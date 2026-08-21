@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	acpsdk "github.com/coder/acp-go-sdk"
 )
 
 func TestHarnessLifecycleSessionMetaIsClaudeOnlyAndFiltered(t *testing.T) {
@@ -158,6 +160,257 @@ func TestClaudeHarnessLifecycleBoundsCumulativeEdgeTaskIDs(t *testing.T) {
 	defer host.harnessWorkMu.Unlock()
 	if len(host.harnessTaskIDs) != maxClaudeLifecycleTasks {
 		t.Fatalf("retained task IDs = %d, want %d", len(host.harnessTaskIDs), maxClaudeLifecycleTasks)
+	}
+}
+
+func TestACPToolCallLifecycleTracksCodexAndOpencodeWork(t *testing.T) {
+	t.Parallel()
+
+	for _, agentType := range []string{"openai-codex", "opencode"} {
+		agentType := agentType
+		t.Run(agentType, func(t *testing.T) {
+			t.Parallel()
+
+			host := NewSessionHost(SessionHostConfig{})
+			defer host.Stop()
+			host.mu.Lock()
+			host.agentType = agentType
+			host.setSessionIDLocked("acp-session")
+			host.setStatusLocked(HostPrompting)
+			host.mu.Unlock()
+			host.resetHarnessWorkForAgent(agentType)
+			client := &sessionHostClient{host: host}
+
+			pending := acpsdk.ToolCallStatusPending
+			if err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+				SessionId: "acp-session",
+				Update: acpsdk.SessionUpdate{
+					ToolCall: &acpsdk.SessionUpdateToolCall{
+						ToolCallId: "tool-1",
+						Title:      "Read file",
+						Status:     pending,
+					},
+				},
+			}); err != nil {
+				t.Fatalf("SessionUpdate tool_call: %v", err)
+			}
+			active := host.harnessWorkSnapshot()
+			if active.State != harnessWorkActive || active.Count != 1 || active.Source != acpToolCallWorkSource {
+				t.Fatalf("active snapshot = %#v", active)
+			}
+			if active.ProgressAt.IsZero() {
+				t.Fatal("active progress timestamp was not recorded")
+			}
+
+			inProgress := acpsdk.ToolCallStatusInProgress
+			if err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+				SessionId: "acp-session",
+				Update: acpsdk.SessionUpdate{
+					ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
+						ToolCallId: "tool-1",
+						Status:     &inProgress,
+					},
+				},
+			}); err != nil {
+				t.Fatalf("SessionUpdate in-progress tool_call_update: %v", err)
+			}
+			progressed := host.harnessWorkSnapshot()
+			if progressed.State != harnessWorkActive || progressed.Count != 1 || !progressed.ProgressAt.After(active.ProgressAt) {
+				t.Fatalf("progressed snapshot = %#v, previous = %#v", progressed, active)
+			}
+
+			// Content-only updates for a known tool still represent real ACP tool
+			// progress and must keep the renewable lease alive.
+			if err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+				SessionId: "acp-session",
+				Update: acpsdk.SessionUpdate{
+					ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
+						ToolCallId: "tool-1",
+					},
+				},
+			}); err != nil {
+				t.Fatalf("SessionUpdate content-only tool_call_update: %v", err)
+			}
+			contentOnly := host.harnessWorkSnapshot()
+			if contentOnly.State != harnessWorkActive || contentOnly.Count != 1 || !contentOnly.ProgressAt.After(progressed.ProgressAt) {
+				t.Fatalf("content-only snapshot = %#v, previous = %#v", contentOnly, progressed)
+			}
+
+			completed := acpsdk.ToolCallStatusCompleted
+			if err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+				SessionId: "acp-session",
+				Update: acpsdk.SessionUpdate{
+					ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
+						ToolCallId: "tool-1",
+						Status:     &completed,
+					},
+				},
+			}); err != nil {
+				t.Fatalf("SessionUpdate terminal tool_call_update: %v", err)
+			}
+			inactive := host.harnessWorkSnapshot()
+			if inactive.State != harnessWorkInactive || inactive.Count != 0 || inactive.Source != acpToolCallWorkSource {
+				t.Fatalf("inactive snapshot = %#v", inactive)
+			}
+		})
+	}
+}
+
+func TestACPToolCallLifecycleRejectsWrongSessionAndReplay(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{})
+	defer host.Stop()
+	host.mu.Lock()
+	host.agentType = "openai-codex"
+	host.setSessionIDLocked("acp-session")
+	host.setStatusLocked(HostPrompting)
+	host.mu.Unlock()
+	host.resetHarnessWorkForAgent("openai-codex")
+	client := &sessionHostClient{host: host}
+
+	if err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+		SessionId: "other-session",
+		Update: acpsdk.SessionUpdate{
+			ToolCall: &acpsdk.SessionUpdateToolCall{
+				ToolCallId: "tool-1",
+				Title:      "Read file",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("wrong-session SessionUpdate: %v", err)
+	}
+	if got := host.harnessWorkSnapshot(); got.State != harnessWorkInactive || got.Count != 0 {
+		t.Fatalf("wrong-session update mutated state: %#v", got)
+	}
+
+	host.replaySuppressed.Store(true)
+	if err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+		SessionId: "acp-session",
+		Update: acpsdk.SessionUpdate{
+			ToolCall: &acpsdk.SessionUpdateToolCall{
+				ToolCallId: "tool-1",
+				Title:      "Read file",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("replay-suppressed SessionUpdate: %v", err)
+	}
+	if got := host.harnessWorkSnapshot(); got.State != harnessWorkInactive || got.Count != 0 {
+		t.Fatalf("replay-suppressed update mutated state: %#v", got)
+	}
+}
+
+func TestACPToolCallsDoNotOverrideClaudeLifecycleSource(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{})
+	defer host.Stop()
+	host.mu.Lock()
+	host.agentType = "claude-code"
+	host.setSessionIDLocked("sdk-session")
+	host.setStatusLocked(HostPrompting)
+	host.mu.Unlock()
+	host.resetHarnessWorkForAgent("claude-code")
+	client := &sessionHostClient{host: host}
+
+	if err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+		SessionId: "sdk-session",
+		Update: acpsdk.SessionUpdate{
+			ToolCall: &acpsdk.SessionUpdateToolCall{
+				ToolCallId: "tool-1",
+				Title:      "Read file",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("SessionUpdate tool_call: %v", err)
+	}
+	if got := host.harnessWorkSnapshot(); got.Source != claudeHarnessWorkSource || got.State != harnessWorkInactive || got.Count != 0 {
+		t.Fatalf("Claude source was overwritten by ACP tool call: %#v", got)
+	}
+
+	notifyClaudeLifecycle(t, client, `{
+		"sessionId":"sdk-session",
+		"message":{"type":"system","subtype":"task_started","session_id":"sdk-session","task_id":"one"}}
+`)
+	if got := host.harnessWorkSnapshot(); got.Source != claudeHarnessWorkSource || got.State != harnessWorkActive || got.Count != 1 {
+		t.Fatalf("Claude lifecycle stopped working after ACP tool call: %#v", got)
+	}
+}
+
+func TestACPToolCallActivityReportsOnlyNormalizedState(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	bodies := make([]string, 0)
+	payloads := make([]activityPayload, 0)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload activityPayload
+		var raw strings.Builder
+		tee := &readRecorder{reader: r.Body, recorded: &raw}
+		decoder := json.NewDecoder(tee)
+		if err := decoder.Decode(&payload); err != nil {
+			t.Errorf("decode activity payload: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		bodies = append(bodies, raw.String())
+		payloads = append(payloads, payload)
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	host := NewSessionHost(SessionHostConfig{GatewayConfig: GatewayConfig{
+		ProjectID:                "project",
+		NodeID:                   "node",
+		SessionID:                "sam-session",
+		ControlPlaneURL:          server.URL,
+		CallbackToken:            "token",
+		HTTPClient:               server.Client(),
+		ActivityRereportInterval: 10 * time.Millisecond,
+	}})
+	defer host.Stop()
+	host.mu.Lock()
+	host.agentType = "openai-codex"
+	host.setSessionIDLocked("acp-session")
+	host.setStatusLocked(HostReady)
+	host.mu.Unlock()
+	host.resetHarnessWorkForAgent("openai-codex")
+	client := &sessionHostClient{host: host}
+
+	if err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+		SessionId: "acp-session",
+		Update: acpsdk.SessionUpdate{
+			ToolCall: &acpsdk.SessionUpdateToolCall{
+				ToolCallId: "tool-secret-id",
+				Title:      "SECRET command",
+				RawInput:   map[string]any{"prompt": "SECRET prompt"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("SessionUpdate tool_call: %v", err)
+	}
+	waitFor(t, 300*time.Millisecond, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(payloads) >= 1
+	})
+
+	mu.Lock()
+	gotBodies := append([]string(nil), bodies...)
+	gotPayloads := append([]activityPayload(nil), payloads...)
+	mu.Unlock()
+	for _, body := range gotBodies {
+		if strings.Contains(body, "SECRET") || strings.Contains(body, "tool-secret-id") {
+			t.Fatalf("activity report leaked raw ACP tool-call payload: %s", body)
+		}
+	}
+	for _, payload := range gotPayloads {
+		if payload.RuntimeWorkState != string(harnessWorkActive) || payload.RuntimeWorkCount == nil || *payload.RuntimeWorkCount != 1 || payload.RuntimeWorkSource != acpToolCallWorkSource {
+			t.Fatalf("normalized ACP tool-call payload = %#v", payload)
+		}
 	}
 }
 

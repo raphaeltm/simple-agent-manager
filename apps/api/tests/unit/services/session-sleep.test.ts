@@ -104,6 +104,7 @@ function buildDb(
         nodeRole: 'workspace',
         taskId: 'task-1',
         taskStatus,
+        taskExecutionStep: 'running',
       },
     ],
     ...(includeAgentQuery ? [[{ id: 'agent-session-1', agentType: 'openai-codex' }]] : []),
@@ -131,9 +132,34 @@ function buildDb(
   return { select, update, batch: vi.fn(async () => undefined) };
 }
 
+function buildD1Database(
+  options: {
+    activeChildTask?: { id: string } | null | (() => { id: string } | null);
+    throwOnChildQuery?: boolean;
+  } = {}
+): D1Database {
+  return {
+    prepare: vi.fn(() => {
+      const statement = {
+        bind: vi.fn(() => ({
+          first: vi.fn(async () => {
+            if (options.throwOnChildQuery) {
+              throw new Error('child task query failed');
+            }
+            return typeof options.activeChildTask === 'function'
+              ? options.activeChildTask()
+              : (options.activeChildTask ?? null);
+          }),
+        })),
+      };
+      return statement;
+    }),
+  } as unknown as D1Database;
+}
+
 function buildEnv(overrides: Partial<Env> = {}): Env {
   return {
-    DATABASE: {},
+    DATABASE: buildD1Database(),
     SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS: '200',
     SESSION_SNAPSHOT_PROGRESS_IDLE_TIMEOUT_MS: '200',
     SESSION_SNAPSHOT_POLL_INTERVAL_MS: '1',
@@ -150,8 +176,11 @@ function buildEnv(overrides: Partial<Env> = {}): Env {
 
 describe('parseHarnessWorkConfig', () => {
   it('uses defaults when env vars are unset', async () => {
-    const { parseHarnessWorkConfig, DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS, DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS } =
-      await import('../../../src/services/session-sleep');
+    const {
+      parseHarnessWorkConfig,
+      DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS,
+      DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS,
+    } = await import('../../../src/services/session-sleep');
 
     const config = parseHarnessWorkConfig({});
     expect(config.leaseMs).toBe(DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS);
@@ -173,37 +202,57 @@ describe('parseHarnessWorkConfig', () => {
 describe('isHarnessWorkLeaseActive', () => {
   it('returns false for null state', async () => {
     const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-sleep');
-    expect(isHarnessWorkLeaseActive(null, new Date(), { leaseMs: 300000, maxDurationMs: 1800000 })).toBe(false);
+    expect(
+      isHarnessWorkLeaseActive(null, new Date(), { leaseMs: 300000, maxDurationMs: 1800000 })
+    ).toBe(false);
   });
 
   it('returns true for active work within lease', async () => {
     const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-sleep');
     const now = new Date();
-    expect(isHarnessWorkLeaseActive(
-      { runtimeWorkState: 'active', runtimeWorkUpdatedAt: now.getTime() - 10_000, runtimeWorkProgressAt: now.getTime() - 10_000 },
-      now,
-      { leaseMs: 300000, maxDurationMs: 1800000 }
-    )).toBe(true);
+    expect(
+      isHarnessWorkLeaseActive(
+        {
+          runtimeWorkState: 'active',
+          runtimeWorkUpdatedAt: now.getTime() - 10_000,
+          runtimeWorkProgressAt: now.getTime() - 10_000,
+        },
+        now,
+        { leaseMs: 300000, maxDurationMs: 1800000 }
+      )
+    ).toBe(true);
   });
 
   it('returns false for expired lease', async () => {
     const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-sleep');
     const now = new Date();
-    expect(isHarnessWorkLeaseActive(
-      { runtimeWorkState: 'active', runtimeWorkUpdatedAt: now.getTime() - 400_000, runtimeWorkProgressAt: now.getTime() - 400_000 },
-      now,
-      { leaseMs: 300000, maxDurationMs: 1800000 }
-    )).toBe(false);
+    expect(
+      isHarnessWorkLeaseActive(
+        {
+          runtimeWorkState: 'active',
+          runtimeWorkUpdatedAt: now.getTime() - 400_000,
+          runtimeWorkProgressAt: now.getTime() - 400_000,
+        },
+        now,
+        { leaseMs: 300000, maxDurationMs: 1800000 }
+      )
+    ).toBe(false);
   });
 
   it('returns false for inactive work state', async () => {
     const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-sleep');
     const now = new Date();
-    expect(isHarnessWorkLeaseActive(
-      { runtimeWorkState: 'inactive', runtimeWorkUpdatedAt: now.getTime() - 10_000, runtimeWorkProgressAt: now.getTime() - 10_000 },
-      now,
-      { leaseMs: 300000, maxDurationMs: 1800000 }
-    )).toBe(false);
+    expect(
+      isHarnessWorkLeaseActive(
+        {
+          runtimeWorkState: 'inactive',
+          runtimeWorkUpdatedAt: now.getTime() - 10_000,
+          runtimeWorkProgressAt: now.getTime() - 10_000,
+        },
+        now,
+        { leaseMs: 300000, maxDurationMs: 1800000 }
+      )
+    ).toBe(false);
   });
 });
 
@@ -470,6 +519,52 @@ describe('sleepWorkspaceSession', () => {
         now
       )
     ).resolves.toEqual({ eligible: true });
+  });
+
+  it('defers an idle session while a child/subtask is still active', async () => {
+    const now = new Date('2026-08-14T05:00:00.000Z');
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'idle',
+      activityAt: now.getTime() - 16 * 60 * 1000,
+    });
+    const { checkAutomaticSessionSleepEligibility } =
+      await import('../../../src/services/session-sleep');
+
+    await expect(
+      checkAutomaticSessionSleepEligibility(
+        buildEnv({ DATABASE: buildD1Database({ activeChildTask: { id: 'child-1' } }) }),
+        { workspaceId: 'workspace-1', userId: 'user-1' },
+        now
+      )
+    ).resolves.toEqual({
+      eligible: false,
+      reason: 'Child/subtask work is active',
+    });
+
+    expect(mocks.deferSessionSnapshotSleepBeforeClaim).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats inconclusive child/subtask evidence as not idle', async () => {
+    const now = new Date('2026-08-14T05:00:00.000Z');
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'idle',
+      activityAt: now.getTime() - 16 * 60 * 1000,
+    });
+    const { checkAutomaticSessionSleepEligibility } =
+      await import('../../../src/services/session-sleep');
+
+    await expect(
+      checkAutomaticSessionSleepEligibility(
+        buildEnv({ DATABASE: buildD1Database({ throwOnChildQuery: true }) }),
+        { workspaceId: 'workspace-1', userId: 'user-1' },
+        now
+      )
+    ).resolves.toEqual({
+      eligible: false,
+      reason: 'Child/subtask work state is unknown',
+    });
+
+    expect(mocks.deferSessionSnapshotSleepBeforeClaim).toHaveBeenCalledTimes(1);
   });
 
   it('lets a completed task sleep on its first idle observation', async () => {
@@ -1053,6 +1148,38 @@ describe('sleepWorkspaceSession', () => {
     expect(mocks.failSessionSnapshotSleepBeforeTeardown).toHaveBeenCalledTimes(1);
   });
 
+  it('aborts before stopping when child/subtask work is active from the start', async () => {
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'idle',
+      activityAt: 100,
+    });
+    mocks.getRestorableSessionSnapshot
+      .mockReset()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        status: 'available',
+        degradation: 'none',
+        expiresAt: '2026-08-19T00:00:00.000Z',
+      });
+    const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
+
+    await expect(
+      sleepWorkspaceSession(
+        buildEnv({ DATABASE: buildD1Database({ activeChildTask: { id: 'child-1' } }) }),
+        {
+          workspaceId: 'workspace-1',
+          userId: 'user-1',
+          reason: 'test',
+        }
+      )
+    ).rejects.toThrow('Child/subtask work is active');
+
+    expect(mocks.beginSessionSnapshotStopping).not.toHaveBeenCalled();
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+    expect(mocks.sleepSession).not.toHaveBeenCalled();
+    expect(mocks.failSessionSnapshotSleepBeforeTeardown).toHaveBeenCalledTimes(1);
+  });
+
   // Gate 2 (stateAfter): harness work starts between stateBefore and
   // stateAfter. stateBefore is idle, stateAfter has active harness work.
   it('aborts after snapshot when harness work begins during verification', async () => {
@@ -1136,14 +1263,11 @@ describe('sleepWorkspaceSession', () => {
       });
     const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
 
-    await sleepWorkspaceSession(
-      buildEnv({ HARNESS_BACKGROUND_WORK_LEASE_MS: '120000' }),
-      {
-        workspaceId: 'workspace-1',
-        userId: 'user-1',
-        reason: 'test',
-      }
-    );
+    await sleepWorkspaceSession(buildEnv({ HARNESS_BACKGROUND_WORK_LEASE_MS: '120000' }), {
+      workspaceId: 'workspace-1',
+      userId: 'user-1',
+      reason: 'test',
+    });
 
     expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
     expect(mocks.finalizeSessionSnapshotSleeping).toHaveBeenCalledTimes(1);

@@ -12,6 +12,7 @@ import (
 const (
 	claudeSDKMessageMethod     = "_claude/sdkMessage"
 	claudeHarnessWorkSource    = "claude_sdk"
+	acpToolCallWorkSource      = "acp_tool_call"
 	claudeBackgroundTasksLevel = "background_tasks_changed"
 
 	// Fallback bounds used when SessionHostConfig leaves them unset (zero).
@@ -162,12 +163,23 @@ func (h *SessionHost) resetHarnessWorkForAgent(agentType string) {
 	progressAt := h.nextHarnessWorkProgressAtLocked()
 	h.harnessTaskIDs = nil
 	h.harnessWork = harnessWorkStatus{}
-	if agentType == "claude-code" {
+	if source := harnessWorkSourceForAgent(agentType); source != "" {
 		h.harnessWork.State = harnessWorkInactive
-		h.harnessWork.Source = claudeHarnessWorkSource
+		h.harnessWork.Source = source
 		h.harnessWork.ProgressAt = progressAt
 	}
 	h.harnessWorkMu.Unlock()
+}
+
+func harnessWorkSourceForAgent(agentType string) string {
+	switch agentType {
+	case "claude-code":
+		return claudeHarnessWorkSource
+	case "openai-codex", "opencode":
+		return acpToolCallWorkSource
+	default:
+		return ""
+	}
 }
 
 func (h *SessionHost) clearHarnessWork() {
@@ -265,11 +277,98 @@ func (h *SessionHost) applyClaudeHarnessLifecycle(message claudeSDKLifecycleMess
 	return true
 }
 
+func (h *SessionHost) applyACPToolCallLifecycle(notification acpsdk.SessionNotification) bool {
+	if !h.matchesHarnessSession(string(notification.SessionId), "") {
+		return false
+	}
+
+	update := notification.Update
+	switch {
+	case update.ToolCall != nil:
+		return h.applyACPToolCallStatus(
+			string(update.ToolCall.ToolCallId),
+			string(update.ToolCall.Status),
+			acpToolCallStatusPresent,
+		)
+	case update.ToolCallUpdate != nil:
+		status := ""
+		presence := acpToolCallStatusAbsent
+		if update.ToolCallUpdate.Status != nil {
+			status = string(*update.ToolCallUpdate.Status)
+			presence = acpToolCallStatusPresent
+		}
+		return h.applyACPToolCallStatus(
+			string(update.ToolCallUpdate.ToolCallId),
+			status,
+			presence,
+		)
+	default:
+		return false
+	}
+}
+
+type acpToolCallStatusPresence int
+
+const (
+	acpToolCallStatusAbsent acpToolCallStatusPresence = iota
+	acpToolCallStatusPresent
+)
+
+func (h *SessionHost) applyACPToolCallStatus(toolCallID string, status string, presence acpToolCallStatusPresence) bool {
+	if toolCallID == "" {
+		return false
+	}
+
+	h.harnessWorkMu.Lock()
+	defer h.harnessWorkMu.Unlock()
+
+	if h.harnessWork.Source != acpToolCallWorkSource {
+		return false
+	}
+	if h.harnessTaskIDs == nil {
+		h.harnessTaskIDs = make(map[string]struct{})
+	}
+
+	statusTerminal := presence == acpToolCallStatusPresent && isTerminalACPToolCallStatus(status)
+	previousCount := len(h.harnessTaskIDs)
+	if statusTerminal {
+		delete(h.harnessTaskIDs, toolCallID)
+	} else if !h.addHarnessTaskLocked(toolCallID) {
+		return false
+	}
+
+	currentCount := len(h.harnessTaskIDs)
+	if currentCount > 0 {
+		h.harnessWork.State = harnessWorkActive
+	} else {
+		h.harnessWork.State = harnessWorkInactive
+	}
+	h.harnessWork.Count = currentCount
+
+	// Repeated non-terminal tool updates are genuine lifecycle progress from
+	// the ACP peer. Terminal updates for an unknown ID do not change the
+	// authoritative active set, so avoid sending redundant inactive reports.
+	if statusTerminal && previousCount == 0 && currentCount == 0 {
+		return false
+	}
+	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLocked()
+	if h.harnessWork.State == harnessWorkActive {
+		h.startHarnessWorkRereportLocked()
+	} else {
+		h.stopHarnessWorkRereportLocked()
+	}
+	return true
+}
+
 // addClaudeHarnessTaskLocked bounds cumulative edge messages as well as the
 // authoritative tasks array. Existing IDs still count as progress at the cap;
 // a new ID is ignored until an authoritative replacement or terminal edge
 // frees capacity.
 func (h *SessionHost) addClaudeHarnessTaskLocked(taskID string) bool {
+	return h.addHarnessTaskLocked(taskID)
+}
+
+func (h *SessionHost) addHarnessTaskLocked(taskID string) bool {
 	if _, exists := h.harnessTaskIDs[taskID]; exists {
 		return true
 	}
@@ -300,6 +399,15 @@ func (h *SessionHost) nextHarnessWorkProgressAtLocked() time.Time {
 func isTerminalClaudeTaskStatus(status string) bool {
 	switch status {
 	case "completed", "failed", "killed":
+		return true
+	default:
+		return false
+	}
+}
+
+func isTerminalACPToolCallStatus(status string) bool {
+	switch acpsdk.ToolCallStatus(status) {
+	case acpsdk.ToolCallStatusCompleted, acpsdk.ToolCallStatusFailed:
 		return true
 	default:
 		return false
