@@ -1,3 +1,4 @@
+import type { PromptDeliverySource } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -74,7 +75,7 @@ describe('ProjectData durable prompt delivery', () => {
   function accept(
     deliveryId = 'delivery-1',
     ttlMs = config.ttlMs,
-    sourceKind: 'user_followup' | 'agent_mailbox' = 'user_followup'
+    sourceKind: PromptDeliverySource = 'user_followup'
   ) {
     return acceptPromptDelivery(
       sql,
@@ -110,6 +111,35 @@ describe('ProjectData durable prompt delivery', () => {
     expect(db.prepare('SELECT COUNT(*) AS count FROM chat_messages').get()).toEqual({ count: 1 });
     expect(db.prepare('SELECT COUNT(*) AS count FROM session_inbox').get()).toEqual({ count: 1 });
     expect(first.message.promptMessageId).toBe(first.transcriptMessageId);
+  });
+
+  it('claims same-priority same-timestamp comment directives in insertion order', () => {
+    accept('comment-directive-thread-1', config.ttlMs, 'comment_directive');
+    accept('comment-directive-thread-2', config.ttlMs, 'comment_directive');
+
+    sql.exec(
+      `UPDATE session_inbox
+       SET created_at = ?, next_attempt_at = ?
+       WHERE id IN ('comment-directive-thread-1', 'comment-directive-thread-2')`,
+      10_000,
+      10_000
+    );
+
+    expect(mailbox.getPendingMessages(sql, 'chat-1').map((message) => message.id)).toEqual([
+      'comment-directive-thread-1',
+      'comment-directive-thread-2',
+    ]);
+
+    const claims = claimDuePromptDeliveries(sql, config, 10_000);
+
+    expect(claims.map((claim) => claim.message.id)).toEqual([
+      'comment-directive-thread-1',
+      'comment-directive-thread-2',
+    ]);
+    expect(claims.map((claim) => claim.message.sourceKind)).toEqual([
+      'comment_directive',
+      'comment_directive',
+    ]);
   });
 
   it('rejects reuse of a stable delivery identity for different prompt intent', () => {

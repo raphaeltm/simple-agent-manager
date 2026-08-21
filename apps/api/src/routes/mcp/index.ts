@@ -26,6 +26,14 @@ import {
   MCP_TOOLS,
   METHOD_NOT_FOUND,
 } from './_helpers';
+import {
+  handleCreateMessageCommentThread,
+  handleGetMessageCommentThread,
+  handleListMessageCommentThreads,
+  handleReopenMessageCommentThread,
+  handleReplyToMessageCommentThread,
+  handleResolveMessageCommentThread,
+} from './comment-tools';
 import { handleBuildAndPublish, handleGetPublishStatus } from './compose-publish-tools';
 import { handleGetDeploymentGuide } from './deployment-guide-tools';
 import {
@@ -311,6 +319,30 @@ mcpRoutes.post('/', async (c) => {
             return c.json(await handleGetPendingMessages(requestId, toolArgs, tokenData, c.env));
           case 'ack_message':
             return c.json(await handleAckMessage(requestId, toolArgs, tokenData, c.env));
+          case 'list_message_comment_threads':
+            return c.json(
+              await handleListMessageCommentThreads(requestId, toolArgs, tokenData, c.env)
+            );
+          case 'get_message_comment_thread':
+            return c.json(
+              await handleGetMessageCommentThread(requestId, toolArgs, tokenData, c.env)
+            );
+          case 'create_message_comment_thread':
+            return c.json(
+              await handleCreateMessageCommentThread(requestId, toolArgs, tokenData, c.env)
+            );
+          case 'reply_to_message_comment_thread':
+            return c.json(
+              await handleReplyToMessageCommentThread(requestId, toolArgs, tokenData, c.env)
+            );
+          case 'resolve_message_comment_thread':
+            return c.json(
+              await handleResolveMessageCommentThread(requestId, toolArgs, tokenData, c.env)
+            );
+          case 'reopen_message_comment_thread':
+            return c.json(
+              await handleReopenMessageCommentThread(requestId, toolArgs, tokenData, c.env)
+            );
           case 'send_message_to_subtask':
             return c.json(await handleSendMessageToSubtask(requestId, toolArgs, tokenData, c.env));
           case 'stop_subtask':
