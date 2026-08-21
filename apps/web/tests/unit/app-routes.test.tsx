@@ -133,6 +133,10 @@ vi.mock('../../src/pages/SamPrototype', () => ({
   SamPrototype: () => <div data-testid="sam-prototype-page" />,
 }));
 
+vi.mock('../../src/pages/comments-prototype', () => ({
+  CommentsPrototype: () => <div data-testid="comments-prototype-page" />,
+}));
+
 vi.mock('../../src/pages/TrialChatGateHarness', () => ({
   TrialChatGateHarness: () => <div data-testid="trial-chat-gate-harness-page" />,
 }));
@@ -240,6 +244,10 @@ describe('App routes', () => {
     expect(await screen.findByTestId('trial-chat-gate-harness-page')).toBeInTheDocument();
 
     cleanup();
+    renderAt('/prototype/comments');
+    expect(await screen.findByTestId('comments-prototype-page')).toBeInTheDocument();
+
+    cleanup();
     renderAt('/ui-standards');
     expect(await screen.findByTestId('ui-standards-page')).toBeInTheDocument();
   });
@@ -272,6 +280,7 @@ describe('App routes', () => {
 
     expect(DEV_ONLY_ROUTE_PATHS).toEqual([
       '/sam',
+      '/prototype/comments',
       '/__test/trial-chat-gate',
       '/__test/error-boundary',
       '/ui-standards',
@@ -284,6 +293,7 @@ describe('App routes', () => {
 
       expect(screen.getByTestId('landing-page')).toBeInTheDocument();
       expect(screen.queryByTestId('sam-prototype-page')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('comments-prototype-page')).not.toBeInTheDocument();
       expect(screen.queryByTestId('trial-chat-gate-harness-page')).not.toBeInTheDocument();
       expect(screen.queryByTestId('ui-standards-page')).not.toBeInTheDocument();
     }

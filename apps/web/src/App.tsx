@@ -135,6 +135,10 @@ const ProjectTriggerDetail = lazyNamed(
 );
 const ProjectTriggers = lazyNamed(() => import('./pages/ProjectTriggers'), 'ProjectTriggers');
 const SamPrototype = lazyNamed(() => import('./pages/SamPrototype'), 'SamPrototype');
+const CommentsPrototype = lazyNamed(
+  () => import('./pages/comments-prototype'),
+  'CommentsPrototype'
+);
 const Settings = lazyNamed(() => import('./pages/Settings'), 'Settings');
 const SettingsAgents = lazyNamed(() => import('./pages/SettingsAgents'), 'SettingsAgents');
 const SettingsApiTokens = lazyNamed(() => import('./pages/SettingsApiTokens'), 'SettingsApiTokens');
@@ -210,6 +214,7 @@ function SuperadminRoute({ children }: { children: ReactNode }) {
 
 export const DEV_ONLY_ROUTE_PATHS = [
   '/sam',
+  '/prototype/comments',
   '/__test/trial-chat-gate',
   '/__test/error-boundary',
   '/ui-standards',
@@ -250,6 +255,8 @@ export default function App() {
                       <>
                         {/* SAM prototype — local/test only, no auth */}
                         <Route path="/sam" element={page(<SamPrototype />)} />
+                        {/* Commenting prototype — local/test only, no auth, mock data */}
+                        <Route path="/prototype/comments" element={page(<CommentsPrototype />)} />
                         {/* Harness for Playwright audits — mounts trial components with mock data */}
                         <Route
                           path="/__test/trial-chat-gate"
