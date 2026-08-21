@@ -159,7 +159,7 @@ Agent responses can be played back as audio using Deepgram Aura 2 (via Workers A
 
 SAM tracks related lifecycle state at three levels:
 
-- **Chat session**: `active`, `completed`, `failed`, or `sleeping`. A sleeping conversation keeps the composer visible so a same-chat follow-up can wake and resume it.
+- **Chat session**: `active`, `sleeping`, `stopped`, or `error` in the public API. A sleeping conversation keeps the composer visible so a same-chat follow-up can wake and resume it.
 - **Task record**: `draft`, `ready`, `queued`, `delegated`, `in_progress`, `completed`, `failed`, or `cancelled`. Task-mode work keeps its task completion lifecycle instead of showing the manual Sleep action while idle.
 - **Runtime agent session**: `running`, `recovery`, `sleeping`, `suspended`, `stopped`, or `error`. Recovery means SAM is rebuilding runtime compute and restoring the saved harness/session state.
 
