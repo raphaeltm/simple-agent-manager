@@ -263,6 +263,27 @@ describe('submitReport', () => {
     expect(input.authorizedKeys).toEqual(['errorId']);
   });
 
+  it('redacts JSON-style secret fields from report text before incident grouping', async () => {
+    mockGet.mockResolvedValueOnce({ id: 'feedback-project-1', userId: 'owner-1' });
+
+    await submitReport(
+      makeEnv(),
+      'user-1',
+      'Nested secret report',
+      [
+        'Attached diagnostic payload:',
+        '{"metadata":{"authorization":"REDACTION_MARKER_SHOULD_NOT_REMAIN","api_key":"REDACTION_MARKER_ALSO_REMOVED"}}',
+      ].join('\n'),
+      false
+    );
+
+    const input = lastUpsertInput();
+    expect(input.description).toContain('[REDACTED]');
+    expect(input.description).not.toContain('REDACTION_MARKER');
+    expect(input.authorizedRefs).toEqual({});
+    expect(input.authorizedKeys).toEqual([]);
+  });
+
   it('keeps malicious report prose out of trusted refs and delegates it as report text', async () => {
     mockGet.mockResolvedValueOnce({ id: 'feedback-project-1', userId: 'owner-1' });
 

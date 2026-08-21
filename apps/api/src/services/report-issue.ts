@@ -146,6 +146,7 @@ async function validateRefs(
 }
 
 const REPORT_SECRET_PATTERNS = [
+  /["']?(?:api[_-]?key|token|secret|password|credential|auth|authorization)["']?\s*[:=]\s*["'][^"'\s,}\]]+["']/gi,
   /(?:api[_-]?key|token|secret|password|credential|auth)\s*[:=]\s*\S+/gi,
   /(?:sk|pk|rk|ghp|gho|ghu|ghs|ghr|glpat|xoxb|xoxp|xoxa|xapp)-[a-zA-Z0-9_-]{10,}/g,
   /-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----/g,
