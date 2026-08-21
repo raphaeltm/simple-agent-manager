@@ -171,29 +171,9 @@ func TestACPToolCallLifecycleTracksCodexAndOpencodeWork(t *testing.T) {
 		t.Run(agentType, func(t *testing.T) {
 			t.Parallel()
 
-			host := NewSessionHost(SessionHostConfig{})
-			defer host.Stop()
-			host.mu.Lock()
-			host.agentType = agentType
-			host.setSessionIDLocked("acp-session")
-			host.setStatusLocked(HostPrompting)
-			host.mu.Unlock()
-			host.resetHarnessWorkForAgent(agentType)
-			client := &sessionHostClient{host: host}
+			host, client := newHarnessWorkTestClient(t, SessionHostConfig{}, agentType, "acp-session", HostPrompting)
 
-			pending := acpsdk.ToolCallStatusPending
-			if err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
-				SessionId: "acp-session",
-				Update: acpsdk.SessionUpdate{
-					ToolCall: &acpsdk.SessionUpdateToolCall{
-						ToolCallId: "tool-1",
-						Title:      "Read file",
-						Status:     pending,
-					},
-				},
-			}); err != nil {
-				t.Fatalf("SessionUpdate tool_call: %v", err)
-			}
+			notifyACPToolCall(t, client, "acp-session", "tool-1", "Read file", acpsdk.ToolCallStatusPending, nil)
 			active := host.harnessWorkSnapshot()
 			if active.State != harnessWorkActive || active.Count != 1 || active.Source != acpToolCallWorkSource {
 				t.Fatalf("active snapshot = %#v", active)
@@ -202,18 +182,7 @@ func TestACPToolCallLifecycleTracksCodexAndOpencodeWork(t *testing.T) {
 				t.Fatal("active progress timestamp was not recorded")
 			}
 
-			inProgress := acpsdk.ToolCallStatusInProgress
-			if err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
-				SessionId: "acp-session",
-				Update: acpsdk.SessionUpdate{
-					ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
-						ToolCallId: "tool-1",
-						Status:     &inProgress,
-					},
-				},
-			}); err != nil {
-				t.Fatalf("SessionUpdate in-progress tool_call_update: %v", err)
-			}
+			notifyACPToolCallUpdate(t, client, "acp-session", "tool-1", toolStatus(acpsdk.ToolCallStatusInProgress))
 			progressed := host.harnessWorkSnapshot()
 			if progressed.State != harnessWorkActive || progressed.Count != 1 || !progressed.ProgressAt.After(active.ProgressAt) {
 				t.Fatalf("progressed snapshot = %#v, previous = %#v", progressed, active)
@@ -221,33 +190,13 @@ func TestACPToolCallLifecycleTracksCodexAndOpencodeWork(t *testing.T) {
 
 			// Content-only updates for a known tool still represent real ACP tool
 			// progress and must keep the renewable lease alive.
-			if err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
-				SessionId: "acp-session",
-				Update: acpsdk.SessionUpdate{
-					ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
-						ToolCallId: "tool-1",
-					},
-				},
-			}); err != nil {
-				t.Fatalf("SessionUpdate content-only tool_call_update: %v", err)
-			}
+			notifyACPToolCallUpdate(t, client, "acp-session", "tool-1", nil)
 			contentOnly := host.harnessWorkSnapshot()
 			if contentOnly.State != harnessWorkActive || contentOnly.Count != 1 || !contentOnly.ProgressAt.After(progressed.ProgressAt) {
 				t.Fatalf("content-only snapshot = %#v, previous = %#v", contentOnly, progressed)
 			}
 
-			completed := acpsdk.ToolCallStatusCompleted
-			if err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
-				SessionId: "acp-session",
-				Update: acpsdk.SessionUpdate{
-					ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
-						ToolCallId: "tool-1",
-						Status:     &completed,
-					},
-				},
-			}); err != nil {
-				t.Fatalf("SessionUpdate terminal tool_call_update: %v", err)
-			}
+			notifyACPToolCallUpdate(t, client, "acp-session", "tool-1", toolStatus(acpsdk.ToolCallStatusCompleted))
 			inactive := host.harnessWorkSnapshot()
 			if inactive.State != harnessWorkInactive || inactive.Count != 0 || inactive.Source != acpToolCallWorkSource {
 				t.Fatalf("inactive snapshot = %#v", inactive)
@@ -259,43 +208,15 @@ func TestACPToolCallLifecycleTracksCodexAndOpencodeWork(t *testing.T) {
 func TestACPToolCallLifecycleRejectsWrongSessionAndReplay(t *testing.T) {
 	t.Parallel()
 
-	host := NewSessionHost(SessionHostConfig{})
-	defer host.Stop()
-	host.mu.Lock()
-	host.agentType = "openai-codex"
-	host.setSessionIDLocked("acp-session")
-	host.setStatusLocked(HostPrompting)
-	host.mu.Unlock()
-	host.resetHarnessWorkForAgent("openai-codex")
-	client := &sessionHostClient{host: host}
+	host, client := newHarnessWorkTestClient(t, SessionHostConfig{}, "openai-codex", "acp-session", HostPrompting)
 
-	if err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
-		SessionId: "other-session",
-		Update: acpsdk.SessionUpdate{
-			ToolCall: &acpsdk.SessionUpdateToolCall{
-				ToolCallId: "tool-1",
-				Title:      "Read file",
-			},
-		},
-	}); err != nil {
-		t.Fatalf("wrong-session SessionUpdate: %v", err)
-	}
+	notifyACPToolCall(t, client, "other-session", "tool-1", "Read file", "", nil)
 	if got := host.harnessWorkSnapshot(); got.State != harnessWorkInactive || got.Count != 0 {
 		t.Fatalf("wrong-session update mutated state: %#v", got)
 	}
 
 	host.replaySuppressed.Store(true)
-	if err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
-		SessionId: "acp-session",
-		Update: acpsdk.SessionUpdate{
-			ToolCall: &acpsdk.SessionUpdateToolCall{
-				ToolCallId: "tool-1",
-				Title:      "Read file",
-			},
-		},
-	}); err != nil {
-		t.Fatalf("replay-suppressed SessionUpdate: %v", err)
-	}
+	notifyACPToolCall(t, client, "acp-session", "tool-1", "Read file", "", nil)
 	if got := host.harnessWorkSnapshot(); got.State != harnessWorkInactive || got.Count != 0 {
 		t.Fatalf("replay-suppressed update mutated state: %#v", got)
 	}
@@ -304,27 +225,9 @@ func TestACPToolCallLifecycleRejectsWrongSessionAndReplay(t *testing.T) {
 func TestACPToolCallsDoNotOverrideClaudeLifecycleSource(t *testing.T) {
 	t.Parallel()
 
-	host := NewSessionHost(SessionHostConfig{})
-	defer host.Stop()
-	host.mu.Lock()
-	host.agentType = "claude-code"
-	host.setSessionIDLocked("sdk-session")
-	host.setStatusLocked(HostPrompting)
-	host.mu.Unlock()
-	host.resetHarnessWorkForAgent("claude-code")
-	client := &sessionHostClient{host: host}
+	host, client := newHarnessWorkTestClient(t, SessionHostConfig{}, "claude-code", "sdk-session", HostPrompting)
 
-	if err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
-		SessionId: "sdk-session",
-		Update: acpsdk.SessionUpdate{
-			ToolCall: &acpsdk.SessionUpdateToolCall{
-				ToolCallId: "tool-1",
-				Title:      "Read file",
-			},
-		},
-	}); err != nil {
-		t.Fatalf("SessionUpdate tool_call: %v", err)
-	}
+	notifyACPToolCall(t, client, "sdk-session", "tool-1", "Read file", "", nil)
 	if got := host.harnessWorkSnapshot(); got.Source != claudeHarnessWorkSource || got.State != harnessWorkInactive || got.Count != 0 {
 		t.Fatalf("Claude source was overwritten by ACP tool call: %#v", got)
 	}
@@ -341,67 +244,24 @@ func TestACPToolCallsDoNotOverrideClaudeLifecycleSource(t *testing.T) {
 func TestACPToolCallActivityReportsOnlyNormalizedState(t *testing.T) {
 	t.Parallel()
 
-	var mu sync.Mutex
-	bodies := make([]string, 0)
-	payloads := make([]activityPayload, 0)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload activityPayload
-		var raw strings.Builder
-		tee := &readRecorder{reader: r.Body, recorded: &raw}
-		decoder := json.NewDecoder(tee)
-		if err := decoder.Decode(&payload); err != nil {
-			t.Errorf("decode activity payload: %v", err)
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		mu.Lock()
-		bodies = append(bodies, raw.String())
-		payloads = append(payloads, payload)
-		mu.Unlock()
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
+	reports := newActivityReportCapture(t)
 
-	host := NewSessionHost(SessionHostConfig{GatewayConfig: GatewayConfig{
+	_, client := newHarnessWorkTestClient(t, SessionHostConfig{GatewayConfig: GatewayConfig{
 		ProjectID:                "project",
 		NodeID:                   "node",
 		SessionID:                "sam-session",
-		ControlPlaneURL:          server.URL,
+		ControlPlaneURL:          reports.server.URL,
 		CallbackToken:            "token",
-		HTTPClient:               server.Client(),
+		HTTPClient:               reports.server.Client(),
 		ActivityRereportInterval: 10 * time.Millisecond,
-	}})
-	defer host.Stop()
-	host.mu.Lock()
-	host.agentType = "openai-codex"
-	host.setSessionIDLocked("acp-session")
-	host.setStatusLocked(HostReady)
-	host.mu.Unlock()
-	host.resetHarnessWorkForAgent("openai-codex")
-	client := &sessionHostClient{host: host}
+	}}, "openai-codex", "acp-session", HostReady)
 
-	if err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
-		SessionId: "acp-session",
-		Update: acpsdk.SessionUpdate{
-			ToolCall: &acpsdk.SessionUpdateToolCall{
-				ToolCallId: "tool-secret-id",
-				Title:      "SECRET command",
-				RawInput:   map[string]any{"prompt": "SECRET prompt"},
-			},
-		},
-	}); err != nil {
-		t.Fatalf("SessionUpdate tool_call: %v", err)
-	}
+	notifyACPToolCall(t, client, "acp-session", "tool-secret-id", "SECRET command", "", map[string]any{"prompt": "SECRET prompt"})
 	waitFor(t, 300*time.Millisecond, func() bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return len(payloads) >= 1
+		return reports.count() >= 1
 	})
 
-	mu.Lock()
-	gotBodies := append([]string(nil), bodies...)
-	gotPayloads := append([]activityPayload(nil), payloads...)
-	mu.Unlock()
+	gotBodies, gotPayloads := reports.snapshot()
 	for _, body := range gotBodies {
 		if strings.Contains(body, "SECRET") || strings.Contains(body, "tool-secret-id") {
 			t.Fatalf("activity report leaked raw ACP tool-call payload: %s", body)
@@ -417,59 +277,27 @@ func TestACPToolCallActivityReportsOnlyNormalizedState(t *testing.T) {
 func TestHarnessActivityReportsOnlyNormalizedStateAndRereportsActiveWork(t *testing.T) {
 	t.Parallel()
 
-	var mu sync.Mutex
-	bodies := make([]string, 0)
-	payloads := make([]activityPayload, 0)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload activityPayload
-		decoder := json.NewDecoder(r.Body)
-		var raw strings.Builder
-		tee := &readRecorder{reader: r.Body, recorded: &raw}
-		decoder = json.NewDecoder(tee)
-		if err := decoder.Decode(&payload); err != nil {
-			t.Errorf("decode activity payload: %v", err)
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		mu.Lock()
-		bodies = append(bodies, raw.String())
-		payloads = append(payloads, payload)
-		mu.Unlock()
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
+	reports := newActivityReportCapture(t)
 
-	host := NewSessionHost(SessionHostConfig{GatewayConfig: GatewayConfig{
+	host, client := newHarnessWorkTestClient(t, SessionHostConfig{GatewayConfig: GatewayConfig{
 		ProjectID:                "project",
 		NodeID:                   "node",
 		SessionID:                "sam-session",
-		ControlPlaneURL:          server.URL,
+		ControlPlaneURL:          reports.server.URL,
 		CallbackToken:            "token",
-		HTTPClient:               server.Client(),
+		HTTPClient:               reports.server.Client(),
 		ActivityRereportInterval: 10 * time.Millisecond,
-	}})
-	host.mu.Lock()
-	host.agentType = "claude-code"
-	host.setSessionIDLocked("sdk-session")
-	host.setStatusLocked(HostReady)
-	host.mu.Unlock()
-	host.resetHarnessWorkForAgent("claude-code")
-	client := &sessionHostClient{host: host}
+	}}, "claude-code", "sdk-session", HostReady)
 
 	notifyClaudeLifecycle(t, client, `{
 		"sessionId":"sdk-session",
 		"message":{"type":"system","subtype":"task_started","session_id":"sdk-session","task_id":"one","description":"SECRET raw description"}}
 `)
 	waitFor(t, 300*time.Millisecond, func() bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return len(payloads) >= 2
+		return reports.count() >= 2
 	})
 
-	mu.Lock()
-	gotBodies := append([]string(nil), bodies...)
-	gotPayloads := append([]activityPayload(nil), payloads...)
-	mu.Unlock()
+	gotBodies, gotPayloads := reports.snapshot()
 	for _, body := range gotBodies {
 		if strings.Contains(body, "SECRET") || strings.Contains(body, "task_id") || strings.Contains(body, "description") {
 			t.Fatalf("activity report leaked raw lifecycle payload: %s", body)
@@ -486,8 +314,7 @@ func TestHarnessActivityReportsOnlyNormalizedStateAndRereportsActiveWork(t *test
 		"message":{"type":"system","subtype":"task_notification","session_id":"sdk-session","task_id":"one","status":"completed","summary":"SECRET result"}}
 `)
 	waitFor(t, 300*time.Millisecond, func() bool {
-		mu.Lock()
-		defer mu.Unlock()
+		_, payloads := reports.snapshot()
 		for _, payload := range payloads {
 			if payload.RuntimeWorkState == string(harnessWorkSettling) {
 				return true
@@ -498,14 +325,10 @@ func TestHarnessActivityReportsOnlyNormalizedStateAndRereportsActiveWork(t *test
 
 	// Settling is a finite lease: unlike active work, it must not heartbeat forever.
 	time.Sleep(5 * host.config.ActivityRereportInterval)
-	mu.Lock()
-	afterSettle := len(payloads)
-	mu.Unlock()
+	afterSettle := reports.count()
 	time.Sleep(5 * host.config.ActivityRereportInterval)
-	mu.Lock()
-	defer mu.Unlock()
-	if len(payloads) != afterSettle {
-		t.Fatalf("settling work kept heartbeating: before=%d after=%d", afterSettle, len(payloads))
+	if got := reports.count(); got != afterSettle {
+		t.Fatalf("settling work kept heartbeating: before=%d after=%d", afterSettle, got)
 	}
 }
 
@@ -593,6 +416,102 @@ func notifyClaudeLifecycle(t *testing.T, client *sessionHostClient, payload stri
 	if _, err := client.HandleExtensionMethod(context.Background(), claudeSDKMessageMethod, json.RawMessage(payload)); err != nil {
 		t.Fatalf("HandleExtensionMethod: %v", err)
 	}
+}
+
+func newHarnessWorkTestClient(t *testing.T, config SessionHostConfig, agentType string, sessionID string, status SessionHostStatus) (*SessionHost, *sessionHostClient) {
+	t.Helper()
+
+	host := NewSessionHost(config)
+	t.Cleanup(host.Stop)
+	host.mu.Lock()
+	host.agentType = agentType
+	host.setSessionIDLocked(acpsdk.SessionId(sessionID))
+	host.setStatusLocked(status)
+	host.mu.Unlock()
+	host.resetHarnessWorkForAgent(agentType)
+	return host, &sessionHostClient{host: host}
+}
+
+func notifyACPToolCall(t *testing.T, client *sessionHostClient, sessionID string, toolCallID string, title string, status acpsdk.ToolCallStatus, rawInput map[string]any) {
+	t.Helper()
+
+	if err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+		SessionId: acpsdk.SessionId(sessionID),
+		Update: acpsdk.SessionUpdate{
+			ToolCall: &acpsdk.SessionUpdateToolCall{
+				ToolCallId: acpsdk.ToolCallId(toolCallID),
+				Title:      title,
+				Status:     status,
+				RawInput:   rawInput,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("SessionUpdate tool_call: %v", err)
+	}
+}
+
+func notifyACPToolCallUpdate(t *testing.T, client *sessionHostClient, sessionID string, toolCallID string, status *acpsdk.ToolCallStatus) {
+	t.Helper()
+
+	if err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+		SessionId: acpsdk.SessionId(sessionID),
+		Update: acpsdk.SessionUpdate{
+			ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
+				ToolCallId: acpsdk.ToolCallId(toolCallID),
+				Status:     status,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("SessionUpdate tool_call_update: %v", err)
+	}
+}
+
+func toolStatus(status acpsdk.ToolCallStatus) *acpsdk.ToolCallStatus {
+	return &status
+}
+
+type activityReportCapture struct {
+	server   *httptest.Server
+	mu       sync.Mutex
+	bodies   []string
+	payloads []activityPayload
+}
+
+func newActivityReportCapture(t *testing.T) *activityReportCapture {
+	t.Helper()
+
+	capture := &activityReportCapture{}
+	capture.server = httptest.NewServer(http.HandlerFunc(capture.handle))
+	t.Cleanup(capture.server.Close)
+	return capture
+}
+
+func (capture *activityReportCapture) handle(w http.ResponseWriter, r *http.Request) {
+	var payload activityPayload
+	var raw strings.Builder
+	decoder := json.NewDecoder(&readRecorder{reader: r.Body, recorded: &raw})
+	if err := decoder.Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	capture.mu.Lock()
+	capture.bodies = append(capture.bodies, raw.String())
+	capture.payloads = append(capture.payloads, payload)
+	capture.mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (capture *activityReportCapture) count() int {
+	capture.mu.Lock()
+	defer capture.mu.Unlock()
+	return len(capture.payloads)
+}
+
+func (capture *activityReportCapture) snapshot() ([]string, []activityPayload) {
+	capture.mu.Lock()
+	defer capture.mu.Unlock()
+	return append([]string(nil), capture.bodies...), append([]activityPayload(nil), capture.payloads...)
 }
 
 func mustJSON(t *testing.T, value any) string {
