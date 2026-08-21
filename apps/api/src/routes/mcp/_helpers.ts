@@ -91,6 +91,10 @@ const DEFAULT_MCP_MESSAGE_SEARCH_MAX = 20;
 const DEFAULT_MCP_TRIGGER_LIST_LIMIT = 20;
 /** Max page size for list_triggers. Override via MCP_TRIGGER_LIST_MAX env var. */
 const DEFAULT_MCP_TRIGGER_LIST_MAX = 100;
+/** Default page size for list_incident_queue. Override via MCP_INCIDENT_LIST_LIMIT env var. */
+const DEFAULT_MCP_INCIDENT_LIST_LIMIT = 10;
+/** Max page size for list_incident_queue. Override via MCP_INCIDENT_LIST_MAX env var. */
+const DEFAULT_MCP_INCIDENT_LIST_MAX = 50;
 /** Max length for task description in list/search results. Override via MCP_TASK_DESCRIPTION_SNIPPET_LENGTH env var. */
 const DEFAULT_MCP_TASK_DESCRIPTION_SNIPPET_LENGTH = 200;
 /** Max length for idea link context string. Override via MCP_IDEA_CONTEXT_MAX_LENGTH env var. */
@@ -157,6 +161,11 @@ export function getMcpLimits(env: Env) {
     messageSearchMax: parsePositiveInt(env.MCP_MESSAGE_SEARCH_MAX, DEFAULT_MCP_MESSAGE_SEARCH_MAX),
     triggerListLimit: parsePositiveInt(env.MCP_TRIGGER_LIST_LIMIT, DEFAULT_MCP_TRIGGER_LIST_LIMIT),
     triggerListMax: parsePositiveInt(env.MCP_TRIGGER_LIST_MAX, DEFAULT_MCP_TRIGGER_LIST_MAX),
+    incidentListLimit: parsePositiveInt(
+      env.MCP_INCIDENT_LIST_LIMIT,
+      DEFAULT_MCP_INCIDENT_LIST_LIMIT
+    ),
+    incidentListMax: parsePositiveInt(env.MCP_INCIDENT_LIST_MAX, DEFAULT_MCP_INCIDENT_LIST_MAX),
     taskDescriptionSnippetLength: parsePositiveInt(
       env.MCP_TASK_DESCRIPTION_SNIPPET_LENGTH,
       DEFAULT_MCP_TASK_DESCRIPTION_SNIPPET_LENGTH

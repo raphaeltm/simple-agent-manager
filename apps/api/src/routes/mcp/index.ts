@@ -49,6 +49,12 @@ import {
   handleUnlinkIdea,
   handleUpdateIdea,
 } from './idea-tools';
+import {
+  handleClaimIncident,
+  handleGetIncident,
+  handleListIncidentQueue,
+  handleResolveIncident,
+} from './incident-tools';
 import { handleGetInstructions, handleRequestHumanInput } from './instruction-tools';
 import {
   handleAddKnowledge,
@@ -421,6 +427,15 @@ mcpRoutes.post('/', async (c) => {
             return c.json(await handleUpdateTrigger(requestId, toolArgs, tokenData, c.env));
           case 'delete_trigger':
             return c.json(await handleDeleteTrigger(requestId, toolArgs, tokenData, c.env));
+          // ─── Private incident backlog tools ───────────────────────────
+          case 'list_incident_queue':
+            return c.json(await handleListIncidentQueue(requestId, toolArgs, tokenData, c.env));
+          case 'get_incident':
+            return c.json(await handleGetIncident(requestId, toolArgs, tokenData, c.env));
+          case 'claim_incident':
+            return c.json(await handleClaimIncident(requestId, toolArgs, tokenData, c.env));
+          case 'resolve_incident':
+            return c.json(await handleResolveIncident(requestId, toolArgs, tokenData, c.env));
           // ─── Agent profile tools ──────────────────────────────────────
           case 'list_agent_profiles':
             return c.json(await handleListAgentProfiles(requestId, toolArgs, tokenData, c.env));

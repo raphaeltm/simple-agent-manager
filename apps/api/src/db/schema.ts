@@ -2773,6 +2773,33 @@ export const platformFeedbackTriages = sqliteTable(
     lastFailureReason: text('last_failure_reason'),
     lastFailedAt: integer('last_failed_at'),
     rejectedAt: integer('rejected_at'),
+    queueState: text('queue_state').notNull().default('resolved'),
+    queuedAt: integer('queued_at'),
+    dispatchLeaseToken: text('dispatch_lease_token'),
+    dispatchLeaseExpiresAt: integer('dispatch_lease_expires_at'),
+    dispatchedTriggerId: text('dispatched_trigger_id').references(() => triggers.id, {
+      onDelete: 'set null',
+    }),
+    dispatchedExecutionId: text('dispatched_execution_id').references(() => triggerExecutions.id, {
+      onDelete: 'set null',
+    }),
+    dispatchedTaskId: text('dispatched_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    dispatchedAt: integer('dispatched_at'),
+    dispatchAttempts: integer('dispatch_attempts').notNull().default(0),
+    incidentClaimToken: text('incident_claim_token'),
+    incidentClaimExpiresAt: integer('incident_claim_expires_at'),
+    incidentClaimedByTaskId: text('incident_claimed_by_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    incidentClaimedAt: integer('incident_claimed_at'),
+    resolvedAt: integer('resolved_at'),
+    resolvedByTaskId: text('resolved_by_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    resolutionNote: text('resolution_note'),
+    expiredAt: integer('expired_at'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -2784,6 +2811,17 @@ export const platformFeedbackTriages = sqliteTable(
     ideaIdx: index('idx_platform_feedback_triages_idea').on(table.ideaId),
     lastSeenIdx: index('idx_platform_feedback_triages_last_seen').on(table.lastSeenAt),
     rejectedIdx: index('idx_platform_feedback_triages_rejected').on(table.rejectedAt),
+    queueStateIdx: index('idx_platform_feedback_triages_queue_state').on(
+      table.queueState,
+      table.queuedAt,
+      table.lastSeenAt
+    ),
+    dispatchLeaseIdx: index('idx_platform_feedback_triages_dispatch_lease').on(
+      table.dispatchLeaseExpiresAt
+    ),
+    incidentClaimIdx: index('idx_platform_feedback_triages_incident_claim').on(
+      table.incidentClaimExpiresAt
+    ),
   })
 );
 

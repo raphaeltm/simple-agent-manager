@@ -1,6 +1,7 @@
 import {
   type AgentProfile,
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
+  type TriggerSourceType,
 } from '@simple-agent-manager/shared';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 
@@ -19,7 +20,7 @@ interface TriggerAdvancedOptionsProps {
   open: boolean;
   profiles: AgentProfile[];
   skipIfRunning: boolean;
-  sourceType: 'cron' | 'github' | 'webhook';
+  sourceType: TriggerSourceType;
   taskMode: 'task' | 'conversation';
   vmSize: string;
 }

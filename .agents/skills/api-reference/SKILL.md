@@ -14,6 +14,7 @@ The reference covers:
 - Project Management (`/api/projects/*`)
 - Task Management (`/api/projects/:projectId/tasks/*`)
 - MCP orchestration (`wait_for_subtasks`, `dispatch_task`, task inspection)
+- MCP private incident backlog tools (`list_incident_queue`, `get_incident`, `claim_incident`, `resolve_incident`)
 - Agent Sessions (`/api/workspaces/:id/agent-sessions/*`)
 - Agent Settings (`/api/agent-settings/*`)
 - Notifications (`/api/notifications/*`)

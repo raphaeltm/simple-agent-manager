@@ -17,6 +17,7 @@ import {
   runScheduledSessionSnapshotPurge,
 } from './d1-retention';
 import { notifyFailedSweeps } from './failed-sweep-notifications';
+import { runIncidentTriggerSweep } from './incident-triggers';
 import { runNodeCleanupSweep } from './node-cleanup';
 import { runObservabilityPurge } from './observability-purge';
 import {
@@ -139,6 +140,9 @@ export async function scheduled(
     runObservabilityPurge(env)
   );
   const cronTriggers = await sweeps.isolate('cron_triggers', () => runCronTriggerSweep(env));
+  const incidentTriggers = await sweeps.isolate('incident_triggers', () =>
+    runIncidentTriggerSweep(env)
+  );
   const triggerCleanup = await sweeps.isolate('trigger_execution_cleanup', () =>
     runTriggerExecutionCleanup(env)
   );
@@ -226,6 +230,15 @@ export async function scheduled(
     cronTriggersFired: cronTriggers?.fired,
     cronTriggersSkipped: cronTriggers?.skipped,
     cronTriggersFailed: cronTriggers?.failed,
+    incidentTriggersEnabled: incidentTriggers?.enabled,
+    incidentTriggersChecked: incidentTriggers?.checked,
+    incidentTriggersFired: incidentTriggers?.fired,
+    incidentTriggersSkipped: incidentTriggers?.skipped,
+    incidentTriggersFailed: incidentTriggers?.failed,
+    incidentTriggersPendingIncidents: incidentTriggers?.pendingIncidents,
+    incidentTriggersRequeuedDispatches: incidentTriggers?.requeuedDispatches,
+    incidentTriggersRejectedDispatches: incidentTriggers?.rejectedDispatches,
+    incidentTriggersExpiredIncidents: incidentTriggers?.expiredIncidents,
     triggerExecStaleRecovered: triggerCleanup?.staleRecovered,
     triggerExecStaleQueuedRecovered: triggerCleanup?.staleQueuedRecovered,
     triggerExecRetentionPurged: triggerCleanup?.retentionPurged,

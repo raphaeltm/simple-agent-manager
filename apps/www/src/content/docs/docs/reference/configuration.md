@@ -342,8 +342,17 @@ Pulumi options `diagnosticIncidentPrefix` (default `diagnostic-incidents`) and `
 | `PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS`              | `600000` | Claim lease duration before a later sweep can reclaim the group                                            |
 | `PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES`              | `3`      | Maximum failed attempts before a group is rejected from auto-triage                                        |
 | `PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH` | `240`    | Maximum characters stored or returned for sanitized failure reasons                                        |
+| `PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS`   | `7200000` | Dispatch lease before a failed incident trigger handoff can be reclaimed                                  |
+| `PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS`      | `3600000` | Agent claim lease before another task can reclaim a private incident                                      |
+| `PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS`   | `3`      | Expired dispatch attempts before an incident is rejected                                                  |
+| `PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS`              | `2592000000` | Maximum active incident age before expiry                                                              |
+| `PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT`           | `5`      | Maximum active incident triggers inspected per sweep                                                     |
+| `PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT`           | `10`     | Maximum grouped incidents included in one incident-trigger backlog summary                                |
+| `PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT`      | `10`     | Maximum bounded evidence references retained per incident                                                 |
+| `PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES`      | `32768`  | Maximum serialized evidence bytes retained per incident                                                   |
+| `PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH` | `2000` | Maximum private incident resolution-note length                                                           |
 
-Automated triage and superadmin-initiated diagnosis read the same `DEBUG_AGENT_DAILY_TOKEN_LIMIT` value but count against **independent per-feature counters**, so worst-case daily spend across both is twice this value.
+Automated triage and superadmin-initiated diagnosis read the same `DEBUG_AGENT_DAILY_TOKEN_LIMIT` value but count against **independent per-feature counters**, so worst-case daily spend across both is twice this value. Incident trigger agents run from the private grouped backlog and dispatch one agent for a bounded backlog summary, not one agent per occurrence.
 
 ### Report an Issue
 
@@ -899,6 +908,8 @@ Applied via cloud-init on each node:
 | `MCP_MESSAGE_LIST_MAX`        | `200`   | Max messages per `get_session_messages` request |
 | `MCP_TRIGGER_LIST_LIMIT`      | `20`    | Default page size for `list_triggers`           |
 | `MCP_TRIGGER_LIST_MAX`        | `100`   | Max triggers per `list_triggers` request        |
+| `MCP_INCIDENT_LIST_LIMIT`     | `10`    | Default page size for private `list_incident_queue` |
+| `MCP_INCIDENT_LIST_MAX`       | `50`    | Max private incidents per `list_incident_queue` request |
 
 ## Web UI (Build-Time)
 

@@ -1,6 +1,6 @@
 import * as v from 'valibot';
 
-const TriggerSourceTypeSchema = v.picklist(['cron', 'webhook', 'github']);
+const TriggerSourceTypeSchema = v.picklist(['cron', 'webhook', 'github', 'incident']);
 const TriggerStatusSchema = v.picklist(['active', 'paused', 'disabled']);
 const TaskModeSchema = v.picklist(['task', 'conversation']);
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);

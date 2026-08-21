@@ -21,6 +21,7 @@ The reference covers:
   - Audio/Transcription settings
   - Client error reporting settings
   - Generic webhook trigger limits, rate damping, and audit retention
+  - Platform feedback, private incident backlog, and Report-an-Issue settings
 - VM Agent Environment Variables:
   - Container/User settings
   - Git operations (timeouts, worktree limits)

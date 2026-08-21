@@ -20,6 +20,7 @@ import {
   getDefaultLocationForProvider,
   isValidProvider,
   resolveResourceReservation,
+  type TriggeredBy,
 } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -55,7 +56,7 @@ export interface SubmitTriggeredTaskInput {
   /** The rendered prompt to use as the task description. */
   renderedPrompt: string;
   /** How the task was triggered (e.g., 'cron'). */
-  triggeredBy: 'user' | 'cron' | 'webhook' | 'github';
+  triggeredBy: Exclude<TriggeredBy, 'mcp'>;
   /** Agent profile ID to use (from trigger config). */
   agentProfileId: string | null;
   /** Skill ID to use (from trigger config). */

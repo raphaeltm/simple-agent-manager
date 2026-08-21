@@ -13,6 +13,8 @@ This reference covers the most commonly used endpoints. For the complete list of
 
 Task agents can call `wait_for_subtasks` with a stable workflow-step `waitKey`, unique direct-child task IDs, an optional `condition` of `all` (the default) or `any`, and an optional bounded `wakeAfterSeconds`. The agent must persist the workflow state and key before calling, reuse the key after a lost response, and end its turn after registration. ProjectData then reconciles child terminal state and durably wakes the same canonical parent session exactly once, including after session sleep and runtime replacement. Automatic wake prompts carry only trusted task IDs and statuses; agents fetch child-authored output explicitly as untrusted data. Servers without durable prompt delivery reject registration so clients can use bounded foreground polling as a compatibility fallback.
 
+Private feedback-project agents can also call `list_incident_queue`, `get_incident`, `claim_incident`, and `resolve_incident`. These tools are scoped server-side to `PLATFORM_FEEDBACK_PROJECT_ID`; callers cannot provide a project id. `claim_incident` and `resolve_incident` require a task-scoped MCP token, use bounded leases/CAS tokens, and return only private redacted incident evidence labelled as untrusted.
+
 ## Authentication
 
 ### `POST /api/auth/sign-in/social`
@@ -283,7 +285,7 @@ Report whether in-app issue reporting is available on this deployment. Returns `
 
 ### `POST /api/report-issue`
 
-Submit an issue report. Returns `201` with the created draft Idea's `ideaId`, its `status`, and `attachedRefKeys` listing the technical references that were actually stored.
+Submit an issue report. Returns `201` with the grouped incident's private draft Idea `ideaId`, its `status`, and `attachedRefKeys` listing the technical references that were actually stored. Repeated matching reports update the same grouped incident/Idea instead of creating one Idea per occurrence.
 
 Body fields: `title`, `description`, `consentToAttachRefs`, and an optional `refs` object (`sessionId`, `taskId`, `nodeId`, `errorId`, `diagnosisId`). References are only stored when `consentToAttachRefs` is true, and each is re-checked against the caller's access first — unauthorized references are dropped silently rather than rejecting the request, so `attachedRefKeys` may be shorter than what was sent.
 

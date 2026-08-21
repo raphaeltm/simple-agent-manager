@@ -192,6 +192,10 @@ Running agents have access to project-aware MCP tools:
 | `get_session_messages` | Read conversation history (consecutive streaming tokens are concatenated into logical messages)                      |
 | `search_messages`      | Search messages by keyword — uses FTS5 full-text search for completed sessions; keyword matching for active sessions |
 | `list_triggers`        | List this project's automation triggers, optionally filtered by status or source type                                |
+| `list_incident_queue`  | List grouped private feedback incidents; available only inside the configured feedback project                       |
+| `get_incident`         | Read one bounded, redacted private incident and its untrusted evidence                                               |
+| `claim_incident`       | Atomically claim a private incident for the current task                                                             |
+| `resolve_incident`     | Terminally resolve or reject a claimed private incident                                                              |
 | `update_task_status`   | Report progress                                                                                                      |
 | `get_task_details`     | Inspect task state, persisted output fields, PR/error details, session id, and bounded recent assistant diagnostics  |
 | `complete_task`        | Mark current work as done, optionally with structured completion evidence                                            |

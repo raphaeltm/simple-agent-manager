@@ -564,7 +564,12 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('list_deployment_environment_config');
       expect(toolNames).toContain('set_deployment_environment_config');
       expect(toolNames).toContain('wait_for_subtasks');
-      expect(body.result.tools).toHaveLength(101);
+      // Private incident backlog tools
+      expect(toolNames).toContain('list_incident_queue');
+      expect(toolNames).toContain('get_incident');
+      expect(toolNames).toContain('claim_incident');
+      expect(toolNames).toContain('resolve_incident');
+      expect(body.result.tools).toHaveLength(105);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
@@ -611,6 +616,7 @@ describe('MCP Routes', () => {
         'cron',
         'webhook',
         'github',
+        'incident',
       ]);
       expect(listTriggers.inputSchema.properties.limit.type).toBe('number');
       expect(listTriggers.inputSchema.properties.limit.minimum).toBe(1);

@@ -256,6 +256,14 @@ by the read-only cron-liveness check.
   `apps/api/.env.example` and `apps/www/src/content/docs/docs/guides/self-hosting.md` for supported keys
   and defaults.
 
+### Platform Feedback and Report an Issue
+
+- `PLATFORM_FEEDBACK_PROJECT_ID` — Private project that receives Report-an-Issue submissions, automated platform triage records, and incident trigger agents; unset hides in-app reporting and disables incident trigger sweeps.
+- `PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES`, `PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT`, `PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT`, `PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT`, `PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS`, `PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES`, `PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH` — Hourly platform-error grouping and draft-Idea triage bounds.
+- `PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS`, `PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS`, `PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS`, `PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS`, `PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT` — Durable private incident backlog dispatch/claim/expiry state-machine and sweep bounds.
+- `PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT`, `PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT`, `PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES`, `PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH` — Model-visible incident summary/evidence/resolution size limits.
+- `REPORT_ISSUE_TITLE_MAX_LENGTH`, `REPORT_ISSUE_DESCRIPTION_MAX_LENGTH`, `REPORT_ISSUE_CONTENT_MAX_LENGTH`, `RATE_LIMIT_REPORT_ISSUE_POST` — In-app user report truncation and rate limits.
+
 ### Pagination
 
 - `TASK_LIST_DEFAULT_PAGE_SIZE` — Default task/project list page size
@@ -265,6 +273,8 @@ by the read-only cron-liveness check.
 - `CHAT_SESSION_DELTA_MESSAGE_LIMIT` — Default page size for forward-cursor chat delta fetches after the newest cached browser message (default: 5000)
 - `MCP_TRIGGER_LIST_LIMIT` — Default result count for the `list_triggers` MCP tool (default: 20)
 - `MCP_TRIGGER_LIST_MAX` — Maximum result count accepted by the `list_triggers` MCP tool (default: 100)
+- `MCP_INCIDENT_LIST_LIMIT` — Default result count for the private `list_incident_queue` MCP tool (default: 10)
+- `MCP_INCIDENT_LIST_MAX` — Maximum result count accepted by the private `list_incident_queue` MCP tool (default: 50)
 
 ### Timeouts
 

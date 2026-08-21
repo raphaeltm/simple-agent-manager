@@ -79,7 +79,7 @@ interface TriggerOverrides {
   nextFireAt?: string | null;
   lastTriggeredAt?: string | null;
   triggerCount?: number;
-  sourceType?: 'cron' | 'github' | 'webhook';
+  sourceType?: 'cron' | 'github' | 'webhook' | 'incident';
   promptTemplate?: string;
   agentProfileId?: string | null;
   webhookConfig?: {
@@ -378,6 +378,19 @@ const STUCK_EXECUTIONS = [
   makeExecution({ id: 'ex-complete', status: 'completed', taskId: 'task-1' }),
 ];
 
+const INCIDENT_TRIGGER = makeTrigger({
+  id: 'trig-incident',
+  name: 'Private incident backlog triage',
+  description:
+    'Dispatches one operator agent for grouped private feedback incidents, including very long explanatory text that must wrap cleanly on narrow screens.',
+  sourceType: 'incident',
+  promptTemplate: 'Investigate private incidents: {{incident.backlogSummary}}',
+  agentProfileId: MOCK_PROFILE.id,
+  triggerCount: 3,
+  nextFireAt: null,
+  lastTriggeredAt: '2026-03-20T08:30:00Z',
+});
+
 // ---------------------------------------------------------------------------
 // API Mock Setup
 // ---------------------------------------------------------------------------
@@ -671,6 +684,33 @@ async function verifyWebhookDetail(page: Page, screenshotPrefix: string) {
   await assertNoClippedOverflow(page);
 }
 
+async function verifyIncidentTriggerDetail(page: Page, screenshotPrefix: string) {
+  await setupApiMocks(page, {
+    triggers: [INCIDENT_TRIGGER],
+    triggerDetail: INCIDENT_TRIGGER,
+    executions: [],
+  });
+  await page.goto(`/projects/proj-test-1/triggers/${INCIDENT_TRIGGER.id}`);
+  await expect(page.getByRole('heading', { name: INCIDENT_TRIGGER.name })).toBeVisible();
+  await expect(page.getByText('Private incident backlog', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('GitHub event', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /run now/i })).toHaveCount(0);
+  await screenshot(page, `${screenshotPrefix}-detail`);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+
+  await page.getByRole('button', { name: /edit trigger/i }).click();
+  await expect(page.getByRole('dialog', { name: /edit trigger/i })).toBeVisible();
+  await expect(page.getByText('Run from grouped feedback incidents')).toBeVisible();
+  await expect(page.getByText('Manual preview/run actions are disabled server-side')).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: '{{incident.backlogSummary}}' })
+  ).toBeVisible();
+  await screenshot(page, `${screenshotPrefix}-edit-form`);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+}
+
 // ---------------------------------------------------------------------------
 // Tests: Triggers List — Mobile
 // ---------------------------------------------------------------------------
@@ -901,6 +941,10 @@ test.describe('Trigger Detail — Mobile', () => {
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
   });
+
+  test('private incident trigger detail and edit state', async ({ page }) => {
+    await verifyIncidentTriggerDetail(page, 'trigger-incident-mobile');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -929,6 +973,10 @@ test.describe('Trigger Detail — Desktop', () => {
 
   test('webhook delivery, preview, filter, and rotation states', async ({ page }) => {
     await verifyWebhookDetail(page, 'trigger-webhook-detail-desktop');
+  });
+
+  test('private incident trigger detail and edit state', async ({ page }) => {
+    await verifyIncidentTriggerDetail(page, 'trigger-incident-desktop');
   });
 });
 

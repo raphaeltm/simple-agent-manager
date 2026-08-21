@@ -83,13 +83,15 @@ A **skill** is a reusable layer of instructions, environment, and files you can 
 
 ## Triggers
 
-A **trigger** starts agent work automatically, without you opening a chat. A trigger runs from one of three sources:
+A **trigger** starts agent work automatically, without you opening a chat. User-facing triggers run from three sources:
 
 - **Schedule** (cron) — run on a recurring basis
 - **GitHub event** — react to activity on the linked repository
 - **Webhook** — start work when an authenticated external request arrives (see [Webhook Triggers](/docs/guides/webhook-triggers/))
 
 Each trigger runs with a specific agent profile (and optional skill), so triggered work behaves like a chat you started yourself.
+
+SAM also has a private operator-only incident trigger source used by the configured platform feedback project. It dispatches agents from grouped private incident backlog summaries rather than from external user/project events.
 
 ## Ideas
 

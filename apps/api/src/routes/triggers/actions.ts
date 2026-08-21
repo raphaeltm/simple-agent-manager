@@ -58,7 +58,8 @@ async function loadSourceConfig(
     if (!row) throw errors.notFound('GitHub trigger');
     return { sourceType: 'github', eventType: row.eventType };
   }
-  return { sourceType: 'cron' };
+  if (trigger.sourceType === 'cron') return { sourceType: 'cron' };
+  throw errors.conflict('Incident triggers run from the private incident backlog sweep');
 }
 
 actionRoutes.post('/:triggerId/test', async (c) => {
@@ -67,6 +68,9 @@ actionRoutes.post('/:triggerId/test', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const project = await requireProjectTaskRead(db, projectId, getAuth(c).user.id);
   const trigger = await loadTrigger(db, projectId, triggerId);
+  if (trigger.sourceType === 'incident') {
+    throw errors.conflict('Incident triggers render from the private incident backlog sweep');
+  }
   const now = new Date();
   const context = buildTriggerActionContext({
     trigger,
@@ -89,6 +93,9 @@ actionRoutes.post('/:triggerId/run', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const project = await requireProjectTaskWrite(db, projectId, getAuth(c).user.id);
   const trigger = await loadTrigger(db, projectId, triggerId);
+  if (trigger.sourceType === 'incident') {
+    throw errors.conflict('Incident triggers run from the private incident backlog sweep');
+  }
   const input: unknown = await c.req.json().catch(() => ({}));
   const preview =
     input && typeof input === 'object' && !Array.isArray(input)

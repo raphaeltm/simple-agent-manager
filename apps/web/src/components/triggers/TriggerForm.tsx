@@ -6,6 +6,7 @@ import type {
   CreateTriggerRequest,
   GitHubTriggerEventType,
   TriggerResponse,
+  TriggerSourceType,
   UpdateTriggerRequest,
   WebhookCredential,
   WebhookTriggerFilter,
@@ -27,6 +28,7 @@ import {
   CRON_TEMPLATE_VARIABLES,
   FOCUS_RING,
   GITHUB_TEMPLATE_VARIABLES,
+  INCIDENT_TEMPLATE_VARIABLES,
   joinList,
   splitList,
   WEBHOOK_TEMPLATE_VARIABLES,
@@ -68,7 +70,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
   // Form state
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [sourceType, setSourceType] = useState<'cron' | 'github' | 'webhook'>('cron');
+  const [sourceType, setSourceType] = useState<TriggerSourceType>('cron');
   const [cronExpression, setCronExpression] = useState('0 9 * * *');
   const [cronTimezone, setCronTimezone] = useState('UTC');
   const [githubEventType, setGitHubEventType] = useState<GitHubTriggerEventType>('issue_comment');
@@ -360,13 +362,17 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
       ? GITHUB_TEMPLATE_VARIABLES
       : sourceType === 'webhook'
         ? WEBHOOK_TEMPLATE_VARIABLES
-        : CRON_TEMPLATE_VARIABLES;
+        : sourceType === 'incident'
+          ? INCIDENT_TEMPLATE_VARIABLES
+          : CRON_TEMPLATE_VARIABLES;
   const promptPlaceholder =
     sourceType === 'github'
       ? 'When {{github.actor}} comments {{github.comment}} on {{github.repository}}#{{github.number}}, decide whether to start the requested SAM task.'
       : sourceType === 'webhook'
         ? 'Process this untrusted webhook payload: {{webhook.payload}}'
-        : 'Review all open pull requests and summarize their status. Current time: {{schedule.time}}';
+        : sourceType === 'incident'
+          ? 'Investigate the private incident backlog: {{incident.backlogSummary}}'
+          : 'Review all open pull requests and summarize their status. Current time: {{schedule.time}}';
 
   if (!open) return null;
 
@@ -443,6 +449,12 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
                 onFilterModeChange={setWebhookFilterMode}
                 onFiltersChange={setWebhookFilters}
               />
+            </div>
+          ) : sourceType === 'incident' ? (
+            <div className="rounded-md border border-border-default bg-surface p-3 text-sm text-fg-muted">
+              Private incident triggers are dispatched only by the scheduled incident backlog sweep.
+              Manual preview/run actions are disabled server-side so a trigger cannot bypass grouped
+              incident leases.
             </div>
           ) : sourceType === 'cron' ? (
             <div>

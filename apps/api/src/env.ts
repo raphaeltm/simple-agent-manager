@@ -129,6 +129,15 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS?: string;
   PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES?: string;
   PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH?: string;
+  PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS?: string;
+  PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS?: string;
+  PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS?: string;
+  PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS?: string;
+  PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT?: string;
+  PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT?: string;
+  PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT?: string;
+  PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES?: string;
+  PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH?: string;
   JWT_PRIVATE_KEY: string;
   JWT_PUBLIC_KEY: string;
   ENCRYPTION_KEY: string;
@@ -643,6 +652,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MCP_MESSAGE_SEARCH_MAX?: string; // Max search results for search_messages (default: 20)
   MCP_TRIGGER_LIST_LIMIT?: string; // Default page size for list_triggers (default: 20)
   MCP_TRIGGER_LIST_MAX?: string; // Max page size for list_triggers (default: 100)
+  MCP_INCIDENT_LIST_LIMIT?: string; // Default page size for list_incident_queue (default: 10)
+  MCP_INCIDENT_LIST_MAX?: string; // Max page size for list_incident_queue (default: 50)
   MCP_DEPLOYMENT_LOG_DEFAULT_LIMIT?: string; // Default deployment log rows for read_deployment_logs (default: 200)
   MCP_DEPLOYMENT_LOG_MAX_LIMIT?: string; // Max deployment log rows for read_deployment_logs (default: 1000)
   // Configurable content limits
