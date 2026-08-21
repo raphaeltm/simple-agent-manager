@@ -17,11 +17,17 @@ import { createSqliteD1 } from '../../helpers/sqlite-d1';
 function setup() {
   const sqlite = new Database(':memory:');
   sqlite.exec(`
-    CREATE TABLE projects (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL);
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE users (id TEXT PRIMARY KEY);
+    CREATE TABLE projects (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id));
     CREATE TABLE tasks (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, user_id TEXT NOT NULL,
       title TEXT NOT NULL, description TEXT, status TEXT NOT NULL, priority INTEGER NOT NULL,
       task_mode TEXT NOT NULL, dispatch_depth INTEGER NOT NULL, created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES projects(id),
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (created_by) REFERENCES users(id));
     CREATE TABLE platform_feedback_triages (
       signature TEXT PRIMARY KEY, source TEXT NOT NULL, summary TEXT NOT NULL,
       first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, occurrence_count INTEGER NOT NULL,
@@ -35,7 +41,9 @@ function setup() {
       incident_claim_token TEXT, incident_claim_expires_at INTEGER,
       incident_claimed_by_task_id TEXT, incident_claimed_at INTEGER,
       resolved_at INTEGER, resolved_by_task_id TEXT, resolution_note TEXT, expired_at INTEGER,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (idea_id) REFERENCES tasks(id) ON DELETE SET NULL);
+    INSERT INTO users VALUES ('owner-1'), ('reporter-1'), ('task-1'), ('task-2');
     INSERT INTO projects VALUES ('feedback-project', 'owner-1', 'Private Feedback');
   `);
   const env = {

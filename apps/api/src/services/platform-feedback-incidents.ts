@@ -377,42 +377,44 @@ export async function upsertUserReportIncident(
   const ideaContent = buildReportIdeaContent(row, input.authorizedKeys).slice(0, input.contentMaxLength);
   if (!row.idea_id) {
     const ideaId = ulid();
-    const linked = await env.DATABASE.prepare(
-      `UPDATE platform_feedback_triages SET idea_id = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE signature = ? AND idea_id IS NULL`
+    await env.DATABASE.prepare(
+      `INSERT INTO tasks (id, project_id, user_id, title, description, status, priority,
+        task_mode, dispatch_depth, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'draft', 0, 'task', 0, ?, ?, ?)`
     )
-      .bind(ideaId, signature)
+      .bind(
+        ideaId,
+        input.feedbackProjectId,
+        input.feedbackProjectOwnerId,
+        sanitizedTitle.slice(0, 200),
+        ideaContent,
+        input.userId,
+        nowIso,
+        nowIso
+      )
       .run();
 
-    if ((linked.meta.changes ?? 0) === 1) {
-      try {
-        await env.DATABASE.prepare(
-          `INSERT INTO tasks (id, project_id, user_id, title, description, status, priority,
-            task_mode, dispatch_depth, created_by, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 'draft', 0, 'task', 0, ?, ?, ?)`
-        )
-          .bind(
-            ideaId,
-            input.feedbackProjectId,
-            input.feedbackProjectOwnerId,
-            sanitizedTitle.slice(0, 200),
-            ideaContent,
-            input.userId,
-            nowIso,
-            nowIso
-          )
-          .run();
-      } catch (error) {
-        await env.DATABASE.prepare(
-          `UPDATE platform_feedback_triages SET idea_id = NULL, updated_at = CURRENT_TIMESTAMP
-           WHERE signature = ? AND idea_id = ?`
-        )
-          .bind(signature, ideaId)
-          .run();
-        throw error;
+    try {
+      const linked = await env.DATABASE.prepare(
+        `UPDATE platform_feedback_triages SET idea_id = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE signature = ? AND idea_id IS NULL`
+      )
+        .bind(ideaId, signature)
+        .run();
+
+      if ((linked.meta.changes ?? 0) === 1) {
+        return { incidentId: signature, ideaId, createdIdea: true, updatedIdea: false };
       }
-      return { incidentId: signature, ideaId, createdIdea: true, updatedIdea: false };
+    } catch (error) {
+      await env.DATABASE.prepare('DELETE FROM tasks WHERE id = ? AND status = ?')
+        .bind(ideaId, 'draft')
+        .run();
+      throw error;
     }
+
+    await env.DATABASE.prepare('DELETE FROM tasks WHERE id = ? AND status = ?')
+      .bind(ideaId, 'draft')
+      .run();
   }
 
   const current = await readIncidentRow(env, signature);
