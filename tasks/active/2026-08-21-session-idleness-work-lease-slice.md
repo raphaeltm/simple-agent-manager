@@ -43,7 +43,7 @@ This slice must be independently shippable: extend the existing finite renewable
 - [x] Keep non-authoritative readers as deliberate gaps, documented in this task and PR body; do not treat absence of a child/tool signal as proof of idleness.
 - [x] Add deterministic TypeScript tests for lease renewal/expiry/absolute ceiling, prompt activity, child-task/wait signals, detached server stale progress, sleep/delete/recovery gates, and inconclusive evidence.
 - [x] Run focused Go and API tests before broader quality checks.
-- [ ] Run local specialist review: test-engineer, go-specialist, constitution-validator, cloudflare-specialist, doc-sync-validator, security-auditor, and task-completion-validator.
+- [x] Run local specialist review: test-engineer, go-specialist, constitution-validator, cloudflare-specialist, doc-sync-validator, security-auditor, and task-completion-validator.
 - [ ] Open a draft PR, let CI run, and stop before staging/merge.
 
 ## Acceptance criteria
@@ -75,6 +75,16 @@ This slice must be independently shippable: extend the existing finite renewable
 - ProjectData idle cleanup and workspace idle-timeout candidate selectors are not yet converted to `classifySessionIdleness()`. They still use schedule/workspace-activity candidate selection plus `classifyTaskRuntimeLiveness()` before terminalization. Converting them needs a separate ACP-session activity mirror resolution and ProjectData wait-subscription adapter.
 - The sleep reader consumes D1 child-task state but not ProjectData `task_wait_subscriptions` directly. The shared predicate now has an `activeWaitCount` input so that adapter can be added without changing the predicate contract.
 - ACP terminal methods remain stubbed; this slice intentionally only consumes ACP `tool_call` / `tool_call_update`.
+
+## Specialist review notes
+
+- `test-engineer`: deterministic coverage includes ACP in-flight/terminal transitions, replay/wrong-session suppression, raw payload minimization, shared predicate cases, child-task and durable-wait signals, lease expiry/ceiling, stale detached work, sleep gate races, inconclusive evidence, full API suite, and full VM-agent Go suite.
+- `go-specialist`: ACP lifecycle handling stays on the existing notification path, uses the lock-free session mirror before taking `harnessWorkMu`, avoids `h.mu`, coalesces activity reports via the existing nudge path, and preserves Claude source exclusivity.
+- `constitution-validator`: no new environment variables; existing lease/ceiling defaults remain configurable by `HARNESS_BACKGROUND_WORK_*`. New D1 active-child statuses are domain constants, not operator-tunable policy.
+- `cloudflare-specialist`: new D1 child-task read is parameterized, scoped by `project_id` + `parent_task_id`, and `LIMIT 1`; query failure returns `unknown` and defers sleep.
+- `doc-sync-validator`: no public env/config docs need updates because no env/schema/API contract changed. The task file and PR body carry the implementation/gap documentation.
+- `security-auditor`: raw ACP tool input/output is not persisted or sent in activity callbacks; tests assert activity reports omit secret marker content and tool IDs. D1 SQL uses bound parameters.
+- `task-completion-validator`: implementation matches the active task checklist except deliberate gaps explicitly retained for ProjectData cleanup selectors and direct wait-subscription adapter wiring.
 
 ## Deliberate non-goals for this slice
 
