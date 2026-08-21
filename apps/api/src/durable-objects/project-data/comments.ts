@@ -468,6 +468,7 @@ export function listCommentThreads(
     params.push(input.afterSequence);
   }
 
+  const whereClause = conditions.join(' AND ');
   const rows = sql
     .exec(
       `SELECT id, session_id, message_id, quote, body, author_type, author_id, author_name,
@@ -476,7 +477,7 @@ export function listCommentThreads(
               resolved_at, resolved_by_type, resolved_by_id, resolved_by_name,
               reopened_at, reopened_by_type, reopened_by_id, reopened_by_name
        FROM comment_threads
-       WHERE ${conditions.join(' AND ')}
+       WHERE ${whereClause}
        ORDER BY sequence ASC
        LIMIT ?`,
       ...params,
