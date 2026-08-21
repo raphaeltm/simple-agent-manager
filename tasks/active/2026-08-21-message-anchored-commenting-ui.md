@@ -77,37 +77,37 @@ Explicit constraints:
 
 ## Implementation checklist
 
-- [ ] Document the assumed message-comment server contract for the backend
+- [x] Document the assumed message-comment server contract for the backend
       integrator, including endpoint paths, payload shapes, event types,
       optimistic IDs, status semantics, and write-boundary limit assumptions.
-- [ ] Add an isolated typed comment API client under `apps/web/src/lib/api/`.
-- [ ] Add TanStack Query options/hooks for listing threads by project/session,
+- [x] Add an isolated typed comment API client under `apps/web/src/lib/api/`.
+- [x] Add TanStack Query options/hooks for listing threads by project/session,
       creating a thread, replying, resolving, reopening, sending to agent, and
       applying realtime comment events with optimistic reconciliation.
-- [ ] Add generic `packages/ui` primitives only where justified by the production
+- [x] Add generic `packages/ui` primitives only where justified by the production
       implementation, likely `Avatar`, `Textarea`, and an interactive anchored
       `Popover`; keep comment-specific markers/composers local to chat.
-- [ ] Add production comment types and utilities for message anchor filtering,
+- [x] Add production comment types and utilities for message anchor filtering,
       status labels, relative time, author display, and optimistic IDs.
-- [ ] Add a message-selection hook using debounced `selectionchange` as primary
+- [x] Add a message-selection hook using debounced `selectionchange` as primary
       trigger, preserving native browser selection and supporting keyboard,
       desktop pointer selection, and mobile long-press/selection-handle flows.
-- [ ] Integrate message anchors into `ProjectMessageView` row wrappers without
+- [x] Integrate message anchors into `ProjectMessageView` row wrappers without
       modifying `MessageBubble` and without changing existing chat streaming,
       composer, scroll, header, timeline, or virtualization behavior.
-- [ ] Add create-thread composer with selected quote, comment body, explicit
+- [x] Add create-thread composer with selected quote, comment body, explicit
       note-only and send-to-agent actions, cancel behavior, focus management,
       `Ctrl/Cmd+Enter`, and screen-reader labels.
-- [ ] Add thread UI with body, quoted anchor, replies, reply composer,
+- [x] Add thread UI with body, quoted anchor, replies, reply composer,
       resolve/reopen, `open | sent | resolved` status, loading/error/empty
       states, and optimistic pending/error affordances.
-- [ ] Add count marker/accent on commented messages with unresolved vs resolved
+- [x] Add count marker/accent on commented messages with unresolved vs resolved
       state and no permanent mobile gutter clutter.
-- [ ] Add a desktop rail at `>=1024px` driven solely by comment data and active
+- [x] Add a desktop rail at `>=1024px` driven solely by comment data and active
       anchor state, not mounted virtual rows.
-- [ ] Add mobile inline expansion with touch-friendly controls and responsive
+- [x] Add mobile inline expansion with touch-friendly controls and responsive
       overflow safety.
-- [ ] Add realtime reconciliation hooks for documented comment WebSocket events,
+- [x] Add realtime reconciliation hooks for documented comment WebSocket events,
       keeping the query cache and optimistic rows server-authoritative.
 - [ ] Add unit/component tests for selection, query/client transformations,
       create/reply/resolve/reopen/send flows, accessibility/focus, and

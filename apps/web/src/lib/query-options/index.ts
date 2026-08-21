@@ -47,6 +47,7 @@ export {
   timelineUserMessagesQueryOptions,
 } from './chats';
 export { cachedCommandsQueryOptions, commandQueryKeys } from './commands';
+export { messageCommentQueryKeys, messageCommentsQueryOptions } from './comments';
 export { credentialQueryKeys, credentialsQueryOptions } from './credentials';
 export { githubInstallationsQueryOptions, githubQueryKeys } from './github';
 export {
