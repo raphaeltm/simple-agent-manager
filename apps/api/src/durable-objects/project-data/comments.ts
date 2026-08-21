@@ -1,9 +1,4 @@
-import type {
-  CommentAuthor,
-  CommentStatus,
-  MessageCommentReply,
-  MessageCommentThread,
-} from '@simple-agent-manager/shared';
+import type { MessageCommentReply, MessageCommentThread } from '@simple-agent-manager/shared';
 import {
   COMMENT_STATUSES,
   DEFAULT_COMMENT_BODY_MAX_LENGTH,
@@ -17,102 +12,50 @@ import {
 import * as v from 'valibot';
 
 import { createModuleLogger } from '../../lib/logger';
+import {
+  COMMENT_IDEMPOTENCY_CONFLICT,
+  COMMENT_LIMIT_EXCEEDED,
+  COMMENT_NOT_FOUND,
+  COMMENT_VALIDATION,
+  type CommentActor,
+  CommentIdempotencyConflictError,
+  CommentLimitExceededError,
+  CommentNotFoundError,
+  type CommentReplyMutationResult,
+  type CommentThreadMutationResult,
+  CommentValidationError,
+  type CreateCommentReplyInput,
+  type CreateCommentThreadInput,
+  type ListCommentThreadsInput,
+  type ListCommentThreadsResult,
+  type UpdateCommentStatusInput,
+} from './comment-contracts';
 import { parseRow } from './row-schemas';
 import type { Env } from './types';
 import { generateId } from './types';
 
 const log = createModuleLogger('project_data.comments');
 
-export type CommentActor = CommentAuthor;
-
-export type CreateCommentThreadInput = {
-  sessionId: string;
-  messageId: string;
-  body: string;
-  quote?: string | null;
-  clientMutationId?: string | null;
-  actor: CommentActor;
+export {
+  COMMENT_IDEMPOTENCY_CONFLICT,
+  COMMENT_LIMIT_EXCEEDED,
+  COMMENT_NOT_FOUND,
+  COMMENT_VALIDATION,
+  CommentIdempotencyConflictError,
+  CommentLimitExceededError,
+  CommentNotFoundError,
+  CommentValidationError,
 };
-
-export type CreateCommentReplyInput = {
-  sessionId: string;
-  threadId: string;
-  body: string;
-  clientMutationId?: string | null;
-  actor: CommentActor;
+export type {
+  CommentActor,
+  CommentReplyMutationResult,
+  CommentThreadMutationResult,
+  CreateCommentReplyInput,
+  CreateCommentThreadInput,
+  ListCommentThreadsInput,
+  ListCommentThreadsResult,
+  UpdateCommentStatusInput,
 };
-
-export type ListCommentThreadsInput = {
-  sessionId: string;
-  messageId?: string | null;
-  status?: CommentStatus | null;
-  afterSequence?: number | null;
-  limit?: number | null;
-};
-
-export type UpdateCommentStatusInput = {
-  sessionId: string;
-  threadId: string;
-  status: CommentStatus;
-  clientMutationId?: string | null;
-  actor: CommentActor;
-};
-
-export type CommentThreadMutationResult = {
-  thread: MessageCommentThread;
-  idempotent: boolean;
-  changed: boolean;
-};
-
-export type CommentReplyMutationResult = CommentThreadMutationResult & {
-  reply: MessageCommentReply;
-};
-
-export type ListCommentThreadsResult = {
-  threads: MessageCommentThread[];
-  hasMore: boolean;
-};
-
-export const COMMENT_NOT_FOUND = 'COMMENT_NOT_FOUND';
-export const COMMENT_VALIDATION = 'COMMENT_VALIDATION';
-export const COMMENT_IDEMPOTENCY_CONFLICT = 'COMMENT_IDEMPOTENCY_CONFLICT';
-export const COMMENT_LIMIT_EXCEEDED = 'COMMENT_LIMIT_EXCEEDED';
-
-export class CommentNotFoundError extends Error {
-  readonly code = COMMENT_NOT_FOUND;
-
-  constructor(readonly resource: 'Chat session' | 'Message' | 'Comment thread') {
-    super(`${resource} not found`);
-    this.name = 'CommentNotFoundError';
-  }
-}
-
-export class CommentValidationError extends Error {
-  readonly code = COMMENT_VALIDATION;
-
-  constructor(message: string) {
-    super(message);
-    this.name = 'CommentValidationError';
-  }
-}
-
-export class CommentIdempotencyConflictError extends Error {
-  readonly code = COMMENT_IDEMPOTENCY_CONFLICT;
-
-  constructor() {
-    super('clientMutationId already belongs to a different comment mutation');
-    this.name = 'CommentIdempotencyConflictError';
-  }
-}
-
-export class CommentLimitExceededError extends Error {
-  readonly code = COMMENT_LIMIT_EXCEEDED;
-
-  constructor(message: string) {
-    super(message);
-    this.name = 'CommentLimitExceededError';
-  }
-}
 
 type CommentLimits = {
   bodyMaxLength: number;
@@ -296,7 +239,7 @@ function actorFromColumns(
   kind: 'human' | 'agent' | null,
   id: string | null,
   name: string | null
-): CommentAuthor | null {
+): CommentActor | null {
   if (!kind || !id) return null;
   return { kind, id, name };
 }

@@ -9,12 +9,12 @@ import { requireRouteParam } from '../lib/route-helpers';
 import { getAuth, getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
+import { jsonValidator } from '../schemas/_validator';
 import {
   CommentStatusMutationSchema,
   CreateCommentReplySchema,
   CreateCommentThreadSchema,
-  jsonValidator,
-} from '../schemas';
+} from '../schemas/comments';
 import * as projectDataService from '../services/project-data';
 
 export const chatCommentRoutes = new Hono<{ Bindings: Env }>();

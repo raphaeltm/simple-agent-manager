@@ -29,13 +29,13 @@ import type {
   CreateCommentThreadInput,
   ListCommentThreadsInput,
   UpdateCommentStatusInput,
-} from '../durable-objects/project-data/comments';
+} from '../durable-objects/project-data/comment-contracts';
 export {
   CommentIdempotencyConflictError,
   CommentLimitExceededError,
   CommentNotFoundError,
   CommentValidationError,
-} from '../durable-objects/project-data/comments';
+} from '../durable-objects/project-data/comment-contracts';
 import type {
   AcceptedPromptDelivery,
   AcceptPromptDeliveryInput,
