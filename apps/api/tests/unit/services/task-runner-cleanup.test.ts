@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 
+const CLEANUP_IMPORT_TEST_TIMEOUT_MS = 15_000;
+
 const mocks = vi.hoisted(() => ({
   drizzle: vi.fn(),
   stopWorkspaceOnNode: vi.fn(),
@@ -11,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   failSession: vi.fn(),
   queueWorkspaceSessionSleep: vi.fn(),
   deleteSessionSnapshotState: vi.fn(),
+  cancelVmTaskAdmission: vi.fn(),
   log: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -45,6 +48,10 @@ vi.mock('../../../src/services/session-sleep', () => ({
 
 vi.mock('../../../src/services/session-snapshots', () => ({
   deleteSessionSnapshotState: (...args: unknown[]) => mocks.deleteSessionSnapshotState(...args),
+}));
+
+vi.mock('../../../src/services/vm-admission-control', () => ({
+  cancelVmTaskAdmission: (...args: unknown[]) => mocks.cancelVmTaskAdmission(...args),
 }));
 
 vi.mock('../../../src/lib/logger', () => ({
@@ -95,6 +102,7 @@ describe('cleanupTerminalTaskResources', () => {
     mocks.failSession.mockResolvedValue(undefined);
     mocks.queueWorkspaceSessionSleep.mockResolvedValue(undefined);
     mocks.deleteSessionSnapshotState.mockResolvedValue(true);
+    mocks.cancelVmTaskAdmission.mockResolvedValue(undefined);
   });
 
   it('queues completed-session sleep without cleaning up the current prompt runtime', async () => {
@@ -127,6 +135,11 @@ describe('cleanupTerminalTaskResources', () => {
 
     await cleanupTerminalTaskResources(env, 'task-terminal-1', { status: 'completed' });
 
+    expect(mocks.cancelVmTaskAdmission).toHaveBeenCalledWith(
+      env,
+      'task-terminal-1',
+      'task_completed_cleanup'
+    );
     expect(mocks.queueWorkspaceSessionSleep).toHaveBeenCalledWith(
       env,
       expect.objectContaining({
@@ -137,7 +150,7 @@ describe('cleanupTerminalTaskResources', () => {
     );
     expect(mocks.stopSession).not.toHaveBeenCalled();
     expect(order).toEqual(['queueWorkspaceSessionSleep']);
-  });
+  }, CLEANUP_IMPORT_TEST_TIMEOUT_MS);
 
   it('fails the chat session before cleanup when task status is failed', async () => {
     const order: string[] = [];
@@ -169,6 +182,11 @@ describe('cleanupTerminalTaskResources', () => {
 
     await cleanupTerminalTaskResources(env, 'task-terminal-failed', { status: 'failed' });
 
+    expect(mocks.cancelVmTaskAdmission).toHaveBeenCalledWith(
+      env,
+      'task-terminal-failed',
+      'task_failed'
+    );
     expect(mocks.failSession).toHaveBeenCalledWith(
       env,
       'project-terminal-1',
@@ -176,7 +194,7 @@ describe('cleanupTerminalTaskResources', () => {
       'runner failed'
     );
     expect(order).toEqual(['failSession', 'cleanupTaskRun']);
-  });
+  }, CLEANUP_IMPORT_TEST_TIMEOUT_MS);
 
   it('deletes retained state before stopping an explicitly archived session', async () => {
     const order: string[] = [];
@@ -217,5 +235,5 @@ describe('cleanupTerminalTaskResources', () => {
 
     expect(mocks.queueWorkspaceSessionSleep).not.toHaveBeenCalled();
     expect(order).toEqual(['deleteSessionSnapshotState', 'stopSession', 'cleanupTaskRun']);
-  });
+  }, CLEANUP_IMPORT_TEST_TIMEOUT_MS);
 });

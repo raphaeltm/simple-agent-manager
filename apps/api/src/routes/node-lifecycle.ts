@@ -215,16 +215,23 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
         }
       }
 
-      const readyNode = await innerDb
-        .select({ userId: schema.nodes.userId })
-        .from(schema.nodes)
-        .where(eq(schema.nodes.id, nodeId))
-        .limit(1);
-      const ownerUserId = readyNode[0]?.userId ?? null;
-      if (ownerUserId) {
-        await wakeVmAdmissionWaiters(c.env, {
-          userId: ownerUserId,
-          reason: 'node_ready',
+      try {
+        const readyNode = await innerDb
+          .select({ userId: schema.nodes.userId })
+          .from(schema.nodes)
+          .where(eq(schema.nodes.id, nodeId))
+          .limit(1);
+        const ownerUserId = readyNode[0]?.userId ?? null;
+        if (ownerUserId) {
+          await wakeVmAdmissionWaiters(c.env, {
+            userId: ownerUserId,
+            reason: 'node_ready',
+          });
+        }
+      } catch (err) {
+        log.warn('node_ready.vm_admission_wakeup_failed', {
+          nodeId,
+          error: err instanceof Error ? err.message : String(err),
         });
       }
     })()
