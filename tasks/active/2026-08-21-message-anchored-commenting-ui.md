@@ -122,7 +122,7 @@ Explicit constraints:
 - [x] Run required local specialist reviews: `ui-ux-specialist`,
       `test-engineer`, accessibility review, `constitution-validator`,
       `doc-sync-validator`, and `task-completion-validator`.
-- [ ] Open the constituent PR to `main`, preserve "do not merge" and
+- [x] Open the constituent PR to `main`, preserve "do not merge" and
       "no staging" constraints in the PR body, and leave it open.
 
 ## Acceptance criteria
@@ -186,6 +186,9 @@ Explicit constraints:
 
 ## Evidence log
 
+- Constituent PR left open: <https://github.com/raphaeltm/simple-agent-manager/pull/1880>
+  (`sam/build-production-web-ui-z72qrz` -> `main`), with explicit "do not
+  merge" and "do not deploy to staging" instructions in the PR body.
 - Targeted unit/component tests:
   `pnpm --filter @simple-agent-manager/web test -- tests/unit/api/comments.test.ts tests/unit/components/message-comments.test.tsx tests/unit/components/project-message-view.test.tsx tests/unit/components/chat/project-message-view-resume.test.tsx`
   — 94 tests passed.
