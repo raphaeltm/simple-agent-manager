@@ -1,0 +1,170 @@
+# Message-anchored commenting production UI
+
+## Problem
+
+SAM needs the production web UI slice of the commenting MVP from idea
+`01M0JQB842XSJ3W172DYPB37HN`. This constituent PR owns message-anchored comments
+in the real project chat surface only. The backend contract will be reconciled by
+the primary integration PR with sibling backend work `01M0K4EP5SND5CPK2N6GYS4449`,
+so the web implementation must isolate and document its assumed contract.
+
+Explicit constraints:
+
+- Start from current `main` and work on branch `sam/build-production-web-ui-z72qrz`.
+- Open a focused PR to `main`.
+- Do not merge.
+- Do not deploy to or mutate staging.
+- Scope is message anchors only: no production file comments, fuzzy re-anchoring,
+  mentions, reactions, global inboxes, or unrelated redesign.
+
+## Research findings
+
+- Idea `01M0JQB842XSJ3W172DYPB37HN` defines the MVP as message-anchored comments
+  with thread body/replies, resolve/reopen, `open | sent | resolved` status,
+  send-to-agent as a distinct action from note-only comments, desktop rail
+  at `>=1024px`, and mobile inline expansion.
+  - Checklist coverage: thread model, send/note composer, rail/inline UI,
+    status and marker items below.
+- Prototype branch `sam/really-get-feature-talked-5ckt0s` validated the core
+  interaction under `apps/web/src/pages/comments-prototype/`.
+  `useCommentSelection.ts` uses debounced `selectionchange` as the primary
+  trigger because mobile long-press and selection-handle changes do not reliably
+  produce mouse/touch terminal events. Desktop gets a floating chip; touch gets a
+  bottom action bar that does not fight native OS selection UI.
+  - Checklist coverage: selection hook, desktop and mobile Playwright tests with
+    actual selection.
+- Production chat renders in
+  `apps/web/src/components/project-message-view/index.tsx`. Each `Virtuoso` row
+  already has `item.id` in scope and wraps `AcpConversationItemView` in
+  `.sam-message-entry`; this is the correct anchor hook point. Do not modify
+  `MessageBubble` for anchoring.
+  - Checklist coverage: row wrapper integration, preservation tests for existing
+    chat behavior.
+- `ProjectMessageView` uses `react-virtuoso`; offscreen rows are unmounted.
+  The desktop comment rail must be driven from fetched comment data, not from
+  mounted DOM rows. The retained timeline-jump post-mortem in
+  `tasks/archive/2026-07-03-chat-full-load-timeline-jump.md` shows why tests
+  must assert virtualization coordinates/behavior rather than only checking
+  rendered rows.
+  - Checklist coverage: data-driven rail, offscreen/virtualization unit and
+    Playwright coverage.
+- Existing data-fetching guidance in `.claude/rules/48-stale-while-revalidate-ui.md`
+  requires new web fetch surfaces to use TanStack Query with identity-scoped keys
+  and stale-while-revalidate behavior. Existing query keys live in
+  `apps/web/src/lib/query-options/chats.ts`; REST client helpers live in
+  `apps/web/src/lib/api/`.
+  - Checklist coverage: isolated API client and query layer.
+- `useChatWebSocket` currently handles chat/session event types. Comment realtime
+  reconciliation should be a narrow hook that accepts documented comment event
+  payloads and updates the query cache without replacing chat message flow.
+  - Checklist coverage: optimistic updates and realtime reconciliation hooks.
+- `packages/ui` has `Button`, `Dialog`, `Input`, `Tooltip`, etc. It has no
+  generic `Avatar`, `Textarea`, or interactive anchored `Popover`. The prototype
+  hand-built these gaps. Add reusable primitives only where the implementation
+  has a generic need and keep comment-specific pieces in `apps/web`.
+  - Checklist coverage: UI primitive additions or explicit local rationale.
+- `.claude/rules/17-ui-visual-testing.md`,
+  `.claude/rules/56-clipped-overflow-is-invisible-to-document-checks.md`, and
+  `.claude/rules/62-tests-must-observe-the-real-trigger.md` require Playwright
+  audits that drive real user actions, check clipped overflow, and inspect
+  screenshot evidence instead of only proving DOM presence.
+  - Checklist coverage: Playwright visual/behavior audit at 375x667 and 1280x800.
+- Constitution Principle XI means body/quote storage limits belong in the server
+  contract with backend configurability. The web may have display caps to protect
+  layout, but must not imply reader-side truncation is the write boundary.
+  - Checklist coverage: contract documentation and no hardcoded operational
+    server limits in the UI.
+
+## Implementation checklist
+
+- [ ] Document the assumed message-comment server contract for the backend
+      integrator, including endpoint paths, payload shapes, event types,
+      optimistic IDs, status semantics, and write-boundary limit assumptions.
+- [ ] Add an isolated typed comment API client under `apps/web/src/lib/api/`.
+- [ ] Add TanStack Query options/hooks for listing threads by project/session,
+      creating a thread, replying, resolving, reopening, sending to agent, and
+      applying realtime comment events with optimistic reconciliation.
+- [ ] Add generic `packages/ui` primitives only where justified by the production
+      implementation, likely `Avatar`, `Textarea`, and an interactive anchored
+      `Popover`; keep comment-specific markers/composers local to chat.
+- [ ] Add production comment types and utilities for message anchor filtering,
+      status labels, relative time, author display, and optimistic IDs.
+- [ ] Add a message-selection hook using debounced `selectionchange` as primary
+      trigger, preserving native browser selection and supporting keyboard,
+      desktop pointer selection, and mobile long-press/selection-handle flows.
+- [ ] Integrate message anchors into `ProjectMessageView` row wrappers without
+      modifying `MessageBubble` and without changing existing chat streaming,
+      composer, scroll, header, timeline, or virtualization behavior.
+- [ ] Add create-thread composer with selected quote, comment body, explicit
+      note-only and send-to-agent actions, cancel behavior, focus management,
+      `Ctrl/Cmd+Enter`, and screen-reader labels.
+- [ ] Add thread UI with body, quoted anchor, replies, reply composer,
+      resolve/reopen, `open | sent | resolved` status, loading/error/empty
+      states, and optimistic pending/error affordances.
+- [ ] Add count marker/accent on commented messages with unresolved vs resolved
+      state and no permanent mobile gutter clutter.
+- [ ] Add a desktop rail at `>=1024px` driven solely by comment data and active
+      anchor state, not mounted virtual rows.
+- [ ] Add mobile inline expansion with touch-friendly controls and responsive
+      overflow safety.
+- [ ] Add realtime reconciliation hooks for documented comment WebSocket events,
+      keeping the query cache and optimistic rows server-authoritative.
+- [ ] Add unit/component tests for selection, query/client transformations,
+      create/reply/resolve/reopen/send flows, accessibility/focus, and
+      virtualization/offscreen behavior.
+- [ ] Add Playwright tests on the real project chat route with mocked API data at
+      375x667 and 1280x800, including actual selection, create, reply, resolve,
+      reopen, send-to-agent, mobile layout, desktop rail, offscreen/virtualized
+      anchors, focus behavior, loading/error/empty states, and screenshots in
+      `.codex/tmp/playwright-screenshots/`.
+- [ ] Run local quality gates: relevant targeted tests during development, then
+      `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build`.
+- [ ] Run required local specialist reviews: `ui-ux-specialist`,
+      `test-engineer`, accessibility review, `constitution-validator`,
+      `doc-sync-validator`, and `task-completion-validator`.
+- [ ] Open the constituent PR to `main`, preserve "do not merge" and
+      "no staging" constraints in the PR body, and leave it open.
+
+## Acceptance criteria
+
+- [ ] A user can select text in a visible agent or user message and create a
+      quoted comment without losing native selection behavior.
+- [ ] Desktop pointer selection shows an anchored affordance; mobile/coarse
+      pointer selection shows a bottom action bar and preserves OS selection
+      handle behavior.
+- [ ] A user can create a note-only comment or explicitly send a comment to the
+      agent; the UI reflects `open` vs `sent`.
+- [ ] A user can reply to a thread, resolve it, reopen it, and see resolved
+      threads represented without hiding their existence.
+- [ ] Commented messages show count/accent state, including unresolved vs
+      resolved distinction, without cluttering mobile gutters.
+- [ ] Desktop `>=1024px` shows a comment rail backed by comment data, including
+      comments for offscreen messages.
+- [ ] Mobile uses inline thread expansion and remains usable at 375x667 with no
+      clipped horizontal overflow.
+- [ ] Loading, error, and empty states are visible and accessible.
+- [ ] Keyboard and screen-reader users can start, submit, cancel, navigate, and
+      manage comments with visible focus and clear labels.
+- [ ] Optimistic create/reply/status actions reconcile with documented server
+      responses and realtime events.
+- [ ] Existing project chat behavior, scrolling, composer, streaming, file links,
+      timeline drawer, and virtualization continue to work.
+- [ ] The exact assumed backend contract is documented in the PR and in-repo.
+- [ ] Unit/component and Playwright tests cover the critical flows and viewports.
+- [ ] Staging deployment is intentionally skipped by explicit user instruction.
+
+## References
+
+- SAM idea `01M0JQB842XSJ3W172DYPB37HN`
+- Prototype branch `sam/really-get-feature-talked-5ckt0s`
+- `apps/web/src/components/project-message-view/index.tsx`
+- `apps/web/src/components/project-message-view/useSessionLifecycle.ts`
+- `apps/web/src/hooks/useChatWebSocket.ts`
+- `apps/web/src/lib/query-options/chats.ts`
+- `packages/acp-client/src/components/MessageBubble.tsx`
+- `packages/ui/src/components/`
+- `tasks/archive/2026-07-03-chat-full-load-timeline-jump.md`
+- `.claude/rules/17-ui-visual-testing.md`
+- `.claude/rules/48-stale-while-revalidate-ui.md`
+- `.claude/rules/56-clipped-overflow-is-invisible-to-document-checks.md`
+- `.claude/rules/62-tests-must-observe-the-real-trigger.md`
