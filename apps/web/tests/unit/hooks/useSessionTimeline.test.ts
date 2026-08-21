@@ -153,7 +153,9 @@ describe('useSessionTimeline', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    expect(result.current.entries.some((entry) => entry.id === 'msg-server-old-user-turn')).toBe(true);
+    await vi.waitFor(() => {
+      expect(result.current.entries.some((entry) => entry.id === 'msg-server-old-user-turn')).toBe(true);
+    });
   });
 
   it('paginates server user messages until history is exhausted', async () => {

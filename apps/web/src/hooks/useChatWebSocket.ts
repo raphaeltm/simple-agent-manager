@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } from '../lib/api';
 import { getChatSession } from '../lib/api';
+import type { MessageCommentRealtimeEvent } from '../lib/api/comments';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 
 export type ChatConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
@@ -39,6 +40,8 @@ interface UseChatWebSocketOptions {
    * phase. Pushed so the wake banner updates without waiting for the fallback poll.
    */
   onWakeProgress?: (progress: WakeProgressUpdate) => void;
+  /** Called for server-authoritative message-comment events carried over the session socket. */
+  onCommentEvent?: (event: MessageCommentRealtimeEvent) => void;
 }
 
 /** Live wake phase delta broadcast by the ProjectData DO (`session.wake_progress`). */
@@ -70,6 +73,7 @@ export function useChatWebSocket({
   onAgentActivity,
   onSessionUpdated,
   onWakeProgress,
+  onCommentEvent,
 }: UseChatWebSocketOptions): UseChatWebSocketReturn {
   const [connectionState, setConnectionState] = useState<ChatConnectionState>('disconnected');
 
@@ -89,6 +93,7 @@ export function useChatWebSocket({
   const onAgentActivityRef = useRef(onAgentActivity);
   const onSessionUpdatedRef = useRef(onSessionUpdated);
   const onWakeProgressRef = useRef(onWakeProgress);
+  const onCommentEventRef = useRef(onCommentEvent);
   onMessageRef.current = onMessage;
   onSessionStoppedRef.current = onSessionStopped;
   onCatchUpRef.current = onCatchUp;
@@ -96,6 +101,7 @@ export function useChatWebSocket({
   onAgentActivityRef.current = onAgentActivity;
   onSessionUpdatedRef.current = onSessionUpdated;
   onWakeProgressRef.current = onWakeProgress;
+  onCommentEventRef.current = onCommentEvent;
 
   const getReconnectDelay = useCallback((attempt: number) => {
     return Math.min(BASE_RECONNECT_DELAY * Math.pow(2, attempt), MAX_RECONNECT_DELAY);
@@ -249,6 +255,15 @@ export function useChatWebSocket({
                 wakePhase: isTaskExecutionStep(p.wakePhase) ? p.wakePhase : null,
               });
             }
+          } else if (
+            data.type === 'comment.thread.created' ||
+            data.type === 'comment.thread.updated' ||
+            data.type === 'comment.reply.created'
+          ) {
+            onCommentEventRef.current?.({
+              type: data.type,
+              payload,
+            } as MessageCommentRealtimeEvent);
           }
         } catch {
           // Ignore malformed messages
