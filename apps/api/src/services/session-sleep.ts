@@ -280,7 +280,8 @@ function childWorkSignalChanged(
 ): boolean {
   return (
     before.outcome !== after.outcome ||
-    (before.activeChildTaskCount ?? 0) !== (after.activeChildTaskCount ?? 0)
+    (before.activeChildTaskCount ?? 0) !== (after.activeChildTaskCount ?? 0) ||
+    (before.activeWaitCount ?? 0) !== (after.activeWaitCount ?? 0)
   );
 }
 

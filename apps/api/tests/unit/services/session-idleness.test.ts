@@ -81,6 +81,28 @@ describe('classifySessionIdleness', () => {
     });
   });
 
+  it('blocks idleness while a durable child-work wait is still active', () => {
+    const now = new Date('2026-08-21T12:00:00.000Z');
+
+    expect(
+      classifySessionIdleness({
+        taskStatus: 'in_progress',
+        state: {
+          activity: 'idle',
+          activityAt: now.getTime() - 20 * 60 * 1000,
+        },
+        childWork: { outcome: 'ok', activeChildTaskCount: 0, activeWaitCount: 1 },
+        now,
+        idleAfterMs: 15 * 60 * 1000,
+        harnessWorkConfig,
+      })
+    ).toMatchObject({
+      idle: false,
+      conclusive: true,
+      reason: 'child_work_active',
+    });
+  });
+
   it('treats inconclusive child-task evidence as not idle', () => {
     const now = new Date('2026-08-21T12:00:00.000Z');
 

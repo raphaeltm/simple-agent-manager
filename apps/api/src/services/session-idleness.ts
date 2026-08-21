@@ -35,6 +35,7 @@ export interface SessionIdlenessActivityState {
 export interface SessionChildWorkSignal {
   outcome: 'ok' | 'unknown' | 'not_checked';
   activeChildTaskCount?: number;
+  activeWaitCount?: number;
   errorMessage?: string;
 }
 
@@ -143,7 +144,7 @@ export function classifySessionIdleness(input: {
       activity,
     };
   }
-  if ((childWork.activeChildTaskCount ?? 0) > 0) {
+  if ((childWork.activeChildTaskCount ?? 0) > 0 || (childWork.activeWaitCount ?? 0) > 0) {
     return {
       idle: false,
       conclusive: true,
