@@ -187,27 +187,28 @@ describe('ProjectMessageView — auto-resume', () => {
     mockCancelAgentPrompt.mockResolvedValue({ status: 'cancelled', message: 'ok' });
   });
 
-  it('keeps the archive dock visible for idle taskless instant sessions', async () => {
+  it('keeps the sleep dock visible for awake idle taskless instant sessions', async () => {
+    const onSleepConversation = vi.fn();
     const onCloseConversation = vi.fn();
 
     render(
       <ProjectMessageView
         projectId={PROJECT_ID}
         sessionId={SESSION_ID}
+        onSleepConversation={onSleepConversation}
         onCloseConversation={onCloseConversation}
       />
     );
 
-    const archiveButton = await screen.findByRole('button', { name: /^archive conversation$/i });
-    expect(archiveButton).toBeInTheDocument();
+    const sleepButton = await screen.findByRole('button', { name: /^sleep session$/i });
+    expect(sleepButton).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^archive conversation$/i })).toBeNull();
 
-    fireEvent.click(archiveButton);
-    const archiveActions = await screen.findAllByRole('button', {
-      name: /^archive conversation$/i,
-    });
-    fireEvent.click(archiveActions[archiveActions.length - 1]);
+    fireEvent.click(sleepButton);
 
-    expect(onCloseConversation).toHaveBeenCalledOnce();
+    expect(onSleepConversation).toHaveBeenCalledOnce();
+    expect(onCloseConversation).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Archive conversation?' })).toBeNull();
   });
 
   it('calls resumeAgentSession when sending follow-up to idle session', async () => {
