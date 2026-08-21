@@ -11,14 +11,31 @@ import type {
   AgentMailboxMessage,
   CheckpointEpisode,
   CheckpointEpisodeTransitionInput,
+  CommentAuthor,
+  CommentStatus,
   CreateCheckpointEpisodeInput,
   DeliveryState,
   MessageClass,
+  MessageCommentListResponse,
+  MessageCommentMutationResponse,
+  MessageCommentReplyMutationResponse,
   SessionActivityTerminalReason,
 } from '@simple-agent-manager/shared';
 import { resolveHandoffLimits, resolveMissionStateLimits } from '@simple-agent-manager/shared';
 
 import type { ProjectData } from '../durable-objects/project-data';
+import type {
+  CreateCommentReplyInput,
+  CreateCommentThreadInput,
+  ListCommentThreadsInput,
+  UpdateCommentStatusInput,
+} from '../durable-objects/project-data/comments';
+export {
+  CommentIdempotencyConflictError,
+  CommentLimitExceededError,
+  CommentNotFoundError,
+  CommentValidationError,
+} from '../durable-objects/project-data/comments';
 import type {
   AcceptedPromptDelivery,
   AcceptPromptDeliveryInput,
@@ -390,6 +407,52 @@ export async function searchMessages(
 > {
   const stub = await getStub(env, projectId);
   return stub.searchMessages(query, sessionId, roles, limit);
+}
+
+// =========================================================================
+// Message-Anchored Comments
+// =========================================================================
+
+export type MessageCommentActor = CommentAuthor;
+
+export async function listCommentThreads(
+  env: Env,
+  projectId: string,
+  input: ListCommentThreadsInput
+): Promise<MessageCommentListResponse> {
+  return callProjectDataWithRetry(env, projectId, 'listCommentThreads', (stub) =>
+    stub.listCommentThreads(input)
+  );
+}
+
+export async function createCommentThread(
+  env: Env,
+  projectId: string,
+  input: CreateCommentThreadInput
+): Promise<MessageCommentMutationResponse> {
+  return callProjectDataNoRetry(env, projectId, 'createCommentThread', (stub) =>
+    stub.createCommentThread(input)
+  );
+}
+
+export async function createCommentReply(
+  env: Env,
+  projectId: string,
+  input: CreateCommentReplyInput
+): Promise<MessageCommentReplyMutationResponse> {
+  return callProjectDataNoRetry(env, projectId, 'createCommentReply', (stub) =>
+    stub.createCommentReply(input)
+  );
+}
+
+export async function updateCommentThreadStatus(
+  env: Env,
+  projectId: string,
+  input: UpdateCommentStatusInput & { status: CommentStatus }
+): Promise<MessageCommentMutationResponse> {
+  return callProjectDataNoRetry(env, projectId, 'updateCommentThreadStatus', (stub) =>
+    stub.updateCommentThreadStatus(input)
+  );
 }
 
 /** Materialize all stopped sessions that haven't been indexed yet. */

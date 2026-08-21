@@ -16,6 +16,7 @@ The reference covers:
 - MCP orchestration (`wait_for_subtasks`, `dispatch_task`, task inspection)
 - MCP private incident backlog tools (`list_incident_queue`, `get_incident`, `claim_incident`, `resolve_incident`)
 - Agent Sessions (`/api/workspaces/:id/agent-sessions/*`)
+- Message-anchored chat comments (`/api/projects/:projectId/sessions/:sessionId/comments*`)
 - Agent Settings (`/api/agent-settings/*`)
 - Notifications (`/api/notifications/*`)
 - Automation triggers (`/api/projects/:projectId/triggers/*`, `/api/webhooks/ingest`)

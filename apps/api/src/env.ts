@@ -506,6 +506,13 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   CACHED_COMMANDS_MAX_DESC_LENGTH?: string;
   MAX_SESSIONS_PER_PROJECT?: string;
   MAX_MESSAGES_PER_SESSION?: string;
+  COMMENT_BODY_MAX_LENGTH?: string; // Max characters per message-anchored comment or reply body (default: 8000)
+  COMMENT_QUOTE_MAX_LENGTH?: string; // Max characters preserved from quoted message text (default: 2000)
+  COMMENT_IDEMPOTENCY_KEY_MAX_LENGTH?: string; // Max clientMutationId length for comment writes (default: 200)
+  COMMENT_LIST_LIMIT_DEFAULT?: string; // Default page size for comment thread lists (default: 100)
+  COMMENT_LIST_LIMIT_MAX?: string; // Max page size for comment thread lists (default: 500)
+  COMMENT_THREADS_PER_SESSION_MAX?: string; // Max comment threads per chat session (default: 1000)
+  COMMENT_REPLIES_PER_THREAD_MAX?: string; // Max replies per comment thread (default: 200)
   DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES?: string; // Max document-card rawOutput bytes preserved in compact message metadata (default: 16384)
   PROJECT_DATA_TOOL_METADATA_MAX_BYTES?: string;
   PROJECT_DATA_STORAGE_TELEMETRY_ENABLED?: string;
