@@ -42,28 +42,28 @@ Sleeping sessions must retain the composer and continue to wake when the user se
 
 ## Implementation Checklist
 
-- [ ] Add a typed `sleepWorkspace()` client wrapper for `POST /api/workspaces/:id/sleep`.
-- [ ] Split project chat lifecycle handlers into manual Sleep and destructive Archive paths.
-- [ ] Wire awake idle conversation sessions to Sleep, using the selected session's `workspaceId` and refreshing session state after success.
-- [ ] Keep destructive Archive using the existing `closeConversationTask()` / `stopChatSession()` path and confirmation.
-- [ ] Update `CompletionDock` to support center action modes: interrupt, sleep, archive.
-- [ ] Preserve working-state immediate interrupt behavior.
-- [ ] Preserve sleeping-session Archive confirmation and composer/wake affordance.
-- [ ] Add unit tests for CompletionDock action modes and ProjectMessageView routing.
-- [ ] Update Playwright completion dock audit to cover awake idle Sleep, sleeping Archive, and working Stop/Interrupt on mobile and desktop.
-- [ ] Update user-facing docs to mention manual Sleep and the Sleep-before-Archive lifecycle.
+- [x] Add a typed `sleepWorkspace()` client wrapper for `POST /api/workspaces/:id/sleep`.
+- [x] Split project chat lifecycle handlers into manual Sleep and destructive Archive paths.
+- [x] Wire awake idle conversation sessions to Sleep, using the selected session's `workspaceId` and refreshing session state after success.
+- [x] Keep destructive Archive using the existing `closeConversationTask()` / `stopChatSession()` path and confirmation.
+- [x] Update `CompletionDock` to support center action modes: interrupt, sleep, archive.
+- [x] Preserve working-state immediate interrupt behavior.
+- [x] Preserve sleeping-session Archive confirmation and composer/wake affordance.
+- [x] Add unit tests for CompletionDock action modes and ProjectMessageView routing.
+- [x] Update Playwright completion dock audit to cover awake idle Sleep, sleeping Archive, and working Stop/Interrupt on mobile and desktop.
+- [x] Update user-facing docs to mention manual Sleep and the Sleep-before-Archive lifecycle.
 - [ ] Run local UI visual validation and full quality gates.
 
 ## Acceptance Criteria
 
-- [ ] An awake idle conversation-mode session shows `Sleep session` as the center lifecycle action, not `Archive conversation`.
-- [ ] Clicking `Sleep session` calls `POST /api/workspaces/:id/sleep` through the web client and does not complete/cancel/archive the task.
-- [ ] A sleeping conversation keeps the composer visible and shows `Archive conversation` as the center lifecycle action.
-- [ ] Clicking `Archive conversation` while sleeping still opens the destructive confirmation dialog before the archive callback runs.
-- [ ] Working sessions still show the immediate Stop/Interrupt action and do not show sleep/archive confirmation first.
-- [ ] Task-mode idle sessions keep their existing no-dock behavior unless they are actively working.
-- [ ] The existing backend sleep gate remains the authority for idleness and harness-work safety; the frontend does not invent a weaker idle predicate.
-- [ ] Mobile and desktop Playwright screenshots show no clipping, overlap, or horizontal overflow for Sleep, Archive, and working states.
+- [x] An awake idle conversation-mode session shows `Sleep session` as the center lifecycle action, not `Archive conversation`.
+- [x] Clicking `Sleep session` calls `POST /api/workspaces/:id/sleep` through the web client and does not complete/cancel/archive the task.
+- [x] A sleeping conversation keeps the composer visible and shows `Archive conversation` as the center lifecycle action.
+- [x] Clicking `Archive conversation` while sleeping still opens the destructive confirmation dialog before the archive callback runs.
+- [x] Working sessions still show the immediate Stop/Interrupt action and do not show sleep/archive confirmation first.
+- [x] Task-mode idle sessions keep their existing no-dock behavior unless they are actively working.
+- [x] The existing backend sleep gate remains the authority for idleness and harness-work safety; the frontend does not invent a weaker idle predicate.
+- [x] Mobile and desktop Playwright screenshots show no clipping, overlap, or horizontal overflow for Sleep, Archive, and working states.
 
 ## References
 

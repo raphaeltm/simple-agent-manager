@@ -14,6 +14,7 @@ import {
   DEFAULT_WORKSPACE_PROFILE,
   hasByocComputeCredential,
 } from '@simple-agent-manager/shared';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 
@@ -37,12 +38,14 @@ import {
   listChatSessions,
   listProjectTasks,
   prepareForkSession,
+  sleepWorkspace,
   startInstantChatSession,
   stopChatSession,
   submitTask,
   summarizeSession,
 } from '../../lib/api';
 import { getSessionState, isStaleSession } from '../../lib/chat-session-utils';
+import { chatQueryKeys } from '../../lib/query-options';
 import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
 import { isRetryOrFork } from './lineageUtils';
@@ -110,6 +113,7 @@ export function useProjectChatState() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { projectId, project } = useProjectContext();
   const queryScope = useQueryScope();
+  const queryClient = useQueryClient();
 
   // Execute-idea flow: pre-fill message and track ideaId for auto-linking
   const executeIdeaId = searchParams.get('executeIdea');
@@ -246,7 +250,9 @@ export function useProjectChatState() {
 
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
-  // Close conversation state
+  // Conversation lifecycle state
+  const [sleepingConversation, setSleepingConversation] = useState(false);
+  const [sleepError, setSleepError] = useState<string | null>(null);
   const [closingConversation, setClosingConversation] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
 
@@ -315,8 +321,6 @@ export function useProjectChatState() {
       setSessionScope('all');
     }
   }, [multiplayerActive]);
-
-
 
   const handleUpdateProfile = useCallback(
     async (profileId: string, data: UpdateAgentProfileRequest) => {
@@ -871,6 +875,33 @@ export function useProjectChatState() {
     [navigate, projectId]
   );
 
+  const handleSleepConversation = useCallback(async () => {
+    const selectedSession = sessions.find((s) => s.id === sessionId);
+    if (!selectedSession) return;
+    const workspaceId = selectedSession.workspaceId;
+    if (!workspaceId) {
+      setSleepError('This session has no workspace to sleep.');
+      return;
+    }
+
+    setSleepingConversation(true);
+    setSleepError(null);
+    try {
+      await sleepWorkspace(workspaceId);
+      if (queryScope) {
+        await queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.sessionMessages(queryScope, projectId, selectedSession.id),
+        });
+      }
+      void loadSessions();
+    } catch (err) {
+      console.warn('Failed to sleep conversation:', err);
+      setSleepError(err instanceof Error ? err.message : 'Failed to sleep conversation');
+    } finally {
+      setSleepingConversation(false);
+    }
+  }, [loadSessions, projectId, queryClient, queryScope, sessionId, sessions]);
+
   const handleCloseConversation = useCallback(async () => {
     const selectedSession = sessions.find((s) => s.id === sessionId);
     if (!selectedSession) return;
@@ -975,6 +1006,9 @@ export function useProjectChatState() {
     setPendingDerived,
     handleFork,
     handleRetry,
+    sleepingConversation,
+    sleepError,
+    handleSleepConversation,
     closingConversation,
     closeError,
     handleCloseConversation,

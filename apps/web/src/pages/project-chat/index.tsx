@@ -503,6 +503,9 @@ export function ProjectChat() {
                 if (s) state.handleFork(s);
               }}
               sourceContext={selectedSourceContext}
+              onSleepConversation={state.handleSleepConversation}
+              sleepingConversation={state.sleepingConversation}
+              sleepError={state.sleepError}
               onCloseConversation={state.handleCloseConversation}
               closingConversation={state.closingConversation}
               closeError={state.closeError}

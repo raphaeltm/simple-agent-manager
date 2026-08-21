@@ -13,7 +13,14 @@ import {
   DEFAULT_CHAT_SESSION_MESSAGE_MAX,
 } from '@simple-agent-manager/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, fireEvent, render as rtlRender, screen, waitFor, within } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render as rtlRender,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import type { ReactElement, ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -1790,7 +1797,7 @@ describe('ProjectMessageView — inline idle indicator', () => {
     vi.useRealTimers();
   });
 
-  it('shows Archive control for idle conversation-mode session with onCloseConversation', async () => {
+  it('shows Sleep control for awake idle conversation-mode session with onSleepConversation', async () => {
     const session = {
       ...makeSession('sess-idle', 'active'),
       isIdle: true,
@@ -1812,20 +1819,71 @@ describe('ProjectMessageView — inline idle indicator', () => {
       hasMore: false,
     });
 
+    const onSleep = vi.fn();
     const onClose = vi.fn();
     render(
-      <ProjectMessageView projectId="proj-1" sessionId="sess-idle" onCloseConversation={onClose} />
+      <ProjectMessageView
+        projectId="proj-1"
+        sessionId="sess-idle"
+        onSleepConversation={onSleep}
+        onCloseConversation={onClose}
+      />
     );
 
-    // Idle conversation-mode dock morphs to the grey Archive control
+    // Awake idle conversation-mode dock morphs to the reversible Sleep control.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Sleep session' })).toBeTruthy();
+    });
+    expect(screen.queryByRole('button', { name: 'Archive conversation' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sleep session' }));
+    expect(onSleep).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Archive conversation?' })).toBeNull();
+  });
+
+  it('shows Archive confirmation for sleeping conversation-mode session', async () => {
+    const session = {
+      ...makeSession('sess-sleeping', 'sleeping'),
+      isIdle: true,
+      task: {
+        id: 'task-conv-sleeping',
+        status: 'in_progress',
+        taskMode: 'conversation' as const,
+        executionStep: null,
+        errorMessage: null,
+        outputBranch: null,
+        outputPrUrl: null,
+        outputSummary: null,
+        finalizedAt: null,
+      },
+    };
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-sleeping', 'Hello')],
+      hasMore: false,
+    });
+
+    const onSleep = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <ProjectMessageView
+        projectId="proj-1"
+        sessionId="sess-sleeping"
+        onSleepConversation={onSleep}
+        onCloseConversation={onClose}
+      />
+    );
+
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Archive conversation' })).toBeTruthy();
     });
-    // Working morph is absent while idle
-    expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Sleep session' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Archive conversation' }));
     expect(screen.getByRole('dialog', { name: 'Archive conversation?' })).toBeTruthy();
+    expect(onSleep).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Archive Conversation' }));
@@ -1925,12 +1983,13 @@ describe('ProjectMessageView — inline idle indicator', () => {
       expect(screen.getByText('Session sess-task')).toBeTruthy();
     });
 
-    // The dock's Archive control must never appear for task-mode idle sessions
+    // The dock's lifecycle controls must never appear for task-mode idle sessions.
+    expect(screen.queryByRole('button', { name: 'Sleep session' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Archive conversation' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
   });
 
-  it('shows Archive control for active conversation-mode session (always-mounted morph)', async () => {
+  it('shows Sleep control for active conversation-mode session (always-mounted morph)', async () => {
     const session = {
       ...makeSession('sess-active', 'active'),
       isIdle: false,
@@ -1956,6 +2015,7 @@ describe('ProjectMessageView — inline idle indicator', () => {
       <ProjectMessageView
         projectId="proj-1"
         sessionId="sess-active"
+        onSleepConversation={vi.fn()}
         onCloseConversation={vi.fn()}
       />
     );
@@ -1965,8 +2025,9 @@ describe('ProjectMessageView — inline idle indicator', () => {
     });
 
     // The dock stays mounted for conversation-mode while active; with the agent
-    // idle it shows the grey Archive morph (not the working Interrupt).
-    expect(screen.getByRole('button', { name: 'Archive conversation' })).toBeTruthy();
+    // idle it shows the reversible Sleep morph (not Archive or working Interrupt).
+    expect(screen.getByRole('button', { name: 'Sleep session' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Archive conversation' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
   });
 

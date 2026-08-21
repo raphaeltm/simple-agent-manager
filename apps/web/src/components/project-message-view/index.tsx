@@ -280,7 +280,13 @@ interface ProjectMessageViewProps {
   onFork?: () => void;
   /** Source details for retries/forks. */
   sourceContext?: SessionSourceContext;
-  /** Called when the user clicks "End session" on an idle conversation-mode session. */
+  /** Called when the user clicks Sleep on an awake idle conversation-mode session. */
+  onSleepConversation?: () => void;
+  /** Whether a sleep-conversation request is in flight. */
+  sleepingConversation?: boolean;
+  /** Error from a failed sleep-conversation attempt. */
+  sleepError?: string | null;
+  /** Called when the user confirms Archive on a sleeping conversation-mode session. */
   onCloseConversation?: () => void;
   /** Whether a close-conversation request is in flight. */
   closingConversation?: boolean;
@@ -304,6 +310,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   onRetry,
   onFork,
   sourceContext,
+  onSleepConversation,
+  sleepingConversation,
+  sleepError,
   onCloseConversation,
   closingConversation,
   closeError,
@@ -523,11 +532,24 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     lc.session?.createdBy?.name?.trim() ||
     lc.session?.createdBy?.email?.split('@')[0] ||
     'the creator';
-  const canArchiveSession = Boolean(
-    onCloseConversation &&
-    (lc.taskEmbed?.taskMode === 'conversation' ||
-      (!lc.taskEmbed?.id && lc.session?.status === 'active'))
+  const isConversationLifecycleSession =
+    lc.taskEmbed?.taskMode === 'conversation' ||
+    (!lc.taskEmbed?.id && (lc.session?.status === 'active' || lc.session?.status === 'sleeping'));
+  const canSleepSession = Boolean(
+    onSleepConversation &&
+    lc.session?.workspaceId &&
+    lc.sessionState !== 'sleeping' &&
+    isConversationLifecycleSession
   );
+  const canArchiveSession = Boolean(
+    onCloseConversation && lc.sessionState === 'sleeping' && isConversationLifecycleSession
+  );
+  const dockCenterAction =
+    lc.agentActivity !== 'idle'
+      ? 'interrupt'
+      : lc.sessionState === 'sleeping'
+        ? 'archive'
+        : 'sleep';
 
   // Initial load — only show full spinner when no data exists yet
   if (lc.loading && lc.messages.length === 0 && !lc.session) {
@@ -705,22 +727,29 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       )}
 
       {/* Lifecycle control — a single always-mounted dock while the session is
-          active. Its center button morphs between a red Interrupt (working) and
-          a grey Archive (idle), so the control never disappears even when the
-          `agentActivity` signal is stale. Archive is wired for
-          conversation-mode tasks and taskless instant sessions the caller can close. */}
-      {isActive && canWriteSession && (canArchiveSession || lc.agentActivity !== 'idle') && (
-        <CompletionDock
-          working={lc.agentActivity !== 'idle'}
-          hasPlan={!!planItem}
-          onInterrupt={lc.handleCancelPrompt}
-          onArchive={() => onCloseConversation?.()}
-          onOpenPlan={() => setShowPlanModal(true)}
-          archiving={closingConversation}
-          archiveError={closeError}
-          elapsed={lc.promptStartedAt ? <ElapsedTime startedAt={lc.promptStartedAt} /> : undefined}
-        />
-      )}
+          active. Its center button morphs between Interrupt (working), Sleep
+          (awake idle), and Archive (already sleeping), so irreversible archive
+          is only the primary action after the reversible sleep boundary. */}
+      {isActive &&
+        canWriteSession &&
+        (lc.agentActivity !== 'idle' || canSleepSession || canArchiveSession) && (
+          <CompletionDock
+            working={lc.agentActivity !== 'idle'}
+            centerAction={dockCenterAction}
+            hasPlan={!!planItem}
+            onInterrupt={lc.handleCancelPrompt}
+            onSleep={() => onSleepConversation?.()}
+            onArchive={() => onCloseConversation?.()}
+            onOpenPlan={() => setShowPlanModal(true)}
+            sleeping={sleepingConversation}
+            archiving={closingConversation}
+            sleepError={sleepError}
+            archiveError={closeError}
+            elapsed={
+              lc.promptStartedAt ? <ElapsedTime startedAt={lc.promptStartedAt} /> : undefined
+            }
+          />
+        )}
       {planItem && (
         <PlanModal plan={planItem} isOpen={showPlanModal} onClose={() => setShowPlanModal(false)} />
       )}

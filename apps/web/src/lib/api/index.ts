@@ -507,6 +507,7 @@ export {
   renameAgentSession,
   restartWorkspace,
   resumeAgentSession,
+  sleepWorkspace,
   stopAgentSession,
   stopWorkspace,
   suspendAgentSession,

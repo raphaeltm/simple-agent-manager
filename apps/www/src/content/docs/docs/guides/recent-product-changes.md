@@ -39,7 +39,7 @@ Reports become draft Ideas in a project the deployment nominates. If you don't s
 
 [Persistent sessions](/docs/guides/instant-sessions/) now use the same snapshot contract on Instant containers and standard VM workspaces. SAM checkpoints after idle turns and requires a verified final checkpoint before sleep. The snapshot contains the agent's home directory (including harness session state) and repository work in progress, so a replacement runtime can resume instead of starting blank. Credential files are deliberately excluded and re-provisioned fresh on restore.
 
-VM compute is stopped after a successful sleep checkpoint and may be deleted normally. A same-chat follow-up atomically provisions one replacement workspace, restores the exact saved harness session, then delivers the queued message. Explicit archive remains destructive, and sleeping state expires after seven days.
+VM compute is stopped after a successful sleep checkpoint and may be deleted normally. Users can also put an awake idle session to sleep manually from the chat lifecycle control. A same-chat follow-up atomically provisions one replacement workspace, restores the exact saved harness session, then delivers the queued message. Explicit archive remains destructive, appears after the reversible sleep boundary, and sleeping state expires after seven days.
 
 What you actually see:
 
