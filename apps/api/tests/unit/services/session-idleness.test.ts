@@ -6,25 +6,48 @@ import {
 } from '../../../src/services/session-idleness';
 
 const harnessWorkConfig = { leaseMs: 120_000, maxDurationMs: 30 * 60 * 1000 };
+const NOW = new Date('2026-08-21T12:00:00.000Z');
+const IDLE_AFTER_MS = 15 * 60 * 1000;
+const OLD_IDLE_ACTIVITY_AT = NOW.getTime() - 20 * 60 * 1000;
+
+type ClassifyInput = Parameters<typeof classifySessionIdleness>[0];
+
+function idleState(overrides: NonNullable<ClassifyInput['state']> = {}) {
+  return {
+    activity: 'idle',
+    activityAt: OLD_IDLE_ACTIVITY_AT,
+    ...overrides,
+  };
+}
+
+function classify(overrides: Partial<ClassifyInput> = {}) {
+  return classifySessionIdleness({
+    taskStatus: 'in_progress',
+    state: idleState(),
+    childWork: { outcome: 'ok', activeChildTaskCount: 0 },
+    now: NOW,
+    idleAfterMs: IDLE_AFTER_MS,
+    harnessWorkConfig,
+    ...overrides,
+  });
+}
+
+function mockChildTaskDb(firstResult: () => Promise<{ id: string } | null>) {
+  const first = vi.fn(firstResult);
+  const bind = vi.fn(() => ({ first }));
+  const prepare = vi.fn(() => ({ bind }));
+  return { bind, db: { prepare } as unknown as D1Database, prepare };
+}
 
 describe('classifySessionIdleness', () => {
   it('keeps a session non-idle while normalized runtime work has a fresh finite lease', () => {
-    const now = new Date('2026-08-21T12:00:00.000Z');
-
     expect(
-      classifySessionIdleness({
-        taskStatus: 'in_progress',
-        state: {
-          activity: 'idle',
-          activityAt: now.getTime() - 20 * 60 * 1000,
+      classify({
+        state: idleState({
           runtimeWorkState: 'active',
-          runtimeWorkUpdatedAt: now.getTime() - 10_000,
-          runtimeWorkProgressAt: now.getTime() - 20_000,
-        },
-        childWork: { outcome: 'ok', activeChildTaskCount: 0 },
-        now,
-        idleAfterMs: 15 * 60 * 1000,
-        harnessWorkConfig,
+          runtimeWorkUpdatedAt: NOW.getTime() - 10_000,
+          runtimeWorkProgressAt: NOW.getTime() - 20_000,
+        }),
       })
     ).toMatchObject({
       idle: false,
@@ -35,22 +58,13 @@ describe('classifySessionIdleness', () => {
   });
 
   it('lets stale detached runtime work release after the absolute progress ceiling', () => {
-    const now = new Date('2026-08-21T12:00:00.000Z');
-
     expect(
-      classifySessionIdleness({
-        taskStatus: 'in_progress',
-        state: {
-          activity: 'idle',
-          activityAt: now.getTime() - 20 * 60 * 1000,
+      classify({
+        state: idleState({
           runtimeWorkState: 'active',
-          runtimeWorkUpdatedAt: now.getTime() - 10_000,
-          runtimeWorkProgressAt: now.getTime() - 31 * 60 * 1000,
-        },
-        childWork: { outcome: 'ok', activeChildTaskCount: 0 },
-        now,
-        idleAfterMs: 15 * 60 * 1000,
-        harnessWorkConfig,
+          runtimeWorkUpdatedAt: NOW.getTime() - 10_000,
+          runtimeWorkProgressAt: NOW.getTime() - 31 * 60 * 1000,
+        }),
       })
     ).toMatchObject({
       idle: true,
@@ -60,21 +74,7 @@ describe('classifySessionIdleness', () => {
   });
 
   it('blocks idleness while a child task is still active', () => {
-    const now = new Date('2026-08-21T12:00:00.000Z');
-
-    expect(
-      classifySessionIdleness({
-        taskStatus: 'in_progress',
-        state: {
-          activity: 'idle',
-          activityAt: now.getTime() - 20 * 60 * 1000,
-        },
-        childWork: { outcome: 'ok', activeChildTaskCount: 1 },
-        now,
-        idleAfterMs: 15 * 60 * 1000,
-        harnessWorkConfig,
-      })
-    ).toMatchObject({
+    expect(classify({ childWork: { outcome: 'ok', activeChildTaskCount: 1 } })).toMatchObject({
       idle: false,
       conclusive: true,
       reason: 'child_work_active',
@@ -82,20 +82,8 @@ describe('classifySessionIdleness', () => {
   });
 
   it('blocks idleness while a durable child-work wait is still active', () => {
-    const now = new Date('2026-08-21T12:00:00.000Z');
-
     expect(
-      classifySessionIdleness({
-        taskStatus: 'in_progress',
-        state: {
-          activity: 'idle',
-          activityAt: now.getTime() - 20 * 60 * 1000,
-        },
-        childWork: { outcome: 'ok', activeChildTaskCount: 0, activeWaitCount: 1 },
-        now,
-        idleAfterMs: 15 * 60 * 1000,
-        harnessWorkConfig,
-      })
+      classify({ childWork: { outcome: 'ok', activeChildTaskCount: 0, activeWaitCount: 1 } })
     ).toMatchObject({
       idle: false,
       conclusive: true,
@@ -104,20 +92,8 @@ describe('classifySessionIdleness', () => {
   });
 
   it('treats inconclusive child-task evidence as not idle', () => {
-    const now = new Date('2026-08-21T12:00:00.000Z');
-
     expect(
-      classifySessionIdleness({
-        taskStatus: 'in_progress',
-        state: {
-          activity: 'idle',
-          activityAt: now.getTime() - 20 * 60 * 1000,
-        },
-        childWork: { outcome: 'unknown', errorMessage: 'D1 unavailable' },
-        now,
-        idleAfterMs: 15 * 60 * 1000,
-        harnessWorkConfig,
-      })
+      classify({ childWork: { outcome: 'unknown', errorMessage: 'D1 unavailable' } })
     ).toMatchObject({
       idle: false,
       conclusive: false,
@@ -126,22 +102,7 @@ describe('classifySessionIdleness', () => {
   });
 
   it('handles awaiting_followup as idle only after the prompt turn ended and the interval elapsed', () => {
-    const now = new Date('2026-08-21T12:00:00.000Z');
-
-    expect(
-      classifySessionIdleness({
-        taskStatus: 'in_progress',
-        taskExecutionStep: 'awaiting_followup',
-        state: {
-          activity: 'idle',
-          activityAt: now.getTime() - 20 * 60 * 1000,
-        },
-        childWork: { outcome: 'ok', activeChildTaskCount: 0 },
-        now,
-        idleAfterMs: 15 * 60 * 1000,
-        harnessWorkConfig,
-      })
-    ).toMatchObject({
+    expect(classify({ taskExecutionStep: 'awaiting_followup' })).toMatchObject({
       idle: true,
       conclusive: true,
       reason: 'idle',
@@ -149,19 +110,13 @@ describe('classifySessionIdleness', () => {
   });
 
   it('preserves a completed task with a recent final prompting state', () => {
-    const now = new Date('2026-08-21T12:00:00.000Z');
-
     expect(
-      classifySessionIdleness({
+      classify({
         taskStatus: 'completed',
         state: {
           activity: 'prompting',
-          activityAt: now.getTime() - 30_000,
+          activityAt: NOW.getTime() - 30_000,
         },
-        childWork: { outcome: 'ok', activeChildTaskCount: 0 },
-        now,
-        idleAfterMs: 15 * 60 * 1000,
-        harnessWorkConfig,
       })
     ).toMatchObject({
       idle: false,
@@ -174,12 +129,10 @@ describe('classifySessionIdleness', () => {
 
 describe('loadActiveChildTaskIdlenessSignal', () => {
   it('detects an active child task without depending on a test harness', async () => {
-    const first = vi.fn(async () => ({ id: 'child-1' }));
-    const bind = vi.fn(() => ({ first }));
-    const prepare = vi.fn(() => ({ bind }));
+    const { bind, db, prepare } = mockChildTaskDb(async () => ({ id: 'child-1' }));
 
     await expect(
-      loadActiveChildTaskIdlenessSignal({ prepare } as unknown as D1Database, {
+      loadActiveChildTaskIdlenessSignal(db, {
         projectId: 'project-1',
         parentTaskId: 'task-1',
       })
@@ -198,14 +151,12 @@ describe('loadActiveChildTaskIdlenessSignal', () => {
   });
 
   it('returns unknown instead of claiming idle when the child-task query fails', async () => {
-    const first = vi.fn(async () => {
+    const { db } = mockChildTaskDb(async () => {
       throw new Error('D1 unavailable');
     });
-    const bind = vi.fn(() => ({ first }));
-    const prepare = vi.fn(() => ({ bind }));
 
     await expect(
-      loadActiveChildTaskIdlenessSignal({ prepare } as unknown as D1Database, {
+      loadActiveChildTaskIdlenessSignal(db, {
         projectId: 'project-1',
         parentTaskId: 'task-1',
       })
