@@ -61,6 +61,14 @@ export interface CommentableMarkdownProps {
   comments: Comment[];
   now: number;
   inlineThreads: boolean;
+  /**
+   * Narrow viewports drop the left gutter entirely. With no hover, every block's
+   * "add a comment" glyph had to render permanently, which put an icon column
+   * down the left of the whole document and ate 24px of a 375px screen for an
+   * affordance that is almost never the one you want. On touch, selecting text is
+   * the natural way to comment on prose anyway.
+   */
+  compact: boolean;
   openAnchorId: string | null;
   onOpenAnchor: (anchorId: string | null) => void;
   onStartComment: (anchorId: string, quote?: string) => void;
@@ -75,6 +83,7 @@ export function CommentableMarkdown({
   comments,
   now,
   inlineThreads,
+  compact,
   openAnchorId,
   onOpenAnchor,
   onStartComment,
@@ -109,32 +118,47 @@ export function CommentableMarkdown({
               className="group relative min-w-0"
               data-testid={`md-row-${block.id}`}
             >
+              {/* Compact: the marker rides above the block instead of beside it,
+                  so prose keeps the full width and uncommented blocks cost nothing. */}
+              {compact && mine.length > 0 && (
+                <div className="mb-1 flex">
+                  <CommentCountMarker
+                    count={mine.length}
+                    hasUnresolved={unresolved.length > 0}
+                    onClick={() => onOpenAnchor(isOpen ? null : block.id)}
+                    label={`${mine.length} comment${mine.length === 1 ? '' : 's'} on this block`}
+                  />
+                </div>
+              )}
+
               <div className="flex min-w-0 items-start gap-1.5">
                 {/* Gutter. Fixed width so prose left-edges stay aligned whether or
-                    not a block has comments. */}
-                <div className="flex w-6 shrink-0 flex-col items-center pt-3">
-                  {mine.length > 0 ? (
-                    <CommentCountMarker
-                      count={mine.length}
-                      hasUnresolved={unresolved.length > 0}
-                      onClick={() => onOpenAnchor(isOpen ? null : block.id)}
-                      label={`${mine.length} comment${mine.length === 1 ? '' : 's'} on this block`}
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => onStartComment(block.id)}
-                      aria-label="Add a comment on this block"
-                      className="rounded p-1 opacity-100 transition-opacity focus-visible:outline focus-visible:outline-2 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100"
-                      style={{
-                        color: 'var(--sam-color-fg-muted, #9fb7ae)',
-                        outlineColor: 'var(--sam-color-focus-ring, #34d399)',
-                      }}
-                    >
-                      <CommentGlyph size={14} />
-                    </button>
-                  )}
-                </div>
+                    not a block has comments. Wide viewports only — see `compact`. */}
+                {!compact && (
+                  <div className="flex w-6 shrink-0 flex-col items-center pt-3">
+                    {mine.length > 0 ? (
+                      <CommentCountMarker
+                        count={mine.length}
+                        hasUnresolved={unresolved.length > 0}
+                        onClick={() => onOpenAnchor(isOpen ? null : block.id)}
+                        label={`${mine.length} comment${mine.length === 1 ? '' : 's'} on this block`}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onStartComment(block.id)}
+                        aria-label="Add a comment on this block"
+                        className="rounded p-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:outline focus-visible:outline-2"
+                        style={{
+                          color: 'var(--sam-color-fg-muted, #9fb7ae)',
+                          outlineColor: 'var(--sam-color-focus-ring, #34d399)',
+                        }}
+                      >
+                        <CommentGlyph size={14} />
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 <div
                   data-comment-anchor={block.id}
@@ -154,7 +178,7 @@ export function CommentableMarkdown({
               </div>
 
               {inlineThreads && isOpen && mine.length > 0 && (
-                <div className="mb-3 ml-7 flex flex-col gap-3">
+                <div className={`mb-3 flex flex-col gap-3 ${compact ? '' : 'ml-7'}`}>
                   <CommentThreadList
                     comments={mine}
                     now={now}
@@ -164,7 +188,7 @@ export function CommentableMarkdown({
                 </div>
               )}
 
-              <div className="ml-7">{renderComposer(block.id)}</div>
+              <div className={compact ? '' : 'ml-7'}>{renderComposer(block.id)}</div>
             </div>
           );
         })}

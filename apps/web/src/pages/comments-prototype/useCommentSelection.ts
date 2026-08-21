@@ -5,14 +5,25 @@
  * Anchoring strategy: every commentable region carries `data-comment-anchor="<id>"`.
  * We walk up from the selection's common ancestor to find it. In production this
  * is exactly how a message id or a markdown block id would be recovered.
+ *
+ * TRIGGER CHOICE (this is the whole correctness story on mobile):
+ * `selectionchange` is the only event that fires for every way a selection can be
+ * made. An earlier version listened to mouseup/keyup/touchend only, which works on
+ * desktop and is silently dead on a phone:
+ *   - long-press selection settles *after* `touchend`, so reading on touchend sees
+ *     a collapsed selection;
+ *   - dragging the native selection handles afterwards emits NO touchend on
+ *     document at all, so adjusting a selection produced nothing.
+ * mouseup/keyup are kept purely so desktop gets an instant response instead of
+ * waiting out the debounce.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface ActiveSelection {
   anchorId: string;
   quote: string;
-  /** Viewport coordinates for the floating "Comment" chip. */
+  /** Viewport coordinates for the floating chip (fine pointers only). */
   x: number;
   y: number;
 }
@@ -21,6 +32,12 @@ export interface ActiveSelection {
 const MIN_SELECTION_CHARS = 3;
 /** Keeps a quoted anchor from swallowing an entire message. */
 const MAX_QUOTE_CHARS = 240;
+/**
+ * Quiet period before a `selectionchange` burst is treated as settled. Long-press
+ * and handle-drag both emit a stream of these; reading on every one would make the
+ * affordance strobe while the user is still adjusting.
+ */
+const SELECTION_SETTLE_MS = 280;
 
 function findAnchorId(node: Node | null): string | null {
   let el: HTMLElement | null = node instanceof HTMLElement ? node : (node?.parentElement ?? null);
@@ -34,8 +51,12 @@ function findAnchorId(node: Node | null): string | null {
 
 export function useCommentSelection(enabled: boolean) {
   const [selection, setSelection] = useState<ActiveSelection | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const clear = useCallback(() => setSelection(null), []);
+  const clear = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    setSelection(null);
+  }, []);
 
   useEffect(() => {
     if (!enabled) return;
@@ -75,17 +96,45 @@ export function useCommentSelection(enabled: boolean) {
       });
     }
 
-    // `selectionchange` fires continuously during a drag; reading on mouseup/keyup
-    // instead means we only measure a settled selection.
-    document.addEventListener('mouseup', read);
-    document.addEventListener('keyup', read);
-    document.addEventListener('touchend', read);
+    function schedule() {
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(read, SELECTION_SETTLE_MS);
+    }
+
+    function readNow() {
+      if (timer.current) clearTimeout(timer.current);
+      read();
+    }
+
+    document.addEventListener('selectionchange', schedule);
+    document.addEventListener('mouseup', readNow);
+    document.addEventListener('keyup', readNow);
     return () => {
-      document.removeEventListener('mouseup', read);
-      document.removeEventListener('keyup', read);
-      document.removeEventListener('touchend', read);
+      if (timer.current) clearTimeout(timer.current);
+      document.removeEventListener('selectionchange', schedule);
+      document.removeEventListener('mouseup', readNow);
+      document.removeEventListener('keyup', readNow);
     };
   }, [enabled]);
 
   return { selection, clear };
+}
+
+/**
+ * True when the primary input is touch. Drives affordance placement: a floating
+ * chip beside the selection is right for a mouse, but on a phone it fights the
+ * OS's own selection callout (Copy / Look Up), which renders in the same spot and
+ * wins. Touch gets a bottom bar instead — out of the callout's way and in the
+ * thumb zone.
+ */
+export function useCoarsePointer(): boolean {
+  const [coarse, setCoarse] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(pointer: coarse)');
+    const sync = () => setCoarse(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+  return coarse;
 }

@@ -275,6 +275,59 @@ export interface SelectionPopoverProps {
   children?: ReactNode;
 }
 
+/**
+ * Touch variant: a fixed bottom bar rather than a chip beside the selection.
+ *
+ * On iOS/Android a long-press draws the OS callout (Copy / Look Up / Share)
+ * directly above the selection — exactly where the chip would go — and it sits
+ * above page content, so the chip is either covered or competing for the same
+ * tap. The bottom bar avoids that entirely and lands in the thumb zone.
+ *
+ * It shows the quote so the user can confirm what they captured before committing,
+ * which matters more on touch where selection precision is worse.
+ */
+export function SelectionActionBar({
+  quote,
+  onComment,
+  onDismiss,
+}: {
+  quote: string;
+  onComment: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div
+      className="fixed right-0 bottom-0 left-0 z-50 border-t px-3 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))]"
+      style={{
+        backgroundColor: 'var(--sam-color-bg-surface, #13201d)',
+        borderColor: 'var(--sam-color-border-default, #29423b)',
+        boxShadow: '0 -6px 20px rgba(0,0,0,0.35)',
+      }}
+      role="dialog"
+      aria-label="Comment on selection"
+    >
+      <p
+        className="m-0 mb-2 line-clamp-2 border-l-2 pl-2 text-xs italic"
+        style={{
+          borderColor: 'var(--sam-color-tn-blue, #7aa2f7)',
+          color: 'var(--sam-color-fg-muted, #9fb7ae)',
+          overflowWrap: 'anywhere',
+        }}
+      >
+        {quote}
+      </p>
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="primary" onClick={onComment}>
+          Comment on selection
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onDismiss}>
+          Dismiss
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function SelectionPopover({ x, y, onComment }: SelectionPopoverProps) {
   return (
     <div

@@ -56,20 +56,14 @@ export function CommentableChat({
             data-comment-anchor={m.id}
             data-testid={`message-${m.id}`}
           >
-            {/* A left rule marks a commented message without touching the bubble's
-                own styling — works for both left- and right-aligned bubbles. */}
-            {mine.length > 0 && (
-              <span
-                aria-hidden="true"
-                className="absolute top-0 bottom-4 left-0 w-0.5 rounded-full"
-                style={{
-                  backgroundColor:
-                    unresolved.length > 0
-                      ? 'var(--sam-color-warning-fg, #fbbf24)'
-                      : 'var(--sam-color-border-default, #29423b)',
-                }}
-              />
-            )}
+            {/* NOTE: an earlier version drew a straight full-height rule down the
+                left of every commented row. It read as misaligned, because it
+                could not follow the bubble: `.glass-msg-*` sets asymmetric radii
+                and an `!important` box-shadow, so an accent that hugs the bubble
+                is not reachable from out here. Right-aligned user bubbles were
+                worse still — the rule sat a whole column away from the bubble it
+                referred to. The count pill below is already side-aligned with its
+                bubble and carries the same signal, so the rule is just noise. */}
 
             <MessageBubble
               text={m.text}

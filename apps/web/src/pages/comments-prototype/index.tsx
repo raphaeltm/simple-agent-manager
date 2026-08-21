@@ -18,7 +18,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Comment, CommentAnchor, CommentStatus } from './comment-types';
 import { CommentableChat } from './CommentableChat';
 import { CommentableMarkdown } from './CommentableMarkdown';
-import { CommentComposer, CommentGlyph, SelectionPopover } from './CommentPrimitives';
+import {
+  CommentComposer,
+  CommentGlyph,
+  SelectionActionBar,
+  SelectionPopover,
+} from './CommentPrimitives';
 import { CommentThreadList } from './CommentThread';
 import {
   AGENT,
@@ -31,7 +36,7 @@ import {
   NOW,
   RAPHAEL,
 } from './mock-data';
-import { useCommentSelection } from './useCommentSelection';
+import { useCoarsePointer, useCommentSelection } from './useCommentSelection';
 
 type Surface = 'chat' | 'file';
 type Dataset = 'default' | 'empty' | 'many';
@@ -75,6 +80,7 @@ export function CommentsPrototype() {
   }, [dataset]);
 
   const { selection, clear: clearSelection } = useCommentSelection(true);
+  const coarsePointer = useCoarsePointer();
 
   const startComment = useCallback((anchorId: string, quote?: string) => {
     setComposingAnchor({ anchorId, quote });
@@ -224,6 +230,7 @@ export function CommentsPrototype() {
                 comments={surfaceComments}
                 now={NOW}
                 inlineThreads={inlineThreads}
+                compact={!isWide}
                 openAnchorId={openAnchorId}
                 onOpenAnchor={setOpenAnchorId}
                 onStartComment={startComment}
@@ -276,17 +283,33 @@ export function CommentsPrototype() {
         </div>
       </div>
 
-      {selection && (
-        <SelectionPopover
-          x={selection.x}
-          y={selection.y}
-          onComment={() => {
-            startComment(selection.anchorId, selection.quote);
-            window.getSelection()?.removeAllRanges();
-            clearSelection();
-          }}
-        />
-      )}
+      {/* The quote was captured into state when the selection settled, so clearing
+          the live DOM selection here (which a tap does anyway on touch) is safe. */}
+      {selection &&
+        (coarsePointer ? (
+          <SelectionActionBar
+            quote={selection.quote}
+            onComment={() => {
+              startComment(selection.anchorId, selection.quote);
+              window.getSelection()?.removeAllRanges();
+              clearSelection();
+            }}
+            onDismiss={() => {
+              window.getSelection()?.removeAllRanges();
+              clearSelection();
+            }}
+          />
+        ) : (
+          <SelectionPopover
+            x={selection.x}
+            y={selection.y}
+            onComment={() => {
+              startComment(selection.anchorId, selection.quote);
+              window.getSelection()?.removeAllRanges();
+              clearSelection();
+            }}
+          />
+        ))}
     </div>
   );
 }
@@ -346,8 +369,8 @@ function Header({
         className="m-0 text-xs"
         style={{ color: 'var(--sam-color-fg-muted, #9fb7ae)', overflowWrap: 'anywhere' }}
       >
-        Select any text to comment on that span, or use the Comment action to comment on the whole
-        message or block.
+        Select any text to comment on that span, or use the Comment action to comment on a whole
+        message.
       </p>
     </header>
   );

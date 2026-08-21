@@ -154,11 +154,49 @@ test.describe('Commenting prototype', () => {
     // A user selects text they can see, so scroll it into view first.
     await page.getByTestId('message-m-4').scrollIntoViewIfNeeded();
 
-    // Drive a real DOM selection inside a message, then dispatch the mouseup the
-    // hook listens for — this is the production trigger path.
+    // Drag across the text with a real pointer rather than dispatching a synthetic
+    // mouseup. The synthetic version passed while the feature was dead on a phone,
+    // because it fabricated the one event the mobile path never produces.
+    const p = page.locator('[data-comment-anchor="m-4"] p').first();
+    const box = await p.boundingBox();
+    if (!box) throw new Error('paragraph has no layout box');
+    // Aim at the FIRST line, not the vertical centre. The paragraph wraps to two
+    // lines at 1280px and six at 375px, so `height / 2` lands in the inter-line
+    // gap on desktop and selects nothing — which failed only on one viewport.
+    const lineY = box.y + 10;
+    await page.mouse.move(box.x + 6, lineY);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.5, lineY, { steps: 12 });
+    await page.mouse.up();
+
+    const affordance = page.getByRole('dialog', { name: 'Comment on selection' });
+    await expect(affordance).toBeVisible();
+    await screenshot(page, 'comments-selection-chip');
+
+    await affordance.getByRole('button', { name: /Comment/ }).click();
+    // The quoted span is carried into the composer.
+    await expect(page.locator('blockquote').first()).toBeVisible();
+    await assertClean(page);
+    await screenshot(page, 'comments-selection-composer');
+  });
+
+  /**
+   * REGRESSION — the bug Raphaël hit on his phone.
+   *
+   * A touch long-press settles the selection *after* `touchend`, and dragging the
+   * native selection handles afterwards emits no `touchend` on document at all.
+   * `selectionchange` is the only event that covers those paths. This test makes a
+   * selection and dispatches NOTHING — no mouseup, no touchend — so it passes only
+   * if the hook is driven by `selectionchange`.
+   *
+   * Verified to fail against the mouseup/keyup/touchend-only implementation.
+   */
+  test('selection with no mouse or touch event still offers to comment', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('message-m-4').scrollIntoViewIfNeeded();
+
     await page.evaluate(() => {
-      const anchor = document.querySelector('[data-comment-anchor="m-4"]');
-      const p = anchor?.querySelector('p');
+      const p = document.querySelector('[data-comment-anchor="m-4"] p');
       if (!p?.firstChild) throw new Error('no text node to select');
       const range = document.createRange();
       range.setStart(p.firstChild, 0);
@@ -166,18 +204,55 @@ test.describe('Commenting prototype', () => {
       const sel = window.getSelection();
       sel?.removeAllRanges();
       sel?.addRange(range);
-      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
     });
 
-    const chip = page.getByRole('dialog', { name: 'Comment on selection' });
-    await expect(chip).toBeVisible();
-    await screenshot(page, 'comments-selection-chip');
+    await expect(page.getByRole('dialog', { name: 'Comment on selection' })).toBeVisible({
+      timeout: 3000,
+    });
+  });
 
-    await chip.getByRole('button', { name: 'Comment' }).click();
-    // The quoted span is carried into the composer.
-    await expect(page.locator('blockquote').first()).toBeVisible();
+  /**
+   * The affordance must match the input type. On touch the OS draws its own
+   * selection callout directly above the selection, so a floating chip there is
+   * covered or fights it for the tap; touch gets a bottom bar instead.
+   */
+  test('touch gets the bottom bar, mouse gets the floating chip', async ({ page }) => {
+    await open(page);
+    const coarse = await page.evaluate(() => window.matchMedia('(pointer: coarse)').matches);
+
+    await page.getByTestId('message-m-4').scrollIntoViewIfNeeded();
+    await page.evaluate(() => {
+      const p = document.querySelector('[data-comment-anchor="m-4"] p');
+      if (!p?.firstChild) throw new Error('no text node to select');
+      const range = document.createRange();
+      range.setStart(p.firstChild, 0);
+      range.setEnd(p.firstChild, Math.min(40, p.firstChild.textContent?.length ?? 0));
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    });
+
+    const affordance = page.getByRole('dialog', { name: 'Comment on selection' });
+    await expect(affordance).toBeVisible({ timeout: 3000 });
+
+    if (coarse) {
+      // Bottom bar: pinned to the viewport floor and showing the captured quote.
+      await expect(affordance.getByRole('button', { name: 'Comment on selection' })).toBeVisible();
+      const boxes = await Promise.all([
+        affordance.boundingBox(),
+        page.evaluate(() => window.innerHeight),
+      ]);
+      const [bar, viewportH] = boxes as [{ y: number; height: number } | null, number];
+      if (!bar) throw new Error('no bar box');
+      expect(bar.y + bar.height).toBeGreaterThanOrEqual(viewportH - 2);
+    } else {
+      await expect(affordance.getByRole('button', { name: 'Comment', exact: true })).toBeVisible();
+    }
     await assertClean(page);
-    await screenshot(page, 'comments-selection-composer');
+    await screenshot(
+      page,
+      coarse ? 'comments-selection-touch-bar' : 'comments-selection-chip-mouse'
+    );
   });
 
   test('resolving a thread collapses it', async ({ page }) => {
