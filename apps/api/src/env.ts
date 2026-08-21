@@ -278,6 +278,14 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // Hierarchy limits
   MAX_NODES_PER_USER?: string;
   MAX_WORKSPACES_PER_NODE?: string;
+  VM_ADMISSION_CONTROL_MODE?: string;
+  VM_ADMISSION_LEASE_TTL_MS?: string;
+  VM_ADMISSION_RETRY_MIN_MS?: string;
+  VM_ADMISSION_RETRY_MAX_MS?: string;
+  VM_ADMISSION_WAIT_TIMEOUT_MS?: string;
+  VM_ADMISSION_PROVIDER_COOLDOWN_MS?: string;
+  VM_ADMISSION_WAKE_BATCH_SIZE?: string;
+  VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH?: string;
   MAX_AGENT_SESSIONS_PER_WORKSPACE?: string;
   MAX_PROJECTS_PER_USER?: string;
   MAX_BRANCHES_PER_REPO?: string;

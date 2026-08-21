@@ -127,6 +127,10 @@ export interface TaskRunnerState {
   lastStepAt: number;
   /** Set when we started waiting for node provisioning — used for timeout detection */
   provisioningStartedAt: number | null;
+  /** VM admission lease scope currently owned by this runner, if any. */
+  admissionScopeKey?: string | null;
+  /** Fencing token for the VM admission provisioning lease. */
+  admissionLeaseToken?: number | null;
   /** Set when we started waiting for agent ready — used for timeout detection */
   agentReadyStartedAt: number | null;
   /** Set when we started waiting for workspace ready — used for timeout detection */

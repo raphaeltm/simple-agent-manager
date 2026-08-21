@@ -12,6 +12,10 @@ import {
 import { log } from '../../lib/logger';
 import type { DevcontainerCacheCredentials } from '../../services/devcontainer-cache';
 import { SessionRecoveryAuthorityRevokedError } from '../../services/session-recovery-authority';
+import {
+  markVmAdmissionPlaced,
+  releaseVmProvisioningLease,
+} from '../../services/vm-admission-control';
 import { reserveWorkspacePlacement } from '../../services/workspace-placement';
 import {
   computeBackoffMs,
@@ -48,6 +52,7 @@ export async function handleWorkspaceCreation(
       // must still be checked separately; D1 workspace linkage is not VM-agent
       // acknowledgement.
       await ensureWorkspaceBookkeeping(state, rc, state.stepResults.workspaceId);
+      await finalizeVmAdmissionPlacement(state, rc);
       await rc.advanceToStep(state, 'workspace_dispatch');
       return;
     }
@@ -55,6 +60,7 @@ export async function handleWorkspaceCreation(
     // the task delegation transition. Re-run idempotent bookkeeping before
     // proceeding with delegation and dispatch.
     await ensureWorkspaceBookkeeping(state, rc, state.stepResults.workspaceId);
+    await finalizeVmAdmissionPlacement(state, rc);
   } else {
     const created = await createAndProvisionWorkspace(state, rc);
     if (!created) return;
@@ -202,6 +208,15 @@ async function createAndProvisionWorkspace(
     state.stepResults.nodeId = null;
     state.stepResults.autoProvisioned = false;
     state.stepResults.provisionedVmSize = null;
+    await releaseVmProvisioningLease(
+      rc.env,
+      state.admissionScopeKey,
+      state.taskId,
+      state.admissionLeaseToken,
+      'workspace_placement_lost'
+    );
+    state.admissionScopeKey = null;
+    state.admissionLeaseToken = null;
     await rc.advanceToStep(state, 'node_selection');
     return false;
   }
@@ -212,10 +227,27 @@ async function createAndProvisionWorkspace(
 
   state.stepResults.workspaceId = workspaceId;
   await rc.ctx.storage.put('state', state);
+  await finalizeVmAdmissionPlacement(state, rc);
   await startComputeTrackingBestEffort(state, rc, db, workspaceId, nodeId);
   await ensureWorkspaceBookkeeping(state, rc, workspaceId, now);
   await rc.ctx.storage.put('state', state);
   return true;
+}
+
+async function finalizeVmAdmissionPlacement(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext
+): Promise<void> {
+  if (!state.stepResults.nodeId || !state.stepResults.workspaceId) return;
+  await markVmAdmissionPlaced(rc.env, {
+    taskId: state.taskId,
+    nodeId: state.stepResults.nodeId,
+    scopeKey: state.admissionScopeKey,
+    fencingToken: state.admissionLeaseToken,
+  });
+  state.admissionScopeKey = null;
+  state.admissionLeaseToken = null;
+  await rc.ctx.storage.put('state', state);
 }
 
 async function ensureWorkspaceBookkeeping(

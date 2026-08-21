@@ -890,6 +890,12 @@ export const tasks = sqliteTable(
     resolvedReservationJson: text('resolved_reservation_json'),
     /** JSON snapshot of PlacementExplanation (audit trail). */
     placementExplanationJson: text('placement_explanation_json'),
+    /** Durable VM admission status mirrored for UI/API visibility. */
+    admissionState: text('admission_state'),
+    /** Durable VM admission/backpressure reason mirrored for UI/API visibility. */
+    admissionReason: text('admission_reason'),
+    /** Next admission retry/wakeup timestamp, if the task is waiting for capacity. */
+    admissionNextRetryAt: text('admission_next_retry_at'),
     createdBy: text('created_by')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
@@ -935,6 +941,110 @@ export const tasks = sqliteTable(
     missionIdIdx: index('idx_tasks_mission_id')
       .on(table.missionId)
       .where(sql`mission_id IS NOT NULL`),
+    admissionStateIdx: index('idx_tasks_admission_state')
+      .on(table.admissionState)
+      .where(sql`admission_state IS NOT NULL`),
+  })
+);
+
+export const vmTaskAdmissions = sqliteTable(
+  'vm_task_admissions',
+  {
+    taskId: text('task_id').primaryKey(),
+    projectId: text('project_id').notNull(),
+    userId: text('user_id').notNull(),
+    provider: text('provider').notNull(),
+    credentialDomainKey: text('credential_domain_key').notNull(),
+    providerDomainKey: text('provider_domain_key').notNull(),
+    scopeKey: text('scope_key').notNull(),
+    requestedVmSize: text('requested_vm_size').notNull(),
+    requestedVmLocation: text('requested_vm_location').notNull(),
+    preferredNodeId: text('preferred_node_id'),
+    state: text('state').notNull().default('queued'),
+    reason: text('reason'),
+    selectedNodeId: text('selected_node_id'),
+    inflightNodeId: text('inflight_node_id'),
+    fencingToken: integer('fencing_token'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    nextRetryAt: text('next_retry_at'),
+    waitDeadlineAt: text('wait_deadline_at'),
+    providerCategory: text('provider_category'),
+    providerCode: text('provider_code'),
+    providerStatusCode: integer('provider_status_code'),
+    providerMessage: text('provider_message'),
+    enqueuedAt: text('enqueued_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    claimedAt: text('claimed_at'),
+    lastEvaluatedAt: text('last_evaluated_at'),
+    completedAt: text('completed_at'),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    userStateRetryIdx: index('idx_vm_task_admissions_user_state_retry').on(
+      table.userId,
+      table.state,
+      table.nextRetryAt
+    ),
+    scopeStateRetryIdx: index('idx_vm_task_admissions_scope_state_retry').on(
+      table.scopeKey,
+      table.state,
+      table.nextRetryAt
+    ),
+    providerDomainStateRetryIdx: index('idx_vm_task_admissions_provider_domain_state_retry').on(
+      table.providerDomainKey,
+      table.state,
+      table.nextRetryAt
+    ),
+    inflightNodeIdx: index('idx_vm_task_admissions_inflight_node')
+      .on(table.inflightNodeId)
+      .where(sql`inflight_node_id IS NOT NULL`),
+  })
+);
+
+export const vmProvisioningLeases = sqliteTable(
+  'vm_provisioning_leases',
+  {
+    scopeKey: text('scope_key').primaryKey(),
+    ownerTaskId: text('owner_task_id').notNull(),
+    fencingToken: integer('fencing_token').notNull().default(1),
+    provider: text('provider').notNull(),
+    credentialDomainKey: text('credential_domain_key').notNull(),
+    providerDomainKey: text('provider_domain_key').notNull(),
+    requestedVmSize: text('requested_vm_size').notNull(),
+    inflightNodeId: text('inflight_node_id'),
+    acquiredAt: text('acquired_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    heartbeatAt: text('heartbeat_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    expiresAt: text('expires_at').notNull(),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    ownerIdx: index('idx_vm_provisioning_leases_owner').on(table.ownerTaskId),
+    expiresIdx: index('idx_vm_provisioning_leases_expires').on(table.expiresAt),
+    inflightNodeIdx: index('idx_vm_provisioning_leases_inflight_node')
+      .on(table.inflightNodeId)
+      .where(sql`inflight_node_id IS NOT NULL`),
+  })
+);
+
+export const vmProviderCapacityState = sqliteTable(
+  'vm_provider_capacity_state',
+  {
+    providerDomainKey: text('provider_domain_key').primaryKey(),
+    provider: text('provider').notNull(),
+    credentialDomainKey: text('credential_domain_key').notNull(),
+    state: text('state').notNull().default('ok'),
+    reason: text('reason'),
+    providerCategory: text('provider_category'),
+    providerCode: text('provider_code'),
+    providerStatusCode: integer('provider_status_code'),
+    providerMessage: text('provider_message'),
+    failureCount: integer('failure_count').notNull().default(0),
+    retryAt: text('retry_at'),
+    lastFailureAt: text('last_failure_at'),
+    lastSuccessAt: text('last_success_at'),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    retryIdx: index('idx_vm_provider_capacity_state_retry').on(table.state, table.retryAt),
   })
 );
 

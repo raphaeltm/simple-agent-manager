@@ -68,6 +68,38 @@ export const DEFAULT_TASK_LIVENESS_MAX_ACP_SESSIONS = 5;
 export const DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS = 5 * 1000;
 
 // =============================================================================
+// VM Admission Control Defaults
+// =============================================================================
+
+export const VM_ADMISSION_CONTROL_MODES = ['off', 'shadow', 'enforce'] as const;
+
+export type VmAdmissionControlMode = (typeof VM_ADMISSION_CONTROL_MODES)[number];
+
+/** Production default: enforce backpressure, with VM_ADMISSION_CONTROL_MODE=off as rollback. */
+export const DEFAULT_VM_ADMISSION_CONTROL_MODE: VmAdmissionControlMode = 'enforce';
+
+/** Lease TTL while a task is the sole owner allowed to provision a new VM. */
+export const DEFAULT_VM_ADMISSION_LEASE_TTL_MS = 20 * 60 * 1000;
+
+/** Minimum delay before retrying a waiting admission. */
+export const DEFAULT_VM_ADMISSION_RETRY_MIN_MS = 15 * 1000;
+
+/** Maximum delay before retrying a waiting admission. */
+export const DEFAULT_VM_ADMISSION_RETRY_MAX_MS = 60 * 1000;
+
+/** Maximum time a task can wait for VM capacity before visible failure. */
+export const DEFAULT_VM_ADMISSION_WAIT_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+
+/** Cooldown after provider/account-capacity failures such as Hetzner server limits. */
+export const DEFAULT_VM_ADMISSION_PROVIDER_COOLDOWN_MS = 10 * 60 * 1000;
+
+/** Bounded number of admission waiters nudged by one node-ready/cleanup/capacity event. */
+export const DEFAULT_VM_ADMISSION_WAKE_BATCH_SIZE = 25;
+
+/** Maximum safe provider diagnostic message length persisted on admission/capacity rows. */
+export const DEFAULT_VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH = 500;
+
+// =============================================================================
 // TaskRunner DO Defaults (Alarm-Driven Orchestration — TDF-2)
 // =============================================================================
 

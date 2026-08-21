@@ -8,6 +8,7 @@ import * as projectDataService from './project-data';
 import { queueWorkspaceSessionSleep } from './session-sleep';
 import { deleteSessionSnapshotState } from './session-snapshots';
 import { cleanupTaskRun } from './task-runner';
+import { cancelVmTaskAdmission } from './vm-admission-control';
 
 export type TerminalTaskCleanupStatus = 'completed' | 'failed' | 'cancelled';
 
@@ -63,6 +64,23 @@ export async function cleanupTerminalTaskResources(
     .from(schema.tasks)
     .where(eq(schema.tasks.id, taskId))
     .limit(1);
+
+  await cancelVmTaskAdmission(
+    env,
+    taskId,
+    options.status === 'cancelled'
+      ? 'cancelled'
+      : options.status === 'failed'
+        ? 'task_failed'
+        : 'task_completed_cleanup'
+  ).catch((err) => {
+    log.warn('task.terminal_cleanup.admission_cancel_failed', {
+      taskId,
+      status: options.status,
+      error: err instanceof Error ? err.message : String(err),
+      ...options.logContext,
+    });
+  });
 
   if (!task?.workspaceId || !task.projectId) {
     return;

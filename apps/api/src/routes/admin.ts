@@ -17,6 +17,7 @@ import {
 } from '../schemas';
 import { getRuntimeLimits } from '../services/limits';
 import { getSignupApprovalConfig, setSignupApprovalConfig } from '../services/signup-approval';
+import { getVmAdmissionDiagnostics } from '../services/vm-admission-control';
 import { adminObservabilityRoutes } from './admin/observability';
 
 const adminRoutes = new Hono<{ Bindings: Env }>();
@@ -210,6 +211,51 @@ adminRoutes.get('/tasks/:taskId/reconciliation-diagnostics', async (c) => {
   const diagnostics = await getTaskReconciliationDiagnostics(c.env, taskId);
 
   if (!diagnostics) throw errors.notFound('Task');
+  return c.json({ diagnostics });
+});
+
+/**
+ * GET /api/admin/vm-admissions - Bounded list of VM admission records.
+ */
+adminRoutes.get('/vm-admissions', async (c) => {
+  const limits = getRuntimeLimits(c.env);
+  const limitParam = Number.parseInt(c.req.query('limit') ?? '', 10);
+  const limit = Number.isFinite(limitParam)
+    ? Math.min(Math.max(1, limitParam), limits.taskListMaxPageSize)
+    : limits.taskListDefaultPageSize;
+  const state = c.req.query('state')?.trim();
+  const binds: unknown[] = [];
+  const where = state ? 'WHERE state = ?' : '';
+  if (state) binds.push(state);
+  binds.push(limit);
+
+  const rows = await c.env.DATABASE.prepare(
+    `
+      SELECT task_id, project_id, user_id, provider, credential_domain_key,
+        provider_domain_key, scope_key, requested_vm_size, requested_vm_location,
+        state, reason, selected_node_id, inflight_node_id, fencing_token,
+        attempt_count, next_retry_at, wait_deadline_at, provider_category,
+        provider_code, provider_status_code, provider_message, enqueued_at,
+        claimed_at, last_evaluated_at, completed_at, updated_at
+      FROM vm_task_admissions
+      ${where}
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `
+  )
+    .bind(...binds)
+    .all<Record<string, unknown>>();
+
+  return c.json({ admissions: rows.results ?? [], limit });
+});
+
+/**
+ * GET /api/admin/vm-admissions/:taskId - Full admission/lease/capacity diagnostics.
+ */
+adminRoutes.get('/vm-admissions/:taskId', async (c) => {
+  const { taskId } = c.req.param();
+  const diagnostics = await getVmAdmissionDiagnostics(c.env, taskId);
+  if (!diagnostics.admission) throw errors.notFound('VM admission');
   return c.json({ diagnostics });
 });
 

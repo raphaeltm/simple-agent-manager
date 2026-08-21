@@ -12,6 +12,10 @@ import {
   runTaskTerminalTransitionHooks,
 } from '../../services/task-terminal-transition-hooks';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
+import {
+  cancelVmTaskAdmission,
+  wakeVmAdmissionWaiters,
+} from '../../services/vm-admission-control';
 import { releaseClaimedWarmNode } from './node-selection';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 import { notifyWakeSettled } from './wake-progress-notifier';
@@ -352,6 +356,16 @@ export async function failTask(
     if (state.config.resumeSnapshotChatSessionId) {
       await failRecoveryLifecycle(state, errorMessage, rc);
     }
+    await cancelVmTaskAdmission(
+      rc.env,
+      state.taskId,
+      currentStatus === 'cancelled' ? 'cancelled' : 'task_failed'
+    ).catch((err) => {
+      log.warn('task_runner_do.admission_terminal_cleanup_failed', {
+        taskId: state.taskId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
     // Already terminal — skip
     state.completed = true;
     await rc.ctx.storage.put('state', state);
@@ -558,6 +572,15 @@ export async function cleanupOnFailure(
 ): Promise<void> {
   const now = new Date().toISOString();
 
+  await cancelVmTaskAdmission(rc.env, state.taskId, 'task_failed').catch((err) => {
+    log.warn('task_runner_do.cleanup.admission_cancel_failed', {
+      taskId: state.taskId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+  state.admissionScopeKey = null;
+  state.admissionLeaseToken = null;
+
   const persistedWarmClaim = await rc.env.DATABASE.prepare(
     `SELECT claimed_warm_node_id FROM tasks WHERE id = ?`
   )
@@ -710,6 +733,10 @@ export async function cleanupOnFailure(
         log.info('task_runner_do.cleanup.node_marked_warm_direct', {
           taskId: state.taskId,
           nodeId: state.stepResults.nodeId,
+        });
+        await wakeVmAdmissionWaiters(rc.env, {
+          userId: state.userId,
+          reason: 'node_marked_warm_direct',
         });
       } catch (err) {
         log.error('task_runner_do.cleanup.node_warm_failed', {

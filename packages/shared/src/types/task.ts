@@ -54,6 +54,7 @@ export function isTaskMode(value: unknown): value is TaskMode {
  */
 export const TASK_EXECUTION_STEPS = [
   'node_selection',
+  'waiting_for_node_capacity',
   'node_provisioning',
   'node_agent_ready',
   'workspace_creation',
@@ -74,6 +75,7 @@ export function isTaskExecutionStep(value: unknown): value is TaskExecutionStep 
 /** Human-readable labels for each execution step (TDF-8). */
 export const EXECUTION_STEP_LABELS: Record<TaskExecutionStep, string> = {
   node_selection: 'Finding a server...',
+  waiting_for_node_capacity: 'Waiting for server capacity...',
   node_provisioning: 'Setting up a new server...',
   node_agent_ready: 'Waiting for server to start...',
   workspace_creation: 'Creating workspace...',
@@ -104,6 +106,7 @@ export const EXECUTION_STEP_ORDER = Object.fromEntries(
  */
 export const WAKE_PHASE_LABELS: Record<TaskExecutionStep, string> = {
   node_selection: 'Finding a server...',
+  waiting_for_node_capacity: 'Waiting for server capacity...',
   node_provisioning: 'Provisioning a server...',
   node_agent_ready: 'Waiting for the server to start...',
   workspace_creation: 'Recreating your workspace...',
@@ -426,6 +429,12 @@ export interface Task {
   resolvedReservationJson: string | null;
   /** JSON snapshot of the PlacementExplanation. */
   placementExplanationJson: string | null;
+  /** Durable VM admission status, if the task is waiting on VM capacity. */
+  admissionState: string | null;
+  /** Inspectable VM admission/backpressure reason. */
+  admissionReason: string | null;
+  /** Next VM admission retry/wakeup time, if waiting. */
+  admissionNextRetryAt: string | null;
   startedAt: string | null;
   completedAt: string | null;
   errorMessage: string | null;

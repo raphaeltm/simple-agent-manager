@@ -115,6 +115,8 @@ export class TaskRunner extends DurableObject<Env> {
       createdAt: now,
       lastStepAt: now,
       provisioningStartedAt: null,
+      admissionScopeKey: null,
+      admissionLeaseToken: null,
       agentReadyStartedAt: null,
       workspaceReadyStartedAt: null,
       workspaceDispatchStartedAt: null,
@@ -185,6 +187,25 @@ export class TaskRunner extends DurableObject<Env> {
     const state = await this.getState();
     if (!state) return false;
     await this.ensureAlarm(state);
+    return true;
+  }
+
+  /**
+   * Pull a non-terminal runner's alarm forward after external capacity changes.
+   * Used by VM admission wakeups; safe to call repeatedly.
+   */
+  async nudge(reason?: string): Promise<boolean> {
+    const state = await this.getState();
+    if (!state || state.completed) return false;
+    if (state.currentStep === 'running' || state.currentStep === 'awaiting_followup') {
+      return false;
+    }
+    await this.ctx.storage.setAlarm(Date.now());
+    log.info('task_runner_do.nudged', {
+      taskId: state.taskId,
+      currentStep: state.currentStep,
+      reason: reason ?? null,
+    });
     return true;
   }
 
@@ -366,6 +387,8 @@ export class TaskRunner extends DurableObject<Env> {
     raw.config.systemPromptAppend ??= null;
     raw.config.agentProfileHint ??= null;
     raw.provisioningStartedAt ??= null;
+    raw.admissionScopeKey ??= null;
+    raw.admissionLeaseToken ??= null;
     raw.agentReadyStartedAt ??= null;
     raw.workspaceReadyStartedAt ??= null;
     raw.workspaceDispatchStartedAt ??= null;

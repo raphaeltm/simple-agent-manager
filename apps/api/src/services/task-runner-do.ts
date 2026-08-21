@@ -204,3 +204,15 @@ export async function ensureTaskRunnerStarted(env: Env, taskId: string): Promise
   const stub = getStub(env, taskId);
   return stub.ensureStarted();
 }
+
+/**
+ * Pull a TaskRunner alarm forward after external capacity/admission changes.
+ */
+export async function nudgeTaskRunnerDO(
+  env: Env,
+  taskId: string,
+  reason?: string
+): Promise<boolean> {
+  const stub = getStub(env, taskId);
+  return stub.nudge(reason);
+}

@@ -741,6 +741,14 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 | ---------------------------------- | ------- | ----------------------------------- |
 | `MAX_NODES_PER_USER`               | `10`    | Max nodes per user                  |
 | `MAX_WORKSPACES_PER_NODE`          | `3`     | Max workspaces packed onto one node |
+| `VM_ADMISSION_CONTROL_MODE`        | `enforce` | VM task/session admission mode: `off`, `shadow`, or `enforce` |
+| `VM_ADMISSION_LEASE_TTL_MS`        | `1200000` (20 min) | Fenced provisioning-claim lease duration |
+| `VM_ADMISSION_RETRY_MIN_MS`        | `15000` | Minimum retry delay for tasks waiting on VM capacity |
+| `VM_ADMISSION_RETRY_MAX_MS`        | `60000` | Maximum retry delay for tasks waiting on VM capacity |
+| `VM_ADMISSION_WAIT_TIMEOUT_MS`     | `7200000` (2 h) | Maximum visible wait for VM capacity before failing the task |
+| `VM_ADMISSION_PROVIDER_COOLDOWN_MS` | `600000` (10 min) | Cooldown after provider/account capacity errors such as Hetzner server limits |
+| `VM_ADMISSION_WAKE_BATCH_SIZE`     | `25`    | Maximum waiting TaskRunner DOs nudged by one capacity event |
+| `VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH` | `500` | Maximum provider diagnostic message length stored on admission records |
 | `MAX_AGENT_SESSIONS_PER_WORKSPACE` | `10`    | Max concurrent agent sessions       |
 | `MAX_PROJECTS_PER_USER`            | `100`   | Max projects per user               |
 | `MAX_TASKS_PER_PROJECT`            | `10000` | Max ideas per project               |
