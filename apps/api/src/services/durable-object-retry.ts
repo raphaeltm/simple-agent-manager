@@ -11,6 +11,13 @@ const TRANSIENT_DURABLE_OBJECT_PATTERNS = [
   /overload.*durable object/i,
 ];
 
+const DURABLE_OBJECT_STORAGE_FULL_PATTERNS = [
+  /\bSQLITE_FULL\b/i,
+  /database or disk is full/i,
+  /durable object.*storage.*full/i,
+  /sqlite.*full/i,
+];
+
 export interface DurableObjectRetryEnv {
   DO_RETRY_MAX_ATTEMPTS?: string;
   DO_RETRY_BASE_DELAY_MS?: string;
@@ -26,7 +33,14 @@ export interface DurableObjectRetryConfig {
 export function isTransientDurableObjectError(err: unknown): boolean {
   const message = extractErrorMessage(err);
   if (!message) return false;
+  if (isDurableObjectStorageFullError(err)) return false;
   return TRANSIENT_DURABLE_OBJECT_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+export function isDurableObjectStorageFullError(err: unknown): boolean {
+  const message = extractErrorMessage(err);
+  if (!message) return false;
+  return DURABLE_OBJECT_STORAGE_FULL_PATTERNS.some((pattern) => pattern.test(message));
 }
 
 export function getDurableObjectRetryConfig(env: DurableObjectRetryEnv): DurableObjectRetryConfig {

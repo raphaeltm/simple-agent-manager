@@ -78,6 +78,9 @@ user-invocable: false
 - `GET /api/admin/observability/errors` — Query platform errors; VM error rows include their same-installation diagnostic incident summary
 - `GET /api/admin/observability/errors/:errorId/incident` — Read one diagnostic incident summary and redacted preview
 - `GET /api/admin/observability/errors/:errorId/incident/artifacts/:artifactId/download` — Stream one private diagnostic artifact through the authenticated Worker; R2 keys and URLs are never exposed
+- `GET /api/admin/project-data/storage` — List latest per-project ProjectData storage telemetry from D1 (`projectId`, `status`, `limit` filters)
+- `POST /api/admin/project-data/storage/:projectId/measure` — Force one ProjectData `databaseSize` measurement and D1 telemetry upsert
+- `POST /api/admin/project-data/storage/:projectId/emergency-purge` — Run a bounded ProjectData emergency purge of oldest `activity_events` and `acp_session_events` rows only
 
 ## Agent Sessions
 

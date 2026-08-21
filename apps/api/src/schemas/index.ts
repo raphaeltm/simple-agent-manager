@@ -120,6 +120,7 @@ export {
   AdminUserRoleSchema,
   AnalyticsForwardSchema,
   CreatePlatformCredentialSchema,
+  ProjectDataStorageEmergencyPurgeSchema,
   UpdatePlatformCredentialSchema,
   UpdatePlatformIntegrationConfigSchema,
   UpdateSignupApprovalConfigSchema,

@@ -49,6 +49,7 @@ import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
 import * as sessionWakeProgress from './session-wake-progress';
 import * as sessions from './sessions';
+import * as storageSafety from './storage-safety';
 import { resolveTaskWaitConfig } from './task-wait-config';
 import { processTaskWaits } from './task-wait-supervisor';
 import * as taskWaits from './task-waits';
@@ -895,10 +896,47 @@ export class ProjectData extends DurableObject<Env> {
     };
   }
 
+  async measureStorage(): Promise<storageSafety.ProjectDataStorageTelemetry | null> {
+    const measurement = await storageSafety.measureAndPersistProjectDataStorage(
+      this.sql,
+      this.env,
+      this.getProjectId(),
+      'admin'
+    );
+    await this.recalculateAlarm();
+    return measurement;
+  }
+
+  async runStorageEmergencyPurge(
+    input: storageSafety.ProjectDataStorageEmergencyPurgeInput = {}
+  ): Promise<storageSafety.ProjectDataStorageEmergencyPurgeResult> {
+    const result = await storageSafety.runProjectDataStorageEmergencyPurge(
+      this.sql,
+      this.env,
+      this.getProjectId(),
+      input
+    );
+    await this.recalculateAlarm();
+    return result;
+  }
+
   // --- DO Alarm Handler ---
 
   async alarm(): Promise<void> {
     if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'ProjectData')) return;
+
+    try {
+      await storageSafety.measureAndPersistProjectDataStorage(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        'alarm'
+      );
+    } catch (err) {
+      log.error('alarm.storage_safety_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     const timedOut = await checkRuntimeHeartbeatTimeouts(
       this.sql,

@@ -2398,6 +2398,44 @@ export const sessionIndexCoverage = sqliteTable('session_index_coverage', {
 
 export type SessionIndexCoverageRow = typeof sessionIndexCoverage.$inferSelect;
 
+export const projectDataStorageTelemetry = sqliteTable(
+  'project_data_storage_telemetry',
+  {
+    projectId: text('project_id')
+      .primaryKey()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    measuredAt: integer('measured_at').notNull(),
+    databaseSizeBytes: integer('database_size_bytes').notNull(),
+    limitBytes: integer('limit_bytes').notNull(),
+    usageRatio: real('usage_ratio').notNull(),
+    status: text('status', { enum: ['ok', 'notice', 'warning', 'critical', 'degraded'] })
+      .notNull(),
+    lastAlarmAt: integer('last_alarm_at'),
+    lastAlertAt: integer('last_alert_at'),
+    lastAlertStatus: text('last_alert_status', {
+      enum: ['ok', 'notice', 'warning', 'critical', 'degraded'],
+    }),
+    lastPurgeAt: integer('last_purge_at'),
+    lastPurgeReason: text('last_purge_reason'),
+    lastPurgeRows: integer('last_purge_rows'),
+    lastPurgeDatabaseSizeBytes: integer('last_purge_database_size_bytes'),
+    lastError: text('last_error'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    statusIdx: index('idx_project_data_storage_telemetry_status').on(
+      table.status,
+      table.usageRatio,
+      table.measuredAt
+    ),
+    measuredAtIdx: index('idx_project_data_storage_telemetry_measured_at').on(table.measuredAt),
+  })
+);
+
+export type ProjectDataStorageTelemetryRow =
+  typeof projectDataStorageTelemetry.$inferSelect;
+
 export const diagnosticIncidents = sqliteTable(
   'diagnostic_incidents',
   {

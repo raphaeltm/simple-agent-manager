@@ -14,12 +14,26 @@ import {
   parseSearchResultRow,
   parseWorkspaceId,
   type SearchResultParsed,
+  stripToolMetadataContent,
 } from './row-schemas';
 import type { Env } from './types';
 import { generateId } from './types';
 
 export const DEFAULT_MAX_MESSAGES_PER_SESSION = 100000;
 export const SESSION_MESSAGE_LIMIT_EXCEEDED = 'SESSION_MESSAGE_LIMIT_EXCEEDED';
+export const DEFAULT_PROJECT_DATA_TOOL_METADATA_MAX_BYTES = 128 * 1024;
+
+const textEncoder = new TextEncoder();
+const MINIMAL_TOOL_METADATA_KEYS = [
+  'toolCallId',
+  'title',
+  'kind',
+  'status',
+  'name',
+  'tool',
+  'exitCode',
+  'contentSize',
+] as const;
 
 export class SessionMessageLimitExceededError extends Error {
   readonly code = SESSION_MESSAGE_LIMIT_EXCEEDED;
@@ -45,6 +59,119 @@ export function resolveCompactMessageOptions(env: Env): CompactMessageOptions {
   };
 }
 
+function resolveToolMetadataMaxBytes(env: Env): number {
+  const parsed = Number.parseInt(env.PROJECT_DATA_TOOL_METADATA_MAX_BYTES || '', 10);
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_PROJECT_DATA_TOOL_METADATA_MAX_BYTES;
+}
+
+function utf8Bytes(value: string): number {
+  return textEncoder.encode(value).byteLength;
+}
+
+function isScalarJsonValue(value: unknown): boolean {
+  return value === null || ['string', 'number', 'boolean'].includes(typeof value);
+}
+
+function buildMinimalToolMetadata(parsed: unknown, originalBytes: number): Record<string, unknown> {
+  const minimal: Record<string, unknown> = {
+    storageSafetyTruncated: true,
+    contentTruncated: true,
+    originalSizeBytes: originalBytes,
+  };
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return minimal;
+  }
+
+  const record = parsed as Record<string, unknown>;
+  for (const key of MINIMAL_TOOL_METADATA_KEYS) {
+    const value = record[key];
+    if (isScalarJsonValue(value)) minimal[key] = value;
+  }
+
+  if (Array.isArray(record.content)) {
+    minimal.contentSize = utf8Bytes(JSON.stringify(record.content));
+  }
+
+  return minimal;
+}
+
+function serializeWithinLimit(value: unknown, maxBytes: number): string {
+  let serialized = JSON.stringify(value);
+  if (utf8Bytes(serialized) <= maxBytes) return serialized;
+
+  const record = value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+  serialized = JSON.stringify({
+    storageSafetyTruncated: true,
+    contentTruncated: true,
+    originalSizeBytes: record.originalSizeBytes,
+    toolCallId: isScalarJsonValue(record.toolCallId) ? record.toolCallId : undefined,
+    title: isScalarJsonValue(record.title) ? record.title : undefined,
+    kind: isScalarJsonValue(record.kind) ? record.kind : undefined,
+    status: isScalarJsonValue(record.status) ? record.status : undefined,
+    contentSize: isScalarJsonValue(record.contentSize) ? record.contentSize : undefined,
+  });
+  return utf8Bytes(serialized) <= maxBytes
+    ? serialized
+    : JSON.stringify({ storageSafetyTruncated: true });
+}
+
+export function boundToolMetadataForStorage(
+  toolMetadata: string | null,
+  env: Env
+): {
+  value: string | null;
+  originalBytes: number;
+  storedBytes: number;
+  truncated: boolean;
+} {
+  if (toolMetadata === null) {
+    return { value: null, originalBytes: 0, storedBytes: 0, truncated: false };
+  }
+
+  const maxBytes = resolveToolMetadataMaxBytes(env);
+  const originalBytes = utf8Bytes(toolMetadata);
+  if (originalBytes <= maxBytes) {
+    return {
+      value: toolMetadata,
+      originalBytes,
+      storedBytes: originalBytes,
+      truncated: false,
+    };
+  }
+
+  let bounded: string;
+  try {
+    const parsed = JSON.parse(toolMetadata);
+    const compact = stripToolMetadataContent(parsed, resolveCompactMessageOptions(env));
+    const compactJson = JSON.stringify(compact);
+    bounded = utf8Bytes(compactJson) <= maxBytes
+      ? compactJson
+      : serializeWithinLimit(buildMinimalToolMetadata(parsed, originalBytes), maxBytes);
+  } catch {
+    bounded = serializeWithinLimit(
+      {
+        storageSafetyTruncated: true,
+        contentTruncated: true,
+        parseFailed: true,
+        originalSizeBytes: originalBytes,
+      },
+      maxBytes
+    );
+  }
+
+  return {
+    value: bounded,
+    originalBytes,
+    storedBytes: utf8Bytes(bounded),
+    truncated: true,
+  };
+}
+
 /**
  * Returns the next monotonic sequence number for a session's messages.
  */
@@ -66,7 +193,14 @@ export function persistMessage(
   content: string,
   toolMetadata: string | null,
   messageId?: string
-): { id: string; now: number; sequence: number; workspaceId: string | null; inserted: boolean } {
+): {
+  id: string;
+  now: number;
+  sequence: number;
+  workspaceId: string | null;
+  inserted: boolean;
+  toolMetadata: string | null;
+} {
   const maxMessages = resolveMaxMessagesPerSession(env);
   const countRow = sql
     .exec('SELECT message_count FROM chat_sessions WHERE id = ?', sessionId)
@@ -84,7 +218,14 @@ export function persistMessage(
     const workspaceId = wsRow
       ? parseWorkspaceId(wsRow, 'messages.persist_duplicate_workspace')
       : null;
-    return { id, now: Date.now(), sequence: 0, workspaceId, inserted: false };
+    return {
+      id,
+      now: Date.now(),
+      sequence: 0,
+      workspaceId,
+      inserted: false,
+      toolMetadata,
+    };
   }
 
   if (parseMessageCount(countRow, 'messages.persist_count') >= maxMessages) {
@@ -93,6 +234,15 @@ export function persistMessage(
 
   const now = Date.now();
   const sequence = nextSequence(sql, sessionId);
+  const boundedToolMetadata = boundToolMetadataForStorage(toolMetadata, env);
+  if (boundedToolMetadata.truncated) {
+    log.warn('messages.tool_metadata_truncated_for_storage', {
+      sessionId,
+      messageId: id,
+      originalBytes: boundedToolMetadata.originalBytes,
+      storedBytes: boundedToolMetadata.storedBytes,
+    });
+  }
 
   sql.exec(
     `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence)
@@ -101,7 +251,7 @@ export function persistMessage(
     sessionId,
     role,
     content,
-    toolMetadata,
+    boundedToolMetadata.value,
     now,
     sequence
   );
@@ -134,7 +284,14 @@ export function persistMessage(
     .toArray()[0];
   const workspaceId = wsRow ? parseWorkspaceId(wsRow, 'messages.persist_workspace') : null;
 
-  return { id, now, sequence, workspaceId, inserted: true };
+  return {
+    id,
+    now,
+    sequence,
+    workspaceId,
+    inserted: true,
+    toolMetadata: boundedToolMetadata.value,
+  };
 }
 
 export function persistMessageBatch(
@@ -251,6 +408,15 @@ export function persistMessageBatch(
 
     const createdAt = new Date(msg.timestamp).getTime() || now;
     const sequence = msg.sequence ?? nextSeq++;
+    const boundedToolMetadata = boundToolMetadataForStorage(msg.toolMetadata, env);
+    if (boundedToolMetadata.truncated) {
+      log.warn('messages.batch_tool_metadata_truncated_for_storage', {
+        sessionId,
+        messageId: msg.messageId,
+        originalBytes: boundedToolMetadata.originalBytes,
+        storedBytes: boundedToolMetadata.storedBytes,
+      });
+    }
     sql.exec(
       `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence, origin)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -258,7 +424,7 @@ export function persistMessageBatch(
       sessionId,
       msg.role,
       msg.content,
-      msg.toolMetadata,
+      boundedToolMetadata.value,
       createdAt,
       sequence,
       origin
@@ -268,7 +434,7 @@ export function persistMessageBatch(
       id: msg.messageId,
       role: msg.role,
       content: msg.content,
-      toolMetadata: msg.toolMetadata ? JSON.parse(msg.toolMetadata) : null,
+      toolMetadata: boundedToolMetadata.value ? JSON.parse(boundedToolMetadata.value) : null,
       createdAt,
       sequence,
       origin,

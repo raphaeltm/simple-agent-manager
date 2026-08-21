@@ -77,7 +77,7 @@ export async function persistMessageWithSideEffects(
       messageId: result.id,
       role,
       content,
-      toolMetadata: parseToolMetadata(toolMetadata, sessionId),
+      toolMetadata: parseToolMetadata(result.toolMetadata, sessionId),
       createdAt: result.now,
       sequence: result.sequence,
       // The single-message path only persists browser/RPC user messages, which

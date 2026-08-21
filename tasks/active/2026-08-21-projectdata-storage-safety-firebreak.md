@@ -35,17 +35,17 @@ The goal is a narrow production-safe firebreak, not full sharding:
 
 ## Implementation checklist
 
-- [ ] Add D1 migration and Drizzle schema for per-project ProjectData storage telemetry.
-- [ ] Add ProjectData storage-safety config with env-backed defaults for measurement cadence, SQLite limit bytes, warning/critical/degrade ratios, emergency purge watermark, telemetry retention, and tool-metadata trim size.
-- [ ] Add a ProjectData storage-safety module that reads `sql.databaseSize`, computes status/watermark state, upserts the D1 telemetry row, logs structured diagnostics, and persists critical/degraded `platform_errors` rows without letting observability failures abort alarms.
-- [ ] Wire storage-safety measurement into the shared ProjectData alarm schedule and into `ProjectData.alarm()` as an isolated step.
-- [ ] Add an admin diagnostic endpoint that lists/query ProjectData storage telemetry for superadmins.
-- [ ] Add explicit `SQLITE_FULL` / storage-limit classification, keep it non-transient, and return a distinct fail-visible service error from ProjectData retry call sites.
-- [ ] Add a bounded emergency recovery RPC/path that deletes oldest low-value telemetry rows (`activity_events`, `acp_session_events`) in capped batches until below the configured recovery watermark, and records the result in telemetry.
-- [ ] Add safe write-path trimming for oversized `tool_metadata` content arrays, preserving metadata/card-critical fields and storing a truncation marker rather than invalid JSON.
-- [ ] Run focused local/Miniflare experiments for catchability, deletion reclamation, and alarm behavior; record evidence in this file.
-- [ ] Add focused unit/workers tests for config, classifier, telemetry upsert, alarm execution, emergency purge, and metadata trimming.
-- [ ] Update documentation/config references.
+- [x] Add D1 migration and Drizzle schema for per-project ProjectData storage telemetry.
+- [x] Add ProjectData storage-safety config with env-backed defaults for measurement cadence, SQLite limit bytes, warning/critical/degrade ratios, alert throttle, emergency purge watermark, and tool-metadata trim size.
+- [x] Add a ProjectData storage-safety module that reads `sql.databaseSize`, computes status/watermark state, upserts the D1 telemetry row, logs structured diagnostics, and persists critical/degraded `platform_errors` rows without letting observability failures abort alarms.
+- [x] Wire storage-safety measurement into the shared ProjectData alarm schedule and into `ProjectData.alarm()` as an isolated step.
+- [x] Add admin diagnostic endpoints that list/query ProjectData storage telemetry, force-measure one project, and run bounded emergency purge for superadmins.
+- [x] Add explicit `SQLITE_FULL` / storage-limit classification, keep it non-transient, and return a distinct fail-visible service error from ProjectData retry/write call sites.
+- [x] Add a bounded emergency recovery RPC/path that deletes oldest low-value telemetry rows (`activity_events`, `acp_session_events`) in capped batches until below the configured recovery watermark or the configured batch bound, and records the result in telemetry.
+- [x] Add safe write-path trimming for oversized `tool_metadata` content arrays, preserving metadata/card-critical fields and storing a truncation marker rather than invalid JSON.
+- [x] Run focused local/Miniflare experiments for catchability, deletion reclamation, and alarm behavior; record evidence in this file.
+- [x] Add focused unit/workers tests for classifier, telemetry upsert, alarm execution, emergency purge, and metadata trimming.
+- [x] Update documentation/config references.
 - [ ] Run local specialist reviews: cloudflare-specialist, constitution-validator, test-engineer, doc-sync-validator, security-auditor, task-completion-validator.
 - [ ] Open a draft PR and let CI run. Stop before staging/deploy/merge.
 
@@ -62,7 +62,11 @@ The goal is a narrow production-safe firebreak, not full sharding:
 
 ## Experiment evidence
 
-Pending.
+- `databaseSize` reclamation: `pnpm vitest run --config vitest.workers.config.ts tests/workers/project-data-storage-safety.test.ts --reporter verbose` inserted ~384 KiB into a scratch DO SQLite table, then deleted it. `sql.databaseSize` increased after inserts and dropped after delete in the workerd/Miniflare runtime.
+- Exact local `SQLITE_FULL` forcing: the same Worker-runtime test proved direct `PRAGMA page_count` is rejected with `SQLITE_AUTH`, and `state.storage.sql.setMaxPageCountForTest` is not exposed in the JS Workers test runtime. Therefore the implementation does not rely on an in-DO `SQLITE_FULL` catch hook for automatic recovery. It classifies `SQLITE_FULL` at the service boundary and exposes explicit admin recovery.
+- Storage write-error catchability: the same test inserted an oversized row to trigger a SqlStorage write-limit exception inside the DO, caught it, then successfully read and deleted from the table afterward. This proves storage write exceptions do not necessarily reset the actor and that reads/deletes can continue after a caught write failure.
+- Alarm behavior: the same test invoked `ProjectData.alarm()` in the Worker runtime, verified a D1 `project_data_storage_telemetry` row with `last_alarm_at`, and verified the ProjectData alarm was rescheduled for the next storage measurement interval.
+- Emergency purge: the same test inserted activity and ACP event rows, ran one bounded purge batch (`batchRows=2`, `maxBatches=1`), verified only two oldest rows per low-value table were removed, verified chat messages remained, and verified D1 telemetry recorded `last_purge_rows=4`.
 
 ## Specialist review tracker
 

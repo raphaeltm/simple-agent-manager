@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { getMessages } from '../../../src/durable-objects/project-data/messages';
+import {
+  boundToolMetadataForStorage,
+  DEFAULT_PROJECT_DATA_TOOL_METADATA_MAX_BYTES,
+  getMessages,
+} from '../../../src/durable-objects/project-data/messages';
+import type { Env } from '../../../src/durable-objects/project-data/types';
 import { log } from '../../../src/lib/logger';
 
 type QueryRow = Record<string, unknown>;
@@ -25,6 +30,81 @@ function makeSql(rows: QueryRow[]) {
     })),
   } as unknown as Parameters<typeof getMessages>[0] & { exec: ReturnType<typeof vi.fn> };
 }
+
+describe('boundToolMetadataForStorage', () => {
+  it('keeps metadata unchanged when it is under the configured cap', () => {
+    const raw = JSON.stringify({ toolCallId: 'tc-1', status: 'completed' });
+    const result = boundToolMetadataForStorage(raw, {} as Env);
+
+    expect(DEFAULT_PROJECT_DATA_TOOL_METADATA_MAX_BYTES).toBe(128 * 1024);
+    expect(result).toMatchObject({
+      value: raw,
+      originalBytes: raw.length,
+      storedBytes: raw.length,
+      truncated: false,
+    });
+  });
+
+  it('strips oversized content arrays and preserves useful tool identity fields', () => {
+    const raw = JSON.stringify({
+      toolCallId: 'tc-large',
+      title: 'Run shell command',
+      kind: 'shell',
+      status: 'completed',
+      content: [{ type: 'terminal', output: 'x'.repeat(4096), exitCode: 0 }],
+    });
+
+    const result = boundToolMetadataForStorage(raw, {
+      PROJECT_DATA_TOOL_METADATA_MAX_BYTES: '768',
+    } as Env);
+
+    expect(result.truncated).toBe(true);
+    expect(result.storedBytes).toBeLessThanOrEqual(768);
+    const stored = JSON.parse(result.value ?? '{}') as Record<string, unknown>;
+    expect(stored).toMatchObject({
+      toolCallId: 'tc-large',
+      title: 'Run shell command',
+      kind: 'shell',
+      status: 'completed',
+    });
+    expect(stored.content).toBeUndefined();
+    expect(stored.contentSize).toBeGreaterThan(4096);
+  });
+
+  it('falls back to a minimal valid JSON marker when compact metadata is still too large', () => {
+    const raw = JSON.stringify({
+      toolCallId: 'tc-minimal',
+      title: 'x'.repeat(2048),
+      status: 'completed',
+      content: [{ type: 'terminal', output: 'y'.repeat(2048) }],
+    });
+
+    const result = boundToolMetadataForStorage(raw, {
+      PROJECT_DATA_TOOL_METADATA_MAX_BYTES: '128',
+    } as Env);
+
+    expect(result.truncated).toBe(true);
+    expect(result.storedBytes).toBeLessThanOrEqual(128);
+    expect(() => JSON.parse(result.value ?? '')).not.toThrow();
+    expect(JSON.parse(result.value ?? '{}')).toMatchObject({
+      storageSafetyTruncated: true,
+    });
+  });
+
+  it('stores a valid JSON marker for oversized malformed metadata', () => {
+    const raw = `{${'x'.repeat(2048)}`;
+    const result = boundToolMetadataForStorage(raw, {
+      PROJECT_DATA_TOOL_METADATA_MAX_BYTES: '256',
+    } as Env);
+
+    expect(result.truncated).toBe(true);
+    expect(result.storedBytes).toBeLessThanOrEqual(256);
+    expect(JSON.parse(result.value ?? '{}')).toMatchObject({
+      storageSafetyTruncated: true,
+      parseFailed: true,
+    });
+  });
+});
 
 describe('ProjectData messages getMessages', () => {
   afterEach(() => {

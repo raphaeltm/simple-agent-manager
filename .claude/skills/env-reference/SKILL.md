@@ -157,6 +157,18 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT` — Maximum active durable parent waits per project (default: `100`)
 - `ORCHESTRATOR_WAIT_MAX_DURATION_MS` — Maximum finite durable wait deadline (default: `86400000`)
 - `ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM` — Maximum wait subscriptions reconciled by one ProjectData alarm (default: `10`)
+- `PROJECT_DATA_TOOL_METADATA_MAX_BYTES` — Maximum stored `tool_metadata` bytes per ProjectData message before oversized tool content is stripped into bounded metadata (default: `131072`)
+- `PROJECT_DATA_STORAGE_TELEMETRY_ENABLED` — Enables ProjectData `databaseSize` alarm measurement and D1 telemetry writes (default: `true`)
+- `PROJECT_DATA_STORAGE_LIMIT_BYTES` — Cloudflare SQLite-backed Durable Object storage limit used for ProjectData usage classification (default: `10000000000`)
+- `PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS` — Minimum interval between per-object ProjectData storage measurements (default: `3600000`)
+- `PROJECT_DATA_STORAGE_ALERT_INTERVAL_MS` — Minimum interval between repeated critical/degraded ProjectData storage observability alerts (default: `21600000`)
+- `PROJECT_DATA_STORAGE_NOTICE_RATIO` — ProjectData storage usage ratio classified as `notice` (default: `0.6`)
+- `PROJECT_DATA_STORAGE_WARNING_RATIO` — ProjectData storage usage ratio classified as `warning` (default: `0.8`)
+- `PROJECT_DATA_STORAGE_CRITICAL_RATIO` — ProjectData storage usage ratio classified as `critical` (default: `0.9`)
+- `PROJECT_DATA_STORAGE_DEGRADED_RATIO` — ProjectData storage usage ratio classified as `degraded` (default: `0.95`)
+- `PROJECT_DATA_STORAGE_EMERGENCY_TARGET_RATIO` — Target usage ratio for explicit superadmin ProjectData emergency purge calls (default: `0.9`)
+- `PROJECT_DATA_STORAGE_EMERGENCY_BATCH_ROWS` — Oldest `activity_events` and `acp_session_events` rows deleted per table per emergency purge batch (default: `500`)
+- `PROJECT_DATA_STORAGE_EMERGENCY_MAX_BATCHES` — Maximum emergency purge batches per explicit call (default: `4`)
 
 Absent operational brake keys and KV read errors mean enabled. This fail-open
 behavior preserves availability and intentionally differs from the fail-closed

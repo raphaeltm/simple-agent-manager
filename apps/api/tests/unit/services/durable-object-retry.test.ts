@@ -6,6 +6,7 @@ import {
   DEFAULT_DO_RETRY_MAX_ATTEMPTS,
   DEFAULT_DO_RETRY_MAX_DELAY_MS,
   getDurableObjectRetryConfig,
+  isDurableObjectStorageFullError,
   isTransientDurableObjectError,
 } from '../../../src/services/durable-object-retry';
 
@@ -35,6 +36,25 @@ describe('isTransientDurableObjectError', () => {
     expect(isTransientDurableObjectError(new Error('database failed'))).toBe(false);
     expect(isTransientDurableObjectError(new Error('reset password token expired'))).toBe(false);
     expect(isTransientDurableObjectError(null)).toBe(false);
+  });
+
+  it('does not retry SQLITE_FULL storage limit failures', () => {
+    const err = new Error('Durable Object storage operation failed: SQLITE_FULL');
+    expect(isDurableObjectStorageFullError(err)).toBe(true);
+    expect(isTransientDurableObjectError(err)).toBe(false);
+  });
+});
+
+describe('isDurableObjectStorageFullError', () => {
+  it('matches Cloudflare/SQLite full-storage variants', () => {
+    expect(isDurableObjectStorageFullError(new Error('SQLITE_FULL'))).toBe(true);
+    expect(isDurableObjectStorageFullError(new Error('database or disk is full'))).toBe(true);
+    expect(isDurableObjectStorageFullError(new Error('sqlite full while inserting'))).toBe(true);
+  });
+
+  it('does not match unrelated SQLite failures', () => {
+    expect(isDurableObjectStorageFullError(new Error('SQLITE_BUSY'))).toBe(false);
+    expect(isDurableObjectStorageFullError(new Error('database locked'))).toBe(false);
   });
 });
 

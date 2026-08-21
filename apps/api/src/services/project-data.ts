@@ -29,9 +29,11 @@ import { log } from '../lib/logger';
 import {
   computeDurableObjectRetryDelayMs,
   getDurableObjectRetryConfig,
+  isDurableObjectStorageFullError,
   isTransientDurableObjectError,
 } from './durable-object-retry';
 import { ensureOncePerIsolate, forgetEnsuredProjectData } from './project-data-ensure-memo';
+import { toProjectDataStorageFullError } from './project-data-storage-errors';
 
 /**
  * Get a typed DO stub for the given project and ensure the DO knows its projectId.
@@ -64,6 +66,28 @@ function forgetEnsuredProject(env: Env, projectId: string): void {
   forgetEnsuredProjectData(env.PROJECT_DATA.idFromName(projectId).toString());
 }
 
+function normalizeProjectDataRpcError(projectId: string, operation: string, err: unknown): unknown {
+  if (isDurableObjectStorageFullError(err)) {
+    return toProjectDataStorageFullError(projectId, operation, err);
+  }
+  return err;
+}
+
+async function callProjectDataNoRetry<T>(
+  env: Env,
+  projectId: string,
+  operation: string,
+  call: (stub: DurableObjectStub<ProjectData>) => Promise<T>
+): Promise<T> {
+  try {
+    const stub = await getStub(env, projectId);
+    return await call(stub);
+  } catch (err) {
+    forgetEnsuredProject(env, projectId);
+    throw normalizeProjectDataRpcError(projectId, operation, err);
+  }
+}
+
 async function callProjectDataWithRetry<T>(
   env: Env,
   projectId: string,
@@ -83,6 +107,10 @@ async function callProjectDataWithRetry<T>(
       // drop its belief that projectId is persisted and let the next attempt
       // re-ensure. Idempotent, and defence in depth only — see the memo module.
       forgetEnsuredProject(env, projectId);
+
+      if (isDurableObjectStorageFullError(err)) {
+        throw toProjectDataStorageFullError(projectId, operation, err);
+      }
 
       if (attempt >= retryConfig.maxAttempts || !isTransientDurableObjectError(err)) {
         throw err;
@@ -105,7 +133,11 @@ async function callProjectDataWithRetry<T>(
     }
   }
 
-  throw lastError ?? new Error('ProjectData DO retry exhausted without an error');
+  throw normalizeProjectDataRpcError(
+    projectId,
+    operation,
+    lastError ?? new Error('ProjectData DO retry exhausted without an error')
+  );
 }
 
 function sleep(ms: number): Promise<void> {
@@ -124,8 +156,9 @@ export async function createSession(
   taskId: string | null = null,
   createdByUserId: string | null = null
 ): Promise<string> {
-  const stub = await getStub(env, projectId);
-  return stub.createSession(workspaceId, topic, taskId, createdByUserId);
+  return callProjectDataNoRetry(env, projectId, 'createSession', (stub) =>
+    stub.createSession(workspaceId, topic, taskId, createdByUserId)
+  );
 }
 
 export async function linkSessionToWorkspace(
@@ -193,13 +226,14 @@ export async function persistMessage(
   toolMetadata: Record<string, unknown> | null,
   messageId?: string
 ): Promise<string> {
-  const stub = await getStub(env, projectId);
-  return stub.persistMessage(
-    sessionId,
-    role,
-    content,
-    toolMetadata ? JSON.stringify(toolMetadata) : null,
-    messageId
+  return callProjectDataNoRetry(env, projectId, 'persistMessage', (stub) =>
+    stub.persistMessage(
+      sessionId,
+      role,
+      content,
+      toolMetadata ? JSON.stringify(toolMetadata) : null,
+      messageId
+    )
   );
 }
 
@@ -223,21 +257,22 @@ export async function persistMessageBatch(
   maxMessages?: number;
   remainingCapacity?: number;
 }> {
-  const stub = await getStub(env, projectId);
-  return stub.persistMessageBatch(
-    sessionId,
-    messages.map((m) => ({
-      messageId: m.messageId,
-      role: m.role,
-      content: m.content,
-      toolMetadata: m.toolMetadata ? JSON.stringify(m.toolMetadata) : null,
-      timestamp: m.timestamp,
-      sequence: m.sequence,
-      // origin ("system" for SAM-injected messages) MUST be forwarded to the DO
-      // so the persisted message can be collapsed in the UI and excluded from
-      // dedup/search/topic/attention. Dropping it here silently loses the tag.
-      origin: m.origin ?? null,
-    }))
+  return callProjectDataNoRetry(env, projectId, 'persistMessageBatch', (stub) =>
+    stub.persistMessageBatch(
+      sessionId,
+      messages.map((m) => ({
+        messageId: m.messageId,
+        role: m.role,
+        content: m.content,
+        toolMetadata: m.toolMetadata ? JSON.stringify(m.toolMetadata) : null,
+        timestamp: m.timestamp,
+        sequence: m.sequence,
+        // origin ("system" for SAM-injected messages) MUST be forwarded to the DO
+        // so the persisted message can be collapsed in the UI and excluded from
+        // dedup/search/topic/attention. Dropping it here silently loses the tag.
+        origin: m.origin ?? null,
+      }))
+    )
   );
 }
 
@@ -484,15 +519,16 @@ export async function recordActivityEvent(
   taskId: string | null,
   payload: Record<string, unknown> | null
 ): Promise<string> {
-  const stub = await getStub(env, projectId);
-  return stub.recordActivityEvent(
-    eventType,
-    actorType,
-    actorId,
-    workspaceId,
-    sessionId,
-    taskId,
-    payload ? JSON.stringify(payload) : null
+  return callProjectDataNoRetry(env, projectId, 'recordActivityEvent', (stub) =>
+    stub.recordActivityEvent(
+      eventType,
+      actorType,
+      actorId,
+      workspaceId,
+      sessionId,
+      taskId,
+      payload ? JSON.stringify(payload) : null
+    )
   );
 }
 
@@ -732,6 +768,27 @@ export async function getSummary(
 ): Promise<{ lastActivityAt: string; activeSessionCount: number }> {
   const stub = await getStub(env, projectId);
   return stub.getSummary();
+}
+
+export async function measureProjectDataStorage(env: Env, projectId: string) {
+  return callProjectDataNoRetry(env, projectId, 'measureProjectDataStorage', (stub) =>
+    stub.measureStorage()
+  );
+}
+
+export async function runProjectDataStorageEmergencyPurge(
+  env: Env,
+  projectId: string,
+  input: {
+    reason?: string | null;
+    targetRatio?: number | null;
+    batchRows?: number | null;
+    maxBatches?: number | null;
+  } = {}
+) {
+  return callProjectDataNoRetry(env, projectId, 'runProjectDataStorageEmergencyPurge', (stub) =>
+    stub.runStorageEmergencyPurge(input)
+  );
 }
 
 // =========================================================================
