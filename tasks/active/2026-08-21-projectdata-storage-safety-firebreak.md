@@ -46,7 +46,7 @@ The goal is a narrow production-safe firebreak, not full sharding:
 - [x] Run focused local/Miniflare experiments for catchability, deletion reclamation, and alarm behavior; record evidence in this file.
 - [x] Add focused unit/workers tests for classifier, telemetry upsert, alarm execution, emergency purge, and metadata trimming.
 - [x] Update documentation/config references.
-- [ ] Run local specialist reviews: cloudflare-specialist, constitution-validator, test-engineer, doc-sync-validator, security-auditor, task-completion-validator.
+- [x] Run local specialist reviews: cloudflare-specialist, constitution-validator, test-engineer, doc-sync-validator, security-auditor, task-completion-validator.
 - [ ] Open a draft PR and let CI run. Stop before staging/deploy/merge.
 
 ## Acceptance criteria
@@ -70,9 +70,31 @@ The goal is a narrow production-safe firebreak, not full sharding:
 
 ## Specialist review tracker
 
-- cloudflare-specialist: PENDING
-- constitution-validator: PENDING
-- test-engineer: PENDING
-- doc-sync-validator: PENDING
-- security-auditor: PENDING
-- task-completion-validator: PENDING
+- cloudflare-specialist: PASS — additive D1 migration only; no DO schema migration; ProjectData alarm work is isolated/caught and rescheduled through the existing alarm multiplexer; no staging or production mutation performed.
+- constitution-validator: PASS — new thresholds, intervals, caps, and batch bounds are environment-backed with documented defaults; no hardcoded external URLs/credentials/tenant IDs added.
+- test-engineer: PASS — focused unit tests cover storage-full classification and tool metadata capping; Worker-runtime tests cover `databaseSize` reclamation, write-error catchability, alarm telemetry, service measurement, and bounded purge; existing ProjectData service Worker suite still passes.
+- doc-sync-validator: PASS — env declarations, wrangler defaults, `.env.example`, public configuration docs, and API/env reference skills were updated for the new endpoints and config.
+- security-auditor: PASS — recovery endpoints remain behind the existing admin auth/approval/superadmin middleware; storage-full service errors expose only `projectId` and operation; purge deletes only `activity_events` and `acp_session_events` in bounded batches.
+- task-completion-validator: PASS — research findings, checklist items, and acceptance criteria are covered by the diff/tests; no UI inputs or multi-provider selection paths were introduced.
+
+## Local validation
+
+- `pnpm --filter @simple-agent-manager/api typecheck` — PASS
+- `pnpm --filter @simple-agent-manager/api lint` — PASS
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/project-data-messages.test.ts tests/unit/services/durable-object-retry.test.ts` — PASS (2 files, 20 tests)
+- `pnpm vitest run --config vitest.workers.config.ts tests/workers/project-data-storage-safety.test.ts --reporter verbose` — PASS (1 file, 5 tests)
+- `pnpm vitest run --config vitest.workers.config.ts tests/workers/project-data-service.test.ts` — PASS (1 file, 55 tests)
+- `git diff --check main...HEAD` — PASS
+
+## Task completion validation report
+
+Verdict: PASS
+
+| Check | Status | Issues |
+|-------|--------|--------|
+| A: Research → Checklist | PASS | All research findings that identified a required change are covered by checklist items. |
+| B: Checklist → Diff | PASS | Checked implementation items map to substantive code/test/doc changes. |
+| C: Criteria → Tests | PASS | Acceptance criteria are covered by unit tests, Worker-runtime tests, and documented experiment evidence. |
+| D: UI → Backend | N/A | No UI changes or new UI inputs were introduced. |
+| E: Multi-Resource | N/A | No provider/resource selection logic was introduced. |
+| F: Vertical Slice | PASS | Worker-runtime tests cover admin/service-to-DO-to-D1 measurement and service-to-DO purge behavior with real Durable Object SQLite storage. |
