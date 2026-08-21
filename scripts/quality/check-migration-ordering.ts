@@ -64,6 +64,19 @@ const LEGACY_ALLOWED_DUPLICATE_FILES = new Map<string, Map<string, Set<string>>>
           '0112_deployment_release_status_updated_at.sql',
         ]),
       ],
+      // PR #1877's private feedback incident queue migration was applied to
+      // staging on 2026-08-21 as d1_migrations id 142 after #1875/#1876 had
+      // already applied the two current-main 0119 files as ids 140 and 141.
+      // Wrangler keys applied migrations by exact filename, so renaming the
+      // branch migration would replay its ALTER TABLE statements.
+      [
+        '0119',
+        new Set([
+          '0119_platform_feedback_incident_queue.sql',
+          '0119_project_data_storage_telemetry.sql',
+          '0119_vm_admission_control.sql',
+        ]),
+      ],
     ]),
   ],
 ]);
