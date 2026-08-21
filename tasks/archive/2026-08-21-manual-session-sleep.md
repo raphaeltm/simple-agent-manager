@@ -52,7 +52,7 @@ Sleeping sessions must retain the composer and continue to wake when the user se
 - [x] Add unit tests for CompletionDock action modes and ProjectMessageView routing.
 - [x] Update Playwright completion dock audit to cover awake idle Sleep, sleeping Archive, and working Stop/Interrupt on mobile and desktop.
 - [x] Update user-facing docs to mention manual Sleep and the Sleep-before-Archive lifecycle.
-- [ ] Run local UI visual validation and full quality gates.
+- [x] Run local UI visual validation and full quality gates.
 
 ## Acceptance Criteria
 
