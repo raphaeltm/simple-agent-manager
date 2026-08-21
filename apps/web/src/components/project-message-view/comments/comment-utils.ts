@@ -33,11 +33,26 @@ export const COMMENT_STATUS_LABELS = {
   resolved: 'Resolved',
 } satisfies Record<MessageCommentStatus, string>;
 
+let optimisticIdSequence = 0;
+
+function createOptimisticIdSegment(): string {
+  const cryptoApi = globalThis.crypto;
+
+  if (typeof cryptoApi?.randomUUID === 'function') {
+    return cryptoApi.randomUUID();
+  }
+
+  if (typeof cryptoApi?.getRandomValues === 'function') {
+    const values = cryptoApi.getRandomValues(new Uint32Array(4));
+    return Array.from(values, (value) => value.toString(36).padStart(7, '0')).join('');
+  }
+
+  optimisticIdSequence += 1;
+  return `${Date.now().toString(36)}-${optimisticIdSequence.toString(36)}`;
+}
+
 export function createOptimisticId(prefix: string): string {
-  const random = typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : Math.random().toString(36).slice(2);
-  return `optimistic:${prefix}:${random}`;
+  return `optimistic:${prefix}:${createOptimisticIdSegment()}`;
 }
 
 export function commentsForMessage(

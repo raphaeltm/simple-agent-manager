@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   commentsForMessage,
+  createOptimisticId,
   summarizeComments,
   threadStatusForAction,
   upsertThread,
@@ -40,6 +41,10 @@ function makeThread(overrides: Partial<MessageCommentThread> = {}): MessageComme
 }
 
 describe('message comment utilities', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('filters and summarizes message-scoped threads', () => {
     const comments = [
       { ...makeThread({ id: 'c1', status: 'open' }) },
@@ -78,6 +83,19 @@ describe('message comment utilities', () => {
   it('maps composer actions to visible thread status', () => {
     expect(threadStatusForAction('note')).toBe('open');
     expect(threadStatusForAction('send_to_agent')).toBe('sent');
+  });
+
+  it('uses Web Crypto values for optimistic ids when randomUUID is unavailable', () => {
+    const getRandomValues = vi.fn((values: Uint32Array) => {
+      values.set([1, 35, 1295, 46655]);
+      return values;
+    });
+    vi.stubGlobal('crypto', { getRandomValues });
+
+    const id = createOptimisticId('thread');
+
+    expect(id).toMatch(/^optimistic:thread:[0-9a-z]+$/);
+    expect(getRandomValues).toHaveBeenCalledTimes(1);
   });
 });
 
