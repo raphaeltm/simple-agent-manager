@@ -8,7 +8,6 @@
  */
 import type {
   ConversationItem,
-  PlanItem,
   SlashCommand,
   ToolCallContentItem,
 } from '@simple-agent-manager/acp-client';
@@ -25,21 +24,13 @@ import { ChatFilePanel } from '../chat/ChatFilePanel';
 import { ChatTimelineDrawer } from '../chat/ChatTimelineDrawer';
 import { TruncatedSummary } from '../chat/TruncatedSummary';
 import { FailureCard } from '../debug/FailureCard';
-import { AcpConversationItemView } from './AcpConversationItemView';
-import type { MessageCommentDraft } from './comments/comment-utils';
-import { SelectionActionBar, SelectionPopover } from './comments/CommentPrimitives';
-import type { CommentActions } from './comments/MessageCommentPanels';
-import {
-  DesktopCommentRail,
-  getMessageComments,
-  InlineMessageComments,
-  MessageCommentActionRow,
-} from './comments/MessageCommentPanels';
-import { useCoarsePointer,useCommentSelection } from './comments/useCommentSelection';
+import { CommentableConversationItem } from './comments/CommentableConversationItem';
 import { useMessageComments } from './comments/useMessageComments';
+import { useProjectMessageCommentUi } from './comments/useProjectMessageCommentUi';
 import { CompletionDock } from './CompletionDock';
 import { FollowUpInput, ReadOnlyFollowUp } from './FollowUpInput';
 import { ConnectionBanner } from './MessageBanners';
+import { currentPlanToPlanItem, ElapsedTime } from './session-view-utils';
 import { SessionHeader } from './SessionHeader';
 import { StaleActivityNotice } from './StaleActivityNotice';
 import type { TimelineJumpTarget } from './timeline-types';
@@ -239,45 +230,6 @@ function FloatingHeader({
   );
 }
 
-/** Convert session state plan array to PlanItem for the CompletionDock plan pill / PlanModal. */
-function currentPlanToPlanItem(plan: Array<{ content: string; status: string }>): PlanItem {
-  return {
-    kind: 'plan',
-    id: 'session-plan',
-    entries: plan.map((e) => ({
-      content: e.content,
-      priority: 'medium' as const,
-      status: (e.status === 'completed'
-        ? 'completed'
-        : e.status === 'in_progress'
-          ? 'in_progress'
-          : 'pending') as 'pending' | 'in_progress' | 'completed',
-    })),
-    timestamp: Date.now(),
-  };
-}
-
-/** Live elapsed-time display since prompt started. */
-const ElapsedTime: FC<{ startedAt: number }> = ({ startedAt }) => {
-  const [elapsed, setElapsed] = useState('');
-  useEffect(() => {
-    const update = () => {
-      const seconds = Math.floor((Date.now() - startedAt) / 1000);
-      const m = Math.floor(seconds / 60);
-      const s = seconds % 60;
-      setElapsed(m > 0 ? `${m}m ${s}s` : `${s}s`);
-    };
-    update();
-    const interval = setInterval(update, 1000);
-    return () => clearInterval(interval);
-  }, [startedAt]);
-  return (
-    <span className="text-xs text-fg-muted tabular-nums" aria-hidden="true">
-      ({elapsed})
-    </span>
-  );
-};
-
 interface ProjectMessageViewProps {
   projectId: string;
   sessionId: string;
@@ -328,9 +280,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [floatingHeaderRef, floatingHeaderHeight] = useFloatingHeaderHeight();
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
-  const [activeCommentMessageId, setActiveCommentMessageId] = useState<string | null>(null);
-  const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
-  const [commentDraft, setCommentDraft] = useState<MessageCommentDraft | null>(null);
 
   const messageComments = useMessageComments(projectId, sessionId, Boolean(projectId && sessionId));
 
@@ -481,42 +430,14 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const fileClickHandler =
     lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined;
   const canWriteSession = lc.session?.isMine !== false;
-
-  const { selection: activeSelection, clear: clearCommentSelection } = useCommentSelection(
-    canWriteSession && conversationItems.length > 0,
-    chatLogRef
-  );
-  const coarsePointer = useCoarsePointer();
-
-  const startCommentDraft = useCallback(
-    (draft: MessageCommentDraft) => {
-      setCommentDraft(draft);
-      setActiveCommentMessageId(draft.anchorId);
-      setFocusedCommentId(null);
-      clearCommentSelection();
-    },
-    [clearCommentSelection]
-  );
-
-  const clearCommentDraft = useCallback(() => setCommentDraft(null), []);
-
-  const commentActions = useMemo<CommentActions>(
-    () => ({
-      createThread: (input) => messageComments.createThread(input),
-      reply: (input) => messageComments.reply(input),
-      resolve: (commentId) => messageComments.resolve(commentId),
-      reopen: (commentId) => messageComments.reopen(commentId),
-      sendToAgent: (input) => messageComments.sendToAgent(input),
-    }),
-    [messageComments]
-  );
-
-  useEffect(() => {
-    setActiveCommentMessageId(null);
-    setFocusedCommentId(null);
-    setCommentDraft(null);
-    clearCommentSelection();
-  }, [clearCommentSelection, sessionId]);
+  const commentUi = useProjectMessageCommentUi({
+    messageComments,
+    canWriteSession,
+    hasMessages: conversationItems.length > 0,
+    chatLogRef,
+    sessionId,
+    scrollAndHighlight,
+  });
 
   /**
    * Row renderer for the virtualized conversation.
@@ -533,74 +454,25 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
    */
   const renderConversationItem = useCallback(
     (index: number, item: ConversationItem) => {
-      const isCommentableMessage =
-        item.kind === 'agent_message' || (item.kind === 'user_message' && item.origin !== 'system');
-      const itemComments = isCommentableMessage
-        ? getMessageComments(messageComments.comments, item.id)
-        : [];
-      const hasUnresolvedComments = itemComments.some((comment) => comment.status !== 'resolved');
-      const isCommentsExpanded = activeCommentMessageId === item.id;
-      const draftForMessage = commentDraft?.anchorId === item.id ? commentDraft : null;
-      const inlineComments = isCommentsExpanded || draftForMessage ? itemComments : [];
-      const commentAccentClass =
-        itemComments.length === 0
-          ? ''
-          : hasUnresolvedComments
-            ? ' lg:border-l-2 lg:border-warning/60'
-            : ' lg:border-l-2 lg:border-border-default';
-
       return (
-        <div
-          className={`sam-message-entry px-4 pb-3${highlightedItemId === item.id ? ' sam-message-highlight' : ''}${commentAccentClass}`}
-          data-commented={itemComments.length > 0 ? 'true' : undefined}
-        >
-          <div data-comment-anchor={isCommentableMessage ? item.id : undefined}>
-            <AcpConversationItemView
-              item={item}
-              projectId={projectId}
-              onFileClick={fileClickHandler}
-              onLoadToolContent={handleLoadToolContent}
-              animateText={
-                item.kind === 'agent_message' &&
-                index - lc.firstItemIndex === animationTargetIdx &&
-                lc.agentActivity === 'responding'
-              }
-              animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
-            />
-          </div>
-
-          {isCommentableMessage && (canWriteSession || itemComments.length > 0) && (
-            <MessageCommentActionRow
-              messageId={item.id}
-              comments={itemComments}
-              expanded={isCommentsExpanded}
-              canComment={canWriteSession}
-              onToggle={() => {
-                setActiveCommentMessageId(isCommentsExpanded ? null : item.id);
-                setFocusedCommentId(null);
-              }}
-              onStartComment={() => startCommentDraft({ anchorId: item.id })}
-            />
-          )}
-
-          {isCommentableMessage && (
-            <div className="lg:hidden">
-              <InlineMessageComments
-                messageId={item.id}
-                comments={inlineComments}
-                draft={draftForMessage}
-                focusedCommentId={focusedCommentId}
-                actions={commentActions}
-                onClose={() => setActiveCommentMessageId(null)}
-                onClearDraft={clearCommentDraft}
-              />
-            </div>
-          )}
-        </div>
+        <CommentableConversationItem
+          index={index}
+          firstItemIndex={lc.firstItemIndex}
+          item={item}
+          projectId={projectId}
+          highlighted={highlightedItemId === item.id}
+          onFileClick={fileClickHandler}
+          onLoadToolContent={handleLoadToolContent}
+          animateAgentText
+          animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
+          canWriteSession={canWriteSession}
+          agentActivity={lc.agentActivity}
+          animationTargetIdx={animationTargetIdx}
+          commentState={commentUi.rowState}
+        />
       );
     },
     [
-      activeCommentMessageId,
       highlightedItemId,
       projectId,
       fileClickHandler,
@@ -609,13 +481,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       lc.agentActivity,
       animationTargetIdx,
       animatedUserMsgIds,
-      messageComments.comments,
-      commentDraft,
       canWriteSession,
-      startCommentDraft,
-      focusedCommentId,
-      commentActions,
-      clearCommentDraft,
+      commentUi.rowState,
     ]
   );
 
@@ -643,15 +510,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     onCloseConversation &&
     (lc.taskEmbed?.taskMode === 'conversation' ||
       (!lc.taskEmbed?.id && lc.session?.status === 'active'))
-  );
-
-  const handleSelectCommentMessage = useCallback(
-    (messageId: string, commentId?: string) => {
-      setActiveCommentMessageId(messageId);
-      setFocusedCommentId(commentId ?? null);
-      scrollAndHighlight(messageId);
-    },
-    [scrollAndHighlight]
   );
 
   // Initial load — only show full spinner when no data exists yet
@@ -829,48 +687,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               </button>
             )}
 
-            {activeSelection && canWriteSession && (
-              coarsePointer ? (
-                <SelectionActionBar
-                  quote={activeSelection.quote}
-                  onComment={() =>
-                    startCommentDraft({
-                      anchorId: activeSelection.anchorId,
-                      quote: activeSelection.quote,
-                    })
-                  }
-                  onDismiss={clearCommentSelection}
-                />
-              ) : (
-                <SelectionPopover
-                  x={activeSelection.x}
-                  y={activeSelection.y}
-                  onComment={() =>
-                    startCommentDraft({
-                      anchorId: activeSelection.anchorId,
-                      quote: activeSelection.quote,
-                    })
-                  }
-                />
-              )
-            )}
+            {commentUi.selectionControls}
           </div>
 
-          <DesktopCommentRail
-            comments={messageComments.comments}
-            draft={commentDraft}
-            loading={messageComments.loading}
-            refreshing={messageComments.refreshing}
-            error={messageComments.error}
-            activeMessageId={activeCommentMessageId}
-            focusedCommentId={focusedCommentId}
-            actions={commentActions}
-            onRetry={() => {
-              void messageComments.refetch();
-            }}
-            onClearDraft={clearCommentDraft}
-            onSelectMessage={handleSelectCommentMessage}
-          />
+          {commentUi.desktopRail}
         </div>
       )}
 
