@@ -35,6 +35,7 @@ import {
 import { cleanupTaskRun } from './task-runner';
 import { sleepVmAgentContainer } from './vm-agent-container';
 
+export type { HarnessWorkConfig } from './session-idleness';
 export {
   DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS,
   DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS,
@@ -42,7 +43,6 @@ export {
   isHarnessWorkLeaseActive,
   parseHarnessWorkConfig,
 } from './session-idleness';
-export type { HarnessWorkConfig } from './session-idleness';
 
 async function finishSleepingWorkspaceComputeCleanup(
   db: ReturnType<typeof drizzle<typeof schema>>,
