@@ -121,8 +121,8 @@ export {
   DEFAULT_VM_ADMISSION_RETRY_MIN_MS,
   DEFAULT_VM_ADMISSION_WAIT_TIMEOUT_MS,
   DEFAULT_VM_ADMISSION_WAKE_BATCH_SIZE,
-  type VmAdmissionControlMode,
   VM_ADMISSION_CONTROL_MODES,
+  type VmAdmissionControlMode,
 } from './task-execution';
 
 // Durable execution supervisor foundation

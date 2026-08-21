@@ -1,17 +1,16 @@
+import type { Env } from '../env';
 import type {
+  VmAdmissionConfig,
+  VmAdmissionExpired,
   VmAdmissionReason,
   VmAdmissionState,
   VmAdmissionWait,
-  VmAdmissionConfig,
-  VmAdmissionExpired,
   VmProviderCapacityInfo,
   VmProvisioningLeaseResult,
   VmProvisioningLeaseRow,
   VmTaskAdmissionIdentity,
   VmTaskAdmissionRow,
 } from './vm-admission-control-types';
-
-import type { Env } from '../env';
 import {
   changes,
   first,
@@ -20,20 +19,9 @@ import {
   toIso,
   truncateDiagnosticMessage,
 } from './vm-admission-control-types';
-import { wakeVmAdmissionWaiters } from './vm-admission-wakeup';
 import { activeProviderCapacityCooldown } from './vm-admission-provider-capacity';
+import { wakeVmAdmissionWaiters } from './vm-admission-wakeup';
 
-export {
-  getVmAdmissionDiagnostics,
-  isActiveVmAdmissionState,
-  wakeVmAdmissionWaiters,
-} from './vm-admission-wakeup';
-export {
-  classifyVmProviderCapacityError,
-  isProviderAccountCapacityError,
-  recordVmProviderCapacityFailure,
-  recordVmProviderCapacitySuccess,
-} from './vm-admission-provider-capacity';
 export {
   getVmAdmissionConfig,
   resolveVmAdmissionScope,
@@ -48,6 +36,17 @@ export {
   type VmProvisioningLeaseResult,
   type VmTaskAdmissionIdentity,
 } from './vm-admission-control-types';
+export {
+  classifyVmProviderCapacityError,
+  isProviderAccountCapacityError,
+  recordVmProviderCapacityFailure,
+  recordVmProviderCapacitySuccess,
+} from './vm-admission-provider-capacity';
+export {
+  getVmAdmissionDiagnostics,
+  isActiveVmAdmissionState,
+  wakeVmAdmissionWaiters,
+} from './vm-admission-wakeup';
 
 export async function ensureVmTaskAdmission(
   env: Env,

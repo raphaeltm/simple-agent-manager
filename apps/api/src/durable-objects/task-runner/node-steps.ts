@@ -21,10 +21,10 @@ import {
   renewVmProvisioningLease,
   resolveVmAdmissionScope,
   tryAcquireVmProvisioningLease,
-  waitForVmAdmissionCapacity,
   type VmAdmissionWait,
   type VmProvisioningLeaseResult,
   type VmTaskAdmissionIdentity,
+  waitForVmAdmissionCapacity,
 } from '../../services/vm-admission-control';
 import { assertClaimedNodeAvailable } from './claimed-node-availability';
 import { parseEnvInt } from './helpers';

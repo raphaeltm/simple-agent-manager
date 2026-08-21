@@ -21,8 +21,8 @@ import {
   recordVmProviderCapacityFailure,
   releaseVmProvisioningLease,
   tryAcquireVmProvisioningLease,
-  waitForVmAdmissionCapacity,
   type VmTaskAdmissionIdentity,
+  waitForVmAdmissionCapacity,
 } from '../../src/services/vm-admission-control';
 import {
   reserveWorkspacePlacement,

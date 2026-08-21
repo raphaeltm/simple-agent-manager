@@ -1,9 +1,9 @@
 import type {
   CredentialProvider,
   CredentialSource,
+  VmAdmissionControlMode,
   VMLocation,
   VMSize,
-  VmAdmissionControlMode,
 } from '@simple-agent-manager/shared';
 import {
   DEFAULT_VM_ADMISSION_CONTROL_MODE,
