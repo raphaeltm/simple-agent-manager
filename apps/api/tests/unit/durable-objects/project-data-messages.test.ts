@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { getMessages } from '../../../src/durable-objects/project-data/messages';
 import {
   boundToolMetadataForStorage,
   DEFAULT_PROJECT_DATA_TOOL_METADATA_MAX_BYTES,
-  getMessages,
-} from '../../../src/durable-objects/project-data/messages';
+} from '../../../src/durable-objects/project-data/tool-metadata-storage';
 import type { Env } from '../../../src/durable-objects/project-data/types';
 import { log } from '../../../src/lib/logger';
 

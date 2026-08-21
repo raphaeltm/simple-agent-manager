@@ -86,14 +86,15 @@ The goal is a narrow production-safe firebreak, not full sharding:
 - `pnpm vitest run --config vitest.workers.config.ts tests/workers/project-data-service.test.ts` — PASS (1 file, 55 tests)
 - `pnpm tsx scripts/quality/ast-checks.ts --file apps/api/src/durable-objects/project-data/storage-safety.ts --rule sql-injection` — PASS
 - `pnpm quality:ast-checks` — PASS (0 errors, existing warnings only)
+- `pnpm quality:file-sizes` — PASS
 - `GITHUB_EVENT_NAME=pull_request GITHUB_EVENT_PATH=<(env -u GH_TOKEN -u GITHUB_TOKEN gh pr view 1875 --json body,url --jq '{pull_request:{body:.body,html_url:.url}}') pnpm quality:preflight` — PASS
 - `git diff --check main...HEAD` — PASS
 
 ## PR / CI evidence
 
 - Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/1875
-- Initial CI exposed two branch issues before later jobs completed: missing PR preflight evidence block, and AST SQL-injection rule rejection of the purge helper's dynamic table-name template literal.
-- Remediation: PR body now includes the required `AGENT_PREFLIGHT` evidence block; purge helper now uses fixed SQL statements for `activity_events` and `acp_session_events` instead of a dynamic table-name interpolation.
+- Initial CI exposed three branch issues before later jobs completed: missing PR preflight evidence block, AST SQL-injection rule rejection of the purge helper's dynamic table-name template literal, and `messages.ts` exceeding the mandatory 800-line file-size ceiling.
+- Remediation: PR body now includes the required `AGENT_PREFLIGHT` evidence block; purge helper now uses fixed SQL statements for `activity_events` and `acp_session_events`; tool metadata bounding now lives in `apps/api/src/durable-objects/project-data/tool-metadata-storage.ts`, bringing `messages.ts` below the hard ceiling.
 
 ## Task completion validation report
 
