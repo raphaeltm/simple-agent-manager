@@ -1,10 +1,19 @@
-import { VoiceButton, type VoiceButtonState } from '@simple-agent-manager/acp-client';
+import {
+  appendDictatedText,
+  VoiceButton,
+  type VoiceButtonState,
+} from '@simple-agent-manager/acp-client';
 import { Button, Textarea } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { getTranscribeApiUrl } from '../../../lib/api/agents';
 import type { MessageCommentAction } from '../../../lib/api/comments';
 import { QuotedAnchor } from './CommentPrimitives';
+
+/** Resting height, matching the 3-row size this composer had before auto-grow. */
+const TEXTAREA_MIN_HEIGHT_PX = 76;
+/** Ceiling before the field scrolls internally, mirroring ProjectChatComposer. */
+const TEXTAREA_MAX_HEIGHT_PX = 200;
 
 export interface CommentComposerProps {
   quote?: string;
@@ -29,7 +38,14 @@ export function CommentComposer({
   const [submitting, setSubmitting] = useState(false);
   const [voiceState, setVoiceState] = useState<VoiceButtonState>('idle');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const canSubmit = body.trim().length > 0 && !submitting;
+  // Submitting unmounts this composer, so a submit landing mid-dictation would
+  // post the comment WITHOUT the words still being recorded or transcribed, with
+  // no signal to the user. Hold submission until the mic is back to idle.
+  const voiceBusy = voiceState === 'recording' || voiceState === 'processing';
+  const canSubmit = body.trim().length > 0 && !submitting && !voiceBusy;
+  // Resolved here rather than threaded down as a prop: it is a pure derivation
+  // of a build-time constant, so relaying it through CommentThread and
+  // MessageCommentPanels would add a pass-through prop carrying no information.
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
   const recording = voiceState === 'recording';
 
@@ -37,19 +53,25 @@ export function CommentComposer({
     if (autoFocus) textareaRef.current?.focus();
   }, [autoFocus]);
 
-  // Same append-and-refocus contract as ProjectChatComposer so dictation feels
-  // identical wherever the mic appears.
+  // The mic overlay covers the native resize grip, so the field grows itself
+  // instead — same scrollHeight technique ProjectChatComposer already uses.
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    const fitted = Math.max(textarea.scrollHeight, TEXTAREA_MIN_HEIGHT_PX);
+    textarea.style.height = `${Math.min(fitted, TEXTAREA_MAX_HEIGHT_PX)}px`;
+  }, [body]);
+
   const handleTranscription = useCallback((text: string) => {
-    setBody((current) => {
-      const separator = current.length > 0 && !current.endsWith(' ') ? ' ' : '';
-      return current + separator + text;
-    });
+    setBody((current) => appendDictatedText(current, text));
     textareaRef.current?.focus();
   }, []);
 
   const submit = async (overrideAction = action) => {
     const trimmed = body.trim();
-    if (!trimmed || submitting) return;
+    // Guard here too, not just on the button: ⌘⏎ and form submit bypass it.
+    if (!trimmed || submitting || voiceBusy) return;
     setSubmitting(true);
     try {
       await onSubmit(trimmed, overrideAction);
@@ -143,7 +165,9 @@ export function CommentComposer({
         <Button size="sm" variant="ghost" type="button" onClick={onCancel}>
           Cancel
         </Button>
-        <span className="ml-auto hidden text-[0.6875rem] text-fg-muted sm:inline">⌘⏎ to submit</span>
+        <span className="ml-auto hidden text-[0.6875rem] text-fg-muted sm:inline">
+          ⌘⏎ to submit
+        </span>
       </div>
     </form>
   );

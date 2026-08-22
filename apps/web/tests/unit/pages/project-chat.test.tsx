@@ -116,7 +116,11 @@ vi.mock('../../../src/components/task-hierarchy', async (importOriginal) => {
   };
 });
 
-vi.mock('@simple-agent-manager/acp-client', () => ({
+// Spreads the real module so pure helpers keep their real behavior (the composer
+// builds appended dictation via appendDictatedText); only the components that
+// actually need stubbing are overridden below.
+vi.mock('@simple-agent-manager/acp-client', async (importActual) => ({
+  ...(await importActual<typeof import('@simple-agent-manager/acp-client')>()),
   VoiceButton: ({
     onTranscription,
     disabled,

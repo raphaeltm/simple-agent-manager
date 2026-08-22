@@ -5,6 +5,19 @@ import { parseJsonRecord, readResponseJsonRecord } from '../runtime-validation';
 /** VoiceButton states */
 export type VoiceButtonState = 'idle' | 'recording' | 'processing' | 'error';
 
+/**
+ * Appends dictated text to whatever the user has already typed, inserting a
+ * single separating space only when one is actually needed.
+ *
+ * Every VoiceButton host does this, so the rule lives here rather than being
+ * re-derived per composer. Hosts still own their own state setter and focus
+ * ref — only the string rule is shared.
+ */
+export function appendDictatedText(previous: string, text: string): string {
+  const separator = previous.length > 0 && !previous.endsWith(' ') ? ' ' : '';
+  return previous + separator + text;
+}
+
 export interface VoiceButtonProps {
   /** Called with transcribed text when transcription completes */
   onTranscription: (text: string) => void;
@@ -18,6 +31,11 @@ export interface VoiceButtonProps {
    * Notified whenever the button's internal state changes. Lets a host surface
    * reflect recording/processing status (e.g. tinting the composer it sits in)
    * without duplicating the recorder state machine.
+   *
+   * Treat these as level-triggered (the current state), not edge-triggered
+   * events: the current state is published on mount, and React StrictMode
+   * double-invokes effects in development, so a handler that counts calls will
+   * over-count. Setting state from it is safe and idempotent.
    */
   onStateChange?: (state: VoiceButtonState) => void;
 }
@@ -116,9 +134,14 @@ export function VoiceButton({
     onStateChangeRef.current?.(state);
   }, [state]);
 
+  // Set once the host has gone away, so a recording torn down by unmount does
+  // not upload audio whose transcription has nowhere left to land.
+  const unmountedRef = useRef(false);
+
   // Clean up on unmount
   useEffect(() => {
     return () => {
+      unmountedRef.current = true;
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
@@ -231,6 +254,11 @@ export function VoiceButton({
           setState('idle');
           return;
         }
+
+        // The host unmounted mid-recording (e.g. the composer was cancelled).
+        // onTranscription now points at a dead closure, so uploading would burn
+        // a request and silently discard the result.
+        if (unmountedRef.current) return;
 
         // Send audio to transcription API
         setState('processing');

@@ -491,8 +491,16 @@ test.describe('message comments audit — desktop 1280x800', () => {
     await mic.click();
     const stop = rail.getByRole('button', { name: 'Stop recording' });
     await expect(stop).toBeVisible();
-    await expect(field).toHaveCSS('border-color', /rgb\(/);
+    // Dark theme resolves --sam-color-danger to #ef4444.
+    await expect(field).toHaveCSS('border-color', 'rgb(239, 68, 68)');
     await screenshot(page, 'message-comments-desktop-voice-recording');
+
+    // The tint is a theme token, not a fixed color: light theme must re-resolve
+    // it to #dc2626 rather than keeping the dark value.
+    await page.evaluate(() => document.documentElement.setAttribute('data-ui-theme', 'sam-light'));
+    await expect(field).toHaveCSS('border-color', 'rgb(220, 38, 38)');
+    await screenshot(page, 'message-comments-desktop-voice-recording-light');
+    await page.evaluate(() => document.documentElement.setAttribute('data-ui-theme', 'sam'));
 
     await stop.click();
     await expect(field).toHaveValue('Typed first. Dictated from voice.');

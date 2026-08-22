@@ -148,9 +148,7 @@ describe('CommentComposer', () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const onCancel = vi.fn();
 
-    render(
-      <CommentComposer quote="Quoted text" onSubmit={onSubmit} onCancel={onCancel} />
-    );
+    render(<CommentComposer quote="Quoted text" onSubmit={onSubmit} onCancel={onCancel} />);
 
     const textarea = screen.getByLabelText('Add a comment…') as HTMLTextAreaElement;
     expect(document.activeElement).toBe(textarea);
@@ -185,10 +183,115 @@ describe('CommentComposer', () => {
       expect(textarea.value).toBe('Typed first. Dictated words.');
     });
 
+    // Submission stays gated until the mic reports idle, so wait for the gate to
+    // lift rather than submitting into it.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Comment' })).not.toBeDisabled();
+    });
     fireEvent.submit(textarea.closest('form')!);
 
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledWith('Typed first. Dictated words.', 'note');
+    });
+  });
+
+  it('does not insert a double space when the body already ends in one', async () => {
+    render(<CommentComposer onSubmit={vi.fn()} onCancel={vi.fn()} />);
+
+    const textarea = screen.getByLabelText('Add a comment…') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Trailing space ' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start voice input' }));
+    await waitFor(() => screen.getByRole('button', { name: 'Stop recording' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }));
+
+    await waitFor(() => {
+      expect(textarea.value).toBe('Trailing space Dictated words.');
+    });
+  });
+
+  it('holds submission until dictation finishes so speech is never dropped', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<CommentComposer onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    const textarea = screen.getByLabelText('Add a comment…') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Typed.' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start voice input' }));
+    await waitFor(() => screen.getByRole('button', { name: 'Stop recording' }));
+
+    // Submitting unmounts this composer, which would post the comment without
+    // the words still being recorded — and without telling the user.
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+    fireEvent.submit(textarea.closest('form')!);
+    expect(screen.getByRole('button', { name: 'Comment' })).toBeDisabled();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }));
+    await waitFor(() => {
+      expect(textarea.value).toBe('Typed. Dictated words.');
+    });
+
+    // Once dictation lands and the mic reports idle, the full text submits.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Comment' })).not.toBeDisabled();
+    });
+    fireEvent.submit(textarea.closest('form')!);
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith('Typed. Dictated words.', 'note');
+    });
+  });
+
+  it('keeps typed text and recovers the mic when transcription fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: false, status: 500, text: async () => '' })
+    );
+
+    render(<CommentComposer onSubmit={vi.fn()} onCancel={vi.fn()} />);
+
+    const textarea = screen.getByLabelText('Add a comment…') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Typed and kept.' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start voice input' }));
+    await waitFor(() => screen.getByRole('button', { name: 'Stop recording' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Transcription failed/i })).toBeTruthy();
+    });
+
+    // The failure must not eat the user's typing, strand the border tint, or
+    // leave submission permanently blocked. The submit gate clears one render
+    // after the mic reports 'error', so wait for it rather than sampling.
+    expect(textarea.value).toBe('Typed and kept.');
+    expect(textarea.style.borderColor).toBe('');
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Comment' })).not.toBeDisabled();
+    });
+  });
+
+  it('ignores the mic while a submit is in flight', async () => {
+    let release: () => void = () => {};
+    const onSubmit = vi
+      .fn()
+      .mockImplementation(() => new Promise<void>((resolve) => (release = () => resolve())));
+
+    render(<CommentComposer onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    const textarea = screen.getByLabelText('Add a comment…') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'In flight.' } });
+    fireEvent.submit(textarea.closest('form')!);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Start voice input' })).toBeDisabled();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Start voice input' }));
+    expect(screen.queryByRole('button', { name: 'Stop recording' })).toBeNull();
+
+    release();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Start voice input' })).not.toBeDisabled();
     });
   });
 
