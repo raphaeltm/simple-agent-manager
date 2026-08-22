@@ -4,8 +4,8 @@ import { X } from 'lucide-react';
 import type { MessageCommentAction } from '../../lib/api/comments';
 import { CommentComposer } from '../project-message-view/comments/CommentComposer';
 import { CommentThreadList } from '../project-message-view/comments/CommentThread';
-import { useLibraryFileComments } from './useLibraryFileComments';
 import { FOCUS_RING } from './types';
+import { useLibraryFileComments } from './useLibraryFileComments';
 
 interface FileCommentPanelProps {
   projectId: string;
@@ -67,7 +67,6 @@ export function FileCommentPanel({ projectId, fileId, onClose }: FileCommentPane
         <CommentComposer
           placeholder="Add a comment on this file…"
           submitLabel="Comment"
-          autoFocus={false}
           hideSendToAgent
           onSubmit={handleCreateThread}
           onCancel={onClose}

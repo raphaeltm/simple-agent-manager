@@ -1,7 +1,12 @@
+import type { LibraryFileCommentThread } from '@simple-agent-manager/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import type { JsonRpcResponse, McpTokenData } from '../../../src/routes/mcp/_helpers';
+
+// ---------------------------------------------------------------------------
+// Mocks — must be declared before importing the handlers
+// ---------------------------------------------------------------------------
 
 const findFirstMock = vi.fn();
 
@@ -18,11 +23,19 @@ vi.mock('drizzle-orm/d1', () => ({
   }),
 }));
 
+vi.mock('../../../src/lib/logger', () => ({
+  log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
+}));
+
 import {
   handleCreateLibraryFileCommentThread,
   handleListLibraryFileCommentThreads,
 } from '../../../src/routes/mcp/library-file-comment-tools';
 import * as projectDataService from '../../../src/services/project-data';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function makeToken(overrides: Partial<McpTokenData> = {}): McpTokenData {
   return {
@@ -48,35 +61,74 @@ function makeEnv(overrides = {}): Env {
   } as unknown as Env;
 }
 
+function makeFileThread(
+  overrides: Partial<LibraryFileCommentThread> = {}
+): LibraryFileCommentThread {
+  return {
+    id: 'thread-1',
+    fileId: 'file-1',
+    anchor: {
+      kind: 'library_file',
+      fileId: 'file-1',
+      quote: 'some quoted code',
+    },
+    author: {
+      kind: 'agent',
+      id: 'agent-session-1',
+      displayName: 'SAM agent',
+    },
+    body: 'Please address this feedback',
+    status: 'open',
+    createdAt: 1000,
+    updatedAt: 1000,
+    resolvedAt: null,
+    replyCount: 0,
+    lastReplyAt: null,
+    replies: [],
+    ...overrides,
+  };
+}
+
 function parseToolResponse(response: JsonRpcResponse): unknown {
   const result = response.result as { content: Array<{ text: string }> };
   return JSON.parse(result.content[0]?.text ?? '{}') as unknown;
 }
 
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 describe('MCP library-file comment tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: file exists
     findFirstMock.mockResolvedValue({ id: 'file-1' });
   });
 
+  // -----------------------------------------------------------------------
+  // handleListLibraryFileCommentThreads
+  // -----------------------------------------------------------------------
+
   describe('handleListLibraryFileCommentThreads', () => {
-    it('returns threads with cursor→afterSequence mapping', async () => {
+    it('lists file comment threads with cursor-to-afterSequence mapping', async () => {
+      const threads = [
+        { ...makeFileThread({ id: 't-1' }), sequence: 5 },
+        { ...makeFileThread({ id: 't-2' }), sequence: 8 },
+      ];
       vi.mocked(projectDataService.listCommentThreads).mockResolvedValue({
-        threads: [
-          { id: 't-1', sequence: 5, status: 'open', body: 'hello', anchor: { kind: 'library_file', fileId: 'file-1', quote: null } } as never,
-          { id: 't-2', sequence: 8, status: 'open', body: 'world', anchor: { kind: 'library_file', fileId: 'file-1', quote: null } } as never,
-        ],
+        threads,
         hasMore: true,
       });
 
-      const resp = await handleListLibraryFileCommentThreads(
+      const response = await handleListLibraryFileCommentThreads(
         'req-1',
         { fileId: 'file-1', cursor: '3', limit: 10 },
         makeToken(),
         makeEnv()
       );
 
-      expect(projectDataService.listCommentThreads).toHaveBeenCalledWith(
+      expect(response.error).toBeUndefined();
+      expect(vi.mocked(projectDataService.listCommentThreads)).toHaveBeenCalledWith(
         expect.anything(),
         'project-1',
         expect.objectContaining({
@@ -86,12 +138,13 @@ describe('MCP library-file comment tools', () => {
         })
       );
 
-      const data = parseToolResponse(resp) as {
+      const data = parseToolResponse(response) as {
         threads: unknown[];
         hasMore: boolean;
         nextCursor: string | null;
       };
       expect(data.hasMore).toBe(true);
+      // nextCursor is the string form of the last thread's sequence
       expect(data.nextCursor).toBe('8');
       expect(data.threads).toHaveLength(2);
     });
@@ -102,59 +155,63 @@ describe('MCP library-file comment tools', () => {
         hasMore: false,
       });
 
-      const resp = await handleListLibraryFileCommentThreads(
+      const response = await handleListLibraryFileCommentThreads(
         'req-2',
         { fileId: 'file-1' },
         makeToken(),
         makeEnv()
       );
 
-      const data = parseToolResponse(resp) as {
-        threads: unknown[];
-        hasMore: boolean;
-        nextCursor: string | null;
-      };
-      expect(data.threads).toHaveLength(0);
-      expect(data.hasMore).toBe(false);
-      expect(data.nextCursor).toBeNull();
-    });
-
-    it('requires fileId', async () => {
-      const resp = await handleListLibraryFileCommentThreads('req-3', {}, makeToken(), makeEnv());
-
-      expect(resp.error).toBeDefined();
-      expect((resp.error as { code: number }).code).toBe(-32602);
-      expect((resp.error as { message: string }).message).toContain('fileId is required');
+      expect(response.error).toBeUndefined();
+      expect(parseToolResponse(response)).toEqual({
+        threads: [],
+        hasMore: false,
+        nextCursor: null,
+      });
     });
 
     it('rejects caller-derived identity fields', async () => {
-      const resp = await handleListLibraryFileCommentThreads(
-        'req-4',
+      const response = await handleListLibraryFileCommentThreads(
+        'req-3',
         { fileId: 'file-1', projectId: 'evil-project' },
         makeToken(),
         makeEnv()
       );
 
-      expect(resp.error).toBeDefined();
-      expect((resp.error as { code: number }).code).toBe(-32602);
-      expect((resp.error as { message: string }).message).toContain('projectId is derived');
+      expect(response.error?.code).toBe(-32602);
+      expect(response.error?.message).toContain('projectId is derived');
+      expect(vi.mocked(projectDataService.listCommentThreads)).not.toHaveBeenCalled();
+    });
+
+    it('validates fileId is required', async () => {
+      const response = await handleListLibraryFileCommentThreads(
+        'req-4',
+        {},
+        makeToken(),
+        makeEnv()
+      );
+
+      expect(response.error?.code).toBe(-32602);
+      expect(response.error?.message).toContain('fileId is required');
+      expect(vi.mocked(projectDataService.listCommentThreads)).not.toHaveBeenCalled();
     });
 
     it('returns error when file does not exist', async () => {
       findFirstMock.mockResolvedValue(null);
 
-      const resp = await handleListLibraryFileCommentThreads(
+      const response = await handleListLibraryFileCommentThreads(
         'req-5',
         { fileId: 'nonexistent' },
         makeToken(),
         makeEnv()
       );
 
-      expect(resp.error).toBeDefined();
-      expect((resp.error as { message: string }).message).toContain('Library file not found');
+      expect(response.error?.code).toBe(-32602);
+      expect(response.error?.message).toContain('Library file not found');
+      expect(vi.mocked(projectDataService.listCommentThreads)).not.toHaveBeenCalled();
     });
 
-    it('handles null cursor by passing null afterSequence', async () => {
+    it('passes null afterSequence when cursor is absent', async () => {
       vi.mocked(projectDataService.listCommentThreads).mockResolvedValue({
         threads: [],
         hasMore: false,
@@ -167,14 +224,14 @@ describe('MCP library-file comment tools', () => {
         makeEnv()
       );
 
-      expect(projectDataService.listCommentThreads).toHaveBeenCalledWith(
+      expect(vi.mocked(projectDataService.listCommentThreads)).toHaveBeenCalledWith(
         expect.anything(),
         'project-1',
         expect.objectContaining({ afterSequence: null })
       );
     });
 
-    it('handles invalid cursor by passing null afterSequence', async () => {
+    it('passes null afterSequence when cursor is non-numeric', async () => {
       vi.mocked(projectDataService.listCommentThreads).mockResolvedValue({
         threads: [],
         hasMore: false,
@@ -187,118 +244,300 @@ describe('MCP library-file comment tools', () => {
         makeEnv()
       );
 
-      expect(projectDataService.listCommentThreads).toHaveBeenCalledWith(
+      expect(vi.mocked(projectDataService.listCommentThreads)).toHaveBeenCalledWith(
         expect.anything(),
         'project-1',
         expect.objectContaining({ afterSequence: null })
       );
     });
-  });
 
-  describe('handleCreateLibraryFileCommentThread', () => {
-    it('creates file comment thread with agent author', async () => {
-      vi.mocked(projectDataService.createFileCommentThread).mockResolvedValue({
-        thread: {
-          id: 'ct-1',
-          fileId: 'file-1',
-          anchor: { kind: 'library_file', fileId: 'file-1', quote: 'code' },
-          body: 'feedback',
-          status: 'open',
-          author: { kind: 'agent', id: 'agent-session-1', name: 'Agent (task-1)' },
-          replies: [],
-          sequence: 1,
-          version: 1,
-          createdAt: '2026-08-22T00:00:00.000Z',
-          updatedAt: '2026-08-22T00:00:00.000Z',
-        } as never,
-        idempotent: false,
-        changed: true,
+    it('filters by status when provided', async () => {
+      vi.mocked(projectDataService.listCommentThreads).mockResolvedValue({
+        threads: [],
+        hasMore: false,
       });
 
-      const resp = await handleCreateLibraryFileCommentThread(
-        'req-10',
-        { fileId: 'file-1', body: 'feedback', quote: 'code' },
+      await handleListLibraryFileCommentThreads(
+        'req-8',
+        { fileId: 'file-1', status: 'resolved' },
         makeToken(),
         makeEnv()
       );
 
-      expect(projectDataService.createFileCommentThread).toHaveBeenCalledWith(
+      expect(vi.mocked(projectDataService.listCommentThreads)).toHaveBeenCalledWith(
         expect.anything(),
         'project-1',
-        expect.objectContaining({
-          fileId: 'file-1',
-          body: 'feedback',
-          quote: 'code',
-          actor: expect.objectContaining({ kind: 'agent' }),
-        })
+        expect.objectContaining({ status: 'resolved' })
       );
-
-      const data = parseToolResponse(resp) as { thread: { id: string } };
-      expect(data.thread.id).toBe('ct-1');
     });
 
-    it('rejects caller-derived identity fields on create', async () => {
-      const resp = await handleCreateLibraryFileCommentThread(
+    it('passes null status for "all" filter', async () => {
+      vi.mocked(projectDataService.listCommentThreads).mockResolvedValue({
+        threads: [],
+        hasMore: false,
+      });
+
+      await handleListLibraryFileCommentThreads(
+        'req-9',
+        { fileId: 'file-1', status: 'all' },
+        makeToken(),
+        makeEnv()
+      );
+
+      expect(vi.mocked(projectDataService.listCommentThreads)).toHaveBeenCalledWith(
+        expect.anything(),
+        'project-1',
+        expect.objectContaining({ status: null })
+      );
+    });
+
+    it('rejects invalid status values', async () => {
+      const response = await handleListLibraryFileCommentThreads(
+        'req-10',
+        { fileId: 'file-1', status: 'invalid' },
+        makeToken(),
+        makeEnv()
+      );
+
+      expect(response.error?.code).toBe(-32602);
+      expect(response.error?.message).toContain('status must be');
+    });
+
+    it('clamps limit to configured maximum', async () => {
+      vi.mocked(projectDataService.listCommentThreads).mockResolvedValue({
+        threads: [],
+        hasMore: false,
+      });
+
+      await handleListLibraryFileCommentThreads(
         'req-11',
-        { fileId: 'file-1', body: 'text', author: { kind: 'human', id: 'u-1', name: 'Hacker' } },
+        { fileId: 'file-1', limit: 999 },
         makeToken(),
-        makeEnv()
+        makeEnv({ MCP_COMMENT_LIST_MAX: '10' })
       );
 
-      expect(resp.error).toBeDefined();
-      expect((resp.error as { code: number }).code).toBe(-32602);
-      expect((resp.error as { message: string }).message).toContain('author is derived');
+      expect(vi.mocked(projectDataService.listCommentThreads)).toHaveBeenCalledWith(
+        expect.anything(),
+        'project-1',
+        expect.objectContaining({ limit: 10 })
+      );
     });
 
-    it('requires fileId and body', async () => {
-      const noFile = await handleCreateLibraryFileCommentThread(
+    it('returns nextCursor as null when hasMore is false', async () => {
+      vi.mocked(projectDataService.listCommentThreads).mockResolvedValue({
+        threads: [{ ...makeFileThread(), sequence: 3 }],
+        hasMore: false,
+      });
+
+      const response = await handleListLibraryFileCommentThreads(
         'req-12',
-        { body: 'text' },
+        { fileId: 'file-1' },
         makeToken(),
         makeEnv()
       );
-      expect(noFile.error).toBeDefined();
-      expect((noFile.error as { message: string }).message).toContain('fileId is required');
 
-      const noBody = await handleCreateLibraryFileCommentThread(
+      expect(response.error).toBeUndefined();
+      const parsed = parseToolResponse(response) as { nextCursor: string | null };
+      expect(parsed.nextCursor).toBeNull();
+    });
+
+    it('handles service errors safely without leaking stack traces', async () => {
+      vi.mocked(projectDataService.listCommentThreads).mockRejectedValue(
+        new Error('raw backend stack with token=secret')
+      );
+
+      const response = await handleListLibraryFileCommentThreads(
         'req-13',
         { fileId: 'file-1' },
         makeToken(),
         makeEnv()
       );
-      expect(noBody.error).toBeDefined();
-      expect((noBody.error as { message: string }).message).toContain('body is required');
+
+      expect(response.error).toEqual({
+        code: -32603,
+        message: 'Comment tool failed',
+      });
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // handleCreateLibraryFileCommentThread
+  // -----------------------------------------------------------------------
+
+  describe('handleCreateLibraryFileCommentThread', () => {
+    it('creates file comment thread with agent author derived from token', async () => {
+      const createdThread = makeFileThread({
+        id: 'ct-1',
+        author: { kind: 'agent', id: 'agent-session-1', displayName: 'SAM agent' },
+      });
+      vi.mocked(projectDataService.createFileCommentThread).mockResolvedValue({
+        thread: createdThread,
+        idempotent: false,
+      });
+
+      const response = await handleCreateLibraryFileCommentThread(
+        'req-20',
+        { fileId: 'file-1', body: 'feedback', quote: 'some code' },
+        makeToken(),
+        makeEnv()
+      );
+
+      expect(response.error).toBeUndefined();
+      expect(vi.mocked(projectDataService.createFileCommentThread)).toHaveBeenCalledWith(
+        expect.anything(),
+        'project-1',
+        expect.objectContaining({
+          fileId: 'file-1',
+          body: 'feedback',
+          quote: 'some code',
+          clientMutationId: null,
+          actor: { kind: 'agent', id: 'agent-session-1', displayName: 'SAM agent' },
+        })
+      );
+
+      const data = parseToolResponse(response) as { thread: { id: string } };
+      expect(data.thread.id).toBe('ct-1');
+    });
+
+    it('rejects caller-derived identity fields', async () => {
+      const response = await handleCreateLibraryFileCommentThread(
+        'req-21',
+        { fileId: 'file-1', body: 'feedback', projectId: 'project-2' },
+        makeToken(),
+        makeEnv()
+      );
+
+      expect(response.error?.code).toBe(-32602);
+      expect(response.error?.message).toContain('projectId is derived');
+      expect(vi.mocked(projectDataService.createFileCommentThread)).not.toHaveBeenCalled();
+    });
+
+    it('rejects all caller-derived fields individually', async () => {
+      const derivedFields = [
+        'userId',
+        'author',
+        'authorId',
+        'authorKind',
+        'authorDisplayName',
+        'provenance',
+      ];
+
+      for (const field of derivedFields) {
+        vi.clearAllMocks();
+        findFirstMock.mockResolvedValue({ id: 'file-1' });
+
+        const response = await handleCreateLibraryFileCommentThread(
+          'req-derived',
+          { fileId: 'file-1', body: 'feedback', [field]: 'spoofed' },
+          makeToken(),
+          makeEnv()
+        );
+
+        expect(response.error?.code).toBe(-32602);
+        expect(response.error?.message).toContain(`${field} is derived`);
+      }
+    });
+
+    it('validates fileId is required', async () => {
+      const response = await handleCreateLibraryFileCommentThread(
+        'req-22',
+        { body: 'feedback' },
+        makeToken(),
+        makeEnv()
+      );
+
+      expect(response.error?.code).toBe(-32602);
+      expect(response.error?.message).toContain('fileId is required');
+    });
+
+    it('validates body is required', async () => {
+      const response = await handleCreateLibraryFileCommentThread(
+        'req-23',
+        { fileId: 'file-1' },
+        makeToken(),
+        makeEnv()
+      );
+
+      expect(response.error?.code).toBe(-32602);
+      expect(response.error?.message).toContain('body is required');
     });
 
     it('returns error when file does not exist', async () => {
       findFirstMock.mockResolvedValue(null);
 
-      const resp = await handleCreateLibraryFileCommentThread(
-        'req-14',
-        { fileId: 'gone', body: 'text' },
+      const response = await handleCreateLibraryFileCommentThread(
+        'req-24',
+        { fileId: 'nonexistent-file', body: 'feedback' },
         makeToken(),
         makeEnv()
       );
 
-      expect(resp.error).toBeDefined();
-      expect((resp.error as { message: string }).message).toContain('Library file not found');
+      expect(response.error?.code).toBe(-32602);
+      expect(response.error?.message).toContain('Library file not found');
+      expect(vi.mocked(projectDataService.createFileCommentThread)).not.toHaveBeenCalled();
     });
 
-    it('handles service errors safely', async () => {
+    it('handles service errors safely without leaking stack traces', async () => {
       vi.mocked(projectDataService.createFileCommentThread).mockRejectedValue(
-        new Error('DO exploded')
+        new Error('DO exploded with credentials=leak')
       );
 
-      const resp = await handleCreateLibraryFileCommentThread(
-        'req-15',
-        { fileId: 'file-1', body: 'text' },
+      const response = await handleCreateLibraryFileCommentThread(
+        'req-25',
+        { fileId: 'file-1', body: 'feedback' },
         makeToken(),
         makeEnv()
       );
 
-      expect(resp.error).toBeDefined();
-      expect((resp.error as { message: string }).message).toBe('Comment tool failed');
-      expect((resp.error as { message: string }).message).not.toContain('exploded');
+      expect(response.error).toEqual({
+        code: -32603,
+        message: 'Comment tool failed',
+      });
+      // Ensure no raw error message leaked
+      expect(response.error?.message).not.toContain('exploded');
+      expect(response.error?.message).not.toContain('credentials');
+    });
+
+    it('passes quote as null when not provided', async () => {
+      vi.mocked(projectDataService.createFileCommentThread).mockResolvedValue({
+        thread: makeFileThread(),
+        idempotent: false,
+      });
+
+      await handleCreateLibraryFileCommentThread(
+        'req-26',
+        { fileId: 'file-1', body: 'feedback' },
+        makeToken(),
+        makeEnv()
+      );
+
+      expect(vi.mocked(projectDataService.createFileCommentThread)).toHaveBeenCalledWith(
+        expect.anything(),
+        'project-1',
+        expect.objectContaining({
+          quote: null,
+        })
+      );
+    });
+
+    it('uses projectId from token, not from params', async () => {
+      vi.mocked(projectDataService.createFileCommentThread).mockResolvedValue({
+        thread: makeFileThread(),
+        idempotent: false,
+      });
+
+      await handleCreateLibraryFileCommentThread(
+        'req-27',
+        { fileId: 'file-1', body: 'feedback' },
+        makeToken({ projectId: 'my-project' }),
+        makeEnv()
+      );
+
+      expect(vi.mocked(projectDataService.createFileCommentThread)).toHaveBeenCalledWith(
+        expect.anything(),
+        'my-project',
+        expect.anything()
+      );
     });
   });
 });

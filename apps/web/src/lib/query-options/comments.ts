@@ -2,9 +2,9 @@ import type { QueryClient } from '@tanstack/react-query';
 import { queryOptions } from '@tanstack/react-query';
 
 import {
+  type LibraryFileCommentThread,
   listLibraryFileComments,
   listMessageComments,
-  type LibraryFileCommentThread,
   type MessageCommentRealtimeEvent,
   type MessageCommentThread,
 } from '../api/comments';
