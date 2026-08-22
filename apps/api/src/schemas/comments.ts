@@ -23,6 +23,12 @@ export const CommentStatusMutationSchema = v.object({
   clientMutationId: v.optional(v.nullable(v.string())),
 });
 
+export const CreateLibraryFileCommentThreadSchema = v.object({
+  body: v.string(),
+  quote: v.optional(v.nullable(v.string())),
+  clientMutationId: v.optional(v.nullable(v.string())),
+});
+
 export const SendCommentDirectiveSchema = v.object({
   body: v.optional(v.string()),
   clientMutationId: v.optional(v.nullable(v.string())),

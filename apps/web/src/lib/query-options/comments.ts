@@ -2,7 +2,9 @@ import type { QueryClient } from '@tanstack/react-query';
 import { queryOptions } from '@tanstack/react-query';
 
 import {
+  listLibraryFileComments,
   listMessageComments,
+  type LibraryFileCommentThread,
   type MessageCommentRealtimeEvent,
   type MessageCommentThread,
 } from '../api/comments';
@@ -60,4 +62,39 @@ export function applyMessageCommentRealtimeEventToQueryCache(
     messageCommentQueryKeys.session(queryScope, projectId, sessionId),
     (previous) => upsertMessageCommentThread(previous, comment)
   );
+}
+
+// ---------------------------------------------------------------------------
+// Library file comments
+// ---------------------------------------------------------------------------
+
+export const libraryFileCommentQueryKeys = {
+  all: (queryScope: string) => ['auth', queryScope, 'library-file-comments'] as const,
+  file: (queryScope: string, projectId: string, fileId: string) =>
+    [...libraryFileCommentQueryKeys.all(queryScope), projectId, fileId] as const,
+};
+
+export function libraryFileCommentsQueryOptions(
+  queryScope: string,
+  projectId: string,
+  fileId: string
+) {
+  return queryOptions({
+    queryKey: libraryFileCommentQueryKeys.file(queryScope, projectId, fileId),
+    queryFn: async ({ signal }): Promise<LibraryFileCommentThread[]> =>
+      (await listLibraryFileComments(projectId, fileId, { signal })).threads,
+  });
+}
+
+export function upsertLibraryFileCommentThread(
+  previous: readonly LibraryFileCommentThread[] | undefined,
+  incoming: LibraryFileCommentThread
+): LibraryFileCommentThread[] {
+  const current = previous ?? [];
+  const index = current.findIndex((c) => c.id === incoming.id);
+  const next =
+    index === -1
+      ? [...current, incoming]
+      : [...current.slice(0, index), incoming, ...current.slice(index + 1)];
+  return next.sort((a, b) => a.createdAt - b.createdAt);
 }

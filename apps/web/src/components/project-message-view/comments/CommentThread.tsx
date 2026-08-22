@@ -13,15 +13,17 @@ import { CommentStatusPill, QuotedAnchor } from './CommentPrimitives';
 interface CommentThreadProps {
   comment: UiMessageCommentThread;
   focused?: boolean;
+  hideSendToAgent?: boolean;
   onReply: (commentId: string, body: string, action: MessageCommentAction) => Promise<unknown>;
   onResolve: (commentId: string) => Promise<unknown>;
   onReopen: (commentId: string) => Promise<unknown>;
-  onSendToAgent: (commentId: string) => Promise<unknown>;
+  onSendToAgent?: (commentId: string) => Promise<unknown>;
 }
 
 export function CommentThread({
   comment,
   focused = false,
+  hideSendToAgent = false,
   onReply,
   onResolve,
   onReopen,
@@ -125,6 +127,7 @@ export function CommentThread({
               <CommentComposer
                 placeholder="Reply…"
                 submitLabel="Reply"
+                hideSendToAgent={hideSendToAgent}
                 onSubmit={async (body, action) => {
                   await onReply(comment.id, body, action);
                   setReplying(false);
@@ -136,7 +139,7 @@ export function CommentThread({
                 <Button size="sm" variant="ghost" onClick={() => setReplying(true)}>
                   Reply
                 </Button>
-                {comment.status === 'open' && (
+                {comment.status === 'open' && onSendToAgent && (
                   <Button size="sm" variant="ghost" onClick={() => onSendToAgent(comment.id)}>
                     Send to agent
                   </Button>
@@ -166,6 +169,7 @@ export function CommentThreadList({
   comments,
   focusedCommentId,
   emptyMessage = 'No comments yet.',
+  hideSendToAgent,
   onReply,
   onResolve,
   onReopen,
@@ -174,6 +178,7 @@ export function CommentThreadList({
   comments: UiMessageCommentThread[];
   focusedCommentId?: string | null;
   emptyMessage?: string;
+  hideSendToAgent?: boolean;
   onReply: CommentThreadProps['onReply'];
   onResolve: CommentThreadProps['onResolve'];
   onReopen: CommentThreadProps['onReopen'];
@@ -190,6 +195,7 @@ export function CommentThreadList({
           key={comment.id}
           comment={comment}
           focused={focusedCommentId === comment.id}
+          hideSendToAgent={hideSendToAgent}
           onReply={onReply}
           onResolve={onResolve}
           onReopen={onReopen}

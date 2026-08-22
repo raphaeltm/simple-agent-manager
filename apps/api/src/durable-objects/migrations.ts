@@ -1055,6 +1055,152 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '033-library-file-comment-anchors',
+    run: (sql) => {
+      // Widen comment_threads to support library_file anchors in addition to
+      // message anchors. SQLite cannot ALTER CHECK or remove NOT NULL, so we
+      // recreate the three comment tables. DO SQLite defaults to
+      // PRAGMA foreign_keys = OFF, so DROP TABLE does not cascade.
+
+      // --- 1. Preserve data -------------------------------------------------
+      sql.exec(`CREATE TABLE _comment_threads_bak AS SELECT * FROM comment_threads`);
+      sql.exec(`CREATE TABLE _comment_replies_bak AS SELECT * FROM comment_replies`);
+      sql.exec(`CREATE TABLE _comment_status_mutations_bak AS SELECT * FROM comment_status_mutations`);
+
+      // --- 2. Drop old tables (children first, then parent) -----------------
+      sql.exec(`DROP TABLE comment_status_mutations`);
+      sql.exec(`DROP TABLE comment_replies`);
+      sql.exec(`DROP TABLE comment_threads`);
+
+      // --- 3. Recreate comment_threads with relaxed constraints -------------
+      sql.exec(`
+        CREATE TABLE comment_threads (
+          id TEXT PRIMARY KEY,
+          session_id TEXT REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          anchor_kind TEXT NOT NULL DEFAULT 'message' CHECK (anchor_kind IN ('message', 'library_file')),
+          message_id TEXT REFERENCES chat_messages(id) ON DELETE CASCADE,
+          file_id TEXT,
+          quote TEXT,
+          body TEXT NOT NULL,
+          author_type TEXT NOT NULL CHECK (author_type IN ('human', 'agent')),
+          author_id TEXT NOT NULL,
+          author_name TEXT,
+          status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'sent', 'resolved')),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          sequence INTEGER NOT NULL,
+          version INTEGER NOT NULL DEFAULT 1,
+          client_mutation_id TEXT,
+          client_mutation_fingerprint TEXT,
+          sent_at INTEGER,
+          sent_by_type TEXT CHECK (sent_by_type IS NULL OR sent_by_type IN ('human', 'agent')),
+          sent_by_id TEXT,
+          sent_by_name TEXT,
+          resolved_at INTEGER,
+          resolved_by_type TEXT CHECK (resolved_by_type IS NULL OR resolved_by_type IN ('human', 'agent')),
+          resolved_by_id TEXT,
+          resolved_by_name TEXT,
+          reopened_at INTEGER,
+          reopened_by_type TEXT CHECK (reopened_by_type IS NULL OR reopened_by_type IN ('human', 'agent')),
+          reopened_by_id TEXT,
+          reopened_by_name TEXT,
+          CHECK (
+            (anchor_kind = 'message' AND message_id IS NOT NULL AND session_id IS NOT NULL)
+            OR (anchor_kind = 'library_file' AND file_id IS NOT NULL)
+          )
+        )
+      `);
+
+      // --- 4. Recreate comment_replies with nullable session_id -------------
+      sql.exec(`
+        CREATE TABLE comment_replies (
+          id TEXT PRIMARY KEY,
+          thread_id TEXT NOT NULL REFERENCES comment_threads(id) ON DELETE CASCADE,
+          session_id TEXT REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          body TEXT NOT NULL,
+          author_type TEXT NOT NULL CHECK (author_type IN ('human', 'agent')),
+          author_id TEXT NOT NULL,
+          author_name TEXT,
+          created_at INTEGER NOT NULL,
+          sequence INTEGER NOT NULL,
+          client_mutation_id TEXT,
+          client_mutation_fingerprint TEXT,
+          UNIQUE(thread_id, client_mutation_id)
+        )
+      `);
+
+      // --- 5. Recreate comment_status_mutations with nullable session_id ----
+      sql.exec(`
+        CREATE TABLE comment_status_mutations (
+          thread_id TEXT NOT NULL REFERENCES comment_threads(id) ON DELETE CASCADE,
+          session_id TEXT REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          client_mutation_id TEXT NOT NULL,
+          target_status TEXT NOT NULL CHECK (target_status IN ('open', 'sent', 'resolved')),
+          thread_version INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (thread_id, client_mutation_id)
+        )
+      `);
+
+      // --- 6. Restore data --------------------------------------------------
+      sql.exec(`
+        INSERT INTO comment_threads (
+          id, session_id, anchor_kind, message_id, file_id, quote, body,
+          author_type, author_id, author_name, status, created_at, updated_at,
+          sequence, version, client_mutation_id, client_mutation_fingerprint,
+          sent_at, sent_by_type, sent_by_id, sent_by_name,
+          resolved_at, resolved_by_type, resolved_by_id, resolved_by_name,
+          reopened_at, reopened_by_type, reopened_by_id, reopened_by_name
+        )
+        SELECT
+          id, session_id, anchor_kind, message_id, NULL, quote, body,
+          author_type, author_id, author_name, status, created_at, updated_at,
+          sequence, version, client_mutation_id, client_mutation_fingerprint,
+          sent_at, sent_by_type, sent_by_id, sent_by_name,
+          resolved_at, resolved_by_type, resolved_by_id, resolved_by_name,
+          reopened_at, reopened_by_type, reopened_by_id, reopened_by_name
+        FROM _comment_threads_bak
+      `);
+      sql.exec(`INSERT INTO comment_replies SELECT * FROM _comment_replies_bak`);
+      sql.exec(`INSERT INTO comment_status_mutations SELECT * FROM _comment_status_mutations_bak`);
+
+      // --- 7. Drop backup tables --------------------------------------------
+      sql.exec(`DROP TABLE _comment_threads_bak`);
+      sql.exec(`DROP TABLE _comment_replies_bak`);
+      sql.exec(`DROP TABLE _comment_status_mutations_bak`);
+
+      // --- 8. Recreate indexes ----------------------------------------------
+      sql.exec(`
+        CREATE INDEX idx_comment_threads_session_sequence
+        ON comment_threads(session_id, sequence)
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_threads_message
+        ON comment_threads(session_id, message_id, sequence)
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_threads_status
+        ON comment_threads(session_id, status, sequence)
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_threads_file
+        ON comment_threads(file_id, sequence)
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_replies_thread_sequence
+        ON comment_replies(thread_id, sequence)
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_replies_session
+        ON comment_replies(session_id, thread_id)
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_status_mutations_session
+        ON comment_status_mutations(session_id, created_at)
+      `);
+    },
+  },
 ];
 
 /**

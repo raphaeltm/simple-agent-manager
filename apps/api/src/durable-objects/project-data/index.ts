@@ -487,15 +487,22 @@ export class ProjectData extends DurableObject<Env> {
     return comments.listCommentThreads(this.sql, this.env, input);
   }
 
-  getCommentThread(input: { sessionId: string; threadId: string }): MessageCommentThread | null {
-    return comments.getCommentThread(this.sql, input.sessionId, input.threadId);
+  getCommentThread(input: { threadId: string }): comments.AnyCommentThread | null {
+    return comments.getCommentThread(this.sql, input.threadId);
   }
 
   createCommentThread(input: comments.CreateCommentThreadInput) {
     const result = this.ctx.storage.transactionSync(() =>
       comments.createCommentThread(this.sql, this.env, input)
     );
-    if (result.changed) this.broadcastCommentThread(result.thread, 'thread_created');
+    if (result.changed) this.broadcastCommentThreadIfSession(result.thread, 'thread_created');
+    return { thread: result.thread, idempotent: result.idempotent };
+  }
+
+  createFileCommentThread(input: comments.CreateFileCommentThreadInput) {
+    const result = this.ctx.storage.transactionSync(() =>
+      comments.createFileCommentThread(this.sql, this.env, input)
+    );
     return { thread: result.thread, idempotent: result.idempotent };
   }
 
@@ -503,7 +510,7 @@ export class ProjectData extends DurableObject<Env> {
     const result = this.ctx.storage.transactionSync(() =>
       comments.createCommentReply(this.sql, this.env, input)
     );
-    if (result.changed) this.broadcastCommentThread(result.thread, 'reply_created');
+    if (result.changed) this.broadcastCommentThreadIfSession(result.thread, 'reply_created');
     return {
       thread: result.thread,
       reply: result.reply,
@@ -516,7 +523,10 @@ export class ProjectData extends DurableObject<Env> {
       comments.updateCommentThreadStatus(this.sql, this.env, input)
     );
     if (result.changed) {
-      this.broadcastCommentThread(result.thread, this.commentStatusEventReason(input.status));
+      this.broadcastCommentThreadIfSession(
+        result.thread,
+        this.commentStatusEventReason(input.status)
+      );
     }
     return { thread: result.thread, idempotent: result.idempotent };
   }
@@ -1638,19 +1648,21 @@ export class ProjectData extends DurableObject<Env> {
     }
   }
 
-  private broadcastCommentThread(
-    thread: MessageCommentThread,
+  private broadcastCommentThreadIfSession(
+    thread: comments.AnyCommentThread,
     reason: MessageCommentThreadEventReason
   ): void {
-    this.broadcastEvent(
-      'comment.thread.changed',
-      {
-        sessionId: thread.sessionId,
-        thread,
-        reason,
-      },
-      thread.sessionId
-    );
+    if ('sessionId' in thread && thread.sessionId) {
+      this.broadcastEvent(
+        'comment.thread.changed',
+        {
+          sessionId: thread.sessionId,
+          thread: thread as MessageCommentThread,
+          reason,
+        },
+        thread.sessionId
+      );
+    }
   }
 
   private commentStatusEventReason(

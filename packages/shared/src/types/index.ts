@@ -219,12 +219,19 @@ export type {
   UpdateTaskStatusRequest,
 } from './task';
 
-// Message-anchored comments
+// Comments (message-anchored and library-file-anchored)
 export type {
+  CommentAnchor,
+  CommentAnchorKind,
   CommentAuthor,
   CommentAuthorKind,
   CommentStatus,
+  CreateLibraryFileCommentThreadRequest,
   CreateMessageCommentThreadRequest,
+  LibraryFileCommentAnchor,
+  LibraryFileCommentListResponse,
+  LibraryFileCommentMutationResponse,
+  LibraryFileCommentThread,
   MessageCommentActorProvenance,
   MessageCommentAnchor,
   MessageCommentAuthor,
@@ -241,10 +248,13 @@ export type {
   MessageCommentThreadEventReason,
   MessageCommentThreadStatus,
   MessageCommentThreadSummary,
+  ReplyToLibraryFileCommentThreadRequest,
   ReplyToMessageCommentThreadRequest,
+  UpdateLibraryFileCommentThreadStatusRequest,
   UpdateMessageCommentThreadStatusRequest,
 } from './comments';
 export {
+  COMMENT_ANCHOR_KINDS,
   COMMENT_AUTHOR_KINDS,
   COMMENT_STATUSES,
   MESSAGE_COMMENT_AUTHOR_KINDS,

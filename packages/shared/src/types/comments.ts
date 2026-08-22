@@ -1,9 +1,10 @@
 /**
- * Shared message-comment contracts for the message-anchored commenting MVP.
+ * Shared comment contracts for message-anchored and library-file-anchored
+ * commenting.
  *
- * This contract intentionally models message anchors only. File anchors,
- * markdown block anchors, fuzzy re-anchoring, reactions, and mentions are
- * outside this MVP slice.
+ * Anchor types form a discriminated union on `kind`. Phase 1 supports
+ * 'message' and 'library_file'. Block anchors, fuzzy re-anchoring,
+ * reactions, and mentions are outside this slice.
  */
 
 export const COMMENT_STATUSES = ['open', 'sent', 'resolved'] as const;
@@ -41,6 +42,17 @@ export type MessageCommentAnchor = {
   messageId: string;
   quote: string | null;
 };
+
+export type LibraryFileCommentAnchor = {
+  kind: 'library_file';
+  fileId: string;
+  quote: string | null;
+};
+
+export type CommentAnchor = MessageCommentAnchor | LibraryFileCommentAnchor;
+
+export const COMMENT_ANCHOR_KINDS = ['message', 'library_file'] as const;
+export type CommentAnchorKind = (typeof COMMENT_ANCHOR_KINDS)[number];
 
 export type MessageCommentSourceMessageContext = {
   id: string;
@@ -172,5 +184,66 @@ export interface UpdateMessageCommentThreadStatusRequest {
   threadId: string;
   status: Extract<MessageCommentThreadStatus, 'open' | 'resolved'>;
   actor: MessageCommentAuthor;
+  provenance: MessageCommentActorProvenance;
+}
+
+// ---------------------------------------------------------------------------
+// Library-file-anchored comments
+// ---------------------------------------------------------------------------
+
+export type LibraryFileCommentThread = {
+  id: string;
+  projectId?: string;
+  fileId: string;
+  anchor: LibraryFileCommentAnchor;
+  author: CommentAuthor;
+  body: string;
+  status: CommentStatus;
+  createdAt: number;
+  updatedAt: number;
+  sequence?: number;
+  version?: number;
+  clientMutationId?: string | null;
+  resolvedAt?: number | null;
+  resolvedBy?: CommentAuthor | null;
+  reopenedAt?: number | null;
+  reopenedBy?: CommentAuthor | null;
+  replyCount?: number;
+  lastReplyAt?: number | null;
+  replies: MessageCommentReply[];
+};
+
+export type LibraryFileCommentListResponse = {
+  threads: LibraryFileCommentThread[];
+  hasMore: boolean;
+  nextCursor?: string | null;
+};
+
+export type LibraryFileCommentMutationResponse = {
+  thread: LibraryFileCommentThread;
+  idempotent: boolean;
+};
+
+export interface CreateLibraryFileCommentThreadRequest {
+  fileId: string;
+  quote?: string | null;
+  body: string;
+  author: CommentAuthor;
+  provenance: MessageCommentActorProvenance;
+}
+
+export interface ReplyToLibraryFileCommentThreadRequest {
+  fileId: string;
+  threadId: string;
+  body: string;
+  author: CommentAuthor;
+  provenance: MessageCommentActorProvenance;
+}
+
+export interface UpdateLibraryFileCommentThreadStatusRequest {
+  fileId: string;
+  threadId: string;
+  status: Extract<CommentStatus, 'open' | 'resolved'>;
+  actor: CommentAuthor;
   provenance: MessageCommentActorProvenance;
 }

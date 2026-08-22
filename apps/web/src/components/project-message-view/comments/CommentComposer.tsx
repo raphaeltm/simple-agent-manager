@@ -20,6 +20,7 @@ export interface CommentComposerProps {
   placeholder?: string;
   submitLabel?: string;
   autoFocus?: boolean;
+  hideSendToAgent?: boolean;
   onSubmit: (body: string, action: MessageCommentAction) => Promise<unknown> | unknown;
   onCancel: () => void;
 }
@@ -29,6 +30,7 @@ export function CommentComposer({
   placeholder = 'Add a comment…',
   submitLabel = 'Comment',
   autoFocus = true,
+  hideSendToAgent = false,
   onSubmit,
   onCancel,
 }: CommentComposerProps) {
@@ -131,33 +133,37 @@ export function CommentComposer({
           />
         </div>
       </div>
-      <fieldset className="flex flex-wrap gap-2" aria-label="Comment action">
-        <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-border-default px-2 py-1 text-xs text-fg-muted">
-          <input
-            type="radio"
-            name={`${textareaId}-action`}
-            value="note"
-            checked={action === 'note'}
-            onChange={() => setAction('note')}
-            className="accent-accent"
-          />
-          Add note
-        </label>
-        <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-border-default px-2 py-1 text-xs text-fg-muted">
-          <input
-            type="radio"
-            name={`${textareaId}-action`}
-            value="send_to_agent"
-            checked={action === 'send_to_agent'}
-            onChange={() => setAction('send_to_agent')}
-            className="accent-accent"
-          />
-          Send to agent
-        </label>
-      </fieldset>
-      <p className="text-[0.6875rem] text-fg-muted">
-        Send to agent creates a follow-up instruction with the quoted message context.
-      </p>
+      {!hideSendToAgent && (
+        <>
+          <fieldset className="flex flex-wrap gap-2" aria-label="Comment action">
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-border-default px-2 py-1 text-xs text-fg-muted">
+              <input
+                type="radio"
+                name={`${textareaId}-action`}
+                value="note"
+                checked={action === 'note'}
+                onChange={() => setAction('note')}
+                className="accent-accent"
+              />
+              Add note
+            </label>
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-border-default px-2 py-1 text-xs text-fg-muted">
+              <input
+                type="radio"
+                name={`${textareaId}-action`}
+                value="send_to_agent"
+                checked={action === 'send_to_agent'}
+                onChange={() => setAction('send_to_agent')}
+                className="accent-accent"
+              />
+              Send to agent
+            </label>
+          </fieldset>
+          <p className="text-[0.6875rem] text-fg-muted">
+            Send to agent creates a follow-up instruction with the quoted message context.
+          </p>
+        </>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" type="submit" disabled={!canSubmit} loading={submitting}>
           {action === 'send_to_agent' ? 'Comment & send' : submitLabel}

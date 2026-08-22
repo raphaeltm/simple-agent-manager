@@ -16,6 +16,7 @@
 
 export { COMMENT_TOOLS } from './tool-definitions-comment-tools';
 export { DEPLOYMENT_TOOLS } from './tool-definitions-deployment-tools';
+export { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
 export { INCIDENT_TOOLS } from './tool-definitions-incident-tools';
 export { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
 export { LIBRARY_TOOLS } from './tool-definitions-library-tools';
@@ -33,6 +34,7 @@ export { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';
 
 import { COMMENT_TOOLS } from './tool-definitions-comment-tools';
 import { DEPLOYMENT_TOOLS } from './tool-definitions-deployment-tools';
+import { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
 import { INCIDENT_TOOLS } from './tool-definitions-incident-tools';
 import { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
 import { LIBRARY_TOOLS } from './tool-definitions-library-tools';
@@ -57,6 +59,7 @@ export const MCP_TOOLS = [
   ...LIBRARY_TOOLS,
   ...ORCHESTRATION_TOOLS,
   ...COMMENT_TOOLS,
+  ...LIBRARY_FILE_COMMENT_TOOLS,
   ...TRIGGER_TOOLS,
   ...INCIDENT_TOOLS,
   ...PROFILE_TOOLS,

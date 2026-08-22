@@ -16,9 +16,7 @@ import type {
   CreateCheckpointEpisodeInput,
   DeliveryState,
   MessageClass,
-  MessageCommentListResponse,
-  MessageCommentMutationResponse,
-  MessageCommentReplyMutationResponse,
+  LibraryFileCommentThread,
   MessageCommentThread,
   SessionActivityTerminalReason,
 } from '@simple-agent-manager/shared';
@@ -26,8 +24,12 @@ import { resolveHandoffLimits, resolveMissionStateLimits } from '@simple-agent-m
 
 import type { ProjectData } from '../durable-objects/project-data';
 import type {
+  CommentReplyMutationResult,
+  CommentThreadMutationResult,
   CreateCommentReplyInput,
   CreateCommentThreadInput,
+  CreateFileCommentThreadInput,
+  ListCommentThreadsResult,
   ListCommentThreadsInput,
   UpdateCommentStatusInput,
 } from '../durable-objects/project-data/comment-contracts';
@@ -441,7 +443,7 @@ export async function listCommentThreads(
   env: Env,
   projectId: string,
   input: ListCommentThreadsInput
-): Promise<MessageCommentListResponse> {
+): Promise<ListCommentThreadsResult> {
   return callProjectDataWithRetry(env, projectId, 'listCommentThreads', (stub) =>
     stub.listCommentThreads(input)
   );
@@ -450,11 +452,12 @@ export async function listCommentThreads(
 export async function getCommentThread(
   env: Env,
   projectId: string,
-  sessionId: string,
   threadId: string
-): Promise<MessageCommentThread | null> {
+): Promise<MessageCommentThread | LibraryFileCommentThread | null> {
   return callProjectDataWithRetry(env, projectId, 'getCommentThread', (stub) =>
-    stub.getCommentThread({ sessionId, threadId })
+    stub.getCommentThread({ threadId }) as Promise<
+      MessageCommentThread | LibraryFileCommentThread | null
+    >
   );
 }
 
@@ -462,9 +465,19 @@ export async function createCommentThread(
   env: Env,
   projectId: string,
   input: CreateCommentThreadInput
-): Promise<MessageCommentMutationResponse> {
+): Promise<CommentThreadMutationResult> {
   return callProjectDataNoRetry(env, projectId, 'createCommentThread', (stub) =>
     stub.createCommentThread(input)
+  );
+}
+
+export async function createFileCommentThread(
+  env: Env,
+  projectId: string,
+  input: CreateFileCommentThreadInput
+): Promise<CommentThreadMutationResult> {
+  return callProjectDataNoRetry(env, projectId, 'createFileCommentThread', (stub) =>
+    stub.createFileCommentThread(input)
   );
 }
 
@@ -472,7 +485,7 @@ export async function createCommentReply(
   env: Env,
   projectId: string,
   input: CreateCommentReplyInput
-): Promise<MessageCommentReplyMutationResponse> {
+): Promise<CommentReplyMutationResult> {
   return callProjectDataNoRetry(env, projectId, 'createCommentReply', (stub) =>
     stub.createCommentReply(input)
   );
@@ -482,7 +495,7 @@ export async function updateCommentThreadStatus(
   env: Env,
   projectId: string,
   input: UpdateCommentStatusInput & { status: CommentStatus }
-): Promise<MessageCommentMutationResponse> {
+): Promise<CommentThreadMutationResult> {
   return callProjectDataNoRetry(env, projectId, 'updateCommentThreadStatus', (stub) =>
     stub.updateCommentThreadStatus(input)
   );

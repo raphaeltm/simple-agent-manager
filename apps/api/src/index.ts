@@ -97,6 +97,7 @@ import {
 } from './routes/interactive-preview-host';
 import { knowledgeRoutes } from './routes/knowledge';
 import { libraryRoutes } from './routes/library';
+import { libraryCommentRoutes } from './routes/library-comments';
 import { mailboxRoutes } from './routes/mailbox';
 import { mcpRoutes } from './routes/mcp';
 import { missionRoutes } from './routes/missions';
@@ -727,6 +728,7 @@ app.route('/api/projects/:projectId/sessions', chatRoutes);
 app.route('/api/projects/:projectId/cached-commands', cachedCommandRoutes);
 app.route('/api/projects/:projectId/activity', activityRoutes);
 app.route('/api/projects/:projectId/library', libraryRoutes);
+app.route('/api/projects/:projectId/library', libraryCommentRoutes);
 app.route('/api/projects/:projectId/agent-profiles/:profileId/runtime', profileRuntimeRoutes);
 app.route('/api/projects/:projectId/agent-profiles', agentProfileRoutes);
 app.route('/api/projects/:projectId/skills/:skillId/runtime', skillRuntimeRoutes);
