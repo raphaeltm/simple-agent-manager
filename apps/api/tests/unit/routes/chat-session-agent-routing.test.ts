@@ -67,6 +67,7 @@ vi.mock('drizzle-orm/d1', () => ({
 }));
 
 vi.mock('@simple-agent-manager/shared', () => ({
+  COMMENT_STATUSES: ['open', 'sent', 'resolved'],
   DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT: 5000,
   DEFAULT_CHAT_SESSION_MESSAGE_LIMIT: 500,
   DEFAULT_CHAT_SESSION_MESSAGE_MAX: 50000,

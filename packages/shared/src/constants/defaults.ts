@@ -93,6 +93,31 @@ export const DEFAULT_CHAT_SESSION_MESSAGE_MAX = 50000;
  */
 export const DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT = 5000;
 
+// =============================================================================
+// Message-anchored comments
+// =============================================================================
+
+/** Max comment thread/reply body length. Override via COMMENT_BODY_MAX_LENGTH. */
+export const DEFAULT_COMMENT_BODY_MAX_LENGTH = 8_000;
+
+/** Max selected quote snapshot length stored on message anchors. Override via COMMENT_QUOTE_MAX_LENGTH. */
+export const DEFAULT_COMMENT_QUOTE_MAX_LENGTH = 2_000;
+
+/** Max idempotency key length accepted for optimistic comment mutations. Override via COMMENT_IDEMPOTENCY_KEY_MAX_LENGTH. */
+export const DEFAULT_COMMENT_IDEMPOTENCY_KEY_MAX_LENGTH = 200;
+
+/** Default page size for session comment list reads. Override via COMMENT_LIST_LIMIT_DEFAULT. */
+export const DEFAULT_COMMENT_LIST_LIMIT_DEFAULT = 100;
+
+/** Max page size for session comment list reads. Override via COMMENT_LIST_LIMIT_MAX. */
+export const DEFAULT_COMMENT_LIST_LIMIT_MAX = 500;
+
+/** Max message-anchored comment threads per chat session. Override via COMMENT_THREADS_PER_SESSION_MAX. */
+export const DEFAULT_COMMENT_THREADS_PER_SESSION_MAX = 1_000;
+
+/** Max replies per comment thread. Override via COMMENT_REPLIES_PER_THREAD_MAX. */
+export const DEFAULT_COMMENT_REPLIES_PER_THREAD_MAX = 200;
+
 /**
  * Safety bound on how many older pages the chat client will fetch while chasing a
  * timeline jump target that predates the loaded window (the rare oversized-session
