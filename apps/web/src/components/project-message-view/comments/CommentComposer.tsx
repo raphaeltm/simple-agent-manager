@@ -1,6 +1,8 @@
+import { VoiceButton, type VoiceButtonState } from '@simple-agent-manager/acp-client';
 import { Button, Textarea } from '@simple-agent-manager/ui';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
+import { getTranscribeApiUrl } from '../../../lib/api/agents';
 import type { MessageCommentAction } from '../../../lib/api/comments';
 import { QuotedAnchor } from './CommentPrimitives';
 
@@ -25,12 +27,25 @@ export function CommentComposer({
   const [body, setBody] = useState('');
   const [action, setAction] = useState<MessageCommentAction>('note');
   const [submitting, setSubmitting] = useState(false);
+  const [voiceState, setVoiceState] = useState<VoiceButtonState>('idle');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const canSubmit = body.trim().length > 0 && !submitting;
+  const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
+  const recording = voiceState === 'recording';
 
   useEffect(() => {
     if (autoFocus) textareaRef.current?.focus();
   }, [autoFocus]);
+
+  // Same append-and-refocus contract as ProjectChatComposer so dictation feels
+  // identical wherever the mic appears.
+  const handleTranscription = useCallback((text: string) => {
+    setBody((current) => {
+      const separator = current.length > 0 && !current.endsWith(' ') ? ' ' : '';
+      return current + separator + text;
+    });
+    textareaRef.current?.focus();
+  }, []);
 
   const submit = async (overrideAction = action) => {
     const trimmed = body.trim();
@@ -57,25 +72,43 @@ export function CommentComposer({
       <label htmlFor={textareaId} className="sr-only">
         {placeholder}
       </label>
-      <Textarea
-        ref={textareaRef}
-        id={textareaId}
-        value={body}
-        placeholder={placeholder}
-        aria-label={placeholder}
-        onChange={(event) => setBody(event.target.value)}
-        onKeyDown={(event) => {
-          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-            event.preventDefault();
-            void submit();
-          }
-          if (event.key === 'Escape') {
-            event.preventDefault();
-            onCancel();
-          }
-        }}
-        className="text-sm"
-      />
+      <div className="relative min-w-0">
+        <Textarea
+          ref={textareaRef}
+          id={textareaId}
+          value={body}
+          placeholder={placeholder}
+          aria-label={placeholder}
+          onChange={(event) => setBody(event.target.value)}
+          onKeyDown={(event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+              event.preventDefault();
+              void submit();
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              onCancel();
+            }
+          }}
+          // pr-14 reserves the mic's footprint so dictated text never runs under it.
+          className="pr-14 text-sm transition-colors"
+          // Inline: both properties lose the Tailwind cascade to the base class's
+          // `resize-y` / `border-border-default`. `resize` is off because the mic
+          // overlay sits exactly on the native resize grip.
+          style={{
+            resize: 'none',
+            ...(recording ? { borderColor: 'var(--sam-color-danger)' } : {}),
+          }}
+        />
+        <div className="absolute bottom-1 right-1">
+          <VoiceButton
+            onTranscription={handleTranscription}
+            onStateChange={setVoiceState}
+            disabled={submitting}
+            apiUrl={transcribeApiUrl}
+          />
+        </div>
+      </div>
       <fieldset className="flex flex-wrap gap-2" aria-label="Comment action">
         <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-border-default px-2 py-1 text-xs text-fg-muted">
           <input

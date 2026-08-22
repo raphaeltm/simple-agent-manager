@@ -50,7 +50,7 @@ export { TypewriterText } from './components/TypewriterText';
 export { UsageIndicator } from './components/UsageIndicator';
 export type { UserMessageFadeProps } from './components/UserMessageFade';
 export { UserMessageFade } from './components/UserMessageFade';
-export type { VoiceButtonProps } from './components/VoiceButton';
+export type { VoiceButtonProps, VoiceButtonState } from './components/VoiceButton';
 export { VoiceButton } from './components/VoiceButton';
 
 // Mermaid utilities

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { parseJsonRecord, readResponseJsonRecord } from '../runtime-validation';
 
 /** VoiceButton states */
-type VoiceState = 'idle' | 'recording' | 'processing' | 'error';
+export type VoiceButtonState = 'idle' | 'recording' | 'processing' | 'error';
 
 export interface VoiceButtonProps {
   /** Called with transcribed text when transcription completes */
@@ -14,6 +14,12 @@ export interface VoiceButtonProps {
   apiUrl: string;
   /** Optional callback for reporting errors to telemetry */
   onError?: (info: { message: string; source: string; context?: Record<string, unknown> }) => void;
+  /**
+   * Notified whenever the button's internal state changes. Lets a host surface
+   * reflect recording/processing status (e.g. tinting the composer it sits in)
+   * without duplicating the recorder state machine.
+   */
+  onStateChange?: (state: VoiceButtonState) => void;
 }
 
 /** Inline SVG microphone icon (idle state) */
@@ -88,8 +94,9 @@ export function VoiceButton({
   disabled = false,
   apiUrl,
   onError,
+  onStateChange,
 }: VoiceButtonProps) {
-  const [state, setState] = useState<VoiceState>('idle');
+  const [state, setState] = useState<VoiceButtonState>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [amplitude, setAmplitude] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -98,6 +105,16 @@ export function VoiceButton({
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+
+  // Held in a ref so a caller passing an inline callback cannot re-fire the
+  // notification effect on every render — only real state transitions notify.
+  const onStateChangeRef = useRef(onStateChange);
+  useEffect(() => {
+    onStateChangeRef.current = onStateChange;
+  }, [onStateChange]);
+  useEffect(() => {
+    onStateChangeRef.current?.(state);
+  }, [state]);
 
   // Clean up on unmount
   useEffect(() => {

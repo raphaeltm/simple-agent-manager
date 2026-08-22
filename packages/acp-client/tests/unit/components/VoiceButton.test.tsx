@@ -378,6 +378,71 @@ describe('VoiceButton', () => {
     });
   });
 
+  it('reports each state transition through onStateChange as the user records', async () => {
+    const onStateChange = vi.fn();
+
+    render(
+      <VoiceButton
+        onTranscription={mockOnTranscription}
+        apiUrl="https://api.example.com/api/transcribe"
+        onStateChange={onStateChange}
+      />
+    );
+
+    // Mounting publishes the initial state so a host can render from it directly.
+    expect(onStateChange.mock.calls.map(([state]) => state)).toEqual(['idle']);
+
+    const button = screen.getByRole('button');
+    await act(async () => {
+      fireEvent.click(button);
+    });
+
+    await waitFor(() => {
+      expect(onStateChange).toHaveBeenCalledWith('recording');
+    });
+
+    // Stopping runs the transcription round-trip and returns to idle.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button'));
+    });
+
+    await waitFor(() => {
+      expect(mockOnTranscription).toHaveBeenCalledWith('Transcribed text');
+    });
+
+    expect(onStateChange.mock.calls.map(([state]) => state)).toEqual([
+      'idle',
+      'recording',
+      'processing',
+      'idle',
+    ]);
+  });
+
+  it('does not re-notify onStateChange when only the callback identity changes', async () => {
+    const onStateChange = vi.fn();
+    const { rerender } = render(
+      <VoiceButton
+        onTranscription={mockOnTranscription}
+        apiUrl="https://api.example.com/api/transcribe"
+        onStateChange={onStateChange}
+      />
+    );
+
+    expect(onStateChange).toHaveBeenCalledTimes(1);
+
+    // A host passing an inline arrow function re-renders with a new identity on
+    // every parent render; that must not look like a state transition.
+    rerender(
+      <VoiceButton
+        onTranscription={mockOnTranscription}
+        apiUrl="https://api.example.com/api/transcribe"
+        onStateChange={(state) => onStateChange(state)}
+      />
+    );
+
+    expect(onStateChange).toHaveBeenCalledTimes(1);
+  });
+
   it('handles browser without mediaDevices support', async () => {
     Object.defineProperty(navigator, 'mediaDevices', {
       value: undefined,

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   commentsForMessage,
@@ -99,7 +99,51 @@ describe('message comment utilities', () => {
   });
 });
 
+/**
+ * Minimal MediaRecorder stand-in so the composer's real VoiceButton can be
+ * driven end-to-end: click -> record -> stop -> POST -> transcribed text.
+ */
+class StubMediaRecorder {
+  state = 'inactive';
+  mimeType = 'audio/webm';
+  ondataavailable: ((event: { data: Blob }) => void) | null = null;
+  onstop: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+
+  static isTypeSupported = () => true;
+
+  start() {
+    this.state = 'recording';
+  }
+
+  stop() {
+    this.state = 'inactive';
+    this.ondataavailable?.({ data: new Blob(['audio'], { type: 'audio/webm' }) });
+    this.onstop?.();
+  }
+}
+
 describe('CommentComposer', () => {
+  beforeEach(() => {
+    const track = { stop: vi.fn(), kind: 'audio', enabled: true };
+    const stream = { getTracks: () => [track] };
+    vi.stubGlobal('MediaRecorder', StubMediaRecorder);
+    vi.stubGlobal('AudioContext', undefined);
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia: vi.fn().mockResolvedValue(stream) },
+      writable: true,
+      configurable: true,
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ text: 'Dictated words.' }) })
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('submits trimmed bodies with the explicit send-to-agent action and keeps focus accessible', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const onCancel = vi.fn();
@@ -118,6 +162,54 @@ describe('CommentComposer', () => {
 
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledWith('Ask the agent to verify this.', 'send_to_agent');
+    });
+  });
+
+  it('dictates into the body, appending after existing text, and submits it', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(<CommentComposer onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    const textarea = screen.getByLabelText('Add a comment…') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Typed first.' } });
+
+    // Drive the real mic control the way a user does, rather than calling the
+    // transcription handler directly.
+    fireEvent.click(screen.getByRole('button', { name: 'Start voice input' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Stop recording' })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }));
+
+    await waitFor(() => {
+      expect(textarea.value).toBe('Typed first. Dictated words.');
+    });
+
+    fireEvent.submit(textarea.closest('form')!);
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith('Typed first. Dictated words.', 'note');
+    });
+  });
+
+  it('tints the composer border only while recording', async () => {
+    render(<CommentComposer onSubmit={vi.fn()} onCancel={vi.fn()} />);
+
+    const textarea = screen.getByLabelText('Add a comment…') as HTMLTextAreaElement;
+    expect(textarea.style.borderColor).toBe('');
+    // The mic overlay sits on the native resize grip, so resizing is disabled.
+    expect(textarea.style.resize).toBe('none');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start voice input' }));
+
+    await waitFor(() => {
+      expect(textarea.style.borderColor).toBe('var(--sam-color-danger)');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }));
+
+    await waitFor(() => {
+      expect(textarea.style.borderColor).toBe('');
     });
   });
 
