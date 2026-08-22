@@ -208,7 +208,8 @@ export function claimDuePromptDeliveries(
          WHEN 'notify' THEN 1
          ELSE 0
        END DESC,
-       created_at ASC
+       created_at ASC,
+       rowid ASC
      LIMIT ?`,
       now,
       config.maxAttempts,

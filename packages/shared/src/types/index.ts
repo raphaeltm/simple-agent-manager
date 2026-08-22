@@ -224,16 +224,32 @@ export type {
   CommentAuthor,
   CommentAuthorKind,
   CommentStatus,
+  CreateMessageCommentThreadRequest,
+  MessageCommentActorProvenance,
   MessageCommentAnchor,
+  MessageCommentAuthor,
+  MessageCommentAuthorKind,
+  MessageCommentDirectiveState,
+  MessageCommentListRequest,
   MessageCommentListResponse,
   MessageCommentMutationResponse,
   MessageCommentReply,
   MessageCommentReplyMutationResponse,
+  MessageCommentSourceMessageContext,
   MessageCommentThread,
   MessageCommentThreadEvent,
   MessageCommentThreadEventReason,
+  MessageCommentThreadStatus,
+  MessageCommentThreadSummary,
+  ReplyToMessageCommentThreadRequest,
+  UpdateMessageCommentThreadStatusRequest,
 } from './comments';
-export { COMMENT_AUTHOR_KINDS, COMMENT_STATUSES } from './comments';
+export {
+  COMMENT_AUTHOR_KINDS,
+  COMMENT_STATUSES,
+  MESSAGE_COMMENT_AUTHOR_KINDS,
+  MESSAGE_COMMENT_THREAD_STATUSES,
+} from './comments';
 export {
   ATTACHMENT_DEFAULTS,
   COMPLETION_EVIDENCE_VERIFICATION_KINDS,

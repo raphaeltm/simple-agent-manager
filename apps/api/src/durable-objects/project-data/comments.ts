@@ -306,7 +306,7 @@ function readReplies(sql: SqlStorage, threadIds: string[]): Map<string, MessageC
   for (const row of rows) {
     try {
       const reply = mapReply(row);
-      byThread.get(reply.threadId)?.push(reply);
+      if (reply.threadId) byThread.get(reply.threadId)?.push(reply);
     } catch (err) {
       log.warn('comments.reply_row_skipped', {
         rowId: typeof row.id === 'string' ? row.id : null,

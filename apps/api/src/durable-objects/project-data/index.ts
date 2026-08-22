@@ -487,6 +487,10 @@ export class ProjectData extends DurableObject<Env> {
     return comments.listCommentThreads(this.sql, this.env, input);
   }
 
+  getCommentThread(input: { sessionId: string; threadId: string }): MessageCommentThread | null {
+    return comments.getCommentThread(this.sql, input.sessionId, input.threadId);
+  }
+
   createCommentThread(input: comments.CreateCommentThreadInput) {
     const result = this.ctx.storage.transactionSync(() =>
       comments.createCommentThread(this.sql, this.env, input)

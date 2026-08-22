@@ -18,6 +18,7 @@ import type {
   MessageClass,
   MessageCommentListResponse,
   MessageCommentMutationResponse,
+  MessageCommentThread,
   MessageCommentReplyMutationResponse,
   SessionActivityTerminalReason,
 } from '@simple-agent-manager/shared';
@@ -422,6 +423,17 @@ export async function listCommentThreads(
 ): Promise<MessageCommentListResponse> {
   return callProjectDataWithRetry(env, projectId, 'listCommentThreads', (stub) =>
     stub.listCommentThreads(input)
+  );
+}
+
+export async function getCommentThread(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  threadId: string
+): Promise<MessageCommentThread | null> {
+  return callProjectDataWithRetry(env, projectId, 'getCommentThread', (stub) =>
+    stub.getCommentThread({ sessionId, threadId })
   );
 }
 
