@@ -7,6 +7,7 @@ import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
+import { parseOptionalBody, SendCommentDirectiveSchema } from '../schemas';
 import {
   createProjectDataMessageCommentAdapter,
   isMessageCommentServiceError,
@@ -47,6 +48,7 @@ export function registerChatCommentDirectiveRoute(chatRoutes: Hono<{ Bindings: E
     const db = drizzle(c.env.DATABASE, { schema });
 
     await requireProjectCapability(db, projectId, userId, 'task:write');
+    const body = await parseOptionalBody(c.req.raw, SendCommentDirectiveSchema, {});
 
     const session = await projectDataService.getSession(c.env, projectId, sessionId);
     if (!session) {
@@ -61,6 +63,7 @@ export function registerChatCommentDirectiveRoute(chatRoutes: Hono<{ Bindings: E
         sessionId,
         threadId,
         humanUserId: userId,
+        body: body.body ?? null,
       });
 
       return c.json(

@@ -39,6 +39,12 @@ const mocks = vi.hoisted(() => ({
   getNode: vi.fn(),
   updateProjectTaskStatus: vi.fn(),
   deleteWorkspace: vi.fn(),
+  listMessageComments: vi.fn().mockResolvedValue({ comments: [] }),
+  createMessageCommentThread: vi.fn(),
+  createMessageCommentReply: vi.fn(),
+  resolveMessageCommentThread: vi.fn(),
+  reopenMessageCommentThread: vi.fn(),
+  sendMessageCommentThreadToAgent: vi.fn(),
   // Timeline data sources (useSessionTimeline)
   listChatMessages: vi.fn(),
   listActivityEvents: vi.fn(),
@@ -59,11 +65,24 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   deleteWorkspace: mocks.deleteWorkspace,
 }));
 
+vi.mock('../../../src/lib/api/comments', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api/comments')>()),
+  listMessageComments: mocks.listMessageComments,
+  createMessageCommentThread: mocks.createMessageCommentThread,
+  createMessageCommentReply: mocks.createMessageCommentReply,
+  resolveMessageCommentThread: mocks.resolveMessageCommentThread,
+  reopenMessageCommentThread: mocks.reopenMessageCommentThread,
+  sendMessageCommentThreadToAgent: mocks.sendMessageCommentThreadToAgent,
+}));
+
 // Captured WebSocket onMessage callback — tests can call this to inject messages
 let capturedWsOnMessage: ((msg: ReturnType<typeof makeMessage>) => void) | null = null;
 // Captured onCatchUp callback — tests can call this to simulate catch-up after reconnect
 let capturedWsOnCatchUp:
   | ((msgs: ReturnType<typeof makeMessage>[], session: ReturnType<typeof makeSession>) => void)
+  | null = null;
+let capturedWsOnCommentEvent:
+  | ((event: import('../../../src/lib/api/comments').MessageCommentRealtimeEvent) => void)
   | null = null;
 let mockWsConnectionState: 'connecting' | 'connected' | 'reconnecting' | 'disconnected' =
   'connected';
@@ -72,9 +91,11 @@ vi.mock('../../../src/hooks/useChatWebSocket', () => ({
   useChatWebSocket: (opts: {
     onMessage?: (msg: unknown) => void;
     onCatchUp?: (msgs: unknown[], session: unknown) => void;
+    onCommentEvent?: (event: unknown) => void;
   }) => {
     capturedWsOnMessage = (opts.onMessage ?? null) as typeof capturedWsOnMessage;
     capturedWsOnCatchUp = (opts.onCatchUp ?? null) as typeof capturedWsOnCatchUp;
+    capturedWsOnCommentEvent = (opts.onCommentEvent ?? null) as typeof capturedWsOnCommentEvent;
     return {
       connectionState: mockWsConnectionState,
       wsRef: { current: null },
@@ -126,6 +147,7 @@ vi.mock('react-virtuoso', async () => {
 // assert the exact coordinate the component asked for.
 const virtuosoMock = {
   scrollToIndexCalls: (await import('../../helpers/virtuoso-mock')).scrollToIndexCalls,
+  reset: (await import('../../helpers/virtuoso-mock')).resetVirtuosoMock,
 };
 
 // Timeline data sources — useSessionTimeline fetches these when the drawer opens.
@@ -156,6 +178,60 @@ beforeEach(() => {
   mockWsConnectionState = 'connected';
   capturedWsOnMessage = null;
   capturedWsOnCatchUp = null;
+  capturedWsOnCommentEvent = null;
+  mocks.listMessageComments.mockResolvedValue({ comments: [] });
+  mocks.createMessageCommentThread.mockImplementation(
+    async (
+      projectId: string,
+      sessionId: string,
+      input: import('../../../src/lib/api/comments').CreateMessageCommentThreadRequest
+    ) => ({
+      comment: makeCommentThread({
+        id: 'server-comment-1',
+        clientId: input.clientId,
+        projectId,
+        sessionId,
+        messageId: input.anchor.messageId,
+        quote: input.anchor.quote,
+        body: input.body,
+        status: input.action === 'send_to_agent' ? 'sent' : 'open',
+      }),
+    })
+  );
+  mocks.createMessageCommentReply.mockImplementation(
+    async (
+      _projectId: string,
+      _sessionId: string,
+      commentId: string,
+      input: import('../../../src/lib/api/comments').CreateMessageCommentReplyRequest
+    ) => ({
+      comment: makeCommentThread({
+        id: commentId,
+        body: 'Existing body',
+        replies: [
+          {
+            id: 'reply-server-1',
+            clientId: input.clientId,
+            author: testAuthor,
+            body: input.body,
+            createdAt: 1_700_000_100_000,
+            updatedAt: 1_700_000_100_000,
+            sentToAgent: input.action === 'send_to_agent',
+          },
+        ],
+        status: input.action === 'send_to_agent' ? 'sent' : 'open',
+      }),
+    })
+  );
+  mocks.resolveMessageCommentThread.mockImplementation(async (_projectId, _sessionId, commentId) => ({
+    comment: makeCommentThread({ id: commentId, status: 'resolved' }),
+  }));
+  mocks.reopenMessageCommentThread.mockImplementation(async (_projectId, _sessionId, commentId) => ({
+    comment: makeCommentThread({ id: commentId, status: 'open' }),
+  }));
+  mocks.sendMessageCommentThreadToAgent.mockImplementation(async (_projectId, _sessionId, commentId) => ({
+    comment: makeCommentThread({ id: commentId, status: 'sent' }),
+  }));
 });
 
 // --- Test helpers ---
@@ -173,15 +249,52 @@ function makeSession(id: string, status = 'active') {
   };
 }
 
-function makeMessage(id: string, sessionId: string, content: string) {
+function makeMessage(
+  id: string,
+  sessionId: string,
+  content: string,
+  role: 'assistant' | 'user' | 'system' | 'tool' = 'assistant'
+) {
   return {
     id,
     sessionId,
-    role: 'assistant' as const,
+    role,
     content,
     toolMetadata: null,
     createdAt: Date.now(),
     sequence: null,
+  };
+}
+
+const testAuthor = {
+  id: 'user-1',
+  name: 'Test User',
+  email: 'test@example.com',
+  avatarUrl: null,
+  kind: 'human' as const,
+};
+
+function makeCommentThread(
+  overrides: Partial<import('../../../src/lib/api/comments').MessageCommentThread> & {
+    messageId?: string;
+    quote?: string;
+  } = {}
+): import('../../../src/lib/api/comments').MessageCommentThread {
+  const messageId = overrides.messageId ?? overrides.anchor?.messageId ?? 'msg-1';
+  const quote = overrides.quote ?? overrides.anchor?.quote ?? 'Selected quote';
+
+  return {
+    id: overrides.id ?? 'comment-1',
+    clientId: overrides.clientId ?? null,
+    projectId: overrides.projectId ?? 'proj-1',
+    sessionId: overrides.sessionId ?? 'session-1',
+    anchor: overrides.anchor ?? { kind: 'message', messageId, quote },
+    author: overrides.author ?? testAuthor,
+    body: overrides.body ?? 'Needs a follow-up check.',
+    createdAt: overrides.createdAt ?? 1_700_000_000_000,
+    updatedAt: overrides.updatedAt ?? 1_700_000_000_000,
+    status: overrides.status ?? 'open',
+    replies: overrides.replies ?? [],
   };
 }
 
@@ -1599,6 +1712,191 @@ describe('ProjectMessageView — virtual scroll', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Session B message')).toBeTruthy();
+    });
+  });
+});
+
+describe('ProjectMessageView — message anchored comments', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.clearAllMocks();
+    virtuosoMock.reset();
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
+    mocks.listMessageComments.mockResolvedValue({ comments: [] });
+  });
+
+  afterEach(() => {
+    window.getSelection()?.removeAllRanges();
+    vi.useRealTimers();
+  });
+
+  it('renders a data-backed desktop rail entry and jumps using the 0-based Virtuoso index', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        makeMessage('msg-1', 'session-1', 'User prompt', 'user'),
+        makeMessage('msg-2', 'session-1', 'Agent answer'),
+        makeMessage('msg-3', 'session-1', 'User clarification', 'user'),
+      ])
+    );
+    mocks.listMessageComments.mockResolvedValue({
+      comments: [
+        makeCommentThread({
+          id: 'comment-msg-3',
+          messageId: 'msg-3',
+          body: 'This comment belongs to the later message.',
+        }),
+      ],
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('This comment belongs to the later message.')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /message msg-3\s*view/i }));
+
+    expect(virtuosoMock.scrollToIndexCalls.at(-1)).toMatchObject({
+      index: 2,
+      behavior: 'smooth',
+      align: 'center',
+    });
+  });
+
+  it('creates an optimistic thread from a message action without changing chat rendering', async () => {
+    mocks.listMessageComments
+      .mockResolvedValueOnce({ comments: [] })
+      .mockResolvedValue({
+        comments: [
+          makeCommentThread({
+            id: 'server-comment-1',
+            messageId: 'msg-1',
+            body: 'Please check this edge case.',
+          }),
+        ],
+      });
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Agent answer')])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Agent answer')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /add comment on message msg-1/i }));
+    const textarea = screen.getAllByLabelText('Add a comment…')[0] as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: ' Please check this edge case. ' } });
+    fireEvent.click(within(textarea.closest('form')!).getByRole('button', { name: 'Comment' }));
+
+    await waitFor(() => {
+      expect(mocks.createMessageCommentThread).toHaveBeenCalledWith(
+        'proj-1',
+        'session-1',
+        expect.objectContaining({
+          anchor: { kind: 'message', messageId: 'msg-1', quote: undefined },
+          body: 'Please check this edge case.',
+          action: 'note',
+        })
+      );
+    });
+    expect(screen.getByTestId('virtuoso-scroller').textContent).toContain('Agent answer');
+    await waitFor(() => {
+      expect(screen.getAllByText('Please check this edge case.').length).toBeGreaterThan(0);
+    });
+  });
+
+  it('uses real DOM selection to open a quoted composer while preserving native selection', async () => {
+    const selectedPhrase = 'Select this exact phrase';
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        makeMessage('msg-1', 'session-1', `${selectedPhrase} for a review comment.`),
+      ])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    const message = await screen.findByText(`${selectedPhrase} for a review comment.`);
+    const textNode = message.firstChild;
+    expect(textNode).toBeTruthy();
+
+    const range = document.createRange();
+    range.setStart(textNode!, 0);
+    range.setEnd(textNode!, selectedPhrase.length);
+    range.getBoundingClientRect = () =>
+      ({
+        left: 96,
+        right: 260,
+        top: 120,
+        bottom: 140,
+        width: 164,
+        height: 20,
+        x: 96,
+        y: 120,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    await act(async () => {
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+      document.dispatchEvent(new Event('mouseup'));
+    });
+
+    const popover = await screen.findByRole('dialog', { name: 'Comment on selection' });
+    const commentButton = within(popover).getByRole('button', { name: 'Comment' });
+    fireEvent.mouseDown(commentButton);
+    expect(window.getSelection()?.toString()).toBe(selectedPhrase);
+    fireEvent.click(commentButton);
+
+    expect(screen.getAllByText(selectedPhrase).length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText('Add a comment…').length).toBeGreaterThan(0);
+  });
+
+  it('applies realtime comment events to the comment cache for the active session', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Agent answer')])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Agent answer')).toBeTruthy();
+      expect(capturedWsOnCommentEvent).toBeTruthy();
+    });
+
+    await act(async () => {
+      capturedWsOnCommentEvent!({
+        type: 'comment.thread.created',
+        payload: {
+          projectId: 'proj-1',
+          sessionId: 'session-1',
+          comment: makeCommentThread({
+            id: 'comment-live-1',
+            messageId: 'msg-1',
+            body: 'Realtime comment body',
+          }),
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Realtime comment body').length).toBeGreaterThan(0);
+      expect(
+        screen.getByRole('button', { name: /1 comment on this message, 1 unresolved/i })
+      ).toBeTruthy();
     });
   });
 });

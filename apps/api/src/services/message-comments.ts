@@ -364,6 +364,7 @@ export interface SendMessageCommentDirectiveInput {
   sessionId: string;
   threadId: string;
   humanUserId: string;
+  body?: string | null;
   now?: number;
 }
 
@@ -406,7 +407,7 @@ export async function sendMessageCommentDirective(
 
   const config = getMessageCommentConfig(input.env);
   const deliveryId = buildCommentDirectiveDeliveryId(thread.id);
-  const content = buildDirectivePrompt(thread, config);
+  const content = buildDirectivePrompt(thread, config, input.body);
   const accepted = await projectDataService.acceptPromptDelivery(input.env, input.projectId, {
     deliveryId,
     targetSessionId: input.sessionId,
@@ -456,13 +457,17 @@ export async function sendMessageCommentDirective(
   };
 }
 
-function buildDirectivePrompt(thread: MessageCommentThread, config: MessageCommentConfig): string {
+function buildDirectivePrompt(
+  thread: MessageCommentThread,
+  config: MessageCommentConfig,
+  directiveBody?: string | null
+): string {
   const author = getAuthorDisplayName(thread.author) || `${thread.author.kind}:${thread.author.id}`;
   const quote = normalizeCommentQuote(
     thread.anchor.quote ?? thread.sourceMessage?.quote ?? null,
     config
   );
-  const body = normalizeCommentBody(thread.body, config);
+  const body = normalizeCommentBody(directiveBody?.trim() ? directiveBody : thread.body, config);
   const sections = [
     'SAM comment directive',
     `Comment ID: ${thread.id}`,

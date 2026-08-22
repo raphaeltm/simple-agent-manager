@@ -17,6 +17,7 @@ import type {
   ChatMessageResponse,
   ChatSessionDetailResponse,
   ChatSessionResponse,
+  MessageCommentRealtimeEvent,
   SessionStateSnapshot,
 } from '../../lib/api';
 import {
@@ -56,7 +57,8 @@ export function useSessionLifecycle(
   projectId: string,
   sessionId: string,
   isProvisioning: boolean,
-  _onSessionMutated?: () => void
+  _onSessionMutated?: () => void,
+  onCommentEvent?: (event: MessageCommentRealtimeEvent) => void
 ): UseSessionLifecycleResult {
   const queryScope = useQueryScope();
   const queryClient = useQueryClient();
@@ -321,6 +323,7 @@ export function useSessionLifecycle(
       },
       [wake]
     ),
+    onCommentEvent,
   });
 
   // Connection recovery (banner debounce, idle timer, auto-resume)

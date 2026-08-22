@@ -14,7 +14,13 @@ import {
   CommentStatusMutationSchema,
   CreateCommentReplySchema,
   CreateCommentThreadSchema,
+  SendCommentDirectiveSchema,
 } from '../schemas/comments';
+import {
+  createProjectDataMessageCommentAdapter,
+  isMessageCommentServiceError,
+  sendMessageCommentDirective,
+} from '../services/message-comments';
 import * as projectDataService from '../services/project-data';
 
 export const chatCommentRoutes = new Hono<{ Bindings: Env }>();
@@ -111,6 +117,24 @@ function rethrowCommentError(err: unknown): never {
     throw errors.unprocessable(err instanceof Error ? err.message : 'Comment limit exceeded');
   }
   throw err;
+}
+
+function rethrowCommentDirectiveError(err: unknown): never {
+  if (!isMessageCommentServiceError(err)) {
+    throw err;
+  }
+  switch (err.code) {
+    case 'invalid_request':
+      throw errors.badRequest(err.message);
+    case 'not_found':
+      throw errors.notFound('Comment thread');
+    case 'forbidden':
+      throw errors.forbidden(err.message);
+    case 'conflict':
+      throw errors.conflict(err.message);
+    case 'unavailable':
+      throw errors.internal('Comment storage backend is unavailable');
+  }
 }
 
 /**
@@ -233,10 +257,38 @@ async function updateCommentStatus(
 
 chatCommentRoutes.post(
   '/:sessionId/comments/:threadId/send',
-  jsonValidator(CommentStatusMutationSchema),
-  (c) => {
+  jsonValidator(SendCommentDirectiveSchema),
+  async (c) => {
     const body = c.req.valid('json');
-    return updateCommentStatus(c, 'sent', body.clientMutationId ?? null);
+    const userId = getUserId(c);
+    const projectId = requireRouteParam(c, 'projectId');
+    const sessionId = requireRouteParam(c, 'sessionId');
+    const threadId = requireRouteParam(c, 'threadId');
+    const db = drizzle(c.env.DATABASE, { schema });
+
+    await requireProjectCapability(db, projectId, userId, 'task:write');
+
+    try {
+      const result = await sendMessageCommentDirective({
+        env: c.env,
+        storage: createProjectDataMessageCommentAdapter(c.env),
+        projectId,
+        sessionId,
+        threadId,
+        humanUserId: userId,
+        body: body.body ?? null,
+      });
+      return c.json(
+        {
+          thread: result.thread,
+          comment: result.thread,
+          idempotent: result.duplicate,
+        },
+        result.duplicate ? 200 : 202
+      );
+    } catch (err) {
+      rethrowCommentDirectiveError(err);
+    }
   }
 );
 

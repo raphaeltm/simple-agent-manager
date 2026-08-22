@@ -8,7 +8,6 @@
  */
 import type {
   ConversationItem,
-  PlanItem,
   SlashCommand,
   ToolCallContentItem,
 } from '@simple-agent-manager/acp-client';
@@ -25,7 +24,9 @@ import { ChatFilePanel } from '../chat/ChatFilePanel';
 import { ChatTimelineDrawer } from '../chat/ChatTimelineDrawer';
 import { TruncatedSummary } from '../chat/TruncatedSummary';
 import { FailureCard } from '../debug/FailureCard';
-import { AcpConversationItemView } from './AcpConversationItemView';
+import { CommentableConversationItem } from './comments/CommentableConversationItem';
+import { useMessageComments } from './comments/useMessageComments';
+import { useProjectMessageCommentUi } from './comments/useProjectMessageCommentUi';
 import { CompletionDock } from './CompletionDock';
 import { FollowUpInput, ReadOnlyFollowUp } from './FollowUpInput';
 import { ConnectionBanner } from './MessageBanners';
@@ -34,6 +35,7 @@ import {
   type ChatListContext,
   useFloatingHeaderHeight,
 } from './MessageListScaffold';
+import { currentPlanToPlanItem, ElapsedTime } from './session-view-utils';
 import { SessionHeader } from './SessionHeader';
 import { StaleActivityNotice } from './StaleActivityNotice';
 import type { TimelineJumpTarget } from './timeline-types';
@@ -159,45 +161,6 @@ function FloatingHeader({
   );
 }
 
-/** Convert session state plan array to PlanItem for the CompletionDock plan pill / PlanModal. */
-function currentPlanToPlanItem(plan: Array<{ content: string; status: string }>): PlanItem {
-  return {
-    kind: 'plan',
-    id: 'session-plan',
-    entries: plan.map((e) => ({
-      content: e.content,
-      priority: 'medium' as const,
-      status: (e.status === 'completed'
-        ? 'completed'
-        : e.status === 'in_progress'
-          ? 'in_progress'
-          : 'pending') as 'pending' | 'in_progress' | 'completed',
-    })),
-    timestamp: Date.now(),
-  };
-}
-
-/** Live elapsed-time display since prompt started. */
-const ElapsedTime: FC<{ startedAt: number }> = ({ startedAt }) => {
-  const [elapsed, setElapsed] = useState('');
-  useEffect(() => {
-    const update = () => {
-      const seconds = Math.floor((Date.now() - startedAt) / 1000);
-      const m = Math.floor(seconds / 60);
-      const s = seconds % 60;
-      setElapsed(m > 0 ? `${m}m ${s}s` : `${s}s`);
-    };
-    update();
-    const interval = setInterval(update, 1000);
-    return () => clearInterval(interval);
-  }, [startedAt]);
-  return (
-    <span className="text-xs text-fg-muted tabular-nums" aria-hidden="true">
-      ({elapsed})
-    </span>
-  );
-};
-
 interface ProjectMessageViewProps {
   projectId: string;
   sessionId: string;
@@ -253,11 +216,20 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   onNewChat,
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const chatLogRef = useRef<HTMLDivElement>(null);
   const [floatingHeaderRef, floatingHeaderHeight] = useFloatingHeaderHeight();
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
 
-  const lc = useSessionLifecycle(projectId, sessionId, isProvisioning, onSessionMutated);
+  const messageComments = useMessageComments(projectId, sessionId, Boolean(projectId && sessionId));
+
+  const lc = useSessionLifecycle(
+    projectId,
+    sessionId,
+    isProvisioning,
+    onSessionMutated,
+    messageComments.applyRealtimeEvent
+  );
 
   // Convert DO messages to conversation items (single source)
   const conversationItems = useMemo<ConversationItem[]>(() => {
@@ -397,6 +369,15 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   // rebuilding the ternary (and therefore the callback) on every render.
   const fileClickHandler =
     lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined;
+  const canWriteSession = lc.session?.isMine !== false;
+  const commentUi = useProjectMessageCommentUi({
+    messageComments,
+    canWriteSession,
+    hasMessages: conversationItems.length > 0,
+    chatLogRef,
+    sessionId,
+    scrollAndHighlight,
+  });
 
   /**
    * Row renderer for the virtualized conversation.
@@ -412,24 +393,25 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
    * note on `itemIndexById` above.
    */
   const renderConversationItem = useCallback(
-    (index: number, item: ConversationItem) => (
-      <div
-        className={`sam-message-entry px-4 pb-3${highlightedItemId === item.id ? ' sam-message-highlight' : ''}`}
-      >
-        <AcpConversationItemView
+    (index: number, item: ConversationItem) => {
+      return (
+        <CommentableConversationItem
+          index={index}
+          firstItemIndex={lc.firstItemIndex}
           item={item}
           projectId={projectId}
+          highlighted={highlightedItemId === item.id}
           onFileClick={fileClickHandler}
           onLoadToolContent={handleLoadToolContent}
-          animateText={
-            item.kind === 'agent_message' &&
-            index - lc.firstItemIndex === animationTargetIdx &&
-            lc.agentActivity === 'responding'
-          }
+          animateAgentText
           animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
+          canWriteSession={canWriteSession}
+          agentActivity={lc.agentActivity}
+          animationTargetIdx={animationTargetIdx}
+          commentState={commentUi.rowState}
         />
-      </div>
-    ),
+      );
+    },
     [
       highlightedItemId,
       projectId,
@@ -439,6 +421,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       lc.agentActivity,
       animationTargetIdx,
       animatedUserMsgIds,
+      canWriteSession,
+      commentUi.rowState,
     ]
   );
 
@@ -458,7 +442,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       lc.currentPlan && lc.currentPlan.length > 0 ? currentPlanToPlanItem(lc.currentPlan) : null,
     [lc.currentPlan]
   );
-  const canWriteSession = lc.session?.isMine !== false;
   const sessionOwnerLabel =
     lc.session?.createdBy?.name?.trim() ||
     lc.session?.createdBy?.email?.split('@')[0] ||
@@ -602,58 +585,65 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           </div>
         </div>
       ) : (
-        <div
-          className="flex-1 min-h-0 min-w-0 relative flex flex-col"
-          role="log"
-          aria-live="polite"
-          aria-label="Conversation"
-        >
-          <FloatingHeader
-            projectId={projectId}
-            lc={lc}
-            onSessionMutated={onSessionMutated}
-            onRetry={onRetry}
-            onFork={onFork}
-            onOpenTimeline={() => setShowTimeline(true)}
-            sourceContext={sourceContext}
-            onShowHierarchy={onShowHierarchy}
-            containerRef={floatingHeaderRef}
-          />
-          <div className="flex-1 min-h-0">
-            <Virtuoso
-              ref={virtuosoRef}
-              style={{ height: '100%' }}
-              data={conversationItems}
-              firstItemIndex={lc.firstItemIndex}
-              initialTopMostItemIndex={conversationItems.length - 1}
-              followOutput={(isAtBottom: boolean) => (isAtBottom ? 'smooth' : false)}
-              alignToBottom
-              atBottomThreshold={50}
-              atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
-              overscan={200}
-              itemContent={renderConversationItem}
-              context={chatListContext}
-              components={CHAT_LIST_COMPONENTS}
+        <div className="flex-1 min-h-0 min-w-0 relative flex flex-col lg:flex-row">
+          <div
+            ref={chatLogRef}
+            className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+            role="log"
+            aria-live="polite"
+            aria-label="Conversation"
+          >
+            <FloatingHeader
+              projectId={projectId}
+              lc={lc}
+              onSessionMutated={onSessionMutated}
+              onRetry={onRetry}
+              onFork={onFork}
+              onOpenTimeline={() => setShowTimeline(true)}
+              sourceContext={sourceContext}
+              onShowHierarchy={onShowHierarchy}
+              containerRef={floatingHeaderRef}
             />
+            <div className="flex-1 min-h-0">
+              <Virtuoso
+                ref={virtuosoRef}
+                style={{ height: '100%' }}
+                data={conversationItems}
+                firstItemIndex={lc.firstItemIndex}
+                initialTopMostItemIndex={conversationItems.length - 1}
+                followOutput={(isAtBottom: boolean) => (isAtBottom ? 'smooth' : false)}
+                alignToBottom
+                atBottomThreshold={50}
+                atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
+                overscan={200}
+                itemContent={renderConversationItem}
+                context={chatListContext}
+                components={CHAT_LIST_COMPONENTS}
+              />
+            </div>
+
+            {/* Scroll to bottom button */}
+            {lc.showScrollButton && (
+              <button
+                type="button"
+                onClick={() => {
+                  virtuosoRef.current?.scrollToIndex({
+                    index: 'LAST',
+                    behavior: 'smooth',
+                  });
+                }}
+                className="sam-scroll-button absolute right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-[var(--sam-form-border)] bg-[var(--sam-form-bg)] shadow-md cursor-pointer hover:bg-page"
+                data-agent-active={lc.agentActivity !== 'idle'}
+                aria-label="Scroll to bottom"
+              >
+                <ChevronDown size={16} className="text-fg-muted" />
+              </button>
+            )}
+
+            {commentUi.selectionControls}
           </div>
 
-          {/* Scroll to bottom button */}
-          {lc.showScrollButton && (
-            <button
-              type="button"
-              onClick={() => {
-                virtuosoRef.current?.scrollToIndex({
-                  index: 'LAST',
-                  behavior: 'smooth',
-                });
-              }}
-              className="sam-scroll-button absolute right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-[var(--sam-form-border)] bg-[var(--sam-form-bg)] shadow-md cursor-pointer hover:bg-page"
-              data-agent-active={lc.agentActivity !== 'idle'}
-              aria-label="Scroll to bottom"
-            >
-              <ChevronDown size={16} className="text-fg-muted" />
-            </button>
-          )}
+          {commentUi.desktopRail}
         </div>
       )}
 

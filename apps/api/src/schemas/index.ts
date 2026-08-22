@@ -119,6 +119,7 @@ export {
   CommentStatusMutationSchema,
   CreateCommentReplySchema,
   CreateCommentThreadSchema,
+  SendCommentDirectiveSchema,
 } from './comments';
 
 // Admin schemas
