@@ -31,6 +31,7 @@ import type {
   ListCommentThreadsInput,
   UpdateCommentStatusInput,
 } from '../durable-objects/project-data/comment-contracts';
+import { CommentNotFoundError } from '../durable-objects/project-data/comment-contracts';
 export {
   CommentIdempotencyConflictError,
   CommentLimitExceededError,
@@ -88,7 +89,27 @@ function normalizeProjectDataRpcError(projectId: string, operation: string, err:
   if (isDurableObjectStorageFullError(err)) {
     return toProjectDataStorageFullError(projectId, operation, err);
   }
+  const commentError = normalizeProjectDataCommentRpcError(err);
+  if (commentError) return commentError;
   return err;
+}
+
+function normalizeProjectDataCommentRpcError(err: unknown): unknown | null {
+  if (!(err instanceof Error)) return null;
+
+  // Cloudflare DO RPC serializes custom Error subclasses across isolates as a
+  // generic Error whose message includes the original class name. Keep this
+  // deliberately exact so non-domain failures continue to surface as 500s.
+  switch (err.message) {
+    case 'CommentNotFoundError: Chat session not found':
+      return new CommentNotFoundError('Chat session');
+    case 'CommentNotFoundError: Message not found':
+      return new CommentNotFoundError('Message');
+    case 'CommentNotFoundError: Comment thread not found':
+      return new CommentNotFoundError('Comment thread');
+    default:
+      return null;
+  }
 }
 
 async function callProjectDataNoRetry<T>(

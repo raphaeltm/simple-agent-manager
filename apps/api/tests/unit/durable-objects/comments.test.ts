@@ -228,6 +228,43 @@ describe('ProjectData message comments', () => {
     expect(reopened.thread.version).toBe(6);
   });
 
+  it('rejects cross-session status mutations without mutating or disclosing the thread', () => {
+    seedSession('session-a');
+    seedSession('session-b');
+    seedMessage('session-a', 'message-a', 1);
+
+    const created = comments.createCommentThread(sql, env, {
+      sessionId: 'session-a',
+      messageId: 'message-a',
+      body: 'Needs a fix',
+      clientMutationId: 'thread-key',
+      actor: HUMAN,
+    });
+
+    expect(() =>
+      comments.updateCommentThreadStatus(sql, env, {
+        sessionId: 'session-b',
+        threadId: created.thread.id,
+        status: 'resolved',
+        clientMutationId: 'wrong-session-resolve',
+        actor: HUMAN,
+      })
+    ).toThrow(comments.CommentNotFoundError);
+
+    const sessionAThreads = comments.listCommentThreads(sql, env, { sessionId: 'session-a' });
+    expect(sessionAThreads.threads).toHaveLength(1);
+    expect(sessionAThreads.threads[0]).toMatchObject({
+      id: created.thread.id,
+      sessionId: 'session-a',
+      status: 'open',
+      resolvedAt: null,
+      resolvedBy: null,
+    });
+
+    const sessionBThreads = comments.listCommentThreads(sql, env, { sessionId: 'session-b' });
+    expect(sessionBThreads.threads).toHaveLength(0);
+  });
+
   it('enforces message ownership, missing resources, validation, and configured limits', () => {
     seedSession('session-a');
     seedSession('session-b');

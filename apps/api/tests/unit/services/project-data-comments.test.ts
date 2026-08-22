@@ -130,4 +130,48 @@ describe('project-data service comment RPC wrappers', () => {
       actor,
     });
   });
+
+  it('normalizes exact serialized DO comment not-found errors at the RPC boundary', async () => {
+    const stub = {
+      ensureProjectId: vi.fn().mockResolvedValue(undefined),
+      updateCommentThreadStatus: vi
+        .fn()
+        .mockRejectedValue(new Error('CommentNotFoundError: Comment thread not found')),
+    };
+    const env = makeEnv(stub);
+
+    await expect(
+      svc.updateCommentThreadStatus(env, 'project-1', {
+        sessionId: 'session-other',
+        threadId: 'thread-1',
+        status: 'resolved',
+        clientMutationId: 'resolve-key',
+        actor,
+      })
+    ).rejects.toMatchObject({
+      name: 'CommentNotFoundError',
+      code: 'COMMENT_NOT_FOUND',
+      resource: 'Comment thread',
+      message: 'Comment thread not found',
+    });
+  });
+
+  it('does not normalize non-exact serialized-looking internal errors', async () => {
+    const internal = new Error('CommentNotFoundError: database unavailable');
+    const stub = {
+      ensureProjectId: vi.fn().mockResolvedValue(undefined),
+      updateCommentThreadStatus: vi.fn().mockRejectedValue(internal),
+    };
+    const env = makeEnv(stub);
+
+    await expect(
+      svc.updateCommentThreadStatus(env, 'project-1', {
+        sessionId: 'session-other',
+        threadId: 'thread-1',
+        status: 'resolved',
+        clientMutationId: 'resolve-key',
+        actor,
+      })
+    ).rejects.toBe(internal);
+  });
 });
