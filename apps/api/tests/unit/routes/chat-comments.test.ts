@@ -308,4 +308,24 @@ describe('chat comment routes', () => {
     );
     expect(conflict.status).toBe(409);
   });
+
+  it('maps serialized cross-session comment mutation misses to clean 404 errors', async () => {
+    mocks.updateCommentThreadStatus.mockRejectedValueOnce(new Error('Comment thread not found'));
+
+    const response = await createApp().request(
+      'https://api.test/api/projects/project-1/sessions/session-other/comments/thread-1/resolve',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientMutationId: 'cross-session-resolve' }),
+      },
+      { DATABASE: {} } as Env
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'NOT_FOUND',
+      message: 'Comment thread not found',
+    });
+  });
 });

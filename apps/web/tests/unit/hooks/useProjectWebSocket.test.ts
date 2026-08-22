@@ -88,6 +88,17 @@ function simulateClose(code = 1006, ws?: MockWebSocket) {
 
 describe('useProjectWebSocket', () => {
   const PROJECT_ID = 'proj-123';
+  const commentThread = {
+    id: 'thread-1',
+    sessionId: 'sess-1',
+    anchor: { kind: 'message', messageId: 'msg-1', quote: 'quoted text' },
+    author: { kind: 'human', id: 'user-1', displayName: 'Ada' },
+    body: 'Needs clarification',
+    createdAt: 10,
+    updatedAt: 10,
+    status: 'open',
+    replies: [],
+  };
 
   it('connects to the project-wide WebSocket endpoint without sessionId', () => {
     renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID }));
@@ -147,6 +158,62 @@ describe('useProjectWebSocket', () => {
 
     expect(onSessionEvent).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['thread_created', 'comment.thread.created'],
+    ['reply_created', 'comment.reply.created'],
+    ['resolved', 'comment.thread.updated'],
+    ['reopened', 'comment.thread.updated'],
+  ] as const)(
+    'forwards %s comment.thread.changed frames to the comment event handler',
+    (reason, eventType) => {
+      const onCommentEvent = vi.fn();
+      renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID, onCommentEvent }));
+
+      act(() => simulateOpen());
+      act(() =>
+        simulateMessage({
+          type: 'comment.thread.changed',
+          payload: {
+            sessionId: 'sess-1',
+            reason,
+            thread: {
+              ...commentThread,
+              status: reason === 'resolved' ? 'resolved' : 'open',
+              replies:
+                reason === 'reply_created'
+                  ? [
+                      {
+                        id: 'reply-1',
+                        author: { kind: 'human', id: 'user-2', name: 'Grace' },
+                        body: 'Reply body',
+                        createdAt: 20,
+                      },
+                    ]
+                  : [],
+            },
+          },
+        })
+      );
+
+      expect(onCommentEvent).toHaveBeenCalledTimes(1);
+      expect(onCommentEvent).toHaveBeenCalledWith({
+        type: eventType,
+        payload: {
+          projectId: PROJECT_ID,
+          sessionId: 'sess-1',
+          comment: expect.objectContaining({
+            id: 'thread-1',
+            projectId: PROJECT_ID,
+            sessionId: 'sess-1',
+            anchor: { kind: 'message', messageId: 'msg-1', quote: 'quoted text' },
+            author: expect.objectContaining({ id: 'user-1', name: 'Ada' }),
+            status: reason === 'resolved' ? 'resolved' : 'open',
+          }),
+        },
+      });
+    }
+  );
 
   it('handles session.agent_completed as a lifecycle event', () => {
     const onSessionEvent = vi.fn();

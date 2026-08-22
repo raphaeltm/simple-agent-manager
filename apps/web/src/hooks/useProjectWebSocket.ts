@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import {
+  mapBackendMessageCommentThread,
+  type MessageCommentRealtimeEvent,
+} from '../lib/api/comments';
 import { expectJsonRecord } from '../lib/runtime-validation';
 
 export type SessionEventType =
@@ -40,6 +44,8 @@ interface UseProjectWebSocketOptions {
   projectId: string;
   /** Called with raw session delta events for incremental state updates. */
   onSessionEvent?: (event: RawSessionEvent) => void;
+  /** Called with server-authoritative comment deltas from the project-wide socket. */
+  onCommentEvent?: (event: MessageCommentRealtimeEvent) => void;
   /** Called on reconnect so the consumer can do a full refetch to re-sync. */
   onReconnected?: () => void;
 }
@@ -60,6 +66,7 @@ export interface UseProjectWebSocketReturn {
 export function useProjectWebSocket({
   projectId,
   onSessionEvent,
+  onCommentEvent,
   onReconnected,
 }: UseProjectWebSocketOptions): UseProjectWebSocketReturn {
   const [connectionState, setConnectionState] = useState<ProjectConnectionState>('disconnected');
@@ -72,6 +79,8 @@ export function useProjectWebSocket({
 
   const onSessionEventRef = useRef(onSessionEvent);
   onSessionEventRef.current = onSessionEvent;
+  const onCommentEventRef = useRef(onCommentEvent);
+  onCommentEventRef.current = onCommentEvent;
   const onReconnectedRef = useRef(onReconnected);
   onReconnectedRef.current = onReconnected;
 
@@ -136,6 +145,34 @@ export function useProjectWebSocket({
             'project.websocket.message'
           );
           const type = typeof data.type === 'string' ? data.type : '';
+          if (type === 'comment.thread.changed') {
+            const payload = expectJsonRecord(data.payload, 'project.websocket.comment.payload');
+            const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+            if (!sessionId) return;
+            const reason = typeof payload.reason === 'string' ? payload.reason : '';
+            const eventType =
+              reason === 'reply_created'
+                ? 'comment.reply.created'
+                : reason === 'thread_created'
+                  ? 'comment.thread.created'
+                  : 'comment.thread.updated';
+            const thread = expectJsonRecord(
+              payload.thread,
+              'project.websocket.comment.payload.thread'
+            );
+            onCommentEventRef.current?.({
+              type: eventType,
+              payload: {
+                projectId,
+                sessionId,
+                comment: mapBackendMessageCommentThread(
+                  projectId,
+                  thread as Parameters<typeof mapBackendMessageCommentThread>[1]
+                ),
+              },
+            } as MessageCommentRealtimeEvent);
+            return;
+          }
           if (SESSION_DELTA_EVENTS.has(type)) {
             const payload =
               typeof data.payload === 'object' && data.payload !== null

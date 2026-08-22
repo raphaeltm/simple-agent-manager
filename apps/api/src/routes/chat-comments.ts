@@ -81,6 +81,15 @@ function getCommentNotFoundResource(err: unknown): string {
   return 'Resource';
 }
 
+function isSerializedCommentNotFoundError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return (
+    err.message === 'Chat session not found' ||
+    err.message === 'Message not found' ||
+    err.message === 'Comment thread not found'
+  );
+}
+
 function rethrowCommentError(err: unknown): never {
   const code = getCommentErrorCode(err);
   const name = getCommentErrorName(err);
@@ -94,7 +103,8 @@ function rethrowCommentError(err: unknown): never {
   if (
     err instanceof projectDataService.CommentNotFoundError ||
     code === 'COMMENT_NOT_FOUND' ||
-    name === 'CommentNotFoundError'
+    name === 'CommentNotFoundError' ||
+    isSerializedCommentNotFoundError(err)
   ) {
     throw errors.notFound(getCommentNotFoundResource(err));
   }

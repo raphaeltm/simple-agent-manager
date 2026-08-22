@@ -12,7 +12,11 @@ import {
   resolveMessageCommentThread,
   sendMessageCommentThreadToAgent,
 } from '../../../lib/api/comments';
-import { messageCommentQueryKeys, messageCommentsQueryOptions } from '../../../lib/query-options';
+import {
+  applyMessageCommentRealtimeEventToQueryCache,
+  messageCommentQueryKeys,
+  messageCommentsQueryOptions,
+} from '../../../lib/query-options';
 import { useAuth } from '../../AuthProvider';
 import {
   buildOptimisticAuthor,
@@ -213,7 +217,9 @@ export function useMessageComments(projectId: string, sessionId: string, enabled
       await queryClient.cancelQueries({ queryKey });
       setComments((previous) =>
         (previous ?? []).map((thread) =>
-          thread.id === input.commentId ? { ...thread, status: 'sent', syncState: 'pending' } : thread
+          thread.id === input.commentId
+            ? { ...thread, status: 'sent', syncState: 'pending' }
+            : thread
         )
       );
     },
@@ -227,10 +233,11 @@ export function useMessageComments(projectId: string, sessionId: string, enabled
 
   const applyRealtimeEvent = useCallback(
     (event: MessageCommentRealtimeEvent) => {
+      if (!queryScope) return;
       if (event.payload.projectId !== projectId || event.payload.sessionId !== sessionId) return;
-      setComments((previous) => replaceThread(previous, event.payload.comment));
+      applyMessageCommentRealtimeEventToQueryCache(queryClient, queryScope, event);
     },
-    [projectId, sessionId, setComments]
+    [projectId, queryClient, queryScope, sessionId]
   );
 
   return {

@@ -45,7 +45,10 @@ import {
   summarizeSession,
 } from '../../lib/api';
 import { getSessionState, isStaleSession } from '../../lib/chat-session-utils';
-import { chatQueryKeys } from '../../lib/query-options';
+import {
+  applyMessageCommentRealtimeEventToQueryCache,
+  chatQueryKeys,
+} from '../../lib/query-options';
 import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
 import { isRetryOrFork } from './lineageUtils';
@@ -389,9 +392,18 @@ export function useProjectChatState() {
     [dispatchEvent, multiplayerActive, sessionScope, loadSessions]
   );
 
+  const handleCommentEvent = useCallback(
+    (event: Parameters<typeof applyMessageCommentRealtimeEventToQueryCache>[2]) => {
+      if (!queryScope) return;
+      applyMessageCommentRealtimeEventToQueryCache(queryClient, queryScope, event);
+    },
+    [queryClient, queryScope]
+  );
+
   const { connectionState } = useProjectWebSocket({
     projectId,
     onSessionEvent: handleSessionEvent,
+    onCommentEvent: handleCommentEvent,
     onReconnected: loadSessions,
   });
 

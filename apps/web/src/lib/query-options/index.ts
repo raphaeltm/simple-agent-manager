@@ -47,7 +47,11 @@ export {
   timelineUserMessagesQueryOptions,
 } from './chats';
 export { cachedCommandsQueryOptions, commandQueryKeys } from './commands';
-export { messageCommentQueryKeys, messageCommentsQueryOptions } from './comments';
+export {
+  applyMessageCommentRealtimeEventToQueryCache,
+  messageCommentQueryKeys,
+  messageCommentsQueryOptions,
+} from './comments';
 export { credentialQueryKeys, credentialsQueryOptions } from './credentials';
 export { githubInstallationsQueryOptions, githubQueryKeys } from './github';
 export {
@@ -58,7 +62,7 @@ export {
   workspacePortsQueryOptions,
   workspaceQueryKeys,
 } from './infrastructure';
-export { type LibraryIndexQueryData,libraryIndexQueryOptions, libraryQueryKeys } from './library';
+export { type LibraryIndexQueryData, libraryIndexQueryOptions, libraryQueryKeys } from './library';
 export {
   notificationPreferencesQueryOptions,
   notificationQueryKeys,
