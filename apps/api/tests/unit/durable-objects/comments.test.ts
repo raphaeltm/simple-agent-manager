@@ -429,3 +429,310 @@ describe('ProjectData message comments', () => {
     expect(firstPage.threads.map((thread) => thread.id)).toEqual([first.id, second.id]);
   });
 });
+
+describe('ProjectData library file comments', () => {
+  let db: Database.Database;
+  let sql: SqlStorage;
+  let env: Env;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    sql = createSqlStorage(db);
+    env = {} as Env;
+    runMigrations(sql);
+  });
+
+  function seedSession(sessionId: string): void {
+    sql.exec(
+      `INSERT INTO chat_sessions (id, topic, started_at)
+       VALUES (?, ?, ?)`,
+      sessionId,
+      `topic ${sessionId}`,
+      Date.now()
+    );
+  }
+
+  function seedMessage(sessionId: string, messageId: string, sequence: number): void {
+    sql.exec(
+      `INSERT INTO chat_messages
+         (id, session_id, role, content, tool_metadata, created_at, sequence)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      messageId,
+      sessionId,
+      'assistant',
+      `message ${messageId}`,
+      null,
+      Date.now() + sequence,
+      sequence
+    );
+  }
+
+  it('creates, lists, and idempotently replays file-anchored threads', () => {
+    const created = comments.createFileCommentThread(sql, env, {
+      fileId: 'file-1',
+      body: '  Needs review  ',
+      quote: '  selected text  ',
+      clientMutationId: 'file-thread-key-1',
+      actor: HUMAN,
+    });
+
+    expect(created.idempotent).toBe(false);
+    expect(created.changed).toBe(true);
+    expect(created.thread).toMatchObject({
+      fileId: 'file-1',
+      anchor: { kind: 'library_file', fileId: 'file-1', quote: 'selected text' },
+      author: HUMAN,
+      body: 'Needs review',
+      status: 'open',
+      sequence: 1,
+      version: 1,
+      clientMutationId: 'file-thread-key-1',
+      replies: [],
+    });
+    // File threads must NOT have a sessionId property
+    expect('sessionId' in created.thread).toBe(false);
+
+    // Idempotent replay with identical inputs
+    const replay = comments.createFileCommentThread(sql, env, {
+      fileId: 'file-1',
+      body: 'Needs review',
+      quote: 'selected text',
+      clientMutationId: 'file-thread-key-1',
+      actor: HUMAN,
+    });
+    expect(replay.idempotent).toBe(true);
+    expect(replay.changed).toBe(false);
+    expect(replay.thread.id).toBe(created.thread.id);
+
+    // Conflict on same clientMutationId but different body
+    expect(() =>
+      comments.createFileCommentThread(sql, env, {
+        fileId: 'file-1',
+        body: 'Different body',
+        clientMutationId: 'file-thread-key-1',
+        actor: HUMAN,
+      })
+    ).toThrow(comments.CommentIdempotencyConflictError);
+
+    // List by fileId
+    const listed = comments.listCommentThreads(sql, env, {
+      fileId: 'file-1',
+      anchorKind: 'library_file',
+    });
+    expect(listed.hasMore).toBe(false);
+    expect(listed.threads).toHaveLength(1);
+    expect(listed.threads[0]).toMatchObject({
+      id: created.thread.id,
+      fileId: 'file-1',
+      sequence: 1,
+    });
+  });
+
+  it('appends replies and status transitions on file threads', () => {
+    const created = comments.createFileCommentThread(sql, env, {
+      fileId: 'file-1',
+      body: 'File thread',
+      clientMutationId: 'ft-key',
+      actor: HUMAN,
+    });
+
+    // Add replies without sessionId
+    const firstReply = comments.createCommentReply(sql, env, {
+      threadId: created.thread.id,
+      body: 'First reply',
+      clientMutationId: 'reply-key-1',
+      actor: HUMAN,
+    });
+    const replayReply = comments.createCommentReply(sql, env, {
+      threadId: created.thread.id,
+      body: 'First reply',
+      clientMutationId: 'reply-key-1',
+      actor: HUMAN,
+    });
+    const secondReply = comments.createCommentReply(sql, env, {
+      threadId: created.thread.id,
+      body: 'Second reply',
+      clientMutationId: 'reply-key-2',
+      actor: HUMAN,
+    });
+
+    expect(firstReply.idempotent).toBe(false);
+    expect(replayReply.idempotent).toBe(true);
+    expect(replayReply.reply.id).toBe(firstReply.reply.id);
+    expect(secondReply.thread.replies.map((r) => r.sequence)).toEqual([1, 2]);
+    // version: 1 (create) + 1 (reply 1) + 1 (reply 2) = 3
+    expect(secondReply.thread.version).toBe(3);
+
+    // Resolve the file thread
+    const resolved = comments.updateCommentThreadStatus(sql, env, {
+      threadId: created.thread.id,
+      status: 'resolved',
+      clientMutationId: 'status-key-1',
+      actor: HUMAN,
+    });
+    expect(resolved.thread.status).toBe('resolved');
+    expect(resolved.thread.version).toBe(4);
+
+    // Idempotent replay of the same status transition
+    const resolvedReplay = comments.updateCommentThreadStatus(sql, env, {
+      threadId: created.thread.id,
+      status: 'resolved',
+      clientMutationId: 'status-key-1',
+      actor: HUMAN,
+    });
+    expect(resolvedReplay.idempotent).toBe(true);
+    expect(resolvedReplay.changed).toBe(false);
+
+    // Reopen the file thread
+    const reopened = comments.updateCommentThreadStatus(sql, env, {
+      threadId: created.thread.id,
+      status: 'open',
+      clientMutationId: 'status-key-2',
+      actor: HUMAN,
+    });
+    expect(reopened.thread.status).toBe('open');
+    expect(reopened.thread.reopenedBy).toEqual(HUMAN);
+    expect(reopened.thread.version).toBe(5);
+  });
+
+  it('file threads do not appear in session-scoped lists and vice versa', () => {
+    // Set up a session with a message thread
+    seedSession('session-x');
+    seedMessage('session-x', 'message-x', 1);
+
+    const messageThread = comments.createCommentThread(sql, env, {
+      sessionId: 'session-x',
+      messageId: 'message-x',
+      body: 'Message comment',
+      clientMutationId: 'msg-key',
+      actor: HUMAN,
+    });
+
+    // Create a file thread (no session required)
+    const fileThread = comments.createFileCommentThread(sql, env, {
+      fileId: 'file-2',
+      body: 'File comment',
+      clientMutationId: 'file-key',
+      actor: HUMAN,
+    });
+
+    // Session-scoped list should only return message threads
+    const sessionList = comments.listCommentThreads(sql, env, { sessionId: 'session-x' });
+    expect(sessionList.threads).toHaveLength(1);
+    expect(sessionList.threads[0].id).toBe(messageThread.thread.id);
+    expect(sessionList.threads[0]).toMatchObject({
+      anchor: { kind: 'message', messageId: 'message-x' },
+    });
+
+    // File-scoped list should only return file threads
+    const fileList = comments.listCommentThreads(sql, env, {
+      fileId: 'file-2',
+      anchorKind: 'library_file',
+    });
+    expect(fileList.threads).toHaveLength(1);
+    expect(fileList.threads[0].id).toBe(fileThread.thread.id);
+    expect(fileList.threads[0]).toMatchObject({
+      anchor: { kind: 'library_file', fileId: 'file-2' },
+    });
+
+    // Both threads are individually retrievable by ID
+    const fetchedMessage = comments.getCommentThread(sql, messageThread.thread.id);
+    const fetchedFile = comments.getCommentThread(sql, fileThread.thread.id);
+    expect(fetchedMessage).not.toBeNull();
+    expect(fetchedFile).not.toBeNull();
+    expect('sessionId' in fetchedMessage!).toBe(true);
+    expect('fileId' in fetchedFile!).toBe(true);
+  });
+
+  it('enforces per-file thread limit', () => {
+    env.COMMENT_THREADS_PER_SESSION_MAX = '1';
+
+    comments.createFileCommentThread(sql, env, {
+      fileId: 'file-3',
+      body: 'First file thread',
+      actor: HUMAN,
+    });
+
+    expect(() =>
+      comments.createFileCommentThread(sql, env, {
+        fileId: 'file-3',
+        body: 'Second file thread',
+        actor: HUMAN,
+      })
+    ).toThrow(comments.CommentLimitExceededError);
+
+    // A different fileId should still allow creation
+    const otherFile = comments.createFileCommentThread(sql, env, {
+      fileId: 'file-4',
+      body: 'Thread on different file',
+      actor: HUMAN,
+    });
+    expect(otherFile.thread.fileId).toBe('file-4');
+  });
+
+  it('lists file threads with status and afterSequence filters', () => {
+    const first = comments.createFileCommentThread(sql, env, {
+      fileId: 'file-5',
+      body: 'First',
+      actor: HUMAN,
+    }).thread;
+    const second = comments.createFileCommentThread(sql, env, {
+      fileId: 'file-5',
+      body: 'Second',
+      actor: HUMAN,
+    }).thread;
+    const third = comments.createFileCommentThread(sql, env, {
+      fileId: 'file-5',
+      body: 'Third',
+      actor: HUMAN,
+    }).thread;
+
+    // Resolve the second thread
+    comments.updateCommentThreadStatus(sql, env, {
+      threadId: second.id,
+      status: 'resolved',
+      actor: HUMAN,
+    });
+
+    // Filter by status=open should return first and third
+    const openThreads = comments.listCommentThreads(sql, env, {
+      fileId: 'file-5',
+      anchorKind: 'library_file',
+      status: 'open',
+    });
+    expect(openThreads.threads.map((t) => t.id)).toEqual([first.id, third.id]);
+
+    // Filter by status=resolved should return only second
+    const resolvedThreads = comments.listCommentThreads(sql, env, {
+      fileId: 'file-5',
+      anchorKind: 'library_file',
+      status: 'resolved',
+    });
+    expect(resolvedThreads.threads).toMatchObject([{ id: second.id, status: 'resolved' }]);
+
+    // afterSequence filter should return threads with sequence > 1
+    const afterFirst = comments.listCommentThreads(sql, env, {
+      fileId: 'file-5',
+      anchorKind: 'library_file',
+      afterSequence: 1,
+    });
+    expect(afterFirst.threads.map((t) => t.id)).toEqual([second.id, third.id]);
+
+    // afterSequence=2 should return only third
+    const afterSecond = comments.listCommentThreads(sql, env, {
+      fileId: 'file-5',
+      anchorKind: 'library_file',
+      afterSequence: 2,
+    });
+    expect(afterSecond.threads.map((t) => t.id)).toEqual([third.id]);
+
+    // Pagination with limit
+    const firstPage = comments.listCommentThreads(sql, env, {
+      fileId: 'file-5',
+      anchorKind: 'library_file',
+      limit: 2,
+    });
+    expect(firstPage.hasMore).toBe(true);
+    expect(firstPage.threads.map((t) => t.id)).toEqual([first.id, second.id]);
+  });
+});
