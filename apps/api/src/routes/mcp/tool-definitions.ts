@@ -16,9 +16,9 @@
 
 export { COMMENT_TOOLS } from './tool-definitions-comment-tools';
 export { DEPLOYMENT_TOOLS } from './tool-definitions-deployment-tools';
-export { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
 export { INCIDENT_TOOLS } from './tool-definitions-incident-tools';
 export { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
+export { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
 export { LIBRARY_TOOLS } from './tool-definitions-library-tools';
 export { MISSION_TOOLS } from './tool-definitions-mission-tools';
 export { ORCHESTRATION_TOOLS } from './tool-definitions-orchestration-tools';
@@ -34,9 +34,9 @@ export { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';
 
 import { COMMENT_TOOLS } from './tool-definitions-comment-tools';
 import { DEPLOYMENT_TOOLS } from './tool-definitions-deployment-tools';
-import { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
 import { INCIDENT_TOOLS } from './tool-definitions-incident-tools';
 import { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
+import { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
 import { LIBRARY_TOOLS } from './tool-definitions-library-tools';
 import { MISSION_TOOLS } from './tool-definitions-mission-tools';
 import { ORCHESTRATION_TOOLS } from './tool-definitions-orchestration-tools';

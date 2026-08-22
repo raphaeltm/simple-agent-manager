@@ -308,17 +308,18 @@ function mapThreadFromParsed(
   } as const;
 
   if (r.anchor_kind === 'library_file') {
+    const fileId = r.file_id ?? '';
     return {
       ...common,
-      fileId: r.file_id!,
-      anchor: { kind: 'library_file', fileId: r.file_id!, quote: r.quote },
+      fileId,
+      anchor: { kind: 'library_file', fileId, quote: r.quote },
     } satisfies LibraryFileCommentThread;
   }
 
   return {
     ...common,
-    sessionId: r.session_id!,
-    anchor: { kind: 'message', messageId: r.message_id!, quote: r.quote },
+    sessionId: r.session_id ?? '',
+    anchor: { kind: 'message', messageId: r.message_id ?? '', quote: r.quote },
     sentAt: r.sent_at,
     sentBy: actorFromColumns(r.sent_by_type, r.sent_by_id, r.sent_by_name),
   } satisfies MessageCommentThread;

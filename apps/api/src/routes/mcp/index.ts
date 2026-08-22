@@ -35,10 +35,6 @@ import {
   handleResolveMessageCommentThread,
 } from './comment-tools';
 import { handleBuildAndPublish, handleGetPublishStatus } from './compose-publish-tools';
-import {
-  handleCreateLibraryFileCommentThread,
-  handleListLibraryFileCommentThreads,
-} from './library-file-comment-tools';
 import { handleGetDeploymentGuide } from './deployment-guide-tools';
 import {
   handleCreateDeploymentEnvironment,
@@ -81,6 +77,10 @@ import {
   handleSearchKnowledge,
   handleUpdateKnowledge,
 } from './knowledge-tools';
+import {
+  handleCreateLibraryFileCommentThread,
+  handleListLibraryFileCommentThreads,
+} from './library-file-comment-tools';
 import {
   handleDisplayFromLibrary,
   handleDownloadLibraryFile,

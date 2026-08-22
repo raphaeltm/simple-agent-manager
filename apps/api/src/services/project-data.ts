@@ -15,8 +15,8 @@ import type {
   CommentStatus,
   CreateCheckpointEpisodeInput,
   DeliveryState,
-  MessageClass,
   LibraryFileCommentThread,
+  MessageClass,
   MessageCommentThread,
   SessionActivityTerminalReason,
 } from '@simple-agent-manager/shared';
@@ -29,8 +29,8 @@ import type {
   CreateCommentReplyInput,
   CreateCommentThreadInput,
   CreateFileCommentThreadInput,
-  ListCommentThreadsResult,
   ListCommentThreadsInput,
+  ListCommentThreadsResult,
   UpdateCommentStatusInput,
 } from '../durable-objects/project-data/comment-contracts';
 import { CommentNotFoundError } from '../durable-objects/project-data/comment-contracts';
