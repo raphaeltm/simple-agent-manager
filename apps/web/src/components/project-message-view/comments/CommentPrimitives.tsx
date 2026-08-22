@@ -121,11 +121,11 @@ export function SelectionActionBar({
       <p className="m-0 mb-2 line-clamp-2 border-l-2 border-tn-blue pl-2 text-xs italic text-fg-muted [overflow-wrap:anywhere]">
         {quote}
       </p>
-      <div className="flex flex-wrap items-center gap-2" onMouseDown={(e) => e.preventDefault()}>
-        <Button size="sm" onClick={onComment}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" onMouseDown={(e: React.MouseEvent) => e.preventDefault()} onClick={onComment}>
           Comment on selection
         </Button>
-        <Button size="sm" variant="ghost" onClick={onDismiss}>
+        <Button size="sm" variant="ghost" onMouseDown={(e: React.MouseEvent) => e.preventDefault()} onClick={onDismiss}>
           Dismiss
         </Button>
       </div>
