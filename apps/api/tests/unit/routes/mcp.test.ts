@@ -229,15 +229,11 @@ const mockDoStub = {
   updateSessionTopic: vi.fn().mockResolvedValue(true),
   getAllHighConfidenceKnowledge: vi.fn().mockResolvedValue([]),
   getActivePolicies: vi.fn().mockResolvedValue([]),
-  listMessageCommentThreads: vi
-    .fn()
-    .mockResolvedValue({ threads: [], nextCursor: null, hasMore: false }),
-  getMessageCommentThread: vi.fn().mockResolvedValue(null),
-  createMessageCommentThread: vi.fn(),
-  replyToMessageCommentThread: vi.fn(),
-  updateMessageCommentThreadStatus: vi.fn(),
-  markMessageCommentThreadObserved: vi.fn(),
-  recordMessageCommentDirectiveDelivery: vi.fn(),
+  listCommentThreads: vi.fn().mockResolvedValue({ threads: [], nextCursor: null, hasMore: false }),
+  getCommentThread: vi.fn().mockResolvedValue(null),
+  createCommentThread: vi.fn(),
+  createCommentReply: vi.fn(),
+  updateCommentThreadStatus: vi.fn(),
   createAttentionMarker: vi.fn().mockResolvedValue({
     id: 'marker-1',
     createdAt: Date.now(),
@@ -823,11 +819,11 @@ describe('MCP Routes', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.error).toBeUndefined();
-      expect(mockDoStub.listMessageCommentThreads).toHaveBeenCalledWith({
+      expect(mockDoStub.listCommentThreads).toHaveBeenCalledWith({
         sessionId: 'chat-session-123',
         status: 'open',
         messageId: null,
-        cursor: null,
+        afterSequence: null,
         limit: 3,
       });
     });

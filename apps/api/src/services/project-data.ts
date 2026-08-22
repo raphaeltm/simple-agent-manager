@@ -18,8 +18,8 @@ import type {
   MessageClass,
   MessageCommentListResponse,
   MessageCommentMutationResponse,
-  MessageCommentThread,
   MessageCommentReplyMutationResponse,
+  MessageCommentThread,
   SessionActivityTerminalReason,
 } from '@simple-agent-manager/shared';
 import { resolveHandoffLimits, resolveMissionStateLimits } from '@simple-agent-manager/shared';

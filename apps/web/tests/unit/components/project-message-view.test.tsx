@@ -223,15 +223,21 @@ beforeEach(() => {
       }),
     })
   );
-  mocks.resolveMessageCommentThread.mockImplementation(async (_projectId, _sessionId, commentId) => ({
-    comment: makeCommentThread({ id: commentId, status: 'resolved' }),
-  }));
-  mocks.reopenMessageCommentThread.mockImplementation(async (_projectId, _sessionId, commentId) => ({
-    comment: makeCommentThread({ id: commentId, status: 'open' }),
-  }));
-  mocks.sendMessageCommentThreadToAgent.mockImplementation(async (_projectId, _sessionId, commentId) => ({
-    comment: makeCommentThread({ id: commentId, status: 'sent' }),
-  }));
+  mocks.resolveMessageCommentThread.mockImplementation(
+    async (_projectId, _sessionId, commentId) => ({
+      comment: makeCommentThread({ id: commentId, status: 'resolved' }),
+    })
+  );
+  mocks.reopenMessageCommentThread.mockImplementation(
+    async (_projectId, _sessionId, commentId) => ({
+      comment: makeCommentThread({ id: commentId, status: 'open' }),
+    })
+  );
+  mocks.sendMessageCommentThreadToAgent.mockImplementation(
+    async (_projectId, _sessionId, commentId) => ({
+      comment: makeCommentThread({ id: commentId, status: 'sent' }),
+    })
+  );
 });
 
 // --- Test helpers ---
@@ -1776,17 +1782,15 @@ describe('ProjectMessageView — message anchored comments', () => {
   });
 
   it('creates an optimistic thread from a message action without changing chat rendering', async () => {
-    mocks.listMessageComments
-      .mockResolvedValueOnce({ comments: [] })
-      .mockResolvedValue({
-        comments: [
-          makeCommentThread({
-            id: 'server-comment-1',
-            messageId: 'msg-1',
-            body: 'Please check this edge case.',
-          }),
-        ],
-      });
+    mocks.listMessageComments.mockResolvedValueOnce({ comments: [] }).mockResolvedValue({
+      comments: [
+        makeCommentThread({
+          id: 'server-comment-1',
+          messageId: 'msg-1',
+          body: 'Please check this edge case.',
+        }),
+      ],
+    });
     mocks.getChatSession.mockResolvedValue(
       makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Agent answer')])
     );

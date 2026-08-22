@@ -185,7 +185,8 @@ async function setupApiMocks(
     if (path === '/api/agents') return respond(200, { agents: [] });
     if (path === '/api/github/installations') return respond(200, []);
     if (path === '/api/workspaces') return respond(200, []);
-    if (path === '/api/projects') return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
+    if (path === '/api/projects')
+      return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
 
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (!projectMatch) return respond(200, {});
@@ -205,11 +206,34 @@ async function setupApiMocks(
 
     if (subPath === commentsBase && method === 'POST') {
       const body = await parseJson(route);
-      const anchor = body.anchor as AuditCommentThread['anchor'];
-      const action = body.action as CommentAction;
+      const legacyAnchor =
+        typeof body.anchor === 'object' && body.anchor !== null
+          ? (body.anchor as Partial<AuditCommentThread['anchor']>)
+          : null;
+      const anchor: AuditCommentThread['anchor'] = {
+        kind: 'message',
+        messageId:
+          typeof body.messageId === 'string'
+            ? body.messageId
+            : typeof legacyAnchor?.messageId === 'string'
+              ? legacyAnchor.messageId
+              : 'msg-3',
+        quote:
+          typeof body.quote === 'string'
+            ? body.quote
+            : typeof legacyAnchor?.quote === 'string'
+              ? legacyAnchor.quote
+              : undefined,
+      };
+      const action: CommentAction = body.action === 'send_to_agent' ? 'send_to_agent' : 'note';
       const comment = makeComment({
         id: `comment-created-${nextCommentId++}`,
-        clientId: String(body.clientId),
+        clientId:
+          typeof body.clientId === 'string'
+            ? body.clientId
+            : typeof body.clientMutationId === 'string'
+              ? body.clientMutationId
+              : null,
         anchor,
         body: String(body.body),
         status: action === 'send_to_agent' ? 'sent' : 'open',
@@ -217,7 +241,7 @@ async function setupApiMocks(
         updatedAt: Date.now(),
       });
       comments.push(comment);
-      return respond(200, { comment });
+      return respond(200, { comment, thread: comment });
     }
 
     const replyMatch = subPath.match(new RegExp(`^${commentsBase}/([^/]+)/replies$`));
@@ -225,10 +249,15 @@ async function setupApiMocks(
       const comment = comments.find((candidate) => candidate.id === replyMatch[1]);
       if (!comment) return respond(404, { error: 'NOT_FOUND', message: 'Comment not found' });
       const body = await parseJson(route);
-      const action = body.action as CommentAction;
+      const action: CommentAction = body.action === 'send_to_agent' ? 'send_to_agent' : 'note';
       comment.replies.push({
         id: `reply-created-${nextReplyId++}`,
-        clientId: String(body.clientId),
+        clientId:
+          typeof body.clientId === 'string'
+            ? body.clientId
+            : typeof body.clientMutationId === 'string'
+              ? body.clientMutationId
+              : null,
         author: AUTHOR,
         body: String(body.body),
         createdAt: Date.now(),
@@ -237,10 +266,12 @@ async function setupApiMocks(
       });
       if (action === 'send_to_agent') comment.status = 'sent';
       comment.updatedAt = Date.now();
-      return respond(200, { comment });
+      return respond(200, { comment, thread: comment });
     }
 
-    const statusMatch = subPath.match(new RegExp(`^${commentsBase}/([^/]+)/(resolve|reopen|send)$`));
+    const statusMatch = subPath.match(
+      new RegExp(`^${commentsBase}/([^/]+)/(resolve|reopen|send)$`)
+    );
     if (statusMatch && method === 'POST') {
       const comment = comments.find((candidate) => candidate.id === statusMatch[1]);
       if (!comment) return respond(404, { error: 'NOT_FOUND', message: 'Comment not found' });
@@ -248,7 +279,7 @@ async function setupApiMocks(
       if (statusMatch[2] === 'reopen') comment.status = 'open';
       if (statusMatch[2] === 'send') comment.status = 'sent';
       comment.updatedAt = Date.now();
-      return respond(200, { comment });
+      return respond(200, { comment, thread: comment });
     }
 
     if (subPath === '/sessions') {
@@ -324,7 +355,9 @@ test.describe('message comments audit — desktop 1280x800', () => {
     await openChat(page);
 
     await expect(page.getByRole('heading', { name: 'Comments' })).toBeVisible();
-    await expect(page.getByText('Seeded desktop rail comment on an offscreen message.')).toBeVisible();
+    await expect(
+      page.getByText('Seeded desktop rail comment on an offscreen message.')
+    ).toBeVisible();
 
     await page.getByRole('button', { name: /Message msg-3\s*View/i }).click();
     const desktopTarget = page.getByText(/Assistant comment target 3/);
@@ -352,13 +385,18 @@ test.describe('message comments audit — desktop 1280x800', () => {
     await createdThread.getByLabel('Reply…').fill('Reply sent with selected context.');
     await createdThread.getByRole('radio', { name: 'Send to agent' }).check();
     await createdThread.getByRole('button', { name: 'Comment & send' }).click();
-    await expect(createdThread.getByText('Reply sent with selected context.')).toBeVisible();
+    await expect(createdThread.getByRole('textbox', { name: 'Reply…' })).toBeHidden();
+    await expect(
+      createdThread.getByRole('listitem').filter({ hasText: 'Reply sent with selected context.' })
+    ).toBeVisible();
     await expect(createdThread).toHaveAttribute('data-comment-status', 'sent');
 
     await createdThread.getByRole('button', { name: 'Resolve' }).click();
     const resolvedThread = rail.locator(`article[data-comment-id="${createdCommentId}"]`);
     await expect(resolvedThread).toHaveAttribute('data-comment-status', 'resolved');
-    await expect(resolvedThread.getByRole('button', { name: /Show resolved thread/ })).toBeVisible();
+    await expect(
+      resolvedThread.getByRole('button', { name: /Show resolved thread/ })
+    ).toBeVisible();
     await resolvedThread.getByRole('button', { name: /Show resolved thread/ }).click();
     await resolvedThread.getByRole('button', { name: 'Reopen' }).click();
     await expect(resolvedThread).toHaveAttribute('data-comment-status', 'open');
@@ -372,7 +410,9 @@ test.describe('message comments audit — desktop 1280x800', () => {
     await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
 
     await expect(page.getByText('Loading comments…')).toBeVisible();
-    await expect(page.getByRole('alert').filter({ hasText: 'Comments failed to load.' })).toBeVisible({
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'Comments failed to load.' })
+    ).toBeVisible({
       timeout: 10_000,
     });
     await screenshot(page, 'message-comments-desktop-error-state');
@@ -405,7 +445,9 @@ test.describe('message comments audit — mobile 375x667', () => {
     await actionBar.getByRole('button', { name: 'Comment on selection' }).click();
 
     const mobilePanel = page.getByRole('region', { name: 'Message comments' }).last();
-    await mobilePanel.getByLabel('Add a comment…').fill('Mobile comment sent to agent from selected text.');
+    await mobilePanel
+      .getByLabel('Add a comment…')
+      .fill('Mobile comment sent to agent from selected text.');
     await mobilePanel.getByRole('radio', { name: 'Send to agent' }).check();
     await mobilePanel.getByRole('button', { name: 'Comment & send' }).click();
 
@@ -414,7 +456,9 @@ test.describe('message comments audit — mobile 375x667', () => {
       'Mobile comment sent to agent from selected text.'
     );
     await expect(thread).toHaveAttribute('data-comment-status', 'sent');
-    await expect(page.getByRole('button', { name: /1 comment on this message, 1 unresolved/i })).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: /1 comment on this message, 1 unresolved/i })
+    ).toBeVisible();
     await expect(page.locator('aside')).toBeHidden();
 
     await screenshot(page, 'message-comments-mobile-inline-send');
