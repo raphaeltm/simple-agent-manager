@@ -488,6 +488,28 @@ test.describe('message comments audit — desktop 1280x800', () => {
     await screenshot(page, 'message-comments-desktop-voice-idle');
     await assertNoOverflow(page);
 
+    // The mic overlay covers the native resize grip, so the field must grow on
+    // its own — otherwise disabling resize would leave long comments stuck in a
+    // fixed 3-row box. Height must rise with content, then stop at the ceiling.
+    const heightOf = () => field.evaluate((el) => el.getBoundingClientRect().height);
+    const restingHeight = await heightOf();
+    await field.fill('One line.\nTwo lines.\nThree lines.\nFour lines.\nFive lines.');
+    const grownHeight = await heightOf();
+    expect(grownHeight).toBeGreaterThan(restingHeight);
+
+    await field.fill(`${'A very long dictated sentence that wraps. '.repeat(40)}`);
+    const cappedHeight = await heightOf();
+    expect(cappedHeight).toBeLessThanOrEqual(200);
+    expect(cappedHeight).toBeGreaterThanOrEqual(grownHeight);
+    // The mic must still be inside the field at its grown size, not floating
+    // over the radios below it.
+    await expectMicOverlaidInComposer(rail, 'Add a comment…');
+    await screenshot(page, 'message-comments-desktop-voice-grown');
+    await assertNoOverflow(page);
+
+    await field.fill('Typed first.');
+    await expect.poll(heightOf).toBe(restingHeight);
+
     await mic.click();
     const stop = rail.getByRole('button', { name: 'Stop recording' });
     await expect(stop).toBeVisible();
