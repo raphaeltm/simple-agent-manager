@@ -44,14 +44,17 @@ export function useCommentSelection(
     const readSelection = () => {
       const currentSelection = window.getSelection();
       const container = containerRef.current;
+
+      // When the browser clears the Selection (Touch-to-Search dismiss, scroll,
+      // tap elsewhere), keep the existing snapshot — it already holds anchorId +
+      // quote.  Only explicit user actions (Dismiss, Comment, new selection
+      // outside chat, session change) should clear it.
       if (!currentSelection || !container || currentSelection.isCollapsed || currentSelection.rangeCount === 0) {
-        setSelection(null);
         return;
       }
 
       const text = currentSelection.toString().trim();
       if (text.length < MIN_SELECTION_CHARS) {
-        setSelection(null);
         return;
       }
 
@@ -70,7 +73,6 @@ export function useCommentSelection(
 
       const rect = range.getBoundingClientRect();
       if (rect.width === 0 && rect.height === 0) {
-        setSelection(null);
         return;
       }
 
