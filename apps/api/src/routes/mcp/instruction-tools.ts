@@ -493,7 +493,8 @@ function buildKnowledgeInstructions(hasKnowledge: boolean, isConversation: boole
     instructions.push(
       'The knowledgeDirectives field above contains stored knowledge from previous sessions. Apply these preferences and facts to your work. ' +
         'It is RANKED (by confidence and how recently each observation was confirmed) and CAPPED per entity, so it is a partial view, not the whole store. ' +
-        'Its trailing "Full knowledge index" lists every entity with an observation count — use `search_knowledge` or `get_relevant_knowledge` to pull anything listed there but not shown in full. ' +
+        'Its trailing knowledge-index section lists entities with their observation counts, and states in its own heading whether that list is itself complete or truncated — do not infer completeness from this sentence. ' +
+        'Use `search_knowledge` or `get_relevant_knowledge` to pull anything listed there but not shown in full, and to reach entities the index itself had to drop. ' +
         'If any observation seems outdated, call `update_knowledge` or `remove_knowledge`. ' +
         'If you verify an observation is still accurate, call `confirm_knowledge` to keep it fresh — confirming also raises its rank for future sessions.'
     );

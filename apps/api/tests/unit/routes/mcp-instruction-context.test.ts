@@ -143,6 +143,38 @@ describe('MCP instruction context handlers', () => {
     expect(directives).toContain('2 of the entities listed here have no observations shown above');
   });
 
+  it('never tells the agent the index is complete when it is truncated', async () => {
+    mocks.selectRows = [[task], [project]];
+    // 3 entities listed, 40 actually exist — the index itself is truncated.
+    mocks.projectData.getKnowledgeEntityIndex.mockResolvedValue({
+      entries: [
+        { name: 'Architecture', entityType: 'context', observationCount: 4 },
+        { name: 'ContentStyle', entityType: 'preference', observationCount: 7 },
+        { name: 'BusinessStrategy', entityType: 'context', observationCount: 2 },
+      ],
+      totalEntities: 40,
+    });
+
+    const response = await handleGetInstructions('request-1', baseToken, makeEnv());
+    const payload = parseInstructionPayload(response);
+    const directives = String(payload.knowledgeDirectives);
+    const instructions = (payload.instructions as string[]).join('\n');
+
+    // The heading must state N of M rather than claiming completeness...
+    expect(directives).toContain('3 of 40 entities');
+    expect(directives).not.toContain('Full knowledge index');
+    expect(directives).toContain('A further 37 entities are not listed');
+
+    // ...and the instructions must not re-assert completeness one layer up. This is the
+    // rule-65 bug reintroduced in prose: the index block was honest while the sentence
+    // pointing at it said "Full knowledge index ... lists every entity".
+    expect(instructions).not.toContain('Full knowledge index');
+    expect(instructions).not.toMatch(/index[^.]*lists every entity/i);
+    // Liveness control (rule 62) — an absence assertion needs a positive one beside it.
+    expect(instructions).toContain('knowledge-index section');
+    expect(payload.task).toMatchObject({ id: 'task-1' });
+  });
+
   it('passes the per-entity cap through to the knowledge query', async () => {
     mocks.selectRows = [[task], [project]];
 
