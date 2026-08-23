@@ -230,7 +230,7 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 		if persisted, err := s.store.GetSessionMcpServers(workspaceID, sessionID); err == nil && len(persisted) > 0 {
 			prefetchedMcpServers = make([]acp.McpServerEntry, len(persisted))
 			for i, p := range persisted {
-				prefetchedMcpServers[i] = acp.McpServerEntry{URL: p.URL, Token: p.Token}
+				prefetchedMcpServers[i] = acp.McpServerEntry{URL: p.URL, Token: p.Token, Name: p.Name}
 			}
 		} else if err != nil {
 			slog.Warn("Failed to read MCP servers from SQLite",

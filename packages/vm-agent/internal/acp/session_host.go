@@ -78,8 +78,9 @@ func buildAcpMcpServers(entries []McpServerEntry, agentType string) []acpsdk.Mcp
 		return []acpsdk.McpServer{}
 	}
 	servers := make([]acpsdk.McpServer, 0, len(entries))
+	names := ResolveMcpServerNames(entries)
 	for i, e := range entries {
-		name := mcpServerName(i, len(entries))
+		name := names[i]
 		if agentType == "amp" {
 			servers = append(servers, buildAmpMcpServer(name, e))
 			continue
@@ -101,13 +102,6 @@ func buildAcpMcpServers(entries []McpServerEntry, agentType string) []acpsdk.Mcp
 		})
 	}
 	return servers
-}
-
-func mcpServerName(index, total int) string {
-	if total > 1 {
-		return fmt.Sprintf("sam-mcp-%d", index)
-	}
-	return "sam-mcp"
 }
 
 func buildAmpMcpServer(name string, entry McpServerEntry) acpsdk.McpServer {

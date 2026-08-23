@@ -127,6 +127,10 @@ import { reportIssueRoutes } from './routes/report-issue';
 import { resolutionStatusRoute } from './routes/resolution-status';
 import { samRoutes } from './routes/sam';
 import { setupRoutes } from './routes/setup';
+import {
+  projectMcpConnectionRoutes,
+  userMcpConnectionRoutes,
+} from './routes/mcp-connections';
 import { skillRuntimeRoutes } from './routes/skill-runtime';
 import { skillRoutes } from './routes/skills';
 import { taskCallbackRoute, tasksRoutes } from './routes/tasks';
@@ -683,6 +687,7 @@ app.route('/api/setup', setupRoutes);
 app.route('/api/credentials', resolutionStatusRoute);
 app.route('/api/credentials', credentialsRoutes);
 app.route('/api/agent-credential-setup-sessions', agentCredentialSetupSessionsRoutes);
+app.route('/api/mcp-connections', userMcpConnectionRoutes);
 app.route('/api/cc', ccRoutes);
 app.route('/api/providers', providersRoutes);
 app.route('/api/github', githubRoutes);
@@ -733,6 +738,7 @@ app.route('/api/projects/:projectId/agent-profiles/:profileId/runtime', profileR
 app.route('/api/projects/:projectId/agent-profiles', agentProfileRoutes);
 app.route('/api/projects/:projectId/skills/:skillId/runtime', skillRuntimeRoutes);
 app.route('/api/projects/:projectId/skills', skillRoutes);
+app.route('/api/projects/:projectId/mcp-connections', projectMcpConnectionRoutes);
 app.route('/api/projects/:projectId/triggers', triggersRoutes);
 app.route('/api/projects/:projectId/knowledge', knowledgeRoutes);
 app.route('/api/projects/:projectId/mailbox', mailboxRoutes);

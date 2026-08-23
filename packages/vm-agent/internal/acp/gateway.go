@@ -256,11 +256,20 @@ type GatewayConfig struct {
 }
 
 // McpServerEntry is a lightweight MCP server config passed from the control
-// plane for injection into ACP sessions. It represents an HTTP MCP server
-// with bearer token authentication.
+// plane for injection into ACP sessions. It represents an HTTP MCP server with
+// optional bearer token authentication.
+//
+// An empty Token means "no auth" — several MCP providers issue pre-signed URLs
+// that carry the credential in the URL itself. Every harness below omits the
+// auth header in that case.
+//
+// Name is the agent-visible server name; tools are namespaced by it. It is
+// optional because a control plane older than this field does not send one, in
+// which case ResolveMcpServerNames falls back to the legacy positional scheme.
 type McpServerEntry struct {
 	URL   string `json:"url"`
 	Token string `json:"token"`
+	Name  string `json:"name,omitempty"`
 }
 
 // Gateway is a thin per-WebSocket relay between a browser and a SessionHost.
@@ -1072,18 +1081,34 @@ type codexProxyProviderConfig struct {
 	model   string
 }
 
-func codexMcpServerName(index, total int) string {
-	if total <= 1 {
-		return "sam-mcp"
-	}
-	return fmt.Sprintf("sam-mcp-%d", index)
-}
-
-func codexMcpTokenEnvVar(index, total int) string {
-	if total <= 1 {
+// codexMcpTokenEnvVar derives the env var Codex reads a server's bearer token from.
+//
+// The "_TOKEN" suffix is required, not stylistic: isSecretEnvVar in process.go classifies
+// secrets by that substring, and an unclassified value would be passed through docker exec
+// argv and become visible in /proc/*/cmdline.
+//
+// The two legacy shapes ("sam-mcp" and "sam-mcp-<n>") keep their historical env var names so
+// unnamed entries produce byte-identical config to before this field existed.
+func codexMcpTokenEnvVar(name string) string {
+	if name == SamMcpServerName {
 		return "SAM_MCP_TOKEN"
 	}
-	return fmt.Sprintf("SAM_MCP_TOKEN_%d", index)
+	if suffix, ok := strings.CutPrefix(name, SamMcpServerName+"-"); ok && isAllDigits(suffix) {
+		return "SAM_MCP_TOKEN_" + suffix
+	}
+	return fmt.Sprintf("SAM_MCP_%s_TOKEN", McpServerEnvVarSuffix(name))
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func removeManagedCodexMcpBlock(existing string) string {
@@ -1278,12 +1303,16 @@ func generateCodexMcpConfig(mcpServers []McpServerEntry, proxyProvider *codexPro
 	}
 	config.WriteString(providerConfig)
 
+	// Names are resolved over validServers (post-filter) so the positional fallback matches
+	// the keys actually written; dropping a server renumbers the rest, which is the
+	// pre-existing behaviour.
+	names := ResolveMcpServerNames(validServers)
 	for i, server := range validServers {
-		name := codexMcpServerName(i, len(validServers))
+		name := names[i]
 		config.WriteString(fmt.Sprintf("[mcp_servers.%s]\n", name))
 		config.WriteString(fmt.Sprintf("url = \"%s\"\n", tomlEscapeBasicString(server.URL)))
 		if server.Token != "" {
-			tokenEnvVar := codexMcpTokenEnvVar(i, len(validServers))
+			tokenEnvVar := codexMcpTokenEnvVar(name)
 			config.WriteString(fmt.Sprintf("bearer_token_env_var = \"%s\"\n", tokenEnvVar))
 			envVars = append(envVars, fmt.Sprintf("%s=%s", tokenEnvVar, server.Token))
 		}
@@ -1383,7 +1412,13 @@ temperature = 0.2
 `, activeModel, activeModel)
 	}
 
-	// Append MCP server configurations if provided
+	// Append MCP server configurations if provided.
+	//
+	// Names come from the shared resolver rather than a local "sam-mcp-%d" — this call site
+	// used to always index-suffix, so a single server was named "sam-mcp-0" here while ACP
+	// and Codex called the same server "sam-mcp". Using the shared resolver fixes that
+	// divergence as well as honouring user-chosen names.
+	names := ResolveMcpServerNames(mcpServers)
 	for i, server := range mcpServers {
 		// Skip entries with control characters that would corrupt TOML
 		if strings.ContainsAny(server.URL, "\n\r") || strings.ContainsAny(server.Token, "\n\r") {
@@ -1392,7 +1427,7 @@ temperature = 0.2
 			continue
 		}
 		safeURL := tomlEscapeBasicString(server.URL)
-		config += fmt.Sprintf("\n[[mcp_servers]]\nname = \"sam-mcp-%d\"\ntransport = \"http\"\nurl = \"%s\"\n", i, safeURL)
+		config += fmt.Sprintf("\n[[mcp_servers]]\nname = \"%s\"\ntransport = \"http\"\nurl = \"%s\"\n", names[i], safeURL)
 		if server.Token != "" {
 			safeToken := tomlEscapeBasicString(server.Token)
 			config += fmt.Sprintf("headers = { Authorization = \"Bearer %s\" }\n", safeToken)

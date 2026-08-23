@@ -444,13 +444,21 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 	if startup.settings != nil {
 		effort = startup.settings.Effort
 	}
+	// URL and CR/LF checks apply to every server: a malformed value would corrupt config.toml.
+	//
+	// The missing-token check applies ONLY to SAM's own endpoint. A user-configured MCP server
+	// may legitimately have no bearer token — several providers issue pre-signed URLs that
+	// carry the credential in the URL itself — and generateCodexMcpConfig already omits
+	// bearer_token_env_var for those. Failing closed on all of them would mean one no-auth
+	// connection blocks every Codex session for that user.
+	names := ResolveMcpServerNames(h.config.McpServers)
 	for i, server := range h.config.McpServers {
 		switch {
 		case strings.TrimSpace(server.URL) == "":
 			return fmt.Errorf("cannot start Codex with SAM MCP enabled: mcp server %d has a blank URL", i)
 		case strings.ContainsAny(server.URL, "\r\n"):
 			return fmt.Errorf("cannot start Codex with SAM MCP enabled: mcp server %d URL contains CR/LF characters", i)
-		case strings.TrimSpace(server.Token) == "":
+		case names[i] == SamMcpServerName && strings.TrimSpace(server.Token) == "":
 			return fmt.Errorf("cannot start Codex with SAM MCP enabled: mcp server %d is missing its bearer token (SAM_MCP_TOKEN)", i)
 		case strings.ContainsAny(server.Token, "\r\n"):
 			return fmt.Errorf("cannot start Codex with SAM MCP enabled: mcp server %d bearer token contains CR/LF characters", i)

@@ -70,6 +70,9 @@ export {
 // Skill schemas
 export { CreateSkillSchema, UpdateSkillSchema } from './skills';
 
+// Bring-your-own MCP server schemas
+export { CreateMcpConnectionSchema, UpdateMcpConnectionSchema } from './mcp-connections';
+
 // Knowledge graph schemas
 export {
   AddObservationSchema,
