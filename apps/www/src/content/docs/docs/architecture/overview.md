@@ -196,6 +196,39 @@ Agent behavior is assembled from several override layers rather than a single gl
 - **Skills** — a first-class override layer that further specializes a profile for a specific task type.
 - **Provider modes** — each agent runs in one of three auth modes: `user-api-key` (the user's own key), `oauth` (a subscription token such as Claude Max), or `sam` (the platform-managed AI proxy, opt-in). See [Agent Authentication](/docs/guides/agents/).
 
+### Agent Bootstrap Payload (`get_instructions`)
+
+Every agent session begins by calling the SAM MCP `get_instructions` tool
+(`handleGetInstructions()` in `apps/api/src/routes/mcp/instruction-tools.ts`), which returns
+the task/session context, the project record, a mode-specific `instructions[]` array, and the
+project's stored knowledge and policies.
+
+Knowledge and policies are delivered as **rendered markdown only** — `knowledgeDirectives` and
+`policyDirectives`, produced by `formatKnowledgeDirectives()` and `formatPolicyDirectives()`.
+Each field is omitted entirely when there is nothing to render; a failed Durable Object read
+also degrades to "omitted" rather than erroring the bootstrap.
+
+There is deliberately **no second structured copy** of this data. The payload previously also
+carried `knowledgeContext` and `policyContext` arrays holding byte-identical observation and
+policy bodies. Nothing consumed them, and on a mature project they accounted for roughly half
+the payload (~166K → ~81K characters, about 21k tokens per session bootstrap), so they were
+removed. Callers that need machine-readable records should use the dedicated tools —
+`list_policies` / `get_policy`, and `search_knowledge` / `get_project_knowledge` — rather than
+parsing the bootstrap payload.
+
+Because `update_policy` and `remove_policy` resolve rows by exact id (`updatePolicy()` and
+`removePolicy()` in `apps/api/src/durable-objects/project-data/policies.ts` use `WHERE id = ?`),
+each rendered policy line carries its **full, untruncated** id:
+
+```text
+### Rules (MUST follow)
+- **Call get_instructions first** (id: 7d24e435-0153-44a6-a532-1244510d9e25): Agents must load SAM context before starting work.
+```
+
+Knowledge observations do **not** currently carry their `observationId` in this payload, so
+`update_knowledge`, `remove_knowledge`, and `confirm_knowledge` need an id obtained from
+`search_knowledge` or `get_project_knowledge` first.
+
 ## Durable Objects Deep Dive
 
 ### ProjectData DO
