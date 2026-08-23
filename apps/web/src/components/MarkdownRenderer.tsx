@@ -402,7 +402,7 @@ const RenderedMarkdownImpl: FC<{ content: string; style?: CSSProperties; inline?
       style={{ ...style, overflowWrap: 'anywhere' }}
       data-testid="rendered-markdown"
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ ...MARKDOWN_COMPONENTS }}>
         {content}
       </ReactMarkdown>
     </div>
