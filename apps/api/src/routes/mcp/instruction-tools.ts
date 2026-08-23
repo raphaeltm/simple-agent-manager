@@ -286,6 +286,13 @@ export async function handleGetInstructions(
     // duplication on every session bootstrap. Policy IDs (needed by `update_policy` /
     // `remove_policy`) lived only in the structured array, so they are now rendered inline
     // by formatPolicyDirectives instead. See the R1 token-optimization task.
+    //
+    // The policy id is deliberately conveyed in prose while every other id here
+    // (`context.task.id`, `project.id`, `context.workspaceId`) is a structured field. Do
+    // NOT "fix" that by re-adding a `policyIds` array: the only consumer of this payload is
+    // the LLM, for which prose and JSON are equally parseable; a bare id array would need
+    // its titles re-duplicated to be correlatable, costing ~2x the inline form; and callers
+    // that need structured policy data already have `list_policies` / `get_policy`.
     ...(knowledgeDirectives ? { knowledgeDirectives } : {}),
     ...(policyDirectives ? { policyDirectives } : {}),
   };

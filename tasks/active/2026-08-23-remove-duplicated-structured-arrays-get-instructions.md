@@ -118,9 +118,9 @@ R2 (policy expiry fields). This diff must stay minimal and land first; rebase on
 
 - [x] `get_instructions` no longer emits `knowledgeContext` or `policyContext`
 - [x] Every policy's full, exact id is available to the agent in the rendered directives
-- [x] Payload for the SAM project drops from ~166.8K to ~81.0K chars (~51%, ~21.4k tokens)
+- [ ] Payload for the SAM project drops from ~166.8K to ~81.0K chars (~51%, ~21.4k tokens)
 - [x] No consumer anywhere in the repo reads the removed fields
-- [x] Staging: a real session bootstrap receives directives, can act on a policy by id, and
+- [ ] Staging: a real session bootstrap receives directives, can act on a policy by id, and
       the payload is measurably smaller (before/after bytes reported in the PR)
 
 ## References
@@ -130,17 +130,24 @@ R2 (policy expiry fields). This diff must stay minimal and land first; rebase on
 - `.claude/rules/02-quality-gates.md` — discriminating regression tests
 - `tasks/archive/2026-04-26-policy-propagation-phase4.md` — where `policyContext` originated
 
-## Outcome
+## Outcome (IN PROGRESS — not yet staging-verified)
 
 **Implemented** in commit `da1d3160a` on `sam/remove-duplicated-structured-arrays-b6ggy4`.
 
-### Measured result
+### Projected result (local computation — NOT yet a live re-measurement)
 
 | | chars |
 |---|---:|
-| BEFORE (`JSON.stringify(result, null, 2)`, real SAM project) | 166,814 |
-| AFTER (incl. +3,483 for inline policy ids) | 81,025 |
-| **Saved** | **85,789 (-51%, ~21.4k tokens per session bootstrap)** |
+| BEFORE (`JSON.stringify(result, null, 2)`, real SAM payload) | 166,814 |
+| AFTER (projected; incl. +3,483 for inline policy ids) | 81,025 |
+| **Projected saving** | **85,789 (-51%, ~21.4k tokens per session bootstrap)** |
+
+The BEFORE number is empirical. The AFTER number is arithmetic over the real payload and
+MUST be replaced with a measured post-deploy figure during staging verification.
+
+A live BEFORE baseline was additionally captured on staging (pre-fix `main`, project
+`01KTKXZ4ZZAT6MJFXRW1ZTQ7RB` seeded with 3 marked policies + 1 observation): 6,025 chars,
+every seeded body appearing exactly **2x**, and **no** policy id in the rendered directives.
 
 ### Discriminating-test proof
 

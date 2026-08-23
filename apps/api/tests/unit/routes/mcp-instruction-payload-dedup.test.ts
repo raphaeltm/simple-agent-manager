@@ -19,7 +19,6 @@ const mocks = vi.hoisted(() => ({
     getSession: vi.fn(),
     getAllHighConfidenceKnowledge: vi.fn(),
     getActivePolicies: vi.fn(),
-    recordActivityEvent: vi.fn(),
   },
 }));
 
@@ -132,6 +131,10 @@ function serializedPayload(response: Awaited<ReturnType<typeof handleGetInstruct
   return result.content[0]?.text ?? '';
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function countOccurrences(haystack: string, needle: string): number {
   let count = 0;
   let index = haystack.indexOf(needle);
@@ -157,7 +160,6 @@ describe('get_instructions payload de-duplication (R1)', () => {
     mocks.projectData.getSession.mockResolvedValue(null);
     mocks.projectData.getAllHighConfidenceKnowledge.mockResolvedValue(OBSERVATIONS);
     mocks.projectData.getActivePolicies.mockResolvedValue(POLICIES);
-    mocks.projectData.recordActivityEvent.mockResolvedValue('event-1');
   });
 
   it('serializes every policy body exactly once', async () => {
@@ -192,6 +194,12 @@ describe('get_instructions payload de-duplication (R1)', () => {
     // Also absent as literal keys anywhere in the serialized text.
     expect(text).not.toContain('"knowledgeContext"');
     expect(text).not.toContain('"policyContext"');
+
+    // Liveness (rule 62 req 5): an absence assertion is also satisfied by a payload that
+    // rendered nothing at all. Prove the surviving representation is actually populated.
+    expect(String(parsed.knowledgeDirectives)).toContain(OBSERVATION_A);
+    expect(String(parsed.policyDirectives)).toContain(RULE_BODY);
+    expect(parsed.task).toMatchObject({ id: 'task-1' });
   });
 
   it('keeps the rendered directives as the single representation', async () => {
@@ -222,7 +230,6 @@ describe('policy management identifiers survive de-duplication', () => {
     mocks.projectData.getSession.mockResolvedValue(null);
     mocks.projectData.getAllHighConfidenceKnowledge.mockResolvedValue(OBSERVATIONS);
     mocks.projectData.getActivePolicies.mockResolvedValue(POLICIES);
-    mocks.projectData.recordActivityEvent.mockResolvedValue('event-1');
   });
 
   it('renders every policy id inline in policyDirectives', async () => {
@@ -238,16 +245,20 @@ describe('policy management identifiers survive de-duplication', () => {
     const { parsed } = await getPayload();
     const policies = String(parsed.policyDirectives);
 
+    // Guard against a truncated/elided rendering such as "(id: 7d24e435…)". Asserted on
+    // the whole rendered block, because a capture group of [0-9a-f-]+ structurally cannot
+    // contain an ellipsis and so could never catch this.
+    expect(policies).not.toContain('…');
+    expect(policies).not.toContain('...');
+
     for (const policy of POLICIES) {
       // Recover the id the way an agent would, then assert it round-trips exactly.
       const match = new RegExp(
-        `\\*\\*${policy.title}\\*\\* \\(id: ([0-9a-f-]+)\\)`,
+        `\\*\\*${escapeRegExp(policy.title)}\\*\\* \\(id: ([^)]+)\\)`,
       ).exec(policies);
       expect(match, `no id captured for ${policy.title}`).not.toBeNull();
       expect(match?.[1]).toBe(policy.id);
       expect(match?.[1]).toHaveLength(36);
-      // Guard against a truncated/elided rendering such as "7d24e435…".
-      expect(match?.[1]).not.toContain('…');
     }
   });
 
@@ -276,7 +287,6 @@ describe('empty knowledge and policy paths still degrade correctly', () => {
     mocks.selectRows = [];
     mocks.drizzle.mockReturnValue(makeMockDb());
     mocks.projectData.getSession.mockResolvedValue(null);
-    mocks.projectData.recordActivityEvent.mockResolvedValue('event-1');
   });
 
   it('omits both directive fields when there is nothing to render', async () => {
@@ -316,5 +326,72 @@ describe('empty knowledge and policy paths still degrade correctly', () => {
     expect(parsed).not.toHaveProperty('knowledgeContext');
     // Policies are unaffected and still carry their ids.
     expect(String(parsed.policyDirectives)).toContain(`(id: ${POLICY_RULE_ID})`);
+  });
+
+  it('survives a policy retrieval failure without emitting either field', async () => {
+    // Mirror of the knowledge-failure case: production wraps both retrievals in the same
+    // shape of try/catch, so both degradation paths need coverage.
+    mocks.projectData.getAllHighConfidenceKnowledge.mockResolvedValue(OBSERVATIONS);
+    mocks.projectData.getActivePolicies.mockRejectedValue(new Error('DO down'));
+
+    const { parsed } = await getPayload();
+
+    expect(parsed).not.toHaveProperty('policyDirectives');
+    expect(parsed).not.toHaveProperty('policyContext');
+    // Knowledge is unaffected, and the policy instructions are correctly suppressed.
+    expect(String(parsed.knowledgeDirectives)).toContain(OBSERVATION_A);
+    expect(JSON.stringify(parsed.instructions)).not.toContain('remove_policy');
+  });
+});
+
+describe('multi-observation entities keep every observation exactly once', () => {
+  // formatKnowledgeDirectives groups by entityName and joins an entity's observations with
+  // ' | '. That branch is the easiest place for a future change to silently drop all but
+  // the last observation, and nothing in the repo covered it.
+  const SAME_ENTITY_OBS = [
+    {
+      entityName: 'SharedEntity',
+      entityType: 'preference',
+      content: 'First observation about the shared entity.',
+      confidence: 0.95,
+    },
+    {
+      entityName: 'SharedEntity',
+      entityType: 'preference',
+      content: 'Second observation about the shared entity.',
+      confidence: 0.9,
+    },
+    {
+      entityName: 'OtherEntity',
+      entityType: 'context',
+      content: 'Sole observation about the other entity.',
+      confidence: 0.85,
+    },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.selectRows = [];
+    mocks.drizzle.mockReturnValue(makeMockDb());
+    mocks.projectData.getSession.mockResolvedValue(null);
+    mocks.projectData.getAllHighConfidenceKnowledge.mockResolvedValue(SAME_ENTITY_OBS);
+    mocks.projectData.getActivePolicies.mockResolvedValue(POLICIES);
+  });
+
+  it('renders both observations of a shared entity, each exactly once', async () => {
+    const { text, parsed } = await getPayload();
+    const knowledge = String(parsed.knowledgeDirectives);
+
+    for (const observation of SAME_ENTITY_OBS) {
+      expect(knowledge, `dropped: ${observation.content}`).toContain(observation.content);
+      expect(countOccurrences(text, observation.content)).toBe(1);
+    }
+
+    // The entity header is emitted once and both observations hang off it.
+    expect(countOccurrences(knowledge, '**SharedEntity** (preference)')).toBe(1);
+    expect(knowledge).toContain(
+      'First observation about the shared entity. | Second observation about the shared entity.'
+    );
+    expect(knowledge).toContain('**OtherEntity** (context)');
   });
 });
