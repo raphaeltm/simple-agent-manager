@@ -227,10 +227,15 @@ describe('handleDiscoveryAgentStart — VM agent boot', () => {
     expect(typeof initialPrompt).toBe('string');
     expect(initialPrompt as string).toContain('octocat/Hello-World');
     expect(userId).toBe('u_anon_trial');
-    expect(mcpServer).toEqual({
-      url: 'https://api.sammy.party/mcp',
-      token: 'mcp_tok_fixture_abc123',
-    });
+    // Exactly one entry: SAM's own endpoint. Bring-your-own MCP connections are
+    // deliberately NOT resolved for trials, which run as the anonymous sentinel user.
+    expect(mcpServer).toEqual([
+      {
+        url: 'https://api.sammy.party/mcp',
+        token: 'mcp_tok_fixture_abc123',
+        name: 'sam-mcp',
+      },
+    ]);
 
     expect(state.agentStartedOnVm).toBe(true);
   });
@@ -314,7 +319,7 @@ describe('handleDiscoveryAgentStart — VM agent boot', () => {
     expect(transitionAcpSessionMock).toHaveBeenCalledTimes(2);
     // MCP token passed to startAgentSessionOnNode is the persisted one, not a fresh mint.
     const startArgs = startAgentSessionOnNodeMock.mock.calls[0];
-    expect(startArgs[7]).toMatchObject({ token: 'mcp_tok_partial' });
+    expect(startArgs[7]).toMatchObject([{ token: 'mcp_tok_partial', name: 'sam-mcp' }]);
 
     expect(advanced).toEqual(['running']);
   });

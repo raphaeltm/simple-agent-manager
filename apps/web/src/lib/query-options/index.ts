@@ -53,7 +53,6 @@ export {
   messageCommentsQueryOptions,
 } from './comments';
 export { credentialQueryKeys, credentialsQueryOptions } from './credentials';
-export { mcpConnectionQueryKeys, mcpConnectionsQueryOptions } from './mcp-connections';
 export { githubInstallationsQueryOptions, githubQueryKeys } from './github';
 export {
   nodeListQueryOptions,
@@ -64,6 +63,7 @@ export {
   workspaceQueryKeys,
 } from './infrastructure';
 export { type LibraryIndexQueryData, libraryIndexQueryOptions, libraryQueryKeys } from './library';
+export { mcpConnectionQueryKeys, mcpConnectionsQueryOptions } from './mcp-connections';
 export {
   notificationPreferencesQueryOptions,
   notificationQueryKeys,

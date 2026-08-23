@@ -331,7 +331,7 @@ describe('handleAgentSession', () => {
       'user-1',
       'chat-1',
       'project-1',
-      { url: 'https://api.example.test/mcp', token: 'mcp-token-new' },
+      [{ url: 'https://api.example.test/mcp', token: 'mcp-token-new', name: 'sam-mcp' }],
       expect.objectContaining({
         beforeExternalMutation: expect.any(Function),
         sourceTaskGuard: undefined,
@@ -358,7 +358,7 @@ describe('handleAgentSession', () => {
       expect.stringContaining('Exercise the TaskRunner agent-session path.'),
       expect.objectContaining({ BASE_DOMAIN: 'example.test' }),
       'user-1',
-      { url: 'https://api.example.test/mcp', token: 'mcp-token-new' },
+      [{ url: 'https://api.example.test/mcp', token: 'mcp-token-new', name: 'sam-mcp' }],
       expect.objectContaining({
         model: 'gpt-5-codex',
         effort: 'high',
@@ -457,7 +457,7 @@ describe('handleAgentSession', () => {
       'user-1',
       'chat-1',
       'project-1',
-      { url: 'https://api.example.test/mcp', token: 'mcp-token-new' },
+      [{ url: 'https://api.example.test/mcp', token: 'mcp-token-new', name: 'sam-mcp' }],
       expect.objectContaining({
         beforeExternalMutation: expect.any(Function),
         sourceTaskGuard: undefined,
@@ -672,7 +672,7 @@ describe('handleAgentSession', () => {
       expect.stringContaining('Exercise the TaskRunner agent-session path.'),
       expect.objectContaining({ BASE_DOMAIN: 'example.test' }),
       'user-1',
-      { url: 'https://api.example.test/mcp', token: 'mcp-token-new' },
+      [{ url: 'https://api.example.test/mcp', token: 'mcp-token-new', name: 'sam-mcp' }],
       expect.objectContaining({
         model: 'gpt-5-codex',
         effort: 'high',

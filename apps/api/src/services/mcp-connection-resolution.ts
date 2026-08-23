@@ -16,6 +16,7 @@ import { and, eq, isNull, or, type SQL } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import { log } from '../lib/logger';
 import { decrypt } from './encryption';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -51,19 +52,28 @@ export async function resolveMcpServersForSession(
     ? (or(personalScope, eq(schema.mcpConnections.projectId, scope.projectId)) as SQL)
     : personalScope;
 
-  let rows: schema.McpConnectionRow[];
   try {
-    rows = await db.select().from(schema.mcpConnections).where(where);
+    const rows: unknown = await db.select().from(schema.mcpConnections).where(where);
+    // The result shape is validated rather than assumed. This function runs on the
+    // agent-session start path, so anything that throws here takes session start down for
+    // the whole tenant — including a driver or binding that returns a non-array.
+    if (!Array.isArray(rows)) {
+      log.error('mcp_connections.resolve_unexpected_result', {
+        projectId: scope.projectId,
+        resultType: typeof rows,
+        action: 'skipped_all',
+      });
+      return [];
+    }
+    return await decryptAndMerge(rows as schema.McpConnectionRow[], scope, encryptionKey);
   } catch (error) {
-    console.error('mcp_connections.resolve_query_failed', {
+    log.error('mcp_connections.resolve_failed', {
       projectId: scope.projectId,
       error: error instanceof Error ? error.message : String(error),
       action: 'skipped_all',
     });
     return [];
   }
-
-  return decryptAndMerge(rows, scope, encryptionKey);
 }
 
 /**
@@ -159,7 +169,7 @@ async function toEntry(
 
     return { url, token, name: row.name };
   } catch (error) {
-    console.error('mcp_connections.row_skipped', {
+    log.warn('mcp_connections.row_skipped', {
       connectionId: row.id,
       name: row.name,
       projectId: row.projectId,

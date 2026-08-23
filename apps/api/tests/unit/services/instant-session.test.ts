@@ -271,7 +271,7 @@ describe('launchInstantSession', () => {
       'enriched prompt',
       expect.anything(),
       'user-1',
-      { url: 'https://api.example.com/mcp', token: 'mcp-token' },
+      [{ url: 'https://api.example.com/mcp', token: 'mcp-token', name: 'sam-mcp' }],
       { model: 'claude-sonnet-4-5-20250929', effort: 'auto' },
       { projectId: 'project-1', taskId: 'task-1', taskMode: 'conversation' },
       expect.stringContaining('MUST call')

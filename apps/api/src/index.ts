@@ -100,6 +100,10 @@ import { libraryRoutes } from './routes/library';
 import { libraryCommentRoutes } from './routes/library-comments';
 import { mailboxRoutes } from './routes/mailbox';
 import { mcpRoutes } from './routes/mcp';
+import {
+  projectMcpConnectionRoutes,
+  userMcpConnectionRoutes,
+} from './routes/mcp-connections';
 import { missionRoutes } from './routes/missions';
 import { modelCatalogRoutes } from './routes/model-catalog';
 import { nodeLifecycleRoutes } from './routes/node-lifecycle';
@@ -127,10 +131,6 @@ import { reportIssueRoutes } from './routes/report-issue';
 import { resolutionStatusRoute } from './routes/resolution-status';
 import { samRoutes } from './routes/sam';
 import { setupRoutes } from './routes/setup';
-import {
-  projectMcpConnectionRoutes,
-  userMcpConnectionRoutes,
-} from './routes/mcp-connections';
 import { skillRuntimeRoutes } from './routes/skill-runtime';
 import { skillRoutes } from './routes/skills';
 import { taskCallbackRoute, tasksRoutes } from './routes/tasks';

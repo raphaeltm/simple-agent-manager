@@ -10,9 +10,9 @@ import { useEffect, useState } from 'react';
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router';
 
 import { DeploymentSettings } from '../components/DeploymentSettings';
+import { McpServersManager } from '../components/mcp-servers/McpServersManager';
 import { ProjectConnectionsSection } from '../components/project-settings/ProjectConnectionsSection';
 import { ProjectMembersSection } from '../components/project-settings/ProjectMembersSection';
-import { McpServersManager } from '../components/mcp-servers/McpServersManager';
 import { ProjectRuntimeConfigSection } from '../components/project-settings/ProjectRuntimeConfigSection';
 import { ProjectAgentsSection } from '../components/ProjectAgentsSection';
 import { RepositoryAccessSettings } from '../components/RepositoryAccessSettings';

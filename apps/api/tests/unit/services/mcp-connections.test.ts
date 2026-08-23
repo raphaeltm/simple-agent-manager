@@ -10,8 +10,6 @@ import { drizzle } from 'drizzle-orm/d1';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { decryptAndMerge, resolveMcpServersForSession } from '../../../src/services/mcp-connection-resolution';
-import { encrypt } from '../../../src/services/encryption';
 import {
   createMcpConnection,
   deleteMcpConnection,

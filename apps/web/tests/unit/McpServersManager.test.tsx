@@ -1,8 +1,7 @@
+import type { McpConnection } from '@simple-agent-manager/shared';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-import type { McpConnection } from '@simple-agent-manager/shared';
 
 const listMcpConnections = vi.fn();
 const createMcpConnection = vi.fn();
