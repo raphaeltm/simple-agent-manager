@@ -310,10 +310,19 @@ export function boundCommentThreadSummary<
   };
 }
 
-export function boundCommentThread(
-  thread: MessageCommentThread,
-  config: MessageCommentConfig
-): MessageCommentThread {
+/**
+ * Generic over the thread shape so message threads and library-file threads
+ * share one bounding implementation — both need bodies and quotes clamped to the
+ * same configured limits before they reach an agent.
+ */
+export function boundCommentThread<
+  T extends {
+    body: string;
+    anchor: { quote: string | null };
+    sourceMessage?: { quote: string | null } | null;
+    replies: Array<{ body: string }>;
+  },
+>(thread: T, config: MessageCommentConfig): T {
   const summary = boundCommentThreadSummary(thread, config);
   return {
     ...summary,
