@@ -10,15 +10,25 @@ import { useLibraryFileComments } from './useLibraryFileComments';
 interface FileCommentPanelProps {
   projectId: string;
   fileId: string;
+  /** Text the user selected in the preview, attached to the thread they are about to create. */
+  pendingQuote?: string | null;
+  onClearPendingQuote?: () => void;
   onClose: () => void;
 }
 
-export function FileCommentPanel({ projectId, fileId, onClose }: FileCommentPanelProps) {
+export function FileCommentPanel({
+  projectId,
+  fileId,
+  pendingQuote,
+  onClearPendingQuote,
+  onClose,
+}: FileCommentPanelProps) {
   const { comments, loading, error, createThread, reply, resolve, reopen } =
     useLibraryFileComments(projectId, fileId);
 
   const handleCreateThread = async (body: string, _action: MessageCommentAction) => {
-    await createThread(body);
+    await createThread(body, pendingQuote ?? undefined);
+    onClearPendingQuote?.();
   };
 
   const handleReply = async (threadId: string, body: string, _action: MessageCommentAction) => {
@@ -65,11 +75,23 @@ export function FileCommentPanel({ projectId, fileId, onClose }: FileCommentPane
 
       <div className="shrink-0 border-t border-border-default p-3">
         <CommentComposer
-          placeholder="Add a comment on this file…"
+          // Remounting on quote change resets the draft body to match the new
+          // selection, and re-runs autoFocus so the user can type immediately.
+          key={pendingQuote ?? 'no-quote'}
+          quote={pendingQuote ?? undefined}
+          placeholder={
+            pendingQuote ? 'Comment on the selected text…' : 'Add a comment on this file…'
+          }
           submitLabel="Comment"
           hideSendToAgent
           onSubmit={handleCreateThread}
-          onCancel={onClose}
+          onCancel={() => {
+            if (pendingQuote) {
+              onClearPendingQuote?.();
+              return;
+            }
+            onClose();
+          }}
         />
       </div>
     </div>

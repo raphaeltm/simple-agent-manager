@@ -12,6 +12,29 @@ export type UiMessageCommentReply = MessageCommentReply & {
   syncState?: CommentSyncState;
 };
 
+/**
+ * The anchor-agnostic subset of a comment thread that the presentational
+ * components (`CommentThread`, `CommentThreadList`) actually render.
+ *
+ * Anchoring is the ONLY thing that differs between a message comment and a
+ * library-file comment, and these components never read the anchor beyond its
+ * quote. Typing them on this instead of on `UiMessageCommentThread` is what lets
+ * library-file threads reuse them without forging a `kind: 'message'` anchor.
+ */
+export type UiCommentThread = {
+  id: string;
+  clientId?: string | null;
+  projectId?: string;
+  author: MessageCommentAuthor;
+  body: string;
+  status: MessageCommentStatus;
+  createdAt: number;
+  updatedAt: number;
+  anchor: { quote?: string | null };
+  replies: UiMessageCommentReply[];
+  syncState?: CommentSyncState;
+};
+
 export type UiMessageCommentThread = Omit<MessageCommentThread, 'replies'> & {
   replies: UiMessageCommentReply[];
   syncState?: CommentSyncState;

@@ -5,13 +5,13 @@ import type { MessageCommentAction } from '../../../lib/api/comments';
 import {
   authorDisplayName,
   relativeCommentTime,
-  type UiMessageCommentThread,
+  type UiCommentThread,
 } from './comment-utils';
 import { CommentComposer } from './CommentComposer';
 import { CommentStatusPill, QuotedAnchor } from './CommentPrimitives';
 
 interface CommentThreadProps {
-  comment: UiMessageCommentThread;
+  comment: UiCommentThread;
   focused?: boolean;
   hideSendToAgent?: boolean;
   onReply: (commentId: string, body: string, action: MessageCommentAction) => Promise<unknown>;
@@ -175,7 +175,7 @@ export function CommentThreadList({
   onReopen,
   onSendToAgent,
 }: {
-  comments: UiMessageCommentThread[];
+  comments: UiCommentThread[];
   focusedCommentId?: string | null;
   emptyMessage?: string;
   hideSendToAgent?: boolean;

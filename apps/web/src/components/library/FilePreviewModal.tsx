@@ -14,6 +14,14 @@ import {
   isPreviewableImageMime,
 } from '../../lib/file-utils';
 import { RenderedMarkdown, SyntaxHighlightedCode } from '../MarkdownRenderer';
+import {
+  SelectionActionBar,
+  SelectionPopover,
+} from '../project-message-view/comments/CommentPrimitives';
+import {
+  useCoarsePointer,
+  useCommentSelection,
+} from '../project-message-view/comments/useCommentSelection';
 import { ImageViewer } from '../shared-file-viewer/ImageViewer';
 import { FileCommentPanel } from './FileCommentPanel';
 import { InteractiveHtmlPreview } from './InteractiveHtmlPreview';
@@ -96,7 +104,7 @@ export function FilePreviewModal({
   const [pdfLoading, setPdfLoading] = useState(true);
   const [pdfError, setPdfError] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
-
+  const [pendingQuote, setPendingQuote] = useState<string | null>(null);
   // Pass the filename so an octet-stream/empty stored type (agent uploads) still
   // resolves to its real previewable type from the extension.
   const isImage = isPreviewableImageMime(file.mimeType, file.filename);
@@ -107,6 +115,24 @@ export function FilePreviewModal({
   const htmlTooLarge = isHtml && file.sizeBytes > FILE_PREVIEW_LOAD_MAX_BYTES;
 
   const [mdViewMode, setMdViewMode] = useState<'rendered' | 'source'>('rendered');
+
+  // Selecting text in the rendered markdown offers "Comment on selection", which
+  // opens the panel with the quote attached. Reuses the same selection machinery
+  // as message comments — the preview body just declares itself an anchor.
+  const previewBodyRef = useRef<HTMLDivElement>(null);
+  const coarsePointer = useCoarsePointer();
+  const { selection, clear: clearSelection } = useCommentSelection(
+    isMarkdown && mdViewMode === 'rendered',
+    previewBodyRef
+  );
+
+  const startQuotedComment = useCallback(() => {
+    if (!selection) return;
+    setPendingQuote(selection.quote);
+    setCommentsOpen(true);
+    clearSelection();
+    window.getSelection()?.removeAllRanges();
+  }, [clearSelection, selection]);
   // HTML defaults to the running preview. Source is the alternate view, and is fetched lazily so
   // opening an artifact costs one request (the signed-URL mint) instead of two.
   const [htmlViewMode, setHtmlViewMode] = useState<'preview' | 'source'>('preview');
@@ -367,7 +393,9 @@ export function FilePreviewModal({
                     !mdLoading &&
                     !mdError &&
                     (mdViewMode === 'rendered' ? (
-                      <RenderedMarkdown content={mdContent} />
+                      <div ref={previewBodyRef} data-comment-anchor={file.id}>
+                        <RenderedMarkdown content={mdContent} />
+                      </div>
                     ) : (
                       <div className="overflow-auto bg-surface-inset p-4">
                         <SyntaxHighlightedCode content={mdContent} language="markdown" />
@@ -425,13 +453,32 @@ export function FilePreviewModal({
                 <FileCommentPanel
                   projectId={projectId}
                   fileId={file.id}
-                  onClose={() => setCommentsOpen(false)}
+                  pendingQuote={pendingQuote}
+                  onClearPendingQuote={() => setPendingQuote(null)}
+                  onClose={() => {
+                    setPendingQuote(null);
+                    setCommentsOpen(false);
+                  }}
                 />
               </div>
             )}
           </div>
         </div>
       </div>
+
+      {selection &&
+        (coarsePointer ? (
+          <SelectionActionBar
+            quote={selection.quote}
+            onComment={startQuotedComment}
+            onDismiss={() => {
+              clearSelection();
+              window.getSelection()?.removeAllRanges();
+            }}
+          />
+        ) : (
+          <SelectionPopover x={selection.x} y={selection.y} onComment={startQuotedComment} />
+        ))}
     </div>,
     document.body
   );

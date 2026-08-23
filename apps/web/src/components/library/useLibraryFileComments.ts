@@ -20,17 +20,23 @@ import { useAuth } from '../AuthProvider';
 import {
   buildOptimisticAuthor,
   createOptimisticId,
+  type UiCommentThread,
   type UiMessageCommentReply,
-  type UiMessageCommentThread,
 } from '../project-message-view/comments/comment-utils';
 
-function fileThreadToUi(thread: LibraryFileCommentThread): UiMessageCommentThread {
+/**
+ * Maps a library-file thread onto the anchor-agnostic shape the shared comment
+ * components render. The anchor is passed through as-is: an earlier cut forged
+ * `{ kind: 'message', messageId: thread.fileId }` here to satisfy a
+ * message-typed prop, which defeated the discriminated union at exactly the
+ * boundary it exists to protect.
+ */
+function fileThreadToUi(thread: LibraryFileCommentThread): UiCommentThread {
   return {
     id: thread.id,
     clientId: thread.clientId ?? null,
     projectId: thread.projectId,
-    sessionId: '',
-    anchor: { kind: 'message', messageId: thread.fileId, quote: thread.anchor.quote },
+    anchor: thread.anchor,
     author: thread.author,
     body: thread.body,
     createdAt: thread.createdAt,
@@ -95,7 +101,7 @@ export function useLibraryFileComments(projectId: string, fileId: string) {
   const commentsQuery = useQuery({
     ...libraryFileCommentsQueryOptions(queryScope, projectId, fileId),
     enabled: Boolean(queryScope && projectId && fileId),
-    select: (threads): UiMessageCommentThread[] => threads.map(fileThreadToUi),
+    select: (threads): UiCommentThread[] => threads.map(fileThreadToUi),
   });
 
   const setCache = useCallback(
@@ -135,12 +141,10 @@ export function useLibraryFileComments(projectId: string, fileId: string) {
       if (ctx?.previous) {
         queryClient.setQueryData(queryKey, ctx.previous);
       }
+      void queryClient.invalidateQueries({ queryKey });
     },
     onSuccess: (response) => {
       setCache((prev) => upsertLibraryFileCommentThread(prev, response.thread));
-    },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey });
     },
   });
 
@@ -163,12 +167,10 @@ export function useLibraryFileComments(projectId: string, fileId: string) {
     },
     onError: (_err, _input, ctx) => {
       if (ctx?.previous) queryClient.setQueryData(queryKey, ctx.previous);
+      void queryClient.invalidateQueries({ queryKey });
     },
     onSuccess: (response) => {
       setCache((prev) => upsertLibraryFileCommentThread(prev, response.thread));
-    },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey });
     },
   });
 
@@ -186,12 +188,10 @@ export function useLibraryFileComments(projectId: string, fileId: string) {
     },
     onError: (_err, _input, ctx) => {
       if (ctx?.previous) queryClient.setQueryData(queryKey, ctx.previous);
+      void queryClient.invalidateQueries({ queryKey });
     },
     onSuccess: (response) => {
       setCache((prev) => upsertLibraryFileCommentThread(prev, response.thread));
-    },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey });
     },
   });
 
@@ -209,12 +209,10 @@ export function useLibraryFileComments(projectId: string, fileId: string) {
     },
     onError: (_err, _input, ctx) => {
       if (ctx?.previous) queryClient.setQueryData(queryKey, ctx.previous);
+      void queryClient.invalidateQueries({ queryKey });
     },
     onSuccess: (response) => {
       setCache((prev) => upsertLibraryFileCommentThread(prev, response.thread));
-    },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey });
     },
   });
 
