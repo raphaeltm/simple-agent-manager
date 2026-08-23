@@ -278,13 +278,16 @@ export async function handleGetInstructions(
           ]
         : []),
     ],
-    // Include formatted directives as a readable text block (primary way agents consume knowledge)
+    // Formatted directives are the SINGLE representation of knowledge and policies.
+    //
+    // These used to be accompanied by `knowledgeContext` / `policyContext` structured
+    // arrays "for programmatic use", but nothing ever consumed them and every observation
+    // and policy body was therefore serialized twice — ~86K chars (~21k tokens) of pure
+    // duplication on every session bootstrap. Policy IDs (needed by `update_policy` /
+    // `remove_policy`) lived only in the structured array, so they are now rendered inline
+    // by formatPolicyDirectives instead. See the R1 token-optimization task.
     ...(knowledgeDirectives ? { knowledgeDirectives } : {}),
-    // Also include structured data for programmatic use
-    ...(knowledgeContext.length > 0 ? { knowledgeContext } : {}),
-    // Include policy directives and structured data
     ...(policyDirectives ? { policyDirectives } : {}),
-    ...(policyContext.length > 0 ? { policyContext } : {}),
   };
 
   return jsonRpcSuccess(requestId, {
@@ -414,27 +417,31 @@ interface PolicyEntry {
  * Format active policies into a readable text block grouped by category.
  * Returns null if there are no policies.
  *
+ * Each policy carries its full id inline so agents can call `update_policy` /
+ * `remove_policy` without a separate lookup. This is the only place the id is exposed —
+ * the former `policyContext` structured array was removed as duplication.
+ *
  * Output looks like:
  *   ## Project Policies — you MUST follow these
  *
  *   ### Rules
- *   - **Always use conventional commits**: Commit messages must follow ...
+ *   - **Always use conventional commits** (id: 7d24e435-0153-44a6-a532-1244510d9e25): Commit messages must follow ...
  *
  *   ### Constraints
- *   - **This project uses Valibot, not Zod**: All runtime validation ...
+ *   - **This project uses Valibot, not Zod** (id: 9f1c02ab-77de-4b30-8c11-3ac6d5e81b47): All runtime validation ...
  */
 function formatPolicyDirectives(entries: PolicyEntry[]): string | null {
   if (entries.length === 0) return null;
 
   // Group by category
-  const grouped = new Map<string, { title: string; content: string }[]>();
+  const grouped = new Map<string, { id: string; title: string; content: string }[]>();
   for (const entry of entries) {
     let group = grouped.get(entry.category);
     if (!group) {
       group = [];
       grouped.set(entry.category, group);
     }
-    group.push({ title: entry.title, content: entry.content });
+    group.push({ id: entry.id, title: entry.title, content: entry.content });
   }
 
   // Category display order and labels
@@ -450,7 +457,9 @@ function formatPolicyDirectives(entries: PolicyEntry[]): string | null {
     const label = categoryLabels[category] || category;
     lines.push(`### ${label}`);
     for (const item of items) {
-      lines.push(`- **${item.title}**: ${item.content}`);
+      // The id MUST be rendered in full — `update_policy` / `remove_policy` resolve it with
+      // `WHERE id = ?` (exact match), so an abbreviated id would not address the row.
+      lines.push(`- **${item.title}** (id: ${item.id}): ${item.content}`);
     }
     lines.push('');
   }
@@ -472,7 +481,8 @@ function buildPolicyInstructions(hasPolicies: boolean, isConversation: boolean):
     );
     instructions.push(
       'If a user statement contradicts an existing policy, use `update_policy` to update it. ' +
-        'If a policy is no longer relevant, use `remove_policy` to deactivate it.'
+        'If a policy is no longer relevant, use `remove_policy` to deactivate it. ' +
+        'Each policy in policyDirectives is tagged with its `policyId` as "(id: ...)" — pass that id exactly as shown.'
     );
   }
 
