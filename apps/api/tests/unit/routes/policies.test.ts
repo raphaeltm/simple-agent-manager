@@ -108,7 +108,9 @@ describe('policy routes', () => {
         'Run the full suite before merging',
         'explicit',
         null,
-        0.9
+        0.9,
+        'always',
+        null
       );
     });
 
@@ -168,7 +170,9 @@ describe('policy routes', () => {
         'c',
         'explicit',
         null,
-        expect.any(Number)
+        expect.any(Number),
+        'always',
+        null
       );
     });
   });
@@ -226,6 +230,138 @@ describe('policy routes', () => {
       const body = (await res.json()) as { message: string };
       expect(body.message).toBe('At least one update field must be provided');
       expect(mocks.updatePolicy).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * The REST boundary must enforce the same lifecycle invariant as the MCP boundary —
+   * both call the shared `validatePolicyLifecycle`, so the rule cannot silently apply
+   * in only one of them (rule 24).
+   */
+  describe('policy lifecycle (expiry + scope)', () => {
+    async function post(body: unknown) {
+      return app.request(
+        BASE,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+        makeEnv()
+      );
+    }
+
+    async function patch(policyId: string, body: unknown) {
+      return app.request(
+        `${BASE}/${policyId}`,
+        { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+        makeEnv()
+      );
+    }
+
+    it('rejects a task-scoped policy with no expiry', async () => {
+      const res = await post({
+        category: 'constraint',
+        title: 'Use profile X for the reliability wave',
+        content: 'Applies to the 2026-08-21 workstream only.',
+        scope: 'task',
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { message: string };
+      expect(body.message).toMatch(/task-scoped policy must set expiresAt/);
+      expect(mocks.createPolicy).not.toHaveBeenCalled();
+    });
+
+    it('rejects an expiry in the past', async () => {
+      const res = await post({
+        category: 'rule',
+        title: 'Already lapsed',
+        content: 'Content',
+        expiresAt: Date.now() - 1000,
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { message: string };
+      expect(body.message).toMatch(/must be in the future/);
+      expect(mocks.createPolicy).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown scope', async () => {
+      const res = await post({ category: 'rule', title: 't', content: 'c', scope: 'forever' });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { message: string };
+      expect(body.message).toMatch(/scope must be one of/);
+      expect(mocks.createPolicy).not.toHaveBeenCalled();
+    });
+
+    it('forwards a valid task-scoped policy with its expiry', async () => {
+      mocks.createPolicy.mockResolvedValueOnce({ id: 'policy-3' });
+      const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+
+      const res = await post({
+        category: 'constraint',
+        title: 'Scoped',
+        content: 'Content',
+        scope: 'task',
+        expiresAt,
+      });
+
+      expect(res.status).toBe(201);
+      expect(mocks.createPolicy).toHaveBeenCalledWith(
+        expect.anything(),
+        'project-1',
+        'constraint',
+        'Scoped',
+        'Content',
+        'explicit',
+        null,
+        expect.any(Number),
+        'task',
+        expiresAt
+      );
+    });
+
+    it('validates an update against the merged post-write state, not the patch alone', async () => {
+      mocks.getPolicy.mockResolvedValueOnce({
+        id: 'policy-1',
+        scope: 'task',
+        expiresAt: Date.now() + 60_000,
+      });
+
+      const res = await patch('policy-1', { expiresAt: null });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { message: string };
+      expect(body.message).toMatch(/task-scoped policy must set expiresAt/);
+      expect(mocks.updatePolicy).not.toHaveBeenCalled();
+    });
+
+    it('allows clearing the expiry when the scope is widened in the same update', async () => {
+      mocks.getPolicy.mockResolvedValueOnce({
+        id: 'policy-1',
+        scope: 'task',
+        expiresAt: Date.now() + 60_000,
+      });
+      mocks.updatePolicy.mockResolvedValueOnce(true);
+
+      const res = await patch('policy-1', { scope: 'always', expiresAt: null });
+
+      expect(res.status).toBe(200);
+      expect(mocks.updatePolicy).toHaveBeenCalledWith(
+        expect.anything(),
+        'project-1',
+        'policy-1',
+        expect.objectContaining({ scope: 'always', expiresAt: null })
+      );
+    });
+
+    it('does not read the stored policy when the update touches no lifecycle field', async () => {
+      // Guards the I/O budget (rule 60): the extra read exists only to merge scope and
+      // expiry, so an ordinary title/active edit must not pay for it.
+      mocks.updatePolicy.mockResolvedValueOnce(true);
+
+      const res = await patch('policy-1', { active: false });
+
+      expect(res.status).toBe(200);
+      expect(mocks.getPolicy).not.toHaveBeenCalled();
     });
   });
 });

@@ -23,6 +23,16 @@ function clampConfidence(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
+/**
+ * An expired policy is still stored and still `active`, it has simply stopped
+ * being injected into agent sessions. Surfacing that here is the whole point of
+ * showing expiry in the UI: without it a human sees a policy that looks live but
+ * no longer reaches any agent.
+ */
+function isExpired(policy: ProjectPolicy, now: number): boolean {
+  return policy.expiresAt !== null && policy.expiresAt <= now;
+}
+
 
 function IconButton({ label, children, className = '', onClick }: { label: string; children: ReactNode; className?: string; onClick: () => void }) {
   return (
@@ -187,6 +197,9 @@ function PolicyCard({ policy, projectId, onRefresh }: { policy: ProjectPolicy; p
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Read the clock once per render rather than per usage, so the badge and the
+  // footer label can never disagree about whether this policy has lapsed.
+  const expired = isExpired(policy, Date.now());
 
   const handleSaved = async () => {
     setEditing(false);
@@ -224,6 +237,12 @@ function PolicyCard({ policy, projectId, onRefresh }: { policy: ProjectPolicy; p
                   }>
                     {policy.active ? 'active' : 'inactive'}
                   </Badge>
+                  {policy.scope === 'task' && (
+                    <Badge className="border-info/30 bg-info-tint text-info-fg">task-scoped</Badge>
+                  )}
+                  {expired && (
+                    <Badge className="border-warning/30 bg-warning-tint text-warning-fg">expired</Badge>
+                  )}
                 </div>
                 <h3 className="m-0 mt-2.5 text-sm font-medium leading-relaxed text-fg-primary break-words">{policy.title}</h3>
                 <p className="m-0 mt-1.5 text-[13px] leading-relaxed text-fg-muted break-words">{policy.content}</p>
@@ -240,7 +259,15 @@ function PolicyCard({ policy, projectId, onRefresh }: { policy: ProjectPolicy; p
               </div>
             </div>
             <div className="mt-3 flex flex-col gap-1.5 border-t border-[color-mix(in_srgb,var(--sam-form-border)_80%,transparent)] pt-3 text-xs text-fg-muted sm:flex-row sm:items-center sm:justify-between">
-              <span className="min-w-0 break-words">Source: {policy.source}</span>
+              <span className="min-w-0 break-words">
+                Source: {policy.source}
+                {policy.expiresAt !== null && (
+                  <span className={expired ? 'text-warning-fg' : undefined}>
+                    {' · '}
+                    {expired ? 'Expired' : 'Expires'} {formatDate(policy.expiresAt)}
+                  </span>
+                )}
+              </span>
               <span className="shrink-0 text-accent/70">Updated {formatDate(policy.updatedAt)}</span>
             </div>
           </>
