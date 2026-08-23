@@ -738,6 +738,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   POLICY_LIST_PAGE_SIZE?: string; // Default policy list page size (default: 50)
   POLICY_LIST_MAX_PAGE_SIZE?: string; // Max policy list page size (default: 200)
   POLICY_DEFAULT_CONFIDENCE?: string; // Default policy confidence (default: 0.8)
+  POLICY_MAX_EXPIRY_MS?: string; // Max horizon for a policy expiry (default: 365 days)
   // Text-to-speech (Workers AI)
   TTS_MODEL?: string;
   TTS_SPEAKER?: string;

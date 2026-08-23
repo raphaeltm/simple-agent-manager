@@ -54,7 +54,7 @@ function makeObservation(overrides: Partial<{ id: string; entityId: string; cont
   };
 }
 
-function makePolicy(overrides: Partial<{ id: string; category: string; title: string; content: string; active: boolean; confidence: number; source: string }> = {}) {
+function makePolicy(overrides: Partial<{ id: string; category: string; title: string; content: string; active: boolean; confidence: number; source: string; scope: string; expiresAt: number | null }> = {}) {
   return {
     id: overrides.id ?? 'pol-1',
     category: overrides.category ?? 'rule',
@@ -64,6 +64,8 @@ function makePolicy(overrides: Partial<{ id: string; category: string; title: st
     confidence: overrides.confidence ?? 0.9,
     source: overrides.source ?? 'explicit',
     sourceSessionId: null,
+    scope: overrides.scope ?? 'always',
+    expiresAt: overrides.expiresAt ?? null,
     createdAt: Date.now() - 86400000,
     updatedAt: Date.now(),
   };
@@ -101,6 +103,41 @@ const NORMAL_POLICIES = [
   makePolicy({ id: 'p1', category: 'rule', title: 'Always run tests' }),
   makePolicy({ id: 'p2', category: 'constraint', title: 'No hardcoded URLs', active: true, confidence: 0.95 }),
   makePolicy({ id: 'p3', category: 'preference', title: 'Prefer concise code', active: false, confidence: 0.7 }),
+];
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Lifecycle states a policy card has to render: a standing policy, a live
+ * task-scoped one, an expired one, and a long-titled task-scoped one (the badge
+ * row grows by two badges, so it is the case most likely to overflow at 375px).
+ */
+const LIFECYCLE_POLICIES = [
+  makePolicy({ id: 'pl1', category: 'rule', title: 'Standing policy with no expiry' }),
+  makePolicy({
+    id: 'pl2',
+    category: 'constraint',
+    title: 'Use Codex 5.5 High Chat VMs for the reliability workflow',
+    content: 'Applies to the 2026-08-21 workstream only.',
+    scope: 'task',
+    expiresAt: Date.now() + 7 * DAY_MS,
+  }),
+  makePolicy({
+    id: 'pl3',
+    category: 'delegation',
+    title: 'Commenting delivery root is coordination-only',
+    content: 'This policy lapsed and no longer reaches any agent session.',
+    scope: 'task',
+    expiresAt: Date.now() - 3 * DAY_MS,
+  }),
+  makePolicy({
+    id: 'pl4',
+    category: 'preference',
+    title: 'A'.repeat(200),
+    content: 'B'.repeat(500),
+    scope: 'task',
+    expiresAt: Date.now() + 30 * DAY_MS,
+  }),
 ];
 
 const NORMAL_OBSERVATIONS = [
@@ -263,6 +300,31 @@ test.describe('Agent Context — Mobile', () => {
     await assertNoOverflow(page);
   });
 
+  test('policies tab distinguishes expired, task-scoped, and standing policies', async ({ page }) => {
+    await setupMocks(page, { policies: LIFECYCLE_POLICIES });
+    await page.goto('/projects/proj-1/agent-context');
+    await page.click('button:has-text("Policies")');
+
+    // An expired policy is still `active` in storage, so without the expiry label a
+    // human cannot tell it has stopped reaching agents. That is the whole point.
+    await expect(page.getByText('Commenting delivery root is coordination-only')).toBeVisible();
+    await expect(page.getByText('expired', { exact: true })).toBeVisible();
+    await expect(page.getByText(/Expired /)).toBeVisible();
+
+    // A live task-scoped policy shows its shelf life but is NOT marked expired.
+    await expect(page.getByText('task-scoped').first()).toBeVisible();
+    await expect(page.getByText(/Expires /).first()).toBeVisible();
+
+    // The standing policy carries neither annotation — the control that keeps the
+    // labels off the policies that genuinely are permanent.
+    const standingCard = page.locator('article').filter({ hasText: 'Standing policy with no expiry' });
+    await expect(standingCard.getByText('task-scoped')).toHaveCount(0);
+    await expect(standingCard.getByText(/Expires |Expired /)).toHaveCount(0);
+
+    await screenshot(page, 'agent-context-policy-lifecycle-mobile');
+    await assertNoOverflow(page);
+  });
+
 
   test('management actions submit mutation requests', async ({ page }) => {
     const requests: CapturedRequest[] = [];
@@ -386,6 +448,18 @@ test.describe('Agent Context — Desktop', () => {
     await page.goto('/projects/proj-1/agent-context');
     await page.click('button:has-text("Policies")');
     await screenshot(page, 'agent-context-policies-desktop');
+    await assertNoOverflow(page);
+  });
+
+  test('policies tab lifecycle states including a 200-char task-scoped title', async ({ page }) => {
+    await setupMocks(page, { policies: LIFECYCLE_POLICIES });
+    await page.goto('/projects/proj-1/agent-context');
+    await page.click('button:has-text("Policies")');
+
+    await expect(page.getByText('expired', { exact: true })).toBeVisible();
+    await expect(page.getByText('task-scoped').first()).toBeVisible();
+
+    await screenshot(page, 'agent-context-policy-lifecycle-desktop');
     await assertNoOverflow(page);
   });
 });

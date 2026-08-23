@@ -125,56 +125,67 @@ New configurable limit (Principle XI): `POLICY_MAX_EXPIRY_MS` / `DEFAULT_POLICY_
 ## Implementation checklist
 
 ### Shared types & constants
-- [ ] `packages/shared/src/types/policy.ts`: add `POLICY_SCOPES = ['always','task']`, `PolicyScope`,
-      `isPolicyScope`; add `scope` + `expiresAt` to `ProjectPolicy`, `CreatePolicyRequest`,
+- [x] `packages/shared/src/types/policy.ts`: `POLICY_SCOPES = ['always','task']`, `PolicyScope`,
+      `isPolicyScope`; `scope` + `expiresAt` on `ProjectPolicy`, `CreatePolicyRequest`,
       `UpdatePolicyRequest`
-- [ ] `packages/shared/src/constants/policies.ts`: add `DEFAULT_POLICY_MAX_EXPIRY_MS`, thread
-      `maxExpiryMs` through `PolicyLimits` / `resolvePolicyLimits`
-- [ ] Single shared write-boundary validator `validatePolicyLifecycle({ scope, expiresAt, now,
+- [x] `packages/shared/src/constants/policies.ts`: `DEFAULT_POLICY_MAX_EXPIRY_MS`, `maxExpiryMs`
+      threaded through `PolicyLimits` / `resolvePolicyLimits`
+- [x] Single shared write-boundary validator `validatePolicyLifecycle({ scope, expiresAt, now,
       maxExpiryMs })` used by **both** MCP and REST (rule 24 — one implementation per operation)
-- [ ] Export the new symbols from `packages/shared/src/types/index.ts` / `constants/index.ts`
+- [x] New symbols exported from `types/index.ts` / `constants/index.ts`
 
 ### Durable Object
-- [ ] Migration `034-policy-lifecycle-controls`: two `ALTER TABLE ... ADD COLUMN` statements. No
+- [x] Migration `034-policy-lifecycle-controls`: two `ALTER TABLE ... ADD COLUMN` statements. No
       table recreation, no `DROP` (rules 31/63 — DO SQLite has no time-travel recovery)
-- [ ] `row-schemas/policies.ts`: parse `expires_at` (nullable number) and `scope`, expose as
-      `expiresAt` / `scope`
-- [ ] `policies.ts:createPolicy` — accept + persist `expiresAt`/`scope`; cap COUNT excludes expired
-- [ ] `policies.ts:updatePolicy` — accept `expiresAt`/`scope`; use an explicit `!== undefined` check
-      so `null` **clears** an expiry (the `?? existing` idiom cannot express "clear")
-- [ ] `policies.ts:getActivePolicies` — add `(expires_at IS NULL OR expires_at > ?)`
-- [ ] `project-data/index.ts` — thread the new params through the DO RPC methods
+- [x] `row-schemas/policies.ts`: parses `expires_at` / `scope`, exposed as `expiresAt` / `scope`,
+      tolerant of absence so a stale-schema row degrades to the defaults rather than throwing (rule 50)
+- [x] `policies.ts:createPolicy` — persists `expiresAt`/`scope`; cap COUNT excludes expired
+- [x] `policies.ts:updatePolicy` — explicit `!== undefined` check so `null` **clears** an expiry
+      (the `?? existing` idiom cannot express "clear")
+- [x] `policies.ts:getActivePolicies` — `(expires_at IS NULL OR expires_at > ?)` at read time
+- [x] `project-data/index.ts` — new params threaded through the DO RPC methods
+- [x] DO-level guard on the scope/expiry invariant in both `createPolicy` and `updatePolicy` — the
+      choke point a future third writer cannot bypass (rules 44/51)
 
 ### API surface
-- [ ] `services/project-data-policies.ts` — thread through
-- [ ] MCP `tool-definitions-policy-tools.ts` — add `scope`/`expiresAt` to `add_policy` and
-      `update_policy`, with descriptions that tell an agent when to use them
-- [ ] MCP `policy-tools.ts` — validate via the shared helper; return `scope`/`expiresAt`
-- [ ] REST `routes/policies.ts` + `schemas/policies.ts` — same fields, same shared validator
-- [ ] `instruction-tools.ts` — annotate expiring policies in `formatPolicyDirectives`; extend the
-      capture instruction in `buildPolicyInstructions` so future agents set `scope: 'task'` +
-      `expiresAt` for one-shot constraints. **Must not reintroduce `policyContext`** (R1)
+- [x] `services/project-data-policies.ts` — threaded through
+- [x] MCP `tool-definitions-policy-tools.ts` — `scope`/`expiresAt` on `add_policy` and
+      `update_policy`, with descriptions telling an agent when to use them
+- [x] MCP `policy-tools.ts` — validates via the shared helper; returns `scope`/`expiresAt`
+- [x] REST `routes/policies.ts` + `schemas/policies.ts` — same fields, same shared validator
+- [x] `instruction-tools.ts` — annotates expiring policies in `formatPolicyDirectives`; extends the
+      capture instruction in `buildPolicyInstructions`. **Did not reintroduce `policyContext`** (R1):
+      the diff is confined to the two formatting functions plus two fields on the existing entry map
 
 ### Web UI
-- [ ] `PoliciesTab.tsx` — surface expiry/scope so a human can see which policies are temporary and
-      which have already expired
-- [ ] Playwright visual audit, mobile 375 + desktop 1280, with overflow assertions (rule 17)
+- [x] `PoliciesTab.tsx` — `task-scoped` / `expired` badges and an Expires/Expired footer label.
+      Display-only; editing an expiry goes through MCP/REST, and adding a date-picker would be an
+      unrelated form change
+- [x] Playwright visual audit, mobile 375 + desktop 1280, with overflow assertions (rule 17)
 
 ### Tests
-- [ ] `tests/workers/policy-do.test.ts` (real SQLite): expired excluded from `getActivePolicies`;
-      unexpired included; **null-expiry unchanged**; expired still visible via `getPolicy` and
-      `listPolicies`; cap COUNT excludes expired; `expiresAt` round-trips and can be cleared;
-      pre-existing rows migrate to `scope='always'` / `expires_at=NULL`
-- [ ] **Prove discriminating**: delete the expiry conjunct, confirm exactly the expiry tests go red
-      and the null-expiry control stays green, then restore
-- [ ] Unit tests for `validatePolicyLifecycle` (task-scope-without-expiry rejected, past expiry
-      rejected, beyond-max-horizon rejected, always-scope-without-expiry accepted)
-- [ ] MCP tool tests: schema advertises the fields; handler rejects `scope:'task'` with no expiry
-- [ ] REST route tests for the same
+- [x] `tests/workers/policy-do.test.ts` (real DO SQLite, real migration chain): expired excluded
+      from `getActivePolicies`; unexpired included; **null-expiry unchanged**; expired still visible
+      via `getPolicy` and `listPolicies`; cap COUNT excludes expired; `expiresAt` round-trips and
+      can be cleared; pre-lifecycle rows default to `scope='always'` / `expires_at=NULL`
+- [x] **Proved discriminating** (2026-08-23): with the expiry conjunct replaced by a tautology,
+      exactly 2 tests went red ("excludes an expired policy…", "excludes expired policies from the
+      per-project cap") and all 15 others — including the null-expiry control — stayed green.
+      Conjunct restored, re-verified 17/17.
+- [x] Unit tests for `validatePolicyLifecycle`: task-scope-without-expiry, past expiry, exact-now
+      boundary, beyond-horizon, caller-supplied horizon, non-finite, fractional, unknown scope
+- [x] MCP tool tests: schema advertises the fields; handler rejects `scope:'task'` with no expiry;
+      update validated against the merged post-write state
+- [x] REST route tests for the same, plus an I/O-budget test proving the extra read only happens
+      when the update actually touches a lifecycle field
+- [x] `get_instructions` tests asserting the annotation reaches the rendered directives, with a
+      control proving standing policies stay unannotated
 
 ### Docs
-- [ ] Update policy documentation under `apps/www/src/content/docs/docs/` if it describes the fields
-- [ ] Add `POLICY_MAX_EXPIRY_MS` to `apps/api/.env.example`
+- [x] Checked `apps/www/src/content/docs/docs/` — no public doc describes the policy field set, so
+      there is no stale behavioral claim to correct
+- [x] Registered `POLICY_MAX_EXPIRY_MS` in `apps/api/src/env.ts`, the canonical registry the other
+      five `POLICY_*` vars live in (none of them appear in `.env.example`)
 
 ## Part 2 — production data cleanup (AFTER merge + production deploy)
 
