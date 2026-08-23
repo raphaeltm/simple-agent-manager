@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   projectData: {
     getSession: vi.fn(),
     getAllHighConfidenceKnowledge: vi.fn(),
+    getKnowledgeEntityIndex: vi.fn(),
     getActivePolicies: vi.fn(),
   },
 }));
@@ -107,6 +108,18 @@ const OBSERVATIONS = [
   { entityName: 'User', entityType: 'preference', content: OBSERVATION_B, confidence: 0.9 },
 ];
 
+// R3 added the knowledge entity index as a third concurrent read. These fixtures give it
+// its real shape ({ entries, totalEntities }) so the de-duplication assertions below run
+// against a production-shaped payload rather than a degraded one.
+const ENTITY_INDEX = {
+  entries: [
+    { name: 'Architecture', entityType: 'context', observationCount: 1 },
+    { name: 'User', entityType: 'preference', observationCount: 1 },
+  ],
+  totalEntities: 2,
+};
+const EMPTY_ENTITY_INDEX = { entries: [], totalEntities: 0 };
+
 function makeEnv() {
   return {
     DATABASE: {},
@@ -159,6 +172,7 @@ describe('get_instructions payload de-duplication (R1)', () => {
     mocks.drizzle.mockReturnValue(makeMockDb());
     mocks.projectData.getSession.mockResolvedValue(null);
     mocks.projectData.getAllHighConfidenceKnowledge.mockResolvedValue(OBSERVATIONS);
+    mocks.projectData.getKnowledgeEntityIndex.mockResolvedValue(ENTITY_INDEX);
     mocks.projectData.getActivePolicies.mockResolvedValue(POLICIES);
   });
 
@@ -229,6 +243,7 @@ describe('policy management identifiers survive de-duplication', () => {
     mocks.drizzle.mockReturnValue(makeMockDb());
     mocks.projectData.getSession.mockResolvedValue(null);
     mocks.projectData.getAllHighConfidenceKnowledge.mockResolvedValue(OBSERVATIONS);
+    mocks.projectData.getKnowledgeEntityIndex.mockResolvedValue(ENTITY_INDEX);
     mocks.projectData.getActivePolicies.mockResolvedValue(POLICIES);
   });
 
@@ -291,6 +306,7 @@ describe('empty knowledge and policy paths still degrade correctly', () => {
 
   it('omits both directive fields when there is nothing to render', async () => {
     mocks.projectData.getAllHighConfidenceKnowledge.mockResolvedValue([]);
+    mocks.projectData.getKnowledgeEntityIndex.mockResolvedValue(EMPTY_ENTITY_INDEX);
     mocks.projectData.getActivePolicies.mockResolvedValue([]);
 
     const { parsed } = await getPayload();
@@ -375,6 +391,7 @@ describe('multi-observation entities keep every observation exactly once', () =>
     mocks.drizzle.mockReturnValue(makeMockDb());
     mocks.projectData.getSession.mockResolvedValue(null);
     mocks.projectData.getAllHighConfidenceKnowledge.mockResolvedValue(SAME_ENTITY_OBS);
+    mocks.projectData.getKnowledgeEntityIndex.mockResolvedValue(ENTITY_INDEX);
     mocks.projectData.getActivePolicies.mockResolvedValue(POLICIES);
   });
 

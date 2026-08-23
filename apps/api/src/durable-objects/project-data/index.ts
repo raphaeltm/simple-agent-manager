@@ -1357,8 +1357,16 @@ export class ProjectData extends DurableObject<Env> {
     return knowledge.getRelevantKnowledge(this.sql, context, limit);
   }
 
-  async getAllHighConfidenceKnowledge(minConfidence: number, limit: number) {
-    return knowledge.getAllHighConfidenceKnowledge(this.sql, minConfidence, limit);
+  async getAllHighConfidenceKnowledge(
+    minConfidence: number,
+    limit: number,
+    perEntityLimit?: number
+  ) {
+    return knowledge.getAllHighConfidenceKnowledge(this.sql, minConfidence, limit, perEntityLimit);
+  }
+
+  async getKnowledgeEntityIndex(limit?: number) {
+    return knowledge.getKnowledgeEntityIndex(this.sql, limit);
   }
 
   async createKnowledgeRelation(

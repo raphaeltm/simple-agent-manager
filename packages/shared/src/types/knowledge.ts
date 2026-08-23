@@ -124,6 +124,12 @@ export const KNOWLEDGE_DEFAULTS = {
   autoRetrieveLimit: 20,
   autoRetrieveMinConfidence: 0.8,
   autoRetrieveHighConfidenceLimit: 50,
+  // Max observations any single entity may contribute to session-start injection.
+  // Without this, one grab-bag entity consumes nearly every slot (production: 46/50).
+  autoRetrievePerEntityLimit: 8,
+  // Max entities listed in the injected entity index. The index is a compact
+  // discovery aid (name + count), so this bounds it to roughly 1k tokens.
+  entityIndexLimit: 200,
   observationMaxLength: 1000,
   entityNameMaxLength: 200,
   descriptionMaxLength: 2000,

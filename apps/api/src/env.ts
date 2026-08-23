@@ -698,6 +698,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   KNOWLEDGE_AUTO_RETRIEVE_LIMIT?: string; // Max auto-retrieved observations on session start (default: 20)
   KNOWLEDGE_AUTO_RETRIEVE_MIN_CONFIDENCE?: string; // Min confidence for auto-retrieved observations (default: 0.8)
   KNOWLEDGE_AUTO_RETRIEVE_HIGH_CONFIDENCE_LIMIT?: string; // Max high-confidence observations to retrieve (default: 50)
+  KNOWLEDGE_AUTO_RETRIEVE_PER_ENTITY_LIMIT?: string; // Max injected observations from any one entity (default: 8)
+  KNOWLEDGE_ENTITY_INDEX_LIMIT?: string; // Max entities listed in the injected knowledge index (default: 200)
   KNOWLEDGE_OBSERVATION_MAX_LENGTH?: string; // Max observation text length (default: 1000)
   KNOWLEDGE_ENTITY_NAME_MAX_LENGTH?: string; // Max entity name length (default: 200)
   KNOWLEDGE_DESCRIPTION_MAX_LENGTH?: string; // Max entity description length (default: 2000)

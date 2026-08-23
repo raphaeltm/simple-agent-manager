@@ -1121,10 +1121,16 @@ export async function getAllHighConfidenceKnowledge(
   env: Env,
   projectId: string,
   minConfidence: number,
-  limit: number
+  limit: number,
+  perEntityLimit?: number
 ) {
   const stub = await getStub(env, projectId);
-  return stub.getAllHighConfidenceKnowledge(minConfidence, limit);
+  return stub.getAllHighConfidenceKnowledge(minConfidence, limit, perEntityLimit);
+}
+
+export async function getKnowledgeEntityIndex(env: Env, projectId: string, limit?: number) {
+  const stub = await getStub(env, projectId);
+  return stub.getKnowledgeEntityIndex(limit);
 }
 
 export async function createKnowledgeRelation(
