@@ -439,13 +439,13 @@ export function getAllHighConfidenceKnowledge(
        SELECT scored.*,
               ROW_NUMBER() OVER (
                 PARTITION BY entity_id
-                ORDER BY relevance_score DESC, last_confirmed_at DESC
+                ORDER BY relevance_score DESC, last_confirmed_at DESC, id ASC
               ) AS entity_rank
        FROM scored
      )
      SELECT * FROM ranked
      WHERE entity_rank <= ?
-     ORDER BY relevance_score DESC, last_confirmed_at DESC
+     ORDER BY relevance_score DESC, last_confirmed_at DESC, id ASC
      LIMIT ?`,
     now, RELEVANCE_RECENCY_SCALE_MS, minConfidence, perEntityLimit, limit,
   ).toArray();
