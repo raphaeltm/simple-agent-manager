@@ -1158,9 +1158,13 @@ export const MIGRATIONS: Migration[] = [
       // Policy lifecycle controls — give policies a shelf life and a scope so
       // one-shot workflow policies stop being injected into every session forever.
       //
-      // STRICTLY ADDITIVE (rules 31 / 63): two `ALTER TABLE ADD COLUMN`s, no table
-      // recreation, no DROP. A Durable Object has no D1-style time-travel recovery,
-      // so a drop-and-restore here would be unrecoverable.
+      // STRICTLY ADDITIVE (rules 31 / 63): two ALTER TABLE ADD COLUMN statements, no
+      // table recreation, no DROP. A Durable Object has no D1-style time-travel
+      // recovery, so a drop-and-restore here would be unrecoverable.
+      //
+      // Do not put backtick-quoted SQL fragments in these comments: the migration
+      // safety test extracts every backtick literal in this file and validates it as
+      // a statement, so inline-code prose is checked as if it were real SQL.
       //
       // Both defaults reproduce the pre-migration behavior exactly, so every policy
       // that already exists keeps applying unchanged:

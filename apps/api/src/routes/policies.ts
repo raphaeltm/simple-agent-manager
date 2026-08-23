@@ -19,7 +19,7 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
-import { errors } from '../middleware/error';
+import { AppError, errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import { CreatePolicySchema, jsonValidator, UpdatePolicySchema } from '../schemas';
 import * as projectDataService from '../services/project-data';
@@ -247,7 +247,19 @@ policyRoutes.patch('/:policyId', jsonValidator(UpdatePolicySchema), async (c) =>
     if (lifecycleError) throw errors.badRequest(lifecycleError);
   }
 
-  const updated = await projectDataService.updatePolicy(c.env, projectId, policyId, updates);
+  // The DO re-validates the scope/expiry invariant against freshly-read state at write
+  // time, so a concurrent PATCH landing between the pre-check above and this write can
+  // still make it throw. That error crosses the RPC boundary as a plain Error with only
+  // name and message (rule 63), so map it by message — an `instanceof` check would miss
+  // it and `app.onError` would return an opaque 500 for what is really a 400-class
+  // conflict, and would additionally persist it to /admin/errors as an INTERNAL_ERROR.
+  let updated: boolean;
+  try {
+    updated = await projectDataService.updatePolicy(c.env, projectId, policyId, updates);
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    throw errors.badRequest(err instanceof Error ? err.message : String(err));
+  }
   if (!updated) throw errors.notFound('Policy not found');
 
   return c.json({ updated: true, policyId });
