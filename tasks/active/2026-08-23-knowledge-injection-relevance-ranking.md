@@ -78,28 +78,28 @@ Its only R1-overlapping file is `instruction-tools.ts`; that one is hand-merged.
 
 ## Implementation checklist
 
-- [ ] Rebase/apply prior work onto post-R1 `origin/main`, file by file, reviewing each
-- [ ] `packages/shared/src/types/knowledge.ts`: add `autoRetrievePerEntityLimit: 8` and
+- [x] Rebase/apply prior work onto post-R1 `origin/main`, file by file, reviewing each
+- [x] `packages/shared/src/types/knowledge.ts`: add `autoRetrievePerEntityLimit: 8` and
       `entityIndexLimit: 200` to `KNOWLEDGE_DEFAULTS`
-- [ ] `knowledge.ts`: extract `RELEVANCE_RECENCY_SCALE_MS` + `computeRelevanceScore` as the
+- [x] `knowledge.ts`: extract `RELEVANCE_RECENCY_SCALE_MS` + `computeRelevanceScore` as the
       canonical JS definition; use it in `getRelevantKnowledge`
-- [ ] `knowledge.ts`: rewrite `getAllHighConfidenceKnowledge` — scored ranking + per-entity
+- [x] `knowledge.ts`: rewrite `getAllHighConfidenceKnowledge` — scored ranking + per-entity
       cap via `ROW_NUMBER() OVER (PARTITION BY entity_id)`; per-row fault isolation (rule 50)
-- [ ] `knowledge.ts`: add `getKnowledgeEntityIndex` returning `{ entries, totalEntities }`
+- [x] `knowledge.ts`: add `getKnowledgeEntityIndex` returning `{ entries, totalEntities }`
       so a truncated index can never be labelled "full"
-- [ ] `durable-objects/project-data/index.ts`: thread `perEntityLimit`; add index RPC
-- [ ] `services/project-data.ts`: mirror both signatures
-- [ ] `row-schemas/knowledge.ts`: `parseKnowledgeEntityIndexRow` + barrel export
-- [ ] `instruction-tools.ts` (**hand-merge with R1**): pass the per-entity limit; fetch the
+- [x] `durable-objects/project-data/index.ts`: thread `perEntityLimit`; add index RPC
+- [x] `services/project-data.ts`: mirror both signatures
+- [x] `row-schemas/knowledge.ts`: `parseKnowledgeEntityIndexRow` + barrel export
+- [x] `instruction-tools.ts` (**hand-merge with R1**): pass the per-entity limit; fetch the
       index; append a compact index section to `knowledgeDirectives`; do NOT reintroduce
       `knowledgeContext`/`policyContext` in the emitted response
-- [ ] `instruction-tools.ts`: update `buildKnowledgeInstructions` strings so the injected set
+- [x] `instruction-tools.ts`: update `buildKnowledgeInstructions` strings so the injected set
       is described as ranked + capped + partial, and point at the index
-- [ ] `apps/api/src/env.ts`: document the two new env vars inline
-- [ ] `.claude/rules/65-capped-selection-must-rank-and-disclose.md`: process fix (rule 02
+- [x] `apps/api/src/env.ts`: document the two new env vars inline
+- [x] `.claude/rules/65-capped-selection-must-rank-and-disclose.md`: process fix (rule 02
       requires a process fix in the same PR as a bug fix)
-- [ ] Tests in `apps/api/tests/workers/` against **real** DO SQLite
-- [ ] Independently re-verify the ranking test fails against the pre-fix `ORDER BY e.name`
+- [x] Tests in `apps/api/tests/workers/` against **real** DO SQLite
+- [x] Independently re-verify the ranking test fails against the pre-fix `ORDER BY e.name`
 
 ## Test plan (discriminating — rules 28, 62)
 
@@ -124,14 +124,14 @@ re-implementing the SQL in the test):
 
 ## Acceptance criteria
 
-- [ ] Injection order is relevance-ranked, not alphabetical; formula documented in-code
-- [ ] No single entity can consume more than the configured per-entity cap
-- [ ] Every active entity appears in the injected index, with an observation count
-- [ ] Index lead-in tells the agent how to retrieve what was not injected in full
-- [ ] Both new limits are env-configurable with `DEFAULT_*`-style constants (Principle XI)
-- [ ] Ranking test independently proven to fail against the pre-fix ordering
-- [ ] Compatible with R1's deduplicated response shape (no reintroduced arrays)
-- [ ] Staging: a real `get_instructions` shows ranked selection + full index
+- [x] Injection order is relevance-ranked, not alphabetical; formula documented in-code
+- [x] No single entity can consume more than the configured per-entity cap
+- [x] Every active entity appears in the injected index, with an observation count
+- [x] Index lead-in tells the agent how to retrieve what was not injected in full
+- [x] Both new limits are env-configurable with `DEFAULT_*`-style constants (Principle XI)
+- [x] Ranking test independently proven to fail against the pre-fix ordering
+- [x] Compatible with R1's deduplicated response shape (no reintroduced arrays)
+- [x] Staging: a real `get_instructions` shows ranked selection + full index
 
 ## Out of scope
 
@@ -147,3 +147,31 @@ re-implementing the SQL in the test):
 - `.claude/rules/24`, `.claude/rules/59` — one implementation per operation
 - `.claude/rules/03` / Constitution Principle XI — no hardcoded limits
 - `.claude/rules/02` — bug fixes ship with a process fix
+
+## Verification evidence (attempt 3)
+
+Discrimination proofs re-run independently rather than trusted from the prior agent
+(rule 62). Each guard was removed, the suite run, then restored:
+
+| Guard removed | Tests that went red |
+|---|---|
+| Ranking → restored `ORDER BY entity_name, last_confirmed_at DESC` | 5 — incl. *injects a recent late-alphabet entity that alphabetical ordering starved*, *ranks by confidence and recency…*, *decays continuously within the first 30 days*, *orders exactly as the canonical JS relevance formula*, *keeps the globally highest-scoring rows when the outer limit truncates* |
+| Per-entity cap → `entity_rank <= 999999` | 3 — *caps how many observations any single entity contributes*, *keeps the globally highest-scoring rows…*, *applies DO-side defaults when the optional limits are omitted over RPC* |
+| Truncation-honesty fix in `buildKnowledgeInstructions` | 1 — *never tells the agent the index is complete when it is truncated* |
+
+All 14 `tests/workers/knowledge-injection-ranking.test.ts` cases pass against real DO
+SQLite; 13 `tests/unit/routes/mcp-instruction-context.test.ts` cases pass.
+
+**Note on the inherited "tests passing" claim**: the workers suite initially failed to
+*load* (`Failed to resolve entry for package "@simple-agent-manager/providers"`) because
+the build-order prerequisites were not built — reporting `no tests` rather than a failure.
+This is the rule-02 "a green test count is not a green suite" trap; the suite only became
+meaningful after `shared` → `providers` → `cloud-init` were built.
+
+### Defect found and fixed during review
+
+`buildKnowledgeInstructions` unconditionally told the agent the payload carried a
+"Full knowledge index" that "lists every entity". When >`entityIndexLimit` entities exist
+the index truncates and both claims are false — the rule-65 defect (a capped selection
+described as complete) reintroduced one layer up, in prose. Fixed in `c927eed56`.
+
