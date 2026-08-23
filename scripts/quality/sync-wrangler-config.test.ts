@@ -46,6 +46,27 @@ afterEach(() => {
 });
 
 describe('sync wrangler config', () => {
+  it('passes deployment image-resolution limits into generated deployments', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('DEPLOYMENT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS', '1000');
+    vi.stubEnv('DEPLOYMENT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS', '2000');
+    vi.stubEnv('DEPLOYMENT_IMAGE_RESOLVE_MAX_FETCH_ATTEMPTS', '3');
+    vi.stubEnv('DEPLOYMENT_IMAGE_RESOLVE_MAX_REDIRECTS', '1');
+    vi.stubEnv('DEPLOYMENT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES', '4096');
+    vi.stubEnv('DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES', '2');
+    vi.stubEnv('DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES', '1');
+
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).toMatchObject({
+      DEPLOYMENT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS: '1000',
+      DEPLOYMENT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS: '2000',
+      DEPLOYMENT_IMAGE_RESOLVE_MAX_FETCH_ATTEMPTS: '3',
+      DEPLOYMENT_IMAGE_RESOLVE_MAX_REDIRECTS: '1',
+      DEPLOYMENT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES: '4096',
+      DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES: '2',
+      DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES: '1',
+    });
+  });
+
   it('propagates the top-level CPU limit into generated deployment environments', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 

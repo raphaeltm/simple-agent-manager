@@ -53,6 +53,17 @@ const DIRECT_SYNC_ENV_MAPPINGS = {
   BASE_DOMAIN: 'BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}',
   RESOURCE_PREFIX: 'RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}',
 } as const;
+
+const DEPLOYMENT_IMAGE_RESOLVE_ENV_VARS = [
+  'DEPLOYMENT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS',
+  'DEPLOYMENT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS',
+  'DEPLOYMENT_IMAGE_RESOLVE_MAX_FETCH_ATTEMPTS',
+  'DEPLOYMENT_IMAGE_RESOLVE_MAX_REDIRECTS',
+  'DEPLOYMENT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES',
+  'DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES',
+  'DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES',
+] as const;
+
 function stepRunScript(stepName: string): string {
   const block = stepBlock(stepName);
   const runIndex = block.indexOf('        run: |\n');
@@ -236,9 +247,7 @@ describe('deploy reusable workflow', () => {
 
     expect(initialSync).toContain('pnpm tsx scripts/deploy/sync-wrangler-config.ts');
     expect(initialSync).toContain('BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}');
-    expect(initialSync).toContain(
-      'RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}'
-    );
+    expect(initialSync).toContain('RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}');
     expect(initialSync).toContain(
       'VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}'
     );
@@ -438,6 +447,21 @@ describe('deploy reusable workflow', () => {
       'SETUP_SESSION_SWEEP_MAX_CANDIDATES: ${{ vars.SETUP_SESSION_SWEEP_MAX_CANDIDATES }}'
     );
     expect(sync).toContain('POOL_LEASE_BUFFER_MS: ${{ vars.POOL_LEASE_BUFFER_MS }}');
+  });
+
+  it('forwards deployment image-resolution limits into every wrangler config sync env', () => {
+    const optionalWorkerVars = extractOptionalWorkerEnvVars();
+    const syncBlocks = [
+      stepBlock('Sync Wrangler Config \\(API \\+ Tail Worker\\)'),
+      stepBlock('Re-sync Wrangler Config \\(add tail_consumers\\)'),
+    ];
+
+    for (const name of DEPLOYMENT_IMAGE_RESOLVE_ENV_VARS) {
+      expect(optionalWorkerVars).toContain(name);
+      for (const sync of syncBlocks) {
+        expect(sync).toContain(name + ': ${{ vars.' + name + ' }}');
+      }
+    }
   });
 
   it('versions the R2 vm-agent binaries with the same commit SHA as the container binary', () => {
