@@ -97,7 +97,20 @@ function makeEnv(overrides: Record<string, unknown> = {}): Record<string, unknow
  */
 function stubGlobalFetch(digest: string = FIXED_DIGEST) {
   const original = globalThis.fetch;
-  const fetchFn = vi.fn(async (_url: string, init?: RequestInit) => {
+  const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+    if (String(url).startsWith('https://cloudflare-dns.com/dns-query')) {
+      const recordType = new URL(String(url)).searchParams.get('type');
+      return new Response(
+        JSON.stringify({
+          Status: 0,
+          Answer:
+            recordType === 'A'
+              ? [{ name: 'ghcr.io', type: 1, data: '93.184.216.34' }]
+              : [],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/dns-json' } }
+      );
+    }
     const method = init?.method ?? 'GET';
     if (method === 'HEAD') {
       return new Response(null, {
@@ -127,7 +140,20 @@ function stubGlobalFetch(digest: string = FIXED_DIGEST) {
 
 function stubGlobalFetchError(status: number) {
   const original = globalThis.fetch;
-  const fetchFn = vi.fn(async () => {
+  const fetchFn = vi.fn(async (url: string) => {
+    if (String(url).startsWith('https://cloudflare-dns.com/dns-query')) {
+      const recordType = new URL(String(url)).searchParams.get('type');
+      return new Response(
+        JSON.stringify({
+          Status: 0,
+          Answer:
+            recordType === 'A'
+              ? [{ name: 'ghcr.io', type: 1, data: '93.184.216.34' }]
+              : [],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/dns-json' } }
+      );
+    }
     return new Response('Error', { status });
   });
   globalThis.fetch = fetchFn as typeof fetch;
@@ -160,7 +186,9 @@ describe('resolveManifestImageTags (release-path vertical slice)', () => {
 
       // Verify registry was called with correct URL
       expect(fetchFn).toHaveBeenCalled();
-      const callUrl = fetchFn.mock.calls[0]![0] as string;
+      const callUrl = fetchFn.mock.calls
+        .map((call) => call[0] as string)
+        .find((url) => url.includes('/v2/myorg/myapp/manifests/v2.1.0'));
       expect(callUrl).toContain('ghcr.io/v2/myorg/myapp/manifests/v2.1.0');
     } finally {
       restore();

@@ -15,6 +15,7 @@
 
 import type { ImageResolver } from '@simple-agent-manager/shared';
 
+import { createDohDnsLookup } from './image-resolver-network';
 import {
   authAppliesToRegistry,
   configFromOptions,
@@ -26,6 +27,12 @@ import {
   type ResolverRuntimeOptions,
 } from './image-resolver-outbound';
 
+export {
+  DEFAULT_IMAGE_RESOLVE_DNS_LOOKUP_TIMEOUT_MS,
+  DEFAULT_IMAGE_RESOLVE_DNS_RESPONSE_MAX_BYTES,
+  DEFAULT_IMAGE_RESOLVE_DOH_RESOLVER_URL,
+  DEFAULT_IMAGE_RESOLVE_MAX_DNS_LOOKUPS,
+} from './image-resolver-network';
 export {
   DEFAULT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES,
   DEFAULT_IMAGE_RESOLVE_MAX_FETCH_ATTEMPTS,
@@ -46,6 +53,11 @@ export interface RegistryAuth {
   password: string;
 }
 
+export type ImageResolverDnsLookupFn = (
+  hostname: string,
+  signal: AbortSignal
+) => Promise<string[]>;
+
 export interface ImageResolverOptions {
   /** Optional auth for private registries */
   auth?: RegistryAuth;
@@ -59,6 +71,8 @@ export interface ImageResolverOptions {
   authRegistryHost?: string;
   /** Custom fetch implementation (for testing) */
   fetchFn?: typeof fetch;
+  /** Custom DNS resolver implementation (for testing or controlled runtimes). */
+  dnsLookupFn?: ImageResolverDnsLookupFn;
   /** Per-request timeout in ms. Default: 10_000 */
   timeoutMs?: number;
   /** Aggregate resolver wall-clock budget in ms. */
@@ -71,6 +85,14 @@ export interface ImageResolverOptions {
   tokenResponseMaxBytes?: number;
   /** Maximum simultaneous outbound fetches for this resolver instance. */
   maxConcurrentFetches?: number;
+  /** Per-host DNS preflight timeout in ms. */
+  dnsLookupTimeoutMs?: number;
+  /** Maximum DNS preflight lookups across this resolver instance. */
+  maxDnsLookups?: number;
+  /** Maximum DNS-over-HTTPS JSON response body size in bytes. */
+  dnsResponseMaxBytes?: number;
+  /** DNS-over-HTTPS resolver URL used by the default DNS lookup function. */
+  dohResolverUrl?: string;
 }
 
 export interface ImageResolverConfig {
@@ -81,6 +103,10 @@ export interface ImageResolverConfig {
   tokenResponseMaxBytes: number;
   maxConcurrentFetches: number;
   maxServices: number;
+  dnsLookupTimeoutMs: number;
+  maxDnsLookups: number;
+  dnsResponseMaxBytes: number;
+  dohResolverUrl: string;
 }
 
 export interface ImageResolverEnv {
@@ -91,6 +117,10 @@ export interface ImageResolverEnv {
   DEPLOYMENT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES?: string;
   DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES?: string;
   DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES?: string;
+  DEPLOYMENT_IMAGE_RESOLVE_DNS_LOOKUP_TIMEOUT_MS?: string;
+  DEPLOYMENT_IMAGE_RESOLVE_MAX_DNS_LOOKUPS?: string;
+  DEPLOYMENT_IMAGE_RESOLVE_DNS_RESPONSE_MAX_BYTES?: string;
+  DEPLOYMENT_IMAGE_RESOLVE_DOH_RESOLVER_URL?: string;
 }
 
 export class ImageResolveError extends Error {
@@ -297,12 +327,14 @@ async function resolveViaGet(
  * @returns An ImageResolver that queries the OCI registry manifest API
  */
 export function createImageResolver(opts: ImageResolverOptions = {}): ImageResolver {
+  const config = configFromOptions(opts);
   const runtime: ResolverRuntimeOptions = {
     auth: opts.auth,
     authRegistryHost: opts.authRegistryHost,
     fetchFn: opts.fetchFn ?? fetch,
-    config: configFromOptions(opts),
-    budget: { attempts: 0, activeFetches: 0, deadlineAt: null },
+    dnsLookupFn: opts.dnsLookupFn ?? createDohDnsLookup(fetch, config),
+    config,
+    budget: { attempts: 0, activeFetches: 0, dnsLookups: 0, deadlineAt: null },
   };
   return (registry: string, repository: string, tag: string) =>
     resolveTagToDigest(registry, repository, tag, runtime);

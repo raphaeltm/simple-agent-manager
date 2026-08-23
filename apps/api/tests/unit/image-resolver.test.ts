@@ -1,12 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createImageResolver, ImageResolveError } from '../../src/services/image-resolver';
+import {
+  createImageResolver,
+  ImageResolveError,
+  type ImageResolverOptions,
+} from '../../src/services/image-resolver';
 
 // =============================================================================
 // Helpers — realistic mock registry HTTP responses
 // =============================================================================
 
 const REALISTIC_DIGEST = 'sha256:a3ed95caeb02ffe68cdd9fd84406680ae93d633cb16422d00e8a7c22955b46d4';
+const PUBLIC_DNS_ADDRESSES = ['93.184.216.34'];
+
+function createTestImageResolver(opts: ImageResolverOptions = {}) {
+  return createImageResolver({
+    dnsLookupFn: vi.fn(async () => PUBLIC_DNS_ADDRESSES),
+    ...opts,
+  });
+}
 
 /** Mock a registry that returns digest on HEAD */
 function mockRegistryFetch(
@@ -91,7 +103,7 @@ describe('ImageResolver', () => {
   describe('createImageResolver', () => {
     it('resolves a tag to a digest via HEAD manifest (happy path)', async () => {
       const { fetchFn } = mockRegistryFetch();
-      const resolver = createImageResolver({ fetchFn });
+      const resolver = createTestImageResolver({ fetchFn });
 
       const digest = await resolver('ghcr.io', 'org/myapp', 'v1.0');
 
@@ -105,7 +117,7 @@ describe('ImageResolver', () => {
 
     it('handles docker.io → registry-1.docker.io rewrite', async () => {
       const { fetchFn } = mockRegistryFetch();
-      const resolver = createImageResolver({ fetchFn });
+      const resolver = createTestImageResolver({ fetchFn });
 
       await resolver('docker.io', 'library/nginx', 'latest');
 
@@ -115,7 +127,7 @@ describe('ImageResolver', () => {
 
     it('returns 404 → ImageResolveError with statusCode 404', async () => {
       const { fetchFn } = mockRegistryFetch({ status: 404 });
-      const resolver = createImageResolver({ fetchFn });
+      const resolver = createTestImageResolver({ fetchFn });
 
       await expect(resolver('ghcr.io', 'org/missing', 'v1.0')).rejects.toThrow(ImageResolveError);
 
@@ -133,7 +145,7 @@ describe('ImageResolver', () => {
 
     it('returns 401/403 → ImageResolveError with auth failure message', async () => {
       const { fetchFn } = mockRegistryFetch({ status: 403 });
-      const resolver = createImageResolver({ fetchFn });
+      const resolver = createTestImageResolver({ fetchFn });
 
       await expect(resolver('ghcr.io', 'org/private', 'v1.0')).rejects.toThrow(ImageResolveError);
 
@@ -148,7 +160,7 @@ describe('ImageResolver', () => {
 
     it('sends Basic auth header when credentials provided', async () => {
       const { fetchFn, callLog } = mockRegistryFetch();
-      const resolver = createImageResolver({
+      const resolver = createTestImageResolver({
         fetchFn,
         auth: { username: 'user', password: 'pass' },
       });
@@ -160,7 +172,7 @@ describe('ImageResolver', () => {
 
     it('sends auth when target registry matches authRegistryHost scope', async () => {
       const { fetchFn, callLog } = mockRegistryFetch();
-      const resolver = createImageResolver({
+      const resolver = createTestImageResolver({
         fetchFn,
         auth: { username: 'user', password: 'pass' },
         authRegistryHost: 'registry.cloudflare.com',
@@ -175,7 +187,7 @@ describe('ImageResolver', () => {
       // Regression: minted SAM-registry credentials must never be sent to an
       // arbitrary registry named in a manifest (e.g. attacker-controlled host).
       const { fetchFn, callLog } = mockRegistryFetch();
-      const resolver = createImageResolver({
+      const resolver = createTestImageResolver({
         fetchFn,
         auth: { username: 'user', password: 'pass' },
         authRegistryHost: 'registry.cloudflare.com',
@@ -189,7 +201,7 @@ describe('ImageResolver', () => {
 
     it('does NOT forward scoped docker.io auth to an unrelated registry', async () => {
       const { fetchFn, callLog } = mockRegistryFetch();
-      const resolver = createImageResolver({
+      const resolver = createTestImageResolver({
         fetchFn,
         auth: { username: 'user', password: 'pass' },
         authRegistryHost: 'docker.io',
@@ -202,7 +214,7 @@ describe('ImageResolver', () => {
 
     it('does NOT forward scoped auth to a different port on the same host', async () => {
       const { fetchFn, callLog } = mockRegistryFetch();
-      const resolver = createImageResolver({
+      const resolver = createTestImageResolver({
         fetchFn,
         auth: { username: 'user', password: 'pass' },
         authRegistryHost: 'registry.cloudflare.com',
@@ -218,7 +230,7 @@ describe('ImageResolver', () => {
 
     it('rejects repository and tag path smuggling before credentialed fetch', async () => {
       const { fetchFn } = mockRegistryFetch();
-      const resolver = createImageResolver({
+      const resolver = createTestImageResolver({
         fetchFn,
         auth: { username: 'user', password: 'pass' },
         authRegistryHost: 'registry.cloudflare.com',
@@ -234,7 +246,7 @@ describe('ImageResolver', () => {
       const { fetchFn, callLog } = mockRegistryFetch({
         needsTokenExchange: true,
       });
-      const resolver = createImageResolver({ fetchFn });
+      const resolver = createTestImageResolver({ fetchFn });
 
       const digest = await resolver('registry.example.com', 'org/app', 'v2.0');
 
@@ -251,7 +263,7 @@ describe('ImageResolver', () => {
       const { fetchFn, callLog } = mockRegistryFetch({
         needsTokenExchange: true,
       });
-      const resolver = createImageResolver({
+      const resolver = createTestImageResolver({
         fetchFn,
         auth: { username: 'myuser', password: 'mypass' },
       });
@@ -285,7 +297,7 @@ describe('ImageResolver', () => {
         });
       });
 
-      const resolver = createImageResolver({ fetchFn });
+      const resolver = createTestImageResolver({ fetchFn });
       const digest = await resolver('ghcr.io', 'org/app', 'v1.0');
 
       expect(headCalled).toBe(true);
@@ -295,7 +307,7 @@ describe('ImageResolver', () => {
 
     it('rejects non-sha256 digest format', async () => {
       const { fetchFn } = mockRegistryFetch({ digest: 'md5:abc123' });
-      const resolver = createImageResolver({ fetchFn });
+      const resolver = createTestImageResolver({ fetchFn });
 
       await expect(resolver('ghcr.io', 'org/app', 'v1.0')).rejects.toThrow(
         'unsupported digest format'
@@ -304,7 +316,7 @@ describe('ImageResolver', () => {
 
     it('handles custom public registry with explicit https scheme and port', async () => {
       const { fetchFn, callLog } = mockRegistryFetch();
-      const resolver = createImageResolver({ fetchFn });
+      const resolver = createTestImageResolver({ fetchFn });
 
       await resolver('https://registry.example.com:5000', 'org/app', 'v1.0');
 
@@ -313,7 +325,7 @@ describe('ImageResolver', () => {
 
     it('normalizes mixed-case public registry hosts before fetching', async () => {
       const { fetchFn, callLog } = mockRegistryFetch();
-      const resolver = createImageResolver({ fetchFn });
+      const resolver = createTestImageResolver({ fetchFn });
 
       await resolver('GhCr.IO', 'org/app', 'v1.0');
 
@@ -322,7 +334,7 @@ describe('ImageResolver', () => {
 
     it('rejects plaintext http:// registry URLs (no creds over cleartext)', async () => {
       const { fetchFn } = mockRegistryFetch();
-      const resolver = createImageResolver({
+      const resolver = createTestImageResolver({
         fetchFn,
         auth: { username: 'user', password: 'pass' },
       });
@@ -359,7 +371,7 @@ describe('ImageResolver', () => {
       ['leading-zero port', 'https://registry.example.com:0443'],
     ])('rejects unsafe registry authority: %s', async (_name, registry) => {
       const { fetchFn } = mockRegistryFetch();
-      const resolver = createImageResolver({ fetchFn });
+      const resolver = createTestImageResolver({ fetchFn });
 
       await expect(resolver(registry, 'org/app', 'v1.0')).rejects.toThrow(/Unsafe|Insecure/);
       expect(fetchFn).not.toHaveBeenCalled();
@@ -373,12 +385,62 @@ describe('ImageResolver', () => {
             headers: { Location: 'https://169.254.169.254/latest/meta-data/' },
           })
       );
-      const resolver = createImageResolver({ fetchFn });
+      const resolver = createTestImageResolver({ fetchFn });
 
       await expect(resolver('registry.example.com', 'org/app', 'v1.0')).rejects.toThrow(
         'not a public registry endpoint'
       );
       expect(fetchFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects a public-looking registry hostname whose DNS resolves to a private address', async () => {
+      const fetchFn = vi.fn(async () => {
+        throw new Error('registry fetch must not be reached');
+      });
+      const dnsLookupFn = vi.fn(async () => ['10.0.0.5']);
+      const resolver = createImageResolver({ fetchFn, dnsLookupFn });
+
+      await expect(resolver('registry.example.com', 'org/app', 'v1.0')).rejects.toThrow(
+        'resolved to non-public address 10.0.0.5'
+      );
+      expect(dnsLookupFn).toHaveBeenCalledWith('registry.example.com', expect.any(AbortSignal));
+      expect(fetchFn).not.toHaveBeenCalled();
+    });
+
+    it('rejects a redirect hostname whose DNS resolves to link-local metadata before fetching it', async () => {
+      const callLog: string[] = [];
+      const fetchFn = vi.fn(async (url: string) => {
+        callLog.push(url);
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location: 'https://public-looking.example/latest/meta-data/',
+          },
+        });
+      });
+      const dnsLookupFn = vi.fn(async (hostname: string) =>
+        hostname === 'public-looking.example' ? ['169.254.169.254'] : PUBLIC_DNS_ADDRESSES
+      );
+      const resolver = createImageResolver({ fetchFn, dnsLookupFn });
+
+      await expect(resolver('registry.example.com', 'org/app', 'v1.0')).rejects.toThrow(
+        'resolved to non-public address 169.254.169.254'
+      );
+      expect(callLog).toEqual(['https://registry.example.com/v2/org/app/manifests/v1.0']);
+      expect(dnsLookupFn).toHaveBeenCalledWith('registry.example.com', expect.any(AbortSignal));
+      expect(dnsLookupFn).toHaveBeenCalledWith('public-looking.example', expect.any(AbortSignal));
+    });
+
+    it('fails closed when DNS returns no addresses for a registry hostname', async () => {
+      const fetchFn = vi.fn(async () => {
+        throw new Error('registry fetch must not be reached');
+      });
+      const resolver = createImageResolver({ fetchFn, dnsLookupFn: vi.fn(async () => []) });
+
+      await expect(resolver('registry.example.com', 'org/app', 'v1.0')).rejects.toThrow(
+        'returned no public addresses'
+      );
+      expect(fetchFn).not.toHaveBeenCalled();
     });
 
     it('strips Authorization when following a validated cross-origin redirect', async () => {
@@ -399,7 +461,7 @@ describe('ImageResolver', () => {
           headers: { 'Docker-Content-Digest': REALISTIC_DIGEST },
         });
       });
-      const resolver = createImageResolver({
+      const resolver = createTestImageResolver({
         fetchFn,
         auth: { username: 'user', password: 'pass' },
       });
@@ -420,7 +482,7 @@ describe('ImageResolver', () => {
             headers: { Location: 'https://registry.example.com/again' },
           })
       );
-      const resolver = createImageResolver({ fetchFn, maxRedirects: 0 });
+      const resolver = createTestImageResolver({ fetchFn, maxRedirects: 0 });
 
       await expect(resolver('registry.example.com', 'org/app', 'v1.0')).rejects.toThrow(
         'redirect budget'
@@ -435,7 +497,7 @@ describe('ImageResolver', () => {
         wwwAuth:
           'Bearer realm="https://evil.attacker.com/token",service="registry.example.com",scope="repository:org/app:pull"',
       });
-      const resolver = createImageResolver({
+      const resolver = createTestImageResolver({
         fetchFn,
         auth: { username: 'user', password: 'pass' },
       });
@@ -451,7 +513,7 @@ describe('ImageResolver', () => {
         wwwAuth:
           'Bearer realm="http://auth.example.com/token",service="registry.example.com",scope="repository:org/app:pull"',
       });
-      const resolver = createImageResolver({ fetchFn });
+      const resolver = createTestImageResolver({ fetchFn });
 
       await expect(resolver('registry.example.com', 'org/app', 'v2.0')).rejects.toThrow(
         'only HTTPS endpoints are allowed'
@@ -464,12 +526,37 @@ describe('ImageResolver', () => {
         wwwAuth:
           'Bearer realm="https://127.0.0.1/token",service="registry.example.com",scope="repository:org/app:pull"',
       });
-      const resolver = createImageResolver({ fetchFn });
+      const resolver = createTestImageResolver({ fetchFn });
 
       await expect(resolver('registry.example.com', 'org/app', 'v2.0')).rejects.toThrow(
         'not a public registry endpoint'
       );
       expect(callLog).toHaveLength(1);
+    });
+
+    it('rejects a trusted token realm hostname whose DNS resolves to a private address', async () => {
+      const { fetchFn, callLog } = mockRegistryFetch({
+        needsTokenExchange: true,
+        wwwAuth:
+          'Bearer realm="https://registry.example.com/token",service="registry.example.com",scope="repository:org/app:pull"',
+      });
+      const dnsLookupFn = vi.fn(async (hostname: string) =>
+        hostname === 'registry.example.com' && callLog.length > 0
+          ? ['172.16.0.10']
+          : PUBLIC_DNS_ADDRESSES
+      );
+      const resolver = createImageResolver({ fetchFn, dnsLookupFn });
+
+      await expect(resolver('registry.example.com', 'org/app', 'v2.0')).rejects.toThrow(
+        'resolved to non-public address 172.16.0.10'
+      );
+      expect(callLog).toEqual([
+        {
+          url: 'https://registry.example.com/v2/org/app/manifests/v2.0',
+          method: 'HEAD',
+          headers: { accept: expect.any(String) },
+        },
+      ]);
     });
 
     it('rejects an untrusted public token realm pivot even without credentials', async () => {
@@ -478,7 +565,7 @@ describe('ImageResolver', () => {
         wwwAuth:
           'Bearer realm="https://api.cloudflare.com/client/v4",service="registry.example.com",scope="repository:org/app:pull"',
       });
-      const resolver = createImageResolver({ fetchFn });
+      const resolver = createTestImageResolver({ fetchFn });
 
       await expect(resolver('registry.example.com', 'org/app', 'v2.0')).rejects.toThrow(
         'untrusted token realm host'
@@ -492,7 +579,7 @@ describe('ImageResolver', () => {
         wwwAuth:
           'Bearer realm="https://tenant-b.pages.dev/token",service="tenant-a.pages.dev",scope="repository:org/app:pull"',
       });
-      const resolver = createImageResolver({ fetchFn });
+      const resolver = createTestImageResolver({ fetchFn });
 
       await expect(resolver('tenant-a.pages.dev', 'org/app', 'v2.0')).rejects.toThrow(
         'untrusted token realm host'
@@ -520,10 +607,44 @@ describe('ImageResolver', () => {
           headers: { Location: 'https://169.254.169.254/latest/meta-data/' },
         });
       });
-      const resolver = createImageResolver({ fetchFn });
+      const resolver = createTestImageResolver({ fetchFn });
 
       await expect(resolver('registry.example.com', 'org/app', 'v2.0')).rejects.toThrow(
         'not a public registry endpoint'
+      );
+      expect(callLog).toEqual([
+        { url: 'https://registry.example.com/v2/org/app/manifests/v2.0', method: 'HEAD' },
+        {
+          url: 'https://registry.example.com/token?service=registry.example.com&scope=repository%3Aorg%2Fapp%3Apull',
+          method: 'GET',
+        },
+      ]);
+    });
+
+    it('rejects a token-realm redirect to an untrusted public host before fetching it', async () => {
+      const callLog: Array<{ url: string; method: string }> = [];
+      let callCount = 0;
+      const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+        callCount += 1;
+        callLog.push({ url, method: init?.method ?? 'GET' });
+        if (callCount === 1) {
+          return new Response('Unauthorized', {
+            status: 401,
+            headers: {
+              'WWW-Authenticate':
+                'Bearer realm="https://registry.example.com/token",service="registry.example.com",scope="repository:org/app:pull"',
+            },
+          });
+        }
+        return new Response(null, {
+          status: 302,
+          headers: { Location: 'https://api.cloudflare.com/client/v4/user/tokens/verify' },
+        });
+      });
+      const resolver = createTestImageResolver({ fetchFn });
+
+      await expect(resolver('registry.example.com', 'org/app', 'v2.0')).rejects.toThrow(
+        'untrusted token realm redirect'
       );
       expect(callLog).toEqual([
         { url: 'https://registry.example.com/v2/org/app/manifests/v2.0', method: 'HEAD' },
@@ -552,7 +673,7 @@ describe('ImageResolver', () => {
           headers: { 'Content-Type': 'application/json' },
         });
       });
-      const resolver = createImageResolver({ fetchFn, tokenResponseMaxBytes: 16 });
+      const resolver = createTestImageResolver({ fetchFn, tokenResponseMaxBytes: 16 });
 
       await expect(resolver('registry.example.com', 'org/app', 'v2.0')).rejects.toThrow(
         'Token exchange response exceeded 16 bytes'
@@ -561,7 +682,7 @@ describe('ImageResolver', () => {
 
     it('bounds total outbound fetch attempts across token fallback work', async () => {
       const { fetchFn } = mockRegistryFetch({ needsTokenExchange: true });
-      const resolver = createImageResolver({ fetchFn, maxFetchAttempts: 1 });
+      const resolver = createTestImageResolver({ fetchFn, maxFetchAttempts: 1 });
 
       await expect(resolver('registry.example.com', 'org/app', 'v2.0')).rejects.toThrow(
         'fetch attempt budget'
@@ -582,7 +703,7 @@ describe('ImageResolver', () => {
           },
         });
       });
-      const resolver = createImageResolver({
+      const resolver = createTestImageResolver({
         fetchFn,
         timeoutMs: 1_000,
         totalTimeoutMs: 10,
@@ -606,7 +727,7 @@ describe('ImageResolver', () => {
             finishFirstFetch = resolve;
           })
       );
-      const resolver = createImageResolver({ fetchFn, maxConcurrentFetches: 1 });
+      const resolver = createTestImageResolver({ fetchFn, maxConcurrentFetches: 1 });
 
       const first = resolver('registry.example.com', 'org/app', 'v1.0');
       await Promise.resolve();
@@ -634,7 +755,7 @@ describe('ImageResolver', () => {
             });
           })
       );
-      const resolver = createImageResolver({ fetchFn, timeoutMs: 1, totalTimeoutMs: 100 });
+      const resolver = createTestImageResolver({ fetchFn, timeoutMs: 1, totalTimeoutMs: 100 });
 
       await expect(resolver('registry.example.com', 'org/app', 'v1.0')).rejects.toThrow(
         'timed out'
@@ -648,7 +769,7 @@ describe('ImageResolver', () => {
         wwwAuth:
           'Bearer realm="https://auth.docker.io/token",service="registry.docker.io",scope="repository:library/nginx:pull"',
       });
-      const resolver = createImageResolver({
+      const resolver = createTestImageResolver({
         fetchFn,
         auth: { username: 'user', password: 'pass' },
       });

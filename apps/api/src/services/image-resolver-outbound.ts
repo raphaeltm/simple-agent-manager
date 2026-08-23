@@ -1,9 +1,18 @@
 import type {
   ImageResolverConfig,
+  ImageResolverDnsLookupFn,
   ImageResolverEnv,
   ImageResolverOptions,
   RegistryAuth,
 } from './image-resolver';
+import {
+  assertResolvedPublic,
+  DEFAULT_IMAGE_RESOLVE_DNS_LOOKUP_TIMEOUT_MS,
+  DEFAULT_IMAGE_RESOLVE_DNS_RESPONSE_MAX_BYTES,
+  DEFAULT_IMAGE_RESOLVE_DOH_RESOLVER_URL,
+  DEFAULT_IMAGE_RESOLVE_MAX_DNS_LOOKUPS,
+  isBlockedHostname,
+} from './image-resolver-network';
 
 export const DEFAULT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS = 10_000;
 export const DEFAULT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS = 60_000;
@@ -12,7 +21,6 @@ export const DEFAULT_IMAGE_RESOLVE_MAX_REDIRECTS = 2;
 export const DEFAULT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES = 65_536;
 export const DEFAULT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES = 4;
 export const DEFAULT_IMAGE_RESOLVE_MAX_SERVICES = 50;
-
 const OCI_REPOSITORY_SEGMENT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const OCI_TAG_RE = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
 
@@ -25,6 +33,7 @@ const PERCENT_ENCODED_CONTROL_RE = /%(?:0[0-9a-f]|1[0-9a-f]|7f)/i;
 interface ResolverFetchBudget {
   attempts: number;
   activeFetches: number;
+  dnsLookups: number;
   deadlineAt: number | null;
 }
 
@@ -32,11 +41,12 @@ export interface ResolverRuntimeOptions {
   auth?: RegistryAuth;
   authRegistryHost?: string;
   fetchFn: typeof fetch;
+  dnsLookupFn: ImageResolverDnsLookupFn;
   config: ImageResolverConfig;
   budget: ResolverFetchBudget;
 }
 
-type OutboundUrlKind = 'registry' | 'token realm' | 'redirect';
+type OutboundUrlKind = 'registry' | 'token realm' | 'redirect' | 'DNS resolver';
 
 export function getImageResolverConfig(env: ImageResolverEnv = {}): ImageResolverConfig {
   return {
@@ -68,6 +78,20 @@ export function getImageResolverConfig(env: ImageResolverEnv = {}): ImageResolve
       env.DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES,
       DEFAULT_IMAGE_RESOLVE_MAX_SERVICES
     ),
+    dnsLookupTimeoutMs: positiveInteger(
+      env.DEPLOYMENT_IMAGE_RESOLVE_DNS_LOOKUP_TIMEOUT_MS,
+      DEFAULT_IMAGE_RESOLVE_DNS_LOOKUP_TIMEOUT_MS
+    ),
+    maxDnsLookups: positiveInteger(
+      env.DEPLOYMENT_IMAGE_RESOLVE_MAX_DNS_LOOKUPS,
+      DEFAULT_IMAGE_RESOLVE_MAX_DNS_LOOKUPS
+    ),
+    dnsResponseMaxBytes: positiveInteger(
+      env.DEPLOYMENT_IMAGE_RESOLVE_DNS_RESPONSE_MAX_BYTES,
+      DEFAULT_IMAGE_RESOLVE_DNS_RESPONSE_MAX_BYTES
+    ),
+    dohResolverUrl:
+      env.DEPLOYMENT_IMAGE_RESOLVE_DOH_RESOLVER_URL ?? DEFAULT_IMAGE_RESOLVE_DOH_RESOLVER_URL,
   };
 }
 
@@ -99,6 +123,16 @@ export function configFromOptions(opts: ImageResolverOptions): ImageResolverConf
       opts.maxConcurrentFetches,
       DEFAULT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES
     ),
+    dnsLookupTimeoutMs: positiveInteger(
+      opts.dnsLookupTimeoutMs,
+      DEFAULT_IMAGE_RESOLVE_DNS_LOOKUP_TIMEOUT_MS
+    ),
+    maxDnsLookups: positiveInteger(opts.maxDnsLookups, DEFAULT_IMAGE_RESOLVE_MAX_DNS_LOOKUPS),
+    dnsResponseMaxBytes: positiveInteger(
+      opts.dnsResponseMaxBytes,
+      DEFAULT_IMAGE_RESOLVE_DNS_RESPONSE_MAX_BYTES
+    ),
+    dohResolverUrl: opts.dohResolverUrl ?? DEFAULT_IMAGE_RESOLVE_DOH_RESOLVER_URL,
   };
 }
 
@@ -179,133 +213,6 @@ function isCanonicalAuthority(authority: string, url: URL): boolean {
     if (parsed > 65_535 || String(parsed) !== rawPort) return false;
   }
   return url.host === url.host.toLowerCase();
-}
-
-function isBlockedHostname(hostname: string): boolean {
-  if (
-    hostname === 'localhost' ||
-    hostname.endsWith('.localhost') ||
-    hostname === 'metadata' ||
-    hostname.endsWith('.metadata') ||
-    hostname === 'metadata.google.internal' ||
-    hostname === 'metadata.azure.internal' ||
-    hostname === 'instance-data' ||
-    hostname.endsWith('.local') ||
-    hostname.endsWith('.localdomain') ||
-    hostname.endsWith('.internal')
-  ) {
-    return true;
-  }
-
-  const ipv4 = parseIpv4(hostname);
-  if (ipv4) {
-    return isUnsafeIpv4(ipv4);
-  }
-
-  const ipv6 = parseIpv6(hostname);
-  return ipv6 ? isUnsafeIpv6(ipv6) : false;
-}
-
-function parseIpv4(hostname: string): [number, number, number, number] | null {
-  const parts = hostname.split('.');
-  if (parts.length !== 4) return null;
-  const octets = parts.map((part) => {
-    if (!/^\d{1,3}$/.test(part)) return null;
-    const value = Number(part);
-    return Number.isInteger(value) && value >= 0 && value <= 255 ? value : null;
-  });
-  if (octets.some((part) => part === null)) return null;
-  return octets as [number, number, number, number];
-}
-
-function isUnsafeIpv4([a, b, c, d]: [number, number, number, number]): boolean {
-  return (
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a === 192 && b === 0 && c === 0) ||
-    (a === 192 && b === 0 && c === 2) ||
-    (a === 198 && (b === 18 || b === 19)) ||
-    (a === 198 && b === 51 && c === 100) ||
-    (a === 203 && b === 0 && c === 113) ||
-    a >= 224 ||
-    (a === 255 && b === 255 && c === 255 && d === 255)
-  );
-}
-
-function parseIpv6(hostname: string): number[] | null {
-  const host = hostname.replace(/^\[/, '').replace(/\]$/, '').toLowerCase();
-  if (!host.includes(':') || host.includes('%')) return null;
-  const halves = host.split('::');
-  if (halves.length > 2) return null;
-
-  const head = parseIpv6Words(halves[0] ?? '');
-  const tail = parseIpv6Words(halves[1] ?? '');
-  if (!head || !tail) return null;
-  if (halves.length === 1 && head.length !== 8) return null;
-  if (halves.length === 2 && head.length + tail.length >= 8) return null;
-
-  const zeros = new Array(8 - head.length - tail.length).fill(0) as number[];
-  const words = [...head, ...zeros, ...tail];
-  if (words.length !== 8) return null;
-
-  const bytes: number[] = [];
-  for (const word of words) {
-    bytes.push((word >> 8) & 0xff, word & 0xff);
-  }
-  return bytes;
-}
-
-function parseIpv6Words(part: string): number[] | null {
-  if (!part) return [];
-  const pieces = part.split(':');
-  const words: number[] = [];
-  for (const piece of pieces) {
-    if (!piece) return null;
-    if (piece.includes('.')) {
-      const ipv4 = parseIpv4(piece);
-      if (!ipv4) return null;
-      words.push((ipv4[0] << 8) | ipv4[1], (ipv4[2] << 8) | ipv4[3]);
-      continue;
-    }
-    if (!/^[0-9a-f]{1,4}$/i.test(piece)) return null;
-    words.push(Number.parseInt(piece, 16));
-  }
-  return words;
-}
-
-function isUnsafeIpv6(bytes: number[]): boolean {
-  if (bytes.length !== 16) return true;
-  const first = bytes[0] ?? 0;
-  const second = bytes[1] ?? 0;
-  const isUnspecified = bytes.every((byte) => byte === 0);
-  const isLoopback = bytes.slice(0, 15).every((byte) => byte === 0) && bytes[15] === 1;
-  const isUniqueLocal = (first & 0xfe) === 0xfc;
-  const isLinkLocal = first === 0xfe && (second & 0xc0) === 0x80;
-  const isDeprecatedSiteLocal = first === 0xfe && (second & 0xc0) === 0xc0;
-  const isMulticast = first === 0xff;
-  const isIpv4Mapped =
-    bytes.slice(0, 10).every((byte) => byte === 0) && bytes[10] === 0xff && bytes[11] === 0xff;
-  const isIpv4Compatible =
-    bytes.slice(0, 12).every((byte) => byte === 0) && !bytes.slice(12).every((byte) => byte === 0);
-  const embeddedIpv4 =
-    isIpv4Mapped || isIpv4Compatible
-      ? ([bytes[12], bytes[13], bytes[14], bytes[15]] as [number, number, number, number])
-      : null;
-
-  return (
-    isUnspecified ||
-    isLoopback ||
-    isUniqueLocal ||
-    isLinkLocal ||
-    isDeprecatedSiteLocal ||
-    isMulticast ||
-    (embeddedIpv4 !== null && isUnsafeIpv4(embeddedIpv4))
-  );
 }
 
 /**
@@ -469,12 +376,15 @@ function redirectLocation(response: Response): string | null {
   return response.headers.get('location');
 }
 
+type RedirectGuard = (nextUrl: URL, currentUrl: URL) => void;
+
 export async function fetchValidated(
   input: string | URL,
   init: RequestInit,
   runtime: ResolverRuntimeOptions,
   kind: OutboundUrlKind,
-  redirectsFollowed = 0
+  redirectsFollowed = 0,
+  redirectGuard?: RedirectGuard
 ): Promise<Response> {
   const url = validateOutboundUrl(input, kind);
   const { config, budget } = runtime;
@@ -489,11 +399,13 @@ export async function fetchValidated(
     );
   }
 
-  const timeoutMs = remainingTimeoutMs(config, budget);
-  budget.attempts += 1;
   budget.activeFetches += 1;
   let response: Response;
+  let timeoutMs = config.requestTimeoutMs;
   try {
+    await assertResolvedPublic(url, runtime, kind);
+    timeoutMs = remainingTimeoutMs(config, budget);
+    budget.attempts += 1;
     response = await runtime.fetchFn(url.toString(), {
       ...init,
       redirect: 'manual',
@@ -520,6 +432,7 @@ export async function fetchValidated(
     /^[a-z][a-z0-9+.-]*:/i.test(location) ? location : new URL(location, url),
     'redirect'
   );
+  redirectGuard?.(nextUrl, url);
   const nextHeaders = cloneHeaders(init.headers);
   if (nextUrl.origin !== url.origin) {
     nextHeaders.delete('authorization');
@@ -534,23 +447,28 @@ export async function fetchValidated(
     },
     runtime,
     'redirect',
-    redirectsFollowed + 1
+    redirectsFollowed + 1,
+    redirectGuard
   );
 }
 
-async function readTextBounded(response: Response, maxBytes: number): Promise<string> {
+async function readTextBounded(
+  response: Response,
+  maxBytes: number,
+  label = 'Token exchange response'
+): Promise<string> {
   const contentLength = response.headers.get('content-length');
   if (contentLength) {
     const parsed = Number.parseInt(contentLength, 10);
     if (Number.isFinite(parsed) && parsed > maxBytes) {
-      throw new Error(`Token exchange response exceeded ${maxBytes} bytes.`);
+      throw new Error(`${label} exceeded ${maxBytes} bytes.`);
     }
   }
 
   if (!response.body) {
     const text = await response.text();
     if (new TextEncoder().encode(text).byteLength > maxBytes) {
-      throw new Error(`Token exchange response exceeded ${maxBytes} bytes.`);
+      throw new Error(`${label} exceeded ${maxBytes} bytes.`);
     }
     return text;
   }
@@ -565,7 +483,7 @@ async function readTextBounded(response: Response, maxBytes: number): Promise<st
       if (!value) continue;
       total += value.byteLength;
       if (total > maxBytes) {
-        throw new Error(`Token exchange response exceeded ${maxBytes} bytes.`);
+        throw new Error(`${label} exceeded ${maxBytes} bytes.`);
       }
       chunks.push(value);
     }
@@ -621,7 +539,16 @@ export async function fetchBearerToken(
       headers,
     },
     runtime,
-    'token realm'
+    'token realm',
+    0,
+    (nextUrl) => {
+      if (!realmOriginIsTrusted(nextUrl, registryBase)) {
+        throw new Error(
+          `Refusing to follow untrusted token realm redirect to ${nextUrl.hostname} ` +
+            `(registry host ${registryBase.hostname}).`
+        );
+      }
+    }
   );
 
   if (!resp.ok) {

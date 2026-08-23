@@ -99,6 +99,10 @@ stored without registry network resolution.
 | `DEPLOYMENT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES` | `65536` | Maximum bearer-token JSON response size                            |
 | `DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES`   | `4`     | Maximum simultaneous outbound resolver fetches                     |
 | `DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES`             | `50`    | Maximum tag-based image references resolved per release submission |
+| `DEPLOYMENT_IMAGE_RESOLVE_DNS_LOOKUP_TIMEOUT_MS`    | `10000` | Per-host DNS preflight timeout before resolver fetches             |
+| `DEPLOYMENT_IMAGE_RESOLVE_MAX_DNS_LOOKUPS`          | `400`   | Maximum DNS preflight lookups per resolver instance                |
+| `DEPLOYMENT_IMAGE_RESOLVE_DNS_RESPONSE_MAX_BYTES`   | `32768` | Maximum DNS-over-HTTPS JSON response size for image resolution     |
+| `DEPLOYMENT_IMAGE_RESOLVE_DOH_RESOLVER_URL`         | `https://cloudflare-dns.com/dns-query` | DNS-over-HTTPS resolver for image-registry preflight |
 
 Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `PULUMI_CONFIG_PASSPHRASE`. GitHub App/OAuth secrets (`GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_SLUG`, `GH_WEBHOOK_SECRET`) and Google **login** OAuth secrets (`GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`) are optional environment fallbacks; fresh deployments can set them through `/setup` instead. The separate Google **infra/GCP** OAuth pair (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) is used only for WIF and can be configured by a superadmin at `/admin/integrations`; runtime values override the environment fallback. Service-account JSON users need no infrastructure OAuth client. Deploy signing keys are generated and persisted by Pulumi during deployment; GitHub Environment values are only needed for explicit key overrides.
 

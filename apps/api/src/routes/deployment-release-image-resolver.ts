@@ -48,6 +48,10 @@ export async function buildProjectImageResolver(
     maxRedirects: config.maxRedirects,
     tokenResponseMaxBytes: config.tokenResponseMaxBytes,
     maxConcurrentFetches: config.maxConcurrentFetches,
+    dnsLookupTimeoutMs: config.dnsLookupTimeoutMs,
+    maxDnsLookups: config.maxDnsLookups,
+    dnsResponseMaxBytes: config.dnsResponseMaxBytes,
+    dohResolverUrl: config.dohResolverUrl,
   });
 }
 
