@@ -546,6 +546,28 @@ describe('MCP knowledge and policy route tools', () => {
       expect(projectDataService.updatePolicy).not.toHaveBeenCalled();
     });
 
+    it('maps the DO guard rejection to INVALID_PARAMS rather than crashing', async () => {
+      // Production RPC fidelity: a DO-thrown error reaches this handler as a plain
+      // Error carrying only name and message (rule 63), so the mapping must be
+      // message-based. Without the try/catch this rejection escapes the handler.
+      vi.mocked(projectDataService.getPolicy).mockResolvedValue({
+        id: 'pol-3',
+        scope: 'always',
+        expiresAt: null,
+      } as Awaited<ReturnType<typeof projectDataService.getPolicy>>);
+      vi.mocked(projectDataService.updatePolicy).mockRejectedValue(
+        new Error(
+          "a task-scoped policy must set expiresAt so it cannot outlive the work it was captured for (use scope 'always' for a standing policy)"
+        )
+      );
+
+      await expectInvalidParams(await mcpPost(app, 'update_policy', {
+        policyId: 'pol-3',
+        scope: 'task',
+        expiresAt: Date.now() + 60_000,
+      }), 'task-scoped policy must set expiresAt');
+    });
+
     it('allows clearing the expiry when the scope is widened in the same update', async () => {
       vi.mocked(projectDataService.getPolicy).mockResolvedValue({
         id: 'pol-2',

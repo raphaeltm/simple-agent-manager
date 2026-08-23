@@ -43,6 +43,7 @@ vi.mock('../../../src/services/project-data', () => ({
   removePolicy: mocks.removePolicy,
 }));
 
+import { errors } from '../../../src/middleware/error';
 import { policyRoutes } from '../../../src/routes/policies';
 
 const ROUTE_PATH = '/api/projects/:projectId/policies';
@@ -351,6 +352,38 @@ describe('policy routes', () => {
         'policy-1',
         expect.objectContaining({ scope: 'always', expiresAt: null })
       );
+    });
+
+    it('maps the DO guard rejection to a 400 rather than an opaque 500', async () => {
+      // The DO re-validates against freshly-read state, so a concurrent PATCH landing
+      // between the pre-check and the write can still make it throw. That error arrives
+      // as a plain Error with only name and message (rule 63) — production RPC fidelity,
+      // NOT a richer custom class — so the route must map it by message.
+      mocks.getPolicy.mockResolvedValueOnce({
+        id: 'policy-1',
+        scope: 'always',
+        expiresAt: null,
+      });
+      mocks.updatePolicy.mockRejectedValueOnce(
+        new Error(
+          "a task-scoped policy must set expiresAt so it cannot outlive the work it was captured for (use scope 'always' for a standing policy)"
+        )
+      );
+
+      const res = await patch('policy-1', { scope: 'task', expiresAt: Date.now() + 60_000 });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string; message: string };
+      expect(body.error).not.toBe('INTERNAL_ERROR');
+      expect(body.message).toMatch(/task-scoped policy must set expiresAt/);
+    });
+
+    it('does not swallow a genuine AppError from the service layer', async () => {
+      mocks.updatePolicy.mockRejectedValueOnce(errors.notFound('Policy not found'));
+
+      const res = await patch('policy-1', { active: false });
+
+      expect(res.status).toBe(404);
     });
 
     it('does not read the stored policy when the update touches no lifecycle field', async () => {

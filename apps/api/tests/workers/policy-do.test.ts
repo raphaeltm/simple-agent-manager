@@ -211,20 +211,39 @@ describe('ProjectData Policy lifecycle (expiry + scope)', () => {
   });
 
   it('excludes expired policies from the per-project cap count', async () => {
+    // This has to drive the cap BOUNDARY, not just re-assert the read filter. The
+    // per-DO env is not overridable through the pool harness, so lower the limit on
+    // the live instance via runInDurableObject — otherwise the assertion is satisfied
+    // by getActivePolicies alone and passes even when the COUNT query still says
+    // `WHERE active = 1`, which is exactly the regression this test exists to catch.
     const stub = getStub('policy-expiry-cap');
-    const { id } = await stub.createPolicy(
-      'rule', 'Expiring', 'Content', 'explicit', null, 0.9, 'task', Date.now() + HOUR_MS,
-    );
-    await stub.updatePolicy(id, { scope: 'always', expiresAt: Date.now() - 60_000 });
 
-    // An inert expired row must not consume cap headroom, otherwise a project that
-    // uses short-lived task policies slowly wedges itself at the limit.
-    const { id: second } = await stub.createPolicy(
-      'rule', 'New policy', 'Content', 'explicit', null, 0.9,
-    );
-    const active = await stub.getActivePolicies();
-    expect(active).toHaveLength(1);
-    expect(active[0]!.id).toBe(second);
+    await runInDurableObject(stub, async (instance) => {
+      const env = (instance as unknown as { env: Record<string, string> }).env;
+      const previous = env.POLICY_MAX_PER_PROJECT;
+      env.POLICY_MAX_PER_PROJECT = '2';
+      try {
+        // Two standing policies fill the cap exactly.
+        await instance.createPolicy('rule', 'Standing A', 'Content', 'explicit', null, 0.9);
+        const b = await instance.createPolicy('rule', 'Standing B', 'Content', 'explicit', null, 0.9);
+
+        // A third is refused — proves the cap is genuinely enforced at 2.
+        await expect(
+          instance.createPolicy('rule', 'Overflow', 'Content', 'explicit', null, 0.9),
+        ).rejects.toThrow(/Maximum active policies/);
+
+        // Expire one of them. It stays active=1 in the table, so a COUNT that ignores
+        // expiry still sees 2 and would keep refusing.
+        await instance.updatePolicy(b.id, { expiresAt: Date.now() - 60_000 });
+
+        // Now a third must succeed: the inert expired row released its cap slot.
+        const c = await instance.createPolicy('rule', 'Now fits', 'Content', 'explicit', null, 0.9);
+        expect(c.id).toBeTruthy();
+      } finally {
+        if (previous === undefined) delete env.POLICY_MAX_PER_PROJECT;
+        else env.POLICY_MAX_PER_PROJECT = previous;
+      }
+    });
   });
 
   it('clears an expiry when updatePolicy is given null, making the policy permanent', async () => {
