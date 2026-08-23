@@ -25,6 +25,30 @@ const KnowledgeEntityWithCountSchema = v.object({
   observation_count: v.number(),
 });
 
+/**
+ * The injected entity index projects only what a discovery listing needs, so it has
+ * its own narrow schema rather than reusing KnowledgeEntityWithCountSchema — the
+ * index query never selects id/description/timestamps.
+ */
+const KnowledgeEntityIndexRowSchema = v.object({
+  name: v.string(),
+  entity_type: v.string(),
+  observation_count: v.number(),
+});
+
+export function parseKnowledgeEntityIndexRow(row: unknown): {
+  name: string;
+  entityType: string;
+  observationCount: number;
+} {
+  const r = parseRow(KnowledgeEntityIndexRowSchema, row, 'knowledge_entity_index');
+  return {
+    name: r.name,
+    entityType: r.entity_type,
+    observationCount: r.observation_count,
+  };
+}
+
 export function parseKnowledgeEntityRow(row: unknown): {
   id: string;
   name: string;

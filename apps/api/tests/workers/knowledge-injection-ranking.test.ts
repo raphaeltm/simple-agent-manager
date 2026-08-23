@@ -19,6 +19,8 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { computeRelevanceScore } from '../../src/durable-objects/project-data/knowledge';
+
 const DAY_MS = 86_400_000;
 
 interface KnowledgeStub {
@@ -39,9 +41,10 @@ interface KnowledgeStub {
     limit: number,
     perEntityLimit?: number
   ): Promise<{ id: string; entityName: string; confidence: number; content: string }[]>;
-  getKnowledgeEntityIndex(
-    limit?: number
-  ): Promise<{ name: string; entityType: string; observationCount: number }[]>;
+  getKnowledgeEntityIndex(limit?: number): Promise<{
+    entries: { name: string; entityType: string; observationCount: number }[];
+    totalEntities: number;
+  }>;
 }
 
 let projectSeq = 0;
@@ -253,6 +256,49 @@ describe('knowledge injection ranking', () => {
     expect(results.map((r) => r.entityName)).toEqual(['BbbFresh', 'AaaConfidentButAging']);
   });
 
+  /**
+   * Parity between the two representations of the relevance formula.
+   *
+   * `computeRelevanceScore` (JS) is canonical and is what `getRelevantKnowledge` uses;
+   * `getAllHighConfidenceKnowledge` re-expresses it in SQL because the ranking happens
+   * inside a window function, before any row reaches JS. They cannot share code, so
+   * this test is what stops them drifting: retune the decay on one side only and the
+   * expected ordering computed from the JS formula stops matching the SQL ordering.
+   */
+  it('orders exactly as the canonical JS relevance formula does', async () => {
+    const seeds = [
+      { name: 'AaaHighOld', confidence: 0.99, ageDays: 120 },
+      { name: 'BbbMidMid', confidence: 0.9, ageDays: 45 },
+      { name: 'CccLowFresh', confidence: 0.82, ageDays: 0 },
+      { name: 'DddHighMid', confidence: 0.95, ageDays: 10 },
+      { name: 'EeeMidOld', confidence: 0.88, ageDays: 300 },
+    ];
+    for (const s of seeds) {
+      await seedEntity(stub, {
+        name: s.name,
+        entityType: 'context',
+        count: 1,
+        confidence: s.confidence,
+        ageDays: s.ageDays,
+      });
+    }
+
+    const now = Date.now();
+    const expected = [...seeds]
+      .sort(
+        (a, b) =>
+          computeRelevanceScore(b.confidence, now - b.ageDays * DAY_MS, now) -
+          computeRelevanceScore(a.confidence, now - a.ageDays * DAY_MS, now)
+      )
+      .map((s) => s.name);
+
+    const results = await stub.getAllHighConfidenceKnowledge(0.8, 50, 8);
+
+    expect(results.map((r) => r.entityName)).toEqual(expected);
+    // Guard against the ordering being trivially the seed order or alphabetical.
+    expect(expected).not.toEqual(seeds.map((s) => s.name));
+  });
+
   it('returns a stable order across identical calls', async () => {
     await seedEntity(stub, {
       name: 'AaaTied',
@@ -269,14 +315,86 @@ describe('knowledge injection ranking', () => {
       ageDays: 5,
     });
 
-    // Every row here has an identical score, so ordering rests entirely on the
-    // tiebreakers. Without them SQLite may permute equal rows between executions.
+    // Every row here scores identically, so ordering rests entirely on the tiebreakers.
+    //
+    // Asserting only "three calls agree" is NOT enough to prove the tiebreakers work:
+    // SQLite returns equal-keyed rows in a stable physical order within one unchanged
+    // table anyway, so that assertion passes with `id ASC` deleted. (Verified — this is
+    // the rule 62 "prove the proof" step; the weaker assertion was not discriminating.)
+    //
+    // Asserting the SPECIFIED order is discriminating, because ids are random UUIDs
+    // (generateId -> crypto.randomUUID), so id order is uncorrelated with insertion
+    // order. Without `id ASC` the rows come back in physical order, which almost surely
+    // is not sorted by id.
     const first = await stub.getAllHighConfidenceKnowledge(0.8, 50, 8);
     const second = await stub.getAllHighConfidenceKnowledge(0.8, 50, 8);
-    const third = await stub.getAllHighConfidenceKnowledge(0.8, 50, 8);
 
     expect(second.map((r) => r.id)).toEqual(first.map((r) => r.id));
-    expect(third.map((r) => r.id)).toEqual(first.map((r) => r.id));
+
+    for (const entityName of ['AaaTied', 'BbbTied']) {
+      const ids = first.filter((r) => r.entityName === entityName).map((r) => r.id);
+      expect(ids.length).toBeGreaterThan(1);
+      expect(ids).toEqual([...ids].sort());
+    }
+  });
+
+  /**
+   * The outer `LIMIT` runs AFTER the per-entity cap. If a future edit re-grouped or
+   * re-sorted that final SELECT, the surviving rows could stop being the globally
+   * highest-scoring ones — reintroducing exactly this bug's shape (truncation by
+   * something other than relevance) at a different layer.
+   *
+   * Here the capped candidate pool is 6 entities x 8 = 48, well over the limit of 10.
+   */
+  it('keeps the globally highest-scoring rows when the outer limit truncates', async () => {
+    // Older entities first so that neither insertion order nor name order matches score.
+    const ages = [300, 250, 200, 150, 100, 0];
+    for (let i = 0; i < ages.length; i++) {
+      await seedEntity(stub, {
+        name: `Entity${String.fromCharCode(65 + i)}`,
+        entityType: 'context',
+        count: 10,
+        confidence: 0.9,
+        ageDays: ages[i]!,
+      });
+    }
+
+    const results = await stub.getAllHighConfidenceKnowledge(0.8, 10, 8);
+
+    expect(results).toHaveLength(10);
+    // The freshest entity (age 0) caps at 8; the next freshest (age 100) supplies the
+    // remaining 2. Nothing older may appear.
+    const perEntity = new Map<string, number>();
+    for (const r of results) perEntity.set(r.entityName, (perEntity.get(r.entityName) ?? 0) + 1);
+    expect(perEntity.get('EntityF')).toBe(8);
+    expect(perEntity.get('EntityE')).toBe(2);
+    expect(perEntity.has('EntityA')).toBe(false);
+  });
+
+  /**
+   * `WHERE o.is_active = 1` was inherited from the pre-fix query, but the whole WHERE
+   * clause was rewritten into the `scored` CTE. Superseded observations must stay out.
+   */
+  it('excludes superseded (inactive) observations from the ranked set', async () => {
+    const entityId = await seedEntity(stub, {
+      name: 'AaaMixed',
+      entityType: 'context',
+      count: 6,
+      confidence: 0.95,
+      ageDays: 0,
+    });
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `UPDATE knowledge_observations SET is_active = 0
+         WHERE id IN (SELECT id FROM knowledge_observations WHERE entity_id = ? LIMIT 4)`,
+        entityId
+      );
+    });
+
+    const results = await stub.getAllHighConfidenceKnowledge(0.8, 50, 8);
+
+    expect(results).toHaveLength(2);
   });
 });
 
@@ -310,7 +428,7 @@ describe('knowledge entity index', () => {
     });
 
     const injected = await stub.getAllHighConfidenceKnowledge(0.8, 50, 8);
-    const index = await stub.getKnowledgeEntityIndex(200);
+    const { entries: index } = await stub.getKnowledgeEntityIndex(200);
 
     const injectedNames = new Set(injected.map((r) => r.entityName));
     expect(injectedNames.has('ZzzContentStyle')).toBe(false);
@@ -349,13 +467,70 @@ describe('knowledge entity index', () => {
       );
     });
 
-    const index = await stub.getKnowledgeEntityIndex(200);
+    const { entries: index } = await stub.getKnowledgeEntityIndex(200);
 
     // AaaBig drops to 2 active, tying BbbSmall, so the name tiebreak decides.
     expect(index.map((e) => [e.name, e.observationCount])).toEqual([
       ['AaaBig', 2],
       ['BbbSmall', 2],
     ]);
+  });
+
+  /**
+   * The RPC signatures take `perEntityLimit`/`limit` as optional and rely on the
+   * DO-side JS default parameter when omitted. Production callers always pass a
+   * resolved number, so nothing else exercises the omitted path across real
+   * Cloudflare RPC serialization — where `undefined` has to survive the hop and still
+   * trigger the default rather than arriving as null and capping at zero.
+   */
+  it('applies DO-side defaults when the optional limits are omitted over RPC', async () => {
+    const { stub } = freshStub();
+
+    await seedEntity(stub, {
+      name: 'AaaGrabBag',
+      entityType: 'preference',
+      count: 20,
+      confidence: 0.95,
+      ageDays: 0,
+    });
+
+    const ranked = await stub.getAllHighConfidenceKnowledge(0.8, 50);
+    const { entries: index } = await stub.getKnowledgeEntityIndex();
+
+    // KNOWLEDGE_DEFAULTS.autoRetrievePerEntityLimit === 8
+    expect(ranked).toHaveLength(8);
+    expect(index).toHaveLength(1);
+    expect(index[0]?.observationCount).toBe(20);
+  });
+
+  /**
+   * The index is itself capped, and a project may hold more entities than that cap
+   * (maxEntitiesPerProject 500 vs entityIndexLimit 200). Reporting only the capped rows
+   * with no total would let the caller label a truncated list "full" — this bug one
+   * layer up. The total must reflect reality, not the page size.
+   */
+  it('reports the true entity total when the index itself truncates', async () => {
+    const { stub } = freshStub();
+
+    for (let i = 0; i < 5; i++) {
+      await seedEntity(stub, {
+        name: `Entity${i}`,
+        entityType: 'context',
+        count: i + 1,
+        confidence: 0.9,
+        ageDays: 1,
+      });
+    }
+
+    const truncated = await stub.getKnowledgeEntityIndex(2);
+    expect(truncated.entries).toHaveLength(2);
+    expect(truncated.totalEntities).toBe(5);
+    // Densest first, so truncation drops the thinnest rather than the unlucky.
+    expect(truncated.entries.map((e) => e.observationCount)).toEqual([5, 4]);
+
+    const complete = await stub.getKnowledgeEntityIndex(200);
+    expect(complete.entries).toHaveLength(5);
+    expect(complete.totalEntities).toBe(5);
   });
 
   it('omits entities that have no active observations', async () => {
@@ -370,7 +545,7 @@ describe('knowledge entity index', () => {
       ageDays: 1,
     });
 
-    const index = await stub.getKnowledgeEntityIndex(200);
+    const { entries: index } = await stub.getKnowledgeEntityIndex(200);
 
     expect(index.map((e) => e.name)).toEqual(['HasObservations']);
   });

@@ -8,6 +8,7 @@ import { buildSafeFtsQuery } from '../../lib/fts5';
 import { createModuleLogger } from '../../lib/logger';
 import {
   parseCountCnt,
+  parseKnowledgeEntityIndexRow,
   parseKnowledgeEntityRow,
   parseKnowledgeObservationRow,
   parseKnowledgeObservationSearchRow,
@@ -17,6 +18,37 @@ import type { Env } from './types';
 import { generateId } from './types';
 
 const log = createModuleLogger('project_data.knowledge');
+
+/**
+ * Recency scale of the relevance score. At this age the recency factor is 0.5; at 3x
+ * it is 0.25.
+ *
+ * Shared by BOTH scoring paths — `getRelevantKnowledge` (JS, over FTS hits) and
+ * `getAllHighConfidenceKnowledge` (SQL, inside a window function). They cannot share
+ * an implementation because one runs before the rows are fetched, so this constant plus
+ * the parity test in tests/workers/knowledge-injection-ranking.test.ts is what keeps
+ * retrieval and injection agreeing on what "most relevant" means.
+ */
+export const RELEVANCE_RECENCY_SCALE_MS = 86_400_000 * 30;
+
+/**
+ * Relevance of one observation: confidence scaled by hyperbolic decay on how recently
+ * it was last confirmed.
+ *
+ *     score = confidence x 1 / (1 + ageMs / RELEVANCE_RECENCY_SCALE_MS)
+ *
+ * Canonical JS definition. The SQL in `getAllHighConfidenceKnowledge` mirrors this
+ * expression; a parity test pins the two together.
+ */
+export function computeRelevanceScore(
+  confidence: number,
+  lastConfirmedAtMs: number,
+  nowMs: number,
+  scaleMs: number = RELEVANCE_RECENCY_SCALE_MS,
+): number {
+  const ageMs = Math.max(0, nowMs - lastConfirmedAtMs);
+  return confidence * (1 / (1 + ageMs / scaleMs));
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -359,7 +391,7 @@ export function getRelevantKnowledge(sql: SqlStorage, context: string, limit: nu
     return ftsResults
       .map((r) => ({
         ...r,
-        score: r.confidence * (1 / (1 + (now - r.lastConfirmedAt) / (86400000 * 30))),
+        score: computeRelevanceScore(r.confidence, r.lastConfirmedAt, now),
       }))
       .sort((a, b) => b.score - a.score)
       .slice(0, limit);
@@ -380,12 +412,6 @@ export function getRelevantKnowledge(sql: SqlStorage, context: string, limit: nu
 }
 
 /**
- * Milliseconds in the recency half-point of the injection relevance score.
- * At this age the recency factor is 0.5; at 3x it is 0.25.
- */
-const RELEVANCE_RECENCY_SCALE_MS = 86_400_000 * 30;
-
-/**
  * Get active observations with confidence >= threshold for session-start
  * knowledge injection, ranked by relevance and capped per entity.
  *
@@ -395,8 +421,11 @@ const RELEVANCE_RECENCY_SCALE_MS = 86_400_000 * 30;
  * entities the agent is explicitly told to consult (ContentStyle, User, Architecture,
  * BusinessStrategy) never appeared at all.
  *
- * Score — identical to the formula already used by `getRelevantKnowledge` above, so
- * injection and retrieval rank knowledge the same way:
+ * The scoring expression below mirrors `computeRelevanceScore`, the canonical JS
+ * definition also used by `getRelevantKnowledge`, so injection and retrieval rank
+ * knowledge the same way. It has to be duplicated in SQL because the ranking happens
+ * inside a window function, before any row reaches JS; a parity test asserts the two
+ * agree, so a change to one that is not mirrored in the other fails CI.
  *
  *     score = confidence x 1 / (1 + ageDays / 30)
  *
@@ -450,7 +479,25 @@ export function getAllHighConfidenceKnowledge(
     now, RELEVANCE_RECENCY_SCALE_MS, minConfidence, perEntityLimit, limit,
   ).toArray();
 
-  return rows.map(parseKnowledgeObservationSearchRow);
+  // Per-row isolation (rule 50). A bare rows.map() throws on the FIRST malformed row and
+  // discards the entire ranked block for the session. That matters more here than
+  // anywhere else in this file: ranking deliberately surfaces entities that alphabetical
+  // truncation had starved for months, which are exactly the oldest, least-touched rows
+  // and so the likeliest to predate a schema tightening. Losing all injected knowledge
+  // because one legacy row is malformed is the failure this whole change exists to end.
+  const observations: ReturnType<typeof parseKnowledgeObservationSearchRow>[] = [];
+  for (const row of rows) {
+    try {
+      observations.push(parseKnowledgeObservationSearchRow(row));
+    } catch (err) {
+      log.warn('knowledge.high_confidence_row_skipped', {
+        observationId: typeof row.id === 'string' ? row.id : null,
+        entityName: typeof row.entity_name === 'string' ? row.entity_name : null,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return observations;
 }
 
 export interface KnowledgeEntityIndexEntry {
@@ -459,27 +506,46 @@ export interface KnowledgeEntityIndexEntry {
   observationCount: number;
 }
 
+export interface KnowledgeEntityIndex {
+  entries: KnowledgeEntityIndexEntry[];
+  /**
+   * Entities with at least one active observation, BEFORE `limit` is applied. When
+   * this exceeds `entries.length` the index itself is truncated and callers must not
+   * describe it as complete.
+   */
+  totalEntities: number;
+}
+
 /**
- * List every entity that has at least one active observation, with its active
- * observation count.
+ * List entities that have at least one active observation, with their active
+ * observation counts, plus the true total.
  *
  * This backs the injected entity index. Ranked+capped injection is necessarily
  * partial, and the previous alphabetical truncation was *silent* — an agent had no
  * way to learn that ContentStyle or Architecture existed at all. The index makes the
- * whole store discoverable at roughly a token per entity, so `search_knowledge` /
+ * store discoverable at roughly a token per entity, so `search_knowledge` /
  * `get_relevant_knowledge` become usable instead of guesses.
+ *
+ * `totalEntities` is returned separately and deliberately. A project may hold up to
+ * `maxEntitiesPerProject` (500) entities while the index caps at `entityIndexLimit`
+ * (200), so the index can truncate — and an index that quietly truncates while being
+ * labelled "full" would recreate this exact bug one layer up. The caller uses the
+ * total to say "N of M" instead of claiming completeness it cannot back.
  *
  * Counts cover all active observations, not just high-confidence ones, because that
  * is the set a follow-up search can actually reach.
  *
  * Ordered by count DESC then name ASC: a stable order that puts the densest topics
- * first, so truncation at `limit` drops the thinnest entities rather than the
- * alphabetically unlucky ones.
+ * first, so truncation drops the thinnest entities rather than the alphabetically
+ * unlucky ones — the failure mode this change exists to remove.
  */
 export function getKnowledgeEntityIndex(
   sql: SqlStorage,
   limit: number = KNOWLEDGE_DEFAULTS.entityIndexLimit,
-): KnowledgeEntityIndexEntry[] {
+): KnowledgeEntityIndex {
+  // A negative or fractional override would otherwise reach LIMIT verbatim and return
+  // nothing at all — the same silent-empty failure this change exists to remove.
+  const safeLimit = Math.max(1, Math.floor(limit));
   const rows = sql.exec(
     `SELECT e.name AS name, e.entity_type AS entity_type, COUNT(o.id) AS observation_count
      FROM knowledge_entities e
@@ -487,21 +553,28 @@ export function getKnowledgeEntityIndex(
      GROUP BY e.id, e.name, e.entity_type
      ORDER BY observation_count DESC, e.name ASC
      LIMIT ?`,
-    limit,
+    safeLimit,
   ).toArray();
+
+  // The true total, so the caller can say "N of M" instead of labelling a truncated
+  // list "full" -- which would recreate this bug one layer up.
+  const totalEntities = parseCountCnt(
+    sql.exec(
+      `SELECT COUNT(*) as cnt FROM (
+         SELECT e.id FROM knowledge_entities e
+         JOIN knowledge_observations o ON o.entity_id = e.id AND o.is_active = 1
+         GROUP BY e.id
+       )`,
+    ).toArray()[0],
+    'knowledge_entity_index_total',
+  );
 
   // Per-row isolation (rule 50): one malformed entity row must not fail the whole
   // index, which would take the agent's only discovery path down with it.
   const entries: KnowledgeEntityIndexEntry[] = [];
   for (const row of rows) {
     try {
-      const name = row.name;
-      const entityType = row.entity_type;
-      const observationCount = Number(row.observation_count);
-      if (typeof name !== 'string' || typeof entityType !== 'string' || !Number.isFinite(observationCount)) {
-        throw new Error('unexpected column types');
-      }
-      entries.push({ name, entityType, observationCount });
+      entries.push(parseKnowledgeEntityIndexRow(row));
     } catch (err) {
       log.warn('knowledge.entity_index_row_skipped', {
         entityName: typeof row.name === 'string' ? row.name : null,
@@ -509,7 +582,7 @@ export function getKnowledgeEntityIndex(
       });
     }
   }
-  return entries;
+  return { entries, totalEntities };
 }
 
 // ─── Relations ──────────────────────────────────────────────────────────────

@@ -93,11 +93,14 @@ describe('MCP instruction context handlers', () => {
         confidence: 0.95,
       },
     ]);
-    mocks.projectData.getKnowledgeEntityIndex.mockResolvedValue([
-      { name: 'Architecture', entityType: 'context', observationCount: 4 },
-      { name: 'ContentStyle', entityType: 'preference', observationCount: 7 },
-      { name: 'BusinessStrategy', entityType: 'context', observationCount: 2 },
-    ]);
+    mocks.projectData.getKnowledgeEntityIndex.mockResolvedValue({
+      entries: [
+        { name: 'Architecture', entityType: 'context', observationCount: 4 },
+        { name: 'ContentStyle', entityType: 'preference', observationCount: 7 },
+        { name: 'BusinessStrategy', entityType: 'context', observationCount: 2 },
+      ],
+      totalEntities: 3,
+    });
     mocks.projectData.getActivePolicies.mockResolvedValue([
       {
         id: 'policy-1',
@@ -137,7 +140,7 @@ describe('MCP instruction context handlers', () => {
     // The agent must be told the block is partial and how to reach the rest.
     expect(directives).toContain('search_knowledge');
     expect(directives).toContain('get_relevant_knowledge');
-    expect(directives).toContain('2 of these entities have no observations shown above');
+    expect(directives).toContain('2 of the entities listed here have no observations shown above');
   });
 
   it('passes the per-entity cap through to the knowledge query', async () => {
@@ -172,10 +175,54 @@ describe('MCP instruction context handlers', () => {
     expect(payload.task).toMatchObject({ id: 'task-1' });
   });
 
+  it('keeps the ranked directives when only the entity index fails', async () => {
+    mocks.selectRows = [[task], [project]];
+    mocks.projectData.getKnowledgeEntityIndex.mockRejectedValue(new Error('DO unavailable'));
+
+    const response = await handleGetInstructions('request-1', baseToken, makeEnv());
+    const directives = String(parseInstructionPayload(response).knowledgeDirectives);
+
+    // Mirror of the ranked-retrieval failure case: each read is isolated, so losing one
+    // must not take the other down with it.
+    expect(directives).toContain('Worker control plane');
+    expect(directives).not.toContain('knowledge index');
+  });
+
+  it('degrades to the bootstrap prompt when both knowledge reads fail', async () => {
+    mocks.selectRows = [[task], [project]];
+    mocks.projectData.getAllHighConfidenceKnowledge.mockRejectedValue(new Error('DO down'));
+    mocks.projectData.getKnowledgeEntityIndex.mockRejectedValue(new Error('DO down'));
+
+    const response = await handleGetInstructions('request-1', baseToken, makeEnv());
+    const payload = parseInstructionPayload(response);
+
+    // Both isolated handlers firing at once must not combine into a broken payload.
+    expect(payload.knowledgeDirectives).toBeUndefined();
+    expect(JSON.stringify(payload.instructions)).toContain('no stored knowledge yet');
+    // Liveness control — the request still succeeded rather than erroring out.
+    expect(payload.task).toMatchObject({ id: 'task-1' });
+  });
+
+  it('labels the index as partial when more entities exist than are listed', async () => {
+    mocks.selectRows = [[task], [project]];
+    mocks.projectData.getKnowledgeEntityIndex.mockResolvedValue({
+      entries: [{ name: 'Architecture', entityType: 'context', observationCount: 4 }],
+      totalEntities: 12,
+    });
+
+    const response = await handleGetInstructions('request-1', baseToken, makeEnv());
+    const directives = String(parseInstructionPayload(response).knowledgeDirectives);
+
+    // Must NOT claim completeness it cannot back.
+    expect(directives).not.toContain('Full knowledge index');
+    expect(directives).toContain('1 of 12 entities');
+    expect(directives).toContain('A further 11 entities are not listed');
+  });
+
   it('omits the index section when the project has no entities', async () => {
     mocks.selectRows = [[task], [project]];
     mocks.projectData.getAllHighConfidenceKnowledge.mockResolvedValue([]);
-    mocks.projectData.getKnowledgeEntityIndex.mockResolvedValue([]);
+    mocks.projectData.getKnowledgeEntityIndex.mockResolvedValue({ entries: [], totalEntities: 0 });
 
     const response = await handleGetInstructions('request-1', baseToken, makeEnv());
     const payload = parseInstructionPayload(response);
