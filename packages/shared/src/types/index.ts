@@ -635,15 +635,18 @@ export type {
   CreatePolicyRequest,
   ListPoliciesResponse,
   PolicyCategory,
+  PolicyScope,
   PolicySource,
   ProjectPolicy,
   UpdatePolicyRequest,
 } from './policy';
 export {
   isPolicyCategory,
+  isPolicyScope,
   isPolicySource,
   POLICY_CATEGORIES,
   POLICY_DEFAULTS,
+  POLICY_SCOPES,
   POLICY_SOURCES,
 } from './policy';
 

@@ -3,8 +3,16 @@
  *
  * Phase 4: Policy Propagation
  */
-import type { PolicyCategory, PolicySource } from '@simple-agent-manager/shared';
-import { isPolicyCategory, isPolicySource, POLICY_CATEGORIES, resolvePolicyLimits } from '@simple-agent-manager/shared';
+import type { PolicyCategory, PolicyScope, PolicySource } from '@simple-agent-manager/shared';
+import {
+  isPolicyCategory,
+  isPolicyScope,
+  isPolicySource,
+  POLICY_CATEGORIES,
+  POLICY_SCOPES,
+  resolvePolicyLimits,
+  validatePolicyLifecycle,
+} from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
@@ -38,6 +46,43 @@ function validatePageNumber(
   const rounded = Math.round(value);
   const minBounded = fieldName === 'offset' ? Math.max(0, rounded) : Math.max(1, rounded);
   return { ok: true, value: maxValue === undefined ? minBounded : Math.min(minBounded, maxValue) };
+}
+
+/**
+ * Parse the raw `scope` / `expiresAt` MCP params into typed values.
+ * Type-shape only — the scope/expiry *relationship* is validated by the shared
+ * `validatePolicyLifecycle`, which the REST routes call too (rule 24).
+ */
+function parseLifecycleParams(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+): { ok: true; scope?: PolicyScope; expiresAt?: number | null } | { ok: false; response: JsonRpcResponse } {
+  let scope: PolicyScope | undefined;
+  if (params.scope !== undefined) {
+    if (typeof params.scope !== 'string' || !isPolicyScope(params.scope)) {
+      return {
+        ok: false,
+        response: jsonRpcError(requestId, INVALID_PARAMS, `scope must be one of: ${POLICY_SCOPES.join(', ')}`),
+      };
+    }
+    scope = params.scope;
+  }
+
+  let expiresAt: number | null | undefined;
+  if (params.expiresAt !== undefined) {
+    if (params.expiresAt === null) {
+      expiresAt = null;
+    } else if (typeof params.expiresAt !== 'number' || !Number.isFinite(params.expiresAt)) {
+      return {
+        ok: false,
+        response: jsonRpcError(requestId, INVALID_PARAMS, 'expiresAt must be a number (epoch milliseconds) or null'),
+      };
+    } else {
+      expiresAt = params.expiresAt;
+    }
+  }
+
+  return { ok: true, scope, expiresAt };
 }
 
 export async function handleAddPolicy(
@@ -90,12 +135,30 @@ export async function handleAddPolicy(
     confidence = params.confidence;
   }
 
+  // Validate lifecycle (scope + expiry). A task-scoped policy must carry an expiry
+  // so a one-shot constraint cannot silently become a permanent one.
+  const lifecycle = parseLifecycleParams(requestId, params);
+  if (!lifecycle.ok) return lifecycle.response;
+  const scope: PolicyScope = lifecycle.scope ?? 'always';
+  const expiresAt = lifecycle.expiresAt ?? null;
+  const lifecycleError = validatePolicyLifecycle({
+    scope,
+    expiresAt,
+    now: Date.now(),
+    maxExpiryMs: limits.maxExpiryMs,
+  });
+  if (lifecycleError) {
+    return jsonRpcError(requestId, INVALID_PARAMS, lifecycleError);
+  }
+
   try {
     const result = await projectDataService.createPolicy(
       env, tokenData.projectId,
       category, title, content, source,
       tokenData.taskId, // use current taskId's session as source
       confidence,
+      scope,
+      expiresAt,
     );
 
     log.info('mcp.add_policy', {
@@ -103,6 +166,8 @@ export async function handleAddPolicy(
       policyId: result.id,
       category,
       source,
+      scope,
+      expiresAt,
     });
 
     return jsonRpcSuccess(requestId, {
@@ -112,6 +177,8 @@ export async function handleAddPolicy(
         title,
         source,
         confidence,
+        scope,
+        expiresAt,
         createdAt: result.now,
       }) }],
     });
@@ -229,13 +296,46 @@ export async function handleUpdatePolicy(
     updates.confidence = params.confidence;
   }
 
+  const lifecycle = parseLifecycleParams(requestId, params);
+  if (!lifecycle.ok) return lifecycle.response;
+  if (lifecycle.scope !== undefined) updates.scope = lifecycle.scope;
+  if (lifecycle.expiresAt !== undefined) updates.expiresAt = lifecycle.expiresAt;
+
   if (Object.keys(updates).length === 0) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'At least one update field must be provided');
   }
 
-  const updated = await projectDataService.updatePolicy(
-    env, tokenData.projectId, policyId, updates as Parameters<typeof projectDataService.updatePolicy>[3],
-  );
+  // The scope/expiry invariant applies to the policy as it will be AFTER the write,
+  // so validate the merge of the update against the stored row — not the patch alone.
+  // Without this, `{scope:'task'}` on a policy that already has an expiry would be
+  // wrongly rejected, and `{expiresAt:null}` on a task-scoped policy would wrongly
+  // succeed and resurrect a permanent one-shot policy.
+  if (lifecycle.scope !== undefined || lifecycle.expiresAt !== undefined) {
+    const existing = await projectDataService.getPolicy(env, tokenData.projectId, policyId);
+    if (!existing) {
+      return jsonRpcError(requestId, INVALID_PARAMS, `Policy not found: ${policyId}`);
+    }
+    const lifecycleError = validatePolicyLifecycle({
+      scope: lifecycle.scope ?? existing.scope,
+      expiresAt: lifecycle.expiresAt !== undefined ? lifecycle.expiresAt : existing.expiresAt,
+      now: Date.now(),
+      maxExpiryMs: limits.maxExpiryMs,
+    });
+    if (lifecycleError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, lifecycleError);
+    }
+  }
+
+  let updated: boolean;
+  try {
+    updated = await projectDataService.updatePolicy(
+      env, tokenData.projectId, policyId, updates as Parameters<typeof projectDataService.updatePolicy>[3],
+    );
+  } catch (err) {
+    // The DO enforces the same invariant as a final guard; it crosses the RPC
+    // boundary as a plain Error, so map by message rather than by type (rule 63).
+    return jsonRpcError(requestId, INVALID_PARAMS, err instanceof Error ? err.message : String(err));
+  }
 
   if (!updated) {
     return jsonRpcError(requestId, INVALID_PARAMS, `Policy not found: ${policyId}`);

@@ -2,7 +2,7 @@
  * Policy service functions — extracted from project-data.ts for file size compliance.
  * Re-exported from project-data.ts so consumers don't need to change imports.
  */
-import type { PolicyCategory, PolicySource } from '@simple-agent-manager/shared';
+import type { PolicyCategory, PolicyScope, PolicySource } from '@simple-agent-manager/shared';
 
 import type { ProjectData } from '../durable-objects/project-data';
 import type { Env } from '../env';
@@ -18,9 +18,12 @@ export async function createPolicy(
   env: Env, projectId: string,
   category: PolicyCategory, title: string, content: string,
   source: PolicySource, sourceSessionId: string | null, confidence: number,
+  scope: PolicyScope = 'always', expiresAt: number | null = null,
 ) {
   const stub = await getStub(env, projectId);
-  return stub.createPolicy(category, title, content, source, sourceSessionId, confidence);
+  return stub.createPolicy(
+    category, title, content, source, sourceSessionId, confidence, scope, expiresAt,
+  );
 }
 
 export async function getPolicy(env: Env, projectId: string, policyId: string) {
@@ -37,7 +40,10 @@ export async function listPolicies(
 
 export async function updatePolicy(
   env: Env, projectId: string, policyId: string,
-  updates: { title?: string; content?: string; category?: PolicyCategory; active?: boolean; confidence?: number },
+  updates: {
+    title?: string; content?: string; category?: PolicyCategory; active?: boolean;
+    confidence?: number; scope?: PolicyScope; expiresAt?: number | null;
+  },
 ) {
   const stub = await getStub(env, projectId);
   return stub.updatePolicy(policyId, updates);

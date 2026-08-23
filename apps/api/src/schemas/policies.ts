@@ -29,6 +29,12 @@ export const CreatePolicySchema = v.object({
   content: v.optional(v.nullable(v.string())),
   source: v.optional(v.string()),
   confidence: v.optional(v.unknown()),
+  // `scope` is passed to the `isPolicyScope` type guard, same as category/source.
+  scope: v.optional(v.string()),
+  // `expiresAt` stays unknown: the handler guards it with its own `typeof` check
+  // and then hands the pair to the shared `validatePolicyLifecycle`, which owns
+  // the real error messages. Nullable because null means "never expires".
+  expiresAt: v.optional(v.nullable(v.unknown())),
 });
 
 export const UpdatePolicySchema = v.object({
@@ -38,4 +44,8 @@ export const UpdatePolicySchema = v.object({
   category: v.optional(v.string()),
   active: v.optional(v.unknown()),
   confidence: v.optional(v.unknown()),
+  scope: v.optional(v.string()),
+  // On update, an explicit null clears the expiry (makes the policy permanent),
+  // which is why this is nullable rather than merely optional.
+  expiresAt: v.optional(v.nullable(v.unknown())),
 });
