@@ -31,6 +31,15 @@ const MARKDOWN_BODY = [
   '| Column | Value |',
   '| --- | --- |',
   '| Long text | A very long markdown table value that should wrap instead of pushing the modal wider than the viewport. |',
+  '',
+  // Enough body copy that a paragraph lands in the bottom band of a 375x667
+  // viewport — the position where a bottom-pinned action bar would cover the
+  // selection and its lower drag handle.
+  ...Array.from(
+    { length: 10 },
+    (_, i) =>
+      `Filler paragraph ${i + 1} carries a reasonably long sentence a reader might select and quote.\n`
+  ),
 ].join('\n');
 
 const MOCK_PROJECT = {
@@ -165,7 +174,8 @@ async function setupMocks(page: Page, scenario: Scenario) {
                 anchor: {
                   kind: 'library_file',
                   fileId: FILE_ID,
-                  quote: 'The quick brown fox jumps over the lazy dog and keeps going for quite a while.',
+                  quote:
+                    'The quick brown fox jumps over the lazy dog and keeps going for quite a while.',
                 },
               }),
               thread({
@@ -179,7 +189,10 @@ async function setupMocks(page: Page, scenario: Scenario) {
               }),
             ]
           : [];
-      return route.fulfill({ status: 200, json: { threads: [...seeded, ...created], hasMore: false } });
+      return route.fulfill({
+        status: 200,
+        json: { threads: [...seeded, ...created], hasMore: false },
+      });
     }
 
     return route.fallback();
@@ -236,6 +249,56 @@ function suffixFor(page: Page) {
 }
 
 test.describe('Library file comments', () => {
+  test('the selection action bar never covers the selection it acts on', async ({ page }) => {
+    // Regression for a bug the other selection test structurally cannot catch:
+    // it always selects the FIRST paragraph, which on a 375x667 viewport sits
+    // far from the bottom. A bottom-pinned bar only covers the selection when
+    // the selection is low on the screen — exactly where chat's alignToBottom
+    // puts the newest message.
+    await setupMocks(page, 'empty');
+    await openPreview(page);
+
+    const selected = await page.evaluate(() => {
+      const anchor = document.querySelector('[data-comment-anchor]');
+      if (!anchor) return null;
+      // The lowest paragraph that is still fully on screen.
+      const target = Array.from(anchor.querySelectorAll('p'))
+        .filter((el) => {
+          const r = el.getBoundingClientRect();
+          return r.height > 0 && r.bottom <= window.innerHeight && r.top >= 0;
+        })
+        .pop();
+      if (!target) return null;
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+      document.dispatchEvent(new Event('selectionchange'));
+      document.dispatchEvent(new Event('mouseup'));
+      const r = target.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, viewport: window.innerHeight };
+    });
+    expect(selected, 'no fully-visible paragraph found to select').not.toBeNull();
+    // The fixture must actually put the selection in the danger band, or this
+    // test would pass for the wrong reason.
+    expect(selected!.bottom).toBeGreaterThan(selected!.viewport * 0.6);
+
+    const bar = page.getByLabel('Comment on selection');
+    await expect(bar).toBeVisible();
+    const barBox = await bar.boundingBox();
+    expect(barBox).not.toBeNull();
+
+    // The whole point: the affordance must not sit on top of the text it acts
+    // on, or the lower drag handle is unreachable and the user is stuck on one
+    // word.
+    const overlaps = barBox!.y < selected!.bottom && barBox!.y + barBox!.height > selected!.top;
+    expect(overlaps, 'action bar overlaps the selected text').toBe(false);
+
+    await screenshot(page, `library-file-comments-low-selection-${suffixFor(page)}`);
+    await assertNoOverflow(page);
+  });
+
   test('empty state', async ({ page }) => {
     await setupMocks(page, 'empty');
     await openPreview(page);
@@ -303,8 +366,7 @@ test.describe('Library file comments', () => {
       page.waitForRequest(
         (req) =>
           req.method() === 'POST' &&
-          new URL(req.url()).pathname ===
-            `/api/projects/${PROJECT_ID}/library/${FILE_ID}/comments`
+          new URL(req.url()).pathname === `/api/projects/${PROJECT_ID}/library/${FILE_ID}/comments`
       ),
       panel.getByRole('button', { name: 'Comment', exact: true }).click(),
     ]);
@@ -330,8 +392,6 @@ test.describe('Library file comments', () => {
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await page.getByRole('button', { name: `Open ${FILE_NAME}` }).click();
     await openCommentPanel(page);
-    await expect(
-      commentPanel(page).getByText('This sentence needs a citation.')
-    ).toBeVisible();
+    await expect(commentPanel(page).getByText('This sentence needs a citation.')).toBeVisible();
   });
 });

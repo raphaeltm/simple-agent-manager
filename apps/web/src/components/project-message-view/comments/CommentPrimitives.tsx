@@ -1,4 +1,5 @@
 import { Button, Popover } from '@simple-agent-manager/ui';
+import { useLayoutEffect, useRef, useState } from 'react';
 
 import { COMMENT_STATUS_LABELS, type UiMessageCommentThread } from './comment-utils';
 
@@ -32,7 +33,9 @@ export function CommentStatusPill({ status }: Pick<UiMessageCommentThread, 'stat
     <span
       className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.6875rem] font-medium whitespace-nowrap ${toneClass}`}
     >
-      {status === 'sent' && <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />}
+      {status === 'sent' && (
+        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />
+      )}
       {COMMENT_STATUS_LABELS[status]}
     </span>
   );
@@ -112,29 +115,70 @@ export function SelectionPopover({
   );
 }
 
+/** Breathing room kept between the bar and the selection it must not cover. */
+const SELECTION_BAR_GUTTER_PX = 8;
+
 export function SelectionActionBar({
   quote,
+  selectionBottom,
   onComment,
   onDismiss,
 }: {
   quote: string;
+  /**
+   * Viewport-space bottom of the selection. When omitted the bar stays pinned
+   * to the bottom, preserving the previous behaviour for callers that have no
+   * geometry to offer.
+   */
+  selectionBottom?: number;
   onComment: () => void;
   onDismiss: () => void;
 }) {
+  const barRef = useRef<HTMLDivElement>(null);
+  const [placeTop, setPlaceTop] = useState(false);
+
+  // Measured rather than estimated: the bar's height depends on how many lines
+  // the quote wraps to. useLayoutEffect so the flip happens before paint —
+  // rendering low and then jumping would be worse than either position.
+  useLayoutEffect(() => {
+    const bar = barRef.current;
+    if (!bar || selectionBottom === undefined) {
+      setPlaceTop(false);
+      return;
+    }
+    const barTopIfBottomPinned = window.innerHeight - bar.offsetHeight;
+    setPlaceTop(selectionBottom + SELECTION_BAR_GUTTER_PX > barTopIfBottomPinned);
+  }, [quote, selectionBottom]);
+
   return (
     <div
+      ref={barRef}
       role="dialog"
       aria-label="Comment on selection"
-      className="fixed inset-x-0 bottom-0 z-panel border-t border-border-default bg-surface px-3 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] shadow-lg"
+      data-placement={placeTop ? 'top' : 'bottom'}
+      className={`fixed inset-x-0 z-panel border-border-default bg-surface px-3 shadow-lg ${
+        placeTop
+          ? 'top-0 border-b pt-[calc(0.625rem+env(safe-area-inset-top))] pb-2.5'
+          : 'bottom-0 border-t pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))]'
+      }`}
     >
       <p className="m-0 mb-2 line-clamp-2 border-l-2 border-tn-blue pl-2 text-xs italic text-fg-muted [overflow-wrap:anywhere]">
         {quote}
       </p>
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" onMouseDown={(e: React.MouseEvent) => e.preventDefault()} onClick={onComment}>
+        <Button
+          size="sm"
+          onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+          onClick={onComment}
+        >
           Comment on selection
         </Button>
-        <Button size="sm" variant="ghost" onMouseDown={(e: React.MouseEvent) => e.preventDefault()} onClick={onDismiss}>
+        <Button
+          size="sm"
+          variant="ghost"
+          onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+          onClick={onDismiss}
+        >
           Dismiss
         </Button>
       </div>

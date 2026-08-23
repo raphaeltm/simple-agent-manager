@@ -470,6 +470,7 @@ export function FilePreviewModal({
         (coarsePointer ? (
           <SelectionActionBar
             quote={selection.quote}
+            selectionBottom={selection.rectBottom}
             onComment={startQuotedComment}
             onDismiss={() => {
               clearSelection();

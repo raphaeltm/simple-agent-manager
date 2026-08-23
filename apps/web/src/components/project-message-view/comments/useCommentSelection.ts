@@ -5,6 +5,19 @@ export interface ActiveMessageSelection {
   quote: string;
   x: number;
   y: number;
+  /**
+   * Viewport-space top/bottom of the selection itself, latched alongside the
+   * quote. The coarse-pointer action bar needs this to avoid rendering on top
+   * of the very text it is acting on — a bottom-pinned bar hides the lower drag
+   * handle when the selection sits low on the screen, which leaves the user
+   * unable to extend past the first word.
+   *
+   * Latched rather than read live for the same reason as the quote: by the time
+   * the bar renders, the browser may already have collapsed the Selection
+   * (see the snapshot-latching fix in PR #1883).
+   */
+  rectTop: number;
+  rectBottom: number;
 }
 
 const MIN_SELECTION_CHARS = 3;
@@ -26,10 +39,7 @@ function findCommentAnchor(node: Node | null): HTMLElement | null {
   return null;
 }
 
-export function useCommentSelection(
-  enabled: boolean,
-  containerRef: RefObject<HTMLElement | null>
-) {
+export function useCommentSelection(enabled: boolean, containerRef: RefObject<HTMLElement | null>) {
   const [selection, setSelection] = useState<ActiveMessageSelection | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -49,7 +59,12 @@ export function useCommentSelection(
       // tap elsewhere), keep the existing snapshot — it already holds anchorId +
       // quote.  Only explicit user actions (Dismiss, Comment, new selection
       // outside chat, session change) should clear it.
-      if (!currentSelection || !container || currentSelection.isCollapsed || currentSelection.rangeCount === 0) {
+      if (
+        !currentSelection ||
+        !container ||
+        currentSelection.isCollapsed ||
+        currentSelection.rangeCount === 0
+      ) {
         return;
       }
 
@@ -81,6 +96,8 @@ export function useCommentSelection(
         quote: truncateQuote(text),
         x: Math.min(Math.max(rect.left + rect.width / 2, 56), window.innerWidth - 56),
         y: Math.min(Math.max(rect.top, 44), window.innerHeight - 16),
+        rectTop: rect.top,
+        rectBottom: rect.bottom,
       });
     };
 

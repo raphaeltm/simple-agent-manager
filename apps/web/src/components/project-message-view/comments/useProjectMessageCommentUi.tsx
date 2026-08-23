@@ -104,6 +104,7 @@ export function useProjectMessageCommentUi({
       coarsePointer ? (
         <SelectionActionBar
           quote={selection.quote}
+          selectionBottom={selection.rectBottom}
           onComment={() =>
             startComment({
               anchorId: selection.anchorId,
