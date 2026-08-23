@@ -42,9 +42,7 @@ function fileThreadToUi(thread: LibraryFileCommentThread): UiCommentThread {
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
     status: thread.status,
-    replies: thread.replies.map(
-      (r): UiMessageCommentReply => ({ ...r, syncState: 'synced' })
-    ),
+    replies: thread.replies.map((r): UiMessageCommentReply => ({ ...r, syncState: 'synced' })),
     syncState: 'synced',
   };
 }
@@ -89,6 +87,53 @@ function makeOptimisticReply(
   };
 }
 
+type OptimisticMutationContext = {
+  queryClient: ReturnType<typeof useQueryClient>;
+  queryKey: readonly unknown[];
+  setCache: (
+    updater: (prev: LibraryFileCommentThread[] | undefined) => LibraryFileCommentThread[]
+  ) => void;
+  setMutationError: (message: string | null) => void;
+};
+
+/**
+ * All four comment mutations share the same optimistic shape: snapshot the
+ * cache, apply a local edit, roll back and report the reason on failure, write
+ * the authoritative server row on success. Only the request and the local edit
+ * differ, so those are the only things a caller supplies.
+ *
+ * Deliberately no `onSettled` invalidation: `onSuccess` already stores the
+ * server's row, so refetching after every mutation only doubles the round trips
+ * (.claude/rules/60-request-io-and-bundle-budgets.md).
+ */
+function useOptimisticThreadMutation<TInput>(
+  ctx: OptimisticMutationContext,
+  mutationFn: (input: TInput) => Promise<{ thread: LibraryFileCommentThread }>,
+  applyOptimistic: (
+    threads: LibraryFileCommentThread[],
+    input: TInput
+  ) => LibraryFileCommentThread[]
+) {
+  return useMutation({
+    mutationFn,
+    onMutate: async (input: TInput) => {
+      ctx.setMutationError(null);
+      await ctx.queryClient.cancelQueries({ queryKey: ctx.queryKey });
+      const previous = ctx.queryClient.getQueryData<LibraryFileCommentThread[]>(ctx.queryKey);
+      ctx.setCache((prev) => applyOptimistic(prev ?? [], input));
+      return { previous };
+    },
+    onError: (err, _input, rollback) => {
+      if (rollback?.previous) ctx.queryClient.setQueryData(ctx.queryKey, rollback.previous);
+      ctx.setMutationError(err instanceof Error ? err.message : 'Could not save that comment.');
+      void ctx.queryClient.invalidateQueries({ queryKey: ctx.queryKey });
+    },
+    onSuccess: (response) => {
+      ctx.setCache((prev) => upsertLibraryFileCommentThread(prev, response.thread));
+    },
+  });
+}
+
 export function useLibraryFileComments(projectId: string, fileId: string) {
   const queryScope = useQueryScope();
   const queryClient = useQueryClient();
@@ -108,124 +153,62 @@ export function useLibraryFileComments(projectId: string, fileId: string) {
   });
 
   const setCache = useCallback(
-    (
-      updater: (
-        prev: LibraryFileCommentThread[] | undefined
-      ) => LibraryFileCommentThread[]
-    ) => {
-      queryClient.setQueryData<LibraryFileCommentThread[]>(queryKey, (prev) =>
-        updater(prev)
-      );
+    (updater: (prev: LibraryFileCommentThread[] | undefined) => LibraryFileCommentThread[]) => {
+      queryClient.setQueryData<LibraryFileCommentThread[]>(queryKey, (prev) => updater(prev));
     },
     [queryClient, queryKey]
   );
 
-  const createThreadMutation = useMutation({
-    mutationFn: (input: { body: string; quote?: string; clientId: string }) =>
+  const shared = useMemo(
+    () => ({ queryClient, queryKey, setCache, setMutationError }),
+    [queryClient, queryKey, setCache]
+  );
+
+  const createThreadMutation = useOptimisticThreadMutation(
+    shared,
+    (input: { body: string; quote?: string; clientId: string }) =>
       createLibraryFileCommentThread(projectId, fileId, {
         body: input.body,
         quote: input.quote,
         clientMutationId: input.clientId,
       }),
-    onMutate: async (input) => {
-      setMutationError(null);
-      await queryClient.cancelQueries({ queryKey });
-      const previous = queryClient.getQueryData<LibraryFileCommentThread[]>(queryKey);
-      const optimistic = makeOptimisticFileThread(
-        projectId,
-        fileId,
-        input.body,
-        buildOptimisticAuthor(user),
-        { quote: input.quote, clientId: input.clientId }
-      );
-      setCache((prev) => [...(prev ?? []), optimistic]);
-      return { previous, optimisticId: optimistic.id };
-    },
-    onError: (err, _input, ctx) => {
-      if (ctx?.previous) {
-        queryClient.setQueryData(queryKey, ctx.previous);
-      }
-      setMutationError(err instanceof Error ? err.message : 'Could not save that comment.');
-      void queryClient.invalidateQueries({ queryKey });
-    },
-    onSuccess: (response) => {
-      setCache((prev) => upsertLibraryFileCommentThread(prev, response.thread));
-    },
-  });
+    (threads, input) => [
+      ...threads,
+      makeOptimisticFileThread(projectId, fileId, input.body, buildOptimisticAuthor(user), {
+        quote: input.quote,
+        clientId: input.clientId,
+      }),
+    ]
+  );
 
-  const replyMutation = useMutation({
-    mutationFn: (input: { threadId: string; body: string; clientId: string }) =>
+  const replyMutation = useOptimisticThreadMutation(
+    shared,
+    (input: { threadId: string; body: string; clientId: string }) =>
       replyToLibraryFileComment(projectId, fileId, input.threadId, {
         body: input.body,
         clientMutationId: input.clientId,
       }),
-    onMutate: async (input) => {
-      setMutationError(null);
-      await queryClient.cancelQueries({ queryKey });
-      const previous = queryClient.getQueryData<LibraryFileCommentThread[]>(queryKey);
+    (threads, input) => {
       const reply = makeOptimisticReply(input.body, buildOptimisticAuthor(user), input.clientId);
-      setCache((prev) =>
-        (prev ?? []).map((t) =>
-          t.id === input.threadId ? { ...t, replies: [...t.replies, reply] } : t
-        )
+      return threads.map((t) =>
+        t.id === input.threadId ? { ...t, replies: [...t.replies, reply] } : t
       );
-      return { previous };
-    },
-    onError: (err, _input, ctx) => {
-      if (ctx?.previous) queryClient.setQueryData(queryKey, ctx.previous);
-      setMutationError(err instanceof Error ? err.message : 'Could not save that comment.');
-      void queryClient.invalidateQueries({ queryKey });
-    },
-    onSuccess: (response) => {
-      setCache((prev) => upsertLibraryFileCommentThread(prev, response.thread));
-    },
-  });
+    }
+  );
 
-  const resolveMutation = useMutation({
-    mutationFn: (threadId: string) => resolveLibraryFileComment(projectId, fileId, threadId),
-    onMutate: async (threadId) => {
-      setMutationError(null);
-      await queryClient.cancelQueries({ queryKey });
-      const previous = queryClient.getQueryData<LibraryFileCommentThread[]>(queryKey);
-      setCache((prev) =>
-        (prev ?? []).map((t) =>
-          t.id === threadId ? { ...t, status: 'resolved' as const } : t
-        )
-      );
-      return { previous };
-    },
-    onError: (err, _input, ctx) => {
-      if (ctx?.previous) queryClient.setQueryData(queryKey, ctx.previous);
-      setMutationError(err instanceof Error ? err.message : 'Could not save that comment.');
-      void queryClient.invalidateQueries({ queryKey });
-    },
-    onSuccess: (response) => {
-      setCache((prev) => upsertLibraryFileCommentThread(prev, response.thread));
-    },
-  });
+  const resolveMutation = useOptimisticThreadMutation(
+    shared,
+    (threadId: string) => resolveLibraryFileComment(projectId, fileId, threadId),
+    (threads, threadId) =>
+      threads.map((t) => (t.id === threadId ? { ...t, status: 'resolved' as const } : t))
+  );
 
-  const reopenMutation = useMutation({
-    mutationFn: (threadId: string) => reopenLibraryFileComment(projectId, fileId, threadId),
-    onMutate: async (threadId) => {
-      setMutationError(null);
-      await queryClient.cancelQueries({ queryKey });
-      const previous = queryClient.getQueryData<LibraryFileCommentThread[]>(queryKey);
-      setCache((prev) =>
-        (prev ?? []).map((t) =>
-          t.id === threadId ? { ...t, status: 'open' as const } : t
-        )
-      );
-      return { previous };
-    },
-    onError: (err, _input, ctx) => {
-      if (ctx?.previous) queryClient.setQueryData(queryKey, ctx.previous);
-      setMutationError(err instanceof Error ? err.message : 'Could not save that comment.');
-      void queryClient.invalidateQueries({ queryKey });
-    },
-    onSuccess: (response) => {
-      setCache((prev) => upsertLibraryFileCommentThread(prev, response.thread));
-    },
-  });
+  const reopenMutation = useOptimisticThreadMutation(
+    shared,
+    (threadId: string) => reopenLibraryFileComment(projectId, fileId, threadId),
+    (threads, threadId) =>
+      threads.map((t) => (t.id === threadId ? { ...t, status: 'open' as const } : t))
+  );
 
   return {
     comments: commentsQuery.data ?? [],

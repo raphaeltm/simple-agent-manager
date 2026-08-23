@@ -7,7 +7,7 @@
  * capability before touching data.
  */
 import { drizzle } from 'drizzle-orm/d1';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
@@ -32,16 +32,38 @@ import * as projectDataService from '../services/project-data';
 
 export const libraryCommentRoutes = new Hono<{ Bindings: Env }>();
 
+type LibraryCommentScope = {
+  projectId: string;
+  fileId: string;
+  threadId: string;
+};
+
 /**
- * GET /api/projects/:projectId/library/:fileId/comments
+ * Resolves the route params and authorizes the caller for this project.
+ *
+ * Every handler below needs exactly this preamble, so it lives in one place —
+ * a handler that forgot the capability check would otherwise be a one-line
+ * omission with no visible symptom.
  */
-libraryCommentRoutes.get('/:fileId/comments', async (c) => {
+async function authorizeScope(
+  c: Context<{ Bindings: Env }>,
+  capability: 'task:read' | 'task:write'
+): Promise<LibraryCommentScope> {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const fileId = requireRouteParam(c, 'fileId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireProjectCapability(db, projectId, userId, 'task:read');
+  await requireProjectCapability(db, projectId, userId, capability);
+
+  return { projectId, fileId, threadId: c.req.param('threadId') ?? '' };
+}
+
+/**
+ * GET /api/projects/:projectId/library/:fileId/comments
+ */
+libraryCommentRoutes.get('/:fileId/comments', async (c) => {
+  const { projectId, fileId } = await authorizeScope(c, 'task:read');
 
   try {
     await assertLibraryFileInProject(c.env, projectId, fileId);
@@ -64,15 +86,15 @@ libraryCommentRoutes.post(
   '/:fileId/comments',
   jsonValidator(CreateLibraryFileCommentThreadSchema),
   async (c) => {
-    const userId = getUserId(c);
-    const projectId = requireRouteParam(c, 'projectId');
-    const fileId = requireRouteParam(c, 'fileId');
-    const db = drizzle(c.env.DATABASE, { schema });
-
-    await requireProjectCapability(db, projectId, userId, 'task:write');
-
+    const { projectId, fileId } = await authorizeScope(c, 'task:write');
     const body = c.req.valid('json');
+
     try {
+      // Only the entry points that can introduce a NEW fileId need the binding
+      // check. Reply/resolve/reopen reach their thread through a
+      // `WHERE id = ? AND file_id = ?` lookup inside this project's own durable
+      // object, so an existing thread already proves it was checked at create
+      // time (.claude/rules/60-request-io-and-bundle-budgets.md).
       await assertLibraryFileInProject(c.env, projectId, fileId);
       const result = await projectDataService.createFileCommentThread(c.env, projectId, {
         fileId,
@@ -95,15 +117,9 @@ libraryCommentRoutes.post(
   '/:fileId/comments/:threadId/replies',
   jsonValidator(CreateCommentReplySchema),
   async (c) => {
-    const userId = getUserId(c);
-    const projectId = requireRouteParam(c, 'projectId');
-    const fileId = requireRouteParam(c, 'fileId');
-    const threadId = requireRouteParam(c, 'threadId');
-    const db = drizzle(c.env.DATABASE, { schema });
-
-    await requireProjectCapability(db, projectId, userId, 'task:write');
-
+    const { projectId, fileId, threadId } = await authorizeScope(c, 'task:write');
     const body = c.req.valid('json');
+
     try {
       const result = await projectDataService.createFileCommentReply(c.env, projectId, {
         fileId,
@@ -120,27 +136,20 @@ libraryCommentRoutes.post(
 );
 
 /**
- * POST /api/projects/:projectId/library/:fileId/comments/:threadId/resolve
+ * Resolve and reopen differ only in the status they write, so they share a
+ * handler rather than existing as two near-identical copies.
  */
-libraryCommentRoutes.post(
-  '/:fileId/comments/:threadId/resolve',
-  jsonValidator(CommentStatusMutationSchema),
-  async (c) => {
-    const userId = getUserId(c);
-    const projectId = requireRouteParam(c, 'projectId');
-    const fileId = requireRouteParam(c, 'fileId');
-    const threadId = requireRouteParam(c, 'threadId');
-    const db = drizzle(c.env.DATABASE, { schema });
+function statusMutationHandler(status: 'resolved' | 'open') {
+  return async (c: Context<{ Bindings: Env }>) => {
+    const { projectId, fileId, threadId } = await authorizeScope(c, 'task:write');
+    const body = c.req.valid('json' as never) as { clientMutationId?: string | null };
 
-    await requireProjectCapability(db, projectId, userId, 'task:write');
-
-    const body = c.req.valid('json');
     try {
       return c.json(
         await projectDataService.updateFileCommentThreadStatus(c.env, projectId, {
           fileId,
           threadId,
-          status: 'resolved',
+          status,
           clientMutationId: body.clientMutationId ?? null,
           actor: getCommentActor(c),
         })
@@ -148,7 +157,16 @@ libraryCommentRoutes.post(
     } catch (err) {
       rethrowCommentError(err);
     }
-  }
+  };
+}
+
+/**
+ * POST /api/projects/:projectId/library/:fileId/comments/:threadId/resolve
+ */
+libraryCommentRoutes.post(
+  '/:fileId/comments/:threadId/resolve',
+  jsonValidator(CommentStatusMutationSchema),
+  statusMutationHandler('resolved')
 );
 
 /**
@@ -157,28 +175,5 @@ libraryCommentRoutes.post(
 libraryCommentRoutes.post(
   '/:fileId/comments/:threadId/reopen',
   jsonValidator(CommentStatusMutationSchema),
-  async (c) => {
-    const userId = getUserId(c);
-    const projectId = requireRouteParam(c, 'projectId');
-    const fileId = requireRouteParam(c, 'fileId');
-    const threadId = requireRouteParam(c, 'threadId');
-    const db = drizzle(c.env.DATABASE, { schema });
-
-    await requireProjectCapability(db, projectId, userId, 'task:write');
-
-    const body = c.req.valid('json');
-    try {
-      return c.json(
-        await projectDataService.updateFileCommentThreadStatus(c.env, projectId, {
-          fileId,
-          threadId,
-          status: 'open',
-          clientMutationId: body.clientMutationId ?? null,
-          actor: getCommentActor(c),
-        })
-      );
-    } catch (err) {
-      rethrowCommentError(err);
-    }
-  }
+  statusMutationHandler('open')
 );

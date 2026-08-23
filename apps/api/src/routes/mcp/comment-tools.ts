@@ -17,75 +17,19 @@ import {
   clampCommentListLimit,
   createProjectDataMessageCommentAdapter,
   getMessageCommentConfig,
-  isMessageCommentServiceError,
   type MessageCommentStorageAdapter,
   normalizeCommentBody,
   normalizeCommentQuote,
 } from '../../services/message-comments';
+import { INVALID_PARAMS, jsonRpcError, type JsonRpcResponse, type McpTokenData } from './_helpers';
 import {
-  INTERNAL_ERROR,
-  INVALID_PARAMS,
-  jsonRpcError,
-  type JsonRpcResponse,
-  jsonRpcSuccess,
-  type McpTokenData,
-} from './_helpers';
-
-const CALLER_DERIVED_FIELDS = [
-  'projectId',
-  'userId',
-  'author',
-  'authorId',
-  'authorKind',
-  'authorDisplayName',
-  'provenance',
-];
-
-function textContent(value: unknown): string {
-  return JSON.stringify(value);
-}
-
-function toolSuccess(requestId: string | number | null, value: unknown): JsonRpcResponse {
-  return jsonRpcSuccess(requestId, {
-    content: [
-      {
-        type: 'text',
-        text: textContent(value),
-      },
-    ],
-  });
-}
-
-function rejectCallerDerivedFields(
-  requestId: string | number | null,
-  params: Record<string, unknown>
-): JsonRpcResponse | null {
-  for (const field of CALLER_DERIVED_FIELDS) {
-    if (Object.prototype.hasOwnProperty.call(params, field)) {
-      return jsonRpcError(
-        requestId,
-        INVALID_PARAMS,
-        `${field} is derived from the verified MCP token and must not be supplied`
-      );
-    }
-  }
-  return null;
-}
-
-function optionalString(params: Record<string, unknown>, field: string): string | null {
-  const value = params[field];
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-function requiredString(
-  requestId: string | number | null,
-  params: Record<string, unknown>,
-  field: string
-): string | JsonRpcResponse {
-  const value = optionalString(params, field);
-  if (!value) return jsonRpcError(requestId, INVALID_PARAMS, `${field} is required`);
-  return value;
-}
+  mapCommentError,
+  optionalString,
+  parseStatusFilter,
+  rejectCallerDerivedFields,
+  requiredString,
+  toolSuccess,
+} from './comment-tool-helpers';
 
 function getStorage(
   env: Env,
@@ -142,32 +86,6 @@ function isRpcError(value: { sessionId: string } | JsonRpcResponse): value is Js
   return 'jsonrpc' in value;
 }
 
-function mapCommentError(
-  requestId: string | number | null,
-  err: unknown,
-  logTag: string,
-  logContext: Record<string, unknown>
-): JsonRpcResponse {
-  if (isMessageCommentServiceError(err)) {
-    const code = err.code === 'unavailable' ? INTERNAL_ERROR : INVALID_PARAMS;
-    return jsonRpcError(requestId, code, err.message);
-  }
-  log.warn(logTag, {
-    ...logContext,
-    error: err instanceof Error ? err.message : String(err),
-  });
-  return jsonRpcError(requestId, INTERNAL_ERROR, 'Comment tool failed');
-}
-
-function parseStatus(
-  requestId: string | number | null,
-  params: Record<string, unknown>
-): MessageCommentThreadStatus | 'all' | JsonRpcResponse {
-  const raw = optionalString(params, 'status') ?? 'open';
-  if (raw === 'open' || raw === 'sent' || raw === 'resolved' || raw === 'all') return raw;
-  return jsonRpcError(requestId, INVALID_PARAMS, 'status must be open, sent, resolved, or all');
-}
-
 export async function handleListMessageCommentThreads(
   requestId: string | number | null,
   params: Record<string, unknown>,
@@ -179,7 +97,7 @@ export async function handleListMessageCommentThreads(
   if (identityError) return identityError;
   const session = await resolveCallerSession(requestId, params, tokenData, env);
   if (isRpcError(session)) return session;
-  const status = parseStatus(requestId, params);
+  const status = parseStatusFilter(requestId, params);
   if (typeof status !== 'string') return status;
 
   const config = getMessageCommentConfig(env);

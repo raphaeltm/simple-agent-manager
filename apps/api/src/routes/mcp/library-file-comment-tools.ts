@@ -7,7 +7,6 @@
  * Cross-references: apps/api/src/routes/library-comments.ts (HTTP routes)
  */
 import type { Env } from '../../env';
-import { log } from '../../lib/logger';
 import { assertLibraryFileInProject } from '../../services/library-file-comments';
 import {
   boundCommentThread,
@@ -15,92 +14,19 @@ import {
   buildAgentCommentAuthor,
   clampCommentListLimit,
   getMessageCommentConfig,
-  isMessageCommentServiceError,
   normalizeCommentBody,
   normalizeCommentQuote,
 } from '../../services/message-comments';
 import * as projectDataService from '../../services/project-data';
+import { INVALID_PARAMS, jsonRpcError, type JsonRpcResponse, type McpTokenData } from './_helpers';
 import {
-  INTERNAL_ERROR,
-  INVALID_PARAMS,
-  jsonRpcError,
-  type JsonRpcResponse,
-  jsonRpcSuccess,
-  type McpTokenData,
-} from './_helpers';
-
-const CALLER_DERIVED_FIELDS = [
-  'projectId',
-  'userId',
-  'author',
-  'authorId',
-  'authorKind',
-  'authorDisplayName',
-  'provenance',
-];
-
-function toolSuccess(requestId: string | number | null, value: unknown): JsonRpcResponse {
-  return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify(value) }],
-  });
-}
-
-function rejectCallerDerivedFields(
-  requestId: string | number | null,
-  params: Record<string, unknown>
-): JsonRpcResponse | null {
-  for (const field of CALLER_DERIVED_FIELDS) {
-    if (Object.prototype.hasOwnProperty.call(params, field)) {
-      return jsonRpcError(
-        requestId,
-        INVALID_PARAMS,
-        `${field} is derived from the verified MCP token and must not be supplied`
-      );
-    }
-  }
-  return null;
-}
-
-function optionalString(params: Record<string, unknown>, field: string): string | null {
-  const value = params[field];
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-function requiredString(
-  requestId: string | number | null,
-  params: Record<string, unknown>,
-  field: string
-): string | JsonRpcResponse {
-  const value = optionalString(params, field);
-  if (!value) return jsonRpcError(requestId, INVALID_PARAMS, `${field} is required`);
-  return value;
-}
-
-function parseStatus(
-  requestId: string | number | null,
-  params: Record<string, unknown>
-): 'open' | 'sent' | 'resolved' | 'all' | JsonRpcResponse {
-  const raw = optionalString(params, 'status') ?? 'open';
-  if (raw === 'open' || raw === 'sent' || raw === 'resolved' || raw === 'all') return raw;
-  return jsonRpcError(requestId, INVALID_PARAMS, 'status must be open, sent, resolved, or all');
-}
-
-function mapCommentError(
-  requestId: string | number | null,
-  err: unknown,
-  logTag: string,
-  logContext: Record<string, unknown>
-): JsonRpcResponse {
-  if (isMessageCommentServiceError(err)) {
-    const code = err.code === 'unavailable' ? INTERNAL_ERROR : INVALID_PARAMS;
-    return jsonRpcError(requestId, code, err.message);
-  }
-  log.warn(logTag, {
-    ...logContext,
-    error: err instanceof Error ? err.message : String(err),
-  });
-  return jsonRpcError(requestId, INTERNAL_ERROR, 'Comment tool failed');
-}
+  mapCommentError,
+  optionalString,
+  parseStatusFilter,
+  rejectCallerDerivedFields,
+  requiredString,
+  toolSuccess,
+} from './comment-tool-helpers';
 
 function parseCursor(cursor: string | null): number | null {
   if (!cursor) return null;
@@ -139,7 +65,7 @@ export async function handleListLibraryFileCommentThreads(
   if (identityError) return identityError;
   const fileId = requiredString(requestId, params, 'fileId');
   if (typeof fileId !== 'string') return fileId;
-  const status = parseStatus(requestId, params);
+  const status = parseStatusFilter(requestId, params);
   if (typeof status !== 'string') return status;
 
   const fileError = await verifyFileInProject(requestId, env, tokenData.projectId, fileId);
