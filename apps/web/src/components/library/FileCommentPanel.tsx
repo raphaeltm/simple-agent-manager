@@ -23,9 +23,11 @@ export function FileCommentPanel({
   onClearPendingQuote,
   onClose,
 }: FileCommentPanelProps) {
-  const { comments, loading, error, createThread, reply, resolve, reopen } =
+  const { comments, loading, error, mutationError, createThread, reply, resolve, reopen } =
     useLibraryFileComments(projectId, fileId);
 
+  // These reject on failure by design: CommentComposer catches, keeps the draft
+  // text, and leaves the reason to be rendered from `mutationError` below.
   const handleCreateThread = async (body: string, _action: MessageCommentAction) => {
     await createThread(body, pendingQuote ?? undefined);
     onClearPendingQuote?.();
@@ -33,6 +35,22 @@ export function FileCommentPanel({
 
   const handleReply = async (threadId: string, body: string, _action: MessageCommentAction) => {
     await reply(threadId, body);
+  };
+
+  const handleResolve = async (threadId: string) => {
+    try {
+      await resolve(threadId);
+    } catch {
+      /* surfaced via mutationError */
+    }
+  };
+
+  const handleReopen = async (threadId: string) => {
+    try {
+      await reopen(threadId);
+    } catch {
+      /* surfaced via mutationError */
+    }
   };
 
   return (
@@ -66,14 +84,19 @@ export function FileCommentPanel({
             emptyMessage="No comments on this file yet."
             hideSendToAgent
             onReply={handleReply}
-            onResolve={resolve}
-            onReopen={reopen}
+            onResolve={handleResolve}
+            onReopen={handleReopen}
             onSendToAgent={undefined}
           />
         )}
       </div>
 
       <div className="shrink-0 border-t border-border-default p-3">
+        {mutationError && (
+          <p role="alert" className="mb-2 text-xs text-danger-fg">
+            {mutationError}
+          </p>
+        )}
         <CommentComposer
           // Remounting on quote change resets the draft body to match the new
           // selection, and re-runs autoFocus so the user can type immediately.

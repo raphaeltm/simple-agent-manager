@@ -34,10 +34,18 @@ function compareMessageCommentThreads(a: MessageCommentThread, b: MessageComment
   return a.createdAt - b.createdAt;
 }
 
-export function upsertMessageCommentThread(
-  previous: readonly MessageCommentThread[] | undefined,
-  incoming: MessageCommentThread
-): MessageCommentThread[] {
+/**
+ * Replaces a thread in the cache, matching on server id OR clientId.
+ *
+ * The clientId arm is what retires the optimistic row: it was inserted under a
+ * locally generated id, so an id-only match would leave it in place alongside
+ * the server's copy and the user would see their own comment twice.
+ */
+function upsertThreadBy<T extends { id: string; clientId?: string | null }>(
+  previous: readonly T[] | undefined,
+  incoming: T,
+  compare: (a: T, b: T) => number
+): T[] {
   const current = previous ?? [];
   const index = current.findIndex((candidate) => {
     if (candidate.id === incoming.id) return true;
@@ -49,7 +57,14 @@ export function upsertMessageCommentThread(
     index === -1
       ? [...current, incoming]
       : [...current.slice(0, index), incoming, ...current.slice(index + 1)];
-  return next.sort(compareMessageCommentThreads);
+  return next.sort(compare);
+}
+
+export function upsertMessageCommentThread(
+  previous: readonly MessageCommentThread[] | undefined,
+  incoming: MessageCommentThread
+): MessageCommentThread[] {
+  return upsertThreadBy(previous, incoming, compareMessageCommentThreads);
 }
 
 export function applyMessageCommentRealtimeEventToQueryCache(
@@ -90,11 +105,5 @@ export function upsertLibraryFileCommentThread(
   previous: readonly LibraryFileCommentThread[] | undefined,
   incoming: LibraryFileCommentThread
 ): LibraryFileCommentThread[] {
-  const current = previous ?? [];
-  const index = current.findIndex((c) => c.id === incoming.id);
-  const next =
-    index === -1
-      ? [...current, incoming]
-      : [...current.slice(0, index), incoming, ...current.slice(index + 1)];
-  return next.sort((a, b) => a.createdAt - b.createdAt);
+  return upsertThreadBy(previous, incoming, (a, b) => a.createdAt - b.createdAt);
 }

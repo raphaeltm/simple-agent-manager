@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
 import {
@@ -93,6 +93,9 @@ export function useLibraryFileComments(projectId: string, fileId: string) {
   const queryScope = useQueryScope();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  // A failed mutation rolls the optimistic row back, which on its own looks
+  // identical to "nothing happened". Surface the reason instead.
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const queryKey = useMemo(
     () => libraryFileCommentQueryKeys.file(queryScope, projectId, fileId),
     [queryScope, projectId, fileId]
@@ -125,6 +128,7 @@ export function useLibraryFileComments(projectId: string, fileId: string) {
         clientMutationId: input.clientId,
       }),
     onMutate: async (input) => {
+      setMutationError(null);
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData<LibraryFileCommentThread[]>(queryKey);
       const optimistic = makeOptimisticFileThread(
@@ -137,10 +141,11 @@ export function useLibraryFileComments(projectId: string, fileId: string) {
       setCache((prev) => [...(prev ?? []), optimistic]);
       return { previous, optimisticId: optimistic.id };
     },
-    onError: (_err, _input, ctx) => {
+    onError: (err, _input, ctx) => {
       if (ctx?.previous) {
         queryClient.setQueryData(queryKey, ctx.previous);
       }
+      setMutationError(err instanceof Error ? err.message : 'Could not save that comment.');
       void queryClient.invalidateQueries({ queryKey });
     },
     onSuccess: (response) => {
@@ -155,6 +160,7 @@ export function useLibraryFileComments(projectId: string, fileId: string) {
         clientMutationId: input.clientId,
       }),
     onMutate: async (input) => {
+      setMutationError(null);
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData<LibraryFileCommentThread[]>(queryKey);
       const reply = makeOptimisticReply(input.body, buildOptimisticAuthor(user), input.clientId);
@@ -165,8 +171,9 @@ export function useLibraryFileComments(projectId: string, fileId: string) {
       );
       return { previous };
     },
-    onError: (_err, _input, ctx) => {
+    onError: (err, _input, ctx) => {
       if (ctx?.previous) queryClient.setQueryData(queryKey, ctx.previous);
+      setMutationError(err instanceof Error ? err.message : 'Could not save that comment.');
       void queryClient.invalidateQueries({ queryKey });
     },
     onSuccess: (response) => {
@@ -177,6 +184,7 @@ export function useLibraryFileComments(projectId: string, fileId: string) {
   const resolveMutation = useMutation({
     mutationFn: (threadId: string) => resolveLibraryFileComment(projectId, fileId, threadId),
     onMutate: async (threadId) => {
+      setMutationError(null);
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData<LibraryFileCommentThread[]>(queryKey);
       setCache((prev) =>
@@ -186,8 +194,9 @@ export function useLibraryFileComments(projectId: string, fileId: string) {
       );
       return { previous };
     },
-    onError: (_err, _input, ctx) => {
+    onError: (err, _input, ctx) => {
       if (ctx?.previous) queryClient.setQueryData(queryKey, ctx.previous);
+      setMutationError(err instanceof Error ? err.message : 'Could not save that comment.');
       void queryClient.invalidateQueries({ queryKey });
     },
     onSuccess: (response) => {
@@ -198,6 +207,7 @@ export function useLibraryFileComments(projectId: string, fileId: string) {
   const reopenMutation = useMutation({
     mutationFn: (threadId: string) => reopenLibraryFileComment(projectId, fileId, threadId),
     onMutate: async (threadId) => {
+      setMutationError(null);
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData<LibraryFileCommentThread[]>(queryKey);
       setCache((prev) =>
@@ -207,8 +217,9 @@ export function useLibraryFileComments(projectId: string, fileId: string) {
       );
       return { previous };
     },
-    onError: (_err, _input, ctx) => {
+    onError: (err, _input, ctx) => {
       if (ctx?.previous) queryClient.setQueryData(queryKey, ctx.previous);
+      setMutationError(err instanceof Error ? err.message : 'Could not save that comment.');
       void queryClient.invalidateQueries({ queryKey });
     },
     onSuccess: (response) => {
@@ -221,6 +232,7 @@ export function useLibraryFileComments(projectId: string, fileId: string) {
     loading: commentsQuery.isPending && commentsQuery.data === undefined,
     refreshing: commentsQuery.isFetching && commentsQuery.data !== undefined,
     error: commentsQuery.error instanceof Error ? commentsQuery.error.message : null,
+    mutationError,
     createThread: (body: string, quote?: string) =>
       createThreadMutation.mutateAsync({
         body,

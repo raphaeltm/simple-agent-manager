@@ -79,6 +79,11 @@ export function CommentComposer({
       await onSubmit(trimmed, overrideAction);
       setBody('');
       setAction('note');
+    } catch {
+      // Keep the draft so the user can retry without retyping, and stop the
+      // rejection escaping as an unhandled promise — callers submit via
+      // `void submit()`. Reporting the failure is the caller's job; it has the
+      // context to say what went wrong.
     } finally {
       setSubmitting(false);
     }
