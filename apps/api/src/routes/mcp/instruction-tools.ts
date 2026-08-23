@@ -127,17 +127,25 @@ export async function handleGetInstructions(
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Project not found');
   }
 
-  // Auto-retrieve ALL high-confidence knowledge for this project.
-  // Instead of keyword-matching against the task title (which misses most relevant
-  // knowledge), we retrieve all observations above a confidence threshold. For typical
-  // projects with <50 observations, this is a small amount of text that gives the agent
-  // full context about user preferences, project conventions, and decisions.
+  // Auto-retrieve high-confidence knowledge for this project.
+  // Keyword-matching against the task title misses most relevant knowledge, so instead
+  // of guessing from the title we take everything above a confidence bar and rank it by
+  // relevance (confidence x recency of last confirmation), capped per entity. The cap
+  // matters: injection used to be ordered alphabetically by entity name, so in practice
+  // one grab-bag entity consumed 46 of 50 slots and entities the agent is explicitly
+  // told to consult never appeared. Whatever does not fit is still discoverable via the
+  // entity index appended below.
   const minConfidence =
     parseFloat(env.KNOWLEDGE_AUTO_RETRIEVE_MIN_CONFIDENCE || '') ||
     KNOWLEDGE_DEFAULTS.autoRetrieveMinConfidence;
   const highConfidenceLimit =
     parseInt(env.KNOWLEDGE_AUTO_RETRIEVE_HIGH_CONFIDENCE_LIMIT || '', 10) ||
     KNOWLEDGE_DEFAULTS.autoRetrieveHighConfidenceLimit;
+  const perEntityLimit =
+    parseInt(env.KNOWLEDGE_AUTO_RETRIEVE_PER_ENTITY_LIMIT || '', 10) ||
+    KNOWLEDGE_DEFAULTS.autoRetrievePerEntityLimit;
+  const entityIndexLimit =
+    parseInt(env.KNOWLEDGE_ENTITY_INDEX_LIMIT || '', 10) || KNOWLEDGE_DEFAULTS.entityIndexLimit;
   let knowledgeContext: {
     entityName: string;
     entityType: string;
@@ -149,7 +157,8 @@ export async function handleGetInstructions(
       env,
       tokenData.projectId,
       minConfidence,
-      highConfidenceLimit
+      highConfidenceLimit,
+      perEntityLimit
     );
     knowledgeContext = allHighConfidence.map((r) => ({
       entityName: r.entityName,
@@ -164,13 +173,32 @@ export async function handleGetInstructions(
     });
   }
 
+  // The entity index is fetched independently of the observations above: if ranked
+  // retrieval fails, the index alone still tells the agent what exists and how to reach
+  // it, which is strictly better than the previous silent-empty behaviour.
+  let entityIndex: { name: string; entityType: string; observationCount: number }[] = [];
+  try {
+    entityIndex = await projectDataService.getKnowledgeEntityIndex(
+      env,
+      tokenData.projectId,
+      entityIndexLimit
+    );
+  } catch (err) {
+    log.warn('mcp.get_instructions.knowledge_entity_index_failed', {
+      projectId: tokenData.projectId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   // Format knowledge as actionable directives grouped by entity, not raw JSON.
   // Agents are more likely to apply knowledge when it reads like instructions.
-  const knowledgeDirectives = formatKnowledgeDirectives(knowledgeContext);
+  const knowledgeDirectives = formatKnowledgeDirectives(knowledgeContext, entityIndex);
 
   // Build knowledge-related instructions based on whether knowledge exists
+  // A project with entities but nothing above the confidence bar still has knowledge —
+  // it is reachable by search — so it must not get the "no stored knowledge" bootstrap text.
   const knowledgeInstructions = buildKnowledgeInstructions(
-    knowledgeContext.length > 0,
+    knowledgeContext.length > 0 || entityIndex.length > 0,
     context.type === 'conversation' || context.task?.taskMode === 'conversation'
   );
 
@@ -301,6 +329,12 @@ interface KnowledgeEntry {
   confidence: number;
 }
 
+interface KnowledgeEntityIndexEntry {
+  name: string;
+  entityType: string;
+  observationCount: number;
+}
+
 /**
  * Format knowledge observations into a readable text block grouped by entity.
  * Returns null if there are no observations.
@@ -311,24 +345,53 @@ interface KnowledgeEntry {
  *   **User** (context): Raphaël, solo founder. Primarily uses mobile PWA.
  *   **CodeQuality** (preference): Prefers Valibot. Skeptical of useEffect.
  */
-function formatKnowledgeDirectives(entries: KnowledgeEntry[]): string | null {
-  if (entries.length === 0) return null;
+function formatKnowledgeDirectives(
+  entries: KnowledgeEntry[],
+  entityIndex: KnowledgeEntityIndexEntry[] = []
+): string | null {
+  if (entries.length === 0 && entityIndex.length === 0) return null;
 
-  // Group by entity name
-  const grouped = new Map<string, { entityType: string; observations: string[] }>();
-  for (const entry of entries) {
-    let group = grouped.get(entry.entityName);
-    if (!group) {
-      group = { entityType: entry.entityType, observations: [] };
-      grouped.set(entry.entityName, group);
+  const lines: string[] = [];
+
+  if (entries.length > 0) {
+    // Group by entity name
+    const grouped = new Map<string, { entityType: string; observations: string[] }>();
+    for (const entry of entries) {
+      let group = grouped.get(entry.entityName);
+      if (!group) {
+        group = { entityType: entry.entityType, observations: [] };
+        grouped.set(entry.entityName, group);
+      }
+      group.observations.push(entry.observation);
     }
-    group.observations.push(entry.observation);
+
+    lines.push('## Project Knowledge — apply these to your work\n');
+    for (const [name, group] of grouped) {
+      const obs = group.observations.join(' | ');
+      lines.push(`**${name}** (${group.entityType}): ${obs}`);
+    }
   }
 
-  const lines: string[] = ['## Project Knowledge — apply these to your work\n'];
-  for (const [name, group] of grouped) {
-    const obs = group.observations.join(' | ');
-    lines.push(`**${name}** (${group.entityType}): ${obs}`);
+  if (entityIndex.length > 0) {
+    // The block above is ranked and deliberately partial. Without this index the
+    // truncation is invisible: an agent cannot search for a topic it does not know
+    // exists. Keep it to one line per entity so the whole store stays affordable.
+    const injectedEntities = new Set(entries.map((e) => e.entityName));
+    const notInjected = entityIndex.filter((e) => !injectedEntities.has(e.name)).length;
+
+    lines.push(
+      `\n### Full knowledge index (${entityIndex.length} entities)\n` +
+        'The block above shows only the highest-ranked observations, capped per entity — it is NOT everything ' +
+        `this project knows.${notInjected > 0 ? ` ${notInjected} of these entities have no observations shown above at all.` : ''} ` +
+        'Each entry below is `EntityName (type, N observations)`. To read anything not shown in full, call ' +
+        '`search_knowledge` with the entity name, or `get_relevant_knowledge` with a description of what you are about to do. ' +
+        'Do this before decisions that touch one of these topics.\n'
+    );
+    lines.push(
+      entityIndex
+        .map((e) => `${e.name} (${e.entityType}, ${e.observationCount})`)
+        .join(', ')
+    );
   }
 
   return lines.join('\n');
@@ -364,7 +427,9 @@ function buildKnowledgeInstructions(hasKnowledge: boolean, isConversation: boole
       'before choosing libraries/tools → search "CodeQuality"; ' +
       'before UI layout decisions → search "User" and "mobile"; ' +
       'before architecture decisions → search "Architecture"; ' +
-      'before pricing/business decisions → search "BusinessStrategy".'
+      'before pricing/business decisions → search "BusinessStrategy". ' +
+      'These entities are usually NOT injected in full — check the knowledge index for what exists, ' +
+      'then retrieve it. Do not assume an entity is empty because its observations are not shown above.'
   );
 
   // What NOT to save
@@ -376,8 +441,10 @@ function buildKnowledgeInstructions(hasKnowledge: boolean, isConversation: boole
     // Knowledge exists — tell agent to apply it and maintain it
     instructions.push(
       'The knowledgeDirectives field above contains stored knowledge from previous sessions. Apply these preferences and facts to your work. ' +
+        'It is RANKED (by confidence and how recently each observation was confirmed) and CAPPED per entity, so it is a partial view, not the whole store. ' +
+        'Its trailing "Full knowledge index" lists every entity with an observation count — use `search_knowledge` or `get_relevant_knowledge` to pull anything listed there but not shown in full. ' +
         'If any observation seems outdated, call `update_knowledge` or `remove_knowledge`. ' +
-        'If you verify an observation is still accurate, call `confirm_knowledge` to keep it fresh.'
+        'If you verify an observation is still accurate, call `confirm_knowledge` to keep it fresh — confirming also raises its rank for future sessions.'
     );
   } else {
     // Empty knowledge graph — bootstrapping prompt

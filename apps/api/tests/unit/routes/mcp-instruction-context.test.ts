@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   projectData: {
     getSession: vi.fn(),
     getAllHighConfidenceKnowledge: vi.fn(),
+    getKnowledgeEntityIndex: vi.fn(),
     getActivePolicies: vi.fn(),
     recordActivityEvent: vi.fn(),
   },
@@ -92,6 +93,11 @@ describe('MCP instruction context handlers', () => {
         confidence: 0.95,
       },
     ]);
+    mocks.projectData.getKnowledgeEntityIndex.mockResolvedValue([
+      { name: 'Architecture', entityType: 'context', observationCount: 4 },
+      { name: 'ContentStyle', entityType: 'preference', observationCount: 7 },
+      { name: 'BusinessStrategy', entityType: 'context', observationCount: 2 },
+    ]);
     mocks.projectData.getActivePolicies.mockResolvedValue([
       {
         id: 'policy-1',
@@ -114,6 +120,68 @@ describe('MCP instruction context handlers', () => {
     expect(payload.task).toMatchObject({ id: 'task-1', title: 'Implement bootstrap' });
     expect(String(payload.knowledgeDirectives)).toContain('Worker control plane');
     expect(String(payload.policyDirectives)).toContain('Call get_instructions');
+  });
+
+  it('appends a complete entity index naming entities that were not injected', async () => {
+    mocks.selectRows = [[task], [project]];
+
+    const response = await handleGetInstructions('request-1', baseToken, makeEnv());
+    const payload = parseInstructionPayload(response);
+    const directives = String(payload.knowledgeDirectives);
+
+    // Only Architecture was injected in full; the other two must still be discoverable.
+    expect(directives).toContain('Full knowledge index (3 entities)');
+    expect(directives).toContain('ContentStyle (preference, 7)');
+    expect(directives).toContain('BusinessStrategy (context, 2)');
+    expect(directives).toContain('Architecture (context, 4)');
+    // The agent must be told the block is partial and how to reach the rest.
+    expect(directives).toContain('search_knowledge');
+    expect(directives).toContain('get_relevant_knowledge');
+    expect(directives).toContain('2 of these entities have no observations shown above');
+  });
+
+  it('passes the per-entity cap through to the knowledge query', async () => {
+    mocks.selectRows = [[task], [project]];
+
+    await handleGetInstructions('request-1', baseToken, makeEnv());
+
+    // Default cap is 8 (KNOWLEDGE_DEFAULTS.autoRetrievePerEntityLimit). Without this
+    // argument reaching the DO, one grab-bag entity reclaims every slot.
+    expect(mocks.projectData.getAllHighConfidenceKnowledge).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-1',
+      0.8,
+      50,
+      8
+    );
+  });
+
+  it('still surfaces the index when ranked observation retrieval fails', async () => {
+    mocks.selectRows = [[task], [project]];
+    mocks.projectData.getAllHighConfidenceKnowledge.mockRejectedValue(new Error('DO unavailable'));
+
+    const response = await handleGetInstructions('request-1', baseToken, makeEnv());
+    const payload = parseInstructionPayload(response);
+    const directives = String(payload.knowledgeDirectives);
+
+    // Degrading to "no knowledge at all" was the old silent failure. The index is
+    // fetched independently, so the agent at least learns what exists.
+    expect(directives).toContain('Full knowledge index');
+    expect(directives).toContain('ContentStyle (preference, 7)');
+    // Liveness control (rule 62): assert the response is otherwise intact, not crashed.
+    expect(payload.task).toMatchObject({ id: 'task-1' });
+  });
+
+  it('omits the index section when the project has no entities', async () => {
+    mocks.selectRows = [[task], [project]];
+    mocks.projectData.getAllHighConfidenceKnowledge.mockResolvedValue([]);
+    mocks.projectData.getKnowledgeEntityIndex.mockResolvedValue([]);
+
+    const response = await handleGetInstructions('request-1', baseToken, makeEnv());
+    const payload = parseInstructionPayload(response);
+
+    expect(payload.knowledgeDirectives).toBeUndefined();
+    expect(payload.task).toMatchObject({ id: 'task-1' });
   });
 
   it('returns taskless conversation instructions resolved through chatSessionId', async () => {

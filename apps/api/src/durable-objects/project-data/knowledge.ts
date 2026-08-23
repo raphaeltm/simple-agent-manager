@@ -377,26 +377,136 @@ export function getRelevantKnowledge(sql: SqlStorage, context: string, limit: nu
 }
 
 /**
- * Get ALL active observations with confidence >= threshold, ordered by entity
- * then recency. Used for session-start knowledge injection — returns everything
- * important rather than trying to guess relevance from keywords.
+ * Milliseconds in the recency half-point of the injection relevance score.
+ * At this age the recency factor is 0.5; at 3x it is 0.25.
+ */
+const RELEVANCE_RECENCY_SCALE_MS = 86_400_000 * 30;
+
+/**
+ * Get active observations with confidence >= threshold for session-start
+ * knowledge injection, ranked by relevance and capped per entity.
+ *
+ * Ranking replaces the previous `ORDER BY e.name` (alphabetical), which silently
+ * made injection a function of entity spelling: in production all 50 slots went to
+ * AccountMap..AgentReliability, 46 of them to the `AgentBehavior` grab-bag, while
+ * entities the agent is explicitly told to consult (ContentStyle, User, Architecture,
+ * BusinessStrategy) never appeared at all.
+ *
+ * Score — identical to the formula already used by `getRelevantKnowledge` above, so
+ * injection and retrieval rank knowledge the same way:
+ *
+ *     score = confidence x 1 / (1 + ageDays / 30)
+ *
+ * Hyperbolic decay on the recency of the LAST CONFIRMATION (not creation), scaled
+ * linearly by confidence. A freshly confirmed observation keeps its full confidence
+ * as its score; at 30 days it is halved; at 90 days quartered. Confirming an
+ * observation (`confirm_knowledge`) restores its rank, which is what makes the
+ * confirm/prune loop meaningful.
+ *
+ * `now` is a bound parameter rather than SQLite's `strftime('now')` so a given
+ * (data, now) pair always produces the same ordering — required by the determinism
+ * test and by anything that diffs injected payloads.
+ *
+ * `perEntityLimit` caps each entity's contribution so one sprawling entity cannot
+ * crowd out every other topic. Ties are broken twice (last_confirmed_at, then id) to
+ * give a total order; without that, equal-scoring rows could permute between calls.
  */
 export function getAllHighConfidenceKnowledge(
   sql: SqlStorage,
   minConfidence: number,
   limit: number,
+  perEntityLimit: number = KNOWLEDGE_DEFAULTS.autoRetrievePerEntityLimit,
+  now: number = Date.now(),
 ) {
   const rows = sql.exec(
-    `SELECT o.*, e.name as entity_name, e.entity_type
-     FROM knowledge_observations o
-     JOIN knowledge_entities e ON e.id = o.entity_id
-     WHERE o.is_active = 1 AND o.confidence >= ?
-     ORDER BY e.name, o.last_confirmed_at DESC
+    `WITH scored AS (
+       SELECT o.*, e.name AS entity_name, e.entity_type,
+              -- The "* 1.0" pins REAL division. In practice the numerator is already REAL
+              -- because SqlStorage binds JS numbers as doubles, so "now" arrives as REAL --
+              -- but that is a driver detail, and SQLite truncates "/" when both operands
+              -- happen to be integers. Without this the decay could silently degrade into a
+              -- 30-day step function where everything under a month scores as brand new.
+              -- (No backticks here: the query is a JS template literal.)
+              o.confidence * (1.0 / (1.0 + (MAX(0, ? - o.last_confirmed_at) * 1.0 / ?))) AS relevance_score
+       FROM knowledge_observations o
+       JOIN knowledge_entities e ON e.id = o.entity_id
+       WHERE o.is_active = 1 AND o.confidence >= ?
+     ),
+     ranked AS (
+       SELECT scored.*,
+              ROW_NUMBER() OVER (
+                PARTITION BY entity_id
+                ORDER BY relevance_score DESC, last_confirmed_at DESC, id ASC
+              ) AS entity_rank
+       FROM scored
+     )
+     SELECT * FROM ranked
+     WHERE entity_rank <= ?
+     ORDER BY relevance_score DESC, last_confirmed_at DESC, id ASC
      LIMIT ?`,
-    minConfidence, limit,
+    now, RELEVANCE_RECENCY_SCALE_MS, minConfidence, perEntityLimit, limit,
   ).toArray();
 
   return rows.map(parseKnowledgeObservationSearchRow);
+}
+
+export interface KnowledgeEntityIndexEntry {
+  name: string;
+  entityType: string;
+  observationCount: number;
+}
+
+/**
+ * List every entity that has at least one active observation, with its active
+ * observation count.
+ *
+ * This backs the injected entity index. Ranked+capped injection is necessarily
+ * partial, and the previous alphabetical truncation was *silent* — an agent had no
+ * way to learn that ContentStyle or Architecture existed at all. The index makes the
+ * whole store discoverable at roughly a token per entity, so `search_knowledge` /
+ * `get_relevant_knowledge` become usable instead of guesses.
+ *
+ * Counts cover all active observations, not just high-confidence ones, because that
+ * is the set a follow-up search can actually reach.
+ *
+ * Ordered by count DESC then name ASC: a stable order that puts the densest topics
+ * first, so truncation at `limit` drops the thinnest entities rather than the
+ * alphabetically unlucky ones.
+ */
+export function getKnowledgeEntityIndex(
+  sql: SqlStorage,
+  limit: number = KNOWLEDGE_DEFAULTS.entityIndexLimit,
+): KnowledgeEntityIndexEntry[] {
+  const rows = sql.exec(
+    `SELECT e.name AS name, e.entity_type AS entity_type, COUNT(o.id) AS observation_count
+     FROM knowledge_entities e
+     JOIN knowledge_observations o ON o.entity_id = e.id AND o.is_active = 1
+     GROUP BY e.id, e.name, e.entity_type
+     ORDER BY observation_count DESC, e.name ASC
+     LIMIT ?`,
+    limit,
+  ).toArray();
+
+  // Per-row isolation (rule 50): one malformed entity row must not fail the whole
+  // index, which would take the agent's only discovery path down with it.
+  const entries: KnowledgeEntityIndexEntry[] = [];
+  for (const row of rows) {
+    try {
+      const name = row.name;
+      const entityType = row.entity_type;
+      const observationCount = Number(row.observation_count);
+      if (typeof name !== 'string' || typeof entityType !== 'string' || !Number.isFinite(observationCount)) {
+        throw new Error('unexpected column types');
+      }
+      entries.push({ name, entityType, observationCount });
+    } catch (err) {
+      console.warn('knowledge.entity_index_row_skipped', {
+        entityName: typeof row.name === 'string' ? row.name : null,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return entries;
 }
 
 // ─── Relations ──────────────────────────────────────────────────────────────
