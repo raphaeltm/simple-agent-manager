@@ -193,12 +193,31 @@ async function setupMocks(page: Page, opts: {
       return route.fulfill({ json: { notifications: [], unreadCount: 0, count: 0 } });
     }
 
+    // Report-issue config. The app shell fetches this on every authenticated page.
+    // Without it the generic `{}` fallback reaches code that calls `.some()` on a
+    // field it expects to be an array, the ErrorBoundary replaces the whole page,
+    // and every test in this file fails regardless of what it asserts.
+    if (path === '/api/report-issue/config') {
+      return route.fulfill({ json: { enabled: false } });
+    }
+    if (path === '/api/config/vapid-public-key') {
+      return route.fulfill({ json: { publicKey: null } });
+    }
+
     // Agents
     if (path === '/api/agents') {
       return route.fulfill({ json: [] });
     }
 
-    // Credentials
+    // Credentials. The two endpoints have DIFFERENT shapes and the difference is
+    // load-bearing: `listCredentials()` (apps/web/src/lib/api/credentials.ts) returns a
+    // bare `CredentialResponse[]`, which `hasByocComputeCredential` calls `.some()` on.
+    // Serving the agent-credential envelope here made that throw, the ErrorBoundary
+    // replaced the entire page, and every test in this file failed no matter what it
+    // asserted. Keep the exact path check before the prefix check.
+    if (path === '/api/credentials') {
+      return route.fulfill({ json: [] });
+    }
     if (path.startsWith('/api/credentials')) {
       return route.fulfill({ json: { credentials: [] } });
     }
