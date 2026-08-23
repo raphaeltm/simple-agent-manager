@@ -13,8 +13,8 @@
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
-import type { Env } from '../env';
 import { CommentNotFoundError } from '../durable-objects/project-data/comment-contracts';
+import type { Env } from '../env';
 
 /**
  * Proves `fileId` names a library file belonging to `projectId`.

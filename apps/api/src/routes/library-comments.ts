@@ -6,9 +6,8 @@
  * wildcard, and every handler additionally asserts the caller's project
  * capability before touching data.
  */
-import { Hono } from 'hono';
-
 import { drizzle } from 'drizzle-orm/d1';
+import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';

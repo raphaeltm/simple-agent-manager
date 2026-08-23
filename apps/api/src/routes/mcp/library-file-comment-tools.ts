@@ -8,6 +8,7 @@
  */
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { assertLibraryFileInProject } from '../../services/library-file-comments';
 import {
   boundCommentThread,
   boundCommentThreadSummary,
@@ -18,7 +19,6 @@ import {
   normalizeCommentBody,
   normalizeCommentQuote,
 } from '../../services/message-comments';
-import { assertLibraryFileInProject } from '../../services/library-file-comments';
 import * as projectDataService from '../../services/project-data';
 import {
   INTERNAL_ERROR,
