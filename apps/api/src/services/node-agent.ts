@@ -460,7 +460,7 @@ export async function createAgentSessionOnNode(
   userId: string,
   chatSessionId?: string | null,
   projectId?: string | null,
-  mcpServer?: McpServerConfig,
+  mcpServers?: McpServerConfig[],
   options?: GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
   const body: Record<string, unknown> = {
@@ -469,13 +469,9 @@ export async function createAgentSessionOnNode(
     chatSessionId: chatSessionId ?? undefined,
     projectId: projectId ?? undefined,
   };
-  if (mcpServer) {
-    body.mcpServers = [
-      {
-        url: mcpServer.url,
-        token: mcpServer.token,
-      },
-    ];
+  const serializedMcpServers = serializeMcpServers(mcpServers);
+  if (serializedMcpServers) {
+    body.mcpServers = serializedMcpServers;
   }
 
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/agent-sessions`, {
@@ -492,6 +488,34 @@ export async function createAgentSessionOnNode(
 export interface McpServerConfig {
   url: string;
   token: string;
+  /**
+   * Agent-visible server name. Tools are namespaced by it.
+   *
+   * Optional for rollout compatibility (rule 54): a vm-agent built before this field existed
+   * ignores it and falls back to its legacy positional naming, so a new control plane still
+   * works against an old agent.
+   */
+  name?: string;
+}
+
+/**
+ * Serializes MCP servers for the vm-agent request body.
+ *
+ * Single choke point so the create and start paths cannot drift — historically both inlined
+ * their own single-element array literal, which is why adding a field here previously meant
+ * remembering two places.
+ */
+function serializeMcpServers(
+  mcpServers: McpServerConfig[] | undefined
+): Array<{ url: string; token: string; name?: string }> | undefined {
+  if (!mcpServers || mcpServers.length === 0) {
+    return undefined;
+  }
+  return mcpServers.map((server) => ({
+    url: server.url,
+    token: server.token,
+    ...(server.name ? { name: server.name } : {}),
+  }));
 }
 
 /** Optional overrides for agent model and permission mode, resolved from agent profiles. */
@@ -519,7 +543,7 @@ export async function startAgentSessionOnNode(
   initialPrompt: string,
   env: Env,
   userId: string,
-  mcpServer?: McpServerConfig,
+  mcpServers?: McpServerConfig[],
   overrides?: AgentSessionOverrides,
   taskContext?: AgentSessionTaskContext,
   injectedInstructions?: string,
@@ -532,13 +556,9 @@ export async function startAgentSessionOnNode(
     // input; the UI collapses the mirrored message.
     body.injectedInstructions = injectedInstructions;
   }
-  if (mcpServer) {
-    body.mcpServers = [
-      {
-        url: mcpServer.url,
-        token: mcpServer.token,
-      },
-    ];
+  const serializedMcpServers = serializeMcpServers(mcpServers);
+  if (serializedMcpServers) {
+    body.mcpServers = serializedMcpServers;
   }
   if (overrides?.model != null) {
     body.model = overrides.model;

@@ -93,19 +93,29 @@ export type DeleteWorkspaceAgentResponse = z.infer<typeof DeleteWorkspaceAgentRe
 // Control Plane -> VM Agent: POST /workspaces/:id/agent-sessions
 // =============================================================================
 
+/**
+ * One MCP server injected into an ACP session.
+ *
+ * `name` is additive and optional on purpose (rule 54): a vm-agent built before this field
+ * existed ignores unknown JSON keys and falls back to its legacy positional naming, so a new
+ * control plane still works against an old agent. `token` stays a required string — an empty
+ * value means "no auth", which every harness already handles by omitting the auth header.
+ */
+export const McpServerEntrySchema = z.object({
+  url: z.string().url(),
+  token: z.string(),
+  /** Agent-visible server name. Tools are namespaced by it. */
+  name: z.string().optional(),
+});
+
+export type McpServerEntry = z.infer<typeof McpServerEntrySchema>;
+
 export const CreateAgentSessionAgentRequestSchema = z.object({
   sessionId: z.string().min(1),
   label: z.string().nullable(),
   chatSessionId: z.string().optional(),
   projectId: z.string().optional(),
-  mcpServers: z
-    .array(
-      z.object({
-        url: z.string().url(),
-        token: z.string(),
-      })
-    )
-    .optional(),
+  mcpServers: z.array(McpServerEntrySchema).optional(),
 });
 
 export type CreateAgentSessionAgentRequest = z.infer<typeof CreateAgentSessionAgentRequestSchema>;

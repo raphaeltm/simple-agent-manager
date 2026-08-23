@@ -22,6 +22,7 @@ import {
   DEFAULT_TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS,
   DEFAULT_VM_LOCATION,
   DEFAULT_VM_SIZE,
+  SAM_MCP_SERVER_NAME,
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -752,6 +753,10 @@ export async function handleDiscoveryAgentStart(
     }
     const initialPrompt = buildDiscoveryInitialPrompt(state.repoOwner, state.repoName);
     const mcpServerUrl = `https://api.${rc.env.BASE_DOMAIN}/mcp`;
+    // Only sam-mcp. Bring-your-own MCP connections are deliberately NOT resolved here: this
+    // session runs as the anonymous trial sentinel user (resolveAnonymousUserId), which owns
+    // no connections, and resolving by that identity could only ever surface rows that do not
+    // belong to the visitor. See tests/unit/services/mcp-connection-injection.test.ts.
     await startAgentSessionOnNode(
       nodeId,
       workspaceId,
@@ -760,7 +765,7 @@ export async function handleDiscoveryAgentStart(
       initialPrompt,
       rc.env,
       userId,
-      { url: mcpServerUrl, token: state.mcpToken },
+      [{ url: mcpServerUrl, token: state.mcpToken, name: SAM_MCP_SERVER_NAME }],
     );
     state.agentStartedOnVm = true;
     await rc.ctx.storage.put('state', state);

@@ -1533,6 +1533,57 @@ export const skills = sqliteTable(
 export type SkillRow = typeof skills.$inferSelect;
 export type NewSkillRow = typeof skills.$inferInsert;
 
+/**
+ * Bring-your-own MCP servers injected into agent sessions alongside SAM's own `sam-mcp`.
+ *
+ * Both the URL and the token are AES-256-GCM encrypted (`services/encryption.ts`). The URL is
+ * a secret because providers such as Composio issue pre-signed MCP URLs with the credential
+ * embedded in the path/query; `urlHost` is the display-only `scheme://host` the API returns
+ * instead. `projectId` NULL means personal scope; a project row overrides a personal row with
+ * the same name.
+ */
+export const mcpConnections = sqliteTable(
+  'mcp_connections',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** AES-256-GCM ciphertext (base64) of the full MCP endpoint URL. */
+    encryptedUrl: text('encrypted_url').notNull(),
+    /** AES-256-GCM IV (base64) for `encryptedUrl`. */
+    urlIv: text('url_iv').notNull(),
+    /** Display-only `scheme://host`. Never the path or query. */
+    urlHost: text('url_host').notNull(),
+    authType: text('auth_type').notNull().default('bearer'),
+    /** AES-256-GCM ciphertext (base64). Null when authType is 'none'. */
+    encryptedToken: text('encrypted_token'),
+    /** AES-256-GCM IV (base64). Null when authType is 'none'. */
+    tokenIv: text('token_iv'),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    projectNameUnique: uniqueIndex('idx_mcp_connections_project_name').on(
+      table.projectId,
+      table.name
+    ),
+    userNameUnique: uniqueIndex('idx_mcp_connections_user_name').on(table.userId, table.name),
+    userIdIdx: index('idx_mcp_connections_user_id').on(table.userId),
+    projectIdIdx: index('idx_mcp_connections_project_id').on(table.projectId),
+  })
+);
+
+export type McpConnectionRow = typeof mcpConnections.$inferSelect;
+export type NewMcpConnectionRow = typeof mcpConnections.$inferInsert;
+
 const profileRuntimeBaseColumns = () => ({
   id: text('id').primaryKey(),
   profileId: text('profile_id')

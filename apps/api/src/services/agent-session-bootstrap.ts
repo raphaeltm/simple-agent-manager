@@ -4,8 +4,10 @@ import { type drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { buildSamBootstrapInstructions } from './agent-bootstrap-prompt';
+import { buildSessionMcpServers } from './mcp-connection-resolution';
 import {
   generateMcpToken,
   type McpInstructionContextType,
@@ -258,6 +260,17 @@ export async function startSamAwareAgentSession(
       await input.onMcpToken?.(mcpToken);
     }
 
+    // Resolved once and reused by both the create and start calls below. This is the single
+    // injection point shared by BOTH runtimes — the VM path (task-runner/agent-session-step)
+    // and the cf-container Instant path (instant-session.ts) both funnel through here, so a
+    // change made once applies to both (rule 61).
+    const sessionMcpServers = await buildSessionMcpServers(
+      db,
+      { baseDomain: env.BASE_DOMAIN, encryptionKey: getCredentialEncryptionKey(env) },
+      { userId: input.userId, projectId: input.projectId },
+      mcpToken
+    );
+
     await runMaybePhased(input, 'create_vm_agent_session', () => {
       const args = [
         input.nodeId,
@@ -268,7 +281,7 @@ export async function startSamAwareAgentSession(
         input.userId,
         input.chatSessionId ?? undefined,
         input.projectId,
-        { url: `https://api.${env.BASE_DOMAIN}/mcp`, token: mcpToken },
+        sessionMcpServers,
       ] as const;
       return guardedMutationOptions
         ? createAgentSessionOnNode(...args, guardedMutationOptions)
@@ -326,7 +339,7 @@ export async function startSamAwareAgentSession(
           input.visibleInitialPrompt,
           env,
           input.userId,
-          { url: `https://api.${env.BASE_DOMAIN}/mcp`, token: mcpToken },
+          sessionMcpServers,
           input.overrides,
           input.taskContext
             ? {

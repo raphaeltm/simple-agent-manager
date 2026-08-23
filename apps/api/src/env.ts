@@ -314,6 +314,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MAX_DEPLOYMENT_ENV_VALUE_BYTES?: string;
   MAX_DEPLOYMENT_ENV_TOTAL_BYTES?: string;
   AGENT_SETTINGS_VALIDATION_LIMITS?: string;
+  // Bring-your-own MCP servers
+  MAX_MCP_CONNECTIONS_PER_SCOPE?: string;
+  MCP_CONNECTION_URL_MAX_BYTES?: string;
+  MCP_CONNECTION_TOKEN_MAX_BYTES?: string;
   TASK_CALLBACK_TIMEOUT_MS?: string;
   TASK_CALLBACK_RETRY_MAX_ATTEMPTS?: string;
   NODE_HEARTBEAT_STALE_SECONDS?: string;

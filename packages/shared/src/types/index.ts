@@ -711,3 +711,19 @@ export type {
   ReportIssueRequest,
   ReportIssueResponse,
 } from './report';
+
+// Bring-your-own MCP servers
+export {
+  MCP_CONNECTION_AUTH_TYPES,
+  MCP_CONNECTION_NAME_PATTERN,
+  MCP_CONNECTION_NAME_RULE,
+  SAM_MCP_SERVER_NAME,
+} from './mcp-connection';
+export type {
+  CreateMcpConnectionRequest,
+  McpConnection,
+  McpConnectionAuthType,
+  McpConnectionListResponse,
+  McpConnectionScope,
+  UpdateMcpConnectionRequest,
+} from './mcp-connection';

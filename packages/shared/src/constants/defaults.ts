@@ -313,3 +313,12 @@ export const DEFAULT_PROJECT_REFERENCE_CACHE_MAX_AGE_SECONDS = 0;
 /** `stale-while-revalidate` for per-user project-scoped reference GETs.
  * Override via PROJECT_REFERENCE_CACHE_SWR_SECONDS. */
 export const DEFAULT_PROJECT_REFERENCE_CACHE_SWR_SECONDS = 30;
+
+/** Default max MCP server connections per scope (per user, and per project). Override via MAX_MCP_CONNECTIONS_PER_SCOPE env var. */
+export const DEFAULT_MAX_MCP_CONNECTIONS_PER_SCOPE = 25;
+
+/** Default max MCP endpoint URL size in bytes. Pre-signed URLs can be long. Override via MCP_CONNECTION_URL_MAX_BYTES env var. */
+export const DEFAULT_MCP_CONNECTION_URL_MAX_BYTES = 2048;
+
+/** Default max MCP bearer token size in bytes. Override via MCP_CONNECTION_TOKEN_MAX_BYTES env var. */
+export const DEFAULT_MCP_CONNECTION_TOKEN_MAX_BYTES = 8 * 1024;

@@ -8,11 +8,13 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { toAgentSessionResponse } from '../../lib/mappers';
 import { parsePositiveInt } from '../../lib/route-helpers';
+import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { AppError, errors } from '../../middleware/error';
 import { CreateAgentSessionSchema, jsonValidator, UpdateAgentSessionSchema } from '../../schemas';
 import { getRuntimeLimits } from '../../services/limits';
+import { buildSessionMcpServers } from '../../services/mcp-connection-resolution';
 import { generateMcpToken, revokeMcpToken, storeMcpToken } from '../../services/mcp-token';
 import {
   createAgentSessionOnNode,
@@ -151,6 +153,21 @@ agentSessionRoutes.post(
         );
       }
 
+      // Manual workspace sessions are a separate producer from the shared bootstrap, so the
+      // MCP server list has to be built here too — otherwise a user's connections would work
+      // in project chat but silently vanish on a workspace-created session (rule 61).
+      const mcpServers = mcpToken
+        ? await buildSessionMcpServers(
+            db,
+            {
+              baseDomain: c.env.BASE_DOMAIN,
+              encryptionKey: getCredentialEncryptionKey(c.env),
+            },
+            { userId, projectId: workspace.projectId },
+            mcpToken
+          )
+        : undefined;
+
       await createAgentSessionOnNode(
         workspace.nodeId,
         workspace.id,
@@ -160,12 +177,7 @@ agentSessionRoutes.post(
         userId,
         workspace.chatSessionId,
         workspace.projectId,
-        mcpToken
-          ? {
-              url: `https://api.${c.env.BASE_DOMAIN}/mcp`,
-              token: mcpToken,
-            }
-          : undefined
+        mcpServers
       );
     } catch (err) {
       if (mcpToken) {
