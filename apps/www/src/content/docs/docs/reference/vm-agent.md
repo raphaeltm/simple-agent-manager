@@ -198,6 +198,8 @@ GET /containers
 
 The `/debug-package` endpoint bundles cloud-init logs, journald, Docker logs, system info, events/metrics databases, provisioning timings, and network config into a single downloadable archive — the fastest way to diagnose a node without SSH.
 
+Node-wide diagnostics require a node-scoped management token issued by the control plane. Workspace browser sessions and workspace-scoped management tokens are not accepted for these routes because a single node can host multiple workspaces. User-facing node observability should go through the control-plane `/api/nodes/{nodeId}/...` proxy routes, which verify node ownership and sign the node-scoped token for the VM Agent.
+
 ## Subsystems
 
 ### PTY Manager
@@ -229,11 +231,12 @@ Responses are serialized via `orderedPipe` to prevent token reordering from conc
 
 ### JWT Validator
 
-Validates workspace JWTs using the API's JWKS endpoint:
+Validates workspace and node-management JWTs using the API's JWKS endpoint:
 
 - Fetches public keys from `/.well-known/jwks.json`
 - Caches keys with periodic refresh
-- Extracts workspace ID and user ID from claims
+- Enforces workspace claims on workspace-scoped routes
+- Enforces node-scoped management tokens on node-wide diagnostic routes
 
 ## Configuration
 
