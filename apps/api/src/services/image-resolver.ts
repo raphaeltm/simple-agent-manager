@@ -297,10 +297,11 @@ async function resolveViaGet(
  * @returns An ImageResolver that queries the OCI registry manifest API
  */
 export function createImageResolver(opts: ImageResolverOptions = {}): ImageResolver {
+  const fetchFn = opts.fetchFn ?? ((input, init) => globalThis.fetch(input, init));
   const runtime: ResolverRuntimeOptions = {
     auth: opts.auth,
     authRegistryHost: opts.authRegistryHost,
-    fetchFn: opts.fetchFn ?? fetch,
+    fetchFn,
     config: configFromOptions(opts),
     budget: { attempts: 0, activeFetches: 0, deadlineAt: null },
   };

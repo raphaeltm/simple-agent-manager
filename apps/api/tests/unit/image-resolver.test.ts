@@ -113,6 +113,36 @@ describe('ImageResolver', () => {
       expect(call[0]).toBe('https://registry-1.docker.io/v2/library/nginx/manifests/latest');
     });
 
+    it('wraps the default global fetch so Workers-style host functions keep their receiver', async () => {
+      const originalFetch = globalThis.fetch;
+      const observedThisValues: unknown[] = [];
+      globalThis.fetch = vi.fn(function (this: unknown) {
+        observedThisValues.push(this);
+        if (this !== globalThis) {
+          throw new TypeError('Illegal invocation');
+        }
+        return Promise.resolve(
+          new Response(null, {
+            status: 200,
+            headers: { 'Docker-Content-Digest': REALISTIC_DIGEST },
+          })
+        );
+      }) as typeof fetch;
+
+      try {
+        const resolver = createImageResolver();
+
+        await expect(resolver('ghcr.io', 'org/myapp', 'v1.0')).resolves.toBe(REALISTIC_DIGEST);
+        expect(globalThis.fetch).toHaveBeenCalledWith(
+          'https://ghcr.io/v2/org/myapp/manifests/v1.0',
+          expect.objectContaining({ method: 'HEAD' })
+        );
+        expect(observedThisValues).toEqual([globalThis]);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
     it('returns 404 → ImageResolveError with statusCode 404', async () => {
       const { fetchFn } = mockRegistryFetch({ status: 404 });
       const resolver = createImageResolver({ fetchFn });
