@@ -11,8 +11,8 @@ import type { JsonRpcResponse, McpTokenData } from '../../../src/routes/mcp/_hel
 const findFirstMock = vi.fn();
 
 vi.mock('../../../src/services/project-data', () => ({
-  listCommentThreads: vi.fn(),
   createFileCommentThread: vi.fn(),
+  listFileCommentThreads: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1', () => ({
@@ -115,7 +115,7 @@ describe('MCP library-file comment tools', () => {
         { ...makeFileThread({ id: 't-1' }), sequence: 5 },
         { ...makeFileThread({ id: 't-2' }), sequence: 8 },
       ];
-      vi.mocked(projectDataService.listCommentThreads).mockResolvedValue({
+      vi.mocked(projectDataService.listFileCommentThreads).mockResolvedValue({
         threads,
         hasMore: true,
       });
@@ -128,12 +128,11 @@ describe('MCP library-file comment tools', () => {
       );
 
       expect(response.error).toBeUndefined();
-      expect(vi.mocked(projectDataService.listCommentThreads)).toHaveBeenCalledWith(
+      expect(vi.mocked(projectDataService.listFileCommentThreads)).toHaveBeenCalledWith(
         expect.anything(),
         'project-1',
         expect.objectContaining({
           fileId: 'file-1',
-          anchorKind: 'library_file',
           afterSequence: 3,
         })
       );
@@ -150,7 +149,7 @@ describe('MCP library-file comment tools', () => {
     });
 
     it('returns empty list without error', async () => {
-      vi.mocked(projectDataService.listCommentThreads).mockResolvedValue({
+      vi.mocked(projectDataService.listFileCommentThreads).mockResolvedValue({
         threads: [],
         hasMore: false,
       });
@@ -180,7 +179,7 @@ describe('MCP library-file comment tools', () => {
 
       expect(response.error?.code).toBe(-32602);
       expect(response.error?.message).toContain('projectId is derived');
-      expect(vi.mocked(projectDataService.listCommentThreads)).not.toHaveBeenCalled();
+      expect(vi.mocked(projectDataService.listFileCommentThreads)).not.toHaveBeenCalled();
     });
 
     it('validates fileId is required', async () => {
@@ -193,7 +192,7 @@ describe('MCP library-file comment tools', () => {
 
       expect(response.error?.code).toBe(-32602);
       expect(response.error?.message).toContain('fileId is required');
-      expect(vi.mocked(projectDataService.listCommentThreads)).not.toHaveBeenCalled();
+      expect(vi.mocked(projectDataService.listFileCommentThreads)).not.toHaveBeenCalled();
     });
 
     it('returns error when file does not exist', async () => {
@@ -208,11 +207,11 @@ describe('MCP library-file comment tools', () => {
 
       expect(response.error?.code).toBe(-32602);
       expect(response.error?.message).toContain('Library file not found');
-      expect(vi.mocked(projectDataService.listCommentThreads)).not.toHaveBeenCalled();
+      expect(vi.mocked(projectDataService.listFileCommentThreads)).not.toHaveBeenCalled();
     });
 
     it('passes null afterSequence when cursor is absent', async () => {
-      vi.mocked(projectDataService.listCommentThreads).mockResolvedValue({
+      vi.mocked(projectDataService.listFileCommentThreads).mockResolvedValue({
         threads: [],
         hasMore: false,
       });
@@ -224,7 +223,7 @@ describe('MCP library-file comment tools', () => {
         makeEnv()
       );
 
-      expect(vi.mocked(projectDataService.listCommentThreads)).toHaveBeenCalledWith(
+      expect(vi.mocked(projectDataService.listFileCommentThreads)).toHaveBeenCalledWith(
         expect.anything(),
         'project-1',
         expect.objectContaining({ afterSequence: null })
@@ -232,7 +231,7 @@ describe('MCP library-file comment tools', () => {
     });
 
     it('passes null afterSequence when cursor is non-numeric', async () => {
-      vi.mocked(projectDataService.listCommentThreads).mockResolvedValue({
+      vi.mocked(projectDataService.listFileCommentThreads).mockResolvedValue({
         threads: [],
         hasMore: false,
       });
@@ -244,7 +243,7 @@ describe('MCP library-file comment tools', () => {
         makeEnv()
       );
 
-      expect(vi.mocked(projectDataService.listCommentThreads)).toHaveBeenCalledWith(
+      expect(vi.mocked(projectDataService.listFileCommentThreads)).toHaveBeenCalledWith(
         expect.anything(),
         'project-1',
         expect.objectContaining({ afterSequence: null })
@@ -252,7 +251,7 @@ describe('MCP library-file comment tools', () => {
     });
 
     it('filters by status when provided', async () => {
-      vi.mocked(projectDataService.listCommentThreads).mockResolvedValue({
+      vi.mocked(projectDataService.listFileCommentThreads).mockResolvedValue({
         threads: [],
         hasMore: false,
       });
@@ -264,7 +263,7 @@ describe('MCP library-file comment tools', () => {
         makeEnv()
       );
 
-      expect(vi.mocked(projectDataService.listCommentThreads)).toHaveBeenCalledWith(
+      expect(vi.mocked(projectDataService.listFileCommentThreads)).toHaveBeenCalledWith(
         expect.anything(),
         'project-1',
         expect.objectContaining({ status: 'resolved' })
@@ -272,7 +271,7 @@ describe('MCP library-file comment tools', () => {
     });
 
     it('passes null status for "all" filter', async () => {
-      vi.mocked(projectDataService.listCommentThreads).mockResolvedValue({
+      vi.mocked(projectDataService.listFileCommentThreads).mockResolvedValue({
         threads: [],
         hasMore: false,
       });
@@ -284,7 +283,7 @@ describe('MCP library-file comment tools', () => {
         makeEnv()
       );
 
-      expect(vi.mocked(projectDataService.listCommentThreads)).toHaveBeenCalledWith(
+      expect(vi.mocked(projectDataService.listFileCommentThreads)).toHaveBeenCalledWith(
         expect.anything(),
         'project-1',
         expect.objectContaining({ status: null })
@@ -304,7 +303,7 @@ describe('MCP library-file comment tools', () => {
     });
 
     it('clamps limit to configured maximum', async () => {
-      vi.mocked(projectDataService.listCommentThreads).mockResolvedValue({
+      vi.mocked(projectDataService.listFileCommentThreads).mockResolvedValue({
         threads: [],
         hasMore: false,
       });
@@ -316,7 +315,7 @@ describe('MCP library-file comment tools', () => {
         makeEnv({ MCP_COMMENT_LIST_MAX: '10' })
       );
 
-      expect(vi.mocked(projectDataService.listCommentThreads)).toHaveBeenCalledWith(
+      expect(vi.mocked(projectDataService.listFileCommentThreads)).toHaveBeenCalledWith(
         expect.anything(),
         'project-1',
         expect.objectContaining({ limit: 10 })
@@ -324,7 +323,7 @@ describe('MCP library-file comment tools', () => {
     });
 
     it('returns nextCursor as null when hasMore is false', async () => {
-      vi.mocked(projectDataService.listCommentThreads).mockResolvedValue({
+      vi.mocked(projectDataService.listFileCommentThreads).mockResolvedValue({
         threads: [{ ...makeFileThread(), sequence: 3 }],
         hasMore: false,
       });
@@ -342,7 +341,7 @@ describe('MCP library-file comment tools', () => {
     });
 
     it('handles service errors safely without leaking stack traces', async () => {
-      vi.mocked(projectDataService.listCommentThreads).mockRejectedValue(
+      vi.mocked(projectDataService.listFileCommentThreads).mockRejectedValue(
         new Error('raw backend stack with token=secret')
       );
 

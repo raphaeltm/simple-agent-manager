@@ -400,7 +400,9 @@ describe('DO Migrations', () => {
       // active-parent (030) and idempotency (031) indexes are CREATE UNIQUE
       // INDEX and are counted separately
       // message-anchored comments: 6 from migration 032
-      expect(indexes.length).toBe(57);
+      // library-file comments: 4 from migration 033 (2 threads, 1 replies,
+      // 1 status_mutations)
+      expect(indexes.length).toBe(61);
     });
   });
 });
