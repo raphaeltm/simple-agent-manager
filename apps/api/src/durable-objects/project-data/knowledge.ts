@@ -24,10 +24,18 @@ const log = createModuleLogger('project_data.knowledge');
  * it is 0.25.
  *
  * Shared by BOTH scoring paths — `getRelevantKnowledge` (JS, over FTS hits) and
- * `getAllHighConfidenceKnowledge` (SQL, inside a window function). They cannot share
- * an implementation because one runs before the rows are fetched, so this constant plus
- * the parity test in tests/workers/knowledge-injection-ranking.test.ts is what keeps
- * retrieval and injection agreeing on what "most relevant" means.
+ * `getAllHighConfidenceKnowledge` (SQL, inside a window function).
+ *
+ * The SQL copy is a deliberate performance trade-off, not a language constraint: this DO's
+ * SqlStorage is in-process, so injection COULD fetch every matching row and rank in JS
+ * using this function alone. It does not, because that would pull the full filtered set
+ * (up to maxEntitiesPerProject x maxObservationsPerEntity) into JS on a path that runs at
+ * every session start, purely to discard most of it. Ranking and capping in SQL keeps the
+ * transfer proportional to what is actually injected.
+ *
+ * Because this constant is bound INTO the query as a parameter, the two paths cannot drift
+ * on the scale value; only the shape of the arithmetic could diverge, which is what the
+ * parity test in tests/workers/knowledge-injection-ranking.test.ts pins down.
  */
 export const RELEVANCE_RECENCY_SCALE_MS = 86_400_000 * 30;
 
@@ -48,6 +56,33 @@ export function computeRelevanceScore(
 ): number {
   const ageMs = Math.max(0, nowMs - lastConfirmedAtMs);
   return confidence * (1 / (1 + ageMs / scaleMs));
+}
+
+/**
+ * Floor a caller-supplied row limit to a value that can actually return rows.
+ *
+ * Every limit in this module lands in a SQL predicate (`LIMIT ?`, `WHERE entity_rank <= ?`),
+ * and SQLite answers a non-positive bound by quietly doing the wrong thing rather than by
+ * erroring — in two opposite directions:
+ *
+ *   - `WHERE entity_rank <= 0` (or negative) is unsatisfiable for every row, because
+ *     ROW_NUMBER() starts at 1. Result: ZERO knowledge injected, project-wide, silently.
+ *   - `LIMIT -1` means "no upper bound" in SQLite, so a negative outer limit does not fail
+ *     safe — it removes the budget entirely.
+ *
+ * A single mistyped env var could therefore reproduce the total, invisible knowledge
+ * starvation this module was just rewritten to end, or blow the payload budget open. The
+ * `parseInt(...) || DEFAULT` idiom at the call site rescues `0` and `NaN` (both falsy) but
+ * NOT `-1`, which is truthy and sails straight through.
+ *
+ * `NaN` still needs its own check here: `Math.max(1, NaN)` is `NaN`, not `1`.
+ *
+ * Clamped at the DO boundary rather than at the caller so the guarantee holds for every
+ * caller, present and future — the callers are the part that can be wrong (rule 51).
+ */
+function clampRowLimit(limit: number, fallback: number): number {
+  if (!Number.isFinite(limit)) return fallback;
+  return Math.max(1, Math.floor(limit));
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -423,9 +458,10 @@ export function getRelevantKnowledge(sql: SqlStorage, context: string, limit: nu
  *
  * The scoring expression below mirrors `computeRelevanceScore`, the canonical JS
  * definition also used by `getRelevantKnowledge`, so injection and retrieval rank
- * knowledge the same way. It has to be duplicated in SQL because the ranking happens
- * inside a window function, before any row reaches JS; a parity test asserts the two
- * agree, so a change to one that is not mirrored in the other fails CI.
+ * knowledge the same way. It is mirrored in SQL so the ranking and the per-entity cap can
+ * happen inside the query rather than by pulling every candidate row into JS (see the note
+ * on RELEVANCE_RECENCY_SCALE_MS); a parity test asserts the two agree, so a change to one
+ * that is not mirrored in the other fails CI.
  *
  *     score = confidence x 1 / (1 + ageDays / 30)
  *
@@ -450,6 +486,13 @@ export function getAllHighConfidenceKnowledge(
   perEntityLimit: number = KNOWLEDGE_DEFAULTS.autoRetrievePerEntityLimit,
   now: number = Date.now(),
 ) {
+  // Both bounds reach SQL predicates where a non-positive value silently empties or
+  // unbounds the result rather than erroring. See clampRowLimit.
+  const safePerEntityLimit = clampRowLimit(
+    perEntityLimit,
+    KNOWLEDGE_DEFAULTS.autoRetrievePerEntityLimit,
+  );
+  const safeLimit = clampRowLimit(limit, KNOWLEDGE_DEFAULTS.autoRetrieveHighConfidenceLimit);
   const rows = sql.exec(
     `WITH scored AS (
        SELECT o.*, e.name AS entity_name, e.entity_type,
@@ -476,7 +519,7 @@ export function getAllHighConfidenceKnowledge(
      WHERE entity_rank <= ?
      ORDER BY relevance_score DESC, last_confirmed_at DESC, id ASC
      LIMIT ?`,
-    now, RELEVANCE_RECENCY_SCALE_MS, minConfidence, perEntityLimit, limit,
+    now, RELEVANCE_RECENCY_SCALE_MS, minConfidence, safePerEntityLimit, safeLimit,
   ).toArray();
 
   // Per-row isolation (rule 50). A bare rows.map() throws on the FIRST malformed row and
@@ -543,11 +586,18 @@ export function getKnowledgeEntityIndex(
   sql: SqlStorage,
   limit: number = KNOWLEDGE_DEFAULTS.entityIndexLimit,
 ): KnowledgeEntityIndex {
-  // A negative or fractional override would otherwise reach LIMIT verbatim and return
-  // nothing at all — the same silent-empty failure this change exists to remove.
-  const safeLimit = Math.max(1, Math.floor(limit));
+  // A negative, zero, fractional, or NaN override would otherwise reach LIMIT verbatim and
+  // return nothing at all — the same silent-empty failure this change exists to remove.
+  const safeLimit = clampRowLimit(limit, KNOWLEDGE_DEFAULTS.entityIndexLimit);
+  // `COUNT(*) OVER ()` carries the true pre-LIMIT group count on every row. SQLite
+  // evaluates window functions after GROUP BY but before LIMIT, so this is the total
+  // number of entities with at least one active observation — what the caller needs to
+  // say "N of M" instead of labelling a truncated list "full", which would recreate this
+  // bug one layer up. Folding it in here avoids a second full JOIN + GROUP BY pass over
+  // the same rows on a path that runs at every session start (rule 60).
   const rows = sql.exec(
-    `SELECT e.name AS name, e.entity_type AS entity_type, COUNT(o.id) AS observation_count
+    `SELECT e.name AS name, e.entity_type AS entity_type, COUNT(o.id) AS observation_count,
+            COUNT(*) OVER () AS total_entities
      FROM knowledge_entities e
      JOIN knowledge_observations o ON o.entity_id = e.id AND o.is_active = 1
      GROUP BY e.id, e.name, e.entity_type
@@ -556,18 +606,11 @@ export function getKnowledgeEntityIndex(
     safeLimit,
   ).toArray();
 
-  // The true total, so the caller can say "N of M" instead of labelling a truncated
-  // list "full" -- which would recreate this bug one layer up.
-  const totalEntities = parseCountCnt(
-    sql.exec(
-      `SELECT COUNT(*) as cnt FROM (
-         SELECT e.id FROM knowledge_entities e
-         JOIN knowledge_observations o ON o.entity_id = e.id AND o.is_active = 1
-         GROUP BY e.id
-       )`,
-    ).toArray()[0],
-    'knowledge_entity_index_total',
-  );
+  // Read the total from the raw row rather than from a parsed entry: a malformed FIRST
+  // row would otherwise be skipped below and take the total with it, silently downgrading
+  // a truncated index to one that claims completeness.
+  const rawTotal = rows[0]?.total_entities;
+  const totalEntities = typeof rawTotal === 'number' ? rawTotal : rows.length;
 
   // Per-row isolation (rule 50): one malformed entity row must not fail the whole
   // index, which would take the agent's only discovery path down with it.

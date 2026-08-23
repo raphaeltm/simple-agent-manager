@@ -99,6 +99,292 @@ async function seedEntity(
   return entityId;
 }
 
+/**
+ * Seed ONE entity whose observations differ from each other in confidence and age.
+ *
+ * `seedEntity` deliberately stamps a single confidence/age across a whole entity, which
+ * makes every row inside that entity's partition tie on relevance_score. That is fine for
+ * cross-entity tests, but it means the window function's own
+ * `ORDER BY relevance_score DESC, ...` is never exercised: the cap could keep an ARBITRARY
+ * N per entity instead of the BEST N and every test would still pass. (Proven: changing
+ * the window ORDER BY to `id ASC` left the whole suite green.)
+ *
+ * Returns the observation contents in the order the ranking should prefer them.
+ */
+async function seedVariedEntity(
+  stub: DurableObjectStub<KnowledgeStub>,
+  opts: {
+    name: string;
+    observations: { label: string; confidence: number; ageDays: number }[];
+  }
+): Promise<string[]> {
+  const { id: entityId } = await stub.createKnowledgeEntity(opts.name, 'context', null);
+  for (const o of opts.observations) {
+    const { id } = await stub.addKnowledgeObservation(
+      entityId,
+      `${opts.name}:${o.label}`,
+      o.confidence,
+      'explicit',
+      null
+    );
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        'UPDATE knowledge_observations SET last_confirmed_at = ? WHERE id = ?',
+        Date.now() - o.ageDays * DAY_MS,
+        id
+      );
+    });
+  }
+
+  // Expected preference order, computed with the PRODUCTION scoring function (not a
+  // reimplementation) so this stays pinned to the canonical formula.
+  const now = Date.now();
+  return [...opts.observations]
+    .sort(
+      (a, b) =>
+        computeRelevanceScore(b.confidence, now - b.ageDays * DAY_MS, now) -
+        computeRelevanceScore(a.confidence, now - a.ageDays * DAY_MS, now)
+    )
+    .map((o) => `${opts.name}:${o.label}`);
+}
+
+describe('per-entity cap keeps the best observations, not arbitrary ones', () => {
+  let stub: DurableObjectStub<KnowledgeStub>;
+
+  beforeEach(() => {
+    ({ stub } = freshStub());
+  });
+
+  /**
+   * The cap must be a RANKING operation, not just a counting one. Without this, the
+   * window function could order by anything (id, insertion order) and the cap would
+   * still "work" by every other test's definition — silently keeping the least useful
+   * observations of each entity, which is this whole file's bug one level down.
+   *
+   * Discriminating: FAILS when the window ORDER BY is changed to `id ASC`.
+   */
+  it('keeps the highest-scoring observations within a single entity', async () => {
+    // Insertion order is deliberately NOT score order, and the best rows are inserted
+    // last, so an id-ordered cap keeps exactly the wrong three.
+    const expectedOrder = await seedVariedEntity(stub, {
+      name: 'MixedEntity',
+      observations: [
+        { label: 'stale-weak', confidence: 0.81, ageDays: 400 },
+        { label: 'stale-strong', confidence: 0.99, ageDays: 365 },
+        { label: 'mid', confidence: 0.9, ageDays: 60 },
+        { label: 'fresh-strong', confidence: 0.98, ageDays: 0 },
+        { label: 'fresh-good', confidence: 0.88, ageDays: 2 },
+      ],
+    });
+
+    const results = await stub.getAllHighConfidenceKnowledge(0.8, 50, 3);
+    const kept = results.map((r) => r.content);
+
+    expect(kept).toHaveLength(3);
+    // The three best by the canonical formula — and in that order.
+    expect(kept).toEqual(expectedOrder.slice(0, 3));
+    // Spelled out so a future reader sees the intent without recomputing the formula.
+    expect(kept).toContain('MixedEntity:fresh-strong');
+    expect(kept).toContain('MixedEntity:fresh-good');
+    expect(kept).not.toContain('MixedEntity:stale-weak');
+  });
+});
+
+describe('knowledge injection limit clamping', () => {
+  let stub: DurableObjectStub<KnowledgeStub>;
+
+  beforeEach(async () => {
+    ({ stub } = freshStub());
+    await seedEntity(stub, {
+      name: 'Alpha',
+      entityType: 'context',
+      count: 4,
+      confidence: 0.95,
+      ageDays: 1,
+    });
+    await seedEntity(stub, {
+      name: 'Beta',
+      entityType: 'preference',
+      count: 4,
+      confidence: 0.9,
+      ageDays: 2,
+    });
+  });
+
+  /**
+   * `WHERE entity_rank <= ?` is unsatisfiable for every row when the bound is <= 0,
+   * because ROW_NUMBER() starts at 1. A single bad env var would therefore inject NOTHING
+   * project-wide — silently, and worse than the alphabetical bug this PR fixes.
+   *
+   * `parseInt('-1') || DEFAULT` does NOT rescue this: -1 is truthy.
+   *
+   * Discriminating: FAILS when clampRowLimit is removed from getAllHighConfidenceKnowledge.
+   */
+  it.each([
+    ['zero', 0],
+    ['negative', -1],
+    ['fractional', 0.5],
+    ['NaN', Number.NaN],
+  ])('still injects knowledge when perEntityLimit is %s', async (_label, badLimit) => {
+    const results = await stub.getAllHighConfidenceKnowledge(0.8, 50, badLimit as number);
+    expect(results.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * The opposite failure direction: SQLite treats `LIMIT -1` as "no upper bound", so a
+   * negative outer limit does not fail safe — it silently removes the payload budget.
+   */
+  it('does not become unbounded when the outer limit is negative', async () => {
+    const results = await stub.getAllHighConfidenceKnowledge(0.8, -1, 8);
+    // Clamped to 1, not "everything".
+    expect(results).toHaveLength(1);
+  });
+
+  it('still returns entities when the index limit is zero or NaN', async () => {
+    expect((await stub.getKnowledgeEntityIndex(0)).entries.length).toBeGreaterThan(0);
+    expect((await stub.getKnowledgeEntityIndex(Number.NaN)).entries.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * Owner control (rule 28): the clamp must not be what makes the above pass. A sane
+   * limit must still be honoured exactly, or the clamp could be masking a broken query.
+   */
+  it('honours a valid limit exactly', async () => {
+    const results = await stub.getAllHighConfidenceKnowledge(0.8, 50, 2);
+    expect(results).toHaveLength(4); // 2 entities x cap 2
+    expect(await stub.getAllHighConfidenceKnowledge(0.8, 3, 8)).toHaveLength(3);
+  });
+});
+
+describe('knowledge injection resilience', () => {
+  let stub: DurableObjectStub<KnowledgeStub>;
+
+  beforeEach(() => {
+    ({ stub } = freshStub());
+  });
+
+  /**
+   * Clock skew, or a bad row, can put last_confirmed_at in the FUTURE. Without
+   * `MAX(0, now - last_confirmed_at)` the denominator goes negative, flipping the sign of
+   * the score so the freshest possible observation sorts to the very BOTTOM.
+   *
+   * The offset must be comfortably beyond RELEVANCE_RECENCY_SCALE_MS (30d) for this to
+   * discriminate. At exactly 30d the denominator is ~0 and the unclamped score is a huge
+   * POSITIVE number, which ranks first anyway — so a +30d version of this test passes with
+   * or without the clamp. 90d gives 1 + (-90/30) = -2, i.e. a solidly negative score.
+   *
+   * Discriminating: verified to FAIL when the MAX(0, ...) clamp is removed.
+   */
+  it('treats a future last_confirmed_at as brand new rather than scoring it negative', async () => {
+    const entityId = await seedEntity(stub, {
+      name: 'FutureEntity',
+      entityType: 'context',
+      count: 1,
+      confidence: 0.99,
+      ageDays: 0,
+    });
+    await seedEntity(stub, {
+      name: 'NormalEntity',
+      entityType: 'context',
+      count: 1,
+      confidence: 0.95,
+      ageDays: 1,
+    });
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        'UPDATE knowledge_observations SET last_confirmed_at = ? WHERE entity_id = ?',
+        Date.now() + 90 * DAY_MS,
+        entityId
+      );
+    });
+
+    const results = await stub.getAllHighConfidenceKnowledge(0.8, 50, 8);
+    // Both present, and the future-dated one ranks first (age clamped to 0 => full
+    // confidence), rather than being sorted to the bottom by a negative score.
+    expect(results).toHaveLength(2);
+    expect(results[0].entityName).toBe('FutureEntity');
+  });
+
+  /**
+   * Rule 50: one malformed legacy row must not take down the entire injected set.
+   *
+   * This matters most precisely here — ranking newly surfaces the oldest, least-touched
+   * entities that alphabetical truncation had starved for months, which are exactly the
+   * rows most likely to predate a schema tightening.
+   *
+   * Discriminating: FAILS if the per-row try/catch is replaced by rows.map(parse...).
+   */
+  it('skips a malformed observation row instead of losing the whole ranked set', async () => {
+    await seedEntity(stub, {
+      name: 'GoodOne',
+      entityType: 'context',
+      count: 1,
+      confidence: 0.95,
+      ageDays: 1,
+    });
+    const badEntity = await seedEntity(stub, {
+      name: 'BadRow',
+      entityType: 'context',
+      count: 1,
+      confidence: 0.95,
+      ageDays: 2,
+    });
+    await seedEntity(stub, {
+      name: 'GoodTwo',
+      entityType: 'context',
+      count: 1,
+      confidence: 0.95,
+      ageDays: 3,
+    });
+
+    // Violate the PARSER schema (confidence: v.number()) without violating the DB's own
+    // NOT NULL constraint — the shape a legacy row takes after a schema tightening.
+    // A BLOB is used deliberately: SQLite column affinity would coerce a stray string or
+    // number back into a valid type, so only a BLOB reliably survives to reach the parser.
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `UPDATE knowledge_observations SET confidence = X'0102' WHERE entity_id = ?`,
+        badEntity
+      );
+    });
+
+    const results = await stub.getAllHighConfidenceKnowledge(0.8, 50, 8);
+    const names = results.map((r) => r.entityName);
+    expect(names).toContain('GoodOne');
+    expect(names).toContain('GoodTwo');
+    expect(names).not.toContain('BadRow');
+  });
+
+  it('skips a malformed entity-index row instead of losing the whole index', async () => {
+    await seedEntity(stub, {
+      name: 'IndexGood',
+      entityType: 'context',
+      count: 2,
+      confidence: 0.95,
+      ageDays: 1,
+    });
+    const badEntity = await seedEntity(stub, {
+      name: 'IndexBad',
+      entityType: 'context',
+      count: 1,
+      confidence: 0.95,
+      ageDays: 1,
+    });
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `UPDATE knowledge_entities SET entity_type = X'0102' WHERE id = ?`,
+        badEntity
+      );
+    });
+
+    const index = await stub.getKnowledgeEntityIndex(200);
+    expect(index.entries.map((e) => e.name)).toEqual(['IndexGood']);
+    // totalEntities counts rows in SQL, before parsing — so it still sees both. That is
+    // correct: the index is truncated/degraded and must not claim to be complete.
+    expect(index.totalEntities).toBe(2);
+  });
+});
+
 describe('knowledge injection ranking', () => {
   let stub: DurableObjectStub<KnowledgeStub>;
 

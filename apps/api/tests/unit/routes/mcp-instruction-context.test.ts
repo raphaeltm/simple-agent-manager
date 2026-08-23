@@ -175,6 +175,38 @@ describe('MCP instruction context handlers', () => {
     expect(payload.task).toMatchObject({ id: 'task-1' });
   });
 
+  it('does not claim the graph is empty when entities exist below the confidence bar', async () => {
+    mocks.selectRows = [[task], [project]];
+    // Nothing clears the confidence bar, but the project plainly HAS knowledge — it is
+    // reachable by search. Gating the instructions on the ranked set alone would hand this
+    // project the "empty graph, start bootstrapping" prompt while its index lists entities.
+    mocks.projectData.getAllHighConfidenceKnowledge.mockResolvedValue([]);
+
+    const response = await handleGetInstructions('request-1', baseToken, makeEnv());
+    const payload = parseInstructionPayload(response);
+    const instructions = (payload.instructions as string[]).join('\n');
+
+    expect(instructions).toContain('contains stored knowledge from previous sessions');
+    expect(instructions).not.toContain('No knowledge has been stored');
+    // Positive control (rule 62): the index really did survive into the payload.
+    expect(String(payload.knowledgeDirectives)).toContain('ContentStyle (preference, 7)');
+  });
+
+  it('passes the entity index limit through to the index query', async () => {
+    mocks.selectRows = [[task], [project]];
+
+    await handleGetInstructions('request-1', baseToken, makeEnv());
+
+    // Default is 200 (KNOWLEDGE_DEFAULTS.entityIndexLimit). The per-entity cap has an
+    // equivalent assertion below; without this one the index limit could stop being
+    // threaded and nothing would notice.
+    expect(mocks.projectData.getKnowledgeEntityIndex).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-1',
+      200
+    );
+  });
+
   it('passes the per-entity cap through to the knowledge query', async () => {
     mocks.selectRows = [[task], [project]];
 

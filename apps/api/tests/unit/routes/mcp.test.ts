@@ -228,6 +228,12 @@ const mockDoStub = {
   getSessionsForIdea: vi.fn().mockReturnValue([]),
   updateSessionTopic: vi.fn().mockResolvedValue(true),
   getAllHighConfidenceKnowledge: vi.fn().mockResolvedValue([]),
+  // Without this, every get_instructions test in this file silently exercises only the
+  // DEGRADED branch: the missing method throws inside Promise.allSettled, which swallows
+  // it as a rejection and logs a warning, so those tests pass identically whether the
+  // entity-index wiring works or is deleted outright (rule 02 — a green test count is not
+  // a green suite).
+  getKnowledgeEntityIndex: vi.fn().mockResolvedValue({ entries: [], totalEntities: 0 }),
   getActivePolicies: vi.fn().mockResolvedValue([]),
   listCommentThreads: vi.fn().mockResolvedValue({ threads: [], nextCursor: null, hasMore: false }),
   getCommentThread: vi.fn().mockResolvedValue(null),
