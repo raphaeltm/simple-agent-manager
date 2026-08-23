@@ -88,39 +88,39 @@ R2 (policy expiry fields). This diff must stay minimal and land first; rebase on
 
 ## Implementation checklist
 
-- [ ] Stop emitting `knowledgeContext` and `policyContext` from the `get_instructions`
+- [x] Stop emitting `knowledgeContext` and `policyContext` from the `get_instructions`
       result object (`instruction-tools.ts:283-287`); keep both as local variables feeding
       the formatters and the `hasKnowledge` / `hasPolicies` instruction switches
-- [ ] Render the full policy id inline in `formatPolicyDirectives`:
+- [x] Render the full policy id inline in `formatPolicyDirectives`:
       `- **{title}** (id: {uuid}): {content}`
-- [ ] Update the `policyDirectives` doc-comment example to show the id
-- [ ] Update `buildPolicyInstructions` so the agent is told where to find the id
-- [ ] Update `tasks/backlog/2026-04-13-knowledge-graph-test-coverage.md` acceptance
+- [x] Update the `policyDirectives` doc-comment example to show the id
+- [x] Update `buildPolicyInstructions` so the agent is told where to find the id
+- [x] Update `tasks/backlog/2026-04-13-knowledge-graph-test-coverage.md` acceptance
       criteria to reference `knowledgeDirectives` instead of the removed `knowledgeContext`
-- [ ] File a backlog task for the pre-existing missing `observationId` (F3)
-- [ ] Regression tests (see below)
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build`
+- [x] File a backlog task for the pre-existing missing `observationId` (F3)
+- [x] Regression tests (see below)
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build`
 
 ## Tests
 
-- [ ] **Discriminating de-duplication test**: each policy `content` and each knowledge
+- [x] **Discriminating de-duplication test**: each policy `content` and each knowledge
       `observation` appears **exactly once** in the serialized response. Must fail on
       pre-fix code (where each appears twice). Verify that once.
-- [ ] **Fields absent**: response has no `knowledgeContext` / `policyContext` key
-- [ ] **Identifier survival**: every active policy's full id appears in `policyDirectives`,
+- [x] **Fields absent**: response has no `knowledgeContext` / `policyContext` key
+- [x] **Identifier survival**: every active policy's full id appears in `policyDirectives`,
       and the rendered id is the exact string `update_policy` / `remove_policy` accept
       (no truncation)
-- [ ] **No-regression**: titles, contents, observations, category grouping and headers all
+- [x] **No-regression**: titles, contents, observations, category grouping and headers all
       still present; empty-knowledge and empty-policy paths still omit the directive fields
       and still select the correct instruction variants
 
 ## Acceptance criteria
 
-- [ ] `get_instructions` no longer emits `knowledgeContext` or `policyContext`
-- [ ] Every policy's full, exact id is available to the agent in the rendered directives
-- [ ] Payload for the SAM project drops from ~166.8K to ~81.0K chars (~51%, ~21.4k tokens)
-- [ ] No consumer anywhere in the repo reads the removed fields
-- [ ] Staging: a real session bootstrap receives directives, can act on a policy by id, and
+- [x] `get_instructions` no longer emits `knowledgeContext` or `policyContext`
+- [x] Every policy's full, exact id is available to the agent in the rendered directives
+- [x] Payload for the SAM project drops from ~166.8K to ~81.0K chars (~51%, ~21.4k tokens)
+- [x] No consumer anywhere in the repo reads the removed fields
+- [x] Staging: a real session bootstrap receives directives, can act on a policy by id, and
       the payload is measurably smaller (before/after bytes reported in the PR)
 
 ## References
@@ -129,3 +129,36 @@ R2 (policy expiry fields). This diff must stay minimal and land first; rebase on
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md` — tests must reach the real path
 - `.claude/rules/02-quality-gates.md` — discriminating regression tests
 - `tasks/archive/2026-04-26-policy-propagation-phase4.md` — where `policyContext` originated
+
+## Outcome
+
+**Implemented** in commit `da1d3160a` on `sam/remove-duplicated-structured-arrays-b6ggy4`.
+
+### Measured result
+
+| | chars |
+|---|---:|
+| BEFORE (`JSON.stringify(result, null, 2)`, real SAM project) | 166,814 |
+| AFTER (incl. +3,483 for inline policy ids) | 81,025 |
+| **Saved** | **85,789 (-51%, ~21.4k tokens per session bootstrap)** |
+
+### Discriminating-test proof
+
+Re-added the two structured arrays locally; exactly 4 of the 12 new tests went red —
+the three "exactly once" body/title/observation tests and the "omits the structured
+arrays" test. Restored → 12/12 green.
+
+### Validation
+
+- `pnpm lint` — 0 errors (3 pre-existing `apps/web` warnings, untouched)
+- `pnpm typecheck` — 19/19 tasks clean
+- `apps/api` suite — 595 files, 8,037 tests, 0 failed, **0 collection errors**
+  (8,025 baseline + 12 new)
+- `pnpm build` — 9/9
+- `pnpm check:fast` — 13/13, 0 blocking type-boundary findings
+
+### Deviation from the brief
+
+The brief suggested an elided id, e.g. `(id: 7d24e435…)`. That would **break**
+`update_policy` / `remove_policy`: `policies.ts:118,136` resolve with `WHERE id = ?`
+(exact match). Full 36-char UUIDs are rendered instead — 3,483 chars against 52,157 saved.
