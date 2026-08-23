@@ -20,7 +20,7 @@ import { act, render } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
 
-import { RenderedMarkdown } from '../../../src/components/MarkdownRenderer';
+import { RenderedMarkdown, RenderedMarkdownImpl } from '../../../src/components/MarkdownRenderer';
 
 const CONTENT = [
   '# A heading',
@@ -85,6 +85,34 @@ describe('RenderedMarkdown DOM stability', () => {
 
     expect(window.getSelection()?.toString()).toBe(selectedBefore);
     expect(window.getSelection()?.isCollapsed).toBe(false);
+  });
+
+  it('survives a real re-render of the renderer itself, without memo', () => {
+    // The tests above drive the re-render through memo's bail-out, so they pass
+    // even if the components object is rebuilt — memo alone would satisfy them.
+    // This one renders the UNMEMOIZED implementation, forcing it to actually
+    // re-execute, which is the only way to prove the module-scope hoist (not
+    // memo) is what keeps the DOM stable.
+    function UnmemoizedHarness() {
+      const [n, setN] = useState(0);
+      return (
+        <div>
+          <button type="button" data-testid="bump" onClick={() => setN((v) => v + 1)}>
+            {n}
+          </button>
+          <RenderedMarkdownImpl content={CONTENT} />
+        </div>
+      );
+    }
+
+    const { container, getByTestId } = render(<UnmemoizedHarness />);
+    const before = container.querySelector('p');
+    expect(before).not.toBeNull();
+
+    act(() => getByTestId('bump').click());
+    expect(getByTestId('bump').textContent).toBe('1');
+
+    expect(container.querySelector('p')).toBe(before);
   });
 
   it('still re-renders when the content itself changes', () => {

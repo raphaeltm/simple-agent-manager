@@ -270,7 +270,7 @@ type MarkdownHastChild = NonNullable<ExtraProps['node']>['children'][number];
  * safe. If one ever needs a prop, memoize it per-instance rather than moving
  * this back inline.
  */
-const MARKDOWN_COMPONENTS: Components = {
+export const MARKDOWN_COMPONENTS: Components = {
   h1: ({ children }) => (
     <h1 className="text-2xl mb-3 leading-tight" style={{ margin: '0 0 12px' }}>
       {children}
@@ -387,11 +387,11 @@ const MARKDOWN_COMPONENTS: Components = {
   },
 };
 
-const RenderedMarkdownImpl: FC<{ content: string; style?: CSSProperties; inline?: boolean }> = ({
-  content,
-  style,
-  inline,
-}) => {
+export const RenderedMarkdownImpl: FC<{
+  content: string;
+  style?: CSSProperties;
+  inline?: boolean;
+}> = ({ content, style, inline }) => {
   return (
     <div
       className={
@@ -402,7 +402,7 @@ const RenderedMarkdownImpl: FC<{ content: string; style?: CSSProperties; inline?
       style={{ ...style, overflowWrap: 'anywhere' }}
       data-testid="rendered-markdown"
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ ...MARKDOWN_COMPONENTS }}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
         {content}
       </ReactMarkdown>
     </div>
