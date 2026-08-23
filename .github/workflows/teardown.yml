@@ -53,51 +53,6 @@ jobs:
       # ================================================================
       # Phase 0: Setup
       # ================================================================
-      - name: Resolve Resource Names
-        id: names
-        run: |
-          EXPLICIT="${{ vars.RESOURCE_PREFIX }}"
-          if [ -n "$EXPLICIT" ]; then
-            PREFIX="$EXPLICIT"
-          else
-            DOMAIN="${{ vars.BASE_DOMAIN }}"
-            HASH=$(echo -n "$DOMAIN" | sha256sum | cut -c1-6)
-            PREFIX="s${HASH}"
-          fi
-          if [ "$INPUT_ENVIRONMENT" = "production" ]; then
-            STACK="prod"
-          else
-            STACK="staging"
-          fi
-          BASE_DOMAIN="${{ vars.BASE_DOMAIN }}"
-          if [ -z "$BASE_DOMAIN" ]; then
-            echo "::error::BASE_DOMAIN is not set in environment variables."
-            exit 1
-          fi
-
-          echo "prefix=$PREFIX" >> "$GITHUB_OUTPUT"
-          echo "stack=$STACK" >> "$GITHUB_OUTPUT"
-          echo "base_domain=$BASE_DOMAIN" >> "$GITHUB_OUTPUT"
-          echo "api_worker=${PREFIX}-api-${STACK}" >> "$GITHUB_OUTPUT"
-          echo "tail_worker=${PREFIX}-tail-worker-${STACK}" >> "$GITHUB_OUTPUT"
-          echo "pages_project=${PREFIX}-web-${STACK}" >> "$GITHUB_OUTPUT"
-          echo "www_project=${PREFIX}-www" >> "$GITHUB_OUTPUT"
-          echo "analytics_dataset=${PREFIX}_analytics" >> "$GITHUB_OUTPUT"
-          AI_GATEWAY_ID="${{ vars.AI_GATEWAY_ID }}"
-          if [ -z "$AI_GATEWAY_ID" ]; then
-            AI_GATEWAY_ID="$PREFIX"
-          fi
-          echo "ai_gateway=$AI_GATEWAY_ID" >> "$GITHUB_OUTPUT"
-
-          echo "### Resource Names"
-          echo "- Stack: $STACK"
-          echo "- API Worker: ${PREFIX}-api-${STACK}"
-          echo "- Tail Worker: ${PREFIX}-tail-worker-${STACK}"
-          echo "- Pages Project: ${PREFIX}-web-${STACK}"
-          echo "- WWW Project: ${PREFIX}-www"
-          echo "- AI Gateway: $AI_GATEWAY_ID"
-          echo "- Base Domain: $BASE_DOMAIN"
-
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -110,6 +65,16 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
 
+      - name: Resolve Resource Names
+        id: names
+        env:
+          INPUT_ENVIRONMENT: ${{ inputs.environment }}
+          RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          AI_GATEWAY_ID: ${{ vars.AI_GATEWAY_ID }}
+          PULUMI_STATE_BUCKET: ${{ vars.PULUMI_STATE_BUCKET }}
+        run: node scripts/deploy/workflow-resource-names.mjs teardown
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -120,8 +85,8 @@ jobs:
         id: pulumi_login
         continue-on-error: true
         run: |
-          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || format('{0}-pulumi-state', steps.names.outputs.prefix) }}"
-          R2_ENDPOINT="${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          BUCKET_NAME="$PULUMI_STATE_BUCKET"
+          R2_ENDPOINT="${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
           # Pulumi >=3.244 (AWS SDK v2) requires an explicit URL scheme on the S3 endpoint;
           # a scheme-less endpoint fails with 'unsupported protocol scheme ""'.
           pulumi login "s3://${BUCKET_NAME}?endpoint=https://${R2_ENDPOINT}&region=auto"
@@ -129,13 +94,14 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          PULUMI_STATE_BUCKET: ${{ steps.names.outputs.pulumi_state_bucket }}
 
       - name: Select Pulumi Stack
         id: pulumi_stack
         continue-on-error: true
         working-directory: infra
         run: |
-          STACK="${{ steps.names.outputs.stack }}"
           if pulumi stack select "$STACK" 2>/dev/null; then
             echo "status=ok" >> "$GITHUB_OUTPUT"
             echo "Pulumi stack '$STACK' selected."
@@ -147,6 +113,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          STACK: ${{ steps.names.outputs.stack }}
 
       # ================================================================
       # Phase 1: Delete Workers (not managed by Pulumi)
@@ -158,8 +125,8 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          WORKER_NAME: ${{ steps.names.outputs.tail_worker }}
         run: |
-          WORKER_NAME="${{ steps.names.outputs.tail_worker }}"
           API="https://api.cloudflare.com/client/v4"
 
           if [ "$INPUT_DRY_RUN" = "true" ]; then
@@ -201,8 +168,8 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          WORKER_NAME: ${{ steps.names.outputs.api_worker }}
         run: |
-          WORKER_NAME="${{ steps.names.outputs.api_worker }}"
           API="https://api.cloudflare.com/client/v4"
 
           if [ "$INPUT_DRY_RUN" = "true" ]; then
@@ -248,8 +215,8 @@ jobs:
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          BASE_DOMAIN: ${{ steps.names.outputs.base_domain }}
         run: |
-          BASE_DOMAIN="${{ steps.names.outputs.base_domain }}"
           API="https://api.cloudflare.com/client/v4"
           DELETED=0
           FAILED=0
@@ -328,8 +295,8 @@ jobs:
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          BASE_DOMAIN: ${{ steps.names.outputs.base_domain }}
         run: |
-          BASE_DOMAIN="${{ steps.names.outputs.base_domain }}"
           API="https://api.cloudflare.com/client/v4"
 
           echo "Looking for Page Rule matching ${BASE_DOMAIN}/*..."
@@ -375,9 +342,9 @@ jobs:
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          WWW_DOMAIN: ${{ steps.names.outputs.www_domain }}
+          WWW_PROJECT: ${{ steps.names.outputs.www_project }}
         run: |
-          WWW_DOMAIN="www.${{ steps.names.outputs.base_domain }}"
-          WWW_PROJECT="${{ steps.names.outputs.www_project }}"
           API="https://api.cloudflare.com/client/v4"
 
           if [ "$INPUT_DRY_RUN" = "true" ]; then
@@ -420,8 +387,8 @@ jobs:
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          BASE_DOMAIN: ${{ steps.names.outputs.base_domain }}
         run: |
-          BASE_DOMAIN="${{ steps.names.outputs.base_domain }}"
           API="https://api.cloudflare.com/client/v4"
           WWW_STATUS="not_found"
           APEX_STATUS="not_found"
@@ -493,8 +460,8 @@ jobs:
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          WWW_PROJECT: ${{ steps.names.outputs.www_project }}
         run: |
-          WWW_PROJECT="${{ steps.names.outputs.www_project }}"
           API="https://api.cloudflare.com/client/v4"
 
           if [ "$INPUT_DRY_RUN" = "true" ]; then
@@ -539,8 +506,8 @@ jobs:
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          GATEWAY_ID: ${{ steps.names.outputs.ai_gateway }}
         run: |
-          GATEWAY_ID="${{ steps.names.outputs.ai_gateway }}"
           API="https://api.cloudflare.com/client/v4"
 
           if [ "$INPUT_DRY_RUN" = "true" ]; then
@@ -695,8 +662,8 @@ jobs:
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          PAGES_PROJECT: ${{ steps.names.outputs.pages_project }}
         run: |
-          PAGES_PROJECT="${{ steps.names.outputs.pages_project }}"
           API="https://api.cloudflare.com/client/v4"
 
           echo "Fallback: Deleting web Pages project '$PAGES_PROJECT' via CF API..."
@@ -727,7 +694,6 @@ jobs:
         continue-on-error: true
         working-directory: infra
         run: |
-          STACK="${{ steps.names.outputs.stack }}"
           echo "Removing Pulumi stack: $STACK"
           pulumi stack rm "$STACK" --yes --force 2>/dev/null || true
           echo "status=removed" >> "$GITHUB_OUTPUT"
@@ -735,6 +701,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          STACK: ${{ steps.names.outputs.stack }}
 
       # ================================================================
       # Phase 7: Job Summary
@@ -742,7 +709,7 @@ jobs:
       - name: Write Job Summary
         if: always()
         run: |
-          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || format('{0}-pulumi-state', steps.names.outputs.prefix) }}"
+          BUCKET_NAME="$PULUMI_STATE_BUCKET"
 
           if [ "$INPUT_DRY_RUN" = "true" ]; then
             echo "## Teardown Preview (Dry Run) — $INPUT_ENVIRONMENT" >> "$GITHUB_STEP_SUMMARY"
@@ -769,32 +736,32 @@ jobs:
           }
 
           # Workers
-          echo "| Workers | Tail Worker (\`${{ steps.names.outputs.tail_worker }}\`) | $(fmt "${{ steps.delete_tail_worker.outputs.status }}") |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Workers | API Worker (\`${{ steps.names.outputs.api_worker }}\`) | $(fmt "${{ steps.delete_api_worker.outputs.status }}") |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Workers | Tail Worker (\`$TAIL_WORKER\`) | $(fmt "$TAIL_WORKER_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Workers | API Worker (\`$API_WORKER\`) | $(fmt "$API_WORKER_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
 
           # Workspace DNS
-          echo "| DNS | Workspace records (\`ws-*\`) | $(fmt "${{ steps.delete_ws_dns.outputs.status }}") |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| DNS | Workspace records (\`ws-*\`) | $(fmt "$WS_DNS_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
 
           # Marketing site
           if [ "$INPUT_INCLUDE_MARKETING" = "true" ]; then
-            echo "| Marketing | Page Rule (\`${{ steps.names.outputs.base_domain }}/*\`) | $(fmt "${{ steps.delete_page_rule.outputs.status }}") |" >> "$GITHUB_STEP_SUMMARY"
-            echo "| Marketing | Custom Domain (\`www.${{ steps.names.outputs.base_domain }}\`) | $(fmt "${{ steps.delete_www_domain.outputs.status }}") |" >> "$GITHUB_STEP_SUMMARY"
-            echo "| Marketing | DNS (www CNAME) | $(fmt "${{ steps.delete_www_dns.outputs.www_status }}") |" >> "$GITHUB_STEP_SUMMARY"
-            echo "| Marketing | DNS (apex A) | $(fmt "${{ steps.delete_www_dns.outputs.apex_status }}") |" >> "$GITHUB_STEP_SUMMARY"
-            echo "| Marketing | Pages Project (\`${{ steps.names.outputs.www_project }}\`) | $(fmt "${{ steps.delete_www_pages.outputs.status }}") |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Marketing | Page Rule (\`$BASE_DOMAIN/*\`) | $(fmt "$PAGE_RULE_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Marketing | Custom Domain (\`$WWW_DOMAIN\`) | $(fmt "$WWW_DOMAIN_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Marketing | DNS (www CNAME) | $(fmt "$WWW_DNS_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Marketing | DNS (apex A) | $(fmt "$APEX_DNS_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Marketing | Pages Project (\`$WWW_PROJECT\`) | $(fmt "$WWW_PAGES_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "| Marketing | *(skipped — include_marketing=false)* | Skipped |" >> "$GITHUB_STEP_SUMMARY"
           fi
 
           # AI Gateway
-          echo "| AI | Gateway (\`${{ steps.names.outputs.ai_gateway }}\`) | $(fmt "${{ steps.delete_ai_gateway.outputs.status }}") |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| AI | Gateway (\`$AI_GATEWAY\`) | $(fmt "$AI_GATEWAY_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
 
           # Pulumi
-          PULUMI_STATUS="${{ steps.pulumi_stack.outputs.status }}"
+          PULUMI_STATUS="$PULUMI_STACK_STATUS"
           if [ "$PULUMI_STATUS" = "not_found" ]; then
             echo "| Pulumi | All Pulumi-managed resources | Stack Not Found (skipped) |" >> "$GITHUB_STEP_SUMMARY"
           else
-            DESTROY_STATUS="${{ steps.pulumi_destroy.outputs.status }}"
+            DESTROY_STATUS="$PULUMI_DESTROY_STATUS"
             if [ "$INPUT_KEEP_DATA" = "true" ]; then
               echo "| Pulumi | D1 Databases | Preserved |" >> "$GITHUB_STEP_SUMMARY"
               echo "| Pulumi | Security Keys (encryption, JWT, Origin CA) | Preserved |" >> "$GITHUB_STEP_SUMMARY"
@@ -802,16 +769,16 @@ jobs:
             else
               echo "| Pulumi | All resources (D1, KV, R2, DNS, Pages, Origin CA, Keys) | $(fmt "$DESTROY_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
             fi
-            STACK_STATUS="${{ steps.remove_stack.outputs.status }}"
+            STACK_STATUS="$REMOVE_STACK_STATUS"
             if [ -n "$STACK_STATUS" ]; then
-              echo "| Pulumi | Stack (\`${{ steps.names.outputs.stack }}\`) | $(fmt "$STACK_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
+              echo "| Pulumi | Stack (\`$STACK\`) | $(fmt "$STACK_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
             fi
           fi
 
           # Web Pages fallback
-          FALLBACK_STATUS="${{ steps.delete_web_pages_fallback.outputs.status }}"
+          FALLBACK_STATUS="$WEB_PAGES_FALLBACK_STATUS"
           if [ -n "$FALLBACK_STATUS" ]; then
-            echo "| Fallback | Web Pages Project (\`${{ steps.names.outputs.pages_project }}\`) | $(fmt "$FALLBACK_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Fallback | Web Pages Project (\`$PAGES_PROJECT\`) | $(fmt "$FALLBACK_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
           fi
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -822,11 +789,11 @@ jobs:
           echo "- **GitHub environment secrets** — stored in GitHub Settings, not Cloudflare. Remove via Settings > Environments." >> "$GITHUB_STEP_SUMMARY"
           echo "- **Cloudflare account and zone** — the DNS zone, account, and subscription are not deleted." >> "$GITHUB_STEP_SUMMARY"
           echo "- **Workers.dev subdomain** — account-level setting shared across all Workers. Remove manually in Cloudflare dashboard only when decommissioning the entire account." >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Analytics Engine data** — \`${{ steps.names.outputs.analytics_dataset }}\` dataset data persists for up to 90 days per Cloudflare retention policy." >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Analytics Engine data** — \`$ANALYTICS_DATASET\` dataset data persists for up to 90 days per Cloudflare retention policy." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
           # Troubleshooting section if any failures
-          if echo "${{ steps.delete_tail_worker.outputs.status }} ${{ steps.delete_api_worker.outputs.status }} ${{ steps.delete_ws_dns.outputs.status }} ${{ steps.delete_page_rule.outputs.status }} ${{ steps.delete_www_domain.outputs.status }} ${{ steps.delete_www_pages.outputs.status }} ${{ steps.delete_ai_gateway.outputs.status }} ${{ steps.pulumi_destroy.outputs.status }}" | grep -q "failed"; then
+          if echo "$TAIL_WORKER_STATUS $API_WORKER_STATUS $WS_DNS_STATUS $PAGE_RULE_STATUS $WWW_DOMAIN_STATUS $WWW_PAGES_STATUS $AI_GATEWAY_STATUS $PULUMI_DESTROY_STATUS" | grep -q "failed"; then
             echo "### Troubleshooting" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
             echo "Some resources failed to delete. Check the step logs above for details." >> "$GITHUB_STEP_SUMMARY"
@@ -836,6 +803,30 @@ jobs:
             echo "- Check that R2 credentials (\`R2_ACCESS_KEY_ID\`, \`R2_SECRET_ACCESS_KEY\`) are correct" >> "$GITHUB_STEP_SUMMARY"
             echo "- Some resources may need manual deletion in the Cloudflare dashboard" >> "$GITHUB_STEP_SUMMARY"
           fi
+        env:
+          PULUMI_STATE_BUCKET: ${{ steps.names.outputs.pulumi_state_bucket }}
+          BASE_DOMAIN: ${{ steps.names.outputs.base_domain }}
+          WWW_DOMAIN: ${{ steps.names.outputs.www_domain }}
+          STACK: ${{ steps.names.outputs.stack }}
+          TAIL_WORKER: ${{ steps.names.outputs.tail_worker }}
+          API_WORKER: ${{ steps.names.outputs.api_worker }}
+          PAGES_PROJECT: ${{ steps.names.outputs.pages_project }}
+          WWW_PROJECT: ${{ steps.names.outputs.www_project }}
+          AI_GATEWAY: ${{ steps.names.outputs.ai_gateway }}
+          ANALYTICS_DATASET: ${{ steps.names.outputs.analytics_dataset }}
+          TAIL_WORKER_STATUS: ${{ steps.delete_tail_worker.outputs.status }}
+          API_WORKER_STATUS: ${{ steps.delete_api_worker.outputs.status }}
+          WS_DNS_STATUS: ${{ steps.delete_ws_dns.outputs.status }}
+          PAGE_RULE_STATUS: ${{ steps.delete_page_rule.outputs.status }}
+          WWW_DOMAIN_STATUS: ${{ steps.delete_www_domain.outputs.status }}
+          WWW_DNS_STATUS: ${{ steps.delete_www_dns.outputs.www_status }}
+          APEX_DNS_STATUS: ${{ steps.delete_www_dns.outputs.apex_status }}
+          WWW_PAGES_STATUS: ${{ steps.delete_www_pages.outputs.status }}
+          AI_GATEWAY_STATUS: ${{ steps.delete_ai_gateway.outputs.status }}
+          PULUMI_STACK_STATUS: ${{ steps.pulumi_stack.outputs.status }}
+          PULUMI_DESTROY_STATUS: ${{ steps.pulumi_destroy.outputs.status }}
+          REMOVE_STACK_STATUS: ${{ steps.remove_stack.outputs.status }}
+          WEB_PAGES_FALLBACK_STATUS: ${{ steps.delete_web_pages_fallback.outputs.status }}
 
   # Confirmation job that runs first if confirm != DELETE
   validate:

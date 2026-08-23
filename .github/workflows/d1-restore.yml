@@ -89,54 +89,36 @@ jobs:
       - name: Install Pulumi CLI
         uses: pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0
 
-      - name: Determine Stack Name
-        id: stack
-        run: |
-          case "$D1_RESTORE_ENVIRONMENT" in
-            production) STACK="prod" ;;
-            staging) STACK="staging" ;;
-          esac
-          echo "name=$STACK" >> "$GITHUB_OUTPUT"
-          echo "Stack: $STACK for environment: $D1_RESTORE_ENVIRONMENT"
+      - name: Validate Deployment Resource Names
+        id: deploy_resources
         env:
-          D1_RESTORE_ENVIRONMENT: ${{ steps.restore_input.outputs.environment }}
-
-      - name: Compute Resource Prefix
-        id: prefix
-        run: |
-          EXPLICIT="${{ vars.RESOURCE_PREFIX }}"
-          if [ -n "$EXPLICIT" ]; then
-            echo "value=$EXPLICIT" >> $GITHUB_OUTPUT
-          else
-            DOMAIN="${{ vars.BASE_DOMAIN }}"
-            if [ -z "$DOMAIN" ]; then
-              echo "::error::BASE_DOMAIN is required when RESOURCE_PREFIX is not set."
-              exit 1
-            fi
-            HASH=$(echo -n "$DOMAIN" | sha256sum | cut -c1-6)
-            echo "value=s${HASH}" >> $GITHUB_OUTPUT
-          fi
+          DEPLOY_ENVIRONMENT: ${{ steps.restore_input.outputs.environment }}
+          RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          PULUMI_STATE_BUCKET: ${{ vars.PULUMI_STATE_BUCKET }}
+        run: node scripts/deploy/workflow-resource-names.mjs pulumi
 
       - name: Login to Pulumi R2 Backend
         run: |
-          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || format('{0}-pulumi-state', steps.prefix.outputs.value) }}"
-          R2_ENDPOINT="${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          BUCKET_NAME="$PULUMI_STATE_BUCKET"
+          R2_ENDPOINT="${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
           # Pulumi >=3.244 (AWS SDK v2) requires an explicit URL scheme on the S3 endpoint;
           # a scheme-less endpoint fails with 'unsupported protocol scheme ""'.
           pulumi login "s3://${BUCKET_NAME}?endpoint=https://${R2_ENDPOINT}&region=auto"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          PULUMI_STATE_BUCKET: ${{ steps.deploy_resources.outputs.pulumi_state_bucket }}
 
       - name: Select Pulumi stack
         working-directory: infra
-        run: |
-          STACK_NAME="${{ steps.stack.outputs.name }}"
-          pulumi stack select "$STACK_NAME" --non-interactive
+        run: pulumi stack select "$STACK_NAME" --non-interactive
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          STACK_NAME: ${{ steps.deploy_resources.outputs.stack }}
 
       - name: Resolve database names
         id: db
