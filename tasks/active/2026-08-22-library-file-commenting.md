@@ -255,6 +255,34 @@ the PR was opened.
     own content intercepted the click. Caught by the Playwright audit at 1280px;
     mobile was unaffected because `SelectionActionBar` already used `z-panel`.
 
+## Second Validator Pass (2026-08-23, post-rework)
+
+`task-completion-validator` re-run against the reworked diff: **PASS**, no
+CRITICAL or HIGH findings. It independently re-derived (rather than trusted)
+session-isolation restoration, migration additivity, and the quote-selection
+wiring, and re-ran both suites itself.
+
+Its three non-blocking findings were fixed in this branch rather than deferred:
+
+- MEDIUM — "unit tests for shared types" was checked off with no artifact. Added
+  `packages/shared/tests/comment-anchors.test.ts` (5 tests) covering union
+  narrowing, per-variant field exclusivity, null quotes, and a runtime-list ↔
+  union-variant parity assertion.
+- LOW — dead code: `services/project-data.ts:getFileCommentThread` and the
+  matching `ProjectData` RPC method had zero callers (Phase 1 has no
+  send-to-agent for files). Removed both; the module-level
+  `library-file-comments.ts:getFileCommentThread` stays, since that IS the
+  file-scoped ownership guard used by create/reply/status.
+- LOW — "comments persist across modal close/reopen" was only covered
+  indirectly. Added an explicit close-and-reopen assertion to the Playwright
+  audit. On mobile the comment panel is a full-width overlay, so the test closes
+  it before the preview, matching the real mobile flow.
+
+Its remaining note — `library-file-comments.ts` at 553 lines, over rule 18's
+500-line soft threshold — is left as-is: it is under the 800-line mandatory
+threshold, `quality:file-sizes` passes, and it is smaller than the message
+equivalent `comments.ts` (698 lines) it mirrors.
+
 ## Post-Mortem
 
 **What broke.** The feature was implemented, self-reviewed as complete, and

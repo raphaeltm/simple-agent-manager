@@ -13,7 +13,6 @@ import {
   type AcpSessionStatus,
   type CheckpointEpisodeTransitionInput,
   type CreateCheckpointEpisodeInput,
-  type LibraryFileCommentThread,
   MAILBOX_DEFAULTS,
   type MessageCommentThread,
   type MessageCommentThreadEventReason,
@@ -531,13 +530,6 @@ export class ProjectData extends DurableObject<Env> {
     input: libraryFileComments.ListFileCommentThreadsInput
   ): libraryFileComments.ListFileCommentThreadsResult {
     return libraryFileComments.listFileCommentThreads(this.sql, this.env, input);
-  }
-
-  getFileCommentThread(input: {
-    fileId: string;
-    threadId: string;
-  }): LibraryFileCommentThread | null {
-    return libraryFileComments.getFileCommentThread(this.sql, input.fileId, input.threadId);
   }
 
   createFileCommentThread(input: libraryFileComments.CreateFileCommentThreadInput) {

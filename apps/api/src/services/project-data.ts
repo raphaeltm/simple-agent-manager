@@ -17,7 +17,6 @@ import type {
   CreateCheckpointEpisodeInput,
   DeliveryState,
   LibraryFileCommentMutationResponse,
-  LibraryFileCommentThread,
   MessageClass,
   MessageCommentListResponse,
   MessageCommentMutationResponse,
@@ -507,17 +506,6 @@ export async function listFileCommentThreads(
 ): Promise<ListFileCommentThreadsResult> {
   return callProjectDataWithRetry(env, projectId, 'listFileCommentThreads', (stub) =>
     stub.listFileCommentThreads(input)
-  );
-}
-
-export async function getFileCommentThread(
-  env: Env,
-  projectId: string,
-  fileId: string,
-  threadId: string
-): Promise<LibraryFileCommentThread | null> {
-  return callProjectDataWithRetry(env, projectId, 'getFileCommentThread', (stub) =>
-    stub.getFileCommentThread({ fileId, threadId })
   );
 }
 

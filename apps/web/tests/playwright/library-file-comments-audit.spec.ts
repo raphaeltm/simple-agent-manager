@@ -318,5 +318,20 @@ test.describe('Library file comments', () => {
     await expect(panel.getByText('This sentence needs a citation.')).toBeVisible();
     await screenshot(page, `library-file-comments-posted-${suffixFor(page)}`);
     await assertNoOverflow(page);
+
+    // Closing and reopening the modal must not lose the thread. Comments are
+    // read from the server on mount rather than held in component state, so this
+    // is structurally safe today — the assertion is here to keep it that way if
+    // someone later introduces client-local comment state.
+    // On mobile the comment panel is a full-width overlay that covers the header,
+    // so closing it first is what a real user does there too.
+    await page.getByRole('button', { name: 'Close comments' }).click();
+    await page.getByRole('button', { name: 'Close preview' }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await page.getByRole('button', { name: `Open ${FILE_NAME}` }).click();
+    await openCommentPanel(page);
+    await expect(
+      commentPanel(page).getByText('This sentence needs a citation.')
+    ).toBeVisible();
   });
 });
