@@ -581,11 +581,51 @@ describe('add_policy', () => {
     expect(result.title).toBe('No force push');
     expect(result.createdAt).toBe('2026-04-27T00:00:00Z');
     // H-3 fix: verify createPolicy called with correct positional args
-    // createPolicy(env, projectId, category, title, content, source, sourceSessionId, confidence)
+    // createPolicy(env, projectId, category, title, content, source, sourceSessionId,
+    //              confidence, scope, expiresAt)
+    // Omitting scope/expiresAt yields a standing policy — the pre-lifecycle behavior.
     expect(mockCreatePolicy).toHaveBeenCalledWith(
       expect.anything(), 'proj-1', 'rule', 'No force push', 'Never force push to main',
-      'explicit', null, expect.any(Number),
+      'explicit', null, expect.any(Number), 'always', null,
     );
+  });
+
+  it('forwards a task-scoped policy with its expiry', async () => {
+    const ctx = buildCtx({ ownedProject: { id: 'proj-1' } });
+    mockCreatePolicy.mockResolvedValue({ id: 'pol-scoped', now: '2026-04-27T00:00:00Z' });
+    const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+
+    await addPolicy(
+      {
+        projectId: 'proj-1', title: 'Wave profile', content: 'Applies to the 2026-08-21 wave.',
+        category: 'constraint', scope: 'task', expiresAt,
+      },
+      ctx,
+    );
+
+    expect(mockCreatePolicy).toHaveBeenCalledWith(
+      expect.anything(), 'proj-1', 'constraint', 'Wave profile', 'Applies to the 2026-08-21 wave.',
+      'explicit', null, expect.any(Number), 'task', expiresAt,
+    );
+  });
+
+  it('rejects a task-scoped policy with no expiry before writing', async () => {
+    // This orchestrator surface is the one most likely to capture dated workflow
+    // constraints, so it has to enforce the same invariant as the MCP and REST
+    // boundaries — otherwise policies created here are permanently non-expiring,
+    // which is exactly the failure the lifecycle feature exists to prevent.
+    const ctx = buildCtx({ ownedProject: { id: 'proj-1' } });
+
+    const result = await addPolicy(
+      {
+        projectId: 'proj-1', title: 'Wave profile', content: 'Applies to one wave.',
+        category: 'constraint', scope: 'task',
+      },
+      ctx,
+    ) as Record<string, unknown>;
+
+    expect(String(result.error)).toMatch(/task-scoped policy must set expiresAt/);
+    expect(mockCreatePolicy).not.toHaveBeenCalled();
   });
 
   it('is registered in toolHandlers via executeTool', async () => {

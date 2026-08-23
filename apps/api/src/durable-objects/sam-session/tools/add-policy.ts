@@ -90,6 +90,26 @@ export async function addPolicy(
   const db = drizzle(env.DATABASE, { schema });
   const limits = resolvePolicyLimits(env);
 
+  // Lifecycle (scope + expiry), validated through the same shared helper the MCP and
+  // REST write boundaries use, so this third writer cannot drift from them (rule 24).
+  if (input.scope !== undefined && !isPolicyScope(input.scope)) {
+    return { error: `scope must be one of: ${POLICY_SCOPES.join(', ')}` };
+  }
+  const scope: PolicyScope = (input.scope as PolicyScope | undefined) ?? 'always';
+  const expiresAt = input.expiresAt ?? null;
+  if (expiresAt !== null && (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt))) {
+    return { error: 'expiresAt must be a number (epoch milliseconds) or null' };
+  }
+  const lifecycleError = validatePolicyLifecycle({
+    scope,
+    expiresAt,
+    now: Date.now(),
+    maxExpiryMs: limits.maxExpiryMs,
+  });
+  if (lifecycleError) {
+    return { error: lifecycleError };
+  }
+
   // Verify ownership
   const project = await db
     .select({ id: schema.projects.id })
