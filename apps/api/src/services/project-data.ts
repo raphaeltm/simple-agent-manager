@@ -12,11 +12,16 @@ import type {
   CheckpointEpisode,
   CheckpointEpisodeTransitionInput,
   CommentAuthor,
+  CommentReply,
   CommentStatus,
   CreateCheckpointEpisodeInput,
   DeliveryState,
+  LibraryFileCommentMutationResponse,
   LibraryFileCommentThread,
   MessageClass,
+  MessageCommentListResponse,
+  MessageCommentMutationResponse,
+  MessageCommentReplyMutationResponse,
   MessageCommentThread,
   SessionActivityTerminalReason,
 } from '@simple-agent-manager/shared';
@@ -24,14 +29,15 @@ import { resolveHandoffLimits, resolveMissionStateLimits } from '@simple-agent-m
 
 import type { ProjectData } from '../durable-objects/project-data';
 import type {
-  CommentReplyMutationResult,
-  CommentThreadMutationResult,
   CreateCommentReplyInput,
   CreateCommentThreadInput,
+  CreateFileCommentReplyInput,
   CreateFileCommentThreadInput,
   ListCommentThreadsInput,
-  ListCommentThreadsResult,
+  ListFileCommentThreadsInput,
+  ListFileCommentThreadsResult,
   UpdateCommentStatusInput,
+  UpdateFileCommentStatusInput,
 } from '../durable-objects/project-data/comment-contracts';
 import { CommentNotFoundError } from '../durable-objects/project-data/comment-contracts';
 export {
@@ -443,7 +449,7 @@ export async function listCommentThreads(
   env: Env,
   projectId: string,
   input: ListCommentThreadsInput
-): Promise<ListCommentThreadsResult> {
+): Promise<MessageCommentListResponse> {
   return callProjectDataWithRetry(env, projectId, 'listCommentThreads', (stub) =>
     stub.listCommentThreads(input)
   );
@@ -452,12 +458,11 @@ export async function listCommentThreads(
 export async function getCommentThread(
   env: Env,
   projectId: string,
+  sessionId: string,
   threadId: string
-): Promise<MessageCommentThread | LibraryFileCommentThread | null> {
+): Promise<MessageCommentThread | null> {
   return callProjectDataWithRetry(env, projectId, 'getCommentThread', (stub) =>
-    stub.getCommentThread({ threadId }) as Promise<
-      MessageCommentThread | LibraryFileCommentThread | null
-    >
+    stub.getCommentThread({ sessionId, threadId })
   );
 }
 
@@ -465,19 +470,9 @@ export async function createCommentThread(
   env: Env,
   projectId: string,
   input: CreateCommentThreadInput
-): Promise<CommentThreadMutationResult> {
+): Promise<MessageCommentMutationResponse> {
   return callProjectDataNoRetry(env, projectId, 'createCommentThread', (stub) =>
     stub.createCommentThread(input)
-  );
-}
-
-export async function createFileCommentThread(
-  env: Env,
-  projectId: string,
-  input: CreateFileCommentThreadInput
-): Promise<CommentThreadMutationResult> {
-  return callProjectDataNoRetry(env, projectId, 'createFileCommentThread', (stub) =>
-    stub.createFileCommentThread(input)
   );
 }
 
@@ -485,7 +480,7 @@ export async function createCommentReply(
   env: Env,
   projectId: string,
   input: CreateCommentReplyInput
-): Promise<CommentReplyMutationResult> {
+): Promise<MessageCommentReplyMutationResponse> {
   return callProjectDataNoRetry(env, projectId, 'createCommentReply', (stub) =>
     stub.createCommentReply(input)
   );
@@ -495,9 +490,64 @@ export async function updateCommentThreadStatus(
   env: Env,
   projectId: string,
   input: UpdateCommentStatusInput & { status: CommentStatus }
-): Promise<CommentThreadMutationResult> {
+): Promise<MessageCommentMutationResponse> {
   return callProjectDataNoRetry(env, projectId, 'updateCommentThreadStatus', (stub) =>
     stub.updateCommentThreadStatus(input)
+  );
+}
+
+// --- Library file comments ---------------------------------------------------
+// Every entry point is `fileId`-scoped. Callers must have already proven the file
+// belongs to `projectId` (see assertLibraryFileInProject) — the DO has no D1.
+
+export async function listFileCommentThreads(
+  env: Env,
+  projectId: string,
+  input: ListFileCommentThreadsInput
+): Promise<ListFileCommentThreadsResult> {
+  return callProjectDataWithRetry(env, projectId, 'listFileCommentThreads', (stub) =>
+    stub.listFileCommentThreads(input)
+  );
+}
+
+export async function getFileCommentThread(
+  env: Env,
+  projectId: string,
+  fileId: string,
+  threadId: string
+): Promise<LibraryFileCommentThread | null> {
+  return callProjectDataWithRetry(env, projectId, 'getFileCommentThread', (stub) =>
+    stub.getFileCommentThread({ fileId, threadId })
+  );
+}
+
+export async function createFileCommentThread(
+  env: Env,
+  projectId: string,
+  input: CreateFileCommentThreadInput
+): Promise<LibraryFileCommentMutationResponse> {
+  return callProjectDataNoRetry(env, projectId, 'createFileCommentThread', (stub) =>
+    stub.createFileCommentThread(input)
+  );
+}
+
+export async function createFileCommentReply(
+  env: Env,
+  projectId: string,
+  input: CreateFileCommentReplyInput
+): Promise<LibraryFileCommentMutationResponse & { reply: CommentReply }> {
+  return callProjectDataNoRetry(env, projectId, 'createFileCommentReply', (stub) =>
+    stub.createFileCommentReply(input)
+  );
+}
+
+export async function updateFileCommentThreadStatus(
+  env: Env,
+  projectId: string,
+  input: UpdateFileCommentStatusInput & { status: CommentStatus }
+): Promise<LibraryFileCommentMutationResponse> {
+  return callProjectDataNoRetry(env, projectId, 'updateFileCommentThreadStatus', (stub) =>
+    stub.updateFileCommentThreadStatus(input)
   );
 }
 

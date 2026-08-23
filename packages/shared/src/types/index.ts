@@ -225,6 +225,7 @@ export type {
   CommentAnchorKind,
   CommentAuthor,
   CommentAuthorKind,
+  CommentReply,
   CommentStatus,
   CreateLibraryFileCommentThreadRequest,
   CreateMessageCommentThreadRequest,

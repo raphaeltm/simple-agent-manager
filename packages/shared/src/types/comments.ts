@@ -69,11 +69,15 @@ export type MessageCommentDirectiveState = {
   ackedAt: number | null;
 };
 
-export type MessageCommentReply = {
+/**
+ * A reply is anchor-agnostic: the same shape serves message threads and
+ * library-file threads. `sessionId` is only populated for message replies.
+ */
+export type CommentReply = {
   id: string;
   threadId?: string;
   sessionId?: string;
-  author: MessageCommentAuthor;
+  author: CommentAuthor;
   body: string;
   createdAt: number;
   updatedAt?: number | null;
@@ -81,6 +85,8 @@ export type MessageCommentReply = {
   clientMutationId?: string | null;
   sentToAgent?: boolean;
 };
+
+export type MessageCommentReply = CommentReply;
 
 export type MessageCommentThread = {
   id: string;
@@ -210,7 +216,7 @@ export type LibraryFileCommentThread = {
   reopenedBy?: CommentAuthor | null;
   replyCount?: number;
   lastReplyAt?: number | null;
-  replies: MessageCommentReply[];
+  replies: CommentReply[];
 };
 
 export type LibraryFileCommentListResponse = {

@@ -194,18 +194,16 @@ export function createProjectDataMessageCommentAdapter(env: Env): MessageComment
         afterSequence: cursorToAfterSequence(input.cursor),
         limit: input.limit,
       });
-      return addNextCursor({
-        threads: result.threads as MessageCommentThread[],
-        hasMore: result.hasMore,
-      });
+      return addNextCursor(result);
     },
     async getThread(input) {
       const thread = await projectDataService.getCommentThread(
         env,
         input.projectId,
+        input.sessionId,
         input.threadId
       );
-      return thread ? withCommentDisplayNames(thread as MessageCommentThread) : null;
+      return thread ? withCommentDisplayNames(thread) : null;
     },
     async createThread(input) {
       const result = await projectDataService.createCommentThread(env, input.projectId, {
@@ -216,7 +214,7 @@ export function createProjectDataMessageCommentAdapter(env: Env): MessageComment
         clientMutationId: null,
         actor: toStorageActor(input.author),
       });
-      return withCommentDisplayNames(result.thread as MessageCommentThread);
+      return withCommentDisplayNames(result.thread);
     },
     async replyToThread(input) {
       const result = await projectDataService.createCommentReply(env, input.projectId, {
@@ -226,7 +224,7 @@ export function createProjectDataMessageCommentAdapter(env: Env): MessageComment
         clientMutationId: null,
         actor: toStorageActor(input.author),
       });
-      return withCommentDisplayNames(result.thread as MessageCommentThread);
+      return withCommentDisplayNames(result.thread);
     },
     async updateThreadStatus(input) {
       const result = await projectDataService.updateCommentThreadStatus(env, input.projectId, {
@@ -236,7 +234,7 @@ export function createProjectDataMessageCommentAdapter(env: Env): MessageComment
         clientMutationId: null,
         actor: toStorageActor(input.actor),
       });
-      return withCommentDisplayNames(result.thread as MessageCommentThread);
+      return withCommentDisplayNames(result.thread);
     },
     async markThreadObserved() {
       return { observed: false };
@@ -255,7 +253,7 @@ export function createProjectDataMessageCommentAdapter(env: Env): MessageComment
         },
       });
       return {
-        ...withCommentDisplayNames(result.thread as MessageCommentThread),
+        ...withCommentDisplayNames(result.thread),
         directive: input.delivery,
       };
     },

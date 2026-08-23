@@ -13,6 +13,7 @@ import {
   type AcpSessionStatus,
   type CheckpointEpisodeTransitionInput,
   type CreateCheckpointEpisodeInput,
+  type LibraryFileCommentThread,
   MAILBOX_DEFAULTS,
   type MessageCommentThread,
   type MessageCommentThreadEventReason,
@@ -36,6 +37,7 @@ import * as durability from './durability-foundation';
 import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
 import * as knowledge from './knowledge';
+import * as libraryFileComments from './library-file-comments';
 import * as mailbox from './mailbox';
 import * as materialization from './materialization';
 import * as messagePersistence from './message-persistence';
@@ -487,22 +489,15 @@ export class ProjectData extends DurableObject<Env> {
     return comments.listCommentThreads(this.sql, this.env, input);
   }
 
-  getCommentThread(input: { threadId: string }): comments.AnyCommentThread | null {
-    return comments.getCommentThread(this.sql, input.threadId);
+  getCommentThread(input: { sessionId: string; threadId: string }): MessageCommentThread | null {
+    return comments.getCommentThread(this.sql, input.sessionId, input.threadId);
   }
 
   createCommentThread(input: comments.CreateCommentThreadInput) {
     const result = this.ctx.storage.transactionSync(() =>
       comments.createCommentThread(this.sql, this.env, input)
     );
-    if (result.changed) this.broadcastCommentThreadIfSession(result.thread, 'thread_created');
-    return { thread: result.thread, idempotent: result.idempotent };
-  }
-
-  createFileCommentThread(input: comments.CreateFileCommentThreadInput) {
-    const result = this.ctx.storage.transactionSync(() =>
-      comments.createFileCommentThread(this.sql, this.env, input)
-    );
+    if (result.changed) this.broadcastCommentThread(result.thread, 'thread_created');
     return { thread: result.thread, idempotent: result.idempotent };
   }
 
@@ -510,7 +505,7 @@ export class ProjectData extends DurableObject<Env> {
     const result = this.ctx.storage.transactionSync(() =>
       comments.createCommentReply(this.sql, this.env, input)
     );
-    if (result.changed) this.broadcastCommentThreadIfSession(result.thread, 'reply_created');
+    if (result.changed) this.broadcastCommentThread(result.thread, 'reply_created');
     return {
       thread: result.thread,
       reply: result.reply,
@@ -523,11 +518,50 @@ export class ProjectData extends DurableObject<Env> {
       comments.updateCommentThreadStatus(this.sql, this.env, input)
     );
     if (result.changed) {
-      this.broadcastCommentThreadIfSession(
-        result.thread,
-        this.commentStatusEventReason(input.status)
-      );
+      this.broadcastCommentThread(result.thread, this.commentStatusEventReason(input.status));
     }
+    return { thread: result.thread, idempotent: result.idempotent };
+  }
+
+  // --- Library file comments ------------------------------------------------
+  // Separate storage from message comments (DO migration 033). Callers must have
+  // already verified the file belongs to this project — the DO has no D1 access.
+
+  listFileCommentThreads(
+    input: libraryFileComments.ListFileCommentThreadsInput
+  ): libraryFileComments.ListFileCommentThreadsResult {
+    return libraryFileComments.listFileCommentThreads(this.sql, this.env, input);
+  }
+
+  getFileCommentThread(input: {
+    fileId: string;
+    threadId: string;
+  }): LibraryFileCommentThread | null {
+    return libraryFileComments.getFileCommentThread(this.sql, input.fileId, input.threadId);
+  }
+
+  createFileCommentThread(input: libraryFileComments.CreateFileCommentThreadInput) {
+    const result = this.ctx.storage.transactionSync(() =>
+      libraryFileComments.createFileCommentThread(this.sql, this.env, input)
+    );
+    return { thread: result.thread, idempotent: result.idempotent };
+  }
+
+  createFileCommentReply(input: libraryFileComments.CreateFileCommentReplyInput) {
+    const result = this.ctx.storage.transactionSync(() =>
+      libraryFileComments.createFileCommentReply(this.sql, this.env, input)
+    );
+    return {
+      thread: result.thread,
+      reply: result.reply,
+      idempotent: result.idempotent,
+    };
+  }
+
+  updateFileCommentThreadStatus(input: libraryFileComments.UpdateFileCommentStatusInput) {
+    const result = this.ctx.storage.transactionSync(() =>
+      libraryFileComments.updateFileCommentThreadStatus(this.sql, this.env, input)
+    );
     return { thread: result.thread, idempotent: result.idempotent };
   }
 
@@ -1648,21 +1682,19 @@ export class ProjectData extends DurableObject<Env> {
     }
   }
 
-  private broadcastCommentThreadIfSession(
-    thread: comments.AnyCommentThread,
+  private broadcastCommentThread(
+    thread: MessageCommentThread,
     reason: MessageCommentThreadEventReason
   ): void {
-    if ('sessionId' in thread && thread.sessionId) {
-      this.broadcastEvent(
-        'comment.thread.changed',
-        {
-          sessionId: thread.sessionId,
-          thread: thread as MessageCommentThread,
-          reason,
-        },
-        thread.sessionId
-      );
-    }
+    this.broadcastEvent(
+      'comment.thread.changed',
+      {
+        sessionId: thread.sessionId,
+        thread,
+        reason,
+      },
+      thread.sessionId
+    );
   }
 
   private commentStatusEventReason(
