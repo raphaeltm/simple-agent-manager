@@ -1,0 +1,55 @@
+{
+  "$comment": [
+    "Cross-language contract fixture for the MCP server name rule.",
+    "The rule is implemented twice, independently: MCP_CONNECTION_NAME_PATTERN in",
+    "packages/shared/src/types/mcp-connection.ts (control plane, rejects on write) and",
+    "sanitizeMcpServerName in packages/vm-agent/internal/acp/mcp_server_names.go (vm-agent,",
+    "falls back to positional naming rather than writing a hostile value into a TOML key or",
+    "an env var name).",
+    "",
+    "Both implementations consume THIS file in their tests, so the two cannot drift (rule 23).",
+    "If you change one, this fixture will fail on the other side.",
+    "",
+    "Note the two differ in DISPOSITION, not in the rule: TS rejects an invalid name with a 400,",
+    "Go substitutes a safe positional name. Both must agree on which names are valid, and both",
+    "normalize by trimming and lowercasing before judging."
+  ],
+  "valid": [
+    "a",
+    "9",
+    "zapier",
+    "executor",
+    "composio",
+    "my-tools",
+    "a-b-c-d",
+    "notion2",
+    "12345678901234567890123456789012"
+  ],
+  "invalid": [
+    "",
+    "   ",
+    "-leading",
+    "trailing-",
+    "-",
+    "has space",
+    "has.dot",
+    "has/slash",
+    "has_underscore",
+    "has$dollar",
+    "has=equals",
+    "has\"quote",
+    "has\\backslash",
+    "has\nnewline",
+    "has\rcarriage",
+    "has\ttab",
+    "café",
+    "日本語",
+    "123456789012345678901234567890123"
+  ],
+  "normalized": {
+    "Zapier": "zapier",
+    "  zapier  ": "zapier",
+    "MY-TOOLS": "my-tools",
+    "\tExecutor\n": "executor"
+  }
+}

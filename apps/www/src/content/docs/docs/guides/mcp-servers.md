@@ -14,7 +14,9 @@ SAM does not build per-service connectors. It speaks MCP, and the endpoint owns 
 3. Paste both into SAM under **Settings → MCP Servers** (yours alone) or **Project Settings → Runtime** (shared with the project).
 4. Start a chat or task. The agent sees the new tools immediately, namespaced by the name you chose.
 
-SAM injects the endpoint into the agent session for every runtime and every supported agent — Claude Code, Codex, Amp, Vibe and OpenCode.
+This works on both runtimes — VM workspaces and Instant (container) sessions.
+
+How the endpoint reaches the agent depends on the agent. Claude Code receives it in the session handshake, Codex and Vibe get it written into their own config files, and Amp reaches it through a bridge. Agents that do not implement remote MCP servers will not see the tools.
 
 ## Choosing a provider
 
