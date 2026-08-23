@@ -132,6 +132,16 @@
         "0ed74e33345c51812e64da9c1525503195b08302331375958aaa089366731f2d",
         "47c37335119e59f588cdc57fe5b2c667193257ab22d0164ee26ec1ac02139c0e"
       ]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Reviewed synthetic mcp_tok_fixture_abc123 token in trial-orchestrator-agent-boot.test.ts; mock MCP callback token for BYO MCP servers feature test, not real secret material.",
+      "owner": "security",
+      "reviewedAt": "2026-08-23T00:00:00.000Z",
+      "expiresAt": "2026-11-21T00:00:00.000Z",
+      "digests": [
+        "a36d27de181226037bea3c4b4b8213525696b3d3a8a94adc48d03797bc412a01"
+      ]
     }
   ]
 }
