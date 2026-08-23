@@ -22,6 +22,10 @@ type mcpNameContract struct {
 	Valid      []string          `json:"valid"`
 	Invalid    []string          `json:"invalid"`
 	Normalized map[string]string `json:"normalized"`
+	URLs       struct {
+		Valid   []string `json:"valid"`
+		Invalid []string `json:"invalid"`
+	} `json:"urls"`
 }
 
 func loadMcpNameContract(t *testing.T) mcpNameContract {

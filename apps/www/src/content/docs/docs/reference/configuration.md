@@ -837,6 +837,9 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 | `MAX_DEPLOYMENT_ENV_VARS_PER_ENVIRONMENT`  | `100`    | Max deployment config vars per environment |
 | `MAX_DEPLOYMENT_ENV_VALUE_BYTES`           | `65536`  | Max bytes per deployment config value      |
 | `MAX_DEPLOYMENT_ENV_TOTAL_BYTES`           | `262144` | Max aggregate deployment config env size   |
+| `MAX_MCP_CONNECTIONS_PER_SCOPE`            | `25`     | Max bring-your-own MCP servers per scope   |
+| `MCP_CONNECTION_URL_MAX_BYTES`             | `2048`   | Max MCP endpoint URL size                  |
+| `MCP_CONNECTION_TOKEN_MAX_BYTES`           | `8192`   | Max MCP bearer token size                  |
 
 ## External API Timeouts
 

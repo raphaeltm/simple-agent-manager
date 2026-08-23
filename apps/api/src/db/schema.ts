@@ -1571,11 +1571,16 @@ export const mcpConnections = sqliteTable(
       .default(sql`(datetime('now'))`),
   },
   (table) => ({
-    projectNameUnique: uniqueIndex('idx_mcp_connections_project_name').on(
-      table.projectId,
-      table.name
-    ),
-    userNameUnique: uniqueIndex('idx_mcp_connections_user_name').on(table.userId, table.name),
+    // Partial, mirroring 0120_mcp_connections.sql. Without the WHERE clauses these would be
+    // FULL unique indexes, which is different semantics: a non-partial UNIQUE(user_id, name)
+    // also covers project rows (every row has a non-null user_id) and would wrongly stop a
+    // user from having a personal and a project connection with the same name.
+    projectNameUnique: uniqueIndex('idx_mcp_connections_project_name')
+      .on(table.projectId, table.name)
+      .where(sql`project_id IS NOT NULL`),
+    userNameUnique: uniqueIndex('idx_mcp_connections_user_name')
+      .on(table.userId, table.name)
+      .where(sql`project_id IS NULL`),
     userIdIdx: index('idx_mcp_connections_user_id').on(table.userId),
     projectIdIdx: index('idx_mcp_connections_project_id').on(table.projectId),
   })

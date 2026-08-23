@@ -7,11 +7,25 @@
  * every session for that tenant.
  *
  * Precedence is `project > user`, merged by name — the same "closest scope wins" shape as
- * `mergeRuntimeAssetRows` in `profile-runtime-assets.ts`. Profile and skill scopes are
- * deliberately not implemented yet; the input type carries the fields so adding them later is
- * an additive change to this one function rather than a new resolution path.
+ * `mergeRuntimeAssetRows` in `profile-runtime-assets.ts`.
+ *
+ * Profile and skill scopes are deliberately not implemented yet. Adding them is additive:
+ * two nullable columns, two more fields on `McpConnectionResolutionScope`, and an extra
+ * filter in `decryptAndMerge` — no new resolution path and no route changes. The callers
+ * already hold the values (`SamAwareAgentStartInput.agentProfileId`/`.skillId`); they are
+ * simply not threaded in yet.
+ *
+ * See also `workspace-runtime-assets.ts`, the sibling system that resolves project/profile/
+ * skill env vars and files. That one is PULL-based (the vm-agent fetches it at startup);
+ * MCP servers are PUSH-based because they are a structural parameter of session creation —
+ * the agent needs them to build its ACP handshake and harness config files, not as a later
+ * environment overlay.
  */
-import { type McpServerEntry, SAM_MCP_SERVER_NAME } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_MAX_MCP_CONNECTIONS_PER_SCOPE,
+  type McpServerEntry,
+  SAM_MCP_SERVER_NAME,
+} from '@simple-agent-manager/shared';
 import { and, eq, isNull, or, type SQL } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -37,8 +51,11 @@ export interface McpConnectionResolutionScope {
 export async function resolveMcpServersForSession(
   db: Db,
   scope: McpConnectionResolutionScope,
-  encryptionKey: string
+  encryptionKey: string,
+  maxPerScope: number = DEFAULT_MAX_MCP_CONNECTIONS_PER_SCOPE
 ): Promise<McpServerEntry[]> {
+  // Personal + project are both visible in one query, so the read bound is twice the cap.
+  const maxRows = maxPerScope * 2;
   // Personal rows are the session user's own (project_id IS NULL). Project rows belong to the
   // session's project regardless of which member created them — project-scoped runtime assets
   // are shared project resources. The user predicate is NOT applied to project rows, and the
@@ -53,7 +70,15 @@ export async function resolveMcpServersForSession(
     : personalScope;
 
   try {
-    const rows: unknown = await db.select().from(schema.mcpConnections).where(where);
+    // Bounded read. The per-scope cap is enforced at write time by a count-then-insert, which
+    // is not atomic, and lowering MAX_MCP_CONNECTIONS_PER_SCOPE does not retroactively delete
+    // rows — so the write-side cap is not a guarantee the read side can rely on. Two scopes
+    // are visible at once, hence twice the cap.
+    const rows: unknown = await db
+      .select()
+      .from(schema.mcpConnections)
+      .where(where)
+      .limit(maxRows);
     // The result shape is validated rather than assumed. This function runs on the
     // agent-session start path, so anything that throws here takes session start down for
     // the whole tenant — including a driver or binding that returns a non-array.
@@ -94,21 +119,33 @@ export async function buildSessionMcpServers(
   scope: McpConnectionResolutionScope,
   samMcpToken: string
 ): Promise<Array<{ url: string; token: string; name: string }>> {
-  const samEntry = {
-    url: `https://api.${options.baseDomain}/mcp`,
-    token: samMcpToken,
-    name: SAM_MCP_SERVER_NAME,
-  };
-
   const resolved = await resolveMcpServersForSession(db, scope, options.encryptionKey);
   return [
-    samEntry,
+    buildSamMcpEntry(options.baseDomain, samMcpToken),
     ...resolved.map((entry) => ({
       url: entry.url,
       token: entry.token,
       name: entry.name as string,
     })),
   ];
+}
+
+/**
+ * SAM's own MCP endpoint entry.
+ *
+ * The single place `https://api.${BASE_DOMAIN}/mcp` is constructed. Kept separate from
+ * `buildSessionMcpServers` because the anonymous-trial path needs this entry WITHOUT
+ * bring-your-own resolution — it runs as the trial sentinel user, which owns no connections.
+ */
+export function buildSamMcpEntry(
+  baseDomain: string,
+  samMcpToken: string
+): { url: string; token: string; name: string } {
+  return {
+    url: `https://api.${baseDomain}/mcp`,
+    token: samMcpToken,
+    name: SAM_MCP_SERVER_NAME,
+  };
 }
 
 /**
@@ -130,9 +167,16 @@ export async function decryptAndMerge(
     (row) => scope.projectId !== null && row.projectId === scope.projectId && row.enabled
   );
 
+  // Decrypt concurrently, then merge in order. Sequential awaits here would stack up to
+  // ~100 AES-GCM operations (2 per bearer row, both scopes at cap) directly on the
+  // agent-session start path — which the Instant runtime shares, and which has a documented
+  // history of timing out (rule 43). The merge still walks personal-then-project so a project
+  // row wins a name collision.
+  const ordered = [...personal, ...project];
+  const entries = await Promise.all(ordered.map((row) => toEntry(row, encryptionKey)));
+
   const byName = new Map<string, McpServerEntry>();
-  for (const row of [...personal, ...project]) {
-    const entry = await toEntry(row, encryptionKey);
+  for (const entry of entries) {
     if (entry) {
       byName.set(entry.name as string, entry);
     }

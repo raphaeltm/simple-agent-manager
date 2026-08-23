@@ -34,8 +34,8 @@ Prefer gateway-style providers that expose a small number of tools over servers 
 
 | Field | Notes |
 | --- | --- |
-| **Name** | How the agent sees the server; its tools are namespaced by it. 1–32 characters, lowercase letters, digits and hyphens. `sam-mcp` is reserved. |
-| **MCP endpoint URL** | Must be HTTPS (`http://localhost` and `http://127.0.0.1` are allowed for a gateway running on the same machine). |
+| **Name** | How the agent sees the server; its tools are namespaced by it. 1–32 characters, lowercase letters, digits and hyphens; it may not start or end with a hyphen. `sam-mcp` is reserved. |
+| **MCP endpoint URL** | Must be HTTPS. `http://localhost:<port>` and `http://127.0.0.1:<port>` are allowed for a gateway running on the same machine — an explicit port is required. |
 | **Authentication** | **Bearer token** for most providers. **None** when the credential is embedded in the URL itself, as with Composio's pre-signed URLs. |
 
 Both the URL and the token are encrypted at rest and are never returned by the API or shown again after you save them — several providers put the credential directly in the URL, so the URL is treated as a secret too. SAM shows only the host.
@@ -58,6 +58,10 @@ Tools from a connected MCP server run inside your agent's session, which already
 - Connections are always explicit opt-in. SAM never seeds one.
 - Only connect endpoints you trust, and prefer providers that scope their access to the specific services you authorized.
 - Project-scoped servers are shared: every member's agents will use that credential.
+- SAM validates the URL's scheme but does not resolve or pin its address. A hostname you
+  control can be pointed at a private address after the fact, so a project-scoped endpoint is
+  effectively a request originating from inside another member's workspace network. Only add
+  project-scoped endpoints from providers you trust.
 
 ## Notes on specific services
 

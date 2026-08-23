@@ -117,14 +117,29 @@ export function validateMcpConnectionUrl(rawUrl: string, maxBytes: number): { ur
     throw errors.badRequest('url must be a valid absolute URL');
   }
 
+  // An explicit port is REQUIRED for loopback, because the vm-agent's own check is a string
+  // prefix match on "http://localhost:" / "http://127.0.0.1:" (normalizeMcpServers in
+  // internal/server/workspaces.go). Without the port requirement here, `http://localhost/mcp`
+  // saves cleanly and then fails normalizeMcpServers on the VM — which rejects the ENTIRE
+  // create-agent-session request, not just that one server, so one bad row would break every
+  // future session for the scope. The two validators are pinned together by
+  // packages/shared/src/fixtures/mcp-server-name-contract.json.
   const isLoopback =
     parsed.protocol === 'http:' &&
-    (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1');
+    (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') &&
+    parsed.port !== '';
   if (parsed.protocol !== 'https:' && !isLoopback) {
-    throw errors.badRequest('url must use HTTPS (http:// is allowed only for localhost)');
+    throw errors.badRequest(
+      'url must use HTTPS (http:// is allowed only for localhost or 127.0.0.1 with an explicit port)'
+    );
   }
 
-  return { url, urlHost: `${parsed.protocol}//${parsed.host}` };
+  // Store the WHATWG-normalized form, not the raw input. `new URL()` lowercases the scheme
+  // and host for its own checks, but the vm-agent's validator is a case-sensitive string
+  // prefix match — so storing the raw string would let `HTTPS://host/mcp` pass here and fail
+  // there, and that failure rejects the whole create-agent-session request while echoing the
+  // URL into an error message. Normalizing removes the divergence at the source.
+  return { url: parsed.toString(), urlHost: `${parsed.protocol}//${parsed.host}` };
 }
 
 function validateToken(

@@ -14,7 +14,7 @@ export function SettingsMcpServers() {
   return (
     <div className="w-full min-w-0 space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-fg">MCP servers</h2>
+        <h2 className="text-lg font-semibold text-fg-primary">MCP servers</h2>
         <p className="mt-1 text-sm text-fg-muted break-words">
           Give your agents access to third-party services. Connect a provider in their own
           dashboard, then paste the MCP endpoint they give you — SAM passes it to every agent
@@ -24,23 +24,23 @@ export function SettingsMcpServers() {
 
       <McpServersManager projectId={null} queryScope={queryScope} title={null} />
 
-      <div className="rounded-md border border-border bg-bg-subtle p-3">
-        <h3 className="text-sm font-medium text-fg">Where do I get an MCP endpoint?</h3>
+      <div className="rounded-md border border-border-default bg-surface p-3">
+        <h3 className="text-sm font-medium text-fg-primary">Where do I get an MCP endpoint?</h3>
         <ul className="mt-2 space-y-1 text-xs text-fg-muted">
           <li>
-            <strong className="text-fg">Zapier MCP</strong> — broadest catalog (~9,000 apps).
+            <strong className="text-fg-primary">Zapier MCP</strong> — broadest catalog (~9,000 apps).
             Do the OAuth in Zapier, copy the endpoint and its bearer token.
           </li>
           <li>
-            <strong className="text-fg">executor.sh</strong> — open source (MIT); run it
+            <strong className="text-fg-primary">executor.sh</strong> — open source (MIT); run it
             yourself or use their hosted endpoint.
           </li>
           <li>
-            <strong className="text-fg">Composio / Rube</strong> — issues a pre-signed URL, so
+            <strong className="text-fg-primary">Composio / Rube</strong> — issues a pre-signed URL, so
             choose &ldquo;None&rdquo; for authentication.
           </li>
           <li>
-            <strong className="text-fg">Official service endpoints</strong> — GitHub, Notion,
+            <strong className="text-fg-primary">Official service endpoints</strong> — GitHub, Notion,
             Linear, Sentry and Stripe all publish remote MCP servers that take a personal
             access token as the bearer.
           </li>

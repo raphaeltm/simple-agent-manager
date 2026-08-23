@@ -37,6 +37,16 @@ func ResolveMcpServerNames(entries []McpServerEntry) []string {
 
 	for i, entry := range entries {
 		name := sanitizeMcpServerName(entry.Name)
+		// `sam-mcp` is reserved for SAM's own endpoint, which the control plane always places
+		// at index 0. Enforce that here rather than trusting the caller: this is the last
+		// point before the name becomes a TOML key and an ACP server identity, and the
+		// payload arrives over the wire alongside third-party entries. Without this, an entry
+		// at any index claiming the reserved name would take it and silently rename SAM's own
+		// endpoint to `sam-mcp-1` — letting a third party occupy the namespace the agent
+		// trusts for SAM's tools (rule 51: decide from values the server verified).
+		if name == SamMcpServerName && i != 0 {
+			name = ""
+		}
 		if name == "" {
 			name = legacyMcpServerName(i, len(entries))
 		}

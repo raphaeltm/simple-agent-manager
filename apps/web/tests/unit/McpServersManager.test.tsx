@@ -1,5 +1,5 @@
 import type { McpConnection } from '@simple-agent-manager/shared';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -165,27 +165,41 @@ describe('McpServersManager', () => {
     expect(await screen.findByText('Disabled')).toBeInTheDocument();
   });
 
-  it('confirms before deleting and does nothing when the user cancels', async () => {
+  it('requires an explicit confirmation before deleting, and cancelling deletes nothing', async () => {
     const user = userEvent.setup();
     listMcpConnections.mockResolvedValue([makeConnection()]);
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     renderWithQuery(<McpServersManager projectId={null} queryScope="user-1" />);
     await user.click(await screen.findByRole('button', { name: /delete zapier/i }));
 
-    expect(confirmSpy).toHaveBeenCalled();
+    // The shared ConfirmDialog, not window.confirm: this is a destructive action on a stored
+    // credential and it must be dismissible and focus-trapped like the app's other ones.
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent(/zapier/);
     expect(deleteMcpConnection).not.toHaveBeenCalled();
 
-    confirmSpy.mockReturnValue(true);
+    await user.click(within(dialog).getByRole('button', { name: /cancel/i }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(deleteMcpConnection).not.toHaveBeenCalled();
+  });
+
+  it('deletes when the confirmation is accepted', async () => {
+    const user = userEvent.setup();
+    listMcpConnections.mockResolvedValue([makeConnection()]);
+    renderWithQuery(<McpServersManager projectId={null} queryScope="user-1" />);
+
+    await user.click(await screen.findByRole('button', { name: /delete zapier/i }));
+
     deleteMcpConnection.mockResolvedValue(undefined);
     listMcpConnections.mockResolvedValue([]);
 
-    await user.click(screen.getByRole('button', { name: /delete zapier/i }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /^delete$/i }));
+
     await waitFor(() => {
       expect(deleteMcpConnection).toHaveBeenCalledWith(null, 'conn-1');
     });
-
-    confirmSpy.mockRestore();
+    expect(await screen.findByText(/No MCP servers yet/i)).toBeInTheDocument();
   });
 
   it('hides write controls when the caller cannot write, but still lists servers', async () => {

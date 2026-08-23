@@ -4,7 +4,7 @@ import {
   type McpConnection,
   type McpConnectionAuthType,
 } from '@simple-agent-manager/shared';
-import { Alert, Button, Spinner } from '@simple-agent-manager/ui';
+import { Alert, Button, Input, Select, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
 import { type FC, useCallback, useState } from 'react';
@@ -16,6 +16,7 @@ import {
   updateMcpConnection,
 } from '../../lib/api';
 import { mcpConnectionQueryKeys, mcpConnectionsQueryOptions } from '../../lib/query-options';
+import { ConfirmDialog } from '../ConfirmDialog';
 
 interface McpServersManagerProps {
   /** null = the caller's personal scope; a project id = that project's shared scope. */
@@ -56,6 +57,7 @@ export const McpServersManager: FC<McpServersManagerProps> = ({
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<McpConnection | null>(null);
 
   const query = useQuery(mcpConnectionsQueryOptions(queryScope, projectId));
   const connections = query.data ?? [];
@@ -99,14 +101,18 @@ export const McpServersManager: FC<McpServersManagerProps> = ({
     }
   };
 
-  const handleDelete = async (connection: McpConnection) => {
-    if (!window.confirm(`Delete the MCP server "${connection.name}"? Agents will stop receiving its tools.`)) {
-      return;
-    }
+  // Deliberately the app's ConfirmDialog rather than window.confirm: this is a destructive
+  // action on a stored credential, and the shared dialog is the pattern the sibling settings
+  // lists already use (ApiTokens, EnvironmentSecretsSection). It also traps and restores focus,
+  // which the native dialog does not.
+  const handleDelete = async () => {
+    const connection = pendingDelete;
+    if (!connection) return;
     setBusyId(connection.id);
     try {
       await deleteMcpConnection(projectId, connection.id);
       await invalidate();
+      setPendingDelete(null);
       toast.success('MCP server removed');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to remove MCP server');
@@ -141,14 +147,21 @@ export const McpServersManager: FC<McpServersManagerProps> = ({
     <div className="w-full min-w-0 space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          {title !== null && <h3 className="text-sm font-medium text-fg">{title}</h3>}
-          <p className="mt-1 text-xs text-fg-muted break-words">
-            {projectId === null
-              ? 'Available to every session you start, in any project.'
-              : 'Shared with everyone in this project.'}{' '}
-            Connect a provider such as Zapier, executor.sh, Composio or an official service
-            endpoint, then paste its MCP URL here.
-          </p>
+          {/*
+            When the host supplies the heading (title={null}, the personal settings page) it
+            also supplies the intro copy, so the scope line here would be a second, nearly
+            identical paragraph above the list.
+          */}
+          {title !== null && (
+            <>
+              <h3 className="text-sm font-medium text-fg-primary">{title}</h3>
+              <p className="mt-1 text-xs text-fg-muted break-words">
+                {projectId === null
+                  ? 'Available to every session you start, in any project.'
+                  : 'Shared with everyone in this project. Connect a provider such as Zapier, executor.sh or Composio, then paste its MCP URL here.'}
+              </p>
+            </>
+          )}
         </div>
         {canWrite && !showForm && (
           <Button size="sm" variant="secondary" onClick={() => setShowForm(true)}>
@@ -158,18 +171,18 @@ export const McpServersManager: FC<McpServersManagerProps> = ({
       </div>
 
       {showForm && canWrite && (
-        <form onSubmit={handleCreate} className="space-y-3 rounded-md border border-border p-3">
+        <form onSubmit={handleCreate} className="space-y-3 rounded-md border border-border-default p-3">
           <div>
             <label htmlFor="mcp-name" className="block text-xs font-medium text-fg-muted">
               Name
             </label>
-            <input
+            <Input
               id="mcp-name"
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               placeholder="zapier"
               required
-              className="mt-1 w-full rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg"
+              className="mt-1"
             />
             <p className="mt-1 text-xs text-fg-muted break-words">
               Agents see tools namespaced by this name — {MCP_CONNECTION_NAME_RULE}.
@@ -180,13 +193,15 @@ export const McpServersManager: FC<McpServersManagerProps> = ({
             <label htmlFor="mcp-url" className="block text-xs font-medium text-fg-muted">
               MCP endpoint URL
             </label>
-            <input
+            <Input
               id="mcp-url"
+              type="url"
+              inputMode="url"
               value={form.url}
               onChange={(e) => setForm({ ...form, url: e.target.value })}
               placeholder="https://mcp.zapier.com/api/mcp/s/..."
               required
-              className="mt-1 w-full rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg"
+              className="mt-1"
             />
             <p className="mt-1 text-xs text-fg-muted break-words">
               Stored encrypted and never shown again — some providers put the credential in
@@ -198,17 +213,17 @@ export const McpServersManager: FC<McpServersManagerProps> = ({
             <label htmlFor="mcp-auth" className="block text-xs font-medium text-fg-muted">
               Authentication
             </label>
-            <select
+            <Select
               id="mcp-auth"
               value={form.authType}
               onChange={(e) =>
                 setForm({ ...form, authType: e.target.value as McpConnectionAuthType })
               }
-              className="mt-1 w-full rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg"
+              className="mt-1"
             >
               <option value="bearer">Bearer token</option>
               <option value="none">None (credential is in the URL)</option>
-            </select>
+            </Select>
           </div>
 
           {form.authType === 'bearer' && (
@@ -216,13 +231,14 @@ export const McpServersManager: FC<McpServersManagerProps> = ({
               <label htmlFor="mcp-token" className="block text-xs font-medium text-fg-muted">
                 Bearer token
               </label>
-              <input
+              <Input
                 id="mcp-token"
                 type="password"
+                autoComplete="off"
                 value={form.token}
                 onChange={(e) => setForm({ ...form, token: e.target.value })}
                 required
-                className="mt-1 w-full rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg"
+                className="mt-1"
               />
             </div>
           )}
@@ -255,18 +271,14 @@ export const McpServersManager: FC<McpServersManagerProps> = ({
           {connections.map((connection) => (
             <li
               key={connection.id}
-              className="flex flex-wrap items-center gap-2 rounded-md border border-border p-3"
+              className="flex flex-wrap items-center gap-2 rounded-md border border-border-default p-3"
             >
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium text-fg break-words">
+                  <span className="text-sm font-medium text-fg-primary break-words">
                     {connection.name}
                   </span>
-                  {!connection.enabled && (
-                    <span className="rounded bg-bg-subtle px-1.5 py-0.5 text-xs text-fg-muted">
-                      Disabled
-                    </span>
-                  )}
+                  {!connection.enabled && <StatusBadge status="disabled" pulse={false} />}
                 </div>
                 {/*
                   The host needs `break-all` because a pre-signed gateway subdomain has no
@@ -295,7 +307,7 @@ export const McpServersManager: FC<McpServersManagerProps> = ({
                     variant="ghost"
                     aria-label={`Delete ${connection.name}`}
                     disabled={busyId === connection.id}
-                    onClick={() => void handleDelete(connection)}
+                    onClick={() => setPendingDelete(connection)}
                   >
                     <Trash2 size={14} />
                   </Button>
@@ -305,6 +317,25 @@ export const McpServersManager: FC<McpServersManagerProps> = ({
           ))}
         </ul>
       )}
+
+      <ConfirmDialog
+        isOpen={pendingDelete !== null}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={() => void handleDelete()}
+        title="Delete MCP server"
+        message={
+          pendingDelete ? (
+            <>
+              Agents will stop receiving tools from{' '}
+              <strong className="text-fg-primary">{pendingDelete.name}</strong>. The stored
+              credential is deleted and cannot be recovered.
+            </>
+          ) : null
+        }
+        confirmLabel="Delete"
+        variant="danger"
+        loading={busyId !== null && busyId === pendingDelete?.id}
+      />
     </div>
   );
 };

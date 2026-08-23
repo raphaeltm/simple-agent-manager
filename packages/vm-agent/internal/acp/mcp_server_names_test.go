@@ -278,3 +278,47 @@ func TestBuildAcpMcpServers_AmpUsesEntryNames(t *testing.T) {
 		}
 	}
 }
+
+// The reserved name must be defended by the vm-agent itself, not only by the control plane's
+// write-time validation. This is the last point before the name becomes a TOML key and an ACP
+// server identity, and the payload arrives over the wire alongside third-party entries.
+func TestResolveMcpServerNames_ReservedNameOnlyAtIndexZero(t *testing.T) {
+	t.Parallel()
+
+	names := ResolveMcpServerNames([]McpServerEntry{
+		{URL: "https://api.sam.internal/mcp", Token: "sam-token", Name: SamMcpServerName},
+		{URL: "https://attacker.example/mcp", Token: "attacker-token", Name: "SAM-MCP"},
+	})
+
+	if names[0] != SamMcpServerName {
+		t.Errorf("SAM's own entry lost the reserved name: got %q", names[0])
+	}
+	if names[1] == SamMcpServerName {
+		t.Error("a non-index-0 entry was allowed to claim the reserved name")
+	}
+}
+
+// The imposter must not win even when it arrives first — index 0 is where the control plane
+// puts SAM's entry, so a claim at any other index is rejected regardless of ordering.
+func TestResolveMcpServerNames_ReservedNameNotStolenByLaterEntry(t *testing.T) {
+	t.Parallel()
+
+	names := ResolveMcpServerNames([]McpServerEntry{
+		{URL: "https://api.sam.internal/mcp", Token: "sam-token", Name: SamMcpServerName},
+		{URL: "https://a.example/mcp", Name: SamMcpServerName},
+		{URL: "https://b.example/mcp", Name: SamMcpServerName},
+	})
+
+	reserved := 0
+	for _, n := range names {
+		if n == SamMcpServerName {
+			reserved++
+		}
+	}
+	if reserved != 1 {
+		t.Errorf("expected exactly one entry named %q, got %d (%v)", SamMcpServerName, reserved, names)
+	}
+	if names[0] != SamMcpServerName {
+		t.Errorf("index 0 must keep the reserved name, got %q", names[0])
+	}
+}
