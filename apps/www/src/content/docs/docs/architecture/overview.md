@@ -225,6 +225,27 @@ each rendered policy line carries its **full, untruncated** id:
 - **Call get_instructions first** (id: 7d24e435-0153-44a6-a532-1244510d9e25): Agents must load SAM context before starting work.
 ```
 
+A policy may also carry a **shelf life**. `add_policy` and `update_policy` accept an optional
+`expiresAt` (epoch milliseconds) and a `scope` of either `always` (a standing project policy,
+the default) or `task` (a one-shot policy captured for a specific piece of work). A
+`task`-scoped policy must set `expiresAt`, enforced at every write boundary by
+`validatePolicyLifecycle()` in `packages/shared/src/constants/policies.ts` — which is what
+stops a constraint captured for one workflow from being injected forever. When a policy has an
+expiry, `formatPolicyLifecycle()` renders it inline between the title and the id:
+
+```text
+- **Use profile X for the reliability wave** (task-scoped, expires 2026-09-30) (id: d55af478-5234-4178-8f9c-47dfd5647de2): ...
+- **Prefer Valibot for runtime validation** (expires 2026-12-01) (id: 56b02cb5-71aa-46bd-9ea1-858aaa5551ec): ...
+```
+
+Expiry is evaluated at **read time** in `getActivePolicies()`
+(`apps/api/src/durable-objects/project-data/policies.ts`) — `active = 1 AND (expires_at IS NULL
+OR expires_at > ?)`. There is no sweep or cron: a lapsed policy simply stops being selected. The
+row is deliberately retained and stays `active`, so `get_policy`, `list_policies`, and the
+Policies tab can still show a human that the policy existed and when it stopped applying. A
+policy with no `expiresAt` never expires, which is the behaviour of every policy created before
+lifecycle controls existed.
+
 Knowledge observations do **not** currently carry their `observationId` in this payload, so
 `update_knowledge`, `remove_knowledge`, and `confirm_knowledge` need an id obtained from
 `search_knowledge` or `get_project_knowledge` first.

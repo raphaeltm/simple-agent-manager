@@ -58,6 +58,15 @@ export function createPolicy(
   // The per-project cap counts only policies that still apply. An expired policy is
   // inert — it is injected into nothing — so letting it consume cap headroom would
   // slowly wedge projects that use short-lived task-scoped policies.
+  //
+  // KNOWN CHARACTERISTIC: because an expired row is deliberately retained (so a human
+  // can still see in `list_policies` / the UI that the policy existed and when it
+  // lapsed), total row count is bounded by human/agent write volume rather than by
+  // this cap. Adding a naive hard total ceiling would be worse than the growth it
+  // prevents: `removePolicy` is a soft delete, so a project that hit the ceiling
+  // could never write a policy again. Sizing that ceiling against a real retention
+  // or hard-delete path is tracked in
+  // tasks/backlog/2026-08-23-policy-row-retention-bound.md (rule 42 — tracked, not silent).
   const count = parseCountCnt(
     sql.exec(`SELECT COUNT(*) as cnt FROM project_policies WHERE ${APPLIES_NOW_SQL}`, now).toArray()[0],
     'policy_count',

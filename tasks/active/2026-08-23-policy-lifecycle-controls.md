@@ -69,6 +69,7 @@ additive. A second table would need a 1:1 join on every read for no benefit.
 ```
 MCP add_policy/update_policy      apps/api/src/routes/mcp/policy-tools.ts
 REST POST/PATCH  /policies        apps/api/src/routes/policies.ts (+ schemas/policies.ts)
+SAM add_policy (orchestrator)     apps/api/src/durable-objects/sam-session/tools/add-policy.ts
    ↓
 service layer                     apps/api/src/services/project-data-policies.ts
    ↓
@@ -78,6 +79,19 @@ pure SQL functions                apps/api/src/durable-objects/project-data/poli
    ↓
 row parser                        apps/api/src/durable-objects/project-data/row-schemas/policies.ts
 ```
+
+**Three writers, not two** (rule 44 / rule 61). The initial enumeration listed only the MCP and
+REST callers and missed `sam-session/tools/add-policy.ts` — the SAM orchestrator's own
+`add_policy` tool, which calls `projectDataService.createPolicy` directly. Left unfixed, every
+policy created from an orchestrator surface would have been permanently non-expiring: the exact
+failure mode this feature exists to remove, reintroduced through the one door nobody counted. It
+was caught in specialist review and now calls the same shared `validatePolicyLifecycle`.
+
+The complete writer set was re-derived from `grep -rl project_policies` (only `migrations.ts` and
+`project-data/policies.ts` touch the table by name — no raw-SQL bypass exists) plus every caller
+of `createPolicy(` / `updatePolicy(`: 3 create callers and 2 update callers, all funnelling
+through the service layer into the DO choke point, which re-checks the invariant against
+freshly-read state immediately before the write.
 
 Consumers of the parsed row: `instruction-tools.ts` (agent injection),
 `apps/web/src/lib/api/policies.ts` + `AgentContextPage/PoliciesTab.tsx` (UI),

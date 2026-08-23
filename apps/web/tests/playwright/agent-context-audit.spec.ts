@@ -109,8 +109,11 @@ const DAY_MS = 86_400_000;
 
 /**
  * Lifecycle states a policy card has to render: a standing policy, a live
- * task-scoped one, an expired one, and a long-titled task-scoped one (the badge
- * row grows by two badges, so it is the case most likely to overflow at 375px).
+ * task-scoped one, an expired one, and — as `pl4` — the genuine worst case for
+ * the header row at 375px: a 200-character unbroken title carrying the MAXIMUM
+ * badge count (category + active + task-scoped + expired). Splitting "longest
+ * title" and "most badges" across two cards would leave the combination that
+ * actually overflows untested.
  */
 const LIFECYCLE_POLICIES = [
   makePolicy({ id: 'pl1', category: 'rule', title: 'Standing policy with no expiry' }),
@@ -136,7 +139,7 @@ const LIFECYCLE_POLICIES = [
     title: 'A'.repeat(200),
     content: 'B'.repeat(500),
     scope: 'task',
-    expiresAt: Date.now() + 30 * DAY_MS,
+    expiresAt: Date.now() - 30 * DAY_MS,
   }),
 ];
 
@@ -346,9 +349,14 @@ test.describe('Agent Context — Mobile', () => {
 
     // An expired policy is still `active` in storage, so without the expiry label a
     // human cannot tell it has stopped reaching agents. That is the whole point.
-    await expect(page.getByText('Commenting delivery root is coordination-only')).toBeVisible();
-    await expect(page.getByText('expired', { exact: true })).toBeVisible();
-    await expect(page.getByText(/Expired /)).toBeVisible();
+    // Scoped to the one card rather than the page, because more than one fixture is
+    // expired — an unscoped getByText would be a strict-mode violation, not a pass.
+    const expiredCard = page
+      .locator('article')
+      .filter({ hasText: 'Commenting delivery root is coordination-only' });
+    await expect(expiredCard).toBeVisible();
+    await expect(expiredCard.getByText('expired', { exact: true })).toBeVisible();
+    await expect(expiredCard.getByText(/Expired /)).toBeVisible();
 
     // A live task-scoped policy shows its shelf life but is NOT marked expired.
     await expect(page.getByText('task-scoped').first()).toBeVisible();
@@ -495,8 +503,13 @@ test.describe('Agent Context — Desktop', () => {
     await page.goto('/projects/proj-1/agent-context');
     await page.click('button:has-text("Policies")');
 
-    await expect(page.getByText('expired', { exact: true })).toBeVisible();
-    await expect(page.getByText('task-scoped').first()).toBeVisible();
+    // pl4 is the worst case: a 200-char unbroken title carrying every badge
+    // (category + active + task-scoped + expired). Assert the badges ON that card,
+    // so the check cannot be satisfied by a different, shorter policy's badges.
+    const worstCase = page.locator('article').filter({ hasText: 'A'.repeat(200) });
+    await expect(worstCase).toBeVisible();
+    await expect(worstCase.getByText('task-scoped', { exact: true })).toBeVisible();
+    await expect(worstCase.getByText('expired', { exact: true })).toBeVisible();
 
     await screenshot(page, 'agent-context-policy-lifecycle-desktop');
     await assertNoOverflow(page);

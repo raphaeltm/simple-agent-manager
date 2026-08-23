@@ -601,6 +601,24 @@ describe('MCP knowledge and policy route tools', () => {
         expect.objectContaining({ scope: 'always', expiresAt: null }),
       );
     });
+
+    it('does not read the stored policy when the update touches no lifecycle field', async () => {
+      // Guards the I/O budget (rule 60) on the path agents actually call at runtime.
+      // The extra getPolicy round-trip exists only to merge scope and expiry against
+      // stored state, so an ordinary active/title edit must not pay for it. The REST
+      // route has the twin of this test in tests/unit/routes/policies.test.ts.
+      vi.mocked(projectDataService.updatePolicy).mockResolvedValue(true);
+
+      const res = await mcpPost(app, 'update_policy', {
+        policyId: 'pol-3',
+        active: false,
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(projectDataService.getPolicy).not.toHaveBeenCalled();
+    });
   });
 
   it('rejects over-limit knowledge update and contradiction content', async () => {

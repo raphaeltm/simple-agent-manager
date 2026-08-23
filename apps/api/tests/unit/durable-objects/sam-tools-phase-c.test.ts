@@ -628,6 +628,47 @@ describe('add_policy', () => {
     expect(mockCreatePolicy).not.toHaveBeenCalled();
   });
 
+  // The MCP and REST boundaries each cover these branches for their own inline
+  // parser. This writer has a third, separate parser, so "the shared validator is
+  // well tested" does not prove THIS boundary reaches it — rule 61 wants every
+  // runtime that performs the operation covered, not just the busiest one. Each
+  // case must fail closed WITHOUT writing.
+  it.each([
+    {
+      label: 'an expiry in the past',
+      overrides: { scope: 'task' as const, expiresAt: Date.now() - 60_000 },
+      expected: /expiresAt must be in the future/,
+    },
+    {
+      label: 'an expiry beyond the max horizon',
+      overrides: { scope: 'task' as const, expiresAt: Date.now() + 400 * 24 * 60 * 60 * 1000 },
+      expected: /expiresAt must be within/,
+    },
+    {
+      label: 'an unknown scope',
+      overrides: { scope: 'forever', expiresAt: Date.now() + 60_000 },
+      expected: /scope must be one of/,
+    },
+    {
+      label: 'a non-numeric expiry',
+      overrides: { scope: 'task' as const, expiresAt: 'next tuesday' as unknown as number },
+      expected: /expiresAt must be a number/,
+    },
+  ])('rejects $label before writing', async ({ overrides, expected }) => {
+    const ctx = buildCtx({ ownedProject: { id: 'proj-1' } });
+
+    const result = await addPolicy(
+      {
+        projectId: 'proj-1', title: 'Wave profile', content: 'Applies to one wave.',
+        category: 'constraint', ...overrides,
+      },
+      ctx,
+    ) as Record<string, unknown>;
+
+    expect(String(result.error)).toMatch(expected);
+    expect(mockCreatePolicy).not.toHaveBeenCalled();
+  });
+
   it('is registered in toolHandlers via executeTool', async () => {
     const ctx = buildCtx();
     const toolCall: CollectedToolCall = {
