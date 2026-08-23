@@ -73,3 +73,4 @@ Tools from a connected MCP server run inside your agent's session, which already
 - **Remote HTTP servers only.** `stdio` servers are not supported: configuring an arbitrary command from a web UI is an unnecessary attack surface, and every major provider is remote-first.
 - **Bearer or no authentication.** Custom auth headers (for example `X-API-Key`) are not yet supported.
 - **Personal and project scope only.** Attaching a server to a specific agent profile or skill is not yet supported.
+- **Amp exposes the endpoint URL locally.** The Amp harness reaches remote MCP servers through a bridge process that receives the URL as a command-line argument, so anything running inside that same workspace can read it. The bearer token is not exposed this way. If your endpoint's URL is itself the credential (a pre-signed URL), prefer a different agent for now.
