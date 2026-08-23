@@ -581,7 +581,10 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('get_incident');
       expect(toolNames).toContain('claim_incident');
       expect(toolNames).toContain('resolve_incident');
-      expect(body.result.tools).toHaveLength(111);
+      // Library file comment tools
+      expect(toolNames).toContain('list_library_file_comment_threads');
+      expect(toolNames).toContain('create_library_file_comment_thread');
+      expect(body.result.tools).toHaveLength(113);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
