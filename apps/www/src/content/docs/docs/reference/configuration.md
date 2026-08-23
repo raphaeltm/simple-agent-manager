@@ -84,6 +84,22 @@ The reviewed default churning selectors are `DATABASE.deployment_releases`, `DAT
 characters of the domain's SHA-256 hash. The self-host onboarding flow fills it
 in for you.
 
+### App deployment image-resolution safety
+
+These optional Worker variables bound the server-side OCI registry lookups used
+when a deployment release submits tag-based images. Digest-pinned images are
+stored without registry network resolution.
+
+| Variable                                            | Default | Description                                                        |
+| --------------------------------------------------- | ------- | ------------------------------------------------------------------ |
+| `DEPLOYMENT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS`       | `10000` | Per-registry request timeout                                       |
+| `DEPLOYMENT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS`         | `60000` | Total tag-resolution wall-clock budget per release submission      |
+| `DEPLOYMENT_IMAGE_RESOLVE_MAX_FETCH_ATTEMPTS`       | `200`   | Maximum outbound registry/token fetches per resolver instance      |
+| `DEPLOYMENT_IMAGE_RESOLVE_MAX_REDIRECTS`            | `2`     | Maximum manually validated HTTPS redirects per outbound request    |
+| `DEPLOYMENT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES` | `65536` | Maximum bearer-token JSON response size                            |
+| `DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES`   | `4`     | Maximum simultaneous outbound resolver fetches                     |
+| `DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES`             | `50`    | Maximum tag-based image references resolved per release submission |
+
 Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `PULUMI_CONFIG_PASSPHRASE`. GitHub App/OAuth secrets (`GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_SLUG`, `GH_WEBHOOK_SECRET`) and Google **login** OAuth secrets (`GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`) are optional environment fallbacks; fresh deployments can set them through `/setup` instead. The separate Google **infra/GCP** OAuth pair (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) is used only for WIF and can be configured by a superadmin at `/admin/integrations`; runtime values override the environment fallback. Service-account JSON users need no infrastructure OAuth client. Deploy signing keys are generated and persisted by Pulumi during deployment; GitHub Environment values are only needed for explicit key overrides.
 
 :::note[Naming convention]

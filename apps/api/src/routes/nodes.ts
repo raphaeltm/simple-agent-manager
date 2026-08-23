@@ -591,9 +591,26 @@ nodesRoutes.get('/:id/logs/stream', async (c) => {
     }
   }
 
-  // Proxy the WebSocket upgrade to the VM agent
-  const headers = new Headers(c.req.raw.headers);
-  headers.delete('x-sam-node-id');
+  // Proxy only WebSocket handshake headers to the VM agent. Browser/control-plane
+  // credentials such as Cookie or Authorization must not be forwarded because
+  // VM-agent diagnostic auth gives Authorization precedence over the query token.
+  const clientHeaders = c.req.raw.headers;
+  const headers = new Headers();
+  for (const name of [
+    'Upgrade',
+    'Connection',
+    'Sec-WebSocket-Key',
+    'Sec-WebSocket-Version',
+    'Sec-WebSocket-Protocol',
+    'Sec-WebSocket-Extensions',
+    'Origin',
+  ]) {
+    const value = clientHeaders.get(name);
+    if (value) {
+      headers.set(name, value);
+    }
+  }
+  headers.set('Authorization', `Bearer ${token}`);
   headers.set('X-SAM-Node-Id', nodeId);
 
   return fetchNodeAgent(

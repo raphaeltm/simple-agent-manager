@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
@@ -16,6 +16,13 @@ interface ParsedWorkflow {
   jobs?: Record<string, { environment?: string; steps?: WorkflowStep[] }>;
 }
 
+interface ResourceNamesModule {
+  resolveResourceNames(
+    env: Record<string, string | undefined>,
+    mode: 'deploy' | 'teardown' | 'marketing' | 'pulumi'
+  ): Record<string, string>;
+}
+
 function workflow(path: string): string {
   return readFileSync(new URL(`../../.github/workflows/${path}`, import.meta.url), 'utf8');
 }
@@ -26,6 +33,29 @@ function repoFile(path: string): string {
 
 function parsedWorkflow(path: string): ParsedWorkflow {
   return parse(workflow(path)) as ParsedWorkflow;
+}
+
+async function resourceNamesModule(): Promise<ResourceNamesModule> {
+  return (await import(
+    new URL('../../scripts/deploy/workflow-resource-names.mjs', import.meta.url).href
+  )) as ResourceNamesModule;
+}
+
+function allWorkflowRunBlocks(): Array<{ path: string; stepName: string; run: string }> {
+  const workflowPaths = readdirSync(new URL('../../.github/workflows/', import.meta.url))
+    .filter((path) => /\.ya?ml$/u.test(path))
+    .sort();
+
+  return workflowPaths.flatMap((path) => {
+    const parsed = parsedWorkflow(path);
+    return Object.values(parsed.jobs ?? {}).flatMap((job) =>
+      (job.steps ?? []).flatMap((step) =>
+        typeof step.run === 'string'
+          ? [{ path, stepName: step.name ?? '<unnamed step>', run: step.run }]
+          : []
+      )
+    );
+  });
 }
 
 function namedStep(parsed: ParsedWorkflow, name: string): WorkflowStep {
@@ -47,18 +77,214 @@ function stepBlock(contents: string, stepName: string): string {
 }
 
 describe('deployment workflow hardening', () => {
-  it('keeps D1 restore dispatch values out of shell source', () => {
-    const steps = Object.values(parsedWorkflow('d1-restore.yml').jobs ?? {}).flatMap(
-      (job) => job.steps ?? []
-    );
-    const runBlocks = steps.flatMap((step) => (typeof step.run === 'string' ? [step.run] : []));
+  it('keeps GitHub expressions out of every workflow shell source block', () => {
+    const runBlocks = allWorkflowRunBlocks();
 
     expect(runBlocks.length).toBeGreaterThan(0);
     for (const block of runBlocks) {
-      expect(block).not.toContain('${{ inputs.');
-      expect(block).not.toContain('${{ github.event.inputs.');
-      expect(block).not.toMatch(/\$\{\{\s*steps\.restore_input\.outputs\./);
+      expect(block.run, `${block.path} :: ${block.stepName}`).not.toContain('${{');
     }
+  });
+
+  it('passes untrusted workflow values through env before validation or command use', () => {
+    const deploy = parsedWorkflow('deploy-reusable.yml');
+    const teardown = parsedWorkflow('teardown.yml');
+    const deployValidation = namedStep(deploy, 'Validate Deployment Resource Names');
+    const teardownValidation = namedStep(teardown, 'Resolve Resource Names');
+
+    expect(deployValidation).toMatchObject({
+      run: 'node scripts/deploy/workflow-resource-names.mjs deploy',
+      env: {
+        DEPLOY_ENVIRONMENT: '${{ inputs.environment }}',
+        RESOURCE_PREFIX: '${{ vars.RESOURCE_PREFIX }}',
+        BASE_DOMAIN: '${{ vars.BASE_DOMAIN }}',
+        PULUMI_STATE_BUCKET: '${{ vars.PULUMI_STATE_BUCKET }}',
+      },
+    });
+    expect(teardownValidation).toMatchObject({
+      run: 'node scripts/deploy/workflow-resource-names.mjs teardown',
+      env: {
+        INPUT_ENVIRONMENT: '${{ inputs.environment }}',
+        RESOURCE_PREFIX: '${{ vars.RESOURCE_PREFIX }}',
+        BASE_DOMAIN: '${{ vars.BASE_DOMAIN }}',
+        AI_GATEWAY_ID: '${{ vars.AI_GATEWAY_ID }}',
+        PULUMI_STATE_BUCKET: '${{ vars.PULUMI_STATE_BUCKET }}',
+      },
+    });
+    expect(JSON.stringify(deployValidation.env ?? {})).not.toContain('secrets.');
+    expect(JSON.stringify(teardownValidation.env ?? {})).not.toContain('secrets.');
+  });
+
+  it.each([
+    ['quote', "sam'owned"],
+    ['double quote', 'sam"owned'],
+    ['command substitution', 'sam$(id)'],
+    ['backticks', 'sam`id`'],
+    ['newline', 'sam\nowned'],
+    ['output-file injection', 'sam\nname=owned'],
+    ['option injection', '--help'],
+    ['globbing', 'sam*'],
+    ['traversal-like', '../sam'],
+  ])('rejects adversarial RESOURCE_PREFIX values: %s', async (_name, resourcePrefix) => {
+    const { resolveResourceNames } = await resourceNamesModule();
+
+    expect(() =>
+      resolveResourceNames(
+        {
+          DEPLOY_ENVIRONMENT: 'staging',
+          RESOURCE_PREFIX: resourcePrefix,
+          BASE_DOMAIN: 'sammy.party',
+        },
+        'deploy'
+      )
+    ).toThrow();
+  });
+
+  it.each([
+    ['quote', "staging'owned"],
+    ['double quote', 'staging"owned'],
+    ['command substitution', 'staging$(id)'],
+    ['backticks', 'staging`id`'],
+    ['newline', 'staging\nowned=true'],
+    ['output-file injection', 'staging\nname=owned'],
+    ['option injection', '--staging'],
+    ['globbing', 'staging*'],
+    ['traversal-like', '../staging'],
+  ])('rejects adversarial deployment environment values: %s', async (_name, environment) => {
+    const { resolveResourceNames } = await resourceNamesModule();
+
+    expect(() =>
+      resolveResourceNames(
+        {
+          DEPLOY_ENVIRONMENT: environment,
+          BASE_DOMAIN: 'sammy.party',
+        },
+        'deploy'
+      )
+    ).toThrow();
+    expect(() =>
+      resolveResourceNames(
+        {
+          INPUT_ENVIRONMENT: environment,
+          BASE_DOMAIN: 'sammy.party',
+        },
+        'teardown'
+      )
+    ).toThrow();
+  });
+
+  it.each([
+    ['quote', "sammy'.party"],
+    ['command substitution', 'sammy.$(id).party'],
+    ['newline', 'sammy.party\nowned=true'],
+    ['control character', 'sammy.party\u0007'],
+    ['option injection', '-sammy.party'],
+    ['globbing', '*.sammy.party'],
+    ['traversal-like', '../sammy.party'],
+  ])('rejects adversarial BASE_DOMAIN values: %s', async (_name, baseDomain) => {
+    const { resolveResourceNames } = await resourceNamesModule();
+
+    expect(() =>
+      resolveResourceNames(
+        {
+          DEPLOY_ENVIRONMENT: 'staging',
+          BASE_DOMAIN: baseDomain,
+        },
+        'deploy'
+      )
+    ).toThrow();
+  });
+
+  it.each([
+    ['quote', "sam-state'owned"],
+    ['command substitution', 'sam-$(id)-state'],
+    ['newline', 'sam-state\nowned=true'],
+    ['option injection', '--sam-state'],
+    ['globbing', 'sam-*-state'],
+    ['traversal-like', '../sam-state'],
+  ])('rejects adversarial PULUMI_STATE_BUCKET values: %s', async (_name, bucket) => {
+    const { resolveResourceNames } = await resourceNamesModule();
+
+    expect(() =>
+      resolveResourceNames(
+        {
+          DEPLOY_ENVIRONMENT: 'staging',
+          BASE_DOMAIN: 'sammy.party',
+          PULUMI_STATE_BUCKET: bucket,
+        },
+        'deploy'
+      )
+    ).toThrow();
+  });
+
+  it.each([
+    ['quote', "gateway'owned"],
+    ['double quote', 'gateway"owned'],
+    ['command substitution', 'gateway$(id)'],
+    ['backticks', 'gateway`id`'],
+    ['newline', 'gateway\nowned=true'],
+    ['output-file injection', 'gateway\nname=owned'],
+    ['option injection', '--gateway'],
+    ['globbing', 'gateway*'],
+    ['traversal-like', '../gateway'],
+  ])('rejects adversarial AI_GATEWAY_ID values: %s', async (_name, aiGatewayId) => {
+    const { resolveResourceNames } = await resourceNamesModule();
+
+    expect(() =>
+      resolveResourceNames(
+        {
+          INPUT_ENVIRONMENT: 'staging',
+          BASE_DOMAIN: 'sammy.party',
+          AI_GATEWAY_ID: aiGatewayId,
+        },
+        'teardown'
+      )
+    ).toThrow();
+  });
+
+  it('preserves staging, production, explicit prefix, default bucket, and derived names', async () => {
+    const { resolveResourceNames } = await resourceNamesModule();
+
+    expect(
+      resolveResourceNames(
+        {
+          DEPLOY_ENVIRONMENT: 'staging',
+          BASE_DOMAIN: 'sammy.party',
+        },
+        'deploy'
+      )
+    ).toMatchObject({
+      environment: 'staging',
+      stack: 'staging',
+      prefix: 's2c56ea',
+      pulumi_state_bucket: 's2c56ea-pulumi-state',
+      api_url: 'https://api.sammy.party',
+      app_url: 'https://app.sammy.party',
+      pages_domain: 'app.sammy.party',
+      web_pages_project: 's2c56ea-web-staging',
+    });
+
+    expect(
+      resolveResourceNames(
+        {
+          DEPLOY_ENVIRONMENT: 'production',
+          BASE_DOMAIN: 'simple-agent-manager.org',
+          RESOURCE_PREFIX: 'sam-prod',
+          PULUMI_STATE_BUCKET: 'sam-prod-state',
+        },
+        'deploy'
+      )
+    ).toMatchObject({
+      environment: 'production',
+      stack: 'prod',
+      prefix: 'sam-prod',
+      pulumi_state_bucket: 'sam-prod-state',
+      api_worker: 'sam-prod-api-prod',
+      tail_worker: 'sam-prod-tail-worker-prod',
+      web_pages_project: 'sam-prod-web-prod',
+      api_url: 'https://api.simple-agent-manager.org',
+      app_url: 'https://app.simple-agent-manager.org',
+    });
   });
 
   it('validates every D1 restore dispatch field before credential-bearing commands', () => {
@@ -177,13 +403,20 @@ describe('deployment workflow hardening', () => {
   });
 
   it.each(['d1-restore.yml', 'pulumi-state-repair.yml'])(
-    '%s fails fast when neither RESOURCE_PREFIX nor BASE_DOMAIN can resolve identity',
+    '%s validates deployment identity before Pulumi credentials',
     (path) => {
-      const block = stepBlock(workflow(path), 'Compute Resource Prefix');
+      const contents = workflow(path);
+      const validation = stepBlock(contents, 'Validate Deployment Resource Names');
+      const firstCredentialStep = contents.indexOf('- name: Login to Pulumi R2 Backend');
 
-      expect(block).toContain('DOMAIN="${{ vars.BASE_DOMAIN }}"');
-      expect(block).toContain('BASE_DOMAIN is required when RESOURCE_PREFIX is not set.');
-      expect(block).toContain('exit 1');
+      expect(contents.indexOf('- name: Validate Deployment Resource Names')).toBeLessThan(
+        firstCredentialStep
+      );
+      expect(validation).toContain('node scripts/deploy/workflow-resource-names.mjs');
+      expect(validation).toContain('RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX }}');
+      expect(validation).toContain('BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}');
+      expect(validation).toContain('PULUMI_STATE_BUCKET: ${{ vars.PULUMI_STATE_BUCKET }}');
+      expect(validation).not.toContain('secrets.');
     }
   );
 
@@ -192,9 +425,9 @@ describe('deployment workflow hardening', () => {
     (path) => {
       const contents = workflow(path);
 
-      expect(contents).toContain('pages_project=${PREFIX}-www');
-      expect(contents).toContain('vars.RESOURCE_PREFIX');
-      expect(contents).toContain('vars.BASE_DOMAIN');
+      expect(contents).toContain('node scripts/deploy/workflow-resource-names.mjs marketing');
+      expect(contents).toContain('RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX }}');
+      expect(contents).toContain('BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}');
       expect(contents).not.toContain("vars.RESOURCE_PREFIX || 'sam'");
     }
   );

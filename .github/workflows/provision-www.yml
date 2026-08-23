@@ -39,25 +39,10 @@ jobs:
 
       - name: Resolve Domain
         id: domain
-        run: |
-          DOMAIN="${{ vars.BASE_DOMAIN }}"
-          if [ -z "$DOMAIN" ]; then
-            echo "::error::BASE_DOMAIN is not set in environment variables."
-            exit 1
-          fi
-          EXPLICIT="${{ vars.RESOURCE_PREFIX }}"
-          if [ -n "$EXPLICIT" ]; then
-            PREFIX="$EXPLICIT"
-          else
-            HASH=$(echo -n "$DOMAIN" | sha256sum | cut -c1-6)
-            PREFIX="s${HASH}"
-          fi
-          echo "base=$DOMAIN" >> "$GITHUB_OUTPUT"
-          echo "www=www.$DOMAIN" >> "$GITHUB_OUTPUT"
-          echo "pages_project=${PREFIX}-www" >> "$GITHUB_OUTPUT"
-          echo "Base domain: $DOMAIN"
-          echo "WWW domain: www.$DOMAIN"
-          echo "Pages project: ${PREFIX}-www"
+        env:
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX }}
+        run: node scripts/deploy/workflow-resource-names.mjs marketing
 
       # ========================================
       # Phase 1: Cloudflare Pages Project
@@ -91,8 +76,8 @@ jobs:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
           PAGES_PROJECT: ${{ steps.domain.outputs.pages_project }}
+          BASE_DOMAIN: ${{ steps.domain.outputs.base }}
         run: |
-          BASE_DOMAIN="${{ steps.domain.outputs.base }}"
           API="https://api.cloudflare.com/client/v4"
           AUTH="Authorization: Bearer $CF_API_TOKEN"
 
@@ -177,8 +162,8 @@ jobs:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           PAGES_PROJECT: ${{ steps.domain.outputs.pages_project }}
+          WWW_DOMAIN: ${{ steps.domain.outputs.www }}
         run: |
-          WWW_DOMAIN="${{ steps.domain.outputs.www }}"
           API="https://api.cloudflare.com/client/v4"
           AUTH="Authorization: Bearer $CF_API_TOKEN"
 
@@ -208,9 +193,9 @@ jobs:
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          BASE_DOMAIN: ${{ steps.domain.outputs.base }}
+          WWW_DOMAIN: ${{ steps.domain.outputs.www }}
         run: |
-          BASE_DOMAIN="${{ steps.domain.outputs.base }}"
-          WWW_DOMAIN="${{ steps.domain.outputs.www }}"
           API="https://api.cloudflare.com/client/v4"
           AUTH="Authorization: Bearer $CF_API_TOKEN"
 
@@ -275,11 +260,7 @@ jobs:
       - name: Write Job Summary
         if: always()
         run: |
-          BASE_DOMAIN="${{ steps.domain.outputs.base }}"
-          WWW_DOMAIN="${{ steps.domain.outputs.www }}"
-          PAGES_PROJECT="${{ steps.domain.outputs.pages_project }}"
-
-          if [ "${{ job.status }}" = "success" ]; then
+          if [ "$PROVISION_JOB_STATUS" = "success" ]; then
             cat >> "$GITHUB_STEP_SUMMARY" <<EOF
           ## Marketing Site Infrastructure Provisioned
 
@@ -314,3 +295,8 @@ jobs:
           - Verify \`BASE_DOMAIN\` is set in environment variables
           EOF
           fi
+        env:
+          PROVISION_JOB_STATUS: ${{ job.status }}
+          BASE_DOMAIN: ${{ steps.domain.outputs.base }}
+          WWW_DOMAIN: ${{ steps.domain.outputs.www }}
+          PAGES_PROJECT: ${{ steps.domain.outputs.pages_project }}

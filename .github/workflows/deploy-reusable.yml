@@ -51,6 +51,7 @@ jobs:
           HAS_CF_ORIGIN_CA_KEY: ${{ secrets.CF_ORIGIN_CA_KEY != '' }}
           HAS_DEPLOY_SIGNING_PRIVATE_KEY: ${{ secrets.DEPLOY_SIGNING_PRIVATE_KEY != '' }}
           HAS_DEPLOY_SIGNING_PUBLIC_KEY: ${{ secrets.DEPLOY_SIGNING_PUBLIC_KEY != '' }}
+          INPUT_ENVIRONMENT: ${{ inputs.environment }}
         run: |
           MISSING=""
 
@@ -88,15 +89,15 @@ jobs:
           fi
 
           if [ -n "$MISSING" ]; then
-            echo "::error::Missing required configuration in GitHub Environment '${{ inputs.environment }}':$MISSING"
+            echo "::error::Missing required configuration in GitHub Environment '$INPUT_ENVIRONMENT':$MISSING"
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "## Missing Configuration" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "The following configuration is required in the GitHub Environment '${{ inputs.environment }}':" >> $GITHUB_STEP_SUMMARY
+            echo "The following configuration is required in the GitHub Environment '$INPUT_ENVIRONMENT':" >> $GITHUB_STEP_SUMMARY
             echo -e "$MISSING" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### Setup Instructions" >> $GITHUB_STEP_SUMMARY
-            echo "1. Go to **Settings > Environments > ${{ inputs.environment }}**" >> $GITHUB_STEP_SUMMARY
+            echo "1. Go to **Settings > Environments > $INPUT_ENVIRONMENT**" >> $GITHUB_STEP_SUMMARY
             echo "2. Add the missing variables and secrets" >> $GITHUB_STEP_SUMMARY
             echo "3. Re-run this workflow" >> $GITHUB_STEP_SUMMARY
             echo "valid=false" >> $GITHUB_OUTPUT
@@ -162,41 +163,21 @@ jobs:
       - name: Install Pulumi CLI
         uses: pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0
 
-      - name: Determine Stack Name
-        id: stack
-        run: |
-          # Map environment to Pulumi stack name
-          case "${{ inputs.environment }}" in
-            production) STACK="prod" ;;
-            staging) STACK="staging" ;;
-            *) STACK="${{ inputs.environment }}" ;;
-          esac
-          echo "name=$STACK" >> $GITHUB_OUTPUT
-          echo "Stack: $STACK for environment: ${{ inputs.environment }}"
-
-      - name: Compute Resource Prefix
-        id: prefix
-        run: |
-          EXPLICIT="${{ vars.RESOURCE_PREFIX }}"
-          if [ -n "$EXPLICIT" ]; then
-            echo "value=$EXPLICIT" >> $GITHUB_OUTPUT
-            echo "Resource prefix (explicit): $EXPLICIT"
-          else
-            # Derive from BASE_DOMAIN: 's' + first 6 hex chars of sha256
-            # Must match infra/resources/config.ts derivePrefix()
-            DOMAIN="${{ vars.BASE_DOMAIN }}"
-            HASH=$(echo -n "$DOMAIN" | sha256sum | cut -c1-6)
-            PREFIX="s${HASH}"
-            echo "value=$PREFIX" >> $GITHUB_OUTPUT
-            echo "Resource prefix (derived from $DOMAIN): $PREFIX"
-          fi
+      - name: Validate Deployment Resource Names
+        id: deploy_resources
+        env:
+          DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+          RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          PULUMI_STATE_BUCKET: ${{ vars.PULUMI_STATE_BUCKET }}
+        run: node scripts/deploy/workflow-resource-names.mjs deploy
 
       # ========================================
       # Phase 1: Infrastructure (Pulumi)
       # ========================================
       - name: Create Pulumi State Bucket (if not exists)
         run: |
-          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || format('{0}-pulumi-state', steps.prefix.outputs.value) }}"
+          BUCKET_NAME="$PULUMI_STATE_BUCKET"
 
           set +e
           OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler r2 bucket create "$BUCKET_NAME" 2>&1)
@@ -209,17 +190,19 @@ jobs:
           elif echo "$OUTPUT" | grep -Eq 'already exists, and you own it|\[code: 10004\]'; then
             echo "R2 bucket already exists: $BUCKET_NAME"
           else
-            echo "::error title=Pulumi state bucket setup failed::Failed to create or verify R2 bucket '$BUCKET_NAME'. Check CF_API_TOKEN, CF_ACCOUNT_ID, and bucket permissions for the '${{ inputs.environment }}' GitHub environment."
+            echo "::error title=Pulumi state bucket setup failed::Failed to create or verify R2 bucket '$BUCKET_NAME'. Check CF_API_TOKEN, CF_ACCOUNT_ID, and bucket permissions for the '$DEPLOY_ENVIRONMENT' GitHub environment."
             exit "$STATUS"
           fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          DEPLOY_ENVIRONMENT: ${{ steps.deploy_resources.outputs.environment }}
+          PULUMI_STATE_BUCKET: ${{ steps.deploy_resources.outputs.pulumi_state_bucket }}
 
       - name: Validate Pulumi R2 Backend Access
         run: |
-          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || format('{0}-pulumi-state', steps.prefix.outputs.value) }}"
-          R2_ENDPOINT="${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          BUCKET_NAME="$PULUMI_STATE_BUCKET"
+          R2_ENDPOINT="${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
           CHECK_SCRIPT="apps/api/.pulumi-r2-preflight.mjs"
           trap 'rm -f "$CHECK_SCRIPT"' EXIT
@@ -273,13 +256,13 @@ jobs:
           if [ "$STATUS" -eq 0 ]; then
             echo "$OUTPUT"
           elif [ "$STATUS" -eq 13 ]; then
-            echo "::error title=Pulumi R2 backend access denied::R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY cannot read .pulumi/meta.yaml from bucket '$BUCKET_NAME'. Rotate these secrets for the '${{ inputs.environment }}' GitHub environment with an R2 API token scoped to this bucket in the same Cloudflare account as CF_ACCOUNT_ID."
+            echo "::error title=Pulumi R2 backend access denied::R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY cannot read .pulumi/meta.yaml from bucket '$BUCKET_NAME'. Rotate these secrets for the '$DEPLOY_ENVIRONMENT' GitHub environment with an R2 API token scoped to this bucket in the same Cloudflare account as CF_ACCOUNT_ID."
             {
               echo "## Pulumi R2 Backend Access Denied"
               echo ""
               echo "The Cloudflare API token could verify the state bucket, but the R2 S3 credentials could not read \`.pulumi/meta.yaml\`."
               echo ""
-              echo "Rotate the GitHub Environment '${{ inputs.environment }}' secrets:"
+              echo "Rotate the GitHub Environment '$DEPLOY_ENVIRONMENT' secrets:"
               echo "- \`R2_ACCESS_KEY_ID\`"
               echo "- \`R2_SECRET_ACCESS_KEY\`"
               echo ""
@@ -294,29 +277,34 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          DEPLOY_ENVIRONMENT: ${{ steps.deploy_resources.outputs.environment }}
+          PULUMI_STATE_BUCKET: ${{ steps.deploy_resources.outputs.pulumi_state_bucket }}
 
       - name: Login to Pulumi R2 Backend
         run: |
-          BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || format('{0}-pulumi-state', steps.prefix.outputs.value) }}"
-          R2_ENDPOINT="${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          BUCKET_NAME="$PULUMI_STATE_BUCKET"
+          R2_ENDPOINT="${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
           # Pulumi >=3.244 (AWS SDK v2) requires an explicit URL scheme on the S3 endpoint;
           # a scheme-less endpoint fails with 'unsupported protocol scheme ""'.
           pulumi login "s3://${BUCKET_NAME}?endpoint=https://${R2_ENDPOINT}&region=auto"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          PULUMI_STATE_BUCKET: ${{ steps.deploy_resources.outputs.pulumi_state_bucket }}
 
       - name: Select or Create Pulumi Stack
         id: pulumi-select
         working-directory: infra
         run: |
-          STACK_NAME="${{ steps.stack.outputs.name }}"
-          echo "stack_name=$STACK_NAME" >> $GITHUB_OUTPUT
-          pulumi stack select $STACK_NAME 2>/dev/null || pulumi stack init $STACK_NAME
+          echo "stack_name=$STACK_NAME" >> "$GITHUB_OUTPUT"
+          pulumi stack select "$STACK_NAME" 2>/dev/null || pulumi stack init "$STACK_NAME"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          STACK_NAME: ${{ steps.deploy_resources.outputs.stack }}
 
       - name: Set Pulumi Configuration
         working-directory: infra
@@ -331,10 +319,10 @@ jobs:
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
-          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
           PREVIEW_BASE_DOMAIN: ${{ vars.PREVIEW_BASE_DOMAIN }}
           PREVIEW_URL_TTL_SECONDS: ${{ vars.PREVIEW_URL_TTL_SECONDS }}
-          RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
+          RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}
 
       - name: Pulumi Preview
         if: ${{ inputs.dry_run == true }}
@@ -385,8 +373,8 @@ jobs:
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
-          RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
+          BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
+          RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}
           VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}
           REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
           CRON_SWEEPS_ENABLED_KV_KEY: ${{ vars.CRON_SWEEPS_ENABLED_KV_KEY }}
@@ -566,7 +554,7 @@ jobs:
           # CF_API_TOKEN for Cloudflare REST API (R2 bucket CORS)
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
 
       - name: Configure AI Gateway
         if: ${{ inputs.dry_run != true }}
@@ -574,7 +562,7 @@ jobs:
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          AI_GATEWAY_ID: ${{ steps.prefix.outputs.value }}
+          AI_GATEWAY_ID: ${{ steps.deploy_resources.outputs.ai_gateway }}
 
       - name: Check First Deploy Status
         id: first_deploy
@@ -592,7 +580,7 @@ jobs:
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
+          RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}
         run: |
           SUBDOMAIN="$RESOURCE_PREFIX"
           echo "Ensuring workers.dev subdomain is initialized: ${SUBDOMAIN}.workers.dev"
@@ -624,8 +612,8 @@ jobs:
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          PAGES_PROJECT: ${{ steps.prefix.outputs.value }}-web-${{ steps.stack.outputs.name }}
-          PAGES_DOMAIN: app.${{ vars.BASE_DOMAIN }}
+          PAGES_PROJECT: ${{ steps.deploy_resources.outputs.web_pages_project }}
+          PAGES_DOMAIN: ${{ steps.deploy_resources.outputs.pages_domain }}
 
       # ========================================
       # Phase 3: Application (Wrangler)
@@ -676,7 +664,7 @@ jobs:
           OBS_DB_NAME=$(pulumi stack output observabilityD1DatabaseName)
           cd ../apps/api
           pnpm tsx ../../scripts/deploy/d1-migration-safety.ts \
-            --env ${{ inputs.environment }} \
+            --env "$DEPLOY_ENV" \
             --database=DATABASE:$DB_NAME \
             --database=OBSERVABILITY_DATABASE:$OBS_DB_NAME
         env:
@@ -685,6 +673,7 @@ jobs:
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
           D1_MIGRATION_CHURNING_TABLES: ${{ vars.D1_MIGRATION_CHURNING_TABLES }}
           D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT: ${{ vars.D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT }}
 
@@ -740,16 +729,17 @@ jobs:
           fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          DEPLOY_ENV: ${{ inputs.environment }}
+          DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
           ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}
 
       # Tail Worker must deploy AFTER API Worker (service binding dependency)
       - name: Deploy Tail Worker
         if: ${{ inputs.dry_run != true }}
-        run: pnpm --filter @simple-agent-manager/tail-worker exec wrangler deploy --env ${{ inputs.environment }}
+        run: pnpm --filter @simple-agent-manager/tail-worker exec wrangler deploy --env "$DEPLOY_ENV"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
 
       # On first deploy: tail worker now exists, re-sync to add tail_consumers and re-deploy API
       - name: Re-sync Wrangler Config (add tail_consumers)
@@ -764,8 +754,8 @@ jobs:
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
-          RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
+          BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
+          RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}
           VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}
           REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
           CRON_SWEEPS_ENABLED_KV_KEY: ${{ vars.CRON_SWEEPS_ENABLED_KV_KEY }}
@@ -941,21 +931,21 @@ jobs:
           echo "$OUTPUT"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          DEPLOY_ENV: ${{ inputs.environment }}
+          DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
           ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}
 
       - name: Deploy Web UI
         if: ${{ inputs.dry_run != true }}
         run: |
-          PREFIX="${{ steps.prefix.outputs.value }}"
-          STACK="${{ steps.stack.outputs.name }}"
           PROJECT_NAME="${PREFIX}-web-${STACK}"
           # --branch main: Deploy as "production" so custom domains serve this deployment.
           # Without this, PR branches deploy as "preview" and custom domains show "Deployment Not Found".
-          pnpm --filter @simple-agent-manager/web exec wrangler pages deploy dist --project-name $PROJECT_NAME --branch main
+          pnpm --filter @simple-agent-manager/web exec wrangler pages deploy dist --project-name "$PROJECT_NAME" --branch main
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          PREFIX: ${{ steps.deploy_resources.outputs.prefix }}
+          STACK: ${{ steps.deploy_resources.outputs.stack }}
 
       - name: Enable Trials on Staging (KV kill-switch)
         # Trials are gated by a KV flag that fails closed. Staging always enables them
@@ -976,13 +966,13 @@ jobs:
 
       - name: Configure Worker Secrets
         if: ${{ inputs.dry_run != true }}
-        run: bash scripts/deploy/configure-secrets.sh ${{ inputs.environment }}
+        run: bash scripts/deploy/configure-secrets.sh "$DEPLOY_ENV"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
           VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
@@ -1020,6 +1010,7 @@ jobs:
           CF_AIG_TOKEN: ${{ secrets.CF_AIG_TOKEN }}
           DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN: ${{ secrets.DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN }}
           DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID }}
+          DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
 
       # Secret writes create fresh Worker deployments. Re-deploy once after all
       # secrets are configured so routes serving the web app keep the current
@@ -1045,7 +1036,7 @@ jobs:
           fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          DEPLOY_ENV: ${{ inputs.environment }}
+          DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
           ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}
 
       - name: Build CLI
@@ -1076,7 +1067,6 @@ jobs:
       - name: Health Check
         if: ${{ inputs.dry_run != true }}
         run: |
-          API_URL="https://api.${{ vars.BASE_DOMAIN }}"
           echo "Waiting for API to be ready at $API_URL..."
 
           for i in {1..30}; do
@@ -1103,13 +1093,18 @@ jobs:
 
           echo "Health check timed out"
           exit 1
+        env:
+          API_URL: ${{ steps.deploy_resources.outputs.api_url }}
 
       - name: Output Deployment URLs
         id: output
         if: ${{ inputs.dry_run != true }}
         run: |
-          echo "api_url=https://api.${{ vars.BASE_DOMAIN }}" >> $GITHUB_OUTPUT
-          echo "app_url=https://app.${{ vars.BASE_DOMAIN }}" >> $GITHUB_OUTPUT
+          echo "api_url=$API_URL" >> "$GITHUB_OUTPUT"
+          echo "app_url=$APP_URL" >> "$GITHUB_OUTPUT"
+        env:
+          API_URL: ${{ steps.deploy_resources.outputs.api_url }}
+          APP_URL: ${{ steps.deploy_resources.outputs.app_url }}
 
       # ========================================
       # Job Summary
@@ -1117,20 +1112,20 @@ jobs:
       - name: Write Job Summary
         if: always()
         run: |
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
+          if [ "$DEPLOY_DRY_RUN" = "true" ]; then
             echo "## Pulumi Preview Complete" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "This was a **dry run**. No changes were applied." >> $GITHUB_STEP_SUMMARY
-          elif [ "${{ job.status }}" = "success" ]; then
-            echo "## Deployment Complete (${{ inputs.environment }})" >> $GITHUB_STEP_SUMMARY
+          elif [ "$DEPLOY_JOB_STATUS" = "success" ]; then
+            echo "## Deployment Complete ($DEPLOY_ENV)" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Commit:** \`${{ steps.deploy-sha.outputs.value || inputs.target_commit_sha || github.sha }}\`" >> $GITHUB_STEP_SUMMARY
-            echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-            echo "**Base Domain:** ${{ vars.BASE_DOMAIN }}" >> $GITHUB_STEP_SUMMARY
+            echo "**Commit:** \`$DEPLOY_COMMIT\`" >> $GITHUB_STEP_SUMMARY
+            echo "**Environment:** $DEPLOY_ENV" >> $GITHUB_STEP_SUMMARY
+            echo "**Base Domain:** $BASE_DOMAIN" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### Access URLs" >> $GITHUB_STEP_SUMMARY
-            echo "- **API:** https://api.${{ vars.BASE_DOMAIN }}" >> $GITHUB_STEP_SUMMARY
-            echo "- **Web UI:** https://app.${{ vars.BASE_DOMAIN }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **API:** $API_URL" >> $GITHUB_STEP_SUMMARY
+            echo "- **Web UI:** $APP_URL" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### What Was Deployed" >> $GITHUB_STEP_SUMMARY
             echo "- Infrastructure (Pulumi): D1, KV, R2, DNS" >> $GITHUB_STEP_SUMMARY
@@ -1138,16 +1133,25 @@ jobs:
             echo "- Tail Worker (log streaming)" >> $GITHUB_STEP_SUMMARY
             echo "- Web UI (Pages)" >> $GITHUB_STEP_SUMMARY
             echo "- Database migrations" >> $GITHUB_STEP_SUMMARY
-            if [ "${{ inputs.skip_agent }}" != "true" ]; then
+            if [ "$DEPLOY_SKIP_AGENT" != "true" ]; then
               echo "- VM Agent binaries" >> $GITHUB_STEP_SUMMARY
             fi
           else
-            echo "## Deployment Failed (${{ inputs.environment }})" >> $GITHUB_STEP_SUMMARY
+            echo "## Deployment Failed ($DEPLOY_ENV)" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Commit:** \`${{ steps.deploy-sha.outputs.value || inputs.target_commit_sha || github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "**Commit:** \`$DEPLOY_COMMIT\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "Check the logs above for error details." >> $GITHUB_STEP_SUMMARY
           fi
+        env:
+          DEPLOY_DRY_RUN: ${{ inputs.dry_run }}
+          DEPLOY_JOB_STATUS: ${{ job.status }}
+          DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
+          DEPLOY_COMMIT: ${{ steps.deploy-sha.outputs.value || inputs.target_commit_sha || github.sha }}
+          DEPLOY_SKIP_AGENT: ${{ inputs.skip_agent }}
+          BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
+          API_URL: ${{ steps.deploy_resources.outputs.api_url }}
+          APP_URL: ${{ steps.deploy_resources.outputs.app_url }}
 
       - name: Security Keys Status
         if: ${{ inputs.dry_run != true }}

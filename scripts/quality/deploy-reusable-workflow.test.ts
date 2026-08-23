@@ -50,8 +50,8 @@ const DIRECT_SYNC_ENV_MAPPINGS = {
   CLOUDFLARE_API_TOKEN: 'CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}',
   ARTIFACTS_BINDING_ENABLED: 'ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}',
   SETUP_FORCE: 'SETUP_FORCE: ${{ vars.SETUP_FORCE }}',
-  BASE_DOMAIN: 'BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}',
-  RESOURCE_PREFIX: 'RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}',
+  BASE_DOMAIN: 'BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}',
+  RESOURCE_PREFIX: 'RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}',
 } as const;
 function stepRunScript(stepName: string): string {
   const block = stepBlock(stepName);
@@ -235,8 +235,10 @@ describe('deploy reusable workflow', () => {
     const firstDeployResync = stepBlock('Re-sync Wrangler Config \\(add tail_consumers\\)');
 
     expect(initialSync).toContain('pnpm tsx scripts/deploy/sync-wrangler-config.ts');
-    expect(initialSync).toContain('BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}');
-    expect(initialSync).toContain('RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}');
+    expect(initialSync).toContain('BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}');
+    expect(initialSync).toContain(
+      'RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}'
+    );
     expect(initialSync).toContain(
       'VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}'
     );
@@ -245,8 +247,12 @@ describe('deploy reusable workflow', () => {
     );
 
     expect(firstDeployResync).toContain('pnpm tsx scripts/deploy/sync-wrangler-config.ts');
-    expect(firstDeployResync).toContain('BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}');
-    expect(firstDeployResync).toContain('RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}');
+    expect(firstDeployResync).toContain(
+      'BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}'
+    );
+    expect(firstDeployResync).toContain(
+      'RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}'
+    );
     expect(firstDeployResync).toContain(
       'VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}'
     );
@@ -304,7 +310,7 @@ describe('deploy reusable workflow', () => {
     const block = stepBlock('Configure AI Gateway');
 
     expect(block).toContain('bash scripts/deploy/configure-ai-gateway.sh');
-    expect(block).toContain('AI_GATEWAY_ID: ${{ steps.prefix.outputs.value }}');
+    expect(block).toContain('AI_GATEWAY_ID: ${{ steps.deploy_resources.outputs.ai_gateway }}');
     expect(block).not.toContain('AI_GATEWAY_ID: sam');
   });
 

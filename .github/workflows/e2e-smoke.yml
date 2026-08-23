@@ -47,4 +47,6 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run smoke test
-        run: ${{ matrix.command }}
+        run: bash -lc "$SMOKE_COMMAND"
+        env:
+          SMOKE_COMMAND: ${{ matrix.command }}

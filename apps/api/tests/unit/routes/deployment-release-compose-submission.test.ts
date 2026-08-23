@@ -447,6 +447,34 @@ describe('POST /:projectId/environments/:envId/releases — Compose submission',
     ]);
   });
 
+  it('rejects Compose submissions with too many tag-based images before building a resolver', async () => {
+    const app = await createTestApp();
+    const res = await app.request(
+      '/api/projects/proj-1/environments/env-1/releases',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/yaml' },
+        body: composeYaml({
+          extraService: `  worker:
+    image: registry.sam.example/proj-1/worker:v1.2.3
+    environment: {}
+`,
+        }),
+      },
+      { ...mockEnv, DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES: '1' }
+    );
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('MANIFEST_VALIDATION_FAILED');
+    expect(body.details.errors[0]).toEqual({
+      path: 'services',
+      message: expect.stringContaining('2 tag-based image references'),
+    });
+    expect(mockCreateImageResolver).not.toHaveBeenCalled();
+    expect(insertedReleases).toHaveLength(0);
+  });
+
   it('scopes minted registry credentials to the SAM registry host for both YAML and JSON paths', async () => {
     const app = await createTestApp();
 
@@ -491,13 +519,19 @@ describe('POST /:projectId/environments/:envId/releases — Compose submission',
       { permissions: ['pull'] }
     );
     expect(mockCreateImageResolver).toHaveBeenCalledTimes(2);
-    expect(mockCreateImageResolver).toHaveBeenNthCalledWith(1, {
-      auth: { username: 'sam-pull-user', password: 'sam-pull-password' },
-      authRegistryHost: 'registry.sam.example',
-    });
-    expect(mockCreateImageResolver).toHaveBeenNthCalledWith(2, {
-      auth: { username: 'sam-pull-user', password: 'sam-pull-password' },
-      authRegistryHost: 'registry.sam.example',
-    });
+    expect(mockCreateImageResolver).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        auth: { username: 'sam-pull-user', password: 'sam-pull-password' },
+        authRegistryHost: 'registry.sam.example',
+      })
+    );
+    expect(mockCreateImageResolver).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        auth: { username: 'sam-pull-user', password: 'sam-pull-password' },
+        authRegistryHost: 'registry.sam.example',
+      })
+    );
   });
 });

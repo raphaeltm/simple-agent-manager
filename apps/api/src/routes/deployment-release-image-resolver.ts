@@ -1,8 +1,16 @@
-import { type ImageResolver, isDigestReference } from '@simple-agent-manager/shared';
+import {
+  type ImageResolver,
+  isDigestReference,
+  type UnresolvedManifest,
+} from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { createImageResolver, ImageResolveError } from '../services/image-resolver';
+import {
+  createImageResolver,
+  getImageResolverConfig,
+  ImageResolveError,
+} from '../services/image-resolver';
 import { mintProjectRegistryCredential } from '../services/registry-credentials';
 
 type ResolveImageResult =
@@ -12,16 +20,16 @@ type ResolveImageResult =
 export async function buildProjectImageResolver(
   env: Env,
   projectId: string,
-  userId: string,
+  userId: string
 ): Promise<ImageResolver> {
+  const config = getImageResolverConfig(env);
   let registryCreds: { username: string; password: string } | undefined;
   let registryAuthHost: string | undefined;
 
   try {
-    const creds = await mintProjectRegistryCredential(
-      env, projectId, userId, '', undefined,
-      { permissions: ['pull'] },
-    );
+    const creds = await mintProjectRegistryCredential(env, projectId, userId, '', undefined, {
+      permissions: ['pull'],
+    });
     registryCreds = { username: creds.username, password: creds.password };
     // Scope the minted credentials to the SAM registry host only. A manifest
     // may name an arbitrary, user-controlled registry; without this scope the
@@ -34,7 +42,32 @@ export async function buildProjectImageResolver(
   return createImageResolver({
     auth: registryCreds,
     authRegistryHost: registryAuthHost,
+    timeoutMs: config.requestTimeoutMs,
+    totalTimeoutMs: config.totalTimeoutMs,
+    maxFetchAttempts: config.maxFetchAttempts,
+    maxRedirects: config.maxRedirects,
+    tokenResponseMaxBytes: config.tokenResponseMaxBytes,
+    maxConcurrentFetches: config.maxConcurrentFetches,
   });
+}
+
+export function validateUnresolvedComposeImageCount(
+  manifest: UnresolvedManifest,
+  env: Env
+): Array<{ path: string; message: string }> {
+  const config = getImageResolverConfig(env);
+  const unresolved = Object.entries(manifest.services).filter(
+    ([, service]) => !isDigestReference(service.image.reference)
+  );
+  if (unresolved.length <= config.maxServices) {
+    return [];
+  }
+  return [
+    {
+      path: 'services',
+      message: `Manifest contains ${unresolved.length} tag-based image references; the configured limit is ${config.maxServices}. Submit digest-pinned images or reduce the number of services.`,
+    },
+  ];
 }
 
 /**
@@ -54,7 +87,7 @@ export async function resolveManifestImageTags(
   body: unknown,
   projectId: string,
   userId: string,
-  env: Env,
+  env: Env
 ): Promise<ResolveImageResult> {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
     return { success: true, body }; // let validateManifest handle shape errors
@@ -68,6 +101,7 @@ export async function resolveManifestImageTags(
 
   const svcMap = services as Record<string, unknown>;
   let needsRewrite = false;
+  let unresolvedServiceCount = 0;
 
   for (const svcConfig of Object.values(svcMap)) {
     if (typeof svcConfig !== 'object' || svcConfig === null) continue;
@@ -80,16 +114,30 @@ export async function resolveManifestImageTags(
 
     if (tag && !digest) {
       needsRewrite = true;
-      break;
+      unresolvedServiceCount += 1;
+      continue;
     }
     if (digest && !isDigestReference(digest)) {
       needsRewrite = true;
-      break;
+      unresolvedServiceCount += 1;
     }
   }
 
   if (!needsRewrite) {
     return { success: true, body };
+  }
+
+  const config = getImageResolverConfig(env);
+  if (unresolvedServiceCount > config.maxServices) {
+    return {
+      success: false,
+      errors: [
+        {
+          path: 'services',
+          message: `Manifest contains ${unresolvedServiceCount} tag-based image references; the configured limit is ${config.maxServices}. Submit digest-pinned images or reduce the number of services.`,
+        },
+      ],
+    };
   }
 
   const resolver = await buildProjectImageResolver(env, projectId, userId);
@@ -132,9 +180,10 @@ export async function resolveManifestImageTags(
         digest: resolvedDigest,
       });
     } catch (err) {
-      const message = err instanceof ImageResolveError
-        ? err.message
-        : `Failed to resolve ${registry}/${repository}:${tagToResolve}: ${err instanceof Error ? err.message : String(err)}`;
+      const message =
+        err instanceof ImageResolveError
+          ? err.message
+          : `Failed to resolve ${registry}/${repository}:${tagToResolve}: ${err instanceof Error ? err.message : String(err)}`;
       resolveErrors.push({ path: `services.${name}.image`, message });
     }
   }
