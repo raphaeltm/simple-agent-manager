@@ -12,6 +12,7 @@ import { Navigate, Outlet, useLocation, useNavigate } from 'react-router';
 import { DeploymentSettings } from '../components/DeploymentSettings';
 import { ProjectConnectionsSection } from '../components/project-settings/ProjectConnectionsSection';
 import { ProjectMembersSection } from '../components/project-settings/ProjectMembersSection';
+import { McpServersManager } from '../components/mcp-servers/McpServersManager';
 import { ProjectRuntimeConfigSection } from '../components/project-settings/ProjectRuntimeConfigSection';
 import { ProjectAgentsSection } from '../components/ProjectAgentsSection';
 import { RepositoryAccessSettings } from '../components/RepositoryAccessSettings';
@@ -461,8 +462,18 @@ export function ProjectSettingsInfrastructure() {
 
 export function ProjectSettingsRuntime() {
   const { projectId } = useProjectContext();
+  const queryScope = useQueryScope();
 
-  return <ProjectRuntimeConfigSection projectId={projectId} />;
+  // MCP servers live beside env vars and files because they are the same class of thing:
+  // project-scoped configuration injected into every agent session in this project.
+  // Write authorization is enforced server-side (`secret:write`), matching how the runtime
+  // env-var and file controls above already behave.
+  return (
+    <div className="w-full min-w-0 space-y-8">
+      <ProjectRuntimeConfigSection projectId={projectId} />
+      <McpServersManager projectId={projectId} queryScope={queryScope} />
+    </div>
+  );
 }
 
 export function ProjectSettingsDeploy() {

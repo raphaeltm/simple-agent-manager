@@ -150,6 +150,10 @@ const SettingsConnections = lazyNamed(
   () => import('./pages/SettingsConnections'),
   'SettingsConnections'
 );
+const SettingsMcpServers = lazyNamed(
+  () => import('./pages/SettingsMcpServers'),
+  'SettingsMcpServers'
+);
 const SettingsCredentials = lazyNamed(
   () => import('./pages/SettingsCredentials'),
   'SettingsCredentials'
@@ -328,6 +332,7 @@ export default function App() {
                         <Route path="github" element={page(<SettingsGitHub />)} />
                         <Route path="connections" element={page(<SettingsConnections />)} />
                         <Route path="agents" element={page(<SettingsAgents />)} />
+                        <Route path="mcp-servers" element={page(<SettingsMcpServers />)} />
                         <Route
                           path="agent-keys"
                           element={<Navigate to="../connections" replace />}

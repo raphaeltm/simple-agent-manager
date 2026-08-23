@@ -11,6 +11,7 @@ const BASE_TABS = [
   { id: 'github', label: 'GitHub', path: 'github' },
   { id: 'connections', label: 'Connections', path: 'connections' },
   { id: 'agents', label: 'Agents', path: 'agents' },
+  { id: 'mcp-servers', label: 'MCP Servers', path: 'mcp-servers' },
   { id: 'advanced', label: 'Advanced', path: 'advanced' },
   { id: 'notifications', label: 'Notifications', path: 'notifications' },
   { id: 'usage', label: 'Usage', path: 'usage' },

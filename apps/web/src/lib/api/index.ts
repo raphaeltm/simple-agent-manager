@@ -536,3 +536,10 @@ export {
   updateWorkspace,
   updateWorkspacePortsPublic,
 } from './workspaces';
+
+export {
+  createMcpConnection,
+  deleteMcpConnection,
+  listMcpConnections,
+  updateMcpConnection,
+} from './mcp-connections';
