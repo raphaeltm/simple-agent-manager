@@ -5,6 +5,7 @@ import type { KnowledgeEntityType, KnowledgeRelationType, KnowledgeSourceType } 
 import { KNOWLEDGE_DEFAULTS } from '@simple-agent-manager/shared';
 
 import { buildSafeFtsQuery } from '../../lib/fts5';
+import { createModuleLogger } from '../../lib/logger';
 import {
   parseCountCnt,
   parseKnowledgeEntityRow,
@@ -14,6 +15,8 @@ import {
 } from './row-schemas';
 import type { Env } from './types';
 import { generateId } from './types';
+
+const log = createModuleLogger('project_data.knowledge');
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -500,7 +503,7 @@ export function getKnowledgeEntityIndex(
       }
       entries.push({ name, entityType, observationCount });
     } catch (err) {
-      console.warn('knowledge.entity_index_row_skipped', {
+      log.warn('knowledge.entity_index_row_skipped', {
         entityName: typeof row.name === 'string' ? row.name : null,
         error: err instanceof Error ? err.message : String(err),
       });
