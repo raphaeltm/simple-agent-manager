@@ -118,9 +118,9 @@ R2 (policy expiry fields). This diff must stay minimal and land first; rebase on
 
 - [x] `get_instructions` no longer emits `knowledgeContext` or `policyContext`
 - [x] Every policy's full, exact id is available to the agent in the rendered directives
-- [ ] Payload for the SAM project drops from ~166.8K to ~81.0K chars (~51%, ~21.4k tokens)
+- [x] Payload for the SAM project drops from ~166.8K to ~81.0K chars (~51%, ~21.4k tokens)
 - [x] No consumer anywhere in the repo reads the removed fields
-- [ ] Staging: a real session bootstrap receives directives, can act on a policy by id, and
+- [x] Staging: a real session bootstrap receives directives, can act on a policy by id, and
       the payload is measurably smaller (before/after bytes reported in the PR)
 
 ## References
@@ -130,7 +130,7 @@ R2 (policy expiry fields). This diff must stay minimal and land first; rebase on
 - `.claude/rules/02-quality-gates.md` — discriminating regression tests
 - `tasks/archive/2026-04-26-policy-propagation-phase4.md` — where `policyContext` originated
 
-## Outcome (IN PROGRESS — not yet staging-verified)
+## Outcome
 
 **Implemented** in commit `da1d3160a` on `sam/remove-duplicated-structured-arrays-b6ggy4`.
 
@@ -169,3 +169,52 @@ arrays" test. Restored → 12/12 green.
 The brief suggested an elided id, e.g. `(id: 7d24e435…)`. That would **break**
 `update_policy` / `remove_policy`: `policies.ts:118,136` resolve with `WHERE id = ?`
 (exact match). Full 36-char UUIDs are rendered instead — 3,483 chars against 52,157 saved.
+
+## Staging verification (2026-08-23, deploy run 32648180754 — SUCCESS)
+
+Measured through the **real deployed Worker** by calling `POST https://api.sammy.party/mcp`
+with a live MCP token read from staging KV (`mcp:<token>`), i.e. the exact production code
+path an agent bootstraps through. Project `01KTKXZ4ZZAT6MJFXRW1ZTQ7RB` was seeded with 3
+marked policies (one per category) + 1 observation; **identical data** measured either side
+of the deploy.
+
+| | BEFORE (pre-fix `main`) | AFTER (this branch) |
+|---|---:|---:|
+| total payload | 6,025 chars | **5,230 chars** |
+| `knowledgeContext` | 177 chars, 1 item | **ABSENT** |
+| `policyContext` | 652 chars, 3 items | **ABSENT** |
+| `policyDirectives` | 481 chars | 610 chars (+129, the 3 inline ids) |
+| occurrences of each seeded body | **2** | **1** |
+| full policy ids rendered | **0 of 3** | **3 of 3** |
+
+The absolute delta is small only because the fixture is small — the fixed
+`context`/`task`/`project`/`instructions` overhead (~4,010 chars) dominates at this size.
+The *duplication* is what was eliminated, and it scales with knowledge + policy volume: on
+the real SAM project (81 policies, 50 observations) that is 166,814 → ~81,025 chars.
+
+### Management round-trip proven end-to-end
+
+The decisive check — an id scraped out of the rendered markdown must actually address the
+row, which is precisely what an elided id would have broken:
+
+1. Scraped `c546f67b-81cd-4224-a39f-8f52a3655aeb` from `- **...** (id: ...)` in `policyDirectives`
+2. `update_policy` with only that id → `{"updated":true,...}`
+3. Fresh `get_instructions` → new text present, stale text gone
+4. `remove_policy` × 3 → `{"removed":true,...}` each
+
+Incidentally confirmed the filed `observationId` gap: cleaning up the seeded observation
+required `search_knowledge` to obtain the id, because `get_instructions` still does not
+expose it.
+
+### Cleanup
+
+All seeded data removed; payload returned to exactly the 4,010-char empty-path shape with
+zero `R1VERIFY` residue. No VMs or nodes were created (the MCP endpoint was exercised
+directly), so the zero-VMs-at-rest rule is respected.
+
+### Rule 13 regression pass (Playwright, live `app.sammy.party`)
+
+Authenticated via `POST https://api.sammy.party/api/auth/token-login` (status 200), then at
+both 375x667 and 1280x800: dashboard, `/projects` (16 projects listed), and `/settings` all
+rendered; `GET /health` 200 `{"status":"healthy"}`; **0 console errors** at both viewports.
+Screenshots in `.codex/tmp/playwright-screenshots/r1-staging-*.png`.
