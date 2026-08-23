@@ -1062,8 +1062,8 @@ export const MIGRATIONS: Migration[] = [
       // message comment tables created in migration 032.
       //
       // The obvious alternative — widening `comment_threads` to allow a
-      // `library_file` anchor — cannot be done additively: SQLite supports neither
-      // `ALTER ... CHECK` nor dropping a NOT NULL, so it would require recreating
+      // `library_file` anchor — cannot be done additively: SQLite cannot change a
+      // CHECK constraint or remove a NOT NULL in place, so it would require recreating
       // `comment_threads` and its two CASCADE children. Durable Object SQLite has no
       // point-in-time recovery, so dropping a table here is unrecoverable
       // (.claude/rules/31-migration-safety.md, `pnpm quality:do-migration-safety`).
