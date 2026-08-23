@@ -1,8 +1,6 @@
 import type {
-  CommentAnchorKind,
   CommentAuthor,
   CommentStatus,
-  LibraryFileCommentThread,
   MessageCommentReply,
   MessageCommentThread,
 } from '@simple-agent-manager/shared';
@@ -18,16 +16,8 @@ export type CreateCommentThreadInput = {
   actor: CommentActor;
 };
 
-export type CreateFileCommentThreadInput = {
-  fileId: string;
-  body: string;
-  quote?: string | null;
-  clientMutationId?: string | null;
-  actor: CommentActor;
-};
-
 export type CreateCommentReplyInput = {
-  sessionId?: string | null;
+  sessionId: string;
   threadId: string;
   body: string;
   clientMutationId?: string | null;
@@ -35,17 +25,15 @@ export type CreateCommentReplyInput = {
 };
 
 export type ListCommentThreadsInput = {
-  sessionId?: string | null;
+  sessionId: string;
   messageId?: string | null;
-  fileId?: string | null;
-  anchorKind?: CommentAnchorKind | null;
   status?: CommentStatus | null;
   afterSequence?: number | null;
   limit?: number | null;
 };
 
 export type UpdateCommentStatusInput = {
-  sessionId?: string | null;
+  sessionId: string;
   threadId: string;
   status: CommentStatus;
   clientMutationId?: string | null;
@@ -53,8 +41,9 @@ export type UpdateCommentStatusInput = {
 };
 
 export type CommentThreadMutationResult = {
-  thread: MessageCommentThread | LibraryFileCommentThread;
+  thread: MessageCommentThread;
   idempotent: boolean;
+  changed: boolean;
 };
 
 export type CommentReplyMutationResult = CommentThreadMutationResult & {
@@ -62,7 +51,7 @@ export type CommentReplyMutationResult = CommentThreadMutationResult & {
 };
 
 export type ListCommentThreadsResult = {
-  threads: (MessageCommentThread | LibraryFileCommentThread)[];
+  threads: MessageCommentThread[];
   hasMore: boolean;
 };
 
@@ -74,7 +63,7 @@ export const COMMENT_LIMIT_EXCEEDED = 'COMMENT_LIMIT_EXCEEDED';
 export class CommentNotFoundError extends Error {
   readonly code = COMMENT_NOT_FOUND;
 
-  constructor(readonly resource: 'Chat session' | 'Message' | 'Comment thread' | 'Library file') {
+  constructor(readonly resource: 'Chat session' | 'Message' | 'Comment thread') {
     super(`${resource} not found`);
     this.name = 'CommentNotFoundError';
   }

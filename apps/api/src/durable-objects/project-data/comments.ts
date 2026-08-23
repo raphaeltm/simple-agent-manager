@@ -1,10 +1,5 @@
-import type {
-  LibraryFileCommentThread,
-  MessageCommentReply,
-  MessageCommentThread,
-} from '@simple-agent-manager/shared';
+import type { MessageCommentReply, MessageCommentThread } from '@simple-agent-manager/shared';
 import {
-  COMMENT_ANCHOR_KINDS,
   COMMENT_STATUSES,
   DEFAULT_COMMENT_BODY_MAX_LENGTH,
   DEFAULT_COMMENT_IDEMPOTENCY_KEY_MAX_LENGTH,
@@ -31,18 +26,10 @@ import {
   CommentValidationError,
   type CreateCommentReplyInput,
   type CreateCommentThreadInput,
-  type CreateFileCommentThreadInput,
   type ListCommentThreadsInput,
   type ListCommentThreadsResult,
   type UpdateCommentStatusInput,
 } from './comment-contracts';
-
-export type InternalCommentThreadMutationResult = CommentThreadMutationResult & {
-  changed: boolean;
-};
-export type InternalCommentReplyMutationResult = CommentReplyMutationResult & {
-  changed: boolean;
-};
 import { parseRow } from './row-schemas';
 import type { Env } from './types';
 import { generateId } from './types';
@@ -65,7 +52,6 @@ export type {
   CommentThreadMutationResult,
   CreateCommentReplyInput,
   CreateCommentThreadInput,
-  CreateFileCommentThreadInput,
   ListCommentThreadsInput,
   ListCommentThreadsResult,
   UpdateCommentStatusInput,
@@ -83,10 +69,8 @@ type CommentLimits = {
 
 const ThreadRowSchema = v.object({
   id: v.string(),
-  anchor_kind: v.picklist([...COMMENT_ANCHOR_KINDS]),
-  session_id: v.nullable(v.string()),
-  message_id: v.nullable(v.string()),
-  file_id: v.nullable(v.string()),
+  session_id: v.string(),
+  message_id: v.string(),
   quote: v.nullable(v.string()),
   body: v.string(),
   author_type: v.picklist(['human', 'agent']),
@@ -115,7 +99,7 @@ const ThreadRowSchema = v.object({
 const ReplyRowSchema = v.object({
   id: v.string(),
   thread_id: v.string(),
-  session_id: v.nullable(v.string()),
+  session_id: v.string(),
   body: v.string(),
   author_type: v.picklist(['human', 'agent']),
   author_id: v.string(),
@@ -241,16 +225,6 @@ function nextThreadSequence(sql: SqlStorage, sessionId: string): number {
   return (typeof row?.max_sequence === 'number' ? row.max_sequence : 0) + 1;
 }
 
-function nextFileThreadSequence(sql: SqlStorage, fileId: string): number {
-  const row = sql
-    .exec(
-      'SELECT COALESCE(MAX(sequence), 0) AS max_sequence FROM comment_threads WHERE file_id = ?',
-      fileId
-    )
-    .toArray()[0];
-  return (typeof row?.max_sequence === 'number' ? row.max_sequence : 0) + 1;
-}
-
 function nextReplySequence(sql: SqlStorage, threadId: string): number {
   const row = sql
     .exec(
@@ -267,7 +241,7 @@ function actorFromColumns(
   name: string | null
 ): CommentActor | null {
   if (!kind || !id) return null;
-  return { kind, id, name: name ?? undefined };
+  return { kind, id, name };
 }
 
 function mapReply(row: unknown): MessageCommentReply {
@@ -275,8 +249,8 @@ function mapReply(row: unknown): MessageCommentReply {
   return {
     id: r.id,
     threadId: r.thread_id,
-    sessionId: r.session_id ?? undefined,
-    author: { kind: r.author_type, id: r.author_id, name: r.author_name ?? undefined },
+    sessionId: r.session_id,
+    author: { kind: r.author_type, id: r.author_id, name: r.author_name },
     body: r.body,
     createdAt: r.created_at,
     sequence: r.sequence,
@@ -284,14 +258,16 @@ function mapReply(row: unknown): MessageCommentReply {
   };
 }
 
-export type AnyCommentThread = MessageCommentThread | LibraryFileCommentThread;
-
-function mapThreadFromParsed(
-  r: ThreadRow,
-  replies: MessageCommentReply[]
-): AnyCommentThread {
-  const common = {
+function mapThread(row: unknown, replies: MessageCommentReply[]): MessageCommentThread {
+  const r = parseRow(ThreadRowSchema, row, 'comment_thread');
+  return {
     id: r.id,
+    sessionId: r.session_id,
+    anchor: {
+      kind: 'message',
+      messageId: r.message_id,
+      quote: r.quote,
+    },
     author: { kind: r.author_type, id: r.author_id, name: r.author_name },
     body: r.body,
     status: r.status,
@@ -300,32 +276,15 @@ function mapThreadFromParsed(
     sequence: r.sequence,
     version: r.version,
     clientMutationId: r.client_mutation_id,
+    sentAt: r.sent_at,
+    sentBy: actorFromColumns(r.sent_by_type, r.sent_by_id, r.sent_by_name),
     resolvedAt: r.resolved_at,
     resolvedBy: actorFromColumns(r.resolved_by_type, r.resolved_by_id, r.resolved_by_name),
     reopenedAt: r.reopened_at,
     reopenedBy: actorFromColumns(r.reopened_by_type, r.reopened_by_id, r.reopened_by_name),
     replies,
-  } as const;
-
-  if (r.anchor_kind === 'library_file') {
-    const fileId = r.file_id ?? '';
-    return {
-      ...common,
-      fileId,
-      anchor: { kind: 'library_file', fileId, quote: r.quote },
-    } satisfies LibraryFileCommentThread;
-  }
-
-  return {
-    ...common,
-    sessionId: r.session_id ?? '',
-    anchor: { kind: 'message', messageId: r.message_id ?? '', quote: r.quote },
-    sentAt: r.sent_at,
-    sentBy: actorFromColumns(r.sent_by_type, r.sent_by_id, r.sent_by_name),
-  } satisfies MessageCommentThread;
+  };
 }
-
-
 
 function readReplies(sql: SqlStorage, threadIds: string[]): Map<string, MessageCommentReply[]> {
   const byThread = new Map<string, MessageCommentReply[]>();
@@ -359,20 +318,19 @@ function readReplies(sql: SqlStorage, threadIds: string[]): Map<string, MessageC
   return byThread;
 }
 
-const THREAD_SELECT_COLUMNS = `id, anchor_kind, session_id, message_id, file_id, quote, body,
-       author_type, author_id, author_name, status, created_at, updated_at, sequence, version,
-       client_mutation_id, sent_at, sent_by_type, sent_by_id, sent_by_name,
-       resolved_at, resolved_by_type, resolved_by_id, resolved_by_name,
-       reopened_at, reopened_by_type, reopened_by_id, reopened_by_name`;
-
-function readThreadRowsByIds(sql: SqlStorage, threadIds: string[]): ThreadRow[] {
+function readThreadRows(sql: SqlStorage, sessionId: string, threadIds: string[]): ThreadRow[] {
   if (threadIds.length === 0) return [];
   const placeholders = threadIds.map(() => '?').join(', ');
   const rows = sql
     .exec(
-      `SELECT ${THREAD_SELECT_COLUMNS}
+      `SELECT id, session_id, message_id, quote, body, author_type, author_id, author_name,
+              status, created_at, updated_at, sequence, version, client_mutation_id,
+              sent_at, sent_by_type, sent_by_id, sent_by_name,
+              resolved_at, resolved_by_type, resolved_by_id, resolved_by_name,
+              reopened_at, reopened_by_type, reopened_by_id, reopened_by_name
        FROM comment_threads
-       WHERE id IN (${placeholders})`,
+       WHERE session_id = ? AND id IN (${placeholders})`,
+      sessionId,
       ...threadIds
     )
     .toArray();
@@ -384,6 +342,7 @@ function readThreadRowsByIds(sql: SqlStorage, threadIds: string[]): ThreadRow[] 
     } catch (err) {
       log.warn('comments.thread_row_skipped', {
         rowId: typeof row.id === 'string' ? row.id : null,
+        sessionId,
         error: String(err),
       });
     }
@@ -391,7 +350,11 @@ function readThreadRowsByIds(sql: SqlStorage, threadIds: string[]): ThreadRow[] 
   return parsed;
 }
 
-function hydrateThreads(sql: SqlStorage, rows: unknown[]): AnyCommentThread[] {
+function hydrateThreads(
+  sql: SqlStorage,
+  sessionId: string,
+  rows: unknown[]
+): MessageCommentThread[] {
   const parsedRows: ThreadRow[] = [];
   for (const row of rows) {
     try {
@@ -400,6 +363,7 @@ function hydrateThreads(sql: SqlStorage, rows: unknown[]): AnyCommentThread[] {
       const record = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
       log.warn('comments.thread_row_skipped', {
         rowId: typeof record.id === 'string' ? record.id : null,
+        sessionId,
         error: String(err),
       });
     }
@@ -409,18 +373,18 @@ function hydrateThreads(sql: SqlStorage, rows: unknown[]): AnyCommentThread[] {
     sql,
     parsedRows.map((row) => row.id)
   );
-  return parsedRows.map((row) => mapThreadFromParsed(row, replies.get(row.id) ?? []));
+  return parsedRows.map((row) => mapThread(row, replies.get(row.id) ?? []));
 }
 
 export function getCommentThread(
   sql: SqlStorage,
+  sessionId: string,
   threadId: string
-): AnyCommentThread | null {
-  const rows = readThreadRowsByIds(sql, [threadId]);
-  const row = rows[0];
-  if (!row) return null;
+): MessageCommentThread | null {
+  const rows = readThreadRows(sql, sessionId, [threadId]);
+  if (rows.length === 0) return null;
   const replies = readReplies(sql, [threadId]);
-  return mapThreadFromParsed(row, replies.get(threadId) ?? []);
+  return mapThread(rows[0], replies.get(threadId) ?? []);
 }
 
 export function listCommentThreads(
@@ -428,32 +392,16 @@ export function listCommentThreads(
   env: Env,
   input: ListCommentThreadsInput
 ): ListCommentThreadsResult {
+  ensureSession(sql, input.sessionId);
   const limit = resolveCommentListLimit(env, input.limit);
-  const conditions: string[] = [];
-  const params: Array<string | number> = [];
+  const conditions = ['session_id = ?'];
+  const params: Array<string | number> = [input.sessionId];
 
-  if (input.anchorKind) {
-    conditions.push('anchor_kind = ?');
-    params.push(input.anchorKind);
+  if (input.messageId) {
+    ensureMessageAnchor(sql, input.sessionId, input.messageId);
+    conditions.push('message_id = ?');
+    params.push(input.messageId);
   }
-
-  if (input.sessionId) {
-    ensureSession(sql, input.sessionId);
-    conditions.push('session_id = ?');
-    params.push(input.sessionId);
-
-    if (input.messageId) {
-      ensureMessageAnchor(sql, input.sessionId, input.messageId);
-      conditions.push('message_id = ?');
-      params.push(input.messageId);
-    }
-  }
-
-  if (input.fileId) {
-    conditions.push('file_id = ?');
-    params.push(input.fileId);
-  }
-
   if (input.status) {
     conditions.push('status = ?');
     params.push(input.status);
@@ -463,10 +411,14 @@ export function listCommentThreads(
     params.push(input.afterSequence);
   }
 
-  const whereClause = conditions.length > 0 ? conditions.join(' AND ') : '1=1';
+  const whereClause = conditions.join(' AND ');
   const rows = sql
     .exec(
-      `SELECT ${THREAD_SELECT_COLUMNS}
+      `SELECT id, session_id, message_id, quote, body, author_type, author_id, author_name,
+              status, created_at, updated_at, sequence, version, client_mutation_id,
+              sent_at, sent_by_type, sent_by_id, sent_by_name,
+              resolved_at, resolved_by_type, resolved_by_id, resolved_by_name,
+              reopened_at, reopened_by_type, reopened_by_id, reopened_by_name
        FROM comment_threads
        WHERE ${whereClause}
        ORDER BY sequence ASC
@@ -478,7 +430,7 @@ export function listCommentThreads(
 
   const hasMore = rows.length > limit;
   return {
-    threads: hydrateThreads(sql, hasMore ? rows.slice(0, limit) : rows),
+    threads: hydrateThreads(sql, input.sessionId, hasMore ? rows.slice(0, limit) : rows),
     hasMore,
   };
 }
@@ -487,7 +439,7 @@ export function createCommentThread(
   sql: SqlStorage,
   env: Env,
   input: CreateCommentThreadInput
-): InternalCommentThreadMutationResult {
+): CommentThreadMutationResult {
   const limits = resolveCommentLimits(env);
   const actor = normalizeActor(input.actor);
   const body = normalizeBody(input.body, limits);
@@ -520,7 +472,7 @@ export function createCommentThread(
       if (existing.client_mutation_fingerprint !== requestFingerprint) {
         throw new CommentIdempotencyConflictError();
       }
-      const thread = getCommentThread(sql, String(existing.id));
+      const thread = getCommentThread(sql, input.sessionId, String(existing.id));
       if (!thread) throw new CommentNotFoundError('Comment thread');
       return { thread, idempotent: true, changed: false };
     }
@@ -559,84 +511,7 @@ export function createCommentThread(
     clientMutationId ? requestFingerprint : null
   );
 
-  const thread = getCommentThread(sql, id);
-  if (!thread) throw new CommentNotFoundError('Comment thread');
-  return { thread, idempotent: false, changed: true };
-}
-
-export function createFileCommentThread(
-  sql: SqlStorage,
-  env: Env,
-  input: CreateFileCommentThreadInput
-): InternalCommentThreadMutationResult {
-  const limits = resolveCommentLimits(env);
-  const actor = normalizeActor(input.actor);
-  const body = normalizeBody(input.body, limits);
-  const quote = normalizeQuote(input.quote, limits);
-  const clientMutationId = normalizeClientMutationId(input.clientMutationId, limits);
-  const requestFingerprint = fingerprint([
-    'thread',
-    input.fileId,
-    body,
-    quote,
-    actor.kind,
-    actor.id,
-  ]);
-
-  if (clientMutationId) {
-    const existing = sql
-      .exec(
-        `SELECT id, client_mutation_fingerprint
-         FROM comment_threads
-         WHERE file_id = ? AND client_mutation_id = ?
-         LIMIT 1`,
-        input.fileId,
-        clientMutationId
-      )
-      .toArray()[0];
-    if (existing) {
-      if (existing.client_mutation_fingerprint !== requestFingerprint) {
-        throw new CommentIdempotencyConflictError();
-      }
-      const thread = getCommentThread(sql, String(existing.id));
-      if (!thread) throw new CommentNotFoundError('Comment thread');
-      return { thread, idempotent: true, changed: false };
-    }
-  }
-
-  const countRow = sql
-    .exec('SELECT COUNT(*) AS count FROM comment_threads WHERE file_id = ?', input.fileId)
-    .toArray()[0];
-  if ((typeof countRow?.count === 'number' ? countRow.count : 0) >= limits.threadsPerSessionMax) {
-    throw new CommentLimitExceededError(
-      `file comment thread limit of ${limits.threadsPerSessionMax} reached`
-    );
-  }
-
-  const id = generateId();
-  const now = Date.now();
-  const sequence = nextFileThreadSequence(sql, input.fileId);
-  sql.exec(
-    `INSERT INTO comment_threads
-       (id, anchor_kind, file_id, quote, body, author_type, author_id, author_name,
-        status, created_at, updated_at, sequence, version, client_mutation_id,
-        client_mutation_fingerprint)
-     VALUES (?, 'library_file', ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, 1, ?, ?)`,
-    id,
-    input.fileId,
-    quote,
-    body,
-    actor.kind,
-    actor.id,
-    actor.name,
-    now,
-    now,
-    sequence,
-    clientMutationId,
-    clientMutationId ? requestFingerprint : null
-  );
-
-  const thread = getCommentThread(sql, id);
+  const thread = getCommentThread(sql, input.sessionId, id);
   if (!thread) throw new CommentNotFoundError('Comment thread');
   return { thread, idempotent: false, changed: true };
 }
@@ -645,14 +520,14 @@ export function createCommentReply(
   sql: SqlStorage,
   env: Env,
   input: CreateCommentReplyInput
-): InternalCommentReplyMutationResult {
+): CommentReplyMutationResult {
   const limits = resolveCommentLimits(env);
   const actor = normalizeActor(input.actor);
   const body = normalizeBody(input.body, limits);
   const clientMutationId = normalizeClientMutationId(input.clientMutationId, limits);
   const requestFingerprint = fingerprint(['reply', input.threadId, body, actor.kind, actor.id]);
 
-  const thread = getCommentThread(sql, input.threadId);
+  const thread = getCommentThread(sql, input.sessionId, input.threadId);
   if (!thread) throw new CommentNotFoundError('Comment thread');
 
   if (clientMutationId) {
@@ -670,7 +545,7 @@ export function createCommentReply(
       if (existing.client_mutation_fingerprint !== requestFingerprint) {
         throw new CommentIdempotencyConflictError();
       }
-      const authoritative = getCommentThread(sql, input.threadId);
+      const authoritative = getCommentThread(sql, input.sessionId, input.threadId);
       const reply = authoritative?.replies.find((candidate) => candidate.id === existing.id);
       if (!authoritative || !reply) throw new CommentNotFoundError('Comment thread');
       return { thread: authoritative, reply, idempotent: true, changed: false };
@@ -696,7 +571,7 @@ export function createCommentReply(
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     input.threadId,
-    input.sessionId ?? null,
+    input.sessionId,
     body,
     actor.kind,
     actor.id,
@@ -709,12 +584,13 @@ export function createCommentReply(
   sql.exec(
     `UPDATE comment_threads
      SET updated_at = ?, version = version + 1
-     WHERE id = ?`,
+     WHERE id = ? AND session_id = ?`,
     now,
-    input.threadId
+    input.threadId,
+    input.sessionId
   );
 
-  const authoritative = getCommentThread(sql, input.threadId);
+  const authoritative = getCommentThread(sql, input.sessionId, input.threadId);
   const reply = authoritative?.replies.find((candidate) => candidate.id === id);
   if (!authoritative || !reply) throw new CommentNotFoundError('Comment thread');
   return { thread: authoritative, reply, idempotent: false, changed: true };
@@ -724,7 +600,7 @@ export function updateCommentThreadStatus(
   sql: SqlStorage,
   env: Env,
   input: UpdateCommentStatusInput
-): InternalCommentThreadMutationResult {
+): CommentThreadMutationResult {
   const limits = resolveCommentLimits(env);
   const actor = normalizeActor(input.actor);
   const clientMutationId = normalizeClientMutationId(input.clientMutationId, limits);
@@ -732,7 +608,7 @@ export function updateCommentThreadStatus(
     throw new CommentValidationError('status must be open, sent, or resolved');
   }
 
-  const current = getCommentThread(sql, input.threadId);
+  const current = getCommentThread(sql, input.sessionId, input.threadId);
   if (!current) throw new CommentNotFoundError('Comment thread');
 
   if (clientMutationId) {
@@ -761,44 +637,47 @@ export function updateCommentThreadStatus(
         `UPDATE comment_threads
          SET status = 'sent', sent_at = ?, sent_by_type = ?, sent_by_id = ?, sent_by_name = ?,
              updated_at = ?, version = version + 1
-         WHERE id = ?`,
+         WHERE id = ? AND session_id = ?`,
         now,
         actor.kind,
         actor.id,
         actor.name,
         now,
-        input.threadId
+        input.threadId,
+        input.sessionId
       );
     } else if (input.status === 'resolved') {
       sql.exec(
         `UPDATE comment_threads
          SET status = 'resolved', resolved_at = ?, resolved_by_type = ?, resolved_by_id = ?,
              resolved_by_name = ?, updated_at = ?, version = version + 1
-         WHERE id = ?`,
+         WHERE id = ? AND session_id = ?`,
         now,
         actor.kind,
         actor.id,
         actor.name,
         now,
-        input.threadId
+        input.threadId,
+        input.sessionId
       );
     } else {
       sql.exec(
         `UPDATE comment_threads
          SET status = 'open', reopened_at = ?, reopened_by_type = ?, reopened_by_id = ?,
              reopened_by_name = ?, updated_at = ?, version = version + 1
-         WHERE id = ?`,
+         WHERE id = ? AND session_id = ?`,
         now,
         actor.kind,
         actor.id,
         actor.name,
         now,
-        input.threadId
+        input.threadId,
+        input.sessionId
       );
     }
   }
 
-  const authoritative = getCommentThread(sql, input.threadId);
+  const authoritative = getCommentThread(sql, input.sessionId, input.threadId);
   if (!authoritative) throw new CommentNotFoundError('Comment thread');
 
   if (clientMutationId) {
@@ -807,7 +686,7 @@ export function updateCommentThreadStatus(
          (thread_id, session_id, client_mutation_id, target_status, thread_version, created_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
       input.threadId,
-      input.sessionId ?? null,
+      input.sessionId,
       clientMutationId,
       input.status,
       authoritative.version,
