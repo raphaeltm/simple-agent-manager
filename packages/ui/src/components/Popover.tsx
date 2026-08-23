@@ -18,6 +18,12 @@ export interface PopoverProps {
   role?: 'dialog' | 'menu';
   'aria-label'?: string;
   className?: string;
+  /**
+   * Stacking layer utility class. Defaults to the dropdown layer, which sits
+   * BELOW dialogs — a popover opened from inside a modal must raise this or the
+   * modal's own content will intercept its clicks.
+   */
+  layerClassName?: string;
 }
 
 const POPOVER_GUTTER = 8;
@@ -53,6 +59,7 @@ export function Popover({
   role = 'dialog',
   'aria-label': ariaLabel,
   className = '',
+  layerClassName = 'z-dropdown',
 }: PopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const [style, setStyle] = useState<CSSProperties>({});
@@ -84,7 +91,7 @@ export function Popover({
       ref={popoverRef}
       role={role}
       aria-label={ariaLabel}
-      className={`fixed z-dropdown rounded-md border border-border-default bg-surface text-fg-primary shadow-lg ${className}`}
+      className={`fixed ${layerClassName} rounded-md border border-border-default bg-surface text-fg-primary shadow-lg ${className}`}
       style={style}
     >
       {children}

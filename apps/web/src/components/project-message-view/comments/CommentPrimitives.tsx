@@ -89,7 +89,16 @@ export function SelectionPopover({
   onComment: () => void;
 }) {
   return (
-    <Popover open anchorPoint={{ x, y }} side="top" aria-label="Comment on selection">
+    // z-panel, matching SelectionActionBar: these two are alternates of the same
+    // control and must share a layer. The default dropdown layer sits below
+    // dialogs, which left this popover unclickable inside the file preview modal.
+    <Popover
+      open
+      anchorPoint={{ x, y }}
+      side="top"
+      layerClassName="z-panel"
+      aria-label="Comment on selection"
+    >
       <button
         type="button"
         onMouseDown={(event) => event.preventDefault()}
