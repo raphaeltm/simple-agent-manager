@@ -183,9 +183,11 @@ async function setupMocks(page: Page, opts: {
       return route.fulfill({ json: { tasks: [] } });
     }
 
-    // GitHub installations
+    // GitHub installations. Non-empty on purpose — see the onboarding note below.
     if (path === '/api/github/installations') {
-      return route.fulfill({ json: [] });
+      return route.fulfill({
+        json: [{ id: 'inst-1', accountLogin: 'testuser', accountType: 'User' }],
+      });
     }
 
     // Notifications
@@ -209,14 +211,32 @@ async function setupMocks(page: Page, opts: {
       return route.fulfill({ json: [] });
     }
 
-    // Credentials. The two endpoints have DIFFERENT shapes and the difference is
-    // load-bearing: `listCredentials()` (apps/web/src/lib/api/credentials.ts) returns a
-    // bare `CredentialResponse[]`, which `hasByocComputeCredential` calls `.some()` on.
-    // Serving the agent-credential envelope here made that throw, the ErrorBoundary
-    // replaced the entire page, and every test in this file failed no matter what it
-    // asserted. Keep the exact path check before the prefix check.
+    // Credentials. Two things matter here, and both were previously wrong.
+    //
+    // 1. The two endpoints have DIFFERENT shapes, and the difference is load-bearing:
+    //    `listCredentials()` (apps/web/src/lib/api/credentials.ts) returns a bare
+    //    `CredentialResponse[]`, which `hasByocComputeCredential` calls `.some()` on.
+    //    Serving the agent-credential envelope here made that throw and the
+    //    ErrorBoundary replaced the whole page. Keep the exact checks before the prefix.
+    //
+    // 2. These responses must satisfy `useSetupStatus`'s
+    //    `isComplete = hasAgent && hasCloud && hasGitHub`. When it is false,
+    //    `OnboardingProvider` auto-opens `ChoosePathWizard`, which `AppShell` mounts on
+    //    every authenticated page as a modal overlay that intercepts pointer events — so
+    //    every `page.click` in this file times out on a dialog it never mentions.
     if (path === '/api/credentials') {
-      return route.fulfill({ json: [] });
+      return route.fulfill({
+        json: [{ id: 'cred-1', provider: 'hetzner', name: 'Test Hetzner', isActive: true }],
+      });
+    }
+    if (path === '/api/credentials/agent') {
+      return route.fulfill({
+        json: {
+          credentials: [
+            { agentType: 'claude-code', credentialKind: 'api-key', isActive: true },
+          ],
+        },
+      });
     }
     if (path.startsWith('/api/credentials')) {
       return route.fulfill({ json: { credentials: [] } });

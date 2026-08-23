@@ -140,9 +140,11 @@ describe('MCP instruction context handlers', () => {
 
     const directives = String(payload.policyDirectives);
     expect(directives).toContain('(task-scoped, expires 2026-09-15)');
-    // The annotation must sit on the title line with the policy it describes.
+    // The annotation must sit on the title line with the policy it describes, AND coexist
+    // with the policy id that update_policy/remove_policy need in order to address the row
+    // (added by the get_instructions payload-reduction change this branch rebased onto).
     expect(directives).toContain(
-      '- **Use profile X for the reliability wave** (task-scoped, expires 2026-09-15): Applies to the 2026-08-21 workstream only.'
+      '- **Use profile X for the reliability wave** (task-scoped, expires 2026-09-15) (id: policy-2): Applies to the 2026-08-21 workstream only.'
     );
   });
 
