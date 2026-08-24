@@ -421,7 +421,7 @@ describe('ProjectData durable prompt delivery', () => {
     expect(sideEffect).not.toHaveBeenCalled();
   });
 
-  it('fails a queued parent wake when a child was reparented after enqueue', async () => {
+  it('allows a queued parent wake when a child was reparented inside the same project', async () => {
     acceptPromptDelivery(
       sql,
       {},
@@ -454,6 +454,55 @@ describe('ProjectData durable prompt delivery', () => {
                   status: 'completed',
                   chat_session_id: 'child-chat-1',
                   parent_task_id: 'other-parent',
+                },
+              ],
+            }),
+          })),
+        })),
+      },
+    } as never;
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>().mockResolvedValue({
+      kind: 'accepted',
+      acpSessionId: 'acp-1',
+      promptEpoch: Date.now(),
+      runtimeIdentity: 'runtime-1',
+      capabilities,
+      receipt: null,
+    });
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim!, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({ kind: 'accepted' });
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails a queued parent wake when a child is no longer in the project', async () => {
+    acceptPromptDelivery(
+      sql,
+      {},
+      {
+        deliveryId: 'parent-wake-missing-child',
+        targetSessionId: 'chat-1',
+        displayContent: 'trusted wake',
+        sourceTaskId: 'parent-task-1',
+        senderType: 'system',
+        sourceKind: 'parent_wakeup',
+        metadata: { waitId: 'wait-1', childTaskIds: ['child-task-1'] },
+      },
+      Date.now()
+    );
+    const [claim] = claimDuePromptDeliveries(sql, config, Date.now());
+    const env = {
+      DATABASE: {
+        prepare: vi.fn(() => ({
+          bind: vi.fn(() => ({
+            all: vi.fn().mockResolvedValue({
+              results: [
+                {
+                  id: 'parent-task-1',
+                  status: 'in_progress',
+                  chat_session_id: 'chat-1',
+                  parent_task_id: null,
                 },
               ],
             }),

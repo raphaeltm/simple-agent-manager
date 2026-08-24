@@ -61,7 +61,7 @@ async function invalidParentWakeTargetResult(
     return {
       kind: 'failed',
       reason: 'terminal_target',
-      error: 'Parent wake has no valid child-lineage identity',
+      error: 'Parent wake has no valid child task identity',
       runtimeIdentity: claim.message.runtimeIdentity,
       capabilities: null,
     };
@@ -69,7 +69,7 @@ async function invalidParentWakeTargetResult(
   const taskIds = [claim.message.sourceTaskId, ...childTaskIds];
   const placeholders = taskIds.map(() => '?').join(', ');
   const response = await env.DATABASE.prepare(
-    `SELECT id, status, chat_session_id, parent_task_id,
+    `SELECT id, status, chat_session_id,
             recovery_source_task_id, triggered_by
      FROM tasks
      WHERE project_id = ?
@@ -87,7 +87,6 @@ async function invalidParentWakeTargetResult(
       id: string;
       status: string;
       chat_session_id: string | null;
-      parent_task_id: string | null;
       recovery_source_task_id: string | null;
       triggered_by: string;
     }>();
@@ -117,14 +116,12 @@ async function invalidParentWakeTargetResult(
       capabilities: null,
     };
   }
-  const invalidChildId = childTaskIds.find(
-    (childTaskId) => tasks.get(childTaskId)?.parent_task_id !== claim.message.sourceTaskId
-  );
+  const invalidChildId = childTaskIds.find((childTaskId) => !tasks.has(childTaskId));
   if (invalidChildId) {
     return {
       kind: 'failed',
       reason: 'terminal_target',
-      error: `Child task lineage changed before parent wake (${invalidChildId})`,
+      error: `Child task is no longer in this project before parent wake (${invalidChildId})`,
       runtimeIdentity: claim.message.runtimeIdentity,
       capabilities: null,
     };

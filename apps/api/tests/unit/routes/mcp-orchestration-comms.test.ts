@@ -159,7 +159,7 @@ describe('MCP Orchestration Communication Tools', () => {
       expect(result.error?.message).toContain('message is required');
     });
 
-    it('should reject when child task is not found', async () => {
+    it('should reject when target task is not found', async () => {
       mockD1ResultSequence([[]]);
 
       const result = await handleSendMessageToSubtask(
@@ -170,10 +170,10 @@ describe('MCP Orchestration Communication Tools', () => {
       );
 
       expect(result.error).toBeDefined();
-      expect(result.error?.message).toContain('Child task not found');
+      expect(result.error?.message).toContain('Target task not found');
     });
 
-    it('should reject when caller is not the direct parent', async () => {
+    it('should deliver when caller is a same-project sibling rather than the direct parent', async () => {
       mockD1ResultSequence([
         [
           {
@@ -182,6 +182,19 @@ describe('MCP Orchestration Communication Tools', () => {
             workspace_id: 'ws-child-001',
             project_id: 'proj-001',
             parent_task_id: 'some-other-task',
+          },
+        ],
+        [
+          {
+            id: 'ws-child-001',
+            node_id: 'node-001',
+            chat_session_id: 'chat-child-001',
+            status: 'running',
+          },
+        ],
+        [
+          {
+            id: 'agent-session-001',
           },
         ],
       ]);
@@ -193,8 +206,16 @@ describe('MCP Orchestration Communication Tools', () => {
         mockEnv as Env
       );
 
-      expect(result.error).toBeDefined();
-      expect(result.error?.message).toContain('direct parent');
+      expect(result.error).toBeUndefined();
+      expect(mockSendPromptToAgentOnNode).toHaveBeenCalledWith(
+        'node-001',
+        'ws-child-001',
+        'agent-session-001',
+        'hello',
+        mockEnv,
+        'user-001',
+        'persisted-msg-001'
+      );
     });
 
     it('should reject when child task is in a terminal status', async () => {

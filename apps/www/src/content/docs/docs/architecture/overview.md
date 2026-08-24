@@ -261,7 +261,7 @@ When a sleeping VM conversation needs a replacement runtime, one D1 transaction 
 
 ProjectData also owns the single durable prompt-delivery queue used by browser followups and agent handoffs. Acceptance persists the visible transcript message and its stable delivery identity before runtime I/O. Alarm-driven attempts use bounded exponential backoff, a finite lifetime, compare-and-set attempt tokens, and stable VM receipts. A lost response is reconciled before retry; if receipt evidence is unavailable or belongs to another runtime, the delivery becomes explicitly ambiguous and is not replayed.
 
-Checkpoint episodes are stored idempotently by ACP session and prompt epoch, including state transitions, attempt/error metadata, and a progress envelope for inspection. Automatic long-turn selection and checkpoint preemption remain disabled. Task agents can explicitly park on a bounded `wait_for_subtasks` subscription: ProjectData reconciles direct-child terminal state and enqueues one immutable parent wake through the existing durable prompt-delivery queue. See [Configuration](/docs/reference/configuration/) for the durable-execution settings and rollout flags.
+Checkpoint episodes are stored idempotently by ACP session and prompt epoch, including state transitions, attempt/error metadata, and a progress envelope for inspection. Automatic long-turn selection and checkpoint preemption remain disabled. Task agents can explicitly park on a bounded `wait_for_subtasks` subscription: ProjectData reconciles selected same-project task terminal state and enqueues one immutable caller wake through the existing durable prompt-delivery queue. See [Configuration](/docs/reference/configuration/) for the durable-execution settings and rollout flags.
 
 **Embedded SQLite tables:**
 
@@ -276,7 +276,7 @@ Checkpoint episodes are stored idempotently by ACP session and prompt epoch, inc
 - `acp_sessions` — ACP session state machine with fork lineage
 - `acp_session_events` — ACP session state transition history
 - `task_wait_subscriptions` — idempotent bounded parent waits, immutable wake payloads, and retry state
-- `task_wait_children` — normalized direct-child observations for each durable wait
+- `task_wait_children` — normalized same-project task observations for each durable wait
 
 **Key features:**
 

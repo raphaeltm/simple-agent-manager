@@ -20,7 +20,6 @@ export interface TaskWaitSupervisorHooks {
 }
 
 interface D1TaskObservation extends taskWaits.TaskObservation {
-  parentTaskId: string | null;
   chatSessionId: string | null;
 }
 
@@ -72,7 +71,6 @@ function normalizeTaskRow(row: Record<string, unknown>): D1TaskObservation | nul
   return {
     taskId: row.id,
     status: row.status,
-    parentTaskId: typeof row.parent_task_id === 'string' ? row.parent_task_id : null,
     chatSessionId: typeof row.chat_session_id === 'string' ? row.chat_session_id : null,
   };
 }
@@ -88,7 +86,7 @@ async function loadTaskObservations(
     const chunk = taskIds.slice(offset, offset + D1_TASK_IDS_PER_QUERY);
     const placeholders = chunk.map(() => '?').join(', ');
     const result = await env.DATABASE.prepare(
-      `SELECT id, status, parent_task_id, chat_session_id
+      `SELECT id, status, chat_session_id
 		   FROM tasks
 		   WHERE project_id = ? AND id IN (${placeholders})`
     )
@@ -239,18 +237,6 @@ export async function processTaskWaits(
       continue;
     }
 
-    const lineageChanged = candidate.children.some((child) => {
-      const observation = observations.get(child.childTaskId);
-      return observation && observation.parentTaskId !== candidate.parentTaskId;
-    });
-    if (lineageChanged) {
-      const cancelled = hooks.transactionSync(() =>
-        taskWaits.cancelTaskWait(sql, candidate.id, 'child_lineage_changed', now)
-      );
-      if (cancelled) result.cancelled++;
-      continue;
-    }
-
     const refreshed = hooks.transactionSync(() =>
       taskWaits.recordTaskWaitObservations(
         sql,
@@ -306,18 +292,6 @@ export async function processTaskWaits(
         if (cancelled) result.cancelled++;
         continue;
       }
-      const latestLineageChanged = prepared.children.some((child) => {
-        const observation = latest.get(child.childTaskId);
-        return observation && observation.parentTaskId !== prepared.parentTaskId;
-      });
-      if (latestLineageChanged) {
-        const cancelled = hooks.transactionSync(() =>
-          taskWaits.cancelTaskWait(sql, prepared.id, 'child_lineage_changed', now)
-        );
-        if (cancelled) result.cancelled++;
-        continue;
-      }
-
       await hooks.acceptPromptDelivery({
         deliveryId: prepared.wakeDeliveryId,
         targetSessionId: prepared.parentSessionId,

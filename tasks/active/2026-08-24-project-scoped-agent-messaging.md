@@ -26,14 +26,14 @@ The product decision for this task is explicit: any active task agent in a proje
 
 ## Implementation checklist
 
-- [ ] Split shared MCP target resolution so non-destructive messaging uses a same-project active target check while destructive stop keeps direct-parent authorization.
-- [ ] Update `send_message_to_subtask` to allow same-project non-parent/sibling targets and preserve verified-token provenance (`sourceTaskId`, `senderId`, `userId`, metadata).
-- [ ] Update `send_durable_message` to allow same-project non-parent/sibling targets and preserve rate limits, size caps, mailbox limits, message class behavior, immediate-delivery fallback, and provenance.
-- [ ] Update `wait_for_subtasks` to allow same-project task IDs without direct-child lineage while preserving caller/session/wait registration checks.
-- [ ] Keep `stop_subtask`, `retry_subtask`, `remove_pending_subtask`, and `add_dependency` direct-parent/workflow restrictions unchanged.
-- [ ] Update MCP tool descriptions and API reference text from direct-child-only to project-scoped where applicable.
-- [ ] Add real-SQL authorization tests for same-project non-parent/sibling success, cross-project rejection, inactive/terminal target rejection, verified sender provenance, and parent-flow regression coverage.
-- [ ] Add regression tests proving destructive parent-only tools still reject non-parent/sibling callers.
+- [x] Split shared MCP target resolution so non-destructive messaging uses a same-project active target check while destructive stop keeps direct-parent authorization.
+- [x] Update `send_message_to_subtask` to allow same-project non-parent/sibling targets and preserve verified-token provenance (`sourceTaskId`, `senderId`, `userId`, metadata).
+- [x] Update `send_durable_message` to allow same-project non-parent/sibling targets and preserve rate limits, size caps, mailbox limits, message class behavior, immediate-delivery fallback, and provenance.
+- [x] Update `wait_for_subtasks` to allow same-project task IDs without direct-child lineage while preserving caller/session/wait registration checks.
+- [x] Keep `stop_subtask`, `retry_subtask`, `remove_pending_subtask`, and `add_dependency` direct-parent/workflow restrictions unchanged.
+- [x] Update MCP tool descriptions and API reference text from direct-child-only to project-scoped where applicable.
+- [x] Add real-SQL authorization tests for same-project non-parent/sibling success, cross-project rejection, inactive/terminal target rejection, verified sender provenance, and parent-flow regression coverage.
+- [x] Add regression tests proving destructive parent-only tools still reject non-parent/sibling callers.
 - [ ] Run focused tests, then the appropriate local quality suite.
 - [ ] Run required specialist reviews: security-auditor, cloudflare-specialist, test-engineer, task-completion-validator, and constitution-validator.
 - [ ] Create and push a focused PR. Do not deploy to staging and do not merge.
