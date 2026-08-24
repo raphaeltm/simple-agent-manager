@@ -32,7 +32,6 @@ import {
   type ListFileCommentThreadsResult,
   type ListProjectCommentThreadCandidatesPage,
   type ListProjectCommentThreadsInput,
-  type ProjectCommentThreadCandidate,
   type UpdateFileCommentStatusInput,
 } from './comment-contracts';
 import {
@@ -45,6 +44,7 @@ import {
   resolveCommentLimits,
   resolveCommentListLimit,
 } from './comment-normalization';
+import { parseProjectCommentThreadCandidates, restoreThreadOrder } from './comment-read-helpers';
 import { parseRow } from './row-schemas';
 import type { Env } from './types';
 import { generateId } from './types';
@@ -227,31 +227,6 @@ function hydrateThreads(sql: SqlStorage, rows: unknown[]): LibraryFileCommentThr
   return parsedRows.map((row) => mapThread(row, replies.get(row.id) ?? []));
 }
 
-function parseProjectFileThreadCandidates(rows: unknown[]): ProjectCommentThreadCandidate[] {
-  const candidates: ProjectCommentThreadCandidate[] = [];
-  for (const row of rows) {
-    try {
-      const parsed = parseRow(
-        ProjectFileThreadCandidateRowSchema,
-        row,
-        'project_file_comment_candidate'
-      );
-      candidates.push({
-        id: parsed.id,
-        updatedAt: parsed.updated_at,
-        estimatedBytes: Math.max(0, parsed.estimated_bytes),
-      });
-    } catch (err) {
-      const record = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
-      log.warn('library_file_comments.project_candidate_row_skipped', {
-        rowId: typeof record.id === 'string' ? record.id : null,
-        error: String(err),
-      });
-    }
-  }
-  return candidates;
-}
-
 /**
  * Reads a thread scoped to its file. The `file_id = ?` predicate is the
  * ownership guard: a thread id alone must never be enough to read or mutate a
@@ -377,7 +352,13 @@ export function listProjectFileCommentThreadCandidates(
     .toArray()[0];
 
   return {
-    candidates: parseProjectFileThreadCandidates(rows),
+    candidates: parseProjectCommentThreadCandidates(
+      rows,
+      ProjectFileThreadCandidateRowSchema,
+      'project_file_comment_candidate',
+      log,
+      'library_file_comments.project_candidate_row_skipped'
+    ),
     totalCount: typeof countRow?.count === 'number' ? countRow.count : 0,
   };
 }
@@ -401,11 +382,7 @@ export function hydrateProjectFileCommentThreads(
     .toArray();
 
   const hydrated = hydrateThreads(sql, rows);
-  const byId = new Map(hydrated.map((thread) => [thread.id, thread]));
-  return threadIds.flatMap((id) => {
-    const thread = byId.get(id);
-    return thread ? [thread] : [];
-  });
+  return restoreThreadOrder(threadIds, hydrated);
 }
 
 export function createFileCommentThread(

@@ -22,7 +22,6 @@ import {
   type ListProjectCommentThreadCandidatesPage,
   type ListProjectCommentThreadsInput,
   type ProjectCommentSessionTopic,
-  type ProjectCommentThreadCandidate,
   type UpdateCommentStatusInput,
 } from './comment-contracts';
 import {
@@ -35,6 +34,7 @@ import {
   resolveCommentLimits,
   resolveCommentListLimit,
 } from './comment-normalization';
+import { parseProjectCommentThreadCandidates, restoreThreadOrder } from './comment-read-helpers';
 import { parseRow } from './row-schemas';
 import type { Env } from './types';
 import { generateId } from './types';
@@ -336,27 +336,6 @@ export function listCommentThreads(
   };
 }
 
-function parseProjectThreadCandidates(rows: unknown[]): ProjectCommentThreadCandidate[] {
-  const candidates: ProjectCommentThreadCandidate[] = [];
-  for (const row of rows) {
-    try {
-      const parsed = parseRow(ProjectThreadCandidateRowSchema, row, 'project_comment_candidate');
-      candidates.push({
-        id: parsed.id,
-        updatedAt: parsed.updated_at,
-        estimatedBytes: Math.max(0, parsed.estimated_bytes),
-      });
-    } catch (err) {
-      const record = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
-      log.warn('comments.project_candidate_row_skipped', {
-        rowId: typeof record.id === 'string' ? record.id : null,
-        error: String(err),
-      });
-    }
-  }
-  return candidates;
-}
-
 /**
  * Every message-anchored thread in the project, newest activity first.
  *
@@ -414,7 +393,13 @@ export function listProjectCommentThreadCandidates(
     .toArray()[0];
 
   return {
-    candidates: parseProjectThreadCandidates(rows),
+    candidates: parseProjectCommentThreadCandidates(
+      rows,
+      ProjectThreadCandidateRowSchema,
+      'project_comment_candidate',
+      log,
+      'comments.project_candidate_row_skipped'
+    ),
     totalCount: typeof countRow?.count === 'number' ? countRow.count : 0,
   };
 }
@@ -439,11 +424,7 @@ export function hydrateProjectCommentThreads(
     .toArray();
 
   const hydrated = hydrateThreads(sql, rows);
-  const byId = new Map(hydrated.map((thread) => [thread.id, thread]));
-  return threadIds.flatMap((id) => {
-    const thread = byId.get(id);
-    return thread ? [thread] : [];
-  });
+  return restoreThreadOrder(threadIds, hydrated);
 }
 
 /**
