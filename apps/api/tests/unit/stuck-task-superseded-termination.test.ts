@@ -226,6 +226,40 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
     expect(statusOf(PREDECESSOR_ID).status).toBe('in_progress');
   });
 
+  /**
+   * The case that matters most, and the one the first ceiling fix got wrong:
+   * past the 24h ceiling with a still-LIVE successor. Terminalizing here would
+   * not merely mislabel a dead task — `cancelled` is a member of
+   * TERMINAL_TASK_STATUSES, so it revokes the recovery guard the live successor
+   * depends on, and `abortRevokedSourceTaskWake` turns that into stopping a
+   * running container. A superseded predecessor holds no compute (its workspace
+   * is already deleted), so the cost ceiling has nothing to bound.
+   */
+  it('preserves a superseded predecessor past the ceiling while its successor is live', async () => {
+    seedTask(PREDECESSOR_ID, { startedAt: iso(-30 * 60 * 60 * 1000) });
+    seedSuccessor('in_progress');
+
+    await recoverStuckTasks(env());
+
+    const row = statusOf(PREDECESSOR_ID);
+    expect(row.status).toBe('in_progress');
+    expect(row.error_message).toBeNull();
+  });
+
+  /** Bounded escape: the moment that successor ends, the ceiling cancels it. */
+  it('cancels the same predecessor once its successor finally ends', async () => {
+    seedTask(PREDECESSOR_ID, { startedAt: iso(-30 * 60 * 60 * 1000) });
+    seedSuccessor('in_progress');
+
+    await recoverStuckTasks(env());
+    expect(statusOf(PREDECESSOR_ID).status).toBe('in_progress');
+
+    sqlite.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`).run(SUCCESSOR_ID);
+    await recoverStuckTasks(env());
+
+    expect(statusOf(PREDECESSOR_ID).status).toBe('cancelled');
+  });
+
   /** The status event must record the same benign transition, not a failure. */
   it('appends a cancelled status event for the supersession', async () => {
     seedTask(PREDECESSOR_ID, { startedAt: iso(-6 * 60 * 60 * 1000) });

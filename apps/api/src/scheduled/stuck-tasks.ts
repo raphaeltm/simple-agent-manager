@@ -1076,7 +1076,6 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
           const executionMs = now.getTime() - startedAt;
           if (executionMs > maxExecutionMs) {
             if (executionMs > absoluteCeilingMs) {
-              isStuck = true;
               // The ceiling is a cost backstop: it still terminalizes unconditionally
               // and deliberately does NOT pay for a full liveness probe (no ACP /
               // container round-trips — a property pinned by
@@ -1099,11 +1098,31 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
                   error: err instanceof Error ? err.message : String(err),
                 });
               }
-              if (ceilingSupersession === 'none') {
-                reason = `Task exceeded the absolute runaway-cost ceiling of ${Math.round(absoluteCeilingMs / 60000)} minutes; live-runtime tasks are bounded to prevent unbounded compute.${stepInfo}`;
-              } else {
+              if (ceilingSupersession === 'live') {
+                // Preserve, do NOT terminalize. A superseded predecessor holds no
+                // compute at all — its workspace is already deleted — so the cost
+                // ceiling has nothing to bound here. Worse, `cancelled` is a member
+                // of TERMINAL_TASK_STATUSES, so terminalizing would revoke the
+                // recovery guard its LIVE successor still depends on, and
+                // `abortRevokedSourceTaskWake` turns that into stopping a running
+                // container. `'live'` is inconclusive everywhere else in the system
+                // and must be inconclusive here too.
+                // Bounded escape (`.claude/rules/47`): once the successor ends this
+                // reads `'terminal'` on the next tick and the task is cancelled.
+                log.info('stuck_task.ceiling_preserved_superseded', {
+                  taskId: task.id,
+                  projectId: task.project_id,
+                  executionMs,
+                  action: 'preserved',
+                });
+                break;
+              }
+              isStuck = true;
+              if (ceilingSupersession === 'terminal') {
                 supersededTermination = true;
                 reason = SUPERSEDED_TERMINATION_MESSAGE;
+              } else {
+                reason = `Task exceeded the absolute runaway-cost ceiling of ${Math.round(absoluteCeilingMs / 60000)} minutes; live-runtime tasks are bounded to prevent unbounded compute.${stepInfo}`;
               }
               break;
             }
