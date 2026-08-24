@@ -546,29 +546,6 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     label: 'GPT-5.3 Codex',
     ...OPENAI_CODEX_PREMIUM_PROFILE,
   }),
-  // GPT-5.2 Codex (deprecating Aug 10, 2026)
-  openAIModel({
-    id: 'gpt-5.2-codex',
-    label: 'GPT-5.2 Codex',
-    ...OPENAI_CODEX_PREMIUM_PROFILE,
-  }),
-  // GPT-5.1 Codex series (deprecating Jul 23, 2026)
-  openAIModel({
-    id: 'gpt-5.1-codex-max',
-    label: 'GPT-5.1 Codex Max',
-    ...OPENAI_CODEX_PREMIUM_PROFILE,
-  }),
-  openAIModel({
-    id: 'gpt-5.1-codex-mini',
-    label: 'GPT-5.1 Codex Mini',
-    tier: 'standard',
-    costPer1kInputTokens: 0.00075,
-    costPer1kOutputTokens: 0.0045,
-    contextWindow: 400000,
-    toolCallSupport: 'excellent',
-    intendedRole: 'workspace-agent',
-    fallbackGroup: 'openai-standard',
-  }),
   // GPT-5 Mini (deprecating Aug 10, 2026)
   openAIModel({
     id: 'gpt-5-mini',

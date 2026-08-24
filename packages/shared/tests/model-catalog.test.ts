@@ -35,7 +35,13 @@ describe('model-catalog', () => {
           'gpt-5.6-luna',
           'gpt-5.5-pro',
           'gpt-5.5',
+        ])
+      );
+      expect(groups[1]?.models.map((model) => model.id)).toEqual(
+        expect.arrayContaining([
           'gpt-5.4-pro',
+          'gpt-5.4',
+          'gpt-5.4-mini',
           'gpt-5.4-nano',
         ])
       );
@@ -44,25 +50,23 @@ describe('model-catalog', () => {
         groups.flatMap((group) => group.models).map((model) => [model.id, model.name])
       );
       expect(
-        groups
-          .find((group) => group.label === 'GPT-5.4 (Retires Aug 31, 2026)')
-          ?.models.map((model) => model.id)
-      ).toEqual(['gpt-5.4', 'gpt-5.4-mini']);
+        groups.find((group) => group.label === 'GPT-5.4 (Current)')?.models.map((model) => model.id)
+      ).toEqual(['gpt-5.4-pro', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano']);
       expect(
-        groups.find((group) => group.label === 'Codex (Deprecated)')?.models.map((model) => model.id)
-      ).toEqual(['gpt-5.3-codex', 'gpt-5.2-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini']);
+        groups.find((group) => group.label === 'Codex (Current)')?.models.map((model) => model.id)
+      ).toEqual(['gpt-5.3-codex']);
       expect(
         groups.find((group) => group.label === 'Deprecated')?.models.map((model) => model.id)
       ).toEqual(['o4-mini']);
       expect(
         groups.find((group) => group.label === 'GPT-5 (Previous)')?.models.map((model) => model.id)
       ).toEqual(['gpt-5-mini']);
-      expect(namesById.get('gpt-5.4')).toContain('retires Aug 31, 2026');
-      expect(namesById.get('gpt-5.4-mini')).toContain('retires Aug 31, 2026');
-      expect(namesById.get('gpt-5.3-codex')).toContain('Deprecated');
-      expect(namesById.get('gpt-5.2-codex')).toContain('Deprecated');
-      expect(namesById.get('gpt-5.1-codex-max')).toContain('Deprecated');
-      expect(namesById.get('gpt-5.1-codex-mini')).toContain('Deprecated');
+      expect(namesById.get('gpt-5.4')).not.toContain('retires');
+      expect(namesById.get('gpt-5.4-mini')).not.toContain('retires');
+      expect(namesById.get('gpt-5.3-codex')).not.toContain('Deprecated');
+      expect(namesById.has('gpt-5.2-codex')).toBe(false);
+      expect(namesById.has('gpt-5.1-codex-max')).toBe(false);
+      expect(namesById.has('gpt-5.1-codex-mini')).toBe(false);
       expect(namesById.get('o4-mini')).toContain('Deprecated');
     });
 
@@ -97,16 +101,21 @@ describe('model-catalog', () => {
       expect(allModels.some((m) => m.id === 'gemini-3.6-flash')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.5-flash')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.5-flash-lite')).toBe(true);
+      expect(allModels.some((m) => m.id === 'gemini-2.5-flash-lite')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.1-pro-preview')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.1-flash-lite')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.1-pro')).toBe(false);
       expect(allModels.some((m) => m.id === 'gemini-2.0-flash')).toBe(false);
 
-      const retiringGroup = groups.find((group) => group.label === 'Gemini 2.5 (Retires Oct 16)');
-      expect(retiringGroup?.models.map((model) => model.name)).toEqual([
-        'Gemini 2.5 Pro (retires Oct 16)',
-        'Gemini 2.5 Flash (retires Oct 16)',
+      const currentGroup = groups.find((group) => group.label === 'Gemini 2.5 (Current)');
+      expect(currentGroup?.models.map((model) => model.name)).toEqual([
+        'Gemini 2.5 Pro',
+        'Gemini 2.5 Flash',
+        'Gemini 2.5 Flash-Lite',
       ]);
+      expect(allModels.find((model) => model.id === 'gemini-3.1-flash-lite')?.name).toContain(
+        'retires May 7, 2027'
+      );
     });
 
     it('returns empty array for unknown agent type', () => {
@@ -124,10 +133,19 @@ describe('model-catalog', () => {
       expect(allModels.some((m) => m.id === 'opencode/gemini-3.7-flash')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/grok-4.6')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/muse-spark-1.2')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/muse-spark-1.2-contributor-free')).toBe(
+        true
+      );
       expect(allModels.some((m) => m.id === 'opencode/nemotron-3.5-lightning-free')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/x-preview-f-free')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/ling-3.0-tiny-free')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode-go/glm-5.2')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/glm-5.3')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode-go/deepseek-v4-flash-vision-exp')).toBe(
+        true
+      );
+      expect(allModels.some((m) => m.id === 'opencode-go/muse-spark-1.2-contributor')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode-go/ox-alpha-free')).toBe(true);
     });
   });
 

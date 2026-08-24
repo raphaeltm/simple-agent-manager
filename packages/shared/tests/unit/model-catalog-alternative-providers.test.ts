@@ -13,17 +13,21 @@ const EXPECTED_OPENCODE_MODELS = [
   'opencode/gpt-5.6-sol',
   'opencode/grok-4.6',
   'opencode/hy3-free',
-  'opencode/laguna-s-2.1-free',
   'opencode/kimi-k3',
   'opencode/minimax-m3',
   'opencode/muse-spark-1.2',
+  'opencode/muse-spark-1.2-contributor-free',
   'opencode/nemotron-3.5-lightning-free',
+  'opencode/x-preview-f-free',
+  'opencode-go/deepseek-v4-flash-vision-exp',
   'opencode-go/glm-5.2',
   'opencode-go/glm-5.3',
   'opencode-go/grok-4.5',
   'opencode-go/gpt-5.6-luna',
   'opencode-go/hy3',
   'opencode-go/kimi-k3',
+  'opencode-go/muse-spark-1.2-contributor',
+  'opencode-go/ox-alpha-free',
   'opencode-go/qwen3.8-max',
 ] as const;
 
@@ -50,11 +54,11 @@ describe('OpenCode model catalog entries', () => {
     );
 
     expect(namesById.get('opencode/deepseek-v4-flash')).toBe('DeepSeek V4 Flash');
-    expect(namesById.get('opencode/deepseek-v4-flash-free')).toBe('DeepSeek V4 Flash Free');
-    expect(namesById.get('opencode-go/deepseek-v4-flash')).toBe(
-      'DeepSeek V4 Flash (2x usage)'
-    );
-    expect(namesById.get('opencode-go/gpt-5.6-luna')).toBe('GPT-5.6 Luna (2x usage)');
+    expect(namesById.get('opencode/gpt-5.6-sol')).toBe('GPT-5.6 Sol (50% Off)');
+    expect(namesById.get('opencode-go/deepseek-v4-flash')).toBe('DeepSeek V4 Flash');
+    expect(namesById.get('opencode-go/deepseek-v4-pro')).toBe('DeepSeek V4 Pro (New)');
+    expect(namesById.get('opencode-go/gpt-5.6-luna')).toBe('GPT-5.6 Luna');
+    expect(namesById.get('opencode-go/hy3')).toBe('Hy3 (8x usage)');
     expect(namesById.get('opencode-go/kimi-k3')).toBe('Kimi K3');
   });
 
@@ -88,6 +92,8 @@ describe('OpenCode model catalog entries', () => {
   it('excludes inactive Models.dev records from the static fallback', () => {
     for (const inactiveModelId of [
       'opencode/claude-opus-4-1',
+      'opencode/deepseek-v4-flash-free',
+      'opencode/laguna-s-2.1-free',
       'opencode/ling-3.0-flash-free',
       'opencode/ling-3.0-tiny-free',
       'opencode/longcat-2.0-free',
