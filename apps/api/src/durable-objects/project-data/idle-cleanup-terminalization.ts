@@ -1,6 +1,9 @@
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
-import type { TaskRuntimeLiveness } from '../../services/task-runtime-liveness';
+import {
+  isSupersededTerminalReason,
+  type TaskRuntimeLiveness,
+} from '../../services/task-runtime-liveness';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import { getLocalTaskRuntimeLiveness } from './task-runtime-liveness';
 import type { Env } from './types';
@@ -214,13 +217,25 @@ export async function terminalizeIdleTaskInD1(
     return { outcome: 'preserved', taskId: task.id, liveness, errorMessage: null };
   }
 
-  const errorMessage = diagnosticMessage(reporter, liveness);
+  // A conversation that moved on to a wake successor and then ended is a benign
+  // lifecycle outcome, not a runtime failure — the same distinction the cron sweep
+  // makes, kept in lockstep here so the two terminalization runtimes cannot
+  // disagree about what a supersession means (`.claude/rules/61`, `.claude/rules/66`).
+  const supersededTermination = isSupersededTerminalReason(liveness.reason);
+  const terminalStatus: 'failed' | 'cancelled' = supersededTermination
+    ? 'cancelled'
+    : 'failed';
+  const errorMessage = supersededTermination
+    ? 'Superseded by a later session wake; the conversation continued in a ' +
+      'replacement task and has since ended.'
+    : diagnosticMessage(reporter, liveness);
   const now = new Date().toISOString();
   const update = env.DATABASE.prepare(
     `UPDATE tasks
-     SET status = 'failed', execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ?
+     SET status = ?, execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ?
      WHERE id = ? AND project_id = ? AND workspace_id = ? AND chat_session_id = ? AND status = ?`
   ).bind(
+    terminalStatus,
     errorMessage,
     now,
     now,
@@ -233,19 +248,21 @@ export async function terminalizeIdleTaskInD1(
   const event = env.DATABASE.prepare(
     `INSERT INTO task_status_events
        (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
-     SELECT ?, id, ?, 'failed', 'system', NULL, ?, ?
+     SELECT ?, id, ?, ?, 'system', NULL, ?, ?
      FROM tasks
      WHERE id = ? AND project_id = ? AND workspace_id = ? AND chat_session_id = ?
-       AND status = 'failed' AND completed_at = ? AND error_message = ?`
+       AND status = ? AND completed_at = ? AND error_message = ?`
   ).bind(
     ulid(),
     task.status,
+    terminalStatus,
     errorMessage,
     now,
     task.id,
     reporter.projectId,
     reporter.workspaceId,
     reporter.sessionId,
+    terminalStatus,
     now,
     errorMessage
   );
@@ -270,6 +287,6 @@ export async function terminalizeIdleTaskInD1(
     throw err;
   }
 
-  await syncTriggerExecutionStatus(env.DATABASE, task.id, 'failed', errorMessage);
+  await syncTriggerExecutionStatus(env.DATABASE, task.id, terminalStatus, errorMessage);
   return { outcome: 'failed', taskId: task.id, liveness, errorMessage };
 }

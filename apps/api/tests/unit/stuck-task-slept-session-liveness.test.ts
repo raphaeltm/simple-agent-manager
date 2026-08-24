@@ -715,6 +715,29 @@ describe('task supersession — a successful wake must not fail its predecessor'
     });
   });
 
+  /**
+   * Rule 61: the ProjectData runtime must reach the same benign verdict, so the
+   * two terminalization writers cannot disagree about what a supersession means.
+   */
+  it('reaches the benign supersession verdict on the ProjectData runtime too', async () => {
+    seedWorkspace('deleted');
+    nullOutHandoffBindings();
+    seedRecoverySuccessor({ status: 'completed' });
+    const sql = createSqlStorage(new Database(':memory:'));
+    const doEnv = { DATABASE: createSqliteD1(sqlite) } as unknown as ProjectDataEnv;
+
+    const verdict = await getLocalTaskRuntimeLiveness(sql, doEnv, {
+      taskId: TASK_ID,
+      projectId: PROJECT_ID,
+      workspaceId: WORKSPACE_ID,
+    });
+    expect(verdict).toMatchObject({
+      conclusive: true,
+      reason: 'workspace_deleted_superseded_by_completed_wake',
+    });
+    expect(isSupersededTerminalReason(verdict.reason)).toBe(true);
+  });
+
   /** A task with no workspace row at all is still protected while superseded. */
   it('preserves a superseded predecessor whose workspace row is gone', async () => {
     seedRecoverySuccessor();
