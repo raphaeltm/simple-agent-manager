@@ -11,7 +11,9 @@ import {
   classifyTaskRuntimeLiveness,
   loadRuntimeWorkspaceSnapshot,
   loadSessionResumabilitySnapshot,
+  loadTaskSupersession,
   needsSessionResumabilityProbe,
+  needsTaskSupersessionProbe,
   type RuntimeAcpSessionSnapshot,
   type TaskRuntimeLiveness,
   type TaskRuntimeLivenessSignals,
@@ -34,7 +36,7 @@ function positiveInt(value: string | undefined, fallback: number): number {
 export async function getLocalTaskRuntimeLiveness(
   sql: SqlStorage,
   env: Env,
-  task: { projectId: string; workspaceId: string | null }
+  task: { taskId: string; projectId: string; workspaceId: string | null }
 ): Promise<TaskRuntimeLiveness> {
   const staleMs =
     positiveInt(env.NODE_HEARTBEAT_STALE_SECONDS, DEFAULT_NODE_HEARTBEAT_STALE_SECONDS) * 1000;
@@ -82,11 +84,35 @@ export async function getLocalTaskRuntimeLiveness(
     }
   }
 
+  // Same hot-path discipline as the resumability probe (`.claude/rules/47`).
+  let supersessionProbeOutcome: TaskRuntimeLivenessSignals['supersessionProbeOutcome'] = 'not_run';
+  let supersededByLiveWake = false;
+  if (needsTaskSupersessionProbe(workspace, workspaceProbeOutcome)) {
+    try {
+      supersededByLiveWake = await loadTaskSupersession(
+        env.DATABASE,
+        task.projectId,
+        task.taskId
+      );
+      supersessionProbeOutcome = 'ok';
+    } catch (err) {
+      supersessionProbeOutcome = 'error';
+      log.warn('task_supersession_query_failed', {
+        taskId: task.taskId,
+        projectId: task.projectId,
+        action: 'preserved',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   const baseSignals: TaskRuntimeLivenessSignals = {
     projectId: task.projectId,
     taskWorkspaceId: task.workspaceId,
     workspace,
     workspaceProbeOutcome,
+    supersessionProbeOutcome,
+    supersededByLiveWake,
     nowMs: Date.now(),
     heartbeatStaleMs: staleMs,
     acpProbeOutcome: 'not_run',

@@ -195,6 +195,7 @@ export async function terminalizeIdleTaskInD1(
   }
 
   const liveness = await getLocalTaskRuntimeLiveness(sql, env, {
+    taskId: task.id,
     projectId: reporter.projectId,
     workspaceId: reporter.workspaceId,
   });

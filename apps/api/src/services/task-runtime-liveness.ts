@@ -69,6 +69,8 @@ export interface SessionResumabilitySnapshot {
 
 export type ResumabilityProbeOutcome = 'ok' | 'error' | 'not_run';
 
+export type SupersessionProbeOutcome = 'ok' | 'error' | 'not_run';
+
 export interface TaskRuntimeLivenessSignals {
   /** The task's project — re-checked against the snapshot row in memory. */
   projectId: string;
@@ -93,6 +95,17 @@ export interface TaskRuntimeLivenessSignals {
    * classifier applies the same wake-attempt ceiling the claim does.
    */
   resumabilityMaxRecoveryAttempts: number;
+  /**
+   * `not_run` preserves the pre-supersession behaviour for callers that cannot
+   * reach D1; `error` withholds a conclusive-death verdict because the
+   * alternative is failing a task whose conversation is demonstrably alive.
+   */
+  supersessionProbeOutcome: SupersessionProbeOutcome;
+  /**
+   * True when a *newer, non-terminal* `session-recovery` task in this task's
+   * recovery family owns the conversation now. See `loadTaskSupersession`.
+   */
+  supersededByLiveWake: boolean;
 }
 
 const ACTIVE_ACP_STATUSES = new Set<AcpSessionStatus>(['assigned', 'running']);
@@ -166,6 +179,65 @@ export function needsSessionResumabilityProbe(
   );
 }
 
+/**
+ * Whether a supersession lookup can still change the verdict. Like
+ * `needsSessionResumabilityProbe` this keeps the extra D1 read off the hot path
+ * by firing only for a task that would otherwise be declared conclusively dead
+ * (`.claude/rules/47` control-loop I/O budget).
+ *
+ * Deliberately NOT gated on `workspace.chatSessionId`. A wake handoff nulls that
+ * exact column (`session-recovery.ts:createRecoveryTask` stmt 3), so gating on it
+ * would blind this probe to precisely the population it exists to protect — the
+ * mistake that made the resumability probe unreachable for superseded tasks
+ * (`.claude/rules/63`). A null workspace is probed too: the task id, not the
+ * workspace, is what identifies the recovery family.
+ */
+export function needsTaskSupersessionProbe(
+  workspace: RuntimeWorkspaceSnapshot | null,
+  workspaceProbeOutcome: TaskRuntimeLivenessSignals['workspaceProbeOutcome']
+): boolean {
+  if (workspaceProbeOutcome !== 'ok') return false;
+  if (workspace === null) return true;
+  return (
+    workspace.status !== 'running' && !INCONCLUSIVE_WORKSPACE_STATUSES.has(workspace.status)
+  );
+}
+
+/**
+ * A task whose conversation has been handed to a live successor is superseded,
+ * not dead. Returns the inconclusive verdict that must pre-empt any
+ * conclusive-death return, or null when supersession cannot explain the state.
+ *
+ * This is the `.claude/rules/58` pairing for task lineage: the resumer
+ * (`claimSessionSnapshotRecovery` via `sourceTaskGuardCondition`) requires the
+ * source task to be NON-terminal, so failing a superseded predecessor does not
+ * merely mislabel it — it permanently revokes the guarded/parent wake path for
+ * that conversation.
+ */
+function supersessionVerdict(
+  signals: TaskRuntimeLivenessSignals,
+  workspace: RuntimeWorkspaceSnapshot | null,
+  reasonPrefix: string
+): TaskRuntimeLiveness | null {
+  if (signals.supersessionProbeOutcome === 'error') {
+    return result(workspace, {
+      live: false,
+      conclusive: false,
+      reason: `${reasonPrefix}_supersession_unknown`,
+      activeAcpSessionId: null,
+    });
+  }
+  if (signals.supersededByLiveWake) {
+    return result(workspace, {
+      live: false,
+      conclusive: false,
+      reason: `${reasonPrefix}_superseded_by_live_wake`,
+      activeAcpSessionId: null,
+    });
+  }
+  return null;
+}
+
 function result(
   workspace: RuntimeWorkspaceSnapshot | null,
   values: Omit<TaskRuntimeLiveness, 'workspaceStatus' | 'nodeId'>
@@ -195,12 +267,15 @@ export function classifyTaskRuntimeLiveness(
     });
   }
   if (!signals.taskWorkspaceId || !workspace) {
-    return result(workspace, {
-      live: false,
-      conclusive: true,
-      reason: 'workspace_missing',
-      activeAcpSessionId: null,
-    });
+    return (
+      supersessionVerdict(signals, workspace, 'workspace_missing') ??
+      result(workspace, {
+        live: false,
+        conclusive: true,
+        reason: 'workspace_missing',
+        activeAcpSessionId: null,
+      })
+    );
   }
 
   if (INCONCLUSIVE_WORKSPACE_STATUSES.has(workspace.status)) {
@@ -240,12 +315,18 @@ export function classifyTaskRuntimeLiveness(
         activeAcpSessionId: null,
       });
     }
-    return result(workspace, {
-      live: false,
-      conclusive: true,
-      reason: `workspace_${workspace.status}`,
-      activeAcpSessionId: null,
-    });
+    // Supersession is checked last among the inconclusive escapes so a genuinely
+    // restorable snapshot still reports the more specific `_snapshot_resumable`
+    // reason, but before any conclusive-death return.
+    return (
+      supersessionVerdict(signals, workspace, `workspace_${workspace.status}`) ??
+      result(workspace, {
+        live: false,
+        conclusive: true,
+        reason: `workspace_${workspace.status}`,
+        activeAcpSessionId: null,
+      })
+    );
   }
 
   if (!workspace.chatSessionId || !workspace.nodeId) {
@@ -402,6 +483,52 @@ function parseTimestamp(value: string | null): number | null {
   if (!value) return null;
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * True when a newer, non-terminal `session-recovery` task in this task's recovery
+ * family owns the conversation now — i.e. this task was superseded by a
+ * *successful* wake rather than losing its runtime.
+ *
+ * The family is keyed on the ROOT, not the direct child, because
+ * `session-recovery.ts:createRecoveryTask` resolves its source as
+ * `guard ?? sourceTask.recoverySourceTaskId ?? sourceTask.id` — every successor
+ * therefore points at the original task, never at its immediate predecessor. A
+ * direct-child check would miss every middle link of a chain (36 of 61 observed
+ * production cases; one root has 8 successors).
+ *
+ * `triggered_by = 'session-recovery'` is what makes this supersession rather than
+ * an unrelated sibling task, and `created_at >` keeps the relation directional so
+ * a predecessor can never be treated as superseding its own successor.
+ *
+ * Project-scoped per `.claude/rules/11`.
+ */
+export async function loadTaskSupersession(
+  db: D1Database,
+  projectId: string,
+  taskId: string
+): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 AS superseded
+         FROM tasks self
+         JOIN tasks owner
+           ON owner.project_id = self.project_id
+          AND owner.id <> self.id
+          AND (
+                owner.id = COALESCE(self.recovery_source_task_id, self.id)
+             OR owner.recovery_source_task_id = COALESCE(self.recovery_source_task_id, self.id)
+              )
+        WHERE self.id = ?
+          AND self.project_id = ?
+          AND owner.triggered_by = 'session-recovery'
+          AND owner.created_at > self.created_at
+          AND owner.status NOT IN ('completed', 'failed', 'cancelled')
+        LIMIT 1`
+    )
+    .bind(taskId, projectId)
+    .first<{ superseded: number }>();
+  return row !== null;
 }
 
 /**
