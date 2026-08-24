@@ -6,8 +6,6 @@
  * combined routing shape: a valid BetterAuth session must be projected onto the
  * Hono context before the project comments handler calls `getUserId`.
  */
-import { readFileSync } from 'node:fs';
-
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -27,6 +25,23 @@ vi.mock('../../src/auth', () => ({
       getSession: harness.getSession,
     },
   }),
+}));
+
+vi.mock(
+  'cloudflare:workers',
+  () => ({
+    DurableObject: class DurableObject {},
+  }),
+  { virtual: true }
+);
+
+vi.mock('@cloudflare/sandbox', () => ({
+  Sandbox: class Sandbox {},
+}));
+
+vi.mock('@cloudflare/containers', () => ({
+  Container: class Container {},
+  switchPort: vi.fn((request: Request) => request),
 }));
 
 vi.mock('drizzle-orm/d1', () => ({
@@ -65,6 +80,8 @@ vi.mock('../../src/services/project-data', async () => {
 
 import { projectCommentRoutes } from '../../src/routes/project-comments';
 import { projectsRoutes } from '../../src/routes/projects';
+
+const worker = await import('../../src/index');
 
 function createCombinedApp() {
   const app = new Hono<{ Bindings: Env }>();
@@ -142,15 +159,40 @@ describe('project comment auth routing', () => {
     );
   });
 
-  it('keeps the real app mount order that makes auth inheritance work', () => {
-    const indexSource = readFileSync(new URL('../../src/index.ts', import.meta.url), 'utf8');
+  it('keeps the real worker mount order that makes auth inheritance work', async () => {
+    harness.getSession.mockResolvedValueOnce(null);
 
-    expect(indexSource.indexOf("app.route('/api/projects', projectsRoutes)")).toBeGreaterThan(-1);
-    expect(
-      indexSource.indexOf("app.route('/api/projects/:projectId/comments', projectCommentRoutes)")
-    ).toBeGreaterThan(-1);
-    expect(indexSource.indexOf("app.route('/api/projects', projectsRoutes)")).toBeLessThan(
-      indexSource.indexOf("app.route('/api/projects/:projectId/comments', projectCommentRoutes)")
+    const unauthenticated = await worker.default.fetch(
+      new Request('https://api.example.test/api/projects/project-a/comments'),
+      { DATABASE: {} } as Env
+    );
+
+    expect(unauthenticated.status).toBe(401);
+    expect(harness.requireProjectCapability).not.toHaveBeenCalled();
+    expect(harness.listProjectCommentInbox).not.toHaveBeenCalled();
+
+    const authenticated = await worker.default.fetch(
+      new Request('https://api.example.test/api/projects/project-a/comments'),
+      { DATABASE: {} } as Env
+    );
+
+    expect(authenticated.status).toBe(200);
+    expect(await authenticated.json()).toMatchObject({
+      messageThreads: [],
+      fileThreads: [],
+      totalCount: 0,
+      hasMore: false,
+    });
+    expect(harness.requireProjectCapability).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-a',
+      'user-1',
+      'task:read'
+    );
+    expect(harness.listProjectCommentInbox).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-a',
+      expect.any(Object)
     );
   });
 });
