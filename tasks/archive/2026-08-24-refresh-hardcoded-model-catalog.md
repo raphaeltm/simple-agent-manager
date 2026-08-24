@@ -24,7 +24,7 @@ SAM's static agent model catalog is the fallback and validation source for suppo
 - [x] Verify Mistral Vibe entries still match source-supported configurable model IDs.
 - [x] Synchronize OpenCode Zen and Go fallback IDs and display names with live Models.dev records.
 - [x] Update focused shared-catalog and platform-registry tests for additions, removals, IDs, names, and lifecycle labels.
-- [ ] Run focused and repository-wide quality checks, specialist reviews, staging verification, CI, merge, and production deployment monitoring.
+- [x] Run focused and repository-wide quality checks, specialist reviews, staging verification, CI, merge, and production deployment monitoring.
 
 ## Acceptance criteria
 
@@ -48,3 +48,15 @@ SAM's static agent model catalog is the fallback and validation source for suppo
 - https://docs.mistral.ai/vibe/code/cli/agents
 - https://opencode.ai/docs/providers
 - https://models.dev/api.json
+
+## Validation evidence
+
+- `pnpm --filter @simple-agent-manager/shared test -- model-catalog` passed: 2 files / 22 tests.
+- `pnpm --filter @simple-agent-manager/shared test -- ai-model-registry` passed: 1 file / 37 tests.
+- `pnpm --filter @simple-agent-manager/shared typecheck` passed.
+- `pnpm --filter @simple-agent-manager/shared lint` passed.
+- `pnpm --filter @simple-agent-manager/shared test -- model-catalog ai-model-registry` passed after merging `origin/main`: 3 files / 59 tests.
+- `pnpm lint && pnpm typecheck && pnpm test && pnpm build` passed.
+- Live OpenCode fallback comparison against `https://models.dev/api.json` found zero ID or display-name differences.
+- Staging deployment `32713139178` passed for branch SHA `6cbead476e1a7d9f6c010845df4c820d19ebb1b6`.
+- Staging API verification against `https://api.sammy.party/api/model-catalog/{agentType}` passed for OpenAI Codex, Google Gemini, and OpenCode changed IDs/labels.
