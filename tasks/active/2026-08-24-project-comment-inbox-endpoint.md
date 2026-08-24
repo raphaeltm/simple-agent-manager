@@ -303,7 +303,7 @@ endpoint/UI Playwright verification.
       `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/migrations.test.ts`,
       and full `pnpm test` all pass. Full test summary:
       21/21 Turbo tasks; API 604 files / 8224 tests; web 293 files / 3502 tests.
-- [ ] Staging deploy + Playwright verification against the live endpoint
+- [x] Staging deploy + Playwright verification against the live endpoint
 - [x] Re-run the visual audit and re-read the screenshots after UI fixes
       (`comments-navigation-audit.spec.ts`, 46/46 at 375x667 + 1280x800)
 - [x] UI rubric: all five categories scored at/above the required >=4 bar
@@ -329,6 +329,42 @@ endpoint/UI Playwright verification.
 - **Compromises:** the filter row intentionally scrolls/clips at the drawer edge
   on narrow widths; the automated audit treats this as the intended horizontal
   scroller case and still asserts no document-level horizontal overflow.
+
+### Staging verification (live, 2026-08-24)
+
+- **Deploy:** GitHub Actions `Deploy Staging` run
+  `32759921571` completed successfully, including health check and smoke tests:
+  `https://github.com/raphaeltm/simple-agent-manager/actions/runs/32759921571`.
+- **Health:** `curl -fsS https://api.sammy.party/health` returned
+  `{"status":"healthy","timestamp":"2026-08-24T18:18:47.941Z"}`.
+- **Authenticated API probe:** token-login succeeded; `GET /api/projects`
+  returned 15 projects. `GET /api/projects/01KTKXZ4ZZAT6MJFXRW1ZTQ7RB/comments?limit=10`
+  returned 200 with 6 message threads, 4 file threads, 2 session refs, 1 file
+  ref, `hasMore: true`, `totalCount: 20`. The filtered
+  `status=open&limit=10` probe returned 200 with 10 message threads and
+  `totalCount: 15`.
+- **Project Comments page:** live Playwright against `https://app.sammy.party`
+  passed at 375x667 and 1280x800. The temporary verifier asserted exactly one
+  `/api/projects/:projectId/comments` request for the page and zero scoped
+  session/file comment fan-out requests, then matched rendered row count to the
+  live response.
+- **Session comments drawer:** live Playwright passed at 375x667 and 1280x800
+  on a clean comment-bearing staging session. It asserted no comment inbox rows
+  are rendered before opening the drawer, then opened the button-triggered
+  Session comments dialog and verified the live target thread row. A temporary
+  auth-rate-limit pause occurred because token-login is capped at 20/IP/hour;
+  the remaining desktop drawer check passed after the 19:00 UTC window reset.
+- **Header chip + timeline:** a live Playwright browser script verified the
+  unresolved-comments header chip and `Session timeline` comment entry on
+  375x667 and 1280x800. Both variants had no same-origin 4xx/5xx responses, no
+  browser console errors, and no document-level horizontal overflow.
+- **Screenshots retained:** `.codex/tmp/playwright-screenshots/staging-comments-session-drawer-desktop-1280x800-.png`,
+  `.codex/tmp/playwright-screenshots/staging-comments-timeline-mobile-375x667.png`,
+  `.codex/tmp/playwright-screenshots/staging-comments-timeline-desktop-1280x800.png`.
+- **Observability:** `pnpm quality:observability-noise` completed with no
+  significant log noise detected. D1 checks were skipped because
+  `OBSERVABILITY_DB_ID` is unset; Workers telemetry was unavailable with 403,
+  which the script reported as non-fatal.
 
 ### Specialist review outcome (recovery pass, 2026-08-24)
 
