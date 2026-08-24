@@ -27,7 +27,8 @@ const WORKSPACE_ID = '01M06502R3MW9JY75M7WK68B42';
 const CHAT_SESSION_ID = '8bd22a42-cf37-41fa-9947-30e78a0b6ece';
 const NODE_ID = '01M064TG56ECJW1D127H32BRVJ';
 
-const task = { project_id: PROJECT_ID, workspace_id: WORKSPACE_ID };
+const TASK_ID = '01M064TG9QK8ZQ3XW0M6P7RCTN';
+const task = { id: TASK_ID, project_id: PROJECT_ID, workspace_id: WORKSPACE_ID };
 
 let sqlite: Database.Database;
 let env: Env;
@@ -107,11 +108,63 @@ function brokenSnapshotDb(): { DATABASE: unknown } {
   };
 }
 
+/**
+ * The task under classification. `seedRecoverySuccessor` below adds the wake
+ * successor that supersedes it; without one, this task is an ordinary
+ * non-superseded task and every pre-existing verdict must be unchanged.
+ */
+function seedTask(
+  id: string,
+  overrides: {
+    status?: string;
+    triggeredBy?: string;
+    recoverySourceTaskId?: string | null;
+    createdAt?: string;
+    chatSessionId?: string | null;
+  } = {}
+): void {
+  sqlite
+    .prepare(
+      `INSERT INTO tasks (id, project_id, user_id, workspace_id, title, status, priority,
+                        triggered_by, recovery_source_task_id, chat_session_id,
+                        created_by, created_at, updated_at)
+     VALUES (?, ?, 'user-1', ?, 'task', ?, 0, ?, ?, ?, 'user-1', ?, ?)`
+    )
+    .run(
+      id,
+      PROJECT_ID,
+      WORKSPACE_ID,
+      overrides.status ?? 'in_progress',
+      overrides.triggeredBy ?? 'user',
+      overrides.recoverySourceTaskId ?? null,
+      overrides.chatSessionId === undefined ? CHAT_SESSION_ID : overrides.chatSessionId,
+      overrides.createdAt ?? iso(-3_600_000),
+      iso(0)
+    );
+}
+
+/**
+ * Reproduce statements 2 and 3 of the `createRecoveryTask` handoff batch, which
+ * strip the chat binding from the previous owner and its workspace. This is what
+ * makes the resumability probe unreachable for a superseded task, so any test
+ * asserting supersession behaviour must apply it rather than assume it.
+ */
+function nullOutHandoffBindings(): void {
+  sqlite.prepare(`UPDATE tasks SET chat_session_id = NULL WHERE id = ?`).run(TASK_ID);
+  sqlite.prepare(`UPDATE workspaces SET chat_session_id = NULL WHERE id = ?`).run(WORKSPACE_ID);
+}
+
 beforeEach(() => {
   sqlite = new Database(':memory:');
-  createSchemaTables(sqlite, [schema.workspaces, schema.nodes, schema.sessionSnapshots]);
+  createSchemaTables(sqlite, [
+    schema.workspaces,
+    schema.nodes,
+    schema.sessionSnapshots,
+    schema.tasks,
+  ]);
   env = { DATABASE: createSqliteD1(sqlite) } as Env;
   seedNode();
+  seedTask(TASK_ID);
 });
 
 describe('stuck-task liveness for a slept session', () => {
@@ -299,7 +352,7 @@ describe('ProjectData idle-cleanup liveness for a slept session', () => {
     return { DATABASE: createSqliteD1(sqlite) } as unknown as ProjectDataEnv;
   }
 
-  const doTask = { projectId: PROJECT_ID, workspaceId: WORKSPACE_ID };
+  const doTask = { taskId: TASK_ID, projectId: PROJECT_ID, workspaceId: WORKSPACE_ID };
 
   it('preserves a slept, restorable session instead of terminalizing it', async () => {
     seedWorkspace('deleted');
@@ -333,6 +386,234 @@ describe('ProjectData idle-cleanup liveness for a slept session', () => {
       live: false,
       conclusive: false,
       reason: 'workspace_deleted_resumability_unknown',
+    });
+  });
+});
+
+/**
+ * Regression suite for the 2026-08-24 production incident: a *successful* wake
+ * marks its own predecessor "failed".
+ *
+ * `session-recovery.ts:createRecoveryTask` commits the handoff as one D1 batch
+ * that mints a successor, nulls `tasks.chat_session_id` AND
+ * `workspaces.chat_session_id` on the previous owner, and then terminalizes
+ * nothing. The predecessor is left `in_progress` with a deleted workspace — the
+ * exact shape the sweep reads as runtime death — so it was failed on average
+ * ~24 minutes later while its conversation carried on in the successor.
+ *
+ * Production (`sam-prod`, 2026-08-15..24): 61 of 91 `conclusively gone
+ * (workspace_deleted)` kills were superseded tasks — 25 with a direct successor
+ * and 36 middle links whose successor points past them to the root.
+ *
+ * This is not merely mislabelling. `sourceTaskGuardCondition`
+ * (`session-snapshot-recovery-lifecycle.ts:34`) requires the source task to be
+ * NON-terminal, and `sourceTaskGuard` is supplied for every `parent_wakeup`
+ * delivery (`project-data/prompt-delivery-runner.ts:194`). Failing a superseded
+ * predecessor therefore permanently revokes the durable parent-wake path for
+ * that conversation — all 34 production roots with recovery children were
+ * `failed`. Hence the fix keeps the predecessor non-terminal (`.claude/rules/58`).
+ */
+describe('task supersession — a successful wake must not fail its predecessor', () => {
+  const SUCCESSOR_ID = '01M0SDBZXG5AEGZJ0JH2YC30Q4';
+
+  /** The wake successor `createRecoveryTask` mints, with a fresh ULID. */
+  function seedRecoverySuccessor(
+    overrides: { status?: string; rootId?: string; createdAt?: string; id?: string } = {}
+  ): void {
+    seedTask(overrides.id ?? SUCCESSOR_ID, {
+      status: overrides.status ?? 'in_progress',
+      triggeredBy: 'session-recovery',
+      recoverySourceTaskId: overrides.rootId ?? TASK_ID,
+      createdAt: overrides.createdAt ?? iso(-60_000),
+      chatSessionId: CHAT_SESSION_ID,
+    });
+  }
+
+  /**
+   * The incident, reproduced. The handoff nulls the predecessor's chat binding,
+   * so the resumability probe cannot even run (`needsSessionResumabilityProbe`
+   * is gated on `workspace.chatSessionId !== null` — `.claude/rules/63`).
+   * Supersession is the only signal left that the conversation is alive.
+   */
+  it('preserves a predecessor whose conversation a live successor now owns', async () => {
+    seedWorkspace('deleted');
+    nullOutHandoffBindings();
+    seedRecoverySuccessor();
+
+    await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'workspace_deleted_superseded_by_live_wake',
+    });
+  });
+
+  /**
+   * Chain collapse: `createRecoveryTask` resolves its source as
+   * `guard ?? sourceTask.recoverySourceTaskId ?? sourceTask.id`, so a second
+   * wake points at the ROOT, never at the middle link it actually replaced.
+   * 36 of the 61 production cases have this shape. A direct-child check would
+   * miss every one of them.
+   */
+  it('preserves a middle link superseded by a sibling that points at the root', async () => {
+    const ROOT_ID = '01M064TG00ROOT00000000000';
+    const MIDDLE_ID = '01M064TG11MIDDLE000000000';
+    seedTask(ROOT_ID, { status: 'failed', createdAt: iso(-7_200_000), chatSessionId: null });
+    seedTask(MIDDLE_ID, {
+      status: 'in_progress',
+      triggeredBy: 'session-recovery',
+      recoverySourceTaskId: ROOT_ID,
+      createdAt: iso(-3_600_000),
+      chatSessionId: null,
+    });
+    // The newest wake also points at ROOT, not at MIDDLE.
+    seedRecoverySuccessor({ rootId: ROOT_ID, createdAt: iso(-60_000) });
+    seedWorkspace('deleted');
+
+    await expect(
+      getTaskRuntimeLiveness(env, {
+        id: MIDDLE_ID,
+        project_id: PROJECT_ID,
+        workspace_id: WORKSPACE_ID,
+      })
+    ).resolves.toMatchObject({
+      conclusive: false,
+      reason: 'workspace_deleted_superseded_by_live_wake',
+    });
+  });
+
+  /**
+   * Discriminating control (`.claude/rules/58`). Without this, the suite passes
+   * equally well with terminalization disabled outright.
+   */
+  it('still terminalizes when the recovery family has no live owner', async () => {
+    seedWorkspace('deleted');
+    nullOutHandoffBindings();
+    seedRecoverySuccessor({ status: 'failed' });
+
+    await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
+      live: false,
+      conclusive: true,
+      reason: 'workspace_deleted',
+    });
+  });
+
+  /**
+   * Bounded escape (`.claude/rules/47`): a superseded task must leave the
+   * candidate set once its successor goes terminal, rather than being preserved
+   * forever. Two consecutive classifications across that transition.
+   */
+  it('releases the predecessor once the live successor terminalizes', async () => {
+    seedWorkspace('deleted');
+    nullOutHandoffBindings();
+    seedRecoverySuccessor({ status: 'in_progress' });
+
+    await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
+      conclusive: false,
+    });
+
+    sqlite.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`).run(SUCCESSOR_ID);
+
+    await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
+      conclusive: true,
+      reason: 'workspace_deleted',
+    });
+  });
+
+  /** Direction matters: an OLDER task can never supersede a newer one. */
+  it('does not treat an older family member as a superseding wake', async () => {
+    seedWorkspace('deleted');
+    nullOutHandoffBindings();
+    seedRecoverySuccessor({ createdAt: iso(-7_200_000) });
+
+    await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
+      conclusive: true,
+      reason: 'workspace_deleted',
+    });
+  });
+
+  /** A live but unrelated task is not a wake successor. */
+  it('does not treat a non-recovery task as a superseding wake', async () => {
+    seedWorkspace('deleted');
+    nullOutHandoffBindings();
+    seedTask('01M064TG22UNRELATED000000', {
+      status: 'in_progress',
+      triggeredBy: 'user',
+      recoverySourceTaskId: TASK_ID,
+      createdAt: iso(-60_000),
+    });
+
+    await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
+      conclusive: true,
+      reason: 'workspace_deleted',
+    });
+  });
+
+  /** Project scoping is a SQL predicate, so it needs a real engine (`.claude/rules/28`). */
+  it('ignores a live successor belonging to a different project', async () => {
+    seedWorkspace('deleted');
+    nullOutHandoffBindings();
+    sqlite
+      .prepare(
+        `INSERT INTO tasks (id, project_id, user_id, workspace_id, title, status, priority,
+                          triggered_by, recovery_source_task_id, created_by, created_at, updated_at)
+       VALUES (?, 'project-2', 'user-1', ?, 'task', 'in_progress', 0, 'session-recovery', ?,
+               'user-1', ?, ?)`
+      )
+      .run('01M064TG33OTHERPROJECT000', WORKSPACE_ID, TASK_ID, iso(-60_000), iso(0));
+
+    await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
+      conclusive: true,
+      reason: 'workspace_deleted',
+    });
+  });
+
+  /** Fail safe: an unreadable supersession probe must withhold the death verdict. */
+  it('withholds a death verdict when the supersession read fails', async () => {
+    seedWorkspace('deleted');
+    const broken = {
+      DATABASE: {
+        prepare: (query: string) =>
+          query.includes('owner.triggered_by')
+            ? { bind: () => ({ first: () => Promise.reject(new Error('D1 unavailable')) }) }
+            : createSqliteD1(sqlite).prepare(query),
+      },
+    } as unknown as Env;
+
+    await expect(getTaskRuntimeLiveness(broken, task)).resolves.toMatchObject({
+      conclusive: false,
+      reason: 'workspace_deleted_supersession_unknown',
+    });
+  });
+
+  /** Rule 61: the guard must hold on the ProjectData runtime too, not just cron. */
+  it('preserves a superseded predecessor on the ProjectData runtime as well', async () => {
+    seedWorkspace('deleted');
+    nullOutHandoffBindings();
+    seedRecoverySuccessor();
+    const sql = createSqlStorage(new Database(':memory:'));
+    const doEnv = { DATABASE: createSqliteD1(sqlite) } as unknown as ProjectDataEnv;
+
+    await expect(
+      getLocalTaskRuntimeLiveness(sql, doEnv, {
+        taskId: TASK_ID,
+        projectId: PROJECT_ID,
+        workspaceId: WORKSPACE_ID,
+      })
+    ).resolves.toMatchObject({
+      conclusive: false,
+      reason: 'workspace_deleted_superseded_by_live_wake',
+    });
+  });
+
+  /** A task with no workspace row at all is still protected while superseded. */
+  it('preserves a superseded predecessor whose workspace row is gone', async () => {
+    seedRecoverySuccessor();
+
+    await expect(
+      getTaskRuntimeLiveness(env, { id: TASK_ID, project_id: PROJECT_ID, workspace_id: null })
+    ).resolves.toMatchObject({
+      conclusive: false,
+      reason: 'workspace_missing_superseded_by_live_wake',
     });
   });
 });
