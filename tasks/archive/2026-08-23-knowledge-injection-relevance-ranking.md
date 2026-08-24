@@ -175,3 +175,50 @@ meaningful after `shared` → `providers` → `cloud-init` were built.
 the index truncates and both claims are false — the rule-65 defect (a capped selection
 described as complete) reintroduced one layer up, in prose. Fixed in `c927eed56`.
 
+## Staging verification (2026-08-24)
+
+Deploy: `deploy-staging.yml` run `32674814563` — **success**.
+
+Exercised the REAL deployed path: seeded the production skew into staging project
+`01KTKXZ4ZZAT6MJFXRW1ZTQ7RB` via the knowledge REST API (which writes through the real
+ProjectData DO), then called `get_instructions` through the live MCP endpoint
+`POST https://api.sammy.party/mcp` with a real MCP token. No mocks anywhere in the path.
+
+Seed: `AaaR3GrabBag` (early alphabet, 20 observations @ conf 0.85) plus `ZzzR3ContentStyle`
+/ `ZzzR3UserPrefs` / `ZzzR3Architecture` (late alphabet, 3 each @ conf 0.98) — i.e. exactly
+the shape that made the production bug invisible.
+
+Result (verbatim from the live payload):
+
+```
+**ZzzR3Architecture** (context): ...3 observations...
+**ZzzR3UserPrefs** (preference): ...3 observations...
+**ZzzR3ContentStyle** (preference): ...3 observations...
+**AaaR3GrabBag** (context): ...observations 20,19,18,17,16,15,14,13...   <- exactly 8 of 20
+
+### Full knowledge index (4 entities)
+AaaR3GrabBag (context, 20), ZzzR3Architecture (context, 3),
+ZzzR3ContentStyle (preference, 3), ZzzR3UserPrefs (preference, 3)
+```
+
+| Acceptance criterion | Evidence |
+|---|---|
+| Ranked, not alphabetical | All three `Zzz*` entities rank ABOVE `AaaR3GrabBag`. Pre-fix `ORDER BY e.name` guarantees the exact opposite. |
+| Per-entity cap enforced | `AaaR3GrabBag` contributed exactly 8 of its 20 observations (default `autoRetrievePerEntityLimit`). |
+| Every active entity in the index | All 4 listed with counts; the index discloses `AaaR3GrabBag (context, 20)` while only 8 were shown. |
+| Index names the retrieval path | `search_knowledge` and `get_relevant_knowledge` both named in the lead-in. |
+| Truncation honesty | 4 <= `entityIndexLimit` (200), so the heading correctly reads "Full knowledge index". |
+| Deterministic | 3 identical calls returned byte-identical `knowledgeDirectives`. |
+| R1 compatible | Payload keys are exactly `context, instructions, knowledgeDirectives, project, session` — no `knowledgeContext` / `policyContext`. |
+| Instruction strings updated | Payload asserts RANKED, CAPPED, "knowledge-index section", "Do not assume an entity is empty", "raises its rank". |
+
+Regression (rule 13): API `/health` 200; `app.sammy.party` 200; `/api/projects`,
+`/api/nodes`, `/api/workspaces`, `/api/auth/me`, project-scoped `/tasks`, `/knowledge` all
+200; MCP `tools/list` exposes 113 tools. Real-browser pass (Playwright/chromium against
+staging, authenticated via `token-login`): dashboard, projects and settings all render,
+no horizontal overflow, **0 console errors**. Screenshots in
+`.codex/tmp/playwright-screenshots/r3-*.png` (3 distinct files, verified not duplicates).
+
+Cleanup: all 9 seeded entities deleted from both staging projects; both verified back to
+their pre-test state.
+
