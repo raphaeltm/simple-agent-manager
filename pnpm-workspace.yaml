@@ -31,14 +31,17 @@ catalog:
 
   # === Cloudflare ===
   '@cloudflare/workers-types': 5.20260707.1
-  wrangler: 4.118.0
+  wrangler: 4.123.0
 
   # === React Ecosystem ===
-  react: 19.2.7
-  react-dom: 19.2.7
+  # react and react-dom ship from one repo and must stay on the same version —
+  # react-dom loads the matching reconciler build. Dependabot groups react with
+  # @types/react but not react-dom, so bump react-dom by hand alongside react.
+  react: 19.2.8
+  react-dom: 19.2.8
   eslint-plugin-react: 7.37.5
   eslint-plugin-react-hooks: 7.1.1
-  '@types/react': 19.2.17
+  '@types/react': 19.2.18
   '@types/react-dom': 19.2.3
   react-router: 7.14.2
   lucide-react: 0.460.0
