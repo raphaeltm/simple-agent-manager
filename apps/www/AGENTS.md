@@ -42,7 +42,7 @@ pnpm --filter @simple-agent-manager/www preview   # Preview production build
 - Do NOT confuse this with `apps/web/` — different stack (Astro vs React+Vite), different domain
 - Starlight sidebar config lives in `astro.config.ts`, not in the content files
 - Astro 7's rolldown pipeline resolves dynamic imports inside **processed** `<script>` blocks. A
-  `<script type="module">` that lazy-loads a `build:assets` output by URL (e.g.
+  `<script type="module">` that lazy-loads a `build:blog-mermaid` output by URL (e.g.
   `import('/scripts/blog-mermaid.js')` in `src/layouts/BlogPost.astro`) must be marked `is:inline`,
   or the build fails with `[UNRESOLVED_IMPORT] Could not resolve '/scripts/...'` — those files are
   emitted into `public/` at build time and are runtime URLs, not bundleable modules

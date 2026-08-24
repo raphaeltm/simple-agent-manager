@@ -39,7 +39,7 @@ pnpm --filter @simple-agent-manager/acp-client lint        # ESLint
 
 ## Gotchas
 
-- ACP payload types are hand-rolled here, NOT imported from an SDK. `src/hooks/useAcpMessagePayloads.ts` declares the loose `SessionUpdate` / `ToolCallUpdate` / `PlanUpdate` shapes, and `src/transport/types.ts` declares SAM's own VM-agent control messages (`agent_status`, `select_agent`, `agent_crash_report`, `session_state`). `src/transport/websocket.ts` deliberately types the ACP payload as `unknown` and forwards it. The canonical ACP wire contract lives in the Go VM agent, not in this package.
+- ACP payload types are hand-rolled here, NOT imported from an SDK. `src/hooks/useAcpMessagePayloads.ts` declares the loose `SessionUpdate` / `ToolCallUpdate` / `PlanUpdate` shapes, and `src/transport/types.ts` declares SAM's own VM-agent control messages (`agent_status`, `select_agent`, `agent_crash_report`, `session_state`). `src/transport/websocket.ts` deliberately types the ACP payload as `unknown` and forwards it. The canonical ACP wire contract lives in the Go VM agent (`packages/vm-agent/internal/acp/`), not in this package.
 - `ToolCallCard` supports lazy content loading via `onLoadContent` callback — it does NOT fetch directly
 - Components use `messageId` field for lazy loading — this is populated by compact mode in the API
 - UI changes here trigger mandatory Playwright visual audit (rule 17)

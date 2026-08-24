@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, posix, relative } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
 
 const root = join(import.meta.dirname, '..', '..');
 
@@ -298,6 +299,83 @@ describe('dependency governance', () => {
         version,
         `${file}: @cloudflare/sandbox npm version must equal the Dockerfile.sandbox image tag ${imageTag}`
       ).toBe(imageTag);
+    }
+  });
+
+  // Dependabot bumps ONE manifest entry at a time and its `groups:` config cannot
+  // express "these siblings ship from one repo". So a lockstep-released group
+  // routinely arrives with only one member moved. Every group below has actually
+  // drifted or been caught mid-drift in this repo:
+  //   - react/react-dom: #1856 grouped `react` with `@types/react` but NOT
+  //     `react-dom`, which ships from the same repo and loads the matching
+  //     reconciler build. Merging it as authored would have landed react 19.2.8
+  //     against react-dom 19.2.7.
+  //   - @commitlint/cli + config-conventional: #1854 moved only the config.
+  //   - typescript-eslint trio: pnpm-workspace.yaml already carried a comment
+  //     saying "Dependabot only proposes the parser" — prose, enforced nowhere.
+  //   - vitest + @vitest/coverage-v8: coverage-v8 declares an EXACT peer pin on
+  //     vitest, and the catalog was violating it (4.1.5 vs 4.1.7) until this batch.
+  // Both halves were caught by a human every time. This test is what makes that
+  // repeatable. Adding a newly discovered pair should be a one-line change here.
+  it('keeps lockstep-released package groups on identical versions', () => {
+    const catalog = (parse(read('pnpm-workspace.yaml')) as { catalog: Record<string, string> })
+      .catalog;
+    const rootDevDeps = (
+      JSON.parse(read('package.json')) as { devDependencies: Record<string, string> }
+    ).devDependencies;
+
+    const groups = [
+      {
+        label: 'react ecosystem (react and react-dom ship from one repo)',
+        source: 'pnpm-workspace.yaml catalog',
+        members: ['react', 'react-dom'] as const,
+        lookup: (name: string) => catalog[name],
+      },
+      {
+        label: 'typescript-eslint (released in lockstep from one monorepo)',
+        source: 'pnpm-workspace.yaml catalog',
+        members: [
+          '@typescript-eslint/eslint-plugin',
+          '@typescript-eslint/parser',
+          'typescript-eslint',
+        ] as const,
+        lookup: (name: string) => catalog[name],
+      },
+      {
+        label: 'vitest (@vitest/coverage-v8 declares an exact peer pin on vitest)',
+        source: 'pnpm-workspace.yaml catalog',
+        members: ['vitest', '@vitest/coverage-v8'] as const,
+        lookup: (name: string) => catalog[name],
+      },
+      {
+        label: 'commitlint (cli and config-conventional are released together)',
+        source: 'package.json devDependencies',
+        members: ['@commitlint/cli', '@commitlint/config-conventional'] as const,
+        lookup: (name: string) => rootDevDeps[name],
+      },
+    ];
+
+    // Guards the guard: a renamed catalog key or a restructured manifest would
+    // otherwise make every group resolve to `undefined` and pass vacuously.
+    expect(groups.length).toBeGreaterThanOrEqual(4);
+
+    for (const { label, source, members, lookup } of groups) {
+      const resolved = members.map((name) => ({ name, version: lookup(name) }));
+
+      for (const { name, version } of resolved) {
+        expect(
+          version,
+          `${label}: "${name}" was not found in ${source}. If it moved, update this group rather than deleting it.`
+        ).toBeDefined();
+      }
+
+      const distinct = new Set(resolved.map(({ version }) => version));
+      expect(
+        distinct.size,
+        `${label}: all members must be on one version, found ${resolved
+          .map(({ name, version }) => `${name}@${version}`)
+          .join(', ')}`
+      ).toBe(1);
     }
   });
 });
