@@ -33,6 +33,7 @@ user-invocable: false
 - `POST /api/projects` — Create project
 - `GET /api/projects` — List user's projects (supports `limit` and `cursor`)
 - `GET /api/projects/:id` — Get project detail (includes task status counts and linked workspace count)
+- `GET /api/projects/:projectId/comments` — List project-wide comment inbox across chat and library threads (supports `status=open|sent|resolved`, `limit`)
 - `PATCH /api/projects/:id` — Update project metadata (`name`, `description`, `defaultBranch`)
 - `DELETE /api/projects/:id` — Delete project (cascades project tasks/dependencies/events)
 
@@ -55,7 +56,7 @@ user-invocable: false
 - `POST /api/projects/:projectId/sessions/:sessionId/summarize` — Generate a session summary for conversation forking
 - `POST /api/projects/:projectId/sessions/:sessionId/stop` — Stop a chat session
 
-Comment threads are scoped to the ProjectData Durable Object addressed by `projectId`; route authorization requires project `task:read` for list and `task:write` for mutations, and the DO rejects missing sessions, missing messages, and cross-session message anchors. Mutations return `{ thread, idempotent }` or `{ thread, reply, idempotent }`; successful first writes use HTTP 201 for create/reply and 200 for status transitions. Project session WebSocket listeners receive `{ type: "comment.thread.changed", payload: { sessionId, thread, reason } }` with `reason` in `thread_created | reply_created | marked_sent | resolved | reopened`.
+Comment threads are scoped to the ProjectData Durable Object addressed by `projectId`; route authorization requires project `task:read` for list and project-wide inbox reads, and `task:write` for mutations. The DO rejects missing sessions, missing messages, and cross-session message anchors. Mutations return `{ thread, idempotent }` or `{ thread, reply, idempotent }`; successful first writes use HTTP 201 for create/reply and 200 for status transitions. Project session WebSocket listeners receive `{ type: "comment.thread.changed", payload: { sessionId, thread, reason } }` with `reason` in `thread_created | reply_created | marked_sent | resolved | reopened`.
 
 ## Task Management (Project Scoped)
 

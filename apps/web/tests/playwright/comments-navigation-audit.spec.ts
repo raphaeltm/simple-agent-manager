@@ -708,12 +708,8 @@ for (const [label, viewport] of [
 
       const disclosure = page.getByText(/most recently active of 137 comments/);
       await expect(disclosure).toBeVisible();
-      // The disclosure sits below the fold at the end of the list, and this app
-      // scrolls inside its own wrapper rather than at the document level — so a
-      // `fullPage` screenshot captures only the viewport and would show the same
-      // pixels as the untruncated case. Scroll to it, which also proves it is
-      // actually reachable rather than merely present in the DOM (rule 62).
-      await disclosure.scrollIntoViewIfNeeded();
+      // The disclosure must be near the filters, before the bucket list, so a
+      // reader who only checks "Needs you" still sees that this is a capped page.
       await expect(disclosure).toBeInViewport();
       await page.waitForTimeout(600);
       await screenshot(page, `comments-12-project-truncated-${label}`);

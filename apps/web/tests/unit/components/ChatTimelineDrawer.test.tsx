@@ -111,6 +111,19 @@ describe('ChatTimelineDrawer', () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it('keeps keyboard focus inside the timeline drawer', () => {
+    render(<ChatTimelineDrawer {...defaultProps} />);
+    const contextBtn = screen.getByText('Context').closest('button')!;
+    const closeBtn = screen.getByLabelText('Close timeline');
+
+    contextBtn.focus();
+    fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(closeBtn);
+
+    fireEvent.keyDown(window, { key: 'Tab' });
+    expect(document.activeElement).toBe(contextBtn);
+  });
+
   it('calls onToggleContext when Context button is clicked', () => {
     const onToggleContext = vi.fn();
     render(<ChatTimelineDrawer {...defaultProps} onToggleContext={onToggleContext} />);

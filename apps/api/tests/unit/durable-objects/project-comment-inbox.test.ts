@@ -306,6 +306,40 @@ describe('ProjectData project comment inbox', () => {
     expect(open.totalCount).toBe(2);
   });
 
+  it('filters sent threads across both anchor kinds', () => {
+    seedSession('s-1');
+    seedMessage('s-1', 'm-1', 1);
+    const openMessage = messageThreadAt('s-1', 'm-1', 'still open', 3_000);
+    const sentMessage = messageThreadAt('s-1', 'm-1', 'sent to agent', 2_000);
+    sql.exec(`UPDATE comment_threads SET status = 'sent' WHERE id = ?`, sentMessage);
+    const sentFile = fileThreadAt('file-1', 'sent file', 1_500);
+    sql.exec(`UPDATE library_file_comment_threads SET status = 'sent' WHERE id = ?`, sentFile);
+    fileThreadAt('file-1', 'still open file', 1_000);
+
+    const sent = listProjectCommentInbox(sql, env, { status: 'sent' });
+
+    expect(sent.messageThreads.map((t) => t.id)).toEqual([sentMessage]);
+    expect(sent.messageThreads.map((t) => t.id)).not.toContain(openMessage);
+    expect(sent.fileThreads.map((t) => t.id)).toEqual([sentFile]);
+    expect(sent.totalCount).toBe(2);
+  });
+
+  it('does not report truncation when both tables exactly meet the merged limit', () => {
+    seedSession('s-1');
+    seedMessage('s-1', 'm-1', 1);
+    const messageOne = messageThreadAt('s-1', 'm-1', 'message one', 4_000);
+    const messageTwo = messageThreadAt('s-1', 'm-1', 'message two', 3_000);
+    const fileOne = fileThreadAt('file-1', 'file one', 2_000);
+    const fileTwo = fileThreadAt('file-1', 'file two', 1_000);
+
+    const inbox = listProjectCommentInbox(sql, env, { limit: 4 });
+
+    expect(inbox.messageThreads.map((t) => t.id)).toEqual([messageOne, messageTwo]);
+    expect(inbox.fileThreads.map((t) => t.id)).toEqual([fileOne, fileTwo]);
+    expect(inbox.totalCount).toBe(4);
+    expect(inbox.hasMore).toBe(false);
+  });
+
   it('skips a malformed row instead of failing the whole read', () => {
     seedSession('s-1');
     seedMessage('s-1', 'm-1', 1);

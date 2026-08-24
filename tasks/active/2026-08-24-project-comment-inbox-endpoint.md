@@ -217,6 +217,18 @@ must not merge yet.
 - [x] `listProjectComments` response mapping has direct unit coverage.
 - [x] Playwright fixture copy no longer describes per-session/per-file fan-out
       as the current architecture.
+- [x] `hydrateThreadsAcrossSessions` removed; project-wide message hydration now
+      uses the shared `hydrateThreads` helper and logs the row's own session id.
+- [x] Combined-app auth-routing unit test proves `projectCommentRoutes` inherits
+      session auth from `projectsRoutes`, and pins the real `index.ts` mount
+      order.
+- [x] Backend edge coverage now includes `sent` status, `limit=0`, and the
+      exact both-tables-at-truncation-boundary case.
+- [x] Timeline and comments drawers now share a focus trap, with direct Tab-wrap
+      tests for both.
+- [x] Project Comments truncation disclosure moved above the bucket list so
+      readers see the cap before checking only "Needs you".
+- [x] Internal API reference updated for `GET /api/projects/:projectId/comments`.
 
 ### Outstanding — blocks merge
 
@@ -234,17 +246,17 @@ must not merge yet.
       only the survivors — which also fixes the next item.
 - [x] **MEDIUM — hydrates ~2x what it returns** (202 threads for a 100 page).
       Steady state once both tables have enough rows, not a worst case.
-- [ ] **MEDIUM — `hydrateThreadsAcrossSessions` should merge into `hydrateThreads`.**
+- [x] **MEDIUM — `hydrateThreadsAcrossSessions` should merge into `hydrateThreads`.**
       Its rule-63 justification is cargo-culted: that function's `sessionId` is
       only a log field, never a SQL predicate — the scoping is in the caller's
       SELECT. Derive the log's session id from the row and delete the duplicate.
 - [x] **MEDIUM — `ProjectCommentListResponse` / `...SessionRef` / `...FileRef`
       are exported but imported by nothing.** Wire the route's return type to
       them or delete them (CLAUDE.md bans dead code).
-- [ ] **MEDIUM — no test proves auth is inherited.** The vertical slice mounts
+- [x] **MEDIUM — no test proves auth is inherited.** The vertical slice mounts
       the route standalone with auth mocked, so it cannot catch a reorder of
       `index.ts` breaking it. Rule 06 requires going through the combined app.
-- [ ] MEDIUM — `sent` status, `limit=0`, and both-tables-at-the-truncation-
+- [x] MEDIUM — `sent` status, `limit=0`, and both-tables-at-the-truncation-
       boundary are untested (the last was probed manually and is correct).
 
 **Frontend**
@@ -263,10 +275,10 @@ must not merge yet.
       5 unresolved, 7 total) with nothing distinguishing them.
 - [x] MEDIUM — filter chips use `role="tab"` without the ARIA tabs keyboard
       contract (no roving tabindex, no arrow keys, no `aria-controls`).
-- [ ] MEDIUM — neither drawer traps focus. Concretely reachable: tab out of an
+- [x] MEDIUM — neither drawer traps focus. Concretely reachable: tab out of an
       open drawer into the obscured header and open the other drawer, producing
       two stacked `aria-modal` dialogs.
-- [ ] MEDIUM — truncation disclosure sits below every bucket, so a reader who
+- [x] MEDIUM — truncation disclosure sits below every bucket, so a reader who
       only checks "Needs you" never sees it (rule 65's whole point).
 - [x] `listProjectComments` response mapper has no direct unit test.
 - [x] Playwright fixture `msg-5` still states the fan-out as current architecture.

@@ -255,11 +255,7 @@ function readThreadRows(sql: SqlStorage, sessionId: string, threadIds: string[])
   return parsed;
 }
 
-function hydrateThreads(
-  sql: SqlStorage,
-  sessionId: string,
-  rows: unknown[]
-): MessageCommentThread[] {
+function hydrateThreads(sql: SqlStorage, rows: unknown[]): MessageCommentThread[] {
   const parsedRows: ThreadRow[] = [];
   for (const row of rows) {
     try {
@@ -268,7 +264,7 @@ function hydrateThreads(
       const record = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
       log.warn('comments.thread_row_skipped', {
         rowId: typeof record.id === 'string' ? record.id : null,
-        sessionId,
+        sessionId: typeof record.session_id === 'string' ? record.session_id : null,
         error: String(err),
       });
     }
@@ -335,40 +331,9 @@ export function listCommentThreads(
 
   const hasMore = rows.length > limit;
   return {
-    threads: hydrateThreads(sql, input.sessionId, hasMore ? rows.slice(0, limit) : rows),
+    threads: hydrateThreads(sql, hasMore ? rows.slice(0, limit) : rows),
     hasMore,
   };
-}
-
-/**
- * Parses thread rows for a read that spans sessions.
- *
- * Separate from `hydrateThreads` rather than relaxing its `sessionId` parameter:
- * that parameter annotates the skip log, but it also documents that its caller
- * is session-scoped, and .claude/rules/63 is about exactly the drift where a
- * scope argument is loosened so one more caller fits. Here each row supplies its
- * own session id, which makes the log strictly more precise anyway.
- */
-function hydrateThreadsAcrossSessions(sql: SqlStorage, rows: unknown[]): MessageCommentThread[] {
-  const parsedRows: ThreadRow[] = [];
-  for (const row of rows) {
-    try {
-      parsedRows.push(parseRow(ThreadRowSchema, row, 'comment_thread'));
-    } catch (err) {
-      const record = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
-      log.warn('comments.thread_row_skipped', {
-        rowId: typeof record.id === 'string' ? record.id : null,
-        sessionId: typeof record.session_id === 'string' ? record.session_id : null,
-        error: String(err),
-      });
-    }
-  }
-
-  const replies = readReplies(
-    sql,
-    parsedRows.map((row) => row.id)
-  );
-  return parsedRows.map((row) => mapThread(row, replies.get(row.id) ?? []));
 }
 
 function parseProjectThreadCandidates(rows: unknown[]): ProjectCommentThreadCandidate[] {
@@ -473,7 +438,7 @@ export function hydrateProjectCommentThreads(
     )
     .toArray();
 
-  const hydrated = hydrateThreadsAcrossSessions(sql, rows);
+  const hydrated = hydrateThreads(sql, rows);
   const byId = new Map(hydrated.map((thread) => [thread.id, thread]));
   return threadIds.flatMap((id) => {
     const thread = byId.get(id);

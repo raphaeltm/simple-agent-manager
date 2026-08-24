@@ -81,6 +81,16 @@ export function ProjectComments() {
 
       <CommentInboxFilters value={filter} counts={counts} onChange={setFilter} />
 
+      {/*
+        Disclose the page cap before the buckets, not after them. A reader who
+        only checks "Needs you" should still see that the page is a capped view.
+      */}
+      {inbox.truncated && (
+        <p className="m-0 rounded-md border border-border-default bg-surface px-3 py-2 text-xs text-fg-muted">
+          Showing the {inbox.shownCount} most recently active of {inbox.totalCount} comments.
+        </p>
+      )}
+
       {inbox.loading ? (
         <div className="flex items-center justify-center gap-2 py-12">
           <Spinner size="md" />
@@ -124,18 +134,6 @@ export function ProjectComments() {
             </section>
           ))}
         </div>
-      )}
-
-      {/*
-        Disclose the page cap rather than letting a truncated list read as a
-        complete one — see `useProjectCommentInbox` and rule 65. Only rendered
-        when something was actually cut: a footer that always says "showing all
-        of them" is noise people learn to skip past.
-      */}
-      {inbox.truncated && (
-        <p className="m-0 text-xs text-fg-muted">
-          Showing the {inbox.shownCount} most recently active of {inbox.totalCount} comments.
-        </p>
       )}
     </div>
   );

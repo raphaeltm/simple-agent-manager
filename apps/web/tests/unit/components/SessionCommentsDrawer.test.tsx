@@ -114,6 +114,17 @@ describe('SessionCommentsDrawer', () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it('keeps keyboard focus inside the comments drawer', () => {
+    render(<SessionCommentsDrawer {...defaultProps} />);
+    const closeBtn = screen.getByLabelText('Close comments');
+    const lastFilter = screen.getByRole('button', { name: 'Resolved, 0 comments' });
+
+    closeBtn.focus();
+    fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+
+    expect(document.activeElement).toBe(lastFilter);
+  });
+
   it('wires reply, send-to-agent, and resolve actions through the expanded thread', async () => {
     const onReply = vi.fn().mockResolvedValue(undefined);
     const onResolve = vi.fn().mockResolvedValue(undefined);

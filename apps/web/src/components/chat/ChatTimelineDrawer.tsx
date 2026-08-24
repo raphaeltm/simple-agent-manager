@@ -6,12 +6,13 @@ import {
   TimelineStem,
 } from '@simple-agent-manager/ui';
 import { AlignLeft, Check, Clock, MessageSquareQuote, X } from 'lucide-react';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Virtuoso } from 'react-virtuoso';
 
 import { COMMENT_BUCKET_COLORS } from '../project-message-view/comments/comment-inbox';
 import type { TimelineEntry, TimelineJumpTarget } from '../project-message-view/timeline-types';
+import { useDialogFocusTrap } from './useDialogFocusTrap';
 
 const SEVERITY_COLORS: Record<string, string> = {
   info: '#3b82f6',
@@ -51,20 +52,7 @@ export function ChatTimelineDrawer({
   onJump,
 }: ChatTimelineDrawerProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-
-  // Escape key closes the drawer
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [onClose]);
-
-  // Focus panel on mount
-  useEffect(() => {
-    panelRef.current?.focus();
-  }, []);
+  useDialogFocusTrap(panelRef, onClose);
 
   const renderEntry = useCallback(
     (index: number, entry: TimelineEntry) => (

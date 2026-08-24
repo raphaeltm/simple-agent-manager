@@ -379,6 +379,14 @@ describe('project comment inbox — vertical slice', () => {
     expect(body.hasMore).toBe(true);
   });
 
+  it('rejects limit=0 at the HTTP boundary', async () => {
+    const res = await get(PROJECT_A, '?limit=0');
+    const body = (await res.json()) as { message: string };
+
+    expect(res.status).toBe(400);
+    expect(body.message).toBe('limit must be a positive integer');
+  });
+
   it('applies the configured byte budget end to end', async () => {
     harness.env.PROJECT_COMMENT_LIST_MAX_BYTES = '20';
     const sqlA = harness.storages.get(PROJECT_A)!;

@@ -1,6 +1,6 @@
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { CornerDownRight, MessageSquareQuote, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import type { MessageCommentAction } from '../../lib/api/comments';
@@ -14,6 +14,7 @@ import { CommentInboxFilters } from '../project-message-view/comments/CommentInb
 import { CommentInboxRow } from '../project-message-view/comments/CommentInboxRow';
 import { CommentThread } from '../project-message-view/comments/CommentThread';
 import type { TimelineJumpTarget } from '../project-message-view/timeline-types';
+import { useDialogFocusTrap } from './useDialogFocusTrap';
 
 export interface SessionCommentsDrawerProps {
   items: CommentInboxItem[];
@@ -61,18 +62,7 @@ export function SessionCommentsDrawer({
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const visible = useMemo(() => filterInbox(items, filter, viewerId), [items, filter, viewerId]);
-
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [onClose]);
-
-  useEffect(() => {
-    panelRef.current?.focus();
-  }, []);
+  useDialogFocusTrap(panelRef, onClose);
 
   return createPortal(
     <>
@@ -147,7 +137,10 @@ export function SessionCommentsDrawer({
                             className="mt-2"
                             onClick={() => {
                               onJump({
-                                messageId: item.source.kind === 'session' ? item.source.messageId : undefined,
+                                messageId:
+                                  item.source.kind === 'session'
+                                    ? item.source.messageId
+                                    : undefined,
                                 timestamp: item.thread.createdAt,
                               });
                               onClose();
@@ -181,9 +174,7 @@ function EmptyInbox({ filter, total }: { filter: CommentInboxFilter; total: numb
       <div className="px-6 py-10 text-center">
         <MessageSquareQuote size={22} className="mx-auto mb-2 text-fg-muted opacity-60" />
         <p className="m-0 text-sm text-fg-primary">No comments in this session</p>
-        <p className="m-0 mt-1 text-xs text-fg-muted">
-          Select any text in a message to leave one.
-        </p>
+        <p className="m-0 mt-1 text-xs text-fg-muted">Select any text in a message to leave one.</p>
       </div>
     );
   }
