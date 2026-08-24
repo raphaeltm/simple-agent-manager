@@ -50,19 +50,19 @@ demonstrated D1 write defect.
 
 ## Implementation checklist
 
-- [ ] Classify TaskRunner `completed=true` + `currentStep='running'` + active D1 task as normal
+- [x] Classify TaskRunner `completed=true` + `currentStep='running'` + active D1 task as normal
       handoff, not a persisted D1 mismatch warning.
-- [ ] Keep conclusive dead-runtime reconciliation unchanged.
-- [ ] Preserve a durable warning for genuine completed-DO/pre-handoff active-task
+- [x] Keep conclusive dead-runtime reconciliation unchanged.
+- [x] Preserve a durable warning for genuine completed-DO/pre-handoff active-task
       inconsistencies.
-- [ ] Change mismatch dedupe from a 30-minute repeat window to one durable diagnostic per task.
-- [ ] Add deterministic regression tests for:
-  - [ ] live normal handoff (`task_acp_session_live`) emits no persisted mismatch warning;
-  - [ ] restorable/superseded preserved normal handoff emits no persisted mismatch warning;
-  - [ ] genuine pre-handoff completed-DO inconsistency emits one durable fact-based diagnostic;
-  - [ ] an existing diagnostic suppresses repeats.
-- [ ] Update source-contract tests that currently encode the old repeated warning behavior.
-- [ ] Run focused tests and required quality checks.
+- [x] Change mismatch dedupe from a 30-minute repeat window to one durable diagnostic per task.
+- [x] Add deterministic regression tests for:
+  - [x] live normal handoff (`task_acp_session_live`) emits no persisted mismatch warning;
+  - [x] restorable/superseded preserved normal handoff emits no persisted mismatch warning;
+  - [x] genuine pre-handoff completed-DO inconsistency emits one durable fact-based diagnostic;
+  - [x] an existing diagnostic suppresses repeats.
+- [x] Update source-contract tests that currently encode the old repeated warning behavior.
+- [x] Run focused tests and required quality checks.
 - [ ] Perform required specialist reviews.
 - [ ] Create/push a focused PR; do not deploy to staging and do not merge.
 
@@ -92,3 +92,10 @@ The `/do` workflow normally commits the task file to `main` before implementatio
 repository auto-deploys production from `main`, and this task explicitly says not to merge or
 enter the shared staging/deployment wave yet. The task file therefore lives on the output
 branch and will be reviewed with the code PR.
+
+## Validation evidence
+
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/stuck-tasks.test.ts` — 52 passed.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/recovery-resilience.test.ts` — 69 passed.
+- `pnpm --filter @simple-agent-manager/api typecheck` — passed.
+- `pnpm --filter @simple-agent-manager/api lint` — passed.
