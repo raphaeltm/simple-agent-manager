@@ -28,6 +28,11 @@ import {
   type McpTokenData,
   sanitizeUserInput,
 } from './_helpers';
+import {
+  buildPolicyInstructions,
+  formatPolicyDirectives,
+  type PolicyEntry,
+} from './instruction-formatting';
 
 type InstructionContextType = 'task' | 'conversation' | 'trial' | 'direct-workspace';
 
@@ -155,13 +160,7 @@ export async function handleGetInstructions(
   }[] = [];
   // Retrieve active project policies (Phase 4: Policy Propagation).
   // Policies are dynamic rules and preferences that agents must follow.
-  let policyContext: {
-    id: string;
-    category: string;
-    title: string;
-    content: string;
-    confidence: number;
-  }[] = [];
+  let policyContext: PolicyEntry[] = [];
   let entityIndex: KnowledgeEntityIndexEntry[] = [];
   let totalEntities = 0;
 
@@ -230,6 +229,8 @@ export async function handleGetInstructions(
       title: p.title,
       content: p.content,
       confidence: p.confidence,
+      scope: p.scope,
+      expiresAt: p.expiresAt,
     }));
   } else {
     log.warn('mcp.get_instructions.policy_retrieval_failed', {
@@ -513,99 +514,6 @@ function buildKnowledgeInstructions(hasKnowledge: boolean, isConversation: boole
       'You are in a direct conversation — this is the richest source of user knowledge. ' +
         'Pay close attention to corrections, preferences, and context the user shares. ' +
         'Store important observations as you go, not just at the end.'
-    );
-  }
-
-  return instructions;
-}
-
-// ─── Policy Formatting Helpers ──────────────────────────────────────────────
-
-interface PolicyEntry {
-  id: string;
-  category: string;
-  title: string;
-  content: string;
-  confidence: number;
-}
-
-/**
- * Format active policies into a readable text block grouped by category.
- * Returns null if there are no policies.
- *
- * Each policy carries its full id inline so agents can call `update_policy` /
- * `remove_policy` without a separate lookup. This is the only place the id is exposed —
- * the former `policyContext` structured array was removed as duplication.
- *
- * Output looks like:
- *   ## Project Policies — you MUST follow these
- *
- *   ### Rules
- *   - **Always use conventional commits** (id: 7d24e435-0153-44a6-a532-1244510d9e25): Commit messages must follow ...
- *
- *   ### Constraints
- *   - **This project uses Valibot, not Zod** (id: 9f1c02ab-77de-4b30-8c11-3ac6d5e81b47): All runtime validation ...
- */
-function formatPolicyDirectives(entries: PolicyEntry[]): string | null {
-  if (entries.length === 0) return null;
-
-  // Group by category
-  const grouped = new Map<string, { id: string; title: string; content: string }[]>();
-  for (const entry of entries) {
-    let group = grouped.get(entry.category);
-    if (!group) {
-      group = [];
-      grouped.set(entry.category, group);
-    }
-    group.push({ id: entry.id, title: entry.title, content: entry.content });
-  }
-
-  // Category display order and labels
-  const categoryLabels: Record<string, string> = {
-    rule: 'Rules (MUST follow)',
-    constraint: 'Constraints (technical limitations)',
-    delegation: 'Delegation (agent autonomy)',
-    preference: 'Preferences (soft guidance)',
-  };
-
-  const lines: string[] = ['## Project Policies — you MUST follow these\n'];
-  for (const [category, items] of grouped) {
-    const label = categoryLabels[category] || category;
-    lines.push(`### ${label}`);
-    for (const item of items) {
-      // The id MUST be rendered in full — `update_policy` / `remove_policy` resolve it with
-      // `WHERE id = ?` (exact match), so an abbreviated id would not address the row.
-      lines.push(`- **${item.title}** (id: ${item.id}): ${item.content}`);
-    }
-    lines.push('');
-  }
-
-  return lines.join('\n');
-}
-
-/**
- * Build policy-related instructions based on whether policies exist
- * and the session mode.
- */
-function buildPolicyInstructions(hasPolicies: boolean, isConversation: boolean): string[] {
-  const instructions: string[] = [];
-
-  if (hasPolicies) {
-    instructions.push(
-      'The policyDirectives field above contains project policies set by the user. ' +
-        'You MUST follow all rules and constraints. Preferences are softer guidance — follow them unless you have a good reason not to.'
-    );
-    instructions.push(
-      'If a user statement contradicts an existing policy, use `update_policy` to update it. ' +
-        'If a policy is no longer relevant, use `remove_policy` to deactivate it. ' +
-        'Each policy in policyDirectives is tagged with its `policyId` as "(id: ...)" — pass that id exactly as shown.'
-    );
-  }
-
-  if (isConversation) {
-    instructions.push(
-      'When a user states a rule, constraint, delegation preference, or soft preference, ' +
-        'save it as a project policy via `add_policy` so it applies to all future agents in this project.'
     );
   }
 

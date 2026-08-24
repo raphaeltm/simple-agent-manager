@@ -3,6 +3,7 @@ import {
   KNOWLEDGE_RELATION_TYPES,
   KNOWLEDGE_SOURCE_TYPES,
   POLICY_CATEGORIES,
+  POLICY_SCOPES,
   POLICY_SOURCES,
 } from '@simple-agent-manager/shared';
 import { Hono } from 'hono';
@@ -179,6 +180,28 @@ describe('MCP knowledge and policy route tools', () => {
     expect(getTool(tools, 'update_policy')?.inputSchema.properties.category.enum).toEqual([...POLICY_CATEGORIES]);
   });
 
+  it('advertises the lifecycle fields on add_policy and update_policy', async () => {
+    // An agent can only set an expiry if the tool schema tells it the field exists —
+    // this is what makes the capture instruction in get_instructions actionable.
+    const res = await listTools(app);
+    const body = await res.json();
+    const tools = body.result.tools as Array<{
+      name: string;
+      description: string;
+      inputSchema: { properties: Record<string, { enum?: string[]; description?: string }> };
+    }>;
+
+    for (const name of ['add_policy', 'update_policy']) {
+      const tool = getTool(tools, name);
+      expect(tool?.inputSchema.properties.scope?.enum).toEqual([...POLICY_SCOPES]);
+      expect(tool?.inputSchema.properties.expiresAt).toBeDefined();
+      expect(tool?.inputSchema.properties.scope?.description).toMatch(/REQUIRES expiresAt/);
+    }
+
+    // The description has to steer an agent toward expiring one-shot policies.
+    expect(getTool(tools, 'add_policy')?.description).toMatch(/scope to "task"/);
+  });
+
   it('returns INVALID_PARAMS for missing required knowledge and policy params', async () => {
     await expectInvalidParams(await mcpPost(app, 'add_knowledge', {
       observation: 'Uses explicit validation',
@@ -302,6 +325,10 @@ describe('MCP knowledge and policy route tools', () => {
       'explicit',
       'task-123',
       0.8,
+      // Lifecycle defaults: a policy created without scope/expiry is a standing one,
+      // which is exactly what every policy created before this feature was.
+      'always',
+      null,
     );
   });
 
@@ -417,6 +444,181 @@ describe('MCP knowledge and policy route tools', () => {
       2,
       0,
     );
+  });
+
+  describe('policy lifecycle (expiry + scope)', () => {
+    it('rejects a task-scoped policy with no expiry before touching ProjectData', async () => {
+      // The failure this feature exists to prevent: capturing a one-shot workflow
+      // constraint as a policy that then loads into every future session forever.
+      await expectInvalidParams(await mcpPost(app, 'add_policy', {
+        category: 'constraint',
+        title: 'Use profile X for the reliability wave',
+        content: 'Applies to the 2026-08-21 workstream only.',
+        scope: 'task',
+      }), 'task-scoped policy must set expiresAt');
+
+      expect(projectDataService.createPolicy).not.toHaveBeenCalled();
+    });
+
+    it('rejects an expiry in the past', async () => {
+      await expectInvalidParams(await mcpPost(app, 'add_policy', {
+        category: 'rule',
+        title: 'Already lapsed',
+        content: 'Content',
+        expiresAt: Date.now() - 1000,
+      }), 'must be in the future');
+
+      expect(projectDataService.createPolicy).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown scope', async () => {
+      await expectInvalidParams(await mcpPost(app, 'add_policy', {
+        category: 'rule',
+        title: 'Bad scope',
+        content: 'Content',
+        scope: 'forever',
+      }), 'scope must be one of');
+
+      expect(projectDataService.createPolicy).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-numeric expiry', async () => {
+      await expectInvalidParams(await mcpPost(app, 'add_policy', {
+        category: 'rule',
+        title: 'Bad expiry',
+        content: 'Content',
+        expiresAt: 'next week',
+      }), 'expiresAt must be a number');
+
+      expect(projectDataService.createPolicy).not.toHaveBeenCalled();
+    });
+
+    it('forwards a valid task-scoped policy with its expiry to ProjectData', async () => {
+      const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+      const res = await mcpPost(app, 'add_policy', {
+        category: 'constraint',
+        title: 'Use profile X for the reliability wave',
+        content: 'Applies to the 2026-08-21 workstream only.',
+        scope: 'task',
+        expiresAt,
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(projectDataService.createPolicy).toHaveBeenCalledWith(
+        mockEnv,
+        'proj-456',
+        'constraint',
+        'Use profile X for the reliability wave',
+        'Applies to the 2026-08-21 workstream only.',
+        'explicit',
+        'task-123',
+        expect.any(Number),
+        'task',
+        expiresAt,
+      );
+    });
+
+    it('validates an update against the merged post-write state, not the patch alone', async () => {
+      // Stripping the expiry off a policy that is already task-scoped must fail even
+      // though the patch itself mentions no scope.
+      vi.mocked(projectDataService.getPolicy).mockResolvedValue({
+        id: 'pol-1',
+        category: 'constraint',
+        title: 'One-shot',
+        content: 'Content',
+        source: 'explicit',
+        sourceSessionId: null,
+        confidence: 0.9,
+        active: true,
+        scope: 'task',
+        expiresAt: Date.now() + 60_000,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      } as Awaited<ReturnType<typeof projectDataService.getPolicy>>);
+
+      await expectInvalidParams(await mcpPost(app, 'update_policy', {
+        policyId: 'pol-1',
+        expiresAt: null,
+      }), 'task-scoped policy must set expiresAt');
+
+      expect(projectDataService.updatePolicy).not.toHaveBeenCalled();
+    });
+
+    it('maps the DO guard rejection to INVALID_PARAMS rather than crashing', async () => {
+      // Production RPC fidelity: a DO-thrown error reaches this handler as a plain
+      // Error carrying only name and message (rule 63), so the mapping must be
+      // message-based. Without the try/catch this rejection escapes the handler.
+      vi.mocked(projectDataService.getPolicy).mockResolvedValue({
+        id: 'pol-3',
+        scope: 'always',
+        expiresAt: null,
+      } as Awaited<ReturnType<typeof projectDataService.getPolicy>>);
+      vi.mocked(projectDataService.updatePolicy).mockRejectedValue(
+        new Error(
+          "a task-scoped policy must set expiresAt so it cannot outlive the work it was captured for (use scope 'always' for a standing policy)"
+        )
+      );
+
+      await expectInvalidParams(await mcpPost(app, 'update_policy', {
+        policyId: 'pol-3',
+        scope: 'task',
+        expiresAt: Date.now() + 60_000,
+      }), 'task-scoped policy must set expiresAt');
+    });
+
+    it('allows clearing the expiry when the scope is widened in the same update', async () => {
+      vi.mocked(projectDataService.getPolicy).mockResolvedValue({
+        id: 'pol-2',
+        category: 'constraint',
+        title: 'One-shot',
+        content: 'Content',
+        source: 'explicit',
+        sourceSessionId: null,
+        confidence: 0.9,
+        active: true,
+        scope: 'task',
+        expiresAt: Date.now() + 60_000,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      } as Awaited<ReturnType<typeof projectDataService.getPolicy>>);
+      vi.mocked(projectDataService.updatePolicy).mockResolvedValue(true);
+
+      const res = await mcpPost(app, 'update_policy', {
+        policyId: 'pol-2',
+        scope: 'always',
+        expiresAt: null,
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(projectDataService.updatePolicy).toHaveBeenCalledWith(
+        mockEnv,
+        'proj-456',
+        'pol-2',
+        expect.objectContaining({ scope: 'always', expiresAt: null }),
+      );
+    });
+
+    it('does not read the stored policy when the update touches no lifecycle field', async () => {
+      // Guards the I/O budget (rule 60) on the path agents actually call at runtime.
+      // The extra getPolicy round-trip exists only to merge scope and expiry against
+      // stored state, so an ordinary active/title edit must not pay for it. The REST
+      // route has the twin of this test in tests/unit/routes/policies.test.ts.
+      vi.mocked(projectDataService.updatePolicy).mockResolvedValue(true);
+
+      const res = await mcpPost(app, 'update_policy', {
+        policyId: 'pol-3',
+        active: false,
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(projectDataService.getPolicy).not.toHaveBeenCalled();
+    });
   });
 
   it('rejects over-limit knowledge update and contradiction content', async () => {

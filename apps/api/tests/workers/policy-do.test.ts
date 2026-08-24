@@ -4,7 +4,7 @@
  * Runs inside the workerd runtime via @cloudflare/vitest-pool-workers,
  * exercising real SQLite storage, DO lifecycle, and migrations.
  */
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { ProjectData } from '../../src/durable-objects/project-data';
@@ -89,7 +89,7 @@ describe('ProjectData Policy CRUD', () => {
     const stub = getStub('policy-remove-test');
     const { id } = await stub.createPolicy(
       'rule', 'To remove', 'Content',
-      'explicit', null, 0.9, {},
+      'explicit', null, 0.9,
     );
 
     const removed = await stub.removePolicy(id);
@@ -108,8 +108,8 @@ describe('ProjectData Policy CRUD', () => {
 
   it('getActivePolicies returns only active policies sorted by category', async () => {
     const stub = getStub('policy-active-test');
-    await stub.createPolicy('preference', 'Pref 1', 'Content', 'explicit', null, 0.8, {});
-    await stub.createPolicy('rule', 'Rule 1', 'Content', 'explicit', null, 0.9, {});
+    await stub.createPolicy('preference', 'Pref 1', 'Content', 'explicit', null, 0.8);
+    await stub.createPolicy('rule', 'Rule 1', 'Content', 'explicit', null, 0.9);
     const { id: toRemove } = await stub.createPolicy('constraint', 'Inactive', 'Content', 'explicit', null, 0.7);
     await stub.removePolicy(toRemove);
 
@@ -135,5 +135,194 @@ describe('ProjectData Policy CRUD', () => {
     const stub = getStub('policy-remove-missing');
     const removed = await stub.removePolicy('nonexistent-id');
     expect(removed).toBe(false);
+  });
+});
+
+/**
+ * Policy lifecycle controls (expiry + scope).
+ *
+ * These run against real DO SQLite through the real migration chain, which is what
+ * makes them a valid test of a WHERE-clause predicate (rule 28) — a mocked `.where()`
+ * that ignores its arguments would pass identically with the expiry conjunct deleted.
+ *
+ * Proven discriminating on 2026-08-23: with `AND (expires_at IS NULL OR expires_at > ?)`
+ * removed from APPLIES_NOW_SQL, exactly the expired-policy assertions below go red while
+ * every null-expiry control stays green.
+ */
+describe('ProjectData Policy lifecycle (expiry + scope)', () => {
+  const HOUR_MS = 60 * 60 * 1000;
+
+  it('excludes an expired policy from getActivePolicies but keeps it readable', async () => {
+    const stub = getStub('policy-expiry-excluded');
+    const { id } = await stub.createPolicy(
+      'constraint', 'Finished workflow', 'Applied only to the 2026-08-21 wave.',
+      'explicit', null, 0.9, 'task', Date.now() + HOUR_MS,
+    );
+    // Move the expiry into the past directly, so the test never sleeps on the clock.
+    // Writing through updatePolicy keeps this on the real update path.
+    await stub.updatePolicy(id, { scope: 'always', expiresAt: Date.now() - 60_000 });
+
+    // The whole point: it stops being injected into sessions.
+    const active = await stub.getActivePolicies();
+    expect(active.find((p: { id: string }) => p.id === id)).toBeUndefined();
+
+    // ...but a human can still see it exists and why it stopped applying.
+    const policy = await stub.getPolicy(id);
+    expect(policy).not.toBeNull();
+    expect(policy!.active).toBe(true);
+
+    const { policies, total } = await stub.listPolicies(null, true, 50, 0);
+    expect(total).toBe(1);
+    expect(policies[0]!.id).toBe(id);
+  });
+
+  it('includes an unexpired policy in getActivePolicies', async () => {
+    const stub = getStub('policy-expiry-included');
+    const expiresAt = Date.now() + HOUR_MS;
+    const { id } = await stub.createPolicy(
+      'rule', 'Still current', 'Content', 'explicit', null, 0.9, 'task', expiresAt,
+    );
+
+    const active = await stub.getActivePolicies();
+    expect(active).toHaveLength(1);
+    expect(active[0]!.id).toBe(id);
+    expect(active[0]!.expiresAt).toBe(expiresAt);
+    expect(active[0]!.scope).toBe('task');
+  });
+
+  /**
+   * The control (rule 62): this must stay green when the expiry conjunct is deleted.
+   * It is what proves the change is backward-compatible for the 81 policies that
+   * already exist — every one of them has a NULL expiry.
+   */
+  it('leaves null-expiry policies untouched — the pre-lifecycle default', async () => {
+    const stub = getStub('policy-expiry-null-control');
+    const { id } = await stub.createPolicy(
+      'rule', 'Standing policy', 'Content', 'explicit', null, 0.9,
+    );
+
+    const policy = await stub.getPolicy(id);
+    expect(policy!.expiresAt).toBeNull();
+    expect(policy!.scope).toBe('always');
+
+    const active = await stub.getActivePolicies();
+    expect(active).toHaveLength(1);
+    expect(active[0]!.id).toBe(id);
+  });
+
+  it('excludes expired policies from the per-project cap count', async () => {
+    // This has to drive the cap BOUNDARY, not just re-assert the read filter. The
+    // per-DO env is not overridable through the pool harness, so lower the limit on
+    // the live instance via runInDurableObject — otherwise the assertion is satisfied
+    // by getActivePolicies alone and passes even when the COUNT query still says
+    // `WHERE active = 1`, which is exactly the regression this test exists to catch.
+    const stub = getStub('policy-expiry-cap');
+
+    await runInDurableObject(stub, async (instance) => {
+      const env = (instance as unknown as { env: Record<string, string> }).env;
+      const previous = env.POLICY_MAX_PER_PROJECT;
+      env.POLICY_MAX_PER_PROJECT = '2';
+      try {
+        // Two standing policies fill the cap exactly.
+        await instance.createPolicy('rule', 'Standing A', 'Content', 'explicit', null, 0.9);
+        const b = await instance.createPolicy('rule', 'Standing B', 'Content', 'explicit', null, 0.9);
+
+        // A third is refused — proves the cap is genuinely enforced at 2.
+        await expect(
+          instance.createPolicy('rule', 'Overflow', 'Content', 'explicit', null, 0.9),
+        ).rejects.toThrow(/Maximum active policies/);
+
+        // Expire one of them. It stays active=1 in the table, so a COUNT that ignores
+        // expiry still sees 2 and would keep refusing.
+        await instance.updatePolicy(b.id, { expiresAt: Date.now() - 60_000 });
+
+        // Now a third must succeed: the inert expired row released its cap slot.
+        const c = await instance.createPolicy('rule', 'Now fits', 'Content', 'explicit', null, 0.9);
+        expect(c.id).toBeTruthy();
+      } finally {
+        if (previous === undefined) delete env.POLICY_MAX_PER_PROJECT;
+        else env.POLICY_MAX_PER_PROJECT = previous;
+      }
+    });
+  });
+
+  it('clears an expiry when updatePolicy is given null, making the policy permanent', async () => {
+    const stub = getStub('policy-expiry-clear');
+    const { id } = await stub.createPolicy(
+      'rule', 'Temporarily scoped', 'Content', 'explicit', null, 0.9, 'task', Date.now() + HOUR_MS,
+    );
+
+    // `null` must mean "clear it", not "leave it alone" — the `??` idiom cannot
+    // express this, which is why updatePolicy uses an explicit undefined check.
+    const updated = await stub.updatePolicy(id, { scope: 'always', expiresAt: null });
+    expect(updated).toBe(true);
+
+    const policy = await stub.getPolicy(id);
+    expect(policy!.expiresAt).toBeNull();
+    expect(policy!.scope).toBe('always');
+  });
+
+  it('leaves the expiry alone when updatePolicy omits it', async () => {
+    const stub = getStub('policy-expiry-preserved');
+    const expiresAt = Date.now() + HOUR_MS;
+    const { id } = await stub.createPolicy(
+      'rule', 'Title', 'Content', 'explicit', null, 0.9, 'task', expiresAt,
+    );
+
+    await stub.updatePolicy(id, { title: 'Renamed' });
+
+    const policy = await stub.getPolicy(id);
+    expect(policy!.title).toBe('Renamed');
+    expect(policy!.expiresAt).toBe(expiresAt);
+    expect(policy!.scope).toBe('task');
+  });
+
+  // The two guard tests below call the DO instance directly via runInDurableObject
+  // rather than through the RPC stub: a stub-level rejection is ALSO surfaced by the
+  // pool as an unhandled rejection, which fails the run even when the assertion passes.
+  // This matches the existing precedent in project-data-do / acp-session-do tests.
+  it('rejects a task-scoped policy with no expiry at the DO guard', async () => {
+    const stub = getStub('policy-scope-guard-create');
+    await runInDurableObject(stub, async (instance) => {
+      await expect(
+        instance.createPolicy('rule', 'One-shot', 'Content', 'explicit', null, 0.9, 'task', null),
+      ).rejects.toThrow(/task-scoped policy must set expiresAt/);
+    });
+
+    // Nothing was written.
+    const active = await stub.getActivePolicies();
+    expect(active).toHaveLength(0);
+  });
+
+  it('rejects an update that would strip the expiry off a task-scoped policy', async () => {
+    const stub = getStub('policy-scope-guard-update');
+    const expiresAt = Date.now() + HOUR_MS;
+    const { id } = await stub.createPolicy(
+      'rule', 'One-shot', 'Content', 'explicit', null, 0.9, 'task', expiresAt,
+    );
+
+    // Clearing the expiry without also widening the scope would resurrect exactly the
+    // permanent one-shot policy this feature exists to prevent.
+    await runInDurableObject(stub, async (instance) => {
+      await expect(instance.updatePolicy(id, { expiresAt: null })).rejects.toThrow(
+        /task-scoped policy must set expiresAt/,
+      );
+    });
+
+    // Nothing mutated.
+    const policy = await stub.getPolicy(id);
+    expect(policy!.expiresAt).toBe(expiresAt);
+    expect(policy!.scope).toBe('task');
+  });
+
+  it('defaults pre-lifecycle rows to scope=always / expiresAt=null after migration 034', async () => {
+    // A policy created without lifecycle arguments is byte-for-byte what migration 034
+    // backfills onto the rows that already existed before this feature shipped.
+    const stub = getStub('policy-migration-defaults');
+    await stub.createPolicy('preference', 'Legacy', 'Content', 'explicit', null, 0.8);
+
+    const { policies } = await stub.listPolicies(null, true, 50, 0);
+    expect(policies[0]!.scope).toBe('always');
+    expect(policies[0]!.expiresAt).toBeNull();
   });
 });

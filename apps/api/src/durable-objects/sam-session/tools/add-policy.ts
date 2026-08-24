@@ -1,7 +1,14 @@
 /**
  * SAM add_policy tool — add a policy to a project.
  */
-import { isPolicyCategory, resolvePolicyLimits } from '@simple-agent-manager/shared';
+import type { PolicyScope } from '@simple-agent-manager/shared';
+import {
+  isPolicyCategory,
+  isPolicyScope,
+  POLICY_SCOPES,
+  resolvePolicyLimits,
+  validatePolicyLifecycle,
+} from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -36,13 +43,34 @@ export const addPolicyDef: AnthropicToolDef = {
         enum: ['rule', 'constraint', 'delegation', 'preference'],
         description: 'The policy category: rule (mandatory), constraint (limit), delegation (authority), preference (soft guidance).',
       },
+      scope: {
+        type: 'string',
+        enum: [...POLICY_SCOPES],
+        description:
+          "How long this policy applies. 'always' (default) is a standing policy injected into every future session. " +
+          "'task' is a one-shot policy captured for a specific piece of work (\"use profile X for the 2026-08-21 wave\") " +
+          'and REQUIRES expiresAt, so it cannot outlive the work it was captured for.',
+      },
+      expiresAt: {
+        type: 'number',
+        description:
+          'Epoch milliseconds after which this policy stops being injected into sessions. Omit for a policy that never expires. ' +
+          'Must be in the future. Required when scope is "task".',
+      },
     },
     required: ['projectId', 'title', 'content', 'category'],
   },
 };
 
 export async function addPolicy(
-  input: { projectId: string; title: string; content: string; category: string },
+  input: {
+    projectId: string;
+    title: string;
+    content: string;
+    category: string;
+    scope?: string;
+    expiresAt?: number | null;
+  },
   ctx: ToolContext,
 ): Promise<unknown> {
   if (!input.projectId?.trim()) {
@@ -61,6 +89,26 @@ export async function addPolicy(
   const env = ctx.env as unknown as Env;
   const db = drizzle(env.DATABASE, { schema });
   const limits = resolvePolicyLimits(env);
+
+  // Lifecycle (scope + expiry), validated through the same shared helper the MCP and
+  // REST write boundaries use, so this third writer cannot drift from them (rule 24).
+  if (input.scope !== undefined && !isPolicyScope(input.scope)) {
+    return { error: `scope must be one of: ${POLICY_SCOPES.join(', ')}` };
+  }
+  const scope: PolicyScope = (input.scope as PolicyScope | undefined) ?? 'always';
+  const expiresAt = input.expiresAt ?? null;
+  if (expiresAt !== null && (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt))) {
+    return { error: 'expiresAt must be a number (epoch milliseconds) or null' };
+  }
+  const lifecycleError = validatePolicyLifecycle({
+    scope,
+    expiresAt,
+    now: Date.now(),
+    maxExpiryMs: limits.maxExpiryMs,
+  });
+  if (lifecycleError) {
+    return { error: lifecycleError };
+  }
 
   // Verify ownership
   const project = await db
@@ -85,6 +133,7 @@ export async function addPolicy(
     env, input.projectId,
     input.category as 'rule' | 'constraint' | 'delegation' | 'preference',
     title, content, 'explicit', null, limits.defaultConfidence,
+    scope, expiresAt,
   );
 
   return {
@@ -94,6 +143,8 @@ export async function addPolicy(
     title,
     source: 'explicit',
     confidence: limits.defaultConfidence,
+    scope,
+    expiresAt,
     createdAt: result.now,
   };
 }

@@ -108,6 +108,8 @@ describe('MCP instruction context handlers', () => {
         title: 'Call get_instructions',
         content: 'Agents must load SAM context before starting work.',
         confidence: 0.95,
+        scope: 'always',
+        expiresAt: null,
       },
     ]);
     mocks.projectData.recordActivityEvent.mockResolvedValue('event-1');
@@ -123,6 +125,78 @@ describe('MCP instruction context handlers', () => {
     expect(payload.task).toMatchObject({ id: 'task-1', title: 'Implement bootstrap' });
     expect(String(payload.knowledgeDirectives)).toContain('Worker control plane');
     expect(String(payload.policyDirectives)).toContain('Call get_instructions');
+    // A standing policy carries no lifecycle annotation — this is the control that
+    // keeps the annotation from leaking onto the ~81 permanent policies.
+    expect(String(payload.policyDirectives)).not.toMatch(/expires/i);
+  });
+
+  it('annotates an expiring policy so an agent does not read it as a permanent gate', async () => {
+    mocks.selectRows = [[task], [project]];
+    mocks.projectData.getActivePolicies.mockResolvedValue([
+      {
+        id: 'policy-2',
+        category: 'constraint',
+        title: 'Use profile X for the reliability wave',
+        content: 'Applies to the 2026-08-21 workstream only.',
+        confidence: 0.9,
+        scope: 'task',
+        expiresAt: Date.UTC(2026, 8, 15, 12, 0, 0),
+      },
+    ]);
+
+    const response = await handleGetInstructions('request-1', baseToken, makeEnv());
+    const payload = parseInstructionPayload(response);
+
+    const directives = String(payload.policyDirectives);
+    expect(directives).toContain('(task-scoped, expires 2026-09-15)');
+    // The annotation must sit on the title line with the policy it describes, AND coexist
+    // with the policy id that update_policy/remove_policy need in order to address the row
+    // (added by the get_instructions payload-reduction change this branch rebased onto).
+    expect(directives).toContain(
+      '- **Use profile X for the reliability wave** (task-scoped, expires 2026-09-15) (id: policy-2): Applies to the 2026-08-21 workstream only.'
+    );
+  });
+
+  it('annotates an always-scoped policy that has an expiry without calling it task-scoped', async () => {
+    mocks.selectRows = [[task], [project]];
+    mocks.projectData.getActivePolicies.mockResolvedValue([
+      {
+        id: 'policy-3',
+        category: 'rule',
+        title: 'Retiring rule',
+        content: 'Content.',
+        confidence: 0.9,
+        scope: 'always',
+        expiresAt: Date.UTC(2026, 11, 1, 0, 0, 0),
+      },
+    ]);
+
+    const response = await handleGetInstructions('request-1', baseToken, makeEnv());
+    const directives = String(parseInstructionPayload(response).policyDirectives);
+
+    expect(directives).toContain('(expires 2026-12-01)');
+    expect(directives).not.toContain('task-scoped');
+  });
+
+  it('tells conversation agents to give one-shot policies an expiry when capturing them', async () => {
+    // Without this instruction the whole feature is inert: agents would keep saving
+    // dated workflow constraints as permanent policies, which is the measured problem.
+    mocks.selectRows = [[project]];
+    mocks.projectData.getSession.mockResolvedValue({ id: 'chat-1', topic: 'Instant topic' });
+
+    const response = await handleGetInstructions('request-1', {
+      ...baseToken,
+      taskId: '',
+      contextType: 'conversation',
+      taskMode: 'conversation',
+      chatSessionId: 'chat-1',
+      agentSessionId: 'agent-1',
+    }, makeEnv());
+    const payload = parseInstructionPayload(response);
+    const instructions = (payload.instructions as string[]).join('\n');
+
+    expect(instructions).toMatch(/scope: "task"/);
+    expect(instructions).toMatch(/expiresAt/);
   });
 
   it('appends a complete entity index naming entities that were not injected', async () => {

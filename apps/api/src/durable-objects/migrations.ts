@@ -1152,6 +1152,34 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '034-policy-lifecycle-controls',
+    run: (sql) => {
+      // Policy lifecycle controls — give policies a shelf life and a scope so
+      // one-shot workflow policies stop being injected into every session forever.
+      //
+      // STRICTLY ADDITIVE (rules 31 / 63): two ALTER TABLE ADD COLUMN statements, no
+      // table recreation, no DROP. A Durable Object has no D1-style time-travel
+      // recovery, so a drop-and-restore here would be unrecoverable.
+      //
+      // Do not put quoted SQL fragments in these comments: the migration safety
+      // scanner extracts every quoted literal in this file — backtick, single AND
+      // double — and validates each as a statement, so inline-code prose is checked
+      // as if it were real SQL.
+      //
+      // Both defaults reproduce the pre-migration behavior exactly, so every policy
+      // that already exists keeps applying unchanged:
+      //   expires_at NULL     -> never expires (what every policy does today)
+      //   scope 'always'      -> standing project policy
+      //
+      // `scope` gets no CHECK constraint, matching `category` / `source` in
+      // migration 019 — SQLite cannot add a CHECK via ALTER TABLE, and the value is
+      // validated at the write boundary by `validatePolicyLifecycle` in
+      // packages/shared/src/constants/policies.ts.
+      sql.exec('ALTER TABLE project_policies ADD COLUMN expires_at INTEGER');
+      sql.exec("ALTER TABLE project_policies ADD COLUMN scope TEXT NOT NULL DEFAULT 'always'");
+    },
+  },
 ];
 
 /**

@@ -54,7 +54,7 @@ function makeObservation(overrides: Partial<{ id: string; entityId: string; cont
   };
 }
 
-function makePolicy(overrides: Partial<{ id: string; category: string; title: string; content: string; active: boolean; confidence: number; source: string }> = {}) {
+function makePolicy(overrides: Partial<{ id: string; category: string; title: string; content: string; active: boolean; confidence: number; source: string; scope: string; expiresAt: number | null }> = {}) {
   return {
     id: overrides.id ?? 'pol-1',
     category: overrides.category ?? 'rule',
@@ -64,6 +64,8 @@ function makePolicy(overrides: Partial<{ id: string; category: string; title: st
     confidence: overrides.confidence ?? 0.9,
     source: overrides.source ?? 'explicit',
     sourceSessionId: null,
+    scope: overrides.scope ?? 'always',
+    expiresAt: overrides.expiresAt ?? null,
     createdAt: Date.now() - 86400000,
     updatedAt: Date.now(),
   };
@@ -101,6 +103,44 @@ const NORMAL_POLICIES = [
   makePolicy({ id: 'p1', category: 'rule', title: 'Always run tests' }),
   makePolicy({ id: 'p2', category: 'constraint', title: 'No hardcoded URLs', active: true, confidence: 0.95 }),
   makePolicy({ id: 'p3', category: 'preference', title: 'Prefer concise code', active: false, confidence: 0.7 }),
+];
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Lifecycle states a policy card has to render: a standing policy, a live
+ * task-scoped one, an expired one, and — as `pl4` — the genuine worst case for
+ * the header row at 375px: a 200-character unbroken title carrying the MAXIMUM
+ * badge count (category + active + task-scoped + expired). Splitting "longest
+ * title" and "most badges" across two cards would leave the combination that
+ * actually overflows untested.
+ */
+const LIFECYCLE_POLICIES = [
+  makePolicy({ id: 'pl1', category: 'rule', title: 'Standing policy with no expiry' }),
+  makePolicy({
+    id: 'pl2',
+    category: 'constraint',
+    title: 'Use Codex 5.5 High Chat VMs for the reliability workflow',
+    content: 'Applies to the 2026-08-21 workstream only.',
+    scope: 'task',
+    expiresAt: Date.now() + 7 * DAY_MS,
+  }),
+  makePolicy({
+    id: 'pl3',
+    category: 'delegation',
+    title: 'Commenting delivery root is coordination-only',
+    content: 'This policy lapsed and no longer reaches any agent session.',
+    scope: 'task',
+    expiresAt: Date.now() - 3 * DAY_MS,
+  }),
+  makePolicy({
+    id: 'pl4',
+    category: 'preference',
+    title: 'A'.repeat(200),
+    content: 'B'.repeat(500),
+    scope: 'task',
+    expiresAt: Date.now() - 30 * DAY_MS,
+  }),
 ];
 
 const NORMAL_OBSERVATIONS = [
@@ -146,9 +186,11 @@ async function setupMocks(page: Page, opts: {
       return route.fulfill({ json: { tasks: [] } });
     }
 
-    // GitHub installations
+    // GitHub installations. Non-empty on purpose — see the onboarding note below.
     if (path === '/api/github/installations') {
-      return route.fulfill({ json: [] });
+      return route.fulfill({
+        json: [{ id: 'inst-1', accountLogin: 'testuser', accountType: 'User' }],
+      });
     }
 
     // Notifications
@@ -156,12 +198,49 @@ async function setupMocks(page: Page, opts: {
       return route.fulfill({ json: { notifications: [], unreadCount: 0, count: 0 } });
     }
 
+    // Report-issue config. The app shell fetches this on every authenticated page.
+    // Without it the generic `{}` fallback reaches code that calls `.some()` on a
+    // field it expects to be an array, the ErrorBoundary replaces the whole page,
+    // and every test in this file fails regardless of what it asserts.
+    if (path === '/api/report-issue/config') {
+      return route.fulfill({ json: { enabled: false } });
+    }
+    if (path === '/api/config/vapid-public-key') {
+      return route.fulfill({ json: { publicKey: null } });
+    }
+
     // Agents
     if (path === '/api/agents') {
       return route.fulfill({ json: [] });
     }
 
-    // Credentials
+    // Credentials. Two things matter here, and both were previously wrong.
+    //
+    // 1. The two endpoints have DIFFERENT shapes, and the difference is load-bearing:
+    //    `listCredentials()` (apps/web/src/lib/api/credentials.ts) returns a bare
+    //    `CredentialResponse[]`, which `hasByocComputeCredential` calls `.some()` on.
+    //    Serving the agent-credential envelope here made that throw and the
+    //    ErrorBoundary replaced the whole page. Keep the exact checks before the prefix.
+    //
+    // 2. These responses must satisfy `useSetupStatus`'s
+    //    `isComplete = hasAgent && hasCloud && hasGitHub`. When it is false,
+    //    `OnboardingProvider` auto-opens `ChoosePathWizard`, which `AppShell` mounts on
+    //    every authenticated page as a modal overlay that intercepts pointer events — so
+    //    every `page.click` in this file times out on a dialog it never mentions.
+    if (path === '/api/credentials') {
+      return route.fulfill({
+        json: [{ id: 'cred-1', provider: 'hetzner', name: 'Test Hetzner', isActive: true }],
+      });
+    }
+    if (path === '/api/credentials/agent') {
+      return route.fulfill({
+        json: {
+          credentials: [
+            { agentType: 'claude-code', credentialKind: 'api-key', isActive: true },
+          ],
+        },
+      });
+    }
     if (path.startsWith('/api/credentials')) {
       return route.fulfill({ json: { credentials: [] } });
     }
@@ -260,6 +339,36 @@ test.describe('Agent Context — Mobile', () => {
     await page.getByRole('button', { name: 'Delete policy' }).first().click();
     await expect(page.getByRole('alertdialog', { name: 'Delete policy' })).toBeVisible();
     await screenshot(page, 'agent-context-policy-delete-dialog-mobile');
+    await assertNoOverflow(page);
+  });
+
+  test('policies tab distinguishes expired, task-scoped, and standing policies', async ({ page }) => {
+    await setupMocks(page, { policies: LIFECYCLE_POLICIES });
+    await page.goto('/projects/proj-1/agent-context');
+    await page.click('button:has-text("Policies")');
+
+    // An expired policy is still `active` in storage, so without the expiry label a
+    // human cannot tell it has stopped reaching agents. That is the whole point.
+    // Scoped to the one card rather than the page, because more than one fixture is
+    // expired — an unscoped getByText would be a strict-mode violation, not a pass.
+    const expiredCard = page
+      .locator('article')
+      .filter({ hasText: 'Commenting delivery root is coordination-only' });
+    await expect(expiredCard).toBeVisible();
+    await expect(expiredCard.getByText('expired', { exact: true })).toBeVisible();
+    await expect(expiredCard.getByText(/Expired /)).toBeVisible();
+
+    // A live task-scoped policy shows its shelf life but is NOT marked expired.
+    await expect(page.getByText('task-scoped').first()).toBeVisible();
+    await expect(page.getByText(/Expires /).first()).toBeVisible();
+
+    // The standing policy carries neither annotation — the control that keeps the
+    // labels off the policies that genuinely are permanent.
+    const standingCard = page.locator('article').filter({ hasText: 'Standing policy with no expiry' });
+    await expect(standingCard.getByText('task-scoped')).toHaveCount(0);
+    await expect(standingCard.getByText(/Expires |Expired /)).toHaveCount(0);
+
+    await screenshot(page, 'agent-context-policy-lifecycle-mobile');
     await assertNoOverflow(page);
   });
 
@@ -386,6 +495,23 @@ test.describe('Agent Context — Desktop', () => {
     await page.goto('/projects/proj-1/agent-context');
     await page.click('button:has-text("Policies")');
     await screenshot(page, 'agent-context-policies-desktop');
+    await assertNoOverflow(page);
+  });
+
+  test('policies tab lifecycle states including a 200-char task-scoped title', async ({ page }) => {
+    await setupMocks(page, { policies: LIFECYCLE_POLICIES });
+    await page.goto('/projects/proj-1/agent-context');
+    await page.click('button:has-text("Policies")');
+
+    // pl4 is the worst case: a 200-char unbroken title carrying every badge
+    // (category + active + task-scoped + expired). Assert the badges ON that card,
+    // so the check cannot be satisfied by a different, shorter policy's badges.
+    const worstCase = page.locator('article').filter({ hasText: 'A'.repeat(200) });
+    await expect(worstCase).toBeVisible();
+    await expect(worstCase.getByText('task-scoped', { exact: true })).toBeVisible();
+    await expect(worstCase.getByText('expired', { exact: true })).toBeVisible();
+
+    await screenshot(page, 'agent-context-policy-lifecycle-desktop');
     await assertNoOverflow(page);
   });
 });

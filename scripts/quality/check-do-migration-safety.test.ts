@@ -9,6 +9,68 @@ import { describe, expect, it } from 'vitest';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 
+import { extractSqlFromTypeScript } from './check-do-migration-safety';
+
+/**
+ * The extractor is what decides whether the danger checks get to see a statement
+ * at all. A statement it fails to extract is not "safe" — it is UNCHECKED, and
+ * reports as PASS. Rule 31 calls this gate one that "cannot be bypassed", so the
+ * quoting style an author happens to pick must never be able to bypass it.
+ *
+ * These cases are anchored on real quoting shapes that occur in the migration
+ * files: single quotes for plain DDL, and double quotes for DDL that embeds a
+ * single-quoted DEFAULT literal (e.g. migration 034's
+ * `ADD COLUMN scope TEXT NOT NULL DEFAULT 'always'`).
+ */
+describe('DO migration safety — SQL extraction covers every string form', () => {
+  const sqlOf = (content: string) => extractSqlFromTypeScript(content).map((r) => r.sql);
+  const sees = (content: string, pattern: RegExp) => sqlOf(content).some((s) => pattern.test(s));
+
+  it('extracts a template-literal statement', () => {
+    expect(sees('sql.exec(`DROP TABLE widgets`);', /DROP\s+TABLE/i)).toBe(true);
+  });
+
+  it('extracts a single-quoted statement', () => {
+    expect(sees(`sql.exec('DROP TABLE widgets');`, /DROP\s+TABLE/i)).toBe(true);
+  });
+
+  it('extracts a DOUBLE-quoted statement', () => {
+    // Regression: the extractor previously handled only backticks and single
+    // quotes, so this statement was never scanned and the whole file reported
+    // PASS without the DROP TABLE check ever running against it.
+    expect(sees(`sql.exec("DROP TABLE widgets");`, /DROP\s+TABLE/i)).toBe(true);
+  });
+
+  it('extracts a double-quoted statement that embeds a single-quoted literal', () => {
+    // The exact shape of migration 034: double quotes are the natural choice
+    // precisely BECAUSE the statement contains a single-quoted DEFAULT.
+    const content = `sql.exec("ALTER TABLE p ADD COLUMN scope TEXT NOT NULL DEFAULT 'always'");`;
+    expect(sees(content, /ALTER\s+TABLE\s+p\s+ADD\s+COLUMN\s+scope/i)).toBe(true);
+  });
+
+  it('does not let an adjacent single-quoted literal swallow a following statement', () => {
+    // A single-quoted statement immediately followed by a double-quoted one that
+    // embeds its own single-quoted literal. Both must survive as whole,
+    // independently scannable statements.
+    const content = [
+      `sql.exec('ALTER TABLE p ADD COLUMN expires_at INTEGER');`,
+      `sql.exec("ALTER TABLE p ADD COLUMN scope TEXT NOT NULL DEFAULT 'always'");`,
+    ].join('\n');
+    expect(sees(content, /ADD\s+COLUMN\s+expires_at\s+INTEGER/i)).toBe(true);
+    expect(sees(content, /ADD\s+COLUMN\s+scope\s+TEXT/i)).toBe(true);
+  });
+
+  it('still reports a real violation hidden in a double-quoted statement', () => {
+    // End-to-end through the danger checks, not just the extractor: the whole
+    // point is that the DROP is now CAUGHT, not merely visible.
+    const content = [
+      `sql.exec('ALTER TABLE project_policies ADD COLUMN expires_at INTEGER');`,
+      `sql.exec("DROP TABLE project_policies");`,
+    ].join('\n');
+    expect(sees(content, /DROP\s+TABLE/i)).toBe(true);
+  });
+});
+
 describe('DO migration safety check', () => {
   it('passes on the current codebase DO migrations', () => {
     const result = execSync(

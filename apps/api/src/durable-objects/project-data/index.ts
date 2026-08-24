@@ -1578,7 +1578,9 @@ export class ProjectData extends DurableObject<Env> {
     content: string,
     source: import('@simple-agent-manager/shared').PolicySource,
     sourceSessionId: string | null,
-    confidence: number
+    confidence: number,
+    scope: import('@simple-agent-manager/shared').PolicyScope = 'always',
+    expiresAt: number | null = null
   ) {
     const result = policies.createPolicy(
       this.sql,
@@ -1588,7 +1590,9 @@ export class ProjectData extends DurableObject<Env> {
       content,
       source,
       sourceSessionId,
-      confidence
+      confidence,
+      scope,
+      expiresAt
     );
     this.broadcastEvent('policy.created', { id: result.id, category, title });
     return result;
@@ -1610,6 +1614,8 @@ export class ProjectData extends DurableObject<Env> {
       category?: import('@simple-agent-manager/shared').PolicyCategory;
       active?: boolean;
       confidence?: number;
+      scope?: import('@simple-agent-manager/shared').PolicyScope;
+      expiresAt?: number | null;
     }
   ) {
     const result = policies.updatePolicy(this.sql, policyId, updates);
