@@ -547,15 +547,16 @@ export async function loadTaskSupersession(
   projectId: string,
   taskId: string
 ): Promise<TaskSupersession> {
-  // One row, not two queries: `live` counts only non-terminal successors while
-  // `any` counts every successor, so a single scan answers both
-  // "is the conversation still running?" and "was this task superseded at all?".
-  const row = await db
-    .prepare(
-      `SELECT
-            COUNT(*) AS any_wake,
-            SUM(CASE WHEN owner.status NOT IN ('completed', 'failed', 'cancelled')
-                     THEN 1 ELSE 0 END) AS live_wake
+  // Two existence checks rather than one aggregate, deliberately: `live` is the
+  // HOT case — a preserved predecessor is re-probed on every sweep tick for as
+  // long as its successor runs — and `LIMIT 1` lets it stop at the first match
+  // instead of scanning the project's whole post-candidate history. The planner
+  // resolves this against `idx_tasks_project_created_at`, so cost is bounded by
+  // tasks created after the candidate, and a superseding wake is almost always
+  // among the newest. The `terminal`/`none` answers cost a second read but are
+  // reached once per task, after which it leaves the candidate set entirely
+  // (`.claude/rules/47`).
+  const familyClause = `
          FROM tasks self
          JOIN tasks owner
            ON owner.project_id = self.project_id
@@ -570,12 +571,23 @@ export async function loadTaskSupersession(
         WHERE self.id = ?
           AND self.project_id = ?
           AND owner.triggered_by = 'session-recovery'
-          AND owner.created_at > self.created_at`
+          AND owner.created_at > self.created_at`;
+
+  const live = await db
+    .prepare(
+      `SELECT 1 AS found ${familyClause}
+          AND owner.status NOT IN ('completed', 'failed', 'cancelled')
+        LIMIT 1`
     )
     .bind(taskId, projectId)
-    .first<{ any_wake: number | null; live_wake: number | null }>();
-  if (!row || !row.any_wake) return 'none';
-  return (row.live_wake ?? 0) > 0 ? 'live' : 'terminal';
+    .first<{ found: number }>();
+  if (live) return 'live';
+
+  const any = await db
+    .prepare(`SELECT 1 AS found ${familyClause} LIMIT 1`)
+    .bind(taskId, projectId)
+    .first<{ found: number }>();
+  return any ? 'terminal' : 'none';
 }
 
 /**

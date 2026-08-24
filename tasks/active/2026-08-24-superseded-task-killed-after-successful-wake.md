@@ -176,7 +176,15 @@ signal, not the snapshot, is the correct discriminator here.
 
 ## Measured cost (`.claude/rules/47` / `.claude/rules/60`)
 
-One extra indexed D1 read per candidate, only when about to terminalize.
+The probe runs only when the sweep is about to terminalize a task AND the snapshot has
+not already proved the session resumable (that short-circuits the classifier before
+supersession is consulted, so the read is skipped entirely).
+
+It is two `LIMIT 1` existence checks rather than one aggregate, deliberately. `live` is
+the hot case — a preserved predecessor is re-probed every sweep tick for as long as its
+successor runs — so it early-exits at the first match. `terminal`/`none` costs the second
+read but is reached once, after which the task leaves the candidate set.
+
 `EXPLAIN QUERY PLAN` against production:
 
 ```
@@ -186,7 +194,29 @@ SEARCH owner USING INDEX idx_tasks_project_created_at (project_id=? AND created_
 
 Worst-case scan width is tasks created in that project after the candidate. The busiest
 production project peaks at **41 tasks/day** (4131 all-time) and sweep candidates are
-hours old, so the range is tens of indexed rows with an early `LIMIT 1`.
+hours old, so the range is tens of indexed rows. A review benchmark put the worst
+realistic case at ~478 µs and the common case at ~8 µs at today's scale.
+
+Note the planner does NOT use `idx_tasks_recovery_source_task_id` for the OR-across-two-
+columns join, in this or any variant tried (scalar subquery, UNION ALL). Forcing it needs
+`INDEXED BY`, which was rejected as brittle. Revisit if a single project ever reaches
+tens of thousands of tasks.
+
+## Conscious scope decisions (review findings decided, not silently inherited)
+
+- **`trigger_executions` stays two-valued.** `syncTriggerExecutionStatus` collapses any
+  non-`completed` status to `failed` for the linked trigger execution, so a superseded
+  predecessor's trigger row still reads `failed`. Left as-is deliberately: the column has
+  no CHECK constraint but has only ever held `completed`/`failed` (317/87 in production),
+  its consumers (`skipIfRunning`) treat every non-completed value identically, and adding
+  a third persisted enum value is a schema-semantics change (rule 31) well outside an
+  urgent reliability fix. No functional regression — a `failed` execution unblocks future
+  firings exactly as before.
+- **`deadRuntimeReconciled` still counts benign supersessions.** The metric name implies
+  runtime death; splitting it would change an existing dashboard/alerting signal. Noted
+  in the follow-up idea rather than changed mid-incident-fix.
+- **`INDEXED BY` rejected** for forcing `idx_tasks_recovery_source_task_id` — brittle if
+  the index is ever renamed or dropped. See the measured-cost section.
 
 ## Closing the delayed-failure gap (added after review)
 

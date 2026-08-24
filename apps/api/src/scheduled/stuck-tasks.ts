@@ -62,6 +62,7 @@ import {
   type RuntimeAcpSessionSnapshot,
   type TaskRuntimeLiveness,
   type TaskRuntimeLivenessSignals,
+  type TaskSupersession,
 } from '../services/task-runtime-liveness';
 import { syncTriggerExecutionStatus } from '../services/trigger-execution-sync';
 import {
@@ -74,6 +75,14 @@ import {
   type CompactionLoopRecovery,
   detectTaskCompactionLoop,
 } from './claude-code-compaction-loop';
+
+/**
+ * Recorded instead of a runtime-death message when a task ended because its
+ * conversation moved on to a wake successor (`.claude/rules/66`).
+ */
+const SUPERSEDED_TERMINATION_MESSAGE =
+  'Superseded by a later session wake; the conversation continued in a replacement ' +
+  'task and has since ended.';
 
 function parseMs(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
@@ -938,6 +947,20 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     let deadRuntimeRecovery = false;
     /** Benign supersession termination — recorded as `cancelled`, never `failed`. */
     let supersededTermination = false;
+    /**
+     * The ONE place a conclusive verdict becomes a terminal reason. Every branch
+     * that can terminalize a task routes through here, so a supersession can
+     * never be recorded as a failure by a branch that simply forgot to ask —
+     * which is exactly how the first cut of this fix missed the two timeout
+     * branches below (`.claude/rules/66` requirement 3).
+     */
+    const terminalReasonFor = (liveness: TaskRuntimeLiveness, deadRuntimeReason: string): string => {
+      if (isSupersededTerminalReason(liveness.reason)) {
+        supersededTermination = true;
+        return SUPERSEDED_TERMINATION_MESSAGE;
+      }
+      return deadRuntimeReason;
+    };
     let admissionSnapshot: Awaited<ReturnType<typeof getVmAdmissionDiagnostics>> | null = null;
 
     const stepInfo = task.execution_step ? ` Last step: ${describeStep(task.execution_step)}.` : '';
@@ -1054,7 +1077,34 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
           if (executionMs > maxExecutionMs) {
             if (executionMs > absoluteCeilingMs) {
               isStuck = true;
-              reason = `Task exceeded the absolute runaway-cost ceiling of ${Math.round(absoluteCeilingMs / 60000)} minutes; live-runtime tasks are bounded to prevent unbounded compute.${stepInfo}`;
+              // The ceiling is a cost backstop: it still terminalizes unconditionally
+              // and deliberately does NOT pay for a full liveness probe (no ACP /
+              // container round-trips — a property pinned by
+              // stuck-tasks.test.ts "without probing liveness"). But a superseded
+              // predecessor holds no compute at all, so it must not be recorded as a
+              // runaway failure. One cheap indexed lookup, reached only by 24h+ tasks,
+              // buys the correct label without reintroducing the expensive probe.
+              let ceilingSupersession: TaskSupersession = 'none';
+              try {
+                ceilingSupersession = await loadTaskSupersession(
+                  env.DATABASE,
+                  task.project_id,
+                  task.id
+                );
+              } catch (err) {
+                log.warn('stuck_task.ceiling_supersession_query_failed', {
+                  taskId: task.id,
+                  projectId: task.project_id,
+                  action: 'labelled_as_runaway',
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              }
+              if (ceilingSupersession === 'none') {
+                reason = `Task exceeded the absolute runaway-cost ceiling of ${Math.round(absoluteCeilingMs / 60000)} minutes; live-runtime tasks are bounded to prevent unbounded compute.${stepInfo}`;
+              } else {
+                supersededTermination = true;
+                reason = SUPERSEDED_TERMINATION_MESSAGE;
+              }
               break;
             }
             const liveness = await probeLiveness();
@@ -1097,7 +1147,10 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
             }
             isStuck = true;
             const threshold = executionMs > hardTimeoutMs ? hardTimeoutMs : maxExecutionMs;
-            reason = `Task runtime is no longer live after ${Math.round(threshold / 60000)} minutes. Last liveness result: ${liveness.reason}.${stepInfo}`;
+            reason = terminalReasonFor(
+              liveness,
+              `Task runtime is no longer live after ${Math.round(threshold / 60000)} minutes. Last liveness result: ${liveness.reason}.${stepInfo}`
+            );
           }
           break;
         }
@@ -1136,19 +1189,10 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         if (liveness?.conclusive && !liveness.live) {
           isStuck = true;
           deadRuntimeRecovery = true;
-          if (isSupersededTerminalReason(liveness.reason)) {
-            // The conversation moved on to a wake successor and has since ended.
-            // This is a normal lifecycle outcome, not a runtime failure, so it is
-            // recorded as a cancellation — project policy is explicit that benign
-            // terminations must be distinguishable from real failures and must not
-            // trigger debug diagnosis (`.claude/rules/66`).
-            supersededTermination = true;
-            reason =
-              'Superseded by a later session wake; the conversation continued in a ' +
-              'replacement task and has since ended.';
-          } else {
-            reason = `Task runtime is conclusively gone after reconciliation grace (${liveness.reason}).`;
-          }
+          reason = terminalReasonFor(
+            liveness,
+            `Task runtime is conclusively gone after reconciliation grace (${liveness.reason}).`
+          );
           log.warn('stuck_task.dead_runtime_reconciliation', {
             taskId: task.id,
             taskStatus: task.status,

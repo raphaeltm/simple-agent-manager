@@ -47,6 +47,7 @@ export type VmAdmissionReason =
   | 'placed'
   | 'cancelled'
   | 'task_failed'
+  | 'task_cancelled'
   | 'wait_deadline_expired';
 
 export interface VmAdmissionConfig {
