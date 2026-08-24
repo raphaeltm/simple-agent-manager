@@ -64,7 +64,7 @@ demonstrated D1 write defect.
 - [x] Update source-contract tests that currently encode the old repeated warning behavior.
 - [x] Run focused tests and required quality checks.
 - [x] Perform required specialist reviews.
-- [ ] Create/push a focused PR; do not deploy to staging and do not merge.
+- [x] Create/push a focused PR; do not deploy to staging and do not merge.
 
 ## Acceptance criteria
 
@@ -81,6 +81,7 @@ demonstrated D1 write defect.
 - SAM idea `01M0SG7ZEE1XARK4QDG7V6HDPN`
 - SAM idea `01KT90PKF6167SXZ9YZY0R26MM`
 - PR #1896: https://github.com/raphaeltm/simple-agent-manager/pull/1896
+- PR #1899: https://github.com/raphaeltm/simple-agent-manager/pull/1899
 - `.claude/rules/47-control-loop-io-budget.md`
 - `.claude/rules/58-terminal-verdicts-must-match-the-resumer.md`
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md`
