@@ -67,7 +67,7 @@ preserving high-value chat history.
   terminal-tool cleanup, active/sleeping preservation, bounded batches, cursor
   continuation, and telemetry/purge metadata.
 - [x] Run focused local checks and specialist validation.
-- [ ] Create a focused draft/do-not-merge PR and wait for CI evidence; do not
+- [x] Create a focused draft/do-not-merge PR and wait for CI evidence; do not
   deploy to staging and do not merge.
 
 ## Acceptance criteria
@@ -90,6 +90,10 @@ preserving high-value chat history.
 
 ## Validation
 
+- Draft/do-not-merge PR: <https://github.com/raphaeltm/simple-agent-manager/pull/1901>
+- `needs-human-review` label added because spawned local review agents timed out
+  before returning results. Manual local specialist checklists passed; do not
+  merge until human review clears the label.
 - `pnpm --filter @simple-agent-manager/shared build && pnpm --filter @simple-agent-manager/providers build && pnpm --filter @simple-agent-manager/cloud-init build`
 - `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/durable-object-retry.test.ts`
 - `pnpm --filter @simple-agent-manager/api typecheck`
