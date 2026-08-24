@@ -218,9 +218,11 @@ must not merge yet.
       `SessionCommentsDrawer.test.tsx`, `project-message-view.test.tsx`,
       `ChatTimelineDrawer.test.tsx`, and `buildSessionTimeline.test.ts`.
       Verification: web typecheck plus targeted Vitest files passed 97/97.
-- [ ] **HIGH — rule 18 file size.** `SessionHeader.tsx` 737 -> 805 and
+- [x] **HIGH — rule 18 file size.** `SessionHeader.tsx` 737 -> 805 and
       `project-message-view/index.tsx` 746 -> 819. Both crossed the 800-line
       MANDATORY split threshold on this branch.
+      Fixed by extracting `SessionHeaderCommentChip` and `FloatingHeader`.
+      Current counts: `SessionHeader.tsx` 780, `index.tsx` 707.
 - [ ] HIGH — three unlabelled comment counts are visible at once (3 "need you",
       5 unresolved, 7 total) with nothing distinguishing them.
 - [ ] MEDIUM — filter chips use `role="tab"` without the ARIA tabs keyboard
