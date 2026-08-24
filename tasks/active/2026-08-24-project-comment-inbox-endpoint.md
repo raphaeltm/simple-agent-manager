@@ -177,6 +177,10 @@ and confirmed exactly the intended test went red). But the review surfaced enoug
 outstanding HIGH findings — mostly in the inherited prototype half — that this
 must not merge yet.
 
+Recovery update: every code/test/documentation blocker listed below is now
+checked off. The remaining merge blocker is the staging deploy plus live
+endpoint/UI Playwright verification.
+
 ### Done in this session
 
 - [x] DO migration `035-comment-thread-activity-indexes` (additive CREATE INDEX)
@@ -325,6 +329,25 @@ must not merge yet.
 - **Compromises:** the filter row intentionally scrolls/clips at the drawer edge
   on narrow widths; the automated audit treats this as the intended horizontal
   scroller case and still asserts no document-level horizontal overflow.
+
+### Specialist review outcome (recovery pass, 2026-08-24)
+
+- **Cloudflare/D1:** pass. Migration `035-comment-thread-activity-indexes` is
+  additive-only (`CREATE INDEX IF NOT EXISTS`), and the project-wide reads use
+  env-configured row and byte budgets before hydration.
+- **Security/auth:** pass. `GET /api/projects/:projectId/comments` inherits
+  session auth through `projectsRoutes`, explicitly requires `task:read`, and
+  resolves filenames through a D1 lookup scoped by `project_id`.
+- **Env/docs/constitution:** pass. New Worker variables are present in
+  `Env`, `wrangler.toml`, `.env.example`, shared defaults, and the public
+  configuration reference; limits use env-overridable defaults.
+- **Test engineering:** pass. Coverage includes the cross-project attack plus
+  owner control, auth mount-order proof, status/limit/byte-budget edges,
+  exact-truncation boundary, row-malformation isolation, single-request web hook
+  assertions, focus traps, comment jump coordinate assertions, and screenshot
+  audit coverage.
+- **UI/UX:** pass locally. Screenshot-backed audit passed 46/46 at 375x667 and
+  1280x800 with rubric scores >=4 in all categories.
 
 ## Acceptance criteria
 
