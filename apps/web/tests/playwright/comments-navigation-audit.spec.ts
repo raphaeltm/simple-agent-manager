@@ -352,6 +352,21 @@ const FILE_THREADS = [
   },
 ];
 
+/**
+ * `GET /api/projects/:projectId/comments` — the whole inbox in one response.
+ *
+ * Spans two chat sessions and one library file on purpose, so the project page
+ * is exercising the cross-source join rather than a single conversation.
+ */
+const PROJECT_COMMENTS_RESPONSE = {
+  messageThreads: [...THREADS, ...OTHER_THREADS],
+  fileThreads: FILE_THREADS,
+  sessions: SESSIONS.map((session) => ({ id: session.id, topic: session.topic })),
+  files: LIBRARY_FILES.map((file) => ({ id: file.id, filename: file.filename })),
+  hasMore: false,
+  totalCount: THREADS.length + OTHER_THREADS.length + FILE_THREADS.length,
+};
+
 // --- API mocks ---------------------------------------------------------------
 
 async function setupMocks(page: Page) {
@@ -392,6 +407,13 @@ async function setupMocks(page: Page) {
     }
 
     // --- comments ---
+    // The project-wide inbox. One endpoint returns every thread in the project
+    // plus the session topics and filenames needed to label them, which is what
+    // replaced the per-session + per-file fan-out.
+    if (pathname === `${base}/comments`) {
+      await route.fulfill({ json: PROJECT_COMMENTS_RESPONSE });
+      return;
+    }
     if (pathname === `${base}/sessions/${SESSION_ID}/comments`) {
       await route.fulfill({ json: { comments: THREADS } });
       return;
@@ -540,7 +562,10 @@ async function openCommentsDrawer(page: Page) {
     await chip.click();
   } else {
     await expandHeader(page);
-    await page.getByRole('button', { name: /^Comments/ }).first().click();
+    await page
+      .getByRole('button', { name: /^Comments/ })
+      .first()
+      .click();
   }
   await page.getByRole('dialog', { name: 'Session comments' }).waitFor({ timeout: 10_000 });
   await page.waitForTimeout(700);
@@ -559,9 +584,7 @@ for (const [label, viewport] of [
       await setupMocks(page);
       await openChat(page);
       await screenshot(page, `comments-01-header-chip-${label}`);
-      await expect(
-        page.getByRole('button', { name: /unresolved comment/i }).first()
-      ).toBeVisible();
+      await expect(page.getByRole('button', { name: /unresolved comment/i }).first()).toBeVisible();
       await assertNoOverflow(page);
     });
 
@@ -619,7 +642,10 @@ for (const [label, viewport] of [
       await setupMocks(page);
       await openChat(page);
       await expandHeader(page);
-      await page.getByRole('button', { name: /^Timeline$/ }).first().click();
+      await page
+        .getByRole('button', { name: /^Timeline$/ })
+        .first()
+        .click();
       await page.getByRole('dialog', { name: 'Session timeline' }).waitFor({ timeout: 10_000 });
       await page.waitForTimeout(900);
       await screenshot(page, `comments-07-timeline-${label}`);
@@ -649,15 +675,48 @@ for (const [label, viewport] of [
 
     test('project comments empty state', async ({ page }) => {
       await setupMocks(page);
-      await page.route(`**/api/projects/${PROJECT_ID}/sessions/*/comments*`, (route) =>
-        route.fulfill({ json: { comments: [] } })
-      );
-      await page.route(`**/api/projects/${PROJECT_ID}/library/*/comments*`, (route) =>
-        route.fulfill({ json: { threads: [], hasMore: false } })
+      await page.route(`**/api/projects/${PROJECT_ID}/comments*`, (route) =>
+        route.fulfill({
+          json: {
+            messageThreads: [],
+            fileThreads: [],
+            sessions: [],
+            files: [],
+            hasMore: false,
+            totalCount: 0,
+          },
+        })
       );
       await page.goto(`/projects/${PROJECT_ID}/comments`);
       await page.getByText('No comments in this project yet').waitFor({ timeout: 15_000 });
       await screenshot(page, `comments-10-project-empty-${label}`);
+      await assertNoOverflow(page);
+    });
+
+    /**
+     * A capped page must say so. Without this the reader concludes there is
+     * nothing else outstanding (rule 65), which is the failure mode the
+     * disclosure exists to prevent.
+     */
+    test('project comments page discloses a truncated page', async ({ page }) => {
+      await setupMocks(page);
+      await page.route(`**/api/projects/${PROJECT_ID}/comments*`, (route) =>
+        route.fulfill({ json: { ...PROJECT_COMMENTS_RESPONSE, hasMore: true, totalCount: 137 } })
+      );
+      await page.goto(`/projects/${PROJECT_ID}/comments`);
+      await page.getByRole('heading', { name: 'Comments', level: 1 }).waitFor({ timeout: 15_000 });
+
+      const disclosure = page.getByText(/most recently active of 137 comments/);
+      await expect(disclosure).toBeVisible();
+      // The disclosure sits below the fold at the end of the list, and this app
+      // scrolls inside its own wrapper rather than at the document level — so a
+      // `fullPage` screenshot captures only the viewport and would show the same
+      // pixels as the untruncated case. Scroll to it, which also proves it is
+      // actually reachable rather than merely present in the DOM (rule 62).
+      await disclosure.scrollIntoViewIfNeeded();
+      await expect(disclosure).toBeInViewport();
+      await page.waitForTimeout(600);
+      await screenshot(page, `comments-12-project-truncated-${label}`);
       await assertNoOverflow(page);
     });
   });
