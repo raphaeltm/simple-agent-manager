@@ -100,6 +100,8 @@ preserving high-value chat history.
 - `(cd apps/api && pnpm vitest run --config vitest.workers.config.ts tests/workers/project-data-storage-safety.test.ts --reporter verbose)`
 - `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/project-data-messages.test.ts tests/unit/services/durable-object-retry.test.ts`
 - `pnpm --filter @simple-agent-manager/api lint`
+- `pnpm quality:file-sizes` — passed after extracting automated tool-payload
+  cleanup into `tool-payload-cleanup.ts`; no files exceed 800 lines.
 - `pnpm quality:ast-checks` — passed after splitting the cleanup candidate
   query into static SQL branches; existing warnings remain unrelated.
 - `pnpm lint` — passed with pre-existing warnings unrelated to this patch.
