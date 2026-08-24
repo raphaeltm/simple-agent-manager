@@ -2,6 +2,7 @@ import type { NotificationResponse } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
 import { buildSessionTimeline } from '../../src/components/project-message-view/buildSessionTimeline';
+import type { UiMessageCommentThread } from '../../src/components/project-message-view/comments/comment-utils';
 import type { ActivityEventResponse, ChatMessageResponse } from '../../src/lib/api/sessions';
 
 function makeMessage(overrides: Partial<ChatMessageResponse> & { id: string }): ChatMessageResponse {
@@ -43,6 +44,25 @@ function makeNotification(overrides: Partial<NotificationResponse> & { id: strin
     readAt: null,
     dismissedAt: null,
     createdAt: new Date(Date.now()).toISOString(),
+    ...overrides,
+  };
+}
+
+function makeCommentThread(
+  overrides: Partial<UiMessageCommentThread> = {}
+): UiMessageCommentThread {
+  return {
+    id: 'thread-1',
+    clientId: null,
+    projectId: 'proj-1',
+    sessionId: 'sess-1',
+    anchor: { kind: 'message', messageId: 'msg-commented', quote: 'quoted message' },
+    author: { id: 'viewer-1', kind: 'human', name: 'You', email: null, avatarUrl: null },
+    body: 'Please check this decision before merge',
+    createdAt: 1_000,
+    updatedAt: 1_000,
+    status: 'open',
+    replies: [],
     ...overrides,
   };
 }
@@ -159,6 +179,53 @@ describe('buildSessionTimeline', () => {
       'Body fallback',
       'Progress: Title fallback',
     ]);
+  });
+
+  it('adds comment threads at their latest activity with jump anchors and viewer bucket', () => {
+    const result = buildSessionTimeline(
+      [],
+      [],
+      [],
+      false,
+      [
+        makeCommentThread({
+          replies: [
+            {
+              id: 'reply-1',
+              clientId: null,
+              author: {
+                id: 'reviewer-1',
+                kind: 'agent',
+                name: 'SAM',
+                email: null,
+                avatarUrl: null,
+              },
+              body: 'I found an issue here',
+              createdAt: 5_000,
+              updatedAt: null,
+              sentToAgent: false,
+            },
+          ],
+        }),
+      ],
+      'viewer-1'
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      kind: 'comment_thread',
+      id: 'comment-thread-1',
+      threadId: 'thread-1',
+      messageId: 'msg-commented',
+      quote: 'quoted message',
+      text: 'Please check this decision before merge',
+      actorName: 'SAM',
+      actorKind: 'agent',
+      isReply: true,
+      bucket: 'needs_you',
+      replyCount: 1,
+      timestamp: 5_000,
+    });
   });
 
   it('truncates long progress notification text', () => {

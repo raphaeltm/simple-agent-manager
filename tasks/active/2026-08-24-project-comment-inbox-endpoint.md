@@ -1,6 +1,6 @@
 # Ship comment navigation UI — with a real project-scoped comments endpoint
 
-**Branch:** `sam/ship-comment-navigation-ui-s1n30h`
+**Branch:** `sam/use-sam-mcp-tools-zpvm08` (continued from `sam/ship-comment-navigation-ui-s1n30h`)
 **Prototype origin:** `sam/ui-uh-looking-uh-9m7yzp` (2 commits, cherry-picked onto this branch)
 **Library writeup:** `/design/comment-navigation/comment-navigation-prototype.md` (+ 21 screenshots)
 
@@ -207,13 +207,17 @@ must not merge yet.
       boundary are untested (the last was probed manually and is correct).
 
 **Frontend**
-- [ ] **HIGH — three interactive surfaces have ZERO behavioural tests:**
+- [x] **HIGH — three interactive surfaces have ZERO behavioural tests:**
       `SessionCommentsDrawer`, the `SessionHeader` comment chip, and the
       `comment_thread` timeline entry. Playwright asserts the timeline entry is
       visible but never clicks it, and never clicks "Show in conversation".
       Rule 02 requires render + simulate + assert per interactive element.
-- [ ] **HIGH — `buildSessionTimeline`'s `comment_thread` branch is untested**,
+- [x] **HIGH — `buildSessionTimeline`'s `comment_thread` branch is untested**,
       though that file's suite has 20+ cases for every sibling kind.
+      Covered by focused component/unit tests:
+      `SessionCommentsDrawer.test.tsx`, `project-message-view.test.tsx`,
+      `ChatTimelineDrawer.test.tsx`, and `buildSessionTimeline.test.ts`.
+      Verification: web typecheck plus targeted Vitest files passed 97/97.
 - [ ] **HIGH — rule 18 file size.** `SessionHeader.tsx` 737 -> 805 and
       `project-message-view/index.tsx` 746 -> 819. Both crossed the 800-line
       MANDATORY split threshold on this branch.

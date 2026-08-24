@@ -47,6 +47,25 @@ function makeProgressEntry(overrides: Partial<Extract<TimelineEntry, { kind: 'pr
   };
 }
 
+function makeCommentEntry(overrides: Partial<Extract<TimelineEntry, { kind: 'comment_thread' }>> = {}): TimelineEntry {
+  return {
+    kind: 'comment_thread',
+    id: 'comment-thread-1',
+    threadId: 'thread-1',
+    messageId: 'message-1',
+    quote: 'selected context',
+    text: 'Please revisit this edge case.',
+    actorName: 'Grace',
+    actorKind: 'human',
+    isReply: false,
+    status: 'open',
+    bucket: 'needs_you',
+    replyCount: 0,
+    timestamp: 999,
+    ...overrides,
+  };
+}
+
 const defaultProps = {
   entries: [] as TimelineEntry[],
   loading: false,
@@ -130,6 +149,23 @@ describe('ChatTimelineDrawer', () => {
     const progressBtn = screen.getByText('Cloned the repo and inspected timeline code');
     fireEvent.click(progressBtn);
     expect(onJump).toHaveBeenCalledWith({ timestamp: 777 });
+  });
+
+  it('renders comment thread entries and jumps by anchored messageId + latest activity timestamp', () => {
+    const onJump = vi.fn();
+    const entries = [
+      makeCommentEntry({
+        messageId: 'msg-commented',
+        text: 'This needs another look',
+        timestamp: 9_001,
+      }),
+    ];
+    render(<ChatTimelineDrawer {...defaultProps} entries={entries} onJump={onJump} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /grace commented/i }));
+
+    expect(screen.getByText('This needs another look')).toBeTruthy();
+    expect(onJump).toHaveBeenCalledWith({ messageId: 'msg-commented', timestamp: 9_001 });
   });
 
   it('has correct dialog aria attributes', () => {

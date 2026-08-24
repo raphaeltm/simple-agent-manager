@@ -1748,7 +1748,7 @@ describe('ProjectMessageView — message anchored comments', () => {
     vi.useRealTimers();
   });
 
-  it('renders a data-backed desktop rail entry and jumps using the 0-based Virtuoso index', async () => {
+  it('opens the comments drawer from the header chip and jumps using the 0-based Virtuoso index', async () => {
     mocks.getChatSession.mockResolvedValue(
       makeSessionResponse('session-1', [
         makeMessage('msg-1', 'session-1', 'User prompt', 'user'),
@@ -1761,6 +1761,13 @@ describe('ProjectMessageView — message anchored comments', () => {
         makeCommentThread({
           id: 'comment-msg-3',
           messageId: 'msg-3',
+          author: {
+            id: 'reviewer-1',
+            kind: 'human',
+            name: 'Grace',
+            email: null,
+            avatarUrl: null,
+          },
           body: 'This comment belongs to the later message.',
         }),
       ],
@@ -1769,15 +1776,20 @@ describe('ProjectMessageView — message anchored comments', () => {
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
 
     await waitFor(() => {
-      expect(screen.getByText('This comment belongs to the later message.')).toBeTruthy();
+      expect(screen.getByRole('button', { name: /1 unresolved comment/i })).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /message msg-3\s*view/i }));
+    fireEvent.click(screen.getByRole('button', { name: /1 unresolved comment/i }));
+    const drawer = await screen.findByRole('dialog', { name: 'Session comments' });
+    fireEvent.click(within(drawer).getByText('This comment belongs to the later message.'));
+    fireEvent.click(within(drawer).getByRole('button', { name: /show in conversation/i }));
 
-    expect(virtuosoMock.scrollToIndexCalls.at(-1)).toMatchObject({
-      index: 2,
-      behavior: 'smooth',
-      align: 'center',
+    await waitFor(() => {
+      expect(virtuosoMock.scrollToIndexCalls.at(-1)).toMatchObject({
+        index: 2,
+        behavior: 'smooth',
+        align: 'center',
+      });
     });
   });
 
@@ -1896,11 +1908,13 @@ describe('ProjectMessageView — message anchored comments', () => {
       });
     });
 
+    const commentMarker = await screen.findByRole('button', {
+      name: /1 comment on this message, 1 unresolved/i,
+    });
+    fireEvent.click(commentMarker);
+
     await waitFor(() => {
       expect(screen.getAllByText('Realtime comment body').length).toBeGreaterThan(0);
-      expect(
-        screen.getByRole('button', { name: /1 comment on this message, 1 unresolved/i })
-      ).toBeTruthy();
     });
   });
 });
