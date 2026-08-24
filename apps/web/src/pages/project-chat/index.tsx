@@ -118,6 +118,27 @@ export function ProjectChat() {
     },
     [navigate, state.projectId]
   );
+  const commentMessageTarget = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    const messageId = params.get('commentMessage');
+    if (!messageId) return null;
+    const timestampRaw = params.get('commentAt');
+    const timestamp = timestampRaw ? Number(timestampRaw) : null;
+    return {
+      messageId,
+      timestamp: Number.isFinite(timestamp) ? timestamp : null,
+    };
+  }, [location.search]);
+  const handleCommentMessageTargetConsumed = useCallback(() => {
+    const params = new URLSearchParams(location.search);
+    if (!params.has('commentMessage') && !params.has('commentAt')) return;
+    params.delete('commentMessage');
+    params.delete('commentAt');
+    const nextSearch = params.toString();
+    navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : ''}${location.hash}`, {
+      replace: true,
+    });
+  }, [location.hash, location.pathname, location.search, navigate]);
   const activeSessionId = state.sessionId ?? '';
   const starterPrompts = useMemo(() => {
     const repoLabel = state.project?.repository || state.project?.name || 'this repo';
@@ -513,6 +534,9 @@ export function ProjectChat() {
               slashCommands={state.slashCommands}
               onShowHierarchy={handleShowHierarchy}
               onNewChat={state.handleNewChat}
+              targetMessageId={commentMessageTarget?.messageId ?? null}
+              targetMessageTimestamp={commentMessageTarget?.timestamp ?? null}
+              onTargetMessageConsumed={handleCommentMessageTargetConsumed}
             />
           </div>
         )}

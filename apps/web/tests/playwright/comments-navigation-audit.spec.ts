@@ -9,7 +9,12 @@
  */
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-import { assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
+import {
+  assertNoClippedOverflow,
+  assertNoOverflow,
+  makeMockUser,
+  screenshot,
+} from './audit-helpers';
 
 const PROJECT_ID = 'proj-comments-1';
 const SESSION_ID = 'cs-comments-1';
@@ -326,7 +331,7 @@ const LIBRARY_FILES = [
     mimeType: 'text/markdown',
     sizeBytes: 8_214,
     status: 'ready',
-    tags: ['design'],
+    tags: [{ tag: 'design' }],
     uploadSource: 'agent',
     createdAt: NOW - 6 * HOUR,
     updatedAt: NOW - 90 * MIN,
@@ -351,6 +356,14 @@ const FILE_THREADS = [
     replies: [],
   },
 ];
+
+const FILE_PREVIEW_BODY = [
+  '# Comment navigation design',
+  '',
+  'This markdown file records the reply-notification story and the open questions.',
+  '',
+  'The reply-notification story needs to say whether updates go to web push or just the bell.',
+].join('\n');
 
 /**
  * `GET /api/projects/:projectId/comments` — the whole inbox in one response.
@@ -426,8 +439,23 @@ async function setupMocks(page: Page) {
       await route.fulfill({ json: { threads: FILE_THREADS, hasMore: false } });
       return;
     }
+    if (pathname === `${base}/library/file-1`) {
+      const file = LIBRARY_FILES[0];
+      await route.fulfill({ json: { file, tags: file.tags } });
+      return;
+    }
+    if (pathname === `${base}/library/file-1/preview`) {
+      await route.fulfill({ status: 200, contentType: 'text/markdown', body: FILE_PREVIEW_BODY });
+      return;
+    }
+    if (pathname === `${base}/library/directories`) {
+      await route.fulfill({ json: { directories: [] } });
+      return;
+    }
     if (pathname === `${base}/library`) {
-      await route.fulfill({ json: { files: LIBRARY_FILES, nextCursor: null } });
+      await route.fulfill({
+        json: { files: LIBRARY_FILES, cursor: null, total: LIBRARY_FILES.length },
+      });
       return;
     }
 
@@ -582,6 +610,40 @@ async function waitForUiSettled(page: Page) {
   );
 }
 
+async function assertFixedElementsInsideViewport(page: Page) {
+  const offenders = await page.evaluate(() => {
+    const tolerance = 1;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    return Array.from(document.body.querySelectorAll('*'))
+      .filter((el) => {
+        const style = getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        if (style.position !== 'fixed') return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 1 || rect.height <= 1) return false;
+        return (
+          rect.left < -tolerance ||
+          rect.right > width + tolerance ||
+          rect.top < -tolerance ||
+          rect.bottom > height + tolerance
+        );
+      })
+      .map((el) => {
+        const rect = el.getBoundingClientRect();
+        const label =
+          el.getAttribute('aria-label') ||
+          el.getAttribute('role') ||
+          el.textContent?.trim().slice(0, 40) ||
+          el.tagName.toLowerCase();
+        return `${label}: left=${Math.round(rect.left)} right=${Math.round(rect.right)} viewport=${width}`;
+      });
+  });
+  expect(offenders, `Fixed-position elements outside viewport:\n${offenders.join('\n')}`).toEqual(
+    []
+  );
+}
+
 // --- Tests -------------------------------------------------------------------
 
 for (const [label, viewport] of [
@@ -612,8 +674,12 @@ for (const [label, viewport] of [
       await setupMocks(page);
       await openChat(page);
       await openCommentsDrawer(page);
+      await assertFixedElementsInsideViewport(page);
       await screenshot(page, `comments-03-drawer-needs-you-${label}`);
       await assertNoOverflow(page);
+      if (label === 'mobile') {
+        await assertNoClippedOverflow(page);
+      }
     });
 
     test('drawer All filter shows every bucket', async ({ page }) => {
@@ -626,6 +692,7 @@ for (const [label, viewport] of [
       await expect(allFilter).toHaveAttribute('aria-pressed', 'true');
       await expect(drawer.locator('[data-comment-thread-id]').first()).toBeVisible();
       await waitForUiSettled(page);
+      await assertFixedElementsInsideViewport(page);
       await screenshot(page, `comments-04-drawer-all-${label}`);
       await assertNoOverflow(page);
     });
@@ -641,6 +708,7 @@ for (const [label, viewport] of [
       await drawer.locator('[data-comment-thread-id="ct-1"]').click();
       await expect(page.getByRole('button', { name: 'Show in conversation' })).toBeVisible();
       await waitForUiSettled(page);
+      await assertFixedElementsInsideViewport(page);
       await screenshot(page, `comments-05-drawer-thread-expanded-${label}`);
       await assertNoOverflow(page);
     });
@@ -695,6 +763,51 @@ for (const [label, viewport] of [
       await expect(page.locator('[data-comment-bucket="needs_you"]').first()).toBeVisible();
       await waitForUiSettled(page);
       await screenshot(page, `comments-09-project-needs-you-${label}`);
+      await assertNoOverflow(page);
+    });
+
+    test('project comments opens a library-file comment in the file preview', async ({ page }) => {
+      await setupMocks(page);
+      await page.goto(`/projects/${PROJECT_ID}/comments`);
+      await page.getByRole('heading', { name: 'Comments', level: 1 }).waitFor({ timeout: 15_000 });
+
+      await page
+        .getByRole('button', {
+          name: /This section needs to say which channel the notification goes out on/,
+        })
+        .click();
+
+      await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}/library\\?preview=file-1`));
+      await expect(page.getByRole('dialog')).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: 'comment-navigation-design.md' })
+      ).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Comment navigation design' })).toBeVisible();
+      await waitForUiSettled(page);
+      await screenshot(page, `comments-13-project-to-library-preview-${label}`);
+      await assertNoOverflow(page);
+    });
+
+    test('project comments opens and reveals a chat message comment', async ({ page }) => {
+      await setupMocks(page);
+      await page.goto(`/projects/${PROJECT_ID}/comments`);
+      await page.getByRole('heading', { name: 'Comments', level: 1 }).waitFor({ timeout: 15_000 });
+
+      await page
+        .getByRole('button', {
+          name: /The project-wide endpoint makes this drawer viable for large projects/,
+        })
+        .click();
+
+      await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`));
+      await expect(page).not.toHaveURL(/commentMessage=/);
+      const highlighted = page.locator('.sam-message-highlight');
+      await expect(highlighted).toContainText(
+        'The project-level page now reads the project-wide comments endpoint once'
+      );
+      await expect(highlighted).toBeInViewport();
+      await waitForUiSettled(page);
+      await screenshot(page, `comments-14-project-to-chat-message-${label}`);
       await assertNoOverflow(page);
     });
 

@@ -23,17 +23,17 @@ Raphaël explicitly requested fixing these and getting them to production withou
 
 ## Implementation checklist
 
-- [ ] Change project-comments library navigation to use `preview`.
-- [ ] Add URL-driven chat-message jump support that consumes a query param, calls the existing jump/highlight path, and removes the param after handling.
-- [ ] Route project-comments session comments with the target message id.
-- [ ] Tighten mobile `SessionCommentsDrawer` geometry so it stays within the viewport at 320–375px and does not depend on desktop rail sizing.
-- [ ] Add/update unit tests for project-comments navigation URLs and URL-driven message jump behavior.
-- [ ] Add/update Playwright audit coverage for:
+- [x] Change project-comments library navigation to use `preview`.
+- [x] Add URL-driven chat-message jump support that consumes a query param, calls the existing jump/highlight path, and removes the param after handling.
+- [x] Route project-comments session comments with the target message id.
+- [x] Tighten mobile `SessionCommentsDrawer` geometry so it stays within the viewport at 320–375px and does not depend on desktop rail sizing.
+- [x] Use Playwright route-level regression coverage rather than isolated unit tests for project-comments navigation URLs and URL-driven message jump behavior, because the defect crosses Project Comments → router → Library/Chat rendering.
+- [x] Add/update Playwright audit coverage for:
   - mobile comments drawer bounding box/no off-screen fixed descendants;
   - project Comments → library-file row opens the file preview;
   - project Comments → chat-message row opens the session and highlights/reveals the target message.
-- [ ] Run local mobile + desktop screenshot-backed validation.
-- [ ] Skip staging per explicit instruction; document this in the PR.
+- [x] Run local mobile + desktop screenshot-backed validation.
+- [x] Skip staging per explicit instruction; document this in the PR.
 - [ ] Merge and monitor automatic production deploy.
 
 ## Acceptance criteria

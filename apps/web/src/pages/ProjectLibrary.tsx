@@ -1,4 +1,9 @@
-import type { DirectoryEntry, FileUploadSource, ListFilesRequest } from '@simple-agent-manager/shared';
+// FILE SIZE EXCEPTION: Pre-existing large Library page; this production hotfix adds URL-preview metadata fallback without a risky component split. See .claude/rules/18-file-size-limits.md
+import type {
+  DirectoryEntry,
+  FileUploadSource,
+  ListFilesRequest,
+} from '@simple-agent-manager/shared';
 import { LIBRARY_DEFAULTS } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
 import { Folder, FolderOpen, Search, Upload } from 'lucide-react';
@@ -22,6 +27,7 @@ import { useIsMobile } from '../hooks/useIsMobile';
 import { useLibraryIndex } from '../hooks/useLibraryIndex';
 import {
   downloadLibraryFile,
+  getLibraryFile,
   getLibraryFilePreviewUrl,
   listLibraryDirectories,
   listLibraryFiles,
@@ -59,7 +65,7 @@ function sortFiles(files: FileWithTags[], sortBy: SortOption): FileWithTags[] {
 function applyAdvancedFilters(
   files: FileWithTags[],
   activeTags: string[],
-  sourceFilter: 'all' | FileUploadSource,
+  sourceFilter: 'all' | FileUploadSource
 ): FileWithTags[] {
   if (activeTags.length === 0 && sourceFilter === 'all') return files;
   return files.filter((f) => {
@@ -74,7 +80,8 @@ function applyAdvancedFilters(
 
 export function ProjectLibrary() {
   const { user } = useAuth();
-  const cacheNamespace = buildLibraryCacheNamespace(user?.id) ?? UNAUTHENTICATED_LIBRARY_CACHE_NAMESPACE;
+  const cacheNamespace =
+    buildLibraryCacheNamespace(user?.id) ?? UNAUTHENTICATED_LIBRARY_CACHE_NAMESPACE;
   return <ProjectLibraryContent key={cacheNamespace} cacheNamespace={cacheNamespace} />;
 }
 
@@ -119,7 +126,7 @@ function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
   // ---------------------------------------------------------------------------
   const initialCachedFiles = getCachedFiles(projectId, '/', 'createdAt', cacheNamespace);
   const [serverFiles, setServerFiles] = useState<FileWithTags[]>(
-    initialCachedFiles ? initialCachedFiles.files : [],
+    initialCachedFiles ? initialCachedFiles.files : []
   );
   const [loading, setLoading] = useState(!initialCachedFiles);
   const [refreshing, setRefreshing] = useState(false);
@@ -137,7 +144,10 @@ function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
   // debouncedSearch drives ONLY (a) URL write-only reflection and (b) the
   // over-cap server-search fallback. It is never read back into the input.
   const [searchInput, setSearchInput] = useState('');
-  const debouncedSearch = useDebouncedValue(searchInput, LIBRARY_DEFAULTS.CLIENT_SEARCH_DEBOUNCE_MS);
+  const debouncedSearch = useDebouncedValue(
+    searchInput,
+    LIBRARY_DEFAULTS.CLIENT_SEARCH_DEBOUNCE_MS
+  );
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [sourceFilter, setSourceFilter] = useState<'all' | FileUploadSource>('all');
   const isSearchPending = searchInput !== debouncedSearch;
@@ -156,15 +166,47 @@ function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
 
   // Tag editor
   const [editingTagsFile, setEditingTagsFile] = useState<FileWithTags | null>(null);
+  const [directPreviewFile, setDirectPreviewFile] = useState<FileWithTags | null>(null);
 
   // The authoritative file set for the active mode (used for preview + tag list)
   const allFiles = isOverCap ? serverFiles : sweptFiles;
 
   // Preview — derived from URL param + loaded files
   const previewFile = useMemo(
-    () => (previewFileId ? allFiles.find((f) => f.id === previewFileId) ?? null : null),
-    [previewFileId, allFiles],
+    () =>
+      previewFileId ? (allFiles.find((f) => f.id === previewFileId) ?? directPreviewFile) : null,
+    [previewFileId, allFiles, directPreviewFile]
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!previewFileId) {
+      setDirectPreviewFile(null);
+      return;
+    }
+
+    const indexedFile = allFiles.find((f) => f.id === previewFileId);
+    if (indexedFile) {
+      setDirectPreviewFile(indexedFile);
+      return;
+    }
+
+    getLibraryFile(projectId, previewFileId)
+      .then(({ file, tags }) => {
+        if (!cancelled) setDirectPreviewFile({ ...file, tags });
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setDirectPreviewFile(null);
+          console.error('Failed to load preview file metadata:', err);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, previewFileId, allFiles]);
 
   // Active filter count for badge — EXCLUDES searchInput (search is always visible)
   const activeFilterCount = activeTags.length + (sourceFilter !== 'all' ? 1 : 0);
@@ -194,7 +236,7 @@ function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
     } else {
       result = sortFiles(
         sweptFiles.filter((f) => f.directory === currentDirectory),
-        sortBy,
+        sortBy
       );
     }
     return applyAdvancedFilters(result, activeTags, sourceFilter);
@@ -296,7 +338,16 @@ function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
         setRefreshing(false);
       }
     },
-    [projectId, cacheNamespace, debouncedSearch, activeTags, sourceFilter, sortBy, currentDirectory, isSearching],
+    [
+      projectId,
+      cacheNamespace,
+      debouncedSearch,
+      activeTags,
+      sourceFilter,
+      sortBy,
+      currentDirectory,
+      isSearching,
+    ]
   );
 
   useEffect(() => {
@@ -325,7 +376,7 @@ function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
         else next.delete('q');
         return next;
       },
-      { replace: true },
+      { replace: true }
     );
   }, [debouncedSearch, setSearchParams]);
 
@@ -341,7 +392,7 @@ function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
         return next;
       });
     },
-    [setSearchParams],
+    [setSearchParams]
   );
 
   // Move focus to the breadcrumb after a directory change (skip initial mount)
@@ -361,7 +412,7 @@ function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
       setDirRefreshToken((t) => t + 1);
       navigateToDirectory(dirPath);
     },
-    [navigateToDirectory],
+    [navigateToDirectory]
   );
 
   // ---------------------------------------------------------------------------
@@ -386,7 +437,7 @@ function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
         }
 
         const existing = allFiles.find(
-          (f) => f.filename === file.name && f.directory === currentDirectory,
+          (f) => f.filename === file.name && f.directory === currentDirectory
         );
         if (existing) continue;
 
@@ -403,20 +454,20 @@ function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
         })
           .then(() => {
             setUploads((prev) =>
-              prev.map((u) => (u.id === id ? { ...u, status: 'done' as const, progress: 100 } : u)),
+              prev.map((u) => (u.id === id ? { ...u, status: 'done' as const, progress: 100 } : u))
             );
             refreshAfterMutation();
           })
           .catch((err: Error) => {
             setUploads((prev) =>
               prev.map((u) =>
-                u.id === id ? { ...u, status: 'error' as const, error: err.message } : u,
-              ),
+                u.id === id ? { ...u, status: 'error' as const, error: err.message } : u
+              )
             );
           });
       }
     },
-    [projectId, allFiles, refreshAfterMutation, currentDirectory],
+    [projectId, allFiles, refreshAfterMutation, currentDirectory]
   );
 
   const dismissUpload = useCallback((id: string) => {
@@ -434,10 +485,10 @@ function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
           next.set('preview', file.id);
           return next;
         },
-        { replace: true },
+        { replace: true }
       );
     },
-    [setSearchParams],
+    [setSearchParams]
   );
 
   const closePreview = useCallback(() => {
@@ -447,7 +498,7 @@ function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
         next.delete('preview');
         return next;
       },
-      { replace: true },
+      { replace: true }
     );
   }, [setSearchParams]);
 

@@ -54,9 +54,14 @@ export function ProjectComments() {
 
   const open = (item: (typeof inbox.items)[number]) => {
     if (item.source.kind === 'session') {
-      navigate(`/projects/${projectId}/chat/${item.source.sessionId}`);
+      const params = new URLSearchParams({
+        commentMessage: item.source.messageId,
+        commentAt: String(item.thread.createdAt),
+      });
+      navigate(`/projects/${projectId}/chat/${item.source.sessionId}?${params.toString()}`);
     } else {
-      navigate(`/projects/${projectId}/library?file=${item.source.fileId}`);
+      const params = new URLSearchParams({ preview: item.source.fileId });
+      navigate(`/projects/${projectId}/library?${params.toString()}`);
     }
   };
 
@@ -100,9 +105,7 @@ export function ProjectComments() {
           <span className="text-sm text-fg-muted">Loading comments…</span>
         </div>
       )}
-      {showEmpty && (
-        <EmptyProjectInbox />
-      )}
+      {showEmpty && <EmptyProjectInbox />}
       {showGroups && (
         <div className="flex min-w-0 flex-col gap-5">
           {groups.map((group) => (

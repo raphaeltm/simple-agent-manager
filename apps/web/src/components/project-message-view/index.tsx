@@ -6,6 +6,7 @@
  * TypewriterText animates the latest assistant message; historical messages
  * render instantly.
  */
+// FILE SIZE EXCEPTION: Pre-existing large chat surface; this production hotfix adds a narrow URL-driven jump entry point that must stay colocated with existing Virtuoso jump/highlight state. See .claude/rules/18-file-size-limits.md
 import type {
   ConversationItem,
   SlashCommand,
@@ -190,6 +191,12 @@ interface ProjectMessageViewProps {
   onShowHierarchy?: (taskId: string) => void;
   /** Start a new chat from read-only sessions. */
   onNewChat?: () => void;
+  /** Message id requested by a route-level deep link, such as Project → Comments. */
+  targetMessageId?: string | null;
+  /** Timestamp used to load older history before resolving a route-level target. */
+  targetMessageTimestamp?: number | null;
+  /** Called once a route-level target has been consumed so refreshes do not re-jump. */
+  onTargetMessageConsumed?: () => void;
 }
 
 export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
@@ -210,6 +217,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   slashCommands = [],
   onShowHierarchy,
   onNewChat,
+  targetMessageId,
+  targetMessageTimestamp,
+  onTargetMessageConsumed,
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatLogRef = useRef<HTMLDivElement>(null);
@@ -288,6 +298,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   // pages until it resolves, so a jump never dead-clicks.
   const [pendingJump, setPendingJump] = useState<TimelineJumpTarget | null>(null);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
+  const consumedTargetMessageRef = useRef<string | null>(null);
 
   const scrollAndHighlight = useCallback(
     (itemId: string): boolean => {
@@ -315,6 +326,28 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     },
     [itemIndexById, scrollAndHighlight, lc]
   );
+
+  // Route-driven jump from the project Comments page. This deliberately reuses
+  // the same jump path as the timeline and session comments drawer so URL
+  // deep-links inherit the existing virtualized-list coordinate fix and
+  // fallback loading behavior.
+  useEffect(() => {
+    if (!targetMessageId) return;
+    const targetKey = `${sessionId}:${targetMessageId}`;
+    if (consumedTargetMessageRef.current === targetKey) return;
+    consumedTargetMessageRef.current = targetKey;
+    handleTimelineJump({
+      messageId: targetMessageId,
+      timestamp: targetMessageTimestamp ?? Date.now(),
+    });
+    onTargetMessageConsumed?.();
+  }, [
+    handleTimelineJump,
+    onTargetMessageConsumed,
+    sessionId,
+    targetMessageId,
+    targetMessageTimestamp,
+  ]);
 
   // Resolve a pending jump once the target (or the nearest message, after
   // loading settles) is available in the rendered list.

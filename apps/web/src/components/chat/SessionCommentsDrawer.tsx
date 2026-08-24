@@ -76,9 +76,9 @@ export function SessionCommentsDrawer({
 
       <dialog
         open
-        className="glass-panel-container glass-composited fixed z-50 glass-modal m-0 max-h-none max-w-none rounded-l-[20px] rounded-r-none border-y-0 border-r-0 p-0 text-inherit backdrop:bg-transparent flex flex-col shadow-xl overflow-hidden
+        className="glass-panel-container glass-composited fixed z-50 glass-modal m-0 box-border h-[100dvh] w-[100dvw] max-h-[100dvh] max-w-[100dvw] rounded-none border-0 p-0 text-inherit backdrop:bg-transparent flex flex-col shadow-xl overflow-hidden
           inset-0
-          md:inset-y-0 md:left-auto md:right-0 md:w-[min(400px,50vw)]
+          md:inset-y-0 md:left-auto md:right-0 md:h-auto md:w-[min(400px,50vw)] md:max-w-[min(400px,50vw)] md:rounded-l-[20px] md:rounded-r-none md:border-y-0 md:border-r-0 md:border-l
           before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,rgba(34,197,94,0.55)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"
         ref={panelRef}
         tabIndex={-1}
@@ -108,9 +108,7 @@ export function SessionCommentsDrawer({
               <Spinner size="sm" />
             </div>
           )}
-          {showEmpty && (
-            <EmptyInbox filter={filter} total={counts.all} />
-          )}
+          {showEmpty && <EmptyInbox filter={filter} total={counts.all} />}
           {!showInitialLoading && !showEmpty && (
             <ul className="m-0 flex list-none flex-col divide-y divide-border-default p-0">
               {visible.map((item) => {
