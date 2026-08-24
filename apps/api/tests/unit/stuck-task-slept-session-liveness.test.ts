@@ -6,7 +6,11 @@ import { getLocalTaskRuntimeLiveness } from '../../src/durable-objects/project-d
 import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
 import type { Env } from '../../src/env';
 import { getTaskRuntimeLiveness } from '../../src/scheduled/stuck-tasks';
-import { needsSessionResumabilityProbe } from '../../src/services/task-runtime-liveness';
+import {
+  isSupersededTerminalReason,
+  needsSessionResumabilityProbe,
+  needsTaskSupersessionProbe,
+} from '../../src/services/task-runtime-liveness';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 import { createSqlStorage } from './durable-objects/sql-storage-test-utils';
 
@@ -485,16 +489,37 @@ describe('task supersession — a successful wake must not fail its predecessor'
    * Discriminating control (`.claude/rules/58`). Without this, the suite passes
    * equally well with terminalization disabled outright.
    */
-  it('still terminalizes when the recovery family has no live owner', async () => {
+  /**
+   * Discriminating control (`.claude/rules/58`): the task must still leave the
+   * candidate set once the conversation is over. But it ended by supersession,
+   * so the verdict carries the benign marker rather than the runtime-death
+   * reason — that marker is what makes the sweep record `cancelled`.
+   */
+  it('terminalizes benignly once the whole recovery family has ended', async () => {
     seedWorkspace('deleted');
     nullOutHandoffBindings();
     seedRecoverySuccessor({ status: 'failed' });
 
-    await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
+    const verdict = await getTaskRuntimeLiveness(env, task);
+    expect(verdict).toMatchObject({
       live: false,
       conclusive: true,
-      reason: 'workspace_deleted',
+      reason: 'workspace_deleted_superseded_by_completed_wake',
     });
+    expect(isSupersededTerminalReason(verdict.reason)).toBe(true);
+  });
+
+  /**
+   * The other half of that control: a task that was NEVER superseded keeps the
+   * plain runtime-death reason, so the sweep still records it as `failed`.
+   * Without this pair, "everything becomes a benign cancellation" would pass.
+   */
+  it('keeps the runtime-death reason for a task that was never superseded', async () => {
+    seedWorkspace('deleted');
+
+    const verdict = await getTaskRuntimeLiveness(env, task);
+    expect(verdict).toMatchObject({ conclusive: true, reason: 'workspace_deleted' });
+    expect(isSupersededTerminalReason(verdict.reason)).toBe(false);
   });
 
   /**
@@ -513,9 +538,94 @@ describe('task supersession — a successful wake must not fail its predecessor'
 
     sqlite.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`).run(SUCCESSOR_ID);
 
+    // Bounded escape, but NOT a false failure: the benign marker is what the
+    // terminal writer keys on to record `cancelled` instead of `failed`.
     await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
       conclusive: true,
-      reason: 'workspace_deleted',
+      reason: 'workspace_deleted_superseded_by_completed_wake',
+    });
+  });
+
+  /**
+   * Rule 47 hot-path discipline: a resumable snapshot short-circuits the
+   * classifier before supersession is consulted, so the extra read is skipped.
+   */
+  it('does not probe supersession when the snapshot already proves resumability', async () => {
+    seedWorkspace('deleted');
+    seedSnapshot();
+    seedRecoverySuccessor();
+    let supersessionReads = 0;
+    const counting = {
+      DATABASE: {
+        prepare: (query: string) => {
+          if (query.includes('FROM tasks self')) supersessionReads++;
+          return createSqliteD1(sqlite).prepare(query);
+        },
+      },
+    } as unknown as Env;
+
+    await expect(getTaskRuntimeLiveness(counting, task)).resolves.toMatchObject({
+      conclusive: false,
+      reason: 'workspace_deleted_snapshot_resumable',
+    });
+    expect(supersessionReads).toBe(0);
+  });
+
+  /** The gate itself, asserted directly — mirrors the resumability-probe precedent. */
+  it('never probes supersession for a running workspace', () => {
+    expect(
+      needsTaskSupersessionProbe(
+        {
+          id: WORKSPACE_ID,
+          status: 'running',
+          chatSessionId: CHAT_SESSION_ID,
+          nodeId: NODE_ID,
+          nodeRuntime: 'vm',
+          nodeStatus: 'running',
+          nodeHealthStatus: 'healthy',
+          nodeHeartbeatAt: Date.now(),
+        },
+        'ok'
+      )
+    ).toBe(false);
+  });
+
+  /** The root of a chain is the other half of the incident population (49 of 91). */
+  it('preserves the ROOT of a chain that still has a live descendant', async () => {
+    const ROOT_ID = '01M064TG00ROOT00000000000';
+    const MIDDLE_ID = '01M064TG11MIDDLE000000000';
+    seedTask(ROOT_ID, { status: 'in_progress', createdAt: iso(-7_200_000), chatSessionId: null });
+    seedTask(MIDDLE_ID, {
+      status: 'failed',
+      triggeredBy: 'session-recovery',
+      recoverySourceTaskId: ROOT_ID,
+      createdAt: iso(-3_600_000),
+      chatSessionId: null,
+    });
+    seedRecoverySuccessor({ rootId: ROOT_ID, createdAt: iso(-60_000) });
+    seedWorkspace('deleted');
+
+    await expect(
+      getTaskRuntimeLiveness(env, {
+        id: ROOT_ID,
+        project_id: PROJECT_ID,
+        workspace_id: WORKSPACE_ID,
+      })
+    ).resolves.toMatchObject({
+      conclusive: false,
+      reason: 'workspace_deleted_superseded_by_live_wake',
+    });
+  });
+
+  /** Supersession applies to any non-running status, not just `deleted`. */
+  it('applies the same protection to a stopped workspace', async () => {
+    seedWorkspace('stopped');
+    nullOutHandoffBindings();
+    seedRecoverySuccessor();
+
+    await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
+      conclusive: false,
+      reason: 'workspace_stopped_superseded_by_live_wake',
     });
   });
 
@@ -573,7 +683,7 @@ describe('task supersession — a successful wake must not fail its predecessor'
     const broken = {
       DATABASE: {
         prepare: (query: string) =>
-          query.includes('owner.triggered_by')
+          query.includes('FROM tasks self')
             ? { bind: () => ({ first: () => Promise.reject(new Error('D1 unavailable')) }) }
             : createSqliteD1(sqlite).prepare(query),
       },

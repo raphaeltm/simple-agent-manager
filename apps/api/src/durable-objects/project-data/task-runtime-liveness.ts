@@ -9,6 +9,7 @@ import { createModuleLogger } from '../../lib/logger';
 import { DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS } from '../../services/session-snapshot-artifacts';
 import {
   classifyTaskRuntimeLiveness,
+  isSessionResumable,
   loadRuntimeWorkspaceSnapshot,
   loadSessionResumabilitySnapshot,
   loadTaskSupersession,
@@ -62,8 +63,15 @@ export async function getLocalTaskRuntimeLiveness(
 
   // Only probed for a workspace that would otherwise be declared conclusively
   // dead, keeping this off the alarm's hot path (`.claude/rules/47`).
+  const nowMs = Date.now();
+  const maxRecoveryAttempts = positiveInt(
+    env.SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
+    DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS
+  );
   let resumabilityProbeOutcome: TaskRuntimeLivenessSignals['resumabilityProbeOutcome'] = 'not_run';
   let sessionResumability: TaskRuntimeLivenessSignals['sessionResumability'] = null;
+  /** True when resumability alone already yields an inconclusive verdict. */
+  let resumabilityResolvedInconclusive = false;
   if (needsSessionResumabilityProbe(workspace, workspaceProbeOutcome)) {
     try {
       sessionResumability = await loadSessionResumabilitySnapshot(
@@ -73,8 +81,16 @@ export async function getLocalTaskRuntimeLiveness(
         workspace.chatSessionId
       );
       resumabilityProbeOutcome = 'ok';
+      resumabilityResolvedInconclusive = isSessionResumable(
+        sessionResumability,
+        task.projectId,
+        workspace.id,
+        maxRecoveryAttempts,
+        nowMs
+      );
     } catch (err) {
       resumabilityProbeOutcome = 'error';
+      resumabilityResolvedInconclusive = true;
       log.warn('session_resumability_query_failed', {
         projectId: task.projectId,
         workspaceId: task.workspaceId,
@@ -84,16 +100,17 @@ export async function getLocalTaskRuntimeLiveness(
     }
   }
 
-  // Same hot-path discipline as the resumability probe (`.claude/rules/47`).
+  // Tighter hot-path gate than the resumability probe (`.claude/rules/47`): skipped
+  // entirely when the snapshot already proved the session resumable, because the
+  // classifier returns `_snapshot_resumable` before it ever consults supersession.
   let supersessionProbeOutcome: TaskRuntimeLivenessSignals['supersessionProbeOutcome'] = 'not_run';
-  let supersededByLiveWake = false;
-  if (needsTaskSupersessionProbe(workspace, workspaceProbeOutcome)) {
+  let supersession: TaskRuntimeLivenessSignals['supersession'] = 'none';
+  if (
+    !resumabilityResolvedInconclusive &&
+    needsTaskSupersessionProbe(workspace, workspaceProbeOutcome)
+  ) {
     try {
-      supersededByLiveWake = await loadTaskSupersession(
-        env.DATABASE,
-        task.projectId,
-        task.taskId
-      );
+      supersession = await loadTaskSupersession(env.DATABASE, task.projectId, task.taskId);
       supersessionProbeOutcome = 'ok';
     } catch (err) {
       supersessionProbeOutcome = 'error';
@@ -112,8 +129,8 @@ export async function getLocalTaskRuntimeLiveness(
     workspace,
     workspaceProbeOutcome,
     supersessionProbeOutcome,
-    supersededByLiveWake,
-    nowMs: Date.now(),
+    supersession,
+    nowMs,
     heartbeatStaleMs: staleMs,
     acpProbeOutcome: 'not_run',
     acpSessions: [],
@@ -121,10 +138,7 @@ export async function getLocalTaskRuntimeLiveness(
     containerLifecycle: null,
     resumabilityProbeOutcome,
     sessionResumability,
-    resumabilityMaxRecoveryAttempts: positiveInt(
-      env.SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
-      DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS
-    ),
+    resumabilityMaxRecoveryAttempts: maxRecoveryAttempts,
   };
   const initialClassification = classifyTaskRuntimeLiveness(baseSignals);
   if (

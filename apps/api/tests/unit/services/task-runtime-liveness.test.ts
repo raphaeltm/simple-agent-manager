@@ -48,6 +48,10 @@ function signals(overrides: Partial<TaskRuntimeLivenessSignals> = {}): TaskRunti
     resumabilityProbeOutcome: 'not_run',
     sessionResumability: null,
     resumabilityMaxRecoveryAttempts: MAX_RECOVERY_ATTEMPTS,
+    // Same back-compat proof for the supersession signals: `not_run` / `none`
+    // must leave every pre-existing verdict in this file untouched.
+    supersessionProbeOutcome: 'not_run',
+    supersession: 'none',
     ...overrides,
   };
 }

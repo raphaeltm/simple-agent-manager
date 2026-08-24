@@ -188,40 +188,62 @@ Worst-case scan width is tasks created in that project after the candidate. The 
 production project peaks at **41 tasks/day** (4131 all-time) and sweep candidates are
 hours old, so the range is tens of indexed rows with an early `LIMIT 1`.
 
-## Known remaining gap (deliberate, tracked)
+## Closing the delayed-failure gap (added after review)
 
-Once the successor goes terminal the predecessor becomes eligible again and still
-terminalizes as `failed` "workspace_deleted" — the false failure is *delayed*, not
-eliminated. That residual is far lower harm than the acute bug (false failures during a
-live conversation, plus a permanently revoked parent-wake path), and removing it needs
-either a supersession marker column or a benign terminal status, both carrying the
-guarded-wake risk above. Tracked as a follow-up SAM idea.
+The first cut preserved the predecessor only *while* its successor lived, so once the
+conversation ended the predecessor still resolved to `failed`. Four independent
+reviewers flagged that as merge-blocking: it delays the false failure rather than
+eliminating it, and it means every completed recovery chain eventually emits a
+retroactive red failure on a conversation that finished normally.
+
+Fixed by making supersession a three-state signal (`none` / `live` / `terminal`):
+
+- `live` -> inconclusive, preserve (guarded wakes keep working)
+- `terminal` -> conclusive (bounded escape, rule 47) but with a distinct reason suffix
+  `_superseded_by_completed_wake`, which the sweep's terminal writer keys on to record
+  **`cancelled`** with a benign message instead of `failed`.
+
+This is safe with respect to the wake path, which is why terminalizing was rejected at
+handoff time but is correct here: a superseded predecessor always has a NULL
+`chat_session_id` (handoff stmt 2), and `terminal` means no live recovery owner exists,
+so BOTH branches of `sourceTaskGuardCondition`'s OR are already false — the guarded wake
+was failing for this task regardless of its status. Terminalizing at *handoff* time
+would have broken it; terminalizing *after the family ends* cannot.
+
+`cancelled` also routes correctly through `syncTriggerExecutionStatus` and
+`cancelVmTaskAdmission`, and project policy is explicit that benign lifecycle
+terminations must be distinguishable from failures and must not trigger debug diagnosis.
 
 ## Required tests
 
 Per `.claude/rules/62` (reach the feature the way production does) and `.claude/rules/58`:
 
-- [ ] **Incident reproduction**: drive a real handoff through `createRecoveryTask`,
-      then run the real classifier against the predecessor. Assert it is NOT
-      failed. Must fail against pre-fix code — verify once.
-- [ ] **Discriminating control**: a genuinely dead workspace with **no** live family
-      owner still terminalizes. Without this the suite passes equally well with
-      terminalization disabled outright.
-- [ ] **Chain-collapse case**: a middle link superseded by a sibling that points at
-      the root is preserved — the direct-child-only check must be proven insufficient.
-- [ ] **CAS guard**: a predecessor that already went `failed` for a real reason is
-      not overwritten by the supersession write; the original cause survives.
-- [ ] **Bounded escape** (`.claude/rules/47`): two sweeps against a family whose
-      successor is terminal — the predecessor leaves the candidate set.
-- [ ] Real SQL engine (`createSqliteD1` + `createSchemaTables`), not a `.where()`-ignoring
-      mock, since the guards are SQL predicates (`.claude/rules/28`).
+- [x] **Incident reproduction through the REAL writer**: `session-recovery-handoff.test.ts`
+      drives the actual `ensureSessionRecovery` -> `createRecoveryTask` batch, then runs
+      the real classifier against the predecessor it left behind (rule 62).
+- [x] **Discriminating control**: a never-superseded task still terminalizes as
+      `failed`/`workspace_deleted`, paired with the benign-cancellation case.
+- [x] **Chain-collapse case**: middle link AND root of a 3-generation chain both
+      preserved; a direct-child-only check is proven insufficient.
+- [x] **CAS guard**: the sweep's terminal write keeps its existing
+      `WHERE id = ? AND status = ?` optimistic lock, so a concurrent real failure is
+      never overwritten. (No new write at handoff time — see the rejected item above.)
+- [x] **Capability preserved**: a guarded `claimSessionSnapshotRecovery` still resolves
+      after the sweep classifies the predecessor — proving the parent-wake path the
+      false failures were revoking actually survives, not just that the label is nicer.
+- [x] **Bounded escape** (`.claude/rules/47`): once the successor terminalizes the
+      predecessor leaves the candidate set — as a benign `cancelled`, not `failed`.
+- [x] Real SQL engine (`createSqliteD1` + `createSchemaTables`) throughout (`.claude/rules/28`).
+- [x] **Proven discriminating**: neutering `supersessionVerdict` turns exactly the 11
+      supersession tests red and leaves all 29 controls green. Verified, then restored.
 
 ## Acceptance criteria
 
-- [ ] A successful wake leaves its predecessor in a benign terminal state, never `failed`
-- [ ] The classifier cannot declare a task conclusively gone while its recovery family
+- [x] A successful wake leaves its predecessor in a benign terminal state, never `failed`
+      (preserved while the successor lives; `cancelled` once the family ends)
+- [x] The classifier cannot declare a task conclusively gone while its recovery family
       has a live owner
-- [ ] Both terminalization paths (cron sweep + ProjectData DO) agree
+- [x] Both terminalization paths (cron sweep + ProjectData DO) agree
 - [ ] Staging: sleep a session, wake it, confirm the predecessor is not failed and the
       successor runs
 - [ ] Production after deploy: `conclusively gone` kills with a live/newer family owner

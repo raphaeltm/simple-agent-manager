@@ -1,9 +1,12 @@
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
+import { getTaskRuntimeLiveness } from '../../src/scheduled/stuck-tasks';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
+import { claimSessionSnapshotRecovery } from '../../src/services/session-snapshot-recovery-lifecycle';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const { ensureTaskRunnerStartedMock, startTaskRunnerDOMock } = vi.hoisted(() => ({
@@ -25,10 +28,19 @@ function seedRecoveryFixture(sqlite: Database.Database): void {
     schema.taskStatusEvents,
     schema.sessionSnapshots,
     schema.agentProfiles,
+    schema.nodes,
   ]);
   sqlite.exec(`
     INSERT INTO users (id, name, email, github_id)
     VALUES ('user-1', 'Test User', 'test@example.com', 'gh-1');
+
+    INSERT INTO nodes
+      (id, user_id, name, status, health_status, last_heartbeat_at, vm_size,
+       vm_location, cloud_provider, created_at, updated_at)
+    VALUES
+      ('node-1', 'user-1', 'node', 'running', 'healthy', '2026-08-15T00:00:00.000Z',
+       'small', 'nbg1', 'hetzner', '2026-08-15T00:00:00.000Z',
+       '2026-08-15T00:00:00.000Z');
 
     INSERT INTO projects
       (id, name, repository, installation_id, default_branch, default_location,
@@ -106,6 +118,98 @@ describe('session recovery handoff', () => {
         sqlite.prepare(`SELECT chat_session_id FROM tasks WHERE id = 'parent-1'`).get()
       ).toEqual({ chat_session_id: null });
       expect(startTaskRunnerDOMock).toHaveBeenCalledTimes(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  /**
+   * Rule 62: reach the classifier through the REAL writer. The unit suite
+   * simulates the handoff's chat-binding strip by hand; this drives the actual
+   * `ensureSessionRecovery` -> `createRecoveryTask` batch and then asks the real
+   * sweep classifier about the predecessor it left behind. If the writer's SQL
+   * ever changes shape, this is the test that notices — the hand-rolled fixture
+   * would not.
+   */
+  it('leaves a predecessor the real handoff produced classified as superseded, not dead', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedRecoveryFixture(sqlite);
+      const database = createSqliteD1(sqlite);
+
+      await expect(
+        ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1', guard())
+      ).resolves.toMatchObject({ status: 'waking' });
+
+      // The predecessor is exactly as the real batch left it: in_progress, chat
+      // binding stripped, and (once NodeLifecycle reaps it) workspace deleted.
+      sqlite.prepare(`UPDATE workspaces SET status = 'deleted' WHERE id = 'workspace-1'`).run();
+
+      await expect(
+        getTaskRuntimeLiveness({ DATABASE: database } as Env, {
+          id: 'parent-1',
+          project_id: 'project-1',
+          workspace_id: 'workspace-1',
+        })
+      ).resolves.toMatchObject({
+        live: false,
+        conclusive: false,
+        reason: 'workspace_deleted_superseded_by_live_wake',
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  /**
+   * The load-bearing justification for this whole fix: `sourceTaskGuardCondition`
+   * requires the source task to be NON-terminal, so a falsely-failed predecessor
+   * permanently revokes the guarded/parent-wake path. This proves the capability
+   * actually survives — not merely that the label is nicer.
+   */
+  it('keeps the guarded wake path claimable after the predecessor is classified', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedRecoveryFixture(sqlite);
+      const database = createSqliteD1(sqlite);
+
+      await expect(
+        ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1', guard())
+      ).resolves.toMatchObject({ status: 'waking' });
+      sqlite.prepare(`UPDATE workspaces SET status = 'deleted' WHERE id = 'workspace-1'`).run();
+
+      // The sweep evaluates the predecessor and must not terminalize it...
+      const verdict = await getTaskRuntimeLiveness({ DATABASE: database } as Env, {
+        id: 'parent-1',
+        project_id: 'project-1',
+        workspace_id: 'workspace-1',
+      });
+      expect(verdict.conclusive).toBe(false);
+      // The exact status does not matter; staying NON-TERMINAL is what
+      // `sourceTaskGuardCondition` requires.
+      expect(
+        sqlite.prepare(`SELECT status FROM tasks WHERE id = 'parent-1'`).get()
+      ).not.toMatchObject({ status: 'failed' });
+
+      // ...so a subsequent guarded claim against that same source still resolves.
+      // Pre-fix, the sweep would have marked parent-1 failed and this claim would
+      // have been refused with `source_task_not_wakeable`.
+      const drizzled = drizzle(database, { schema });
+      sqlite
+        .prepare(
+          `UPDATE session_snapshots
+              SET recovery_status = NULL, recovery_task_id = NULL, sleep_status = 'sleeping',
+                  sleeping_at = ?, recovery_attempts = 0
+            WHERE chat_session_id = 'chat-1'`
+        )
+        .run(new Date(Date.now() - 60_000).toISOString());
+      const claim = await claimSessionSnapshotRecovery(drizzled, {} as Env, {
+        chatSessionId: 'chat-1',
+        userId: 'user-1',
+        taskId: '01M064TGCLAIMAGAIN0000000',
+        sourceTaskGuard: guard(),
+      });
+      expect(claim.status).not.toBe('unavailable');
     } finally {
       sqlite.close();
     }

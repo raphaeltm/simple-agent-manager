@@ -65,19 +65,39 @@ Tells:
 
 ## Hard Requirements
 
-1. **The handoff must record the supersession on the record being replaced** — a
-   status transition, a `superseded_by` pointer, or an explicit marker — in the **same
-   transaction** that transfers ownership. "The new owner exists" is not a record that
-   the old one was retired.
+1. **The supersession must be recorded on the record being replaced** — a status
+   transition, a `superseded_by` pointer, or an explicit marker. "The new owner exists"
+   is not a record that the old one was retired.
+
+   Record it in the **same transaction** that transfers ownership *by default*. There is
+   one sanctioned exception, and it is the case that produced this rule: when some other
+   predicate requires the replaced record to stay **non-terminal** for a while. Here
+   every guarded-wake predicate (`sourceTaskGuardCondition`) requires the source task to
+   be non-terminal, so terminalizing at handoff time would have revoked the parent-wake
+   path — a strictly worse bug than the one being fixed. In that case the reaper may
+   *derive* supersession from lineage, provided that:
+   - the derivation is exact rather than a proxy (see requirement 5), and
+   - the terminal state it eventually writes is **benign and distinguishable** from a
+     failure, so the record never ends up mislabelled as dead, and
+   - the deferral is written down with the predicate that forced it.
+
+   What is never acceptable is deriving supersession and then still recording the
+   record as a failure — that is the original bug with extra steps.
 
 2. **Enumerate every consumer of every column the handoff nulls**, and state per
    consumer whether nulling it changes that consumer's verdict
    (`.claude/rules/44`, `.claude/rules/63`). A guard gated on a column your handoff
    clears is a guard you have silently deleted.
 
-3. **A reaper must be able to distinguish "superseded" from "dead" without inferring
-   it.** If the only way to tell them apart is a heuristic over timestamps or lineage
-   joins, the handoff did not record enough.
+3. **A reaper must be able to distinguish "superseded" from "dead" — and its verdict
+   must carry that distinction all the way to the status it writes.** A marker on the
+   replaced record is the strongest form. A lineage derivation is acceptable under the
+   requirement-1 exception, but only if it is exact: a *heuristic* (nearest timestamp,
+   "probably related", best-effort matching) is not, because a wrong answer either
+   resurrects a dead record or fails a live one.
+
+   The failure this forbids is a reaper that knows the difference and discards it —
+   computing "this was superseded" and then writing `failed` anyway.
 
 4. **Check the terminal-state predicates before choosing the marker.** Marking the
    predecessor terminal is the obvious move and is often *wrong*: here every
@@ -90,8 +110,16 @@ Tells:
 
 ## Required Tests
 
-- **The incident**: perform a real handoff, then run the real reaper against the
-  predecessor. Assert it is not terminalized. Must fail against pre-fix code.
+- **The incident, through the real writer**: perform a handoff by calling the actual
+  handoff function — not a hand-rolled fixture reproducing its effects — then run the
+  real reaper against the predecessor. Assert it is not terminalized. Must fail against
+  pre-fix code. A fixture that simulates the writer cannot notice the writer changing.
+- **The benign terminal state**: once the successor ends, assert the predecessor
+  resolves to the benign status, never to a failure, and that a never-superseded record
+  in the same suite still resolves to the failure status.
+- **The capability that was actually lost**: if the mislabelling revoked some downstream
+  capability (here, guarded wakes), assert that capability still works after the fix.
+  Asserting only the nicer label proves the symptom is gone, not the damage.
 - **The discriminating control**: an equivalent record with no live successor still
   terminalizes. Without it the suite passes with reaping disabled outright.
 - **The middle link**: a record superseded by a sibling that points past it to the
