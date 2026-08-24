@@ -19,6 +19,7 @@ import type {
   TaskRunnerState,
 } from '../../../src/durable-objects/task-runner/types';
 import { handleWorkspaceDispatch } from '../../../src/durable-objects/task-runner/workspace-steps';
+import { SessionRecoveryAuthorityRevokedError } from '../../../src/services/session-recovery-authority';
 
 function makeState(branch: string, outputBranch: string): TaskRunnerState {
   return {
@@ -64,6 +65,7 @@ function makeContext(): TaskRunnerContext {
   return {
     env: { DATABASE: { prepare } },
     ctx: { storage: { put: vi.fn(), setAlarm: vi.fn() } },
+    assertRecoveryAuthority: vi.fn().mockResolvedValue(undefined),
     updateD1ExecutionStep: vi.fn(),
     advanceToStep: vi.fn(),
     getWorkspaceDispatchTimeoutMs: vi.fn(() => 30_000),
@@ -124,8 +126,66 @@ describe('TaskRunner workspace branch dispatch', () => {
           branch: checkoutBranch,
           baseBranch,
           defaultBranch: 'main',
+        }),
+        expect.objectContaining({
+          sourceTaskGuard: undefined,
+          beforeExternalMutation: expect.any(Function),
         })
       );
     }
   );
+
+  it('carries recovery authority through workspace dispatch and rechecks after acknowledgement', async () => {
+    const state = makeState('main', 'sam/recovered-workspace');
+    state.config.recoverySourceTaskId = 'source-task-1';
+    state.config.resumeSnapshotChatSessionId = 'chat-1';
+    const rc = makeContext();
+    mocks.createWorkspaceOnNode.mockImplementationOnce(async (...args: unknown[]) => {
+      const options = args[4] as { beforeExternalMutation: () => Promise<void> };
+      await options.beforeExternalMutation();
+      return { workspaceId: 'workspace-1', status: 'creating' };
+    });
+
+    await handleWorkspaceDispatch(state, rc);
+
+    expect(mocks.createWorkspaceOnNode).toHaveBeenCalledWith(
+      'node-1',
+      rc.env,
+      'user-1',
+      expect.any(Object),
+      expect.objectContaining({
+        sourceTaskGuard: {
+          taskId: 'source-task-1',
+          projectId: 'project-1',
+          chatSessionId: 'chat-1',
+        },
+        beforeExternalMutation: expect.any(Function),
+      })
+    );
+    expect(rc.assertRecoveryAuthority).toHaveBeenCalledTimes(3);
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_ready');
+  });
+
+  it('does not record dispatch acknowledgement when authority is revoked after workspace creation', async () => {
+    const state = makeState('main', 'sam/revoked-workspace');
+    state.config.recoverySourceTaskId = 'source-task-revoked';
+    state.config.resumeSnapshotChatSessionId = 'chat-revoked';
+    const rc = makeContext();
+    vi.mocked(rc.assertRecoveryAuthority)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new SessionRecoveryAuthorityRevokedError());
+    mocks.createWorkspaceOnNode.mockImplementationOnce(async (...args: unknown[]) => {
+      const options = args[4] as { beforeExternalMutation: () => Promise<void> };
+      await options.beforeExternalMutation();
+      return { workspaceId: 'workspace-1', status: 'creating' };
+    });
+
+    await expect(handleWorkspaceDispatch(state, rc)).rejects.toBeInstanceOf(
+      SessionRecoveryAuthorityRevokedError
+    );
+
+    expect(state.workspaceDispatchAckedAt).toBeNull();
+    expect(rc.advanceToStep).not.toHaveBeenCalled();
+  });
 });

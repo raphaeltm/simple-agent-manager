@@ -11,8 +11,18 @@ import {
 
 import { log } from '../../lib/logger';
 import type { DevcontainerCacheCredentials } from '../../services/devcontainer-cache';
+import { SessionRecoveryAuthorityRevokedError } from '../../services/session-recovery-authority';
+import {
+  markVmAdmissionPlaced,
+  releaseVmProvisioningLease,
+} from '../../services/vm-admission-control';
 import { reserveWorkspacePlacement } from '../../services/workspace-placement';
-import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
+import {
+  computeBackoffMs,
+  getRecoverySourceTaskGuard,
+  isTransientError,
+  parseEnvInt,
+} from './helpers';
 import { ensureSessionLinked } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 import { ensureBranchExistsOnRemote } from './workspace-branch';
@@ -42,6 +52,7 @@ export async function handleWorkspaceCreation(
       // must still be checked separately; D1 workspace linkage is not VM-agent
       // acknowledgement.
       await ensureWorkspaceBookkeeping(state, rc, state.stepResults.workspaceId);
+      await finalizeVmAdmissionPlacement(state, rc);
       await rc.advanceToStep(state, 'workspace_dispatch');
       return;
     }
@@ -49,12 +60,14 @@ export async function handleWorkspaceCreation(
     // the task delegation transition. Re-run idempotent bookkeeping before
     // proceeding with delegation and dispatch.
     await ensureWorkspaceBookkeeping(state, rc, state.stepResults.workspaceId);
+    await finalizeVmAdmissionPlacement(state, rc);
   } else {
     const created = await createAndProvisionWorkspace(state, rc);
     if (!created) return;
   }
 
   // Transition task: queued → delegated (optimistic locking)
+  await rc.assertRecoveryAuthority(state);
   const now = new Date().toISOString();
   const result = await rc.env.DATABASE.prepare(
     `UPDATE tasks SET status = 'delegated', updated_at = ? WHERE id = ? AND status = 'queued'`
@@ -149,6 +162,10 @@ async function createAndProvisionWorkspace(
   const uniqueName = await resolveUniqueWorkspaceDisplayName(db, nodeId, workspaceName);
   const now = new Date().toISOString();
 
+  // Recovery authority is revalidated immediately before the physical
+  // workspace-row allocation (.claude/rules/49): a parent that terminalized
+  // while we resolved the unique display name must not allocate compute.
+  await rc.assertRecoveryAuthority(state);
   const maxWorkspaces =
     state.config.projectScaling?.maxWorkspacesPerNode ??
     parseEnvInt(rc.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE);
@@ -191,6 +208,15 @@ async function createAndProvisionWorkspace(
     state.stepResults.nodeId = null;
     state.stepResults.autoProvisioned = false;
     state.stepResults.provisionedVmSize = null;
+    await releaseVmProvisioningLease(
+      rc.env,
+      state.admissionScopeKey,
+      state.taskId,
+      state.admissionLeaseToken,
+      'workspace_placement_lost'
+    );
+    state.admissionScopeKey = null;
+    state.admissionLeaseToken = null;
     await rc.advanceToStep(state, 'node_selection');
     return false;
   }
@@ -201,10 +227,27 @@ async function createAndProvisionWorkspace(
 
   state.stepResults.workspaceId = workspaceId;
   await rc.ctx.storage.put('state', state);
+  await finalizeVmAdmissionPlacement(state, rc);
   await startComputeTrackingBestEffort(state, rc, db, workspaceId, nodeId);
   await ensureWorkspaceBookkeeping(state, rc, workspaceId, now);
   await rc.ctx.storage.put('state', state);
   return true;
+}
+
+async function finalizeVmAdmissionPlacement(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext
+): Promise<void> {
+  if (!state.stepResults.nodeId || !state.stepResults.workspaceId) return;
+  await markVmAdmissionPlaced(rc.env, {
+    taskId: state.taskId,
+    nodeId: state.stepResults.nodeId,
+    scopeKey: state.admissionScopeKey,
+    fencingToken: state.admissionLeaseToken,
+  });
+  state.admissionScopeKey = null;
+  state.admissionLeaseToken = null;
+  await rc.ctx.storage.put('state', state);
 }
 
 async function ensureWorkspaceBookkeeping(
@@ -213,6 +256,7 @@ async function ensureWorkspaceBookkeeping(
   workspaceId: string,
   now = new Date().toISOString()
 ): Promise<void> {
+  await rc.assertRecoveryAuthority(state);
   await ensureSessionLinked(state, workspaceId, rc);
   await setOutputBranch(state, rc, now);
   await ensureBranchExistsOnRemote(state, rc);
@@ -297,26 +341,39 @@ async function createWorkspaceOnVmAgent(
   const checkoutBranch = state.config.outputBranch || state.config.branch;
   const baseBranch =
     checkoutBranch === state.config.branch ? state.config.defaultBranch : state.config.branch;
-
-  const response = await createWorkspaceOnNode(nodeId, rc.env, state.userId, {
-    workspaceId,
-    repository: state.config.repository,
-    branch: checkoutBranch,
-    baseBranch,
-    defaultBranch: state.config.defaultBranch || 'main',
-    repoProvider: gitSource.repoProvider,
-    cloneUrl: gitSource.cloneUrl,
-    repositoryHost: gitSource.repositoryHost,
-    repositoryPath: gitSource.repositoryPath,
-    callbackToken,
-    gitUserName: state.config.userName,
-    gitUserEmail: state.config.userEmail,
-    githubId: state.config.githubId,
-    lightweight: state.config.workspaceProfile === 'lightweight',
-    devcontainerConfigName: state.config.devcontainerConfigName ?? undefined,
-    devcontainerCache: await getDevcontainerCacheForWorkspace(state, rc, workspaceId),
-  });
-
+  const devcontainerCache = await getDevcontainerCacheForWorkspace(state, rc, workspaceId);
+  const sourceTaskGuard = getRecoverySourceTaskGuard(state);
+  await rc.assertRecoveryAuthority(state);
+  const response = await createWorkspaceOnNode(
+    nodeId,
+    rc.env,
+    state.userId,
+    {
+      workspaceId,
+      repository: state.config.repository,
+      branch: checkoutBranch,
+      baseBranch,
+      defaultBranch: state.config.defaultBranch || 'main',
+      repoProvider: gitSource.repoProvider,
+      cloneUrl: gitSource.cloneUrl,
+      repositoryHost: gitSource.repositoryHost,
+      repositoryPath: gitSource.repositoryPath,
+      callbackToken,
+      gitUserName: state.config.userName,
+      gitUserEmail: state.config.userEmail,
+      githubId: state.config.githubId,
+      lightweight: state.config.workspaceProfile === 'lightweight',
+      devcontainerConfigName: state.config.devcontainerConfigName ?? undefined,
+      devcontainerCache,
+    },
+    {
+      sourceTaskGuard,
+      beforeExternalMutation: async () => {
+        await rc.assertRecoveryAuthority(state);
+      },
+    }
+  );
+  await rc.assertRecoveryAuthority(state);
   if (!isWorkspaceDispatchAck(response, workspaceId)) {
     throw Object.assign(
       new Error(`Node Agent did not acknowledge workspace dispatch for ${workspaceId}`),
@@ -394,6 +451,7 @@ export async function handleWorkspaceDispatch(
     await rc.ctx.storage.put('state', state);
     await rc.advanceToStep(state, 'workspace_ready');
   } catch (err) {
+    if (err instanceof SessionRecoveryAuthorityRevokedError) throw err;
     const errorMessage = err instanceof Error ? err.message : String(err);
     state.workspaceDispatchLastError = errorMessage;
     await rc.ctx.storage.put('state', state);
@@ -632,6 +690,7 @@ export async function handleAttachmentTransfer(
     let resp: Response;
     try {
       const uploadUrl = `${uploadBaseUrl}?token=${encodeURIComponent(token)}`;
+      await rc.assertRecoveryAuthority(state);
       resp = await fetch(uploadUrl, {
         method: 'POST',
         body: formData,

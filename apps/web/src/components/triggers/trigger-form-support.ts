@@ -92,6 +92,20 @@ export const WEBHOOK_TEMPLATE_VARIABLES = [
   ...COMMON_TEMPLATE_VARIABLES,
 ];
 
+export const INCIDENT_TEMPLATE_VARIABLES = [
+  {
+    group: 'incident',
+    vars: [
+      'incident.pendingCount',
+      'incident.totalOccurrenceCount',
+      'incident.backlogSummary',
+      'incident.incidents',
+      'incident.tools',
+    ],
+  },
+  ...COMMON_TEMPLATE_VARIABLES,
+];
+
 export function splitList(value: string): string[] | undefined {
   const items = value
     .split(',')

@@ -4,16 +4,20 @@ import {
   DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
   DEFAULT_CHAT_SESSION_MESSAGE_MAX,
 } from '@simple-agent-manager/shared';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
+import type { WakeProgressUpdate } from '../../hooks/useChatWebSocket';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
+import { useQueryScope } from '../../hooks/useQueryScope';
 import { useTokenRefresh } from '../../hooks/useTokenRefresh';
+import { useDocumentVisible } from '../../hooks/useVisibilityAwarePoll';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
 import type {
   ChatMessageResponse,
   ChatSessionDetailResponse,
   ChatSessionResponse,
+  MessageCommentRealtimeEvent,
   SessionStateSnapshot,
 } from '../../lib/api';
 import {
@@ -25,11 +29,16 @@ import {
   getWorkspace,
   resetIdleTimer,
   sendFollowUpPrompt,
-  uploadSessionFiles,
 } from '../../lib/api';
 import { mergeMessages } from '../../lib/merge-messages';
+import { chatQueryKeys, chatSessionMessagesQueryOptions } from '../../lib/query-options';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
-import type { SessionState } from './types';
+import type { FilePanelState } from './session-lifecycle-helpers';
+import {
+  getPlanFingerprint,
+  mergeSessionDetailMessages,
+  parsePlanContent,
+} from './session-lifecycle-helpers';
 import type { AgentActivityState } from './types';
 import {
   CHAT_FALLBACK_POLL_MS,
@@ -40,92 +49,23 @@ import {
 } from './types';
 import { useActivityVerifyTimer } from './useActivityVerifyTimer';
 import { useConnectionRecovery } from './useConnectionRecovery';
-
-type FilePanelState = {
-  mode: 'browse' | 'view' | 'diff' | 'git-status';
-  path?: string;
-  line?: number | null;
-} | null;
-
-function parsePlanContent(content: string): SessionStateSnapshot['currentPlan'] | null {
-  try {
-    const parsed = JSON.parse(content);
-    return Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function hashPlanContent(plan: SessionStateSnapshot['currentPlan']): string {
-  if (!plan) return 'none';
-  const serialized = JSON.stringify(plan);
-  let hash = 0;
-  for (let i = 0; i < serialized.length; i += 1) {
-    hash = ((hash << 5) - hash + serialized.charCodeAt(i)) | 0;
-  }
-  return `${plan.length}:${hash.toString(36)}`;
-}
-
-function getPlanFingerprint(state: SessionStateSnapshot | null | undefined): string {
-  if (!state) return 'no-state';
-  return state.planUpdatedAt
-    ? `updated:${state.planUpdatedAt}`
-    : `content:${hashPlanContent(state.currentPlan)}`;
-}
-
-export interface UseSessionLifecycleResult {
-  session: ChatSessionResponse | null;
-  messages: ChatMessageResponse[];
-  hasMore: boolean;
-  loading: boolean;
-  error: string | null;
-  setError: (e: string | null) => void;
-  sessionState: SessionState;
-  taskEmbed: ChatSessionResponse['task'] | null;
-  workspace: WorkspaceResponse | null;
-  node: NodeResponse | null;
-  detectedPorts: ReturnType<typeof useWorkspacePorts>['ports'];
-  followUp: string;
-  setFollowUp: (v: string) => void;
-  sendingFollowUp: boolean;
-  uploading: boolean;
-  isResuming: boolean;
-  resumeStartedAt: number | null;
-  resumeError: string | null;
-  clearResumeError: () => void;
-  connectionState: ChatConnectionState;
-  showConnectionBanner: boolean;
-  retryWs: () => void;
-  agentActivity: AgentActivityState;
-  staleNotice: boolean;
-  dismissStaleNotice: () => void;
-  currentPlan: SessionStateSnapshot['currentPlan'];
-  promptStartedAt: number | null;
-  firstItemIndex: number;
-  showScrollButton: boolean;
-  setShowScrollButton: (v: boolean) => void;
-  idleCountdownMs: number | null;
-  filePanel: FilePanelState;
-  setFilePanel: (v: FilePanelState) => void;
-  handleFileClick: (path: string, line?: number | null) => void;
-  handleOpenFileBrowser: () => void;
-  handleOpenGitChanges: () => void;
-  handleCancelPrompt: () => void;
-  handleSendFollowUp: () => Promise<void>;
-  handleUploadFiles: (files: FileList | File[]) => Promise<void>;
-  loadMore: () => Promise<void>;
-  loadUntil: (targetTimestamp: number) => Promise<void>;
-  loadingMore: boolean;
-  transcribeApiUrl: string;
-  wsRef: React.RefObject<WebSocket | null>;
-}
+import { useSessionFileUpload } from './useSessionFileUpload';
+import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
+import { useWakeProgress } from './useWakeProgress';
 
 export function useSessionLifecycle(
   projectId: string,
   sessionId: string,
   isProvisioning: boolean,
-  _onSessionMutated?: () => void
+  _onSessionMutated?: () => void,
+  onCommentEvent?: (event: MessageCommentRealtimeEvent) => void
 ): UseSessionLifecycleResult {
+  const queryScope = useQueryScope();
+  const queryClient = useQueryClient();
+  const sessionMessagesQueryKey = useMemo(
+    () => chatQueryKeys.sessionMessages(queryScope, projectId, sessionId),
+    [projectId, queryScope, sessionId]
+  );
   const [session, setSession] = useState<ChatSessionResponse | null>(null);
   const [taskEmbed, setTaskEmbed] = useState<ChatSessionResponse['task'] | null>(null);
   const [messages, setMessages] = useState<ChatMessageResponse[]>([]);
@@ -133,6 +73,31 @@ export function useSessionLifecycle(
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const sessionQuery = useQuery({
+    ...chatSessionMessagesQueryOptions(queryScope, projectId, sessionId),
+    enabled: Boolean(queryScope && projectId && sessionId),
+    queryFn: async ({ signal }) => {
+      const cached = queryClient.getQueryData<ChatSessionDetailResponse>(sessionMessagesQueryKey);
+      const latestCachedAt = cached?.messages.at(-1)?.createdAt;
+      if (cached && typeof latestCachedAt === 'number') {
+        const delta = await getChatSession(projectId, sessionId, {
+          signal,
+          after: latestCachedAt,
+        });
+        return {
+          ...delta,
+          messages: mergeMessages(cached.messages, delta.messages, 'append'),
+          hasMore: cached.hasMore || delta.hasMore,
+        };
+      }
+
+      return getChatSession(projectId, sessionId, {
+        signal,
+        limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX,
+      });
+    },
+  });
 
   // Refs mirror the latest messages/hasMore so imperative loaders (loadUntil)
   // can read current state without stale closures.
@@ -145,12 +110,35 @@ export function useSessionLifecycle(
     hasMoreRef.current = hasMore;
   }, [hasMore]);
 
+  const updateCachedMessages = useCallback(
+    (incoming: ChatMessageResponse[], strategy: 'replace' | 'append' | 'prepend') => {
+      if (!queryScope) return;
+      // TODO: Add size-based cache eviction — no cap for now, optimize later
+      queryClient.setQueryData<ChatSessionDetailResponse | undefined>(
+        sessionMessagesQueryKey,
+        (old) => mergeSessionDetailMessages(old, incoming, strategy)
+      );
+    },
+    [queryClient, queryScope, sessionMessagesQueryKey]
+  );
+
+  const appendOptimisticMessage = useCallback(
+    (message: ChatMessageResponse) => {
+      setMessages((prev) => [...prev, message]);
+      updateCachedMessages([message], 'append');
+    },
+    [updateCachedMessages]
+  );
+  const { uploading, handleUploadFiles } = useSessionFileUpload({
+    projectId,
+    sessionId,
+    onOptimisticMessage: appendOptimisticMessage,
+  });
+
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
   const [node, setNode] = useState<NodeResponse | null>(null);
-
   const [followUp, setFollowUp] = useState('');
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
   const sleepingWakePendingRef = useRef(false);
   const [currentPlan, setCurrentPlan] = useState<SessionStateSnapshot['currentPlan']>(null);
@@ -160,12 +148,10 @@ export function useSessionLifecycle(
     setAgentActivity('idle');
     setPromptStartedAt(null);
   }, []);
-
   const hydratePlan = useCallback((s: SessionStateSnapshot | null | undefined) => {
     if (!s) return;
     setCurrentPlan(s.currentPlan ?? null);
   }, []);
-
   const handleVerifiedStale = useCallback(() => setStaleNotice(true), []);
   const dismissStaleNotice = useCallback(() => setStaleNotice(false), []);
   const { startVerifyDecayTimer, stopVerifyDecayTimer } = useActivityVerifyTimer({
@@ -178,34 +164,37 @@ export function useSessionLifecycle(
     onStateSnapshot: hydratePlan,
   });
 
+  const wake = useWakeProgress(sessionId);
+  const { hydrateWakeProgress } = wake;
+
   const hydrateState = useCallback(
     (s: SessionStateSnapshot | null | undefined) => {
       if (!s) return;
+      // Wake phase is folded in first so the banner has a phase to render in the
+      // same commit that flips activity to 'recovering'.
+      hydrateWakeProgress(s);
       if (isWorkingActivity(s.activity)) {
         setAgentActivity(s.activity);
         setPromptStartedAt(s.promptStartedAt ?? null);
         startVerifyDecayTimer();
+      } else if (s.recoveryStatus === 'waking') {
+        setAgentActivity('recovering');
+        sleepingWakePendingRef.current = true;
       } else {
         clearActivity();
         stopVerifyDecayTimer();
       }
       hydratePlan(s);
     },
-    [clearActivity, hydratePlan, startVerifyDecayTimer, stopVerifyDecayTimer]
+    [clearActivity, hydratePlan, hydrateWakeProgress, startVerifyDecayTimer, stopVerifyDecayTimer]
   );
 
   const [filePanel, setFilePanel] = useState<FilePanelState>(null);
-
   const handleFileClick = useCallback((path: string, line?: number | null) => {
     setFilePanel({ mode: 'view', path, line });
   }, []);
-  const handleOpenFileBrowser = useCallback(() => {
-    setFilePanel({ mode: 'browse', path: '.' });
-  }, []);
-  const handleOpenGitChanges = useCallback(() => {
-    setFilePanel({ mode: 'git-status' });
-  }, []);
-
+  const handleOpenFileBrowser = useCallback(() => setFilePanel({ mode: 'browse', path: '.' }), []);
+  const handleOpenGitChanges = useCallback(() => setFilePanel({ mode: 'git-status' }), []);
   const [firstItemIndex, setFirstItemIndex] = useState(VIRTUAL_START);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const sessionState = session ? deriveSessionState(session) : 'terminated';
@@ -219,10 +208,21 @@ export function useSessionLifecycle(
   } = useChatWebSocket({
     projectId,
     sessionId,
-    enabled: session?.status === 'active',
+    // A waking session is still `sleeping` server-side for the whole wake —
+    // `wakeSession()` only flips it to `active` at the very end, after the agent
+    // session is live. Gating the socket on `active` alone therefore means the
+    // client holds NO connection during the exact window the wake-progress
+    // broadcasts are being sent, and every phase delta is dropped.
+    //
+    // `isWaking` comes from the D1 hydrate, so it is known on mount and on every
+    // poll. Opening the socket for that bounded window (and only then — an
+    // ordinary sleeping session still connects nothing) is what makes the push
+    // half of wake progress actually reach the user.
+    enabled: session?.status === 'active' || wake.isWaking,
     onMessage: useCallback(
       (msg: ChatMessageResponse) => {
         setMessages((prev) => mergeMessages(prev, [msg], 'append'));
+        updateCachedMessages([msg], 'append');
 
         if (msg.role === 'plan' && msg.content) {
           const parsed = parsePlanContent(msg.content);
@@ -238,7 +238,7 @@ export function useSessionLifecycle(
           startVerifyDecayTimer();
         }
       },
-      [startVerifyDecayTimer]
+      [startVerifyDecayTimer, updateCachedMessages]
     ),
     onSessionStopped: useCallback(() => {
       setSession((prev) => (prev ? { ...prev, status: 'stopped' } : prev));
@@ -255,9 +255,21 @@ export function useSessionLifecycle(
       ) => {
         setSession(catchUpSession);
         setMessages((prev) => mergeMessages(prev, catchUpMessages, 'replace'));
+        queryClient.setQueryData<ChatSessionDetailResponse | undefined>(
+          sessionMessagesQueryKey,
+          (old) =>
+            old
+              ? {
+                  ...old,
+                  session: catchUpSession,
+                  messages: mergeMessages(old.messages, catchUpMessages, 'replace'),
+                  state: state ?? old.state,
+                }
+              : old
+        );
         hydrateState(state);
       },
-      [hydrateState]
+      [hydrateState, queryClient, sessionMessagesQueryKey]
     ),
     onAgentCompleted: useCallback(
       (agentCompletedAt: number) => {
@@ -297,6 +309,21 @@ export function useSessionLifecycle(
       },
       []
     ),
+    // Pushed wake phase — arrives well ahead of the fallback poll, so the banner
+    // tracks the actual wake instead of lagging a poll interval behind it.
+    onWakeProgress: useCallback(
+      (update: WakeProgressUpdate) => {
+        wake.applyWakeProgress(update);
+        if (update.recoveryStatus !== 'waking') {
+          // The replacement runner is live (or gave up). Release the local wake
+          // latch so the fallback poll is allowed to publish authoritative state
+          // again instead of being suppressed as "stale sleeping state".
+          sleepingWakePendingRef.current = false;
+        }
+      },
+      [wake]
+    ),
+    onCommentEvent,
   });
 
   // Connection recovery (banner debounce, idle timer, auto-resume)
@@ -318,33 +345,49 @@ export function useSessionLifecycle(
     setShowScrollButton(false);
   }, [sessionId, stopVerifyDecayTimer]);
 
-  // Load session
-  const loadSession = useCallback(async () => {
-    try {
-      setError(null);
-      setLoading(true);
-      // Load the FULL conversation up front (server clamps to CHAT_SESSION_MESSAGE_MAX
-      // and the 30 MiB RPC size guard). This keeps the timeline jump index map
-      // complete and removes windowed loading for typical sessions. Oversized /
-      // guard-trimmed sessions keep hasMore=true and fall back to "Load earlier".
-      const data: ChatSessionDetailResponse = await getChatSession(projectId, sessionId, {
-        limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX,
-      });
-      setSession(data.session);
-      setMessages(data.messages);
-      setHasMore(data.hasMore);
-      if (data.session.task) setTaskEmbed(data.session.task);
-      hydrateState(data.state);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load session');
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, sessionId, hydrateState]);
-
   useEffect(() => {
-    void loadSession();
-  }, [loadSession]);
+    setLoading(sessionQuery.isPending && sessionQuery.data === undefined);
+    if (sessionQuery.error && sessionQuery.data === undefined) {
+      setError(
+        sessionQuery.error instanceof Error ? sessionQuery.error.message : 'Failed to load session'
+      );
+    }
+    if (!sessionQuery.data) return;
+
+    setError(null);
+    setSession(sessionQuery.data.session);
+    setMessages(sessionQuery.data.messages);
+    setHasMore(sessionQuery.data.hasMore);
+    setTaskEmbed(sessionQuery.data.session.task ?? null);
+    const serverStillHasStaleSleepingState =
+      sleepingWakePendingRef.current &&
+      sessionQuery.data.session.status === 'sleeping' &&
+      !isWorkingActivity(sessionQuery.data.state?.activity);
+    if (serverStillHasStaleSleepingState) {
+      hydratePlan(sessionQuery.data.state);
+      // The guard exists to stop a stale `idle` activity from erasing the user's
+      // wake feedback — NOT to discard wake progress. Its condition holds for most
+      // of a wake (status stays `sleeping`, activity stays `idle` until the agent
+      // actually starts), so routing around `hydrateState` without this would drop
+      // every phase update and leave `isWaking` false for the entire wake.
+      hydrateWakeProgress(sessionQuery.data.state);
+    } else {
+      if (
+        sessionQuery.data.session.status !== 'sleeping' ||
+        isWorkingActivity(sessionQuery.data.state?.activity)
+      ) {
+        sleepingWakePendingRef.current = false;
+      }
+      hydrateState(sessionQuery.data.state);
+    }
+  }, [
+    sessionQuery.data,
+    sessionQuery.error,
+    sessionQuery.isPending,
+    hydrateState,
+    hydratePlan,
+    hydrateWakeProgress,
+  ]);
 
   // Fetch workspace and node details
   useEffect(() => {
@@ -404,9 +447,22 @@ export function useSessionLifecycle(
   // Degraded fallback while the DO WebSocket is unavailable. Connected active
   // sessions rely on WebSocket events and reconnect catch-up instead of polling
   // the full session detail endpoint.
+  const documentVisible = useDocumentVisible();
+  // Tracks the hidden→visible edge so the effect below can tell a visibility
+  // return (which must catch up immediately) apart from its other re-run causes.
+  // Updated inside the effect, never during render.
+  const wasVisibleRef = useRef(documentVisible);
+
   useEffect(() => {
+    const becameVisible = documentVisible && !wasVisibleRef.current;
+    wasVisibleRef.current = documentVisible;
+
     if (!session || !['active', 'sleeping'].includes(session.status)) return;
     if (session.status === 'active' && connectionState === 'connected') return;
+    // Same reasoning as the WebSocket gate above, applied to the tab: nobody is
+    // reading this session while it is hidden, and this poll fetches the full
+    // session detail (heavier than the session list).
+    if (!documentVisible) return;
 
     const abortController = new AbortController();
     let lastPollFingerprint = '';
@@ -431,6 +487,16 @@ export function useSessionLifecycle(
           lastPollFingerprint = fingerprint;
           setSession(data.session);
           setMessages((prev) => mergeMessages(prev, data.messages, 'replace'));
+          queryClient.setQueryData<ChatSessionDetailResponse | undefined>(
+            sessionMessagesQueryKey,
+            (old) =>
+              old
+                ? {
+                    ...data,
+                    messages: mergeMessages(old.messages, data.messages, 'replace'),
+                  }
+                : data
+          );
           if (data.session.task) setTaskEmbed(data.session.task);
         }
         const wakeAttemptFailed =
@@ -449,6 +515,10 @@ export function useSessionLifecycle(
           // During that window the sleeping session's last persisted activity is
           // still idle; do not let fallback polling erase the user's wake feedback.
           hydratePlan(data.state);
+          // Wake progress must survive this branch — see the matching comment on
+          // the mount-hydrate path. This is the poll that carries phase updates
+          // for a user-triggered wake, which is the common trigger.
+          hydrateWakeProgress(data.state);
         } else {
           if (data.session.status !== 'sleeping' || isWorkingActivity(data.state?.activity)) {
             sleepingWakePendingRef.current = false;
@@ -461,6 +531,13 @@ export function useSessionLifecycle(
         pollInFlight = false;
       }
     };
+    // Catch up immediately when the tab regains visibility — the poll was
+    // suspended while hidden, so waiting a full interval would show a stale
+    // conversation at exactly the moment the user looks at it. Scoped to the
+    // visibility edge: this effect's other re-run causes (session status,
+    // connection state) keep their pre-existing interval-only behaviour.
+    if (becameVisible) void pollActiveSession();
+
     const pollInterval = setInterval(() => {
       void pollActiveSession();
     }, CHAT_FALLBACK_POLL_MS);
@@ -469,7 +546,16 @@ export function useSessionLifecycle(
       clearInterval(pollInterval);
       abortController.abort();
     };
-  }, [session?.status, projectId, sessionId, hydrateState, connectionState]);
+  }, [
+    session?.status,
+    projectId,
+    sessionId,
+    hydrateState,
+    connectionState,
+    documentVisible,
+    queryClient,
+    sessionMessagesQueryKey,
+  ]);
 
   // ── Send follow-up via REST API ──
   const handleSendFollowUp = async () => {
@@ -502,17 +588,16 @@ export function useSessionLifecycle(
 
       // Optimistic user message
       const optimisticId = `optimistic-${crypto.randomUUID()}`;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: optimisticId,
-          sessionId,
-          role: 'user',
-          content: trimmed,
-          toolMetadata: null,
-          createdAt: Date.now(),
-        },
-      ]);
+      const optimisticMessage: ChatMessageResponse = {
+        id: optimisticId,
+        sessionId,
+        role: 'user',
+        content: trimmed,
+        toolMetadata: null,
+        createdAt: Date.now(),
+      };
+      setMessages((prev) => [...prev, optimisticMessage]);
+      updateCachedMessages([optimisticMessage], 'append');
 
       // Persist via DO WebSocket
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -561,34 +646,6 @@ export function useSessionLifecycle(
   };
 
   // Upload files
-  const handleUploadFiles = useCallback(
-    async (files: FileList | File[]) => {
-      const fileArray = Array.from(files);
-      if (fileArray.length === 0) return;
-      setUploading(true);
-      try {
-        const result = await uploadSessionFiles(projectId, sessionId, fileArray);
-        const names = result.files.map((f) => f.name).join(', ');
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `optimistic-upload-${crypto.randomUUID()}`,
-            sessionId,
-            role: 'user' as const,
-            content: `Uploaded ${result.files.length} file${result.files.length > 1 ? 's' : ''}: ${names}`,
-            toolMetadata: null,
-            createdAt: Date.now(),
-          },
-        ]);
-      } catch (err) {
-        console.error('File upload failed:', err);
-      } finally {
-        setUploading(false);
-      }
-    },
-    [projectId, sessionId]
-  );
-
   // Cancel the current in-flight prompt via REST API
   const cancellingRef = useRef(false);
   const handleCancelPrompt = useCallback(() => {
@@ -623,6 +680,7 @@ export function useSessionLifecycle(
         setFirstItemIndex((fi) => fi - actualAdded);
         return merged;
       });
+      updateCachedMessages(data.messages, 'prepend');
       setHasMore(data.hasMore);
     } finally {
       setLoadingMore(false);
@@ -671,13 +729,14 @@ export function useSessionLifecycle(
             setFirstItemIndex((fi) => fi - actualAdded);
             return merged;
           });
+          updateCachedMessages(accumulated, 'prepend');
         }
         setHasMore(more);
       } finally {
         setLoadingMore(false);
       }
     },
-    [projectId, sessionId]
+    [projectId, sessionId, updateCachedMessages]
   );
 
   return {
@@ -704,6 +763,10 @@ export function useSessionLifecycle(
     showConnectionBanner: recovery.showConnectionBanner,
     retryWs,
     agentActivity,
+    /** True while a wake is in flight (hydrated from D1 or pushed over the socket). */
+    isWaking: wake.isWaking,
+    /** Current wake phase, or null before the replacement runner reports a step. */
+    wakePhase: wake.wakePhase,
     staleNotice,
     dismissStaleNotice,
     currentPlan,

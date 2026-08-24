@@ -24,6 +24,9 @@ import (
 type McpServer struct {
 	URL   string `json:"url"`
 	Token string `json:"token"`
+	// Name is the agent-visible server name. Empty for rows written before the
+	// name column existed; callers fall back to positional naming.
+	Name string `json:"name,omitempty"`
 }
 
 // WorkspaceMetadata represents persisted workspace metadata that survives
@@ -153,6 +156,7 @@ func (s *Store) migrate() error {
 		migrateV9,
 		migrateV10,
 		migrateV11,
+		migrateV12,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -208,6 +212,18 @@ func migrateV11(db *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_rollover_operations_state
 			ON checkpoint_rollover_operations(state, updated_at);
+	`)
+	return err
+}
+
+// migrateV12 adds the agent-visible name for injected MCP servers.
+//
+// Additive column with a default so pre-existing rows remain valid: an empty name means
+// "unnamed", and acp.ResolveMcpServerNames falls back to the legacy positional scheme for
+// those, preserving the behaviour of sessions registered before this column existed.
+func migrateV12(db *sql.DB) error {
+	_, err := db.Exec(`
+		ALTER TABLE session_mcp_servers ADD COLUMN name TEXT NOT NULL DEFAULT '';
 	`)
 	return err
 }
@@ -586,8 +602,8 @@ func (s *Store) UpsertSessionMcpServers(workspaceID, sessionID string, servers [
 
 	for i, srv := range servers {
 		if _, err := tx.Exec(
-			"INSERT INTO session_mcp_servers (workspace_id, session_id, sort_order, url, token) VALUES (?, ?, ?, ?, ?)",
-			workspaceID, sessionID, i, srv.URL, srv.Token,
+			"INSERT INTO session_mcp_servers (workspace_id, session_id, sort_order, url, token, name) VALUES (?, ?, ?, ?, ?, ?)",
+			workspaceID, sessionID, i, srv.URL, srv.Token, srv.Name,
 		); err != nil {
 			return fmt.Errorf("upsert session mcp servers: insert row %d: %w", i, err)
 		}
@@ -606,7 +622,7 @@ func (s *Store) GetSessionMcpServers(workspaceID, sessionID string) ([]McpServer
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(
-		"SELECT url, token FROM session_mcp_servers WHERE workspace_id = ? AND session_id = ? ORDER BY sort_order ASC",
+		"SELECT url, token, name FROM session_mcp_servers WHERE workspace_id = ? AND session_id = ? ORDER BY sort_order ASC",
 		workspaceID, sessionID,
 	)
 	if err != nil {
@@ -617,7 +633,7 @@ func (s *Store) GetSessionMcpServers(workspaceID, sessionID string) ([]McpServer
 	servers := []McpServer{}
 	for rows.Next() {
 		var srv McpServer
-		if err := rows.Scan(&srv.URL, &srv.Token); err != nil {
+		if err := rows.Scan(&srv.URL, &srv.Token, &srv.Name); err != nil {
 			return nil, fmt.Errorf("get session mcp servers: scan: %w", err)
 		}
 		servers = append(servers, srv)

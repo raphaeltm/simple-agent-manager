@@ -5,12 +5,14 @@
  * Fetches trigger list on open (not on page load) to stay lightweight.
  */
 import type { TriggerResponse } from '@simple-agent-manager/shared';
+import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, Clock, Plus } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router';
 
-import { listTriggers } from '../../lib/api/triggers';
+import { useQueryScope } from '../../hooks/useQueryScope';
+import { triggersQueryOptions } from '../../lib/query-options';
 import { FOCUS_RING } from './trigger-presentation';
 
 const POPOVER_WIDTH = 288;
@@ -69,15 +71,17 @@ const TriggerRow: FC<TriggerRowProps> = ({ trigger, projectId, onNavigate }) => 
 
 export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onToggle }) => {
   const navigate = useNavigate();
+  const queryScope = useQueryScope();
   const dropdownRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const triggerBtnRef = useRef<HTMLButtonElement>(null);
-  const [triggers, setTriggers] = useState<TriggerResponse[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [position, setPosition] = useState<{ top: number; left: number }>({
     top: POPOVER_MARGIN,
     left: POPOVER_MARGIN,
+  });
+  const triggersQuery = useQuery({
+    ...triggersQueryOptions(queryScope, projectId),
+    enabled: open && Boolean(projectId && queryScope),
   });
 
   const updatePosition = useCallback(() => {
@@ -97,27 +101,12 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
     requestAnimationFrame(() => triggerBtnRef.current?.focus());
   }, [open, onToggle]);
 
-  const fetchTriggers = useCallback(async () => {
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const result = await listTriggers(projectId);
-      setTriggers(result.triggers);
-    } catch (err) {
-      setTriggers([]);
-      setLoadError(err instanceof Error ? err.message : 'Failed to load triggers');
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId]);
-
   // Fetch triggers when dropdown opens
   useEffect(() => {
     if (open) {
       updatePosition();
-      fetchTriggers().catch(() => undefined);
     }
-  }, [open, fetchTriggers, updatePosition]);
+  }, [open, updatePosition]);
 
   useEffect(() => {
     if (!open) return;
@@ -160,9 +149,17 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
   }, [closePopover, navigate]);
 
   const handleRetry = useCallback(() => {
-    fetchTriggers().catch(() => undefined);
-  }, [fetchTriggers]);
+    void triggersQuery.refetch();
+  }, [triggersQuery]);
 
+  const triggers: TriggerResponse[] = triggersQuery.data ?? [];
+  const loadError =
+    triggersQuery.data === undefined && triggersQuery.error
+      ? triggersQuery.error instanceof Error
+        ? triggersQuery.error.message
+        : 'Failed to load triggers'
+      : null;
+  const loading = open && triggersQuery.isPending && triggersQuery.data === undefined;
   const activeTriggers = triggers.filter((t) => t.status === 'active');
   const pausedTriggers = triggers.filter((t) => t.status === 'paused');
   const popoverId = `trigger-dropdown-${projectId}`;

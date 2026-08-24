@@ -13,6 +13,7 @@ import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { runDebugDiagnosis, SCHEDULED_TRIAGE_DEBUG_FEATURE_KEY } from './debug-agent';
 import { redactSensitiveData } from './observability';
+import { configuredFeedbackProjectId, markIncidentPending } from './platform-feedback-incidents';
 import { formatUntrustedIdeaContent } from './untrusted-idea-content';
 
 export type FeedbackTriageTrigger = 'cron' | 'manual';
@@ -31,6 +32,7 @@ interface ErrorRow {
   source: string;
   message: string;
   timestamp: number;
+  task_id?: string | null;
 }
 export interface FeedbackErrorGroup {
   signature: string;
@@ -161,18 +163,38 @@ async function recordGroupFailure(
   await env.DATABASE.prepare(
     `UPDATE platform_feedback_triages SET failure_count = failure_count + 1, last_failure_reason = ?,
     last_failed_at = ?, rejected_at = COALESCE(rejected_at, ?), claim_token = NULL, claim_expires_at = NULL,
+    queue_state = CASE WHEN ? IS NOT NULL THEN 'rejected' ELSE queue_state END,
     updated_at = CURRENT_TIMESTAMP WHERE signature = ? AND claim_token = ?`
   )
-    .bind(reason, now, rejectedAt, signature, claimToken)
+    .bind(reason, now, rejectedAt, rejectedAt, signature, claimToken)
     .run();
   return { rejected: rejectedAt !== null };
+}
+
+async function excludeFeedbackProjectTaskErrors(
+  env: Env,
+  rows: ErrorRow[],
+  feedbackProjectId: string
+): Promise<ErrorRow[]> {
+  const taskIds = [
+    ...new Set(rows.map((row) => row.task_id).filter((id): id is string => Boolean(id))),
+  ];
+  if (taskIds.length === 0) return rows;
+  const placeholders = taskIds.map(() => '?').join(', ');
+  const query = await env.DATABASE.prepare(
+    `SELECT id FROM tasks WHERE project_id = ? AND id IN (${placeholders})`
+  )
+    .bind(feedbackProjectId, ...taskIds)
+    .all<{ id: string }>();
+  const selfTaskIds = new Set((query.results ?? []).map((row) => row.id));
+  return rows.filter((row) => !row.task_id || !selfTaskIds.has(row.task_id));
 }
 export async function runPlatformFeedbackTriage(
   env: Env,
   trigger: FeedbackTriageTrigger,
   deps: TriageDeps = {}
 ): Promise<FeedbackTriageResult> {
-  const projectId = env.PLATFORM_FEEDBACK_PROJECT_ID?.trim();
+  const projectId = await configuredFeedbackProjectId(env);
   const base: FeedbackTriageResult = {
     enabled: Boolean(projectId),
     trigger,
@@ -188,7 +210,7 @@ export async function runPlatformFeedbackTriage(
     .bind(projectId)
     .first<{ id: string; user_id: string }>();
   if (!project)
-    throw new Error('PLATFORM_FEEDBACK_PROJECT_ID does not reference an existing project');
+    throw new Error('Configured feedback project does not reference an existing project');
   const now = deps.now?.() ?? Date.now();
   const windowMinutes = positive(
     env.PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES,
@@ -219,11 +241,16 @@ export async function runPlatformFeedbackTriage(
     DEFAULT_PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH
   );
   const query = await env.OBSERVABILITY_DATABASE.prepare(
-    'SELECT id, source, message, timestamp FROM platform_errors WHERE level = ? AND timestamp BETWEEN ? AND ? ORDER BY timestamp DESC LIMIT ?'
+    'SELECT id, source, message, timestamp, task_id FROM platform_errors WHERE level = ? AND timestamp BETWEEN ? AND ? ORDER BY timestamp DESC LIMIT ?'
   )
     .bind('error', now - windowMinutes * 60_000, now, errorLimit)
     .all<ErrorRow>();
-  const groups = (await groupPlatformErrors(query.results ?? [], evidenceLimit))
+  const candidateRows = await excludeFeedbackProjectTaskErrors(
+    env,
+    query.results ?? [],
+    project.id
+  );
+  const groups = (await groupPlatformErrors(candidateRows, evidenceLimit))
     .sort((a, b) => b.count - a.count || b.lastSeenAt - a.lastSeenAt)
     .slice(0, groupLimit);
   const result = { ...base, groupsFound: groups.length };
@@ -233,8 +260,9 @@ export async function runPlatformFeedbackTriage(
     const refs = JSON.stringify(group.evidence);
     await env.DATABASE.prepare(
       `INSERT OR IGNORE INTO platform_feedback_triages
-      (signature, source, summary, first_seen_at, last_seen_at, occurrence_count, evidence_refs)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`
+      (signature, source, summary, first_seen_at, last_seen_at, occurrence_count, evidence_refs,
+       queue_state, queued_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
     )
       .bind(
         group.signature,
@@ -243,16 +271,29 @@ export async function runPlatformFeedbackTriage(
         group.firstSeenAt,
         group.lastSeenAt,
         group.count,
-        refs
+        refs,
+        now
       )
       .run();
     await env.DATABASE.prepare(
       `UPDATE platform_feedback_triages SET first_seen_at = MIN(first_seen_at, ?),
       last_seen_at = MAX(last_seen_at, ?), occurrence_count = MAX(occurrence_count, ?), evidence_refs = ?,
+      queue_state = CASE
+        WHEN rejected_at IS NOT NULL THEN 'rejected'
+        WHEN queue_state IN ('resolved', 'expired') THEN 'pending'
+        ELSE queue_state
+      END,
+      queued_at = CASE
+        WHEN rejected_at IS NOT NULL THEN queued_at
+        WHEN queued_at IS NULL OR queue_state IN ('resolved', 'expired') THEN ?
+        ELSE queued_at
+      END,
+      expired_at = CASE WHEN queue_state = 'expired' THEN NULL ELSE expired_at END,
       updated_at = CURRENT_TIMESTAMP WHERE signature = ?`
     )
-      .bind(group.firstSeenAt, group.lastSeenAt, group.count, refs, group.signature)
+      .bind(group.firstSeenAt, group.lastSeenAt, group.count, refs, now, group.signature)
       .run();
+    await markIncidentPending(env, group.signature, now);
     const existing = await env.DATABASE.prepare(
       `SELECT t.idea_id, t.diagnosis_id, t.rejected_at FROM platform_feedback_triages t
       WHERE t.signature = ?`

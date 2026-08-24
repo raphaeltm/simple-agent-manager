@@ -8,7 +8,7 @@ export const TRIGGER_TOOLS = [
     name: 'list_triggers',
     description:
       'List automation triggers in the current project. ' +
-      'Returns bounded operational metadata for cron, webhook, and GitHub triggers without prompt templates, webhook credentials/configuration, or execution history.',
+      'Returns bounded operational metadata for cron, webhook, GitHub, and private incident triggers without prompt templates, webhook credentials/configuration, or execution history.',
     inputSchema: {
       type: 'object' as const,
       properties: {

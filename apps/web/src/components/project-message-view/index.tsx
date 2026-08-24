@@ -8,13 +8,12 @@
  */
 import type {
   ConversationItem,
-  PlanItem,
   SlashCommand,
   ToolCallContentItem,
 } from '@simple-agent-manager/acp-client';
 import { mapToolCallContent, PlanModal } from '@simple-agent-manager/acp-client';
-import { type AgentProfile,classifyFailure } from '@simple-agent-manager/shared';
-import { Button, Spinner } from '@simple-agent-manager/ui';
+import { type AgentProfile, classifyFailure } from '@simple-agent-manager/shared';
+import { Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown } from 'lucide-react';
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
@@ -25,16 +24,25 @@ import { ChatFilePanel } from '../chat/ChatFilePanel';
 import { ChatTimelineDrawer } from '../chat/ChatTimelineDrawer';
 import { TruncatedSummary } from '../chat/TruncatedSummary';
 import { FailureCard } from '../debug/FailureCard';
-import { AcpConversationItemView } from './AcpConversationItemView';
+import { CommentableConversationItem } from './comments/CommentableConversationItem';
+import { useMessageComments } from './comments/useMessageComments';
+import { useProjectMessageCommentUi } from './comments/useProjectMessageCommentUi';
 import { CompletionDock } from './CompletionDock';
 import { FollowUpInput, ReadOnlyFollowUp } from './FollowUpInput';
 import { ConnectionBanner } from './MessageBanners';
+import {
+  CHAT_LIST_COMPONENTS,
+  type ChatListContext,
+  useFloatingHeaderHeight,
+} from './MessageListScaffold';
+import { currentPlanToPlanItem, ElapsedTime } from './session-view-utils';
 import { SessionHeader } from './SessionHeader';
 import { StaleActivityNotice } from './StaleActivityNotice';
 import type { TimelineJumpTarget } from './timeline-types';
 import { chatMessagesToConversationItems } from './types';
 import { useSessionLifecycle } from './useSessionLifecycle';
 import { useSessionTimeline } from './useSessionTimeline';
+import { WakeProgressBanner } from './WakeProgressBanner';
 
 /**
  * Resolve the id of the loaded conversation item nearest to (at or just before)
@@ -54,32 +62,6 @@ function nearestItemId(items: ConversationItem[], timestamp: number): string | u
 
 // Re-export utilities used by external consumers
 export { chatMessagesToConversationItems, groupMessages } from './types';
-
-/**
- * Measures the floating header's rendered height so the message list can pad
- * itself by the real value. The header stack (title wrapping to two lines,
- * status badges, error banner, output summary) varies from ~56px to several
- * hundred px — a fixed spacer leaves messages hidden behind the glass.
- */
-function useFloatingHeaderHeight(): [(el: HTMLDivElement | null) => void, number] {
-  // Callback ref (not useRef + mount effect): FloatingHeader renders null until
-  // the session loads, so the element attaches AFTER mount — an []-deps effect
-  // would run before the ref exists and never observe anything.
-  const [el, setEl] = useState<HTMLDivElement | null>(null);
-  const [height, setHeight] = useState(56);
-  useEffect(() => {
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => {
-      setHeight((prev) => {
-        const next = Math.ceil(el.getBoundingClientRect().height);
-        return next > 0 && next !== prev ? next : prev;
-      });
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [el]);
-  return [setEl, height];
-}
 
 /** Floating session header with optional error banner and summary. */
 function FloatingHeader({
@@ -179,45 +161,6 @@ function FloatingHeader({
   );
 }
 
-/** Convert session state plan array to PlanItem for the CompletionDock plan pill / PlanModal. */
-function currentPlanToPlanItem(plan: Array<{ content: string; status: string }>): PlanItem {
-  return {
-    kind: 'plan',
-    id: 'session-plan',
-    entries: plan.map((e) => ({
-      content: e.content,
-      priority: 'medium' as const,
-      status: (e.status === 'completed'
-        ? 'completed'
-        : e.status === 'in_progress'
-          ? 'in_progress'
-          : 'pending') as 'pending' | 'in_progress' | 'completed',
-    })),
-    timestamp: Date.now(),
-  };
-}
-
-/** Live elapsed-time display since prompt started. */
-const ElapsedTime: FC<{ startedAt: number }> = ({ startedAt }) => {
-  const [elapsed, setElapsed] = useState('');
-  useEffect(() => {
-    const update = () => {
-      const seconds = Math.floor((Date.now() - startedAt) / 1000);
-      const m = Math.floor(seconds / 60);
-      const s = seconds % 60;
-      setElapsed(m > 0 ? `${m}m ${s}s` : `${s}s`);
-    };
-    update();
-    const interval = setInterval(update, 1000);
-    return () => clearInterval(interval);
-  }, [startedAt]);
-  return (
-    <span className="text-xs text-fg-muted tabular-nums" aria-hidden="true">
-      ({elapsed})
-    </span>
-  );
-};
-
 interface ProjectMessageViewProps {
   projectId: string;
   sessionId: string;
@@ -231,7 +174,13 @@ interface ProjectMessageViewProps {
   onFork?: () => void;
   /** Source details for retries/forks. */
   sourceContext?: SessionSourceContext;
-  /** Called when the user clicks "End session" on an idle conversation-mode session. */
+  /** Called when the user clicks Sleep on an awake idle conversation-mode session. */
+  onSleepConversation?: () => void;
+  /** Whether a sleep-conversation request is in flight. */
+  sleepingConversation?: boolean;
+  /** Error from a failed sleep-conversation attempt. */
+  sleepError?: string | null;
+  /** Called when the user confirms Archive on a sleeping conversation-mode session. */
   onCloseConversation?: () => void;
   /** Whether a close-conversation request is in flight. */
   closingConversation?: boolean;
@@ -255,6 +204,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   onRetry,
   onFork,
   sourceContext,
+  onSleepConversation,
+  sleepingConversation,
+  sleepError,
   onCloseConversation,
   closingConversation,
   closeError,
@@ -264,11 +216,20 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   onNewChat,
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const chatLogRef = useRef<HTMLDivElement>(null);
   const [floatingHeaderRef, floatingHeaderHeight] = useFloatingHeaderHeight();
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
 
-  const lc = useSessionLifecycle(projectId, sessionId, isProvisioning, onSessionMutated);
+  const messageComments = useMessageComments(projectId, sessionId, Boolean(projectId && sessionId));
+
+  const lc = useSessionLifecycle(
+    projectId,
+    sessionId,
+    isProvisioning,
+    onSessionMutated,
+    messageComments.applyRealtimeEvent
+  );
 
   // Convert DO messages to conversation items (single source)
   const conversationItems = useMemo<ConversationItem[]>(() => {
@@ -403,21 +364,106 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     return -1;
   }, [conversationItems]);
 
+  // Only pass a file-click handler through when the session can actually serve
+  // files; hoisted so `renderConversationItem` has a stable dependency instead of
+  // rebuilding the ternary (and therefore the callback) on every render.
+  const fileClickHandler =
+    lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined;
+  const canWriteSession = lc.session?.isMine !== false;
+  const commentUi = useProjectMessageCommentUi({
+    messageComments,
+    canWriteSession,
+    hasMessages: conversationItems.length > 0,
+    chatLogRef,
+    sessionId,
+    scrollAndHighlight,
+  });
+
+  /**
+   * Row renderer for the virtualized conversation.
+   *
+   * Memoized so the identity only changes when something a row actually reads
+   * changes. An inline arrow here gives Virtuoso a new `itemContent` on every
+   * parent render, which re-renders every row currently inside the scroll window
+   * — the exact cost `React.memo` on `AcpConversationItemView` exists to avoid.
+   *
+   * `index` is Virtuoso's `firstItemIndex`-OFFSET coordinate, which is why the
+   * animation comparison subtracts `lc.firstItemIndex` to get back to the
+   * zero-based data index. Do not "simplify" that away — see the coordinate-space
+   * note on `itemIndexById` above.
+   */
+  const renderConversationItem = useCallback(
+    (index: number, item: ConversationItem) => {
+      return (
+        <CommentableConversationItem
+          index={index}
+          firstItemIndex={lc.firstItemIndex}
+          item={item}
+          projectId={projectId}
+          highlighted={highlightedItemId === item.id}
+          onFileClick={fileClickHandler}
+          onLoadToolContent={handleLoadToolContent}
+          animateAgentText
+          animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
+          canWriteSession={canWriteSession}
+          agentActivity={lc.agentActivity}
+          animationTargetIdx={animationTargetIdx}
+          commentState={commentUi.rowState}
+        />
+      );
+    },
+    [
+      highlightedItemId,
+      projectId,
+      fileClickHandler,
+      handleLoadToolContent,
+      lc.firstItemIndex,
+      lc.agentActivity,
+      animationTargetIdx,
+      animatedUserMsgIds,
+      canWriteSession,
+      commentUi.rowState,
+    ]
+  );
+
+  /** Values the stable `ChatListHeader` reads, passed via Virtuoso's `context`. */
+  const chatListContext = useMemo<ChatListContext>(
+    () => ({
+      headerSpacerHeight: floatingHeaderHeight + 8,
+      hasMore: lc.hasMore,
+      loadingMore: lc.loadingMore,
+      onLoadMore: lc.loadMore,
+    }),
+    [floatingHeaderHeight, lc.hasMore, lc.loadingMore, lc.loadMore]
+  );
+
   const planItem = useMemo(
     () =>
       lc.currentPlan && lc.currentPlan.length > 0 ? currentPlanToPlanItem(lc.currentPlan) : null,
     [lc.currentPlan]
   );
-  const canWriteSession = lc.session?.isMine !== false;
   const sessionOwnerLabel =
     lc.session?.createdBy?.name?.trim() ||
     lc.session?.createdBy?.email?.split('@')[0] ||
     'the creator';
-  const canArchiveSession = Boolean(
-    onCloseConversation &&
-    (lc.taskEmbed?.taskMode === 'conversation' ||
-      (!lc.taskEmbed?.id && lc.session?.status === 'active'))
+  const isConversationLifecycleSession =
+    lc.taskEmbed?.taskMode === 'conversation' ||
+    (!lc.taskEmbed?.id && (lc.session?.status === 'active' || lc.session?.status === 'sleeping'));
+  const canSleepSession = Boolean(
+    onSleepConversation &&
+    lc.session?.workspaceId &&
+    lc.sessionState !== 'sleeping' &&
+    isConversationLifecycleSession
   );
+  const canArchiveSession = Boolean(
+    onCloseConversation && lc.sessionState === 'sleeping' && isConversationLifecycleSession
+  );
+  const dockCenterAction =
+    lc.agentActivity !== 'idle'
+      ? 'interrupt'
+      : lc.sessionState === 'sleeping'
+        ? 'archive'
+        : 'sleep';
 
   // Initial load — only show full spinner when no data exists yet
   if (lc.loading && lc.messages.length === 0 && !lc.session) {
@@ -464,15 +510,20 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       )}
 
-      {lc.sessionState === 'sleeping' && lc.agentActivity !== 'idle' && (
-        <div
-          role="status"
-          aria-label="Sleeping session wake status"
-          className="flex items-center gap-2 px-4 py-1.5 border-b border-border-default bg-surface text-xs text-fg-muted"
-        >
-          <Spinner size="sm" />
-          <span>Waking and restoring session...</span>
-        </div>
+      {/*
+        Wake progress. `isWaking` is the server-derived signal (D1 hydrate + socket
+        push). `agentActivity !== 'idle'` is retained as the pre-existing local
+        fallback so a wake still shows a banner when no phase signal is available —
+        e.g. an API that predates `wakePhase`, or a wake claimed before the
+        replacement runner has written its first execution step.
+      */}
+      {lc.sessionState === 'sleeping' && (lc.isWaking || lc.agentActivity !== 'idle') && (
+        <WakeProgressBanner
+          wakePhase={lc.wakePhase}
+          elapsed={
+            lc.promptStartedAt != null ? <ElapsedTime startedAt={lc.promptStartedAt} /> : null
+          }
+        />
       )}
 
       {/* Resume / delivery error banner with retry */}
@@ -534,122 +585,92 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           </div>
         </div>
       ) : (
-        <div
-          className="flex-1 min-h-0 min-w-0 relative flex flex-col"
-          role="log"
-          aria-live="polite"
-          aria-label="Conversation"
-        >
-          <FloatingHeader
-            projectId={projectId}
-            lc={lc}
-            onSessionMutated={onSessionMutated}
-            onRetry={onRetry}
-            onFork={onFork}
-            onOpenTimeline={() => setShowTimeline(true)}
-            sourceContext={sourceContext}
-            onShowHierarchy={onShowHierarchy}
-            containerRef={floatingHeaderRef}
-          />
-          <div className="flex-1 min-h-0">
-            <Virtuoso
-              ref={virtuosoRef}
-              style={{ height: '100%' }}
-              data={conversationItems}
-              firstItemIndex={lc.firstItemIndex}
-              initialTopMostItemIndex={conversationItems.length - 1}
-              followOutput={(isAtBottom: boolean) => (isAtBottom ? 'smooth' : false)}
-              alignToBottom
-              atBottomThreshold={50}
-              atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
-              overscan={200}
-              itemContent={(index, item) => (
-                <div
-                  className={`sam-message-entry px-4 pb-3${highlightedItemId === item.id ? ' sam-message-highlight' : ''}`}
-                >
-                  <AcpConversationItemView
-                    item={item}
-                    projectId={projectId}
-                    onFileClick={
-                      lc.session?.workspaceId && lc.sessionState === 'active'
-                        ? lc.handleFileClick
-                        : undefined
-                    }
-                    onLoadToolContent={handleLoadToolContent}
-                    animateText={
-                      item.kind === 'agent_message' &&
-                      index - lc.firstItemIndex === animationTargetIdx &&
-                      lc.agentActivity === 'responding'
-                    }
-                    animateUserMessage={
-                      item.kind === 'user_message' && animatedUserMsgIds.has(item.id)
-                    }
-                  />
-                </div>
-              )}
-              components={{
-                Header: () => (
-                  <>
-                    {/* Spacer for absolutely-positioned FloatingHeader so messages aren't hidden
-                        behind it — tracks the measured header height (title wrap, badges, error
-                        banner, and summary all change it). The extra 8px keeps the first message
-                        clear of the glass edge. */}
-                    <div style={{ height: floatingHeaderHeight + 8 }} />
-                    {lc.hasMore && (
-                      <div className="text-center py-3">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={lc.loadMore}
-                          loading={lc.loadingMore}
-                        >
-                          Load earlier messages
-                        </Button>
-                      </div>
-                    )}
-                  </>
-                ),
-              }}
+        <div className="flex-1 min-h-0 min-w-0 relative flex flex-col lg:flex-row">
+          <div
+            ref={chatLogRef}
+            className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+            role="log"
+            aria-live="polite"
+            aria-label="Conversation"
+          >
+            <FloatingHeader
+              projectId={projectId}
+              lc={lc}
+              onSessionMutated={onSessionMutated}
+              onRetry={onRetry}
+              onFork={onFork}
+              onOpenTimeline={() => setShowTimeline(true)}
+              sourceContext={sourceContext}
+              onShowHierarchy={onShowHierarchy}
+              containerRef={floatingHeaderRef}
             />
+            <div className="flex-1 min-h-0">
+              <Virtuoso
+                ref={virtuosoRef}
+                style={{ height: '100%' }}
+                data={conversationItems}
+                firstItemIndex={lc.firstItemIndex}
+                initialTopMostItemIndex={conversationItems.length - 1}
+                followOutput={(isAtBottom: boolean) => (isAtBottom ? 'smooth' : false)}
+                alignToBottom
+                atBottomThreshold={50}
+                atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
+                overscan={200}
+                itemContent={renderConversationItem}
+                context={chatListContext}
+                components={CHAT_LIST_COMPONENTS}
+              />
+            </div>
+
+            {/* Scroll to bottom button */}
+            {lc.showScrollButton && (
+              <button
+                type="button"
+                onClick={() => {
+                  virtuosoRef.current?.scrollToIndex({
+                    index: 'LAST',
+                    behavior: 'smooth',
+                  });
+                }}
+                className="sam-scroll-button absolute right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-[var(--sam-form-border)] bg-[var(--sam-form-bg)] shadow-md cursor-pointer hover:bg-page"
+                data-agent-active={lc.agentActivity !== 'idle'}
+                aria-label="Scroll to bottom"
+              >
+                <ChevronDown size={16} className="text-fg-muted" />
+              </button>
+            )}
+
+            {commentUi.selectionControls}
           </div>
 
-          {/* Scroll to bottom button */}
-          {lc.showScrollButton && (
-            <button
-              type="button"
-              onClick={() => {
-                virtuosoRef.current?.scrollToIndex({
-                  index: 'LAST',
-                  behavior: 'smooth',
-                });
-              }}
-              className="sam-scroll-button absolute right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-[var(--sam-form-border)] bg-[var(--sam-form-bg)] shadow-md cursor-pointer hover:bg-page"
-              data-agent-active={lc.agentActivity !== 'idle'}
-              aria-label="Scroll to bottom"
-            >
-              <ChevronDown size={16} className="text-fg-muted" />
-            </button>
-          )}
+          {commentUi.desktopRail}
         </div>
       )}
 
       {/* Lifecycle control — a single always-mounted dock while the session is
-          active. Its center button morphs between a red Interrupt (working) and
-          a grey Archive (idle), so the control never disappears even when the
-          `agentActivity` signal is stale. Archive is wired for
-          conversation-mode tasks and taskless instant sessions the caller can close. */}
-      {isActive && canWriteSession && (canArchiveSession || lc.agentActivity !== 'idle') && (
-        <CompletionDock
-          working={lc.agentActivity !== 'idle'}
-          hasPlan={!!planItem}
-          onInterrupt={lc.handleCancelPrompt}
-          onArchive={() => onCloseConversation?.()}
-          onOpenPlan={() => setShowPlanModal(true)}
-          archiving={closingConversation}
-          archiveError={closeError}
-          elapsed={lc.promptStartedAt ? <ElapsedTime startedAt={lc.promptStartedAt} /> : undefined}
-        />
-      )}
+          active. Its center button morphs between Interrupt (working), Sleep
+          (awake idle), and Archive (already sleeping), so irreversible archive
+          is only the primary action after the reversible sleep boundary. */}
+      {isActive &&
+        canWriteSession &&
+        (lc.agentActivity !== 'idle' || canSleepSession || canArchiveSession) && (
+          <CompletionDock
+            working={lc.agentActivity !== 'idle'}
+            centerAction={dockCenterAction}
+            hasPlan={!!planItem}
+            onInterrupt={lc.handleCancelPrompt}
+            onSleep={() => onSleepConversation?.()}
+            onArchive={() => onCloseConversation?.()}
+            onOpenPlan={() => setShowPlanModal(true)}
+            sleeping={sleepingConversation}
+            archiving={closingConversation}
+            sleepError={sleepError}
+            archiveError={closeError}
+            elapsed={
+              lc.promptStartedAt ? <ElapsedTime startedAt={lc.promptStartedAt} /> : undefined
+            }
+          />
+        )}
       {planItem && (
         <PlanModal plan={planItem} isOpen={showPlanModal} onClose={() => setShowPlanModal(false)} />
       )}
@@ -671,13 +692,18 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           sending={lc.sendingFollowUp}
           uploading={lc.uploading}
           placeholder={
-            lc.agentActivity === 'prompting' || lc.agentActivity === 'responding'
-              ? 'Agent is working...'
-              : lc.sessionState === 'idle'
-                ? 'Send a message to resume the agent...'
-                : lc.sessionState === 'sleeping'
-                  ? 'Send a message to wake the agent...'
-                  : 'Send a message...'
+            // A wake already in flight must not be advertised as "send a message
+            // to wake" — that contradicts the banner directly above and is what
+            // invites the duplicate wake this feature exists to prevent.
+            lc.isWaking
+              ? 'Waking the agent — your message will be delivered...'
+              : lc.agentActivity === 'prompting' || lc.agentActivity === 'responding'
+                ? 'Agent is working...'
+                : lc.sessionState === 'idle'
+                  ? 'Send a message to resume the agent...'
+                  : lc.sessionState === 'sleeping'
+                    ? 'Send a message to wake the agent...'
+                    : 'Send a message...'
           }
           transcribeApiUrl={lc.transcribeApiUrl}
           agentProfiles={agentProfiles}

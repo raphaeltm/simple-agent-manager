@@ -1,8 +1,16 @@
-import type { ListFilesResponse, ProjectFile, ProjectFileTag } from '@simple-agent-manager/shared';
-import { render, screen, waitFor } from '@testing-library/react';
+import {
+  LIBRARY_DEFAULTS,
+  type ListFilesResponse,
+  type ProjectFile,
+  type ProjectFileTag,
+} from '@simple-agent-manager/shared';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { type LibraryIndexQueryData,libraryQueryKeys } from '../../../src/lib/query-options';
+import { renderWithQuery } from '../../test-utils/query-test-utils';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -65,9 +73,9 @@ vi.mock('../../../src/components/AuthProvider', () => ({
   }),
 }));
 
-// Mock library-cache to avoid localStorage in the test env. Must include the
-// global-index helpers used by the sweep hook in addition to the per-directory
-// helpers used by the page.
+// Mock library-cache to avoid localStorage in the test env. The page still uses
+// it for per-directory server-fallback caches; the global index now lives in
+// TanStack Query and is asserted through the QueryClient below.
 const cacheMocks = vi.hoisted(() => ({
   UNAUTHENTICATED_LIBRARY_CACHE_NAMESPACE: 'user:unauthenticated',
   buildLibraryCacheNamespace: vi.fn((userId: string | null | undefined) => userId ? `user:${encodeURIComponent(userId)}` : null),
@@ -119,7 +127,7 @@ function page(files: ReturnType<typeof makeFile>[], total?: number): ListFilesRe
 }
 
 function renderLibrary(initialRoute = '/projects/proj-test/library') {
-  return render(
+  return renderWithQuery(
     <MemoryRouter initialEntries={[initialRoute]}>
       <ProjectLibrary />
     </MemoryRouter>,
@@ -143,11 +151,7 @@ describe('ProjectLibrary (client-side index)', () => {
 
   // --- Basic rendering ------------------------------------------------------
 
-
-
-
-
-  it('does not hydrate legacy cache when auth is temporarily null', async () => {
+  it('does not hydrate legacy global-index cache when auth is temporarily null', () => {
     authState.userId = null;
     cacheMocks.getCachedIndex.mockImplementation((_projectId: string, namespace?: string | null) => {
       if (namespace === undefined || namespace === null) {
@@ -159,21 +163,15 @@ describe('ProjectLibrary (client-side index)', () => {
 
     renderLibrary();
 
-    await waitFor(() => expect(cacheMocks.getCachedIndex).toHaveBeenCalledWith('proj-test', 'user:unauthenticated'));
+    expect(cacheMocks.getCachedIndex).not.toHaveBeenCalled();
+    expect(mocks.listLibraryFiles).not.toHaveBeenCalled();
     expect(screen.queryByText('previous-user.txt')).not.toBeInTheDocument();
   });
 
-  it('remounts on account switch so previous-user cached rows do not flash', async () => {
-    cacheMocks.getCachedIndex.mockImplementation((_projectId: string, namespace?: string | null) => {
-      if (namespace === 'user:user-1') {
-        return { files: [makeFile({ id: 'a', filename: 'user-a-private.txt' })], count: 1, sweptAt: Date.now() };
-      }
-      if (namespace === 'user:user-2') {
-        return { files: [makeFile({ id: 'b', filename: 'user-b-private.txt' })], count: 1, sweptAt: Date.now() };
-      }
-      return null;
-    });
-    mocks.listLibraryFiles.mockReturnValue(new Promise(() => undefined));
+  it('remounts on account switch so previous-user query rows do not flash', async () => {
+    mocks.listLibraryFiles
+      .mockResolvedValueOnce(page([makeFile({ id: 'a', filename: 'user-a-private.txt' })]))
+      .mockResolvedValueOnce(page([makeFile({ id: 'b', filename: 'user-b-private.txt' })]));
 
     const { rerender } = renderLibrary();
     expect(await screen.findByText('user-a-private.txt')).toBeInTheDocument();
@@ -189,19 +187,25 @@ describe('ProjectLibrary (client-side index)', () => {
     expect(screen.queryByText('user-a-private.txt')).not.toBeInTheDocument();
   });
 
-  it('reads and writes ProjectLibrary cache through the authenticated user namespace', async () => {
+  it('stores the swept index under the authenticated Query scope and keeps directory cache namespaced', async () => {
     mocks.listLibraryFiles.mockResolvedValue(page([makeFile({ id: 'f1', filename: 'safe.txt' })]));
 
-    renderLibrary();
+    const { queryClient } = renderLibrary();
 
     await waitFor(() => expect(screen.getByText('safe.txt')).toBeInTheDocument());
-    expect(cacheMocks.getCachedIndex).toHaveBeenCalledWith('proj-test', 'user:user-1');
-    expect(cacheMocks.getCachedDirectories).toHaveBeenCalledWith('proj-test', '/', 'user:user-1');
-    expect(cacheMocks.setCachedIndex).toHaveBeenCalledWith(
-      'proj-test',
-      expect.arrayContaining([expect.objectContaining({ id: 'f1' })]),
-      'user:user-1',
+    const cachedIndex = queryClient.getQueryData<LibraryIndexQueryData>(
+      libraryQueryKeys.index('user-1', 'proj-test', {
+        cap: LIBRARY_DEFAULTS.CLIENT_SWEEP_CAP,
+        maxSweepPages: LIBRARY_DEFAULTS.CLIENT_MAX_SWEEP_PAGES,
+        namespace: 'user:user-1',
+      })
     );
+    expect(cachedIndex?.files).toEqual([
+      expect.objectContaining({ id: 'f1', extractedTextPreview: null }),
+    ]);
+    expect(cacheMocks.getCachedIndex).not.toHaveBeenCalled();
+    expect(cacheMocks.getCachedDirectories).toHaveBeenCalledWith('proj-test', '/', 'user:user-1');
+    expect(cacheMocks.setCachedIndex).not.toHaveBeenCalled();
     expect(cacheMocks.setCachedDirectories).toHaveBeenCalledWith('proj-test', '/', [], 'user:user-1');
   });
 
@@ -450,11 +454,6 @@ describe('ProjectLibrary (client-side index)', () => {
     mocks.listLibraryFiles
       .mockResolvedValueOnce(page([readme]))
       .mockReturnValue(new Promise(() => {}));
-    // The first sweep populated the cache, so the re-sweep hydrates from it
-    // (flicker-free) instead of resetting to a full-page loading spinner.
-    cacheMocks.getCachedIndex
-      .mockReturnValueOnce(null)
-      .mockReturnValue({ files: [readme], count: 1, sweptAt: Date.now() });
     mocks.deleteLibraryFile.mockResolvedValue(undefined);
 
     renderLibrary();
@@ -496,11 +495,6 @@ describe('ProjectLibrary (client-side index)', () => {
       .mockResolvedValueOnce(page([keep, deleteMe]))
       // The re-sweep after deletion returns the list WITHOUT the deleted file.
       .mockResolvedValue(page([keep]));
-    // The first sweep populated the cache (both files); the re-sweep hydrates
-    // from it for a flicker-free transition, then overwrites with fresh data.
-    cacheMocks.getCachedIndex
-      .mockReturnValueOnce(null)
-      .mockReturnValue({ files: [keep, deleteMe], count: 2, sweptAt: Date.now() });
     mocks.deleteLibraryFile.mockResolvedValue(undefined);
 
     renderLibrary();

@@ -7,7 +7,7 @@
  * Uses Miniflare with real DOs — no vi.mock().
  */
 import { env, runInDurableObject } from 'cloudflare:test';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ProjectData } from '../../src/durable-objects/project-data';
 import type { TaskRunner } from '../../src/durable-objects/task-runner';
@@ -61,7 +61,13 @@ function makeStartInput(taskId: string) {
     systemPromptAppend: 'Always run tests before committing.',
     agentProfileHint: 'profile-release-001',
     attachments: [
-      { id: 'att-001', filename: 'spec.md', r2Key: 'attachments/att-001', contentType: 'text/markdown', sizeBytes: 1024 },
+      {
+        id: 'att-001',
+        filename: 'spec.md',
+        r2Key: 'attachments/att-001',
+        contentType: 'text/markdown',
+        sizeBytes: 1024,
+      },
     ],
     projectScaling: {
       taskExecutionTimeoutMs: 7200000,
@@ -97,16 +103,22 @@ beforeEach(async () => {
   await seedInstallation('inst-002', 'user-tr-002', { installationIdValue: 'inst-002-ext' });
   await seedProject('proj-tr-001', 'user-tr-001', 'inst-001');
   await seedProject('proj-tr-002', 'user-tr-002', 'inst-002');
-  await seedNode('node-warm-001', 'user-tr-001', { status: 'warm', warmSince: new Date().toISOString() });
+  await seedNode('node-warm-001', 'user-tr-001', {
+    status: 'warm',
+    warmSince: new Date().toISOString(),
+  });
 
   for (const taskId of TASK_IDS) {
     const projectId = taskId === 'task-start-defaults-001' ? 'proj-tr-002' : 'proj-tr-001';
     const userId = taskId === 'task-start-defaults-001' ? 'user-tr-002' : 'user-tr-001';
-    await seedTask(taskId, projectId, userId, { status: 'delegated', executionStep: 'node_selection' });
+    await seedTask(taskId, projectId, userId, {
+      status: 'delegated',
+      executionStep: 'node_selection',
+    });
   }
 
   const projectDataStub = env.PROJECT_DATA.get(
-    env.PROJECT_DATA.idFromName('proj-tr-001'),
+    env.PROJECT_DATA.idFromName('proj-tr-001')
   ) as DurableObjectStub<ProjectData>;
   await runInDurableObject(projectDataStub, async (_instance, state) => {
     const now = Date.now();
@@ -118,9 +130,23 @@ beforeEach(async () => {
       'active',
       now,
       now,
-      now,
+      now
     );
   });
+});
+
+afterEach(async () => {
+  // startTaskRunnerDO intentionally schedules an immediate alarm. These proxy
+  // contract tests inspect the initialized state but do not own orchestration,
+  // so leaving those alarms armed races vitest-pool-workers environment
+  // teardown and can strand a pending DO RPC after every assertion passed.
+  await Promise.all(
+    TASK_IDS.map((taskId) =>
+      runInDurableObject(getStub(taskId), async (_instance, state) => {
+        await state.storage.deleteAlarm();
+      })
+    )
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -272,7 +298,7 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
   it('advanceTaskRunnerWorkspaceReady is a no-op on uninitialized DO', async () => {
     // Calling advance on a DO that was never started should not throw
     await expect(
-      advanceTaskRunnerWorkspaceReady(env, 'task-advance-noop-001', 'running', null),
+      advanceTaskRunnerWorkspaceReady(env, 'task-advance-noop-001', 'running', null)
     ).resolves.toBeUndefined();
 
     // Verify DO remains uninitialized

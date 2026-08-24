@@ -12,6 +12,13 @@ export const UpdateSignupApprovalConfigSchema = v.object({
   requireApproval: v.boolean(),
 });
 
+export const ProjectDataStorageEmergencyPurgeSchema = v.object({
+  reason: v.optional(v.pipe(v.string(), v.maxLength(500))),
+  targetRatio: v.optional(v.pipe(v.number(), v.minValue(0.1), v.maxValue(0.99))),
+  batchRows: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(5000))),
+  maxBatches: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100))),
+});
+
 export const AnalyticsForwardSchema = v.object({
   startDate: v.optional(v.string()),
   endDate: v.optional(v.string()),
@@ -63,6 +70,12 @@ export const UpdatePlatformIntegrationConfigSchema = v.object({
         host: v.optional(v.string()),
         clientId: v.optional(v.string()),
         clientSecret: v.optional(v.string()),
+      })
+    ),
+    feedback: v.optional(
+      v.object({
+        projectId: v.optional(v.pipe(v.string(), v.maxLength(200))),
+        remove: v.optional(v.boolean()),
       })
     ),
   }),

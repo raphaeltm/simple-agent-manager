@@ -86,12 +86,6 @@ agentActivityCallbackRoute.post(
     if (!existing) {
       throw errors.notFound('ACP session not found');
     }
-    if (body.activity === 'prompting') {
-      await cancelScheduledSessionSleep(
-        drizzle(c.env.DATABASE, { schema }),
-        existing.chatSessionId
-      );
-    }
 
     // Authoritative auth: bind the token's OWN identity (payload.workspace) to the session's
     // node/workspace — never authorize on the client-supplied body.nodeId. A node-scoped token
@@ -124,6 +118,19 @@ agentActivityCallbackRoute.post(
         action: 'rejected',
       });
       throw errors.forbidden('Node identity verification failed');
+    }
+
+    // Mutate sleep state only after the callback token and reported node are
+    // both bound to this exact session. A valid token for another tenant must
+    // not be able to keep a victim's runtime awake by cancelling its sleep.
+    const reportedHarnessWorkKeepsRuntimeActive =
+      body.activity === 'idle' &&
+      (body.runtimeWorkState === 'active' || body.runtimeWorkState === 'settling');
+    if (body.activity === 'prompting' || reportedHarnessWorkKeepsRuntimeActive) {
+      await cancelScheduledSessionSleep(
+        drizzle(c.env.DATABASE, { schema }),
+        existing.chatSessionId
+      );
     }
 
     // Staleness guard (S2): reject a DESTRUCTIVE `error` callback that provably
@@ -178,7 +185,18 @@ agentActivityCallbackRoute.post(
       agentType: body.agentType,
       restartCount: body.restartCount,
       statusError: body.statusError,
+      runtimeWorkState: body.runtimeWorkState,
+      runtimeWorkCount: body.runtimeWorkCount,
+      runtimeWorkSource: body.runtimeWorkSource,
+      runtimeWorkProgressAt: body.runtimeWorkProgressAt,
     });
+    const persistedActivity = body.runtimeWorkState
+      ? await projectDataService.getSessionState(c.env, projectId, sessionId)
+      : null;
+    const harnessWorkKeepsRuntimeActive =
+      body.activity === 'idle' &&
+      (persistedActivity?.runtimeWorkState === 'active' ||
+        persistedActivity?.runtimeWorkState === 'settling');
     if (body.activity === 'error' && canTransitionAcpSessionToFailed(existing.status)) {
       const failureMessage = normalizeAgentErrorMessage(body.statusError);
       const db = drizzle(c.env.DATABASE, { schema });
@@ -231,7 +249,7 @@ agentActivityCallbackRoute.post(
           });
         });
     }
-    if (body.activity === 'idle' || body.activity === 'error') {
+    if ((body.activity === 'idle' && !harnessWorkKeepsRuntimeActive) || body.activity === 'error') {
       let idleSnapshotQueued = false;
       if (
         body.activity === 'idle' &&

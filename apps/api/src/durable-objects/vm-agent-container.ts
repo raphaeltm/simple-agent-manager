@@ -3,8 +3,14 @@ import { Container, switchPort } from '@cloudflare/containers';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
+import {
+  isSessionRecoverySourceTaskGuardValid,
+  SessionRecoveryAuthorityRevokedError,
+  type SessionRecoverySourceTaskGuard,
+} from '../services/session-recovery-authority';
 import {
   ACTIVE_WORK_KEY,
   type ActiveWorkRuntime,
@@ -40,6 +46,7 @@ import {
   isMutatingRuntimeRequest as isMutatingRequest,
   persistRuntimeEnded,
   persistRuntimeSleeping,
+  persistRuntimeSleepingAfterRevokedWake,
   probeLiveRuntimeSession,
   resolveRuntimeSettings,
   runtimeRecoveryResponse as recoveryResponse,
@@ -51,6 +58,7 @@ export const DEFAULT_CF_CONTAINER_PORT_READY_TIMEOUT_MS = 30_000;
 export const DEFAULT_CF_CONTAINER_ACTIVE_WORK_MAX_MS = 2 * 60 * 60 * 1000;
 export const DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS = 5 * 60 * 1000;
 export const DEFAULT_CF_CONTAINER_RECOVERY_MAX_ATTEMPTS = 2;
+export const DEFAULT_CF_CONTAINER_HARNESS_LEASE_CHECK_TIMEOUT_MS = 5_000;
 export interface VmAgentContainerLaunchConfig {
   nodeId: string;
   workspaceId: string;
@@ -72,10 +80,24 @@ export interface VmAgentContainerRecoveryResult {
   code?: RuntimeRecoveryCode;
   message?: string;
 }
+export type VmAgentContainerRequestGuard = SessionRecoverySourceTaskGuard;
 type LifecycleStatus = VmAgentContainerLifecycleStatus;
 
 const RECOVERY_STATE_KEY = 'runtimeRecovery';
+const SOURCE_TASK_WAKE_GUARD_KEY = 'sourceTaskWakeGuard';
 const KEEPALIVE_CALLBACK = 'renewActiveWorkKeepalive';
+function sameSourceTaskGuard(
+  left: VmAgentContainerRequestGuard | undefined,
+  right: VmAgentContainerRequestGuard | undefined
+): boolean {
+  return Boolean(
+    left &&
+    right &&
+    left.taskId === right.taskId &&
+    left.projectId === right.projectId &&
+    left.chatSessionId === right.chatSessionId
+  );
+}
 function stoppedRecoveryResult(): VmAgentContainerRecoveryResult {
   return {
     ok: false,
@@ -83,6 +105,16 @@ function stoppedRecoveryResult(): VmAgentContainerRecoveryResult {
     code: 'RUNTIME_STOPPED',
     message: RUNTIME_STOPPED_MESSAGE,
   };
+}
+
+function revokedSourceTaskResponse(): Response {
+  return Response.json(
+    {
+      error: 'SOURCE_TASK_NOT_WAKEABLE',
+      message: 'The source task no longer authorizes this runtime request.',
+    },
+    { status: 409 }
+  );
 }
 
 export class VmAgentContainer extends Container<Env> {
@@ -116,6 +148,7 @@ export class VmAgentContainer extends Container<Env> {
     await this.ctx.storage.put('lifecycleStatus', 'launching' satisfies LifecycleStatus);
     await this.ctx.storage.delete(ACTIVE_WORK_KEY);
     await this.ctx.storage.delete(RECOVERY_STATE_KEY);
+    await this.ctx.storage.delete(SOURCE_TASK_WAKE_GUARD_KEY);
     await this.clearKeepaliveSchedule();
 
     try {
@@ -128,8 +161,28 @@ export class VmAgentContainer extends Container<Env> {
   }
 
   async proxyHttp(request: Request, port?: number): Promise<Response> {
-    const ready = await this.prepareForRequest();
-    if (!ready.ok) return resultResponse(ready);
+    return this.proxyHttpAuthorized(request, port);
+  }
+
+  private async proxyHttpAuthorized(
+    request: Request,
+    port?: number,
+    sourceTaskGuard?: VmAgentContainerRequestGuard
+  ): Promise<Response> {
+    let ready: VmAgentContainerRecoveryResult;
+    try {
+      ready = await this.prepareForRequest(sourceTaskGuard);
+    } catch (error) {
+      if (error instanceof SessionRecoveryAuthorityRevokedError) {
+        if (sourceTaskGuard) await this.abortRevokedSourceTaskWake(sourceTaskGuard);
+        return revokedSourceTaskResponse();
+      }
+      throw error;
+    }
+    if (!ready.ok) {
+      await this.clearSourceTaskWakeGuard(sourceTaskGuard);
+      return resultResponse(ready);
+    }
 
     const state = await this.getState();
     if (state.status === 'stopped' || state.status === 'stopped_with_code') {
@@ -139,12 +192,17 @@ export class VmAgentContainer extends Container<Env> {
         promptDisposition: isMutatingRequest(request) ? 'manual_retry' : 'none',
       });
       if (!recovery) {
+        await this.clearSourceTaskWakeGuard(sourceTaskGuard);
         return recoveryResponse('RUNTIME_STOPPED', RUNTIME_STOPPED_MESSAGE, 410);
       }
+      await this.clearSourceTaskWakeGuard(sourceTaskGuard);
       return interruptedRequestResponse(request);
     }
 
     try {
+      // prepareForRequest may include a long restore. Revalidate again at the
+      // actual prompt/request boundary before bytes reach the runtime.
+      await this.assertSourceTaskGuard(sourceTaskGuard);
       const response = await this.containerFetch(request, port ?? this.defaultPort);
       if (await isMissingSessionHostResponse(response)) {
         await this.beginUnexpectedRecovery({
@@ -156,6 +214,10 @@ export class VmAgentContainer extends Container<Env> {
       }
       return response;
     } catch (error) {
+      if (error instanceof SessionRecoveryAuthorityRevokedError) {
+        if (sourceTaskGuard) await this.abortRevokedSourceTaskWake(sourceTaskGuard);
+        return revokedSourceTaskResponse();
+      }
       await this.beginUnexpectedRecovery({
         trigger: 'request',
         cause: {
@@ -165,7 +227,25 @@ export class VmAgentContainer extends Container<Env> {
         promptDisposition: isMutatingRequest(request) ? 'manual_retry' : 'none',
       });
       return interruptedRequestResponse(request);
+    } finally {
+      await this.clearSourceTaskWakeGuard(sourceTaskGuard);
     }
+  }
+
+  async proxyHttpGuarded(
+    request: Request,
+    port: number | undefined,
+    sourceTaskGuard: VmAgentContainerRequestGuard
+  ): Promise<Response> {
+    // This check intentionally lives inside the container DO immediately
+    // before proxyHttp() reaches prepareForRequest()/ensureAwake(). A caller-
+    // side check alone leaves a network-RPC window where a terminal parent can
+    // still cold-start compute.
+    if (!(await isSessionRecoverySourceTaskGuardValid(this.env.DATABASE, sourceTaskGuard))) {
+      await this.abortRevokedSourceTaskWake(sourceTaskGuard);
+      return revokedSourceTaskResponse();
+    }
+    return this.proxyHttpAuthorized(request, port, sourceTaskGuard);
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -287,6 +367,7 @@ export class VmAgentContainer extends Container<Env> {
     await this.withLifecycleLock(async () => {
       await this.ctx.storage.put('lifecycleStatus', 'stopping' satisfies LifecycleStatus);
       await this.ctx.storage.delete(RECOVERY_STATE_KEY);
+      await this.ctx.storage.delete(SOURCE_TASK_WAKE_GUARD_KEY);
     });
     await this.stop();
   }
@@ -294,6 +375,7 @@ export class VmAgentContainer extends Container<Env> {
   async sleepForUser(): Promise<void> {
     await this.markActiveWorkEnded('user_sleep');
     await this.ctx.storage.put('lifecycleStatus', 'sleeping' satisfies LifecycleStatus);
+    await this.ctx.storage.delete(SOURCE_TASK_WAKE_GUARD_KEY);
     await this.stop();
   }
 
@@ -302,6 +384,7 @@ export class VmAgentContainer extends Container<Env> {
     await this.withLifecycleLock(async () => {
       await this.ctx.storage.put('lifecycleStatus', 'stopping' satisfies LifecycleStatus);
       await this.ctx.storage.delete(RECOVERY_STATE_KEY);
+      await this.ctx.storage.delete(SOURCE_TASK_WAKE_GUARD_KEY);
     });
     await this.destroy();
   }
@@ -343,6 +426,7 @@ export class VmAgentContainer extends Container<Env> {
     if (
       status === 'expired' ||
       status === 'sleeping' ||
+      status === 'sleep-preparing' ||
       status === 'recovering' ||
       status === 'waking' ||
       status === 'restoring' ||
@@ -378,6 +462,57 @@ export class VmAgentContainer extends Container<Env> {
     if (activeWork?.status === 'active' && Date.now() < activeWork.deadlineAt) {
       await this.renewActiveWorkKeepalive();
       return;
+    }
+    // Check ProjectData harness work lease before committing to sleep.
+    // The container's own ActiveWorkState tracks prompt-level keepalive,
+    // but Claude SDK background tasks report separately to ProjectData
+    // via the vm-agent's ACP extension handler (nudgeHarnessActivityReport).
+    if (activeWork?.agentSessionId) {
+      const config = await this.ctx.storage.get<VmAgentContainerLaunchConfig>('launchConfig');
+      if (config) {
+        try {
+          const { isHarnessWorkLeaseActive, parseHarnessWorkConfig } = await import(
+            '../services/session-sleep'
+          );
+          const projectDataService = await import('../services/project-data');
+          const timeoutMs = parsePositiveInt(
+            this.env.CF_CONTAINER_HARNESS_LEASE_CHECK_TIMEOUT_MS,
+            DEFAULT_CF_CONTAINER_HARNESS_LEASE_CHECK_TIMEOUT_MS
+          );
+          const state = await Promise.race([
+            projectDataService.getSessionState(
+              this.env,
+              config.projectId,
+              activeWork.agentSessionId
+            ),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('harness lease check timed out')), timeoutMs)
+            ),
+          ]);
+          if (state && isHarnessWorkLeaseActive(state, new Date(), parseHarnessWorkConfig(this.env))) {
+            log.info('vm_agent_container_sleep_deferred_harness_work', {
+              nodeId: config.nodeId,
+              workspaceId: config.workspaceId,
+              agentSessionId: activeWork.agentSessionId,
+            });
+            await this.renewActivityTimeout();
+            return;
+          }
+        } catch (error) {
+          // Fail closed: unknown harness state must not authorize a destructive
+          // action (rule 58). Renew the timeout and retry on the next cycle;
+          // bounded by DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS once
+          // ProjectData recovers, and by the 24h node-lifetime sweep.
+          log.warn('vm_agent_container_harness_lease_check_failed', {
+            nodeId: config.nodeId,
+            workspaceId: config.workspaceId,
+            agentSessionId: activeWork.agentSessionId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          await this.renewActivityTimeout();
+          return;
+        }
+      }
     }
     // Close the request gate before crossing D1/ProjectData boundaries. A
     // follow-up accepted after this point remains in durable delivery instead
@@ -419,7 +554,13 @@ export class VmAgentContainer extends Container<Env> {
       await this.ctx.storage.put('lifecycleStatus', 'error' satisfies LifecycleStatus);
       return;
     }
-    if (status === 'stopped' || status === 'sleeping' || status === 'expired') return;
+    if (
+      status === 'stopped' ||
+      status === 'sleeping' ||
+      status === 'sleep-preparing' ||
+      status === 'expired'
+    )
+      return;
 
     await this.beginUnexpectedRecovery({
       trigger: 'error',
@@ -431,7 +572,72 @@ export class VmAgentContainer extends Container<Env> {
     });
   }
 
-  private async prepareForRequest(): Promise<VmAgentContainerRecoveryResult> {
+  private async assertSourceTaskGuard(
+    sourceTaskGuard?: VmAgentContainerRequestGuard
+  ): Promise<void> {
+    if (
+      sourceTaskGuard &&
+      !(await isSessionRecoverySourceTaskGuardValid(this.env.DATABASE, sourceTaskGuard))
+    ) {
+      throw new SessionRecoveryAuthorityRevokedError();
+    }
+  }
+
+  private async clearSourceTaskWakeGuard(
+    sourceTaskGuard?: VmAgentContainerRequestGuard
+  ): Promise<void> {
+    if (!sourceTaskGuard) return;
+    await this.withLifecycleLock(async () => {
+      const owner = await this.ctx.storage.get<VmAgentContainerRequestGuard>(
+        SOURCE_TASK_WAKE_GUARD_KEY
+      );
+      if (sameSourceTaskGuard(owner, sourceTaskGuard)) {
+        await this.ctx.storage.delete(SOURCE_TASK_WAKE_GUARD_KEY);
+      }
+    });
+  }
+
+  private async abortRevokedSourceTaskWake(
+    sourceTaskGuard: VmAgentContainerRequestGuard
+  ): Promise<void> {
+    await this.withLifecycleLock(async () => {
+      const owner = await this.ctx.storage.get<VmAgentContainerRequestGuard>(
+        SOURCE_TASK_WAKE_GUARD_KEY
+      );
+      if (!sameSourceTaskGuard(owner, sourceTaskGuard)) return;
+      const lifecycle = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
+      if (
+        lifecycle === 'stopping' ||
+        lifecycle === 'stopped' ||
+        lifecycle === 'expired' ||
+        lifecycle === 'sleeping'
+      ) {
+        await this.ctx.storage.delete(SOURCE_TASK_WAKE_GUARD_KEY);
+        return;
+      }
+      const config = await this.ctx.storage.get<VmAgentContainerLaunchConfig>('launchConfig');
+      await this.ctx.storage.put('lifecycleStatus', 'sleep-preparing' satisfies LifecycleStatus);
+      await this.clearKeepaliveSchedule();
+      await this.markActiveWorkEnded('source_task_authority_revoked');
+      try {
+        await this.stop();
+      } catch (error) {
+        log.warn('vm_agent_container_revoked_wake_stop_failed', {
+          errorName: error instanceof Error ? error.name : 'unknown',
+        });
+        return;
+      }
+      if (config) {
+        await persistRuntimeSleepingAfterRevokedWake(this.env, config).catch(() => undefined);
+      }
+      await this.ctx.storage.delete(SOURCE_TASK_WAKE_GUARD_KEY);
+      await this.ctx.storage.put('lifecycleStatus', 'sleeping' satisfies LifecycleStatus);
+    });
+  }
+
+  private async prepareForRequest(
+    sourceTaskGuard?: VmAgentContainerRequestGuard
+  ): Promise<VmAgentContainerRecoveryResult> {
     const status = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
     if (status === 'running' || status === 'launching') {
       return { ok: true, status: 'running' };
@@ -447,10 +653,12 @@ export class VmAgentContainer extends Container<Env> {
     if (status === 'stopping' || status === 'stopped') {
       return stoppedRecoveryResult();
     }
-    return this.ensureAwake();
+    return this.ensureAwake(sourceTaskGuard);
   }
 
-  private async ensureAwake(): Promise<VmAgentContainerRecoveryResult> {
+  private async ensureAwake(
+    sourceTaskGuard?: VmAgentContainerRequestGuard
+  ): Promise<VmAgentContainerRecoveryResult> {
     const run = this.wakeChain.then(async () => {
       let status = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
       if (status === 'running' || status === 'launching') {
@@ -519,7 +727,7 @@ export class VmAgentContainer extends Container<Env> {
       };
       await this.ctx.storage.put(RECOVERY_STATE_KEY, recovery);
       await this.ctx.storage.put('lifecycleStatus', 'waking' satisfies LifecycleStatus);
-      return this.wakeFromSnapshot(recovery);
+      return this.wakeFromSnapshot(recovery, sourceTaskGuard);
     });
     this.wakeChain = run.then(
       () => undefined,
@@ -594,10 +802,14 @@ export class VmAgentContainer extends Container<Env> {
   }
 
   private async wakeFromSnapshot(
-    recovery: RuntimeRecoveryState
+    recovery: RuntimeRecoveryState,
+    sourceTaskGuard?: VmAgentContainerRequestGuard
   ): Promise<VmAgentContainerRecoveryResult> {
     const config = await this.ctx.storage.get<VmAgentContainerLaunchConfig>('launchConfig');
     if (!config) return this.degradeRecovery(recovery, 'launch');
+    if (sourceTaskGuard) {
+      await this.ctx.storage.put(SOURCE_TASK_WAKE_GUARD_KEY, sourceTaskGuard);
+    }
 
     // loadRuntimeRecoveryContext reads D1; a query failure must degrade through the
     // sanitized recovery path, not escape as an uncaught 500. It sits outside the
@@ -621,8 +833,10 @@ export class VmAgentContainer extends Container<Env> {
 
     try {
       const nodeCallbackToken = await signNodeCallbackToken(config.nodeId, this.env);
+      await this.assertSourceTaskGuard(sourceTaskGuard);
       await this.startRuntime(config, { nodeCallbackToken });
     } catch (error) {
+      if (error instanceof SessionRecoveryAuthorityRevokedError) throw error;
       log.warn('vm_agent_container_recovery_launch_failed', {
         nodeId: config.nodeId,
         workspaceId: config.workspaceId,
@@ -646,6 +860,7 @@ export class VmAgentContainer extends Container<Env> {
       const restoreUrl = new URL(
         `http://localhost:${config.vmAgentPort}/workspaces/${config.workspaceId}/agent-sessions/${context.agentSessionId}/restore`
       );
+      await this.assertSourceTaskGuard(sourceTaskGuard);
       const restoreResponse = await this.containerFetch(
         new Request(restoreUrl.toString(), {
           method: 'POST',
@@ -680,10 +895,15 @@ export class VmAgentContainer extends Container<Env> {
         return this.degradeRecovery(restoring, 'restore_status', target);
       }
 
+      await this.assertSourceTaskGuard(sourceTaskGuard);
       const completed = await this.withLifecycleLock(async () => {
         const lifecycle = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
         if (lifecycle === 'stopping' || lifecycle === 'stopped') return false;
+        // The lock may have been queued behind a stop or another lifecycle
+        // operation. Revalidate after entering it and after the D1 commit.
+        await this.assertSourceTaskGuard(sourceTaskGuard);
         await persistRuntimeRecovered(this.env, target, restoring.promptDisposition);
+        await this.assertSourceTaskGuard(sourceTaskGuard);
         await this.ctx.storage.delete(RECOVERY_STATE_KEY);
         await this.ctx.storage.put('lifecycleStatus', 'running' satisfies LifecycleStatus);
         return true;
@@ -705,6 +925,10 @@ export class VmAgentContainer extends Container<Env> {
       });
       return { ok: true, status: 'running' };
     } catch (error) {
+      if (error instanceof SessionRecoveryAuthorityRevokedError) {
+        if (sourceTaskGuard) await this.abortRevokedSourceTaskWake(sourceTaskGuard);
+        throw error;
+      }
       log.warn('vm_agent_container_recovery_restore_failed', {
         nodeId: config.nodeId,
         workspaceId: config.workspaceId,

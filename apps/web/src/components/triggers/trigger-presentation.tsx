@@ -8,7 +8,7 @@
  * "next run" rendered as "overdue" on one screen and "5m ago" on another).
  */
 import type { TriggerResponse } from '@simple-agent-manager/shared';
-import { Clock, Github, Webhook } from 'lucide-react';
+import { AlertTriangle, Clock, Github, Webhook } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 /** Shared focus ring. Also exported from `trigger-form-support` for form fields. */
@@ -29,6 +29,7 @@ export function statusBadgeKey(status: string): 'active' | 'paused' | 'disabled'
 export function sourceIcon(trigger: TriggerResponse, size = 14): ReactNode {
   if (trigger.sourceType === 'github') return <Github size={size} aria-hidden="true" />;
   if (trigger.sourceType === 'webhook') return <Webhook size={size} aria-hidden="true" />;
+  if (trigger.sourceType === 'incident') return <AlertTriangle size={size} aria-hidden="true" />;
   return <Clock size={size} aria-hidden="true" />;
 }
 
@@ -53,6 +54,7 @@ export function formatTriggerSource(trigger: TriggerResponse): string {
     if (label) return label;
     return suffix ? `Webhook · token ••••${suffix}` : 'Webhook';
   }
+  if (trigger.sourceType === 'incident') return 'Private incident backlog';
   return trigger.cronHumanReadable ?? trigger.cronExpression ?? 'No schedule';
 }
 

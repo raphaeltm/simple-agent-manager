@@ -749,6 +749,7 @@ function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
       {/* Preview modal */}
       {previewFile && (
         <FilePreviewModal
+          projectId={projectId}
           file={previewFile}
           previewUrl={getLibraryFilePreviewUrl(projectId, previewFile.id)}
           onClose={closePreview}

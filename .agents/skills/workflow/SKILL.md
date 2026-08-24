@@ -1,6 +1,6 @@
 ---
 name: workflow
-description: 'Orchestrate multi-step workflows by decomposing into subtasks, dispatching them, and monitoring via foreground polling loops. Prevents session timeout kills during long-running orchestration. Use when coordinating multiple agents or running multi-phase work that takes more than a few minutes.'
+description: 'Orchestrate multi-step workflows by decomposing and dispatching subtasks, then waiting through SAM durable parent wake delivery. Use when coordinating multiple agents or multi-phase work.'
 ---
 
 # Workflow Orchestrator
@@ -11,13 +11,13 @@ Read the full workflow from `.claude/commands/workflow.md` and execute it.
 
 1. **Decompose** — break the user's request into discrete subtasks with dependencies
 2. **Dispatch** — send subtasks to other agents via `dispatch_task` (with `/do` instructions) and verify each task started with the intended title, profile, and constraints
-3. **Poll** — foreground `sleep 300` + `get_task_details` loop keeps the session alive
+3. **Wait** — persist state and a stable workflow-step `waitKey`, register `wait_for_subtasks`, and end the turn
 4. **React** — dispatch dependent tasks as predecessors complete, retry failures
 5. **Complete** — summarize results when all subtasks finish
 
 ## Why This Exists
 
-When Claude Code dispatches subtasks and waits passively, the ACP session appears idle and the control plane kills it. This skill uses explicit foreground polling (Bash `sleep` + MCP tool calls) to maintain visible session activity throughout the orchestration.
+SAM owns durable child-task status and can wake a sleeping parent exactly once when a registered wait resolves. The orchestrator therefore releases its prompt turn instead of maintaining an expensive foreground poller. Bounded foreground polling is a compatibility fallback only when the connected server does not advertise `wait_for_subtasks` or reports that durable wake delivery is disabled.
 
 ## Staging Debugging Access
 
@@ -25,4 +25,4 @@ All agents have access to `$CF_TOKEN` for direct Cloudflare API queries against 
 
 ## State Persistence
 
-Maintain `.workflow-state.md` (gitignored) as external memory. Re-read it before every poll cycle. This survives context compaction. See `.claude/commands/workflow.md` for the full state file format.
+Maintain `.workflow-state.md` (gitignored) as external memory. Write it before registering a wait and re-read it whenever SAM wakes the session. This survives sleep, recovery, and context compaction. See `.claude/commands/workflow.md` for the full state file format.

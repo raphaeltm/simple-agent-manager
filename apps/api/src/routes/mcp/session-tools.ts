@@ -119,6 +119,7 @@ export async function handleGetSessionMessages(
     sessionId,
     limit,
     null,
+    null,
     roles,
   );
 

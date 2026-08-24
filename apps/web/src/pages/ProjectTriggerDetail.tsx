@@ -256,15 +256,17 @@ export function ProjectTriggerDetail() {
 
         {/* Actions */}
         <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={handleRunNow}
-            disabled={trigger.status === 'disabled'}
-            className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${FOCUS_RING}`}
-            aria-label="Run now"
-          >
-            <Play size={14} aria-hidden="true" />
-            <span className="hidden sm:inline">Run Now</span>
-          </button>
+          {trigger.sourceType !== 'incident' && (
+            <button
+              onClick={handleRunNow}
+              disabled={trigger.status === 'disabled'}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${FOCUS_RING}`}
+              aria-label="Run now"
+            >
+              <Play size={14} aria-hidden="true" />
+              <span className="hidden sm:inline">Run Now</span>
+            </button>
+          )}
           <button
             onClick={handleTogglePause}
             className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer ${FOCUS_RING}`}
@@ -309,14 +311,19 @@ export function ProjectTriggerDetail() {
             {trigger.sourceType === 'cron' ? 'Next Run' : 'Source'}
           </p>
           <p className="text-sm text-fg-primary m-0 flex items-center gap-1.5">
-            <Calendar size={14} aria-hidden="true" />
             {trigger.sourceType === 'cron'
-              ? trigger.nextFireAt
-                ? formatDateFull(trigger.nextFireAt)
-                : 'Not scheduled'
-              : trigger.sourceType === 'webhook'
-                ? 'Incoming webhook'
-                : 'GitHub event'}
+              ? (
+                  <>
+                    <Calendar size={14} aria-hidden="true" />
+                    {trigger.nextFireAt ? formatDateFull(trigger.nextFireAt) : 'Not scheduled'}
+                  </>
+                )
+              : (
+                  <>
+                    {sourceIcon(trigger)}
+                    {formatTriggerSource(trigger)}
+                  </>
+                )}
           </p>
         </div>
 

@@ -1,3 +1,4 @@
+import type { PromptDeliverySource } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -74,7 +75,7 @@ describe('ProjectData durable prompt delivery', () => {
   function accept(
     deliveryId = 'delivery-1',
     ttlMs = config.ttlMs,
-    sourceKind: 'user_followup' | 'agent_mailbox' = 'user_followup'
+    sourceKind: PromptDeliverySource = 'user_followup'
   ) {
     return acceptPromptDelivery(
       sql,
@@ -110,6 +111,35 @@ describe('ProjectData durable prompt delivery', () => {
     expect(db.prepare('SELECT COUNT(*) AS count FROM chat_messages').get()).toEqual({ count: 1 });
     expect(db.prepare('SELECT COUNT(*) AS count FROM session_inbox').get()).toEqual({ count: 1 });
     expect(first.message.promptMessageId).toBe(first.transcriptMessageId);
+  });
+
+  it('claims same-priority same-timestamp comment directives in insertion order', () => {
+    accept('comment-directive-thread-1', config.ttlMs, 'comment_directive');
+    accept('comment-directive-thread-2', config.ttlMs, 'comment_directive');
+
+    sql.exec(
+      `UPDATE session_inbox
+       SET created_at = ?, next_attempt_at = ?
+       WHERE id IN ('comment-directive-thread-1', 'comment-directive-thread-2')`,
+      10_000,
+      10_000
+    );
+
+    expect(mailbox.getPendingMessages(sql, 'chat-1').map((message) => message.id)).toEqual([
+      'comment-directive-thread-1',
+      'comment-directive-thread-2',
+    ]);
+
+    const claims = claimDuePromptDeliveries(sql, config, 10_000);
+
+    expect(claims.map((claim) => claim.message.id)).toEqual([
+      'comment-directive-thread-1',
+      'comment-directive-thread-2',
+    ]);
+    expect(claims.map((claim) => claim.message.sourceKind)).toEqual([
+      'comment_directive',
+      'comment_directive',
+    ]);
   });
 
   it('rejects reuse of a stable delivery identity for different prompt intent', () => {
@@ -180,6 +210,263 @@ describe('ProjectData durable prompt delivery', () => {
     expect(mailbox.getMessage(sql, 'delivery-1')?.deliveryState).toBe('acked');
     expect(mailbox.getMessage(sql, 'delivery-1')?.acceptedAt).toBe(12_000);
     expect(claimDuePromptDeliveries(sql, config, 40_000)).toHaveLength(0);
+  });
+
+  it('fails a parent wake claim before adapter recovery when the parent is terminal', async () => {
+    acceptPromptDelivery(
+      sql,
+      {},
+      {
+        deliveryId: 'parent-wake-1',
+        targetSessionId: 'chat-1',
+        displayContent: 'trusted wake',
+        deliveryContent: 'trusted wake',
+        sourceTaskId: 'parent-task-1',
+        senderType: 'system',
+        sourceKind: 'parent_wakeup',
+        metadata: { waitId: 'wait-1', childTaskIds: ['child-task-1'] },
+      },
+      Date.now()
+    );
+    const [claim] = claimDuePromptDeliveries(sql, config, Date.now());
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
+    const adapter: VmPromptDeliveryAdapter = { submit, reconcile: vi.fn() };
+    const env = {
+      DATABASE: {
+        prepare: vi.fn(() => ({
+          bind: vi.fn(() => ({
+            all: vi.fn().mockResolvedValue({
+              results: [
+                {
+                  id: 'parent-task-1',
+                  status: 'completed',
+                  chat_session_id: 'chat-1',
+                  parent_task_id: null,
+                },
+                {
+                  id: 'child-task-1',
+                  status: 'completed',
+                  chat_session_id: 'child-chat-1',
+                  parent_task_id: 'parent-task-1',
+                },
+              ],
+            }),
+          })),
+        })),
+      },
+    } as never;
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim!, adapter, hooks)
+    ).resolves.toMatchObject({ kind: 'failed', reason: 'terminal_target' });
+    expect(submit).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'parent-wake-1')).toMatchObject({
+      deliveryState: 'failed',
+      terminalReason: 'terminal_target',
+    });
+  });
+
+  it('accepts the recovery task as session owner while preserving the live source parent', async () => {
+    acceptPromptDelivery(
+      sql,
+      {},
+      {
+        deliveryId: 'parent-wake-recovery-owner',
+        targetSessionId: 'chat-1',
+        displayContent: 'trusted wake',
+        sourceTaskId: 'parent-task-1',
+        senderType: 'system',
+        sourceKind: 'parent_wakeup',
+        metadata: { waitId: 'wait-1', childTaskIds: ['child-task-1'] },
+      },
+      Date.now()
+    );
+    const [claim] = claimDuePromptDeliveries(sql, config, Date.now());
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>().mockResolvedValue({
+      kind: 'retry',
+      reason: 'not_ready',
+      error: 'replacement runtime is starting',
+      runtimeIdentity: null,
+      capabilities: null,
+    });
+    const env = {
+      DATABASE: {
+        prepare: vi.fn(() => ({
+          bind: vi.fn(() => ({
+            all: vi.fn().mockResolvedValue({
+              results: [
+                {
+                  id: 'parent-task-1',
+                  status: 'awaiting_followup',
+                  chat_session_id: null,
+                  parent_task_id: null,
+                  recovery_source_task_id: null,
+                  triggered_by: 'mcp',
+                },
+                {
+                  id: 'child-task-1',
+                  status: 'completed',
+                  chat_session_id: 'child-chat-1',
+                  parent_task_id: 'parent-task-1',
+                  recovery_source_task_id: null,
+                  triggered_by: 'mcp',
+                },
+                {
+                  id: 'recovery-task-1',
+                  status: 'queued',
+                  chat_session_id: 'chat-1',
+                  parent_task_id: null,
+                  recovery_source_task_id: 'parent-task-1',
+                  triggered_by: 'session-recovery',
+                },
+              ],
+            }),
+          })),
+        })),
+      },
+    } as never;
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim!, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({ kind: 'retry', reason: 'not_ready' });
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a parent wake when target validation storage is temporarily unavailable', async () => {
+    acceptPromptDelivery(
+      sql,
+      {},
+      {
+        deliveryId: 'parent-wake-read-retry',
+        targetSessionId: 'chat-1',
+        displayContent: 'trusted wake',
+        sourceTaskId: 'parent-task-1',
+        senderType: 'system',
+        sourceKind: 'parent_wakeup',
+        metadata: { waitId: 'wait-1', childTaskIds: ['child-task-1'] },
+      },
+      Date.now()
+    );
+    const [claim] = claimDuePromptDeliveries(sql, config, Date.now());
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
+    const env = {
+      DATABASE: {
+        prepare: vi.fn(() => ({
+          bind: vi.fn(() => ({ all: vi.fn().mockRejectedValue(new Error('D1 unavailable')) })),
+        })),
+      },
+    } as never;
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim!, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({ kind: 'retry', reason: 'not_ready' });
+    expect(submit).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'parent-wake-read-retry')).toMatchObject({
+      deliveryState: 'retry_wait',
+      terminalReason: null,
+    });
+  });
+
+  it('revalidates parent state inside the adapter boundary before side effects', async () => {
+    acceptPromptDelivery(
+      sql,
+      {},
+      {
+        deliveryId: 'parent-wake-race',
+        targetSessionId: 'chat-1',
+        displayContent: 'trusted wake',
+        sourceTaskId: 'parent-task-1',
+        senderType: 'system',
+        sourceKind: 'parent_wakeup',
+        metadata: { waitId: 'wait-1', childTaskIds: ['child-task-1'] },
+      },
+      Date.now()
+    );
+    const [claim] = claimDuePromptDeliveries(sql, config, Date.now());
+    let validationCount = 0;
+    const all = vi.fn(async () => {
+      validationCount++;
+      return {
+        results: [
+          {
+            id: 'parent-task-1',
+            status: validationCount === 1 ? 'in_progress' : 'completed',
+            chat_session_id: 'chat-1',
+            parent_task_id: null,
+          },
+          {
+            id: 'child-task-1',
+            status: 'completed',
+            chat_session_id: 'child-chat-1',
+            parent_task_id: 'parent-task-1',
+          },
+        ],
+      };
+    });
+    const env = {
+      DATABASE: { prepare: vi.fn(() => ({ bind: vi.fn(() => ({ all })) })) },
+    } as never;
+    const sideEffect = vi.fn();
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>(async (input) => {
+      const guarded = await input.beforeSideEffect?.();
+      if (guarded) return guarded;
+      sideEffect();
+      throw new Error('guard unexpectedly allowed side effect');
+    });
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim!, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({ kind: 'failed', reason: 'terminal_target' });
+    expect(validationCount).toBe(2);
+    expect(sideEffect).not.toHaveBeenCalled();
+  });
+
+  it('fails a queued parent wake when a child was reparented after enqueue', async () => {
+    acceptPromptDelivery(
+      sql,
+      {},
+      {
+        deliveryId: 'parent-wake-reparented',
+        targetSessionId: 'chat-1',
+        displayContent: 'trusted wake',
+        sourceTaskId: 'parent-task-1',
+        senderType: 'system',
+        sourceKind: 'parent_wakeup',
+        metadata: { waitId: 'wait-1', childTaskIds: ['child-task-1'] },
+      },
+      Date.now()
+    );
+    const [claim] = claimDuePromptDeliveries(sql, config, Date.now());
+    const env = {
+      DATABASE: {
+        prepare: vi.fn(() => ({
+          bind: vi.fn(() => ({
+            all: vi.fn().mockResolvedValue({
+              results: [
+                {
+                  id: 'parent-task-1',
+                  status: 'in_progress',
+                  chat_session_id: 'chat-1',
+                  parent_task_id: null,
+                },
+                {
+                  id: 'child-task-1',
+                  status: 'completed',
+                  chat_session_id: 'child-chat-1',
+                  parent_task_id: 'other-parent',
+                },
+              ],
+            }),
+          })),
+        })),
+      },
+    } as never;
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim!, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({ kind: 'failed', reason: 'terminal_target' });
+    expect(submit).not.toHaveBeenCalled();
   });
 
   it('keeps a cold-start busy delivery retryable at the attempt cap until TTL', () => {

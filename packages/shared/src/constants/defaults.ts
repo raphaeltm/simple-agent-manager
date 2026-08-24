@@ -82,12 +82,90 @@ export const DEFAULT_CHAT_SESSION_MESSAGE_LIMIT = 500;
 export const DEFAULT_CHAT_SESSION_MESSAGE_MAX = 50000;
 
 /**
+ * Default page size for forward-cursor chat delta fetches.
+ *
+ * Browser-side cached conversations only need rows newer than the newest cached
+ * message during background revalidation. Keep this configurable separately from
+ * full initial loads so operators can tune the catch-up payload without reducing
+ * the full-conversation cache seed.
+ *
+ * Override via CHAT_SESSION_DELTA_MESSAGE_LIMIT env var.
+ */
+export const DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT = 5000;
+
+// =============================================================================
+// Message-anchored comments
+// =============================================================================
+
+/** Max comment thread/reply body length. Override via COMMENT_BODY_MAX_LENGTH. */
+export const DEFAULT_COMMENT_BODY_MAX_LENGTH = 8_000;
+
+/** Max selected quote snapshot length stored on message anchors. Override via COMMENT_QUOTE_MAX_LENGTH. */
+export const DEFAULT_COMMENT_QUOTE_MAX_LENGTH = 2_000;
+
+/** Max idempotency key length accepted for optimistic comment mutations. Override via COMMENT_IDEMPOTENCY_KEY_MAX_LENGTH. */
+export const DEFAULT_COMMENT_IDEMPOTENCY_KEY_MAX_LENGTH = 200;
+
+/** Default page size for session comment list reads. Override via COMMENT_LIST_LIMIT_DEFAULT. */
+export const DEFAULT_COMMENT_LIST_LIMIT_DEFAULT = 100;
+
+/** Max page size for session comment list reads. Override via COMMENT_LIST_LIMIT_MAX. */
+export const DEFAULT_COMMENT_LIST_LIMIT_MAX = 500;
+
+/** Max message-anchored comment threads per chat session. Override via COMMENT_THREADS_PER_SESSION_MAX. */
+export const DEFAULT_COMMENT_THREADS_PER_SESSION_MAX = 1_000;
+
+/** Max replies per comment thread. Override via COMMENT_REPLIES_PER_THREAD_MAX. */
+export const DEFAULT_COMMENT_REPLIES_PER_THREAD_MAX = 200;
+
+/**
  * Safety bound on how many older pages the chat client will fetch while chasing a
  * timeline jump target that predates the loaded window (the rare oversized-session
  * fallback). Bounds the load-until loop so a server misreporting `hasMore` can
  * never loop unbounded. Override at build time via VITE_CHAT_LOAD_UNTIL_MAX_PAGES.
  */
 export const DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES = 400;
+
+/**
+ * Cap on how many sessions the ProjectData DO mirrors into the D1
+ * `session_summaries` index per project, per sync.
+ *
+ * A project whose session count exceeds this is marked incomplete in
+ * `session_index_coverage`, and its per-project list falls back to the DO — the
+ * index may only answer a read it can prove is equivalent. Sized well above the
+ * sidebar's 100-row page so the fast path applies to effectively every real
+ * project. Override via SESSION_INDEX_MAX_ROWS env var.
+ */
+export const DEFAULT_SESSION_INDEX_MAX_ROWS = 1000;
+
+/**
+ * How stale a `session_index_coverage` row may be before the per-project session
+ * list stops trusting D1 and falls back to the ProjectData DO.
+ *
+ * The DO schedules a sync within DO_SUMMARY_SYNC_DEBOUNCE_MS of every session
+ * mutation, so under normal operation the index is seconds behind. This bound is
+ * not there for normal operation — it is the fail-closed backstop for the case
+ * where the sync itself breaks (its D1 writes are deliberately swallowed so a
+ * sync failure cannot fail the mutation, which means a broken sync is silent).
+ *
+ * The fallback is self-healing: the DO's listSessions RPC schedules a sync, so
+ * one stale read re-primes the index for the next one. Override via
+ * SESSION_INDEX_MAX_STALENESS_MS env var.
+ */
+export const DEFAULT_SESSION_INDEX_MAX_STALENESS_MS = 15 * 60 * 1000;
+
+/**
+ * Safety bound on how many pages the timeline drawer fetches when it opens.
+ *
+ * The drawer paginates user messages and progress notifications to exhaustion to
+ * build a complete jump index. Both loops were previously unbounded `for(;;)`
+ * loops with no page cap, so a server that keeps reporting `hasMore` (or a
+ * cursor that fails to advance) would spin forever. This is the same class of
+ * guard as DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES, applied per loop.
+ *
+ * Override at build time via VITE_CHAT_TIMELINE_MAX_PAGES.
+ */
+export const DEFAULT_CHAT_TIMELINE_MAX_PAGES = 200;
 
 /**
  * Whether chat session message loads strip tool_metadata.content by default.
@@ -167,3 +245,80 @@ export const DEFAULT_REPORT_ISSUE_DESCRIPTION_MAX_LENGTH = 5_000;
 
 /** Max length for stored report content (description + technical references). Override via REPORT_ISSUE_CONTENT_MAX_LENGTH env var. */
 export const DEFAULT_REPORT_ISSUE_CONTENT_MAX_LENGTH = 65_536;
+
+// =============================================================================
+// Client Query Cache Persistence (apps/web)
+// =============================================================================
+// The web app persists an allowlisted slice of its TanStack Query cache to
+// IndexedDB so a full page reload paints from cache instead of refetching the
+// world. See apps/web/src/lib/query-persistence.ts.
+
+/** How long a persisted query cache entry may be restored after it was written.
+ * `persistQueryClientRestore` discards (and deletes) anything older. Matches
+ * TanStack's own documented default. Override via VITE_QUERY_PERSIST_MAX_AGE_MS. */
+export const DEFAULT_QUERY_PERSIST_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/** Minimum gap between IndexedDB writes. TanStack v5 removed `throttleTime` from
+ * persistQueryClient, so the persister throttles its own writes to avoid an IDB
+ * write per cache event. Override via VITE_QUERY_PERSIST_THROTTLE_MS. */
+export const DEFAULT_QUERY_PERSIST_THROTTLE_MS = 1_000;
+
+/** Upper bound on the initial cache restore for a signed-in user.
+ *
+ * Rendering is gated on this restore, and that gate can only ever ADD latency to
+ * first paint: it runs after the session round trip (it needs the identity to
+ * pick the right record), and it suppresses the spinner `ProtectedRoute` would
+ * otherwise show, because that spinner lives inside the gated subtree. So the
+ * budget is deliberately tight — a healthy IndexedDB read is single-digit
+ * milliseconds, and past this point failing open to an empty in-memory cache
+ * beats holding a blank screen.
+ * Override via VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS. */
+export const DEFAULT_QUERY_PERSIST_RESTORE_TIMEOUT_MS = 250;
+
+// =============================================================================
+// HTTP Response Cache-Control (apps/api)
+// =============================================================================
+// Conservative stale-while-revalidate budgets for stable/semi-stable GETs. See
+// apps/api/src/lib/cache-headers.ts. Authenticated responses are ALWAYS `private`
+// and carry `Vary: Cookie`; `public` is reserved for unauthenticated, globally
+// identical responses.
+
+/** `max-age` for unauthenticated deploy-scoped config GETs (/api/config/*).
+ * Override via PUBLIC_CONFIG_CACHE_MAX_AGE_SECONDS. */
+export const DEFAULT_PUBLIC_CONFIG_CACHE_MAX_AGE_SECONDS = 60;
+
+/** `stale-while-revalidate` for unauthenticated deploy-scoped config GETs.
+ * Override via PUBLIC_CONFIG_CACHE_SWR_SECONDS. */
+export const DEFAULT_PUBLIC_CONFIG_CACHE_SWR_SECONDS = 300;
+
+/** `max-age` for the authenticated but globally identical model catalog.
+ *
+ * Deliberately far below the KV catalog TTL (`MODEL_CATALOG_CACHE_TTL_SECONDS`,
+ * default 3600) so a refreshed catalog is not masked for long. The two are
+ * independent env vars and nothing enforces the ordering — raising this above the
+ * KV TTL is a staleness footgun, not a caught error.
+ * Override via MODEL_CATALOG_CACHE_MAX_AGE_SECONDS. */
+export const DEFAULT_MODEL_CATALOG_RESPONSE_CACHE_MAX_AGE_SECONDS = 60;
+
+/** `stale-while-revalidate` for the model catalog response.
+ * Override via MODEL_CATALOG_CACHE_SWR_SECONDS. */
+export const DEFAULT_MODEL_CATALOG_RESPONSE_CACHE_SWR_SECONDS = 300;
+
+/** `max-age` for per-user project-scoped reference GETs (agent profiles, skills).
+ * Deliberately 0: the response is served stale-then-revalidated rather than held
+ * fresh, so a user's own edit is never masked by more than one request.
+ * Override via PROJECT_REFERENCE_CACHE_MAX_AGE_SECONDS. */
+export const DEFAULT_PROJECT_REFERENCE_CACHE_MAX_AGE_SECONDS = 0;
+
+/** `stale-while-revalidate` for per-user project-scoped reference GETs.
+ * Override via PROJECT_REFERENCE_CACHE_SWR_SECONDS. */
+export const DEFAULT_PROJECT_REFERENCE_CACHE_SWR_SECONDS = 30;
+
+/** Default max MCP server connections per scope (per user, and per project). Override via MAX_MCP_CONNECTIONS_PER_SCOPE env var. */
+export const DEFAULT_MAX_MCP_CONNECTIONS_PER_SCOPE = 25;
+
+/** Default max MCP endpoint URL size in bytes. Pre-signed URLs can be long. Override via MCP_CONNECTION_URL_MAX_BYTES env var. */
+export const DEFAULT_MCP_CONNECTION_URL_MAX_BYTES = 2048;
+
+/** Default max MCP bearer token size in bytes. Override via MCP_CONNECTION_TOKEN_MAX_BYTES env var. */
+export const DEFAULT_MCP_CONNECTION_TOKEN_MAX_BYTES = 8 * 1024;

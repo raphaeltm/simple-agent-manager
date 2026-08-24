@@ -260,6 +260,7 @@ describe('recoverStuckTasks', () => {
         'chat-session-1',
         40,
         null,
+        null,
         ['assistant', 'system', 'tool'],
         false,
         'desc'

@@ -37,6 +37,10 @@
       "registryUrl": "https://www.npmjs.com/package/@tailwindcss/vite",
       "necessity": "Compiles Tailwind CSS through Vite builds."
     },
+    "@tanstack/query-persist-client-core": {
+      "registryUrl": "https://www.npmjs.com/package/@tanstack/query-persist-client-core",
+      "necessity": "Persists an allowlisted slice of the TanStack Query cache so a reload paints from cache instead of an empty state. Loaded via dynamic import for signed-in sessions only."
+    },
     "@typescript-eslint/eslint-plugin": {
       "registryUrl": "https://www.npmjs.com/package/@typescript-eslint/eslint-plugin",
       "necessity": "Hosts supported TypeScript lint rules."
@@ -65,9 +69,17 @@
       "registryUrl": "https://www.npmjs.com/package/eslint-plugin-react-hooks",
       "necessity": "Preserves existing React Hooks lint findings."
     },
+    "fake-indexeddb": {
+      "registryUrl": "https://www.npmjs.com/package/fake-indexeddb",
+      "necessity": "In-memory IndexedDB for tests of the query-cache persister; jsdom provides no IndexedDB implementation."
+    },
     "globals": {
       "registryUrl": "https://www.npmjs.com/package/globals",
       "necessity": "Defines explicit flat-config runtime globals."
+    },
+    "idb-keyval": {
+      "registryUrl": "https://www.npmjs.com/package/idb-keyval",
+      "necessity": "IndexedDB backing store for the persisted query cache. Chosen over localStorage so it cannot evict the library-cache index, which already needs its own LRU within the ~5 MB localStorage budget."
     },
     "oxlint": {
       "registryUrl": "https://www.npmjs.com/package/oxlint",
@@ -81,13 +93,13 @@
       "registryUrl": "https://www.npmjs.com/package/tailwindcss",
       "necessity": "Provides Tailwind CSS styling primitives."
     },
-    "typescript": {
-      "registryUrl": "https://www.npmjs.com/package/typescript",
-      "necessity": "Checks local plugin JavaScript declarations."
-    },
     "tsx": {
       "registryUrl": "https://www.npmjs.com/package/tsx",
       "necessity": "Runs the deterministic Astro validation wrapper."
+    },
+    "typescript": {
+      "registryUrl": "https://www.npmjs.com/package/typescript",
+      "necessity": "Checks local plugin JavaScript declarations."
     },
     "typescript-eslint": {
       "registryUrl": "https://www.npmjs.com/package/typescript-eslint",

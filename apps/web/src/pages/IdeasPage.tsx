@@ -1,12 +1,13 @@
 import type { Task } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
+import { useQuery } from '@tanstack/react-query';
 import { Clock, Lightbulb, MessageSquare, RefreshCw, Search } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { useIsMobile } from '../hooks/useIsMobile';
-import type { ChatSessionListItem } from '../lib/api';
-import { listChatSessions, listProjectTasks } from '../lib/api';
+import { useQueryScope } from '../hooks/useQueryScope';
+import { draftIdeasQueryOptions, projectChatSessionsQueryOptions } from '../lib/query-options';
 import { useProjectContext } from './ProjectContext';
 
 /** Max ideas to load per page. Override via VITE_IDEAS_FETCH_LIMIT. */
@@ -40,27 +41,6 @@ function timeAgo(dateStr: string): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
-}
-
-async function listAllDraftIdeas(
-  projectId: string
-): Promise<{ tasks: Task[]; truncated: boolean }> {
-  const tasks: Task[] = [];
-  let cursor: string | undefined;
-  let pagesLoaded = 0;
-
-  do {
-    const result = await listProjectTasks(projectId, {
-      status: 'draft',
-      limit: IDEAS_FETCH_LIMIT,
-      cursor,
-    });
-    tasks.push(...result.tasks);
-    cursor = result.nextCursor ?? undefined;
-    pagesLoaded += 1;
-  } while (cursor && pagesLoaded < IDEAS_FETCH_MAX_PAGES);
-
-  return { tasks, truncated: Boolean(cursor) };
 }
 
 // ---------------------------------------------------------------------------
@@ -131,39 +111,37 @@ export function IdeasPage() {
   const navigate = useNavigate();
   const { projectId } = useProjectContext();
   const isMobile = useIsMobile();
+  const queryScope = useQueryScope();
 
-  const [ideas, setIdeas] = useState<Task[]>([]);
-  const [sessions, setSessions] = useState<ChatSessionListItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [truncated, setTruncated] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   // ---------------------------------------------------------------------------
   // Data loading
   // ---------------------------------------------------------------------------
 
-  const loadData = useCallback(async () => {
-    try {
-      setError(null);
-      const [tasksResult, sessionsResult] = await Promise.all([
-        listAllDraftIdeas(projectId),
-        listChatSessions(projectId, { limit: IDEAS_SESSION_FETCH_LIMIT }),
-      ]);
-      setIdeas(tasksResult.tasks.filter((task) => task.status === 'draft'));
-      setTruncated(tasksResult.truncated);
-      setSessions(sessionsResult.sessions);
-    } catch (err) {
-      console.error('Failed to load ideas data:', err);
-      setError('Failed to load ideas. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  const ideasQuery = useQuery({
+    ...draftIdeasQueryOptions(queryScope, projectId, IDEAS_FETCH_LIMIT, IDEAS_FETCH_MAX_PAGES),
+    enabled: Boolean(projectId && queryScope),
+  });
+  const sessionsQuery = useQuery({
+    ...projectChatSessionsQueryOptions(queryScope, projectId, IDEAS_SESSION_FETCH_LIMIT),
+    enabled: Boolean(projectId && queryScope),
+  });
+  const ideas = useMemo(() => ideasQuery.data?.tasks ?? [], [ideasQuery.data]);
+  const sessions = useMemo(() => sessionsQuery.data ?? [], [sessionsQuery.data]);
+  const truncated = ideasQuery.data?.truncated ?? false;
+  const loading =
+    Boolean(projectId && queryScope) &&
+    [ideasQuery, sessionsQuery].some((query) => query.isPending && query.data === undefined);
+  const error =
+    (ideasQuery.data === undefined && ideasQuery.error) ||
+    (sessionsQuery.data === undefined && sessionsQuery.error)
+      ? 'Failed to load ideas. Please try again.'
+      : null;
+  const loadData = useCallback(() => {
+    void ideasQuery.refetch();
+    void sessionsQuery.refetch();
+  }, [ideasQuery, sessionsQuery]);
 
   // ---------------------------------------------------------------------------
   // Computed: session counts per idea, filtered ideas

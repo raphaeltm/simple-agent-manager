@@ -1,33 +1,60 @@
-import type { ListFilesResponse } from '@simple-agent-manager/shared';
+import { LIBRARY_DEFAULTS, type ListFilesResponse } from '@simple-agent-manager/shared';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { createElement, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { FileWithTags } from '../../../src/components/library/types';
-
-const { listLibraryFiles } = vi.hoisted(() => ({ listLibraryFiles: vi.fn() }));
-const cache = vi.hoisted(() => ({
-  getCachedIndex: vi.fn(),
-  setCachedIndex: vi.fn(),
-  clearCachedIndex: vi.fn(),
-}));
-
-vi.mock('../../../src/lib/api/library', () => ({ listLibraryFiles }));
-vi.mock('../../../src/lib/library-cache', () => ({
-  getCachedIndex: cache.getCachedIndex,
-  setCachedIndex: cache.setCachedIndex,
-  clearCachedIndex: cache.clearCachedIndex,
-}));
-
 import { useLibraryIndex } from '../../../src/hooks/useLibraryIndex';
+import {
+  type LibraryIndexFile,
+  type LibraryIndexQueryData,
+  libraryQueryKeys,
+} from '../../../src/lib/query-options/library';
 
-function makeFile(overrides: Partial<FileWithTags> = {}): FileWithTags {
+vi.mock('../../../src/lib/api/library', () => ({
+  listLibraryFiles: vi.fn(),
+}));
+
+vi.mock('../../../src/hooks/useQueryScope', () => ({
+  useQueryScope: () => 'user-1',
+}));
+
+import { listLibraryFiles } from '../../../src/lib/api/library';
+
+const mockListLibraryFiles = vi.mocked(listLibraryFiles);
+
+const DEFAULT_INDEX_CONFIG = {
+  cap: LIBRARY_DEFAULTS.CLIENT_SWEEP_CAP,
+  maxSweepPages: LIBRARY_DEFAULTS.CLIENT_MAX_SWEEP_PAGES,
+  namespace: null,
+} as const;
+
+function createWrapper(client = createQueryClient()) {
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return createElement(QueryClientProvider, { client }, children);
+  };
+}
+
+function createQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        gcTime: Infinity,
+        retry: false,
+        staleTime: 0,
+      },
+    },
+  });
+}
+
+function makeFile(id: string, overrides: Partial<LibraryIndexFile> = {}): LibraryIndexFile {
   return {
-    id: overrides.id ?? 'f1',
+    id,
     projectId: 'proj-1',
-    filename: overrides.filename ?? 'a.txt',
-    directory: overrides.directory ?? '/',
-    mimeType: 'text/plain',
-    sizeBytes: 1,
+    filename: `${id}.md`,
+    directory: '/',
+    mimeType: 'text/markdown',
+    sizeBytes: 123,
     description: null,
     uploadedBy: 'user-1',
     uploadSource: 'user',
@@ -36,180 +63,176 @@ function makeFile(overrides: Partial<FileWithTags> = {}): FileWithTags {
     replacedAt: null,
     replacedBy: null,
     status: 'ready',
-    extractedTextPreview: overrides.extractedTextPreview ?? 'preview text',
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
+    extractedTextPreview: 'preview text that must not be cached',
+    createdAt: `2026-08-20T00:00:0${id.length}.000Z`,
+    updatedAt: `2026-08-20T00:00:0${id.length}.000Z`,
     tags: [],
     ...overrides,
   };
 }
 
-function page(files: FileWithTags[], cursor: string | null, total: number): ListFilesResponse {
-  return { files, cursor, total } as ListFilesResponse;
+function page(
+  files: LibraryIndexFile[],
+  cursor: string | null,
+  total = files.length
+): ListFilesResponse {
+  return { files, cursor, total };
+}
+
+function seedIndexData(client: QueryClient, data: LibraryIndexQueryData) {
+  client.setQueryData(libraryQueryKeys.index('user-1', 'proj-1', DEFAULT_INDEX_CONFIG), data);
 }
 
 describe('useLibraryIndex', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    cache.getCachedIndex.mockReturnValue(null);
-    cache.setCachedIndex.mockReturnValue(true);
+    mockListLibraryFiles.mockReset();
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
-  it('sweeps multiple pages with sortOrder=asc until cursor===null', async () => {
-    listLibraryFiles
-      .mockResolvedValueOnce(page([makeFile({ id: 'a' })], 'a', 2))
-      .mockResolvedValueOnce(page([makeFile({ id: 'b' })], null, 2));
+  it('sweeps all pages using recursive ascending createdAt pagination', async () => {
+    const firstFile = makeFile('a');
+    const secondFile = makeFile('b');
+    mockListLibraryFiles
+      .mockResolvedValueOnce(page([firstFile], 'cursor-1', 2))
+      .mockResolvedValueOnce(page([secondFile], null, 2));
 
-    const { result } = renderHook(() => useLibraryIndex('proj-1'));
+    const { result } = renderHook(() => useLibraryIndex('proj-1'), {
+      wrapper: createWrapper(),
+    });
 
     await waitFor(() => expect(result.current.status).toBe('ready'));
-    expect(result.current.files.map((f) => f.id)).toEqual(['a', 'b']);
 
-    // Every sweep call must request the full library recursively in ascending order.
-    for (const call of listLibraryFiles.mock.calls) {
-      expect(call[1]).toMatchObject({
-        directory: '/',
-        recursive: true,
-        sortOrder: 'asc',
-        sortBy: 'createdAt',
-      });
-    }
-    // Second page passed the first page's cursor
-    expect(listLibraryFiles.mock.calls[1]![1]).toMatchObject({ cursor: 'a' });
+    expect(result.current.files.map((file) => file.id)).toEqual(['a', 'b']);
+    expect(mockListLibraryFiles).toHaveBeenNthCalledWith(1, 'proj-1', {
+      directory: '/',
+      recursive: true,
+      sortBy: 'createdAt',
+      sortOrder: 'asc',
+      limit: LIBRARY_DEFAULTS.LIST_MAX_PAGE_SIZE,
+      cursor: undefined,
+    });
+    expect(mockListLibraryFiles).toHaveBeenNthCalledWith(2, 'proj-1', {
+      directory: '/',
+      recursive: true,
+      sortBy: 'createdAt',
+      sortOrder: 'asc',
+      limit: LIBRARY_DEFAULTS.LIST_MAX_PAGE_SIZE,
+      cursor: 'cursor-1',
+    });
   });
 
-  it('strips extractedTextPreview before caching', async () => {
-    listLibraryFiles.mockResolvedValueOnce(page([makeFile({ id: 'a' })], null, 1));
+  it('strips extracted text previews before exposing and caching swept files', async () => {
+    const client = createQueryClient();
+    mockListLibraryFiles.mockResolvedValueOnce(page([makeFile('a')], null, 1));
 
-    const { result } = renderHook(() => useLibraryIndex('proj-1'));
+    const { result } = renderHook(() => useLibraryIndex('proj-1'), {
+      wrapper: createWrapper(client),
+    });
+
     await waitFor(() => expect(result.current.status).toBe('ready'));
 
-    expect(cache.setCachedIndex).toHaveBeenCalledTimes(1);
-    const cached = cache.setCachedIndex.mock.calls[0]![1] as FileWithTags[];
-    expect(cached[0]!.extractedTextPreview).toBeNull();
+    expect(result.current.files[0]?.extractedTextPreview).toBeNull();
+    const cached = client.getQueryData<LibraryIndexQueryData>(
+      libraryQueryKeys.index('user-1', 'proj-1', DEFAULT_INDEX_CONFIG)
+    );
+    expect(cached?.files[0]?.extractedTextPreview).toBeNull();
   });
 
-  it('falls back to overCap when total >= cap and clears the cache', async () => {
-    listLibraryFiles.mockResolvedValueOnce(page([], null, 9999));
+  it('reports overCap without storing files when the server total reaches the client cap', async () => {
+    mockListLibraryFiles.mockResolvedValueOnce(
+      page([makeFile('too-many')], null, LIBRARY_DEFAULTS.CLIENT_SWEEP_CAP)
+    );
 
-    const { result } = renderHook(() => useLibraryIndex('proj-1'));
+    const { result } = renderHook(() => useLibraryIndex('proj-1'), {
+      wrapper: createWrapper(),
+    });
+
     await waitFor(() => expect(result.current.status).toBe('overCap'));
 
     expect(result.current.files).toEqual([]);
-    expect(result.current.fileCount).toBe(9999);
-    expect(cache.clearCachedIndex).toHaveBeenCalledWith('proj-1', undefined);
-    expect(cache.setCachedIndex).not.toHaveBeenCalled();
+    expect(result.current.fileCount).toBe(LIBRARY_DEFAULTS.CLIENT_SWEEP_CAP);
   });
 
-  it('hydrates from cache for flicker-free first paint', async () => {
-    cache.getCachedIndex.mockReturnValue({
-      files: [makeFile({ id: 'cached', extractedTextPreview: null })],
-      count: 1,
-      sweptAt: Date.now(),
+  it('hydrates immediately from Query cache and stale-revalidates in the background', async () => {
+    const client = createQueryClient();
+    const cachedFile = makeFile('cached', { extractedTextPreview: null });
+    seedIndexData(client, { files: [cachedFile], fileCount: 1, status: 'ready' });
+    mockListLibraryFiles.mockResolvedValueOnce(page([makeFile('fresh')], null, 1));
+
+    const { result } = renderHook(() => useLibraryIndex('proj-1'), {
+      wrapper: createWrapper(client),
     });
-    listLibraryFiles.mockResolvedValueOnce(page([makeFile({ id: 'fresh' })], null, 1));
 
-    const { result } = renderHook(() => useLibraryIndex('proj-1'));
-
-    // Immediately ready from cache (no loading flash)
     expect(result.current.status).toBe('ready');
-    expect(result.current.files[0]!.id).toBe('cached');
+    expect(result.current.files.map((file) => file.id)).toEqual(['cached']);
 
-    // Then the re-sweep replaces it
-    await waitFor(() => expect(result.current.files[0]!.id).toBe('fresh'));
+    await waitFor(() => expect(result.current.files.map((file) => file.id)).toEqual(['fresh']));
+    expect(mockListLibraryFiles).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps prior files and reports sweepError on a failed page', async () => {
-    cache.getCachedIndex.mockReturnValue({
-      files: [makeFile({ id: 'cached', extractedTextPreview: null })],
-      count: 1,
-      sweptAt: Date.now(),
-    });
-    listLibraryFiles.mockRejectedValueOnce(new Error('network'));
+  it('keeps cached data and reports sweepError when a background re-sweep fails', async () => {
+    const client = createQueryClient();
+    const cachedFile = makeFile('cached', { extractedTextPreview: null });
+    seedIndexData(client, { files: [cachedFile], fileCount: 1, status: 'ready' });
+    mockListLibraryFiles.mockRejectedValueOnce(new Error('network down'));
 
-    const { result } = renderHook(() => useLibraryIndex('proj-1'));
+    const { result } = renderHook(() => useLibraryIndex('proj-1'), {
+      wrapper: createWrapper(client),
+    });
 
     await waitFor(() => expect(result.current.sweepError).toBe(true));
+
     expect(result.current.status).toBe('ready');
-    expect(result.current.files[0]!.id).toBe('cached');
+    expect(result.current.files.map((file) => file.id)).toEqual(['cached']);
   });
 
-  it('reports status:error when the first page fails with no cache and nothing accumulated', async () => {
-    cache.getCachedIndex.mockReturnValue(null);
-    listLibraryFiles.mockRejectedValueOnce(new Error('network'));
+  it('reports error when the initial sweep fails without cached data', async () => {
+    mockListLibraryFiles.mockRejectedValueOnce(new Error('network down'));
 
-    const { result } = renderHook(() => useLibraryIndex('proj-1'));
+    const { result } = renderHook(() => useLibraryIndex('proj-1'), {
+      wrapper: createWrapper(),
+    });
 
     await waitFor(() => expect(result.current.status).toBe('error'));
-    expect(result.current.sweepError).toBe(true);
+
     expect(result.current.files).toEqual([]);
-    expect(cache.setCachedIndex).not.toHaveBeenCalled();
+    expect(result.current.sweepError).toBe(true);
   });
 
-  it('stops sweeping at the page cap even when the cursor never goes null', async () => {
-    // Every page returns a non-null cursor and a sub-cap total, so only the
-    // runaway-guard (maxSweepPages, default 10) can terminate the loop.
-    listLibraryFiles.mockImplementation(async (_projectId: string, opts: { cursor?: string }) => {
-      const next = `${Number(opts.cursor ?? '0') + 1}`;
-      return page([makeFile({ id: next })], next, 5);
+  it('stops sweeping at the configured page cap when the cursor never ends', async () => {
+    mockListLibraryFiles.mockImplementation(async (_projectId, filters) =>
+      page([makeFile(String(filters?.cursor ?? 'first'))], 'next-cursor', 1)
+    );
+
+    const { result } = renderHook(() => useLibraryIndex('proj-1'), {
+      wrapper: createWrapper(),
     });
 
-    const { result } = renderHook(() => useLibraryIndex('proj-1'));
-
     await waitFor(() => expect(result.current.status).toBe('ready'));
-    expect(listLibraryFiles.mock.calls.length).toBe(10);
-    expect(result.current.files.length).toBe(10);
+
+    expect(mockListLibraryFiles).toHaveBeenCalledTimes(LIBRARY_DEFAULTS.CLIENT_MAX_SWEEP_PAGES);
+    expect(result.current.files).toHaveLength(LIBRARY_DEFAULTS.CLIENT_MAX_SWEEP_PAGES);
   });
 
-  it('re-sweeps when invalidate() is called', async () => {
-    listLibraryFiles.mockResolvedValue(page([makeFile({ id: 'a' })], null, 1));
+  it('invalidates the exact project index query and re-sweeps', async () => {
+    mockListLibraryFiles
+      .mockResolvedValueOnce(page([makeFile('a')], null, 1))
+      .mockResolvedValueOnce(page([makeFile('b')], null, 1));
 
-    const { result } = renderHook(() => useLibraryIndex('proj-1'));
-    await waitFor(() => expect(result.current.status).toBe('ready'));
-    const before = listLibraryFiles.mock.calls.length;
+    const { result } = renderHook(() => useLibraryIndex('proj-1'), {
+      wrapper: createWrapper(),
+    });
 
-    act(() => result.current.invalidate());
-    await waitFor(() => expect(listLibraryFiles.mock.calls.length).toBeGreaterThan(before));
-  });
+    await waitFor(() => expect(result.current.files.map((file) => file.id)).toEqual(['a']));
 
-  it('generation guard discards a stale in-flight sweep when invalidate() supersedes it', async () => {
-    // Two deferred sweeps: A is in-flight when invalidate() starts B.
-    function deferred() {
-      let resolve!: (v: ListFilesResponse) => void;
-      const promise = new Promise<ListFilesResponse>((r) => {
-        resolve = r;
-      });
-      return { promise, resolve };
-    }
-    const sweepA = deferred();
-    const sweepB = deferred();
-    listLibraryFiles.mockReturnValueOnce(sweepA.promise).mockReturnValueOnce(sweepB.promise);
-
-    const { result } = renderHook(() => useLibraryIndex('proj-1'));
-    expect(result.current.status).toBe('loading');
-
-    // Supersede sweep A before it resolves — bumps the generation, starts sweep B.
-    act(() => result.current.invalidate());
-    await waitFor(() => expect(listLibraryFiles.mock.calls.length).toBe(2));
-
-    // Resolve the STALE sweep first, then the current one.
     await act(async () => {
-      sweepA.resolve(page([makeFile({ id: 'stale' })], null, 1));
-      sweepB.resolve(page([makeFile({ id: 'fresh' })], null, 1));
-      await Promise.resolve();
+      result.current.invalidate();
     });
 
-    await waitFor(() => expect(result.current.status).toBe('ready'));
-    // Stale sweep A's result must be discarded; only sweep B's files survive.
-    expect(result.current.files.map((f) => f.id)).toEqual(['fresh']);
-    // And the stale result must never have been cached.
-    for (const call of cache.setCachedIndex.mock.calls) {
-      const cached = call[1] as FileWithTags[];
-      expect(cached.map((f) => f.id)).not.toContain('stale');
-    }
+    await waitFor(() => expect(result.current.files.map((file) => file.id)).toEqual(['b']));
+    expect(mockListLibraryFiles).toHaveBeenCalledTimes(2);
   });
 });

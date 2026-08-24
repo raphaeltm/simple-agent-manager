@@ -1,7 +1,5 @@
 // FILE SIZE EXCEPTION: Pre-existing project chat state hook exceeds the 800-line gate on main; split as follow-up outside shared runtime fix scope.
 import type {
-  AgentInfo,
-  AgentProfile,
   AgentProfileRuntime,
   CreateAgentProfileRequest,
   ProviderCatalog,
@@ -16,35 +14,41 @@ import {
   DEFAULT_WORKSPACE_PROFILE,
   hasByocComputeCredential,
 } from '@simple-agent-manager/shared';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 
+import { useAgentCatalog } from '../../hooks/useAgentCatalog';
+import { useAgentProfiles } from '../../hooks/useAgentProfiles';
 import { useAvailableCommands } from '../../hooks/useAvailableCommands';
 import { useBootLogStream } from '../../hooks/useBootLogStream';
+import { useCredentials } from '../../hooks/useCredentials';
 import { type RawSessionEvent, useProjectWebSocket } from '../../hooks/useProjectWebSocket';
+import { useProviderCatalog } from '../../hooks/useProviderCatalog';
+import { useQueryScope } from '../../hooks/useQueryScope';
+import { useTrialStatus } from '../../hooks/useTrialStatus';
+import { useDocumentVisible, useVisibilityAwarePoll } from '../../hooks/useVisibilityAwarePoll';
 import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
 import {
   closeConversationTask,
-  createAgentProfile,
   getProjectTask,
-  getProviderCatalog,
   getTranscribeApiUrl,
-  getTrialStatus,
   getWorkspace,
   linkSessionIdea,
-  listAgentProfiles,
-  listAgents,
   listChatSessions,
-  listCredentials,
   listProjectTasks,
   prepareForkSession,
+  sleepWorkspace,
   startInstantChatSession,
   stopChatSession,
   submitTask,
   summarizeSession,
-  updateAgentProfile,
 } from '../../lib/api';
 import { getSessionState, isStaleSession } from '../../lib/chat-session-utils';
+import {
+  applyMessageCommentRealtimeEventToQueryCache,
+  chatQueryKeys,
+} from '../../lib/query-options';
 import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
 import { isRetryOrFork } from './lineageUtils';
@@ -67,6 +71,7 @@ import {
   CHAT_TASK_LIST_LIMIT,
   EXECUTE_IDEA_PROMPT_TEMPLATE,
   isTerminal,
+  SESSION_RECONCILE_INTERVAL_MS,
   SESSION_SYNC_INTERVAL_MS,
   TASK_STATUS_POLL_MS,
 } from './types';
@@ -103,11 +108,15 @@ export interface ProfileWizardState {
   error: string | null;
 }
 
+const EMPTY_PROVIDER_CATALOGS: ProviderCatalog[] = [];
+
 export function useProjectChatState() {
   const navigate = useNavigate();
   const { sessionId } = useParams<{ sessionId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { projectId, project } = useProjectContext();
+  const queryScope = useQueryScope();
+  const queryClient = useQueryClient();
 
   // Execute-idea flow: pre-fill message and track ideaId for auto-linking
   const executeIdeaId = searchParams.get('executeIdea');
@@ -117,8 +126,14 @@ export function useProjectChatState() {
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const hasLoadedRef = useRef(false);
-  const [hasCloudCredentials, setHasCloudCredentials] = useState(false);
-  const [hasUserCloudCredentials, setHasUserCloudCredentials] = useState(false);
+  // Credentials, trial status, provider catalog, agent catalog and agent profiles all
+  // come from shared TanStack queries. Before this migration each was fetched by a
+  // mount effect local to this hook, duplicating requests that the settings pages,
+  // onboarding wizards, task forms and workspace creation were already making.
+  const { credentials } = useCredentials(queryScope);
+  const { available: trialAvailable } = useTrialStatus(queryScope);
+  const hasUserCloudCredentials = hasByocComputeCredential(credentials);
+  const hasCloudCredentials = hasUserCloudCredentials || trialAvailable;
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Sidebar filtering
@@ -136,14 +151,41 @@ export function useProjectChatState() {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Agent type selection
-  const [configuredAgents, setConfiguredAgents] = useState<AgentInfo[]>([]);
+  const { agents: agentCatalog } = useAgentCatalog(queryScope);
+  const configuredAgents = useMemo(
+    () => agentCatalog.filter((agent) => agent.configured && agent.supportsAcp),
+    [agentCatalog]
+  );
   const [selectedAgentType, setSelectedAgentType] = useState<string | null>(null);
 
   // Agent profile selection
-  const [agentProfiles, setAgentProfiles] = useState<AgentProfile[]>([]);
+  const {
+    profiles: agentProfiles,
+    createProfile: createProfileMutation,
+    updateProfile,
+  } = useAgentProfiles(projectId, queryScope);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+
+  // Auto-selection that previously lived inside the two removed mount effects. Both
+  // are strictly "fill in a default once something is available" — neither may
+  // override a choice the user has already made, so each is guarded on the current
+  // selection (`.claude/rules/06-technical-patterns.md`, interaction-effect analysis).
+  useEffect(() => {
+    const firstAgent = configuredAgents[0];
+    if (!firstAgent) return;
+    setSelectedAgentType((current) => current ?? firstAgent.id);
+  }, [configuredAgents]);
+
+  useEffect(() => {
+    setSelectedProfileId((current) => selectProfileId(current, agentProfiles));
+  }, [agentProfiles]);
   const { skills, selectedSkillId, setSelectedSkillId } = useProjectSkills(projectId);
-  const [providerCatalogs, setProviderCatalogs] = useState<ProviderCatalog[]>([]);
+  // The catalog is only meaningful once the user can actually provision, matching the
+  // previous behaviour where it was fetched inside the `hasCloud` branch.
+  const { catalogs: allProviderCatalogs } = useProviderCatalog(
+    hasCloudCredentials ? queryScope : ''
+  );
+  const providerCatalogs = hasCloudCredentials ? allProviderCatalogs : EMPTY_PROVIDER_CATALOGS;
   const [profileWizard, setProfileWizard] = useState<ProfileWizardState>({
     open: false,
     step: 'agent',
@@ -211,7 +253,9 @@ export function useProjectChatState() {
 
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
-  // Close conversation state
+  // Conversation lifecycle state
+  const [sleepingConversation, setSleepingConversation] = useState(false);
+  const [sleepError, setSleepError] = useState<string | null>(null);
   const [closingConversation, setClosingConversation] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
 
@@ -281,66 +325,11 @@ export function useProjectChatState() {
     }
   }, [multiplayerActive]);
 
-  useEffect(() => {
-    void Promise.all([listCredentials().catch(() => []), getTrialStatus().catch(() => null)]).then(
-      ([creds, trial]) => {
-        const hasUserCreds = hasByocComputeCredential(creds);
-        const trialAvailable = trial?.available ?? false;
-        const hasCloud = hasUserCreds || trialAvailable;
-        setHasUserCloudCredentials(hasUserCreds);
-        setHasCloudCredentials(hasCloud);
-        if (hasCloud) {
-          void getProviderCatalog()
-            .then((response) => setProviderCatalogs(response.catalogs ?? []))
-            .catch(() => setProviderCatalogs([]));
-        } else {
-          setProviderCatalogs([]);
-        }
-      }
-    );
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    void listAgents()
-      .then((data) => {
-        if (cancelled) return;
-        const acpAgents = (data.agents || []).filter((a) => a.configured && a.supportsAcp);
-        setConfiguredAgents(acpAgents);
-        const firstAgent = acpAgents[0];
-        if (!selectedAgentType && firstAgent) {
-          setSelectedAgentType(firstAgent.id);
-        }
-      })
-      .catch((err: unknown) => {
-        console.error('Failed to load agents', err);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const loadProfiles = useCallback(() => {
-    void listAgentProfiles(projectId)
-      .then((data) => {
-        setAgentProfiles(data);
-        setSelectedProfileId((current) => selectProfileId(current, data));
-      })
-      .catch((err: unknown) => {
-        console.error('Failed to load agent profiles', err);
-      });
-  }, [projectId]);
-
-  useEffect(() => {
-    loadProfiles();
-  }, [loadProfiles]);
-
   const handleUpdateProfile = useCallback(
     async (profileId: string, data: UpdateAgentProfileRequest) => {
-      await updateAgentProfile(projectId, profileId, data);
-      loadProfiles();
+      await updateProfile(profileId, data);
     },
-    [projectId, loadProfiles]
+    [updateProfile]
   );
 
   useEffect(() => {
@@ -403,9 +392,18 @@ export function useProjectChatState() {
     [dispatchEvent, multiplayerActive, sessionScope, loadSessions]
   );
 
+  const handleCommentEvent = useCallback(
+    (event: Parameters<typeof applyMessageCommentRealtimeEventToQueryCache>[2]) => {
+      if (!queryScope) return;
+      applyMessageCommentRealtimeEventToQueryCache(queryClient, queryScope, event);
+    },
+    [queryClient, queryScope]
+  );
+
   const { connectionState } = useProjectWebSocket({
     projectId,
     onSessionEvent: handleSessionEvent,
+    onCommentEvent: handleCommentEvent,
     onReconnected: loadSessions,
   });
 
@@ -416,17 +414,40 @@ export function useProjectChatState() {
     void loadSessions().finally(() => setLoading(false));
   }, [loadSessions]);
 
-  // Periodic background sync — self-heals if a WebSocket delta was silently dropped.
-  // Depends on `loading` to defer until the first load completes.
-  useEffect(() => {
-    if (loading) return;
-    const interval = setInterval(() => void loadSessions(), SESSION_SYNC_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [loading, loadSessions]);
+  // Session-list freshness has two modes, and exactly one is active at a time.
+  //
+  // 1. Degraded fallback (30s) while the ProjectData WebSocket is NOT connected.
+  //    Each tick is a 100-session list + a 200-task list, so running it while
+  //    the socket is delivering deltas in real time is pure duplicate I/O.
+  // 2. Slow reconciliation (10min) while it IS connected. `connectionState`
+  //    only tracks socket open/close — `useProjectWebSocket` silently drops
+  //    malformed frames and there is no sequence/gap detector, so suppressing
+  //    the poll entirely would let a dropped delta leave the sidebar stale for
+  //    the whole connection lifetime. This preserves the original poll's
+  //    self-healing role at ~1/20th the request rate.
+  //
+  // Both are deferred until the first load completes and both pause on hidden
+  // tabs. Reconnect catch-up is handled by `onReconnected` above; disconnect and
+  // tab-return catch-up come from the hook's elapsed-gated refresh.
+  const wsConnected = connectionState === 'connected';
+  useVisibilityAwarePoll(loadSessions, SESSION_SYNC_INTERVAL_MS, {
+    enabled: !loading,
+    paused: wsConnected,
+  });
+  useVisibilityAwarePoll(loadSessions, SESSION_RECONCILE_INTERVAL_MS, {
+    enabled: !loading,
+    paused: !wsConnected,
+  });
 
   // Poll task status during provisioning
+  const provisioningVisible = useDocumentVisible();
   useEffect(() => {
     if (!provisioning || isTerminal(provisioning.status)) return;
+    // Provisioning polls every 2s and can run for minutes — by far the hottest
+    // poll on this page. Suspend it in a hidden tab; re-running this effect on
+    // the visibility transition refreshes once immediately on return, which is
+    // what a 2s progress poll wants.
+    if (!provisioningVisible) return;
     const poll = async () => {
       try {
         const task = await getProjectTask(projectId, provisioning.taskId);
@@ -478,6 +499,7 @@ export function useProjectChatState() {
     navigate,
     loadSessions,
     provisioning?.sessionId,
+    provisioningVisible,
   ]);
 
   // Restore provisioning state when navigating to a session with an active task
@@ -554,15 +576,14 @@ export function useProjectChatState() {
 
   const createProfile = useCallback(
     async (data: CreateAgentProfileRequest) => {
-      const profile = await createAgentProfile(projectId, data);
-      setAgentProfiles((current) => {
-        const withoutDuplicate = current.filter((candidate) => candidate.id !== profile.id);
-        return [...withoutDuplicate, profile];
-      });
+      // The mutation invalidates the shared `agentProfiles` entry, so the new profile
+      // reaches every consumer (profiles page, task forms, trigger form) rather than
+      // only this hook's local copy, which is what the previous manual splice did.
+      const profile = await createProfileMutation(data);
       setSelectedProfileId(profile.id);
       return profile;
     },
-    [projectId]
+    [createProfileMutation]
   );
 
   const createProfileFromWizard = useCallback(async () => {
@@ -866,6 +887,33 @@ export function useProjectChatState() {
     [navigate, projectId]
   );
 
+  const handleSleepConversation = useCallback(async () => {
+    const selectedSession = sessions.find((s) => s.id === sessionId);
+    if (!selectedSession) return;
+    const workspaceId = selectedSession.workspaceId;
+    if (!workspaceId) {
+      setSleepError('This session has no workspace to sleep.');
+      return;
+    }
+
+    setSleepingConversation(true);
+    setSleepError(null);
+    try {
+      await sleepWorkspace(workspaceId);
+      if (queryScope) {
+        await queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.sessionMessages(queryScope, projectId, selectedSession.id),
+        });
+      }
+      void loadSessions();
+    } catch (err) {
+      console.warn('Failed to sleep conversation:', err);
+      setSleepError(err instanceof Error ? err.message : 'Failed to sleep conversation');
+    } finally {
+      setSleepingConversation(false);
+    }
+  }, [loadSessions, projectId, queryClient, queryScope, sessionId, sessions]);
+
   const handleCloseConversation = useCallback(async () => {
     const selectedSession = sessions.find((s) => s.id === sessionId);
     if (!selectedSession) return;
@@ -970,6 +1018,9 @@ export function useProjectChatState() {
     setPendingDerived,
     handleFork,
     handleRetry,
+    sleepingConversation,
+    sleepError,
+    handleSleepConversation,
     closingConversation,
     closeError,
     handleCloseConversation,

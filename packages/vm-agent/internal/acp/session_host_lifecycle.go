@@ -111,7 +111,7 @@ func (h *SessionHost) Suspend() (acpSessionID string, agentType string) {
 	h.stopCurrentAgentLocked()
 
 	// Mark the host as stopped so no further operations occur.
-	h.status = HostStopped
+	h.setStatusLocked(HostStopped)
 	h.statusErr = ""
 	// Snapshot credential metadata while still holding the lock.
 	snap := credSyncSnapshot{
@@ -126,6 +126,7 @@ func (h *SessionHost) Suspend() (acpSessionID string, agentType string) {
 	h.syncCredentialOnStop(snap)
 
 	// Report idle to the control plane so the browser status bar clears.
+	h.clearHarnessWork()
 	h.reportActivity("idle")
 
 	h.cancel()

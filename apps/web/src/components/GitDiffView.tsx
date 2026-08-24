@@ -1,17 +1,18 @@
 import { Spinner } from '@simple-agent-manager/ui';
-import { FileText,X } from 'lucide-react';
+import { FileText, X } from 'lucide-react';
 import { Highlight, themes } from 'prism-react-renderer';
 import {
   type CSSProperties,
   type FC,
   type HTMLAttributes,
+  memo,
   type ReactNode,
   useCallback,
   useEffect,
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import { getGitDiff, getGitFile } from '../lib/api';
@@ -254,7 +255,10 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
         )}
 
         {!error && diff !== '' && viewMode === 'diff' && (
-          <div style={{ opacity: loading ? 0.6 : 1, transition: 'opacity 0.15s' }} aria-busy={loading}>
+          <div
+            style={{ opacity: loading ? 0.6 : 1, transition: 'opacity 0.15s' }}
+            aria-busy={loading}
+          >
             <DiffRenderer diff={diff} />
           </div>
         )}
@@ -266,7 +270,10 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
               <Spinner size="md" />
             </div>
           ) : fullContent !== null ? (
-            <div style={{ opacity: fullLoading ? 0.6 : 1, transition: 'opacity 0.15s' }} aria-busy={fullLoading}>
+            <div
+              style={{ opacity: fullLoading ? 0.6 : 1, transition: 'opacity 0.15s' }}
+              aria-busy={fullLoading}
+            >
               {markdownFile && markdownMode === 'rendered' ? (
                 <RenderedMarkdown content={fullContent} />
               ) : (
@@ -278,7 +285,7 @@ export const GitDiffView: FC<GitDiffViewProps> = ({
           ))}
       </div>
     </div>,
-    document.body,
+    document.body
   );
 };
 
@@ -362,114 +369,166 @@ const ToggleButton: FC<{ label: string; active: boolean; onClick: () => void }> 
 );
 
 // ---------- Rendered Markdown ----------
+// NOTE: this is a second markdown renderer, kept separate from
+// components/MarkdownRenderer.tsx only because its typography differs. Both now
+// hoist + memo; consolidating them is tracked separately.
 
-const RenderedMarkdown: FC<{ content: string }> = ({ content }) => {
-  return (
-    <div className="max-w-full overflow-x-hidden p-4 text-fg-primary break-words" style={{ lineHeight: 1.6, fontSize: 'var(--sam-type-body-size)' }}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          h1: ({ children }) => (
-            <h1 style={{ fontSize: 'var(--sam-type-page-title-size)', margin: '0 0 12px', lineHeight: 1.25 }}>{children}</h1>
-          ),
-          h2: ({ children }) => (
-            <h2 style={{ fontSize: 'var(--sam-type-page-title-size)', margin: '18px 0 10px', lineHeight: 1.3 }}>{children}</h2>
-          ),
-          h3: ({ children }) => (
-            <h3 style={{ fontSize: 'var(--sam-type-section-heading-size)', margin: '16px 0 8px', lineHeight: 1.35 }}>{children}</h3>
-          ),
-          p: ({ children }) => <p style={{ margin: '0 0 12px' }}>{children}</p>,
-          ul: ({ children }) => <ul style={{ margin: '0 0 12px', paddingLeft: 22 }}>{children}</ul>,
-          ol: ({ children }) => <ol style={{ margin: '0 0 12px', paddingLeft: 22 }}>{children}</ol>,
-          li: ({ children }) => <li style={{ marginBottom: 4 }}>{children}</li>,
-          blockquote: ({ children }) => (
-            <blockquote
-              style={{
-                margin: '12px 0',
-                padding: '8px 12px',
-                borderLeft: '3px solid var(--sam-color-border-default)',
-                backgroundColor: 'var(--sam-color-info-tint)',
-              }}
-            >
-              {children}
-            </blockquote>
-          ),
-          a: ({ href, children }) => (
-            <a href={href} target="_blank" rel="noreferrer" className="text-tn-blue">
-              {children}
-            </a>
-          ),
-          table: ({ children }) => (
-            <div style={{ overflowX: 'auto', marginBottom: 12 }}>
-              <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 320 }}>
-                {children}
-              </table>
-            </div>
-          ),
-          th: ({ children }) => (
-            <th style={{ border: '1px solid var(--sam-color-border-default)', padding: '6px 8px', textAlign: 'left', backgroundColor: 'var(--sam-color-info-tint)' }}>
-              {children}
-            </th>
-          ),
-          td: ({ children }) => (
-            <td style={{ border: '1px solid var(--sam-color-border-default)', padding: '6px 8px' }}>
-              {children}
-            </td>
-          ),
-          code: ({
-            className,
-            children,
-            ...props
-          }: HTMLAttributes<HTMLElement> & { children?: ReactNode }) => {
-            const match = /language-(\w+)/.exec(className ?? '');
-            const code = String(children ?? '').replace(/\n$/, '');
+// Hoisted to module scope on purpose — DO NOT inline back into the JSX.
+// react-markdown uses each mapped value as the element type, so an object
+// literal in the render body gives every override a new identity and React
+// remounts the whole document instead of reconciling it. That destroys any live
+// text Selection inside it (see .claude/rules/64 and MarkdownRenderer.tsx).
+const DIFF_MARKDOWN_COMPONENTS: Components = {
+  h1: ({ children }) => (
+    <h1
+      style={{ fontSize: 'var(--sam-type-page-title-size)', margin: '0 0 12px', lineHeight: 1.25 }}
+    >
+      {children}
+    </h1>
+  ),
+  h2: ({ children }) => (
+    <h2
+      style={{
+        fontSize: 'var(--sam-type-page-title-size)',
+        margin: '18px 0 10px',
+        lineHeight: 1.3,
+      }}
+    >
+      {children}
+    </h2>
+  ),
+  h3: ({ children }) => (
+    <h3
+      style={{
+        fontSize: 'var(--sam-type-section-heading-size)',
+        margin: '16px 0 8px',
+        lineHeight: 1.35,
+      }}
+    >
+      {children}
+    </h3>
+  ),
+  p: ({ children }) => <p style={{ margin: '0 0 12px' }}>{children}</p>,
+  ul: ({ children }) => <ul style={{ margin: '0 0 12px', paddingLeft: 22 }}>{children}</ul>,
+  ol: ({ children }) => <ol style={{ margin: '0 0 12px', paddingLeft: 22 }}>{children}</ol>,
+  li: ({ children }) => <li style={{ marginBottom: 4 }}>{children}</li>,
+  blockquote: ({ children }) => (
+    <blockquote
+      style={{
+        margin: '12px 0',
+        padding: '8px 12px',
+        borderLeft: '3px solid var(--sam-color-border-default)',
+        backgroundColor: 'var(--sam-color-info-tint)',
+      }}
+    >
+      {children}
+    </blockquote>
+  ),
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noreferrer" className="text-tn-blue">
+      {children}
+    </a>
+  ),
+  table: ({ children }) => (
+    <div style={{ overflowX: 'auto', marginBottom: 12 }}>
+      <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 320 }}>{children}</table>
+    </div>
+  ),
+  th: ({ children }) => (
+    <th
+      style={{
+        border: '1px solid var(--sam-color-border-default)',
+        padding: '6px 8px',
+        textAlign: 'left',
+        backgroundColor: 'var(--sam-color-info-tint)',
+      }}
+    >
+      {children}
+    </th>
+  ),
+  td: ({ children }) => (
+    <td style={{ border: '1px solid var(--sam-color-border-default)', padding: '6px 8px' }}>
+      {children}
+    </td>
+  ),
+  code: ({
+    className,
+    children,
+    ...props
+  }: HTMLAttributes<HTMLElement> & { children?: ReactNode }) => {
+    const match = /language-(\w+)/.exec(className ?? '');
+    const code = String(children ?? '').replace(/\n$/, '');
 
-            if (match) {
-              return (
-                <div style={{ marginBottom: 12 }}>
-                  <Highlight theme={themes.nightOwl} code={code} language={match[1] ?? ''}>
-                    {({ style: themeStyle, tokens, getLineProps, getTokenProps }) => (
-                      <pre style={{ ...themeStyle, margin: 0, padding: '0.75rem', fontFamily: 'monospace', fontSize: '0.8125rem', lineHeight: '1.5', borderRadius: '0.375rem', overflow: 'auto' }}>
-                        {tokens.map((line, lineIdx) => {
-                          const lineProps = getLineProps({ line });
-                          return (
-                            <div key={lineIdx} {...lineProps} style={{ ...lineProps.style, whiteSpace: 'pre', minHeight: '1.5em' }}>
-                              {line.map((token, tokenIdx) => {
-                                const tokenProps = getTokenProps({ token });
-                                return <span key={tokenIdx} {...tokenProps} />;
-                              })}
-                            </div>
-                          );
-                        })}
-                      </pre>
-                    )}
-                  </Highlight>
-                </div>
-              );
-            }
-
-            return (
-              <code
-                {...props}
+    if (match) {
+      return (
+        <div style={{ marginBottom: 12 }}>
+          <Highlight theme={themes.nightOwl} code={code} language={match[1] ?? ''}>
+            {({ style: themeStyle, tokens, getLineProps, getTokenProps }) => (
+              <pre
                 style={{
-                  backgroundColor: 'var(--sam-color-info-tint)',
-                  borderRadius: 4,
-                  padding: '1px 5px',
+                  ...themeStyle,
+                  margin: 0,
+                  padding: '0.75rem',
                   fontFamily: 'monospace',
-                  fontSize: '0.85em',
+                  fontSize: '0.8125rem',
+                  lineHeight: '1.5',
+                  borderRadius: '0.375rem',
+                  overflow: 'auto',
                 }}
               >
-                {children}
-              </code>
-            );
-          },
+                {tokens.map((line, lineIdx) => {
+                  const lineProps = getLineProps({ line });
+                  return (
+                    <div
+                      key={lineIdx}
+                      {...lineProps}
+                      style={{ ...lineProps.style, whiteSpace: 'pre', minHeight: '1.5em' }}
+                    >
+                      {line.map((token, tokenIdx) => {
+                        const tokenProps = getTokenProps({ token });
+                        return <span key={tokenIdx} {...tokenProps} />;
+                      })}
+                    </div>
+                  );
+                })}
+              </pre>
+            )}
+          </Highlight>
+        </div>
+      );
+    }
+
+    return (
+      <code
+        {...props}
+        style={{
+          backgroundColor: 'var(--sam-color-info-tint)',
+          borderRadius: 4,
+          padding: '1px 5px',
+          fontFamily: 'monospace',
+          fontSize: '0.85em',
         }}
       >
+        {children}
+      </code>
+    );
+  },
+};
+
+const RenderedMarkdownImpl: FC<{ content: string }> = ({ content }) => {
+  return (
+    <div
+      className="max-w-full overflow-x-hidden p-4 text-fg-primary break-words"
+      style={{ lineHeight: 1.6, fontSize: 'var(--sam-type-body-size)' }}
+    >
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={DIFF_MARKDOWN_COMPONENTS}>
         {content}
       </ReactMarkdown>
     </div>
   );
 };
+
+const RenderedMarkdown = memo(RenderedMarkdownImpl);
 
 // ---------- Helpers ----------
 

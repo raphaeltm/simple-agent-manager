@@ -69,13 +69,24 @@ export interface VmPromptDeliveryTarget {
 type TargetResolution =
   | { kind: 'ready'; target: VmPromptDeliveryTarget }
   | { kind: 'retry'; reason: string }
-  | { kind: 'failed'; reason: 'terminal_target' | 'dead_target'; error: string };
+  | { kind: 'failed'; reason: 'terminal_target' | 'dead_target'; error: string }
+  | { kind: 'guarded'; result: PromptDeliveryResult };
+
+export interface VmPromptDeliverySourceTaskGuard {
+  taskId: string;
+  projectId: string;
+  chatSessionId: string;
+}
 
 export interface VmPromptDeliveryAdapterInput {
   projectId: string;
   claim: PromptDeliveryClaim;
   allowLegacyVm: boolean;
   requestTimeoutMs: number;
+  /** Revalidates a parent wake immediately before recovery/container/VM mutations. */
+  beforeSideEffect?: () => Promise<PromptDeliveryResult | null>;
+  /** Makes snapshot recovery's D1 claim conditional on the source parent. */
+  sourceTaskGuard?: VmPromptDeliverySourceTaskGuard;
 }
 
 export interface VmPromptDeliveryAdapter {
@@ -124,8 +135,10 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
   async submit(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult> {
     const resolution = await this.resolveTarget(
       input.projectId,
-      input.claim.message.targetSessionId
+      input.claim.message.targetSessionId,
+      input
     );
+    if (resolution.kind === 'guarded') return resolution.result;
     if (resolution.kind === 'failed') {
       return {
         kind: 'failed',
@@ -145,7 +158,16 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       };
     }
     const { target } = resolution;
-    const capabilities = await this.getCapabilities(target, input.requestTimeoutMs);
+    // A Cloudflare Container capability request may wake the container while
+    // preparing the proxied request. Revalidate before the probe, not only
+    // before the later prompt/wake mutations.
+    const guardedBeforeProbe = await this.runSideEffectGuard(input);
+    if (guardedBeforeProbe) return guardedBeforeProbe;
+    const capabilities = await this.getCapabilities(
+      target,
+      input.requestTimeoutMs,
+      input.sourceTaskGuard
+    );
     if (!capabilities) {
       return {
         kind: 'retry',
@@ -156,7 +178,8 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       };
     }
     if (target.runtime === 'cf-container') {
-      await this.commitContainerWake(target);
+      const guarded = await this.commitContainerWake(target, input);
+      if (guarded) return guarded;
     }
     if (!capabilities.promptReceipts.supported && !input.allowLegacyVm) {
       return {
@@ -169,6 +192,8 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
     }
 
     try {
+      const guarded = await this.runSideEffectGuard(input);
+      if (guarded) return guarded;
       const raw = await sendPromptToAgentOnNode(
         target.nodeId,
         target.workspaceId,
@@ -182,8 +207,12 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
               requestTimeoutMs: input.requestTimeoutMs,
               protocolVersion: VM_PROMPT_DELIVERY_PROTOCOL_VERSION,
               deliveryId: input.claim.message.id,
+              ...(input.sourceTaskGuard ? { sourceTaskGuard: input.sourceTaskGuard } : {}),
             }
-          : { requestTimeoutMs: input.requestTimeoutMs }
+          : {
+              requestTimeoutMs: input.requestTimeoutMs,
+              ...(input.sourceTaskGuard ? { sourceTaskGuard: input.sourceTaskGuard } : {}),
+            }
       );
       if (capabilities.protocolVersion === 0 && input.allowLegacyVm) {
         return {
@@ -199,10 +228,9 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       if (!parsed.success) {
         return this.reconcileAfterAmbiguousSubmit(
           target,
-          input.claim,
+          input,
           capabilities,
-          new Error('Target VM returned an invalid versioned prompt response'),
-          input.requestTimeoutMs
+          new Error('Target VM returned an invalid versioned prompt response')
         );
       }
       const response: VmPromptDeliveryResponse = parsed.output;
@@ -292,10 +320,9 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       }
       return this.reconcileAfterAmbiguousSubmit(
         target,
-        input.claim,
+        input,
         capabilities,
-        error,
-        input.requestTimeoutMs
+        error
       );
     }
   }
@@ -303,8 +330,10 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
   async reconcile(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult> {
     const resolution = await this.resolveTarget(
       input.projectId,
-      input.claim.message.targetSessionId
+      input.claim.message.targetSessionId,
+      input
     );
+    if (resolution.kind === 'guarded') return resolution.result;
     if (resolution.kind === 'failed') {
       return {
         kind: 'ambiguous',
@@ -326,7 +355,13 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       };
     }
     const { target } = resolution;
-    const capabilities = await this.getCapabilities(target, input.requestTimeoutMs);
+    const guardedBeforeProbe = await this.runSideEffectGuard(input);
+    if (guardedBeforeProbe) return guardedBeforeProbe;
+    const capabilities = await this.getCapabilities(
+      target,
+      input.requestTimeoutMs,
+      input.sourceTaskGuard
+    );
     if (!capabilities) {
       return {
         kind: 'ambiguous',
@@ -360,10 +395,22 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         receipt: null,
       };
     }
-    return this.lookupReceiptResult(target, input.claim, capabilities, input.requestTimeoutMs);
+    const guardedBeforeReceipt = await this.runSideEffectGuard(input);
+    if (guardedBeforeReceipt) return guardedBeforeReceipt;
+    return this.lookupReceiptResult(
+      target,
+      input.claim,
+      capabilities,
+      input.requestTimeoutMs,
+      input.sourceTaskGuard
+    );
   }
 
-  private async resolveTarget(projectId: string, chatSessionId: string): Promise<TargetResolution> {
+  private async resolveTarget(
+    projectId: string,
+    chatSessionId: string,
+    input: VmPromptDeliveryAdapterInput
+  ): Promise<TargetResolution> {
     const row = await this.env.DATABASE.prepare(
       `SELECT w.id AS workspace_id,
               w.user_id AS user_id,
@@ -399,7 +446,14 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       }>();
 
     if (!row) {
-      const recovery = await ensureSessionRecovery(this.env, projectId, chatSessionId);
+      const guarded = await this.runSideEffectGuard(input);
+      if (guarded) return { kind: 'guarded', result: guarded };
+      const recovery = await ensureSessionRecovery(
+        this.env,
+        projectId,
+        chatSessionId,
+        input.sourceTaskGuard
+      );
       if (recovery.status === 'waking') {
         return { kind: 'retry', reason: `Session is waking (${recovery.taskId})` };
       }
@@ -413,7 +467,14 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       row.node_runtime !== 'cf-container' &&
       ['sleeping', 'stopping', 'stopped', 'deleted', 'error'].includes(row.workspace_status)
     ) {
-      const recovery = await ensureSessionRecovery(this.env, projectId, chatSessionId);
+      const guarded = await this.runSideEffectGuard(input);
+      if (guarded) return { kind: 'guarded', result: guarded };
+      const recovery = await ensureSessionRecovery(
+        this.env,
+        projectId,
+        chatSessionId,
+        input.sourceTaskGuard
+      );
       if (recovery.status === 'waking') {
         return { kind: 'retry', reason: `Session is waking (${recovery.taskId})` };
       }
@@ -483,13 +544,24 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
     };
   }
 
-  private async commitContainerWake(target: VmPromptDeliveryTarget): Promise<void> {
+  private async runSideEffectGuard(
+    input: VmPromptDeliveryAdapterInput
+  ): Promise<PromptDeliveryResult | null> {
+    return input.beforeSideEffect ? input.beforeSideEffect() : null;
+  }
+
+  private async commitContainerWake(
+    target: VmPromptDeliveryTarget,
+    input: VmPromptDeliveryAdapterInput
+  ): Promise<PromptDeliveryResult | null> {
     const task = await this.env.DATABASE.prepare(
       `SELECT id FROM tasks WHERE workspace_id = ? ORDER BY updated_at DESC LIMIT 1`
     )
       .bind(target.workspaceId)
       .first<{ id: string }>();
-    if (!task) return;
+    if (!task) return null;
+    const guarded = await this.runSideEffectGuard(input);
+    if (guarded) return guarded;
     await Promise.all([
       projectDataService.wakeSession(
         this.env,
@@ -500,11 +572,13 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       ),
       markSessionSnapshotAwakeInPlace(this.env, target.chatSessionId, task.id, target.workspaceId),
     ]);
+    return null;
   }
 
   private async getCapabilities(
     target: VmPromptDeliveryTarget,
-    requestTimeoutMs: number
+    requestTimeoutMs: number,
+    sourceTaskGuard?: VmPromptDeliverySourceTaskGuard
   ): Promise<VmPromptDeliveryCapabilities | null> {
     try {
       const raw = await nodeAgentRequest(
@@ -516,6 +590,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
           userId: target.userId,
           workspaceId: target.workspaceId,
           requestTimeoutMs,
+          ...(sourceTaskGuard ? { sourceTaskGuard } : {}),
         }
       );
       const capabilities = v.parse(CapabilitiesSchema, raw);
@@ -543,10 +618,9 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
 
   private async reconcileAfterAmbiguousSubmit(
     target: VmPromptDeliveryTarget,
-    claim: PromptDeliveryClaim,
+    input: VmPromptDeliveryAdapterInput,
     capabilities: VmPromptDeliveryCapabilities,
-    submitError: unknown,
-    requestTimeoutMs: number
+    submitError: unknown
   ): Promise<PromptDeliveryResult> {
     if (!capabilities.promptReceipts.supported || !capabilities.promptReceipts.lookup) {
       return {
@@ -558,14 +632,23 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         receipt: null,
       };
     }
-    return this.lookupReceiptResult(target, claim, capabilities, requestTimeoutMs);
+    const guarded = await this.runSideEffectGuard(input);
+    if (guarded) return guarded;
+    return this.lookupReceiptResult(
+      target,
+      input.claim,
+      capabilities,
+      input.requestTimeoutMs,
+      input.sourceTaskGuard
+    );
   }
 
   private async lookupReceiptResult(
     target: VmPromptDeliveryTarget,
     claim: PromptDeliveryClaim,
     capabilities: VmPromptDeliveryCapabilities,
-    requestTimeoutMs: number
+    requestTimeoutMs: number,
+    sourceTaskGuard?: VmPromptDeliverySourceTaskGuard
   ): Promise<PromptDeliveryResult> {
     try {
       const raw = await nodeAgentRequest(
@@ -581,6 +664,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
           userId: target.userId,
           workspaceId: target.workspaceId,
           requestTimeoutMs,
+          ...(sourceTaskGuard ? { sourceTaskGuard } : {}),
         }
       );
       const receipt: VmPromptDeliveryReceipt = v.parse(ReceiptSchema, raw);

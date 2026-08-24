@@ -149,7 +149,7 @@ func (h *SessionHost) triggerPromptForceStopIfStuck(promptID uint64, reason stri
 		h.mu.Lock()
 		agentType := h.agentType
 		if h.status == HostPrompting {
-			h.status = HostError
+			h.setStatusLocked(HostError)
 			h.statusErr = reason
 		}
 		h.stopCurrentAgentLocked()
@@ -168,7 +168,7 @@ func (h *SessionHost) triggerPromptForceStopIfStuck(promptID uint64, reason stri
 
 func (h *SessionHost) setStatus(status SessionHostStatus, errMsg string) {
 	h.mu.Lock()
-	h.status = status
+	h.setStatusLocked(status)
 	h.statusErr = errMsg
 	h.mu.Unlock()
 }

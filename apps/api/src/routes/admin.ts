@@ -13,13 +13,29 @@ import {
   AdminUserActionSchema,
   AdminUserRoleSchema,
   jsonValidator,
+  parseOptionalBody,
+  ProjectDataStorageEmergencyPurgeSchema,
   UpdateSignupApprovalConfigSchema,
 } from '../schemas';
 import { getRuntimeLimits } from '../services/limits';
+import {
+  measureProjectDataStorage,
+  runProjectDataStorageEmergencyPurge,
+} from '../services/project-data';
 import { getSignupApprovalConfig, setSignupApprovalConfig } from '../services/signup-approval';
+import { getVmAdmissionDiagnostics } from '../services/vm-admission-control';
 import { adminObservabilityRoutes } from './admin/observability';
 
 const adminRoutes = new Hono<{ Bindings: Env }>();
+const PROJECT_DATA_STORAGE_STATUSES = new Set([
+  'ok',
+  'notice',
+  'warning',
+  'critical',
+  'degraded',
+]);
+const DEFAULT_STORAGE_TELEMETRY_LIMIT = 50;
+const MAX_STORAGE_TELEMETRY_LIMIT = 200;
 
 // All admin routes require auth + approval + superadmin
 adminRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
@@ -214,6 +230,51 @@ adminRoutes.get('/tasks/:taskId/reconciliation-diagnostics', async (c) => {
 });
 
 /**
+ * GET /api/admin/vm-admissions - Bounded list of VM admission records.
+ */
+adminRoutes.get('/vm-admissions', async (c) => {
+  const limits = getRuntimeLimits(c.env);
+  const limitParam = Number.parseInt(c.req.query('limit') ?? '', 10);
+  const limit = Number.isFinite(limitParam)
+    ? Math.min(Math.max(1, limitParam), limits.taskListMaxPageSize)
+    : limits.taskListDefaultPageSize;
+  const state = c.req.query('state')?.trim();
+  const binds: unknown[] = [];
+  const where = state ? 'WHERE state = ?' : '';
+  if (state) binds.push(state);
+  binds.push(limit);
+
+  const rows = await c.env.DATABASE.prepare(
+    `
+      SELECT task_id, project_id, user_id, provider, credential_domain_key,
+        provider_domain_key, scope_key, requested_vm_size, requested_vm_location,
+        state, reason, selected_node_id, inflight_node_id, fencing_token,
+        attempt_count, next_retry_at, wait_deadline_at, provider_category,
+        provider_code, provider_status_code, provider_message, enqueued_at,
+        claimed_at, last_evaluated_at, completed_at, updated_at
+      FROM vm_task_admissions
+      ${where}
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `
+  )
+    .bind(...binds)
+    .all<Record<string, unknown>>();
+
+  return c.json({ admissions: rows.results ?? [], limit });
+});
+
+/**
+ * GET /api/admin/vm-admissions/:taskId - Full admission/lease/capacity diagnostics.
+ */
+adminRoutes.get('/vm-admissions/:taskId', async (c) => {
+  const { taskId } = c.req.param();
+  const diagnostics = await getVmAdmissionDiagnostics(c.env, taskId);
+  if (!diagnostics.admission) throw errors.notFound('VM admission');
+  return c.json({ diagnostics });
+});
+
+/**
  * GET /api/admin/tasks/recent-failures - List recently failed tasks with error details
  *
  * Returns the most recent failed tasks for debugging delegation issues.
@@ -245,6 +306,96 @@ adminRoutes.get('/tasks/recent-failures', async (c) => {
     .limit(limit);
 
   return c.json({ tasks: failures });
+});
+
+/**
+ * GET /api/admin/project-data/storage - Read latest ProjectData storage telemetry.
+ *
+ * Bounded D1 query only. Force-measure a specific project through the POST
+ * endpoint when the row is missing or stale.
+ */
+adminRoutes.get('/project-data/storage', async (c) => {
+  const status = c.req.query('status')?.trim();
+  if (status && !PROJECT_DATA_STORAGE_STATUSES.has(status)) {
+    throw errors.badRequest('status must be ok, notice, warning, critical, or degraded');
+  }
+
+  const projectId = c.req.query('projectId')?.trim();
+  const limitParam = c.req.query('limit');
+  const parsedLimit = limitParam ? Number.parseInt(limitParam, 10) : DEFAULT_STORAGE_TELEMETRY_LIMIT;
+  if (
+    !Number.isSafeInteger(parsedLimit) ||
+    parsedLimit < 1 ||
+    parsedLimit > MAX_STORAGE_TELEMETRY_LIMIT
+  ) {
+    throw errors.badRequest(`limit must be between 1 and ${MAX_STORAGE_TELEMETRY_LIMIT}`);
+  }
+
+  const filters: string[] = [];
+  const params: Array<string | number> = [];
+  if (status) {
+    filters.push('t.status = ?');
+    params.push(status);
+  }
+  if (projectId) {
+    filters.push('t.project_id = ?');
+    params.push(projectId);
+  }
+
+  const whereClause = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
+  const result = await c.env.DATABASE.prepare(
+    `SELECT
+       t.project_id,
+       p.name AS project_name,
+       p.repository AS repository,
+       t.measured_at,
+       t.database_size_bytes,
+       t.limit_bytes,
+       t.usage_ratio,
+       t.status,
+       t.last_alarm_at,
+       t.last_alert_at,
+       t.last_alert_status,
+       t.last_purge_at,
+       t.last_purge_reason,
+       t.last_purge_rows,
+       t.last_purge_database_size_bytes,
+       t.last_error,
+       t.updated_at
+     FROM project_data_storage_telemetry t
+     LEFT JOIN projects p ON p.id = t.project_id
+     ${whereClause}
+     ORDER BY t.usage_ratio DESC, t.measured_at DESC
+     LIMIT ?`
+  )
+    .bind(...params, parsedLimit)
+    .all();
+
+  return c.json({ telemetry: result.results ?? [] });
+});
+
+/**
+ * POST /api/admin/project-data/storage/:projectId/measure - Force a measurement.
+ */
+adminRoutes.post('/project-data/storage/:projectId/measure', async (c) => {
+  const { projectId } = c.req.param();
+  if (!projectId) throw errors.badRequest('projectId is required');
+  const telemetry = await measureProjectDataStorage(c.env, projectId);
+  return c.json({ telemetry });
+});
+
+/**
+ * POST /api/admin/project-data/storage/:projectId/emergency-purge
+ *
+ * Explicit superadmin-only recovery path. Deletes only bounded batches of
+ * oldest ProjectData event-log rows (activity_events and acp_session_events).
+ */
+adminRoutes.post('/project-data/storage/:projectId/emergency-purge', async (c) => {
+  const { projectId } = c.req.param();
+  if (!projectId) throw errors.badRequest('projectId is required');
+  const body = await parseOptionalBody(c.req.raw, ProjectDataStorageEmergencyPurgeSchema, {});
+  const result = await runProjectDataStorageEmergencyPurge(c.env, projectId, body);
+  return c.json({ result });
 });
 
 

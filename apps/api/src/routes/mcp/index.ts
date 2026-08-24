@@ -26,6 +26,14 @@ import {
   MCP_TOOLS,
   METHOD_NOT_FOUND,
 } from './_helpers';
+import {
+  handleCreateMessageCommentThread,
+  handleGetMessageCommentThread,
+  handleListMessageCommentThreads,
+  handleReopenMessageCommentThread,
+  handleReplyToMessageCommentThread,
+  handleResolveMessageCommentThread,
+} from './comment-tools';
 import { handleBuildAndPublish, handleGetPublishStatus } from './compose-publish-tools';
 import { handleGetDeploymentGuide } from './deployment-guide-tools';
 import {
@@ -49,6 +57,12 @@ import {
   handleUnlinkIdea,
   handleUpdateIdea,
 } from './idea-tools';
+import {
+  handleClaimIncident,
+  handleGetIncident,
+  handleListIncidentQueue,
+  handleResolveIncident,
+} from './incident-tools';
 import { handleGetInstructions, handleRequestHumanInput } from './instruction-tools';
 import {
   handleAddKnowledge,
@@ -63,6 +77,10 @@ import {
   handleSearchKnowledge,
   handleUpdateKnowledge,
 } from './knowledge-tools';
+import {
+  handleCreateLibraryFileCommentThread,
+  handleListLibraryFileCommentThreads,
+} from './library-file-comment-tools';
 import {
   handleDisplayFromLibrary,
   handleDownloadLibraryFile,
@@ -135,6 +153,7 @@ import {
   handleSearchTasks,
   handleUpdateTaskStatus,
 } from './task-tools';
+import { handleWaitForSubtasks } from './task-wait-tools';
 import {
   handleCreateTrigger,
   handleDeleteTrigger,
@@ -295,6 +314,8 @@ mcpRoutes.post('/', async (c) => {
             }
             return c.json(await handleDispatchTask(requestId, toolArgs, tokenData, c.env, execCtx));
           }
+          case 'wait_for_subtasks':
+            return c.json(await handleWaitForSubtasks(requestId, toolArgs, tokenData, c.env));
           // ─── Durable messaging tools ──────────────────────────────────
           case 'send_durable_message':
             return c.json(await handleSendDurableMessage(requestId, toolArgs, tokenData, c.env));
@@ -302,6 +323,38 @@ mcpRoutes.post('/', async (c) => {
             return c.json(await handleGetPendingMessages(requestId, toolArgs, tokenData, c.env));
           case 'ack_message':
             return c.json(await handleAckMessage(requestId, toolArgs, tokenData, c.env));
+          case 'list_message_comment_threads':
+            return c.json(
+              await handleListMessageCommentThreads(requestId, toolArgs, tokenData, c.env)
+            );
+          case 'get_message_comment_thread':
+            return c.json(
+              await handleGetMessageCommentThread(requestId, toolArgs, tokenData, c.env)
+            );
+          case 'create_message_comment_thread':
+            return c.json(
+              await handleCreateMessageCommentThread(requestId, toolArgs, tokenData, c.env)
+            );
+          case 'reply_to_message_comment_thread':
+            return c.json(
+              await handleReplyToMessageCommentThread(requestId, toolArgs, tokenData, c.env)
+            );
+          case 'resolve_message_comment_thread':
+            return c.json(
+              await handleResolveMessageCommentThread(requestId, toolArgs, tokenData, c.env)
+            );
+          case 'reopen_message_comment_thread':
+            return c.json(
+              await handleReopenMessageCommentThread(requestId, toolArgs, tokenData, c.env)
+            );
+          case 'list_library_file_comment_threads':
+            return c.json(
+              await handleListLibraryFileCommentThreads(requestId, toolArgs, tokenData, c.env)
+            );
+          case 'create_library_file_comment_thread':
+            return c.json(
+              await handleCreateLibraryFileCommentThread(requestId, toolArgs, tokenData, c.env)
+            );
           case 'send_message_to_subtask':
             return c.json(await handleSendMessageToSubtask(requestId, toolArgs, tokenData, c.env));
           case 'stop_subtask':
@@ -418,6 +471,15 @@ mcpRoutes.post('/', async (c) => {
             return c.json(await handleUpdateTrigger(requestId, toolArgs, tokenData, c.env));
           case 'delete_trigger':
             return c.json(await handleDeleteTrigger(requestId, toolArgs, tokenData, c.env));
+          // ─── Private incident backlog tools ───────────────────────────
+          case 'list_incident_queue':
+            return c.json(await handleListIncidentQueue(requestId, toolArgs, tokenData, c.env));
+          case 'get_incident':
+            return c.json(await handleGetIncident(requestId, toolArgs, tokenData, c.env));
+          case 'claim_incident':
+            return c.json(await handleClaimIncident(requestId, toolArgs, tokenData, c.env));
+          case 'resolve_incident':
+            return c.json(await handleResolveIncident(requestId, toolArgs, tokenData, c.env));
           // ─── Agent profile tools ──────────────────────────────────────
           case 'list_agent_profiles':
             return c.json(await handleListAgentProfiles(requestId, toolArgs, tokenData, c.env));

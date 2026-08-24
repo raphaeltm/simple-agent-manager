@@ -194,7 +194,7 @@ func TestErrorActivityIncludesRedactedStatusError(t *testing.T) {
 	})
 	host.mu.Lock()
 	host.agentType = "openai-codex"
-	host.status = HostError
+	host.setStatusLocked(HostError)
 	host.statusErr = "ACP NewSession failed: api_key=sk-testsecret1234567890"
 	host.mu.Unlock()
 

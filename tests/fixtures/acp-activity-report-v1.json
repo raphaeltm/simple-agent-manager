@@ -1,0 +1,55 @@
+{
+  "description": "Shared cross-boundary contract fixture for the ACP session activity report. The vm-agent SERIALIZES this shape (packages/vm-agent/internal/acp/session_host_reporting.go:activityPayload) and the Worker VALIDATES it (apps/api/src/schemas/acp-sessions.ts:AcpSessionActivityReportSchema). Both sides consume this same file so a rename on either side fails a test instead of silently dropping the field at runtime. See .claude/rules/23-cross-boundary-contract-tests.md.",
+  "cases": [
+    {
+      "name": "harness_work_active",
+      "comment": "Full harness-background-work report: the payload that defers session sleep.",
+      "payload": {
+        "activity": "idle",
+        "nodeId": "01K0000000000000000000NODE",
+        "restartCount": 0,
+        "agentType": "claude-code",
+        "runtimeWorkState": "active",
+        "runtimeWorkCount": 2,
+        "runtimeWorkSource": "claude_sdk",
+        "runtimeWorkProgressAt": 1786961000000
+      }
+    },
+    {
+      "name": "harness_work_settling",
+      "comment": "One-shot finite settling lease emitted when the active set drains.",
+      "payload": {
+        "activity": "idle",
+        "nodeId": "01K0000000000000000000NODE",
+        "restartCount": 1,
+        "runtimeWorkState": "settling",
+        "runtimeWorkCount": 0,
+        "runtimeWorkSource": "claude_sdk",
+        "runtimeWorkProgressAt": 1786961500000
+      }
+    },
+    {
+      "name": "harness_work_inactive",
+      "comment": "Explicit inactive publish on process detach.",
+      "payload": {
+        "activity": "idle",
+        "nodeId": "01K0000000000000000000NODE",
+        "restartCount": 0,
+        "runtimeWorkState": "inactive",
+        "runtimeWorkCount": 0,
+        "runtimeWorkSource": "claude_sdk",
+        "runtimeWorkProgressAt": 1786962000000
+      }
+    },
+    {
+      "name": "legacy_no_harness_fields",
+      "comment": "Backward compatibility: an older vm-agent with no harness support omits every runtimeWork* field. Must still validate.",
+      "payload": {
+        "activity": "prompting",
+        "nodeId": "01K0000000000000000000NODE",
+        "restartCount": 0,
+        "promptStartedAt": 1786960000000
+      }
+    }
+  ]
+}

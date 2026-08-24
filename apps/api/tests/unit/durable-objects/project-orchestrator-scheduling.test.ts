@@ -75,6 +75,8 @@ interface MockTaskRow extends Record<string, unknown> {
   scheduler_state: string | null;
   mission_id: string;
   updated_at: string;
+  chat_session_id?: string | null;
+  activeAdmission?: boolean;
 }
 
 interface MockDependencyRow {
@@ -185,7 +187,11 @@ function makeMockEnv(
             if (q.includes('SCHEDULER_STATE') && q.includes('SCHEDULABLE')) {
               return {
                 results: tasks.filter(
-                  (task) => task.scheduler_state === 'schedulable' && task.status === 'queued'
+                  (task) =>
+                    task.scheduler_state === 'schedulable' &&
+                    task.status === 'queued' &&
+                    !task.chat_session_id &&
+                    !task.activeAdmission
                 ),
               };
             }
@@ -199,8 +205,11 @@ function makeMockEnv(
             const q = query.trim().toUpperCase();
             // Active count
             if (q.includes('COUNT(*)')) {
-              const active = tasks.filter((task) =>
-                ['in_progress', 'delegated', 'provisioning', 'running'].includes(task.status)
+              const active = tasks.filter(
+                (task) =>
+                  ['in_progress', 'delegated'].includes(task.status) ||
+                  (task.status === 'queued' && !!task.chat_session_id) ||
+                  !!task.activeAdmission
               );
               return { cnt: active.length };
             }
@@ -272,6 +281,8 @@ function makeTask(overrides: Partial<MockTaskRow> & { id: string }): MockTaskRow
     scheduler_state: 'pending',
     mission_id: 'mission-1',
     updated_at: new Date().toISOString(),
+    chat_session_id: null,
+    activeAdmission: false,
     ...overrides,
   };
 }
@@ -343,6 +354,56 @@ describe('Scheduling Cycle — Auto-Dispatch', () => {
     expect(updateCalls.length).toBeGreaterThan(0);
   });
 
+  it('does not re-dispatch queued VM admission waiters and counts them active', async () => {
+    const sql = makeSqlStorage({
+      orchestrator_missions: [
+        { mission_id: 'mission-1', status: 'active', registered_at: Date.now() },
+      ],
+    });
+
+    const { env, startTaskRunnerCalls, sessionsCreated } = makeMockEnv({
+      tasks: [
+        makeTask({
+          id: 'task-admission-waiter',
+          status: 'queued',
+          scheduler_state: 'schedulable',
+          chat_session_id: 'session-existing',
+          activeAdmission: true,
+          title: 'Already waiting',
+          description: null,
+          user_id: 'user-1',
+          project_id: 'proj-1',
+          output_branch: null,
+          dispatch_depth: 0,
+          priority: 10,
+        }),
+        makeTask({
+          id: 'task-next',
+          status: 'queued',
+          scheduler_state: 'schedulable',
+          title: 'Next task',
+          description: null,
+          user_id: 'user-1',
+          project_id: 'proj-1',
+          output_branch: null,
+          dispatch_depth: 0,
+          priority: 0,
+        }),
+      ],
+    });
+
+    await runSchedulingCycle(sql, env, 'proj-1', {
+      ...config,
+      maxActiveTasksPerMission: 1,
+      maxDispatchesPerCycle: 2,
+    });
+
+    expect(sessionsCreated).toHaveLength(0);
+    expect(startTaskRunnerCalls).toHaveLength(0);
+    const decisions = getDecisionInserts(sql);
+    expect(decisions.some((call) => String(call[5]).includes('concurrency limit'))).toBe(true);
+  });
+
   it('skips scheduling when no active missions exist', async () => {
     const sql = makeSqlStorage({
       orchestrator_missions: [],
@@ -362,12 +423,12 @@ describe('Scheduling Cycle — Auto-Dispatch', () => {
       ],
     });
 
-    // 5 running tasks = at concurrency limit (default maxActiveTasksPerMission = 5)
+    // 5 active tasks = at concurrency limit (default maxActiveTasksPerMission = 5)
     const tasks = [
       ...Array.from({ length: 5 }, (_, i) =>
         makeTask({
-          id: `running-${i}`,
-          status: 'running',
+          id: `active-${i}`,
+          status: 'in_progress',
           scheduler_state: 'running',
         })
       ),

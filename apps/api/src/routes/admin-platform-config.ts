@@ -15,8 +15,27 @@ const adminPlatformConfigRoutes = new Hono<{ Bindings: Env }>();
 
 adminPlatformConfigRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
 
+async function assertFeedbackProjectSelection(
+  env: Env,
+  userId: string,
+  projectId: string
+): Promise<void> {
+  const row = await env.DATABASE.prepare(
+    `SELECT p.id
+     FROM projects p
+     INNER JOIN project_members pm ON pm.project_id = p.id
+     WHERE p.id = ? AND pm.user_id = ? AND pm.status = 'active'
+     LIMIT 1`
+  )
+    .bind(projectId, userId)
+    .first<{ id: string }>();
+  if (!row) {
+    throw errors.badRequest('Feedback project must exist and be a project you can access');
+  }
+}
+
 adminPlatformConfigRoutes.get('/', async (c) => {
-  return c.json({ status: await getPlatformConfigStatus(c.env) });
+  return c.json({ status: await getPlatformConfigStatus(c.env, { userId: getUserId(c) }) });
 });
 
 adminPlatformConfigRoutes.put(
@@ -24,20 +43,24 @@ adminPlatformConfigRoutes.put(
   jsonValidator(UpdatePlatformIntegrationConfigSchema),
   async (c) => {
     const { config } = c.req.valid('json');
+    const userId = getUserId(c);
     if (config.googleInfrastructure) {
-      await enforceCredentialMutationRateLimit(
-        c.env,
-        getUserId(c),
-        'google-infra-oauth',
-      );
+      await enforceCredentialMutationRateLimit(c.env, userId, 'google-infra-oauth');
+    }
+    if (config.feedback?.remove && config.feedback.projectId?.trim()) {
+      throw errors.badRequest('Choose a feedback project or clear the runtime selection, not both');
+    }
+    const feedbackProjectId = config.feedback?.projectId?.trim();
+    if (feedbackProjectId) {
+      await assertFeedbackProjectSelection(c.env, userId, feedbackProjectId);
     }
     const validation = await validatePlatformIntegrationInput(c.env, config);
     if (!validation.ok) {
       throw errors.badRequest('Platform configuration is invalid', { errors: validation.errors });
     }
-    await savePlatformIntegrationConfig(c.env, config, getUserId(c));
-    return c.json({ status: await getPlatformConfigStatus(c.env) });
-  },
+    await savePlatformIntegrationConfig(c.env, config, userId);
+    return c.json({ status: await getPlatformConfigStatus(c.env, { userId }) });
+  }
 );
 
 export { adminPlatformConfigRoutes };

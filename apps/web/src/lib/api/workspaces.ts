@@ -63,6 +63,22 @@ export async function stopWorkspace(id: string): Promise<{ status: string }> {
   });
 }
 
+export async function sleepWorkspace(id: string): Promise<{
+  status: 'sleeping';
+  workspaceId: string;
+  chatSessionId: string;
+  snapshotExpiresAt: string;
+}> {
+  return request<{
+    status: 'sleeping';
+    workspaceId: string;
+    chatSessionId: string;
+    snapshotExpiresAt: string;
+  }>(`/api/workspaces/${id}/sleep`, {
+    method: 'POST',
+  });
+}
+
 export async function restartWorkspace(id: string): Promise<{ status: string }> {
   return request<{ status: string }>(`/api/workspaces/${id}/restart`, {
     method: 'POST',
@@ -121,13 +137,15 @@ export async function listWorkspaceEvents(
 export async function listWorkspacePorts(
   workspaceUrl: string,
   workspaceId: string,
-  token: string
+  token: string,
+  signal?: AbortSignal
 ): Promise<DetectedPort[]> {
   const params = new URLSearchParams();
   params.set('token', token);
 
   const res = await fetch(
-    `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/ports?${params.toString()}`
+    `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/ports?${params.toString()}`,
+    signal ? { signal } : undefined
   );
   if (!res.ok) {
     const text = await res.text().catch(() => 'Unknown error');

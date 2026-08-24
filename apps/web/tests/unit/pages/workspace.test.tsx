@@ -33,6 +33,12 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
+// `useQueryScope()` reads the authenticated identity, and every migrated query
+// is keyed by it. Without a provider `useAuth` throws, so supply a stable identity.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
+}));
+
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   ApiClientError: class ApiClientError extends Error {
@@ -150,6 +156,7 @@ vi.mock('../../../src/config/features', () => ({
 }));
 
 import { Workspace } from '../../../src/pages/workspace';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 function LocationProbe() {
   const location = useLocation();
@@ -175,7 +182,7 @@ function renderWorkspace(initialEntry = '/workspaces/ws-123', includeProbe = fal
         />
       </Routes>
     </MemoryRouter>
-  );
+  , { wrapper: QueryTestWrapper });
 }
 
 function setMobileViewport() {

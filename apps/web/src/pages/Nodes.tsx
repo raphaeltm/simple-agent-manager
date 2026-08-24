@@ -1,10 +1,4 @@
-import type {
-  CredentialProvider,
-  NodeResponse,
-  ProviderCatalog,
-  VMSize,
-  WorkspaceResponse,
-} from '@simple-agent-manager/shared';
+import type { CredentialProvider, VMSize, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_LOCATION, PROVIDER_LABELS } from '@simple-agent-manager/shared';
 import {
   Alert,
@@ -22,26 +16,20 @@ import { useNavigate } from 'react-router';
 
 import { NodeCard } from '../components/node/NodeCard';
 import { VmSizeCard } from '../components/vm/VmSizeCard';
+import { useQueryScope } from '../hooks/useQueryScope';
+import { createNode, deleteNode, stopNode } from '../lib/api';
+import { NODE_LIST_POLL_MS, WORKSPACE_LIST_POLL_MS } from '../lib/poll-intervals';
 import {
-  createNode,
-  deleteNode,
-  getProviderCatalog,
-  listNodes,
-  listWorkspaces,
-  stopNode,
-} from '../lib/api';
-import { workspacesKeys } from './Workspaces';
-
-/** Stable query key factory for node-related queries. */
-export const nodesKeys = {
-  all: ['nodes'] as const,
-  list: () => ['nodes', 'list'] as const,
-  catalog: () => ['nodes', 'catalog'] as const,
-};
+  nodeListQueryOptions,
+  nodeQueryKeys,
+  providerCatalogQueryOptions,
+  workspaceListQueryOptions,
+} from '../lib/query-options';
 
 export function Nodes() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const queryScope = useQueryScope();
 
   const [creating, setCreating] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -58,25 +46,24 @@ export function Nodes() {
     isFetching: nodesFetching,
     isError: nodesError,
     error: nodesQueryError,
-  } = useQuery<NodeResponse[]>({
-    queryKey: nodesKeys.list(),
-    queryFn: listNodes,
-    refetchInterval: 10_000,
+  } = useQuery({
+    ...nodeListQueryOptions(queryScope),
+    enabled: Boolean(queryScope),
+    refetchInterval: NODE_LIST_POLL_MS > 0 ? NODE_LIST_POLL_MS : false,
   });
 
-  const { data: workspaces } = useQuery<WorkspaceResponse[]>({
-    queryKey: workspacesKeys.list(undefined),
-    queryFn: () => listWorkspaces(),
-    refetchInterval: 10_000,
+  const { data: workspaces } = useQuery({
+    ...workspaceListQueryOptions(queryScope),
+    enabled: Boolean(queryScope),
+    refetchInterval: WORKSPACE_LIST_POLL_MS > 0 ? WORKSPACE_LIST_POLL_MS : false,
   });
 
-  const { data: catalogData } = useQuery<{ catalogs: ProviderCatalog[] }>({
-    queryKey: nodesKeys.catalog(),
-    queryFn: getProviderCatalog,
-    staleTime: 60_000, // catalog rarely changes; keep longer
+  const { data: catalogData } = useQuery({
+    ...providerCatalogQueryOptions(queryScope),
+    enabled: Boolean(queryScope),
   });
 
-  const catalogs = catalogData?.catalogs ?? [];
+  const catalogs = catalogData ?? [];
 
   // Auto-select first provider once catalog loads, if nothing selected yet
   const effectiveProvider = selectedProvider || catalogs[0]?.provider || '';
@@ -130,7 +117,7 @@ export function Nodes() {
   const handleStopNode = async (id: string) => {
     try {
       await stopNode(id);
-      void queryClient.invalidateQueries({ queryKey: nodesKeys.all });
+      void queryClient.invalidateQueries({ queryKey: nodeQueryKeys.all(queryScope) });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to stop node');
     }
@@ -151,7 +138,7 @@ export function Nodes() {
     }
     try {
       await deleteNode(id);
-      void queryClient.invalidateQueries({ queryKey: nodesKeys.all });
+      void queryClient.invalidateQueries({ queryKey: nodeQueryKeys.all(queryScope) });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete node');
     }

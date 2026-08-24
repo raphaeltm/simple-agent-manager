@@ -2,6 +2,7 @@ package acp
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"io"
 	"strings"
@@ -433,5 +434,61 @@ func TestOrderedPipe_PermissionRequestDoesNotBlockSessionUpdate(t *testing.T) {
 	}
 	if received[2] != "session/update" {
 		t.Errorf("line 2: expected session/update, got %s", received[2])
+	}
+}
+
+func TestOrderedPipe_ExtensionMethodCannotReleasePendingSessionUpdate(t *testing.T) {
+	t.Parallel()
+
+	extension := `{"jsonrpc":"2.0","method":"_claude/sdkMessage","params":{"sessionId":"sdk-session","message":{"type":"system","subtype":"task_started","session_id":"sdk-session","task_id":"one"}}}`
+	input := strings.Join([]string{
+		makeNotification("session/update", 1),
+		extension,
+		makeNotification("session/update", 2),
+	}, "\n") + "\n"
+
+	processedCh := make(chan struct{}, 1)
+	done := make(chan struct{})
+	defer close(done)
+	reader := newOrderedPipe(strings.NewReader(input), processedCh, done, time.Second)
+	scanner := bufio.NewScanner(reader)
+
+	if !scanner.Scan() {
+		t.Fatal("first session/update was not delivered")
+	}
+	if !scanner.Scan() {
+		t.Fatal("intervening extension method was not delivered")
+	}
+
+	host := NewSessionHost(SessionHostConfig{})
+	host.mu.Lock()
+	host.setSessionIDLocked("sdk-session")
+	host.mu.Unlock()
+	host.resetHarnessWorkForAgent("claude-code")
+	client := &sessionHostClient{host: host, processedCh: processedCh}
+	if _, err := client.HandleExtensionMethod(
+		context.Background(),
+		claudeSDKMessageMethod,
+		json.RawMessage(`{"sessionId":"sdk-session","message":{"type":"system","subtype":"task_started","session_id":"sdk-session","task_id":"one"}}`),
+	); err != nil {
+		t.Fatalf("HandleExtensionMethod: %v", err)
+	}
+
+	next := make(chan bool, 1)
+	go func() { next <- scanner.Scan() }()
+	select {
+	case <-next:
+		t.Fatal("extension method released the next session/update before the prior update completed")
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	client.signalProcessed()
+	select {
+	case ok := <-next:
+		if !ok {
+			t.Fatal("second session/update was not delivered after the prior update completed")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for second session/update")
 	}
 }

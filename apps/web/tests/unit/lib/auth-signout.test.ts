@@ -22,6 +22,13 @@ vi.mock('../../../src/lib/api/notifications', () => ({
   unsubscribeWebPush: mockUnsubscribeWebPush,
 }));
 
+// signOut dynamically imports this module to keep idb-keyval out of the eager
+// bundle; mocking it here proves the wiring survives that indirection.
+const mockRemoveAllPersistedQueryCaches = vi.fn();
+vi.mock('../../../src/lib/query-persistence', () => ({
+  removeAllPersistedQueryCaches: mockRemoveAllPersistedQueryCaches,
+}));
+
 describe('signOut', () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -36,6 +43,7 @@ describe('signOut', () => {
       writable: true,
     });
     mockUnsubscribeWebPush.mockResolvedValue(undefined);
+    mockRemoveAllPersistedQueryCaches.mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'serviceWorker', {
       configurable: true,
       value: {
@@ -103,5 +111,38 @@ describe('signOut', () => {
     expect(mockUnsubscribeWebPush.mock.invocationCallOrder[0]).toBeLessThan(
       mockSignOut.mock.invocationCallOrder[0]!
     );
+  });
+
+  it('sweeps the persisted query cache before the sign-out request', async () => {
+    // Nothing previously proved signOut() actually calls this — the sweep function
+    // was unit-tested in isolation, so deleting the call site would have been
+    // invisible. That is precisely the regression this whole feature guards against.
+    const { signOut } = await import('../../../src/lib/auth');
+
+    await signOut();
+
+    expect(mockRemoveAllPersistedQueryCaches).toHaveBeenCalledOnce();
+    expect(mockRemoveAllPersistedQueryCaches.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockSignOut.mock.invocationCallOrder[0]!
+    );
+  });
+
+  it('sweeps the persisted query cache even when the sign-out request fails', async () => {
+    mockSignOut.mockRejectedValueOnce(new Error('network down'));
+    const { signOut } = await import('../../../src/lib/auth');
+
+    await expect(signOut()).rejects.toThrow('network down');
+
+    expect(mockRemoveAllPersistedQueryCaches).toHaveBeenCalledOnce();
+  });
+
+  it('completes sign-out even when the persisted-cache sweep rejects', async () => {
+    // The sweep is best-effort: a storage failure must not block sign-out.
+    mockRemoveAllPersistedQueryCaches.mockRejectedValueOnce(new Error('IndexedDB gone'));
+    const { signOut } = await import('../../../src/lib/auth');
+
+    await signOut();
+
+    expect(mockSignOut).toHaveBeenCalledOnce();
   });
 });

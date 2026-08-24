@@ -6,9 +6,19 @@
  */
 import { log } from '../../lib/logger';
 import { persistError, redactSensitiveData } from '../../services/observability';
-import { runTaskTerminalTransitionHooks } from '../../services/task-terminal-transition-hooks';
+import { restoreSessionRecoveryHandoff } from '../../services/session-recovery-authority';
+import {
+  createTaskWaitTerminalTransitionHook,
+  runTaskTerminalTransitionHooks,
+} from '../../services/task-terminal-transition-hooks';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
+import {
+  cancelVmTaskAdmission,
+  wakeVmAdmissionWaiters,
+} from '../../services/vm-admission-control';
+import { releaseClaimedWarmNode } from './node-selection';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
+import { notifyWakeSettled } from './wake-progress-notifier';
 
 // =========================================================================
 // Session linking
@@ -157,12 +167,48 @@ export async function transitionToInProgress(
   rc: TaskRunnerContext
 ): Promise<void> {
   const now = new Date().toISOString();
+  const recoverySourceTaskId = state.config.recoverySourceTaskId ?? null;
+  const recoveryChatSessionId = state.config.resumeSnapshotChatSessionId ?? null;
 
-  // Optimistic lock: only transition if still delegated
+  // Optimistic lock: only transition if still delegated. Guarded snapshot
+  // recovery also proves the exact source and snapshot claim are live in the
+  // same D1 statement that commits the replacement to in_progress.
   const result = await rc.env.DATABASE.prepare(
-    `UPDATE tasks SET status = 'in_progress', started_at = ?, execution_step = 'running', updated_at = ? WHERE id = ? AND status = 'delegated'`
+    `UPDATE tasks
+        SET status = 'in_progress', started_at = ?, execution_step = 'running', updated_at = ?
+      WHERE id = ? AND status = 'delegated'
+        AND (
+          ? IS NULL
+          OR EXISTS (
+            SELECT 1
+              FROM tasks recovery
+              JOIN tasks source
+                ON source.id = recovery.recovery_source_task_id
+               AND source.project_id = recovery.project_id
+              JOIN session_snapshots snapshot
+                ON snapshot.chat_session_id = recovery.chat_session_id
+               AND snapshot.project_id = recovery.project_id
+               AND snapshot.recovery_task_id = recovery.id
+             WHERE recovery.id = ?
+               AND recovery.recovery_source_task_id = ?
+               AND recovery.project_id = ?
+               AND recovery.chat_session_id = ?
+               AND recovery.triggered_by = 'session-recovery'
+               AND source.status NOT IN ('completed', 'failed', 'cancelled')
+               AND snapshot.recovery_status IN ('waking', 'restored')
+          )
+        )`
   )
-    .bind(now, now, state.taskId)
+    .bind(
+      now,
+      now,
+      state.taskId,
+      recoverySourceTaskId,
+      state.taskId,
+      recoverySourceTaskId,
+      state.projectId,
+      recoveryChatSessionId
+    )
     .run();
 
   if (!result.meta.changes || result.meta.changes === 0) {
@@ -175,12 +221,38 @@ export async function transitionToInProgress(
       authoritativeStatus: authoritative?.status ?? null,
     });
     if (authoritative?.status === 'in_progress') {
+      // Another runner already committed the handoff. The wake is still over from
+      // the watcher's point of view, so clear the banner here too.
+      rc.ctx.waitUntil(
+        notifyWakeSettled({
+          env: rc.env,
+          projectId: state.projectId,
+          chatSessionId: recoveryChatSessionId,
+          status: 'restored',
+        })
+      );
       state.currentStep = 'running';
       state.completed = true;
       await rc.ctx.storage.put('state', state);
       return;
     }
     if (!authoritative || ['completed', 'failed', 'cancelled'].includes(authoritative.status)) {
+      if (recoveryChatSessionId) {
+        await failRecoveryLifecycle(
+          state,
+          'Session recovery authority was revoked before agent handoff committed.',
+          rc
+        );
+        // A wake that will never finish must not leave a spinner running.
+        rc.ctx.waitUntil(
+          notifyWakeSettled({
+            env: rc.env,
+            projectId: state.projectId,
+            chatSessionId: recoveryChatSessionId,
+            status: 'failed',
+          })
+        );
+      }
       state.completed = true;
       await rc.ctx.storage.put('state', state);
       return;
@@ -233,6 +305,19 @@ export async function transitionToInProgress(
     }
   }
 
+  // The agent session is live, so the wake is over. This is the ONLY terminal
+  // emit on the happy path: the raw guarded UPDATE above bypasses
+  // `updateD1ExecutionStep`, and the alarm dispatcher treats `running` as a
+  // terminal no-op step, so the intermediate-phase choke point never fires here.
+  rc.ctx.waitUntil(
+    notifyWakeSettled({
+      env: rc.env,
+      projectId: state.projectId,
+      chatSessionId: recoveryChatSessionId,
+      status: 'restored',
+    })
+  );
+
   state.currentStep = 'running';
   state.completed = true;
   await rc.ctx.storage.put('state', state);
@@ -268,6 +353,19 @@ export async function failTask(
     currentStatus === 'completed' ||
     currentStatus === 'cancelled'
   ) {
+    if (state.config.resumeSnapshotChatSessionId) {
+      await failRecoveryLifecycle(state, errorMessage, rc);
+    }
+    await cancelVmTaskAdmission(
+      rc.env,
+      state.taskId,
+      currentStatus === 'cancelled' ? 'cancelled' : 'task_failed'
+    ).catch((err) => {
+      log.warn('task_runner_do.admission_terminal_cleanup_failed', {
+        taskId: state.taskId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
     // Already terminal — skip
     state.completed = true;
     await rc.ctx.storage.put('state', state);
@@ -285,6 +383,9 @@ export async function failTask(
     .run();
 
   if (!failureTransition.meta.changes) {
+    if (state.config.resumeSnapshotChatSessionId) {
+      await failRecoveryLifecycle(state, errorMessage, rc);
+    }
     state.completed = true;
     await rc.ctx.storage.put('state', state);
     return;
@@ -302,15 +403,18 @@ export async function failTask(
     .bind(ulid(), state.taskId, currentStatus || 'queued', errorMessage, now)
     .run();
 
-  await runTaskTerminalTransitionHooks({
-    taskId: state.taskId,
-    projectId: state.projectId,
-    parentTaskId: task?.parent_task_id ?? null,
-    status: 'failed',
-    reason: errorMessage,
-    occurredAt: now,
-    source: 'task_runner.fail_task',
-  });
+  await runTaskTerminalTransitionHooks(
+    {
+      taskId: state.taskId,
+      projectId: state.projectId,
+      parentTaskId: task?.parent_task_id ?? null,
+      status: 'failed',
+      reason: errorMessage,
+      occurredAt: now,
+      source: 'task_runner.fail_task',
+    },
+    [createTaskWaitTerminalTransitionHook(rc.env)]
+  );
 
   // Notify orchestrator of task failure (best-effort) — triggers scheduling cycle
   // so dependent tasks can react to the failure (e.g., unblock blocked_dependency tasks)
@@ -360,39 +464,7 @@ export async function failTask(
 
   const recoverySessionId = state.config.resumeSnapshotChatSessionId ?? null;
   if (recoverySessionId) {
-    try {
-      const { drizzle } = await import('drizzle-orm/d1');
-      const schema = await import('../../db/schema');
-      const { failSessionSnapshotRecovery } = await import('../../services/session-snapshots');
-      await failSessionSnapshotRecovery(
-        drizzle(rc.env.DATABASE, { schema }),
-        rc.env,
-        recoverySessionId,
-        state.taskId,
-        errorMessage
-      );
-    } catch (snapshotErr) {
-      log.warn('task_runner_do.session_recovery_fail_record_failed', {
-        taskId: state.taskId,
-        sessionId: recoverySessionId,
-        error: snapshotErr instanceof Error ? snapshotErr.message : String(snapshotErr),
-      });
-    }
-
-    // The failed task owns only the replacement runtime. Preserve the original
-    // conversation as sleeping so another bounded wake attempt can reuse the
-    // verified snapshot. This also compensates if ProjectData accepted the wake
-    // immediately before a later D1 recovery-commit failure.
-    try {
-      const { sleepSession } = await import('../../services/project-data');
-      await sleepSession(rc.env, state.projectId, recoverySessionId);
-    } catch (chatErr) {
-      log.warn('task_runner_do.session_recovery_resleep_failed', {
-        taskId: state.taskId,
-        sessionId: recoverySessionId,
-        error: chatErr instanceof Error ? chatErr.message : String(chatErr),
-      });
-    }
+    await failRecoveryLifecycle(state, errorMessage, rc);
   } else if (state.stepResults.chatSessionId && state.projectId) {
     // Ordinary task failures are terminal for their chat. The UI also
     // cross-references task.status, but update ProjectData for consistency.
@@ -448,6 +520,45 @@ export async function failTask(
   await rc.ctx.storage.put('state', state);
 }
 
+async function failRecoveryLifecycle(
+  state: TaskRunnerState,
+  errorMessage: string,
+  rc: TaskRunnerContext
+): Promise<void> {
+  const recoverySessionId = state.config.resumeSnapshotChatSessionId;
+  if (!recoverySessionId) return;
+
+  // Ownership restoration is a correctness boundary, not best-effort cleanup:
+  // if D1 is temporarily unavailable, let the DO alarm retry instead of
+  // completing with a terminal replacement still owning the durable chat.
+  await restoreSessionRecoveryHandoff(rc.env.DATABASE, state.taskId, recoverySessionId);
+  const { drizzle } = await import('drizzle-orm/d1');
+  const schema = await import('../../db/schema');
+  const { failSessionSnapshotRecovery } = await import('../../services/session-snapshots');
+  await failSessionSnapshotRecovery(
+    drizzle(rc.env.DATABASE, { schema }),
+    rc.env,
+    recoverySessionId,
+    state.taskId,
+    errorMessage
+  );
+
+  // The failed task owns only the replacement runtime. Preserve the original
+  // conversation as sleeping so another bounded wake attempt can reuse the
+  // verified snapshot. This also compensates if ProjectData accepted the wake
+  // immediately before a later D1 recovery-commit failure.
+  try {
+    const { sleepSession } = await import('../../services/project-data');
+    await sleepSession(rc.env, state.projectId, recoverySessionId);
+  } catch (chatErr) {
+    log.warn('task_runner_do.session_recovery_resleep_failed', {
+      taskId: state.taskId,
+      sessionId: recoverySessionId,
+      error: chatErr instanceof Error ? chatErr.message : String(chatErr),
+    });
+  }
+}
+
 // =========================================================================
 // Cleanup
 // =========================================================================
@@ -460,6 +571,33 @@ export async function cleanupOnFailure(
   rc: TaskRunnerContext
 ): Promise<void> {
   const now = new Date().toISOString();
+
+  await cancelVmTaskAdmission(rc.env, state.taskId, 'task_failed').catch((err) => {
+    log.warn('task_runner_do.cleanup.admission_cancel_failed', {
+      taskId: state.taskId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+  state.admissionScopeKey = null;
+  state.admissionLeaseToken = null;
+
+  const persistedWarmClaim = await rc.env.DATABASE.prepare(
+    `SELECT claimed_warm_node_id FROM tasks WHERE id = ?`
+  )
+    .bind(state.taskId)
+    .first<{ claimed_warm_node_id: string | null }>()
+    .catch(() => null);
+  const claimedWarmNodeId =
+    state.stepResults.claimedWarmNodeId ?? persistedWarmClaim?.claimed_warm_node_id ?? null;
+  if (claimedWarmNodeId) {
+    await releaseClaimedWarmNode(state, rc, claimedWarmNodeId).catch((error) => {
+      log.error('task_runner_do.cleanup.warm_claim_release_failed', {
+        taskId: state.taskId,
+        nodeId: claimedWarmNodeId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
 
   if (state.stepResults.workspaceId && state.stepResults.nodeId) {
     const node = await rc.env.DATABASE.prepare(
@@ -547,6 +685,23 @@ export async function cleanupOnFailure(
   // If no workspace was created (failure during provisioning), we still need
   // to mark the auto-provisioned node as warm directly via NodeLifecycle DO.
   if (state.stepResults.autoProvisioned && state.stepResults.nodeId) {
+    if (state.config.resumeSnapshotChatSessionId && !state.stepResults.workspaceId) {
+      try {
+        const { deleteNodeResourcesStrict } = await import('../../services/nodes');
+        await deleteNodeResourcesStrict(state.stepResults.nodeId, state.userId, rc.env);
+        log.info('task_runner_do.cleanup.revoked_recovery_node_destroyed', {
+          taskId: state.taskId,
+          nodeId: state.stepResults.nodeId,
+        });
+      } catch (err) {
+        log.error('task_runner_do.cleanup.revoked_recovery_node_destroy_failed', {
+          taskId: state.taskId,
+          nodeId: state.stepResults.nodeId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      return;
+    }
     if (state.stepResults.workspaceId) {
       try {
         const { cleanupTaskRun } = await import('../../services/task-runner');
@@ -578,6 +733,10 @@ export async function cleanupOnFailure(
         log.info('task_runner_do.cleanup.node_marked_warm_direct', {
           taskId: state.taskId,
           nodeId: state.stepResults.nodeId,
+        });
+        await wakeVmAdmissionWaiters(rc.env, {
+          userId: state.userId,
+          reason: 'node_marked_warm_direct',
         });
       } catch (err) {
         log.error('task_runner_do.cleanup.node_warm_failed', {

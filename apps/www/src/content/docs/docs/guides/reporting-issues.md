@@ -76,23 +76,23 @@ The feature is **hidden entirely** unless the deployment has been configured wit
 
 Reports are filed as draft Ideas in one project you nominate:
 
-```
-PLATFORM_FEEDBACK_PROJECT_ID=<project id>
-```
+1. Create or choose a project for platform feedback.
+2. Open **Admin → Integrations** (`/admin/integrations`).
+3. Choose that project under **Private feedback project** and save.
 
-Set it to a project that exists in **this deployment's** database. SAM validates the project on every check — if the variable is unset, or points at a project that doesn't exist, `GET /api/report-issue/config` returns `enabled: false` and both entry points disappear from the UI. This is deliberate: an unconfigured deployment shows no button rather than a button that errors.
+The saved runtime setting is stored in `platform_settings` and takes precedence without a redeploy. `PLATFORM_FEEDBACK_PROJECT_ID=<project id>` remains available as a bootstrap/environment fallback for first deploys and automation. SAM validates the effective project on every check — if no runtime setting or environment fallback exists, or the effective project doesn't exist, `GET /api/report-issue/config` returns `enabled: false` and both entry points disappear from the UI. This is deliberate: an unconfigured deployment shows no button rather than a button that errors.
 
 The same project also receives [automated error triage](#for-operators-automated-error-triage), so pick one you'll actually watch — a dedicated "Platform Feedback" project works well.
 
 ### Report limits
 
-| Variable                              | Default | Description                                                             |
-| ------------------------------------- | ------- | ----------------------------------------------------------------------- |
-| `PLATFORM_FEEDBACK_PROJECT_ID`        | unset   | Project that receives reports and triage Ideas. Unset ⇒ feature hidden. |
-| `REPORT_ISSUE_TITLE_MAX_LENGTH`       | `200`   | Truncation ceiling for the stored title — see below                     |
-| `REPORT_ISSUE_DESCRIPTION_MAX_LENGTH` | `5000`  | Truncation ceiling for the stored description — see below               |
-| `REPORT_ISSUE_CONTENT_MAX_LENGTH`     | `65536` | Max stored Idea body, including attached references                     |
-| `RATE_LIMIT_REPORT_ISSUE_POST`        | `20`    | Report submissions allowed per clock hour, per user                     |
+| Variable                              | Default | Description                                                                                                                        |
+| ------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `PLATFORM_FEEDBACK_PROJECT_ID`        | unset   | Bootstrap/environment fallback for the feedback project. The Admin → Integrations runtime selection is preferred and overrides it. |
+| `REPORT_ISSUE_TITLE_MAX_LENGTH`       | `200`   | Truncation ceiling for the stored title — see below                                                                                |
+| `REPORT_ISSUE_DESCRIPTION_MAX_LENGTH` | `5000`  | Truncation ceiling for the stored description — see below                                                                          |
+| `REPORT_ISSUE_CONTENT_MAX_LENGTH`     | `65536` | Max stored Idea body, including attached references                                                                                |
+| `RATE_LIMIT_REPORT_ISSUE_POST`        | `20`    | Report submissions allowed per clock hour, per user                                                                                |
 
 :::caution
 The two length variables can only **lower** the stored length — they cannot raise the limit users hit. The request schema and the dialog both enforce the built-in 200 / 5,000 caps, so `REPORT_ISSUE_DESCRIPTION_MAX_LENGTH=20000` still rejects a 5,001-character description with a `400`. Set them below the defaults to truncate more aggressively; setting them above has no effect.
@@ -100,7 +100,9 @@ The two length variables can only **lower** the stored length — they cannot ra
 
 ### How a report is stored
 
-Every report Idea is written in a three-part structure that keeps maintainer instructions separate from user-supplied text:
+Every report first enters a private grouped incident backlog keyed by a redacted content signature. Repeated reports update the same grouped incident and its existing draft Idea instead of creating one Idea per occurrence.
+
+The draft Idea body is written in a three-part structure that keeps maintainer instructions separate from user-supplied text:
 
 | Section                                          | Contents                                                                    |
 | ------------------------------------------------ | --------------------------------------------------------------------------- |
@@ -112,21 +114,32 @@ That fence matters when you point an agent at the resulting Idea. The reporter's
 
 ## For operators: automated error triage
 
-Beyond user-submitted reports, SAM files its **own** reports. Once an hour it groups recent platform errors, runs the [deployment diagnosis agent](#for-superadmins-diagnosing-errors-with-an-agent) on a representative error from each group, and writes a draft Idea into the same feedback project.
+Beyond user-submitted reports, SAM files its **own** reports. Once an hour it groups recent platform errors, runs the [deployment diagnosis agent](#for-superadmins-diagnosing-errors-with-an-agent) on a representative error from each group, and writes a grouped incident plus draft Idea into the same feedback project.
 
-Grouping is by a redacted content signature, so a recurring error updates its existing Idea instead of filing a new one every hour. A group that fails triage repeatedly is rejected rather than retried forever.
+Grouping is by a redacted content signature, so a recurring error updates its existing incident/Idea instead of filing a new one every hour. A group that fails triage repeatedly is rejected rather than retried forever. Errors emitted by tasks in the feedback project are excluded from the hourly grouping pass so an incident-handling agent cannot recursively file incidents about its own failures.
+
+The private incident backlog has its own queue state (`pending`, `dispatched`, `claimed`, `resolved`, `rejected`, `expired`). Scheduled incident triggers, when configured in the feedback project, dispatch one agent for a bounded backlog summary, not one agent per occurrence. Agents then use private MCP tools (`list_incident_queue`, `get_incident`, `claim_incident`, `resolve_incident`) to claim and terminally resolve incidents. Those tools are server-scoped to the effective feedback project setting; they return only bounded, redacted evidence and explicitly label report/log/diagnosis text as untrusted. Machine-generated feedback and diagnostics should stay private and must not be copied into public GitHub issues.
 
 There is no UI button for triage yet. A superadmin can `POST /api/admin/observability/feedback-triage` to sweep immediately rather than waiting for the next hourly run. Note that a manual sweep still only looks back over `PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES` (60 minutes by default), so it will not surface older errors — to test a fresh configuration, trigger it while a recent error is still inside that window.
 
-| Variable                                             | Default  | Description                                          |
-| ---------------------------------------------------- | -------- | ---------------------------------------------------- |
-| `PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES`            | `60`     | Lookback window for grouping recent errors           |
-| `PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT`               | `100`    | Max error rows scanned per sweep                     |
-| `PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT`               | `5`      | Max grouped candidates processed per sweep           |
-| `PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT`            | `10`     | Max error references retained per group              |
-| `PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS`              | `600000` | Claim lease before a later sweep can reclaim a group |
-| `PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES`              | `3`      | Failed attempts before a group is rejected           |
-| `PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH` | `240`    | Max characters stored for a sanitized failure reason |
+| Variable                                                | Default      | Description                                                     |
+| ------------------------------------------------------- | ------------ | --------------------------------------------------------------- |
+| `PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES`               | `60`         | Lookback window for grouping recent errors                      |
+| `PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT`                  | `100`        | Max error rows scanned per sweep                                |
+| `PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT`                  | `5`          | Max grouped candidates processed per sweep                      |
+| `PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT`               | `10`         | Max error references retained per group                         |
+| `PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS`                 | `600000`     | Claim lease before a later sweep can reclaim a group            |
+| `PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES`                 | `3`          | Failed attempts before a group is rejected                      |
+| `PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH`    | `240`        | Max characters stored for a sanitized failure reason            |
+| `PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS`      | `7200000`    | Dispatch lease before a failed trigger handoff can be reclaimed |
+| `PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS`         | `3600000`    | Agent claim lease before another task can reclaim an incident   |
+| `PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS`      | `3`          | Expired dispatch attempts before an incident is rejected        |
+| `PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS`                 | `2592000000` | Max active incident age before expiry                           |
+| `PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT`              | `5`          | Max active incident triggers inspected per sweep                |
+| `PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT`              | `10`         | Max incidents in one trigger backlog summary                    |
+| `PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT`         | `10`         | Max evidence references retained per incident                   |
+| `PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES`         | `32768`      | Max serialized evidence bytes per incident                      |
+| `PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH` | `2000`       | Max private resolution-note length                              |
 
 Automated triage and superadmin-initiated diagnosis have **separate** daily token budgets. They read the same `DEBUG_AGENT_DAILY_TOKEN_LIMIT` value but count against independent per-feature counters, so a noisy hour of triage can never eat the allowance a superadmin wants for hands-on diagnosis. Budget accordingly: with triage enabled, worst-case daily spend on diagnosis is **twice** `DEBUG_AGENT_DAILY_TOKEN_LIMIT`. To cap triage specifically, lower `PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT` or `PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT`.
 

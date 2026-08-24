@@ -54,6 +54,7 @@ export function isTaskMode(value: unknown): value is TaskMode {
  */
 export const TASK_EXECUTION_STEPS = [
   'node_selection',
+  'waiting_for_node_capacity',
   'node_provisioning',
   'node_agent_ready',
   'workspace_creation',
@@ -74,6 +75,7 @@ export function isTaskExecutionStep(value: unknown): value is TaskExecutionStep 
 /** Human-readable labels for each execution step (TDF-8). */
 export const EXECUTION_STEP_LABELS: Record<TaskExecutionStep, string> = {
   node_selection: 'Finding a server...',
+  waiting_for_node_capacity: 'Waiting for server capacity...',
   node_provisioning: 'Setting up a new server...',
   node_agent_ready: 'Waiting for server to start...',
   workspace_creation: 'Creating workspace...',
@@ -89,6 +91,44 @@ export const EXECUTION_STEP_LABELS: Record<TaskExecutionStep, string> = {
 export const EXECUTION_STEP_ORDER = Object.fromEntries(
   TASK_EXECUTION_STEPS.map((step, i) => [step, i])
 ) as Record<TaskExecutionStep, number>;
+
+/**
+ * Wake-specific wording for each execution step.
+ *
+ * A sleeping conversation is woken by a replacement TaskRunner, so its progress
+ * is reported through the same `TASK_EXECUTION_STEPS` vocabulary as any other
+ * task. The user-facing framing differs though: this is a session being restored,
+ * not a task being launched, so `EXECUTION_STEP_LABELS` ("Uploading attachments",
+ * "Waiting for follow-up") reads wrong here. Same steps, wake-shaped words.
+ *
+ * Keep this exhaustive over `TaskExecutionStep` — the `Record` type enforces it,
+ * and `packages/shared/tests/unit/wake-phase-labels.test.ts` pins it.
+ */
+export const WAKE_PHASE_LABELS: Record<TaskExecutionStep, string> = {
+  node_selection: 'Finding a server...',
+  waiting_for_node_capacity: 'Waiting for server capacity...',
+  node_provisioning: 'Provisioning a server...',
+  node_agent_ready: 'Waiting for the server to start...',
+  workspace_creation: 'Recreating your workspace...',
+  workspace_dispatch: 'Starting your workspace...',
+  workspace_ready: 'Restoring your session...',
+  attachment_transfer: 'Restoring your files...',
+  agent_session: 'Starting the agent...',
+  running: 'Session restored.',
+  awaiting_followup: 'Session restored.',
+};
+
+/** Fallback shown while a wake is claimed but no execution step has been reported yet. */
+export const WAKE_PHASE_PENDING_LABEL = 'Waking and restoring session...';
+
+/**
+ * Human-readable wake progress text. Falls back to the generic pending label when
+ * the phase is absent — a wake that has been claimed in D1 but whose replacement
+ * TaskRunner has not yet written its first execution step.
+ */
+export function wakePhaseLabel(step: TaskExecutionStep | null | undefined): string {
+  return step ? WAKE_PHASE_LABELS[step] : WAKE_PHASE_PENDING_LABEL;
+}
 
 export type TaskActorType = 'user' | 'system' | 'workspace_callback';
 
@@ -389,6 +429,12 @@ export interface Task {
   resolvedReservationJson: string | null;
   /** JSON snapshot of the PlacementExplanation. */
   placementExplanationJson: string | null;
+  /** Durable VM admission status, if the task is waiting on VM capacity. */
+  admissionState: string | null;
+  /** Inspectable VM admission/backpressure reason. */
+  admissionReason: string | null;
+  /** Next VM admission retry/wakeup time, if waiting. */
+  admissionNextRetryAt: string | null;
   startedAt: string | null;
   completedAt: string | null;
   errorMessage: string | null;

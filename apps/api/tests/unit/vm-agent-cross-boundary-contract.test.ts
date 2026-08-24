@@ -613,7 +613,10 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
         'Fix the bug',
         env,
         'user-123',
-        { url: 'https://mcp.example.com', token: 'mcp-token' },
+        [
+          { url: 'https://mcp.example.com', token: 'mcp-token', name: 'sam-mcp' },
+          { url: 'https://mcp.zapier.com/x', token: 'zap-token', name: 'zapier' },
+        ],
         {
           model: 'claude-sonnet-4-6',
           permissionMode: 'auto-edit',
@@ -633,7 +636,8 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
 
       // MCP servers array
       expect(parsedBody.mcpServers).toEqual([
-        { url: 'https://mcp.example.com', token: 'mcp-token' },
+        { url: 'https://mcp.example.com', token: 'mcp-token', name: 'sam-mcp' },
+        { url: 'https://mcp.zapier.com/x', token: 'zap-token', name: 'zapier' },
       ]);
 
       // Model overrides

@@ -97,7 +97,7 @@ A superadmin can separately configure **Google infrastructure OAuth** at `/admin
 
 ### Let users report problems
 
-SAM's in-app **Report an Issue** flow is off until you nominate a project to receive reports. Create a project for feedback, then set `PLATFORM_FEEDBACK_PROJECT_ID` to its ID. Until you do, the Report button and the crash-screen report link are hidden from every user — so if people tell you there's no Report button, this is why. The same setting enables hourly automated triage of platform errors into that project. See [Reporting Issues](/docs/guides/reporting-issues/#for-operators-where-reports-land).
+SAM's in-app **Report an Issue** flow is off until you nominate a project to receive reports. Create a project for feedback, then open **Admin → Integrations** (`/admin/integrations`) and select it under **Private feedback project**. `PLATFORM_FEEDBACK_PROJECT_ID` is still supported as a bootstrap/environment fallback, but the in-app runtime setting is preferred and overrides it. Until an effective project exists, the Report button and the crash-screen report link are hidden from every user — so if people tell you there's no Report button, this is why. The same setting enables hourly automated triage of platform errors into that project. See [Reporting Issues](/docs/guides/reporting-issues/#for-operators-where-reports-land).
 
 ## GCP provisioning credentials
 

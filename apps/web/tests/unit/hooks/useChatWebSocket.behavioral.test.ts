@@ -63,8 +63,26 @@ class MockWebSocket {
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   getChatSession: vi.fn().mockResolvedValue({
-    session: { id: 'sess-1', status: 'active', workspaceId: null, topic: null, messageCount: 0, startedAt: 0, endedAt: null, createdAt: 0 },
-    messages: [{ id: 'msg-catchup-1', sessionId: 'sess-1', role: 'assistant', content: 'caught up', toolMetadata: null, createdAt: 100 }],
+    session: {
+      id: 'sess-1',
+      status: 'active',
+      workspaceId: null,
+      topic: null,
+      messageCount: 0,
+      startedAt: 0,
+      endedAt: null,
+      createdAt: 0,
+    },
+    messages: [
+      {
+        id: 'msg-catchup-1',
+        sessionId: 'sess-1',
+        role: 'assistant',
+        content: 'caught up',
+        toolMetadata: null,
+        createdAt: 100,
+      },
+    ],
     hasMore: false,
   }),
 }));
@@ -142,11 +160,13 @@ describe('useChatWebSocket (behavioral)', () => {
     });
 
     expect(onMessage).toHaveBeenCalledOnce();
-    expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'msg-1',
-      role: 'assistant',
-      content: 'Hello',
-    }));
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'msg-1',
+        role: 'assistant',
+        content: 'Hello',
+      })
+    );
   });
 
   it('ignores messages for different sessions', () => {
@@ -203,6 +223,112 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(onAgentActivity).toHaveBeenNthCalledWith(2, 'recovering', 123);
     expect(onAgentActivity).toHaveBeenNthCalledWith(3, 'error', 123);
     expect(onAgentActivity).toHaveBeenNthCalledWith(4, 'idle', 123);
+  });
+
+  it('forwards a session.wake_progress event with its parsed phase', () => {
+    // This branch parses untrusted WS JSON and is what makes the wake banner
+    // update ahead of the fallback poll. Tested here, at the real onmessage
+    // handler, rather than by calling the reducer directly.
+    const onWakeProgress = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onWakeProgress }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.wake_progress',
+        sessionId: 'sess-1',
+        recoveryStatus: 'waking',
+        wakePhase: 'node_provisioning',
+      });
+    });
+
+    expect(onWakeProgress).toHaveBeenCalledTimes(1);
+    expect(onWakeProgress).toHaveBeenCalledWith({
+      recoveryStatus: 'waking',
+      wakePhase: 'node_provisioning',
+    });
+  });
+
+  it('forwards the terminal wake states so the banner can clear', () => {
+    const onWakeProgress = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onWakeProgress }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      for (const recoveryStatus of ['restored', 'failed']) {
+        MockWebSocket.instances[0]!.simulateMessage({
+          type: 'session.wake_progress',
+          sessionId: 'sess-1',
+          recoveryStatus,
+          wakePhase: null,
+        });
+      }
+    });
+
+    expect(onWakeProgress).toHaveBeenCalledTimes(2);
+    expect(onWakeProgress).toHaveBeenNthCalledWith(1, {
+      recoveryStatus: 'restored',
+      wakePhase: null,
+    });
+    expect(onWakeProgress).toHaveBeenNthCalledWith(2, {
+      recoveryStatus: 'failed',
+      wakePhase: null,
+    });
+  });
+
+  it('normalizes an unknown wake phase to null instead of trusting it', () => {
+    // The phase is rendered as a label; an unrecognized value must degrade to the
+    // generic pending copy, never leak through as text.
+    const onWakeProgress = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onWakeProgress }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.wake_progress',
+        sessionId: 'sess-1',
+        recoveryStatus: 'waking',
+        wakePhase: 'not_a_real_step',
+      });
+    });
+
+    expect(onWakeProgress).toHaveBeenCalledWith({ recoveryStatus: 'waking', wakePhase: null });
+  });
+
+  it('ignores a session.wake_progress with an unknown recovery status', () => {
+    const onWakeProgress = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onWakeProgress }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.wake_progress',
+        sessionId: 'sess-1',
+        recoveryStatus: 'bogus',
+        wakePhase: 'agent_session',
+      });
+    });
+
+    expect(onWakeProgress).not.toHaveBeenCalled();
+  });
+
+  it('ignores session.wake_progress for a different session', () => {
+    // Cross-session isolation: one conversation's wake must never paint a banner
+    // in another.
+    const onWakeProgress = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onWakeProgress }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.wake_progress',
+        sessionId: 'sess-other',
+        recoveryStatus: 'waking',
+        wakePhase: 'agent_session',
+      });
+    });
+
+    expect(onWakeProgress).not.toHaveBeenCalled();
   });
 
   it('calls onSessionUpdated when a session.updated event arrives', () => {
@@ -357,7 +483,7 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(onCatchUp).toHaveBeenLastCalledWith(
       expect.arrayContaining([expect.objectContaining({ id: 'msg-catchup-1' })]),
       expect.any(Object),
-      undefined,
+      undefined
     );
   });
 
@@ -592,10 +718,9 @@ describe('useChatWebSocket (behavioral)', () => {
   });
 
   it('disconnects when enabled changes to false', () => {
-    const { result, rerender } = renderHook(
-      (props) => useChatWebSocket(props),
-      { initialProps: { ...defaultProps, enabled: true } },
-    );
+    const { result, rerender } = renderHook((props) => useChatWebSocket(props), {
+      initialProps: { ...defaultProps, enabled: true },
+    });
 
     act(() => {
       MockWebSocket.instances[0]!.simulateOpen();
@@ -649,14 +774,18 @@ describe('useChatWebSocket (behavioral)', () => {
     });
 
     expect(onMessage).toHaveBeenCalledTimes(2);
-    expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'batch-1',
-      content: 'Hello',
-    }));
-    expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'batch-2',
-      content: 'World',
-    }));
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'batch-1',
+        content: 'Hello',
+      })
+    );
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'batch-2',
+        content: 'World',
+      })
+    );
   });
 
   it('skips batch messages without content', () => {
@@ -682,10 +811,12 @@ describe('useChatWebSocket (behavioral)', () => {
     });
 
     expect(onMessage).toHaveBeenCalledTimes(1);
-    expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'batch-1',
-      content: 'Has content',
-    }));
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'batch-1',
+        content: 'Has content',
+      })
+    );
   });
 
   it('ignores messages.batch for different sessions', () => {
@@ -874,12 +1005,14 @@ describe('useChatWebSocket (behavioral)', () => {
     });
 
     expect(onMessage).toHaveBeenCalledOnce();
-    expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'msg-wrapped',
-      role: 'assistant',
-      content: 'Wrapped message',
-      createdAt: 12345,
-    }));
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'msg-wrapped',
+        role: 'assistant',
+        content: 'Wrapped message',
+        createdAt: 12345,
+      })
+    );
   });
 
   it('skips message.new without content', () => {

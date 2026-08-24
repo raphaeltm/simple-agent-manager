@@ -49,6 +49,10 @@ export interface ActivityUpdate {
   agentType?: string | null;
   restartCount?: number | null;
   statusError?: string | null;
+  runtimeWorkState?: 'inactive' | 'active' | 'settling';
+  runtimeWorkCount?: number;
+  runtimeWorkSource?: string;
+  runtimeWorkProgressAt?: number | null;
   now?: number;
   /** Which end produced this value. Defaults to the VM agent's own report. */
   source?: SessionActivitySource;
@@ -63,22 +67,30 @@ function isWorkingActivity(activity: string): boolean {
 export function upsertActivityState(
   sql: SqlStorage,
   sessionId: string,
-  update: ActivityUpdate,
+  update: ActivityUpdate
 ): void {
   const now = update.now ?? Date.now();
-  const promptStartedAt = update.activity === 'prompting' || update.activity === 'recovering'
-    ? (update.promptStartedAt ?? now)
-    : null;
+  const promptStartedAt =
+    update.activity === 'prompting' || update.activity === 'recovering'
+      ? (update.promptStartedAt ?? now)
+      : null;
   const source: SessionActivitySource = update.source ?? 'vm_report';
   // A fresh authoritative report is its own evidence — a session that just
   // reported is no longer an unproven probe candidate.
   const reason: SessionActivityTerminalReason | null = isWorkingActivity(update.activity)
     ? null
     : (update.reason ?? (update.activity === 'idle' ? 'completed' : null));
+  const hasRuntimeWorkUpdate = update.runtimeWorkState !== undefined;
 
   sql.exec(
-    `INSERT INTO session_state (session_id, activity, activity_at, prompt_started_at, prompt_epoch, agent_type, restart_count, status_error, activity_source, activity_reason, activity_probe_attempts)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+    `INSERT INTO session_state (
+       session_id, activity, activity_at, prompt_started_at, prompt_epoch,
+       agent_type, restart_count, status_error,
+       activity_source, activity_reason, activity_probe_attempts,
+       runtime_work_state, runtime_work_count, runtime_work_source,
+       runtime_work_updated_at, runtime_work_progress_at
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
      ON CONFLICT(session_id) DO UPDATE SET
        activity_source = excluded.activity_source,
        activity_reason = excluded.activity_reason,
@@ -102,7 +114,22 @@ export function upsertActivityState(
        END,
        agent_type = COALESCE(excluded.agent_type, session_state.agent_type),
        restart_count = COALESCE(excluded.restart_count, session_state.restart_count),
-       status_error = excluded.status_error`,
+		   status_error = excluded.status_error,
+		   runtime_work_state = CASE
+		     WHEN ? = 1 AND (session_state.runtime_work_progress_at IS NULL OR excluded.runtime_work_progress_at >= session_state.runtime_work_progress_at)
+		       THEN excluded.runtime_work_state ELSE session_state.runtime_work_state END,
+		   runtime_work_count = CASE
+		     WHEN ? = 1 AND (session_state.runtime_work_progress_at IS NULL OR excluded.runtime_work_progress_at >= session_state.runtime_work_progress_at)
+		       THEN excluded.runtime_work_count ELSE session_state.runtime_work_count END,
+		   runtime_work_source = CASE
+		     WHEN ? = 1 AND (session_state.runtime_work_progress_at IS NULL OR excluded.runtime_work_progress_at >= session_state.runtime_work_progress_at)
+		       THEN excluded.runtime_work_source ELSE session_state.runtime_work_source END,
+		   runtime_work_updated_at = CASE
+		     WHEN ? = 1 AND (session_state.runtime_work_progress_at IS NULL OR excluded.runtime_work_progress_at >= session_state.runtime_work_progress_at)
+		       THEN excluded.runtime_work_updated_at ELSE session_state.runtime_work_updated_at END,
+		   runtime_work_progress_at = CASE
+		     WHEN ? = 1 AND (session_state.runtime_work_progress_at IS NULL OR excluded.runtime_work_progress_at >= session_state.runtime_work_progress_at)
+		       THEN excluded.runtime_work_progress_at ELSE session_state.runtime_work_progress_at END`,
     sessionId,
     update.activity,
     now,
@@ -113,6 +140,12 @@ export function upsertActivityState(
     update.statusError ?? null,
     source,
     reason,
+    hasRuntimeWorkUpdate ? update.runtimeWorkState : null,
+    hasRuntimeWorkUpdate ? (update.runtimeWorkCount ?? 0) : null,
+    hasRuntimeWorkUpdate ? (update.runtimeWorkSource ?? null) : null,
+    hasRuntimeWorkUpdate ? now : null,
+    hasRuntimeWorkUpdate ? (update.runtimeWorkProgressAt ?? null) : null,
+    ...Array(5).fill(hasRuntimeWorkUpdate ? 1 : 0)
   );
 }
 
@@ -208,15 +241,12 @@ export function markPromptAccepted(
   sql: SqlStorage,
   sessionId: string,
   promptEpoch: number,
-  now = Date.now(),
+  now = Date.now()
 ): boolean {
-  const existing = sql.exec(
-    'SELECT prompt_epoch FROM session_state WHERE session_id = ?',
-    sessionId,
-  ).toArray()[0];
-  const existingEpoch = typeof existing?.prompt_epoch === 'number'
-    ? existing.prompt_epoch
-    : null;
+  const existing = sql
+    .exec('SELECT prompt_epoch FROM session_state WHERE session_id = ?', sessionId)
+    .toArray()[0];
+  const existingEpoch = typeof existing?.prompt_epoch === 'number' ? existing.prompt_epoch : null;
   if (existingEpoch !== null && promptEpoch <= existingEpoch) return false;
 
   sql.exec(
@@ -236,23 +266,22 @@ export function markPromptAccepted(
     sessionId,
     now,
     promptEpoch,
-    promptEpoch,
+    promptEpoch
   );
   return true;
 }
 
 export function getPromptEpoch(sql: SqlStorage, sessionId: string): number | null {
-  const row = sql.exec(
-    'SELECT prompt_epoch FROM session_state WHERE session_id = ?',
-    sessionId,
-  ).toArray()[0];
+  const row = sql
+    .exec('SELECT prompt_epoch FROM session_state WHERE session_id = ?', sessionId)
+    .toArray()[0];
   return typeof row?.prompt_epoch === 'number' ? row.prompt_epoch : null;
 }
 
 export function refreshWorkingActivityForChatSession(
   sql: SqlStorage,
   chatSessionId: string,
-  now = Date.now(),
+  now = Date.now()
 ): void {
   sql.exec(
     `UPDATE session_state
@@ -264,23 +293,18 @@ export function refreshWorkingActivityForChatSession(
        )`,
     now,
     chatSessionId,
-    chatSessionId,
+    chatSessionId
   );
 }
 
 export function resolveActivityChatSessionId(sql: SqlStorage, sessionId: string): string {
-  const row = sql.exec(
-    'SELECT chat_session_id FROM acp_sessions WHERE id = ?',
-    sessionId,
-  ).toArray()[0];
+  const row = sql
+    .exec('SELECT chat_session_id FROM acp_sessions WHERE id = ?', sessionId)
+    .toArray()[0];
   return (row?.chat_session_id as string | undefined) ?? sessionId;
 }
 
-export function updateCurrentPlan(
-  sql: SqlStorage,
-  sessionId: string,
-  planJson: string,
-): void {
+export function updateCurrentPlan(sql: SqlStorage, sessionId: string, planJson: string): void {
   const now = Date.now();
   sql.exec(
     `INSERT INTO session_state (session_id, activity, activity_at, current_plan_json, plan_updated_at)
@@ -291,54 +315,53 @@ export function updateCurrentPlan(
     sessionId,
     now,
     planJson,
-    now,
+    now
   );
 }
 
-export function markSessionStopped(
-  sql: SqlStorage,
-  sessionId: string,
-  reason: string,
-): void {
+export function markSessionStopped(sql: SqlStorage, sessionId: string, reason: string): void {
   const now = Date.now();
   sql.exec(
     `UPDATE session_state
      SET activity = 'stopped', activity_at = ?, last_stop_reason = ?,
-         prompt_started_at = NULL, prompt_epoch = NULL
+		     prompt_started_at = NULL, prompt_epoch = NULL,
+			 runtime_work_state = 'inactive', runtime_work_count = 0,
+			 runtime_work_updated_at = ?
      WHERE session_id = ?`,
     now,
     reason,
-    sessionId,
+    now,
+    sessionId
   );
 }
 
-export function markSessionError(
-  sql: SqlStorage,
-  sessionId: string,
-  errorMessage: string,
-): void {
+export function markSessionError(sql: SqlStorage, sessionId: string, errorMessage: string): void {
   const now = Date.now();
   sql.exec(
-    `UPDATE session_state SET activity = 'error', activity_at = ?, status_error = ? WHERE session_id = ?`,
+    `UPDATE session_state
+		 SET activity = 'error', activity_at = ?, status_error = ?,
+		     runtime_work_state = 'inactive', runtime_work_count = 0,
+			 runtime_work_updated_at = ?
+		 WHERE session_id = ?`,
     now,
     errorMessage,
-    sessionId,
+    now,
+    sessionId
   );
 }
 
 // --- Read Operations ---
 
-export function getSessionState(
-  sql: SqlStorage,
-  sessionId: string,
-): SessionStateSnapshot | null {
+export function getSessionState(sql: SqlStorage, sessionId: string): SessionStateSnapshot | null {
   const rows = sql
     .exec(
       `SELECT activity, activity_at, status_error, current_plan_json, plan_updated_at,
               prompt_started_at, last_stop_reason, agent_type,
-              activity_source, activity_reason
+              activity_source, activity_reason,
+              runtime_work_state, runtime_work_count, runtime_work_source,
+              runtime_work_updated_at, runtime_work_progress_at
        FROM session_state WHERE session_id = ?`,
-      sessionId,
+      sessionId
     )
     .toArray();
 
@@ -365,6 +388,13 @@ export function getSessionState(
     agentType: (row.agent_type as string) || null,
     activitySource: (row.activity_source as SessionActivitySource) || null,
     activityReason: (row.activity_reason as SessionActivityTerminalReason) || null,
+    runtimeWorkState: (row.runtime_work_state as SessionStateSnapshot['runtimeWorkState']) || null,
+    runtimeWorkCount: typeof row.runtime_work_count === 'number' ? row.runtime_work_count : null,
+    runtimeWorkSource: (row.runtime_work_source as string) || null,
+    runtimeWorkUpdatedAt:
+      typeof row.runtime_work_updated_at === 'number' ? row.runtime_work_updated_at : null,
+    runtimeWorkProgressAt:
+      typeof row.runtime_work_progress_at === 'number' ? row.runtime_work_progress_at : null,
   };
 }
 
@@ -375,7 +405,7 @@ export interface PersistedPlanSnapshot {
 
 export function getLatestPersistedPlan(
   sql: SqlStorage,
-  sessionId: string,
+  sessionId: string
 ): PersistedPlanSnapshot | null {
   const row = sql
     .exec(
@@ -384,7 +414,7 @@ export function getLatestPersistedPlan(
        WHERE session_id = ? AND role = 'plan'
        ORDER BY created_at DESC, sequence DESC
        LIMIT 1`,
-      sessionId,
+      sessionId
     )
     .toArray()[0];
 
@@ -415,10 +445,7 @@ export function getLatestPersistedPlan(
  *
  * Returns session IDs that were auto-healed (for broadcasting).
  */
-export function reconcileStaleActivity(
-  sql: SqlStorage,
-  thresholdMs?: number,
-): string[] {
+export function reconcileStaleActivity(sql: SqlStorage, thresholdMs?: number): string[] {
   const threshold = thresholdMs ?? DEFAULT_SESSION_ACTIVITY_STALE_THRESHOLD_MS;
   const cutoff = Date.now() - threshold;
   const now = Date.now();
@@ -448,7 +475,7 @@ export function reconcileStaleActivity(
              AND COALESCE(acp.last_heartbeat_at, acp.updated_at, acp.started_at, acp.created_at, 0) >= ?
          )`,
       cutoff,
-      cutoff,
+      cutoff
     )
     .toArray();
 
@@ -466,7 +493,7 @@ export function reconcileStaleActivity(
            activity_probe_attempts = 0, activity_probe_at = NULL
        WHERE session_id = ?`,
       now,
-      sessionId,
+      sessionId
     );
     healedSessionIds.push(sessionId);
     log.warn('session_state.stale_activity_healed', { sessionId, staleSince: cutoff });

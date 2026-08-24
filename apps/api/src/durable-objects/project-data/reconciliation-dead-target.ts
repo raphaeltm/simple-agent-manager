@@ -10,6 +10,14 @@ const log = createModuleLogger('reconciliation');
 export interface ReconciliationProcessingHooks {
   waitUntil?: (promise: Promise<unknown>) => void;
   projectId?: string | null;
+  /**
+   * Schedule a D1 session-index resync. This path terminalizes a session, so it
+   * is a `chat_sessions` writer like every other one — and it was the only such
+   * writer with no sync hook, so the index went on reporting the session as
+   * active until some unrelated write happened to resync the project.
+   * See .claude/rules/44 (enumerate every writer).
+   */
+  scheduleSummarySync?: () => void;
 }
 
 interface DeadTargetCandidate {
@@ -46,6 +54,7 @@ export async function terminallyFailDeadTarget(
 
   await failTaskAndWorkspace(env, candidate.taskId, candidate.workspaceId, hooks.projectId ?? null, errorMessage);
   sessions.failSession(sql, candidate.sessionId);
+  hooks.scheduleSummarySync?.();
   recordActivityEventInternal(
     sql,
     'reconciliation.dead_target_failed',

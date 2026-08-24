@@ -352,6 +352,23 @@ export interface SessionStateSnapshot {
    * terminal transitions; null while a prompt is in flight.
    */
   activityReason?: SessionActivityTerminalReason | null;
+  /** Normalized harness-owned work state. Raw harness lifecycle payloads are never persisted. */
+  runtimeWorkState: 'inactive' | 'active' | 'settling' | null;
+  runtimeWorkCount: number | null;
+  runtimeWorkSource: string | null;
+  /** Control-plane receipt time for the latest work-state report. */
+  runtimeWorkUpdatedAt: number | null;
+  /** Harness lifecycle progress time reported by the VM Agent. */
+  runtimeWorkProgressAt: number | null;
+  /** D1-sourced recovery status from session_snapshots (sleep/wake lifecycle). */
+  recoveryStatus?: 'waking' | 'restored' | 'failed' | null;
+  /**
+   * Execution step of the replacement TaskRunner currently waking this session,
+   * resolved from `session_snapshots.recovery_task_id` -> `tasks.execution_step`.
+   * Drives phase-level wake progress in the UI. Null when no wake is in flight or
+   * the recovery task has not reported a step yet.
+   */
+  wakePhase?: TaskExecutionStep | null;
 }
 
 /** Which end of the system produced the authoritative activity value. */

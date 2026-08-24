@@ -1,4 +1,3 @@
-import { hasByocComputeCredential } from '@simple-agent-manager/shared';
 import {
   createContext,
   type ReactNode,
@@ -9,7 +8,8 @@ import {
   useState,
 } from 'react';
 
-import { listAgentCredentials, listCredentials, listGitHubInstallations } from '../../lib/api';
+import { useQueryScope } from '../../hooks/useQueryScope';
+import { useSetupStatus } from '../../hooks/useSetupStatus';
 import { useAuth } from '../AuthProvider';
 
 interface OnboardingContextValue {
@@ -55,8 +55,11 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id;
 
-  const [loading, setLoading] = useState(true);
-  const [setupComplete, setSetupComplete] = useState(false);
+  // Shared with `ChoosePathWizard`, which `AppShell` mounts alongside this provider
+  // on every authenticated page. Both used to issue the same three requests
+  // independently; now they read one cache entry each.
+  const queryScope = useQueryScope();
+  const { isComplete: setupComplete, loading } = useSetupStatus(queryScope);
   const [dismissed, setDismissed] = useState<boolean>(() => {
     // ?onboarding forces the overlay open, overriding a persisted dismissal
     // (without clearing the stored flag — see openOnboarding / checkStatus).
@@ -68,56 +71,32 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   // than waiting on the background credential-status fetch.
   const [overlayOpen, setOverlayOpen] = useState<boolean>(() => isOnboardingForced());
 
+  // Overlay policy, previously interleaved with the fetch above. It must run once
+  // the status is known, and must not re-open an overlay the user dismissed.
   useEffect(() => {
-    const controller = new AbortController();
-    async function checkStatus() {
-      try {
-        const [credResult, installResult, agentResult] = await Promise.allSettled([
-          listCredentials(),
-          listGitHubInstallations(),
-          listAgentCredentials(),
-        ]);
-        if (controller.signal.aborted) return;
+    if (loading) return;
 
-        const credentials = credResult.status === 'fulfilled' ? credResult.value : [];
-        const installations = installResult.status === 'fulfilled' ? installResult.value : [];
-        const agentCreds =
-          agentResult.status === 'fulfilled' ? agentResult.value : { credentials: [] };
-
-        const hasCloud = hasByocComputeCredential(credentials);
-        const hasGitHub = installations.length > 0;
-        const hasAgent = agentCreds.credentials.some((c) => c.isActive);
-
-        // Onboarding is "complete" only when the user has configured their OWN
-        // agent, cloud, and GitHub. Platform availability (SAM-managed AI tokens /
-        // SAM-managed infrastructure) must NOT auto-complete onboarding — choosing
-        // to route through SAM is itself a decision the user makes inside onboarding.
-        const isComplete = hasAgent && hasCloud && hasGitHub;
-        setSetupComplete(isComplete);
-
-        // ?onboarding URL param forces the overlay open (for testing / re-running).
-        // Reset the dismissed flag so users who previously dismissed can always
-        // re-view onboarding on demand. (The overlay is already open synchronously
-        // from initial state in this case; this keeps it open after the fetch.)
-        if (isOnboardingForced()) {
-          setOverlayOpen(true);
-          setDismissed(false);
-        } else if (isComplete) {
-          setDismissed(true);
-          if (userId) localStorage.setItem(getStorageKey(userId), 'true');
-        } else if (!localStorage.getItem(getStorageKey(userId ?? ''))) {
-          // First visit with incomplete setup — auto-show the overlay
-          setOverlayOpen(true);
-        }
-      } catch {
-        // Non-critical
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
-      }
+    // ?onboarding forces the overlay open (for testing / re-running) and resets the
+    // dismissed flag so a user who previously dismissed can always re-view it. The
+    // overlay is already open synchronously from initial state in that case; this
+    // keeps it open now that the status has resolved.
+    if (isOnboardingForced()) {
+      setOverlayOpen(true);
+      setDismissed(false);
+      return;
     }
-    checkStatus();
-    return () => controller.abort();
-  }, [userId]);
+
+    if (setupComplete) {
+      setDismissed(true);
+      if (userId) localStorage.setItem(getStorageKey(userId), 'true');
+      return;
+    }
+
+    if (!localStorage.getItem(getStorageKey(userId ?? ''))) {
+      // First visit with incomplete setup — auto-show the overlay.
+      setOverlayOpen(true);
+    }
+  }, [loading, setupComplete, userId]);
 
   const needsOnboarding = !setupComplete && !loading;
 

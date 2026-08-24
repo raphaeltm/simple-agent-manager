@@ -3,8 +3,9 @@
 // state-dependent strips ("Agent idle · End session" and "Agent is working…
 // · Cancel") with a SINGLE always-mounted control whose center button morphs:
 //
-//   working -> red Interrupt (Square) with a spinning ring
-//   idle    -> grey Archive (ends the conversation)
+//   working      -> red Interrupt (Square) with a spinning ring
+//   awake idle   -> Sleep (reversible checkpoint + compute release)
+//   sleeping     -> grey Archive (ends the conversation)
 //
 // Because the dock is always mounted while the session isActive, the
 // interrupt/archive control never disappears even when the `agentActivity`
@@ -15,7 +16,7 @@
 // dark (`sam`) and light (`sam-light`) themes with no wrapper scoping.
 
 import { Button, Dialog } from '@simple-agent-manager/ui';
-import { Archive, ListTodo, Square } from 'lucide-react';
+import { Archive, ListTodo, Moon, Square } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 // ---------------------------------------------------------------------------
@@ -116,7 +117,14 @@ function Ring({ active, size }: { active: boolean; size: number }) {
       style={{ opacity: active ? 1 : 0, transition: 'opacity 300ms ease' }}
       aria-hidden
     >
-      <circle cx="22" cy="22" r="20" fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="2.5" />
+      <circle
+        cx="22"
+        cy="22"
+        r="20"
+        fill="none"
+        stroke="rgba(255,255,255,0.12)"
+        strokeWidth="2.5"
+      />
       <circle
         cx="22"
         cy="22"
@@ -137,33 +145,47 @@ function Ring({ active, size }: { active: boolean; size: number }) {
 // CompletionDock
 // ---------------------------------------------------------------------------
 
+export type CompletionDockCenterAction = 'interrupt' | 'sleep' | 'archive';
+
 export interface CompletionDockProps {
   /** True while the agent is producing output (agentActivity !== 'idle'). */
   working: boolean;
+  /** Center lifecycle action. Defaults to legacy interrupt/archive derivation for compatibility. */
+  centerAction?: CompletionDockCenterAction;
   /** True when a plan exists to reveal the plan pill. */
   hasPlan: boolean;
   /** Interrupt the running prompt (wired to lc.handleCancelPrompt). */
   onInterrupt: () => void;
+  /** Sleep the idle conversation without archiving it. */
+  onSleep?: () => void;
   /** Archive / end the conversation (wired to onCloseConversation). */
   onArchive: () => void;
   /** Open the plan modal (wired to setShowPlanModal(true)). */
   onOpenPlan: () => void;
   /** True while the archive request is in flight; disables the Archive button. */
   archiving?: boolean;
+  /** True while the sleep request is in flight; disables the Sleep button. */
+  sleeping?: boolean;
   /** Error message from a failed archive attempt, shown beneath the bar. */
   archiveError?: string | null;
+  /** Error message from a failed sleep attempt, shown beneath the bar. */
+  sleepError?: string | null;
   /** Optional elapsed-time node rendered on the right while working. */
   elapsed?: ReactNode;
 }
 
 export function CompletionDock({
   working,
+  centerAction,
   hasPlan,
   onInterrupt,
+  onSleep,
   onArchive,
   onOpenPlan,
   archiving = false,
+  sleeping = false,
   archiveError,
+  sleepError,
   elapsed,
 }: CompletionDockProps) {
   const reducedMotion = usePrefersReducedMotion();
@@ -205,7 +227,9 @@ export function CompletionDock({
       'Z',
     ].join(' ');
   } else {
-    path = [`M 0 ${yB}`, `L ${width} ${yB}`, `L ${width} ${totalH}`, `L 0 ${totalH}`, 'Z'].join(' ');
+    path = [`M 0 ${yB}`, `L ${width} ${yB}`, `L ${width} ${totalH}`, `L 0 ${totalH}`, 'Z'].join(
+      ' '
+    );
   }
 
   // Punch a circular hole (evenodd) concentric with the button so it shows
@@ -216,27 +240,66 @@ export function CompletionDock({
     ` A ${holeR} ${holeR} 0 1 1 ${cx} ${btnC + holeR}` +
     ` A ${holeR} ${holeR} 0 1 1 ${cx} ${btnC - holeR} Z`;
 
-  // Center-button identity: Interrupt while working, Archive while idle.
-  const showArchiveInCenter = !working;
-  const CenterIcon = showArchiveInCenter ? Archive : Square;
-  const centerBg = showArchiveInCenter
-    ? 'var(--sam-color-fg-muted, #9fb7ae)'
-    : 'var(--sam-color-danger, #ef4444)';
-  const centerDisabled = showArchiveInCenter && archiving;
+  // Center-button identity: Interrupt while working, Sleep while awake idle,
+  // Archive only once the session is already sleeping.
+  const effectiveCenterAction: CompletionDockCenterAction =
+    centerAction ?? (working ? 'interrupt' : 'archive');
+  const CenterIcon =
+    effectiveCenterAction === 'archive'
+      ? Archive
+      : effectiveCenterAction === 'sleep'
+        ? Moon
+        : Square;
+  const centerBg =
+    effectiveCenterAction === 'archive'
+      ? 'var(--sam-color-fg-muted)'
+      : effectiveCenterAction === 'sleep'
+        ? 'var(--sam-color-info)'
+        : 'var(--sam-color-danger)';
+  const centerFg = 'var(--sam-color-fg-on-accent)';
+  const centerDisabled =
+    (effectiveCenterAction === 'archive' && archiving) ||
+    (effectiveCenterAction === 'sleep' && sleeping);
+  const centerLabel =
+    effectiveCenterAction === 'archive'
+      ? 'Archive conversation'
+      : effectiveCenterAction === 'sleep'
+        ? 'Sleep session'
+        : 'Interrupt agent';
+  const centerTitle =
+    effectiveCenterAction === 'archive'
+      ? archiving
+        ? 'Archiving…'
+        : 'Archive'
+      : effectiveCenterAction === 'sleep'
+        ? sleeping
+          ? 'Sleeping…'
+          : 'Sleep'
+        : 'Interrupt';
+  const actionError =
+    effectiveCenterAction === 'sleep'
+      ? sleepError
+      : effectiveCenterAction === 'archive'
+        ? archiveError
+        : null;
 
   useEffect(() => {
-    if (working) {
+    if (effectiveCenterAction !== 'archive') {
       setArchiveConfirmOpen(false);
     }
-  }, [working]);
+  }, [effectiveCenterAction]);
 
   const handleCenterClick = useCallback(() => {
-    if (showArchiveInCenter) {
+    if (effectiveCenterAction === 'archive') {
       setArchiveConfirmOpen(true);
       return;
     }
+    if (effectiveCenterAction === 'sleep') {
+      onSleep?.();
+      return;
+    }
     onInterrupt();
-  }, [onInterrupt, showArchiveInCenter]);
+  }, [effectiveCenterAction, onInterrupt, onSleep]);
 
   const handleConfirmArchive = useCallback(() => {
     if (archiving) {
@@ -262,7 +325,11 @@ export function CompletionDock({
       {/* Announce working/idle transitions to assistive tech (the morph itself is
           purely visual; ElapsedTime is aria-hidden). */}
       <span className="sr-only" role="status" aria-live="polite">
-        {working ? 'Agent working' : 'Agent idle'}
+        {working
+          ? 'Agent working'
+          : effectiveCenterAction === 'sleep'
+            ? 'Agent idle, ready to sleep'
+            : 'Session sleeping'}
       </span>
       <div ref={ref} className="relative w-full select-none" style={{ height: totalH }}>
         <svg
@@ -317,7 +384,7 @@ export function CompletionDock({
           type="button"
           onClick={handleCenterClick}
           disabled={centerDisabled}
-          aria-label={showArchiveInCenter ? 'Archive conversation' : 'Interrupt agent'}
+          aria-label={centerLabel}
           className="pointer-events-auto absolute flex items-center justify-center rounded-full cursor-pointer border-0 shadow-lg disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:outline-offset-2"
           style={{
             width: BTN,
@@ -329,10 +396,14 @@ export function CompletionDock({
             transition: 'background 300ms ease, box-shadow 300ms ease',
             zIndex: 2,
           }}
-          title={showArchiveInCenter ? (archiving ? 'Ending…' : 'Archive') : 'Interrupt'}
+          title={centerTitle}
         >
           <Ring active={working} size={BTN} />
-          <CenterIcon size={20} color="#fff" fill={showArchiveInCenter ? 'none' : '#fff'} />
+          <CenterIcon
+            size={20}
+            color={centerFg}
+            fill={effectiveCenterAction === 'interrupt' ? centerFg : 'none'}
+          />
         </button>
       </div>
 
@@ -343,7 +414,10 @@ export function CompletionDock({
         aria-labelledby="archive-conversation-title"
         aria-describedby="archive-conversation-description"
       >
-        <h3 id="archive-conversation-title" className="text-base font-semibold text-fg-primary mb-2">
+        <h3
+          id="archive-conversation-title"
+          className="text-base font-semibold text-fg-primary mb-2"
+        >
           Archive conversation?
         </h3>
         <p id="archive-conversation-description" className="text-sm text-fg-muted mb-4">
@@ -351,7 +425,12 @@ export function CompletionDock({
           progress tied to this conversation may be lost. This action cannot be undone.
         </p>
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" size="sm" onClick={handleCloseArchiveConfirm} disabled={archiving}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleCloseArchiveConfirm}
+            disabled={archiving}
+          >
             Cancel
           </Button>
           <Button variant="danger" size="sm" onClick={handleConfirmArchive} loading={archiving}>
@@ -360,9 +439,9 @@ export function CompletionDock({
         </div>
       </Dialog>
 
-      {archiveError && (
+      {actionError && (
         <div className="px-3 pb-2 text-xs text-danger" role="alert">
-          {archiveError}
+          {actionError}
         </div>
       )}
     </div>

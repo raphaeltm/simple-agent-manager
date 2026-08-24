@@ -76,6 +76,7 @@ describe('getLatestAssistantMessageForTask', () => {
       'session-1',
       1,
       null,
+      null,
       ['assistant'],
       false,
       'desc',

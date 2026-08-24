@@ -5,9 +5,10 @@ import type { NavigateFunction } from 'react-router';
 
 import type { ChatSessionHandle } from '../../components/ChatSession';
 import type { SessionTokenUsage } from '../../components/WorkspaceSidebar';
+import { useAgentCatalog } from '../../hooks/useAgentCatalog';
+import { useQueryScope } from '../../hooks/useQueryScope';
 import {
   createAgentSession,
-  listAgents,
   listAgentSessions,
   resumeAgentSession,
   stopAgentSession,
@@ -57,7 +58,6 @@ export function useSessionState(
 ): UseSessionStateResult {
   const sessionIdParam = searchParams.get('sessionId');
   const [sessionsLoading, setSessionsLoading] = useState(false);
-  const [agentOptions, setAgentOptions] = useState<AgentInfo[]>([]);
   const [preferredAgentsBySession, setPreferredAgentsBySession] = useState<
     Record<string, AgentInfo['id']>
   >({});
@@ -65,25 +65,10 @@ export function useSessionState(
   const [recentlyStopped, setRecentlyStopped] = useState<Set<string>>(new Set());
   const [dismissedOrphans, setDismissedOrphans] = useState(false);
 
-  // Load agent options
-  useEffect(() => {
-    if (!isRunning) {
-      setAgentOptions([]);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const data = await listAgents();
-        if (!cancelled) setAgentOptions(data.agents || []);
-      } catch {
-        if (!cancelled) setAgentOptions([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [isRunning]);
+  // Agent catalog, shared with project chat and the settings pages. Only fetched once
+  // the workspace is running, matching the previous effect's precondition.
+  const queryScope = useQueryScope();
+  const { agents: agentOptions } = useAgentCatalog(isRunning ? queryScope : '');
 
   const configuredAgents = useMemo(
     () => agentOptions.filter((a) => a.configured && a.supportsAcp),

@@ -5,7 +5,6 @@ import { buildSafeFtsQuery } from '../../lib/fts5';
 import { log } from '../../lib/logger';
 import {
   type CompactMessageOptions,
-  DEFAULT_DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES,
   parseChatMessageRow,
   parseChatMessageRowCompact,
   parseCount,
@@ -15,8 +14,15 @@ import {
   parseWorkspaceId,
   type SearchResultParsed,
 } from './row-schemas';
+import { boundToolMetadataForStorage } from './tool-metadata-storage';
 import type { Env } from './types';
 import { generateId } from './types';
+
+export {
+  boundToolMetadataForStorage,
+  DEFAULT_PROJECT_DATA_TOOL_METADATA_MAX_BYTES,
+  resolveCompactMessageOptions,
+} from './tool-metadata-storage';
 
 export const DEFAULT_MAX_MESSAGES_PER_SESSION = 100000;
 export const SESSION_MESSAGE_LIMIT_EXCEEDED = 'SESSION_MESSAGE_LIMIT_EXCEEDED';
@@ -35,14 +41,6 @@ export class SessionMessageLimitExceededError extends Error {
 function resolveMaxMessagesPerSession(env: Env): number {
   const parsed = Number.parseInt(env.MAX_MESSAGES_PER_SESSION || '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_MESSAGES_PER_SESSION;
-}
-
-export function resolveCompactMessageOptions(env: Env): CompactMessageOptions {
-  const parsed = Number.parseInt(env.DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES || '', 10);
-  return {
-    documentCardRawOutputMaxBytes:
-      Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES,
-  };
 }
 
 /**
@@ -66,7 +64,14 @@ export function persistMessage(
   content: string,
   toolMetadata: string | null,
   messageId?: string
-): { id: string; now: number; sequence: number; workspaceId: string | null; inserted: boolean } {
+): {
+  id: string;
+  now: number;
+  sequence: number;
+  workspaceId: string | null;
+  inserted: boolean;
+  toolMetadata: string | null;
+} {
   const maxMessages = resolveMaxMessagesPerSession(env);
   const countRow = sql
     .exec('SELECT message_count FROM chat_sessions WHERE id = ?', sessionId)
@@ -84,7 +89,14 @@ export function persistMessage(
     const workspaceId = wsRow
       ? parseWorkspaceId(wsRow, 'messages.persist_duplicate_workspace')
       : null;
-    return { id, now: Date.now(), sequence: 0, workspaceId, inserted: false };
+    return {
+      id,
+      now: Date.now(),
+      sequence: 0,
+      workspaceId,
+      inserted: false,
+      toolMetadata,
+    };
   }
 
   if (parseMessageCount(countRow, 'messages.persist_count') >= maxMessages) {
@@ -93,6 +105,15 @@ export function persistMessage(
 
   const now = Date.now();
   const sequence = nextSequence(sql, sessionId);
+  const boundedToolMetadata = boundToolMetadataForStorage(toolMetadata, env);
+  if (boundedToolMetadata.truncated) {
+    log.warn('messages.tool_metadata_truncated_for_storage', {
+      sessionId,
+      messageId: id,
+      originalBytes: boundedToolMetadata.originalBytes,
+      storedBytes: boundedToolMetadata.storedBytes,
+    });
+  }
 
   sql.exec(
     `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence)
@@ -101,7 +122,7 @@ export function persistMessage(
     sessionId,
     role,
     content,
-    toolMetadata,
+    boundedToolMetadata.value,
     now,
     sequence
   );
@@ -134,7 +155,14 @@ export function persistMessage(
     .toArray()[0];
   const workspaceId = wsRow ? parseWorkspaceId(wsRow, 'messages.persist_workspace') : null;
 
-  return { id, now, sequence, workspaceId, inserted: true };
+  return {
+    id,
+    now,
+    sequence,
+    workspaceId,
+    inserted: true,
+    toolMetadata: boundedToolMetadata.value,
+  };
 }
 
 export function persistMessageBatch(
@@ -251,6 +279,15 @@ export function persistMessageBatch(
 
     const createdAt = new Date(msg.timestamp).getTime() || now;
     const sequence = msg.sequence ?? nextSeq++;
+    const boundedToolMetadata = boundToolMetadataForStorage(msg.toolMetadata, env);
+    if (boundedToolMetadata.truncated) {
+      log.warn('messages.batch_tool_metadata_truncated_for_storage', {
+        sessionId,
+        messageId: msg.messageId,
+        originalBytes: boundedToolMetadata.originalBytes,
+        storedBytes: boundedToolMetadata.storedBytes,
+      });
+    }
     sql.exec(
       `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence, origin)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -258,7 +295,7 @@ export function persistMessageBatch(
       sessionId,
       msg.role,
       msg.content,
-      msg.toolMetadata,
+      boundedToolMetadata.value,
       createdAt,
       sequence,
       origin
@@ -268,7 +305,7 @@ export function persistMessageBatch(
       id: msg.messageId,
       role: msg.role,
       content: msg.content,
-      toolMetadata: msg.toolMetadata ? JSON.parse(msg.toolMetadata) : null,
+      toolMetadata: boundedToolMetadata.value ? JSON.parse(boundedToolMetadata.value) : null,
       createdAt,
       sequence,
       origin,
@@ -351,6 +388,7 @@ export function getMessages(
   sessionId: string,
   limit: number = 1000,
   before: number | null = null,
+  after: number | null = null,
   roles?: string[],
   compact: boolean = false,
   order: 'asc' | 'desc' = 'desc',
@@ -363,6 +401,11 @@ export function getMessages(
   if (before !== null) {
     query += ' AND created_at < ?';
     params.push(before);
+  }
+
+  if (after !== null) {
+    query += ' AND created_at > ?';
+    params.push(after);
   }
 
   if (roles && roles.length > 0) {

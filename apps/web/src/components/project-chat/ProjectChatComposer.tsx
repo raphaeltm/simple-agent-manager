@@ -1,12 +1,25 @@
-import type { MentionPaletteHandle, SlashCommand, SlashCommandPaletteHandle } from '@simple-agent-manager/acp-client';
-import { MentionPalette, SlashCommandPalette, VoiceButton } from '@simple-agent-manager/acp-client';
+import type {
+  MentionPaletteHandle,
+  SlashCommand,
+  SlashCommandPaletteHandle,
+} from '@simple-agent-manager/acp-client';
+import {
+  appendDictatedText,
+  MentionPalette,
+  SlashCommandPalette,
+  VoiceButton,
+} from '@simple-agent-manager/acp-client';
 import type { AgentProfile, AgentSkill } from '@simple-agent-manager/shared';
 import { Paperclip, X } from 'lucide-react';
 import type { MutableRefObject } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { formatFileSize } from '../../lib/file-utils';
-import { getSendButtonTitle, getSendShortcutAriaKey, getSendShortcutHint } from '../../lib/platform-shortcuts';
+import {
+  getSendButtonTitle,
+  getSendShortcutAriaKey,
+  getSendShortcutHint,
+} from '../../lib/platform-shortcuts';
 import { SkillSelector } from '../skills/SkillSelector';
 
 export interface ProjectChatComposerAttachment {
@@ -79,9 +92,7 @@ export function ProjectChatComposer({
     dismissedSlashFilterRef.current = null;
   }
   const showSlashPalette =
-    !!slashMatch &&
-    slashCommands.length > 0 &&
-    dismissedSlashFilterRef.current !== slashFilter;
+    !!slashMatch && slashCommands.length > 0 && dismissedSlashFilterRef.current !== slashFilter;
 
   const textBeforeCursor = value.slice(0, cursorPos);
   const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
@@ -110,23 +121,31 @@ export function ProjectChatComposer({
     textarea.style.height = `${Math.min(textarea.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
   }, [value]);
 
-  const setFileInput = useCallback((node: HTMLInputElement | null) => {
-    internalFileInputRef.current = node;
-    if (fileInputRef) {
-      fileInputRef.current = node;
-    }
-  }, [fileInputRef]);
+  const setFileInput = useCallback(
+    (node: HTMLInputElement | null) => {
+      internalFileInputRef.current = node;
+      if (fileInputRef) {
+        fileInputRef.current = node;
+      }
+    },
+    [fileInputRef]
+  );
 
-  const handleTranscription = useCallback((text: string) => {
-    const separator = value.length > 0 && !value.endsWith(' ') ? ' ' : '';
-    onChange(value + separator + text);
-    textareaRef.current?.focus();
-  }, [value, onChange]);
+  const handleTranscription = useCallback(
+    (text: string) => {
+      onChange(appendDictatedText(value, text));
+      textareaRef.current?.focus();
+    },
+    [value, onChange]
+  );
 
-  const handleCommandSelect = useCallback((command: SlashCommand) => {
-    onChange(`/${command.name} `);
-    textareaRef.current?.focus();
-  }, [onChange]);
+  const handleCommandSelect = useCallback(
+    (command: SlashCommand) => {
+      onChange(`/${command.name} `);
+      textareaRef.current?.focus();
+    },
+    [onChange]
+  );
 
   const handleMentionSelect = useCallback(
     (profile: { name: string }) => {
@@ -142,22 +161,28 @@ export function ProjectChatComposer({
         textareaRef.current?.setSelectionRange(nextCursorPos, nextCursorPos);
       });
     },
-    [cursorPos, mentionTriggerIndex, onChange, value],
+    [cursorPos, mentionTriggerIndex, onChange, value]
   );
 
-  const handleFilesSelected = useCallback((files: FileList | null) => {
-    onFilesSelected?.(files);
-    if (internalFileInputRef.current) internalFileInputRef.current.value = '';
-  }, [onFilesSelected]);
+  const handleFilesSelected = useCallback(
+    (files: FileList | null) => {
+      onFilesSelected?.(files);
+      if (internalFileInputRef.current) internalFileInputRef.current.value = '';
+    },
+    [onFilesSelected]
+  );
 
-  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (slashPaletteRef.current?.handleKeyDown(event)) return;
-    if (mentionPaletteRef.current?.handleKeyDown(event)) return;
-    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !sending && !disabled) {
-      event.preventDefault();
-      onSend();
-    }
-  }, [disabled, onSend, sending]);
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (slashPaletteRef.current?.handleKeyDown(event)) return;
+      if (mentionPaletteRef.current?.handleKeyDown(event)) return;
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !sending && !disabled) {
+        event.preventDefault();
+        onSend();
+      }
+    },
+    [disabled, onSend, sending]
+  );
 
   const sendDisabled = sending || disabled || !value.trim() || uploading;
 
@@ -209,7 +234,9 @@ export function ProjectChatComposer({
                   : formatFileSize(attachment.file.size)}
               </span>
               {attachment.status === 'error' && (
-                <span className="text-danger shrink-0" title={attachment.error}>!</span>
+                <span className="text-danger shrink-0" title={attachment.error}>
+                  !
+                </span>
               )}
               {onRemoveAttachment && (
                 <button
@@ -279,8 +306,20 @@ export function ProjectChatComposer({
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={showSlashPalette || showMentionPalette}
-          aria-controls={showSlashPalette ? 'slash-palette-listbox' : showMentionPalette ? 'mention-palette-listbox' : undefined}
-          aria-activedescendant={showSlashPalette ? slashPaletteRef.current?.activeDescendantId : showMentionPalette ? mentionPaletteRef.current?.activeDescendantId : undefined}
+          aria-controls={
+            showSlashPalette
+              ? 'slash-palette-listbox'
+              : showMentionPalette
+                ? 'mention-palette-listbox'
+                : undefined
+          }
+          aria-activedescendant={
+            showSlashPalette
+              ? slashPaletteRef.current?.activeDescendantId
+              : showMentionPalette
+                ? mentionPaletteRef.current?.activeDescendantId
+                : undefined
+          }
           className="flex-1 p-2 px-3 bg-[var(--sam-form-bg)] border border-[rgba(34,197,94,0.12)] rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px] overflow-y-auto focus:border-[rgba(34,197,94,0.35)] focus:shadow-[0_0_0_3px_rgba(34,197,94,0.08),0_0_20px_rgba(22,163,74,0.08)] transition-all"
         />
         <VoiceButton
@@ -304,9 +343,7 @@ export function ProjectChatComposer({
         </button>
       </div>
       {showShortcutHint && (
-        <div className="sam-type-caption text-fg-muted mt-1">
-          {sendShortcutHint}
-        </div>
+        <div className="sam-type-caption text-fg-muted mt-1">{sendShortcutHint}</div>
       )}
     </>
   );

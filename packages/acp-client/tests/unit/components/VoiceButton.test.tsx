@@ -11,6 +11,12 @@ class MockMediaRecorder {
   mimeType: string = 'audio/webm;codecs=opus';
 
   static isTypeSupported = vi.fn().mockReturnValue(true);
+  /** Lets a test reach the recorder the component created, to fire deferred events. */
+  static lastInstance: MockMediaRecorder | null = null;
+
+  constructor() {
+    MockMediaRecorder.lastInstance = this;
+  }
 
   start() {
     this.state = 'recording';
@@ -376,6 +382,97 @@ describe('VoiceButton', () => {
         })
       );
     });
+  });
+
+  it('reports each state transition through onStateChange as the user records', async () => {
+    const onStateChange = vi.fn();
+
+    render(
+      <VoiceButton
+        onTranscription={mockOnTranscription}
+        apiUrl="https://api.example.com/api/transcribe"
+        onStateChange={onStateChange}
+      />
+    );
+
+    // Mounting publishes the initial state so a host can render from it directly.
+    expect(onStateChange.mock.calls.map(([state]) => state)).toEqual(['idle']);
+
+    const button = screen.getByRole('button');
+    await act(async () => {
+      fireEvent.click(button);
+    });
+
+    await waitFor(() => {
+      expect(onStateChange).toHaveBeenCalledWith('recording');
+    });
+
+    // Stopping runs the transcription round-trip and returns to idle.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button'));
+    });
+
+    await waitFor(() => {
+      expect(mockOnTranscription).toHaveBeenCalledWith('Transcribed text');
+    });
+
+    expect(onStateChange.mock.calls.map(([state]) => state)).toEqual([
+      'idle',
+      'recording',
+      'processing',
+      'idle',
+    ]);
+  });
+
+  it('does not upload audio when the host unmounted mid-recording', async () => {
+    const { unmount } = render(
+      <VoiceButton
+        onTranscription={mockOnTranscription}
+        apiUrl="https://api.example.com/api/transcribe"
+      />
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button'));
+    });
+
+    // Unmount while still recording — e.g. the host composer was cancelled.
+    // Real MediaRecorders still fire onstop once their tracks end, so the
+    // deferred handler must not upload to a callback that no longer exists.
+    const live = MockMediaRecorder.lastInstance;
+    expect(live).toBeTruthy();
+    unmount();
+    await act(async () => {
+      live!.stop();
+    });
+
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mockOnTranscription).not.toHaveBeenCalled();
+  });
+
+  it('does not re-notify onStateChange when only the callback identity changes', async () => {
+    const onStateChange = vi.fn();
+    const { rerender } = render(
+      <VoiceButton
+        onTranscription={mockOnTranscription}
+        apiUrl="https://api.example.com/api/transcribe"
+        onStateChange={onStateChange}
+      />
+    );
+
+    expect(onStateChange).toHaveBeenCalledTimes(1);
+
+    // A host passing an inline arrow function re-renders with a new identity on
+    // every parent render; that must not look like a state transition.
+    rerender(
+      <VoiceButton
+        onTranscription={mockOnTranscription}
+        apiUrl="https://api.example.com/api/transcribe"
+        onStateChange={(state) => onStateChange(state)}
+      />
+    );
+
+    expect(onStateChange).toHaveBeenCalledTimes(1);
   });
 
   it('handles browser without mediaDevices support', async () => {

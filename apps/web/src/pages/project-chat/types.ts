@@ -30,6 +30,23 @@ export const SESSION_SYNC_INTERVAL_MS = parseInt(
   import.meta.env.VITE_SESSION_SYNC_INTERVAL_MS || String(DEFAULT_SESSION_SYNC_INTERVAL_MS),
 );
 
+/**
+ * Slow reconciliation interval for the session list while the ProjectData
+ * WebSocket IS connected (ms). Override via VITE_SESSION_RECONCILE_INTERVAL_MS.
+ *
+ * `connectionState === 'connected'` means the socket is open — it is NOT a
+ * delivery guarantee. `useProjectWebSocket` silently discards malformed frames,
+ * and there is no sequence number or gap detector, so a dropped delta would
+ * otherwise leave the sidebar wrong for the entire lifetime of that connection.
+ * This keeps the original poll's self-healing property at ~1/20th the request
+ * rate rather than removing it outright.
+ */
+const DEFAULT_SESSION_RECONCILE_INTERVAL_MS = 600_000;
+export const SESSION_RECONCILE_INTERVAL_MS = parseInt(
+  import.meta.env.VITE_SESSION_RECONCILE_INTERVAL_MS ||
+    String(DEFAULT_SESSION_RECONCILE_INTERVAL_MS),
+);
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------

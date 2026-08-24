@@ -6,6 +6,7 @@ export type {
   BillingMode,
   CostByModel,
   CostSummaryResponse,
+  FeedbackProjectStatus,
   PlatformConfigFieldStatus,
   PlatformConfigSource,
   PlatformConfigStatus,
@@ -158,6 +159,28 @@ export {
   setupConfigSupportsAgent,
   submitAgentCredentialSetupVerificationCode,
 } from './codex-setup';
+export type {
+  CreateMessageCommentReplyRequest,
+  CreateMessageCommentThreadRequest,
+  ListMessageCommentsResponse,
+  MessageCommentAction,
+  MessageCommentAnchor,
+  MessageCommentAuthor,
+  MessageCommentRealtimeEvent,
+  MessageCommentReply,
+  MessageCommentStatus,
+  MessageCommentThread,
+  MessageCommentThreadResponse,
+  SendMessageCommentThreadRequest,
+} from './comments';
+export {
+  createMessageCommentReply,
+  createMessageCommentThread,
+  listMessageComments,
+  reopenMessageCommentThread,
+  resolveMessageCommentThread,
+  sendMessageCommentThreadToAgent,
+} from './comments';
 export type {
   CCAttachmentListItem,
   CCConfigurationListItem,
@@ -312,6 +335,12 @@ export {
   updateFileTags,
   uploadLibraryFile,
 } from './library';
+export {
+  createMcpConnection,
+  deleteMcpConnection,
+  listMcpConnections,
+  updateMcpConnection,
+} from './mcp-connections';
 export type {
   ApiTokenResponse,
   CachedCommandResponse,
@@ -506,6 +535,7 @@ export {
   renameAgentSession,
   restartWorkspace,
   resumeAgentSession,
+  sleepWorkspace,
   stopAgentSession,
   stopWorkspace,
   suspendAgentSession,

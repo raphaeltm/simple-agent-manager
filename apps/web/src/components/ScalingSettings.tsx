@@ -14,10 +14,12 @@ import {
   type ScalingParamMeta,
 } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 
+import { useCredentials } from '../hooks/useCredentials';
+import { useQueryScope } from '../hooks/useQueryScope';
 import { useToast } from '../hooks/useToast';
-import { listCredentials, updateProject } from '../lib/api';
+import { updateProject } from '../lib/api';
 
 /** Format milliseconds as a human-readable duration. */
 function formatMs(ms: number): string {
@@ -113,7 +115,14 @@ export function ScalingSettings({
   const [selectedLocation, setSelectedLocation] = useState<string | null>(
     project.defaultLocation ?? null
   );
-  const [configuredProviders, setConfiguredProviders] = useState<CredentialProvider[]>([]);
+  // Derived from the shared credentials query rather than a local mount fetch — this
+  // is the same list the settings pages and workspace creation already load.
+  const queryScope = useQueryScope();
+  const { credentials } = useCredentials(queryScope);
+  const configuredProviders = useMemo<CredentialProvider[]>(
+    () => [...new Set(credentials.filter((c) => c.connected).map((c) => c.provider))],
+    [credentials]
+  );
   const [savingLocation, setSavingLocation] = useState(false);
 
   // Scaling params state
@@ -129,17 +138,6 @@ export function ScalingSettings({
   );
   const [savingScaling, setSavingScaling] = useState(false);
 
-  // Fetch configured providers
-  useEffect(() => {
-    listCredentials()
-      .then((creds) => {
-        const providers = [...new Set(creds.filter((c) => c.connected).map((c) => c.provider))];
-        setConfiguredProviders(providers);
-      })
-      .catch((err: unknown) => {
-        console.error('Failed to load credentials', err);
-      });
-  }, []);
 
   // Sync from project prop
   useEffect(() => {

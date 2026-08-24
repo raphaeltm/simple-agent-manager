@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Capture mermaid.initialize config outside mock lifecycle so it survives clearAllMocks.
 // The MarkdownRenderer singleton calls initialize only once per module load.
@@ -20,7 +20,12 @@ vi.mock('mermaid', () => ({
   },
 }));
 
-import { CODE_THEME_BG, RenderedMarkdown, SVG_SANITIZE_CONFIG, SyntaxHighlightedCode } from '../../../src/components/MarkdownRenderer';
+import {
+  CODE_THEME_BG,
+  RenderedMarkdown,
+  SVG_SANITIZE_CONFIG,
+  SyntaxHighlightedCode,
+} from '../../../src/components/MarkdownRenderer';
 
 describe('RenderedMarkdown', () => {
   beforeEach(() => {
@@ -47,7 +52,11 @@ describe('RenderedMarkdown', () => {
 
   it('does not render raw HTML from markdown as DOM', () => {
     const { container } = render(
-      <RenderedMarkdown content={'# Report\n\n<script>alert(1)</script><iframe src="https://evil.example"></iframe><span onclick="alert(2)">raw</span>'} />,
+      <RenderedMarkdown
+        content={
+          '# Report\n\n<script>alert(1)</script><iframe src="https://evil.example"></iframe><span onclick="alert(2)">raw</span>'
+        }
+      />
     );
 
     expect(screen.getByRole('heading', { name: 'Report' })).toBeInTheDocument();
@@ -68,7 +77,11 @@ describe('RenderedMarkdown', () => {
   });
 
   it('preserves relative markdown links for local preview navigation', () => {
-    render(<RenderedMarkdown content={'[Section](#section) [Guide](/docs/guide) [Relative](../README.md)'} />);
+    render(
+      <RenderedMarkdown
+        content={'[Section](#section) [Guide](/docs/guide) [Relative](../README.md)'}
+      />
+    );
 
     expect(screen.getByRole('link', { name: 'Section' })).toHaveAttribute('href', '#section');
     expect(screen.getByRole('link', { name: 'Guide' })).toHaveAttribute('href', '/docs/guide');
@@ -76,7 +89,11 @@ describe('RenderedMarkdown', () => {
   });
 
   it('fails closed for unsafe markdown link protocols', () => {
-    render(<RenderedMarkdown content={'[bad](javascript:alert(1)) [protocol-relative](//evil.example)'} />);
+    render(
+      <RenderedMarkdown
+        content={'[bad](javascript:alert(1)) [protocol-relative](//evil.example)'}
+      />
+    );
 
     expect(screen.getByRole('link', { name: 'bad' })).toHaveAttribute('href', '#');
     expect(screen.getByRole('link', { name: 'protocol-relative' })).toHaveAttribute('href', '#');
@@ -93,9 +110,7 @@ describe('RenderedMarkdown', () => {
     const { container } = render(<RenderedMarkdown content={content} />);
     // The inner <pre> from SyntaxHighlightedCode carries the theme background
     const pres = container.querySelectorAll('pre');
-    const themedPre = Array.from(pres).find(
-      (p) => p.style.backgroundColor !== '',
-    );
+    const themedPre = Array.from(pres).find((p) => p.style.backgroundColor !== '');
     expect(themedPre).toBeTruthy();
     // nightOwl theme background is #011627 — must not be transparent or empty
     expect(themedPre!.style.backgroundColor).toBe('rgb(1, 22, 39)');
@@ -125,7 +140,7 @@ describe('RenderedMarkdown', () => {
 
     expect(mocks.mermaidRender).toHaveBeenCalledWith(
       expect.stringContaining('mermaid-'),
-      'graph TD\n  A-->B',
+      'graph TD\n  A-->B'
     );
   });
 
@@ -187,7 +202,12 @@ describe('RenderedMarkdown', () => {
 
     // Parameterized XSS vector tests — each case specifies malicious SVG,
     // strings that must survive sanitization, and strings that must be stripped.
-    const xssVectors: Array<{ name: string; svg: string; mustContain: string[]; mustNotContain: string[] }> = [
+    const xssVectors: Array<{
+      name: string;
+      svg: string;
+      mustContain: string[];
+      mustNotContain: string[];
+    }> = [
       {
         name: 'script tags in SVG',
         svg: '<svg><text>Diagram</text><script>alert("xss")</script></svg>',
@@ -239,7 +259,12 @@ describe('RenderedMarkdown', () => {
     });
 
     // Parameterized preservation tests — verify safe SVG structures survive sanitization.
-    const preservationCases: Array<{ name: string; svg: string; mustContain: string[]; mustNotContain?: string[] }> = [
+    const preservationCases: Array<{
+      name: string;
+      svg: string;
+      mustContain: string[];
+      mustNotContain?: string[];
+    }> = [
       {
         name: 'foreignObject with safe Mermaid label content',
         svg: '<svg><foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node A</span></div></foreignObject></svg>',
@@ -270,13 +295,15 @@ describe('RenderedMarkdown', () => {
     });
 
     it('preserves multiple foreignObject elements in one SVG (multi-node flowchart)', async () => {
-      const html = await renderMermaidSvg([
-        '<svg>',
-        '<foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node A</span></div></foreignObject>',
-        '<foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node B</span></div></foreignObject>',
-        '<foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node C</span></div></foreignObject>',
-        '</svg>',
-      ].join(''));
+      const html = await renderMermaidSvg(
+        [
+          '<svg>',
+          '<foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node A</span></div></foreignObject>',
+          '<foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node B</span></div></foreignObject>',
+          '<foreignObject width="100" height="40"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel">Node C</span></div></foreignObject>',
+          '</svg>',
+        ].join('')
+      );
       expect(html).toContain('Node A');
       expect(html).toContain('Node B');
       expect(html).toContain('Node C');
@@ -291,8 +318,20 @@ describe('RenderedMarkdown', () => {
       expect(SVG_SANITIZE_CONFIG.ALLOWED_ATTR!.length).toBeGreaterThan(10);
 
       // Dangerous tags must NOT be in any allowlist
-      const allAllowedTags = [...SVG_SANITIZE_CONFIG.ALLOWED_TAGS!, ...SVG_SANITIZE_CONFIG.ADD_TAGS!];
-      const blockedTags = ['script', 'iframe', 'object', 'embed', 'form', 'input', 'textarea', 'img'];
+      const allAllowedTags = [
+        ...SVG_SANITIZE_CONFIG.ALLOWED_TAGS!,
+        ...SVG_SANITIZE_CONFIG.ADD_TAGS!,
+      ];
+      const blockedTags = [
+        'script',
+        'iframe',
+        'object',
+        'embed',
+        'form',
+        'input',
+        'textarea',
+        'img',
+      ];
       for (const tag of blockedTags) {
         expect(allAllowedTags).not.toContain(tag);
       }
@@ -304,7 +343,17 @@ describe('RenderedMarkdown', () => {
       }
 
       // Core SVG tags must be in ALLOWED_TAGS
-      const requiredSvgTags = ['svg', 'g', 'path', 'rect', 'text', 'tspan', 'defs', 'style', 'marker'];
+      const requiredSvgTags = [
+        'svg',
+        'g',
+        'path',
+        'rect',
+        'text',
+        'tspan',
+        'defs',
+        'style',
+        'marker',
+      ];
       for (const tag of requiredSvgTags) {
         expect(SVG_SANITIZE_CONFIG.ALLOWED_TAGS).toContain(tag);
       }
@@ -321,7 +370,10 @@ describe('RenderedMarkdown', () => {
       // HTML_INTEGRATION_POINTS must include both foreignobject (SVG→HTML bridge)
       // and annotation-xml (MathML→HTML bridge) for namespace bridging
       expect(SVG_SANITIZE_CONFIG.HTML_INTEGRATION_POINTS).toBeDefined();
-      const integrationPoints = SVG_SANITIZE_CONFIG.HTML_INTEGRATION_POINTS as Record<string, unknown>;
+      const integrationPoints = SVG_SANITIZE_CONFIG.HTML_INTEGRATION_POINTS as Record<
+        string,
+        unknown
+      >;
       expect(integrationPoints).toHaveProperty('foreignobject', true);
       expect(integrationPoints).toHaveProperty('annotation-xml', true);
     });
@@ -363,7 +415,7 @@ describe('RenderedMarkdown', () => {
         (config) =>
           config &&
           typeof config === 'object' &&
-          (config as Record<string, unknown>).securityLevel === 'strict',
+          (config as Record<string, unknown>).securityLevel === 'strict'
       );
       expect(hasStrictCall).toBe(true);
     });
@@ -373,7 +425,7 @@ describe('RenderedMarkdown', () => {
 describe('SyntaxHighlightedCode', () => {
   it('applies the nightOwl theme dark background to the pre element', () => {
     const { container } = render(
-      <SyntaxHighlightedCode content="const x = 1;" language="typescript" />,
+      <SyntaxHighlightedCode content="const x = 1;" language="typescript" />
     );
     const pre = container.querySelector('pre');
     expect(pre).toBeTruthy();

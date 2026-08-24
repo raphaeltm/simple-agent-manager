@@ -45,8 +45,8 @@ PR #693 shipped the knowledge graph feature with Playwright visual audits for th
 - [ ] `DELETE /observations/:observationId` — happy path
 
 ### HIGH — get_instructions Integration
-- [ ] When `getRelevantKnowledge` returns results, response includes `knowledgeContext` + 3-item instructions
-- [ ] When `getRelevantKnowledge` returns empty, response omits `knowledgeContext` + 2-item instructions
+- [ ] When `getRelevantKnowledge` returns results, response includes `knowledgeDirectives` + 3-item instructions
+- [ ] When `getRelevantKnowledge` returns empty, response omits `knowledgeDirectives` + 2-item instructions
 - [ ] When `getRelevantKnowledge` throws, `get_instructions` still succeeds (error swallowed)
 
 ### MEDIUM — Row Parser Tests

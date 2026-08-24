@@ -67,6 +67,8 @@ vi.mock('drizzle-orm/d1', () => ({
 }));
 
 vi.mock('@simple-agent-manager/shared', () => ({
+  COMMENT_STATUSES: ['open', 'sent', 'resolved'],
+  DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT: 5000,
   DEFAULT_CHAT_SESSION_MESSAGE_LIMIT: 500,
   DEFAULT_CHAT_SESSION_MESSAGE_MAX: 50000,
   DEFAULT_CHAT_COMPACT_MODE: true,
@@ -353,6 +355,7 @@ describe('chatRoutes agent session routing', () => {
       'chat-1',
       5000,
       null,
+      null,
       undefined,
       true,
     );
@@ -382,6 +385,7 @@ describe('chatRoutes agent session routing', () => {
       'proj-1',
       'chat-1',
       50000,
+      null,
       null,
       undefined,
       true,
@@ -414,6 +418,7 @@ describe('chatRoutes agent session routing', () => {
       'chat-1',
       8000,
       null,
+      null,
       undefined,
       true,
     );
@@ -437,6 +442,7 @@ describe('chatRoutes agent session routing', () => {
       'proj-1',
       'chat-1',
       500,
+      null,
       null,
       undefined,
       true,
@@ -657,6 +663,7 @@ describe('chatRoutes message list', () => {
       'chat-1',
       20,
       2000,
+      null,
       ['user'],
       true,
       'desc',
@@ -676,6 +683,7 @@ describe('chatRoutes message list', () => {
       'proj-1',
       'chat-1',
       1,
+      null,
       null,
       ['user'],
       true,

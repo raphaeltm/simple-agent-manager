@@ -11,39 +11,127 @@ import type {
   AgentMailboxMessage,
   CheckpointEpisode,
   CheckpointEpisodeTransitionInput,
+  CommentAuthor,
+  CommentReply,
+  CommentStatus,
   CreateCheckpointEpisodeInput,
   DeliveryState,
+  LibraryFileCommentMutationResponse,
   MessageClass,
+  MessageCommentListResponse,
+  MessageCommentMutationResponse,
+  MessageCommentReplyMutationResponse,
+  MessageCommentThread,
   SessionActivityTerminalReason,
 } from '@simple-agent-manager/shared';
 import { resolveHandoffLimits, resolveMissionStateLimits } from '@simple-agent-manager/shared';
 
 import type { ProjectData } from '../durable-objects/project-data';
 import type {
+  CreateCommentReplyInput,
+  CreateCommentThreadInput,
+  CreateFileCommentReplyInput,
+  CreateFileCommentThreadInput,
+  ListCommentThreadsInput,
+  ListFileCommentThreadsInput,
+  ListFileCommentThreadsResult,
+  UpdateCommentStatusInput,
+  UpdateFileCommentStatusInput,
+} from '../durable-objects/project-data/comment-contracts';
+import { CommentNotFoundError } from '../durable-objects/project-data/comment-contracts';
+export {
+  CommentIdempotencyConflictError,
+  CommentLimitExceededError,
+  CommentNotFoundError,
+  CommentValidationError,
+} from '../durable-objects/project-data/comment-contracts';
+import type {
   AcceptedPromptDelivery,
   AcceptPromptDeliveryInput,
 } from '../durable-objects/project-data/prompt-delivery';
+import type { RegisterTaskWaitInput } from '../durable-objects/project-data/task-waits';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import {
   computeDurableObjectRetryDelayMs,
   getDurableObjectRetryConfig,
+  isDurableObjectStorageFullError,
   isTransientDurableObjectError,
 } from './durable-object-retry';
+import { ensureOncePerIsolate, forgetEnsuredProjectData } from './project-data-ensure-memo';
+import { toProjectDataStorageFullError } from './project-data-storage-errors';
 
 /**
  * Get a typed DO stub for the given project and ensure the DO knows its projectId.
  * Uses `idFromName(projectId)` for deterministic mapping.
  *
  * `ensureProjectId` stores the projectId in DO SQLite so that internal methods
- * like `syncSummaryToD1` can reference the correct D1 row. This is necessary
- * because `DurableObjectId.toString()` returns a hex ID, not the original name.
+ * like `syncSummaryToD1` — and every `alarm()`-driven sweep — can reference the
+ * correct D1 row. This is necessary because `DurableObjectId.toString()` returns
+ * a hex ID, not the original name, so the DO cannot derive its own projectId.
+ *
+ * The ensure is issued **once per (isolate, DO)** rather than before every call:
+ * `do_meta` is durable and is never deleted, so repeating the RPC only bought a
+ * second roundtrip per logical operation. See `project-data-ensure-memo.ts` for
+ * the full justification and the list of consumers that depend on the stored id.
  */
 async function getStub(env: Env, projectId: string): Promise<DurableObjectStub<ProjectData>> {
   const id = env.PROJECT_DATA.idFromName(projectId);
   const stub = env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectData>;
-  await stub.ensureProjectId(projectId);
+  await ensureOncePerIsolate(env, id.toString(), async () => {
+    await stub.ensureProjectId(projectId);
+  });
   return stub;
+}
+
+/**
+ * Forget the memoized ensure for a project after a failed DO call, so a Durable
+ * Object that was reset mid-flight re-persists its projectId on the next attempt.
+ */
+function forgetEnsuredProject(env: Env, projectId: string): void {
+  forgetEnsuredProjectData(env.PROJECT_DATA.idFromName(projectId).toString());
+}
+
+function normalizeProjectDataRpcError(projectId: string, operation: string, err: unknown): unknown {
+  if (isDurableObjectStorageFullError(err)) {
+    return toProjectDataStorageFullError(projectId, operation, err);
+  }
+  const commentError = normalizeProjectDataCommentRpcError(err);
+  if (commentError) return commentError;
+  return err;
+}
+
+function normalizeProjectDataCommentRpcError(err: unknown): unknown | null {
+  if (!(err instanceof Error)) return null;
+
+  // Cloudflare DO RPC serializes custom Error subclasses across isolates as a
+  // generic Error whose message includes the original class name. Keep this
+  // deliberately exact so non-domain failures continue to surface as 500s.
+  switch (err.message) {
+    case 'CommentNotFoundError: Chat session not found':
+      return new CommentNotFoundError('Chat session');
+    case 'CommentNotFoundError: Message not found':
+      return new CommentNotFoundError('Message');
+    case 'CommentNotFoundError: Comment thread not found':
+      return new CommentNotFoundError('Comment thread');
+    default:
+      return null;
+  }
+}
+
+async function callProjectDataNoRetry<T>(
+  env: Env,
+  projectId: string,
+  operation: string,
+  call: (stub: DurableObjectStub<ProjectData>) => Promise<T>
+): Promise<T> {
+  try {
+    const stub = await getStub(env, projectId);
+    return await call(stub);
+  } catch (err) {
+    forgetEnsuredProject(env, projectId);
+    throw normalizeProjectDataRpcError(projectId, operation, err);
+  }
 }
 
 async function callProjectDataWithRetry<T>(
@@ -61,6 +149,14 @@ async function callProjectDataWithRetry<T>(
       return await call(stub);
     } catch (err) {
       lastError = err;
+      // Any DO failure means this isolate could not observe the DO's state, so
+      // drop its belief that projectId is persisted and let the next attempt
+      // re-ensure. Idempotent, and defence in depth only — see the memo module.
+      forgetEnsuredProject(env, projectId);
+
+      if (isDurableObjectStorageFullError(err)) {
+        throw toProjectDataStorageFullError(projectId, operation, err);
+      }
 
       if (attempt >= retryConfig.maxAttempts || !isTransientDurableObjectError(err)) {
         throw err;
@@ -83,7 +179,11 @@ async function callProjectDataWithRetry<T>(
     }
   }
 
-  throw lastError ?? new Error('ProjectData DO retry exhausted without an error');
+  throw normalizeProjectDataRpcError(
+    projectId,
+    operation,
+    lastError ?? new Error('ProjectData DO retry exhausted without an error')
+  );
 }
 
 function sleep(ms: number): Promise<void> {
@@ -102,8 +202,9 @@ export async function createSession(
   taskId: string | null = null,
   createdByUserId: string | null = null
 ): Promise<string> {
-  const stub = await getStub(env, projectId);
-  return stub.createSession(workspaceId, topic, taskId, createdByUserId);
+  return callProjectDataNoRetry(env, projectId, 'createSession', (stub) =>
+    stub.createSession(workspaceId, topic, taskId, createdByUserId)
+  );
 }
 
 export async function linkSessionToWorkspace(
@@ -171,13 +272,14 @@ export async function persistMessage(
   toolMetadata: Record<string, unknown> | null,
   messageId?: string
 ): Promise<string> {
-  const stub = await getStub(env, projectId);
-  return stub.persistMessage(
-    sessionId,
-    role,
-    content,
-    toolMetadata ? JSON.stringify(toolMetadata) : null,
-    messageId
+  return callProjectDataNoRetry(env, projectId, 'persistMessage', (stub) =>
+    stub.persistMessage(
+      sessionId,
+      role,
+      content,
+      toolMetadata ? JSON.stringify(toolMetadata) : null,
+      messageId
+    )
   );
 }
 
@@ -201,21 +303,22 @@ export async function persistMessageBatch(
   maxMessages?: number;
   remainingCapacity?: number;
 }> {
-  const stub = await getStub(env, projectId);
-  return stub.persistMessageBatch(
-    sessionId,
-    messages.map((m) => ({
-      messageId: m.messageId,
-      role: m.role,
-      content: m.content,
-      toolMetadata: m.toolMetadata ? JSON.stringify(m.toolMetadata) : null,
-      timestamp: m.timestamp,
-      sequence: m.sequence,
-      // origin ("system" for SAM-injected messages) MUST be forwarded to the DO
-      // so the persisted message can be collapsed in the UI and excluded from
-      // dedup/search/topic/attention. Dropping it here silently loses the tag.
-      origin: m.origin ?? null,
-    }))
+  return callProjectDataNoRetry(env, projectId, 'persistMessageBatch', (stub) =>
+    stub.persistMessageBatch(
+      sessionId,
+      messages.map((m) => ({
+        messageId: m.messageId,
+        role: m.role,
+        content: m.content,
+        toolMetadata: m.toolMetadata ? JSON.stringify(m.toolMetadata) : null,
+        timestamp: m.timestamp,
+        sequence: m.sequence,
+        // origin ("system" for SAM-injected messages) MUST be forwarded to the DO
+        // so the persisted message can be collapsed in the UI and excluded from
+        // dedup/search/topic/attention. Dropping it here silently loses the tag.
+        origin: m.origin ?? null,
+      }))
+    )
   );
 }
 
@@ -230,6 +333,19 @@ export async function listSessions(
 ): Promise<{ sessions: Record<string, unknown>[]; total: number; hasMore: boolean }> {
   const stub = await getStub(env, projectId);
   return stub.listSessions(status, limit, offset, taskId, createdByUserId);
+}
+
+/**
+ * Ask the ProjectData DO to refresh the D1 session index (debounced inside the DO).
+ *
+ * Only for callers that observed the index fail to answer. Do NOT fold this into
+ * `listSessions` — most of its callers never touch the index, and syncing from
+ * there turns ordinary reads (the account-map fan-out over every project, the
+ * admin backfill over every project in the deployment) into re-index storms.
+ */
+export async function primeSessionIndex(env: Env, projectId: string): Promise<void> {
+  const stub = await getStub(env, projectId);
+  await stub.primeSessionIndex();
 }
 
 export async function getSessionsByTaskIds(
@@ -268,12 +384,13 @@ export async function getMessages(
   sessionId: string,
   limit: number = 100,
   before: number | null = null,
+  after: number | null = null,
   roles?: string[],
   compact: boolean = false,
   order: 'asc' | 'desc' = 'desc'
 ): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
   return callProjectDataWithRetry(env, projectId, 'getMessages', (stub) =>
-    stub.getMessages(sessionId, limit, before, roles, compact, order)
+    stub.getMessages(sessionId, limit, before, after, roles, compact, order)
   );
 }
 
@@ -319,6 +436,107 @@ export async function searchMessages(
 > {
   const stub = await getStub(env, projectId);
   return stub.searchMessages(query, sessionId, roles, limit);
+}
+
+// =========================================================================
+// Message-Anchored Comments
+// =========================================================================
+
+export type MessageCommentActor = CommentAuthor;
+
+export async function listCommentThreads(
+  env: Env,
+  projectId: string,
+  input: ListCommentThreadsInput
+): Promise<MessageCommentListResponse> {
+  return callProjectDataWithRetry(env, projectId, 'listCommentThreads', (stub) =>
+    stub.listCommentThreads(input)
+  );
+}
+
+export async function getCommentThread(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  threadId: string
+): Promise<MessageCommentThread | null> {
+  return callProjectDataWithRetry(env, projectId, 'getCommentThread', (stub) =>
+    stub.getCommentThread({ sessionId, threadId })
+  );
+}
+
+export async function createCommentThread(
+  env: Env,
+  projectId: string,
+  input: CreateCommentThreadInput
+): Promise<MessageCommentMutationResponse> {
+  return callProjectDataNoRetry(env, projectId, 'createCommentThread', (stub) =>
+    stub.createCommentThread(input)
+  );
+}
+
+export async function createCommentReply(
+  env: Env,
+  projectId: string,
+  input: CreateCommentReplyInput
+): Promise<MessageCommentReplyMutationResponse> {
+  return callProjectDataNoRetry(env, projectId, 'createCommentReply', (stub) =>
+    stub.createCommentReply(input)
+  );
+}
+
+export async function updateCommentThreadStatus(
+  env: Env,
+  projectId: string,
+  input: UpdateCommentStatusInput & { status: CommentStatus }
+): Promise<MessageCommentMutationResponse> {
+  return callProjectDataNoRetry(env, projectId, 'updateCommentThreadStatus', (stub) =>
+    stub.updateCommentThreadStatus(input)
+  );
+}
+
+// --- Library file comments ---------------------------------------------------
+// Every entry point is `fileId`-scoped. Callers must have already proven the file
+// belongs to `projectId` (see assertLibraryFileInProject) — the DO has no D1.
+
+export async function listFileCommentThreads(
+  env: Env,
+  projectId: string,
+  input: ListFileCommentThreadsInput
+): Promise<ListFileCommentThreadsResult> {
+  return callProjectDataWithRetry(env, projectId, 'listFileCommentThreads', (stub) =>
+    stub.listFileCommentThreads(input)
+  );
+}
+
+export async function createFileCommentThread(
+  env: Env,
+  projectId: string,
+  input: CreateFileCommentThreadInput
+): Promise<LibraryFileCommentMutationResponse> {
+  return callProjectDataNoRetry(env, projectId, 'createFileCommentThread', (stub) =>
+    stub.createFileCommentThread(input)
+  );
+}
+
+export async function createFileCommentReply(
+  env: Env,
+  projectId: string,
+  input: CreateFileCommentReplyInput
+): Promise<LibraryFileCommentMutationResponse & { reply: CommentReply }> {
+  return callProjectDataNoRetry(env, projectId, 'createFileCommentReply', (stub) =>
+    stub.createFileCommentReply(input)
+  );
+}
+
+export async function updateFileCommentThreadStatus(
+  env: Env,
+  projectId: string,
+  input: UpdateFileCommentStatusInput & { status: CommentStatus }
+): Promise<LibraryFileCommentMutationResponse> {
+  return callProjectDataNoRetry(env, projectId, 'updateFileCommentThreadStatus', (stub) =>
+    stub.updateFileCommentThreadStatus(input)
+  );
 }
 
 /** Materialize all stopped sessions that haven't been indexed yet. */
@@ -448,15 +666,16 @@ export async function recordActivityEvent(
   taskId: string | null,
   payload: Record<string, unknown> | null
 ): Promise<string> {
-  const stub = await getStub(env, projectId);
-  return stub.recordActivityEvent(
-    eventType,
-    actorType,
-    actorId,
-    workspaceId,
-    sessionId,
-    taskId,
-    payload ? JSON.stringify(payload) : null
+  return callProjectDataNoRetry(env, projectId, 'recordActivityEvent', (stub) =>
+    stub.recordActivityEvent(
+      eventType,
+      actorType,
+      actorId,
+      workspaceId,
+      sessionId,
+      taskId,
+      payload ? JSON.stringify(payload) : null
+    )
   );
 }
 
@@ -589,6 +808,10 @@ export async function reportAcpSessionActivity(
     agentType?: string | null;
     restartCount?: number | null;
     statusError?: string | null;
+    runtimeWorkState?: 'inactive' | 'active' | 'settling';
+    runtimeWorkCount?: number;
+    runtimeWorkSource?: string;
+    runtimeWorkProgressAt?: number | null;
   }
 ): Promise<void> {
   const stub = await getStub(env, projectId);
@@ -615,6 +838,23 @@ export async function recordSessionTurnEnd(
 export async function getSessionState(env: Env, projectId: string, sessionId: string) {
   const stub = await getStub(env, projectId);
   return stub.getSessionState(sessionId);
+}
+
+export async function registerTaskWait(env: Env, projectId: string, input: RegisterTaskWaitInput) {
+  return callProjectDataWithRetry(env, projectId, 'registerTaskWait', (stub) =>
+    stub.registerTaskWait(input)
+  );
+}
+
+export async function getTaskWait(env: Env, projectId: string, subscriptionId: string) {
+  const stub = await getStub(env, projectId);
+  return stub.getTaskWait(subscriptionId);
+}
+
+export async function reconcileTaskWaits(env: Env, projectId: string, childTaskId?: string) {
+  return callProjectDataWithRetry(env, projectId, 'reconcileTaskWaits', (stub) =>
+    stub.reconcileTaskWaits(childTaskId)
+  );
 }
 
 /** Get the latest durable plan message snapshot for a chat session. */
@@ -675,6 +915,27 @@ export async function getSummary(
 ): Promise<{ lastActivityAt: string; activeSessionCount: number }> {
   const stub = await getStub(env, projectId);
   return stub.getSummary();
+}
+
+export async function measureProjectDataStorage(env: Env, projectId: string) {
+  return callProjectDataNoRetry(env, projectId, 'measureProjectDataStorage', (stub) =>
+    stub.measureStorage()
+  );
+}
+
+export async function runProjectDataStorageEmergencyPurge(
+  env: Env,
+  projectId: string,
+  input: {
+    reason?: string | null;
+    targetRatio?: number | null;
+    batchRows?: number | null;
+    maxBatches?: number | null;
+  } = {}
+) {
+  return callProjectDataNoRetry(env, projectId, 'runProjectDataStorageEmergencyPurge', (stub) =>
+    stub.runStorageEmergencyPurge(input)
+  );
 }
 
 // =========================================================================
@@ -860,10 +1121,16 @@ export async function getAllHighConfidenceKnowledge(
   env: Env,
   projectId: string,
   minConfidence: number,
-  limit: number
+  limit: number,
+  perEntityLimit?: number
 ) {
   const stub = await getStub(env, projectId);
-  return stub.getAllHighConfidenceKnowledge(minConfidence, limit);
+  return stub.getAllHighConfidenceKnowledge(minConfidence, limit, perEntityLimit);
+}
+
+export async function getKnowledgeEntityIndex(env: Env, projectId: string, limit?: number) {
+  const stub = await getStub(env, projectId);
+  return stub.getKnowledgeEntityIndex(limit);
 }
 
 export async function createKnowledgeRelation(

@@ -1,4 +1,4 @@
-import type { AgentProfileRuntime } from '@simple-agent-manager/shared';
+import type { AgentProfileRuntime, TaskExecutionStep } from '@simple-agent-manager/shared';
 
 import { request } from './client';
 
@@ -114,6 +114,17 @@ export interface SessionStateSnapshot {
   promptStartedAt: number | null;
   agentType: string | null;
   lastStopReason: string | null;
+  runtimeWorkState: 'inactive' | 'active' | 'settling' | null;
+  runtimeWorkCount: number | null;
+  runtimeWorkSource: string | null;
+  runtimeWorkUpdatedAt: number | null;
+  runtimeWorkProgressAt: number | null;
+  recoveryStatus?: 'waking' | 'restored' | 'failed' | null;
+  /**
+   * Execution step of the replacement TaskRunner waking this session. Drives
+   * phase-level wake progress; null when no wake is in flight.
+   */
+  wakePhase?: TaskExecutionStep | null;
 }
 
 export interface ChatSessionDetailResponse {
@@ -216,11 +227,12 @@ export async function getAllChats(
 export async function getChatSession(
   projectId: string,
   sessionId: string,
-  params: { limit?: number; before?: number; signal?: AbortSignal } = {}
+  params: { limit?: number; before?: number; after?: number; signal?: AbortSignal } = {}
 ): Promise<ChatSessionDetailResponse> {
   const searchParams = new URLSearchParams();
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
   if (params.before !== undefined) searchParams.set('before', String(params.before));
+  if (params.after !== undefined) searchParams.set('after', String(params.after));
 
   const qs = searchParams.toString();
   const endpoint = qs
@@ -250,6 +262,7 @@ export async function listChatMessages(
   params: {
     limit?: number;
     before?: number;
+    after?: number;
     roles?: string[];
     compact?: boolean;
     order?: 'asc' | 'desc';
@@ -259,6 +272,7 @@ export async function listChatMessages(
   const searchParams = new URLSearchParams();
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
   if (params.before !== undefined) searchParams.set('before', String(params.before));
+  if (params.after !== undefined) searchParams.set('after', String(params.after));
   if (params.roles && params.roles.length > 0) searchParams.set('roles', params.roles.join(','));
   if (params.compact !== undefined) searchParams.set('compact', String(params.compact));
   if (params.order !== undefined) searchParams.set('order', params.order);

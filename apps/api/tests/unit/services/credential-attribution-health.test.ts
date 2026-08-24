@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
-import { getProjectCredentialAttributionHealth } from '../../../src/services/credential-attribution-health';
+import {
+  clearCredentialAttributionHealthCache,
+  getProjectCredentialAttributionHealth,
+} from '../../../src/services/credential-attribution-health';
 
 function makeDb(results: unknown[][]) {
   let callIndex = 0;
@@ -56,6 +59,9 @@ const owner = {
 };
 
 describe('credential attribution health service', () => {
+  beforeEach(() => {
+    clearCredentialAttributionHealthCache();
+  });
   it('counts personal trigger credential paths when no project coverage exists', async () => {
     const db = makeDb([
       [trigger],
@@ -129,5 +135,48 @@ describe('credential attribution health service', () => {
     expect(serialized).not.toContain('secret-iv');
     expect(serialized).not.toContain('encryptedToken');
     expect(serialized).not.toContain('"iv"');
+  });
+
+  it('reuses cached project health within the configured TTL', async () => {
+    const db = makeDb([[trigger], [], [owner], []]);
+
+    const first = await getProjectCredentialAttributionHealth({
+      db: db as never,
+      project,
+      defaultAgentType: 'opencode',
+      multiplayerActive: false,
+      env: { CREDENTIAL_ATTRIBUTION_CACHE_TTL_MS: '1000' },
+    });
+    const second = await getProjectCredentialAttributionHealth({
+      db: db as never,
+      project,
+      defaultAgentType: 'opencode',
+      multiplayerActive: false,
+      env: { CREDENTIAL_ATTRIBUTION_CACHE_TTL_MS: '1000' },
+    });
+
+    expect(second).toBe(first);
+  });
+
+  it('supports explicit credential attribution cache invalidation', async () => {
+    const db = makeDb([[trigger], [], [owner], []]);
+
+    const first = await getProjectCredentialAttributionHealth({
+      db: db as never,
+      project,
+      defaultAgentType: 'opencode',
+      multiplayerActive: false,
+      env: { CREDENTIAL_ATTRIBUTION_CACHE_TTL_MS: '1000' },
+    });
+    clearCredentialAttributionHealthCache(project.id);
+    const second = await getProjectCredentialAttributionHealth({
+      db: db as never,
+      project,
+      defaultAgentType: 'opencode',
+      multiplayerActive: false,
+      env: { CREDENTIAL_ATTRIBUTION_CACHE_TTL_MS: '1000' },
+    });
+
+    expect(second).not.toBe(first);
   });
 });

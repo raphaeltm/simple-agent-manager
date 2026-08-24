@@ -70,6 +70,9 @@ export {
 // Skill schemas
 export { CreateSkillSchema, UpdateSkillSchema } from './skills';
 
+// Bring-your-own MCP server schemas
+export { CreateMcpConnectionSchema, UpdateMcpConnectionSchema } from './mcp-connections';
+
 // Knowledge graph schemas
 export {
   AddObservationSchema,
@@ -114,12 +117,21 @@ export {
   CreateAcpSessionSchema,
 } from './acp-sessions';
 
+// Message-anchored comment schemas
+export {
+  CommentStatusMutationSchema,
+  CreateCommentReplySchema,
+  CreateCommentThreadSchema,
+  SendCommentDirectiveSchema,
+} from './comments';
+
 // Admin schemas
 export {
   AdminUserActionSchema,
   AdminUserRoleSchema,
   AnalyticsForwardSchema,
   CreatePlatformCredentialSchema,
+  ProjectDataStorageEmergencyPurgeSchema,
   UpdatePlatformCredentialSchema,
   UpdatePlatformIntegrationConfigSchema,
   UpdateSignupApprovalConfigSchema,

@@ -7,10 +7,17 @@ import { ToastProvider } from '../../../src/hooks/useToast';
 import { createTrigger, listAgentProfiles } from '../../../src/lib/api';
 import { ProjectContext, type ProjectContextValue } from '../../../src/pages/ProjectContext';
 import { ProjectTriggers } from '../../../src/pages/ProjectTriggers';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 // ---------------------------------------------------------------------------
 // Mocks — inline data to avoid hoisting issues with vi.mock
 // ---------------------------------------------------------------------------
+
+// `useQueryScope()` reads the authenticated identity, and every migrated query
+// is keyed by it. Without a provider `useAuth` throws, so supply a stable identity.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
+}));
 
 vi.mock('../../../src/lib/api', () => ({
   listTriggers: vi.fn().mockResolvedValue({
@@ -87,7 +94,7 @@ function renderTriggers(initialRoute = '/projects/proj-test/triggers') {
         </ToastProvider>
       </ProjectContext.Provider>
     </MemoryRouter>
-  );
+  , { wrapper: QueryTestWrapper });
 }
 
 // ---------------------------------------------------------------------------

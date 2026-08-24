@@ -120,6 +120,28 @@
         "d375245952311c037411c21bfb6861e1b98c3cfb9336cce43d43c7eaa8433198",
         "1baa6f716547da91f09a12d0d8cba7e12a1fd05ba774a6e8a1cc9288e98feb5e"
       ]
+    },
+    {
+      "classification": "code-identifier",
+      "reason": "Reviewed PEM header/footer string references in convertPkcs1ToPkcs8() at shifted line positions after KV caching code added earlier in github-app.ts; same code as main lines 189/196/207, now at 204/211/222.",
+      "owner": "security",
+      "reviewedAt": "2026-08-19T00:00:00.000Z",
+      "expiresAt": "2026-11-17T00:00:00.000Z",
+      "digests": [
+        "1b2e5830af04890ec8044656187a4435d76062a4c0c4b19b561046bac67d32a0",
+        "0ed74e33345c51812e64da9c1525503195b08302331375958aaa089366731f2d",
+        "47c37335119e59f588cdc57fe5b2c667193257ab22d0164ee26ec1ac02139c0e"
+      ]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Reviewed synthetic mcp_tok_fixture_abc123 token in trial-orchestrator-agent-boot.test.ts; mock MCP callback token for BYO MCP servers feature test, not real secret material.",
+      "owner": "security",
+      "reviewedAt": "2026-08-23T00:00:00.000Z",
+      "expiresAt": "2026-11-21T00:00:00.000Z",
+      "digests": [
+        "a36d27de181226037bea3c4b4b8213525696b3d3a8a94adc48d03797bc412a01"
+      ]
     }
   ]
 }

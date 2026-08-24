@@ -1,8 +1,10 @@
 import type { SlashCommand } from '@simple-agent-manager/acp-client';
 import { CLIENT_COMMANDS,getAllStaticCommands } from '@simple-agent-manager/acp-client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useCallback, useMemo } from 'react';
 
-import { getCachedCommands } from '../lib/api';
+import { cachedCommandsQueryOptions } from '../lib/query-options';
+import { useQueryScope } from './useQueryScope';
 
 /**
  * Merges three tiers of slash commands for the project chat input:
@@ -20,44 +22,21 @@ export function useAvailableCommands(
   projectId: string,
   liveCommands?: SlashCommand[],
   refreshKey?: string | null,
-): { commands: SlashCommand[]; isLoading: boolean; refetch: () => void; persistCommands: (agentType: string, cmds: SlashCommand[]) => void } {
-  const [cachedCommands, setCachedCommands] = useState<SlashCommand[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  const fetchCachedCommands = useCallback((signal?: { cancelled: boolean }) => {
-    setIsLoading(true);
-    getCachedCommands(projectId)
-      .then((result) => {
-        if (signal?.cancelled) return;
-        setCachedCommands(
-          result.commands.map((cmd) => ({
-            name: cmd.name,
-            description: cmd.description,
-            source: 'cached' as const,
-          })),
-        );
-      })
-      .catch(() => {
-        // Non-fatal — static commands are still available
-      })
-      .finally(() => {
-        if (!signal?.cancelled) setIsLoading(false);
-      });
-  }, [projectId]);
-
-  // Fetch cached commands on mount, when projectId changes, or when refreshKey changes
-  useEffect(() => {
-    const signal = { cancelled: false };
-    fetchCachedCommands(signal);
-    return () => { signal.cancelled = true; };
-  }, [fetchCachedCommands, refreshKey]);
+): { commands: SlashCommand[]; isLoading: boolean; refetch: () => void; persistCommands: (agentType: string, cmds?: SlashCommand[]) => void } {
+  const queryScope = useQueryScope();
+  const cachedCommandsQuery = useQuery({
+    ...cachedCommandsQueryOptions(queryScope, projectId, refreshKey),
+    enabled: Boolean(projectId && queryScope),
+  });
 
   // Imperative refetch for callers (e.g. after persisting new commands)
-  const refetch = useCallback(() => fetchCachedCommands(), [fetchCachedCommands]);
+  const refetch = useCallback(() => {
+    void cachedCommandsQuery.refetch();
+  }, [cachedCommandsQuery]);
 
   // Allow callers to trigger a cache persist (fire-and-forget)
   const persistCommands = useCallback(
-    (agentType: string, cmds: SlashCommand[]) => {
+    (agentType: string, cmds: SlashCommand[] = []) => {
       import('../lib/api').then(({ saveCachedCommands }) => {
         saveCachedCommands(
           projectId,
@@ -72,6 +51,12 @@ export function useAvailableCommands(
   // Merge all sources with dedup (live > cached > static > client)
   const commands = useMemo(() => {
     const seen = new Map<string, SlashCommand>();
+    const cachedCommands: SlashCommand[] =
+      cachedCommandsQuery.data?.commands?.map((cmd) => ({
+        name: cmd.name,
+        description: cmd.description,
+        source: 'cached' as const,
+      })) ?? [];
 
     // Lowest priority first — higher priority overwrites
     for (const cmd of CLIENT_COMMANDS) seen.set(cmd.name, cmd);
@@ -82,7 +67,15 @@ export function useAvailableCommands(
     }
 
     return Array.from(seen.values());
-  }, [cachedCommands, liveCommands]);
+  }, [cachedCommandsQuery.data, liveCommands]);
 
-  return { commands, isLoading, refetch, persistCommands };
+  return {
+    commands,
+    isLoading:
+      Boolean(projectId && queryScope) &&
+      cachedCommandsQuery.isPending &&
+      cachedCommandsQuery.data === undefined,
+    refetch,
+    persistCommands,
+  };
 }

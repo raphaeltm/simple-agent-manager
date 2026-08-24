@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useSessionTimeline } from '../../../src/components/project-message-view/useSessionTimeline';
 import type { ActivityEventResponse, ChatMessageResponse } from '../../../src/lib/api/sessions';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 // Mock the API module
 vi.mock('../../../src/lib/api/sessions', async (importOriginal) => {
@@ -17,6 +18,10 @@ vi.mock('../../../src/lib/api/sessions', async (importOriginal) => {
 
 vi.mock('../../../src/lib/api/notifications', () => ({
   listNotifications: vi.fn(),
+}));
+
+vi.mock('../../../src/hooks/useQueryScope', () => ({
+  useQueryScope: () => 'user-1',
 }));
 
 // Import the mocked function for assertions
@@ -79,9 +84,9 @@ describe('useSessionTimeline', () => {
   });
 
   it('does not fetch events when disabled', () => {
-    renderHook(() =>
-      useSessionTimeline('proj-1', 'sess-1', [], false)
-    );
+    renderHook(() => useSessionTimeline('proj-1', 'sess-1', [], false), {
+      wrapper: QueryTestWrapper,
+    });
 
     expect(mockListActivityEvents).not.toHaveBeenCalled();
     expect(mockListChatMessages).not.toHaveBeenCalled();
@@ -98,9 +103,9 @@ describe('useSessionTimeline', () => {
       hasMore: false,
     });
 
-    const { result } = renderHook(() =>
-      useSessionTimeline('proj-1', 'sess-1', [], true)
-    );
+    const { result } = renderHook(() => useSessionTimeline('proj-1', 'sess-1', [], true), {
+      wrapper: QueryTestWrapper,
+    });
 
     // Wait for the fetch to complete
     await act(async () => {
@@ -123,7 +128,9 @@ describe('useSessionTimeline', () => {
       });
     });
 
-    expect(result.current.loading).toBe(false);
+    await vi.waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
   });
 
   it('uses server-fetched messages instead of only the loaded chat messages', async () => {
@@ -134,8 +141,9 @@ describe('useSessionTimeline', () => {
 
     const loadedMessages = [makeMessage('loaded-ui-message', 1000)];
 
-    const { result } = renderHook(() =>
-      useSessionTimeline('proj-1', 'sess-1', loadedMessages, true)
+    const { result } = renderHook(
+      () => useSessionTimeline('proj-1', 'sess-1', loadedMessages, true),
+      { wrapper: QueryTestWrapper }
     );
 
     await act(async () => {
@@ -145,7 +153,9 @@ describe('useSessionTimeline', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    expect(result.current.entries.some((entry) => entry.id === 'msg-server-old-user-turn')).toBe(true);
+    await vi.waitFor(() => {
+      expect(result.current.entries.some((entry) => entry.id === 'msg-server-old-user-turn')).toBe(true);
+    });
   });
 
   it('paginates server user messages until history is exhausted', async () => {
@@ -159,9 +169,9 @@ describe('useSessionTimeline', () => {
         hasMore: false,
       });
 
-    const { result } = renderHook(() =>
-      useSessionTimeline('proj-1', 'sess-1', [], true)
-    );
+    const { result } = renderHook(() => useSessionTimeline('proj-1', 'sess-1', [], true), {
+      wrapper: QueryTestWrapper,
+    });
 
     await act(async () => {
       await vi.waitFor(() => {
@@ -189,9 +199,9 @@ describe('useSessionTimeline', () => {
       nextCursor: null,
     });
 
-    const { result } = renderHook(() =>
-      useSessionTimeline('proj-1', 'sess-1', [], true)
-    );
+    const { result } = renderHook(() => useSessionTimeline('proj-1', 'sess-1', [], true), {
+      wrapper: QueryTestWrapper,
+    });
 
     await act(async () => {
       await vi.waitFor(() => {
@@ -205,10 +215,12 @@ describe('useSessionTimeline', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    expect(result.current.entries.find((entry) => entry.id === 'notif-n1')).toMatchObject({
-      kind: 'progress_notification',
-      notificationId: 'n1',
-      text: 'Ran focused timeline tests',
+    await vi.waitFor(() => {
+      expect(result.current.entries.find((entry) => entry.id === 'notif-n1')).toMatchObject({
+        kind: 'progress_notification',
+        notificationId: 'n1',
+        text: 'Ran focused timeline tests',
+      });
     });
   });
 
@@ -225,9 +237,9 @@ describe('useSessionTimeline', () => {
         nextCursor: null,
       });
 
-    const { result } = renderHook(() =>
-      useSessionTimeline('proj-1', 'sess-1', [], true)
-    );
+    const { result } = renderHook(() => useSessionTimeline('proj-1', 'sess-1', [], true), {
+      wrapper: QueryTestWrapper,
+    });
 
     await act(async () => {
       await vi.waitFor(() => {
@@ -262,9 +274,9 @@ describe('useSessionTimeline', () => {
       hasMore: false,
     });
 
-    const { result } = renderHook(() =>
-      useSessionTimeline('proj-1', 'sess-1', [], true)
-    );
+    const { result } = renderHook(() => useSessionTimeline('proj-1', 'sess-1', [], true), {
+      wrapper: QueryTestWrapper,
+    });
 
     // Wait for fetch to settle
     await act(async () => {
@@ -284,9 +296,9 @@ describe('useSessionTimeline', () => {
   it('handles fetch errors gracefully without throwing', async () => {
     mockListActivityEvents.mockRejectedValue(new Error('Network error'));
 
-    const { result } = renderHook(() =>
-      useSessionTimeline('proj-1', 'sess-1', [], true)
-    );
+    const { result } = renderHook(() => useSessionTimeline('proj-1', 'sess-1', [], true), {
+      wrapper: QueryTestWrapper,
+    });
 
     // Wait for the rejected promise to settle
     await act(async () => {
@@ -301,9 +313,9 @@ describe('useSessionTimeline', () => {
   it('provides showContext toggle', () => {
     mockListActivityEvents.mockResolvedValue({ events: [], hasMore: false });
 
-    const { result } = renderHook(() =>
-      useSessionTimeline('proj-1', 'sess-1', [], false)
-    );
+    const { result } = renderHook(() => useSessionTimeline('proj-1', 'sess-1', [], false), {
+      wrapper: QueryTestWrapper,
+    });
 
     expect(result.current.showContext).toBe(false);
 

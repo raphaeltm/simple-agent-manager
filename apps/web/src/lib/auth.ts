@@ -2,7 +2,11 @@ import { createAuthClient } from 'better-auth/react';
 
 import { unsubscribeWebPush } from './api/notifications';
 import { clearLegacyLibraryCache, clearLibraryCache } from './library-cache';
-import { broadcastAuthRevocation, cleanupTerminalSecrets, resetAuthRevoked } from './terminal-cleanup';
+import {
+  broadcastAuthRevocation,
+  cleanupTerminalSecrets,
+  resetAuthRevoked,
+} from './terminal-cleanup';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
@@ -62,6 +66,17 @@ export async function signOut() {
   }
   clearLibraryCache();
   clearLegacyLibraryCache();
+  // Best-effort, internally bounded sweep of the persisted query cache. Awaited so
+  // it normally completes before the redirect, and it runs even when the signOut
+  // request below fails — the case the archived cross-user cache incident cared
+  // about. It is NOT a hard guarantee: the sweep races an internal timeout so
+  // sign-out can never hang behind IndexedDB. That is safe because a surviving
+  // record is keyed to this same user and gated by the scope-checked allowlist, so
+  // it can never be read by the next account.
+  // Imported dynamically to keep idb-keyval out of the eager bundle.
+  await import('./query-persistence')
+    .then((m) => m.removeAllPersistedQueryCaches())
+    .catch(() => undefined);
   try {
     await authClient.signOut({
       fetchOptions: {

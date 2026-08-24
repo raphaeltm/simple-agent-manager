@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   nodeAgentRequest: vi.fn(),
   sendPromptToAgentOnNode: vi.fn(),
   ensureSessionRecovery: vi.fn(),
+  wakeSession: vi.fn(),
+  markSessionSnapshotAwakeInPlace: vi.fn(),
   NodeAgentHttpError: class NodeAgentHttpError extends Error {
     constructor(
       public readonly statusCode: number,
@@ -30,6 +32,14 @@ vi.mock('../../../src/services/node-agent', () => ({
 
 vi.mock('../../../src/services/session-recovery', () => ({
   ensureSessionRecovery: mocks.ensureSessionRecovery,
+}));
+
+vi.mock('../../../src/services/project-data', () => ({
+  wakeSession: mocks.wakeSession,
+}));
+
+vi.mock('../../../src/services/session-snapshots', () => ({
+  markSessionSnapshotAwakeInPlace: mocks.markSessionSnapshotAwakeInPlace,
 }));
 
 const protocolFixture = JSON.parse(
@@ -195,15 +205,191 @@ describe('VM prompt delivery adapter', () => {
       })
     );
 
-    const result = await adapter.submit(input(false));
+    const request = input(false);
+    request.sourceTaskGuard = {
+      taskId: 'parent-task-1',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    };
+    const result = await adapter.submit(request);
 
     expect(result).toMatchObject({ kind: 'retry', reason: 'not_ready' });
     expect(mocks.ensureSessionRecovery).toHaveBeenCalledWith(
       expect.anything(),
       'project-1',
-      'chat-1'
+      'chat-1',
+      request.sourceTaskGuard
     );
     expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+  });
+
+  it('revalidates a guarded parent before creating sleeping-session recovery', async () => {
+    const adapter = new DefaultVmPromptDeliveryAdapter(
+      envWithTarget({ ...targetRow, workspace_status: 'sleeping' })
+    );
+    const request = input(false);
+    request.beforeSideEffect = vi.fn().mockResolvedValue({
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'parent completed',
+      runtimeIdentity: null,
+      capabilities: null,
+    });
+    request.sourceTaskGuard = {
+      taskId: 'parent-task-1',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    };
+
+    await expect(adapter.submit(request)).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+    });
+    expect(request.beforeSideEffect).toHaveBeenCalledTimes(1);
+    expect(mocks.ensureSessionRecovery).not.toHaveBeenCalled();
+  });
+
+  it('revalidates a guarded parent before a capability probe that may wake compute', async () => {
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+    const request = input(false);
+    request.beforeSideEffect = vi.fn().mockResolvedValue({
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'parent completed before capability probe',
+      runtimeIdentity: null,
+      capabilities: null,
+    });
+
+    await expect(adapter.submit(request)).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+    });
+    expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+    expect(request.beforeSideEffect).toHaveBeenCalledTimes(1);
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
+
+  it('revalidates a guarded parent before a reconciliation capability probe', async () => {
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+    const request = input(false);
+    request.beforeSideEffect = vi.fn().mockResolvedValue({
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'parent completed before reconciliation probe',
+      runtimeIdentity: null,
+      capabilities: null,
+    });
+    request.sourceTaskGuard = {
+      taskId: 'parent-task-1',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    };
+
+    await expect(adapter.reconcile(request)).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+    });
+    expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+  });
+
+  it('carries the source guard through capability, prompt, and receipt requests', async () => {
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    mocks.sendPromptToAgentOnNode.mockRejectedValue(new Error('connection reset'));
+    mocks.nodeAgentRequest.mockResolvedValueOnce(protocolFixture.capabilities).mockResolvedValueOnce({
+      deliveryId: 'delivery-1',
+      state: 'accepted',
+      runtimeIdentity: 'runtime-vm-01',
+      acceptedAt: 500,
+      completedAt: null,
+    });
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+    const request = input(false);
+    request.sourceTaskGuard = {
+      taskId: 'parent-task-1',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    };
+
+    await expect(adapter.submit(request)).resolves.toMatchObject({ kind: 'accepted' });
+    expect(mocks.nodeAgentRequest).toHaveBeenNthCalledWith(
+      1,
+      'node-1',
+      expect.anything(),
+      '/workspaces/workspace-1/agent-capabilities',
+      expect.objectContaining({ sourceTaskGuard: request.sourceTaskGuard })
+    );
+    expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledWith(
+      'node-1',
+      'workspace-1',
+      'acp-1',
+      'hello',
+      expect.anything(),
+      'user-1',
+      'delivery-1',
+      expect.objectContaining({ sourceTaskGuard: request.sourceTaskGuard })
+    );
+    expect(mocks.nodeAgentRequest).toHaveBeenNthCalledWith(
+      2,
+      'node-1',
+      expect.anything(),
+      '/workspaces/workspace-1/agent-sessions/acp-1/prompt-receipts/delivery-1',
+      expect.objectContaining({ sourceTaskGuard: request.sourceTaskGuard })
+    );
+  });
+
+  it('revalidates again after capability I/O and before VM prompt submission', async () => {
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+    const request = input(false);
+    request.beforeSideEffect = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'parent completed during capability probe',
+      runtimeIdentity: null,
+      capabilities: null,
+    });
+
+    await expect(adapter.submit(request)).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+    });
+    expect(mocks.nodeAgentRequest).toHaveBeenCalledTimes(1);
+    expect(request.beforeSideEffect).toHaveBeenCalledTimes(2);
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
+
+  it('revalidates after container target lookup and before container wake mutations', async () => {
+    const first = vi
+      .fn()
+      .mockResolvedValueOnce({ ...targetRow, node_runtime: 'cf-container' })
+      .mockResolvedValueOnce({ id: 'task-1' });
+    const env = {
+      DATABASE: {
+        prepare: vi.fn(() => ({ bind: vi.fn(() => ({ first })) })),
+      } as unknown as D1Database,
+    } as Env;
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    const adapter = new DefaultVmPromptDeliveryAdapter(env);
+    const request = input(false);
+    request.beforeSideEffect = vi.fn().mockResolvedValue({
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'parent completed during container target lookup',
+      runtimeIdentity: null,
+      capabilities: null,
+    });
+
+    await expect(adapter.submit(request)).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+    });
+    expect(request.beforeSideEffect).toHaveBeenCalledTimes(1);
+    expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+    expect(mocks.wakeSession).not.toHaveBeenCalled();
+    expect(mocks.markSessionSnapshotAwakeInPlace).not.toHaveBeenCalled();
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 
   it('preserves the old VM submit path only behind its explicit compatibility flag', async () => {

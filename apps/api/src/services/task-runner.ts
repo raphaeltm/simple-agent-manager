@@ -28,6 +28,7 @@ import { log } from '../lib/logger';
 import { stopWorkspaceOnNode } from './node-agent';
 import * as nodeLifecycleService from './node-lifecycle';
 import { stopNodeResources } from './nodes';
+import { wakeVmAdmissionWaiters } from './vm-admission-control';
 
 function getCleanupDelayMs(env: Env): number {
   const value = env.TASK_RUN_CLEANUP_DELAY_MS;
@@ -272,6 +273,7 @@ async function cleanupAutoProvisionedNode(
   try {
     await nodeLifecycleService.markIdle(env, nodeId, userId, warmTimeoutOverrideMs);
     log.info('task_run.cleanup.node_marked_warm', { nodeId, userId, warmTimeoutOverrideMs });
+    await wakeVmAdmissionWaiters(env, { userId, reason: 'node_marked_warm' });
   } catch (err) {
     log.error('task_run.cleanup.mark_idle_failed', {
       nodeId,

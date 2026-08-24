@@ -5,14 +5,35 @@
  * plus node selection helper functions (warm pool, capacity finding, health).
  */
 import { isTransientCapacityError, ProviderError } from '@simple-agent-manager/providers';
-import type { VMSize } from '@simple-agent-manager/shared';
+import type { CredentialProvider, VMSize } from '@simple-agent-manager/shared';
 import { canSatisfyVmSize, vmSizeFallbackChain } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
+import {
+  assertVmProvisioningLease,
+  getVmAdmissionConfig,
+  markVmAdmissionNodeReady,
+  markVmProvisioningLeaseInflightNode,
+  recordVmProviderCapacityFailure,
+  recordVmProviderCapacitySuccess,
+  releaseVmProvisioningLease,
+  renewVmProvisioningLease,
+  resolveVmAdmissionScope,
+  tryAcquireVmProvisioningLease,
+  type VmAdmissionWait,
+  type VmProvisioningLeaseResult,
+  type VmTaskAdmissionIdentity,
+  waitForVmAdmissionCapacity,
+} from '../../services/vm-admission-control';
 import { assertClaimedNodeAvailable } from './claimed-node-availability';
 import { parseEnvInt } from './helpers';
-import { findNodeWithCapacity, tryClaimWarmNode, verifyNodeAgentHealthy } from './node-selection';
+import {
+  findNodeWithCapacity,
+  releaseClaimedWarmNode,
+  tryClaimWarmNode,
+  verifyNodeAgentHealthy,
+} from './node-selection';
 import { isNodeAgentReadyForWorkspaceDispatch } from './readiness';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -21,6 +42,95 @@ export { verifyNodeAgentHealthy } from './node-selection';
 // =========================================================================
 // Step Handlers
 // =========================================================================
+
+async function scheduleAdmissionWait(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+  result: VmAdmissionWait
+): Promise<void> {
+  await rc.updateD1ExecutionStep(state.taskId, 'waiting_for_node_capacity');
+  await rc.ctx.storage.put('state', state);
+  const nextRetryMs = Date.parse(result.nextRetryAt);
+  await rc.ctx.storage.setAlarm(Number.isFinite(nextRetryMs) ? nextRetryMs : Date.now());
+  log.info('task_runner_do.node_provisioning.admission_wait', {
+    taskId: state.taskId,
+    reason: result.reason,
+    nextRetryAt: result.nextRetryAt,
+    waitDeadlineAt: result.waitDeadlineAt,
+  });
+}
+
+async function handleLeaseResult(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+  result: VmProvisioningLeaseResult
+): Promise<'granted' | 'waiting'> {
+  if (result.kind === 'expired') {
+    throw Object.assign(new Error('Timed out waiting for VM capacity'), { permanent: true });
+  }
+  if (result.kind === 'waiting') {
+    await scheduleAdmissionWait(state, rc, result);
+    return 'waiting';
+  }
+  state.admissionScopeKey = result.scopeKey;
+  state.admissionLeaseToken = result.fencingToken > 0 ? result.fencingToken : null;
+  await rc.ctx.storage.put('state', state);
+  return 'granted';
+}
+
+async function trySelectReusableNodeForProvisioning(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext
+): Promise<string | null> {
+  const warmNodeId = await tryClaimWarmNode(state, rc);
+  if (warmNodeId) {
+    if (await verifyNodeAgentHealthy(warmNodeId, rc)) {
+      return warmNodeId;
+    }
+    await releaseClaimedWarmNode(state, rc, warmNodeId);
+    log.warn('task_runner_do.node_provisioning.warm_node_unhealthy', {
+      taskId: state.taskId,
+      nodeId: warmNodeId,
+    });
+  }
+
+  const existingNodeId = await findNodeWithCapacity(state, rc);
+  if (existingNodeId) {
+    if (await verifyNodeAgentHealthy(existingNodeId, rc)) {
+      return existingNodeId;
+    }
+    log.warn('task_runner_do.node_provisioning.existing_node_unhealthy', {
+      taskId: state.taskId,
+      nodeId: existingNodeId,
+    });
+  }
+
+  return null;
+}
+
+async function buildAdmissionIdentity(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext
+): Promise<VmTaskAdmissionIdentity | null> {
+  const scope = await resolveVmAdmissionScope(rc.env, {
+    userId: state.userId,
+    projectId: state.projectId,
+    targetProvider: state.config.cloudProvider,
+    credentialAttributionUserId: state.config.credentialAttributionUserId,
+    credentialAttributionProjectId: state.config.credentialAttributionProjectId,
+    credentialAttributionSource: state.config.credentialAttributionSource,
+  });
+  if (!scope) return null;
+  return {
+    ...scope,
+    taskId: state.taskId,
+    projectId: state.projectId,
+    userId: state.userId,
+    requestedVmSize: state.config.vmSize,
+    requestedVmLocation: state.config.vmLocation,
+    preferredNodeId: state.config.preferredNodeId,
+  };
+}
 
 export async function handleNodeSelection(
   state: TaskRunnerState,
@@ -76,6 +186,7 @@ export async function handleNodeSelection(
       await rc.advanceToStep(state, 'workspace_creation');
       return;
     }
+    await releaseClaimedWarmNode(state, rc, nodeId);
     // Warm node agent not healthy — fall through to try other options
     log.warn('task_runner_do.warm_node_unhealthy', {
       taskId: state.taskId,
@@ -107,12 +218,6 @@ export async function handleNodeProvisioning(
   rc: TaskRunnerContext
 ): Promise<void> {
   await rc.updateD1ExecutionStep(state.taskId, 'node_provisioning');
-
-  // Initialize timeout tracking on first entry (mirrors handleNodeAgentReady pattern)
-  if (!state.provisioningStartedAt) {
-    state.provisioningStartedAt = Date.now();
-    await rc.ctx.storage.put('state', state);
-  }
 
   // Self-healing recovery: a prior attempt may have provisioned a node in D1
   // (and in the cloud) but crashed before persisting nodeId to DO storage. The
@@ -146,6 +251,7 @@ export async function handleNodeProvisioning(
         state.stepResults.autoProvisioned = true;
         state.stepResults.provisionedVmSize = recoveredSize;
         state.config.vmSize = recoveredSize;
+        state.provisioningStartedAt ??= Date.now();
         await rc.ctx.storage.put('state', state);
         log.info('task_runner_do.node_provisioning.recovered', {
           taskId: state.taskId,
@@ -168,6 +274,16 @@ export async function handleNodeProvisioning(
 
   // If we already created the node (retry scenario, or recovery above), check its status
   if (state.stepResults.nodeId) {
+    if (!state.provisioningStartedAt) {
+      state.provisioningStartedAt = Date.now();
+      await rc.ctx.storage.put('state', state);
+    }
+    await renewVmProvisioningLease(
+      rc.env,
+      state.admissionScopeKey,
+      state.taskId,
+      state.admissionLeaseToken
+    );
     const node = await rc.env.DATABASE.prepare(
       `SELECT id, status, error_message FROM nodes WHERE id = ?`
     )
@@ -204,6 +320,19 @@ export async function handleNodeProvisioning(
     return;
   }
 
+  const admissionIdentity = await buildAdmissionIdentity(state, rc);
+
+  // A waiter woken by capacity changes should try packing onto an existing
+  // compatible node before claiming the provisioning lease.
+  if (admissionIdentity) {
+    const reusableNodeId = await trySelectReusableNodeForProvisioning(state, rc);
+    if (reusableNodeId) {
+      state.stepResults.nodeId = reusableNodeId;
+      await rc.advanceToStep(state, 'workspace_creation');
+      return;
+    }
+  }
+
   // Check user node limit. User-owned (BYO) nodes are excluded — they cost SAM nothing to run, so
   // they must not consume an auto-provisioning slot or block cloud provisioning (critique #8).
   const maxNodes = parseEnvInt(rc.env.MAX_NODES_PER_USER, 10);
@@ -214,6 +343,20 @@ export async function handleNodeProvisioning(
     .first<{ c: number }>();
 
   if ((countResult?.c ?? 0) >= maxNodes) {
+    if (admissionIdentity && getVmAdmissionConfig(rc.env).mode === 'enforce') {
+      const waitResult = await waitForVmAdmissionCapacity(
+        rc.env,
+        admissionIdentity,
+        'user_node_limit'
+      );
+      if (waitResult.kind === 'expired') {
+        throw Object.assign(new Error(`Maximum ${maxNodes} nodes allowed. Cannot auto-provision.`), {
+          permanent: true,
+        });
+      }
+      await scheduleAdmissionWait(state, rc, waitResult);
+      return;
+    }
     throw Object.assign(new Error(`Maximum ${maxNodes} nodes allowed. Cannot auto-provision.`), {
       permanent: true,
     });
@@ -236,8 +379,7 @@ export async function handleNodeProvisioning(
     const credResult = await resolveCredentialSource(
       db,
       state.config.credentialAttributionUserId,
-      (state.config.cloudProvider as import('@simple-agent-manager/shared').CredentialProvider) ??
-        undefined,
+      (state.config.cloudProvider as CredentialProvider) ?? undefined,
       attributionProjectId
     );
 
@@ -260,6 +402,29 @@ export async function handleNodeProvisioning(
           { permanent: true }
         );
       }
+    }
+  }
+
+  if (admissionIdentity) {
+    const leaseResult = await tryAcquireVmProvisioningLease(rc.env, admissionIdentity);
+    if ((await handleLeaseResult(state, rc, leaseResult)) === 'waiting') return;
+
+    // Re-select after winning the claim. A compatible node may have become
+    // reusable while this task was competing for the fenced provisioning lease.
+    const reusableNodeId = await trySelectReusableNodeForProvisioning(state, rc);
+    if (reusableNodeId) {
+      await releaseVmProvisioningLease(
+        rc.env,
+        state.admissionScopeKey,
+        state.taskId,
+        state.admissionLeaseToken,
+        'claim_reselected_existing_node'
+      );
+      state.admissionScopeKey = null;
+      state.admissionLeaseToken = null;
+      state.stepResults.nodeId = reusableNodeId;
+      await rc.advanceToStep(state, 'workspace_creation');
+      return;
     }
   }
 
@@ -286,6 +451,16 @@ export async function handleNodeProvisioning(
   for (const [i, size] of chain.entries()) {
     const isLastSize = i === chain.length - 1;
 
+    // Quota and credential resolution above can take long enough for the
+    // source parent to terminalize. Revalidate at the allocation boundary.
+    await rc.assertRecoveryAuthority(state);
+    await assertVmProvisioningLease(
+      rc.env,
+      state.admissionScopeKey,
+      state.taskId,
+      state.admissionLeaseToken
+    );
+    state.provisioningStartedAt = Date.now();
     const createdNode = await createNodeRecord(rc.env, {
       userId: state.userId,
       credentialAttributionUserId: state.config.credentialAttributionUserId,
@@ -305,6 +480,25 @@ export async function handleNodeProvisioning(
       .bind(createdNode.id, new Date().toISOString(), state.taskId)
       .run();
 
+    // Persist ownership before the provider call so a revocation or crash
+    // after record creation still drives ordinary resource cleanup.
+    state.stepResults.nodeId = createdNode.id;
+    state.stepResults.autoProvisioned = true;
+    state.stepResults.provisionedVmSize = size;
+    await rc.ctx.storage.put('state', state);
+    const markedInflight = await markVmProvisioningLeaseInflightNode(
+      rc.env,
+      state.admissionScopeKey,
+      state.taskId,
+      state.admissionLeaseToken,
+      createdNode.id
+    );
+    if (state.admissionScopeKey && state.admissionLeaseToken && !markedInflight) {
+      throw Object.assign(new Error('VM provisioning lease lost before provider allocation'), {
+        permanent: true,
+      });
+    }
+
     log.info('task_runner_do.step.node_provisioning', {
       taskId: state.taskId,
       nodeId: createdNode.id,
@@ -319,6 +513,7 @@ export async function handleNodeProvisioning(
       // the message reporter for chat persistence. rethrowProviderError makes
       // provisionNode surface the typed ProviderError (and delete the failed
       // node row on capacity exhaustion) so we can branch on the category.
+      await rc.assertRecoveryAuthority(state);
       await provisionNode(
         createdNode.id,
         rc.env,
@@ -328,20 +523,102 @@ export async function handleNodeProvisioning(
           taskId: state.taskId,
           taskMode: state.config.taskMode,
         },
-        { rethrowProviderError: true }
+        {
+          rethrowProviderError: true,
+          assertExternalMutationAuthority: async () => {
+            await rc.assertRecoveryAuthority(state);
+            await assertVmProvisioningLease(
+              rc.env,
+              state.admissionScopeKey,
+              state.taskId,
+              state.admissionLeaseToken
+            );
+          },
+        }
+      );
+      // Detect revocation that raced the provider request. The persisted node
+      // identity above lets failTask tear the new compute down safely.
+      await rc.assertRecoveryAuthority(state);
+      await assertVmProvisioningLease(
+        rc.env,
+        state.admissionScopeKey,
+        state.taskId,
+        state.admissionLeaseToken
       );
     } catch (err) {
+      if (admissionIdentity) {
+        const providerCapacity = await recordVmProviderCapacityFailure(rc.env, {
+          scope: admissionIdentity,
+          error: err,
+        });
+        if (providerCapacity) {
+          await rc.env.DATABASE.prepare(
+            `DELETE FROM nodes WHERE id = ? AND provider_instance_id IS NULL`
+          )
+            .bind(createdNode.id)
+            .run();
+          await rc.env.DATABASE.prepare(
+            `UPDATE tasks SET auto_provisioned_node_id = NULL, updated_at = ? WHERE id = ?`
+          )
+            .bind(new Date().toISOString(), state.taskId)
+            .run();
+          state.stepResults.nodeId = null;
+          state.stepResults.autoProvisioned = false;
+          state.stepResults.provisionedVmSize = null;
+          await releaseVmProvisioningLease(
+            rc.env,
+            state.admissionScopeKey,
+            state.taskId,
+            state.admissionLeaseToken,
+            'provider_account_capacity'
+          );
+          state.admissionScopeKey = null;
+          state.admissionLeaseToken = null;
+          await rc.ctx.storage.put('state', state);
+          const retryAt = new Date(
+            Date.now() + getVmAdmissionConfig(rc.env).providerCooldownMs
+          ).toISOString();
+          const waitResult = await waitForVmAdmissionCapacity(
+            rc.env,
+            admissionIdentity,
+            'provider_account_capacity',
+            retryAt,
+            providerCapacity
+          );
+          if (waitResult.kind === 'expired') {
+            throw Object.assign(new Error('Timed out waiting for provider account capacity'), {
+              permanent: true,
+            });
+          }
+          await scheduleAdmissionWait(state, rc, waitResult);
+          return;
+        }
+      }
       const isCapacityFailure = err instanceof ProviderError && isTransientCapacityError(err);
 
       // Any non-capacity provider failure fails fast — never descend on
       // invalid_config / quota_exceeded / auth_error / rate_limited / unknown.
       if (!isCapacityFailure) {
+        await releaseVmProvisioningLease(
+          rc.env,
+          state.admissionScopeKey,
+          state.taskId,
+          state.admissionLeaseToken,
+          'provisioning_failed'
+        );
+        state.admissionScopeKey = null;
+        state.admissionLeaseToken = null;
+        await rc.ctx.storage.put('state', state);
         const message = err instanceof Error ? err.message : 'Node provisioning failed';
         throw Object.assign(new Error(message), { permanent: true });
       }
 
       // transient_capacity: descend to the next-smaller size if one remains.
       // The failed node row was already deleted inside provisionNode (decision #1).
+      state.stepResults.nodeId = null;
+      state.stepResults.autoProvisioned = false;
+      state.stepResults.provisionedVmSize = null;
+      await rc.ctx.storage.put('state', state);
       if (!isLastSize) {
         const nextSize = chain[i + 1];
         if (nextSize === undefined) {
@@ -365,17 +642,27 @@ export async function handleNodeProvisioning(
         chain.length === 1
           ? `There were no ${requestedSize} machines available.`
           : `No capacity for any available VM size (tried ${chain.join(', ')}).`;
+      await releaseVmProvisioningLease(
+        rc.env,
+        state.admissionScopeKey,
+        state.taskId,
+        state.admissionLeaseToken,
+        'transient_capacity_exhausted'
+      );
+      state.admissionScopeKey = null;
+      state.admissionLeaseToken = null;
+      await rc.ctx.storage.put('state', state);
       throw Object.assign(new Error(terminalMessage), { permanent: true });
     }
 
     // provisionNode returned without throwing — this size was accepted.
-    state.stepResults.nodeId = createdNode.id;
-    state.stepResults.autoProvisioned = true;
-    state.stepResults.provisionedVmSize = size;
     // Update the working size so downstream steps reference the size actually
     // provisioned (relevant when we descended below the requested size).
     state.config.vmSize = size;
     await rc.ctx.storage.put('state', state);
+    if (admissionIdentity) {
+      await recordVmProviderCapacitySuccess(rc.env, admissionIdentity);
+    }
 
     if (size !== requestedSize) {
       // Persist the downgraded size on the task so the UI can surface it.
@@ -420,6 +707,12 @@ export async function handleNodeAgentReady(
     await rc.ctx.storage.put('state', state);
   }
   const agentReadyStartedAt = state.agentReadyStartedAt;
+  await renewVmProvisioningLease(
+    rc.env,
+    state.admissionScopeKey,
+    state.taskId,
+    state.admissionLeaseToken
+  );
 
   // Check agent health via D1 heartbeat records.
   //
@@ -470,6 +763,10 @@ export async function handleNodeAgentReady(
       elapsedMs: elapsed,
       lastHeartbeatAt: node?.last_heartbeat_at,
       agentReadyAt: node?.agent_ready_at,
+    });
+    await markVmAdmissionNodeReady(rc.env, {
+      taskId: state.taskId,
+      nodeId: state.stepResults.nodeId,
     });
     await rc.advanceToStep(state, 'workspace_creation');
     return;

@@ -7,6 +7,7 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
+import { seedInstallation, seedProject, seedTask, seedUser } from './helpers/seed-d1';
 import {
   captureProjectDataExpectedError,
   type ProjectDataTestDouble,
@@ -122,6 +123,301 @@ describe('ProjectData Durable Object', () => {
           lastError: 'Prompt delivery TTL expired',
         })
       );
+    });
+  });
+
+  describe('durable task waits', () => {
+    it('wakes a parent exactly once after every selected child becomes terminal', async () => {
+      const suffix = crypto.randomUUID();
+      const userId = `wait-user-${suffix}`;
+      const installationId = `wait-installation-${suffix}`;
+      const projectId = `wait-project-${suffix}`;
+      const parentTaskId = `wait-parent-${suffix}`;
+      const childOneId = `wait-child-one-${suffix}`;
+      const childTwoId = `wait-child-two-${suffix}`;
+
+      await seedUser(userId);
+      await seedInstallation(installationId, userId, {
+        installationIdValue: `wait-external-${suffix}`,
+      });
+      await seedProject(projectId, userId, installationId);
+      await seedTask(parentTaskId, projectId, userId, { status: 'in_progress' });
+      await seedTask(childOneId, projectId, userId, { status: 'in_progress' });
+      await seedTask(childTwoId, projectId, userId, { status: 'in_progress' });
+      await env.DATABASE.prepare(`UPDATE tasks SET parent_task_id = ? WHERE id IN (?, ?)`)
+        .bind(parentTaskId, childOneId, childTwoId)
+        .run();
+
+      const stub = getStub(projectId);
+      await stub.ensureProjectId(projectId);
+      const parentSessionId = await stub.createSession(null, 'Durable parent wait', parentTaskId);
+      await env.DATABASE.prepare(`UPDATE tasks SET chat_session_id = ? WHERE id = ?`)
+        .bind(parentSessionId, parentTaskId)
+        .run();
+      const registered = await stub.registerTaskWait({
+        parentTaskId,
+        parentSessionId,
+        idempotencyKey: 'review-round-1',
+        condition: 'all',
+        childTaskIds: [childOneId, childTwoId],
+        wakeDeadline: Date.now() + 60_000,
+      });
+      expect(registered).toMatchObject({
+        created: true,
+        subscription: { state: 'active', condition: 'all' },
+      });
+
+      await env.DATABASE.prepare(
+        `UPDATE tasks SET status = 'completed', output_summary = ? WHERE id = ?`
+      )
+        .bind('First child finished', childOneId)
+        .run();
+      const firstResult = await stub.reconcileTaskWaits(childOneId);
+      expect(firstResult).toMatchObject({ resolved: 0, pending: 1 });
+
+      await env.DATABASE.prepare(
+        `UPDATE tasks SET status = 'failed', error_message = ? WHERE id = ?`
+      )
+        .bind('Second child failed safely', childTwoId)
+        .run();
+      await runInDurableObject(stub, async (instance, state) => {
+        state.storage.sql.exec(
+          `UPDATE task_wait_subscriptions SET next_reconcile_at = 0 WHERE id = ?`,
+          registered.subscription!.id
+        );
+        await instance.alarmWithDurablePromptDelivery();
+      });
+
+      const wait = await stub.getTaskWait(registered.subscription!.id);
+      expect(wait).toMatchObject({ state: 'resolved', resolutionReason: 'condition_met' });
+      const { messages } = await stub.getMessages(parentSessionId, 10);
+      expect(messages).toHaveLength(1);
+      expect(messages[0]!.content).toContain('wait_for_subtasks subscription resolved');
+      expect(messages[0]!.content).not.toContain('First child finished');
+      expect(messages[0]!.content).not.toContain('Second child failed safely');
+      const snapshot = await stub.getDurableExecutionSnapshot(parentSessionId);
+      expect(snapshot.deliveries).toHaveLength(1);
+      expect(snapshot.deliveries[0]).toMatchObject({ sourceKind: 'parent_wakeup' });
+
+      await stub.reconcileTaskWaits(childTwoId);
+      expect((await stub.getMessages(parentSessionId, 10)).messages).toHaveLength(1);
+      expect((await stub.getDurableExecutionSnapshot(parentSessionId)).deliveries).toHaveLength(1);
+
+      const lostResponseRetry = await stub.registerTaskWait({
+        parentTaskId,
+        parentSessionId,
+        idempotencyKey: 'review-round-1',
+        condition: 'all',
+        childTaskIds: [childOneId, childTwoId],
+        wakeDeadline: Date.now() + 120_000,
+      });
+      expect(lostResponseRetry).toMatchObject({
+        created: false,
+        subscription: { id: registered.subscription!.id, state: 'resolved' },
+      });
+      expect((await stub.getMessages(parentSessionId, 10)).messages).toHaveLength(1);
+      expect((await stub.getDurableExecutionSnapshot(parentSessionId)).deliveries).toHaveLength(1);
+
+      await env.DATABASE.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`)
+        .bind(parentTaskId)
+        .run();
+      await stub.reconcileTaskWaits(parentTaskId);
+      expect((await stub.getDurableExecutionSnapshot(parentSessionId)).deliveries[0]).toMatchObject(
+        {
+          deliveryState: 'failed',
+          terminalReason: 'terminal_target',
+        }
+      );
+    });
+
+    it('cancels a terminal parent wait without waking or resurrecting its session', async () => {
+      const suffix = crypto.randomUUID();
+      const userId = `wait-cancel-user-${suffix}`;
+      const installationId = `wait-cancel-installation-${suffix}`;
+      const projectId = `wait-cancel-project-${suffix}`;
+      const parentTaskId = `wait-cancel-parent-${suffix}`;
+      const childTaskId = `wait-cancel-child-${suffix}`;
+
+      await seedUser(userId);
+      await seedInstallation(installationId, userId, {
+        installationIdValue: `wait-cancel-external-${suffix}`,
+      });
+      await seedProject(projectId, userId, installationId);
+      await seedTask(parentTaskId, projectId, userId, { status: 'in_progress' });
+      await seedTask(childTaskId, projectId, userId, { status: 'in_progress' });
+      await env.DATABASE.prepare(`UPDATE tasks SET parent_task_id = ? WHERE id = ?`)
+        .bind(parentTaskId, childTaskId)
+        .run();
+
+      const stub = getStub(projectId);
+      await stub.ensureProjectId(projectId);
+      const parentSessionId = await stub.createSession(null, 'Cancelled parent wait', parentTaskId);
+      await env.DATABASE.prepare(`UPDATE tasks SET chat_session_id = ? WHERE id = ?`)
+        .bind(parentSessionId, parentTaskId)
+        .run();
+      const registered = await stub.registerTaskWait({
+        parentTaskId,
+        parentSessionId,
+        idempotencyKey: 'cancel-round-1',
+        condition: 'all',
+        childTaskIds: [childTaskId],
+        wakeDeadline: Date.now() + 60_000,
+      });
+
+      await env.DATABASE.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`)
+        .bind(parentTaskId)
+        .run();
+      const cancellation = await stub.reconcileTaskWaits(parentTaskId);
+      expect(cancellation).toMatchObject({ cancelled: 1, resolved: 0 });
+      expect(await stub.getTaskWait(registered.subscription!.id)).toMatchObject({
+        state: 'cancelled',
+        resolutionReason: 'parent_completed',
+      });
+
+      await env.DATABASE.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`)
+        .bind(childTaskId)
+        .run();
+      await stub.reconcileTaskWaits(childTaskId);
+      expect((await stub.getMessages(parentSessionId, 10)).messages).toHaveLength(0);
+      expect((await stub.getDurableExecutionSnapshot(parentSessionId)).deliveries).toHaveLength(0);
+    });
+
+    it('backs off a permanent wake conflict and terminalizes after bounded attempts', async () => {
+      const suffix = crypto.randomUUID();
+      const userId = `wait-failure-user-${suffix}`;
+      const installationId = `wait-failure-installation-${suffix}`;
+      const projectId = `wait-failure-project-${suffix}`;
+      const parentTaskId = `wait-failure-parent-${suffix}`;
+      const childTaskId = `wait-failure-child-${suffix}`;
+
+      await seedUser(userId);
+      await seedInstallation(installationId, userId, {
+        installationIdValue: `wait-failure-external-${suffix}`,
+      });
+      await seedProject(projectId, userId, installationId);
+      await seedTask(parentTaskId, projectId, userId, { status: 'in_progress' });
+      await seedTask(childTaskId, projectId, userId, { status: 'in_progress' });
+      await env.DATABASE.prepare(`UPDATE tasks SET parent_task_id = ? WHERE id = ?`)
+        .bind(parentTaskId, childTaskId)
+        .run();
+
+      const stub = getStub(projectId);
+      await stub.ensureProjectId(projectId);
+      const parentSessionId = await stub.createSession(null, 'Failed parent wake', parentTaskId);
+      await env.DATABASE.prepare(`UPDATE tasks SET chat_session_id = ? WHERE id = ?`)
+        .bind(parentSessionId, parentTaskId)
+        .run();
+      const registered = await stub.registerTaskWait({
+        parentTaskId,
+        parentSessionId,
+        idempotencyKey: 'wait-registration',
+        condition: 'all',
+        childTaskIds: [childTaskId],
+        wakeDeadline: Date.now() + 60_000,
+      });
+
+      await stub.acceptPromptDelivery({
+        deliveryId: registered.subscription!.wakeDeliveryId,
+        targetSessionId: parentSessionId,
+        displayContent: 'conflicting intent',
+        deliveryContent: 'conflicting intent',
+        senderType: 'system',
+        sourceKind: 'agent_mailbox',
+        ttlMs: 60_000,
+      });
+      await runInDurableObject(stub, async (_instance, state) => {
+        state.storage.sql.exec(
+          `UPDATE session_inbox SET delivery_state = 'failed' WHERE id = ?`,
+          registered.subscription!.wakeDeliveryId
+        );
+      });
+      await env.DATABASE.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`)
+        .bind(childTaskId)
+        .run();
+
+      const first = await stub.reconcileTaskWaits(childTaskId);
+      expect(first).toMatchObject({ failed: 1, resolved: 0 });
+      const afterFirst = await stub.getTaskWait(registered.subscription!.id);
+      expect(afterFirst).toMatchObject({ state: 'active', wakeAttempts: 1 });
+      expect(afterFirst!.nextReconcileAt).toBeGreaterThan(Date.now());
+
+      for (let attempt = 1; attempt < 5; attempt++) {
+        await stub.reconcileTaskWaits(childTaskId);
+      }
+      expect(await stub.getTaskWait(registered.subscription!.id)).toMatchObject({
+        state: 'cancelled',
+        resolutionReason: 'wake_delivery_failed',
+        wakeAttempts: 5,
+      });
+    });
+
+    it('reconciles the maximum default batch without exceeding D1 bind limits', async () => {
+      const suffix = crypto.randomUUID();
+      const userId = `wait-scale-user-${suffix}`;
+      const installationId = `wait-scale-installation-${suffix}`;
+      const projectId = `wait-scale-project-${suffix}`;
+
+      await seedUser(userId);
+      await seedInstallation(installationId, userId, {
+        installationIdValue: `wait-scale-external-${suffix}`,
+      });
+      await seedProject(projectId, userId, installationId);
+
+      const parentIds = Array.from({ length: 10 }, (_, index) => `wait-parent-${index}-${suffix}`);
+      const childIds = parentIds.map((_, parentIndex) =>
+        Array.from(
+          { length: 20 },
+          (_, childIndex) => `wait-child-${parentIndex}-${childIndex}-${suffix}`
+        )
+      );
+      const statements = parentIds.flatMap((parentId, parentIndex) => [
+        env.DATABASE.prepare(
+          `INSERT INTO tasks
+             (id, project_id, user_id, title, status, task_mode, created_by, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'in_progress', 'task', ?, datetime('now'), datetime('now'))`
+        ).bind(parentId, projectId, userId, parentId, userId),
+        ...childIds[parentIndex]!.map((childId) =>
+          env.DATABASE.prepare(
+            `INSERT INTO tasks
+               (id, project_id, user_id, title, status, task_mode, parent_task_id, created_by, created_at, updated_at)
+             VALUES (?, ?, ?, ?, 'in_progress', 'task', ?, ?, datetime('now'), datetime('now'))`
+          ).bind(childId, projectId, userId, childId, parentId, userId)
+        ),
+      ]);
+      for (let offset = 0; offset < statements.length; offset += 100) {
+        await env.DATABASE.batch(statements.slice(offset, offset + 100));
+      }
+
+      const stub = getStub(projectId);
+      await stub.ensureProjectId(projectId);
+      for (let index = 0; index < parentIds.length; index++) {
+        const parentTaskId = parentIds[index]!;
+        const parentSessionId = await stub.createSession(
+          null,
+          `Scaled parent ${index}`,
+          parentTaskId
+        );
+        await env.DATABASE.prepare(`UPDATE tasks SET chat_session_id = ? WHERE id = ?`)
+          .bind(parentSessionId, parentTaskId)
+          .run();
+        await stub.registerTaskWait({
+          parentTaskId,
+          parentSessionId,
+          idempotencyKey: `scale-round-${index}`,
+          condition: 'all',
+          childTaskIds: childIds[index]!,
+          wakeDeadline: Date.now() + 60_000,
+        });
+      }
+
+      await runInDurableObject(stub, async (_instance, state) => {
+        state.storage.sql.exec(`UPDATE task_wait_subscriptions SET next_reconcile_at = 0`);
+      });
+      await expect(stub.reconcileTaskWaits()).resolves.toMatchObject({
+        checked: 10,
+        pending: 10,
+        failed: 0,
+      });
     });
   });
 
@@ -1263,6 +1559,7 @@ describe('ProjectData Durable Object', () => {
       const { messages, hasMore } = await stub.getMessages(
         sessionId,
         1,
+        null,
         null,
         ['user'],
         true,

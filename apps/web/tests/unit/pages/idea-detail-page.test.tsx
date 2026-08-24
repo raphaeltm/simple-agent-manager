@@ -1,10 +1,11 @@
 import type { TaskDetailResponse, TaskStatus } from '@simple-agent-manager/shared';
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TaskSessionLink } from '../../../src/lib/api';
+import { renderWithQuery } from '../../test-utils/query-test-utils';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -43,6 +44,10 @@ vi.mock('../../../src/hooks/useIsMobile', () => ({
 
 vi.mock('@simple-agent-manager/ui', () => ({
   Spinner: ({ size }: { size: string }) => <span data-testid="spinner" data-size={size}>Loading...</span>,
+}));
+
+vi.mock('../../../src/hooks/useQueryScope', () => ({
+  useQueryScope: () => 'user-1',
 }));
 
 import { IdeaDetailPage } from '../../../src/pages/IdeaDetailPage';
@@ -93,7 +98,7 @@ function makeSession(overrides: Partial<TaskSessionLink> = {}): TaskSessionLink 
 }
 
 function renderIdeaDetail(taskId = 'idea-1') {
-  return render(
+  return renderWithQuery(
     <MemoryRouter initialEntries={[`/projects/proj-test/ideas/${taskId}`]}>
       <Routes>
         <Route path="/projects/:id/ideas/:taskId" element={<IdeaDetailPage />} />

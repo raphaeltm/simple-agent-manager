@@ -78,8 +78,9 @@ func buildAcpMcpServers(entries []McpServerEntry, agentType string) []acpsdk.Mcp
 		return []acpsdk.McpServer{}
 	}
 	servers := make([]acpsdk.McpServer, 0, len(entries))
+	names := ResolveMcpServerNames(entries)
 	for i, e := range entries {
-		name := mcpServerName(i, len(entries))
+		name := names[i]
 		if agentType == "amp" {
 			servers = append(servers, buildAmpMcpServer(name, e))
 			continue
@@ -103,13 +104,12 @@ func buildAcpMcpServers(entries []McpServerEntry, agentType string) []acpsdk.Mcp
 	return servers
 }
 
-func mcpServerName(index, total int) string {
-	if total > 1 {
-		return fmt.Sprintf("sam-mcp-%d", index)
-	}
-	return "sam-mcp"
-}
-
+// KNOWN EXPOSURE (idea 01M0QQ7PTBDPG0DVR10XMKB679): entry.URL is passed as a positional CLI
+// argument, so it is visible in /proc/<pid>/cmdline to anything running as the same container
+// user. That is fine for SAM's own static endpoint but NOT for a bring-your-own connection,
+// where the URL can itself be a credential (pre-signed MCP URLs). The token below is already
+// kept out of argv for exactly this reason; the URL should get the same treatment once it is
+// verified how mcp-remote accepts a URL from the environment.
 func buildAmpMcpServer(name string, entry McpServerEntry) acpsdk.McpServer {
 	var env []acpsdk.EnvVariable
 	args := []string{"-y", ampMcpRemotePackage, entry.URL}
@@ -211,15 +211,38 @@ type SessionHost struct {
 	config SessionHostConfig
 
 	// Agent state (guarded by mu)
-	mu             sync.RWMutex
-	process        agentProcess
-	acpConn        *acpsdk.ClientSideConnection
-	agentType      string
-	sessionID      acpsdk.SessionId
-	configOptions  []acpsdk.SessionConfigOption
-	restartCount   int
-	lastCrashTime  time.Time
-	permissionMode string
+	mu        sync.RWMutex
+	process   agentProcess
+	acpConn   *acpsdk.ClientSideConnection
+	agentType string
+	sessionID acpsdk.SessionId
+
+	// Lock-free mirrors of sessionID/status, read ONLY by code reachable from
+	// the ACP SDK's single notification-processing goroutine
+	// (HandleExtensionMethod -> matchesHarnessSession / activityForHarnessWork).
+	//
+	// That goroutine must never block on `mu`: the ACP handshake
+	// (startAgent/applySessionSettings) holds `mu` for its whole duration while
+	// its in-flight RPC blocks in the SDK's waitNotificationsUpTo, which waits
+	// for this very notification worker. Taking mu.RLock() there is a genuine
+	// self-deadlock (reproduced: a _claude/sdkMessage notification arriving just
+	// before the session/new response turned a 5ms handshake into an 800ms
+	// timeout; with SetSessionMode's unbounded ctx it hangs indefinitely).
+	//
+	// Writers keep these in step with the mu-guarded fields via
+	// setSessionIDLocked/setStatusLocked. See .claude/rules/46.
+	//
+	// This constraint is transitive: NOTHING reachable from
+	// HandleExtensionMethod may call a helper that takes mu, however far down the
+	// call chain. reportActivity is the trap — it looks like a fire-and-forget
+	// reporter but takes mu.RLock to snapshot agentType/restartCount/statusErr.
+	// Use nudgeHarnessActivityReport from that goroutine instead.
+	mirrorSessionID atomic.Value // string
+	mirrorStatus    atomic.Value // SessionHostStatus
+	configOptions   []acpsdk.SessionConfigOption
+	restartCount    int
+	lastCrashTime   time.Time
+	permissionMode  string
 	// agentSupportsLoadSession is captured from ACP Initialize so prompt error
 	// handling can decide whether a process crash is recoverable.
 	agentSupportsLoadSession bool
@@ -278,6 +301,22 @@ type SessionHost struct {
 	// promptActivityCancel stops the periodic prompting re-report loop.
 	// Protected by promptCancelMu.
 	promptActivityCancel context.CancelFunc
+
+	// Harness-owned background work is normalized from optional ACP extension
+	// notifications. It is isolated from the prompt lifecycle because it may
+	// continue after session/prompt has returned.
+	harnessWorkMu         sync.Mutex
+	harnessWork           harnessWorkStatus
+	harnessTaskIDs        map[string]struct{}
+	harnessActivityCancel context.CancelFunc
+	// harnessReportPending single-flights the activity report triggered by a
+	// harness lifecycle notification. The ACP notification goroutine must never
+	// call reportActivity inline: reportActivity takes mu.RLock for its
+	// agentType/restartCount/statusErr snapshot, which is exactly the block the
+	// lock-free mirrors above exist to avoid. Handing the report to a short-lived
+	// goroutine keeps the notification worker unblocked, and coalescing stops a
+	// chatty harness from spawning one retried HTTP POST per message.
+	harnessReportPending atomic.Bool
 	// activePromptID identifies the in-flight prompt associated with promptCancel.
 	// Protected by promptCancelMu.
 	activePromptID uint64
@@ -801,7 +840,7 @@ func (h *SessionHost) Stop() {
 		h.mu.Unlock()
 		return
 	}
-	h.status = HostStopped
+	h.setStatusLocked(HostStopped)
 	h.statusErr = ""
 	h.stopCurrentAgentLocked()
 	// Snapshot credential metadata while still holding the lock.
@@ -819,6 +858,7 @@ func (h *SessionHost) Stop() {
 
 	// Report idle to the control plane so the browser status bar clears.
 	h.stopPromptActivityRereport()
+	h.clearHarnessWork()
 	h.reportActivity("idle")
 
 	// Cancel any pending auto-suspend timer.
@@ -865,6 +905,15 @@ func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentS
 	if settings == nil || h.acpConn == nil || h.sessionID == "" {
 		return
 	}
+
+	// These RPCs run while h.mu is held for write, and the ACP SDK blocks each
+	// response on its notification worker catching up (waitNotificationsUpTo).
+	// The caller's ctx is the WebSocket connection lifetime — effectively
+	// unbounded — so a stalled notification worker would hang the handshake (and
+	// every h.mu reader) forever. Bound it explicitly; both calls are non-fatal.
+	settingsCtx, cancel := context.WithTimeout(ctx, h.sessionSettingsTimeout())
+	defer cancel()
+	ctx = settingsCtx
 
 	if settings.Model != "" {
 		h.applySessionModelConfigOption(ctx, settings.Model)
@@ -1055,12 +1104,15 @@ func truncateString(s string, maxLen int) string {
 
 // stopCurrentAgentLocked stops the current agent process. Must hold h.mu.
 func (h *SessionHost) stopCurrentAgentLocked() {
+	// Stop the process-scoped harness heartbeat before clearing the ACP
+	// connection. A replacement connection will establish fresh state.
+	h.clearHarnessWork()
 	if h.process != nil {
 		_ = h.process.Stop()
 		h.process = nil
 	}
 	h.acpConn = nil
-	h.sessionID = ""
+	h.setSessionIDLocked("")
 	h.agentSupportsLoadSession = false
 	// Clear credential metadata so stale values don't leak across agent switches.
 	h.credInjectionMode = ""
@@ -1136,4 +1188,50 @@ func (h *SessionHost) isPromptingOrRecovering() bool {
 // the control plane without going through HandlePrompt.
 func (h *SessionHost) OnPromptCompleteCallback() func(string, error) {
 	return h.config.OnPromptComplete
+}
+
+// setSessionIDLocked assigns the ACP session ID and its lock-free mirror.
+// Callers must hold h.mu for write.
+func (h *SessionHost) setSessionIDLocked(id acpsdk.SessionId) {
+	h.sessionID = id
+	h.mirrorSessionID.Store(string(id))
+}
+
+// setStatusLocked assigns the host status and its lock-free mirror.
+// Callers must hold h.mu for write.
+func (h *SessionHost) setStatusLocked(status SessionHostStatus) {
+	h.status = status
+	h.mirrorStatus.Store(status)
+}
+
+// loadMirroredSessionID reads the session ID WITHOUT taking h.mu. Safe to call
+// from the ACP notification-processing goroutine.
+func (h *SessionHost) loadMirroredSessionID() string {
+	if v, ok := h.mirrorSessionID.Load().(string); ok {
+		return v
+	}
+	return ""
+}
+
+// loadMirroredStatus reads the host status WITHOUT taking h.mu. Safe to call
+// from the ACP notification-processing goroutine.
+func (h *SessionHost) loadMirroredStatus() SessionHostStatus {
+	if v, ok := h.mirrorStatus.Load().(SessionHostStatus); ok {
+		return v
+	}
+	return HostIdle
+}
+
+// DefaultSessionSettingsTimeout bounds the post-handshake SetSessionMode /
+// SetSessionConfigOption RPCs. Override via the existing NewSessionTimeoutMs
+// gateway setting (ACP_NEW_SESSION_TIMEOUT_MS).
+const DefaultSessionSettingsTimeout = 30 * time.Second
+
+// sessionSettingsTimeout resolves the bound for applySessionSettings' RPCs,
+// reusing the configured NewSession timeout when one is set.
+func (h *SessionHost) sessionSettingsTimeout() time.Duration {
+	if h.config.NewSessionTimeoutMs > 0 {
+		return time.Duration(h.config.NewSessionTimeoutMs) * time.Millisecond
+	}
+	return DefaultSessionSettingsTimeout
 }

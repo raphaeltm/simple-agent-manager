@@ -934,7 +934,7 @@ describe('Node Agent client functions send correct payloads', () => {
       'user-123',
       'chat-123',
       'proj-123',
-      { url: 'https://api.example.com/mcp', token: 'mcp-token' }
+      [{ url: 'https://api.example.com/mcp', token: 'mcp-token', name: 'sam-mcp' }]
     );
 
     const [, capturedInit] = fetchWithTimeoutMock.mock.calls[0] as [string, RequestInit];
@@ -946,7 +946,51 @@ describe('Node Agent client functions send correct payloads', () => {
     expect(parsedBody.chatSessionId).toBe('chat-123');
     expect(parsedBody.projectId).toBe('proj-123');
     expect(parsedBody.mcpServers).toEqual([
-      { url: 'https://api.example.com/mcp', token: 'mcp-token' },
+      { url: 'https://api.example.com/mcp', token: 'mcp-token', name: 'sam-mcp' },
+    ]);
+  });
+
+  it('createAgentSessionOnNode serializes N MCP servers and omits absent names', async () => {
+    fetchWithTimeoutMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'sess-multi',
+          workspaceId: 'ws-test',
+          status: 'running',
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+        }),
+        { status: 201, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+
+    await createAgentSessionOnNode(
+      'node-abc',
+      'ws-test',
+      'sess-multi',
+      null,
+      makeNodeAgentTestEnv(),
+      'user-123',
+      'chat-123',
+      'proj-123',
+      [
+        { url: 'https://api.example.com/mcp', token: 'sam-token', name: 'sam-mcp' },
+        { url: 'https://mcp.zapier.com/x', token: 'zap-token', name: 'zapier' },
+        // No auth (pre-signed URL) — empty token, which every harness reads as "no auth".
+        { url: 'https://presigned.example/mcp', token: '', name: 'composio' },
+        // No name — an entry the vm-agent must positionally name for backwards compat.
+        { url: 'https://legacy.example/mcp', token: 'legacy-token' },
+      ]
+    );
+
+    const [, capturedInit] = fetchWithTimeoutMock.mock.calls[0] as [string, RequestInit];
+    const parsedBody = JSON.parse(capturedInit.body as string);
+    expect(CreateAgentSessionAgentRequestSchema.safeParse(parsedBody).success).toBe(true);
+    expect(parsedBody.mcpServers).toEqual([
+      { url: 'https://api.example.com/mcp', token: 'sam-token', name: 'sam-mcp' },
+      { url: 'https://mcp.zapier.com/x', token: 'zap-token', name: 'zapier' },
+      { url: 'https://presigned.example/mcp', token: '', name: 'composio' },
+      { url: 'https://legacy.example/mcp', token: 'legacy-token' },
     ]);
   });
 

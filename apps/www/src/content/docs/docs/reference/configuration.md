@@ -46,17 +46,23 @@ These are Cloudflare Worker secrets, set during deployment. Pulumi auto-generate
 
 Set as `[vars]` in `wrangler.toml` or as environment variables:
 
-| Variable                          | Default               | Description                                                                                                                |
-| --------------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `BASE_DOMAIN`                     | —                     | Root domain for the deployment (e.g., `example.com`)                                                                       |
-| `PREVIEW_BASE_DOMAIN`             | `preview.BASE_DOMAIN` | Full isolated hostname used for interactive HTML previews                                                                  |
-| `PREVIEW_URL_TTL_SECONDS`         | `300`                 | Lifetime of project/file/version-scoped interactive preview URLs in seconds                                                |
-| `PREVIEW_SIGNING_KEY`             | generated             | Deployment-owned HMAC key generated and persisted by Pulumi; not a manual prerequisite                                     |
-| `VERSION`                         | —                     | Deployment version string                                                                                                  |
-| `SETUP_TOKEN`                     | —                     | Plaintext first-run setup token generated during deploy and readable in the Cloudflare dashboard while setup is incomplete |
-| `SETUP_FORCE`                     | _(unset)_             | Set to `true` to reopen `/setup` for lockout recovery                                                                      |
-| `SETUP_RATE_LIMIT_MAX_ATTEMPTS`   | `10`                  | Max setup-token attempts per identifier/window                                                                             |
-| `SETUP_RATE_LIMIT_WINDOW_SECONDS` | `900`                 | Setup-token attempt window in seconds                                                                                      |
+| Variable                                      | Default               | Description                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BASE_DOMAIN`                                 | —                     | Root domain for the deployment (e.g., `example.com`)                                                                                                                                                                                                                                                                                                                                                             |
+| `PREVIEW_BASE_DOMAIN`                         | `preview.BASE_DOMAIN` | Full isolated hostname used for interactive HTML previews                                                                                                                                                                                                                                                                                                                                                        |
+| `PREVIEW_URL_TTL_SECONDS`                     | `300`                 | Lifetime of project/file/version-scoped interactive preview URLs in seconds                                                                                                                                                                                                                                                                                                                                      |
+| `PREVIEW_SIGNING_KEY`                         | generated             | Deployment-owned HMAC key generated and persisted by Pulumi; not a manual prerequisite                                                                                                                                                                                                                                                                                                                           |
+| `VERSION`                                     | —                     | Deployment version string                                                                                                                                                                                                                                                                                                                                                                                        |
+| `SETUP_TOKEN`                                 | —                     | Plaintext first-run setup token generated during deploy and readable in the Cloudflare dashboard while setup is incomplete                                                                                                                                                                                                                                                                                       |
+| `SETUP_FORCE`                                 | _(unset)_             | Set to `true` to reopen `/setup` for lockout recovery                                                                                                                                                                                                                                                                                                                                                            |
+| `SETUP_RATE_LIMIT_MAX_ATTEMPTS`               | `10`                  | Max setup-token attempts per identifier/window                                                                                                                                                                                                                                                                                                                                                                   |
+| `SETUP_RATE_LIMIT_WINDOW_SECONDS`             | `900`                 | Setup-token attempt window in seconds                                                                                                                                                                                                                                                                                                                                                                            |
+| `PLATFORM_CONFIG_CACHE_MS`                    | `60000`               | Per-isolate cache TTL for the resolved platform integration config (the `GITHUB_*`/`GITLAB_*`/`GOOGLE_LOGIN_*` fallbacks above and their runtime admin overrides). Resolving costs 13 D1 queries and runs on the auth preamble of every authenticated request. After a config change, isolates that already hold a cached copy converge within this window. Set to `0` to disable caching and always re-read D1. |
+| `GITHUB_INSTALLATION_TOKEN_CACHE_TTL_SECONDS` | `3000`                | KV cache TTL for GitHub App installation tokens. The default is shorter than GitHub's one-hour token lifetime. Set to `0` to disable writes for new cache entries.                                                                                                                                                                                                                                               |
+| `GITHUB_REPO_ACCESS_CACHE_TTL_SECONDS`        | `300`                 | KV cache TTL for per-user, per-installation, per-repository GitHub access checks used by the Files page. Set to `0` to disable writes for new cache entries.                                                                                                                                                                                                                                                     |
+| `GITHUB_TREE_CACHE_TTL_SECONDS`               | `86400`               | KV cache TTL for immutable Git tree responses keyed by commit SHA. Branch refs are resolved to a commit SHA before lookup. Set to `0` to disable writes for new cache entries.                                                                                                                                                                                                                                   |
+| `PROJECT_MULTIPLAYER_CACHE_TTL_MS`            | `10000`               | Per-isolate cache TTL for project multiplayer state counts used by trigger-bearing pages. Set to `0` to disable the cache.                                                                                                                                                                                                                                                                                       |
+| `CREDENTIAL_ATTRIBUTION_CACHE_TTL_MS`         | `10000`               | Per-isolate cache TTL for project credential attribution health used by trigger-bearing pages. Set to `0` to disable the cache.                                                                                                                                                                                                                                                                                  |
 
 ## GitHub Environment Variables
 
@@ -77,6 +83,22 @@ The reviewed default churning selectors are `DATABASE.deployment_releases`, `DAT
 `RESOURCE_PREFIX` is generated from `BASE_DOMAIN` as `s` plus the first six hex
 characters of the domain's SHA-256 hash. The self-host onboarding flow fills it
 in for you.
+
+### App deployment image-resolution safety
+
+These optional Worker variables bound the server-side OCI registry lookups used
+when a deployment release submits tag-based images. Digest-pinned images are
+stored without registry network resolution.
+
+| Variable                                            | Default | Description                                                        |
+| --------------------------------------------------- | ------- | ------------------------------------------------------------------ |
+| `DEPLOYMENT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS`       | `10000` | Per-registry request timeout                                       |
+| `DEPLOYMENT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS`         | `60000` | Total tag-resolution wall-clock budget per release submission      |
+| `DEPLOYMENT_IMAGE_RESOLVE_MAX_FETCH_ATTEMPTS`       | `200`   | Maximum outbound registry/token fetches per resolver instance      |
+| `DEPLOYMENT_IMAGE_RESOLVE_MAX_REDIRECTS`            | `2`     | Maximum manually validated HTTPS redirects per outbound request    |
+| `DEPLOYMENT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES` | `65536` | Maximum bearer-token JSON response size                            |
+| `DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES`   | `4`     | Maximum simultaneous outbound resolver fetches                     |
+| `DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES`             | `50`    | Maximum tag-based image references resolved per release submission |
 
 Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `PULUMI_CONFIG_PASSPHRASE`. GitHub App/OAuth secrets (`GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_SLUG`, `GH_WEBHOOK_SECRET`) and Google **login** OAuth secrets (`GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`) are optional environment fallbacks; fresh deployments can set them through `/setup` instead. The separate Google **infra/GCP** OAuth pair (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) is used only for WIF and can be configured by a superadmin at `/admin/integrations`; runtime values override the environment fallback. Service-account JSON users need no infrastructure OAuth client. Deploy signing keys are generated and persisted by Pulumi during deployment; GitHub Environment values are only needed for explicit key overrides.
 
@@ -159,6 +181,8 @@ Sleeping and reclaimed Instant and VM sessions are restored from a snapshot of t
 | `SESSION_SLEEP_RETRY_DELAY_MS`              | `300000` (5 min)          | Retry delay after a fail-closed automatic sleep attempt.                                                                                                                                                                                                                                                                                                                                        |
 | `SESSION_SLEEP_MAX_ATTEMPTS`                | `9`                       | Automatic sleep attempts before SAM preserves compute and records an operator-visible failure. Raising the configured budget re-arms previously exhausted rows that are still below the new limit.                                                                                                                                                                                              |
 | `SESSION_SLEEP_CLAIM_LEASE_MS`              | `600000` (10 min)         | Time after which an interrupted automatic-sleep claim can be safely reclaimed.                                                                                                                                                                                                                                                                                                                  |
+| `HARNESS_BACKGROUND_WORK_LEASE_MS`          | `300000` (5 min)          | Finite sleep-protection lease renewed by normalized harness background-work lifecycle signals. Expiry fails open to ordinary idle-sleep eligibility so a missing terminal signal cannot pin compute forever.                                                                                                                                                                                    |
+| `HARNESS_BACKGROUND_WORK_MAX_DURATION_MS`   | `1800000` (30 min)        | Absolute ceiling, measured from the last harness lifecycle **progress** edge rather than the last heartbeat, on how long background work may defer sleep. The sliding lease above is refreshed by periodic re-reports, so an adapter faithfully re-reporting a stale task set (for example an abandoned `run_in_background` dev server) would otherwise pin compute awake indefinitely.         |
 | `SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS`  | `600000` (10 min)         | Time after which an interrupted replacement-runtime wake claim can be reconciled or reclaimed.                                                                                                                                                                                                                                                                                                  |
 | `SESSION_LIFECYCLE_ERROR_MAX_LENGTH`        | `2048`                    | Maximum sleep/recovery diagnostic detail stored in lifecycle records.                                                                                                                                                                                                                                                                                                                           |
 | `SESSION_SNAPSHOT_PURGE_ENABLED`            | `true`                    | Enables bounded expiry cleanup: terminalizes the sleeping chat, deletes its R2 objects, then removes D1 metadata.                                                                                                                                                                                                                                                                               |
@@ -324,22 +348,31 @@ Pulumi options `diagnosticIncidentPrefix` (default `diagnostic-incidents`) and `
 
 ### Platform Feedback Triage
 
-| Variable                                             | Default  | Description                                                                                                |
-| ---------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------- |
-| `PLATFORM_FEEDBACK_PROJECT_ID`                       | unset    | Project that receives user issue reports and automated triage draft Ideas; unset ⇒ in-app reporting hidden |
-| `PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES`            | `60`     | Lookback window for grouping recent platform errors                                                        |
-| `PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT`               | `100`    | Maximum platform error rows scanned per triage sweep                                                       |
-| `PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT`               | `5`      | Maximum grouped feedback candidates processed per triage sweep                                             |
-| `PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT`            | `10`     | Maximum bounded error references retained per grouped feedback record                                      |
-| `PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS`              | `600000` | Claim lease duration before a later sweep can reclaim the group                                            |
-| `PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES`              | `3`      | Maximum failed attempts before a group is rejected from auto-triage                                        |
-| `PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH` | `240`    | Maximum characters stored or returned for sanitized failure reasons                                        |
+| Variable                                                | Default      | Description                                                                                                                                                                               |
+| ------------------------------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PLATFORM_FEEDBACK_PROJECT_ID`                          | unset        | Bootstrap/environment fallback for the project that receives user issue reports and automated triage draft Ideas. The Admin → Integrations runtime setting is preferred and overrides it. |
+| `PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES`               | `60`         | Lookback window for grouping recent platform errors                                                                                                                                       |
+| `PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT`                  | `100`        | Maximum platform error rows scanned per triage sweep                                                                                                                                      |
+| `PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT`                  | `5`          | Maximum grouped feedback candidates processed per triage sweep                                                                                                                            |
+| `PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT`               | `10`         | Maximum bounded error references retained per grouped feedback record                                                                                                                     |
+| `PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS`                 | `600000`     | Claim lease duration before a later sweep can reclaim the group                                                                                                                           |
+| `PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES`                 | `3`          | Maximum failed attempts before a group is rejected from auto-triage                                                                                                                       |
+| `PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH`    | `240`        | Maximum characters stored or returned for sanitized failure reasons                                                                                                                       |
+| `PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS`      | `7200000`    | Dispatch lease before a failed incident trigger handoff can be reclaimed                                                                                                                  |
+| `PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS`         | `3600000`    | Agent claim lease before another task can reclaim a private incident                                                                                                                      |
+| `PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS`      | `3`          | Expired dispatch attempts before an incident is rejected                                                                                                                                  |
+| `PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS`                 | `2592000000` | Maximum active incident age before expiry                                                                                                                                                 |
+| `PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT`              | `5`          | Maximum active incident triggers inspected per sweep                                                                                                                                      |
+| `PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT`              | `10`         | Maximum grouped incidents included in one incident-trigger backlog summary                                                                                                                |
+| `PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT`         | `10`         | Maximum bounded evidence references retained per incident                                                                                                                                 |
+| `PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES`         | `32768`      | Maximum serialized evidence bytes retained per incident                                                                                                                                   |
+| `PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH` | `2000`       | Maximum private incident resolution-note length                                                                                                                                           |
 
-Automated triage and superadmin-initiated diagnosis read the same `DEBUG_AGENT_DAILY_TOKEN_LIMIT` value but count against **independent per-feature counters**, so worst-case daily spend across both is twice this value.
+Automated triage and superadmin-initiated diagnosis read the same `DEBUG_AGENT_DAILY_TOKEN_LIMIT` value but count against **independent per-feature counters**, so worst-case daily spend across both is twice this value. Incident trigger agents run from the private grouped backlog and dispatch one agent for a bounded backlog summary, not one agent per occurrence.
 
 ### Report an Issue
 
-The in-app **Report an Issue** flow files user-submitted reports as draft Ideas in `PLATFORM_FEEDBACK_PROJECT_ID` (above). The feature is **hidden entirely** — both UI entry points disappear and `GET /api/report-issue/config` returns `enabled: false` — when that variable is unset or points at a project that does not exist in this deployment's database.
+The in-app **Report an Issue** flow files user-submitted reports as draft Ideas in the effective private feedback project. Configure it from **Admin → Integrations** when possible; `PLATFORM_FEEDBACK_PROJECT_ID` remains the environment fallback when no runtime setting is saved. The feature is **hidden entirely** — both UI entry points disappear and `GET /api/report-issue/config` returns `enabled: false` — when no effective project exists or the effective project does not exist in this deployment's database.
 
 | Variable                              | Default | Description                                                       |
 | ------------------------------------- | ------- | ----------------------------------------------------------------- |
@@ -361,6 +394,27 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 | `MODEL_CATALOG_SOURCE_URL`        | `https://models.dev/api.json` | Source URL for the dynamic model catalog                      |
 | `MODEL_CATALOG_CACHE_TTL_SECONDS` | `3600`                        | KV cache TTL for normalized dynamic model catalog payloads    |
 | `MODEL_CATALOG_FETCH_TIMEOUT_MS`  | `5000`                        | Timeout for the upstream catalog fetch before static fallback |
+
+## HTTP Response Caching
+
+Conservative `Cache-Control` budgets for stable and semi-stable API `GET`s, letting the browser
+serve a cached body instantly while it revalidates in the background. All values are **seconds** and
+are clamped to `[0, 86400]`; an unparseable or negative value falls back to the default rather than
+caching for longer.
+
+Authenticated responses are always emitted as `private` with `Vary: Cookie`, so neither a shared
+cache nor a second account in the same browser can be served another user's body. Only the
+unauthenticated `/api/config/*` endpoints are marked `public`. Endpoints returning real-time data
+(chat messages, task status, session and workspace state) are deliberately excluded.
+
+| Variable                                  | Default | Description                                                                 |
+| ----------------------------------------- | ------- | --------------------------------------------------------------------------- |
+| `PUBLIC_CONFIG_CACHE_MAX_AGE_SECONDS`     | `60`    | `max-age` for the unauthenticated `/api/config/*` endpoints                 |
+| `PUBLIC_CONFIG_CACHE_SWR_SECONDS`         | `300`   | `stale-while-revalidate` for `/api/config/*`                                |
+| `MODEL_CATALOG_CACHE_MAX_AGE_SECONDS`     | `60`    | `max-age` for `GET /api/model-catalog/:agentType`                           |
+| `MODEL_CATALOG_CACHE_SWR_SECONDS`         | `300`   | `stale-while-revalidate` for the model catalog response                     |
+| `PROJECT_REFERENCE_CACHE_MAX_AGE_SECONDS` | `0`     | `max-age` for project agent-profile and skill lists (0 = always revalidate) |
+| `PROJECT_REFERENCE_CACHE_SWR_SECONDS`     | `30`    | `stale-while-revalidate` for project agent-profile and skill lists          |
 
 ## Warm Node Pooling
 
@@ -626,23 +680,28 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 
 Durable prompt delivery is enabled by default so a follow-up can remain queued while a sleeping VM is replaced and restored. Legacy VM compatibility remains disabled: targets must advertise stable delivery receipts, and receipt ambiguity fails visibly rather than being guessed or replayed.
 
-| Variable                                   | Default           | Description                                                                                                     |
-| ------------------------------------------ | ----------------- | --------------------------------------------------------------------------------------------------------------- |
-| `DURABLE_PROMPT_DELIVERY_ENABLED`          | `true`            | Persist prompts and deliver them from ProjectData alarms, including sleeping-session wake.                      |
-| `PROMPT_DELIVERY_LEGACY_VM_COMPAT_ENABLED` | `false`           | Explicit old-VM compatibility switch; receipt ambiguity still fails visibly and is never guessed or replayed.   |
-| `PROMPT_DELIVERY_MAX_CANDIDATES_PER_ALARM` | `5`               | Maximum delivery claims started by one alarm pass.                                                              |
-| `PROMPT_DELIVERY_MAX_ATTEMPTS`             | `5`               | Counted delivery attempts before retryable busy/not-ready waits use capped backoff; TTL remains the hard bound. |
-| `PROMPT_DELIVERY_RETRY_BASE_MS`            | `5000`            | Initial retry delay.                                                                                            |
-| `PROMPT_DELIVERY_RETRY_MAX_MS`             | `300000`          | Maximum exponential retry delay.                                                                                |
-| `PROMPT_DELIVERY_TTL_MS`                   | `3600000`         | Maximum unresolved delivery lifetime.                                                                           |
-| `PROMPT_DELIVERY_RECEIPT_TIMEOUT_MS`       | `30000`           | Age at which an unconfirmed claim enters receipt reconciliation.                                                |
-| `PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS`    | `5000`            | Timeout for background VM delivery and receipt calls.                                                           |
-| `PROMPT_DELIVERY_MIN_ALARM_DELAY_MS`       | `1000`            | Minimum delay before the next delivery alarm.                                                                   |
-| `ACP_LONG_TURN_SUPERVISOR_ENABLED`         | `false`           | Reserved long-turn candidate/preemption engine switch; this release leaves it inert.                            |
-| `ACP_LONG_TURN_CHECKPOINT_MS`              | `18000000` (5 hr) | Reserved checkpoint eligibility threshold.                                                                      |
-| `ACP_CHECKPOINT_PREEMPT_GRACE_MS`          | `30000`           | Reserved graceful preemption window.                                                                            |
+| Variable                                     | Default           | Description                                                                                                     |
+| -------------------------------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------- |
+| `DURABLE_PROMPT_DELIVERY_ENABLED`            | `true`            | Persist prompts and deliver them from ProjectData alarms, including sleeping-session wake.                      |
+| `PROMPT_DELIVERY_LEGACY_VM_COMPAT_ENABLED`   | `false`           | Explicit old-VM compatibility switch; receipt ambiguity still fails visibly and is never guessed or replayed.   |
+| `PROMPT_DELIVERY_MAX_CANDIDATES_PER_ALARM`   | `5`               | Maximum delivery claims started by one alarm pass.                                                              |
+| `PROMPT_DELIVERY_MAX_ATTEMPTS`               | `5`               | Counted delivery attempts before retryable busy/not-ready waits use capped backoff; TTL remains the hard bound. |
+| `PROMPT_DELIVERY_RETRY_BASE_MS`              | `5000`            | Initial retry delay.                                                                                            |
+| `PROMPT_DELIVERY_RETRY_MAX_MS`               | `300000`          | Maximum exponential retry delay.                                                                                |
+| `PROMPT_DELIVERY_TTL_MS`                     | `3600000`         | Maximum unresolved delivery lifetime.                                                                           |
+| `PROMPT_DELIVERY_RECEIPT_TIMEOUT_MS`         | `30000`           | Age at which an unconfirmed claim enters receipt reconciliation.                                                |
+| `PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS`      | `5000`            | Timeout for background VM delivery and receipt calls.                                                           |
+| `PROMPT_DELIVERY_MIN_ALARM_DELAY_MS`         | `1000`            | Minimum delay before the next delivery alarm.                                                                   |
+| `ACP_LONG_TURN_SUPERVISOR_ENABLED`           | `false`           | Reserved long-turn candidate/preemption engine switch; this release leaves it inert.                            |
+| `ACP_LONG_TURN_CHECKPOINT_MS`                | `18000000` (5 hr) | Reserved checkpoint eligibility threshold.                                                                      |
+| `ACP_CHECKPOINT_PREEMPT_GRACE_MS`            | `30000`           | Reserved graceful preemption window.                                                                            |
+| `ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS`    | `30000`           | D1 reconciliation backstop interval for active parent waits.                                                    |
+| `ORCHESTRATOR_WAIT_MAX_CHILDREN`             | `20`              | Maximum direct children selected by one durable wait (hard ceiling: `90`, preserving D1 bind headroom).         |
+| `ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT`   | `100`             | Maximum active durable parent waits per project.                                                                |
+| `ORCHESTRATOR_WAIT_MAX_DURATION_MS`          | `86400000`        | Maximum finite wait deadline.                                                                                   |
+| `ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM` | `10`              | Maximum wait subscriptions reconciled by one ProjectData alarm.                                                 |
 
-ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed by ACP session and prompt epoch. Sleeping-session prompts stay in that queue until strict restore succeeds, then use stable receipts for exactly-once acceptance. Automatic checkpoint preemption, parent wake behavior, and `wait_for_subtasks` remain disabled.
+ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed by ACP session and prompt epoch. Sleeping-session prompts stay in that queue until strict restore succeeds, then use stable receipts for exactly-once acceptance. Task agents can register `wait_for_subtasks` for direct children; terminal hooks provide low-latency nudges, bounded alarms reconcile missed writers, and one stable delivery ID wakes the parent exactly once. Automatic checkpoint preemption remains disabled.
 
 > **Liveness-gated recovery.** Stuck-task recovery for `in_progress` tasks (including task-mode work paused at the `awaiting_followup` execution step) is gated on **task-scoped** liveness — a live workspace, a healthy node with a recent heartbeat, **and** an active task-scoped ACP session. A shared-node heartbeat alone is never sufficient. Consequently, `TASK_RUN_HARD_TIMEOUT_MS` and `TASK_RUN_MAX_EXECUTION_MS` bound the point at which a task with **no** proven live runtime is failed; a task with a demonstrably live runtime is preserved past those thresholds, but remains bounded by `TASK_RUN_ABSOLUTE_CEILING_MS` (24 hours by default) as a runaway-cost backstop. When liveness cannot be determined (probe timeout or error), the task is left untouched (fail-safe) until it reaches that absolute ceiling.
 
@@ -703,38 +762,68 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 
 ## Platform Limits
 
-| Variable                           | Default | Description                         |
-| ---------------------------------- | ------- | ----------------------------------- |
-| `MAX_NODES_PER_USER`               | `10`    | Max nodes per user                  |
-| `MAX_WORKSPACES_PER_NODE`          | `3`     | Max workspaces packed onto one node |
-| `MAX_AGENT_SESSIONS_PER_WORKSPACE` | `10`    | Max concurrent agent sessions       |
-| `MAX_PROJECTS_PER_USER`            | `100`   | Max projects per user               |
-| `MAX_TASKS_PER_PROJECT`            | `10000` | Max ideas per project               |
-| `MAX_TASK_MESSAGE_LENGTH`          | `16000` | Max idea description length         |
+| Variable                                     | Default            | Description                                                                   |
+| -------------------------------------------- | ------------------ | ----------------------------------------------------------------------------- |
+| `MAX_NODES_PER_USER`                         | `10`               | Max nodes per user                                                            |
+| `MAX_WORKSPACES_PER_NODE`                    | `3`                | Max workspaces packed onto one node                                           |
+| `VM_ADMISSION_CONTROL_MODE`                  | `enforce`          | VM task/session admission mode: `off`, `shadow`, or `enforce`                 |
+| `VM_ADMISSION_LEASE_TTL_MS`                  | `1200000` (20 min) | Fenced provisioning-claim lease duration                                      |
+| `VM_ADMISSION_RETRY_MIN_MS`                  | `15000`            | Minimum retry delay for tasks waiting on VM capacity                          |
+| `VM_ADMISSION_RETRY_MAX_MS`                  | `60000`            | Maximum retry delay for tasks waiting on VM capacity                          |
+| `VM_ADMISSION_WAIT_TIMEOUT_MS`               | `7200000` (2 h)    | Maximum visible wait for VM capacity before failing the task                  |
+| `VM_ADMISSION_PROVIDER_COOLDOWN_MS`          | `600000` (10 min)  | Cooldown after provider/account capacity errors such as Hetzner server limits |
+| `VM_ADMISSION_WAKE_BATCH_SIZE`               | `25`               | Maximum waiting TaskRunner DOs nudged by one capacity event                   |
+| `VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH` | `500`              | Maximum provider diagnostic message length stored on admission records        |
+| `MAX_AGENT_SESSIONS_PER_WORKSPACE`           | `10`               | Max concurrent agent sessions                                                 |
+| `MAX_PROJECTS_PER_USER`                      | `100`              | Max projects per user                                                         |
+| `MAX_TASKS_PER_PROJECT`                      | `10000`            | Max ideas per project                                                         |
+| `MAX_TASK_MESSAGE_LENGTH`                    | `16000`            | Max idea description length                                                   |
 
 ## Durable Object Limits
 
-| Variable                              | Default          | Description                                                            |
-| ------------------------------------- | ---------------- | ---------------------------------------------------------------------- |
-| `MAX_SESSIONS_PER_PROJECT`            | `10000`          | Max chat sessions per project                                          |
-| `MAX_MESSAGES_PER_SESSION`            | `100000`         | Max messages per chat session                                          |
-| `DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES`  | `16384`          | Max compact metadata bytes preserved for library document cards        |
-| `MESSAGE_SIZE_THRESHOLD`              | `102400`         | Max message size in bytes                                              |
-| `ACTIVITY_RETENTION_DAYS`             | `90`             | Days to retain activity events                                         |
-| `SESSION_IDLE_TIMEOUT_MINUTES`        | `60`             | Idle session timeout                                                   |
-| `SESSION_ACTIVITY_STALE_THRESHOLD_MS` | `300000` (5 min) | Evidence threshold before stale working activity can be healed to idle |
-| `SESSION_ACTIVITY_PROBE_TIMEOUT_MS` | `5000` (5 s) | Timeout for the vm-agent session-activity probe. Background control-loop budget — deliberately far below the interactive node-agent timeout |
-| `SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS` | `3` | Consecutive unreachable probes after which a stale working state is terminalized as dead |
-| `SESSION_ACTIVITY_PROBE_MAX_CANDIDATES` | `10` | Stale-activity candidates probed per ProjectData alarm pass |
-| `DO_SUMMARY_SYNC_DEBOUNCE_MS`         | `5000`           | Debounce for DO-to-D1 summary sync                                     |
+| Variable                                      | Default           | Description                                                                                                                                                                      |
+| --------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MAX_SESSIONS_PER_PROJECT`                    | `10000`           | Max chat sessions per project                                                                                                                                                    |
+| `MAX_MESSAGES_PER_SESSION`                    | `100000`          | Max messages per chat session                                                                                                                                                    |
+| `COMMENT_BODY_MAX_LENGTH`                     | `8000`            | Max characters per message-anchored comment or reply body                                                                                                                        |
+| `COMMENT_QUOTE_MAX_LENGTH`                    | `2000`            | Max characters preserved from quoted message text                                                                                                                                |
+| `COMMENT_IDEMPOTENCY_KEY_MAX_LENGTH`          | `200`             | Max `clientMutationId` length for message-anchored comment writes                                                                                                                |
+| `COMMENT_LIST_LIMIT_DEFAULT`                  | `100`             | Default page size for comment thread lists                                                                                                                                       |
+| `COMMENT_LIST_LIMIT_MAX`                      | `500`             | Max page size for comment thread lists                                                                                                                                           |
+| `COMMENT_THREADS_PER_SESSION_MAX`             | `1000`            | Max message-anchored comment threads per chat session                                                                                                                            |
+| `COMMENT_REPLIES_PER_THREAD_MAX`              | `200`             | Max replies per message-anchored comment thread                                                                                                                                  |
+| `DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES`          | `16384`           | Max compact metadata bytes preserved for library document cards                                                                                                                  |
+| `PROJECT_DATA_TOOL_METADATA_MAX_BYTES`        | `131072`          | Max stored `tool_metadata` bytes per message before oversized tool content is stripped into bounded metadata                                                                     |
+| `PROJECT_DATA_STORAGE_TELEMETRY_ENABLED`      | `true`            | Enables ProjectData `databaseSize` alarm measurement and D1 telemetry writes                                                                                                     |
+| `PROJECT_DATA_STORAGE_LIMIT_BYTES`            | `10000000000`     | Cloudflare SQLite-backed Durable Object storage limit used for ProjectData usage classification                                                                                  |
+| `PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS`    | `3600000`         | Minimum interval between per-object ProjectData storage measurements                                                                                                             |
+| `PROJECT_DATA_STORAGE_ALERT_INTERVAL_MS`      | `21600000`        | Minimum interval between repeated critical/degraded ProjectData storage observability alerts                                                                                     |
+| `PROJECT_DATA_STORAGE_NOTICE_RATIO`           | `0.6`             | ProjectData storage usage ratio classified as `notice`                                                                                                                           |
+| `PROJECT_DATA_STORAGE_WARNING_RATIO`          | `0.8`             | ProjectData storage usage ratio classified as `warning`                                                                                                                          |
+| `PROJECT_DATA_STORAGE_CRITICAL_RATIO`         | `0.9`             | ProjectData storage usage ratio classified as `critical`                                                                                                                         |
+| `PROJECT_DATA_STORAGE_DEGRADED_RATIO`         | `0.95`            | ProjectData storage usage ratio classified as `degraded`                                                                                                                         |
+| `PROJECT_DATA_STORAGE_EMERGENCY_TARGET_RATIO` | `0.9`             | Target usage ratio for explicit superadmin ProjectData emergency purge calls                                                                                                     |
+| `PROJECT_DATA_STORAGE_EMERGENCY_BATCH_ROWS`   | `500`             | Oldest `activity_events` and `acp_session_events` rows deleted per table per emergency purge batch                                                                               |
+| `PROJECT_DATA_STORAGE_EMERGENCY_MAX_BATCHES`  | `4`               | Maximum emergency purge batches per explicit call                                                                                                                                |
+| `MESSAGE_SIZE_THRESHOLD`                      | `102400`          | Max message size in bytes                                                                                                                                                        |
+| `ACTIVITY_RETENTION_DAYS`                     | `90`              | Days to retain activity events                                                                                                                                                   |
+| `SESSION_IDLE_TIMEOUT_MINUTES`                | `60`              | Idle session timeout                                                                                                                                                             |
+| `SESSION_ACTIVITY_STALE_THRESHOLD_MS`         | `300000` (5 min)  | Evidence threshold before stale working activity can be healed to idle                                                                                                           |
+| `SESSION_ACTIVITY_PROBE_TIMEOUT_MS`           | `5000` (5 s)      | Timeout for the vm-agent session-activity probe. Background control-loop budget — deliberately far below the interactive node-agent timeout                                      |
+| `SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS`         | `3`               | Consecutive unreachable probes after which a stale working state is terminalized as dead                                                                                         |
+| `SESSION_ACTIVITY_PROBE_MAX_CANDIDATES`       | `10`              | Stale-activity candidates probed per ProjectData alarm pass                                                                                                                      |
+| `DO_SUMMARY_SYNC_DEBOUNCE_MS`                 | `5000`            | Debounce for DO-to-D1 summary sync                                                                                                                                               |
+| `SESSION_INDEX_MAX_ROWS`                      | `1000`            | Sessions mirrored into the D1 `session_summaries` index per project. A project holding more is recorded as incomplete and its chat sidebar reads fall back to the Durable Object |
+| `SESSION_INDEX_MAX_STALENESS_MS`              | `900000` (15 min) | How stale the session index may be before the per-project sidebar list stops trusting it and falls back to the Durable Object                                                    |
 
 ## Durable Object Retry
 
-| Variable                 | Default | Description                                                                |
-| ------------------------ | ------- | -------------------------------------------------------------------------- |
-| `DO_RETRY_MAX_ATTEMPTS`  | `8`     | Max attempts for transient Durable Object RPC reset/overload errors        |
-| `DO_RETRY_BASE_DELAY_MS` | `100`   | Base retry delay in milliseconds for transient Durable Object RPC failures |
-| `DO_RETRY_MAX_DELAY_MS`  | `250`   | Max per-attempt retry delay for transient Durable Object RPC failures      |
+| Variable                               | Default | Description                                                                                                                                                                                |
+| -------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DO_RETRY_MAX_ATTEMPTS`                | `8`     | Max attempts for transient Durable Object RPC reset/overload errors                                                                                                                        |
+| `DO_RETRY_BASE_DELAY_MS`               | `100`   | Base retry delay in milliseconds for transient Durable Object RPC failures                                                                                                                 |
+| `DO_RETRY_MAX_DELAY_MS`                | `250`   | Max per-attempt retry delay for transient Durable Object RPC failures                                                                                                                      |
+| `PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES` | `2000`  | Max ProjectData Durable Objects one Worker isolate remembers as already having a persisted `projectId`, so `ensureProjectId` costs one RPC per isolate instead of one before every DO call |
 
 ## Runtime Config Limits
 
@@ -748,6 +837,9 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 | `MAX_DEPLOYMENT_ENV_VARS_PER_ENVIRONMENT`  | `100`    | Max deployment config vars per environment |
 | `MAX_DEPLOYMENT_ENV_VALUE_BYTES`           | `65536`  | Max bytes per deployment config value      |
 | `MAX_DEPLOYMENT_ENV_TOTAL_BYTES`           | `262144` | Max aggregate deployment config env size   |
+| `MAX_MCP_CONNECTIONS_PER_SCOPE`            | `25`     | Max bring-your-own MCP servers per scope   |
+| `MCP_CONNECTION_URL_MAX_BYTES`             | `2048`   | Max MCP endpoint URL size                  |
+| `MCP_CONNECTION_TOKEN_MAX_BYTES`           | `8192`   | Max MCP bearer token size                  |
 
 ## External API Timeouts
 
@@ -831,33 +923,64 @@ Applied via cloud-init on each node:
 
 ## MCP Tool Limits
 
-| Variable                      | Default | Description                                     |
-| ----------------------------- | ------- | ----------------------------------------------- |
-| `MCP_IDEA_CONTEXT_MAX_LENGTH` | `500`   | Max characters of idea context shown to agents  |
-| `MCP_IDEA_LIST_LIMIT`         | `20`    | Default page size for `list_ideas`              |
-| `MCP_IDEA_LIST_MAX`           | `100`   | Max page size for `list_ideas`                  |
-| `MCP_IDEA_SEARCH_MAX`         | `20`    | Max results from `search_ideas`                 |
-| `MCP_MESSAGE_SEARCH_MAX`      | `20`    | Max results from `search_messages`              |
-| `MCP_MESSAGE_LIST_LIMIT`      | `50`    | Default page size for `get_session_messages`    |
-| `MCP_MESSAGE_LIST_MAX`        | `200`   | Max messages per `get_session_messages` request |
-| `MCP_TRIGGER_LIST_LIMIT`      | `20`    | Default page size for `list_triggers`           |
-| `MCP_TRIGGER_LIST_MAX`        | `100`   | Max triggers per `list_triggers` request        |
+| Variable                               | Default | Description                                             |
+| -------------------------------------- | ------- | ------------------------------------------------------- |
+| `MCP_IDEA_CONTEXT_MAX_LENGTH`          | `500`   | Max characters of idea context shown to agents          |
+| `MCP_IDEA_LIST_LIMIT`                  | `20`    | Default page size for `list_ideas`                      |
+| `MCP_IDEA_LIST_MAX`                    | `100`   | Max page size for `list_ideas`                          |
+| `MCP_IDEA_SEARCH_MAX`                  | `20`    | Max results from `search_ideas`                         |
+| `MCP_MESSAGE_SEARCH_MAX`               | `20`    | Max results from `search_messages`                      |
+| `MCP_MESSAGE_LIST_LIMIT`               | `50`    | Default page size for `get_session_messages`            |
+| `MCP_MESSAGE_LIST_MAX`                 | `200`   | Max messages per `get_session_messages` request         |
+| `MCP_COMMENT_LIST_LIMIT`               | `10`    | Default page size for `list_message_comment_threads`    |
+| `MCP_COMMENT_LIST_MAX`                 | `25`    | Max threads per `list_message_comment_threads` request  |
+| `MCP_COMMENT_BODY_MAX_LENGTH`          | `4000`  | Max comment/reply body characters accepted through MCP  |
+| `MCP_COMMENT_QUOTE_MAX_LENGTH`         | `1000`  | Max quoted source-message characters returned to agents |
+| `COMMENT_DIRECTIVE_CONTEXT_MAX_LENGTH` | `6000`  | Max send-to-agent comment directive prompt length       |
+| `MCP_TRIGGER_LIST_LIMIT`               | `20`    | Default page size for `list_triggers`                   |
+| `MCP_TRIGGER_LIST_MAX`                 | `100`   | Max triggers per `list_triggers` request                |
+| `MCP_INCIDENT_LIST_LIMIT`              | `10`    | Default page size for private `list_incident_queue`     |
+| `MCP_INCIDENT_LIST_MAX`                | `50`    | Max private incidents per `list_incident_queue` request |
 
 ## Web UI (Build-Time)
 
-| Variable                                | Default            | Description                                                           |
-| --------------------------------------- | ------------------ | --------------------------------------------------------------------- |
-| `VITE_FILE_PREVIEW_INLINE_MAX_BYTES`    | `10485760` (10 MB) | Images below this size render inline automatically                    |
-| `VITE_FILE_PREVIEW_LOAD_MAX_BYTES`      | `52428800` (50 MB) | Images below this size show click-to-load; above shows download link  |
-| `VITE_ANALYTICS_MAX_QUEUE_SIZE`         | `100`              | Max client-side analytics events retained before oldest events drop   |
-| `VITE_ANALYTICS_FLUSH_THRESHOLD`        | `10`               | Client event count that triggers an immediate analytics flush         |
-| `VITE_ANALYTICS_FLUSH_INTERVAL_MS`      | `5000`             | Client analytics background flush interval in milliseconds            |
-| `VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES`  | `100`              | Max paginated diagnosis-event pages loaded per browser request        |
-| `VITE_PROJECT_LIST_LIMIT`               | `50`               | Projects loaded into each shared list-cache entry                     |
-| `VITE_PROJECT_POLL_INTERVAL_MS`         | `30000`            | Project-list page refresh cadence in milliseconds; `0` disables       |
-| `VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS` | `60000`            | App-shell project-list refresh cadence in milliseconds; `0` disables  |
-| `VITE_PROJECT_PREFETCH_DELAY_MS`        | `120`              | Mouse dwell before project-detail prefetch; focus/touch are immediate |
-| `VITE_BACKGROUND_FETCH_DELAY_MS`        | `150`              | Delay before background query activity is shown and announced         |
+| Variable                                   | Default            | Description                                                              |
+| ------------------------------------------ | ------------------ | ------------------------------------------------------------------------ |
+| `VITE_FILE_PREVIEW_INLINE_MAX_BYTES`       | `10485760` (10 MB) | Images below this size render inline automatically                       |
+| `VITE_FILE_PREVIEW_LOAD_MAX_BYTES`         | `52428800` (50 MB) | Images below this size show click-to-load; above shows download link     |
+| `VITE_ANALYTICS_MAX_QUEUE_SIZE`            | `100`              | Max client-side analytics events retained before oldest events drop      |
+| `VITE_ANALYTICS_FLUSH_THRESHOLD`           | `10`               | Client event count that triggers an immediate analytics flush            |
+| `VITE_ANALYTICS_FLUSH_INTERVAL_MS`         | `5000`             | Client analytics background flush interval in milliseconds               |
+| `VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES`     | `100`              | Max paginated diagnosis-event pages loaded per browser request           |
+| `VITE_PROJECT_LIST_LIMIT`                  | `50`               | Projects loaded into each shared list-cache entry                        |
+| `VITE_PROJECT_POLL_INTERVAL_MS`            | `30000`            | Project-list page refresh cadence in milliseconds; `0` disables          |
+| `VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS`    | `60000`            | App-shell project-list refresh cadence in milliseconds; `0` disables     |
+| `VITE_PROJECT_PREFETCH_DELAY_MS`           | `120`              | Mouse dwell before project-detail prefetch; focus/touch are immediate    |
+| `VITE_BACKGROUND_FETCH_DELAY_MS`           | `150`              | Delay before background query activity is shown and announced            |
+| `VITE_CHUNK_LOAD_RETRY_DELAY_MS`           | `350`              | Wait before retrying a failed lazy route-chunk import                    |
+| `VITE_CHUNK_RELOAD_COOLDOWN_MS`            | `15000`            | Minimum gap between chunk-recovery reloads; guards against a reload loop |
+| `VITE_ROUTE_FALLBACK_REVEAL_DELAY_MS`      | `180`              | Delay before the route loading spinner fades in, avoiding a flash        |
+| `VITE_QUERY_PERSIST_MAX_AGE_MS`            | `86400000` (24 h)  | How long a persisted query-cache record may be restored after writing    |
+| `VITE_QUERY_PERSIST_THROTTLE_MS`           | `1000`             | Minimum gap between IndexedDB writes of the query cache                  |
+| `VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS`    | `250`              | Budget for the initial cache restore before failing open to no cache     |
+| `VITE_AGENT_CATALOG_STALE_TIME_MS`         | `300000`           | Freshness window for the installable agent catalog query                 |
+| `VITE_PROVIDER_CATALOG_STALE_TIME_MS`      | `300000`           | Freshness window for provider catalog size/location/price metadata       |
+| `VITE_TRIAL_STATUS_STALE_TIME_MS`          | `60000`            | Freshness window for trial availability status                           |
+| `VITE_CACHED_COMMANDS_STALE_TIME_MS`       | `300000`           | Freshness window for cached slash-command registries                     |
+| `VITE_PROJECT_CREATE_CONFIG_STALE_TIME_MS` | `300000`           | Freshness window for project-creation config flags                       |
+
+### Query cache persistence
+
+The control-plane UI writes an allowlisted slice of its query cache to IndexedDB so a full page
+reload paints from cache instead of refetching. Persisted slices are limited to allowlisted
+project summaries, stripped library indexes, and project-chat session messages. Credentials,
+admin diagnostics, node and workspace runtime details, file contents, signed URLs, and mutation state
+are never written to disk.
+
+Records are namespaced by authenticated user and by a schema version, and are deleted on sign-out
+and on account switch, so one account can never be shown another account's cached data. If
+IndexedDB is unavailable — private browsing, a storage quota failure, or a disabled store — the app
+degrades silently to its normal in-memory cache.
 
 ## Analytics
 

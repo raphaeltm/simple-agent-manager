@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
-import { getProjectMultiplayerState } from '../../../src/services/project-multiplayer';
+import {
+  clearProjectMultiplayerStateCache,
+  getProjectMultiplayerState,
+} from '../../../src/services/project-multiplayer';
 
 function makeDb(counts: number[]) {
   let callIndex = 0;
@@ -14,6 +17,9 @@ function makeDb(counts: number[]) {
 }
 
 describe('project multiplayer state service', () => {
+  beforeEach(() => {
+    clearProjectMultiplayerStateCache();
+  });
   it('treats an owner-only project with no invite or request as solo', async () => {
     const state = await getProjectMultiplayerState(
       makeDb([1, 0, 0]) as never,
@@ -48,5 +54,66 @@ describe('project multiplayer state service', () => {
 
     expect(state.multiplayerActive).toBe(true);
     expect(state.hasPendingAccessRequest).toBe(true);
+  });
+
+  it('reuses cached state within the configured TTL', async () => {
+    const db = makeDb([1, 0, 0, 2, 0, 0]);
+
+    const first = await getProjectMultiplayerState(
+      db as never,
+      'proj-cache',
+      new Date('2026-08-19T00:00:00.000Z'),
+      { PROJECT_MULTIPLAYER_CACHE_TTL_MS: '1000' }
+    );
+    const second = await getProjectMultiplayerState(
+      db as never,
+      'proj-cache',
+      new Date('2026-08-19T00:00:00.500Z'),
+      { PROJECT_MULTIPLAYER_CACHE_TTL_MS: '1000' }
+    );
+
+    expect(first.multiplayerActive).toBe(false);
+    expect(second).toBe(first);
+  });
+
+  it('expires cached state after the configured TTL', async () => {
+    const db = makeDb([1, 0, 0, 2, 0, 0]);
+
+    const first = await getProjectMultiplayerState(
+      db as never,
+      'proj-expire',
+      new Date('2026-08-19T00:00:00.000Z'),
+      { PROJECT_MULTIPLAYER_CACHE_TTL_MS: '1000' }
+    );
+    const second = await getProjectMultiplayerState(
+      db as never,
+      'proj-expire',
+      new Date('2026-08-19T00:00:01.001Z'),
+      { PROJECT_MULTIPLAYER_CACHE_TTL_MS: '1000' }
+    );
+
+    expect(first.multiplayerActive).toBe(false);
+    expect(second.multiplayerActive).toBe(true);
+  });
+
+  it('supports explicit cache invalidation', async () => {
+    const db = makeDb([1, 0, 0, 2, 0, 0]);
+
+    const first = await getProjectMultiplayerState(
+      db as never,
+      'proj-invalidate',
+      new Date('2026-08-19T00:00:00.000Z'),
+      { PROJECT_MULTIPLAYER_CACHE_TTL_MS: '1000' }
+    );
+    clearProjectMultiplayerStateCache('proj-invalidate');
+    const second = await getProjectMultiplayerState(
+      db as never,
+      'proj-invalidate',
+      new Date('2026-08-19T00:00:00.500Z'),
+      { PROJECT_MULTIPLAYER_CACHE_TTL_MS: '1000' }
+    );
+
+    expect(first.multiplayerActive).toBe(false);
+    expect(second.multiplayerActive).toBe(true);
   });
 });

@@ -14,7 +14,15 @@ vi.mock('../../../src/lib/api', () => ({
   listSkills: vi.fn().mockResolvedValue({ items: [] }),
 }));
 
+
+// `useQueryScope()` reads the authenticated identity, and every migrated query
+// is keyed by it. Without a provider `useAuth` throws, so supply a stable identity.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
+}));
+
 import { updateTrigger } from '../../../src/lib/api';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 function makeTrigger(overrides: Partial<TriggerResponse> = {}): TriggerResponse {
   return {
@@ -58,7 +66,7 @@ function renderForm(editTrigger: TriggerResponse | null) {
         <TriggerForm open onClose={vi.fn()} editTrigger={editTrigger} onSaved={vi.fn()} />
       </ToastProvider>
     </ProjectContext.Provider>
-  );
+  , { wrapper: QueryTestWrapper });
 }
 
 /**

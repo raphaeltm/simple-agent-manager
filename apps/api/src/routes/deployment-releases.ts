@@ -21,6 +21,7 @@ import { decrypt } from '../services/encryption';
 import {
   buildProjectImageResolver,
   resolveManifestImageTags,
+  validateUnresolvedComposeImageCount,
 } from './deployment-release-image-resolver';
 import { createDeploymentReleaseFromManifest } from './deployment-release-submission';
 
@@ -34,7 +35,7 @@ import { createDeploymentReleaseFromManifest } from './deployment-release-submis
 async function requireOwnedEnvironment(
   db: ReturnType<typeof drizzle>,
   envId: string,
-  projectId: string,
+  projectId: string
 ) {
   const rows = await db
     .select()
@@ -42,8 +43,8 @@ async function requireOwnedEnvironment(
     .where(
       and(
         eq(schema.deploymentEnvironments.id, envId),
-        eq(schema.deploymentEnvironments.projectId, projectId),
-      ),
+        eq(schema.deploymentEnvironments.projectId, projectId)
+      )
     )
     .limit(1);
 
@@ -59,7 +60,7 @@ async function requireOwnedEnvironment(
 async function requireOwnedRelease(
   db: ReturnType<typeof drizzle>,
   releaseId: string,
-  envId: string,
+  envId: string
 ) {
   const rows = await db
     .select()
@@ -67,8 +68,8 @@ async function requireOwnedRelease(
     .where(
       and(
         eq(schema.deploymentReleases.id, releaseId),
-        eq(schema.deploymentReleases.environmentId, envId),
-      ),
+        eq(schema.deploymentReleases.environmentId, envId)
+      )
     )
     .limit(1);
 
@@ -94,7 +95,7 @@ export async function loadResolvedSecrets(
   db: ReturnType<typeof drizzle>,
   envId: string,
   secretNames: string[],
-  encryptionKey: string,
+  encryptionKey: string
 ): Promise<Record<string, string>> {
   if (secretNames.length === 0) return {};
 
@@ -108,12 +109,14 @@ export async function loadResolvedSecrets(
     .where(
       and(
         eq(schema.deploymentSecrets.environmentId, envId),
-        inArray(schema.deploymentSecrets.name, secretNames),
-      ),
+        inArray(schema.deploymentSecrets.name, secretNames)
+      )
     );
 
   const entries = await Promise.all(
-    rows.map(async (row) => [row.name, await decrypt(row.encryptedValue, row.iv, encryptionKey)] as const),
+    rows.map(
+      async (row) => [row.name, await decrypt(row.encryptedValue, row.iv, encryptionKey)] as const
+    )
   );
   return Object.fromEntries(entries);
 }
@@ -164,7 +167,19 @@ deploymentReleaseRoutes.post(
             message: 'Compose parse failed',
             details: { errors: parsed.errors },
           },
-          400,
+          400
+        );
+      }
+
+      const imageCountErrors = validateUnresolvedComposeImageCount(parsed.manifest, c.env);
+      if (imageCountErrors.length > 0) {
+        return c.json(
+          {
+            error: 'MANIFEST_VALIDATION_FAILED',
+            message: 'Manifest validation failed',
+            details: { errors: imageCountErrors },
+          },
+          400
         );
       }
 
@@ -177,7 +192,7 @@ deploymentReleaseRoutes.post(
             message: 'Manifest validation failed',
             details: { errors: resolved.errors },
           },
-          400,
+          400
         );
       }
 
@@ -198,7 +213,7 @@ deploymentReleaseRoutes.post(
             message: 'Failed to resolve image tag(s) to digest(s)',
             details: { errors: resolveResult.errors },
           },
-          400,
+          400
         );
       }
 
@@ -210,7 +225,7 @@ deploymentReleaseRoutes.post(
             message: 'Manifest validation failed',
             details: { errors: result.errors },
           },
-          400,
+          400
         );
       }
 
@@ -236,16 +251,16 @@ deploymentReleaseRoutes.post(
     }
 
     return c.json(release.body, 201);
-  },
+  }
 );
 
 function isYamlContentType(contentType: string): boolean {
   const mediaType = contentType.split(';', 1)[0]?.trim().toLowerCase();
   return (
-    mediaType === 'application/yaml'
-    || mediaType === 'text/yaml'
-    || mediaType === 'application/x-yaml'
-    || mediaType === 'text/x-yaml'
+    mediaType === 'application/yaml' ||
+    mediaType === 'text/yaml' ||
+    mediaType === 'application/x-yaml' ||
+    mediaType === 'text/x-yaml'
   );
 }
 
@@ -281,7 +296,7 @@ deploymentReleaseRoutes.get(
       .orderBy(desc(schema.deploymentReleases.version));
 
     return c.json({ releases: rows });
-  },
+  }
 );
 
 /**
@@ -306,7 +321,7 @@ deploymentReleaseRoutes.get(
       ...row,
       manifest: JSON.parse(row.manifest),
     });
-  },
+  }
 );
 
 /**
@@ -370,7 +385,7 @@ deploymentReleaseRoutes.get(
     return c.text(composeYaml, 200, {
       'Content-Type': 'text/yaml; charset=utf-8',
     });
-  },
+  }
 );
 
 export { deploymentReleaseRoutes };

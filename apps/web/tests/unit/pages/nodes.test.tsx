@@ -11,6 +11,12 @@ const mocks = vi.hoisted(() => ({
   getProviderCatalog: vi.fn(),
 }));
 
+// `useQueryScope()` reads the authenticated identity, and every migrated query
+// is keyed by it. Without a provider `useAuth` throws, so supply a stable identity.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
+}));
+
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   listNodes: mocks.listNodes,
@@ -23,7 +29,12 @@ vi.mock('../../../src/components/UserMenu', () => ({
   UserMenu: () => <div data-testid="user-menu" />,
 }));
 
+import { nodeQueryKeys } from '../../../src/lib/query-options';
 import { Nodes } from '../../../src/pages/Nodes';
+
+/** Must match the id returned by the mocked `useAuth` above — the query keys are
+ * scoped by it, so an invalidate with a different scope would match nothing. */
+const SCOPE = 'user-1';
 
 describe('Nodes page', () => {
   beforeEach(() => {
@@ -167,7 +178,7 @@ describe('Nodes page', () => {
     expect(await screen.findByText('Persisted Node')).toBeInTheDocument();
 
     mocks.listNodes.mockRejectedValueOnce(new Error('Nodes refetch boom'));
-    void queryClient.invalidateQueries({ queryKey: ['nodes'] });
+    void queryClient.invalidateQueries({ queryKey: nodeQueryKeys.all(SCOPE) });
 
     await waitFor(() => {
       expect(screen.getByText('Persisted Node')).toBeInTheDocument();
@@ -212,7 +223,7 @@ describe('Nodes page', () => {
     mocks.listNodes.mockReturnValueOnce(refetchPromise);
 
     // Trigger a refetch
-    void queryClient.invalidateQueries({ queryKey: ['nodes'] });
+    void queryClient.invalidateQueries({ queryKey: nodeQueryKeys.all(SCOPE) });
 
     // Content must stay visible while refetch is in-flight
     expect(screen.getByText('Stale Node')).toBeInTheDocument();

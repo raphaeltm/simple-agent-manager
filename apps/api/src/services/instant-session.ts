@@ -25,6 +25,10 @@ import {
   requireVmAgentContainer,
   runContainerPhase,
 } from './vm-agent-container';
+import {
+  ensureWorkspaceBranchOnRemote,
+  logWorkspaceBranchResult,
+} from './workspace-branch';
 import { resolveWorkspaceGitSource } from './workspace-git-source';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -184,6 +188,58 @@ export async function launchInstantSession(
   return continueInstantSessionLaunch(db, env, input, accepted);
 }
 
+/**
+ * Thrown when the checkout branch is confirmed absent from the remote and could
+ * not be created. Provisioning stops here rather than launching a container that
+ * is certain to fail its clone.
+ */
+export class InstantBranchUnavailableError extends Error {
+  constructor(
+    readonly branch: string,
+    readonly reason: string
+  ) {
+    super(
+      // JSON-quote the branch: it can be a caller-supplied string, and this
+      // message reaches logs and MCP responses, so control characters must not
+      // pass through raw.
+      `Branch ${JSON.stringify(branch)} does not exist on the remote and could not be created: ` +
+        `${reason}. Push the branch, or dispatch without an explicit branch to work on a new one.`
+    );
+    this.name = 'InstantBranchUnavailableError';
+  }
+}
+
+async function ensureInstantCheckoutBranch(
+  env: Env,
+  input: LaunchInstantSessionInput,
+  branch: string,
+  defaultBranch: string
+): Promise<void> {
+  const result = await ensureWorkspaceBranchOnRemote(env, {
+    projectId: input.project.id,
+    repository: input.project.repository,
+    repoProvider: input.project.repoProvider,
+    installationId: input.project.installationId,
+    userId: input.userId,
+    branch,
+    baseBranch: defaultBranch,
+  });
+
+  logWorkspaceBranchResult('instant_session.ensure_branch', result, {
+    taskId: input.taskId,
+    projectId: input.project.id,
+    branch,
+    defaultBranch,
+  });
+
+  // Only `missing` is positive evidence that the clone will fail. `unknown` and
+  // `skipped` mean the check could not run, so we must not convert launches that
+  // work today into hard failures.
+  if (result.status === 'missing') {
+    throw new InstantBranchUnavailableError(branch, result.reason);
+  }
+}
+
 export async function acceptInstantSession(
   db: Db,
   env: Env,
@@ -192,8 +248,19 @@ export async function acceptInstantSession(
   requireVmAgentContainer(env);
 
   const startedAt = Date.now();
-  const branch = input.branch?.trim() || input.project.defaultBranch || 'main';
+  const defaultBranch = input.project.defaultBranch || 'main';
+  const branch = input.branch?.trim() || defaultBranch;
   const workspaceName = getWorkspaceName(input);
+
+  // The standalone agent clones with a bare `git clone --branch <branch>` and
+  // has no base-branch fallback, so a branch that is not on the remote is a
+  // guaranteed exit-128 failure — after a container has already been allocated.
+  // MCP dispatch hands us a freshly generated `sam/<slug>-<suffix>` output
+  // branch, which by definition has never been pushed. Create it up front (the
+  // same guard the VM runtime has had since 2026-06-02) so the clone, the
+  // snapshot-restore re-clone, and the eventual push all resolve the same ref.
+  await ensureInstantCheckoutBranch(env, input, branch, defaultBranch);
+
   const gitSource = await resolveWorkspaceGitSource(db, input.project);
 
   const node = await createNodeRecord(env, {

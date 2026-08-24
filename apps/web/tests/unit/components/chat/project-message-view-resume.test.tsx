@@ -8,8 +8,17 @@
  * 4. Resume failures show clear error messages
  * 5. Idle countdown pauses during resume
  */
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import {
+  act,
+  fireEvent,
+  render as rtlRender,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
+import type { ReactElement, ReactNode } from 'react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ProjectMessageView } from '../../../../src/components/project-message-view';
 // Real ApiClientError (NOT overridden by the api mock below — the factory spreads
@@ -32,6 +41,9 @@ const mockSendFollowUpPrompt = vi.fn();
 const mockCancelAgentPrompt = vi.fn();
 const mockGetTranscribeApiUrl = vi.fn().mockReturnValue('https://api.example.com/transcribe');
 const mockGetTtsApiUrl = vi.fn().mockReturnValue('https://api.example.com/tts');
+const commentApiMocks = vi.hoisted(() => ({
+  listMessageComments: vi.fn().mockResolvedValue({ comments: [] }),
+}));
 
 vi.mock('../../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../../src/lib/api')>()),
@@ -48,6 +60,21 @@ vi.mock('../../../../src/lib/api', async (importOriginal) => ({
   updateProjectTaskStatus: vi.fn(),
   deleteWorkspace: vi.fn(),
   saveCachedCommands: vi.fn().mockResolvedValue({ cached: 0 }),
+}));
+
+vi.mock('../../../../src/lib/api/comments', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../../src/lib/api/comments')>()),
+  listMessageComments: commentApiMocks.listMessageComments,
+  createMessageCommentThread: vi.fn(),
+  createMessageCommentReply: vi.fn(),
+  resolveMessageCommentThread: vi.fn(),
+  reopenMessageCommentThread: vi.fn(),
+  sendMessageCommentThreadToAgent: vi.fn(),
+}));
+
+vi.mock('../../../../src/components/AuthProvider', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../../src/components/AuthProvider')>()),
+  useAuth: () => ({ user: { id: 'user-1' }, isSuperadmin: false, isLoading: false }),
 }));
 
 // Mock useChatWebSocket
@@ -111,6 +138,17 @@ const SESSION_ID = 'sess-456';
 const WORKSPACE_ID = 'ws-789';
 const AGENT_SESSION_ID = 'agent-sess-001';
 
+function render(ui: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const Wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+
+  return rtlRender(ui, { wrapper: Wrapper });
+}
+
 function makeSessionResponse(overrides: Record<string, unknown> = {}) {
   return {
     id: SESSION_ID,
@@ -133,6 +171,10 @@ function makeSessionResponse(overrides: Record<string, unknown> = {}) {
   };
 }
 
+async function waitForAutoResumeDelay() {
+  await new Promise((resolve) => setTimeout(resolve, 2_100));
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -140,6 +182,7 @@ function makeSessionResponse(overrides: Record<string, unknown> = {}) {
 describe('ProjectMessageView — auto-resume', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    commentApiMocks.listMessageComments.mockResolvedValue({ comments: [] });
 
     // Default: session is idle with workspace and agent session
     mockGetChatSession.mockResolvedValue({
@@ -165,27 +208,28 @@ describe('ProjectMessageView — auto-resume', () => {
     mockCancelAgentPrompt.mockResolvedValue({ status: 'cancelled', message: 'ok' });
   });
 
-  it('keeps the archive dock visible for idle taskless instant sessions', async () => {
+  it('keeps the sleep dock visible for awake idle taskless instant sessions', async () => {
+    const onSleepConversation = vi.fn();
     const onCloseConversation = vi.fn();
 
     render(
       <ProjectMessageView
         projectId={PROJECT_ID}
         sessionId={SESSION_ID}
+        onSleepConversation={onSleepConversation}
         onCloseConversation={onCloseConversation}
       />
     );
 
-    const archiveButton = await screen.findByRole('button', { name: /^archive conversation$/i });
-    expect(archiveButton).toBeInTheDocument();
+    const sleepButton = await screen.findByRole('button', { name: /^sleep session$/i });
+    expect(sleepButton).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^archive conversation$/i })).toBeNull();
 
-    fireEvent.click(archiveButton);
-    const archiveActions = await screen.findAllByRole('button', {
-      name: /^archive conversation$/i,
-    });
-    fireEvent.click(archiveActions[archiveActions.length - 1]);
+    fireEvent.click(sleepButton);
 
-    expect(onCloseConversation).toHaveBeenCalledOnce();
+    expect(onSleepConversation).toHaveBeenCalledOnce();
+    expect(onCloseConversation).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Archive conversation?' })).toBeNull();
   });
 
   it('calls resumeAgentSession when sending follow-up to idle session', async () => {
@@ -293,7 +337,6 @@ describe('ProjectMessageView — auto-resume', () => {
 describe('ProjectMessageView — auto-resume on page visit', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.useFakeTimers({ shouldAdvanceTime: true });
 
     // Default: session is idle with workspace and agent session
     mockGetChatSession.mockResolvedValue({
@@ -319,10 +362,6 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
     mockCancelAgentPrompt.mockResolvedValue({ status: 'cancelled', message: 'ok' });
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   it('auto-resumes idle session after 2s delay without user interaction', async () => {
     render(<ProjectMessageView projectId={PROJECT_ID} sessionId={SESSION_ID} />);
 
@@ -335,9 +374,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
     expect(mockResumeAgentSession).not.toHaveBeenCalled();
 
     // Advance past the 2s delay
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2100);
-    });
+    await waitForAutoResumeDelay();
 
     await waitFor(() => {
       expect(mockResumeAgentSession).toHaveBeenCalledWith(WORKSPACE_ID, AGENT_SESSION_ID);
@@ -354,9 +391,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
       expect(mockGetChatSession).toHaveBeenCalled();
     });
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2100);
-    });
+    await waitForAutoResumeDelay();
 
     await waitFor(() => {
       expect(screen.getByText('Waking and restoring Instant session...')).toBeInTheDocument();
@@ -372,9 +407,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
       expect(mockGetChatSession).toHaveBeenCalled();
     });
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2100);
-    });
+    await waitForAutoResumeDelay();
 
     await waitFor(() => {
       expect(
@@ -392,9 +425,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
       expect(mockGetChatSession).toHaveBeenCalled();
     });
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2100);
-    });
+    await waitForAutoResumeDelay();
 
     expect(mockResumeAgentSession).not.toHaveBeenCalled();
   });
@@ -413,9 +444,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
       expect(mockGetChatSession).toHaveBeenCalled();
     });
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2100);
-    });
+    await waitForAutoResumeDelay();
 
     expect(mockResumeAgentSession).not.toHaveBeenCalled();
   });
@@ -430,12 +459,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
     });
 
     // Advance timer to trigger the auto-resume, then flush pending promises
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2100);
-    });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(100);
-    });
+    await waitForAutoResumeDelay();
 
     await waitFor(
       () => {
@@ -458,9 +482,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
     });
 
     // Trigger auto-resume for first session
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2100);
-    });
+    await waitForAutoResumeDelay();
 
     await waitFor(() => {
       expect(screen.getByText('Waking and restoring Instant session...')).toBeInTheDocument();
@@ -487,9 +509,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
     });
 
     // Auto-resume should fire for the new session after the delay
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2100);
-    });
+    await waitForAutoResumeDelay();
 
     await waitFor(() => {
       expect(mockResumeAgentSession).toHaveBeenCalled();
@@ -516,9 +536,7 @@ describe('ProjectMessageView — auto-resume on page visit', () => {
     });
 
     // Now advance past the auto-resume timer — it should NOT fire a second resume
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2100);
-    });
+    await waitForAutoResumeDelay();
 
     // Still only 1 call (from the follow-up, not from auto-resume)
     expect(mockResumeAgentSession).toHaveBeenCalledTimes(1);
@@ -771,7 +789,6 @@ describe('ProjectMessageView — delivery/resume failure UX', () => {
 describe('ProjectMessageView — resume re-entrancy (UX4)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     mockGetChatSession.mockResolvedValue({
       session: makeSessionResponse({ isIdle: true, agentCompletedAt: Date.now() - 5_000 }),
       messages: ACTIVE_MESSAGES,
@@ -784,10 +801,6 @@ describe('ProjectMessageView — resume re-entrancy (UX4)', () => {
     mockResumeAgentSession.mockResolvedValue({ id: AGENT_SESSION_ID, status: 'running' });
     mockSendFollowUpPrompt.mockResolvedValue({ status: 'accepted', sessionId: AGENT_SESSION_ID });
     mockCancelAgentPrompt.mockResolvedValue({ status: 'cancelled', message: 'ok' });
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
   });
 
   it('piggybacks a user send onto the in-flight auto-resume (single resume) and delivers without a spurious banner', async () => {
@@ -803,9 +816,7 @@ describe('ProjectMessageView — resume re-entrancy (UX4)', () => {
     await waitFor(() => expect(mockGetChatSession).toHaveBeenCalled());
 
     // Auto-resume fires FIRST → exactly one resume call, banner visible.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2100);
-    });
+    await waitForAutoResumeDelay();
     await waitFor(() => expect(mockResumeAgentSession).toHaveBeenCalledTimes(1));
     expect(screen.getByText('Waking and restoring Instant session...')).toBeInTheDocument();
 

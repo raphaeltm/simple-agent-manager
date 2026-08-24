@@ -32,6 +32,7 @@ import { ulid } from '../../lib/ulid';
 import { createOwnerProjectMembership } from '../../middleware/project-auth';
 import { signCallbackToken } from '../../services/jwt';
 import { getRuntimeLimits } from '../../services/limits';
+import { buildSamMcpEntry } from '../../services/mcp-connection-resolution';
 import { generateMcpToken, storeMcpToken } from '../../services/mcp-token';
 import {
   createAgentSessionOnNode,
@@ -751,7 +752,11 @@ export async function handleDiscoveryAgentStart(
       throw new Error('discovery_agent_start: mcpToken missing after step 3');
     }
     const initialPrompt = buildDiscoveryInitialPrompt(state.repoOwner, state.repoName);
-    const mcpServerUrl = `https://api.${rc.env.BASE_DOMAIN}/mcp`;
+
+    // Only sam-mcp. Bring-your-own MCP connections are deliberately NOT resolved here: this
+    // session runs as the anonymous trial sentinel user (resolveAnonymousUserId), which owns
+    // no connections, and resolving by that identity could only ever surface rows that do not
+    // belong to the visitor. See tests/unit/services/mcp-connection-injection.test.ts.
     await startAgentSessionOnNode(
       nodeId,
       workspaceId,
@@ -760,7 +765,7 @@ export async function handleDiscoveryAgentStart(
       initialPrompt,
       rc.env,
       userId,
-      { url: mcpServerUrl, token: state.mcpToken },
+      [buildSamMcpEntry(rc.env.BASE_DOMAIN, state.mcpToken)],
     );
     state.agentStartedOnVm = true;
     await rc.ctx.storage.put('state', state);

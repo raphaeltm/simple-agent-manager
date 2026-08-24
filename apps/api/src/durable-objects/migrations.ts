@@ -733,8 +733,8 @@ export const MIGRATIONS: Migration[] = [
           ON session_attention_markers(next_escalation_at)
           WHERE resolved_at IS NULL AND next_escalation_at IS NOT NULL
         `);
-      },
     },
+  },
   {
     // Worker-owned durable prompt delivery and checkpoint episode foundation.
     // session_inbox remains the only queue; these columns add attempt/receipt
@@ -856,6 +856,299 @@ export const MIGRATIONS: Migration[] = [
       sql.exec(`
         CREATE INDEX IF NOT EXISTS idx_session_state_working_activity
         ON session_state(activity, activity_at)
+      `);
+    },
+  },
+  {
+    // Normalize harness-owned work into bounded metadata. Raw harness payloads
+    // intentionally have no persistence column.
+    //
+    // Numbered 030 (not 029) because PR #1840's
+    // `029-session-activity-reconciliation` landed on main first and is already
+    // applied in production. This ledger is keyed by NAME
+    // (`runMigrations` skips already-applied names), and this migration has
+    // never been applied in any environment — the authoring branch never
+    // deployed — so appending it after 029 is safe for both a clean bootstrap
+    // and an existing deployment. See .claude/rules/07-env-and-urls.md.
+    name: '030-harness-work-and-task-waits',
+    run: (sql) => {
+      // Each ADD COLUMN is individually guarded so a partial previous run — or a
+      // Durable Object that somehow recorded this migration under its
+      // pre-renumber name — cannot wedge the DO constructor with a
+      // `duplicate column name` error on every subsequent RPC. Same pattern as
+      // migrations 011 and 017.
+      for (const statement of [
+        `ALTER TABLE session_state ADD COLUMN runtime_work_state TEXT CHECK (runtime_work_state IN ('inactive', 'active', 'settling'))`,
+        `ALTER TABLE session_state ADD COLUMN runtime_work_count INTEGER CHECK (runtime_work_count IS NULL OR runtime_work_count >= 0)`,
+        `ALTER TABLE session_state ADD COLUMN runtime_work_source TEXT`,
+        `ALTER TABLE session_state ADD COLUMN runtime_work_updated_at INTEGER`,
+        `ALTER TABLE session_state ADD COLUMN runtime_work_progress_at INTEGER`,
+      ]) {
+        try {
+          sql.exec(statement);
+        } catch {
+          // Column already exists from a partial previous run — safe to ignore.
+        }
+      }
+
+      sql.exec(`
+				CREATE TABLE IF NOT EXISTS task_wait_subscriptions (
+					id TEXT PRIMARY KEY,
+					parent_task_id TEXT NOT NULL,
+					parent_session_id TEXT NOT NULL,
+					wait_condition TEXT NOT NULL CHECK (wait_condition IN ('all', 'any')),
+					state TEXT NOT NULL CHECK (state IN ('active', 'resolved', 'cancelled')),
+					child_count INTEGER NOT NULL CHECK (child_count > 0),
+					wake_deadline INTEGER NOT NULL,
+					next_reconcile_at INTEGER NOT NULL,
+					wake_delivery_id TEXT NOT NULL UNIQUE,
+					resolution_reason TEXT,
+					created_at INTEGER NOT NULL,
+					updated_at INTEGER NOT NULL,
+					resolved_at INTEGER
+				)
+			`);
+      sql.exec(`
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_task_wait_active_parent
+				ON task_wait_subscriptions(parent_task_id)
+				WHERE state = 'active'
+			`);
+      sql.exec(`
+				CREATE INDEX IF NOT EXISTS idx_task_wait_due
+				ON task_wait_subscriptions(next_reconcile_at, wake_deadline)
+				WHERE state = 'active'
+			`);
+      sql.exec(`
+				CREATE TABLE IF NOT EXISTS task_wait_children (
+					subscription_id TEXT NOT NULL REFERENCES task_wait_subscriptions(id) ON DELETE CASCADE,
+					child_task_id TEXT NOT NULL,
+					observed_status TEXT,
+					observed_at INTEGER,
+					PRIMARY KEY (subscription_id, child_task_id)
+				)
+			`);
+      sql.exec(`
+				CREATE INDEX IF NOT EXISTS idx_task_wait_child
+				ON task_wait_children(child_task_id, subscription_id)
+      `);
+    },
+  },
+  {
+    // Replay hardening for the task-wait tables created in 030. Kept as a
+    // separate additive migration (rather than folded into 030) so any
+    // Durable Object that recorded 030 still receives these columns.
+    //
+    // Numbered 031 for the same reason 030 was renumbered: PR #1840's
+    // `029-session-activity-reconciliation` claimed 029 on main first.
+    name: '031-task-wait-replay-hardening',
+    run: (sql) => {
+      for (const statement of [
+        `ALTER TABLE task_wait_subscriptions ADD COLUMN idempotency_key TEXT NOT NULL DEFAULT ''`,
+        `ALTER TABLE task_wait_subscriptions ADD COLUMN wake_content TEXT`,
+        `ALTER TABLE task_wait_subscriptions ADD COLUMN wake_attempts INTEGER NOT NULL DEFAULT 0 CHECK (wake_attempts >= 0)`,
+      ]) {
+        try {
+          sql.exec(statement);
+        } catch {
+          // Column already exists from a partial previous run — safe to ignore.
+        }
+      }
+      sql.exec(`
+        UPDATE task_wait_subscriptions
+        SET idempotency_key = 'legacy-' || id
+        WHERE idempotency_key = ''
+      `);
+      sql.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_task_wait_idempotency
+        ON task_wait_subscriptions(parent_task_id, idempotency_key)
+      `);
+    },
+  },
+  {
+    name: '032-message-comment-threads',
+    run: (sql) => {
+      sql.exec(`
+        CREATE TABLE comment_threads (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          anchor_kind TEXT NOT NULL DEFAULT 'message' CHECK (anchor_kind = 'message'),
+          message_id TEXT NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+          quote TEXT,
+          body TEXT NOT NULL,
+          author_type TEXT NOT NULL CHECK (author_type IN ('human', 'agent')),
+          author_id TEXT NOT NULL,
+          author_name TEXT,
+          status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'sent', 'resolved')),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          sequence INTEGER NOT NULL,
+          version INTEGER NOT NULL DEFAULT 1,
+          client_mutation_id TEXT,
+          client_mutation_fingerprint TEXT,
+          sent_at INTEGER,
+          sent_by_type TEXT CHECK (sent_by_type IS NULL OR sent_by_type IN ('human', 'agent')),
+          sent_by_id TEXT,
+          sent_by_name TEXT,
+          resolved_at INTEGER,
+          resolved_by_type TEXT CHECK (resolved_by_type IS NULL OR resolved_by_type IN ('human', 'agent')),
+          resolved_by_id TEXT,
+          resolved_by_name TEXT,
+          reopened_at INTEGER,
+          reopened_by_type TEXT CHECK (reopened_by_type IS NULL OR reopened_by_type IN ('human', 'agent')),
+          reopened_by_id TEXT,
+          reopened_by_name TEXT,
+          UNIQUE(session_id, client_mutation_id)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_threads_session_sequence
+        ON comment_threads(session_id, sequence)
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_threads_message
+        ON comment_threads(session_id, message_id, sequence)
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_threads_status
+        ON comment_threads(session_id, status, sequence)
+      `);
+
+      sql.exec(`
+        CREATE TABLE comment_replies (
+          id TEXT PRIMARY KEY,
+          thread_id TEXT NOT NULL REFERENCES comment_threads(id) ON DELETE CASCADE,
+          session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          body TEXT NOT NULL,
+          author_type TEXT NOT NULL CHECK (author_type IN ('human', 'agent')),
+          author_id TEXT NOT NULL,
+          author_name TEXT,
+          created_at INTEGER NOT NULL,
+          sequence INTEGER NOT NULL,
+          client_mutation_id TEXT,
+          client_mutation_fingerprint TEXT,
+          UNIQUE(thread_id, client_mutation_id)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_replies_thread_sequence
+        ON comment_replies(thread_id, sequence)
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_replies_session
+        ON comment_replies(session_id, thread_id)
+      `);
+
+      sql.exec(`
+        CREATE TABLE comment_status_mutations (
+          thread_id TEXT NOT NULL REFERENCES comment_threads(id) ON DELETE CASCADE,
+          session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          client_mutation_id TEXT NOT NULL,
+          target_status TEXT NOT NULL CHECK (target_status IN ('open', 'sent', 'resolved')),
+          thread_version INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (thread_id, client_mutation_id)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_status_mutations_session
+        ON comment_status_mutations(session_id, created_at)
+      `);
+    },
+  },
+  {
+    name: '033-library-file-comment-threads',
+    run: (sql) => {
+      // Library file comments live in their OWN tables, entirely separate from the
+      // message comment tables created in migration 032.
+      //
+      // The obvious alternative — widening `comment_threads` to allow a
+      // `library_file` anchor — cannot be done additively: SQLite cannot change a
+      // CHECK constraint or remove a NOT NULL in place, so it would require recreating
+      // `comment_threads` and its two CASCADE children. Durable Object SQLite has no
+      // point-in-time recovery, so dropping a table here is unrecoverable
+      // (.claude/rules/31-migration-safety.md, `pnpm quality:do-migration-safety`).
+      //
+      // Separate tables also keep message-comment session isolation intact by
+      // construction: a file thread simply cannot be reached by a session-scoped
+      // query, so no message-comment code path needs to learn about nullable
+      // session_id. The two anchor kinds are joined at the type layer
+      // (`CommentAnchor` in packages/shared/src/types/comments.ts), not in storage.
+      //
+      // Phase 2 anchor kinds for other file types extend `library_file_comment_threads`
+      // additively (new nullable columns), never by widening the message tables.
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS library_file_comment_threads (
+          id TEXT PRIMARY KEY,
+          file_id TEXT NOT NULL,
+          anchor_kind TEXT NOT NULL DEFAULT 'library_file' CHECK (anchor_kind = 'library_file'),
+          quote TEXT,
+          body TEXT NOT NULL,
+          author_type TEXT NOT NULL CHECK (author_type IN ('human', 'agent')),
+          author_id TEXT NOT NULL,
+          author_name TEXT,
+          status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'sent', 'resolved')),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          sequence INTEGER NOT NULL,
+          version INTEGER NOT NULL DEFAULT 1,
+          client_mutation_id TEXT,
+          client_mutation_fingerprint TEXT,
+          resolved_at INTEGER,
+          resolved_by_type TEXT CHECK (resolved_by_type IS NULL OR resolved_by_type IN ('human', 'agent')),
+          resolved_by_id TEXT,
+          resolved_by_name TEXT,
+          reopened_at INTEGER,
+          reopened_by_type TEXT CHECK (reopened_by_type IS NULL OR reopened_by_type IN ('human', 'agent')),
+          reopened_by_id TEXT,
+          reopened_by_name TEXT,
+          UNIQUE(file_id, client_mutation_id)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_library_file_comment_threads_file_sequence
+        ON library_file_comment_threads(file_id, sequence)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_library_file_comment_threads_status
+        ON library_file_comment_threads(file_id, status, sequence)
+      `);
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS library_file_comment_replies (
+          id TEXT PRIMARY KEY,
+          thread_id TEXT NOT NULL REFERENCES library_file_comment_threads(id) ON DELETE CASCADE,
+          file_id TEXT NOT NULL,
+          body TEXT NOT NULL,
+          author_type TEXT NOT NULL CHECK (author_type IN ('human', 'agent')),
+          author_id TEXT NOT NULL,
+          author_name TEXT,
+          created_at INTEGER NOT NULL,
+          sequence INTEGER NOT NULL,
+          client_mutation_id TEXT,
+          client_mutation_fingerprint TEXT,
+          UNIQUE(thread_id, client_mutation_id)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_library_file_comment_replies_thread_sequence
+        ON library_file_comment_replies(thread_id, sequence)
+      `);
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS library_file_comment_status_mutations (
+          thread_id TEXT NOT NULL REFERENCES library_file_comment_threads(id) ON DELETE CASCADE,
+          file_id TEXT NOT NULL,
+          client_mutation_id TEXT NOT NULL,
+          target_status TEXT NOT NULL CHECK (target_status IN ('open', 'sent', 'resolved')),
+          thread_version INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (thread_id, client_mutation_id)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_library_file_comment_status_mutations_file
+        ON library_file_comment_status_mutations(file_id, created_at)
       `);
     },
   },

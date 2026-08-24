@@ -43,19 +43,28 @@ import * as schema from '../db/schema';
 import type { TaskRunner } from '../durable-objects/task-runner';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
+import { DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS } from '../services/session-snapshot-artifacts';
 import { cleanupTaskRun } from '../services/task-runner';
 import {
   classifyTaskRuntimeLiveness,
   loadRuntimeWorkspaceSnapshot,
+  loadSessionResumabilitySnapshot,
+  needsSessionResumabilityProbe,
   type RuntimeAcpSessionSnapshot,
   type TaskRuntimeLiveness,
   type TaskRuntimeLivenessSignals,
 } from '../services/task-runtime-liveness';
 import { syncTriggerExecutionStatus } from '../services/trigger-execution-sync';
+import {
+  cancelVmTaskAdmission,
+  getVmAdmissionDiagnostics,
+  isActiveVmAdmissionState,
+} from '../services/vm-admission-control';
 import { inspectVmAgentContainerLifecycle } from '../services/vm-agent-container';
 import {
   type CompactionLoopRecovery,
@@ -73,6 +82,7 @@ function parseMs(value: string | undefined, fallback: number): number {
 const STEP_DESCRIPTIONS: Record<string, string> = {
   node_selection: 'selecting a node',
   node_provisioning: 'provisioning a new node',
+  waiting_for_node_capacity: 'waiting for VM capacity',
   node_agent_ready: 'waiting for node agent to start',
   workspace_creation: 'creating workspace on node',
   workspace_dispatch: 'starting workspace on node',
@@ -158,6 +168,11 @@ export interface RecoveryDiagnostics {
   nodeStatus: string | null;
   nodeHealthStatus: string | null;
   autoProvisionedNodeId: string | null;
+  admission: {
+    admission: Record<string, unknown> | null;
+    lease: Record<string, unknown> | null;
+    providerCapacity: Record<string, unknown> | null;
+  } | null;
   doState: {
     outcome: TaskRunnerProbeResult['outcome'];
     exists: boolean;
@@ -177,6 +192,8 @@ export type TaskReconciliationDecision =
   | 'reconcile_dead_runtime'
   | 'preserve_live_runtime'
   | 'preserve_inconclusive_runtime'
+  | 'preserve_admission_wait'
+  | 'fail_admission_expired'
   | 'observe_orchestration';
 
 export interface TaskReconciliationDiagnostics {
@@ -189,6 +206,7 @@ export interface TaskReconciliationDiagnostics {
   eligible: boolean;
   decision: TaskReconciliationDecision;
   liveness: TaskRuntimeLiveness | null;
+  admission: Awaited<ReturnType<typeof getVmAdmissionDiagnostics>> | null;
   taskRunner: TaskRunnerProbeResult;
   candidateScan: {
     limit: number;
@@ -437,7 +455,33 @@ export async function getTaskRuntimeLiveness(
     }
   }
 
+  // Only probed for a workspace that would otherwise be declared conclusively
+  // dead, so the sweep pays one extra point lookup only when it is about to
+  // terminalize a task (`.claude/rules/47`).
+  let resumabilityProbeOutcome: TaskRuntimeLivenessSignals['resumabilityProbeOutcome'] = 'not_run';
+  let sessionResumability: TaskRuntimeLivenessSignals['sessionResumability'] = null;
+  if (needsSessionResumabilityProbe(workspace, workspaceProbeOutcome)) {
+    try {
+      sessionResumability = await loadSessionResumabilitySnapshot(
+        env.DATABASE,
+        task.project_id,
+        workspace.id,
+        workspace.chatSessionId
+      );
+      resumabilityProbeOutcome = 'ok';
+    } catch (err) {
+      resumabilityProbeOutcome = 'error';
+      log.warn('stuck_task.session_resumability_query_failed', {
+        workspaceId: task.workspace_id,
+        projectId: task.project_id,
+        action: 'preserved',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   const baseSignals: TaskRuntimeLivenessSignals = {
+    projectId: task.project_id,
     taskWorkspaceId: task.workspace_id,
     workspace,
     workspaceProbeOutcome,
@@ -447,6 +491,12 @@ export async function getTaskRuntimeLiveness(
     acpSessions: [],
     containerProbeOutcome: 'not_run',
     containerLifecycle: null,
+    resumabilityProbeOutcome,
+    sessionResumability,
+    resumabilityMaxRecoveryAttempts: parsePositiveInt(
+      env.SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
+      DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS
+    ),
   };
   const initialClassification = classifyTaskRuntimeLiveness(baseSignals);
   if (
@@ -614,6 +664,10 @@ export async function getTaskReconciliationDiagnostics(
     task.status === 'in_progress' ? getTaskRuntimeLiveness(env, task) : Promise.resolve(null),
     selectStuckTaskCandidates(env, maxCandidates),
   ]);
+  const admission =
+    task.status === 'queued' && task.execution_step === 'waiting_for_node_capacity'
+      ? await getVmAdmissionDiagnostics(env, task.id)
+      : null;
   const candidateIndex = candidateSelection.tasks.findIndex(
     (candidate) => candidate.id === task.id
   );
@@ -621,6 +675,20 @@ export async function getTaskReconciliationDiagnostics(
   let decision: TaskReconciliationDecision;
   if (!active) {
     decision = 'not_active';
+  } else if (
+    task.status === 'queued' &&
+    task.execution_step === 'waiting_for_node_capacity' &&
+    admission?.admission &&
+    isActiveVmAdmissionState(String(admission.admission.state ?? ''))
+  ) {
+    const waitDeadlineAt =
+      typeof admission.admission.wait_deadline_at === 'string'
+        ? Date.parse(admission.admission.wait_deadline_at)
+        : NaN;
+    decision =
+      Number.isFinite(waitDeadlineAt) && waitDeadlineAt <= now
+        ? 'fail_admission_expired'
+        : 'preserve_admission_wait';
   } else if (!eligible) {
     decision = 'within_grace';
   } else if (liveness?.conclusive && !liveness.live) {
@@ -643,6 +711,7 @@ export async function getTaskReconciliationDiagnostics(
     eligible,
     decision,
     liveness,
+    admission,
     taskRunner,
     candidateScan: {
       limit: maxCandidates,
@@ -685,8 +754,20 @@ export async function gatherDiagnostics(
     nodeStatus: null,
     nodeHealthStatus: null,
     autoProvisionedNodeId: task.auto_provisioned_node_id,
+    admission: null,
     doState: null,
   };
+
+  if (task.execution_step === 'waiting_for_node_capacity') {
+    try {
+      diagnostics.admission = await getVmAdmissionDiagnostics(env, task.id);
+    } catch (err) {
+      log.warn('stuck_task.admission_diagnostics_failed', {
+        taskId: task.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   // Query workspace status
   if (task.workspace_id) {
@@ -814,8 +895,32 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     let reason = '';
     let compactionLoopRecovery: CompactionLoopRecovery | null = null;
     let deadRuntimeRecovery = false;
+    let admissionSnapshot: Awaited<ReturnType<typeof getVmAdmissionDiagnostics>> | null = null;
 
     const stepInfo = task.execution_step ? ` Last step: ${describeStep(task.execution_step)}.` : '';
+
+    if (task.status === 'queued' && task.execution_step === 'waiting_for_node_capacity') {
+      admissionSnapshot = await getVmAdmissionDiagnostics(env, task.id);
+      const admission = admissionSnapshot.admission;
+      if (admission && isActiveVmAdmissionState(String(admission.state ?? ''))) {
+        const waitDeadlineAt =
+          typeof admission.wait_deadline_at === 'string'
+            ? Date.parse(admission.wait_deadline_at)
+            : NaN;
+        if (Number.isFinite(waitDeadlineAt) && waitDeadlineAt <= now.getTime()) {
+          isStuck = true;
+          reason = `Task exceeded VM admission wait deadline.${stepInfo} Last admission reason: ${String(admission.reason ?? 'unknown')}.`;
+        } else {
+          log.info('stuck_task.preserved_admission_wait', {
+            taskId: task.id,
+            reason: admission.reason ?? null,
+            nextRetryAt: admission.next_retry_at ?? null,
+            waitDeadlineAt: admission.wait_deadline_at ?? null,
+          });
+          continue;
+        }
+      }
+    }
 
     try {
       compactionLoopRecovery = await detectTaskCompactionLoop(env, task);
@@ -1107,6 +1212,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
             nodeStatus: diagnostics.nodeStatus,
             nodeHealthStatus: diagnostics.nodeHealthStatus,
             autoProvisionedNodeId: diagnostics.autoProvisionedNodeId,
+            admission: diagnostics.admission ?? admissionSnapshot,
             doState: diagnostics.doState,
           },
           userId: task.user_id,
@@ -1153,6 +1259,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       // Sync trigger execution status (best-effort) — without this, cron triggers
       // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
       await syncTriggerExecutionStatus(env.DATABASE, task.id, 'failed', reason);
+      await cancelVmTaskAdmission(env, task.id, 'task_failed');
 
       if (compactionLoopRecovery?.sessionId) {
         try {

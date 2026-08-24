@@ -67,7 +67,26 @@ function createEnv(overrides: Partial<Env> = {}): Env {
   const sqlite = new Database(':memory:');
   sqlite.exec(`
     CREATE TABLE users (id TEXT PRIMARY KEY);
-    INSERT INTO users (id) VALUES ('system_anonymous_trials');
+    INSERT INTO users (id) VALUES ('system_anonymous_trials'), ('superadmin-1'), ('owner-1');
+    CREATE TABLE projects (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active'
+    );
+    CREATE TABLE project_members (
+      project_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'owner',
+      status TEXT NOT NULL DEFAULT 'active'
+    );
+    INSERT INTO projects (id, user_id, name, status)
+      VALUES ('feedback-project-1', 'owner-1', 'Platform Feedback', 'active'),
+             ('other-project-1', 'owner-1', 'Other Feedback', 'active'),
+             ('inaccessible-project-1', 'owner-1', 'Inaccessible Feedback', 'active');
+    INSERT INTO project_members (project_id, user_id, role, status)
+      VALUES ('feedback-project-1', 'superadmin-1', 'owner', 'active'),
+             ('other-project-1', 'superadmin-1', 'admin', 'active');
     CREATE TABLE platform_settings (
       key TEXT PRIMARY KEY NOT NULL,
       value TEXT NOT NULL,
@@ -186,23 +205,29 @@ describe('admin platform config routes', () => {
       GOOGLE_CLIENT_ID: 'env-infra-client',
       GOOGLE_CLIENT_SECRET: 'env-infra-secret',
     });
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
-      JSON.stringify({ error: 'invalid_grant' }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } },
-    ));
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: 'invalid_grant' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
 
-    const save = await createApp().request('/api/admin/platform-config', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
-      body: JSON.stringify({
-        config: {
-          googleInfrastructure: {
-            clientId: 'runtime-infra-client',
-            clientSecret: 'runtime-infra-secret',
+    const save = await createApp().request(
+      '/api/admin/platform-config',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
+        body: JSON.stringify({
+          config: {
+            googleInfrastructure: {
+              clientId: 'runtime-infra-client',
+              clientSecret: 'runtime-infra-secret',
+            },
           },
-        },
-      }),
-    }, env);
+        }),
+      },
+      env
+    );
 
     expect(save.status).toBe(200);
     const saveBody = await save.text();
@@ -218,40 +243,48 @@ describe('admin platform config routes', () => {
     const secretRow = await env.DATABASE.prepare(
       `SELECT encrypted_token AS encryptedToken, updated_by AS updatedBy
        FROM platform_credentials
-       WHERE provider = 'google-infrastructure'`,
+       WHERE provider = 'google-infrastructure'`
     ).first<{ encryptedToken: string; updatedBy: string }>();
     expect(secretRow?.encryptedToken).not.toContain('runtime-infra-secret');
     expect(secretRow?.updatedBy).toBe('superadmin-1');
 
-    const rotate = await createApp().request('/api/admin/platform-config', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
-      body: JSON.stringify({
-        config: {
-          googleInfrastructure: {
-            clientId: 'runtime-infra-client-rotated',
-            clientSecret: 'runtime-infra-secret-rotated',
+    const rotate = await createApp().request(
+      '/api/admin/platform-config',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
+        body: JSON.stringify({
+          config: {
+            googleInfrastructure: {
+              clientId: 'runtime-infra-client-rotated',
+              clientSecret: 'runtime-infra-secret-rotated',
+            },
           },
-        },
-      }),
-    }, env);
+        }),
+      },
+      env
+    );
     expect(rotate.status).toBe(200);
     expect(await rotate.text()).not.toContain('runtime-infra-secret-rotated');
     const rotatedRows = await env.DATABASE.prepare(
       `SELECT encrypted_token AS encryptedToken, updated_by AS updatedBy
        FROM platform_credentials
-       WHERE provider = 'google-infrastructure'`,
+       WHERE provider = 'google-infrastructure'`
     ).all<{ encryptedToken: string; updatedBy: string }>();
     expect(rotatedRows.results).toHaveLength(1);
     expect(rotatedRows.results[0]?.encryptedToken).not.toBe(secretRow?.encryptedToken);
     expect(rotatedRows.results[0]?.encryptedToken).not.toContain('runtime-infra-secret-rotated');
     expect(rotatedRows.results[0]?.updatedBy).toBe('superadmin-1');
 
-    const remove = await createApp().request('/api/admin/platform-config', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
-      body: JSON.stringify({ config: { googleInfrastructure: { remove: true } } }),
-    }, env);
+    const remove = await createApp().request(
+      '/api/admin/platform-config',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
+        body: JSON.stringify({ config: { googleInfrastructure: { remove: true } } }),
+      },
+      env
+    );
     expect(remove.status).toBe(200);
     await expect(remove.json()).resolves.toMatchObject({
       status: {
@@ -283,12 +316,140 @@ describe('admin platform config routes', () => {
     });
   });
 
+  it('persists the feedback project runtime setting after validating project access', async () => {
+    const env = createEnv({ PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project-1' });
+
+    const res = await createApp().request(
+      '/api/admin/platform-config',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
+        body: JSON.stringify({
+          config: {
+            feedback: {
+              projectId: 'other-project-1',
+            },
+          },
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      status: {
+        feedbackProject: {
+          configured: true,
+          source: 'runtime',
+          state: 'ready',
+          projectId: 'other-project-1',
+          project: { name: 'Other Feedback' },
+          fields: { projectId: { updatedBy: 'superadmin-1' } },
+        },
+      },
+    });
+
+    const setting = await env.DATABASE.prepare(
+      "SELECT value, updated_by AS updatedBy FROM platform_settings WHERE key = 'feedback.projectId'"
+    ).first<{ value: string; updatedBy: string }>();
+    expect(setting).toEqual({ value: 'other-project-1', updatedBy: 'superadmin-1' });
+  });
+
+  it('removes the runtime feedback project and reveals the environment fallback', async () => {
+    const env = createEnv({ PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project-1' });
+    await env.DATABASE.prepare(
+      `INSERT INTO platform_settings (key, value, updated_by)
+       VALUES ('feedback.projectId', 'other-project-1', 'superadmin-1')`
+    ).run();
+
+    const res = await createApp().request(
+      '/api/admin/platform-config',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
+        body: JSON.stringify({ config: { feedback: { remove: true } } }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      status: {
+        feedbackProject: {
+          configured: true,
+          source: 'environment',
+          state: 'ready',
+          projectId: 'feedback-project-1',
+          project: { name: 'Platform Feedback' },
+        },
+      },
+    });
+
+    const runtimeSetting = await env.DATABASE.prepare(
+      "SELECT value FROM platform_settings WHERE key = 'feedback.projectId'"
+    ).first();
+    expect(runtimeSetting).toBeFalsy();
+  });
+
+  it('rejects feedback projects the superadmin cannot access', async () => {
+    const res = await createApp().request(
+      '/api/admin/platform-config',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
+        body: JSON.stringify({
+          config: {
+            feedback: {
+              projectId: 'inaccessible-project-1',
+            },
+          },
+        }),
+      },
+      createEnv()
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'BAD_REQUEST',
+      message: 'Feedback project must exist and be a project you can access',
+    });
+  });
+
+  it('reports a missing configured feedback project distinctly from unset', async () => {
+    const env = createEnv({ PLATFORM_FEEDBACK_PROJECT_ID: 'missing-project-1' });
+
+    const res = await createApp().request(
+      '/api/admin/platform-config',
+      {
+        headers: { 'X-Test-Role': 'superadmin' },
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      status: {
+        feedbackProject: {
+          configured: false,
+          source: 'environment',
+          state: 'missing',
+          projectId: 'missing-project-1',
+          project: null,
+        },
+      },
+    });
+  });
+
   it('rejects malformed platform config bodies before persistence', async () => {
-    const res = await createApp().request('/api/admin/platform-config', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
-      body: JSON.stringify({ config: 'not-an-object' }),
-    }, createEnv());
+    const res = await createApp().request(
+      '/api/admin/platform-config',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
+        body: JSON.stringify({ config: 'not-an-object' }),
+      },
+      createEnv()
+    );
 
     expect(res.status).toBe(400);
   });

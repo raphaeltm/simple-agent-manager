@@ -32,6 +32,7 @@ export {
 export { parseRow, safeParseJson } from './row-schemas/core';
 export {
   parseKnowledgeEntityBasicRow,
+  parseKnowledgeEntityIndexRow,
   parseKnowledgeEntityRow,
   parseKnowledgeObservationRow,
   parseKnowledgeObservationSearchRow,

@@ -15,6 +15,28 @@
 
 import type { ImageResolver } from '@simple-agent-manager/shared';
 
+import {
+  authAppliesToRegistry,
+  configFromOptions,
+  fetchBearerToken,
+  fetchValidated,
+  manifestUrl,
+  parseBearerChallenge,
+  registryBaseUrl,
+  type ResolverRuntimeOptions,
+} from './image-resolver-outbound';
+
+export {
+  DEFAULT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES,
+  DEFAULT_IMAGE_RESOLVE_MAX_FETCH_ATTEMPTS,
+  DEFAULT_IMAGE_RESOLVE_MAX_REDIRECTS,
+  DEFAULT_IMAGE_RESOLVE_MAX_SERVICES,
+  DEFAULT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS,
+  DEFAULT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES,
+  DEFAULT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS,
+  getImageResolverConfig,
+} from './image-resolver-outbound';
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -37,8 +59,38 @@ export interface ImageResolverOptions {
   authRegistryHost?: string;
   /** Custom fetch implementation (for testing) */
   fetchFn?: typeof fetch;
-  /** Request timeout in ms. Default: 10_000 */
+  /** Per-request timeout in ms. Default: 10_000 */
   timeoutMs?: number;
+  /** Aggregate resolver wall-clock budget in ms. */
+  totalTimeoutMs?: number;
+  /** Maximum outbound fetch attempts across this resolver instance, including redirects. */
+  maxFetchAttempts?: number;
+  /** Maximum manually followed redirects per outbound request. */
+  maxRedirects?: number;
+  /** Maximum bearer-token JSON response body size in bytes. */
+  tokenResponseMaxBytes?: number;
+  /** Maximum simultaneous outbound fetches for this resolver instance. */
+  maxConcurrentFetches?: number;
+}
+
+export interface ImageResolverConfig {
+  requestTimeoutMs: number;
+  totalTimeoutMs: number;
+  maxFetchAttempts: number;
+  maxRedirects: number;
+  tokenResponseMaxBytes: number;
+  maxConcurrentFetches: number;
+  maxServices: number;
+}
+
+export interface ImageResolverEnv {
+  DEPLOYMENT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS?: string;
+  DEPLOYMENT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS?: string;
+  DEPLOYMENT_IMAGE_RESOLVE_MAX_FETCH_ATTEMPTS?: string;
+  DEPLOYMENT_IMAGE_RESOLVE_MAX_REDIRECTS?: string;
+  DEPLOYMENT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES?: string;
+  DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES?: string;
+  DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES?: string;
 }
 
 export class ImageResolveError extends Error {
@@ -58,8 +110,6 @@ export class ImageResolveError extends Error {
 // Constants
 // =============================================================================
 
-const DEFAULT_TIMEOUT_MS = 10_000;
-
 /**
  * Accept headers for OCI/Docker manifest content negotiation.
  * We request both OCI and Docker manifest types to maximize compatibility.
@@ -72,164 +122,6 @@ const MANIFEST_ACCEPT = [
 ].join(', ');
 
 const SHA256_RE = /^sha256:[a-f0-9]{64}$/;
-
-// Non-backtracking: the capture group is forced to start with a non-space
-// character so it cannot overlap with the preceding `\s+`.
-const BEARER_CHALLENGE_RE = /^Bearer\s+(\S.*)$/i;
-
-// =============================================================================
-// Registry URL resolution
-// =============================================================================
-
-/**
- * Build the base URL for a registry's v2 API.
- * Handles special cases like docker.io → registry-1.docker.io.
- */
-function registryBaseUrl(registry: string): string {
-  // Docker Hub uses a different API host
-  if (registry === 'docker.io' || registry === 'index.docker.io') {
-    return 'https://registry-1.docker.io';
-  }
-  // Reject plaintext HTTP: registry credentials (Basic auth) must never be sent
-  // over an unencrypted channel.
-  if (registry.startsWith('http://')) {
-    throw new Error(
-      `Insecure registry URL rejected: ${registry}. Registry endpoints must use HTTPS.`
-    );
-  }
-  // If the registry already includes an https scheme, use as-is
-  if (registry.startsWith('https://')) {
-    return registry.replace(/\/$/, '');
-  }
-  // Default to HTTPS
-  return `https://${registry}`;
-}
-
-/**
- * Returns true if `auth` credentials scoped to `authRegistryHost` may be sent
- * to a request targeting `registry`. Credentials are only forwarded when the
- * target registry host exactly matches the host the credentials were minted
- * for. When `authRegistryHost` is undefined the caller has explicitly opted
- * out of host scoping and credentials apply to every registry (legacy
- * behavior, used only when the caller fully controls the registry value).
- *
- * This prevents minted SAM registry credentials from being forwarded to an
- * arbitrary, user-controlled registry named in a deployment manifest.
- */
-function authAppliesToRegistry(registry: string, authRegistryHost: string | undefined): boolean {
-  if (!authRegistryHost) return true;
-  try {
-    const targetHost = new URL(registryBaseUrl(registry)).hostname.toLowerCase();
-    const authHost = new URL(registryBaseUrl(authRegistryHost)).hostname.toLowerCase();
-    return targetHost === authHost;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Returns true if the token-realm host is safe to forward registry credentials
- * to: either it exactly matches the registry host, or it shares the registry's
- * parent domain (last two labels). This prevents a malicious registry from
- * redirecting Basic-auth credentials to an attacker-controlled host via a
- * crafted WWW-Authenticate realm (e.g. Docker Hub's registry-1.docker.io and
- * auth.docker.io both share docker.io).
- */
-function realmHostIsTrusted(realmHost: string, registryHost: string): boolean {
-  const realm = realmHost.toLowerCase();
-  const registry = registryHost.toLowerCase();
-  if (realm === registry) return true;
-  const parentDomain = (host: string) => host.split('.').slice(-2).join('.');
-  const realmParent = parentDomain(realm);
-  return realmParent.includes('.') && realmParent === parentDomain(registry);
-}
-
-// =============================================================================
-// Token auth (for registries that use WWW-Authenticate challenges)
-// =============================================================================
-
-/**
- * Parse a WWW-Authenticate: Bearer realm="...",service="...",scope="..." header.
- */
-function parseBearerChallenge(
-  header: string
-): { realm: string; service?: string; scope?: string } | null {
-  const match = BEARER_CHALLENGE_RE.exec(header);
-  if (!match) return null;
-
-  const [, params] = match;
-  if (params === undefined) return null;
-  const realm = extractParam(params, 'realm');
-  if (!realm) return null;
-
-  return {
-    realm,
-    service: extractParam(params, 'service'),
-    scope: extractParam(params, 'scope'),
-  };
-}
-
-function extractParam(params: string, key: string): string | undefined {
-  const re = new RegExp(`${key}="([^"]*)"`, 'i');
-  const m = re.exec(params);
-  return m ? m[1] : undefined;
-}
-
-/**
- * Exchange credentials for a bearer token using the token endpoint.
- */
-async function fetchBearerToken(
-  challenge: { realm: string; service?: string; scope?: string },
-  auth: RegistryAuth | undefined,
-  registryHost: string,
-  fetchFn: typeof fetch,
-  timeoutMs: number
-): Promise<string> {
-  const url = new URL(challenge.realm);
-
-  // The token realm comes from a registry-controlled WWW-Authenticate header.
-  // Require HTTPS so credentials are never sent in cleartext, and — when we have
-  // credentials to forward — require the realm host to belong to the registry's
-  // domain so a malicious registry cannot exfiltrate Basic-auth credentials to
-  // an attacker-controlled host.
-  if (url.protocol !== 'https:') {
-    throw new Error(
-      `Insecure token realm rejected: ${challenge.realm}. Token endpoint must use HTTPS.`
-    );
-  }
-  if (auth && !realmHostIsTrusted(url.hostname, registryHost)) {
-    throw new Error(
-      `Refusing to send registry credentials to untrusted token realm host ${url.hostname} ` +
-        `(registry host ${registryHost}).`
-    );
-  }
-
-  if (challenge.service) url.searchParams.set('service', challenge.service);
-  if (challenge.scope) url.searchParams.set('scope', challenge.scope);
-
-  const headers: Record<string, string> = {};
-  if (auth) {
-    const basicCredentials = btoa(`${auth.username}:${auth.password}`);
-    headers['Authorization'] = `Basic ${basicCredentials}`;
-  }
-
-  const resp = await fetchFn(url.toString(), {
-    method: 'GET',
-    headers,
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-
-  if (!resp.ok) {
-    throw new Error(`Token exchange failed: ${resp.status} ${resp.statusText}`);
-  }
-
-  const body = (await resp.json()) as { token?: string; access_token?: string };
-  const token = body.token ?? body.access_token;
-  if (!token) {
-    throw new Error('Token exchange response missing token field');
-  }
-  return token;
-}
 
 // =============================================================================
 // Core resolver
@@ -247,12 +139,10 @@ async function resolveTagToDigest(
   registry: string,
   repository: string,
   tag: string,
-  opts: ImageResolverOptions
+  runtime: ResolverRuntimeOptions
 ): Promise<string> {
-  const fetchFn = opts.fetchFn ?? fetch;
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const base = registryBaseUrl(registry);
-  const manifestUrl = `${base}/v2/${repository}/manifests/${tag}`;
+  const url = manifestUrl(base, repository, tag);
 
   const headers: Record<string, string> = {
     Accept: MANIFEST_ACCEPT,
@@ -261,7 +151,7 @@ async function resolveTagToDigest(
   // Only use credentials when they were minted for this exact registry host.
   // Never forward SAM-minted credentials to an unrelated (potentially
   // user-controlled) registry named in the manifest.
-  const auth = authAppliesToRegistry(registry, opts.authRegistryHost) ? opts.auth : undefined;
+  const auth = authAppliesToRegistry(registry, runtime.authRegistryHost) ? runtime.auth : undefined;
 
   // Try Basic auth first if credentials provided
   if (auth) {
@@ -269,11 +159,15 @@ async function resolveTagToDigest(
     headers['Authorization'] = `Basic ${basicCredentials}`;
   }
 
-  let resp = await fetchFn(manifestUrl, {
-    method: 'HEAD',
-    headers,
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  let resp = await fetchValidated(
+    url,
+    {
+      method: 'HEAD',
+      headers,
+    },
+    runtime,
+    'registry'
+  );
 
   // Handle token-based auth (401 with WWW-Authenticate: Bearer)
   if (resp.status === 401) {
@@ -281,14 +175,18 @@ async function resolveTagToDigest(
     if (wwwAuth) {
       const challenge = parseBearerChallenge(wwwAuth);
       if (challenge) {
-        const registryHost = new URL(base).hostname;
-        const token = await fetchBearerToken(challenge, auth, registryHost, fetchFn, timeoutMs);
+        const registryBase = new URL(base);
+        const token = await fetchBearerToken(challenge, auth, registryBase, runtime);
         headers['Authorization'] = `Bearer ${token}`;
-        resp = await fetchFn(manifestUrl, {
-          method: 'HEAD',
-          headers,
-          signal: AbortSignal.timeout(timeoutMs),
-        });
+        resp = await fetchValidated(
+          url,
+          {
+            method: 'HEAD',
+            headers,
+          },
+          runtime,
+          'registry'
+        );
       }
     }
   }
@@ -328,7 +226,7 @@ async function resolveTagToDigest(
   if (!digest) {
     // Fallback: some registries only return the digest in a GET response body.
     // Do a GET and compute/read from the response.
-    return resolveViaGet(manifestUrl, headers, registry, repository, tag, fetchFn, timeoutMs);
+    return resolveViaGet(url, headers, registry, repository, tag, runtime);
   }
 
   if (!SHA256_RE.test(digest)) {
@@ -353,14 +251,17 @@ async function resolveViaGet(
   registry: string,
   repository: string,
   tag: string,
-  fetchFn: typeof fetch,
-  timeoutMs: number
+  runtime: ResolverRuntimeOptions
 ): Promise<string> {
-  const resp = await fetchFn(manifestUrl, {
-    method: 'GET',
-    headers,
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  const resp = await fetchValidated(
+    manifestUrl,
+    {
+      method: 'GET',
+      headers,
+    },
+    runtime,
+    'registry'
+  );
 
   if (!resp.ok) {
     throw new ImageResolveError(
@@ -396,8 +297,16 @@ async function resolveViaGet(
  * @returns An ImageResolver that queries the OCI registry manifest API
  */
 export function createImageResolver(opts: ImageResolverOptions = {}): ImageResolver {
+  const fetchFn = opts.fetchFn ?? ((input, init) => globalThis.fetch(input, init));
+  const runtime: ResolverRuntimeOptions = {
+    auth: opts.auth,
+    authRegistryHost: opts.authRegistryHost,
+    fetchFn,
+    config: configFromOptions(opts),
+    budget: { attempts: 0, activeFetches: 0, deadlineAt: null },
+  };
   return (registry: string, repository: string, tag: string) =>
-    resolveTagToDigest(registry, repository, tag, opts);
+    resolveTagToDigest(registry, repository, tag, runtime);
 }
 
 // Re-export for convenience

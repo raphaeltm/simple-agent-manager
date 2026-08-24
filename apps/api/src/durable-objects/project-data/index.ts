@@ -14,6 +14,8 @@ import {
   type CheckpointEpisodeTransitionInput,
   type CreateCheckpointEpisodeInput,
   MAILBOX_DEFAULTS,
+  type MessageCommentThread,
+  type MessageCommentThreadEventReason,
   type SessionActivityTerminalReason,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
@@ -28,11 +30,13 @@ import { computeProjectDataAlarmTime } from './alarm-schedule';
 import * as attention from './attention';
 import * as attentionExpiry from './attention-expiry';
 import * as commands from './commands';
+import * as comments from './comments';
 import { stopTimedOutConversationWorkspaces } from './conversation-timeout';
 import * as durability from './durability-foundation';
 import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
 import * as knowledge from './knowledge';
+import * as libraryFileComments from './library-file-comments';
 import * as mailbox from './mailbox';
 import * as materialization from './materialization';
 import * as messagePersistence from './message-persistence';
@@ -47,7 +51,12 @@ import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
 import * as sessionActivityReconciliation from './session-activity-reconciliation';
 import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
+import * as sessionWakeProgress from './session-wake-progress';
 import * as sessions from './sessions';
+import * as storageSafety from './storage-safety';
+import { resolveTaskWaitConfig } from './task-wait-config';
+import { processTaskWaits } from './task-wait-supervisor';
+import * as taskWaits from './task-waits';
 import type { Env, SummaryData } from './types';
 
 const log = createModuleLogger('project_data');
@@ -57,6 +66,8 @@ export type { Env } from './types';
 export class ProjectData extends DurableObject<Env> {
   private sql: SqlStorage;
   private summarySyncTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Serializes summary syncs — see `runSummarySyncLocked` (rule 45). */
+  private summarySyncLock: Promise<unknown> = Promise.resolve();
   private cachedProjectId: string | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -76,6 +87,35 @@ export class ProjectData extends DurableObject<Env> {
     return this.cachedProjectId;
   }
 
+  /**
+   * Persist this DO's projectId so it can identify itself with no inbound RPC.
+   *
+   * DO NOT REMOVE THIS. This DO is addressed by `idFromName(projectId)`, and
+   * `DurableObjectId.toString()` yields a one-way hex digest with no inverse.
+   *
+   * Note for future readers: `DurableObjectId.name` DOES carry the addressing
+   * string in workerd — verified via the vitest workers pool, populated both on
+   * an RPC-driven call and inside an `alarm()`-triggered instantiation. It is
+   * NOT currently used, because it is typed optional, is documented as present
+   * only for `idFromName`-derived ids, and this identity drives D1 writes; that
+   * combination needs production verification before it can be trusted here.
+   * Replacing this row with `ctx.id.name` is tracked in
+   * `tasks/backlog/2026-08-18-project-data-id-name-identity-source.md`.
+   * Until then `do_meta.projectId` is the durable, unconditional record.
+   *
+   * Consumers that read it with no RPC in flight (so the value cannot be threaded
+   * in as an argument), all of which degrade to a no-op when it is absent:
+   *   - `syncSummaryToD1()`             — debounced D1 write-back of project summary
+   *   - `alarm()` → `idleCleanup.checkWorkspaceIdleTimeouts` / `processExpiredCleanups`
+   *   - `alarm()` → `reconciliation.processReconciliationCandidates`
+   *   - `alarm()` → `sessionActivityReconciliation.probeStaleSessionActivity`
+   *   - `processTaskWaits` via the `getProjectId` hook
+   *   - `durabilityHooks().getProjectId` — durable-execution metrics, prompt delivery
+   *
+   * The write is `INSERT OR IGNORE` into durable DO SQLite and is never deleted,
+   * so callers only need to invoke this once per DO — see
+   * `services/project-data-ensure-memo.ts`.
+   */
   ensureProjectId(projectId: string): void {
     if (this.cachedProjectId === projectId) return;
     const existing = this.getProjectId();
@@ -195,6 +235,26 @@ export class ProjectData extends DurableObject<Env> {
     return updated;
   }
 
+  /**
+   * Broadcast live wake progress for a sleeping conversation.
+   *
+   * Called by the replacement TaskRunner at each execution-step transition so the
+   * wake banner updates without waiting for the client's poll. Emit-only — D1
+   * remains the durable record, so a missed broadcast is recovered by the next
+   * hydrate (`routes/chat/wake-state.ts`). See `session-wake-progress.ts`.
+   */
+  async publishSessionWakeProgress(
+    input: sessionWakeProgress.SessionWakeProgressInput
+  ): Promise<void> {
+    sessionWakeProgress.publishSessionWakeProgress(
+      {
+        broadcastEvent: (type, payload, sessionId) => this.broadcastEvent(type, payload, sessionId),
+      },
+      input,
+      Date.now()
+    );
+  }
+
   async failSession(sessionId: string, errorMessage: string | null = null): Promise<void> {
     const result = sessions.failSession(this.sql, sessionId);
     if (result) {
@@ -262,6 +322,54 @@ export class ProjectData extends DurableObject<Env> {
     return durability.acceptPromptDelivery(this.sql, this.env, this.durabilityHooks(), input);
   }
 
+  async registerTaskWait(input: taskWaits.RegisterTaskWaitInput) {
+    const config = resolveTaskWaitConfig(this.env);
+    const created = this.ctx.storage.transactionSync(() =>
+      taskWaits.createTaskWait(this.sql, config, {
+        ...input,
+        id: crypto.randomUUID(),
+        wakeDeliveryId: crypto.randomUUID(),
+      })
+    );
+    // Best-effort low-latency nudge; the periodic alarm remains the correctness
+    // backstop. The subscription is already committed above, so a reconcile
+    // failure caused by some OTHER subscription in this project must not fail
+    // this registration back to the caller. Note this sweep is also bounded by
+    // `maxCandidatesPerAlarm`, so a busy project may not process the new
+    // subscription until the next alarm tick.
+    try {
+      await this.reconcileTaskWaits();
+    } catch (error) {
+      log.warn('task_wait.register_reconcile_failed', {
+        subscriptionId: created.subscription.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return {
+      created: created.created,
+      subscription: taskWaits.getTaskWait(this.sql, created.subscription.id),
+    };
+  }
+
+  getTaskWait(subscriptionId: string) {
+    return taskWaits.getTaskWait(this.sql, subscriptionId);
+  }
+
+  async reconcileTaskWaits(childTaskId?: string) {
+    return processTaskWaits(
+      this.sql,
+      this.env,
+      {
+        getProjectId: () => this.getProjectId(),
+        transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
+        acceptPromptDelivery: (input) =>
+          durability.acceptPromptDelivery(this.sql, this.env, this.durabilityHooks(), input),
+        recalculateAlarm: () => this.recalculateAlarm(),
+      },
+      { childTaskId }
+    );
+  }
+
   private durabilityHooks(): durability.DurabilityFoundationHooks {
     return {
       getProjectId: () => this.getProjectId(),
@@ -306,6 +414,9 @@ export class ProjectData extends DurableObject<Env> {
         ...serializeError(err),
       })
     );
+    // `workspace_id` is part of the D1 session index; without this the column
+    // drifted until some unrelated write happened to resync the project.
+    this.scheduleSummarySync();
     this.broadcastEvent('session.updated', { sessionId, workspaceId }, sessionId);
   }
 
@@ -337,6 +448,7 @@ export class ProjectData extends DurableObject<Env> {
     sessionId: string,
     limit: number = 1000,
     before: number | null = null,
+    after: number | null = null,
     roles?: string[],
     compact: boolean = false,
     order: 'asc' | 'desc' = 'desc'
@@ -347,6 +459,7 @@ export class ProjectData extends DurableObject<Env> {
       sessionId,
       limit,
       before,
+      after,
       roles,
       compact,
       order,
@@ -369,6 +482,79 @@ export class ProjectData extends DurableObject<Env> {
     limit: number = 10
   ) {
     return messages.searchMessages(this.sql, query, sessionId, roles, limit);
+  }
+
+  listCommentThreads(input: comments.ListCommentThreadsInput): comments.ListCommentThreadsResult {
+    return comments.listCommentThreads(this.sql, this.env, input);
+  }
+
+  getCommentThread(input: { sessionId: string; threadId: string }): MessageCommentThread | null {
+    return comments.getCommentThread(this.sql, input.sessionId, input.threadId);
+  }
+
+  createCommentThread(input: comments.CreateCommentThreadInput) {
+    const result = this.ctx.storage.transactionSync(() =>
+      comments.createCommentThread(this.sql, this.env, input)
+    );
+    if (result.changed) this.broadcastCommentThread(result.thread, 'thread_created');
+    return { thread: result.thread, idempotent: result.idempotent };
+  }
+
+  createCommentReply(input: comments.CreateCommentReplyInput) {
+    const result = this.ctx.storage.transactionSync(() =>
+      comments.createCommentReply(this.sql, this.env, input)
+    );
+    if (result.changed) this.broadcastCommentThread(result.thread, 'reply_created');
+    return {
+      thread: result.thread,
+      reply: result.reply,
+      idempotent: result.idempotent,
+    };
+  }
+
+  updateCommentThreadStatus(input: comments.UpdateCommentStatusInput) {
+    const result = this.ctx.storage.transactionSync(() =>
+      comments.updateCommentThreadStatus(this.sql, this.env, input)
+    );
+    if (result.changed) {
+      this.broadcastCommentThread(result.thread, this.commentStatusEventReason(input.status));
+    }
+    return { thread: result.thread, idempotent: result.idempotent };
+  }
+
+  // --- Library file comments ------------------------------------------------
+  // Separate storage from message comments (DO migration 033). Callers must have
+  // already verified the file belongs to this project — the DO has no D1 access.
+
+  listFileCommentThreads(
+    input: libraryFileComments.ListFileCommentThreadsInput
+  ): libraryFileComments.ListFileCommentThreadsResult {
+    return libraryFileComments.listFileCommentThreads(this.sql, this.env, input);
+  }
+
+  createFileCommentThread(input: libraryFileComments.CreateFileCommentThreadInput) {
+    const result = this.ctx.storage.transactionSync(() =>
+      libraryFileComments.createFileCommentThread(this.sql, this.env, input)
+    );
+    return { thread: result.thread, idempotent: result.idempotent };
+  }
+
+  createFileCommentReply(input: libraryFileComments.CreateFileCommentReplyInput) {
+    const result = this.ctx.storage.transactionSync(() =>
+      libraryFileComments.createFileCommentReply(this.sql, this.env, input)
+    );
+    return {
+      thread: result.thread,
+      reply: result.reply,
+      idempotent: result.idempotent,
+    };
+  }
+
+  updateFileCommentThreadStatus(input: libraryFileComments.UpdateFileCommentStatusInput) {
+    const result = this.ctx.storage.transactionSync(() =>
+      libraryFileComments.updateFileCommentThreadStatus(this.sql, this.env, input)
+    );
+    return { thread: result.thread, idempotent: result.idempotent };
   }
 
   materializeSession(sessionId: string): void {
@@ -439,6 +625,10 @@ export class ProjectData extends DurableObject<Env> {
 
   async markAgentCompleted(sessionId: string): Promise<void> {
     const now = sessions.markAgentCompleted(this.sql, sessionId);
+    // `agent_completed_at` drives the derived `isIdle` flag the session list
+    // renders, so the D1 index has to see it. Without this the sidebar's idle
+    // badge stayed stale until an unrelated write resynced the project.
+    this.scheduleSummarySync();
     this.broadcastEvent('session.agent_completed', { sessionId, agentCompletedAt: now }, sessionId);
   }
 
@@ -672,6 +862,10 @@ export class ProjectData extends DurableObject<Env> {
       agentType?: string | null;
       restartCount?: number | null;
       statusError?: string | null;
+      runtimeWorkState?: 'inactive' | 'active' | 'settling';
+      runtimeWorkCount?: number;
+      runtimeWorkSource?: string;
+      runtimeWorkProgressAt?: number | null;
     }
   ): Promise<void> {
     return durability.reportActivity(this.sql, this.durabilityHooks(), sessionId, activity, extra);
@@ -778,10 +972,47 @@ export class ProjectData extends DurableObject<Env> {
     };
   }
 
+  async measureStorage(): Promise<storageSafety.ProjectDataStorageTelemetry | null> {
+    const measurement = await storageSafety.measureAndPersistProjectDataStorage(
+      this.sql,
+      this.env,
+      this.getProjectId(),
+      'admin'
+    );
+    await this.recalculateAlarm();
+    return measurement;
+  }
+
+  async runStorageEmergencyPurge(
+    input: storageSafety.ProjectDataStorageEmergencyPurgeInput = {}
+  ): Promise<storageSafety.ProjectDataStorageEmergencyPurgeResult> {
+    const result = await storageSafety.runProjectDataStorageEmergencyPurge(
+      this.sql,
+      this.env,
+      this.getProjectId(),
+      input
+    );
+    await this.recalculateAlarm();
+    return result;
+  }
+
   // --- DO Alarm Handler ---
 
   async alarm(): Promise<void> {
     if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'ProjectData')) return;
+
+    try {
+      await storageSafety.measureAndPersistProjectDataStorage(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        'alarm'
+      );
+    } catch (err) {
+      log.error('alarm.storage_safety_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     const timedOut = await checkRuntimeHeartbeatTimeouts(
       this.sql,
@@ -834,7 +1065,11 @@ export class ProjectData extends DurableObject<Env> {
         this.sql,
         this.env,
         (type, payload, sid) => this.broadcastEvent(type, payload, sid),
-        { waitUntil: (promise) => this.ctx.waitUntil(promise), projectId: this.getProjectId() }
+        {
+          waitUntil: (promise) => this.ctx.waitUntil(promise),
+          projectId: this.getProjectId(),
+          scheduleSummarySync: () => this.scheduleSummarySync(),
+        }
       );
     } catch (err) {
       log.error('alarm.reconciliation_failed', {
@@ -887,6 +1122,16 @@ export class ProjectData extends DurableObject<Env> {
     const ackTimeoutMs = parseInt(this.env.MAILBOX_ACK_TIMEOUT_MS ?? '300000', 10);
     const maxAttempts = parseInt(this.env.MAILBOX_REDELIVERY_MAX_ATTEMPTS ?? '5', 10);
     mailbox.runDeliverySweep(this.sql, ackTimeoutMs, maxAttempts);
+
+    // Resolve due waits before claiming prompt deliveries so a newly enqueued
+    // parent wake can be dispatched in this same alarm turn.
+    try {
+      await this.reconcileTaskWaits();
+    } catch (err) {
+      log.error('alarm.task_wait_reconciliation_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     // Claims persist before bounded adapter I/O continues through waitUntil.
     durability.processPromptDeliveryAlarm(this.sql, this.env, this.durabilityHooks());
@@ -1112,8 +1357,16 @@ export class ProjectData extends DurableObject<Env> {
     return knowledge.getRelevantKnowledge(this.sql, context, limit);
   }
 
-  async getAllHighConfidenceKnowledge(minConfidence: number, limit: number) {
-    return knowledge.getAllHighConfidenceKnowledge(this.sql, minConfidence, limit);
+  async getAllHighConfidenceKnowledge(
+    minConfidence: number,
+    limit: number,
+    perEntityLimit?: number
+  ) {
+    return knowledge.getAllHighConfidenceKnowledge(this.sql, minConfidence, limit, perEntityLimit);
+  }
+
+  async getKnowledgeEntityIndex(limit?: number) {
+    return knowledge.getKnowledgeEntityIndex(this.sql, limit);
   }
 
   async createKnowledgeRelation(
@@ -1429,20 +1682,98 @@ export class ProjectData extends DurableObject<Env> {
     }
   }
 
+  private broadcastCommentThread(
+    thread: MessageCommentThread,
+    reason: MessageCommentThreadEventReason
+  ): void {
+    this.broadcastEvent(
+      'comment.thread.changed',
+      {
+        sessionId: thread.sessionId,
+        thread,
+        reason,
+      },
+      thread.sessionId
+    );
+  }
+
+  private commentStatusEventReason(
+    status: comments.UpdateCommentStatusInput['status']
+  ): MessageCommentThreadEventReason {
+    if (status === 'sent') return 'marked_sent';
+    if (status === 'resolved') return 'resolved';
+    return 'reopened';
+  }
+
   private scheduleSummarySync(): void {
     const debounceMs = parseInt(this.env.DO_SUMMARY_SYNC_DEBOUNCE_MS || '5000', 10);
     if (this.summarySyncTimer !== null) clearTimeout(this.summarySyncTimer);
     this.summarySyncTimer = setTimeout(async () => {
       this.summarySyncTimer = null;
       try {
-        await this.syncSummaryToD1();
+        await this.runSummarySyncLocked();
       } catch (err) {
         log.error('summary_sync_to_d1_failed', serializeError(err));
       }
     }, debounceMs);
   }
 
-  private async syncSummaryToD1(): Promise<void> {
+  /**
+   * Serializes the summary sync's read → D1-write critical section.
+   *
+   * The debounce timer only stops two PENDING timers from coexisting — it does
+   * nothing once a callback has started, because `summarySyncTimer` is nulled at
+   * the top of the callback and a fresh timer can be armed immediately. So two
+   * syncs could overlap across their `await`s, and a Durable Object does NOT
+   * serialize across `await` (rule 45). Both would read the DO's session rows at
+   * different instants, and whichever finished last would win the coverage
+   * write — so an older snapshot could land after a newer one and silently
+   * revert row content (status, agent_completed_at, attention) while leaving a
+   * `complete=1` row with a fresh `synced_at` that readers trust.
+   *
+   * Reading happens inside the lock, so a queued second sync re-reads the
+   * post-write state rather than acting on a stale snapshot. The chain is kept
+   * alive through rejection so a thrown sync cannot wedge every later one.
+   *
+   * `protected` only so the workers-pool test double can drive the LOCKED path
+   * directly instead of racing the debounce timer — a concurrency test that
+   * called the unlocked sync would prove nothing.
+   */
+  protected async runSummarySyncLocked(): Promise<void> {
+    const run = this.summarySyncLock.then(() => this.syncSummaryToD1());
+    this.summarySyncLock = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  /**
+   * Prime the D1 session index after the read path could not use it.
+   *
+   * Deliberately its OWN RPC rather than a side effect of `listSessions`: seven
+   * of that method's eight callers (account-map's fan-out over every project,
+   * the admin backfill's fan-out over every project in the deployment, MCP
+   * tools, a cron sweep, the project-detail preview) never consult the index, so
+   * syncing from there turned ordinary reads into full-project re-index storms.
+   * Only the caller that actually observed a miss should pay to fix it.
+   */
+  async primeSessionIndex(): Promise<void> {
+    this.scheduleSummarySync();
+  }
+
+  /**
+   * `protected`, not `private`, purely so the workers-pool test double subclass
+   * can drive it directly instead of racing the `scheduleSummarySync` debounce
+   * timer. This is a TypeScript subclass-access rule and nothing more.
+   *
+   * NOTE: `private`/`protected` are compile-time only — `tsc` erases them, so at
+   * runtime this is an ordinary prototype method and its RPC reachability is
+   * unchanged by the modifier (it was equally reachable when `private`). If a
+   * method ever genuinely needs to be off the Workers RPC surface, use a real
+   * `#private` method; do not rely on a TS access modifier.
+   */
+  protected async syncSummaryToD1(): Promise<void> {
     const projectId = this.getProjectId();
     if (!projectId) {
       log.warn('summary_sync_skipped_no_project_id');

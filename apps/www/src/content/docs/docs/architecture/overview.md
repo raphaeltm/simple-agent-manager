@@ -196,6 +196,39 @@ Agent behavior is assembled from several override layers rather than a single gl
 - **Skills** — a first-class override layer that further specializes a profile for a specific task type.
 - **Provider modes** — each agent runs in one of three auth modes: `user-api-key` (the user's own key), `oauth` (a subscription token such as Claude Max), or `sam` (the platform-managed AI proxy, opt-in). See [Agent Authentication](/docs/guides/agents/).
 
+### Agent Bootstrap Payload (`get_instructions`)
+
+Every agent session begins by calling the SAM MCP `get_instructions` tool
+(`handleGetInstructions()` in `apps/api/src/routes/mcp/instruction-tools.ts`), which returns
+the task/session context, the project record, a mode-specific `instructions[]` array, and the
+project's stored knowledge and policies.
+
+Knowledge and policies are delivered as **rendered markdown only** — `knowledgeDirectives` and
+`policyDirectives`, produced by `formatKnowledgeDirectives()` and `formatPolicyDirectives()`.
+Each field is omitted entirely when there is nothing to render; a failed Durable Object read
+also degrades to "omitted" rather than erroring the bootstrap.
+
+There is deliberately **no second structured copy** of this data. The payload previously also
+carried `knowledgeContext` and `policyContext` arrays holding byte-identical observation and
+policy bodies. Nothing consumed them, and on a mature project they accounted for roughly half
+the payload (~166K → ~81K characters, about 21k tokens per session bootstrap), so they were
+removed. Callers that need machine-readable records should use the dedicated tools —
+`list_policies` / `get_policy`, and `search_knowledge` / `get_project_knowledge` — rather than
+parsing the bootstrap payload.
+
+Because `update_policy` and `remove_policy` resolve rows by exact id (`updatePolicy()` and
+`removePolicy()` in `apps/api/src/durable-objects/project-data/policies.ts` use `WHERE id = ?`),
+each rendered policy line carries its **full, untruncated** id:
+
+```text
+### Rules (MUST follow)
+- **Call get_instructions first** (id: 7d24e435-0153-44a6-a532-1244510d9e25): Agents must load SAM context before starting work.
+```
+
+Knowledge observations do **not** currently carry their `observationId` in this payload, so
+`update_knowledge`, `remove_knowledge`, and `confirm_knowledge` need an id obtained from
+`search_knowledge` or `get_project_knowledge` first.
+
 ## Durable Objects Deep Dive
 
 ### ProjectData DO
@@ -203,9 +236,11 @@ Agent behavior is assembled from several override layers rather than a single gl
 Each project gets one `ProjectData` Durable Object instance, accessed via `env.PROJECT_DATA.idFromName(projectId)`.
 Every user-visible chat session has exactly one backing D1 Task. `taskMode` controls autonomous task versus human-controlled conversation lifecycle semantics; it never controls whether the Task exists. D1 `tasks.chat_session_id` and ProjectData `chat_sessions.task_id` form a bidirectional soft link. Because the stores cannot share a transaction, creation and legacy repair are idempotent and retain compatibility readers while reconciliation is in progress.
 
+When a sleeping VM conversation needs a replacement runtime, one D1 transaction conditionally creates the recovery task, records `recovery_source_task_id`, and transfers the unique chat-session binding only while the source task is still non-terminal. Parent-wake validation accepts that linked recovery task as the temporary session owner while continuing to require the original parent and child lineage to remain valid. If the parent terminalizes before runner startup, SAM cancels the handoff and restores the original task/workspace bindings.
+
 ProjectData also owns the single durable prompt-delivery queue used by browser followups and agent handoffs. Acceptance persists the visible transcript message and its stable delivery identity before runtime I/O. Alarm-driven attempts use bounded exponential backoff, a finite lifetime, compare-and-set attempt tokens, and stable VM receipts. A lost response is reconciled before retry; if receipt evidence is unavailable or belongs to another runtime, the delivery becomes explicitly ambiguous and is not replayed.
 
-Checkpoint episodes are stored idempotently by ACP session and prompt epoch, including state transitions, attempt/error metadata, and a progress envelope for inspection. Automatic long-turn selection, checkpoint preemption, parent park/wake, and subtask waiting are not enabled by this storage foundation. See [Configuration](/docs/reference/configuration/) for the capability and rollout flags, all of which default to disabled.
+Checkpoint episodes are stored idempotently by ACP session and prompt epoch, including state transitions, attempt/error metadata, and a progress envelope for inspection. Automatic long-turn selection and checkpoint preemption remain disabled. Task agents can explicitly park on a bounded `wait_for_subtasks` subscription: ProjectData reconciles direct-child terminal state and enqueues one immutable parent wake through the existing durable prompt-delivery queue. See [Configuration](/docs/reference/configuration/) for the durable-execution settings and rollout flags.
 
 **Embedded SQLite tables:**
 
@@ -219,6 +254,8 @@ Checkpoint episodes are stored idempotently by ACP session and prompt epoch, inc
 - `session_attention_markers` — active human-input and reconciliation waits, including bounded escalation/expiry state and correlated structured answers
 - `acp_sessions` — ACP session state machine with fork lineage
 - `acp_session_events` — ACP session state transition history
+- `task_wait_subscriptions` — idempotent bounded parent waits, immutable wake payloads, and retry state
+- `task_wait_children` — normalized direct-child observations for each durable wait
 
 **Key features:**
 

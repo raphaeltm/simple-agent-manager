@@ -203,42 +203,45 @@ afterEach(() => {
 });
 
 describe('App routes', () => {
-  it('routes /projects to the Projects page', () => {
+  // Pages other than Landing/Dashboard are code-split (`lazyNamed` in src/App.tsx), so
+  // they resolve on a microtask rather than synchronously — hence `findByTestId`.
+  it('routes /projects to the Projects page', async () => {
     renderAt('/projects');
 
-    expect(screen.getByTestId('projects-page')).toBeInTheDocument();
+    expect(await screen.findByTestId('projects-page')).toBeInTheDocument();
     expect(screen.queryByTestId('dashboard-page')).not.toBeInTheDocument();
   });
 
-  it('routes /tools to the Tools page', () => {
+  it('routes /tools to the Tools page', async () => {
     renderAt('/tools');
-    expect(screen.getByTestId('tools-page')).toBeInTheDocument();
+    expect(await screen.findByTestId('tools-page')).toBeInTheDocument();
   });
 
-  it('routes /tools/cli to the CLI download page', () => {
+  it('routes /tools/cli to the CLI download page', async () => {
     renderAt('/tools/cli');
-    expect(screen.getByTestId('tools-cli-page')).toBeInTheDocument();
+    expect(await screen.findByTestId('tools-cli-page')).toBeInTheDocument();
   });
 
-  it('routes /projects/:id/tasks/:taskId to the task redirect (redirects to chat session)', () => {
+  it('routes /projects/:id/tasks/:taskId to the task redirect (redirects to chat session)', async () => {
     renderAt('/projects/proj-1/tasks/task-1');
 
-    // TaskRedirect is a child route of Project that redirects to the chat session
-    expect(screen.getByTestId('project-detail-page')).toBeInTheDocument();
-    expect(screen.getByTestId('task-redirect-page')).toBeInTheDocument();
+    // TaskRedirect is a child route of Project that redirects to the chat session.
+    // Both the shell and the child are code-split, so both are awaited.
+    expect(await screen.findByTestId('project-detail-page')).toBeInTheDocument();
+    expect(await screen.findByTestId('task-redirect-page')).toBeInTheDocument();
   });
 
-  it('keeps prototype and test harness routes available in local/test mode', () => {
+  it('keeps prototype and test harness routes available in local/test mode', async () => {
     renderAt('/sam');
-    expect(screen.getByTestId('sam-prototype-page')).toBeInTheDocument();
+    expect(await screen.findByTestId('sam-prototype-page')).toBeInTheDocument();
 
     cleanup();
     renderAt('/__test/trial-chat-gate');
-    expect(screen.getByTestId('trial-chat-gate-harness-page')).toBeInTheDocument();
+    expect(await screen.findByTestId('trial-chat-gate-harness-page')).toBeInTheDocument();
 
     cleanup();
     renderAt('/ui-standards');
-    expect(screen.getByTestId('ui-standards-page')).toBeInTheDocument();
+    expect(await screen.findByTestId('ui-standards-page')).toBeInTheDocument();
   });
 
   it('redirects non-superadmins away from deep-linked admin child routes before child pages render', () => {
@@ -246,18 +249,20 @@ describe('App routes', () => {
 
     renderAt('/admin/users');
 
+    // Still synchronous: the guard runs before the lazy Admin shell is ever requested,
+    // and Dashboard is one of the two statically-imported pages.
     expect(screen.getByTestId('dashboard-page')).toBeInTheDocument();
     expect(screen.queryByTestId('admin-layout')).not.toBeInTheDocument();
     expect(screen.queryByTestId('admin-users-page')).not.toBeInTheDocument();
   });
 
-  it('renders admin child routes for superadmins', () => {
+  it('renders admin child routes for superadmins', async () => {
     mockUseAuth.mockReturnValue({ isSuperadmin: true });
 
     renderAt('/admin/users');
 
-    expect(screen.getByTestId('admin-layout')).toBeInTheDocument();
-    expect(screen.getByTestId('admin-users-page')).toBeInTheDocument();
+    expect(await screen.findByTestId('admin-layout')).toBeInTheDocument();
+    expect(await screen.findByTestId('admin-users-page')).toBeInTheDocument();
   });
 
   it('does not render inventoried dev-only routes under production env flags', () => {
@@ -265,7 +270,12 @@ describe('App routes', () => {
     vi.stubEnv('PROD', true);
     vi.stubEnv('MODE', 'production');
 
-    expect(DEV_ONLY_ROUTE_PATHS).toEqual(['/sam', '/__test/trial-chat-gate', '/__test/error-boundary', '/ui-standards']);
+    expect(DEV_ONLY_ROUTE_PATHS).toEqual([
+      '/sam',
+      '/__test/trial-chat-gate',
+      '/__test/error-boundary',
+      '/ui-standards',
+    ]);
     expect(devOnlyRoutesEnabled()).toBe(false);
 
     for (const routePath of DEV_ONLY_ROUTE_PATHS) {

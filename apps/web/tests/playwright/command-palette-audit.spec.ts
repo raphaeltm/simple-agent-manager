@@ -97,6 +97,10 @@ interface MockOptions {
 async function setupMocks(page: Page, options: MockOptions = {}) {
   const { projects = NORMAL_PROJECTS, chats = NORMAL_CHATS } = options;
 
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, SUPERADMIN.user.id);
+
   await setupAuditRoutes(page, (path, respond) => {
     if (path.includes('/api/auth/')) return respond(200, SUPERADMIN);
     if (path === '/api/projects') return respond(200, { projects });
@@ -108,7 +112,7 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     }
     if (path === '/api/github/installations') return respond(200, []);
     if (path === '/api/credentials') return respond(200, []);
-    if (path === '/api/agents') return respond(200, []);
+    if (path === '/api/agents') return respond(200, { agents: [] });
     if (path.includes('/sessions')) return respond(200, { sessions: [], total: 0 });
     if (path.includes('/tasks')) return respond(200, { tasks: [], total: 0 });
     // Everything else falls through to an empty 200 so the page never hangs.

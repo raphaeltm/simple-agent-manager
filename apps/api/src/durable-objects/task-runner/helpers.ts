@@ -6,6 +6,18 @@
  */
 
 import { isTransientDurableObjectError } from '../../services/durable-object-retry';
+import type { SessionRecoverySourceTaskGuard } from '../../services/session-recovery-authority';
+import type { TaskRunnerState } from './types';
+
+export function getRecoverySourceTaskGuard(
+  state: TaskRunnerState
+): SessionRecoverySourceTaskGuard | undefined {
+  const taskId = state.config.recoverySourceTaskId;
+  const chatSessionId = state.config.resumeSnapshotChatSessionId;
+  return taskId && chatSessionId
+    ? { taskId, projectId: state.projectId, chatSessionId }
+    : undefined;
+}
 
 export function parseEnvInt(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
@@ -16,7 +28,7 @@ export function parseEnvInt(value: string | undefined, fallback: number): number
 export function computeBackoffMs(
   retryCount: number,
   baseDelayMs: number,
-  maxDelayMs: number,
+  maxDelayMs: number
 ): number {
   // Exponential backoff: base * 2^retry, capped at max
   const delay = baseDelayMs * Math.pow(2, retryCount);
@@ -43,7 +55,13 @@ export function isTransientError(err: unknown): boolean {
   }
 
   // Network / timeout errors — always transient
-  if (msg.includes('fetch failed') || msg.includes('network') || msg.includes('timeout') || msg.includes('econnrefused') || msg.includes('enotfound')) {
+  if (
+    msg.includes('fetch failed') ||
+    msg.includes('network') ||
+    msg.includes('timeout') ||
+    msg.includes('econnrefused') ||
+    msg.includes('enotfound')
+  ) {
     return true;
   }
 
@@ -52,7 +70,14 @@ export function isTransientError(err: unknown): boolean {
   if (msg.match(/\b5\d{2}\b/)) return true; // 5xx
 
   // Explicit permanent errors
-  if (msg.includes('not found') || msg.includes('not_found') || msg.includes('limit_exceeded') || msg.includes('invalid') || msg.includes('forbidden') || msg.includes('unauthorized')) {
+  if (
+    msg.includes('not found') ||
+    msg.includes('not_found') ||
+    msg.includes('limit_exceeded') ||
+    msg.includes('invalid') ||
+    msg.includes('forbidden') ||
+    msg.includes('unauthorized')
+  ) {
     return false;
   }
 

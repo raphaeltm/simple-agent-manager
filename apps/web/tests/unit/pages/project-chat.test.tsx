@@ -42,6 +42,7 @@ const mocks = vi.hoisted(() => ({
   submitTask: vi.fn(),
   startInstantChatSession: vi.fn(),
   stopChatSession: vi.fn(),
+  sleepWorkspace: vi.fn(),
   getProjectTask: vi.fn(),
   summarizeSession: vi.fn(),
   prepareForkSession: vi.fn(),
@@ -61,6 +62,12 @@ const mocks = vi.hoisted(() => ({
   capturedOnReconnected: null as (() => void) | null,
 }));
 
+// `useQueryScope()` reads the authenticated identity, and every migrated query
+// is keyed by it. Without a provider `useAuth` throws, so supply a stable identity.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
+}));
+
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   listAgents: mocks.listAgents,
@@ -75,6 +82,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   submitTask: mocks.submitTask,
   startInstantChatSession: mocks.startInstantChatSession,
   stopChatSession: mocks.stopChatSession,
+  sleepWorkspace: mocks.sleepWorkspace,
   getProjectTask: mocks.getProjectTask,
   summarizeSession: mocks.summarizeSession,
   prepareForkSession: mocks.prepareForkSession,
@@ -108,7 +116,11 @@ vi.mock('../../../src/components/task-hierarchy', async (importOriginal) => {
   };
 });
 
-vi.mock('@simple-agent-manager/acp-client', () => ({
+// Spreads the real module so pure helpers keep their real behavior (the composer
+// builds appended dictation via appendDictatedText); only the components that
+// actually need stubbing are overridden below.
+vi.mock('@simple-agent-manager/acp-client', async (importActual) => ({
+  ...(await importActual<typeof import('@simple-agent-manager/acp-client')>()),
   VoiceButton: ({
     onTranscription,
     disabled,
@@ -180,6 +192,7 @@ vi.mock('../../../src/components/project-message-view', () => ({
 import { ProjectChat } from '../../../src/pages/project-chat';
 import { ProvisioningIndicator } from '../../../src/pages/project-chat/ProvisioningIndicator';
 import { ProjectContext, type ProjectContextValue } from '../../../src/pages/ProjectContext';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 const PROJECT_ID = 'proj-1';
 
@@ -242,7 +255,8 @@ function renderProjectChat(path = `/projects/${PROJECT_ID}/chat`) {
           />
         </Routes>
       </ProjectContext.Provider>
-    </MemoryRouter>
+    </MemoryRouter>,
+    { wrapper: QueryTestWrapper }
   );
 }
 
@@ -431,6 +445,17 @@ async function createProfileFromWizard({
   const nameInput = screen.getByLabelText('Profile name');
   expect(nameInput).toHaveValue(defaultName);
   fireEvent.change(nameInput, { target: { value: profileName } });
+
+  // A successful create means the server now HAS the profile, so its profile list
+  // must return it. The list is a shared query that the create invalidates, and the
+  // composer reconciles its selection against that list (`selectProfileId` drops a
+  // selected id that the list does not contain). Leaving the list empty here would
+  // model a server that accepts a create and then denies the row exists — under
+  // which resetting the selection is the correct behaviour, not a bug.
+  mocks.listAgentProfiles.mockResolvedValue([
+    makeAgentProfile({ id: 'created-profile', name: profileName, ...expectedPayload }),
+  ]);
+
   fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
 
   await waitFor(() => {
@@ -908,7 +933,8 @@ describe('ProvisioningIndicator', () => {
           workspaceId: 'workspace-1',
           workspaceUrl: null,
         }}
-      />
+      />,
+      { wrapper: QueryTestWrapper }
     );
 
     expect(screen.getByText('Installing dependencies (3/4)')).toBeInTheDocument();
@@ -1043,7 +1069,9 @@ describe('ProjectChat profile setup wizard', () => {
       },
     });
 
-    const textarea = await screen.findByPlaceholderText('Describe what you want the agent to do...');
+    const textarea = await screen.findByPlaceholderText(
+      'Describe what you want the agent to do...'
+    );
     fireEvent.change(textarea, { target: { value: 'Build a profile-first chat' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
@@ -1228,14 +1256,96 @@ describe('ProjectChat close conversation button', () => {
     });
     mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.availableCommands = [];
+    mocks.sleepWorkspace.mockResolvedValue({
+      status: 'sleeping',
+      workspaceId: 'ws-idle',
+      chatSessionId: 'session-idle',
+      snapshotExpiresAt: '2026-08-28T00:00:00.000Z',
+    });
     mocks.closeConversationTask.mockResolvedValue({});
     mocks.stopChatSession.mockResolvedValue({ status: 'stopped', workspaceDeleted: true });
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
 
-  it('passes onCloseConversation to ProjectMessageView for idle session with task', async () => {
+  it('passes onSleepConversation to ProjectMessageView and sleeps the linked workspace', async () => {
     mocks.listChatSessions.mockResolvedValue({
       sessions: [IDLE_SESSION_WITH_TASK],
+      total: 1,
+    });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${IDLE_SESSION_WITH_TASK.id}`);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-view')).toBeInTheDocument();
+    });
+
+    expect(capturedMessageViewProps.current).toHaveProperty('onSleepConversation');
+    expect(typeof capturedMessageViewProps.current?.onSleepConversation).toBe('function');
+
+    await act(async () => {
+      (capturedMessageViewProps.current?.onSleepConversation as () => void)();
+    });
+
+    await waitFor(() => {
+      expect(mocks.sleepWorkspace).toHaveBeenCalledWith('ws-idle');
+    });
+    expect(mocks.closeConversationTask).not.toHaveBeenCalled();
+    expect(mocks.stopChatSession).not.toHaveBeenCalled();
+  });
+
+  it('passes sleep failures to ProjectMessageView without archiving', async () => {
+    mocks.sleepWorkspace.mockRejectedValueOnce(new Error('Snapshot is not ready yet'));
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [IDLE_SESSION_WITH_TASK],
+      total: 1,
+    });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${IDLE_SESSION_WITH_TASK.id}`);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-view')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      (capturedMessageViewProps.current?.onSleepConversation as () => void)();
+    });
+
+    await waitFor(() => {
+      expect(capturedMessageViewProps.current?.sleepError).toBe('Snapshot is not ready yet');
+    });
+    expect(mocks.closeConversationTask).not.toHaveBeenCalled();
+    expect(mocks.stopChatSession).not.toHaveBeenCalled();
+  });
+
+  it('reports a missing workspace instead of sleeping or archiving', async () => {
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [{ ...IDLE_SESSION_WITH_TASK, workspaceId: null }],
+      total: 1,
+    });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${IDLE_SESSION_WITH_TASK.id}`);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-view')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      (capturedMessageViewProps.current?.onSleepConversation as () => void)();
+    });
+
+    await waitFor(() => {
+      expect(capturedMessageViewProps.current?.sleepError).toBe(
+        'This session has no workspace to sleep.'
+      );
+    });
+    expect(mocks.sleepWorkspace).not.toHaveBeenCalled();
+    expect(mocks.closeConversationTask).not.toHaveBeenCalled();
+    expect(mocks.stopChatSession).not.toHaveBeenCalled();
+  });
+
+  it('passes onCloseConversation to ProjectMessageView for sleeping-session archive with task', async () => {
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [{ ...IDLE_SESSION_WITH_TASK, status: 'sleeping' as const }],
       total: 1,
     });
 
@@ -1257,12 +1367,13 @@ describe('ProjectChat close conversation button', () => {
     await waitFor(() => {
       expect(mocks.closeConversationTask).toHaveBeenCalledWith(PROJECT_ID, 'task-conv-1');
     });
+    expect(mocks.sleepWorkspace).not.toHaveBeenCalled();
     expect(mocks.stopChatSession).not.toHaveBeenCalled();
   });
 
-  it('stops the chat session for idle taskless instant sessions', async () => {
+  it('stops the chat session for sleeping taskless instant sessions when archived', async () => {
     mocks.listChatSessions.mockResolvedValue({
-      sessions: [IDLE_SESSION_WITHOUT_TASK],
+      sessions: [{ ...IDLE_SESSION_WITHOUT_TASK, status: 'sleeping' as const }],
       total: 1,
     });
 
@@ -1281,6 +1392,7 @@ describe('ProjectChat close conversation button', () => {
     await waitFor(() => {
       expect(mocks.stopChatSession).toHaveBeenCalledWith(PROJECT_ID, 'session-instant-idle');
     });
+    expect(mocks.sleepWorkspace).not.toHaveBeenCalled();
     expect(mocks.closeConversationTask).not.toHaveBeenCalled();
   });
 

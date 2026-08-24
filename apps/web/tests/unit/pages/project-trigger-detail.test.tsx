@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../../src/hooks/useToast';
 import { ProjectContext, type ProjectContextValue } from '../../../src/pages/ProjectContext';
 import { ProjectTriggerDetail } from '../../../src/pages/ProjectTriggerDetail';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 const mocks = vi.hoisted(() => ({
   getTrigger: vi.fn(),
@@ -15,6 +16,12 @@ const mocks = vi.hoisted(() => ({
   updateTrigger: vi.fn(),
   deleteTrigger: vi.fn(),
   listAgentProfiles: vi.fn(),
+}));
+
+// `useQueryScope()` reads the authenticated identity, and every migrated query
+// is keyed by it. Without a provider `useAuth` throws, so supply a stable identity.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
 }));
 
 vi.mock('../../../src/lib/api', () => ({
@@ -89,8 +96,8 @@ function renderDetail() {
           </Routes>
         </ToastProvider>
       </ProjectContext.Provider>
-    </MemoryRouter>,
-  );
+    </MemoryRouter>
+  , { wrapper: QueryTestWrapper });
 }
 
 describe('ProjectTriggerDetail pagination', () => {

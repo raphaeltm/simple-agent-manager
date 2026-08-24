@@ -498,6 +498,10 @@ export async function handleUploadToLibrary(
     if (message.includes('not found') || message.includes('Not Found')) {
       return jsonRpcError(requestId, INVALID_PARAMS, 'File not found in workspace');
     }
+    // Pass through validation errors (file limit, size limit, bad filename, etc.)
+    if (err instanceof Error && 'statusCode' in err && (err as { statusCode: number }).statusCode === 400) {
+      return jsonRpcError(requestId, INVALID_PARAMS, message);
+    }
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to upload to library');
   }
 }

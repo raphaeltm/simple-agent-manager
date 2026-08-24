@@ -3,8 +3,8 @@
 // =============================================================================
 //
 // Acquisition only. Sweeps the entire project library (sub-cap projects) into a
-// client-side set, hydrates from localStorage for flicker-free first paint, and
-// exposes a generation-guarded invalidation handle for mutations. Matching and
+// client-side set, hydrates from TanStack Query cache for flicker-free first
+// paint, and exposes a targeted invalidation handle for mutations. Matching and
 // ranking live in lib/library-search.ts — this hook never filters.
 //
 // Sweep contract (see tasks/.../library-client-index-search.md):
@@ -17,17 +17,13 @@
 //     the server-search path.
 
 import { LIBRARY_DEFAULTS } from '@simple-agent-manager/shared';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useMemo } from 'react';
 
 import type { FileWithTags } from '../components/library/types';
-import { listLibraryFiles } from '../lib/api/library';
-import {
-  type CachedIndexFile,
-  clearCachedIndex,
-  getCachedIndex,
-  setCachedIndex,
-} from '../lib/library-cache';
 import { buildIndex, type LibraryIndex } from '../lib/library-search';
+import { libraryIndexQueryOptions, libraryQueryKeys } from '../lib/query-options';
+import { useQueryScope } from './useQueryScope';
 
 /** Safety cap on sweep iterations (200/page × 10 = 2000, far above the file cap). */
 function resolveMaxSweepPages(): number {
@@ -60,115 +56,44 @@ function resolveCap(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : LIBRARY_DEFAULTS.CLIENT_SWEEP_CAP;
 }
 
-/** Remove the (potentially large) extracted-text preview before caching. */
-function stripPreview(file: FileWithTags): CachedIndexFile {
-  return { ...file, extractedTextPreview: null };
-}
-
 export function useLibraryIndex(
   projectId: string,
   cacheNamespace?: string | null
 ): UseLibraryIndexResult {
   const cap = resolveCap();
   const maxSweepPages = resolveMaxSweepPages();
-  const [files, setFiles] = useState<FileWithTags[]>([]);
-  const [status, setStatus] = useState<LibraryIndexStatus>('loading');
-  const [isSweeping, setIsSweeping] = useState(false);
-  const [sweepError, setSweepError] = useState(false);
-  const [fileCount, setFileCount] = useState(0);
-  const [invalidationToken, setInvalidationToken] = useState(0);
+  const queryScope = useQueryScope();
+  const queryClient = useQueryClient();
+  const queryConfig = useMemo(
+    () => ({ cap, maxSweepPages, namespace: cacheNamespace ?? null }),
+    [cacheNamespace, cap, maxSweepPages]
+  );
 
-  const genRef = useRef(0);
-  const filesRef = useRef<FileWithTags[]>([]);
-  filesRef.current = files;
+  const query = useQuery({
+    ...libraryIndexQueryOptions(queryScope, projectId, queryConfig),
+    enabled: Boolean(projectId && queryScope),
+  });
 
-  const invalidate = useCallback(() => setInvalidationToken((t) => t + 1), []);
+  const invalidate = useCallback(() => {
+    if (!projectId || !queryScope) return;
+    void queryClient.invalidateQueries({
+      queryKey: libraryQueryKeys.index(queryScope, projectId, queryConfig),
+    });
+  }, [projectId, queryClient, queryConfig, queryScope]);
 
-  useEffect(() => {
-    const gen = ++genRef.current;
-    let cancelled = false;
-    const isCurrent = () => !cancelled && gen === genRef.current;
-
-    // Hydrate from cache for a flicker-free first paint, then re-sweep.
-    const cached = getCachedIndex(projectId, cacheNamespace);
-    if (cached) {
-      setFiles(cached.files);
-      setFileCount(cached.count);
-      setStatus('ready');
-    } else {
-      setFiles([]);
-      setStatus('loading');
-    }
-    const hadCache = !!cached;
-
-    async function sweep() {
-      setIsSweeping(true);
-      setSweepError(false);
-      const accumulated: CachedIndexFile[] = [];
-      let cursor: string | undefined;
-      let pages = 0;
-
-      try {
-        for (;;) {
-          const resp = await listLibraryFiles(projectId, {
-            directory: '/',
-            recursive: true,
-            sortBy: 'createdAt',
-            sortOrder: 'asc',
-            limit: LIBRARY_DEFAULTS.LIST_MAX_PAGE_SIZE,
-            cursor,
-          });
-          if (!isCurrent()) return;
-
-          if (resp.total >= cap) {
-            setFiles([]);
-            setFileCount(resp.total);
-            setStatus('overCap');
-            clearCachedIndex(projectId, cacheNamespace);
-            return;
-          }
-
-          for (const file of resp.files) accumulated.push(stripPreview(file));
-          pages += 1;
-
-          // First page with no cache: paint immediately, keep accumulating.
-          if (pages === 1 && !hadCache) {
-            setFiles([...accumulated]);
-            setStatus('ready');
-          }
-
-          if (resp.cursor === null || pages >= maxSweepPages) break;
-          cursor = resp.cursor;
-        }
-
-        if (!isCurrent()) return;
-        setFiles(accumulated);
-        setFileCount(accumulated.length);
-        setStatus('ready');
-        setCachedIndex(projectId, accumulated, cacheNamespace);
-      } catch {
-        if (!isCurrent()) return;
-        setSweepError(true);
-        // Keep whatever we already showed; only hard-fail if we have nothing.
-        if (accumulated.length === 0 && filesRef.current.length === 0) {
-          setStatus('error');
-        } else {
-          setStatus('ready');
-        }
-      } finally {
-        if (isCurrent()) setIsSweeping(false);
-      }
-    }
-
-    void sweep();
-    return () => {
-      cancelled = true;
-    };
-    // Sweep ONLY on project change or explicit invalidation — never on
-    // directory navigation, search, or sort.
-  }, [projectId, cacheNamespace, invalidationToken]);
+  const files = (query.data?.files ?? []) as FileWithTags[];
+  const status: LibraryIndexStatus =
+    query.data?.status ?? (query.error && query.data === undefined ? 'error' : 'loading');
 
   const index = useMemo(() => buildIndex(files), [files]);
 
-  return { files, index, status, isSweeping, sweepError, fileCount, invalidate };
+  return {
+    files,
+    index,
+    status,
+    isSweeping: query.isFetching,
+    sweepError: Boolean(query.error),
+    fileCount: query.data?.fileCount ?? 0,
+    invalidate,
+  };
 }

@@ -185,3 +185,33 @@ function sanitizeGitRef(ref: string, maxLength: number): string {
 
   return result;
 }
+
+/**
+ * Whether a string is a branch name git would accept, per
+ * https://git-scm.com/docs/git-check-ref-format.
+ *
+ * Deliberately conservative: it rejects only what git definitely rejects, so an
+ * unusual-but-legal branch a user genuinely wants to continue from is never
+ * refused. A name that fails this check cannot exist on any remote, which is why
+ * `services/workspace-branch.ts` can treat it as `missing` without a lookup --
+ * and, more importantly, must never hand it to a ref-CREATE API.
+ */
+export function isValidGitRefName(ref: string): boolean {
+  if (!ref || ref !== ref.trim()) return false;
+  if (ref === '@') return false;
+
+  // ASCII control characters, DEL, space, and the characters git names explicitly.
+  for (const char of ref) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) return false;
+  }
+  if (/[ ~^:?*[\\]/.test(ref)) return false;
+
+  if (ref.includes('..') || ref.includes('@{')) return false;
+  if (ref.startsWith('/') || ref.endsWith('/') || ref.includes('//')) return false;
+  if (ref.startsWith('-')) return false;
+  if (ref.endsWith('.')) return false;
+
+  // Per-component rules: no empty component, no leading dot, no `.lock` suffix.
+  return ref.split('/').every((part) => Boolean(part) && !part.startsWith('.') && !part.endsWith('.lock'));
+}

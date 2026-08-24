@@ -50,9 +50,20 @@ const DIRECT_SYNC_ENV_MAPPINGS = {
   CLOUDFLARE_API_TOKEN: 'CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}',
   ARTIFACTS_BINDING_ENABLED: 'ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}',
   SETUP_FORCE: 'SETUP_FORCE: ${{ vars.SETUP_FORCE }}',
-  BASE_DOMAIN: 'BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}',
-  RESOURCE_PREFIX: 'RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}',
+  BASE_DOMAIN: 'BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}',
+  RESOURCE_PREFIX: 'RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}',
 } as const;
+
+const DEPLOYMENT_IMAGE_RESOLVE_ENV_VARS = [
+  'DEPLOYMENT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS',
+  'DEPLOYMENT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS',
+  'DEPLOYMENT_IMAGE_RESOLVE_MAX_FETCH_ATTEMPTS',
+  'DEPLOYMENT_IMAGE_RESOLVE_MAX_REDIRECTS',
+  'DEPLOYMENT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES',
+  'DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES',
+  'DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES',
+] as const;
+
 function stepRunScript(stepName: string): string {
   const block = stepBlock(stepName);
   const runIndex = block.indexOf('        run: |\n');
@@ -235,8 +246,8 @@ describe('deploy reusable workflow', () => {
     const firstDeployResync = stepBlock('Re-sync Wrangler Config \\(add tail_consumers\\)');
 
     expect(initialSync).toContain('pnpm tsx scripts/deploy/sync-wrangler-config.ts');
-    expect(initialSync).toContain('BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}');
-    expect(initialSync).toContain('RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}');
+    expect(initialSync).toContain('BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}');
+    expect(initialSync).toContain('RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}');
     expect(initialSync).toContain(
       'VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}'
     );
@@ -245,8 +256,12 @@ describe('deploy reusable workflow', () => {
     );
 
     expect(firstDeployResync).toContain('pnpm tsx scripts/deploy/sync-wrangler-config.ts');
-    expect(firstDeployResync).toContain('BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}');
-    expect(firstDeployResync).toContain('RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}');
+    expect(firstDeployResync).toContain(
+      'BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}'
+    );
+    expect(firstDeployResync).toContain(
+      'RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}'
+    );
     expect(firstDeployResync).toContain(
       'VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}'
     );
@@ -304,7 +319,7 @@ describe('deploy reusable workflow', () => {
     const block = stepBlock('Configure AI Gateway');
 
     expect(block).toContain('bash scripts/deploy/configure-ai-gateway.sh');
-    expect(block).toContain('AI_GATEWAY_ID: ${{ steps.prefix.outputs.value }}');
+    expect(block).toContain('AI_GATEWAY_ID: ${{ steps.deploy_resources.outputs.ai_gateway }}');
     expect(block).not.toContain('AI_GATEWAY_ID: sam');
   });
 
@@ -387,6 +402,17 @@ describe('deploy reusable workflow', () => {
       'PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT',
       'PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT',
       'PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS',
+      'PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES',
+      'PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH',
+      'PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS',
+      'PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS',
+      'PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS',
+      'PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS',
+      'PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT',
+      'PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT',
+      'PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT',
+      'PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES',
+      'PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH',
     ]) {
       expect(sync).toContain(name + ': ${{ vars.' + name + ' }}');
     }
@@ -421,6 +447,21 @@ describe('deploy reusable workflow', () => {
       'SETUP_SESSION_SWEEP_MAX_CANDIDATES: ${{ vars.SETUP_SESSION_SWEEP_MAX_CANDIDATES }}'
     );
     expect(sync).toContain('POOL_LEASE_BUFFER_MS: ${{ vars.POOL_LEASE_BUFFER_MS }}');
+  });
+
+  it('forwards deployment image-resolution limits into every wrangler config sync env', () => {
+    const optionalWorkerVars = extractOptionalWorkerEnvVars();
+    const syncBlocks = [
+      stepBlock('Sync Wrangler Config \\(API \\+ Tail Worker\\)'),
+      stepBlock('Re-sync Wrangler Config \\(add tail_consumers\\)'),
+    ];
+
+    for (const name of DEPLOYMENT_IMAGE_RESOLVE_ENV_VARS) {
+      expect(optionalWorkerVars).toContain(name);
+      for (const sync of syncBlocks) {
+        expect(sync).toContain(name + ': ${{ vars.' + name + ' }}');
+      }
+    }
   });
 
   it('versions the R2 vm-agent binaries with the same commit SHA as the container binary', () => {

@@ -36,10 +36,12 @@ vi.mock('../../src/services/trigger-admission', () => ({
 
 vi.mock('../../src/services/project-multiplayer', () => ({
   getProjectMultiplayerState: vi.fn().mockResolvedValue({ multiplayerActive: false }),
+  clearProjectMultiplayerStateCache: vi.fn(),
 }));
 
 vi.mock('../../src/services/credential-attribution-health', () => ({
   buildCredentialAttributionForTriggers: vi.fn().mockResolvedValue(new Map()),
+  clearCredentialAttributionHealthCache: vi.fn(),
 }));
 
 vi.mock('../../src/lib/logger', () => ({

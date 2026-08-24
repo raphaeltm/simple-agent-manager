@@ -220,8 +220,7 @@ export const DocumentCard: FC<DocumentCardProps> = ({ item, projectId }) => {
 
       {modalOpen && canPreview && previewUrl && (
         <FilePreviewModal
-          // The modal reads the project/file scope plus display metadata; the card data is
-          // sufficient for its render (it fetches content from previewUrl).
+          projectId={projectId as string}
           file={
             {
               id: fileId as string,

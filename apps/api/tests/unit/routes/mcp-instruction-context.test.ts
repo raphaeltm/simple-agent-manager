@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   projectData: {
     getSession: vi.fn(),
     getAllHighConfidenceKnowledge: vi.fn(),
+    getKnowledgeEntityIndex: vi.fn(),
     getActivePolicies: vi.fn(),
     recordActivityEvent: vi.fn(),
   },
@@ -92,6 +93,14 @@ describe('MCP instruction context handlers', () => {
         confidence: 0.95,
       },
     ]);
+    mocks.projectData.getKnowledgeEntityIndex.mockResolvedValue({
+      entries: [
+        { name: 'Architecture', entityType: 'context', observationCount: 4 },
+        { name: 'ContentStyle', entityType: 'preference', observationCount: 7 },
+        { name: 'BusinessStrategy', entityType: 'context', observationCount: 2 },
+      ],
+      totalEntities: 3,
+    });
     mocks.projectData.getActivePolicies.mockResolvedValue([
       {
         id: 'policy-1',
@@ -114,6 +123,176 @@ describe('MCP instruction context handlers', () => {
     expect(payload.task).toMatchObject({ id: 'task-1', title: 'Implement bootstrap' });
     expect(String(payload.knowledgeDirectives)).toContain('Worker control plane');
     expect(String(payload.policyDirectives)).toContain('Call get_instructions');
+  });
+
+  it('appends a complete entity index naming entities that were not injected', async () => {
+    mocks.selectRows = [[task], [project]];
+
+    const response = await handleGetInstructions('request-1', baseToken, makeEnv());
+    const payload = parseInstructionPayload(response);
+    const directives = String(payload.knowledgeDirectives);
+
+    // Only Architecture was injected in full; the other two must still be discoverable.
+    expect(directives).toContain('Full knowledge index (3 entities)');
+    expect(directives).toContain('ContentStyle (preference, 7)');
+    expect(directives).toContain('BusinessStrategy (context, 2)');
+    expect(directives).toContain('Architecture (context, 4)');
+    // The agent must be told the block is partial and how to reach the rest.
+    expect(directives).toContain('search_knowledge');
+    expect(directives).toContain('get_relevant_knowledge');
+    expect(directives).toContain('2 of the entities listed here have no observations shown above');
+  });
+
+  it('never tells the agent the index is complete when it is truncated', async () => {
+    mocks.selectRows = [[task], [project]];
+    // 3 entities listed, 40 actually exist — the index itself is truncated.
+    mocks.projectData.getKnowledgeEntityIndex.mockResolvedValue({
+      entries: [
+        { name: 'Architecture', entityType: 'context', observationCount: 4 },
+        { name: 'ContentStyle', entityType: 'preference', observationCount: 7 },
+        { name: 'BusinessStrategy', entityType: 'context', observationCount: 2 },
+      ],
+      totalEntities: 40,
+    });
+
+    const response = await handleGetInstructions('request-1', baseToken, makeEnv());
+    const payload = parseInstructionPayload(response);
+    const directives = String(payload.knowledgeDirectives);
+    const instructions = (payload.instructions as string[]).join('\n');
+
+    // The heading must state N of M rather than claiming completeness...
+    expect(directives).toContain('3 of 40 entities');
+    expect(directives).not.toContain('Full knowledge index');
+    expect(directives).toContain('A further 37 entities are not listed');
+
+    // ...and the instructions must not re-assert completeness one layer up. This is the
+    // rule-65 bug reintroduced in prose: the index block was honest while the sentence
+    // pointing at it said "Full knowledge index ... lists every entity".
+    expect(instructions).not.toContain('Full knowledge index');
+    expect(instructions).not.toMatch(/index[^.]*lists every entity/i);
+    // Liveness control (rule 62) — an absence assertion needs a positive one beside it.
+    expect(instructions).toContain('knowledge-index section');
+    expect(payload.task).toMatchObject({ id: 'task-1' });
+  });
+
+  it('does not claim the graph is empty when entities exist below the confidence bar', async () => {
+    mocks.selectRows = [[task], [project]];
+    // Nothing clears the confidence bar, but the project plainly HAS knowledge — it is
+    // reachable by search. Gating the instructions on the ranked set alone would hand this
+    // project the "empty graph, start bootstrapping" prompt while its index lists entities.
+    mocks.projectData.getAllHighConfidenceKnowledge.mockResolvedValue([]);
+
+    const response = await handleGetInstructions('request-1', baseToken, makeEnv());
+    const payload = parseInstructionPayload(response);
+    const instructions = (payload.instructions as string[]).join('\n');
+
+    expect(instructions).toContain('contains stored knowledge from previous sessions');
+    expect(instructions).not.toContain('No knowledge has been stored');
+    // Positive control (rule 62): the index really did survive into the payload.
+    expect(String(payload.knowledgeDirectives)).toContain('ContentStyle (preference, 7)');
+  });
+
+  it('passes the entity index limit through to the index query', async () => {
+    mocks.selectRows = [[task], [project]];
+
+    await handleGetInstructions('request-1', baseToken, makeEnv());
+
+    // Default is 200 (KNOWLEDGE_DEFAULTS.entityIndexLimit). The per-entity cap has an
+    // equivalent assertion below; without this one the index limit could stop being
+    // threaded and nothing would notice.
+    expect(mocks.projectData.getKnowledgeEntityIndex).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-1',
+      200
+    );
+  });
+
+  it('passes the per-entity cap through to the knowledge query', async () => {
+    mocks.selectRows = [[task], [project]];
+
+    await handleGetInstructions('request-1', baseToken, makeEnv());
+
+    // Default cap is 8 (KNOWLEDGE_DEFAULTS.autoRetrievePerEntityLimit). Without this
+    // argument reaching the DO, one grab-bag entity reclaims every slot.
+    expect(mocks.projectData.getAllHighConfidenceKnowledge).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-1',
+      0.8,
+      50,
+      8
+    );
+  });
+
+  it('still surfaces the index when ranked observation retrieval fails', async () => {
+    mocks.selectRows = [[task], [project]];
+    mocks.projectData.getAllHighConfidenceKnowledge.mockRejectedValue(new Error('DO unavailable'));
+
+    const response = await handleGetInstructions('request-1', baseToken, makeEnv());
+    const payload = parseInstructionPayload(response);
+    const directives = String(payload.knowledgeDirectives);
+
+    // Degrading to "no knowledge at all" was the old silent failure. The index is
+    // fetched independently, so the agent at least learns what exists.
+    expect(directives).toContain('Full knowledge index');
+    expect(directives).toContain('ContentStyle (preference, 7)');
+    // Liveness control (rule 62): assert the response is otherwise intact, not crashed.
+    expect(payload.task).toMatchObject({ id: 'task-1' });
+  });
+
+  it('keeps the ranked directives when only the entity index fails', async () => {
+    mocks.selectRows = [[task], [project]];
+    mocks.projectData.getKnowledgeEntityIndex.mockRejectedValue(new Error('DO unavailable'));
+
+    const response = await handleGetInstructions('request-1', baseToken, makeEnv());
+    const directives = String(parseInstructionPayload(response).knowledgeDirectives);
+
+    // Mirror of the ranked-retrieval failure case: each read is isolated, so losing one
+    // must not take the other down with it.
+    expect(directives).toContain('Worker control plane');
+    expect(directives).not.toContain('knowledge index');
+  });
+
+  it('degrades to the bootstrap prompt when both knowledge reads fail', async () => {
+    mocks.selectRows = [[task], [project]];
+    mocks.projectData.getAllHighConfidenceKnowledge.mockRejectedValue(new Error('DO down'));
+    mocks.projectData.getKnowledgeEntityIndex.mockRejectedValue(new Error('DO down'));
+
+    const response = await handleGetInstructions('request-1', baseToken, makeEnv());
+    const payload = parseInstructionPayload(response);
+
+    // Both isolated handlers firing at once must not combine into a broken payload.
+    expect(payload.knowledgeDirectives).toBeUndefined();
+    expect(JSON.stringify(payload.instructions)).toContain('no stored knowledge yet');
+    // Liveness control — the request still succeeded rather than erroring out.
+    expect(payload.task).toMatchObject({ id: 'task-1' });
+  });
+
+  it('labels the index as partial when more entities exist than are listed', async () => {
+    mocks.selectRows = [[task], [project]];
+    mocks.projectData.getKnowledgeEntityIndex.mockResolvedValue({
+      entries: [{ name: 'Architecture', entityType: 'context', observationCount: 4 }],
+      totalEntities: 12,
+    });
+
+    const response = await handleGetInstructions('request-1', baseToken, makeEnv());
+    const directives = String(parseInstructionPayload(response).knowledgeDirectives);
+
+    // Must NOT claim completeness it cannot back.
+    expect(directives).not.toContain('Full knowledge index');
+    expect(directives).toContain('1 of 12 entities');
+    expect(directives).toContain('A further 11 entities are not listed');
+  });
+
+  it('omits the index section when the project has no entities', async () => {
+    mocks.selectRows = [[task], [project]];
+    mocks.projectData.getAllHighConfidenceKnowledge.mockResolvedValue([]);
+    mocks.projectData.getKnowledgeEntityIndex.mockResolvedValue({ entries: [], totalEntities: 0 });
+
+    const response = await handleGetInstructions('request-1', baseToken, makeEnv());
+    const payload = parseInstructionPayload(response);
+
+    expect(payload.knowledgeDirectives).toBeUndefined();
+    expect(payload.task).toMatchObject({ id: 'task-1' });
   });
 
   it('returns taskless conversation instructions resolved through chatSessionId', async () => {

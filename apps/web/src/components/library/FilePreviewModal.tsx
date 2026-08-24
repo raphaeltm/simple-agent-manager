@@ -1,5 +1,5 @@
 import { Spinner } from '@simple-agent-manager/ui';
-import { AlertTriangle, Code, Download, Eye, X } from 'lucide-react';
+import { AlertTriangle, Code, Download, Eye, MessageSquare, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -14,11 +14,21 @@ import {
   isPreviewableImageMime,
 } from '../../lib/file-utils';
 import { RenderedMarkdown, SyntaxHighlightedCode } from '../MarkdownRenderer';
+import {
+  SelectionActionBar,
+  SelectionPopover,
+} from '../project-message-view/comments/CommentPrimitives';
+import {
+  useCoarsePointer,
+  useCommentSelection,
+} from '../project-message-view/comments/useCommentSelection';
 import { ImageViewer } from '../shared-file-viewer/ImageViewer';
+import { FileCommentPanel } from './FileCommentPanel';
 import { InteractiveHtmlPreview } from './InteractiveHtmlPreview';
 import { type FileWithTags, FOCUS_RING } from './types';
 
 export interface FilePreviewModalProps {
+  projectId: string;
   file: FileWithTags;
   previewUrl: string;
   onClose: () => void;
@@ -83,11 +93,18 @@ function ViewToggle({
   );
 }
 
-export function FilePreviewModal({ file, previewUrl, onClose, onDownload }: FilePreviewModalProps) {
+export function FilePreviewModal({
+  projectId,
+  file,
+  previewUrl,
+  onClose,
+  onDownload,
+}: FilePreviewModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const [pdfLoading, setPdfLoading] = useState(true);
   const [pdfError, setPdfError] = useState(false);
-
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [pendingQuote, setPendingQuote] = useState<string | null>(null);
   // Pass the filename so an octet-stream/empty stored type (agent uploads) still
   // resolves to its real previewable type from the extension.
   const isImage = isPreviewableImageMime(file.mimeType, file.filename);
@@ -98,6 +115,24 @@ export function FilePreviewModal({ file, previewUrl, onClose, onDownload }: File
   const htmlTooLarge = isHtml && file.sizeBytes > FILE_PREVIEW_LOAD_MAX_BYTES;
 
   const [mdViewMode, setMdViewMode] = useState<'rendered' | 'source'>('rendered');
+
+  // Selecting text in the rendered markdown offers "Comment on selection", which
+  // opens the panel with the quote attached. Reuses the same selection machinery
+  // as message comments — the preview body just declares itself an anchor.
+  const previewBodyRef = useRef<HTMLDivElement>(null);
+  const coarsePointer = useCoarsePointer();
+  const { selection, clear: clearSelection } = useCommentSelection(
+    isMarkdown && mdViewMode === 'rendered',
+    previewBodyRef
+  );
+
+  const startQuotedComment = useCallback(() => {
+    if (!selection) return;
+    setPendingQuote(selection.quote);
+    setCommentsOpen(true);
+    clearSelection();
+    window.getSelection()?.removeAllRanges();
+  }, [clearSelection, selection]);
   // HTML defaults to the running preview. Source is the alternate view, and is fetched lazily so
   // opening an artifact costs one request (the signed-URL mint) instead of two.
   const [htmlViewMode, setHtmlViewMode] = useState<'preview' | 'source'>('preview');
@@ -248,6 +283,20 @@ export function FilePreviewModal({ file, previewUrl, onClose, onDownload }: File
             </button>
             <button
               type="button"
+              onClick={() => setCommentsOpen((prev) => !prev)}
+              aria-pressed={commentsOpen}
+              className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium rounded-md border cursor-pointer min-h-[44px] ${FOCUS_RING} ${
+                commentsOpen
+                  ? 'border-accent bg-accent/10 text-accent'
+                  : 'border-border-default bg-transparent text-fg-primary hover:bg-surface-hover'
+              }`}
+              aria-label={commentsOpen ? 'Hide comments' : 'Show comments'}
+            >
+              <MessageSquare size={14} />
+              <span className="hidden sm:inline">Comments</span>
+            </button>
+            <button
+              type="button"
               onClick={onClose}
               className={`p-3 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary rounded min-w-[44px] min-h-[44px] flex items-center justify-center ${FOCUS_RING}`}
               aria-label="Close preview"
@@ -256,142 +305,181 @@ export function FilePreviewModal({ file, previewUrl, onClose, onDownload }: File
             </button>
           </div>
 
-          {/* Content.
-              The HTML branch needs a real flex context so the preview iframe can claim the full
-              remaining height; the image/PDF/markdown branches depend on this wrapper being a block
-              `overflow-auto` scroller (PDF uses `h-full` under a block parent, markdown scrolls
-              here), so the flex context is applied only for HTML. */}
-          <div
-            className={
-              isHtml
-                ? 'flex min-h-0 flex-1 flex-col overflow-hidden'
-                : 'min-h-0 flex-1 overflow-auto'
-            }
-            style={{
-              paddingBottom: 'env(safe-area-inset-bottom)',
-              paddingLeft: 'env(safe-area-inset-left)',
-              paddingRight: 'env(safe-area-inset-right)',
-            }}
-          >
-            {isImage && (
-              <ImageViewer src={previewUrl} fileName={file.filename} fileSize={file.sizeBytes} />
-            )}
+          {/* Content + optional comment panel */}
+          <div className="flex min-h-0 flex-1 overflow-hidden">
+            {/* File content area.
+                The HTML branch needs a real flex context so the preview iframe can claim the full
+                remaining height; the image/PDF/markdown branches depend on this wrapper being a
+                block `overflow-auto` scroller (PDF uses `h-full` under a block parent, markdown
+                scrolls here), so the flex context is applied only for HTML. */}
+            <div
+              className={
+                isHtml
+                  ? 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'
+                  : 'min-h-0 min-w-0 flex-1 overflow-auto'
+              }
+              style={{
+                paddingBottom: 'env(safe-area-inset-bottom)',
+                paddingLeft: 'env(safe-area-inset-left)',
+                paddingRight: commentsOpen ? undefined : 'env(safe-area-inset-right)',
+              }}
+            >
+              {isImage && (
+                <ImageViewer src={previewUrl} fileName={file.filename} fileSize={file.sizeBytes} />
+              )}
 
-            {isPdf && (
-              <div className="relative h-full min-h-[60vh]">
-                {pdfLoading && !pdfError && (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <Spinner size="md" />
-                  </div>
-                )}
-                {pdfError ? (
-                  <div className="flex flex-col items-center justify-center gap-3 p-8 text-center min-h-[60vh]">
-                    <AlertTriangle size={32} className="text-warning" />
-                    <p className="text-sm text-fg-muted">
-                      Unable to load PDF preview. Try downloading the file instead.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={onDownload}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-border-default bg-transparent text-fg-primary cursor-pointer hover:bg-surface-hover ${FOCUS_RING}`}
-                    >
-                      <Download size={14} />
-                      Download
-                    </button>
-                  </div>
-                ) : (
-                  <iframe
-                    src={previewUrl}
-                    title={`Preview of ${file.filename}`}
-                    sandbox="allow-same-origin"
-                    className="h-full min-h-[60vh] w-full border-none"
-                    onLoad={() => setPdfLoading(false)}
-                    onError={() => {
-                      setPdfLoading(false);
-                      setPdfError(true);
-                    }}
-                  />
-                )}
-              </div>
-            )}
-
-            {isMarkdown && (
-              <>
-                {mdLoading && (
-                  <div className="flex items-center justify-center py-12">
-                    <Spinner size="md" />
-                  </div>
-                )}
-                {mdError && (
-                  <div className="flex flex-col items-center justify-center gap-3 p-8 text-center">
-                    <AlertTriangle size={32} className="text-warning" />
-                    <p className="text-sm text-fg-muted">
-                      Unable to load markdown preview. Try downloading the file instead.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={onDownload}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-border-default bg-transparent text-fg-primary cursor-pointer hover:bg-surface-hover ${FOCUS_RING}`}
-                    >
-                      <Download size={14} />
-                      Download
-                    </button>
-                  </div>
-                )}
-                {mdContent !== null &&
-                  !mdLoading &&
-                  !mdError &&
-                  (mdViewMode === 'rendered' ? (
-                    <RenderedMarkdown content={mdContent} />
-                  ) : (
-                    <div className="overflow-auto bg-surface-inset p-4">
-                      <SyntaxHighlightedCode content={mdContent} language="markdown" />
+              {isPdf && (
+                <div className="relative h-full min-h-[60vh]">
+                  {pdfLoading && !pdfError && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <Spinner size="md" />
                     </div>
-                  ))}
-              </>
-            )}
+                  )}
+                  {pdfError ? (
+                    <div className="flex flex-col items-center justify-center gap-3 p-8 text-center min-h-[60vh]">
+                      <AlertTriangle size={32} className="text-warning" />
+                      <p className="text-sm text-fg-muted">
+                        Unable to load PDF preview. Try downloading the file instead.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={onDownload}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-border-default bg-transparent text-fg-primary cursor-pointer hover:bg-surface-hover ${FOCUS_RING}`}
+                      >
+                        <Download size={14} />
+                        Download
+                      </button>
+                    </div>
+                  ) : (
+                    <iframe
+                      src={previewUrl}
+                      title={`Preview of ${file.filename}`}
+                      sandbox="allow-same-origin"
+                      className="h-full min-h-[60vh] w-full border-none"
+                      onLoad={() => setPdfLoading(false)}
+                      onError={() => {
+                        setPdfLoading(false);
+                        setPdfError(true);
+                      }}
+                    />
+                  )}
+                </div>
+              )}
 
-            {isHtml && htmlTooLarge && (
-              <div className="flex flex-col items-center justify-center gap-3 p-8 text-center">
-                <AlertTriangle size={32} className="text-warning" />
-                <p className="text-sm text-fg-muted">
-                  This file is too large to preview. Download it to view the contents.
-                </p>
-                <button
-                  type="button"
-                  onClick={onDownload}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-border-default bg-transparent text-fg-primary cursor-pointer hover:bg-surface-hover ${FOCUS_RING}`}
-                >
-                  <Download size={14} />
-                  Download
-                </button>
-              </div>
-            )}
-
-            {isHtml &&
-              !htmlTooLarge &&
-              (htmlViewMode === 'preview' ? (
-                <InteractiveHtmlPreview file={file} />
-              ) : (
-                <div className="min-h-0 flex-1 overflow-auto bg-surface-inset p-4">
-                  {htmlSourceLoading && htmlSource === null && (
+              {isMarkdown && (
+                <>
+                  {mdLoading && (
                     <div className="flex items-center justify-center py-12">
                       <Spinner size="md" />
                     </div>
                   )}
-                  {htmlSourceError && htmlSource === null && (
-                    <p role="alert" className="text-sm text-fg-muted">
-                      Unable to load the HTML source. Try downloading the file instead.
-                    </p>
+                  {mdError && (
+                    <div className="flex flex-col items-center justify-center gap-3 p-8 text-center">
+                      <AlertTriangle size={32} className="text-warning" />
+                      <p className="text-sm text-fg-muted">
+                        Unable to load markdown preview. Try downloading the file instead.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={onDownload}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-border-default bg-transparent text-fg-primary cursor-pointer hover:bg-surface-hover ${FOCUS_RING}`}
+                      >
+                        <Download size={14} />
+                        Download
+                      </button>
+                    </div>
                   )}
-                  {htmlSource !== null && (
-                    <SyntaxHighlightedCode content={htmlSource} language="markup" />
-                  )}
+                  {mdContent !== null &&
+                    !mdLoading &&
+                    !mdError &&
+                    (mdViewMode === 'rendered' ? (
+                      <div ref={previewBodyRef} data-comment-anchor={file.id}>
+                        <RenderedMarkdown content={mdContent} />
+                      </div>
+                    ) : (
+                      <div className="overflow-auto bg-surface-inset p-4">
+                        <SyntaxHighlightedCode content={mdContent} language="markdown" />
+                      </div>
+                    ))}
+                </>
+              )}
+
+              {isHtml && htmlTooLarge && (
+                <div className="flex flex-col items-center justify-center gap-3 p-8 text-center">
+                  <AlertTriangle size={32} className="text-warning" />
+                  <p className="text-sm text-fg-muted">
+                    This file is too large to preview. Download it to view the contents.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={onDownload}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-border-default bg-transparent text-fg-primary cursor-pointer hover:bg-surface-hover ${FOCUS_RING}`}
+                  >
+                    <Download size={14} />
+                    Download
+                  </button>
                 </div>
-              ))}
+              )}
+
+              {isHtml &&
+                !htmlTooLarge &&
+                (htmlViewMode === 'preview' ? (
+                  <InteractiveHtmlPreview file={file} />
+                ) : (
+                  <div className="min-h-0 flex-1 overflow-auto bg-surface-inset p-4">
+                    {htmlSourceLoading && htmlSource === null && (
+                      <div className="flex items-center justify-center py-12">
+                        <Spinner size="md" />
+                      </div>
+                    )}
+                    {htmlSourceError && htmlSource === null && (
+                      <p role="alert" className="text-sm text-fg-muted">
+                        Unable to load the HTML source. Try downloading the file instead.
+                      </p>
+                    )}
+                    {htmlSource !== null && (
+                      <SyntaxHighlightedCode content={htmlSource} language="markup" />
+                    )}
+                  </div>
+                ))}
+            </div>
+
+            {/* Comment panel — side panel on desktop, overlay on mobile */}
+            {commentsOpen && (
+              <div
+                className="absolute inset-y-0 right-0 w-full border-l border-border-default sm:relative sm:w-80 lg:w-96"
+                style={{ paddingRight: 'env(safe-area-inset-right)' }}
+              >
+                <FileCommentPanel
+                  projectId={projectId}
+                  fileId={file.id}
+                  pendingQuote={pendingQuote}
+                  onClearPendingQuote={() => setPendingQuote(null)}
+                  onClose={() => {
+                    setPendingQuote(null);
+                    setCommentsOpen(false);
+                  }}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {selection &&
+        (coarsePointer ? (
+          <SelectionActionBar
+            quote={selection.quote}
+            selectionBottom={selection.rectBottom}
+            onComment={startQuotedComment}
+            onDismiss={() => {
+              clearSelection();
+              window.getSelection()?.removeAllRanges();
+            }}
+          />
+        ) : (
+          <SelectionPopover x={selection.x} y={selection.y} onComment={startQuotedComment} />
+        ))}
     </div>,
     document.body
   );

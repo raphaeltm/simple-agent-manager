@@ -1,8 +1,16 @@
-import { DEFAULT_CHAT_SESSION_MESSAGE_LIMIT } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+  isTaskExecutionStep,
+  type TaskExecutionStep,
+} from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } from '../lib/api';
 import { getChatSession } from '../lib/api';
+import {
+  mapBackendMessageCommentThread,
+  type MessageCommentRealtimeEvent,
+} from '../lib/api/comments';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 
 export type ChatConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
@@ -23,13 +31,33 @@ interface UseChatWebSocketOptions {
   /** Called when the session is stopped server-side. */
   onSessionStopped: () => void;
   /** Called when we catch up with missed messages after reconnect. */
-  onCatchUp: (messages: ChatMessageResponse[], session: ChatSessionResponse, state?: SessionStateSnapshot | null) => void;
+  onCatchUp: (
+    messages: ChatMessageResponse[],
+    session: ChatSessionResponse,
+    state?: SessionStateSnapshot | null
+  ) => void;
   /** Called when the agent completes on the session. */
   onAgentCompleted?: (agentCompletedAt: number) => void;
   /** Called when a session.activity event arrives (prompting/idle). */
-  onAgentActivity?: (activity: 'prompting' | 'idle' | 'recovering' | 'error', promptStartedAt?: number | null) => void;
+  onAgentActivity?: (
+    activity: 'prompting' | 'idle' | 'recovering' | 'error',
+    promptStartedAt?: number | null
+  ) => void;
   /** Called when the session metadata changes server-side. */
   onSessionUpdated?: (updates: Partial<Pick<ChatSessionResponse, 'topic' | 'workspaceId'>>) => void;
+  /**
+   * Called when the replacement TaskRunner waking this sleeping session advances a
+   * phase. Pushed so the wake banner updates without waiting for the fallback poll.
+   */
+  onWakeProgress?: (progress: WakeProgressUpdate) => void;
+  /** Called for server-authoritative message-comment events carried over the session socket. */
+  onCommentEvent?: (event: MessageCommentRealtimeEvent) => void;
+}
+
+/** Live wake phase delta broadcast by the ProjectData DO (`session.wake_progress`). */
+export interface WakeProgressUpdate {
+  recoveryStatus: 'waking' | 'restored' | 'failed';
+  wakePhase: TaskExecutionStep | null;
 }
 
 export interface UseChatWebSocketReturn {
@@ -54,6 +82,8 @@ export function useChatWebSocket({
   onAgentCompleted,
   onAgentActivity,
   onSessionUpdated,
+  onWakeProgress,
+  onCommentEvent,
 }: UseChatWebSocketOptions): UseChatWebSocketReturn {
   const [connectionState, setConnectionState] = useState<ChatConnectionState>('disconnected');
 
@@ -72,12 +102,16 @@ export function useChatWebSocket({
   const onAgentCompletedRef = useRef(onAgentCompleted);
   const onAgentActivityRef = useRef(onAgentActivity);
   const onSessionUpdatedRef = useRef(onSessionUpdated);
+  const onWakeProgressRef = useRef(onWakeProgress);
+  const onCommentEventRef = useRef(onCommentEvent);
   onMessageRef.current = onMessage;
   onSessionStoppedRef.current = onSessionStopped;
   onCatchUpRef.current = onCatchUp;
   onAgentCompletedRef.current = onAgentCompleted;
   onAgentActivityRef.current = onAgentActivity;
   onSessionUpdatedRef.current = onSessionUpdated;
+  onWakeProgressRef.current = onWakeProgress;
+  onCommentEventRef.current = onCommentEvent;
 
   const getReconnectDelay = useCallback((attempt: number) => {
     return Math.min(BASE_RECONNECT_DELAY * Math.pow(2, attempt), MAX_RECONNECT_DELAY);
@@ -113,7 +147,9 @@ export function useChatWebSocket({
     }
 
     const API_URL = import.meta.env.VITE_API_URL || '';
-    const wsUrl = API_URL.replace(/^http/, 'ws') + `/api/projects/${projectId}/sessions/ws?sessionId=${encodeURIComponent(sessionId)}`;
+    const wsUrl =
+      API_URL.replace(/^http/, 'ws') +
+      `/api/projects/${projectId}/sessions/ws?sessionId=${encodeURIComponent(sessionId)}`;
 
     try {
       const ws = new WebSocket(wsUrl);
@@ -209,13 +245,54 @@ export function useChatWebSocket({
             const p = payload;
             if (p.sessionId !== sessionId) return;
             if (
-              p.activity === 'prompting'
-              || p.activity === 'idle'
-              || p.activity === 'recovering'
-              || p.activity === 'error'
+              p.activity === 'prompting' ||
+              p.activity === 'idle' ||
+              p.activity === 'recovering' ||
+              p.activity === 'error'
             ) {
               onAgentActivityRef.current?.(p.activity, p.promptStartedAt ?? null);
             }
+          } else if (data.type === 'session.wake_progress') {
+            const p = payload;
+            if (p.sessionId !== sessionId) return;
+            if (
+              p.recoveryStatus === 'waking' ||
+              p.recoveryStatus === 'restored' ||
+              p.recoveryStatus === 'failed'
+            ) {
+              onWakeProgressRef.current?.({
+                recoveryStatus: p.recoveryStatus,
+                // An unknown/absent step is normal early in a wake — the runner has
+                // been claimed but has not written its first execution step yet.
+                wakePhase: isTaskExecutionStep(p.wakePhase) ? p.wakePhase : null,
+              });
+            }
+          } else if (data.type === 'comment.thread.changed') {
+            const p = payload;
+            if (p.sessionId !== sessionId || !p.thread) return;
+            const type =
+              p.reason === 'reply_created'
+                ? 'comment.reply.created'
+                : p.reason === 'thread_created'
+                  ? 'comment.thread.created'
+                  : 'comment.thread.updated';
+            onCommentEventRef.current?.({
+              type,
+              payload: {
+                projectId,
+                sessionId: p.sessionId,
+                comment: mapBackendMessageCommentThread(projectId, p.thread),
+              },
+            } as MessageCommentRealtimeEvent);
+          } else if (
+            data.type === 'comment.thread.created' ||
+            data.type === 'comment.thread.updated' ||
+            data.type === 'comment.reply.created'
+          ) {
+            onCommentEventRef.current?.({
+              type: data.type,
+              payload,
+            } as MessageCommentRealtimeEvent);
           }
         } catch {
           // Ignore malformed messages

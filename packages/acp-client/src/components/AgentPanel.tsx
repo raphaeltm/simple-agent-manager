@@ -1,4 +1,11 @@
-import React, { useCallback, useEffect, useImperativeHandle,useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { getErrorMeta } from '../errors';
@@ -19,7 +26,7 @@ import { StickyPlanButton } from './StickyPlanButton';
 import { ThinkingBlock } from './ThinkingBlock';
 import { ToolCallCard } from './ToolCallCard';
 import { UsageIndicator } from './UsageIndicator';
-import { VoiceButton } from './VoiceButton';
+import { appendDictatedText, VoiceButton } from './VoiceButton';
 
 // =============================================================================
 // Client-side commands (not forwarded to agent)
@@ -60,7 +67,10 @@ interface AgentPanelProps {
   /** Permission mode options for the settings panel */
   permissionModes?: { value: string; label: string }[];
   /** Called when user saves settings from the in-chat panel */
-  onSaveSettings?: (data: { model?: string | null; permissionMode?: string | null }) => Promise<void>;
+  onSaveSettings?: (data: {
+    model?: string | null;
+    permissionMode?: string | null;
+  }) => Promise<void>;
   /** Optional callback for reporting client-side errors to telemetry */
   onError?: (info: { message: string; source: string; context?: Record<string, unknown> }) => void;
 }
@@ -69,21 +79,24 @@ interface AgentPanelProps {
  * Main conversation container for structured agent interaction.
  * Renders message list, prompt input, slash command palette, voice button, and usage indicator.
  */
-export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(function AgentPanel({
-  session,
-  messages,
-  availableCommands = [],
-  modes,
-  currentMode,
-  onSelectMode,
-  transcribeApiUrl,
-  ttsApiUrl,
-  agentSettings,
-  agentSettingsLoading,
-  permissionModes,
-  onSaveSettings,
-  onError,
-}, ref) {
+export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(function AgentPanel(
+  {
+    session,
+    messages,
+    availableCommands = [],
+    modes,
+    currentMode,
+    onSelectMode,
+    transcribeApiUrl,
+    ttsApiUrl,
+    agentSettings,
+    agentSettingsLoading,
+    permissionModes,
+    onSaveSettings,
+    onError,
+  },
+  ref
+) {
   const [input, setInput] = useState('');
   const [showPalette, setShowPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -232,10 +245,7 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
 
   // Handle voice transcription — append transcribed text to current input
   const handleTranscription = useCallback((text: string) => {
-    setInput((prev) => {
-      const separator = prev.length > 0 && !prev.endsWith(' ') ? ' ' : '';
-      return prev + separator + text;
-    });
+    setInput((prev) => appendDictatedText(prev, text));
     // Focus the input after transcription so user can review/edit
     inputRef.current?.focus();
   }, []);
@@ -270,12 +280,21 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
       {/* Mode selector toolbar */}
       {modes && modes.length > 0 && onSelectMode && (
         <div className="border-b border-gray-200 bg-white px-4 py-2">
-          <ModeSelector modes={modes} currentMode={currentMode ?? null} onSelectMode={onSelectMode} />
+          <ModeSelector
+            modes={modes}
+            currentMode={currentMode ?? null}
+            onSelectMode={onSelectMode}
+          />
         </div>
       )}
 
       {/* Message area — virtualized for performance */}
-      <div className="relative flex-1 min-h-0" role="log" aria-live="polite" aria-label="Conversation">
+      <div
+        className="relative flex-1 min-h-0"
+        role="log"
+        aria-live="polite"
+        aria-label="Conversation"
+      >
         {messages.items.length === 0 && !isReconnecting ? (
           <div className="flex items-center justify-center h-full text-gray-400 text-sm">
             Send a message to start the conversation
@@ -286,7 +305,7 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
             style={{ height: '100%' }}
             data={messages.items}
             initialTopMostItemIndex={messages.items.length - 1}
-            followOutput={(atBottom: boolean) => atBottom ? 'smooth' : false}
+            followOutput={(atBottom: boolean) => (atBottom ? 'smooth' : false)}
             alignToBottom
             atBottomThreshold={50}
             atBottomStateChange={setIsAtBottom}
@@ -302,12 +321,23 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
         {!isAtBottom && messages.items.length > 0 && (
           <button
             type="button"
-            onClick={() => virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'smooth' })}
+            onClick={() =>
+              virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'smooth' })
+            }
             className="absolute bottom-3 right-5 z-10 w-11 h-11 flex items-center justify-center rounded-full bg-white border border-gray-300 shadow-md text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors"
             aria-label="Scroll to bottom"
             title="Scroll to bottom"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <polyline points="6 9 12 15 18 9" />
             </svg>
           </button>
@@ -341,7 +371,17 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
               aria-label="Agent settings"
               title="Agent settings"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="flex-shrink-0"
+              >
                 <circle cx="12" cy="12" r="3" />
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
               </svg>
@@ -351,12 +391,18 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
           {/* Plan button */}
           <StickyPlanButton plan={currentPlan} onClick={() => setShowPlanModal(true)} />
           {currentPlan && (
-            <PlanModal plan={currentPlan} isOpen={showPlanModal} onClose={() => setShowPlanModal(false)} />
+            <PlanModal
+              plan={currentPlan}
+              isOpen={showPlanModal}
+              onClose={() => setShowPlanModal(false)}
+            />
           )}
           {/* Cancel button — always visible so user can force-cancel unreported activity */}
           <button
             type="button"
-            onClick={() => session.sendMessage({ jsonrpc: '2.0', method: 'session/cancel', params: {} })}
+            onClick={() =>
+              session.sendMessage({ jsonrpc: '2.0', method: 'session/cancel', params: {} })
+            }
             className={`ml-auto flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${
               isPrompting
                 ? 'border-red-300 bg-red-50 text-red-600 hover:bg-red-100'
@@ -365,7 +411,17 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
             aria-label="Cancel agent"
             title="Send cancel signal to agent"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="flex-shrink-0"
+            >
               <circle cx="12" cy="12" r="10" />
               <line x1="15" y1="9" x2="9" y2="15" />
               <line x1="9" y1="9" x2="15" y2="15" />
@@ -383,33 +439,33 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
           visible={showPalette}
         />
         <form onSubmit={handleSubmit} className="flex items-end space-x-2">
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={placeholderText}
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholderText}
+            disabled={session.state !== 'ready'}
+            rows={1}
+            className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm resize-none focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+          />
+          {transcribeApiUrl && (
+            <VoiceButton
+              onTranscription={handleTranscription}
               disabled={session.state !== 'ready'}
-              rows={1}
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm resize-none focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+              apiUrl={transcribeApiUrl}
+              onError={onError}
             />
-            {transcribeApiUrl && (
-              <VoiceButton
-                onTranscription={handleTranscription}
-                disabled={session.state !== 'ready'}
-                apiUrl={transcribeApiUrl}
-                onError={onError}
-              />
-            )}
-            <button
-              type="submit"
-              disabled={!canSend}
-              className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ minHeight: 44 }}
-            >
-              Send
-            </button>
-          </form>
+          )}
+          <button
+            type="submit"
+            disabled={!canSend}
+            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ minHeight: 44 }}
+          >
+            Send
+          </button>
+        </form>
         {/* Usage indicator */}
         <div className="mt-2 flex justify-end">
           <UsageIndicator usage={messages.usage} />
@@ -427,18 +483,26 @@ function ErrorBanner({ session }: { session: AcpSessionHandle }) {
   const severity = meta?.severity ?? 'recoverable';
 
   // Show the raw error if it provides more detail than the generic userMessage
-  const detailedError = session.error && session.error !== userMessage && session.error !== meta?.userMessage
-    ? session.error
-    : null;
+  const detailedError =
+    session.error && session.error !== userMessage && session.error !== meta?.userMessage
+      ? session.error
+      : null;
 
   // Color scheme based on severity
-  const colors = severity === 'fatal'
-    ? { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', hint: 'text-red-600' }
-    : severity === 'transient'
-      ? { bg: 'bg-yellow-50', border: 'border-yellow-200', text: 'text-yellow-800', hint: 'text-yellow-600' }
-      : { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', hint: 'text-red-600' };
+  const colors =
+    severity === 'fatal'
+      ? { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', hint: 'text-red-600' }
+      : severity === 'transient'
+        ? {
+            bg: 'bg-yellow-50',
+            border: 'border-yellow-200',
+            text: 'text-yellow-800',
+            hint: 'text-yellow-600',
+          }
+        : { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', hint: 'text-red-600' };
 
-  const showReconnect = severity !== 'fatal' && severity !== 'transient' && session.errorCode !== 'NETWORK_OFFLINE';
+  const showReconnect =
+    severity !== 'fatal' && severity !== 'transient' && session.errorCode !== 'NETWORK_OFFLINE';
 
   return (
     <div className={`${colors.bg} border-b ${colors.border} px-4 py-2 text-sm text-center`}>
@@ -456,11 +520,14 @@ function ErrorBanner({ session }: { session: AcpSessionHandle }) {
         )}
       </div>
       {detailedError && (
-        <p className={`text-xs mt-0.5 ${colors.hint} truncate max-w-lg mx-auto`} title={detailedError}>{detailedError}</p>
+        <p
+          className={`text-xs mt-0.5 ${colors.hint} truncate max-w-lg mx-auto`}
+          title={detailedError}
+        >
+          {detailedError}
+        </p>
       )}
-      {suggestedAction && (
-        <p className={`text-xs mt-1 ${colors.hint}`}>{suggestedAction}</p>
-      )}
+      {suggestedAction && <p className={`text-xs mt-1 ${colors.hint}`}>{suggestedAction}</p>}
     </div>
   );
 }
@@ -472,12 +539,27 @@ function ErrorBanner({ session }: { session: AcpSessionHandle }) {
  * state toggles, palette visibility) don't cascade into every conversation
  * item. Only re-renders when the item object itself changes.
  */
-const ConversationItemView = React.memo(function ConversationItemView({ item, ttsApiUrl }: { item: ConversationItem; ttsApiUrl?: string }) {
+const ConversationItemView = React.memo(function ConversationItemView({
+  item,
+  ttsApiUrl,
+}: {
+  item: ConversationItem;
+  ttsApiUrl?: string;
+}) {
   switch (item.kind) {
     case 'user_message':
       return <MessageBubble text={item.text} role="user" />;
     case 'agent_message':
-      return <MessageBubble text={item.text} role="agent" streaming={item.streaming} timestamp={item.timestamp} ttsApiUrl={ttsApiUrl} ttsStorageId={item.id} />;
+      return (
+        <MessageBubble
+          text={item.text}
+          role="agent"
+          streaming={item.streaming}
+          timestamp={item.timestamp}
+          ttsApiUrl={ttsApiUrl}
+          ttsStorageId={item.id}
+        />
+      );
     case 'thinking':
       return <ThinkingBlock text={item.text} active={item.active} />;
     case 'tool_call':
@@ -498,7 +580,12 @@ const ConversationItemView = React.memo(function ConversationItemView({ item, tt
 // =============================================================================
 
 function exportConversationAsMarkdown(items: ConversationItem[]): string {
-  const lines: string[] = ['# Conversation Export', '', `Exported: ${new Date().toISOString()}`, ''];
+  const lines: string[] = [
+    '# Conversation Export',
+    '',
+    `Exported: ${new Date().toISOString()}`,
+    '',
+  ];
 
   for (const item of items) {
     switch (item.kind) {

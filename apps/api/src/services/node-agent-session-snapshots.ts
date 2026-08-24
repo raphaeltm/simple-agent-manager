@@ -1,6 +1,10 @@
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { getNodeAgentBackgroundRequestTimeoutMs, nodeAgentRequest } from './node-agent';
+import {
+  getNodeAgentBackgroundRequestTimeoutMs,
+  type GuardedNodeAgentMutationOptions,
+  nodeAgentRequest,
+} from './node-agent';
 
 export const DEFAULT_SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -25,7 +29,8 @@ function requestSessionSnapshot(
   sessionId: string,
   env: Env,
   userId: string,
-  input: SessionSnapshotRequest
+  input: SessionSnapshotRequest,
+  options?: GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
   return nodeAgentRequest(
     nodeId,
@@ -35,6 +40,8 @@ function requestSessionSnapshot(
       method: 'POST',
       userId,
       workspaceId,
+      sourceTaskGuard: options?.sourceTaskGuard,
+      beforeExternalMutation: options?.beforeExternalMutation,
       requestTimeoutMs: input.background
         ? getNodeAgentBackgroundRequestTimeoutMs(env)
         : getSessionSnapshotRequestTimeoutMs(env),
@@ -60,7 +67,17 @@ export function restoreAgentSessionOnNode(
   sessionId: string,
   env: Env,
   userId: string,
-  input: SessionSnapshotRequest
+  input: SessionSnapshotRequest,
+  options?: GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
-  return requestSessionSnapshot('restore', nodeId, workspaceId, sessionId, env, userId, input);
+  return requestSessionSnapshot(
+    'restore',
+    nodeId,
+    workspaceId,
+    sessionId,
+    env,
+    userId,
+    input,
+    options
+  );
 }

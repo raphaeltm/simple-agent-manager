@@ -45,22 +45,10 @@ jobs:
 
       - name: Resolve Marketing Site Project
         id: names
-        run: |
-          EXPLICIT="${{ vars.RESOURCE_PREFIX }}"
-          if [ -n "$EXPLICIT" ]; then
-            PREFIX="$EXPLICIT"
-          else
-            DOMAIN="${{ vars.BASE_DOMAIN }}"
-            if [ -z "$DOMAIN" ]; then
-              echo "::error::BASE_DOMAIN is required when RESOURCE_PREFIX is not set."
-              exit 1
-            fi
-            HASH=$(echo -n "$DOMAIN" | sha256sum | cut -c1-6)
-            PREFIX="s${HASH}"
-          fi
-
-          echo "pages_project=${PREFIX}-www" >> "$GITHUB_OUTPUT"
-          echo "www_domain=www.${{ vars.BASE_DOMAIN }}" >> "$GITHUB_OUTPUT"
+        env:
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX }}
+        run: node scripts/deploy/workflow-resource-names.mjs marketing
 
       - name: Build marketing site
         run: pnpm --filter @simple-agent-manager/www build
@@ -68,21 +56,21 @@ jobs:
           SITE_URL: https://${{ steps.names.outputs.www_domain }}
 
       - name: Deploy to Cloudflare Pages
-        run: pnpm --filter @simple-agent-manager/www exec wrangler pages deploy dist --project-name=${{ steps.names.outputs.pages_project }} --commit-dirty=true
+        run: pnpm --filter @simple-agent-manager/www exec wrangler pages deploy dist --project-name="$PAGES_PROJECT" --commit-dirty=true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          PAGES_PROJECT: ${{ steps.names.outputs.pages_project }}
 
       - name: Write Job Summary
         if: always()
         run: |
-          WWW_DOMAIN="${{ steps.names.outputs.www_domain }}"
-          if [ "${{ job.status }}" = "success" ]; then
+          if [ "$DEPLOY_JOB_STATUS" = "success" ]; then
             echo "## Marketing Site Deployed" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
             echo "**URL:** https://${WWW_DOMAIN}" >> "$GITHUB_STEP_SUMMARY"
-            echo "**Pages URL:** https://${{ steps.names.outputs.pages_project }}.pages.dev" >> "$GITHUB_STEP_SUMMARY"
-            echo "**Commit:** \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Pages URL:** https://${PAGES_PROJECT}.pages.dev" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Commit:** \`$DEPLOY_COMMIT\`" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "## Marketing Site Deployment Failed" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -92,3 +80,8 @@ jobs:
             echo "- Ensure infrastructure is provisioned (run the **Provision Marketing Site Infrastructure** workflow)" >> "$GITHUB_STEP_SUMMARY"
             echo "- Verify \`CF_API_TOKEN\` and \`CF_ACCOUNT_ID\` secrets are set" >> "$GITHUB_STEP_SUMMARY"
           fi
+        env:
+          DEPLOY_JOB_STATUS: ${{ job.status }}
+          DEPLOY_COMMIT: ${{ github.sha }}
+          WWW_DOMAIN: ${{ steps.names.outputs.www_domain }}
+          PAGES_PROJECT: ${{ steps.names.outputs.pages_project }}

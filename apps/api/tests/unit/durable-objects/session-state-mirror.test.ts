@@ -28,6 +28,16 @@ describe('Session State Mirror — vertical slice', () => {
   });
 
   describe('Activity report → persistence → retrieval', () => {
+    it('parses positive stale thresholds and falls back for invalid values', () => {
+      expect(sessionState.parseActivityStaleThreshold('1234')).toBe(1234);
+      expect(sessionState.parseActivityStaleThreshold('0')).toBe(
+        sessionState.DEFAULT_SESSION_ACTIVITY_STALE_THRESHOLD_MS
+      );
+      expect(sessionState.parseActivityStaleThreshold(undefined)).toBe(
+        sessionState.DEFAULT_SESSION_ACTIVITY_STALE_THRESHOLD_MS
+      );
+    });
+
     it('persists prompting activity and returns it via getSessionState', () => {
       const promptTime = Date.now() - 5000;
 
@@ -61,6 +71,121 @@ describe('Session State Mirror — vertical slice', () => {
 
       const state = sessionState.getSessionState(sql, 'sess-1');
       expect(state!.activity).toBe('idle');
+    });
+
+    it('persists normalized harness work without retaining raw lifecycle data', () => {
+      sessionState.upsertActivityState(sql, 'sess-runtime-work', {
+        activity: 'idle',
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 2,
+        runtimeWorkSource: 'claude_sdk',
+        runtimeWorkProgressAt: 900,
+        now: 1_000,
+      });
+
+      expect(sessionState.getSessionState(sql, 'sess-runtime-work')).toMatchObject({
+        activity: 'idle',
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 2,
+        runtimeWorkSource: 'claude_sdk',
+        runtimeWorkUpdatedAt: 1_000,
+        runtimeWorkProgressAt: 900,
+      });
+      const columns = sql
+        .exec('PRAGMA table_info(session_state)')
+        .toArray()
+        .map((row) => row.name);
+      expect(columns).not.toContain('runtime_work_payload');
+      expect(columns).not.toContain('runtime_work_description');
+    });
+
+    it('preserves runtime work across reports from older VM agents and clears it explicitly', () => {
+      sessionState.upsertActivityState(sql, 'sess-runtime-compatible', {
+        activity: 'idle',
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 1,
+        runtimeWorkSource: 'claude_sdk',
+        runtimeWorkProgressAt: 900,
+        now: 1_000,
+      });
+      sessionState.upsertActivityState(sql, 'sess-runtime-compatible', {
+        activity: 'idle',
+        now: 2_000,
+      });
+      expect(sessionState.getSessionState(sql, 'sess-runtime-compatible')).toMatchObject({
+        runtimeWorkState: 'active',
+        runtimeWorkUpdatedAt: 1_000,
+      });
+
+      sessionState.upsertActivityState(sql, 'sess-runtime-compatible', {
+        activity: 'idle',
+        runtimeWorkState: 'inactive',
+        runtimeWorkCount: 0,
+        runtimeWorkSource: 'claude_sdk',
+        runtimeWorkProgressAt: 2_900,
+        now: 3_000,
+      });
+      expect(sessionState.getSessionState(sql, 'sess-runtime-compatible')).toMatchObject({
+        runtimeWorkState: 'inactive',
+        runtimeWorkCount: 0,
+        runtimeWorkUpdatedAt: 3_000,
+        runtimeWorkProgressAt: 2_900,
+      });
+    });
+
+    it('rejects a delayed older runtime-work snapshot without extending its lease', () => {
+      sessionState.upsertActivityState(sql, 'sess-runtime-ordered', {
+        activity: 'idle',
+        runtimeWorkState: 'inactive',
+        runtimeWorkCount: 0,
+        runtimeWorkSource: 'claude_sdk',
+        runtimeWorkProgressAt: 2_900,
+        now: 3_000,
+      });
+
+      // This active snapshot was captured before the inactive edge but its
+      // independent HTTP goroutine completed later.
+      sessionState.upsertActivityState(sql, 'sess-runtime-ordered', {
+        activity: 'idle',
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 1,
+        runtimeWorkSource: 'claude_sdk',
+        runtimeWorkProgressAt: 900,
+        now: 4_000,
+      });
+
+      expect(sessionState.getSessionState(sql, 'sess-runtime-ordered')).toMatchObject({
+        runtimeWorkState: 'inactive',
+        runtimeWorkCount: 0,
+        runtimeWorkUpdatedAt: 3_000,
+        runtimeWorkProgressAt: 2_900,
+      });
+    });
+
+    it('refreshes the finite lease for a same-progress active runtime-work rereport', () => {
+      sessionState.upsertActivityState(sql, 'sess-runtime-heartbeat', {
+        activity: 'idle',
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 1,
+        runtimeWorkSource: 'claude_sdk',
+        runtimeWorkProgressAt: 900,
+        now: 1_000,
+      });
+      sessionState.upsertActivityState(sql, 'sess-runtime-heartbeat', {
+        activity: 'idle',
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 1,
+        runtimeWorkSource: 'claude_sdk',
+        runtimeWorkProgressAt: 900,
+        now: 2_000,
+      });
+
+      expect(sessionState.getSessionState(sql, 'sess-runtime-heartbeat')).toMatchObject({
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 1,
+        runtimeWorkUpdatedAt: 2_000,
+        runtimeWorkProgressAt: 900,
+      });
     });
 
     it('returns null for sessions with no state row', () => {
@@ -100,6 +225,22 @@ describe('Session State Mirror — vertical slice', () => {
       expect(sessionState.markPromptAccepted(sql, 'sess-new-epoch', 3_000, 3_100)).toBe(true);
       expect(sessionState.getSessionState(sql, 'sess-new-epoch')?.promptStartedAt).toBe(3_000);
       expect(sessionState.getPromptEpoch(sql, 'sess-new-epoch')).toBe(3_000);
+    });
+
+    it('resolves ACP activity IDs to their owning chat and falls back to the input ID', () => {
+      sql.exec(
+        `INSERT INTO chat_sessions
+           (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
+         VALUES ('chat-resolve', 'workspace-resolve', 'Resolve', 'active', 0, 1000, 1000, 1000);
+
+         INSERT INTO acp_sessions
+           (id, chat_session_id, workspace_id, status, agent_type, created_at, updated_at)
+         VALUES ('acp-resolve', 'chat-resolve', 'workspace-resolve', 'running',
+                 'claude_code', 1000, 1000)`
+      );
+
+      expect(sessionState.resolveActivityChatSessionId(sql, 'acp-resolve')).toBe('chat-resolve');
+      expect(sessionState.resolveActivityChatSessionId(sql, 'chat-direct')).toBe('chat-direct');
     });
   });
 
@@ -141,6 +282,33 @@ describe('Session State Mirror — vertical slice', () => {
       expect(state).not.toBeNull();
       expect(state!.currentPlan).toBeNull();
     });
+
+    it('loads the latest persisted plan message and rejects missing or invalid snapshots', () => {
+      sql.exec(
+        `INSERT INTO chat_sessions
+           (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
+         VALUES
+           ('chat-plan', 'workspace-plan', 'Plan', 'active', 0, 1000, 1000, 1000),
+           ('chat-invalid-plan', 'workspace-invalid', 'Invalid', 'active', 0, 1000, 1000, 1000),
+           ('chat-object-plan', 'workspace-object', 'Object', 'active', 0, 1000, 1000, 1000);
+
+         INSERT INTO chat_messages
+           (id, session_id, sequence, role, content, created_at)
+         VALUES
+           ('plan-old', 'chat-plan', 1, 'plan', '[{"content":"old","status":"pending"}]', 1000),
+           ('plan-new', 'chat-plan', 2, 'plan', '[{"content":"new","status":"in_progress"}]', 2000),
+           ('plan-invalid', 'chat-invalid-plan', 1, 'plan', '{not-json', 3000),
+           ('plan-object', 'chat-object-plan', 1, 'plan', '{"content":"not-an-array"}', 4000)`
+      );
+
+      expect(sessionState.getLatestPersistedPlan(sql, 'chat-plan')).toEqual({
+        currentPlan: [{ content: 'new', status: 'in_progress' }],
+        planUpdatedAt: 2000,
+      });
+      expect(sessionState.getLatestPersistedPlan(sql, 'chat-missing-plan')).toBeNull();
+      expect(sessionState.getLatestPersistedPlan(sql, 'chat-invalid-plan')).toBeNull();
+      expect(sessionState.getLatestPersistedPlan(sql, 'chat-object-plan')).toBeNull();
+    });
   });
 
   describe('Staleness reconciliation', () => {
@@ -152,12 +320,16 @@ describe('Session State Mirror — vertical slice', () => {
       sql.exec(
         `INSERT INTO session_state (session_id, activity, activity_at, prompt_started_at, agent_type, restart_count)
          VALUES (?, 'prompting', ?, ?, 'claude-code', 0)`,
-        'stuck-sess', tenMinAgo, tenMinAgo,
+        'stuck-sess',
+        tenMinAgo,
+        tenMinAgo
       );
       sql.exec(
         `INSERT INTO session_state (session_id, activity, activity_at, prompt_started_at, agent_type, restart_count)
          VALUES (?, 'prompting', ?, ?, 'claude-code', 0)`,
-        'fresh-sess', oneMinAgo, oneMinAgo,
+        'fresh-sess',
+        oneMinAgo,
+        oneMinAgo
       );
 
       const healed = sessionState.reconcileStaleActivity(sql, 5 * 60 * 1000);
@@ -180,7 +352,8 @@ describe('Session State Mirror — vertical slice', () => {
       sql.exec(
         `INSERT INTO session_state (session_id, activity, activity_at, restart_count)
          VALUES (?, 'idle', ?, 0)`,
-        'idle-old', thirtyMinAgo,
+        'idle-old',
+        thirtyMinAgo
       );
 
       const healed = sessionState.reconcileStaleActivity(sql, 5 * 60 * 1000);
@@ -196,13 +369,13 @@ describe('Session State Mirror — vertical slice', () => {
          VALUES ('chat-1', 'ws-1', 'Topic', 'active', 0, ?, ?, ?)`,
         now,
         now,
-        now,
+        now
       );
       sql.exec(
         `INSERT INTO acp_sessions (id, chat_session_id, workspace_id, status, agent_type, created_at, updated_at)
          VALUES ('acp-1', 'chat-1', 'ws-1', 'running', 'claude_code', ?, ?)`,
         now,
-        now,
+        now
       );
       sessionState.upsertActivityState(sql, 'acp-1', { activity: 'prompting' });
       const before = sessionState.getSessionState(sql, 'acp-1')!.activityAt;
@@ -219,7 +392,7 @@ describe('Session State Mirror — vertical slice', () => {
         'chat-1',
         'assistant',
         'progress',
-        null,
+        null
       );
 
       const after = sessionState.getSessionState(sql, 'acp-1')!.activityAt;
@@ -234,13 +407,13 @@ describe('Session State Mirror — vertical slice', () => {
          VALUES ('chat-old-prompt', 'ws-old-prompt', 'Topic', 'active', 0, ?, ?, ?)`,
         oldPromptAt,
         oldPromptAt,
-        oldPromptAt,
+        oldPromptAt
       );
       sql.exec(
         `INSERT INTO acp_sessions (id, chat_session_id, workspace_id, status, agent_type, created_at, updated_at)
          VALUES ('acp-old-prompt', 'chat-old-prompt', 'ws-old-prompt', 'running', 'claude_code', ?, ?)`,
         oldPromptAt,
-        oldPromptAt,
+        oldPromptAt
       );
       sessionState.upsertActivityState(sql, 'acp-old-prompt', {
         activity: 'prompting',
@@ -248,11 +421,7 @@ describe('Session State Mirror — vertical slice', () => {
         now: oldPromptAt,
       });
 
-      sessionState.refreshWorkingActivityForChatSession(
-        sql,
-        'chat-old-prompt',
-        recentActivityAt,
-      );
+      sessionState.refreshWorkingActivityForChatSession(sql, 'chat-old-prompt', recentActivityAt);
 
       const state = sessionState.getSessionState(sql, 'acp-old-prompt');
       expect(state?.activityAt).toBe(recentActivityAt);
@@ -280,6 +449,8 @@ describe('Session State Mirror — vertical slice', () => {
       expect(state!.activity).toBe('stopped');
       expect(state!.lastStopReason).toBe('user_requested');
       expect(state!.promptStartedAt).toBeNull();
+      expect(state!.runtimeWorkState).toBe('inactive');
+      expect(state!.runtimeWorkCount).toBe(0);
       expect(sessionState.getPromptEpoch(sql, 'sess-1')).toBeNull();
     });
 

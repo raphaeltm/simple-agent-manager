@@ -30,6 +30,7 @@ import { cors } from 'hono/cors';
 import { createAuth } from './auth';
 import * as schema from './db/schema';
 import type { Env } from './env';
+import { applyCacheHeaders } from './lib/cache-headers';
 import { resolveCredentialedCorsOrigin } from './lib/cors-origin';
 import { log, serializeError } from './lib/logger';
 import { resolvePagesProxyTarget } from './lib/pages-proxy';
@@ -96,8 +97,13 @@ import {
 } from './routes/interactive-preview-host';
 import { knowledgeRoutes } from './routes/knowledge';
 import { libraryRoutes } from './routes/library';
+import { libraryCommentRoutes } from './routes/library-comments';
 import { mailboxRoutes } from './routes/mailbox';
 import { mcpRoutes } from './routes/mcp';
+import {
+  projectMcpConnectionRoutes,
+  userMcpConnectionRoutes,
+} from './routes/mcp-connections';
 import { missionRoutes } from './routes/missions';
 import { modelCatalogRoutes } from './routes/model-catalog';
 import { nodeLifecycleRoutes } from './routes/node-lifecycle';
@@ -623,12 +629,14 @@ app.get('/health', (c) => {
 
 // Public config — exposes feature flags the UI needs before auth
 app.get('/api/config/artifacts-enabled', (c) => {
+  applyCacheHeaders(c, 'public-config');
   return c.json({ enabled: c.env.ARTIFACTS_ENABLED === 'true' && !!c.env.ARTIFACTS });
 });
 
 // The VAPID public key is runtime configuration: deploy-generated keys do not
 // exist when the web bundle is built. Never expose the corresponding private key.
 app.get('/api/config/vapid-public-key', (c) => {
+  applyCacheHeaders(c, 'public-config');
   const publicKey = c.env.VAPID_PUBLIC_KEY?.trim() || null;
   return c.json({ publicKey });
 });
@@ -644,6 +652,7 @@ app.get('/api/config/login-providers', async (c) => {
     getGoogleLoginOAuthConfig(c.env),
     getGitLabOAuthConfig(c.env),
   ]);
+  applyCacheHeaders(c, 'public-config');
   return c.json({ github: github !== null, google: google !== null, gitlab: gitlab !== null });
 });
 
@@ -678,6 +687,7 @@ app.route('/api/setup', setupRoutes);
 app.route('/api/credentials', resolutionStatusRoute);
 app.route('/api/credentials', credentialsRoutes);
 app.route('/api/agent-credential-setup-sessions', agentCredentialSetupSessionsRoutes);
+app.route('/api/mcp-connections', userMcpConnectionRoutes);
 app.route('/api/cc', ccRoutes);
 app.route('/api/providers', providersRoutes);
 app.route('/api/github', githubRoutes);
@@ -723,10 +733,12 @@ app.route('/api/projects/:projectId/sessions', chatRoutes);
 app.route('/api/projects/:projectId/cached-commands', cachedCommandRoutes);
 app.route('/api/projects/:projectId/activity', activityRoutes);
 app.route('/api/projects/:projectId/library', libraryRoutes);
+app.route('/api/projects/:projectId/library', libraryCommentRoutes);
 app.route('/api/projects/:projectId/agent-profiles/:profileId/runtime', profileRuntimeRoutes);
 app.route('/api/projects/:projectId/agent-profiles', agentProfileRoutes);
 app.route('/api/projects/:projectId/skills/:skillId/runtime', skillRuntimeRoutes);
 app.route('/api/projects/:projectId/skills', skillRoutes);
+app.route('/api/projects/:projectId/mcp-connections', projectMcpConnectionRoutes);
 app.route('/api/projects/:projectId/triggers', triggersRoutes);
 app.route('/api/projects/:projectId/knowledge', knowledgeRoutes);
 app.route('/api/projects/:projectId/mailbox', mailboxRoutes);

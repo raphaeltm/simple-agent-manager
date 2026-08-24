@@ -95,7 +95,7 @@ Ask: "What test, if it existed before the breaking change was introduced, would 
 - **If the bug involves cancellation through a timeout, retry, poll, or multi-step resource boundary**, the regression must prove the caller signal is composed with (not replaced by) internal timeouts, the exact caller reason survives provider-specific error handling, listeners/timers are cleaned up, and no later retry, poll, cleanup, cache write, or resource mutation starts after cancellation. Include a cancellation reason shaped like an otherwise retryable or idempotent domain error so classification catches cannot swallow it.
 - **If the bug involves streamed UI data that is later reconstructed from durable storage**, write a parity regression test for the persisted representation, not only the live stream. The test MUST include a partial/status-only update event and assert omitted fields do not clear previously visible metadata. See the retained incident lesson in this rule.
 - **If the bug involves lifecycle control across a runtime boundary** (agent/session/workspace/node stop, cancel, retry, replacement, suspend, or resume), the regression test MUST assert the runtime command is invoked before accepting the terminal state or dispatching replacement work. Database state changes and successful JSON responses are insufficient; the test must prove the external agent/node/workspace control side effect.
-- **If runtime liveness is represented in more than one control plane** (for example D1, a session Durable Object, and a runtime Durable Object), timeout and cleanup tests MUST cross those boundaries with deliberately stale secondary state. A heartbeat timeout or sweep may terminalize work only after the runtime owner reports a conclusively terminal lifecycle; sleep, wake, restore, replacement, probe failure, and unknown state are inconclusive. Use one shared lifecycle classifier for every cleanup path so a stale replica cannot strand recoverable work.
+- **If runtime liveness is represented in more than one control plane** (for example D1, a session Durable Object, and a runtime Durable Object), timeout and cleanup tests MUST cross those boundaries with deliberately stale secondary state. A heartbeat timeout or sweep may terminalize work only after the runtime owner reports a conclusively terminal lifecycle; sleep, wake, restore, replacement, probe failure, and unknown state are inconclusive. Use one shared lifecycle classifier for every cleanup path so a stale replica cannot strand recoverable work. A shared classifier is necessary but NOT sufficient: it must also derive its verdict from the record the recovery path actually reads, or it will confidently declare restorable work dead while every cleanup path agrees with it. See `.claude/rules/58-terminal-verdicts-must-match-the-resumer.md`.
 - **Inactivity is never successful completion evidence.** An idle, timeout, or cleanup sweep MUST NOT write `completed`; success requires an explicit successful task/runtime transition. If a shared liveness classifier proves the runtime conclusively dead, the sweep may write `failed` only with diagnostic context, a system `task_status_events` row, and failed trigger-execution synchronization. Gate workspace deletion on that same conclusive-death result; live and inconclusive tasks and workspaces remain intact.
 - **If the bug involves shell or process execution lifecycle** (process groups, child processes, cancellation, timeout, or cleanup after command completion), the regression test MUST cover the success path as well as failure/cancellation paths and prove spawned children are not left alive after the tool or command returns.
 - **If the bug involves a utility LLM call through a provider-compatible API**, the regression test MUST assert the exact provider payload controls that make the response contract reliable, not just the returned parsed text. For reasoning-capable models, this includes any explicit thinking/reasoning-disable parameters or response-format controls required for the utility to receive text in the field it reads.
@@ -154,6 +154,37 @@ Before finalizing tests, ask:
 - Would a developer introducing the original regression have seen a red CI from these tests? If not, the tests aren't defensive enough.
 
 For exported helpers that return canonical domain types, include at least one direct malformed-domain test when the codebase separates structural validation from semantic validation. A resolver, converter, or parser success result must prove the canonical validation helper ran, not just the lower-level schema parser.
+
+### A Green Test Count Is Not A Green Suite
+
+A test file that fails to **load** contributes zero assertions. Any check that counts
+only assertion-level failures therefore reports a collection error — a bad import path, a
+syntax error, a missing mock module — as success. The absence of failures and the absence
+of tests are indistinguishable if you only look at the failure count.
+
+This is the `.claude/rules/53` "silence is not success" failure mode applied to test
+reporting, and it is easy to hit: on 2026-08-19 a full `apps/web` run reported
+`0 failed` while **15 test files were failing to import**. It was caught only by
+reconciling the total against a known baseline (3176 vs 3246) and asking where 70 tests
+had gone.
+
+When you report a test result — in a PR, a task file, or to a human — you MUST:
+
+1. **Reconcile the total against a known expected count.** A baseline run on the merge
+   base, or the previous run on the same branch. A total that went DOWN while you added
+   tests is a red flag, not a rounding error. State the numbers.
+2. **Check per-file collection status, not just assertion status.** With
+   `--reporter=json`, a file that failed to load appears with `status: "failed"` and an
+   empty `assertionResults` array. Assert that no such file exists.
+3. **Never take an exit code through a pipe.** `vitest … | tail` yields `tail`'s status,
+   which is essentially always 0. Redirect to a file and read `$?` from the unpiped
+   command, or use the JSON reporter's own `success` field.
+4. **Never trust a truncated run as a baseline.** If a run terminates early its totals
+   are meaningless; compare file counts before comparing failure counts.
+
+The same applies to any other tool whose "pass" is expressed as an absence: linters
+invoked on a path that matched no files, coverage gates over an empty file set, and
+schema checks that skip when the input is unparseable.
 
 ### Unconditional Account-Denial Gates
 
@@ -222,6 +253,8 @@ Run local subagents **in parallel** covering each language and discipline touche
 | Documentation changes                                | `doc-sync-validator` — docs match code reality                                                                    |
 | Business logic, config                               | `constitution-validator` — no hardcoded values                                                                    |
 | Tests added/changed                                  | `test-engineer` — coverage, realism, TDD compliance                                                               |
+| New helpers, hooks, services, or abstractions        | `architecture-reviewer` — duplicated functionality, pattern reuse, system awareness (see `59-understand-before-adding.md`) |
+| API middleware, hot routes, data-fetching hooks       | `performance-reviewer` — D1/DO round-trip counts, caching, bundle size (see `60-request-io-and-bundle-budgets.md`) |
 
 ### What Reviewers Must Check
 

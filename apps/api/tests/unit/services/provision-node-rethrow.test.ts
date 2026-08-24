@@ -40,6 +40,13 @@ vi.mock('drizzle-orm/d1', () => ({
       set: (val: Record<string, unknown>) => ({
         where: () => {
           ops.push({ kind: 'update', set: val });
+          // The provider-identity persistence write lands between createVM and
+          // the terminal write and must NOT consume the barrier: the
+          // cancellation tests below target the TERMINAL write boundary.
+          // Only the terminal writes persist credential attribution, so
+          // `cloudProvider` is the discriminator (the identity write sets just
+          // providerInstanceId/ipAddress/status/updatedAt).
+          if (!('cloudProvider' in val)) return Promise.resolve();
           return updateBarrier ?? Promise.resolve();
         },
       }),
@@ -389,9 +396,16 @@ describe('provisionNode rethrowProviderError', () => {
     const provisioning = provisionNode('node-1', ENV, undefined, {
       signal: controller.signal,
     });
-    await vi.waitFor(() => expect(ops).toHaveLength(2));
+    // ops[1] is the provider-identity persistence write added alongside the
+    // recovery-authority boundary; ops[2] is the terminal write under test.
+    await vi.waitFor(() => expect(ops).toHaveLength(3));
     expect(createVM).toHaveBeenCalledTimes(1);
     expect(ops[1]).toEqual({
+      kind: 'update',
+      set: expect.objectContaining({ providerInstanceId: 'provider-vm-1', status: 'creating' }),
+    });
+    expect(ops[1].set).not.toHaveProperty('cloudProvider');
+    expect(ops[2]).toEqual({
       kind: 'update',
       set: expect.objectContaining(expectedTerminalSet),
     });
@@ -403,6 +417,42 @@ describe('provisionNode rethrowProviderError', () => {
     expect(ops.slice(operationCountAtAbort)).toEqual([]);
     expect(persistError).not.toHaveBeenCalled();
     expect(logError).not.toHaveBeenCalledWith('node_provisioning.failed', expect.anything());
+  });
+
+  it('revalidates authority immediately before paid allocation', async () => {
+    const authority = vi.fn().mockRejectedValue(new Error('source revoked'));
+
+    await expect(
+      provisionNode('node-1', ENV, undefined, {
+        rethrowProviderError: true,
+        assertExternalMutationAuthority: authority,
+      })
+    ).rejects.toThrow('source revoked');
+
+    expect(authority).toHaveBeenCalledOnce();
+    expect(createVM).not.toHaveBeenCalled();
+  });
+
+  it('persists provider identity before detecting revocation after allocation', async () => {
+    const authority = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('source revoked'));
+
+    await expect(
+      provisionNode('node-1', ENV, undefined, {
+        rethrowProviderError: true,
+        assertExternalMutationAuthority: authority,
+      })
+    ).rejects.toThrow('source revoked');
+
+    expect(createVM).toHaveBeenCalledOnce();
+    expect(ops).toContainEqual(
+      expect.objectContaining({
+        kind: 'update',
+        set: expect.objectContaining({ providerInstanceId: 'provider-vm-1' }),
+      })
+    );
   });
 
   it('deletes the failed node row and re-throws on transient capacity exhaustion', async () => {

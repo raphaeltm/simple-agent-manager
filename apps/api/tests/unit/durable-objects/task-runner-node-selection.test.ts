@@ -5,8 +5,10 @@ import type {
   TaskRunnerContext,
   TaskRunnerState,
 } from '../../../src/durable-objects/task-runner/types';
+import { SessionRecoveryAuthorityRevokedError } from '../../../src/services/session-recovery-authority';
 
 type D1ResultMap = {
+  persistedWarmClaim?: string | null;
   preferredNode?: {
     id: string;
     status: string;
@@ -33,6 +35,7 @@ type D1ResultMap = {
     agent_version?: string | null;
   }>;
   workspaceCounts?: Array<{ node_id: string; c: number }>;
+  warmWorkspaceCount?: number;
   healthByNode?: Record<
     string,
     {
@@ -52,6 +55,9 @@ function createStatement(sql: string, results: D1ResultMap) {
       return this;
     },
     first() {
+      if (sql.includes('SELECT claimed_warm_node_id FROM tasks')) {
+        return Promise.resolve({ claimed_warm_node_id: results.persistedWarmClaim ?? null });
+      }
       if (sql.includes('SELECT id, status, vm_size')) {
         return Promise.resolve(results.preferredNode ?? null);
       }
@@ -61,7 +67,13 @@ function createStatement(sql: string, results: D1ResultMap) {
       if (sql.includes('SELECT health_status, last_heartbeat_at, agent_ready_at')) {
         return Promise.resolve(results.healthByNode?.[String(bound[0])] ?? null);
       }
+      if (sql.includes('SELECT COUNT(*) as c FROM workspaces WHERE node_id = ?')) {
+        return Promise.resolve({ c: results.warmWorkspaceCount ?? 0 });
+      }
       return Promise.resolve(null);
+    },
+    run() {
+      return Promise.resolve({ meta: { changes: 1 } });
     },
     all() {
       if (sql.includes('warm_since IS NOT NULL')) {
@@ -93,8 +105,10 @@ function createContext(results: D1ResultMap): TaskRunnerContext {
     ctx: {
       storage: {
         setAlarm: vi.fn(),
+        put: vi.fn().mockResolvedValue(undefined),
       },
     },
+    assertRecoveryAuthority: vi.fn().mockResolvedValue(undefined),
     advanceToStep: vi.fn().mockResolvedValue(undefined),
     getAgentPollIntervalMs: vi.fn(() => 1000),
     getAgentReadyTimeoutMs: vi.fn(() => 1000),
@@ -163,6 +177,144 @@ function createState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState 
 }
 
 describe('TaskRunner node selection VM size minimum behavior', () => {
+  it('recovers a D1-persisted warm claim before discovering new candidates', async () => {
+    const now = new Date().toISOString();
+    const state = createState();
+    const tryClaim = vi.fn().mockResolvedValue({
+      claimed: true,
+      state: {
+        nodeId: 'warm-recovered',
+        status: 'active',
+        warmSince: null,
+        claimedByTask: state.taskId,
+      },
+    });
+    const rc = createContext({
+      persistedWarmClaim: 'warm-recovered',
+      warmNodes: [],
+      healthByNode: {
+        'warm-recovered': {
+          health_status: 'healthy',
+          last_heartbeat_at: now,
+          agent_ready_at: now,
+          agent_version: 'current-sha',
+        },
+      },
+    });
+    rc.env.NODE_LIFECYCLE = {
+      idFromName: vi.fn((id: string) => id),
+      get: vi.fn(() => ({ tryClaim, releaseClaim: vi.fn() })),
+    } as unknown as DurableObjectNamespace;
+
+    await handleNodeSelection(state, rc);
+
+    expect(tryClaim).toHaveBeenCalledWith(state.taskId, undefined);
+    expect(state.stepResults).toMatchObject({
+      nodeId: 'warm-recovered',
+      claimedWarmNodeId: 'warm-recovered',
+      autoProvisioned: false,
+    });
+    expect(rc.ctx.storage.put).toHaveBeenCalledWith('state', state);
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+  });
+
+  it('persists a warm claim locally and advances only after post-claim authority validation', async () => {
+    const now = new Date().toISOString();
+    const state = createState();
+    const tryClaim = vi.fn().mockResolvedValue({
+      claimed: true,
+      state: {
+        nodeId: 'warm-large',
+        status: 'active',
+        warmSince: null,
+        claimedByTask: state.taskId,
+      },
+    });
+    const rc = createContext({
+      warmNodes: [
+        { id: 'warm-large', vm_size: 'large', vm_location: 'fsn1', agent_version: 'current-sha' },
+      ],
+      freshWarmNode: {
+        status: 'running',
+        warm_since: now,
+        agent_version: 'current-sha',
+      },
+      healthByNode: {
+        'warm-large': {
+          health_status: 'healthy',
+          last_heartbeat_at: now,
+          agent_ready_at: now,
+          agent_version: 'current-sha',
+        },
+      },
+    });
+    rc.env.NODE_LIFECYCLE = {
+      idFromName: vi.fn((id: string) => id),
+      get: vi.fn(() => ({ tryClaim, releaseClaim: vi.fn() })),
+    } as unknown as DurableObjectNamespace;
+
+    await handleNodeSelection(state, rc);
+
+    expect(tryClaim).toHaveBeenCalledWith(state.taskId, undefined);
+    expect(rc.assertRecoveryAuthority).toHaveBeenCalledTimes(2);
+    expect(state.stepResults).toMatchObject({
+      nodeId: 'warm-large',
+      claimedWarmNodeId: 'warm-large',
+      autoProvisioned: false,
+    });
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+  });
+
+  it('releases the exact warm claim when authority is revoked after the DO mutation', async () => {
+    const state = createState({
+      config: {
+        ...createState().config,
+        recoverySourceTaskId: 'source-1',
+        resumeSnapshotChatSessionId: 'chat-1',
+      },
+    });
+    const releaseClaim = vi.fn().mockResolvedValue({
+      released: true,
+      state: { nodeId: 'warm-large', status: 'warm', warmSince: 1, claimedByTask: null },
+    });
+    const rc = createContext({
+      warmNodes: [
+        { id: 'warm-large', vm_size: 'large', vm_location: 'fsn1', agent_version: 'current-sha' },
+      ],
+      freshWarmNode: {
+        status: 'running',
+        warm_since: new Date().toISOString(),
+        agent_version: 'current-sha',
+      },
+    });
+    vi.mocked(rc.assertRecoveryAuthority)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new SessionRecoveryAuthorityRevokedError());
+    rc.env.NODE_LIFECYCLE = {
+      idFromName: vi.fn((id: string) => id),
+      get: vi.fn(() => ({
+        tryClaim: vi.fn().mockResolvedValue({
+          claimed: true,
+          state: {
+            nodeId: 'warm-large',
+            status: 'active',
+            warmSince: null,
+            claimedByTask: state.taskId,
+          },
+        }),
+        releaseClaim,
+      })),
+    } as unknown as DurableObjectNamespace;
+
+    await expect(handleNodeSelection(state, rc)).rejects.toBeInstanceOf(
+      SessionRecoveryAuthorityRevokedError
+    );
+    expect(releaseClaim).toHaveBeenCalledWith(state.taskId);
+    expect(state.stepResults.nodeId).toBeNull();
+    expect(state.stepResults.claimedWarmNodeId).toBeNull();
+    expect(rc.advanceToStep).not.toHaveBeenCalled();
+  });
+
   it('rejects an undersized preferred node before health verification', async () => {
     const state = createState({
       config: { ...createState().config, preferredNodeId: 'node-medium', vmSize: 'large' },

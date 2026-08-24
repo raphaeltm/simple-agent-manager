@@ -6,6 +6,12 @@ const mocks = vi.hoisted(() => ({
   listCredentials: vi.fn(),
 }));
 
+// `useQueryScope()` reads the authenticated identity, and every migrated query
+// is keyed by it. Without a provider `useAuth` throws, so supply a stable identity.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
+}));
+
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   listCredentials: mocks.listCredentials,
@@ -55,6 +61,7 @@ import { SettingsAgents } from '../../../src/pages/SettingsAgents';
 import { SettingsCloudProvider } from '../../../src/pages/SettingsCloudProvider';
 import { SettingsConnections } from '../../../src/pages/SettingsConnections';
 import { SettingsGitHub } from '../../../src/pages/SettingsGitHub';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 function renderSettings(path = '/settings/cloud-provider') {
   return render(
@@ -71,7 +78,7 @@ function renderSettings(path = '/settings/cloud-provider') {
         </Routes>
       </MemoryRouter>
     </ToastProvider>
-  );
+  , { wrapper: QueryTestWrapper });
 }
 
 describe('Settings shell', () => {

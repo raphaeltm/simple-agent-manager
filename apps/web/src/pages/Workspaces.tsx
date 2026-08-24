@@ -1,11 +1,13 @@
-import type { WorkspaceResponse } from '@simple-agent-manager/shared';
 import { Alert, EmptyState,PageLayout, Select, SkeletonCard, Spinner } from '@simple-agent-manager/ui';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Monitor } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { WorkspaceCard } from '../components/WorkspaceCard';
-import { deleteWorkspace,listWorkspaces, restartWorkspace, stopWorkspace } from '../lib/api';
+import { useQueryScope } from '../hooks/useQueryScope';
+import { deleteWorkspace, restartWorkspace, stopWorkspace } from '../lib/api';
+import { WORKSPACE_LIST_POLL_MS } from '../lib/poll-intervals';
+import { workspaceListQueryOptions, workspaceQueryKeys } from '../lib/query-options';
 
 const STATUS_FILTERS = [
   { value: '', label: 'All statuses' },
@@ -15,14 +17,9 @@ const STATUS_FILTERS = [
   { value: 'error', label: 'Error' },
 ];
 
-/** Stable query key factory for workspace list queries. */
-export const workspacesKeys = {
-  all: ['workspaces'] as const,
-  list: (status?: string) => ['workspaces', 'list', status ?? ''] as const,
-};
-
 export function Workspaces() {
   const queryClient = useQueryClient();
+  const queryScope = useQueryScope();
   const [statusFilter, setStatusFilter] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -32,16 +29,19 @@ export function Workspaces() {
     isFetching,
     isError,
     error: queryError,
-  } = useQuery<WorkspaceResponse[]>({
-    queryKey: workspacesKeys.list(statusFilter || undefined),
-    queryFn: () => listWorkspaces(statusFilter || undefined),
-    refetchInterval: 10_000,
+  } = useQuery({
+    ...workspaceListQueryOptions(queryScope, statusFilter || undefined),
+    enabled: Boolean(queryScope),
+    refetchInterval: WORKSPACE_LIST_POLL_MS > 0 ? WORKSPACE_LIST_POLL_MS : false,
   });
+
+  const invalidateWorkspaces = () =>
+    queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.all(queryScope) });
 
   const handleStop = async (id: string) => {
     try {
       await stopWorkspace(id);
-      void queryClient.invalidateQueries({ queryKey: workspacesKeys.all });
+      void invalidateWorkspaces();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to stop workspace');
     }
@@ -50,7 +50,7 @@ export function Workspaces() {
   const handleRestart = async (id: string) => {
     try {
       await restartWorkspace(id);
-      void queryClient.invalidateQueries({ queryKey: workspacesKeys.all });
+      void invalidateWorkspaces();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to restart workspace');
     }
@@ -59,7 +59,7 @@ export function Workspaces() {
   const handleDelete = async (id: string) => {
     try {
       await deleteWorkspace(id);
-      void queryClient.invalidateQueries({ queryKey: workspacesKeys.all });
+      void invalidateWorkspaces();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete workspace');
     }
@@ -98,7 +98,11 @@ export function Workspaces() {
         </div>
       )}
 
-      {isLoading ? (
+      {/* Keep the previously rendered list up while a filter change loads its own
+          query key — switching the status filter is a different key, so `isLoading`
+          is true even though there is perfectly good content on screen. Matches the
+          guard `Nodes.tsx` already uses. */}
+      {isLoading && sortedWorkspaces.length === 0 ? (
         <div role="status" aria-label="Loading workspaces" aria-busy="true" className="grid grid-cols-1 gap-3">
           {Array.from({ length: 3 }, (_, i) => (
             <SkeletonCard key={i} lines={2} />

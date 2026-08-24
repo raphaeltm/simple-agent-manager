@@ -16,6 +16,7 @@ vi.mock('../../../src/services/project-data', () => ({
   stopSession: (...args: unknown[]) => stopSessionSpy(...args),
   recordActivityEvent: vi.fn().mockResolvedValue(undefined),
   markAgentCompleted: vi.fn().mockResolvedValue(undefined),
+  reconcileTaskWaits: vi.fn().mockResolvedValue(undefined),
   scheduleIdleCleanup: vi.fn().mockResolvedValue({ cleanupAt: Date.now() + 60000 }),
 }));
 

@@ -43,6 +43,20 @@ const (
 	// prompt is in flight. Override via ACTIVITY_REREPORT_INTERVAL.
 	DefaultACPActivityRereportInterval = 60 * time.Second
 
+	// DefaultClaudeHarnessLifecycleMaxBytes bounds a single `_claude/sdkMessage`
+	// extension notification. Override via CLAUDE_HARNESS_LIFECYCLE_MAX_BYTES.
+	DefaultClaudeHarnessLifecycleMaxBytes = 64 * 1024
+
+	// DefaultClaudeHarnessLifecycleMaxTasks bounds how many background tasks a
+	// single harness snapshot may track. Override via
+	// CLAUDE_HARNESS_LIFECYCLE_MAX_TASKS.
+	DefaultClaudeHarnessLifecycleMaxTasks = 256
+
+	// DefaultClaudeHarnessLifecycleMaxIDBytes bounds session/task identifier
+	// length inside a lifecycle notification. Override via
+	// CLAUDE_HARNESS_LIFECYCLE_MAX_ID_BYTES.
+	DefaultClaudeHarnessLifecycleMaxIDBytes = 256
+
 	// DefaultACPTerminalActivityReportAttempts is the retry budget for
 	// terminal/error activity reports. Override via ACTIVITY_TERMINAL_REPORT_ATTEMPTS.
 	DefaultACPTerminalActivityReportAttempts = 5
@@ -240,6 +254,9 @@ type Config struct {
 	ACPNotifSerializeTimeout          time.Duration // Max wait for previous notification processing before delivering next (default: 5s)
 	ACPHeartbeatInterval              time.Duration // Interval for direct ACP session heartbeats to control plane (default: 60s, env: ACP_HEARTBEAT_INTERVAL)
 	ACPActivityRereportInterval       time.Duration // Re-report prompting while a prompt is active (default: 60s, env: ACTIVITY_REREPORT_INTERVAL)
+	ClaudeHarnessLifecycleMaxBytes    int           // Max bytes per harness lifecycle notification (default: 65536, env: CLAUDE_HARNESS_LIFECYCLE_MAX_BYTES)
+	ClaudeHarnessLifecycleMaxTasks    int           // Max tracked background tasks per snapshot (default: 256, env: CLAUDE_HARNESS_LIFECYCLE_MAX_TASKS)
+	ClaudeHarnessLifecycleMaxIDBytes  int           // Max identifier length in a lifecycle notification (default: 256, env: CLAUDE_HARNESS_LIFECYCLE_MAX_ID_BYTES)
 	ACPTerminalActivityReportAttempts int           // Retry attempts for terminal activity reports (default: 5, env: ACTIVITY_TERMINAL_REPORT_ATTEMPTS)
 	ACPTerminalActivityReportBackoff  time.Duration // Retry backoff for terminal activity reports (default: 1s, env: ACTIVITY_TERMINAL_REPORT_BACKOFF)
 	ACPCredentialSyncTimeout          time.Duration // Timeout for auth-file sync-back during shutdown (default: 10s, env: ACP_CREDENTIAL_SYNC_TIMEOUT)

@@ -1,6 +1,8 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
+
 const mocks = vi.hoisted(() => ({
   listCredentials: vi.fn(),
   listGitHubInstallations: vi.fn(),
@@ -40,7 +42,7 @@ function renderProvider() {
     <OnboardingProvider>
       <Probe />
     </OnboardingProvider>
-  );
+  , { wrapper: QueryTestWrapper });
 }
 
 // Configure the user's OWN cloud + GitHub creds, with the agent credential

@@ -1,12 +1,14 @@
 import type { TriggerSourceType } from '@simple-agent-manager/shared';
-import { Clock, Github, Webhook } from 'lucide-react';
+import { AlertTriangle, Clock, Github, Webhook } from 'lucide-react';
 
 import { FOCUS_RING } from './trigger-form-support';
+
+type CreateableTriggerSourceType = Exclude<TriggerSourceType, 'incident'>;
 
 interface TriggerSourceSelectorProps {
   value: TriggerSourceType;
   disabled: boolean;
-  onChange: (value: TriggerSourceType) => void;
+  onChange: (value: CreateableTriggerSourceType) => void;
 }
 
 const SOURCES = [
@@ -24,20 +26,31 @@ const SOURCES = [
     icon: Webhook,
   },
 ];
+const INCIDENT_SOURCE = {
+  value: 'incident' as const,
+  label: 'Private incident backlog',
+  description: 'Run from grouped feedback incidents',
+  icon: AlertTriangle,
+};
 
 export function TriggerSourceSelector({ value, disabled, onChange }: TriggerSourceSelectorProps) {
+  const visibleSources = value === 'incident' ? [...SOURCES, INCIDENT_SOURCE] : SOURCES;
   return (
     <div>
       <h3 className="text-sm font-medium text-fg-primary mb-2">Source</h3>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-        {SOURCES.map((source) => {
+      <div
+        className={`grid grid-cols-1 ${value === 'incident' ? 'sm:grid-cols-2 lg:grid-cols-4' : 'sm:grid-cols-3'} gap-2`}
+      >
+        {visibleSources.map((source) => {
           const Icon = source.icon;
           return (
             <button
               key={source.value}
               type="button"
-              onClick={() => onChange(source.value)}
-              disabled={disabled}
+              onClick={() => {
+                if (source.value !== 'incident') onChange(source.value);
+              }}
+              disabled={disabled || source.value === 'incident'}
               className={`flex items-center gap-3 rounded-md border px-3 py-3 text-left cursor-pointer disabled:cursor-not-allowed disabled:opacity-70 ${
                 value === source.value
                   ? 'border-accent bg-accent/10 text-fg-primary'

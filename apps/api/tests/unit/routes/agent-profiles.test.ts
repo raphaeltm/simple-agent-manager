@@ -117,6 +117,32 @@ describe('Agent Profiles Routes', () => {
       );
     });
 
+    it('marks the list private, always-revalidate, and varying on Cookie', async () => {
+      // Per-user body (project profiles OR this caller's global profiles).
+      mockService.listProfiles.mockResolvedValueOnce([makeProfile({ id: 'p1', name: 'default' })]);
+
+      const res = await app.request(`${BASE_URL}${REQUEST_PATH}`, { method: 'GET' }, makeEnv());
+
+      expect(res.headers.get('cache-control')).toBe(
+        'private, max-age=0, stale-while-revalidate=30'
+      );
+      expect(res.headers.get('vary')).toBe('Cookie');
+      expect(res.headers.get('cache-control')).not.toContain('public');
+    });
+
+    it('does NOT cache a rejected (non-member) response', async () => {
+      // A 404 for a non-member must never be cacheable — otherwise a later
+      // successful membership check could be masked by the cached rejection.
+      mockProjectAuth.requireProjectAccess.mockRejectedValueOnce(
+        Object.assign(new Error('Project not found'), { statusCode: 404, error: 'NOT_FOUND' })
+      );
+
+      const res = await app.request(`${BASE_URL}${REQUEST_PATH}`, { method: 'GET' }, makeEnv());
+
+      expect(res.status).toBe(404);
+      expect(res.headers.get('cache-control')).toBeNull();
+    });
+
     it('rejects non-members before listing profiles', async () => {
       mockProjectAuth.requireProjectAccess.mockRejectedValueOnce(
         Object.assign(new Error('Project not found'), {

@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router';
 
 import { DeploymentSettings } from '../components/DeploymentSettings';
+import { McpServersManager } from '../components/mcp-servers/McpServersManager';
 import { ProjectConnectionsSection } from '../components/project-settings/ProjectConnectionsSection';
 import { ProjectMembersSection } from '../components/project-settings/ProjectMembersSection';
 import { ProjectRuntimeConfigSection } from '../components/project-settings/ProjectRuntimeConfigSection';
@@ -22,6 +23,7 @@ import {
 } from '../components/vm/format-vm-size';
 import { VmSizeCard } from '../components/vm/VmSizeCard';
 import { useProviderCatalog } from '../hooks/useProviderCatalog';
+import { useQueryScope } from '../hooks/useQueryScope';
 import { useToast } from '../hooks/useToast';
 import { deleteProject, updateProject } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
@@ -314,7 +316,8 @@ export function ProjectSettingsInfrastructure() {
   );
   const [savingWorkspaceTimeout, setSavingWorkspaceTimeout] = useState(false);
 
-  const { catalogs, loading: catalogLoading } = useProviderCatalog();
+  const queryScope = useQueryScope();
+  const { catalogs, loading: catalogLoading } = useProviderCatalog(queryScope);
   const activeCatalog = selectProviderCatalog(catalogs, project?.defaultProvider);
   const catalogContext = formatProviderCatalogContext(activeCatalog, project?.defaultLocation);
 
@@ -459,8 +462,18 @@ export function ProjectSettingsInfrastructure() {
 
 export function ProjectSettingsRuntime() {
   const { projectId } = useProjectContext();
+  const queryScope = useQueryScope();
 
-  return <ProjectRuntimeConfigSection projectId={projectId} />;
+  // MCP servers live beside env vars and files because they are the same class of thing:
+  // project-scoped configuration injected into every agent session in this project.
+  // Write authorization is enforced server-side (`secret:write`), matching how the runtime
+  // env-var and file controls above already behave.
+  return (
+    <div className="w-full min-w-0 space-y-8">
+      <ProjectRuntimeConfigSection projectId={projectId} />
+      <McpServersManager projectId={projectId} queryScope={queryScope} />
+    </div>
+  );
 }
 
 export function ProjectSettingsDeploy() {

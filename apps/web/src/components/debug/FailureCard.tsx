@@ -1,5 +1,6 @@
 import type { FailureClassification, TaskStatusEvent } from '@simple-agent-manager/shared';
 import { classifyFailure } from '@simple-agent-manager/shared';
+import { useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -9,9 +10,10 @@ import {
   ExternalLink,
   XCircle,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
-import { listTaskEvents } from '../../lib/api/tasks';
+import { useQueryScope } from '../../hooks/useQueryScope';
+import { taskEventsQueryOptions } from '../../lib/query-options';
 import { useAuth } from '../AuthProvider';
 import { CopyableId } from '../project-message-view/CopyableId';
 import { buildDebugReport } from './debug-report';
@@ -66,37 +68,21 @@ export function FailureCard({
   recoverable,
 }: FailureCardProps) {
   const { isSuperadmin } = useAuth();
+  const queryScope = useQueryScope();
   const [expanded, setExpanded] = useState(false);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
-  const [events, setEvents] = useState<TaskStatusEvent[]>([]);
-  const [eventsLoading, setEventsLoading] = useState(false);
-  const [eventsError, setEventsError] = useState<string | null>(null);
-  const eventsFetchedRef = useRef(false);
-
-  // Fetch lifecycle events on first expand: the same data feeds the visible
-  // timeline AND the copyable debug report.
-  useEffect(() => {
-    if (!expanded || eventsFetchedRef.current) return;
-    eventsFetchedRef.current = true;
-    let cancelled = false;
-    setEventsLoading(true);
-    setEventsError(null);
-    listTaskEvents(projectId, taskEmbed.id, 50)
-      .then((res) => {
-        if (!cancelled) setEvents(res.events);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setEventsError(err instanceof Error ? err.message : 'Failed to load events');
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setEventsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [expanded, projectId, taskEmbed.id]);
+  const eventsQuery = useQuery({
+    ...taskEventsQueryOptions(queryScope, projectId, taskEmbed.id, 50),
+    enabled: expanded && Boolean(projectId && taskEmbed.id && queryScope),
+  });
+  const events: TaskStatusEvent[] = useMemo(() => eventsQuery.data ?? [], [eventsQuery.data]);
+  const eventsLoading = expanded && eventsQuery.isPending && eventsQuery.data === undefined;
+  const eventsError =
+    eventsQuery.data === undefined && eventsQuery.error
+      ? eventsQuery.error instanceof Error
+        ? eventsQuery.error.message
+        : 'Failed to load events'
+      : null;
 
   const classification = useMemo(
     () => classifyFailure(taskEmbed.errorMessage ?? '', taskEmbed.executionStep ?? undefined),

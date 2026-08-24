@@ -94,6 +94,11 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   GITHUB_APP_ID?: string;
   GITHUB_APP_PRIVATE_KEY?: string;
   GITHUB_APP_SLUG?: string; // GitHub App slug for install URL
+  GITHUB_INSTALLATION_TOKEN_CACHE_TTL_SECONDS?: string; // KV cache TTL for App installation tokens (default: 3000)
+  GITHUB_REPO_ACCESS_CACHE_TTL_SECONDS?: string; // KV cache TTL for user∩installation repo access checks (default: 300)
+  GITHUB_TREE_CACHE_TTL_SECONDS?: string; // KV cache TTL for immutable commit-SHA git trees (default: 86400)
+  PROJECT_MULTIPLAYER_CACHE_TTL_MS?: string; // Per-isolate cache TTL for project multiplayer state (default: 10000)
+  CREDENTIAL_ATTRIBUTION_CACHE_TTL_MS?: string; // Per-isolate cache TTL for project credential attribution health (default: 10000)
   GITLAB_HOST?: string; // Optional GitLab OAuth host fallback, e.g. https://gitlab.com
   GITLAB_CLIENT_ID?: string;
   GITLAB_CLIENT_SECRET?: string;
@@ -124,6 +129,15 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS?: string;
   PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES?: string;
   PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH?: string;
+  PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS?: string;
+  PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS?: string;
+  PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS?: string;
+  PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS?: string;
+  PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT?: string;
+  PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT?: string;
+  PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT?: string;
+  PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES?: string;
+  PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH?: string;
   JWT_PRIVATE_KEY: string;
   JWT_PUBLIC_KEY: string;
   ENCRYPTION_KEY: string;
@@ -135,6 +149,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SETUP_FORCE?: string; // "true" reopens /setup for lockout recovery
   SETUP_RATE_LIMIT_MAX_ATTEMPTS?: string; // Max setup-token attempts per identifier/window (default: 10)
   SETUP_RATE_LIMIT_WINDOW_SECONDS?: string; // Setup-token attempt window in seconds (default: 900)
+  PLATFORM_CONFIG_CACHE_MS?: string; // Per-isolate resolved-platform-config cache TTL in ms; 0 disables (default: 60000)
   // Guided agent credential setup via Cloudflare Sandbox
   MAX_CONCURRENT_SETUP_SESSIONS?: string; // Concurrency sub-cap below the Sandbox container max_instances (default: 2)
   SETUP_SESSION_TTL_MS?: string; // Setup session lifetime in ms before auto-teardown (default: 900000 = 15 min)
@@ -227,6 +242,13 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES?: string; // Max snapshot control-plane JSON request size (default: 262144)
   SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS?: string; // Max replacement-runtime wake attempts (default: 3)
   SESSION_SLEEP_AFTER_MS?: string; // Idle duration before verified snapshot teardown (default: 900000)
+  HARNESS_BACKGROUND_WORK_LEASE_MS?: string; // Fresh normalized harness-work report lease before sleep is allowed (default: 300000)
+  HARNESS_BACKGROUND_WORK_MAX_DURATION_MS?: string; // Absolute ceiling, from the last lifecycle progress edge, on harness-work sleep deferral (default: 1800000)
+  ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS?: string; // Durable parent-wait D1 reconciliation interval (default: 30000)
+  ORCHESTRATOR_WAIT_MAX_CHILDREN?: string; // Max direct children in one wait_for_subtasks call (default: 20)
+  ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT?: string; // Max active parent waits per project (default: 100)
+  ORCHESTRATOR_WAIT_MAX_DURATION_MS?: string; // Finite safety deadline for parent waits (default: 86400000)
+  ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM?: string; // Max parent waits reconciled per ProjectData alarm (default: 10)
   SESSION_SLEEP_SWEEP_BATCH_SIZE?: string; // Max due sleeps claimed per cron sweep (default: 10)
   SESSION_SLEEP_SWEEP_WALL_BUDGET_MS?: string; // Soft D1/DO claim-loop wall budget before deferring remaining candidates (default: 20000)
   SESSION_SLEEP_RETRY_DELAY_MS?: string; // Delay after a fail-closed sleep attempt (default: 300000)
@@ -265,6 +287,14 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // Hierarchy limits
   MAX_NODES_PER_USER?: string;
   MAX_WORKSPACES_PER_NODE?: string;
+  VM_ADMISSION_CONTROL_MODE?: string;
+  VM_ADMISSION_LEASE_TTL_MS?: string;
+  VM_ADMISSION_RETRY_MIN_MS?: string;
+  VM_ADMISSION_RETRY_MAX_MS?: string;
+  VM_ADMISSION_WAIT_TIMEOUT_MS?: string;
+  VM_ADMISSION_PROVIDER_COOLDOWN_MS?: string;
+  VM_ADMISSION_WAKE_BATCH_SIZE?: string;
+  VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH?: string;
   MAX_AGENT_SESSIONS_PER_WORKSPACE?: string;
   MAX_PROJECTS_PER_USER?: string;
   MAX_BRANCHES_PER_REPO?: string;
@@ -284,6 +314,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MAX_DEPLOYMENT_ENV_VALUE_BYTES?: string;
   MAX_DEPLOYMENT_ENV_TOTAL_BYTES?: string;
   AGENT_SETTINGS_VALIDATION_LIMITS?: string;
+  // Bring-your-own MCP servers
+  MAX_MCP_CONNECTIONS_PER_SCOPE?: string;
+  MCP_CONNECTION_URL_MAX_BYTES?: string;
+  MCP_CONNECTION_TOKEN_MAX_BYTES?: string;
   TASK_CALLBACK_TIMEOUT_MS?: string;
   TASK_CALLBACK_RETRY_MAX_ATTEMPTS?: string;
   NODE_HEARTBEAT_STALE_SECONDS?: string;
@@ -476,7 +510,26 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   CACHED_COMMANDS_MAX_DESC_LENGTH?: string;
   MAX_SESSIONS_PER_PROJECT?: string;
   MAX_MESSAGES_PER_SESSION?: string;
+  COMMENT_BODY_MAX_LENGTH?: string; // Max characters per message-anchored comment or reply body (default: 8000)
+  COMMENT_QUOTE_MAX_LENGTH?: string; // Max characters preserved from quoted message text (default: 2000)
+  COMMENT_IDEMPOTENCY_KEY_MAX_LENGTH?: string; // Max clientMutationId length for comment writes (default: 200)
+  COMMENT_LIST_LIMIT_DEFAULT?: string; // Default page size for comment thread lists (default: 100)
+  COMMENT_LIST_LIMIT_MAX?: string; // Max page size for comment thread lists (default: 500)
+  COMMENT_THREADS_PER_SESSION_MAX?: string; // Max comment threads per chat session (default: 1000)
+  COMMENT_REPLIES_PER_THREAD_MAX?: string; // Max replies per comment thread (default: 200)
   DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES?: string; // Max document-card rawOutput bytes preserved in compact message metadata (default: 16384)
+  PROJECT_DATA_TOOL_METADATA_MAX_BYTES?: string;
+  PROJECT_DATA_STORAGE_TELEMETRY_ENABLED?: string;
+  PROJECT_DATA_STORAGE_LIMIT_BYTES?: string;
+  PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS?: string;
+  PROJECT_DATA_STORAGE_ALERT_INTERVAL_MS?: string;
+  PROJECT_DATA_STORAGE_NOTICE_RATIO?: string;
+  PROJECT_DATA_STORAGE_WARNING_RATIO?: string;
+  PROJECT_DATA_STORAGE_CRITICAL_RATIO?: string;
+  PROJECT_DATA_STORAGE_DEGRADED_RATIO?: string;
+  PROJECT_DATA_STORAGE_EMERGENCY_TARGET_RATIO?: string;
+  PROJECT_DATA_STORAGE_EMERGENCY_BATCH_ROWS?: string;
+  PROJECT_DATA_STORAGE_EMERGENCY_MAX_BATCHES?: string;
   MESSAGE_SIZE_THRESHOLD?: string;
   ACTIVITY_RETENTION_DAYS?: string;
   SESSION_IDLE_TIMEOUT_MINUTES?: string;
@@ -485,6 +538,11 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS?: string;
   SESSION_ACTIVITY_PROBE_MAX_CANDIDATES?: string;
   DO_SUMMARY_SYNC_DEBOUNCE_MS?: string;
+  // D1 per-project session index (session_summaries + session_index_coverage)
+  /** Cap on sessions mirrored into the index per project, per sync. */
+  SESSION_INDEX_MAX_ROWS?: string;
+  /** How stale coverage may be before the session list falls back to the DO. */
+  SESSION_INDEX_MAX_STALENESS_MS?: string;
   // ACP Session Lifecycle (spec 027)
   ACP_SESSION_DETECTION_WINDOW_MS?: string;
   ACP_SESSION_MAX_FORK_DEPTH?: string;
@@ -520,6 +578,14 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   DO_RETRY_MAX_ATTEMPTS?: string;
   DO_RETRY_BASE_DELAY_MS?: string;
   DO_RETRY_MAX_DELAY_MS?: string;
+  // Max per-isolate memo entries for ProjectData DOs with a persisted projectId
+  PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES?: string;
+  /**
+   * Bounded budget for the TaskRunner -> ProjectData wake-progress broadcast.
+   * Background control-loop call, so it gets its own short timeout rather than the
+   * interactive node-agent default (rule 47).
+   */
+  WAKE_PROGRESS_BROADCAST_TIMEOUT_MS?: string;
   // TaskRunner DO configuration (TDF-2: alarm-driven orchestration)
   TASK_RUNNER_STEP_MAX_RETRIES?: string;
   TASK_RUNNER_RETRY_BASE_DELAY_MS?: string;
@@ -595,8 +661,15 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MCP_MESSAGE_LIST_LIMIT?: string; // Default raw tokens per request (default: 50)
   MCP_MESSAGE_LIST_MAX?: string; // Max raw tokens per request (default: 200)
   MCP_MESSAGE_SEARCH_MAX?: string; // Max search results for search_messages (default: 20)
+  MCP_COMMENT_LIST_LIMIT?: string; // Default message-comment threads per request (default: 10)
+  MCP_COMMENT_LIST_MAX?: string; // Max message-comment threads per request (default: 25)
+  MCP_COMMENT_BODY_MAX_LENGTH?: string; // Max comment/reply body characters accepted via MCP (default: 4000)
+  MCP_COMMENT_QUOTE_MAX_LENGTH?: string; // Max message quote characters returned/sent to agents (default: 1000)
+  COMMENT_DIRECTIVE_CONTEXT_MAX_LENGTH?: string; // Max send-to-agent directive prompt length (default: 6000)
   MCP_TRIGGER_LIST_LIMIT?: string; // Default page size for list_triggers (default: 20)
   MCP_TRIGGER_LIST_MAX?: string; // Max page size for list_triggers (default: 100)
+  MCP_INCIDENT_LIST_LIMIT?: string; // Default page size for list_incident_queue (default: 10)
+  MCP_INCIDENT_LIST_MAX?: string; // Max page size for list_incident_queue (default: 50)
   MCP_DEPLOYMENT_LOG_DEFAULT_LIMIT?: string; // Default deployment log rows for read_deployment_logs (default: 200)
   MCP_DEPLOYMENT_LOG_MAX_LIMIT?: string; // Max deployment log rows for read_deployment_logs (default: 1000)
   // Configurable content limits
@@ -625,6 +698,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   KNOWLEDGE_AUTO_RETRIEVE_LIMIT?: string; // Max auto-retrieved observations on session start (default: 20)
   KNOWLEDGE_AUTO_RETRIEVE_MIN_CONFIDENCE?: string; // Min confidence for auto-retrieved observations (default: 0.8)
   KNOWLEDGE_AUTO_RETRIEVE_HIGH_CONFIDENCE_LIMIT?: string; // Max high-confidence observations to retrieve (default: 50)
+  KNOWLEDGE_AUTO_RETRIEVE_PER_ENTITY_LIMIT?: string; // Max injected observations from any one entity (default: 8)
+  KNOWLEDGE_ENTITY_INDEX_LIMIT?: string; // Max entities listed in the injected knowledge index (default: 200)
   KNOWLEDGE_OBSERVATION_MAX_LENGTH?: string; // Max observation text length (default: 1000)
   KNOWLEDGE_ENTITY_NAME_MAX_LENGTH?: string; // Max entity name length (default: 200)
   KNOWLEDGE_DESCRIPTION_MAX_LENGTH?: string; // Max entity description length (default: 2000)
@@ -694,6 +769,13 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   REGISTRY_HOST?: string; // Registry host override (default: registry.cloudflare.com)
   REGISTRY_CREDENTIAL_RATE_LIMIT?: string; // Max credential mints per project per window (default: 10)
   REGISTRY_CREDENTIAL_RATE_WINDOW_SECONDS?: string; // Rate limit window in seconds (default: 300)
+  DEPLOYMENT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS?: string; // Per-registry request timeout (default: 10000)
+  DEPLOYMENT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS?: string; // Total tag-resolution budget per submission (default: 60000)
+  DEPLOYMENT_IMAGE_RESOLVE_MAX_FETCH_ATTEMPTS?: string; // Max resolver outbound fetches per submission (default: 200)
+  DEPLOYMENT_IMAGE_RESOLVE_MAX_REDIRECTS?: string; // Max manual redirects per outbound registry/token request (default: 2)
+  DEPLOYMENT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES?: string; // Max bearer token response body size (default: 65536)
+  DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES?: string; // Max concurrent resolver outbound fetches (default: 4)
+  DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES?: string; // Max tag-based images resolved per submission (default: 50)
   // Workspace tool proxy configuration (unified from workspace-mcp)
   WORKSPACE_TOOL_TIMEOUT_MS?: string; // Timeout for VM agent proxy calls (default: 15000)
   BUILD_PUBLISH_TOOL_TIMEOUT_MS?: string; // Legacy timeout for synchronous build_and_publish VM agent proxy (default: 1260000)
@@ -832,7 +914,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   LIBRARY_ENCRYPTION_KEY?: string; // Purpose-specific KEK for file library (falls back to ENCRYPTION_KEY)
   LIBRARY_UPLOAD_MAX_BYTES?: string; // Max file size per upload (default: 50MB)
   FILE_PREVIEW_MAX_BYTES?: string; // Max file size for inline preview (default: 50MB)
-  LIBRARY_MAX_FILES_PER_PROJECT?: string; // Max files per project (default: 500)
+  LIBRARY_MAX_FILES_PER_PROJECT?: string; // Max files per project (default: 10000)
+  LIBRARY_MAX_TOTAL_BYTES_PER_PROJECT?: string; // Max total storage bytes per project (default: 2GB)
   LIBRARY_MAX_TAGS_PER_FILE?: string; // Max tags per file (default: 20)
   LIBRARY_MAX_TAG_LENGTH?: string; // Max tag length in chars (default: 50)
   LIBRARY_MAX_FILENAME_LENGTH?: string; // Max filename length in chars (default: 255)
@@ -881,6 +964,16 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MODEL_CATALOG_SOURCE_URL?: string; // OpenCode model catalog source URL (default: https://models.dev/api.json)
   MODEL_CATALOG_CACHE_TTL_SECONDS?: string; // KV cache TTL for dynamic model catalogs (default: 3600)
   MODEL_CATALOG_FETCH_TIMEOUT_MS?: string; // Upstream model catalog fetch timeout (default: 5000)
+
+  // HTTP response Cache-Control budgets for stable/semi-stable GETs.
+  // See apps/api/src/lib/cache-headers.ts. Values are seconds, clamped to [0, 86400].
+  PUBLIC_CONFIG_CACHE_MAX_AGE_SECONDS?: string; // /api/config/* max-age (default: 60)
+  PUBLIC_CONFIG_CACHE_SWR_SECONDS?: string; // /api/config/* stale-while-revalidate (default: 300)
+  MODEL_CATALOG_CACHE_MAX_AGE_SECONDS?: string; // Model catalog response max-age (default: 60)
+  MODEL_CATALOG_CACHE_SWR_SECONDS?: string; // Model catalog response stale-while-revalidate (default: 300)
+  PROJECT_REFERENCE_CACHE_MAX_AGE_SECONDS?: string; // Agent profiles/skills max-age (default: 0)
+  PROJECT_REFERENCE_CACHE_SWR_SECONDS?: string; // Agent profiles/skills stale-while-revalidate (default: 30)
+
   AI_PROXY_DAILY_INPUT_TOKEN_LIMIT?: string; // Per-user daily input token cap (default: 500000)
   AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT?: string; // Per-user daily output token cap (default: 200000)
   AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST?: string; // Max input tokens per request (default: 32000)
@@ -982,6 +1075,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SAM_HISTORY_LOAD_LIMIT?: string; // Max messages loaded on page mount (default: 200)
   CHAT_SESSION_MESSAGE_LIMIT?: string; // Default page size when no explicit limit is requested — poll & load-more (default: 500)
   CHAT_SESSION_MESSAGE_MAX?: string; // Ceiling (max clamp) for a chat session REST response — the initial full-conversation load requests up to this (default: 50000)
+  CHAT_SESSION_DELTA_MESSAGE_LIMIT?: string; // Default page size for forward-cursor chat delta fetches (default: 5000)
   CHAT_COMPACT_MODE_DEFAULT?: string; // Whether compact mode strips tool content by default (default: true)
   SAM_MAX_REQUEST_BODY_BYTES?: string; // Override max request body bytes for LLM trimming
   SAM_LLM_TIMEOUT_MS?: string; // LLM call timeout in ms (default: 120000)
@@ -1021,6 +1115,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   CF_CONTAINER_RECOVERY_MAX_ATTEMPTS?: string; // Max snapshot restore attempts before terminal reconciliation (default: 2)
   INSTANT_STALE_CALLBACK_MARGIN_MS?: string; // Freshness margin for rejecting destructive callbacks from superseded Instant containers (default: 60000)
   CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS?: string; // Max time for the synchronous standalone create-workspace request incl. clone (default: 120000)
+  CF_CONTAINER_HARNESS_LEASE_CHECK_TIMEOUT_MS?: string; // Max time for the ProjectData RPC that checks harness work lease before sleep (default: 5000)
   CF_CONTAINER_CLONE_FILTER?: string; // Git partial-clone filter passed to the container as STANDALONE_CLONE_FILTER (vm-agent default: blob:none; "off" disables)
   CF_CONTAINER_WORKSPACE_BASE_DIR?: string; // Base checkout dir inside raw container (default: /workspaces)
   // Legacy Sandbox SDK prototype (admin-only)

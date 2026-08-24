@@ -47,6 +47,7 @@ vi.mock('../../../src/components/ProjectSummaryCard', () => ({
 
 import { ToastProvider } from '../../../src/hooks/useToast';
 import { Dashboard } from '../../../src/pages/Dashboard';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 const sampleProject = {
   id: 'proj-1',
@@ -66,7 +67,7 @@ function renderDashboard() {
         <Dashboard />
       </MemoryRouter>
     </ToastProvider>
-  );
+  , { wrapper: QueryTestWrapper });
 }
 
 describe('Dashboard page', () => {

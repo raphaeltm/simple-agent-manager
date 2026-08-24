@@ -26,6 +26,12 @@ function sourceRows(trigger: TriggerResponse): Array<[string, string]> {
       ['Included Headers', trigger.webhookConfig?.includedHeaders.join(', ') || 'None'],
     ];
   }
+  if (trigger.sourceType === 'incident') {
+    return [
+      ['Backlog', 'Private platform feedback incidents'],
+      ['Dispatch Policy', 'Scheduled grouped backlog sweep'],
+    ];
+  }
   return [
     ['Schedule', trigger.cronHumanReadable ?? trigger.cronExpression ?? '—'],
     ['Timezone', trigger.cronTimezone],

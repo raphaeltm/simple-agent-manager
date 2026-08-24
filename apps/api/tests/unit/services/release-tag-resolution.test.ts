@@ -23,7 +23,7 @@ import { resolveManifestImageTags } from '../../../src/routes/deployment-release
 // Mock the image-resolver module so we can inject a fake fetchFn
 vi.mock('../../../src/services/image-resolver', async () => {
   const actual = await vi.importActual<typeof import('../../../src/services/image-resolver')>(
-    '../../../src/services/image-resolver',
+    '../../../src/services/image-resolver'
   );
   return {
     ...actual,
@@ -83,10 +83,11 @@ function makeManifestBody(overrides?: {
  * Minimal Env stub — only used for mintProjectRegistryCredential
  * which is mocked to fail anyway.
  */
-function makeEnv(): Record<string, unknown> {
+function makeEnv(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     DATABASE: {},
     ENCRYPTION_KEY: 'test-key',
+    ...overrides,
   };
 }
 
@@ -116,7 +117,12 @@ function stubGlobalFetch(digest: string = FIXED_DIGEST) {
     });
   });
   globalThis.fetch = fetchFn as typeof fetch;
-  return { fetchFn, restore: () => { globalThis.fetch = original; } };
+  return {
+    fetchFn,
+    restore: () => {
+      globalThis.fetch = original;
+    },
+  };
 }
 
 function stubGlobalFetchError(status: number) {
@@ -125,7 +131,12 @@ function stubGlobalFetchError(status: number) {
     return new Response('Error', { status });
   });
   globalThis.fetch = fetchFn as typeof fetch;
-  return { fetchFn, restore: () => { globalThis.fetch = original; } };
+  return {
+    fetchFn,
+    restore: () => {
+      globalThis.fetch = original;
+    },
+  };
 }
 
 // =============================================================================
@@ -194,6 +205,137 @@ describe('resolveManifestImageTags (release-path vertical slice)', () => {
     }
   });
 
+  it('does not apply tag-resolution service caps to already digest-pinned manifests', async () => {
+    const body = {
+      ...makeManifestBody({ imageDigest: FIXED_DIGEST }),
+      services: Object.fromEntries(
+        Array.from({ length: 3 }, (_unused, index) => [
+          `web-${index}`,
+          {
+            ...makeManifestBody({ imageDigest: FIXED_DIGEST }).services.web,
+            image: {
+              registry: 'ghcr.io',
+              repository: `myorg/myapp-${index}`,
+              digest: FIXED_DIGEST,
+            },
+          },
+        ])
+      ),
+      routes: [
+        { service: 'web-0', port: 8080, mode: 'public' },
+        { service: 'web-1', port: 8081, mode: 'private' },
+        { service: 'web-2', port: 8082, mode: 'private' },
+      ],
+    };
+    const { fetchFn, restore } = stubGlobalFetch();
+
+    try {
+      const result = await resolveManifestImageTags(
+        body,
+        'proj-1',
+        'user-1',
+        makeEnv({ DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES: '1' }) as never
+      );
+      expect(result.success).toBe(true);
+      expect(fetchFn).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it('rejects many tag-based services before making registry requests', async () => {
+    const serviceTemplate = makeManifestBody({ imageTag: 'v1.0.0' }).services.web;
+    const body = {
+      version: 1,
+      services: {
+        web: serviceTemplate,
+        worker: {
+          ...serviceTemplate,
+          image: {
+            registry: 'ghcr.io',
+            repository: 'myorg/worker',
+            tag: 'v1.0.0',
+          },
+        },
+        queue: {
+          ...serviceTemplate,
+          image: {
+            registry: 'ghcr.io',
+            repository: 'myorg/queue',
+            tag: 'v1.0.0',
+          },
+        },
+      },
+      volumes: {},
+      routes: [{ service: 'web', port: 8080, mode: 'public' }],
+    };
+    const { fetchFn, restore } = stubGlobalFetch();
+
+    try {
+      const result = await resolveManifestImageTags(
+        body,
+        'proj-1',
+        'user-1',
+        makeEnv({ DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES: '2' }) as never
+      );
+      expect(result.success).toBe(false);
+      if (result.success) throw new Error('Expected failure');
+      expect(result.errors[0]!.path).toBe('services');
+      expect(result.errors[0]!.message).toContain('3 tag-based image references');
+      expect(fetchFn).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it('returns a structured release-path error for an unsafe registry authority before fetch', async () => {
+    const body = makeManifestBody({
+      imageTag: 'latest',
+      registry: '169.254.169.254',
+      repository: 'metadata/probe',
+    });
+    const { fetchFn, restore } = stubGlobalFetch();
+
+    try {
+      const result = await resolveManifestImageTags(body, 'proj-1', 'user-1', makeEnv() as never);
+      expect(result.success).toBe(false);
+      if (result.success) throw new Error('Expected failure');
+      expect(result.errors).toEqual([
+        {
+          path: 'services.web.image',
+          message: expect.stringContaining('not a public registry endpoint'),
+        },
+      ]);
+      expect(fetchFn).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it('returns a structured release-path error for repository/tag smuggling before fetch', async () => {
+    const body = makeManifestBody({
+      imageTag: 'latest?x=1',
+      registry: 'registry.cloudflare.com',
+      repository: 'acct/sam-proj/app/../../_catalog',
+    });
+    const { fetchFn, restore } = stubGlobalFetch();
+
+    try {
+      const result = await resolveManifestImageTags(body, 'proj-1', 'user-1', makeEnv() as never);
+      expect(result.success).toBe(false);
+      if (result.success) throw new Error('Expected failure');
+      expect(result.errors).toEqual([
+        {
+          path: 'services.web.image',
+          message: expect.stringMatching(/Unsafe image (repository|tag) rejected/),
+        },
+      ]);
+      expect(fetchFn).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
   it('returns structured error when registry returns 404', async () => {
     const body = makeManifestBody({ imageTag: 'v999.0.0' });
     const { restore } = stubGlobalFetchError(404);
@@ -212,7 +354,12 @@ describe('resolveManifestImageTags (release-path vertical slice)', () => {
   });
 
   it('passes through non-object bodies without error (let validateManifest handle)', async () => {
-    const result = await resolveManifestImageTags('not-an-object', 'proj-1', 'user-1', makeEnv() as never);
+    const result = await resolveManifestImageTags(
+      'not-an-object',
+      'proj-1',
+      'user-1',
+      makeEnv() as never
+    );
     expect(result.success).toBe(true);
     if (!result.success) throw new Error('Expected success');
     expect(result.body).toBe('not-an-object');
@@ -226,7 +373,12 @@ describe('resolveManifestImageTags (release-path vertical slice)', () => {
     const { restore } = stubGlobalFetch();
 
     try {
-      const resolveResult = await resolveManifestImageTags(body, 'proj-1', 'user-1', makeEnv() as never);
+      const resolveResult = await resolveManifestImageTags(
+        body,
+        'proj-1',
+        'user-1',
+        makeEnv() as never
+      );
       expect(resolveResult.success).toBe(true);
       if (!resolveResult.success) throw new Error('Expected success');
 
@@ -243,7 +395,12 @@ describe('resolveManifestImageTags (release-path vertical slice)', () => {
     const { restore } = stubGlobalFetch();
 
     try {
-      const resolveResult = await resolveManifestImageTags(body, 'proj-1', 'user-1', makeEnv() as never);
+      const resolveResult = await resolveManifestImageTags(
+        body,
+        'proj-1',
+        'user-1',
+        makeEnv() as never
+      );
       expect(resolveResult.success).toBe(true);
       if (!resolveResult.success) throw new Error('Expected success');
 

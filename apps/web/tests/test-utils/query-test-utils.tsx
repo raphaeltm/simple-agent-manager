@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { RenderOptions } from '@testing-library/react';
 import { render } from '@testing-library/react';
-import type { ReactElement, ReactNode } from 'react';
+import { type ReactElement, type ReactNode, useState } from 'react';
 
 /**
  * Creates a fresh QueryClient configured for tests:
@@ -23,9 +23,14 @@ export function createTestQueryClient(): QueryClient {
  * Wraps children in a QueryClientProvider with a disposable test client.
  * Use via `renderWithQuery()` or as a standalone wrapper for tests that
  * need additional providers layered around the query provider.
+ *
+ * The client is held in state rather than constructed during render: a fresh
+ * `QueryClient` per render would discard the cache on every re-render, so any test
+ * asserting dedup, cache reuse, or stale-while-revalidate would silently measure a
+ * cold cache each time.
  */
 export function QueryTestWrapper({ children }: { children: ReactNode }) {
-  const client = createTestQueryClient();
+  const [client] = useState(createTestQueryClient);
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
@@ -42,6 +47,8 @@ export function renderWithQuery(
   options?: Omit<RenderOptions, 'wrapper'> & { wrapper?: React.ComponentType<{ children: ReactNode }> },
 ) {
   const { wrapper: InnerWrapper, ...rest } = options ?? {};
+  // One client per `renderWithQuery` call (not per render) so the cache survives
+  // re-renders within a single test.
   const client = createTestQueryClient();
 
   function Wrapper({ children }: { children: ReactNode }) {

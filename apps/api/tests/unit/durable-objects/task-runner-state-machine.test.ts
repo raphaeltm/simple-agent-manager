@@ -11,24 +11,28 @@ import type {
 
 const {
   cleanupTaskRunMock,
+  deleteNodeResourcesStrictMock,
   failSessionSnapshotRecoveryMock,
   failSessionMock,
   notifyTaskEventMock,
   persistErrorMock,
   persistMessageMock,
   revokeMcpTokenMock,
+  restoreSessionRecoveryHandoffMock,
   sleepSessionMock,
   stopComputeTrackingMock,
   stopWorkspaceOnNodeMock,
   syncTriggerExecutionStatusMock,
 } = vi.hoisted(() => ({
   cleanupTaskRunMock: vi.fn(async () => undefined),
+  deleteNodeResourcesStrictMock: vi.fn(async () => undefined),
   failSessionSnapshotRecoveryMock: vi.fn(async () => undefined),
   failSessionMock: vi.fn(async () => undefined),
   notifyTaskEventMock: vi.fn(async () => undefined),
   persistErrorMock: vi.fn(async () => undefined),
   persistMessageMock: vi.fn(async () => undefined),
   revokeMcpTokenMock: vi.fn(async () => undefined),
+  restoreSessionRecoveryHandoffMock: vi.fn(async () => undefined),
   sleepSessionMock: vi.fn(async () => true),
   stopComputeTrackingMock: vi.fn(async () => undefined),
   stopWorkspaceOnNodeMock: vi.fn(async () => undefined),
@@ -53,11 +57,16 @@ vi.mock('../../../src/services/observability', async () => {
 vi.mock('../../../src/services/project-data', () => ({
   failSession: failSessionMock,
   persistMessage: persistMessageMock,
+  reconcileTaskWaits: vi.fn(async () => undefined),
   sleepSession: sleepSessionMock,
 }));
 
 vi.mock('../../../src/services/session-snapshots', () => ({
   failSessionSnapshotRecovery: failSessionSnapshotRecoveryMock,
+}));
+
+vi.mock('../../../src/services/session-recovery-authority', () => ({
+  restoreSessionRecoveryHandoff: restoreSessionRecoveryHandoffMock,
 }));
 
 vi.mock('../../../src/services/project-orchestrator', () => ({
@@ -70,6 +79,10 @@ vi.mock('../../../src/services/mcp-token', () => ({
 
 vi.mock('../../../src/services/node-agent', () => ({
   stopWorkspaceOnNode: stopWorkspaceOnNodeMock,
+}));
+
+vi.mock('../../../src/services/nodes', () => ({
+  deleteNodeResourcesStrict: deleteNodeResourcesStrictMock,
 }));
 
 vi.mock('../../../src/services/task-runner', () => ({
@@ -115,7 +128,10 @@ function createD1State() {
   };
 }
 
-function createD1Database(state: ReturnType<typeof createD1State>) {
+function createD1Database(
+  state: ReturnType<typeof createD1State>,
+  options: { onFailureStatusRead?: (task: TaskRow) => void } = {}
+) {
   return {
     prepare: vi.fn((sql: string) => ({
       bind: (...params: unknown[]) => ({
@@ -126,18 +142,20 @@ function createD1Database(state: ReturnType<typeof createD1State>) {
           }
           if (sql.includes('SELECT status, mission_id, parent_task_id FROM tasks WHERE id = ?')) {
             const task = state.tasks.get(String(params[0]));
-            return task
+            const result = task
               ? {
                   status: task.status,
                   mission_id: task.mission_id,
                   parent_task_id: task.parent_task_id,
                 }
               : null;
+            if (task) options.onFailureStatusRead?.(task);
+            return result;
           }
           return null;
         },
         run: async () => {
-          if (sql.includes("UPDATE tasks SET status = 'in_progress'")) {
+          if (sql.includes("SET status = 'in_progress'")) {
             const taskId = String(params[2]);
             const task = state.tasks.get(taskId);
             if (!task || task.status !== 'delegated') {
@@ -255,14 +273,26 @@ function makeState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState {
   };
 }
 
-function createContext(dbState = createD1State()) {
+function createContext(
+  dbState = createD1State(),
+  options: { onFailureStatusRead?: (task: TaskRow) => void } = {}
+) {
   const storageWrites: TaskRunnerState[] = [];
-  const database = createD1Database(dbState);
+  const database = createD1Database(dbState, options);
+  // Captures the wake-progress broadcast so tests can assert that a wake driven
+  // through the REAL transition emits a terminal `restored`/`failed`. The
+  // terminal step bypasses `updateD1ExecutionStep`, so this is the only place
+  // that emit can be observed.
+  const publishSessionWakeProgress = vi.fn(async () => undefined);
   const rc = {
     env: {
       DATABASE: database,
       OBSERVABILITY_DATABASE: database,
       KV: {},
+      PROJECT_DATA: {
+        idFromName: vi.fn((id: string) => ({ toString: () => id })),
+        get: vi.fn(() => ({ publishSessionWakeProgress })),
+      },
       NODE_LIFECYCLE: {
         idFromName: vi.fn((id: string) => id),
         get: vi.fn(() => ({
@@ -277,10 +307,16 @@ function createContext(dbState = createD1State()) {
           storageWrites.push(structuredClone(state));
         }),
       },
+      // Mirrors the real DO: the promise is started immediately and runs to
+      // completion outside the caller's await chain.
+      waitUntil: vi.fn((promise: Promise<unknown>) => {
+        void Promise.resolve(promise).catch(() => undefined);
+      }),
     },
+    assertRecoveryAuthority: vi.fn(async () => undefined),
   } as unknown as TaskRunnerContext;
 
-  return { dbState, rc, storageWrites };
+  return { dbState, rc, storageWrites, publishSessionWakeProgress };
 }
 
 function seedTask(dbState: ReturnType<typeof createD1State>, overrides: Partial<TaskRow> = {}) {
@@ -325,6 +361,72 @@ describe('transitionToInProgress', () => {
     expect(state.currentStep).toBe('running');
     expect(state.completed).toBe(true);
     expect(storageWrites.at(-1)).toMatchObject({ currentStep: 'running', completed: true });
+  });
+
+  it('broadcasts the terminal wake state when a recovery task goes in_progress', async () => {
+    // The regression this guards: `transitionToInProgress` writes
+    // execution_step='running' with its own guarded raw UPDATE, bypassing the
+    // `updateD1ExecutionStep` choke point that carries every INTERMEDIATE phase.
+    // The alarm dispatcher then treats `running` as a terminal no-op step. So
+    // without an explicit emit here the banner never learns the wake finished and
+    // lingers until the client's next fallback poll.
+    const { dbState, rc, publishSessionWakeProgress } = createContext();
+    seedTask(dbState);
+    const state = makeState({
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'chat-session-1',
+      },
+    });
+
+    await transitionToInProgress(state, rc);
+
+    expect(dbState.tasks.get('task-1')).toMatchObject({ status: 'in_progress' });
+    expect(publishSessionWakeProgress).toHaveBeenCalledTimes(1);
+    expect(publishSessionWakeProgress).toHaveBeenCalledWith({
+      chatSessionId: 'chat-session-1',
+      recoveryStatus: 'restored',
+      // No phase on a settled wake — a step here would render as stale progress.
+      wakePhase: null,
+    });
+  });
+
+  it('does NOT broadcast wake progress for a normal (non-recovery) task', async () => {
+    // Discriminating control. `resumeSnapshotChatSessionId` is null for every
+    // ordinary task run; without that guard the entire task fleet would emit wake
+    // broadcasts into project sockets on each completion.
+    const { dbState, rc, publishSessionWakeProgress } = createContext();
+    seedTask(dbState);
+    const state = makeState();
+
+    await transitionToInProgress(state, rc);
+
+    expect(dbState.tasks.get('task-1')).toMatchObject({ status: 'in_progress' });
+    expect(publishSessionWakeProgress).not.toHaveBeenCalled();
+    expect(rc.env.PROJECT_DATA.get).not.toHaveBeenCalled();
+  });
+
+  it('still completes the transition when the wake broadcast fails', async () => {
+    // Cosmetic telemetry must never fail a lifecycle transition already durable
+    // in D1.
+    const { dbState, rc, publishSessionWakeProgress } = createContext();
+    publishSessionWakeProgress.mockRejectedValueOnce(new Error('DO unavailable'));
+    seedTask(dbState);
+    const state = makeState({
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'chat-session-1',
+      },
+    });
+
+    await expect(transitionToInProgress(state, rc)).resolves.toBeUndefined();
+
+    expect(dbState.tasks.get('task-1')).toMatchObject({
+      status: 'in_progress',
+      execution_step: 'running',
+    });
+    expect(state.currentStep).toBe('running');
+    expect(state.completed).toBe(true);
   });
 
   it('does not overwrite non-delegated task status', async () => {
@@ -397,6 +499,29 @@ describe('transitionToInProgress', () => {
     expect(state.completed).toBe(true);
     expect(storageWrites.at(-1)).toMatchObject({ currentStep: 'running', completed: true });
   });
+
+  it('restores snapshot ownership when a terminal task wins the final handoff race', async () => {
+    const { dbState, rc } = createContext();
+    seedTask(dbState, { status: 'completed', execution_step: null });
+    const state = makeState({
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'session-race',
+        recoverySourceTaskId: 'source-race',
+      },
+    });
+
+    await transitionToInProgress(state, rc);
+
+    expect(restoreSessionRecoveryHandoffMock).toHaveBeenCalledWith(
+      rc.env.DATABASE,
+      'task-1',
+      'session-race'
+    );
+    expect(failSessionSnapshotRecoveryMock).toHaveBeenCalled();
+    expect(state.currentStep).toBe('agent_session');
+    expect(state.completed).toBe(true);
+  });
 });
 
 describe('failTask', () => {
@@ -425,6 +550,35 @@ describe('failTask', () => {
     expect(dbState.statusEvents).toHaveLength(0);
     expect(syncTriggerExecutionStatusMock).not.toHaveBeenCalled();
     expect(storageWrites.at(-1)).toMatchObject({ completed: true });
+  });
+
+  it('restores snapshot ownership when another writer terminalizes between failure SELECT and UPDATE', async () => {
+    const dbState = createD1State();
+    const { rc } = createContext(dbState, {
+      onFailureStatusRead: (task) => {
+        task.status = 'completed';
+        task.execution_step = null;
+      },
+    });
+    seedTask(dbState, { status: 'delegated', execution_step: 'agent_session' });
+    const state = makeState({
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'session-select-update-race',
+        recoverySourceTaskId: 'source-select-update-race',
+      },
+    });
+
+    await failTask(state, 'revoked during failure transition', rc);
+
+    expect(dbState.tasks.get('task-1')?.status).toBe('completed');
+    expect(restoreSessionRecoveryHandoffMock).toHaveBeenCalledWith(
+      rc.env.DATABASE,
+      'task-1',
+      'session-select-update-race'
+    );
+    expect(failSessionSnapshotRecoveryMock).toHaveBeenCalled();
+    expect(state.completed).toBe(true);
   });
 
   it('marks active tasks failed with terminal fields and a status event', async () => {
@@ -539,9 +693,41 @@ describe('failTask', () => {
       'task-1',
       'replacement restore failed'
     );
+    expect(restoreSessionRecoveryHandoffMock).toHaveBeenCalledWith(
+      rc.env.DATABASE,
+      'task-1',
+      'session-1'
+    );
     expect(sleepSessionMock).toHaveBeenCalledWith(rc.env, 'project-1', 'session-1');
     expect(failSessionMock).not.toHaveBeenCalled();
     expect(persistMessageMock).not.toHaveBeenCalled();
     expect(stopWorkspaceOnNodeMock).toHaveBeenCalledWith('node-1', 'workspace-1', rc.env, 'user-1');
+  });
+
+  it('strictly destroys an auto-provisioned recovery node when failure precedes workspace creation', async () => {
+    const { dbState, rc } = createContext();
+    seedTask(dbState, { status: 'delegated', execution_step: 'node_provisioning' });
+    const state = makeState({
+      currentStep: 'node_provisioning',
+      stepResults: {
+        ...makeState().stepResults,
+        nodeId: 'recovery-node-1',
+        autoProvisioned: true,
+        workspaceId: null,
+        agentSessionId: null,
+        agentStarted: false,
+      },
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'recovery-chat-1',
+        recoverySourceTaskId: 'source-task-1',
+      },
+    });
+
+    await failTask(state, 'recovery provisioning lost authority', rc);
+
+    expect(deleteNodeResourcesStrictMock).toHaveBeenCalledWith('recovery-node-1', 'user-1', rc.env);
+    expect(cleanupTaskRunMock).not.toHaveBeenCalled();
+    expect(rc.env.NODE_LIFECYCLE.get).not.toHaveBeenCalled();
   });
 });

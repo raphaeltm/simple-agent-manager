@@ -38,7 +38,15 @@ vi.mock('lucide-react', () => ({
   X: () => <span data-testid="x-icon" />,
 }));
 
+
+// `useQueryScope()` reads the authenticated identity, and every migrated query
+// is keyed by it. Without a provider `useAuth` throws, so supply a stable identity.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
+}));
+
 import { TaskSubmitForm } from '../../../src/components/task/TaskSubmitForm';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 function renderForm(overrides: Partial<React.ComponentProps<typeof TaskSubmitForm>> = {}) {
   const props = {
@@ -48,7 +56,7 @@ function renderForm(overrides: Partial<React.ComponentProps<typeof TaskSubmitFor
     onSaveToBacklog: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
-  const result = render(<TaskSubmitForm {...props} />);
+  const result = render(<TaskSubmitForm {...props} />, { wrapper: QueryTestWrapper });
   return { ...result, props };
 }
 

@@ -27,6 +27,29 @@ import {
 import { cleanupTaskRun } from './task-runner';
 import { sleepVmAgentContainer } from './vm-agent-container';
 
+export const DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS = 5 * 60 * 1000;
+
+/**
+ * Absolute ceiling on how long harness-owned background work may defer sleep,
+ * measured from the last real lifecycle PROGRESS edge (not from the last
+ * heartbeat).
+ *
+ * The sliding lease alone is renewable forever: the VM agent re-reports the
+ * active snapshot every `ActivityRereportInterval`, and each report refreshes
+ * `runtimeWorkUpdatedAt`. An adapter faithfully re-reporting a STALE task set —
+ * the canonical case being an abandoned `run_in_background` dev server that
+ * stays in Claude's `background_tasks_changed` set — would therefore pin compute
+ * awake indefinitely. That contradicts the canonical definition of idleness
+ * (agent-initiated work still in flight and expected to return to the agent;
+ * NOT "is any process alive on the box") and this feature's own non-goal of
+ * "keeping background work alive without a finite lease or absolute task
+ * ceiling".
+ *
+ * See `.claude/rules/53`: never let a column a keepalive path writes be the only
+ * staleness signal.
+ */
+export const DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS = 30 * 60 * 1000;
+
 async function finishSleepingWorkspaceComputeCleanup(
   db: ReturnType<typeof drizzle<typeof schema>>,
   env: Env,
@@ -202,6 +225,61 @@ function isActivitySafeForSleep(
   );
 }
 
+export interface HarnessWorkConfig {
+  leaseMs: number;
+  maxDurationMs: number;
+}
+
+export function parseHarnessWorkConfig(env: { HARNESS_BACKGROUND_WORK_LEASE_MS?: string; HARNESS_BACKGROUND_WORK_MAX_DURATION_MS?: string }): HarnessWorkConfig {
+  return {
+    leaseMs: parsePositiveInt(env.HARNESS_BACKGROUND_WORK_LEASE_MS, DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS),
+    maxDurationMs: parsePositiveInt(env.HARNESS_BACKGROUND_WORK_MAX_DURATION_MS, DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS),
+  };
+}
+
+export function isHarnessWorkLeaseActive(
+  state: {
+    runtimeWorkState?: string | null;
+    runtimeWorkUpdatedAt?: number | null;
+    runtimeWorkProgressAt?: number | null;
+  } | null,
+  now: Date,
+  config: HarnessWorkConfig
+): boolean {
+  return getFreshHarnessWorkLeaseExpiry(state, now, config.leaseMs, config.maxDurationMs) !== null;
+}
+
+export function getFreshHarnessWorkLeaseExpiry(
+  state: {
+    runtimeWorkState?: string | null;
+    runtimeWorkUpdatedAt?: number | null;
+    runtimeWorkProgressAt?: number | null;
+  } | null,
+  now: Date,
+  leaseMs: number,
+  maxDurationMs: number
+): Date | null {
+  if (!state || !['active', 'settling'].includes(state.runtimeWorkState ?? '')) return null;
+  if (!state.runtimeWorkUpdatedAt || state.runtimeWorkUpdatedAt <= 0) return null;
+  const expiresAt = state.runtimeWorkUpdatedAt + leaseMs;
+  if (expiresAt <= now.getTime()) return null;
+
+  // Absolute ceiling anchored on the PROGRESS clock, which only advances on real
+  // harness lifecycle edges/progress — never on the periodic heartbeat re-report
+  // that refreshes `runtimeWorkUpdatedAt`. Work that has stopped progressing
+  // therefore releases the session even while the adapter keeps reporting it.
+  // Falls back to the heartbeat clock when no progress timestamp was reported,
+  // which is the conservative direction (sleep sooner, never later).
+  const progressAnchor =
+    state.runtimeWorkProgressAt && state.runtimeWorkProgressAt > 0
+      ? state.runtimeWorkProgressAt
+      : state.runtimeWorkUpdatedAt;
+  const ceiling = progressAnchor + maxDurationMs;
+  if (ceiling <= now.getTime()) return null;
+
+  return new Date(Math.min(expiresAt, ceiling));
+}
+
 /**
  * Check the authoritative ProjectData work-activity clock before the sweep
  * consumes a sleep attempt. Node/ACP heartbeats are deliberately absent: they
@@ -263,12 +341,17 @@ export async function checkAutomaticSessionSleepEligibility(
         .catch(() => null)
     : null;
   const idleAfterMs = parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS);
+  const harnessConfig = parseHarnessWorkConfig(env);
   let reason: string;
   let retryAt: Date | undefined;
+  const harnessWorkLeaseExpiry = getFreshHarnessWorkLeaseExpiry(state, now, harnessConfig.leaseMs, harnessConfig.maxDurationMs);
   // A terminal task can retain a stale `prompting` transition forever. Treat it
   // as safe only after the normal idle interval has elapsed, preserving a live
   // final response while preventing old terminal sessions from stranding compute.
-  if (!isActivitySafeForSleep(workspace.taskStatus, state, now, idleAfterMs)) {
+  if (harnessWorkLeaseExpiry) {
+    reason = 'Harness-owned background work is active';
+    retryAt = harnessWorkLeaseExpiry;
+  } else if (!isActivitySafeForSleep(workspace.taskStatus, state, now, idleAfterMs)) {
     reason = `Workspace agent is not idle (${state?.activity ?? 'unknown'})`;
     if (workspace.taskStatus === 'completed' && state?.activityAt) {
       retryAt = new Date(state.activityAt + idleAfterMs);
@@ -439,8 +522,10 @@ export async function sleepWorkspaceSession(
         env.SESSION_SLEEP_AFTER_MS,
         DEFAULT_SESSION_SLEEP_AFTER_MS
       );
+      const harnessConfig = parseHarnessWorkConfig(env);
       if (
         !stateBefore ||
+        isHarnessWorkLeaseActive(stateBefore, new Date(), harnessConfig) ||
         !isActivitySafeForSleep(workspace.taskStatus, stateBefore, new Date(), idleAfterMs)
       ) {
         throw new Error(`Workspace agent is not idle (${stateBefore?.activity ?? 'unknown'})`);
@@ -471,14 +556,37 @@ export async function sleepWorkspaceSession(
       );
       if (
         !stateAfter ||
+        isHarnessWorkLeaseActive(stateAfter, new Date(), harnessConfig) ||
         !isActivitySafeForSleep(workspace.taskStatus, stateAfter, new Date(), idleAfterMs) ||
         stateAfter.activity !== stateBefore.activity ||
-        stateAfter.activityAt !== stateBefore.activityAt
+        stateAfter.activityAt !== stateBefore.activityAt ||
+        stateAfter.runtimeWorkState !== stateBefore.runtimeWorkState ||
+        stateAfter.runtimeWorkUpdatedAt !== stateBefore.runtimeWorkUpdatedAt
       ) {
         throw new Error('Workspace activity changed while the final snapshot was captured');
       }
       if (!(await verifySessionSnapshotArtifactsForSleep(env, verified))) {
         throw new Error('Workspace snapshot artifacts failed durable R2 verification');
+      }
+      // R2 verification is asynchronous. Re-read immediately before the
+      // stopping CAS; an active/settling callback also cancels the preparing
+      // claim, so either boundary prevents newly hidden harness work from
+      // crossing the point of no return.
+      const stateAtStop = await projectDataService.getSessionState(
+        env,
+        workspace.projectId,
+        agentSession.id
+      );
+      if (
+        !stateAtStop ||
+        isHarnessWorkLeaseActive(stateAtStop, new Date(), harnessConfig) ||
+        !isActivitySafeForSleep(workspace.taskStatus, stateAtStop, new Date(), idleAfterMs) ||
+        stateAtStop.activity !== stateAfter.activity ||
+        stateAtStop.activityAt !== stateAfter.activityAt ||
+        stateAtStop.runtimeWorkState !== stateAfter.runtimeWorkState ||
+        stateAtStop.runtimeWorkUpdatedAt !== stateAfter.runtimeWorkUpdatedAt
+      ) {
+        throw new Error('Workspace activity changed during snapshot artifact verification');
       }
       if (!(await beginSessionSnapshotStopping(db, workspace.chatSessionId, claimId))) {
         throw new Error('Workspace sleep claim was cancelled before teardown');

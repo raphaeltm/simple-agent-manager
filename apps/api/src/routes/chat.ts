@@ -9,6 +9,7 @@
 import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
 import {
   DEFAULT_CHAT_COMPACT_MODE,
+  DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
   DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
   DEFAULT_CHAT_SESSION_MESSAGE_MAX,
   isTaskExecutionStep,
@@ -37,21 +38,18 @@ import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as chatPersistence from '../services/chat-persistence';
 import * as projectDataService from '../services/project-data';
 import { isTaskStatus } from '../services/task-status';
+import { attachWakeState } from './chat/wake-state';
 import { resolveChatAgentState } from './chat-agent-state';
 import { registerChatCancelRoute } from './chat-cancel';
+import { registerChatCommentDirectiveRoute } from './chat-comment-directives';
+import { chatCommentRoutes } from './chat-comments';
 import { chatForkRoutes } from './chat-fork';
 import { recordChatSessionLoadFailure } from './chat-load-diagnostics';
-import {
-  preparePromptForLiveAgent,
-  sendPreparedPromptToLiveAgent,
-} from './chat-prompt-forward';
+import { preparePromptForLiveAgent, sendPreparedPromptToLiveAgent } from './chat-prompt-forward';
 import { registerChatPromptRoute } from './chat-prompt-route';
 import { getChatSessionRouteContext } from './chat-route-context';
-import {
-  enrichSessionsWithCreators,
-  getSessionListScope,
-  requireSessionCreator,
-} from './chat-session-ownership';
+import { registerChatSessionListRoute } from './chat-session-list';
+import { enrichSessionsWithCreators, requireSessionCreator } from './chat-session-ownership';
 import { chatStateRoutes } from './chat-state';
 import { registerChatStopRoute } from './chat-stop';
 
@@ -131,38 +129,7 @@ function getMessageOrder(rawOrder?: string): 'asc' | 'desc' {
   throw errors.badRequest('order must be asc or desc');
 }
 
-/**
- * GET /api/projects/:projectId/sessions
- * List chat sessions for a project.
- */
-chatRoutes.get('/', async (c) => {
-  const userId = getUserId(c);
-  const projectId = requireRouteParam(c, 'projectId');
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  await requireProjectAccess(db, projectId, userId);
-
-  const status = c.req.query('status') || null;
-  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
-  const offset = parseInt(c.req.query('offset') || '0', 10);
-  const scope = getSessionListScope(c.req.query('scope'));
-  const createdByUserId = scope === 'my' ? userId : null;
-
-  const result = await projectDataService.listSessions(
-    c.env,
-    projectId,
-    status,
-    limit,
-    offset,
-    null,
-    createdByUserId
-  );
-
-  return c.json({
-    ...result,
-    sessions: await enrichSessionsWithCreators(db, result.sessions, userId),
-  });
-});
+registerChatSessionListRoute(chatRoutes);
 
 /**
  * POST /api/projects/:projectId/sessions
@@ -269,6 +236,14 @@ chatRoutes.get('/:sessionId', async (c) => {
   const limit = getSessionMessageLimit(c.env, c.req.query('limit'));
   const beforeParam = c.req.query('before');
   const before = beforeParam ? Number.parseInt(beforeParam, 10) : null;
+  const afterParam = c.req.query('after');
+  const after = afterParam ? Number.parseInt(afterParam, 10) : null;
+  const configuredDeltaLimit = Number.parseInt(c.env.CHAT_SESSION_DELTA_MESSAGE_LIMIT || '', 10);
+  const deltaLimit =
+    Number.isFinite(configuredDeltaLimit) && configuredDeltaLimit > 0
+      ? configuredDeltaLimit
+      : DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT;
+  const effectiveLimit = after !== null && c.req.query('limit') === undefined ? deltaLimit : limit;
 
   const compactDefault = (c.env.CHAT_COMPACT_MODE_DEFAULT ?? '').toLowerCase();
   const compact = compactDefault === 'false' ? false : DEFAULT_CHAT_COMPACT_MODE;
@@ -279,8 +254,9 @@ chatRoutes.get('/:sessionId', async (c) => {
       c.env,
       projectId,
       sessionId,
-      limit,
+      effectiveLimit,
       before,
+      after,
       undefined,
       compact
     );
@@ -348,6 +324,12 @@ chatRoutes.get('/:sessionId', async (c) => {
     lookupFailureEvent: 'chat.agent_session_id_lookup_failed',
   });
 
+  const stateWithRecovery = await attachWakeState(db, state, {
+    projectId,
+    sessionId,
+    sessionStatus: sessionRecord.status,
+  });
+
   return c.json({
     session: (
       await enrichSessionsWithCreators(
@@ -358,7 +340,7 @@ chatRoutes.get('/:sessionId', async (c) => {
     )[0],
     messages: messagesResult.messages,
     hasMore: messagesResult.hasMore,
-    state,
+    state: stateWithRecovery,
   });
 });
 
@@ -384,6 +366,7 @@ chatRoutes.get('/:sessionId/messages', async (c) => {
 
   const limit = getSessionMessageLimit(c.env, c.req.query('limit'));
   const before = getBeforeCursor(c.req.query('before'));
+  const after = getBeforeCursor(c.req.query('after'));
   const roles = getRequestedRoles(c.req.query('roles') ?? c.req.query('role'));
   const order = getMessageOrder(c.req.query('order'));
 
@@ -397,6 +380,7 @@ chatRoutes.get('/:sessionId/messages', async (c) => {
     sessionId,
     limit,
     before,
+    after,
     roles,
     compact,
     order
@@ -434,6 +418,8 @@ chatRoutes.get('/:sessionId/messages/:messageId/tool-content', async (c) => {
 
   return c.json({ content });
 });
+
+chatRoutes.route('/', chatCommentRoutes);
 
 registerChatStopRoute(chatRoutes);
 registerChatCancelRoute(chatRoutes);
@@ -478,6 +464,7 @@ chatRoutes.get('/:sessionId/durability', async (c) => {
 });
 
 registerChatPromptRoute(chatRoutes);
+registerChatCommentDirectiveRoute(chatRoutes);
 
 /**
  * POST /api/projects/:projectId/sessions/:sessionId/attention/:markerId/resolve
@@ -570,6 +557,7 @@ chatRoutes.post('/:sessionId/summarize', async (c) => {
     projectId,
     sessionId,
     1000,
+    null,
     null,
     undefined,
     false

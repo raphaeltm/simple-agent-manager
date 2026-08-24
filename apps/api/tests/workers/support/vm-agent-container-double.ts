@@ -37,6 +37,10 @@ import {
   type VmAgentContainerLifecycleStatus,
 } from '../../../src/durable-objects/vm-agent-container-lifecycle';
 import type { Env } from '../../../src/env';
+import {
+  isSessionRecoverySourceTaskGuardValid,
+  type SessionRecoverySourceTaskGuard,
+} from '../../../src/services/session-recovery-authority';
 
 // These keys MUST match VmAgentContainer's private storage keys so the shared
 // read helper observes the same state the production DO would. `lifecycleStatus`
@@ -48,6 +52,25 @@ const RECOVERY_STATE_KEY = 'runtimeRecovery';
 
 export class VmAgentContainerTestDouble extends DurableObject<Env> {
   /**
+   * Container-less vertical slice for the production guard's D1 check and DO
+   * preparation boundary. The real Container base cannot run in Miniflare,
+   * but this method deliberately uses the production SQL helper before
+   * recording that request preparation was reached.
+   */
+  async __guardedPrepare(sourceTaskGuard: SessionRecoverySourceTaskGuard): Promise<{
+    authorized: boolean;
+    prepared: boolean;
+  }> {
+    const authorized = await isSessionRecoverySourceTaskGuardValid(
+      this.env.DATABASE,
+      sourceTaskGuard
+    );
+    if (!authorized) return { authorized: false, prepared: false };
+    await this.ctx.storage.put('guardedPrepareReached', true);
+    return { authorized: true, prepared: true };
+  }
+
+  /**
    * Mirrors VmAgentContainer.inspectLifecycle() exactly: same shared read
    * helper, same storage keys. Keeps the real RPC contract on the code path.
    */
@@ -55,7 +78,7 @@ export class VmAgentContainerTestDouble extends DurableObject<Env> {
     return inspectStoredVmAgentContainerLifecycle(
       this.ctx.storage,
       RECOVERY_STATE_KEY,
-      ACTIVE_WORK_KEY,
+      ACTIVE_WORK_KEY
     );
   }
 

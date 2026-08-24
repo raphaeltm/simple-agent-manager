@@ -265,6 +265,10 @@ const MOCK_ACCOUNT_MAP = {
 // ---------------------------------------------------------------------------
 
 async function setupApiMocks(page: Page) {
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, MOCK_USER.user.id);
+
   await page.route('**/api/**', async (route: Route) => {
     const requestUrl = new URL(route.request().url());
     const pathName = requestUrl.pathname;
@@ -278,6 +282,14 @@ async function setupApiMocks(page: Page) {
     // Notifications
     if (pathName.startsWith('/api/notifications')) {
       return respond(200, { notifications: [], unreadCount: 0 });
+    }
+
+    if (pathName === '/api/dashboard/active-tasks') {
+      return respond(200, { tasks: [] });
+    }
+
+    if (pathName === '/api/agents') {
+      return respond(200, { agents: [] });
     }
 
     // Nodes and workspace list
@@ -294,8 +306,11 @@ async function setupApiMocks(page: Page) {
     }
 
     // Credentials
-    if (pathName.startsWith('/api/credentials')) {
+    if (pathName === '/api/credentials') {
       return respond(200, []);
+    }
+    if (pathName.startsWith('/api/credentials')) {
+      return respond(200, { credentials: [] });
     }
 
     // GitHub installations
@@ -369,7 +384,7 @@ async function setupApiMocks(page: Page) {
 
       // Agent profiles
       if (subPath.startsWith('/agent-profiles')) {
-        return respond(200, { profiles: [] });
+        return respond(200, { items: [] });
       }
 
       // Single project

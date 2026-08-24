@@ -1,18 +1,20 @@
 import { MERMAID_SVG_SANITIZE_CONFIG as SVG_SANITIZE_CONFIG } from '@simple-agent-manager/acp-client/mermaid';
-import DOMPurify from 'dompurify';
-import mermaid from 'mermaid';
+import { Spinner } from '@simple-agent-manager/ui';
 import { Highlight, themes } from 'prism-react-renderer';
 import {
   type CSSProperties,
   type FC,
   type HTMLAttributes,
+  memo,
   type ReactNode,
   useEffect,
   useRef,
   useState,
 } from 'react';
-import ReactMarkdown, { type ExtraProps } from 'react-markdown';
+import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+
+import { importWithRetry } from '../lib/lazy-with-retry';
 
 const SAFE_MARKDOWN_URL_PROTOCOLS = new Set(['http:', 'https:']);
 
@@ -40,10 +42,53 @@ export { MERMAID_SVG_SANITIZE_CONFIG as SVG_SANITIZE_CONFIG } from '@simple-agen
 
 // ---------- Mermaid Initialization ----------
 
-let mermaidInitialized = false;
+/**
+ * Mermaid (~1 MB parsed, plus DOMPurify) is loaded on demand.
+ *
+ * It used to be a static import at module scope, which put the whole diagram engine in
+ * the initial bundle for every user on the chat path even though diagrams are rare. It
+ * is now pulled in only when a ```mermaid fence is actually rendered.
+ *
+ * The promise is memoised so concurrent diagrams share one fetch and `initialize()`
+ * runs exactly once, and is cleared on failure so a transient network error can retry.
+ */
+type MermaidApi = (typeof import('mermaid'))['default'];
+type DomPurifyApi = (typeof import('dompurify'))['default'];
 
-function ensureMermaidInit() {
-  if (mermaidInitialized) return;
+interface MermaidBundle {
+  mermaid: MermaidApi;
+  domPurify: DomPurifyApi;
+}
+
+let mermaidBundlePromise: Promise<MermaidBundle> | null = null;
+
+function loadMermaid(): Promise<MermaidBundle> {
+  // Routed through `importWithRetry` for the same reason route chunks are: these are
+  // content-hashed chunks fetched long after the page loaded, so a redeploy mid-session
+  // makes them 404. Without it a stale session would render the raw browser fetch-error
+  // string inline in the chat transcript instead of recovering.
+  mermaidBundlePromise ??= Promise.all([
+    importWithRetry(() => import('mermaid')),
+    importWithRetry(() => import('dompurify')),
+  ])
+    .then(([mermaidModule, domPurifyModule]) => {
+      const mermaid = mermaidModule.default;
+      initializeMermaid(mermaid);
+      return { mermaid, domPurify: domPurifyModule.default };
+    })
+    .catch((error: unknown) => {
+      mermaidBundlePromise = null;
+      throw error;
+    });
+  return mermaidBundlePromise;
+}
+
+/** Exported for tests: forget the memoised module so a fresh load can be observed. */
+export function resetMermaidLoaderForTests() {
+  mermaidBundlePromise = null;
+}
+
+function initializeMermaid(mermaid: MermaidApi) {
   mermaid.initialize({
     startOnLoad: false,
     theme: 'dark',
@@ -69,7 +114,6 @@ function ensureMermaidInit() {
     securityLevel: 'strict',
     logLevel: 5,
   });
-  mermaidInitialized = true;
 }
 
 // ---------- Mermaid Diagram Component ----------
@@ -80,23 +124,30 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const idRef = useRef(`mermaid-${Date.now()}-${++mermaidCounter}`);
   const [error, setError] = useState<string | null>(null);
+  const [isRendering, setIsRendering] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     const diagramId = idRef.current;
+    setIsRendering(true);
 
     async function render() {
-      ensureMermaidInit();
       try {
+        // First diagram on the page pays for fetching the mermaid engine here, so this
+        // await can be seconds on a slow connection — hence the placeholder below.
+        const { mermaid, domPurify } = await loadMermaid();
+        if (cancelled) return;
         const { svg } = await mermaid.render(diagramId, code);
         if (!cancelled && containerRef.current) {
-          const sanitizedSvg = DOMPurify.sanitize(svg, SVG_SANITIZE_CONFIG) as string;
+          const sanitizedSvg = domPurify.sanitize(svg, SVG_SANITIZE_CONFIG) as string;
           containerRef.current.innerHTML = sanitizedSvg;
         }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to render diagram');
         }
+      } finally {
+        if (!cancelled) setIsRendering(false);
       }
     }
 
@@ -122,7 +173,25 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
     );
   }
 
-  return <div ref={containerRef} data-testid="mermaid-diagram" className="mb-3 overflow-auto" />;
+  return (
+    <div className="mb-3">
+      {/* Reserves space and announces progress while the engine chunk downloads and the
+          diagram renders — otherwise this is an invisible gap mid-message. */}
+      {isRendering && (
+        <div
+          className="flex items-center gap-2 px-4 py-3 min-h-16 text-fg-muted"
+          role="status"
+          aria-label="Rendering diagram"
+          data-testid="mermaid-loading"
+          style={{ fontSize: '0.8125rem' }}
+        >
+          <Spinner size="sm" />
+          <span>Rendering diagram…</span>
+        </div>
+      )}
+      <div ref={containerRef} data-testid="mermaid-diagram" className="overflow-auto" />
+    </div>
+  );
 };
 
 // ---------- Syntax Highlighted Code ----------
@@ -182,11 +251,147 @@ export const SyntaxHighlightedCode: FC<{ content: string; language: string }> = 
 // `node` prop) — a union of comment/element/text nodes, narrowed via `.type`.
 type MarkdownHastChild = NonNullable<ExtraProps['node']>['children'][number];
 
-export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inline?: boolean }> = ({
-  content,
-  style,
-  inline,
-}) => {
+/**
+ * Hoisted to module scope on purpose — DO NOT inline this back into the JSX.
+ *
+ * react-markdown renders each node via `createElement(components[tag], ...)`.
+ * An object literal in the render body gives every override a NEW function
+ * identity on every render, so React sees a different component *type* for each
+ * paragraph and unmounts/remounts the entire document instead of reconciling it.
+ *
+ * That destroys any native text Selection inside the markdown. On Android it
+ * made text selection unusable: a long-press selected one word, the resulting
+ * re-render rebuilt the DOM under the user's finger, and the selection (and its
+ * drag handles) vanished before they could extend it — so commenting on a
+ * quoted passage was impossible. Same trap in chat message comments, which
+ * re-render far more often.
+ *
+ * These overrides close over nothing from props, so a single shared instance is
+ * safe. If one ever needs a prop, memoize it per-instance rather than moving
+ * this back inline.
+ */
+export const MARKDOWN_COMPONENTS: Components = {
+  h1: ({ children }) => (
+    <h1 className="text-2xl mb-3 leading-tight" style={{ margin: '0 0 12px' }}>
+      {children}
+    </h1>
+  ),
+  h2: ({ children }) => (
+    <h2 className="text-2xl leading-snug" style={{ margin: '18px 0 10px' }}>
+      {children}
+    </h2>
+  ),
+  h3: ({ children }) => (
+    <h3 className="text-base leading-snug" style={{ margin: '16px 0 8px' }}>
+      {children}
+    </h3>
+  ),
+  p: ({ children }) => (
+    <p className="mb-3" style={{ margin: '0 0 12px' }}>
+      {children}
+    </p>
+  ),
+  ul: ({ children }) => (
+    <ul className="mb-3" style={{ margin: '0 0 12px', paddingLeft: 22 }}>
+      {children}
+    </ul>
+  ),
+  ol: ({ children }) => (
+    <ol className="mb-3" style={{ margin: '0 0 12px', paddingLeft: 22 }}>
+      {children}
+    </ol>
+  ),
+  li: ({ children }) => <li className="mb-1">{children}</li>,
+  blockquote: ({ children }) => (
+    <blockquote className="my-3 py-2 px-3 border-l-[3px] border-border-default bg-info-tint">
+      {children}
+    </blockquote>
+  ),
+  a: ({ href, children }) => (
+    <a
+      href={sanitizeMarkdownHref(href)}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="text-tn-blue"
+      style={{ overflowWrap: 'anywhere' }}
+    >
+      {children}
+    </a>
+  ),
+  table: ({ children }) => (
+    <div className="overflow-x-auto mb-3 max-w-full">
+      <table className="border-collapse w-full min-w-80">{children}</table>
+    </div>
+  ),
+  // `overflow-wrap: anywhere` on the markdown root lets the table layout
+  // crush columns below word width (per-letter wrapping). `break-word`
+  // keeps whole words in min-content sizing so the overflow-x wrapper
+  // scrolls instead, while still breaking truly unbreakable tokens.
+  th: ({ children }) => (
+    <th
+      className="border border-border-default px-2 py-1.5 text-left bg-info-tint"
+      style={{ overflowWrap: 'break-word' }}
+    >
+      {children}
+    </th>
+  ),
+  td: ({ children }) => (
+    <td className="border border-border-default px-2 py-1.5" style={{ overflowWrap: 'break-word' }}>
+      {children}
+    </td>
+  ),
+  // react-markdown wraps fenced code in <pre><code>. Our `code` override
+  // replaces <code class="language-mermaid"> with <MermaidDiagram>,
+  // producing <pre><MermaidDiagram/></pre>. The <pre> applies monospace
+  // font and whitespace rules that break SVG layout. Unwrap it.
+  // We detect mermaid by inspecting the HAST node's code child className.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  pre: ({ node, children }: { node?: any; children?: ReactNode }) => {
+    const codeChild = node?.children?.find(
+      (c: MarkdownHastChild) => c.type === 'element' && c.tagName === 'code'
+    );
+    if (codeChild?.properties?.className?.includes('language-mermaid')) {
+      return <>{children}</>;
+    }
+    return <pre className="m-0 overflow-x-auto max-w-full">{children}</pre>;
+  },
+  code: ({
+    className,
+    children,
+    ...props
+  }: HTMLAttributes<HTMLElement> & { children?: ReactNode }) => {
+    const match = /language-(\w+)/.exec(className ?? '');
+    const code = String(children ?? '').replace(/\n$/, '');
+
+    if (match) {
+      if (match[1] === 'mermaid') {
+        return <MermaidDiagram code={code} />;
+      }
+
+      return (
+        <div className="mb-3 overflow-hidden rounded-md">
+          <SyntaxHighlightedCode content={code} language={match[1] ?? ''} />
+        </div>
+      );
+    }
+
+    return (
+      <code
+        {...props}
+        className="bg-info-tint rounded-sm font-mono"
+        style={{ padding: '1px 5px', fontSize: '0.85em', overflowWrap: 'anywhere' }}
+      >
+        {children}
+      </code>
+    );
+  },
+};
+
+export const RenderedMarkdownImpl: FC<{
+  content: string;
+  style?: CSSProperties;
+  inline?: boolean;
+}> = ({ content, style, inline }) => {
   return (
     <div
       className={
@@ -197,130 +402,16 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inli
       style={{ ...style, overflowWrap: 'anywhere' }}
       data-testid="rendered-markdown"
     >
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          h1: ({ children }) => (
-            <h1 className="text-2xl mb-3 leading-tight" style={{ margin: '0 0 12px' }}>
-              {children}
-            </h1>
-          ),
-          h2: ({ children }) => (
-            <h2 className="text-2xl leading-snug" style={{ margin: '18px 0 10px' }}>
-              {children}
-            </h2>
-          ),
-          h3: ({ children }) => (
-            <h3 className="text-base leading-snug" style={{ margin: '16px 0 8px' }}>
-              {children}
-            </h3>
-          ),
-          p: ({ children }) => (
-            <p className="mb-3" style={{ margin: '0 0 12px' }}>
-              {children}
-            </p>
-          ),
-          ul: ({ children }) => (
-            <ul className="mb-3" style={{ margin: '0 0 12px', paddingLeft: 22 }}>
-              {children}
-            </ul>
-          ),
-          ol: ({ children }) => (
-            <ol className="mb-3" style={{ margin: '0 0 12px', paddingLeft: 22 }}>
-              {children}
-            </ol>
-          ),
-          li: ({ children }) => <li className="mb-1">{children}</li>,
-          blockquote: ({ children }) => (
-            <blockquote className="my-3 py-2 px-3 border-l-[3px] border-border-default bg-info-tint">
-              {children}
-            </blockquote>
-          ),
-          a: ({ href, children }) => (
-            <a
-              href={sanitizeMarkdownHref(href)}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="text-tn-blue"
-              style={{ overflowWrap: 'anywhere' }}
-            >
-              {children}
-            </a>
-          ),
-          table: ({ children }) => (
-            <div className="overflow-x-auto mb-3 max-w-full">
-              <table className="border-collapse w-full min-w-80">{children}</table>
-            </div>
-          ),
-          // `overflow-wrap: anywhere` on the markdown root lets the table layout
-          // crush columns below word width (per-letter wrapping). `break-word`
-          // keeps whole words in min-content sizing so the overflow-x wrapper
-          // scrolls instead, while still breaking truly unbreakable tokens.
-          th: ({ children }) => (
-            <th
-              className="border border-border-default px-2 py-1.5 text-left bg-info-tint"
-              style={{ overflowWrap: 'break-word' }}
-            >
-              {children}
-            </th>
-          ),
-          td: ({ children }) => (
-            <td
-              className="border border-border-default px-2 py-1.5"
-              style={{ overflowWrap: 'break-word' }}
-            >
-              {children}
-            </td>
-          ),
-          // react-markdown wraps fenced code in <pre><code>. Our `code` override
-          // replaces <code class="language-mermaid"> with <MermaidDiagram>,
-          // producing <pre><MermaidDiagram/></pre>. The <pre> applies monospace
-          // font and whitespace rules that break SVG layout. Unwrap it.
-          // We detect mermaid by inspecting the HAST node's code child className.
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          pre: ({ node, children }: { node?: any; children?: ReactNode }) => {
-            const codeChild = node?.children?.find(
-              (c: MarkdownHastChild) => c.type === 'element' && c.tagName === 'code'
-            );
-            if (codeChild?.properties?.className?.includes('language-mermaid')) {
-              return <>{children}</>;
-            }
-            return <pre className="m-0 overflow-x-auto max-w-full">{children}</pre>;
-          },
-          code: ({
-            className,
-            children,
-            ...props
-          }: HTMLAttributes<HTMLElement> & { children?: ReactNode }) => {
-            const match = /language-(\w+)/.exec(className ?? '');
-            const code = String(children ?? '').replace(/\n$/, '');
-
-            if (match) {
-              if (match[1] === 'mermaid') {
-                return <MermaidDiagram code={code} />;
-              }
-
-              return (
-                <div className="mb-3 overflow-hidden rounded-md">
-                  <SyntaxHighlightedCode content={code} language={match[1] ?? ''} />
-                </div>
-              );
-            }
-
-            return (
-              <code
-                {...props}
-                className="bg-info-tint rounded-sm font-mono"
-                style={{ padding: '1px 5px', fontSize: '0.85em', overflowWrap: 'anywhere' }}
-              >
-                {children}
-              </code>
-            );
-          },
-        }}
-      >
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
         {content}
       </ReactMarkdown>
     </div>
   );
 };
+
+/**
+ * Memoized so an unrelated parent re-render (a selection popover appearing, a
+ * chat poll landing) does not re-render the document and disturb the DOM the
+ * user is interacting with.
+ */
+export const RenderedMarkdown = memo(RenderedMarkdownImpl);

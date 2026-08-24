@@ -29,6 +29,13 @@ export function getMaxFilesPerProject(env: Env): number {
   );
 }
 
+export function getMaxTotalBytesPerProject(env: Env): number {
+  return parsePositiveInt(
+    env.LIBRARY_MAX_TOTAL_BYTES_PER_PROJECT,
+    LIBRARY_DEFAULTS.MAX_TOTAL_BYTES_PER_PROJECT
+  );
+}
+
 export function getMaxTagsPerFile(env: Env): number {
   return parsePositiveInt(env.LIBRARY_MAX_TAGS_PER_FILE, LIBRARY_DEFAULTS.MAX_TAGS_PER_FILE);
 }

@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { TaskForm } from '../../../../src/components/project/TaskForm';
+import { QueryTestWrapper } from '../../../test-utils/query-test-utils';
 
 // Mock the API module so listAgentProfiles doesn't make real requests
 vi.mock('../../../../src/lib/api', async (importOriginal) => ({
@@ -30,6 +31,13 @@ vi.mock('../../../../src/lib/api', async (importOriginal) => ({
       updatedAt: '2026-03-15T00:00:00Z',
     },
   ]),
+}));
+
+
+// `useQueryScope()` reads the authenticated identity, and every migrated query
+// is keyed by it. Without a provider `useAuth` throws, so supply a stable identity.
+vi.mock('../../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
 }));
 
 const taskA: Task = {
@@ -64,8 +72,8 @@ describe('TaskForm', () => {
         projectId="proj-1"
         tasks={[taskA]}
         onSubmit={onSubmit}
-      />,
-    );
+      />
+    , { wrapper: QueryTestWrapper });
 
     fireEvent.change(screen.getByPlaceholderText('Task title'), { target: { value: 'Write tests' } });
     fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
@@ -98,8 +106,8 @@ describe('TaskForm', () => {
         projectId="proj-1"
         tasks={[]}
         onSubmit={vi.fn()}
-      />,
-    );
+      />
+    , { wrapper: QueryTestWrapper });
 
     const titleInput = screen.getByPlaceholderText('Task title') as HTMLInputElement;
     const descriptionInput = screen.getByRole('textbox', { name: 'Description' }) as HTMLTextAreaElement;
@@ -125,8 +133,8 @@ describe('TaskForm', () => {
         projectId="proj-1"
         tasks={[]}
         onSubmit={onSubmit}
-      />,
-    );
+      />
+    , { wrapper: QueryTestWrapper });
 
     fireEvent.change(screen.getByPlaceholderText('Task title'), { target: { value: 'Simple task' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create Task' }));

@@ -1,12 +1,17 @@
 import type { ProjectSummary } from '@simple-agent-manager/shared';
 import { QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { clear as idbClear, get as idbGet, keys as idbKeys, set as idbSet } from 'idb-keyval';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthProvider, useAuth } from '../../../src/components/AuthProvider';
 import { GITHUB_REAUTH_REQUIRED_EVENT } from '../../../src/lib/api/client';
 import { queryClient } from '../../../src/lib/query-client';
 import { projectQueryKeys } from '../../../src/lib/query-options';
+import {
+  buildQueryPersistStorageKey,
+  QUERY_PERSIST_SCHEMA_VERSION,
+} from '../../../src/lib/query-persistence';
 
 const {
   mockUseSession,
@@ -116,7 +121,13 @@ describe('AuthProvider', () => {
     cacheRenderLog.length = 0;
   });
 
-  it('shows authenticated when session is valid', () => {
+  // NOTE: an authenticated render is asynchronous. AuthProvider gates children
+  // until the identity namespace resolves AND the persisted query cache has been
+  // restored for it (useQueryCachePersistence), and that restore is an IndexedDB
+  // read. Tests that expect children for a signed-in user must therefore `find`
+  // rather than `get`. Signed-out / pending renders stay synchronous because no
+  // record is ever read for a null namespace.
+  it('shows authenticated when session is valid', async () => {
     mockUseSession.mockReturnValue({
       data: validSession,
       isPending: false,
@@ -124,7 +135,7 @@ describe('AuthProvider', () => {
       isRefetching: false,
     });
     renderWithAuth();
-    expect(screen.getByTestId('authenticated')).toHaveTextContent('true');
+    expect(await screen.findByTestId('authenticated')).toHaveTextContent('true');
     expect(screen.getByTestId('user-name')).toHaveTextContent('Test User');
   });
 
@@ -140,7 +151,7 @@ describe('AuthProvider', () => {
     expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
   });
 
-  it('preserves session when refetch error occurs after valid session', () => {
+  it('preserves session when refetch error occurs after valid session', async () => {
     // First render: valid session
     mockUseSession.mockReturnValue({
       data: validSession,
@@ -149,7 +160,7 @@ describe('AuthProvider', () => {
       isRefetching: false,
     });
     const { rerender } = renderWithAuth();
-    expect(screen.getByTestId('authenticated')).toHaveTextContent('true');
+    expect(await screen.findByTestId('authenticated')).toHaveTextContent('true');
 
     // Second render: refetch error wipes session data (BetterAuth behavior)
     mockUseSession.mockReturnValue({
@@ -181,7 +192,7 @@ describe('AuthProvider', () => {
     expect(screen.getByTestId('user-name')).toHaveTextContent('none');
   });
 
-  it('exposes isRefetching from BetterAuth', () => {
+  it('exposes isRefetching from BetterAuth', async () => {
     mockUseSession.mockReturnValue({
       data: validSession,
       isPending: false,
@@ -189,10 +200,10 @@ describe('AuthProvider', () => {
       isRefetching: true,
     });
     renderWithAuth();
-    expect(screen.getByTestId('refetching')).toHaveTextContent('true');
+    expect(await screen.findByTestId('refetching')).toHaveTextContent('true');
   });
 
-  it('clears cached session on clean null (intentional signout)', () => {
+  it('clears cached session on clean null (intentional signout)', async () => {
     // Start with valid session
     mockUseSession.mockReturnValue({
       data: validSession,
@@ -201,7 +212,7 @@ describe('AuthProvider', () => {
       isRefetching: false,
     });
     const { rerender } = renderWithAuth();
-    expect(screen.getByTestId('authenticated')).toHaveTextContent('true');
+    expect(await screen.findByTestId('authenticated')).toHaveTextContent('true');
 
     // Server returns clean null — no error, not pending (signout or session expiry)
     mockUseSession.mockReturnValue({
@@ -221,7 +232,7 @@ describe('AuthProvider', () => {
     expect(screen.getByTestId('user-name')).toHaveTextContent('none');
   });
 
-  it('recovers when refetch succeeds after transient error', () => {
+  it('recovers when refetch succeeds after transient error', async () => {
     // Start with valid session
     mockUseSession.mockReturnValue({
       data: validSession,
@@ -244,7 +255,7 @@ describe('AuthProvider', () => {
       </AuthProvider>
     );
     // Cached session used
-    expect(screen.getByTestId('authenticated')).toHaveTextContent('true');
+    expect(await screen.findByTestId('authenticated')).toHaveTextContent('true');
 
     // Refetch succeeds with new session
     const newSession = {
@@ -266,7 +277,7 @@ describe('AuthProvider', () => {
     expect(screen.getByTestId('user-name')).toHaveTextContent('Updated User');
   });
 
-  it('does not clear the same user namespace during transient refetch errors', () => {
+  it('does not clear the same user namespace during transient refetch errors', async () => {
     mockUseSession.mockReturnValue({
       data: validSession,
       isPending: false,
@@ -274,6 +285,7 @@ describe('AuthProvider', () => {
       isRefetching: false,
     });
     const { rerender } = renderWithAuth();
+    await screen.findByTestId('authenticated');
     expect(mockClearLegacyLibraryCache).toHaveBeenCalledTimes(1);
     clearQueryCacheSpy.mockClear();
     mockBroadcastAuthRevocation.mockClear();
@@ -337,7 +349,7 @@ describe('AuthProvider', () => {
     expect(mockResetAuthRevoked).not.toHaveBeenCalled();
   });
 
-  it('clears the previous user namespace on account switch without clearing the new user cache', () => {
+  it('clears the previous user namespace on account switch without clearing the new user cache', async () => {
     mockUseSession.mockReturnValue({
       data: validSession,
       isPending: false,
@@ -345,6 +357,7 @@ describe('AuthProvider', () => {
       isRefetching: false,
     });
     const { rerender } = renderWithAuth();
+    await screen.findByTestId('user-name');
     mockClearLibraryCache.mockClear();
     mockClearLegacyLibraryCache.mockClear();
     clearQueryCacheSpy.mockClear();
@@ -367,7 +380,7 @@ describe('AuthProvider', () => {
       </AuthProvider>
     );
 
-    expect(screen.getByTestId('user-name')).toHaveTextContent('Other User');
+    expect(await screen.findByTestId('user-name')).toHaveTextContent('Other User');
     expect(mockClearLibraryCache).toHaveBeenCalledTimes(1);
     expect(mockClearLibraryCache).toHaveBeenCalledWith('user:u1');
     expect(mockClearLibraryCache).not.toHaveBeenCalledWith('user:u2');
@@ -484,5 +497,217 @@ describe('AuthProvider', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sign out and reconnect' }));
 
     expect(mockSignOut).toHaveBeenCalledTimes(1);
+  });
+
+  describe('persisted query cache', () => {
+    beforeEach(async () => {
+      vi.restoreAllMocks();
+      await idbClear();
+    });
+
+    it('restores the persisted cache for the signed-in user before children render', async () => {
+      // The whole point of item #3: a reload paints from cache, not a spinner.
+      // Children must not appear until the restore has landed, otherwise the
+      // first frame is an empty state and the cache is pointless.
+      const storageKey = buildQueryPersistStorageKey('user:u1')!;
+      await idbSet(storageKey, {
+        timestamp: Date.now(),
+        buster: QUERY_PERSIST_SCHEMA_VERSION,
+        clientState: {
+          mutations: [],
+          queries: [
+            {
+              queryKey: projectQueryKeys.list('u1', 50),
+              queryHash: JSON.stringify(projectQueryKeys.list('u1', 50)),
+              state: {
+                data: [PRIVATE_PROJECT],
+                dataUpdateCount: 1,
+                dataUpdatedAt: Date.now(),
+                error: null,
+                errorUpdateCount: 0,
+                errorUpdatedAt: 0,
+                fetchFailureCount: 0,
+                fetchFailureReason: null,
+                fetchMeta: null,
+                isInvalidated: false,
+                status: 'success',
+                fetchStatus: 'idle',
+              },
+            },
+          ],
+        },
+      });
+
+      mockUseSession.mockReturnValue({
+        data: validSession,
+        isPending: false,
+        error: null,
+        isRefetching: false,
+      });
+      render(
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <ScopedProjectCacheConsumer />
+          </AuthProvider>
+        </QueryClientProvider>
+      );
+
+      expect(await screen.findByTestId('cached-project')).toHaveTextContent(PRIVATE_PROJECT.name);
+      // Discriminating: the very first render of the consumer already had the
+      // cached project. If the gate were removed, the log would start with a
+      // `u1:none` frame.
+      expect(cacheRenderLog[0]).toBe(`u1:${PRIVATE_PROJECT.name}`);
+      expect(cacheRenderLog).not.toContain('u1:none');
+    });
+
+    it("never hydrates one user's persisted record into another user's session", async () => {
+      // The cross-user leak this whole design exists to prevent — the shape of
+      // the incident in tasks/archive/2026-08-05-namespace-library-cache-by-user.md.
+      const storageKey = buildQueryPersistStorageKey('user:u1')!;
+      await idbSet(storageKey, {
+        timestamp: Date.now(),
+        buster: QUERY_PERSIST_SCHEMA_VERSION,
+        clientState: {
+          mutations: [],
+          queries: [
+            {
+              // Deliberately keyed to u2 INSIDE u1's record: even a poisoned
+              // record must not surface, because the record is only ever read
+              // under its owner's storage key.
+              queryKey: projectQueryKeys.list('u2', 50),
+              queryHash: JSON.stringify(projectQueryKeys.list('u2', 50)),
+              state: {
+                data: [PRIVATE_PROJECT],
+                dataUpdateCount: 1,
+                dataUpdatedAt: Date.now(),
+                error: null,
+                errorUpdateCount: 0,
+                errorUpdatedAt: 0,
+                fetchFailureCount: 0,
+                fetchFailureReason: null,
+                fetchMeta: null,
+                isInvalidated: false,
+                status: 'success',
+                fetchStatus: 'idle',
+              },
+            },
+          ],
+        },
+      });
+
+      // Sign in as u2 — a DIFFERENT user, so a different storage key.
+      mockUseSession.mockReturnValue({
+        data: {
+          ...validSession,
+          user: { ...validSession.user, id: 'u2', email: 'other@test.com', name: 'Other User' },
+        },
+        isPending: false,
+        error: null,
+        isRefetching: false,
+      });
+      render(
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <ScopedProjectCacheConsumer />
+          </AuthProvider>
+        </QueryClientProvider>
+      );
+
+      expect(await screen.findByTestId('cache-user')).toHaveTextContent('u2');
+      expect(screen.getByTestId('cached-project')).toHaveTextContent('none');
+      expect(screen.queryByText(PRIVATE_PROJECT.name)).not.toBeInTheDocument();
+      expect(cacheRenderLog.some((entry) => entry.includes(PRIVATE_PROJECT.name))).toBe(false);
+      // u1's record is untouched — we never even opened it.
+      expect(await idbGet(storageKey)).toBeDefined();
+    });
+
+    it("deletes the previous user's persisted record on account switch", async () => {
+      const previousKey = buildQueryPersistStorageKey('user:u1')!;
+      await idbSet(previousKey, {
+        timestamp: Date.now(),
+        buster: QUERY_PERSIST_SCHEMA_VERSION,
+        clientState: { mutations: [], queries: [] },
+      });
+
+      mockUseSession.mockReturnValue({
+        data: validSession,
+        isPending: false,
+        error: null,
+        isRefetching: false,
+      });
+      const { rerender } = renderWithAuth();
+      await screen.findByTestId('user-name');
+
+      mockUseSession.mockReturnValue({
+        data: {
+          ...validSession,
+          user: { ...validSession.user, id: 'u2', email: 'other@test.com', name: 'Other User' },
+        },
+        isPending: false,
+        error: null,
+        isRefetching: false,
+      });
+      rerender(
+        <AuthProvider>
+          <AuthConsumer />
+        </AuthProvider>
+      );
+
+      expect(await screen.findByTestId('user-name')).toHaveTextContent('Other User');
+      await waitFor(async () => expect(await idbGet(previousKey)).toBeUndefined());
+    });
+
+    it('renders normally when there is no persisted record', async () => {
+      mockUseSession.mockReturnValue({
+        data: validSession,
+        isPending: false,
+        error: null,
+        isRefetching: false,
+      });
+      renderWithAuth();
+      expect(await screen.findByTestId('authenticated')).toHaveTextContent('true');
+    });
+
+    it('survives a rapid A -> B -> C identity switch without leaking either predecessor', async () => {
+      const { rerender } = renderWithAuth(<ScopedProjectCacheConsumer />);
+
+      for (const id of ['u1', 'u2', 'u3']) {
+        mockUseSession.mockReturnValue({
+          data: { ...validSession, user: { ...validSession.user, id, name: `User ${id}` } },
+          isPending: false,
+          error: null,
+          isRefetching: false,
+        });
+        rerender(
+          <QueryClientProvider client={queryClient}>
+            <AuthProvider>
+              <ScopedProjectCacheConsumer />
+            </AuthProvider>
+          </QueryClientProvider>
+        );
+      }
+
+      await waitFor(() => expect(screen.getByTestId('cache-user')).toHaveTextContent('u3'));
+      // Every rendered frame belongs to the identity that owns it: no frame ever
+      // paired a later scope with an earlier identity's project data.
+      expect(cacheRenderLog).not.toContain(`u2:${PRIVATE_PROJECT.name}`);
+      expect(cacheRenderLog).not.toContain(`u3:${PRIVATE_PROJECT.name}`);
+      expect(mockClearLibraryCache).toHaveBeenCalledWith('user:u1');
+      expect(mockClearLibraryCache).toHaveBeenCalledWith('user:u2');
+    });
+
+    it('persists nothing and renders synchronously for a signed-out session', async () => {
+      mockUseSession.mockReturnValue({
+        data: null,
+        isPending: false,
+        error: null,
+        isRefetching: false,
+      });
+      renderWithAuth();
+      expect(await screen.findByTestId('authenticated')).toHaveTextContent('false');
+
+      const remaining = await idbKeys();
+      expect(remaining.filter((k) => String(k).startsWith('sam-query-cache:'))).toHaveLength(0);
+    });
   });
 });

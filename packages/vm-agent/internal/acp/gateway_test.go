@@ -927,8 +927,15 @@ func TestGenerateVibeConfig_McpServerWithToken(t *testing.T) {
 	if !strings.Contains(config, "[[mcp_servers]]") {
 		t.Fatal("expected [[mcp_servers]] section in config")
 	}
-	if !strings.Contains(config, `name = "sam-mcp-0"`) {
-		t.Error("expected MCP server name sam-mcp-0")
+	// A single unnamed server is "sam-mcp", matching what buildAcpMcpServers and
+	// generateCodexMcpConfig emit. This call site previously always index-suffixed, so the
+	// same server was "sam-mcp-0" to Vibe and "sam-mcp" to every other harness; all three now
+	// share ResolveMcpServerNames.
+	if !strings.Contains(config, `name = "sam-mcp"`) {
+		t.Error("expected MCP server name sam-mcp")
+	}
+	if strings.Contains(config, `name = "sam-mcp-0"`) {
+		t.Error("single server must not be index-suffixed")
 	}
 	if !strings.Contains(config, `transport = "http"`) {
 		t.Error("expected transport = http for MCP server")
@@ -2113,7 +2120,7 @@ func TestWriteCodexConfigLocallyCreatesFile(t *testing.T) {
 		t.Error("config missing MCP server URL")
 	}
 
-	expectedEnvName := codexMcpTokenEnvVar(0, 1)
+	expectedEnvName := codexMcpTokenEnvVar(SamMcpServerName)
 	foundToken := false
 	for _, ev := range envVars {
 		if strings.HasPrefix(ev, expectedEnvName+"=") {

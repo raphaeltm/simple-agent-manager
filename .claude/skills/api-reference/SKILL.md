@@ -43,10 +43,19 @@ user-invocable: false
 - `GET /api/projects/:projectId/sessions/:sessionId/state` — Get lightweight ACP activity state for a chat session
 - `GET /api/projects/:projectId/sessions/:sessionId/messages` — List persisted session messages (supports `roles`, `before`, `limit`, `compact`, `order=asc|desc`)
 - `GET /api/projects/:projectId/sessions/:sessionId/messages/:messageId/tool-content` — Lazy-load stored tool content for compact messages
+- `GET /api/projects/:projectId/sessions/:sessionId/comments` — List message-anchored comment threads (supports `messageId`, `status=open|sent|resolved`, `afterSequence`, `limit`)
+- `POST /api/projects/:projectId/sessions/:sessionId/comments` — Create a message-anchored comment thread (`{ messageId, body, quote?, clientMutationId? }`)
+- `POST /api/projects/:projectId/sessions/:sessionId/comments/:threadId/replies` — Append a comment reply (`{ body, clientMutationId? }`)
+- `POST /api/projects/:projectId/sessions/:sessionId/comments/:threadId/send` — Mark a thread `sent` (`{ clientMutationId? }`)
+- `POST /api/projects/:projectId/sessions/:sessionId/comments/:threadId/resolve` — Mark a thread `resolved` (`{ clientMutationId? }`)
+- `POST /api/projects/:projectId/sessions/:sessionId/comments/:threadId/reopen` — Reopen a thread to `open` (`{ clientMutationId? }`)
 - `POST /api/projects/:projectId/sessions/:sessionId/prompt` — Send a follow-up prompt to the active agent session
+- `POST /api/projects/:projectId/sessions/:sessionId/comments/:threadId/send-to-agent` — Queue one idempotent comment directive through ProjectData prompt delivery for the explicit human "send to agent" action
 - `POST /api/projects/:projectId/sessions/:sessionId/attention/:markerId/resolve` — Validate, forward, and record one structured human-input answer (`{ answer }`)
 - `POST /api/projects/:projectId/sessions/:sessionId/summarize` — Generate a session summary for conversation forking
 - `POST /api/projects/:projectId/sessions/:sessionId/stop` — Stop a chat session
+
+Comment threads are scoped to the ProjectData Durable Object addressed by `projectId`; route authorization requires project `task:read` for list and `task:write` for mutations, and the DO rejects missing sessions, missing messages, and cross-session message anchors. Mutations return `{ thread, idempotent }` or `{ thread, reply, idempotent }`; successful first writes use HTTP 201 for create/reply and 200 for status transitions. Project session WebSocket listeners receive `{ type: "comment.thread.changed", payload: { sessionId, thread, reason } }` with `reason` in `thread_created | reply_created | marked_sent | resolved | reopened`.
 
 ## Task Management (Project Scoped)
 
@@ -62,6 +71,15 @@ user-invocable: false
 - `POST /api/projects/:projectId/tasks/:taskId/delegate` — Delegate ready+unblocked task to owned running workspace
 - `GET /api/projects/:projectId/tasks/:taskId/events` — List append-only task status events
 
+## MCP Orchestration
+
+- `wait_for_subtasks` — Task-agent-only tool that registers one durable wait for unique direct-child task IDs. `waitKey` is a required stable workflow-step idempotency key and must be reused after a lost response. `condition` is `all` (default) or `any`; optional `wakeAfterSeconds` is positive and server-capped. Persist workflow state before calling, then end the turn. ProjectData wakes the parent through exact-once durable prompt delivery when the condition or finite deadline resolves.
+- `dispatch_task` — Create a direct child task subject to project dispatch depth and concurrency limits.
+- `get_task_details` / `get_peer_agent_output` — Read authoritative child status and output after a durable wake.
+- `list_incident_queue` / `get_incident` / `claim_incident` / `resolve_incident` — Private feedback-project-only incident backlog tools. The server derives scope from the MCP token and the effective private feedback project setting (Admin → Integrations runtime value first, then `PLATFORM_FEEDBACK_PROJECT_ID` fallback); agents cannot pass a project id. Claim/resolve require a task-scoped token and use bounded leases/CAS tokens. Returned evidence is allowlisted, bounded, recursively redacted, and labelled as untrusted; agents must not copy machine-generated diagnostics or feedback into public GitHub issues.
+
+`wait_for_subtasks` rejects conversation/direct-workspace agents, non-child IDs, terminal parents, duplicate IDs, mismatched parent sessions, invalid wait keys, and installations where durable prompt delivery is disabled. Reusing the same `waitKey` and intent is idempotent even after resolution; using a key for a different intent is rejected. Automatic wake prompts contain only trusted task IDs/statuses—child-authored summaries, errors, and URLs must be fetched explicitly and treated as untrusted data.
+
 ## Administration (Superadmin Only)
 
 - `GET /api/admin/tasks/stuck` — List tasks currently in transient states
@@ -70,6 +88,9 @@ user-invocable: false
 - `GET /api/admin/observability/errors` — Query platform errors; VM error rows include their same-installation diagnostic incident summary
 - `GET /api/admin/observability/errors/:errorId/incident` — Read one diagnostic incident summary and redacted preview
 - `GET /api/admin/observability/errors/:errorId/incident/artifacts/:artifactId/download` — Stream one private diagnostic artifact through the authenticated Worker; R2 keys and URLs are never exposed
+- `GET /api/admin/project-data/storage` — List latest per-project ProjectData storage telemetry from D1 (`projectId`, `status`, `limit` filters)
+- `POST /api/admin/project-data/storage/:projectId/measure` — Force one ProjectData `databaseSize` measurement and D1 telemetry upsert
+- `POST /api/admin/project-data/storage/:projectId/emergency-purge` — Run a bounded ProjectData emergency purge of oldest `activity_events` and `acp_session_events` rows only
 
 ## Agent Sessions
 
@@ -112,7 +133,7 @@ All direct routes require the workspace-scoped node-management Bearer token. Omi
 
 ## Automation Triggers (Project Scoped)
 
-- `POST /api/projects/:projectId/triggers` — Create a cron, GitHub, or generic webhook trigger. Webhook creation requires `agentProfileId` and `webhookConfig`; its response includes a one-time `webhookCredential`.
+- `POST /api/projects/:projectId/triggers` — Create a cron, GitHub, generic webhook, or private incident trigger. Webhook creation requires `agentProfileId` and `webhookConfig`; its response includes a one-time `webhookCredential`. Incident triggers are intended for the configured private feedback project and fire from the scheduled incident backlog sweep.
 - `GET /api/projects/:projectId/triggers` — List triggers with safe source configuration. Webhook tokens are redacted to `tokenLastFour`.
 - `GET /api/projects/:projectId/triggers/:triggerId` — Get trigger details and recent execution history.
 - `PATCH /api/projects/:projectId/triggers/:triggerId` — Update common trigger settings or source-specific webhook configuration.
@@ -124,7 +145,7 @@ All direct routes require the workspace-scoped node-management Bearer token. Omi
 - `GET /api/projects/:projectId/triggers/:triggerId/webhook/deliveries` — List redacted webhook delivery audit metadata (`limit`, `cursor`).
 - `POST /api/webhooks/ingest` — Public generic webhook ingress. Requires `Authorization: Bearer <token>`, `Content-Type: application/json`, and a JSON object body. Supports optional `Idempotency-Key`.
 
-The MCP `create_trigger` tool intentionally creates cron triggers only. Generic webhook creation, filter management, preview, and credential rotation use the authenticated UI/REST surface so one-time credentials can be presented safely.
+The MCP `create_trigger` tool intentionally creates cron triggers only. Generic webhook creation, incident trigger creation, filter management, preview, and credential rotation use the authenticated UI/REST surface so one-time credentials and private operator configuration can be handled explicitly.
 
 ## VM Communication (Callback Endpoints)
 

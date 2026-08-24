@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import type { VmAgentContainerRequestGuard } from '../durable-objects/vm-agent-container';
 import {
   getRuntimeRecoveryMessage,
   type RuntimeRecoveryCode,
@@ -45,6 +46,15 @@ interface NodeAgentRequestOptions extends RequestInit {
   userId: string;
   workspaceId?: string | null;
   requestTimeoutMs?: number;
+  /** Internal authorization checked inside a cf-container DO before cold wake. */
+  sourceTaskGuard?: VmAgentContainerRequestGuard;
+  /** Caller-side fail-closed check repeated at the physical fetch boundary. */
+  beforeExternalMutation?: () => Promise<void>;
+}
+
+export interface GuardedNodeAgentMutationOptions {
+  sourceTaskGuard?: VmAgentContainerRequestGuard;
+  beforeExternalMutation?: () => Promise<void>;
 }
 
 const RUNTIME_RECOVERY_CODES: ReadonlySet<string> = new Set([
@@ -74,7 +84,7 @@ export class NodeAgentRequestError extends AppError {
 export class NodeAgentHttpError extends Error {
   constructor(
     public readonly statusCode: number,
-    public readonly responseBody: string,
+    public readonly responseBody: string
   ) {
     super(`Node Agent request failed: ${statusCode} ${responseBody}`);
     this.name = 'NodeAgentHttpError';
@@ -137,21 +147,24 @@ export async function nodeAgentRequest(
   path: string,
   options: NodeAgentRequestOptions
 ): Promise<unknown> {
-  const { token } = await signNodeManagementToken(
-    options.userId,
-    nodeId,
-    options.workspaceId ?? null,
-    env
-  );
+  const {
+    userId,
+    workspaceId = null,
+    requestTimeoutMs: configuredRequestTimeoutMs,
+    sourceTaskGuard,
+    beforeExternalMutation,
+    ...requestOptions
+  } = options;
+  const { token } = await signNodeManagementToken(userId, nodeId, workspaceId, env);
 
   const url = `${getNodeBackendBaseUrl(nodeId, env)}${path}`;
-  const headers = new Headers(options.headers);
+  const headers = new Headers(requestOptions.headers);
   headers.set('Authorization', `Bearer ${token}`);
   headers.set('Content-Type', 'application/json');
   headers.set('X-SAM-Node-Id', nodeId);
 
-  if (options.workspaceId) {
-    headers.set('X-SAM-Workspace-Id', options.workspaceId);
+  if (workspaceId) {
+    headers.set('X-SAM-Workspace-Id', workspaceId);
   } else {
     headers.delete('X-SAM-Workspace-Id');
   }
@@ -161,25 +174,27 @@ export async function nodeAgentRequest(
     {
       metric: 'node_agent_request',
       nodeId,
-      workspaceId: options.workspaceId ?? null,
+      workspaceId,
     },
     env
   );
 
-  const requestTimeoutMs = options.requestTimeoutMs ?? getNodeAgentRequestTimeoutMs(env);
+  const requestTimeoutMs = configuredRequestTimeoutMs ?? getNodeAgentRequestTimeoutMs(env);
   const response = await fetchNodeAgent(
     nodeId,
     env,
     url,
-    { ...options, headers },
-    requestTimeoutMs
+    { ...requestOptions, headers },
+    requestTimeoutMs,
+    sourceTaskGuard,
+    beforeExternalMutation
   );
 
   recordNodeRoutingMetric(
     {
       metric: 'node_agent_response',
       nodeId,
-      workspaceId: options.workspaceId ?? null,
+      workspaceId,
       statusCode: response.status,
       durationMs: Date.now() - startedAt,
     },
@@ -236,9 +251,12 @@ export async function fetchNodeAgent(
   env: Env,
   url: string,
   options: RequestInit,
-  requestTimeoutMs: number
+  requestTimeoutMs: number,
+  sourceTaskGuard?: VmAgentContainerRequestGuard,
+  beforeExternalMutation?: () => Promise<void>
 ): Promise<Response> {
   if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
+    await beforeExternalMutation?.();
     return fetchWithTimeout(url, options, requestTimeoutMs);
   }
 
@@ -250,6 +268,7 @@ export async function fetchNodeAgent(
     .get();
 
   if (node?.runtime !== 'cf-container') {
+    await beforeExternalMutation?.();
     return fetchWithTimeout(url, options, requestTimeoutMs);
   }
 
@@ -281,12 +300,14 @@ export async function fetchNodeAgent(
   // fetchVmAgentContainer. Deferred to the tracked backlog task.
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
   try {
+    await beforeExternalMutation?.();
     const response = await Promise.race([
       fetchVmAgentContainer(
         env,
         nodeId,
         new Request(containerUrl.toString(), requestInitWithoutSignal(options)),
-        vmAgentPort
+        vmAgentPort,
+        sourceTaskGuard
       ),
       new Promise<Response>((_resolve, reject) => {
         timeoutHandle = setTimeout(
@@ -357,7 +378,7 @@ export async function createWorkspaceOnNode(
      * is a fast 202 dispatch ack and keeps the interactive default.
      */
     requestTimeoutMs?: number;
-  }
+  } & GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, '/workspaces', {
     method: 'POST',
@@ -365,6 +386,8 @@ export async function createWorkspaceOnNode(
     workspaceId: workspace.workspaceId,
     body: JSON.stringify(workspace),
     requestTimeoutMs: options?.requestTimeoutMs,
+    sourceTaskGuard: options?.sourceTaskGuard,
+    beforeExternalMutation: options?.beforeExternalMutation,
   });
 }
 
@@ -437,7 +460,8 @@ export async function createAgentSessionOnNode(
   userId: string,
   chatSessionId?: string | null,
   projectId?: string | null,
-  mcpServer?: McpServerConfig
+  mcpServers?: McpServerConfig[],
+  options?: GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
   const body: Record<string, unknown> = {
     sessionId,
@@ -445,19 +469,17 @@ export async function createAgentSessionOnNode(
     chatSessionId: chatSessionId ?? undefined,
     projectId: projectId ?? undefined,
   };
-  if (mcpServer) {
-    body.mcpServers = [
-      {
-        url: mcpServer.url,
-        token: mcpServer.token,
-      },
-    ];
+  const serializedMcpServers = serializeMcpServers(mcpServers);
+  if (serializedMcpServers) {
+    body.mcpServers = serializedMcpServers;
   }
 
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/agent-sessions`, {
     method: 'POST',
     userId,
     workspaceId,
+    sourceTaskGuard: options?.sourceTaskGuard,
+    beforeExternalMutation: options?.beforeExternalMutation,
     body: JSON.stringify(body),
   });
 }
@@ -466,6 +488,34 @@ export async function createAgentSessionOnNode(
 export interface McpServerConfig {
   url: string;
   token: string;
+  /**
+   * Agent-visible server name. Tools are namespaced by it.
+   *
+   * Optional for rollout compatibility (rule 54): a vm-agent built before this field existed
+   * ignores it and falls back to its legacy positional naming, so a new control plane still
+   * works against an old agent.
+   */
+  name?: string;
+}
+
+/**
+ * Serializes MCP servers for the vm-agent request body.
+ *
+ * Single choke point so the create and start paths cannot drift — historically both inlined
+ * their own single-element array literal, which is why adding a field here previously meant
+ * remembering two places.
+ */
+function serializeMcpServers(
+  mcpServers: McpServerConfig[] | undefined
+): Array<{ url: string; token: string; name?: string }> | undefined {
+  if (!mcpServers || mcpServers.length === 0) {
+    return undefined;
+  }
+  return mcpServers.map((server) => ({
+    url: server.url,
+    token: server.token,
+    ...(server.name ? { name: server.name } : {}),
+  }));
 }
 
 /** Optional overrides for agent model and permission mode, resolved from agent profiles. */
@@ -493,10 +543,11 @@ export async function startAgentSessionOnNode(
   initialPrompt: string,
   env: Env,
   userId: string,
-  mcpServer?: McpServerConfig,
+  mcpServers?: McpServerConfig[],
   overrides?: AgentSessionOverrides,
   taskContext?: AgentSessionTaskContext,
-  injectedInstructions?: string
+  injectedInstructions?: string,
+  options?: GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
   const body: Record<string, unknown> = { agentType, initialPrompt };
   if (injectedInstructions != null && injectedInstructions !== '') {
@@ -505,13 +556,9 @@ export async function startAgentSessionOnNode(
     // input; the UI collapses the mirrored message.
     body.injectedInstructions = injectedInstructions;
   }
-  if (mcpServer) {
-    body.mcpServers = [
-      {
-        url: mcpServer.url,
-        token: mcpServer.token,
-      },
-    ];
+  const serializedMcpServers = serializeMcpServers(mcpServers);
+  if (serializedMcpServers) {
+    body.mcpServers = serializedMcpServers;
   }
   if (overrides?.model != null) {
     body.model = overrides.model;
@@ -535,6 +582,7 @@ export async function startAgentSessionOnNode(
       body.taskMode = taskContext.taskMode;
     }
   }
+  await options?.beforeExternalMutation?.();
   await markVmAgentContainerActiveWorkStarted(env, nodeId, {
     workspaceId,
     agentSessionId: sessionId,
@@ -549,6 +597,8 @@ export async function startAgentSessionOnNode(
         method: 'POST',
         userId,
         workspaceId,
+        sourceTaskGuard: options?.sourceTaskGuard,
+        beforeExternalMutation: options?.beforeExternalMutation,
         body: JSON.stringify(body),
       }
     );
@@ -570,6 +620,7 @@ export async function sendPromptToAgentOnNode(
     requestTimeoutMs?: number;
     protocolVersion?: number;
     deliveryId?: string;
+    sourceTaskGuard?: VmAgentContainerRequestGuard;
   }
 ): Promise<unknown> {
   const body: {
@@ -597,6 +648,7 @@ export async function sendPromptToAgentOnNode(
         userId,
         workspaceId,
         requestTimeoutMs: options?.requestTimeoutMs,
+        sourceTaskGuard: options?.sourceTaskGuard,
         body: JSON.stringify(body),
       }
     );

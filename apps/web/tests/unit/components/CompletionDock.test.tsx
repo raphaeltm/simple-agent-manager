@@ -2,7 +2,10 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CompletionDock, type CompletionDockProps } from '../../../src/components/project-message-view/CompletionDock';
+import {
+  CompletionDock,
+  type CompletionDockProps,
+} from '../../../src/components/project-message-view/CompletionDock';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -52,13 +55,28 @@ describe('CompletionDock', () => {
     setReducedMotion(false);
   });
 
-  it('resilience: renders the Archive control when idle even though the session is active', () => {
+  it('resilience: renders the Sleep control when awake idle even though the session is active', () => {
     // Mirrors the acceptance criterion — the dock is always mounted while the
     // session is active, so the lifecycle control never disappears when the
-    // agentActivity signal reads (or is stale at) idle.
-    renderDock({ working: false });
-    expect(screen.getByRole('button', { name: 'Archive conversation' })).toBeInTheDocument();
+    // agentActivity signal reads (or is stale at) idle. Archive is only exposed
+    // once the session is already sleeping.
+    renderDock({ working: false, centerAction: 'sleep' });
+    expect(screen.getByRole('button', { name: 'Sleep session' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Archive conversation' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Interrupt agent' })).not.toBeInTheDocument();
+  });
+
+  it('calls onSleep immediately when the awake-idle center action is clicked', async () => {
+    const user = userEvent.setup();
+    const onSleep = vi.fn();
+    const onArchive = vi.fn();
+    renderDock({ working: false, centerAction: 'sleep', onSleep, onArchive });
+
+    await user.click(screen.getByRole('button', { name: 'Sleep session' }));
+
+    expect(onSleep).toHaveBeenCalledTimes(1);
+    expect(onArchive).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('shows the Interrupt control while working (no idle Archive)', () => {
@@ -83,7 +101,7 @@ describe('CompletionDock', () => {
     const user = userEvent.setup();
     const onInterrupt = vi.fn();
     const onArchive = vi.fn();
-    renderDock({ working: false, onInterrupt, onArchive });
+    renderDock({ working: false, centerAction: 'archive', onInterrupt, onArchive });
 
     await user.click(screen.getByRole('button', { name: 'Archive conversation' }));
 
@@ -96,7 +114,7 @@ describe('CompletionDock', () => {
   it('does not archive when the confirmation is cancelled', async () => {
     const user = userEvent.setup();
     const onArchive = vi.fn();
-    renderDock({ working: false, onArchive });
+    renderDock({ working: false, centerAction: 'archive', onArchive });
 
     await user.click(screen.getByRole('button', { name: 'Archive conversation' }));
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -108,7 +126,7 @@ describe('CompletionDock', () => {
   it('calls onArchive only after the confirmation action is clicked', async () => {
     const user = userEvent.setup();
     const onArchive = vi.fn();
-    renderDock({ working: false, onArchive });
+    renderDock({ working: false, centerAction: 'archive', onArchive });
 
     await user.click(screen.getByRole('button', { name: 'Archive conversation' }));
     await user.click(screen.getByRole('button', { name: 'Archive Conversation' }));
@@ -124,23 +142,25 @@ describe('CompletionDock', () => {
     const { rerender } = render(
       <CompletionDock
         working={false}
+        centerAction="archive"
         hasPlan={false}
         onInterrupt={onInterrupt}
         onArchive={onArchive}
         onOpenPlan={onOpenPlan}
-      />,
+      />
     );
 
     await user.click(screen.getByRole('button', { name: 'Archive conversation' }));
     rerender(
       <CompletionDock
         working={false}
+        centerAction="archive"
         hasPlan={false}
         onInterrupt={onInterrupt}
         onArchive={onArchive}
         onOpenPlan={onOpenPlan}
         archiving
-      />,
+      />
     );
 
     expect(screen.getByRole('button', { name: 'Archiving...' })).toBeDisabled();
@@ -157,7 +177,7 @@ describe('CompletionDock', () => {
         onInterrupt={vi.fn()}
         onArchive={vi.fn()}
         onOpenPlan={onOpenPlan}
-      />,
+      />
     );
     expect(screen.getByRole('button', { name: 'View plan' })).toBeInTheDocument();
 
@@ -168,7 +188,7 @@ describe('CompletionDock', () => {
         onInterrupt={vi.fn()}
         onArchive={vi.fn()}
         onOpenPlan={onOpenPlan}
-      />,
+      />
     );
 
     const pill = screen.getByRole('button', { name: 'View plan' });
@@ -182,9 +202,16 @@ describe('CompletionDock', () => {
   });
 
   it('disables the Archive button while archiving is in flight', () => {
-    renderDock({ working: false, archiving: true });
+    renderDock({ working: false, centerAction: 'archive', archiving: true });
     const btn = screen.getByRole('button', { name: 'Archive conversation' });
     expect(btn).toBeDisabled();
+  });
+
+  it('disables the Sleep button while sleep is in flight', () => {
+    renderDock({ working: false, centerAction: 'sleep', sleeping: true });
+    const btn = screen.getByRole('button', { name: 'Sleep session' });
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute('title', 'Sleeping…');
   });
 
   it('does not disable the Interrupt button while archiving is in flight', () => {
@@ -195,9 +222,23 @@ describe('CompletionDock', () => {
   });
 
   it('renders the archive error message with an alert role', () => {
-    renderDock({ working: false, archiveError: 'Could not end the conversation' });
+    renderDock({
+      working: false,
+      centerAction: 'archive',
+      archiveError: 'Could not end the conversation',
+    });
     const alert = screen.getByRole('alert');
     expect(alert).toHaveTextContent('Could not end the conversation');
+  });
+
+  it('renders the sleep error message with an alert role', () => {
+    renderDock({
+      working: false,
+      centerAction: 'sleep',
+      sleepError: 'Snapshot is not ready yet',
+    });
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('Snapshot is not ready yet');
   });
 
   it('renders the elapsed slot while working and hides it while idle', () => {
@@ -210,7 +251,7 @@ describe('CompletionDock', () => {
         onArchive={vi.fn()}
         onOpenPlan={vi.fn()}
         elapsed={elapsed}
-      />,
+      />
     );
     expect(screen.getByTestId('elapsed')).toBeInTheDocument();
 
@@ -222,20 +263,33 @@ describe('CompletionDock', () => {
         onArchive={vi.fn()}
         onOpenPlan={vi.fn()}
         elapsed={elapsed}
-      />,
+      />
     );
     expect(screen.queryByTestId('elapsed')).not.toBeInTheDocument();
   });
 
   it('announces working/idle state via an aria-live status region', () => {
     const { rerender } = render(
-      <CompletionDock working={false} hasPlan={false} onInterrupt={vi.fn()} onArchive={vi.fn()} onOpenPlan={vi.fn()} />,
+      <CompletionDock
+        working={false}
+        centerAction="sleep"
+        hasPlan={false}
+        onInterrupt={vi.fn()}
+        onArchive={vi.fn()}
+        onOpenPlan={vi.fn()}
+      />
     );
     const status = screen.getByRole('status');
-    expect(status).toHaveTextContent('Agent idle');
+    expect(status).toHaveTextContent('Agent idle, ready to sleep');
 
     rerender(
-      <CompletionDock working hasPlan={false} onInterrupt={vi.fn()} onArchive={vi.fn()} onOpenPlan={vi.fn()} />,
+      <CompletionDock
+        working
+        hasPlan={false}
+        onInterrupt={vi.fn()}
+        onArchive={vi.fn()}
+        onOpenPlan={vi.fn()}
+      />
     );
     expect(screen.getByRole('status')).toHaveTextContent('Agent working');
   });
@@ -243,12 +297,25 @@ describe('CompletionDock', () => {
   it('reduced-motion path: still renders both morph states without animation', () => {
     setReducedMotion(true);
     const { rerender } = render(
-      <CompletionDock working={false} hasPlan={false} onInterrupt={vi.fn()} onArchive={vi.fn()} onOpenPlan={vi.fn()} />,
+      <CompletionDock
+        working={false}
+        centerAction="sleep"
+        hasPlan={false}
+        onInterrupt={vi.fn()}
+        onArchive={vi.fn()}
+        onOpenPlan={vi.fn()}
+      />
     );
-    expect(screen.getByRole('button', { name: 'Archive conversation' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sleep session' })).toBeInTheDocument();
 
     rerender(
-      <CompletionDock working hasPlan={false} onInterrupt={vi.fn()} onArchive={vi.fn()} onOpenPlan={vi.fn()} />,
+      <CompletionDock
+        working
+        hasPlan={false}
+        onInterrupt={vi.fn()}
+        onArchive={vi.fn()}
+        onOpenPlan={vi.fn()}
+      />
     );
     expect(screen.getByRole('button', { name: 'Interrupt agent' })).toBeInTheDocument();
   });

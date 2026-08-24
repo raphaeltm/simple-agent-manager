@@ -1,12 +1,20 @@
 import { log } from '../../lib/logger';
-import { getExternalInstallationId } from '../../services/github-installation-ids';
+import { SessionRecoveryAuthorityRevokedError } from '../../services/session-recovery-authority';
+import {
+  ensureWorkspaceBranchOnRemote,
+  logWorkspaceBranchResult,
+} from '../../services/workspace-branch';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 /**
  * Ensure the checkout branch exists on the remote before cloning.
  *
- * Best-effort: failures are logged but do not block workspace creation. The
- * clone will produce the definitive error if the branch cannot be resolved.
+ * Best-effort: failures are logged but do not block workspace creation. That is
+ * safe for the VM runtime specifically, because `bootstrap.go:ensureRepositoryReady`
+ * clones `baseBranch` and then runs `git checkout -b <branch>`, so a missing ref
+ * still produces a working workspace and the clone yields the definitive error.
+ * The Instant runtime has no such fallback and therefore fails closed instead —
+ * see `services/instant-session.ts`.
  */
 export async function ensureBranchExistsOnRemote(
   state: TaskRunnerState,
@@ -15,57 +23,32 @@ export async function ensureBranchExistsOnRemote(
   const defaultBranch = state.config.defaultBranch || 'main';
   if (state.config.branch === defaultBranch) return;
 
-  const projectRepo = await loadTaskRunnerProjectRepo(state, rc);
-  if (projectRepo?.repoProvider === 'artifacts') return;
-  if (projectRepo?.repoProvider === 'gitlab') {
-    await ensureGitLabBranchExistsOnRemote(state, rc, defaultBranch);
-    return;
-  }
-
-  const repoParts = state.config.repository.split('/');
-  if (repoParts.length !== 2 || !repoParts[0] || !repoParts[1]) {
-    log.warn('task_runner_do.ensure_branch.invalid_repository', {
-      taskId: state.taskId,
-      repository: state.config.repository,
-    });
-    return;
-  }
-
-  const [owner, repo] = repoParts;
   try {
-    const installation = await loadTaskRunnerGitHubInstallation(state, rc);
-    if (!installation) {
-      log.warn('task_runner_do.ensure_branch.installation_not_found', {
-        taskId: state.taskId,
-        installationId: state.config.installationId,
-      });
-      return;
-    }
+    // Inside the try: this is a best-effort guard, so a transient D1 read
+    // failure on `projects` must not fail the task it is trying to help.
+    const projectRepo = await loadTaskRunnerProjectRepo(state, rc);
 
-    const externalInstallationId = getExternalInstallationId(installation);
-    const { ensureBranchExists } = await import('../../services/github-app');
-    const created = await ensureBranchExists(
-      externalInstallationId,
-      owner,
-      repo,
-      state.config.branch,
+    const result = await ensureWorkspaceBranchOnRemote(rc.env, {
+      projectId: state.projectId,
+      repository: state.config.repository,
+      repoProvider: projectRepo?.repoProvider,
+      installationId: state.config.installationId,
+      userId: state.userId,
+      branch: state.config.branch,
+      baseBranch: defaultBranch,
+      beforeRemoteWrite: () => rc.assertRecoveryAuthority(state),
+    });
+
+    logWorkspaceBranchResult('task_runner_do.ensure_branch', result, {
+      taskId: state.taskId,
+      branch: state.config.branch,
       defaultBranch,
-      rc.env
-    );
-
-    if (created) {
-      log.info('task_runner_do.ensure_branch.ok', {
-        taskId: state.taskId,
-        branch: state.config.branch,
-      });
-    } else {
-      log.warn('task_runner_do.ensure_branch.failed', {
-        taskId: state.taskId,
-        branch: state.config.branch,
-        defaultBranch,
-      });
-    }
+    });
   } catch (err) {
+    // A revoked recovery authority is NOT a best-effort branch failure — it
+    // means the source parent terminalized and this replacement must abort
+    // rather than continue provisioning.
+    if (err instanceof SessionRecoveryAuthorityRevokedError) throw err;
     log.warn('task_runner_do.ensure_branch.error', {
       taskId: state.taskId,
       branch: state.config.branch,
@@ -81,65 +64,4 @@ async function loadTaskRunnerProjectRepo(
   return rc.env.DATABASE.prepare(`SELECT repo_provider AS repoProvider FROM projects WHERE id = ?`)
     .bind(state.projectId)
     .first<{ repoProvider: string | null }>();
-}
-
-async function ensureGitLabBranchExistsOnRemote(
-  state: TaskRunnerState,
-  rc: TaskRunnerContext,
-  defaultBranch: string
-): Promise<void> {
-  try {
-    const { drizzle } = await import('drizzle-orm/d1');
-    const schema = await import('../../db/schema');
-    const { ensureGitLabBranchExists, getProjectGitLabRepository } =
-      await import('../../services/gitlab');
-    const metadata = await getProjectGitLabRepository(
-      drizzle(rc.env.DATABASE, { schema }),
-      state.projectId
-    );
-    if (!metadata) {
-      log.warn('task_runner_do.ensure_branch.gitlab_metadata_missing', {
-        taskId: state.taskId,
-        projectId: state.projectId,
-      });
-      return;
-    }
-    const created = await ensureGitLabBranchExists({
-      env: rc.env,
-      userId: state.userId,
-      projectId: metadata.gitlabProjectId,
-      branch: state.config.branch,
-      ref: defaultBranch,
-    });
-    if (created) {
-      log.info('task_runner_do.ensure_branch.gitlab_ok', {
-        taskId: state.taskId,
-        branch: state.config.branch,
-      });
-    }
-  } catch (err) {
-    log.warn('task_runner_do.ensure_branch.gitlab_error', {
-      taskId: state.taskId,
-      branch: state.config.branch,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-}
-
-type TaskRunnerGitHubInstallation = {
-  installationId: string;
-  externalInstallationId: string | null;
-};
-
-async function loadTaskRunnerGitHubInstallation(
-  state: TaskRunnerState,
-  rc: TaskRunnerContext
-): Promise<TaskRunnerGitHubInstallation | null> {
-  return rc.env.DATABASE.prepare(
-    `SELECT installation_id AS installationId, external_installation_id AS externalInstallationId
-     FROM github_installations
-     WHERE id = ? AND user_id = ?`
-  )
-    .bind(state.config.installationId, state.userId)
-    .first<TaskRunnerGitHubInstallation>();
 }

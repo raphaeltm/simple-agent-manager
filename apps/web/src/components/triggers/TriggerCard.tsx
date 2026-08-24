@@ -32,6 +32,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
 }) => {
   const isDisabled = trigger.status === 'disabled';
   const isPaused = trigger.status === 'paused';
+  const canRunNow = trigger.sourceType !== 'incident';
 
   // No item icons: every other DropdownMenu in the app (WorkspaceCard, NodeCard,
   // ProjectSummaryCard) is icon-less, and a partially-iconed menu also misaligns
@@ -96,17 +97,19 @@ export const TriggerCard: FC<TriggerCardProps> = ({
             the button it replaced, and inconsistent with the identical action on
             the detail page (ProjectTriggerDetail.tsx).
           */}
-          <button
-            type="button"
-            onClick={() => onRunNow(trigger)}
-            disabled={isDisabled}
-            title={isDisabled ? 'Trigger is disabled' : 'Run now'}
-            aria-label={`Run "${trigger.name}" now`}
-            className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-sm border border-border-default bg-transparent px-2 text-xs font-medium text-fg-muted hover:bg-surface-hover hover:text-fg-primary cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}
-          >
-            <Play size={14} aria-hidden="true" />
-            <span className="hidden sm:inline">Run now</span>
-          </button>
+          {canRunNow && (
+            <button
+              type="button"
+              onClick={() => onRunNow(trigger)}
+              disabled={isDisabled}
+              title={isDisabled ? 'Trigger is disabled' : 'Run now'}
+              aria-label={`Run "${trigger.name}" now`}
+              className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-sm border border-border-default bg-transparent px-2 text-xs font-medium text-fg-muted hover:bg-surface-hover hover:text-fg-primary cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}
+            >
+              <Play size={14} aria-hidden="true" />
+              <span className="hidden sm:inline">Run now</span>
+            </button>
+          )}
           <DropdownMenu items={menuItems} aria-label={`Actions for "${trigger.name}"`} />
         </div>
       </div>

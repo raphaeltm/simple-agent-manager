@@ -1,7 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { renderWithQuery } from '../../test-utils/query-test-utils';
 
 const mocks = vi.hoisted(() => ({
   getProjectCredentialAttributionHealth: vi.fn(),
@@ -10,6 +12,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   getProjectCredentialAttributionHealth: mocks.getProjectCredentialAttributionHealth,
+}));
+
+vi.mock('../../../src/hooks/useQueryScope', () => ({
+  useQueryScope: () => 'user-1',
 }));
 
 import { CredentialHealthNavItem } from '../../../src/components/CredentialHealthNavItem';
@@ -86,7 +92,7 @@ describe('CredentialHealthNavItem', () => {
 
   it('shows compact counts and opens the detail modal', async () => {
     const user = userEvent.setup();
-    render(
+    renderWithQuery(
       <MemoryRouter>
         <CredentialHealthNavItem projectId="proj-1" />
       </MemoryRouter>
@@ -119,7 +125,7 @@ describe('CredentialHealthNavItem', () => {
       resources: [],
     });
 
-    render(
+    renderWithQuery(
       <MemoryRouter>
         <CredentialHealthNavItem projectId="proj-1" />
       </MemoryRouter>

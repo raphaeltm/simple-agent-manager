@@ -27,6 +27,7 @@ import {
   DecideProjectAccessRequestSchema,
   jsonValidator,
 } from '../../schemas';
+import { clearCredentialAttributionHealthCache } from '../../services/credential-attribution-health';
 import { getUserInstallationRepositories } from '../../services/github-app';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import {
@@ -38,6 +39,7 @@ import {
   resolveConcurrentAccessRequest,
   resolveConcurrentRequestInsert,
 } from '../../services/project-access-request-reentry';
+import { clearProjectMultiplayerStateCache } from '../../services/project-multiplayer';
 import { applyProjectMemberOffboarding } from '../../services/project-offboarding-apply';
 import { createProjectMemberOffboardingPreview } from '../../services/project-offboarding-preview';
 import { projectOwnershipTransferRoutes } from './ownership-transfer';
@@ -50,17 +52,19 @@ const DEFAULT_INVITE_MAX_EXPIRY_DAYS = 30;
 const projectMembersRoutes = new Hono<{ Bindings: Env }>();
 projectMembersRoutes.route('/', projectOwnershipTransferRoutes);
 
+function clearProjectMemberDerivedCaches(projectId: string): void {
+  clearProjectMultiplayerStateCache(projectId);
+  clearCredentialAttributionHealthCache(projectId);
+}
 function parsePositiveEnvInt(value: string | undefined, fallback: number): number {
   const parsed = parseInt(value ?? '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
-
 function addDays(now: Date, days: number): Date {
   const next = new Date(now);
   next.setUTCDate(next.getUTCDate() + days);
   return next;
 }
-
 function generateInviteToken(tokenBytes: number): string {
   const bytes = new Uint8Array(tokenBytes);
   crypto.getRandomValues(bytes);
@@ -79,17 +83,13 @@ async function hmacInviteToken(rawToken: string, secret: string): Promise<string
     ['sign']
   );
   const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawToken));
-  return Array.from(new Uint8Array(sig))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
+  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
-
 function inviteStatus(row: schema.ProjectInviteLink, now = new Date()): ProjectInviteLinkStatus {
   if (row.revokedAt) return 'revoked';
   if (new Date(row.expiresAt).getTime() <= now.getTime()) return 'expired';
   return 'active';
 }
-
 function toUser(row: {
   id: string | null;
   name: string | null;
@@ -106,7 +106,6 @@ function toUser(row: {
     avatarUrl: row.avatarUrl,
   };
 }
-
 function toInviteLinkResponse(row: schema.ProjectInviteLink): ProjectInviteLinkResponse {
   return {
     id: row.id,
@@ -121,7 +120,6 @@ function toInviteLinkResponse(row: schema.ProjectInviteLink): ProjectInviteLinkR
     useCount: row.useCount,
   };
 }
-
 function toAccessRequestResponse(row: {
   request: schema.ProjectAccessRequest;
   userId: string | null;
@@ -155,7 +153,6 @@ function toAccessRequestResponse(row: {
     }),
   };
 }
-
 async function getProjectInstallation(
   db: ReturnType<typeof drizzle<typeof schema>>,
   project: schema.Project
@@ -171,7 +168,6 @@ async function getProjectInstallation(
   }
   return installation;
 }
-
 async function evaluateRequesterGithubAccess(input: {
   env: Env;
   headers: Headers;
@@ -270,7 +266,6 @@ async function evaluateRequesterGithubAccess(input: {
     };
   }
 }
-
 async function loadProjectInviteByToken(
   c: { env: Env },
   token: string
@@ -484,6 +479,7 @@ projectMembersRoutes.post(
       useCount: 0,
     } satisfies schema.ProjectInviteLink;
     await db.insert(schema.projectInviteLinks).values(link);
+    clearProjectMemberDerivedCaches(projectId);
 
     const response: CreatedProjectInviteLinkResponse = {
       ...toInviteLinkResponse(link),
@@ -515,6 +511,7 @@ projectMembersRoutes.post('/:id/invite-links/:linkId/revoke', async (c) => {
   if (!link) {
     throw errors.notFound('Invite link');
   }
+  clearProjectMemberDerivedCaches(projectId);
   return c.json(toInviteLinkResponse(link));
 });
 
@@ -681,6 +678,7 @@ projectMembersRoutes.post('/invite-links/:token/request', async (c) => {
       updatedAt: now,
     })
     .where(eq(schema.projectInviteLinks.id, link.id));
+  clearProjectMemberDerivedCaches(project.id);
 
   return c.json(await loadAccessRequestWithUser(db, project.id, requestId), existing ? 200 : 201);
 });
@@ -755,6 +753,7 @@ projectMembersRoutes.post(
         updatedAt: now,
       })
       .where(eq(schema.projectAccessRequests.id, request.id));
+    clearProjectMemberDerivedCaches(project.id);
 
     return c.json(await loadAccessRequestWithUser(db, project.id, request.id));
   }
@@ -792,6 +791,7 @@ projectMembersRoutes.post(
     if (!rows[0]) {
       throw errors.notFound('Pending access request');
     }
+    clearProjectMemberDerivedCaches(project.id);
     return c.json(await loadAccessRequestWithUser(db, project.id, requestId));
   }
 );

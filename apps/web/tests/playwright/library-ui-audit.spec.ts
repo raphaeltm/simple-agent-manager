@@ -204,6 +204,10 @@ async function setupApiMocks(
     errorOnPreviewMint = false,
   } = options;
 
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, MOCK_USER.user.id);
+
   // The isolated preview origin. In production this is a different host served by the API Worker
   // with a CSP sandbox header; here it just needs to return a real document so the iframe lays out.
   await page.route(`${PREVIEW_ORIGIN}/**`, (route: Route) =>

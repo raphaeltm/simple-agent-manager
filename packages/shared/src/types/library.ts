@@ -145,8 +145,10 @@ export interface FileMetadataResponse {
 export const LIBRARY_DEFAULTS = {
   /** Maximum file size per upload in bytes (default: 50MB). Env: LIBRARY_UPLOAD_MAX_BYTES */
   UPLOAD_MAX_BYTES: 50 * 1024 * 1024,
-  /** Maximum files per project (default: 500). Env: LIBRARY_MAX_FILES_PER_PROJECT */
-  MAX_FILES_PER_PROJECT: 500,
+  /** Maximum files per project (default: 10000). Env: LIBRARY_MAX_FILES_PER_PROJECT */
+  MAX_FILES_PER_PROJECT: 10_000,
+  /** Maximum total storage bytes per project (default: 2GB). Env: LIBRARY_MAX_TOTAL_BYTES_PER_PROJECT */
+  MAX_TOTAL_BYTES_PER_PROJECT: 2 * 1024 * 1024 * 1024,
   /** Maximum tags per file (default: 20). Env: LIBRARY_MAX_TAGS_PER_FILE */
   MAX_TAGS_PER_FILE: 20,
   /** Maximum tag length in characters (default: 50). Env: LIBRARY_MAX_TAG_LENGTH */

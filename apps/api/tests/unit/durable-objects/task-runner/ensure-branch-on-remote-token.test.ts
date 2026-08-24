@@ -96,6 +96,7 @@ function makeContext(): TaskRunnerContext {
       GITHUB_APP_ID: 'test-app-id',
       GITHUB_APP_PRIVATE_KEY: btoa('test-private-key'),
     },
+    assertRecoveryAuthority: vi.fn().mockResolvedValue(undefined),
   } as unknown as TaskRunnerContext;
 }
 

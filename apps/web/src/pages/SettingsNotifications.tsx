@@ -10,7 +10,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useIsStandalone } from '../hooks/useIsStandalone';
 import { usePushSubscription } from '../hooks/usePushSubscription';
 import { usePwaInstallPrompt } from '../hooks/usePwaInstallPrompt';
-import { getNotificationPreferences, updateNotificationPreference } from '../lib/api';
+import { useQueryScope } from '../hooks/useQueryScope';
+import { updateNotificationPreference } from '../lib/api';
+import {
+  notificationPreferencesQueryOptions,
+  notificationQueryKeys,
+} from '../lib/query-options';
 
 const TYPE_LABELS: Record<NotificationType, { label: string; description: string }> = {
   task_complete: {
@@ -50,10 +55,10 @@ function isGlobalInAppPref(pref: NotificationPreference): boolean {
 
 export function SettingsNotifications() {
   const queryClient = useQueryClient();
+  const queryScope = useQueryScope();
   const preferencesQuery = useQuery({
-    queryKey: ['notification-preferences'],
-    queryFn: getNotificationPreferences,
-    retry: false,
+    ...notificationPreferencesQueryOptions(queryScope),
+    enabled: Boolean(queryScope),
   });
   const preferences = preferencesQuery.data?.preferences ?? [];
   const push = usePushSubscription();
@@ -71,7 +76,7 @@ export function SettingsNotifications() {
     },
     onSuccess: ({ type, enabled }) => {
       queryClient.setQueryData<NotificationPreferencesResponse>(
-        ['notification-preferences'],
+        notificationQueryKeys.preferences(queryScope),
         (previous) => {
           const preferences = previous?.preferences ?? [];
           const existing = preferences.findIndex(

@@ -29,6 +29,50 @@ function capture(error: unknown): CapturedExpectedError {
  * behavior while returning a serializable assertion value to Vitest.
  */
 export class ProjectDataTestDouble extends ProjectData {
+  /**
+   * Read `do_meta.projectId` straight out of DO SQLite, so a test can tell
+   * "this DO has been ensured" apart from "this isolate believes it has".
+   */
+  readPersistedProjectId(): string | null {
+    const row = this.ctx.storage.sql
+      .exec('SELECT value FROM do_meta WHERE key = ?', 'projectId')
+      .toArray()[0] as { value?: unknown } | undefined;
+    return typeof row?.value === 'string' ? row.value : null;
+  }
+
+  /**
+   * Drive the D1 summary write-back without waiting on the debounce timer.
+   *
+   * Goes through the LOCKED path, exactly as the production timer callback does,
+   * so an overlapping-sync test actually exercises the mutex rather than a
+   * bypass that could never observe the race.
+   */
+  async runSummarySyncForTest(): Promise<void> {
+    await this.runSummarySyncLocked();
+  }
+
+  /**
+   * Same, with env overrides applied for the duration of the sync — so a test can
+   * exercise a row cap it would otherwise need thousands of sessions to hit.
+   * Restored afterwards so the override cannot leak into a later assertion.
+   */
+  async runSummarySyncWithEnvForTest(overrides: Record<string, string>): Promise<void> {
+    const mutableEnv = this.env as unknown as Record<string, string | undefined>;
+    const previous = new Map<string, string | undefined>();
+    for (const [key, value] of Object.entries(overrides)) {
+      previous.set(key, mutableEnv[key]);
+      mutableEnv[key] = value;
+    }
+    try {
+      await this.runSummarySyncLocked();
+    } finally {
+      for (const [key, value] of previous) {
+        if (value === undefined) delete mutableEnv[key];
+        else mutableEnv[key] = value;
+      }
+    }
+  }
+
   async alarmWithDurablePromptDelivery(): Promise<void> {
     const previous = this.env.DURABLE_PROMPT_DELIVERY_ENABLED;
     this.env.DURABLE_PROMPT_DELIVERY_ENABLED = 'true';

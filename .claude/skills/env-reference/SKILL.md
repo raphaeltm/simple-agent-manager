@@ -100,6 +100,8 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `SESSION_SLEEP_RETRY_DELAY_MS` — Delay after a fail-closed automatic sleep attempt (default: `300000`)
 - `SESSION_SLEEP_MAX_ATTEMPTS` — Maximum automatic sleep attempts; exhaustion preserves compute and records the error (default: `9`)
 - `SESSION_SLEEP_CLAIM_LEASE_MS` — Reclaim timeout for an interrupted automatic-sleep claim (default: `600000`)
+- `HARNESS_BACKGROUND_WORK_LEASE_MS` — Finite sleep-protection lease renewed by normalized harness background-work lifecycle signals (default: `300000`)
+- `HARNESS_BACKGROUND_WORK_MAX_DURATION_MS` — Absolute ceiling, measured from the last harness lifecycle progress edge, on how long background work may defer sleep (default: `1800000`)
 - `SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS` — Reclaim timeout for an interrupted replacement-runtime wake claim (default: `600000`)
 - `SESSION_LIFECYCLE_ERROR_MAX_LENGTH` — Maximum stored sleep/recovery diagnostic length (default: `2048`)
 - `SESSION_SNAPSHOT_PURGE_ENABLED` — Kill switch for expired snapshot cleanup in D1 and R2 (default: enabled)
@@ -150,6 +152,23 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS` — Minimum re-arm delay for completed diagnosis steps (default: `1000`)
 - `ORCHESTRATOR_ZERO_TASK_GRACE_MS` — Grace before a zero-task mission terminalizes (default: `600000`)
 - `ORCHESTRATOR_MAX_MISSION_LIFETIME_MS` — Mission lifetime backstop (default: `86400000`)
+- `ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS` — ProjectData D1 reconciliation backstop interval for active parent waits (default: `30000`)
+- `ORCHESTRATOR_WAIT_MAX_CHILDREN` — Maximum direct children selected by one durable wait (default: `20`, hard ceiling: `90`)
+- `ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT` — Maximum active durable parent waits per project (default: `100`)
+- `ORCHESTRATOR_WAIT_MAX_DURATION_MS` — Maximum finite durable wait deadline (default: `86400000`)
+- `ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM` — Maximum wait subscriptions reconciled by one ProjectData alarm (default: `10`)
+- `PROJECT_DATA_TOOL_METADATA_MAX_BYTES` — Maximum stored `tool_metadata` bytes per ProjectData message before oversized tool content is stripped into bounded metadata (default: `131072`)
+- `PROJECT_DATA_STORAGE_TELEMETRY_ENABLED` — Enables ProjectData `databaseSize` alarm measurement and D1 telemetry writes (default: `true`)
+- `PROJECT_DATA_STORAGE_LIMIT_BYTES` — Cloudflare SQLite-backed Durable Object storage limit used for ProjectData usage classification (default: `10000000000`)
+- `PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS` — Minimum interval between per-object ProjectData storage measurements (default: `3600000`)
+- `PROJECT_DATA_STORAGE_ALERT_INTERVAL_MS` — Minimum interval between repeated critical/degraded ProjectData storage observability alerts (default: `21600000`)
+- `PROJECT_DATA_STORAGE_NOTICE_RATIO` — ProjectData storage usage ratio classified as `notice` (default: `0.6`)
+- `PROJECT_DATA_STORAGE_WARNING_RATIO` — ProjectData storage usage ratio classified as `warning` (default: `0.8`)
+- `PROJECT_DATA_STORAGE_CRITICAL_RATIO` — ProjectData storage usage ratio classified as `critical` (default: `0.9`)
+- `PROJECT_DATA_STORAGE_DEGRADED_RATIO` — ProjectData storage usage ratio classified as `degraded` (default: `0.95`)
+- `PROJECT_DATA_STORAGE_EMERGENCY_TARGET_RATIO` — Target usage ratio for explicit superadmin ProjectData emergency purge calls (default: `0.9`)
+- `PROJECT_DATA_STORAGE_EMERGENCY_BATCH_ROWS` — Oldest `activity_events` and `acp_session_events` rows deleted per table per emergency purge batch (default: `500`)
+- `PROJECT_DATA_STORAGE_EMERGENCY_MAX_BATCHES` — Maximum emergency purge batches per explicit call (default: `4`)
 
 Absent operational brake keys and KV read errors mean enabled. This fail-open
 behavior preserves availability and intentionally differs from the fail-closed
@@ -218,6 +237,13 @@ by the read-only cron-liveness check.
 
 - `MAX_NODES_PER_USER` — Runtime node cap
 - `MAX_AGENT_SESSIONS_PER_WORKSPACE` — Runtime session cap
+- `VM_ADMISSION_CONTROL_MODE` — VM task/session admission mode for node-packing backpressure (`off`, `shadow`, `enforce`; default: `enforce`)
+- `VM_ADMISSION_LEASE_TTL_MS` — Fenced VM provisioning claim lease duration (default: `1200000`)
+- `VM_ADMISSION_RETRY_MIN_MS` / `VM_ADMISSION_RETRY_MAX_MS` — Bounds for retrying tasks waiting on VM capacity (defaults: `15000` / `60000`)
+- `VM_ADMISSION_WAIT_TIMEOUT_MS` — Maximum visible wait for VM capacity before failing the task (default: `7200000`)
+- `VM_ADMISSION_PROVIDER_COOLDOWN_MS` — Cooldown after provider/account capacity errors such as Hetzner server limits (default: `600000`)
+- `VM_ADMISSION_WAKE_BATCH_SIZE` — Maximum waiting TaskRunner DOs nudged by one capacity event (default: `25`)
+- `VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH` — Maximum provider diagnostic message persisted on admission/capacity rows (default: `500`)
 - `MAX_PROJECTS_PER_USER` — Runtime project cap
 - `MAX_TASKS_PER_PROJECT` — Runtime task cap per project
 - `MAX_TASK_DEPENDENCIES_PER_TASK` — Runtime dependency-edge cap per task
@@ -230,14 +256,25 @@ by the read-only cron-liveness check.
   `apps/api/.env.example` and `apps/www/src/content/docs/docs/guides/self-hosting.md` for supported keys
   and defaults.
 
+### Platform Feedback and Report an Issue
+
+- `PLATFORM_FEEDBACK_PROJECT_ID` — Bootstrap/environment fallback for the private project that receives Report-an-Issue submissions, automated platform triage records, and incident trigger agents. The Admin → Integrations runtime setting is preferred and overrides it; no effective project hides in-app reporting and disables incident trigger sweeps.
+- `PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES`, `PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT`, `PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT`, `PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT`, `PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS`, `PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES`, `PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH` — Hourly platform-error grouping and draft-Idea triage bounds.
+- `PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS`, `PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS`, `PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS`, `PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS`, `PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT` — Durable private incident backlog dispatch/claim/expiry state-machine and sweep bounds.
+- `PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT`, `PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT`, `PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES`, `PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH` — Model-visible incident summary/evidence/resolution size limits.
+- `REPORT_ISSUE_TITLE_MAX_LENGTH`, `REPORT_ISSUE_DESCRIPTION_MAX_LENGTH`, `REPORT_ISSUE_CONTENT_MAX_LENGTH`, `RATE_LIMIT_REPORT_ISSUE_POST` — In-app user report truncation and rate limits.
+
 ### Pagination
 
 - `TASK_LIST_DEFAULT_PAGE_SIZE` — Default task/project list page size
 - `TASK_LIST_MAX_PAGE_SIZE` — Maximum task/project list page size
 - `CHAT_SESSION_MESSAGE_LIMIT` — Default page size for chat session message REST responses when no limit is requested — used by the 3s poll and load-more (default: 500)
 - `CHAT_SESSION_MESSAGE_MAX` — Ceiling any chat session message request is clamped to; the initial full-conversation load requests up to this (default: 50000)
+- `CHAT_SESSION_DELTA_MESSAGE_LIMIT` — Default page size for forward-cursor chat delta fetches after the newest cached browser message (default: 5000)
 - `MCP_TRIGGER_LIST_LIMIT` — Default result count for the `list_triggers` MCP tool (default: 20)
 - `MCP_TRIGGER_LIST_MAX` — Maximum result count accepted by the `list_triggers` MCP tool (default: 100)
+- `MCP_INCIDENT_LIST_LIMIT` — Default result count for the private `list_incident_queue` MCP tool (default: 10)
+- `MCP_INCIDENT_LIST_MAX` — Maximum result count accepted by the private `list_incident_queue` MCP tool (default: 50)
 
 ### Timeouts
 

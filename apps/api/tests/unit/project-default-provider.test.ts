@@ -306,7 +306,12 @@ describe('Project default provider — settings UI', () => {
   });
 
   it('ScalingSettings loads user credentials to determine configured providers', () => {
-    expect(scaling).toContain('listCredentials');
-    expect(scaling).toContain('setConfiguredProviders');
+    // The credential read moved from a component-local `listCredentials()` mount effect
+    // to the shared `useCredentials` query, so the provider list is now derived from
+    // cached data rather than assigned by a `setConfiguredProviders` setter. The intent
+    // of this assertion is unchanged: the selector's options come from the user's own
+    // credentials.
+    expect(scaling).toContain('useCredentials');
+    expect(scaling).toContain('configuredProviders');
   });
 });

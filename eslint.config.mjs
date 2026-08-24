@@ -19,6 +19,11 @@ const samPluginFiles = ['packages/eslint-plugin-sam/**/*.js'];
 // block) because test-double typing is idiomatic and these rules target
 // production request/row-narrowing patterns.
 const samBlockingRules = {
+  // Added 2026-08-23 after an inline react-markdown `components` map was found
+  // remounting the whole rendered document on every render, destroying native
+  // text selection on Android. A prose rule alone was insufficient — the commit
+  // that added .claude/rules/64 violated it in the same diff.
+  'sam/no-inline-markdown-components': 'error',
   'sam/no-local-record-guard': 'error',
   'sam/no-unsafe-json-parse-assertion': 'error',
   'sam/no-unvalidated-request-json': 'error',

@@ -48,6 +48,7 @@ export default defineConfig({
             { slug: 'docs/guides/recent-product-changes' },
             { slug: 'docs/guides/notifications' },
             { slug: 'docs/guides/webhook-triggers' },
+            { slug: 'docs/guides/mcp-servers' },
             { slug: 'docs/guides/app-deployments' },
             { slug: 'docs/guides/self-hosting' },
             { slug: 'docs/guides/local-development' },

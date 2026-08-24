@@ -37,6 +37,7 @@ import {
 } from '../services/node-callback-auth';
 import { issueNodeOriginCertificate } from '../services/origin-ca-certificates';
 import * as projectDataService from '../services/project-data';
+import { wakeVmAdmissionWaiters } from '../services/vm-admission-control';
 import { resolveWorkspaceGitSourceByProjectId } from '../services/workspace-git-source';
 import { nodeDiagnosticIncidentRoutes } from './node-diagnostic-incidents';
 
@@ -212,6 +213,26 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
             })
             .where(eq(schema.workspaces.id, workspace.id));
         }
+      }
+
+      try {
+        const readyNode = await innerDb
+          .select({ userId: schema.nodes.userId })
+          .from(schema.nodes)
+          .where(eq(schema.nodes.id, nodeId))
+          .limit(1);
+        const ownerUserId = readyNode[0]?.userId ?? null;
+        if (ownerUserId) {
+          await wakeVmAdmissionWaiters(c.env, {
+            userId: ownerUserId,
+            reason: 'node_ready',
+          });
+        }
+      } catch (err) {
+        log.warn('node_ready.vm_admission_wakeup_failed', {
+          nodeId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     })()
   );

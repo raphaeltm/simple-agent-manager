@@ -10,9 +10,10 @@ import { seedTheme } from './audit-helpers';
 // `lc.agentActivity !== 'idle'`. `agentActivity` is hydrated at session-load
 // time from the session-detail response's `state.activity` field. So to render
 // the WORKING morph (red Interrupt + spinner ring + Plan pill + elapsed) we mock
-// the session detail with `state.activity === 'prompting'`; to render the IDLE
-// morph (grey Archive) we use an idle state on an active taskless instant
-// session, matching the Cloudflare Container chat path.
+// the session detail with `state.activity === 'prompting'`; to render the awake
+// IDLE morph (Sleep) we use an idle state on an active taskless instant session,
+// matching the Cloudflare Container chat path. A separate sleeping scenario
+// verifies Archive is only exposed after the reversible sleep boundary.
 //
 // Captured at mobile (375x667) and desktop (1280x800), dark (sam) and light
 // (sam-light), both dock states, asserting no horizontal overflow.
@@ -56,21 +57,58 @@ const MOCK_PROJECT = {
   updatedAt: '2026-01-01T00:00:00Z',
 };
 
+const MOCK_CLOUD_CREDENTIALS = [
+  {
+    id: 'cred-cloud-1',
+    provider: 'hetzner',
+    connected: true,
+    createdAt: '2026-01-01T00:00:00Z',
+  },
+];
+
+const MOCK_AGENT_CREDENTIALS = {
+  credentials: [
+    {
+      agentType: 'claude-code',
+      provider: 'anthropic',
+      credentialKind: 'api-key',
+      isActive: true,
+      maskedKey: 'sk-ant-••••test',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    },
+  ],
+};
+
+const MOCK_GITHUB_INSTALLATIONS = [
+  {
+    id: 'gh-inst-1',
+    userId: 'user-test-1',
+    installationId: 'inst-1',
+    accountType: 'personal',
+    accountName: 'testuser',
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  },
+];
+
 const NOW = Date.now();
 
-function makeSession() {
+type CompletionDockMode = 'working' | 'idle' | 'sleeping';
+
+function makeSession(status: 'active' | 'sleeping' = 'active') {
   return {
     id: 'session-1',
     workspaceId: 'ws-1',
     taskId: null,
     topic: 'Active Chat Session',
-    status: 'active',
+    status,
     messageCount: 6,
     startedAt: NOW - 60000,
     endedAt: null,
     createdAt: NOW - 120000,
     lastMessageAt: NOW - 30000,
-    isIdle: false,
+    isIdle: status === 'sleeping',
     agentCompletedAt: null,
     isTerminated: false,
     workspaceUrl: null,
@@ -78,6 +116,32 @@ function makeSession() {
     agentSessionId: 'agent-sess-1',
     agentType: 'claude-code',
     task: null,
+  };
+}
+
+function makeWorkspace(status: 'running' | 'sleeping' = 'running') {
+  return {
+    id: 'ws-1',
+    nodeId: 'node-1',
+    projectId: MOCK_PROJECT.id,
+    name: 'test-workspace',
+    displayName: 'Test workspace',
+    repository: MOCK_PROJECT.repository,
+    branch: 'main',
+    status,
+    vmSize: 'cx22',
+    vmLocation: 'fsn1',
+    workspaceProfile: 'full',
+    devcontainerConfigName: null,
+    vmIp: '203.0.113.10',
+    lastActivityAt: new Date(NOW - 30000).toISOString(),
+    portsPublicEnabled: false,
+    errorMessage: null,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: new Date(NOW).toISOString(),
+    url: null,
+    bootLogs: [],
+    chatSessionId: 'session-1',
   };
 }
 
@@ -136,7 +200,12 @@ const IDLE_STATE = {
   lastStopReason: null,
 };
 
-async function setupApiMocks(page: Page, opts: { working: boolean }) {
+async function setupApiMocks(page: Page, opts: { mode: CompletionDockMode }) {
+  const state: { mode: CompletionDockMode; sleepRequests: string[] } = {
+    mode: opts.mode,
+    sleepRequests: [],
+  };
+
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -145,29 +214,47 @@ async function setupApiMocks(page: Page, opts: { working: boolean }) {
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
-    if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
-    if (path.startsWith('/api/credentials')) return respond(200, []);
+    if (path.startsWith('/api/notifications'))
+      return respond(200, { notifications: [], unreadCount: 0 });
+    if (path === '/api/credentials/agent') return respond(200, MOCK_AGENT_CREDENTIALS);
+    if (path.startsWith('/api/credentials')) return respond(200, MOCK_CLOUD_CREDENTIALS);
     if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
     if (path === '/api/trial/status') return respond(200, { available: false });
     if (path === '/api/agents') return respond(200, { agents: [] });
-    if (path === '/api/github/installations') return respond(200, []);
-    if (path === '/api/workspaces') return respond(200, []);
+    if (path === '/api/github/installations') return respond(200, MOCK_GITHUB_INSTALLATIONS);
+    if (path === '/api/workspaces') {
+      return respond(200, [makeWorkspace(state.mode === 'sleeping' ? 'sleeping' : 'running')]);
+    }
+    if (path === '/api/workspaces/ws-1/sleep') {
+      if (route.request().method() !== 'POST') {
+        return respond(405, { error: 'METHOD_NOT_ALLOWED' });
+      }
+      state.sleepRequests.push(`${route.request().method()} ${path}`);
+      state.mode = 'sleeping';
+      return respond(200, {
+        status: 'sleeping',
+        workspaceId: 'ws-1',
+        chatSessionId: 'session-1',
+        snapshotExpiresAt: '2026-08-28T00:00:00.000Z',
+      });
+    }
 
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (projectMatch) {
       const subPath = projectMatch[2] || '';
+      const session = makeSession(state.mode === 'sleeping' ? 'sleeping' : 'active');
 
       if (subPath === '/sessions') {
-        return respond(200, { sessions: [makeSession()], total: 1, hasMore: false });
+        return respond(200, { sessions: [session], total: 1, hasMore: false });
       }
 
       const sessionDetailMatch = subPath.match(/^\/sessions\/([^/]+)$/);
       if (sessionDetailMatch) {
         return respond(200, {
-          session: makeSession(),
+          session,
           messages: MESSAGES,
           hasMore: false,
-          state: opts.working ? WORKING_STATE : IDLE_STATE,
+          state: state.mode === 'working' ? WORKING_STATE : IDLE_STATE,
         });
       }
 
@@ -182,10 +269,13 @@ async function setupApiMocks(page: Page, opts: { working: boolean }) {
       return respond(200, MOCK_PROJECT);
     }
 
-    if (path === '/api/projects') return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
+    if (path === '/api/projects')
+      return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
 
-    return respond(200, {});
+    return respond(404, { error: 'UNMOCKED_API_ROUTE', path });
   });
+
+  return state;
 }
 
 async function screenshot(page: Page, name: string) {
@@ -218,15 +308,40 @@ for (const theme of ['dark', 'light'] as const) {
   test.describe(`CompletionDock — ${theme} — Desktop`, () => {
     test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
-    test('idle: grey Archive control + plan pill', async ({ page }) => {
+    test('awake idle: blue Sleep control + plan pill', async ({ page }) => {
       await seedTheme(page, theme);
-      await setupApiMocks(page, { working: false });
+      await setupApiMocks(page, { mode: 'idle' });
       await gotoChat(page);
-      await expect(page.getByRole('button', { name: 'Archive conversation' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Sleep session' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Archive conversation' })).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'View plan' })).toBeVisible();
-      await screenshot(page, `completion-dock-idle-${theme}-desktop`);
+      await screenshot(page, `completion-dock-sleep-${theme}-desktop`);
       await assertNoOverflow(page);
+    });
 
+    if (theme === 'dark') {
+      test('awake idle: clicking Sleep posts to workspace sleep and refreshes to Archive', async ({
+        page,
+      }) => {
+        await seedTheme(page, theme);
+        const apiState = await setupApiMocks(page, { mode: 'idle' });
+        await gotoChat(page);
+
+        await page.getByRole('button', { name: 'Sleep session' }).click();
+
+        await expect
+          .poll(() => apiState.sleepRequests)
+          .toEqual(['POST /api/workspaces/ws-1/sleep']);
+        await expect(page.getByRole('button', { name: 'Archive conversation' })).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Sleep session' })).toHaveCount(0);
+        await assertNoOverflow(page);
+      });
+    }
+
+    test('sleeping: grey Archive control + confirmation', async ({ page }) => {
+      await seedTheme(page, theme);
+      await setupApiMocks(page, { mode: 'sleeping' });
+      await gotoChat(page);
       await page.getByRole('button', { name: 'Archive conversation' }).click();
       await expect(page.getByRole('dialog')).toBeVisible();
       await expect(page.getByText('Archive conversation?')).toBeVisible();
@@ -236,7 +351,7 @@ for (const theme of ['dark', 'light'] as const) {
 
     test('working: red Interrupt + spinner + plan pill', async ({ page }) => {
       await seedTheme(page, theme);
-      await setupApiMocks(page, { working: true });
+      await setupApiMocks(page, { mode: 'working' });
       await gotoChat(page);
       await expect(page.getByRole('button', { name: 'Interrupt agent' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'View plan' })).toBeVisible();
@@ -246,15 +361,21 @@ for (const theme of ['dark', 'light'] as const) {
   });
 
   test.describe(`CompletionDock — ${theme} — Mobile`, () => {
-    test('idle: grey Archive control + plan pill', async ({ page }) => {
+    test('awake idle: blue Sleep control + plan pill', async ({ page }) => {
       await seedTheme(page, theme);
-      await setupApiMocks(page, { working: false });
+      await setupApiMocks(page, { mode: 'idle' });
       await gotoChat(page);
-      await expect(page.getByRole('button', { name: 'Archive conversation' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Sleep session' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Archive conversation' })).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'View plan' })).toBeVisible();
-      await screenshot(page, `completion-dock-idle-${theme}-mobile`);
+      await screenshot(page, `completion-dock-sleep-${theme}-mobile`);
       await assertNoOverflow(page);
+    });
 
+    test('sleeping: grey Archive control + confirmation', async ({ page }) => {
+      await seedTheme(page, theme);
+      await setupApiMocks(page, { mode: 'sleeping' });
+      await gotoChat(page);
       await page.getByRole('button', { name: 'Archive conversation' }).click();
       await expect(page.getByRole('dialog')).toBeVisible();
       await expect(page.getByText('Archive conversation?')).toBeVisible();
@@ -264,7 +385,7 @@ for (const theme of ['dark', 'light'] as const) {
 
     test('working: red Interrupt + spinner + plan pill', async ({ page }) => {
       await seedTheme(page, theme);
-      await setupApiMocks(page, { working: true });
+      await setupApiMocks(page, { mode: 'working' });
       await gotoChat(page);
       await expect(page.getByRole('button', { name: 'Interrupt agent' })).toBeVisible();
       await screenshot(page, `completion-dock-working-${theme}-mobile`);

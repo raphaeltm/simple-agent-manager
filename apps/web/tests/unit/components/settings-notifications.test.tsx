@@ -26,6 +26,14 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   updateNotificationPreference: mocks.updateNotificationPreference,
 }));
 
+
+// `useQueryScope()` reads the authenticated identity, and every migrated query
+// is keyed by it. Without a provider `useAuth` throws, so supply a stable identity.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
+}));
+
+import { notificationQueryKeys } from '../../../src/lib/query-options';
 import { SettingsNotifications } from '../../../src/pages/SettingsNotifications';
 
 function renderSettingsNotifications() {
@@ -49,6 +57,10 @@ function globalPref(
 ): NotificationPreference {
   return { notificationType, projectId: null, channel: 'in_app', enabled };
 }
+
+/** Must match the id returned by the mocked `useAuth` — the preferences key is
+ * scoped by it, so a refetch under a different scope would match nothing. */
+const SCOPE = 'user-1';
 
 describe('SettingsNotifications', () => {
   beforeEach(() => {
@@ -174,7 +186,7 @@ describe('SettingsNotifications', () => {
     });
 
     mocks.getNotificationPreferences.mockRejectedValueOnce(new Error('refresh failed'));
-    await queryClient.refetchQueries({ queryKey: ['notification-preferences'] });
+    await queryClient.refetchQueries({ queryKey: notificationQueryKeys.preferences(SCOPE) });
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/Showing the last saved settings/i);
     expect(taskCompleteSwitch).toBeInTheDocument();

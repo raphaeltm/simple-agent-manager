@@ -6,12 +6,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TriggerForm } from '../../../src/components/triggers/TriggerForm';
 import { ToastProvider } from '../../../src/hooks/useToast';
 import { ProjectContext, type ProjectContextValue } from '../../../src/pages/ProjectContext';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 vi.mock('../../../src/lib/api', () => ({
   createTrigger: vi.fn().mockResolvedValue({}),
   updateTrigger: vi.fn().mockResolvedValue({}),
   listAgentProfiles: vi.fn().mockResolvedValue({ items: [] }),
   listSkills: vi.fn().mockResolvedValue({ items: [] }),
+}));
+
+
+// `useQueryScope()` reads the authenticated identity, and every migrated query
+// is keyed by it. Without a provider `useAuth` throws, so supply a stable identity.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
 }));
 
 const PROJECT_CONTEXT: ProjectContextValue = {
@@ -29,7 +37,7 @@ function renderForm(onClose = vi.fn(), editTrigger: TriggerResponse | null = nul
         <TriggerForm open onClose={onClose} editTrigger={editTrigger} onSaved={vi.fn()} />
       </ToastProvider>
     </ProjectContext.Provider>
-  );
+  , { wrapper: QueryTestWrapper });
   return { onClose, ...utils };
 }
 

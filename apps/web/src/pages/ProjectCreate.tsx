@@ -1,35 +1,46 @@
-import type { GitHubInstallation } from '@simple-agent-manager/shared';
 import { Breadcrumb, PageLayout } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import { ProjectOnboardingWizard } from '../components/project-onboarding';
 import { useLoginProviders } from '../hooks/useLoginProviders';
-import { getArtifactsEnabled, listGitHubInstallations } from '../lib/api';
+import { useQueryScope } from '../hooks/useQueryScope';
+import {
+  githubInstallationsQueryOptions,
+  projectArtifactsEnabledQueryOptions,
+} from '../lib/query-options';
 
 export function ProjectCreate() {
   const providers = useLoginProviders();
-  const [installations, setInstallations] = useState<GitHubInstallation[]>([]);
-  const [artifactsEnabled, setArtifactsEnabled] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const queryScope = useQueryScope();
 
-  const load = useCallback(async () => {
-    try {
-      setLoadError(null);
-      setLoading(true);
-      const [data, artifacts] = await Promise.all([listGitHubInstallations(), getArtifactsEnabled()]);
-      setInstallations(data);
-      setArtifactsEnabled(artifacts);
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Failed to load installations');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const installationsQuery = useQuery({
+    ...githubInstallationsQueryOptions(queryScope),
+    enabled: Boolean(queryScope),
+  });
+  const artifactsEnabledQuery = useQuery({
+    ...projectArtifactsEnabledQueryOptions(queryScope),
+    enabled: Boolean(queryScope),
+  });
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const loading =
+    Boolean(queryScope) &&
+    [installationsQuery, artifactsEnabledQuery].some(
+      (query) => query.isPending && query.data === undefined
+    );
+  const loadError =
+    installationsQuery.data === undefined && installationsQuery.error
+      ? installationsQuery.error instanceof Error
+        ? installationsQuery.error.message
+        : 'Failed to load installations'
+      : artifactsEnabledQuery.data === undefined && artifactsEnabledQuery.error
+        ? artifactsEnabledQuery.error instanceof Error
+          ? artifactsEnabledQuery.error.message
+          : 'Failed to load installations'
+        : null;
+  const retry = () => {
+    void installationsQuery.refetch();
+    void artifactsEnabledQuery.refetch();
+  };
 
   return (
     <PageLayout title="New Project" maxWidth="xl">
@@ -43,12 +54,12 @@ export function ProjectCreate() {
 
       <div className="mt-4">
         <ProjectOnboardingWizard
-          installations={installations}
-          artifactsEnabled={artifactsEnabled}
+          installations={installationsQuery.data ?? []}
+          artifactsEnabled={artifactsEnabledQuery.data ?? false}
           gitlabEnabled={providers.gitlab}
           loading={loading}
           loadError={loadError}
-          onRetryInstallations={load}
+          onRetryInstallations={retry}
         />
       </div>
     </PageLayout>

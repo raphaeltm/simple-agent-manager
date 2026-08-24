@@ -161,7 +161,7 @@ describe('requireRepositoryUserAccess', () => {
         }),
         'user-1'
       )
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject(INSTALLATION_ROW);
 
     // The intersection source WAS consulted — the gate ran, it was not skipped.
     expect(mocks.getUserInstallationRepositories).toHaveBeenCalledWith(
@@ -236,7 +236,7 @@ describe('requireRepositoryUserAccess', () => {
         makeProject({ githubRepoId: 42 }),
         'user-1'
       )
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject(INSTALLATION_ROW);
 
     // Intersection uses the user OAuth token + the installation's EXTERNAL id.
     expect(getUserInstallationRepositories).toHaveBeenCalledWith('github-user-token', '120081765', {
@@ -258,7 +258,7 @@ describe('requireRepositoryUserAccess', () => {
         makeProject({ githubRepoId: null }),
         'user-1'
       )
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject(INSTALLATION_ROW);
   });
 
   it('rejects with 404 when the project installation row is missing', async () => {
@@ -285,7 +285,7 @@ describe('requireRepositoryUserAccess', () => {
         sharedProject,
         'admin-user'
       )
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ ...INSTALLATION_ROW, userId: 'owner-user' });
 
     expect(getUserInstallationRepositories).toHaveBeenCalledWith(
       'admin-token',

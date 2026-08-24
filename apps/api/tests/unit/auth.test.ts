@@ -50,35 +50,16 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: mocks.drizzle,
 }));
 
-vi.mock('../../src/services/platform-config', () => ({
-  getGitHubOAuthConfig: async (env: {
-    GITHUB_CLIENT_ID?: string;
-    GITHUB_CLIENT_SECRET?: string;
-  }) =>
-    env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET
-      ? { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET }
-      : null,
-  getGoogleLoginOAuthConfig: async (env: {
-    GOOGLE_LOGIN_CLIENT_ID?: string;
-    GOOGLE_LOGIN_CLIENT_SECRET?: string;
-  }) =>
-    env.GOOGLE_LOGIN_CLIENT_ID && env.GOOGLE_LOGIN_CLIENT_SECRET
-      ? { clientId: env.GOOGLE_LOGIN_CLIENT_ID, clientSecret: env.GOOGLE_LOGIN_CLIENT_SECRET }
-      : null,
-  getGitLabOAuthConfig: async (env: {
-    GITLAB_HOST?: string;
-    GITLAB_CLIENT_ID?: string;
-    GITLAB_CLIENT_SECRET?: string;
-  }) =>
-    env.GITLAB_HOST && env.GITLAB_CLIENT_ID && env.GITLAB_CLIENT_SECRET
-      ? {
-          host: env.GITLAB_HOST,
-          apiBaseUrl: `${env.GITLAB_HOST}/api/v4`,
-          clientId: env.GITLAB_CLIENT_ID,
-          clientSecret: env.GITLAB_CLIENT_SECRET,
-        }
-      : null,
-}));
+vi.mock('../../src/services/platform-config', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/services/platform-config')>();
+  const { buildResolvedPlatformConfig } = await import('../helpers/platform-config-fixture');
+  return {
+    ...actual,
+    // Mock only the D1 boundary; the real select* projections still run.
+    resolvePlatformConfig: async (env: Parameters<typeof buildResolvedPlatformConfig>[0]) =>
+      buildResolvedPlatformConfig(env),
+  };
+});
 
 function fakeEnv(requireApproval = 'true') {
   return {

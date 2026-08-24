@@ -3,6 +3,12 @@ import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockNavigate = vi.fn();
+// `useQueryScope()` reads the authenticated identity, and every migrated query
+// is keyed by it. Without a provider `useAuth` throws, so supply a stable identity.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
+}));
+
 vi.mock('react-router', async () => {
   const actual = await vi.importActual('react-router');
   return { ...actual, useNavigate: () => mockNavigate };
@@ -21,13 +27,14 @@ vi.mock('../../../src/components/UserMenu', () => ({
 }));
 
 import { Chats } from '../../../src/pages/Chats';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 function renderChats() {
   return render(
     <MemoryRouter initialEntries={['/chats']}>
       <Chats />
     </MemoryRouter>
-  );
+  , { wrapper: QueryTestWrapper });
 }
 
 const NOW = Date.now();

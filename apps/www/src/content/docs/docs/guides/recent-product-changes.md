@@ -20,12 +20,12 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 ### For self-hosters & admins
 
-| Change                         | What it enables                                                                                                                       | Where to configure it          |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| **In-app issue reporting**     | Route user reports into a project you watch. The feature stays hidden until you configure it.                                         | `PLATFORM_FEEDBACK_PROJECT_ID` |
-| **Automated error triage**     | SAM groups recent platform errors hourly and files deduplicated draft Ideas for them.                                                 | `PLATFORM_FEEDBACK_TRIAGE_*`   |
-| **Deployment diagnosis agent** | Superadmins can hand an error — or a whole time window — to an AI agent from **Admin → Errors**, and save the result as a draft Idea. | `DEBUG_AGENT_*`                |
-| **Durable diagnosis runs**     | A diagnosis keeps running if you close the tab, with a runs list, status, and retry.                                                  | **Admin → Errors**             |
+| Change                         | What it enables                                                                                                                       | Where to configure it                                              |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| **In-app issue reporting**     | Route user reports into a project you watch. The feature stays hidden until you configure it.                                         | Admin → Integrations, with `PLATFORM_FEEDBACK_PROJECT_ID` fallback |
+| **Automated error triage**     | SAM groups recent platform errors hourly and files deduplicated draft Ideas for them.                                                 | `PLATFORM_FEEDBACK_TRIAGE_*`                                       |
+| **Deployment diagnosis agent** | Superadmins can hand an error — or a whole time window — to an AI agent from **Admin → Errors**, and save the result as a draft Idea. | `DEBUG_AGENT_*`                                                    |
+| **Durable diagnosis runs**     | A diagnosis keeps running if you close the tab, with a runs list, status, and retry.                                                  | **Admin → Errors**                                                 |
 
 ## Report an issue without leaving SAM
 
@@ -39,7 +39,7 @@ Reports become draft Ideas in a project the deployment nominates. If you don't s
 
 [Persistent sessions](/docs/guides/instant-sessions/) now use the same snapshot contract on Instant containers and standard VM workspaces. SAM checkpoints after idle turns and requires a verified final checkpoint before sleep. The snapshot contains the agent's home directory (including harness session state) and repository work in progress, so a replacement runtime can resume instead of starting blank. Credential files are deliberately excluded and re-provisioned fresh on restore.
 
-VM compute is stopped after a successful sleep checkpoint and may be deleted normally. A same-chat follow-up atomically provisions one replacement workspace, restores the exact saved harness session, then delivers the queued message. Explicit archive remains destructive, and sleeping state expires after seven days.
+VM compute is stopped after a successful sleep checkpoint and may be deleted normally. Users can also put an awake idle conversation-mode session with a workspace to sleep manually from the chat lifecycle control; task-mode sessions keep their task completion lifecycle. A same-chat follow-up atomically provisions one replacement workspace, restores the exact saved harness session, then delivers the queued message. Explicit archive remains destructive, appears after the reversible sleep boundary, and sleeping state expires after seven days.
 
 What you actually see:
 

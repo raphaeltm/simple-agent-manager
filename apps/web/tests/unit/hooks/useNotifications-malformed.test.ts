@@ -2,6 +2,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useNotifications } from '../../../src/hooks/useNotifications';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 // Regression: NotificationCenter renders in the app shell on every page and
 // derives tab counts via `notifications.filter(...)`. A notifications payload
@@ -16,6 +17,10 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   listNotifications: (...args: unknown[]) => mockListNotifications(...args),
   getNotificationUnreadCount: () => Promise.resolve({ count: 0 }),
   getNotificationWsUrl: () => 'ws://localhost:9/ws',
+}));
+
+vi.mock('../../../src/hooks/useQueryScope', () => ({
+  useQueryScope: () => 'user-1',
 }));
 
 class FakeWebSocket {
@@ -40,7 +45,7 @@ describe('useNotifications — malformed payload resilience', () => {
   it('degrades to an empty list when the response has no notifications array', async () => {
     mockListNotifications.mockResolvedValue({ error: 'upstream unavailable' });
 
-    const { result } = renderHook(() => useNotifications());
+    const { result } = renderHook(() => useNotifications(), { wrapper: QueryTestWrapper });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     // The old behavior stored `undefined`, so `.filter` in NotificationCenter threw.
@@ -58,7 +63,7 @@ describe('useNotifications — malformed payload resilience', () => {
     });
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    const { result } = renderHook(() => useNotifications());
+    const { result } = renderHook(() => useNotifications(), { wrapper: QueryTestWrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     const ws = FakeWebSocket.last!;
@@ -85,7 +90,7 @@ describe('useNotifications — malformed payload resilience', () => {
     });
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    const { result } = renderHook(() => useNotifications());
+    const { result } = renderHook(() => useNotifications(), { wrapper: QueryTestWrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     const ws = FakeWebSocket.last!;
@@ -127,7 +132,7 @@ describe('useNotifications — malformed payload resilience', () => {
       nextCursor: null,
     });
 
-    const { result } = renderHook(() => useNotifications());
+    const { result } = renderHook(() => useNotifications(), { wrapper: QueryTestWrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     const ws = FakeWebSocket.last!;
@@ -163,7 +168,7 @@ describe('useNotifications — malformed payload resilience', () => {
       nextCursor: null,
     });
 
-    const { result } = renderHook(() => useNotifications());
+    const { result } = renderHook(() => useNotifications(), { wrapper: QueryTestWrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     const ws = FakeWebSocket.last!;
@@ -204,7 +209,7 @@ describe('useNotifications — malformed payload resilience', () => {
       nextCursor: null,
     });
 
-    const { result } = renderHook(() => useNotifications());
+    const { result } = renderHook(() => useNotifications(), { wrapper: QueryTestWrapper });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.notifications).toHaveLength(1);
@@ -240,7 +245,7 @@ describe('useNotifications — malformed payload resilience', () => {
     });
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    const { result } = renderHook(() => useNotifications());
+    const { result } = renderHook(() => useNotifications(), { wrapper: QueryTestWrapper });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 

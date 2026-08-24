@@ -154,7 +154,9 @@ describe('cf-container runtime spike contracts', () => {
     expect(nodeAgent).toContain(
       "markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'stop_agent_session')"
     );
-    expect(activityCallback).toContain("body.activity === 'idle' || body.activity === 'error'");
+    expect(activityCallback).toContain("body.activity === 'idle' && !harnessWorkKeepsRuntimeActive");
+    expect(activityCallback).toContain("body.runtimeWorkState === 'active'");
+    expect(activityCallback).toContain("body.runtimeWorkState === 'settling'");
     expect(acpSessionsRoute).toContain("body.status === 'completed' || body.status === 'failed'");
   });
 

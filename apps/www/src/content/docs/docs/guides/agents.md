@@ -157,18 +157,13 @@ Agent responses can be played back as audio using Deepgram Aura 2 (via Workers A
 
 ### Session Lifecycle
 
-Each agent session follows this state machine:
+SAM tracks related lifecycle state at three levels:
 
-```
-pending → assigned → running → completed/failed/interrupted
-```
+- **Chat session**: `active`, `sleeping`, `stopped`, or `error` in the public API. A sleeping conversation keeps the composer visible so a same-chat follow-up can wake and resume it.
+- **Task record**: `draft`, `ready`, `queued`, `delegated`, `in_progress`, `completed`, `failed`, or `cancelled`. Task-mode work keeps its task completion lifecycle instead of showing the manual Sleep action while idle.
+- **Runtime agent session**: `running`, `recovery`, `sleeping`, `suspended`, `stopped`, or `error`. Recovery means SAM is rebuilding runtime compute and restoring the saved harness/session state.
 
-- **Pending**: Session created, waiting for workspace assignment
-- **Assigned**: Workspace ready, agent starting up
-- **Running**: Agent actively executing
-- **Completed**: Agent finished successfully
-- **Failed**: Agent encountered an error
-- **Interrupted**: Connection to the agent was lost
+Conversation-mode sessions with an attached workspace can be manually slept when awake and idle. Archive remains destructive and appears after the reversible sleep boundary.
 
 SAM now backs chat sessions with task records across more runtime paths. In practice, that means forking, archive/complete controls, lineage, and status reporting behave consistently whether the work started as an idea execution, a full task, or an instant chat.
 
@@ -192,6 +187,10 @@ Running agents have access to project-aware MCP tools:
 | `get_session_messages` | Read conversation history (consecutive streaming tokens are concatenated into logical messages)                      |
 | `search_messages`      | Search messages by keyword — uses FTS5 full-text search for completed sessions; keyword matching for active sessions |
 | `list_triggers`        | List this project's automation triggers, optionally filtered by status or source type                                |
+| `list_incident_queue`  | List grouped private feedback incidents; available only inside the configured feedback project                       |
+| `get_incident`         | Read one bounded, redacted private incident and its untrusted evidence                                               |
+| `claim_incident`       | Atomically claim a private incident for the current task                                                             |
+| `resolve_incident`     | Terminally resolve or reject a claimed private incident                                                              |
 | `update_task_status`   | Report progress                                                                                                      |
 | `get_task_details`     | Inspect task state, persisted output fields, PR/error details, session id, and bounded recent assistant diagnostics  |
 | `complete_task`        | Mark current work as done, optionally with structured completion evidence                                            |

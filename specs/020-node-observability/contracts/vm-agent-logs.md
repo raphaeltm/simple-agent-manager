@@ -5,10 +5,12 @@
 
 ## Authentication
 
-All log endpoints use the same authentication as existing node-level endpoints (`requireNodeEventAuth`):
-1. Node management JWT via `Authorization: Bearer <token>` header (control plane proxy)
-2. Node management JWT via `?token=<token>` query parameter (browser direct)
-3. Any valid workspace session cookie for a workspace on this node (browser)
+Log endpoints are node-wide diagnostics and require a node-scoped management JWT:
+
+1. `Authorization: Bearer <token>` header for control-plane proxy requests.
+2. `?token=<token>` query parameter for WebSocket upgrade requests that cannot set custom headers.
+
+Workspace browser session cookies and workspace-scoped management tokens are rejected. Browser/user-facing log access goes through the control-plane `/api/nodes/:nodeId/...` proxy routes, which authenticate the user, verify node ownership, and mint a node-scoped management token for the VM Agent.
 
 ---
 
@@ -80,7 +82,7 @@ Real-time log streaming via WebSocket. Delivers new log entries as they are gene
 
 ### Connection
 
-WebSocket upgrade at `GET /logs/stream`. Authentication via `?token=<management-jwt>` query parameter.
+WebSocket upgrade at `GET /logs/stream`. Authentication via `?token=<node-scoped-management-jwt>` query parameter.
 
 ### Query Parameters (set at connection time)
 
@@ -89,7 +91,7 @@ WebSocket upgrade at `GET /logs/stream`. Authentication via `?token=<management-
 | `source` | string | `all` | Filter by source |
 | `level` | string | `info` | Minimum level |
 | `container` | string | — | Docker container name filter |
-| `token` | string | required | Node management JWT |
+| `token` | string | required | Node-scoped management JWT |
 
 ### WebSocket Messages
 

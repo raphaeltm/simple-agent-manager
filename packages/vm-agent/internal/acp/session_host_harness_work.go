@@ -1,0 +1,380 @@
+package acp
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	acpsdk "github.com/coder/acp-go-sdk"
+)
+
+const (
+	claudeSDKMessageMethod     = "_claude/sdkMessage"
+	claudeHarnessWorkSource    = "claude_sdk"
+	claudeBackgroundTasksLevel = "background_tasks_changed"
+
+	// Fallback bounds used when SessionHostConfig leaves them unset (zero).
+	// Operators override via CLAUDE_HARNESS_LIFECYCLE_MAX_BYTES /
+	// _MAX_TASKS / _MAX_ID_BYTES; see internal/config.
+	maxClaudeLifecycleBytes   = 64 * 1024
+	maxClaudeLifecycleTasks   = 256
+	maxClaudeLifecycleIDBytes = 256
+)
+
+// harnessLifecycleLimits resolves the configured bounds, falling back to the
+// package defaults so a zero-valued config cannot disable bounding.
+func (h *SessionHost) harnessLifecycleLimits() (maxBytes int, maxTasks int, maxIDBytes int) {
+	maxBytes, maxTasks, maxIDBytes = maxClaudeLifecycleBytes, maxClaudeLifecycleTasks, maxClaudeLifecycleIDBytes
+	if h == nil {
+		return
+	}
+	if h.config.ClaudeHarnessLifecycleMaxBytes > 0 {
+		maxBytes = h.config.ClaudeHarnessLifecycleMaxBytes
+	}
+	if h.config.ClaudeHarnessLifecycleMaxTasks > 0 {
+		maxTasks = h.config.ClaudeHarnessLifecycleMaxTasks
+	}
+	if h.config.ClaudeHarnessLifecycleMaxIDBytes > 0 {
+		maxIDBytes = h.config.ClaudeHarnessLifecycleMaxIDBytes
+	}
+	return
+}
+
+type harnessWorkState string
+
+const (
+	harnessWorkInactive harnessWorkState = "inactive"
+	harnessWorkActive   harnessWorkState = "active"
+	harnessWorkSettling harnessWorkState = "settling"
+)
+
+type harnessWorkStatus struct {
+	State      harnessWorkState
+	Count      int
+	Source     string
+	ProgressAt time.Time
+}
+
+// harnessLifecycleSessionMeta opts into only the Claude SDK lifecycle messages
+// needed to determine whether harness-owned background work is live. The raw
+// messages are consumed locally by the VM Agent and never leave the VM.
+func harnessLifecycleSessionMeta(agentType string) map[string]any {
+	if agentType != "claude-code" {
+		return nil
+	}
+	return map[string]any{
+		"claudeCode": map[string]any{
+			"emitRawSDKMessages": []map[string]string{
+				{"type": "system", "subtype": claudeBackgroundTasksLevel},
+				{"type": "system", "subtype": "task_started"},
+				{"type": "system", "subtype": "task_progress"},
+				{"type": "system", "subtype": "task_updated"},
+				{"type": "system", "subtype": "task_notification"},
+				{"type": "result", "origin": "task-notification"},
+			},
+		},
+	}
+}
+
+type claudeSDKMessageNotification struct {
+	SessionID string                    `json:"sessionId"`
+	Message   claudeSDKLifecycleMessage `json:"message"`
+}
+
+// claudeSDKLifecycleMessage intentionally models only non-sensitive lifecycle
+// fields. Descriptions, prompts, output paths, summaries, and result text are
+// never retained, logged, or forwarded to the control plane.
+type claudeSDKLifecycleMessage struct {
+	Type      string `json:"type"`
+	Subtype   string `json:"subtype"`
+	SessionID string `json:"session_id"`
+	TaskID    string `json:"task_id"`
+	Tasks     []struct {
+		TaskID string `json:"task_id"`
+	} `json:"tasks"`
+	Patch struct {
+		Status string `json:"status"`
+	} `json:"patch"`
+	Origin struct {
+		Kind string `json:"kind"`
+	} `json:"origin"`
+}
+
+// HandleExtensionMethod implements acpsdk.ExtensionMethodHandler. Unknown
+// extension methods follow ACP's method-not-found contract; notifications do
+// not receive an error response from the peer.
+func (c *sessionHostClient) HandleExtensionMethod(_ context.Context, method string, params json.RawMessage) (any, error) {
+	if method != claudeSDKMessageMethod {
+		return nil, acpsdk.NewMethodNotFound(method)
+	}
+	maxBytes, maxTasks, maxIDBytes := c.host.harnessLifecycleLimits()
+	if len(params) > maxBytes {
+		return nil, fmt.Errorf("Claude SDK lifecycle notification exceeds %d bytes", maxBytes)
+	}
+
+	var notification claudeSDKMessageNotification
+	if err := json.Unmarshal(params, &notification); err != nil {
+		return nil, fmt.Errorf("decode Claude SDK lifecycle notification: %w", err)
+	}
+	if !validClaudeLifecycleShape(notification, maxTasks, maxIDBytes) {
+		return nil, fmt.Errorf("Claude SDK lifecycle notification exceeds bounded identifier/task limits")
+	}
+	if !c.host.matchesHarnessSession(notification.SessionID, notification.Message.SessionID) {
+		return nil, nil
+	}
+	if c.host.applyClaudeHarnessLifecycle(notification.Message) {
+		c.host.nudgeHarnessActivityReport()
+	}
+	return nil, nil
+}
+
+func validClaudeLifecycleShape(notification claudeSDKMessageNotification, maxTasks int, maxIDBytes int) bool {
+	if len(notification.SessionID) > maxIDBytes ||
+		len(notification.Message.SessionID) > maxIDBytes ||
+		len(notification.Message.TaskID) > maxIDBytes ||
+		len(notification.Message.Tasks) > maxTasks {
+		return false
+	}
+	for _, task := range notification.Message.Tasks {
+		if len(task.TaskID) > maxIDBytes {
+			return false
+		}
+	}
+	return true
+}
+
+// matchesHarnessSession runs on the ACP SDK's single notification-processing
+// goroutine, so it MUST NOT take h.mu: the handshake holds that lock while its
+// in-flight RPC waits on this very goroutine (see the mirror-field comment on
+// SessionHost). It reads the lock-free mirror instead.
+func (h *SessionHost) matchesHarnessSession(outerSessionID, innerSessionID string) bool {
+	expected := h.loadMirroredSessionID()
+	if expected == "" {
+		return false
+	}
+	return outerSessionID == expected && (innerSessionID == "" || innerSessionID == expected)
+}
+
+func (h *SessionHost) resetHarnessWorkForAgent(agentType string) {
+	h.harnessWorkMu.Lock()
+	h.stopHarnessWorkRereportLocked()
+	progressAt := h.nextHarnessWorkProgressAtLocked()
+	h.harnessTaskIDs = nil
+	h.harnessWork = harnessWorkStatus{}
+	if agentType == "claude-code" {
+		h.harnessWork.State = harnessWorkInactive
+		h.harnessWork.Source = claudeHarnessWorkSource
+		h.harnessWork.ProgressAt = progressAt
+	}
+	h.harnessWorkMu.Unlock()
+}
+
+func (h *SessionHost) clearHarnessWork() {
+	h.harnessWorkMu.Lock()
+	h.stopHarnessWorkRereportLocked()
+	h.harnessTaskIDs = nil
+	if h.harnessWork.Source != "" {
+		h.harnessWork.State = harnessWorkInactive
+		h.harnessWork.Count = 0
+		h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLocked()
+	}
+	h.harnessWorkMu.Unlock()
+}
+
+func (h *SessionHost) harnessWorkSnapshot() harnessWorkStatus {
+	h.harnessWorkMu.Lock()
+	defer h.harnessWorkMu.Unlock()
+	return h.harnessWork
+}
+
+func (h *SessionHost) applyClaudeHarnessLifecycle(message claudeSDKLifecycleMessage) bool {
+	h.harnessWorkMu.Lock()
+	defer h.harnessWorkMu.Unlock()
+
+	if h.harnessWork.Source != claudeHarnessWorkSource {
+		return false
+	}
+	if h.harnessTaskIDs == nil {
+		h.harnessTaskIDs = make(map[string]struct{})
+	}
+
+	recognized := true
+	switch {
+	case message.Type == "system" && message.Subtype == claudeBackgroundTasksLevel:
+		replacement := make(map[string]struct{}, len(message.Tasks))
+		for _, task := range message.Tasks {
+			if task.TaskID != "" {
+				replacement[task.TaskID] = struct{}{}
+			}
+		}
+		h.harnessTaskIDs = replacement
+	case message.Type == "system" && message.Subtype == "task_started":
+		if message.TaskID == "" {
+			return false
+		}
+		if !h.addClaudeHarnessTaskLocked(message.TaskID) {
+			return false
+		}
+	case message.Type == "system" && message.Subtype == "task_progress":
+		if message.TaskID == "" {
+			return false
+		}
+		if !h.addClaudeHarnessTaskLocked(message.TaskID) {
+			return false
+		}
+	case message.Type == "system" && message.Subtype == "task_updated":
+		if message.TaskID == "" {
+			return false
+		}
+		if isTerminalClaudeTaskStatus(message.Patch.Status) {
+			delete(h.harnessTaskIDs, message.TaskID)
+		} else if !h.addClaudeHarnessTaskLocked(message.TaskID) {
+			return false
+		}
+	case message.Type == "system" && message.Subtype == "task_notification":
+		if message.TaskID == "" {
+			return false
+		}
+		delete(h.harnessTaskIDs, message.TaskID)
+	case message.Type == "result" && message.Origin.Kind == "task-notification":
+		if len(h.harnessTaskIDs) == 0 {
+			h.harnessWork.State = harnessWorkInactive
+		}
+	default:
+		recognized = false
+	}
+	if !recognized {
+		return false
+	}
+
+	h.harnessWork.Count = len(h.harnessTaskIDs)
+	if h.harnessWork.Count > 0 {
+		h.harnessWork.State = harnessWorkActive
+	} else if message.Type != "result" {
+		// The task bookend can be followed by an autonomous completion turn.
+		// Report one finite settling lease, but do not heartbeat it indefinitely.
+		h.harnessWork.State = harnessWorkSettling
+	}
+	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLocked()
+	if h.harnessWork.State == harnessWorkActive {
+		h.startHarnessWorkRereportLocked()
+	} else {
+		h.stopHarnessWorkRereportLocked()
+	}
+	return true
+}
+
+// addClaudeHarnessTaskLocked bounds cumulative edge messages as well as the
+// authoritative tasks array. Existing IDs still count as progress at the cap;
+// a new ID is ignored until an authoritative replacement or terminal edge
+// frees capacity.
+func (h *SessionHost) addClaudeHarnessTaskLocked(taskID string) bool {
+	if _, exists := h.harnessTaskIDs[taskID]; exists {
+		return true
+	}
+	_, maxTasks, _ := h.harnessLifecycleLimits()
+	if len(h.harnessTaskIDs) >= maxTasks {
+		return false
+	}
+	h.harnessTaskIDs[taskID] = struct{}{}
+	return true
+}
+
+// nextHarnessWorkProgressAtLocked returns a process-local, strictly monotonic
+// lifecycle version that remains representable as Unix milliseconds. Activity
+// reports are sent concurrently and may arrive out of order; ProjectData uses
+// this value to reject an older runtime-work snapshot while accepting same-
+// version heartbeat rereports that refresh the finite lease.
+func (h *SessionHost) nextHarnessWorkProgressAtLocked() time.Time {
+	now := h.now()
+	if !h.harnessWork.ProgressAt.IsZero() && !now.After(h.harnessWork.ProgressAt) {
+		return h.harnessWork.ProgressAt.Add(time.Millisecond)
+	}
+	if !h.harnessWork.ProgressAt.IsZero() && now.UnixMilli() <= h.harnessWork.ProgressAt.UnixMilli() {
+		return time.UnixMilli(h.harnessWork.ProgressAt.UnixMilli() + 1)
+	}
+	return now
+}
+
+func isTerminalClaudeTaskStatus(status string) bool {
+	switch status {
+	case "completed", "failed", "killed":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *SessionHost) startHarnessWorkRereportLocked() {
+	if h.harnessActivityCancel != nil || h.config.ActivityRereportInterval <= 0 {
+		return
+	}
+	ctx, cancel := context.WithCancel(h.ctx)
+	h.harnessActivityCancel = cancel
+	interval := h.config.ActivityRereportInterval
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				h.reportActivity(h.activityForHarnessWork())
+			}
+		}
+	}()
+}
+
+func (h *SessionHost) stopHarnessWorkRereportLocked() {
+	if h.harnessActivityCancel != nil {
+		h.harnessActivityCancel()
+		h.harnessActivityCancel = nil
+	}
+}
+
+// nudgeHarnessActivityReport queues one activity report for the harness
+// lifecycle change that just landed.
+//
+// It MUST be used instead of calling reportActivity inline from
+// HandleExtensionMethod. reportActivity takes h.mu.RLock to snapshot
+// agentType/restartCount/statusErr, and the ACP notification goroutine must
+// never block on h.mu: the handshake (startSelectedAgent -> applySessionSettings
+// -> SetSessionMode/SetSessionConfigOption) holds h.mu for write while its RPC
+// blocks in the SDK's waitNotificationsUpTo, which is waiting for this very
+// notification worker. Because setSessionIDLocked populates the session mirror
+// *before* applySessionSettings runs, a harness re-announcement arriving in that
+// window passes matchesHarnessSession and would deadlock until the settings
+// timeout fires — stalling the handshake and every later notification
+// (including session/update, i.e. the live stream) behind it.
+//
+// The atomic single-flight also coalesces bursts: applyClaudeHarnessLifecycle
+// returns true for any recognized message, including repeat task_progress that
+// mutates nothing, and each report otherwise spawns its own retried HTTP POST.
+// Clearing the flag before reporting is deliberate — a nudge that races the
+// in-flight report queues a trailing one, so the control plane always converges
+// on the latest state.
+func (h *SessionHost) nudgeHarnessActivityReport() {
+	if !h.harnessReportPending.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		h.harnessReportPending.Store(false)
+		h.reportActivity(h.activityForHarnessWork())
+	}()
+}
+
+// activityForHarnessWork is reachable from the ACP notification goroutine, so it
+// reads the lock-free status mirror rather than taking h.mu. See
+// matchesHarnessSession for why.
+func (h *SessionHost) activityForHarnessWork() string {
+	switch h.loadMirroredStatus() {
+	case HostPrompting:
+		return "prompting"
+	case HostError:
+		return "error"
+	default:
+		return "idle"
+	}
+}

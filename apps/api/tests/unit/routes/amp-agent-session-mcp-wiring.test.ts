@@ -194,10 +194,13 @@ describe('Amp project-chat MCP wiring', () => {
       'user-123',
       'chat-123',
       'project-123',
-      {
-        url: 'https://api.example.com/mcp',
-        token: 'mcp-token-123',
-      },
+      [
+        {
+          url: 'https://api.example.com/mcp',
+          token: 'mcp-token-123',
+          name: 'sam-mcp',
+        },
+      ],
     );
     expect(revokeMcpTokenMock).not.toHaveBeenCalled();
   });

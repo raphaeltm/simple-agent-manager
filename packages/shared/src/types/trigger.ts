@@ -8,7 +8,7 @@ import type { TaskMode } from './task';
 export const TRIGGER_STATUSES = ['active', 'paused', 'disabled'] as const;
 export type TriggerStatus = (typeof TRIGGER_STATUSES)[number];
 
-export const TRIGGER_SOURCE_TYPES = ['cron', 'webhook', 'github'] as const;
+export const TRIGGER_SOURCE_TYPES = ['cron', 'webhook', 'github', 'incident'] as const;
 export type TriggerSourceType = (typeof TRIGGER_SOURCE_TYPES)[number];
 
 export const TRIGGER_EXECUTION_STATUSES = [
@@ -29,7 +29,7 @@ export const TRIGGER_SKIP_REASONS = [
 export type TriggerSkipReason = (typeof TRIGGER_SKIP_REASONS)[number];
 
 /** Sources that can create a task. */
-export const TRIGGERED_BY_VALUES = ['user', 'cron', 'webhook', 'github', 'mcp'] as const;
+export const TRIGGERED_BY_VALUES = ['user', 'cron', 'webhook', 'github', 'incident', 'mcp'] as const;
 export type TriggeredBy = (typeof TRIGGERED_BY_VALUES)[number];
 
 // =============================================================================

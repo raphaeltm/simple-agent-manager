@@ -3,7 +3,20 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { parseJsonRecord, readResponseJsonRecord } from '../runtime-validation';
 
 /** VoiceButton states */
-type VoiceState = 'idle' | 'recording' | 'processing' | 'error';
+export type VoiceButtonState = 'idle' | 'recording' | 'processing' | 'error';
+
+/**
+ * Appends dictated text to whatever the user has already typed, inserting a
+ * single separating space only when one is actually needed.
+ *
+ * Every VoiceButton host does this, so the rule lives here rather than being
+ * re-derived per composer. Hosts still own their own state setter and focus
+ * ref — only the string rule is shared.
+ */
+export function appendDictatedText(previous: string, text: string): string {
+  const separator = previous.length > 0 && !previous.endsWith(' ') ? ' ' : '';
+  return previous + separator + text;
+}
 
 export interface VoiceButtonProps {
   /** Called with transcribed text when transcription completes */
@@ -14,6 +27,17 @@ export interface VoiceButtonProps {
   apiUrl: string;
   /** Optional callback for reporting errors to telemetry */
   onError?: (info: { message: string; source: string; context?: Record<string, unknown> }) => void;
+  /**
+   * Notified whenever the button's internal state changes. Lets a host surface
+   * reflect recording/processing status (e.g. tinting the composer it sits in)
+   * without duplicating the recorder state machine.
+   *
+   * Treat these as level-triggered (the current state), not edge-triggered
+   * events: the current state is published on mount, and React StrictMode
+   * double-invokes effects in development, so a handler that counts calls will
+   * over-count. Setting state from it is safe and idempotent.
+   */
+  onStateChange?: (state: VoiceButtonState) => void;
 }
 
 /** Inline SVG microphone icon (idle state) */
@@ -88,8 +112,9 @@ export function VoiceButton({
   disabled = false,
   apiUrl,
   onError,
+  onStateChange,
 }: VoiceButtonProps) {
-  const [state, setState] = useState<VoiceState>('idle');
+  const [state, setState] = useState<VoiceButtonState>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [amplitude, setAmplitude] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -99,9 +124,24 @@ export function VoiceButton({
   const animationFrameRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
 
+  // Held in a ref so a caller passing an inline callback cannot re-fire the
+  // notification effect on every render — only real state transitions notify.
+  const onStateChangeRef = useRef(onStateChange);
+  useEffect(() => {
+    onStateChangeRef.current = onStateChange;
+  }, [onStateChange]);
+  useEffect(() => {
+    onStateChangeRef.current?.(state);
+  }, [state]);
+
+  // Set once the host has gone away, so a recording torn down by unmount does
+  // not upload audio whose transcription has nowhere left to land.
+  const unmountedRef = useRef(false);
+
   // Clean up on unmount
   useEffect(() => {
     return () => {
+      unmountedRef.current = true;
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
@@ -214,6 +254,11 @@ export function VoiceButton({
           setState('idle');
           return;
         }
+
+        // The host unmounted mid-recording (e.g. the composer was cancelled).
+        // onTranscription now points at a dead closure, so uploading would burn
+        // a request and silently discard the result.
+        if (unmountedRef.current) return;
 
         // Send audio to transcription API
         setState('processing');

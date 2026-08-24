@@ -4,6 +4,13 @@ import { VmAgentContainer } from '../../../src/durable-objects/vm-agent-containe
 import type { RuntimeRecoveryState } from '../../../src/durable-objects/vm-agent-container-recovery';
 
 type PrivateContainer = {
+  proxyHttpAuthorized: (
+    this: unknown,
+    request: Request,
+    port?: number,
+    guard?: { taskId: string; projectId: string; chatSessionId: string }
+  ) => Promise<Response>;
+  assertSourceTaskGuard: (this: unknown, guard?: unknown) => Promise<void>;
   prepareForRequest: (this: unknown) => Promise<unknown>;
   ensureAwake: (this: unknown) => Promise<unknown>;
   resultResponse: (this: unknown, result: unknown) => Response;
@@ -20,6 +27,23 @@ function callProxyHttp(fake: unknown, request: Request): Promise<Response> {
   ).proxyHttp.call(fake, request);
 }
 
+function callProxyHttpGuarded(
+  fake: unknown,
+  request: Request,
+  guard: { taskId: string; projectId: string; chatSessionId: string }
+): Promise<Response> {
+  return (
+    VmAgentContainer.prototype as unknown as {
+      proxyHttpGuarded: (
+        this: unknown,
+        request: Request,
+        port: number | undefined,
+        sourceTaskGuard: typeof guard
+      ) => Promise<Response>;
+    }
+  ).proxyHttpGuarded.call(fake, request, undefined, guard);
+}
+
 function makeProxyFake(input: {
   ready: { ok: boolean; status: string; code?: string; message?: string };
   state: string;
@@ -30,6 +54,9 @@ function makeProxyFake(input: {
   return {
     fake: {
       defaultPort: 8080,
+      proxyHttpAuthorized: privateContainer.proxyHttpAuthorized,
+      clearSourceTaskWakeGuard: vi.fn().mockResolvedValue(undefined),
+      assertSourceTaskGuard: vi.fn(async () => undefined),
       prepareForRequest: vi.fn().mockResolvedValue(input.ready),
       resultResponse: privateContainer.resultResponse,
       interruptedRequestResponse: privateContainer.interruptedRequestResponse,
@@ -43,6 +70,111 @@ function makeProxyFake(input: {
 }
 
 describe('VmAgentContainer proxy recovery boundaries', () => {
+  it('rejects a revoked source guard before proxy preparation can wake compute', async () => {
+    const proxyHttp = vi.fn();
+    const first = vi.fn().mockResolvedValue(null);
+    const fake = {
+      env: {
+        DATABASE: {
+          prepare: vi.fn(() => ({ bind: vi.fn(() => ({ first })) })),
+        },
+      },
+      proxyHttp,
+      proxyHttpAuthorized: privateContainer.proxyHttpAuthorized,
+      assertSourceTaskGuard: privateContainer.assertSourceTaskGuard,
+      abortRevokedSourceTaskWake: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const response = await callProxyHttpGuarded(
+      fake,
+      new Request('http://container/prompt', { method: 'POST' }),
+      { taskId: 'parent-1', projectId: 'project-1', chatSessionId: 'chat-1' }
+    );
+
+    expect(response.status).toBe(409);
+    expect(proxyHttp).not.toHaveBeenCalled();
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(fake.abortRevokedSourceTaskWake).toHaveBeenCalledOnce();
+  });
+
+  it('rechecks after preparation and withholds the prompt when authority is revoked mid-wake', async () => {
+    const first = vi.fn().mockResolvedValueOnce({ id: 'parent-1' }).mockResolvedValueOnce(null);
+    const startRuntime = vi.fn();
+    const containerFetch = vi.fn().mockResolvedValue(new Response('proxied'));
+    const fake: Record<string, unknown> = {
+      defaultPort: 8080,
+      env: {
+        DATABASE: {
+          prepare: vi.fn(() => ({ bind: vi.fn(() => ({ first })) })),
+        },
+      },
+      proxyHttpAuthorized: privateContainer.proxyHttpAuthorized,
+      assertSourceTaskGuard: privateContainer.assertSourceTaskGuard,
+      prepareForRequest: privateContainer.prepareForRequest,
+      ctx: {
+        storage: {
+          get: vi.fn(async (key: string) => (key === 'lifecycleStatus' ? 'sleeping' : undefined)),
+        },
+      },
+      getState: vi.fn().mockResolvedValue({ status: 'running' }),
+      containerFetch,
+      beginUnexpectedRecovery: vi.fn(),
+      abortRevokedSourceTaskWake: vi.fn().mockResolvedValue(undefined),
+      clearSourceTaskWakeGuard: vi.fn().mockResolvedValue(undefined),
+    };
+    const ensureAwake = vi.fn(async (guard: unknown) => {
+      await privateContainer.assertSourceTaskGuard.call(fake, guard);
+      startRuntime();
+      return { ok: true, status: 'running' };
+    });
+    fake.ensureAwake = ensureAwake;
+
+    const response = await callProxyHttpGuarded(
+      fake,
+      new Request('http://container/prompt', { method: 'POST' }),
+      { taskId: 'parent-1', projectId: 'project-1', chatSessionId: 'chat-1' }
+    );
+
+    expect(response.status).toBe(409);
+    expect(first).toHaveBeenCalledTimes(2);
+    expect(ensureAwake).toHaveBeenCalledOnce();
+    expect(startRuntime).not.toHaveBeenCalled();
+    expect(containerFetch).not.toHaveBeenCalled();
+    expect(fake.abortRevokedSourceTaskWake).toHaveBeenCalledOnce();
+  });
+
+  it('allows a live source through both the preparation and prompt boundaries', async () => {
+    const first = vi.fn().mockResolvedValue({ id: 'parent-1' });
+    const prepareForRequest = vi.fn().mockResolvedValue({ ok: true, status: 'running' });
+    const containerFetch = vi.fn().mockResolvedValue(new Response('proxied'));
+    const fake = {
+      defaultPort: 8080,
+      env: {
+        DATABASE: {
+          prepare: vi.fn(() => ({ bind: vi.fn(() => ({ first })) })),
+        },
+      },
+      proxyHttpAuthorized: privateContainer.proxyHttpAuthorized,
+      clearSourceTaskWakeGuard: vi.fn().mockResolvedValue(undefined),
+      assertSourceTaskGuard: privateContainer.assertSourceTaskGuard,
+      prepareForRequest,
+      getState: vi.fn().mockResolvedValue({ status: 'running' }),
+      containerFetch,
+      beginUnexpectedRecovery: vi.fn(),
+    };
+
+    const response = await callProxyHttpGuarded(
+      fake,
+      new Request('http://container/prompt', { method: 'POST' }),
+      { taskId: 'parent-1', projectId: 'project-1', chatSessionId: 'chat-1' }
+    );
+
+    expect(response.status).toBe(200);
+    expect(first).toHaveBeenCalledTimes(2);
+    expect(prepareForRequest).toHaveBeenCalledOnce();
+    expect(containerFetch).toHaveBeenCalledOnce();
+  });
+
   it('forwards a prompt only after wake/restore reports running', async () => {
     const { fake, containerFetch } = makeProxyFake({
       ready: { ok: true, status: 'running' },
@@ -137,6 +269,9 @@ describe('VmAgentContainer cold-wake serialization', () => {
     const containerFetch = vi.fn().mockResolvedValue(new Response('proxied'));
     const fake = {
       defaultPort: 8080,
+      proxyHttpAuthorized: privateContainer.proxyHttpAuthorized,
+      clearSourceTaskWakeGuard: vi.fn().mockResolvedValue(undefined),
+      assertSourceTaskGuard: vi.fn(async () => undefined),
       wakeChain: Promise.resolve(),
       ctx: { storage },
       prepareForRequest: privateContainer.prepareForRequest,

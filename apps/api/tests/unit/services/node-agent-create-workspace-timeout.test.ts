@@ -36,11 +36,14 @@ vi.mock('../../../src/services/vm-agent-container', () => mocks.container);
 vi.mock('drizzle-orm/d1', () => ({ drizzle: mocks.drizzle }));
 
 import {
+  createAgentSessionOnNode,
   createWorkspaceOnNode,
   getCfContainerCreateWorkspaceTimeoutMs,
   NodeAgentRequestError,
   sendPromptToAgentOnNode,
+  startAgentSessionOnNode,
 } from '../../../src/services/node-agent';
+import { restoreAgentSessionOnNode } from '../../../src/services/node-agent-session-snapshots';
 
 const cfContainerEnv = {
   BASE_DOMAIN: 'example.com',
@@ -101,6 +104,7 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
     vi.clearAllMocks();
   });
 
@@ -215,5 +219,182 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
     expect(error.message).not.toContain('bearer should-not-leak');
     expect(mocks.container.fetchVmAgentContainer).toHaveBeenCalledTimes(1);
     expect(mocks.container.markVmAgentContainerRequestInterrupted).not.toHaveBeenCalled();
+  });
+
+  it('carries an internal source-task guard to the cf-container request boundary', async () => {
+    mocks.container.fetchVmAgentContainer.mockImplementation(async () =>
+      Response.json({ status: 'accepted' }, { status: 200 })
+    );
+    const sourceTaskGuard = {
+      taskId: 'parent-task-1',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    };
+
+    await sendPromptToAgentOnNode(
+      'node-1',
+      'ws-1',
+      'agent-1',
+      'continue',
+      cfContainerEnv,
+      'user-1',
+      'message-1',
+      { sourceTaskGuard }
+    );
+
+    expect(mocks.container.fetchVmAgentContainer).toHaveBeenCalledWith(
+      cfContainerEnv,
+      'node-1',
+      expect.any(Request),
+      8080,
+      sourceTaskGuard
+    );
+    const proxiedRequest = mocks.container.fetchVmAgentContainer.mock.calls[0]?.[2] as Request;
+    expect(proxiedRequest).toBeInstanceOf(Request);
+    expect((proxiedRequest as unknown as Record<string, unknown>).sourceTaskGuard).toBeUndefined();
+  });
+
+  it('revalidates and carries the guard through agent create/start physical boundaries', async () => {
+    mocks.container.fetchVmAgentContainer.mockImplementation(async () =>
+      Response.json({ status: 'accepted' }, { status: 200 })
+    );
+    const sourceTaskGuard = {
+      taskId: 'parent-task-agent',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    };
+    const beforeExternalMutation = vi.fn().mockResolvedValue(undefined);
+
+    await createAgentSessionOnNode(
+      'node-1',
+      'ws-1',
+      'agent-1',
+      'Recovered agent',
+      cfContainerEnv,
+      'user-1',
+      'chat-1',
+      'project-1',
+      undefined,
+      { sourceTaskGuard, beforeExternalMutation }
+    );
+    await startAgentSessionOnNode(
+      'node-1',
+      'ws-1',
+      'agent-1',
+      'claude-code',
+      'Continue recovered work',
+      cfContainerEnv,
+      'user-1',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { sourceTaskGuard, beforeExternalMutation }
+    );
+    await restoreAgentSessionOnNode(
+      'node-1',
+      'ws-1',
+      'agent-1',
+      cfContainerEnv,
+      'user-1',
+      { chatSessionId: 'chat-1', runtime: 'cf-container', agentType: 'claude-code' },
+      { sourceTaskGuard, beforeExternalMutation }
+    );
+
+    expect(beforeExternalMutation).toHaveBeenCalledTimes(4);
+    expect(mocks.container.fetchVmAgentContainer).toHaveBeenNthCalledWith(
+      1,
+      cfContainerEnv,
+      'node-1',
+      expect.any(Request),
+      8080,
+      sourceTaskGuard
+    );
+    expect(mocks.container.fetchVmAgentContainer).toHaveBeenNthCalledWith(
+      2,
+      cfContainerEnv,
+      'node-1',
+      expect.any(Request),
+      8080,
+      sourceTaskGuard
+    );
+    expect(mocks.container.fetchVmAgentContainer).toHaveBeenNthCalledWith(
+      3,
+      cfContainerEnv,
+      'node-1',
+      expect.any(Request),
+      8080,
+      sourceTaskGuard
+    );
+  });
+
+  it('withholds cf-container workspace creation when authority is revoked at the physical boundary', async () => {
+    const beforeExternalMutation = vi.fn().mockRejectedValue(new Error('source authority revoked'));
+
+    await expect(
+      createWorkspaceOnNode('node-1', cfContainerEnv, 'user-1', workspacePayload, {
+        sourceTaskGuard: {
+          taskId: 'source-task-workspace',
+          projectId: 'project-1',
+          chatSessionId: 'chat-1',
+        },
+        beforeExternalMutation,
+      })
+    ).rejects.toThrow('source authority revoked');
+
+    expect(beforeExternalMutation).toHaveBeenCalledOnce();
+    expect(mocks.container.fetchVmAgentContainer).not.toHaveBeenCalled();
+  });
+
+  it('withholds direct VM workspace creation when authority is revoked at the physical boundary', async () => {
+    mocks.drizzle.mockReturnValue({
+      select: () => ({
+        from: () => ({
+          where: () => ({ get: () => Promise.resolve({ runtime: 'vm' }) }),
+        }),
+      }),
+    });
+    const directFetch = vi.fn();
+    vi.stubGlobal('fetch', directFetch);
+    const beforeExternalMutation = vi.fn().mockRejectedValue(new Error('source authority revoked'));
+
+    await expect(
+      createWorkspaceOnNode('node-1', cfContainerEnv, 'user-1', workspacePayload, {
+        beforeExternalMutation,
+      })
+    ).rejects.toThrow('source authority revoked');
+
+    expect(beforeExternalMutation).toHaveBeenCalledOnce();
+    expect(directFetch).not.toHaveBeenCalled();
+    expect(mocks.container.fetchVmAgentContainer).not.toHaveBeenCalled();
+  });
+
+  it('ends active work and withholds agent start when the physical-boundary recheck revokes', async () => {
+    const beforeExternalMutation = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('source authority revoked'));
+
+    await expect(
+      startAgentSessionOnNode(
+        'node-1',
+        'ws-1',
+        'agent-1',
+        'claude-code',
+        'Continue recovered work',
+        cfContainerEnv,
+        'user-1',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { beforeExternalMutation }
+      )
+    ).rejects.toThrow('source authority revoked');
+
+    expect(beforeExternalMutation).toHaveBeenCalledTimes(2);
+    expect(mocks.container.markVmAgentContainerActiveWorkStarted).toHaveBeenCalledOnce();
+    expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).toHaveBeenCalledOnce();
+    expect(mocks.container.fetchVmAgentContainer).not.toHaveBeenCalled();
   });
 });

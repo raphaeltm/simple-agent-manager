@@ -87,10 +87,12 @@ vi.mock('../../../src/services/project-multiplayer', () => ({
     hasPendingAccessRequest: false,
     multiplayerActive: false,
   }),
+  clearProjectMultiplayerStateCache: vi.fn(),
 }));
 
 vi.mock('../../../src/services/credential-attribution-health', () => ({
   buildCredentialAttributionForTriggers: vi.fn().mockResolvedValue(new Map()),
+  clearCredentialAttributionHealthCache: vi.fn(),
 }));
 
 // Mock ulid

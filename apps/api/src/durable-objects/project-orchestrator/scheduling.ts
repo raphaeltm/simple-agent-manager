@@ -283,7 +283,18 @@ async function autoDispatchSchedulableTasks(
   const schedulableResult = await env.DATABASE.prepare(
     `SELECT id, title, description, user_id, project_id, output_branch, agent_profile_hint, dispatch_depth, priority
      FROM tasks
-     WHERE mission_id = ? AND scheduler_state = 'schedulable' AND status = 'queued'
+     WHERE mission_id = ?
+       AND scheduler_state = 'schedulable'
+       AND status = 'queued'
+       AND chat_session_id IS NULL
+       AND NOT EXISTS (
+         SELECT 1
+         FROM vm_task_admissions
+         WHERE vm_task_admissions.task_id = tasks.id
+           AND vm_task_admissions.state IN (
+             'queued', 'waiting', 'provisioning_granted', 'provisioning', 'node_ready'
+           )
+       )
      ORDER BY priority DESC, created_at ASC
      LIMIT ?`
   )
@@ -296,7 +307,19 @@ async function autoDispatchSchedulableTasks(
   // Check concurrency limit: count currently active tasks in this mission
   const activeCountResult = await env.DATABASE.prepare(
     `SELECT COUNT(*) as cnt FROM tasks
-     WHERE mission_id = ? AND status IN ('in_progress', 'delegated', 'provisioning', 'running')`
+     WHERE mission_id = ?
+       AND (
+         status IN ('in_progress', 'delegated')
+         OR (status = 'queued' AND chat_session_id IS NOT NULL)
+         OR EXISTS (
+           SELECT 1
+           FROM vm_task_admissions
+           WHERE vm_task_admissions.task_id = tasks.id
+             AND vm_task_admissions.state IN (
+               'queued', 'waiting', 'provisioning_granted', 'provisioning', 'node_ready'
+             )
+         )
+       )`
   )
     .bind(missionId)
     .first<{ cnt: number }>();
@@ -423,11 +446,16 @@ async function autoDispatchSchedulableTasks(
       }
 
       // Transition task to queued → provisioning via status update
-      await env.DATABASE.prepare(
-        `UPDATE tasks SET status = 'queued', execution_step = 'node_selection', updated_at = ? WHERE id = ?`
+      const dispatchTransition = await env.DATABASE.prepare(
+        `UPDATE tasks
+         SET status = 'queued', chat_session_id = ?, execution_step = 'node_selection', updated_at = ?
+         WHERE id = ? AND (chat_session_id IS NULL OR chat_session_id = ?)`
       )
-        .bind(new Date().toISOString(), task.id)
+        .bind(sessionId, new Date().toISOString(), task.id, sessionId)
         .run();
+      if (!dispatchTransition.meta.changes) {
+        throw new Error('Task was already bound to a different chat session');
+      }
 
       // Start the TaskRunner DO
       await startTaskRunnerDO(env, {

@@ -9,11 +9,16 @@
  *   - tool-definitions-workspace-tools.ts     (workspace info, env, CI, cost, onboarding)
  *   - tool-definitions-library-tools.ts       (project file library)
  *   - tool-definitions-orchestration-tools.ts (agent-to-agent communication & control)
+ *   - tool-definitions-comment-tools.ts       (message comment threads)
  *   - tool-definitions-trigger-tools.ts       (trigger management — cron automation)
+ *   - tool-definitions-incident-tools.ts      (private feedback incident backlog)
  */
 
+export { COMMENT_TOOLS } from './tool-definitions-comment-tools';
 export { DEPLOYMENT_TOOLS } from './tool-definitions-deployment-tools';
+export { INCIDENT_TOOLS } from './tool-definitions-incident-tools';
 export { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
+export { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
 export { LIBRARY_TOOLS } from './tool-definitions-library-tools';
 export { MISSION_TOOLS } from './tool-definitions-mission-tools';
 export { ORCHESTRATION_TOOLS } from './tool-definitions-orchestration-tools';
@@ -27,8 +32,11 @@ export { TASK_LIFECYCLE_TOOLS } from './tool-definitions-task-tools';
 export { TRIGGER_TOOLS } from './tool-definitions-trigger-tools';
 export { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';
 
+import { COMMENT_TOOLS } from './tool-definitions-comment-tools';
 import { DEPLOYMENT_TOOLS } from './tool-definitions-deployment-tools';
+import { INCIDENT_TOOLS } from './tool-definitions-incident-tools';
 import { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
+import { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
 import { LIBRARY_TOOLS } from './tool-definitions-library-tools';
 import { MISSION_TOOLS } from './tool-definitions-mission-tools';
 import { ORCHESTRATION_TOOLS } from './tool-definitions-orchestration-tools';
@@ -50,7 +58,10 @@ export const MCP_TOOLS = [
   ...DEPLOYMENT_TOOLS,
   ...LIBRARY_TOOLS,
   ...ORCHESTRATION_TOOLS,
+  ...COMMENT_TOOLS,
+  ...LIBRARY_FILE_COMMENT_TOOLS,
   ...TRIGGER_TOOLS,
+  ...INCIDENT_TOOLS,
   ...PROFILE_TOOLS,
   ...SKILL_TOOLS,
   ...KNOWLEDGE_TOOLS,

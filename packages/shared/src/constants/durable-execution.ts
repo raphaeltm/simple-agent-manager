@@ -37,6 +37,24 @@ export const DEFAULT_PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS = 5 * 1000;
 /** Avoid immediate alarm hot loops while still reacting promptly to readiness. */
 export const DEFAULT_PROMPT_DELIVERY_MIN_ALARM_DELAY_MS = 1000;
 
+/** Parent task wait subscriptions reconcile terminal child state on this cadence. */
+export const DEFAULT_ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS = 30 * 1000;
+
+/** Maximum direct children tracked by one parent wait subscription. */
+export const DEFAULT_ORCHESTRATOR_WAIT_MAX_CHILDREN = 20;
+
+/** Hard ceiling that keeps one claim-time parent/child D1 read below 100 bindings. */
+export const MAX_ORCHESTRATOR_WAIT_CHILDREN = 90;
+
+/** Maximum simultaneously active wait subscriptions in one project. */
+export const DEFAULT_ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT = 100;
+
+/** Every wait has a finite safety deadline, even when the caller omits one. */
+export const DEFAULT_ORCHESTRATOR_WAIT_MAX_DURATION_MS = 24 * 60 * 60 * 1000;
+
+/** Maximum subscriptions reconciled by one ProjectData alarm pass. */
+export const DEFAULT_ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM = 10;
+
 /** Version of the stable VM prompt receipt contract published by this foundation. */
 export const VM_PROMPT_DELIVERY_PROTOCOL_VERSION = 1;
 

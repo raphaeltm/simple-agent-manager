@@ -815,6 +815,8 @@ export const tasks = sqliteTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     /** Soft cross-store link to the ProjectData chat session backing this task. */
     chatSessionId: text('chat_session_id'),
+    /** Soft link from a sleeping-session recovery task to the live task whose conversation it resumes. */
+    recoverySourceTaskId: text('recovery_source_task_id'),
     /** Null for top-level tasks; set for agent-dispatched sub-tasks (dispatch depth > 0). No FK — parent may be in another project's scope. */
     parentTaskId: text('parent_task_id'),
     /** Null until a workspace is assigned during task execution. Set by TaskRunner DO. */
@@ -843,6 +845,10 @@ export const tasks = sqliteTable(
     dispatchDepth: integer('dispatch_depth').notNull().default(0),
     /** Node auto-provisioned for this task. set null on node delete so the task record survives cleanup. */
     autoProvisionedNodeId: text('auto_provisioned_node_id').references(() => nodes.id, {
+      onDelete: 'set null',
+    }),
+    /** Warm-pool node claimed by this task until workspace activation or release. */
+    claimedWarmNodeId: text('claimed_warm_node_id').references(() => nodes.id, {
       onDelete: 'set null',
     }),
     /** Source that created this task. 'user' = manual, 'cron'/'webhook'/'mcp' = automated. */
@@ -884,6 +890,12 @@ export const tasks = sqliteTable(
     resolvedReservationJson: text('resolved_reservation_json'),
     /** JSON snapshot of PlacementExplanation (audit trail). */
     placementExplanationJson: text('placement_explanation_json'),
+    /** Durable VM admission status mirrored for UI/API visibility. */
+    admissionState: text('admission_state'),
+    /** Durable VM admission/backpressure reason mirrored for UI/API visibility. */
+    admissionReason: text('admission_reason'),
+    /** Next admission retry/wakeup timestamp, if the task is waiting for capacity. */
+    admissionNextRetryAt: text('admission_next_retry_at'),
     createdBy: text('created_by')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
@@ -909,6 +921,14 @@ export const tasks = sqliteTable(
     chatSessionIdUnique: uniqueIndex('idx_tasks_chat_session_id_unique')
       .on(table.chatSessionId)
       .where(sql`chat_session_id IS NOT NULL`),
+    recoverySourceTaskIdx: index('idx_tasks_recovery_source_task_id')
+      .on(table.recoverySourceTaskId)
+      .where(sql`recovery_source_task_id IS NOT NULL`),
+    claimedWarmNodeUnique: uniqueIndex('idx_tasks_claimed_warm_node_unique')
+      .on(table.claimedWarmNodeId)
+      .where(
+        sql`claimed_warm_node_id IS NOT NULL AND status NOT IN ('completed', 'failed', 'cancelled')`
+      ),
     // Supports the `WHERE workspace_id = ? AND status IN (...)` lookups on the
     // mass-outage recovery hot path (persistRuntimeRecoveryFailed) and other
     // workspace-scoped task queries. Partial: most tasks never bind a workspace.
@@ -921,6 +941,110 @@ export const tasks = sqliteTable(
     missionIdIdx: index('idx_tasks_mission_id')
       .on(table.missionId)
       .where(sql`mission_id IS NOT NULL`),
+    admissionStateIdx: index('idx_tasks_admission_state')
+      .on(table.admissionState)
+      .where(sql`admission_state IS NOT NULL`),
+  })
+);
+
+export const vmTaskAdmissions = sqliteTable(
+  'vm_task_admissions',
+  {
+    taskId: text('task_id').primaryKey(),
+    projectId: text('project_id').notNull(),
+    userId: text('user_id').notNull(),
+    provider: text('provider').notNull(),
+    credentialDomainKey: text('credential_domain_key').notNull(),
+    providerDomainKey: text('provider_domain_key').notNull(),
+    scopeKey: text('scope_key').notNull(),
+    requestedVmSize: text('requested_vm_size').notNull(),
+    requestedVmLocation: text('requested_vm_location').notNull(),
+    preferredNodeId: text('preferred_node_id'),
+    state: text('state').notNull().default('queued'),
+    reason: text('reason'),
+    selectedNodeId: text('selected_node_id'),
+    inflightNodeId: text('inflight_node_id'),
+    fencingToken: integer('fencing_token'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    nextRetryAt: text('next_retry_at'),
+    waitDeadlineAt: text('wait_deadline_at'),
+    providerCategory: text('provider_category'),
+    providerCode: text('provider_code'),
+    providerStatusCode: integer('provider_status_code'),
+    providerMessage: text('provider_message'),
+    enqueuedAt: text('enqueued_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    claimedAt: text('claimed_at'),
+    lastEvaluatedAt: text('last_evaluated_at'),
+    completedAt: text('completed_at'),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    userStateRetryIdx: index('idx_vm_task_admissions_user_state_retry').on(
+      table.userId,
+      table.state,
+      table.nextRetryAt
+    ),
+    scopeStateRetryIdx: index('idx_vm_task_admissions_scope_state_retry').on(
+      table.scopeKey,
+      table.state,
+      table.nextRetryAt
+    ),
+    providerDomainStateRetryIdx: index('idx_vm_task_admissions_provider_domain_state_retry').on(
+      table.providerDomainKey,
+      table.state,
+      table.nextRetryAt
+    ),
+    inflightNodeIdx: index('idx_vm_task_admissions_inflight_node')
+      .on(table.inflightNodeId)
+      .where(sql`inflight_node_id IS NOT NULL`),
+  })
+);
+
+export const vmProvisioningLeases = sqliteTable(
+  'vm_provisioning_leases',
+  {
+    scopeKey: text('scope_key').primaryKey(),
+    ownerTaskId: text('owner_task_id').notNull(),
+    fencingToken: integer('fencing_token').notNull().default(1),
+    provider: text('provider').notNull(),
+    credentialDomainKey: text('credential_domain_key').notNull(),
+    providerDomainKey: text('provider_domain_key').notNull(),
+    requestedVmSize: text('requested_vm_size').notNull(),
+    inflightNodeId: text('inflight_node_id'),
+    acquiredAt: text('acquired_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    heartbeatAt: text('heartbeat_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    expiresAt: text('expires_at').notNull(),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    ownerIdx: index('idx_vm_provisioning_leases_owner').on(table.ownerTaskId),
+    expiresIdx: index('idx_vm_provisioning_leases_expires').on(table.expiresAt),
+    inflightNodeIdx: index('idx_vm_provisioning_leases_inflight_node')
+      .on(table.inflightNodeId)
+      .where(sql`inflight_node_id IS NOT NULL`),
+  })
+);
+
+export const vmProviderCapacityState = sqliteTable(
+  'vm_provider_capacity_state',
+  {
+    providerDomainKey: text('provider_domain_key').primaryKey(),
+    provider: text('provider').notNull(),
+    credentialDomainKey: text('credential_domain_key').notNull(),
+    state: text('state').notNull().default('ok'),
+    reason: text('reason'),
+    providerCategory: text('provider_category'),
+    providerCode: text('provider_code'),
+    providerStatusCode: integer('provider_status_code'),
+    providerMessage: text('provider_message'),
+    failureCount: integer('failure_count').notNull().default(0),
+    retryAt: text('retry_at'),
+    lastFailureAt: text('last_failure_at'),
+    lastSuccessAt: text('last_success_at'),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    retryIdx: index('idx_vm_provider_capacity_state_retry').on(table.state, table.retryAt),
   })
 );
 
@@ -1408,6 +1532,62 @@ export const skills = sqliteTable(
 
 export type SkillRow = typeof skills.$inferSelect;
 export type NewSkillRow = typeof skills.$inferInsert;
+
+/**
+ * Bring-your-own MCP servers injected into agent sessions alongside SAM's own `sam-mcp`.
+ *
+ * Both the URL and the token are AES-256-GCM encrypted (`services/encryption.ts`). The URL is
+ * a secret because providers such as Composio issue pre-signed MCP URLs with the credential
+ * embedded in the path/query; `urlHost` is the display-only `scheme://host` the API returns
+ * instead. `projectId` NULL means personal scope; a project row overrides a personal row with
+ * the same name.
+ */
+export const mcpConnections = sqliteTable(
+  'mcp_connections',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** AES-256-GCM ciphertext (base64) of the full MCP endpoint URL. */
+    encryptedUrl: text('encrypted_url').notNull(),
+    /** AES-256-GCM IV (base64) for `encryptedUrl`. */
+    urlIv: text('url_iv').notNull(),
+    /** Display-only `scheme://host`. Never the path or query. */
+    urlHost: text('url_host').notNull(),
+    authType: text('auth_type').notNull().default('bearer'),
+    /** AES-256-GCM ciphertext (base64). Null when authType is 'none'. */
+    encryptedToken: text('encrypted_token'),
+    /** AES-256-GCM IV (base64). Null when authType is 'none'. */
+    tokenIv: text('token_iv'),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    // Partial, mirroring 0120_mcp_connections.sql. Without the WHERE clauses these would be
+    // FULL unique indexes, which is different semantics: a non-partial UNIQUE(user_id, name)
+    // also covers project rows (every row has a non-null user_id) and would wrongly stop a
+    // user from having a personal and a project connection with the same name.
+    projectNameUnique: uniqueIndex('idx_mcp_connections_project_name')
+      .on(table.projectId, table.name)
+      .where(sql`project_id IS NOT NULL`),
+    userNameUnique: uniqueIndex('idx_mcp_connections_user_name')
+      .on(table.userId, table.name)
+      .where(sql`project_id IS NULL`),
+    userIdIdx: index('idx_mcp_connections_user_id').on(table.userId),
+    projectIdIdx: index('idx_mcp_connections_project_id').on(table.projectId),
+  })
+);
+
+export type McpConnectionRow = typeof mcpConnections.$inferSelect;
+export type NewMcpConnectionRow = typeof mcpConnections.$inferInsert;
 
 const profileRuntimeBaseColumns = () => ({
   id: text('id').primaryKey(),
@@ -2332,6 +2512,17 @@ export const sessionSummaries = sqliteTable(
     agentCompletedAt: integer('agent_completed_at'),
     endedAt: integer('ended_at'),
     updatedAt: integer('updated_at').notNull(),
+    /**
+     * Session creator. `userId` above is the PROJECT OWNER, not the creator, so
+     * it cannot answer `scope=my` / `isMine` on a shared project.
+     */
+    createdByUserId: text('created_by_user_id'),
+    /** Mirrors `chat_sessions.created_at`; distinct from `startedAt`. */
+    createdAt: integer('created_at'),
+    /** Serialized `getAttentionSummary()` result for the newest unresolved marker. */
+    attentionJson: text('attention_json'),
+    /** When the DO last wrote this row — the freshness signal, not session activity. */
+    syncedAt: integer('synced_at'),
   },
   (table) => ({
     userRecentIdx: index('idx_session_summaries_user_recent').on(
@@ -2340,11 +2531,76 @@ export const sessionSummaries = sqliteTable(
       table.updatedAt
     ),
     projectIdx: index('idx_session_summaries_project').on(table.projectId, table.updatedAt),
+    projectCreatorIdx: index('idx_session_summaries_project_creator').on(
+      table.projectId,
+      table.createdByUserId,
+      table.updatedAt
+    ),
   })
 );
 
 export type SessionSummaryRow = typeof sessionSummaries.$inferSelect;
 export type NewSessionSummaryRow = typeof sessionSummaries.$inferInsert;
+
+/**
+ * Per-project coverage record for `session_summaries` — the gate that decides
+ * whether a per-project session list may be answered from D1 instead of the
+ * ProjectData DO.
+ *
+ * D1 is an eventually-consistent index, so it may only serve a read it can
+ * prove is equivalent: `complete` records whether the sync captured every
+ * session (it is capped), `sessionCount` is how many the DO held at sync time,
+ * and `syncedAt` bounds staleness. Anything missing or stale means fall back to
+ * the DO rather than guess.
+ */
+export const sessionIndexCoverage = sqliteTable('session_index_coverage', {
+  projectId: text('project_id')
+    .primaryKey()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  syncedAt: integer('synced_at').notNull(),
+  sessionCount: integer('session_count').notNull().default(0),
+  complete: integer('complete').notNull().default(0),
+});
+
+export type SessionIndexCoverageRow = typeof sessionIndexCoverage.$inferSelect;
+
+export const projectDataStorageTelemetry = sqliteTable(
+  'project_data_storage_telemetry',
+  {
+    projectId: text('project_id')
+      .primaryKey()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    measuredAt: integer('measured_at').notNull(),
+    databaseSizeBytes: integer('database_size_bytes').notNull(),
+    limitBytes: integer('limit_bytes').notNull(),
+    usageRatio: real('usage_ratio').notNull(),
+    status: text('status', { enum: ['ok', 'notice', 'warning', 'critical', 'degraded'] })
+      .notNull(),
+    lastAlarmAt: integer('last_alarm_at'),
+    lastAlertAt: integer('last_alert_at'),
+    lastAlertStatus: text('last_alert_status', {
+      enum: ['ok', 'notice', 'warning', 'critical', 'degraded'],
+    }),
+    lastPurgeAt: integer('last_purge_at'),
+    lastPurgeReason: text('last_purge_reason'),
+    lastPurgeRows: integer('last_purge_rows'),
+    lastPurgeDatabaseSizeBytes: integer('last_purge_database_size_bytes'),
+    lastError: text('last_error'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    statusIdx: index('idx_project_data_storage_telemetry_status').on(
+      table.status,
+      table.usageRatio,
+      table.measuredAt
+    ),
+    measuredAtIdx: index('idx_project_data_storage_telemetry_measured_at').on(table.measuredAt),
+  })
+);
+
+export type ProjectDataStorageTelemetryRow =
+  typeof projectDataStorageTelemetry.$inferSelect;
 
 export const diagnosticIncidents = sqliteTable(
   'diagnostic_incidents',
@@ -2573,6 +2829,33 @@ export const platformFeedbackTriages = sqliteTable(
     lastFailureReason: text('last_failure_reason'),
     lastFailedAt: integer('last_failed_at'),
     rejectedAt: integer('rejected_at'),
+    queueState: text('queue_state').notNull().default('resolved'),
+    queuedAt: integer('queued_at'),
+    dispatchLeaseToken: text('dispatch_lease_token'),
+    dispatchLeaseExpiresAt: integer('dispatch_lease_expires_at'),
+    dispatchedTriggerId: text('dispatched_trigger_id').references(() => triggers.id, {
+      onDelete: 'set null',
+    }),
+    dispatchedExecutionId: text('dispatched_execution_id').references(() => triggerExecutions.id, {
+      onDelete: 'set null',
+    }),
+    dispatchedTaskId: text('dispatched_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    dispatchedAt: integer('dispatched_at'),
+    dispatchAttempts: integer('dispatch_attempts').notNull().default(0),
+    incidentClaimToken: text('incident_claim_token'),
+    incidentClaimExpiresAt: integer('incident_claim_expires_at'),
+    incidentClaimedByTaskId: text('incident_claimed_by_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    incidentClaimedAt: integer('incident_claimed_at'),
+    resolvedAt: integer('resolved_at'),
+    resolvedByTaskId: text('resolved_by_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    resolutionNote: text('resolution_note'),
+    expiredAt: integer('expired_at'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -2584,6 +2867,17 @@ export const platformFeedbackTriages = sqliteTable(
     ideaIdx: index('idx_platform_feedback_triages_idea').on(table.ideaId),
     lastSeenIdx: index('idx_platform_feedback_triages_last_seen').on(table.lastSeenAt),
     rejectedIdx: index('idx_platform_feedback_triages_rejected').on(table.rejectedAt),
+    queueStateIdx: index('idx_platform_feedback_triages_queue_state').on(
+      table.queueState,
+      table.queuedAt,
+      table.lastSeenAt
+    ),
+    dispatchLeaseIdx: index('idx_platform_feedback_triages_dispatch_lease').on(
+      table.dispatchLeaseExpiresAt
+    ),
+    incidentClaimIdx: index('idx_platform_feedback_triages_incident_claim').on(
+      table.incidentClaimExpiresAt
+    ),
   })
 );
 

@@ -218,6 +218,49 @@ export type {
   UpdateTaskRequest,
   UpdateTaskStatusRequest,
 } from './task';
+
+// Comments (message-anchored and library-file-anchored)
+export type {
+  CommentAnchor,
+  CommentAnchorKind,
+  CommentAuthor,
+  CommentAuthorKind,
+  CommentReply,
+  CommentStatus,
+  CreateLibraryFileCommentThreadRequest,
+  CreateMessageCommentThreadRequest,
+  LibraryFileCommentAnchor,
+  LibraryFileCommentListResponse,
+  LibraryFileCommentMutationResponse,
+  LibraryFileCommentThread,
+  MessageCommentActorProvenance,
+  MessageCommentAnchor,
+  MessageCommentAuthor,
+  MessageCommentAuthorKind,
+  MessageCommentDirectiveState,
+  MessageCommentListRequest,
+  MessageCommentListResponse,
+  MessageCommentMutationResponse,
+  MessageCommentReply,
+  MessageCommentReplyMutationResponse,
+  MessageCommentSourceMessageContext,
+  MessageCommentThread,
+  MessageCommentThreadEvent,
+  MessageCommentThreadEventReason,
+  MessageCommentThreadStatus,
+  MessageCommentThreadSummary,
+  ReplyToLibraryFileCommentThreadRequest,
+  ReplyToMessageCommentThreadRequest,
+  UpdateLibraryFileCommentThreadStatusRequest,
+  UpdateMessageCommentThreadStatusRequest,
+} from './comments';
+export {
+  COMMENT_ANCHOR_KINDS,
+  COMMENT_AUTHOR_KINDS,
+  COMMENT_STATUSES,
+  MESSAGE_COMMENT_AUTHOR_KINDS,
+  MESSAGE_COMMENT_THREAD_STATUSES,
+} from './comments';
 export {
   ATTACHMENT_DEFAULTS,
   COMPLETION_EVIDENCE_VERIFICATION_KINDS,
@@ -233,6 +276,9 @@ export {
   TASK_STATUSES,
   TASK_TERMINAL_STATUSES,
   validateCompletionEvidence,
+  WAKE_PHASE_LABELS,
+  WAKE_PHASE_PENDING_LABEL,
+  wakePhaseLabel,
 } from './task';
 
 // Session (Chat, Agent, ACP)
@@ -543,10 +589,7 @@ export type {
   CheckpointProgressEnvelope,
   CreateCheckpointEpisodeInput,
 } from './checkpoint';
-export {
-  CHECKPOINT_EPISODE_STATES,
-  CHECKPOINT_EPISODE_TRANSITIONS,
-} from './checkpoint';
+export { CHECKPOINT_EPISODE_STATES, CHECKPOINT_EPISODE_TRANSITIONS } from './checkpoint';
 
 // Mission (Phase 2: Orchestration Primitives)
 export type {
@@ -668,3 +711,19 @@ export type {
   ReportIssueRequest,
   ReportIssueResponse,
 } from './report';
+
+// Bring-your-own MCP servers
+export type {
+  CreateMcpConnectionRequest,
+  McpConnection,
+  McpConnectionAuthType,
+  McpConnectionListResponse,
+  McpConnectionScope,
+  UpdateMcpConnectionRequest,
+} from './mcp-connection';
+export {
+  MCP_CONNECTION_AUTH_TYPES,
+  MCP_CONNECTION_NAME_PATTERN,
+  MCP_CONNECTION_NAME_RULE,
+  SAM_MCP_SERVER_NAME,
+} from './mcp-connection';

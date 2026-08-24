@@ -34,6 +34,7 @@ chatForkRoutes.post('/:sessionId/fork-prepare', async (c) => {
     sessionId,
     1000,
     null,
+    null,
     undefined,
     false
   );

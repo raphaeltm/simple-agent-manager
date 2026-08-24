@@ -17,6 +17,12 @@ const mocks = vi.hoisted(() => ({
   stopAgentSession: vi.fn(),
 }));
 
+// `useQueryScope()` reads the authenticated identity, and every migrated query
+// is keyed by it. Without a provider `useAuth` throws, so supply a stable identity.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
+}));
+
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   getWorkspace: mocks.getWorkspace,
@@ -58,6 +64,7 @@ vi.mock('@simple-agent-manager/terminal', () => ({
 }));
 
 import { Workspace } from '../../../src/pages/workspace';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 describe('Workspace toolbar declutter', () => {
   beforeEach(() => {
@@ -93,7 +100,7 @@ describe('Workspace toolbar declutter', () => {
           <Route path="/workspaces/:id" element={<Workspace />} />
         </Routes>
       </MemoryRouter>
-    );
+    , { wrapper: QueryTestWrapper });
 
     // Wait for workspace to load
     await screen.findByText('Test Workspace');

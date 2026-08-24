@@ -6,6 +6,7 @@ import type { Context } from 'hono';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { AppError, errors } from '../../middleware/error';
+import { parseCacheTtlSeconds } from '../../services/cache-config';
 import {
   getUserInstallationRepositories,
   type GitHubRepositoryAccess,
@@ -259,8 +260,13 @@ export async function assertRepositoryAccess(
   installationExternalId: string,
   repository: string,
   userId: string,
-  flow: 'project-access' | 'branches' = 'project-access'
+  flow: 'repositories' | 'branches' | 'project-access' | 'project-invite' = 'project-access',
+  env?: Env
 ): Promise<GitHubRepositoryAccess> {
+  const cacheKey = `github-repo-access:v1:${userId}:${installationExternalId}:${repository.toLowerCase()}`;
+  const cached = await env?.KV?.get<GitHubRepositoryAccess>(cacheKey, 'json');
+  if (cached?.fullName) return cached;
+
   const repositories = await getUserInstallationRepositories(accessToken, installationExternalId, {
     flow,
     userId,
@@ -273,6 +279,12 @@ export async function assertRepositoryAccess(
   );
   if (!matchedRepo) {
     throw errors.forbidden('Repository is not accessible through the selected installation');
+  }
+  const cacheTtl = parseCacheTtlSeconds(env?.GITHUB_REPO_ACCESS_CACHE_TTL_SECONDS, 5 * 60);
+  if (cacheTtl > 0) {
+    await env?.KV?.put(cacheKey, JSON.stringify(matchedRepo), {
+      expirationTtl: cacheTtl,
+    });
   }
   return matchedRepo;
 }
@@ -320,11 +332,11 @@ export async function requireRepositoryUserAccess(
   db: ReturnType<typeof drizzle<typeof schema>>,
   project: schema.Project,
   userId: string
-): Promise<void> {
+): Promise<schema.GitHubInstallation | undefined> {
   // Artifacts-backed projects have no external user repository to intersect
   // against — they are out of scope for this gate.
   if (project.repoProvider === 'artifacts') {
-    return;
+    return undefined;
   }
   if (project.repoProvider === 'gitlab') {
     const metadata = await getProjectGitLabRepository(db, project.id);
@@ -340,7 +352,7 @@ export async function requireRepositoryUserAccess(
     ) {
       throw errors.forbidden('GitLab repository access has changed; repository no longer matches');
     }
-    return;
+    return undefined;
   }
   if (project.repoProvider && project.repoProvider !== 'github') {
     throw errors.forbidden('Unsupported repository provider');
@@ -353,11 +365,14 @@ export async function requireRepositoryUserAccess(
     accessToken,
     externalInstallationId,
     project.repository,
-    userId
+    userId,
+    'project-access',
+    c.env
   );
   if (project.githubRepoId !== null && verifiedRepo.id !== project.githubRepoId) {
     throw errors.forbidden('GitHub repository access has changed; repository ID no longer matches');
   }
+  return installation;
 }
 
 export async function requireRepositoryOwnerAccess(
@@ -404,7 +419,9 @@ export async function requireRepositoryOwnerAccess(
     accessToken,
     externalInstallationId,
     project.repository,
-    userId
+    userId,
+    'project-access',
+    env
   );
   if (project.githubRepoId !== null && verifiedRepo.id !== project.githubRepoId) {
     throw errors.forbidden('GitHub repository access has changed; repository ID no longer matches');

@@ -1,5 +1,4 @@
 import type {
-  AgentProfile,
   AgentSkill,
   CredentialProvider,
   UpdateAgentProfileRequest,
@@ -10,14 +9,14 @@ import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/
 import { Paperclip, Settings, X } from 'lucide-react';
 import { type FC, useCallback, useEffect, useId, useRef, useState } from 'react';
 
+import { useAgentProfiles } from '../../hooks/useAgentProfiles';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
+import { useQueryScope } from '../../hooks/useQueryScope';
 import type { TaskAttachmentRef } from '../../lib/api';
 import {
   getProject,
-  listAgentProfiles,
   listSkills,
   requestAttachmentUpload,
-  updateAgentProfile,
   uploadAttachmentToR2,
 } from '../../lib/api';
 import { formatFileSize } from '../../lib/file-utils';
@@ -64,7 +63,8 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   onRunNow,
   onSaveToBacklog,
 }) => {
-  const { catalogs } = useProviderCatalog();
+  const queryScope = useQueryScope();
+  const { catalogs } = useProviderCatalog(queryScope);
   const [title, setTitle] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [description, setDescription] = useState('');
@@ -76,7 +76,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   const [devcontainerConfigName, setDevcontainerConfigName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
+  const { profiles, updateProfile } = useAgentProfiles(projectId, queryScope);
   const [skills, setSkills] = useState<AgentSkill[]>([]);
   const [projectProvider, setProjectProvider] = useState<CredentialProvider | null>(null);
   const [projectLocation, setProjectLocation] = useState<string | null>(null);
@@ -100,18 +100,6 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   const allUploadsComplete =
     attachments.length === 0 || attachments.every((a) => a.status === 'complete');
 
-  // Load profiles
-  const loadProfiles = useCallback(() => {
-    void listAgentProfiles(projectId)
-      .then((data) => setProfiles(data))
-      .catch(() => {
-        /* best-effort */
-      });
-  }, [projectId]);
-
-  useEffect(() => {
-    loadProfiles();
-  }, [loadProfiles]);
 
   useEffect(() => {
     void listSkills(projectId)
@@ -141,10 +129,10 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
 
   const handleUpdateProfile = useCallback(
     async (_profileId: string, data: UpdateAgentProfileRequest) => {
-      await updateAgentProfile(projectId, _profileId, data);
-      loadProfiles();
+      // Invalidates the shared profiles entry, so every other consumer sees the edit.
+      await updateProfile(_profileId, data);
     },
-    [projectId, loadProfiles]
+    [updateProfile]
   );
 
   // Upload a single file: request presigned URL, then PUT to R2

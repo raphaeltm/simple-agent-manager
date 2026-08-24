@@ -257,7 +257,8 @@ async function setupMocks(
     if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
     if (path.startsWith('/api/github')) return respond(200, []);
     if (path === '/api/credentials/resolution-status') return respond(200, { consumers: [] });
-    if (path.startsWith('/api/credentials')) return respond(200, { credentials: [] });
+    if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
+    if (path === '/api/credentials') return respond(200, []);
     if (path.startsWith('/api/nodes')) return respond(200, { nodes: [] });
 
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);

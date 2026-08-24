@@ -188,6 +188,13 @@ Match the verification to what the PR actually changes:
   browser parses and then silently drops because nothing is listening for the
   specific event name. See
   the retained incident lesson in this rule.
+- **For browser-consumed streams that update React/query-cache state: confirming
+  that a browser received a frame, but not that the receiving browser's visible
+  UI converged.** If the production path can deliver the same domain event over
+  multiple client sockets or hooks, tests and staging verification must exercise
+  the exact socket/hook that receives the production frame and assert the
+  downstream cache or DOM changes. At minimum, cover create/update/status-only
+  event variants in the receiving browser without a reload.
 
 These are baseline regression checks. They do NOT verify that the specific fix or feature works on the live environment.
 

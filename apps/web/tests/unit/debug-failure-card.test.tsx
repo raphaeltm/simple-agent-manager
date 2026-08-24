@@ -1,5 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { renderWithQuery } from '../test-utils/query-test-utils';
 
 const mocks = vi.hoisted(() => ({
   listTaskEvents: vi.fn(),
@@ -12,6 +14,10 @@ vi.mock('../../src/components/AuthProvider', () => ({
 
 vi.mock('../../src/lib/api/tasks', () => ({
   listTaskEvents: mocks.listTaskEvents,
+}));
+
+vi.mock('../../src/hooks/useQueryScope', () => ({
+  useQueryScope: () => 'user-1',
 }));
 
 import { FailureCard } from '../../src/components/debug/FailureCard';
@@ -67,14 +73,16 @@ describe('FailureCard', () => {
   });
 
   it('renders classification label and explanation for agent crash', () => {
-    render(<FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={false} />);
+    renderWithQuery(
+      <FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={false} />
+    );
 
     expect(screen.getByText('Agent crashed')).toBeInTheDocument();
     expect(screen.getByText(/exited unexpectedly/i)).toBeInTheDocument();
   });
 
   it('renders classification for capacity errors', () => {
-    render(
+    renderWithQuery(
       <FailureCard
         projectId="proj-1"
         taskEmbed={makeTaskEmbed({
@@ -88,7 +96,7 @@ describe('FailureCard', () => {
   });
 
   it('renders classification for cancelled tasks', () => {
-    render(
+    renderWithQuery(
       <FailureCard
         projectId="proj-1"
         taskEmbed={makeTaskEmbed({
@@ -104,7 +112,7 @@ describe('FailureCard', () => {
 
   it('renders expected human-input expiry as a neutral lifecycle outcome', async () => {
     mocks.useAuth.mockReturnValue({ isSuperadmin: true });
-    render(
+    renderWithQuery(
       <FailureCard
         projectId="proj-1"
         taskEmbed={makeTaskEmbed({
@@ -128,13 +136,15 @@ describe('FailureCard', () => {
   });
 
   it('shows Recoverable badge when recoverable', () => {
-    render(<FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={true} />);
+    renderWithQuery(
+      <FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={true} />
+    );
 
     expect(screen.getByText('Recoverable')).toBeInTheDocument();
   });
 
   it('expands detail on click', async () => {
-    render(
+    renderWithQuery(
       <FailureCard
         projectId="proj-1"
         taskEmbed={makeTaskEmbed()}
@@ -160,7 +170,9 @@ describe('FailureCard', () => {
   });
 
   it('renders lifecycle timeline events from listTaskEvents', async () => {
-    render(<FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={false} />);
+    renderWithQuery(
+      <FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={false} />
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /Agent crashed/i }));
 
@@ -184,7 +196,7 @@ describe('FailureCard', () => {
       configurable: true,
     });
 
-    render(
+    renderWithQuery(
       <FailureCard
         projectId="proj-1"
         taskEmbed={makeTaskEmbed()}
@@ -224,7 +236,7 @@ describe('FailureCard', () => {
   it('does not show admin errors link for non-superadmin', () => {
     mocks.useAuth.mockReturnValue({ isSuperadmin: false });
 
-    render(
+    renderWithQuery(
       <FailureCard
         projectId="proj-1"
         taskEmbed={makeTaskEmbed()}
@@ -240,7 +252,7 @@ describe('FailureCard', () => {
   it('shows admin errors link for superadmin', async () => {
     mocks.useAuth.mockReturnValue({ isSuperadmin: true });
 
-    render(
+    renderWithQuery(
       <FailureCard
         projectId="proj-1"
         taskEmbed={makeTaskEmbed()}
@@ -264,7 +276,9 @@ describe('FailureCard', () => {
   });
 
   it('shows recoverable guidance when expanded', async () => {
-    render(<FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={true} />);
+    renderWithQuery(
+      <FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={true} />
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /Agent crashed/i }));
 
@@ -274,7 +288,7 @@ describe('FailureCard', () => {
   });
 
   it('shows execution step when available', async () => {
-    render(
+    renderWithQuery(
       <FailureCard
         projectId="proj-1"
         taskEmbed={makeTaskEmbed({ executionStep: 'provisioning_node' })}
@@ -292,7 +306,9 @@ describe('FailureCard', () => {
   it('handles empty events gracefully', async () => {
     mocks.listTaskEvents.mockResolvedValue({ events: [] });
 
-    render(<FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={false} />);
+    renderWithQuery(
+      <FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={false} />
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /Agent crashed/i }));
 
@@ -304,7 +320,9 @@ describe('FailureCard', () => {
   it('handles event loading error gracefully', async () => {
     mocks.listTaskEvents.mockRejectedValue(new Error('Network error'));
 
-    render(<FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={false} />);
+    renderWithQuery(
+      <FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={false} />
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /Agent crashed/i }));
 
@@ -321,7 +339,9 @@ describe('FailureCard', () => {
       configurable: true,
     });
 
-    render(<FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={false} />);
+    renderWithQuery(
+      <FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={false} />
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /Agent crashed/i }));
     await waitFor(() => {
@@ -342,7 +362,9 @@ describe('FailureCard', () => {
       configurable: true,
     });
 
-    render(<FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={false} />);
+    renderWithQuery(
+      <FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={false} />
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /Agent crashed/i }));
     await waitFor(() => {

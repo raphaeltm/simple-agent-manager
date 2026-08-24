@@ -3,6 +3,7 @@ import { MessageSquare } from 'lucide-react';
 import { useNavigate } from 'react-router';
 
 import { useAllChatSessions } from '../hooks/useAllChatSessions';
+import { useQueryScope } from '../hooks/useQueryScope';
 import {
   formatRelativeTime,
   getLastActivity,
@@ -16,7 +17,12 @@ import {
 
 export function Chats() {
   const navigate = useNavigate();
-  const { sessions, loading, error, refresh } = useAllChatSessions();
+  const queryScope = useQueryScope();
+  // `loading` is true only when nothing is cached, so the skeleton below shows on the
+  // very first load and never again. A background refetch leaves the rendered list
+  // mounted (`.claude/rules/48-stale-while-revalidate-ui.md`); the global
+  // `BackgroundFetchIndicator` is what signals that a refresh is in flight.
+  const { sessions, loading, error, refresh } = useAllChatSessions(queryScope);
 
   // Only show sessions that are recent (not stale) and not stopped
   const activeSessions = sessions.filter((s) => !isStaleSession(s) && isActiveSession(s));

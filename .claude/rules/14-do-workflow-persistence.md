@@ -16,21 +16,27 @@ As the very first action when starting a `/do` execution, create `.do-state.md`:
 # /do Workflow State
 
 ## Task
+
 <one-line summary of what you're doing>
 
 ## Task File
+
 <path to the task file, e.g., tasks/active/2026-03-14-notification-system.md>
 
 ## Branch
+
 <branch name once created>
 
 ## Worktree
+
 <worktree path once created>
 
 ## Current Phase
+
 Phase 1: Research & Task Creation
 
 ## Phase Checklist
+
 - [ ] Phase 1: Research & Task Creation
 - [ ] Phase 2: Worktree Setup
 - [ ] Phase 3: Implementation
@@ -40,19 +46,23 @@ Phase 1: Research & Task Creation
 - [ ] Phase 7: Pull Request & Post-Merge Deploy Monitoring
 
 ## Phase 5: Review Tracker
+
 <populated when Phase 5 starts — one line per local reviewer>
 <Phase 5 is NOT complete until every entry shows PASS or ADDRESSED>
 
 ## Implementation Progress
+
 <checklist items from the task file, updated as you go>
 
 ## Notes
+
 <anything important discovered during execution>
 ```
 
 ### Update It at Every Phase Transition
 
 Before starting any new phase, update `.do-state.md`:
+
 1. Check off the completed phase
 2. Update "Current Phase" to the new phase
 3. Add any notes about what was accomplished
@@ -68,6 +78,7 @@ During Phase 3 (Implementation) and Phase 5 (Review), update the file after ever
 ### Use Plan Mode as a Checkpoint
 
 At the transition between Phase 3 (Implementation) and Phase 4 (Pre-PR Validation), enter Plan Mode briefly to:
+
 1. Re-read the state file
 2. Re-read the task file
 3. Verify all checklist items are actually done (not just checked off from memory)
@@ -75,18 +86,34 @@ At the transition between Phase 3 (Implementation) and Phase 4 (Pre-PR Validatio
 
 This forces a deliberate pause that prevents the "rush to PR" failure mode.
 
+## Durable Subtask Waiting
+
+When a workflow is waiting for SAM-dispatched child tasks, the orchestrator MUST
+persist its workflow state and a stable workflow-step `waitKey`, call
+`wait_for_subtasks`, and end the current turn. Reuse the exact key if the call's
+response is lost or registration is otherwise retried.
+Do not rely on a harness-owned background task, timer, or polling loop: ACP can
+legitimately report the top-level prompt as complete while that work remains
+private to the harness, allowing SAM to sleep the runtime before the poller can
+surface its result.
+
+Foreground polling is a compatibility fallback only when the connected SAM
+server reports that `wait_for_subtasks` is unavailable or disabled. Keep that
+fallback bounded and record it in the workflow state file.
+
 ## What the State File Prevents
 
-| Failure Mode | How the State File Helps |
-|---|---|
-| Forgetting which phase you're in | "Current Phase" field is always current |
-| Skipping review phase | Checklist shows Phase 5 unchecked |
-| Losing track of implementation items | "Implementation Progress" mirrors the task file |
-| Forgetting the branch/worktree path | Recorded at creation time |
-| Repeating already-done work | Checked items + notes show what's been accomplished |
-| Jumping to PR creation early | Phase checklist enforces ordering |
-| Merging before reviewers finish | Review Tracker blocks Phase 5 completion until all reviewers report back |
-| Silently failing production deploy | Phase 7 checklist includes deploy monitoring — task is not complete until deploy succeeds or user is alerted |
+| Failure Mode                                          | How the State File Helps                                                                                     |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Forgetting which phase you're in                      | "Current Phase" field is always current                                                                      |
+| Skipping review phase                                 | Checklist shows Phase 5 unchecked                                                                            |
+| Losing track of implementation items                  | "Implementation Progress" mirrors the task file                                                              |
+| Forgetting the branch/worktree path                   | Recorded at creation time                                                                                    |
+| Repeating already-done work                           | Checked items + notes show what's been accomplished                                                          |
+| Jumping to PR creation early                          | Phase checklist enforces ordering                                                                            |
+| Merging before reviewers finish                       | Review Tracker blocks Phase 5 completion until all reviewers report back                                     |
+| Silently failing production deploy                    | Phase 7 checklist includes deploy monitoring — task is not complete until deploy succeeds or user is alerted |
+| Harness poller disappears after ACP prompt completion | Durable wait subscription wakes the parent through SAM-owned delivery                                        |
 
 ## Cleanup
 
@@ -107,21 +134,25 @@ Before advancing past Phase 5, you MUST:
 ### Updating the Review Tracker
 
 When starting a local reviewer subagent, immediately write:
+
 ```markdown
 - [ ] security-auditor — PENDING (local subagent running)
 ```
 
 When the reviewer completes with no blockers:
+
 ```markdown
 - [x] security-auditor — PASS, no critical findings
 ```
 
 When the reviewer finds issues that you fix:
+
 ```markdown
 - [x] security-auditor — ADDRESSED, 2 HIGH fixed in commit abc123
 ```
 
 When the reviewer finds issues deferred to backlog:
+
 ```markdown
 - [x] security-auditor — DEFERRED, 1 MEDIUM → tasks/backlog/2026-03-16-rate-limiting.md
 ```
