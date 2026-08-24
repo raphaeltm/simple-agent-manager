@@ -151,20 +151,51 @@ signal, not the snapshot, is the correct discriminator here.
 
 ## Implementation checklist
 
-- [ ] Add the supersession-terminalization statement to the `createRecoveryTask` batch
-- [ ] Emit a `task_status_events` row for the superseded task
-- [ ] Decide + document handling of terminal-transition hooks (durable parent-wake,
-      trigger-execution sync) for a supersession, given the work continues in the
-      successor rather than ending
-- [ ] Add the family-aware live-owner guard to `stuck-tasks.ts`
-- [ ] Mirror the guard in the ProjectData DO adapter
-      (`apps/api/src/durable-objects/project-data/task-runtime-liveness.ts`) so both
-      terminalization paths agree (`.claude/rules/61`: one guard, every runtime)
-- [ ] Make every new limit/threshold env-configurable with a `DEFAULT_*` constant
-- [ ] Fix the latent classifier/claim divergence: `isSessionResumable` requires
+- [x] ~~Add the supersession-terminalization statement to the `createRecoveryTask` batch~~
+      **REJECTED during implementation — it would have made things worse.**
+      `sourceTaskGuardCondition` (`session-snapshot-recovery-lifecycle.ts:34`) requires
+      the guard's source task to be NON-terminal, and `createRecoveryTask` stmt 1's CAS
+      carries `AND (? = 0 OR source.status NOT IN ('completed','failed','cancelled'))`.
+      Terminalizing the predecessor would therefore have broken every subsequent guarded
+      wake. Keeping it non-terminal is exactly what the guard needs, so the whole fix
+      moved to the classifier.
+- [x] Add the family-aware live-owner guard (`loadTaskSupersession`,
+      `needsTaskSupersessionProbe`, `supersessionVerdict`) to the shared classifier
+- [x] Wire it into `stuck-tasks.ts` (cron sweep)
+- [x] Mirror it in the ProjectData DO adapter (`.claude/rules/61`: one guard, every runtime)
+- [x] Probe only when about to terminalize (`.claude/rules/47` hot-path discipline)
+- [x] Fail safe: probe error → inconclusive, never a conclusive death verdict
+- [x] Prove the guard discriminating: neutering `supersessionVerdict` turns exactly the
+      6 supersession-preservation tests red and leaves all 20 controls green
+- [x] No new limits/thresholds introduced, so no `DEFAULT_*` constants required
+- [ ] **Deferred** — latent classifier/claim divergence: `isSessionResumable` requires
       `sleepStatus === 'sleeping'` while `claimSessionSnapshotRecovery` only requires
-      `sleeping_at IS NOT NULL`, yet the doc comment asserts they are equal
-      (0 production rows today — latent, fix defensively or correct the comment)
+      `sleeping_at IS NOT NULL`, yet the doc comment asserts they are equal. Verified
+      **0 production rows** match (`sleeping_at IS NOT NULL AND sleep_status <> 'sleeping'`),
+      so it is latent, not a live cause. Out of scope for an urgent fix.
+
+## Measured cost (`.claude/rules/47` / `.claude/rules/60`)
+
+One extra indexed D1 read per candidate, only when about to terminalize.
+`EXPLAIN QUERY PLAN` against production:
+
+```
+SEARCH self  USING INDEX sqlite_autoindex_tasks_1 (id=?)                  -- PK point lookup
+SEARCH owner USING INDEX idx_tasks_project_created_at (project_id=? AND created_at>?)
+```
+
+Worst-case scan width is tasks created in that project after the candidate. The busiest
+production project peaks at **41 tasks/day** (4131 all-time) and sweep candidates are
+hours old, so the range is tens of indexed rows with an early `LIMIT 1`.
+
+## Known remaining gap (deliberate, tracked)
+
+Once the successor goes terminal the predecessor becomes eligible again and still
+terminalizes as `failed` "workspace_deleted" — the false failure is *delayed*, not
+eliminated. That residual is far lower harm than the acute bug (false failures during a
+live conversation, plus a permanently revoked parent-wake path), and removing it needs
+either a supersession marker column or a benign terminal status, both carrying the
+guarded-wake risk above. Tracked as a follow-up SAM idea.
 
 ## Required tests
 
