@@ -1180,6 +1180,45 @@ export const MIGRATIONS: Migration[] = [
       sql.exec("ALTER TABLE project_policies ADD COLUMN scope TEXT NOT NULL DEFAULT 'always'");
     },
   },
+  {
+    name: '035-comment-thread-activity-indexes',
+    run: (sql) => {
+      // Indexes for the project-wide comment inbox (GET /projects/:id/comments).
+      //
+      // STRICTLY ADDITIVE (rule 31): CREATE INDEX only — no table recreation, no
+      // DROP, no ALTER. A Durable Object has no D1-style time-travel recovery, so
+      // anything destructive here would be unrecoverable.
+      //
+      // Why these are needed: every index migrations 032/033 created leads with the
+      // scope column, session_id or file_id. The project-wide read deliberately has
+      // no such predicate — the Durable Object IS the project — and ranks by
+      // updated_at, which appeared in no index at all. Verified with EXPLAIN QUERY
+      // PLAN against the real schema, both reads degraded to a full table scan plus
+      // a temp B-tree sort, so their cost grew with total project comment volume
+      // rather than with the page size and the LIMIT bought nothing.
+      //
+      // Column order matters: updated_at leads because it is the ranking key, and id
+      // follows so the sort has a total order and the ranking pass can be answered
+      // from the index without touching the table. The status-prefixed variants
+      // serve the filtered reads and let their counts run covered.
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_comment_threads_updated_at
+        ON comment_threads(updated_at DESC, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_comment_threads_status_updated_at
+        ON comment_threads(status, updated_at DESC, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_library_file_comment_threads_updated_at
+        ON library_file_comment_threads(updated_at DESC, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_library_file_comment_threads_status_updated_at
+        ON library_file_comment_threads(status, updated_at DESC, id)
+      `);
+    },
+  },
 ];
 
 /**

@@ -2,6 +2,7 @@ import type { NotificationResponse } from '@simple-agent-manager/shared';
 
 import type { MessageCommentAuthor } from '../../lib/api/comments';
 import type { ActivityEventResponse, ChatMessageResponse } from '../../lib/api/sessions';
+import { bucketForThread } from './comments/comment-inbox';
 import { authorDisplayName, type UiMessageCommentThread } from './comments/comment-utils';
 import type { TimelineEntry } from './timeline-types';
 
@@ -68,7 +69,12 @@ export function buildSessionTimeline(
    * Comment threads anchored in this session. Optional so existing callers and
    * tests keep their current behaviour.
    */
-  commentThreads: readonly UiMessageCommentThread[] = []
+  commentThreads: readonly UiMessageCommentThread[] = [],
+  /**
+   * Who is looking. Used only to bucket comment threads — "needs you" means the
+   * last person to speak was not you, so it cannot be derived without it.
+   */
+  viewerId: string | null = null
 ): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
 
@@ -114,9 +120,13 @@ export function buildSessionTimeline(
         kind: 'system_event',
         id: `evt-${evt.id}`,
         eventType: evt.eventType,
-        title: isTaskChange ? getTaskTitle(evt.payload) : (EVENT_TITLES[evt.eventType] ?? evt.eventType),
+        title: isTaskChange
+          ? getTaskTitle(evt.payload)
+          : (EVENT_TITLES[evt.eventType] ?? evt.eventType),
         timestamp: evt.createdAt,
-        severity: isTaskChange ? getTaskSeverity(evt.payload) : (EVENT_SEVERITY[evt.eventType] ?? 'info'),
+        severity: isTaskChange
+          ? getTaskSeverity(evt.payload)
+          : (EVENT_SEVERITY[evt.eventType] ?? 'info'),
       });
     }
   }
@@ -128,7 +138,8 @@ export function buildSessionTimeline(
     if (!body) continue;
 
     const latest = thread.replies.reduce<{ at: number; author: MessageCommentAuthor }>(
-      (acc, reply) => (reply.createdAt >= acc.at ? { at: reply.createdAt, author: reply.author } : acc),
+      (acc, reply) =>
+        reply.createdAt >= acc.at ? { at: reply.createdAt, author: reply.author } : acc,
       { at: thread.createdAt, author: thread.author }
     );
 
@@ -143,6 +154,7 @@ export function buildSessionTimeline(
       actorKind: latest.author.kind,
       isReply: latest.at !== thread.createdAt,
       status: thread.status,
+      bucket: bucketForThread(thread.status, latest.author.id, viewerId),
       replyCount: thread.replies.length,
       timestamp: latest.at,
     });

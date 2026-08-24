@@ -58,7 +58,11 @@ export function ProjectComments() {
   };
 
   return (
-    <div className="flex min-w-0 flex-col gap-4">
+    // `w-full min-w-0 max-w-3xl mx-auto` matches every sibling Project* page.
+    // Without min-w-0 a flex child floors at its min-content width, which is what
+    // rule 56 is about; without max-w-3xl the rows stretch edge to edge on a wide
+    // screen and the count pill detaches from the heading it belongs to.
+    <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-4">
       <div className="flex min-w-0 items-center justify-between gap-2">
         <h1 className="m-0 text-xl font-semibold text-fg-primary">Comments</h1>
         {counts.needs_you > 0 && (

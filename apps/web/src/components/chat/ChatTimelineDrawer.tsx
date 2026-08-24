@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Virtuoso } from 'react-virtuoso';
 
+import { COMMENT_BUCKET_COLORS } from '../project-message-view/comments/comment-inbox';
 import type { TimelineEntry, TimelineJumpTarget } from '../project-message-view/timeline-types';
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -22,15 +23,11 @@ const SEVERITY_COLORS: Record<string, string> = {
 const DOT_COLOR_USER = '#22c55e';
 const DOT_COLOR_PROGRESS = '#60a5fa';
 
-/**
- * Comment dots are keyed to thread state, not to severity, because that is the
- * question a comment answers in a timeline: is this still waiting on someone?
- */
-const COMMENT_DOT_COLORS: Record<'open' | 'sent' | 'resolved', string> = {
-  open: '#f59e0b',
-  sent: '#60a5fa',
-  resolved: '#22c55e',
-};
+// Comment dots key to the triage BUCKET rather than the raw status, and reuse
+// the inbox's own token map, so the timeline and the comments drawer cannot
+// disagree about the same thread. Tokens rather than hex literals also means
+// they re-theme in light mode, which the surrounding hardcoded dot colours
+// above (pre-existing) do not.
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -212,8 +209,8 @@ function TimelineEntryRow({
       ) : entry.kind === 'comment_thread' ? (
         <TimelineItem
           dot={{
-            color: COMMENT_DOT_COLORS[entry.status],
-            muted: entry.status === 'resolved',
+            color: COMMENT_BUCKET_COLORS[entry.bucket],
+            muted: entry.bucket === 'resolved',
           }}
         >
           <button

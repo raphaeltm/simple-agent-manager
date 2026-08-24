@@ -70,7 +70,11 @@ export function useSessionTimeline(
         activityEventsQuery.data ?? [],
         progressNotificationsQuery.data ?? [],
         showContext,
-        commentThreads
+        commentThreads,
+        // `queryScope` IS the authenticated user id (see useQueryScope); it is ''
+        // when signed out, which normalises to "no viewer" and leaves every
+        // thread in a viewer-independent bucket.
+        queryScope || null
       ),
     [
       messagesForTimeline,
@@ -78,6 +82,7 @@ export function useSessionTimeline(
       progressNotificationsQuery.data,
       showContext,
       commentThreads,
+      queryScope,
     ]
   );
 

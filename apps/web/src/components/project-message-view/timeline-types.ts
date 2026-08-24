@@ -1,3 +1,5 @@
+import type { CommentInboxBucket } from './comments/comment-inbox';
+
 export type TimelineEntry =
   | {
       kind: 'user_message';
@@ -45,6 +47,18 @@ export type TimelineEntry =
       /** Renders as "replied" rather than "commented". */
       isReply: boolean;
       status: 'open' | 'sent' | 'resolved';
+      /**
+       * Triage bucket from the viewer's perspective, from the same
+       * `bucketForThread` the inbox and the drawer use.
+       *
+       * Carried on the entry rather than derived at render time because it needs
+       * the viewer's identity, which the drawer does not have. Keying the dot to
+       * raw `status` instead looked equivalent and was not: a thread the viewer
+       * replied to last is `status: 'open'` but belongs in the neutral `open`
+       * bucket, so the timeline painted it amber while the drawer painted the
+       * very same thread grey.
+       */
+      bucket: CommentInboxBucket;
       replyCount: number;
       timestamp: number;
     };

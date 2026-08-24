@@ -119,9 +119,28 @@ export function toInboxItem(thread: UiCommentThread, source: CommentInboxSource)
  * other three buckets are viewer-independent.
  */
 export function bucketFor(item: CommentInboxItem, viewerId: string | null): CommentInboxBucket {
-  if (item.thread.status === 'resolved') return 'resolved';
-  if (item.thread.status === 'sent') return 'with_agent';
-  if (viewerId && item.lastActor.id !== viewerId) return 'needs_you';
+  return bucketForThread(item.thread.status, item.lastActor.id, viewerId);
+}
+
+/**
+ * The same rule, for callers that have already reduced a thread to its last
+ * actor and do not need a full `CommentInboxItem`.
+ *
+ * This exists so the chat timeline can key its dot to the *bucket* rather than
+ * to the raw `status`. Keying on status looked equivalent and was not: a thread
+ * you replied to last is `status: 'open'` but belongs in the neutral `open`
+ * bucket, not `needs_you` — so the timeline rendered it amber ("waiting on
+ * you") while the drawer rendered the very same thread grey. One definition,
+ * two entry points, so the two surfaces cannot disagree again.
+ */
+export function bucketForThread(
+  status: UiCommentThread['status'],
+  lastActorId: string,
+  viewerId: string | null
+): CommentInboxBucket {
+  if (status === 'resolved') return 'resolved';
+  if (status === 'sent') return 'with_agent';
+  if (viewerId && lastActorId !== viewerId) return 'needs_you';
   return 'open';
 }
 
