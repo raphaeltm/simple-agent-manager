@@ -7,7 +7,7 @@
  */
 import type { MessageClass } from '@simple-agent-manager/shared';
 import { MESSAGE_CLASSES } from '@simple-agent-manager/shared';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -321,7 +321,8 @@ async function resolveProjectAgentForMailbox(
 ): Promise<JsonRpcResponse | ResolvedMailboxTarget> {
   // Query target task in the caller's verified project. This project predicate
   // is the authorization boundary for durable agent messaging.
-  const [targetTask] = await db
+  const requestedTaskIds = [...new Set([tokenData.taskId, targetTaskId])];
+  const taskRows = await db
     .select({
       id: schema.tasks.id,
       status: schema.tasks.status,
@@ -329,8 +330,32 @@ async function resolveProjectAgentForMailbox(
       projectId: schema.tasks.projectId,
     })
     .from(schema.tasks)
-    .where(and(eq(schema.tasks.id, targetTaskId), eq(schema.tasks.projectId, tokenData.projectId)))
-    .limit(1);
+    .where(
+      and(
+        inArray(schema.tasks.id, requestedTaskIds),
+        eq(schema.tasks.projectId, tokenData.projectId)
+      )
+    );
+  const targetTask = taskRows.find((task) => task.id === targetTaskId);
+  const callerTask = taskRows.find((task) => task.id === tokenData.taskId);
+
+  if (!callerTask) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'Calling task was not found in this project');
+  }
+  if (!ACTIVE_STATUSES.includes(callerTask.status)) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Calling task is in '${callerTask.status}' status — only active task agents can send messages`
+    );
+  }
+  if (targetTaskId === tokenData.taskId) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Target task must be another active task agent in the same project'
+    );
+  }
 
   if (!targetTask) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'Target task not found in this project');

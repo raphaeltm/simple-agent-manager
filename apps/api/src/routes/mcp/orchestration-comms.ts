@@ -4,7 +4,7 @@
  * send_message_to_subtask: Injects a user-role message into a running same-project agent's ACP session.
  * stop_subtask: Gracefully stops a child agent's session with an optional warning message.
  */
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -76,7 +76,8 @@ async function resolveAgentTarget(
 
   // 2. Query target task in the caller's verified project. This project predicate
   // is the authorization boundary for non-destructive communication.
-  const [targetTask] = await db
+  const requestedTaskIds = [...new Set([tokenData.taskId, targetTaskId])];
+  const taskRows = await db
     .select({
       id: schema.tasks.id,
       status: schema.tasks.status,
@@ -85,8 +86,34 @@ async function resolveAgentTarget(
       parentTaskId: schema.tasks.parentTaskId,
     })
     .from(schema.tasks)
-    .where(and(eq(schema.tasks.id, targetTaskId), eq(schema.tasks.projectId, tokenData.projectId)))
-    .limit(1);
+    .where(
+      and(
+        inArray(schema.tasks.id, requestedTaskIds),
+        eq(schema.tasks.projectId, tokenData.projectId)
+      )
+    );
+  const targetTask = taskRows.find((task) => task.id === targetTaskId);
+  const callerTask = taskRows.find((task) => task.id === tokenData.taskId);
+
+  if (options.authorization === 'same-project-active-agent') {
+    if (!callerTask) {
+      return jsonRpcError(requestId, INVALID_PARAMS, 'Calling task was not found in this project');
+    }
+    if (!ACTIVE_STATUSES.includes(callerTask.status)) {
+      return jsonRpcError(
+        requestId,
+        INVALID_PARAMS,
+        `Calling task is in '${callerTask.status}' status — only active task agents can send messages`
+      );
+    }
+    if (targetTaskId === tokenData.taskId) {
+      return jsonRpcError(
+        requestId,
+        INVALID_PARAMS,
+        'Target task must be another active task agent in the same project'
+      );
+    }
+  }
 
   if (!targetTask) {
     return jsonRpcError(

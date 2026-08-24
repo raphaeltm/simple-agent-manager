@@ -311,6 +311,37 @@ describe('project-scoped MCP agent messaging authorization', () => {
     expect(mockSendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 
+  it('send_message_to_subtask rejects a terminal caller before delivery side effects', async () => {
+    const { env, sqlite } = createMessagingEnv();
+    sqlite.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('completed', 'task-caller');
+
+    const response = await handleSendMessageToSubtask(
+      1,
+      { taskId: 'task-sibling', message: 'stale sender attack' },
+      callerToken,
+      env
+    );
+
+    expect(response.error?.message).toContain("Calling task is in 'completed' status");
+    expect(mockPersistOrchestrationPrompt).not.toHaveBeenCalled();
+    expect(mockSendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
+
+  it('send_message_to_subtask rejects self-targeting instead of widening to self-delivery', async () => {
+    const { env } = createMessagingEnv();
+
+    const response = await handleSendMessageToSubtask(
+      1,
+      { taskId: 'task-caller', message: 'loopback' },
+      callerToken,
+      env
+    );
+
+    expect(response.error?.message).toContain('another active task agent');
+    expect(mockPersistOrchestrationPrompt).not.toHaveBeenCalled();
+    expect(mockSendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
+
   it('send_durable_message allows same-project sibling agents and preserves verified-token provenance', async () => {
     const { env } = createMessagingEnv();
     const durableEnv = { ...env, DURABLE_PROMPT_DELIVERY_ENABLED: 'true' } as Env;
@@ -365,6 +396,39 @@ describe('project-scoped MCP agent messaging authorization', () => {
     expect(crossProject.error?.message).toContain('not found in this project');
     expect(terminal.error?.message).toContain("Target task is in 'completed' status");
     expect(mockAcceptPromptDelivery).not.toHaveBeenCalled();
+  });
+
+  it('send_durable_message rejects a terminal caller before accepting delivery', async () => {
+    const { env, sqlite } = createMessagingEnv();
+    sqlite.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('completed', 'task-caller');
+    const durableEnv = { ...env, DURABLE_PROMPT_DELIVERY_ENABLED: 'true' } as Env;
+
+    const response = await handleSendDurableMessage(
+      1,
+      { targetTaskId: 'task-sibling', message: 'stale sender attack' },
+      callerToken,
+      durableEnv
+    );
+
+    expect(response.error?.message).toContain("Calling task is in 'completed' status");
+    expect(mockAcceptPromptDelivery).not.toHaveBeenCalled();
+    expect(mockEnqueueMailboxMessage).not.toHaveBeenCalled();
+  });
+
+  it('send_durable_message rejects self-targeting instead of accepting self-delivery', async () => {
+    const { env } = createMessagingEnv();
+    const durableEnv = { ...env, DURABLE_PROMPT_DELIVERY_ENABLED: 'true' } as Env;
+
+    const response = await handleSendDurableMessage(
+      1,
+      { targetTaskId: 'task-caller', message: 'loopback' },
+      callerToken,
+      durableEnv
+    );
+
+    expect(response.error?.message).toContain('another active task agent');
+    expect(mockAcceptPromptDelivery).not.toHaveBeenCalled();
+    expect(mockEnqueueMailboxMessage).not.toHaveBeenCalled();
   });
 
   it('send_durable_message rejects a target whose workspace is no longer in the caller project', async () => {
