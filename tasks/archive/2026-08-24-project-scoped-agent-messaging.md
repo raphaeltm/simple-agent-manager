@@ -34,9 +34,9 @@ The product decision for this task is explicit: any active task agent in a proje
 - [x] Update MCP tool descriptions and API reference text from direct-child-only to project-scoped where applicable.
 - [x] Add real-SQL authorization tests for same-project non-parent/sibling success, cross-project rejection, inactive/terminal target rejection, verified sender provenance, and parent-flow regression coverage.
 - [x] Add regression tests proving destructive parent-only tools still reject non-parent/sibling callers.
-- [ ] Run focused tests, then the appropriate local quality suite.
-- [ ] Run required specialist reviews: security-auditor, cloudflare-specialist, test-engineer, task-completion-validator, and constitution-validator.
-- [ ] Create and push a focused PR. Do not deploy to staging and do not merge.
+- [x] Run focused tests, then the appropriate local quality suite.
+- [x] Run required specialist reviews: security-auditor, cloudflare-specialist, test-engineer, task-completion-validator, and constitution-validator.
+- [x] Create and push a focused PR. Do not deploy to staging and do not merge.
 
 ## Acceptance criteria
 
@@ -48,6 +48,26 @@ The product decision for this task is explicit: any active task agent in a proje
 - Destructive controls remain direct-parent restricted.
 - Local tests and CI evidence are recorded in the PR.
 - Staging is intentionally skipped by explicit user instruction, and the PR is left unmerged.
+
+## Validation evidence
+
+- `pnpm --filter @simple-agent-manager/api test -- --run tests/unit/routes/mcp-agent-messaging-authorization.test.ts tests/unit/routes/mcp-orchestration-comms.test.ts tests/unit/routes/task-wait-tools.test.ts tests/unit/durable-objects/durable-prompt-delivery.test.ts tests/unit/durable-objects/task-wait-supervisor.test.ts` — 5 files / 68 tests passed.
+- `pnpm check:fast` — passed; existing unrelated lint warnings remain warning-only, type-boundary audit has 0 blocking findings.
+- `pnpm test` — passed; 21 turbo tasks successful, API 605 files / 8238 tests passed.
+- `pnpm build` — passed; 9 turbo tasks successful from cache.
+
+## Specialist review notes
+
+- Security review: PASS. Sender task ID, project ID, workspace ID, and user ID are all derived from the verified MCP token; communication resolvers re-read the caller task in the token project and require active caller/target tasks. Cross-project task rows are indistinguishable from not-found targets, target workspaces are also scoped to the token project, and self-targeting is rejected to preserve agent-to-agent semantics. Destructive tools keep direct-parent checks.
+- Cloudflare/D1 review: PASS. Changes use parameterized Drizzle/D1 predicates; no D1 migrations, Durable Object schema changes, KV/R2 bindings, wrangler configuration, or deployment settings changed. Wait wake reconciliation remains fail-closed when selected task rows disappear from the caller project.
+- Test-engineer review: PASS. Authorization boundary coverage uses real SQLite D1 fixtures for same-project sibling success, cross-project rejection, stale workspace project mismatch, inactive caller/target rejection, verified provenance, self-target rejection, parent-flow regression, and destructive non-parent rejection.
+- Constitution review: PASS. No new hardcoded URLs, service endpoints, timeouts, provider identifiers, or deployment-specific constants were introduced.
+- Doc sync review: PASS. MCP tool definitions, API reference, env reference, and public docs now describe same-project communication/wait behavior.
+- Task completion review: PASS. The implemented diff matches the scoped checklist; broader destructive/workflow-shaping parent restrictions from the ready idea remain unchanged by design.
+
+## PR
+
+- https://github.com/raphaeltm/simple-agent-manager/pull/1900
 
 ## References
 
