@@ -32,6 +32,27 @@ function getMaxPolicies(env: Env): number {
  */
 const APPLIES_NOW_SQL = 'active = 1 AND (expires_at IS NULL OR expires_at > ?)';
 
+/**
+ * The two statements that apply the predicate above, composed ONCE here at module
+ * scope rather than interpolated at the `sql.exec()` call sites.
+ *
+ * Both forms would execute identically, but composing here means the string handed
+ * to `sql.exec()` is a fixed load-time constant with no call-site interpolation at
+ * all — which is what `scripts/quality/ast-checks.ts` (`sql-injection`,
+ * `parameterized-sql`) requires, and it keeps every executed statement greppable in
+ * one place. The predicate itself stays single-sourced, so the cap count and the
+ * injection read cannot drift apart.
+ *
+ * Placeholder order matters: the `?` inside APPLIES_NOW_SQL binds `now`, and the
+ * trailing `LIMIT ?` binds the cap.
+ */
+const COUNT_APPLIES_NOW_SQL = `SELECT COUNT(*) as cnt FROM project_policies WHERE ${APPLIES_NOW_SQL}`;
+
+const SELECT_APPLIES_NOW_SQL = `SELECT * FROM project_policies
+     WHERE ${APPLIES_NOW_SQL}
+     ORDER BY category ASC, created_at ASC
+     LIMIT ?`;
+
 // ─── Policy CRUD ────────────────────────────────────────────────────────────
 
 export function createPolicy(
@@ -68,7 +89,7 @@ export function createPolicy(
   // or hard-delete path is tracked in
   // tasks/backlog/2026-08-23-policy-row-retention-bound.md (rule 42 — tracked, not silent).
   const count = parseCountCnt(
-    sql.exec(`SELECT COUNT(*) as cnt FROM project_policies WHERE ${APPLIES_NOW_SQL}`, now).toArray()[0],
+    sql.exec(COUNT_APPLIES_NOW_SQL, now).toArray()[0],
     'policy_count',
   );
   if (count >= getMaxPolicies(env)) {
@@ -213,13 +234,6 @@ export function getActivePolicies(
   now: number = Date.now(),
 ): ReturnType<typeof parsePolicyRow>[] {
   const max = getMaxPolicies(env);
-  const rows = sql.exec(
-    `SELECT * FROM project_policies
-     WHERE ${APPLIES_NOW_SQL}
-     ORDER BY category ASC, created_at ASC
-     LIMIT ?`,
-    now,
-    max,
-  ).toArray();
+  const rows = sql.exec(SELECT_APPLIES_NOW_SQL, now, max).toArray();
   return rows.map((row) => parsePolicyRow(row));
 }
