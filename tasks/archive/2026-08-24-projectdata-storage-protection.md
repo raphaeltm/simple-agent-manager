@@ -25,10 +25,11 @@ preserving high-value chat history.
   `.library/projectdata-do-storage-ceiling-status-2026-08-24.md/...` confirms
   the −3.14 GB drop was Raphaël's manual purge of tool-call JSON data, making
   `chat_messages.tool_metadata` / large tool payload JSON the dominant consumer.
-- PR #1875 adds `storage-safety.ts`, per-object `sql.databaseSize` telemetry,
-  a superadmin emergency purge for `activity_events` / `acp_session_events`, and
-  a 128 KiB write-path cap for new `tool_metadata`; it does not auto-reclaim or
-  shed writes at warning/critical pressure.
+- Current main already has `storage-safety.ts`, per-object `sql.databaseSize`
+  telemetry, a superadmin emergency purge for `activity_events` /
+  `acp_session_events`, and a 128 KiB write-path cap for new `tool_metadata`;
+  it does not auto-reclaim legacy dominant tool payload rows under storage
+  pressure.
 - `measureAndPersistProjectDataStorage()` currently runs on every ProjectData
   alarm tick, even when the storage measurement interval is not due. Because
   ProjectData alarms are multiplexed with faster control loops, this causes more
@@ -65,7 +66,7 @@ preserving high-value chat history.
 - [x] Add scenario-driven Worker-runtime tests for due measurement gating,
   terminal-tool cleanup, active/sleeping preservation, bounded batches, cursor
   continuation, and telemetry/purge metadata.
-- [ ] Run focused local checks and specialist validation.
+- [x] Run focused local checks and specialist validation.
 - [ ] Create a focused draft/do-not-merge PR and wait for CI evidence; do not
   deploy to staging and do not merge.
 
@@ -86,3 +87,35 @@ preserving high-value chat history.
   more frequently.
 - Tests prove the cleanup shrinks `tool_metadata`, preserves high-value rows,
   respects batch bounds, and records telemetry/purge metadata.
+
+## Validation
+
+- `pnpm --filter @simple-agent-manager/shared build && pnpm --filter @simple-agent-manager/providers build && pnpm --filter @simple-agent-manager/cloud-init build`
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/durable-object-retry.test.ts`
+- `pnpm --filter @simple-agent-manager/api typecheck`
+- `(cd apps/api && pnpm vitest run --config vitest.workers.config.ts tests/workers/project-data-storage-safety.test.ts --reporter verbose)`
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/project-data-messages.test.ts tests/unit/services/durable-object-retry.test.ts`
+- `pnpm --filter @simple-agent-manager/api lint`
+- `pnpm lint` — passed with pre-existing warnings unrelated to this patch.
+- `pnpm typecheck` — passed; Astro reported its baseline template diagnostics but exited 0.
+- `pnpm test` — 21 tasks passed; API 604 files / 8224 tests, web 293 files / 3502 tests.
+- `pnpm build` — passed from cache.
+- `pnpm format:check` — Prettier format ratchet passed.
+- `git diff --check HEAD`
+
+## Specialist review notes
+
+- Cloudflare/DO review: cleanup uses `ctx.storage.sql.databaseSize`, keeps
+  alarm work isolated, uses bounded LIMIT/keyset batches, and persists a
+  recheck cursor instead of running a long sweep.
+- Data-loss review: automated cleanup strips only expandable
+  `tool_metadata.content` from old terminal sessions; it preserves chat rows,
+  message text, active/sleeping sessions, and recent terminal sessions by
+  default.
+- Constitution/env review: operational thresholds, limits, batch sizes, age
+  floors, and recheck cadence are configurable via env vars and documented in
+  Worker env types, examples, `wrangler.toml`, public docs, and
+  `env-reference`.
+- Test review: worker-runtime scenarios cover quota measurement, delete reclaim
+  semantics, interval gating, bounded cleanup, cursor continuation,
+  active/sleeping preservation, age-floor preservation, and telemetry metadata.
