@@ -162,6 +162,86 @@ is guaranteed to be the true top `limit` of the union.
 - [x] Screenshots opened and compared by hash; the truncation case was initially
       byte-identical to the untruncated one and was fixed
 
+## Review outcome (2026-08-24) — NOT MERGE-READY
+
+Ten local specialists reviewed the branch. The endpoint work passed security and
+architecture review cleanly, and all three of its discrimination proofs were
+independently re-verified by `test-engineer` (it made each breaking change itself
+and confirmed exactly the intended test went red). But the review surfaced enough
+outstanding HIGH findings — mostly in the inherited prototype half — that this
+must not merge yet.
+
+### Done in this session
+- [x] DO migration `035-comment-thread-activity-indexes` (additive CREATE INDEX)
+- [x] Timeline/drawer bucket contradiction fixed via one shared `bucketForThread`
+- [x] `ProjectComments` page root gets `w-full min-w-0 max-w-3xl mx-auto`
+- [x] `COMMENT_DOT_COLORS` hex literals retired in favour of bucket tokens
+- [x] 26 tests for the triage model (`comment-inbox.test.ts`) — it had none
+- [x] `wrangler.toml [vars]` + public `configuration.md` for the new limits
+
+### Outstanding — blocks merge
+
+**Backend**
+- [ ] **HIGH — no byte budget on the response.** Only thread COUNT is capped.
+      Per-thread worst case is 8k body + 200 replies x 8k = ~1.6 MB, all
+      reachable through ordinary use. ~20 such threads exceed the 32 MiB DO RPC
+      ceiling, and the DO builds up to `2 x (limit+1)` hydrated threads before
+      slicing, against a 128 MB isolate SHARED with every other ProjectData
+      instance — so the blast radius is the project's whole DO.
+      Fix: `PROJECT_COMMENT_LIST_MAX_BYTES` (already added to wrangler.toml and
+      configuration.md, NOT yet implemented). Select candidate rows with a
+      cheap `length(body) + reply-bytes` estimate, apply the budget, then hydrate
+      only the survivors — which also fixes the next item.
+- [ ] **MEDIUM — hydrates ~2x what it returns** (202 threads for a 100 page).
+      Steady state once both tables have enough rows, not a worst case.
+- [ ] **MEDIUM — `hydrateThreadsAcrossSessions` should merge into `hydrateThreads`.**
+      Its rule-63 justification is cargo-culted: that function's `sessionId` is
+      only a log field, never a SQL predicate — the scoping is in the caller's
+      SELECT. Derive the log's session id from the row and delete the duplicate.
+- [ ] **MEDIUM — `ProjectCommentListResponse` / `...SessionRef` / `...FileRef`
+      are exported but imported by nothing.** Wire the route's return type to
+      them or delete them (CLAUDE.md bans dead code).
+- [ ] **MEDIUM — no test proves auth is inherited.** The vertical slice mounts
+      the route standalone with auth mocked, so it cannot catch a reorder of
+      `index.ts` breaking it. Rule 06 requires going through the combined app.
+- [ ] MEDIUM — `sent` status, `limit=0`, and both-tables-at-the-truncation-
+      boundary are untested (the last was probed manually and is correct).
+
+**Frontend**
+- [ ] **HIGH — three interactive surfaces have ZERO behavioural tests:**
+      `SessionCommentsDrawer`, the `SessionHeader` comment chip, and the
+      `comment_thread` timeline entry. Playwright asserts the timeline entry is
+      visible but never clicks it, and never clicks "Show in conversation".
+      Rule 02 requires render + simulate + assert per interactive element.
+- [ ] **HIGH — `buildSessionTimeline`'s `comment_thread` branch is untested**,
+      though that file's suite has 20+ cases for every sibling kind.
+- [ ] **HIGH — rule 18 file size.** `SessionHeader.tsx` 737 -> 805 and
+      `project-message-view/index.tsx` 746 -> 819. Both crossed the 800-line
+      MANDATORY split threshold on this branch.
+- [ ] HIGH — three unlabelled comment counts are visible at once (3 "need you",
+      5 unresolved, 7 total) with nothing distinguishing them.
+- [ ] MEDIUM — filter chips use `role="tab"` without the ARIA tabs keyboard
+      contract (no roving tabindex, no arrow keys, no `aria-controls`).
+- [ ] MEDIUM — neither drawer traps focus. Concretely reachable: tab out of an
+      open drawer into the obscured header and open the other drawer, producing
+      two stacked `aria-modal` dialogs.
+- [ ] MEDIUM — truncation disclosure sits below every bucket, so a reader who
+      only checks "Needs you" never sees it (rule 65's whole point).
+- [ ] `listProjectComments` response mapper has no direct unit test.
+- [ ] Playwright fixture `msg-5` still states the fan-out as current architecture.
+
+**Blocked on Raphaël** (asked via `request_human_input`)
+- [ ] **HIGH — the new drawer duplicates the pre-existing desktop comment rail.**
+      At lg+ both render at the same position doing the same job. The writeup
+      raised this and he replied "I mostly use mobile" — an acknowledgement, not
+      a decision. Options: (A) rail stays, drawer mobile-only; (B) drop the rail;
+      (C) ship both. Recommended A. Several UI fixes above are downstream of this.
+
+**Gates not yet run**
+- [ ] Staging deploy + Playwright verification against the live endpoint
+- [ ] Re-run the visual audit and re-read the screenshots after UI fixes
+- [ ] UI rubric: all five categories scored below the required >=4 bar
+
 ## Acceptance criteria
 
 1. `GET /api/projects/:projectId/comments` returns every comment thread in the
