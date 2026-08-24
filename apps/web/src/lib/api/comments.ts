@@ -490,3 +490,67 @@ export async function reopenLibraryFileComment(
     idempotent: response.idempotent ?? false,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Project-wide comment inbox
+// ---------------------------------------------------------------------------
+
+type BackendProjectCommentsResponse = {
+  messageThreads?: BackendThread[];
+  fileThreads?: BackendFileThread[];
+  sessions?: Array<{ id: string; topic?: string | null }>;
+  files?: Array<{ id: string; filename: string }>;
+  hasMore?: boolean;
+  totalCount?: number;
+};
+
+export interface ProjectCommentsResponse {
+  messageThreads: MessageCommentThread[];
+  fileThreads: LibraryFileCommentThread[];
+  /** Session id → topic, for labelling where a thread lives. */
+  sessionTopics: Map<string, string | null>;
+  /** File id → filename, same purpose. */
+  fileNames: Map<string, string>;
+  hasMore: boolean;
+  /** Total threads in the project, so a capped list can disclose the cut. */
+  totalCount: number;
+}
+
+/**
+ * Every comment thread in a project — chat and library — in one request.
+ *
+ * Reuses the same per-kind mappers as the scoped endpoints, so the shapes the
+ * inbox renders cannot drift from the shapes the session drawer and the file
+ * panel render.
+ */
+export async function listProjectComments(
+  projectId: string,
+  params: { status?: MessageCommentStatus; limit?: number; signal?: AbortSignal } = {}
+): Promise<ProjectCommentsResponse> {
+  const searchParams = new URLSearchParams();
+  if (params.status) searchParams.set('status', params.status);
+  if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
+  const qs = searchParams.toString();
+  const response = await request<BackendProjectCommentsResponse>(
+    `/api/projects/${projectId}/comments${qs ? `?${qs}` : ''}`,
+    params.signal ? { signal: params.signal } : {}
+  );
+
+  const messageThreads = (response.messageThreads ?? []).map((thread) =>
+    mapBackendMessageCommentThread(projectId, thread)
+  );
+  const fileThreads = (response.fileThreads ?? []).map((thread) =>
+    mapBackendFileThread(projectId, thread)
+  );
+
+  return {
+    messageThreads,
+    fileThreads,
+    sessionTopics: new Map(
+      (response.sessions ?? []).map((session) => [session.id, session.topic ?? null])
+    ),
+    fileNames: new Map((response.files ?? []).map((file) => [file.id, file.filename])),
+    hasMore: response.hasMore ?? false,
+    totalCount: response.totalCount ?? messageThreads.length + fileThreads.length,
+  };
+}

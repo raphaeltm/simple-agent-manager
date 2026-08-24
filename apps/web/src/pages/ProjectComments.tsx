@@ -1,5 +1,5 @@
 import { Spinner } from '@simple-agent-manager/ui';
-import { FileText, MessageSquare, MessageSquareQuote } from 'lucide-react';
+import { MessageSquareQuote } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -123,20 +123,16 @@ export function ProjectComments() {
       )}
 
       {/*
-        Disclose the fan-out cap rather than letting a truncated list read as a
-        complete one — see `useProjectCommentInbox` and rule 65.
+        Disclose the page cap rather than letting a truncated list read as a
+        complete one — see `useProjectCommentInbox` and rule 65. Only rendered
+        when something was actually cut: a footer that always says "showing all
+        of them" is noise people learn to skip past.
       */}
-      <p className="m-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-muted">
-        <span className="inline-flex items-center gap-1">
-          <MessageSquare size={11} />
-          {inbox.scannedSessions} chat{inbox.scannedSessions === 1 ? '' : 's'}
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <FileText size={11} />
-          {inbox.scannedFiles} library file{inbox.scannedFiles === 1 ? '' : 's'}
-        </span>
-        {inbox.truncated && <span>· most recent only</span>}
-      </p>
+      {inbox.truncated && (
+        <p className="m-0 text-xs text-fg-muted">
+          Showing the {inbox.shownCount} most recently active of {inbox.totalCount} comments.
+        </p>
+      )}
     </div>
   );
 }

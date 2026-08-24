@@ -30,6 +30,7 @@ import { computeProjectDataAlarmTime } from './alarm-schedule';
 import * as attention from './attention';
 import * as attentionExpiry from './attention-expiry';
 import * as commands from './commands';
+import type * as commentContracts from './comment-contracts';
 import * as comments from './comments';
 import { stopTimedOutConversationWorkspaces } from './conversation-timeout';
 import * as durability from './durability-foundation';
@@ -43,6 +44,7 @@ import * as messagePersistence from './message-persistence';
 import * as messages from './messages';
 import * as missionState from './missions';
 import * as policies from './policies';
+import * as projectCommentInbox from './project-comment-inbox';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from './prompt-delivery';
 import * as promptDelivery from './prompt-delivery';
 import * as reconciliation from './reconciliation';
@@ -520,6 +522,20 @@ export class ProjectData extends DurableObject<Env> {
       this.broadcastCommentThread(result.thread, this.commentStatusEventReason(input.status));
     }
     return { thread: result.thread, idempotent: result.idempotent };
+  }
+
+  /**
+   * Every comment thread in the project, both anchor kinds, newest activity
+   * first. Backs `GET /api/projects/:projectId/comments`, which exists so the
+   * inbox page costs one request instead of one per session plus one per file.
+   *
+   * Needs no project predicate: this Durable Object *is* the project, so every
+   * row in either comment table already belongs to it.
+   */
+  listProjectCommentInbox(
+    input: commentContracts.ListProjectCommentThreadsInput
+  ): commentContracts.ProjectCommentInboxResult {
+    return projectCommentInbox.listProjectCommentInbox(this.sql, this.env, input);
   }
 
   // --- Library file comments ------------------------------------------------

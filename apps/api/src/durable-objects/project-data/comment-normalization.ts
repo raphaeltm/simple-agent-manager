@@ -15,6 +15,8 @@ import {
   DEFAULT_COMMENT_QUOTE_MAX_LENGTH,
   DEFAULT_COMMENT_REPLIES_PER_THREAD_MAX,
   DEFAULT_COMMENT_THREADS_PER_SESSION_MAX,
+  DEFAULT_PROJECT_COMMENT_LIST_LIMIT,
+  DEFAULT_PROJECT_COMMENT_LIST_MAX,
 } from '@simple-agent-manager/shared';
 
 import { type CommentActor, CommentValidationError } from './comment-contracts';
@@ -68,6 +70,34 @@ export function resolveCommentListLimit(env: Env, requested?: number | null): nu
       ? Math.floor(requested)
       : limits.listDefaultLimit;
   return Math.min(limit, limits.listMaxLimit);
+}
+
+/**
+ * Row budget for the project-wide comment inbox.
+ *
+ * Separate from `resolveCommentListLimit` because it bounds a different thing:
+ * that one caps threads within a single conversation or file, this one caps a
+ * cross-source triage page and therefore also bounds the Durable Object RPC
+ * payload (threads are hydrated with their replies, from two tables at once).
+ *
+ * Clamped here, at the Durable Object boundary, rather than trusting the route:
+ * a non-finite or negative limit reaching `LIMIT ?` means *unbounded* in SQLite
+ * (.claude/rules/51, and the same reasoning as `clampRowLimit` in knowledge.ts).
+ */
+export function resolveProjectCommentListLimit(env: Env, requested?: number | null): number {
+  const defaultLimit = positiveInteger(
+    env.PROJECT_COMMENT_LIST_LIMIT,
+    DEFAULT_PROJECT_COMMENT_LIST_LIMIT
+  );
+  const maxLimit = Math.max(
+    defaultLimit,
+    positiveInteger(env.PROJECT_COMMENT_LIST_MAX, DEFAULT_PROJECT_COMMENT_LIST_MAX)
+  );
+  const limit =
+    typeof requested === 'number' && Number.isFinite(requested) && requested > 0
+      ? Math.floor(requested)
+      : defaultLimit;
+  return Math.min(limit, maxLimit);
 }
 
 export function normalizeBody(body: string, limits: CommentLimits): string {

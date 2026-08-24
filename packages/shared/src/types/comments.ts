@@ -253,3 +253,51 @@ export interface UpdateLibraryFileCommentThreadStatusRequest {
   actor: CommentAuthor;
   provenance: MessageCommentActorProvenance;
 }
+
+// ---------------------------------------------------------------------------
+// Project-wide comment inbox
+//
+// A comment thread renders beside the one message or file it annotates, so the
+// only way to *discover* an unresolved comment used to be scrolling the thing
+// that contains it. `GET /api/projects/:projectId/comments` is the index that
+// fixes that: every thread in a project, from chat and from the library, in one
+// request.
+//
+// The two anchor kinds stay separate in the response rather than being merged
+// into a union. They are genuinely different shapes (message threads carry
+// `sessionId` + `sent*` directive state; file threads carry neither), they live
+// in physically separate tables, and keeping them apart means the existing
+// per-kind client mappers are reused unchanged.
+// ---------------------------------------------------------------------------
+
+/** A chat session that owns at least one thread in the response. */
+export interface ProjectCommentSessionRef {
+  id: string;
+  topic: string | null;
+}
+
+/** A library file that owns at least one thread in the response. */
+export interface ProjectCommentFileRef {
+  id: string;
+  filename: string;
+}
+
+export interface ProjectCommentListResponse {
+  messageThreads: MessageCommentThread[];
+  fileThreads: LibraryFileCommentThread[];
+  /**
+   * Topics for every session referenced by `messageThreads`, so the client can
+   * label "where does this live" without a second round trip.
+   */
+  sessions: ProjectCommentSessionRef[];
+  /** Filenames for every file referenced by `fileThreads`. Same reasoning. */
+  files: ProjectCommentFileRef[];
+  /** True when `limit` kept the response from covering every thread. */
+  hasMore: boolean;
+  /**
+   * Total threads in the project across both anchor kinds, matching the same
+   * status filter. Present so a truncated list can never be read as a complete
+   * one (.claude/rules/65-capped-selection-must-rank-and-disclose.md).
+   */
+  totalCount: number;
+}

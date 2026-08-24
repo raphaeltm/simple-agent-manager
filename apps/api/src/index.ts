@@ -114,6 +114,7 @@ import { orchestratorRoutes } from './routes/orchestrator';
 import { policyRoutes } from './routes/policies';
 import { profileRuntimeRoutes } from './routes/profile-runtime';
 import { projectAgentRoutes } from './routes/project-agent';
+import { projectCommentRoutes } from './routes/project-comments';
 import {
   deploymentIdentityTokenRoute,
   gcpDeployCallbackRoute,
@@ -730,6 +731,7 @@ app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/sessions', chatStartRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
+app.route('/api/projects/:projectId/comments', projectCommentRoutes);
 app.route('/api/projects/:projectId/cached-commands', cachedCommandRoutes);
 app.route('/api/projects/:projectId/activity', activityRoutes);
 app.route('/api/projects/:projectId/library', libraryRoutes);

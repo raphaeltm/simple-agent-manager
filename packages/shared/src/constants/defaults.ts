@@ -119,27 +119,27 @@ export const DEFAULT_COMMENT_THREADS_PER_SESSION_MAX = 1_000;
 export const DEFAULT_COMMENT_REPLIES_PER_THREAD_MAX = 200;
 
 /**
- * How many of a project's most recent chat sessions the project-level comment
- * inbox scans for threads.
+ * How many threads `GET /api/projects/:projectId/comments` returns in one page.
  *
- * There is no project-scoped comment list endpoint, so the inbox fans out one
- * request per session. That fan-out MUST be bounded or opening the page on a
- * long-lived project issues hundreds of requests (rule 60). Recency is the right
- * cut here because an unresolved comment on a session nobody has touched in
- * months is not what the page exists to surface — but the cut is disclosed in
- * the UI rather than applied silently (rule 65).
+ * The project comment inbox is a triage surface, not an archive: it answers "is
+ * anything waiting on me", and nobody triages more than a screenful. The cap is
+ * ranked by `updated_at DESC` — most recently active first — because that is
+ * what a reader of an inbox needs, and the response carries `totalCount` so a
+ * truncated list can never be mistaken for a complete one (rule 65).
  *
- * Override at build time via VITE_PROJECT_COMMENT_INBOX_SESSION_LIMIT.
+ * Override via PROJECT_COMMENT_LIST_LIMIT.
  */
-export const DEFAULT_PROJECT_COMMENT_INBOX_SESSION_LIMIT = 25;
+export const DEFAULT_PROJECT_COMMENT_LIST_LIMIT = 100;
 
 /**
- * How many library files the project-level comment inbox scans for threads.
- * Same fan-out reasoning as the session limit above.
+ * Ceiling on a caller-supplied `limit` for the project comment inbox.
  *
- * Override at build time via VITE_PROJECT_COMMENT_INBOX_FILE_LIMIT.
+ * Bounds the work the Durable Object does per request and the size of the RPC
+ * payload it returns, since threads are hydrated with their replies.
+ *
+ * Override via PROJECT_COMMENT_LIST_MAX.
  */
-export const DEFAULT_PROJECT_COMMENT_INBOX_FILE_LIMIT = 25;
+export const DEFAULT_PROJECT_COMMENT_LIST_MAX = 300;
 
 /**
  * Safety bound on how many older pages the chat client will fetch while chasing a

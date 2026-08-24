@@ -53,6 +53,8 @@ export {
   libraryFileCommentsQueryOptions,
   messageCommentQueryKeys,
   messageCommentsQueryOptions,
+  projectCommentQueryKeys,
+  projectCommentsQueryOptions,
   upsertLibraryFileCommentThread,
 } from './comments';
 export { credentialQueryKeys, credentialsQueryOptions } from './credentials';

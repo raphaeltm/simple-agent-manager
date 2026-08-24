@@ -30,6 +30,8 @@ import {
   type FileCommentThreadMutationResult,
   type ListFileCommentThreadsInput,
   type ListFileCommentThreadsResult,
+  type ListProjectCommentThreadsInput,
+  type ListProjectCommentThreadsPage,
   type UpdateFileCommentStatusInput,
 } from './comment-contracts';
 import {
@@ -289,6 +291,57 @@ export function listFileCommentThreads(
   return {
     threads: hydrateThreads(sql, hasMore ? rows.slice(0, limit) : rows),
     hasMore,
+  };
+}
+
+/**
+ * Every library-file-anchored thread in the project, newest activity first.
+ *
+ * The file-comment sibling of `listProjectCommentThreads`. Same reasoning for
+ * dropping the scope predicate (this Durable Object is the project) and same
+ * reasoning for `updated_at DESC` (bumped on reply and on status change, so it
+ * ranks by real activity rather than insertion order — .claude/rules/65).
+ *
+ * Returns up to `limit + 1` so the caller can merge against message threads and
+ * still detect truncation.
+ */
+export function listProjectFileCommentThreads(
+  sql: SqlStorage,
+  input: ListProjectCommentThreadsInput & { limit: number }
+): ListProjectCommentThreadsPage<LibraryFileCommentThread> {
+  const conditions: string[] = [];
+  const params: Array<string | number> = [];
+
+  if (input.status) {
+    conditions.push('status = ?');
+    params.push(input.status);
+  }
+
+  // Named `whereClause` deliberately — see the note in `listFileCommentThreads`.
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const rows = sql
+    .exec(
+      `SELECT id, file_id, quote, body, author_type, author_id, author_name,
+              status, created_at, updated_at, sequence, version, client_mutation_id,
+              resolved_at, resolved_by_type, resolved_by_id, resolved_by_name,
+              reopened_at, reopened_by_type, reopened_by_id, reopened_by_name
+       FROM library_file_comment_threads
+       ${whereClause}
+       ORDER BY updated_at DESC, id ASC
+       LIMIT ?`,
+      ...params,
+      input.limit + 1
+    )
+    .toArray();
+
+  const countRow = sql
+    .exec(`SELECT COUNT(*) AS count FROM library_file_comment_threads ${whereClause}`, ...params)
+    .toArray()[0];
+
+  return {
+    threads: hydrateThreads(sql, rows),
+    totalCount: typeof countRow?.count === 'number' ? countRow.count : 0,
   };
 }
 

@@ -26,6 +26,10 @@ export type Env = {
   COMMENT_LIST_LIMIT_MAX?: string;
   COMMENT_THREADS_PER_SESSION_MAX?: string;
   COMMENT_REPLIES_PER_THREAD_MAX?: string;
+  /** Page size for the project-wide comment inbox (GET /projects/:id/comments). */
+  PROJECT_COMMENT_LIST_LIMIT?: string;
+  /** Ceiling on a caller-supplied limit for that same read. */
+  PROJECT_COMMENT_LIST_MAX?: string;
   DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES?: string;
   PROJECT_DATA_TOOL_METADATA_MAX_BYTES?: string;
   PROJECT_DATA_STORAGE_TELEMETRY_ENABLED?: string;

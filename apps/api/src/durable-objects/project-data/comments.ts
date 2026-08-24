@@ -19,6 +19,9 @@ import {
   type CreateCommentThreadInput,
   type ListCommentThreadsInput,
   type ListCommentThreadsResult,
+  type ListProjectCommentThreadsInput,
+  type ListProjectCommentThreadsPage,
+  type ProjectCommentSessionTopic,
   type UpdateCommentStatusInput,
 } from './comment-contracts';
 import {
@@ -328,6 +331,119 @@ export function listCommentThreads(
     threads: hydrateThreads(sql, input.sessionId, hasMore ? rows.slice(0, limit) : rows),
     hasMore,
   };
+}
+
+/**
+ * Parses thread rows for a read that spans sessions.
+ *
+ * Separate from `hydrateThreads` rather than relaxing its `sessionId` parameter:
+ * that parameter annotates the skip log, but it also documents that its caller
+ * is session-scoped, and .claude/rules/63 is about exactly the drift where a
+ * scope argument is loosened so one more caller fits. Here each row supplies its
+ * own session id, which makes the log strictly more precise anyway.
+ */
+function hydrateThreadsAcrossSessions(sql: SqlStorage, rows: unknown[]): MessageCommentThread[] {
+  const parsedRows: ThreadRow[] = [];
+  for (const row of rows) {
+    try {
+      parsedRows.push(parseRow(ThreadRowSchema, row, 'comment_thread'));
+    } catch (err) {
+      const record = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
+      log.warn('comments.thread_row_skipped', {
+        rowId: typeof record.id === 'string' ? record.id : null,
+        sessionId: typeof record.session_id === 'string' ? record.session_id : null,
+        error: String(err),
+      });
+    }
+  }
+
+  const replies = readReplies(
+    sql,
+    parsedRows.map((row) => row.id)
+  );
+  return parsedRows.map((row) => mapThread(row, replies.get(row.id) ?? []));
+}
+
+/**
+ * Every message-anchored thread in the project, newest activity first.
+ *
+ * No session predicate, by design: this Durable Object *is* the project, so
+ * every row in `comment_threads` belongs to it. The ordering is the load-bearing
+ * decision — `updated_at` is bumped by `createCommentReply` and by every status
+ * transition, so `updated_at DESC` genuinely means "most recently active", which
+ * is what a reader triaging an inbox needs. Ordering by `sequence` (what the
+ * session-scoped read uses, where it means chronological-within-one-conversation)
+ * would rank by insertion order across sessions and systematically bury whatever
+ * moved most recently (.claude/rules/65).
+ *
+ * Returns up to `limit + 1` so the caller can merge against the other anchor
+ * kind and still detect truncation.
+ */
+export function listProjectCommentThreads(
+  sql: SqlStorage,
+  input: ListProjectCommentThreadsInput & { limit: number }
+): ListProjectCommentThreadsPage<MessageCommentThread> {
+  const conditions: string[] = [];
+  const params: Array<string | number> = [];
+
+  if (input.status) {
+    conditions.push('status = ?');
+    params.push(input.status);
+  }
+
+  // Named `whereClause` deliberately: every fragment in `conditions` is a literal
+  // with `?` placeholders, and that identifier is what the sql-injection scanner
+  // recognises as a parameterized clause builder (scripts/quality/ast-checks.ts).
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const rows = sql
+    .exec(
+      `SELECT id, session_id, message_id, quote, body, author_type, author_id, author_name,
+              status, created_at, updated_at, sequence, version, client_mutation_id,
+              sent_at, sent_by_type, sent_by_id, sent_by_name,
+              resolved_at, resolved_by_type, resolved_by_id, resolved_by_name,
+              reopened_at, reopened_by_type, reopened_by_id, reopened_by_name
+       FROM comment_threads
+       ${whereClause}
+       ORDER BY updated_at DESC, id ASC
+       LIMIT ?`,
+      ...params,
+      input.limit + 1
+    )
+    .toArray();
+
+  const countRow = sql
+    .exec(`SELECT COUNT(*) AS count FROM comment_threads ${whereClause}`, ...params)
+    .toArray()[0];
+
+  return {
+    threads: hydrateThreadsAcrossSessions(sql, rows),
+    totalCount: typeof countRow?.count === 'number' ? countRow.count : 0,
+  };
+}
+
+/**
+ * Topics for the given session ids, for labelling "where does this thread live".
+ *
+ * Free to do here — `chat_sessions` is in this same Durable Object — which is
+ * why the response can carry it without a second round trip.
+ */
+export function readSessionTopics(
+  sql: SqlStorage,
+  sessionIds: string[]
+): ProjectCommentSessionTopic[] {
+  if (sessionIds.length === 0) return [];
+  const placeholders = sessionIds.map(() => '?').join(', ');
+  const rows = sql
+    .exec(`SELECT id, topic FROM chat_sessions WHERE id IN (${placeholders})`, ...sessionIds)
+    .toArray();
+
+  const topics: ProjectCommentSessionTopic[] = [];
+  for (const row of rows) {
+    if (typeof row.id !== 'string') continue;
+    topics.push({ id: row.id, topic: typeof row.topic === 'string' ? row.topic : null });
+  }
+  return topics;
 }
 
 export function createCommentThread(

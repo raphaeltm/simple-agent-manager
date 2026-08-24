@@ -113,6 +113,43 @@ export type ListFileCommentThreadsResult = {
   hasMore: boolean;
 };
 
+// ---------------------------------------------------------------------------
+// Project-wide comment inbox
+//
+// Deliberately a separate input type rather than making `sessionId` / `fileId`
+// optional on the two scoped inputs above. Those columns are authorization
+// predicates, and .claude/rules/63 exists because relaxing exactly this kind of
+// parameter is how an `AND session_id = ?` becomes "unnecessary" and then
+// absent. The project-wide read needs no such predicate — the Durable Object is
+// keyed by project, so every row it holds already belongs to this project.
+// ---------------------------------------------------------------------------
+
+export type ListProjectCommentThreadsInput = {
+  status?: CommentStatus | null;
+  limit?: number | null;
+};
+
+/** One capped, `updated_at DESC`-ranked page of a single anchor kind. */
+export type ListProjectCommentThreadsPage<TThread> = {
+  threads: TThread[];
+  /** Total rows matching the filter, ignoring the cap. */
+  totalCount: number;
+};
+
+export type ProjectCommentSessionTopic = {
+  id: string;
+  topic: string | null;
+};
+
+export type ProjectCommentInboxResult = {
+  messageThreads: MessageCommentThread[];
+  fileThreads: LibraryFileCommentThread[];
+  /** Topics for the sessions referenced by `messageThreads`, joined in-DO. */
+  sessions: ProjectCommentSessionTopic[];
+  hasMore: boolean;
+  totalCount: number;
+};
+
 export const COMMENT_NOT_FOUND = 'COMMENT_NOT_FOUND';
 export const COMMENT_VALIDATION = 'COMMENT_VALIDATION';
 export const COMMENT_IDEMPOTENCY_CONFLICT = 'COMMENT_IDEMPOTENCY_CONFLICT';

@@ -35,6 +35,8 @@ import type {
   ListCommentThreadsInput,
   ListFileCommentThreadsInput,
   ListFileCommentThreadsResult,
+  ListProjectCommentThreadsInput,
+  ProjectCommentInboxResult,
   UpdateCommentStatusInput,
   UpdateFileCommentStatusInput,
 } from '../durable-objects/project-data/comment-contracts';
@@ -492,6 +494,23 @@ export async function updateCommentThreadStatus(
 ): Promise<MessageCommentMutationResponse> {
   return callProjectDataNoRetry(env, projectId, 'updateCommentThreadStatus', (stub) =>
     stub.updateCommentThreadStatus(input)
+  );
+}
+
+/**
+ * Every comment thread in the project, both anchor kinds, in one round trip.
+ *
+ * Replaces a client-side fan-out that issued one request per recent session plus
+ * one per library file — up to 52 requests to render a single page
+ * (.claude/rules/60).
+ */
+export async function listProjectCommentInbox(
+  env: Env,
+  projectId: string,
+  input: ListProjectCommentThreadsInput
+): Promise<ProjectCommentInboxResult> {
+  return callProjectDataWithRetry(env, projectId, 'listProjectCommentInbox', (stub) =>
+    stub.listProjectCommentInbox(input)
   );
 }
 

@@ -5,8 +5,10 @@ import {
   type LibraryFileCommentThread,
   listLibraryFileComments,
   listMessageComments,
+  listProjectComments,
   type MessageCommentRealtimeEvent,
   type MessageCommentThread,
+  type ProjectCommentsResponse,
 } from '../api/comments';
 
 export const messageCommentQueryKeys = {
@@ -14,6 +16,25 @@ export const messageCommentQueryKeys = {
   session: (queryScope: string, projectId: string, sessionId: string) =>
     [...messageCommentQueryKeys.all(queryScope), 'session', projectId, sessionId] as const,
 };
+
+export const projectCommentQueryKeys = {
+  all: (queryScope: string) => ['auth', queryScope, 'project-comments'] as const,
+  project: (queryScope: string, projectId: string) =>
+    [...projectCommentQueryKeys.all(queryScope), projectId] as const,
+};
+
+/**
+ * The whole project comment inbox in one request.
+ *
+ * Replaces a per-session + per-file fan-out; see `useProjectCommentInbox`.
+ */
+export function projectCommentsQueryOptions(queryScope: string, projectId: string) {
+  return queryOptions({
+    queryKey: projectCommentQueryKeys.project(queryScope, projectId),
+    queryFn: async ({ signal }): Promise<ProjectCommentsResponse> =>
+      listProjectComments(projectId, { signal }),
+  });
+}
 
 export function messageCommentsQueryOptions(
   queryScope: string,
