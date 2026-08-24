@@ -7,7 +7,7 @@ export class ProjectDataStorageFullError extends AppError {
     super(
       507,
       PROJECT_DATA_STORAGE_FULL,
-      'ProjectData storage is full; writes are paused until an administrator runs storage recovery.',
+      'ProjectData storage is full; storage recovery is required before this write can complete.',
       {
         projectId,
         operation,

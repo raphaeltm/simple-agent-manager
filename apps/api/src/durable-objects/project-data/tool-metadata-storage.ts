@@ -139,3 +139,44 @@ export function boundToolMetadataForStorage(
     truncated: true,
   };
 }
+
+export function stripToolMetadataPayloadForStorage(
+  toolMetadata: string | null,
+  env: Env
+): {
+  value: string | null;
+  originalBytes: number;
+  storedBytes: number;
+  stripped: boolean;
+} {
+  if (toolMetadata === null) {
+    return { value: null, originalBytes: 0, storedBytes: 0, stripped: false };
+  }
+
+  const originalBytes = utf8Bytes(toolMetadata);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(toolMetadata);
+  } catch {
+    return { value: toolMetadata, originalBytes, storedBytes: originalBytes, stripped: false };
+  }
+
+  const compact = stripToolMetadataContent(parsed, resolveCompactMessageOptions(env));
+  const compactJson = JSON.stringify(compact);
+  const compactBytes = utf8Bytes(compactJson);
+  if (compactBytes >= originalBytes) {
+    return { value: toolMetadata, originalBytes, storedBytes: originalBytes, stripped: false };
+  }
+
+  const maxBytes = resolveToolMetadataMaxBytes(env);
+  const value = compactBytes <= maxBytes
+    ? compactJson
+    : serializeWithinLimit(buildMinimalToolMetadata(parsed, originalBytes), maxBytes);
+
+  return {
+    value,
+    originalBytes,
+    storedBytes: utf8Bytes(value),
+    stripped: true,
+  };
+}

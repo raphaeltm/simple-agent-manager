@@ -14,6 +14,7 @@ const TRANSIENT_DURABLE_OBJECT_PATTERNS = [
 const DURABLE_OBJECT_STORAGE_FULL_PATTERNS = [
   /\bSQLITE_FULL\b/i,
   /database or disk is full/i,
+  /exceeded the maximum database size/i,
   /durable object.*storage.*full/i,
   /sqlite.*full/i,
 ];

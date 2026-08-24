@@ -49,6 +49,9 @@ describe('isDurableObjectStorageFullError', () => {
   it('matches Cloudflare/SQLite full-storage variants', () => {
     expect(isDurableObjectStorageFullError(new Error('SQLITE_FULL'))).toBe(true);
     expect(isDurableObjectStorageFullError(new Error('database or disk is full'))).toBe(true);
+    expect(isDurableObjectStorageFullError(new Error('Exceeded the maximum database size.'))).toBe(
+      true
+    );
     expect(isDurableObjectStorageFullError(new Error('sqlite full while inserting'))).toBe(true);
   });
 

@@ -1018,12 +1018,7 @@ export class ProjectData extends DurableObject<Env> {
     if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'ProjectData')) return;
 
     try {
-      await storageSafety.measureAndPersistProjectDataStorage(
-        this.sql,
-        this.env,
-        this.getProjectId(),
-        'alarm'
-      );
+      await storageSafety.runProjectDataStorageSafetyAlarm(this.sql, this.env, this.getProjectId());
     } catch (err) {
       log.error('alarm.storage_safety_failed', {
         error: err instanceof Error ? err.message : String(err),
