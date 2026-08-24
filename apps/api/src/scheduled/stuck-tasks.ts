@@ -34,6 +34,7 @@ import {
   DEFAULT_TASK_RUN_MAX_EXECUTION_MS,
   DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS,
   DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS,
+  type TaskExecutionStep,
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -83,7 +84,7 @@ import {
 const SUPERSEDED_TERMINATION_MESSAGE =
   'Superseded by a later session wake; the conversation continued in a replacement ' +
   'task and has since ended.';
-const TASK_RUNNER_NORMAL_HANDOFF_STEP = 'running';
+const TASK_RUNNER_NORMAL_HANDOFF_STEP: TaskExecutionStep = 'running';
 const TASK_RUNNER_MISMATCH_RECOVERY_TYPE = 'do_task_status_mismatch';
 
 function parseMs(value: string | undefined, fallback: number): number {

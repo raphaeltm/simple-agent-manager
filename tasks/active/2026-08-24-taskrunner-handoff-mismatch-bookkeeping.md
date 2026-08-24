@@ -63,7 +63,7 @@ demonstrated D1 write defect.
   - [x] an existing diagnostic suppresses repeats.
 - [x] Update source-contract tests that currently encode the old repeated warning behavior.
 - [x] Run focused tests and required quality checks.
-- [ ] Perform required specialist reviews.
+- [x] Perform required specialist reviews.
 - [ ] Create/push a focused PR; do not deploy to staging and do not merge.
 
 ## Acceptance criteria
@@ -99,3 +99,24 @@ branch and will be reviewed with the code PR.
 - `pnpm --filter @simple-agent-manager/api test -- tests/unit/recovery-resilience.test.ts` — 69 passed.
 - `pnpm --filter @simple-agent-manager/api typecheck` — passed.
 - `pnpm --filter @simple-agent-manager/api lint` — passed.
+- `pnpm typecheck` — 19 tasks passed.
+- `pnpm lint` — 13 tasks passed; warning-only pre-existing a11y/hooks findings outside this diff.
+- `pnpm test` — 604 test files / 8,230 tests passed; 21 tasks passed.
+- `pnpm build` — 9 tasks passed; warning-only existing Turbo output warning for API build outputs.
+- `git diff --check origin/main...HEAD` — passed.
+
+## Specialist review evidence
+
+- `test-engineer` — PASS. New deterministic regression tests call `recoverStuckTasks()`
+  through the scheduled-sweep entry point and model the relevant D1, TaskRunner DO,
+  ProjectData/ACP, snapshot, and supersession boundaries with concrete rows.
+- `cloudflare-specialist` — PASS. No migration or binding changes. The hot production
+  path no longer writes to `OBSERVABILITY_DATABASE`; the remaining diagnostic lookup
+  is task-scoped and uses the existing `idx_platform_errors_task_id` index before
+  applying the JSON-context substring filter.
+- `constitution-validator` — PASS. No URLs, timeouts, limits, secrets, or
+  deployment-specific identifiers were added. The new handoff sentinel is typed as
+  shared `TaskExecutionStep` protocol vocabulary.
+- `task-completion-validator` — PASS. Research findings and acceptance criteria map to
+  the implemented diff and tests; UI/backend and multi-resource checks are not
+  applicable for this scheduled API bookkeeping change.
