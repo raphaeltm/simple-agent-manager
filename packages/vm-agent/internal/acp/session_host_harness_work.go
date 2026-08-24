@@ -314,31 +314,35 @@ func (h *SessionHost) applyACPToolCallStatus(toolCallID string, status *acpsdk.T
 	}
 
 	statusTerminal := status != nil && isTerminalACPToolCallStatus(*status)
-	previousCount := len(h.harnessTaskIDs)
 	if statusTerminal {
 		delete(h.harnessTaskIDs, toolCallID)
 	} else if !h.addHarnessTaskLocked(toolCallID) {
 		return false
 	}
 
-	// A terminal update while nothing was tracked cannot change the
-	// authoritative active set, so skip the redundant inactive report.
-	if statusTerminal && previousCount == 0 {
+	count := len(h.harnessTaskIDs)
+	state := harnessWorkInactive
+	if count > 0 {
+		state = harnessWorkActive
+	}
+
+	// A terminal update that moved nothing is not progress and must not renew the
+	// lease: a duplicate, or one arriving for a tool call turn-end reconciliation
+	// already dropped, or one for an ID we never tracked while other work is live.
+	// Non-terminal updates always fall through — repeated `in_progress` and
+	// content-only edges are genuine lifecycle progress from the ACP peer.
+	//
+	// Note this deliberately DOES report when a late terminal update arrives while
+	// the state is `settling`: that is positive evidence the settling lease can be
+	// released now rather than waiting it out.
+	if statusTerminal && state == h.harnessWork.State && count == h.harnessWork.Count {
 		return false
 	}
 
-	currentCount := len(h.harnessTaskIDs)
-	if currentCount > 0 {
-		h.harnessWork.State = harnessWorkActive
-	} else {
-		h.harnessWork.State = harnessWorkInactive
-	}
-	h.harnessWork.Count = currentCount
-
-	// Repeated non-terminal tool updates are genuine lifecycle progress from the
-	// ACP peer, so they legitimately advance the progress clock.
+	h.harnessWork.State = state
+	h.harnessWork.Count = count
 	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLocked()
-	if h.harnessWork.State == harnessWorkActive {
+	if state == harnessWorkActive {
 		h.startHarnessWorkRereportLocked()
 	} else {
 		h.stopHarnessWorkRereportLocked()

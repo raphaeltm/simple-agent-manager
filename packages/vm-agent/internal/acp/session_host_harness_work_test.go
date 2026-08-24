@@ -219,8 +219,44 @@ func TestACPToolCallCancelledStatusEndsWork(t *testing.T) {
 	// pinned SDK. Treating it as non-terminal would leak the tool call in the one
 	// case where the agent explicitly told us the work is over.
 	notifyACPToolCallUpdate(t, client, "acp-session", "tool-1", toolStatus(acpToolCallStatusCancelled))
-	if got := host.harnessWorkSnapshot(); got.State != harnessWorkInactive || got.Count != 0 {
-		t.Fatalf("cancelled tool call did not release work: %#v", got)
+	released := host.harnessWorkSnapshot()
+	if released.State != harnessWorkInactive || released.Count != 0 {
+		t.Fatalf("cancelled tool call did not release work: %#v", released)
+	}
+
+	// A repeat terminal update moved nothing, so it is not progress and must not
+	// renew the lease by advancing the progress clock.
+	notifyACPToolCallUpdate(t, client, "acp-session", "tool-1", toolStatus(acpToolCallStatusCancelled))
+	if got := host.harnessWorkSnapshot(); !got.ProgressAt.Equal(released.ProgressAt) {
+		t.Fatalf("no-op terminal update renewed the lease: %#v -> %#v", released, got)
+	}
+
+	// A terminal update for an ID we never tracked must not disturb live work.
+	notifyACPToolCall(t, client, "acp-session", "tool-live", "Read file", acpsdk.ToolCallStatusInProgress, nil)
+	live := host.harnessWorkSnapshot()
+	notifyACPToolCallUpdate(t, client, "acp-session", "tool-unknown", toolStatus(acpsdk.ToolCallStatusCompleted))
+	if got := host.harnessWorkSnapshot(); got.State != harnessWorkActive || got.Count != 1 || !got.ProgressAt.Equal(live.ProgressAt) {
+		t.Fatalf("unknown terminal ID disturbed live work: %#v -> %#v", live, got)
+	}
+}
+
+// A late terminal update is positive evidence that the settling lease can be
+// released now rather than waited out.
+func TestACPToolCallLateTerminalUpdateReleasesSettlingLease(t *testing.T) {
+	t.Parallel()
+
+	host, client := newHarnessWorkTestClient(t, SessionHostConfig{}, "openai-codex", "acp-session", HostPrompting)
+
+	notifyACPToolCall(t, client, "acp-session", "tool-orphan", "Run command", acpsdk.ToolCallStatusInProgress, nil)
+	endPromptTurn(t, host, "end_turn", nil)
+	settled := host.harnessWorkSnapshot()
+	if settled.State != harnessWorkSettling {
+		t.Fatalf("expected settling before the late update: %#v", settled)
+	}
+
+	notifyACPToolCallUpdate(t, client, "acp-session", "tool-orphan", toolStatus(acpsdk.ToolCallStatusCompleted))
+	if got := host.harnessWorkSnapshot(); got.State != harnessWorkInactive || got.Count != 0 || !got.ProgressAt.After(settled.ProgressAt) {
+		t.Fatalf("late terminal update did not release the settling lease: %#v -> %#v", settled, got)
 	}
 }
 
