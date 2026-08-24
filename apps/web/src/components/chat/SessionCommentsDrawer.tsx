@@ -52,7 +52,7 @@ export function SessionCommentsDrawer({
   onReopen,
   onSendToAgent,
 }: SessionCommentsDrawerProps) {
-  const panelRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDialogElement>(null);
   const counts = useMemo(() => countBuckets(items, viewerId), [items, viewerId]);
   // Open on whichever bucket has something waiting: landing on an empty "Needs
   // you" tab reads as "comments are broken" rather than "you are up to date".
@@ -62,6 +62,8 @@ export function SessionCommentsDrawer({
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const visible = useMemo(() => filterInbox(items, filter, viewerId), [items, filter, viewerId]);
+  const showInitialLoading = loading && items.length === 0;
+  const showEmpty = !showInitialLoading && visible.length === 0;
   useDialogFocusTrap(panelRef, onClose);
 
   return createPortal(
@@ -72,14 +74,14 @@ export function SessionCommentsDrawer({
         aria-hidden="true"
       />
 
-      <div
-        className="glass-panel-container glass-composited fixed z-50 glass-modal rounded-l-[20px] rounded-r-none border-y-0 border-r-0 flex flex-col shadow-xl overflow-hidden
+      <dialog
+        open
+        className="glass-panel-container glass-composited fixed z-50 glass-modal m-0 max-h-none max-w-none rounded-l-[20px] rounded-r-none border-y-0 border-r-0 p-0 text-inherit backdrop:bg-transparent flex flex-col shadow-xl overflow-hidden
           inset-0
           md:inset-y-0 md:left-auto md:right-0 md:w-[min(400px,50vw)]
           before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,rgba(34,197,94,0.55)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"
         ref={panelRef}
         tabIndex={-1}
-        role="dialog"
         aria-modal="true"
         aria-label="Session comments"
       >
@@ -101,16 +103,19 @@ export function SessionCommentsDrawer({
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto">
-          {loading && items.length === 0 ? (
+          {showInitialLoading && (
             <div className="flex items-center justify-center py-8">
               <Spinner size="sm" />
             </div>
-          ) : visible.length === 0 ? (
+          )}
+          {showEmpty && (
             <EmptyInbox filter={filter} total={counts.all} />
-          ) : (
+          )}
+          {!showInitialLoading && !showEmpty && (
             <ul className="m-0 flex list-none flex-col divide-y divide-border-default p-0">
               {visible.map((item) => {
                 const expanded = expandedId === item.thread.id;
+                const sessionSource = item.source.kind === 'session' ? item.source : null;
                 return (
                   <li key={item.thread.id} className="min-w-0">
                     <CommentInboxRow
@@ -130,17 +135,14 @@ export function SessionCommentsDrawer({
                           onReopen={onReopen}
                           onSendToAgent={onSendToAgent}
                         />
-                        {item.source.kind === 'session' && (
+                        {sessionSource && (
                           <Button
                             size="sm"
                             variant="ghost"
                             className="mt-2"
                             onClick={() => {
                               onJump({
-                                messageId:
-                                  item.source.kind === 'session'
-                                    ? item.source.messageId
-                                    : undefined,
+                                messageId: sessionSource.messageId,
                                 timestamp: item.thread.createdAt,
                               });
                               onClose();
@@ -158,7 +160,7 @@ export function SessionCommentsDrawer({
             </ul>
           )}
         </div>
-      </div>
+      </dialog>
     </>,
     document.body
   );
@@ -168,7 +170,7 @@ export function SessionCommentsDrawer({
  * Empty states are split because "you have no comments" and "you are caught up"
  * are different pieces of news and only one of them is good.
  */
-function EmptyInbox({ filter, total }: { filter: CommentInboxFilter; total: number }) {
+function EmptyInbox({ filter, total }: Readonly<{ filter: CommentInboxFilter; total: number }>) {
   if (total === 0) {
     return (
       <div className="px-6 py-10 text-center">
@@ -178,13 +180,14 @@ function EmptyInbox({ filter, total }: { filter: CommentInboxFilter; total: numb
       </div>
     );
   }
+  const emptyTitle = filter === 'needs_you' ? "You're all caught up" : 'Nothing here';
+  const commentNoun = total === 1 ? 'comment' : 'comments';
+
   return (
     <div className="px-6 py-10 text-center">
-      <p className="m-0 text-sm text-fg-primary">
-        {filter === 'needs_you' ? "You're all caught up" : 'Nothing here'}
-      </p>
+      <p className="m-0 text-sm text-fg-primary">{emptyTitle}</p>
       <p className="m-0 mt-1 text-xs text-fg-muted">
-        {total} comment{total === 1 ? '' : 's'} in this session — switch filters to see them.
+        {total} {commentNoun} in this session — switch filters to see them.
       </p>
     </div>
   );

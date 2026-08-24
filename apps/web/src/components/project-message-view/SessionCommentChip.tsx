@@ -11,12 +11,23 @@ export function SessionCommentChip({
   unresolvedCommentCount,
   needsAttentionCommentCount,
   onOpenComments,
-}: {
+}: Readonly<{
   unresolvedCommentCount: number;
   needsAttentionCommentCount: number;
   onOpenComments: () => void;
-}) {
+}>) {
   if (unresolvedCommentCount <= 0) return null;
+
+  const hasAttention = needsAttentionCommentCount > 0;
+  const commentNoun = unresolvedCommentCount === 1 ? 'comment' : 'comments';
+  const attentionSuffix = hasAttention
+    ? `, ${needsAttentionCommentCount} needing your attention`
+    : '';
+  const ariaLabel = `${unresolvedCommentCount} unresolved ${commentNoun}${attentionSuffix}`;
+  const attentionVerb = needsAttentionCommentCount === 1 ? 'needs' : 'need';
+  const chipText = hasAttention
+    ? `${needsAttentionCommentCount} ${attentionVerb} you`
+    : String(unresolvedCommentCount);
 
   return (
     <button
@@ -24,26 +35,15 @@ export function SessionCommentChip({
       onClick={onOpenComments}
       className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 border cursor-pointer whitespace-nowrap transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary"
       style={{
-        color:
-          needsAttentionCommentCount > 0
-            ? 'var(--sam-color-warning-fg)'
-            : 'var(--sam-color-fg-muted)',
-        borderColor:
-          needsAttentionCommentCount > 0
-            ? 'var(--sam-color-warning)'
-            : 'var(--sam-color-border-default)',
-        backgroundColor:
-          needsAttentionCommentCount > 0 ? 'var(--sam-color-warning-tint)' : 'transparent',
+        color: hasAttention ? 'var(--sam-color-warning-fg)' : 'var(--sam-color-fg-muted)',
+        borderColor: hasAttention ? 'var(--sam-color-warning)' : 'var(--sam-color-border-default)',
+        backgroundColor: hasAttention ? 'var(--sam-color-warning-tint)' : 'transparent',
       }}
-      aria-label={`${unresolvedCommentCount} unresolved ${
-        unresolvedCommentCount === 1 ? 'comment' : 'comments'
-      }${needsAttentionCommentCount > 0 ? `, ${needsAttentionCommentCount} needing your attention` : ''}`}
+      aria-label={ariaLabel}
       title="Open comments"
     >
       <MessageSquareQuote size={10} aria-hidden="true" />
-      {needsAttentionCommentCount > 0
-        ? `${needsAttentionCommentCount} need${needsAttentionCommentCount === 1 ? 's' : ''} you`
-        : unresolvedCommentCount}
+      {chipText}
     </button>
   );
 }

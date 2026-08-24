@@ -159,17 +159,18 @@ function TimelineEntryRow({
   entry,
   previousEntry,
   onJump,
-}: {
+}: Readonly<{
   entry: TimelineEntry;
   previousEntry: TimelineEntry | undefined;
   onJump: (target: TimelineJumpTarget) => void;
-}) {
+}>) {
   // Insert date separator when the day changes. The separator belongs to the row
   // that starts the new day, so it stays correct under virtualization (a row is
   // rendered without its predecessors being mounted).
   const showDateSep =
     previousEntry !== undefined &&
     new Date(previousEntry.timestamp).toDateString() !== new Date(entry.timestamp).toDateString();
+  const entryContent = renderTimelineEntryContent(entry, onJump);
 
   return (
     <div>
@@ -181,7 +182,15 @@ function TimelineEntryRow({
           })}
         />
       )}
-      {entry.kind === 'user_message' ? (
+      {entryContent}
+    </div>
+  );
+}
+
+function renderTimelineEntryContent(entry: TimelineEntry, onJump: (target: TimelineJumpTarget) => void) {
+  switch (entry.kind) {
+    case 'user_message':
+      return (
         <TimelineItem dot={{ color: DOT_COLOR_USER }}>
           <button
             type="button"
@@ -194,7 +203,10 @@ function TimelineEntryRow({
             </div>
           </button>
         </TimelineItem>
-      ) : entry.kind === 'comment_thread' ? (
+      );
+
+    case 'comment_thread':
+      return (
         <TimelineItem
           dot={{
             color: COMMENT_BUCKET_COLORS[entry.bucket],
@@ -236,7 +248,10 @@ function TimelineEntryRow({
             )}
           </button>
         </TimelineItem>
-      ) : entry.kind === 'progress_notification' ? (
+      );
+
+    case 'progress_notification':
+      return (
         <TimelineItem dot={{ color: DOT_COLOR_PROGRESS, muted: true }}>
           <button
             type="button"
@@ -251,7 +266,10 @@ function TimelineEntryRow({
             </div>
           </button>
         </TimelineItem>
-      ) : (
+      );
+
+    case 'system_event':
+      return (
         <TimelineItem
           dot={{
             color: SEVERITY_COLORS[entry.severity] ?? SEVERITY_COLORS.info,
@@ -270,7 +288,6 @@ function TimelineEntryRow({
             </div>
           </button>
         </TimelineItem>
-      )}
-    </div>
-  );
+      );
+  }
 }

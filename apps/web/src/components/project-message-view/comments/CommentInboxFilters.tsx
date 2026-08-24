@@ -14,6 +14,17 @@ const FILTERS: { value: CommentInboxFilter; label: string }[] = [
   })),
 ];
 
+function accentForFilter(value: CommentInboxFilter): string {
+  if (value === 'all') return 'var(--sam-color-accent-primary)';
+  return COMMENT_BUCKET_COLORS[value];
+}
+
+function classNameForFilter(active: boolean, count: number): string {
+  if (active) return 'border-transparent bg-surface-hover text-fg-primary';
+  if (count === 0) return 'border-border-default text-fg-muted opacity-60 hover:opacity-100';
+  return 'border-border-default text-fg-muted hover:text-fg-primary';
+}
+
 /**
  * Bucket filter chips with live counts.
  *
@@ -30,12 +41,12 @@ export function CommentInboxFilters({
   counts,
   onChange,
   className = '',
-}: {
+}: Readonly<{
   value: CommentInboxFilter;
   counts: CommentInboxCounts;
   onChange: (next: CommentInboxFilter) => void;
   className?: string;
-}) {
+}>) {
   return (
     <div
       aria-label="Filter comments"
@@ -48,10 +59,8 @@ export function CommentInboxFilters({
       {FILTERS.map((filter) => {
         const count = counts[filter.value];
         const active = value === filter.value;
-        const accent =
-          filter.value === 'all'
-            ? 'var(--sam-color-accent-primary)'
-            : COMMENT_BUCKET_COLORS[filter.value];
+        const accent = accentForFilter(filter.value);
+        const stateClassName = classNameForFilter(active, count);
 
         return (
           <button
@@ -60,13 +69,7 @@ export function CommentInboxFilters({
             aria-pressed={active}
             aria-label={`${filter.label}, ${count} ${count === 1 ? 'comment' : 'comments'}`}
             onClick={() => onChange(filter.value)}
-            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring ${
-              active
-                ? 'border-transparent bg-surface-hover text-fg-primary'
-                : count === 0
-                  ? 'border-border-default text-fg-muted opacity-60 hover:opacity-100'
-                  : 'border-border-default text-fg-muted hover:text-fg-primary'
-            }`}
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring ${stateClassName}`}
           >
             {filter.value !== 'all' && (
               <span

@@ -48,6 +48,9 @@ export function ProjectComments() {
         : [{ bucket: filter, items: filterInbox(inbox.items, filter, viewerId) }],
     [inbox.items, filter, viewerId]
   );
+  const showLoading = inbox.loading;
+  const showEmpty = !showLoading && counts.all === 0;
+  const showGroups = !showLoading && !showEmpty;
 
   const open = (item: (typeof inbox.items)[number]) => {
     if (item.source.kind === 'session') {
@@ -91,14 +94,16 @@ export function ProjectComments() {
         </p>
       )}
 
-      {inbox.loading ? (
+      {showLoading && (
         <div className="flex items-center justify-center gap-2 py-12">
           <Spinner size="md" />
           <span className="text-sm text-fg-muted">Loading comments…</span>
         </div>
-      ) : counts.all === 0 ? (
+      )}
+      {showEmpty && (
         <EmptyProjectInbox />
-      ) : (
+      )}
+      {showGroups && (
         <div className="flex min-w-0 flex-col gap-5">
           {groups.map((group) => (
             <section key={group.bucket} className="min-w-0">

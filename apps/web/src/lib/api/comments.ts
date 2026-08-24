@@ -531,8 +531,9 @@ export async function listProjectComments(
   if (params.status) searchParams.set('status', params.status);
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
   const qs = searchParams.toString();
+  const querySuffix = qs ? `?${qs}` : '';
   const response = await request<BackendProjectCommentsResponse>(
-    `/api/projects/${projectId}/comments${qs ? `?${qs}` : ''}`,
+    `/api/projects/${projectId}/comments${querySuffix}`,
     params.signal ? { signal: params.signal } : {}
   );
 

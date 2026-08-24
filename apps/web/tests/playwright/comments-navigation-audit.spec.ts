@@ -542,7 +542,7 @@ async function openChat(page: Page) {
     .getByText('What icon are you using for the nav item?')
     .first()
     .waitFor({ timeout: 20_000 });
-  await page.waitForTimeout(1200);
+  await waitForUiSettled(page);
 }
 
 /** Expand the session-details disclosure so the action row is reachable. */
@@ -550,7 +550,7 @@ async function expandHeader(page: Page) {
   const details = page.getByLabel('Show session details').first();
   if (await details.isVisible().catch(() => false)) {
     await details.click();
-    await page.waitForTimeout(400);
+    await expect(page.getByRole('button', { name: /^Comments/ }).first()).toBeVisible();
   }
 }
 
@@ -567,8 +567,19 @@ async function openCommentsDrawer(page: Page) {
       .first()
       .click();
   }
-  await page.getByRole('dialog', { name: 'Session comments' }).waitFor({ timeout: 10_000 });
-  await page.waitForTimeout(700);
+  const drawer = page.getByRole('dialog', { name: 'Session comments' });
+  await drawer.waitFor({ timeout: 10_000 });
+  await expect(drawer.locator('[data-comment-thread-id]').first()).toBeVisible();
+  await waitForUiSettled(page);
+}
+
+async function waitForUiSettled(page: Page) {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      })
+  );
 }
 
 // --- Tests -------------------------------------------------------------------
@@ -609,8 +620,12 @@ for (const [label, viewport] of [
       await setupMocks(page);
       await openChat(page);
       await openCommentsDrawer(page);
-      await page.getByRole('button', { name: /^All/ }).click();
-      await page.waitForTimeout(500);
+      const drawer = page.getByRole('dialog', { name: 'Session comments' });
+      const allFilter = drawer.getByRole('button', { name: /^All/ });
+      await allFilter.click();
+      await expect(allFilter).toHaveAttribute('aria-pressed', 'true');
+      await expect(drawer.locator('[data-comment-thread-id]').first()).toBeVisible();
+      await waitForUiSettled(page);
       await screenshot(page, `comments-04-drawer-all-${label}`);
       await assertNoOverflow(page);
     });
@@ -619,12 +634,14 @@ for (const [label, viewport] of [
       await setupMocks(page);
       await openChat(page);
       await openCommentsDrawer(page);
-      await page.getByRole('button', { name: /^All/ }).click();
-      await page.waitForTimeout(300);
-      await page.locator('[data-comment-thread-id="ct-1"]').click();
-      await page.waitForTimeout(600);
-      await screenshot(page, `comments-05-drawer-thread-expanded-${label}`);
+      const drawer = page.getByRole('dialog', { name: 'Session comments' });
+      const allFilter = drawer.getByRole('button', { name: /^All/ });
+      await allFilter.click();
+      await expect(allFilter).toHaveAttribute('aria-pressed', 'true');
+      await drawer.locator('[data-comment-thread-id="ct-1"]').click();
       await expect(page.getByRole('button', { name: 'Show in conversation' })).toBeVisible();
+      await waitForUiSettled(page);
+      await screenshot(page, `comments-05-drawer-thread-expanded-${label}`);
       await assertNoOverflow(page);
     });
 
@@ -632,8 +649,12 @@ for (const [label, viewport] of [
       await setupMocks(page);
       await openChat(page);
       await openCommentsDrawer(page);
-      await page.getByRole('button', { name: /^Resolved/ }).click();
-      await page.waitForTimeout(500);
+      const drawer = page.getByRole('dialog', { name: 'Session comments' });
+      const resolvedFilter = drawer.getByRole('button', { name: /^Resolved/ });
+      await resolvedFilter.click();
+      await expect(resolvedFilter).toHaveAttribute('aria-pressed', 'true');
+      await expect(drawer.locator('[data-comment-bucket="resolved"]').first()).toBeVisible();
+      await waitForUiSettled(page);
       await screenshot(page, `comments-06-drawer-resolved-${label}`);
       await assertNoOverflow(page);
     });
@@ -647,9 +668,9 @@ for (const [label, viewport] of [
         .first()
         .click();
       await page.getByRole('dialog', { name: 'Session timeline' }).waitFor({ timeout: 10_000 });
-      await page.waitForTimeout(900);
-      await screenshot(page, `comments-07-timeline-${label}`);
       await expect(page.locator('[data-timeline-comment-id]').first()).toBeVisible();
+      await waitForUiSettled(page);
+      await screenshot(page, `comments-07-timeline-${label}`);
       await assertNoOverflow(page);
     });
 
@@ -657,7 +678,8 @@ for (const [label, viewport] of [
       await setupMocks(page);
       await page.goto(`/projects/${PROJECT_ID}/comments`);
       await page.getByRole('heading', { name: 'Comments', level: 1 }).waitFor({ timeout: 15_000 });
-      await page.waitForTimeout(1800);
+      await expect(page.locator('[data-comment-thread-id]').first()).toBeVisible();
+      await waitForUiSettled(page);
       await screenshot(page, `comments-08-project-page-${label}`);
       await assertNoOverflow(page);
     });
@@ -666,9 +688,12 @@ for (const [label, viewport] of [
       await setupMocks(page);
       await page.goto(`/projects/${PROJECT_ID}/comments`);
       await page.getByRole('heading', { name: 'Comments', level: 1 }).waitFor({ timeout: 15_000 });
-      await page.waitForTimeout(1500);
-      await page.getByRole('button', { name: /^Needs you/ }).click();
-      await page.waitForTimeout(500);
+      await expect(page.locator('[data-comment-thread-id]').first()).toBeVisible();
+      const needsYouFilter = page.getByRole('button', { name: /^Needs you/ });
+      await needsYouFilter.click();
+      await expect(needsYouFilter).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.locator('[data-comment-bucket="needs_you"]').first()).toBeVisible();
+      await waitForUiSettled(page);
       await screenshot(page, `comments-09-project-needs-you-${label}`);
       await assertNoOverflow(page);
     });
@@ -711,7 +736,7 @@ for (const [label, viewport] of [
       // The disclosure must be near the filters, before the bucket list, so a
       // reader who only checks "Needs you" still sees that this is a capped page.
       await expect(disclosure).toBeInViewport();
-      await page.waitForTimeout(600);
+      await waitForUiSettled(page);
       await screenshot(page, `comments-12-project-truncated-${label}`);
       await assertNoOverflow(page);
     });
@@ -725,7 +750,8 @@ test.describe('Comment navigation — nav placement', () => {
     await setupMocks(page);
     await page.goto(`/projects/${PROJECT_ID}/comments`);
     await page.getByRole('heading', { name: 'Comments', level: 1 }).waitFor({ timeout: 15_000 });
-    await page.waitForTimeout(1200);
+    await expect(page.getByRole('link', { name: 'Comments' }).first()).toBeVisible();
+    await waitForUiSettled(page);
 
     const navLabels = await page
       .locator('nav a[href^="/projects/"], aside a[href^="/projects/"]')

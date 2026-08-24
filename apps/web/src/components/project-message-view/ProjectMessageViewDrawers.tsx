@@ -22,7 +22,7 @@ export function ProjectMessageViewDrawers({
   onResolve,
   onReopen,
   onSendToAgent,
-}: {
+}: Readonly<{
   showTimeline: boolean;
   timelineEntries: TimelineEntry[];
   timelineLoading: boolean;
@@ -40,7 +40,7 @@ export function ProjectMessageViewDrawers({
   onResolve: (threadId: string) => Promise<unknown>;
   onReopen: (threadId: string) => Promise<unknown>;
   onSendToAgent: (threadId: string) => Promise<unknown>;
-}) {
+}>) {
   return (
     <>
       {showTimeline && (

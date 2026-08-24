@@ -18,8 +18,9 @@ function focusableElements(panel: HTMLElement): HTMLElement[] {
 /**
  * Minimal modal-dialog focus management for the slide-over drawers.
  *
- * The drawers already carry `aria-modal="true"`; this supplies the behavioral
- * half by keeping Tab focus inside the active panel and closing on Escape.
+ * The drawers already identify themselves as modal dialogs; this supplies the
+ * behavioral half by keeping Tab focus inside the active panel and closing on
+ * Escape.
  */
 export function useDialogFocusTrap(panelRef: RefObject<HTMLElement | null>, onClose: () => void) {
   useEffect(() => {
@@ -46,7 +47,7 @@ export function useDialogFocusTrap(panelRef: RefObject<HTMLElement | null>, onCl
       }
 
       const first = focusable[0];
-      const last = focusable[focusable.length - 1];
+      const last = focusable.at(-1);
       if (!first || !last) {
         event.preventDefault();
         panel.focus();

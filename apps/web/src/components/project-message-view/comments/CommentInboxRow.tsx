@@ -11,6 +11,12 @@ import {
 } from './comment-inbox';
 import { relativeCommentTime } from './comment-utils';
 
+function anchorFallbackLabel(source: CommentInboxItem['source']): string {
+  if (source.kind === 'library_file') return 'on this file';
+  if (source.messageRole === 'user') return 'on your message';
+  return "on the agent's reply";
+}
+
 /**
  * One scannable comment thread in a list.
  *
@@ -30,7 +36,7 @@ export function CommentInboxRow({
   showBucket = true,
   selected = false,
   onSelect,
-}: {
+}: Readonly<{
   item: CommentInboxItem;
   viewerId: string | null;
   /** Show the "which session / which file" line. Off inside a single session. */
@@ -42,12 +48,13 @@ export function CommentInboxRow({
   showBucket?: boolean;
   selected?: boolean;
   onSelect: () => void;
-}) {
+}>) {
   const bucket = bucketFor(item, viewerId);
   const accent = COMMENT_BUCKET_COLORS[bucket];
   const { thread } = item;
   const quote = thread.anchor.quote?.trim();
   const replyCount = thread.replies.length;
+  const fallbackLabel = anchorFallbackLabel(item.source);
 
   return (
     <button
@@ -73,11 +80,7 @@ export function CommentInboxRow({
               ) : (
                 <FileText size={11} className="shrink-0" />
               )}
-              {item.source.kind === 'session'
-                ? item.source.messageRole === 'user'
-                  ? 'on your message'
-                  : "on the agent's reply"
-                : 'on this file'}
+              {fallbackLabel}
             </span>
           )}
         </span>

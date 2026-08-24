@@ -40,6 +40,15 @@ type RankedThread =
   | { kind: 'message'; candidate: ProjectCommentThreadCandidate }
   | { kind: 'file'; candidate: ProjectCommentThreadCandidate };
 
+function compareRankedThread(a: RankedThread, b: RankedThread): number {
+  if (b.candidate.updatedAt !== a.candidate.updatedAt) {
+    return b.candidate.updatedAt - a.candidate.updatedAt;
+  }
+  if (a.candidate.id < b.candidate.id) return -1;
+  if (a.candidate.id > b.candidate.id) return 1;
+  return 0;
+}
+
 /**
  * Reads both anchor kinds and keeps the `limit` most recently active threads
  * across the two.
@@ -73,12 +82,7 @@ export function listProjectCommentInbox(
   const ranked: RankedThread[] = [
     ...messagePage.candidates.map((candidate): RankedThread => ({ kind: 'message', candidate })),
     ...filePage.candidates.map((candidate): RankedThread => ({ kind: 'file', candidate })),
-  ].sort((a, b) => {
-    if (b.candidate.updatedAt !== a.candidate.updatedAt) {
-      return b.candidate.updatedAt - a.candidate.updatedAt;
-    }
-    return a.candidate.id < b.candidate.id ? -1 : a.candidate.id > b.candidate.id ? 1 : 0;
-  });
+  ].sort(compareRankedThread);
 
   const page: RankedThread[] = [];
   let selectedBytes = 0;
