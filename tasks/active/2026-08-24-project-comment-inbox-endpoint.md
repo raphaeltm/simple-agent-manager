@@ -230,12 +230,11 @@ must not merge yet.
 - [ ] `listProjectComments` response mapper has no direct unit test.
 - [ ] Playwright fixture `msg-5` still states the fan-out as current architecture.
 
-**Blocked on Raphaël** (asked via `request_human_input`)
-- [ ] **HIGH — the new drawer duplicates the pre-existing desktop comment rail.**
-      At lg+ both render at the same position doing the same job. The writeup
-      raised this and he replied "I mostly use mobile" — an acknowledgement, not
-      a decision. Options: (A) rail stays, drawer mobile-only; (B) drop the rail;
-      (C) ship both. Recommended A. Several UI fixes above are downstream of this.
+**Resolved after Raphaël's production feedback**
+- [x] **HIGH — the new drawer duplicates the pre-existing desktop comment rail.**
+      Raphaël explicitly rejected the always-visible desktop rail after seeing
+      the shipped MVP on desktop. The rail has been removed; the button-triggered
+      drawer is now the single comments discovery surface across viewports.
 
 **Gates not yet run**
 - [ ] Staging deploy + Playwright verification against the live endpoint

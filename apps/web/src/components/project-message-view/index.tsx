@@ -422,7 +422,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     hasMessages: conversationItems.length > 0,
     chatLogRef,
     sessionId,
-    scrollAndHighlight,
   });
 
   /**
@@ -694,8 +693,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
             {commentUi.selectionControls}
           </div>
-
-          {commentUi.desktopRail}
         </div>
       )}
 
