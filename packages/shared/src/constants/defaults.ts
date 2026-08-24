@@ -142,6 +142,19 @@ export const DEFAULT_PROJECT_COMMENT_LIST_LIMIT = 100;
 export const DEFAULT_PROJECT_COMMENT_LIST_MAX = 300;
 
 /**
+ * Content-byte budget for one project-wide comment inbox response.
+ *
+ * The DO applies this before hydrating replies so a small number of very long
+ * threads cannot exceed Cloudflare's Durable Object RPC payload ceiling or
+ * consume the shared 128 MB isolate. This is an estimate over comment body,
+ * quote, and reply body bytes; JSON/object overhead stays bounded by the row
+ * count caps above.
+ *
+ * Override via PROJECT_COMMENT_LIST_MAX_BYTES.
+ */
+export const DEFAULT_PROJECT_COMMENT_LIST_MAX_BYTES = 4_000_000;
+
+/**
  * Safety bound on how many older pages the chat client will fetch while chasing a
  * timeline jump target that predates the loaded window (the rare oversized-session
  * fallback). Bounds the load-until loop so a server misreporting `hasMore` can

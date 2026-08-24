@@ -15,6 +15,7 @@
  * a VM-agent callback, so .claude/rules/34 does not apply. The handler still
  * asserts the caller's project capability explicitly before touching data.
  */
+import type { ProjectCommentListResponse } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -65,14 +66,16 @@ projectCommentRoutes.get('/', async (c) => {
             columns: { id: true, filename: true },
           });
 
-    return c.json({
+    const response: ProjectCommentListResponse = {
       messageThreads: inbox.messageThreads,
       fileThreads: inbox.fileThreads,
       sessions: inbox.sessions,
       files,
       hasMore: inbox.hasMore,
       totalCount: inbox.totalCount,
-    });
+    };
+
+    return c.json(response);
   } catch (err) {
     rethrowCommentError(err);
   }

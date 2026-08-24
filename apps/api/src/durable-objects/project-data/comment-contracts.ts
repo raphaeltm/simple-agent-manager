@@ -129,9 +129,17 @@ export type ListProjectCommentThreadsInput = {
   limit?: number | null;
 };
 
-/** One capped, `updated_at DESC`-ranked page of a single anchor kind. */
-export type ListProjectCommentThreadsPage<TThread> = {
-  threads: TThread[];
+/** One cheap, `updated_at DESC`-ranked candidate row from a project-wide read. */
+export type ProjectCommentThreadCandidate = {
+  id: string;
+  updatedAt: number;
+  /** Estimated content bytes: root body + quote + reply bodies. */
+  estimatedBytes: number;
+};
+
+/** One capped, `updated_at DESC`-ranked candidate page of a single anchor kind. */
+export type ListProjectCommentThreadCandidatesPage = {
+  candidates: ProjectCommentThreadCandidate[];
   /** Total rows matching the filter, ignoring the cap. */
   totalCount: number;
 };
@@ -158,9 +166,7 @@ export const COMMENT_LIMIT_EXCEEDED = 'COMMENT_LIMIT_EXCEEDED';
 export class CommentNotFoundError extends Error {
   readonly code = COMMENT_NOT_FOUND;
 
-  constructor(
-    readonly resource: 'Chat session' | 'Message' | 'Comment thread' | 'Library file'
-  ) {
+  constructor(readonly resource: 'Chat session' | 'Message' | 'Comment thread' | 'Library file') {
     super(`${resource} not found`);
     this.name = 'CommentNotFoundError';
   }

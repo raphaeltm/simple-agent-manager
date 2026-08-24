@@ -379,6 +379,37 @@ describe('project comment inbox — vertical slice', () => {
     expect(body.hasMore).toBe(true);
   });
 
+  it('applies the configured byte budget end to end', async () => {
+    harness.env.PROJECT_COMMENT_LIST_MAX_BYTES = '20';
+    const sqlA = harness.storages.get(PROJECT_A)!;
+    seedSession(sqlA, 'session-a', 'Project A chat');
+    seedMessage(sqlA, 'session-a', 'message-a');
+    comments.createCommentThread(sqlA, harness.env as never, {
+      sessionId: 'session-a',
+      messageId: 'message-a',
+      body: 'x'.repeat(100),
+      actor: HUMAN,
+    });
+    comments.createCommentThread(sqlA, harness.env as never, {
+      sessionId: 'session-a',
+      messageId: 'message-a',
+      body: 'small enough',
+      actor: HUMAN,
+    });
+
+    const res = await get(PROJECT_A);
+    const body = (await res.json()) as {
+      messageThreads: Array<{ body: string }>;
+      totalCount: number;
+      hasMore: boolean;
+    };
+
+    expect(res.status).toBe(200);
+    expect(body.messageThreads.map((t) => t.body)).toEqual(['small enough']);
+    expect(body.totalCount).toBe(2);
+    expect(body.hasMore).toBe(true);
+  });
+
   it('returns an empty inbox for a project with no comments', async () => {
     const res = await get(PROJECT_A);
     const body = (await res.json()) as {

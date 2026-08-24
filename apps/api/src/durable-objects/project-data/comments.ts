@@ -19,9 +19,10 @@ import {
   type CreateCommentThreadInput,
   type ListCommentThreadsInput,
   type ListCommentThreadsResult,
+  type ListProjectCommentThreadCandidatesPage,
   type ListProjectCommentThreadsInput,
-  type ListProjectCommentThreadsPage,
   type ProjectCommentSessionTopic,
+  type ProjectCommentThreadCandidate,
   type UpdateCommentStatusInput,
 } from './comment-contracts';
 import {
@@ -105,6 +106,12 @@ const ReplyRowSchema = v.object({
 });
 
 type ThreadRow = v.InferOutput<typeof ThreadRowSchema>;
+
+const ProjectThreadCandidateRowSchema = v.object({
+  id: v.string(),
+  updated_at: v.number(),
+  estimated_bytes: v.number(),
+});
 
 function ensureSession(sql: SqlStorage, sessionId: string): void {
   const row = sql.exec('SELECT id FROM chat_sessions WHERE id = ? LIMIT 1', sessionId).toArray()[0];
@@ -364,6 +371,27 @@ function hydrateThreadsAcrossSessions(sql: SqlStorage, rows: unknown[]): Message
   return parsedRows.map((row) => mapThread(row, replies.get(row.id) ?? []));
 }
 
+function parseProjectThreadCandidates(rows: unknown[]): ProjectCommentThreadCandidate[] {
+  const candidates: ProjectCommentThreadCandidate[] = [];
+  for (const row of rows) {
+    try {
+      const parsed = parseRow(ProjectThreadCandidateRowSchema, row, 'project_comment_candidate');
+      candidates.push({
+        id: parsed.id,
+        updatedAt: parsed.updated_at,
+        estimatedBytes: Math.max(0, parsed.estimated_bytes),
+      });
+    } catch (err) {
+      const record = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
+      log.warn('comments.project_candidate_row_skipped', {
+        rowId: typeof record.id === 'string' ? record.id : null,
+        error: String(err),
+      });
+    }
+  }
+  return candidates;
+}
+
 /**
  * Every message-anchored thread in the project, newest activity first.
  *
@@ -379,15 +407,15 @@ function hydrateThreadsAcrossSessions(sql: SqlStorage, rows: unknown[]): Message
  * Returns up to `limit + 1` so the caller can merge against the other anchor
  * kind and still detect truncation.
  */
-export function listProjectCommentThreads(
+export function listProjectCommentThreadCandidates(
   sql: SqlStorage,
   input: ListProjectCommentThreadsInput & { limit: number }
-): ListProjectCommentThreadsPage<MessageCommentThread> {
+): ListProjectCommentThreadCandidatesPage {
   const conditions: string[] = [];
   const params: Array<string | number> = [];
 
   if (input.status) {
-    conditions.push('status = ?');
+    conditions.push('t.status = ?');
     params.push(input.status);
   }
 
@@ -398,14 +426,18 @@ export function listProjectCommentThreads(
 
   const rows = sql
     .exec(
-      `SELECT id, session_id, message_id, quote, body, author_type, author_id, author_name,
-              status, created_at, updated_at, sequence, version, client_mutation_id,
-              sent_at, sent_by_type, sent_by_id, sent_by_name,
-              resolved_at, resolved_by_type, resolved_by_id, resolved_by_name,
-              reopened_at, reopened_by_type, reopened_by_id, reopened_by_name
-       FROM comment_threads
+      `SELECT t.id,
+              t.updated_at,
+              length(CAST(COALESCE(t.body, '') AS BLOB)) +
+                COALESCE(length(CAST(t.quote AS BLOB)), 0) +
+                COALESCE((
+                  SELECT SUM(length(CAST(COALESCE(r.body, '') AS BLOB)))
+                  FROM comment_replies r
+                  WHERE r.thread_id = t.id
+                ), 0) AS estimated_bytes
+       FROM comment_threads t
        ${whereClause}
-       ORDER BY updated_at DESC, id ASC
+       ORDER BY t.updated_at DESC, t.id ASC
        LIMIT ?`,
       ...params,
       input.limit + 1
@@ -413,13 +445,40 @@ export function listProjectCommentThreads(
     .toArray();
 
   const countRow = sql
-    .exec(`SELECT COUNT(*) AS count FROM comment_threads ${whereClause}`, ...params)
+    .exec(`SELECT COUNT(*) AS count FROM comment_threads t ${whereClause}`, ...params)
     .toArray()[0];
 
   return {
-    threads: hydrateThreadsAcrossSessions(sql, rows),
+    candidates: parseProjectThreadCandidates(rows),
     totalCount: typeof countRow?.count === 'number' ? countRow.count : 0,
   };
+}
+
+export function hydrateProjectCommentThreads(
+  sql: SqlStorage,
+  threadIds: string[]
+): MessageCommentThread[] {
+  if (threadIds.length === 0) return [];
+  const placeholders = threadIds.map(() => '?').join(', ');
+  const rows = sql
+    .exec(
+      `SELECT id, session_id, message_id, quote, body, author_type, author_id, author_name,
+              status, created_at, updated_at, sequence, version, client_mutation_id,
+              sent_at, sent_by_type, sent_by_id, sent_by_name,
+              resolved_at, resolved_by_type, resolved_by_id, resolved_by_name,
+              reopened_at, reopened_by_type, reopened_by_id, reopened_by_name
+       FROM comment_threads
+       WHERE id IN (${placeholders})`,
+      ...threadIds
+    )
+    .toArray();
+
+  const hydrated = hydrateThreadsAcrossSessions(sql, rows);
+  const byId = new Map(hydrated.map((thread) => [thread.id, thread]));
+  return threadIds.flatMap((id) => {
+    const thread = byId.get(id);
+    return thread ? [thread] : [];
+  });
 }
 
 /**

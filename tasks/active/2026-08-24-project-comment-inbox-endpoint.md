@@ -26,10 +26,10 @@ recent session and library file"):
 
 > **"This isn't acceptable if we build for real. We'd have to just build the endpoint."**
 
-Shipping to production *is* building for real. The writeup itself is stamped
+Shipping to production _is_ building for real. The writeup itself is stamped
 `Status: prototype, not for merge` and its own "Things I decided that you may
-want to overrule" section says: *"Shipping this for real wants `GET
-/api/projects/:id/comments`; the hook is shaped so only that one file changes."*
+want to overrule" section says: _"Shipping this for real wants `GET
+/api/projects/:id/comments`; the hook is shaped so only that one file changes."_
 
 So this task is the prototype **plus** the endpoint that makes it shippable.
 
@@ -40,10 +40,10 @@ So this task is the prototype **plus** the endpoint that makes it shippable.
 Comment threads live in the per-project `ProjectData` DO, in two physically
 separate tables (deliberately separate per `.claude/rules/63`):
 
-| Table | Module | Scope column |
-|---|---|---|
-| `comment_threads` (+ `comment_replies`) | `durable-objects/project-data/comments.ts` | `session_id` |
-| `library_file_comment_threads` (+ `..._replies`) | `durable-objects/project-data/library-file-comments.ts` | `file_id` |
+| Table                                            | Module                                                  | Scope column |
+| ------------------------------------------------ | ------------------------------------------------------- | ------------ |
+| `comment_threads` (+ `comment_replies`)          | `durable-objects/project-data/comments.ts`              | `session_id` |
+| `library_file_comment_threads` (+ `..._replies`) | `durable-objects/project-data/library-file-comments.ts` | `file_id`    |
 
 Created by DO migrations `032-message-comment-threads` and
 `033-library-file-comment-threads`. **Both tables are already project-DO-global**
@@ -62,7 +62,7 @@ Verified both tables before choosing it.
 
 ### Enrichment sources differ per anchor kind
 
-- **Session topic** — `chat_sessions.topic` is in the *same* DO, so it joins
+- **Session topic** — `chat_sessions.topic` is in the _same_ DO, so it joins
   server-side for free.
 - **File name** — `project_files.filename` is in **D1**, and the DO has no D1
   access. Must be resolved at the route layer, scoped by `project_id`
@@ -103,7 +103,7 @@ is guaranteed to be the true top `limit` of the union.
 
 - `useProjectCommentInbox.ts` fan-out (the whole point of this task).
 - `DEFAULT_PROJECT_COMMENT_INBOX_SESSION_LIMIT` / `..._FILE_LIMIT` — these exist
-  *solely* to bound the fan-out. Once it is gone they are dead code
+  _solely_ to bound the fan-out. Once it is gone they are dead code
   (CLAUDE.md "No dead code").
 - The library writeup's `Status: prototype, not for merge` header is stale once
   merged; the doc lives in the library, not the repo, so update the library copy.
@@ -111,6 +111,7 @@ is guaranteed to be the true top `limit` of the union.
 ## Implementation checklist
 
 ### Shared types + constants
+
 - [x] Add `ProjectCommentListResponse`, `ProjectCommentSessionRef`,
       `ProjectCommentFileRef` to `packages/shared/src/types/comments.ts`
 - [x] Add `DEFAULT_PROJECT_COMMENT_LIST_LIMIT` (100) / `DEFAULT_PROJECT_COMMENT_LIST_MAX` (300)
@@ -119,6 +120,7 @@ is guaranteed to be the true top `limit` of the union.
       `DEFAULT_PROJECT_COMMENT_INBOX_FILE_LIMIT` (dead once the fan-out goes)
 
 ### Durable Object
+
 - [x] `comments.ts`: `listProjectCommentThreads(sql, input)` — project-wide,
       `ORDER BY updated_at DESC, id ASC`, `limit + 1`, plus `readSessionTopics`
 - [x] `library-file-comments.ts`: `listProjectFileCommentThreads(sql, input)`
@@ -129,6 +131,7 @@ is guaranteed to be the true top `limit` of the union.
 - [x] `resolveProjectCommentListLimit` clamps at the DO boundary (negative/NaN)
 
 ### Service + route
+
 - [x] `services/project-data.ts`: `listProjectCommentInbox` via `callProjectDataWithRetry`
 - [x] `routes/project-comments.ts`: `GET /api/projects/:projectId/comments`,
       `task:read`, resolves filenames from D1 scoped by `projectId`
@@ -137,6 +140,7 @@ is guaranteed to be the true top `limit` of the union.
 - [x] Env vars in `apps/api/src/env.ts` + `.env.example`
 
 ### Web
+
 - [x] `lib/api/comments.ts`: `listProjectComments(projectId)` + response mapping
       reusing the existing `mapBackendMessageCommentThread` / `mapBackendFileThread`
 - [x] `lib/query-options/comments.ts`: `projectCommentsQueryOptions`
@@ -146,6 +150,7 @@ is guaranteed to be the true top `limit` of the union.
       ("Showing the N most recently active of M comments"), rendered only when cut
 
 ### Tests
+
 - [x] DO unit tests (17): project-wide list, cross-source cap, truncation-selection
       ranking, malformed-row isolation, totalCount, determinism, limit clamping
 - [x] Integration vertical slice (9): cross-project attack + owner control,
@@ -155,6 +160,7 @@ is guaranteed to be the true top `limit` of the union.
       23 cases green at 375 + 1280
 
 ### Discrimination proofs (rules 28/62/65)
+
 - [x] Ranking: `ORDER BY updated_at DESC` → `ORDER BY sequence ASC` turns exactly
       the two truncation-selection tests red; the ordering test stays green
 - [x] Filename scoping: deleting `eq(f.projectId, projectId)` turns the leak test
@@ -172,6 +178,7 @@ outstanding HIGH findings — mostly in the inherited prototype half — that th
 must not merge yet.
 
 ### Done in this session
+
 - [x] DO migration `035-comment-thread-activity-indexes` (additive CREATE INDEX)
 - [x] Timeline/drawer bucket contradiction fixed via one shared `bucketForThread`
 - [x] `ProjectComments` page root gets `w-full min-w-0 max-w-3xl mx-auto`
@@ -185,11 +192,17 @@ must not merge yet.
 - [x] `project-message-view.test.tsx` now exercises the header comment chip →
       comments drawer → "Show in conversation" path and asserts the 0-based
       Virtuoso scroll coordinate.
+- [x] `PROJECT_COMMENT_LIST_MAX_BYTES` implemented at the ProjectData boundary:
+      project-wide reads select cheap candidates, apply the byte budget, and
+      hydrate only survivors.
+- [x] `ProjectCommentListResponse` / `...SessionRef` / `...FileRef` exported
+      from the shared package root and used as the route response type.
 
 ### Outstanding — blocks merge
 
 **Backend**
-- [ ] **HIGH — no byte budget on the response.** Only thread COUNT is capped.
+
+- [x] **HIGH — no byte budget on the response.** Only thread COUNT is capped.
       Per-thread worst case is 8k body + 200 replies x 8k = ~1.6 MB, all
       reachable through ordinary use. ~20 such threads exceed the 32 MiB DO RPC
       ceiling, and the DO builds up to `2 x (limit+1)` hydrated threads before
@@ -199,13 +212,13 @@ must not merge yet.
       configuration.md, NOT yet implemented). Select candidate rows with a
       cheap `length(body) + reply-bytes` estimate, apply the budget, then hydrate
       only the survivors — which also fixes the next item.
-- [ ] **MEDIUM — hydrates ~2x what it returns** (202 threads for a 100 page).
+- [x] **MEDIUM — hydrates ~2x what it returns** (202 threads for a 100 page).
       Steady state once both tables have enough rows, not a worst case.
 - [ ] **MEDIUM — `hydrateThreadsAcrossSessions` should merge into `hydrateThreads`.**
       Its rule-63 justification is cargo-culted: that function's `sessionId` is
       only a log field, never a SQL predicate — the scoping is in the caller's
       SELECT. Derive the log's session id from the row and delete the duplicate.
-- [ ] **MEDIUM — `ProjectCommentListResponse` / `...SessionRef` / `...FileRef`
+- [x] **MEDIUM — `ProjectCommentListResponse` / `...SessionRef` / `...FileRef`
       are exported but imported by nothing.** Wire the route's return type to
       them or delete them (CLAUDE.md bans dead code).
 - [ ] **MEDIUM — no test proves auth is inherited.** The vertical slice mounts
@@ -215,6 +228,7 @@ must not merge yet.
       boundary are untested (the last was probed manually and is correct).
 
 **Frontend**
+
 - [ ] **HIGH — three interactive surfaces have ZERO behavioural tests:**
       `SessionCommentsDrawer`, the `SessionHeader` comment chip, and the
       `comment_thread` timeline entry. Playwright asserts the timeline entry is
@@ -238,11 +252,13 @@ must not merge yet.
 - [ ] Playwright fixture `msg-5` still states the fan-out as current architecture.
 
 **Resolved product decision**
+
 - [x] **HIGH — the new drawer duplicated the pre-existing desktop comment rail.**
       Raphaël explicitly rejected the always-visible rail and wants the
       button-triggered drawer from the prototype instead. The rail is removed.
 
 **Gates not yet run**
+
 - [ ] Staging deploy + Playwright verification against the live endpoint
 - [ ] Re-run the visual audit and re-read the screenshots after UI fixes
 - [ ] UI rubric: all five categories scored below the required >=4 bar

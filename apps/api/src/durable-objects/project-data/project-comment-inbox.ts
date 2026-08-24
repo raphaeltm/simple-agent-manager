@@ -18,16 +18,27 @@ import type { LibraryFileCommentThread, MessageCommentThread } from '@simple-age
 import type {
   ListProjectCommentThreadsInput,
   ProjectCommentInboxResult,
+  ProjectCommentThreadCandidate,
 } from './comment-contracts';
-import { resolveProjectCommentListLimit } from './comment-normalization';
-import { listProjectCommentThreads, readSessionTopics } from './comments';
-import { listProjectFileCommentThreads } from './library-file-comments';
+import {
+  resolveProjectCommentListLimit,
+  resolveProjectCommentListMaxBytes,
+} from './comment-normalization';
+import {
+  hydrateProjectCommentThreads,
+  listProjectCommentThreadCandidates,
+  readSessionTopics,
+} from './comments';
+import {
+  hydrateProjectFileCommentThreads,
+  listProjectFileCommentThreadCandidates,
+} from './library-file-comments';
 import type { Env } from './types';
 
 /** One thread plus which table it came from, so the merge can split back. */
 type RankedThread =
-  | { kind: 'message'; thread: MessageCommentThread }
-  | { kind: 'file'; thread: LibraryFileCommentThread };
+  | { kind: 'message'; candidate: ProjectCommentThreadCandidate }
+  | { kind: 'file'; candidate: ProjectCommentThreadCandidate };
 
 /**
  * Reads both anchor kinds and keeps the `limit` most recently active threads
@@ -50,31 +61,49 @@ export function listProjectCommentInbox(
   input: ListProjectCommentThreadsInput
 ): ProjectCommentInboxResult {
   const limit = resolveProjectCommentListLimit(env, input.limit);
+  const maxBytes = resolveProjectCommentListMaxBytes(env);
   const status = input.status ?? null;
 
-  const messagePage = listProjectCommentThreads(sql, { status, limit });
-  const filePage = listProjectFileCommentThreads(sql, { status, limit });
+  const messagePage = listProjectCommentThreadCandidates(sql, { status, limit });
+  const filePage = listProjectFileCommentThreadCandidates(sql, { status, limit });
 
   // Merge on `updatedAt`, breaking ties by id so repeated identical calls return
   // an identical sequence (rule 65: ties need a total order, or the payload
   // permutes between calls and defeats caching).
   const ranked: RankedThread[] = [
-    ...messagePage.threads.map((thread): RankedThread => ({ kind: 'message', thread })),
-    ...filePage.threads.map((thread): RankedThread => ({ kind: 'file', thread })),
+    ...messagePage.candidates.map((candidate): RankedThread => ({ kind: 'message', candidate })),
+    ...filePage.candidates.map((candidate): RankedThread => ({ kind: 'file', candidate })),
   ].sort((a, b) => {
-    if (b.thread.updatedAt !== a.thread.updatedAt) return b.thread.updatedAt - a.thread.updatedAt;
-    return a.thread.id < b.thread.id ? -1 : a.thread.id > b.thread.id ? 1 : 0;
+    if (b.candidate.updatedAt !== a.candidate.updatedAt) {
+      return b.candidate.updatedAt - a.candidate.updatedAt;
+    }
+    return a.candidate.id < b.candidate.id ? -1 : a.candidate.id > b.candidate.id ? 1 : 0;
   });
 
-  const page = ranked.slice(0, limit);
+  const page: RankedThread[] = [];
+  let selectedBytes = 0;
+  for (const entry of ranked) {
+    if (page.length >= limit) break;
+    const nextBytes = selectedBytes + entry.candidate.estimatedBytes;
+    if (nextBytes > maxBytes) continue;
+    page.push(entry);
+    selectedBytes = nextBytes;
+  }
+
   const totalCount = messagePage.totalCount + filePage.totalCount;
 
-  const messageThreads: MessageCommentThread[] = [];
-  const fileThreads: LibraryFileCommentThread[] = [];
-  for (const entry of page) {
-    if (entry.kind === 'message') messageThreads.push(entry.thread);
-    else fileThreads.push(entry.thread);
-  }
+  const messageIds = page
+    .filter(
+      (entry): entry is Extract<RankedThread, { kind: 'message' }> => entry.kind === 'message'
+    )
+    .map((entry) => entry.candidate.id);
+  const fileIds = page
+    .filter((entry): entry is Extract<RankedThread, { kind: 'file' }> => entry.kind === 'file')
+    .map((entry) => entry.candidate.id);
+
+  const messageThreads: MessageCommentThread[] = hydrateProjectCommentThreads(sql, messageIds);
+  const fileThreads: LibraryFileCommentThread[] = hydrateProjectFileCommentThreads(sql, fileIds);
+  const returnedCount = messageThreads.length + fileThreads.length;
 
   const sessionIds = [...new Set(messageThreads.map((thread) => thread.sessionId))];
 
@@ -85,7 +114,7 @@ export function listProjectCommentInbox(
     // Truncated either because the merge overflowed the budget, or because a
     // source reported more rows than it returned. `totalCount` is the honest
     // signal; this stays for callers that only need the boolean.
-    hasMore: totalCount > page.length,
+    hasMore: totalCount > returnedCount,
     totalCount,
   };
 }

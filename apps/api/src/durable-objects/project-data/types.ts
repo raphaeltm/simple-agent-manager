@@ -30,6 +30,8 @@ export type Env = {
   PROJECT_COMMENT_LIST_LIMIT?: string;
   /** Ceiling on a caller-supplied limit for that same read. */
   PROJECT_COMMENT_LIST_MAX?: string;
+  /** Estimated content-byte budget for that same read. */
+  PROJECT_COMMENT_LIST_MAX_BYTES?: string;
   DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES?: string;
   PROJECT_DATA_TOOL_METADATA_MAX_BYTES?: string;
   PROJECT_DATA_STORAGE_TELEMETRY_ENABLED?: string;

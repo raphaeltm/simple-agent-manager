@@ -381,4 +381,45 @@ describe('ProjectData project comment inbox', () => {
     );
     expect(ceilinged.messageThreads).toHaveLength(3);
   });
+
+  it('applies the byte budget before hydrating rejected candidates', () => {
+    seedSession('s-1');
+    seedMessage('s-1', 'm-1', 1);
+    const rejectedHeavy = messageThreadAt('s-1', 'm-1', 'x'.repeat(100), 9_000);
+    const selectedSmall = messageThreadAt('s-1', 'm-1', 'small enough', 8_000);
+
+    const calls: Array<{ statement: string; params: unknown[] }> = [];
+    const tracedSql = {
+      ...sql,
+      exec(statement: string, ...params: unknown[]) {
+        calls.push({ statement, params });
+        return sql.exec(statement, ...(params as never[]));
+      },
+    } as SqlStorage;
+
+    const inbox = listProjectCommentInbox(
+      tracedSql,
+      {
+        ...env,
+        PROJECT_COMMENT_LIST_MAX_BYTES: '20',
+      } as Env,
+      { limit: 2 }
+    );
+
+    expect(inbox.messageThreads.map((t) => t.id)).toEqual([selectedSmall]);
+    expect(inbox.messageThreads.map((t) => t.id)).not.toContain(rejectedHeavy);
+    expect(inbox.hasMore).toBe(true);
+    expect(inbox.totalCount).toBe(2);
+
+    const hydrateThreadCall = calls.find(
+      (call) => call.statement.includes('FROM comment_threads') && call.statement.includes('id IN')
+    );
+    expect(hydrateThreadCall?.params).toEqual([selectedSmall]);
+
+    const hydrateReplyCall = calls.find(
+      (call) =>
+        call.statement.includes('FROM comment_replies') && call.statement.includes('thread_id IN')
+    );
+    expect(hydrateReplyCall?.params).toEqual([selectedSmall]);
+  });
 });

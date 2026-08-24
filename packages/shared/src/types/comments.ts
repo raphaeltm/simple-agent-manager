@@ -292,7 +292,7 @@ export interface ProjectCommentListResponse {
   sessions: ProjectCommentSessionRef[];
   /** Filenames for every file referenced by `fileThreads`. Same reasoning. */
   files: ProjectCommentFileRef[];
-  /** True when `limit` kept the response from covering every thread. */
+  /** True when the row or byte budget kept the response from covering every thread. */
   hasMore: boolean;
   /**
    * Total threads in the project across both anchor kinds, matching the same
