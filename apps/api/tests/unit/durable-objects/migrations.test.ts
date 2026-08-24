@@ -402,7 +402,9 @@ describe('DO Migrations', () => {
       // message-anchored comments: 6 from migration 032
       // library-file comments: 4 from migration 033 (2 threads, 1 replies,
       // 1 status_mutations)
-      expect(indexes.length).toBe(61);
+      // project-wide comment activity: 4 from migration 035 (chat/library
+      // updated_at + status/updated_at)
+      expect(indexes.length).toBe(65);
     });
   });
 });

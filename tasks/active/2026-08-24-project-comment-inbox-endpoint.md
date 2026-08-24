@@ -229,6 +229,8 @@ must not merge yet.
 - [x] Project Comments truncation disclosure moved above the bucket list so
       readers see the cap before checking only "Needs you".
 - [x] Internal API reference updated for `GET /api/projects/:projectId/comments`.
+- [x] DO migration index-count test updated for additive migration
+      `035-comment-thread-activity-indexes`.
 
 ### Outstanding — blocks merge
 
@@ -289,8 +291,14 @@ must not merge yet.
       Raphaël explicitly rejected the always-visible rail and wants the
       button-triggered drawer from the prototype instead. The rail is removed.
 
-**Gates not yet run**
+**Validation and remaining gates**
 
+- [x] Local validation suite:
+      `pnpm format:check`, `pnpm quality:file-sizes`, `pnpm typecheck`,
+      `pnpm lint`, focused
+      `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/migrations.test.ts`,
+      and full `pnpm test` all pass. Full test summary:
+      21/21 Turbo tasks; API 604 files / 8224 tests; web 293 files / 3502 tests.
 - [ ] Staging deploy + Playwright verification against the live endpoint
 - [x] Re-run the visual audit and re-read the screenshots after UI fixes
       (`comments-navigation-audit.spec.ts`, 46/46 at 375x667 + 1280x800)
