@@ -1748,7 +1748,7 @@ describe('ProjectMessageView — message anchored comments', () => {
     vi.useRealTimers();
   });
 
-  it('renders a data-backed desktop rail entry and jumps using the 0-based Virtuoso index', async () => {
+  it('renders a data-backed comments drawer entry and jumps using the 0-based Virtuoso index', async () => {
     mocks.getChatSession.mockResolvedValue(
       makeSessionResponse('session-1', [
         makeMessage('msg-1', 'session-1', 'User prompt', 'user'),
@@ -1768,11 +1768,14 @@ describe('ProjectMessageView — message anchored comments', () => {
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
 
-    await waitFor(() => {
-      expect(screen.getByText('This comment belongs to the later message.')).toBeTruthy();
-    });
+    const openComments = await screen.findByRole('button', { name: /1 unresolved comment/i });
+    fireEvent.click(openComments);
 
-    fireEvent.click(screen.getByRole('button', { name: /message msg-3\s*view/i }));
+    const drawerRow = await screen.findByRole('button', {
+      name: /This comment belongs to the later message\./i,
+    });
+    fireEvent.click(drawerRow);
+    fireEvent.click(screen.getByRole('button', { name: /show in conversation/i }));
 
     expect(virtuosoMock.scrollToIndexCalls.at(-1)).toMatchObject({
       index: 2,
@@ -1897,10 +1900,15 @@ describe('ProjectMessageView — message anchored comments', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getAllByText('Realtime comment body').length).toBeGreaterThan(0);
       expect(
         screen.getByRole('button', { name: /1 comment on this message, 1 unresolved/i })
       ).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /1 unresolved comment/i }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Realtime comment body').length).toBeGreaterThan(0);
     });
   });
 });

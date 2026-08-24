@@ -3,7 +3,7 @@ import { type RefObject, useCallback, useEffect, useMemo, useState } from 'react
 import type { MessageCommentDraft } from './comment-utils';
 import type { MessageCommentRowState } from './CommentableConversationItem';
 import { SelectionActionBar, SelectionPopover } from './CommentPrimitives';
-import { type CommentActions, DesktopCommentRail } from './MessageCommentPanels';
+import { type CommentActions } from './MessageCommentPanels';
 import { useCoarsePointer, useCommentSelection } from './useCommentSelection';
 import { type useMessageComments } from './useMessageComments';
 
@@ -15,14 +15,12 @@ export function useProjectMessageCommentUi({
   hasMessages,
   chatLogRef,
   sessionId,
-  scrollAndHighlight,
 }: {
   messageComments: MessageCommentsController;
   canWriteSession: boolean;
   hasMessages: boolean;
   chatLogRef: RefObject<HTMLDivElement | null>;
   sessionId: string;
-  scrollAndHighlight: (messageId: string) => boolean;
 }) {
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
@@ -63,15 +61,6 @@ export function useProjectMessageCommentUi({
     setDraft(null);
     clearSelection();
   }, [clearSelection, sessionId]);
-
-  const selectMessage = useCallback(
-    (messageId: string, commentId?: string) => {
-      setActiveMessageId(messageId);
-      setFocusedCommentId(commentId ?? null);
-      scrollAndHighlight(messageId);
-    },
-    [scrollAndHighlight]
-  );
 
   const rowState = useMemo<MessageCommentRowState>(
     () => ({
@@ -127,27 +116,8 @@ export function useProjectMessageCommentUi({
       )
     ) : null;
 
-  const desktopRail = (
-    <DesktopCommentRail
-      comments={messageComments.comments}
-      draft={draft}
-      loading={messageComments.loading}
-      refreshing={messageComments.refreshing}
-      error={messageComments.error}
-      activeMessageId={activeMessageId}
-      focusedCommentId={focusedCommentId}
-      actions={actions}
-      onRetry={() => {
-        void messageComments.refetch();
-      }}
-      onClearDraft={clearDraft}
-      onSelectMessage={selectMessage}
-    />
-  );
-
   return {
     rowState,
     selectionControls,
-    desktopRail,
   };
 }

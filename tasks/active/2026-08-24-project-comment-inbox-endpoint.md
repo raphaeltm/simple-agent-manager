@@ -1,6 +1,6 @@
 # Ship comment navigation UI — with a real project-scoped comments endpoint
 
-**Branch:** `sam/ship-comment-navigation-ui-s1n30h`
+**Branch:** `sam/use-sam-mcp-tools-bt5jk6`
 **Prototype origin:** `sam/ui-uh-looking-uh-9m7yzp` (2 commits, cherry-picked onto this branch)
 **Library writeup:** `/design/comment-navigation/comment-navigation-prototype.md` (+ 21 screenshots)
 
@@ -178,6 +178,13 @@ must not merge yet.
 - [x] `COMMENT_DOT_COLORS` hex literals retired in favour of bucket tokens
 - [x] 26 tests for the triage model (`comment-inbox.test.ts`) — it had none
 - [x] `wrangler.toml [vars]` + public `configuration.md` for the new limits
+- [x] Rail-vs-drawer decision resolved by Raphaël: remove the always-visible
+      desktop comments rail; the button-triggered drawer is the single comments
+      surface across viewports.
+- [x] `DesktopCommentRail` removed and rail-only `selectMessage` plumbing deleted.
+- [x] `project-message-view.test.tsx` now exercises the header comment chip →
+      comments drawer → "Show in conversation" path and asserts the 0-based
+      Virtuoso scroll coordinate.
 
 ### Outstanding — blocks merge
 
@@ -230,12 +237,10 @@ must not merge yet.
 - [ ] `listProjectComments` response mapper has no direct unit test.
 - [ ] Playwright fixture `msg-5` still states the fan-out as current architecture.
 
-**Blocked on Raphaël** (asked via `request_human_input`)
-- [ ] **HIGH — the new drawer duplicates the pre-existing desktop comment rail.**
-      At lg+ both render at the same position doing the same job. The writeup
-      raised this and he replied "I mostly use mobile" — an acknowledgement, not
-      a decision. Options: (A) rail stays, drawer mobile-only; (B) drop the rail;
-      (C) ship both. Recommended A. Several UI fixes above are downstream of this.
+**Resolved product decision**
+- [x] **HIGH — the new drawer duplicated the pre-existing desktop comment rail.**
+      Raphaël explicitly rejected the always-visible rail and wants the
+      button-triggered drawer from the prototype instead. The rail is removed.
 
 **Gates not yet run**
 - [ ] Staging deploy + Playwright verification against the live endpoint
