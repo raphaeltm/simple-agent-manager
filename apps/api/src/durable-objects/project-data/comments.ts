@@ -19,9 +19,10 @@ import {
   type CreateCommentThreadInput,
   type ListCommentThreadsInput,
   type ListCommentThreadsResult,
+  type ListProjectCommentThreadCandidatesPage,
   type ListProjectCommentThreadsInput,
-  type ListProjectCommentThreadsPage,
   type ProjectCommentSessionTopic,
+  type ProjectCommentThreadCandidate,
   type UpdateCommentStatusInput,
 } from './comment-contracts';
 import {
@@ -105,6 +106,12 @@ const ReplyRowSchema = v.object({
 });
 
 type ThreadRow = v.InferOutput<typeof ThreadRowSchema>;
+
+const ProjectThreadCandidateRowSchema = v.object({
+  id: v.string(),
+  updated_at: v.number(),
+  estimated_bytes: v.number(),
+});
 
 function ensureSession(sql: SqlStorage, sessionId: string): void {
   const row = sql.exec('SELECT id FROM chat_sessions WHERE id = ? LIMIT 1', sessionId).toArray()[0];
@@ -250,8 +257,8 @@ function readThreadRows(sql: SqlStorage, sessionId: string, threadIds: string[])
 
 function hydrateThreads(
   sql: SqlStorage,
-  sessionId: string,
-  rows: unknown[]
+  rows: unknown[],
+  sessionIdForLog?: string
 ): MessageCommentThread[] {
   const parsedRows: ThreadRow[] = [];
   for (const row of rows) {
@@ -261,7 +268,8 @@ function hydrateThreads(
       const record = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
       log.warn('comments.thread_row_skipped', {
         rowId: typeof record.id === 'string' ? record.id : null,
-        sessionId,
+        sessionId:
+          sessionIdForLog ?? (typeof record.session_id === 'string' ? record.session_id : null),
         error: String(err),
       });
     }
@@ -328,40 +336,27 @@ export function listCommentThreads(
 
   const hasMore = rows.length > limit;
   return {
-    threads: hydrateThreads(sql, input.sessionId, hasMore ? rows.slice(0, limit) : rows),
+    threads: hydrateThreads(sql, hasMore ? rows.slice(0, limit) : rows, input.sessionId),
     hasMore,
   };
 }
 
-/**
- * Parses thread rows for a read that spans sessions.
- *
- * Separate from `hydrateThreads` rather than relaxing its `sessionId` parameter:
- * that parameter annotates the skip log, but it also documents that its caller
- * is session-scoped, and .claude/rules/63 is about exactly the drift where a
- * scope argument is loosened so one more caller fits. Here each row supplies its
- * own session id, which makes the log strictly more precise anyway.
- */
-function hydrateThreadsAcrossSessions(sql: SqlStorage, rows: unknown[]): MessageCommentThread[] {
-  const parsedRows: ThreadRow[] = [];
-  for (const row of rows) {
-    try {
-      parsedRows.push(parseRow(ThreadRowSchema, row, 'comment_thread'));
-    } catch (err) {
-      const record = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
-      log.warn('comments.thread_row_skipped', {
-        rowId: typeof record.id === 'string' ? record.id : null,
-        sessionId: typeof record.session_id === 'string' ? record.session_id : null,
-        error: String(err),
-      });
-    }
+function parseProjectThreadCandidate(row: unknown): ProjectCommentThreadCandidate | null {
+  try {
+    const parsed = parseRow(ProjectThreadCandidateRowSchema, row, 'comment_thread_candidate');
+    return {
+      id: parsed.id,
+      updatedAt: parsed.updated_at,
+      estimatedBytes: Math.max(0, Math.floor(parsed.estimated_bytes)),
+    };
+  } catch (err) {
+    const record = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
+    log.warn('comments.thread_candidate_row_skipped', {
+      rowId: typeof record.id === 'string' ? record.id : null,
+      error: String(err),
+    });
+    return null;
   }
-
-  const replies = readReplies(
-    sql,
-    parsedRows.map((row) => row.id)
-  );
-  return parsedRows.map((row) => mapThread(row, replies.get(row.id) ?? []));
 }
 
 /**
@@ -376,13 +371,13 @@ function hydrateThreadsAcrossSessions(sql: SqlStorage, rows: unknown[]): Message
  * would rank by insertion order across sessions and systematically bury whatever
  * moved most recently (.claude/rules/65).
  *
- * Returns up to `limit + 1` so the caller can merge against the other anchor
- * kind and still detect truncation.
+ * Returns lightweight candidates up to `limit + 1` so the caller can merge and
+ * byte-budget across anchor kinds before hydrating full threads with replies.
  */
-export function listProjectCommentThreads(
+export function listProjectCommentThreadCandidates(
   sql: SqlStorage,
   input: ListProjectCommentThreadsInput & { limit: number }
-): ListProjectCommentThreadsPage<MessageCommentThread> {
+): ListProjectCommentThreadCandidatesPage {
   const conditions: string[] = [];
   const params: Array<string | number> = [];
 
@@ -398,11 +393,14 @@ export function listProjectCommentThreads(
 
   const rows = sql
     .exec(
-      `SELECT id, session_id, message_id, quote, body, author_type, author_id, author_name,
-              status, created_at, updated_at, sequence, version, client_mutation_id,
-              sent_at, sent_by_type, sent_by_id, sent_by_name,
-              resolved_at, resolved_by_type, resolved_by_id, resolved_by_name,
-              reopened_at, reopened_by_type, reopened_by_id, reopened_by_name
+      `SELECT id, updated_at,
+              COALESCE(length(CAST(body AS BLOB)), 0) +
+              COALESCE(length(CAST(quote AS BLOB)), 0) +
+              COALESCE((
+                SELECT SUM(length(CAST(comment_replies.body AS BLOB)))
+                FROM comment_replies
+                WHERE comment_replies.thread_id = comment_threads.id
+              ), 0) AS estimated_bytes
        FROM comment_threads
        ${whereClause}
        ORDER BY updated_at DESC, id ASC
@@ -417,9 +415,36 @@ export function listProjectCommentThreads(
     .toArray()[0];
 
   return {
-    threads: hydrateThreadsAcrossSessions(sql, rows),
+    candidates: rows
+      .map((row) => parseProjectThreadCandidate(row))
+      .filter((candidate): candidate is ProjectCommentThreadCandidate => candidate !== null),
     totalCount: typeof countRow?.count === 'number' ? countRow.count : 0,
   };
+}
+
+export function hydrateProjectCommentThreads(
+  sql: SqlStorage,
+  threadIds: string[]
+): MessageCommentThread[] {
+  if (threadIds.length === 0) return [];
+  const placeholders = threadIds.map(() => '?').join(', ');
+  const rows = sql
+    .exec(
+      `SELECT id, session_id, message_id, quote, body, author_type, author_id, author_name,
+              status, created_at, updated_at, sequence, version, client_mutation_id,
+              sent_at, sent_by_type, sent_by_id, sent_by_name,
+              resolved_at, resolved_by_type, resolved_by_id, resolved_by_name,
+              reopened_at, reopened_by_type, reopened_by_id, reopened_by_name
+       FROM comment_threads
+       WHERE id IN (${placeholders})`,
+      ...threadIds
+    )
+    .toArray();
+
+  const byId = new Map(hydrateThreads(sql, rows).map((thread) => [thread.id, thread]));
+  return threadIds
+    .map((id) => byId.get(id))
+    .filter((thread): thread is MessageCommentThread => thread !== undefined);
 }
 
 /**

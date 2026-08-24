@@ -17,6 +17,7 @@ import {
   DEFAULT_COMMENT_THREADS_PER_SESSION_MAX,
   DEFAULT_PROJECT_COMMENT_LIST_LIMIT,
   DEFAULT_PROJECT_COMMENT_LIST_MAX,
+  DEFAULT_PROJECT_COMMENT_LIST_MAX_BYTES,
 } from '@simple-agent-manager/shared';
 
 import { type CommentActor, CommentValidationError } from './comment-contracts';
@@ -98,6 +99,13 @@ export function resolveProjectCommentListLimit(env: Env, requested?: number | nu
       ? Math.floor(requested)
       : defaultLimit;
   return Math.min(limit, maxLimit);
+}
+
+export function resolveProjectCommentListMaxBytes(env: Env): number {
+  return positiveInteger(
+    env.PROJECT_COMMENT_LIST_MAX_BYTES,
+    DEFAULT_PROJECT_COMMENT_LIST_MAX_BYTES
+  );
 }
 
 export function normalizeBody(body: string, limits: CommentLimits): string {

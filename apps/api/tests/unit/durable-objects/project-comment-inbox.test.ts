@@ -245,6 +245,54 @@ describe('ProjectData project comment inbox', () => {
     expect(inbox.hasMore).toBe(true);
   });
 
+  it('cuts the ranked page before a thread would exceed the response byte budget', () => {
+    seedSession('s-1');
+    seedMessage('s-1', 'm-1', 1);
+    const newestSmall = messageThreadAt('s-1', 'm-1', 'tiny', 3_000);
+    const oversizedNext = messageThreadAt('s-1', 'm-1', 'this body is too large for the budget', 2_000);
+    const olderSmall = messageThreadAt('s-1', 'm-1', 'ok', 1_000);
+
+    const inbox = listProjectCommentInbox(
+      sql,
+      { ...env, PROJECT_COMMENT_LIST_MAX_BYTES: '10' } as Env,
+      { limit: 10 }
+    );
+
+    expect(inbox.messageThreads.map((t) => t.id)).toEqual([newestSmall]);
+    expect(inbox.messageThreads.map((t) => t.id)).not.toContain(oversizedNext);
+    // The byte budget preserves the ranked prefix; it does not skip an
+    // oversized active thread to show older work as if the middle did not exist.
+    expect(inbox.messageThreads.map((t) => t.id)).not.toContain(olderSmall);
+    expect(inbox.totalCount).toBe(3);
+    expect(inbox.hasMore).toBe(true);
+  });
+
+  it('counts replies in the project inbox byte estimate before hydrating', () => {
+    seedSession('s-1');
+    seedMessage('s-1', 'm-1', 1);
+    const newestSmall = messageThreadAt('s-1', 'm-1', 'a', 3_000);
+    const replyHeavy = messageThreadAt('s-1', 'm-1', 'b', 2_000);
+    comments.createCommentReply(sql, env, {
+      sessionId: 's-1',
+      threadId: replyHeavy,
+      body: 'reply body exceeds the remaining budget',
+      actor: HUMAN,
+    });
+    sql.exec(`UPDATE comment_threads SET updated_at = ? WHERE id = ?`, 2_000, replyHeavy);
+    const olderSmall = messageThreadAt('s-1', 'm-1', 'c', 1_000);
+
+    const inbox = listProjectCommentInbox(
+      sql,
+      { ...env, PROJECT_COMMENT_LIST_MAX_BYTES: '5' } as Env,
+      { limit: 10 }
+    );
+
+    expect(inbox.messageThreads.map((t) => t.id)).toEqual([newestSmall]);
+    expect(inbox.messageThreads.map((t) => t.id)).not.toContain(replyHeavy);
+    expect(inbox.messageThreads.map((t) => t.id)).not.toContain(olderSmall);
+    expect(inbox.hasMore).toBe(true);
+  });
+
   it('returns an identical sequence across repeated identical calls', () => {
     seedSession('s-1');
     seedMessage('s-1', 'm-1', 1);

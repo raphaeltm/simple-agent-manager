@@ -519,6 +519,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   COMMENT_REPLIES_PER_THREAD_MAX?: string; // Max replies per comment thread (default: 200)
   PROJECT_COMMENT_LIST_LIMIT?: string; // Page size for the project-wide comment inbox (default: 100)
   PROJECT_COMMENT_LIST_MAX?: string; // Max page size for the project-wide comment inbox (default: 300)
+  PROJECT_COMMENT_LIST_MAX_BYTES?: string; // Estimated byte budget for one project-wide comment inbox response (default: 4000000)
   DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES?: string; // Max document-card rawOutput bytes preserved in compact message metadata (default: 16384)
   PROJECT_DATA_TOOL_METADATA_MAX_BYTES?: string;
   PROJECT_DATA_STORAGE_TELEMETRY_ENABLED?: string;

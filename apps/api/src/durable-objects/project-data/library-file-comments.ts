@@ -30,8 +30,9 @@ import {
   type FileCommentThreadMutationResult,
   type ListFileCommentThreadsInput,
   type ListFileCommentThreadsResult,
+  type ListProjectCommentThreadCandidatesPage,
   type ListProjectCommentThreadsInput,
-  type ListProjectCommentThreadsPage,
+  type ProjectCommentThreadCandidate,
   type UpdateFileCommentStatusInput,
 } from './comment-contracts';
 import {
@@ -98,6 +99,12 @@ const FileReplyRowSchema = v.object({
 });
 
 type FileThreadRow = v.InferOutput<typeof FileThreadRowSchema>;
+
+const ProjectFileThreadCandidateRowSchema = v.object({
+  id: v.string(),
+  updated_at: v.number(),
+  estimated_bytes: v.number(),
+});
 
 function normalizeFileId(fileId: string): string {
   const normalized = fileId.trim();
@@ -220,6 +227,28 @@ function hydrateThreads(sql: SqlStorage, rows: unknown[]): LibraryFileCommentThr
   return parsedRows.map((row) => mapThread(row, replies.get(row.id) ?? []));
 }
 
+function parseProjectFileThreadCandidate(row: unknown): ProjectCommentThreadCandidate | null {
+  try {
+    const parsed = parseRow(
+      ProjectFileThreadCandidateRowSchema,
+      row,
+      'library_file_comment_thread_candidate'
+    );
+    return {
+      id: parsed.id,
+      updatedAt: parsed.updated_at,
+      estimatedBytes: Math.max(0, Math.floor(parsed.estimated_bytes)),
+    };
+  } catch (err) {
+    const record = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
+    log.warn('library_file_comments.thread_candidate_row_skipped', {
+      rowId: typeof record.id === 'string' ? record.id : null,
+      error: String(err),
+    });
+    return null;
+  }
+}
+
 /**
  * Reads a thread scoped to its file. The `file_id = ?` predicate is the
  * ownership guard: a thread id alone must never be enough to read or mutate a
@@ -297,18 +326,19 @@ export function listFileCommentThreads(
 /**
  * Every library-file-anchored thread in the project, newest activity first.
  *
- * The file-comment sibling of `listProjectCommentThreads`. Same reasoning for
- * dropping the scope predicate (this Durable Object is the project) and same
- * reasoning for `updated_at DESC` (bumped on reply and on status change, so it
- * ranks by real activity rather than insertion order — .claude/rules/65).
+ * The file-comment sibling of `listProjectCommentThreadCandidates`. Same
+ * reasoning for dropping the scope predicate (this Durable Object is the
+ * project) and same reasoning for `updated_at DESC` (bumped on reply and on
+ * status change, so it ranks by real activity rather than insertion order —
+ * .claude/rules/65).
  *
- * Returns up to `limit + 1` so the caller can merge against message threads and
- * still detect truncation.
+ * Returns lightweight candidates up to `limit + 1` so the caller can merge and
+ * byte-budget against message threads before hydrating full threads with replies.
  */
-export function listProjectFileCommentThreads(
+export function listProjectFileCommentThreadCandidates(
   sql: SqlStorage,
   input: ListProjectCommentThreadsInput & { limit: number }
-): ListProjectCommentThreadsPage<LibraryFileCommentThread> {
+): ListProjectCommentThreadCandidatesPage {
   const conditions: string[] = [];
   const params: Array<string | number> = [];
 
@@ -322,10 +352,14 @@ export function listProjectFileCommentThreads(
 
   const rows = sql
     .exec(
-      `SELECT id, file_id, quote, body, author_type, author_id, author_name,
-              status, created_at, updated_at, sequence, version, client_mutation_id,
-              resolved_at, resolved_by_type, resolved_by_id, resolved_by_name,
-              reopened_at, reopened_by_type, reopened_by_id, reopened_by_name
+      `SELECT id, updated_at,
+              COALESCE(length(CAST(body AS BLOB)), 0) +
+              COALESCE(length(CAST(quote AS BLOB)), 0) +
+              COALESCE((
+                SELECT SUM(length(CAST(library_file_comment_replies.body AS BLOB)))
+                FROM library_file_comment_replies
+                WHERE library_file_comment_replies.thread_id = library_file_comment_threads.id
+              ), 0) AS estimated_bytes
        FROM library_file_comment_threads
        ${whereClause}
        ORDER BY updated_at DESC, id ASC
@@ -340,9 +374,35 @@ export function listProjectFileCommentThreads(
     .toArray()[0];
 
   return {
-    threads: hydrateThreads(sql, rows),
+    candidates: rows
+      .map((row) => parseProjectFileThreadCandidate(row))
+      .filter((candidate): candidate is ProjectCommentThreadCandidate => candidate !== null),
     totalCount: typeof countRow?.count === 'number' ? countRow.count : 0,
   };
+}
+
+export function hydrateProjectFileCommentThreads(
+  sql: SqlStorage,
+  threadIds: string[]
+): LibraryFileCommentThread[] {
+  if (threadIds.length === 0) return [];
+  const placeholders = threadIds.map(() => '?').join(', ');
+  const rows = sql
+    .exec(
+      `SELECT id, file_id, quote, body, author_type, author_id, author_name,
+              status, created_at, updated_at, sequence, version, client_mutation_id,
+              resolved_at, resolved_by_type, resolved_by_id, resolved_by_name,
+              reopened_at, reopened_by_type, reopened_by_id, reopened_by_name
+       FROM library_file_comment_threads
+       WHERE id IN (${placeholders})`,
+      ...threadIds
+    )
+    .toArray();
+
+  const byId = new Map(hydrateThreads(sql, rows).map((thread) => [thread.id, thread]));
+  return threadIds
+    .map((id) => byId.get(id))
+    .filter((thread): thread is LibraryFileCommentThread => thread !== undefined);
 }
 
 export function createFileCommentThread(

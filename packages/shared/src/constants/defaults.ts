@@ -142,6 +142,15 @@ export const DEFAULT_PROJECT_COMMENT_LIST_LIMIT = 100;
 export const DEFAULT_PROJECT_COMMENT_LIST_MAX = 300;
 
 /**
+ * Estimated response-content byte budget for one project comment inbox read.
+ *
+ * Kept well below the Durable Object RPC ceiling so long comment bodies and
+ * reply bodies cannot turn a count-bounded inbox request into a giant hydrated
+ * payload. Override via PROJECT_COMMENT_LIST_MAX_BYTES.
+ */
+export const DEFAULT_PROJECT_COMMENT_LIST_MAX_BYTES = 4_000_000;
+
+/**
  * Safety bound on how many older pages the chat client will fetch while chasing a
  * timeline jump target that predates the loaded window (the rare oversized-session
  * fallback). Bounds the load-until loop so a server misreporting `hasMore` can

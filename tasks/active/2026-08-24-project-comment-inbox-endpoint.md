@@ -119,9 +119,9 @@ is guaranteed to be the true top `limit` of the union.
       `DEFAULT_PROJECT_COMMENT_INBOX_FILE_LIMIT` (dead once the fan-out goes)
 
 ### Durable Object
-- [x] `comments.ts`: `listProjectCommentThreads(sql, input)` — project-wide,
+- [x] `comments.ts`: `listProjectCommentThreadCandidates(sql, input)` — project-wide,
       `ORDER BY updated_at DESC, id ASC`, `limit + 1`, plus `readSessionTopics`
-- [x] `library-file-comments.ts`: `listProjectFileCommentThreads(sql, input)`
+- [x] `library-file-comments.ts`: `listProjectFileCommentThreadCandidates(sql, input)`
 - [x] New `project-comment-inbox.ts`: merges both by `updated_at DESC`, applies
       the single cross-source cap, resolves session topics, returns `totalCount`
 - [x] `ProjectData.listProjectCommentInbox(input)` RPC method
@@ -182,23 +182,22 @@ must not merge yet.
 ### Outstanding — blocks merge
 
 **Backend**
-- [ ] **HIGH — no byte budget on the response.** Only thread COUNT is capped.
+- [x] **HIGH — no byte budget on the response.** Only thread COUNT is capped.
       Per-thread worst case is 8k body + 200 replies x 8k = ~1.6 MB, all
       reachable through ordinary use. ~20 such threads exceed the 32 MiB DO RPC
       ceiling, and the DO builds up to `2 x (limit+1)` hydrated threads before
       slicing, against a 128 MB isolate SHARED with every other ProjectData
       instance — so the blast radius is the project's whole DO.
-      Fix: `PROJECT_COMMENT_LIST_MAX_BYTES` (already added to wrangler.toml and
-      configuration.md, NOT yet implemented). Select candidate rows with a
-      cheap `length(body) + reply-bytes` estimate, apply the budget, then hydrate
-      only the survivors — which also fixes the next item.
-- [ ] **MEDIUM — hydrates ~2x what it returns** (202 threads for a 100 page).
+      Fixed by `PROJECT_COMMENT_LIST_MAX_BYTES`: the DO now selects lightweight
+      candidate rows with a cheap body/quote/reply byte estimate, applies the
+      ranked cross-source byte budget, then hydrates only selected survivor IDs.
+- [x] **MEDIUM — hydrates ~2x what it returns** (202 threads for a 100 page).
       Steady state once both tables have enough rows, not a worst case.
-- [ ] **MEDIUM — `hydrateThreadsAcrossSessions` should merge into `hydrateThreads`.**
+- [x] **MEDIUM — `hydrateThreadsAcrossSessions` should merge into `hydrateThreads`.**
       Its rule-63 justification is cargo-culted: that function's `sessionId` is
       only a log field, never a SQL predicate — the scoping is in the caller's
       SELECT. Derive the log's session id from the row and delete the duplicate.
-- [ ] **MEDIUM — `ProjectCommentListResponse` / `...SessionRef` / `...FileRef`
+- [x] **MEDIUM — `ProjectCommentListResponse` / `...SessionRef` / `...FileRef`
       are exported but imported by nothing.** Wire the route's return type to
       them or delete them (CLAUDE.md bans dead code).
 - [ ] **MEDIUM — no test proves auth is inherited.** The vertical slice mounts

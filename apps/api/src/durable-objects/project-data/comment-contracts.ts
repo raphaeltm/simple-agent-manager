@@ -129,9 +129,22 @@ export type ListProjectCommentThreadsInput = {
   limit?: number | null;
 };
 
-/** One capped, `updated_at DESC`-ranked page of a single anchor kind. */
-export type ListProjectCommentThreadsPage<TThread> = {
-  threads: TThread[];
+/**
+ * Lightweight candidate row for the project-wide inbox.
+ *
+ * The inbox ranks and budgets these rows before hydrating full threads with
+ * replies, which keeps oversized comments from inflating the Durable Object RPC
+ * payload.
+ */
+export type ProjectCommentThreadCandidate = {
+  id: string;
+  updatedAt: number;
+  estimatedBytes: number;
+};
+
+/** One `updated_at DESC`-ranked candidate page of a single anchor kind. */
+export type ListProjectCommentThreadCandidatesPage = {
+  candidates: ProjectCommentThreadCandidate[];
   /** Total rows matching the filter, ignoring the cap. */
   totalCount: number;
 };
