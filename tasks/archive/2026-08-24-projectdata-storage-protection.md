@@ -100,6 +100,8 @@ preserving high-value chat history.
 - `(cd apps/api && pnpm vitest run --config vitest.workers.config.ts tests/workers/project-data-storage-safety.test.ts --reporter verbose)`
 - `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/project-data-messages.test.ts tests/unit/services/durable-object-retry.test.ts`
 - `pnpm --filter @simple-agent-manager/api lint`
+- `pnpm quality:ast-checks` — passed after splitting the cleanup candidate
+  query into static SQL branches; existing warnings remain unrelated.
 - `pnpm lint` — passed with pre-existing warnings unrelated to this patch.
 - `pnpm typecheck` — passed; Astro reported its baseline template diagnostics but exited 0.
 - `pnpm test` — 21 tasks passed; API 604 files / 8224 tests, web 293 files / 3502 tests.

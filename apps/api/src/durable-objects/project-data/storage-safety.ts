@@ -629,25 +629,34 @@ function selectToolPayloadCandidates(
   cursor: ToolPayloadCleanupCursor | null,
   limit: number
 ): ToolPayloadCandidate[] {
-  const params: (string | number)[] = [sessionId];
-  let keyset = '';
   if (cursor && cursor.sessionId === sessionId) {
-    keyset = `
-      AND (
-        created_at > ?
-        OR (created_at = ? AND COALESCE(sequence, 0) > ?)
-        OR (created_at = ? AND COALESCE(sequence, 0) = ? AND id > ?)
-      )`;
-    params.push(
-      cursor.createdAt,
-      cursor.createdAt,
-      cursor.sequence,
-      cursor.createdAt,
-      cursor.sequence,
-      cursor.messageId
-    );
+    const rows = sql
+      .exec(
+        `SELECT id, created_at, COALESCE(sequence, 0) AS sequence, tool_metadata
+         FROM chat_messages
+         WHERE session_id = ?
+           AND role = 'tool'
+           AND tool_metadata IS NOT NULL
+           AND tool_metadata LIKE '%"content"%'
+           AND (
+             created_at > ?
+             OR (created_at = ? AND COALESCE(sequence, 0) > ?)
+             OR (created_at = ? AND COALESCE(sequence, 0) = ? AND id > ?)
+           )
+         ORDER BY created_at ASC, COALESCE(sequence, 0) ASC, id ASC
+         LIMIT ?`,
+        sessionId,
+        cursor.createdAt,
+        cursor.createdAt,
+        cursor.sequence,
+        cursor.createdAt,
+        cursor.sequence,
+        cursor.messageId,
+        limit
+      )
+      .raw();
+    return parseToolPayloadCandidateRows(sessionId, rows);
   }
-  params.push(limit);
 
   const rows = sql
     .exec(
@@ -657,13 +666,19 @@ function selectToolPayloadCandidates(
          AND role = 'tool'
          AND tool_metadata IS NOT NULL
          AND tool_metadata LIKE '%"content"%'
-         ${keyset}
        ORDER BY created_at ASC, COALESCE(sequence, 0) ASC, id ASC
        LIMIT ?`,
-      ...params
+      sessionId,
+      limit
     )
     .raw();
+  return parseToolPayloadCandidateRows(sessionId, rows);
+}
 
+function parseToolPayloadCandidateRows(
+  sessionId: string,
+  rows: IterableIterator<unknown[]>
+): ToolPayloadCandidate[] {
   const candidates: ToolPayloadCandidate[] = [];
   for (const row of rows) {
     const id = row[0];
