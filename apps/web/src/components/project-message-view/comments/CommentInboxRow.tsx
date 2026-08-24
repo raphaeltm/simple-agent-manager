@@ -27,6 +27,7 @@ export function CommentInboxRow({
   item,
   viewerId,
   showSource = false,
+  showBucket = true,
   selected = false,
   onSelect,
 }: {
@@ -34,6 +35,11 @@ export function CommentInboxRow({
   viewerId: string | null;
   /** Show the "which session / which file" line. Off inside a single session. */
   showSource?: boolean;
+  /**
+   * Off when the row already sits under a bucket heading — repeating the state
+   * on every row inside a group labelled with that state is pure noise.
+   */
+  showBucket?: boolean;
   selected?: boolean;
   onSelect: () => void;
 }) {
@@ -80,8 +86,12 @@ export function CommentInboxRow({
         </time>
       </div>
 
-      {/* Line 2 — the comment itself. Clamped: rows must stay uniform. */}
-      <p className="m-0 mt-1 line-clamp-2 text-sm leading-snug text-fg-primary [overflow-wrap:anywhere]">
+      {/*
+        Line 2 — the comment itself. Clamped so rows stay uniform, and capped at
+        a readable measure so a full-width desktop list does not run 200
+        characters to the line.
+      */}
+      <p className="m-0 mt-1 line-clamp-2 max-w-[85ch] text-sm leading-snug text-fg-primary [overflow-wrap:anywhere]">
         {thread.body}
       </p>
 
@@ -102,13 +112,15 @@ export function CommentInboxRow({
             {replyCount}
           </span>
         )}
-        <span
-          className="ml-auto inline-flex shrink-0 items-center gap-1 text-[0.6875rem] font-medium"
-          style={{ color: accent }}
-        >
-          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />
-          {COMMENT_BUCKET_LABELS[bucket]}
-        </span>
+        {showBucket && (
+          <span
+            className="ml-auto inline-flex shrink-0 items-center gap-1 text-[0.6875rem] font-medium"
+            style={{ color: accent }}
+          >
+            <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />
+            {COMMENT_BUCKET_LABELS[bucket]}
+          </span>
+        )}
       </div>
 
       {/* Line 4 — only in cross-source lists, where "where is this?" is a real question. */}

@@ -41,7 +41,10 @@ export function CommentInboxFilters({
       role="tablist"
       aria-label="Filter comments"
       data-intentional-clip="horizontal chip scroller — five filters cannot fit at 375px"
-      className={`flex items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${className}`}
+      // The right-edge mask is load-bearing, not decoration: without it a chip
+      // sliced by the container edge reads as a layout bug rather than as a
+      // scroller, and people do not try to swipe it.
+      className={`flex items-center gap-1 overflow-x-auto [scrollbar-width:none] [mask-image:linear-gradient(to_right,black_0,black_calc(100%-1.5rem),transparent_100%)] [&::-webkit-scrollbar]:hidden ${className}`}
     >
       {FILTERS.map((filter) => {
         const count = counts[filter.value];

@@ -410,8 +410,14 @@ export function SessionHeader({
               title="Open comments"
             >
               <MessageSquareQuote size={10} aria-hidden="true" />
-              {unresolvedCommentCount}
-              {needsAttentionCommentCount > 0 && <span className="ml-0.5">needs you</span>}
+              {/*
+                Lead with the actionable number. "5 needs you" would be a lie —
+                5 is the unresolved total and only 3 of those are waiting on the
+                reader. When nothing is waiting, the total is the useful figure.
+              */}
+              {needsAttentionCommentCount > 0
+                ? `${needsAttentionCommentCount} need${needsAttentionCommentCount === 1 ? 's' : ''} you`
+                : unresolvedCommentCount}
             </button>
           )}
 

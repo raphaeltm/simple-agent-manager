@@ -110,6 +110,7 @@ export function ProjectComments() {
                         item={item}
                         viewerId={viewerId}
                         showSource
+                        showBucket={false}
                         onSelect={() => open(item)}
                       />
                     </li>

@@ -224,7 +224,12 @@ function TimelineEntryRow({
             onClick={() => onJump({ messageId: entry.messageId, timestamp: entry.timestamp })}
           >
             <div className="text-xs text-fg-muted mb-0.5">{formatTime(entry.timestamp)}</div>
-            <div className="flex items-center gap-1 text-[11px] uppercase mb-1 text-fg-muted">
+            {/*
+              Not uppercased, unlike the fixed "Status update" eyebrow above:
+              this one contains a person's name, and a full name in caps reads
+              as shouting rather than as a label.
+            */}
+            <div className="flex items-center gap-1 text-[11px] mb-1 text-fg-muted">
               <MessageSquareQuote size={11} className="shrink-0" />
               <span className="truncate">
                 {entry.actorName} {entry.isReply ? 'replied' : 'commented'}
