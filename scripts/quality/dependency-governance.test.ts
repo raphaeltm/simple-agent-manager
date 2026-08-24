@@ -102,7 +102,16 @@ function reviewedSourcePairs(contents: string): ReviewedSourcePair[] {
 
     if (line.startsWith('#')) {
       const match = declarationPattern.exec(line);
-      if (match) pending = normaliseImageRef(match[1]!);
+      if (match) {
+        // Two declarations before a single FROM means one of them governs
+        // nothing and would be silently dropped by the overwrite — a false pass
+        // in exactly the file whose job is to prevent false passes. Surface it
+        // as an unpaired declaration instead, so it fails loudly.
+        if (pending !== undefined) {
+          pairs.push({ declared: pending, from: '<no FROM follows this declaration>', line: index });
+        }
+        pending = normaliseImageRef(match[1]!);
+      }
       return;
     }
 

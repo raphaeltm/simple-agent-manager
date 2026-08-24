@@ -32,6 +32,14 @@ catalog:
   typescript-eslint: 8.67.0
 
   # === Cloudflare ===
+  # KNOWN LAG, deliberate: wrangler declares an OPTIONAL peer on
+  # @cloudflare/workers-types (4.123.0 wants ^5.20260811.1) and these two have
+  # lagged for several wrangler releases. Unlike the exact-pinned lockstep groups
+  # enforced in scripts/quality/dependency-governance.test.ts, this is a caret
+  # range on an optional peer: nothing here exercises the newer runtime types and
+  # `tsc --noEmit` is clean, so the two are NOT required to move together. Let
+  # Dependabot's own workers-types PR advance it rather than bundling it with a
+  # wrangler bump.
   '@cloudflare/workers-types': 5.20260707.1
   wrangler: 4.123.0
 
