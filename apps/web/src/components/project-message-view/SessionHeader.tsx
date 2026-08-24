@@ -43,6 +43,7 @@ import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils
 import { ReportIssueDialog } from '../ReportIssueDialog';
 import { CopyableId } from './CopyableId';
 import { PublicPortsToggleRow } from './PublicPortsToggleRow';
+import { SessionCommentChip } from './SessionCommentChip';
 import { WorkspaceProfileBadge } from './SessionHeaderBadges';
 import { SessionHeaderCompletionDialog } from './SessionHeaderCompletionDialog';
 import {
@@ -380,45 +381,12 @@ export function SessionHeader({
             </button>
           )}
 
-          {/*
-            Comment chip lives in the ALWAYS-VISIBLE chip row, not in the action
-            row below. The action row is inside the collapsed disclosure, so a
-            button there would be invisible until you already suspected there
-            was something to find — which is precisely the discovery problem
-            comments have today. The chip renders only when something is
-            unresolved, so a session with nothing outstanding stays quiet.
-          */}
           {onOpenComments && unresolvedCommentCount > 0 && (
-            <button
-              type="button"
-              onClick={onOpenComments}
-              className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 border cursor-pointer whitespace-nowrap transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary"
-              style={{
-                color: needsAttentionCommentCount > 0
-                  ? 'var(--sam-color-warning-fg)'
-                  : 'var(--sam-color-fg-muted)',
-                borderColor: needsAttentionCommentCount > 0
-                  ? 'var(--sam-color-warning)'
-                  : 'var(--sam-color-border-default)',
-                backgroundColor: needsAttentionCommentCount > 0
-                  ? 'var(--sam-color-warning-tint)'
-                  : 'transparent',
-              }}
-              aria-label={`${unresolvedCommentCount} unresolved ${unresolvedCommentCount === 1 ? 'comment' : 'comments'}${
-                needsAttentionCommentCount > 0 ? `, ${needsAttentionCommentCount} needing your attention` : ''
-              }`}
-              title="Open comments"
-            >
-              <MessageSquareQuote size={10} aria-hidden="true" />
-              {/*
-                Lead with the actionable number. "5 needs you" would be a lie —
-                5 is the unresolved total and only 3 of those are waiting on the
-                reader. When nothing is waiting, the total is the useful figure.
-              */}
-              {needsAttentionCommentCount > 0
-                ? `${needsAttentionCommentCount} need${needsAttentionCommentCount === 1 ? 's' : ''} you`
-                : unresolvedCommentCount}
-            </button>
+            <SessionCommentChip
+              unresolvedCommentCount={unresolvedCommentCount}
+              needsAttentionCommentCount={needsAttentionCommentCount}
+              onOpenComments={onOpenComments}
+            />
           )}
 
           {lineageText && (
@@ -722,17 +690,6 @@ export function SessionHeader({
               <Button variant="ghost" size="sm" onClick={onOpenComments}>
                 <MessageSquareQuote size={14} className="mr-1" />
                 Comments
-                {unresolvedCommentCount > 0 && (
-                  <span
-                    className="ml-1 rounded-full px-1.5 text-[0.6875rem] tabular-nums"
-                    style={{
-                      backgroundColor: 'var(--sam-color-warning-tint)',
-                      color: 'var(--sam-color-warning-fg)',
-                    }}
-                  >
-                    {unresolvedCommentCount}
-                  </span>
-                )}
               </Button>
             )}
 

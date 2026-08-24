@@ -4,6 +4,7 @@ import {
   createMessageCommentReply,
   createMessageCommentThread,
   listMessageComments,
+  listProjectComments,
   reopenMessageCommentThread,
   resolveMessageCommentThread,
   sendMessageCommentThreadToAgent,
@@ -30,6 +31,21 @@ function backendThread(overrides: Record<string, unknown> = {}) {
     createdAt: 1,
     updatedAt: 1,
     status: 'open',
+    replies: [],
+    ...overrides,
+  };
+}
+
+function backendFileThread(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'fc1',
+    fileId: 'file-1',
+    anchor: { kind: 'library_file', fileId: 'file-1', quote: 'file quote' },
+    author: { kind: 'agent', id: 'agent-1', displayName: 'SAM' },
+    body: 'File comment',
+    createdAt: 2,
+    updatedAt: 3,
+    status: 'resolved',
     replies: [],
     ...overrides,
   };
@@ -135,5 +151,95 @@ describe('message comment API client', () => {
         body: JSON.stringify({ body: 'Send context' }),
       })
     );
+  });
+
+  it('maps project-wide comments and reference labels from the single endpoint', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        messageThreads: [
+          backendThread({
+            id: 'mc1',
+            clientMutationId: 'client-message-thread',
+            author: { kind: 'human', id: 'user-1', displayName: 'Ada Display' },
+            replies: [
+              {
+                id: 'mr1',
+                clientMutationId: 'client-message-reply',
+                author: { kind: 'agent', id: 'agent-1', name: 'SAM' },
+                body: 'Message reply',
+                createdAt: 4,
+                sentToAgent: true,
+              },
+            ],
+          }),
+        ],
+        fileThreads: [
+          backendFileThread({
+            id: 'fc1',
+            clientMutationId: 'client-file-thread',
+            replies: [
+              {
+                id: 'fr1',
+                author: { kind: 'human', id: 'user-2', name: 'Grace' },
+                body: 'File reply',
+                createdAt: 5,
+              },
+            ],
+          }),
+        ],
+        sessions: [{ id: 'sess-1', topic: null }],
+        files: [{ id: 'file-1', filename: 'notes.md' }],
+        hasMore: true,
+        totalCount: 9,
+      })
+    );
+
+    const result = await listProjectComments('proj-1', { status: 'open', limit: 2 });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8787/api/projects/proj-1/comments?status=open&limit=2',
+      expect.objectContaining({
+        credentials: 'include',
+        headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+      })
+    );
+    expect(result.messageThreads[0]).toMatchObject({
+      id: 'mc1',
+      clientId: 'client-message-thread',
+      projectId: 'proj-1',
+      author: { name: 'Ada Display' },
+      replies: [
+        {
+          id: 'mr1',
+          clientId: 'client-message-reply',
+          sentToAgent: true,
+        },
+      ],
+    });
+    expect(result.fileThreads[0]).toMatchObject({
+      id: 'fc1',
+      clientId: 'client-file-thread',
+      fileId: 'file-1',
+      author: { name: 'SAM' },
+      replies: [{ id: 'fr1', sentToAgent: false }],
+    });
+    expect(result.sessionTopics.get('sess-1')).toBeNull();
+    expect(result.fileNames.get('file-1')).toBe('notes.md');
+    expect(result.hasMore).toBe(true);
+    expect(result.totalCount).toBe(9);
+  });
+
+  it('falls back to returned thread count when project-wide total is omitted', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        messageThreads: [backendThread()],
+        fileThreads: [backendFileThread()],
+      })
+    );
+
+    const result = await listProjectComments('proj-1');
+
+    expect(result.totalCount).toBe(2);
+    expect(result.hasMore).toBe(false);
   });
 });

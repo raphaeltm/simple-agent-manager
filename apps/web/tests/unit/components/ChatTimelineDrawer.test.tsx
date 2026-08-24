@@ -11,7 +11,9 @@ vi.mock('react-virtuoso', async () => {
 import { ChatTimelineDrawer } from '../../../src/components/chat/ChatTimelineDrawer';
 import type { TimelineEntry } from '../../../src/components/project-message-view/timeline-types';
 
-function makeUserEntry(overrides: Partial<Extract<TimelineEntry, { kind: 'user_message' }>> = {}): TimelineEntry {
+function makeUserEntry(
+  overrides: Partial<Extract<TimelineEntry, { kind: 'user_message' }>> = {}
+): TimelineEntry {
   return {
     kind: 'user_message',
     id: 'msg-1',
@@ -22,7 +24,9 @@ function makeUserEntry(overrides: Partial<Extract<TimelineEntry, { kind: 'user_m
   };
 }
 
-function makeSystemEntry(overrides: Partial<Extract<TimelineEntry, { kind: 'system_event' }>> = {}): TimelineEntry {
+function makeSystemEntry(
+  overrides: Partial<Extract<TimelineEntry, { kind: 'system_event' }>> = {}
+): TimelineEntry {
   return {
     kind: 'system_event',
     id: 'evt-1',
@@ -34,7 +38,9 @@ function makeSystemEntry(overrides: Partial<Extract<TimelineEntry, { kind: 'syst
   };
 }
 
-function makeProgressEntry(overrides: Partial<Extract<TimelineEntry, { kind: 'progress_notification' }>> = {}): TimelineEntry {
+function makeProgressEntry(
+  overrides: Partial<Extract<TimelineEntry, { kind: 'progress_notification' }>> = {}
+): TimelineEntry {
   return {
     kind: 'progress_notification',
     id: 'notif-1',
@@ -43,6 +49,27 @@ function makeProgressEntry(overrides: Partial<Extract<TimelineEntry, { kind: 'pr
     text: 'Installed dependencies and started focused tests',
     timestamp: 750,
     severity: 'info',
+    ...overrides,
+  };
+}
+
+function makeCommentEntry(
+  overrides: Partial<Extract<TimelineEntry, { kind: 'comment_thread' }>> = {}
+): TimelineEntry {
+  return {
+    kind: 'comment_thread',
+    id: 'comment-thread-1',
+    threadId: 'thread-1',
+    messageId: 'message-1',
+    quote: 'Relevant line',
+    text: 'Please verify this behavior',
+    actorName: 'Grace',
+    actorKind: 'human',
+    isReply: false,
+    status: 'open',
+    bucket: 'needs_you',
+    replyCount: 0,
+    timestamp: 888,
     ...overrides,
   };
 }
@@ -103,7 +130,9 @@ describe('ChatTimelineDrawer', () => {
 
   it('renders user message entries and jumps by messageId + timestamp on click', () => {
     const onJump = vi.fn();
-    const entries = [makeUserEntry({ id: 'msg-1', messageId: 'm-abc', text: 'Test message', timestamp: 4321 })];
+    const entries = [
+      makeUserEntry({ id: 'msg-1', messageId: 'm-abc', text: 'Test message', timestamp: 4321 }),
+    ];
     render(<ChatTimelineDrawer {...defaultProps} entries={entries} onJump={onJump} />);
 
     const msgBtn = screen.getByText('Test message');
@@ -113,7 +142,9 @@ describe('ChatTimelineDrawer', () => {
 
   it('renders system event entries and jumps by timestamp on click', () => {
     const onJump = vi.fn();
-    const entries = [makeSystemEntry({ title: 'Session started', severity: 'info', timestamp: 555 })];
+    const entries = [
+      makeSystemEntry({ title: 'Session started', severity: 'info', timestamp: 555 }),
+    ];
     render(<ChatTimelineDrawer {...defaultProps} entries={entries} onJump={onJump} />);
 
     const eventBtn = screen.getByText('Session started');
@@ -123,13 +154,34 @@ describe('ChatTimelineDrawer', () => {
 
   it('renders progress notification entries as status updates and jumps by timestamp on click', () => {
     const onJump = vi.fn();
-    const entries = [makeProgressEntry({ text: 'Cloned the repo and inspected timeline code', timestamp: 777 })];
+    const entries = [
+      makeProgressEntry({ text: 'Cloned the repo and inspected timeline code', timestamp: 777 }),
+    ];
     render(<ChatTimelineDrawer {...defaultProps} entries={entries} onJump={onJump} />);
 
     expect(screen.getByText('Status update')).toBeTruthy();
     const progressBtn = screen.getByText('Cloned the repo and inspected timeline code');
     fireEvent.click(progressBtn);
     expect(onJump).toHaveBeenCalledWith({ timestamp: 777 });
+  });
+
+  it('renders comment thread entries and jumps to the annotated message', () => {
+    const onJump = vi.fn();
+    const entries = [
+      makeCommentEntry({
+        messageId: 'msg-commented',
+        text: 'Can you tighten this wording?',
+        timestamp: 999,
+      }),
+    ];
+    render(<ChatTimelineDrawer {...defaultProps} entries={entries} onJump={onJump} />);
+
+    expect(screen.getByText('Grace commented')).toBeTruthy();
+    expect(screen.getByText('Relevant line')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Can you tighten this wording?'));
+
+    expect(onJump).toHaveBeenCalledWith({ messageId: 'msg-commented', timestamp: 999 });
   });
 
   it('has correct dialog aria attributes', () => {

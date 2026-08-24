@@ -22,15 +22,9 @@ import { getMessageToolContent } from '../../lib/api/sessions';
 import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
 import { useAuth } from '../AuthProvider';
 import { ChatFilePanel } from '../chat/ChatFilePanel';
-import { ChatTimelineDrawer } from '../chat/ChatTimelineDrawer';
-import { SessionCommentsDrawer } from '../chat/SessionCommentsDrawer';
 import { TruncatedSummary } from '../chat/TruncatedSummary';
 import { FailureCard } from '../debug/FailureCard';
-import {
-  type CommentInboxItem,
-  countBuckets,
-  toInboxItem,
-} from './comments/comment-inbox';
+import { type CommentInboxItem, countBuckets, toInboxItem } from './comments/comment-inbox';
 import { CommentableConversationItem } from './comments/CommentableConversationItem';
 import { useMessageComments } from './comments/useMessageComments';
 import { useProjectMessageCommentUi } from './comments/useProjectMessageCommentUi';
@@ -42,30 +36,16 @@ import {
   type ChatListContext,
   useFloatingHeaderHeight,
 } from './MessageListScaffold';
+import { ProjectMessageViewDrawers } from './ProjectMessageViewDrawers';
 import { currentPlanToPlanItem, ElapsedTime } from './session-view-utils';
 import { SessionHeader } from './SessionHeader';
 import { StaleActivityNotice } from './StaleActivityNotice';
+import { nearestItemId } from './timeline-jump';
 import type { TimelineJumpTarget } from './timeline-types';
 import { chatMessagesToConversationItems } from './types';
 import { useSessionLifecycle } from './useSessionLifecycle';
 import { useSessionTimeline } from './useSessionTimeline';
 import { WakeProgressBanner } from './WakeProgressBanner';
-
-/**
- * Resolve the id of the loaded conversation item nearest to (at or just before)
- * a timestamp. Used to anchor timeline entries that have no exact message id
- * (status updates, activity events) to a message in the list.
- */
-function nearestItemId(items: ConversationItem[], timestamp: number): string | undefined {
-  if (items.length === 0) return undefined;
-  let candidateId = items[0]?.id;
-  for (const item of items) {
-    const ts = 'timestamp' in item && typeof item.timestamp === 'number' ? item.timestamp : 0;
-    if (ts <= timestamp) candidateId = item.id;
-    else break;
-  }
-  return candidateId;
-}
 
 // Re-export utilities used by external consumers
 export { chatMessagesToConversationItems, groupMessages } from './types';
@@ -779,38 +759,27 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         />
       )}
 
-      {/* Timeline drawer */}
-      {showTimeline && (
-        <ChatTimelineDrawer
-          entries={timeline.entries}
-          loading={timeline.loading}
-          showContext={timeline.showContext}
-          onToggleContext={() => timeline.setShowContext(!timeline.showContext)}
-          onClose={() => setShowTimeline(false)}
-          onJump={handleTimelineJump}
-        />
-      )}
-
-      {/* Comments drawer — the session-scoped inbox */}
-      {showComments && (
-        <SessionCommentsDrawer
-          items={commentInbox}
-          loading={messageComments.loading}
-          viewerId={viewerId}
-          onClose={() => setShowComments(false)}
-          onJump={handleTimelineJump}
-          onReply={(threadId, body, action) =>
-            messageComments.reply({ commentId: threadId, body, action })
-          }
-          onResolve={messageComments.resolve}
-          onReopen={messageComments.reopen}
-          onSendToAgent={
-            canWriteSession
-              ? (threadId) => messageComments.sendToAgent({ commentId: threadId })
-              : undefined
-          }
-        />
-      )}
+      <ProjectMessageViewDrawers
+        showTimeline={showTimeline}
+        timelineEntries={timeline.entries}
+        timelineLoading={timeline.loading}
+        showTimelineContext={timeline.showContext}
+        onToggleTimelineContext={() => timeline.setShowContext(!timeline.showContext)}
+        onCloseTimeline={() => setShowTimeline(false)}
+        showComments={showComments}
+        commentItems={commentInbox}
+        commentsLoading={messageComments.loading}
+        viewerId={viewerId}
+        canWriteSession={canWriteSession}
+        onCloseComments={() => setShowComments(false)}
+        onJump={handleTimelineJump}
+        onReply={(threadId, body, action) =>
+          messageComments.reply({ commentId: threadId, body, action })
+        }
+        onResolve={messageComments.resolve}
+        onReopen={messageComments.reopen}
+        onSendToAgent={(threadId) => messageComments.sendToAgent({ commentId: threadId })}
+      />
     </div>
   );
 };

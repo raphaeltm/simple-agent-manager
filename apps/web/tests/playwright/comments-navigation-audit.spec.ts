@@ -138,10 +138,10 @@ const THREADS = [
     anchor: {
       kind: 'message' as const,
       messageId: 'msg-5',
-      quote: 'fans out across the 25 most recent sessions',
+      quote: 'one endpoint returns every thread in the project',
     },
     author: TEAMMATE,
-    body: 'A fan-out of 50 requests on page load is going to be rough on a big project. Can we get a real endpoint before this ships?',
+    body: 'The project-wide endpoint makes this drawer viable for large projects. Please keep the single-request path covered.',
     status: 'open' as const,
     createdAt: NOW - 26 * MIN,
     updatedAt: NOW - 26 * MIN,
@@ -609,7 +609,7 @@ for (const [label, viewport] of [
       await setupMocks(page);
       await openChat(page);
       await openCommentsDrawer(page);
-      await page.getByRole('tab', { name: /^All/ }).click();
+      await page.getByRole('button', { name: /^All/ }).click();
       await page.waitForTimeout(500);
       await screenshot(page, `comments-04-drawer-all-${label}`);
       await assertNoOverflow(page);
@@ -619,7 +619,7 @@ for (const [label, viewport] of [
       await setupMocks(page);
       await openChat(page);
       await openCommentsDrawer(page);
-      await page.getByRole('tab', { name: /^All/ }).click();
+      await page.getByRole('button', { name: /^All/ }).click();
       await page.waitForTimeout(300);
       await page.locator('[data-comment-thread-id="ct-1"]').click();
       await page.waitForTimeout(600);
@@ -632,7 +632,7 @@ for (const [label, viewport] of [
       await setupMocks(page);
       await openChat(page);
       await openCommentsDrawer(page);
-      await page.getByRole('tab', { name: /^Resolved/ }).click();
+      await page.getByRole('button', { name: /^Resolved/ }).click();
       await page.waitForTimeout(500);
       await screenshot(page, `comments-06-drawer-resolved-${label}`);
       await assertNoOverflow(page);
@@ -667,7 +667,7 @@ for (const [label, viewport] of [
       await page.goto(`/projects/${PROJECT_ID}/comments`);
       await page.getByRole('heading', { name: 'Comments', level: 1 }).waitFor({ timeout: 15_000 });
       await page.waitForTimeout(1500);
-      await page.getByRole('tab', { name: /^Needs you/ }).click();
+      await page.getByRole('button', { name: /^Needs you/ }).click();
       await page.waitForTimeout(500);
       await screenshot(page, `comments-09-project-needs-you-${label}`);
       await assertNoOverflow(page);

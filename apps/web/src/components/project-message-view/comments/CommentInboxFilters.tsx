@@ -38,7 +38,6 @@ export function CommentInboxFilters({
 }) {
   return (
     <div
-      role="tablist"
       aria-label="Filter comments"
       data-intentional-clip="horizontal chip scroller — five filters cannot fit at 375px"
       // The right-edge mask is load-bearing, not decoration: without it a chip
@@ -50,14 +49,16 @@ export function CommentInboxFilters({
         const count = counts[filter.value];
         const active = value === filter.value;
         const accent =
-          filter.value === 'all' ? 'var(--sam-color-accent-primary)' : COMMENT_BUCKET_COLORS[filter.value];
+          filter.value === 'all'
+            ? 'var(--sam-color-accent-primary)'
+            : COMMENT_BUCKET_COLORS[filter.value];
 
         return (
           <button
             key={filter.value}
             type="button"
-            role="tab"
-            aria-selected={active}
+            aria-pressed={active}
+            aria-label={`${filter.label}, ${count} ${count === 1 ? 'comment' : 'comments'}`}
             onClick={() => onChange(filter.value)}
             className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring ${
               active
@@ -75,7 +76,9 @@ export function CommentInboxFilters({
               />
             )}
             {filter.label}
-            <span className="tabular-nums opacity-70">{count}</span>
+            <span aria-hidden="true" className="tabular-nums opacity-70">
+              {count}
+            </span>
           </button>
         );
       })}

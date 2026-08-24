@@ -2,9 +2,12 @@ import type { NotificationResponse } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
 import { buildSessionTimeline } from '../../src/components/project-message-view/buildSessionTimeline';
+import type { UiMessageCommentThread } from '../../src/components/project-message-view/comments/comment-utils';
 import type { ActivityEventResponse, ChatMessageResponse } from '../../src/lib/api/sessions';
 
-function makeMessage(overrides: Partial<ChatMessageResponse> & { id: string }): ChatMessageResponse {
+function makeMessage(
+  overrides: Partial<ChatMessageResponse> & { id: string }
+): ChatMessageResponse {
   return {
     sessionId: 'sess-1',
     role: 'user',
@@ -15,7 +18,9 @@ function makeMessage(overrides: Partial<ChatMessageResponse> & { id: string }): 
   };
 }
 
-function makeEvent(overrides: Partial<ActivityEventResponse> & { id: string }): ActivityEventResponse {
+function makeEvent(
+  overrides: Partial<ActivityEventResponse> & { id: string }
+): ActivityEventResponse {
   return {
     eventType: 'workspace.created',
     actorType: 'system',
@@ -29,7 +34,9 @@ function makeEvent(overrides: Partial<ActivityEventResponse> & { id: string }): 
   };
 }
 
-function makeNotification(overrides: Partial<NotificationResponse> & { id: string }): NotificationResponse {
+function makeNotification(
+  overrides: Partial<NotificationResponse> & { id: string }
+): NotificationResponse {
   return {
     projectId: 'proj-1',
     taskId: 'task-1',
@@ -43,6 +50,30 @@ function makeNotification(overrides: Partial<NotificationResponse> & { id: strin
     readAt: null,
     dismissedAt: null,
     createdAt: new Date(Date.now()).toISOString(),
+    ...overrides,
+  };
+}
+
+function makeCommentThread(
+  overrides: Partial<UiMessageCommentThread> & { id: string }
+): UiMessageCommentThread {
+  return {
+    id: overrides.id,
+    projectId: 'proj-1',
+    sessionId: 'sess-1',
+    anchor: { kind: 'message', messageId: 'msg-1', quote: null },
+    author: {
+      id: 'user-1',
+      name: 'Ada',
+      email: 'ada@example.test',
+      avatarUrl: null,
+      kind: 'human',
+    },
+    body: 'Please check this',
+    createdAt: 1000,
+    updatedAt: 1000,
+    status: 'open',
+    replies: [],
     ...overrides,
   };
 }
@@ -190,7 +221,11 @@ describe('buildSessionTimeline', () => {
       [
         makeNotification({ id: 'n1', type: 'error', createdAt: new Date(1000).toISOString() }),
         makeNotification({ id: 'n2', createdAt: 'not-a-date' }),
-        makeNotification({ id: 'n3', body: 'Visible update', createdAt: new Date(2000).toISOString() }),
+        makeNotification({
+          id: 'n3',
+          body: 'Visible update',
+          createdAt: new Date(2000).toISOString(),
+        }),
       ],
       false
     );
@@ -208,7 +243,11 @@ describe('buildSessionTimeline', () => {
       makeEvent({ id: 'e1', eventType: 'session.started', createdAt: 2000 }),
     ];
     const notifications: NotificationResponse[] = [
-      makeNotification({ id: 'n1', body: 'Progress between event and final message', createdAt: new Date(2500).toISOString() }),
+      makeNotification({
+        id: 'n1',
+        body: 'Progress between event and final message',
+        createdAt: new Date(2500).toISOString(),
+      }),
     ];
     const result = buildSessionTimeline(messages, events, notifications, true);
 
@@ -221,9 +260,24 @@ describe('buildSessionTimeline', () => {
 
   it('maps task.status_changed to correct severity', () => {
     const events: ActivityEventResponse[] = [
-      makeEvent({ id: 'e1', eventType: 'task.status_changed', payload: { toStatus: 'completed' }, createdAt: 1000 }),
-      makeEvent({ id: 'e2', eventType: 'task.status_changed', payload: { toStatus: 'failed' }, createdAt: 2000 }),
-      makeEvent({ id: 'e3', eventType: 'task.status_changed', payload: { toStatus: 'cancelled' }, createdAt: 3000 }),
+      makeEvent({
+        id: 'e1',
+        eventType: 'task.status_changed',
+        payload: { toStatus: 'completed' },
+        createdAt: 1000,
+      }),
+      makeEvent({
+        id: 'e2',
+        eventType: 'task.status_changed',
+        payload: { toStatus: 'failed' },
+        createdAt: 2000,
+      }),
+      makeEvent({
+        id: 'e3',
+        eventType: 'task.status_changed',
+        payload: { toStatus: 'cancelled' },
+        createdAt: 3000,
+      }),
     ];
     const result = buildSessionTimeline([], events, [], true);
 
@@ -315,7 +369,12 @@ describe('buildSessionTimeline', () => {
 
   it('maps task.status_changed with error status to error severity', () => {
     const events: ActivityEventResponse[] = [
-      makeEvent({ id: 'e1', eventType: 'task.status_changed', payload: { toStatus: 'error' }, createdAt: 1000 }),
+      makeEvent({
+        id: 'e1',
+        eventType: 'task.status_changed',
+        payload: { toStatus: 'error' },
+        createdAt: 1000,
+      }),
     ];
     const result = buildSessionTimeline([], events, [], true);
     expect(result[0]).toMatchObject({ severity: 'error', title: 'Task error' });
@@ -327,6 +386,85 @@ describe('buildSessionTimeline', () => {
     ];
     const result = buildSessionTimeline([], events, [], true);
     expect(result[0]).toMatchObject({ severity: 'info', title: 'Task status changed' });
+  });
+
+  it('includes message comment threads at their latest activity with viewer-aware buckets', () => {
+    const result = buildSessionTimeline(
+      [],
+      [],
+      [],
+      false,
+      [
+        makeCommentThread({
+          id: 'comment-1',
+          anchor: { kind: 'message', messageId: 'msg-commented', quote: 'selected text' },
+          body: 'Please check this edge case',
+          createdAt: 1000,
+          updatedAt: 3000,
+          replies: [
+            {
+              id: 'reply-1',
+              author: {
+                id: 'agent-1',
+                name: 'SAM',
+                email: null,
+                avatarUrl: null,
+                kind: 'agent',
+              },
+              body: 'I changed it',
+              createdAt: 3000,
+            },
+          ],
+        }),
+      ],
+      'user-1'
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      kind: 'comment_thread',
+      id: 'comment-comment-1',
+      threadId: 'comment-1',
+      messageId: 'msg-commented',
+      quote: 'selected text',
+      text: 'Please check this edge case',
+      actorName: 'SAM',
+      actorKind: 'agent',
+      isReply: true,
+      status: 'open',
+      bucket: 'needs_you',
+      replyCount: 1,
+      timestamp: 3000,
+    });
+  });
+
+  it('skips blank comment threads and truncates long comment bodies', () => {
+    const result = buildSessionTimeline(
+      [],
+      [],
+      [],
+      false,
+      [
+        makeCommentThread({ id: 'blank-comment', body: '   ' }),
+        makeCommentThread({
+          id: 'long-comment',
+          body: 'B'.repeat(200),
+          status: 'sent',
+        }),
+      ],
+      'user-1'
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      kind: 'comment_thread',
+      threadId: 'long-comment',
+      bucket: 'with_agent',
+    });
+    if (result[0].kind === 'comment_thread') {
+      expect(result[0].text.length).toBeLessThanOrEqual(120);
+      expect(result[0].text.endsWith('\u2026')).toBe(true);
+    }
   });
 
   it('falls back to raw event type for unknown event types', () => {

@@ -197,6 +197,26 @@ must not merge yet.
       hydrate only survivors.
 - [x] `ProjectCommentListResponse` / `...SessionRef` / `...FileRef` exported
       from the shared package root and used as the route response type.
+- [x] `buildSessionTimeline` now covers `comment_thread` entries, including
+      latest-activity placement, viewer-aware buckets, blank bodies, and
+      truncation.
+- [x] `ChatTimelineDrawer` now clicks comment-thread entries and asserts the
+      annotated-message jump target.
+- [x] `SessionCommentsDrawer` now has direct behavior tests for empty/loading
+      states, expand → "Show in conversation", reply, send-to-agent, resolve,
+      and filter selection.
+- [x] The always-visible `SessionHeader` comment chip was split into
+      `SessionCommentChip`; the collapsed action-row Comments button no longer
+      repeats a bare numeric badge.
+- [x] Comment filter chips now use pressed-button semantics with explicit
+      accessible count labels instead of ARIA tab roles without a tabs keyboard
+      contract.
+- [x] `project-message-view/index.tsx` was split into
+      `ProjectMessageViewDrawers` and `timeline-jump`; line counts are now
+      below the rule-18 ceiling (`index.tsx` 785, `SessionHeader.tsx` 762).
+- [x] `listProjectComments` response mapping has direct unit coverage.
+- [x] Playwright fixture copy no longer describes per-session/per-file fan-out
+      as the current architecture.
 
 ### Outstanding — blocks merge
 
@@ -229,27 +249,27 @@ must not merge yet.
 
 **Frontend**
 
-- [ ] **HIGH — three interactive surfaces have ZERO behavioural tests:**
+- [x] **HIGH — three interactive surfaces have ZERO behavioural tests:**
       `SessionCommentsDrawer`, the `SessionHeader` comment chip, and the
       `comment_thread` timeline entry. Playwright asserts the timeline entry is
       visible but never clicks it, and never clicks "Show in conversation".
       Rule 02 requires render + simulate + assert per interactive element.
-- [ ] **HIGH — `buildSessionTimeline`'s `comment_thread` branch is untested**,
+- [x] **HIGH — `buildSessionTimeline`'s `comment_thread` branch is untested**,
       though that file's suite has 20+ cases for every sibling kind.
-- [ ] **HIGH — rule 18 file size.** `SessionHeader.tsx` 737 -> 805 and
+- [x] **HIGH — rule 18 file size.** `SessionHeader.tsx` 737 -> 805 and
       `project-message-view/index.tsx` 746 -> 819. Both crossed the 800-line
       MANDATORY split threshold on this branch.
-- [ ] HIGH — three unlabelled comment counts are visible at once (3 "need you",
+- [x] HIGH — three unlabelled comment counts are visible at once (3 "need you",
       5 unresolved, 7 total) with nothing distinguishing them.
-- [ ] MEDIUM — filter chips use `role="tab"` without the ARIA tabs keyboard
+- [x] MEDIUM — filter chips use `role="tab"` without the ARIA tabs keyboard
       contract (no roving tabindex, no arrow keys, no `aria-controls`).
 - [ ] MEDIUM — neither drawer traps focus. Concretely reachable: tab out of an
       open drawer into the obscured header and open the other drawer, producing
       two stacked `aria-modal` dialogs.
 - [ ] MEDIUM — truncation disclosure sits below every bucket, so a reader who
       only checks "Needs you" never sees it (rule 65's whole point).
-- [ ] `listProjectComments` response mapper has no direct unit test.
-- [ ] Playwright fixture `msg-5` still states the fan-out as current architecture.
+- [x] `listProjectComments` response mapper has no direct unit test.
+- [x] Playwright fixture `msg-5` still states the fan-out as current architecture.
 
 **Resolved product decision**
 
