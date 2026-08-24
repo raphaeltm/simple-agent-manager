@@ -1,19 +1,24 @@
-import { isJsonRecord } from '@simple-agent-manager/shared';
-
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import type {
   ProjectDataStorageStatus,
   ProjectDataStorageTelemetry,
   StorageSafetyConfig,
 } from './storage-safety';
+import {
+  deleteStorageSafetyMeta as deleteMeta,
+  META_LAST_ERROR,
+  META_LAST_MEASURED_AT,
+  META_LAST_STATUS,
+  readStorageSafetyMeta as readMeta,
+  readStorageSafetyMetaNumber as readMetaNumber,
+  truncateStorageSafetyMetaValue as truncate,
+  writeStorageSafetyMeta as writeMeta,
+} from './storage-safety-meta';
 import { stripToolMetadataPayloadForStorage } from './tool-metadata-storage';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.tool_payload_cleanup');
 
-const META_LAST_MEASURED_AT = 'storageSafetyLastMeasuredAt';
-const META_LAST_STATUS = 'storageSafetyLastStatus';
-const META_LAST_ERROR = 'storageSafetyLastError';
 const META_TOOL_CLEANUP_CURSOR_SESSION_ID = 'storageSafetyToolCleanupCursorSessionId';
 const META_TOOL_CLEANUP_CURSOR_CREATED_AT = 'storageSafetyToolCleanupCursorCreatedAt';
 const META_TOOL_CLEANUP_CURSOR_SEQUENCE = 'storageSafetyToolCleanupCursorSequence';
@@ -72,38 +77,6 @@ type ToolPayloadCleanupCursor = {
 type ToolPayloadCandidate = ToolPayloadCleanupCursor & {
   toolMetadata: string;
 };
-
-function readMeta(sql: SqlStorage, key: string): string | null {
-  const row = sql.exec('SELECT value FROM do_meta WHERE key = ?', key).toArray()[0];
-  if (!isJsonRecord(row)) return null;
-  const value = (row as Record<string, unknown>).value;
-  return typeof value === 'string' ? value : null;
-}
-
-function readMetaNumber(sql: SqlStorage, key: string): number | null {
-  const raw = readMeta(sql, key);
-  if (!raw) return null;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isSafeInteger(parsed) ? parsed : null;
-}
-
-function writeMeta(sql: SqlStorage, key: string, value: string): void {
-  sql.exec(
-    `INSERT INTO do_meta (key, value)
-     VALUES (?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    key,
-    value
-  );
-}
-
-function deleteMeta(sql: SqlStorage, key: string): void {
-  sql.exec('DELETE FROM do_meta WHERE key = ?', key);
-}
-
-function truncate(value: string, maxLength: number): string {
-  return value.length <= maxLength ? value : value.slice(0, maxLength);
-}
 
 function rawNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isSafeInteger(value)) return value;
@@ -210,35 +183,10 @@ function selectToolPayloadCandidates(
   cursor: ToolPayloadCleanupCursor | null,
   limit: number
 ): ToolPayloadCandidate[] {
-  if (cursor && cursor.sessionId === sessionId) {
-    const rows = sql
-      .exec(
-        `SELECT id, created_at, COALESCE(sequence, 0) AS sequence, tool_metadata
-         FROM chat_messages
-         WHERE session_id = ?
-           AND role = 'tool'
-           AND tool_metadata IS NOT NULL
-           AND tool_metadata LIKE '%"content"%'
-           AND (
-             created_at > ?
-             OR (created_at = ? AND COALESCE(sequence, 0) > ?)
-             OR (created_at = ? AND COALESCE(sequence, 0) = ? AND id > ?)
-           )
-         ORDER BY created_at ASC, COALESCE(sequence, 0) ASC, id ASC
-         LIMIT ?`,
-        sessionId,
-        cursor.createdAt,
-        cursor.createdAt,
-        cursor.sequence,
-        cursor.createdAt,
-        cursor.sequence,
-        cursor.messageId,
-        limit
-      )
-      .raw();
-    return parseToolPayloadCandidateRows(sessionId, rows);
-  }
-
+  const messageCursor = cursor?.sessionId === sessionId ? cursor : null;
+  const cursorCreatedAt = messageCursor?.createdAt ?? null;
+  const cursorSequence = messageCursor?.sequence ?? null;
+  const cursorMessageId = messageCursor?.messageId ?? null;
   const rows = sql
     .exec(
       `SELECT id, created_at, COALESCE(sequence, 0) AS sequence, tool_metadata
@@ -247,9 +195,22 @@ function selectToolPayloadCandidates(
          AND role = 'tool'
          AND tool_metadata IS NOT NULL
          AND tool_metadata LIKE '%"content"%'
+         AND (
+           ? IS NULL
+           OR created_at > ?
+           OR (created_at = ? AND COALESCE(sequence, 0) > ?)
+           OR (created_at = ? AND COALESCE(sequence, 0) = ? AND id > ?)
+         )
        ORDER BY created_at ASC, COALESCE(sequence, 0) ASC, id ASC
        LIMIT ?`,
       sessionId,
+      cursorCreatedAt,
+      cursorCreatedAt ?? 0,
+      cursorCreatedAt ?? 0,
+      cursorSequence ?? 0,
+      cursorCreatedAt ?? 0,
+      cursorSequence ?? 0,
+      cursorMessageId ?? '',
       limit
     )
     .raw();
@@ -282,13 +243,36 @@ function updateToolMetadata(sql: SqlStorage, messageId: string, toolMetadata: st
   sql.exec('UPDATE chat_messages SET tool_metadata = ? WHERE id = ?', toolMetadata, messageId);
 }
 
-export async function runProjectDataToolPayloadCleanup(
+type ToolPayloadCleanupPlan = {
+  projectId: string;
+  now: number;
+  beforeBytes: number;
+  limitBytes: number;
+  triggerBytes: number;
+  targetBytes: number;
+  batchRows: number;
+  cutoffUpdatedAt: number;
+  pendingCursor: ToolPayloadCleanupCursor | null;
+};
+
+type ToolPayloadCleanupBatch = {
+  sessionsScanned: number;
+  rowsScanned: number;
+  rowsUpdated: number;
+  originalToolMetadataBytes: number;
+  storedToolMetadataBytes: number;
+  lastCursor: ToolPayloadCleanupCursor | null;
+  lastScannedSessionId: string | null;
+  hasMoreCandidates: boolean;
+  finalSessionId: string | null;
+};
+
+function createToolPayloadCleanupPlan(
   sql: SqlStorage,
-  env: Env,
   projectId: string | null,
   config: StorageSafetyConfig,
   options: ProjectDataToolPayloadCleanupOptions
-): Promise<ProjectDataToolPayloadCleanupResult | null> {
+): ToolPayloadCleanupPlan | null {
   if (!config.enabled || !config.toolPayloadCleanupEnabled || !projectId) return null;
   const now = options.now ?? Date.now();
 
@@ -313,132 +297,275 @@ export async function runProjectDataToolPayloadCleanup(
     return null;
   }
 
-  const cutoffUpdatedAt = now - config.toolPayloadCleanupMinSessionAgeMs;
-  const batchRows = config.toolPayloadCleanupBatchRows;
-  let cursor = pendingCursor;
-  let sessionId = cursor
-    ? isSessionExhaustedCursor(cursor)
-      ? selectNextTerminalSessionId(sql, cutoffUpdatedAt, cursor.sessionId)
-      : cursor.sessionId
-    : selectNextTerminalSessionId(sql, cutoffUpdatedAt, '');
-  let sessionsScanned = 0;
-  let rowsScanned = 0;
+  return {
+    projectId,
+    now,
+    beforeBytes,
+    limitBytes: config.limitBytes,
+    triggerBytes,
+    targetBytes,
+    batchRows: config.toolPayloadCleanupBatchRows,
+    cutoffUpdatedAt: now - config.toolPayloadCleanupMinSessionAgeMs,
+    pendingCursor,
+  };
+}
+
+function selectInitialCleanupSessionId(
+  sql: SqlStorage,
+  cutoffUpdatedAt: number,
+  cursor: ToolPayloadCleanupCursor | null
+): string | null {
+  if (!cursor) return selectNextTerminalSessionId(sql, cutoffUpdatedAt, '');
+  if (isSessionExhaustedCursor(cursor)) {
+    return selectNextTerminalSessionId(sql, cutoffUpdatedAt, cursor.sessionId);
+  }
+  return cursor.sessionId;
+}
+
+function createEmptyToolPayloadCleanupBatch(): ToolPayloadCleanupBatch {
+  return {
+    sessionsScanned: 0,
+    rowsScanned: 0,
+    rowsUpdated: 0,
+    originalToolMetadataBytes: 0,
+    storedToolMetadataBytes: 0,
+    lastCursor: null,
+    lastScannedSessionId: null,
+    hasMoreCandidates: false,
+    finalSessionId: null,
+  };
+}
+
+function scanToolPayloadCandidates(
+  sql: SqlStorage,
+  env: Env,
+  candidates: ToolPayloadCandidate[]
+): Pick<
+  ToolPayloadCleanupBatch,
+  | 'rowsScanned'
+  | 'rowsUpdated'
+  | 'originalToolMetadataBytes'
+  | 'storedToolMetadataBytes'
+  | 'lastCursor'
+> {
   let rowsUpdated = 0;
   let originalToolMetadataBytes = 0;
   let storedToolMetadataBytes = 0;
   let lastCursor: ToolPayloadCleanupCursor | null = null;
-  let lastScannedSessionId: string | null = null;
-  let hasMoreCandidates = false;
+
+  for (const candidate of candidates) {
+    lastCursor = candidate;
+    const stripped = stripToolMetadataPayloadForStorage(candidate.toolMetadata, env);
+    if (!stripped.stripped) continue;
+
+    updateToolMetadata(sql, candidate.messageId, stripped.value);
+    rowsUpdated++;
+    originalToolMetadataBytes += stripped.originalBytes;
+    storedToolMetadataBytes += stripped.storedBytes;
+  }
+
+  return {
+    rowsScanned: candidates.length,
+    rowsUpdated,
+    originalToolMetadataBytes,
+    storedToolMetadataBytes,
+    lastCursor,
+  };
+}
+
+function scanToolPayloadCleanupBatch(
+  sql: SqlStorage,
+  env: Env,
+  config: StorageSafetyConfig,
+  plan: ToolPayloadCleanupPlan
+): ToolPayloadCleanupBatch {
+  const batch = createEmptyToolPayloadCleanupBatch();
+  let cursor = plan.pendingCursor;
+  let sessionId = selectInitialCleanupSessionId(sql, plan.cutoffUpdatedAt, cursor);
 
   while (
     sessionId &&
-    rowsScanned < batchRows &&
-    sessionsScanned < config.toolPayloadCleanupMaxSessionsPerAlarm
+    batch.rowsScanned < plan.batchRows &&
+    batch.sessionsScanned < config.toolPayloadCleanupMaxSessionsPerAlarm
   ) {
-    const remainingRows = batchRows - rowsScanned;
+    const remainingRows = plan.batchRows - batch.rowsScanned;
     const messageCursor = cursor?.sessionId === sessionId ? cursor : null;
     const candidates = selectToolPayloadCandidates(sql, sessionId, messageCursor, remainingRows);
-    lastScannedSessionId = sessionId;
-    sessionsScanned++;
+    const scanned = scanToolPayloadCandidates(sql, env, candidates);
 
-    for (const candidate of candidates) {
-      rowsScanned++;
-      lastCursor = candidate;
-      const stripped = stripToolMetadataPayloadForStorage(candidate.toolMetadata, env);
-      if (!stripped.stripped) continue;
-
-      updateToolMetadata(sql, candidate.messageId, stripped.value);
-      rowsUpdated++;
-      originalToolMetadataBytes += stripped.originalBytes;
-      storedToolMetadataBytes += stripped.storedBytes;
-    }
+    batch.lastScannedSessionId = sessionId;
+    batch.sessionsScanned++;
+    batch.rowsScanned += scanned.rowsScanned;
+    batch.rowsUpdated += scanned.rowsUpdated;
+    batch.originalToolMetadataBytes += scanned.originalToolMetadataBytes;
+    batch.storedToolMetadataBytes += scanned.storedToolMetadataBytes;
+    batch.lastCursor = scanned.lastCursor ?? batch.lastCursor;
 
     if (candidates.length >= remainingRows) {
-      hasMoreCandidates = true;
+      batch.hasMoreCandidates = true;
       break;
     }
 
-    sessionId = selectNextTerminalSessionId(sql, cutoffUpdatedAt, sessionId);
-    cursor = sessionId ? null : cursor;
+    sessionId = selectNextTerminalSessionId(sql, plan.cutoffUpdatedAt, sessionId);
+    cursor = null;
   }
 
-  const afterBytes = sql.databaseSize;
+  batch.finalSessionId = sessionId;
+  return batch;
+}
+
+function resolveContinuationCursor(
+  batch: ToolPayloadCleanupBatch,
+  config: StorageSafetyConfig,
+  afterBytes: number,
+  targetBytes: number
+): ToolPayloadCleanupCursor | null {
+  if (batch.hasMoreCandidates) return batch.lastCursor;
   const pausedForSessionScanBudget =
     afterBytes > targetBytes &&
-    !hasMoreCandidates &&
-    sessionId !== null &&
-    sessionsScanned >= config.toolPayloadCleanupMaxSessionsPerAlarm &&
-    lastScannedSessionId !== null;
-  const continuationCursor = hasMoreCandidates
-    ? lastCursor
-    : pausedForSessionScanBudget && lastScannedSessionId
-      ? buildSessionExhaustedCursor(lastScannedSessionId)
-      : null;
-  const shouldContinue = afterBytes > targetBytes && continuationCursor !== null;
-  const recheckAt = shouldContinue ? now + config.toolPayloadCleanupRecheckMs : null;
+    batch.finalSessionId !== null &&
+    batch.sessionsScanned >= config.toolPayloadCleanupMaxSessionsPerAlarm &&
+    batch.lastScannedSessionId !== null;
+  if (!pausedForSessionScanBudget || !batch.lastScannedSessionId) return null;
+  return buildSessionExhaustedCursor(batch.lastScannedSessionId);
+}
+
+function persistToolPayloadCleanupState(
+  sql: SqlStorage,
+  continuationCursor: ToolPayloadCleanupCursor | null,
+  recheckAt: number | null
+): void {
   if (continuationCursor && recheckAt !== null) {
     writeToolPayloadCleanupCursor(sql, continuationCursor, recheckAt);
   } else {
     clearToolPayloadCleanupState(sql);
   }
+}
 
-  const exhaustedCandidates = afterBytes > targetBytes && !shouldContinue && sessionId === null;
-
-  const result: ProjectDataToolPayloadCleanupResult = {
-    projectId,
-    beforeBytes,
+function buildToolPayloadCleanupResult(
+  plan: ToolPayloadCleanupPlan,
+  batch: ToolPayloadCleanupBatch,
+  afterBytes: number,
+  shouldContinue: boolean,
+  continuationCursor: ToolPayloadCleanupCursor | null,
+  exhaustedCandidates: boolean,
+  recheckAt: number | null
+): ProjectDataToolPayloadCleanupResult {
+  return {
+    projectId: plan.projectId,
+    beforeBytes: plan.beforeBytes,
     afterBytes,
-    limitBytes: config.limitBytes,
-    triggerBytes,
-    targetBytes,
-    batchRows,
-    sessionsScanned,
-    rowsScanned,
-    rowsUpdated,
-    originalToolMetadataBytes,
-    storedToolMetadataBytes,
+    limitBytes: plan.limitBytes,
+    triggerBytes: plan.triggerBytes,
+    targetBytes: plan.targetBytes,
+    batchRows: plan.batchRows,
+    sessionsScanned: batch.sessionsScanned,
+    rowsScanned: batch.rowsScanned,
+    rowsUpdated: batch.rowsUpdated,
+    originalToolMetadataBytes: batch.originalToolMetadataBytes,
+    storedToolMetadataBytes: batch.storedToolMetadataBytes,
     cursor: shouldContinue ? publicToolPayloadCleanupCursor(continuationCursor) : null,
     exhaustedCandidates,
     recheckAt,
   };
+}
 
-  if (rowsUpdated > 0) {
-    const measuredAt = Date.now();
-    writeMeta(sql, META_LAST_MEASURED_AT, String(measuredAt));
-    const statusAfter = options.classifyStatus(afterBytes);
-    writeMeta(sql, META_LAST_STATUS, statusAfter);
-    const telemetry: ProjectDataStorageTelemetry = {
+async function recordToolPayloadCleanupTelemetry(
+  sql: SqlStorage,
+  config: StorageSafetyConfig,
+  options: ProjectDataToolPayloadCleanupOptions,
+  projectId: string,
+  afterBytes: number,
+  rowsUpdated: number
+): Promise<void> {
+  if (rowsUpdated <= 0) return;
+
+  const measuredAt = Date.now();
+  writeMeta(sql, META_LAST_MEASURED_AT, String(measuredAt));
+  const statusAfter = options.classifyStatus(afterBytes);
+  writeMeta(sql, META_LAST_STATUS, statusAfter);
+  const telemetry: ProjectDataStorageTelemetry = {
+    projectId,
+    measuredAt,
+    databaseSizeBytes: afterBytes,
+    limitBytes: config.limitBytes,
+    usageRatio: afterBytes / config.limitBytes,
+    status: statusAfter,
+  };
+
+  try {
+    await options.recordTelemetry(telemetry, {
+      lastPurgeAt: measuredAt,
+      lastPurgeReason: 'auto_tool_payload_cleanup',
+      lastPurgeRows: rowsUpdated,
+      lastPurgeDatabaseSizeBytes: afterBytes,
+      lastError: null,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    writeMeta(sql, META_LAST_ERROR, truncate(message, 500));
+    log.warn('telemetry_upsert_failed', {
       projectId,
-      measuredAt,
-      databaseSizeBytes: afterBytes,
-      limitBytes: config.limitBytes,
-      usageRatio: afterBytes / config.limitBytes,
-      status: statusAfter,
-    };
-
-    try {
-      await options.recordTelemetry(telemetry, {
-        lastPurgeAt: measuredAt,
-        lastPurgeReason: 'auto_tool_payload_cleanup',
-        lastPurgeRows: rowsUpdated,
-        lastPurgeDatabaseSizeBytes: afterBytes,
-        lastError: null,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      writeMeta(sql, META_LAST_ERROR, truncate(message, 500));
-      log.warn('telemetry_upsert_failed', {
-        projectId,
-        ...serializeError(error),
-      });
-    }
+      ...serializeError(error),
+    });
   }
+}
 
-  if (rowsUpdated > 0 || exhaustedCandidates) {
+function shouldReturnToolPayloadCleanupResult(
+  batch: ToolPayloadCleanupBatch,
+  exhaustedCandidates: boolean,
+  shouldContinue: boolean
+): boolean {
+  return batch.rowsScanned > 0 || batch.rowsUpdated > 0 || exhaustedCandidates || shouldContinue;
+}
+
+export async function runProjectDataToolPayloadCleanup(
+  sql: SqlStorage,
+  env: Env,
+  projectId: string | null,
+  config: StorageSafetyConfig,
+  options: ProjectDataToolPayloadCleanupOptions
+): Promise<ProjectDataToolPayloadCleanupResult | null> {
+  const plan = createToolPayloadCleanupPlan(sql, projectId, config, options);
+  if (!plan) return null;
+
+  const batch = scanToolPayloadCleanupBatch(sql, env, config, plan);
+  const afterBytes = sql.databaseSize;
+  const continuationCursor = resolveContinuationCursor(
+    batch,
+    config,
+    afterBytes,
+    plan.targetBytes
+  );
+  const shouldContinue = afterBytes > plan.targetBytes && continuationCursor !== null;
+  const recheckAt = shouldContinue ? plan.now + config.toolPayloadCleanupRecheckMs : null;
+  persistToolPayloadCleanupState(sql, continuationCursor, recheckAt);
+
+  const exhaustedCandidates =
+    afterBytes > plan.targetBytes && !shouldContinue && batch.finalSessionId === null;
+  const result = buildToolPayloadCleanupResult(
+    plan,
+    batch,
+    afterBytes,
+    shouldContinue,
+    continuationCursor,
+    exhaustedCandidates,
+    recheckAt
+  );
+  await recordToolPayloadCleanupTelemetry(
+    sql,
+    config,
+    options,
+    plan.projectId,
+    afterBytes,
+    batch.rowsUpdated
+  );
+
+  if (batch.rowsUpdated > 0 || exhaustedCandidates) {
     log.warn('completed', { ...result });
   }
 
-  return rowsScanned > 0 || rowsUpdated > 0 || exhaustedCandidates || shouldContinue
+  return shouldReturnToolPayloadCleanupResult(batch, exhaustedCandidates, shouldContinue)
     ? result
     : null;
 }

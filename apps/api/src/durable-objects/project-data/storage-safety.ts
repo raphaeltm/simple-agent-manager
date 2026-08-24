@@ -11,6 +11,15 @@ import { isJsonRecord } from '@simple-agent-manager/shared';
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { persistError } from '../../services/observability';
 import {
+  META_LAST_ERROR,
+  META_LAST_MEASURED_AT,
+  META_LAST_STATUS,
+  readStorageSafetyMeta as readMeta,
+  readStorageSafetyMetaNumber as readMetaNumber,
+  truncateStorageSafetyMetaValue as truncate,
+  writeStorageSafetyMeta as writeMeta,
+} from './storage-safety-meta';
+import {
   type ProjectDataToolPayloadCleanupResult,
   readProjectDataToolPayloadCleanupRecheckAt,
   runProjectDataToolPayloadCleanup,
@@ -46,11 +55,8 @@ export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS = 7;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS = 60 * 1000;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM = 25;
 
-const META_LAST_MEASURED_AT = 'storageSafetyLastMeasuredAt';
-const META_LAST_STATUS = 'storageSafetyLastStatus';
 const META_LAST_ALERT_AT = 'storageSafetyLastAlertAt';
 const META_LAST_ALERT_STATUS = 'storageSafetyLastAlertStatus';
-const META_LAST_ERROR = 'storageSafetyLastError';
 export interface ProjectDataStorageTelemetry {
   projectId: string;
   measuredAt: number;
@@ -239,34 +245,6 @@ export function classifyStorageUsage(
   if (usageRatio >= config.warningRatio) return 'warning';
   if (usageRatio >= config.noticeRatio) return 'notice';
   return 'ok';
-}
-
-function readMeta(sql: SqlStorage, key: string): string | null {
-  const row = sql.exec('SELECT value FROM do_meta WHERE key = ?', key).toArray()[0];
-  if (!isJsonRecord(row)) return null;
-  const value = (row as Record<string, unknown>).value;
-  return typeof value === 'string' ? value : null;
-}
-
-function readMetaNumber(sql: SqlStorage, key: string): number | null {
-  const raw = readMeta(sql, key);
-  if (!raw) return null;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isSafeInteger(parsed) ? parsed : null;
-}
-
-function writeMeta(sql: SqlStorage, key: string, value: string): void {
-  sql.exec(
-    `INSERT INTO do_meta (key, value)
-     VALUES (?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    key,
-    value
-  );
-}
-
-function truncate(value: string, maxLength: number): string {
-  return value.length <= maxLength ? value : value.slice(0, maxLength);
 }
 
 function buildTelemetry(
