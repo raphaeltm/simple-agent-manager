@@ -292,8 +292,31 @@ must not merge yet.
 **Gates not yet run**
 
 - [ ] Staging deploy + Playwright verification against the live endpoint
-- [ ] Re-run the visual audit and re-read the screenshots after UI fixes
-- [ ] UI rubric: all five categories scored below the required >=4 bar
+- [x] Re-run the visual audit and re-read the screenshots after UI fixes
+      (`comments-navigation-audit.spec.ts`, 46/46 at 375x667 + 1280x800)
+- [x] UI rubric: all five categories scored at/above the required >=4 bar
+      after screenshot-backed review
+
+### UI/UX validation (local, 2026-08-24)
+
+- **Variants considered:** keep the inherited always-visible desktop rail plus
+  drawer; make the drawer the single cross-viewport comments surface; or replace
+  the header chip with only the expanded action-row button. Selected the single
+  drawer because Raphaël explicitly rejected the desktop rail, and it preserves
+  one discovery/action model across mobile and desktop.
+- **Screenshot evidence:** local Playwright audit regenerated
+  `.codex/tmp/playwright-screenshots/comments-01-header-chip-mobile-375x667.png`,
+  `comments-03-drawer-needs-you-mobile-375x667.png`,
+  `comments-05-drawer-thread-expanded-desktop-1280x800.png`,
+  `comments-07-timeline-desktop-1280x800.png`,
+  `comments-08-project-page-desktop-1280x800.png`, and
+  `comments-12-project-truncated-mobile-375x667.png`; these were opened and
+  inspected after the fixture copy cleanup.
+- **Rubric scores:** visual hierarchy 4/5; interaction clarity 4/5; mobile
+  usability 4/5; accessibility 4/5; system consistency 4/5.
+- **Compromises:** the filter row intentionally scrolls/clips at the drawer edge
+  on narrow widths; the automated audit treats this as the intended horizontal
+  scroller case and still asserts no document-level horizontal overflow.
 
 ## Acceptance criteria
 

@@ -89,7 +89,7 @@ const MESSAGES = [
     sessionId: SESSION_ID,
     role: 'assistant',
     content:
-      'The project-level page fans out across the 25 most recent sessions and library files. There is no project-scoped comments endpoint yet, so the cap is disclosed in the footer rather than applied silently.',
+      ' The project-level page now reads the project-wide comments endpoint once, merges chat and library threads, and discloses the cap above the buckets when the response is truncated.',
     toolMetadata: null,
     createdAt: NOW - 40 * MIN,
   },
