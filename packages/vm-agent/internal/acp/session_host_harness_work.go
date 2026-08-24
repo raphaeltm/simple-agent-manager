@@ -12,6 +12,7 @@ import (
 const (
 	claudeSDKMessageMethod     = "_claude/sdkMessage"
 	claudeHarnessWorkSource    = "claude_sdk"
+	acpToolCallWorkSource      = "acp_tool_call"
 	claudeBackgroundTasksLevel = "background_tasks_changed"
 
 	// Fallback bounds used when SessionHostConfig leaves them unset (zero).
@@ -162,12 +163,23 @@ func (h *SessionHost) resetHarnessWorkForAgent(agentType string) {
 	progressAt := h.nextHarnessWorkProgressAtLocked()
 	h.harnessTaskIDs = nil
 	h.harnessWork = harnessWorkStatus{}
-	if agentType == "claude-code" {
+	if source := harnessWorkSourceForAgent(agentType); source != "" {
 		h.harnessWork.State = harnessWorkInactive
-		h.harnessWork.Source = claudeHarnessWorkSource
+		h.harnessWork.Source = source
 		h.harnessWork.ProgressAt = progressAt
 	}
 	h.harnessWorkMu.Unlock()
+}
+
+func harnessWorkSourceForAgent(agentType string) string {
+	switch agentType {
+	case "claude-code":
+		return claudeHarnessWorkSource
+	case "openai-codex", "opencode":
+		return acpToolCallWorkSource
+	default:
+		return ""
+	}
 }
 
 func (h *SessionHost) clearHarnessWork() {
@@ -213,14 +225,14 @@ func (h *SessionHost) applyClaudeHarnessLifecycle(message claudeSDKLifecycleMess
 		if message.TaskID == "" {
 			return false
 		}
-		if !h.addClaudeHarnessTaskLocked(message.TaskID) {
+		if !h.addHarnessTaskLocked(message.TaskID) {
 			return false
 		}
 	case message.Type == "system" && message.Subtype == "task_progress":
 		if message.TaskID == "" {
 			return false
 		}
-		if !h.addClaudeHarnessTaskLocked(message.TaskID) {
+		if !h.addHarnessTaskLocked(message.TaskID) {
 			return false
 		}
 	case message.Type == "system" && message.Subtype == "task_updated":
@@ -229,7 +241,7 @@ func (h *SessionHost) applyClaudeHarnessLifecycle(message claudeSDKLifecycleMess
 		}
 		if isTerminalClaudeTaskStatus(message.Patch.Status) {
 			delete(h.harnessTaskIDs, message.TaskID)
-		} else if !h.addClaudeHarnessTaskLocked(message.TaskID) {
+		} else if !h.addHarnessTaskLocked(message.TaskID) {
 			return false
 		}
 	case message.Type == "system" && message.Subtype == "task_notification":
@@ -265,11 +277,124 @@ func (h *SessionHost) applyClaudeHarnessLifecycle(message claudeSDKLifecycleMess
 	return true
 }
 
-// addClaudeHarnessTaskLocked bounds cumulative edge messages as well as the
+func (h *SessionHost) applyACPToolCallLifecycle(notification acpsdk.SessionNotification) bool {
+	if !h.matchesHarnessSession(string(notification.SessionId), "") {
+		return false
+	}
+
+	update := notification.Update
+	switch {
+	case update.ToolCall != nil:
+		return h.applyACPToolCallStatus(string(update.ToolCall.ToolCallId), &update.ToolCall.Status)
+	case update.ToolCallUpdate != nil:
+		// Status is a patch field. Absent means "unchanged", which for lease
+		// purposes is treated the same as a non-terminal update.
+		return h.applyACPToolCallStatus(
+			string(update.ToolCallUpdate.ToolCallId),
+			update.ToolCallUpdate.Status,
+		)
+	default:
+		return false
+	}
+}
+
+func (h *SessionHost) applyACPToolCallStatus(toolCallID string, status *acpsdk.ToolCallStatus) bool {
+	if toolCallID == "" {
+		return false
+	}
+
+	h.harnessWorkMu.Lock()
+	defer h.harnessWorkMu.Unlock()
+
+	if h.harnessWork.Source != acpToolCallWorkSource {
+		return false
+	}
+	if h.harnessTaskIDs == nil {
+		h.harnessTaskIDs = make(map[string]struct{})
+	}
+
+	statusTerminal := status != nil && isTerminalACPToolCallStatus(*status)
+	if statusTerminal {
+		delete(h.harnessTaskIDs, toolCallID)
+	} else if !h.addHarnessTaskLocked(toolCallID) {
+		return false
+	}
+
+	count := len(h.harnessTaskIDs)
+	state := harnessWorkInactive
+	if count > 0 {
+		state = harnessWorkActive
+	}
+
+	// A terminal update that moved nothing is not progress and must not renew the
+	// lease: a duplicate, or one arriving for a tool call turn-end reconciliation
+	// already dropped, or one for an ID we never tracked while other work is live.
+	// Non-terminal updates always fall through — repeated `in_progress` and
+	// content-only edges are genuine lifecycle progress from the ACP peer.
+	//
+	// Note this deliberately DOES report when a late terminal update arrives while
+	// the state is `settling`: that is positive evidence the settling lease can be
+	// released now rather than waiting it out.
+	if statusTerminal && state == h.harnessWork.State && count == h.harnessWork.Count {
+		return false
+	}
+
+	h.harnessWork.State = state
+	h.harnessWork.Count = count
+	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLocked()
+	if state == harnessWorkActive {
+		h.startHarnessWorkRereportLocked()
+	} else {
+		h.stopHarnessWorkRereportLocked()
+	}
+	return true
+}
+
+// reconcileHarnessWorkAtPromptTurnEnd releases ACP tool-call work when the
+// prompt turn ends, reporting one finite settling lease in its place.
+//
+// ACP has no cross-turn background-work primitive: `session/update` reports tool
+// calls incrementally per `toolCallId`, and the `session/prompt` response is the
+// authoritative turn boundary. Anything still tracked at that point never
+// reported a terminal status — a routine occurrence rather than an anomaly,
+// because codex-acp's `turn/completed` handler does not flush pending item state
+// and an interrupt drops the pending `tool_call_update` entirely.
+//
+// Those orphans must not be mistaken for live work. Without this reconciliation
+// the tracked set only ever grows, `State` stays `active` for the rest of the
+// process's life, and — because `ProgressAt` is one session-wide clock that
+// EVERY later tool call re-stamps — the absolute ceiling in the control plane's
+// `getFreshHarnessWorkLeaseExpiry` keeps sliding forward, so the safety net that
+// is meant to release the session never fires.
+//
+// Claude's adapter already has the equivalent self-healing primitive: the
+// `background_tasks_changed` bookend wholesale-replaces the set with the
+// harness's authoritative task list (see applyClaudeHarnessLifecycle). ACP has
+// no such message, so the turn boundary is the reconciliation point.
+//
+// Downgrading to `settling` rather than clearing outright leaves one finite
+// lease (`HARNESS_BACKGROUND_WORK_LEASE_MS`) for a tool that genuinely was still
+// running, instead of making the session sleep-eligible the instant the turn
+// ends. Stopping the re-report loop is what keeps that lease finite.
+func (h *SessionHost) reconcileHarnessWorkAtPromptTurnEnd() {
+	h.harnessWorkMu.Lock()
+	defer h.harnessWorkMu.Unlock()
+
+	if h.harnessWork.Source != acpToolCallWorkSource || len(h.harnessTaskIDs) == 0 {
+		return
+	}
+	h.stopHarnessWorkRereportLocked()
+	h.harnessTaskIDs = nil
+	h.harnessWork.State = harnessWorkSettling
+	h.harnessWork.Count = 0
+	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLocked()
+}
+
+// addHarnessTaskLocked bounds cumulative edge messages as well as the
 // authoritative tasks array. Existing IDs still count as progress at the cap;
 // a new ID is ignored until an authoritative replacement or terminal edge
 // frees capacity.
-func (h *SessionHost) addClaudeHarnessTaskLocked(taskID string) bool {
+func (h *SessionHost) addHarnessTaskLocked(taskID string) bool {
 	if _, exists := h.harnessTaskIDs[taskID]; exists {
 		return true
 	}
@@ -300,6 +425,23 @@ func (h *SessionHost) nextHarnessWorkProgressAtLocked() time.Time {
 func isTerminalClaudeTaskStatus(status string) bool {
 	switch status {
 	case "completed", "failed", "killed":
+		return true
+	default:
+		return false
+	}
+}
+
+// acpToolCallStatusCancelled is a terminal tool-call status in the ACP protocol
+// that the pinned SDK (coder/acp-go-sdk v0.13.5) predates, so it has no
+// generated constant. `ToolCallStatus` is a plain string with no runtime enum
+// validation, so a peer sending it unmarshals fine — and treating it as
+// non-terminal would leak the tool call in the exact case where the agent DID
+// tell us the work is over.
+const acpToolCallStatusCancelled acpsdk.ToolCallStatus = "cancelled"
+
+func isTerminalACPToolCallStatus(status acpsdk.ToolCallStatus) bool {
+	switch status {
+	case acpsdk.ToolCallStatusCompleted, acpsdk.ToolCallStatusFailed, acpToolCallStatusCancelled:
 		return true
 	default:
 		return false

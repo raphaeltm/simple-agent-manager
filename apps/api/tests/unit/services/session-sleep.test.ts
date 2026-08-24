@@ -131,9 +131,34 @@ function buildDb(
   return { select, update, batch: vi.fn(async () => undefined) };
 }
 
+function buildD1Database(
+  options: {
+    activeChildTask?: { id: string } | null | (() => { id: string } | null);
+    throwOnChildQuery?: boolean;
+  } = {}
+): D1Database {
+  return {
+    prepare: vi.fn(() => {
+      const statement = {
+        bind: vi.fn(() => ({
+          first: vi.fn(async () => {
+            if (options.throwOnChildQuery) {
+              throw new Error('child task query failed');
+            }
+            return typeof options.activeChildTask === 'function'
+              ? options.activeChildTask()
+              : (options.activeChildTask ?? null);
+          }),
+        })),
+      };
+      return statement;
+    }),
+  } as unknown as D1Database;
+}
+
 function buildEnv(overrides: Partial<Env> = {}): Env {
   return {
-    DATABASE: {},
+    DATABASE: buildD1Database(),
     SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS: '200',
     SESSION_SNAPSHOT_PROGRESS_IDLE_TIMEOUT_MS: '200',
     SESSION_SNAPSHOT_POLL_INTERVAL_MS: '1',
@@ -150,8 +175,11 @@ function buildEnv(overrides: Partial<Env> = {}): Env {
 
 describe('parseHarnessWorkConfig', () => {
   it('uses defaults when env vars are unset', async () => {
-    const { parseHarnessWorkConfig, DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS, DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS } =
-      await import('../../../src/services/session-sleep');
+    const {
+      parseHarnessWorkConfig,
+      DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS,
+      DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS,
+    } = await import('../../../src/services/session-idleness');
 
     const config = parseHarnessWorkConfig({});
     expect(config.leaseMs).toBe(DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS);
@@ -159,7 +187,7 @@ describe('parseHarnessWorkConfig', () => {
   });
 
   it('reads configured env var values', async () => {
-    const { parseHarnessWorkConfig } = await import('../../../src/services/session-sleep');
+    const { parseHarnessWorkConfig } = await import('../../../src/services/session-idleness');
 
     const config = parseHarnessWorkConfig({
       HARNESS_BACKGROUND_WORK_LEASE_MS: '120000',
@@ -172,38 +200,66 @@ describe('parseHarnessWorkConfig', () => {
 
 describe('isHarnessWorkLeaseActive', () => {
   it('returns false for null state', async () => {
-    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-sleep');
-    expect(isHarnessWorkLeaseActive(null, new Date(), { leaseMs: 300000, maxDurationMs: 1800000 })).toBe(false);
+    const { isHarnessWorkLeaseActive } = await import(
+      '../../../src/services/session-idleness'
+    );
+    expect(
+      isHarnessWorkLeaseActive(null, new Date(), { leaseMs: 300000, maxDurationMs: 1800000 })
+    ).toBe(false);
   });
 
   it('returns true for active work within lease', async () => {
-    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-sleep');
+    const { isHarnessWorkLeaseActive } = await import(
+      '../../../src/services/session-idleness'
+    );
     const now = new Date();
-    expect(isHarnessWorkLeaseActive(
-      { runtimeWorkState: 'active', runtimeWorkUpdatedAt: now.getTime() - 10_000, runtimeWorkProgressAt: now.getTime() - 10_000 },
-      now,
-      { leaseMs: 300000, maxDurationMs: 1800000 }
-    )).toBe(true);
+    expect(
+      isHarnessWorkLeaseActive(
+        {
+          runtimeWorkState: 'active',
+          runtimeWorkUpdatedAt: now.getTime() - 10_000,
+          runtimeWorkProgressAt: now.getTime() - 10_000,
+        },
+        now,
+        { leaseMs: 300000, maxDurationMs: 1800000 }
+      )
+    ).toBe(true);
   });
 
   it('returns false for expired lease', async () => {
-    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-sleep');
+    const { isHarnessWorkLeaseActive } = await import(
+      '../../../src/services/session-idleness'
+    );
     const now = new Date();
-    expect(isHarnessWorkLeaseActive(
-      { runtimeWorkState: 'active', runtimeWorkUpdatedAt: now.getTime() - 400_000, runtimeWorkProgressAt: now.getTime() - 400_000 },
-      now,
-      { leaseMs: 300000, maxDurationMs: 1800000 }
-    )).toBe(false);
+    expect(
+      isHarnessWorkLeaseActive(
+        {
+          runtimeWorkState: 'active',
+          runtimeWorkUpdatedAt: now.getTime() - 400_000,
+          runtimeWorkProgressAt: now.getTime() - 400_000,
+        },
+        now,
+        { leaseMs: 300000, maxDurationMs: 1800000 }
+      )
+    ).toBe(false);
   });
 
   it('returns false for inactive work state', async () => {
-    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-sleep');
+    const { isHarnessWorkLeaseActive } = await import(
+      '../../../src/services/session-idleness'
+    );
     const now = new Date();
-    expect(isHarnessWorkLeaseActive(
-      { runtimeWorkState: 'inactive', runtimeWorkUpdatedAt: now.getTime() - 10_000, runtimeWorkProgressAt: now.getTime() - 10_000 },
-      now,
-      { leaseMs: 300000, maxDurationMs: 1800000 }
-    )).toBe(false);
+    expect(
+      isHarnessWorkLeaseActive(
+        {
+          runtimeWorkState: 'inactive',
+          runtimeWorkUpdatedAt: now.getTime() - 10_000,
+          runtimeWorkProgressAt: now.getTime() - 10_000,
+        },
+        now,
+        { leaseMs: 300000, maxDurationMs: 1800000 }
+      )
+    ).toBe(false);
   });
 });
 
@@ -470,6 +526,83 @@ describe('sleepWorkspaceSession', () => {
         now
       )
     ).resolves.toEqual({ eligible: true });
+  });
+
+  // Discriminating control for the explicit-sleep test in the
+  // `sleepWorkspaceSession` block below: the UNATTENDED scheduler still waits out
+  // the idle interval for the very same session state that an explicit sleep
+  // accepts immediately.
+  it('defers an ongoing session that only just went idle', async () => {
+    const now = new Date('2026-08-14T05:00:00.000Z');
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'idle',
+      activityAt: now.getTime() - 1_000,
+    });
+    const { checkAutomaticSessionSleepEligibility } =
+      await import('../../../src/services/session-sleep');
+
+    await expect(
+      checkAutomaticSessionSleepEligibility(
+        buildEnv({ SESSION_SLEEP_AFTER_MS: '900000' }),
+        { workspaceId: 'workspace-1', userId: 'user-1' },
+        now
+      )
+    ).resolves.toEqual({
+      eligible: false,
+      reason: 'Workspace idle interval has not elapsed',
+      retryAt: '2026-08-14T05:14:59.000Z',
+    });
+
+    expect(mocks.deferSessionSnapshotSleepBeforeClaim).toHaveBeenCalledTimes(1);
+  });
+
+  // Raphaël, 2026-08-24 (PR #1874 review): an orchestrator whose prompt turn has
+  // ended must SLEEP and be woken durably by the ProjectData parent-wake delivery
+  // path when its children finish. Keeping it awake because it has children burns
+  // compute for no benefit. These two tests pin that child lineage is never
+  // consulted; both fail against the child-blocking implementation.
+  it('sleeps an idle orchestrator whose child/subtask work is still running', async () => {
+    const now = new Date('2026-08-14T05:00:00.000Z');
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'idle',
+      activityAt: now.getTime() - 16 * 60 * 1000,
+    });
+    const database = buildD1Database({ activeChildTask: { id: 'child-1' } });
+    const { checkAutomaticSessionSleepEligibility } =
+      await import('../../../src/services/session-sleep');
+
+    await expect(
+      checkAutomaticSessionSleepEligibility(
+        buildEnv({ DATABASE: database }),
+        { workspaceId: 'workspace-1', userId: 'user-1' },
+        now
+      )
+    ).resolves.toEqual({ eligible: true });
+
+    expect(mocks.deferSessionSnapshotSleepBeforeClaim).not.toHaveBeenCalled();
+    // Negative assertion (no child-lineage read is issued at all), paired with the
+    // positive `eligible: true` above so a broken path cannot satisfy it silently.
+    expect(database.prepare).not.toHaveBeenCalled();
+  });
+
+  it('sleeps an idle orchestrator even when a child-lineage read would fail', async () => {
+    const now = new Date('2026-08-14T05:00:00.000Z');
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'idle',
+      activityAt: now.getTime() - 16 * 60 * 1000,
+    });
+    const { checkAutomaticSessionSleepEligibility } =
+      await import('../../../src/services/session-sleep');
+
+    await expect(
+      checkAutomaticSessionSleepEligibility(
+        buildEnv({ DATABASE: buildD1Database({ throwOnChildQuery: true }) }),
+        { workspaceId: 'workspace-1', userId: 'user-1' },
+        now
+      )
+    ).resolves.toEqual({ eligible: true });
+
+    expect(mocks.deferSessionSnapshotSleepBeforeClaim).not.toHaveBeenCalled();
   });
 
   it('lets a completed task sleep on its first idle observation', async () => {
@@ -1045,12 +1178,89 @@ describe('sleepWorkspaceSession', () => {
         userId: 'user-1',
         reason: 'test',
       })
-    ).rejects.toThrow('Workspace agent is not idle');
+    ).rejects.toThrow('Harness-owned background work is active');
 
     expect(mocks.beginSessionSnapshotStopping).not.toHaveBeenCalled();
     expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
     expect(mocks.sleepSession).not.toHaveBeenCalled();
     expect(mocks.failSessionSnapshotSleepBeforeTeardown).toHaveBeenCalledTimes(1);
+  });
+
+  // Teardown counterpart of the eligibility tests above: none of the three
+  // point-of-no-return gates may abort a sleep because the session has children.
+  it('completes teardown for an idle orchestrator whose child/subtask work is still running', async () => {
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'idle',
+      activityAt: 100,
+    });
+    mocks.getRestorableSessionSnapshot
+      .mockReset()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        status: 'available',
+        degradation: 'none',
+        expiresAt: '2026-08-19T00:00:00.000Z',
+      })
+      .mockResolvedValueOnce({
+        status: 'available',
+        degradation: 'none',
+        sleepingAt: '2026-08-12T00:00:00.000Z',
+        sleepStatus: 'sleeping',
+        expiresAt: '2026-08-19T00:00:00.000Z',
+      });
+    const database = buildD1Database({ activeChildTask: { id: 'child-1' } });
+    const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
+
+    await expect(
+      sleepWorkspaceSession(buildEnv({ DATABASE: database }), {
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        reason: 'test',
+      })
+    ).resolves.toMatchObject({ status: 'sleeping', chatSessionId: 'chat-1' });
+
+    expect(mocks.beginSessionSnapshotStopping).toHaveBeenCalledTimes(1);
+    expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
+    expect(mocks.failSessionSnapshotSleepBeforeTeardown).not.toHaveBeenCalled();
+    expect(database.prepare).not.toHaveBeenCalled();
+  });
+
+  // `POST /api/workspaces/:id/sleep` calls sleepWorkspaceSession directly, with no
+  // preceding eligibility check. The teardown gates therefore must NOT re-impose
+  // the unattended scheduler's idle interval: a user pressing Sleep one second
+  // after their agent finished would otherwise get an error for up to
+  // SESSION_SLEEP_AFTER_MS (15 min default). This fails if the gates are switched
+  // to the `idle-interval-elapsed` policy.
+  it('sleeps on explicit request immediately after the prompt turn ends', async () => {
+    const justWentIdleAt = Date.now() - 1_000;
+    mocks.getSessionState.mockResolvedValue({ activity: 'idle', activityAt: justWentIdleAt });
+    mocks.getRestorableSessionSnapshot
+      .mockReset()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        status: 'available',
+        degradation: 'none',
+        expiresAt: '2026-08-19T00:00:00.000Z',
+      })
+      .mockResolvedValueOnce({
+        status: 'available',
+        degradation: 'none',
+        sleepingAt: '2026-08-12T00:00:00.000Z',
+        sleepStatus: 'sleeping',
+        expiresAt: '2026-08-19T00:00:00.000Z',
+      });
+    const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
+
+    await expect(
+      sleepWorkspaceSession(buildEnv({ SESSION_SLEEP_AFTER_MS: '900000' }), {
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        reason: 'Explicit workspace sleep API request',
+      })
+    ).resolves.toMatchObject({ status: 'sleeping', chatSessionId: 'chat-1' });
+
+    expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
+    expect(mocks.failSessionSnapshotSleepBeforeTeardown).not.toHaveBeenCalled();
   });
 
   // Gate 2 (stateAfter): harness work starts between stateBefore and
@@ -1136,14 +1346,11 @@ describe('sleepWorkspaceSession', () => {
       });
     const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
 
-    await sleepWorkspaceSession(
-      buildEnv({ HARNESS_BACKGROUND_WORK_LEASE_MS: '120000' }),
-      {
-        workspaceId: 'workspace-1',
-        userId: 'user-1',
-        reason: 'test',
-      }
-    );
+    await sleepWorkspaceSession(buildEnv({ HARNESS_BACKGROUND_WORK_LEASE_MS: '120000' }), {
+      workspaceId: 'workspace-1',
+      userId: 'user-1',
+      reason: 'test',
+    });
 
     expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
     expect(mocks.finalizeSessionSnapshotSleeping).toHaveBeenCalledTimes(1);

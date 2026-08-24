@@ -512,10 +512,16 @@ func (h *SessionHost) markPromptStarted(sessionID acpsdk.SessionId, blockCount i
 	})
 }
 
+// markPromptDone is the single turn-end hook shared by normal completion,
+// cancellation, and error (see finishPrompt / finishPromptCancelled /
+// finishPromptAttemptWithError).
 func (h *SessionHost) markPromptDone() {
 	h.setStatus(HostReady, "")
 	h.broadcastControl(MsgSessionPromptDone, nil)
 	h.stopPromptActivityRereport()
+	// Must run before the report below so the settling downgrade rides along on
+	// the same activity callback instead of waiting for the next edge.
+	h.reconcileHarnessWorkAtPromptTurnEnd()
 	h.reportActivity("idle")
 }
 
