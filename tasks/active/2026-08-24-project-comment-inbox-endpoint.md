@@ -111,47 +111,56 @@ is guaranteed to be the true top `limit` of the union.
 ## Implementation checklist
 
 ### Shared types + constants
-- [ ] Add `ProjectCommentListResponse`, `ProjectCommentSessionRef`,
+- [x] Add `ProjectCommentListResponse`, `ProjectCommentSessionRef`,
       `ProjectCommentFileRef` to `packages/shared/src/types/comments.ts`
-- [ ] Add `DEFAULT_PROJECT_COMMENT_LIST_LIMIT` / `DEFAULT_PROJECT_COMMENT_LIST_MAX`
+- [x] Add `DEFAULT_PROJECT_COMMENT_LIST_LIMIT` (100) / `DEFAULT_PROJECT_COMMENT_LIST_MAX` (300)
       to `packages/shared/src/constants/defaults.ts`
-- [ ] Delete `DEFAULT_PROJECT_COMMENT_INBOX_SESSION_LIMIT` and
+- [x] Delete `DEFAULT_PROJECT_COMMENT_INBOX_SESSION_LIMIT` and
       `DEFAULT_PROJECT_COMMENT_INBOX_FILE_LIMIT` (dead once the fan-out goes)
 
 ### Durable Object
-- [ ] `comments.ts`: `listProjectCommentThreads(sql, env, input)` — project-wide,
-      `ORDER BY updated_at DESC`, `limit + 1`, reuses `hydrateThreads`
-- [ ] `library-file-comments.ts`: `listProjectFileCommentThreads(sql, env, input)`
-- [ ] New `project-comment-inbox.ts`: merges both by `updated_at DESC`, applies
+- [x] `comments.ts`: `listProjectCommentThreads(sql, input)` — project-wide,
+      `ORDER BY updated_at DESC, id ASC`, `limit + 1`, plus `readSessionTopics`
+- [x] `library-file-comments.ts`: `listProjectFileCommentThreads(sql, input)`
+- [x] New `project-comment-inbox.ts`: merges both by `updated_at DESC`, applies
       the single cross-source cap, resolves session topics, returns `totalCount`
-- [ ] `ProjectData.listProjectCommentInbox(input)` RPC method
-- [ ] Env limits in `durable-objects/project-data/types.ts`
+- [x] `ProjectData.listProjectCommentInbox(input)` RPC method
+- [x] Env limits in `durable-objects/project-data/types.ts`
+- [x] `resolveProjectCommentListLimit` clamps at the DO boundary (negative/NaN)
 
 ### Service + route
-- [ ] `services/project-data.ts`: `listProjectCommentInbox` via `callProjectDataWithRetry`
-- [ ] `routes/project-comments.ts`: `GET /api/projects/:projectId/comments`,
+- [x] `services/project-data.ts`: `listProjectCommentInbox` via `callProjectDataWithRetry`
+- [x] `routes/project-comments.ts`: `GET /api/projects/:projectId/comments`,
       `task:read`, resolves filenames from D1 scoped by `projectId`
-- [ ] Mount in `index.ts` after `projectsRoutes` (session-cookie auth, not a
+- [x] Mount in `index.ts` after `projectsRoutes` (session-cookie auth, not a
       VM-agent callback — `.claude/rules/34` does not apply)
-- [ ] Env vars in `apps/api/src/env.ts`
+- [x] Env vars in `apps/api/src/env.ts` + `.env.example`
 
 ### Web
-- [ ] `lib/api/comments.ts`: `listProjectComments(projectId)` + response mapping
+- [x] `lib/api/comments.ts`: `listProjectComments(projectId)` + response mapping
       reusing the existing `mapBackendMessageCommentThread` / `mapBackendFileThread`
-- [ ] `lib/query-options/comments.ts`: `projectCommentsQueryOptions`
-- [ ] Rewrite `useProjectCommentInbox.ts` to one `useQuery` — delete the fan-out
-- [ ] Update `ProjectComments.tsx` disclosure footer to report real totals
-      (`showing N of M`) instead of "scanned X chats / Y files"
+- [x] `lib/query-options/comments.ts`: `projectCommentsQueryOptions`
+- [x] Rewrite `useProjectCommentInbox.ts` to one `useQuery` — fan-out deleted
+      (verified: no `useQueries` remains anywhere under `project-message-view/`)
+- [x] Update `ProjectComments.tsx` disclosure to report real totals
+      ("Showing the N most recently active of M comments"), rendered only when cut
 
 ### Tests
-- [ ] DO unit tests: project-wide list, cross-source cap correctness, ranking by
-      `updated_at`, malformed-row isolation, totalCount
-- [ ] Route unit tests: auth (cross-project rejection + owner control), capability,
-      limit clamping, filename resolution incl. a deleted-file fallback
-- [ ] Integration vertical slice (mirror `library-file-comments-vertical-slice.test.ts`)
-- [ ] Web unit test for `useProjectCommentInbox` (none exists today)
-- [ ] Playwright: update `comments-navigation-audit.spec.ts` to mock the single
-      endpoint; keep all 21 cases green at 375 + 1280
+- [x] DO unit tests (17): project-wide list, cross-source cap, truncation-selection
+      ranking, malformed-row isolation, totalCount, determinism, limit clamping
+- [x] Integration vertical slice (9): cross-project attack + owner control,
+      capability rejection, filename scoping + deleted-file fallback, status, limit
+- [x] Web unit test for `useProjectCommentInbox` (9) — request-count assertions
+- [x] Playwright: single-endpoint mock + new truncation-disclosure case;
+      23 cases green at 375 + 1280
+
+### Discrimination proofs (rules 28/62/65)
+- [x] Ranking: `ORDER BY updated_at DESC` → `ORDER BY sequence ASC` turns exactly
+      the two truncation-selection tests red; the ordering test stays green
+- [x] Filename scoping: deleting `eq(f.projectId, projectId)` turns the leak test
+      red while the owner control stays green
+- [x] Screenshots opened and compared by hash; the truncation case was initially
+      byte-identical to the untruncated one and was fixed
 
 ## Acceptance criteria
 
