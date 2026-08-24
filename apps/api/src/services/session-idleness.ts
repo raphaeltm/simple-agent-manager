@@ -14,6 +14,14 @@ export const DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS = 5 * 60 * 1000;
  * runtime-work set — would therefore pin compute awake indefinitely. That
  * contradicts the canonical definition of idleness: only work still expected to
  * return to the agent pins compute.
+ *
+ * NOTE: `runtimeWorkProgressAt` is ONE clock for the reporter's whole tracked
+ * set, so this ceiling can only bound a set that stops progressing as a whole.
+ * A single stale entry mixed in with live ones keeps re-stamping it and never
+ * expires. Reporters are therefore responsible for evicting entries they can no
+ * longer vouch for — see `reconcileHarnessWorkAtPromptTurnEnd` (ACP tool calls)
+ * and the `background_tasks_changed` wholesale replace (Claude) in
+ * `packages/vm-agent/internal/acp/session_host_harness_work.go`.
  */
 export const DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS = 30 * 60 * 1000;
 
@@ -32,22 +40,28 @@ export interface SessionIdlenessActivityState {
   runtimeWorkProgressAt?: number | null;
 }
 
-export interface SessionChildWorkSignal {
-  outcome: 'ok' | 'unknown' | 'not_checked';
-  activeChildTaskCount?: number;
-  activeWaitCount?: number;
-  errorMessage?: string;
-}
-
 export type SessionIdlenessReason =
   | 'idle'
   | 'runtime_work_lease_active'
-  | 'child_work_active'
-  | 'child_work_unknown'
   | 'prompt_turn_active'
   | 'prompt_turn_unknown'
   | 'idle_interval_pending'
   | 'completed_prompt_stale';
+
+/**
+ * The two different questions callers ask of the same idleness evidence.
+ *
+ * `prompt-turn-ended` is the SAFETY question — "has the agent handed control
+ * back, and is nothing it started still in flight?". It is what a teardown gate
+ * needs, and what an explicit user-initiated sleep needs. It deliberately does
+ * NOT wait out the automatic idle interval: a user pressing Sleep right after
+ * their agent finishes must not be told to come back in 15 minutes.
+ *
+ * `idle-interval-elapsed` adds the automatic-sleep SCHEDULING policy on top —
+ * "…and has the session been idle long enough that we should reclaim it on our
+ * own initiative?". Only the unattended sleep scheduler asks this.
+ */
+export type SessionIdlenessPolicy = 'prompt-turn-ended' | 'idle-interval-elapsed';
 
 export interface SessionIdlenessClassification {
   idle: boolean;
@@ -108,14 +122,28 @@ export function getFreshHarnessWorkLeaseExpiry(
   return new Date(Math.min(expiresAt, ceiling));
 }
 
+/**
+ * Single predicate for "has this session handed control back and is nothing it
+ * started still in flight?", plus the automatic-sleep scheduling policy layered
+ * on top of it (see `SessionIdlenessPolicy`).
+ *
+ * Child tasks and durable subtask waits are deliberately NOT inputs. A parent
+ * blocked on `wait_for_subtasks` ends its turn and is woken durably by the
+ * ProjectData parent-wake delivery path when its children finish, so keeping it
+ * awake merely to hold a place in the lineage burns compute for no benefit.
+ *
+ * Only the sleep reader calls this today. Converting the remaining shutdown
+ * timers (ProjectData idle cleanup, workspace idle timeout) onto it is tracked
+ * as a follow-up in idea `01M08VJDHK3MNYMZCQF5AJC17P`; they still use
+ * schedule/workspace-activity candidate selection plus `classifyTaskRuntimeLiveness()`.
+ */
 export function classifySessionIdleness(input: {
   taskStatus: string | null;
-  taskExecutionStep?: string | null;
   state: SessionIdlenessActivityState | null;
   now: Date;
   idleAfterMs: number;
   harnessWorkConfig: HarnessWorkConfig;
-  childWork?: SessionChildWorkSignal;
+  policy: SessionIdlenessPolicy;
 }): SessionIdlenessClassification {
   const activity = input.state?.activity ?? null;
 
@@ -132,24 +160,6 @@ export function classifySessionIdleness(input: {
       reason: 'runtime_work_lease_active',
       activity,
       retryAt: runtimeWorkLeaseExpiry,
-    };
-  }
-
-  const childWork = input.childWork ?? { outcome: 'not_checked' };
-  if (childWork.outcome === 'unknown') {
-    return {
-      idle: false,
-      conclusive: false,
-      reason: 'child_work_unknown',
-      activity,
-    };
-  }
-  if ((childWork.activeChildTaskCount ?? 0) > 0 || (childWork.activeWaitCount ?? 0) > 0) {
-    return {
-      idle: false,
-      conclusive: true,
-      reason: 'child_work_active',
-      activity,
     };
   }
 
@@ -206,7 +216,10 @@ export function classifySessionIdleness(input: {
     };
   }
 
-  if (input.taskStatus === 'completed') {
+  // The prompt turn has ended and no runtime work holds a lease. That is the
+  // whole safety question, so a teardown gate or an explicit user-initiated
+  // sleep stops here. A terminal task is also always immediately reclaimable.
+  if (input.policy === 'prompt-turn-ended' || input.taskStatus === 'completed') {
     return {
       idle: true,
       conclusive: true,
@@ -215,28 +228,23 @@ export function classifySessionIdleness(input: {
     };
   }
 
-  if (!activityAt) {
-    return {
-      idle: false,
-      conclusive: false,
-      reason: 'prompt_turn_unknown',
-      activity,
-    };
-  }
-
-  const idleEligibleAt = activityAt + input.idleAfterMs;
-  if (idleEligibleAt > input.now.getTime()) {
+  // Automatic sleep additionally waits out the idle interval. A missing
+  // `activityAt` means we cannot tell how long the session has been idle, so
+  // the unattended scheduler declines to reclaim it (a user can still sleep it
+  // explicitly, which takes the `prompt-turn-ended` branch above).
+  const idleEligibleAt = activityAt === null ? null : activityAt + input.idleAfterMs;
+  if (idleEligibleAt === null || idleEligibleAt > input.now.getTime()) {
     return {
       idle: false,
       conclusive: true,
       reason: 'idle_interval_pending',
       activity,
-      retryAt: new Date(idleEligibleAt),
+      retryAt: idleEligibleAt === null ? undefined : new Date(idleEligibleAt),
     };
   }
 
   // `awaiting_followup` is an execution step, not a terminal task status. Once
-  // the prompt turn is idle and no tool/subtask work is in flight, it is eligible
+  // the prompt turn is idle and no runtime work is in flight, it is eligible
   // just like other non-terminal states after the configured idle interval.
   return {
     idle: true,
@@ -244,42 +252,4 @@ export function classifySessionIdleness(input: {
     reason: 'idle',
     activity,
   };
-}
-
-const ACTIVE_CHILD_TASK_STATUSES = [
-  'ready',
-  'queued',
-  'delegated',
-  'in_progress',
-  // Historical rows and some query surfaces have treated this execution step as
-  // a task status. Keep it as an active compatibility value.
-  'awaiting_followup',
-] as const;
-
-export async function loadActiveChildTaskIdlenessSignal(
-  db: D1Database,
-  input: { projectId: string; parentTaskId: string | null | undefined }
-): Promise<SessionChildWorkSignal> {
-  if (!input.parentTaskId) return { outcome: 'not_checked' };
-
-  try {
-    const placeholders = ACTIVE_CHILD_TASK_STATUSES.map(() => '?').join(', ');
-    const child = await db
-      .prepare(
-        `SELECT id
-         FROM tasks
-         WHERE project_id = ?
-           AND parent_task_id = ?
-           AND status IN (${placeholders})
-         LIMIT 1`
-      )
-      .bind(input.projectId, input.parentTaskId, ...ACTIVE_CHILD_TASK_STATUSES)
-      .first<{ id: string }>();
-    return { outcome: 'ok', activeChildTaskCount: child?.id ? 1 : 0 };
-  } catch (error) {
-    return {
-      outcome: 'unknown',
-      errorMessage: error instanceof Error ? error.message : String(error),
-    };
-  }
 }

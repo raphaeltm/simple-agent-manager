@@ -472,7 +472,7 @@ export class VmAgentContainer extends Container<Env> {
       if (config) {
         try {
           const { isHarnessWorkLeaseActive, parseHarnessWorkConfig } = await import(
-            '../services/session-sleep'
+            '../services/session-idleness'
           );
           const projectDataService = await import('../services/project-data');
           const timeoutMs = parsePositiveInt(

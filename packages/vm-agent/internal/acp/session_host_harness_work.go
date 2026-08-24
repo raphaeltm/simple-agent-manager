@@ -225,14 +225,14 @@ func (h *SessionHost) applyClaudeHarnessLifecycle(message claudeSDKLifecycleMess
 		if message.TaskID == "" {
 			return false
 		}
-		if !h.addClaudeHarnessTaskLocked(message.TaskID) {
+		if !h.addHarnessTaskLocked(message.TaskID) {
 			return false
 		}
 	case message.Type == "system" && message.Subtype == "task_progress":
 		if message.TaskID == "" {
 			return false
 		}
-		if !h.addClaudeHarnessTaskLocked(message.TaskID) {
+		if !h.addHarnessTaskLocked(message.TaskID) {
 			return false
 		}
 	case message.Type == "system" && message.Subtype == "task_updated":
@@ -241,7 +241,7 @@ func (h *SessionHost) applyClaudeHarnessLifecycle(message claudeSDKLifecycleMess
 		}
 		if isTerminalClaudeTaskStatus(message.Patch.Status) {
 			delete(h.harnessTaskIDs, message.TaskID)
-		} else if !h.addClaudeHarnessTaskLocked(message.TaskID) {
+		} else if !h.addHarnessTaskLocked(message.TaskID) {
 			return false
 		}
 	case message.Type == "system" && message.Subtype == "task_notification":
@@ -285,36 +285,20 @@ func (h *SessionHost) applyACPToolCallLifecycle(notification acpsdk.SessionNotif
 	update := notification.Update
 	switch {
 	case update.ToolCall != nil:
-		return h.applyACPToolCallStatus(
-			string(update.ToolCall.ToolCallId),
-			string(update.ToolCall.Status),
-			acpToolCallStatusPresent,
-		)
+		return h.applyACPToolCallStatus(string(update.ToolCall.ToolCallId), &update.ToolCall.Status)
 	case update.ToolCallUpdate != nil:
-		status := ""
-		presence := acpToolCallStatusAbsent
-		if update.ToolCallUpdate.Status != nil {
-			status = string(*update.ToolCallUpdate.Status)
-			presence = acpToolCallStatusPresent
-		}
+		// Status is a patch field. Absent means "unchanged", which for lease
+		// purposes is treated the same as a non-terminal update.
 		return h.applyACPToolCallStatus(
 			string(update.ToolCallUpdate.ToolCallId),
-			status,
-			presence,
+			update.ToolCallUpdate.Status,
 		)
 	default:
 		return false
 	}
 }
 
-type acpToolCallStatusPresence int
-
-const (
-	acpToolCallStatusAbsent acpToolCallStatusPresence = iota
-	acpToolCallStatusPresent
-)
-
-func (h *SessionHost) applyACPToolCallStatus(toolCallID string, status string, presence acpToolCallStatusPresence) bool {
+func (h *SessionHost) applyACPToolCallStatus(toolCallID string, status *acpsdk.ToolCallStatus) bool {
 	if toolCallID == "" {
 		return false
 	}
@@ -329,11 +313,17 @@ func (h *SessionHost) applyACPToolCallStatus(toolCallID string, status string, p
 		h.harnessTaskIDs = make(map[string]struct{})
 	}
 
-	statusTerminal := presence == acpToolCallStatusPresent && isTerminalACPToolCallStatus(status)
+	statusTerminal := status != nil && isTerminalACPToolCallStatus(*status)
 	previousCount := len(h.harnessTaskIDs)
 	if statusTerminal {
 		delete(h.harnessTaskIDs, toolCallID)
 	} else if !h.addHarnessTaskLocked(toolCallID) {
+		return false
+	}
+
+	// A terminal update while nothing was tracked cannot change the
+	// authoritative active set, so skip the redundant inactive report.
+	if statusTerminal && previousCount == 0 {
 		return false
 	}
 
@@ -345,12 +335,8 @@ func (h *SessionHost) applyACPToolCallStatus(toolCallID string, status string, p
 	}
 	h.harnessWork.Count = currentCount
 
-	// Repeated non-terminal tool updates are genuine lifecycle progress from
-	// the ACP peer. Terminal updates for an unknown ID do not change the
-	// authoritative active set, so avoid sending redundant inactive reports.
-	if statusTerminal && previousCount == 0 && currentCount == 0 {
-		return false
-	}
+	// Repeated non-terminal tool updates are genuine lifecycle progress from the
+	// ACP peer, so they legitimately advance the progress clock.
 	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLocked()
 	if h.harnessWork.State == harnessWorkActive {
 		h.startHarnessWorkRereportLocked()
@@ -360,14 +346,50 @@ func (h *SessionHost) applyACPToolCallStatus(toolCallID string, status string, p
 	return true
 }
 
-// addClaudeHarnessTaskLocked bounds cumulative edge messages as well as the
+// reconcileHarnessWorkAtPromptTurnEnd releases ACP tool-call work when the
+// prompt turn ends, reporting one finite settling lease in its place.
+//
+// ACP has no cross-turn background-work primitive: `session/update` reports tool
+// calls incrementally per `toolCallId`, and the `session/prompt` response is the
+// authoritative turn boundary. Anything still tracked at that point never
+// reported a terminal status — a routine occurrence rather than an anomaly,
+// because codex-acp's `turn/completed` handler does not flush pending item state
+// and an interrupt drops the pending `tool_call_update` entirely.
+//
+// Those orphans must not be mistaken for live work. Without this reconciliation
+// the tracked set only ever grows, `State` stays `active` for the rest of the
+// process's life, and — because `ProgressAt` is one session-wide clock that
+// EVERY later tool call re-stamps — the absolute ceiling in the control plane's
+// `getFreshHarnessWorkLeaseExpiry` keeps sliding forward, so the safety net that
+// is meant to release the session never fires.
+//
+// Claude's adapter already has the equivalent self-healing primitive: the
+// `background_tasks_changed` bookend wholesale-replaces the set with the
+// harness's authoritative task list (see applyClaudeHarnessLifecycle). ACP has
+// no such message, so the turn boundary is the reconciliation point.
+//
+// Downgrading to `settling` rather than clearing outright leaves one finite
+// lease (`HARNESS_BACKGROUND_WORK_LEASE_MS`) for a tool that genuinely was still
+// running, instead of making the session sleep-eligible the instant the turn
+// ends. Stopping the re-report loop is what keeps that lease finite.
+func (h *SessionHost) reconcileHarnessWorkAtPromptTurnEnd() {
+	h.harnessWorkMu.Lock()
+	defer h.harnessWorkMu.Unlock()
+
+	if h.harnessWork.Source != acpToolCallWorkSource || len(h.harnessTaskIDs) == 0 {
+		return
+	}
+	h.stopHarnessWorkRereportLocked()
+	h.harnessTaskIDs = nil
+	h.harnessWork.State = harnessWorkSettling
+	h.harnessWork.Count = 0
+	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLocked()
+}
+
+// addHarnessTaskLocked bounds cumulative edge messages as well as the
 // authoritative tasks array. Existing IDs still count as progress at the cap;
 // a new ID is ignored until an authoritative replacement or terminal edge
 // frees capacity.
-func (h *SessionHost) addClaudeHarnessTaskLocked(taskID string) bool {
-	return h.addHarnessTaskLocked(taskID)
-}
-
 func (h *SessionHost) addHarnessTaskLocked(taskID string) bool {
 	if _, exists := h.harnessTaskIDs[taskID]; exists {
 		return true
@@ -405,9 +427,17 @@ func isTerminalClaudeTaskStatus(status string) bool {
 	}
 }
 
-func isTerminalACPToolCallStatus(status string) bool {
-	switch acpsdk.ToolCallStatus(status) {
-	case acpsdk.ToolCallStatusCompleted, acpsdk.ToolCallStatusFailed:
+// acpToolCallStatusCancelled is a terminal tool-call status in the ACP protocol
+// that the pinned SDK (coder/acp-go-sdk v0.13.5) predates, so it has no
+// generated constant. `ToolCallStatus` is a plain string with no runtime enum
+// validation, so a peer sending it unmarshals fine — and treating it as
+// non-terminal would leak the tool call in the exact case where the agent DID
+// tell us the work is over.
+const acpToolCallStatusCancelled acpsdk.ToolCallStatus = "cancelled"
+
+func isTerminalACPToolCallStatus(status acpsdk.ToolCallStatus) bool {
+	switch status {
+	case acpsdk.ToolCallStatusCompleted, acpsdk.ToolCallStatusFailed, acpToolCallStatusCancelled:
 		return true
 	default:
 		return false

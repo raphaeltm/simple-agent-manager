@@ -74,6 +74,23 @@ error.** Two distinct sub-classes, both present above:
    liveness — pick a different signal (last *work* activity, a dedicated
    `last_activity_at`, or a derived `MAX()` over child rows) and document why.
 
+5b. **A per-SET progress clock cannot bound a per-ITEM stale entry.** When an absolute
+   ceiling is anchored on "the last real progress edge" but the reporter tracks a *set*
+   of work items behind one shared timestamp, progress on any live item re-stamps the
+   clock for every stale one. The ceiling then only fires when the whole set goes quiet
+   — precisely never, for an active session. This is rule 5 one level in: the clock is a
+   genuine progress signal, it just answers a question about the set rather than the
+   item you are asking about. Either track progress per item, or make the *reporter*
+   responsible for evicting entries it can no longer vouch for at a boundary it knows is
+   authoritative, and name that boundary in a comment. Ask, for every capped/leased set:
+   "what removes an entry that never reports a terminal state?" — if the only answer is
+   process death, the ceiling is decorative. This was found pre-merge in PR #1874: ACP
+   tool calls orphaned by an interrupt stayed in the tracked set forever, and every later
+   tool call in every later turn pushed the 30-minute ceiling out again
+   (`reconcileHarnessWorkAtPromptTurnEnd` is the fix; the Claude adapter's
+   `background_tasks_changed` wholesale-replace was the pre-existing prior art that the
+   new reporter had not reproduced).
+
 6. **Precondition deferrals must not consume destructive retry budgets or leave immortal retry
    states.** A lifecycle loop may discover work before a later runtime event makes it safe (for
    example, task completion is recorded before the completing prompt reports idle, or a final
@@ -107,6 +124,8 @@ Before merging a change to a scheduled handler or an idleness predicate:
 - [ ] The completion log names failed steps
 - [ ] The failure-recording path cannot itself abort the handler
 - [ ] No idleness predicate reads a column any keepalive path writes
+- [ ] Every leased/capped set has a named answer to "what evicts an entry that never
+      reports a terminal state?", and it is not process death
 - [ ] Precondition deferrals preserve the destructive retry budget and remain durably selectable
 - [ ] Discriminating regression tests exist for both the isolation and the signal
 

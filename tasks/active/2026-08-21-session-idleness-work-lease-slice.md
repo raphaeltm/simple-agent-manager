@@ -2,7 +2,7 @@
 
 **SAM task**: `01M0HC5AEWPJJY2356FW3WPB6G`
 **Branch**: `sam/implement-next-independently-shippable-3wpb6g`
-**Status**: implemented locally; draft PR/CI pending
+**Status**: PR #1874; review feedback applied 2026-08-24
 
 ## Problem statement
 
@@ -20,16 +20,17 @@ This slice must be independently shippable: extend the existing finite renewable
 - PR #1845 (`855f701e`) shipped Claude `_claude/sdkMessage` lifecycle detection, ProjectData `runtime_work_state`, `HARNESS_BACKGROUND_WORK_LEASE_MS`, `HARNESS_BACKGROUND_WORK_MAX_DURATION_MS`, and durable `wait_for_subtasks`. It documents Codex/OpenCode and full shared-idle-predicate work as follow-ups.
 - Current `session-sleep.ts` already has the lease math and three race gates (`checkAutomaticSessionSleepEligibility`, `stateBefore`, `stateAfter`, `stateAtStop`), but the logic is local (`isActivitySafeForSleep`, `isHarnessWorkLeaseActive`), not shared.
 - Current `SessionHost.SessionUpdate` is the VM-agent point where standard ACP `ToolCall` / `ToolCallUpdate` notifications are observed. The notification path must remain non-blocking and must not leak raw tool input/output across the VM boundary.
-- Current ProjectData `task_wait_subscriptions` and D1 task parentage are authoritative child/subtask signals. Absence of a task-wait or child-task query must not be interpreted as idle. This slice should include the signal shape in `classifySessionIdleness`; readers can pass `unknown` until an adapter has authoritative coverage.
+- Current ProjectData `task_wait_subscriptions` and D1 task parentage were considered as child/subtask idleness signals. **Rejected on review** (Raphaël, 2026-08-24, PR #1874 comment): a parent blocked on `wait_for_subtasks` should sleep and be woken durably by the ProjectData parent-wake delivery path, not be kept awake because it has children. Sleep+durable-wake is more resource-efficient, and the fix for lineage breakage belongs on the wake/identity side.
 - Current DO idle cleanup and workspace idle timeout paths already route terminalization through `classifyTaskRuntimeLiveness()`, but their candidate selection still uses older schedule/activity proxies. Converting those selectors in this slice would widen control-loop scope and requires more adapter work; keep them as deliberate gaps unless directly covered by new authoritative idleness signals.
 - Rule 53 forbids liveness/heartbeat timestamps as idleness predicates. Rule 47 requires finite leases, absolute ceilings, and control-loop escape paths. Rule 35 requires vertical-slice tests for cross-boundary flows. Rule 58 protects sleep/delete/recovery from conclusive-death drift.
 
 ## Implemented slice
 
-- Added `apps/api/src/services/session-idleness.ts` with the shared `classifySessionIdleness()` predicate, finite `runtime_work_state` lease math, absolute progress ceiling, explicit child-task and durable-wait signal fields, and an inconclusive outcome for unknown child-work evidence.
+- Added `apps/api/src/services/session-idleness.ts` with the shared `classifySessionIdleness()` predicate, finite `runtime_work_state` lease math, and an absolute progress ceiling.
 - Converted `checkAutomaticSessionSleepEligibility()` plus the `sleepWorkspaceSession()` state-before, state-after, and state-at-stop gates to call the shared predicate.
-- Added a D1 child-task adapter for the sleep reader. It treats active child tasks (`ready`, `queued`, `delegated`, `in_progress`, historical `awaiting_followup`) as non-idle; query failure returns `unknown` and blocks sleep instead of proving idleness.
-- Added VM-agent ACP `tool_call` / `tool_call_update` runtime-work normalization for `openai-codex` and `opencode` with source `acp_tool_call`. Initial/nonterminal/content-only updates start or renew work; terminal `completed`/`failed` updates clear it. ACP v0.13.5 exposes only those terminal statuses.
+- Split the predicate by `SessionIdlenessPolicy`. `prompt-turn-ended` is the safety question (turn ended, no runtime-work lease) used by the three teardown gates; `idle-interval-elapsed` layers the automatic-sleep scheduling interval on top and is used only by the unattended scheduler.
+- Added VM-agent ACP `tool_call` / `tool_call_update` runtime-work normalization for `openai-codex` and `opencode` with source `acp_tool_call`. Initial/nonterminal/content-only updates start or renew work; terminal `completed`/`failed`/`cancelled` updates clear it.
+- Added `reconcileHarnessWorkAtPromptTurnEnd()`, run from the shared `markPromptDone` turn-end hook, so ACP tool calls orphaned by an interrupt or an unflushed `turn/completed` settle instead of pinning the session forever.
 - Preserved Claude `_claude/sdkMessage` behavior by keeping source `claude_sdk` exclusive for `claude-code`; standard ACP tool calls do not override it. cf-container `activeWork` liveness semantics were not changed.
 - Kept raw ACP tool inputs/outputs out of VM activity reports; only normalized runtime-work state/count/source/progress crosses the control-plane boundary.
 
@@ -38,13 +39,14 @@ This slice must be independently shippable: extend the existing finite renewable
 - [x] Add failing Go tests for ACP `ToolCall` / `ToolCallUpdate` lifecycle detection: pending/in-progress/content-only starts or renews work, completed/failed ends it, wrong-session/replay updates are ignored, and raw tool input/output is not sent in activity reports.
 - [x] Implement a harness-agnostic ACP tool-call adapter in the VM agent that feeds the existing normalized runtime-work state with source `acp_tool_call`, without changing persisted chat-message metadata.
 - [x] Preserve the Claude adapter and cf-container `activeWork` semantics unchanged.
-- [x] Add `classifySessionIdleness()` as a shared API helper with explicit signal outcomes for prompt activity, VM runtime-work lease, child/subtask work, durable wait counts, and unknown/inconclusive evidence.
+- [x] Add `classifySessionIdleness()` as a shared API helper with explicit signal outcomes for prompt activity, VM runtime-work lease, and unknown/inconclusive evidence.
 - [x] Convert `checkAutomaticSessionSleepEligibility()` and `sleepWorkspaceSession()` point-of-no-return checks to call `classifySessionIdleness()` instead of local proxy logic.
-- [x] Keep non-authoritative readers as deliberate gaps, documented in this task and PR body; do not treat absence of a child/tool signal as proof of idleness.
-- [x] Add deterministic TypeScript tests for lease renewal/expiry/absolute ceiling, prompt activity, child-task/wait signals, detached server stale progress, sleep/delete/recovery gates, and inconclusive evidence.
+- [x] Keep non-authoritative readers as deliberate gaps, documented in this task and PR body; do not treat absence of a tool signal as proof of idleness.
+- [x] Add deterministic TypeScript tests for lease renewal/expiry/absolute ceiling, prompt activity, both idleness policies, detached server stale progress, sleep/delete/recovery gates, and inconclusive evidence.
 - [x] Run focused Go and API tests before broader quality checks.
 - [x] Run local specialist review: test-engineer, go-specialist, constitution-validator, cloudflare-specialist, doc-sync-validator, security-auditor, and task-completion-validator.
-- [ ] Open a draft PR, let CI run, and stop before staging/merge.
+- [x] Open a draft PR and let CI run.
+- [x] Apply PR review feedback (2026-08-24): drop child-task sleep blocking; fix the manual-sleep interval regression; fix the ACP orphaned-tool-call lease leak.
 
 ## Acceptance criteria
 
@@ -53,9 +55,11 @@ This slice must be independently shippable: extend the existing finite renewable
 - [x] Claude `background_tasks_changed` behavior remains covered and unchanged.
 - [x] cf-container `activeWork` liveness semantics remain covered and unchanged.
 - [x] Sleep eligibility and sleep teardown race gates use the same `classifySessionIdleness()` predicate.
-- [x] Child/subtask work and durable waits are represented as explicit non-idle or inconclusive signals; missing evidence is not interpreted as idle.
+- [x] Child/subtask work does NOT block sleep. An orchestrator whose prompt turn ended sleeps and is woken durably by the ProjectData parent-wake delivery path (Raphaël, 2026-08-24).
+- [x] An explicit user-initiated sleep is never rejected because the automatic idle interval has not elapsed.
+- [x] An ACP tool call that never reports a terminal status cannot pin the session past one finite settling lease.
 - [x] Sleep/delete/recovery protections from PR #1844 still pass.
-- [x] Deterministic local tests cover in-flight tools, child tasks, lease renewal/expiry/ceiling, detached servers, sleep/delete/recovery, and inconclusive evidence.
+- [x] Deterministic local tests cover in-flight tools, both idleness policies, lease renewal/expiry/ceiling, turn-end reconciliation, detached servers, sleep/delete/recovery, and inconclusive evidence.
 - [ ] Draft PR reports exact SHA/PR, converted readers, deliberate gaps, tests/CI, rollback, and a staging plan using `GET /api/admin/tasks/:taskId/reconciliation-diagnostics` with `eligible=true` assertions across prompt/tool/subtask/sleep chain.
 
 ## Validation
@@ -73,15 +77,14 @@ This slice must be independently shippable: extend the existing finite renewable
 ## Deliberate gaps after this slice
 
 - ProjectData idle cleanup and workspace idle-timeout candidate selectors are not yet converted to `classifySessionIdleness()`. They still use schedule/workspace-activity candidate selection plus `classifyTaskRuntimeLiveness()` before terminalization. Converting them needs a separate ACP-session activity mirror resolution and ProjectData wait-subscription adapter.
-- The sleep reader consumes D1 child-task state but not ProjectData `task_wait_subscriptions` directly. The shared predicate now has an `activeWaitCount` input so that adapter can be added without changing the predicate contract.
 - ACP terminal methods remain stubbed; this slice intentionally only consumes ACP `tool_call` / `tool_call_update`.
 
 ## Specialist review notes
 
-- `test-engineer`: deterministic coverage includes ACP in-flight/terminal transitions, replay/wrong-session suppression, raw payload minimization, shared predicate cases, child-task and durable-wait signals, lease expiry/ceiling, stale detached work, sleep gate races, inconclusive evidence, full API suite, and full VM-agent Go suite.
+- `test-engineer`: deterministic coverage includes ACP in-flight/terminal transitions, replay/wrong-session suppression, raw payload minimization, shared predicate cases for both policies, turn-end reconciliation across completion/cancel/error, lease expiry/ceiling, stale detached work, sleep gate races, inconclusive evidence, full API suite, and full VM-agent Go suite.
 - `go-specialist`: ACP lifecycle handling stays on the existing notification path, uses the lock-free session mirror before taking `harnessWorkMu`, avoids `h.mu`, coalesces activity reports via the existing nudge path, and preserves Claude source exclusivity.
-- `constitution-validator`: no new environment variables; existing lease/ceiling defaults remain configurable by `HARNESS_BACKGROUND_WORK_*`. New D1 active-child statuses are domain constants, not operator-tunable policy.
-- `cloudflare-specialist`: new D1 child-task read is parameterized, scoped by `project_id` + `parent_task_id`, and `LIMIT 1`; query failure returns `unknown` and defers sleep.
+- `constitution-validator`: no new environment variables; existing lease/ceiling defaults remain configurable by `HARNESS_BACKGROUND_WORK_*`.
+- `cloudflare-specialist`: no new D1 reads. The child-task query from the first cut was removed on review, so sleep eligibility costs the same round trips as before this PR.
 - `doc-sync-validator`: no public env/config docs need updates because no env/schema/API contract changed. The task file and PR body carry the implementation/gap documentation.
 - `security-auditor`: raw ACP tool input/output is not persisted or sent in activity callbacks; tests assert activity reports omit secret marker content and tool IDs. D1 SQL uses bound parameters.
 - `task-completion-validator`: implementation matches the active task checklist except deliberate gaps explicitly retained for ProjectData cleanup selectors and direct wait-subscription adapter wiring.

@@ -1,9 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import {
-  classifySessionIdleness,
-  loadActiveChildTaskIdlenessSignal,
-} from '../../../src/services/session-idleness';
+import { classifySessionIdleness } from '../../../src/services/session-idleness';
 
 const harnessWorkConfig = { leaseMs: 120_000, maxDurationMs: 30 * 60 * 1000 };
 const NOW = new Date('2026-08-21T12:00:00.000Z');
@@ -24,19 +21,12 @@ function classify(overrides: Partial<ClassifyInput> = {}) {
   return classifySessionIdleness({
     taskStatus: 'in_progress',
     state: idleState(),
-    childWork: { outcome: 'ok', activeChildTaskCount: 0 },
     now: NOW,
     idleAfterMs: IDLE_AFTER_MS,
     harnessWorkConfig,
+    policy: 'idle-interval-elapsed',
     ...overrides,
   });
-}
-
-function mockChildTaskDb(firstResult: () => Promise<{ id: string } | null>) {
-  const first = vi.fn(firstResult);
-  const bind = vi.fn(() => ({ first }));
-  const prepare = vi.fn(() => ({ bind }));
-  return { bind, db: { prepare } as unknown as D1Database, prepare };
 }
 
 describe('classifySessionIdleness', () => {
@@ -73,36 +63,101 @@ describe('classifySessionIdleness', () => {
     });
   });
 
-  it('blocks idleness while a child task is still active', () => {
-    expect(classify({ childWork: { outcome: 'ok', activeChildTaskCount: 1 } })).toMatchObject({
-      idle: false,
-      conclusive: true,
-      reason: 'child_work_active',
-    });
-  });
-
-  it('blocks idleness while a durable child-work wait is still active', () => {
-    expect(
-      classify({ childWork: { outcome: 'ok', activeChildTaskCount: 0, activeWaitCount: 1 } })
-    ).toMatchObject({
-      idle: false,
-      conclusive: true,
-      reason: 'child_work_active',
-    });
-  });
-
-  it('treats inconclusive child-task evidence as not idle', () => {
-    expect(
-      classify({ childWork: { outcome: 'unknown', errorMessage: 'D1 unavailable' } })
-    ).toMatchObject({
+  it('treats an unknown session state as inconclusive rather than idle', () => {
+    expect(classify({ state: null })).toMatchObject({
       idle: false,
       conclusive: false,
-      reason: 'child_work_unknown',
+      reason: 'prompt_turn_unknown',
+      activity: null,
     });
   });
 
-  it('handles awaiting_followup as idle only after the prompt turn ended and the interval elapsed', () => {
-    expect(classify({ taskExecutionStep: 'awaiting_followup' })).toMatchObject({
+  it('blocks sleep while the prompt turn is still running', () => {
+    expect(
+      classify({ state: idleState({ activity: 'prompting', activityAt: NOW.getTime() - 1_000 }) })
+    ).toMatchObject({
+      idle: false,
+      conclusive: true,
+      reason: 'prompt_turn_active',
+    });
+  });
+
+  it('defers an idle session until the configured idle interval has elapsed', () => {
+    expect(classify({ state: idleState({ activityAt: NOW.getTime() - 60_000 }) })).toMatchObject({
+      idle: false,
+      conclusive: true,
+      reason: 'idle_interval_pending',
+      retryAt: new Date('2026-08-21T12:14:00.000Z'),
+    });
+  });
+
+  it('defers automatic sleep, without a retry hint, when the idle age is unknown', () => {
+    expect(classify({ state: { activity: 'idle', activityAt: null } })).toMatchObject({
+      idle: false,
+      conclusive: true,
+      reason: 'idle_interval_pending',
+      activity: 'idle',
+      retryAt: undefined,
+    });
+  });
+
+  // The idle interval is an automatic-sleep SCHEDULING policy, not a safety
+  // property. Teardown gates and the user-initiated `POST /workspaces/:id/sleep`
+  // path ask only whether the prompt turn ended, so they must not be blocked for
+  // up to SESSION_SLEEP_AFTER_MS after the agent hands control back.
+  describe('policy: prompt-turn-ended', () => {
+    it('is idle as soon as the prompt turn ends, ignoring the idle interval', () => {
+      expect(
+        classify({
+          policy: 'prompt-turn-ended',
+          state: idleState({ activityAt: NOW.getTime() - 1_000 }),
+        })
+      ).toMatchObject({ idle: true, conclusive: true, reason: 'idle' });
+    });
+
+    it('is idle even when the idle age is unknown', () => {
+      expect(
+        classify({ policy: 'prompt-turn-ended', state: { activity: 'idle', activityAt: null } })
+      ).toMatchObject({ idle: true, conclusive: true, reason: 'idle' });
+    });
+
+    it('still blocks on a live prompt turn', () => {
+      expect(
+        classify({
+          policy: 'prompt-turn-ended',
+          state: idleState({ activity: 'prompting', activityAt: NOW.getTime() - 1_000 }),
+        })
+      ).toMatchObject({ idle: false, conclusive: true, reason: 'prompt_turn_active' });
+    });
+
+    it('still blocks on a fresh runtime-work lease', () => {
+      expect(
+        classify({
+          policy: 'prompt-turn-ended',
+          state: idleState({
+            runtimeWorkState: 'active',
+            runtimeWorkUpdatedAt: NOW.getTime() - 10_000,
+            runtimeWorkProgressAt: NOW.getTime() - 20_000,
+          }),
+        })
+      ).toMatchObject({ idle: false, conclusive: true, reason: 'runtime_work_lease_active' });
+    });
+
+    it('still refuses to guess when the session state is missing entirely', () => {
+      expect(classify({ policy: 'prompt-turn-ended', state: null })).toMatchObject({
+        idle: false,
+        conclusive: false,
+        reason: 'prompt_turn_unknown',
+      });
+    });
+  });
+
+  it('sleeps an orchestrator whose prompt turn ended while its children are still running', () => {
+    // Raphaël, 2026-08-24: a parent blocked on `wait_for_subtasks` must sleep and
+    // be woken durably by the ProjectData parent-wake delivery path, not be kept
+    // awake because it has children. Nothing about child lineage is an input to
+    // this predicate — this test pins that.
+    expect(classify({ taskStatus: 'awaiting_followup' })).toMatchObject({
       idle: true,
       conclusive: true,
       reason: 'idle',
@@ -125,41 +180,30 @@ describe('classifySessionIdleness', () => {
       retryAt: new Date('2026-08-21T12:14:30.000Z'),
     });
   });
-});
 
-describe('loadActiveChildTaskIdlenessSignal', () => {
-  it('detects an active child task without depending on a test harness', async () => {
-    const { bind, db, prepare } = mockChildTaskDb(async () => ({ id: 'child-1' }));
-
-    await expect(
-      loadActiveChildTaskIdlenessSignal(db, {
-        projectId: 'project-1',
-        parentTaskId: 'task-1',
+  it('releases a completed task whose final prompting state is stale', () => {
+    expect(
+      classify({
+        taskStatus: 'completed',
+        state: { activity: 'prompting', activityAt: OLD_IDLE_ACTIVITY_AT },
       })
-    ).resolves.toEqual({ outcome: 'ok', activeChildTaskCount: 1 });
-
-    expect(prepare.mock.calls[0]?.[0]).toContain('parent_task_id');
-    expect(bind.mock.calls[0]).toEqual([
-      'project-1',
-      'task-1',
-      'ready',
-      'queued',
-      'delegated',
-      'in_progress',
-      'awaiting_followup',
-    ]);
+    ).toMatchObject({
+      idle: true,
+      conclusive: true,
+      reason: 'completed_prompt_stale',
+    });
   });
 
-  it('returns unknown instead of claiming idle when the child-task query fails', async () => {
-    const { db } = mockChildTaskDb(async () => {
-      throw new Error('D1 unavailable');
-    });
-
-    await expect(
-      loadActiveChildTaskIdlenessSignal(db, {
-        projectId: 'project-1',
-        parentTaskId: 'task-1',
+  it('sleeps a completed task immediately once it reports idle', () => {
+    expect(
+      classify({
+        taskStatus: 'completed',
+        state: { activity: 'idle', activityAt: NOW.getTime() - 1_000 },
       })
-    ).resolves.toMatchObject({ outcome: 'unknown', errorMessage: 'D1 unavailable' });
+    ).toMatchObject({
+      idle: true,
+      conclusive: true,
+      reason: 'idle',
+    });
   });
 });

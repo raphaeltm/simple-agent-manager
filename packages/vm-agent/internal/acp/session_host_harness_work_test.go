@@ -205,6 +205,144 @@ func TestACPToolCallLifecycleTracksCodexAndOpencodeWork(t *testing.T) {
 	}
 }
 
+func TestACPToolCallCancelledStatusEndsWork(t *testing.T) {
+	t.Parallel()
+
+	host, client := newHarnessWorkTestClient(t, SessionHostConfig{}, "openai-codex", "acp-session", HostPrompting)
+
+	notifyACPToolCall(t, client, "acp-session", "tool-1", "Run command", acpsdk.ToolCallStatusInProgress, nil)
+	if got := host.harnessWorkSnapshot(); got.State != harnessWorkActive || got.Count != 1 {
+		t.Fatalf("active snapshot = %#v", got)
+	}
+
+	// `cancelled` is terminal in the ACP protocol but has no constant in the
+	// pinned SDK. Treating it as non-terminal would leak the tool call in the one
+	// case where the agent explicitly told us the work is over.
+	notifyACPToolCallUpdate(t, client, "acp-session", "tool-1", toolStatus(acpToolCallStatusCancelled))
+	if got := host.harnessWorkSnapshot(); got.State != harnessWorkInactive || got.Count != 0 {
+		t.Fatalf("cancelled tool call did not release work: %#v", got)
+	}
+}
+
+// The ACP peer is not required to report a terminal status for every tool call:
+// codex-acp's `turn/completed` does not flush pending item state, and an
+// interrupt drops the pending `tool_call_update`. The turn boundary must
+// therefore reconcile, or the orphan pins the session for the rest of the
+// process's life (see reconcileHarnessWorkAtPromptTurnEnd).
+func TestACPToolCallOrphanedAtPromptTurnEndSettlesAndDoesNotLeakAcrossTurns(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name       string
+		stopReason string
+		err        error
+	}{
+		{name: "natural completion", stopReason: "end_turn"},
+		{name: "user cancellation", stopReason: "cancelled", err: context.Canceled},
+		{name: "prompt error", stopReason: "error", err: errors.New("peer disconnected")},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			host, client := newHarnessWorkTestClient(t, SessionHostConfig{}, "openai-codex", "acp-session", HostPrompting)
+
+			// Turn 1: a tool call starts and never reports a terminal status.
+			notifyACPToolCall(t, client, "acp-session", "tool-orphan", "Run command", acpsdk.ToolCallStatusInProgress, nil)
+			active := host.harnessWorkSnapshot()
+			if active.State != harnessWorkActive || active.Count != 1 {
+				t.Fatalf("active snapshot = %#v", active)
+			}
+
+			endPromptTurn(t, host, tc.stopReason, tc.err)
+
+			settled := host.harnessWorkSnapshot()
+			if settled.State != harnessWorkSettling || settled.Count != 0 {
+				t.Fatalf("orphaned tool call was not reconciled at turn end: %#v", settled)
+			}
+			if !settled.ProgressAt.After(active.ProgressAt) {
+				t.Fatalf("reconciliation did not advance the progress clock: %#v -> %#v", active, settled)
+			}
+
+			// Turn 2: an unrelated tool call must be tracked on its own, and
+			// completing it must return the session to inactive. Before
+			// reconciliation the orphan kept Count at 1 here, so the session never
+			// went inactive AND every one of these edges re-stamped the shared
+			// progress clock, sliding the control plane's absolute ceiling forward
+			// indefinitely.
+			host.setStatus(HostPrompting, "")
+			notifyACPToolCall(t, client, "acp-session", "tool-2", "Read file", acpsdk.ToolCallStatusPending, nil)
+			if got := host.harnessWorkSnapshot(); got.State != harnessWorkActive || got.Count != 1 {
+				t.Fatalf("second-turn snapshot = %#v", got)
+			}
+			notifyACPToolCallUpdate(t, client, "acp-session", "tool-2", toolStatus(acpsdk.ToolCallStatusCompleted))
+			if got := host.harnessWorkSnapshot(); got.State != harnessWorkInactive || got.Count != 0 {
+				t.Fatalf("orphan from the previous turn still pins work: %#v", got)
+			}
+		})
+	}
+}
+
+// Discriminating control for the reconciliation above: Claude's background tasks
+// are genuinely allowed to outlive a prompt turn (that is the entire reason the
+// `claude_sdk` adapter exists), so the same turn-end hook must leave them alone.
+// This fails if reconcileHarnessWorkAtPromptTurnEnd is generalised to all sources.
+func TestClaudeBackgroundWorkSurvivesPromptTurnEnd(t *testing.T) {
+	t.Parallel()
+
+	host, client := newHarnessWorkTestClient(t, SessionHostConfig{}, "claude-code", "sdk-session", HostPrompting)
+
+	notifyClaudeLifecycle(t, client, `{
+		"sessionId":"sdk-session",
+		"message":{"type":"system","subtype":"task_started","session_id":"sdk-session","task_id":"one"}}
+`)
+	if got := host.harnessWorkSnapshot(); got.State != harnessWorkActive || got.Count != 1 {
+		t.Fatalf("claude active snapshot = %#v", got)
+	}
+
+	endPromptTurn(t, host, "end_turn", nil)
+
+	if got := host.harnessWorkSnapshot(); got.State != harnessWorkActive || got.Count != 1 || got.Source != claudeHarnessWorkSource {
+		t.Fatalf("claude background work was reconciled away at turn end: %#v", got)
+	}
+}
+
+// The settling lease must be finite: reconciliation stops the re-report loop, so
+// `runtimeWorkUpdatedAt` stops advancing and the control-plane lease expires.
+func TestACPToolCallSettlingLeaseStopsRereporting(t *testing.T) {
+	t.Parallel()
+
+	reports := newActivityReportCapture(t)
+	host, client := newHarnessWorkTestClient(t, SessionHostConfig{GatewayConfig: GatewayConfig{
+		ProjectID:                "project",
+		NodeID:                   "node",
+		SessionID:                "sam-session",
+		ControlPlaneURL:          reports.server.URL,
+		CallbackToken:            "token",
+		HTTPClient:               reports.server.Client(),
+		ActivityRereportInterval: 10 * time.Millisecond,
+	}}, "openai-codex", "acp-session", HostPrompting)
+
+	notifyACPToolCall(t, client, "acp-session", "tool-orphan", "Run command", acpsdk.ToolCallStatusInProgress, nil)
+	waitFor(t, 300*time.Millisecond, func() bool { return reports.count() >= 2 })
+
+	endPromptTurn(t, host, "end_turn", nil)
+	waitFor(t, 300*time.Millisecond, func() bool { return reports.count() >= 3 })
+
+	// Liveness first: the settling downgrade itself reached the control plane.
+	_, payloads := reports.snapshot()
+	last := payloads[len(payloads)-1]
+	if last.RuntimeWorkState != string(harnessWorkSettling) || last.RuntimeWorkCount == nil || *last.RuntimeWorkCount != 0 {
+		t.Fatalf("settling downgrade was not reported: %#v", last)
+	}
+
+	settledCount := reports.count()
+	time.Sleep(60 * time.Millisecond)
+	if got := reports.count(); got != settledCount {
+		t.Fatalf("re-report loop kept renewing the lease after turn end: %d -> %d", settledCount, got)
+	}
+}
+
 func TestACPToolCallLifecycleRejectsWrongSessionAndReplay(t *testing.T) {
 	t.Parallel()
 
@@ -468,6 +606,23 @@ func notifyACPToolCallUpdate(t *testing.T, client *sessionHostClient, sessionID 
 
 func toolStatus(status acpsdk.ToolCallStatus) *acpsdk.ToolCallStatus {
 	return &status
+}
+
+// endPromptTurn drives the real turn-end sequence rather than calling
+// markPromptDone directly: production reaches it only through
+// promptAttempt.completeWith, which is the single terminal owner shared by
+// finishPrompt, finishPromptCancelled, and finishPromptAttemptWithError.
+func endPromptTurn(t *testing.T, host *SessionHost, stopReason string, promptErr error) {
+	t.Helper()
+
+	_, cancel := context.WithCancel(context.Background())
+	attempt, started := host.beginPrompt(cancel, nil)
+	if !started {
+		t.Fatal("beginPrompt did not start an attempt")
+	}
+	if !attempt.completeWith(host, stopReason, promptErr, host.markPromptDone) {
+		t.Fatal("completeWith did not claim the prompt terminal")
+	}
 }
 
 type activityReportCapture struct {

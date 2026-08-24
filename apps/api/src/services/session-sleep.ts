@@ -11,9 +11,7 @@ import { stopWorkspaceOnNode } from './node-agent';
 import * as projectDataService from './project-data';
 import {
   classifySessionIdleness,
-  loadActiveChildTaskIdlenessSignal,
   parseHarnessWorkConfig,
-  type SessionChildWorkSignal,
   type SessionIdlenessActivityState,
   type SessionIdlenessClassification,
 } from './session-idleness';
@@ -34,15 +32,6 @@ import {
 } from './session-snapshots';
 import { cleanupTaskRun } from './task-runner';
 import { sleepVmAgentContainer } from './vm-agent-container';
-
-export type { HarnessWorkConfig } from './session-idleness';
-export {
-  DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS,
-  DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS,
-  getFreshHarnessWorkLeaseExpiry,
-  isHarnessWorkLeaseActive,
-  parseHarnessWorkConfig,
-} from './session-idleness';
 
 async function finishSleepingWorkspaceComputeCleanup(
   db: ReturnType<typeof drizzle<typeof schema>>,
@@ -210,53 +199,11 @@ function sessionSleepDeferralReason(
   switch (classification.reason) {
     case 'runtime_work_lease_active':
       return 'Harness-owned background work is active';
-    case 'child_work_active':
-      return 'Child/subtask work is active';
-    case 'child_work_unknown':
-      return 'Child/subtask work state is unknown';
     case 'idle_interval_pending':
       return 'Workspace idle interval has not elapsed';
     default:
       return `Workspace agent is not idle (${state?.activity ?? 'unknown'})`;
   }
-}
-
-async function loadSleepChildWorkSignal(
-  env: Env,
-  input: { projectId: string; taskId: string | null | undefined }
-): Promise<SessionChildWorkSignal> {
-  const signal = await loadActiveChildTaskIdlenessSignal(env.DATABASE, {
-    projectId: input.projectId,
-    parentTaskId: input.taskId,
-  });
-  if (signal.outcome === 'unknown') {
-    log.warn('session_sleep.child_work_signal_unknown', {
-      projectId: input.projectId,
-      taskId: input.taskId ?? null,
-      error: signal.errorMessage ?? null,
-    });
-  }
-  return signal;
-}
-
-function classifySleepIdleness(input: {
-  taskStatus: string | null;
-  taskExecutionStep?: string | null;
-  state: SessionIdlenessActivityState | null;
-  childWork: SessionChildWorkSignal;
-  now: Date;
-  idleAfterMs: number;
-  env: Pick<Env, 'HARNESS_BACKGROUND_WORK_LEASE_MS' | 'HARNESS_BACKGROUND_WORK_MAX_DURATION_MS'>;
-}): SessionIdlenessClassification {
-  return classifySessionIdleness({
-    taskStatus: input.taskStatus,
-    taskExecutionStep: input.taskExecutionStep,
-    state: input.state,
-    childWork: input.childWork,
-    now: input.now,
-    idleAfterMs: input.idleAfterMs,
-    harnessWorkConfig: parseHarnessWorkConfig(input.env),
-  });
 }
 
 function idlenessStateChanged(
@@ -271,17 +218,6 @@ function idlenessStateChanged(
     after.runtimeWorkSource !== before.runtimeWorkSource ||
     after.runtimeWorkUpdatedAt !== before.runtimeWorkUpdatedAt ||
     after.runtimeWorkProgressAt !== before.runtimeWorkProgressAt
-  );
-}
-
-function childWorkSignalChanged(
-  before: SessionChildWorkSignal,
-  after: SessionChildWorkSignal
-): boolean {
-  return (
-    before.outcome !== after.outcome ||
-    (before.activeChildTaskCount ?? 0) !== (after.activeChildTaskCount ?? 0) ||
-    (before.activeWaitCount ?? 0) !== (after.activeWaitCount ?? 0)
   );
 }
 
@@ -305,9 +241,7 @@ export async function checkAutomaticSessionSleepEligibility(
     .select({
       projectId: schema.workspaces.projectId,
       chatSessionId: schema.workspaces.chatSessionId,
-      taskId: schema.tasks.id,
       taskStatus: schema.tasks.status,
-      taskExecutionStep: schema.tasks.executionStep,
     })
     .from(schema.workspaces)
     .leftJoin(
@@ -348,18 +282,15 @@ export async function checkAutomaticSessionSleepEligibility(
         .catch(() => null)
     : null;
   const idleAfterMs = parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS);
-  const childWork = await loadSleepChildWorkSignal(env, {
-    projectId: workspace.projectId,
-    taskId: workspace.taskId,
-  });
-  const idleness = classifySleepIdleness({
+  const idleness = classifySessionIdleness({
     taskStatus: workspace.taskStatus,
-    taskExecutionStep: workspace.taskExecutionStep,
     state,
-    childWork,
     now,
     idleAfterMs,
-    env,
+    harnessWorkConfig: parseHarnessWorkConfig(env),
+    // The unattended scheduler is the only caller that also waits out the idle
+    // interval before reclaiming a session on its own initiative.
+    policy: 'idle-interval-elapsed',
   });
   if (idleness.idle) {
     return { eligible: true };
@@ -399,7 +330,6 @@ export async function sleepWorkspaceSession(
       nodeRole: schema.nodes.nodeRole,
       taskId: schema.tasks.id,
       taskStatus: schema.tasks.status,
-      taskExecutionStep: schema.tasks.executionStep,
       warmNodeTimeoutMs: schema.projects.warmNodeTimeoutMs,
     })
     .from(schema.workspaces)
@@ -523,19 +453,22 @@ export async function sleepWorkspaceSession(
         env.SESSION_SLEEP_AFTER_MS,
         DEFAULT_SESSION_SLEEP_AFTER_MS
       );
-      const childWorkBefore = await loadSleepChildWorkSignal(env, {
-        projectId: workspace.projectId,
-        taskId: workspace.taskId,
-      });
-      const idlenessBefore = classifySleepIdleness({
-        taskStatus: workspace.taskStatus,
-        taskExecutionStep: workspace.taskExecutionStep,
-        state: stateBefore,
-        childWork: childWorkBefore,
-        now: new Date(),
-        idleAfterMs,
-        env,
-      });
+      const harnessWorkConfig = parseHarnessWorkConfig(env);
+      // Point-of-no-return gates ask the SAFETY question only. Whoever called
+      // `sleepWorkspaceSession` has already decided this session should sleep —
+      // including the user pressing Sleep on a session that just went idle — so
+      // re-imposing the unattended scheduler's idle interval here would reject
+      // an explicit request for up to SESSION_SLEEP_AFTER_MS.
+      const classifyGate = (state: SessionIdlenessActivityState | null) =>
+        classifySessionIdleness({
+          taskStatus: workspace.taskStatus,
+          state,
+          now: new Date(),
+          idleAfterMs,
+          harnessWorkConfig,
+          policy: 'prompt-turn-ended',
+        });
+      const idlenessBefore = classifyGate(stateBefore);
       if (!stateBefore || !idlenessBefore.idle) {
         throw new Error(sessionSleepDeferralReason(idlenessBefore, stateBefore));
       }
@@ -563,24 +496,10 @@ export async function sleepWorkspaceSession(
         workspace.projectId,
         agentSession.id
       );
-      const childWorkAfter = await loadSleepChildWorkSignal(env, {
-        projectId: workspace.projectId,
-        taskId: workspace.taskId,
-      });
-      const idlenessAfter = classifySleepIdleness({
-        taskStatus: workspace.taskStatus,
-        taskExecutionStep: workspace.taskExecutionStep,
-        state: stateAfter,
-        childWork: childWorkAfter,
-        now: new Date(),
-        idleAfterMs,
-        env,
-      });
       if (
         !stateAfter ||
-        !idlenessAfter.idle ||
-        idlenessStateChanged(stateBefore, stateAfter) ||
-        childWorkSignalChanged(childWorkBefore, childWorkAfter)
+        !classifyGate(stateAfter).idle ||
+        idlenessStateChanged(stateBefore, stateAfter)
       ) {
         throw new Error('Workspace activity changed while the final snapshot was captured');
       }
@@ -596,24 +515,10 @@ export async function sleepWorkspaceSession(
         workspace.projectId,
         agentSession.id
       );
-      const childWorkAtStop = await loadSleepChildWorkSignal(env, {
-        projectId: workspace.projectId,
-        taskId: workspace.taskId,
-      });
-      const idlenessAtStop = classifySleepIdleness({
-        taskStatus: workspace.taskStatus,
-        taskExecutionStep: workspace.taskExecutionStep,
-        state: stateAtStop,
-        childWork: childWorkAtStop,
-        now: new Date(),
-        idleAfterMs,
-        env,
-      });
       if (
         !stateAtStop ||
-        !idlenessAtStop.idle ||
-        idlenessStateChanged(stateAfter, stateAtStop) ||
-        childWorkSignalChanged(childWorkAfter, childWorkAtStop)
+        !classifyGate(stateAtStop).idle ||
+        idlenessStateChanged(stateAfter, stateAtStop)
       ) {
         throw new Error('Workspace activity changed during snapshot artifact verification');
       }

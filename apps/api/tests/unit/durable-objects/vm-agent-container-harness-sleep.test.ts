@@ -14,7 +14,7 @@ const { mockIsHarnessWorkLeaseActive, mockParseHarnessWorkConfig, mockGetSession
     mockGetSessionState: vi.fn(),
   }));
 
-vi.mock('../../../src/services/session-sleep', () => ({
+vi.mock('../../../src/services/session-idleness', () => ({
   isHarnessWorkLeaseActive: mockIsHarnessWorkLeaseActive,
   parseHarnessWorkConfig: mockParseHarnessWorkConfig,
 }));
