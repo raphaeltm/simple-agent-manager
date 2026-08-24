@@ -86,6 +86,7 @@ const ProjectDeployments = lazyNamed(
   () => import('./pages/ProjectDeployments'),
   'ProjectDeployments'
 );
+const ProjectComments = lazyNamed(() => import('./pages/ProjectComments'), 'ProjectComments');
 const ProjectFiles = lazyNamed(() => import('./pages/ProjectFiles'), 'ProjectFiles');
 const ProjectInvite = lazyNamed(() => import('./pages/ProjectInvite'), 'ProjectInvite');
 const ProjectLibrary = lazyNamed(() => import('./pages/ProjectLibrary'), 'ProjectLibrary');
@@ -280,6 +281,7 @@ export default function App() {
                         <Route path="chat/:sessionId" element={page(<ProjectChat />)} />
                         <Route path="agent" element={page(<ProjectAgentChat />)} />
                         <Route path="library" element={page(<ProjectLibrary />)} />
+                        <Route path="comments" element={page(<ProjectComments />)} />
                         <Route path="files" element={page(<ProjectFiles />)} />
                         <Route path="ideas" element={page(<IdeasPage />)} />
                         <Route path="deployments" element={page(<ProjectDeployments />)} />

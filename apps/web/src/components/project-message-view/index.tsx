@@ -20,10 +20,17 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { getMessageToolContent } from '../../lib/api/sessions';
 import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
+import { useAuth } from '../AuthProvider';
 import { ChatFilePanel } from '../chat/ChatFilePanel';
 import { ChatTimelineDrawer } from '../chat/ChatTimelineDrawer';
+import { SessionCommentsDrawer } from '../chat/SessionCommentsDrawer';
 import { TruncatedSummary } from '../chat/TruncatedSummary';
 import { FailureCard } from '../debug/FailureCard';
+import {
+  type CommentInboxItem,
+  countBuckets,
+  toInboxItem,
+} from './comments/comment-inbox';
 import { CommentableConversationItem } from './comments/CommentableConversationItem';
 import { useMessageComments } from './comments/useMessageComments';
 import { useProjectMessageCommentUi } from './comments/useProjectMessageCommentUi';
@@ -71,6 +78,9 @@ function FloatingHeader({
   onRetry,
   onFork,
   onOpenTimeline,
+  onOpenComments,
+  unresolvedCommentCount,
+  needsAttentionCommentCount,
   sourceContext,
   onShowHierarchy,
   containerRef,
@@ -81,6 +91,9 @@ function FloatingHeader({
   onRetry?: () => void;
   onFork?: () => void;
   onOpenTimeline?: () => void;
+  onOpenComments?: () => void;
+  unresolvedCommentCount?: number;
+  needsAttentionCommentCount?: number;
   sourceContext?: SessionSourceContext;
   onShowHierarchy?: (taskId: string) => void;
   containerRef?: (el: HTMLDivElement | null) => void;
@@ -123,6 +136,9 @@ function FloatingHeader({
         onOpenFiles={lc.handleOpenFileBrowser}
         onOpenGit={lc.handleOpenGitChanges}
         onOpenTimeline={onOpenTimeline}
+        onOpenComments={onOpenComments}
+        unresolvedCommentCount={unresolvedCommentCount}
+        needsAttentionCommentCount={needsAttentionCommentCount}
         onRetry={onRetry}
         onFork={onFork}
         lineageText={sourceContext?.lineageText}
@@ -220,8 +236,11 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [floatingHeaderRef, floatingHeaderHeight] = useFloatingHeaderHeight();
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
+  const [showComments, setShowComments] = useState(false);
 
   const messageComments = useMessageComments(projectId, sessionId, Boolean(projectId && sessionId));
+  const { user } = useAuth();
+  const viewerId = user?.id ?? null;
 
   const lc = useSessionLifecycle(
     projectId,
@@ -230,6 +249,27 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     onSessionMutated,
     messageComments.applyRealtimeEvent
   );
+
+  // One derivation feeds the header chip, the drawer, and the timeline, so the
+  // three can never disagree about how many comments are outstanding.
+  const commentInbox = useMemo<CommentInboxItem[]>(() => {
+    const roleById = new Map(lc.messages.map((msg) => [msg.id, msg.role]));
+    return messageComments.comments.map((thread) =>
+      toInboxItem(thread, {
+        kind: 'session',
+        sessionId,
+        sessionTopic: lc.session?.topic ?? 'This session',
+        messageId: thread.anchor.messageId,
+        messageRole: roleById.get(thread.anchor.messageId) === 'user' ? 'user' : 'assistant',
+      })
+    );
+  }, [messageComments.comments, lc.messages, lc.session?.topic, sessionId]);
+
+  const commentCounts = useMemo(
+    () => countBuckets(commentInbox, viewerId),
+    [commentInbox, viewerId]
+  );
+  const unresolvedCommentCount = commentCounts.all - commentCounts.resolved;
 
   // Convert DO messages to conversation items (single source)
   const conversationItems = useMemo<ConversationItem[]>(() => {
@@ -252,7 +292,13 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     return map;
   }, [conversationItems]);
 
-  const timeline = useSessionTimeline(projectId, sessionId, lc.messages, showTimeline);
+  const timeline = useSessionTimeline(
+    projectId,
+    sessionId,
+    lc.messages,
+    showTimeline,
+    messageComments.comments
+  );
 
   // Jump-to-message from the timeline. A jump targets either an exact message
   // (user message) or the nearest message to a timestamp (status/activity
@@ -569,6 +615,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
             onRetry={onRetry}
             onFork={onFork}
             onOpenTimeline={() => setShowTimeline(true)}
+            onOpenComments={() => setShowComments(true)}
+            unresolvedCommentCount={unresolvedCommentCount}
+            needsAttentionCommentCount={commentCounts.needs_you}
             sourceContext={sourceContext}
             onShowHierarchy={onShowHierarchy}
             containerRef={floatingHeaderRef}
@@ -600,6 +649,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               onRetry={onRetry}
               onFork={onFork}
               onOpenTimeline={() => setShowTimeline(true)}
+              onOpenComments={() => setShowComments(true)}
+              unresolvedCommentCount={unresolvedCommentCount}
+              needsAttentionCommentCount={commentCounts.needs_you}
               sourceContext={sourceContext}
               onShowHierarchy={onShowHierarchy}
               containerRef={floatingHeaderRef}
@@ -739,6 +791,27 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           onToggleContext={() => timeline.setShowContext(!timeline.showContext)}
           onClose={() => setShowTimeline(false)}
           onJump={handleTimelineJump}
+        />
+      )}
+
+      {/* Comments drawer — the session-scoped inbox */}
+      {showComments && (
+        <SessionCommentsDrawer
+          items={commentInbox}
+          loading={messageComments.loading}
+          viewerId={viewerId}
+          onClose={() => setShowComments(false)}
+          onJump={handleTimelineJump}
+          onReply={(threadId, body, action) =>
+            messageComments.reply({ commentId: threadId, body, action })
+          }
+          onResolve={messageComments.resolve}
+          onReopen={messageComments.reopen}
+          onSendToAgent={
+            canWriteSession
+              ? (threadId) => messageComments.sendToAgent({ commentId: threadId })
+              : undefined
+          }
         />
       )}
     </div>

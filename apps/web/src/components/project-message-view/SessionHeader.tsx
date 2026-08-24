@@ -20,6 +20,7 @@ import {
   Globe,
   Hash,
   MessageSquare,
+  MessageSquareQuote,
   RotateCcw,
   Tag,
   Timer,
@@ -73,6 +74,9 @@ export function SessionHeader({
   onOpenFiles,
   onOpenGit,
   onOpenTimeline,
+  onOpenComments,
+  unresolvedCommentCount = 0,
+  needsAttentionCommentCount = 0,
   onRetry,
   onFork,
   lineageText,
@@ -94,6 +98,11 @@ export function SessionHeader({
   onOpenFiles?: () => void;
   onOpenGit?: () => void;
   onOpenTimeline?: () => void;
+  onOpenComments?: () => void;
+  /** Threads in this session that are not resolved. Drives the header chip. */
+  unresolvedCommentCount?: number;
+  /** Subset of the above whose last activity came from someone other than you. */
+  needsAttentionCommentCount?: number;
   onRetry?: () => void;
   onFork?: () => void;
   /** Lineage subtitle for retries/forks (e.g., "↩ attempt 3"). */
@@ -368,6 +377,41 @@ export function SessionHeader({
               aria-label={`Show ${extraPortCount} more forwarded ${extraPortCount === 1 ? 'port' : 'ports'}`}
             >
               +{extraPortCount} more
+            </button>
+          )}
+
+          {/*
+            Comment chip lives in the ALWAYS-VISIBLE chip row, not in the action
+            row below. The action row is inside the collapsed disclosure, so a
+            button there would be invisible until you already suspected there
+            was something to find — which is precisely the discovery problem
+            comments have today. The chip renders only when something is
+            unresolved, so a session with nothing outstanding stays quiet.
+          */}
+          {onOpenComments && unresolvedCommentCount > 0 && (
+            <button
+              type="button"
+              onClick={onOpenComments}
+              className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 border cursor-pointer whitespace-nowrap transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary"
+              style={{
+                color: needsAttentionCommentCount > 0
+                  ? 'var(--sam-color-warning-fg)'
+                  : 'var(--sam-color-fg-muted)',
+                borderColor: needsAttentionCommentCount > 0
+                  ? 'var(--sam-color-warning)'
+                  : 'var(--sam-color-border-default)',
+                backgroundColor: needsAttentionCommentCount > 0
+                  ? 'var(--sam-color-warning-tint)'
+                  : 'transparent',
+              }}
+              aria-label={`${unresolvedCommentCount} unresolved ${unresolvedCommentCount === 1 ? 'comment' : 'comments'}${
+                needsAttentionCommentCount > 0 ? `, ${needsAttentionCommentCount} needing your attention` : ''
+              }`}
+              title="Open comments"
+            >
+              <MessageSquareQuote size={10} aria-hidden="true" />
+              {unresolvedCommentCount}
+              {needsAttentionCommentCount > 0 && <span className="ml-0.5">needs you</span>}
             </button>
           )}
 
@@ -665,6 +709,24 @@ export function SessionHeader({
               <Button variant="ghost" size="sm" onClick={onOpenTimeline}>
                 <Clock size={14} className="mr-1" />
                 Timeline
+              </Button>
+            )}
+
+            {onOpenComments && (
+              <Button variant="ghost" size="sm" onClick={onOpenComments}>
+                <MessageSquareQuote size={14} className="mr-1" />
+                Comments
+                {unresolvedCommentCount > 0 && (
+                  <span
+                    className="ml-1 rounded-full px-1.5 text-[0.6875rem] tabular-nums"
+                    style={{
+                      backgroundColor: 'var(--sam-color-warning-tint)',
+                      color: 'var(--sam-color-warning-fg)',
+                    }}
+                  >
+                    {unresolvedCommentCount}
+                  </span>
+                )}
               </Button>
             )}
 

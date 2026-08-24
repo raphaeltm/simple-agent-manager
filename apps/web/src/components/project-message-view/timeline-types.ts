@@ -22,6 +22,31 @@ export type TimelineEntry =
       text: string;
       timestamp: number;
       severity: 'info';
+    }
+  /**
+   * A comment thread, placed at its most recent activity rather than at its
+   * creation time. A comment is a conversation *about* the conversation, and
+   * what a reader scanning the timeline needs is when it last moved — a thread
+   * opened yesterday that the agent answered a minute ago belongs next to the
+   * minute-old entries, not next to yesterday's.
+   */
+  | {
+      kind: 'comment_thread';
+      id: string;
+      threadId: string;
+      /** Anchor message, so this jumps exactly like a `user_message` entry. */
+      messageId: string;
+      quote: string | null;
+      /** Root comment body, truncated for the row. */
+      text: string;
+      /** Whoever moved the thread last. */
+      actorName: string;
+      actorKind: 'human' | 'agent';
+      /** Renders as "replied" rather than "commented". */
+      isReply: boolean;
+      status: 'open' | 'sent' | 'resolved';
+      replyCount: number;
+      timestamp: number;
     };
 
 /** Where a timeline entry should jump to in the message list. */

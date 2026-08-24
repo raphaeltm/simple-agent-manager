@@ -31,7 +31,7 @@ import {
  * message-typed prop, which defeated the discriminated union at exactly the
  * boundary it exists to protect.
  */
-function fileThreadToUi(thread: LibraryFileCommentThread): UiCommentThread {
+export function fileThreadToUi(thread: LibraryFileCommentThread): UiCommentThread {
   return {
     id: thread.id,
     clientId: thread.clientId ?? null,

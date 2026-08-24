@@ -1,6 +1,8 @@
 import type { NotificationResponse } from '@simple-agent-manager/shared';
 
+import type { MessageCommentAuthor } from '../../lib/api/comments';
 import type { ActivityEventResponse, ChatMessageResponse } from '../../lib/api/sessions';
+import { authorDisplayName, type UiMessageCommentThread } from './comments/comment-utils';
 import type { TimelineEntry } from './timeline-types';
 
 type Severity = Extract<TimelineEntry, { kind: 'system_event' }>['severity'];
@@ -61,7 +63,12 @@ export function buildSessionTimeline(
   messages: ChatMessageResponse[],
   activityEvents: ActivityEventResponse[],
   progressNotifications: NotificationResponse[],
-  showContext: boolean
+  showContext: boolean,
+  /**
+   * Comment threads anchored in this session. Optional so existing callers and
+   * tests keep their current behaviour.
+   */
+  commentThreads: readonly UiMessageCommentThread[] = []
 ): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
 
@@ -112,6 +119,33 @@ export function buildSessionTimeline(
         severity: isTaskChange ? getTaskSeverity(evt.payload) : (EVENT_SEVERITY[evt.eventType] ?? 'info'),
       });
     }
+  }
+
+  // Comment threads, positioned at their latest activity rather than their
+  // creation time — see the `comment_thread` doc comment in timeline-types.ts.
+  for (const thread of commentThreads) {
+    const body = thread.body.trim();
+    if (!body) continue;
+
+    const latest = thread.replies.reduce<{ at: number; author: MessageCommentAuthor }>(
+      (acc, reply) => (reply.createdAt >= acc.at ? { at: reply.createdAt, author: reply.author } : acc),
+      { at: thread.createdAt, author: thread.author }
+    );
+
+    entries.push({
+      kind: 'comment_thread',
+      id: `comment-${thread.id}`,
+      threadId: thread.id,
+      messageId: thread.anchor.messageId,
+      quote: thread.anchor.quote?.trim() || null,
+      text: truncateText(body, 120),
+      actorName: authorDisplayName(latest.author),
+      actorKind: latest.author.kind,
+      isReply: latest.at !== thread.createdAt,
+      status: thread.status,
+      replyCount: thread.replies.length,
+      timestamp: latest.at,
+    });
   }
 
   // Sort chronologically (oldest first)

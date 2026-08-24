@@ -119,6 +119,29 @@ export const DEFAULT_COMMENT_THREADS_PER_SESSION_MAX = 1_000;
 export const DEFAULT_COMMENT_REPLIES_PER_THREAD_MAX = 200;
 
 /**
+ * How many of a project's most recent chat sessions the project-level comment
+ * inbox scans for threads.
+ *
+ * There is no project-scoped comment list endpoint, so the inbox fans out one
+ * request per session. That fan-out MUST be bounded or opening the page on a
+ * long-lived project issues hundreds of requests (rule 60). Recency is the right
+ * cut here because an unresolved comment on a session nobody has touched in
+ * months is not what the page exists to surface — but the cut is disclosed in
+ * the UI rather than applied silently (rule 65).
+ *
+ * Override at build time via VITE_PROJECT_COMMENT_INBOX_SESSION_LIMIT.
+ */
+export const DEFAULT_PROJECT_COMMENT_INBOX_SESSION_LIMIT = 25;
+
+/**
+ * How many library files the project-level comment inbox scans for threads.
+ * Same fan-out reasoning as the session limit above.
+ *
+ * Override at build time via VITE_PROJECT_COMMENT_INBOX_FILE_LIMIT.
+ */
+export const DEFAULT_PROJECT_COMMENT_INBOX_FILE_LIMIT = 25;
+
+/**
  * Safety bound on how many older pages the chat client will fetch while chasing a
  * timeline jump target that predates the loaded window (the rare oversized-session
  * fallback). Bounds the load-until loop so a server misreporting `hasMore` can

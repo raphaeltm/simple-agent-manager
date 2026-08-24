@@ -13,6 +13,7 @@ import {
   Lightbulb,
   Map,
   MessageSquare,
+  MessageSquareQuote,
   Monitor,
   PlayCircle,
   Rocket,
@@ -51,6 +52,10 @@ export const GLOBAL_NAV_ITEMS: NavItem[] = [
 export const PROJECT_NAV_ITEMS: NavItem[] = [
   { label: 'Chat', path: 'chat', icon: <MessageSquare size={18} /> },
   // { label: 'Agent', path: 'agent', icon: <Bot size={18} /> }, // Hidden — experimental, not ready for users yet
+  // MessageSquareQuote, not MessageSquare: Chat already owns the plain speech
+  // bubble, and two bubbles side by side in the same rail are indistinguishable
+  // at 18px. The quote marks are what make this read as "annotation".
+  { label: 'Comments', path: 'comments', icon: <MessageSquareQuote size={18} /> },
   { label: 'Files', path: 'files', icon: <FileCode size={18} /> },
   { label: 'Library', path: 'library', icon: <FolderOpen size={18} /> },
   { label: 'Ideas', path: 'ideas', icon: <Lightbulb size={18} /> },

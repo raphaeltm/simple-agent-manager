@@ -5,7 +5,7 @@ import {
   TimelineSeparator,
   TimelineStem,
 } from '@simple-agent-manager/ui';
-import { AlignLeft, Clock, X } from 'lucide-react';
+import { AlignLeft, Check, Clock, MessageSquareQuote, X } from 'lucide-react';
 import { useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Virtuoso } from 'react-virtuoso';
@@ -21,6 +21,16 @@ const SEVERITY_COLORS: Record<string, string> = {
 
 const DOT_COLOR_USER = '#22c55e';
 const DOT_COLOR_PROGRESS = '#60a5fa';
+
+/**
+ * Comment dots are keyed to thread state, not to severity, because that is the
+ * question a comment answers in a timeline: is this still waiting on someone?
+ */
+const COMMENT_DOT_COLORS: Record<'open' | 'sent' | 'resolved', string> = {
+  open: '#f59e0b',
+  sent: '#60a5fa',
+  resolved: '#22c55e',
+};
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -197,6 +207,43 @@ function TimelineEntryRow({
             <div className="text-sm text-fg-primary leading-snug line-clamp-2 group-hover:text-fg-accent transition-colors">
               {entry.text}
             </div>
+          </button>
+        </TimelineItem>
+      ) : entry.kind === 'comment_thread' ? (
+        <TimelineItem
+          dot={{
+            color: COMMENT_DOT_COLORS[entry.status],
+            muted: entry.status === 'resolved',
+          }}
+        >
+          <button
+            type="button"
+            aria-label={`Jump to the message ${entry.actorName} commented on`}
+            data-timeline-comment-id={entry.threadId}
+            className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+            onClick={() => onJump({ messageId: entry.messageId, timestamp: entry.timestamp })}
+          >
+            <div className="text-xs text-fg-muted mb-0.5">{formatTime(entry.timestamp)}</div>
+            <div className="flex items-center gap-1 text-[11px] uppercase mb-1 text-fg-muted">
+              <MessageSquareQuote size={11} className="shrink-0" />
+              <span className="truncate">
+                {entry.actorName} {entry.isReply ? 'replied' : 'commented'}
+              </span>
+              {entry.status === 'resolved' && <Check size={11} className="shrink-0" />}
+            </div>
+            {entry.quote && (
+              <div className="mb-1 border-l-2 border-tn-blue pl-2 text-xs italic text-fg-muted line-clamp-1">
+                {entry.quote}
+              </div>
+            )}
+            <div className="text-sm text-fg-primary leading-snug line-clamp-2 group-hover:text-fg-accent transition-colors">
+              {entry.text}
+            </div>
+            {entry.replyCount > 0 && (
+              <div className="mt-0.5 text-[11px] text-fg-muted">
+                {entry.replyCount} {entry.replyCount === 1 ? 'reply' : 'replies'}
+              </div>
+            )}
           </button>
         </TimelineItem>
       ) : entry.kind === 'progress_notification' ? (
