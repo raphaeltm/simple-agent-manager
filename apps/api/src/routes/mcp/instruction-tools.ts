@@ -29,9 +29,9 @@ import {
   sanitizeUserInput,
 } from './_helpers';
 import {
-  type PolicyEntry,
   buildPolicyInstructions,
   formatPolicyDirectives,
+  type PolicyEntry,
 } from './instruction-formatting';
 
 type InstructionContextType = 'task' | 'conversation' | 'trial' | 'direct-workspace';
