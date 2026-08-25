@@ -36,7 +36,7 @@ The result is bad in both directions: UI PRs pay roughly 34 minutes of wall-cloc
   - uploads screenshots on normal failure.
 - [x] Add quality tests covering the selector and workflow wiring.
 - [x] Run targeted validation, then the repository quality suite in proportion to risk.
-- [ ] Archive this task after validation.
+- [x] Archive this task after validation.
 
 ## Acceptance criteria
 
