@@ -389,29 +389,27 @@ jobs:
         working-directory: apps/web
         run: mkdir -p ../../.codex/tmp/playwright-screenshots
 
+      - name: Select non-quarantined Playwright visual audits
+        id: visual-audits
+        run: |
+          pnpm exec tsx scripts/quality/select-playwright-visual-audits.ts \
+            > /tmp/playwright-visual-audits.txt
+          echo "Selected Playwright visual audit specs:"
+          sed 's/^/  - /' /tmp/playwright-visual-audits.txt
+
       - name: Run Playwright visual audit tests
         id: playwright
-        continue-on-error: true
         working-directory: apps/web
         run: |
-          find tests/playwright \
-            -name '*audit*.spec.ts' \
-            ! -name 'staging-*.spec.ts' \
-            -print0 \
-            | xargs -0 npx playwright test \
-                --project='iPhone 14 (390x844)' \
-                --reporter=list
+          xargs npx playwright test \
+            --project='iPhone 14 (390x844)' \
+            --reporter=list \
+            < /tmp/playwright-visual-audits.txt
         env:
           CI: true
 
-      - name: Fail if Playwright timed out
-        if: steps.playwright.outcome == 'failure'
-        run: |
-          echo "::warning::Playwright visual audit tests had failures. See uploaded screenshots for details."
-          echo "Visual audit failures are informational — individual test fixes tracked separately."
-
       - name: Upload screenshots on failure
-        if: failure() || steps.playwright.outcome == 'failure'
+        if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-screenshots

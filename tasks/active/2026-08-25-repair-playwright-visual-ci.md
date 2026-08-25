@@ -22,26 +22,26 @@ The result is bad in both directions: UI PRs pay roughly 34 minutes of wall-cloc
 
 ## Implementation checklist
 
-- [ ] Add an explicit quarantine file for stale Playwright audit specs.
-- [ ] Add a deterministic Playwright audit selector script that:
+- [x] Add an explicit quarantine file for stale Playwright audit specs.
+- [x] Add a deterministic Playwright audit selector script that:
   - includes non-staging `*audit*.spec.ts` files;
   - excludes quarantined specs;
   - fails closed if the quarantine references missing files, non-audit files, or staging specs;
   - prints newline-delimited spec paths suitable for `xargs`.
-- [ ] Update `.github/workflows/ci.yml` so `playwright-visual`:
+- [x] Update `.github/workflows/ci.yml` so `playwright-visual`:
   - keeps PR + `web-ui` path gating;
   - runs only selected, non-quarantined audit specs;
   - removes `continue-on-error`;
   - removes the warning-only fake failure step;
   - uploads screenshots on normal failure.
-- [ ] Add quality tests covering the selector and workflow wiring.
-- [ ] Run targeted validation, then the repository quality suite in proportion to risk.
+- [x] Add quality tests covering the selector and workflow wiring.
+- [x] Run targeted validation, then the repository quality suite in proportion to risk.
 - [ ] Archive this task after validation.
 
 ## Acceptance criteria
 
-- [ ] CI no longer contains a warn-only Playwright visual gate.
-- [ ] The healthy Playwright visual audit subset is blocking.
-- [ ] Quarantined specs are explicit, reviewable, and have a tracked follow-up.
-- [ ] Workflow regression tests fail if someone reintroduces `continue-on-error` or bypasses the selector.
-- [ ] The implementation preserves the existing PR + `web-ui` path gate.
+- [x] CI no longer contains a warn-only Playwright visual gate.
+- [x] The healthy Playwright visual audit subset is blocking.
+- [x] Quarantined specs are explicit, reviewable, and have a tracked follow-up.
+- [x] Workflow regression tests fail if someone reintroduces `continue-on-error` or bypasses the selector.
+- [x] The implementation preserves the existing PR + `web-ui` path gate.

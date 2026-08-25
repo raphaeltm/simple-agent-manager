@@ -61,3 +61,33 @@ describe('CI Worker and Durable Object suite wiring', () => {
     );
   });
 });
+
+describe('CI Playwright visual audit wiring', () => {
+  function expectBlockingPlaywrightVisualJob(workflow: string): void {
+    const job = jobBlock(workflow, 'playwright-visual');
+    const selectionStep = stepBlock(job, 'Select non-quarantined Playwright visual audits');
+    const runStep = stepBlock(job, 'Run Playwright visual audit tests');
+
+    expect(job).toContain("if: github.event_name == 'pull_request' && needs.changes.outputs.web-ui == 'true'");
+    expect(selectionStep).toContain('pnpm exec tsx scripts/quality/select-playwright-visual-audits.ts');
+    expect(runStep).toContain('xargs npx playwright test');
+    expect(runStep).toContain("--project='iPhone 14 (390x844)'");
+    expect(runStep).not.toContain('continue-on-error');
+    expect(job).not.toContain('Visual audit failures are informational');
+    expect(job).not.toContain('Fail if Playwright timed out');
+    expect(job).toContain('if: failure()');
+  }
+
+  it('runs selected Playwright visual audits as a blocking PR-only web-ui gate', () => {
+    expectBlockingPlaywrightVisualJob(readCiWorkflow());
+  });
+
+  it('fails if Playwright is made warn-only again', () => {
+    const warnOnlyWorkflow = readCiWorkflow().replace(
+      '        working-directory: apps/web\n        run: |\n          xargs npx playwright test',
+      '        continue-on-error: true\n        working-directory: apps/web\n        run: |\n          xargs npx playwright test'
+    );
+
+    expect(() => expectBlockingPlaywrightVisualJob(warnOnlyWorkflow)).toThrow();
+  });
+});
