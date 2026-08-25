@@ -744,19 +744,19 @@ func TestProcessConfig_EnvVarInjection(t *testing.T) {
 			name:      "Mistral Vibe API key uses env var",
 			agentType: "mistral-vibe",
 			credential: &agentCredential{
-				credential:     "mistral-api-key-123",
+				credential:     "mistral-placeholder",
 				credentialKind: "api-key",
 			},
-			wantEnvVar: "MISTRAL_API_KEY=mistral-api-key-123",
+			wantEnvVar: "MISTRAL_API_KEY=mistral-placeholder",
 		},
 		{
 			name:      "Amp API key uses env var",
 			agentType: "amp",
 			credential: &agentCredential{
-				credential:     "sgamp-api-key-123",
+				credential:     "amp-placeholder",
 				credentialKind: "api-key",
 			},
-			wantEnvVar: "AMP_API_KEY=sgamp-api-key-123",
+			wantEnvVar: "AMP_API_KEY=amp-placeholder",
 		},
 	}
 
