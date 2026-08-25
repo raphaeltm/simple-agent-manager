@@ -36,8 +36,10 @@ Selected direction: variant 3.
 - [x] Add/update unit tests for desktop rail visibility, message-button/selection/header entry points, and mobile selected-text bottom composer behavior.
 - [x] Update Playwright audit coverage to exercise the real user triggers at 1280x800 and 375x667, including screenshots and overflow checks.
 - [x] Run local validation: focused unit tests, focused Playwright audit, then full lint/typecheck/test/build gates.
-- [ ] Run specialist review: `ui-ux-specialist`, `test-engineer`, `constitution-validator`, and `task-completion-validator`; address blockers.
-- [ ] Deploy to staging, verify the comments UX end to end with Playwright, upload screenshots to the project library, create PR, wait for CI, and monitor deploy after merge if normal gates authorize it.
+- [x] Run specialist review: `ui-ux-specialist`, `test-engineer`, `constitution-validator`, and `task-completion-validator`; address blockers.
+- [x] Upload screenshots to the project library for review.
+- [ ] Deploy to staging and verify the comments UX end to end.
+- [ ] Create PR, wait for CI, and monitor deploy after merge if normal gates authorize it.
 
 ## Implementation notes
 
@@ -51,6 +53,22 @@ Selected direction: variant 3.
 - `pnpm typecheck` — passed.
 - `pnpm test` — passed.
 - `pnpm build` — passed.
+- `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/message-comments-audit.spec.ts --project "Desktop (1280x800)" --project "iPhone SE (375x667)"` — passed again after the final accessibility cleanup, 10 tests.
+
+## Review log
+
+- `ui-ux-specialist` review — pass. The selected responsive layout is the on-demand rail plus mobile selected-text bottom composer. Screenshot review covered 1280x800 desktop rail thread/error/empty states and 375x667 mobile composer states; no horizontal overflow or clipped visible controls were found.
+- `test-engineer` review — pass. Unit tests cover header/dropdown, message-level, selected-text, desktop rail hidden-by-default, desktop create, and mobile selected-text overlay behavior. Playwright tests exercise the real user triggers and verify chat scrolling behind the fixed mobile composer.
+- `constitution-validator` review — pass. New constants are presentational UI geometry/breakpoint values tied to Tailwind responsive behavior and screenshot tests; no new endpoints, secrets, provider IDs, business limits, or deployment-owned configuration were hardcoded.
+- `task-completion-validator` review — pass for completed phases. Checklist items through local validation, specialist review, and screenshot upload are reflected in the diff and validation evidence. Staging, PR, CI, and post-merge monitoring remain pending.
+
+## Uploaded screenshots
+
+- `01M0WW8WMQ5323ZGVAQQHX2GHW` — `message-comments-desktop-thread-flow-1280x800.png`
+- `01M0WW8ZD9JQG8JK0K2BXVGS1A` — `message-comments-desktop-error-state-1280x800.png`
+- `01M0WW924DMK9HPY9HYN25F8CS` — `message-comments-desktop-empty-state-1280x800.png`
+- `01M0WW94V859QG68DSXG2G143Z` — `message-comments-mobile-voice-idle-375x667.png`
+- `01M0WW97EP00YM2DHQREK522YC` — `message-comments-mobile-bottom-composer-send-375x667.png`
 
 ## Acceptance criteria
 
