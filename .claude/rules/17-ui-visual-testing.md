@@ -160,6 +160,31 @@ actionable URL, verification code, token, or confirmation:
 4. Staging validation must prove the actionable value came through the real
    integration, then exercise the native control that exposes it.
 
+## Responsive / On-Demand Surfaces Must Be Proved Visible
+
+When a user action opens a responsive surface (rail, drawer, popover, composer,
+details panel), tests must prove the resulting surface is visible at the
+viewport where the action is available. Do not rely on state-only assertions or
+mobile-only inline panels when desktop CSS hides that panel.
+
+Retained incident lesson (2026-08-25): desktop chat message comments regressed
+because the message and selected-text `Comment` controls set draft state, but
+the only composer lived in an inline panel hidden at `lg`. The action looked
+clickable and the state updated, while users saw nothing. The fix restored an
+on-demand desktop rail and added tests that click the real header, message-level,
+and selected-text controls at 1280x800 and assert the rail/composer becomes
+visible.
+
+Required for any responsive/on-demand surface:
+
+1. Assert the surface is hidden by default when that is part of the intended UX.
+2. Click every public entry point that should open it, at the viewport where each
+   entry point is rendered.
+3. Assert the visible surface contains the active/draft state created by the
+   action, not just that a boolean or ARIA attribute changed.
+4. Include mobile and desktop screenshots when the surface changes form across
+   breakpoints.
+
 ## Virtualized-List Scroll/Jump Features (jsdom Renders All Rows — Assert the Coordinate)
 
 When a feature scrolls or jumps to a specific item in a **virtualized** list

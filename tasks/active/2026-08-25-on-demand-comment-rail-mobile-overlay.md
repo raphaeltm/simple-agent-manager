@@ -44,6 +44,7 @@ Selected direction: variant 3.
 ## Implementation notes
 
 - Split `FloatingHeader` out of `project-message-view/index.tsx`, reducing the main chat component from 850 to 741 lines during this PR.
+- Added a retained lesson to `.claude/rules/17-ui-visual-testing.md` requiring responsive/on-demand surfaces to be proved visible from every public entry point at the viewport where the action is available.
 
 ## Validation log
 
@@ -56,12 +57,14 @@ Selected direction: variant 3.
 - `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/message-comments-audit.spec.ts --project "Desktop (1280x800)" --project "iPhone SE (375x667)"` — passed again after the final accessibility cleanup, 10 tests.
 - `gh workflow run deploy-staging.yml --ref sam/chat-ui-desktop-broken-x7a6h9` — staging deploy run `32872775053` passed, including post-deploy smoke tests.
 - `PLAYWRIGHT_BASE_URL=https://app.sammy.party pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/staging-comment-rail-verification.spec.ts --project "Desktop (1280x800)"` — temporary live-staging verifier passed, 2 tests. Verified desktop rail from message/selected-text/header controls and mobile fixed selected-text composer with real staging comment API writes.
+- `doc-sync-validator` review of `.claude/rules/17-ui-visual-testing.md` — passed. The new process note references existing code/test paths and matches this PR's behavior and validation evidence.
 
 ## Review log
 
 - `ui-ux-specialist` review — pass. The selected responsive layout is the on-demand rail plus mobile selected-text bottom composer. Screenshot review covered 1280x800 desktop rail thread/error/empty states and 375x667 mobile composer states; no horizontal overflow or clipped visible controls were found.
 - `test-engineer` review — pass. Unit tests cover header/dropdown, message-level, selected-text, desktop rail hidden-by-default, desktop create, and mobile selected-text overlay behavior. Playwright tests exercise the real user triggers and verify chat scrolling behind the fixed mobile composer.
 - `constitution-validator` review — pass. New constants are presentational UI geometry/breakpoint values tied to Tailwind responsive behavior and screenshot tests; no new endpoints, secrets, provider IDs, business limits, or deployment-owned configuration were hardcoded.
+- `doc-sync-validator` review — pass. The durable rule update is scoped to the bug class fixed here and does not introduce stale file references or inaccurate behavior claims.
 - `task-completion-validator` review — pass for completed phases. Checklist items through local validation, specialist review, and screenshot upload are reflected in the diff and validation evidence. Staging, PR, CI, and post-merge monitoring remain pending.
 
 ## Uploaded screenshots
