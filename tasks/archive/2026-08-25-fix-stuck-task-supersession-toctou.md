@@ -56,6 +56,10 @@ which requires the source task to be non-terminal, causing a double-kill cascade
   - 74 tests passed.
 - Passed: `pnpm --filter @simple-agent-manager/api typecheck`.
 - Passed: `pnpm --filter @simple-agent-manager/api lint`.
+- Passed: staging deploy run `32835290023`
+  - Deploy to Cloudflare completed successfully.
+  - Health Check completed successfully.
+  - Smoke tests completed successfully.
 - Inconclusive local runner: `pnpm --filter @simple-agent-manager/api test:workers -- tests/workers/scheduled-stuck-tasks.test.ts`
   was interrupted after producing no terminal result for more than two minutes.
 - Inconclusive local runner: `pnpm --filter @simple-agent-manager/api test`
