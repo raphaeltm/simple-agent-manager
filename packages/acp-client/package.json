@@ -25,7 +25,7 @@
     "lint": "eslint 'src/**/*.ts' 'src/**/*.tsx'"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "0.25.0",
+    "@agentclientprotocol/sdk": "1.4.0",
     "dompurify": "3.4.13",
     "lucide-react": "catalog:",
     "mermaid": "11.14.0",
