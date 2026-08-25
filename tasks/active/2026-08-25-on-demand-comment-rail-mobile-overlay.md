@@ -58,6 +58,8 @@ Selected direction: variant 3.
 - `gh workflow run deploy-staging.yml --ref sam/chat-ui-desktop-broken-x7a6h9` — staging deploy run `32872775053` passed, including post-deploy smoke tests.
 - `PLAYWRIGHT_BASE_URL=https://app.sammy.party pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/staging-comment-rail-verification.spec.ts --project "Desktop (1280x800)"` — temporary live-staging verifier passed, 2 tests. Verified desktop rail from message/selected-text/header controls and mobile fixed selected-text composer with real staging comment API writes.
 - `doc-sync-validator` review of `.claude/rules/17-ui-visual-testing.md` — passed. The new process note references existing code/test paths and matches this PR's behavior and validation evidence.
+- `gh workflow run deploy-staging.yml --ref sam/chat-ui-desktop-broken-x7a6h9` — exact-head staging deploy run `32876032734` passed at SHA `bb7288d39`, including post-deploy smoke tests.
+- `pnpm --filter @simple-agent-manager/web exec node --input-type=module <exact-head live comments verifier>` — passed against `https://app.sammy.party`. Rechecked desktop selected-text rail and mobile bottom composer on the exact-head deployment.
 
 ## Review log
 
@@ -77,6 +79,8 @@ Selected direction: variant 3.
 - `01M0WY32WXTSXSSZKPGABYS658` — `staging-comments-desktop-rail-1280x800.png`
 - `01M0WY35PJACF0NP1YE4ZVG61N` — `staging-comments-mobile-bottom-composer-375x667.png`
 - `01M0WY39G0R11VEXYAYD1HGPD6` — `staging-comments-mobile-thread-after-send-375x667.png`
+- `01M0WZ9XMVJZBFH4K7QET6WR0F` — `staging-exacthead-comments-desktop-rail-1280x800.png`
+- `01M0WZA1SH67SH4RVWGF9AY2J6` — `staging-exacthead-comments-mobile-bottom-composer-375x667.png`
 
 ## Acceptance criteria
 
