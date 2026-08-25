@@ -602,6 +602,7 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 | `ACP_PROMPT_RETRY_INITIAL_BACKOFF`  | `15s`   | Initial backoff before retrying transient provider prompt errors |
 | `ACP_PROMPT_RETRY_MAX_BACKOFF`      | `2m`    | Max exponential backoff for transient provider prompt retries    |
 | `ACTIVITY_REREPORT_INTERVAL`        | `60s`   | Re-send prompting activity while a prompt is active              |
+| `ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE` | `750ms` | Debounce ACP harness/tool-call activity reports before callbacks |
 | `ACP_CHECKPOINT_PREEMPT_GRACE`      | `30s`   | Graceful ACP cancel/close wait before harness force-stop         |
 | `ACP_CHECKPOINT_PREEMPT_MAX_GRACE`  | `2m`    | Maximum caller-selected checkpoint rollover grace                |
 | `ACP_CHECKPOINT_ROLLOVER_TIMEOUT`   | `2m`    | Full checkpoint restart and strict LoadSession deadline          |
