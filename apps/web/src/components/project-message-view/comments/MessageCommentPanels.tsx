@@ -157,7 +157,7 @@ export function DesktopCommentRail({
 
   return (
     <aside
-      className="glass-panel-container glass-composited glass-modal relative hidden min-h-0 w-[24rem] max-w-[42vw] shrink-0 flex-col overflow-hidden rounded-none border-y-0 border-r-0 border-l border-border-default shadow-xl lg:flex"
+      className="glass-panel-container glass-composited glass-modal relative hidden min-h-0 w-80 max-w-[42vw] shrink-0 flex-col overflow-hidden rounded-none border-y-0 border-r-0 border-l border-border-default shadow-xl lg:flex 2xl:w-[24rem]"
       role="complementary"
       aria-label="Session comments"
     >

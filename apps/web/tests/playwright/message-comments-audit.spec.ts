@@ -400,6 +400,34 @@ async function expectCommentThreadVisible(root: Page | Locator, body: string) {
   return article;
 }
 
+async function expectConversationCanScrollBehindOverlay(page: Page) {
+  const scrollResult = await page.evaluate(() => {
+    const scroller = document.querySelector<HTMLElement>(
+      '[data-sam-conversation-scroller="true"]'
+    );
+    if (!scroller) return null;
+
+    const before = scroller.scrollTop;
+    const maxScroll = scroller.scrollHeight - scroller.clientHeight;
+    scroller.scrollTop = before > 0 ? Math.max(0, before - 300) : Math.min(maxScroll, 300);
+    scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+
+    return {
+      after: scroller.scrollTop,
+      before,
+      clientHeight: scroller.clientHeight,
+      scrollHeight: scroller.scrollHeight,
+    };
+  });
+
+  expect(
+    scrollResult,
+    'conversation scroller should exist while the selected-text composer is fixed'
+  ).not.toBeNull();
+  expect(scrollResult!.scrollHeight).toBeGreaterThan(scrollResult!.clientHeight);
+  expect(scrollResult!.after).not.toBe(scrollResult!.before);
+}
+
 test.describe('message comments audit — desktop 1280x800', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false });
 
@@ -417,13 +445,14 @@ test.describe('message comments audit — desktop 1280x800', () => {
     });
     await openChat(page);
 
-    await expect(page.getByRole('heading', { name: 'Comments' })).toBeVisible();
+    await expect(page.getByRole('complementary', { name: 'Session comments' })).toHaveCount(0);
+    await page.getByRole('button', { name: /1 unresolved comment/i }).click();
+    const rail = page.getByRole('complementary', { name: 'Session comments' });
     await expect(
-      page.getByText('Seeded desktop rail comment on an offscreen message.')
+      rail.getByText('Seeded desktop rail comment on an offscreen message.')
     ).toBeVisible();
 
-    await page.getByRole('button', { name: /Message msg-3\s*View/i }).click();
-    const desktopTarget = page.getByText(/Assistant comment target 3/);
+    const desktopTarget = page.getByText(/Assistant mobile comment target 27/);
     await expect(desktopTarget).toBeVisible();
     await dragSelectText(page, desktopTarget);
 
@@ -431,15 +460,19 @@ test.describe('message comments audit — desktop 1280x800', () => {
     await expect(selectionDialog).toBeVisible();
     await selectionDialog.getByRole('button', { name: 'Comment' }).click();
 
-    const rail = page.locator('aside');
-    await expect(rail.getByText(/New comment on message msg-3/)).toBeVisible();
+    await expect(rail.getByText(/New comment on selected text msg-27/)).toBeVisible();
     await rail.getByLabel('Add a comment…').fill('Desktop note from selected message text.');
-    await rail.getByRole('button', { name: 'Comment' }).click();
+    await rail.getByRole('button', { name: 'Comment', exact: true }).click();
 
     const createdThread = await expectCommentThreadVisible(
       rail,
       'Desktop note from selected message text.'
     );
+    await expect
+      .poll(() => createdThread.getAttribute('data-comment-id'), {
+        message: 'created comment should settle from optimistic id to server id',
+      })
+      .toMatch(/^comment-created-/);
     const createdCommentId = await createdThread.getAttribute('data-comment-id');
     expect(createdCommentId).toBeTruthy();
     await expect(createdThread).toHaveAttribute('data-comment-status', 'open');
@@ -479,7 +512,7 @@ test.describe('message comments audit — desktop 1280x800', () => {
       .getByRole('button', { name: 'Comment', exact: true })
       .click();
 
-    const rail = page.locator('aside');
+    const rail = page.getByRole('complementary', { name: 'Session comments' });
     const field = rail.getByLabel('Add a comment…');
     await expect(field).toBeVisible();
     await field.fill('Typed first.');
@@ -537,18 +570,24 @@ test.describe('message comments audit — desktop 1280x800', () => {
     const controls = await setupApiMocks(page, { commentsMode: 'error-then-empty' });
     await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
 
-    await expect(page.getByText('Loading comments…')).toBeVisible();
+    await page.getByRole('button', { name: 'Show session details' }).click();
+    await page.getByRole('button', { name: 'Comments', exact: true }).click();
+    const rail = page.getByRole('complementary', { name: 'Session comments' });
+
+    await expect(rail.getByText('Loading comments…')).toBeVisible();
     await expect(
-      page.getByRole('alert').filter({ hasText: 'Comments failed to load.' })
+      rail.getByRole('alert').filter({ hasText: 'Comments failed to load.' })
     ).toBeVisible({
       timeout: 10_000,
     });
     await screenshot(page, 'message-comments-desktop-error-state');
 
     controls.clearCommentsError();
-    await page.getByRole('button', { name: 'Retry' }).click();
+    await rail.getByRole('button', { name: 'Retry' }).click();
     await expect(
-      page.getByText('Select text in a user or agent message to start a comment.')
+      rail.getByText(
+        'Select text in a user or agent message, or use a message Comment button to start a thread.'
+      )
     ).toBeVisible();
     await screenshot(page, 'message-comments-desktop-empty-state');
     await assertNoOverflow(page);
@@ -558,7 +597,7 @@ test.describe('message comments audit — desktop 1280x800', () => {
 test.describe('message comments audit — mobile 375x667', () => {
   test.use({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
 
-  test('uses coarse-pointer selection affordance and inline send-to-agent threads', async ({
+  test('uses coarse-pointer selection affordance and bottom composer for selected-text drafts', async ({
     page,
   }) => {
     await setupApiMocks(page);
@@ -572,12 +611,21 @@ test.describe('message comments audit — mobile 375x667', () => {
     await expect(actionBar.getByRole('button', { name: 'Comment on selection' })).toBeVisible();
     await actionBar.getByRole('button', { name: 'Comment on selection' }).click();
 
-    const mobilePanel = page.getByRole('region', { name: 'Message comments' }).last();
-    await mobilePanel
+    const bottomComposer = page.getByRole('region', {
+      name: 'Selected text comment composer',
+    });
+    await expect(bottomComposer).toBeVisible();
+    await expectConversationCanScrollBehindOverlay(page);
+    await expect(bottomComposer).toBeVisible();
+
+    await bottomComposer
       .getByLabel('Add a comment…')
       .fill('Mobile comment sent to agent from selected text.');
-    await mobilePanel.getByRole('radio', { name: 'Send to agent' }).check();
-    await mobilePanel.getByRole('button', { name: 'Comment & send' }).click();
+    await bottomComposer.getByRole('radio', { name: 'Send to agent' }).check();
+    await bottomComposer.getByRole('button', { name: 'Comment & send' }).click();
+
+    await expect(bottomComposer).toBeHidden();
+    const mobilePanel = page.getByRole('region', { name: 'Message comments' }).last();
 
     const thread = await expectCommentThreadVisible(
       mobilePanel,
@@ -589,7 +637,7 @@ test.describe('message comments audit — mobile 375x667', () => {
     ).toBeVisible();
     await expect(page.locator('aside')).toBeHidden();
 
-    await screenshot(page, 'message-comments-mobile-inline-send');
+    await screenshot(page, 'message-comments-mobile-bottom-composer-send');
     await assertNoOverflow(page);
   });
 
@@ -605,7 +653,7 @@ test.describe('message comments audit — mobile 375x667', () => {
       .getByRole('button', { name: 'Comment on selection' })
       .click();
 
-    const panel = page.getByRole('region', { name: 'Message comments' }).last();
+    const panel = page.getByRole('region', { name: 'Selected text comment composer' });
     const field = panel.getByLabel('Add a comment…');
     await expect(field).toBeVisible();
 
@@ -623,7 +671,9 @@ test.describe('message comments audit — mobile 375x667', () => {
     await expect(field).toHaveValue('Dictated from voice.');
 
     await panel.getByRole('button', { name: 'Comment', exact: true }).click();
-    await expectCommentThreadVisible(panel, 'Dictated from voice.');
+    await expect(panel).toBeHidden();
+    const messagePanel = page.getByRole('region', { name: 'Message comments' }).last();
+    await expectCommentThreadVisible(messagePanel, 'Dictated from voice.');
     await screenshot(page, 'message-comments-mobile-voice-submitted');
     await assertNoOverflow(page);
   });

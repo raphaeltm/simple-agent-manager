@@ -1,5 +1,6 @@
 import { Button } from '@simple-agent-manager/ui';
-import { useEffect, useState } from 'react';
+import { forwardRef, useEffect, useState } from 'react';
+import type { HTMLAttributes } from 'react';
 
 /**
  * Data the virtualized list's Header needs, threaded through Virtuoso's `context`
@@ -42,8 +43,13 @@ function ChatListHeader({ context }: { context?: ChatListContext }) {
   );
 }
 
+const ChatListScroller = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
+  (props, ref) => <div {...props} ref={ref} data-sam-conversation-scroller="true" />
+);
+ChatListScroller.displayName = 'ChatListScroller';
+
 /** Stable `components` object — see `ChatListHeader` for why this must not be inline. */
-export const CHAT_LIST_COMPONENTS = { Header: ChatListHeader };
+export const CHAT_LIST_COMPONENTS = { Header: ChatListHeader, Scroller: ChatListScroller };
 
 /**
  * Measures the floating header's rendered height so the message list can pad
