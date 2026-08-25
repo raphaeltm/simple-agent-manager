@@ -32,7 +32,7 @@ The visible failure is a twitchy CompletionDock center button: Stop/Interrupt an
 - [x] Add web unit tests for working→idle stabilization and reversal swallowing.
 - [x] Run the required local quality checks and Playwright visual audit for the changed chat UI surface.
 - [x] Run specialist reviews: task-completion-validator, go-specialist, ui-ux-specialist, test-engineer, constitution-validator, and env-validator.
-- [ ] Deploy to staging, verify the live app, and provision a VM to verify vm-agent heartbeat/workspace access because `packages/vm-agent` changes.
+- [x] Deploy to staging, verify the live app, and provision a VM to verify vm-agent heartbeat/workspace access because `packages/vm-agent` changes.
 - [x] Add the process fix to repository agent guidance.
 
 ## Acceptance criteria
@@ -74,3 +74,18 @@ High-frequency runtime lifecycle signals converted directly into unordered cross
 ### Process fix
 
 Update VM-agent guidance so high-frequency callback streams must be debounced/coalesced, single-flight, and regression-tested for ordering/cadence before they can mutate control-plane state.
+
+## Staging verification
+
+- Staging deployment run: `32838455761` — deploy and GitHub smoke-tests jobs passed.
+- Fresh staging VM run:
+  - Task: `01M0W9A19ZKHNRTED6QKGGBYW1`
+  - Chat session: `f719fc22-dbe1-4d97-a852-292fef0a3ee0`
+  - Node: `01M0W9A6P4GC57Z33PBN6SZYE7`
+  - Workspace: `01M0W9KMAKSADEY31MM4BG8XN6`
+  - ACP session: `01M0W9MVKG17N9RPWWYDHN3Z7V`
+- VM-agent system info on the fresh node reported branch build `a7b661f70f619d613b22bc6f32fca51b05aeb261` and Go `1.26.6`.
+- During active Codex runtime work, session state reported `activity=prompting`, `runtimeWorkState=active`, and `runtimeWorkCount=1`; the live UI exposed the CompletionDock `Interrupt agent` control.
+- After the prompt completed, state reported `activity=idle`, `runtimeWorkState=inactive`, and `runtimeWorkCount=0`; the live UI stabilized to `Sleep session`.
+- No browser console errors were observed during the live UI check.
+- Cleanup completed: `POST /sessions/:sessionId/stop` returned `workspaceDeleted=true`, and final staging `/api/nodes` plus `/api/workspaces` were both `[]`.
