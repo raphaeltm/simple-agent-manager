@@ -153,7 +153,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `ORCHESTRATOR_ZERO_TASK_GRACE_MS` — Grace before a zero-task mission terminalizes (default: `600000`)
 - `ORCHESTRATOR_MAX_MISSION_LIFETIME_MS` — Mission lifetime backstop (default: `86400000`)
 - `ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS` — ProjectData D1 reconciliation backstop interval for active parent waits (default: `30000`)
-- `ORCHESTRATOR_WAIT_MAX_CHILDREN` — Maximum direct children selected by one durable wait (default: `20`, hard ceiling: `90`)
+- `ORCHESTRATOR_WAIT_MAX_CHILDREN` — Maximum same-project task IDs selected by one durable wait (default: `20`, hard ceiling: `90`)
 - `ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT` — Maximum active durable parent waits per project (default: `100`)
 - `ORCHESTRATOR_WAIT_MAX_DURATION_MS` — Maximum finite durable wait deadline (default: `86400000`)
 - `ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM` — Maximum wait subscriptions reconciled by one ProjectData alarm (default: `10`)

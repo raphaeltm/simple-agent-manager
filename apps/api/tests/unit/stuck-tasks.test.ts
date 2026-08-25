@@ -143,6 +143,16 @@ function createMockEnv(
   } as unknown as Env;
 }
 
+function persistedRecoveryTypes(): unknown[] {
+  return vi
+    .mocked(persistError)
+    .mock.calls.map(([, payload]) => payload.context?.recoveryType);
+}
+
+function expectNoPersistedTaskRunnerMismatch(): void {
+  expect(persistedRecoveryTypes()).not.toContain('do_task_status_mismatch');
+}
+
 describe('recoverStuckTasks', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1054,6 +1064,185 @@ describe('recoverStuckTasks', () => {
   });
 
   describe('prompt dead-runtime reconciliation', () => {
+    function completedTaskRunnerStatus(currentStep = 'running') {
+      return {
+        completed: true,
+        currentStep,
+        retryCount: 0,
+        lastStepAt: Date.now() - 10 * 60 * 1000,
+      };
+    }
+
+    function activeHandoffResponses(taskId: string) {
+      const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+      const recentHeartbeat = new Date(Date.now() - 30 * 1000).toISOString();
+      return new Map<string, { results: unknown[]; changes?: number }>([
+        [
+          "status IN ('queued', 'delegated', 'in_progress')",
+          {
+            results: [
+              {
+                id: taskId,
+                project_id: 'proj-1',
+                user_id: 'user-1',
+                status: 'in_progress',
+                execution_step: 'running',
+                updated_at: threeHoursAgo,
+                started_at: threeHoursAgo,
+                workspace_id: 'ws-1',
+                auto_provisioned_node_id: 'node-1',
+                chat_session_id: 'chat-1',
+              },
+            ],
+          },
+        ],
+        [
+          'w.chat_session_id',
+          {
+            results: [
+              {
+                workspace_status: 'running',
+                chat_session_id: 'chat-1',
+                node_id: 'node-1',
+                node_status: 'running',
+                health_status: 'healthy',
+                last_heartbeat_at: recentHeartbeat,
+                node_runtime: 'vm',
+              },
+            ],
+          },
+        ],
+      ]);
+    }
+
+    function deletedSnapshotHandoffResponses(taskId: string) {
+      const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+      const sleepingAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      return new Map<string, { results: unknown[]; changes?: number }>([
+        [
+          "status IN ('queued', 'delegated', 'in_progress')",
+          {
+            results: [
+              {
+                id: taskId,
+                project_id: 'proj-1',
+                user_id: 'user-1',
+                status: 'in_progress',
+                execution_step: 'awaiting_followup',
+                updated_at: threeHoursAgo,
+                started_at: threeHoursAgo,
+                workspace_id: 'ws-1',
+                auto_provisioned_node_id: 'node-1',
+                chat_session_id: 'chat-1',
+              },
+            ],
+          },
+        ],
+        [
+          'w.chat_session_id',
+          {
+            results: [
+              {
+                workspace_status: 'deleted',
+                chat_session_id: 'chat-1',
+                node_id: 'node-1',
+                node_status: 'deleted',
+                health_status: 'stale',
+                last_heartbeat_at: threeHoursAgo,
+                node_runtime: 'vm',
+              },
+            ],
+          },
+        ],
+        [
+          'FROM session_snapshots',
+          {
+            results: [
+              {
+                chat_session_id: 'chat-1',
+                project_id: 'proj-1',
+                workspace_id: 'ws-1',
+                sleeping_at: sleepingAt,
+                sleep_status: 'sleeping',
+                expires_at: expiresAt,
+                status: 'available',
+                degradation: 'none',
+                recovery_attempts: 0,
+              },
+            ],
+          },
+        ],
+      ]);
+    }
+
+    function liveSupersededHandoffResponses(taskId: string) {
+      const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+      return new Map<string, { results: unknown[]; changes?: number }>([
+        [
+          "status IN ('queued', 'delegated', 'in_progress')",
+          {
+            results: [
+              {
+                id: taskId,
+                project_id: 'proj-1',
+                user_id: 'user-1',
+                status: 'in_progress',
+                execution_step: 'running',
+                updated_at: threeHoursAgo,
+                started_at: threeHoursAgo,
+                workspace_id: 'ws-1',
+                auto_provisioned_node_id: 'node-1',
+                chat_session_id: null,
+              },
+            ],
+          },
+        ],
+        [
+          'w.chat_session_id',
+          {
+            results: [
+              {
+                workspace_status: 'deleted',
+                chat_session_id: null,
+                node_id: 'node-1',
+                node_status: 'deleted',
+                health_status: 'stale',
+                last_heartbeat_at: threeHoursAgo,
+                node_runtime: 'vm',
+              },
+            ],
+          },
+        ],
+        ['owner.status NOT IN', { results: [{ found: 1 }] }],
+      ]);
+    }
+
+    function queuedCompletedMismatchResponses(taskId: string) {
+      const sixMinutesAgo = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+      return new Map<string, { results: unknown[]; changes?: number }>([
+        [
+          "status IN ('queued', 'delegated', 'in_progress')",
+          {
+            results: [
+              {
+                id: taskId,
+                project_id: 'proj-1',
+                user_id: 'user-1',
+                status: 'queued',
+                execution_step: 'agent_session',
+                updated_at: sixMinutesAgo,
+                started_at: null,
+                workspace_id: null,
+                auto_provisioned_node_id: null,
+                chat_session_id: 'chat-queued',
+              },
+            ],
+          },
+        ],
+      ]);
+    }
+
     function resumableRuntimeResponses(workspaceStatus: 'sleeping' | 'recovery') {
       const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
       return new Map<string, { results: unknown[]; changes?: number }>([
@@ -1220,6 +1409,125 @@ describe('recoverStuckTasks', () => {
         status: null,
         error: expect.stringContaining('exceeded 1ms'),
       });
+    });
+
+    it('does not persist a D1 mismatch warning for a live completed TaskRunner handoff', async () => {
+      const env = createMockEnv(
+        activeHandoffResponses('task-live-handoff'),
+        { TASK_DO_MISMATCH_GRACE_MS: '60000' },
+        completedTaskRunnerStatus()
+      );
+
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(0);
+      expect(result.deadRuntimeReconciled).toBe(0);
+      expect(result.doHealthChecked).toBe(1);
+      expectNoPersistedTaskRunnerMismatch();
+      expect(env.OBSERVABILITY_DATABASE.prepare).not.toHaveBeenCalled();
+    });
+
+    it('does not persist a D1 mismatch warning for a restorable completed handoff', async () => {
+      const env = createMockEnv(
+        deletedSnapshotHandoffResponses('task-restorable-handoff'),
+        { TASK_DO_MISMATCH_GRACE_MS: '60000' },
+        completedTaskRunnerStatus()
+      );
+
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(0);
+      expect(result.deadRuntimeReconciled).toBe(0);
+      expect(result.doHealthChecked).toBe(1);
+      expectNoPersistedTaskRunnerMismatch();
+      expect(env.OBSERVABILITY_DATABASE.prepare).not.toHaveBeenCalled();
+    });
+
+    it('does not persist a D1 mismatch warning for a live-superseded completed handoff', async () => {
+      const env = createMockEnv(
+        liveSupersededHandoffResponses('task-live-superseded-handoff'),
+        { TASK_DO_MISMATCH_GRACE_MS: '60000' },
+        completedTaskRunnerStatus()
+      );
+
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(0);
+      expect(result.deadRuntimeReconciled).toBe(0);
+      expect(result.doHealthChecked).toBe(1);
+      expectNoPersistedTaskRunnerMismatch();
+      expect(env.OBSERVABILITY_DATABASE.prepare).not.toHaveBeenCalled();
+    });
+
+    it('still reconciles a conclusively dead runtime after a completed TaskRunner handoff', async () => {
+      const env = createMockEnv(
+        deadRuntimeResponses('task-dead-completed-handoff'),
+        { TASK_DO_MISMATCH_GRACE_MS: '60000' },
+        completedTaskRunnerStatus()
+      );
+
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(1);
+      expect(result.deadRuntimeReconciled).toBe(1);
+      expect(result.doHealthChecked).toBe(1);
+      expectNoPersistedTaskRunnerMismatch();
+      expect(syncTriggerExecutionMock).toHaveBeenCalledWith(
+        env.DATABASE,
+        'task-dead-completed-handoff',
+        'failed',
+        expect.stringContaining('workspace_deleted')
+      );
+    });
+
+    it('persists one diagnostic for a completed TaskRunner before normal handoff convergence', async () => {
+      const env = createMockEnv(
+        queuedCompletedMismatchResponses('task-queued-do-completed'),
+        { TASK_DO_MISMATCH_GRACE_MS: '60000' },
+        completedTaskRunnerStatus('agent_session')
+      );
+
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedQueued).toBe(0);
+      expect(result.doHealthChecked).toBe(1);
+      expect(persistError).toHaveBeenCalledWith(
+        env.OBSERVABILITY_DATABASE,
+        expect.objectContaining({
+          source: 'api',
+          level: 'warn',
+          message: expect.stringContaining(
+            "TaskRunner DO reports completed at 'agent_session' while task remains 'queued'"
+          ),
+          context: expect.objectContaining({
+            recoveryType: 'do_task_status_mismatch',
+            mismatchKind: 'completed_before_running_handoff',
+            taskId: 'task-queued-do-completed',
+            taskStatus: 'queued',
+            doCurrentStep: 'agent_session',
+            livenessReason: null,
+          }),
+        }),
+        env
+      );
+    });
+
+    it('does not repeat an existing completed-DO active-task diagnostic', async () => {
+      const env = createMockEnv(
+        queuedCompletedMismatchResponses('task-queued-do-completed-once'),
+        { TASK_DO_MISMATCH_GRACE_MS: '60000' },
+        completedTaskRunnerStatus('agent_session')
+      );
+      env.OBSERVABILITY_DATABASE = {
+        prepare: vi.fn().mockReturnValue(mockPreparedStatement([{ id: 'existing-warning' }])),
+      } as unknown as D1Database;
+
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedQueued).toBe(0);
+      expect(result.doHealthChecked).toBe(1);
+      expectNoPersistedTaskRunnerMismatch();
+      expect(env.OBSERVABILITY_DATABASE.prepare).toHaveBeenCalledTimes(1);
     });
 
     it('reports the exact read-only reconciliation decision for admins', async () => {
