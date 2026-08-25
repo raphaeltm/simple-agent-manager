@@ -32,6 +32,28 @@ When a remote system (VM) is responsible for triggering its own cleanup:
 3. **Both paths must use the same deletion logic** — reuse `deleteServer()`, `deleteDNSRecord()`, `cleanupWorkspaceDNSRecords()`
 4. **Guard against duplicate execution** — Use DB status transitions (`running` -> `stopping`) as a lock.
 
+## High-Frequency Callback Signals
+
+When the VM agent converts high-frequency runtime or harness lifecycle signals
+into HTTP callbacks to the control plane, do not post one callback per edge.
+
+Required pattern:
+
+1. **Coalesce before crossing the network** — debounce bursts and send the latest
+   resolved state after a short quiet window.
+2. **Serialize callback sends per signal source** — one source must not have
+   multiple in-flight POSTs that can arrive out of order and overwrite each
+   other.
+3. **Read authoritative local state at send time** — edge handlers may record
+   intent, but they must not capture a status value that can become stale before
+   the POST lands.
+4. **Dedupe only after success** — failed POST attempts must not update the
+   "last successfully reported" state; periodic re-report loops remain the
+   reliability backstop.
+5. **Test cadence and ordering** — regression tests must prove bursts collapse,
+   turn-boundary stale reports are suppressed, and semantically new payloads
+   such as runtime-work lease changes still reach the control plane.
+
 ## Modifying Cloud-Init
 
 1. Edit `packages/cloud-init/src/template.ts`

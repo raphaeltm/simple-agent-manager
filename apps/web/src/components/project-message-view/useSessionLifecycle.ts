@@ -48,6 +48,7 @@ import {
   VIRTUAL_START,
 } from './types';
 import { useActivityVerifyTimer } from './useActivityVerifyTimer';
+import { useCompletionDockWorking } from './useCompletionDockWorking';
 import { useConnectionRecovery } from './useConnectionRecovery';
 import { useSessionFileUpload } from './useSessionFileUpload';
 import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
@@ -140,6 +141,7 @@ export function useSessionLifecycle(
   const [followUp, setFollowUp] = useState('');
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
+  const completionDockWorking = useCompletionDockWorking(agentActivity);
   const sleepingWakePendingRef = useRef(false);
   const [currentPlan, setCurrentPlan] = useState<SessionStateSnapshot['currentPlan']>(null);
   const [promptStartedAt, setPromptStartedAt] = useState<number | null>(null);
@@ -649,7 +651,7 @@ export function useSessionLifecycle(
   // Cancel the current in-flight prompt via REST API
   const cancellingRef = useRef(false);
   const handleCancelPrompt = useCallback(() => {
-    if (agentActivity === 'idle' || cancellingRef.current) return;
+    if (!completionDockWorking || cancellingRef.current) return;
     cancellingRef.current = true;
     cancelAgentPrompt(projectId, sessionId)
       .then(() => {
@@ -661,7 +663,7 @@ export function useSessionLifecycle(
       .finally(() => {
         cancellingRef.current = false;
       });
-  }, [agentActivity, projectId, sessionId]);
+  }, [completionDockWorking, projectId, sessionId]);
 
   // Load more (pagination)
   const loadMore = async () => {
@@ -763,6 +765,7 @@ export function useSessionLifecycle(
     showConnectionBanner: recovery.showConnectionBanner,
     retryWs,
     agentActivity,
+    completionDockWorking,
     /** True while a wake is in flight (hydrated from D1 or pushed over the socket). */
     isWaking: wake.isWaking,
     /** Current wake phase, or null before the replacement runner reports a step. */

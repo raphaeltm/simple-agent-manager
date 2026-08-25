@@ -186,6 +186,9 @@ type GatewayConfig struct {
 	// ActivityRereportInterval refreshes prompt activity while a prompt is active.
 	// Zero disables the periodic re-report loop.
 	ActivityRereportInterval time.Duration
+	// HarnessActivityReportDebounce coalesces high-frequency harness lifecycle
+	// edges before making activity callbacks. Zero uses the package default.
+	HarnessActivityReportDebounce time.Duration
 
 	// Bounds on a single Claude harness lifecycle notification. Zero falls back
 	// to the package defaults so existing constructions stay safe.

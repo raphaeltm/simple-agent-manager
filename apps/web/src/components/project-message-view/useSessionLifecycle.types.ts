@@ -42,6 +42,8 @@ export interface UseSessionLifecycleResult {
   showConnectionBanner: boolean;
   retryWs: () => void;
   agentActivity: AgentActivityState;
+  /** Debounced working signal used only by CompletionDock to swallow brief idle reversals. */
+  completionDockWorking: boolean;
   /** True while a wake is in flight (hydrated from D1 or pushed over the socket). */
   isWaking: boolean;
   /** Current wake phase, or null before the replacement runner reports a step. */

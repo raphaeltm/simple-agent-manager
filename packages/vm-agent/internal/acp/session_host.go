@@ -309,14 +309,19 @@ type SessionHost struct {
 	harnessWork           harnessWorkStatus
 	harnessTaskIDs        map[string]struct{}
 	harnessActivityCancel context.CancelFunc
-	// harnessReportPending single-flights the activity report triggered by a
-	// harness lifecycle notification. The ACP notification goroutine must never
-	// call reportActivity inline: reportActivity takes mu.RLock for its
-	// agentType/restartCount/statusErr snapshot, which is exactly the block the
-	// lock-free mirrors above exist to avoid. Handing the report to a short-lived
-	// goroutine keeps the notification worker unblocked, and coalescing stops a
-	// chatty harness from spawning one retried HTTP POST per message.
-	harnessReportPending atomic.Bool
+	// harnessReportMu owns the debounced, single-flight activity reporter
+	// triggered by harness lifecycle notifications. The ACP notification
+	// goroutine must never call reportActivity inline: reportActivity takes
+	// mu.RLock for its agentType/restartCount/statusErr snapshot, which is
+	// exactly the block the lock-free mirrors above exist to avoid.
+	harnessReportMu       sync.Mutex
+	harnessReportTimer    *time.Timer
+	harnessReportSequence uint64
+	harnessReportRunning  bool
+	harnessReportPending  bool
+	lastActivityReportMu  sync.Mutex
+	lastActivityReport    activityReportSnapshot
+	lastActivityReportSet bool
 	// activePromptID identifies the in-flight prompt associated with promptCancel.
 	// Protected by promptCancelMu.
 	activePromptID uint64

@@ -176,11 +176,82 @@ type activityPayload struct {
 	RuntimeWorkProgressAt *int64  `json:"runtimeWorkProgressAt,omitempty"`
 }
 
+type activityReportRequest struct {
+	activity      string
+	url           string
+	callbackToken string
+	payload       activityPayload
+}
+
+type activityReportSnapshot struct {
+	Activity                 string
+	NodeID                   string
+	PromptStartedAt          int64
+	HasPromptStartedAt       bool
+	AgentType                string
+	RestartCount             int
+	StatusError              string
+	HasStatusError           bool
+	RuntimeWorkState         string
+	RuntimeWorkCount         int
+	HasRuntimeWorkCount      bool
+	RuntimeWorkSource        string
+	RuntimeWorkProgressAt    int64
+	HasRuntimeWorkProgressAt bool
+}
+
+func activityReportSnapshotFromPayload(payload activityPayload) activityReportSnapshot {
+	snapshot := activityReportSnapshot{
+		Activity:          payload.Activity,
+		NodeID:            payload.NodeID,
+		AgentType:         payload.AgentType,
+		RestartCount:      payload.RestartCount,
+		RuntimeWorkState:  payload.RuntimeWorkState,
+		RuntimeWorkSource: payload.RuntimeWorkSource,
+	}
+	if payload.PromptStartedAt != nil {
+		snapshot.PromptStartedAt = *payload.PromptStartedAt
+		snapshot.HasPromptStartedAt = true
+	}
+	if payload.StatusError != nil {
+		snapshot.StatusError = *payload.StatusError
+		snapshot.HasStatusError = true
+	}
+	if payload.RuntimeWorkCount != nil {
+		snapshot.RuntimeWorkCount = *payload.RuntimeWorkCount
+		snapshot.HasRuntimeWorkCount = true
+	}
+	if payload.RuntimeWorkProgressAt != nil {
+		snapshot.RuntimeWorkProgressAt = *payload.RuntimeWorkProgressAt
+		snapshot.HasRuntimeWorkProgressAt = true
+	}
+	return snapshot
+}
+
 // reportActivity sends a durable activity signal to the control plane.
 // Prompting reports stay cheap because the periodic re-report loop self-heals
 // missed starts; terminal/error reports use a larger retry budget.
 // activity should be "prompting", "idle", "recovering", or "error".
 func (h *SessionHost) reportActivity(activity string) {
+	request, ok := h.prepareActivityReport(activity)
+	if !ok {
+		return
+	}
+	go h.sendActivityReport(request)
+}
+
+func (h *SessionHost) reportCoalescedHarnessActivity() {
+	request, ok := h.prepareActivityReport(h.activityForHarnessWork())
+	if !ok {
+		return
+	}
+	if h.successfulActivityReportMatches(request.payload) {
+		return
+	}
+	h.sendActivityReport(request)
+}
+
+func (h *SessionHost) prepareActivityReport(activity string) (activityReportRequest, bool) {
 	// h.config fields are immutable after construction — no lock needed.
 	projectID := h.config.ProjectID
 	nodeID := h.config.NodeID
@@ -194,7 +265,7 @@ func (h *SessionHost) reportActivity(activity string) {
 			"hasNodeID", nodeID != "",
 			"hasControlPlaneURL", controlPlaneURL != "",
 			"hasSessionID", sessionID != "")
-		return
+		return activityReportRequest{}, false
 	}
 
 	// Snapshot state under read lock for the enhanced payload.
@@ -234,39 +305,62 @@ func (h *SessionHost) reportActivity(activity string) {
 		payload.StatusError = &redactedStatusErr
 	}
 
-	go func() {
-		url := strings.TrimRight(controlPlaneURL, "/") +
-			"/api/projects/" + projectID + "/acp-sessions/" + sessionID + "/activity"
+	return activityReportRequest{
+		activity: activity,
+		url: strings.TrimRight(controlPlaneURL, "/") +
+			"/api/projects/" + projectID + "/acp-sessions/" + sessionID + "/activity",
+		callbackToken: callbackToken,
+		payload:       payload,
+	}, true
+}
 
-		body, err := json.Marshal(payload)
-		if err != nil {
-			slog.Warn("reportActivity: marshal failed", "error", err)
-			return
-		}
+func (h *SessionHost) sendActivityReport(request activityReportRequest) bool {
+	body, err := json.Marshal(request.payload)
+	if err != nil {
+		slog.Warn("reportActivity: marshal failed", "error", err)
+		return false
+	}
 
-		maxAttempts, retryBackoff := h.activityReportRetryPolicy(activity)
-		for attempt := 1; attempt <= maxAttempts; attempt++ {
-			statusCode, doErr := h.doActivityRequest(url, body, callbackToken)
-			if doErr != nil {
-				if attempt < maxAttempts {
-					slog.Info("reportActivity: attempt failed, retrying", "attempt", attempt, "error", doErr)
-					time.Sleep(retryBackoff)
-					continue
-				}
-				slog.Warn("reportActivity: all attempts failed", "error", doErr)
-				return
-			}
-			if statusCode >= 500 && attempt < maxAttempts {
-				slog.Info("reportActivity: server error, retrying", "status", statusCode)
+	maxAttempts, retryBackoff := h.activityReportRetryPolicy(request.activity)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		statusCode, doErr := h.doActivityRequest(request.url, body, request.callbackToken)
+		if doErr != nil {
+			if attempt < maxAttempts {
+				slog.Info("reportActivity: attempt failed, retrying", "attempt", attempt, "error", doErr)
 				time.Sleep(retryBackoff)
 				continue
 			}
-			if statusCode >= 400 {
-				slog.Warn("reportActivity: non-2xx response", "status", statusCode)
-			}
-			return
+			slog.Warn("reportActivity: all attempts failed", "error", doErr)
+			return false
 		}
-	}()
+		if statusCode >= 500 && attempt < maxAttempts {
+			slog.Info("reportActivity: server error, retrying", "status", statusCode)
+			time.Sleep(retryBackoff)
+			continue
+		}
+		if statusCode >= 400 {
+			slog.Warn("reportActivity: non-2xx response", "status", statusCode)
+			return false
+		}
+		h.recordSuccessfulActivityReport(request.payload)
+		return true
+	}
+	return false
+}
+
+func (h *SessionHost) successfulActivityReportMatches(payload activityPayload) bool {
+	snapshot := activityReportSnapshotFromPayload(payload)
+	h.lastActivityReportMu.Lock()
+	defer h.lastActivityReportMu.Unlock()
+	return h.lastActivityReportSet && h.lastActivityReport == snapshot
+}
+
+func (h *SessionHost) recordSuccessfulActivityReport(payload activityPayload) {
+	snapshot := activityReportSnapshotFromPayload(payload)
+	h.lastActivityReportMu.Lock()
+	h.lastActivityReport = snapshot
+	h.lastActivityReportSet = true
+	h.lastActivityReportMu.Unlock()
 }
 
 func (h *SessionHost) activityReportRetryPolicy(activity string) (int, time.Duration) {

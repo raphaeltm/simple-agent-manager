@@ -291,6 +291,7 @@ func (c *Config) Validate() error {
 		{"DEVCONTAINER_CACHE_PUSH_TIMEOUT", c.DevcontainerCachePushTimeout},
 		{"ACP_CREDENTIAL_SYNC_TIMEOUT", c.ACPCredentialSyncTimeout},
 		{"ACP_ACTIVITY_REPORT_TIMEOUT", c.ACPActivityReportTimeout},
+		{"ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE", c.ACPHarnessActivityReportDebounce},
 		{"JWKS_FETCH_TIMEOUT", c.JWKSFetchTimeout},
 	}
 	for _, timeout := range requiredTimeouts {

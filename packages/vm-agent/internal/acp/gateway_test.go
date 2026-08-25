@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 // Tests for OAuth support
@@ -1949,6 +1950,20 @@ func TestActivityReportTimeoutPreservesLegacyDefaultAndOverride(t *testing.T) {
 	h.config.ActivityReportTimeout = 17 * time.Second
 	if got := h.activityReportTimeout(); got != 17*time.Second {
 		t.Fatalf("activityReportTimeout() = %v, want configured 17s", got)
+	}
+}
+
+func TestHarnessActivityReportDebouncePreservesDefaultAndOverride(t *testing.T) {
+	t.Parallel()
+
+	h := &SessionHost{config: SessionHostConfig{GatewayConfig: GatewayConfig{}}}
+	if got := h.harnessActivityReportDebounce(); got != config.DefaultACPHarnessActivityReportDebounce {
+		t.Fatalf("harnessActivityReportDebounce() = %v, want default %v", got, config.DefaultACPHarnessActivityReportDebounce)
+	}
+
+	h.config.HarnessActivityReportDebounce = 875 * time.Millisecond
+	if got := h.harnessActivityReportDebounce(); got != 875*time.Millisecond {
+		t.Fatalf("harnessActivityReportDebounce() = %v, want configured 875ms", got)
 	}
 }
 

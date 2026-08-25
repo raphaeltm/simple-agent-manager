@@ -448,19 +448,191 @@ func TestACPToolCallActivityReportsOnlyNormalizedState(t *testing.T) {
 	}
 }
 
+func TestHarnessActivityReportCoalescesACPToolCallBursts(t *testing.T) {
+	t.Parallel()
+
+	reports := newActivityReportCapture(t)
+	debounce := 20 * time.Millisecond
+
+	_, client := newHarnessWorkTestClient(t, SessionHostConfig{GatewayConfig: GatewayConfig{
+		ProjectID:                      "project",
+		NodeID:                         "node",
+		SessionID:                      "sam-session",
+		ControlPlaneURL:                reports.server.URL,
+		CallbackToken:                  "token",
+		HTTPClient:                     reports.server.Client(),
+		HarnessActivityReportDebounce:  debounce,
+		TerminalActivityReportAttempts: 1,
+	}}, "openai-codex", "acp-session", HostPrompting)
+
+	notifyACPToolCall(t, client, "acp-session", "tool-1", "Read file", acpsdk.ToolCallStatusPending, nil)
+	for range 12 {
+		notifyACPToolCallUpdate(t, client, "acp-session", "tool-1", nil)
+	}
+
+	waitFor(t, 300*time.Millisecond, func() bool {
+		return reports.count() == 1
+	})
+	time.Sleep(3 * debounce)
+	if got := reports.count(); got != 1 {
+		t.Fatalf("tool-call burst was not coalesced: reports=%d", got)
+	}
+
+	_, payloads := reports.snapshot()
+	payload := payloads[0]
+	if payload.Activity != "prompting" {
+		t.Fatalf("coalesced activity = %q, want prompting", payload.Activity)
+	}
+	if payload.RuntimeWorkState != string(harnessWorkActive) ||
+		payload.RuntimeWorkCount == nil ||
+		*payload.RuntimeWorkCount != 1 ||
+		payload.RuntimeWorkSource != acpToolCallWorkSource {
+		t.Fatalf("coalesced runtime-work payload = %#v", payload)
+	}
+}
+
+func TestHarnessActivityReportDebounceReadsStatusAfterPromptDone(t *testing.T) {
+	t.Parallel()
+
+	reports := newActivityReportCapture(t)
+	debounce := 40 * time.Millisecond
+
+	host, client := newHarnessWorkTestClient(t, SessionHostConfig{GatewayConfig: GatewayConfig{
+		ProjectID:                     "project",
+		NodeID:                        "node",
+		SessionID:                     "sam-session",
+		ControlPlaneURL:               reports.server.URL,
+		CallbackToken:                 "token",
+		HTTPClient:                    reports.server.Client(),
+		HarnessActivityReportDebounce: debounce,
+	}}, "openai-codex", "acp-session", HostPrompting)
+
+	notifyACPToolCall(t, client, "acp-session", "tool-orphan", "Run command", acpsdk.ToolCallStatusInProgress, nil)
+	time.Sleep(debounce / 4)
+	if got := reports.count(); got != 0 {
+		t.Fatalf("harness report fired before debounce elapsed: reports=%d", got)
+	}
+
+	endPromptTurn(t, host, "end_turn", nil)
+	waitFor(t, 300*time.Millisecond, func() bool {
+		return reports.count() >= 1
+	})
+	time.Sleep(3 * debounce)
+
+	_, payloads := reports.snapshot()
+	idleSeen := false
+	for _, payload := range payloads {
+		if payload.Activity == "prompting" {
+			t.Fatalf("stale prompting report escaped after prompt done: payloads=%#v", payloads)
+		}
+		if payload.Activity == "idle" {
+			idleSeen = true
+		}
+	}
+	if !idleSeen {
+		t.Fatalf("prompt done did not report idle: payloads=%#v", payloads)
+	}
+}
+
+func TestPromptReportsUpdateHarnessCoalescerSuccessfulSnapshot(t *testing.T) {
+	t.Parallel()
+
+	reports := newActivityReportCapture(t)
+	debounce := 15 * time.Millisecond
+
+	host := NewSessionHost(SessionHostConfig{GatewayConfig: GatewayConfig{
+		ProjectID:                     "project",
+		NodeID:                        "node",
+		SessionID:                     "sam-session",
+		ControlPlaneURL:               reports.server.URL,
+		CallbackToken:                 "token",
+		HTTPClient:                    reports.server.Client(),
+		HarnessActivityReportDebounce: debounce,
+	}})
+	t.Cleanup(host.Stop)
+
+	host.markPromptStarted(acpsdk.SessionId("acp-session"), 1, "viewer-1")
+	waitForActivitySnapshot(t, host, "prompting")
+	host.nudgeHarnessActivityReport()
+	time.Sleep(3 * debounce)
+	if got := reports.count(); got != 1 {
+		t.Fatalf("coalescer re-sent successful prompt-start snapshot: reports=%d", got)
+	}
+
+	host.markPromptDone()
+	waitForActivitySnapshot(t, host, "idle")
+	host.nudgeHarnessActivityReport()
+	time.Sleep(3 * debounce)
+	if got := reports.count(); got != 2 {
+		t.Fatalf("coalescer re-sent successful prompt-done snapshot: reports=%d", got)
+	}
+}
+
+func TestFailedHarnessActivityReportDoesNotUpdateCoalescerSnapshot(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	fail := true
+	reports := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		reports++
+		shouldFail := fail
+		mu.Unlock()
+		if shouldFail {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	debounce := 10 * time.Millisecond
+	host := NewSessionHost(SessionHostConfig{GatewayConfig: GatewayConfig{
+		ProjectID:                      "project",
+		NodeID:                         "node",
+		SessionID:                      "sam-session",
+		ControlPlaneURL:                server.URL,
+		CallbackToken:                  "token",
+		HTTPClient:                     server.Client(),
+		HarnessActivityReportDebounce:  debounce,
+		TerminalActivityReportAttempts: 1,
+	}})
+	t.Cleanup(host.Stop)
+	host.setStatus(HostReady, "")
+
+	host.nudgeHarnessActivityReport()
+	waitFor(t, 300*time.Millisecond, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return reports == 1
+	})
+
+	mu.Lock()
+	fail = false
+	mu.Unlock()
+	host.nudgeHarnessActivityReport()
+	waitFor(t, 300*time.Millisecond, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return reports == 2
+	})
+}
+
 func TestHarnessActivityReportsOnlyNormalizedStateAndRereportsActiveWork(t *testing.T) {
 	t.Parallel()
 
 	reports := newActivityReportCapture(t)
 
 	host, client := newHarnessWorkTestClient(t, SessionHostConfig{GatewayConfig: GatewayConfig{
-		ProjectID:                "project",
-		NodeID:                   "node",
-		SessionID:                "sam-session",
-		ControlPlaneURL:          reports.server.URL,
-		CallbackToken:            "token",
-		HTTPClient:               reports.server.Client(),
-		ActivityRereportInterval: 10 * time.Millisecond,
+		ProjectID:                     "project",
+		NodeID:                        "node",
+		SessionID:                     "sam-session",
+		ControlPlaneURL:               reports.server.URL,
+		CallbackToken:                 "token",
+		HTTPClient:                    reports.server.Client(),
+		HarnessActivityReportDebounce: 10 * time.Millisecond,
+		ActivityRereportInterval:      10 * time.Millisecond,
 	}}, "claude-code", "sdk-session", HostReady)
 
 	notifyClaudeLifecycle(t, client, `{
@@ -590,6 +762,18 @@ func notifyClaudeLifecycle(t *testing.T, client *sessionHostClient, payload stri
 	if _, err := client.HandleExtensionMethod(context.Background(), claudeSDKMessageMethod, json.RawMessage(payload)); err != nil {
 		t.Fatalf("HandleExtensionMethod: %v", err)
 	}
+}
+
+func waitForActivitySnapshot(t *testing.T, host *SessionHost, activity string) {
+	t.Helper()
+
+	waitFor(t, 300*time.Millisecond, func() bool {
+		request, ok := host.prepareActivityReport(activity)
+		if !ok {
+			return false
+		}
+		return host.successfulActivityReportMatches(request.payload)
+	})
 }
 
 func newHarnessWorkTestClient(t *testing.T, config SessionHostConfig, agentType string, sessionID string, status SessionHostStatus) (*SessionHost, *sessionHostClient) {

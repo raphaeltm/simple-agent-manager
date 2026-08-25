@@ -43,6 +43,11 @@ const (
 	// prompt is in flight. Override via ACTIVITY_REREPORT_INTERVAL.
 	DefaultACPActivityRereportInterval = 60 * time.Second
 
+	// DefaultACPHarnessActivityReportDebounce coalesces high-frequency harness
+	// lifecycle edges before reporting durable activity. Override via
+	// ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE.
+	DefaultACPHarnessActivityReportDebounce = 750 * time.Millisecond
+
 	// DefaultClaudeHarnessLifecycleMaxBytes bounds a single `_claude/sdkMessage`
 	// extension notification. Override via CLAUDE_HARNESS_LIFECYCLE_MAX_BYTES.
 	DefaultClaudeHarnessLifecycleMaxBytes = 64 * 1024
@@ -254,6 +259,7 @@ type Config struct {
 	ACPNotifSerializeTimeout          time.Duration // Max wait for previous notification processing before delivering next (default: 5s)
 	ACPHeartbeatInterval              time.Duration // Interval for direct ACP session heartbeats to control plane (default: 60s, env: ACP_HEARTBEAT_INTERVAL)
 	ACPActivityRereportInterval       time.Duration // Re-report prompting while a prompt is active (default: 60s, env: ACTIVITY_REREPORT_INTERVAL)
+	ACPHarnessActivityReportDebounce  time.Duration // Debounce high-frequency harness activity reports (default: 750ms, env: ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE)
 	ClaudeHarnessLifecycleMaxBytes    int           // Max bytes per harness lifecycle notification (default: 65536, env: CLAUDE_HARNESS_LIFECYCLE_MAX_BYTES)
 	ClaudeHarnessLifecycleMaxTasks    int           // Max tracked background tasks per snapshot (default: 256, env: CLAUDE_HARNESS_LIFECYCLE_MAX_TASKS)
 	ClaudeHarnessLifecycleMaxIDBytes  int           // Max identifier length in a lifecycle notification (default: 256, env: CLAUDE_HARNESS_LIFECYCLE_MAX_ID_BYTES)

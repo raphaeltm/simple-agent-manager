@@ -420,6 +420,7 @@ func New(cfg *config.Config) (*Server, error) {
 		PromptRetryInitialDelay:          cfg.ACPPromptRetryInitial,
 		PromptRetryMaxDelay:              cfg.ACPPromptRetryMax,
 		ActivityRereportInterval:         cfg.ACPActivityRereportInterval,
+		HarnessActivityReportDebounce:    cfg.ACPHarnessActivityReportDebounce,
 		ClaudeHarnessLifecycleMaxBytes:   cfg.ClaudeHarnessLifecycleMaxBytes,
 		ClaudeHarnessLifecycleMaxTasks:   cfg.ClaudeHarnessLifecycleMaxTasks,
 		ClaudeHarnessLifecycleMaxIDBytes: cfg.ClaudeHarnessLifecycleMaxIDBytes,

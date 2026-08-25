@@ -682,9 +682,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           is only the primary action after the reversible sleep boundary. */}
       {isActive &&
         canWriteSession &&
-        (lc.agentActivity !== 'idle' || canSleepSession || canArchiveSession) && (
+        (lc.completionDockWorking || canSleepSession || canArchiveSession) && (
           <CompletionDock
-            working={lc.agentActivity !== 'idle'}
+            working={lc.completionDockWorking}
             centerAction={dockCenterAction}
             hasPlan={!!planItem}
             onInterrupt={lc.handleCancelPrompt}

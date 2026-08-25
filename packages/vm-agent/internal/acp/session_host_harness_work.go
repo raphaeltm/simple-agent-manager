@@ -7,6 +7,7 @@ import (
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 const (
@@ -158,6 +159,7 @@ func (h *SessionHost) matchesHarnessSession(outerSessionID, innerSessionID strin
 }
 
 func (h *SessionHost) resetHarnessWorkForAgent(agentType string) {
+	h.stopHarnessActivityReportCoalescer()
 	h.harnessWorkMu.Lock()
 	h.stopHarnessWorkRereportLocked()
 	progressAt := h.nextHarnessWorkProgressAtLocked()
@@ -183,6 +185,7 @@ func harnessWorkSourceForAgent(agentType string) string {
 }
 
 func (h *SessionHost) clearHarnessWork() {
+	h.stopHarnessActivityReportCoalescer()
 	h.harnessWorkMu.Lock()
 	h.stopHarnessWorkRereportLocked()
 	h.harnessTaskIDs = nil
@@ -476,8 +479,8 @@ func (h *SessionHost) stopHarnessWorkRereportLocked() {
 	}
 }
 
-// nudgeHarnessActivityReport queues one activity report for the harness
-// lifecycle change that just landed.
+// nudgeHarnessActivityReport records that a harness lifecycle change landed and
+// schedules one debounced activity report.
 //
 // It MUST be used instead of calling reportActivity inline from
 // HandleExtensionMethod. reportActivity takes h.mu.RLock to snapshot
@@ -491,20 +494,80 @@ func (h *SessionHost) stopHarnessWorkRereportLocked() {
 // timeout fires — stalling the handshake and every later notification
 // (including session/update, i.e. the live stream) behind it.
 //
-// The atomic single-flight also coalesces bursts: applyClaudeHarnessLifecycle
+// The debounced single-flight also coalesces bursts: applyClaudeHarnessLifecycle
 // returns true for any recognized message, including repeat task_progress that
-// mutates nothing, and each report otherwise spawns its own retried HTTP POST.
-// Clearing the flag before reporting is deliberate — a nudge that races the
-// in-flight report queues a trailing one, so the control plane always converges
-// on the latest state.
+// mutates nothing, and ACP tool-call streams can emit dozens of edges in one
+// turn. The timer reads the current status mirror only after the stream has been
+// quiet for the debounce window, so a pre-turn-end edge cannot post stale
+// prompting after markPromptDone's authoritative idle report.
 func (h *SessionHost) nudgeHarnessActivityReport() {
-	if !h.harnessReportPending.CompareAndSwap(false, true) {
+	select {
+	case <-h.ctx.Done():
+		return
+	default:
+	}
+
+	h.harnessReportMu.Lock()
+	defer h.harnessReportMu.Unlock()
+	h.harnessReportPending = true
+	if h.harnessReportRunning {
 		return
 	}
-	go func() {
-		h.harnessReportPending.Store(false)
-		h.reportActivity(h.activityForHarnessWork())
-	}()
+	h.scheduleHarnessActivityReportLocked(h.harnessActivityReportDebounce())
+}
+
+func (h *SessionHost) harnessActivityReportDebounce() time.Duration {
+	if h.config.HarnessActivityReportDebounce > 0 {
+		return h.config.HarnessActivityReportDebounce
+	}
+	return config.DefaultACPHarnessActivityReportDebounce
+}
+
+func (h *SessionHost) scheduleHarnessActivityReportLocked(delay time.Duration) {
+	h.harnessReportSequence++
+	sequence := h.harnessReportSequence
+	if h.harnessReportTimer != nil {
+		h.harnessReportTimer.Stop()
+	}
+	h.harnessReportTimer = time.AfterFunc(delay, func() {
+		h.flushHarnessActivityReport(sequence)
+	})
+}
+
+func (h *SessionHost) flushHarnessActivityReport(sequence uint64) {
+	h.harnessReportMu.Lock()
+	if sequence != h.harnessReportSequence {
+		h.harnessReportMu.Unlock()
+		return
+	}
+	h.harnessReportTimer = nil
+	if !h.harnessReportPending {
+		h.harnessReportMu.Unlock()
+		return
+	}
+	h.harnessReportPending = false
+	h.harnessReportRunning = true
+	h.harnessReportMu.Unlock()
+
+	h.reportCoalescedHarnessActivity()
+
+	h.harnessReportMu.Lock()
+	h.harnessReportRunning = false
+	if h.harnessReportPending {
+		h.scheduleHarnessActivityReportLocked(h.harnessActivityReportDebounce())
+	}
+	h.harnessReportMu.Unlock()
+}
+
+func (h *SessionHost) stopHarnessActivityReportCoalescer() {
+	h.harnessReportMu.Lock()
+	h.harnessReportSequence++
+	h.harnessReportPending = false
+	if h.harnessReportTimer != nil {
+		h.harnessReportTimer.Stop()
+		h.harnessReportTimer = nil
+	}
+	h.harnessReportMu.Unlock()
 }
 
 // activityForHarnessWork is reachable from the ACP notification goroutine, so it

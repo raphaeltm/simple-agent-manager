@@ -158,6 +158,7 @@ func Load() (*Config, error) {
 		ACPNotifSerializeTimeout:          getEnvDuration("ACP_NOTIF_SERIALIZE_TIMEOUT", 5*time.Second),
 		ACPHeartbeatInterval:              getEnvDuration("ACP_HEARTBEAT_INTERVAL", 60*time.Second),
 		ACPActivityRereportInterval:       getEnvDuration("ACTIVITY_REREPORT_INTERVAL", DefaultACPActivityRereportInterval),
+		ACPHarnessActivityReportDebounce:  getEnvDuration("ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE", DefaultACPHarnessActivityReportDebounce),
 		ClaudeHarnessLifecycleMaxBytes:    getEnvInt("CLAUDE_HARNESS_LIFECYCLE_MAX_BYTES", DefaultClaudeHarnessLifecycleMaxBytes),
 		ClaudeHarnessLifecycleMaxTasks:    getEnvInt("CLAUDE_HARNESS_LIFECYCLE_MAX_TASKS", DefaultClaudeHarnessLifecycleMaxTasks),
 		ClaudeHarnessLifecycleMaxIDBytes:  getEnvInt("CLAUDE_HARNESS_LIFECYCLE_MAX_ID_BYTES", DefaultClaudeHarnessLifecycleMaxIDBytes),

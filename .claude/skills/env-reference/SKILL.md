@@ -461,6 +461,7 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `ACP_PROMPT_RETRY_INITIAL_BACKOFF` — Initial backoff before retrying transient provider prompt errors (default: 15s)
 - `ACP_PROMPT_RETRY_MAX_BACKOFF` — Max exponential backoff for transient provider prompt retries (default: 2m)
 - `ACTIVITY_REREPORT_INTERVAL` — Re-send `prompting` activity while a prompt is active (default: 60s)
+- `ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE` — Debounce window for coalescing high-frequency ACP harness/tool-call activity reports before POSTing to the control plane (default: 750ms)
 - `ACP_CHECKPOINT_PREEMPT_GRACE` — Graceful ACP cancel/close wait before harness force-stop (default: 30s)
 - `ACP_CHECKPOINT_PREEMPT_MAX_GRACE` — Maximum caller-selected checkpoint rollover grace (default: 2m)
 - `ACP_CHECKPOINT_ROLLOVER_TIMEOUT` — Full checkpoint restart and strict LoadSession deadline (default: 2m)

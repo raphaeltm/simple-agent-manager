@@ -19,17 +19,17 @@ The visible failure is a twitchy CompletionDock center button: Stop/Interrupt an
 
 ## Implementation checklist
 
-- [ ] Add a debounced, coalescing harness activity reporter in the VM agent.
-- [ ] Ensure harness-originated reporting reads current mirrored status only when the debounce fires.
-- [ ] Ensure only one harness-originated activity POST is in flight at a time.
-- [ ] Track successful activity report snapshots so redundant coalesced reports are skipped while runtime-work state changes still propagate.
-- [ ] Keep `markPromptStarted()` / `markPromptDone()` immediate and ensure successful authoritative reports update the coalescer's last-success state.
-- [ ] Keep the 60s harness work re-report loop as the reliability backstop.
-- [ ] Add a configurable VM-agent debounce interval with a default in the requested 500ms–1s range.
-- [ ] Add Go regression tests for burst coalescing, stale prompting suppression after prompt done, successful-report dedupe, retry/no-success behavior, and runtime-work payload preservation.
-- [ ] Add a client-side stabilized CompletionDock working signal that delays only working→idle propagation.
-- [ ] Ensure idle→working remains immediate so Stop/Interrupt appears immediately.
-- [ ] Add web unit tests for working→idle stabilization and reversal swallowing.
+- [x] Add a debounced, coalescing harness activity reporter in the VM agent.
+- [x] Ensure harness-originated reporting reads current mirrored status only when the debounce fires.
+- [x] Ensure only one harness-originated activity POST is in flight at a time.
+- [x] Track successful activity report snapshots so redundant coalesced reports are skipped while runtime-work state changes still propagate.
+- [x] Keep `markPromptStarted()` / `markPromptDone()` immediate and ensure successful authoritative reports update the coalescer's last-success state.
+- [x] Keep the 60s harness work re-report loop as the reliability backstop.
+- [x] Add a configurable VM-agent debounce interval with a default in the requested 500ms–1s range.
+- [x] Add Go regression tests for burst coalescing, stale prompting suppression after prompt done, successful-report dedupe, retry/no-success behavior, and runtime-work payload preservation.
+- [x] Add a client-side stabilized CompletionDock working signal that delays only working→idle propagation.
+- [x] Ensure idle→working remains immediate so Stop/Interrupt appears immediately.
+- [x] Add web unit tests for working→idle stabilization and reversal swallowing.
 - [ ] Run the required local quality checks and Playwright visual audit for the changed chat UI surface.
 - [ ] Run specialist reviews: task-completion-validator, go-specialist, ui-ux-specialist, test-engineer, constitution-validator, and env-validator.
 - [ ] Deploy to staging, verify the live app, and provision a VM to verify vm-agent heartbeat/workspace access because `packages/vm-agent` changes.

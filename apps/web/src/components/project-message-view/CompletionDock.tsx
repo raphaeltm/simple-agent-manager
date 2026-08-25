@@ -148,7 +148,7 @@ function Ring({ active, size }: { active: boolean; size: number }) {
 export type CompletionDockCenterAction = 'interrupt' | 'sleep' | 'archive';
 
 export interface CompletionDockProps {
-  /** True while the agent is producing output (agentActivity !== 'idle'). */
+  /** True while the agent is producing output; caller may stabilize brief idle reversals. */
   working: boolean;
   /** Center lifecycle action. Defaults to legacy interrupt/archive derivation for compatibility. */
   centerAction?: CompletionDockCenterAction;
