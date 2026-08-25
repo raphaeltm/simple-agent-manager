@@ -1393,17 +1393,48 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         : 'failed';
       const updateResult = await env.DATABASE.prepare(
         `UPDATE tasks SET status = ?, execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ?
-         WHERE id = ? AND status = ?`
+         WHERE id = ? AND status = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM tasks succ
+              WHERE succ.project_id = tasks.project_id
+                AND succ.id <> tasks.id
+                AND succ.triggered_by = 'session-recovery'
+                AND succ.created_at > tasks.created_at
+                AND succ.status NOT IN ('completed', 'failed', 'cancelled')
+                AND (
+                  succ.id = COALESCE(tasks.recovery_source_task_id, tasks.id)
+                  OR succ.recovery_source_task_id = COALESCE(tasks.recovery_source_task_id, tasks.id)
+                )
+           )`
       )
         .bind(terminalStatus, reason, nowIso, nowIso, task.id, task.status)
         .run();
 
       if (!updateResult.meta.changes || updateResult.meta.changes === 0) {
-        // Task was advanced by the DO between our SELECT and UPDATE — skip
-        log.info('stuck_task.skipped_optimistic_lock', {
-          taskId: task.id,
-          expectedStatus: task.status,
-        });
+        let liveSupersessionAtWrite = false;
+        try {
+          liveSupersessionAtWrite =
+            (await loadTaskSupersession(env.DATABASE, task.project_id, task.id)) === 'live';
+        } catch (err) {
+          log.warn('stuck_task.supersession_guard_diagnosis_failed', {
+            taskId: task.id,
+            projectId: task.project_id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        if (liveSupersessionAtWrite) {
+          log.info('stuck_task.skipped_supersession_guard', {
+            taskId: task.id,
+            projectId: task.project_id,
+            expectedStatus: task.status,
+          });
+        } else {
+          // Task was advanced by the DO between our SELECT and UPDATE — skip
+          log.info('stuck_task.skipped_optimistic_lock', {
+            taskId: task.id,
+            expectedStatus: task.status,
+          });
+        }
         continue;
       }
 

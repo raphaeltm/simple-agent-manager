@@ -24,6 +24,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
+import { log } from '../../src/lib/logger';
 import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
@@ -86,21 +87,58 @@ function seedTask(
 }
 
 /** The wake successor `createRecoveryTask` mints. */
-function seedSuccessor(status: string): void {
-  seedTask(SUCCESSOR_ID, {
+function seedSuccessor(
+  status: string,
+  o: {
+    id?: string;
+    recoverySourceTaskId?: string;
+    createdAt?: string;
+    chatSessionId?: string | null;
+  } = {}
+): void {
+  seedTask(o.id ?? SUCCESSOR_ID, {
     status,
     triggeredBy: 'session-recovery',
-    recoverySourceTaskId: PREDECESSOR_ID,
-    createdAt: iso(-60_000),
+    recoverySourceTaskId: o.recoverySourceTaskId ?? PREDECESSOR_ID,
+    createdAt: o.createdAt ?? iso(-60_000),
     startedAt: iso(-60_000),
-    chatSessionId: CHAT_SESSION_ID,
+    chatSessionId: o.chatSessionId === undefined ? CHAT_SESSION_ID : o.chatSessionId,
   });
 }
 
-function env(): Env {
+function env(
+  o: {
+    beforeTerminalUpdate?: () => void;
+  } = {}
+): Env {
   const kv = new Map<string, string>();
+  const database = createSqliteD1(sqlite);
+  const guardedDatabase = o.beforeTerminalUpdate
+    ? ({
+        ...database,
+        prepare: (sql: string) => {
+          const statement = database.prepare(sql);
+          const isTerminalUpdate =
+            sql.includes('UPDATE tasks SET status = ?') && sql.includes('completed_at = ?');
+          if (!isTerminalUpdate) return statement;
+          return {
+            ...statement,
+            bind: (...params: unknown[]) => {
+              const bound = statement.bind(...params);
+              return {
+                ...bound,
+                run: async () => {
+                  o.beforeTerminalUpdate?.();
+                  return bound.run();
+                },
+              };
+            },
+          };
+        },
+      } as D1Database)
+    : database;
   return {
-    DATABASE: createSqliteD1(sqlite),
+    DATABASE: guardedDatabase,
     KV: {
       get: vi.fn(async (k: string) => kv.get(k) ?? null),
       put: vi.fn(async (k: string, v: string) => {
@@ -138,6 +176,8 @@ beforeEach(() => {
     schema.tasks,
     schema.taskStatusEvents,
     schema.triggerExecutions,
+    schema.vmTaskAdmissions,
+    schema.vmProvisioningLeases,
   ]);
   sqlite
     .prepare(
@@ -272,5 +312,130 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
       .get(PREDECESSOR_ID) as { to_status: string; reason: string } | undefined;
     expect(event?.to_status).toBe('cancelled');
     expect(event?.reason).toContain('Superseded by a later session wake');
+  });
+
+  it('does not kill a predecessor when a live successor appears after the sweep probe', async () => {
+    seedTask(PREDECESSOR_ID, {
+      startedAt: iso(-10 * 60 * 1000),
+      createdAt: iso(-60 * 60 * 1000),
+    });
+    const skippedSupersessionGuard = vi.spyOn(log, 'info');
+    let insertedSuccessor = false;
+
+    const result = await recoverStuckTasks(
+      env({
+        beforeTerminalUpdate: () => {
+          if (insertedSuccessor) return;
+          insertedSuccessor = true;
+          seedSuccessor('queued', { createdAt: iso(-30_000) });
+        },
+      })
+    );
+
+    expect(insertedSuccessor).toBe(true);
+    expect(result.failedInProgress).toBe(0);
+    expect(statusOf(PREDECESSOR_ID)).toMatchObject({
+      status: 'in_progress',
+      error_message: null,
+    });
+    expect(statusOf(SUCCESSOR_ID).status).toBe('queued');
+    expect(skippedSupersessionGuard).toHaveBeenCalledWith(
+      'stuck_task.skipped_supersession_guard',
+      expect.objectContaining({ taskId: PREDECESSOR_ID, projectId: PROJECT_ID })
+    );
+    skippedSupersessionGuard.mockRestore();
+  });
+
+  it('still kills the same dead predecessor when no successor appears at write time', async () => {
+    seedTask(PREDECESSOR_ID, {
+      startedAt: iso(-10 * 60 * 1000),
+      createdAt: iso(-60 * 60 * 1000),
+    });
+
+    const result = await recoverStuckTasks(env());
+
+    expect(result.failedInProgress).toBe(1);
+    expect(statusOf(PREDECESSOR_ID).status).toBe('failed');
+    expect(statusOf(PREDECESSOR_ID).error_message).toContain('workspace_deleted');
+  });
+
+  it('matches live successors through the root family when the predecessor is a middle link', async () => {
+    const rootId = '01M064TG9QK8ZQ3XW0M6P7ROOT';
+    const middleId = PREDECESSOR_ID;
+    const siblingSuccessorId = '01M0SDBZXG5AEGZJ0JH2SIBLG';
+    seedTask(rootId, {
+      startedAt: iso(-3 * 60 * 60 * 1000),
+      createdAt: iso(-3 * 60 * 60 * 1000),
+      chatSessionId: null,
+    });
+    seedTask(middleId, {
+      startedAt: iso(-10 * 60 * 1000),
+      createdAt: iso(-2 * 60 * 60 * 1000),
+      triggeredBy: 'session-recovery',
+      recoverySourceTaskId: rootId,
+      chatSessionId: null,
+    });
+    let insertedSuccessor = false;
+
+    await recoverStuckTasks(
+      env({
+        beforeTerminalUpdate: () => {
+          if (insertedSuccessor) return;
+          insertedSuccessor = true;
+          seedSuccessor('in_progress', {
+            id: siblingSuccessorId,
+            recoverySourceTaskId: rootId,
+            createdAt: iso(-30_000),
+            chatSessionId: CHAT_SESSION_ID,
+          });
+        },
+      })
+    );
+
+    expect(insertedSuccessor).toBe(true);
+    expect(statusOf(middleId).status).toBe('in_progress');
+    expect(statusOf(siblingSuccessorId).status).toBe('in_progress');
+  });
+
+  it('keeps the successor source-task guard valid when the atomic guard blocks the kill', async () => {
+    seedTask(PREDECESSOR_ID, {
+      startedAt: iso(-10 * 60 * 1000),
+      createdAt: iso(-60 * 60 * 1000),
+    });
+    let insertedSuccessor = false;
+
+    await recoverStuckTasks(
+      env({
+        beforeTerminalUpdate: () => {
+          if (insertedSuccessor) return;
+          insertedSuccessor = true;
+          seedSuccessor('queued', { createdAt: iso(-30_000) });
+        },
+      })
+    );
+
+    const guardRow = sqlite
+      .prepare(
+        `SELECT source.id
+           FROM tasks source
+          WHERE source.id = ?
+            AND source.project_id = ?
+            AND source.status NOT IN ('completed', 'failed', 'cancelled')
+            AND (
+              source.chat_session_id = ?
+              OR EXISTS (
+                SELECT 1 FROM tasks recovery
+                 WHERE recovery.recovery_source_task_id = source.id
+                   AND recovery.project_id = ?
+                   AND recovery.chat_session_id = ?
+                   AND recovery.triggered_by = 'session-recovery'
+                   AND recovery.status NOT IN ('completed', 'failed', 'cancelled')
+              )
+            )`
+      )
+      .get(PREDECESSOR_ID, PROJECT_ID, CHAT_SESSION_ID, PROJECT_ID, CHAT_SESSION_ID);
+
+    expect(statusOf(PREDECESSOR_ID).status).toBe('in_progress');
+    expect(guardRow).toMatchObject({ id: PREDECESSOR_ID });
   });
 });
