@@ -12,6 +12,7 @@ export interface TaskRuntimeLiveness {
 }
 
 export type RuntimeProbeOutcome = 'ok' | 'timeout' | 'error' | 'unknown' | 'not_run';
+export type NodeHealthProbeOutcome = 'ok' | 'failed' | 'not_run';
 
 export interface RuntimeWorkspaceSnapshot {
   id: string;
@@ -22,6 +23,7 @@ export interface RuntimeWorkspaceSnapshot {
   nodeStatus: string | null;
   nodeHealthStatus: string | null;
   nodeHeartbeatAt: number | null;
+  runningWorkspacesOnNode: number | null;
 }
 
 export interface RuntimeAcpSessionSnapshot {
@@ -104,6 +106,7 @@ export interface TaskRuntimeLivenessSignals {
   nowMs: number;
   heartbeatStaleMs: number;
   acpProbeOutcome: RuntimeProbeOutcome;
+  nodeHealthProbeOutcome: NodeHealthProbeOutcome;
   acpSessions: RuntimeAcpSessionSnapshot[];
   containerProbeOutcome: RuntimeProbeOutcome;
   containerLifecycle: ContainerLifecycleSnapshot | null;
@@ -132,6 +135,7 @@ export interface TaskRuntimeLivenessSignals {
 const ACTIVE_ACP_STATUSES = new Set<AcpSessionStatus>(['assigned', 'running']);
 const INCONCLUSIVE_WORKSPACE_STATUSES = new Set(['creating', 'sleeping', 'recovery']);
 const TERMINAL_CONTAINER_STATUSES = new Set(['stopping', 'stopped', 'expired', 'error']);
+const TERMINAL_NODE_STATUSES = new Set(['stopped', 'deleted', 'destroyed', 'destroying', 'error']);
 /** `session_snapshots.sleep_status` value meaning "asleep right now". */
 const RESUMABLE_SLEEP_STATUS = 'sleeping';
 
@@ -420,16 +424,35 @@ export function classifyTaskRuntimeLiveness(
     });
   }
 
-  if (
-    workspace.nodeStatus !== 'running' ||
-    workspace.nodeHealthStatus !== 'healthy' ||
-    workspace.nodeHeartbeatAt === null ||
-    signals.nowMs - workspace.nodeHeartbeatAt > signals.heartbeatStaleMs
-  ) {
+  if (workspace.nodeStatus && TERMINAL_NODE_STATUSES.has(workspace.nodeStatus)) {
     return result(workspace, {
       live: false,
       conclusive: true,
       reason: 'node_not_live',
+      activeAcpSessionId: null,
+    });
+  }
+
+  const nodeHeartbeatStale =
+    workspace.nodeHealthStatus !== 'healthy' ||
+    workspace.nodeHeartbeatAt === null ||
+    signals.nowMs - workspace.nodeHeartbeatAt > signals.heartbeatStaleMs;
+  if (nodeHeartbeatStale) {
+    if (signals.nodeHealthProbeOutcome === 'failed') {
+      return result(workspace, {
+        live: false,
+        conclusive: true,
+        reason: 'node_not_live',
+        activeAcpSessionId: null,
+      });
+    }
+    return result(workspace, {
+      live: false,
+      conclusive: false,
+      reason:
+        (workspace.runningWorkspacesOnNode ?? 0) > 0
+          ? 'node_heartbeat_stale_running_workspaces'
+          : 'node_heartbeat_stale_probe_required',
       activeAcpSessionId: null,
     });
   }
@@ -486,7 +509,8 @@ export async function loadRuntimeWorkspaceSnapshot(
     .prepare(
       `SELECT w.id, w.status AS workspace_status, w.chat_session_id, w.node_id,
             n.status AS node_status, n.health_status, n.last_heartbeat_at,
-            n.runtime AS node_runtime
+            n.runtime AS node_runtime,
+            (SELECT COUNT(*) FROM workspaces nw WHERE nw.node_id = w.node_id AND nw.status = 'running') AS running_workspaces_on_node
      FROM workspaces w
      LEFT JOIN nodes n ON n.id = w.node_id
      WHERE w.id = ? AND w.project_id = ?
@@ -502,6 +526,7 @@ export async function loadRuntimeWorkspaceSnapshot(
       health_status: string | null;
       last_heartbeat_at: string | null;
       node_runtime: string | null;
+      running_workspaces_on_node: number | null;
     }>();
   if (!row) return null;
 
@@ -515,6 +540,7 @@ export async function loadRuntimeWorkspaceSnapshot(
     nodeStatus: row.node_status,
     nodeHealthStatus: row.health_status,
     nodeHeartbeatAt: Number.isFinite(heartbeatAt) ? heartbeatAt : null,
+    runningWorkspacesOnNode: row.running_workspaces_on_node ?? null,
   };
 }
 

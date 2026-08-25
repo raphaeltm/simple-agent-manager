@@ -26,10 +26,12 @@ function signals(overrides: Partial<TaskRuntimeLivenessSignals> = {}): TaskRunti
       nodeStatus: 'running',
       nodeHealthStatus: 'healthy',
       nodeHeartbeatAt: NOW,
+      runningWorkspacesOnNode: 1,
     },
     nowMs: NOW,
     heartbeatStaleMs: STALE_MS,
     acpProbeOutcome: 'ok',
+    nodeHealthProbeOutcome: 'not_run',
     acpSessions: [
       {
         id: 'acp-1',
@@ -152,6 +154,71 @@ describe('classifyTaskRuntimeLiveness', () => {
       live: false,
       conclusive: true,
       reason: 'node_not_live',
+    });
+  });
+
+  it('treats stale heartbeat with running workspaces as inconclusive before probing', () => {
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: {
+            ...workspaceFrom(base),
+            nodeHeartbeatAt: NOW - STALE_MS - 1,
+            runningWorkspacesOnNode: 2,
+          },
+          acpProbeOutcome: 'not_run',
+          acpSessions: [],
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'node_heartbeat_stale_running_workspaces',
+    });
+  });
+
+  it('treats stale heartbeat with no running workspaces as conclusive after failed node probe', () => {
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: {
+            ...workspaceFrom(base),
+            nodeHeartbeatAt: NOW - STALE_MS - 1,
+            runningWorkspacesOnNode: 0,
+          },
+          acpProbeOutcome: 'not_run',
+          nodeHealthProbeOutcome: 'failed',
+          acpSessions: [],
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: true,
+      reason: 'node_not_live',
+    });
+  });
+
+  it('treats stale heartbeat with running workspaces and successful node probe as inconclusive', () => {
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: {
+            ...workspaceFrom(base),
+            nodeHeartbeatAt: NOW - STALE_MS - 1,
+            runningWorkspacesOnNode: 2,
+          },
+          acpProbeOutcome: 'not_run',
+          nodeHealthProbeOutcome: 'ok',
+          acpSessions: [],
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'node_heartbeat_stale_running_workspaces',
     });
   });
 

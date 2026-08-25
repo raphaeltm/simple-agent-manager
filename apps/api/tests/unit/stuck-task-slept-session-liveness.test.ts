@@ -337,6 +337,7 @@ describe('stuck-task liveness for a slept session', () => {
           nodeStatus: 'running',
           nodeHealthStatus: 'healthy',
           nodeHeartbeatAt: Date.now(),
+          runningWorkspacesOnNode: 1,
         },
         'ok'
       )
@@ -584,6 +585,7 @@ describe('task supersession — a successful wake must not fail its predecessor'
           nodeStatus: 'running',
           nodeHealthStatus: 'healthy',
           nodeHeartbeatAt: Date.now(),
+          runningWorkspacesOnNode: 1,
         },
         'ok'
       )

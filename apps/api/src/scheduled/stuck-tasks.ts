@@ -28,6 +28,7 @@ import {
   DEFAULT_STUCK_TASK_SCAN_CURSOR_KV_KEY,
   DEFAULT_TASK_DO_MISMATCH_GRACE_MS,
   DEFAULT_TASK_LIVENESS_MAX_ACP_SESSIONS,
+  DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS,
   DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS,
   DEFAULT_TASK_RUN_ABSOLUTE_CEILING_MS,
   DEFAULT_TASK_RUN_HARD_TIMEOUT_MS,
@@ -47,6 +48,8 @@ import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
+import { fetchWithTimeout, getTimeoutMs } from '../services/fetch-timeout';
+import { getNodeBackendBaseUrl } from '../services/node-agent-readiness';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
 import { DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS } from '../services/session-snapshot-artifacts';
@@ -92,6 +95,15 @@ function parseMs(value: string | undefined, fallback: number): number {
   const parsed = parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
   return parsed;
+}
+
+export function getTaskLivenessNodeHealthProbeTimeoutMs(env: {
+  TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS?: string;
+}): number {
+  return getTimeoutMs(
+    env.TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS,
+    DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS
+  );
 }
 
 /** Human-readable descriptions for execution steps */
@@ -560,6 +572,7 @@ export async function getTaskRuntimeLiveness(
     nowMs,
     heartbeatStaleMs: staleSeconds * 1000,
     acpProbeOutcome: 'not_run',
+    nodeHealthProbeOutcome: 'not_run',
     acpSessions: [],
     containerProbeOutcome: 'not_run',
     containerLifecycle: null,
@@ -568,6 +581,39 @@ export async function getTaskRuntimeLiveness(
     resumabilityMaxRecoveryAttempts: maxRecoveryAttempts,
   };
   const initialClassification = classifyTaskRuntimeLiveness(baseSignals);
+  const staleVmNodeId =
+    workspace?.status === 'running' &&
+    workspace.nodeRuntime !== 'cf-container' &&
+    workspace.nodeId &&
+    workspace.nodeStatus === 'running' &&
+    initialClassification.reason === 'node_heartbeat_stale_probe_required'
+      ? workspace.nodeId
+      : null;
+  if (staleVmNodeId) {
+    const timeoutMs = getTaskLivenessNodeHealthProbeTimeoutMs(env);
+    try {
+      const response = await fetchWithTimeout(
+        `${getNodeBackendBaseUrl(staleVmNodeId, env)}/health`,
+        { method: 'GET' },
+        timeoutMs
+      );
+      return classifyTaskRuntimeLiveness({
+        ...baseSignals,
+        nodeHealthProbeOutcome: response.ok ? 'ok' : 'failed',
+      });
+    } catch (err) {
+      log.warn('stuck_task.node_health_probe_failed', {
+        workspaceId: task.workspace_id,
+        nodeId: staleVmNodeId,
+        timeoutMs,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return classifyTaskRuntimeLiveness({
+        ...baseSignals,
+        nodeHealthProbeOutcome: 'failed',
+      });
+    }
+  }
   if (
     !workspace ||
     workspace.status !== 'running' ||

@@ -6,12 +6,16 @@
  * 2. In-progress tasks with stale heartbeats ARE marked as stuck
  * 3. Tasks without a node are treated as stuck (no heartbeat to check)
  */
-import { DEFAULT_STUCK_TASK_SCAN_CURSOR_KV_KEY } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_STUCK_TASK_SCAN_CURSOR_KV_KEY,
+  DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS,
+} from '@simple-agent-manager/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { detectClaudeCodeCompactionLoop } from '../../src/scheduled/claude-code-compaction-loop';
 import {
+  getTaskLivenessNodeHealthProbeTimeoutMs,
   getTaskReconciliationDiagnostics,
   persistStuckTaskScanCursor,
   probeTaskRunnerStatus,
@@ -25,6 +29,25 @@ import { cleanupTaskRun } from '../../src/services/task-runner';
 vi.mock('../../src/services/task-runner', () => ({
   cleanupTaskRun: vi.fn().mockResolvedValue(undefined),
 }));
+
+describe('task liveness node health probe timeout', () => {
+  it('uses the short control-loop timeout by default and allows env override', () => {
+    expect(getTaskLivenessNodeHealthProbeTimeoutMs({})).toBe(
+      DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS
+    );
+    expect(DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS).toBe(5_000);
+    expect(
+      getTaskLivenessNodeHealthProbeTimeoutMs({
+        TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS: '1234',
+      })
+    ).toBe(1234);
+    expect(
+      getTaskLivenessNodeHealthProbeTimeoutMs({
+        TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS: '30000',
+      })
+    ).toBe(30_000);
+  });
+});
 
 // Mock persistError
 vi.mock('../../src/services/observability', () => ({

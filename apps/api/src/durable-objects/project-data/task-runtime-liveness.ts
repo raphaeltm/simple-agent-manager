@@ -133,6 +133,7 @@ export async function getLocalTaskRuntimeLiveness(
     nowMs,
     heartbeatStaleMs: staleMs,
     acpProbeOutcome: 'not_run',
+    nodeHealthProbeOutcome: 'not_run',
     acpSessions: [],
     containerProbeOutcome: 'not_run',
     containerLifecycle: null,
