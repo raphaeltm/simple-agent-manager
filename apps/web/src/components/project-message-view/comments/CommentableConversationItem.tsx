@@ -14,8 +14,10 @@ export interface MessageCommentRowState {
   activeMessageId: string | null;
   focusedCommentId: string | null;
   draft: MessageCommentDraft | null;
+  detachedDraftMessageId: string | null;
   actions: CommentActions;
   onToggleMessageComments: (messageId: string) => void;
+  onSelectMessageComments: (messageId: string, commentId?: string) => void;
   onStartComment: (draft: MessageCommentDraft) => void;
   onCloseMessageComments: () => void;
   onClearDraft: () => void;
@@ -58,7 +60,9 @@ export function CommentableConversationItem({
   const hasUnresolvedComments = itemComments.some((comment) => comment.status !== 'resolved');
   const isCommentsExpanded = commentState.activeMessageId === item.id;
   const draftForMessage = commentState.draft?.anchorId === item.id ? commentState.draft : null;
-  const inlineComments = isCommentsExpanded || draftForMessage ? itemComments : [];
+  const inlineDraftForMessage =
+    commentState.detachedDraftMessageId === item.id ? null : draftForMessage;
+  const inlineComments = isCommentsExpanded || inlineDraftForMessage ? itemComments : [];
   const commentAccentClass =
     itemComments.length === 0
       ? ''
@@ -103,7 +107,7 @@ export function CommentableConversationItem({
           <InlineMessageComments
             messageId={item.id}
             comments={inlineComments}
-            draft={draftForMessage}
+            draft={inlineDraftForMessage}
             focusedCommentId={commentState.focusedCommentId}
             actions={commentState.actions}
             onClose={commentState.onCloseMessageComments}

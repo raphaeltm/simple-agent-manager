@@ -27,13 +27,13 @@ Selected direction: variant 3.
 
 ## Implementation checklist
 
-- [ ] Reintroduce a desktop comment rail as an on-demand in-layout `aside`, with a close button and no modal backdrop.
-- [ ] Ensure desktop header/dropdown `Comments`, message-level `Comment`, selected-text `Comment`, and comment count markers open the rail.
-- [ ] Keep the rail hidden until a comment control is clicked.
-- [ ] Render active/draft comments in the rail on desktop, including loading, error, retry, empty, reply, resolve/reopen, and send-to-agent paths.
-- [ ] Keep existing mobile whole-message inline commenting behavior.
-- [ ] For mobile selected-text drafts, render the composer fixed at the bottom over the normal chat input so the chat remains scrollable behind it.
-- [ ] Add/update unit tests for desktop rail visibility, message-button/selection/header entry points, and mobile selected-text bottom composer behavior.
+- [x] Reintroduce a desktop comment rail as an on-demand in-layout `aside`, with a close button and no modal backdrop.
+- [x] Ensure desktop header/dropdown `Comments`, message-level `Comment`, selected-text `Comment`, and comment count markers open the rail.
+- [x] Keep the rail hidden until a comment control is clicked.
+- [x] Render active/draft comments in the rail on desktop, including loading, error, retry, empty, reply, resolve/reopen, and send-to-agent paths.
+- [x] Keep existing mobile whole-message inline commenting behavior.
+- [x] For mobile selected-text drafts, render the composer fixed at the bottom over the normal chat input so the chat remains scrollable behind it.
+- [x] Add/update unit tests for desktop rail visibility, message-button/selection/header entry points, and mobile selected-text bottom composer behavior.
 - [ ] Update Playwright audit coverage to exercise the real user triggers at 1280x800 and 375x667, including screenshots and overflow checks.
 - [ ] Run local validation: focused unit tests, focused Playwright audit, then full lint/typecheck/test/build gates.
 - [ ] Run specialist review: `ui-ux-specialist`, `test-engineer`, `constitution-validator`, and `task-completion-validator`; address blockers.

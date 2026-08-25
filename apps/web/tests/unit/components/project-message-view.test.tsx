@@ -150,6 +150,29 @@ const virtuosoMock = {
   reset: (await import('../../helpers/virtuoso-mock')).resetVirtuosoMock,
 };
 
+function setMediaMatches({
+  commentsRail = false,
+  coarsePointer = false,
+}: {
+  commentsRail?: boolean;
+  coarsePointer?: boolean;
+} = {}) {
+  vi.mocked(window.matchMedia).mockImplementation((query: string) => ({
+    matches: query.includes('min-width: 1024px')
+      ? commentsRail
+      : query.includes('pointer: coarse')
+        ? coarsePointer
+        : false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+}
+
 // Timeline data sources — useSessionTimeline fetches these when the drawer opens.
 vi.mock('../../../src/lib/api/sessions', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api/sessions')>()),
@@ -176,6 +199,7 @@ import {
 
 beforeEach(() => {
   mockWsConnectionState = 'connected';
+  setMediaMatches();
   capturedWsOnMessage = null;
   capturedWsOnCatchUp = null;
   capturedWsOnCommentEvent = null;
@@ -321,6 +345,34 @@ function render(ui: ReactElement) {
   );
 
   return rtlRender(ui, { wrapper: Wrapper });
+}
+
+async function selectPhraseInMessage(fullText: string, selectedPhrase: string) {
+  const message = await screen.findByText(fullText);
+  const textNode = message.firstChild;
+  expect(textNode).toBeTruthy();
+
+  const range = document.createRange();
+  range.setStart(textNode!, 0);
+  range.setEnd(textNode!, selectedPhrase.length);
+  range.getBoundingClientRect = () =>
+    ({
+      left: 96,
+      right: 260,
+      top: 120,
+      bottom: 140,
+      width: 164,
+      height: 20,
+      x: 96,
+      y: 120,
+      toJSON: () => ({}),
+    }) as DOMRect;
+
+  await act(async () => {
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    document.dispatchEvent(new Event('mouseup'));
+  });
 }
 
 type WorkspaceBadgeFixture = {
@@ -1784,6 +1836,113 @@ describe('ProjectMessageView — message anchored comments', () => {
     });
   });
 
+  it('opens an on-demand desktop comments rail from the header chip without rendering the modal drawer', async () => {
+    setMediaMatches({ commentsRail: true });
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        makeMessage('msg-1', 'session-1', 'User prompt', 'user'),
+        makeMessage('msg-2', 'session-1', 'Agent answer'),
+      ])
+    );
+    mocks.listMessageComments.mockResolvedValue({
+      comments: [
+        makeCommentThread({
+          id: 'comment-msg-2',
+          messageId: 'msg-2',
+          body: 'This desktop rail comment should be readable beside the chat.',
+        }),
+      ],
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await screen.findByText('Agent answer');
+    expect(screen.queryByRole('complementary', { name: 'Session comments' })).toBeNull();
+
+    fireEvent.click(await screen.findByRole('button', { name: /1 unresolved comment/i }));
+
+    const rail = await screen.findByRole('complementary', { name: 'Session comments' });
+    expect(
+      within(rail).getByText('This desktop rail comment should be readable beside the chat.')
+    ).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Session comments' })).toBeNull();
+  });
+
+  it('opens the desktop comments rail from the expanded header Comments button even with no threads', async () => {
+    setMediaMatches({ commentsRail: true });
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Agent answer')])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await screen.findByText('Agent answer');
+    expect(screen.queryByRole('complementary', { name: 'Session comments' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show session details' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Comments' }));
+
+    const rail = await screen.findByRole('complementary', { name: 'Session comments' });
+    expect(
+      within(rail).getByText(
+        'Select text in a user or agent message, or use a message Comment button to start a thread.'
+      )
+    ).toBeTruthy();
+  });
+
+  it('opens a desktop rail composer from the message-level Comment button', async () => {
+    setMediaMatches({ commentsRail: true });
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Agent answer')])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await screen.findByText('Agent answer');
+    fireEvent.click(screen.getByRole('button', { name: /add comment on message msg-1/i }));
+
+    const rail = await screen.findByRole('complementary', { name: 'Session comments' });
+    expect(within(rail).getByRole('region', { name: 'New message comment' })).toBeTruthy();
+    const textarea = within(rail).getByLabelText('Add a comment…') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: ' Desktop message-level comment. ' } });
+    fireEvent.click(within(textarea.closest('form')!).getByRole('button', { name: 'Comment' }));
+
+    await waitFor(() => {
+      expect(mocks.createMessageCommentThread).toHaveBeenCalledWith(
+        'proj-1',
+        'session-1',
+        expect.objectContaining({
+          anchor: { kind: 'message', messageId: 'msg-1', quote: undefined },
+          body: 'Desktop message-level comment.',
+          action: 'note',
+        })
+      );
+    });
+  });
+
+  it('opens a quoted desktop rail composer from the selected-text Comment popover', async () => {
+    setMediaMatches({ commentsRail: true });
+    const selectedPhrase = 'Select this exact phrase';
+    const fullText = `${selectedPhrase} for a desktop rail comment.`;
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', fullText)])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await selectPhraseInMessage(fullText, selectedPhrase);
+    const popover = await screen.findByRole('dialog', { name: 'Comment on selection' });
+    const commentButton = within(popover).getByRole('button', { name: 'Comment' });
+    fireEvent.mouseDown(commentButton);
+    expect(window.getSelection()?.toString()).toBe(selectedPhrase);
+    fireEvent.click(commentButton);
+
+    const rail = await screen.findByRole('complementary', { name: 'Session comments' });
+    expect(within(rail).getByRole('region', { name: 'New comment on selected text' })).toBeTruthy();
+    expect(within(rail).getByText(selectedPhrase)).toBeTruthy();
+    expect(within(rail).getByLabelText('Add a comment…')).toBeTruthy();
+  });
+
   it('creates an optimistic thread from a message action without changing chat rendering', async () => {
     mocks.listMessageComments.mockResolvedValueOnce({ comments: [] }).mockResolvedValue({
       comments: [
@@ -1870,6 +2029,40 @@ describe('ProjectMessageView — message anchored comments', () => {
 
     expect(screen.getAllByText(selectedPhrase).length).toBeGreaterThan(0);
     expect(screen.getAllByLabelText('Add a comment…').length).toBeGreaterThan(0);
+  });
+
+  it('moves mobile selected-text drafts into a bottom composer overlay', async () => {
+    setMediaMatches({ coarsePointer: true });
+    const selectedPhrase = 'Select this mobile phrase';
+    const fullText = `${selectedPhrase} while keeping chat scroll context.`;
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', fullText)])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await selectPhraseInMessage(fullText, selectedPhrase);
+    const actionBar = await screen.findByRole('dialog', { name: 'Comment on selection' });
+    fireEvent.click(within(actionBar).getByRole('button', { name: 'Comment on selection' }));
+
+    const overlay = await screen.findByRole('region', {
+      name: 'Selected text comment composer',
+    });
+    expect(within(overlay).getByText(selectedPhrase)).toBeTruthy();
+    const textarea = within(overlay).getByLabelText('Add a comment…') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: ' Mobile selected text comment. ' } });
+    fireEvent.click(within(textarea.closest('form')!).getByRole('button', { name: 'Comment' }));
+
+    await waitFor(() => {
+      expect(mocks.createMessageCommentThread).toHaveBeenCalledWith(
+        'proj-1',
+        'session-1',
+        expect.objectContaining({
+          anchor: { kind: 'message', messageId: 'msg-1', quote: selectedPhrase },
+          body: 'Mobile selected text comment.',
+        })
+      );
+    });
   });
 
   it('applies realtime comment events to the comment cache for the active session', async () => {

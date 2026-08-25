@@ -27,6 +27,7 @@ import { TruncatedSummary } from '../chat/TruncatedSummary';
 import { FailureCard } from '../debug/FailureCard';
 import { type CommentInboxItem, countBuckets, toInboxItem } from './comments/comment-inbox';
 import { CommentableConversationItem } from './comments/CommentableConversationItem';
+import { DesktopCommentRail } from './comments/MessageCommentPanels';
 import { useMessageComments } from './comments/useMessageComments';
 import { useProjectMessageCommentUi } from './comments/useProjectMessageCommentUi';
 import { CompletionDock } from './CompletionDock';
@@ -227,6 +228,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
   const [showComments, setShowComments] = useState(false);
+  const openComments = useCallback(() => setShowComments(true), []);
+  const closeComments = useCallback(() => setShowComments(false), []);
 
   const messageComments = useMessageComments(projectId, sessionId, Boolean(projectId && sessionId));
   const { user } = useAuth();
@@ -435,7 +438,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     hasMessages: conversationItems.length > 0,
     chatLogRef,
     sessionId,
+    onRequestCommentSurface: openComments,
   });
+  const showDockedCommentRail = showComments && commentUi.usesDesktopRail;
+  const showMobileCommentsDrawer = showComments && !commentUi.usesDesktopRail;
 
   /**
    * Row renderer for the virtualized conversation.
@@ -538,6 +544,27 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
   const isActive =
     lc.sessionState === 'active' || lc.sessionState === 'idle' || lc.sessionState === 'sleeping';
+  const desktopCommentRail = showDockedCommentRail ? (
+    <DesktopCommentRail
+      comments={messageComments.comments}
+      draft={commentUi.rowState.draft}
+      loading={messageComments.loading}
+      refreshing={messageComments.refreshing}
+      error={messageComments.error}
+      activeMessageId={commentUi.rowState.activeMessageId}
+      focusedCommentId={commentUi.rowState.focusedCommentId}
+      actions={commentUi.rowState.actions}
+      onRetry={() => {
+        void messageComments.refetch();
+      }}
+      onClearDraft={commentUi.rowState.onClearDraft}
+      onSelectMessage={(messageId, commentId) => {
+        commentUi.rowState.onSelectMessageComments(messageId, commentId);
+        handleTimelineJump({ messageId, timestamp: Date.now() });
+      }}
+      onClose={closeComments}
+    />
+  ) : null;
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -619,31 +646,34 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       {/* Messages area — virtualized, DO-only */}
       {conversationItems.length === 0 ? (
-        <div className="flex-1 min-h-0 flex flex-col relative">
-          <FloatingHeader
-            projectId={projectId}
-            lc={lc}
-            onSessionMutated={onSessionMutated}
-            onRetry={onRetry}
-            onFork={onFork}
-            onOpenTimeline={() => setShowTimeline(true)}
-            onOpenComments={() => setShowComments(true)}
-            unresolvedCommentCount={unresolvedCommentCount}
-            needsAttentionCommentCount={commentCounts.needs_you}
-            sourceContext={sourceContext}
-            onShowHierarchy={onShowHierarchy}
-            containerRef={floatingHeaderRef}
-          />
-          <div
-            className="flex flex-1 items-center justify-center"
-            style={{ paddingTop: floatingHeaderHeight }}
-          >
-            <span className="text-fg-muted text-sm">
-              {lc.sessionState === 'active'
-                ? 'Waiting for messages...'
-                : 'No messages in this session.'}
-            </span>
+        <div className="relative flex flex-1 min-h-0 min-w-0 flex-col lg:flex-row">
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+            <FloatingHeader
+              projectId={projectId}
+              lc={lc}
+              onSessionMutated={onSessionMutated}
+              onRetry={onRetry}
+              onFork={onFork}
+              onOpenTimeline={() => setShowTimeline(true)}
+              onOpenComments={openComments}
+              unresolvedCommentCount={unresolvedCommentCount}
+              needsAttentionCommentCount={commentCounts.needs_you}
+              sourceContext={sourceContext}
+              onShowHierarchy={onShowHierarchy}
+              containerRef={floatingHeaderRef}
+            />
+            <div
+              className="flex flex-1 items-center justify-center"
+              style={{ paddingTop: floatingHeaderHeight }}
+            >
+              <span className="text-fg-muted text-sm">
+                {lc.sessionState === 'active'
+                  ? 'Waiting for messages...'
+                  : 'No messages in this session.'}
+              </span>
+            </div>
           </div>
+          {desktopCommentRail}
         </div>
       ) : (
         <div className="flex-1 min-h-0 min-w-0 relative flex flex-col lg:flex-row">
@@ -661,7 +691,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               onRetry={onRetry}
               onFork={onFork}
               onOpenTimeline={() => setShowTimeline(true)}
-              onOpenComments={() => setShowComments(true)}
+              onOpenComments={openComments}
               unresolvedCommentCount={unresolvedCommentCount}
               needsAttentionCommentCount={commentCounts.needs_you}
               sourceContext={sourceContext}
@@ -706,6 +736,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
             {commentUi.selectionControls}
           </div>
+          {desktopCommentRail}
         </div>
       )}
 
@@ -739,6 +770,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       {/* Stale activity notice — shown once per verified-stale transition */}
       {lc.staleNotice && <StaleActivityNotice onDismiss={lc.dismissStaleNotice} />}
+      {commentUi.selectedTextComposer}
 
       {/* Input area */}
       {isActive && canWriteSession && (
@@ -799,12 +831,12 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         showTimelineContext={timeline.showContext}
         onToggleTimelineContext={() => timeline.setShowContext(!timeline.showContext)}
         onCloseTimeline={() => setShowTimeline(false)}
-        showComments={showComments}
+        showComments={showMobileCommentsDrawer}
         commentItems={commentInbox}
         commentsLoading={messageComments.loading}
         viewerId={viewerId}
         canWriteSession={canWriteSession}
-        onCloseComments={() => setShowComments(false)}
+        onCloseComments={closeComments}
         onJump={handleTimelineJump}
         onReply={(threadId, body, action) =>
           messageComments.reply({ commentId: threadId, body, action })
