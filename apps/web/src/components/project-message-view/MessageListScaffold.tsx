@@ -1,6 +1,5 @@
 import { Button } from '@simple-agent-manager/ui';
-import { forwardRef, useEffect, useState } from 'react';
-import type { HTMLAttributes } from 'react';
+import { forwardRef, type HTMLAttributes, useEffect, useState } from 'react';
 
 /**
  * Data the virtualized list's Header needs, threaded through Virtuoso's `context`

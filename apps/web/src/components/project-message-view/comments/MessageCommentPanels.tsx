@@ -158,7 +158,6 @@ export function DesktopCommentRail({
   return (
     <aside
       className="glass-panel-container glass-composited glass-modal relative hidden min-h-0 w-80 max-w-[42vw] shrink-0 flex-col overflow-hidden rounded-none border-y-0 border-r-0 border-l border-border-default shadow-xl lg:flex 2xl:w-[24rem]"
-      role="complementary"
       aria-label="Session comments"
     >
       <header className="flex min-h-[44px] shrink-0 items-center gap-2 border-b border-border-default px-3 py-2">
@@ -278,7 +277,6 @@ export function MobileSelectedTextCommentComposer({
 }) {
   return createPortal(
     <section
-      role="region"
       aria-label="Selected text comment composer"
       className="fixed inset-x-2 bottom-2 z-panel max-h-[min(72dvh,32rem)] overflow-y-auto rounded-2xl border border-border-default bg-surface p-2 shadow-2xl lg:hidden"
     >

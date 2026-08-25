@@ -35,13 +35,22 @@ Selected direction: variant 3.
 - [x] For mobile selected-text drafts, render the composer fixed at the bottom over the normal chat input so the chat remains scrollable behind it.
 - [x] Add/update unit tests for desktop rail visibility, message-button/selection/header entry points, and mobile selected-text bottom composer behavior.
 - [x] Update Playwright audit coverage to exercise the real user triggers at 1280x800 and 375x667, including screenshots and overflow checks.
-- [ ] Run local validation: focused unit tests, focused Playwright audit, then full lint/typecheck/test/build gates.
+- [x] Run local validation: focused unit tests, focused Playwright audit, then full lint/typecheck/test/build gates.
 - [ ] Run specialist review: `ui-ux-specialist`, `test-engineer`, `constitution-validator`, and `task-completion-validator`; address blockers.
 - [ ] Deploy to staging, verify the comments UX end to end with Playwright, upload screenshots to the project library, create PR, wait for CI, and monitor deploy after merge if normal gates authorize it.
 
 ## Implementation notes
 
 - Split `FloatingHeader` out of `project-message-view/index.tsx`, reducing the main chat component from 850 to 741 lines during this PR.
+
+## Validation log
+
+- `pnpm --filter @simple-agent-manager/web test -- tests/unit/components/project-message-view.test.tsx` — passed, 66 tests.
+- `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/message-comments-audit.spec.ts --project "Desktop (1280x800)" --project "iPhone SE (375x667)"` — passed, 10 tests.
+- `pnpm lint` — passed with existing warnings.
+- `pnpm typecheck` — passed.
+- `pnpm test` — passed.
+- `pnpm build` — passed.
 
 ## Acceptance criteria
 
