@@ -1,13 +1,13 @@
 /**
  * MCP mailbox tools — durable messaging between agents.
  *
- * send_durable_message: Enqueue a message for a child agent with configurable class and delivery.
+ * send_durable_message: Enqueue a message for a same-project agent with configurable class and delivery.
  * get_pending_messages: Retrieve unacked messages for the calling agent's session.
  * ack_message: Acknowledge receipt of a delivered message.
  */
 import type { MessageClass } from '@simple-agent-manager/shared';
 import { MESSAGE_CLASSES } from '@simple-agent-manager/shared';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -36,7 +36,7 @@ export async function handleSendDurableMessage(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const limits = getMcpLimits(env);
 
@@ -55,7 +55,11 @@ export async function handleSendDurableMessage(
 
   const messageClass = typeof params.messageClass === 'string' ? params.messageClass : 'deliver';
   if (!(MESSAGE_CLASSES as readonly string[]).includes(messageClass)) {
-    return jsonRpcError(requestId, INVALID_PARAMS, `Invalid messageClass. Must be one of: ${MESSAGE_CLASSES.join(', ')}`);
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Invalid messageClass. Must be one of: ${MESSAGE_CLASSES.join(', ')}`
+    );
   }
 
   let metadata: Record<string, unknown> | null = null;
@@ -69,17 +73,20 @@ export async function handleSendDurableMessage(
 
   // Validate caller is a task agent
   if (!tokenData.taskId) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'Only task agents can use durable messaging tools');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Only task agents can use durable messaging tools'
+    );
   }
 
-  // Resolve the child task to find its project and session
+  // Resolve the target task to find its project and session
   const db = drizzle(env.DATABASE, { schema });
-  const resolution = await resolveChildForMailbox(requestId, targetTaskId, tokenData, db);
+  const resolution = await resolveProjectAgentForMailbox(requestId, targetTaskId, tokenData, db);
   if ('jsonrpc' in resolution) return resolution;
 
-  const { resolveDurableExecutionConfig } = await import(
-    '../../durable-objects/project-data/durable-execution-config'
-  );
+  const { resolveDurableExecutionConfig } =
+    await import('../../durable-objects/project-data/durable-execution-config');
   const durableConfig = resolveDurableExecutionConfig(env);
   if (durableConfig.deliveryEnabled) {
     try {
@@ -98,15 +105,17 @@ export async function handleSendDurableMessage(
         maxMessages: limits.mailboxMaxMessagesPerProject,
       });
       return jsonRpcSuccess(requestId, {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            messageId: accepted.message.id,
-            deliveryState: accepted.message.deliveryState,
-            delivered: false,
-            accepted: true,
-          }),
-        }],
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              messageId: accepted.message.id,
+              deliveryState: accepted.message.deliveryState,
+              delivered: false,
+              accepted: true,
+            }),
+          },
+        ],
       });
     } catch (err) {
       log.error('mcp.send_durable_message.accept_failed', {
@@ -137,7 +146,12 @@ export async function handleSendDurableMessage(
     let delivered = false;
     if (messageClass === 'notify' || messageClass === 'deliver') {
       delivered = await attemptImmediateDelivery(
-        env, db, msg.id, resolution, message, tokenData.userId,
+        env,
+        db,
+        msg.id,
+        resolution,
+        message,
+        tokenData.userId
       );
     }
 
@@ -150,14 +164,16 @@ export async function handleSendDurableMessage(
     });
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          messageId: msg.id,
-          deliveryState: delivered ? 'delivered' : 'queued',
-          delivered,
-        }),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            messageId: msg.id,
+            deliveryState: delivered ? 'delivered' : 'queued',
+            delivered,
+          }),
+        },
+      ],
     });
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
@@ -176,22 +192,26 @@ export async function handleGetPendingMessages(
   requestId: string | number | null,
   _params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   // Get this agent's chat session from the DO
   const chatSessionId = await resolveCallerChatSession(tokenData, env);
   if (!chatSessionId) {
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({ messages: [] }),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({ messages: [] }),
+        },
+      ],
     });
   }
 
   try {
     const messages = await projectDataService.getPendingMailboxMessages(
-      env, tokenData.projectId, chatSessionId,
+      env,
+      tokenData.projectId,
+      chatSessionId
     );
 
     // Auto-mark as delivered when retrieved
@@ -202,10 +222,12 @@ export async function handleGetPendingMessages(
     }
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({ messages }),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({ messages }),
+        },
+      ],
     });
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
@@ -224,7 +246,7 @@ export async function handleAckMessage(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const messageId = typeof params.messageId === 'string' ? params.messageId.trim() : '';
   if (!messageId) {
@@ -244,18 +266,26 @@ export async function handleAckMessage(
       return jsonRpcError(requestId, INVALID_PARAMS, 'Message not found');
     }
     if (message.targetSessionId !== callerChatSessionId) {
-      return jsonRpcError(requestId, INVALID_PARAMS, 'Message does not belong to this agent session');
+      return jsonRpcError(
+        requestId,
+        INVALID_PARAMS,
+        'Message does not belong to this agent session'
+      );
     }
 
     const acked = await projectDataService.acknowledgeMailboxMessage(
-      env, tokenData.projectId, messageId,
+      env,
+      tokenData.projectId,
+      messageId
     );
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({ acked, messageId }),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({ acked, messageId }),
+        },
+      ],
     });
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
@@ -279,52 +309,73 @@ interface ResolvedMailboxTarget {
 }
 
 /**
- * Resolve a child task to its project, chat session, workspace, and agent session.
- * Validates parent authorization.
+ * Resolve a same-project active target task to its project, chat session,
+ * workspace, and optional running agent session. The caller project comes from
+ * the verified MCP token; callers cannot supply or override project identity.
  */
-async function resolveChildForMailbox(
+async function resolveProjectAgentForMailbox(
   requestId: string | number | null,
-  childTaskId: string,
+  targetTaskId: string,
   tokenData: McpTokenData,
-  db: DrizzleD1Database<typeof schema>,
+  db: DrizzleD1Database<typeof schema>
 ): Promise<JsonRpcResponse | ResolvedMailboxTarget> {
-  // Query child task
-  const [childTask] = await db
+  // Query target task in the caller's verified project. This project predicate
+  // is the authorization boundary for durable agent messaging.
+  const requestedTaskIds = [...new Set([tokenData.taskId, targetTaskId])];
+  const taskRows = await db
     .select({
       id: schema.tasks.id,
       status: schema.tasks.status,
       workspaceId: schema.tasks.workspaceId,
       projectId: schema.tasks.projectId,
-      parentTaskId: schema.tasks.parentTaskId,
     })
     .from(schema.tasks)
     .where(
       and(
-        eq(schema.tasks.id, childTaskId),
-        eq(schema.tasks.projectId, tokenData.projectId),
-      ),
-    )
-    .limit(1);
+        inArray(schema.tasks.id, requestedTaskIds),
+        eq(schema.tasks.projectId, tokenData.projectId)
+      )
+    );
+  const targetTask = taskRows.find((task) => task.id === targetTaskId);
+  const callerTask = taskRows.find((task) => task.id === tokenData.taskId);
 
-  if (!childTask) {
+  if (!callerTask) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'Calling task was not found in this project');
+  }
+  if (!ACTIVE_STATUSES.includes(callerTask.status)) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Calling task is in '${callerTask.status}' status — only active task agents can send messages`
+    );
+  }
+  if (targetTaskId === tokenData.taskId) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Target task must be another active task agent in the same project'
+    );
+  }
+
+  if (!targetTask) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'Target task not found in this project');
   }
 
-  // Authorization: direct parent only
-  if (childTask.parentTaskId !== tokenData.taskId) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'Only the direct parent task can send durable messages to a child');
+  // Verify target is in an active status
+  if (!ACTIVE_STATUSES.includes(targetTask.status)) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Target task is in '${targetTask.status}' status — only active tasks can receive messages`
+    );
   }
 
-  // Verify child is in an active status
-  if (!ACTIVE_STATUSES.includes(childTask.status)) {
-    return jsonRpcError(requestId, INVALID_PARAMS, `Target task is in '${childTask.status}' status — only active tasks can receive messages`);
-  }
-
-  if (!childTask.workspaceId) {
+  if (!targetTask.workspaceId) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'Target task has no workspace assigned yet');
   }
 
-  // Resolve workspace + node
+  // Resolve workspace + node. Require the workspace's own project_id to match
+  // the caller project as a defence-in-depth consistency check.
   const [workspace] = await db
     .select({
       id: schema.workspaces.id,
@@ -332,7 +383,12 @@ async function resolveChildForMailbox(
       chatSessionId: schema.workspaces.chatSessionId,
     })
     .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, childTask.workspaceId))
+    .where(
+      and(
+        eq(schema.workspaces.id, targetTask.workspaceId),
+        eq(schema.workspaces.projectId, tokenData.projectId)
+      )
+    )
     .limit(1);
 
   if (!workspace || !workspace.nodeId) {
@@ -342,7 +398,11 @@ async function resolveChildForMailbox(
   // Use workspace's chatSessionId (canonical session mapping)
   const chatSessionId = workspace.chatSessionId;
   if (!chatSessionId) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'Target task has no chat session — messages cannot be queued');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Target task has no chat session — messages cannot be queued'
+    );
   }
 
   // Resolve running agent session
@@ -352,14 +412,14 @@ async function resolveChildForMailbox(
     .where(
       and(
         eq(schema.agentSessions.workspaceId, workspace.id),
-        eq(schema.agentSessions.status, 'running'),
-      ),
+        eq(schema.agentSessions.status, 'running')
+      )
     )
     .orderBy(desc(schema.agentSessions.createdAt))
     .limit(1);
 
   return {
-    projectId: childTask.projectId,
+    projectId: targetTask.projectId,
     chatSessionId,
     nodeId: workspace.nodeId,
     workspaceId: workspace.id,
@@ -376,7 +436,7 @@ async function attemptImmediateDelivery(
   messageId: string,
   target: ResolvedMailboxTarget,
   content: string,
-  userId: string,
+  userId: string
 ): Promise<boolean> {
   if (!target.agentSessionId) return false;
 
@@ -400,7 +460,7 @@ async function attemptImmediateDelivery(
       content,
       env,
       userId,
-      persistedMessageId,
+      persistedMessageId
     );
 
     // Mark as delivered in the DO
@@ -410,7 +470,10 @@ async function attemptImmediateDelivery(
     const errorMessage = err instanceof Error ? err.message : String(err);
     // 409 means agent busy — message stays queued for alarm-based delivery
     if (errorMessage.includes('409')) {
-      log.info('mcp.mailbox.immediate_delivery_busy', { messageId, agentSessionId: target.agentSessionId });
+      log.info('mcp.mailbox.immediate_delivery_busy', {
+        messageId,
+        agentSessionId: target.agentSessionId,
+      });
     } else {
       log.warn('mcp.mailbox.immediate_delivery_failed', { messageId, error: errorMessage });
     }
@@ -421,20 +484,19 @@ async function attemptImmediateDelivery(
 /**
  * Resolve the calling agent's chat session from its workspace.
  */
-async function resolveCallerChatSession(
-  tokenData: McpTokenData,
-  env: Env,
-): Promise<string | null> {
+async function resolveCallerChatSession(tokenData: McpTokenData, env: Env): Promise<string | null> {
   if (!tokenData.workspaceId) return null;
 
   const db = drizzle(env.DATABASE, { schema });
   const [workspace] = await db
     .select({ chatSessionId: schema.workspaces.chatSessionId })
     .from(schema.workspaces)
-    .where(and(
-      eq(schema.workspaces.id, tokenData.workspaceId),
-      eq(schema.workspaces.projectId, tokenData.projectId),
-    ))
+    .where(
+      and(
+        eq(schema.workspaces.id, tokenData.workspaceId),
+        eq(schema.workspaces.projectId, tokenData.projectId)
+      )
+    )
     .limit(1);
 
   return workspace?.chatSessionId ?? null;

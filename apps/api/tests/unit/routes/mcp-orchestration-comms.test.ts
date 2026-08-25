@@ -75,6 +75,14 @@ const parentTokenData = {
   createdAt: new Date().toISOString(),
 };
 
+const activeCallerTaskRow = {
+  id: 'parent-task-001',
+  status: 'in_progress',
+  workspace_id: 'ws-parent-001',
+  project_id: 'proj-001',
+  parent_task_id: null,
+};
+
 /**
  * Helper: set mock D1 results for BOTH .all() and .raw() paths.
  * Drizzle uses .all() for select() and .raw() for select({...}).
@@ -159,8 +167,8 @@ describe('MCP Orchestration Communication Tools', () => {
       expect(result.error?.message).toContain('message is required');
     });
 
-    it('should reject when child task is not found', async () => {
-      mockD1ResultSequence([[]]);
+    it('should reject when target task is not found', async () => {
+      mockD1ResultSequence([[activeCallerTaskRow]]);
 
       const result = await handleSendMessageToSubtask(
         1,
@@ -170,18 +178,32 @@ describe('MCP Orchestration Communication Tools', () => {
       );
 
       expect(result.error).toBeDefined();
-      expect(result.error?.message).toContain('Child task not found');
+      expect(result.error?.message).toContain('Target task not found');
     });
 
-    it('should reject when caller is not the direct parent', async () => {
+    it('should deliver when caller is a same-project sibling rather than the direct parent', async () => {
       mockD1ResultSequence([
         [
+          activeCallerTaskRow,
           {
             id: 'child-001',
             status: 'in_progress',
             workspace_id: 'ws-child-001',
             project_id: 'proj-001',
             parent_task_id: 'some-other-task',
+          },
+        ],
+        [
+          {
+            id: 'ws-child-001',
+            node_id: 'node-001',
+            chat_session_id: 'chat-child-001',
+            status: 'running',
+          },
+        ],
+        [
+          {
+            id: 'agent-session-001',
           },
         ],
       ]);
@@ -193,13 +215,22 @@ describe('MCP Orchestration Communication Tools', () => {
         mockEnv as Env
       );
 
-      expect(result.error).toBeDefined();
-      expect(result.error?.message).toContain('direct parent');
+      expect(result.error).toBeUndefined();
+      expect(mockSendPromptToAgentOnNode).toHaveBeenCalledWith(
+        'node-001',
+        'ws-child-001',
+        'agent-session-001',
+        'hello',
+        mockEnv,
+        'user-001',
+        'persisted-msg-001'
+      );
     });
 
     it('should reject when child task is in a terminal status', async () => {
       mockD1ResultSequence([
         [
+          activeCallerTaskRow,
           {
             id: 'child-001',
             status: 'completed',
@@ -224,6 +255,7 @@ describe('MCP Orchestration Communication Tools', () => {
     it('should reject when child has no workspace assigned', async () => {
       mockD1ResultSequence([
         [
+          activeCallerTaskRow,
           {
             id: 'child-001',
             status: 'queued',
@@ -248,6 +280,7 @@ describe('MCP Orchestration Communication Tools', () => {
     it('should deliver message successfully (happy path)', async () => {
       mockD1ResultSequence([
         [
+          activeCallerTaskRow,
           {
             id: 'child-001',
             status: 'in_progress',
@@ -317,6 +350,7 @@ describe('MCP Orchestration Communication Tools', () => {
     it('durably accepts the handoff and skips direct VM delivery when enabled', async () => {
       mockD1ResultSequence([
         [
+          activeCallerTaskRow,
           {
             id: 'child-001',
             status: 'in_progress',
@@ -372,6 +406,7 @@ describe('MCP Orchestration Communication Tools', () => {
     it('should return agent_busy when child responds with 409', async () => {
       mockD1ResultSequence([
         [
+          activeCallerTaskRow,
           {
             id: 'child-001',
             status: 'in_progress',
@@ -435,6 +470,7 @@ describe('MCP Orchestration Communication Tools', () => {
     it('should return internal error for non-409 delivery failures', async () => {
       mockD1ResultSequence([
         [
+          activeCallerTaskRow,
           {
             id: 'child-001',
             status: 'in_progress',
@@ -475,6 +511,7 @@ describe('MCP Orchestration Communication Tools', () => {
     it('should reject when no running agent session exists', async () => {
       mockD1ResultSequence([
         [
+          activeCallerTaskRow,
           {
             id: 'child-001',
             status: 'in_progress',
@@ -508,6 +545,7 @@ describe('MCP Orchestration Communication Tools', () => {
     it('should truncate message to max length', async () => {
       mockD1ResultSequence([
         [
+          activeCallerTaskRow,
           {
             id: 'child-001',
             status: 'in_progress',

@@ -167,19 +167,22 @@ describe('stuck-tasks DO health checks (TDF-7)', () => {
     expect(healthCheckSection).toContain('timeForCheck');
   });
 
-  it('detects DO-completed-but-task-active mismatch', () => {
-    expect(stuckTasksSource).toContain('stuck_task.do_completed_but_task_active');
+  it('detects completed-DO active-state mismatches while recognizing normal handoff', () => {
+    expect(stuckTasksSource).toContain('stuck_task.do_completed_handoff_active');
+    expect(stuckTasksSource).toContain('stuck_task.do_completed_active_state_mismatch');
     expect(stuckTasksSource).toContain('doStatus?.completed');
   });
 
   it('records DO mismatch in OBSERVABILITY_DATABASE', () => {
-    expect(stuckTasksSource).toContain("recoveryType: 'do_task_status_mismatch'");
+    expect(stuckTasksSource).toContain('TASK_RUNNER_MISMATCH_RECOVERY_TYPE');
+    expect(stuckTasksSource).toContain("'do_task_status_mismatch'");
   });
 
-  it('deduplicates DO mismatch records (30 min window)', () => {
-    expect(stuckTasksSource).toContain('recentMismatch');
+  it('deduplicates DO mismatch records once per task', () => {
+    expect(stuckTasksSource).toContain('existingMismatch');
     expect(stuckTasksSource).toContain('do_task_status_mismatch');
-    expect(stuckTasksSource).toContain('30 * 60 * 1000');
+    expect(stuckTasksSource).toContain('One durable diagnostic per task is enough');
+    expect(stuckTasksSource).not.toContain('30 * 60 * 1000');
   });
 
   it('tracks doHealthChecked count in result', () => {

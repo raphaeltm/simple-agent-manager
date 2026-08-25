@@ -1,10 +1,10 @@
 /**
- * MCP orchestration communication tools — parent → child agent messaging and control.
+ * MCP orchestration communication tools — project-scoped agent messaging and parent → child control.
  *
- * send_message_to_subtask: Injects a user-role message into a running child agent's ACP session.
+ * send_message_to_subtask: Injects a user-role message into a running same-project agent's ACP session.
  * stop_subtask: Gracefully stops a child agent's session with an optional warning message.
  */
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -31,7 +31,7 @@ import {
 
 // ─── Shared resolution helpers ──────────────────────────────────────────────
 
-interface ResolvedChild {
+interface ResolvedAgentTarget {
   task: {
     id: string;
     status: string;
@@ -50,22 +50,34 @@ interface ResolvedChild {
 }
 
 /**
- * Validate parent authorization and resolve child task → workspace → agent session.
+ * Validate authorization and resolve task → workspace → agent session.
+ *
+ * Project-scoped communication is intentionally broader than destructive controls:
+ * any active task agent in the caller's verified MCP-token project can message any
+ * other active task agent in that same project. Destructive lifecycle controls keep
+ * direct-parent authorization.
+ *
  * Returns a JSON-RPC error response on failure, or the resolved child context on success.
  */
-async function resolveChildAgent(
+async function resolveAgentTarget(
   requestId: string | number | null,
-  childTaskId: string,
+  targetTaskId: string,
   tokenData: McpTokenData,
-  db: DrizzleD1Database<typeof schema>
-): Promise<JsonRpcResponse | ResolvedChild> {
+  db: DrizzleD1Database<typeof schema>,
+  options: {
+    authorization: 'same-project-active-agent' | 'direct-child-control';
+    targetLabel: string;
+  }
+): Promise<JsonRpcResponse | ResolvedAgentTarget> {
   // 1. Validate caller is a task agent
   if (!tokenData.taskId) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'Only task agents can use orchestration tools');
   }
 
-  // 2. Query child task
-  const [childTask] = await db
+  // 2. Query target task in the caller's verified project. This project predicate
+  // is the authorization boundary for non-destructive communication.
+  const requestedTaskIds = [...new Set([tokenData.taskId, targetTaskId])];
+  const taskRows = await db
     .select({
       id: schema.tasks.id,
       status: schema.tasks.status,
@@ -74,19 +86,52 @@ async function resolveChildAgent(
       parentTaskId: schema.tasks.parentTaskId,
     })
     .from(schema.tasks)
-    .where(and(eq(schema.tasks.id, childTaskId), eq(schema.tasks.projectId, tokenData.projectId)))
-    .limit(1);
+    .where(
+      and(
+        inArray(schema.tasks.id, requestedTaskIds),
+        eq(schema.tasks.projectId, tokenData.projectId)
+      )
+    );
+  const targetTask = taskRows.find((task) => task.id === targetTaskId);
+  const callerTask = taskRows.find((task) => task.id === tokenData.taskId);
 
-  if (!childTask) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'Child task not found in this project');
+  if (options.authorization === 'same-project-active-agent') {
+    if (!callerTask) {
+      return jsonRpcError(requestId, INVALID_PARAMS, 'Calling task was not found in this project');
+    }
+    if (!ACTIVE_STATUSES.includes(callerTask.status)) {
+      return jsonRpcError(
+        requestId,
+        INVALID_PARAMS,
+        `Calling task is in '${callerTask.status}' status — only active task agents can send messages`
+      );
+    }
+    if (targetTaskId === tokenData.taskId) {
+      return jsonRpcError(
+        requestId,
+        INVALID_PARAMS,
+        'Target task must be another active task agent in the same project'
+      );
+    }
   }
 
-  // 3. Authorization: direct parent only
-  if (childTask.parentTaskId !== tokenData.taskId) {
+  if (!targetTask) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `${options.targetLabel} not found in this project`
+    );
+  }
+
+  // 3. Authorization: direct parent only for destructive lifecycle controls.
+  if (
+    options.authorization === 'direct-child-control' &&
+    targetTask.parentTaskId !== tokenData.taskId
+  ) {
     log.warn('mcp.orchestration.unauthorized_parent', {
       callerTaskId: tokenData.taskId,
-      childTaskId,
-      actualParentTaskId: childTask.parentTaskId,
+      childTaskId: targetTaskId,
+      actualParentTaskId: targetTask.parentTaskId,
       projectId: tokenData.projectId,
     });
     return jsonRpcError(
@@ -96,22 +141,23 @@ async function resolveChildAgent(
     );
   }
 
-  // 4. Verify child is in an active status
-  if (!ACTIVE_STATUSES.includes(childTask.status)) {
+  // 4. Verify target is in an active status
+  if (!ACTIVE_STATUSES.includes(targetTask.status)) {
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      `Child task is in '${childTask.status}' status — only active tasks can receive messages`
+      `${options.targetLabel} is in '${targetTask.status}' status — only active tasks can receive messages`
     );
   }
 
-  // 5. Resolve workspace (project scoping is inherited — the task query above already
-  //    filters by projectId, so the workspace belongs to the same project by definition)
-  if (!childTask.workspaceId) {
+  // 5. Resolve workspace. Require the workspace's own project_id to match the
+  // caller project as a defence-in-depth consistency check; the task row alone is
+  // not enough if stale/relaxed fixtures disagree.
+  if (!targetTask.workspaceId) {
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'Child task has no workspace assigned yet (it may still be provisioning)'
+      `${options.targetLabel} has no workspace assigned yet (it may still be provisioning)`
     );
   }
 
@@ -124,26 +170,35 @@ async function resolveChildAgent(
     })
     .from(schema.workspaces)
     .leftJoin(schema.nodes, eq(schema.workspaces.nodeId, schema.nodes.id))
-    .where(eq(schema.workspaces.id, childTask.workspaceId))
+    .where(
+      and(
+        eq(schema.workspaces.id, targetTask.workspaceId),
+        eq(schema.workspaces.projectId, tokenData.projectId)
+      )
+    )
     .limit(1);
 
   if (!workspace || !workspace.nodeId) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'Child workspace or node not found');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `${options.targetLabel} workspace or node not found`
+    );
   }
 
   // Verify node is reachable — D1 nodes.status uses 'running' for healthy nodes
   // (not 'active'/'warm', which are NodeLifecycle DO states, not D1 column values)
   if (workspace.nodeStatus !== 'running') {
     log.warn('mcp.orchestration.node_not_running', {
-      childTaskId,
-      workspaceId: childTask.workspaceId,
+      childTaskId: targetTaskId,
+      workspaceId: targetTask.workspaceId,
       nodeId: workspace.nodeId,
       nodeStatus: workspace.nodeStatus,
     });
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      `Child workspace node is not running (status: ${workspace.nodeStatus ?? 'unknown'})`
+      `${options.targetLabel} workspace node is not running (status: ${workspace.nodeStatus ?? 'unknown'})`
     );
   }
 
@@ -161,15 +216,19 @@ async function resolveChildAgent(
     .limit(1);
 
   if (!agentSession) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'No running agent session found for child task');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `No running agent session found for ${options.targetLabel.toLowerCase()}`
+    );
   }
 
   return {
     task: {
-      id: childTask.id,
-      status: childTask.status,
-      workspaceId: childTask.workspaceId,
-      projectId: childTask.projectId,
+      id: targetTask.id,
+      status: targetTask.status,
+      workspaceId: targetTask.workspaceId,
+      projectId: targetTask.projectId,
     },
     workspace: {
       id: workspace.id,
@@ -184,7 +243,7 @@ async function resolveChildAgent(
 }
 
 /** Type guard: check if the resolution result is an error response. */
-function isError(result: JsonRpcResponse | ResolvedChild): result is JsonRpcResponse {
+function isError(result: JsonRpcResponse | ResolvedAgentTarget): result is JsonRpcResponse {
   return 'jsonrpc' in result;
 }
 
@@ -211,9 +270,12 @@ export async function handleSendMessageToSubtask(
 
   const message = sanitizeUserInput(rawMessage).slice(0, limits.orchestratorMessageMaxLength);
 
-  // Resolve child agent
+  // Resolve same-project target agent
   const db = drizzle(env.DATABASE, { schema });
-  const resolution = await resolveChildAgent(requestId, taskId, tokenData, db);
+  const resolution = await resolveAgentTarget(requestId, taskId, tokenData, db, {
+    authorization: 'same-project-active-agent',
+    targetLabel: 'Target task',
+  });
   if (isError(resolution)) {
     return resolution;
   }
@@ -224,40 +286,37 @@ export async function handleSendMessageToSubtask(
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Child workspace has no chat session');
   }
 
-  const { resolveDurableExecutionConfig } = await import(
-    '../../durable-objects/project-data/durable-execution-config'
-  );
+  const { resolveDurableExecutionConfig } =
+    await import('../../durable-objects/project-data/durable-execution-config');
   const durableConfig = resolveDurableExecutionConfig(env);
   if (durableConfig.deliveryEnabled) {
-    const accepted = await projectDataService.acceptPromptDelivery(
-      env,
-      resolution.task.projectId,
-      {
-        targetSessionId: workspace.chatSessionId,
-        displayContent: message,
-        deliveryContent: message,
-        sourceTaskId: tokenData.taskId ?? null,
-        senderType: 'agent',
-        senderId: tokenData.workspaceId,
-        messageClass: 'deliver',
-        sourceKind: 'orchestration_handoff',
-        ttlMs: durableConfig.ttlMs,
-        metadata: {
-          parentTaskId: tokenData.taskId,
-          childTaskId: taskId,
-        },
+    const accepted = await projectDataService.acceptPromptDelivery(env, resolution.task.projectId, {
+      targetSessionId: workspace.chatSessionId,
+      displayContent: message,
+      deliveryContent: message,
+      sourceTaskId: tokenData.taskId ?? null,
+      senderType: 'agent',
+      senderId: tokenData.workspaceId,
+      messageClass: 'deliver',
+      sourceKind: 'orchestration_handoff',
+      ttlMs: durableConfig.ttlMs,
+      metadata: {
+        parentTaskId: tokenData.taskId,
+        childTaskId: taskId,
       },
-    );
+    });
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          delivered: false,
-          queued: true,
-          accepted: true,
-          messageId: accepted.message.id,
-        }),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            delivered: false,
+            queued: true,
+            accepted: true,
+            messageId: accepted.message.id,
+          }),
+        },
+      ],
     });
   }
 
@@ -405,9 +464,13 @@ export async function handleStopSubtask(
       ? sanitizeUserInput(params.reason.trim()).slice(0, limits.orchestratorMessageMaxLength)
       : undefined;
 
-  // Resolve child agent
+  // Resolve child agent. stop_subtask is destructive, so it intentionally keeps
+  // the direct-parent restriction while send_message_to_subtask is project-scoped.
   const db = drizzle(env.DATABASE, { schema });
-  const resolution = await resolveChildAgent(requestId, taskId, tokenData, db);
+  const resolution = await resolveAgentTarget(requestId, taskId, tokenData, db, {
+    authorization: 'direct-child-control',
+    targetLabel: 'Child task',
+  });
   if (isError(resolution)) {
     return resolution;
   }

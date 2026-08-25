@@ -51,13 +51,13 @@ describe('wait_for_subtasks MCP handler', () => {
     });
   });
 
-  it('is advertised with the required child task IDs', () => {
+  it('is advertised with the required task IDs', () => {
     const definition = ORCHESTRATION_TOOLS.find((tool) => tool.name === 'wait_for_subtasks');
     expect(definition).toBeDefined();
     expect(definition!.inputSchema.required).toContain('taskIds');
   });
 
-  it('registers a bounded durable wait for direct child tasks', async () => {
+  it('registers a bounded durable wait for same-project direct child tasks', async () => {
     const env = createEnv([
       {
         id: 'parent-1',
@@ -111,7 +111,7 @@ describe('wait_for_subtasks MCP handler', () => {
     });
   });
 
-  it('rejects a task outside the direct child lineage', async () => {
+  it('registers a bounded durable wait for same-project non-child tasks', async () => {
     const env = createEnv([
       {
         id: 'parent-1',
@@ -134,8 +134,16 @@ describe('wait_for_subtasks MCP handler', () => {
       env
     );
 
-    expect(errorMessage(response)).toContain('not a direct child');
-    expect(registerTaskWait).not.toHaveBeenCalled();
+    expect(response.error).toBeUndefined();
+    expect(registerTaskWait).toHaveBeenCalledWith(
+      env,
+      'project-1',
+      expect.objectContaining({
+        parentTaskId: 'parent-1',
+        parentSessionId: 'session-1',
+        childTaskIds: ['other-task'],
+      })
+    );
   });
 
   it('rejects duplicates and waits beyond the configured maximum', async () => {

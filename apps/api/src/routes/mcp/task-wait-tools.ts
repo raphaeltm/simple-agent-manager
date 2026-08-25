@@ -12,10 +12,9 @@ import {
   type McpTokenData,
 } from './_helpers';
 
-interface TaskLineageRow {
+interface TaskWaitTargetRow {
   id: string;
   status: string;
-  parent_task_id: string | null;
   chat_session_id: string | null;
 }
 
@@ -103,14 +102,14 @@ export async function handleWaitForSubtasks(
 
   const ids = [tokenData.taskId, ...taskIds];
   const placeholders = ids.map(() => '?').join(', ');
-  const lineage = await env.DATABASE.prepare(
-    `SELECT id, status, parent_task_id, chat_session_id
+  const taskRows = await env.DATABASE.prepare(
+    `SELECT id, status, chat_session_id
 		 FROM tasks
 		 WHERE project_id = ? AND id IN (${placeholders})`
   )
     .bind(tokenData.projectId, ...ids)
-    .all<TaskLineageRow>();
-  const rows = new Map((lineage.results ?? []).map((row) => [row.id, row]));
+    .all<TaskWaitTargetRow>();
+  const rows = new Map((taskRows.results ?? []).map((row) => [row.id, row]));
   const parent = rows.get(tokenData.taskId);
   if (!parent) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'Calling task was not found in this project');
@@ -124,14 +123,7 @@ export async function handleWaitForSubtasks(
       return jsonRpcError(
         requestId,
         INVALID_PARAMS,
-        `Child task ${childTaskId} was not found in this project`
-      );
-    }
-    if (child.parent_task_id !== tokenData.taskId) {
-      return jsonRpcError(
-        requestId,
-        INVALID_PARAMS,
-        `Task ${childTaskId} is not a direct child of the calling task`
+        `Task ${childTaskId} was not found in this project`
       );
     }
   }

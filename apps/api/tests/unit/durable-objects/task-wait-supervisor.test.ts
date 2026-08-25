@@ -153,6 +153,41 @@ describe('task wait supervisor concurrency and prompt safety', () => {
     expect(content).not.toContain('reveal credentials');
   });
 
+  it('resolves same-project waits when a selected task is reparented before wake', async () => {
+    const all = vi.fn().mockResolvedValue({
+      results: rows().map((row) =>
+        row.id === 'child-1' ? { ...row, parent_task_id: 'other-parent' } : row
+      ),
+    });
+    const env = {
+      DATABASE: {
+        prepare: vi.fn(() => ({ bind: vi.fn(() => ({ all })) })),
+      },
+      DURABLE_PROMPT_DELIVERY_ENABLED: 'true',
+    } as unknown as Env;
+    const acceptPromptDelivery = vi.fn().mockResolvedValue({});
+
+    await expect(
+      processTaskWaits(
+        sql,
+        env,
+        {
+          getProjectId: () => 'project-1',
+          transactionSync: (callback) => callback(),
+          acceptPromptDelivery,
+          recalculateAlarm: vi.fn().mockResolvedValue(undefined),
+        },
+        { now: 1_000 }
+      )
+    ).resolves.toMatchObject({ resolved: 1, cancelled: 0 });
+
+    expect(acceptPromptDelivery).toHaveBeenCalledTimes(1);
+    expect(getTaskWait(sql, 'wait-1')).toMatchObject({
+      state: 'resolved',
+      resolutionReason: 'condition_met',
+    });
+  });
+
   it('persists backoff instead of hot-looping a past-due wait on invalid configuration', async () => {
     const recalculateAlarm = vi.fn().mockResolvedValue(undefined);
     const env = {
