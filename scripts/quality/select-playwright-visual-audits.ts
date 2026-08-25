@@ -15,6 +15,10 @@ function repoRootFromCurrentFile(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 }
 
+function compareAlphabetically(left: string, right: string): number {
+  return left.localeCompare(right);
+}
+
 function parseArgs(argv: string[]): { webDir: string } {
   const webDirArg = argv.find((arg) => arg.startsWith('--web-dir='));
   return { webDir: webDirArg?.slice('--web-dir='.length) || DEFAULT_WEB_DIR };
@@ -63,14 +67,14 @@ export function selectPlaywrightVisualAudits(repoRoot: string, webDir = DEFAULT_
     .filter((fileName) => fileName.endsWith('audit.spec.ts'))
     .filter((fileName) => !fileName.startsWith('staging-'))
     .filter((fileName) => !quarantineSet.has(fileName))
-    .sort()
+    .sort(compareAlphabetically)
     .map((fileName) => path.posix.join(PLAYWRIGHT_DIR, fileName));
 
   if (selected.length === 0) {
     throw new Error('Playwright visual audit selection is empty. Repair at least one audit before running CI.');
   }
 
-  return { selected, quarantined: [...quarantineSet].sort() };
+  return { selected, quarantined: [...quarantineSet].sort(compareAlphabetically) };
 }
 
 function main(): void {
