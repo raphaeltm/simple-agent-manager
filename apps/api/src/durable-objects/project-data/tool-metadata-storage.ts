@@ -148,9 +148,10 @@ export function stripToolMetadataPayloadForStorage(
   originalBytes: number;
   storedBytes: number;
   stripped: boolean;
+  failed: boolean;
 } {
   if (toolMetadata === null) {
-    return { value: null, originalBytes: 0, storedBytes: 0, stripped: false };
+    return { value: null, originalBytes: 0, storedBytes: 0, stripped: false, failed: false };
   }
 
   const originalBytes = utf8Bytes(toolMetadata);
@@ -158,14 +159,37 @@ export function stripToolMetadataPayloadForStorage(
   try {
     parsed = JSON.parse(toolMetadata);
   } catch {
-    return { value: toolMetadata, originalBytes, storedBytes: originalBytes, stripped: false };
+    return {
+      value: toolMetadata,
+      originalBytes,
+      storedBytes: originalBytes,
+      stripped: false,
+      failed: true,
+    };
   }
 
-  const compact = stripToolMetadataContent(parsed, resolveCompactMessageOptions(env));
+  let compact: unknown;
+  try {
+    compact = stripToolMetadataContent(parsed, resolveCompactMessageOptions(env));
+  } catch {
+    return {
+      value: toolMetadata,
+      originalBytes,
+      storedBytes: originalBytes,
+      stripped: false,
+      failed: true,
+    };
+  }
   const compactJson = JSON.stringify(compact);
   const compactBytes = utf8Bytes(compactJson);
   if (compactBytes >= originalBytes) {
-    return { value: toolMetadata, originalBytes, storedBytes: originalBytes, stripped: false };
+    return {
+      value: toolMetadata,
+      originalBytes,
+      storedBytes: originalBytes,
+      stripped: false,
+      failed: false,
+    };
   }
 
   const maxBytes = resolveToolMetadataMaxBytes(env);
@@ -178,5 +202,6 @@ export function stripToolMetadataPayloadForStorage(
     originalBytes,
     storedBytes: utf8Bytes(value),
     stripped: true,
+    failed: false,
   };
 }

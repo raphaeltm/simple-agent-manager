@@ -44,6 +44,15 @@ preserving high-value chat history.
 - For Durable Object cleanup, use raw row access with bounded LIMIT/keyset
   batches across separate alarm calls. Fully consume cursors before any await;
   never materialize large sweeps with `.toArray()`.
+- Independent review of PR #1901 found the first cleanup implementation was
+  row-bounded but not byte-bounded: it selected full `tool_metadata` values and
+  materialized up to 500 legacy payloads. Legacy individual payloads may be
+  much larger than the write-path cap, so cleanup must bound bytes read into JS,
+  not just candidate rows.
+- The same review found poison-candidate risk: one cleanup candidate that throws
+  during strip/update can prevent cursor advancement and leave a stale
+  `storageSafetyToolCleanupRecheckAt`, making ProjectData alarms re-arm
+  immediately.
 - Safe cleanup target: terminal-session `tool_metadata.content` payloads.
   Stripping the heavy structured payload preserves the chat row, role, text
   content, tool identity/status, and `contentSize`; recent/active/sleeping
@@ -59,6 +68,12 @@ preserving high-value chat history.
   hourly measurement.
 - [x] Implement one bounded keyset/LIMIT cleanup batch per alarm that strips
   `tool_metadata.content` from old terminal-session rows using raw cursor access.
+- [x] Add a configurable cleanup byte budget so candidate selection reads only
+  row identity plus `length(CAST(tool_metadata AS BLOB))`, then reads full
+  legacy metadata only when it fits the remaining per-alarm byte budget.
+- [x] Add fail-closed oversized/poison candidate handling that writes a small
+  sentinel, records failure metadata, advances the cursor, and prevents stale
+  due recheck alarms from hot-looping.
 - [x] Fix alarm measurement gating so storage measurement runs only when due
   unless explicitly forced by an admin call.
 - [x] Ensure the ProjectData alarm isolates storage measurement/cleanup failures
@@ -77,6 +92,11 @@ preserving high-value chat history.
   ratio or candidate rows are exhausted.
 - Cleanup processes at most one bounded batch per alarm call and continues via
   persisted keyset cursor/recheck alarm, not a long synchronous sweep.
+- Cleanup is byte/memory-bounded for legacy metadata: it does not select or
+  materialize full `tool_metadata` batches, and full metadata reads are capped
+  by a configurable per-alarm byte budget.
+- A single oversized or poison legacy row cannot stall the sweep; it is handled
+  fail-closed with observability, cursor progress, and a sane future alarm.
 - Cleanup uses raw row access and fully consumes the cursor before updates or
   awaits.
 - Cleanup preserves active/sleeping sessions and recent terminal sessions by
@@ -86,7 +106,8 @@ preserving high-value chat history.
 - `measureIntervalMs` is honored even when unrelated ProjectData alarms fire
   more frequently.
 - Tests prove the cleanup shrinks `tool_metadata`, preserves high-value rows,
-  respects batch bounds, and records telemetry/purge metadata.
+  respects row and byte bounds, handles oversized/poison candidates, clears stale
+  due rechecks, avoids alarm thrash, and records telemetry/purge metadata.
 
 ## Validation
 
@@ -97,33 +118,35 @@ preserving high-value chat history.
 - `pnpm --filter @simple-agent-manager/shared build && pnpm --filter @simple-agent-manager/providers build && pnpm --filter @simple-agent-manager/cloud-init build`
 - `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/durable-object-retry.test.ts`
 - `pnpm --filter @simple-agent-manager/api typecheck`
-- `(cd apps/api && pnpm vitest run --config vitest.workers.config.ts tests/workers/project-data-storage-safety.test.ts --reporter verbose)`
-- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/project-data-messages.test.ts tests/unit/services/durable-object-retry.test.ts`
+- `pnpm --filter @simple-agent-manager/api build`
+- `(cd apps/api && pnpm vitest run --config vitest.workers.config.ts tests/workers/project-data-storage-safety.test.ts --reporter verbose)` — 11 tests passed after adding byte-budget, oversized-row, poison-row, stale-recheck, and non-thrashing alarm coverage.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/project-data-messages.test.ts`
 - `pnpm --filter @simple-agent-manager/api lint`
 - `pnpm quality:file-sizes` — passed after extracting automated tool-payload
-  cleanup into `tool-payload-cleanup.ts`; no files exceed 800 lines.
+  cleanup candidate processing into `tool-payload-cleanup-candidates.ts`; no
+  files exceed 800 lines.
 - `pnpm quality:ast-checks` — passed after splitting the cleanup candidate
   query into static SQL branches; existing warnings remain unrelated.
 - `pnpm lint` — passed with pre-existing warnings unrelated to this patch.
-- `pnpm typecheck` — passed; Astro reported its baseline template diagnostics but exited 0.
-- `pnpm test` — 21 tasks passed; API 604 files / 8224 tests, web 293 files / 3502 tests.
-- `pnpm build` — passed from cache.
 - `pnpm format:check` — Prettier format ratchet passed.
 - `git diff --check HEAD`
 
 ## Specialist review notes
 
 - Cloudflare/DO review: cleanup uses `ctx.storage.sql.databaseSize`, keeps
-  alarm work isolated, uses bounded LIMIT/keyset batches, and persists a
-  recheck cursor instead of running a long sweep.
+  alarm work isolated, uses bounded LIMIT/keyset batches over row identity plus
+  metadata byte length, and persists a recheck cursor instead of running a long
+  sweep.
 - Data-loss review: automated cleanup strips only expandable
   `tool_metadata.content` from old terminal sessions; it preserves chat rows,
   message text, active/sleeping sessions, and recent terminal sessions by
   default.
 - Constitution/env review: operational thresholds, limits, batch sizes, age
-  floors, and recheck cadence are configurable via env vars and documented in
-  Worker env types, examples, `wrangler.toml`, public docs, and
+  floors, byte budgets, and recheck cadence are configurable via env vars and
+  documented in Worker env types, examples, `wrangler.toml`, public docs, and
   `env-reference`.
 - Test review: worker-runtime scenarios cover quota measurement, delete reclaim
   semantics, interval gating, bounded cleanup, cursor continuation,
-  active/sleeping preservation, age-floor preservation, and telemetry metadata.
+  active/sleeping preservation, age-floor preservation, oversized and poison
+  legacy metadata, stale recheck clearing, non-thrashing alarm scheduling, and
+  telemetry metadata.

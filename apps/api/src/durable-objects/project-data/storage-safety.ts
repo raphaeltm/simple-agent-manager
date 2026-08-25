@@ -51,6 +51,7 @@ export const DEFAULT_PROJECT_DATA_STORAGE_EMERGENCY_MAX_BATCHES = 4;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO = 0.8;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO = 0.75;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS = 500;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES = 1024 * 1024;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS = 7;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS = 60 * 1000;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM = 25;
@@ -113,6 +114,7 @@ export interface StorageSafetyConfig {
   toolPayloadCleanupTriggerRatio: number;
   toolPayloadCleanupTargetRatio: number;
   toolPayloadCleanupBatchRows: number;
+  toolPayloadCleanupBatchBytes: number;
   toolPayloadCleanupMinSessionAgeMs: number;
   toolPayloadCleanupRecheckMs: number;
   toolPayloadCleanupMaxSessionsPerAlarm: number;
@@ -219,6 +221,10 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
     toolPayloadCleanupBatchRows: parsePositiveInteger(
       env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS,
       DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS
+    ),
+    toolPayloadCleanupBatchBytes: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES
     ),
     toolPayloadCleanupMinSessionAgeMs: cleanupMinSessionAgeDays * 24 * 60 * 60 * 1000,
     toolPayloadCleanupRecheckMs: parsePositiveInteger(
