@@ -1,11 +1,11 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { AgentActivityState } from '../../../src/components/project-message-view/types';
 import {
   COMPLETION_DOCK_IDLE_STABILIZE_MS,
   useCompletionDockWorking,
 } from '../../../src/components/project-message-view/useCompletionDockWorking';
-import type { AgentActivityState } from '../../../src/components/project-message-view/types';
 
 describe('useCompletionDockWorking', () => {
   beforeEach(() => {

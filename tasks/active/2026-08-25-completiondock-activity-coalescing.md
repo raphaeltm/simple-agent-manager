@@ -30,10 +30,10 @@ The visible failure is a twitchy CompletionDock center button: Stop/Interrupt an
 - [x] Add a client-side stabilized CompletionDock working signal that delays only working→idle propagation.
 - [x] Ensure idle→working remains immediate so Stop/Interrupt appears immediately.
 - [x] Add web unit tests for working→idle stabilization and reversal swallowing.
-- [ ] Run the required local quality checks and Playwright visual audit for the changed chat UI surface.
+- [x] Run the required local quality checks and Playwright visual audit for the changed chat UI surface.
 - [ ] Run specialist reviews: task-completion-validator, go-specialist, ui-ux-specialist, test-engineer, constitution-validator, and env-validator.
 - [ ] Deploy to staging, verify the live app, and provision a VM to verify vm-agent heartbeat/workspace access because `packages/vm-agent` changes.
-- [ ] Add the process fix to repository agent guidance.
+- [x] Add the process fix to repository agent guidance.
 
 ## Acceptance criteria
 
