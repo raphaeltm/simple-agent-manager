@@ -38,7 +38,7 @@ Selected direction: variant 3.
 - [x] Run local validation: focused unit tests, focused Playwright audit, then full lint/typecheck/test/build gates.
 - [x] Run specialist review: `ui-ux-specialist`, `test-engineer`, `constitution-validator`, and `task-completion-validator`; address blockers.
 - [x] Upload screenshots to the project library for review.
-- [ ] Deploy to staging and verify the comments UX end to end.
+- [x] Deploy to staging and verify the comments UX end to end.
 - [ ] Create PR, wait for CI, and monitor deploy after merge if normal gates authorize it.
 
 ## Implementation notes
@@ -54,6 +54,8 @@ Selected direction: variant 3.
 - `pnpm test` — passed.
 - `pnpm build` — passed.
 - `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/message-comments-audit.spec.ts --project "Desktop (1280x800)" --project "iPhone SE (375x667)"` — passed again after the final accessibility cleanup, 10 tests.
+- `gh workflow run deploy-staging.yml --ref sam/chat-ui-desktop-broken-x7a6h9` — staging deploy run `32872775053` passed, including post-deploy smoke tests.
+- `PLAYWRIGHT_BASE_URL=https://app.sammy.party pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/staging-comment-rail-verification.spec.ts --project "Desktop (1280x800)"` — temporary live-staging verifier passed, 2 tests. Verified desktop rail from message/selected-text/header controls and mobile fixed selected-text composer with real staging comment API writes.
 
 ## Review log
 
@@ -69,6 +71,9 @@ Selected direction: variant 3.
 - `01M0WW924DMK9HPY9HYN25F8CS` — `message-comments-desktop-empty-state-1280x800.png`
 - `01M0WW94V859QG68DSXG2G143Z` — `message-comments-mobile-voice-idle-375x667.png`
 - `01M0WW97EP00YM2DHQREK522YC` — `message-comments-mobile-bottom-composer-send-375x667.png`
+- `01M0WY32WXTSXSSZKPGABYS658` — `staging-comments-desktop-rail-1280x800.png`
+- `01M0WY35PJACF0NP1YE4ZVG61N` — `staging-comments-mobile-bottom-composer-375x667.png`
+- `01M0WY39G0R11VEXYAYD1HGPD6` — `staging-comments-mobile-thread-after-send-375x667.png`
 
 ## Acceptance criteria
 
