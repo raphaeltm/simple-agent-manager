@@ -208,6 +208,30 @@ describe('MCP incident tools', () => {
     });
   });
 
+  it('rejects malformed pull request references before terminal mutation', async () => {
+    const { sqlite, env } = setup();
+
+    const claim = parseToolText(
+      await handleClaimIncident('1', { incidentId: 'incident-a' }, token(), env)
+    );
+    const rejected = await handleResolveIncident(
+      '2',
+      {
+        incidentId: 'incident-a',
+        claimToken: claim.claimToken,
+        outcome: 'resolved',
+        fixPrUrl: 'http://example.com/not-a-pr',
+      },
+      token(),
+      env
+    );
+
+    expect(rejected.error?.message).toContain('fixPrUrl must use https');
+    expect(sqlite.prepare('SELECT queue_state FROM platform_feedback_triages').get()).toEqual({
+      queue_state: 'claimed',
+    });
+  });
+
   it('rejects incidents only with a justification note and no fix reference', async () => {
     const { sqlite, env } = setup();
 

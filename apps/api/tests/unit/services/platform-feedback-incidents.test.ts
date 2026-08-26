@@ -255,6 +255,38 @@ describe('platform feedback incidents', () => {
     expect(detail?.resolutionReferences).toMatchObject({ linkedRecordId: TRACKING_ID });
   });
 
+  it('resolves incidents with a structured pull request URL reference', async () => {
+    const { sqlite, env } = setup();
+    const signature = seedIncident(sqlite);
+    const claim = await claimIncident(env, signature, 'task-1', 10_000);
+
+    await expect(
+      resolveIncident(
+        env,
+        signature,
+        claim?.claimToken ?? '',
+        'resolved',
+        'task-1',
+        'Fixed by PR.',
+        {
+          now: 10_001,
+          resolutionReferences: {
+            fixPrUrl:
+              'https://user:pass@github.com/raphaeltm/simple-agent-manager/pull/1928?canary=1#discussion',
+          },
+        }
+      )
+    ).resolves.toBe(true);
+
+    const terminal = sqlite
+      .prepare('SELECT queue_state, resolution_references FROM platform_feedback_triages')
+      .get() as Record<string, unknown>;
+    expect(terminal.queue_state).toBe('resolved');
+    expect(JSON.parse(String(terminal.resolution_references))).toMatchObject({
+      fixPrUrl: 'https://github.com/raphaeltm/simple-agent-manager/pull/1928',
+    });
+  });
+
   it('requires rejection justifications without requiring fix references', async () => {
     const { sqlite, env } = setup();
     const signature = seedIncident(sqlite);
