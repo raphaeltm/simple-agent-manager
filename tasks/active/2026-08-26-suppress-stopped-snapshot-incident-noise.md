@@ -131,6 +131,20 @@ Two smaller issues in the same diff:
 - [ ] Real-VM staging verification per `.claude/rules/27` + `/do` Phase 6b, with staging nodes
       deleted afterwards (Hetzner 10-server shared cap, policy `a63e6a68`)
 
+## Review findings addressed (Phase 5)
+
+Three local reviewers ran. All findings addressed in-branch; none deferred.
+
+| Finding | Severity | Resolution |
+|---|---|---|
+| go-specialist: suppression keys off the `errWorkspaceNotRunning` sentinel, which covers `stopped`, `creating` and `error` alike, while evidence only validated `stopped`. `errors.Is` cannot see the interpolated status. | MEDIUM | Introduced `workspaceNotRunningError` carrying the status; `isSnapshotTeardownRaceError` now branches with `errors.As` and suppresses **only** `stopped`. Added must-still-report cases for `creating` (restart race) and `error`. Proven discriminating: widening back to all statuses turns both red. |
+| test-engineer: no regression test for `context.Canceled`, the other half of the suppression the first cut added. Proven by re-adding it and watching the whole suite stay green. | HIGH | Added a `capture cancelled mid-flight` case. Proven discriminating: re-adding `context.Canceled` suppression turns it red. |
+| test-engineer: the dominant production wrap (`resolve snapshot devcontainer: %w`) was hand-duplicated in the test helper, so changing it to `%v` would disable classification with no test failing. | MEDIUM | Extracted `newSnapshotResolveError` in `session_snapshot.go` as the single seam; production and tests both call it. Proven discriminating: `%w` -> `%v` now turns two cases red. |
+| test-engineer: the `create WIP bundle` timeout case used a shape that cannot reach the classifier (WIP failures degrade the manifest instead of erroring). | MEDIUM | Rebuilt from `completeSnapshot`'s real hard-failure shape, which does box the error with a generation. |
+| test-engineer: `waitFor`'s stopping condition called `shouldReportBackgroundSnapshotIncident` — the function under test. Verified non-exploitable but fragile. | LOW-MED | Harness now takes `wantIncident` from the caller and adds a settle window for absence assertions. |
+| task-completion-validator: PR body missing Preflight/Post-Mortem/review table; no staging verification. | HIGH x2 | PR body rewritten; staging verification performed in Phase 6. |
+| both: one case uses a literal string for the `no running devcontainer found` shape. | LOW | Documented why (substring predicate, no `%w` chain, pinned independently by `TestIsContainerUnavailableError`). |
+
 ## Post-mortem
 
 **What broke.** Not a user-visible outage. The vm-agent classified an expected teardown race as a

@@ -241,7 +241,11 @@ type backgroundSnapshotIncidentProbe struct {
 
 // runBackgroundSnapshotIncidentProbe drives startBackgroundSessionSnapshot against a stub
 // control plane and waits for the capture goroutine to finish reporting.
-func runBackgroundSnapshotIncidentProbe(t *testing.T, captureErr error) backgroundSnapshotIncidentProbe {
+//
+// wantIncident is the CALLER's expectation, not the verdict of the code under test: the wait
+// condition must never consult shouldReportBackgroundSnapshotIncident, or the harness would
+// decide how long to wait using the very function the assertion is checking.
+func runBackgroundSnapshotIncidentProbe(t *testing.T, captureErr error, wantIncident bool) backgroundSnapshotIncidentProbe {
 	t.Helper()
 
 	var errorPosts atomic.Int32
@@ -297,9 +301,18 @@ func runBackgroundSnapshotIncidentProbe(t *testing.T, captureErr error) backgrou
 	}
 	// The runner returns before the goroutine reports, so wait for the reporting tail rather
 	// than sampling immediately: a "no incident" assertion taken too early passes vacuously.
-	waitFor(t, func() bool {
-		return failureReports.Load() > 0 && (errorPosts.Load() > 0 || !shouldReportBackgroundSnapshotIncident(captureErr))
-	}, "control plane did not receive the expected snapshot reports")
+	if wantIncident {
+		waitFor(t, func() bool {
+			return failureReports.Load() > 0 && errorPosts.Load() > 0
+		}, "control plane did not receive both the failure callback and the incident")
+	} else {
+		waitFor(t, func() bool { return failureReports.Load() > 0 },
+			"control plane did not receive the generation-scoped failure callback")
+		// The failure callback and the incident post are independent writes. Give a wrongly
+		// un-suppressed incident a settle window to land, so "0 posts" means "none was sent"
+		// rather than "we sampled too early".
+		time.Sleep(150 * time.Millisecond)
+	}
 
 	return backgroundSnapshotIncidentProbe{
 		errorPosts:    errorPosts.Load(),
@@ -350,22 +363,42 @@ func TestBackgroundSessionSnapshotIncidentSeverity(t *testing.T) {
 			captureErr: errors.New("resolve snapshot devcontainer: failed to resolve container: no running devcontainer found (label: devcontainer.local_folder=/workspace)"),
 		},
 		{
+			// Racing a restart is NOT teardown: the workspace was running a moment ago and
+			// goes back to "creating". Evidence only covers "stopped", so this must report.
+			name:         "workspace restarting",
+			captureErr:   wrapAsSnapshotResolveError(&workspaceNotRunningError{status: "creating"}),
+			wantIncident: true,
+		},
+		{
+			name:         "workspace in error state",
+			captureErr:   wrapAsSnapshotResolveError(&workspaceNotRunningError{status: "error"}),
+			wantIncident: true,
+		},
+		{
 			name:         "material upload failure",
 			captureErr:   errors.New("snapshot control plane returned HTTP 400: checksum mismatch"),
 			wantIncident: true,
 		},
 		{
-			// A capture that blows SessionSnapshotOperationTimeout has failed to preserve
-			// resumable state, so it must stay visible.
+			// completeSnapshot is a real hard-failure point that boxes the error WITH a
+			// generation, so this is the shape a genuine capture timeout arrives in. (A WIP
+			// bundle timeout does not reach here — it degrades the manifest instead.)
 			name:         "capture exceeded its time budget",
-			captureErr:   fmt.Errorf("create WIP bundle: %w", context.DeadlineExceeded),
+			captureErr:   fmt.Errorf(`Post "https://api.example.test/session-snapshot/complete": %w`, context.DeadlineExceeded),
+			wantIncident: true,
+		},
+		{
+			// The first cut suppressed context.Canceled too. Production really does emit
+			// cancellation-shaped capture failures, and they mean the capture did not finish.
+			name:         "capture cancelled mid-flight",
+			captureErr:   fmt.Errorf("create auth file parent dir: command failed: %w", context.Canceled),
 			wantIncident: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := runBackgroundSnapshotIncidentProbe(t, tt.captureErr)
+			got := runBackgroundSnapshotIncidentProbe(t, tt.captureErr, tt.wantIncident)
 
 			if tt.wantIncident && got.errorPosts == 0 {
 				t.Fatalf("error posts = 0, want an incident for %q", tt.captureErr)
@@ -409,9 +442,11 @@ func missingWorkspaceResolveError(t *testing.T) error {
 	return err
 }
 
-// wrapAsSnapshotResolveError mirrors how session_snapshot.go boxes a resolver failure.
+// wrapAsSnapshotResolveError boxes a resolver failure through the SAME production seam the
+// capture path uses, so a change to that wrap (e.g. %w -> %v) breaks these tests instead of
+// silently disabling classification in production.
 func wrapAsSnapshotResolveError(err error) error {
-	return fmt.Errorf("resolve snapshot devcontainer: %w", err)
+	return newSnapshotResolveError("generation-1", err)
 }
 
 // TestWorkspaceLifecycleErrorsClassifyWithoutTriggeringRecovery pins the split this fix exists

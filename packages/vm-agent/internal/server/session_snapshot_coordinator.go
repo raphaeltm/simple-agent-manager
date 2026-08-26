@@ -102,9 +102,14 @@ func isSnapshotTeardownRaceError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return errors.Is(err, errWorkspaceRuntimeNotFound) ||
-		errors.Is(err, errWorkspaceNotRunning) ||
-		isContainerUnavailableError(err)
+	if errors.Is(err, errWorkspaceRuntimeNotFound) || isContainerUnavailableError(err) {
+		return true
+	}
+	// Only "stopped" is deliberate teardown. Production evidence covers that status alone, so
+	// per .claude/rules/67 this filters the narrowest set the evidence supports: a snapshot that
+	// fails while the workspace is "creating" (e.g. racing a restart) or "error" keeps reporting.
+	var notRunning *workspaceNotRunningError
+	return errors.As(err, &notRunning) && notRunning.status == workspaceStatusStopped
 }
 
 // shouldReportBackgroundSnapshotIncident decides whether a failed background capture is worth

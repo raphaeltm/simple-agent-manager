@@ -74,18 +74,32 @@ The tells:
    user-visible outcome is unharmed — here, that `session_snapshots` already held a successful
    capture (`sleep_status='sleeping'`, artifact key present, `capture_error IS NULL`) written
    1.2 s before the failure being suppressed. Filter the narrowest set that evidence supports:
-   do not fold in `context.DeadlineExceeded` or other timeouts, which mean the work genuinely
-   did not finish (`.claude/rules/39`, policy `d08d64dc`).
+   do not fold in `context.DeadlineExceeded`, `context.Canceled`, or other did-not-finish
+   errors (`.claude/rules/39`, policy `d08d64dc`).
+
+5. **A sentinel is coarser than the evidence that justified it.** `errors.Is` compares identity
+   only — it cannot see the values interpolated into the message. A single
+   `errWorkspaceNotRunning` covers `stopped`, `creating`, and `error` alike, so suppressing on
+   it silently extends the filter to states nobody measured (a snapshot racing a *restart* is
+   not teardown). If the evidence covers one value of a field, carry that field on a typed
+   error and branch on it with `errors.As`, and give the states you did NOT validate their own
+   must-still-report test.
 
 ## Required Tests
 
 - **A no-widening test on the trigger**: assert the trigger returns `false` for the new case
   while the new classifier returns `true`. Verify it goes red when the case is added back to
   the trigger — that is the test that would have caught the original defect.
-- **Build the error from its real producer**, not from a hand-written string. A literal
+- **Build the error from its real producer AND through the real wrap.** A literal
   `errors.New("…")` copy of a production message does not exercise the `%w` chain the sentinel
-  depends on, so it passes or fails for the wrong reason (`.claude/rules/62`). Assert the
-  producer's message text separately so a reword is caught deliberately.
+  depends on, so it passes or fails for the wrong reason (`.claude/rules/62`). A test helper
+  that *re-implements* the production wrap is the same bug one level up: it keeps passing if the
+  real wrap is changed to `%v`, silently disabling the classification. Extract the wrap into a
+  named seam both sides call. Assert the producer's message text separately so a reword is
+  caught deliberately.
+- **A test that decides how long to wait by calling the function under test is circular.** Pass
+  the expectation in from the caller instead, and give an absence assertion a settle window so
+  "nothing was sent" cannot mean "we sampled too early".
 - **A discriminating control per suppressed case**: at least one materially-failing error that
   must still report. Verify the suppression is discriminating by removing it and confirming
   exactly the expected cases go red.
@@ -100,7 +114,10 @@ The tells:
 - [ ] Message-substring matching was replaced by a typed sentinel at the producer
 - [ ] The wrapped message text is unchanged and pinned by a test
 - [ ] Suppression is backed by evidence that no user-visible state is lost
-- [ ] Timeouts and other did-not-finish errors are excluded from the suppression
+- [ ] Timeouts, cancellations, and other did-not-finish errors are excluded from the suppression
+- [ ] The sentinel is no coarser than the evidence; unvalidated states have must-still-report tests
+- [ ] Tests go through the production wrap seam, not a re-implementation of it
+- [ ] No wait condition calls the function under test
 - [ ] The no-widening test was verified to go red when the widening is restored
 
 ## References
