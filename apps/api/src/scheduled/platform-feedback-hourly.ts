@@ -48,6 +48,7 @@ export function scheduleHourlyPlatformMaintenance(
         feedbackTriageIdeasUpdated: feedbackTriage?.ideasUpdated ?? 0,
         feedbackTriageGroupsSkipped: feedbackTriage?.groupsSkipped ?? 0,
         feedbackTriageGroupsFailed: feedbackTriage?.groupsFailed ?? 0,
+        feedbackTriageGroupsBudgetDeferred: feedbackTriage?.groupsBudgetDeferred ?? 0,
         feedbackTriageFailureReasons: feedbackTriage?.failureReasons ?? [],
         monthlyCostUsersUpdated: result?.usersUpdated ?? 0,
         monthlyCostTotalEntries: result?.totalEntries ?? 0,

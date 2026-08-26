@@ -19,6 +19,8 @@ function incident(
     nodeId: 'node-1',
     workspaceId: 'workspace-1',
     status,
+    occurrenceCount: 3,
+    lastSeenAt: '2026-08-05T12:02:00.000Z',
     artifactCount: status === 'available' ? 1 : 0,
     totalBytes: status === 'available' ? 2048 : 0,
     manifest: {

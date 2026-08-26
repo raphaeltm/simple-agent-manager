@@ -31,9 +31,11 @@ function setup() {
     CREATE TABLE platform_feedback_triages (
       signature TEXT PRIMARY KEY, source TEXT NOT NULL, summary TEXT NOT NULL,
       first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, occurrence_count INTEGER NOT NULL,
-      evidence_refs TEXT NOT NULL, diagnosis_id TEXT, idea_id TEXT, claim_token TEXT,
+      severity TEXT NOT NULL DEFAULT 'error', evidence_refs TEXT NOT NULL, diagnosis_id TEXT, idea_id TEXT, claim_token TEXT,
       claim_expires_at INTEGER, failure_count INTEGER NOT NULL DEFAULT 0,
       last_failure_reason TEXT, last_failed_at INTEGER, rejected_at INTEGER,
+      budget_deferred_until INTEGER, budget_deferred_reason TEXT,
+      budget_defer_count INTEGER NOT NULL DEFAULT 0, last_budget_deferred_at INTEGER,
       queue_state TEXT NOT NULL DEFAULT 'resolved', queued_at INTEGER,
       dispatch_lease_token TEXT, dispatch_lease_expires_at INTEGER,
       dispatched_trigger_id TEXT, dispatched_execution_id TEXT, dispatched_task_id TEXT,
@@ -66,9 +68,9 @@ function seedIncident(
     .prepare(
       `INSERT INTO platform_feedback_triages
         (signature, source, summary, first_seen_at, last_seen_at, occurrence_count,
-         evidence_refs, queue_state, queued_at, dispatch_attempts, dispatch_lease_expires_at,
+         severity, evidence_refs, queue_state, queued_at, dispatch_attempts, dispatch_lease_expires_at,
          rejected_at, incident_claim_token, incident_claim_expires_at, incident_claimed_by_task_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       signature,
@@ -77,6 +79,7 @@ function seedIncident(
       overrides.first_seen_at ?? 1000,
       overrides.last_seen_at ?? 2000,
       overrides.occurrence_count ?? 1,
+      overrides.severity ?? 'error',
       overrides.evidence_refs ?? JSON.stringify([{ errorId: 'err-1', timestamp: 1000 }]),
       overrides.queue_state ?? 'pending',
       overrides.queued_at ?? 1000,
@@ -243,6 +246,59 @@ describe('platform feedback incidents', () => {
         )
         .get('dispatched', 'exec-1')
     ).toEqual({ count: 2 });
+  });
+
+  it('orders dispatch candidates by severity and novelty ahead of low-severity repeats', async () => {
+    const { sqlite, env } = setup();
+    seedIncident(sqlite, {
+      signature: 'incident-warn-repeat',
+      severity: 'warn',
+      occurrence_count: 100,
+      summary: 'Recurring warning repeat',
+    });
+    seedIncident(sqlite, {
+      signature: 'incident-error-novel',
+      severity: 'error',
+      occurrence_count: 1,
+      summary: 'Recurring error novel',
+    });
+
+    const summary = await buildIncidentBacklogSummary(env, 10, 5000);
+
+    expect(summary.incidents.map((incident) => incident.id)).toEqual([
+      'incident-error-novel',
+      'incident-warn-repeat',
+    ]);
+    expect(summary.rendered).toContain('severity error');
+    expect(summary.rendered).toContain('severity warn');
+  });
+
+  it('recovers expired agent claims through the backlog summary escape path', async () => {
+    const { sqlite, env } = setup();
+    seedIncident(sqlite, {
+      signature: 'incident-claimed-expired',
+      queue_state: 'claimed',
+      incident_claim_token: 'stale-claim',
+      incident_claim_expires_at: 4999,
+      incident_claimed_by_task_id: 'task-1',
+    });
+
+    const summary = await buildIncidentBacklogSummary(env, 10, 5000);
+
+    expect(summary.pendingCount).toBe(1);
+    expect(summary.incidents[0]?.id).toBe('incident-claimed-expired');
+    expect(
+      sqlite
+        .prepare(
+          'SELECT queue_state, incident_claim_token, incident_claim_expires_at, incident_claimed_by_task_id FROM platform_feedback_triages'
+        )
+        .get()
+    ).toEqual({
+      queue_state: 'pending',
+      incident_claim_token: null,
+      incident_claim_expires_at: null,
+      incident_claimed_by_task_id: null,
+    });
   });
 
   it('requeues expired dispatch leases then rejects when the dispatch attempt bound is exhausted', async () => {

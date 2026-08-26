@@ -103,6 +103,8 @@ const mockRegisterDiagnosticArtifact = vi.fn().mockResolvedValue({
   status: 'pending',
 });
 vi.mock('../../../src/services/diagnostic-incidents', () => ({
+  diagnosticIncidentDeploymentId: vi.fn().mockReturnValue('test-deployment'),
+  diagnosticIncidentSignature: vi.fn().mockResolvedValue('test-signature'),
   ensurePendingIncidents: (...args: unknown[]) => mockEnsurePendingIncidents(...args),
   registerDiagnosticArtifact: (...args: unknown[]) => mockRegisterDiagnosticArtifact(...args),
   uploadDiagnosticArtifact: vi.fn(),
@@ -196,8 +198,11 @@ describe('VM Agent Errors Route', () => {
         [
           {
             incidentId,
+            deploymentId: 'test-deployment',
             platformErrorId: incidentId,
             nodeId: 'node-123',
+            occurredAt: Date.parse('2026-02-14T12:00:00Z'),
+            signature: 'test-signature',
             workspaceId: 'ws-abc',
           },
         ]

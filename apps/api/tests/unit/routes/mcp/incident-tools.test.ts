@@ -18,9 +18,11 @@ function setup() {
     CREATE TABLE platform_feedback_triages (
       signature TEXT PRIMARY KEY, source TEXT NOT NULL, summary TEXT NOT NULL,
       first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, occurrence_count INTEGER NOT NULL,
-      evidence_refs TEXT NOT NULL, diagnosis_id TEXT, idea_id TEXT, claim_token TEXT,
+      severity TEXT NOT NULL DEFAULT 'error', evidence_refs TEXT NOT NULL, diagnosis_id TEXT, idea_id TEXT, claim_token TEXT,
       claim_expires_at INTEGER, failure_count INTEGER NOT NULL DEFAULT 0,
       last_failure_reason TEXT, last_failed_at INTEGER, rejected_at INTEGER,
+      budget_deferred_until INTEGER, budget_deferred_reason TEXT,
+      budget_defer_count INTEGER NOT NULL DEFAULT 0, last_budget_deferred_at INTEGER,
       queue_state TEXT NOT NULL DEFAULT 'resolved', queued_at INTEGER,
       dispatch_lease_token TEXT, dispatch_lease_expires_at INTEGER,
       dispatched_trigger_id TEXT, dispatched_execution_id TEXT, dispatched_task_id TEXT,

@@ -2609,9 +2609,13 @@ export const diagnosticIncidents = sqliteTable(
     platformErrorId: text('platform_error_id').notNull().unique(),
     nodeId: text('node_id').notNull(),
     workspaceId: text('workspace_id'),
+    signature: text('signature'),
+    deploymentId: text('deployment_id'),
     status: text('status', { enum: ['pending', 'available', 'failed', 'expired'] })
       .notNull()
       .default('pending'),
+    occurrenceCount: integer('occurrence_count').notNull().default(1),
+    lastSeenAt: text('last_seen_at'),
     artifactCount: integer('artifact_count').notNull().default(0),
     totalBytes: integer('total_bytes').notNull().default(0),
     manifestJson: text('manifest_json'),
@@ -2634,6 +2638,31 @@ export const diagnosticIncidents = sqliteTable(
     ),
     expiryIdx: index('idx_diagnostic_incidents_expiry').on(table.status, table.expiresAt),
     deleteAfterIdx: index('idx_diagnostic_incidents_delete_after').on(table.deleteAfter),
+    signatureDeploymentIdx: uniqueIndex('idx_diagnostic_incidents_signature_deployment')
+      .on(table.signature, table.deploymentId)
+      .where(sql`${table.signature} IS NOT NULL AND ${table.deploymentId} IS NOT NULL`),
+  })
+);
+
+export const diagnosticIncidentOccurrences = sqliteTable(
+  'diagnostic_incident_occurrences',
+  {
+    platformErrorId: text('platform_error_id').primaryKey(),
+    incidentId: text('incident_id')
+      .notNull()
+      .references(() => diagnosticIncidents.id, { onDelete: 'cascade' }),
+    nodeId: text('node_id').notNull(),
+    workspaceId: text('workspace_id'),
+    occurredAt: text('occurred_at').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    incidentIdx: index('idx_diagnostic_incident_occurrences_incident').on(
+      table.incidentId,
+      table.occurredAt
+    ),
   })
 );
 
@@ -2820,6 +2849,7 @@ export const platformFeedbackTriages = sqliteTable(
     firstSeenAt: integer('first_seen_at').notNull(),
     lastSeenAt: integer('last_seen_at').notNull(),
     occurrenceCount: integer('occurrence_count').notNull(),
+    severity: text('severity').notNull().default('error'),
     evidenceRefs: text('evidence_refs').notNull(),
     diagnosisId: text('diagnosis_id').references(() => debugDiagnoses.id, { onDelete: 'set null' }),
     ideaId: text('idea_id').references(() => tasks.id, { onDelete: 'set null' }),
@@ -2829,6 +2859,10 @@ export const platformFeedbackTriages = sqliteTable(
     lastFailureReason: text('last_failure_reason'),
     lastFailedAt: integer('last_failed_at'),
     rejectedAt: integer('rejected_at'),
+    budgetDeferredUntil: integer('budget_deferred_until'),
+    budgetDeferredReason: text('budget_deferred_reason'),
+    budgetDeferCount: integer('budget_defer_count').notNull().default(0),
+    lastBudgetDeferredAt: integer('last_budget_deferred_at'),
     queueState: text('queue_state').notNull().default('resolved'),
     queuedAt: integer('queued_at'),
     dispatchLeaseToken: text('dispatch_lease_token'),
@@ -2878,6 +2912,9 @@ export const platformFeedbackTriages = sqliteTable(
     incidentClaimIdx: index('idx_platform_feedback_triages_incident_claim').on(
       table.incidentClaimExpiresAt
     ),
+    budgetDeferIdx: index('idx_platform_feedback_triages_budget_defer')
+      .on(table.budgetDeferredUntil)
+      .where(sql`${table.budgetDeferredUntil} IS NOT NULL`),
   })
 );
 

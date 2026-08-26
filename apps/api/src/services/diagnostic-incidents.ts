@@ -24,6 +24,7 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const SAFE_ARTIFACT_KIND = 'safe-vm-incident-v1';
 const SAFE_CONTENT_TYPE = 'application/gzip';
 const textEncoder = new TextEncoder();
+const DEFAULT_DIAGNOSTIC_DEPLOYMENT_ID = 'unknown-deployment';
 
 // Mirrors DiagnosticIncidentManifest / DiagnosticCollectorOutcome
 // (packages/shared/src/types/debug-agent.ts) exactly. The admin UI
@@ -63,6 +64,35 @@ function encodedBytes(value: unknown): number {
   return textEncoder.encode(JSON.stringify(value)).byteLength;
 }
 
+function normalizeDiagnosticText(value: string): string {
+  return String(redactSensitiveData(value))
+    .toLowerCase()
+    .replace(/\b[a-z0-9.!#$%&*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi, '[email]')
+    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[ip]')
+    .replace(/https?:\/\/\S+/g, '[url]')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f-]{27,}\b/gi, '[id]')
+    .replace(/\b01[a-z0-9]{24}\b/gi, '[id]')
+    .replace(/\b\d{3,}\b/g, '[n]')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 500);
+}
+
+async function digest(value: string): Promise<string> {
+  const bytes = await crypto.subtle.digest('SHA-256', textEncoder.encode(value));
+  return [...new Uint8Array(bytes)].map((item) => item.toString(16).padStart(2, '0')).join('');
+}
+
+export async function diagnosticIncidentSignature(source: string, message: string): Promise<string> {
+  return digest(`${normalizeDiagnosticText(source)}\n${normalizeDiagnosticText(message)}`);
+}
+
+export function diagnosticIncidentDeploymentId(env: Env): string {
+  const raw = env.VERSION || env.ENVIRONMENT || DEFAULT_DIAGNOSTIC_DEPLOYMENT_ID;
+  const sanitized = String(redactSensitiveData(raw)).replace(/\s+/g, '-').trim().slice(0, 128);
+  return sanitized || DEFAULT_DIAGNOSTIC_DEPLOYMENT_ID;
+}
+
 function deterministicObjectKey(
   config: IncidentConfig,
   nodeId: string,
@@ -77,47 +107,157 @@ export interface PendingIncidentInput {
   platformErrorId: string;
   nodeId: string;
   workspaceId: string | null;
+  signature?: string;
+  deploymentId?: string;
+  occurredAt?: number;
+}
+
+export interface PendingIncidentResult {
+  platformErrorId: string;
+  incidentId: string;
+  canonicalIncidentId: string;
+  duplicate: boolean;
+  occurrenceRecorded: boolean;
 }
 
 export async function ensurePendingIncidents(
   env: Env,
   inputs: PendingIncidentInput[]
-): Promise<void> {
+): Promise<PendingIncidentResult[]> {
   const config = resolveDiagnosticIncidentConfig(env);
   const now = new Date();
   const expiresAt = new Date(now.getTime() + config.retentionDays * 86_400_000).toISOString();
   const deleteAfter = new Date(
     now.getTime() + (config.retentionDays + config.metadataRetentionDays) * 86_400_000
   ).toISOString();
+  const results: PendingIncidentResult[] = [];
   for (const input of inputs) {
     assertULID(input.incidentId, 'incidentId');
+    const occurrenceAt = new Date(input.occurredAt ?? now.getTime()).toISOString();
+    const signature = input.signature?.trim() || null;
+    const deploymentId = input.deploymentId?.trim() || null;
     await env.DATABASE.prepare(
       `INSERT OR IGNORE INTO diagnostic_incidents
-       (id, platform_error_id, node_id, workspace_id, status, expires_at, delete_after)
-       VALUES (?, ?, ?, ?, 'pending', ?, ?)`
+       (id, platform_error_id, node_id, workspace_id, signature, deployment_id,
+        status, occurrence_count, last_seen_at, expires_at, delete_after)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', 1, ?, ?, ?)`
     )
       .bind(
         input.incidentId,
         input.platformErrorId,
         input.nodeId,
         input.workspaceId,
+        signature,
+        deploymentId,
+        occurrenceAt,
         expiresAt,
         deleteAfter
       )
       .run();
-    const authoritative = await env.DATABASE.prepare(
-      'SELECT node_id, platform_error_id FROM diagnostic_incidents WHERE id = ?'
+    const direct = await env.DATABASE.prepare(
+      `SELECT id, node_id, platform_error_id, signature, deployment_id
+       FROM diagnostic_incidents WHERE id = ?`
     )
       .bind(input.incidentId)
-      .first<{ node_id: string; platform_error_id: string }>();
-    if (
-      !authoritative ||
-      authoritative.node_id !== input.nodeId ||
-      authoritative.platform_error_id !== input.platformErrorId
-    ) {
+      .first<{
+        id: string;
+        node_id: string;
+        platform_error_id: string;
+        signature: string | null;
+        deployment_id: string | null;
+      }>();
+    if (direct) {
+      if (
+        direct.node_id !== input.nodeId ||
+        direct.platform_error_id !== input.platformErrorId ||
+        (signature && direct.signature && direct.signature !== signature) ||
+        (deploymentId && direct.deployment_id && direct.deployment_id !== deploymentId)
+      ) {
+        throw errors.conflict('Incident ID is already bound to another error or node');
+      }
+      if ((signature && !direct.signature) || (deploymentId && !direct.deployment_id)) {
+        await env.DATABASE.prepare(
+          `UPDATE diagnostic_incidents
+           SET signature = COALESCE(signature, ?),
+             deployment_id = COALESCE(deployment_id, ?),
+             last_seen_at = COALESCE(last_seen_at, ?),
+             updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`
+        )
+          .bind(signature, deploymentId, occurrenceAt, direct.id)
+          .run();
+      }
+      results.push({
+        platformErrorId: input.platformErrorId,
+        incidentId: input.incidentId,
+        canonicalIncidentId: direct.id,
+        duplicate: false,
+        occurrenceRecorded: false,
+      });
+      continue;
+    }
+    if (!signature || !deploymentId) {
       throw errors.conflict('Incident ID is already bound to another error or node');
     }
+    const canonical = await env.DATABASE.prepare(
+      `SELECT id FROM diagnostic_incidents
+       WHERE signature = ? AND deployment_id = ?
+       ORDER BY created_at ASC
+       LIMIT 1`
+    )
+      .bind(signature, deploymentId)
+      .first<{ id: string }>();
+    if (!canonical) throw errors.internal('Diagnostic incident deduplication lost canonical row');
+
+    const occurrence = await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO diagnostic_incident_occurrences
+       (platform_error_id, incident_id, node_id, workspace_id, occurred_at)
+       VALUES (?, ?, ?, ?, ?)`
+    )
+      .bind(
+        input.platformErrorId,
+        canonical.id,
+        input.nodeId,
+        input.workspaceId,
+        occurrenceAt
+      )
+      .run();
+    const occurrenceRecorded = Number(occurrence.meta.changes ?? 0) === 1;
+    if (occurrenceRecorded) {
+      await env.DATABASE.prepare(
+        `UPDATE diagnostic_incidents
+         SET occurrence_count = occurrence_count + 1,
+           last_seen_at = CASE
+             WHEN last_seen_at IS NULL OR last_seen_at < ? THEN ?
+             ELSE last_seen_at
+           END,
+           updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`
+      )
+        .bind(occurrenceAt, occurrenceAt, canonical.id)
+        .run();
+    }
+    results.push({
+      platformErrorId: input.platformErrorId,
+      incidentId: input.incidentId,
+      canonicalIncidentId: canonical.id,
+      duplicate: true,
+      occurrenceRecorded,
+    });
   }
+  return results;
+}
+
+async function getCanonicalIncidentIdForOccurrence(
+  env: Env,
+  platformErrorId: string
+): Promise<{ incidentId: string; nodeId: string } | null> {
+  const row = await env.DATABASE.prepare(
+    'SELECT incident_id, node_id FROM diagnostic_incident_occurrences WHERE platform_error_id = ?'
+  )
+    .bind(platformErrorId)
+    .first<{ incident_id: string; node_id: string }>();
+  return row ? { incidentId: row.incident_id, nodeId: row.node_id } : null;
 }
 
 export interface RegisterDiagnosticArtifactInput {
@@ -196,11 +336,29 @@ export async function registerDiagnosticArtifact(
     manifest: redactSensitiveData(input.manifest),
     preview: redactSensitiveData(input.preview),
   };
-  const incident = await env.DATABASE.prepare(
-    'SELECT node_id, expires_at FROM diagnostic_incidents WHERE id = ?'
+  let incident = await env.DATABASE.prepare(
+    'SELECT node_id, expires_at, status FROM diagnostic_incidents WHERE id = ?'
   )
     .bind(incidentId)
-    .first<{ node_id: string; expires_at: string }>();
+    .first<{ node_id: string; expires_at: string; status: DiagnosticIncidentStatus }>();
+  const duplicateOccurrence = !incident
+    ? await getCanonicalIncidentIdForOccurrence(env, incidentId)
+    : null;
+  if (!incident && duplicateOccurrence) {
+    if (duplicateOccurrence.nodeId !== nodeId)
+      throw errors.forbidden('Incident belongs to another node');
+    incident = await env.DATABASE.prepare(
+      'SELECT node_id, expires_at, status FROM diagnostic_incidents WHERE id = ?'
+    )
+      .bind(duplicateOccurrence.incidentId)
+      .first<{ node_id: string; expires_at: string; status: DiagnosticIncidentStatus }>();
+    if (incident) {
+      return {
+        artifactId: input.artifactId,
+        status: input.status === 'failed' ? 'failed' : 'available',
+      };
+    }
+  }
   if (!incident) throw errors.notFound('Diagnostic incident not found');
   if (incident.node_id !== nodeId) throw errors.forbidden('Incident belongs to another node');
 
@@ -496,8 +654,17 @@ export async function uploadDiagnosticArtifact(
         | 'expected_bytes'
       >
     >();
-  if (!row || row.incident_id !== incidentId)
+  if (!row || row.incident_id !== incidentId) {
+    const duplicateOccurrence = await getCanonicalIncidentIdForOccurrence(env, incidentId);
+    if (
+      duplicateOccurrence &&
+      duplicateOccurrence.nodeId === nodeId &&
+      artifactId === `${incidentId}-safe`
+    ) {
+      return;
+    }
     throw errors.notFound('Diagnostic artifact not found');
+  }
   if (row.node_id !== nodeId) throw errors.forbidden('Artifact belongs to another node');
   if (row.status === 'available') return;
   if (row.status !== 'pending') throw errors.conflict('Artifact is not accepting content');
@@ -611,6 +778,8 @@ interface IncidentRow {
   node_id: string;
   workspace_id: string | null;
   status: DiagnosticIncidentStatus;
+  occurrence_count: number;
+  last_seen_at: string | null;
   artifact_count: number;
   total_bytes: number;
   manifest_json: string | null;
@@ -665,6 +834,8 @@ async function summarizeIncidentRows(
     nodeId: row.node_id,
     workspaceId: row.workspace_id,
     status: row.status,
+    occurrenceCount: row.occurrence_count,
+    lastSeenAt: row.last_seen_at ?? row.updated_at,
     artifactCount: row.artifact_count,
     totalBytes: row.total_bytes,
     manifest: parseDiagnosticManifest(row.manifest_json, row.id),
@@ -683,20 +854,48 @@ export async function getDiagnosticIncidentsByErrorIds(
 ): Promise<Map<string, DiagnosticIncidentSummary>> {
   const ids = [...new Set(errorIds)].slice(0, 200);
   if (ids.length === 0) return new Map();
-  const incidentRows: IncidentRow[] = [];
+  const rowsByRequestedErrorId = new Map<string, IncidentRow>();
+  const rowsByIncidentId = new Map<string, IncidentRow>();
   for (let offset = 0; offset < ids.length; offset += D1_MAX_BOUND_PARAMETERS) {
     const chunk = ids.slice(offset, offset + D1_MAX_BOUND_PARAMETERS);
     const incidents = await env.DATABASE.prepare(
-      `SELECT id, platform_error_id, node_id, workspace_id, status, artifact_count,
-       total_bytes, manifest_json, preview_json, failure_reason, expires_at, created_at, updated_at
+      `SELECT id, platform_error_id, node_id, workspace_id, status, occurrence_count,
+       last_seen_at, artifact_count, total_bytes, manifest_json, preview_json, failure_reason,
+       expires_at, created_at, updated_at
        FROM diagnostic_incidents WHERE platform_error_id IN (${chunk.map(() => '?').join(',')})`
     )
       .bind(...chunk)
       .all<IncidentRow>();
-    incidentRows.push(...incidents.results);
+    for (const row of incidents.results) {
+      rowsByRequestedErrorId.set(row.platform_error_id, row);
+      rowsByIncidentId.set(row.id, row);
+    }
+    const occurrences = await env.DATABASE.prepare(
+      `SELECT o.platform_error_id AS requested_error_id,
+        i.id, i.platform_error_id, i.node_id, i.workspace_id, i.status, i.occurrence_count,
+        i.last_seen_at, i.artifact_count, i.total_bytes, i.manifest_json, i.preview_json,
+        i.failure_reason, i.expires_at, i.created_at, i.updated_at
+       FROM diagnostic_incident_occurrences o
+       JOIN diagnostic_incidents i ON i.id = o.incident_id
+       WHERE o.platform_error_id IN (${chunk.map(() => '?').join(',')})`
+    )
+      .bind(...chunk)
+      .all<IncidentRow & { requested_error_id: string }>();
+    for (const row of occurrences.results) {
+      rowsByRequestedErrorId.set(row.requested_error_id, row);
+      rowsByIncidentId.set(row.id, row);
+    }
   }
-  const summaries = await summarizeIncidentRows(env, incidentRows);
-  return new Map(summaries.map((summary) => [summary.platformErrorId, summary]));
+  const summaries = await summarizeIncidentRows(env, [...rowsByIncidentId.values()]);
+  const byIncidentId = new Map(summaries.map((summary) => [summary.id, summary]));
+  return new Map(
+    [...rowsByRequestedErrorId.entries()]
+      .map(([requestedErrorId, row]) => {
+        const summary = byIncidentId.get(row.id);
+        return summary ? ([requestedErrorId, summary] as const) : null;
+      })
+      .filter((entry): entry is readonly [string, DiagnosticIncidentSummary] => entry !== null)
+  );
 }
 
 /** List recent incident evidence by node without requiring the node row to still exist. */
@@ -706,8 +905,9 @@ export async function getDiagnosticIncidentsByNodeId(
   limit: number
 ): Promise<DiagnosticIncidentSummary[]> {
   const incidents = await env.DATABASE.prepare(
-    `SELECT id, platform_error_id, node_id, workspace_id, status, artifact_count,
-       total_bytes, manifest_json, preview_json, failure_reason, expires_at, created_at, updated_at
+    `SELECT id, platform_error_id, node_id, workspace_id, status, occurrence_count,
+       last_seen_at, artifact_count, total_bytes, manifest_json, preview_json, failure_reason,
+       expires_at, created_at, updated_at
        FROM diagnostic_incidents
        WHERE node_id = ?
        ORDER BY created_at DESC
@@ -736,9 +936,16 @@ export async function getDiagnosticArtifactForDownload(
      a.failure_reason, a.created_at, a.updated_at
      FROM diagnostic_artifacts a
      JOIN diagnostic_incidents i ON i.id = a.incident_id
-     WHERE i.platform_error_id = ? AND a.id = ?`
+     WHERE a.id = ?
+       AND (
+         i.platform_error_id = ?
+         OR EXISTS (
+           SELECT 1 FROM diagnostic_incident_occurrences o
+           WHERE o.incident_id = i.id AND o.platform_error_id = ?
+         )
+       )`
   )
-    .bind(errorId, artifactId)
+    .bind(artifactId, errorId, errorId)
     .first<ArtifactRow>();
   if (!row || row.status !== 'available')
     throw errors.notFound('Diagnostic artifact is unavailable');

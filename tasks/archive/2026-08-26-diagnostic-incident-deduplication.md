@@ -22,33 +22,44 @@ This task must bound repeated diagnostic evidence volume, keep frequency visible
 
 ## Implementation checklist
 
-- [ ] Add additive D1 migration and Drizzle schema fields for diagnostic incident signature, deployment discriminator, occurrence counter, last-seen timestamp, and lightweight duplicate occurrence mapping.
-- [ ] Compute a redacted diagnostic signature at VM error ingestion, deduplicate at least by signature + deployment, and increment occurrence accounting exactly once per duplicate platform error ID.
-- [ ] Make duplicate diagnostic artifact registration/upload acknowledge successfully without creating duplicate `diagnostic_artifacts` rows or R2 objects.
-- [ ] Expose diagnostic occurrence count and last-seen timestamp through shared types/API summaries, and surface them proportionally in the admin diagnostic evidence card.
-- [ ] Add additive D1 migration and Drizzle schema fields for feedback triage severity and budget deferral metadata.
-- [ ] Classify daily/per-run budget errors separately from ordinary diagnosis failures; budget deferral must not increment the permanent failure/rejection counter.
-- [ ] Prioritize triage diagnosis candidates by severity and novelty before low-severity repeats, within existing bounded group limits.
-- [ ] Keep budget-deferred signatures pending/dispatch-eligible, skip diagnosis before their defer-until time, and retry diagnosis when the budget refresh/defer window passes.
-- [ ] Revive existing budget-rejected signatures during migration by clearing rejection for rows whose last failure reason is a known budget-block message.
-- [ ] Reclaim expired incident agent claims back to pending so claimed-but-abandoned incidents have an automatic dispatch escape path.
-- [ ] Ensure a single canonical private incident trigger exists for the configured feedback project when pending incidents need dispatch, without creating duplicates or overriding existing operator-created incident triggers.
-- [ ] Preserve dispatch idempotency: one eligible backlog dispatch creates exactly one trigger execution/task link, and repeated sweeps do not duplicate work while the prior dispatch/claim is active.
-- [ ] Update public docs/config references for diagnostic deduplication, budget-deferred triage retry, and server-ensured private incident dispatch.
-- [ ] Add the process-rule fix required for this production bug class.
-- [ ] Add audit-required automated coverage: repeated diagnostic signature many times, mixed severities, exhausted daily budget then retry after refresh, lease recovery, durable dispatch creates exactly one task/no duplicates, resolution, and at least one eligible incident reaches dispatch end-to-end.
+- [x] Add additive D1 migration and Drizzle schema fields for diagnostic incident signature, deployment discriminator, occurrence counter, last-seen timestamp, and lightweight duplicate occurrence mapping.
+- [x] Compute a redacted diagnostic signature at VM error ingestion, deduplicate at least by signature + deployment, and increment occurrence accounting exactly once per duplicate platform error ID.
+- [x] Make duplicate diagnostic artifact registration/upload acknowledge successfully without creating duplicate `diagnostic_artifacts` rows or R2 objects.
+- [x] Expose diagnostic occurrence count and last-seen timestamp through shared types/API summaries, and surface them proportionally in the admin diagnostic evidence card.
+- [x] Add additive D1 migration and Drizzle schema fields for feedback triage severity and budget deferral metadata.
+- [x] Classify daily/per-run budget errors separately from ordinary diagnosis failures; budget deferral must not increment the permanent failure/rejection counter.
+- [x] Prioritize triage diagnosis candidates by severity and novelty before low-severity repeats, within existing bounded group limits.
+- [x] Keep budget-deferred signatures pending/dispatch-eligible, skip diagnosis before their defer-until time, and retry diagnosis when the budget refresh/defer window passes.
+- [x] Revive existing budget-rejected signatures during migration by clearing rejection for rows whose last failure reason is a known budget-block message.
+- [x] Reclaim expired incident agent claims back to pending so claimed-but-abandoned incidents have an automatic dispatch escape path.
+- [x] Ensure a single canonical private incident trigger exists for the configured feedback project when pending incidents need dispatch, without creating duplicates or overriding existing operator-created incident triggers.
+- [x] Preserve dispatch idempotency: one eligible backlog dispatch creates exactly one trigger execution/task link, and repeated sweeps do not duplicate work while the prior dispatch/claim is active.
+- [x] Update public docs/config references for diagnostic deduplication, budget-deferred triage retry, and server-ensured private incident dispatch.
+- [x] Add the process-rule fix required for this production bug class.
+- [x] Add audit-required automated coverage: repeated diagnostic signature many times, mixed severities, exhausted daily budget then retry after refresh, lease recovery, durable dispatch creates exactly one task/no duplicates, resolution, and at least one eligible incident reaches dispatch end-to-end.
 
 ## Acceptance criteria
 
-- [ ] Repeating the same diagnostic signature many times in one deployment creates one canonical diagnostic incident/artifact, increments occurrence count once per distinct platform error ID, updates last-seen, and resolves duplicate error IDs to the canonical safe evidence.
-- [ ] Duplicate artifact registration/upload attempts from the VM are acknowledged without storing duplicate artifacts or R2 objects.
-- [ ] Budget-blocked triage signatures remain pending and dispatch-eligible, are not rejected because a daily/per-run budget ran out, and are retried after the defer/refresh time passes.
-- [ ] High-severity and novel signatures consume diagnosis budget ahead of low-severity repeats under a constrained budget.
-- [ ] Pending, dispatched, claimed, budget-deferred, rejected, resolved, and expired queue paths have explicit success, retry, terminal, or max-age escape behavior per rule 47.
-- [ ] At least one eligible incident reaches durable dispatch end-to-end in tests, and repeated sweeps create exactly one task link rather than duplicates.
-- [ ] An expired dispatch/agent lease is recovered and an incident can be claimed then resolved.
-- [ ] The stopped-workspace snapshot race itself is not fixed here; existing idea tracking is verified or a new SAM idea is created only if missing.
-- [ ] Focused tests, full quality gates, specialist reviews, staging verification, CI, merge, and production deploy monitoring complete.
+- [x] Repeating the same diagnostic signature many times in one deployment creates one canonical diagnostic incident/artifact, increments occurrence count once per distinct platform error ID, updates last-seen, and resolves duplicate error IDs to the canonical safe evidence.
+- [x] Duplicate artifact registration/upload attempts from the VM are acknowledged without storing duplicate artifacts or R2 objects.
+- [x] Budget-blocked triage signatures remain pending and dispatch-eligible, are not rejected because a daily/per-run budget ran out, and are retried after the defer/refresh time passes.
+- [x] High-severity and novel signatures consume diagnosis budget ahead of low-severity repeats under a constrained budget.
+- [x] Pending, dispatched, claimed, budget-deferred, rejected, resolved, and expired queue paths have explicit success, retry, terminal, or max-age escape behavior per rule 47.
+- [x] At least one eligible incident reaches durable dispatch end-to-end in tests, and repeated sweeps create exactly one task link rather than duplicates.
+- [x] An expired dispatch/agent lease is recovered and an incident can be claimed then resolved.
+- [x] The stopped-workspace snapshot race itself is not fixed here; existing idea tracking is verified or a new SAM idea is created only if missing.
+- [x] Focused tests, full local quality gates, specialist reviews, and responsive UI verification complete; CI, merge, and production deploy monitoring are tracked in the PR/post-merge phase.
+
+## Validation evidence
+
+- Focused API diagnostic/triage/incident tests passed.
+- `pnpm test` passed after rerun of a transient MCP timeout.
+- `pnpm typecheck` passed with existing Astro template baseline only.
+- `pnpm lint` passed with existing warnings only.
+- `pnpm format:check` passed.
+- `pnpm quality:migration-safety && pnpm quality:do-migration-safety` passed.
+- `git diff --check` passed.
+- Playwright diagnostic audit passed on `iPhone SE (375x667)` and `Desktop (1280x800)`: 26 tests passed.
 
 ## Control-loop load review
 

@@ -32,6 +32,14 @@ API/tail-worker feedback cycle where observing the ingest request produced the
 next ingest request. Cheap iterations are still runaway spend when iteration
 count is unbounded.
 
+The 2026-08-25 production stability audit found a third failure mode in the
+diagnostic feedback loop: evidence capture succeeded, but diagnosis budget
+exhaustion was recorded like ordinary failure. Known repeat signatures consumed
+the bounded selection window, budget-blocked signatures accumulated as rejected
+rows, and no durable dispatch was ever attempted. Token or API budgets are
+control-loop capacity, not incident disposition; exhausting them must defer work
+until the budget refreshes and must not silently drop the candidate.
+
 ## Hard Requirements
 
 1. **Alarm/cron/sweep handlers get a wall-time budget.** DO `alarm()` handlers,
@@ -55,6 +63,12 @@ count is unbounded.
    reconcile loop selects MUST have a path to leave the candidate set: success,
    terminal failure, or an expiring marker. A code path that logs-and-skips
    creates an immortal candidate retried every sweep.
+
+   Capacity exhaustion such as daily token budget, per-run budget, rate limit,
+   or provider 429 is an expiring marker, not terminal failure. Persist the
+   retry eligibility time and leave the candidate eligible after that time.
+   Prioritize severe/novel candidates ahead of low-severity repeat floods when
+   budget is scarce.
 
 4. **Selection widening requires load review.** Any PR that changes a WHERE
    clause, status set, join, or other candidate-selection predicate for a
@@ -104,6 +118,9 @@ prevention regression test:
   re-arm or repeat work.
 - For feedback-prone ingestion paths, prove both that the request logger omits
   the ingest edge and that downstream failures cache zero demand.
+- For budgeted diagnosis/triage loops, prove budget exhaustion persists a
+  retryable deferral, the candidate is skipped before refresh, retried after
+  refresh, and is not counted against ordinary failure/rejection limits.
 
 ## Reviewer Checklist
 

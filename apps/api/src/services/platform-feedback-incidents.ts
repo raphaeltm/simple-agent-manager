@@ -1,5 +1,6 @@
 import {
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS,
+  DEFAULT_PLATFORM_FEEDBACK_INCIDENT_AUTO_TRIGGER_ENABLED,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT,
@@ -8,6 +9,8 @@ import {
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT,
+  DEFAULT_PLATFORM_FEEDBACK_INCIDENT_TRIGGER_NAME,
+  DEFAULT_PLATFORM_FEEDBACK_INCIDENT_TRIGGER_TEMPLATE,
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
@@ -32,11 +35,14 @@ const TERMINAL_INCIDENT_STATES = new Set<IncidentQueueState>(['resolved', 'rejec
 const REPORT_SOURCE = 'user-report';
 
 export interface IncidentConfig {
+  autoTriggerEnabled: boolean;
   dispatchLeaseTtlMs: number;
   agentLeaseTtlMs: number;
   maxDispatchAttempts: number;
   maxAgeMs: number;
   triggerLimit: number;
+  triggerName: string;
+  triggerTemplate: string;
   summaryLimit: number;
   evidenceRefLimit: number;
   evidenceMaxBytes: number;
@@ -47,6 +53,7 @@ interface IncidentRow {
   signature: string;
   source: string;
   summary: string;
+  severity: string;
   first_seen_at: number;
   last_seen_at: number;
   occurrence_count: number;
@@ -82,6 +89,7 @@ export interface IncidentListItem {
   id: string;
   source: string;
   summary: string;
+  severity: string;
   queueState: IncidentQueueState;
   firstSeenAt: number;
   lastSeenAt: number;
@@ -129,8 +137,20 @@ function positive(value: string | undefined, fallback: number): number {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function booleanSetting(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
+}
+
 export function getIncidentConfig(env: Env): IncidentConfig {
   return {
+    autoTriggerEnabled: booleanSetting(
+      env.PLATFORM_FEEDBACK_INCIDENT_AUTO_TRIGGER_ENABLED,
+      DEFAULT_PLATFORM_FEEDBACK_INCIDENT_AUTO_TRIGGER_ENABLED
+    ),
     dispatchLeaseTtlMs: positive(
       env.PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS,
       DEFAULT_PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS
@@ -151,6 +171,12 @@ export function getIncidentConfig(env: Env): IncidentConfig {
       env.PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT,
       DEFAULT_PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT
     ),
+    triggerName:
+      env.PLATFORM_FEEDBACK_INCIDENT_TRIGGER_NAME?.trim() ||
+      DEFAULT_PLATFORM_FEEDBACK_INCIDENT_TRIGGER_NAME,
+    triggerTemplate:
+      env.PLATFORM_FEEDBACK_INCIDENT_TRIGGER_TEMPLATE?.trim() ||
+      DEFAULT_PLATFORM_FEEDBACK_INCIDENT_TRIGGER_TEMPLATE,
     summaryLimit: positive(
       env.PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT,
       DEFAULT_PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT
@@ -260,6 +286,7 @@ function toListItem(row: IncidentRow): IncidentListItem {
     id: row.signature,
     source: row.source,
     summary: row.summary,
+    severity: row.severity === 'warn' ? 'warn' : 'error',
     queueState: toQueueState(row.queue_state),
     firstSeenAt: row.first_seen_at,
     lastSeenAt: row.last_seen_at,
@@ -281,7 +308,7 @@ function toListItem(row: IncidentRow): IncidentListItem {
 async function readIncidentRow(env: Env, signature: string): Promise<IncidentRow | null> {
   return (
     (await env.DATABASE.prepare(
-      `SELECT signature, source, summary, first_seen_at, last_seen_at, occurrence_count,
+      `SELECT signature, source, summary, severity, first_seen_at, last_seen_at, occurrence_count,
         evidence_refs, diagnosis_id, idea_id, failure_count, last_failure_reason, last_failed_at,
         rejected_at, queue_state, queued_at, dispatch_lease_token, dispatch_lease_expires_at,
         dispatched_trigger_id, dispatched_execution_id, dispatched_task_id, dispatched_at,
@@ -530,6 +557,28 @@ export async function reclaimExpiredIncidentDispatches(
   return { requeued: requeue.meta.changes ?? 0, rejected: reject.meta.changes ?? 0 };
 }
 
+export async function reclaimExpiredIncidentClaims(
+  env: Env,
+  now: number = Date.now()
+): Promise<number> {
+  const result = await env.DATABASE.prepare(
+    `UPDATE platform_feedback_triages SET queue_state = 'pending',
+      incident_claim_token = NULL,
+      incident_claim_expires_at = NULL,
+      incident_claimed_by_task_id = NULL,
+      incident_claimed_at = NULL,
+      queued_at = COALESCE(queued_at, ?),
+      updated_at = CURRENT_TIMESTAMP
+     WHERE queue_state = 'claimed'
+       AND rejected_at IS NULL
+       AND incident_claim_expires_at IS NOT NULL
+       AND incident_claim_expires_at < ?`
+  )
+    .bind(now, now)
+    .run();
+  return result.meta.changes ?? 0;
+}
+
 export async function listIncidentQueue(
   env: Env,
   states: IncidentQueueState[],
@@ -537,7 +586,7 @@ export async function listIncidentQueue(
 ): Promise<IncidentListItem[]> {
   const selectedStates = states.length ? states : ['pending', 'dispatched', 'claimed'];
   const query = await env.DATABASE.prepare(
-    `SELECT signature, source, summary, first_seen_at, last_seen_at, occurrence_count,
+    `SELECT signature, source, summary, severity, first_seen_at, last_seen_at, occurrence_count,
       evidence_refs, diagnosis_id, idea_id, failure_count, last_failure_reason, last_failed_at,
       rejected_at, queue_state, queued_at, dispatch_lease_token, dispatch_lease_expires_at,
       dispatched_trigger_id, dispatched_execution_id, dispatched_task_id, dispatched_at,
@@ -546,7 +595,10 @@ export async function listIncidentQueue(
       resolution_note, expired_at, created_at, updated_at
      FROM platform_feedback_triages
      WHERE queue_state IN (${placeholders(selectedStates)})
-     ORDER BY occurrence_count DESC, last_seen_at DESC
+     ORDER BY CASE severity WHEN 'error' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END ASC,
+       CASE WHEN diagnosis_id IS NULL AND idea_id IS NULL THEN 0 ELSE 1 END ASC,
+       occurrence_count ASC,
+       last_seen_at DESC
      LIMIT ?`
   )
     .bind(...selectedStates, limit)
@@ -571,6 +623,7 @@ export async function getIncidentDetail(
       trustedDetails: [
         `Incident signature ref: ${row.signature.slice(0, 16)}`,
         `Queue state: ${item.queueState}`,
+        `Severity: ${item.severity}`,
         `Occurrence count: ${item.occurrenceCount}`,
         `Source: ${item.source}`,
       ],
@@ -586,11 +639,12 @@ export async function buildIncidentBacklogSummary(
   now: number = Date.now()
 ): Promise<IncidentBacklogSummary> {
   await expireStaleIncidents(env, now);
+  await reclaimExpiredIncidentClaims(env, now);
   const incidents = await listIncidentQueue(env, ['pending'], limit);
   const totalOccurrenceCount = incidents.reduce((sum, item) => sum + item.occurrenceCount, 0);
   const lines = incidents.map(
     (item, index) =>
-      `${index + 1}. ${item.summary} — id ${item.id.slice(0, 16)}, source ${item.source}, occurrences ${item.occurrenceCount}, first ${new Date(item.firstSeenAt).toISOString()}, last ${new Date(item.lastSeenAt).toISOString()}, dispatch attempts ${item.dispatchAttempts}`
+      `${index + 1}. ${item.summary} — id ${item.id.slice(0, 16)}, severity ${item.severity}, source ${item.source}, occurrences ${item.occurrenceCount}, first ${new Date(item.firstSeenAt).toISOString()}, last ${new Date(item.lastSeenAt).toISOString()}, dispatch attempts ${item.dispatchAttempts}`
   );
   return {
     pendingCount: incidents.length,
