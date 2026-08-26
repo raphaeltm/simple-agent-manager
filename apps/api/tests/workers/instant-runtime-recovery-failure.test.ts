@@ -53,11 +53,11 @@ describe('Instant runtime terminal reconciliation with Miniflare D1', () => {
       status: 'in_progress',
       workspaceId,
       autoProvisionedNodeId: nodeId,
-      executionStep: 'agent_running',
+      executionStep: 'running',
     });
 
     const projectDataStub = env.PROJECT_DATA.get(
-      env.PROJECT_DATA.idFromName(projectId),
+      env.PROJECT_DATA.idFromName(projectId)
     ) as DurableObjectStub<ProjectData>;
     await runInDurableObject(projectDataStub, async (_instance, state) => {
       const now = Date.now();
@@ -69,7 +69,7 @@ describe('Instant runtime terminal reconciliation with Miniflare D1', () => {
         'Runtime recovery failure',
         now,
         now,
-        now,
+        now
       );
       state.storage.sql.exec(
         `INSERT INTO acp_sessions
@@ -84,7 +84,7 @@ describe('Instant runtime terminal reconciliation with Miniflare D1', () => {
         now,
         now,
         now,
-        now,
+        now
       );
     });
 

@@ -299,7 +299,11 @@ describe('launchInstantSession', () => {
     expect(JSON.stringify(launchConfig)).not.toContain('skill-1');
     expect(updates).toContainEqual(expect.objectContaining({ dispatchedAt: expect.any(String) }));
     expect(updates).toContainEqual(
-      expect.objectContaining({ status: 'in_progress', workspaceId: 'workspace-1' })
+      expect.objectContaining({
+        status: 'in_progress',
+        executionStep: 'running',
+        workspaceId: 'workspace-1',
+      })
     );
   });
 

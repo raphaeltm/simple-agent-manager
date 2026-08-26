@@ -279,6 +279,7 @@ export {
   TASK_MODES,
   TASK_STATUSES,
   TASK_TERMINAL_STATUSES,
+  taskExecutionStep,
   validateCompletionEvidence,
   WAKE_PHASE_LABELS,
   WAKE_PHASE_PENDING_LABEL,

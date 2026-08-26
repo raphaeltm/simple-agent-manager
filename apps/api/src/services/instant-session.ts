@@ -1,5 +1,5 @@
 import type { AgentProfileRuntime, TaskMode } from '@simple-agent-manager/shared';
-import { DEFAULT_TASK_TITLE_MAX_LENGTH } from '@simple-agent-manager/shared';
+import { DEFAULT_TASK_TITLE_MAX_LENGTH, taskExecutionStep } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -495,7 +495,7 @@ export async function continueInstantSessionLaunch(
       .update(schema.tasks)
       .set({
         status: 'in_progress',
-        executionStep: 'agent_running',
+        executionStep: taskExecutionStep('running'),
         workspaceId,
         autoProvisionedNodeId: nodeId,
         updatedAt: new Date().toISOString(),

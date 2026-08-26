@@ -68,6 +68,19 @@ export const TASK_EXECUTION_STEPS = [
 
 export type TaskExecutionStep = (typeof TASK_EXECUTION_STEPS)[number];
 
+/**
+ * Compile-time helper for execution-step write sites.
+ *
+ * Drizzle currently types the D1 `execution_step` column as `string | null`, so
+ * a raw literal like `'agent_running'` can compile even though API mappers later
+ * reject it. Route task writes through this helper when persisting a
+ * TaskExecutionStep literal so TypeScript checks the shared contract at the
+ * writer boundary.
+ */
+export function taskExecutionStep<const Step extends TaskExecutionStep>(step: Step): Step {
+  return step;
+}
+
 export function isTaskExecutionStep(value: unknown): value is TaskExecutionStep {
   return typeof value === 'string' && (TASK_EXECUTION_STEPS as readonly string[]).includes(value);
 }
