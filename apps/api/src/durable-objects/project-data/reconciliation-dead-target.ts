@@ -1,7 +1,7 @@
 import type { Env as WorkerEnv } from '../../env';
 import { createModuleLogger } from '../../lib/logger';
+import { transitionTaskToTerminal } from '../../services/task-terminal-transition';
 import { recordActivityEventInternal } from './activity';
-import * as idleCleanup from './idle-cleanup';
 import * as sessions from './sessions';
 import type { Env as DOEnv } from './types';
 
@@ -33,6 +33,7 @@ interface DeadTargetCandidate {
 interface DeadTargetResult {
   reason: string;
   nodeId: string | null;
+  projectId?: string | null;
 }
 
 function waitUntil(hooks: ReconciliationProcessingHooks, promise: Promise<unknown>): void {
@@ -48,11 +49,33 @@ export async function terminallyFailDeadTarget(
   env: DOEnv,
   candidate: DeadTargetCandidate,
   targetResult: DeadTargetResult,
-  hooks: ReconciliationProcessingHooks,
+  hooks: ReconciliationProcessingHooks
 ): Promise<void> {
   const errorMessage = `Agent workspace unavailable during reconciliation (${targetResult.reason})`;
+  const projectId = hooks.projectId ?? targetResult.projectId ?? null;
 
-  await failTaskAndWorkspace(env, candidate.taskId, candidate.workspaceId, hooks.projectId ?? null, errorMessage);
+  const transitionOutcome = await transitionTaskToTerminal(env as unknown as WorkerEnv, {
+    taskId: candidate.taskId,
+    projectId,
+    status: 'failed',
+    reason: errorMessage,
+    source: 'project_data.reconciliation.dead_target',
+    expectedWorkspaceId: candidate.workspaceId,
+    expectedChatSessionId: candidate.sessionId,
+    stopWorkspace: true,
+  });
+  if (transitionOutcome !== 'transitioned') {
+    log.warn('reconciliation.dead_target_terminal_transition_skipped', {
+      sessionId: candidate.sessionId,
+      taskId: candidate.taskId,
+      workspaceId: candidate.workspaceId,
+      acpSessionId: candidate.acpSessionId,
+      action: candidate.action,
+      reason: targetResult.reason,
+      transitionOutcome,
+    });
+    return;
+  }
   sessions.failSession(sql, candidate.sessionId);
   hooks.scheduleSummarySync?.();
   recordActivityEventInternal(
@@ -70,7 +93,7 @@ export async function terminallyFailDeadTarget(
       nodeId: targetResult.nodeId,
       idleDurationMs: candidate.idleDurationMs,
       promptAgeMs: candidate.promptAgeMs,
-    }),
+    })
   );
 
   waitUntil(hooks, cleanupTaskRun(env, candidate.workspaceId, candidate.taskId));
@@ -84,41 +107,6 @@ export async function terminallyFailDeadTarget(
     reason: targetResult.reason,
     nodeId: targetResult.nodeId,
   });
-}
-
-async function failTaskAndWorkspace(
-  env: DOEnv,
-  taskId: string,
-  workspaceId: string,
-  projectId: string | null,
-  errorMessage: string,
-): Promise<void> {
-  if (projectId) {
-    const now = new Date().toISOString();
-    await env.DATABASE.prepare(
-      `UPDATE tasks
-       SET status = 'failed', error_message = ?, updated_at = datetime('now')
-       WHERE id = ? AND project_id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`,
-    ).bind(errorMessage, taskId, projectId).run();
-    await env.DATABASE.prepare(
-      `UPDATE workspaces
-       SET status = 'stopped', updated_at = ?
-       WHERE id = ? AND project_id = ? AND status IN ('running', 'recovery')`,
-    ).bind(now, workspaceId, projectId).run();
-    return;
-  }
-
-  log.warn('reconciliation.project_scope_missing_for_d1_failure', {
-    taskId,
-    workspaceId,
-    action: 'unscoped_legacy_update',
-  });
-  await env.DATABASE.prepare(
-    `UPDATE tasks
-     SET status = 'failed', error_message = ?, updated_at = datetime('now')
-     WHERE id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`,
-  ).bind(errorMessage, taskId).run();
-  await idleCleanup.stopWorkspaceInD1(env.DATABASE, workspaceId);
 }
 
 async function cleanupTaskRun(env: DOEnv, workspaceId: string, taskId: string): Promise<void> {

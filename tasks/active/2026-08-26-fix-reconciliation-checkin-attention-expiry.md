@@ -47,29 +47,37 @@ no `completed_at`, and stale `execution_step`. This is the deferred follow-up fr
 
 ## Implementation checklist
 
-- [ ] Add a local ProjectData expiry guard for expired `reconciliation_checkin` markers:
+- [x] Add a local ProjectData expiry guard for expired `reconciliation_checkin` markers:
       if the latest active ACP session for the marker's chat/workspace has current-generation
       `prompting`/`recovering` activity or `runtime_work_state IN ('active','settling')` with
       evidence at or after marker creation, extend the marker by the reconciliation deadline.
-- [ ] Record a diagnostic activity event when a reconciliation check-in expiry is deferred by
+- [x] Record a diagnostic activity event when a reconciliation check-in expiry is deferred by
       current-generation ACP/runtime work.
-- [ ] Preserve genuine no-delivery/no-liveness expiry: no fresh ACP activity/runtime-work evidence
+- [x] Preserve genuine no-delivery/no-liveness expiry: no fresh ACP activity/runtime-work evidence
       still resolves the marker as expired and fails the task.
-- [ ] Route attention-expiry task terminalization through a shared guarded D1 transition helper
+- [x] Route attention-expiry task terminalization through a shared guarded D1 transition helper
       rather than a bare task update.
-- [ ] Ensure the helper writes `task_status_events`, sets `completed_at`, clears `execution_step`,
+- [x] Ensure the helper writes `task_status_events`, sets `completed_at`, clears `execution_step`,
       syncs trigger executions, runs task terminal hooks, is idempotent, and has a write-time
       live-supersession fence.
-- [ ] Keep workspace/task-run cleanup and ProjectData session failure behavior intact, including
+- [x] Keep workspace/task-run cleanup and ProjectData session failure behavior intact, including
       summary sync through the existing `failSession` path.
-- [ ] Add discriminating tests:
-  - [ ] check-in delivered, current-generation ACP prompting/runtime work stays active for more
+- [x] Add discriminating tests:
+  - [x] check-in delivered, current-generation ACP prompting/runtime work stays active for more
         than 60 seconds with no assistant token; marker renews and task survives;
-  - [ ] genuine no-delivery/no-liveness expiry still terminates;
-  - [ ] terminal write emits the status event, timestamps, cleared execution step, trigger sync /
+  - [x] genuine no-delivery/no-liveness expiry still terminates;
+  - [x] terminal write emits the status event, timestamps, cleared execution step, trigger sync /
         hooks as applicable, and remains idempotent.
-- [ ] Archive or otherwise resolve the older narrow backlog item for attention-expiry status
+- [x] Archive or otherwise resolve the older narrow backlog item for attention-expiry status
       events when this broader fix lands.
+
+## Validation evidence
+
+- `pnpm --filter @simple-agent-manager/api test -- attention-expiry task-terminal-transition`
+  passed: 3 files / 12 tests.
+- `pnpm --filter @simple-agent-manager/api test -- reconciliation` passed: 6 files / 164 tests.
+- `pnpm typecheck && pnpm lint` passed. Lint retained only baseline warnings in acp-client and web.
+- `pnpm --filter @simple-agent-manager/api test` passed: 606 files / 8254 tests.
 
 ## Acceptance criteria
 
@@ -95,4 +103,4 @@ no `completed_at`, and stale `execution_step`. This is the deferred follow-up fr
 - `apps/api/src/scheduled/stuck-tasks.ts`
 - `tasks/archive/2026-06-20-reconciliation-prompt-in-flight.md`
 - `tasks/archive/2026-08-06-fix-idle-sweep-silent-task-completion.md`
-- `tasks/backlog/2026-08-06-attention-expiry-task-status-events.md`
+- `tasks/archive/2026-08-06-attention-expiry-task-status-events.md`

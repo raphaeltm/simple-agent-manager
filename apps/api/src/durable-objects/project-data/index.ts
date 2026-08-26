@@ -1091,7 +1091,11 @@ export class ProjectData extends DurableObject<Env> {
     await attentionExpiry.processExpiredAttentionMarkers(
       this.sql,
       this.env,
-      (sessionId, errorMessage) => this.failSession(sessionId, errorMessage)
+      (sessionId, errorMessage) => this.failSession(sessionId, errorMessage),
+      {
+        projectId: this.getProjectId(),
+        scheduleSummarySync: () => this.scheduleSummarySync(),
+      }
     );
 
     // Session state staleness: auto-heal stuck "prompting" states
