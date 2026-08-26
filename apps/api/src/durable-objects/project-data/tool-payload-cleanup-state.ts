@@ -12,10 +12,22 @@ const META_TOOL_CLEANUP_CURSOR_CREATED_AT = 'storageSafetyToolCleanupCursorCreat
 const META_TOOL_CLEANUP_CURSOR_SEQUENCE = 'storageSafetyToolCleanupCursorSequence';
 const META_TOOL_CLEANUP_CURSOR_MESSAGE_ID = 'storageSafetyToolCleanupCursorMessageId';
 const META_TOOL_CLEANUP_RECHECK_AT = 'storageSafetyToolCleanupRecheckAt';
+const META_TOOL_PAYLOAD_ARCHIVE_LAST_RUN_AT = 'storageSafetyToolPayloadArchiveLastRunAt';
 const TOOL_PAYLOAD_SESSION_EXHAUSTED_MESSAGE_ID = '__session_exhausted__';
 
 export function readProjectDataToolPayloadCleanupRecheckAt(sql: SqlStorage): number | null {
   return readMetaNumber(sql, META_TOOL_CLEANUP_RECHECK_AT);
+}
+
+export function readProjectDataToolPayloadArchiveLastRunAt(sql: SqlStorage): number | null {
+  return readMetaNumber(sql, META_TOOL_PAYLOAD_ARCHIVE_LAST_RUN_AT);
+}
+
+export function writeProjectDataToolPayloadArchiveLastRunAt(
+  sql: SqlStorage,
+  lastRunAt: number
+): void {
+  writeMeta(sql, META_TOOL_PAYLOAD_ARCHIVE_LAST_RUN_AT, String(lastRunAt));
 }
 
 export function readToolPayloadCleanupCursor(sql: SqlStorage): ToolPayloadCleanupCursor | null {

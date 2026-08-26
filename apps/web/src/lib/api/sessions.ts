@@ -296,8 +296,16 @@ export async function getMessageToolContent(
   projectId: string,
   sessionId: string,
   messageId: string
-): Promise<{ content: unknown[] }> {
-  return request<{ content: unknown[] }>(
+): Promise<{
+  content: unknown[];
+  source?: 'inline' | 'archive' | 'archived_unavailable';
+  archived?: { archivedAt: number; contentBytes: number; reason?: string };
+}> {
+  return request<{
+    content: unknown[];
+    source?: 'inline' | 'archive' | 'archived_unavailable';
+    archived?: { archivedAt: number; contentBytes: number; reason?: string };
+  }>(
     `/api/projects/${projectId}/sessions/${sessionId}/messages/${messageId}/tool-content`
   );
 }

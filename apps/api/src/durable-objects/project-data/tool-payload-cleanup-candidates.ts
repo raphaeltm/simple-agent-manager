@@ -1,7 +1,5 @@
-import { stripToolMetadataPayloadForStorage } from './tool-metadata-storage';
+import { archiveToolPayloadCandidate } from './tool-payload-archive';
 import type { Env } from './types';
-
-const textEncoder = new TextEncoder();
 
 export type ToolPayloadCleanupCursor = {
   sessionId: string;
@@ -23,6 +21,9 @@ export type ToolPayloadCandidateScanResult = {
   originalToolMetadataBytes: number;
   storedToolMetadataBytes: number;
   lastCursor: ToolPayloadCleanupCursor | null;
+  retryCursor: ToolPayloadCleanupCursor | null;
+  pausedForWallTime: boolean;
+  retryableFailure: boolean;
   errorMessages: string[];
 };
 
@@ -32,6 +33,7 @@ type ToolPayloadCandidateUpdate = {
   toolMetadataBytesRead: number;
   originalToolMetadataBytes: number;
   storedToolMetadataBytes: number;
+  retryableFailure: boolean;
   errorMessage: string | null;
 };
 
@@ -47,29 +49,29 @@ function rawNumber(value: unknown): number | null {
 
 export function selectToolPayloadCandidates(
   sql: SqlStorage,
-  sessionId: string,
   cursor: ToolPayloadCleanupCursor | null,
+  cutoffCreatedAt: number,
   limit: number,
   maxMetadataBytes: number,
   allowOversizedFirst: boolean
 ): ToolPayloadCandidate[] {
-  const messageCursor = cursor?.sessionId === sessionId ? cursor : null;
-  const cursorCreatedAt = messageCursor?.createdAt ?? null;
-  const cursorSequence = messageCursor?.sequence ?? null;
-  const cursorMessageId = messageCursor?.messageId ?? null;
+  const cursorCreatedAt = cursor?.createdAt ?? null;
+  const cursorSequence = cursor?.sequence ?? null;
+  const cursorMessageId = cursor?.messageId ?? null;
   const rows = sql
     .exec(
       `WITH limited AS (
          SELECT
            id,
+           session_id,
            created_at,
            COALESCE(sequence, 0) AS sequence,
            length(CAST(tool_metadata AS BLOB)) AS tool_metadata_bytes
          FROM chat_messages
-         WHERE session_id = ?
-           AND role = 'tool'
+         WHERE role = 'tool'
            AND tool_metadata IS NOT NULL
            AND tool_metadata LIKE '%"content"%'
+           AND created_at < ?
            AND (
              ? IS NULL
              OR created_at > ?
@@ -82,6 +84,7 @@ export function selectToolPayloadCandidates(
        bounded AS (
          SELECT
            id,
+           session_id,
            created_at,
            sequence,
            tool_metadata_bytes,
@@ -92,12 +95,12 @@ export function selectToolPayloadCandidates(
            ) AS cumulative_tool_metadata_bytes
          FROM limited
        )
-       SELECT id, created_at, sequence, tool_metadata_bytes
+       SELECT id, session_id, created_at, sequence, tool_metadata_bytes
        FROM bounded
        WHERE cumulative_tool_metadata_bytes <= ?
           OR (? = 1 AND row_number = 1)
        ORDER BY created_at ASC, sequence ASC, id ASC`,
-      sessionId,
+      cutoffCreatedAt,
       cursorCreatedAt,
       cursorCreatedAt ?? 0,
       cursorCreatedAt ?? 0,
@@ -110,26 +113,25 @@ export function selectToolPayloadCandidates(
       allowOversizedFirst ? 1 : 0
     )
     .raw();
-  return parseToolPayloadCandidateRows(sessionId, rows);
+  return parseToolPayloadCandidateRows(rows);
 }
 
 export function hasToolPayloadCandidatesAfter(
   sql: SqlStorage,
-  sessionId: string,
-  cursor: ToolPayloadCleanupCursor | null
+  cursor: ToolPayloadCleanupCursor | null,
+  cutoffCreatedAt: number
 ): boolean {
-  const messageCursor = cursor?.sessionId === sessionId ? cursor : null;
-  const cursorCreatedAt = messageCursor?.createdAt ?? null;
-  const cursorSequence = messageCursor?.sequence ?? null;
-  const cursorMessageId = messageCursor?.messageId ?? null;
+  const cursorCreatedAt = cursor?.createdAt ?? null;
+  const cursorSequence = cursor?.sequence ?? null;
+  const cursorMessageId = cursor?.messageId ?? null;
   const rows = sql
     .exec(
       `SELECT id
        FROM chat_messages
-       WHERE session_id = ?
-         AND role = 'tool'
+       WHERE role = 'tool'
          AND tool_metadata IS NOT NULL
          AND tool_metadata LIKE '%"content"%'
+         AND created_at < ?
          AND (
            ? IS NULL
            OR created_at > ?
@@ -138,7 +140,7 @@ export function hasToolPayloadCandidatesAfter(
          )
        ORDER BY created_at ASC, COALESCE(sequence, 0) ASC, id ASC
        LIMIT ?`,
-      sessionId,
+      cutoffCreatedAt,
       cursorCreatedAt,
       cursorCreatedAt ?? 0,
       cursorCreatedAt ?? 0,
@@ -149,25 +151,23 @@ export function hasToolPayloadCandidatesAfter(
       1
     )
     .raw();
-  let found = false;
   for (const row of rows) {
-    found = found || typeof row[0] === 'string';
+    if (typeof row[0] === 'string') return true;
   }
-  return found;
+  return false;
 }
 
-function parseToolPayloadCandidateRows(
-  sessionId: string,
-  rows: IterableIterator<unknown[]>
-): ToolPayloadCandidate[] {
+function parseToolPayloadCandidateRows(rows: IterableIterator<unknown[]>): ToolPayloadCandidate[] {
   const candidates: ToolPayloadCandidate[] = [];
   for (const row of rows) {
     const id = row[0];
-    const createdAt = rawNumber(row[1]);
-    const sequence = rawNumber(row[2]);
-    const toolMetadataBytes = rawNumber(row[3]);
+    const sessionId = row[1];
+    const createdAt = rawNumber(row[2]);
+    const sequence = rawNumber(row[3]);
+    const toolMetadataBytes = rawNumber(row[4]);
     if (
       typeof id === 'string' &&
+      typeof sessionId === 'string' &&
       createdAt !== null &&
       sequence !== null &&
       toolMetadataBytes !== null &&
@@ -196,91 +196,10 @@ function readBoundedToolMetadata(
       maxMetadataBytes
     )
     .raw();
-  let toolMetadata: string | null = null;
   for (const row of rows) {
-    if (typeof row[0] === 'string') toolMetadata = row[0];
+    if (typeof row[0] === 'string') return row[0];
   }
-  return toolMetadata;
-}
-
-function updateToolMetadata(sql: SqlStorage, messageId: string, toolMetadata: string | null): void {
-  sql.exec('UPDATE chat_messages SET tool_metadata = ? WHERE id = ?', toolMetadata, messageId);
-}
-
-function utf8Bytes(value: string): number {
-  return textEncoder.encode(value).byteLength;
-}
-
-function buildFailClosedToolMetadata(
-  candidate: ToolPayloadCandidate,
-  reason: 'oversized_legacy_payload' | 'poison_legacy_payload'
-): string {
-  return JSON.stringify({
-    storageSafetyTruncated: true,
-    contentTruncated: true,
-    storageSafetyCleanupReason: reason,
-    originalSizeBytes: candidate.toolMetadataBytes,
-  });
-}
-
-function failClosedToolMetadataCandidate(
-  sql: SqlStorage,
-  candidate: ToolPayloadCandidate,
-  reason: 'oversized_legacy_payload' | 'poison_legacy_payload'
-): ToolPayloadCandidateUpdate {
-  const value = buildFailClosedToolMetadata(candidate, reason);
-  updateToolMetadata(sql, candidate.messageId, value);
-  return {
-    rowsUpdated: 1,
-    rowsFailed: reason === 'poison_legacy_payload' ? 1 : 0,
-    toolMetadataBytesRead: 0,
-    originalToolMetadataBytes: candidate.toolMetadataBytes,
-    storedToolMetadataBytes: utf8Bytes(value),
-    errorMessage: null,
-  };
-}
-
-function processToolPayloadCandidate(
-  sql: SqlStorage,
-  env: Env,
-  candidate: ToolPayloadCandidate,
-  remainingReadBytes: number
-): ToolPayloadCandidateUpdate {
-  try {
-    if (candidate.toolMetadataBytes > remainingReadBytes) {
-      return failClosedToolMetadataCandidate(sql, candidate, 'oversized_legacy_payload');
-    }
-
-    const toolMetadata = readBoundedToolMetadata(sql, candidate.messageId, remainingReadBytes);
-    if (toolMetadata === null) return emptyCandidateUpdate();
-
-    const stripped = stripToolMetadataPayloadForStorage(toolMetadata, env);
-    if (stripped.failed) {
-      return failClosedToolMetadataCandidate(sql, candidate, 'poison_legacy_payload');
-    }
-    if (!stripped.stripped) {
-      return {
-        rowsUpdated: 0,
-        rowsFailed: 0,
-        toolMetadataBytesRead: stripped.originalBytes,
-        originalToolMetadataBytes: 0,
-        storedToolMetadataBytes: 0,
-        errorMessage: null,
-      };
-    }
-
-    updateToolMetadata(sql, candidate.messageId, stripped.value);
-    return {
-      rowsUpdated: 1,
-      rowsFailed: 0,
-      toolMetadataBytesRead: stripped.originalBytes,
-      originalToolMetadataBytes: stripped.originalBytes,
-      storedToolMetadataBytes: stripped.storedBytes,
-      errorMessage: null,
-    };
-  } catch (error) {
-    return failClosedAfterError(sql, candidate, error);
-  }
+  return null;
 }
 
 function emptyCandidateUpdate(): ToolPayloadCandidateUpdate {
@@ -290,57 +209,46 @@ function emptyCandidateUpdate(): ToolPayloadCandidateUpdate {
     toolMetadataBytesRead: 0,
     originalToolMetadataBytes: 0,
     storedToolMetadataBytes: 0,
+    retryableFailure: false,
     errorMessage: null,
   };
 }
 
-function failClosedAfterError(
-  sql: SqlStorage,
-  candidate: ToolPayloadCandidate,
-  error: unknown
-): ToolPayloadCandidateUpdate {
-  try {
-    const failClosed = failClosedToolMetadataCandidate(sql, candidate, 'poison_legacy_payload');
-    return {
-      ...failClosed,
-      errorMessage: error instanceof Error ? error.message : String(error),
-    };
-  } catch (failClosedError) {
-    const originalMessage = error instanceof Error ? error.message : String(error);
-    const failClosedMessage =
-      failClosedError instanceof Error ? failClosedError.message : String(failClosedError);
-    return {
-      rowsUpdated: 0,
-      rowsFailed: 1,
-      toolMetadataBytesRead: 0,
-      originalToolMetadataBytes: 0,
-      storedToolMetadataBytes: 0,
-      errorMessage: `${originalMessage}; fail-closed update failed: ${failClosedMessage}`,
-    };
-  }
+function failedBudgetUpdate(candidate: ToolPayloadCandidate): ToolPayloadCandidateUpdate {
+  return {
+    rowsUpdated: 0,
+    rowsFailed: 1,
+    toolMetadataBytesRead: 0,
+    originalToolMetadataBytes: candidate.toolMetadataBytes,
+    storedToolMetadataBytes: 0,
+    retryableFailure: false,
+    errorMessage: `tool_metadata row ${candidate.messageId} exceeded the cleanup byte budget`,
+  };
 }
 
-export function scanToolPayloadCandidates(
+async function processToolPayloadCandidate(
   sql: SqlStorage,
   env: Env,
-  batchBytes: number,
-  candidates: ToolPayloadCandidate[]
-): ToolPayloadCandidateScanResult {
-  const result = createEmptyCandidateScanResult();
-  for (const candidate of candidates) {
-    result.lastCursor = candidate;
-    result.toolMetadataBytesScanned += candidate.toolMetadataBytes;
-    const remainingReadBytes = Math.max(batchBytes - result.toolMetadataBytesRead, 0);
-    const updated = processToolPayloadCandidate(sql, env, candidate, remainingReadBytes);
-    result.rowsUpdated += updated.rowsUpdated;
-    result.rowsFailed += updated.rowsFailed;
-    result.toolMetadataBytesRead += updated.toolMetadataBytesRead;
-    result.originalToolMetadataBytes += updated.originalToolMetadataBytes;
-    result.storedToolMetadataBytes += updated.storedToolMetadataBytes;
-    if (updated.errorMessage) result.errorMessages.push(updated.errorMessage);
-  }
-  result.rowsScanned = candidates.length;
-  return result;
+  projectId: string,
+  archivePrefix: string,
+  candidate: ToolPayloadCandidate,
+  maxReadBytes: number,
+  archivedAt: number
+): Promise<ToolPayloadCandidateUpdate> {
+  if (candidate.toolMetadataBytes > maxReadBytes) return failedBudgetUpdate(candidate);
+
+  const toolMetadata = readBoundedToolMetadata(sql, candidate.messageId, maxReadBytes);
+  if (toolMetadata === null) return emptyCandidateUpdate();
+
+  return archiveToolPayloadCandidate({
+    sql,
+    env,
+    projectId,
+    archivePrefix,
+    candidate,
+    toolMetadata,
+    archivedAt,
+  });
 }
 
 function createEmptyCandidateScanResult(): ToolPayloadCandidateScanResult {
@@ -353,6 +261,78 @@ function createEmptyCandidateScanResult(): ToolPayloadCandidateScanResult {
     originalToolMetadataBytes: 0,
     storedToolMetadataBytes: 0,
     lastCursor: null,
+    retryCursor: null,
+    pausedForWallTime: false,
+    retryableFailure: false,
     errorMessages: [],
   };
+}
+
+export async function scanToolPayloadCandidates(
+  sql: SqlStorage,
+  env: Env,
+  projectId: string,
+  archivePrefix: string,
+  batchBytes: number,
+  candidates: ToolPayloadCandidate[],
+  options: {
+    initialCursor: ToolPayloadCleanupCursor | null;
+    archivedAt: number;
+    deadlineMs: number;
+    nowMs?: () => number;
+  }
+): Promise<ToolPayloadCandidateScanResult> {
+  const result = createEmptyCandidateScanResult();
+  const nowMs = options.nowMs ?? Date.now;
+  let previousCursor = options.initialCursor;
+
+  for (const candidate of candidates) {
+    if (result.rowsScanned > 0 && nowMs() >= options.deadlineMs) {
+      result.pausedForWallTime = true;
+      result.retryCursor = previousCursor;
+      break;
+    }
+
+    const remainingReadBytes = Math.max(batchBytes - result.toolMetadataBytesRead, 0);
+    const maxReadBytes =
+      result.rowsScanned === 0 && candidate.toolMetadataBytes > remainingReadBytes
+        ? candidate.toolMetadataBytes
+        : remainingReadBytes;
+
+    const updated = await processToolPayloadCandidate(
+      sql,
+      env,
+      projectId,
+      archivePrefix,
+      candidate,
+      maxReadBytes,
+      options.archivedAt
+    );
+
+    result.rowsScanned++;
+    result.lastCursor = candidate;
+    result.toolMetadataBytesScanned += candidate.toolMetadataBytes;
+    result.rowsUpdated += updated.rowsUpdated;
+    result.rowsFailed += updated.rowsFailed;
+    result.toolMetadataBytesRead += updated.toolMetadataBytesRead;
+    result.originalToolMetadataBytes += updated.originalToolMetadataBytes;
+    result.storedToolMetadataBytes += updated.storedToolMetadataBytes;
+    if (updated.errorMessage) result.errorMessages.push(updated.errorMessage);
+
+    if (updated.retryableFailure) {
+      result.retryableFailure = true;
+      result.retryCursor = previousCursor;
+      break;
+    }
+
+    previousCursor = candidate;
+
+    if (nowMs() >= options.deadlineMs) {
+      result.pausedForWallTime = true;
+      result.retryCursor = candidate;
+      break;
+    }
+  }
+
+  return result;
 }

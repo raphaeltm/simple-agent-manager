@@ -28,6 +28,11 @@ import { resolveHandoffLimits, resolveMissionStateLimits } from '@simple-agent-m
 
 import type { ProjectData } from '../durable-objects/project-data';
 import type {
+  ArchivedToolPayloadListResult,
+  ArchivedToolPayloadQuery,
+  MessageToolContentResult,
+} from '../durable-objects/project-data/tool-payload-archive';
+import type {
   CreateCommentReplyInput,
   CreateCommentThreadInput,
   CreateFileCommentReplyInput,
@@ -402,9 +407,18 @@ export async function getMessageToolContent(
   projectId: string,
   sessionId: string,
   messageId: string
-): Promise<unknown[] | null> {
+): Promise<MessageToolContentResult | null> {
   const stub = await getStub(env, projectId);
   return stub.getMessageToolContent(sessionId, messageId);
+}
+
+export async function getArchivedToolPayloads(
+  env: Env,
+  projectId: string,
+  input: ArchivedToolPayloadQuery
+): Promise<ArchivedToolPayloadListResult> {
+  const stub = await getStub(env, projectId);
+  return stub.getArchivedToolPayloads(input);
 }
 
 /** Get total message count for a session, optionally filtered by roles. */

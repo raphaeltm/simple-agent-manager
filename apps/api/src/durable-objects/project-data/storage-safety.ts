@@ -35,7 +35,9 @@ import {
   upsertProjectDataStorageTelemetry,
 } from './storage-telemetry';
 import {
+  DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX,
   type ProjectDataToolPayloadCleanupResult,
+  readProjectDataToolPayloadArchiveLastRunAt,
   readProjectDataToolPayloadCleanupRecheckAt,
 } from './tool-payload-cleanup';
 import type { Env } from './types';
@@ -70,6 +72,9 @@ export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES = 1024 * 1024
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS = 7;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS = 60 * 1000;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM = 25;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS = 20 * 1000;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS = 7;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS = 500;
 export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS = 7;
 export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS = 60 * 1000;
@@ -143,6 +148,10 @@ export interface StorageSafetyConfig {
   toolPayloadCleanupMinSessionAgeMs: number;
   toolPayloadCleanupRecheckMs: number;
   toolPayloadCleanupMaxSessionsPerAlarm: number;
+  toolPayloadCleanupWallTimeMs: number;
+  toolPayloadArchiveRetentionMs: number;
+  toolPayloadArchiveIntervalMs: number;
+  toolPayloadArchiveR2Prefix: string;
   eventLogCleanupEnabled: boolean;
   eventLogCleanupBatchRows: number;
   eventLogCleanupMinSessionAgeMs: number;
@@ -170,6 +179,11 @@ function parseBoundedRatio(value: string | undefined, fallback: number): number 
 function envFlagEnabled(value: string | undefined): boolean {
   if (!value) return true;
   return !['0', 'false', 'off', 'disabled'].includes(value.trim().toLowerCase());
+}
+
+function parseR2Prefix(value: string | undefined, fallback: string): string {
+  const parsed = (value ?? fallback).trim().replace(/^\/+|\/+$/g, '');
+  return parsed || fallback;
 }
 
 export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
@@ -204,6 +218,10 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
   const cleanupMinSessionAgeDays = parseNonNegativeInteger(
     env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS,
     DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS
+  );
+  const archiveRetentionDays = parseNonNegativeInteger(
+    env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS,
+    DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS
   );
   const growthLookbackDays = parsePositiveInteger(
     env.PROJECT_DATA_STORAGE_GROWTH_LOOKBACK_DAYS,
@@ -273,6 +291,19 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
       env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM,
       DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM
     ),
+    toolPayloadCleanupWallTimeMs: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS
+    ),
+    toolPayloadArchiveRetentionMs: archiveRetentionDays * 24 * 60 * 60 * 1000,
+    toolPayloadArchiveIntervalMs: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS
+    ),
+    toolPayloadArchiveR2Prefix: parseR2Prefix(
+      env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX
+    ),
     eventLogCleanupEnabled: envFlagEnabled(env.PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED),
     eventLogCleanupBatchRows: parsePositiveInteger(
       env.PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS,
@@ -341,12 +372,21 @@ export function computeStorageSafetyAlarmTime(
   const cleanupRecheckAt = config.toolPayloadCleanupEnabled
     ? readProjectDataToolPayloadCleanupRecheckAt(sql)
     : null;
+  const archiveLastRunAt = config.toolPayloadCleanupEnabled
+    ? readProjectDataToolPayloadArchiveLastRunAt(sql)
+    : null;
+  const archiveRunAt =
+    config.toolPayloadCleanupEnabled && archiveLastRunAt === null
+      ? now
+      : archiveLastRunAt !== null
+        ? archiveLastRunAt + config.toolPayloadArchiveIntervalMs
+        : null;
   const eventLogCleanupRecheckAt = config.eventLogCleanupEnabled
     ? readProjectDataEventLogCleanupRecheckAt(sql)
     : null;
   return Math.min(
     measureAt,
-    ...[cleanupRecheckAt, eventLogCleanupRecheckAt].filter(
+    ...[cleanupRecheckAt, archiveRunAt, eventLogCleanupRecheckAt].filter(
       (value): value is number => value !== null
     )
   );

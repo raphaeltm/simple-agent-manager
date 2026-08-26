@@ -134,6 +134,7 @@ import {
   handleUpdateAgentProfile,
 } from './profile-tools';
 import {
+  handleGetArchivedToolPayloads,
   handleGetSessionMessages,
   handleListSessions,
   handleSearchMessages,
@@ -375,6 +376,10 @@ mcpRoutes.post('/', async (c) => {
             return c.json(await handleListSessions(requestId, toolArgs, tokenData, c.env));
           case 'get_session_messages':
             return c.json(await handleGetSessionMessages(requestId, toolArgs, tokenData, c.env));
+          case 'get_archived_tool_payloads':
+            return c.json(
+              await handleGetArchivedToolPayloads(requestId, toolArgs, tokenData, c.env)
+            );
           case 'search_messages':
             return c.json(await handleSearchMessages(requestId, toolArgs, tokenData, c.env));
           case 'update_session_topic':

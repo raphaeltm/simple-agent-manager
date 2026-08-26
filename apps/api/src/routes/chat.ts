@@ -405,18 +405,18 @@ chatRoutes.get('/:sessionId/messages/:messageId/tool-content', async (c) => {
 
   await requireProjectAccess(db, projectId, userId);
 
-  const content = await projectDataService.getMessageToolContent(
+  const toolContent = await projectDataService.getMessageToolContent(
     c.env,
     projectId,
     sessionId,
     messageId
   );
 
-  if (content === null) {
+  if (toolContent === null) {
     throw errors.notFound('Message tool content');
   }
 
-  return c.json({ content });
+  return c.json(toolContent);
 });
 
 chatRoutes.route('/', chatCommentRoutes);

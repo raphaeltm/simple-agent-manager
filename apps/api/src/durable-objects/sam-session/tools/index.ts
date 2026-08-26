@@ -7,6 +7,10 @@ import { createMission, createMissionDef } from './create-mission';
 import { dispatchTask, dispatchTaskDef } from './dispatch-task';
 import { findRelatedIdeas, findRelatedIdeasDef } from './find-related-ideas';
 import { getAccountSetupStatus, getAccountSetupStatusDef } from './get-account-setup-status';
+import {
+  getArchivedToolPayloads,
+  getArchivedToolPayloadsDef,
+} from './get-archived-tool-payloads';
 import { getCiStatus, getCiStatusDef } from './get-ci-status';
 import { getFileContent, getFileContentDef } from './get-file-content';
 import { getMission, getMissionDef } from './get-mission';
@@ -59,6 +63,7 @@ export const SAM_TOOLS: AnthropicToolDef[] = [
   // Observability: task message search
   listSessionsDef,
   getSessionMessagesDef,
+  getArchivedToolPayloadsDef,
   searchTaskMessagesDef,
   // Codebase contextual search
   searchCodeDef,
@@ -97,6 +102,7 @@ const toolHandlers: Record<string, ToolHandler> = {
   // Observability: task message search
   list_sessions: listSessions as ToolHandler,
   get_session_messages: getSessionMessages as ToolHandler,
+  get_archived_tool_payloads: getArchivedToolPayloads as ToolHandler,
   search_task_messages: searchTaskMessages as ToolHandler,
   // Codebase contextual search
   search_code: searchCode as ToolHandler,

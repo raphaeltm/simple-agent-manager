@@ -69,6 +69,7 @@ You are the project's dedicated manager. Users come to you for quick, focused an
 ### Sessions & Messages
 - **list_sessions** — List chat sessions (task and conversation sessions)
 - **get_session_messages** — Read messages from a specific session
+- **get_archived_tool_payloads** — Retrieve archived tool-call payloads from private storage
 - **search_task_messages** — Search across task session messages
 
 ### Ideas & Planning

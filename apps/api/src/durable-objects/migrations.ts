@@ -1219,6 +1219,39 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '036-tool-payload-archives',
+    run: (sql) => {
+      // Additive-only (rule 31): this table records the private R2 object that
+      // owns an archived `chat_messages.tool_metadata.content` payload after the
+      // payload has been removed from DO SQLite.
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS tool_payload_archives (
+          message_id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          r2_key TEXT NOT NULL,
+          content_bytes INTEGER NOT NULL,
+          tool_metadata_bytes INTEGER NOT NULL,
+          archived_at INTEGER NOT NULL,
+          message_created_at INTEGER NOT NULL,
+          message_sequence INTEGER NOT NULL,
+          archive_version INTEGER NOT NULL DEFAULT 1
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_tool_payload_archives_session_created
+        ON tool_payload_archives(session_id, message_created_at, message_sequence, message_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_tool_payload_archives_created
+        ON tool_payload_archives(message_created_at, message_sequence, message_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_tool_payload_archives_archived_at
+        ON tool_payload_archives(archived_at)
+      `);
+    },
+  },
 ];
 
 /**

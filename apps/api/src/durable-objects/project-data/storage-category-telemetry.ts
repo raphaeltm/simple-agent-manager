@@ -45,6 +45,8 @@ export interface ProjectDataStorageCategoryBreakdown {
     terminalLegacyToolPayloadBytes: number;
     terminalLegacyToolPayloadEligibleRows: number;
     terminalLegacyToolPayloadEligibleBytes: number;
+    toolPayloadArchiveEligibleRows: number;
+    toolPayloadArchiveEligibleBytes: number;
     normalizedToolMetadataRows: number;
     normalizedToolMetadataBytes: number;
   };
@@ -123,7 +125,8 @@ function measureAcpSessions(sql: SqlStorage): ProjectDataStorageCategoryBreakdow
 
 function measureMessages(
   sql: SqlStorage,
-  toolPayloadCutoffUpdatedAt: number
+  toolPayloadCutoffUpdatedAt: number,
+  toolPayloadArchiveCutoffCreatedAt: number
 ): ProjectDataStorageCategoryBreakdown['messages'] {
   const row = firstRow(
     sql,
@@ -180,6 +183,22 @@ function measureMessages(
          END
        ), 0) AS terminal_legacy_tool_payload_eligible_bytes,
        COALESCE(SUM(
+         CASE WHEN m.created_at < ?
+                AND m.role = 'tool'
+                AND m.tool_metadata LIKE '%"content"%'
+           THEN 1
+           ELSE 0
+         END
+       ), 0) AS tool_payload_archive_eligible_rows,
+       COALESCE(SUM(
+         CASE WHEN m.created_at < ?
+                AND m.role = 'tool'
+                AND m.tool_metadata LIKE '%"content"%'
+           THEN length(CAST(COALESCE(m.tool_metadata, '') AS BLOB))
+           ELSE 0
+         END
+       ), 0) AS tool_payload_archive_eligible_bytes,
+       COALESCE(SUM(
          CASE WHEN m.role = 'tool'
                 AND m.tool_metadata IS NOT NULL
                 AND (s.status IS NULL OR s.status NOT IN ('active', 'sleeping'))
@@ -206,7 +225,9 @@ function measureMessages(
      FROM chat_messages m
      LEFT JOIN chat_sessions s ON s.id = m.session_id`,
     toolPayloadCutoffUpdatedAt,
-    toolPayloadCutoffUpdatedAt
+    toolPayloadCutoffUpdatedAt,
+    toolPayloadArchiveCutoffCreatedAt,
+    toolPayloadArchiveCutoffCreatedAt
   );
 
   return {
@@ -226,6 +247,8 @@ function measureMessages(
       row,
       'terminal_legacy_tool_payload_eligible_bytes'
     ),
+    toolPayloadArchiveEligibleRows: readNumber(row, 'tool_payload_archive_eligible_rows'),
+    toolPayloadArchiveEligibleBytes: readNumber(row, 'tool_payload_archive_eligible_bytes'),
     normalizedToolMetadataRows: readNumber(row, 'normalized_tool_metadata_rows'),
     normalizedToolMetadataBytes: readNumber(row, 'normalized_tool_metadata_bytes'),
   };
@@ -332,15 +355,18 @@ export function measureProjectDataStorageCategories(
   sql: SqlStorage,
   config: Pick<
     StorageSafetyConfig,
-    'toolPayloadCleanupMinSessionAgeMs' | 'eventLogCleanupMinSessionAgeMs'
+    | 'toolPayloadCleanupMinSessionAgeMs'
+    | 'toolPayloadArchiveRetentionMs'
+    | 'eventLogCleanupMinSessionAgeMs'
   >,
   measuredAt: number
 ): ProjectDataStorageCategoryBreakdown {
   const toolPayloadCutoffUpdatedAt = measuredAt - config.toolPayloadCleanupMinSessionAgeMs;
+  const toolPayloadArchiveCutoffCreatedAt = measuredAt - config.toolPayloadArchiveRetentionMs;
   const eventCutoffUpdatedAt = measuredAt - config.eventLogCleanupMinSessionAgeMs;
   const sessions = measureSessions(sql);
   const acpSessions = measureAcpSessions(sql);
-  const messages = measureMessages(sql, toolPayloadCutoffUpdatedAt);
+  const messages = measureMessages(sql, toolPayloadCutoffUpdatedAt, toolPayloadArchiveCutoffCreatedAt);
   const activityEvents = measureActivityEvents(sql, eventCutoffUpdatedAt);
   const acpSessionEvents = measureAcpSessionEvents(sql, eventCutoffUpdatedAt);
   const taskStatusEvents = measureTaskStatusEvents(sql);
@@ -355,7 +381,7 @@ export function measureProjectDataStorageCategories(
     acpSessionEvents.metadataBytes +
     taskStatusEvents.reasonBytes;
   const reclaimableBytes =
-    messages.terminalLegacyToolPayloadEligibleBytes +
+    messages.toolPayloadArchiveEligibleBytes +
     activityEvents.terminalEligiblePayloadBytes +
     acpSessionEvents.terminalEligibleBytes;
   const totalDatabaseBytes = sql.databaseSize;

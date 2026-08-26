@@ -531,6 +531,10 @@ function getApiWorkerVars(
       'SESSION_SNAPSHOT_POLL_INTERVAL_MS',
       'SESSION_SNAPSHOT_OPERATION_TIMEOUT',
       'SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS',
+      'PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS',
+      'PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS',
+      'PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX',
       'SESSION_SLEEP_AFTER_MS',
       'SESSION_SLEEP_SWEEP_BATCH_SIZE',
       'SESSION_SLEEP_SWEEP_WALL_BUDGET_MS',
@@ -752,7 +756,10 @@ export function generateApiWorkerEnv(
       },
     ],
     kv_namespaces: [{ binding: 'KV', id: outputs.kvId }],
-    r2_buckets: [{ binding: 'R2', bucket_name: outputs.r2Name }],
+    r2_buckets: [
+      { binding: 'R2', bucket_name: outputs.r2Name },
+      { binding: 'PROJECT_DATA_ARCHIVE_R2', bucket_name: outputs.r2Name },
+    ],
 
     // Static bindings copied from top-level config
     ...getStaticApiWorkerBindings(

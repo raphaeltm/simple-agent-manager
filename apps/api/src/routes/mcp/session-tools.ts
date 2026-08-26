@@ -205,6 +205,75 @@ export async function handleSearchMessages(
   });
 }
 
+function parseOptionalTimestamp(value: unknown, name: string): { value: number | null; error: string | null } {
+  if (value === undefined || value === null) return { value: null, error: null };
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) {
+    return { value, error: null };
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return { value: null, error: null };
+    const parsed = Date.parse(trimmed);
+    if (Number.isFinite(parsed)) return { value: parsed, error: null };
+  }
+  return { value: null, error: `${name} must be an epoch-millisecond number or ISO timestamp` };
+}
+
+export async function handleGetArchivedToolPayloads(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<JsonRpcResponse> {
+  const messageId = typeof params.messageId === 'string' ? params.messageId.trim() : '';
+  const sessionId = typeof params.sessionId === 'string' ? params.sessionId.trim() : '';
+  const startTime = parseOptionalTimestamp(params.startTime, 'startTime');
+  if (startTime.error) return jsonRpcError(requestId, INVALID_PARAMS, startTime.error);
+  const endTime = parseOptionalTimestamp(params.endTime, 'endTime');
+  if (endTime.error) return jsonRpcError(requestId, INVALID_PARAMS, endTime.error);
+  if (
+    startTime.value !== null &&
+    endTime.value !== null &&
+    startTime.value > endTime.value
+  ) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'startTime must be before or equal to endTime');
+  }
+  if (!messageId && !sessionId && startTime.value === null && endTime.value === null) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Provide messageId, sessionId, startTime, or endTime to bound archive retrieval',
+    );
+  }
+
+  if (sessionId) {
+    const session = await projectDataService.getSession(env, tokenData.projectId, sessionId);
+    if (!session) {
+      return jsonRpcError(requestId, INVALID_PARAMS, 'Session not found in this project');
+    }
+  }
+
+  const limits = getMcpLimits(env);
+  const requestedLimit =
+    typeof params.limit === 'number' ? params.limit : limits.archivedToolPayloadListLimit;
+  const limit = Math.min(
+    Math.max(1, Math.round(requestedLimit)),
+    limits.archivedToolPayloadListMax
+  );
+
+  const result = await projectDataService.getArchivedToolPayloads(env, tokenData.projectId, {
+    ...(messageId ? { messageId } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    ...(startTime.value !== null ? { startTime: startTime.value } : {}),
+    ...(endTime.value !== null ? { endTime: endTime.value } : {}),
+    limit,
+  });
+
+  return jsonRpcSuccess(requestId, {
+    content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+  });
+}
+
 export async function handleUpdateSessionTopic(
   requestId: string | number | null,
   params: Record<string, unknown>,

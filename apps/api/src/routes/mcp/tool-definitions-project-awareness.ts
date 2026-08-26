@@ -135,6 +135,39 @@ export const PROJECT_AWARENESS_TOOLS = [
     },
   },
   {
+    name: 'get_archived_tool_payloads',
+    description:
+      'Retrieve ProjectData tool-call JSON payloads that were archived from Durable Object SQLite to private R2. Scope is the current project. Provide a messageId, a sessionId, and/or a message-created time range to keep the read bounded.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        messageId: {
+          type: 'string',
+          description: 'Optional exact tool message ID to retrieve.',
+        },
+        sessionId: {
+          type: 'string',
+          description: 'Optional session ID to retrieve archived tool payloads from.',
+        },
+        startTime: {
+          type: ['number', 'string'],
+          description:
+            'Optional inclusive lower bound for message created time, as epoch milliseconds or an ISO timestamp.',
+        },
+        endTime: {
+          type: ['number', 'string'],
+          description:
+            'Optional inclusive upper bound for message created time, as epoch milliseconds or an ISO timestamp.',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max archived payloads to return (default: 10, max: 50).',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'search_messages',
     description:
       'Search messages across all chat sessions in your project by keyword using full-text search. Returns matching message snippets with session context. Useful for finding past discussions about specific topics, decisions, or code. Completed sessions use FTS5 indexing (matches messages containing all search words); active sessions fall back to keyword matching.',

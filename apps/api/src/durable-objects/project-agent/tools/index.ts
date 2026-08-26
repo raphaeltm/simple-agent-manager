@@ -22,6 +22,8 @@ import { dispatchTask } from '../../sam-session/tools/dispatch-task';
 import { dispatchTaskDef } from '../../sam-session/tools/dispatch-task';
 import { findRelatedIdeas } from '../../sam-session/tools/find-related-ideas';
 import { findRelatedIdeasDef } from '../../sam-session/tools/find-related-ideas';
+import { getArchivedToolPayloads } from '../../sam-session/tools/get-archived-tool-payloads';
+import { getArchivedToolPayloadsDef } from '../../sam-session/tools/get-archived-tool-payloads';
 import { getCiStatus } from '../../sam-session/tools/get-ci-status';
 import { getCiStatusDef } from '../../sam-session/tools/get-ci-status';
 import { getFileContent } from '../../sam-session/tools/get-file-content';
@@ -105,6 +107,7 @@ export const PROJECT_AGENT_TOOLS: AnthropicToolDef[] = [
   // Sessions & messages
   stripProjectId(listSessionsDef),
   stripProjectId(getSessionMessagesDef),
+  stripProjectId(getArchivedToolPayloadsDef),
   stripProjectId(searchTaskMessagesDef),
   // Ideas
   stripProjectId(createIdeaDef),
@@ -160,6 +163,7 @@ const toolHandlers: Record<string, ToolHandler> = {
   // Sessions
   list_sessions: withProjectId(listSessions as ToolHandler),
   get_session_messages: withProjectId(getSessionMessages as ToolHandler),
+  get_archived_tool_payloads: withProjectId(getArchivedToolPayloads as ToolHandler),
   search_task_messages: withProjectId(searchTaskMessages as ToolHandler),
   // Ideas
   create_idea: withProjectId(createIdea as ToolHandler),

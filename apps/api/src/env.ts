@@ -12,6 +12,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   KV: KVNamespace;
   // R2 for VM Agent binaries
   R2: R2Bucket;
+  // Private R2 archive for ProjectData tool payload JSON
+  PROJECT_DATA_ARCHIVE_R2: R2Bucket;
   // Workers AI for speech-to-text transcription
   AI: Ai;
   // Cloudflare Artifacts for SAM-native Git repos (optional — absent when ARTIFACTS_ENABLED is falsy)
@@ -548,6 +550,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM?: string;
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS?: string; // Wall-time budget for one archival cleanup pass (default: 20000)
+  PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS?: string; // Tool payload age before archive+strip eligibility (default: 7)
+  PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS?: string; // Cadence for retention archive scans (default: 86400000)
+  PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX?: string; // Private R2 prefix for archived ProjectData tool payloads
   PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED?: string;
   PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS?: string;
   PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS?: string;
@@ -684,6 +690,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MCP_MESSAGE_LIST_LIMIT?: string; // Default raw tokens per request (default: 50)
   MCP_MESSAGE_LIST_MAX?: string; // Max raw tokens per request (default: 200)
   MCP_MESSAGE_SEARCH_MAX?: string; // Max search results for search_messages (default: 20)
+  MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT?: string; // Default archived payloads per get_archived_tool_payloads (default: 10)
+  MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX?: string; // Max archived payloads per get_archived_tool_payloads (default: 50)
   MCP_COMMENT_LIST_LIMIT?: string; // Default message-comment threads per request (default: 10)
   MCP_COMMENT_LIST_MAX?: string; // Max message-comment threads per request (default: 25)
   MCP_COMMENT_BODY_MAX_LENGTH?: string; // Max comment/reply body characters accepted via MCP (default: 4000)

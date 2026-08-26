@@ -83,6 +83,10 @@ PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES = "1048576"
 PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS = "7"
 PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS = "60000"
 PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM = "25"
+PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS = "20000"
+PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS = "7"
+PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS = "86400000"
+PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX = "project-data/tool-payloads"
 PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED = "true"
 PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS = "500"
 PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS = "7"
@@ -237,6 +241,12 @@ id = "your-kv-namespace-id"
 # R2 for VM Agent binaries
 [[r2_buckets]]
 binding = "R2"
+bucket_name = "workspaces-dev-assets"
+
+# Private ProjectData tool-payload archive. Uses a distinct binding/prefix so
+# archive reads never expose VM binary/object namespaces.
+[[r2_buckets]]
+binding = "PROJECT_DATA_ARCHIVE_R2"
 bucket_name = "workspaces-dev-assets"
 
 

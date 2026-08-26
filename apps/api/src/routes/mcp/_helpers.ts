@@ -68,6 +68,8 @@ export type MessageRole = (typeof VALID_MESSAGE_ROLES)[number];
 /** Default HTTP-level rate limit for the /mcp endpoint (per token, per minute). Override via MCP_RATE_LIMIT env var. */
 const DEFAULT_MCP_RATE_LIMIT = 120;
 const DEFAULT_MCP_RATE_LIMIT_WINDOW_SECONDS = 60;
+const DEFAULT_MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT = 10;
+const DEFAULT_MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX = 50;
 
 /** Default dispatch limits for agent-to-agent task spawning. */
 const DEFAULT_MCP_DISPATCH_MAX_DEPTH = 3;
@@ -159,6 +161,14 @@ export function getMcpLimits(env: Env) {
     messageListLimit: parsePositiveInt(env.MCP_MESSAGE_LIST_LIMIT, DEFAULT_MCP_MESSAGE_LIST_LIMIT),
     messageListMax: parsePositiveInt(env.MCP_MESSAGE_LIST_MAX, DEFAULT_MCP_MESSAGE_LIST_MAX),
     messageSearchMax: parsePositiveInt(env.MCP_MESSAGE_SEARCH_MAX, DEFAULT_MCP_MESSAGE_SEARCH_MAX),
+    archivedToolPayloadListLimit: parsePositiveInt(
+      env.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT,
+      DEFAULT_MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT
+    ),
+    archivedToolPayloadListMax: parsePositiveInt(
+      env.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX,
+      DEFAULT_MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX
+    ),
     triggerListLimit: parsePositiveInt(env.MCP_TRIGGER_LIST_LIMIT, DEFAULT_MCP_TRIGGER_LIST_LIMIT),
     triggerListMax: parsePositiveInt(env.MCP_TRIGGER_LIST_MAX, DEFAULT_MCP_TRIGGER_LIST_MAX),
     incidentListLimit: parsePositiveInt(

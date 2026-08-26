@@ -34,7 +34,7 @@ export default defineConfig({
         compatibilityFlags: ['nodejs_compat'],
         d1Databases: ['DATABASE', 'OBSERVABILITY_DATABASE'],
         kvNamespaces: ['KV'],
-        r2Buckets: ['R2'],
+        r2Buckets: ['R2', 'PROJECT_DATA_ARCHIVE_R2'],
         durableObjects: {
           PROJECT_DATA: {
             className: 'ProjectData',

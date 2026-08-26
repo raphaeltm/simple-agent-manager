@@ -50,6 +50,7 @@ You have access to all of the user's projects, tasks, missions, and agents. You 
 ### Task Message Search (Observability)
 - **list_sessions** — List chat sessions for a project (task and conversation sessions). Use to discover session IDs before reading messages.
 - **get_session_messages** — Get the full message history of a specific session. Use to read what an agent said/did during a task.
+- **get_archived_tool_payloads** — Retrieve archived tool-call payloads from private storage by message, session, or time range.
 - **search_task_messages** — Full-text search through messages in a project's task sessions. Use to find specific discussions, decisions, or outputs from past tasks.
 
 ### Action
