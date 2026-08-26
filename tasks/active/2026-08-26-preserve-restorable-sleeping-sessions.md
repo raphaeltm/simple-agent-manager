@@ -101,13 +101,13 @@ archives because those paths delete snapshot state first.
 | `scheduled/node-cleanup/workspace-phases.ts:sweepOrphanedWorkspaces`     | Orphan workspace stop                  | Yes for stop status                                           | Restorable sleep should not become archive; non-restorable orphan still stops.                       |
 | `scheduled/node-cleanup/workspace-phases.ts:sweepStaleStoppedWorkspaces` | Stale stopped workspace delete         | Yes                                                           | Stale non-restorable sessions still stop.                                                            |
 | `durable-objects/node-lifecycle.ts:deleteWorkspace`                      | Staged workspace deletion              | Yes                                                           | One of the confirmed incident writers.                                                               |
-| `routes/workspaces/lifecycle.ts`                                         | Explicit workspace stop                | Yes for sleep-preservation; explicit delete handled elsewhere | Explicit stop of a restorable slept session should not archive it accidentally.                      |
+| `routes/workspaces/lifecycle.ts`                                         | Explicit workspace stop                | Guard does not preserve                                       | Deletes snapshot state before finalizer, so explicit stop remains destructive/archive intent.        |
 | `services/workspace-cleanup.ts:cleanupWorkspaceForDeletion`              | User/API workspace delete/archive      | Guard does not preserve                                       | Deletes snapshot state before finalizer, so no restorable row remains.                               |
 | `services/nodes.ts:stopNodeResources`                                    | Node stop/delete cascade               | Yes                                                           | Preserve if this is runtime teardown after sleep; genuine user archive has no snapshot.              |
 | `services/nodes.ts:deleteNodeResources`                                  | Node delete cascade                    | Yes                                                           | Same finalizer choke point.                                                                          |
 | `services/nodes.ts:retireDeletedDeploymentNodeRecord`                    | Deployment node retirement             | Mostly N/A                                                    | Deployment nodes should not own user chat sessions, but guard is harmless if a workspace row exists. |
 | `services/instant-session.ts`                                            | cf-container launch failure            | No preservation for failure                                   | Uses failed status/error; should still fail ProjectData.                                             |
-| `durable-objects/vm-agent-container-runtime.ts:persistRuntimeEnded`      | cf-container runtime ended             | No preservation for stopped/error runtime end                 | In-place container wake uses `markSessionSnapshotAwakeInPlace`; stopped/error means runtime ended.   |
+| `durable-objects/vm-agent-container-runtime.ts:persistRuntimeEnded`      | cf-container runtime ended             | Stopped: yes if a restorable row exists; error: no            | The finalizer guard runs for `stopped`; `error` intentionally records failed runtime outcome.         |
 | `scheduled/trial-expire.ts`                                              | Anonymous trial expiry                 | Yes only if restorable row exists                             | Trial expiry normally deletes old anonymous resources; no snapshot row means unchanged stop.         |
 
 ## Implementation Checklist
@@ -179,8 +179,8 @@ archives because those paths delete snapshot state first.
 
 - 2026-08-26 pre-review verdict: WARN.
 - Covered: implementation checklist items, required real-writer teardown tests, real-SQL predicates,
-  stopped-session recovery unbrick, no-snapshot/expired-snapshot/user-archive/task-terminal controls,
-  and finalizer caller inventory.
+  stopped-session recovery unbrick, no-snapshot/expired-snapshot/non-restorable/cross-scope/
+  user-archive/task-terminal controls, and finalizer caller inventory.
 - Pending by design: specialist review, CI, staging verification, merge, production deploy monitoring,
   and production post-deploy sleep survival verification.
 

@@ -307,6 +307,7 @@ export async function hasAuthorizedRestorableSnapshotWakeClaim(
   input: {
     projectId: string;
     chatSessionId: string;
+    workspaceId: string;
     taskId: string;
     now?: Date;
   }
@@ -319,9 +320,17 @@ export async function hasAuthorizedRestorableSnapshotWakeClaim(
          JOIN tasks recovery
            ON recovery.id = ?
           AND recovery.project_id = snapshot.project_id
+          AND recovery.user_id = snapshot.user_id
           AND recovery.chat_session_id = snapshot.chat_session_id
+          AND recovery.workspace_id = ?
           AND recovery.triggered_by = 'session-recovery'
           AND recovery.status NOT IN ('completed', 'failed', 'cancelled')
+         JOIN workspaces replacement
+           ON replacement.id = ?
+          AND replacement.id = recovery.workspace_id
+          AND replacement.id = snapshot.recovery_workspace_id
+          AND replacement.project_id = snapshot.project_id
+          AND replacement.user_id = snapshot.user_id
         WHERE snapshot.chat_session_id = ?
           AND snapshot.project_id = ?
           AND snapshot.recovery_task_id = ?
@@ -339,7 +348,15 @@ export async function hasAuthorizedRestorableSnapshotWakeClaim(
           )
         LIMIT 1`
     )
-    .bind(input.taskId, input.chatSessionId, input.projectId, input.taskId, now.toISOString())
+    .bind(
+      input.taskId,
+      input.workspaceId,
+      input.workspaceId,
+      input.chatSessionId,
+      input.projectId,
+      input.taskId,
+      now.toISOString()
+    )
     .first<{ found: number }>();
   return Boolean(row);
 }

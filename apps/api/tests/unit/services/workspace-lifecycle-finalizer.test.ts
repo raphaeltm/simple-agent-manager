@@ -165,6 +165,7 @@ function seedRestorableSnapshot(
   overrides: {
     id?: string;
     chatSessionId?: string;
+    projectId?: string;
     workspaceId?: string;
     expiresAt?: string;
     status?: string;
@@ -185,7 +186,7 @@ function seedRestorableSnapshot(
     )
     .run(
       overrides.id ?? `snapshot-${chatSessionId}`,
-      PROJECT_ID,
+      overrides.projectId ?? PROJECT_ID,
       overrides.workspaceId ?? WORKSPACE_ID,
       NODE_ID,
       USER_ID,
@@ -268,6 +269,25 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
     seedNode();
     seedWorkspace({ status: 'deleted' });
     seedRestorableSnapshot({ expiresAt: iso(-1_000) });
+
+    await finalizeWorkspace();
+
+    expect(mocks.stopSession).toHaveBeenCalledWith(env, PROJECT_ID, CHAT_SESSION_ID);
+    expect(mocks.failSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['snapshot is not marked sleeping', { sleepStatus: 'awake' }],
+    ['snapshot has no sleeping timestamp', { sleepingAt: null }],
+    ['snapshot exhausted recovery attempts', { recoveryAttempts: 3 }],
+    ['snapshot status is not restorable', { status: 'failed', degradation: 'none' }],
+    ['available snapshot has non-none degradation', { status: 'available', degradation: 'partial' }],
+    ['snapshot belongs to a different project', { projectId: 'project-other' }],
+    ['snapshot belongs to a different workspace', { workspaceId: 'workspace-other' }],
+  ])('still stops when the %s', async (_name, snapshotOverrides) => {
+    seedNode();
+    seedWorkspace({ status: 'deleted' });
+    seedRestorableSnapshot(snapshotOverrides);
 
     await finalizeWorkspace();
 

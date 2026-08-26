@@ -42,7 +42,7 @@ The chain was entirely composed of individually-correct steps:
    an `expires_at` seven days out.
 3. Five minutes later `NodeLifecycle` ran
    `UPDATE workspaces SET status='deleted' ... WHERE status IN ('stopped','sleeping')`
-   (`node-lifecycle.ts:570-573`) — **rewriting the inconclusive `sleeping` marker into the
+   (`apps/api/src/durable-objects/node-lifecycle.ts`) — **rewriting the inconclusive `sleeping` marker into the
    conclusive `deleted` marker.**
 4. The classifier read `workspaces.status`, saw `deleted`, and returned
    `conclusive: true`. The stuck-task sweep wrote `failed`.
@@ -106,12 +106,14 @@ Tells:
 
 7. **Lifecycle finalizers that stop/archive a user-visible session are destroyers too.**
    A shared teardown helper can still be wrong if it centralizes the destructive mutation
-   at the wrong altitude. Before a finalizer calls `stopSession`, `failSession`, archives a
-   conversation, or otherwise removes a wake path, it must read the same recovery artifact
-   the wake path reads. For sleeping conversations that means `session_snapshots`, not the
-   old workspace/node row being torn down. Exercise the real writer that reaches the finalizer
-   (NodeLifecycle, cron cleanup, explicit delete, task-terminal cleanup, etc.), because a direct
-   helper test cannot prove production reaches the guard.
+   at the wrong altitude. Before a finalizer calls `stopSession`, archives a conversation, or
+   otherwise removes a wake path for a non-failed runtime teardown, it must read the same recovery
+   artifact the wake path reads. For sleeping conversations that means `session_snapshots`, not the
+   old workspace/node row being torn down. Failed/error closures are exempt only when they are
+   intentionally recording a failed runtime outcome with `failSession`, rather than archiving a
+   recoverable sleep. Exercise the real writer that reaches the finalizer (NodeLifecycle, cron
+   cleanup, explicit delete, task-terminal cleanup, etc.), because a direct helper test cannot
+   prove production reaches the guard.
 
 ## Required Tests
 

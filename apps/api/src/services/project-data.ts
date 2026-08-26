@@ -262,8 +262,10 @@ export async function wakeSessionForSnapshotRecovery(
   const allowStopped = await hasAuthorizedRestorableSnapshotWakeClaim(env.DATABASE, {
     projectId,
     chatSessionId: sessionId,
+    workspaceId,
     taskId,
   });
+  if (!allowStopped) return false;
   const stub = await getStub(env, projectId);
   return stub.wakeSession(sessionId, workspaceId, taskId, { allowStopped });
 }
