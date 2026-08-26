@@ -73,6 +73,7 @@ When a migration creates a second representation that must stay in sync:
 ## Quick Compliance Check
 
 Before merging any migration that introduces a synced second representation:
+
 - [ ] Every writer of the source table is enumerated (grep UPDATE/INSERT/DELETE,
       including Durable Objects)
 - [ ] Each writer either dual-writes, is read-only, or has a tracked follow-up
@@ -107,6 +108,31 @@ columns:
 - [ ] If a legacy tolerance accepts `NULL`, it must be backed by another
       server-written binding for the same resource and must backfill the missing
       linkage before proceeding.
+
+## Lifecycle Finalizers Are Writer Contracts
+
+This rule also applies when one terminal operation must update multiple
+lifecycle mirrors even without a schema migration. Workspace/node deletion is
+the current example: `workspaces` / `nodes`, `agent_sessions`, `compute_usage`,
+and ProjectData session/activity summaries all represent the same lifecycle
+state. Adding a new deletion, stop, destroy, retry-cleanup, or terminal runtime
+path without the shared finalizer silently recreates stale mirrors.
+
+Before merging lifecycle teardown changes:
+
+- [ ] Enumerate every writer that can make a workspace, node, runtime, task
+      workspace, or related session terminal, including cron sweeps, Durable
+      Object alarms, retry cleanup, Instant/cf-container paths, trial cleanup,
+      deployment teardown, and user/API deletion.
+- [ ] Route each writer through one shared idempotent finalizer, or place it on
+      an explicit allowlist with a written reason showing no lifecycle mirror can
+      exist yet or that another terminal owner performs the finalization.
+- [ ] Add a machine-checked writer-inventory test that scans for terminal writes
+      and fails on unfinalized call sites. Assert a non-trivial minimum match
+      count and verify the test goes red when an unguarded writer is added.
+- [ ] Add vertical-slice tests for the main teardown paths that assert the
+      effective postcondition, not just the helper call. For workspace/node
+      deletion, no related `agent_sessions.status='running'` row may remain.
 
 ## References
 
