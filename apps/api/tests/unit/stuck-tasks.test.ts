@@ -689,11 +689,11 @@ describe('recoverStuckTasks', () => {
       );
     });
 
-    it('fails an in_progress task when the node is healthy but the task-scoped ACP session is gone', async () => {
-      // The exact production regression: a HEALTHY node with a RECENT heartbeat
-      // is not proof the task is alive. When the task-scoped ACP session is
-      // absent/stale, reconciliation must still fail the task — a shared-node
-      // heartbeat cannot independently suppress it.
+    it('preserves an in_progress VM task when ProjectData ACP data is missing but the node is healthy', async () => {
+      // Production regression from 2026-08-26: ProjectData ACP writes were
+      // blocked by a hot ProjectData DO, while the VM node and workspace were
+      // still healthy. Missing durable heartbeat data is suspect, not terminal
+      // runtime-death evidence.
       const now = Date.now();
       const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
       const recentHeartbeat = new Date(now - 30 * 1000).toISOString(); // node very much alive
@@ -732,23 +732,16 @@ describe('recoverStuckTasks', () => {
       responses.set('status, health_status FROM nodes', {
         results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
       });
-      responses.set("UPDATE tasks SET status = 'failed'", { results: [], changes: 1 });
-
-      // No live task-scoped ACP session, despite the healthy node.
+      // No observable task-scoped ACP session, despite the healthy node.
       projectDataMocks.listAcpSessions.mockResolvedValueOnce({ sessions: [], total: 0 });
 
       const env = createMockEnv(responses);
       const result = await recoverStuckTasks(env);
 
-      expect(result.failedInProgress).toBe(1);
+      expect(result.failedInProgress).toBe(0);
       expect(result.heartbeatSkipped).toBe(0);
-      // Failure is driven by the ACP-session check, not the node heartbeat.
-      expect(syncTriggerExecutionMock).toHaveBeenCalledWith(
-        env.DATABASE,
-        'task-1',
-        'failed',
-        expect.stringContaining('task_acp_session_not_live')
-      );
+      expect(syncTriggerExecutionMock).not.toHaveBeenCalled();
+      expect(cleanupTaskRun).not.toHaveBeenCalled();
     });
 
     it('fails in_progress tasks with no node (no heartbeat to check)', async () => {

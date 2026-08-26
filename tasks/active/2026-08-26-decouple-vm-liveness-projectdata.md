@@ -85,15 +85,15 @@ reread before destructive cleanup.
 
 ## Implementation checklist
 
-- [ ] Add immediate liveness guardrails so stale, missing, timed-out, or
+- [x] Add immediate liveness guardrails so stale, missing, timed-out, or
   unobservable ProjectData ACP heartbeat data is suspect/unknown for VM runtime
   tasks instead of conclusive runtime death.
-- [ ] Preserve conclusive terminalization for explicit terminal evidence and
+- [x] Preserve conclusive terminalization for explicit terminal evidence and
   terminal owning workspace/node state.
-- [ ] Update stuck-task tests so a healthy VM node with missing ProjectData ACP
+- [x] Update stuck-task tests so a healthy VM node with missing ProjectData ACP
   rows is preserved, and a dead runtime still converges exactly once with
   conclusive evidence.
-- [ ] Update ProjectData runtime heartbeat timeout policy so non-container VM
+- [x] Update ProjectData runtime heartbeat timeout policy so non-container VM
   sessions are not interrupted solely because ProjectData ACP heartbeat data is
   stale.
 - [ ] Move stuck-task destructive cleanup toward the canonical idempotent
@@ -154,6 +154,8 @@ reread before destructive cleanup.
 ## References
 
 - SAM idea `01M0Y6N63R23N7HDH4V0X1T49G`
+- Bootstrap task-file PR `#1926` was required because direct push to `main` was
+  rejected by branch protection. No implementation changes belong in that PR.
 - `apps/api/src/services/task-runtime-liveness.ts`
 - `apps/api/src/services/stuck-tasks.ts`
 - `apps/api/src/scheduled/stuck-tasks.ts`

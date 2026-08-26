@@ -6,6 +6,7 @@ import {
   checkHeartbeatTimeouts,
   computeHeartbeatAlarmTime,
 } from '../../src/durable-objects/project-data/acp-sessions';
+import { shouldDeferRuntimeHeartbeatTimeout } from '../../src/durable-objects/project-data/runtime-heartbeat-policy';
 import type { Env } from '../../src/durable-objects/project-data/types';
 import { createSqlStorage } from './durable-objects/sql-storage-test-utils';
 
@@ -105,4 +106,40 @@ describe('ACP heartbeat timeout policy', () => {
 
     expect(nextAlarm).toBeGreaterThanOrEqual(now + 300_000);
   });
+
+  it('defers VM runtime timeouts because ProjectData heartbeat staleness is suspect', async () => {
+    const result = await shouldDeferRuntimeHeartbeatTimeout(
+      envWithRuntimeRow({ workspace_status: 'running', node_runtime: 'vm' }),
+      { workspaceId: 'ws-1', nodeId: 'node-1' }
+    );
+
+    expect(result).toEqual({
+      defer: true,
+      reason: 'vm_runtime_projectdata_heartbeat_suspect',
+    });
+  });
+
+  it('does not defer VM runtime timeouts when the owning workspace is terminal', async () => {
+    const result = await shouldDeferRuntimeHeartbeatTimeout(
+      envWithRuntimeRow({ workspace_status: 'stopped', node_runtime: 'vm' }),
+      { workspaceId: 'ws-1', nodeId: 'node-1' }
+    );
+
+    expect(result).toEqual({
+      defer: false,
+      reason: 'workspace_stopped',
+    });
+  });
 });
+
+function envWithRuntimeRow(row: { workspace_status: string; node_runtime: string | null }): Env {
+  return {
+    DATABASE: {
+      prepare: vi.fn().mockReturnValue({
+        bind: vi.fn().mockReturnValue({
+          first: vi.fn().mockResolvedValue(row),
+        }),
+      }),
+    },
+  } as unknown as Env;
+}
