@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -113,6 +114,12 @@ fi
 previous_arg=''
 for arg in "$@"; do
   if [ "$previous_arg" = "bulk" ]; then
+    invocation_count=0
+    if [ -f "$CAPTURED_BULK_INVOCATIONS" ]; then
+      invocation_count="$(cat "$CAPTURED_BULK_INVOCATIONS")"
+    fi
+    invocation_count=$((invocation_count + 1))
+    printf '%s\\n' "$invocation_count" > "$CAPTURED_BULK_INVOCATIONS"
     cp "$arg" "$CAPTURED_BULK_PAYLOAD"
     printf '%s\\n' "$arg" > "$CAPTURED_BULK_SOURCE_PATH"
     exit 0
@@ -139,6 +146,7 @@ function configureSecretsEnv(
     PATH: `${binDir}:${process.env.PATH ?? ''}`,
     CAPTURED_BULK_PAYLOAD: join(captureDir, 'worker-secret-bulk-payload.json'),
     CAPTURED_BULK_SOURCE_PATH: join(captureDir, 'worker-secret-bulk-source-path.txt'),
+    CAPTURED_BULK_INVOCATIONS: join(captureDir, 'worker-secret-bulk-invocations.txt'),
     EXPECTED_DEPLOY_SIGNING_PUBLIC_KEY: expectedDeployPublic,
     EXPECTED_VAPID_PUBLIC_KEY: expectedVapidPublic,
     SECRET_ENCRYPTION_KEY: 'encryption-secret',
@@ -163,6 +171,10 @@ function configureSecretsEnv(
   };
 }
 
+function readOptionalFile(path: string): string | null {
+  return existsSync(path) ? readFileSync(path, 'utf8') : null;
+}
+
 function runConfigureSecrets(overrides: Record<string, string | undefined> = {}) {
   const tmpRoot = mkdtempSync(join(tmpdir(), 'sam-configure-secrets-'));
   const binDir = join(tmpRoot, 'bin');
@@ -182,11 +194,13 @@ function runConfigureSecrets(overrides: Record<string, string | undefined> = {})
     });
     const capturedPayloadPath = join(captureDir, 'worker-secret-bulk-payload.json');
     const capturedSourcePath = join(captureDir, 'worker-secret-bulk-source-path.txt');
+    const capturedInvocationsPath = join(captureDir, 'worker-secret-bulk-invocations.txt');
+    const bulkInvocations = Number.parseInt(readOptionalFile(capturedInvocationsPath) ?? '0', 10);
     return {
       ...result,
-      bulkPayload: result.status === 0 ? readFileSync(capturedPayloadPath, 'utf8') : null,
-      bulkSourcePath:
-        result.status === 0 ? readFileSync(capturedSourcePath, 'utf8').trim() : null,
+      bulkPayload: readOptionalFile(capturedPayloadPath),
+      bulkSourcePath: readOptionalFile(capturedSourcePath)?.trim() ?? null,
+      bulkInvocations: Number.isFinite(bulkInvocations) ? bulkInvocations : 0,
       cleanup: () => rmSync(tmpRoot, { force: true, recursive: true }),
     };
   } catch (error) {
@@ -610,6 +624,7 @@ describe('deployment workflow hardening', () => {
       expect(result.stdout).toContain('Applying ');
       expect(result.stdout).toContain('wrangler secret bulk');
       expect(result.stdout).toContain('Worker secrets configured in bulk');
+      expect(result.bulkInvocations).toBe(1);
 
       const combinedOutput = `${result.stdout}\n${result.stderr}`;
       expect(combinedOutput).not.toContain('github-client-secret-line-1');
@@ -646,6 +661,7 @@ describe('deployment workflow hardening', () => {
       expect(result.stderr).toContain(
         'exceeding WORKER_SECRET_BULK_MAX_OPS=1'
       );
+      expect(result.bulkInvocations).toBe(0);
       expect(result.bulkPayload).toBeNull();
 
       const combinedOutput = `${result.stdout}\n${result.stderr}`;
