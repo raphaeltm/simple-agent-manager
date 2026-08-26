@@ -11,9 +11,12 @@ export type Env = {
   VM_AGENT_CONTAINER?: DurableObjectNamespace<VmAgentContainer>;
   NODE_HEARTBEAT_STALE_SECONDS?: string;
   TASK_LIVENESS_MAX_ACP_SESSIONS?: string;
+  TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS?: string;
   TASK_LIVENESS_PROBE_TIMEOUT_MS?: string;
   IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP?: string;
   BASE_DOMAIN?: string;
+  VM_AGENT_PROTOCOL?: string;
+  VM_AGENT_PORT?: string;
   DO_SUMMARY_SYNC_DEBOUNCE_MS?: string;
   /** Cap on sessions mirrored into the D1 session index per project, per sync. */
   SESSION_INDEX_MAX_ROWS?: string;

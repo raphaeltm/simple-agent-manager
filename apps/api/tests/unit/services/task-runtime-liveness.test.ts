@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   classifyTaskRuntimeLiveness,
+  needsNodeHealthProbe,
   needsSessionResumabilityProbe,
   type SessionResumabilitySnapshot,
   type TaskRuntimeLivenessSignals,
@@ -157,7 +158,27 @@ describe('classifyTaskRuntimeLiveness', () => {
     });
   });
 
-  it('treats stale heartbeat with running workspaces as inconclusive before probing', () => {
+  it('requires a node health probe for stale VM heartbeat even with running workspaces', () => {
+    const base = signals();
+    const staleSignals = signals({
+      workspace: {
+        ...workspaceFrom(base),
+        nodeHeartbeatAt: NOW - STALE_MS - 1,
+        runningWorkspacesOnNode: 2,
+      },
+      acpProbeOutcome: 'not_run',
+      acpSessions: [],
+    });
+
+    expect(needsNodeHealthProbe(staleSignals)).toBe(true);
+    expect(classifyTaskRuntimeLiveness(staleSignals)).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'node_heartbeat_stale_running_workspaces',
+    });
+  });
+
+  it('treats stale heartbeat with running workspaces as conclusive after failed node probe', () => {
     const base = signals();
     expect(
       classifyTaskRuntimeLiveness(
@@ -166,27 +187,6 @@ describe('classifyTaskRuntimeLiveness', () => {
             ...workspaceFrom(base),
             nodeHeartbeatAt: NOW - STALE_MS - 1,
             runningWorkspacesOnNode: 2,
-          },
-          acpProbeOutcome: 'not_run',
-          acpSessions: [],
-        })
-      )
-    ).toMatchObject({
-      live: false,
-      conclusive: false,
-      reason: 'node_heartbeat_stale_running_workspaces',
-    });
-  });
-
-  it('treats stale heartbeat with no running workspaces as conclusive after failed node probe', () => {
-    const base = signals();
-    expect(
-      classifyTaskRuntimeLiveness(
-        signals({
-          workspace: {
-            ...workspaceFrom(base),
-            nodeHeartbeatAt: NOW - STALE_MS - 1,
-            runningWorkspacesOnNode: 0,
           },
           acpProbeOutcome: 'not_run',
           nodeHealthProbeOutcome: 'failed',
@@ -200,7 +200,28 @@ describe('classifyTaskRuntimeLiveness', () => {
     });
   });
 
-  it('treats stale heartbeat with running workspaces and successful node probe as inconclusive', () => {
+  it('continues to task-scoped ACP liveness after successful node probe', () => {
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: {
+            ...workspaceFrom(base),
+            nodeHeartbeatAt: NOW - STALE_MS - 1,
+            runningWorkspacesOnNode: 2,
+          },
+          nodeHealthProbeOutcome: 'ok',
+        })
+      )
+    ).toMatchObject({
+      live: true,
+      conclusive: true,
+      reason: 'task_acp_session_live',
+      activeAcpSessionId: 'acp-1',
+    });
+  });
+
+  it('treats a timed-out node health probe as inconclusive', () => {
     const base = signals();
     expect(
       classifyTaskRuntimeLiveness(
@@ -211,14 +232,36 @@ describe('classifyTaskRuntimeLiveness', () => {
             runningWorkspacesOnNode: 2,
           },
           acpProbeOutcome: 'not_run',
-          nodeHealthProbeOutcome: 'ok',
+          nodeHealthProbeOutcome: 'timeout',
           acpSessions: [],
         })
       )
     ).toMatchObject({
       live: false,
       conclusive: false,
-      reason: 'node_heartbeat_stale_running_workspaces',
+      reason: 'node_health_probe_timeout',
+    });
+  });
+
+  it('treats a node health probe configuration error as inconclusive', () => {
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: {
+            ...workspaceFrom(base),
+            nodeHeartbeatAt: NOW - STALE_MS - 1,
+            runningWorkspacesOnNode: 2,
+          },
+          acpProbeOutcome: 'not_run',
+          nodeHealthProbeOutcome: 'error',
+          acpSessions: [],
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'node_health_probe_error',
     });
   });
 

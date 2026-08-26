@@ -647,7 +647,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP?: string; // Max candidates processed per alarm sweep (default: 5)
   TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS?: string; // Node heartbeat freshness threshold for reconciliation delivery (default: 300000 = 5 minutes)
   TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS?: string; // Short timeout for reconciliation-originated node calls (default: 5000 = 5 seconds)
-  TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS?: string; // Short timeout for stuck-task VM-agent health probes (default: 5000 = 5 seconds)
+  TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS?: string; // Short timeout for task-liveness VM-agent health probes (default: 5000 = 5 seconds)
   // Durable mailbox (Phase 1 orchestrator messaging)
   MAILBOX_ACK_TIMEOUT_MS?: string; // Ack timeout before re-delivery (default: 300000)
   MAILBOX_REDELIVERY_MAX_ATTEMPTS?: string; // Max delivery attempts before expiry (default: 5)

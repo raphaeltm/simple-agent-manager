@@ -3,6 +3,11 @@ import type { Env } from '../env';
 const DEFAULT_NODE_AGENT_READY_TIMEOUT_MS = 900_000;
 const DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS = 5000;
 
+export type NodeBackendBaseUrlEnv = Pick<
+  Env,
+  'BASE_DOMAIN' | 'VM_AGENT_PROTOCOL' | 'VM_AGENT_PORT'
+>;
+
 type NodeAgentFetch = (
   nodeId: string,
   env: Env,
@@ -11,7 +16,7 @@ type NodeAgentFetch = (
   requestTimeoutMs: number
 ) => Promise<Response>;
 
-export function getNodeBackendBaseUrl(nodeId: string, env: Env): string {
+export function getNodeBackendBaseUrl(nodeId: string, env: NodeBackendBaseUrlEnv): string {
   const protocol = env.VM_AGENT_PROTOCOL || 'https';
   const port = env.VM_AGENT_PORT || '8443';
   // Two-level subdomain ({nodeId}.vm.{domain}) bypasses Cloudflare same-zone routing.
@@ -20,9 +25,7 @@ export function getNodeBackendBaseUrl(nodeId: string, env: Env): string {
   return `${protocol}://${nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}`;
 }
 
-export function getNodeAgentReadyTimeoutMs(env: {
-  NODE_AGENT_READY_TIMEOUT_MS?: string;
-}): number {
+export function getNodeAgentReadyTimeoutMs(env: { NODE_AGENT_READY_TIMEOUT_MS?: string }): number {
   const parsed = env.NODE_AGENT_READY_TIMEOUT_MS
     ? Number.parseInt(env.NODE_AGENT_READY_TIMEOUT_MS, 10)
     : DEFAULT_NODE_AGENT_READY_TIMEOUT_MS;

@@ -34,7 +34,7 @@ export const DEFAULT_MAX_AGENT_SESSIONS_PER_WORKSPACE = 10;
 /** Default node heartbeat staleness threshold in seconds. Override via NODE_HEARTBEAT_STALE_SECONDS env var. */
 export const DEFAULT_NODE_HEARTBEAT_STALE_SECONDS = 180;
 
-/** Default timeout for task-liveness VM-agent health probes in cron sweeps. Override via TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS env var. */
+/** Default timeout for task-liveness VM-agent health probes. Override via TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS env var. */
 export const DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS = 5_000;
 
 /** Default max projects per user. Override via MAX_PROJECTS_PER_USER env var. */

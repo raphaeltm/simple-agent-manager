@@ -28,7 +28,6 @@ import {
   DEFAULT_STUCK_TASK_SCAN_CURSOR_KV_KEY,
   DEFAULT_TASK_DO_MISMATCH_GRACE_MS,
   DEFAULT_TASK_LIVENESS_MAX_ACP_SESSIONS,
-  DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS,
   DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS,
   DEFAULT_TASK_RUN_ABSOLUTE_CEILING_MS,
   DEFAULT_TASK_RUN_HARD_TIMEOUT_MS,
@@ -48,8 +47,6 @@ import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
-import { fetchWithTimeout, getTimeoutMs } from '../services/fetch-timeout';
-import { getNodeBackendBaseUrl } from '../services/node-agent-readiness';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
 import { DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS } from '../services/session-snapshot-artifacts';
@@ -61,8 +58,10 @@ import {
   loadRuntimeWorkspaceSnapshot,
   loadSessionResumabilitySnapshot,
   loadTaskSupersession,
+  needsNodeHealthProbe,
   needsSessionResumabilityProbe,
   needsTaskSupersessionProbe,
+  probeNodeHealthForTaskLiveness,
   type RuntimeAcpSessionSnapshot,
   type TaskRuntimeLiveness,
   type TaskRuntimeLivenessSignals,
@@ -95,15 +94,6 @@ function parseMs(value: string | undefined, fallback: number): number {
   const parsed = parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
   return parsed;
-}
-
-export function getTaskLivenessNodeHealthProbeTimeoutMs(env: {
-  TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS?: string;
-}): number {
-  return getTimeoutMs(
-    env.TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS,
-    DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS
-  );
 }
 
 /** Human-readable descriptions for execution steps */
@@ -562,7 +552,7 @@ export async function getTaskRuntimeLiveness(
     }
   }
 
-  const baseSignals: TaskRuntimeLivenessSignals = {
+  let livenessSignals: TaskRuntimeLivenessSignals = {
     projectId: task.project_id,
     taskWorkspaceId: task.workspace_id,
     workspace,
@@ -580,38 +570,27 @@ export async function getTaskRuntimeLiveness(
     sessionResumability,
     resumabilityMaxRecoveryAttempts: maxRecoveryAttempts,
   };
-  const initialClassification = classifyTaskRuntimeLiveness(baseSignals);
-  const staleVmNodeId =
-    workspace?.status === 'running' &&
-    workspace.nodeRuntime !== 'cf-container' &&
-    workspace.nodeId &&
-    workspace.nodeStatus === 'running' &&
-    initialClassification.reason === 'node_heartbeat_stale_probe_required'
-      ? workspace.nodeId
-      : null;
-  if (staleVmNodeId) {
-    const timeoutMs = getTaskLivenessNodeHealthProbeTimeoutMs(env);
-    try {
-      const response = await fetchWithTimeout(
-        `${getNodeBackendBaseUrl(staleVmNodeId, env)}/health`,
-        { method: 'GET' },
-        timeoutMs
-      );
-      return classifyTaskRuntimeLiveness({
-        ...baseSignals,
-        nodeHealthProbeOutcome: response.ok ? 'ok' : 'failed',
-      });
-    } catch (err) {
-      log.warn('stuck_task.node_health_probe_failed', {
+  let initialClassification = classifyTaskRuntimeLiveness(livenessSignals);
+  if (needsNodeHealthProbe(livenessSignals) && livenessSignals.workspace?.nodeId) {
+    const nodeId = livenessSignals.workspace.nodeId;
+    const probe = await probeNodeHealthForTaskLiveness(env, nodeId);
+    if (probe.outcome !== 'ok') {
+      log.warn('stuck_task.node_health_probe_unhealthy', {
         workspaceId: task.workspace_id,
-        nodeId: staleVmNodeId,
-        timeoutMs,
-        error: err instanceof Error ? err.message : String(err),
+        nodeId,
+        outcome: probe.outcome,
+        status: probe.status,
+        timeoutMs: probe.timeoutMs,
+        error: probe.error,
       });
-      return classifyTaskRuntimeLiveness({
-        ...baseSignals,
-        nodeHealthProbeOutcome: 'failed',
-      });
+    }
+    livenessSignals = {
+      ...livenessSignals,
+      nodeHealthProbeOutcome: probe.outcome,
+    };
+    initialClassification = classifyTaskRuntimeLiveness(livenessSignals);
+    if (probe.outcome !== 'ok') {
+      return initialClassification;
     }
   }
   if (
@@ -636,12 +615,12 @@ export async function getTaskRuntimeLiveness(
       ]);
       if (probe === TIMEOUT) {
         return classifyTaskRuntimeLiveness({
-          ...baseSignals,
+          ...livenessSignals,
           containerProbeOutcome: 'timeout',
         });
       }
       return classifyTaskRuntimeLiveness({
-        ...baseSignals,
+        ...livenessSignals,
         containerProbeOutcome: 'ok',
         containerLifecycle: probe,
       });
@@ -652,7 +631,7 @@ export async function getTaskRuntimeLiveness(
         error: err instanceof Error ? err.message : String(err),
       });
       return classifyTaskRuntimeLiveness({
-        ...baseSignals,
+        ...livenessSignals,
         containerProbeOutcome: 'error',
       });
     } finally {
@@ -685,12 +664,12 @@ export async function getTaskRuntimeLiveness(
         probeTimeoutMs,
       });
       return classifyTaskRuntimeLiveness({
-        ...baseSignals,
+        ...livenessSignals,
         acpProbeOutcome: 'timeout',
       });
     }
     return classifyTaskRuntimeLiveness({
-      ...baseSignals,
+      ...livenessSignals,
       acpProbeOutcome: 'ok',
       acpSessions: probe.sessions as RuntimeAcpSessionSnapshot[],
     });
@@ -700,7 +679,7 @@ export async function getTaskRuntimeLiveness(
       error: err instanceof Error ? err.message : String(err),
     });
     return classifyTaskRuntimeLiveness({
-      ...baseSignals,
+      ...livenessSignals,
       acpProbeOutcome: 'error',
     });
   }
@@ -1019,7 +998,10 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
      * which is exactly how the first cut of this fix missed the two timeout
      * branches below (`.claude/rules/66` requirement 3).
      */
-    const terminalReasonFor = (liveness: TaskRuntimeLiveness, deadRuntimeReason: string): string => {
+    const terminalReasonFor = (
+      liveness: TaskRuntimeLiveness,
+      deadRuntimeReason: string
+    ): string => {
       if (isSupersededTerminalReason(liveness.reason)) {
         supersededTermination = true;
         return SUPERSEDED_TERMINATION_MESSAGE;
@@ -1434,9 +1416,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       // same status we observed. This prevents TOCTOU races with the
       // TaskRunner DO which may have advanced the task in between our
       // SELECT and this UPDATE.
-      const terminalStatus: 'failed' | 'cancelled' = supersededTermination
-        ? 'cancelled'
-        : 'failed';
+      const terminalStatus: 'failed' | 'cancelled' = supersededTermination ? 'cancelled' : 'failed';
       const updateResult = await env.DATABASE.prepare(
         `UPDATE tasks SET status = ?, execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ?
          WHERE id = ? AND status = ?
@@ -1498,7 +1478,11 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       // Sync trigger execution status (best-effort) — without this, cron triggers
       // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
       await syncTriggerExecutionStatus(env.DATABASE, task.id, terminalStatus, reason);
-      await cancelVmTaskAdmission(env, task.id, supersededTermination ? 'task_cancelled' : 'task_failed');
+      await cancelVmTaskAdmission(
+        env,
+        task.id,
+        supersededTermination ? 'task_cancelled' : 'task_failed'
+      );
 
       if (compactionLoopRecovery?.sessionId) {
         try {

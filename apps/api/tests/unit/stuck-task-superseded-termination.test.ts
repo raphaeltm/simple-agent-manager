@@ -28,6 +28,17 @@ import { log } from '../../src/lib/logger';
 import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
+const { fetchWithTimeoutMock } = vi.hoisted(() => ({
+  fetchWithTimeoutMock: vi.fn(),
+}));
+vi.mock('../../src/services/fetch-timeout', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/services/fetch-timeout')>();
+  return {
+    ...actual,
+    fetchWithTimeout: fetchWithTimeoutMock,
+  };
+});
+
 vi.mock('../../src/services/task-runner', () => ({
   cleanupTaskRun: vi.fn().mockResolvedValue(undefined),
 }));
@@ -156,6 +167,7 @@ function env(
     TASK_RUN_HARD_TIMEOUT_MS: '28800000', // 8h
     TASK_RUN_ABSOLUTE_CEILING_MS: '86400000', // 24h
     NODE_HEARTBEAT_STALE_SECONDS: '180',
+    BASE_DOMAIN: 'example.test',
   } as unknown as Env;
 }
 
@@ -166,8 +178,24 @@ function statusOf(id: string): { status: string; error_message: string | null } 
   };
 }
 
+function makeWorkspaceRunning(): void {
+  sqlite
+    .prepare(`UPDATE workspaces SET status = 'running', chat_session_id = ? WHERE id = ?`)
+    .run(CHAT_SESSION_ID, WORKSPACE_ID);
+}
+
+function makeNodeHeartbeatStale(): void {
+  sqlite
+    .prepare(
+      `UPDATE nodes SET status = 'running', health_status = 'healthy', last_heartbeat_at = ? WHERE id = ?`
+    )
+    .run(iso(-10 * 60 * 1000), NODE_ID);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  fetchWithTimeoutMock.mockReset();
+  fetchWithTimeoutMock.mockResolvedValue(new Response(null, { status: 503 }));
   sqlite = new Database(':memory:');
   createSchemaTables(sqlite, [
     schema.workspaces,
@@ -344,6 +372,40 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
       expect.objectContaining({ taskId: PREDECESSOR_ID, projectId: PROJECT_ID })
     );
     skippedSupersessionGuard.mockRestore();
+  });
+
+  it('keeps the supersession fence on a stale-heartbeat node_not_live terminal write', async () => {
+    seedTask(PREDECESSOR_ID, {
+      startedAt: iso(-10 * 60 * 1000),
+      createdAt: iso(-60 * 60 * 1000),
+      chatSessionId: CHAT_SESSION_ID,
+    });
+    makeWorkspaceRunning();
+    makeNodeHeartbeatStale();
+    let insertedSuccessor = false;
+
+    const result = await recoverStuckTasks(
+      env({
+        beforeTerminalUpdate: () => {
+          if (insertedSuccessor) return;
+          insertedSuccessor = true;
+          seedSuccessor('queued', { createdAt: iso(-30_000) });
+        },
+      })
+    );
+
+    expect(fetchWithTimeoutMock).toHaveBeenCalledWith(
+      'https://01m064tg56ecjw1d127h32brvj.vm.example.test:8443/health',
+      { method: 'GET' },
+      5_000
+    );
+    expect(insertedSuccessor).toBe(true);
+    expect(result.failedInProgress).toBe(0);
+    expect(statusOf(PREDECESSOR_ID)).toMatchObject({
+      status: 'in_progress',
+      error_message: null,
+    });
+    expect(statusOf(SUCCESSOR_ID).status).toBe('queued');
   });
 
   it('still kills the same dead predecessor when no successor appears at write time', async () => {
