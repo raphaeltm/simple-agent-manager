@@ -1423,6 +1423,15 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       });
 
       if (transitionOutcome !== 'transitioned') {
+        if (transitionOutcome === 'superseded') {
+          log.info('stuck_task.skipped_supersession_guard', {
+            taskId: task.id,
+            projectId: task.project_id,
+            expectedStatus: task.status,
+            terminalStatus,
+            action: 'preserved',
+          });
+        }
         log.info('stuck_task.skipped_terminal_transition', {
           taskId: task.id,
           projectId: task.project_id,

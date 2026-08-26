@@ -78,10 +78,13 @@ describe('ProjectData runtime heartbeat timeout policy', () => {
     }
   );
 
-  it('keeps VM/devcontainer heartbeat timeout behavior unchanged', async () => {
+  it('treats VM/devcontainer ProjectData heartbeat timeout data as suspect', async () => {
     await expect(
       shouldDeferRuntimeHeartbeatTimeout(createEnv({ runtime: 'vm' }), candidate)
-    ).resolves.toEqual({ defer: false, reason: 'non_container_runtime' });
+    ).resolves.toEqual({
+      defer: true,
+      reason: 'vm_runtime_projectdata_heartbeat_suspect',
+    });
   });
 
   it.each(['stopping', 'stopped'])(

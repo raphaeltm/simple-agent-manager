@@ -130,7 +130,8 @@ function env(
         prepare: (sql: string) => {
           const statement = database.prepare(sql);
           const isTerminalUpdate =
-            sql.includes('UPDATE tasks SET status = ?') && sql.includes('completed_at = ?');
+            /UPDATE\s+tasks\s+SET\s+status\s*=\s*\?/i.test(sql) &&
+            /completed_at\s*=\s*\?/i.test(sql);
           if (!isTerminalUpdate) return statement;
           return {
             ...statement,
@@ -141,6 +142,10 @@ function env(
                 run: async () => {
                   o.beforeTerminalUpdate?.();
                   return bound.run();
+                },
+                runSync: () => {
+                  o.beforeTerminalUpdate?.();
+                  return bound.runSync();
                 },
               };
             },
