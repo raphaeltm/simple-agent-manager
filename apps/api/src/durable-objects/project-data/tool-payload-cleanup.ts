@@ -55,6 +55,7 @@ type ToolPayloadCleanupPlan = {
   targetBytes: number;
   batchRows: number;
   batchBytes: number;
+  maxRowBytes: number;
   cutoffCreatedAt: number;
   deadlineMs: number;
   pendingCursor: ToolPayloadCleanupCursor | null;
@@ -124,6 +125,7 @@ function createToolPayloadCleanupPlan(
     targetBytes,
     batchRows: config.toolPayloadCleanupBatchRows,
     batchBytes: config.toolPayloadCleanupBatchBytes,
+    maxRowBytes: config.toolPayloadCleanupMaxRowBytes,
     cutoffCreatedAt: now - config.toolPayloadArchiveRetentionMs,
     deadlineMs: now + config.toolPayloadCleanupWallTimeMs,
     pendingCursor,
@@ -179,6 +181,7 @@ async function scanToolPayloadCleanupBatch(
     plan.projectId,
     config.toolPayloadArchiveR2Prefix,
     plan.batchBytes,
+    plan.maxRowBytes,
     candidates,
     {
       initialCursor: plan.pendingCursor,
@@ -262,6 +265,7 @@ function buildToolPayloadCleanupResult(
     targetBytes: plan.targetBytes,
     batchRows: plan.batchRows,
     batchBytes: plan.batchBytes,
+    maxRowBytes: plan.maxRowBytes,
     sessionsScanned: batch.sessionsScanned,
     rowsScanned: batch.rowsScanned,
     rowsUpdated: batch.rowsUpdated,
@@ -376,6 +380,7 @@ function buildFailedToolPayloadCleanupResult(
     targetBytes: plan.targetBytes,
     batchRows: plan.batchRows,
     batchBytes: plan.batchBytes,
+    maxRowBytes: plan.maxRowBytes,
     sessionsScanned: 0,
     rowsScanned: 0,
     rowsUpdated: 0,

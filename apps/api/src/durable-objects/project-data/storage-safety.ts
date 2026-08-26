@@ -5,7 +5,7 @@
  * - direct per-object `databaseSize` measurement from SQLite-backed DO storage;
  * - latest-row and append-only D1 telemetry with growth forecasts;
  * - throttled operator-visible observability alerts;
- * - bounded automatic cleanup for safely reclaimable terminal-session payloads;
+ * - bounded automatic cleanup for safely reclaimable archived tool payloads;
  * - a bounded, explicit emergency purge of low-value event logs.
  */
 import { createModuleLogger, serializeError } from '../../lib/logger';
@@ -69,6 +69,7 @@ export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO = 0.8;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO = 0.75;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS = 500;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES = 1024 * 1024;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES = 1024 * 1024;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS = 7;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS = 60 * 1000;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM = 25;
@@ -145,6 +146,7 @@ export interface StorageSafetyConfig {
   toolPayloadCleanupTargetRatio: number;
   toolPayloadCleanupBatchRows: number;
   toolPayloadCleanupBatchBytes: number;
+  toolPayloadCleanupMaxRowBytes: number;
   toolPayloadCleanupMinSessionAgeMs: number;
   toolPayloadCleanupRecheckMs: number;
   toolPayloadCleanupMaxSessionsPerAlarm: number;
@@ -281,6 +283,10 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
     toolPayloadCleanupBatchBytes: parsePositiveInteger(
       env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES,
       DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES
+    ),
+    toolPayloadCleanupMaxRowBytes: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES
     ),
     toolPayloadCleanupMinSessionAgeMs: cleanupMinSessionAgeDays * 24 * 60 * 60 * 1000,
     toolPayloadCleanupRecheckMs: parsePositiveInteger(

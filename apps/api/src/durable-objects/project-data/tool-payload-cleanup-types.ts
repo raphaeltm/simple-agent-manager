@@ -16,6 +16,7 @@ export interface ProjectDataToolPayloadCleanupResult {
   targetBytes: number;
   batchRows: number;
   batchBytes: number;
+  maxRowBytes: number;
   sessionsScanned: number;
   rowsScanned: number;
   rowsUpdated: number;

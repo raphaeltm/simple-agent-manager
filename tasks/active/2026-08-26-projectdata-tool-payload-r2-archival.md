@@ -48,7 +48,7 @@ Every finding above is represented in the checklist below.
 - [x] Daily retention archives tool payload JSON older than the configured window to private R2 and only then removes the payload from ProjectData SQLite.
 - [x] Message text and non-payload metadata remain in ProjectData; searchability is preserved.
 - [x] R2 archive failures fail closed with no DO payload deletion.
-- [x] Cleanup uses keyset/LIMIT pagination and bounded row/byte/wall-time budgets; no large `.toArray()` scans are added.
+- [x] Cleanup uses keyset/LIMIT pagination and bounded row/byte/wall-time/per-row budgets; no large `.toArray()` scans are added.
 - [x] Existing lazy expanders either load archived content transparently or show an explicit archived-unavailable state.
 - [x] SAM MCP exposes a project-scoped retrieval tool for archived tool payloads by message/session/time range.
 - [x] All new limits, cadence, retention windows, and prefixes are environment-configurable with `DEFAULT_*` constants.

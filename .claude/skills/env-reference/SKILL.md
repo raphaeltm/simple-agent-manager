@@ -177,6 +177,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO` — ProjectData storage usage ratio below which automatic tool payload cleanup stops (default: `0.75`)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS` — Maximum tool-message rows inspected by one automatic cleanup alarm batch (default: `500`)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES` — Maximum legacy `tool_metadata` bytes read into JS by one automatic archival cleanup alarm batch (default: `1048576`)
+- `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES` — Maximum single legacy `tool_metadata` row bytes read into JS by one archival cleanup pass; larger rows fail closed and remain in ProjectData unless this limit is deliberately raised (default: `1048576`)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS` — Legacy terminal-session age guard retained for storage telemetry compatibility; tool payload archival uses `PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS` (default: `7`)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS` — Delay before the next automatic cleanup alarm batch when more candidates remain (default: `60000`)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM` — Legacy terminal-session cleanup knob retained for env compatibility; archival cleanup scans tool-message rows directly (default: `25`)

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS,
+  DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS,
   resolveStorageSafetyConfig,
 } from '../../../src/durable-objects/project-data/storage-safety';
@@ -31,6 +32,9 @@ describe('ProjectData tool payload archive helpers', () => {
     expect(defaults.toolPayloadCleanupWallTimeMs).toBe(
       DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS
     );
+    expect(defaults.toolPayloadCleanupMaxRowBytes).toBe(
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES
+    );
     expect(defaults.toolPayloadArchiveRetentionMs).toBe(
       DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS * 24 * 60 * 60 * 1000
     );
@@ -43,11 +47,13 @@ describe('ProjectData tool payload archive helpers', () => {
 
     const overrides = resolveStorageSafetyConfig({
       PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS: '1234',
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES: '2345',
       PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '3',
       PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS: '4567',
       PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX: '/custom/tool-payloads/',
     } as Env);
     expect(overrides.toolPayloadCleanupWallTimeMs).toBe(1234);
+    expect(overrides.toolPayloadCleanupMaxRowBytes).toBe(2345);
     expect(overrides.toolPayloadArchiveRetentionMs).toBe(3 * 24 * 60 * 60 * 1000);
     expect(overrides.toolPayloadArchiveIntervalMs).toBe(4567);
     expect(overrides.toolPayloadArchiveR2Prefix).toBe('custom/tool-payloads');

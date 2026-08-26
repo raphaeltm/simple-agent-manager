@@ -222,7 +222,7 @@ function failedBudgetUpdate(candidate: ToolPayloadCandidate): ToolPayloadCandida
     originalToolMetadataBytes: candidate.toolMetadataBytes,
     storedToolMetadataBytes: 0,
     retryableFailure: false,
-    errorMessage: `tool_metadata row ${candidate.messageId} exceeded the cleanup byte budget`,
+    errorMessage: `tool_metadata row ${candidate.messageId} exceeded the cleanup per-row byte budget`,
   };
 }
 
@@ -233,8 +233,10 @@ async function processToolPayloadCandidate(
   archivePrefix: string,
   candidate: ToolPayloadCandidate,
   maxReadBytes: number,
+  maxRowBytes: number,
   archivedAt: number
 ): Promise<ToolPayloadCandidateUpdate> {
+  if (candidate.toolMetadataBytes > maxRowBytes) return failedBudgetUpdate(candidate);
   if (candidate.toolMetadataBytes > maxReadBytes) return failedBudgetUpdate(candidate);
 
   const toolMetadata = readBoundedToolMetadata(sql, candidate.messageId, maxReadBytes);
@@ -274,6 +276,7 @@ export async function scanToolPayloadCandidates(
   projectId: string,
   archivePrefix: string,
   batchBytes: number,
+  maxRowBytes: number,
   candidates: ToolPayloadCandidate[],
   options: {
     initialCursor: ToolPayloadCleanupCursor | null;
@@ -306,6 +309,7 @@ export async function scanToolPayloadCandidates(
       archivePrefix,
       candidate,
       maxReadBytes,
+      maxRowBytes,
       options.archivedAt
     );
 
