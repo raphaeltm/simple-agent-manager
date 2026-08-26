@@ -22,7 +22,7 @@ export { VmAgentContainer } from './durable-objects/vm-agent-container';
 export type { Env } from './env';
 export { Sandbox as SandboxDO } from '@cloudflare/sandbox';
 
-import type { WorkspacePortsState, WorkspaceStatus } from '@simple-agent-manager/shared';
+import type { WorkspaceStatus } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -146,56 +146,18 @@ import { ttsRoutes } from './routes/tts';
 import { uiGovernanceRoutes } from './routes/ui-governance';
 import { usageRoutes } from './routes/usage';
 import { workspacesRoutes } from './routes/workspaces';
+import {
+  isExpectedWorkspacePortsUpstreamUnavailable,
+  isWorkspacePortsListRequest,
+  workspacePortsReadinessPayload,
+  workspacePortsStateForStatus,
+} from './routes/workspaces/ports-readiness';
 import { scheduled } from './scheduled/handler';
 import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
 import { assertUserNotSuspended } from './services/signup-approval';
 import { recordNodeRoutingMetric } from './services/telemetry';
 import { assertTerminalTokenSessionLive } from './services/terminal-token-liveness';
 import { fetchVmAgentContainer, getVmAgentContainerConfig } from './services/vm-agent-container';
-
-type WorkspacePortsReadinessPayload = {
-  ports: [];
-  state: WorkspacePortsState;
-  workspaceStatus: WorkspaceStatus | null;
-  retryable: boolean;
-  message: string;
-  diagnostics?: Record<string, unknown>;
-};
-
-function isWorkspacePortsListRequest(
-  method: string,
-  pathname: string,
-  workspaceId: string
-): boolean {
-  return method === 'GET' && pathname === `/workspaces/${workspaceId}/ports`;
-}
-
-function workspacePortsStateForStatus(status: WorkspaceStatus): WorkspacePortsState {
-  if (status === 'sleeping' || status === 'stopped' || status === 'deleted') return status;
-  if (status === 'error') return 'error';
-  return 'not_ready';
-}
-
-function workspacePortsReadinessPayload(
-  state: WorkspacePortsState,
-  workspaceStatus: WorkspaceStatus | null,
-  message: string,
-  retryable: boolean,
-  diagnostics?: Record<string, unknown>
-): WorkspacePortsReadinessPayload {
-  return {
-    ports: [],
-    state,
-    workspaceStatus,
-    retryable,
-    message,
-    ...(diagnostics ? { diagnostics } : {}),
-  };
-}
-
-function isExpectedWorkspacePortsUpstreamUnavailable(status: number): boolean {
-  return status === 502 || status === 503 || status === 504;
-}
 
 const app = new Hono<{ Bindings: Env }>();
 

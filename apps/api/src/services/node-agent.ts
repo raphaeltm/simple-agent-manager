@@ -91,6 +91,25 @@ export class NodeAgentHttpError extends Error {
   }
 }
 
+export class NodeAgentFetchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NodeAgentFetchError';
+  }
+}
+
+function isNodeAgentTransportError(err: unknown): boolean {
+  if (err instanceof TypeError) return true;
+  if (!(err instanceof Error)) return false;
+  if (err.name === 'AbortError') return true;
+  return (
+    err.message.includes('Request timed out') ||
+    err.message.includes('fetch failed') ||
+    err.message.includes('Failed to fetch') ||
+    err.message.includes('NetworkError')
+  );
+}
+
 function requestInitWithoutSignal(options: RequestInit): RequestInit {
   const serializableOptions = { ...options };
   delete serializableOptions.signal;
@@ -856,16 +875,22 @@ export async function getWorkspacePortsOnNode(
     env.NODE_AGENT_REQUEST_TIMEOUT_MS,
     DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS
   );
-  const response = await fetchNodeAgent(
-    nodeId,
-    env,
-    url,
-    {
-      method: 'GET',
-      headers,
-    },
-    requestTimeoutMs
-  );
+  let response: Response;
+  try {
+    response = await fetchNodeAgent(
+      nodeId,
+      env,
+      url,
+      {
+        method: 'GET',
+        headers,
+      },
+      requestTimeoutMs
+    );
+  } catch (err) {
+    if (!isNodeAgentTransportError(err)) throw err;
+    throw new NodeAgentFetchError(err instanceof Error ? err.message : String(err));
+  }
 
   recordNodeRoutingMetric(
     {
@@ -880,7 +905,7 @@ export async function getWorkspacePortsOnNode(
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    throw new Error(`Node Agent request failed: ${response.status} ${body}`);
+    throw new NodeAgentHttpError(response.status, body);
   }
 
   try {

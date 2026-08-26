@@ -1,4 +1,8 @@
-import { DEFAULT_VM_LOCATION,DEFAULT_VM_SIZE } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_VM_LOCATION,
+  DEFAULT_VM_SIZE,
+  type WorkspaceStatus,
+} from '@simple-agent-manager/shared';
 import { and, count, desc, eq, inArray, ne } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -17,6 +21,8 @@ import { signPortAccessToken } from '../../services/jwt';
 import { getRuntimeLimits } from '../../services/limits';
 import {
   getWorkspacePortsOnNode,
+  NodeAgentFetchError,
+  NodeAgentHttpError,
   waitForNodeAgentReady,
 } from '../../services/node-agent';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
@@ -27,6 +33,12 @@ import { cleanupWorkspaceForDeletion } from '../../services/workspace-cleanup';
 import { resolveUniqueWorkspaceDisplayName } from '../../services/workspace-names';
 import { requireRepositoryUserAccess } from '../projects/_helpers';
 import { getOwnedNode, getOwnedWorkspace, scheduleWorkspaceCreateOnNode } from './_helpers';
+import {
+  isExpectedWorkspacePortsUpstreamUnavailable,
+  workspacePortsReadinessPayload,
+  workspacePortsReadinessStatus,
+  workspacePortsStateForStatus,
+} from './ports-readiness';
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
 
@@ -113,15 +125,66 @@ crudRoutes.get('/:id/ports', requireAuth(), requireApproved(), async (c) => {
   const workspaceId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  const [workspace] = await db
+    .select()
+    .from(schema.workspaces)
+    .where(and(eq(schema.workspaces.id, workspaceId), eq(schema.workspaces.userId, userId)))
+    .limit(1);
+  if (!workspace) {
+    return c.json(workspacePortsReadinessPayload('gone', null, 'Workspace not found', false));
+  }
+
+  const workspaceStatus = workspace.status as WorkspaceStatus;
+  if (workspaceStatus !== 'running' && workspaceStatus !== 'recovery') {
+    const state = workspacePortsStateForStatus(workspaceStatus);
+    return c.json(
+      workspacePortsReadinessPayload(
+        state,
+        workspaceStatus,
+        `Workspace is ${workspaceStatus}`,
+        state === 'not_ready'
+      ),
+      workspacePortsReadinessStatus(state)
+    );
+  }
+
   if (!workspace.nodeId) {
     throw errors.badRequest('Workspace has no node assigned');
   }
-  if (workspace.status !== 'running' && workspace.status !== 'recovery') {
-    throw errors.badRequest(`Workspace is ${workspace.status}, not running`);
-  }
 
-  const result = await getWorkspacePortsOnNode(workspace.nodeId, workspaceId, c.env, userId);
+  let result: unknown;
+  try {
+    result = await getWorkspacePortsOnNode(workspace.nodeId, workspaceId, c.env, userId);
+  } catch (err) {
+    if (
+      err instanceof NodeAgentHttpError &&
+      isExpectedWorkspacePortsUpstreamUnavailable(err.statusCode)
+    ) {
+      return c.json(
+        workspacePortsReadinessPayload(
+          'not_ready',
+          workspaceStatus,
+          'Workspace ports are not ready',
+          true,
+          { upstreamStatus: err.statusCode }
+        ),
+        202
+      );
+    }
+    if (err instanceof NodeAgentFetchError) {
+      return c.json(
+        workspacePortsReadinessPayload(
+          'not_ready',
+          workspaceStatus,
+          'Workspace ports are not ready',
+          true,
+          { reason: 'fetch_exception' }
+        ),
+        202
+      );
+    }
+    throw err;
+  }
   return c.json(result);
 });
 

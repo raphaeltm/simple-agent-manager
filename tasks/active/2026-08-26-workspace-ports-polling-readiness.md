@@ -49,6 +49,7 @@ The 2026-08-25 production stability audit found a high-volume `/ports` readiness
 - [x] Keep raw tokens out of query keys and preserve token-rotation behavior.
 - [x] Update both web callers to pass `workspace?.status` instead of only an `isRunning` boolean.
 - [x] Add cheap server-side structured readiness/lifecycle payload handling in the wildcard workspace proxy for exact port-list requests.
+- [x] Add the same structured readiness/lifecycle contract to `GET /api/workspaces/:id/ports`, which is the route used by the web helper and CLI/control-plane callers.
 - [x] Add/adjust API tests proving expected lifecycle/not-ready port-list states do not produce 5xx responses while auth/token failures still fail.
 - [x] Add browser/React Query behavior tests covering provisioning/not-ready, running-but-agent-not-ready, recovery, sleeping, stopped, deleted, token rotation, repeated 503, backoff intervals, circuit cooldown, hidden-tab pause, bounded warnings, and stale-port preservation.
 - [x] Run the mandatory Playwright visual audit at 375x667 and 1280x800 with screenshots under `.codex/tmp/playwright-screenshots/`.
@@ -108,6 +109,12 @@ The 2026-08-25 production stability audit found a high-volume `/ports` readiness
   - Replaced `parseInt` with `Number.parseInt` in the new polling helper.
   - Replaced `Math.random()` jitter with `crypto.getRandomValues()` plus a deterministic no-jitter fallback.
   - Reruns: `pnpm --filter @simple-agent-manager/web test -- tests/unit/hooks/useWorkspacePorts.test.ts` — passed; `pnpm --filter @simple-agent-manager/web lint` — passed with existing unrelated warnings; `pnpm --filter @simple-agent-manager/web typecheck` — passed; `git diff --check` — passed.
+- Pre-staging route-shadowing fix:
+  - Found that `GET /api/workspaces/:id/ports` was still handled by the older workspaces route before the wildcard proxy and therefore did not return the structured readiness payload.
+  - Added `apps/api/tests/unit/routes/workspace-ports-readiness-contract.test.ts` to cover absent/gone, sleeping, stopped, deleted, provisioning/creating, successful running response, upstream 503, transport failure, and unexpected upstream failure.
+  - Tightened node-agent transport classification so only upstream 502/503/504 and actual fetch/timeout transport failures become `not_ready`; signing/setup/config failures remain genuine errors.
+  - Extracted shared ports-readiness helpers to `apps/api/src/routes/workspaces/ports-readiness.ts` after SonarCloud flagged duplicated helper code between the wildcard proxy and typed API route.
+  - Reruns: `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/workspace-ports-readiness-contract.test.ts tests/unit/services/node-agent-ports-auth.test.ts tests/unit/workspace-proxy-port-access.test.ts tests/unit/ws-proxy.test.ts` — passed (39 tests); `pnpm --filter @simple-agent-manager/web test -- tests/unit/hooks/useWorkspacePorts.test.ts` — passed; `pnpm --filter @simple-agent-manager/api lint` — passed; `pnpm --filter @simple-agent-manager/api typecheck` — passed; `git diff --check` — passed.
 
 ## Specialist review notes
 
