@@ -7,10 +7,7 @@ import { createMission, createMissionDef } from './create-mission';
 import { dispatchTask, dispatchTaskDef } from './dispatch-task';
 import { findRelatedIdeas, findRelatedIdeasDef } from './find-related-ideas';
 import { getAccountSetupStatus, getAccountSetupStatusDef } from './get-account-setup-status';
-import {
-  getArchivedToolPayloads,
-  getArchivedToolPayloadsDef,
-} from './get-archived-tool-payloads';
+import { getArchivedToolPayloads, getArchivedToolPayloadsDef } from './get-archived-tool-payloads';
 import { getCiStatus, getCiStatusDef } from './get-ci-status';
 import { getFileContent, getFileContentDef } from './get-file-content';
 import { getMission, getMissionDef } from './get-mission';
@@ -27,7 +24,10 @@ import { pauseMission, pauseMissionDef } from './pause-mission';
 import { resumeMission, resumeMissionDef } from './resume-mission';
 import { retrySubtask, retrySubtaskDef } from './retry-subtask';
 import { searchCode, searchCodeDef } from './search-code';
-import { searchConversationHistory, searchConversationHistoryDef } from './search-conversation-history';
+import {
+  searchConversationHistory,
+  searchConversationHistoryDef,
+} from './search-conversation-history';
 import { searchKnowledge, searchKnowledgeDef } from './search-knowledge';
 import { searchTaskMessages, searchTaskMessagesDef } from './search-task-messages';
 import { searchTasks, searchTasksDef } from './search-tasks';
@@ -112,10 +112,7 @@ const toolHandlers: Record<string, ToolHandler> = {
 };
 
 /** Execute a tool call and return the result (or error message on failure). */
-export async function executeTool(
-  toolCall: CollectedToolCall,
-  ctx: ToolContext,
-): Promise<unknown> {
+export async function executeTool(toolCall: CollectedToolCall, ctx: ToolContext): Promise<unknown> {
   const handler = toolHandlers[toolCall.name];
   if (!handler) {
     return { error: `Unknown tool: ${toolCall.name}` };

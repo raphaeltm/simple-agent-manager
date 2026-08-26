@@ -29,32 +29,56 @@ Every finding above is represented in the checklist below.
 
 ## Implementation checklist
 
-- [ ] Extend ProjectData DO schema additively with archive metadata for tool payloads.
-- [ ] Add a private project-scoped R2 archive helper with deterministic keys, JSON object format, and no public URL exposure.
-- [ ] Extend storage safety config and env typing with archive cadence, retention window, batch row/byte/wall-time budgets, retry/recheck cadence, and key prefix defaults.
-- [ ] Add top-level `PROJECT_DATA_ARCHIVE_R2` binding in `apps/api/wrangler.toml` and generated staging/production binding emission in deploy sync code.
-- [ ] Extend `runProjectDataToolPayloadCleanup` to run retention archive batches using keyset pagination by message age and to archive before removing `tool_metadata.content`.
-- [ ] Preserve fail-closed behavior: R2 write failure, malformed payload, missing binding, or budget exhaustion must not remove DO payload content.
-- [ ] Update alarm scheduling so the retention cadence and continuation rechecks are honored without adding a parallel cleanup loop.
-- [ ] Update the lazy tool-content read path to return inline content, transparent R2 archived content, or an explicit archived-unavailable content item.
-- [ ] Add an MCP tool for retrieving archived tool payloads by message ID and/or session/time range, scoped to the caller's project and bounded by env-configurable limits.
-- [ ] Update public/agent API references and env references where they document runtime env vars or MCP tools.
-- [ ] Add deterministic unit tests for archive helpers/config and MCP handler validation.
-- [ ] Add workers-pool tests for archive-then-delete atomicity, retention-window boundaries, batch budgets, R2 read fallback, and MCP retrieval.
+- [x] Extend ProjectData DO schema additively with archive metadata for tool payloads.
+- [x] Add a private project-scoped R2 archive helper with deterministic keys, JSON object format, and no public URL exposure.
+- [x] Extend storage safety config and env typing with archive cadence, retention window, batch row/byte/wall-time budgets, retry/recheck cadence, and key prefix defaults.
+- [x] Add top-level `PROJECT_DATA_ARCHIVE_R2` binding in `apps/api/wrangler.toml` and generated staging/production binding emission in deploy sync code.
+- [x] Extend `runProjectDataToolPayloadCleanup` to run retention archive batches using keyset pagination by message age and to archive before removing `tool_metadata.content`.
+- [x] Preserve fail-closed behavior: R2 write failure, malformed payload, missing binding, or budget exhaustion must not remove DO payload content.
+- [x] Update alarm scheduling so the retention cadence and continuation rechecks are honored without adding a parallel cleanup loop.
+- [x] Update the lazy tool-content read path to return inline content, transparent R2 archived content, or an explicit archived-unavailable content item.
+- [x] Add an MCP tool for retrieving archived tool payloads by message ID and/or session/time range, scoped to the caller's project and bounded by env-configurable limits.
+- [x] Update public/agent API references and env references where they document runtime env vars or MCP tools.
+- [x] Add deterministic unit tests for archive helpers/config and MCP handler validation.
+- [x] Add workers-pool tests for archive-then-delete atomicity, retention-window boundaries, batch budgets, R2 read fallback, and MCP retrieval.
 - [ ] Run quality gates, specialist review skills, staging verification, PR creation, CI, merge, and production deploy monitoring per `/do`.
 
 ## Acceptance criteria
 
-- [ ] Daily retention archives tool payload JSON older than the configured window to private R2 and only then removes the payload from ProjectData SQLite.
-- [ ] Message text and non-payload metadata remain in ProjectData; searchability is preserved.
-- [ ] R2 archive failures fail closed with no DO payload deletion.
-- [ ] Cleanup uses keyset/LIMIT pagination and bounded row/byte/wall-time budgets; no large `.toArray()` scans are added.
-- [ ] Existing lazy expanders either load archived content transparently or show an explicit archived-unavailable state.
-- [ ] SAM MCP exposes a project-scoped retrieval tool for archived tool payloads by message/session/time range.
-- [ ] All new limits, cadence, retention windows, and prefixes are environment-configurable with `DEFAULT_*` constants.
-- [ ] Staging/production deployment config receives the new R2 binding from the generated wrangler path.
-- [ ] Tests prove atomicity, boundaries, budgets, read fallback, and MCP retrieval.
-- [ ] Production verification plan records that post-merge effectiveness must be judged by `project_data_storage_telemetry.databaseSize`.
+- [x] Daily retention archives tool payload JSON older than the configured window to private R2 and only then removes the payload from ProjectData SQLite.
+- [x] Message text and non-payload metadata remain in ProjectData; searchability is preserved.
+- [x] R2 archive failures fail closed with no DO payload deletion.
+- [x] Cleanup uses keyset/LIMIT pagination and bounded row/byte/wall-time budgets; no large `.toArray()` scans are added.
+- [x] Existing lazy expanders either load archived content transparently or show an explicit archived-unavailable state.
+- [x] SAM MCP exposes a project-scoped retrieval tool for archived tool payloads by message/session/time range.
+- [x] All new limits, cadence, retention windows, and prefixes are environment-configurable with `DEFAULT_*` constants.
+- [x] Staging/production deployment config receives the new R2 binding from the generated wrangler path.
+- [x] Tests prove atomicity, boundaries, budgets, read fallback, and MCP retrieval.
+- [x] Production verification plan records that post-merge effectiveness must be judged by `project_data_storage_telemetry.databaseSize`.
+
+## Validation evidence
+
+- `git diff --check`
+- `pnpm quality:wrangler-bindings`
+- `pnpm quality:do-migration-safety`
+- `pnpm quality:skill-references`
+- `pnpm format:check`
+- `pnpm --filter @simple-agent-manager/api typecheck`
+- `pnpm --filter @simple-agent-manager/api lint`
+- `pnpm --filter @simple-agent-manager/web typecheck` after building `@simple-agent-manager/ui`, `@simple-agent-manager/acp-client`, and `@simple-agent-manager/terminal`
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/project-data-tool-payload-archive.test.ts tests/unit/routes/mcp.test.ts`
+- `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/project-data-tool-payload-archive.test.ts`
+- `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/project-data-storage-safety.test.ts`
+- `pnpm quality:type-boundaries`
+- `pnpm quality:source-contract-tests`
+
+## Post-merge production verification plan
+
+After merge and production deploy, query production `project_data_storage_telemetry`
+with `CF_PRODUCTION_DEBUGGING_TOKEN` and compare the SAM project's latest
+`database_size_bytes`/`databaseSize` before and after the archival job runs. Judge
+effectiveness only by the DO `sql.databaseSize`-backed telemetry value, not PRAGMA
+page-count math.
 
 ## References
 

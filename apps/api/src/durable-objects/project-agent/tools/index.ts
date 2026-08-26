@@ -188,7 +188,7 @@ const toolHandlers: Record<string, ToolHandler> = {
 /** Execute a tool call and return the result (or error message on failure). */
 export async function executeProjectTool(
   toolCall: CollectedToolCall,
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   const handler = toolHandlers[toolCall.name];
   if (!handler) {

@@ -22,7 +22,7 @@ export async function handleListSessions(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const limits = getMcpLimits(env);
   const status = typeof params.status === 'string' ? params.status : null;
@@ -33,7 +33,7 @@ export async function handleListSessions(
     env,
     tokenData.projectId,
     status,
-    limit,
+    limit
   );
 
   const result = sessions.map((s: Record<string, unknown>) => ({
@@ -87,7 +87,7 @@ export async function handleGetSessionMessages(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const sessionId = typeof params.sessionId === 'string' ? params.sessionId.trim() : '';
   if (!sessionId) {
@@ -102,7 +102,7 @@ export async function handleGetSessionMessages(
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      `Invalid roles: ${rolesResult.invalid.join(', ')}. Valid roles: ${VALID_MESSAGE_ROLES.join(', ')}`,
+      `Invalid roles: ${rolesResult.invalid.join(', ')}. Valid roles: ${VALID_MESSAGE_ROLES.join(', ')}`
     );
   }
   const roles = rolesResult.roles;
@@ -120,7 +120,7 @@ export async function handleGetSessionMessages(
     limit,
     null,
     null,
-    roles,
+    roles
   );
 
   // Each row in chat_messages is a streaming token (chunk). Group consecutive
@@ -134,17 +134,23 @@ export async function handleGetSessionMessages(
   const result = groupTokensIntoMessages(tokens);
 
   return jsonRpcSuccess(requestId, {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({
-        sessionId,
-        topic: session.topic,
-        taskId: session.taskId,
-        messages: result,
-        messageCount: result.length,
-        hasMore,
-      }, null, 2),
-    }],
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify(
+          {
+            sessionId,
+            topic: session.topic,
+            taskId: session.taskId,
+            messages: result,
+            messageCount: result.length,
+            hasMore,
+          },
+          null,
+          2
+        ),
+      },
+    ],
   });
 }
 
@@ -152,11 +158,15 @@ export async function handleSearchMessages(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const query = typeof params.query === 'string' ? params.query.trim() : '';
   if (!query) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'query is required and must be a non-empty string');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'query is required and must be a non-empty string'
+    );
   }
   if (query.length < 2) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'query must be at least 2 characters');
@@ -169,7 +179,7 @@ export async function handleSearchMessages(
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      `Invalid roles: ${rolesResult.invalid.join(', ')}. Valid roles: ${VALID_MESSAGE_ROLES.join(', ')}`,
+      `Invalid roles: ${rolesResult.invalid.join(', ')}. Valid roles: ${VALID_MESSAGE_ROLES.join(', ')}`
     );
   }
   const roles = rolesResult.roles;
@@ -182,30 +192,39 @@ export async function handleSearchMessages(
     query,
     sessionId,
     roles,
-    limit,
+    limit
   );
 
   return jsonRpcSuccess(requestId, {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({
-        results: results.map((r) => ({
-          messageId: r.id,
-          sessionId: r.sessionId,
-          sessionTopic: r.sessionTopic,
-          sessionTaskId: r.sessionTaskId,
-          role: r.role,
-          snippet: r.snippet,
-          createdAt: r.createdAt,
-        })),
-        count: results.length,
-        query,
-      }, null, 2),
-    }],
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify(
+          {
+            results: results.map((r) => ({
+              messageId: r.id,
+              sessionId: r.sessionId,
+              sessionTopic: r.sessionTopic,
+              sessionTaskId: r.sessionTaskId,
+              role: r.role,
+              snippet: r.snippet,
+              createdAt: r.createdAt,
+            })),
+            count: results.length,
+            query,
+          },
+          null,
+          2
+        ),
+      },
+    ],
   });
 }
 
-function parseOptionalTimestamp(value: unknown, name: string): { value: number | null; error: string | null } {
+function parseOptionalTimestamp(
+  value: unknown,
+  name: string
+): { value: number | null; error: string | null } {
   if (value === undefined || value === null) return { value: null, error: null };
   if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) {
     return { value, error: null };
@@ -223,7 +242,7 @@ export async function handleGetArchivedToolPayloads(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const messageId = typeof params.messageId === 'string' ? params.messageId.trim() : '';
   const sessionId = typeof params.sessionId === 'string' ? params.sessionId.trim() : '';
@@ -231,18 +250,14 @@ export async function handleGetArchivedToolPayloads(
   if (startTime.error) return jsonRpcError(requestId, INVALID_PARAMS, startTime.error);
   const endTime = parseOptionalTimestamp(params.endTime, 'endTime');
   if (endTime.error) return jsonRpcError(requestId, INVALID_PARAMS, endTime.error);
-  if (
-    startTime.value !== null &&
-    endTime.value !== null &&
-    startTime.value > endTime.value
-  ) {
+  if (startTime.value !== null && endTime.value !== null && startTime.value > endTime.value) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'startTime must be before or equal to endTime');
   }
   if (!messageId && !sessionId && startTime.value === null && endTime.value === null) {
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'Provide messageId, sessionId, startTime, or endTime to bound archive retrieval',
+      'Provide messageId, sessionId, startTime, or endTime to bound archive retrieval'
     );
   }
 
@@ -278,49 +293,67 @@ export async function handleUpdateSessionTopic(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const rawTopic = typeof params.topic === 'string' ? params.topic.trim() : '';
   if (!rawTopic) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'topic is required and must be a non-empty string');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'topic is required and must be a non-empty string'
+    );
   }
 
   const limits = getMcpLimits(env);
   const topic = sanitizeUserInput(rawTopic).slice(0, limits.sessionTopicMaxLength);
 
   if (!topic) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'topic must contain visible characters after sanitization');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'topic must contain visible characters after sanitization'
+    );
   }
 
   // Resolve session ID from workspace
   const sessionId = await resolveSessionId(env, tokenData.workspaceId);
   if (!sessionId) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'No chat session found for the current workspace');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'No chat session found for the current workspace'
+    );
   }
 
   const updated = await projectDataService.updateSessionTopic(
     env,
     tokenData.projectId,
     sessionId,
-    topic,
+    topic
   );
 
   if (!updated) {
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'Session not found or is no longer active. Only active sessions can be renamed.',
+      'Session not found or is no longer active. Only active sessions can be renamed.'
     );
   }
 
   return jsonRpcSuccess(requestId, {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({
-        updated: true,
-        sessionId,
-        topic,
-      }, null, 2),
-    }],
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify(
+          {
+            updated: true,
+            sessionId,
+            topic,
+          },
+          null,
+          2
+        ),
+      },
+    ],
   });
 }

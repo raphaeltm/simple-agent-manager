@@ -221,6 +221,12 @@ const mockDoStub = {
   listSessions: vi.fn().mockResolvedValue({ sessions: [], total: 0 }),
   getSession: vi.fn().mockResolvedValue(null),
   getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
+  getArchivedToolPayloads: vi.fn().mockResolvedValue({
+    projectId: 'proj-456',
+    payloads: [],
+    count: 0,
+    hasMore: false,
+  }),
   searchMessages: vi.fn().mockReturnValue([]),
   linkSessionIdea: vi.fn(),
   unlinkSessionIdea: vi.fn(),
@@ -492,6 +498,7 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('search_tasks');
       expect(toolNames).toContain('list_sessions');
       expect(toolNames).toContain('get_session_messages');
+      expect(toolNames).toContain('get_archived_tool_payloads');
       expect(toolNames).toContain('search_messages');
       expect(toolNames).toContain('update_session_topic');
       expect(toolNames).toContain('dispatch_task');
@@ -590,7 +597,7 @@ describe('MCP Routes', () => {
       // Library file comment tools
       expect(toolNames).toContain('list_library_file_comment_threads');
       expect(toolNames).toContain('create_library_file_comment_thread');
-      expect(body.result.tools).toHaveLength(113);
+      expect(body.result.tools).toHaveLength(114);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
@@ -1689,6 +1696,98 @@ describe('MCP Routes', () => {
         false,
         'desc'
       );
+    });
+  });
+
+  // ─── get_archived_tool_payloads ─────────────────────────────────────
+
+  describe('get_archived_tool_payloads', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+      mockDoStub.getSession.mockResolvedValue({
+        id: 'sess-1',
+        topic: 'Archived payloads',
+        taskId: 'task-other',
+      });
+    });
+
+    it('should retrieve archived payloads with bounded arguments', async () => {
+      mockDoStub.getArchivedToolPayloads.mockResolvedValue({
+        projectId: 'proj-456',
+        payloads: [
+          {
+            messageId: 'msg-archived',
+            sessionId: 'sess-1',
+            messageCreatedAt: 1710000000000,
+            messageSequence: 3,
+            archivedAt: 1710600000000,
+            contentBytes: 42,
+            toolMetadataBytes: 128,
+            archiveVersion: 1,
+            available: true,
+            content: [{ type: 'text', text: 'archived output' }],
+          },
+        ],
+        count: 1,
+        hasMore: false,
+      });
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_archived_tool_payloads',
+          arguments: {
+            sessionId: 'sess-1',
+            startTime: '2024-03-09T16:00:00.000Z',
+            limit: 500,
+          },
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.payloads[0].content[0].text).toBe('archived output');
+      expect(mockDoStub.getArchivedToolPayloads).toHaveBeenCalledWith({
+        sessionId: 'sess-1',
+        startTime: 1710000000000,
+        limit: 50,
+      });
+    });
+
+    it('should require at least one selector', async () => {
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_archived_tool_payloads',
+          arguments: {},
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('Provide messageId');
+    });
+
+    it('should reject inverted time ranges', async () => {
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_archived_tool_payloads',
+          arguments: {
+            startTime: 200,
+            endTime: 100,
+          },
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('startTime');
     });
   });
 

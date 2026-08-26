@@ -13,7 +13,6 @@ const META_TOOL_CLEANUP_CURSOR_SEQUENCE = 'storageSafetyToolCleanupCursorSequenc
 const META_TOOL_CLEANUP_CURSOR_MESSAGE_ID = 'storageSafetyToolCleanupCursorMessageId';
 const META_TOOL_CLEANUP_RECHECK_AT = 'storageSafetyToolCleanupRecheckAt';
 const META_TOOL_PAYLOAD_ARCHIVE_LAST_RUN_AT = 'storageSafetyToolPayloadArchiveLastRunAt';
-const TOOL_PAYLOAD_SESSION_EXHAUSTED_MESSAGE_ID = '__session_exhausted__';
 
 export function readProjectDataToolPayloadCleanupRecheckAt(sql: SqlStorage): number | null {
   return readMetaNumber(sql, META_TOOL_CLEANUP_RECHECK_AT);
@@ -63,23 +62,6 @@ export function clearToolPayloadCleanupState(sql: SqlStorage): void {
   deleteMeta(sql, META_TOOL_CLEANUP_RECHECK_AT);
 }
 
-export function isSessionExhaustedCursor(cursor: ToolPayloadCleanupCursor): boolean {
-  return (
-    cursor.createdAt === Number.MAX_SAFE_INTEGER &&
-    cursor.sequence === Number.MAX_SAFE_INTEGER &&
-    cursor.messageId === TOOL_PAYLOAD_SESSION_EXHAUSTED_MESSAGE_ID
-  );
-}
-
-export function buildSessionExhaustedCursor(sessionId: string): ToolPayloadCleanupCursor {
-  return {
-    sessionId,
-    createdAt: Number.MAX_SAFE_INTEGER,
-    sequence: Number.MAX_SAFE_INTEGER,
-    messageId: TOOL_PAYLOAD_SESSION_EXHAUSTED_MESSAGE_ID,
-  };
-}
-
 export function publicToolPayloadCleanupCursor(
   cursor: ToolPayloadCleanupCursor | null
 ): ProjectDataToolPayloadCleanupCursor | null {
@@ -90,31 +72,4 @@ export function publicToolPayloadCleanupCursor(
     sequence: cursor.sequence,
     messageId: cursor.messageId,
   };
-}
-
-export function selectNextTerminalSessionId(
-  sql: SqlStorage,
-  cutoffUpdatedAt: number,
-  afterSessionId: string
-): string | null {
-  const cursor = sql
-    .exec(
-      `SELECT id
-       FROM chat_sessions
-       WHERE status IN ('stopped', 'failed')
-         AND updated_at <= ?
-         AND id > ?
-       ORDER BY id ASC
-       LIMIT 1`,
-      cutoffUpdatedAt,
-      afterSessionId
-    )
-    .raw();
-
-  let sessionId: string | null = null;
-  for (const row of cursor) {
-    const id = row[0];
-    if (typeof id === 'string') sessionId = id;
-  }
-  return sessionId;
 }

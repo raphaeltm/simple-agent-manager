@@ -58,6 +58,12 @@ function parseOptionalTimestamp(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function parsePositiveInteger(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 export async function getArchivedToolPayloads(
   input: {
     projectId: string;
@@ -97,8 +103,11 @@ export async function getArchivedToolPayloads(
     if (!session) return { error: 'Session not found in this project.' };
   }
 
-  const maxLimit = Number(env.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX) || DEFAULT_MAX_LIMIT;
-  const defaultLimit = Number(env.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT) || DEFAULT_LIMIT;
+  const maxLimit = parsePositiveInteger(env.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX, DEFAULT_MAX_LIMIT);
+  const defaultLimit = parsePositiveInteger(
+    env.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT,
+    DEFAULT_LIMIT
+  );
   const limit = Math.min(Math.max(1, Math.round(input.limit || defaultLimit)), maxLimit);
 
   return projectDataService.getArchivedToolPayloads(env, project.id, {

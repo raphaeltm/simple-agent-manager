@@ -57,10 +57,10 @@ import * as sessionWakeProgress from './session-wake-progress';
 import * as sessions from './sessions';
 import * as storageSafety from './storage-safety';
 import { readTaskAcpLivenessSignals } from './task-runtime-liveness';
-import * as toolPayloadArchive from './tool-payload-archive';
 import { resolveTaskWaitConfig } from './task-wait-config';
 import { processTaskWaits } from './task-wait-supervisor';
 import * as taskWaits from './task-waits';
+import * as toolPayloadArchive from './tool-payload-archive';
 import type { Env, SummaryData } from './types';
 
 const log = createModuleLogger('project_data');

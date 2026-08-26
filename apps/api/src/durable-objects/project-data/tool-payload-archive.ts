@@ -6,8 +6,7 @@ const log = createModuleLogger('project_data.tool_payload_archive');
 const textEncoder = new TextEncoder();
 
 export const TOOL_PAYLOAD_ARCHIVE_VERSION = 1;
-export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX =
-  'project-data/tool-payloads';
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX = 'project-data/tool-payloads';
 
 export type ArchivedToolPayloadRow = {
   messageId: string;

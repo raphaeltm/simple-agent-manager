@@ -457,18 +457,12 @@ export async function runProjectDataStorageSafetyAlarm(
   projectId: string | null
 ): Promise<ProjectDataStorageAlarmResult> {
   const config = resolveStorageSafetyConfig(env);
-  return runProjectDataStorageSafetyAlarmCore(
-    sql,
-    env,
-    projectId,
-    config,
-    {
-      shouldMeasure: shouldMeasureProjectDataStorage,
-      measureAndPersist: measureAndPersistProjectDataStorage,
-      classifyStatus: classifyStorageUsage,
-      buildTelemetry,
-    }
-  );
+  return runProjectDataStorageSafetyAlarmCore(sql, env, projectId, config, {
+    shouldMeasure: shouldMeasureProjectDataStorage,
+    measureAndPersist: measureAndPersistProjectDataStorage,
+    classifyStatus: classifyStorageUsage,
+    buildTelemetry,
+  });
 }
 
 export async function runProjectDataStorageEmergencyPurge(

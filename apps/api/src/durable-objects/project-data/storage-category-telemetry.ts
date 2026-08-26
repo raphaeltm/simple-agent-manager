@@ -75,7 +75,11 @@ function readNumber(row: unknown, key: string): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
-function firstRow(sql: SqlStorage, statement: string, ...bindings: Array<number | string>): unknown {
+function firstRow(
+  sql: SqlStorage,
+  statement: string,
+  ...bindings: Array<number | string>
+): unknown {
   return sql.exec(statement, ...bindings).toArray()[0];
 }
 
@@ -366,7 +370,11 @@ export function measureProjectDataStorageCategories(
   const eventCutoffUpdatedAt = measuredAt - config.eventLogCleanupMinSessionAgeMs;
   const sessions = measureSessions(sql);
   const acpSessions = measureAcpSessions(sql);
-  const messages = measureMessages(sql, toolPayloadCutoffUpdatedAt, toolPayloadArchiveCutoffCreatedAt);
+  const messages = measureMessages(
+    sql,
+    toolPayloadCutoffUpdatedAt,
+    toolPayloadArchiveCutoffCreatedAt
+  );
   const activityEvents = measureActivityEvents(sql, eventCutoffUpdatedAt);
   const acpSessionEvents = measureAcpSessionEvents(sql, eventCutoffUpdatedAt);
   const taskStatusEvents = measureTaskStatusEvents(sql);

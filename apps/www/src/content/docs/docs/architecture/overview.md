@@ -161,11 +161,11 @@ Summary data flows back from DOs to D1 via debounced sync (e.g., `last_activity_
 
 ### Other Bindings
 
-| Service        | Binding | Purpose                                                                                                      |
-| -------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
-| **KV**         | `KV`    | Auth sessions, bootstrap tokens, boot logs, MCP tokens                                                       |
-| **R2**         | `R2`    | VM Agent binaries, private diagnostic artifacts, session snapshots, compose image artifacts, TTS audio cache |
-| **Workers AI** | `AI`    | Idea title generation, transcription, TTS, context summarization                                             |
+| Service        | Binding | Purpose                                                                                                                                          |
+| -------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **KV**         | `KV`    | Auth sessions, bootstrap tokens, boot logs, MCP tokens                                                                                           |
+| **R2**         | `R2`    | VM Agent binaries, private diagnostic artifacts, session snapshots, compose image artifacts, TTS audio cache, ProjectData archived tool payloads |
+| **Workers AI** | `AI`    | Idea title generation, transcription, TTS, context summarization                                                                                 |
 
 ### VM diagnostic incident flow
 
@@ -262,6 +262,13 @@ When a sleeping VM conversation needs a replacement runtime, one D1 transaction 
 ProjectData also owns the single durable prompt-delivery queue used by browser followups and agent handoffs. Acceptance persists the visible transcript message and its stable delivery identity before runtime I/O. Alarm-driven attempts use bounded exponential backoff, a finite lifetime, compare-and-set attempt tokens, and stable VM receipts. A lost response is reconciled before retry; if receipt evidence is unavailable or belongs to another runtime, the delivery becomes explicitly ambiguous and is not replayed.
 
 Checkpoint episodes are stored idempotently by ACP session and prompt epoch, including state transitions, attempt/error metadata, and a progress envelope for inspection. Automatic long-turn selection and checkpoint preemption remain disabled. Task agents can explicitly park on a bounded `wait_for_subtasks` subscription: ProjectData reconciles selected same-project task terminal state and enqueues one immutable caller wake through the existing durable prompt-delivery queue. See [Configuration](/docs/reference/configuration/) for the durable-execution settings and rollout flags.
+
+Conversation and message text stays in ProjectData for long-term searchability. Large
+tool-call JSON payloads older than the configured retention window are archived first
+to private, project-scoped R2 objects and only then stripped from the embedded SQLite
+row. Existing tool-content expanders read through the ProjectData service and fall
+back to the archive; MCP agents can retrieve archived payloads by message, session,
+or time range without receiving raw R2 keys.
 
 **Embedded SQLite tables:**
 

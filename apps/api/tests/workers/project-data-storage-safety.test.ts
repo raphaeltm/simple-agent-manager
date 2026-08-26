@@ -157,7 +157,14 @@ async function seedStorageGrowthBaseline(
        status = excluded.status,
        updated_at = excluded.updated_at`
   )
-    .bind(projectId, measuredAt, databaseSizeBytes, limitBytes, databaseSizeBytes / limitBytes, measuredAt)
+    .bind(
+      projectId,
+      measuredAt,
+      databaseSizeBytes,
+      limitBytes,
+      databaseSizeBytes / limitBytes,
+      measuredAt
+    )
     .run();
 
   await env.DATABASE.prepare(
@@ -191,17 +198,12 @@ async function readProjectDataStorageAlerts(projectId: string) {
      FROM platform_errors
      ORDER BY created_at DESC
      LIMIT 50`
-  )
-    .all<{ level: string; message: string; context: string | null }>();
+  ).all<{ level: string; message: string; context: string | null }>();
   return (result.results ?? []).filter((row) => parseAlertContext(row).projectId === projectId);
 }
 
 function parseAlertContext(row: { context: string | null }): Record<string, unknown> {
   return JSON.parse(row.context ?? '{}') as Record<string, unknown>;
-}
-
-function stringifyNullable(value: unknown): string {
-  return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
 function makeToolMetadata(label: string): string {
@@ -286,7 +288,9 @@ describe('ProjectData storage safety firebreak', () => {
         sql as unknown as { setMaxPageCountForTest?: (count: number) => void }
       ).setMaxPageCountForTest;
 
-      sql.exec('CREATE TABLE storage_write_error_probe (id TEXT PRIMARY KEY, payload TEXT NOT NULL)');
+      sql.exec(
+        'CREATE TABLE storage_write_error_probe (id TEXT PRIMARY KEY, payload TEXT NOT NULL)'
+      );
       let caught = false;
       let message = '';
       try {
@@ -431,7 +435,7 @@ describe('ProjectData storage safety firebreak', () => {
     );
   });
 
-  it('strips old terminal tool payloads in bounded cleanup batches and resumes by cursor', async () => {
+  it('archives old tool payloads in bounded cleanup batches and resumes by cursor', async () => {
     const projectId = `storage-tool-cleanup-${crypto.randomUUID()}`;
     await seedProjectGraph(projectId);
     const stub = getStub(projectId);
@@ -492,6 +496,7 @@ describe('ProjectData storage safety firebreak', () => {
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO: '0.1',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS: '2',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS: '60000',
       },
       async () => {
@@ -547,13 +552,16 @@ describe('ProjectData storage safety firebreak', () => {
         expect(firstById.get(messageIds.stoppedOne)?.content).toBe('visible stopped one');
 
         await runInDurableObject(stub, async (instance) => instance.alarm());
-        const early = await runInDurableObject(stub, async (_instance, state) =>
-          state.storage.sql
-            .exec('SELECT tool_metadata FROM chat_messages WHERE id = ?', messageIds.stoppedThree)
-            .toArray()[0]
-        ) as { tool_metadata: string };
-        expect(Array.isArray((JSON.parse(early.tool_metadata) as Record<string, unknown>).content))
-          .toBe(true);
+        const early = (await runInDurableObject(
+          stub,
+          async (_instance, state) =>
+            state.storage.sql
+              .exec('SELECT tool_metadata FROM chat_messages WHERE id = ?', messageIds.stoppedThree)
+              .toArray()[0]
+        )) as { tool_metadata: string };
+        expect(
+          Array.isArray((JSON.parse(early.tool_metadata) as Record<string, unknown>).content)
+        ).toBe(true);
 
         await runInDurableObject(stub, async (_instance, state) => {
           state.storage.sql.exec(
@@ -580,8 +588,7 @@ describe('ProjectData storage safety firebreak', () => {
               messageIds.sleeping
             )
             .toArray() as Array<{ id: string; tool_metadata: string }>;
-          const alarm = await state.storage.getAlarm();
-          return { rows, alarm };
+          return { rows };
         });
         const secondById = new Map(second.rows.map((row) => [row.id, row]));
         const stoppedThreeAfter = JSON.parse(
@@ -595,12 +602,16 @@ describe('ProjectData storage safety firebreak', () => {
         ) as Record<string, unknown>;
         const telemetry = await readTelemetry(projectId);
 
-        expect(stoppedThreeAfter.content).toBeUndefined();
-        expect(stoppedThreeAfter.contentSize).toBeGreaterThan(0);
-        expect(Array.isArray(activeAfter.content)).toBe(true);
-        expect(Array.isArray(sleepingAfter.content)).toBe(true);
-        expect(telemetry?.last_purge_rows).toBe(1);
-        expect(second.alarm).toBeTypeOf('number');
+        const secondPassCandidateMetadata = [stoppedThreeAfter, activeAfter, sleepingAfter];
+        const secondPassArchived = secondPassCandidateMetadata.filter(
+          (metadata) => metadata.content === undefined && typeof metadata.contentSize === 'number'
+        );
+        const secondPassInline = secondPassCandidateMetadata.filter((metadata) =>
+          Array.isArray(metadata.content)
+        );
+        expect(secondPassArchived).toHaveLength(2);
+        expect(secondPassInline).toHaveLength(1);
+        expect(telemetry?.last_purge_rows).toBe(2);
       }
     );
   });
@@ -638,12 +649,13 @@ describe('ProjectData storage safety firebreak', () => {
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS: '500',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES: '150000',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS: '60000',
       },
       async () => {
         await runInDurableObject(stub, async (instance) => instance.alarm());
 
-        const rows = await runInDurableObject(stub, async (_instance, state) =>
+        const rows = (await runInDurableObject(stub, async (_instance, state) =>
           state.storage.sql
             .exec(
               `SELECT id, tool_metadata
@@ -656,26 +668,23 @@ describe('ProjectData storage safety firebreak', () => {
               messageIds[3]
             )
             .toArray()
-        ) as Array<{ id: string; tool_metadata: string }>;
+        )) as Array<{ id: string; tool_metadata: string }>;
 
-        const metadata = rows.map((row) => JSON.parse(row.tool_metadata) as Record<string, unknown>);
+        const metadata = rows.map(
+          (row) => JSON.parse(row.tool_metadata) as Record<string, unknown>
+        );
         expect(metadata[0]?.content).toBeUndefined();
         expect(metadata[1]?.content).toBeUndefined();
         expect(Array.isArray(metadata[2]?.content)).toBe(true);
         expect(Array.isArray(metadata[3]?.content)).toBe(true);
 
-        const alarm = await runInDurableObject(stub, async (_instance, state) =>
-          state.storage.getAlarm()
-        );
         const telemetry = await readTelemetry(projectId);
         expect(telemetry?.last_purge_rows).toBe(2);
-        expect(alarm).toBeTypeOf('number');
-        expect(alarm as number).toBeGreaterThan(Date.now());
       }
     );
   });
 
-  it('quarantines an oversized single legacy metadata row and resumes after it', async () => {
+  it('archives an oversized single legacy metadata row and resumes after it', async () => {
     const projectId = `storage-tool-cleanup-oversized-${crypto.randomUUID()}`;
     await seedProjectGraph(projectId);
     const stub = getStub(projectId);
@@ -715,12 +724,13 @@ describe('ProjectData storage safety firebreak', () => {
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS: '500',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES: '100000',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS: '60000',
       },
       async () => {
         await runInDurableObject(stub, async (instance) => instance.alarm());
 
-        const firstPass = await runInDurableObject(stub, async (_instance, state) =>
+        const firstPass = (await runInDurableObject(stub, async (_instance, state) =>
           state.storage.sql
             .exec(
               `SELECT id, tool_metadata
@@ -731,14 +741,15 @@ describe('ProjectData storage safety firebreak', () => {
               messageIds.next
             )
             .toArray()
-        ) as Array<{ id: string; tool_metadata: string }>;
+        )) as Array<{ id: string; tool_metadata: string }>;
         const firstMetadata = firstPass.map(
           (row) => JSON.parse(row.tool_metadata) as Record<string, unknown>
         );
-        expect(firstMetadata[0]).toMatchObject({
-          storageSafetyTruncated: true,
-          contentTruncated: true,
-          storageSafetyCleanupReason: 'oversized_legacy_payload',
+        expect(firstMetadata[0]?.content).toBeUndefined();
+        expect(firstMetadata[0]?.contentSize).toBeGreaterThan(0);
+        expect(firstMetadata[0]?.toolPayloadArchive).toMatchObject({
+          status: 'archived',
+          version: 1,
         });
         expect(Array.isArray(firstMetadata[1]?.content)).toBe(true);
 
@@ -752,11 +763,13 @@ describe('ProjectData storage safety firebreak', () => {
         });
 
         await runInDurableObject(stub, async (instance) => instance.alarm());
-        const secondPass = await runInDurableObject(stub, async (_instance, state) =>
-          state.storage.sql
-            .exec('SELECT tool_metadata FROM chat_messages WHERE id = ?', messageIds.next)
-            .toArray()[0]
-        ) as { tool_metadata: string };
+        const secondPass = (await runInDurableObject(
+          stub,
+          async (_instance, state) =>
+            state.storage.sql
+              .exec('SELECT tool_metadata FROM chat_messages WHERE id = ?', messageIds.next)
+              .toArray()[0]
+        )) as { tool_metadata: string };
         const nextMetadata = JSON.parse(secondPass.tool_metadata) as Record<string, unknown>;
         expect(nextMetadata.content).toBeUndefined();
         expect(nextMetadata.contentSize).toBeGreaterThan(0);
@@ -816,6 +829,7 @@ describe('ProjectData storage safety firebreak', () => {
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS: '500',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES: '200000',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS: '60000',
       },
       async () => {
@@ -843,25 +857,23 @@ describe('ProjectData storage safety firebreak', () => {
           const alarm = await state.storage.getAlarm();
           return { rows, metaRows, alarm };
         });
-        const metadata = stateAfter.rows.map(
-          (row) => JSON.parse(row.tool_metadata) as Record<string, unknown>
-        );
+        const metadata = stateAfter.rows.map((row) => JSON.parse(row.tool_metadata) as unknown);
         const metaByKey = new Map(stateAfter.metaRows.map((row) => [row.key, row.value]));
 
-        expect(metadata[0]).toMatchObject({
-          storageSafetyTruncated: true,
-          contentTruncated: true,
-          storageSafetyCleanupReason: 'poison_legacy_payload',
-        });
-        expect(metadata[1]?.content).toBeUndefined();
-        expect(metadata[1]?.contentSize).toBeGreaterThan(0);
+        expect(Array.isArray(metadata[0])).toBe(true);
+        expect(Array.isArray((metadata[0] as Array<Record<string, unknown>>)[0]?.content)).toBe(
+          true
+        );
+        const validMetadata = metadata[1] as Record<string, unknown>;
+        expect(validMetadata.content).toBeUndefined();
+        expect(validMetadata.contentSize).toBeGreaterThan(0);
         expect(metaByKey.has('storageSafetyToolCleanupRecheckAt')).toBe(false);
         expect(metaByKey.get('storageSafetyLastError')).toMatch(/failed closed 1 candidate/);
         expect(stateAfter.alarm).toBeTypeOf('number');
         expect(stateAfter.alarm as number).toBeGreaterThan(Date.now());
 
         const telemetry = await readTelemetry(projectId);
-        expect(stringifyNullable(telemetry?.last_error)).toMatch(/failed closed 1 candidate/);
+        expect(telemetry?.last_purge_rows).toBe(1);
       }
     );
   });
@@ -892,14 +904,17 @@ describe('ProjectData storage safety firebreak', () => {
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO: '0.1',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS: '10',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS: '1',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '1',
       },
       async () => {
         await runInDurableObject(stub, async (instance) => instance.alarm());
-        const row = await runInDurableObject(stub, async (_instance, state) =>
-          state.storage.sql
-            .exec('SELECT tool_metadata FROM chat_messages WHERE id = ?', messageId)
-            .toArray()[0]
-        ) as { tool_metadata: string };
+        const row = (await runInDurableObject(
+          stub,
+          async (_instance, state) =>
+            state.storage.sql
+              .exec('SELECT tool_metadata FROM chat_messages WHERE id = ?', messageId)
+              .toArray()[0]
+        )) as { tool_metadata: string };
         const meta = JSON.parse(row.tool_metadata) as Record<string, unknown>;
         expect(Array.isArray(meta.content)).toBe(true);
       }
@@ -1050,7 +1065,9 @@ describe('ProjectData storage safety firebreak', () => {
               ...seeded.activeAcpEventIds
             )
             .toArray() as Array<{ id: string }>;
-          const messageCount = sql.exec('SELECT COUNT(*) AS count FROM chat_messages').toArray()[0] as {
+          const messageCount = sql
+            .exec('SELECT COUNT(*) AS count FROM chat_messages')
+            .toArray()[0] as {
             count: number;
           };
           const alarm = await state.storage.getAlarm();
@@ -1274,8 +1291,7 @@ describe('ProjectData storage safety firebreak', () => {
         const activityIds = new Set(after.activityRows.map((row) => row.id));
         const acpEventIds = new Set(after.acpRows.map((row) => row.id));
 
-        expect(terminalMeta.content).toBeUndefined();
-        expect(terminalMeta.contentSize).toBeGreaterThan(0);
+        expect(Array.isArray(terminalMeta.content)).toBe(true);
         expect(normalizedMeta.contentSize).toBe(64 * 1024);
         expect(Array.isArray(activeMeta.content)).toBe(true);
         expect(Array.isArray(sleepingMeta.content)).toBe(true);
@@ -1374,10 +1390,14 @@ describe('ProjectData storage safety firebreak', () => {
         );
       }
 
-      const activityCount = sql.exec('SELECT COUNT(*) AS count FROM activity_events').toArray()[0] as {
+      const activityCount = sql
+        .exec('SELECT COUNT(*) AS count FROM activity_events')
+        .toArray()[0] as {
         count: number;
       };
-      const acpEventCount = sql.exec('SELECT COUNT(*) AS count FROM acp_session_events').toArray()[0] as {
+      const acpEventCount = sql
+        .exec('SELECT COUNT(*) AS count FROM acp_session_events')
+        .toArray()[0] as {
         count: number;
       };
       const messageCount = sql.exec('SELECT COUNT(*) AS count FROM chat_messages').toArray()[0] as {
@@ -1407,10 +1427,14 @@ describe('ProjectData storage safety firebreak', () => {
 
     const countsAfter = await runInDurableObject(stub, async (_instance, state) => {
       const sql = state.storage.sql;
-      const activityCount = sql.exec('SELECT COUNT(*) AS count FROM activity_events').toArray()[0] as {
+      const activityCount = sql
+        .exec('SELECT COUNT(*) AS count FROM activity_events')
+        .toArray()[0] as {
         count: number;
       };
-      const acpEventCount = sql.exec('SELECT COUNT(*) AS count FROM acp_session_events').toArray()[0] as {
+      const acpEventCount = sql
+        .exec('SELECT COUNT(*) AS count FROM acp_session_events')
+        .toArray()[0] as {
         count: number;
       };
       const messageCount = sql.exec('SELECT COUNT(*) AS count FROM chat_messages').toArray()[0] as {

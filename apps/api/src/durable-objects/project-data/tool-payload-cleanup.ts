@@ -28,18 +28,15 @@ import type {
   ProjectDataToolPayloadCleanupOptions,
   ProjectDataToolPayloadCleanupResult,
 } from './tool-payload-cleanup-types';
-import {
-  DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX,
-} from './tool-payload-archive';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.tool_payload_cleanup');
 
+export { DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX } from './tool-payload-archive';
 export {
   readProjectDataToolPayloadArchiveLastRunAt,
   readProjectDataToolPayloadCleanupRecheckAt,
 } from './tool-payload-cleanup-state';
-export { DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX } from './tool-payload-archive';
 export type {
   ProjectDataToolPayloadCleanupOptions,
   ProjectDataToolPayloadCleanupResult,
@@ -51,6 +48,7 @@ type ToolPayloadCleanupPlan = {
   projectId: string;
   reason: ToolPayloadCleanupReason;
   now: number;
+  nowMs?: () => number;
   beforeBytes: number;
   limitBytes: number;
   triggerBytes: number;
@@ -96,7 +94,8 @@ function createToolPayloadCleanupPlan(
   const retentionDue =
     lastArchiveRunAt === null || now - lastArchiveRunAt >= config.toolPayloadArchiveIntervalMs;
   const hasPendingCleanup = pendingCursor !== null || pendingRecheckAt !== null;
-  const underStoragePressure = beforeBytes >= triggerBytes || (hasPendingCleanup && beforeBytes > targetBytes);
+  const underStoragePressure =
+    beforeBytes >= triggerBytes || (hasPendingCleanup && beforeBytes > targetBytes);
 
   if (pendingRecheckAt !== null && pendingRecheckAt > now) {
     return null;
@@ -128,6 +127,7 @@ function createToolPayloadCleanupPlan(
     cutoffCreatedAt: now - config.toolPayloadArchiveRetentionMs,
     deadlineMs: now + config.toolPayloadCleanupWallTimeMs,
     pendingCursor,
+    ...(options.nowMs ? { nowMs: options.nowMs } : {}),
   };
 }
 
@@ -184,6 +184,7 @@ async function scanToolPayloadCleanupBatch(
       initialCursor: plan.pendingCursor,
       archivedAt: plan.now,
       deadlineMs: plan.deadlineMs,
+      ...(plan.nowMs ? { nowMs: plan.nowMs } : {}),
     }
   );
 
@@ -445,7 +446,8 @@ export async function runProjectDataToolPayloadCleanup(
   const recheckAt = shouldContinue ? plan.now + config.toolPayloadCleanupRecheckMs : null;
   persistToolPayloadCleanupState(sql, continuationCursor, recheckAt);
 
-  const exhaustedCandidates = plan.reason === 'storage_pressure' && afterBytes > plan.targetBytes && !shouldContinue;
+  const exhaustedCandidates =
+    plan.reason === 'storage_pressure' && afterBytes > plan.targetBytes && !shouldContinue;
   if (!shouldContinue) {
     writeProjectDataToolPayloadArchiveLastRunAt(sql, plan.now);
   }
