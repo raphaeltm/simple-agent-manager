@@ -77,6 +77,19 @@ const LEGACY_ALLOWED_DUPLICATE_FILES = new Map<string, Map<string, Set<string>>>
           '0119_vm_admission_control.sql',
         ]),
       ],
+      // PR #1920's ProjectData storage growth history migration was applied to
+      // staging on 2026-08-26 by workflow run 32924143424 before current-main
+      // claimed prefix 0121 with diagnostic dedup/budget retry. Wrangler keys
+      // applied migrations by exact filename, so renumbering this file would
+      // replay ALTER TABLE project_data_storage_telemetry ADD COLUMN statements
+      // against staging and abort future migration runs.
+      [
+        '0121',
+        new Set([
+          '0121_diagnostic_dedup_and_budget_retry.sql',
+          '0121_project_data_storage_growth_history.sql',
+        ]),
+      ],
     ]),
   ],
 ]);

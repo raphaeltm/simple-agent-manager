@@ -193,6 +193,18 @@ perform any one-off production purge.
   unauthenticated checks for `/api/admin/project-data/storage` and
   `/api/admin/project-data/storage/history` both returned 401, confirming the
   staging admin routes are mounted behind the existing admin auth path.
+- After merging current `origin/main`, the branch intentionally keeps
+  `0121_project_data_storage_growth_history.sql` under its staging-applied
+  prefix and adds it to the exact duplicate-prefix allowlist with
+  `0121_diagnostic_dedup_and_budget_retry.sql`; renumbering would replay the
+  already-applied staging `ALTER TABLE` statements and abort future staging
+  migrations.
+- Post-merge migration/order validation — passed:
+  `pnpm quality:migration-ordering`, `pnpm quality:scripts:test` (39 files, 529
+  tests), `pnpm quality:migration-safety` (153 FK relationships, 0 violations),
+  `pnpm quality:do-migration-safety`, `pnpm quality:file-sizes`,
+  `pnpm quality:wrangler-bindings`, `pnpm quality:stale-artifacts`, and
+  `pnpm quality:source-contract-tests`.
 - Touched non-test source files are at or below 500 lines, except documented
   existing exceptions (`apps/api/src/env.ts`, `apps/api/src/db/schema.ts`).
 

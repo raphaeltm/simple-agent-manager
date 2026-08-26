@@ -56,6 +56,19 @@ describe('D1 migration ordering check', () => {
     );
   });
 
+  it('grandfathers the staging-applied ProjectData storage migration prefix', () => {
+    const migrationsDir = join(ROOT, 'apps/api/src/db/migrations');
+    const appliedFiles = [
+      '0121_diagnostic_dedup_and_budget_retry.sql',
+      '0121_project_data_storage_growth_history.sql',
+    ];
+
+    expect(isAllowedDuplicateSet(migrationsDir, '0121', appliedFiles)).toBe(true);
+    expect(isAllowedDuplicateSet(migrationsDir, '0121', [...appliedFiles, '0121_future.sql'])).toBe(
+      false
+    );
+  });
+
   it('fails on migration filenames without a sortable numeric prefix', () => {
     const dir = makeDir();
     writeFileSync(join(dir, '0001_initial.sql'), 'CREATE TABLE first (id TEXT PRIMARY KEY);');
