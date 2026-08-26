@@ -57,6 +57,7 @@ function createMockDb(
     purgeChanges?: number;
     staleQueryError?: Error;
     staleQueuedQueryError?: Error;
+    taskLookupError?: Error;
     batchError?: Error;
     purgeError?: Error;
   } = {}
@@ -113,6 +114,11 @@ function createMockDb(
 
         // SELECT tasks WHERE id IN (...)
         if (sql.includes('FROM tasks WHERE id IN')) {
+          if (options.taskLookupError) {
+            return Object.assign(stmt, {
+              all: vi.fn().mockRejectedValue(options.taskLookupError),
+            });
+          }
           const taskResults = args
             .map((id) => taskLookups[id as string])
             .filter((t): t is TaskRow => t !== null && t !== undefined);
@@ -288,11 +294,12 @@ describe('runTriggerExecutionCleanup', () => {
 
       const updateCall = db._calls.find((c) => c.sql.includes('UPDATE trigger_executions'));
       expect(updateCall).toBeDefined();
-      expect(updateCall!.bindings[0]).toBe('Linked task task-deleted was deleted');
-      expect(updateCall!.bindings[2]).toBe('exec-deleted');
+      expect(updateCall!.bindings[0]).toBe('failed');
+      expect(updateCall!.bindings[1]).toBe('Linked task task-deleted was deleted');
+      expect(updateCall!.bindings[3]).toBe('exec-deleted');
     });
 
-    it('recovers execution where task is completed but sync was missed', async () => {
+    it('syncs execution to completed where task is completed but sync was missed', async () => {
       const exec = makeStaleExec({ id: 'exec-missed', task_id: 'task-completed' });
       const db = createMockDb({
         staleRunningExecutions: [exec],
@@ -304,7 +311,8 @@ describe('runTriggerExecutionCleanup', () => {
 
       expect(stats.staleRecovered).toBe(1);
       const updateCall = db._calls.find((c) => c.sql.includes('UPDATE trigger_executions'));
-      expect(updateCall!.bindings[0]).toBe('Linked task task-completed is completed (sync missed)');
+      expect(updateCall!.bindings[0]).toBe('completed');
+      expect(updateCall!.bindings[1]).toBeNull();
     });
 
     it('recovers execution where task is failed but sync was missed', async () => {
@@ -319,7 +327,8 @@ describe('runTriggerExecutionCleanup', () => {
 
       expect(stats.staleRecovered).toBe(1);
       const updateCall = db._calls.find((c) => c.sql.includes('UPDATE trigger_executions'));
-      expect(updateCall!.bindings[0]).toBe('Linked task task-failed is failed (sync missed)');
+      expect(updateCall!.bindings[0]).toBe('failed');
+      expect(updateCall!.bindings[1]).toBe('Linked task task-failed is failed (sync missed)');
     });
 
     it('recovers execution where task is cancelled but sync was missed', async () => {
@@ -334,23 +343,47 @@ describe('runTriggerExecutionCleanup', () => {
 
       expect(stats.staleRecovered).toBe(1);
       const updateCall = db._calls.find((c) => c.sql.includes('UPDATE trigger_executions'));
-      expect(updateCall!.bindings[0]).toBe('Linked task task-cancelled is cancelled (sync missed)');
+      expect(updateCall!.bindings[0]).toBe('failed');
+      expect(updateCall!.bindings[1]).toBe('Linked task task-cancelled is cancelled (sync missed)');
     });
 
-    it('recovers execution where task is stuck in queued state', async () => {
-      const exec = makeStaleExec({ id: 'exec-stuck', task_id: 'task-queued' });
+    it('preserves execution where linked task is non-terminal past the normal stale threshold', async () => {
+      const exec = makeStaleExec({ id: 'exec-live', task_id: 'task-live' });
       const db = createMockDb({
         staleRunningExecutions: [exec],
-        taskLookups: { 'task-queued': { id: 'task-queued', status: 'queued' } },
+        taskLookups: { 'task-live': { id: 'task-live', status: 'in_progress' } },
       });
       const env = createMockEnv({ DATABASE: db });
 
       const stats = await runTriggerExecutionCleanup(env);
 
+      expect(stats.staleRecovered).toBe(0);
+      expect(db._calls.some((c) => c.sql.includes('UPDATE trigger_executions'))).toBe(false);
+    });
+
+    it('uses the hard residence backstop for a non-terminal linked task only after the configured hours', async () => {
+      const exec = makeStaleExec({
+        id: 'exec-hard-max',
+        task_id: 'task-hard-max',
+        created_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+        started_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+      });
+      const db = createMockDb({
+        staleRunningExecutions: [exec],
+        taskLookups: { 'task-hard-max': { id: 'task-hard-max', status: 'in_progress' } },
+      });
+      const env = createMockEnv({
+        DATABASE: db,
+        TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS: '2',
+      });
+
+      const stats = await runTriggerExecutionCleanup(env);
+
       expect(stats.staleRecovered).toBe(1);
       const updateCall = db._calls.find((c) => c.sql.includes('UPDATE trigger_executions'));
-      expect(updateCall!.bindings[0]).toBe(
-        "Linked task task-queued stuck in 'queued' past stale threshold"
+      expect(updateCall!.bindings[0]).toBe('failed');
+      expect(String(updateCall!.bindings[1])).toContain(
+        'Trigger execution exceeded hard maximum residence of 2 hours'
       );
     });
 
@@ -365,7 +398,8 @@ describe('runTriggerExecutionCleanup', () => {
 
       expect(stats.staleRecovered).toBe(1);
       const updateCall = db._calls.find((c) => c.sql.includes('UPDATE trigger_executions'));
-      expect(updateCall!.bindings[0]).toBe('Task was never created (submission failed)');
+      expect(updateCall!.bindings[0]).toBe('failed');
+      expect(updateCall!.bindings[1]).toBe('Task was never created (submission failed)');
     });
 
     it('handles multiple stale executions in one sweep', async () => {
@@ -444,6 +478,21 @@ describe('runTriggerExecutionCleanup', () => {
       expect(stats.errors).toBeGreaterThanOrEqual(1);
     });
 
+    it('preserves linked executions when the task liveness lookup fails', async () => {
+      const exec = makeStaleExec({ id: 'exec-lookup-error', task_id: 'task-lookup-error' });
+      const db = createMockDb({
+        staleRunningExecutions: [exec],
+        taskLookupError: new Error('D1 task lookup failed'),
+      });
+      const env = createMockEnv({ DATABASE: db });
+
+      const stats = await runTriggerExecutionCleanup(env);
+
+      expect(stats.staleRecovered).toBe(0);
+      expect(stats.errors).toBe(1);
+      expect(db._calls.some((c) => c.sql.includes('UPDATE trigger_executions'))).toBe(false);
+    });
+
     it('uses parameterized status in stale query', async () => {
       const db = createMockDb({ staleRunningExecutions: [] });
       const env = createMockEnv({ DATABASE: db });
@@ -514,14 +563,14 @@ describe('runTriggerExecutionCleanup', () => {
       expect(stats.staleQueuedRecovered).toBe(1);
 
       const updateCalls = db._calls.filter((c) => c.sql.includes('UPDATE trigger_executions'));
-      const queuedUpdate = updateCalls.find((c) => c.bindings[3] === 'queued');
+      const queuedUpdate = updateCalls.find((c) => c.bindings[4] === 'queued');
       expect(queuedUpdate).toBeDefined();
-      expect(queuedUpdate!.bindings[0]).toBe(
+      expect(queuedUpdate!.bindings[1]).toBe(
         'Queued execution never started (submission failed or timed out)'
       );
     });
 
-    it('recovers queued execution with a linked task', async () => {
+    it('preserves queued execution with a non-terminal linked task', async () => {
       const exec = makeStaleExec({ id: 'exec-q-task', task_id: 'task-x' });
       const db = createMockDb({
         staleQueuedExecutions: [exec],
@@ -531,12 +580,8 @@ describe('runTriggerExecutionCleanup', () => {
 
       const stats = await runTriggerExecutionCleanup(env);
 
-      expect(stats.staleQueuedRecovered).toBe(1);
-
-      const updateCalls = db._calls.filter((c) => c.sql.includes('UPDATE trigger_executions'));
-      const queuedUpdate = updateCalls.find((c) => c.bindings[3] === 'queued');
-      expect(queuedUpdate).toBeDefined();
-      expect(queuedUpdate!.bindings[0]).toContain('Queued execution stale');
+      expect(stats.staleQueuedRecovered).toBe(0);
+      expect(db._calls.some((c) => c.sql.includes('UPDATE trigger_executions'))).toBe(false);
     });
 
     it('uses separate queued threshold from running threshold', async () => {

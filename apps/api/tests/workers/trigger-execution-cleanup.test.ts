@@ -8,10 +8,12 @@
  * Source: apps/api/src/scheduled/trigger-execution-cleanup.ts
  */
 import { env } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import type * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { runTriggerExecutionCleanup } from '../../src/scheduled/trigger-execution-cleanup';
+import { admitAndSubmitTriggerExecution } from '../../src/services/trigger-admission';
 import {
   seedInstallation,
   seedProject,
@@ -122,7 +124,7 @@ describe('trigger execution cleanup (vertical slice, real D1)', () => {
       expect(exec?.completed_at).toBeTruthy();
     });
 
-    it('recovers execution where task is in terminal state (sync missed)', async () => {
+    it('syncs execution to completed where task is in terminal completed state', async () => {
       await seedBaseData();
 
       // Create a completed task
@@ -141,30 +143,50 @@ describe('trigger execution cleanup (vertical slice, real D1)', () => {
       expect(stats.staleRecovered).toBeGreaterThanOrEqual(1);
 
       const exec = await getExecution('exec-term-001');
-      expect(exec?.status).toBe('failed');
-      expect(exec?.error_message).toContain('is completed (sync missed)');
+      expect(exec?.status).toBe('completed');
+      expect(exec?.error_message).toBeNull();
     });
 
-    it('recovers execution where task is stuck in non-terminal state', async () => {
+    it('preserves execution where linked task is in_progress past the old stale threshold', async () => {
       await seedBaseData();
 
-      // Task still in 'queued' state — stuck
-      await seedTask('task-stuck-001', PROJECT_ID, USER_ID, { status: 'queued' });
+      await seedTask('task-live-001', PROJECT_ID, USER_ID, { status: 'in_progress' });
 
-      await seedTriggerExecution('exec-stuck-001', TRIGGER_ID, PROJECT_ID, {
+      await seedTriggerExecution('exec-live-001', TRIGGER_ID, PROJECT_ID, {
         status: 'running',
-        taskId: 'task-stuck-001',
+        taskId: 'task-live-001',
         startedAt: TWO_HOURS_AGO,
         createdAt: TWO_HOURS_AGO,
       });
 
-      const stats = await runTriggerExecutionCleanup(buildEnv());
+      await runTriggerExecutionCleanup(buildEnv());
+      await runTriggerExecutionCleanup(buildEnv());
 
-      expect(stats.staleRecovered).toBeGreaterThanOrEqual(1);
+      const exec = await getExecution('exec-live-001');
+      expect(exec?.status).toBe('running');
+      expect(exec?.error_message).toBeNull();
+      expect(exec?.completed_at).toBeNull();
+    });
 
-      const exec = await getExecution('exec-stuck-001');
+    it('uses the hard residence backstop for a non-terminal task after the configured hours', async () => {
+      await seedBaseData();
+
+      await seedTask('task-hard-max-001', PROJECT_ID, USER_ID, { status: 'in_progress' });
+
+      await seedTriggerExecution('exec-hard-max-001', TRIGGER_ID, PROJECT_ID, {
+        status: 'running',
+        taskId: 'task-hard-max-001',
+        startedAt: TWO_HOURS_AGO,
+        createdAt: TWO_HOURS_AGO,
+      });
+
+      await runTriggerExecutionCleanup(
+        buildEnv({ TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS: '1' })
+      );
+
+      const exec = await getExecution('exec-hard-max-001');
       expect(exec?.status).toBe('failed');
-      expect(exec?.error_message).toContain("stuck in 'queued'");
+      expect(exec?.error_message).toContain('exceeded hard maximum residence of 1 hours');
     });
 
     it('recovers execution with no linked task (submission failed)', async () => {
@@ -315,7 +337,7 @@ describe('trigger execution cleanup (vertical slice, real D1)', () => {
       expect(exec?.error_message).toContain('never started');
     });
 
-    it('recovers queued execution with linked task', async () => {
+    it('preserves queued execution with a non-terminal linked task', async () => {
       await seedBaseData();
 
       await seedTask('task-q-linked-001', PROJECT_ID, USER_ID, { status: 'queued' });
@@ -327,13 +349,78 @@ describe('trigger execution cleanup (vertical slice, real D1)', () => {
         createdAt: TWO_HOURS_AGO,
       });
 
-      const stats = await runTriggerExecutionCleanup(buildEnv());
-
-      expect(stats.staleQueuedRecovered).toBeGreaterThanOrEqual(1);
+      await runTriggerExecutionCleanup(buildEnv());
 
       const exec = await getExecution('exec-q-linked-001');
-      expect(exec?.status).toBe('failed');
-      expect(exec?.error_message).toContain('Queued execution stale');
+      expect(exec?.status).toBe('queued');
+      expect(exec?.error_message).toBeNull();
+    });
+  });
+
+  describe('admission guard after legacy or backstop execution failure', () => {
+    it('counts a failed execution with a live linked task as active for skipIfRunning', async () => {
+      await seedBaseData();
+      const triggerId = 'trigger-failed-live-slot-001';
+      const taskId = 'task-failed-live-slot-001';
+      const executionId = 'exec-failed-live-slot-001';
+      await seedTrigger(triggerId, PROJECT_ID, USER_ID, {
+        skipIfRunning: true,
+        maxConcurrent: 1,
+      });
+      await seedTask(taskId, PROJECT_ID, USER_ID, { status: 'in_progress' });
+      await seedTriggerExecution(executionId, triggerId, PROJECT_ID, {
+        status: 'failed',
+        taskId,
+        errorMessage: 'legacy stale cleanup failure while task was live',
+        completedAt: TWO_HOURS_AGO,
+        createdAt: TWO_HOURS_AGO,
+      });
+      const submitter = vi.fn(async () => ({
+        taskId: 'should-not-submit',
+        sessionId: 'should-not-submit-session',
+        branchName: 'sam/should-not-submit',
+      }));
+      const trigger = {
+        id: triggerId,
+        projectId: PROJECT_ID,
+        userId: USER_ID,
+        name: 'Failed Live Slot Trigger',
+        description: null,
+        status: 'active',
+        sourceType: 'cron',
+        cronExpression: '0 9 * * *',
+        cronTimezone: 'UTC',
+        skipIfRunning: true,
+        promptTemplate: 'run',
+        agentProfileId: null,
+        skillId: null,
+        taskMode: 'task',
+        vmSizeOverride: null,
+        maxConcurrent: 1,
+        lastTriggeredAt: null,
+        triggerCount: 0,
+        nextExecutionSequence: 2,
+        nextFireAt: null,
+        credentialBlockedReason: null,
+        credentialBlockedAt: null,
+        credentialBlockedBy: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } satisfies schema.TriggerRow;
+
+      const result = await admitAndSubmitTriggerExecution(
+        buildEnv(),
+        {
+          trigger,
+          eventType: 'cron',
+          triggeredBy: 'cron',
+          renderPrompt: () => 'run',
+        },
+        submitter
+      );
+
+      expect(result).toMatchObject({ outcome: 'skipped', reason: 'still_running' });
+      expect(submitter).not.toHaveBeenCalled();
     });
   });
 

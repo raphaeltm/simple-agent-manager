@@ -1,5 +1,6 @@
 import {
   DEFAULT_TRIGGER_AUTO_PAUSE_AFTER_FAILURES,
+  TASK_TERMINAL_STATUSES,
   type TriggeredBy,
   type TriggerSkipReason,
 } from '@simple-agent-manager/shared';
@@ -9,15 +10,14 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
-import {
-  type SubmittedTriggerTask,
-  TriggerTaskSubmissionPendingError,
-} from './trigger-submission';
+import { type SubmittedTriggerTask, TriggerTaskSubmissionPendingError } from './trigger-submission';
 import { submitTriggeredTask } from './trigger-submit';
 
 export type TriggerTaskSubmitter = typeof submitTriggeredTask;
 
 type AdmissionSkipReason = Extract<TriggerSkipReason, 'still_running' | 'concurrent_limit'>;
+const TERMINAL_TASK_STATUSES = new Set<string>(TASK_TERMINAL_STATUSES);
+const TERMINAL_TASK_STATUS_SQL = TASK_TERMINAL_STATUSES.map((status) => `'${status}'`).join(', ');
 
 export type TriggerAdmissionResult =
   | {
@@ -55,14 +55,19 @@ async function consecutiveFailureCount(
   threshold: number
 ): Promise<number> {
   const rows = await env.DATABASE.prepare(
-    `SELECT status FROM trigger_executions
-     WHERE trigger_id = ? ORDER BY created_at DESC LIMIT ?`
+    `SELECT e.status, t.status AS taskStatus
+       FROM trigger_executions e
+       LEFT JOIN tasks t ON t.id = e.task_id
+      WHERE e.trigger_id = ?
+      ORDER BY e.created_at DESC LIMIT ?`
   )
     .bind(triggerId, threshold)
-    .all<{ status: string }>();
+    .all<{ status: string; taskStatus: string | null }>();
   let count = 0;
   for (const row of rows.results) {
-    if (row.status !== 'failed') break;
+    const linkedTaskStillLive =
+      row.taskStatus !== null && !TERMINAL_TASK_STATUSES.has(row.taskStatus);
+    if (row.status !== 'failed' || linkedTaskStillLive) break;
     count += 1;
   }
   return count;
@@ -132,7 +137,12 @@ async function classifyReservationFailure(
   const state = await env.DATABASE.prepare(
     `SELECT status, skip_if_running AS skipIfRunning, max_concurrent AS maxConcurrent,
        (SELECT COUNT(*) FROM trigger_executions e
-        WHERE e.trigger_id = triggers.id AND e.status IN ('queued', 'running')) AS activeCount
+          LEFT JOIN tasks t ON t.id = e.task_id
+         WHERE e.trigger_id = triggers.id
+           AND (
+             e.status IN ('queued', 'running')
+             OR (e.task_id IS NOT NULL AND t.status NOT IN (${TERMINAL_TASK_STATUS_SQL}))
+           )) AS activeCount
      FROM triggers WHERE id = ? AND project_id = ?`
   )
     .bind(trigger.id, trigger.projectId)
@@ -188,7 +198,12 @@ export async function admitAndSubmitTriggerExecution(
       WHERE id = ? AND project_id = ?
         AND (status = 'active' OR (? = 1 AND status = 'paused'))
         AND (SELECT COUNT(*) FROM trigger_executions e
-             WHERE e.trigger_id = triggers.id AND e.status IN ('queued', 'running'))
+             LEFT JOIN tasks t ON t.id = e.task_id
+             WHERE e.trigger_id = triggers.id
+               AND (
+                 e.status IN ('queued', 'running')
+                 OR (e.task_id IS NOT NULL AND t.status NOT IN (${TERMINAL_TASK_STATUS_SQL}))
+               ))
             < CASE WHEN skip_if_running = 1 THEN 1 ELSE max_concurrent END`
   ).bind(
     executionId,
