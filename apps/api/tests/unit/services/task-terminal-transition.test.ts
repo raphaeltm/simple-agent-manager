@@ -48,13 +48,14 @@ describe('transitionTaskToTerminal', () => {
     vi.useRealTimers();
   });
 
-  function seedWorkspace(id: string, status = 'running') {
+  function seedWorkspace(id: string, status = 'running', nodeId: string | null = 'node-1') {
     sqlite
       .prepare(
-        `INSERT INTO workspaces (id, project_id, user_id, name, repository, branch, status, vm_size, vm_location)
-         VALUES (?, ?, 'user-1', 'Workspace', 'repo', 'main', ?, 'small', 'nbg1')`
+        `INSERT INTO workspaces
+           (id, project_id, user_id, name, repository, branch, node_id, status, vm_size, vm_location)
+         VALUES (?, ?, 'user-1', 'Workspace', 'repo', 'main', ?, ?, 'small', 'nbg1')`
       )
-      .run(id, PROJECT_ID, status);
+      .run(id, PROJECT_ID, nodeId, status);
   }
 
   function seedTask(
@@ -137,6 +138,7 @@ describe('transitionTaskToTerminal', () => {
       source: 'test.attention_expiry',
       expectedWorkspaceId: 'workspace-1',
       expectedChatSessionId: 'session-1',
+      expectedNodeId: 'node-1',
     });
     const second = await transitionTaskToTerminal(env, {
       taskId: 'task-1',
@@ -146,6 +148,7 @@ describe('transitionTaskToTerminal', () => {
       source: 'test.attention_expiry',
       expectedWorkspaceId: 'workspace-1',
       expectedChatSessionId: 'session-1',
+      expectedNodeId: 'node-1',
     });
 
     expect(first).toBe('transitioned');
@@ -182,6 +185,35 @@ describe('transitionTaskToTerminal', () => {
     expect(cancelVmTaskAdmission).toHaveBeenCalledWith(env, 'task-1', 'task_failed');
     expect(reconcileTaskWaits).toHaveBeenCalledTimes(1);
     expect(reconcileTaskWaits).toHaveBeenCalledWith(env, PROJECT_ID, 'task-1');
+  });
+
+  it('rejects stale terminal evidence after workspace node ownership changes', async () => {
+    sqlite.prepare(`UPDATE workspaces SET node_id = ? WHERE id = ?`).run('node-2', 'workspace-1');
+
+    const outcome = await transitionTaskToTerminal(env, {
+      taskId: 'task-1',
+      projectId: PROJECT_ID,
+      status: 'failed',
+      reason: 'Old node failed after stale liveness snapshot',
+      source: 'test.stuck_tasks',
+      expectedWorkspaceId: 'workspace-1',
+      expectedChatSessionId: 'session-1',
+      expectedNodeId: 'node-1',
+    });
+
+    expect(outcome).toBe('scope_mismatch');
+    expect(taskRow()).toMatchObject({
+      status: 'in_progress',
+      execution_step: 'awaiting_followup',
+      error_message: null,
+      completed_at: null,
+    });
+    expect(statusEvents()).toEqual([]);
+    expect(
+      sqlite.prepare(`SELECT status FROM workspaces WHERE id = ?`).pluck().get('workspace-1')
+    ).toBe('running');
+    expect(cancelVmTaskAdmission).not.toHaveBeenCalled();
+    expect(reconcileTaskWaits).not.toHaveBeenCalled();
   });
 
   it('terminalizes queued rows for scheduled timeout recovery', async () => {

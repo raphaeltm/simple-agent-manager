@@ -101,7 +101,7 @@ set_worker_secret() {
 
   if [ -z "$secret_value" ]; then
     if [ "$is_required" = "true" ]; then
-      echo -e "${RED}❌ Required secret $secret_name is not set${NC}"
+      echo -e "${RED}❌ Required secret $secret_name is not set${NC}" >&2
       return 1
     else
       echo -e "${YELLOW}⚠️  Optional secret $secret_name is not set, skipping${NC}"
@@ -422,11 +422,16 @@ for secret_name in "${STALE_SECRETS[@]}"; do
 done
 
 echo ""
+if [ "$FAILED" = "true" ]; then
+  echo -e "${RED}❌ Some required secrets failed to configure${NC}" >&2
+  exit 1
+fi
+
 flush_worker_secret_bulk || FAILED=true
 
 echo ""
 if [ "$FAILED" = "true" ]; then
-  echo -e "${RED}❌ Some required secrets failed to configure${NC}"
+  echo -e "${RED}❌ Some secrets failed to configure${NC}" >&2
   exit 1
 else
   echo -e "${GREEN}✅ All secrets configured successfully${NC}"

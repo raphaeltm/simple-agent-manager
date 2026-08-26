@@ -281,7 +281,7 @@ Checkpoint episodes are stored idempotently by ACP session and prompt epoch, inc
 **Key features:**
 
 - Hibernatable WebSockets for zero-idle-cost real-time chat
-- Heartbeat-based VM failure detection via DO alarms
+- ACP heartbeat-history checks via DO alarms; VM interruption still requires conclusive runtime/workspace evidence
 - Session forking with parent lineage tracking
 - Debounced D1 summary sync for dashboard data
 

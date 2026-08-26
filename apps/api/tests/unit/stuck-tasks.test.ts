@@ -137,6 +137,26 @@ function collectTaskTerminalRows(
   return rows;
 }
 
+function collectWorkspaceNodeRows(
+  prepareResponses: Map<string, { results: unknown[]; changes?: number }>
+): Map<string, { node_id: string | null }> {
+  const rows = new Map<string, { node_id: string | null }>();
+
+  for (const config of prepareResponses.values()) {
+    for (const row of config.results) {
+      if (!row || typeof row !== 'object') continue;
+      const candidate = row as Record<string, unknown>;
+      if (typeof candidate.id === 'string' && 'node_id' in candidate) {
+        rows.set(candidate.id, {
+          node_id: typeof candidate.node_id === 'string' ? candidate.node_id : null,
+        });
+      }
+    }
+  }
+
+  return rows;
+}
+
 function mockTaskTerminalLoadStatement(taskRows: Map<string, Record<string, unknown>>) {
   return {
     bind: vi.fn((taskId: string) => {
@@ -177,8 +197,28 @@ function createMockEnv(
   containerLifecycle?: ReturnType<typeof vi.fn>
 ): Env {
   const taskTerminalRows = collectTaskTerminalRows(prepareResponses);
+  const workspaceNodeRows = collectWorkspaceNodeRows(prepareResponses);
   const mockDb = {
     prepare: vi.fn((sql: string) => {
+      if (
+        sql.includes('SELECT node_id') &&
+        sql.includes('FROM workspaces') &&
+        sql.includes('WHERE id = ? AND project_id = ?')
+      ) {
+        return {
+          bind: vi.fn((workspaceId: string) => {
+            const row = workspaceNodeRows.get(workspaceId) ?? null;
+            return {
+              all: vi.fn().mockResolvedValue({ results: row ? [row] : [] }),
+              first: vi.fn().mockResolvedValue(row),
+              run: vi.fn().mockResolvedValue({ meta: { changes: 0 } }),
+            };
+          }),
+          all: vi.fn().mockResolvedValue({ results: [] }),
+          first: vi.fn().mockResolvedValue(null),
+          run: vi.fn().mockResolvedValue({ meta: { changes: 0 } }),
+        };
+      }
       if (
         sql.includes('id, project_id, status, workspace_id, chat_session_id, parent_task_id') &&
         sql.includes('FROM tasks') &&
@@ -931,7 +971,10 @@ describe('recoverStuckTasks', () => {
         () => new Promise(() => undefined)
       );
 
-      const diagnostics = await getTaskReconciliationDiagnostics(env, 'task-projectdata-acp-timeout');
+      const diagnostics = await getTaskReconciliationDiagnostics(
+        env,
+        'task-projectdata-acp-timeout'
+      );
       expect(diagnostics?.decision).toBe('preserve_inconclusive_runtime');
       expect(diagnostics?.liveness).toMatchObject({
         live: false,

@@ -45,6 +45,7 @@ export interface TransitionTaskToTerminalOptions {
   source: string;
   expectedWorkspaceId?: string | null;
   expectedChatSessionId?: string | null;
+  expectedNodeId?: string | null;
   actorType?: TaskActorType;
   actorId?: string | null;
   stopWorkspace?: boolean;
@@ -87,6 +88,24 @@ async function loadTaskRow(
     .first<TaskTerminalTransitionRow>();
 }
 
+async function workspaceMatchesExpectedNode(
+  db: D1Database,
+  task: TaskTerminalTransitionRow,
+  expectedNodeId: string
+): Promise<boolean> {
+  if (!task.workspace_id) return false;
+  const workspace = await db
+    .prepare(
+      `SELECT node_id
+       FROM workspaces
+       WHERE id = ? AND project_id = ?
+       LIMIT 1`
+    )
+    .bind(task.workspace_id, task.project_id)
+    .first<{ node_id: string | null }>();
+  return workspace?.node_id === expectedNodeId;
+}
+
 /**
  * Shared D1 terminal transition contract for non-TaskRunner writers.
  *
@@ -126,6 +145,13 @@ export async function transitionTaskToTerminal(
   ) {
     return 'scope_mismatch';
   }
+  if (
+    options.expectedNodeId !== undefined &&
+    options.expectedNodeId !== null &&
+    !(await workspaceMatchesExpectedNode(env.DATABASE, task, options.expectedNodeId))
+  ) {
+    return 'scope_mismatch';
+  }
   if (task.status === options.status) return 'already_terminal';
   if (['completed', 'failed', 'cancelled'].includes(task.status)) return 'already_terminal';
   if (!ACTIVE_TERMINALIZABLE_TASK_STATUSES.has(task.status)) return 'not_terminalizable';
@@ -145,6 +171,19 @@ export async function transitionTaskToTerminal(
        AND status = ?
        AND (? IS NULL OR workspace_id = ?)
        AND (? IS NULL OR chat_session_id = ?)
+       AND (
+         ? IS NULL
+         OR (
+           workspace_id IS NOT NULL
+           AND EXISTS (
+             SELECT 1
+             FROM workspaces w
+             WHERE w.id = tasks.workspace_id
+               AND w.project_id = tasks.project_id
+               AND w.node_id = ?
+           )
+         )
+       )
        AND NOT EXISTS (
          SELECT 1 FROM tasks succ
           WHERE succ.project_id = tasks.project_id
@@ -170,7 +209,9 @@ export async function transitionTaskToTerminal(
     options.expectedWorkspaceId ?? null,
     options.expectedWorkspaceId ?? null,
     options.expectedChatSessionId ?? null,
-    options.expectedChatSessionId ?? null
+    options.expectedChatSessionId ?? null,
+    options.expectedNodeId ?? null,
+    options.expectedNodeId ?? null
   );
   const insertEvent = env.DATABASE.prepare(
     `INSERT INTO task_status_events

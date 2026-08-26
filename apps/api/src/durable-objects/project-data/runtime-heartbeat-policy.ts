@@ -15,10 +15,11 @@ const TERMINAL_WORKSPACE_STATUSES = new Set(['stopping', 'stopped', 'error', 'de
 export function checkRuntimeHeartbeatTimeouts(
   sql: SqlStorage,
   env: Env,
-  transitionFn: Parameters<typeof checkHeartbeatTimeouts>[2]
+  transitionFn: Parameters<typeof checkHeartbeatTimeouts>[2],
+  projectId: string | null
 ) {
   return checkHeartbeatTimeouts(sql, env, transitionFn, {
-    shouldDeferTimeout: (session) => shouldDeferRuntimeHeartbeatTimeout(env, session),
+    shouldDeferTimeout: (session) => shouldDeferRuntimeHeartbeatTimeout(env, session, projectId),
   });
 }
 
@@ -31,20 +32,24 @@ function probeTimeoutMs(env: Env): number {
 
 export async function shouldDeferRuntimeHeartbeatTimeout(
   env: Env,
-  candidate: HeartbeatTimeoutCandidate
+  candidate: HeartbeatTimeoutCandidate,
+  projectId: string | null
 ): Promise<{ defer: boolean; reason: string }> {
   if (!candidate.workspaceId || !candidate.nodeId) {
     return { defer: false, reason: 'runtime_identity_incomplete' };
+  }
+  if (!projectId) {
+    return { defer: true, reason: 'project_identity_unavailable' };
   }
 
   const row = await env.DATABASE.prepare(
     `SELECT w.status AS workspace_status, n.runtime AS node_runtime
      FROM workspaces w
      LEFT JOIN nodes n ON n.id = w.node_id
-     WHERE w.id = ? AND w.node_id = ?
+     WHERE w.project_id = ? AND w.id = ? AND w.node_id = ?
      LIMIT 1`
   )
-    .bind(candidate.workspaceId, candidate.nodeId)
+    .bind(projectId, candidate.workspaceId, candidate.nodeId)
     .first<{ workspace_status: string; node_runtime: string | null }>();
   if (!row) {
     return { defer: false, reason: 'workspace_missing' };

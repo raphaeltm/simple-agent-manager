@@ -601,11 +601,15 @@ describe('deployment workflow hardening', () => {
 
   it('worker secret configuration requires an explicit environment', () => {
     const contents = repoFile('scripts/deploy/configure-secrets.sh');
+    const deployWorkflow = parsedWorkflow('deploy-reusable.yml');
+    const configureSecretsStep = namedStep(deployWorkflow, 'Configure Worker Secrets');
 
     expect(contents).toContain('deployment environment argument is required');
     expect(contents).toContain('Usage: bash scripts/deploy/configure-secrets.sh <environment>');
     expect(contents).toContain('set_worker_secret "CF_AIG_TOKEN"');
-    expect(contents).toContain('wrangler secret bulk "$WORKER_SECRET_BULK_PAYLOAD" --env "$ENVIRONMENT"');
+    expect(contents).toContain(
+      'wrangler secret bulk "$WORKER_SECRET_BULK_PAYLOAD" --env "$ENVIRONMENT"'
+    );
     expect(contents).toContain('WORKER_SECRET_BULK_MAX_OPS');
     expect(contents).toContain('chmod 600 "$WORKER_SECRET_BULK_PAYLOAD"');
     expect(contents).toContain('json_escape_stdin');
@@ -614,6 +618,9 @@ describe('deployment workflow hardening', () => {
     expect(contents).not.toContain('wrangler secret delete');
     expect(contents).not.toContain('echo "$output"');
     expect(contents).not.toContain('ENVIRONMENT="${1:-production}"');
+    expect(configureSecretsStep.env).toMatchObject({
+      WORKER_SECRET_BULK_MAX_OPS: '${{ vars.WORKER_SECRET_BULK_MAX_OPS }}',
+    });
   });
 
   it('worker secret configuration applies one redacted bulk payload with stale deletes', () => {
@@ -658,9 +665,7 @@ describe('deployment workflow hardening', () => {
     });
     try {
       expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain(
-        'exceeding WORKER_SECRET_BULK_MAX_OPS=1'
-      );
+      expect(result.stderr).toContain('exceeding WORKER_SECRET_BULK_MAX_OPS=1');
       expect(result.bulkInvocations).toBe(0);
       expect(result.bulkPayload).toBeNull();
 
@@ -668,6 +673,26 @@ describe('deployment workflow hardening', () => {
       expect(combinedOutput).not.toContain('budget-secret-line-1');
       expect(combinedOutput).not.toContain('budget-secret-line-2');
       expect(combinedOutput).not.toContain('jwt-private-secret');
+    } finally {
+      result.cleanup();
+    }
+  });
+
+  it('worker secret configuration fails before bulk apply when required secrets are missing', () => {
+    const result = runConfigureSecrets({
+      SECRET_ENCRYPTION_KEY: 'partial-secret',
+      SECRET_JWT_PRIVATE_KEY: '',
+    });
+    try {
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('Required secret JWT_PRIVATE_KEY is not set');
+      expect(result.stderr).toContain('Some required secrets failed to configure');
+      expect(result.bulkInvocations).toBe(0);
+      expect(result.bulkPayload).toBeNull();
+
+      const combinedOutput = `${result.stdout}\n${result.stderr}`;
+      expect(combinedOutput).not.toContain('partial-secret');
+      expect(combinedOutput).not.toContain('github-client-secret-line-1');
     } finally {
       result.cleanup();
     }

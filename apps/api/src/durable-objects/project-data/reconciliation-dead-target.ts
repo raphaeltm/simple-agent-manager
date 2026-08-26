@@ -62,6 +62,7 @@ export async function terminallyFailDeadTarget(
     source: 'project_data.reconciliation.dead_target',
     expectedWorkspaceId: candidate.workspaceId,
     expectedChatSessionId: candidate.sessionId,
+    expectedNodeId: targetResult.nodeId,
     stopWorkspace: true,
   });
   if (transitionOutcome !== 'transitioned') {

@@ -18,7 +18,13 @@ import type { ProjectData } from '../../src/durable-objects/project-data';
 import { shouldDeferRuntimeHeartbeatTimeout } from '../../src/durable-objects/project-data/runtime-heartbeat-policy';
 import type { VmAgentContainerLifecycleStatus } from '../../src/durable-objects/vm-agent-container-lifecycle';
 import type { Env } from '../../src/env';
-import { seedNode, seedUser, seedWorkspace } from './helpers/seed-d1';
+import {
+  seedInstallation,
+  seedNode,
+  seedProject,
+  seedUser,
+  seedWorkspace,
+} from './helpers/seed-d1';
 import type { VmAgentContainerTestDouble } from './support/vm-agent-container-double';
 
 /** Seed the bound VM_AGENT_CONTAINER double's lifecycle status for a node. */
@@ -249,12 +255,17 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
     // the container-lifecycle policy decides preserve vs terminalize.
     async function setupInstantSession(prefix: string) {
       const userId = `${prefix}-user`;
+      const installationId = `${prefix}-install`;
+      const projectId = `${prefix}-project`;
       const nodeId = `${prefix}-node`;
       const workspaceId = `${prefix}-workspace`;
-      const stub = getStub(`${prefix}-project`);
+      const stub = getStub(projectId);
+      await stub.ensureProjectId(projectId);
       const { acpSession, chatSessionId } = await createSessionPair(stub);
 
       await seedUser(userId);
+      await seedInstallation(installationId, userId, { installationIdValue: `${prefix}-ext` });
+      await seedProject(projectId, userId, installationId);
       await seedNode(nodeId, userId);
       await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
         .bind(nodeId)
@@ -262,6 +273,7 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
       // Workspace stays non-terminal ('sleeping') so the policy does NOT
       // short-circuit on workspace status and actually reaches the container RPC.
       await seedWorkspace(workspaceId, nodeId, userId, {
+        projectId,
         status: 'sleeping',
         chatSessionId,
       });
@@ -275,7 +287,7 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
         actorId: nodeId,
         acpSdkSessionId: `${prefix}-sdk`,
       });
-      return { stub, acpSession, workspaceId, nodeId };
+      return { stub, acpSession, workspaceId, nodeId, projectId };
     }
 
     function staleHeartbeat(
@@ -296,7 +308,8 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
 
     it('preserves a sleeping Instant session across repeated stale-heartbeat alarms', async () => {
       const prefix = `acp-instant-sleep-${Date.now()}-${crypto.randomUUID()}`;
-      const { stub, acpSession, workspaceId, nodeId } = await setupInstantSession(prefix);
+      const { stub, acpSession, workspaceId, nodeId, projectId } =
+        await setupInstantSession(prefix);
 
       // The real container is asleep (idle handback), not terminated.
       await seedContainerLifecycle(nodeId, 'sleeping');
@@ -305,10 +318,14 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
       // inspectLifecycle RPC + classifier ran — the reason is lifecycle-based,
       // NOT the 'cf_container_lifecycle_binding_unavailable' short-circuit that
       // masked this path when VM_AGENT_CONTAINER was unbound.
-      const decision = await shouldDeferRuntimeHeartbeatTimeout(env as unknown as Env, {
-        workspaceId,
-        nodeId,
-      });
+      const decision = await shouldDeferRuntimeHeartbeatTimeout(
+        env as unknown as Env,
+        {
+          workspaceId,
+          nodeId,
+        },
+        projectId
+      );
       expect(decision).toEqual({ defer: true, reason: 'cf_container_sleeping' });
 
       const nextAlarm = await staleHeartbeat(stub, acpSession.id, 2);
@@ -321,16 +338,21 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
 
     it('terminalizes an Instant session when the container lifecycle is terminal', async () => {
       const prefix = `acp-instant-stopped-${Date.now()}-${crypto.randomUUID()}`;
-      const { stub, acpSession, workspaceId, nodeId } = await setupInstantSession(prefix);
+      const { stub, acpSession, workspaceId, nodeId, projectId } =
+        await setupInstantSession(prefix);
 
       // The real container is terminated ('stopped') — the classifier treats
       // this as conclusively dead, so the heartbeat timeout must NOT be deferred.
       await seedContainerLifecycle(nodeId, 'stopped');
 
-      const decision = await shouldDeferRuntimeHeartbeatTimeout(env as unknown as Env, {
-        workspaceId,
-        nodeId,
-      });
+      const decision = await shouldDeferRuntimeHeartbeatTimeout(
+        env as unknown as Env,
+        {
+          workspaceId,
+          nodeId,
+        },
+        projectId
+      );
       expect(decision).toEqual({ defer: false, reason: 'cf_container_stopped' });
 
       await staleHeartbeat(stub, acpSession.id, 1);

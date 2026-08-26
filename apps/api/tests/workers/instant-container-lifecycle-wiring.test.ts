@@ -39,17 +39,17 @@ import type { VmAgentContainerTestDouble } from './support/vm-agent-container-do
 
 function getProjectStub(projectId: string): DurableObjectStub<ProjectData> {
   return env.PROJECT_DATA.get(
-    env.PROJECT_DATA.idFromName(projectId),
+    env.PROJECT_DATA.idFromName(projectId)
   ) as DurableObjectStub<ProjectData>;
 }
 
 function seedContainerLifecycle(
   nodeId: string,
-  status: VmAgentContainerLifecycleStatus,
+  status: VmAgentContainerLifecycleStatus
 ): Promise<void> {
   const ns = env.VM_AGENT_CONTAINER!;
   const stub = ns.get(
-    ns.idFromName(nodeId.toLowerCase()),
+    ns.idFromName(nodeId.toLowerCase())
   ) as unknown as DurableObjectStub<VmAgentContainerTestDouble>;
   return stub.__seedLifecycle(status);
 }
@@ -131,7 +131,11 @@ describe('Instant container lifecycle wiring — alarm + sweep', () => {
     // Policy runs the REAL inspectLifecycle RPC + classifier — reason is
     // lifecycle-based, NOT the binding-unavailable short-circuit.
     expect(
-      await shouldDeferRuntimeHeartbeatTimeout(env as unknown as Env, { workspaceId, nodeId }),
+      await shouldDeferRuntimeHeartbeatTimeout(
+        env as unknown as Env,
+        { workspaceId, nodeId },
+        projectId
+      )
     ).toEqual({ defer: true, reason: 'cf_container_sleeping' });
 
     // Actor 1 — ProjectData alarm stale-heartbeat pass: session stays running.
@@ -139,7 +143,7 @@ describe('Instant container lifecycle wiring — alarm + sweep', () => {
       state.storage.sql.exec(
         `UPDATE acp_sessions SET last_heartbeat_at = ? WHERE id = ?`,
         Date.now() - 10 * 60 * 1000,
-        acpSession.id,
+        acpSession.id
       );
       await instance.alarm();
     });
@@ -161,7 +165,11 @@ describe('Instant container lifecycle wiring — alarm + sweep', () => {
     await seedContainerLifecycle(nodeId, 'stopped');
 
     expect(
-      await shouldDeferRuntimeHeartbeatTimeout(env as unknown as Env, { workspaceId, nodeId }),
+      await shouldDeferRuntimeHeartbeatTimeout(
+        env as unknown as Env,
+        { workspaceId, nodeId },
+        projectId
+      )
     ).toEqual({ defer: false, reason: 'cf_container_stopped' });
 
     // The sweep now sees a conclusively-dead runtime and reconciles the task.

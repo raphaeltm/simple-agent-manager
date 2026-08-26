@@ -6,7 +6,7 @@
 
 - Node.js 18+, pnpm 8+, Go 1.24+
 - Working build: `pnpm install && pnpm build`
-- Familiarity with ProjectData DO (`apps/api/src/durable-objects/project-data.ts`)
+- Familiarity with ProjectData DO (`apps/api/src/durable-objects/project-data/index.ts`) and ACP session helpers (`apps/api/src/durable-objects/project-data/acp-sessions.ts`)
 
 ## Implementation Order
 
@@ -15,13 +15,13 @@ Build in this sequence (each step testable independently):
 ### Step 1: Data Model (DO Migration + Types)
 
 1. Add `acp_sessions` and `acp_session_events` tables to `apps/api/src/durable-objects/migrations.ts` (migration 008)
-2. Add `AcpSession`, `AcpSessionStatus`, `AcpSessionEvent` types to `packages/shared/src/types.ts`
+2. Add `AcpSession`, `AcpSessionStatus`, `AcpSessionEvent` types to `packages/shared/src/types/session.ts`
 3. Build shared: `pnpm --filter @simple-agent-manager/shared build`
 4. **Test**: Verify migration runs in Miniflare test
 
 ### Step 2: DO Session CRUD
 
-1. Add methods to `apps/api/src/durable-objects/project-data.ts`:
+1. Add public ProjectData methods to `apps/api/src/durable-objects/project-data/index.ts` backed by helpers in `apps/api/src/durable-objects/project-data/acp-sessions.ts`:
    - `createAcpSession()` — insert with status "pending"
    - `getAcpSession()` / `listAcpSessions()` — query
    - `transitionAcpSession()` — state machine enforcement
@@ -33,7 +33,7 @@ Build in this sequence (each step testable independently):
 
 ### Step 3: API Endpoints
 
-1. Add routes to `apps/api/src/routes/projects.ts`:
+1. Add routes to `apps/api/src/routes/projects/acp-sessions.ts`:
    - POST/GET for ACP sessions
    - Status report, heartbeat, fork, lineage endpoints
 2. Add reconciliation endpoint: GET `/api/nodes/:nodeId/acp-sessions`
@@ -55,7 +55,7 @@ Build in this sequence (each step testable independently):
 
 ### Step 6: Heartbeat + Interruption Detection
 
-1. Add DO alarm handler for heartbeat checking in `project-data.ts`
+1. Add DO alarm handler for heartbeat checking in `apps/api/src/durable-objects/project-data/index.ts`
 2. Wire heartbeat endpoint processing
 3. Treat stale ProjectData heartbeat rows as suspect for VM-backed sessions; only interrupt from explicit terminal ACP evidence, terminal owning workspace/node state, cf-container terminal lifecycle, or another authoritative runtime signal
 4. **Test**: Simulate conclusive runtime failure, verify session transitions to "interrupted"; simulate stale ProjectData heartbeat alone, verify VM work is preserved
@@ -75,18 +75,19 @@ Build in this sequence (each step testable independently):
 
 ## Key Files to Modify
 
-| File | What to Change |
-|------|----------------|
-| `apps/api/src/durable-objects/migrations.ts` | Add migration 008 |
-| `apps/api/src/durable-objects/project-data.ts` | Add ACP session methods |
-| `apps/api/src/services/project-data.ts` | Add service layer |
-| `apps/api/src/routes/projects.ts` | Add API endpoints |
-| `packages/shared/src/types.ts` | Add ACP session types |
-| `packages/shared/src/vm-agent-contract.ts` | Add reconciliation schemas |
-| `packages/vm-agent/internal/agentsessions/manager.go` | Add reconciliation + heartbeat |
-| `packages/vm-agent/internal/acp/session_host.go` | Report status changes |
-| `apps/web/src/components/SessionStatusBadge.tsx` | New component |
-| `apps/web/src/pages/ProjectChat.tsx` | Show session states + fork lineage |
+| File                                                        | What to Change                             |
+| ----------------------------------------------------------- | ------------------------------------------ |
+| `apps/api/src/durable-objects/migrations.ts`                | Add migration 008                          |
+| `apps/api/src/durable-objects/project-data/index.ts`        | Add ProjectData ACP session facade methods |
+| `apps/api/src/durable-objects/project-data/acp-sessions.ts` | Add ACP session CRUD/state-machine helpers |
+| `apps/api/src/services/project-data.ts`                     | Add service layer                          |
+| `apps/api/src/routes/projects/acp-sessions.ts`              | Add API endpoints                          |
+| `packages/shared/src/types/session.ts`                      | Add ACP session types                      |
+| `packages/shared/src/vm-agent-contract.ts`                  | Add reconciliation schemas                 |
+| `packages/vm-agent/internal/agentsessions/manager.go`       | Add reconciliation + heartbeat             |
+| `packages/vm-agent/internal/acp/session_host.go`            | Report status changes                      |
+| `apps/web/src/components/SessionStatusBadge.tsx`            | New component                              |
+| `apps/web/src/pages/ProjectChat.tsx`                        | Show session states + fork lineage         |
 
 ## Environment Variables
 

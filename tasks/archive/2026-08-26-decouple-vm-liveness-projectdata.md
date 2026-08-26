@@ -86,39 +86,44 @@ reread before destructive cleanup.
 ## Implementation checklist
 
 - [x] Add immediate liveness guardrails so stale, missing, timed-out, or
-  unobservable ProjectData ACP heartbeat data is suspect/unknown for VM runtime
-  tasks instead of conclusive runtime death.
+      unobservable ProjectData ACP heartbeat data is suspect/unknown for VM runtime
+      tasks instead of conclusive runtime death.
 - [x] Preserve conclusive terminalization for explicit terminal evidence and
-  terminal owning workspace/node state.
+      terminal owning workspace/node state.
 - [x] Update stuck-task tests so a healthy VM node with missing ProjectData ACP
-  rows is preserved, and a dead runtime still converges exactly once with
-  conclusive evidence.
+      rows is preserved, and a dead runtime still converges exactly once with
+      conclusive evidence.
 - [x] Update ProjectData runtime heartbeat timeout policy so non-container VM
-  sessions are not interrupted solely because ProjectData ACP heartbeat data is
-  stale.
+      sessions are not interrupted solely because ProjectData ACP heartbeat data is
+      stale.
 - [x] Move stuck-task destructive cleanup toward the canonical idempotent
-  terminal transition service, including just-in-time status checks/CAS before
-  cleanup.
+      terminal transition service, including just-in-time status checks/CAS before
+      cleanup.
 - [x] Scoped D1-backed runtime session leases and bounded VM node heartbeat
-  inventory to follow-up SAM Idea `01M0YDM9YPP2234VHY82W4NNN1`; this PR keeps
-  the immediate production safety fuse small enough to validate and ship.
+      inventory to follow-up SAM Idea `01M0YDM9YPP2234VHY82W4NNN1`; this PR keeps
+      the immediate production safety fuse small enough to validate and ship.
 - [x] Runtime inventory was not added in this PR, so VM-agent rollout remains
-  unchanged. Additive/version-aware rollout and "missing inventory is unknown,
-  not death" requirements are captured in follow-up SAM Idea
-  `01M0YDM9YPP2234VHY82W4NNN1`.
+      unchanged. Additive/version-aware rollout and "missing inventory is unknown,
+      not death" requirements are captured in follow-up SAM Idea
+      `01M0YDM9YPP2234VHY82W4NNN1`.
+- [x] The idea's `liveness-v2` off/shadow/enforce rollout mode is explicitly
+      deferred with the runtime-inventory lease work above. This emergency PR ships
+      the fail-safe behavior directly because the requested Phase 0 priority is to
+      stop stale/missing ProjectData heartbeat data from being treated as conclusive
+      VM death.
 - [x] Bound ProjectData alarm maintenance by keeping hot-path storage checks O(1)
-  with `sql.databaseSize`, moving category breakdown scans out of ordinary alarm
-  execution, and ensuring cleanup batches are indexed/bounded with cursor/yield
-  behavior.
+      with `sql.databaseSize`, moving category breakdown scans out of ordinary alarm
+      execution, and ensuring cleanup batches are indexed/bounded with cursor/yield
+      behavior.
 - [x] Reorder or isolate ProjectData alarm work so lifecycle/control bookkeeping
-  is not delayed by optional storage maintenance.
+      is not delayed by optional storage maintenance.
 - [x] Add telemetry for storage alarm duration, rows, bytes, and budget decisions
-  where missing.
+      where missing.
 - [x] Replace repeated per-secret `wrangler secret put` / delete loops in
-  `scripts/deploy/configure-secrets.sh` with a bulk/bounded secret workflow that
-  never logs secret values.
+      `scripts/deploy/configure-secrets.sh` with a bulk/bounded secret workflow that
+      never logs secret values.
 - [x] Update public/internal documentation and environment references for any new
-  liveness, storage, or deploy-secret settings.
+      liveness, storage, or deploy-secret settings.
 - [x] Run targeted unit and Miniflare/workerd tests proving:
   - healthy VM/runtime survives blocked, stale, or missing ProjectData ACP data;
   - conclusive terminal evidence still fails dead work;
@@ -165,9 +170,10 @@ the PR description per phases 5-7.
 - Bootstrap task-file PR `#1926` was required because direct push to `main` was
   rejected by branch protection. No implementation changes belong in that PR.
 - `apps/api/src/services/task-runtime-liveness.ts`
-- `apps/api/src/services/stuck-tasks.ts`
 - `apps/api/src/scheduled/stuck-tasks.ts`
-- `apps/api/src/durable-objects/project-data.ts`
+- `apps/api/src/durable-objects/project-data/index.ts`
+- `apps/api/src/durable-objects/project-data/runtime-heartbeat-policy.ts`
+- `apps/api/src/durable-objects/project-data/acp-sessions.ts`
 - `apps/api/src/durable-objects/project-data/index.ts`
 - `apps/api/src/durable-objects/project-data/runtime-heartbeat-policy.ts`
 - `apps/api/src/durable-objects/project-data/storage-safety.ts`

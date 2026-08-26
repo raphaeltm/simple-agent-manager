@@ -68,15 +68,16 @@ Set as `[vars]` in `wrangler.toml` or as environment variables:
 
 Set in GitHub Settings → Environments → production:
 
-| Variable                                           | Description                                                                                                                                         | Example                                  |
-| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `BASE_DOMAIN`                                      | Deployment domain                                                                                                                                   | `example.com`                            |
-| `RESOURCE_PREFIX`                                  | Domain-derived Cloudflare resource name prefix                                                                                                      | `sa379a6`                                |
-| `PULUMI_STATE_BUCKET`                              | R2 bucket for Pulumi state                                                                                                                          | `sa379a6-pulumi-state`                   |
-| `CF_CONTAINER_ENABLED`                             | Optional instant-session runtime toggle. Generated deploys default to `true`; set `false` to force VM runtime.                                      | `false`                                  |
-| `D1_RESTORE_RECOVERY_WINDOW_DAYS`                  | Optional D1 restore window for accounts with narrower retention. Defaults to `30`; range `1`–`30`.                                                  | `7`                                      |
-| `D1_MIGRATION_CHURNING_TABLES`                     | Optional comma-separated `<binding>.<table>` subset of the reviewed retention/expiry table list. May narrow the built-in list but cannot expand it. | `OBSERVABILITY_DATABASE.platform_errors` |
-| `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | Maximum allowed decrease for reviewed churning tables. Defaults to `50`; range `0`–`100`. A decrease exactly at the limit is accepted.              | `25`                                     |
+| Variable                                           | Description                                                                                                                                                      | Example                                  |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `BASE_DOMAIN`                                      | Deployment domain                                                                                                                                                | `example.com`                            |
+| `RESOURCE_PREFIX`                                  | Domain-derived Cloudflare resource name prefix                                                                                                                   | `sa379a6`                                |
+| `PULUMI_STATE_BUCKET`                              | R2 bucket for Pulumi state                                                                                                                                       | `sa379a6-pulumi-state`                   |
+| `CF_CONTAINER_ENABLED`                             | Optional instant-session runtime toggle. Generated deploys default to `true`; set `false` to force VM runtime.                                                   | `false`                                  |
+| `WORKER_SECRET_BULK_MAX_OPS`                       | Optional deploy-script limit for queued Worker secret create/update/delete operations in one `wrangler secret bulk` payload. Defaults to `100`; range `1`–`100`. | `75`                                     |
+| `D1_RESTORE_RECOVERY_WINDOW_DAYS`                  | Optional D1 restore window for accounts with narrower retention. Defaults to `30`; range `1`–`30`.                                                               | `7`                                      |
+| `D1_MIGRATION_CHURNING_TABLES`                     | Optional comma-separated `<binding>.<table>` subset of the reviewed retention/expiry table list. May narrow the built-in list but cannot expand it.              | `OBSERVABILITY_DATABASE.platform_errors` |
+| `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | Maximum allowed decrease for reviewed churning tables. Defaults to `50`; range `0`–`100`. A decrease exactly at the limit is accepted.                           | `25`                                     |
 
 The reviewed default churning selectors are `DATABASE.deployment_releases`, `DATABASE.github_webhook_deliveries`, `DATABASE.project_files`, `DATABASE.registry_credential_rate_limits`, `DATABASE.session_snapshots`, `DATABASE.sessions`, `DATABASE.trial_waitlist`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. All other application tables retain zero row-decrease tolerance. Leave `D1_MIGRATION_CHURNING_TABLES` unset to use the complete reviewed default list.
 
@@ -358,7 +359,7 @@ Pulumi options `diagnosticIncidentPrefix` (default `diagnostic-incidents`) and `
 | `PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS`                 | `600000`     | Claim lease duration before a later sweep can reclaim the group                                                                                                                           |
 | `PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES`                 | `3`          | Maximum failed attempts before a group is rejected from auto-triage                                                                                                                       |
 | `PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH`    | `240`        | Maximum characters stored or returned for sanitized failure reasons                                                                                                                       |
-| `PLATFORM_FEEDBACK_TRIAGE_BUDGET_DEFER_MS`              | `86400000`   | Retry delay for per-run budget deferrals                                                                                                                                                 |
+| `PLATFORM_FEEDBACK_TRIAGE_BUDGET_DEFER_MS`              | `86400000`   | Retry delay for per-run budget deferrals                                                                                                                                                  |
 | `PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS`      | `7200000`    | Dispatch lease before a failed incident trigger handoff can be reclaimed                                                                                                                  |
 | `PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS`         | `3600000`    | Agent claim lease before another task can reclaim a private incident                                                                                                                      |
 | `PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS`      | `3`          | Expired dispatch attempts before an incident is rejected                                                                                                                                  |
@@ -585,35 +586,35 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 
 ## ACP Session Lifecycle
 
-| Variable                                | Default          | Description                                          |
-| --------------------------------------- | ---------------- | ---------------------------------------------------- |
+| Variable                                | Default          | Description                                                                                                                                                                                                    |
+| --------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ACP_SESSION_DETECTION_WINDOW_MS`       | `300000` (5 min) | Stale ProjectData ACP heartbeat detection window. VM sessions are not interrupted solely from stale/missing ProjectData heartbeat rows; the timeout must be paired with conclusive runtime/workspace evidence. |
-| `ACP_SESSION_HEARTBEAT_INTERVAL_MS`     | `60000` (60s)    | How often VM agent sends heartbeats                  |
-| `ACP_SESSION_RECONCILIATION_TIMEOUT_MS` | `30000` (30s)    | VM agent startup reconciliation timeout              |
-| `ACP_SESSION_MAX_FORK_DEPTH`            | `10`             | Maximum session fork chain depth                     |
-| `ACP_SESSION_FORK_CONTEXT_MESSAGES`     | `20`             | Context messages included when forking               |
+| `ACP_SESSION_HEARTBEAT_INTERVAL_MS`     | `60000` (60s)    | How often VM agent sends heartbeats                                                                                                                                                                            |
+| `ACP_SESSION_RECONCILIATION_TIMEOUT_MS` | `30000` (30s)    | VM agent startup reconciliation timeout                                                                                                                                                                        |
+| `ACP_SESSION_MAX_FORK_DEPTH`            | `10`             | Maximum session fork chain depth                                                                                                                                                                               |
+| `ACP_SESSION_FORK_CONTEXT_MESSAGES`     | `20`             | Context messages included when forking                                                                                                                                                                         |
 
 ## ACP Protocol (VM Agent)
 
-| Variable                            | Default | Description                                                      |
-| ----------------------------------- | ------- | ---------------------------------------------------------------- |
-| `ACP_MESSAGE_BUFFER_SIZE`           | `5000`  | Buffer size for ACP messages                                     |
-| `ACP_STDERR_BUFFER_BYTES`           | `4096`  | Agent stderr bytes retained for crash reports                    |
-| `ACP_PING_INTERVAL`                 | `30s`   | WebSocket keepalive ping interval                                |
-| `ACP_PONG_TIMEOUT`                  | `10s`   | Pong response timeout                                            |
-| `ACP_TASK_PROMPT_TIMEOUT`           | `8h`    | Task execution prompt timeout                                    |
-| `ACP_PROMPT_RETRY_MAX_RETRIES`      | `2`     | Max transient provider prompt retries after the initial attempt  |
-| `ACP_PROMPT_RETRY_INITIAL_BACKOFF`  | `15s`   | Initial backoff before retrying transient provider prompt errors |
-| `ACP_PROMPT_RETRY_MAX_BACKOFF`      | `2m`    | Max exponential backoff for transient provider prompt retries    |
-| `ACTIVITY_REREPORT_INTERVAL`        | `60s`   | Re-send prompting activity while a prompt is active              |
+| Variable                               | Default | Description                                                      |
+| -------------------------------------- | ------- | ---------------------------------------------------------------- |
+| `ACP_MESSAGE_BUFFER_SIZE`              | `5000`  | Buffer size for ACP messages                                     |
+| `ACP_STDERR_BUFFER_BYTES`              | `4096`  | Agent stderr bytes retained for crash reports                    |
+| `ACP_PING_INTERVAL`                    | `30s`   | WebSocket keepalive ping interval                                |
+| `ACP_PONG_TIMEOUT`                     | `10s`   | Pong response timeout                                            |
+| `ACP_TASK_PROMPT_TIMEOUT`              | `8h`    | Task execution prompt timeout                                    |
+| `ACP_PROMPT_RETRY_MAX_RETRIES`         | `2`     | Max transient provider prompt retries after the initial attempt  |
+| `ACP_PROMPT_RETRY_INITIAL_BACKOFF`     | `15s`   | Initial backoff before retrying transient provider prompt errors |
+| `ACP_PROMPT_RETRY_MAX_BACKOFF`         | `2m`    | Max exponential backoff for transient provider prompt retries    |
+| `ACTIVITY_REREPORT_INTERVAL`           | `60s`   | Re-send prompting activity while a prompt is active              |
 | `ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE` | `750ms` | Debounce ACP harness/tool-call activity reports before callbacks |
-| `ACP_CHECKPOINT_PREEMPT_GRACE`      | `30s`   | Graceful ACP cancel/close wait before harness force-stop         |
-| `ACP_CHECKPOINT_PREEMPT_MAX_GRACE`  | `2m`    | Maximum caller-selected checkpoint rollover grace                |
-| `ACP_CHECKPOINT_ROLLOVER_TIMEOUT`   | `2m`    | Full checkpoint restart and strict LoadSession deadline          |
-| `ACTIVITY_TERMINAL_REPORT_ATTEMPTS` | `5`     | Retry attempts for terminal activity reports                     |
-| `ACTIVITY_TERMINAL_REPORT_BACKOFF`  | `1s`    | Backoff between terminal activity report retries                 |
-| `ACP_IDLE_SUSPEND_TIMEOUT`          | `30m`   | Idle session auto-suspend timeout                                |
-| `ACP_NOTIF_SERIALIZE_TIMEOUT`       | `5s`    | Notification serialization timeout                               |
+| `ACP_CHECKPOINT_PREEMPT_GRACE`         | `30s`   | Graceful ACP cancel/close wait before harness force-stop         |
+| `ACP_CHECKPOINT_PREEMPT_MAX_GRACE`     | `2m`    | Maximum caller-selected checkpoint rollover grace                |
+| `ACP_CHECKPOINT_ROLLOVER_TIMEOUT`      | `2m`    | Full checkpoint restart and strict LoadSession deadline          |
+| `ACTIVITY_TERMINAL_REPORT_ATTEMPTS`    | `5`     | Retry attempts for terminal activity reports                     |
+| `ACTIVITY_TERMINAL_REPORT_BACKOFF`     | `1s`    | Backoff between terminal activity report retries                 |
+| `ACP_IDLE_SUSPEND_TIMEOUT`             | `30m`   | Idle session auto-suspend timeout                                |
+| `ACP_NOTIF_SERIALIZE_TIMEOUT`          | `5s`    | Notification serialization timeout                               |
 
 ## MCP (Agent Tools)
 
@@ -787,58 +788,58 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 
 ## Durable Object Limits
 
-| Variable                                      | Default           | Description                                                                                                                                                                      |
-| --------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MAX_SESSIONS_PER_PROJECT`                    | `10000`           | Max chat sessions per project                                                                                                                                                    |
-| `MAX_MESSAGES_PER_SESSION`                    | `100000`          | Max messages per chat session                                                                                                                                                    |
-| `COMMENT_BODY_MAX_LENGTH`                     | `8000`            | Max characters per message-anchored comment or reply body                                                                                                                        |
-| `COMMENT_QUOTE_MAX_LENGTH`                    | `2000`            | Max characters preserved from quoted message text                                                                                                                                |
-| `COMMENT_IDEMPOTENCY_KEY_MAX_LENGTH`          | `200`             | Max `clientMutationId` length for message-anchored comment writes                                                                                                                |
-| `COMMENT_LIST_LIMIT_DEFAULT`                  | `100`             | Default page size for comment thread lists                                                                                                                                       |
-| `COMMENT_LIST_LIMIT_MAX`                      | `500`             | Max page size for comment thread lists                                                                                                                                           |
-| `COMMENT_THREADS_PER_SESSION_MAX`             | `1000`            | Max message-anchored comment threads per chat session                                                                                                                            |
-| `COMMENT_REPLIES_PER_THREAD_MAX`              | `200`             | Max replies per message-anchored comment thread                                                                                                                                  |
-| `PROJECT_COMMENT_LIST_LIMIT`                  | `100`             | Page size for the project-wide comment inbox                                                                                                                                     |
-| `PROJECT_COMMENT_LIST_MAX`                    | `300`             | Max page size for the project-wide comment inbox                                                                                                                                 |
-| `PROJECT_COMMENT_LIST_MAX_BYTES`              | `4000000`         | Byte budget for one project-wide comment inbox response, so a few very long threads cannot exhaust the Durable Object RPC limit                                                  |
-| `DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES`          | `16384`           | Max compact metadata bytes preserved for library document cards                                                                                                                  |
-| `PROJECT_DATA_TOOL_METADATA_MAX_BYTES`        | `131072`          | Max stored `tool_metadata` bytes per message before oversized tool content is stripped into bounded metadata                                                                     |
-| `PROJECT_DATA_STORAGE_TELEMETRY_ENABLED`      | `true`            | Enables ProjectData `databaseSize` alarm measurement and D1 telemetry writes                                                                                                     |
-| `PROJECT_DATA_STORAGE_LIMIT_BYTES`            | `10000000000`     | Cloudflare SQLite-backed Durable Object storage limit used for ProjectData usage classification                                                                                  |
-| `PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS`    | `3600000`         | Minimum interval between per-object ProjectData storage measurements                                                                                                             |
-| `PROJECT_DATA_STORAGE_ALERT_INTERVAL_MS`      | `21600000`        | Minimum interval between repeated warning/critical/degraded ProjectData storage observability alerts and cleanup target-unreachable alerts                                        |
-| `PROJECT_DATA_STORAGE_NOTICE_RATIO`           | `0.6`             | ProjectData storage usage ratio classified as `notice`                                                                                                                           |
-| `PROJECT_DATA_STORAGE_WARNING_RATIO`          | `0.8`             | ProjectData storage usage ratio classified as `warning`                                                                                                                          |
-| `PROJECT_DATA_STORAGE_CRITICAL_RATIO`         | `0.9`             | ProjectData storage usage ratio classified as `critical`                                                                                                                         |
-| `PROJECT_DATA_STORAGE_DEGRADED_RATIO`         | `0.95`            | ProjectData storage usage ratio classified as `degraded`                                                                                                                         |
-| `PROJECT_DATA_STORAGE_EMERGENCY_TARGET_RATIO` | `0.9`             | Target usage ratio for explicit superadmin ProjectData emergency purge calls                                                                                                     |
-| `PROJECT_DATA_STORAGE_EMERGENCY_BATCH_ROWS`   | `500`             | Oldest `activity_events` and `acp_session_events` rows deleted per table per emergency purge batch                                                                               |
-| `PROJECT_DATA_STORAGE_EMERGENCY_MAX_BATCHES`  | `4`               | Maximum emergency purge batches per explicit call                                                                                                                                |
-| `PROJECT_DATA_STORAGE_GROWTH_LOOKBACK_DAYS`   | `7`               | Lookback window used to estimate ProjectData bytes/day growth and days to storage limit                                                                                          |
-| `PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_DEFAULT` | `50`       | Default row count for admin ProjectData storage telemetry and history lists                                                                                                       |
-| `PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_MAX` | `200`          | Max accepted row count for admin ProjectData storage telemetry and history lists                                                                                                  |
-| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED`   | `true`            | Enables automatic ProjectData cleanup that strips expandable `tool_metadata.content` payloads from old terminal-session tool messages under storage pressure                     |
-| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO` | `0.8`          | ProjectData storage usage ratio that starts automatic terminal-session tool payload cleanup                                                                                       |
-| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO` | `0.75`         | ProjectData storage usage ratio below which automatic tool payload cleanup stops                                                                                                  |
-| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS` | `500`            | Maximum tool-message rows inspected by one automatic cleanup alarm batch                                                                                                         |
-| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES` | `1048576`      | Maximum legacy `tool_metadata` bytes read into JS by one automatic cleanup alarm batch                                                                                            |
-| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS` | `7`    | Minimum terminal-session age before automatic cleanup may strip stored tool payload content                                                                                       |
-| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS` | `60000`          | Delay before the next automatic cleanup alarm batch when more candidates remain                                                                                                   |
-| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM` | `25` | Maximum terminal sessions scanned by one automatic cleanup alarm batch                                                                                                           |
-| `PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED`      | `true`            | Enables automatic deletion of old low-value terminal-session `activity_events` and terminal ACP event history when storage remains above the cleanup target                      |
-| `PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS`   | `500`             | Maximum terminal `activity_events` rows and terminal `acp_session_events` rows deleted per automatic cleanup alarm batch                                                         |
-| `PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS` | `7`     | Minimum terminal-session age before automatic event-log cleanup may delete its activity/ACP event history                                                                         |
-| `PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS`   | `60000`           | Delay before the next terminal event-log cleanup alarm batch when more candidates remain                                                                                          |
-| `MESSAGE_SIZE_THRESHOLD`                      | `102400`          | Max message size in bytes                                                                                                                                                        |
-| `ACTIVITY_RETENTION_DAYS`                     | `90`              | Days to retain activity events                                                                                                                                                   |
-| `SESSION_IDLE_TIMEOUT_MINUTES`                | `60`              | Idle session timeout                                                                                                                                                             |
-| `SESSION_ACTIVITY_STALE_THRESHOLD_MS`         | `300000` (5 min)  | Evidence threshold before stale working activity can be healed to idle                                                                                                           |
-| `SESSION_ACTIVITY_PROBE_TIMEOUT_MS`           | `5000` (5 s)      | Timeout for the vm-agent session-activity probe. Background control-loop budget — deliberately far below the interactive node-agent timeout                                      |
-| `SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS`         | `3`               | Consecutive unreachable probes after which a stale working state is terminalized as dead                                                                                         |
-| `SESSION_ACTIVITY_PROBE_MAX_CANDIDATES`       | `10`              | Stale-activity candidates probed per ProjectData alarm pass                                                                                                                      |
-| `DO_SUMMARY_SYNC_DEBOUNCE_MS`                 | `5000`            | Debounce for DO-to-D1 summary sync                                                                                                                                               |
-| `SESSION_INDEX_MAX_ROWS`                      | `1000`            | Sessions mirrored into the D1 `session_summaries` index per project. A project holding more is recorded as incomplete and its chat sidebar reads fall back to the Durable Object |
-| `SESSION_INDEX_MAX_STALENESS_MS`              | `900000` (15 min) | How stale the session index may be before the per-project sidebar list stops trusting it and falls back to the Durable Object                                                    |
+| Variable                                                   | Default           | Description                                                                                                                                                                      |
+| ---------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MAX_SESSIONS_PER_PROJECT`                                 | `10000`           | Max chat sessions per project                                                                                                                                                    |
+| `MAX_MESSAGES_PER_SESSION`                                 | `100000`          | Max messages per chat session                                                                                                                                                    |
+| `COMMENT_BODY_MAX_LENGTH`                                  | `8000`            | Max characters per message-anchored comment or reply body                                                                                                                        |
+| `COMMENT_QUOTE_MAX_LENGTH`                                 | `2000`            | Max characters preserved from quoted message text                                                                                                                                |
+| `COMMENT_IDEMPOTENCY_KEY_MAX_LENGTH`                       | `200`             | Max `clientMutationId` length for message-anchored comment writes                                                                                                                |
+| `COMMENT_LIST_LIMIT_DEFAULT`                               | `100`             | Default page size for comment thread lists                                                                                                                                       |
+| `COMMENT_LIST_LIMIT_MAX`                                   | `500`             | Max page size for comment thread lists                                                                                                                                           |
+| `COMMENT_THREADS_PER_SESSION_MAX`                          | `1000`            | Max message-anchored comment threads per chat session                                                                                                                            |
+| `COMMENT_REPLIES_PER_THREAD_MAX`                           | `200`             | Max replies per message-anchored comment thread                                                                                                                                  |
+| `PROJECT_COMMENT_LIST_LIMIT`                               | `100`             | Page size for the project-wide comment inbox                                                                                                                                     |
+| `PROJECT_COMMENT_LIST_MAX`                                 | `300`             | Max page size for the project-wide comment inbox                                                                                                                                 |
+| `PROJECT_COMMENT_LIST_MAX_BYTES`                           | `4000000`         | Byte budget for one project-wide comment inbox response, so a few very long threads cannot exhaust the Durable Object RPC limit                                                  |
+| `DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES`                       | `16384`           | Max compact metadata bytes preserved for library document cards                                                                                                                  |
+| `PROJECT_DATA_TOOL_METADATA_MAX_BYTES`                     | `131072`          | Max stored `tool_metadata` bytes per message before oversized tool content is stripped into bounded metadata                                                                     |
+| `PROJECT_DATA_STORAGE_TELEMETRY_ENABLED`                   | `true`            | Enables ProjectData `databaseSize` alarm measurement and D1 telemetry writes                                                                                                     |
+| `PROJECT_DATA_STORAGE_LIMIT_BYTES`                         | `10000000000`     | Cloudflare SQLite-backed Durable Object storage limit used for ProjectData usage classification                                                                                  |
+| `PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS`                 | `3600000`         | Minimum interval between per-object ProjectData storage measurements                                                                                                             |
+| `PROJECT_DATA_STORAGE_ALERT_INTERVAL_MS`                   | `21600000`        | Minimum interval between repeated warning/critical/degraded ProjectData storage observability alerts and cleanup target-unreachable alerts                                       |
+| `PROJECT_DATA_STORAGE_NOTICE_RATIO`                        | `0.6`             | ProjectData storage usage ratio classified as `notice`                                                                                                                           |
+| `PROJECT_DATA_STORAGE_WARNING_RATIO`                       | `0.8`             | ProjectData storage usage ratio classified as `warning`                                                                                                                          |
+| `PROJECT_DATA_STORAGE_CRITICAL_RATIO`                      | `0.9`             | ProjectData storage usage ratio classified as `critical`                                                                                                                         |
+| `PROJECT_DATA_STORAGE_DEGRADED_RATIO`                      | `0.95`            | ProjectData storage usage ratio classified as `degraded`                                                                                                                         |
+| `PROJECT_DATA_STORAGE_EMERGENCY_TARGET_RATIO`              | `0.9`             | Target usage ratio for explicit superadmin ProjectData emergency purge calls                                                                                                     |
+| `PROJECT_DATA_STORAGE_EMERGENCY_BATCH_ROWS`                | `500`             | Oldest `activity_events` and `acp_session_events` rows deleted per table per emergency purge batch                                                                               |
+| `PROJECT_DATA_STORAGE_EMERGENCY_MAX_BATCHES`               | `4`               | Maximum emergency purge batches per explicit call                                                                                                                                |
+| `PROJECT_DATA_STORAGE_GROWTH_LOOKBACK_DAYS`                | `7`               | Lookback window used to estimate ProjectData bytes/day growth and days to storage limit                                                                                          |
+| `PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_DEFAULT`        | `50`              | Default row count for admin ProjectData storage telemetry and history lists                                                                                                      |
+| `PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_MAX`            | `200`             | Max accepted row count for admin ProjectData storage telemetry and history lists                                                                                                 |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED`                | `true`            | Enables automatic ProjectData cleanup that strips expandable `tool_metadata.content` payloads from old terminal-session tool messages under storage pressure                     |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO`          | `0.8`             | ProjectData storage usage ratio that starts automatic terminal-session tool payload cleanup                                                                                      |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO`           | `0.75`            | ProjectData storage usage ratio below which automatic tool payload cleanup stops                                                                                                 |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS`             | `500`             | Maximum tool-message rows inspected by one automatic cleanup alarm batch                                                                                                         |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES`            | `1048576`         | Maximum legacy `tool_metadata` bytes read into JS by one automatic cleanup alarm batch                                                                                           |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS`   | `7`               | Minimum terminal-session age before automatic cleanup may strip stored tool payload content                                                                                      |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS`             | `60000`           | Delay before the next automatic cleanup alarm batch when more candidates remain                                                                                                  |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM` | `25`              | Maximum terminal sessions scanned by one automatic cleanup alarm batch                                                                                                           |
+| `PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED`                   | `true`            | Enables automatic deletion of old low-value terminal-session `activity_events` and terminal ACP event history when storage remains above the cleanup target                      |
+| `PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS`                | `500`             | Maximum terminal `activity_events` rows and terminal `acp_session_events` rows deleted per automatic cleanup alarm batch                                                         |
+| `PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS`      | `7`               | Minimum terminal-session age before automatic event-log cleanup may delete its activity/ACP event history                                                                        |
+| `PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS`                | `60000`           | Delay before the next terminal event-log cleanup alarm batch when more candidates remain                                                                                         |
+| `MESSAGE_SIZE_THRESHOLD`                                   | `102400`          | Max message size in bytes                                                                                                                                                        |
+| `ACTIVITY_RETENTION_DAYS`                                  | `90`              | Days to retain activity events                                                                                                                                                   |
+| `SESSION_IDLE_TIMEOUT_MINUTES`                             | `60`              | Idle session timeout                                                                                                                                                             |
+| `SESSION_ACTIVITY_STALE_THRESHOLD_MS`                      | `300000` (5 min)  | Evidence threshold before stale working activity can be healed to idle                                                                                                           |
+| `SESSION_ACTIVITY_PROBE_TIMEOUT_MS`                        | `5000` (5 s)      | Timeout for the vm-agent session-activity probe. Background control-loop budget — deliberately far below the interactive node-agent timeout                                      |
+| `SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS`                      | `3`               | Consecutive unreachable probes after which a stale working state is terminalized as dead                                                                                         |
+| `SESSION_ACTIVITY_PROBE_MAX_CANDIDATES`                    | `10`              | Stale-activity candidates probed per ProjectData alarm pass                                                                                                                      |
+| `DO_SUMMARY_SYNC_DEBOUNCE_MS`                              | `5000`            | Debounce for DO-to-D1 summary sync                                                                                                                                               |
+| `SESSION_INDEX_MAX_ROWS`                                   | `1000`            | Sessions mirrored into the D1 `session_summaries` index per project. A project holding more is recorded as incomplete and its chat sidebar reads fall back to the Durable Object |
+| `SESSION_INDEX_MAX_STALENESS_MS`                           | `900000` (15 min) | How stale the session index may be before the per-project sidebar list stops trusting it and falls back to the Durable Object                                                    |
 
 Ordinary ProjectData storage alarms record O(1) `databaseSize` telemetry and bounded cleanup row/byte counters. Category breakdown scans are reserved for explicit/admin measurement paths so hot ProjectData alarms do not delay lifecycle bookkeeping.
 
@@ -970,35 +971,35 @@ Applied via cloud-init on each node:
 
 ## Web UI (Build-Time)
 
-| Variable                                   | Default            | Description                                                              |
-| ------------------------------------------ | ------------------ | ------------------------------------------------------------------------ |
-| `VITE_FILE_PREVIEW_INLINE_MAX_BYTES`       | `10485760` (10 MB) | Images below this size render inline automatically                       |
-| `VITE_FILE_PREVIEW_LOAD_MAX_BYTES`         | `52428800` (50 MB) | Images below this size show click-to-load; above shows download link     |
-| `VITE_ANALYTICS_MAX_QUEUE_SIZE`            | `100`              | Max client-side analytics events retained before oldest events drop      |
-| `VITE_ANALYTICS_FLUSH_THRESHOLD`           | `10`               | Client event count that triggers an immediate analytics flush            |
-| `VITE_ANALYTICS_FLUSH_INTERVAL_MS`         | `5000`             | Client analytics background flush interval in milliseconds               |
-| `VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES`     | `100`              | Max paginated diagnosis-event pages loaded per browser request           |
-| `VITE_PROJECT_LIST_LIMIT`                  | `50`               | Projects loaded into each shared list-cache entry                        |
-| `VITE_PROJECT_POLL_INTERVAL_MS`            | `30000`            | Project-list page refresh cadence in milliseconds; `0` disables          |
-| `VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS`    | `60000`            | App-shell project-list refresh cadence in milliseconds; `0` disables     |
-| `VITE_WORKSPACE_PORTS_POLL_MS`             | `10000`            | Workspace forwarded-port base refresh cadence in milliseconds            |
-| `VITE_WORKSPACE_PORTS_BACKOFF_MAX_MS`      | `120000`           | Maximum backoff between forwarded-port readiness polls                   |
-| `VITE_WORKSPACE_PORTS_FAILURE_BUDGET`      | `6`                | Consecutive unavailable port-list responses before circuit cooldown      |
-| `VITE_WORKSPACE_PORTS_BACKOFF_JITTER_RATIO` | `0.2`             | +/- jitter ratio applied to forwarded-port readiness backoff delays      |
-| `VITE_WORKSPACE_PORTS_CIRCUIT_RESET_MS`    | `300000`           | Open-circuit cooldown before probing forwarded-port readiness again      |
-| `VITE_PROJECT_PREFETCH_DELAY_MS`           | `120`              | Mouse dwell before project-detail prefetch; focus/touch are immediate    |
-| `VITE_BACKGROUND_FETCH_DELAY_MS`           | `150`              | Delay before background query activity is shown and announced            |
-| `VITE_CHUNK_LOAD_RETRY_DELAY_MS`           | `350`              | Wait before retrying a failed lazy route-chunk import                    |
-| `VITE_CHUNK_RELOAD_COOLDOWN_MS`            | `15000`            | Minimum gap between chunk-recovery reloads; guards against a reload loop |
-| `VITE_ROUTE_FALLBACK_REVEAL_DELAY_MS`      | `180`              | Delay before the route loading spinner fades in, avoiding a flash        |
-| `VITE_QUERY_PERSIST_MAX_AGE_MS`            | `86400000` (24 h)  | How long a persisted query-cache record may be restored after writing    |
-| `VITE_QUERY_PERSIST_THROTTLE_MS`           | `1000`             | Minimum gap between IndexedDB writes of the query cache                  |
-| `VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS`    | `250`              | Budget for the initial cache restore before failing open to no cache     |
-| `VITE_AGENT_CATALOG_STALE_TIME_MS`         | `300000`           | Freshness window for the installable agent catalog query                 |
-| `VITE_PROVIDER_CATALOG_STALE_TIME_MS`      | `300000`           | Freshness window for provider catalog size/location/price metadata       |
-| `VITE_TRIAL_STATUS_STALE_TIME_MS`          | `60000`            | Freshness window for trial availability status                           |
-| `VITE_CACHED_COMMANDS_STALE_TIME_MS`       | `300000`           | Freshness window for cached slash-command registries                     |
-| `VITE_PROJECT_CREATE_CONFIG_STALE_TIME_MS` | `300000`           | Freshness window for project-creation config flags                       |
+| Variable                                    | Default            | Description                                                              |
+| ------------------------------------------- | ------------------ | ------------------------------------------------------------------------ |
+| `VITE_FILE_PREVIEW_INLINE_MAX_BYTES`        | `10485760` (10 MB) | Images below this size render inline automatically                       |
+| `VITE_FILE_PREVIEW_LOAD_MAX_BYTES`          | `52428800` (50 MB) | Images below this size show click-to-load; above shows download link     |
+| `VITE_ANALYTICS_MAX_QUEUE_SIZE`             | `100`              | Max client-side analytics events retained before oldest events drop      |
+| `VITE_ANALYTICS_FLUSH_THRESHOLD`            | `10`               | Client event count that triggers an immediate analytics flush            |
+| `VITE_ANALYTICS_FLUSH_INTERVAL_MS`          | `5000`             | Client analytics background flush interval in milliseconds               |
+| `VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES`      | `100`              | Max paginated diagnosis-event pages loaded per browser request           |
+| `VITE_PROJECT_LIST_LIMIT`                   | `50`               | Projects loaded into each shared list-cache entry                        |
+| `VITE_PROJECT_POLL_INTERVAL_MS`             | `30000`            | Project-list page refresh cadence in milliseconds; `0` disables          |
+| `VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS`     | `60000`            | App-shell project-list refresh cadence in milliseconds; `0` disables     |
+| `VITE_WORKSPACE_PORTS_POLL_MS`              | `10000`            | Workspace forwarded-port base refresh cadence in milliseconds            |
+| `VITE_WORKSPACE_PORTS_BACKOFF_MAX_MS`       | `120000`           | Maximum backoff between forwarded-port readiness polls                   |
+| `VITE_WORKSPACE_PORTS_FAILURE_BUDGET`       | `6`                | Consecutive unavailable port-list responses before circuit cooldown      |
+| `VITE_WORKSPACE_PORTS_BACKOFF_JITTER_RATIO` | `0.2`              | +/- jitter ratio applied to forwarded-port readiness backoff delays      |
+| `VITE_WORKSPACE_PORTS_CIRCUIT_RESET_MS`     | `300000`           | Open-circuit cooldown before probing forwarded-port readiness again      |
+| `VITE_PROJECT_PREFETCH_DELAY_MS`            | `120`              | Mouse dwell before project-detail prefetch; focus/touch are immediate    |
+| `VITE_BACKGROUND_FETCH_DELAY_MS`            | `150`              | Delay before background query activity is shown and announced            |
+| `VITE_CHUNK_LOAD_RETRY_DELAY_MS`            | `350`              | Wait before retrying a failed lazy route-chunk import                    |
+| `VITE_CHUNK_RELOAD_COOLDOWN_MS`             | `15000`            | Minimum gap between chunk-recovery reloads; guards against a reload loop |
+| `VITE_ROUTE_FALLBACK_REVEAL_DELAY_MS`       | `180`              | Delay before the route loading spinner fades in, avoiding a flash        |
+| `VITE_QUERY_PERSIST_MAX_AGE_MS`             | `86400000` (24 h)  | How long a persisted query-cache record may be restored after writing    |
+| `VITE_QUERY_PERSIST_THROTTLE_MS`            | `1000`             | Minimum gap between IndexedDB writes of the query cache                  |
+| `VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS`     | `250`              | Budget for the initial cache restore before failing open to no cache     |
+| `VITE_AGENT_CATALOG_STALE_TIME_MS`          | `300000`           | Freshness window for the installable agent catalog query                 |
+| `VITE_PROVIDER_CATALOG_STALE_TIME_MS`       | `300000`           | Freshness window for provider catalog size/location/price metadata       |
+| `VITE_TRIAL_STATUS_STALE_TIME_MS`           | `60000`            | Freshness window for trial availability status                           |
+| `VITE_CACHED_COMMANDS_STALE_TIME_MS`        | `300000`           | Freshness window for cached slash-command registries                     |
+| `VITE_PROJECT_CREATE_CONFIG_STALE_TIME_MS`  | `300000`           | Freshness window for project-creation config flags                       |
 
 ### Query cache persistence
 

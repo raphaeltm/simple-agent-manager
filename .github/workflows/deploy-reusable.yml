@@ -1029,6 +1029,7 @@ jobs:
           CF_AIG_TOKEN: ${{ secrets.CF_AIG_TOKEN }}
           DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN: ${{ secrets.DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN }}
           DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID }}
+          WORKER_SECRET_BULK_MAX_OPS: ${{ vars.WORKER_SECRET_BULK_MAX_OPS }}
           DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
 
       # Secret writes create fresh Worker deployments. Re-deploy once after all

@@ -69,9 +69,7 @@ export function createAcpSession(
 }
 
 export function getAcpSession(sql: SqlStorage, sessionId: string): AcpSession | null {
-  const row = sql
-    .exec('SELECT * FROM acp_sessions WHERE id = ?', sessionId)
-    .toArray()[0];
+  const row = sql.exec('SELECT * FROM acp_sessions WHERE id = ?', sessionId).toArray()[0];
   return row ? parseAcpSessionRow(row) : null;
 }
 
@@ -144,9 +142,7 @@ export function transitionAcpSession(
   },
   projectId: string | null
 ): { session: AcpSession; fromStatus: AcpSessionStatus; chatSessionId: string } {
-  const rawRow = sql
-    .exec('SELECT * FROM acp_sessions WHERE id = ?', sessionId)
-    .toArray()[0];
+  const rawRow = sql.exec('SELECT * FROM acp_sessions WHERE id = ?', sessionId).toArray()[0];
 
   if (!rawRow) {
     throw new Error(`ACP session ${sessionId} not found`);
@@ -175,27 +171,47 @@ export function transitionAcpSession(
   if (toStatus === 'assigned') {
     sql.exec(
       `UPDATE acp_sessions SET status = ?, workspace_id = ?, node_id = ?, assigned_at = ?, last_heartbeat_at = ?, updated_at = ? WHERE id = ?`,
-      toStatus, opts.workspaceId ?? null, opts.nodeId ?? null, now, now, now, sessionId
+      toStatus,
+      opts.workspaceId ?? null,
+      opts.nodeId ?? null,
+      now,
+      now,
+      now,
+      sessionId
     );
   } else if (toStatus === 'running') {
     sql.exec(
       `UPDATE acp_sessions SET status = ?, acp_sdk_session_id = ?, started_at = ?, updated_at = ? WHERE id = ?`,
-      toStatus, opts.acpSdkSessionId ?? null, now, now, sessionId
+      toStatus,
+      opts.acpSdkSessionId ?? null,
+      now,
+      now,
+      sessionId
     );
   } else if (toStatus === 'completed' || toStatus === 'failed') {
     sql.exec(
       `UPDATE acp_sessions SET status = ?, completed_at = ?, error_message = ?, updated_at = ? WHERE id = ?`,
-      toStatus, now, opts.errorMessage ?? null, now, sessionId
+      toStatus,
+      now,
+      opts.errorMessage ?? null,
+      now,
+      sessionId
     );
   } else if (toStatus === 'interrupted') {
     sql.exec(
       `UPDATE acp_sessions SET status = ?, interrupted_at = ?, error_message = ?, updated_at = ? WHERE id = ?`,
-      toStatus, now, opts.errorMessage ?? null, now, sessionId
+      toStatus,
+      now,
+      opts.errorMessage ?? null,
+      now,
+      sessionId
     );
   } else {
     sql.exec(
       `UPDATE acp_sessions SET status = ?, updated_at = ? WHERE id = ?`,
-      toStatus, now, sessionId
+      toStatus,
+      now,
+      sessionId
     );
   }
 
@@ -247,9 +263,7 @@ export function prepareAcpSessionForFreshStart(
   },
   projectId: string | null
 ): AcpSession {
-  const rawRow = sql
-    .exec('SELECT * FROM acp_sessions WHERE id = ?', sessionId)
-    .toArray()[0];
+  const rawRow = sql.exec('SELECT * FROM acp_sessions WHERE id = ?', sessionId).toArray()[0];
 
   if (!rawRow) {
     throw new Error(`ACP session ${sessionId} not found`);
@@ -332,7 +346,9 @@ export function updateHeartbeat(
       projectId,
       action: 'rejected',
     });
-    throw new Error(`Node mismatch: session assigned to ${session.nodeId}, heartbeat from ${nodeId}`);
+    throw new Error(
+      `Node mismatch: session assigned to ${session.nodeId}, heartbeat from ${nodeId}`
+    );
   }
 
   if (!['assigned', 'running'].includes(session.status)) {
@@ -364,9 +380,7 @@ export function forkAcpSession(
   contextSummary: string,
   projectId: string | null
 ): AcpSession {
-  const rawRow = sql
-    .exec('SELECT * FROM acp_sessions WHERE id = ?', sessionId)
-    .toArray()[0];
+  const rawRow = sql.exec('SELECT * FROM acp_sessions WHERE id = ?', sessionId).toArray()[0];
 
   if (!rawRow) {
     throw new Error(`ACP session ${sessionId} not found`);
@@ -398,9 +412,7 @@ export function forkAcpSession(
       maxDepth,
       action: 'rejected',
     });
-    throw new Error(
-      `Fork depth ${parent.forkDepth + 1} exceeds maximum ${maxDepth}`
-    );
+    throw new Error(`Fork depth ${parent.forkDepth + 1} exceeds maximum ${maxDepth}`);
   }
 
   return createAcpSession(sql, {
@@ -464,20 +476,25 @@ export function listAcpSessionsByNode(
 }
 
 /**
- * Check for stale ACP sessions whose heartbeats have expired and transition
- * them to 'interrupted'. Returns the list of workspace IDs that were affected
- * so the caller can take additional action (e.g. stopping workspaces for
- * conversation-mode sessions).
+ * Check for stale ACP sessions whose heartbeats have expired. Sessions are
+ * interrupted only when the runtime timeout policy does not defer; deferred
+ * stale heartbeat rows are treated as inconclusive. Returns the list of
+ * workspace IDs that were affected so the caller can take additional action
+ * (e.g. stopping workspaces for conversation-mode sessions).
  */
 export function checkHeartbeatTimeouts(
   sql: SqlStorage,
   env: Env,
-  transitionFn: (sessionId: string, toStatus: AcpSessionStatus, opts: {
-    actorType: AcpSessionEventActorType;
-    reason?: string | null;
-    errorMessage?: string;
-    metadata?: Record<string, unknown> | null;
-  }) => Promise<unknown>,
+  transitionFn: (
+    sessionId: string,
+    toStatus: AcpSessionStatus,
+    opts: {
+      actorType: AcpSessionEventActorType;
+      reason?: string | null;
+      errorMessage?: string;
+      metadata?: Record<string, unknown> | null;
+    }
+  ) => Promise<unknown>,
   options: {
     shouldDeferTimeout?: (session: {
       id: string;
@@ -532,36 +549,63 @@ export function checkHeartbeatTimeouts(
         }
       }
       await transitionFn(session.id, 'interrupted', {
-        actorType: 'alarm', reason: 'Heartbeat timeout exceeded detection window',
+        actorType: 'alarm',
+        reason: 'Heartbeat timeout exceeded detection window',
         errorMessage: `Heartbeat timeout: last heartbeat at ${session.lastHeartbeatAt}, cutoff was ${cutoff}`,
-        metadata: { detectionWindowMs: detectionWindow, lastHeartbeatAt: session.lastHeartbeatAt, cutoff },
+        metadata: {
+          detectionWindowMs: detectionWindow,
+          lastHeartbeatAt: session.lastHeartbeatAt,
+          cutoff,
+        },
       });
       timedOut.push({ sessionId: session.id, workspaceId: session.workspaceId });
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      log.error('acp_session.heartbeat_timeout_transition_failed', { sessionId: session.id, error: errorMsg });
+      log.error('acp_session.heartbeat_timeout_transition_failed', {
+        sessionId: session.id,
+        error: errorMsg,
+      });
       failures.push({ sessionId: session.id, error: errorMsg });
     }
   });
   return Promise.all(promises).then(() => {
     if (failures.length > 0) {
-      log.error('acp_session.heartbeat_timeout_batch_failures', { failureCount: failures.length, totalStale: staleSessions.length, failures });
+      log.error('acp_session.heartbeat_timeout_batch_failures', {
+        failureCount: failures.length,
+        totalStale: staleSessions.length,
+        failures,
+      });
     }
     return timedOut;
   });
 }
 
-function recordAcpSessionEvent(sql: SqlStorage, acpSessionId: string, fromStatus: AcpSessionStatus | null, toStatus: AcpSessionStatus, actorType: AcpSessionEventActorType | string, actorId: string | null, reason: string | null, metadata: Record<string, unknown> | null = null): void {
+function recordAcpSessionEvent(
+  sql: SqlStorage,
+  acpSessionId: string,
+  fromStatus: AcpSessionStatus | null,
+  toStatus: AcpSessionStatus,
+  actorType: AcpSessionEventActorType | string,
+  actorId: string | null,
+  reason: string | null,
+  metadata: Record<string, unknown> | null = null
+): void {
   sql.exec(
     `INSERT INTO acp_session_events (id, acp_session_id, from_status, to_status, actor_type, actor_id, reason, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    generateId(), acpSessionId, fromStatus, toStatus, actorType, actorId, reason, metadata ? JSON.stringify(metadata) : null, Date.now()
+    generateId(),
+    acpSessionId,
+    fromStatus,
+    toStatus,
+    actorType,
+    actorId,
+    reason,
+    metadata ? JSON.stringify(metadata) : null,
+    Date.now()
   );
 }
 
 export function getAcpSessionOrThrow(sql: SqlStorage, sessionId: string): AcpSession {
-  const row = sql
-    .exec('SELECT * FROM acp_sessions WHERE id = ?', sessionId)
-    .toArray()[0];
+  const row = sql.exec('SELECT * FROM acp_sessions WHERE id = ?', sessionId).toArray()[0];
   if (!row) {
     throw new Error(`ACP session ${sessionId} not found`);
   }

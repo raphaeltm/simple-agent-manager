@@ -1030,7 +1030,8 @@ export class ProjectData extends DurableObject<Env> {
     const timedOut = await checkRuntimeHeartbeatTimeouts(
       this.sql,
       this.env,
-      this.transitionAcpSession.bind(this)
+      this.transitionAcpSession.bind(this),
+      this.getProjectId()
     );
 
     await stopTimedOutConversationWorkspaces(this.env, timedOut);

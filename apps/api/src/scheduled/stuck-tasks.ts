@@ -1422,6 +1422,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
             : 'scheduled.stuck_tasks',
         expectedWorkspaceId: task.workspace_id,
         expectedChatSessionId: task.chat_session_id,
+        expectedNodeId: diagnostics.workspaceStatus !== null ? diagnostics.nodeId : undefined,
         // cleanupTaskRun owns the external VM stop call and then finalizes D1.
         // Pre-marking the workspace stopped here makes cleanupTaskRun skip the
         // VM-agent /stop path and can leave real compute running behind stale

@@ -110,7 +110,8 @@ describe('ACP heartbeat timeout policy', () => {
   it('defers VM runtime timeouts because ProjectData heartbeat staleness is suspect', async () => {
     const result = await shouldDeferRuntimeHeartbeatTimeout(
       envWithRuntimeRow({ workspace_status: 'running', node_runtime: 'vm' }),
-      { workspaceId: 'ws-1', nodeId: 'node-1' }
+      { workspaceId: 'ws-1', nodeId: 'node-1' },
+      'project-1'
     );
 
     expect(result).toEqual({
@@ -122,7 +123,8 @@ describe('ACP heartbeat timeout policy', () => {
   it('does not defer VM runtime timeouts when the owning workspace is terminal', async () => {
     const result = await shouldDeferRuntimeHeartbeatTimeout(
       envWithRuntimeRow({ workspace_status: 'stopped', node_runtime: 'vm' }),
-      { workspaceId: 'ws-1', nodeId: 'node-1' }
+      { workspaceId: 'ws-1', nodeId: 'node-1' },
+      'project-1'
     );
 
     expect(result).toEqual({
