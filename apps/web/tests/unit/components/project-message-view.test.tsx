@@ -1868,7 +1868,7 @@ describe('ProjectMessageView — message anchored comments', () => {
     expect(screen.queryByRole('dialog', { name: 'Session comments' })).toBeNull();
   });
 
-  it('opens the desktop comments rail from the expanded header Comments button even with no threads', async () => {
+  it('opens the desktop comments rail from the always-visible header Comments chip even with no threads', async () => {
     setMediaMatches({ commentsRail: true });
     mocks.getChatSession.mockResolvedValue(
       makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Agent answer')])
@@ -1879,7 +1879,6 @@ describe('ProjectMessageView — message anchored comments', () => {
     await screen.findByText('Agent answer');
     expect(screen.queryByRole('complementary', { name: 'Session comments' })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show session details' }));
     fireEvent.click(screen.getByRole('button', { name: 'Comments' }));
 
     const rail = await screen.findByRole('complementary', { name: 'Session comments' });
