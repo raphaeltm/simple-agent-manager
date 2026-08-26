@@ -44,6 +44,7 @@ function signals(overrides: Partial<TaskRuntimeLivenessSignals> = {}): TaskRunti
         createdAt: NOW - 2_000,
       },
     ],
+    sessionWork: null,
     containerProbeOutcome: 'not_run',
     containerLifecycle: null,
     // Default `not_run` keeps every pre-existing expectation in this file
@@ -286,6 +287,66 @@ describe('classifyTaskRuntimeLiveness', () => {
       live: false,
       conclusive: true,
       reason: 'task_acp_session_not_live',
+    });
+  });
+
+  it('treats fresh prompt-turn state as positive liveness even when ACP heartbeat is stale', () => {
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          acpSessions: [
+            {
+              id: 'acp-1',
+              status: 'running',
+              workspaceId: 'workspace-1',
+              lastHeartbeatAt: NOW - STALE_MS - 1,
+              updatedAt: NOW - STALE_MS - 1,
+              startedAt: NOW - 10 * 60 * 1000,
+              createdAt: NOW - 10 * 60 * 1000,
+            },
+          ],
+          sessionWork: {
+            active: true,
+            activeAcpSessionId: 'acp-1',
+            reason: 'task_prompt_turn_active',
+          },
+        })
+      )
+    ).toMatchObject({
+      live: true,
+      conclusive: true,
+      reason: 'task_prompt_turn_active',
+      activeAcpSessionId: 'acp-1',
+    });
+  });
+
+  it('treats fresh runtime-work state as positive liveness even when ACP heartbeat is absent', () => {
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          acpSessions: [
+            {
+              id: 'acp-1',
+              status: 'running',
+              workspaceId: 'workspace-1',
+              lastHeartbeatAt: null,
+              updatedAt: NOW - STALE_MS - 1,
+              startedAt: NOW - 10 * 60 * 1000,
+              createdAt: NOW - 10 * 60 * 1000,
+            },
+          ],
+          sessionWork: {
+            active: true,
+            activeAcpSessionId: 'acp-1',
+            reason: 'task_runtime_work_active',
+          },
+        })
+      )
+    ).toMatchObject({
+      live: true,
+      conclusive: true,
+      reason: 'task_runtime_work_active',
+      activeAcpSessionId: 'acp-1',
     });
   });
 

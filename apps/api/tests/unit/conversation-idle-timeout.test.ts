@@ -234,7 +234,7 @@ describe('ProjectData idle cleanup runtime liveness contract', () => {
     if (options.scheduleExpired) {
       projectDb
         .prepare(
-         `INSERT INTO idle_cleanup_schedule
+          `INSERT INTO idle_cleanup_schedule
          (session_id, workspace_id, task_id, cleanup_at, created_at, retry_count)
          VALUES (?, ?, ?, ?, ?, ?)`
         )
@@ -680,7 +680,9 @@ describe('ProjectData idle cleanup runtime liveness contract', () => {
         idFromName: vi.fn().mockReturnValue('project-do-id'),
         get: vi.fn().mockReturnValue({
           ensureProjectId: vi.fn().mockResolvedValue(undefined),
-          listAcpSessions: vi.fn().mockResolvedValue({ sessions, total: sessions.length }),
+          getTaskAcpLivenessSignals: vi
+            .fn()
+            .mockResolvedValue({ sessions, total: sessions.length, sessionWork: null }),
         }),
       },
     } as unknown as Env;

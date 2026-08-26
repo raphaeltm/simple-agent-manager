@@ -56,6 +56,7 @@ import * as sessionSummarySync from './session-summary-sync';
 import * as sessionWakeProgress from './session-wake-progress';
 import * as sessions from './sessions';
 import * as storageSafety from './storage-safety';
+import { readTaskAcpLivenessSignals } from './task-runtime-liveness';
 import { resolveTaskWaitConfig } from './task-wait-config';
 import { processTaskWaits } from './task-wait-supervisor';
 import * as taskWaits from './task-waits';
@@ -805,6 +806,15 @@ export class ProjectData extends DurableObject<Env> {
     offset?: number;
   }) {
     return acpSessions.listAcpSessions(this.sql, opts);
+  }
+
+  async getTaskAcpLivenessSignals(opts: {
+    chatSessionId: string;
+    workspaceId: string;
+    limit: number;
+    nowMs?: number;
+  }) {
+    return readTaskAcpLivenessSignals(this.sql, this.env, opts);
   }
 
   async transitionAcpSession(

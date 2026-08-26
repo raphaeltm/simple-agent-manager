@@ -435,11 +435,30 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
     } as unknown as ProjectDataEnv;
   }
 
-  function sqlWithLiveAcpSession(): SqlStorage {
+  function sqlWithAcpSession(
+    opts: {
+      acpId?: string;
+      lastHeartbeatAt?: number | null;
+      updatedAt?: number;
+      startedAt?: number;
+      sessionState?: {
+        activity: string;
+        activityAt: number;
+        promptStartedAt?: number | null;
+        runtimeWorkState?: 'inactive' | 'active' | 'settling' | null;
+        runtimeWorkUpdatedAt?: number | null;
+        runtimeWorkProgressAt?: number | null;
+      };
+    } = {}
+  ): SqlStorage {
     const db = new Database(':memory:');
     const sql = createSqlStorage(db);
     runMigrations(sql);
     const now = Date.now();
+    const acpId = opts.acpId ?? 'acp-live';
+    const updatedAt = opts.updatedAt ?? now;
+    const startedAt = opts.startedAt ?? now - 60_000;
+    const lastHeartbeatAt = opts.lastHeartbeatAt === undefined ? now : opts.lastHeartbeatAt;
     sql.exec(
       `INSERT INTO chat_sessions (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)
        VALUES (?, ?, ?, 'Task', 'active', 0, ?, ?, ?)`,
@@ -452,16 +471,39 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
     );
     sql.exec(
       `INSERT INTO acp_sessions (id, chat_session_id, workspace_id, node_id, status, agent_type, last_heartbeat_at, created_at, updated_at, started_at)
-       VALUES ('acp-live', ?, ?, ?, 'running', 'codex', ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, 'running', 'codex', ?, ?, ?, ?)`,
+      acpId,
       CHAT_SESSION_ID,
       WORKSPACE_ID,
       NODE_ID,
-      now,
+      lastHeartbeatAt,
       now - 60_000,
-      now,
-      now - 60_000
+      updatedAt,
+      startedAt
     );
+    if (opts.sessionState) {
+      sql.exec(
+        `INSERT INTO session_state (
+           session_id, activity, activity_at, prompt_started_at, restart_count,
+           runtime_work_state, runtime_work_count, runtime_work_source,
+           runtime_work_updated_at, runtime_work_progress_at
+         )
+         VALUES (?, ?, ?, ?, 0, ?, ?, 'test', ?, ?)`,
+        acpId,
+        opts.sessionState.activity,
+        opts.sessionState.activityAt,
+        opts.sessionState.promptStartedAt ?? null,
+        opts.sessionState.runtimeWorkState ?? null,
+        opts.sessionState.runtimeWorkState ? 1 : null,
+        opts.sessionState.runtimeWorkUpdatedAt ?? null,
+        opts.sessionState.runtimeWorkProgressAt ?? null
+      );
+    }
     return sql;
+  }
+
+  function sqlWithLiveAcpSession(): SqlStorage {
+    return sqlWithAcpSession();
   }
 
   beforeEach(() => {
@@ -508,6 +550,89 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
       live: false,
       conclusive: false,
       reason: 'node_health_probe_timeout',
+    });
+  });
+
+  it('uses fresh prompt-turn state when ACP heartbeat writes are stale', async () => {
+    const now = Date.now();
+    const staleAt = now - 10 * 60 * 1000;
+
+    const verdict = await getLocalTaskRuntimeLiveness(
+      sqlWithAcpSession({
+        lastHeartbeatAt: staleAt,
+        updatedAt: staleAt,
+        startedAt: staleAt,
+        sessionState: {
+          activity: 'prompting',
+          activityAt: now - 30_000,
+          promptStartedAt: staleAt,
+        },
+      }),
+      doEnv(),
+      doTask
+    );
+
+    expect(verdict).toMatchObject({
+      live: true,
+      conclusive: true,
+      reason: 'task_prompt_turn_active',
+      activeAcpSessionId: 'acp-live',
+    });
+  });
+
+  it('uses fresh runtime-work state when ACP heartbeat writes are absent', async () => {
+    const now = Date.now();
+    const staleAt = now - 10 * 60 * 1000;
+
+    const verdict = await getLocalTaskRuntimeLiveness(
+      sqlWithAcpSession({
+        lastHeartbeatAt: null,
+        updatedAt: staleAt,
+        startedAt: staleAt,
+        sessionState: {
+          activity: 'idle',
+          activityAt: staleAt,
+          runtimeWorkState: 'active',
+          runtimeWorkUpdatedAt: now - 30_000,
+          runtimeWorkProgressAt: now - 60_000,
+        },
+      }),
+      doEnv(),
+      doTask
+    );
+
+    expect(verdict).toMatchObject({
+      live: true,
+      conclusive: true,
+      reason: 'task_runtime_work_active',
+      activeAcpSessionId: 'acp-live',
+    });
+  });
+
+  it('does not preserve a stale prompt-turn state after the configured freshness window', async () => {
+    const now = Date.now();
+    const staleAt = now - 10 * 60 * 1000;
+
+    const verdict = await getLocalTaskRuntimeLiveness(
+      sqlWithAcpSession({
+        lastHeartbeatAt: staleAt,
+        updatedAt: staleAt,
+        startedAt: staleAt,
+        sessionState: {
+          activity: 'prompting',
+          activityAt: staleAt,
+          promptStartedAt: staleAt,
+        },
+      }),
+      doEnv(),
+      doTask
+    );
+
+    expect(verdict).toMatchObject({
+      live: false,
+      conclusive: true,
+      reason: 'task_acp_session_not_live',
+      activeAcpSessionId: null,
     });
   });
 });
