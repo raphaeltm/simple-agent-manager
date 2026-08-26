@@ -17,6 +17,23 @@ interface RequestIdentifiers {
   projectId?: string;
 }
 
+const BENIGN_DISCONNECT_PATHS = new Set([
+  '/api/notifications/ws',
+  '/api/admin/observability/logs/ingest',
+]);
+
+function isBenignDisconnect(err: Error, path: string): boolean {
+  if (!BENIGN_DISCONNECT_PATHS.has(path)) return false;
+  const message = err.message.toLowerCase();
+  return (
+    message === 'network connection lost.' ||
+    message.includes('network connection lost') ||
+    message.includes('client disconnected') ||
+    message.includes('canceled') ||
+    message.includes('cancelled')
+  );
+}
+
 function requestIdentifiers(c: AppContext): RequestIdentifiers {
   const params = c.req.param() as Record<string, string>;
   const path = new URL(c.req.url).pathname;
@@ -82,6 +99,16 @@ function scheduleErrorPersistence(
 
 /** Global Hono error handler shared by the production Worker and worker integration tests. */
 export function handleAppError(err: Error, c: AppContext): Response {
+  const path = new URL(c.req.url).pathname;
+  if (isBenignDisconnect(err, path)) {
+    log.warn('request_disconnected', {
+      path,
+      method: c.req.method,
+      error: err.message,
+    });
+    return new Response(null, { status: 204 });
+  }
+
   let status: number;
   let body: Record<string, unknown>;
 
