@@ -13,13 +13,14 @@ import { workspacePortsQueryOptions } from '../lib/query-options';
 import { isWorkspaceOperational } from '../lib/workspace-status-utils';
 import { useQueryScope } from './useQueryScope';
 
-const TERMINAL_PORT_STATES: readonly WorkspacePortsState[] = [
+const TERMINAL_PORT_STATES = new Set<WorkspacePortsState>([
   'sleeping',
   'stopped',
   'deleted',
   'gone',
   'error',
-];
+]);
+const RANDOM_UINT32_RANGE = 2 ** 32;
 
 export function useWorkspacePorts(
   workspaceUrl: string | undefined,
@@ -111,7 +112,7 @@ function incrementUnavailableCount(previous: number): number {
 }
 
 function isTerminalPortsState(state: WorkspacePortsState): boolean {
-  return TERMINAL_PORT_STATES.includes(state);
+  return TERMINAL_PORT_STATES.has(state);
 }
 
 function getWorkspacePortsRefetchIntervalMs(consecutiveUnavailable: number): number {
@@ -130,6 +131,15 @@ function getWorkspacePortsRefetchIntervalMs(consecutiveUnavailable: number): num
 
 function applyJitter(delayMs: number, jitterRatio: number): number {
   if (jitterRatio <= 0) return delayMs;
-  const offset = delayMs * jitterRatio * (Math.random() * 2 - 1);
+  const offset = delayMs * jitterRatio * (randomUnitInterval() * 2 - 1);
   return Math.max(1, Math.round(delayMs + offset));
+}
+
+function randomUnitInterval(): number {
+  if (typeof globalThis.crypto?.getRandomValues === 'function') {
+    const value = new Uint32Array(1);
+    globalThis.crypto.getRandomValues(value);
+    return (value[0] ?? 0) / RANDOM_UINT32_RANGE;
+  }
+  return 0.5;
 }

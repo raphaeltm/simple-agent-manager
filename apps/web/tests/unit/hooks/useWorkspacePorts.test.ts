@@ -95,7 +95,14 @@ async function flushQueries() {
 describe('useWorkspacePorts', () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
+      <T extends ArrayBufferView | null>(array: T): T => {
+        if (array instanceof Uint32Array) {
+          array.fill(0x80000000);
+        }
+        return array;
+      }
+    );
     mockListWorkspacePorts.mockReset();
     setVisibility('visible');
   });

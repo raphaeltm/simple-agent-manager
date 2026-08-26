@@ -22,12 +22,12 @@
 import { DEFAULT_DASHBOARD_POLL_INTERVAL_MS } from '@simple-agent-manager/shared';
 
 function resolveIntervalMs(raw: string | undefined, fallback: number): number {
-  const parsed = parseInt(raw ?? '', 10);
+  const parsed = Number.parseInt(raw ?? '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function resolvePositiveInteger(raw: string | undefined, fallback: number): number {
-  const parsed = parseInt(raw ?? '', 10);
+  const parsed = Number.parseInt(raw ?? '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 

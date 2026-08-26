@@ -103,6 +103,11 @@ The 2026-08-25 production stability audit found a high-volume `/ports` readiness
   - `git diff --check` — passed.
   - `pnpm lint` — passed with existing unrelated warnings in acp-client and web components.
   - `pnpm typecheck` — passed.
+- SonarCloud follow-up fixes for PR #1918:
+  - Replaced terminal-state array membership with `Set.has()`.
+  - Replaced `parseInt` with `Number.parseInt` in the new polling helper.
+  - Replaced `Math.random()` jitter with `crypto.getRandomValues()` plus a deterministic no-jitter fallback.
+  - Reruns: `pnpm --filter @simple-agent-manager/web test -- tests/unit/hooks/useWorkspacePorts.test.ts` — passed; `pnpm --filter @simple-agent-manager/web lint` — passed with existing unrelated warnings; `pnpm --filter @simple-agent-manager/web typecheck` — passed; `git diff --check` — passed.
 
 ## Specialist review notes
 
