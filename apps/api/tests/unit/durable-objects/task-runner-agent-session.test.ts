@@ -67,6 +67,7 @@ vi.mock('../../../src/services/project-data', () => ({
   prepareAcpSessionForFreshStart: prepareAcpSessionForFreshStartMock,
   transitionAcpSession: transitionAcpSessionMock,
   wakeSession: wakeSessionMock,
+  wakeSessionForSnapshotRecovery: wakeSessionMock,
 }));
 
 vi.mock('../../../src/services/session-snapshots', () => ({
