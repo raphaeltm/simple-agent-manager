@@ -25,6 +25,13 @@ import {
   captureProjectDataExpectedError,
   type ProjectDataTestDouble,
 } from './support/expected-error-doubles';
+import {
+  seedInstallation,
+  seedProject,
+  seedTask,
+  seedUser,
+  seedWorkspace,
+} from './helpers/seed-d1';
 
 // Cast the test env to the service's Env type.
 // The miniflare env provides the same bindings (PROJECT_DATA, etc.)
@@ -126,6 +133,82 @@ describe('project-data service: session lifecycle', () => {
       isTerminated: false,
     });
     expect(await svc.wakeSession(testEnv, pid, sessionId, 'ws-other', 'task-other')).toBe(false);
+  });
+
+  it('wakes a stopped ProjectData session when a restorable snapshot recovery claim is authorized', async () => {
+    const pid = 'svc-stopped-snapshot-wake';
+    const userId = 'user-stopped-snapshot-wake';
+    const installationId = 'installation-stopped-snapshot-wake';
+    const workspaceId = 'workspace-stopped-snapshot-wake';
+    const nextWorkspaceId = 'workspace-stopped-snapshot-wake-next';
+    const sourceTaskId = 'task-stopped-snapshot-wake-source';
+    const recoveryTaskId = 'task-stopped-snapshot-wake-recovery';
+    await seedUser(userId);
+    await seedInstallation(installationId, userId);
+    await seedProject(pid, userId, installationId);
+    await seedWorkspace(workspaceId, null, userId, {
+      projectId: pid,
+      status: 'sleeping',
+    });
+
+    const sessionId = await svc.createSession(testEnv, pid, workspaceId, 'Will be unbricked');
+    expect(await svc.sleepSession(testEnv, pid, sessionId)).toBe(true);
+    await svc.stopSession(testEnv, pid, sessionId);
+    await env.DATABASE.prepare(
+      `UPDATE workspaces SET chat_session_id = ?, updated_at = datetime('now') WHERE id = ?`
+    )
+      .bind(sessionId, workspaceId)
+      .run();
+    await seedTask(sourceTaskId, pid, userId, {
+      status: 'awaiting_followup',
+      workspaceId,
+      taskMode: 'conversation',
+    });
+    await seedTask(recoveryTaskId, pid, userId, {
+      status: 'in_progress',
+      taskMode: 'conversation',
+    });
+    await env.DATABASE.prepare(
+      `UPDATE tasks
+          SET chat_session_id = ?, recovery_source_task_id = ?,
+              triggered_by = 'session-recovery', updated_at = datetime('now')
+        WHERE id = ?`
+    )
+      .bind(sessionId, sourceTaskId, recoveryTaskId)
+      .run();
+    await env.DATABASE.prepare(
+      `INSERT INTO session_snapshots
+         (id, project_id, workspace_id, user_id, chat_session_id, runtime, status,
+          degradation, manifest_r2_key, expires_at, sleeping_at, sleep_status,
+          recovery_status, recovery_task_id, recovery_attempts, sleep_attempts,
+          created_at, updated_at)
+       VALUES ('snapshot-stopped-snapshot-wake', ?, ?, ?, ?, 'vm', 'available',
+               'none', ?, '2099-01-01T00:00:00.000Z',
+               '2026-08-26T20:56:54.000Z', 'sleeping', 'waking', ?, 1, 0,
+               datetime('now'), datetime('now'))`
+    )
+      .bind(
+        pid,
+        workspaceId,
+        userId,
+        sessionId,
+        `snapshots/${sessionId}/manifest.json`,
+        recoveryTaskId
+      )
+      .run();
+
+    await expect(
+      svc.wakeSessionForSnapshotRecovery(testEnv, pid, sessionId, nextWorkspaceId, recoveryTaskId)
+    ).resolves.toBe(true);
+
+    const session = await svc.getSession(testEnv, pid, sessionId);
+    expect(session).toMatchObject({
+      status: 'active',
+      workspaceId: nextWorkspaceId,
+      taskId: recoveryTaskId,
+      endedAt: null,
+      isTerminated: false,
+    });
   });
 
   it('failSession transitions to failed with error message', async () => {
