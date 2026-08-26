@@ -98,7 +98,7 @@ perform any one-off production purge.
 - [x] Update admin storage telemetry output to expose growth, forecast, cleanup
   health, and category breakdown while keeping existing fields stable.
 - [x] Add or update env examples and public/internal configuration references
-  for the new cleanup and history/forecast settings.
+  for the new cleanup, history/forecast, and admin telemetry list settings.
 - [x] Add the audit-required Worker-runtime regression: seed bytes across
   messages, activity/event logs, active/sleeping sessions, normalized tool
   payloads, and terminal legacy payloads; exhaust reclaimable candidates above
@@ -110,7 +110,7 @@ perform any one-off production purge.
 - [x] Add the process fix to the relevant rule/checklist so future computed
   warning or cleanup-exhausted states must be routed to an operator-visible
   channel, not just logged.
-- [ ] Run local validation and specialist reviews required by `/do`.
+- [x] Run local validation and specialist reviews required by `/do`.
 - [ ] Deploy to staging, verify the live admin/API behavior, create the PR, wait
   for CI, merge when green, and monitor production deploy to completion.
 
@@ -138,6 +138,29 @@ perform any one-off production purge.
   and active/sleeping content excluded.
 - ProjectData storage admin endpoints were extracted to an admin sub-router and
   expose the new latest-row fields plus bounded append-only history reads.
+- Admin storage telemetry/history list limits are configurable through
+  `PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_DEFAULT` and
+  `PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_MAX`.
+
+## Specialist review evidence
+
+- Cloudflare/DO review — PASS: D1 migration is additive, DO cleanup uses bounded
+  local SQLite work with persisted recheck state, and no production data purge
+  was performed.
+- Constitution review — PASS: storage thresholds, cleanup budgets, growth
+  lookback, recheck delays, and admin list bounds are env-configurable with safe
+  defaults.
+- Env/config review — PASS: typed env, `wrangler.toml`, `.env.example`, public
+  configuration docs, and internal env reference are synchronized.
+- Security review — PASS: admin history/latest reads stay behind the existing
+  superadmin middleware, D1 queries are parameterized, alert context carries
+  numeric/category metadata rather than payload content, and cleanup excludes
+  active/sleeping or resumable session content.
+- Test-engineer review — PASS: Worker-runtime tests cover warning alerts,
+  growth/time-to-limit, append-only history, bounded event cleanup, active and
+  sleeping preservation, and the audit-required target-unreachable alert.
+- Doc-sync review — PASS: operator/admin/API references and environment
+  documentation match the implemented behavior.
 
 ## Validation evidence
 
@@ -146,12 +169,18 @@ perform any one-off production purge.
 - `pnpm vitest run --config vitest.workers.config.ts tests/workers/project-data-storage-safety.test.ts --reporter=verbose` — passed, 14 tests
 - `pnpm --filter @simple-agent-manager/api test:workers -- --reporter=dot` —
   passed, 55 files, 724 tests
-- `pnpm vitest run tests/unit/routes/admin-security.test.ts --reporter=verbose` — passed, 7 tests
+- `pnpm vitest run tests/unit/routes/admin-security.test.ts --reporter=verbose` — passed, 8 tests
 - `pnpm quality:migration-safety` — passed, 152 FK relationships scanned, 0 new violations
+- `pnpm quality:file-sizes` — passed
+- `pnpm quality:wrangler-bindings` — passed
+- `pnpm quality:do-migration-safety` — passed
+- `pnpm quality:do-wall-time` — not locally runnable without the Cloudflare
+  script-name env target; the CI workflow derives `DO_WALL_TIME_SCRIPT_NAMES`
+  from `RESOURCE_PREFIX` and `TARGET_STACK`.
 - `pnpm lint` — passed with existing unrelated ACP/web warnings only
 - `pnpm typecheck` — passed with existing Astro template baseline report
 - `pnpm build` — passed
-- `pnpm test` — passed, 21 tasks; API package 605 files / 8249 tests
+- `pnpm test` — passed, 21 tasks; API package 605 files / 8250 tests
 - Touched non-test source files are at or below 500 lines, except documented
   existing exceptions (`apps/api/src/env.ts`, `apps/api/src/db/schema.ts`).
 

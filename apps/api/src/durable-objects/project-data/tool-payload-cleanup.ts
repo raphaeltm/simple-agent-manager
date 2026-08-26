@@ -489,7 +489,6 @@ export async function runProjectDataToolPayloadCleanup(
     batch.rowsUpdated,
     failureMessage
   );
-
   if (batch.rowsUpdated > 0 || batch.rowsFailed > 0 || exhaustedCandidates) {
     log.warn('completed', { ...result });
   }

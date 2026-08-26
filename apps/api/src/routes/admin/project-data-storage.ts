@@ -22,10 +22,44 @@ const PROJECT_DATA_STORAGE_CLEANUP_HEALTH_STATES = new Set([
   'target_unreachable',
   'failed',
 ]);
-const DEFAULT_STORAGE_TELEMETRY_LIMIT = 50;
-const MAX_STORAGE_TELEMETRY_LIMIT = 200;
+const DEFAULT_STORAGE_TELEMETRY_LIST_LIMIT = 50;
+const DEFAULT_STORAGE_TELEMETRY_LIST_MAX = 200;
 
 export const adminProjectDataStorageRoutes = new Hono<{ Bindings: Env }>();
+
+function parsePositiveIntegerConfig(raw: string | undefined, fallback: number): number {
+  if (!raw?.trim()) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) return fallback;
+  return parsed;
+}
+
+function getStorageTelemetryListConfig(env: Env): { defaultLimit: number; maxLimit: number } {
+  const maxLimit = parsePositiveIntegerConfig(
+    env.PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_MAX,
+    DEFAULT_STORAGE_TELEMETRY_LIST_MAX
+  );
+  const configuredDefault = parsePositiveIntegerConfig(
+    env.PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_DEFAULT,
+    DEFAULT_STORAGE_TELEMETRY_LIST_LIMIT
+  );
+  return {
+    defaultLimit: Math.min(configuredDefault, maxLimit),
+    maxLimit,
+  };
+}
+
+function parseStorageTelemetryLimit(
+  rawLimit: string | undefined,
+  env: Env
+): number {
+  const { defaultLimit, maxLimit } = getStorageTelemetryListConfig(env);
+  const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : defaultLimit;
+  if (!Number.isSafeInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > maxLimit) {
+    throw errors.badRequest(`limit must be between 1 and ${maxLimit}`);
+  }
+  return parsedLimit;
+}
 
 /**
  * GET /api/admin/project-data/storage - Read latest ProjectData storage telemetry.
@@ -40,15 +74,7 @@ adminProjectDataStorageRoutes.get('/', async (c) => {
   }
 
   const projectId = c.req.query('projectId')?.trim();
-  const limitParam = c.req.query('limit');
-  const parsedLimit = limitParam ? Number.parseInt(limitParam, 10) : DEFAULT_STORAGE_TELEMETRY_LIMIT;
-  if (
-    !Number.isSafeInteger(parsedLimit) ||
-    parsedLimit < 1 ||
-    parsedLimit > MAX_STORAGE_TELEMETRY_LIMIT
-  ) {
-    throw errors.badRequest(`limit must be between 1 and ${MAX_STORAGE_TELEMETRY_LIMIT}`);
-  }
+  const limit = parseStorageTelemetryLimit(c.req.query('limit'), c.env);
 
   const filters: string[] = [];
   const params: Array<string | number> = [];
@@ -93,7 +119,7 @@ adminProjectDataStorageRoutes.get('/', async (c) => {
      ORDER BY t.usage_ratio DESC, t.measured_at DESC
      LIMIT ?`
   )
-    .bind(...params, parsedLimit)
+    .bind(...params, limit)
     .all();
 
   return c.json({ telemetry: result.results ?? [] });
@@ -119,15 +145,7 @@ adminProjectDataStorageRoutes.get('/history', async (c) => {
   }
 
   const projectId = c.req.query('projectId')?.trim();
-  const limitParam = c.req.query('limit');
-  const parsedLimit = limitParam ? Number.parseInt(limitParam, 10) : DEFAULT_STORAGE_TELEMETRY_LIMIT;
-  if (
-    !Number.isSafeInteger(parsedLimit) ||
-    parsedLimit < 1 ||
-    parsedLimit > MAX_STORAGE_TELEMETRY_LIMIT
-  ) {
-    throw errors.badRequest(`limit must be between 1 and ${MAX_STORAGE_TELEMETRY_LIMIT}`);
-  }
+  const limit = parseStorageTelemetryLimit(c.req.query('limit'), c.env);
 
   const filters: string[] = [];
   const params: Array<string | number> = [];
@@ -168,7 +186,7 @@ adminProjectDataStorageRoutes.get('/history', async (c) => {
      ORDER BY h.measured_at DESC
      LIMIT ?`
   )
-    .bind(...params, parsedLimit)
+    .bind(...params, limit)
     .all();
 
   return c.json({ history: result.results ?? [] });

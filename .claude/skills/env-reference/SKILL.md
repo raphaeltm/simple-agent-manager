@@ -170,6 +170,8 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `PROJECT_DATA_STORAGE_EMERGENCY_BATCH_ROWS` — Oldest `activity_events` and `acp_session_events` rows deleted per table per emergency purge batch (default: `500`)
 - `PROJECT_DATA_STORAGE_EMERGENCY_MAX_BATCHES` — Maximum emergency purge batches per explicit call (default: `4`)
 - `PROJECT_DATA_STORAGE_GROWTH_LOOKBACK_DAYS` — Lookback window used to estimate ProjectData bytes/day growth and days to storage limit (default: `7`)
+- `PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_DEFAULT` — Default row count for admin ProjectData storage telemetry and history lists (default: `50`)
+- `PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_MAX` — Max accepted row count for admin ProjectData storage telemetry and history lists (default: `200`)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` — Enables automatic ProjectData cleanup that strips expandable `tool_metadata.content` payloads from old terminal-session tool messages under storage pressure (default: enabled)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO` — ProjectData storage usage ratio that starts automatic terminal-session tool payload cleanup (default: `0.8`)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO` — ProjectData storage usage ratio below which automatic tool payload cleanup stops (default: `0.75`)

@@ -489,7 +489,6 @@ export async function runProjectDataEventLogCleanup(
     totalRowsDeleted,
     null
   );
-
   if (totalRowsDeleted > 0 || exhaustedCandidates) {
     log.warn('completed', { ...result });
   }
