@@ -311,7 +311,10 @@ export interface AcpSessionEvent {
 export const ACP_SESSION_DEFAULTS = {
   /** VM agent heartbeat frequency (ms). Env: ACP_SESSION_HEARTBEAT_INTERVAL_MS */
   HEARTBEAT_INTERVAL_MS: 60_000,
-  /** DO heartbeat timeout before marking interrupted (ms). Env: ACP_SESSION_DETECTION_WINDOW_MS */
+  /**
+   * ProjectData heartbeat stale window (ms). Env: ACP_SESSION_DETECTION_WINDOW_MS.
+   * VM-backed sessions require conclusive runtime/workspace evidence before interruption.
+   */
   DETECTION_WINDOW_MS: 300_000,
   /** VM agent startup reconciliation timeout (ms). Env: ACP_SESSION_RECONCILIATION_TIMEOUT_MS */
   RECONCILIATION_TIMEOUT_MS: 30_000,

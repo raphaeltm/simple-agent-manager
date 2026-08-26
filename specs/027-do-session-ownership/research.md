@@ -117,7 +117,7 @@
 | Value | Env Var | Default | Context |
 |-------|---------|---------|---------|
 | Heartbeat interval | `ACP_SESSION_HEARTBEAT_INTERVAL_MS` | `60000` (60s) | VM agent → control plane |
-| Detection window | `ACP_SESSION_DETECTION_WINDOW_MS` | `300000` (5 min) | DO alarm timeout |
+| Detection window | `ACP_SESSION_DETECTION_WINDOW_MS` | `300000` (5 min) | ProjectData heartbeat stale window; VM-backed interruption needs conclusive runtime/workspace evidence |
 | Reconciliation timeout | `ACP_SESSION_RECONCILIATION_TIMEOUT_MS` | `30000` (30s) | VM agent startup |
 | Fork context messages | `ACP_SESSION_FORK_CONTEXT_MESSAGES` | `20` | Messages to include in fork summary |
 | Max fork depth | `ACP_SESSION_MAX_FORK_DEPTH` | `10` | Prevent infinite fork chains |

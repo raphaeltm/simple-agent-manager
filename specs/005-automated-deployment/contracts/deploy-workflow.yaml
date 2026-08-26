@@ -180,8 +180,8 @@ jobs:
       - name: Configure Worker Secrets
         if: ${{ !inputs.dry_run }}
         run: |
-          echo "${{ secrets.GITHUB_CLIENT_SECRET }}" | pnpm wrangler secret put GITHUB_CLIENT_SECRET --env ${{ inputs.environment }} || true
-          # ... additional secrets
+          scripts/deploy/configure-secrets.sh ${{ inputs.environment }}
+          # Uses a bounded wrangler secret bulk payload; values are never logged.
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 

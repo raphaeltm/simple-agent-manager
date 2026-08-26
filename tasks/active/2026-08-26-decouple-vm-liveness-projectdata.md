@@ -126,7 +126,7 @@ reread before destructive cleanup.
     ProjectData heartbeat alone;
   - ProjectData storage alarm does not run unbounded category scans;
   - deploy-secret bulk workflow redacts values and bounds Worker-version churn.
-- [ ] Run broader API, Worker, deploy-script, and VM-agent checks as applicable.
+- [x] Run broader API, Worker, deploy-script, and VM-agent checks as applicable.
 - [ ] Complete specialist review, staging verification, PR CI, merge, and
   production deploy monitoring.
 

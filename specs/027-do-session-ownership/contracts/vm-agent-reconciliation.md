@@ -102,6 +102,11 @@ async updateHeartbeat(sessionId: string, nodeId: string): Promise<void> {
 
 ### DO Alarm Handler (Interruption Detection)
 
+ProjectData heartbeat staleness is storage-history evidence. For VM-backed
+sessions it is suspect by itself; interruption requires explicit terminal
+session evidence, terminal owning workspace/node state, or another authoritative
+runtime signal.
+
 ```typescript
 // In ProjectData DO alarm() handler
 async checkSessionHeartbeats(): Promise<void> {
@@ -139,5 +144,5 @@ async checkSessionHeartbeats(): Promise<void> {
 | Env Var | Default | Where Set | Description |
 |---------|---------|-----------|-------------|
 | `ACP_SESSION_HEARTBEAT_INTERVAL_MS` | `60000` | VM agent env | How often to send heartbeats |
-| `ACP_SESSION_DETECTION_WINDOW_MS` | `300000` | Worker env | How long before declaring interrupted |
+| `ACP_SESSION_DETECTION_WINDOW_MS` | `300000` | Worker env | ProjectData heartbeat stale window; VM-backed sessions require conclusive runtime/workspace evidence before interruption |
 | `ACP_SESSION_RECONCILIATION_TIMEOUT_MS` | `30000` | VM agent env | Timeout for startup reconciliation query |

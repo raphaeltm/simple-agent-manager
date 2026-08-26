@@ -94,7 +94,7 @@ Add to `.env.example` and document:
 ```bash
 # ACP Session Lifecycle (all optional, sensible defaults)
 ACP_SESSION_HEARTBEAT_INTERVAL_MS=60000       # VM agent heartbeat frequency
-ACP_SESSION_DETECTION_WINDOW_MS=300000         # DO heartbeat timeout
+ACP_SESSION_DETECTION_WINDOW_MS=300000         # ProjectData heartbeat stale window
 ACP_SESSION_RECONCILIATION_TIMEOUT_MS=30000    # VM agent startup reconciliation
 ACP_SESSION_FORK_CONTEXT_MESSAGES=20           # Messages to summarize for fork
 ACP_SESSION_MAX_FORK_DEPTH=10                  # Max fork chain length
