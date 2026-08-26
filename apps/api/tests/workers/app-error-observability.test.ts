@@ -219,7 +219,11 @@ describe('global app.onError observability persistence', () => {
       ['POST', 'https://api.test.example.com/api/admin/observability/logs/ingest'],
     ] as const) {
       const pending: Promise<unknown>[] = [];
-      const response = await app.fetch(new Request(url, { method }), env, executionContext(pending));
+      const response = await app.fetch(
+        new Request(url, { method }),
+        env,
+        executionContext(pending)
+      );
 
       expect(response.status).toBe(204);
       expect(pending).toHaveLength(0);
