@@ -1,6 +1,6 @@
 # Fix reconciliation check-in false deaths and attention-expiry terminal writer
 
-**Status**: active
+**Status**: completed
 **Created**: 2026-08-26
 **SAM task**: `01M0XRNZWZVQACVKPGG1BJ75FW`
 **Branch**: `sam/stop-reconciliation-check-false-bj75fw`
@@ -78,6 +78,13 @@ no `completed_at`, and stale `execution_step`. This is the deferred follow-up fr
 - `pnpm --filter @simple-agent-manager/api test -- reconciliation` passed: 6 files / 164 tests.
 - `pnpm typecheck && pnpm lint` passed. Lint retained only baseline warnings in acp-client and web.
 - `pnpm --filter @simple-agent-manager/api test` passed: 606 files / 8254 tests.
+- `pnpm format:check` passed.
+- `git diff --check` passed.
+- `Deploy Staging` passed for commit `b940ed42b`:
+  https://github.com/raphaeltm/simple-agent-manager/actions/runs/32919441324.
+- Live staging Playwright smoke passed 12/12 against `app.sammy.party` / `api.sammy.party`
+  using staging token-login auth.
+- PR #1916 CI passed before merge.
 
 ## Acceptance criteria
 
