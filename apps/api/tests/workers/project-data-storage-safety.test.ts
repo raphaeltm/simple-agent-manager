@@ -441,7 +441,7 @@ describe('ProjectData storage safety firebreak', () => {
     const stub = getStub(projectId);
     await stub.ensureProjectId(projectId);
 
-    const messageIds = await runInDurableObject(stub, async (instance) => {
+    const messageIds = await runInDurableObject(stub, async (instance, state) => {
       const stoppedSession = await instance.createSession(null, 'Old terminal tool payloads');
       const activeSession = await instance.createSession(null, 'Active tool payload');
       const sleepingSession = await instance.createSession(null, 'Sleeping tool payload');
@@ -484,6 +484,17 @@ describe('ProjectData storage safety firebreak', () => {
 
       await instance.stopSession(stoppedSession);
       await instance.sleepSession(sleepingSession);
+      const oldBase = Date.now() - 1000;
+      const orderedMessages = [stoppedOne, stoppedTwo, stoppedThree, active, sleeping];
+      for (const [index, messageId] of orderedMessages.entries()) {
+        state.storage.sql.exec(
+          `UPDATE chat_messages
+           SET created_at = ?
+           WHERE id = ?`,
+          oldBase + index,
+          messageId
+        );
+      }
 
       return { stoppedOne, stoppedTwo, stoppedThree, active, sleeping };
     });

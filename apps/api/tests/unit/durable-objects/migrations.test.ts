@@ -404,7 +404,9 @@ describe('DO Migrations', () => {
       // 1 status_mutations)
       // project-wide comment activity: 4 from migration 035 (chat/library
       // updated_at + status/updated_at)
-      expect(indexes).toHaveLength(65);
+      // tool payload archives: 3 from migration 036 (session+created,
+      // created_at, archived_at)
+      expect(indexes).toHaveLength(68);
     });
   });
 });
