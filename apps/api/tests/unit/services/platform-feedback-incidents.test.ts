@@ -28,6 +28,8 @@ function setup() {
       FOREIGN KEY (project_id) REFERENCES projects(id),
       FOREIGN KEY (user_id) REFERENCES users(id),
       FOREIGN KEY (created_by) REFERENCES users(id));
+    CREATE TABLE trigger_executions (
+      id TEXT PRIMARY KEY, task_id TEXT, status TEXT NOT NULL);
     CREATE TABLE platform_feedback_triages (
       signature TEXT PRIMARY KEY, source TEXT NOT NULL, summary TEXT NOT NULL,
       first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, occurrence_count INTEGER NOT NULL,
@@ -69,8 +71,9 @@ function seedIncident(
       `INSERT INTO platform_feedback_triages
         (signature, source, summary, first_seen_at, last_seen_at, occurrence_count,
          severity, evidence_refs, queue_state, queued_at, dispatch_attempts, dispatch_lease_expires_at,
-         rejected_at, incident_claim_token, incident_claim_expires_at, incident_claimed_by_task_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         dispatched_trigger_id, dispatched_execution_id, dispatched_task_id, rejected_at,
+         incident_claim_token, incident_claim_expires_at, incident_claimed_by_task_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       signature,
@@ -85,6 +88,9 @@ function seedIncident(
       overrides.queued_at ?? 1000,
       overrides.dispatch_attempts ?? 0,
       overrides.dispatch_lease_expires_at ?? null,
+      overrides.dispatched_trigger_id ?? null,
+      overrides.dispatched_execution_id ?? null,
+      overrides.dispatched_task_id ?? null,
       overrides.rejected_at ?? null,
       overrides.incident_claim_token ?? null,
       overrides.incident_claim_expires_at ?? null,
@@ -152,9 +158,17 @@ describe('platform feedback incidents', () => {
 
     const reclaimed = await claimIncident(env, signature, 'task-2', 11_001);
     expect(reclaimed).toEqual({ claimToken: expect.any(String), leaseExpiresAt: 12_001 });
-    expect(await resolveIncident(env, signature, first?.claimToken ?? '', 'resolved', 'task-1', '', 11_002)).toBe(
-      false
-    );
+    expect(
+      await resolveIncident(
+        env,
+        signature,
+        first?.claimToken ?? '',
+        'resolved',
+        'task-1',
+        '',
+        11_002
+      )
+    ).toBe(false);
     expect(
       await resolveIncident(
         env,
@@ -233,9 +247,17 @@ describe('platform feedback incidents', () => {
     expect(summary.totalOccurrenceCount).toBe(4);
     expect(summary.rendered).toContain(first.slice(0, 16));
     expect(summary.rendered).toContain(second.slice(0, 16));
-    expect(summary.rendered).toContain('Do not post machine-generated diagnostic or feedback content');
+    expect(summary.rendered).toContain(
+      'Do not post machine-generated diagnostic or feedback content'
+    );
 
-    const reserved = await reserveIncidentDispatch(env, [first, second], 'trigger-1', 'exec-1', 5000);
+    const reserved = await reserveIncidentDispatch(
+      env,
+      [first, second],
+      'trigger-1',
+      'exec-1',
+      5000
+    );
     expect(reserved.reserved).toBe(2);
     const again = await reserveIncidentDispatch(env, [first, second], 'trigger-1', 'exec-2', 5000);
     expect(again.reserved).toBe(0);
@@ -320,12 +342,16 @@ describe('platform feedback incidents', () => {
     expect(result).toEqual({ requeued: 1, rejected: 1 });
     expect(
       sqlite
-        .prepare('SELECT queue_state, dispatch_lease_expires_at FROM platform_feedback_triages WHERE signature = ?')
+        .prepare(
+          'SELECT queue_state, dispatch_lease_expires_at FROM platform_feedback_triages WHERE signature = ?'
+        )
         .get('incident-requeue')
     ).toEqual({ queue_state: 'pending', dispatch_lease_expires_at: null });
     expect(
       sqlite
-        .prepare('SELECT queue_state, rejected_at, resolution_note FROM platform_feedback_triages WHERE signature = ?')
+        .prepare(
+          'SELECT queue_state, rejected_at, resolution_note FROM platform_feedback_triages WHERE signature = ?'
+        )
         .get('incident-reject')
     ).toEqual({
       queue_state: 'rejected',
@@ -335,5 +361,79 @@ describe('platform feedback incidents', () => {
     const rejected = await listIncidentQueue(env, ['rejected'], 10);
     expect(rejected).toHaveLength(1);
     expect(rejected[0]).toMatchObject({ id: 'incident-reject', queueState: 'rejected' });
+  });
+
+  it('preserves expired dispatch leases while the dispatched task is alive', async () => {
+    const { sqlite, env } = setup();
+    sqlite
+      .prepare(
+        `INSERT INTO tasks
+          (id, project_id, user_id, title, status, priority, task_mode, dispatch_depth,
+           created_by, created_at, updated_at)
+         VALUES (?, 'feedback-project', 'task-1', ?, ?, 0, 'task', 0, 'task-1', ?, ?)`
+      )
+      .run(
+        'task-live-dispatch',
+        'Live dispatch task',
+        'in_progress',
+        '2026-08-26T06:00:00.000Z',
+        '2026-08-26T06:45:00.000Z'
+      );
+    sqlite
+      .prepare(
+        `INSERT INTO tasks
+          (id, project_id, user_id, title, status, priority, task_mode, dispatch_depth,
+           created_by, created_at, updated_at)
+         VALUES (?, 'feedback-project', 'task-2', ?, ?, 0, 'task', 0, 'task-2', ?, ?)`
+      )
+      .run(
+        'task-terminal-dispatch',
+        'Terminal dispatch task',
+        'completed',
+        '2026-08-26T06:00:00.000Z',
+        '2026-08-26T06:45:00.000Z'
+      );
+    seedIncident(sqlite, {
+      signature: 'incident-live-dispatch',
+      queue_state: 'dispatched',
+      dispatch_attempts: 1,
+      dispatch_lease_expires_at: 999,
+      dispatched_task_id: 'task-live-dispatch',
+    });
+    seedIncident(sqlite, {
+      signature: 'incident-terminal-dispatch',
+      queue_state: 'dispatched',
+      dispatch_attempts: 1,
+      dispatch_lease_expires_at: 999,
+      dispatched_task_id: 'task-terminal-dispatch',
+    });
+
+    const result = await reclaimExpiredIncidentDispatches(env, 1000);
+
+    expect(result).toEqual({ requeued: 1, rejected: 0 });
+    expect(
+      sqlite
+        .prepare(
+          `SELECT queue_state, dispatch_lease_expires_at, dispatched_task_id
+           FROM platform_feedback_triages WHERE signature = ?`
+        )
+        .get('incident-live-dispatch')
+    ).toEqual({
+      queue_state: 'dispatched',
+      dispatch_lease_expires_at: 999,
+      dispatched_task_id: 'task-live-dispatch',
+    });
+    expect(
+      sqlite
+        .prepare(
+          `SELECT queue_state, dispatch_lease_expires_at, dispatched_task_id
+           FROM platform_feedback_triages WHERE signature = ?`
+        )
+        .get('incident-terminal-dispatch')
+    ).toEqual({
+      queue_state: 'pending',
+      dispatch_lease_expires_at: null,
+      dispatched_task_id: null,
+    });
   });
 });

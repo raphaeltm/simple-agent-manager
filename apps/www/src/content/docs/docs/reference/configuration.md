@@ -560,6 +560,17 @@ aggregate operator-visible counters.
 | `WEB_PUSH_USER_AGENT_MAX_LENGTH`        | `512`                  | Maximum stored browser description length                              |
 | `RATE_LIMIT_PUSH_SUBSCRIPTION`          | `30`                   | Subscription mutations per user per hour                               |
 
+## Event Trigger Cleanup
+
+| Variable                                     | Default            | Description                                                                                                      |
+| -------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `TRIGGER_STALE_EXECUTION_TIMEOUT_MS`         | `1800000` (30 min) | Age before running executions are checked against linked task liveness                                           |
+| `TRIGGER_STALE_QUEUED_TIMEOUT_MS`            | `300000` (5 min)   | Age before queued executions are checked against linked task liveness                                            |
+| `TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS` | `48`               | Hard maximum execution residence backstop; live linked tasks still control concurrency and incident dispatch use |
+| `TRIGGER_EXECUTION_LOG_RETENTION_DAYS`       | `90`               | Completed/failed/skipped execution log retention                                                                 |
+| `TRIGGER_EXECUTION_CLEANUP_ENABLED`          | enabled            | Set to `false` to disable the cleanup sweep                                                                      |
+| `TRIGGER_STALE_RECOVERY_BATCH_SIZE`          | `100`              | Maximum stale execution candidates processed per sweep                                                           |
+
 ## Generic Webhook Triggers
 
 | Variable                                      | Default | Description                                                 |

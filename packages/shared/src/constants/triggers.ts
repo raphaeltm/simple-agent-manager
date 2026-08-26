@@ -36,11 +36,18 @@ export const DEFAULT_TRIGGER_DESCRIPTION_MAX_LENGTH = 500;
 /** Upper bound for maxConcurrent per trigger. Override via TRIGGER_MAX_CONCURRENT_LIMIT env var. */
 export const DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT = 10;
 
-/** Timeout in ms before a running execution is considered stale. Override via TRIGGER_STALE_EXECUTION_TIMEOUT_MS env var. */
+/** Age in ms before a non-terminal execution is checked against linked task liveness. Override via TRIGGER_STALE_EXECUTION_TIMEOUT_MS env var. */
 export const DEFAULT_TRIGGER_STALE_EXECUTION_TIMEOUT_MS = 1_800_000; // 30 minutes
 
-/** Timeout in ms before a queued execution is considered stale. Override via TRIGGER_STALE_QUEUED_TIMEOUT_MS env var. */
+/** Age in ms before a queued execution is checked against linked task liveness. Override via TRIGGER_STALE_QUEUED_TIMEOUT_MS env var. */
 export const DEFAULT_TRIGGER_STALE_QUEUED_TIMEOUT_MS = 300_000; // 5 minutes
+
+/** Hard maximum trigger execution residence in hours. Override via TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS env var. */
+export const DEFAULT_TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS = 48;
+
+/** Prefix for hard-residence backstop failure messages that may later be reconciled by task terminal sync. */
+export const TRIGGER_EXECUTION_HARD_MAX_FAILURE_PREFIX =
+  'Trigger execution exceeded hard maximum residence';
 
 /** Maximum raw JSON webhook body size. Override via WEBHOOK_TRIGGER_MAX_BODY_BYTES. */
 export const DEFAULT_WEBHOOK_TRIGGER_MAX_BODY_BYTES = 65_536;
@@ -108,6 +115,7 @@ export const TRIGGER_DEFAULTS = {
   TRIGGER_MAX_CONCURRENT_LIMIT: DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
   TRIGGER_STALE_EXECUTION_TIMEOUT_MS: DEFAULT_TRIGGER_STALE_EXECUTION_TIMEOUT_MS,
   TRIGGER_STALE_QUEUED_TIMEOUT_MS: DEFAULT_TRIGGER_STALE_QUEUED_TIMEOUT_MS,
+  TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS: DEFAULT_TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS,
   WEBHOOK_TRIGGER_MAX_BODY_BYTES: DEFAULT_WEBHOOK_TRIGGER_MAX_BODY_BYTES,
   WEBHOOK_TRIGGER_MAX_FILTERS: DEFAULT_WEBHOOK_TRIGGER_MAX_FILTERS,
   WEBHOOK_TRIGGER_MAX_FILTER_PATH_LENGTH: DEFAULT_WEBHOOK_TRIGGER_MAX_FILTER_PATH_LENGTH,

@@ -11,6 +11,7 @@ function setup(options: { withTrigger?: boolean } = {}) {
   sqlite.exec(`
     CREATE TABLE platform_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT, updated_by TEXT);
     CREATE TABLE projects (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL);
+    CREATE TABLE tasks (id TEXT PRIMARY KEY, status TEXT NOT NULL);
     CREATE TABLE triggers (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, user_id TEXT NOT NULL,
       name TEXT NOT NULL, description TEXT, status TEXT NOT NULL, source_type TEXT NOT NULL,
@@ -114,13 +115,11 @@ describe('incident trigger sweep', () => {
     expect(second).toMatchObject({ autoTriggerCreated: 0, fired: 0, pendingIncidents: 0 });
     expect(submitter).toHaveBeenCalledTimes(1);
     expect(
-      sqlite
-        .prepare("SELECT COUNT(*) AS count FROM triggers WHERE source_type = 'incident'")
-        .get()
+      sqlite.prepare("SELECT COUNT(*) AS count FROM triggers WHERE source_type = 'incident'").get()
     ).toEqual({ count: 1 });
     expect(
       sqlite
-        .prepare("SELECT COUNT(*) AS count FROM trigger_executions WHERE task_id = ?")
+        .prepare('SELECT COUNT(*) AS count FROM trigger_executions WHERE task_id = ?')
         .get('task-from-auto-trigger')
     ).toEqual({ count: 1 });
     expect(
@@ -150,9 +149,7 @@ describe('incident trigger sweep', () => {
       )
     ).resolves.toBe(true);
     expect(
-      sqlite
-        .prepare('SELECT queue_state, resolved_by_task_id FROM platform_feedback_triages')
-        .get()
+      sqlite.prepare('SELECT queue_state, resolved_by_task_id FROM platform_feedback_triages').get()
     ).toEqual({
       queue_state: 'resolved',
       resolved_by_task_id: 'task-from-auto-trigger',

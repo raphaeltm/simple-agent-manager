@@ -982,8 +982,9 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   TRIGGER_NAME_MAX_LENGTH?: string; // Max trigger name length (default: 100)
   TRIGGER_MAX_CONCURRENT_LIMIT?: string; // Upper bound for maxConcurrent per trigger (default: 10)
   // Trigger execution cleanup
-  TRIGGER_STALE_EXECUTION_TIMEOUT_MS?: string; // Timeout before running executions are considered stale (default: 1800000 = 30 min)
-  TRIGGER_STALE_QUEUED_TIMEOUT_MS?: string; // Timeout before queued executions are considered stale (default: 300000 = 5 min)
+  TRIGGER_STALE_EXECUTION_TIMEOUT_MS?: string; // Age before running executions are checked against linked task liveness (default: 1800000 = 30 min)
+  TRIGGER_STALE_QUEUED_TIMEOUT_MS?: string; // Age before queued executions are checked against linked task liveness (default: 300000 = 5 min)
+  TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS?: string; // Hard maximum execution residence backstop in hours (default: 48)
   TRIGGER_EXECUTION_LOG_RETENTION_DAYS?: string; // Days to retain completed/failed/skipped execution logs (default: 90)
   TRIGGER_EXECUTION_CLEANUP_ENABLED?: string; // Kill switch: "false" to disable cleanup sweep (default: enabled)
   TRIGGER_STALE_RECOVERY_BATCH_SIZE?: string; // Max stale executions to recover per sweep (default: 100)

@@ -375,6 +375,12 @@ by the read-only cron-liveness check.
 
 ### Generic Webhook Triggers
 
+- `TRIGGER_STALE_EXECUTION_TIMEOUT_MS` — Age before running executions are checked against linked task liveness (default: `1800000`)
+- `TRIGGER_STALE_QUEUED_TIMEOUT_MS` — Age before queued executions are checked against linked task liveness (default: `300000`)
+- `TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS` — Hard maximum execution residence backstop. The cleanup/admission/incident-dispatch paths still read linked task liveness so this backstop cannot free concurrency for a live task by itself (default: `48`)
+- `TRIGGER_EXECUTION_LOG_RETENTION_DAYS` — Completed/failed/skipped execution log retention (default: `90`)
+- `TRIGGER_EXECUTION_CLEANUP_ENABLED` — Trigger execution cleanup kill switch (default: enabled; set to `false` to disable)
+- `TRIGGER_STALE_RECOVERY_BATCH_SIZE` — Maximum stale execution candidates processed per sweep (default: `100`)
 - `WEBHOOK_TRIGGERS_ENABLED` — Public ingress kill switch (default: `true`)
 - `WEBHOOK_TRIGGER_MAX_BODY_BYTES` — Maximum JSON request body (default: `65536`)
 - `WEBHOOK_TRIGGER_MAX_FILTERS` — Maximum deterministic filters per trigger (default: `10`)

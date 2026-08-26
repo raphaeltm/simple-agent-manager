@@ -1,3 +1,5 @@
+import { TASK_TERMINAL_STATUSES } from '@simple-agent-manager/shared';
+
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
 import { redactSensitiveData } from './observability';
@@ -24,6 +26,7 @@ export type IncidentQueueState = (typeof INCIDENT_QUEUE_STATES)[number];
 const ACTIVE_INCIDENT_STATES = new Set<IncidentQueueState>(['pending', 'dispatched', 'claimed']);
 const TERMINAL_INCIDENT_STATES = new Set<IncidentQueueState>(['resolved', 'rejected', 'expired']);
 const REPORT_SOURCE = 'user-report';
+const TERMINAL_TASK_STATUS_SQL = TASK_TERMINAL_STATUSES.map((status) => `'${status}'`).join(', ');
 
 interface IncidentRow {
   signature: string;
@@ -426,6 +429,22 @@ export async function reclaimExpiredIncidentDispatches(
   now: number = Date.now(),
   config: IncidentConfig = getIncidentConfig(env)
 ): Promise<{ requeued: number; rejected: number }> {
+  // A dispatch lease expiring only proves the handoff marker is old. It does not
+  // prove the dispatched task is dead. Mirror the task row that
+  // completeIncidentDispatchLink() writes and preserve the lease while that task
+  // remains non-terminal; trigger cleanup/admission use the same liveness owner.
+  const liveDispatchedTaskPredicate = `NOT EXISTS (
+    SELECT 1 FROM tasks live_task
+     WHERE live_task.status NOT IN (${TERMINAL_TASK_STATUS_SQL})
+       AND (
+         live_task.id = platform_feedback_triages.dispatched_task_id
+         OR live_task.id = (
+           SELECT e.task_id FROM trigger_executions e
+            WHERE e.id = platform_feedback_triages.dispatched_execution_id
+            LIMIT 1
+         )
+       )
+  )`;
   const reject = await env.DATABASE.prepare(
     `UPDATE platform_feedback_triages SET queue_state = 'rejected', rejected_at = COALESCE(rejected_at, ?),
       resolution_note = ?, dispatch_lease_token = NULL, dispatch_lease_expires_at = NULL,
@@ -433,7 +452,7 @@ export async function reclaimExpiredIncidentDispatches(
      WHERE queue_state = 'dispatched'
        AND dispatch_lease_expires_at IS NOT NULL
        AND dispatch_lease_expires_at < ?
-       AND dispatch_attempts >= ?`
+       AND dispatch_attempts >= ?` + ` AND ${liveDispatchedTaskPredicate}`
   )
     .bind(
       now,
@@ -452,7 +471,7 @@ export async function reclaimExpiredIncidentDispatches(
      WHERE queue_state = 'dispatched'
        AND dispatch_lease_expires_at IS NOT NULL
        AND dispatch_lease_expires_at < ?
-       AND dispatch_attempts < ?`
+       AND dispatch_attempts < ?` + ` AND ${liveDispatchedTaskPredicate}`
   )
     .bind(now, now, config.maxDispatchAttempts)
     .run();
