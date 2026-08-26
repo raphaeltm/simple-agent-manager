@@ -22,16 +22,16 @@ import type { Env } from '../../src/env';
 // Import service functions under test
 import * as svc from '../../src/services/project-data';
 import {
-  captureProjectDataExpectedError,
-  type ProjectDataTestDouble,
-} from './support/expected-error-doubles';
-import {
   seedInstallation,
   seedProject,
   seedTask,
   seedUser,
   seedWorkspace,
 } from './helpers/seed-d1';
+import {
+  captureProjectDataExpectedError,
+  type ProjectDataTestDouble,
+} from './support/expected-error-doubles';
 
 // Cast the test env to the service's Env type.
 // The miniflare env provides the same bindings (PROJECT_DATA, etc.)
