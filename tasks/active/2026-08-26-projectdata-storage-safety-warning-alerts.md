@@ -111,8 +111,8 @@ perform any one-off production purge.
   warning or cleanup-exhausted states must be routed to an operator-visible
   channel, not just logged.
 - [x] Run local validation and specialist reviews required by `/do`.
-- [ ] Deploy to staging, verify the live admin/API behavior, create the PR, wait
-  for CI, merge when green, and monitor production deploy to completion.
+- [ ] Create the fresh PR CI run from the staging-evidence commit, wait for CI,
+  merge when green, and monitor production deploy to completion.
 
 ## Implementation notes
 
@@ -185,6 +185,14 @@ perform any one-off production purge.
 - `pnpm typecheck` — passed with existing Astro template baseline report
 - `pnpm build` — passed
 - `pnpm test` — passed, 21 tasks; API package 605 files / 8250 tests
+- Staging deploy workflow 32924143424 for commit
+  `228c052b54ee2ac435d1b969251df0617377f401` — passed; D1 migrations with
+  safety gates passed; API health check returned `status: healthy` at
+  `https://api.sammy.party/health`; Playwright smoke tests against
+  `https://app.sammy.party`/`https://api.sammy.party` passed, 12 tests; direct
+  unauthenticated checks for `/api/admin/project-data/storage` and
+  `/api/admin/project-data/storage/history` both returned 401, confirming the
+  staging admin routes are mounted behind the existing admin auth path.
 - Touched non-test source files are at or below 500 lines, except documented
   existing exceptions (`apps/api/src/env.ts`, `apps/api/src/db/schema.ts`).
 
