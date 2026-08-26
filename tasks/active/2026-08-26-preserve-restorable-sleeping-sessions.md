@@ -130,7 +130,7 @@ archives because those paths delete snapshot state first.
 - [x] Add controls proving user archive and task-terminal destructive cleanup still stop.
 - [x] Verify at least one new incident reproduction test fails on the pre-fix code, then passes.
 - [x] Update `.claude/rules/58-terminal-verdicts-must-match-the-resumer.md` with the process fix.
-- [ ] Run targeted tests and full validation.
+- [x] Run targeted tests and full validation.
 - [ ] Run required specialist review and address findings.
 - [ ] Coordinate the staging lane with the unfiltered `gh run list` command before deploying.
 - [ ] Open PR, get CI green, merge, monitor production deploy, then verify a fresh production sleep
@@ -150,6 +150,39 @@ archives because those paths delete snapshot state first.
 - The PR documents every finalizer caller and whether the guard applies.
 - CI, staging verification, merge, production deploy monitoring, and production post-deploy sleep
   survival verification are completed.
+
+## Validation Evidence
+
+- Pre-fix verification:
+  - `pnpm --filter @simple-agent-manager/api exec vitest run tests/unit/services/workspace-lifecycle-finalizer.test.ts`
+    failed because the direct finalizer and `destroyNodeForCleanup()` still stopped a restorable slept
+    session.
+  - `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/node-lifecycle-do.test.ts --testNamePattern "preserves a ProjectData sleeping session"`
+    failed because NodeLifecycle staged deletion changed the ProjectData session from `sleeping` to
+    `stopped`.
+- Targeted post-fix tests:
+  - `pnpm --filter @simple-agent-manager/api exec vitest run tests/unit/services/workspace-lifecycle-finalizer.test.ts`
+  - `pnpm --filter @simple-agent-manager/api exec vitest run tests/unit/services/project-data-snapshot-recovery-wake.test.ts tests/unit/durable-objects/project-data-sessions-wake.test.ts`
+  - `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/node-lifecycle-do.test.ts --testNamePattern "preserves a ProjectData sleeping session"`
+  - `pnpm --filter @simple-agent-manager/api exec vitest run tests/unit/services/workspace-lifecycle-finalizer.test.ts tests/unit/services/project-data-snapshot-recovery-wake.test.ts tests/unit/durable-objects/project-data-sessions-wake.test.ts tests/unit/stuck-task-slept-session-liveness.test.ts tests/unit/node-cleanup.test.ts tests/unit/stuck-task-terminal-cleanup.test.ts`
+  - `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/node-lifecycle-do.test.ts`
+  - `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/project-data-service.test.ts --testNamePattern "wakes a stopped ProjectData session"`
+  - `pnpm --filter @simple-agent-manager/api exec vitest run tests/unit/durable-objects/task-runner-agent-session.test.ts`
+- Full validation:
+  - `pnpm lint`
+  - `pnpm typecheck`
+  - `pnpm test` — 617 files, 8376 tests.
+  - `pnpm build`
+  - `pnpm --filter @simple-agent-manager/api test:workers` — 58 files, 751 tests.
+
+## Task Completion Validation
+
+- 2026-08-26 pre-review verdict: WARN.
+- Covered: implementation checklist items, required real-writer teardown tests, real-SQL predicates,
+  stopped-session recovery unbrick, no-snapshot/expired-snapshot/user-archive/task-terminal controls,
+  and finalizer caller inventory.
+- Pending by design: specialist review, CI, staging verification, merge, production deploy monitoring,
+  and production post-deploy sleep survival verification.
 
 ## References
 
