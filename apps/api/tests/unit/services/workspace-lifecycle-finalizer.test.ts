@@ -255,6 +255,19 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
     expect(mocks.cleanupWorkspaceActivity).toHaveBeenCalledWith(env, PROJECT_ID, WORKSPACE_ID);
   });
 
+  it('preserves a degraded slept ProjectData session when the snapshot is still restorable', async () => {
+    seedNode();
+    seedWorkspace({ status: 'deleted' });
+    seedAgentSession();
+    seedRestorableSnapshot({ status: 'degraded', degradation: 'entries-skipped' });
+
+    await finalizeWorkspace();
+
+    expect(mocks.stopSession).not.toHaveBeenCalled();
+    expect(mocks.failSession).not.toHaveBeenCalled();
+    expect(mocks.cleanupWorkspaceActivity).toHaveBeenCalledWith(env, PROJECT_ID, WORKSPACE_ID);
+  });
+
   it('still stops a session with no snapshot row', async () => {
     seedNode();
     seedWorkspace({ status: 'deleted' });

@@ -168,6 +168,15 @@ archives because those paths delete snapshot state first.
   - `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/node-lifecycle-do.test.ts`
   - `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/project-data-service.test.ts --testNamePattern "wakes a stopped ProjectData session"`
   - `pnpm --filter @simple-agent-manager/api exec vitest run tests/unit/durable-objects/task-runner-agent-session.test.ts`
+- Reviewer-driven follow-up tests:
+  - `pnpm --filter @simple-agent-manager/api exec vitest run tests/unit/services/workspace-lifecycle-finalizer.test.ts`
+    — 16 tests, including degraded-restorable preservation plus non-restorable/cross-scope stops.
+  - `pnpm --filter @simple-agent-manager/api exec vitest run tests/unit/services/project-data-snapshot-recovery-wake.test.ts tests/unit/services/workspace-lifecycle-finalizer.test.ts`
+    — 23 tests after adding fail-closed recovery-claim coverage and degraded-restorable preservation.
+  - `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/project-data-service.test.ts --testNamePattern "does not wake a sleeping ProjectData session|wakes a stopped ProjectData session"`
+    — 5 tests proving authorized stopped-session wake and unauthorized sleeping-session non-mutation.
+  - `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/project-data-service.test.ts`
+    — 60 tests.
 - Full validation:
   - `pnpm lint`
   - `pnpm typecheck`
@@ -179,8 +188,9 @@ archives because those paths delete snapshot state first.
 
 - 2026-08-26 pre-review verdict: WARN.
 - Covered: implementation checklist items, required real-writer teardown tests, real-SQL predicates,
-  stopped-session recovery unbrick, no-snapshot/expired-snapshot/non-restorable/cross-scope/
-  user-archive/task-terminal controls, and finalizer caller inventory.
+  stopped-session recovery unbrick, no-snapshot/expired-snapshot/degraded-restorable/
+  non-restorable/cross-scope/user-archive/task-terminal controls, replacement-workspace-gated
+  recovery wake authorization, and finalizer caller inventory.
 - Pending by design: specialist review, CI, staging verification, merge, production deploy monitoring,
   and production post-deploy sleep survival verification.
 
