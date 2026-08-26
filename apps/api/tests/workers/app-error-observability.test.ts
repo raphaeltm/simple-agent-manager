@@ -30,6 +30,12 @@ function errorApp(errorFactory: () => Error): Hono<{ Bindings: Env }> {
   app.get('/api/workspaces/:id/fail', () => {
     throw errorFactory();
   });
+  app.get('/api/notifications/ws', () => {
+    throw errorFactory();
+  });
+  app.post('/api/admin/observability/logs/ingest', () => {
+    throw errorFactory();
+  });
   return app;
 }
 
@@ -204,6 +210,30 @@ describe('global app.onError observability persistence', () => {
     );
     expect(response.status).toBe(500);
     expect(pending).toHaveLength(0);
+  });
+
+  it('does not persist benign disconnects from websocket and log-ingest control paths', async () => {
+    const app = errorApp(() => new Error('Network connection lost.'));
+    for (const [method, url] of [
+      ['GET', 'https://api.test.example.com/api/notifications/ws'],
+      ['POST', 'https://api.test.example.com/api/admin/observability/logs/ingest'],
+    ] as const) {
+      const pending: Promise<unknown>[] = [];
+      const response = await app.fetch(
+        new Request(url, { method }),
+        env,
+        executionContext(pending)
+      );
+
+      expect(response.status).toBe(204);
+      expect(pending).toHaveLength(0);
+    }
+
+    expect(
+      await env.OBSERVABILITY_DATABASE.prepare(
+        'SELECT COUNT(*) AS count FROM platform_errors'
+      ).first('count')
+    ).toBe(0);
   });
 });
 

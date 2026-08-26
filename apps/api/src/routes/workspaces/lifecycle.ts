@@ -45,6 +45,18 @@ const CF_CONTAINER_STOPPABLE_WORKSPACE_STATUSES = new Set([
   'stopping',
 ]);
 const CF_CONTAINER_STOPPABLE_NODE_STATUSES = new Set(['running', 'creating', 'error']);
+const SAFE_SLEEP_DEFERRAL_MESSAGES = new Set([
+  'Harness-owned background work is active',
+  'Workspace idle interval has not elapsed',
+  'Workspace activity changed while the final snapshot was captured',
+  'Workspace activity changed during snapshot artifact verification',
+]);
+
+function isSafeSleepDeferral(error: unknown): error is Error {
+  if (!(error instanceof Error)) return false;
+  if (SAFE_SLEEP_DEFERRAL_MESSAGES.has(error.message)) return true;
+  return error.message.startsWith('Workspace agent is not idle (');
+}
 
 function getTaskRunnerReadyStatus(status: string): 'running' | 'recovery' | 'error' {
   if (status === 'running') return 'running';
@@ -82,6 +94,11 @@ lifecycleRoutes.post('/:id/sleep', requireAuth(), requireApproved(), async (c) =
     workspaceId,
     userId,
     reason: 'Explicit workspace sleep API request',
+  }).catch((error) => {
+    if (isSafeSleepDeferral(error)) {
+      throw errors.conflict(error.message);
+    }
+    throw error;
   });
   return c.json(result);
 });

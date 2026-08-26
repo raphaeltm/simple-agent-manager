@@ -127,4 +127,33 @@ describe('POST /api/workspaces/:id/sleep', () => {
     });
     expect(mocks.sleepWorkspaceSession).not.toHaveBeenCalled();
   });
+
+  it('returns conflict instead of a platform 500 when explicit sleep is safely deferred', async () => {
+    const db = buildDb([
+      {
+        id: 'workspace-sleep-1',
+        userId: 'user-sleep-1',
+        projectId: 'project-sleep-1',
+        nodeId: 'node-sleep-1',
+        chatSessionId: 'chat-sleep-1',
+        status: 'running',
+      },
+    ]);
+    vi.mocked(drizzle).mockReturnValue(db as never);
+    mocks.sleepWorkspaceSession.mockRejectedValue(
+      new Error('Harness-owned background work is active')
+    );
+
+    const response = await createRouteTestApp('/api/workspaces', lifecycleRoutes).request(
+      '/api/workspaces/workspace-sleep-1/sleep',
+      { method: 'POST' },
+      buildEnv()
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'CONFLICT',
+      message: 'Harness-owned background work is active',
+    });
+  });
 });
