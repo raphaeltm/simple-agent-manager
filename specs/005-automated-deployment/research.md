@@ -342,7 +342,7 @@ fs.writeFileSync(configPath, TOML.stringify(config));
 │  │  - wrangler deploy (API Worker)                         │ │
 │  │  - wrangler pages deploy (Web UI)                       │ │
 │  │  - wrangler d1 migrations apply                         │ │
-│  │  - wrangler secret put (all secrets)                    │ │
+│  │  - wrangler secret bulk (bounded secret batch)           │ │
 │  └─────────────────────────────────────────────────────────┘ │
 │                            ↓                                 │
 │  ┌─────────────────────────────────────────────────────────┐ │

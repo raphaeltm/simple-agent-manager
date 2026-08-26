@@ -464,7 +464,7 @@ binding = "AI"
 [triggers]
 crons = ["*/5 * * * *", "30 * * * *", "0 3 * * *", "0 4 * * *", "0 5 1 * *"]
 
-# Secrets (set via wrangler secret put):
+# Secrets (set via wrangler secret bulk):
 # - GITHUB_CLIENT_ID
 # - GITHUB_CLIENT_SECRET
 # - GITHUB_APP_ID

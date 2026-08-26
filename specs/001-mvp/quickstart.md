@@ -75,13 +75,10 @@ BASE_DOMAIN=example.com
 # Login to Cloudflare
 wrangler login
 
-# Create secrets for the API worker
-cd apps/api
-wrangler secret put CF_API_TOKEN
-wrangler secret put CF_ZONE_ID
-wrangler secret put HETZNER_TOKEN
-wrangler secret put API_TOKEN
-wrangler secret put BASE_DOMAIN
+# Apply API Worker secrets in one bounded batch. The deploy workflow normally
+# invokes scripts/deploy/configure-secrets.sh so secret values are not logged and
+# repeated per-secret Worker version resets are avoided.
+wrangler secret bulk worker-secrets.json --env production
 ```
 
 ### 4. Start Development Servers

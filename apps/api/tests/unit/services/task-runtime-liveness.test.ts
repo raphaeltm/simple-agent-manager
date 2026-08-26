@@ -266,7 +266,7 @@ describe('classifyTaskRuntimeLiveness', () => {
     });
   });
 
-  it('classifies a completed ACP session conclusively dead', () => {
+  it('classifies an explicit terminal ACP session as conclusive terminal evidence', () => {
     expect(
       classifyTaskRuntimeLiveness(
         signals({
@@ -286,7 +286,46 @@ describe('classifyTaskRuntimeLiveness', () => {
     ).toMatchObject({
       live: false,
       conclusive: true,
-      reason: 'task_acp_session_not_live',
+      reason: 'task_acp_session_terminal',
+      activeAcpSessionId: 'acp-completed',
+    });
+  });
+
+  it('treats a missing ProjectData ACP session as suspect for a healthy VM runtime', () => {
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          acpSessions: [],
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'task_acp_session_missing',
+    });
+  });
+
+  it('treats a stale ProjectData ACP session as suspect for a healthy VM runtime', () => {
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          acpSessions: [
+            {
+              id: 'acp-stale',
+              status: 'running',
+              workspaceId: 'workspace-1',
+              lastHeartbeatAt: NOW - STALE_MS - 1,
+              updatedAt: NOW - STALE_MS - 1,
+              startedAt: NOW - STALE_MS - 2_000,
+              createdAt: NOW - STALE_MS - 3_000,
+            },
+          ],
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'task_acp_session_stale',
     });
   });
 

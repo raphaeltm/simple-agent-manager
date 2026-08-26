@@ -57,19 +57,27 @@ secrets:
     required: true
     description: 'Passphrase for encrypting secrets in Pulumi state'
 
-  # GitHub App (Optional)
-  GITHUB_APP_ID:
+  # GitHub App / OAuth environment fallback secrets (Optional)
+  # GitHub Actions secret names cannot start with GITHUB_*, so the workflow
+  # accepts GH_* and configure-secrets.sh maps them to GITHUB_* Worker secrets.
+  GH_APP_ID:
     required: false
     description: 'GitHub App ID for repository access'
-  GITHUB_CLIENT_ID:
+  GH_CLIENT_ID:
     required: false
     description: 'GitHub OAuth Client ID'
-  GITHUB_CLIENT_SECRET:
+  GH_CLIENT_SECRET:
     required: false
     description: 'GitHub OAuth Client Secret'
-  GITHUB_APP_PRIVATE_KEY:
+  GH_APP_PRIVATE_KEY:
     required: false
     description: 'GitHub App private key (base64 encoded PEM)'
+  GH_APP_SLUG:
+    required: false
+    description: 'GitHub App slug for installation URLs'
+  GH_WEBHOOK_SECRET:
+    required: false
+    description: 'GitHub App webhook HMAC secret'
 
 # Workflow Outputs
 outputs:
@@ -180,10 +188,52 @@ jobs:
       - name: Configure Worker Secrets
         if: ${{ !inputs.dry_run }}
         run: |
-          echo "${{ secrets.GITHUB_CLIENT_SECRET }}" | pnpm wrangler secret put GITHUB_CLIENT_SECRET --env ${{ inputs.environment }} || true
-          # ... additional secrets
+          bash scripts/deploy/configure-secrets.sh "$DEPLOY_ENV"
+          # Uses a bounded wrangler secret bulk payload; values are never logged.
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+          GH_CLIENT_ID: ${{ secrets.GH_CLIENT_ID }}
+          GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}
+          GH_APP_ID: ${{ secrets.GH_APP_ID }}
+          GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          GH_APP_SLUG: ${{ secrets.GH_APP_SLUG }}
+          GH_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          PULUMI_STACK: ${{ steps.pulumi-select.outputs.stack_name }}
+          SECRET_ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          SECRET_JWT_PRIVATE_KEY: ${{ secrets.JWT_PRIVATE_KEY }}
+          SECRET_JWT_PUBLIC_KEY: ${{ secrets.JWT_PUBLIC_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_LOGIN_CLIENT_ID: ${{ secrets.GOOGLE_LOGIN_CLIENT_ID }}
+          GOOGLE_LOGIN_CLIENT_SECRET: ${{ secrets.GOOGLE_LOGIN_CLIENT_SECRET }}
+          GITLAB_HOST: ${{ secrets.GITLAB_HOST }}
+          GITLAB_CLIENT_ID: ${{ secrets.GITLAB_CLIENT_ID }}
+          GITLAB_CLIENT_SECRET: ${{ secrets.GITLAB_CLIENT_SECRET }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+          SMOKE_TEST_AUTH_ENABLED: ${{ secrets.SMOKE_TEST_AUTH_ENABLED }}
+          DEPLOY_SIGNING_PRIVATE_KEY: ${{ secrets.DEPLOY_SIGNING_PRIVATE_KEY }}
+          DEPLOY_SIGNING_PUBLIC_KEY: ${{ secrets.DEPLOY_SIGNING_PUBLIC_KEY }}
+          ANTHROPIC_API_KEY_TRIAL: ${{ secrets.ANTHROPIC_API_KEY_TRIAL }}
+          SEGMENT_WRITE_KEY: ${{ secrets.SEGMENT_WRITE_KEY }}
+          GA4_API_SECRET: ${{ secrets.GA4_API_SECRET }}
+          GA4_MEASUREMENT_ID: ${{ secrets.GA4_MEASUREMENT_ID }}
+          CF_AIG_TOKEN: ${{ secrets.CF_AIG_TOKEN }}
+          DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN: ${{ secrets.DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN }}
+          DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID }}
+          DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
 
       # Phase 4: VM Agent
       - name: Setup Go

@@ -209,7 +209,7 @@ GitHub Action: Deploy
 │   ├── wrangler deploy --env production (API)
 │   ├── wrangler pages deploy (Web)
 │   ├── wrangler d1 migrations apply
-│   └── wrangler secret put (all secrets)
+│   └── wrangler secret bulk (bounded secret batch)
 │
 ├── Phase 4: VM Agent
 │   ├── Build: make -C packages/vm-agent build-all

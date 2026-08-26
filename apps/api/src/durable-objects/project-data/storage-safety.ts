@@ -31,6 +31,7 @@ import {
 import {
   enrichProjectDataStorageTelemetry,
   maybePersistProjectDataStorageAlert,
+  type ProjectDataStorageTelemetryEnrichmentOptions,
   upsertProjectDataStorageTelemetry,
 } from './storage-telemetry';
 import {
@@ -118,6 +119,7 @@ export interface ProjectDataStorageAlarmResult {
   cleanup: ProjectDataToolPayloadCleanupResult | null;
   eventLogCleanup: ProjectDataEventLogCleanupResult | null;
   cleanupHealth: ProjectDataStorageCleanupHealth | null;
+  durationMs: number;
 }
 
 export interface StorageSafetyConfig {
@@ -304,7 +306,8 @@ async function buildTelemetry(
   env: Env,
   projectId: string,
   measuredAt: number = Date.now(),
-  cleanupHealth: ProjectDataStorageCleanupHealth | null = null
+  cleanupHealth: ProjectDataStorageCleanupHealth | null = null,
+  options: ProjectDataStorageTelemetryEnrichmentOptions = {}
 ): Promise<ProjectDataStorageTelemetry> {
   const config = resolveStorageSafetyConfig(env);
   const databaseSizeBytes = sql.databaseSize;
@@ -322,7 +325,7 @@ async function buildTelemetry(
     reclaimableBytes: null,
     categoryBreakdown: null,
   };
-  return enrichProjectDataStorageTelemetry(sql, env, baseTelemetry, config);
+  return enrichProjectDataStorageTelemetry(sql, env, baseTelemetry, config, options);
 }
 
 export function computeStorageSafetyAlarmTime(
@@ -374,7 +377,9 @@ export async function measureAndPersistProjectDataStorage(
     return null;
   }
 
-  const telemetry = await buildTelemetry(sql, env, projectId);
+  const telemetry = await buildTelemetry(sql, env, projectId, Date.now(), null, {
+    includeCategoryBreakdown: reason !== 'alarm',
+  });
   writeMeta(sql, META_LAST_MEASURED_AT, String(telemetry.measuredAt));
   writeMeta(sql, META_LAST_STATUS, telemetry.status);
 

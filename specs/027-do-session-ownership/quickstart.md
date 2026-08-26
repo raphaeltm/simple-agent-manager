@@ -57,7 +57,8 @@ Build in this sequence (each step testable independently):
 
 1. Add DO alarm handler for heartbeat checking in `project-data.ts`
 2. Wire heartbeat endpoint processing
-3. **Test**: Simulate heartbeat timeout, verify session transitions to "interrupted"
+3. Treat stale ProjectData heartbeat rows as suspect for VM-backed sessions; only interrupt from explicit terminal ACP evidence, terminal owning workspace/node state, cf-container terminal lifecycle, or another authoritative runtime signal
+4. **Test**: Simulate conclusive runtime failure, verify session transitions to "interrupted"; simulate stale ProjectData heartbeat alone, verify VM work is preserved
 
 ### Step 7: Session Forking
 
@@ -94,7 +95,7 @@ Add to `.env.example` and document:
 ```bash
 # ACP Session Lifecycle (all optional, sensible defaults)
 ACP_SESSION_HEARTBEAT_INTERVAL_MS=60000       # VM agent heartbeat frequency
-ACP_SESSION_DETECTION_WINDOW_MS=300000         # DO heartbeat timeout
+ACP_SESSION_DETECTION_WINDOW_MS=300000         # ProjectData heartbeat stale window
 ACP_SESSION_RECONCILIATION_TIMEOUT_MS=30000    # VM agent startup reconciliation
 ACP_SESSION_FORK_CONTEXT_MESSAGES=20           # Messages to summarize for fork
 ACP_SESSION_MAX_FORK_DEPTH=10                  # Max fork chain length
@@ -115,7 +116,7 @@ pnpm --filter @simple-agent-manager/web test     # UI tests (after step 8)
 - [ ] Migration 008 creates tables correctly
 - [ ] All 8 state transitions work (valid) and invalid transitions are rejected
 - [ ] Heartbeat resets detection alarm
-- [ ] Heartbeat timeout marks session as "interrupted"
+- [ ] Heartbeat timeout marks ProjectData data stale/suspect; VM-backed interruption requires conclusive runtime/workspace evidence
 - [ ] Fork creates child with correct lineage
 - [ ] Fork depth limit enforced
 - [ ] VM agent reconciles on startup

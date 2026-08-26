@@ -48,9 +48,9 @@
 
 ## Phase 3: User Story 1 — Resilient Task Execution (Priority: P1) 🎯 MVP
 
-**Goal**: DO tracks ACP session state machine (pending → assigned → running → completed/failed/interrupted). VM failure detected via heartbeat timeout.
+**Goal**: DO tracks ACP session state machine (pending → assigned → running → completed/failed/interrupted). ProjectData heartbeat timeout marks storage-history data stale/suspect; VM interruption requires explicit terminal ACP evidence, terminal owning workspace/node state, cf-container terminal lifecycle, or another authoritative runtime signal.
 
-**Independent Test**: Submit a task, verify session record exists in DO with correct state transitions. Simulate VM failure, verify DO marks session as "interrupted".
+**Independent Test**: Submit a task, verify session record exists in DO with correct state transitions. Simulate conclusive VM failure evidence, verify DO marks session as "interrupted"; simulate stale ProjectData heartbeat data alone and verify VM-backed work is preserved.
 
 ### Implementation for User Story 1
 
@@ -60,11 +60,11 @@
 - [ ] T017 [US1] Add POST `/api/projects/:projectId/acp-sessions/:sessionId/status` endpoint to `apps/api/src/routes/projects.ts` — VM agent reports running/completed/failed, validate nodeId matches
 - [ ] T018 [US1] Add POST `/api/projects/:projectId/acp-sessions/:sessionId/heartbeat` endpoint to `apps/api/src/routes/projects.ts` — update `last_heartbeat_at`, reset DO alarm
 - [ ] T019 [US1] Add `updateHeartbeat(sessionId, nodeId)` method to `apps/api/src/durable-objects/project-data.ts` — validate node match, update timestamp, set alarm for detection window
-- [ ] T020 [US1] Add heartbeat timeout check to DO `alarm()` handler in `apps/api/src/durable-objects/project-data.ts` — query stale sessions, transition to "interrupted"
+- [ ] T020 [US1] Add heartbeat timeout check to DO `alarm()` handler in `apps/api/src/durable-objects/project-data.ts` — query stale sessions, treat VM-backed ProjectData heartbeat staleness as suspect, and transition only with conclusive runtime/workspace evidence
 - [ ] T021 [US1] Write integration test: create session → assign → report running → heartbeat → report completed in `apps/api/tests/integration/acp-session-lifecycle.test.ts`
-- [ ] T022 [US1] Write integration test: create session → assign → report running → heartbeat timeout → verify interrupted in `apps/api/tests/integration/acp-session-interruption.test.ts`
+- [ ] T022 [US1] Write integration tests: create session → assign → report running → stale ProjectData heartbeat alone preserves VM-backed work; conclusive terminal runtime/workspace evidence verifies interrupted in `apps/api/tests/integration/acp-session-interruption.test.ts`
 
-**Checkpoint**: API endpoints fully functional. Sessions tracked in DO with heartbeat-based interruption detection.
+**Checkpoint**: API endpoints fully functional. Sessions tracked in DO with ProjectData heartbeat stale/suspect detection and conclusive runtime/workspace interruption detection.
 
 ---
 

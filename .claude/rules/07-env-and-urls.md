@@ -100,7 +100,7 @@ Miniflare (used in Vitest worker tests) configures bindings directly in `vitest.
 ### Workers Secrets
 
 ```bash
-wrangler secret put SECRET_NAME
+wrangler secret bulk secrets.json --env "$ENVIRONMENT"
 ```
 
 Local development uses `.dev.vars`.

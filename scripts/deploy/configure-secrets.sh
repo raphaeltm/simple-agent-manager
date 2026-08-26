@@ -39,7 +39,60 @@ derive_vapid_key_from_pem() {
   VAPID_PRIVATE_KEY_PEM_INPUT="$private_key_pem" pnpm exec tsx scripts/deploy/vapid-keys.ts "$component"
 }
 
-# Function to set a secret with proper error handling
+# Cloudflare's bulk secrets API accepts up to 100 create/update/delete operations
+# per request. Keep this configurable so operators can lower the per-request
+# budget if the API or account policy changes.
+DEFAULT_WORKER_SECRET_BULK_MAX_OPS=100
+WORKER_SECRET_BULK_MAX_OPS="${WORKER_SECRET_BULK_MAX_OPS:-$DEFAULT_WORKER_SECRET_BULK_MAX_OPS}"
+if ! [[ "$WORKER_SECRET_BULK_MAX_OPS" =~ ^[0-9]+$ ]] ||
+  [ "$WORKER_SECRET_BULK_MAX_OPS" -lt 1 ] ||
+  [ "$WORKER_SECRET_BULK_MAX_OPS" -gt "$DEFAULT_WORKER_SECRET_BULK_MAX_OPS" ]; then
+  echo -e "${RED}ERROR: WORKER_SECRET_BULK_MAX_OPS must be between 1 and $DEFAULT_WORKER_SECRET_BULK_MAX_OPS${NC}" >&2
+  exit 1
+fi
+
+WORKER_SECRET_BULK_PAYLOAD="$(mktemp)"
+chmod 600 "$WORKER_SECRET_BULK_PAYLOAD"
+printf '{' >"$WORKER_SECRET_BULK_PAYLOAD"
+WORKER_SECRET_BULK_HAS_ENTRIES=false
+WORKER_SECRET_BULK_COUNT=0
+WORKER_SECRET_BULK_SET_COUNT=0
+WORKER_SECRET_BULK_DELETE_COUNT=0
+
+cleanup_worker_secret_bulk_payload() {
+  if [ -n "${WORKER_SECRET_BULK_PAYLOAD:-}" ]; then
+    rm -f "$WORKER_SECRET_BULK_PAYLOAD"
+  fi
+}
+trap cleanup_worker_secret_bulk_payload EXIT
+
+json_escape_stdin() {
+  node -e 'let input = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { process.stdout.write(JSON.stringify(input)); });'
+}
+
+append_worker_secret_bulk_entry() {
+  local secret_name="$1"
+  local encoded_secret_value="$2"
+  local encoded_secret_name
+
+  encoded_secret_name="$(printf '%s' "$secret_name" | json_escape_stdin)"
+
+  if [ "$WORKER_SECRET_BULK_HAS_ENTRIES" = "true" ]; then
+    printf ',' >>"$WORKER_SECRET_BULK_PAYLOAD"
+  fi
+  printf '\n  %s: %s' "$encoded_secret_name" "$encoded_secret_value" >>"$WORKER_SECRET_BULK_PAYLOAD"
+  WORKER_SECRET_BULK_HAS_ENTRIES=true
+  WORKER_SECRET_BULK_COUNT=$((WORKER_SECRET_BULK_COUNT + 1))
+
+  if [ "$WORKER_SECRET_BULK_COUNT" -gt "$WORKER_SECRET_BULK_MAX_OPS" ]; then
+    echo -e "${RED}ERROR: queued $WORKER_SECRET_BULK_COUNT Worker secret operations, exceeding WORKER_SECRET_BULK_MAX_OPS=$WORKER_SECRET_BULK_MAX_OPS${NC}" >&2
+    exit 1
+  fi
+}
+
+# Function to queue a secret with proper error handling. The call sites stay
+# named set_worker_secret so scripts/quality/check-wrangler-bindings.ts can keep
+# comparing this script to the wrangler.toml secret inventory.
 set_worker_secret() {
   local secret_name="$1"
   local secret_value="$2"
@@ -56,23 +109,46 @@ set_worker_secret() {
     fi
   fi
 
-  echo -n "Setting $secret_name... "
-
-  # Try to set the secret and capture the output
-  if output=$(echo "$secret_value" | pnpm --filter @simple-agent-manager/api exec wrangler secret put "$secret_name" --env "$environment" 2>&1); then
-    echo -e "${GREEN}✅${NC}"
-    return 0
-  else
-    # Check if it's an "already exists" error
-    if echo "$output" | grep -q "already exists\|already set"; then
-      echo -e "${GREEN}✅ (already exists)${NC}"
-      return 0
-    else
-      echo -e "${RED}❌${NC}"
-      echo "Error: $output"
-      return 1
-    fi
+  if [ "$environment" != "${ENVIRONMENT:-}" ]; then
+    echo -e "${RED}❌ Secret $secret_name was queued for unexpected environment $environment${NC}" >&2
+    return 1
   fi
+
+  echo -n "Queueing $secret_name... "
+
+  local encoded_secret_value
+  encoded_secret_value="$(printf '%s' "$secret_value" | json_escape_stdin)"
+  append_worker_secret_bulk_entry "$secret_name" "$encoded_secret_value"
+  WORKER_SECRET_BULK_SET_COUNT=$((WORKER_SECRET_BULK_SET_COUNT + 1))
+  echo -e "${GREEN}✅${NC}"
+}
+
+queue_stale_worker_secret_delete() {
+  local secret_name="$1"
+
+  echo -n "Queueing stale secret deletion for $secret_name... "
+  append_worker_secret_bulk_entry "$secret_name" "null"
+  WORKER_SECRET_BULK_DELETE_COUNT=$((WORKER_SECRET_BULK_DELETE_COUNT + 1))
+  echo -e "${GREEN}✅${NC}"
+}
+
+flush_worker_secret_bulk() {
+  if [ "$WORKER_SECRET_BULK_HAS_ENTRIES" != "true" ]; then
+    echo "No Worker secret changes queued."
+    return 0
+  fi
+
+  printf '\n}\n' >>"$WORKER_SECRET_BULK_PAYLOAD"
+  echo "Applying $WORKER_SECRET_BULK_COUNT Worker secret operations via wrangler secret bulk ($WORKER_SECRET_BULK_SET_COUNT set/update, $WORKER_SECRET_BULK_DELETE_COUNT delete)..."
+
+  if pnpm --filter @simple-agent-manager/api exec wrangler secret bulk "$WORKER_SECRET_BULK_PAYLOAD" --env "$ENVIRONMENT" >/dev/null 2>&1; then
+    echo -e "${GREEN}✅ Worker secrets configured in bulk${NC}"
+    return 0
+  fi
+
+  echo -e "${RED}❌ Worker secret bulk configuration failed${NC}" >&2
+  echo "Wrangler returned a non-zero status. Secret values were not logged; rerun locally with Wrangler diagnostics if needed." >&2
+  return 1
 }
 
 # Parse arguments
@@ -342,18 +418,11 @@ STALE_SECRETS=(
 echo ""
 echo "Cleaning up stale secrets (migrated to wrangler.toml vars)..."
 for secret_name in "${STALE_SECRETS[@]}"; do
-  if output=$(echo "y" | pnpm --filter @simple-agent-manager/api exec wrangler secret delete "$secret_name" --env "$ENVIRONMENT" 2>&1); then
-    echo -e "${GREEN}  Deleted stale secret: $secret_name${NC}"
-  else
-    # Wrangler exits non-zero if the secret doesn't exist — that's fine
-    if echo "$output" | grep -qi "not found\|does not exist\|couldn't find"; then
-      echo -e "  $secret_name not present (OK)"
-    else
-      # Unexpected error — log but don't fail the deploy
-      echo -e "${YELLOW}  Could not delete $secret_name: $output${NC}"
-    fi
-  fi
+  queue_stale_worker_secret_delete "$secret_name"
 done
+
+echo ""
+flush_worker_secret_bulk || FAILED=true
 
 echo ""
 if [ "$FAILED" = "true" ]; then

@@ -46,11 +46,14 @@ export async function shouldDeferRuntimeHeartbeatTimeout(
   )
     .bind(candidate.workspaceId, candidate.nodeId)
     .first<{ workspace_status: string; node_runtime: string | null }>();
-  if (!row || row.node_runtime !== 'cf-container') {
-    return { defer: false, reason: row ? 'non_container_runtime' : 'workspace_missing' };
+  if (!row) {
+    return { defer: false, reason: 'workspace_missing' };
   }
   if (TERMINAL_WORKSPACE_STATUSES.has(row.workspace_status)) {
     return { defer: false, reason: `workspace_${row.workspace_status}` };
+  }
+  if (row.node_runtime !== 'cf-container') {
+    return { defer: true, reason: 'vm_runtime_projectdata_heartbeat_suspect' };
   }
   if (!env.VM_AGENT_CONTAINER) {
     return { defer: true, reason: 'cf_container_lifecycle_binding_unavailable' };

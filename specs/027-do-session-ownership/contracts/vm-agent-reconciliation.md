@@ -102,6 +102,11 @@ async updateHeartbeat(sessionId: string, nodeId: string): Promise<void> {
 
 ### DO Alarm Handler (Interruption Detection)
 
+ProjectData heartbeat staleness is storage-history evidence. For VM-backed
+sessions it is suspect by itself; interruption requires explicit terminal
+session evidence, terminal owning workspace/node state, or another authoritative
+runtime signal.
+
 ```typescript
 // In ProjectData DO alarm() handler
 async checkSessionHeartbeats(): Promise<void> {
@@ -109,16 +114,20 @@ async checkSessionHeartbeats(): Promise<void> {
   const cutoff = Date.now() - detectionWindow;
 
   const staleSessions = this.sql.exec(
-    `SELECT id FROM acp_sessions
+    `SELECT id, workspace_id, node_id FROM acp_sessions
      WHERE status IN ('assigned', 'running')
      AND last_heartbeat_at < ?`,
     cutoff
   ).toArray();
 
   for (const session of staleSessions) {
+    if (await this.shouldDeferVmHeartbeatTimeout(session)) {
+      await this.recordSuspectHeartbeat(session.id, 'projectdata_heartbeat_stale');
+      continue;
+    }
     await this.transitionAcpSession(session.id, 'interrupted', {
       actorType: 'alarm',
-      reason: 'Heartbeat timeout exceeded detection window',
+      reason: 'Conclusive runtime/workspace evidence exceeded detection window',
     });
   }
 }
@@ -128,10 +137,10 @@ async checkSessionHeartbeats(): Promise<void> {
 
 | Scenario | VM Agent Behavior | DO Behavior |
 |----------|-------------------|-------------|
-| VM crash (sudden death) | Nothing (dead) | Heartbeat alarm fires → session "interrupted" |
+| VM crash (sudden death) | Nothing (dead) | ProjectData heartbeat becomes stale/suspect; session is interrupted only after conclusive runtime/workspace evidence |
 | VM restart (clean) | Reconciliation on startup | Continues receiving heartbeats after restart |
 | Network partition | Heartbeat POST fails, logs warning | Alarm fires if partition > detection window |
-| API unreachable on startup | Reconciliation times out, logs error, starts fresh | Sessions remain "assigned" until heartbeat timeout |
+| API unreachable on startup | Reconciliation times out, logs error, starts fresh | Sessions remain "assigned"; ProjectData heartbeat timeout is suspect until paired with conclusive runtime/workspace evidence |
 | Agent process crash (VM alive) | Detects process exit, reports "failed" | Transitions to "failed" |
 
 ## Configuration
@@ -139,5 +148,5 @@ async checkSessionHeartbeats(): Promise<void> {
 | Env Var | Default | Where Set | Description |
 |---------|---------|-----------|-------------|
 | `ACP_SESSION_HEARTBEAT_INTERVAL_MS` | `60000` | VM agent env | How often to send heartbeats |
-| `ACP_SESSION_DETECTION_WINDOW_MS` | `300000` | Worker env | How long before declaring interrupted |
+| `ACP_SESSION_DETECTION_WINDOW_MS` | `300000` | Worker env | ProjectData heartbeat stale window; VM-backed sessions require conclusive runtime/workspace evidence before interruption |
 | `ACP_SESSION_RECONCILIATION_TIMEOUT_MS` | `30000` | VM agent env | Timeout for startup reconciliation query |

@@ -282,7 +282,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
    * atomically by CodexRefreshLock DO using ctx.storage (not KV). See
    * {@link CodexRefreshEnv} in codex-refresh-lock.ts for the authoritative
    * declaration — this is a Worker-level re-export so operators can configure
-   * the variable via wrangler.toml / `wrangler secret put`.
+   * the variable via wrangler.toml / `wrangler secret bulk`.
    */
   RATE_LIMIT_CODEX_REFRESH_PER_HOUR?: string;
   RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS?: string;

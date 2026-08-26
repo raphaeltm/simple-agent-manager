@@ -108,6 +108,51 @@ function mockPreparedStatement(results: unknown[] = [], changes = 1) {
   };
 }
 
+function collectTaskTerminalRows(
+  prepareResponses: Map<string, { results: unknown[]; changes?: number }>
+): Map<string, Record<string, unknown>> {
+  const rows = new Map<string, Record<string, unknown>>();
+
+  for (const config of prepareResponses.values()) {
+    for (const row of config.results) {
+      if (!row || typeof row !== 'object') continue;
+      const candidate = row as Record<string, unknown>;
+      if (
+        typeof candidate.id === 'string' &&
+        typeof candidate.project_id === 'string' &&
+        typeof candidate.status === 'string'
+      ) {
+        rows.set(candidate.id, {
+          id: candidate.id,
+          project_id: candidate.project_id,
+          status: candidate.status,
+          workspace_id: candidate.workspace_id ?? null,
+          chat_session_id: candidate.chat_session_id ?? null,
+          parent_task_id: candidate.parent_task_id ?? null,
+        });
+      }
+    }
+  }
+
+  return rows;
+}
+
+function mockTaskTerminalLoadStatement(taskRows: Map<string, Record<string, unknown>>) {
+  return {
+    bind: vi.fn((taskId: string) => {
+      const row = taskRows.get(taskId) ?? null;
+      return {
+        all: vi.fn().mockResolvedValue({ results: row ? [row] : [] }),
+        first: vi.fn().mockResolvedValue(row),
+        run: vi.fn().mockResolvedValue({ meta: { changes: 0 } }),
+      };
+    }),
+    all: vi.fn().mockResolvedValue({ results: [] }),
+    first: vi.fn().mockResolvedValue(null),
+    run: vi.fn().mockResolvedValue({ meta: { changes: 0 } }),
+  };
+}
+
 /**
  * Wire a mocked env.VM_AGENT_CONTAINER namespace whose stub.inspectLifecycle()
  * returns the given inspection (or a never-resolving promise for the timeout
@@ -131,8 +176,16 @@ function createMockEnv(
   taskRunnerStatus: unknown | Error = null,
   containerLifecycle?: ReturnType<typeof vi.fn>
 ): Env {
+  const taskTerminalRows = collectTaskTerminalRows(prepareResponses);
   const mockDb = {
     prepare: vi.fn((sql: string) => {
+      if (
+        sql.includes('id, project_id, status, workspace_id, chat_session_id, parent_task_id') &&
+        sql.includes('FROM tasks') &&
+        sql.includes('WHERE id = ?')
+      ) {
+        return mockTaskTerminalLoadStatement(taskTerminalRows);
+      }
       for (const [substring, config] of prepareResponses.entries()) {
         if (sql.includes(substring)) {
           return mockPreparedStatement(config.results, config.changes ?? 1);
@@ -140,7 +193,15 @@ function createMockEnv(
       }
       return mockPreparedStatement([]);
     }),
-    batch: vi.fn().mockResolvedValue([]),
+    batch: vi.fn(async (statements: Array<{ run?: () => Promise<unknown> }>) =>
+      Promise.all(
+        statements.map((statement) =>
+          typeof statement.run === 'function'
+            ? statement.run()
+            : Promise.resolve({ meta: { changes: 1 } })
+        )
+      )
+    ),
     dump: vi.fn(),
     exec: vi.fn(),
   } as unknown as D1Database;
@@ -192,6 +253,8 @@ describe('recoverStuckTasks', () => {
     vi.clearAllMocks();
     fetchWithTimeoutMock.mockReset();
     fetchWithTimeoutMock.mockResolvedValue(new Response(null, { status: 200 }));
+    projectDataMocks.listAcpSessions.mockReset();
+    projectDataMocks.getTaskAcpLivenessSignals.mockReset();
     projectDataMocks.getMessages.mockResolvedValue({ messages: [], hasMore: false });
     projectDataMocks.listSessions.mockResolvedValue({ sessions: [], total: 0 });
     projectDataMocks.listAcpSessions.mockResolvedValue({ sessions: [], total: 0 });
@@ -430,6 +493,51 @@ describe('recoverStuckTasks', () => {
       responses.set("UPDATE tasks SET status = 'failed'", {
         results: [],
         changes: 1,
+      });
+      return responses;
+    }
+
+    function healthyVmRunningWorkspaceResponses(taskId: string) {
+      const now = Date.now();
+      const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
+      const recentHeartbeat = new Date(now - 30 * 1000).toISOString();
+      const taskRow = {
+        id: taskId,
+        project_id: 'proj-1',
+        user_id: 'user-1',
+        status: 'in_progress',
+        execution_step: 'running',
+        updated_at: startedAt,
+        started_at: startedAt,
+        workspace_id: 'ws-1',
+        auto_provisioned_node_id: 'node-1',
+      };
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
+        results: [taskRow],
+      });
+      responses.set('FROM tasks\n     WHERE id = ?', {
+        results: [taskRow],
+      });
+      responses.set('w.chat_session_id', {
+        results: [
+          {
+            workspace_status: 'running',
+            chat_session_id: 'chat-1',
+            node_id: 'node-1',
+            node_status: 'running',
+            health_status: 'healthy',
+            last_heartbeat_at: recentHeartbeat,
+            node_runtime: 'vm',
+            running_workspaces_on_node: 1,
+          },
+        ],
+      });
+      responses.set('node_id, status FROM workspaces', {
+        results: [{ id: 'ws-1', node_id: 'node-1', status: 'running' }],
+      });
+      responses.set('status, health_status FROM nodes', {
+        results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
       });
       return responses;
     }
@@ -697,11 +805,11 @@ describe('recoverStuckTasks', () => {
       );
     });
 
-    it('fails an in_progress task when the node is healthy but the task-scoped ACP session is gone', async () => {
-      // The exact production regression: a HEALTHY node with a RECENT heartbeat
-      // is not proof the task is alive. When the task-scoped ACP session is
-      // absent/stale, reconciliation must still fail the task — a shared-node
-      // heartbeat cannot independently suppress it.
+    it('preserves an in_progress VM task when ProjectData ACP data is missing but the node is healthy', async () => {
+      // Production regression from 2026-08-26: ProjectData ACP writes were
+      // blocked by a hot ProjectData DO, while the VM node and workspace were
+      // still healthy. Missing durable heartbeat data is suspect, not terminal
+      // runtime-death evidence.
       const now = Date.now();
       const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
       const recentHeartbeat = new Date(now - 30 * 1000).toISOString(); // node very much alive
@@ -742,7 +850,7 @@ describe('recoverStuckTasks', () => {
       });
       responses.set("UPDATE tasks SET status = 'failed'", { results: [], changes: 1 });
 
-      // No live task-scoped ACP session, despite the healthy node.
+      // No observable task-scoped ACP session, despite the healthy node.
       projectDataMocks.getTaskAcpLivenessSignals.mockResolvedValueOnce({
         sessions: [],
         total: 0,
@@ -752,15 +860,125 @@ describe('recoverStuckTasks', () => {
       const env = createMockEnv(responses);
       const result = await recoverStuckTasks(env);
 
-      expect(result.failedInProgress).toBe(1);
+      expect(result.failedInProgress).toBe(0);
       expect(result.heartbeatSkipped).toBe(0);
-      // Failure is driven by the ACP-session check, not the node heartbeat.
-      expect(syncTriggerExecutionMock).toHaveBeenCalledWith(
-        env.DATABASE,
-        'task-1',
-        'failed',
-        expect.stringContaining('task_acp_session_not_live')
+      expect(syncTriggerExecutionMock).not.toHaveBeenCalled();
+      expect(cleanupTaskRun).not.toHaveBeenCalled();
+    });
+
+    it('preserves an in_progress VM task when ProjectData ACP data is stale but the node is healthy', async () => {
+      const now = Date.now();
+      const staleHeartbeatAt = now - 10 * 60 * 1000;
+      const env = createMockEnv(healthyVmRunningWorkspaceResponses('task-stale-projectdata-acp'));
+      projectDataMocks.getTaskAcpLivenessSignals.mockResolvedValueOnce({
+        sessions: [
+          {
+            id: 'acp-stale',
+            status: 'running',
+            workspaceId: 'ws-1',
+            lastHeartbeatAt: staleHeartbeatAt,
+            updatedAt: staleHeartbeatAt,
+            startedAt: staleHeartbeatAt,
+            createdAt: staleHeartbeatAt,
+          },
+        ],
+        total: 1,
+        sessionWork: null,
+      });
+
+      const diagnostics = await getTaskReconciliationDiagnostics(env, 'task-stale-projectdata-acp');
+      expect(diagnostics?.decision).toBe('preserve_inconclusive_runtime');
+      expect(diagnostics?.liveness).toMatchObject({
+        live: false,
+        conclusive: false,
+        reason: 'task_acp_session_stale',
+        workspaceStatus: 'running',
+        nodeId: 'node-1',
+      });
+
+      projectDataMocks.getTaskAcpLivenessSignals.mockResolvedValueOnce({
+        sessions: [
+          {
+            id: 'acp-stale',
+            status: 'running',
+            workspaceId: 'ws-1',
+            lastHeartbeatAt: staleHeartbeatAt,
+            updatedAt: staleHeartbeatAt,
+            startedAt: staleHeartbeatAt,
+            createdAt: staleHeartbeatAt,
+          },
+        ],
+        total: 1,
+        sessionWork: null,
+      });
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(0);
+      expect(result.deadRuntimeReconciled).toBe(0);
+      expect(result.heartbeatSkipped).toBe(0);
+      expect(syncTriggerExecutionMock).not.toHaveBeenCalled();
+      expect(cleanupTaskRun).not.toHaveBeenCalled();
+    });
+
+    it('preserves an in_progress VM task when the ProjectData ACP probe times out', async () => {
+      const env = createMockEnv(
+        healthyVmRunningWorkspaceResponses('task-projectdata-acp-timeout'),
+        {
+          TASK_LIVENESS_PROBE_TIMEOUT_MS: '1',
+        }
       );
+      projectDataMocks.getTaskAcpLivenessSignals.mockImplementationOnce(
+        () => new Promise(() => undefined)
+      );
+
+      const diagnostics = await getTaskReconciliationDiagnostics(env, 'task-projectdata-acp-timeout');
+      expect(diagnostics?.decision).toBe('preserve_inconclusive_runtime');
+      expect(diagnostics?.liveness).toMatchObject({
+        live: false,
+        conclusive: false,
+        reason: 'task_liveness_timeout',
+        workspaceStatus: 'running',
+        nodeId: 'node-1',
+      });
+
+      projectDataMocks.getTaskAcpLivenessSignals.mockImplementationOnce(
+        () => new Promise(() => undefined)
+      );
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(0);
+      expect(result.deadRuntimeReconciled).toBe(0);
+      expect(result.heartbeatSkipped).toBe(0);
+      expect(syncTriggerExecutionMock).not.toHaveBeenCalled();
+      expect(cleanupTaskRun).not.toHaveBeenCalled();
+    });
+
+    it('preserves an in_progress VM task when the ProjectData ACP probe errors', async () => {
+      const env = createMockEnv(healthyVmRunningWorkspaceResponses('task-projectdata-acp-error'));
+      projectDataMocks.getTaskAcpLivenessSignals.mockRejectedValueOnce(
+        new Error('ProjectData unavailable')
+      );
+
+      const diagnostics = await getTaskReconciliationDiagnostics(env, 'task-projectdata-acp-error');
+      expect(diagnostics?.decision).toBe('preserve_inconclusive_runtime');
+      expect(diagnostics?.liveness).toMatchObject({
+        live: false,
+        conclusive: false,
+        reason: 'task_liveness_unknown',
+        workspaceStatus: 'running',
+        nodeId: 'node-1',
+      });
+
+      projectDataMocks.getTaskAcpLivenessSignals.mockRejectedValueOnce(
+        new Error('ProjectData unavailable')
+      );
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(0);
+      expect(result.deadRuntimeReconciled).toBe(0);
+      expect(result.heartbeatSkipped).toBe(0);
+      expect(syncTriggerExecutionMock).not.toHaveBeenCalled();
+      expect(cleanupTaskRun).not.toHaveBeenCalled();
     });
 
     it('fails in_progress tasks with no node (no heartbeat to check)', async () => {

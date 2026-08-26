@@ -14,6 +14,7 @@ import { cancelVmTaskAdmission } from './vm-admission-control';
 const log = createModuleLogger('task_terminal_transition');
 
 const ACTIVE_TERMINALIZABLE_TASK_STATUSES = new Set([
+  'queued',
   'in_progress',
   'delegated',
   'awaiting_followup',

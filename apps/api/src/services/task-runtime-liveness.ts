@@ -1,4 +1,5 @@
 import {
+  ACP_SESSION_TERMINAL_STATUSES,
   type AcpSessionStatus,
   DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
@@ -47,6 +48,7 @@ export function isSupersededTerminalReason(reason: string): boolean {
 }
 
 const ACTIVE_ACP_STATUSES = new Set<AcpSessionStatus>(['assigned', 'running']);
+const TERMINAL_ACP_STATUSES = new Set<AcpSessionStatus>(ACP_SESSION_TERMINAL_STATUSES);
 const INCONCLUSIVE_WORKSPACE_STATUSES = new Set(['creating', 'sleeping', 'recovery']);
 const TERMINAL_CONTAINER_STATUSES = new Set(['stopping', 'stopped', 'expired', 'error']);
 const TERMINAL_NODE_STATUSES = new Set(['stopped', 'deleted', 'destroyed', 'destroying', 'error']);
@@ -519,10 +521,31 @@ export function classifyTaskRuntimeLiveness(
     });
   }
 
+  const taskWorkspaceSessions = signals.acpSessions.filter(
+    (session) => session.workspaceId === workspace.id
+  );
+  const terminal = taskWorkspaceSessions.find((session) => TERMINAL_ACP_STATUSES.has(session.status));
+  if (terminal) {
+    return result(workspace, {
+      live: false,
+      conclusive: true,
+      reason: 'task_acp_session_terminal',
+      activeAcpSessionId: terminal.id,
+    });
+  }
+
+  const hasStaleActiveProjectDataSession = taskWorkspaceSessions.some((session) =>
+    ACTIVE_ACP_STATUSES.has(session.status)
+  );
   return result(workspace, {
     live: false,
-    conclusive: true,
-    reason: 'task_acp_session_not_live',
+    conclusive: false,
+    reason:
+      taskWorkspaceSessions.length === 0
+        ? 'task_acp_session_missing'
+        : hasStaleActiveProjectDataSession
+          ? 'task_acp_session_stale'
+          : 'task_acp_session_suspect',
     activeAcpSessionId: null,
   });
 }

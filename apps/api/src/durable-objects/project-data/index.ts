@@ -1027,14 +1027,6 @@ export class ProjectData extends DurableObject<Env> {
   async alarm(): Promise<void> {
     if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'ProjectData')) return;
 
-    try {
-      await storageSafety.runProjectDataStorageSafetyAlarm(this.sql, this.env, this.getProjectId());
-    } catch (err) {
-      log.error('alarm.storage_safety_failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
     const timedOut = await checkRuntimeHeartbeatTimeouts(
       this.sql,
       this.env,
@@ -1160,6 +1152,18 @@ export class ProjectData extends DurableObject<Env> {
 
     // Claims persist before bounded adapter I/O continues through waitUntil.
     durability.processPromptDeliveryAlarm(this.sql, this.env, this.durabilityHooks());
+
+    // Storage safety is durable maintenance, not lifecycle authority. Keep it
+    // isolated and after control-plane bookkeeping so storage measurement or
+    // cleanup can never delay ACP heartbeat timeout, reconciliation, or prompt
+    // delivery alarm work.
+    try {
+      await storageSafety.runProjectDataStorageSafetyAlarm(this.sql, this.env, this.getProjectId());
+    } catch (err) {
+      log.error('alarm.storage_safety_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     await this.recalculateAlarm();
   }
