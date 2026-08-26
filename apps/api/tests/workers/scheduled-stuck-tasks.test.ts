@@ -16,7 +16,11 @@ import { describe, expect, it } from 'vitest';
 
 import type { TaskRunner, TaskRunnerState } from '../../src/durable-objects/task-runner';
 import type { Env } from '../../src/env';
-import { gatherDiagnostics, recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
+import {
+  gatherDiagnostics,
+  getTaskReconciliationDiagnostics,
+  recoverStuckTasks,
+} from '../../src/scheduled/stuck-tasks';
 import {
   seedInstallation,
   seedNode,
@@ -376,6 +380,66 @@ describe('recoverStuckTasks — vertical slice', () => {
   });
 
   describe('liveness grace period', () => {
+    it('preserves a healthy VM runtime when ProjectData ACP session data is missing', async () => {
+      await seedBaseData();
+      const taskId = 'task-st-missing-projectdata-acp';
+      const nodeId = 'node-st-missing-projectdata-acp';
+      const workspaceId = 'ws-st-missing-projectdata-acp';
+      const chatSessionId = 'chat-st-missing-projectdata-acp';
+      const fiveHoursAgo = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
+
+      await seedNode(nodeId, USER_ID, {
+        status: 'running',
+        healthStatus: 'healthy',
+        lastHeartbeatAt: new Date().toISOString(),
+      });
+      await seedWorkspace(workspaceId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'running',
+        chatSessionId,
+      });
+      await seedTask(taskId, PROJECT_ID, USER_ID, {
+        status: 'in_progress',
+        executionStep: 'running',
+        startedAt: fiveHoursAgo,
+        updatedAt: fiveHoursAgo,
+        workspaceId,
+      });
+
+      const testEnv = {
+        ...env,
+        TASK_STUCK_QUEUED_TIMEOUT_MS: '300000',
+        TASK_STUCK_DELEGATED_TIMEOUT_MS: '300000',
+        TASK_RUN_MAX_EXECUTION_MS: '14400000', // 4h: task is eligible for liveness reconciliation
+        TASK_RUN_HARD_TIMEOUT_MS: '28800000', // 8h: task is inside the hard timeout window
+        NODE_HEARTBEAT_STALE_SECONDS: '300',
+        STUCK_TASK_SCAN_CURSOR_KV_KEY: 'test:stuck-task-cursor:missing-projectdata-acp',
+      } as unknown as Env;
+
+      await env.KV.delete('test:stuck-task-cursor:missing-projectdata-acp');
+
+      const beforeSweep = await getTaskReconciliationDiagnostics(testEnv, taskId);
+      expect(beforeSweep?.decision).toBe('preserve_inconclusive_runtime');
+      expect(beforeSweep?.liveness).toMatchObject({
+        live: false,
+        conclusive: false,
+        reason: 'task_acp_session_missing',
+        workspaceStatus: 'running',
+        nodeId,
+      });
+
+      const result = await recoverStuckTasks(testEnv);
+
+      expect(result.failedInProgress).toBe(0);
+      expect(result.deadRuntimeReconciled).toBe(0);
+      expect(result.heartbeatSkipped).toBe(0);
+      const task = await getTaskStatus(taskId);
+      expect(task?.status).toBe('in_progress');
+      expect(task?.error_message).toBeNull();
+      expect(task?.completed_at).toBeNull();
+      expect(await getTaskStatusEvents(taskId)).toEqual([]);
+    });
+
     it('preserves an in_progress task whose runtime identity is incomplete (fail-safe)', async () => {
       // A running workspace with a fresh node heartbeat but no resolvable
       // task-scoped runtime identity yields an INCONCLUSIVE liveness result.

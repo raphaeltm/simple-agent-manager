@@ -117,7 +117,7 @@ reread before destructive cleanup.
   never logs secret values.
 - [ ] Update public/internal documentation and environment references for any new
   liveness, storage, or deploy-secret settings.
-- [ ] Run targeted unit and Miniflare/workerd tests proving:
+- [x] Run targeted unit and Miniflare/workerd tests proving:
   - healthy VM/runtime survives blocked, stale, or missing ProjectData ACP data;
   - conclusive terminal evidence still fails dead work;
   - ProjectData alarm heartbeat timeout does not kill VM sessions on stale
