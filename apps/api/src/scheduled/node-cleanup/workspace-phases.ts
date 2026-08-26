@@ -19,7 +19,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { deleteWorkspaceOnNode, stopWorkspaceOnNode } from '../../services/node-agent';
 import { persistError } from '../../services/observability';
-import * as projectDataService from '../../services/project-data';
+import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import type { CleanupConfig, CleanupDb, NodeCleanupResult } from './shared';
 
 /**
@@ -104,20 +104,12 @@ export async function sweepOrphanedWorkspaces(
         .set({ status: 'stopped', updatedAt: new Date().toISOString() })
         .where(eq(schema.workspaces.id, ws.id));
 
-      if (ws.project_id && ws.chat_session_id) {
-        await projectDataService.stopSession(env, ws.project_id, ws.chat_session_id).catch((e) => {
-          log.warn('node_cleanup.orphan_session_stop_failed', {
-            workspaceId: ws.id,
-            error: String(e),
-          });
-        });
-        await projectDataService.cleanupWorkspaceActivity(env, ws.project_id, ws.id).catch((e) => {
-          log.warn('node_cleanup.orphan_activity_cleanup_failed', {
-            workspaceId: ws.id,
-            error: String(e),
-          });
-        });
-      }
+      await finalizeWorkspaceLifecycleClosure(env, {
+        workspaceIds: [ws.id],
+        userId: ws.user_id,
+        agentSessionStatus: 'stopped',
+        reason: 'node_cleanup_orphaned_workspace_stopped',
+      });
 
       await persistError(
         env.OBSERVABILITY_DATABASE,
@@ -194,10 +186,19 @@ export async function sweepStaleStoppedWorkspaces(
 
       // Status guard prevents a TOCTOU race if the workspace was restarted. Also
       // the escape path: on success the row no longer matches `status='stopped'`.
-      await db
+      const deleted = await db
         .update(schema.workspaces)
         .set({ status: 'deleted', updatedAt: new Date().toISOString() })
         .where(and(eq(schema.workspaces.id, ws.id), eq(schema.workspaces.status, 'stopped')));
+
+      if ((deleted.meta?.changes ?? 0) > 0) {
+        await finalizeWorkspaceLifecycleClosure(env, {
+          workspaceIds: [ws.id],
+          userId: ws.user_id,
+          agentSessionStatus: 'completed',
+          reason: 'node_cleanup_stale_stopped_workspace_deleted',
+        });
+      }
 
       result.stoppedWorkspacesDeleted++;
     } catch (e) {

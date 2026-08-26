@@ -44,6 +44,7 @@ import {
   isSessionRecoveryTaskAuthorized,
   type SessionRecoverySourceTaskGuard,
 } from '../services/session-recovery-authority';
+import { finalizeWorkspaceLifecycleClosure } from '../services/workspace-lifecycle-finalizer';
 
 type NodeLifecycleEnv = {
   DATABASE: D1Database;
@@ -712,16 +713,13 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
       .bind(now, workspaceId)
       .run();
 
-    // Clean up any agent_sessions referencing this workspace (best-effort)
-    try {
-      await this.env.DATABASE.prepare(
-        `UPDATE agent_sessions SET status = 'completed', updated_at = ? WHERE workspace_id = ? AND status NOT IN ('completed', 'failed')`
-      )
-        .bind(now, workspaceId)
-        .run();
-    } catch {
-      // best-effort
-    }
+    await finalizeWorkspaceLifecycleClosure(this.env as unknown as Env, {
+      workspaceIds: [workspaceId],
+      userId,
+      agentSessionStatus: 'completed',
+      nowIso: now,
+      reason: 'node_lifecycle_workspace_auto_delete',
+    });
   }
 
   /**

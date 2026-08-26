@@ -21,6 +21,7 @@ import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
 import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/node-phases';
 import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
 import {
+  seedAgentSession,
   seedInstallation,
   seedNode,
   seedProject,
@@ -72,6 +73,14 @@ async function getWorkspaceStatus(wsId: string): Promise<{ status: string } | nu
     .first<{ status: string }>();
 }
 
+async function getAgentSessionStatus(
+  agentSessionId: string
+): Promise<{ status: string; stopped_at: string | null } | null> {
+  return env.DATABASE.prepare('SELECT status, stopped_at FROM agent_sessions WHERE id = ?')
+    .bind(agentSessionId)
+    .first<{ status: string; stopped_at: string | null }>();
+}
+
 async function getNodeRuntimeStatus(
   nodeId: string
 ): Promise<{ status: string; runtime: string } | null> {
@@ -115,6 +124,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         chatSessionId: 'session-nc-cf-terminal',
         createdAt: oldDate,
       });
+      await seedAgentSession('agent-nc-cf-terminal', wsId, USER_ID, { status: 'running' });
       await seedTask(taskId, PROJECT_ID, USER_ID, {
         status: 'failed',
         workspaceId: wsId,
@@ -139,6 +149,10 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       expect(await getNodeRuntimeStatus(nodeId)).toMatchObject({
         status: 'deleted',
         runtime: 'cf-container',
+      });
+      expect(await getAgentSessionStatus('agent-nc-cf-terminal')).toMatchObject({
+        status: 'stopped',
+        stopped_at: expect.any(String),
       });
     });
 
@@ -255,6 +269,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         chatSessionId: 'session-nc-1',
         createdAt: oldDate,
       });
+      await seedAgentSession('agent-nc-orphan', wsId, USER_ID, { status: 'running' });
       await seedTask(taskId, PROJECT_ID, USER_ID, {
         status: 'failed',
         workspaceId: wsId,
@@ -272,6 +287,10 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       // Verify D1 state: workspace should be 'stopped'
       const ws = await getWorkspaceStatus(wsId);
       expect(ws?.status).toBe('stopped');
+      expect(await getAgentSessionStatus('agent-nc-orphan')).toMatchObject({
+        status: 'stopped',
+        stopped_at: expect.any(String),
+      });
 
       // Verify observability event was recorded
       const events = await getObservabilityEvents('orphaned_workspace');
@@ -389,6 +408,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         status: 'stopped',
         updatedAt: oldDate,
       });
+      await seedAgentSession('agent-nc-stopped-ttl', wsId, USER_ID, { status: 'running' });
 
       const testEnv = {
         ...env,
@@ -402,6 +422,10 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       // Verify D1 state: workspace should now be 'deleted'
       const ws = await getWorkspaceStatus(wsId);
       expect(ws?.status).toBe('deleted');
+      expect(await getAgentSessionStatus('agent-nc-stopped-ttl')).toMatchObject({
+        status: 'completed',
+        stopped_at: expect.any(String),
+      });
     });
 
     it('does not delete recently stopped workspace', async () => {

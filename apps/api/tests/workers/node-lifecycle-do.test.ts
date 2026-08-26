@@ -11,6 +11,7 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  seedAgentSession,
   seedInstallation,
   seedNode,
   seedProject,
@@ -114,6 +115,14 @@ async function getNodeFromD1(
   return await env.DATABASE.prepare(`SELECT status, warm_since FROM nodes WHERE id = ?`)
     .bind(nodeId)
     .first<{ status: string; warm_since: string | null }>();
+}
+
+async function getAgentSessionStatus(
+  agentSessionId: string
+): Promise<{ status: string; stopped_at: string | null } | null> {
+  return await env.DATABASE.prepare(`SELECT status, stopped_at FROM agent_sessions WHERE id = ?`)
+    .bind(agentSessionId)
+    .first<{ status: string; stopped_at: string | null }>();
 }
 
 async function getStoredState(
@@ -668,8 +677,10 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
   it('alarm processes due workspace deletions while preserving active node state', async () => {
     const nodeId = 'nl-test-active-ws-delete-alarm-001';
     const wsId = 'ws-due-delete-active-001';
+    const agentSessionId = 'agent-due-delete-active-001';
     await seedTestNode(nodeId);
     await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'stopped' });
+    await seedAgentSession(agentSessionId, wsId, TEST_USER_ID, { status: 'running' });
 
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -700,6 +711,10 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       .bind(wsId)
       .first<{ status: string }>();
     expect(workspace?.status).toBe('deleted');
+    expect(await getAgentSessionStatus(agentSessionId)).toMatchObject({
+      status: 'completed',
+      stopped_at: expect.any(String),
+    });
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(await getAlarm(stub)).toBeNull();
   });
@@ -707,8 +722,10 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
   it('alarm deletes a due sleeping workspace before warm-pool state exists', async () => {
     const nodeId = 'nl-test-uninitialized-ws-delete-001';
     const wsId = 'ws-due-delete-uninitialized-001';
+    const agentSessionId = 'agent-due-delete-uninitialized-001';
     await seedTestNode(nodeId);
     await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'sleeping' });
+    await seedAgentSession(agentSessionId, wsId, TEST_USER_ID, { status: 'running' });
 
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -739,6 +756,10 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       .bind(wsId)
       .first<{ status: string }>();
     expect(workspace?.status).toBe('deleted');
+    expect(await getAgentSessionStatus(agentSessionId)).toMatchObject({
+      status: 'completed',
+      stopped_at: expect.any(String),
+    });
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(await getAlarm(stub)).toBeNull();
   });

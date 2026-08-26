@@ -29,6 +29,7 @@ import { stopWorkspaceOnNode } from './node-agent';
 import * as nodeLifecycleService from './node-lifecycle';
 import { stopNodeResources } from './nodes';
 import { wakeVmAdmissionWaiters } from './vm-admission-control';
+import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
 
 function getCleanupDelayMs(env: Env): number {
   const value = env.TASK_RUN_CLEANUP_DELAY_MS;
@@ -162,10 +163,18 @@ export async function cleanupTaskRun(
       });
     }
 
+    const stoppedAt = new Date().toISOString();
     await db
       .update(schema.workspaces)
-      .set({ status: 'stopped', updatedAt: new Date().toISOString() })
+      .set({ status: 'stopped', updatedAt: stoppedAt })
       .where(eq(schema.workspaces.id, workspace.id));
+    await finalizeWorkspaceLifecycleClosure(env, {
+      workspaceIds: [workspace.id],
+      userId: cleanupUserId,
+      agentSessionStatus: 'completed',
+      nowIso: stoppedAt,
+      reason: 'task_run_cleanup_workspace_stopped',
+    });
   } else {
     log.info('task_run.cleanup.workspace_already_stopped', {
       taskId,

@@ -53,6 +53,20 @@ vi.mock('../../../src/services/observability', () => ({
   persistError: (...args: unknown[]) => persistError(...args),
 }));
 
+const finalizeWorkspaceLifecycleClosure = vi.fn(async () => ({
+  workspaces: 0,
+  agentSessionsClosed: 0,
+  computeUsageClosed: 0,
+  projectSessionsClosed: 0,
+  projectSessionErrors: 0,
+  workspaceActivityCleaned: 0,
+  workspaceActivityErrors: 0,
+}));
+vi.mock('../../../src/services/workspace-lifecycle-finalizer', () => ({
+  finalizeWorkspaceLifecycleClosure: (...args: unknown[]) =>
+    finalizeWorkspaceLifecycleClosure(...args),
+}));
+
 vi.mock('../../../src/lib/logger', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   serializeError: vi.fn((err: unknown) => ({
@@ -254,7 +268,7 @@ describe('node resource deletion services', () => {
   it('retires deployment node records as tombstones so event history can keep its FK', async () => {
     const db = drizzle({} as never) as Parameters<typeof retireDeletedDeploymentNodeRecord>[0];
 
-    await retireDeletedDeploymentNodeRecord(db, 'node-1', 'user-1');
+    await retireDeletedDeploymentNodeRecord(db, ENV, 'node-1', 'user-1');
 
     expect(updateCalls).toEqual(
       expect.arrayContaining([
@@ -274,6 +288,15 @@ describe('node resource deletion services', () => {
           ipAddress: null,
         }),
       ])
+    );
+    expect(finalizeWorkspaceLifecycleClosure).toHaveBeenCalledWith(
+      ENV,
+      expect.objectContaining({
+        nodeId: 'node-1',
+        userId: 'user-1',
+        agentSessionStatus: 'completed',
+        reason: 'retire_deleted_deployment_node_record',
+      })
     );
   });
 

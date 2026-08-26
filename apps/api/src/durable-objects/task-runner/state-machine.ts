@@ -12,10 +12,8 @@ import {
   runTaskTerminalTransitionHooks,
 } from '../../services/task-terminal-transition-hooks';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
-import {
-  cancelVmTaskAdmission,
-  wakeVmAdmissionWaiters,
-} from '../../services/vm-admission-control';
+import { cancelVmTaskAdmission, wakeVmAdmissionWaiters } from '../../services/vm-admission-control';
+import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import { releaseClaimedWarmNode } from './node-selection';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 import { notifyWakeSettled } from './wake-progress-notifier';
@@ -645,15 +643,18 @@ export async function cleanupOnFailure(
       .bind(now, state.stepResults.workspaceId)
       .run();
 
-    // Stop compute usage metering (best-effort)
     try {
-      const { drizzle } = await import('drizzle-orm/d1');
-      const dbSchema = await import('../../db/schema');
-      const { stopComputeTracking } = await import('../../services/compute-usage');
-      const db = drizzle(rc.env.DATABASE, { schema: dbSchema });
-      await stopComputeTracking(db, state.stepResults.workspaceId);
+      await finalizeWorkspaceLifecycleClosure(rc.env, {
+        workspaceIds: [state.stepResults.workspaceId],
+        userId: state.userId,
+        agentSessionStatus: 'failed',
+        errorMessage:
+          state.workspaceErrorMessage ?? `Task failed during ${state.currentStep} cleanup`,
+        nowIso: now,
+        reason: 'task_runner_do_cleanup_on_failure',
+      });
     } catch (err) {
-      log.error('task_runner_do.cleanup.compute_tracking_stop_failed', {
+      log.error('task_runner_do.cleanup.lifecycle_finalizer_failed', {
         taskId: state.taskId,
         workspaceId: state.stepResults.workspaceId,
         error: err instanceof Error ? err.message : String(err),

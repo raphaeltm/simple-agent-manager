@@ -25,11 +25,9 @@ import {
   requireVmAgentContainer,
   runContainerPhase,
 } from './vm-agent-container';
-import {
-  ensureWorkspaceBranchOnRemote,
-  logWorkspaceBranchResult,
-} from './workspace-branch';
+import { ensureWorkspaceBranchOnRemote, logWorkspaceBranchResult } from './workspace-branch';
 import { resolveWorkspaceGitSource } from './workspace-git-source';
+import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -592,6 +590,21 @@ export async function continueInstantSessionLaunch(
           error: errorMessage(updateErr),
         });
       });
+    await finalizeWorkspaceLifecycleClosure(env, {
+      workspaceIds: [workspaceId],
+      userId: input.userId,
+      agentSessionStatus: 'failed',
+      errorMessage: message,
+      nowIso: failedAt,
+      reason: 'instant_session_launch_failed',
+    }).catch((finalizerErr) => {
+      log.warn('instant_session.lifecycle_finalizer_failed', {
+        taskId: input.taskId,
+        workspaceId,
+        nodeId,
+        error: errorMessage(finalizerErr),
+      });
+    });
     await destroyVmAgentContainer(env, containerId).catch((destroyErr) => {
       log.error('instant_session.container_destroy_after_failure_failed', {
         nodeId,

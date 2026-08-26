@@ -23,6 +23,7 @@ import { stopNodeResources } from '../../services/nodes';
 import * as projectDataService from '../../services/project-data';
 import { sleepWorkspaceSession } from '../../services/session-sleep';
 import { deleteSessionSnapshotState } from '../../services/session-snapshots';
+import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import { requireRepositoryOwnerAccess } from '../projects/_helpers';
 import {
   assertNodeOperational,
@@ -134,24 +135,25 @@ lifecycleRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c) =>
             });
           }
           await stopNodeResources(nodeId, userId, c.env);
-          await innerDb
-            .update(schema.agentSessions)
-            .set({
-              status: 'stopped',
-              stoppedAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            })
-            .where(eq(schema.agentSessions.workspaceId, workspace.id));
         } else {
           await stopWorkspaceOnNode(nodeId, workspace.id, c.env, userId);
+          const stoppedAt = new Date().toISOString();
           await innerDb
             .update(schema.workspaces)
             .set({
               status: 'stopped',
               errorMessage: null,
-              updatedAt: new Date().toISOString(),
+              updatedAt: stoppedAt,
             })
             .where(eq(schema.workspaces.id, workspace.id));
+
+          await finalizeWorkspaceLifecycleClosure(c.env, {
+            workspaceIds: [workspace.id],
+            userId,
+            agentSessionStatus: 'stopped',
+            nowIso: stoppedAt,
+            reason: 'workspace_stop',
+          });
 
           // Schedule automatic deletion after TTL
           try {
@@ -187,31 +189,6 @@ lifecycleRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c) =>
       }
     })()
   );
-
-  // Stop the chat session and clean up activity tracking (best-effort)
-  if (workspace.projectId && workspace.chatSessionId) {
-    c.executionCtx.waitUntil(
-      projectDataService
-        .stopSession(c.env, workspace.projectId, workspace.chatSessionId)
-        .catch((e) => {
-          log.warn('workspace.stop_session_failed', {
-            workspaceId: workspace.id,
-            sessionId: workspace.chatSessionId,
-            error: String(e),
-          });
-        })
-    );
-    c.executionCtx.waitUntil(
-      projectDataService
-        .cleanupWorkspaceActivity(c.env, workspace.projectId, workspace.id)
-        .catch((e) => {
-          log.warn('workspace.cleanup_activity_failed', {
-            workspaceId: workspace.id,
-            error: String(e),
-          });
-        })
-    );
-  }
 
   // Record activity event for workspace stop
   if (workspace.projectId) {

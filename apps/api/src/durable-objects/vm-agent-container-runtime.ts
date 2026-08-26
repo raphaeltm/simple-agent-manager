@@ -4,6 +4,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { readResponseJson } from '../lib/runtime-validation';
 import { signNodeManagementToken } from '../services/jwt';
+import { finalizeWorkspaceLifecycleClosure } from '../services/workspace-lifecycle-finalizer';
 import {
   RUNTIME_RECOVERING_MESSAGE,
   RUNTIME_RECOVERY_DEGRADED_MESSAGE,
@@ -244,10 +245,14 @@ export async function persistRuntimeEnded(
     env.DATABASE.prepare(
       `UPDATE workspaces SET status = ?, error_message = ?, updated_at = ? WHERE id = ?`
     ).bind(status, errorMessage, now, identity.workspaceId),
-    env.DATABASE.prepare(
-      `UPDATE agent_sessions
-       SET status = ?, stopped_at = ?, error_message = ?, updated_at = ?
-       WHERE workspace_id = ?`
-    ).bind(status, now, errorMessage, now, identity.workspaceId),
   ]);
+
+  await finalizeWorkspaceLifecycleClosure(env, {
+    workspaceIds: [identity.workspaceId],
+    nodeId: identity.nodeId,
+    agentSessionStatus: status,
+    errorMessage,
+    nowIso: now,
+    reason: 'cf_container_runtime_ended',
+  });
 }

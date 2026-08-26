@@ -4,11 +4,10 @@ import { type drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { stopComputeTracking } from './compute-usage';
 import { deleteWorkspaceOnNode } from './node-agent';
 import { stopNodeResources } from './nodes';
-import * as projectDataService from './project-data';
 import { deleteSessionSnapshotState } from './session-snapshots';
+import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -69,7 +68,7 @@ async function cleanupWorkspaceNode(options: {
 export async function cleanupWorkspaceForDeletion(
   options: WorkspaceDeletionCleanupOptions
 ): Promise<void> {
-  const { db, env, workspace, userId, waitUntil, logContext = {} } = options;
+  const { db, env, workspace, userId, logContext = {} } = options;
 
   if (workspace.chatSessionId) {
     await deleteSessionSnapshotState(db, env, workspace.chatSessionId);
@@ -91,46 +90,12 @@ export async function cleanupWorkspaceForDeletion(
     }
   }
 
-  if (workspace.projectId && workspace.chatSessionId) {
-    const stopSession = projectDataService
-      .stopSession(env, workspace.projectId, workspace.chatSessionId)
-      .catch((e) => {
-        log.warn('workspace.delete_stop_session_failed', {
-          workspaceId: workspace.id,
-          sessionId: workspace.chatSessionId,
-          error: String(e),
-          ...logContext,
-        });
-      });
-    const cleanupActivity = projectDataService
-      .cleanupWorkspaceActivity(env, workspace.projectId, workspace.id)
-      .catch((e) => {
-        log.warn('workspace.delete_cleanup_activity_failed', {
-          workspaceId: workspace.id,
-          error: String(e),
-          ...logContext,
-        });
-      });
-
-    if (waitUntil) {
-      waitUntil(stopSession);
-      waitUntil(cleanupActivity);
-    } else {
-      await Promise.all([stopSession, cleanupActivity]);
-    }
-  }
-
-  try {
-    await stopComputeTracking(db, workspace.id);
-  } catch (e) {
-    log.warn('workspace.compute_tracking_stop_failed', {
-      workspaceId: workspace.id,
-      error: String(e),
-      ...logContext,
-    });
-  }
-
-  await db.delete(schema.agentSessions).where(eq(schema.agentSessions.workspaceId, workspace.id));
+  await finalizeWorkspaceLifecycleClosure(env, {
+    workspaceIds: [workspace.id],
+    userId,
+    agentSessionStatus: 'completed',
+    reason: String(logContext.closePath ?? 'workspace_delete'),
+  });
 
   await db
     .delete(schema.workspaces)

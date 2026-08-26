@@ -218,6 +218,41 @@ export async function seedWorkspace(
 }
 
 /**
+ * Seed an agent session into D1. Idempotent. Requires user + workspace to exist.
+ */
+export async function seedAgentSession(
+  agentSessionId: string,
+  workspaceId: string,
+  userId: string,
+  opts?: {
+    status?: string;
+    agentType?: string;
+    stoppedAt?: string | null;
+    errorMessage?: string | null;
+    createdAt?: string;
+    updatedAt?: string;
+  }
+): Promise<void> {
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO agent_sessions
+       (id, workspace_id, user_id, status, agent_type, stopped_at, error_message, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      agentSessionId,
+      workspaceId,
+      userId,
+      opts?.status ?? 'running',
+      opts?.agentType ?? 'codex',
+      opts?.stoppedAt ?? null,
+      opts?.errorMessage ?? null,
+      opts?.createdAt ?? new Date().toISOString(),
+      opts?.updatedAt ?? new Date().toISOString()
+    )
+    .run();
+}
+
+/**
  * Seed a compute_usage record into D1. Idempotent. Requires user to exist.
  */
 export async function seedComputeUsage(

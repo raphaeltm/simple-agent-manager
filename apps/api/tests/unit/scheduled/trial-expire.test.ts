@@ -107,6 +107,13 @@ function makeEnv(
                 options.workspacesByInvocation?.[workspaceQueryCount++] ?? options.workspaces ?? [],
             };
           }
+          if (sql.includes('FROM workspaces') && sql.includes('id IN')) {
+            const workspaceRows =
+              options.workspaces ?? options.workspacesByInvocation?.flat() ?? [];
+            return {
+              results: workspaceRows.filter((workspace) => binds.includes(workspace.id)),
+            };
+          }
           return { results: [] };
         }),
         first: vi.fn(async () => {
@@ -242,7 +249,9 @@ describe('runTrialExpireSweep', () => {
     const agentSessionUpdate = env.__calls.find((call) =>
       call.sql.includes('UPDATE agent_sessions')
     );
-    expect(agentSessionUpdate?.sql).toContain("status = 'completed'");
+    expect(agentSessionUpdate?.sql).toContain('status = ?');
+    expect(agentSessionUpdate?.sql).toContain('status NOT IN');
+    expect(agentSessionUpdate?.binds[0]).toBe('completed');
     const computeUsageUpdate = env.__calls.find((call) =>
       call.sql.includes('UPDATE compute_usage')
     );

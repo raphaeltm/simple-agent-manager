@@ -32,6 +32,7 @@ import { log } from '../../lib/logger';
 import { getNodeAgentBackgroundRequestTimeoutMs } from '../../services/node-agent';
 import { deleteNodeResourcesStrict } from '../../services/nodes';
 import { persistError } from '../../services/observability';
+import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 
 export const DEFAULT_CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT = 25;
 
@@ -439,6 +440,14 @@ export async function destroyNodeForCleanup(
         updatedAt: nowIso,
       })
       .where(eq(schema.nodes.id, node.id));
+
+    await finalizeWorkspaceLifecycleClosure(env, {
+      nodeId: node.id,
+      userId: node.user_id,
+      agentSessionStatus: 'completed',
+      nowIso,
+      reason: 'node_cleanup_destroy_node_for_cleanup',
+    });
 
     await persistCleanupSuccess(env, node, options);
 

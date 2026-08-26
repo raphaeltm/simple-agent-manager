@@ -7,10 +7,8 @@ import { cleanupWorkspaceForDeletion } from '../../../src/services/workspace-cle
 const mocks = vi.hoisted(() => ({
   deleteWorkspaceOnNode: vi.fn(),
   stopNodeResources: vi.fn(),
-  stopComputeTracking: vi.fn(),
-  stopSession: vi.fn(),
-  cleanupWorkspaceActivity: vi.fn(),
   deleteSessionSnapshotState: vi.fn(),
+  finalizeWorkspaceLifecycleClosure: vi.fn(),
 }));
 
 vi.mock('../../../src/services/node-agent', () => ({
@@ -19,15 +17,12 @@ vi.mock('../../../src/services/node-agent', () => ({
 vi.mock('../../../src/services/nodes', () => ({
   stopNodeResources: (...args: unknown[]) => mocks.stopNodeResources(...args),
 }));
-vi.mock('../../../src/services/compute-usage', () => ({
-  stopComputeTracking: (...args: unknown[]) => mocks.stopComputeTracking(...args),
-}));
-vi.mock('../../../src/services/project-data', () => ({
-  stopSession: (...args: unknown[]) => mocks.stopSession(...args),
-  cleanupWorkspaceActivity: (...args: unknown[]) => mocks.cleanupWorkspaceActivity(...args),
-}));
 vi.mock('../../../src/services/session-snapshots', () => ({
   deleteSessionSnapshotState: (...args: unknown[]) => mocks.deleteSessionSnapshotState(...args),
+}));
+vi.mock('../../../src/services/workspace-lifecycle-finalizer', () => ({
+  finalizeWorkspaceLifecycleClosure: (...args: unknown[]) =>
+    mocks.finalizeWorkspaceLifecycleClosure(...args),
 }));
 vi.mock('../../../src/lib/logger', () => ({
   log: { error: vi.fn(), warn: vi.fn() },
@@ -93,10 +88,16 @@ describe('cleanupWorkspaceForDeletion', () => {
     vi.clearAllMocks();
     mocks.deleteWorkspaceOnNode.mockResolvedValue(undefined);
     mocks.stopNodeResources.mockResolvedValue(undefined);
-    mocks.stopComputeTracking.mockResolvedValue(undefined);
-    mocks.stopSession.mockResolvedValue(undefined);
-    mocks.cleanupWorkspaceActivity.mockResolvedValue(undefined);
     mocks.deleteSessionSnapshotState.mockResolvedValue(true);
+    mocks.finalizeWorkspaceLifecycleClosure.mockResolvedValue({
+      workspaces: 1,
+      agentSessionsClosed: 1,
+      computeUsageClosed: 1,
+      projectSessionsClosed: 1,
+      projectSessionErrors: 0,
+      workspaceActivityCleaned: 1,
+      workspaceActivityErrors: 0,
+    });
   });
 
   it('deletes the workspace row immediately after best-effort runtime cleanup', async () => {
@@ -119,10 +120,18 @@ describe('cleanupWorkspaceForDeletion', () => {
       'user-cleanup-1'
     );
     expect(mocks.stopNodeResources).not.toHaveBeenCalled();
-    expect(mocks.stopComputeTracking).toHaveBeenCalledWith(db, 'ws-cleanup-1');
     expect(mocks.deleteSessionSnapshotState).toHaveBeenCalledWith(db, env, 'session-cleanup-1');
-    expect(deletedTables).toEqual(['agent_sessions', 'workspaces']);
-    expect(waitUntil).toHaveBeenCalledTimes(2);
+    expect(mocks.finalizeWorkspaceLifecycleClosure).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        workspaceIds: ['ws-cleanup-1'],
+        userId: 'user-cleanup-1',
+        agentSessionStatus: 'completed',
+        reason: 'workspace_delete',
+      })
+    );
+    expect(deletedTables).toEqual(['workspaces']);
+    expect(waitUntil).not.toHaveBeenCalled();
   });
 
   it('destroys cf-container nodes instead of only deleting the workspace inside the container', async () => {
@@ -144,7 +153,7 @@ describe('cleanupWorkspaceForDeletion', () => {
 
     expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-cleanup-1', 'user-cleanup-1', env);
     expect(mocks.deleteWorkspaceOnNode).not.toHaveBeenCalled();
-    expect(deletedTables).toEqual(['agent_sessions', 'workspaces']);
+    expect(deletedTables).toEqual(['workspaces']);
   });
 
   it('still requests cf-container destruction when the node heartbeat is unhealthy', async () => {

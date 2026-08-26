@@ -118,6 +118,17 @@ describe('expired-trial conclusive provider absence vertical slice', () => {
                 ],
               };
             }
+            if (sql.includes('FROM workspaces') && sql.includes('id IN')) {
+              return {
+                results: [
+                  {
+                    id: 'workspace-old',
+                    project_id: 'project-old',
+                    chat_session_id: 'chat-old',
+                  },
+                ],
+              };
+            }
             return { results: [] };
           }),
           first: vi.fn(async () =>

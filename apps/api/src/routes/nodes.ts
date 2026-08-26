@@ -342,19 +342,6 @@ nodesRoutes.post('/:id/stop', async (c) => {
 
   await stopNodeResources(nodeId, userId, c.env);
 
-  const now = new Date().toISOString();
-  const workspaceIds = workspaceRows.map((workspace) => workspace.id);
-  if (workspaceIds.length > 0) {
-    await db
-      .update(schema.agentSessions)
-      .set({
-        status: 'stopped',
-        stoppedAt: now,
-        updatedAt: now,
-      })
-      .where(inArray(schema.agentSessions.workspaceId, workspaceIds));
-  }
-
   return c.json({ status: 'stopped' });
 });
 
@@ -407,20 +394,8 @@ nodesRoutes.delete('/:id', async (c) => {
     });
   }
 
-  const workspaceRows = await db
-    .select({ id: schema.workspaces.id })
-    .from(schema.workspaces)
-    .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
-
-  const workspaceIds = workspaceRows.map((workspace) => workspace.id);
-  if (workspaceIds.length > 0) {
-    await db
-      .delete(schema.agentSessions)
-      .where(inArray(schema.agentSessions.workspaceId, workspaceIds));
-  }
-
   if ((node.nodeRole ?? 'workspace') === 'deployment') {
-    await retireDeletedDeploymentNodeRecord(db, nodeId, userId);
+    await retireDeletedDeploymentNodeRecord(db, c.env, nodeId, userId);
   } else {
     await db
       .delete(schema.workspaces)

@@ -14,7 +14,7 @@ import { log, serializeError } from '../lib/logger';
 import { deleteWorkspaceOnNode } from '../services/node-agent';
 import { deleteNodeResourcesStrict } from '../services/nodes';
 import { persistError } from '../services/observability';
-import * as projectDataService from '../services/project-data';
+import { finalizeWorkspaceLifecycleClosure } from '../services/workspace-lifecycle-finalizer';
 
 const DEFAULT_TRIAL_EXPIRE_BATCH_SIZE = 1000;
 const DEFAULT_TRIAL_CLEANUP_BATCH_SIZE = 25;
@@ -500,66 +500,20 @@ async function cleanupWorkspaceReferences(
   nowIso: string
 ): Promise<void> {
   try {
-    await env.DATABASE.prepare(
-      `UPDATE agent_sessions
-       SET status = 'completed',
-           updated_at = ?
-       WHERE workspace_id = ?
-         AND status NOT IN ('completed', 'failed')`
-    )
-      .bind(nowIso, workspace.id)
-      .run();
+    await finalizeWorkspaceLifecycleClosure(env, {
+      workspaceIds: [workspace.id],
+      userId: workspace.user_id,
+      agentSessionStatus: 'completed',
+      nowIso,
+      reason: `trial_expire:${trialId}`,
+    });
   } catch (err) {
-    log.warn('trial_expire.agent_sessions_cleanup_failed', {
+    log.warn('trial_expire.workspace_lifecycle_finalizer_failed', {
       trialId,
       workspaceId: workspace.id,
       error: err instanceof Error ? err.message : String(err),
     });
   }
-
-  try {
-    await env.DATABASE.prepare(
-      `UPDATE compute_usage
-       SET ended_at = ?
-       WHERE workspace_id = ?
-         AND ended_at IS NULL`
-    )
-      .bind(nowIso, workspace.id)
-      .run();
-  } catch (err) {
-    log.warn('trial_expire.compute_usage_cleanup_failed', {
-      trialId,
-      workspaceId: workspace.id,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-
-  if (!workspace.project_id || !workspace.chat_session_id) {
-    return;
-  }
-
-  await projectDataService
-    .stopSession(env, workspace.project_id, workspace.chat_session_id)
-    .catch((err) => {
-      log.warn('trial_expire.stop_session_failed', {
-        trialId,
-        projectId: workspace.project_id,
-        workspaceId: workspace.id,
-        chatSessionId: workspace.chat_session_id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
-
-  await projectDataService
-    .cleanupWorkspaceActivity(env, workspace.project_id, workspace.id)
-    .catch((err) => {
-      log.warn('trial_expire.cleanup_workspace_activity_failed', {
-        trialId,
-        projectId: workspace.project_id,
-        workspaceId: workspace.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
 }
 
 async function countActiveWorkspaces(env: Env, nodeId: string): Promise<number> {
@@ -700,17 +654,21 @@ async function recordCleanupError(
   });
 
   try {
-    await persistError(env.OBSERVABILITY_DATABASE, {
-      source: 'api',
-      level: 'error',
-      message: `Expired trial resource cleanup failed: ${err instanceof Error ? err.message : String(err)}`,
-      stack: err instanceof Error ? err.stack : undefined,
-      context: {
-        recoveryType: 'expired_trial_resource_cleanup_failure',
-        ...context,
+    await persistError(
+      env.OBSERVABILITY_DATABASE,
+      {
+        source: 'api',
+        level: 'error',
+        message: `Expired trial resource cleanup failed: ${err instanceof Error ? err.message : String(err)}`,
+        stack: err instanceof Error ? err.stack : undefined,
+        context: {
+          recoveryType: 'expired_trial_resource_cleanup_failure',
+          ...context,
+        },
+        userId: anonymousUserId,
       },
-      userId: anonymousUserId,
-    }, env);
+      env
+    );
   } catch (persistErr) {
     log.error('trial_expire.persist_error_failed', {
       originalEvent: eventName,

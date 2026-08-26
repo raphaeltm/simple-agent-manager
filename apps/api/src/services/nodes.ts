@@ -31,6 +31,7 @@ import {
 import { persistError } from './observability';
 import { createProviderForUser } from './provider-credentials';
 import { destroyVmAgentContainer } from './vm-agent-container';
+import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
 
 const NODE_ERROR_MESSAGE_MAX_LENGTH = 500;
 
@@ -510,6 +511,13 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
       .update(schema.workspaces)
       .set({ status: 'deleted', updatedAt: now })
       .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
+    await finalizeWorkspaceLifecycleClosure(env, {
+      nodeId,
+      userId,
+      agentSessionStatus: 'stopped',
+      nowIso: now,
+      reason: 'stop_node_resources_user_owned_offline',
+    });
     await db
       .update(schema.nodes)
       .set({ status: 'stopped', healthStatus: 'unhealthy', updatedAt: now })
@@ -567,6 +575,14 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
       updatedAt: now,
     })
     .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
+
+  await finalizeWorkspaceLifecycleClosure(env, {
+    nodeId,
+    userId,
+    agentSessionStatus: 'stopped',
+    nowIso: now,
+    reason: 'stop_node_resources',
+  });
 
   await db
     .update(schema.nodes)
@@ -680,11 +696,20 @@ export async function deleteNodeResources(
     .set({ status: 'deleted', updatedAt: now })
     .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
 
+  await finalizeWorkspaceLifecycleClosure(env, {
+    nodeId,
+    userId,
+    agentSessionStatus: 'completed',
+    nowIso: now,
+    reason: 'delete_node_resources',
+  });
+
   return result;
 }
 
 export async function retireDeletedDeploymentNodeRecord(
   db: ReturnType<typeof drizzle<typeof schema>>,
+  env: Env,
   nodeId: string,
   userId: string
 ): Promise<void> {
@@ -706,6 +731,14 @@ export async function retireDeletedDeploymentNodeRecord(
     .update(schema.workspaces)
     .set({ status: 'deleted', updatedAt: now })
     .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
+
+  await finalizeWorkspaceLifecycleClosure(env, {
+    nodeId,
+    userId,
+    agentSessionStatus: 'completed',
+    nowIso: now,
+    reason: 'retire_deleted_deployment_node_record',
+  });
 
   await db
     .update(schema.nodes)

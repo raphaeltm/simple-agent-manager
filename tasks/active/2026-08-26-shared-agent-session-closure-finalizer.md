@@ -59,26 +59,64 @@ Historical stale-row repair is explicitly out of scope for this task.
 
 ## Implementation checklist
 
-- [ ] Add one shared idempotent workspace lifecycle closure finalizer in
+- [x] Add one shared idempotent workspace lifecycle closure finalizer in
       `apps/api/src/services/`.
-- [ ] Move the NodeLifecycle inline `agent_sessions` closure to the shared finalizer.
-- [ ] Route node cleanup workspace phases through the shared finalizer.
-- [ ] Route `stopNodeResources`, `deleteNodeResources`, and
+- [x] Move the NodeLifecycle inline `agent_sessions` closure to the shared finalizer.
+- [x] Route node cleanup workspace phases through the shared finalizer.
+- [x] Route `stopNodeResources`, `deleteNodeResources`, and
       `retireDeletedDeploymentNodeRecord` through the shared finalizer.
-- [ ] Route explicit workspace deletion cleanup through the shared finalizer.
-- [ ] Route trial expiry cleanup through the shared finalizer.
-- [ ] Route cf-container terminal runtime persistence through the shared finalizer
+- [x] Route explicit workspace deletion cleanup through the shared finalizer.
+- [x] Route trial expiry cleanup through the shared finalizer.
+- [x] Route cf-container terminal runtime persistence through the shared finalizer
       instead of duplicating `agent_sessions` closure.
-- [ ] Add/extend vertical-slice tests proving no related `agent_sessions` row
+- [x] Route TaskRunner DO failure cleanup and Instant launch failure cleanup through
+      the shared finalizer.
+- [x] Add/extend vertical-slice tests proving no related `agent_sessions` row
       remains `running` after the main deletion paths.
-- [ ] Add a machine-checked writer-inventory test modeled on
+- [x] Add a machine-checked writer-inventory test modeled on
       `workspace-branch-guard-coverage.test.ts`; include a non-trivial minimum
       file count and allowlist reasons for non-workspace allocation deletes.
-- [ ] Verify the inventory test fails when an unguarded deletion writer is added,
+- [x] Verify the inventory test fails when an unguarded deletion writer is added,
       then restore it.
-- [ ] File a SAM Idea follow-up for historical stale-row repair only after the
-      invariant exists.
-- [ ] Include writer inventory and per-writer disposition in the PR description.
+- [x] File a SAM Idea follow-up for historical stale-row repair only after the
+      invariant exists: `01M0XTKC0HDZ2Q7MY098A0K67M`.
+- [x] Include writer inventory and per-writer disposition in the PR description.
+
+## Final writer inventory and disposition
+
+| Writer / teardown path                                                                                                                                                           | Disposition                                                                                                                                                                            |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| NodeLifecycle DO stopped/sleeping workspace auto-delete (`durable-objects/node-lifecycle.ts`)                                                                                    | Calls `finalizeWorkspaceLifecycleClosure()` after D1 workspace tombstone.                                                                                                              |
+| Node cleanup orphaned workspace stop (`scheduled/node-cleanup/workspace-phases.ts`)                                                                                              | Calls finalizer with `agentSessionStatus='stopped'`.                                                                                                                                   |
+| Node cleanup stale stopped workspace delete (`scheduled/node-cleanup/workspace-phases.ts`)                                                                                       | Calls finalizer with `agentSessionStatus='completed'` after guarded status update changes a row.                                                                                       |
+| Node cleanup cf-container terminal sweep (`scheduled/node-cleanup/node-phases.ts`)                                                                                               | Routes through `stopNodeResources()`, which finalizes.                                                                                                                                 |
+| Node cleanup node destroy helper (`scheduled/node-cleanup/shared.ts`)                                                                                                            | Calls finalizer after node tombstone for any remaining attached workspaces.                                                                                                            |
+| `stopNodeResources()` (`services/nodes.ts`)                                                                                                                                      | Calls finalizer for both managed and user-owned node branches.                                                                                                                         |
+| `deleteNodeResources()` (`services/nodes.ts`)                                                                                                                                    | Calls finalizer after workspace tombstones.                                                                                                                                            |
+| `retireDeletedDeploymentNodeRecord()` (`services/nodes.ts`)                                                                                                                      | Now receives `env` and calls finalizer after deployment workspace tombstones.                                                                                                          |
+| Explicit node stop/delete routes (`routes/nodes.ts`)                                                                                                                             | Duplicate `agent_sessions` updates/deletes removed; routes delegate to service finalizer paths.                                                                                        |
+| Deployment environment stop/delete routes (`routes/deployment-environment-lifecycle.ts`, `routes/deployment-environments.ts`)                                                    | Pass `env` into `retireDeletedDeploymentNodeRecord()` and otherwise delegate to `deleteNodeResources()`.                                                                               |
+| Explicit workspace stop route (`routes/workspaces/lifecycle.ts`)                                                                                                                 | VM branch calls finalizer with `stopped`; cf-container branch delegates to `stopNodeResources()`.                                                                                      |
+| Explicit workspace delete/task-close cleanup (`services/workspace-cleanup.ts`)                                                                                                   | Calls finalizer before hard-deleting workspace row; no direct `agent_sessions` delete remains.                                                                                         |
+| Trial expiry cleanup (`scheduled/trial-expire.ts`)                                                                                                                               | Replaced duplicated `agent_sessions`/`compute_usage`/ProjectData cleanup with finalizer.                                                                                               |
+| Instant/cf-container runtime terminal persistence (`durable-objects/vm-agent-container-runtime.ts`)                                                                              | Replaced direct `agent_sessions` update with finalizer.                                                                                                                                |
+| Instant launch failure teardown (`services/instant-session.ts`)                                                                                                                  | Calls finalizer after workspace/node error tombstones and before container destroy.                                                                                                    |
+| TaskRunner DO VM failure cleanup (`durable-objects/task-runner/state-machine.ts`)                                                                                                | Calls finalizer after workspace stop; removes duplicate compute-only cleanup path.                                                                                                     |
+| Task cleanup service (`services/task-runner.ts`)                                                                                                                                 | Calls finalizer after workspace stop; cf-container branch delegates to `stopNodeResources()`.                                                                                          |
+| Task/session terminal cleanup wrappers (`scheduled/stuck-tasks.ts`, `services/session-sleep.ts`, `services/task-terminal-cleanup.ts`, ProjectData dead-target/attention cleanup) | Delegate to `cleanupTaskRun()` where workspace/node teardown occurs.                                                                                                                   |
+| Strict external node deletion (`services/strict-node-deletion.ts`)                                                                                                               | Allowlisted: external teardown only; callers own D1 row mutation and finalizer sequencing.                                                                                             |
+| Fresh node allocation race deletes (`durable-objects/task-runner/node-steps.ts`, `services/deployment-provisioning.ts`, `services/nodes.ts`)                                     | Allowlisted or routed in containing service: node rows are deleted before any workspace/agent_session can reference them.                                                              |
+| Session-snapshot D1 retention cf-container destroy (`scheduled/d1-retention.ts`)                                                                                                 | Allowlisted: stops ProjectData session and destroys expired runtime state without marking workspace/node rows deleted; container DO terminal persistence owns D1 runtime finalization. |
+| VM_AGENT_CONTAINER transport wrapper (`services/vm-agent-container.ts`)                                                                                                          | Allowlisted: no D1 lifecycle mutation; container DO calls `persistRuntimeEnded()`.                                                                                                     |
+
+## Verification
+
+- `pnpm --filter @simple-agent-manager/api exec vitest run tests/unit/services/workspace-lifecycle-finalizer-coverage.test.ts tests/unit/scheduled/trial-expire.test.ts tests/unit/scheduled/trial-expire-missing-vm-vertical.test.ts tests/unit/services/workspace-cleanup.test.ts tests/unit/services/nodes-delete.test.ts`
+- `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/node-lifecycle-do.test.ts tests/workers/scheduled-node-cleanup.test.ts tests/workers/workspace-lifecycle-finalizer-vertical.test.ts`
+- Red-check: temporarily added an unguarded source writer under `apps/api/src/services`; the inventory test failed on it, then passed after removing the fixture.
+- `pnpm --filter @simple-agent-manager/api typecheck`
+- `pnpm --filter @simple-agent-manager/api lint`
+- `pnpm exec prettier --check ...` for all touched files
 
 ## Acceptance criteria
 
