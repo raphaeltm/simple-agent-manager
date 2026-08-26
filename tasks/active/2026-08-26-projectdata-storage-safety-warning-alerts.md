@@ -161,6 +161,10 @@ perform any one-off production purge.
   sleeping preservation, and the audit-required target-unreachable alert.
 - Doc-sync review — PASS: operator/admin/API references and environment
   documentation match the implemented behavior.
+- Task-completion review — PASS: research findings map to checked-off
+  implementation items, acceptance criteria have automated or documented
+  validation, and the vertical ProjectData Worker test covers the cross-boundary
+  alert/history/cleanup behavior.
 
 ## Validation evidence
 
