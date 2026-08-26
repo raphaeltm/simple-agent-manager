@@ -238,49 +238,80 @@ function parseOptionalTimestamp(
   return { value: null, error: `${name} must be an epoch-millisecond number or ISO timestamp` };
 }
 
+type ArchivedToolPayloadRequest = {
+  messageId: string;
+  sessionId: string;
+  startTime: number | null;
+  endTime: number | null;
+  requestedLimit: number | null;
+};
+
+function parseArchivedToolPayloadRequest(
+  params: Record<string, unknown>
+): { request: ArchivedToolPayloadRequest | null; error: string | null } {
+  const messageId = typeof params.messageId === 'string' ? params.messageId.trim() : '';
+  const sessionId = typeof params.sessionId === 'string' ? params.sessionId.trim() : '';
+  const startTime = parseOptionalTimestamp(params.startTime, 'startTime');
+  if (startTime.error) return { request: null, error: startTime.error };
+  const endTime = parseOptionalTimestamp(params.endTime, 'endTime');
+  if (endTime.error) return { request: null, error: endTime.error };
+  if (startTime.value !== null && endTime.value !== null && startTime.value > endTime.value) {
+    return { request: null, error: 'startTime must be before or equal to endTime' };
+  }
+  if (!messageId && !sessionId && startTime.value === null && endTime.value === null) {
+    return {
+      request: null,
+      error: 'Provide messageId, sessionId, startTime, or endTime to bound archive retrieval',
+    };
+  }
+
+  return {
+    request: {
+      messageId,
+      sessionId,
+      startTime: startTime.value,
+      endTime: endTime.value,
+      requestedLimit: typeof params.limit === 'number' ? params.limit : null,
+    },
+    error: null,
+  };
+}
+
+function resolveArchivedToolPayloadLimit(env: Env, requestedLimit: number | null): number {
+  const limits = getMcpLimits(env);
+  const rawLimit = requestedLimit ?? limits.archivedToolPayloadListLimit;
+  return Math.min(Math.max(1, Math.round(rawLimit)), limits.archivedToolPayloadListMax);
+}
+
 export async function handleGetArchivedToolPayloads(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env
 ): Promise<JsonRpcResponse> {
-  const messageId = typeof params.messageId === 'string' ? params.messageId.trim() : '';
-  const sessionId = typeof params.sessionId === 'string' ? params.sessionId.trim() : '';
-  const startTime = parseOptionalTimestamp(params.startTime, 'startTime');
-  if (startTime.error) return jsonRpcError(requestId, INVALID_PARAMS, startTime.error);
-  const endTime = parseOptionalTimestamp(params.endTime, 'endTime');
-  if (endTime.error) return jsonRpcError(requestId, INVALID_PARAMS, endTime.error);
-  if (startTime.value !== null && endTime.value !== null && startTime.value > endTime.value) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'startTime must be before or equal to endTime');
-  }
-  if (!messageId && !sessionId && startTime.value === null && endTime.value === null) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'Provide messageId, sessionId, startTime, or endTime to bound archive retrieval'
-    );
+  const parsed = parseArchivedToolPayloadRequest(params);
+  if (parsed.error || parsed.request === null) {
+    return jsonRpcError(requestId, INVALID_PARAMS, parsed.error ?? 'Invalid archive retrieval request');
   }
 
-  if (sessionId) {
-    const session = await projectDataService.getSession(env, tokenData.projectId, sessionId);
+  if (parsed.request.sessionId) {
+    const session = await projectDataService.getSession(
+      env,
+      tokenData.projectId,
+      parsed.request.sessionId
+    );
     if (!session) {
       return jsonRpcError(requestId, INVALID_PARAMS, 'Session not found in this project');
     }
   }
 
-  const limits = getMcpLimits(env);
-  const requestedLimit =
-    typeof params.limit === 'number' ? params.limit : limits.archivedToolPayloadListLimit;
-  const limit = Math.min(
-    Math.max(1, Math.round(requestedLimit)),
-    limits.archivedToolPayloadListMax
-  );
+  const limit = resolveArchivedToolPayloadLimit(env, parsed.request.requestedLimit);
 
   const result = await projectDataService.getArchivedToolPayloads(env, tokenData.projectId, {
-    ...(messageId ? { messageId } : {}),
-    ...(sessionId ? { sessionId } : {}),
-    ...(startTime.value !== null ? { startTime: startTime.value } : {}),
-    ...(endTime.value !== null ? { endTime: endTime.value } : {}),
+    ...(parsed.request.messageId ? { messageId: parsed.request.messageId } : {}),
+    ...(parsed.request.sessionId ? { sessionId: parsed.request.sessionId } : {}),
+    ...(parsed.request.startTime !== null ? { startTime: parsed.request.startTime } : {}),
+    ...(parsed.request.endTime !== null ? { endTime: parsed.request.endTime } : {}),
     limit,
   });
 

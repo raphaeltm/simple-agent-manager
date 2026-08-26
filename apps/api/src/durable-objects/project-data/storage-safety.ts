@@ -183,8 +183,16 @@ function envFlagEnabled(value: string | undefined): boolean {
   return !['0', 'false', 'off', 'disabled'].includes(value.trim().toLowerCase());
 }
 
+function stripBoundarySlashes(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value[start] === '/') start++;
+  while (end > start && value[end - 1] === '/') end--;
+  return value.slice(start, end);
+}
+
 function parseR2Prefix(value: string | undefined, fallback: string): string {
-  const parsed = (value ?? fallback).trim().replace(/^\/+|\/+$/g, '');
+  const parsed = stripBoundarySlashes((value ?? fallback).trim());
   return parsed || fallback;
 }
 
@@ -381,12 +389,11 @@ export function computeStorageSafetyAlarmTime(
   const archiveLastRunAt = config.toolPayloadCleanupEnabled
     ? readProjectDataToolPayloadArchiveLastRunAt(sql)
     : null;
-  const archiveRunAt =
-    config.toolPayloadCleanupEnabled && archiveLastRunAt === null
-      ? now
-      : archiveLastRunAt !== null
-        ? archiveLastRunAt + config.toolPayloadArchiveIntervalMs
-        : null;
+  let archiveRunAt: number | null = null;
+  if (config.toolPayloadCleanupEnabled) {
+    archiveRunAt =
+      archiveLastRunAt === null ? now : archiveLastRunAt + config.toolPayloadArchiveIntervalMs;
+  }
   const eventLogCleanupRecheckAt = config.eventLogCleanupEnabled
     ? readProjectDataEventLogCleanupRecheckAt(sql)
     : null;

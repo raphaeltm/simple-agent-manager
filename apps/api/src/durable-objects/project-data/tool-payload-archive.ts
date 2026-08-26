@@ -112,8 +112,16 @@ function rawNumber(value: unknown): number | null {
   return null;
 }
 
+function stripBoundarySlashes(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value[start] === '/') start++;
+  while (end > start && value[end - 1] === '/') end--;
+  return value.slice(start, end);
+}
+
 function normalizeArchivePrefix(prefix: string): string {
-  const trimmed = prefix.trim().replace(/^\/+|\/+$/g, '');
+  const trimmed = stripBoundarySlashes(prefix.trim());
   return trimmed || DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX;
 }
 
@@ -423,10 +431,8 @@ export function selectArchivedToolPayloadRow(
       sessionId ?? null
     )
     .raw();
-  for (const row of rows) {
-    return parseArchivedToolPayloadRow(row);
-  }
-  return null;
+  const firstRow = rows.next();
+  return firstRow.done ? null : parseArchivedToolPayloadRow(firstRow.value);
 }
 
 function parseArchivedToolPayloadRow(row: unknown[]): ArchivedToolPayloadRow {

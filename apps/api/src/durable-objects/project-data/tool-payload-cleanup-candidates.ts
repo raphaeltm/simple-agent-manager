@@ -37,6 +37,23 @@ type ToolPayloadCandidateUpdate = {
   errorMessage: string | null;
 };
 
+type ToolPayloadCandidateProcessingContext = {
+  sql: SqlStorage;
+  env: Env;
+  projectId: string;
+  archivePrefix: string;
+  maxRowBytes: number;
+  archivedAt: number;
+};
+
+type ToolPayloadCandidateScanInput = ToolPayloadCandidateProcessingContext & {
+  batchBytes: number;
+  candidates: ToolPayloadCandidate[];
+  initialCursor: ToolPayloadCleanupCursor | null;
+  deadlineMs: number;
+  nowMs?: () => number;
+};
+
 function rawNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isSafeInteger(value)) return value;
   if (typeof value === 'bigint' && value <= BigInt(Number.MAX_SAFE_INTEGER)) return Number(value);
@@ -227,29 +244,24 @@ function failedBudgetUpdate(candidate: ToolPayloadCandidate): ToolPayloadCandida
 }
 
 async function processToolPayloadCandidate(
-  sql: SqlStorage,
-  env: Env,
-  projectId: string,
-  archivePrefix: string,
+  context: ToolPayloadCandidateProcessingContext,
   candidate: ToolPayloadCandidate,
-  maxReadBytes: number,
-  maxRowBytes: number,
-  archivedAt: number
+  maxReadBytes: number
 ): Promise<ToolPayloadCandidateUpdate> {
-  if (candidate.toolMetadataBytes > maxRowBytes) return failedBudgetUpdate(candidate);
+  if (candidate.toolMetadataBytes > context.maxRowBytes) return failedBudgetUpdate(candidate);
   if (candidate.toolMetadataBytes > maxReadBytes) return failedBudgetUpdate(candidate);
 
-  const toolMetadata = readBoundedToolMetadata(sql, candidate.messageId, maxReadBytes);
+  const toolMetadata = readBoundedToolMetadata(context.sql, candidate.messageId, maxReadBytes);
   if (toolMetadata === null) return emptyCandidateUpdate();
 
   return archiveToolPayloadCandidate({
-    sql,
-    env,
-    projectId,
-    archivePrefix,
+    sql: context.sql,
+    env: context.env,
+    projectId: context.projectId,
+    archivePrefix: context.archivePrefix,
     candidate,
     toolMetadata,
-    archivedAt,
+    archivedAt: context.archivedAt,
   });
 }
 
@@ -271,47 +283,34 @@ function createEmptyCandidateScanResult(): ToolPayloadCandidateScanResult {
 }
 
 export async function scanToolPayloadCandidates(
-  sql: SqlStorage,
-  env: Env,
-  projectId: string,
-  archivePrefix: string,
-  batchBytes: number,
-  maxRowBytes: number,
-  candidates: ToolPayloadCandidate[],
-  options: {
-    initialCursor: ToolPayloadCleanupCursor | null;
-    archivedAt: number;
-    deadlineMs: number;
-    nowMs?: () => number;
-  }
+  input: ToolPayloadCandidateScanInput
 ): Promise<ToolPayloadCandidateScanResult> {
   const result = createEmptyCandidateScanResult();
-  const nowMs = options.nowMs ?? Date.now;
-  let previousCursor = options.initialCursor;
+  const nowMs = input.nowMs ?? Date.now;
+  let previousCursor = input.initialCursor;
+  const processingContext: ToolPayloadCandidateProcessingContext = {
+    sql: input.sql,
+    env: input.env,
+    projectId: input.projectId,
+    archivePrefix: input.archivePrefix,
+    maxRowBytes: input.maxRowBytes,
+    archivedAt: input.archivedAt,
+  };
 
-  for (const candidate of candidates) {
-    if (result.rowsScanned > 0 && nowMs() >= options.deadlineMs) {
+  for (const candidate of input.candidates) {
+    if (result.rowsScanned > 0 && nowMs() >= input.deadlineMs) {
       result.pausedForWallTime = true;
       result.retryCursor = previousCursor;
       break;
     }
 
-    const remainingReadBytes = Math.max(batchBytes - result.toolMetadataBytesRead, 0);
+    const remainingReadBytes = Math.max(input.batchBytes - result.toolMetadataBytesRead, 0);
     const maxReadBytes =
       result.rowsScanned === 0 && candidate.toolMetadataBytes > remainingReadBytes
         ? candidate.toolMetadataBytes
         : remainingReadBytes;
 
-    const updated = await processToolPayloadCandidate(
-      sql,
-      env,
-      projectId,
-      archivePrefix,
-      candidate,
-      maxReadBytes,
-      maxRowBytes,
-      options.archivedAt
-    );
+    const updated = await processToolPayloadCandidate(processingContext, candidate, maxReadBytes);
 
     result.rowsScanned++;
     result.lastCursor = candidate;
@@ -331,7 +330,7 @@ export async function scanToolPayloadCandidates(
 
     previousCursor = candidate;
 
-    if (nowMs() >= options.deadlineMs) {
+    if (nowMs() >= input.deadlineMs) {
       result.pausedForWallTime = true;
       result.retryCursor = candidate;
       break;

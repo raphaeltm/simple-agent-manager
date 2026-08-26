@@ -109,11 +109,12 @@ function createToolPayloadCleanupPlan(
     return null;
   }
 
-  const reason: ToolPayloadCleanupReason = hasPendingCleanup
-    ? 'continuation'
-    : underStoragePressure
-      ? 'storage_pressure'
-      : 'retention_due';
+  let reason: ToolPayloadCleanupReason = 'retention_due';
+  if (hasPendingCleanup) {
+    reason = 'continuation';
+  } else if (underStoragePressure) {
+    reason = 'storage_pressure';
+  }
 
   return {
     projectId,
@@ -175,21 +176,19 @@ async function scanToolPayloadCleanupBatch(
     return batch;
   }
 
-  const scanned = await scanToolPayloadCandidates(
+  const scanned = await scanToolPayloadCandidates({
     sql,
     env,
-    plan.projectId,
-    config.toolPayloadArchiveR2Prefix,
-    plan.batchBytes,
-    plan.maxRowBytes,
+    projectId: plan.projectId,
+    archivePrefix: config.toolPayloadArchiveR2Prefix,
+    batchBytes: plan.batchBytes,
+    maxRowBytes: plan.maxRowBytes,
     candidates,
-    {
-      initialCursor: plan.pendingCursor,
-      archivedAt: plan.now,
-      deadlineMs: plan.deadlineMs,
-      ...(plan.nowMs ? { nowMs: plan.nowMs } : {}),
-    }
-  );
+    initialCursor: plan.pendingCursor,
+    archivedAt: plan.now,
+    deadlineMs: plan.deadlineMs,
+    ...(plan.nowMs ? { nowMs: plan.nowMs } : {}),
+  });
 
   batch.sessionsScanned = countSessions(candidates.slice(0, scanned.rowsScanned));
   batch.rowsScanned = scanned.rowsScanned;
