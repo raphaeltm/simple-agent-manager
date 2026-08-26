@@ -126,6 +126,9 @@ perform any one-off production purge.
   through the existing observability error path. Cleanup target exhaustion above
   the configured target persists an error-level `cleanup_target_unreachable`
   alert.
+- Alert throttling metadata is updated only after the operator-visible alert and
+  latest-row alert fields are persisted, so transient alert-write failures do
+  not suppress the next retry.
 - Category telemetry measures message content/tool metadata, active/sleeping
   session payload, terminal legacy tool payloads, normalized tool metadata,
   activity events, ACP session events, task status events, and unattributed DB
@@ -141,6 +144,8 @@ perform any one-off production purge.
 - `pnpm --filter @simple-agent-manager/api lint` — passed
 - `pnpm --filter @simple-agent-manager/api typecheck` — passed
 - `pnpm vitest run --config vitest.workers.config.ts tests/workers/project-data-storage-safety.test.ts --reporter=verbose` — passed, 14 tests
+- `pnpm --filter @simple-agent-manager/api test:workers -- --reporter=dot` —
+  passed, 55 files, 724 tests
 - `pnpm vitest run tests/unit/routes/admin-security.test.ts --reporter=verbose` — passed, 7 tests
 - `pnpm quality:migration-safety` — passed, 152 FK relationships scanned, 0 new violations
 - Touched non-test source files are at or below 500 lines, except documented

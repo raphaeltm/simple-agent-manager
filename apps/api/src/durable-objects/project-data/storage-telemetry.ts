@@ -333,9 +333,6 @@ export async function maybePersistProjectDataStorageAlert(
     return;
   }
 
-  writeMeta(sql, META_LAST_ALERT_AT, String(now));
-  writeMeta(sql, META_LAST_ALERT_STATUS, telemetry.status);
-  writeMeta(sql, META_LAST_ALERT_REASON, reason);
   const growthText = formatGrowthForecast(telemetry);
   const message = isCleanupTargetUnreachable
     ? `ProjectData storage cleanup target unreachable (${formatUsageRatio(telemetry.usageRatio)}, ${growthText})`
@@ -399,4 +396,8 @@ export async function maybePersistProjectDataStorageAlert(
     },
     { appendHistory: false }
   );
+
+  writeMeta(sql, META_LAST_ALERT_AT, String(now));
+  writeMeta(sql, META_LAST_ALERT_STATUS, telemetry.status);
+  writeMeta(sql, META_LAST_ALERT_REASON, reason);
 }
