@@ -3,10 +3,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppError } from '../../../src/middleware/error';
 
-const WORKSPACES = { __table: 'workspaces', id: 'workspaces.id' };
+const WORKSPACES = {
+  __table: 'workspaces',
+  id: 'workspaces.id',
+  status: 'workspaces.status',
+  nodeId: 'workspaces.node_id',
+};
+const NODES = { __table: 'nodes', id: 'nodes.id', status: 'nodes.status' };
 const DEPLOYMENT_PUBLISH_JOBS = { __table: 'deployment_publish_jobs' };
 
-let workspaceRows: Array<{ projectId: string | null; userId: string }> = [];
+let workspaceRows: Array<{
+  projectId: string | null;
+  userId: string;
+  status: string;
+  nodeId?: string | null;
+  nodeStatus?: string | null;
+}> = [];
 let jobRows: Array<{ environmentId: string; nodeId: string }> = [];
 let verifiedPayload: { workspace: string; type: string; scope?: string } = {
   workspace: 'ws-1',
@@ -23,6 +35,7 @@ vi.mock('drizzle-orm', () => ({
 
 vi.mock('../../../src/db/schema', () => ({
   workspaces: WORKSPACES,
+  nodes: NODES,
   deploymentPublishJobs: DEPLOYMENT_PUBLISH_JOBS,
 }));
 
@@ -32,6 +45,11 @@ vi.mock('drizzle-orm/d1', () => ({
       from: vi.fn().mockImplementation((table: unknown) => {
         if (table === WORKSPACES) {
           return {
+            leftJoin: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue(workspaceRows),
+              }),
+            }),
             where: vi.fn().mockReturnValue({
               limit: vi.fn().mockResolvedValue(workspaceRows),
             }),
@@ -99,7 +117,15 @@ const validEvent = {
 describe('deployment-publish-job-callback (vertical slice)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    workspaceRows = [{ projectId: 'proj-1', userId: 'user-1' }];
+    workspaceRows = [
+      {
+        projectId: 'proj-1',
+        userId: 'user-1',
+        status: 'running',
+        nodeId: 'node-1',
+        nodeStatus: 'running',
+      },
+    ];
     jobRows = [{ environmentId: 'env-1', nodeId: 'node-1' }];
     verifiedPayload = { workspace: 'ws-1', type: 'callback', scope: 'workspace' };
   });

@@ -89,7 +89,7 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
       if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
         return c.json(
           { error: appError.error, message: appError.message },
-          appError.statusCode as 400 | 401 | 403 | 404 | 500
+          appError.statusCode as 400 | 401 | 403 | 404 | 410 | 500
         );
       }
       return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
@@ -99,6 +99,7 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
     mockDB = {
       select: vi.fn().mockReturnThis(),
       from: vi.fn().mockReturnThis(),
+      leftJoin: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(),
       limit: vi.fn(),
     };
@@ -106,7 +107,11 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
   });
 
   it('returns 404 for default OpenCode Zen when no dedicated OpenCode key exists', async () => {
-    queueLimitResponses([{ userId: 'user-1' }], [], []);
+    queueLimitResponses(
+      [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
+      [],
+      []
+    );
 
     const resp = await postAgentKey({ agentType: 'opencode' });
     expect(resp.status).toBe(404);
@@ -116,7 +121,7 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
 
   it('returns the dedicated opencode key without any proxy fallback', async () => {
     queueLimitResponses(
-      [{ userId: 'user-1' }],
+      [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
       [
         {
           encryptedToken: 'encrypted-dedicated',
@@ -157,7 +162,9 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
   });
 
   it('does not resolve a key for non-opencode agents without a credential', async () => {
-    queueLimitResponses([{ userId: 'user-1' }]);
+    queueLimitResponses([
+      { userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' },
+    ]);
 
     const resp = await postAgentKey({ agentType: 'google-gemini' });
     expect(resp.status).toBe(404);
@@ -170,7 +177,7 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
     'returns the dedicated key directly for %s instead of routing through any proxy',
     async (_label, encryptedToken, iv, decryptedKey) => {
       queueLimitResponses(
-        [{ userId: 'user-1' }],
+        [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
         [
           {
             encryptedToken,
@@ -192,7 +199,11 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
   );
 
   it('returns 404 and does not fall back to any platform/cloud credential when no key exists', async () => {
-    queueLimitResponses([{ userId: 'user-1' }], [], []);
+    queueLimitResponses(
+      [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
+      [],
+      []
+    );
 
     const resp = await postAgentKey({ agentType: 'opencode' });
     expect(resp.status).toBe(404);

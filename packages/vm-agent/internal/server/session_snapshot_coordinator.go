@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -71,7 +72,7 @@ func (s *Server) startBackgroundSessionSnapshot(input *sessionSnapshotHandlerInp
 				}
 				reportCancel()
 			}
-			if s.errorReporter != nil {
+			if s.errorReporter != nil && shouldReportBackgroundSnapshotIncident(err) {
 				s.errorReporter.ReportError(err, "session_snapshot.background_capture", input.workspaceID, map[string]interface{}{
 					"chatSessionId": input.chatSessionID,
 					"sessionId":     input.sessionID,
@@ -84,4 +85,42 @@ func (s *Server) startBackgroundSessionSnapshot(input *sessionSnapshotHandlerInp
 		slog.Info("Background session snapshot completed", "chatSessionId", input.chatSessionID, "workspaceId", input.workspaceID, "result", result)
 	}()
 	return true
+}
+
+// isSnapshotTeardownRaceError reports whether a capture failed only because the workspace
+// it was snapshotting had already been torn down.
+//
+// A background capture races teardown by design: startBackgroundSessionSnapshot returns as
+// soon as the goroutine is running and the handler answers 202, so the workspace is free to
+// stop while the capture is still in flight. Losing that race is the expected terminal state,
+// not a fault — the authoritative snapshot was already written by the sleep path that stopped
+// the workspace in the first place.
+//
+// This composes isContainerUnavailableError rather than extending it, because that predicate
+// is a recovery trigger for three unrelated call sites.
+func isSnapshotTeardownRaceError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, errWorkspaceRuntimeNotFound) || isContainerUnavailableError(err) {
+		return true
+	}
+	// Only "stopped" is deliberate teardown. Production evidence covers that status alone, so
+	// per .claude/rules/67 this filters the narrowest set the evidence supports: a snapshot that
+	// fails while the workspace is "creating" (e.g. racing a restart) or "error" keeps reporting.
+	var notRunning *workspaceNotRunningError
+	return errors.As(err, &notRunning) && notRunning.status == workspaceStatusStopped
+}
+
+// shouldReportBackgroundSnapshotIncident decides whether a failed background capture is worth
+// raising as a platform error incident.
+//
+// Only the teardown race is filtered. Everything else — including a capture that exceeds
+// SessionSnapshotOperationTimeout — still reports, because a snapshot that fails to preserve
+// resumable state must stay visible.
+func shouldReportBackgroundSnapshotIncident(err error) bool {
+	if err == nil {
+		return false
+	}
+	return !isSnapshotTeardownRaceError(err)
 }

@@ -68,6 +68,9 @@ func (s *Server) startNodeHealthReporter() {
 			case <-s.done:
 				return
 			case <-ticker.C:
+				if s.controlPlaneCallbacksStopped() {
+					return
+				}
 				s.sendNodeHeartbeat()
 			}
 		}
@@ -81,6 +84,10 @@ func (s *Server) SendNodeReady() {
 }
 
 func (s *Server) sendNodeReady() {
+	if s.controlPlaneCallbacksStopped() {
+		return
+	}
+
 	url := strings.TrimRight(s.config.ControlPlaneURL, "/") + "/api/nodes/" + s.config.NodeID + "/ready"
 	body, err := json.Marshal(map[string]string{"agentVersion": sysinfo.Version})
 	if err != nil {
@@ -104,7 +111,14 @@ func (s *Server) sendNodeReady() {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		slog.Warn("Node ready callback returned non-success status", "statusCode", resp.StatusCode)
+		body := readAcpHeartbeatErrorBody(resp.Body)
+		if isTerminalControlPlaneCallbackStatus(resp.StatusCode) {
+			s.markControlPlaneCallbacksTerminal("node_ready", resp.StatusCode, body)
+			return
+		}
+		slog.Warn("Node ready callback returned non-success status",
+			"statusCode", resp.StatusCode,
+			"responseBody", body)
 	}
 }
 
@@ -144,6 +158,10 @@ type heartbeatResponse struct {
 }
 
 func (s *Server) sendNodeHeartbeat() {
+	if s.controlPlaneCallbacksStopped() {
+		return
+	}
+
 	url := strings.TrimRight(s.config.ControlPlaneURL, "/") + "/api/nodes/" + s.config.NodeID + "/heartbeat"
 
 	payload := map[string]interface{}{
@@ -220,7 +238,14 @@ func (s *Server) sendNodeHeartbeat() {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		slog.Warn("Node heartbeat returned non-success status", "statusCode", resp.StatusCode)
+		body := readAcpHeartbeatErrorBody(resp.Body)
+		if isTerminalControlPlaneCallbackStatus(resp.StatusCode) {
+			s.markControlPlaneCallbacksTerminal("node_heartbeat", resp.StatusCode, body)
+			return
+		}
+		slog.Warn("Node heartbeat returned non-success status",
+			"statusCode", resp.StatusCode,
+			"responseBody", body)
 		return
 	}
 
@@ -463,6 +488,7 @@ func (s *Server) retryPendingReadyCallbacks() {
 				"workspace", p.WorkspaceID, "error", err)
 			continue
 		}
+		responseBody := readAcpHeartbeatErrorBody(resp.Body)
 		resp.Body.Close()
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
@@ -474,10 +500,10 @@ func (s *Server) retryPendingReadyCallbacks() {
 			// — stop retrying.
 			s.clearReadyCallbackPending(p.WorkspaceID)
 			slog.Warn("Workspace-ready retry got permanent error, giving up",
-				"workspace", p.WorkspaceID, "statusCode", resp.StatusCode)
+				"workspace", p.WorkspaceID, "statusCode", resp.StatusCode, "responseBody", responseBody)
 		} else {
 			slog.Warn("Workspace-ready retry got transient error (will try again)",
-				"workspace", p.WorkspaceID, "statusCode", resp.StatusCode)
+				"workspace", p.WorkspaceID, "statusCode", resp.StatusCode, "responseBody", responseBody)
 		}
 	}
 }

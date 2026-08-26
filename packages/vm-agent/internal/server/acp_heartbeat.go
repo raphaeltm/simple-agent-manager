@@ -41,6 +41,9 @@ func (s *Server) startAcpHeartbeatReporter() {
 			case <-s.done:
 				return
 			case <-ticker.C:
+				if s.controlPlaneCallbacksStopped() {
+					return
+				}
 				s.sendAcpHeartbeats()
 			}
 		}
@@ -50,6 +53,10 @@ func (s *Server) startAcpHeartbeatReporter() {
 // sendAcpHeartbeats collects unique (projectID) values from active workspace
 // runtimes and sends a node-level ACP heartbeat for each project.
 func (s *Server) sendAcpHeartbeats() {
+	if s.controlPlaneCallbacksStopped() {
+		return
+	}
+
 	projectIDs := s.activeProjectIDs()
 	if len(projectIDs) == 0 {
 		return
@@ -63,6 +70,9 @@ func (s *Server) sendAcpHeartbeats() {
 	}
 
 	for _, projectID := range projectIDs {
+		if s.controlPlaneCallbacksStopped() {
+			return
+		}
 		s.sendAcpHeartbeatForProject(projectID, nodeID, token)
 	}
 }
@@ -91,6 +101,10 @@ func (s *Server) activeProjectIDs() []string {
 
 // sendAcpHeartbeatForProject POSTs a node-level ACP heartbeat for a single project.
 func (s *Server) sendAcpHeartbeatForProject(projectID, nodeID, token string) {
+	if s.controlPlaneCallbacksStopped() {
+		return
+	}
+
 	url := strings.TrimRight(s.config.ControlPlaneURL, "/") +
 		"/api/projects/" + projectID + "/node-acp-heartbeat"
 
@@ -117,6 +131,10 @@ func (s *Server) sendAcpHeartbeatForProject(projectID, nodeID, token string) {
 
 	if resp.StatusCode >= 300 {
 		body := readAcpHeartbeatErrorBody(resp.Body)
+		if isTerminalControlPlaneCallbackStatus(resp.StatusCode) {
+			s.markControlPlaneCallbacksTerminal("node_acp_heartbeat", resp.StatusCode, body)
+			return
+		}
 		level := slog.LevelWarn
 		if isTransientAcpHeartbeatResponse(resp.StatusCode, body) {
 			level = slog.LevelInfo

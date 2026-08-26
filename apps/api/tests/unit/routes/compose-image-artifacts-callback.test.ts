@@ -3,9 +3,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppError } from '../../../src/middleware/error';
 
-const WORKSPACES = { __table: 'workspaces', id: 'workspaces.id' };
+const WORKSPACES = {
+  __table: 'workspaces',
+  id: 'workspaces.id',
+  status: 'workspaces.status',
+  nodeId: 'workspaces.node_id',
+};
+const NODES = { __table: 'nodes', id: 'nodes.id', status: 'nodes.status' };
 
-let workspaceRows: Array<{ projectId: string | null; userId: string }> = [];
+let workspaceRows: Array<{
+  projectId: string | null;
+  userId: string;
+  status: string;
+  nodeId?: string | null;
+  nodeStatus?: string | null;
+}> = [];
 let policyResult: { environmentId: string } | { error: string } = { environmentId: 'env-1' };
 let verifiedPayload: { workspace: string; type: string; scope?: string } = {
   workspace: 'ws-1',
@@ -46,12 +58,18 @@ vi.mock('drizzle-orm', () => ({
 
 vi.mock('../../../src/db/schema', () => ({
   workspaces: WORKSPACES,
+  nodes: NODES,
 }));
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
     select: vi.fn().mockImplementation(() => ({
       from: vi.fn().mockReturnValue({
+        leftJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue(workspaceRows),
+          }),
+        }),
         where: vi.fn().mockReturnValue({
           limit: vi.fn().mockResolvedValue(workspaceRows),
         }),
@@ -117,7 +135,15 @@ function request(
 describe('compose-image-artifacts callback (vertical slice)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    workspaceRows = [{ projectId: 'proj-1', userId: 'user-1' }];
+    workspaceRows = [
+      {
+        projectId: 'proj-1',
+        userId: 'user-1',
+        status: 'running',
+        nodeId: 'node-1',
+        nodeStatus: 'running',
+      },
+    ];
     policyResult = { environmentId: 'env-1' };
     verifiedPayload = { workspace: 'ws-1', type: 'callback', scope: 'workspace' };
   });

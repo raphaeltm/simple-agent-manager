@@ -3,12 +3,45 @@ package server
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
 )
+
+// Sentinels for the two ways resolveContainerForWorkspace fails because the workspace
+// itself is gone rather than because the caller did something wrong. They let callers
+// classify with errors.Is instead of matching on message text; the wrapped messages are
+// unchanged, so operator-facing error strings and HTTP responses are byte-identical.
+var (
+	errWorkspaceRuntimeNotFound = errors.New("workspace not found")
+	errWorkspaceNotRunning      = errors.New("workspace is not running/recovery")
+)
+
+// workspaceStatusStopped is the only non-running status that means "this workspace was
+// deliberately torn down". It is set solely by StopAllWorkspacesAndSessions. The other
+// non-running statuses — "creating" (including a restart of a previously running
+// workspace) and "error" (a provisioning attempt that never reached running) — are NOT
+// teardown, so callers classifying failures must distinguish them rather than treating
+// every errWorkspaceNotRunning alike.
+const workspaceStatusStopped = "stopped"
+
+// workspaceNotRunningError carries the status alongside errWorkspaceNotRunning so callers
+// can branch on which non-running status was observed. errors.Is still reports it as
+// errWorkspaceNotRunning for callers that only care about the class.
+type workspaceNotRunningError struct {
+	status string
+}
+
+func (e *workspaceNotRunningError) Error() string {
+	return fmt.Sprintf("%s (status: %s)", errWorkspaceNotRunning.Error(), e.status)
+}
+
+func (e *workspaceNotRunningError) Is(target error) bool {
+	return target == errWorkspaceNotRunning
+}
 
 // ---------- Response types ----------
 
@@ -357,10 +390,10 @@ func isValidRefChar(r rune) bool {
 func (s *Server) resolveContainerForWorkspace(workspaceID string) (containerID, workDir, user string, err error) {
 	runtime, ok := s.getWorkspaceRuntime(workspaceID)
 	if !ok {
-		return "", "", "", fmt.Errorf("workspace not found")
+		return "", "", "", errWorkspaceRuntimeNotFound
 	}
 	if runtime.Status != "running" && runtime.Status != "recovery" {
-		return "", "", "", fmt.Errorf("workspace is not running/recovery (status: %s)", runtime.Status)
+		return "", "", "", &workspaceNotRunningError{status: runtime.Status}
 	}
 
 	if s.config.IsStandaloneMode() {

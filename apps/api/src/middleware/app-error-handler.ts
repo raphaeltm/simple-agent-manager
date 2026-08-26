@@ -100,7 +100,11 @@ export function handleAppError(err: Error, c: AppContext): Response {
   }
 
   if (status < 500) {
-    log.error('request_error', serializeError(err));
+    if (status === 401 || status === 410) {
+      log.info('request_rejected', { status, ...serializeError(err) });
+    } else {
+      log.warn('request_rejected', { status, ...serializeError(err) });
+    }
     return c.json(body, status as ContentfulStatusCode);
   }
 

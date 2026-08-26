@@ -15,5 +15,9 @@ Required pattern:
 9. Destructive rollout cleanup must treat an active task's provisioning claim as active work even before a workspace row exists. A node referenced by `tasks.auto_provisioned_node_id` for a queued/delegated/in-progress task is not idle.
 10. Missing build metadata is the normal pre-heartbeat state for a freshly booting VM. Cleanup must preserve a configurable boot grace before retiring an unversioned, unclaimed node.
 11. A state machine waiting on a claimed node must distinguish missing/deleted state from "still booting" and terminalize promptly without returning the gone node to a reusable pool.
+12. Control-plane changes that stop callback storms MUST stand alone for already-deployed agents: terminal statuses and low-severity logging must be correct even if the old VM agent keeps retrying until it is replaced.
+13. VM-agent callback loops MUST treat terminal control-plane statuses (`401`, `403`, `404`, `410`) as stop signals, or otherwise use exponential backoff with a hard retry/time budget. Unbounded retries after a terminal resource response are not rollout-compatible.
 
 Tests for scheduling-affecting VM-agent changes should include a stale-but-otherwise-better candidate losing to a compatible node, preferred/warm stale-node rejection, current fresh-node readiness, active stale-node preservation, idle stale-node retirement, and the pre-heartbeat interleaving where an active task owns an unversioned node before any workspace exists.
+
+Tests for callback-storm fixes should include old-agent-compatible control-plane assertions for terminal status/severity, plus new-agent assertions that heartbeat, ACP heartbeat, and message-outbox callbacks terminate or exhaust a bounded retry budget after terminal responses.

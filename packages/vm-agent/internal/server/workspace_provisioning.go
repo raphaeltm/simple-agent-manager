@@ -153,6 +153,15 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 	return recoveryMode, nil
 }
 
+// isContainerUnavailableError reports whether err means the devcontainer could not be
+// resolved and a workspace recovery attempt is therefore worth making.
+//
+// This is a TRIGGER, not a classifier: every caller reacts by calling
+// recoverWorkspaceRuntime (websocket.go terminal + multi-terminal create, agent_ws.go
+// SessionHost start). Do not widen it to make some other code path treat an error as
+// expected — that silently adds a recovery attempt at all three call sites. Compose a
+// separate named predicate instead, as isSnapshotTeardownRaceError does.
+// See .claude/rules/67-shared-predicates-that-trigger-actions.md.
 func isContainerUnavailableError(err error) bool {
 	if err == nil {
 		return false

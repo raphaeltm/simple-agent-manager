@@ -63,7 +63,15 @@ describe('project-data Durable Object retry', () => {
     expect(result).toEqual(messages);
     expect(stub.ensureProjectId).toHaveBeenCalledTimes(2);
     expect(stub.getMessages).toHaveBeenCalledTimes(2);
-    expect(stub.getMessages).toHaveBeenLastCalledWith('chat-1', 100, null, null, undefined, true, 'desc');
+    expect(stub.getMessages).toHaveBeenLastCalledWith(
+      'chat-1',
+      100,
+      null,
+      null,
+      undefined,
+      true,
+      'desc'
+    );
   });
 
   // Regression for the missing-propagation bug where the service layer re-mapped
@@ -120,6 +128,27 @@ describe('project-data Durable Object retry', () => {
 
     expect(stub.ensureProjectId).toHaveBeenCalledTimes(2);
     expect(stub.getSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries WebSocket forwarding when the DO fetch sees the code-update reset', async () => {
+    const response = new Response(null, { status: 204 });
+    const stub = {
+      ensureProjectId: vi.fn().mockResolvedValue(undefined),
+      fetch: vi.fn().mockRejectedValueOnce(doResetError).mockResolvedValue(response),
+    };
+    const request = new Request('https://api.example.test/api/projects/proj-1/sessions/ws', {
+      headers: { Upgrade: 'websocket' },
+    });
+
+    const result = await svc.forwardWebSocket(makeEnv(stub), 'proj-1', request);
+
+    expect(result).toBe(response);
+    expect(stub.ensureProjectId).toHaveBeenCalledTimes(2);
+    expect(stub.fetch).toHaveBeenCalledTimes(2);
+    for (const [forwardedRequest] of stub.fetch.mock.calls) {
+      expect(forwardedRequest).toBeInstanceOf(Request);
+      expect(new URL((forwardedRequest as Request).url).pathname).toBe('/ws');
+    }
   });
 
   it('does not retry non-transient Durable Object errors', async () => {

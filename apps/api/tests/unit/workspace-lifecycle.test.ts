@@ -293,13 +293,8 @@ describe('/ready route — inline DO notification (TDF-5)', () => {
     expect(readyHandler).toContain('verifyWorkspaceCallbackAuth');
   });
 
-  it('returns 404 if workspace not found', () => {
-    expect(readyHandler).toContain("errors.notFound('Workspace')");
-  });
-
-  it('skips notification if workspace is stopping/stopped', () => {
-    expect(readyHandler).toContain("workspace.status === 'stopping'");
-    expect(readyHandler).toContain("workspace.status === 'stopped'");
+  it('returns terminal gone if the callback workspace is missing or inactive', () => {
+    expect(readyHandler).toContain('assertWorkspaceAcceptsCallback');
   });
 });
 

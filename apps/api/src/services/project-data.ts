@@ -62,6 +62,7 @@ import {
 } from './durable-object-retry';
 import { ensureOncePerIsolate, forgetEnsuredProjectData } from './project-data-ensure-memo';
 import { toProjectDataStorageFullError } from './project-data-storage-errors';
+import type { TaskAcpLivenessSignals } from './task-runtime-liveness';
 
 /**
  * Get a typed DO stub for the given project and ensure the DO knows its projectId.
@@ -767,6 +768,21 @@ export async function listAcpSessions(
   return stub.listAcpSessions(opts);
 }
 
+export async function getTaskAcpLivenessSignals(
+  env: Env,
+  projectId: string,
+  opts: {
+    chatSessionId: string;
+    workspaceId: string;
+    limit: number;
+    nowMs?: number;
+  }
+): Promise<TaskAcpLivenessSignals> {
+  return callProjectDataWithRetry(env, projectId, 'getTaskAcpLivenessSignals', (stub) =>
+    stub.getTaskAcpLivenessSignals(opts)
+  );
+}
+
 export async function transitionAcpSession(
   env: Env,
   projectId: string,
@@ -1428,10 +1444,11 @@ export async function forwardWebSocket(
   projectId: string,
   request: Request
 ): Promise<Response> {
-  const stub = await getStub(env, projectId);
-  const url = new URL(request.url);
-  url.pathname = '/ws';
-  return stub.fetch(new Request(url.toString(), request));
+  return callProjectDataWithRetry(env, projectId, 'forwardWebSocket', (stub) => {
+    const url = new URL(request.url);
+    url.pathname = '/ws';
+    return stub.fetch(new Request(url.toString(), request));
+  });
 }
 
 // =========================================================================

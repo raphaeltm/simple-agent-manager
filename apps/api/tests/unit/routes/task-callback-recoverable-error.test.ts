@@ -45,13 +45,20 @@ vi.mock('drizzle-orm/d1', () => ({
         if (selection && 'updatedAt' in selection) {
           return [{ updatedAt: null, runtime: 'vm' }];
         }
+        if (selection && 'nodeStatus' in selection) {
+          return [{ status: 'running', nodeId: 'node-1', nodeStatus: 'running' }];
+        }
         if (selection && 'chatSessionId' in selection) {
           return [{ chatSessionId: 'chat-recoverable' }];
         }
         return [{ ...mocks.task }];
       };
       const afterOrderBy = { limit: () => Promise.resolve(rows()) };
-      const terminal = { limit: () => Promise.resolve(rows()), orderBy: () => afterOrderBy };
+      const terminal = {
+        limit: () => Promise.resolve(rows()),
+        orderBy: () => afterOrderBy,
+        get: () => Promise.resolve(rows()[0] ?? null),
+      };
       const joinable: { leftJoin: () => typeof joinable; where: () => typeof terminal } = {
         leftJoin: () => joinable,
         where: () => terminal,
@@ -116,7 +123,7 @@ async function createTestApp(): Promise<Hono> {
   app.route('/api/projects', taskCallbackRoute);
   app.onError((err, c) => {
     if (err instanceof AppError) {
-      return c.json(err.toJSON(), err.statusCode as 400 | 401 | 403 | 404 | 409 | 500);
+      return c.json(err.toJSON(), err.statusCode as 400 | 401 | 403 | 404 | 409 | 410 | 500);
     }
     return c.json(
       { error: 'INTERNAL_ERROR', message: err instanceof Error ? err.message : String(err) },

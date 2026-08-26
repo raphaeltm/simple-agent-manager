@@ -21,11 +21,15 @@ const mockKvGet = vi.fn();
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
     select: () => ({
-      from: () => ({
-        where: () => ({
-          limit: () => mockDbLimit(),
-        }),
-      }),
+      from: () => {
+        const query = {
+          leftJoin: () => query,
+          where: () => ({
+            limit: () => mockDbLimit(),
+          }),
+        };
+        return query;
+      },
     }),
     update: () => ({
       set: () => ({
@@ -52,7 +56,9 @@ vi.mock('../../src/db/schema', () => ({
     projectId: 'projectId',
     chatSessionId: 'chatSessionId',
     status: 'status',
+    nodeId: 'nodeId',
   },
+  nodes: { id: 'nodeId', status: 'nodeStatus' },
   tasks: { id: 'id', workspaceId: 'workspaceId' },
   credentials: {},
   agentSettings: {},
@@ -96,6 +102,12 @@ vi.mock('../../src/middleware/error', () => ({
       err.error = 'CONFLICT';
       return err;
     },
+    gone: (msg: string) => {
+      const err = new Error(msg) as Error & { statusCode: number; error: string };
+      err.statusCode = 410;
+      err.error = 'GONE';
+      return err;
+    },
   },
 }));
 
@@ -131,6 +143,8 @@ vi.mock('../../src/schemas', async (importOriginal) => {
 });
 
 vi.mock('../../src/routes/workspaces/_helpers', () => ({
+  assertWorkspaceAcceptsCallback: vi.fn(),
+  assertWorkspaceCallbackResourceById: vi.fn().mockResolvedValue(undefined),
   verifyWorkspaceCallbackAuth: vi.fn().mockResolvedValue(undefined),
   getWorkspaceRuntimeAssets: vi.fn(),
   safeParseJson: vi.fn(),
@@ -285,7 +299,13 @@ describe('runtime.ts always-proxy', () => {
 
   it('rejects oversized message payloads with a bounded body read before persistence', async () => {
     mockDbLimit.mockImplementation(() => [
-      { projectId: 'proj1', chatSessionId: 'sess1', status: 'running' },
+      {
+        projectId: 'proj1',
+        chatSessionId: 'sess1',
+        status: 'running',
+        nodeId: 'node1',
+        nodeStatus: 'running',
+      },
     ]);
 
     const response = await postMessagesRaw(
@@ -315,7 +335,13 @@ describe('runtime.ts always-proxy', () => {
 
   it('rejects message persistence for inactive workspaces before ProjectData writes', async () => {
     mockDbLimit.mockImplementation(() => [
-      { projectId: 'proj1', chatSessionId: 'sess1', status: 'stopped' },
+      {
+        projectId: 'proj1',
+        chatSessionId: 'sess1',
+        status: 'stopped',
+        nodeId: 'node1',
+        nodeStatus: 'running',
+      },
     ]);
 
     const response = await postMessages([
@@ -327,19 +353,19 @@ describe('runtime.ts always-proxy', () => {
         timestamp: '2026-06-18T14:18:22.000Z',
       },
     ]);
-    const body = (await response.json()) as { error: string; message: string };
-
-    expect(response.status, body.message).toBe(400);
-    expect(body).toMatchObject({
-      error: 'BAD_REQUEST',
-      message: 'Workspace is stopped, not active',
-    });
+    expect(response.status).toBe(204);
     expect(projectDataService.persistMessageBatch).not.toHaveBeenCalled();
   });
 
   it('returns structured 409 when message batch reaches the session cap', async () => {
     mockDbLimit.mockImplementation(() => [
-      { projectId: 'proj1', chatSessionId: 'sess1', status: 'running' },
+      {
+        projectId: 'proj1',
+        chatSessionId: 'sess1',
+        status: 'running',
+        nodeId: 'node1',
+        nodeStatus: 'running',
+      },
     ]);
     vi.mocked(projectDataService.persistMessageBatch).mockResolvedValueOnce({
       persisted: 1,

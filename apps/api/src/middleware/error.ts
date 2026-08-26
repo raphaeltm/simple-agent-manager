@@ -30,27 +30,23 @@ export const errors = {
   badRequest: (message: string, details?: Record<string, unknown>) =>
     new AppError(400, 'BAD_REQUEST', message, details),
 
-  unauthorized: (message = 'Authentication required') =>
-    new AppError(401, 'UNAUTHORIZED', message),
+  unauthorized: (message = 'Authentication required') => new AppError(401, 'UNAUTHORIZED', message),
 
-  forbidden: (message = 'Access denied') =>
-    new AppError(403, 'FORBIDDEN', message),
+  forbidden: (message = 'Access denied') => new AppError(403, 'FORBIDDEN', message),
 
-  notFound: (resource = 'Resource') =>
-    new AppError(404, 'NOT_FOUND', `${resource} not found`),
+  notFound: (resource = 'Resource') => new AppError(404, 'NOT_FOUND', `${resource} not found`),
 
-  conflict: (message: string) =>
-    new AppError(409, 'CONFLICT', message),
+  gone: (message = 'Resource is gone') => new AppError(410, 'GONE', message),
+
+  conflict: (message: string) => new AppError(409, 'CONFLICT', message),
 
   unprocessable: (message: string, details?: Record<string, unknown>) =>
     new AppError(422, 'UNPROCESSABLE_ENTITY', message, details),
 
-  paymentRequired: (message = 'Payment required') =>
-    new AppError(402, 'PAYMENT_REQUIRED', message),
+  paymentRequired: (message = 'Payment required') => new AppError(402, 'PAYMENT_REQUIRED', message),
 
   tooManyRequests: (message = 'Too many requests') =>
     new AppError(429, 'TOO_MANY_REQUESTS', message),
 
-  internal: (message = 'Internal server error') =>
-    new AppError(500, 'INTERNAL_ERROR', message),
+  internal: (message = 'Internal server error') => new AppError(500, 'INTERNAL_ERROR', message),
 };

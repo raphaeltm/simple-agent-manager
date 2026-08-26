@@ -70,6 +70,7 @@ const { projectDataMocks } = vi.hoisted(() => ({
     getMessages: vi.fn(),
     listSessions: vi.fn(),
     listAcpSessions: vi.fn(),
+    getTaskAcpLivenessSignals: vi.fn(),
     failSession: vi.fn(),
   },
 }));
@@ -253,18 +254,24 @@ describe('recoverStuckTasks', () => {
     fetchWithTimeoutMock.mockReset();
     fetchWithTimeoutMock.mockResolvedValue(new Response(null, { status: 200 }));
     projectDataMocks.listAcpSessions.mockReset();
+    projectDataMocks.getTaskAcpLivenessSignals.mockReset();
     projectDataMocks.getMessages.mockResolvedValue({ messages: [], hasMore: false });
     projectDataMocks.listSessions.mockResolvedValue({ sessions: [], total: 0 });
-    projectDataMocks.listAcpSessions.mockResolvedValue({
+    projectDataMocks.listAcpSessions.mockResolvedValue({ sessions: [], total: 0 });
+    projectDataMocks.getTaskAcpLivenessSignals.mockResolvedValue({
       sessions: [
         {
           id: 'acp-live',
           status: 'running',
           workspaceId: 'ws-1',
           lastHeartbeatAt: Date.now(),
+          updatedAt: Date.now(),
+          startedAt: Date.now() - 60_000,
+          createdAt: Date.now() - 60_000,
         },
       ],
       total: 1,
+      sessionWork: null,
     });
     projectDataMocks.failSession.mockResolvedValue(undefined);
   });
@@ -615,7 +622,9 @@ describe('recoverStuckTasks', () => {
           },
         ],
       });
-      projectDataMocks.listAcpSessions.mockRejectedValueOnce(new Error('ProjectData unavailable'));
+      projectDataMocks.getTaskAcpLivenessSignals.mockRejectedValueOnce(
+        new Error('ProjectData unavailable')
+      );
 
       const env = createMockEnv(responses);
       const result = await recoverStuckTasks(env);
@@ -718,7 +727,7 @@ describe('recoverStuckTasks', () => {
       const env = createMockEnv(responses);
       const result = await recoverStuckTasks(env);
 
-      // Default listAcpSessions mock returns a live running session for ws-1.
+      // Default getTaskAcpLivenessSignals mock returns a live running session for ws-1.
       expect(result.failedInProgress).toBe(0);
       expect(result.heartbeatSkipped).toBe(1);
     });
@@ -839,8 +848,14 @@ describe('recoverStuckTasks', () => {
       responses.set('status, health_status FROM nodes', {
         results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
       });
+      responses.set("UPDATE tasks SET status = 'failed'", { results: [], changes: 1 });
+
       // No observable task-scoped ACP session, despite the healthy node.
-      projectDataMocks.listAcpSessions.mockResolvedValueOnce({ sessions: [], total: 0 });
+      projectDataMocks.getTaskAcpLivenessSignals.mockResolvedValueOnce({
+        sessions: [],
+        total: 0,
+        sessionWork: null,
+      });
 
       const env = createMockEnv(responses);
       const result = await recoverStuckTasks(env);
@@ -855,7 +870,7 @@ describe('recoverStuckTasks', () => {
       const now = Date.now();
       const staleHeartbeatAt = now - 10 * 60 * 1000;
       const env = createMockEnv(healthyVmRunningWorkspaceResponses('task-stale-projectdata-acp'));
-      projectDataMocks.listAcpSessions.mockResolvedValueOnce({
+      projectDataMocks.getTaskAcpLivenessSignals.mockResolvedValueOnce({
         sessions: [
           {
             id: 'acp-stale',
@@ -868,6 +883,7 @@ describe('recoverStuckTasks', () => {
           },
         ],
         total: 1,
+        sessionWork: null,
       });
 
       const diagnostics = await getTaskReconciliationDiagnostics(env, 'task-stale-projectdata-acp');
@@ -880,7 +896,7 @@ describe('recoverStuckTasks', () => {
         nodeId: 'node-1',
       });
 
-      projectDataMocks.listAcpSessions.mockResolvedValueOnce({
+      projectDataMocks.getTaskAcpLivenessSignals.mockResolvedValueOnce({
         sessions: [
           {
             id: 'acp-stale',
@@ -893,6 +909,7 @@ describe('recoverStuckTasks', () => {
           },
         ],
         total: 1,
+        sessionWork: null,
       });
       const result = await recoverStuckTasks(env);
 
@@ -910,7 +927,7 @@ describe('recoverStuckTasks', () => {
           TASK_LIVENESS_PROBE_TIMEOUT_MS: '1',
         }
       );
-      projectDataMocks.listAcpSessions.mockImplementationOnce(
+      projectDataMocks.getTaskAcpLivenessSignals.mockImplementationOnce(
         () => new Promise(() => undefined)
       );
 
@@ -924,7 +941,7 @@ describe('recoverStuckTasks', () => {
         nodeId: 'node-1',
       });
 
-      projectDataMocks.listAcpSessions.mockImplementationOnce(
+      projectDataMocks.getTaskAcpLivenessSignals.mockImplementationOnce(
         () => new Promise(() => undefined)
       );
       const result = await recoverStuckTasks(env);
@@ -938,7 +955,9 @@ describe('recoverStuckTasks', () => {
 
     it('preserves an in_progress VM task when the ProjectData ACP probe errors', async () => {
       const env = createMockEnv(healthyVmRunningWorkspaceResponses('task-projectdata-acp-error'));
-      projectDataMocks.listAcpSessions.mockRejectedValueOnce(new Error('ProjectData unavailable'));
+      projectDataMocks.getTaskAcpLivenessSignals.mockRejectedValueOnce(
+        new Error('ProjectData unavailable')
+      );
 
       const diagnostics = await getTaskReconciliationDiagnostics(env, 'task-projectdata-acp-error');
       expect(diagnostics?.decision).toBe('preserve_inconclusive_runtime');
@@ -950,7 +969,9 @@ describe('recoverStuckTasks', () => {
         nodeId: 'node-1',
       });
 
-      projectDataMocks.listAcpSessions.mockRejectedValueOnce(new Error('ProjectData unavailable'));
+      projectDataMocks.getTaskAcpLivenessSignals.mockRejectedValueOnce(
+        new Error('ProjectData unavailable')
+      );
       const result = await recoverStuckTasks(env);
 
       expect(result.failedInProgress).toBe(0);
@@ -1043,7 +1064,7 @@ describe('recoverStuckTasks', () => {
       const result = await recoverStuckTasks(env);
       expect(result.failedInProgress).toBe(1);
       expect(result.heartbeatSkipped).toBe(0);
-      expect(projectDataMocks.listAcpSessions).not.toHaveBeenCalled();
+      expect(projectDataMocks.getTaskAcpLivenessSignals).not.toHaveBeenCalled();
       expect(syncTriggerExecutionMock).toHaveBeenCalledWith(
         env.DATABASE,
         'task-absolute-ceiling',
@@ -1193,7 +1214,7 @@ describe('recoverStuckTasks', () => {
 
       expect(result.failedInProgress).toBe(0);
       expect(result.heartbeatSkipped).toBe(1);
-      expect(projectDataMocks.listAcpSessions).toHaveBeenCalled();
+      expect(projectDataMocks.getTaskAcpLivenessSignals).toHaveBeenCalled();
     });
 
     it('preserves heartbeat grace between soft and hard timeout', async () => {

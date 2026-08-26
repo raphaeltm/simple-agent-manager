@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+const DefaultResponseMaxBytes = 2048
+
 // Config holds tunable parameters for the message reporter.
 // All values have sensible defaults; override via MSG_* environment variables.
 type Config struct {
@@ -44,6 +46,10 @@ type Config struct {
 	// HTTPTimeout is the per-request timeout for batch POST calls.
 	HTTPTimeout time.Duration
 
+	// ResponseMaxBytes bounds the amount of response body retained for retry
+	// diagnostics when the control plane rejects a batch.
+	ResponseMaxBytes int
+
 	// Endpoint is the control plane URL (without trailing slash).
 	// The batch endpoint will be: {Endpoint}/api/workspaces/{workspaceId}/messages
 	Endpoint string
@@ -73,6 +79,7 @@ func DefaultConfig() Config {
 		RetryMax:               30 * time.Second,
 		RetryMaxElapsed:        5 * time.Minute,
 		HTTPTimeout:            10 * time.Second,
+		ResponseMaxBytes:       DefaultResponseMaxBytes,
 	}
 }
 
@@ -90,6 +97,7 @@ func LoadConfigFromEnv() Config {
 	cfg.RetryMax = envDuration("MSG_RETRY_MAX", cfg.RetryMax)
 	cfg.RetryMaxElapsed = envDuration("MSG_RETRY_MAX_ELAPSED", cfg.RetryMaxElapsed)
 	cfg.HTTPTimeout = envDuration("MSG_HTTP_TIMEOUT", cfg.HTTPTimeout)
+	cfg.ResponseMaxBytes = envInt("MSG_RESPONSE_MAX_BYTES", cfg.ResponseMaxBytes)
 
 	cfg.Endpoint = os.Getenv("CONTROL_PLANE_URL")
 	cfg.WorkspaceID = os.Getenv("WORKSPACE_ID")

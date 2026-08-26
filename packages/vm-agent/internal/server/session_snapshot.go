@@ -98,39 +98,6 @@ type sessionSnapshotHandlerInput struct {
 	background    bool
 }
 
-type sessionSnapshotCaptureError struct {
-	generation string
-	err        error
-}
-
-func (e *sessionSnapshotCaptureError) Error() string {
-	if e == nil || e.err == nil {
-		return ""
-	}
-	return e.err.Error()
-}
-
-func (e *sessionSnapshotCaptureError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.err
-}
-
-func snapshotCaptureErrorGeneration(err error) string {
-	for err != nil {
-		if captureErr, ok := err.(*sessionSnapshotCaptureError); ok {
-			return strings.TrimSpace(captureErr.generation)
-		}
-		unwrapped, ok := err.(interface{ Unwrap() error })
-		if !ok {
-			return ""
-		}
-		err = unwrapped.Unwrap()
-	}
-	return ""
-}
-
 func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Request) (*sessionSnapshotHandlerInput, bool) {
 	workspaceID := r.PathValue("workspaceId")
 	sessionID := r.PathValue("sessionId")
@@ -299,10 +266,7 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *Workspac
 	if !s.config.IsStandaloneMode() {
 		snapshotTarget, err = s.resolveContainerSnapshotTarget(runtime)
 		if err != nil {
-			return nil, &sessionSnapshotCaptureError{
-				generation: prepare.Generation,
-				err:        fmt.Errorf("resolve snapshot devcontainer: %w", err),
-			}
+			return nil, newSnapshotResolveError(prepare.Generation, err)
 		}
 		workDir = snapshotTarget.workDir
 	}

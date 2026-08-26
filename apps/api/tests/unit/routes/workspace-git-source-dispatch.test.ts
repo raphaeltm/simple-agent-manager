@@ -20,7 +20,11 @@ vi.mock('../../../src/services/jwt', () => ({
   signNodeManagementToken: vi.fn(),
 }));
 vi.mock('../../../src/services/node-callback-auth', () => ({
+  NODE_CALLBACK_TERMINAL_STATUSES: ['deleted', 'destroyed', 'destroying', 'stopped', 'stopping'],
   verifyNodeCallbackAuth: mocks.verifyNodeCallbackAuth,
+  nodeStatusTerminatesCallbacks: (status: string | null | undefined) =>
+    status != null &&
+    ['deleted', 'destroyed', 'destroying', 'stopped', 'stopping'].includes(status),
 }));
 
 import { drizzle } from 'drizzle-orm/d1';
@@ -64,7 +68,11 @@ function makeDb(selectResults: unknown[][]) {
       update: vi.fn(() => ({
         set: vi.fn((value: unknown) => {
           updates.push(value);
-          return { where: vi.fn().mockResolvedValue(undefined) };
+          return {
+            where: vi.fn(() => ({
+              returning: vi.fn().mockResolvedValue([{ status: 'running' }]),
+            })),
+          };
         }),
       })),
     },
@@ -137,7 +145,12 @@ describe('GitLab metadata propagation to VM workspace dispatch', () => {
       projectId: gitlabProject.id,
       repoProvider: gitlabProject.repoProvider,
     };
-    const { db } = makeDb([[pendingWorkspace], [gitlabProject], [gitlabMetadata]]);
+    const { db } = makeDb([
+      [{ status: 'running' }],
+      [pendingWorkspace],
+      [gitlabProject],
+      [gitlabMetadata],
+    ]);
     (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(db);
     const { env } = makeEnv();
     const waitUntilPromises: Promise<unknown>[] = [];
@@ -183,7 +196,12 @@ describe('GitLab metadata propagation to VM workspace dispatch', () => {
       projectId: gitlabProject.id,
       repoProvider: gitlabProject.repoProvider,
     };
-    const { db, updates } = makeDb([[pendingWorkspace], [gitlabProject], []]);
+    const { db, updates } = makeDb([
+      [{ status: 'running' }],
+      [pendingWorkspace],
+      [gitlabProject],
+      [],
+    ]);
     (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(db);
     const { env } = makeEnv();
     const waitUntilPromises: Promise<unknown>[] = [];

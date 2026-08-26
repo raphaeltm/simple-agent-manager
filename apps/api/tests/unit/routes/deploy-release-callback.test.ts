@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import { AppError } from '../../../src/middleware/error';
 import { environmentPortOffset } from '../../../src/services/deployment-routing';
 
 const mockLimit = vi.fn();
@@ -266,7 +267,7 @@ describe('deploy release callback route auth invariants', () => {
 
   it('rejects workspace-scoped deploy callback tokens before session auth or DB access', async () => {
     mockVerifyCallbackToken.mockRejectedValueOnce(
-      new Error("Token scope 'workspace' does not match expected 'node'")
+      new AppError(403, 'FORBIDDEN', "Token scope 'workspace' does not match expected 'node'")
     );
 
     const response = await createCombinedNodeRoutesApp().request(
@@ -504,6 +505,20 @@ describe('deploy release callback route', () => {
     );
   });
 
+  it('returns 410 for a stopped node before serving signed route-only config', async () => {
+    mockLimit.mockResolvedValueOnce([{ userId: 'user-1', status: 'stopped' }]);
+
+    const response = await createTestApp().request(
+      '/api/nodes/node-deploy-1/deploy-routes?revision=3&environmentId=env-1',
+      { headers: { Authorization: 'Bearer callback-token' } },
+      env()
+    );
+
+    expect(response.status).toBe(410);
+    expect(await response.json()).toMatchObject({ error: 'GONE' });
+    expect(mockSignRouteConfigPayload).not.toHaveBeenCalled();
+  });
+
   it('adds verified custom domains to the signed apply payload without creating user DNS records', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
     stubHappyPathDb();
@@ -717,9 +732,31 @@ describe('deploy release callback route', () => {
     expect(await response.json()).toMatchObject({ message: 'Deployment environment not found' });
   });
 
+  it('returns 410 for a deleted node before release state, DNS, signing, or secret work', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    mockLimit.mockResolvedValueOnce([
+      {
+        userId: 'user-1',
+        status: 'deleted',
+        ipAddress: '203.0.113.10',
+        providerInstanceId: currentProviderServerId,
+      },
+    ]);
+
+    const response = await requestDeployRelease();
+
+    expect(response.status).toBe(410);
+    expect(await response.json()).toMatchObject({ error: 'GONE' });
+    expect(mockD1Prepare).not.toHaveBeenCalled();
+    expect(mockLoadResolvedSecrets).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockSignDeployPayload).not.toHaveBeenCalled();
+  });
+
   it('rejects legacy or workspace-scoped callback tokens before DNS or signing work', async () => {
     mockVerifyCallbackToken.mockRejectedValueOnce(
-      new Error("Token scope 'none' does not match expected 'node'")
+      new AppError(403, 'FORBIDDEN', "Token scope 'none' does not match expected 'node'")
     );
 
     const response = await createTestApp().request(
@@ -1019,13 +1056,23 @@ describe('deployment-env callback route', () => {
     expect(mockLoadDeploymentInterpolationEnv).not.toHaveBeenCalled();
   });
 
-  it('rejects with 404 when the node does not exist', async () => {
+  it('rejects with 410 when the callback node resource does not exist', async () => {
     mockLimit.mockResolvedValueOnce([]);
 
     const response = await requestDeploymentEnv();
 
-    expect(response.status).toBe(404);
-    expect(await response.json()).toMatchObject({ message: 'Node not found' });
+    expect(response.status).toBe(410);
+    expect(await response.json()).toMatchObject({ error: 'GONE' });
+    expect(mockLoadDeploymentInterpolationEnv).not.toHaveBeenCalled();
+  });
+
+  it('returns 410 for a destroyed node before serving deployment environment config', async () => {
+    mockLimit.mockResolvedValueOnce([{ userId: 'user-1', status: 'destroyed' }]);
+
+    const response = await requestDeploymentEnv();
+
+    expect(response.status).toBe(410);
+    expect(await response.json()).toMatchObject({ error: 'GONE' });
     expect(mockLoadDeploymentInterpolationEnv).not.toHaveBeenCalled();
   });
 
@@ -1049,7 +1096,7 @@ describe('deployment-env callback route', () => {
 
   it('rejects a non-node-scoped callback token with 403 before any DB read', async () => {
     mockVerifyCallbackToken.mockRejectedValueOnce(
-      new Error("Token scope 'none' does not match expected 'node'")
+      new AppError(403, 'FORBIDDEN', "Token scope 'none' does not match expected 'node'")
     );
 
     const response = await requestDeploymentEnv();

@@ -560,6 +560,7 @@ export async function getTaskRuntimeLiveness(
     acpProbeOutcome: 'not_run',
     nodeHealthProbeOutcome: 'not_run',
     acpSessions: [],
+    sessionWork: null,
     containerProbeOutcome: 'not_run',
     containerLifecycle: null,
     resumabilityProbeOutcome,
@@ -645,9 +646,11 @@ export async function getTaskRuntimeLiveness(
     const TIMEOUT = Symbol('liveness_probe_timeout');
     let timer: ReturnType<typeof setTimeout> | undefined;
     const probe = await Promise.race([
-      projectDataService.listAcpSessions(env, task.project_id, {
-        chatSessionId: workspace?.chatSessionId ?? undefined,
+      projectDataService.getTaskAcpLivenessSignals(env, task.project_id, {
+        chatSessionId: workspace.chatSessionId,
+        workspaceId: workspace.id,
         limit,
+        nowMs,
       }),
       new Promise<typeof TIMEOUT>((resolve) => {
         timer = setTimeout(() => resolve(TIMEOUT), probeTimeoutMs);
@@ -668,6 +671,7 @@ export async function getTaskRuntimeLiveness(
       ...livenessSignals,
       acpProbeOutcome: 'ok',
       acpSessions: probe.sessions as RuntimeAcpSessionSnapshot[],
+      sessionWork: probe.sessionWork,
     });
   } catch (err) {
     log.warn('stuck_task.liveness_probe_failed', {

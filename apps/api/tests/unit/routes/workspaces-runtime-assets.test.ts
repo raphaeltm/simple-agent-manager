@@ -34,14 +34,34 @@ describe('workspaces runtime-assets callback route', () => {
   } as Env;
 
   const requestRuntimeAssets = (path = '/api/workspaces/WS_1/runtime-assets') =>
-    app.request(path, {
-      method: 'GET',
-      headers: { Authorization: 'Bearer callback-token' },
-    }, runtimeBindings);
+    app.request(
+      path,
+      {
+        method: 'GET',
+        headers: { Authorization: 'Bearer callback-token' },
+      },
+      runtimeBindings
+    );
+
+  function makeWorkspaceStatusDb(status: string) {
+    return {
+      select: vi.fn(() => ({
+        from: vi.fn(() => {
+          const query = {
+            leftJoin: vi.fn(() => query),
+            where: vi.fn(() => ({
+              get: vi.fn(async () => ({ status, nodeId: 'node-1', nodeStatus: 'running' })),
+            })),
+          };
+          return query;
+        }),
+      })),
+    };
+  }
 
   beforeEach(() => {
     vi.clearAllMocks();
-    (drizzle as any).mockReturnValue({ db: true });
+    (drizzle as any).mockReturnValue(makeWorkspaceStatusDb('running'));
     mocks.verifyCallbackToken.mockResolvedValue({
       workspace: 'WS_1',
       type: 'callback',
@@ -66,21 +86,32 @@ describe('workspaces runtime-assets callback route', () => {
       files: [{ path: '.env.local', content: 'FOO=bar', isSecret: false }],
     });
     expect(mocks.getWorkspaceRuntimeAssets).toHaveBeenCalledWith(
-      { db: true },
+      expect.objectContaining({ select: expect.any(Function) }),
       { workspaceId: 'WS_1', agentSessionId: null },
       'enc-key'
     );
   });
 
   it('passes taskless agent session context to the resolver', async () => {
-    const res = await requestRuntimeAssets('/api/workspaces/WS_1/runtime-assets?agentSessionId=agent-session-1');
+    const res = await requestRuntimeAssets(
+      '/api/workspaces/WS_1/runtime-assets?agentSessionId=agent-session-1'
+    );
 
     expect(res.status).toBe(200);
     expect(mocks.getWorkspaceRuntimeAssets).toHaveBeenCalledWith(
-      { db: true },
+      expect.objectContaining({ select: expect.any(Function) }),
       { workspaceId: 'WS_1', agentSessionId: 'agent-session-1' },
       'enc-key'
     );
+  });
+
+  it('returns 410 and does not resolve assets when the callback workspace is stopped', async () => {
+    (drizzle as any).mockReturnValue(makeWorkspaceStatusDb('stopped'));
+
+    const res = await requestRuntimeAssets();
+
+    expect(res.status).toBe(410);
+    expect(mocks.getWorkspaceRuntimeAssets).not.toHaveBeenCalled();
   });
 
   it('rejects node-scoped callback tokens', async () => {

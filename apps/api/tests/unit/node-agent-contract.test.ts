@@ -761,6 +761,25 @@ describe('JWT Token Contract', () => {
       await expect(verifyCallbackToken(expiredToken, env)).rejects.toThrow();
     });
 
+    it('does not convert callback public-key import failures into token 401s', async () => {
+      const { AppError } = await import('../../src/middleware/error');
+      const { verifyCallbackToken } = await import('../../src/services/jwt');
+
+      let thrown: unknown;
+      try {
+        await verifyCallbackToken('malformed-token', {
+          JWT_PUBLIC_KEY: 'not a pem public key',
+          BASE_DOMAIN: 'example.com',
+        } as any);
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBeTruthy();
+      expect(thrown).not.toBeInstanceOf(AppError);
+      expect((thrown as { statusCode?: number }).statusCode).not.toBe(401);
+    });
+
     it('rejects a token with wrong audience', async () => {
       const { SignJWT, importPKCS8 } = await import('jose');
       const { verifyCallbackToken } = await import('../../src/services/jwt');

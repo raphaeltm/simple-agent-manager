@@ -21,10 +21,10 @@ func TestActiveProjectIDs_ReturnsUniqueRunningProjects(t *testing.T) {
 		config: &config.Config{NodeID: "node-1"},
 		workspaces: map[string]*WorkspaceRuntime{
 			"ws-1": {ID: "ws-1", ProjectID: "proj-a", Status: "running"},
-			"ws-2": {ID: "ws-2", ProjectID: "proj-a", Status: "running"},  // duplicate project
+			"ws-2": {ID: "ws-2", ProjectID: "proj-a", Status: "running"}, // duplicate project
 			"ws-3": {ID: "ws-3", ProjectID: "proj-b", Status: "running"},
 			"ws-4": {ID: "ws-4", ProjectID: "proj-c", Status: "stopped"},  // not running
-			"ws-5": {ID: "ws-5", ProjectID: "", Status: "running"},         // no project
+			"ws-5": {ID: "ws-5", ProjectID: "", Status: "running"},        // no project
 			"ws-6": {ID: "ws-6", ProjectID: "proj-d", Status: "recovery"}, // recovery counts
 		},
 		done: make(chan struct{}),
@@ -126,6 +126,61 @@ func TestSendAcpHeartbeats_PostsToCorrectEndpoint(t *testing.T) {
 		if nodeID != "node-test" {
 			t.Errorf("expected nodeId node-test, got %s", nodeID)
 		}
+	}
+}
+
+func TestSendAcpHeartbeatsTerminalStatusStopsFutureCallbacks(t *testing.T) {
+	for _, status := range []int{
+		http.StatusUnauthorized,
+		http.StatusForbidden,
+		http.StatusNotFound,
+		http.StatusGone,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var mu sync.Mutex
+			requestCount := 0
+
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				requestCount++
+				mu.Unlock()
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"error":"terminal","message":"callback resource is gone"}`))
+			}))
+			defer ts.Close()
+
+			s := &Server{
+				config: &config.Config{
+					NodeID:               "node-test",
+					ControlPlaneURL:      ts.URL,
+					ACPHeartbeatInterval: 100 * time.Millisecond,
+					HTTPCallbackTimeout:  5 * time.Second,
+				},
+				workspaces: map[string]*WorkspaceRuntime{
+					"ws-1": {ID: "ws-1", ProjectID: "proj-a", Status: "running"},
+					"ws-2": {ID: "ws-2", ProjectID: "proj-b", Status: "running"},
+				},
+				callbackToken:    "test-token",
+				httpClient:       &http.Client{Timeout: 5 * time.Second},
+				messageReporters: make(map[string]*messagereport.Reporter),
+				done:             make(chan struct{}),
+			}
+
+			s.sendAcpHeartbeats()
+
+			if !s.controlPlaneCallbacksStopped() {
+				t.Fatal("expected terminal ACP heartbeat response to stop control-plane callbacks")
+			}
+
+			s.sendAcpHeartbeats()
+
+			mu.Lock()
+			count := requestCount
+			mu.Unlock()
+			if count != 1 {
+				t.Fatalf("expected one ACP heartbeat request before terminal stop, got %d", count)
+			}
+		})
 	}
 }
 

@@ -1,5 +1,8 @@
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
+import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { readBoundedRequestBody, RequestBodyTooLargeError } from '../lib/bounded-request-body';
 import { log } from '../lib/logger';
@@ -14,7 +17,10 @@ import {
   type RegisterDiagnosticArtifactInput,
   uploadDiagnosticArtifact,
 } from '../services/diagnostic-incidents';
-import { verifyNodeCallbackAuth } from '../services/node-callback-auth';
+import {
+  nodeStatusTerminatesCallbacks,
+  verifyNodeCallbackAuth,
+} from '../services/node-callback-auth';
 import {
   persistErrorBatch,
   type PersistErrorInput,
@@ -60,9 +66,33 @@ function positiveInteger(value: string | undefined, fallback: number): number {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+async function assertNodeCallbackResourceAcceptsWrite(
+  c: { env: Env },
+  nodeId: string,
+  callback: string
+): Promise<void> {
+  const db = drizzle(c.env.DATABASE, { schema });
+  const nodeRow = await db
+    .select({ status: schema.nodes.status })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, nodeId))
+    .get();
+  if (!nodeRow || nodeStatusTerminatesCallbacks(nodeRow.status)) {
+    const observedStatus = nodeRow?.status ?? 'missing';
+    log.info('node_callback.terminal_resource', {
+      nodeId,
+      status: observedStatus,
+      callback,
+      action: 'terminal_gone',
+    });
+    throw errors.gone(`Node is ${observedStatus}; callback resource is gone`);
+  }
+}
+
 nodeDiagnosticIncidentRoutes.post('/:id/errors', async (c) => {
   const nodeId = c.req.param('id');
   await verifyNodeCallbackAuth(c, nodeId, { requireExplicitScope: true });
+  await assertNodeCallbackResourceAcceptsWrite(c, nodeId, 'errors');
   const maxBodyBytes = positiveInteger(
     c.env.MAX_VM_AGENT_ERROR_BODY_BYTES,
     DEFAULT_MAX_VM_ERROR_BODY_BYTES
@@ -267,6 +297,7 @@ nodeDiagnosticIncidentRoutes.post('/:id/diagnostic-incidents/:incidentId/artifac
   const nodeId = c.req.param('id');
   const incidentId = c.req.param('incidentId');
   await verifyNodeCallbackAuth(c, nodeId, { requireExplicitScope: true });
+  await assertNodeCallbackResourceAcceptsWrite(c, nodeId, 'diagnostic_artifact_registration');
   const config = resolveDiagnosticIncidentConfig(c.env);
   const contentLength = Number.parseInt(c.req.header('content-length') ?? '', 10);
   if (
@@ -312,6 +343,7 @@ nodeDiagnosticIncidentRoutes.put(
   async (c) => {
     const nodeId = c.req.param('id');
     await verifyNodeCallbackAuth(c, nodeId, { requireExplicitScope: true });
+    await assertNodeCallbackResourceAcceptsWrite(c, nodeId, 'diagnostic_artifact_upload');
     await uploadDiagnosticArtifact(
       c.env,
       nodeId,

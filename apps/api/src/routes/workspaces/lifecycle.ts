@@ -27,11 +27,13 @@ import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-life
 import { requireRepositoryOwnerAccess } from '../projects/_helpers';
 import {
   assertNodeOperational,
+  assertWorkspaceAcceptsCallback,
   getOwnedNode,
   getOwnedWorkspace,
   isActiveWorkspaceStatus,
   normalizeWorkspaceReadyStatus,
   verifyWorkspaceCallbackAuth,
+  WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES,
 } from './_helpers';
 
 const lifecycleRoutes = new Hono<{ Bindings: Env }>();
@@ -357,19 +359,19 @@ lifecycleRoutes.post('/:id/ready', async (c) => {
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
   const rows = await db
-    .select({ id: schema.workspaces.id, status: schema.workspaces.status })
+    .select({
+      id: schema.workspaces.id,
+      status: schema.workspaces.status,
+      nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
+    })
     .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
   const workspace = rows[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
-
-  if (workspace.status === 'stopping' || workspace.status === 'stopped') {
-    return c.json({ success: false, reason: 'workspace_not_running' });
-  }
+  assertWorkspaceAcceptsCallback(workspace, workspaceId, 'ready');
 
   const updateValues: {
     status: string;
@@ -420,15 +422,23 @@ lifecycleRoutes.post('/:id/provisioning-failed', async (c) => {
   const errorMessage = providedMessage || 'Workspace provisioning failed';
 
   const rows = await db
-    .select({ status: schema.workspaces.status })
+    .select({
+      status: schema.workspaces.status,
+      nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
+    })
     .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
   const workspace = rows[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
+  assertWorkspaceAcceptsCallback(
+    workspace,
+    workspaceId,
+    'provisioning_failed',
+    WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES
+  );
 
   // Allow retries: if the workspace is already in 'error' state (from a previous
   // attempt where D1 was updated but the DO notification failed), skip the D1

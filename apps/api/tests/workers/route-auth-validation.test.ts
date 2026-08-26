@@ -34,6 +34,7 @@
  * - H4: Workspace count filter (excludes 'deleted'/'error') requires user auth.
  */
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
+import { importPKCS8, SignJWT } from 'jose';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { signCallbackToken, signNodeCallbackToken } from '../../src/services/jwt';
@@ -43,11 +44,46 @@ const TEST_PREFIX = `auth-val-${Date.now()}`;
 const USER_ID = `${TEST_PREFIX}-user`;
 const PROJECT_ID = `${TEST_PREFIX}-proj`;
 const NODE_ID = `${TEST_PREFIX}-node`;
+const DELETED_NODE_ID = `${TEST_PREFIX}-deleted-node`;
+const STOPPED_NODE_ID = `${TEST_PREFIX}-stopped-node`;
 const WORKSPACE_ID = `${TEST_PREFIX}-ws`;
+const INACTIVE_WORKSPACE_ID = `${TEST_PREFIX}-inactive-ws`;
 const SESSION_ID = `${TEST_PREFIX}-sess`;
+const DELETED_NODE_LAST_HEARTBEAT = '2026-08-25T00:00:00.000Z';
+const STOPPED_NODE_LAST_HEARTBEAT = '2026-08-25T01:00:00.000Z';
+const CALLBACK_AUDIENCE = 'workspace-callback';
 
 let workspaceCallbackToken: string;
 let nodeCallbackToken: string;
+let deletedNodeCallbackToken: string;
+let stoppedNodeCallbackToken: string;
+let expiredNodeCallbackToken: string;
+
+async function signExpiredNodeCallbackToken(nodeId: string): Promise<string> {
+  const privateKey = await importPKCS8((env as any).JWT_PRIVATE_KEY, 'RS256');
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  return new SignJWT({
+    workspace: nodeId,
+    type: 'callback',
+    scope: 'node',
+  })
+    .setProtectedHeader({ alg: 'RS256' })
+    .setIssuer(`https://api.${(env as any).BASE_DOMAIN}`)
+    .setSubject(nodeId)
+    .setAudience(CALLBACK_AUDIENCE)
+    .setIssuedAt(nowSeconds - 7200)
+    .setExpirationTime(nowSeconds - 3600)
+    .sign(privateKey);
+}
+
+async function countPlatformErrorsForNode(nodeId: string): Promise<number> {
+  const row = await env.OBSERVABILITY_DATABASE.prepare(
+    'SELECT COUNT(*) AS count FROM platform_errors WHERE node_id = ?'
+  )
+    .bind(nodeId)
+    .first<{ count: number }>();
+  return row?.count ?? 0;
+}
 
 beforeAll(async () => {
   // Seed test user
@@ -105,6 +141,40 @@ beforeAll(async () => {
     .bind(NODE_ID, USER_ID, 'auth-test-node')
     .run();
 
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO nodes
+       (id, user_id, name, status, health_status, last_heartbeat_at, cloud_provider, vm_location, vm_size, created_at, updated_at)
+     VALUES (?, ?, ?, 'deleted', 'unhealthy', ?, 'hetzner', 'fsn1', 'cx22', datetime('now'), datetime('now'))`
+  )
+    .bind(DELETED_NODE_ID, USER_ID, 'deleted-auth-test-node', DELETED_NODE_LAST_HEARTBEAT)
+    .run();
+
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO nodes
+       (id, user_id, name, status, health_status, last_heartbeat_at, cloud_provider, vm_location, vm_size, created_at, updated_at)
+     VALUES (?, ?, ?, 'stopped', 'unhealthy', ?, 'hetzner', 'fsn1', 'cx22', datetime('now'), datetime('now'))`
+  )
+    .bind(STOPPED_NODE_ID, USER_ID, 'stopped-auth-test-node', STOPPED_NODE_LAST_HEARTBEAT)
+    .run();
+
+  // Seed an inactive historical workspace before the active workspace. This makes
+  // node-scoped ACP heartbeat coverage discriminate against arbitrary LIMIT 1
+  // selection when a reused node has mixed workspace statuses for the project.
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO workspaces (id, user_id, node_id, project_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'stopped', 'cx22', 'fsn1', datetime('now'), datetime('now'))`
+  )
+    .bind(
+      INACTIVE_WORKSPACE_ID,
+      USER_ID,
+      NODE_ID,
+      PROJECT_ID,
+      'auth-test-inactive-ws',
+      'test-repo',
+      'main'
+    )
+    .run();
+
   // Seed test workspace
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO workspaces (id, user_id, node_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
@@ -125,6 +195,9 @@ beforeAll(async () => {
   // Sign all tokens after seeding is complete (follows workspace-messages.test.ts pattern)
   workspaceCallbackToken = await signCallbackToken(WORKSPACE_ID, env as any);
   nodeCallbackToken = await signNodeCallbackToken(NODE_ID, env as any);
+  deletedNodeCallbackToken = await signNodeCallbackToken(DELETED_NODE_ID, env as any);
+  stoppedNodeCallbackToken = await signNodeCallbackToken(STOPPED_NODE_ID, env as any);
+  expiredNodeCallbackToken = await signExpiredNodeCallbackToken(NODE_ID);
 
   const projectData = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(PROJECT_ID));
   await runInDurableObject(projectData, async (instance) => {
@@ -214,7 +287,13 @@ describe('workspace callback auth', () => {
 // =============================================================================
 
 describe('node callback auth', () => {
-  it('accepts node callback token for heartbeat endpoint', async () => {
+  it('accepts node callback token for heartbeat endpoint and updates live node health', async () => {
+    const before = await env.DATABASE.prepare(
+      'SELECT health_status, last_heartbeat_at FROM nodes WHERE id = ?'
+    )
+      .bind(NODE_ID)
+      .first<{ health_status: string | null; last_heartbeat_at: string | null }>();
+
     const response = await SELF.fetch(
       `https://api.test.example.com/api/nodes/${NODE_ID}/heartbeat`,
       {
@@ -232,6 +311,14 @@ describe('node callback auth', () => {
       }
     );
     expect(response.status).toBe(200);
+    const after = await env.DATABASE.prepare(
+      'SELECT status, health_status, last_heartbeat_at FROM nodes WHERE id = ?'
+    )
+      .bind(NODE_ID)
+      .first<{ status: string; health_status: string | null; last_heartbeat_at: string | null }>();
+    expect(after).toMatchObject({ status: 'running', health_status: 'healthy' });
+    expect(after?.last_heartbeat_at).toEqual(expect.any(String));
+    expect(after?.last_heartbeat_at).not.toBe(before?.last_heartbeat_at ?? null);
   });
 
   it('returns 401 for heartbeat without token', async () => {
@@ -250,6 +337,97 @@ describe('node callback auth', () => {
     );
     expect(response.status).toBe(401);
   });
+
+  it('returns 401, not 500, when heartbeat callback token is expired', async () => {
+    const beforeErrors = await countPlatformErrorsForNode(NODE_ID);
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/nodes/${NODE_ID}/heartbeat`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${expiredNodeCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          cpuPercent: 50,
+          memoryPercent: 60,
+          diskPercent: 30,
+          uptimeSeconds: 3600,
+        }),
+      }
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.status).not.toBe(500);
+    expect(await response.json()).toMatchObject({ error: 'UNAUTHORIZED' });
+    expect(await countPlatformErrorsForNode(NODE_ID)).toBe(beforeErrors);
+  });
+
+  it('returns 410 for deleted node heartbeat and does not mark the node healthy', async () => {
+    const beforeErrors = await countPlatformErrorsForNode(DELETED_NODE_ID);
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/nodes/${DELETED_NODE_ID}/heartbeat`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${deletedNodeCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          cpuPercent: 50,
+          memoryPercent: 60,
+          diskPercent: 30,
+          uptimeSeconds: 3600,
+        }),
+      }
+    );
+
+    expect(response.status).toBe(410);
+    expect(await countPlatformErrorsForNode(DELETED_NODE_ID)).toBe(beforeErrors);
+    const node = await env.DATABASE.prepare(
+      'SELECT status, health_status, last_heartbeat_at FROM nodes WHERE id = ?'
+    )
+      .bind(DELETED_NODE_ID)
+      .first<{ status: string; health_status: string; last_heartbeat_at: string | null }>();
+    expect(node).toEqual({
+      status: 'deleted',
+      health_status: 'unhealthy',
+      last_heartbeat_at: DELETED_NODE_LAST_HEARTBEAT,
+    });
+  });
+
+  it('returns 410 for stopped node heartbeat and does not mark the node healthy', async () => {
+    const beforeErrors = await countPlatformErrorsForNode(STOPPED_NODE_ID);
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/nodes/${STOPPED_NODE_ID}/heartbeat`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${stoppedNodeCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          cpuPercent: 50,
+          memoryPercent: 60,
+          diskPercent: 30,
+          uptimeSeconds: 3600,
+        }),
+      }
+    );
+
+    expect(response.status).toBe(410);
+    expect(await countPlatformErrorsForNode(STOPPED_NODE_ID)).toBe(beforeErrors);
+    const node = await env.DATABASE.prepare(
+      'SELECT status, health_status, last_heartbeat_at FROM nodes WHERE id = ?'
+    )
+      .bind(STOPPED_NODE_ID)
+      .first<{ status: string; health_status: string; last_heartbeat_at: string | null }>();
+    expect(node).toEqual({
+      status: 'stopped',
+      health_status: 'unhealthy',
+      last_heartbeat_at: STOPPED_NODE_LAST_HEARTBEAT,
+    });
+  });
 });
 
 // =============================================================================
@@ -257,7 +435,7 @@ describe('node callback auth', () => {
 // =============================================================================
 
 describe('workspace resolution', () => {
-  it('returns 404 for non-existent workspace messages', async () => {
+  it('returns 204 for non-existent workspace messages to stop old-agent outbox retries', async () => {
     const fakeToken = await signCallbackToken('nonexistent-ws', env as any);
     const response = await SELF.fetch(
       `https://api.test.example.com/api/workspaces/nonexistent-ws/messages`,
@@ -280,7 +458,7 @@ describe('workspace resolution', () => {
         }),
       }
     );
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(204);
   });
 });
 
@@ -304,6 +482,73 @@ describe('node ready callback', () => {
     // a status-based error — but should NOT return 401 (auth) or 500 (crash)
     expect(response.status).toBeLessThan(500);
     expect(response.status).not.toBe(401);
+  });
+
+  it('returns 410 for deleted node ready callback and leaves node tombstoned', async () => {
+    const beforeErrors = await countPlatformErrorsForNode(DELETED_NODE_ID);
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/nodes/${DELETED_NODE_ID}/ready`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${deletedNodeCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ip: '1.2.3.4' }),
+      }
+    );
+
+    expect(response.status).toBe(410);
+    expect(await countPlatformErrorsForNode(DELETED_NODE_ID)).toBe(beforeErrors);
+    const node = await env.DATABASE.prepare('SELECT status FROM nodes WHERE id = ?')
+      .bind(DELETED_NODE_ID)
+      .first<{ status: string }>();
+    expect(node?.status).toBe('deleted');
+  });
+
+  it('returns 410 for deleted node origin CA callback before certificate issuance', async () => {
+    const beforeErrors = await countPlatformErrorsForNode(DELETED_NODE_ID);
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/nodes/${DELETED_NODE_ID}/origin-ca-certificate`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${deletedNodeCallbackToken}`,
+          'Content-Type': 'text/plain',
+        },
+        body: '-----BEGIN CERTIFICATE REQUEST-----\nMIIB\n-----END CERTIFICATE REQUEST-----',
+      }
+    );
+
+    expect(response.status).toBe(410);
+    expect(await countPlatformErrorsForNode(DELETED_NODE_ID)).toBe(beforeErrors);
+  });
+
+  it('returns 410 for deleted node diagnostic error callback without persisting platform errors', async () => {
+    const beforeErrors = await countPlatformErrorsForNode(DELETED_NODE_ID);
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/nodes/${DELETED_NODE_ID}/errors`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${deletedNodeCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          errors: [
+            {
+              level: 'error',
+              message: 'late error after node deletion',
+              source: 'vm-agent',
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        }),
+      }
+    );
+
+    expect(response.status).toBe(410);
+    expect(await countPlatformErrorsForNode(DELETED_NODE_ID)).toBe(beforeErrors);
   });
 });
 
@@ -344,6 +589,21 @@ describe('node-level ACP heartbeat auth', () => {
     expect(response.status).toBe(204);
   });
 
+  it('accepts node-scoped callback token when the project has mixed active and inactive workspaces on the node', async () => {
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${PROJECT_ID}/node-acp-heartbeat`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${nodeCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ nodeId: NODE_ID }),
+      }
+    );
+    expect(response.status).toBe(204);
+  });
+
   it('returns 401 without any token', async () => {
     const response = await SELF.fetch(
       `https://api.test.example.com/api/projects/${PROJECT_ID}/node-acp-heartbeat`,
@@ -356,7 +616,7 @@ describe('node-level ACP heartbeat auth', () => {
     expect(response.status).toBe(401);
   });
 
-  it('returns a sanitized 500 with a malformed token', async () => {
+  it('returns 401, not a server fault, with a malformed callback token', async () => {
     const response = await SELF.fetch(
       `https://api.test.example.com/api/projects/${PROJECT_ID}/node-acp-heartbeat`,
       {
@@ -368,18 +628,67 @@ describe('node-level ACP heartbeat auth', () => {
         body: JSON.stringify({ nodeId: NODE_ID }),
       }
     );
-    // extractBearerToken only validates the Bearer shape. A malformed JWT is
-    // rejected by jose with a non-AppError, so the current global handler maps
-    // it to its sanitized INTERNAL_ERROR response rather than leaking details.
-    // 5xx responses now carry a correlation requestId (persisted alongside the
-    // observability error row) — still no error internals in the body.
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(401);
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body).toEqual({
-      error: 'INTERNAL_ERROR',
-      message: 'Internal server error',
-      requestId: expect.stringMatching(/^[0-9a-f-]{36}$/),
-    });
+    expect(body).toEqual({ error: 'UNAUTHORIZED', message: 'Invalid or expired callback token' });
+    expect(body.requestId).toBeUndefined();
+  });
+
+  it('returns 401, not 500, when node-level ACP heartbeat token is expired', async () => {
+    const beforeErrors = await countPlatformErrorsForNode(NODE_ID);
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${PROJECT_ID}/node-acp-heartbeat`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${expiredNodeCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ nodeId: NODE_ID }),
+      }
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.status).not.toBe(500);
+    expect(await countPlatformErrorsForNode(NODE_ID)).toBe(beforeErrors);
+  });
+
+  it('returns 410 for node-level ACP heartbeat from a deleted node', async () => {
+    const beforeErrors = await countPlatformErrorsForNode(DELETED_NODE_ID);
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${PROJECT_ID}/node-acp-heartbeat`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${deletedNodeCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ nodeId: DELETED_NODE_ID }),
+      }
+    );
+
+    expect(response.status).toBe(410);
+    expect(await response.json()).toMatchObject({ error: 'GONE' });
+    expect(await countPlatformErrorsForNode(DELETED_NODE_ID)).toBe(beforeErrors);
+  });
+
+  it('returns 410 for node-level ACP heartbeat from a stopped node', async () => {
+    const beforeErrors = await countPlatformErrorsForNode(STOPPED_NODE_ID);
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${PROJECT_ID}/node-acp-heartbeat`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${stoppedNodeCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ nodeId: STOPPED_NODE_ID }),
+      }
+    );
+
+    expect(response.status).toBe(410);
+    expect(await response.json()).toMatchObject({ error: 'GONE' });
+    expect(await countPlatformErrorsForNode(STOPPED_NODE_ID)).toBe(beforeErrors);
   });
 
   it('does NOT require BetterAuth session cookie', async () => {

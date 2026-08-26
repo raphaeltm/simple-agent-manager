@@ -71,8 +71,14 @@ describe('nodeStatusBlocksTokenRefresh', () => {
     expect(nodeStatusBlocksTokenRefresh('deleted')).toBe(true);
   });
 
+  it('blocks refresh for terminal/terminating statuses', () => {
+    for (const status of ['deleted', 'destroyed', 'destroying', 'stopping', 'stopped']) {
+      expect(nodeStatusBlocksTokenRefresh(status)).toBe(true);
+    }
+  });
+
   it('allows refresh for live/transient statuses', () => {
-    for (const status of ['running', 'creating', 'pending', 'stopping', 'stopped', 'error']) {
+    for (const status of ['running', 'creating', 'pending', 'error']) {
       expect(nodeStatusBlocksTokenRefresh(status)).toBe(false);
     }
   });

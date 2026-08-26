@@ -15,7 +15,7 @@ import type { Env } from '../env';
 import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { errors } from '../middleware/error';
+import { AppError, errors } from '../middleware/error';
 import {
   type ComposeImageArtifactDownload,
   createComposeImageArtifactDownloads,
@@ -38,6 +38,7 @@ import {
 import { buildVolumeMountDescriptors } from '../services/deployment-volumes';
 import { cleanupAppRouteDNSRecords, upsertAppRouteDNSRecord } from '../services/dns';
 import { verifyCallbackToken } from '../services/jwt';
+import { nodeStatusTerminatesCallbacks } from '../services/node-callback-auth';
 import { mintProjectRegistryCredential } from '../services/registry-credentials';
 import { getEncryptionKey, loadResolvedSecrets } from './deployment-releases';
 
@@ -50,15 +51,34 @@ async function verifyNodeCallback(c: Context<{ Bindings: Env }>, nodeId: string)
   try {
     payload = await verifyCallbackToken(token, c.env, { expectedScope: 'node' });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Invalid callback token';
-    if (message.includes('scope')) {
+    if (!(err instanceof AppError)) throw err;
+    const message = err.message || 'Invalid callback token';
+    if (err.statusCode === 403 || message.includes('scope')) {
       throw errors.forbidden('Insufficient token scope');
     }
+    if (err.statusCode !== 401) throw err;
     throw errors.unauthorized('Invalid callback token');
   }
 
   if (payload.workspace !== nodeId) {
     throw errors.unauthorized('Callback token does not match node');
+  }
+}
+
+function assertDeploymentNodeAcceptsCallback<T extends { status: string }>(
+  node: T | null | undefined,
+  nodeId: string,
+  callback: string
+): asserts node is T {
+  if (!node || nodeStatusTerminatesCallbacks(node.status)) {
+    const observedStatus = node?.status ?? 'missing';
+    log.info('deployment_callback.terminal_node', {
+      nodeId,
+      status: observedStatus,
+      callback,
+      action: 'terminal_gone',
+    });
+    throw errors.gone(`Node is ${observedStatus}; callback resource is gone`);
   }
 }
 
@@ -72,14 +92,12 @@ deployReleaseCallbackRoute.get('/:id/deployment-env', async (c) => {
 
   const db = drizzle(c.env.DATABASE, { schema });
   const nodeRows = await db
-    .select({ userId: schema.nodes.userId })
+    .select({ userId: schema.nodes.userId, status: schema.nodes.status })
     .from(schema.nodes)
     .where(eq(schema.nodes.id, nodeId))
     .limit(1);
   const node = nodeRows.at(0);
-  if (!node) {
-    throw errors.notFound('Node');
-  }
+  assertDeploymentNodeAcceptsCallback(node, nodeId, 'deployment_env');
 
   const envRows = await db
     .select({
@@ -141,6 +159,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
   const nodeRows = await db
     .select({
       userId: schema.nodes.userId,
+      status: schema.nodes.status,
       ipAddress: schema.nodes.ipAddress,
       providerInstanceId: schema.nodes.providerInstanceId,
     })
@@ -149,9 +168,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     .limit(1);
 
   const node = nodeRows.at(0);
-  if (!node) {
-    throw errors.notFound('Node');
-  }
+  assertDeploymentNodeAcceptsCallback(node, nodeId, 'deploy_release');
 
   // Verify the environment exists and belongs to the same user as the node
   // (environment → project → userId must match node → userId)
@@ -501,14 +518,12 @@ deployReleaseCallbackRoute.get('/:id/deploy-routes', async (c) => {
 
   const db = drizzle(c.env.DATABASE, { schema });
   const nodeRows = await db
-    .select({ userId: schema.nodes.userId })
+    .select({ userId: schema.nodes.userId, status: schema.nodes.status })
     .from(schema.nodes)
     .where(eq(schema.nodes.id, nodeId))
     .limit(1);
   const node = nodeRows.at(0);
-  if (!node) {
-    throw errors.notFound('Node');
-  }
+  assertDeploymentNodeAcceptsCallback(node, nodeId, 'deploy_routes');
 
   const envRows = await db
     .select({

@@ -69,13 +69,18 @@ function makeDb(
   }
 ) {
   return {
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          limit: vi.fn(async () => [workspace]),
-          get: vi.fn(async () => authorization),
-        })),
-      })),
+    select: vi.fn((selection?: Record<string, unknown>) => ({
+      from: vi.fn(() => {
+        const isWorkspaceGuard = !!selection && Object.hasOwn(selection, 'nodeStatus');
+        const query = {
+          leftJoin: vi.fn(() => query),
+          where: vi.fn(() => ({
+            limit: vi.fn(async () => [workspace]),
+            get: vi.fn(async () => (isWorkspaceGuard ? workspace : authorization)),
+          })),
+        };
+        return query;
+      }),
     })),
   };
 }
@@ -107,6 +112,8 @@ describe('workspaces session snapshot callback routes', () => {
     projectId: 'project-1',
     userId: 'user-1',
     chatSessionId: 'chat-1',
+    status: 'running',
+    nodeStatus: 'running',
   };
 
   beforeEach(() => {
@@ -209,6 +216,30 @@ describe('workspaces session snapshot callback routes', () => {
       runtimeBindings,
       expect.objectContaining({ userId: 'user-1', directUploadSupported: false })
     );
+  });
+
+  it('returns 410 and does not prepare a snapshot when the callback workspace is stopped', async () => {
+    (drizzle as any).mockReturnValue(makeDb({ ...workspace, status: 'stopped' }));
+
+    const res = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/prepare',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer callback-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chatSessionId: 'chat-1',
+          agentSessionId: 'agent-session-1',
+          runtime: 'cf-container',
+        }),
+      },
+      runtimeBindings
+    );
+
+    expect(res.status).toBe(410);
+    expect(mocks.prepareSessionSnapshot).not.toHaveBeenCalled();
   });
 
   it('does not provision a relay when the agent advertises direct uploads', async () => {

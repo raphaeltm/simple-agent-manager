@@ -96,7 +96,7 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
       if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
         return c.json(
           { error: appError.error, message: appError.message },
-          appError.statusCode as 400 | 401 | 403 | 404 | 500
+          appError.statusCode as 400 | 401 | 403 | 404 | 410 | 500
         );
       }
       return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
@@ -106,6 +106,7 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
     mockDB = {
       select: vi.fn().mockReturnThis(),
       from: vi.fn().mockReturnThis(),
+      leftJoin: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(),
       limit: vi.fn(),
       update: vi.fn().mockReturnThis(),
@@ -125,7 +126,11 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
     ...lookupRows: Array<Record<string, unknown> | null>
   ) {
     const chain = mockDB.limit;
-    chain.mockResolvedValueOnce(workspaceRow ? [workspaceRow] : []);
+    chain.mockResolvedValueOnce(
+      workspaceRow
+        ? [{ status: 'running', nodeId: 'node-1', nodeStatus: 'running', ...workspaceRow }]
+        : []
+    );
     for (const row of lookupRows) {
       chain.mockResolvedValueOnce(row ? [row] : []);
     }
@@ -185,11 +190,18 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
     expect(body.message).toContain('credentialKind');
   });
 
-  it('returns 404 when workspace does not exist', async () => {
+  it('returns 410 when callback workspace resource does not exist', async () => {
     setupDBMocks(null, null);
 
     const res = await postSync(validBody);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(410);
+  });
+
+  it('returns 410 when callback workspace is stopped', async () => {
+    setupDBMocks({ userId: 'user-1', nodeId: 'node-1', status: 'stopped' }, null);
+
+    const res = await postSync(validBody);
+    expect(res.status).toBe(410);
   });
 
   it('returns credential_not_found when no matching credential exists', async () => {

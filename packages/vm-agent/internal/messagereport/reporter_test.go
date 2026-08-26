@@ -426,6 +426,197 @@ func TestFlush_PermanentError_Discards(t *testing.T) {
 	}
 }
 
+func TestFlush_TerminalStatusesDisableFutureMessages(t *testing.T) {
+	for _, status := range []int{
+		http.StatusUnauthorized,
+		http.StatusForbidden,
+		http.StatusNotFound,
+		http.StatusGone,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var attempts int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				atomic.AddInt32(&attempts, 1)
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"error":"terminal","message":"callback resource is gone"}`))
+			}))
+			defer ts.Close()
+
+			db := openTestDB(t)
+			cfg := testConfig(ts.URL, "ws-1")
+			cfg.BatchMaxWait = 10 * time.Second
+			r, err := New(db, cfg)
+			if err != nil {
+				t.Fatalf("new: %v", err)
+			}
+			defer r.Shutdown()
+			r.SetToken("test-token")
+
+			if err := r.Enqueue(Message{
+				MessageID: "m-terminal-1",
+				SessionID: "s1",
+				Role:      "assistant",
+				Content:   "first",
+				Timestamp: "2024-01-01T00:00:00Z",
+			}); err != nil {
+				t.Fatalf("enqueue first: %v", err)
+			}
+
+			r.flush()
+
+			if got := atomic.LoadInt32(&attempts); got != 1 {
+				t.Fatalf("expected one terminal request, got %d", got)
+			}
+			assertOutboxCount(t, db, 0, "after terminal response")
+
+			if err := r.Enqueue(Message{
+				MessageID: "m-terminal-2",
+				SessionID: "s1",
+				Role:      "assistant",
+				Content:   "second",
+				Timestamp: "2024-01-01T00:00:01Z",
+			}); err != nil {
+				t.Fatalf("enqueue after terminal response should drop without error: %v", err)
+			}
+			assertOutboxCount(t, db, 0, "after enqueue while terminal disabled")
+
+			r.flush()
+
+			if got := atomic.LoadInt32(&attempts); got != 1 {
+				t.Fatalf("expected no retry after terminal response, got %d requests", got)
+			}
+		})
+	}
+}
+
+func TestMarkTerminalStopsInFlightRetryBeforeNextAttempt(t *testing.T) {
+	var attempts int32
+	firstAttempt := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&attempts, 1) == 1 {
+			close(firstAttempt)
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`transient`))
+	}))
+	defer ts.Close()
+
+	db := openTestDB(t)
+	cfg := testConfig(ts.URL, "ws-1")
+	cfg.BatchMaxWait = 10 * time.Second
+	cfg.RetryInitial = 150 * time.Millisecond
+	cfg.RetryMaxElapsed = 2 * time.Second
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer r.Shutdown()
+	r.SetToken("test-token")
+
+	if err := r.Enqueue(Message{
+		MessageID: "m-inflight-terminal",
+		SessionID: "s1",
+		Role:      "assistant",
+		Content:   "first",
+		Timestamp: "2024-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		r.flush()
+		close(done)
+	}()
+
+	select {
+	case <-firstAttempt:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first request")
+	}
+	r.MarkTerminal("node heartbeat returned terminal status")
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("terminal mark did not stop in-flight flush promptly")
+	}
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Fatalf("expected terminal mark to stop before second request, got %d requests", got)
+	}
+	assertOutboxCount(t, db, 0, "after terminal mark during retry")
+}
+
+func TestMarkTerminalClearsOutboxAndDisablesFutureMessages(t *testing.T) {
+	db := openTestDB(t)
+	cfg := testConfig("http://127.0.0.1", "ws-1")
+	cfg.BatchMaxWait = 10 * time.Second
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer r.Shutdown()
+	r.SetToken("test-token")
+
+	if err := r.Enqueue(Message{
+		MessageID: "m-server-terminal-1",
+		SessionID: "sess-1",
+		Role:      "assistant",
+		Content:   "before terminal",
+		Timestamp: "2024-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("enqueue before terminal: %v", err)
+	}
+	assertOutboxCount(t, db, 1, "before server terminal signal")
+
+	r.MarkTerminal("node heartbeat returned terminal status")
+
+	if !r.terminalPersistenceStopped() {
+		t.Fatal("expected reporter to be terminal after MarkTerminal")
+	}
+	assertOutboxCount(t, db, 0, "after server terminal signal")
+
+	if err := r.Enqueue(Message{
+		MessageID: "m-server-terminal-2",
+		SessionID: "sess-1",
+		Role:      "assistant",
+		Content:   "after terminal",
+		Timestamp: "2024-01-01T00:00:01Z",
+	}); err != nil {
+		t.Fatalf("enqueue after terminal should drop without error: %v", err)
+	}
+	assertOutboxCount(t, db, 0, "after enqueue following server terminal signal")
+}
+
+func TestSetSessionIDDoesNotReenableTerminalReporter(t *testing.T) {
+	db := openTestDB(t)
+	cfg := testConfig("http://127.0.0.1", "ws-1")
+	cfg.BatchMaxWait = 10 * time.Second
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer r.Shutdown()
+	r.SetToken("test-token")
+
+	r.MarkTerminal("node heartbeat returned terminal status")
+	r.SetSessionID("sess-2")
+
+	if !r.terminalPersistenceStopped() {
+		t.Fatal("expected terminal state to survive session switch")
+	}
+	if err := r.Enqueue(Message{
+		MessageID: "m-terminal-after-session-switch",
+		SessionID: "sess-2",
+		Role:      "assistant",
+		Content:   "after switch",
+		Timestamp: "2024-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("enqueue after terminal session switch should drop without error: %v", err)
+	}
+	assertOutboxCount(t, db, 0, "after session switch while terminal")
+}
+
 func TestOutbox_AtMaxSize_ReturnsError(t *testing.T) {
 	db := openTestDB(t)
 	cfg := testConfig("http://localhost", "ws-1")
@@ -1745,6 +1936,15 @@ func TestLoadConfigFromEnv_ReadsMaxMessageContentBytes(t *testing.T) {
 	cfg := LoadConfigFromEnv()
 	if cfg.MaxMessageContentBytes != 4096 {
 		t.Fatalf("MaxMessageContentBytes = %d, want 4096", cfg.MaxMessageContentBytes)
+	}
+}
+
+func TestLoadConfigFromEnv_ReadsResponseMaxBytes(t *testing.T) {
+	t.Setenv("MSG_RESPONSE_MAX_BYTES", "512")
+
+	cfg := LoadConfigFromEnv()
+	if cfg.ResponseMaxBytes != 512 {
+		t.Fatalf("ResponseMaxBytes = %d, want 512", cfg.ResponseMaxBytes)
 	}
 }
 

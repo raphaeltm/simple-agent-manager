@@ -49,6 +49,7 @@ import {
   requireGitLabUserAccessTokenResultForOwner,
   verifyGitLabProjectAccess,
 } from '../../services/gitlab';
+import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
 import { persistError } from '../../services/observability';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
@@ -57,7 +58,12 @@ import { bridgeAgentActivity } from '../../services/trial/bridge';
 import { getWorkspaceRuntimeAssets } from '../../services/workspace-runtime-assets';
 import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
 import { assertRepositoryAccess } from '../projects/_helpers';
-import { safeParseJson, verifyWorkspaceCallbackAuth } from './_helpers';
+import {
+  assertWorkspaceAcceptsCallback,
+  assertWorkspaceCallbackResourceById,
+  safeParseJson,
+  verifyWorkspaceCallbackAuth,
+} from './_helpers';
 
 /** Agent types eligible for AI proxy credential fallback (module-scope for isolate reuse). */
 const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set(
@@ -122,6 +128,8 @@ type MessageWorkspace = {
   projectId: string | null;
   chatSessionId: string | null;
   status: string;
+  nodeId: string | null;
+  nodeStatus: string | null;
 };
 
 type MessageBatchPersistenceRouteResult = {
@@ -287,35 +295,64 @@ async function loadMessageWorkspace(
       projectId: schema.workspaces.projectId,
       chatSessionId: schema.workspaces.chatSessionId,
       status: schema.workspaces.status,
+      nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
     })
     .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
   return workspaceRows[0] ?? null;
 }
 
-function rejectInactiveMessageWorkspace(
+function terminalMessagePersistenceResponse(
   c: RuntimeContext,
-  context: MessageRouteContext,
-  status: string
-): never {
+  context: Omit<MessageRouteContext, 'projectId'> & { projectId: string | null },
+  status: string,
+  reason: string
+): Response {
   const logContext = {
     ...context,
     status,
-    action: 'rejected_inactive_workspace',
+    reason,
+    action: 'dropped_terminal_resource',
   };
-  log.warn('message_persistence.inactive_workspace', logContext);
-  waitUntilIfAvailable(
-    c,
-    persistError(c.env.OBSERVABILITY_DATABASE, {
-      source: 'api',
-      level: 'warn',
-      message: `Rejecting messages for inactive workspace ${context.workspaceId}`,
-      context: logContext,
-      workspaceId: context.workspaceId,
-    }, c.env)
-  );
-  throw errors.badRequest(`Workspace is ${status}, not active`);
+  log.info('message_persistence.inactive_workspace', logContext);
+  return c.body(null, 204);
+}
+
+function maybeTerminalMessageWorkspaceResponse(
+  c: RuntimeContext,
+  workspace: MessageWorkspace | null,
+  workspaceId: string,
+  sessionId: string,
+  messageCount: number
+): Response | null {
+  const context = {
+    workspaceId,
+    projectId: workspace?.projectId ?? null,
+    sessionId,
+    messageCount,
+  };
+  if (!workspace) {
+    return terminalMessagePersistenceResponse(c, context, 'missing', 'workspace_missing');
+  }
+  if (!ACTIVE_MESSAGE_WORKSPACE_STATUSES.has(workspace.status)) {
+    return terminalMessagePersistenceResponse(c, context, workspace.status, 'workspace_inactive');
+  }
+  if (
+    !workspace.nodeId ||
+    !workspace.nodeStatus ||
+    nodeStatusTerminatesCallbacks(workspace.nodeStatus)
+  ) {
+    return terminalMessagePersistenceResponse(
+      c,
+      context,
+      workspace.nodeStatus ?? 'missing',
+      'workspace_node_terminal'
+    );
+  }
+  return null;
 }
 
 function rejectMessageSessionMismatch(
@@ -332,13 +369,17 @@ function rejectMessageSessionMismatch(
   log.error('message_routing.session_mismatch', logContext);
   waitUntilIfAvailable(
     c,
-    persistError(c.env.OBSERVABILITY_DATABASE, {
-      source: 'api',
-      level: 'error',
-      message: `Message routing mismatch: workspace ${context.workspaceId} linked to session ${expectedSessionId}, but messages target ${context.sessionId}`,
-      context: logContext,
-      workspaceId: context.workspaceId,
-    }, c.env)
+    persistError(
+      c.env.OBSERVABILITY_DATABASE,
+      {
+        source: 'api',
+        level: 'error',
+        message: `Message routing mismatch: workspace ${context.workspaceId} linked to session ${expectedSessionId}, but messages target ${context.sessionId}`,
+        context: logContext,
+        workspaceId: context.workspaceId,
+      },
+      c.env
+    )
   );
   throw errors.badRequest(
     `Session mismatch: workspace is linked to session ${expectedSessionId}, ` +
@@ -355,13 +396,17 @@ function rejectWorkspaceWithoutChatSession(c: RuntimeContext, context: MessageRo
   log.warn('message_routing.no_chat_session_linked', logContext);
   waitUntilIfAvailable(
     c,
-    persistError(c.env.OBSERVABILITY_DATABASE, {
-      source: 'api',
-      level: 'warn',
-      message: `Rejecting messages for workspace ${context.workspaceId}: no chatSessionId linked yet`,
-      context: logContext,
-      workspaceId: context.workspaceId,
-    }, c.env)
+    persistError(
+      c.env.OBSERVABILITY_DATABASE,
+      {
+        source: 'api',
+        level: 'warn',
+        message: `Rejecting messages for workspace ${context.workspaceId}: no chatSessionId linked yet`,
+        context: logContext,
+        workspaceId: context.workspaceId,
+      },
+      c.env
+    )
   );
   throw errors.conflict(
     'Workspace has no linked chat session yet — messages cannot be routed safely'
@@ -388,9 +433,6 @@ function assertMessageWorkspaceAcceptsBatch(
     sessionId,
     messageCount,
   };
-  if (!ACTIVE_MESSAGE_WORKSPACE_STATUSES.has(workspace.status)) {
-    rejectInactiveMessageWorkspace(c, context, workspace.status);
-  }
   if (workspace.chatSessionId && workspace.chatSessionId !== sessionId) {
     rejectMessageSessionMismatch(c, context, workspace.chatSessionId);
   }
@@ -418,13 +460,17 @@ function sessionLimitReachedResponse(c: RuntimeContext, context: MessageRouteCon
   });
   waitUntilIfAvailable(
     c,
-    persistError(c.env.OBSERVABILITY_DATABASE, {
-      source: 'api',
-      level: 'error',
-      message: `Session ${context.sessionId} has reached the message limit`,
-      context: { ...context, action: 'rejected_session_message_limit' },
-      workspaceId: context.workspaceId,
-    }, c.env)
+    persistError(
+      c.env.OBSERVABILITY_DATABASE,
+      {
+        source: 'api',
+        level: 'error',
+        message: `Session ${context.sessionId} has reached the message limit`,
+        context: { ...context, action: 'rejected_session_message_limit' },
+        workspaceId: context.workspaceId,
+      },
+      c.env
+    )
   );
   return c.json(
     {
@@ -445,12 +491,12 @@ function handleMessagePersistenceError(
     return sessionLimitReachedResponse(c, context);
   }
   if (message.includes('not found') || message.includes('is stopped')) {
-    log.error('message_persistence.rejected_by_do', {
+    log.info('message_persistence.dropped_terminal_do_response', {
       ...context,
       error: message,
-      action: 'rejected_permanent',
+      action: 'dropped_terminal_resource',
     });
-    throw errors.badRequest(message);
+    return c.body(null, 204);
   }
   log.error('message_persistence.do_error_transient', {
     ...context,
@@ -479,13 +525,17 @@ function partialSessionLimitResponse(
   log.error('message_persistence.session_message_limit_reached', logContext);
   waitUntilIfAvailable(
     c,
-    persistError(c.env.OBSERVABILITY_DATABASE, {
-      source: 'api',
-      level: 'error',
-      message: `Session ${context.sessionId} reached the message limit while persisting a batch`,
-      context: logContext,
-      workspaceId: context.workspaceId,
-    }, c.env)
+    persistError(
+      c.env.OBSERVABILITY_DATABASE,
+      {
+        source: 'api',
+        level: 'error',
+        message: `Session ${context.sessionId} reached the message limit while persisting a batch`,
+        context: logContext,
+        workspaceId: context.workspaceId,
+      },
+      c.env
+    )
   );
   return c.json(
     {
@@ -591,9 +641,7 @@ async function resolveAdditionalRepositoryIds(input: {
       githubRepoId: schema.projectGithubRepositories.githubRepoId,
     })
     .from(schema.projectGithubRepositories)
-    .where(
-      eq(schema.projectGithubRepositories.projectId, input.projectId)
-    );
+    .where(eq(schema.projectGithubRepositories.projectId, input.projectId));
   if (rows.length === 0) {
     return [];
   }
@@ -664,15 +712,20 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   const db = drizzle(c.env.DATABASE, { schema });
 
   const workspaceRows = await db
-    .select({ userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
+    .select({
+      userId: schema.workspaces.userId,
+      projectId: schema.workspaces.projectId,
+      status: schema.workspaces.status,
+      nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
+    })
     .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
   const workspace = workspaceRows[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
+  assertWorkspaceAcceptsCallback(workspace, workspaceId, 'agent_key');
 
   // OpenCode always uses a user-supplied credential (zen/go/custom). It never
   // routes through the SAM platform proxy, so it always requires a dedicated key.
@@ -986,15 +1039,20 @@ runtimeRoutes.post(
 
     // Look up the workspace to get the user ID and project ID.
     const workspaceRows = await db
-      .select({ userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
+      .select({
+        userId: schema.workspaces.userId,
+        projectId: schema.workspaces.projectId,
+        status: schema.workspaces.status,
+        nodeId: schema.workspaces.nodeId,
+        nodeStatus: schema.nodes.status,
+      })
       .from(schema.workspaces)
+      .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
       .where(eq(schema.workspaces.id, workspaceId))
       .limit(1);
 
     const workspace = workspaceRows[0];
-    if (!workspace) {
-      throw errors.notFound('Workspace');
-    }
+    assertWorkspaceAcceptsCallback(workspace, workspaceId, 'agent_credential_sync');
 
     // Find the existing credential row to update. Prefer project-scoped match
     // when the workspace is in a project; fall back to user-scoped only when
@@ -1108,15 +1166,17 @@ runtimeRoutes.post('/:id/agent-settings', jsonValidator(AgentTypeBodySchema), as
     .select({
       userId: schema.workspaces.userId,
       projectId: schema.workspaces.projectId,
+      status: schema.workspaces.status,
+      nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
     })
     .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
   const workspace = workspaceRows[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
+  assertWorkspaceAcceptsCallback(workspace, workspaceId, 'agent_settings');
 
   // Fetch user-level agent settings (existing behaviour).
   const settingsRows = await db
@@ -1168,15 +1228,15 @@ runtimeRoutes.get('/:id/runtime', async (c) => {
       chatSessionId: schema.workspaces.chatSessionId,
       status: schema.workspaces.status,
       nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
     })
     .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
   const workspace = workspaceRows[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
+  assertWorkspaceAcceptsCallback(workspace, workspaceId, 'runtime');
 
   return c.json({
     workspaceId: workspace.id,
@@ -1194,6 +1254,7 @@ runtimeRoutes.get('/:id/runtime-assets', async (c) => {
   await verifyWorkspaceCallbackAuth(c, workspaceId);
   const db = drizzle(c.env.DATABASE, { schema });
   const agentSessionId = c.req.query('agentSessionId')?.trim() || null;
+  await assertWorkspaceCallbackResourceById(c.env, workspaceId, 'runtime_assets');
   const assets = await getWorkspaceRuntimeAssets(
     db,
     { workspaceId, agentSessionId },
@@ -1215,15 +1276,17 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       installationId: schema.workspaces.installationId,
       projectId: schema.workspaces.projectId,
       userId: schema.workspaces.userId,
+      status: schema.workspaces.status,
+      nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
     })
     .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
   const workspace = workspaceRows[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
+  assertWorkspaceAcceptsCallback(workspace, workspaceId, 'git_token');
 
   // Look up the project to check repoProvider
   let repoProvider = 'github';
@@ -1482,6 +1545,7 @@ runtimeRoutes.post('/:id/boot-log', jsonValidator(BootLogEntrySchema), async (c)
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
   const body = c.req.valid('json');
+  await assertWorkspaceCallbackResourceById(c.env, workspaceId, 'boot_log');
 
   const entry = {
     step: body.step,
@@ -1509,6 +1573,16 @@ runtimeRoutes.post('/:id/messages', async (c) => {
 
   // Resolve workspace to project and validate session linkage (Principle XIII: Fail-Fast)
   const workspace = await loadMessageWorkspace(c.env, workspaceId);
+  const terminalResponse = maybeTerminalMessageWorkspaceResponse(
+    c,
+    workspace,
+    workspaceId,
+    sessionId,
+    body.messages.length
+  );
+  if (terminalResponse) {
+    return terminalResponse;
+  }
   assertMessageWorkspaceAcceptsBatch(c, workspace, workspaceId, sessionId, body.messages.length);
 
   // Delegate to ProjectData DO with structured error handling.

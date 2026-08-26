@@ -3,9 +3,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppError } from '../../../src/middleware/error';
 
-const WORKSPACES = { __table: 'workspaces', id: 'workspaces.id' };
+const WORKSPACES = {
+  __table: 'workspaces',
+  id: 'workspaces.id',
+  status: 'workspaces.status',
+  nodeId: 'workspaces.node_id',
+};
+const NODES = { __table: 'nodes', id: 'nodes.id', status: 'nodes.status' };
 
-let workspaceRows: Array<{ projectId: string | null; userId: string }> = [];
+let workspaceRows: Array<{
+  projectId: string | null;
+  userId: string;
+  status: string;
+  nodeId?: string | null;
+  nodeStatus?: string | null;
+}> = [];
 let policyResult: { environmentId: string } | { error: string } = { environmentId: 'env-1' };
 let verifiedPayload: { workspace: string; type: string; scope?: string } = {
   workspace: 'ws-1',
@@ -36,12 +48,18 @@ vi.mock('drizzle-orm', () => ({
 
 vi.mock('../../../src/db/schema', () => ({
   workspaces: WORKSPACES,
+  nodes: NODES,
 }));
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
     select: vi.fn().mockImplementation(() => ({
       from: vi.fn().mockReturnValue({
+        leftJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue(workspaceRows),
+          }),
+        }),
         where: vi.fn().mockReturnValue({
           limit: vi.fn().mockResolvedValue(workspaceRows),
         }),
@@ -103,7 +121,15 @@ function request(
 describe('registry-push-credentials callback (vertical slice)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    workspaceRows = [{ projectId: 'proj-1', userId: 'user-1' }];
+    workspaceRows = [
+      {
+        projectId: 'proj-1',
+        userId: 'user-1',
+        status: 'running',
+        nodeId: 'node-1',
+        nodeStatus: 'running',
+      },
+    ];
     policyResult = { environmentId: 'env-1' };
     consumeRateLimitMock.mockResolvedValue({
       allowed: true,
@@ -138,7 +164,15 @@ describe('registry-push-credentials callback (vertical slice)', () => {
   });
 
   it('rejects when the workspace project does not match the route param', async () => {
-    workspaceRows = [{ projectId: 'proj-OTHER', userId: 'user-1' }];
+    workspaceRows = [
+      {
+        projectId: 'proj-OTHER',
+        userId: 'user-1',
+        status: 'running',
+        nodeId: 'node-1',
+        nodeStatus: 'running',
+      },
+    ];
     const app = await buildApp();
     const res = await request(app, 'proj-1');
 
@@ -147,11 +181,62 @@ describe('registry-push-credentials callback (vertical slice)', () => {
   });
 
   it('rejects when the workspace is not linked to a project', async () => {
-    workspaceRows = [{ projectId: null, userId: 'user-1' }];
+    workspaceRows = [
+      {
+        projectId: null,
+        userId: 'user-1',
+        status: 'running',
+        nodeId: 'node-1',
+        nodeStatus: 'running',
+      },
+    ];
     const app = await buildApp();
     const res = await request(app, 'proj-1');
 
     expect(res.status).toBe(403);
+    expect(mintMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 410 for callbacks from a stopped workspace before minting credentials', async () => {
+    workspaceRows = [
+      {
+        projectId: 'proj-1',
+        userId: 'user-1',
+        status: 'stopped',
+        nodeId: 'node-1',
+        nodeStatus: 'running',
+      },
+    ];
+    const app = await buildApp();
+    const res = await request(app, 'proj-1');
+
+    expect(res.status).toBe(410);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'GONE',
+      message: 'Workspace is stopped; callback resource is gone',
+    });
+    expect(consumeRateLimitMock).not.toHaveBeenCalled();
+    expect(mintMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 410 for callbacks from a workspace attached to a deleted node before minting credentials', async () => {
+    workspaceRows = [
+      {
+        projectId: 'proj-1',
+        userId: 'user-1',
+        status: 'running',
+        nodeId: 'node-1',
+        nodeStatus: 'deleted',
+      },
+    ];
+    const app = await buildApp();
+    const res = await request(app, 'proj-1');
+
+    expect(res.status).toBe(410);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'GONE',
+    });
+    expect(consumeRateLimitMock).not.toHaveBeenCalled();
     expect(mintMock).not.toHaveBeenCalled();
   });
 

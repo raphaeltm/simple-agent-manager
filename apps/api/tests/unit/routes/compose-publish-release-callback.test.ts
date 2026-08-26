@@ -3,7 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppError } from '../../../src/middleware/error';
 
-const WORKSPACES = { __table: 'workspaces', id: 'workspaces.id' };
+const WORKSPACES = {
+  __table: 'workspaces',
+  id: 'workspaces.id',
+  status: 'workspaces.status',
+  nodeId: 'workspaces.node_id',
+};
 const DEPLOYMENT_RELEASES = {
   __table: 'deployment_releases',
   environmentId: 'deployment_releases.environmentId',
@@ -32,7 +37,13 @@ const NODES = {
   providerInstanceId: 'nodes.providerInstanceId',
 };
 
-let workspaceRows: Array<{ projectId: string | null; userId: string }> = [];
+let workspaceRows: Array<{
+  projectId: string | null;
+  userId: string;
+  status: string;
+  nodeId?: string | null;
+  nodeStatus?: string | null;
+}> = [];
 let latestVersionRows: Array<{ version: number }> = [];
 let environmentRows: Array<{
   id: string;
@@ -113,6 +124,11 @@ function createMockDb() {
       from: vi.fn().mockImplementation((table: unknown) => {
         if (table === WORKSPACES) {
           return {
+            leftJoin: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue(workspaceRows),
+              }),
+            }),
             where: vi.fn().mockReturnValue({
               limit: vi.fn().mockResolvedValue(workspaceRows),
             }),
@@ -222,7 +238,15 @@ describe('compose-publish-release callback (vertical slice)', () => {
     inserted.length = 0;
     updated.length = 0;
     nodeRows = [];
-    workspaceRows = [{ projectId: 'proj-1', userId: 'user-1' }];
+    workspaceRows = [
+      {
+        projectId: 'proj-1',
+        userId: 'user-1',
+        status: 'running',
+        nodeId: 'node-1',
+        nodeStatus: 'running',
+      },
+    ];
     latestVersionRows = [{ version: 4 }];
     environmentRows = [
       {
@@ -525,7 +549,15 @@ volumes:
   });
 
   it('rejects when the workspace project does not match the route param', async () => {
-    workspaceRows = [{ projectId: 'proj-OTHER', userId: 'user-1' }];
+    workspaceRows = [
+      {
+        projectId: 'proj-OTHER',
+        userId: 'user-1',
+        status: 'running',
+        nodeId: 'node-1',
+        nodeStatus: 'running',
+      },
+    ];
     const app = await buildApp();
     const res = await request(app, 'proj-1', validSubmission);
 
@@ -534,7 +566,15 @@ volumes:
   });
 
   it('rejects when the workspace is not linked to a project', async () => {
-    workspaceRows = [{ projectId: null, userId: 'user-1' }];
+    workspaceRows = [
+      {
+        projectId: null,
+        userId: 'user-1',
+        status: 'running',
+        nodeId: 'node-1',
+        nodeStatus: 'running',
+      },
+    ];
     const app = await buildApp();
     const res = await request(app, 'proj-1', validSubmission);
 

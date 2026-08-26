@@ -2,9 +2,18 @@ import {
   DEFAULT_GCP_IDENTITY_TOKEN_EXPIRY_SECONDS,
   DEFAULT_TERMINAL_TOKEN_EXPIRY_MS,
 } from '@simple-agent-manager/shared';
-import { decodeJwt, exportJWK, importPKCS8, importSPKI, jwtVerify, SignJWT } from 'jose';
+import {
+  decodeJwt,
+  exportJWK,
+  importPKCS8,
+  importSPKI,
+  type JWTPayload,
+  jwtVerify,
+  SignJWT,
+} from 'jose';
 
 import type { Env } from '../env';
+import { AppError } from '../middleware/error';
 
 // Key ID format: key-YYYY-MM (rotates monthly)
 const KEY_ID = `key-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
@@ -16,6 +25,23 @@ const NODE_MANAGEMENT_AUDIENCE = 'node-management';
 const PORT_ACCESS_AUDIENCE = 'port-access';
 const LOCAL_FORWARD_AUDIENCE = 'local-forward';
 const IDENTITY_TOKEN_TYPE = 'identity';
+
+function callbackTokenUnauthorized(message = 'Invalid or expired callback token'): AppError {
+  return new AppError(401, 'UNAUTHORIZED', message);
+}
+
+function callbackTokenForbidden(message: string): AppError {
+  return new AppError(403, 'FORBIDDEN', message);
+}
+
+function isJoseVerificationFailure(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return (
+    typeof code === 'string' &&
+    (code.startsWith('ERR_JWT_') || code.startsWith('ERR_JWS_') || code.startsWith('ERR_JOSE_'))
+  );
+}
 
 /**
  * Get the JWT issuer URL from environment.
@@ -218,30 +244,38 @@ export async function verifyCallbackToken(
   const publicKey = await importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
   const issuer = getIssuer(env);
 
-  const { payload } = await jwtVerify(token, publicKey, {
-    issuer,
-    audience: CALLBACK_AUDIENCE,
-  });
+  let payload: JWTPayload;
+  try {
+    ({ payload } = await jwtVerify(token, publicKey, {
+      issuer,
+      audience: CALLBACK_AUDIENCE,
+    }));
+  } catch (error) {
+    if (isJoseVerificationFailure(error)) {
+      throw callbackTokenUnauthorized();
+    }
+    throw error;
+  }
 
   // Validate required claims
   if (payload.type !== 'callback') {
-    throw new Error('Invalid token type');
+    throw callbackTokenUnauthorized('Invalid token type');
   }
 
   if (typeof payload.workspace !== 'string') {
-    throw new Error('Missing workspace claim');
+    throw callbackTokenUnauthorized('Missing workspace claim');
   }
 
   // Extract and validate optional scope claim (legacy tokens won't have it)
   const rawScope = payload.scope;
   if (rawScope !== undefined && rawScope !== 'node' && rawScope !== 'workspace') {
-    throw new Error('Invalid token scope claim');
+    throw callbackTokenUnauthorized('Invalid token scope claim');
   }
   const scope = rawScope as CallbackTokenScope | undefined;
 
   // Enforce expected scope when specified (unified scope check — F-010)
   if (options?.expectedScope && scope !== options.expectedScope) {
-    throw new Error(
+    throw callbackTokenForbidden(
       `Token scope '${scope ?? 'none'}' does not match expected '${options.expectedScope}'`
     );
   }

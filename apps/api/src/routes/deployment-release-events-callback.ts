@@ -6,10 +6,14 @@ import * as v from 'valibot';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { parseWithSchema, readRequestJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
 import { appendDeploymentReleaseEvent } from '../services/deployment-release-events';
-import { verifyNodeCallbackAuth } from '../services/node-callback-auth';
+import {
+  nodeStatusTerminatesCallbacks,
+  verifyNodeCallbackAuth,
+} from '../services/node-callback-auth';
 
 const deploymentReleaseEventsCallbackRoute = new Hono<{ Bindings: Env }>();
 
@@ -35,6 +39,21 @@ deploymentReleaseEventsCallbackRoute.post('/:id/deployment-release-events', asyn
   const nodeId = c.req.param('id');
   await verifyNodeCallbackAuth(c, nodeId);
   const db = drizzle(c.env.DATABASE, { schema });
+
+  const nodeRow = await db
+    .select({ status: schema.nodes.status })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, nodeId))
+    .get();
+  if (!nodeRow || nodeStatusTerminatesCallbacks(nodeRow.status)) {
+    const observedStatus = nodeRow?.status ?? 'missing';
+    log.info('deployment_release_event.terminal_node', {
+      nodeId,
+      status: observedStatus,
+      action: 'terminal_gone',
+    });
+    throw errors.gone(`Node is ${observedStatus}; callback resource is gone`);
+  }
 
   let requestBody: Record<string, unknown>;
   try {

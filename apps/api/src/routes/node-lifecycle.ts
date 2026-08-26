@@ -1,11 +1,12 @@
 /**
- * Node lifecycle callback routes — ready, heartbeat, errors, and token issuance.
+ * Node lifecycle routes — VM-agent callbacks plus browser token issuance.
  *
  * These endpoints are called by the VM agent (ready, heartbeat, errors) or
- * the browser (token) and use callback JWT auth rather than user session auth.
+ * the browser (token). VM-agent callbacks use callback JWT auth; the token
+ * issuance route uses user session auth through the nodes route middleware.
  */
 import { isUserOwnedNodeClass } from '@simple-agent-manager/shared';
-import { and, desc, eq, isNull, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, ne, notInArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -32,7 +33,9 @@ import {
 } from '../services/jwt';
 import { createWorkspaceOnNode } from '../services/node-agent';
 import {
+  NODE_CALLBACK_TERMINAL_STATUSES,
   nodeStatusBlocksTokenRefresh,
+  nodeStatusTerminatesCallbacks,
   verifyNodeCallbackAuth,
 } from '../services/node-callback-auth';
 import { issueNodeOriginCertificate } from '../services/origin-ca-certificates';
@@ -44,6 +47,21 @@ import { nodeDiagnosticIncidentRoutes } from './node-diagnostic-incidents';
 const nodeLifecycleRoutes = new Hono<{ Bindings: Env }>();
 const NODE_DNS_ERROR_MESSAGE_MAX_LENGTH = 500;
 const NODE_BACKEND_DNS_ERROR_PREFIX = 'Backend DNS record creation failed:';
+
+function rejectTerminalNodeCallback(
+  nodeId: string,
+  status: string | null | undefined,
+  callback: string
+): never {
+  const observedStatus = status ?? 'missing';
+  log.info('node_callback.terminal_resource', {
+    nodeId,
+    status: observedStatus,
+    callback,
+    action: 'terminal_gone',
+  });
+  throw errors.gone(`Node is ${observedStatus}; callback resource is gone`);
+}
 
 function truncateNodeLifecycleError(value: string): string {
   return value.length > NODE_DNS_ERROR_MESSAGE_MAX_LENGTH
@@ -136,6 +154,16 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
   const nodeId = c.req.param('id');
   await verifyNodeCallbackAuth(c, nodeId);
   const db = drizzle(c.env.DATABASE, { schema });
+  const nodeRows = await db
+    .select({ status: schema.nodes.status })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, nodeId))
+    .limit(1);
+  const node = nodeRows[0];
+  if (!node || nodeStatusTerminatesCallbacks(node.status)) {
+    rejectTerminalNodeCallback(nodeId, node?.status, 'ready');
+  }
+
   const now = new Date().toISOString();
   const contentType = c.req.header('content-type') || '';
   const readyPayload = contentType.includes('application/json')
@@ -144,7 +172,7 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
   const agentVersion =
     typeof readyPayload?.agentVersion === 'string' ? readyPayload.agentVersion : null;
 
-  await db
+  const updatedRows = await db
     .update(schema.nodes)
     .set({
       status: 'running',
@@ -154,7 +182,22 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
       agentVersion,
       updatedAt: now,
     })
-    .where(eq(schema.nodes.id, nodeId));
+    .where(
+      and(
+        eq(schema.nodes.id, nodeId),
+        notInArray(schema.nodes.status, [...NODE_CALLBACK_TERMINAL_STATUSES])
+      )
+    )
+    .returning({ status: schema.nodes.status });
+
+  if (updatedRows.length === 0) {
+    const latest = await db
+      .select({ status: schema.nodes.status })
+      .from(schema.nodes)
+      .where(eq(schema.nodes.id, nodeId))
+      .get();
+    rejectTerminalNodeCallback(nodeId, latest?.status, 'ready');
+  }
 
   c.executionCtx.waitUntil(
     (async () => {
@@ -258,12 +301,16 @@ nodeLifecycleRoutes.post('/:id/origin-ca-certificate', async (c) => {
   // This gate is independent of what the agent chooses to send. See security-critique #2, rule 28.
   const gateDb = drizzle(c.env.DATABASE, { schema });
   const nodeRow = await gateDb
-    .select({ nodeClass: schema.nodes.nodeClass, transport: schema.nodes.transport })
+    .select({
+      nodeClass: schema.nodes.nodeClass,
+      status: schema.nodes.status,
+      transport: schema.nodes.transport,
+    })
     .from(schema.nodes)
     .where(eq(schema.nodes.id, nodeId))
     .get();
-  if (!nodeRow) {
-    throw errors.notFound('Node');
+  if (!nodeRow || nodeStatusTerminatesCallbacks(nodeRow.status)) {
+    rejectTerminalNodeCallback(nodeId, nodeRow?.status, 'origin_ca_certificate');
   }
   if (isUserOwnedNodeClass(nodeRow.nodeClass) || nodeRow.transport === 'cloudflare-tunnel') {
     log.error('node_origin_ca_certificate.denied_user_owned', {
@@ -316,8 +363,8 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
   const rows = await db.select().from(schema.nodes).where(eq(schema.nodes.id, nodeId)).limit(1);
 
   const node = rows[0];
-  if (!node) {
-    throw errors.notFound('Node');
+  if (!node || nodeStatusTerminatesCallbacks(node.status)) {
+    rejectTerminalNodeCallback(nodeId, node?.status, 'heartbeat');
   }
 
   const updatePayload: Record<string, unknown> = {
@@ -421,7 +468,25 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
     }
   }
 
-  await db.update(schema.nodes).set(updatePayload).where(eq(schema.nodes.id, nodeId));
+  const updatedRows = await db
+    .update(schema.nodes)
+    .set(updatePayload)
+    .where(
+      and(
+        eq(schema.nodes.id, nodeId),
+        notInArray(schema.nodes.status, [...NODE_CALLBACK_TERMINAL_STATUSES])
+      )
+    )
+    .returning({ status: schema.nodes.status });
+
+  if (updatedRows.length === 0) {
+    const latest = await db
+      .select({ status: schema.nodes.status })
+      .from(schema.nodes)
+      .where(eq(schema.nodes.id, nodeId))
+      .get();
+    rejectTerminalNodeCallback(nodeId, latest?.status, 'heartbeat');
+  }
 
   // Backup ACP heartbeat sweep — primary heartbeat is now sent directly by the
   // VM agent via POST /api/projects/:id/node-acp-heartbeat. Retained as safety net.

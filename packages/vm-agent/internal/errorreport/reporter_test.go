@@ -658,6 +658,178 @@ func TestTransientFailureRetriesAtStoredDeadlineWithoutManualFlush(t *testing.T)
 	}
 }
 
+func TestStructuredReportTerminalStatusesLatchReporter(t *testing.T) {
+	for _, status := range []int{
+		http.StatusUnauthorized,
+		http.StatusForbidden,
+		http.StatusNotFound,
+		http.StatusGone,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var mu sync.Mutex
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				mu.Lock()
+				requests++
+				mu.Unlock()
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte("terminal callback resource"))
+			}))
+			defer server.Close()
+
+			reporter := New(server.URL, "node-1", "token", testConfig(t))
+			defer reporter.Shutdown()
+			incidentID := reporter.Report(ErrorEntry{
+				Level:   "info",
+				Message: "terminal report",
+				Source:  "test",
+			})
+			if incidentID == "" {
+				t.Fatal("expected pre-terminal report to enqueue")
+			}
+
+			if err := reporter.flushReports(); err == nil {
+				t.Fatal("expected terminal delivery error to be returned for logging")
+			}
+
+			if got := reporter.pendingCount(); got != 0 {
+				t.Fatalf("terminal status should clear queued rows, got %d", got)
+			}
+			if got := reporter.Report(ErrorEntry{
+				Level:   "info",
+				Message: "after terminal",
+				Source:  "test",
+			}); got != "" {
+				t.Fatalf("terminal reporter accepted a future report: %q", got)
+			}
+			if err := reporter.flushReports(); err != nil {
+				t.Fatalf("terminal reporter should not retry: %v", err)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if requests != 1 {
+				t.Fatalf("expected no retry after terminal status, got %d requests", requests)
+			}
+		})
+	}
+}
+
+func TestArtifactTerminalStatusLatchesReporter(t *testing.T) {
+	var mu sync.Mutex
+	registrations := 0
+	uploads := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/artifacts"):
+			mu.Lock()
+			registrations++
+			mu.Unlock()
+			w.WriteHeader(http.StatusGone)
+			_, _ = w.Write([]byte("terminal artifact callback resource"))
+		case request.Method == http.MethodPut:
+			mu.Lock()
+			uploads++
+			mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+
+	reporter := New(server.URL, "node-1", "token", testConfig(t))
+	defer reporter.Shutdown()
+	incidentID := reporter.Report(ErrorEntry{
+		Level: "error", Message: "artifact terminal",
+		Source: "test", Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	if incidentID == "" {
+		t.Fatal("expected pre-terminal report to enqueue")
+	}
+	if err := reporter.markSnapshotReady(
+		incidentID,
+		filepath.Join(reporter.config.SpoolDir, incidentID+".tar.gz"),
+		`{"version":1}`,
+		`{}`,
+		strings.Repeat("a", 64),
+		10,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reporter.db.Exec(
+		"UPDATE error_report_outbox SET report_ack = 1 WHERE incident_id = ?",
+		incidentID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := reporter.flushArtifacts(); err == nil {
+		t.Fatal("expected terminal artifact delivery error")
+	}
+	if got := reporter.pendingCount(); got != 0 {
+		t.Fatalf("terminal artifact status should clear queued rows, got %d", got)
+	}
+	if got := reporter.Report(ErrorEntry{
+		Level:   "warn",
+		Message: "after artifact terminal",
+		Source:  "test",
+	}); got != "" {
+		t.Fatalf("terminal reporter accepted a future report: %q", got)
+	}
+	reporter.flush()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if registrations != 1 || uploads != 0 {
+		t.Fatalf("registrations=%d uploads=%d, want one terminal registration and no uploads", registrations, uploads)
+	}
+}
+
+func TestMarkTerminalDropsQueuedAndFutureErrorReports(t *testing.T) {
+	var mu sync.Mutex
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		requests++
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	reporter := New(server.URL, "node-1", "token", testConfig(t))
+	defer reporter.Shutdown()
+
+	if reporter.Report(ErrorEntry{
+		Level:   "warn",
+		Message: "queued before terminal",
+		Source:  "test",
+	}) == "" {
+		t.Fatal("expected pre-terminal report to enqueue")
+	}
+	if got := reporter.pendingCount(); got != 1 {
+		t.Fatalf("expected one queued report before terminal, got %d", got)
+	}
+
+	reporter.MarkTerminal("node heartbeat returned terminal status")
+	if got := reporter.pendingCount(); got != 0 {
+		t.Fatalf("expected terminal mark to clear outbox, got %d rows", got)
+	}
+	if incidentID := reporter.Report(ErrorEntry{
+		Level:   "warn",
+		Message: "after terminal",
+		Source:  "test",
+	}); incidentID != "" {
+		t.Fatalf("expected no incident ID after terminal state, got %q", incidentID)
+	}
+	reporter.flush()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if requests != 0 {
+		t.Fatalf("expected no HTTP requests after terminal mark, got %d", requests)
+	}
+}
+
 func TestBuildReportBatchSplitsAtByteLimitAndRejectsSingleOversize(t *testing.T) {
 	reporter := New("http://localhost", "node-1", "token", testConfig(t))
 	defer reporter.Shutdown()

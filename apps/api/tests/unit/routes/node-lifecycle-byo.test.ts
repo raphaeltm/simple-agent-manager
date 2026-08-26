@@ -38,11 +38,17 @@ vi.mock('drizzle-orm', () => ({
   eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
   isNull: (col: unknown) => ({ op: 'isNull', col }),
   ne: (col: unknown, val: unknown) => ({ op: 'ne', col, val }),
+  notInArray: (col: unknown, values: unknown[]) => ({ op: 'notInArray', col, values }),
   sql: (strings: TemplateStringsArray) => ({ sql: strings.join('') }),
 }));
 
 vi.mock('../../../src/db/schema', () => ({
-  nodes: { id: 'nodes.id', ipAddress: 'nodes.ipAddress', nodeClass: 'nodes.nodeClass' },
+  nodes: {
+    id: 'nodes.id',
+    ipAddress: 'nodes.ipAddress',
+    nodeClass: 'nodes.nodeClass',
+    status: 'nodes.status',
+  },
   workspaces: {
     id: 'workspaces.id',
     projectId: 'workspaces.projectId',
@@ -66,6 +72,7 @@ function createMockDb() {
               selection
                 ? {
                     nodeClass: (state.node as NodeRow)?.nodeClass,
+                    status: (state.node as NodeRow)?.status,
                     transport: (state.node as NodeRow)?.transport,
                   }
                 : state.node
@@ -80,7 +87,9 @@ function createMockDb() {
       set: vi.fn().mockImplementation((values: Record<string, unknown>) => ({
         where: vi.fn().mockImplementation(() => {
           state.updates.push(values);
-          return Promise.resolve();
+          return {
+            returning: vi.fn().mockResolvedValue([{ status: 'running' }]),
+          };
         }),
       })),
     })),
@@ -153,7 +162,7 @@ beforeAll(async () => {
   app.route('/api/nodes', nodeLifecycleRoutes);
   app.onError((err, c) => {
     if (err instanceof AppError) {
-      return c.json(err.toJSON(), err.statusCode as 400 | 401 | 403 | 404 | 500);
+      return c.json(err.toJSON(), err.statusCode as 400 | 401 | 403 | 404 | 410 | 500);
     }
     return c.json({ error: 'INTERNAL_ERROR', message: String(err) }, 500);
   });
@@ -216,11 +225,12 @@ describe('node-lifecycle BYO gates', () => {
   });
 
   describe('Revocation-on-refresh (critique #4)', () => {
-    it('withholds a refreshed token for a deregistered (deleted) node', async () => {
+    it('returns terminal gone for a deregistered (deleted) node before refresh or health mutation', async () => {
       state.node = makeNode({ status: 'deleted' });
       const res = await appRequest('/api/nodes/node-1/heartbeat', { nodeId: 'node-1' });
-      expect(res.status).toBe(200);
-      expect((await res.json()).refreshedToken).toBeUndefined();
+      expect(res.status).toBe(410);
+      expect(await res.json()).toMatchObject({ error: 'GONE' });
+      expect(state.updates).toHaveLength(0);
     });
 
     it('still refreshes a live node token', async () => {

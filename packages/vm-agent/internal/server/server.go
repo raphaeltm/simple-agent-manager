@@ -108,6 +108,7 @@ type Server struct {
 	bootstrapComplete     atomic.Bool
 	callbackTokenMu       sync.RWMutex
 	callbackToken         string
+	callbacksTerminal     atomic.Bool
 	httpClient            *http.Client // shared HTTP client with timeout for control-plane callbacks
 	done                  chan struct{}
 	stopOnce              sync.Once
@@ -1196,6 +1197,10 @@ func (s *Server) getOrCreateReporter(workspaceID, projectID, chatSessionID strin
 	s.messageReportersMu.RLock()
 	if r, ok := s.messageReporters[workspaceID]; ok {
 		s.messageReportersMu.RUnlock()
+		if s.controlPlaneCallbacksStopped() {
+			r.MarkTerminal(terminalControlPlaneCallbackReason)
+			return nil
+		}
 		// The boot-time reporter is created before the workspace callback token
 		// is available, and standalone mode never runs bootstrap's
 		// setTokenAllReporters. Refresh the token from the workspace runtime on
@@ -1207,6 +1212,10 @@ func (s *Server) getOrCreateReporter(workspaceID, projectID, chatSessionID strin
 		return r
 	}
 	s.messageReportersMu.RUnlock()
+
+	if s.controlPlaneCallbacksStopped() {
+		return nil
+	}
 
 	// Message persistence uses workspace-scoped endpoints. A node-scoped
 	// fallback token is intentionally not accepted here because the API rejects
@@ -1243,6 +1252,12 @@ func (s *Server) getOrCreateReporter(workspaceID, projectID, chatSessionID strin
 		reporter.SetToken(token)
 	}
 
+	if s.controlPlaneCallbacksStopped() {
+		reporter.MarkTerminal(terminalControlPlaneCallbackReason)
+		reporter.Shutdown()
+		return nil
+	}
+
 	// Re-acquire lock and check again — a concurrent call may have won the race.
 	s.messageReportersMu.Lock()
 	defer s.messageReportersMu.Unlock()
@@ -1250,7 +1265,17 @@ func (s *Server) getOrCreateReporter(workspaceID, projectID, chatSessionID strin
 	if existing, ok := s.messageReporters[workspaceID]; ok {
 		// Concurrent creation won — discard our duplicate.
 		reporter.Shutdown()
+		if s.controlPlaneCallbacksStopped() {
+			existing.MarkTerminal(terminalControlPlaneCallbackReason)
+			return nil
+		}
 		return existing
+	}
+
+	if s.controlPlaneCallbacksStopped() {
+		reporter.MarkTerminal(terminalControlPlaneCallbackReason)
+		reporter.Shutdown()
+		return nil
 	}
 
 	s.messageReporters[workspaceID] = reporter
@@ -1485,6 +1510,11 @@ func awaitingFollowupCallbackBody(pushResult gitPushResult) map[string]interface
 
 // postTaskCallback sends a JSON payload to the task status callback endpoint.
 func (s *Server) postTaskCallback(callbackURL, taskID, token string, body map[string]interface{}) {
+	if s.controlPlaneCallbacksStopped() {
+		slog.Warn("Task callback: terminal callback state latched, skipping", "taskId", taskID)
+		return
+	}
+
 	payload, err := json.Marshal(body)
 	if err != nil {
 		slog.Error("Task callback: marshal error", "error", err)
@@ -1514,6 +1544,14 @@ func (s *Server) postTaskCallback(callbackURL, taskID, token string, body map[st
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		slog.Info("Task callback sent", "taskId", taskID, "body", string(payload))
+	} else if isTerminalControlPlaneCallbackStatus(resp.StatusCode) {
+		slog.Warn("Task callback: terminal status",
+			"statusCode", resp.StatusCode,
+			"taskId", taskID,
+			"callbackURL", callbackURL,
+			"responseBody", responseBody,
+		)
+		s.markControlPlaneCallbacksTerminal("task_callback", resp.StatusCode, responseBody)
 	} else {
 		slog.Error("Task callback: unexpected status",
 			"statusCode", resp.StatusCode,

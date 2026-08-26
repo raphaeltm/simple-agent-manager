@@ -264,11 +264,20 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	// Lock ordering: sessionHostMu → messageReportersMu → Reporter.mu
 	// and: callbackTokenMu → messageReportersMu → Reporter.mu
 	// Never acquire sessionHostMu while holding messageReportersMu.
-	s.messageReportersMu.Lock()
-	if r, ok := s.messageReporters[workspaceID]; ok {
-		cfg.MessageReporter = &messageReporterAdapter{r: r}
+	if !s.controlPlaneCallbacksStopped() {
+		s.messageReportersMu.Lock()
+		if r, ok := s.messageReporters[workspaceID]; ok {
+			cfg.MessageReporter = &messageReporterAdapter{r: r}
+		}
+		s.messageReportersMu.Unlock()
+	} else {
+		s.messageReportersMu.RLock()
+		r, ok := s.messageReporters[workspaceID]
+		s.messageReportersMu.RUnlock()
+		if ok {
+			r.MarkTerminal(terminalControlPlaneCallbackReason)
+		}
 	}
-	s.messageReportersMu.Unlock()
 	cfg.SessionManager = s.agentSessions
 	cfg.TabStore = s.store
 	cfg.TabLastPromptStore = s.store

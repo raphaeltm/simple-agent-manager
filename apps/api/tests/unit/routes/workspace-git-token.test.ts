@@ -129,6 +129,9 @@ describe('workspace git-token GitHub scoping', () => {
       installationId: 'inst-row-111',
       projectId: 'proj-1',
       userId: 'user-1',
+      status: 'running',
+      nodeId: 'node-1',
+      nodeStatus: 'running',
       ...overrides,
     };
   }
@@ -212,6 +215,7 @@ describe('workspace git-token GitHub scoping', () => {
       };
       const builder = {
         from: vi.fn(() => builder),
+        leftJoin: vi.fn(() => builder),
         where: vi.fn((clause: unknown) => {
           whereClause = clause;
           return builder;
@@ -241,6 +245,16 @@ describe('workspace git-token GitHub scoping', () => {
       return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
     });
     app.route('/ws', runtimeRoutes);
+  });
+
+  it('returns 410 and does not mint when the callback workspace is stopped', async () => {
+    limitResponses.push([workspaceRow({ status: 'stopped' })]);
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(410);
+    expect(mocks.getInstallationToken).not.toHaveBeenCalled();
+    expect(mocks.requireGitLabUserAccessTokenResultForOwner).not.toHaveBeenCalled();
   });
 
   it('returns host/path-constrained GitLab credentials after re-verifying project access', async () => {

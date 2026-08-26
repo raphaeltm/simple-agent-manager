@@ -27,6 +27,7 @@ vi.mock('drizzle-orm', () => ({
   desc: (col: unknown) => col,
   eq: (col: string, val: unknown) => ({ op: 'eq', col, val }),
   isNull: (col: unknown) => ({ op: 'isNull', col }),
+  notInArray: (col: unknown, values: unknown[]) => ({ op: 'notInArray', col, values }),
   sql: (strings: TemplateStringsArray) => ({ sql: strings.join('') }),
 }));
 
@@ -170,7 +171,9 @@ function createMockDb() {
       set: vi.fn().mockImplementation((values: Record<string, unknown>) => ({
         where: vi.fn().mockImplementation((where: unknown) => {
           updates.push({ table, values, where });
-          return Promise.resolve();
+          return {
+            returning: vi.fn().mockResolvedValue([{ status: 'running' }]),
+          };
         }),
       })),
     })),

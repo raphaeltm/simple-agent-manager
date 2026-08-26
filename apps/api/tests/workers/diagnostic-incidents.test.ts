@@ -16,6 +16,7 @@ import {
 
 const NODE_ID = 'diagnostic-worker-node';
 const WORKSPACE_ID = 'diagnostic-worker-workspace';
+const USER_ID = 'diagnostic-worker-user';
 const INCIDENT_ID = '01KZ8V0GMXQ4ZCSERPRT2X2K6P';
 const ARTIFACT_ID = `${INCIDENT_ID}-safe`;
 let nodeToken: string;
@@ -43,6 +44,26 @@ beforeAll(async () => {
       migrationBindings.TEST_OBSERVABILITY_MIGRATIONS
     );
   }
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO users (id, email, email_verified, role, status, created_at, updated_at)
+     VALUES (?, ?, 1, 'user', 'active', unixepoch() * 1000, unixepoch() * 1000)`
+  )
+    .bind(USER_ID, 'diagnostic-worker@example.com')
+    .run();
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO nodes
+       (id, user_id, name, status, health_status, cloud_provider, vm_location, vm_size, created_at, updated_at)
+     VALUES (?, ?, ?, 'running', 'healthy', 'hetzner', 'fsn1', 'cx22', datetime('now'), datetime('now'))`
+  )
+    .bind(NODE_ID, USER_ID, 'diagnostic-worker-node')
+    .run();
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO nodes
+       (id, user_id, name, status, health_status, cloud_provider, vm_location, vm_size, created_at, updated_at)
+     VALUES (?, ?, ?, 'running', 'healthy', 'hetzner', 'fsn1', 'cx22', datetime('now'), datetime('now'))`
+  )
+    .bind('diagnostic-other-node', USER_ID, 'diagnostic-other-node')
+    .run();
   nodeToken = await signNodeCallbackToken(NODE_ID, env as never);
   otherNodeToken = await signNodeCallbackToken('diagnostic-other-node', env as never);
   workspaceToken = await signCallbackToken(WORKSPACE_ID, env as never);

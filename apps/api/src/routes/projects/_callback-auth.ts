@@ -8,6 +8,9 @@ import { extractBearerToken } from '../../lib/auth-helpers';
 import { log } from '../../lib/logger';
 import { errors } from '../../middleware/error';
 import { verifyCallbackToken } from '../../services/jwt';
+import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
+
+const WORKSPACE_STATUSES_ACCEPTING_PUBLISH_CALLBACKS = new Set(['creating', 'running', 'recovery']);
 
 /**
  * Verified result of the shared workspace-scoped publish callback auth preamble.
@@ -49,7 +52,7 @@ export async function verifyWorkspacePublishCallback(
   const payload = await verifyCallbackToken(token, c.env);
 
   if (payload.scope !== undefined && payload.scope !== 'workspace') {
-    log.error(`${logPrefix}.invalid_token_scope`, {
+    log.warn(`${logPrefix}.invalid_token_scope`, {
       scope: payload.scope,
       action: 'rejected',
     });
@@ -68,22 +71,62 @@ export async function verifyWorkspacePublishCallback(
     .select({
       projectId: schema.workspaces.projectId,
       userId: schema.workspaces.userId,
+      status: schema.workspaces.status,
+      nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
     })
     .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
     .where(eq(schema.workspaces.id, payload.workspace))
     .limit(1);
 
   const workspace = workspaceRows[0];
-  if (!workspace || !workspace.projectId) {
-    log.error(`${logPrefix}.workspace_not_linked`, {
+  if (!workspace) {
+    log.info(`${logPrefix}.terminal_workspace`, {
+      workspaceId: payload.workspace,
+      status: 'missing',
+      action: 'terminal_gone',
+    });
+    throw errors.gone('Workspace is missing; callback resource is gone');
+  }
+
+  if (!workspace.projectId) {
+    log.warn(`${logPrefix}.workspace_not_linked`, {
       workspaceId: payload.workspace,
       action: 'rejected',
     });
     throw errors.forbidden('Workspace is not linked to a project');
   }
 
+  if (!WORKSPACE_STATUSES_ACCEPTING_PUBLISH_CALLBACKS.has(workspace.status)) {
+    log.info(`${logPrefix}.terminal_workspace`, {
+      workspaceId: payload.workspace,
+      projectId: workspace.projectId,
+      status: workspace.status,
+      action: 'terminal_gone',
+    });
+    throw errors.gone(`Workspace is ${workspace.status}; callback resource is gone`);
+  }
+
+  if (
+    !workspace.nodeId ||
+    !workspace.nodeStatus ||
+    nodeStatusTerminatesCallbacks(workspace.nodeStatus)
+  ) {
+    log.info(`${logPrefix}.terminal_node`, {
+      workspaceId: payload.workspace,
+      projectId: workspace.projectId,
+      nodeId: workspace.nodeId ?? null,
+      nodeStatus: workspace.nodeStatus ?? 'missing',
+      action: 'terminal_gone',
+    });
+    throw errors.gone(
+      `Workspace node is ${workspace.nodeStatus ?? 'missing'}; callback resource is gone`
+    );
+  }
+
   if (workspace.projectId !== projectId) {
-    log.error(`${logPrefix}.project_mismatch`, {
+    log.warn(`${logPrefix}.project_mismatch`, {
       workspaceId: payload.workspace,
       expectedProjectId: workspace.projectId,
       receivedProjectId: projectId,

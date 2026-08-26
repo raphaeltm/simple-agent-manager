@@ -36,7 +36,7 @@ import {
   type SessionSnapshotStatus,
 } from '../../services/session-snapshots';
 import { markVmAgentContainerActiveWorkEndedBestEffort } from '../../services/vm-agent-container';
-import { verifyWorkspaceCallbackAuth } from './_helpers';
+import { assertWorkspaceCallbackResourceById, verifyWorkspaceCallbackAuth } from './_helpers';
 
 const sessionSnapshotRoutes = new Hono<{ Bindings: Env }>();
 type SnapshotRouteContext = Context<{ Bindings: Env }>;
@@ -152,7 +152,11 @@ function containsOnlyRegenerableOpenCodeSkips(manifest: SessionSnapshotManifest)
   );
 }
 
-async function requireWorkspace(c: SnapshotRouteContext, workspaceId: string) {
+async function requireWorkspace(
+  c: SnapshotRouteContext,
+  workspaceId: string,
+  callback = 'session_snapshot'
+) {
   const db = drizzle(c.env.DATABASE, { schema });
   const rows = await db
     .select()
@@ -160,7 +164,11 @@ async function requireWorkspace(c: SnapshotRouteContext, workspaceId: string) {
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
   const workspace = rows[0];
-  if (!workspace) throw errors.notFound('Workspace');
+  if (!workspace) {
+    await assertWorkspaceCallbackResourceById(c.env, workspaceId, callback);
+    throw errors.gone('Workspace is missing; callback resource is gone');
+  }
+  await assertWorkspaceCallbackResourceById(c.env, workspaceId, callback);
   return { db, workspace };
 }
 
@@ -176,7 +184,7 @@ async function requireSnapshotArtifactTarget(c: SnapshotRouteContext) {
   if (!chatSessionId) throw errors.badRequest('chatSessionId is required');
   const generation = c.req.query('generation')?.trim();
   if (!generation) throw errors.badRequest('generation is required');
-  const { db, workspace } = await requireWorkspace(c, workspaceId);
+  const { db, workspace } = await requireWorkspace(c, workspaceId, 'session_snapshot_artifact');
   if (!workspace.chatSessionId || workspace.chatSessionId !== chatSessionId) {
     throw errors.forbidden('Snapshot chat session does not match workspace');
   }
@@ -186,7 +194,7 @@ async function requireSnapshotArtifactTarget(c: SnapshotRouteContext) {
 sessionSnapshotRoutes.post('/:id/session-snapshot/prepare', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
-  const { db, workspace } = await requireWorkspace(c, workspaceId);
+  const { db, workspace } = await requireWorkspace(c, workspaceId, 'session_snapshot_prepare');
   const body = await readJsonBody(c);
   const chatSessionId = requiredStringField(body, 'chatSessionId');
   const agentSessionId = stringField(body, 'agentSessionId', false);
@@ -244,7 +252,7 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/prepare', async (c) => {
 sessionSnapshotRoutes.post('/:id/session-snapshot/progress', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
-  const { db, workspace } = await requireWorkspace(c, workspaceId);
+  const { db, workspace } = await requireWorkspace(c, workspaceId, 'session_snapshot_progress');
   const body = await readJsonBody(c);
   const chatSessionId = requiredStringField(body, 'chatSessionId');
   const generation = requiredStringField(body, 'generation');
@@ -261,7 +269,7 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/progress', async (c) => {
 sessionSnapshotRoutes.post('/:id/session-snapshot/failure', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
-  const { db, workspace } = await requireWorkspace(c, workspaceId);
+  const { db, workspace } = await requireWorkspace(c, workspaceId, 'session_snapshot_failure');
   const body = await readJsonBody(c);
   const chatSessionId = requiredStringField(body, 'chatSessionId');
   const generation = requiredStringField(body, 'generation');
@@ -371,7 +379,7 @@ sessionSnapshotRoutes.put('/:id/session-snapshot/artifacts/:artifact', async (c)
 sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
-  const { db, workspace } = await requireWorkspace(c, workspaceId);
+  const { db, workspace } = await requireWorkspace(c, workspaceId, 'session_snapshot_complete');
   const body = await readJsonBody(c);
   const chatSessionId = stringField(body, 'chatSessionId');
   if (!workspace.chatSessionId || workspace.chatSessionId !== chatSessionId) {
@@ -549,7 +557,7 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
 sessionSnapshotRoutes.get('/:id/session-snapshot/restore', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
-  const { db, workspace } = await requireWorkspace(c, workspaceId);
+  const { db, workspace } = await requireWorkspace(c, workspaceId, 'session_snapshot_restore');
   const chatSessionId = c.req.query('chatSessionId')?.trim() || workspace.chatSessionId;
   if (!chatSessionId) throw errors.badRequest('chatSessionId is required');
   if (workspace.chatSessionId !== chatSessionId) {
@@ -586,7 +594,11 @@ sessionSnapshotRoutes.get('/:id/session-snapshot/artifacts/:artifact', async (c)
   const artifact = artifactFromParam(c.req.param('artifact'));
   const chatSessionId = c.req.query('chatSessionId')?.trim();
   if (!chatSessionId) throw errors.badRequest('chatSessionId is required');
-  const { db, workspace } = await requireWorkspace(c, workspaceId);
+  const { db, workspace } = await requireWorkspace(
+    c,
+    workspaceId,
+    'session_snapshot_artifact_download'
+  );
   if (workspace.chatSessionId !== chatSessionId) {
     throw errors.forbidden('Snapshot chat session does not match workspace');
   }
@@ -609,7 +621,11 @@ sessionSnapshotRoutes.get('/:id/session-snapshot/artifacts/:artifact', async (c)
 sessionSnapshotRoutes.post('/:id/session-snapshot/restore-result', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
-  const { db, workspace } = await requireWorkspace(c, workspaceId);
+  const { db, workspace } = await requireWorkspace(
+    c,
+    workspaceId,
+    'session_snapshot_restore_result'
+  );
   const body = await readJsonBody(c);
   const chatSessionId = requiredStringField(body, 'chatSessionId');
   if (workspace.chatSessionId !== chatSessionId) {

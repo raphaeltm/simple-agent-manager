@@ -33,7 +33,7 @@ vi.mock('drizzle-orm/d1', () => ({
     where: vi.fn().mockReturnThis(),
     orderBy: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
-    get: vi.fn(),
+    get: vi.fn().mockResolvedValue({ status: 'running' }),
     update: vi.fn().mockReturnThis(),
     set: vi.fn().mockReturnThis(),
     delete: vi.fn().mockReturnThis(),

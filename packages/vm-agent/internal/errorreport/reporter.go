@@ -65,7 +65,10 @@ type Reporter struct {
 	started        atomic.Bool
 	snapshotActive atomic.Bool
 	closed         atomic.Bool
+	terminal       atomic.Bool
 }
+
+const terminalCallbackFailureReason = "error reporter control-plane callback returned terminal status"
 
 // New creates a reporter. InitError reports a disk/configuration failure.
 func New(apiBaseURL, nodeID, authToken string, cfg Config) *Reporter {
@@ -126,7 +129,9 @@ func (r *Reporter) SetToken(token string) {
 	r.stateMu.Lock()
 	r.authToken = token
 	r.stateMu.Unlock()
-	r.signalFlush()
+	if !r.terminalStopped() {
+		r.signalFlush()
+	}
 }
 
 // Start launches snapshot recovery and the serialized delivery loop once.
@@ -136,7 +141,7 @@ func (r *Reporter) Start() {
 	}
 	r.lifecycleMu.Lock()
 	defer r.lifecycleMu.Unlock()
-	if r.closed.Load() {
+	if r.closed.Load() || r.terminalStopped() {
 		return
 	}
 	r.startOnce.Do(func() {
@@ -183,12 +188,12 @@ func (r *Reporter) Shutdown() {
 
 // Report durably enqueues an entry and returns its stable incident ULID.
 func (r *Reporter) Report(entry ErrorEntry) string {
-	if r == nil || r.db == nil {
+	if r == nil || r.db == nil || r.terminalStopped() {
 		return ""
 	}
 	r.lifecycleMu.Lock()
 	defer r.lifecycleMu.Unlock()
-	if r.closed.Load() {
+	if r.closed.Load() || r.terminalStopped() {
 		return ""
 	}
 	if !validIncidentID.MatchString(entry.IncidentID) {
@@ -302,7 +307,7 @@ func (r *Reporter) flushLoop() {
 }
 
 func (r *Reporter) flush() {
-	if r == nil || r.db == nil {
+	if r == nil || r.db == nil || r.terminalStopped() {
 		return
 	}
 	if err := r.terminalizeExpired(); err != nil {
@@ -321,6 +326,9 @@ func (r *Reporter) flush() {
 }
 
 func (r *Reporter) flushReports() error {
+	if r.terminalStopped() {
+		return nil
+	}
 	rows, err := r.readReportCandidates()
 	if err != nil || len(rows) == 0 {
 		return err
@@ -341,8 +349,11 @@ func (r *Reporter) flushReports() error {
 		return r.markReportAcknowledged(batch)
 	}
 	deliveryErr := fmt.Errorf("status=%d response=%s transport=%v", status, response, err)
-	permanent := status == http.StatusBadRequest || status == http.StatusForbidden || status == http.StatusRequestEntityTooLarge
+	permanent := permanentCallbackFailureStatus(status) || status == http.StatusRequestEntityTooLarge
 	_ = r.markAttempt(batch, deliveryErr, permanent)
+	if terminalCallbackFailureStatus(status) {
+		r.MarkTerminal(terminalCallbackFailureReason)
+	}
 	return deliveryErr
 }
 
@@ -375,11 +386,17 @@ func (r *Reporter) buildReportBatch(rows []outboxRow) ([]outboxRow, []byte, erro
 }
 
 func (r *Reporter) flushArtifacts() error {
+	if r.terminalStopped() {
+		return nil
+	}
 	rows, err := r.readDeliverableArtifacts()
 	if err != nil {
 		return err
 	}
 	for _, row := range rows {
+		if r.terminalStopped() {
+			return nil
+		}
 		if err := r.deliverArtifact(row); err != nil {
 			return err
 		}
@@ -477,11 +494,31 @@ func successOrConflict(status int) bool {
 
 func success(status int) bool { return status >= 200 && status < 300 }
 
+func permanentCallbackFailureStatus(status int) bool {
+	switch status {
+	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusGone:
+		return true
+	default:
+		return false
+	}
+}
+
+func terminalCallbackFailureStatus(status int) bool {
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusGone:
+		return true
+	default:
+		return false
+	}
+}
+
 func (r *Reporter) handleArtifactFailure(row outboxRow, status int, response string, requestErr error) error {
 	deliveryErr := fmt.Errorf("status=%d response=%s transport=%v", status, response, requestErr)
-	permanent := status == http.StatusBadRequest || status == http.StatusForbidden ||
-		status == http.StatusNotFound || status == http.StatusRequestEntityTooLarge
+	permanent := permanentCallbackFailureStatus(status) || status == http.StatusRequestEntityTooLarge
 	_ = r.markAttempt([]outboxRow{row}, deliveryErr, permanent)
+	if terminalCallbackFailureStatus(status) {
+		r.MarkTerminal(terminalCallbackFailureReason)
+	}
 	return deliveryErr
 }
 
@@ -498,6 +535,9 @@ func (r *Reporter) doRequest(
 	contentLength int64,
 	checksum string,
 ) (int, string, error) {
+	if r.terminalStopped() {
+		return 0, "", fmt.Errorf("callback resource is terminal")
+	}
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
 	if err != nil {
 		return 0, "", err
@@ -520,6 +560,33 @@ func (r *Reporter) doRequest(
 		return resp.StatusCode, "", readErr
 	}
 	return resp.StatusCode, string(response), nil
+}
+
+// MarkTerminal disables future durable error reporting after any control-plane
+// callback proves this VM agent resource is no longer accepted. Queued rows are
+// removed because retrying them cannot succeed with this callback identity.
+func (r *Reporter) MarkTerminal(reason string) {
+	if r == nil {
+		return
+	}
+	if !r.terminal.CompareAndSwap(false, true) {
+		return
+	}
+	slog.Warn("errorreport: terminal callback state latched; dropping queued reports", "reason", reason)
+	if r.db == nil {
+		return
+	}
+	if _, err := r.db.Exec(`DELETE FROM error_report_outbox`); err != nil {
+		slog.Warn("errorreport: failed to clear terminal outbox", "error", boundedError(err, r.config.StoredErrorBytes))
+		return
+	}
+	if err := r.cleanupSpool(); err != nil {
+		slog.Warn("errorreport: failed to clean terminal spool", "error", boundedError(err, r.config.StoredErrorBytes))
+	}
+}
+
+func (r *Reporter) terminalStopped() bool {
+	return r != nil && r.terminal.Load()
 }
 
 func (r *Reporter) pendingCount() int {

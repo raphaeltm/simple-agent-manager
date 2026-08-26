@@ -6,6 +6,7 @@ import type { Env } from '../../../src/env';
 const mockVerifyCallbackToken = vi.fn();
 const insertedEvents: Array<Record<string, unknown>> = [];
 let selectLimitCount = 0;
+let nodeStatus: string | null = 'running';
 
 vi.mock('../../../src/services/jwt', () => ({
   verifyCallbackToken: (...args: unknown[]) => mockVerifyCallbackToken(...args),
@@ -16,6 +17,7 @@ vi.mock('drizzle-orm/d1', () => ({
     select: () => ({
       from: () => ({
         where: () => ({
+          get: () => Promise.resolve(nodeStatus == null ? undefined : { status: nodeStatus }),
           limit: () => {
             selectLimitCount += 1;
             if (selectLimitCount === 1) {
@@ -38,9 +40,8 @@ vi.mock('drizzle-orm/d1', () => ({
   }),
 }));
 
-const { deploymentReleaseEventsCallbackRoute } = await import(
-  '../../../src/routes/deployment-release-events-callback'
-);
+const { deploymentReleaseEventsCallbackRoute } =
+  await import('../../../src/routes/deployment-release-events-callback');
 
 function createTestApp() {
   const app = new Hono<{ Bindings: Env }>();
@@ -80,6 +81,7 @@ describe('deployment release events callback route', () => {
   beforeEach(() => {
     insertedEvents.length = 0;
     selectLimitCount = 0;
+    nodeStatus = 'running';
     mockVerifyCallbackToken.mockReset();
     mockVerifyCallbackToken.mockResolvedValue({
       workspace: 'node-1',
@@ -106,6 +108,19 @@ describe('deployment release events callback route', () => {
       step: 'apply',
       message: 'deployment apply started',
     });
+  });
+
+  it('returns 410 for release events from a deleted node before appending', async () => {
+    nodeStatus = 'deleted';
+
+    const response = await requestEvent();
+
+    expect(response.status).toBe(410);
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'GONE',
+      message: 'Node is deleted; callback resource is gone',
+    });
+    expect(insertedEvents).toHaveLength(0);
   });
 
   it('rejects missing and workspace-scoped callback tokens', async () => {

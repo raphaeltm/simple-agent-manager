@@ -43,7 +43,9 @@ vi.mock('drizzle-orm/d1', () => ({
     }),
     update: () => ({
       set: () => ({
-        where: () => Promise.resolve(),
+        where: () => ({
+          returning: () => Promise.resolve([{ status: 'running' }]),
+        }),
       }),
     }),
   }),
@@ -124,7 +126,7 @@ async function createTestApp() {
   app.route('/api/nodes', nodeLifecycleRoutes);
   app.onError((err, c) => {
     if (err instanceof AppError) {
-      return c.json(err.toJSON(), err.statusCode as 401 | 403 | 404 | 500);
+      return c.json(err.toJSON(), err.statusCode as 401 | 403 | 404 | 410 | 500);
     }
     return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
   });

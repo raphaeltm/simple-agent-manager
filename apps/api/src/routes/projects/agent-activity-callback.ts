@@ -14,6 +14,7 @@ import { hibernateAgentSessionOnNode } from '../../services/node-agent';
 import {
   callbackTokenMatchesNode,
   callbackTokenMatchesWorkspace,
+  nodeStatusTerminatesCallbacks,
 } from '../../services/node-callback-auth';
 import * as projectDataService from '../../services/project-data';
 import { cancelScheduledSessionSleep } from '../../services/session-snapshots';
@@ -43,6 +44,11 @@ import {
 const agentActivityCallbackRoute = new Hono<{ Bindings: Env }>();
 
 const MAX_AGENT_ERROR_MESSAGE_LENGTH = 2048;
+const ACP_ACTIVITY_WORKSPACE_CALLBACK_ACTIVE_STATUSES: ReadonlySet<string> = new Set([
+  'creating',
+  'running',
+  'recovery',
+]);
 
 function truncateAgentErrorMessage(value: string): string {
   if (value.length <= MAX_AGENT_ERROR_MESSAGE_LENGTH) return value;
@@ -62,6 +68,52 @@ function canTransitionAcpSessionToFailed(status: string): boolean {
   return validTargets?.includes('failed') ?? false;
 }
 
+async function assertAcpActivityCallbackResourcesActive(
+  env: Env,
+  input: {
+    projectId: string;
+    sessionId: string;
+    nodeId: string;
+    workspaceId: string | null | undefined;
+  }
+): Promise<void> {
+  const db = drizzle(env.DATABASE, { schema });
+  const node = await db
+    .select({ status: schema.nodes.status })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, input.nodeId))
+    .get();
+  if (!node || nodeStatusTerminatesCallbacks(node.status)) {
+    const observedStatus = node?.status ?? 'missing';
+    log.info('acp_activity.terminal_node', {
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      nodeId: input.nodeId,
+      status: observedStatus,
+      action: 'terminal_gone',
+    });
+    throw errors.gone(`Node is ${observedStatus}; activity callback resource is gone`);
+  }
+
+  if (!input.workspaceId) return;
+  const workspace = await db
+    .select({ status: schema.workspaces.status })
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.id, input.workspaceId))
+    .get();
+  if (!workspace || !ACP_ACTIVITY_WORKSPACE_CALLBACK_ACTIVE_STATUSES.has(workspace.status)) {
+    const observedStatus = workspace?.status ?? 'missing';
+    log.info('acp_activity.terminal_workspace', {
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      workspaceId: input.workspaceId,
+      status: observedStatus,
+      action: 'terminal_gone',
+    });
+    throw errors.gone(`Workspace is ${observedStatus}; activity callback resource is gone`);
+  }
+}
+
 agentActivityCallbackRoute.post(
   '/:id/acp-sessions/:sessionId/activity',
   jsonValidator(AcpSessionActivityReportSchema),
@@ -71,7 +123,7 @@ agentActivityCallbackRoute.post(
     const payload = await verifyCallbackToken(token, c.env);
 
     if (payload.scope !== 'workspace' && payload.scope !== 'node') {
-      log.error('acp_activity.invalid_token_scope', {
+      log.warn('acp_activity.invalid_token_scope', {
         scope: payload.scope,
         action: 'rejected',
       });
@@ -96,7 +148,7 @@ agentActivityCallbackRoute.post(
       callbackTokenMatchesNode(payload, existing.nodeId) ||
       callbackTokenMatchesWorkspace(payload, existing.workspaceId);
     if (!tokenBoundToSession) {
-      log.error('acp_activity.callback_token_not_bound_to_session', {
+      log.warn('acp_activity.callback_token_not_bound_to_session', {
         sessionId,
         projectId,
         scope: payload.scope,
@@ -110,7 +162,7 @@ agentActivityCallbackRoute.post(
 
     // Defense-in-depth: the reported nodeId must still match the session's assigned node.
     if (existing.nodeId !== body.nodeId) {
-      log.error('acp_activity.node_mismatch', {
+      log.warn('acp_activity.node_mismatch', {
         sessionId,
         projectId,
         expectedNodeId: existing.nodeId,
@@ -119,6 +171,13 @@ agentActivityCallbackRoute.post(
       });
       throw errors.forbidden('Node identity verification failed');
     }
+
+    await assertAcpActivityCallbackResourcesActive(c.env, {
+      projectId,
+      sessionId,
+      nodeId: body.nodeId,
+      workspaceId: existing.workspaceId,
+    });
 
     // Mutate sleep state only after the callback token and reported node are
     // both bound to this exact session. A valid token for another tenant must

@@ -20,10 +20,19 @@ This exact class of bug has caused production failures **five times**:
 
 Any route that is called by the VM agent over HTTP with a callback JWT Bearer token MUST:
 
-1. **Be defined in its own file** under `apps/api/src/routes/projects/` (e.g., `agent-activity-callback.ts`, `node-acp-heartbeat.ts`)
+1. **Be defined in its own callback route file** under the route family it serves (for example `apps/api/src/routes/projects/agent-activity-callback.ts` for `/api/projects` callbacks or `apps/api/src/routes/deploy-release-callback.ts` for `/api/nodes` callbacks)
 2. **Use `extractBearerToken()` + `verifyCallbackToken()`** for authentication — NOT `getUserId()` or `requireAuth()`
 3. **Be mounted in `index.ts` BEFORE `projectsRoutes`** at the same `/api/projects` base path
 4. **Include a comment** explaining why it's mounted before `projectsRoutes`
+
+## Terminal Callback Classification
+
+Callback JWT routes are not allowed to convert designed terminal callback states into server faults:
+
+1. Expired, malformed, or otherwise unverifiable callback JWTs MUST return a designed auth status such as `401`, not an unhandled `500`. Keep callback signing-key import, JWKS, or storage failures as genuine `5xx` auth-system faults.
+2. Callback routes targeting deleted, destroyed, stopped, missing, or otherwise tombstoned node/workspace resources MUST return a documented terminal callback response such as `410 Gone` or another VM-agent-terminal status (`401`/`403`/`404`/`410`) before mutating liveness or accepting writes.
+3. Designed callback `4xx`/`410` responses MUST use non-error or bounded low-severity logging. They MUST NOT emit an error-level log or persisted platform error row for every retry attempt.
+4. Tests for callback-route changes MUST include the discriminating control: a live node/workspace callback still succeeds through the combined app/router wiring.
 
 ### How to Identify VM Agent Callback Routes
 
@@ -36,12 +45,19 @@ A route is a VM agent callback if ANY of these are true:
 
 ### Current Extracted Routes (Reference)
 
-| File | Route | Caller |
-|------|-------|--------|
-| `agent-activity-callback.ts` | `POST /:id/acp-sessions/:sessionId/activity` | `session_host_reporting.go:reportActivity()` |
-| `node-acp-heartbeat.ts` | `POST /:id/node-acp-heartbeat` | VM agent heartbeat loop |
-| `../tasks/callback.ts` | `POST /:projectId/tasks/:taskId/status/callback` | `server.go:notifyTaskCallback()` |
-| `../deployment-release-events-callback.ts` | `POST /api/nodes/:id/deployment-release-events` | `deploy/events.go:reportApplyEvent()` |
+| File                                       | Route                                                                                                                                                                  | Caller                                       |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `agent-activity-callback.ts`               | `POST /:id/acp-sessions/:sessionId/activity`                                                                                                                           | `session_host_reporting.go:reportActivity()` |
+| `node-acp-heartbeat.ts`                    | `POST /:id/node-acp-heartbeat`                                                                                                                                         | VM agent heartbeat loop                      |
+| `deployment-identity-token.ts`             | `POST /:id/deployment-identity-token`                                                                                                                                  | VM agent deployment identity flow            |
+| `registry-push-credentials-callback.ts`    | `POST /:id/registry-push-credentials`                                                                                                                                  | VM agent registry push flow                  |
+| `compose-image-artifacts-callback.ts`      | `POST /:id/compose-image-artifacts`                                                                                                                                    | VM agent compose artifact reporting          |
+| `compose-publish-release-callback.ts`      | `POST /:id/compose-publish-release`                                                                                                                                    | VM agent compose release reporting           |
+| `deployment-publish-job-callback.ts`       | `POST /:id/deployment-publish-jobs/:jobId/*`                                                                                                                           | VM agent deployment publish reporting        |
+| `../tasks/callback.ts`                     | `POST /:projectId/tasks/:taskId/status/callback`                                                                                                                       | `server.go:notifyTaskCallback()`             |
+| `../node-lifecycle.ts`                     | `POST /api/nodes/:id/ready`, `POST /api/nodes/:id/heartbeat`, `POST /api/nodes/:id/origin-ca-certificate`, `POST /api/nodes/:id/errors`, diagnostic artifact callbacks | VM agent node lifecycle/error reporting      |
+| `../deploy-release-callback.ts`            | `POST /api/nodes/:id/deploy-release`, `POST /api/nodes/:id/deploy-routes`                                                                                              | VM agent deployment release fetch            |
+| `../deployment-release-events-callback.ts` | `POST /api/nodes/:id/deployment-release-events`                                                                                                                        | `deploy/events.go:reportApplyEvent()`        |
 
 ### Mounting Order in `index.ts`
 
@@ -51,11 +67,16 @@ app.route('/api/projects', deploymentIdentityTokenRoute);
 app.route('/api/projects', nodeAcpHeartbeatRoute);
 app.route('/api/projects', agentActivityCallbackRoute);
 app.route('/api/projects', taskCallbackRoute);
+app.route('/api/projects', registryPushCredentialsCallbackRoute);
+app.route('/api/projects', composeImageArtifactsCallbackRoute);
+app.route('/api/projects', composePublishReleaseCallbackRoute);
+app.route('/api/projects', deploymentPublishJobCallbackRoute);
 // Session cookie routes
 app.route('/api/projects', projectsRoutes);
 ```
 
-For `/api/nodes` callback routes, use the same ordering rule:
+For `/api/nodes` callback routes, use the same ordering rule when the callback
+router contains only callback-auth routes:
 
 ```typescript
 // Callback JWT routes — MUST be before session-auth node routes
@@ -65,7 +86,12 @@ app.route('/api/nodes', deploymentReleaseEventsCallbackRoute);
 app.route('/api/nodes', nodesRoutes);
 ```
 
-Do not add new callback endpoints by extending a session-auth wildcard allowlist. Extract the route instead; allowlists are fragile and have repeatedly missed new VM-agent callback paths.
+`nodeLifecycleRoutes` is the current mixed-auth exception: it contains callback
+routes plus `POST /api/nodes/:id/token`, which relies on `nodesRoutes` session
+auth. The existing `nodesRoutes` middleware therefore has an explicit skip for
+known lifecycle callback paths. Do not add new callback endpoints by extending a
+session-auth wildcard allowlist. Extract new callback-only routes instead;
+allowlists are fragile and have repeatedly missed new VM-agent callback paths.
 
 ## How to Detect This Bug
 
@@ -78,8 +104,11 @@ When adding a new route to `acpSessionRoutes` or any subrouter under `projectsRo
 ## Quick Compliance Check
 
 Before adding any new route under `/api/projects`:
+
 - [ ] Identified who calls this route (browser, VM agent, internal DO, or cron)
 - [ ] If VM agent: route is in its own file with callback JWT auth
 - [ ] If VM agent: route is mounted before `projectsRoutes` in `index.ts`
 - [ ] If VM agent: route does NOT use `getUserId()`, `requireAuth()`, or `requireApproved()`
 - [ ] If VM agent: route uses `extractBearerToken()` + `verifyCallbackToken()`
+- [ ] If VM agent: expired callback tokens and tombstoned callback resources return designed terminal statuses, not `500`
+- [ ] If VM agent: terminal callback responses are logged below error severity and covered by live-resource regression controls

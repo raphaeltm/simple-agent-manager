@@ -12,7 +12,7 @@
  * See docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md
  */
 import { Hono } from 'hono';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppError } from '../../src/middleware/error';
 
@@ -29,12 +29,21 @@ vi.mock('../../src/auth', () => ({
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
     select: () => ({
-      from: () => ({
-        where: () => ({
-          limit: () => Promise.resolve([{ id: 'ws-test', status: 'creating', nodeId: 'node-test' }]),
-          orderBy: () => Promise.resolve([]),
-        }),
-      }),
+      from: () => {
+        const query = {
+          leftJoin: () => query,
+          where: () => ({
+            limit: () =>
+              Promise.resolve([
+                { id: 'ws-test', status: 'creating', nodeId: 'node-test', nodeStatus: 'running' },
+              ]),
+            orderBy: () => Promise.resolve([]),
+            get: () =>
+              Promise.resolve({ status: 'creating', nodeId: 'node-test', nodeStatus: 'running' }),
+          }),
+        };
+        return query;
+      },
     }),
     update: () => ({
       set: () => ({
@@ -52,7 +61,9 @@ vi.mock('drizzle-orm/d1', () => ({
 
 // Mock JWT verification to accept any token (workspace-scoped)
 vi.mock('../../src/services/jwt', () => ({
-  verifyCallbackToken: vi.fn().mockResolvedValue({ workspace: 'ws-test', type: 'callback', scope: 'workspace' }),
+  verifyCallbackToken: vi
+    .fn()
+    .mockResolvedValue({ workspace: 'ws-test', type: 'callback', scope: 'workspace' }),
   signCallbackToken: vi.fn().mockResolvedValue('mock-token'),
   signNodeCallbackToken: vi.fn().mockResolvedValue('mock-node-token'),
 }));
@@ -147,7 +158,7 @@ describe('workspace callback auth routing (regression)', () => {
     const res = await app.request('/api/workspaces/ws-test/provisioning-failed', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer valid-callback-token',
+        Authorization: 'Bearer valid-callback-token',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ errorMessage: 'devcontainer build failed' }),
@@ -162,7 +173,7 @@ describe('workspace callback auth routing (regression)', () => {
     const res = await app.request('/api/workspaces/ws-test/ready', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer valid-callback-token',
+        Authorization: 'Bearer valid-callback-token',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ status: 'running' }),
@@ -175,7 +186,7 @@ describe('workspace callback auth routing (regression)', () => {
     const res = await app.request('/api/workspaces/ws-test/agent-key', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer valid-callback-token',
+        Authorization: 'Bearer valid-callback-token',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ agentType: 'claude-code' }),

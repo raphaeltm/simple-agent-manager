@@ -19,6 +19,7 @@ const WORKSPACE_NO_SESSION = `${TEST_PREFIX}-ws-nosess`;
 const WORKSPACE_NO_PROJECT = `${TEST_PREFIX}-ws-noproj`;
 const WORKSPACE_STOPPED = `${TEST_PREFIX}-ws-stopped`;
 const PROJECT_ID = `${TEST_PREFIX}-proj`;
+const NODE_ID = `${TEST_PREFIX}-node`;
 const SESSION_ID = `${TEST_PREFIX}-sess`;
 const STOPPED_SESSION_ID = `${TEST_PREFIX}-stopped-sess`;
 const USER_ID = `${TEST_PREFIX}-user`;
@@ -36,6 +37,15 @@ async function postMessages(
     },
     body: JSON.stringify({ messages }),
   });
+}
+
+async function countPlatformErrorsForWorkspace(workspaceId: string): Promise<number> {
+  const row = await env.OBSERVABILITY_DATABASE.prepare(
+    'SELECT COUNT(*) AS count FROM platform_errors WHERE workspace_id = ?'
+  )
+    .bind(workspaceId)
+    .first<{ count: number }>();
+  return row?.count ?? 0;
 }
 
 function makeMessage(overrides: Partial<Record<string, unknown>> = {}) {
@@ -60,66 +70,96 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
       `INSERT OR IGNORE INTO users (id, email, github_id, name, avatar_url, role, status, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, 'user', 'active', cast(unixepoch() * 1000 as integer), cast(unixepoch() * 1000 as integer))`
     )
-      .bind(USER_ID, 'test-user' + '@example.test', 999999, 'Test User', 'https://example.com/avatar.png')
+      .bind(
+        USER_ID,
+        'test-user' + '@example.test',
+        999999,
+        'Test User',
+        'https://example.com/avatar.png'
+      )
       .run();
 
     // Create test project
     await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO github_installation_accounts
+      `INSERT OR IGNORE INTO github_installation_accounts
        (installation_id, account_type, account_name, normalized_account_name, created_at, updated_at)
-     VALUES (?, 'personal', ?, lower(?), datetime('now'), datetime('now'))`,
-  )
-    .bind(PROJECT_ID + '-inst', 'test-owner', 'test-owner')
-    .run();
+     VALUES (?, 'personal', ?, lower(?), datetime('now'), datetime('now'))`
+    )
+      .bind(PROJECT_ID + '-inst', 'test-owner', 'test-owner')
+      .run();
 
-  await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO github_installations
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO github_installations
        (id, user_id, installation_id, external_installation_id, account_type, account_name, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'user', ?, datetime('now'), datetime('now'))`,
-  )
-    .bind(PROJECT_ID + '-inst', USER_ID, PROJECT_ID + '-inst', PROJECT_ID + '-inst', 'test-owner')
-    .run();
+     VALUES (?, ?, ?, ?, 'user', ?, datetime('now'), datetime('now'))`
+    )
+      .bind(PROJECT_ID + '-inst', USER_ID, PROJECT_ID + '-inst', PROJECT_ID + '-inst', 'test-owner')
+      .run();
 
-  await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO projects
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO projects
        (id, user_id, name, normalized_name, installation_id, repository, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, lower(?), ?, ?, ?, datetime('now'), datetime('now'))`,
-  )
-    .bind(PROJECT_ID, USER_ID, 'test-project', 'test-project', PROJECT_ID + '-inst', 'test-owner/test-repo', USER_ID)
+     VALUES (?, ?, ?, lower(?), ?, ?, ?, datetime('now'), datetime('now'))`
+    )
+      .bind(
+        PROJECT_ID,
+        USER_ID,
+        'test-project',
+        'test-project',
+        PROJECT_ID + '-inst',
+        'test-owner/test-repo',
+        USER_ID
+      )
+      .run();
+
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO nodes (id, user_id, name, status, cloud_provider, vm_location, vm_size, created_at, updated_at)
+       VALUES (?, ?, ?, 'running', 'hetzner', 'fsn1', 'cx22', datetime('now'), datetime('now'))`
+    )
+      .bind(NODE_ID, USER_ID, 'test-node')
       .run();
 
     // Workspace with linked chatSessionId
     await env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO workspaces (id, user_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'running', 'cx22', 'fsn1', datetime('now'), datetime('now'))`
+      `INSERT OR IGNORE INTO workspaces (id, user_id, node_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', 'cx22', 'fsn1', datetime('now'), datetime('now'))`
     )
-      .bind(WORKSPACE_ID, USER_ID, PROJECT_ID, SESSION_ID, 'test-ws', 'test-repo', 'main')
+      .bind(WORKSPACE_ID, USER_ID, NODE_ID, PROJECT_ID, SESSION_ID, 'test-ws', 'test-repo', 'main')
       .run();
 
     // Workspace WITHOUT chatSessionId (simulates linking window)
     await env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO workspaces (id, user_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
-       VALUES (?, ?, ?, NULL, ?, ?, ?, 'running', 'cx22', 'fsn1', datetime('now'), datetime('now'))`
+      `INSERT OR IGNORE INTO workspaces (id, user_id, node_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
+       VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 'running', 'cx22', 'fsn1', datetime('now'), datetime('now'))`
     )
-      .bind(WORKSPACE_NO_SESSION, USER_ID, PROJECT_ID, 'test-ws-nosess', 'test-repo', 'main')
+      .bind(
+        WORKSPACE_NO_SESSION,
+        USER_ID,
+        NODE_ID,
+        PROJECT_ID,
+        'test-ws-nosess',
+        'test-repo',
+        'main'
+      )
       .run();
 
     // Workspace without project (edge case)
     await env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO workspaces (id, user_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
-       VALUES (?, ?, NULL, NULL, ?, ?, ?, 'running', 'cx22', 'fsn1', datetime('now'), datetime('now'))`
+      `INSERT OR IGNORE INTO workspaces (id, user_id, node_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
+       VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, 'running', 'cx22', 'fsn1', datetime('now'), datetime('now'))`
     )
-      .bind(WORKSPACE_NO_PROJECT, USER_ID, 'test-ws-noproj', 'test-repo', 'main')
+      .bind(WORKSPACE_NO_PROJECT, USER_ID, NODE_ID, 'test-ws-noproj', 'test-repo', 'main')
       .run();
 
     // Stopped workspace with a still-linked session
     await env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO workspaces (id, user_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'stopped', 'cx22', 'fsn1', datetime('now'), datetime('now'))`
+      `INSERT OR IGNORE INTO workspaces (id, user_id, node_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'stopped', 'cx22', 'fsn1', datetime('now'), datetime('now'))`
     )
       .bind(
         WORKSPACE_STOPPED,
         USER_ID,
+        NODE_ID,
         PROJECT_ID,
         STOPPED_SESSION_ID,
         'test-ws-stopped',
@@ -281,21 +321,21 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
   });
 
   describe('workspace resolution', () => {
-    it('returns 404 for non-existent workspace', async () => {
+    it('returns 204 for non-existent workspace to stop old-agent outbox retries', async () => {
       const fakeToken = await signCallbackToken('nonexistent-ws', env as any);
       const response = await postMessages('nonexistent-ws', [makeMessage()], fakeToken);
-      expect(response.status).toBe(404);
+      expect(response.status).toBe(204);
     });
 
-    it('rejects messages for stopped workspaces before persistence', async () => {
+    it('drops messages for stopped workspaces before persistence', async () => {
+      const beforeErrors = await countPlatformErrorsForWorkspace(WORKSPACE_STOPPED);
       const response = await postMessages(
         WORKSPACE_STOPPED,
         [makeMessage({ sessionId: STOPPED_SESSION_ID })],
         stoppedToken
       );
-      expect(response.status).toBe(400);
-      const body = await response.json<{ error: string; message: string }>();
-      expect(body.message).toContain('Workspace is stopped, not active');
+      expect(response.status).toBe(204);
+      expect(await countPlatformErrorsForWorkspace(WORKSPACE_STOPPED)).toBe(beforeErrors);
     });
   });
 });

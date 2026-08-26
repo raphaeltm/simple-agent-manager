@@ -93,6 +93,51 @@ func TestCallbackTokenRefresh(t *testing.T) {
 	}
 }
 
+func TestNodeHeartbeatTerminalStatusStopsFurtherHeartbeats(t *testing.T) {
+	for _, status := range []int{
+		http.StatusUnauthorized,
+		http.StatusForbidden,
+		http.StatusNotFound,
+		http.StatusGone,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var heartbeatCount int
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				heartbeatCount++
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"error":"terminal","message":"callback resource is gone"}`))
+			}))
+			defer ts.Close()
+
+			cfg := &config.Config{
+				ControlPlaneURL:   ts.URL,
+				NodeID:            "deleted-node-001",
+				CallbackToken:     "callback-token",
+				HeartbeatInterval: time.Minute,
+			}
+			s := &Server{
+				config:        cfg,
+				callbackToken: cfg.CallbackToken,
+				workspaces:    map[string]*WorkspaceRuntime{},
+				errorReporter: newTestErrorReporter(),
+				done:          make(chan struct{}),
+			}
+
+			s.sendNodeHeartbeat()
+
+			if !s.controlPlaneCallbacksStopped() {
+				t.Fatal("expected terminal heartbeat response to stop control-plane callbacks")
+			}
+
+			s.sendNodeHeartbeat()
+
+			if heartbeatCount != 1 {
+				t.Fatalf("expected no retry after terminal heartbeat response, got %d requests", heartbeatCount)
+			}
+		})
+	}
+}
+
 func TestNodeReadyAndHeartbeatReportAgentVersion(t *testing.T) {
 	originalVersion := sysinfo.Version
 	sysinfo.Version = "test-build-sha"

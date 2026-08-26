@@ -25,6 +25,7 @@ import {
   getInstantStaleCallbackMarginMs,
   isSupersededInstantCallback,
 } from '../_stale-callback-guard';
+import { assertWorkspaceCallbackResourceById } from '../workspaces/_helpers';
 import { computeBlockedForTask, setTaskStatus } from './_helpers';
 
 /**
@@ -72,6 +73,7 @@ taskCallbackRoute.post(
       throw errors.forbidden('Token workspace mismatch');
     }
     const workspaceId = task.workspaceId;
+    await assertWorkspaceCallbackResourceById(c.env, workspaceId, 'task_status');
 
     // --- Execution-step-only update (no status transition) ---
     // When executionStep is provided without toStatus, update the step and

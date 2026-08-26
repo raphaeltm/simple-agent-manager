@@ -6,6 +6,9 @@ import { AppError } from '../../../src/middleware/error';
 const mocks = vi.hoisted(() => ({
   updateSets: [] as Array<Record<string, unknown>>,
   workspace: null as Record<string, unknown> | null,
+  nodeStatus: 'running',
+  workspaceStatus: 'running',
+  statusLookupCount: 0,
   // Row returned to the S2 staleness guard's combined agent_sessions⋈nodes read
   // ({ updatedAt, runtime }). Default is non-Instant so existing error tests
   // still process (the guard only engages for cf-container runtimes).
@@ -50,8 +53,16 @@ vi.mock('drizzle-orm/d1', () => ({
     // `id`) and the S2 guard's agent_sessions⋈workspaces⋈nodes read (selection
     // includes `updatedAt`). Any number of leftJoins chain into the same `where`.
     select: (selection?: Record<string, unknown>) => {
-      const rowFor = () =>
-        selection && 'updatedAt' in selection ? mocks.guardRow : mocks.workspace;
+      const rowFor = () => {
+        if (selection && 'updatedAt' in selection) return mocks.guardRow;
+        if (selection && Object.keys(selection).length === 1 && 'status' in selection) {
+          mocks.statusLookupCount += 1;
+          return {
+            status: mocks.statusLookupCount === 1 ? mocks.nodeStatus : mocks.workspaceStatus,
+          };
+        }
+        return mocks.workspace;
+      };
       const terminal = { get: () => Promise.resolve(rowFor()) };
       const joinable: { leftJoin: () => typeof joinable; where: () => typeof terminal } = {
         leftJoin: () => joinable,
@@ -143,6 +154,9 @@ describe('agent activity callback', () => {
     vi.clearAllMocks();
     mocks.updateSets.length = 0;
     mocks.workspace = null;
+    mocks.nodeStatus = 'running';
+    mocks.workspaceStatus = 'running';
+    mocks.statusLookupCount = 0;
     mocks.guardRow = { updatedAt: null, runtime: 'vm' };
     mocks.jwt.verifyCallbackToken.mockResolvedValue({
       workspace: 'workspace-1',
@@ -377,6 +391,31 @@ describe('agent activity callback', () => {
 
     expect(response.status).toBe(204);
     expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalled();
+  });
+
+  it('returns 410 and does not mutate when the session node is deleted', async () => {
+    mocks.nodeStatus = 'deleted';
+    const app = await createTestApp();
+
+    const response = await postActivity(app, { activity: 'error', nodeId: 'node-1' });
+
+    expect(response.status).toBe(410);
+    expect(mocks.projectData.reportAcpSessionActivity).not.toHaveBeenCalled();
+    expect(mocks.projectData.transitionAcpSession).not.toHaveBeenCalled();
+    expect(mocks.projectData.failSession).not.toHaveBeenCalled();
+    expect(mocks.updateSets).toHaveLength(0);
+  });
+
+  it('returns 410 and does not mutate when the session workspace is stopped', async () => {
+    mocks.workspaceStatus = 'stopped';
+    const app = await createTestApp();
+
+    const response = await postActivity(app, { activity: 'idle', nodeId: 'node-1' });
+
+    expect(response.status).toBe(410);
+    expect(mocks.projectData.reportAcpSessionActivity).not.toHaveBeenCalled();
+    expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
+    expect(mocks.updateSets).toHaveLength(0);
   });
 
   it('does not re-fail terminal ACP sessions on duplicate late error activity', async () => {

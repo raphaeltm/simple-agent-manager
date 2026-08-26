@@ -8,17 +8,84 @@ import { extractBearerToken } from '../../lib/auth-helpers';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
-import { signCallbackToken,verifyCallbackToken } from '../../services/jwt';
+import { signCallbackToken, verifyCallbackToken } from '../../services/jwt';
 import { createWorkspaceOnNode } from '../../services/node-agent';
+import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
 import {
   resolveWorkspaceGitSource,
   type WorkspaceGitSourceProject,
 } from '../../services/workspace-git-source';
 
 export const ACTIVE_WORKSPACE_STATUSES = new Set(['running', 'recovery'] as const);
+export const WORKSPACE_CALLBACK_ACTIVE_STATUSES: ReadonlySet<string> = new Set([
+  'creating',
+  'running',
+  'recovery',
+]);
+export const WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES: ReadonlySet<string> = new Set([
+  'creating',
+  'error',
+]);
 
 export function isActiveWorkspaceStatus(status: string): boolean {
   return ACTIVE_WORKSPACE_STATUSES.has(status as 'running' | 'recovery');
+}
+
+export function assertWorkspaceAcceptsCallback<
+  T extends { status: string; nodeId: string | null; nodeStatus: string | null },
+>(
+  workspace: T | null | undefined,
+  workspaceId: string,
+  callback: string,
+  allowedStatuses: ReadonlySet<string> = WORKSPACE_CALLBACK_ACTIVE_STATUSES
+): asserts workspace is T {
+  if (!workspace || !allowedStatuses.has(workspace.status)) {
+    const observedStatus = workspace?.status ?? 'missing';
+    log.info('workspace_callback.terminal_resource', {
+      workspaceId,
+      status: observedStatus,
+      callback,
+      action: 'terminal_gone',
+    });
+    throw errors.gone(`Workspace is ${observedStatus}; callback resource is gone`);
+  }
+
+  if (
+    !workspace.nodeId ||
+    !workspace.nodeStatus ||
+    nodeStatusTerminatesCallbacks(workspace.nodeStatus)
+  ) {
+    const observedNodeStatus = workspace.nodeStatus ?? 'missing';
+    log.info('workspace_callback.terminal_node', {
+      workspaceId,
+      nodeId: workspace.nodeId ?? null,
+      nodeStatus: observedNodeStatus,
+      workspaceStatus: workspace.status,
+      callback,
+      action: 'terminal_gone',
+    });
+    throw errors.gone(`Workspace node is ${observedNodeStatus}; callback resource is gone`);
+  }
+}
+
+export async function assertWorkspaceCallbackResourceById(
+  env: Env,
+  workspaceId: string,
+  callback: string,
+  allowedStatuses: ReadonlySet<string> = WORKSPACE_CALLBACK_ACTIVE_STATUSES
+): Promise<void> {
+  const db = drizzle(env.DATABASE, { schema });
+  const workspace = await db
+    .select({
+      status: schema.workspaces.status,
+      nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
+    })
+    .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
+    .where(eq(schema.workspaces.id, workspaceId))
+    .get();
+  assertWorkspaceAcceptsCallback(workspace, workspaceId, callback, allowedStatuses);
 }
 
 /** Parse a JSON string into a plain object, returning null on failure or prototype pollution. */
@@ -106,7 +173,7 @@ export async function verifyWorkspaceCallbackAuth(
   // Node-scoped tokens CANNOT access workspace-scoped endpoints.
   // This prevents cross-workspace secret access on multi-tenant nodes.
   if (payload.scope === 'node') {
-    log.error('workspace_auth.rejected_node_scoped_token', {
+    log.warn('workspace_auth.rejected_node_scoped_token', {
       tokenWorkspace: payload.workspace,
       requestedWorkspaceId: workspaceId,
       scope: payload.scope,
@@ -168,9 +235,9 @@ export async function scheduleWorkspaceCreateOnNode(
       gitUserName,
       gitUserEmail,
     });
-    await env.DATABASE.prepare(
-      `UPDATE workspaces SET dispatched_at = ? WHERE id = ?`
-    ).bind(new Date().toISOString(), workspaceId).run();
+    await env.DATABASE.prepare(`UPDATE workspaces SET dispatched_at = ? WHERE id = ?`)
+      .bind(new Date().toISOString(), workspaceId)
+      .run();
   } catch (err) {
     await db
       .update(schema.workspaces)
