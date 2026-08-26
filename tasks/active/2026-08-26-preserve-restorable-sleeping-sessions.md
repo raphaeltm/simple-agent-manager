@@ -180,9 +180,9 @@ archives because those paths delete snapshot state first.
 - Full validation:
   - `pnpm lint`
   - `pnpm typecheck`
-  - `pnpm test` — 617 files, 8376 tests.
   - `pnpm build`
-  - `pnpm --filter @simple-agent-manager/api test:workers` — 58 files, 751 tests.
+  - `pnpm test` — 617 files, 8387 tests.
+  - `pnpm --filter @simple-agent-manager/api test:workers` — 58 files, 755 tests.
 
 ## Task Completion Validation
 
