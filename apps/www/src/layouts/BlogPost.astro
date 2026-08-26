@@ -56,7 +56,15 @@ const formattedDate = date.toLocaleDateString('en-US', {
     </div>
   </main>
   <CtaFooter />
-  <script type="module">
+  <!--
+    is:inline keeps this out of Astro's bundler. /scripts/blog-mermaid.js is an
+    esbuild output emitted into public/ by the `build:blog-mermaid` step, so it
+    is a runtime URL rather than a module the bundler can resolve from source.
+    Astro 7's rolldown pipeline resolves dynamic imports inside processed
+    <script> blocks and fails the build on this one; is:inline preserves the
+    original lazy-load-only-when-a-mermaid-block-exists behaviour.
+  -->
+  <script type="module" is:inline>
     if (document.querySelector('.post-body [data-language="mermaid"]')) {
       import('/scripts/blog-mermaid.js');
     }

@@ -8,7 +8,9 @@ catalog:
   # === Build & Dev Tooling ===
   typescript: 5.9.3
   vite: 8.1.3
-  vitest: 4.1.5
+  # @vitest/coverage-v8 peer-depends on an EXACT vitest version (not a range),
+  # so these two must move together. Keep in sync with the Vitest Ecosystem block.
+  vitest: 4.1.7
   tsx: 4.23.1
   '@eslint/js': 9.39.5
   '@astrojs/check': 0.9.10
@@ -30,15 +32,26 @@ catalog:
   typescript-eslint: 8.67.0
 
   # === Cloudflare ===
+  # KNOWN LAG, deliberate: wrangler declares an OPTIONAL peer on
+  # @cloudflare/workers-types (4.123.0 wants ^5.20260811.1) and these two have
+  # lagged for several wrangler releases. Unlike the exact-pinned lockstep groups
+  # enforced in scripts/quality/dependency-governance.test.ts, this is a caret
+  # range on an optional peer: nothing here exercises the newer runtime types and
+  # `tsc --noEmit` is clean, so the two are NOT required to move together. Let
+  # Dependabot's own workers-types PR advance it rather than bundling it with a
+  # wrangler bump.
   '@cloudflare/workers-types': 5.20260707.1
-  wrangler: 4.118.0
+  wrangler: 4.123.0
 
   # === React Ecosystem ===
-  react: 19.2.7
-  react-dom: 19.2.7
+  # react and react-dom ship from one repo and must stay on the same version —
+  # react-dom loads the matching reconciler build. Dependabot groups react with
+  # @types/react but not react-dom, so bump react-dom by hand alongside react.
+  react: 19.2.8
+  react-dom: 19.2.8
   eslint-plugin-react: 7.37.5
   eslint-plugin-react-hooks: 7.1.1
-  '@types/react': 19.2.17
+  '@types/react': 19.2.18
   '@types/react-dom': 19.2.3
   react-router: 7.14.2
   lucide-react: 0.460.0
