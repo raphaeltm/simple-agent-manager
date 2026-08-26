@@ -112,7 +112,7 @@ reread before destructive cleanup.
   is not delayed by optional storage maintenance.
 - [x] Add telemetry for storage alarm duration, rows, bytes, and budget decisions
   where missing.
-- [ ] Replace repeated per-secret `wrangler secret put` / delete loops in
+- [x] Replace repeated per-secret `wrangler secret put` / delete loops in
   `scripts/deploy/configure-secrets.sh` with a bulk/bounded secret workflow that
   never logs secret values.
 - [ ] Update public/internal documentation and environment references for any new

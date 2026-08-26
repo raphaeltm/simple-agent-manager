@@ -72,7 +72,7 @@ function extractConfiguredWorkerSecrets(scriptContent: string): string[] {
 }
 
 function extractWranglerCommentedSecrets(wranglerContent: string): string[] {
-  const secretsHeader = 'Secrets (set via wrangler secret put):';
+  const secretsHeader = 'Secrets (set via wrangler secret bulk):';
   const start = wranglerContent.indexOf(secretsHeader);
   if (start === -1) {
     return [];
@@ -165,7 +165,7 @@ function checkSecretInventory(
 ): void {
   if (commentedSecrets.length === 0) {
     errors.push(
-      'apps/api/wrangler.toml: missing "# Secrets (set via wrangler secret put):" inventory comment'
+      'apps/api/wrangler.toml: missing "# Secrets (set via wrangler secret bulk):" inventory comment'
     );
     return;
   }

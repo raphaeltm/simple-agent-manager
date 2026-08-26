@@ -472,6 +472,14 @@ describe('deployment workflow hardening', () => {
     expect(contents).toContain('deployment environment argument is required');
     expect(contents).toContain('Usage: bash scripts/deploy/configure-secrets.sh <environment>');
     expect(contents).toContain('set_worker_secret "CF_AIG_TOKEN"');
+    expect(contents).toContain('wrangler secret bulk "$WORKER_SECRET_BULK_PAYLOAD" --env "$ENVIRONMENT"');
+    expect(contents).toContain('WORKER_SECRET_BULK_MAX_OPS');
+    expect(contents).toContain('chmod 600 "$WORKER_SECRET_BULK_PAYLOAD"');
+    expect(contents).toContain('json_escape_stdin');
+    expect(contents).toContain('>/dev/null 2>&1');
+    expect(contents).not.toContain('wrangler secret put');
+    expect(contents).not.toContain('wrangler secret delete');
+    expect(contents).not.toContain('echo "$output"');
     expect(contents).not.toContain('ENVIRONMENT="${1:-production}"');
   });
 
