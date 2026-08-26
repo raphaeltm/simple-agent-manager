@@ -127,8 +127,10 @@ reread before destructive cleanup.
   - ProjectData storage alarm does not run unbounded category scans;
   - deploy-secret bulk workflow redacts values and bounds Worker-version churn.
 - [x] Run broader API, Worker, deploy-script, and VM-agent checks as applicable.
-- [ ] Complete specialist review, staging verification, PR CI, merge, and
-  production deploy monitoring.
+
+Post-archive `/do` workflow gates — specialist review, staging verification, PR
+CI, merge, and production deploy monitoring — are tracked in `.do-state.md` and
+the PR description per phases 5-7.
 
 ## Acceptance criteria
 
@@ -150,8 +152,10 @@ reread before destructive cleanup.
   boundaries fail closed, no new destructive agent-facing deployment control is
   exposed without user-visible controls, and missing user cloud credentials are
   not treated as a staging/provisioning blocker when platform credentials exist.
-- Focused unit tests, Worker/Miniflare tests, relevant broader checks, staging
-  verification, PR CI, merge, and production deploy monitoring all complete.
+- Focused unit tests, Worker/Miniflare tests, and relevant broader checks
+  complete before archive; specialist review, staging verification, PR CI,
+  merge, and production deploy monitoring are post-archive `/do` gates tracked in
+  `.do-state.md` and the final report.
 
 ## References
 
