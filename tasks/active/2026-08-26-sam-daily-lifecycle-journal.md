@@ -25,12 +25,12 @@ reader without SAM architecture knowledge can follow.
 
 ## Implementation checklist
 
-- [ ] Draft a concise `devlog` post in the SAM journal series.
-- [ ] Explain the liveness change as “check before stopping work,” without
+- [x] Draft a concise `devlog` post in the SAM journal series.
+- [x] Explain the liveness change as “check before stopping work,” without
       overstating heartbeat or probe guarantees.
-- [ ] Explain centralized lifecycle closure as one shared final step used by
+- [x] Explain centralized lifecycle closure as one shared final step used by
       many shutdown paths.
-- [ ] Add a Mermaid diagram only for the cleanup flow.
+- [x] Add a Mermaid diagram only for the cleanup flow.
 - [ ] Build the public website and inspect the rendered content.
 
 ## Acceptance criteria
