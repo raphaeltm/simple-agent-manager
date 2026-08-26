@@ -100,30 +100,33 @@ Two smaller issues in the same diff:
 
 ## Implementation checklist
 
-- [ ] Add typed sentinels `errWorkspaceRuntimeNotFound` / `errWorkspaceNotRunning` in `git.go`, and
+- [x] Add typed sentinels `errWorkspaceRuntimeNotFound` / `errWorkspaceNotRunning` in `git.go`, and
       have `resolveContainerForWorkspace` wrap them with `%w`, preserving the exact message text
-- [ ] Revert the widening of `isContainerUnavailableError` (restore its recovery-trigger meaning)
-- [ ] Add `isSnapshotTeardownRaceError` in the snapshot coordinator, composing the sentinels with
+- [x] Revert the widening of `isContainerUnavailableError` (restore its recovery-trigger meaning)
+- [x] Add `isSnapshotTeardownRaceError` in the snapshot coordinator, composing the sentinels with
       `isContainerUnavailableError` (composition, not duplication)
-- [ ] Simplify `shouldReportBackgroundSnapshotIncident` to the evidence-backed rule; drop the
+- [x] Simplify `shouldReportBackgroundSnapshotIncident` to the evidence-backed rule; drop the
       `context.Canceled` / `context.DeadlineExceeded` suppression
-- [ ] Rewrite the two duplicated tests as one table-driven test with a shared harness (clears Sonar)
-- [ ] Cover all three teardown-race spellings plus a material-failure control in the table
-- [ ] Prove the guard discriminating: delete it, confirm only the suppression cases go red, restore
-- [ ] Add process-fix rule `.claude/rules/67-shared-predicates-that-trigger-actions.md`
+- [x] Rewrite the two duplicated tests as one table-driven test with a shared harness (clears Sonar)
+- [x] Cover all three teardown-race spellings plus a material-failure control in the table
+- [x] Prove the guard discriminating: delete it, confirm only the suppression cases go red, restore
+- [x] Add process-fix rule `.claude/rules/67-shared-predicates-that-trigger-actions.md`
 - [ ] Add the Agent Preflight block + Post-Mortem + Specialist Review Evidence to the PR body
-- [ ] File a SAM Idea for the unaddressed HTTP-409 stale-generation snapshot noise (7 occurrences)
+- [x] File a SAM Idea for the unaddressed HTTP-409 stale-generation snapshot noise (7 occurrences)
+      -> SAM Idea `01M0Y8FDWWPFAJ50WSYSEZQ5KD`
 
 ## Acceptance criteria
 
-- [ ] `isContainerUnavailableError` is byte-identical to `main` (no behaviour change at its three
-      recovery call sites)
-- [ ] All three production teardown-race messages stop producing error incidents
-- [ ] A material snapshot failure (e.g. `HTTP 400: checksum mismatch`) still produces an incident
-- [ ] A snapshot timeout still produces an incident
-- [ ] The generation-scoped `reportSnapshotFailure` callback still fires for suppressed failures, so
-      the control plane is not blinded
-- [ ] `go test ./...` green in `packages/vm-agent`; `go vet` and `gofmt` clean
+- [x] `isContainerUnavailableError` function body is byte-identical to `main` (verified by diffing the
+      function against `origin/main`; only a doc comment was added above it) — no behaviour change at its
+      three recovery call sites, and pinned by `TestWorkspaceLifecycleErrorsClassifyWithoutTriggeringRecovery`
+- [x] All three production teardown-race messages stop producing error incidents
+      (`TestBackgroundSessionSnapshotIncidentSeverity`, cases built from the real resolver)
+- [x] A material snapshot failure (e.g. `HTTP 400: checksum mismatch`) still produces an incident
+- [x] A snapshot timeout still produces an incident (`capture exceeded its time budget` case)
+- [x] The generation-scoped `reportSnapshotFailure` callback still fires for suppressed failures, so
+      the control plane is not blinded (asserted in every table case)
+- [x] `go test ./...` green in `packages/vm-agent` (also `-race`); `go vet` and `gofmt` clean
 - [ ] SonarCloud quality gate passes; Preflight Evidence passes
 - [ ] Real-VM staging verification per `.claude/rules/27` + `/do` Phase 6b, with staging nodes
       deleted afterwards (Hetzner 10-server shared cap, policy `a63e6a68`)
