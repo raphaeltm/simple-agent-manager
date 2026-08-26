@@ -6,6 +6,8 @@ import {
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS,
+  DEFAULT_PLATFORM_FEEDBACK_INCIDENT_RECLAIM_LIMIT,
+  DEFAULT_PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT,
@@ -21,6 +23,8 @@ export interface IncidentConfig {
   dispatchLeaseTtlMs: number;
   agentLeaseTtlMs: number;
   maxDispatchAttempts: number;
+  reopenCooldownMs: number;
+  reclaimLimit: number;
   maxAgeMs: number;
   triggerLimit: number;
   triggerName: string;
@@ -34,6 +38,11 @@ export interface IncidentConfig {
 function positive(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? '', 10);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function nonNegative(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 function booleanSetting(value: string | undefined, fallback: boolean): boolean {
@@ -61,6 +70,14 @@ export function getIncidentConfig(env: Env): IncidentConfig {
     maxDispatchAttempts: positive(
       env.PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS,
       DEFAULT_PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS
+    ),
+    reopenCooldownMs: nonNegative(
+      env.PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS,
+      DEFAULT_PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS
+    ),
+    reclaimLimit: positive(
+      env.PLATFORM_FEEDBACK_INCIDENT_RECLAIM_LIMIT,
+      DEFAULT_PLATFORM_FEEDBACK_INCIDENT_RECLAIM_LIMIT
     ),
     maxAgeMs: positive(
       env.PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS,

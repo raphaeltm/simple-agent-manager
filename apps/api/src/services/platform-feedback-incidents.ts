@@ -2,6 +2,7 @@ import { TASK_TERMINAL_STATUSES } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
+import { isNodeAgentVersionCompatible } from './node-agent-compatibility';
 import { redactSensitiveData } from './observability';
 import {
   configuredFeedbackProjectId,
@@ -40,6 +41,8 @@ const ACTIVE_INCIDENT_STATES = new Set<IncidentQueueState>(['pending', 'dispatch
 const TERMINAL_INCIDENT_STATES = new Set<IncidentQueueState>(['resolved', 'rejected', 'expired']);
 const REPORT_SOURCE = 'user-report';
 const TERMINAL_TASK_STATUS_SQL = TASK_TERMINAL_STATUSES.map((status) => `'${status}'`).join(', ');
+const FIX_REFERENCE_PATTERN =
+  /(?:\bPR\s*#\d+\b|#\d+\b|\bpull\/\d+\b|github\.com\/[^\s]+\/pull\/\d+)/i;
 
 interface IncidentRow {
   signature: string;
@@ -71,6 +74,7 @@ interface IncidentRow {
   incident_claimed_at: number | null;
   resolved_at: number | null;
   resolved_by_task_id: string | null;
+  resolved_task_output_pr_url?: string | null;
   resolution_note: string | null;
   resolution_references: string | null;
   expired_at: number | null;
@@ -130,6 +134,25 @@ export interface UserReportIncidentInput {
   authorizedKeys: string[];
   contentMaxLength: number;
   now?: number;
+}
+
+export interface IncidentReopenEvidence {
+  timestamp: number;
+  nodeAgentVersion?: string | null;
+}
+
+export interface IncidentReopenCheckInput {
+  queueState: string | null | undefined;
+  rejectedAt?: number | null;
+  resolvedAt?: number | null;
+  expiredAt?: number | null;
+  source?: string | null;
+  resolutionNote?: string | null;
+  resolvedTaskOutputPrUrl?: string | null;
+  resolutionReferences?: IncidentResolutionReferences | null;
+  occurrence: IncidentReopenEvidence;
+  config: Pick<IncidentConfig, 'reopenCooldownMs'>;
+  requiredVmAgentVersion?: string | null;
 }
 
 function stripControlCharacters(value: string): string {
@@ -227,6 +250,61 @@ function resolveIncidentOptions(
   };
 }
 
+function hasFixReference(
+  input: Pick<
+    IncidentReopenCheckInput,
+    'resolutionNote' | 'resolvedTaskOutputPrUrl' | 'resolutionReferences'
+  >
+): boolean {
+  if (
+    input.resolutionReferences?.fixPrUrl ||
+    input.resolutionReferences?.dispatchedTaskId ||
+    input.resolutionReferences?.linkedRecordId
+  ) {
+    return true;
+  }
+  if (input.resolvedTaskOutputPrUrl?.trim()) return true;
+  return FIX_REFERENCE_PATTERN.test(input.resolutionNote ?? '');
+}
+
+function terminalTimestampForState(
+  queueState: IncidentQueueState,
+  input: Pick<IncidentReopenCheckInput, 'resolvedAt' | 'expiredAt'>
+): number | null {
+  if (queueState === 'resolved') return input.resolvedAt ?? null;
+  if (queueState === 'expired') return input.expiredAt ?? input.resolvedAt ?? null;
+  return null;
+}
+
+export function shouldReopenIncidentForOccurrence(input: IncidentReopenCheckInput): boolean {
+  if (!Number.isFinite(input.occurrence.timestamp)) return false;
+
+  const queueState = toQueueState(input.queueState ?? 'pending');
+  if (input.rejectedAt !== null && input.rejectedAt !== undefined) return false;
+  if (queueState === 'rejected') return false;
+  if (!TERMINAL_INCIDENT_STATES.has(queueState)) return true;
+
+  const terminalAt = terminalTimestampForState(queueState, input);
+  if (terminalAt !== null) {
+    if (input.occurrence.timestamp <= terminalAt) return false;
+    const cooldownMs = Math.max(0, input.config.reopenCooldownMs);
+    if (input.occurrence.timestamp < terminalAt + cooldownMs) return false;
+  }
+
+  const source = input.source?.trim().toLowerCase();
+  if (source === 'vm-agent' && hasFixReference(input)) {
+    const requiredAgentVersion = input.requiredVmAgentVersion?.trim();
+    if (
+      requiredAgentVersion &&
+      !isNodeAgentVersionCompatible(input.occurrence.nodeAgentVersion, requiredAgentVersion)
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function toListItem(row: IncidentRow): IncidentListItem {
   return {
     id: row.signature,
@@ -255,14 +333,21 @@ function toListItem(row: IncidentRow): IncidentListItem {
 async function readIncidentRow(env: Env, signature: string): Promise<IncidentRow | null> {
   return (
     (await env.DATABASE.prepare(
-      `SELECT signature, source, summary, severity, first_seen_at, last_seen_at, occurrence_count,
-        evidence_refs, diagnosis_id, idea_id, failure_count, last_failure_reason, last_failed_at,
-        rejected_at, queue_state, queued_at, dispatch_lease_token, dispatch_lease_expires_at,
-        dispatched_trigger_id, dispatched_execution_id, dispatched_task_id, dispatched_at,
-        dispatch_attempts, incident_claim_token, incident_claim_expires_at,
-        incident_claimed_by_task_id, incident_claimed_at, resolved_at, resolved_by_task_id,
-        resolution_note, resolution_references, expired_at, created_at, updated_at
-       FROM platform_feedback_triages WHERE signature = ?`
+      `SELECT triage.signature, triage.source, triage.summary, triage.severity,
+        triage.first_seen_at, triage.last_seen_at, triage.occurrence_count,
+        triage.evidence_refs, triage.diagnosis_id, triage.idea_id, triage.failure_count,
+        triage.last_failure_reason, triage.last_failed_at, triage.rejected_at,
+        triage.queue_state, triage.queued_at, triage.dispatch_lease_token,
+        triage.dispatch_lease_expires_at, triage.dispatched_trigger_id,
+        triage.dispatched_execution_id, triage.dispatched_task_id, triage.dispatched_at,
+        triage.dispatch_attempts, triage.incident_claim_token, triage.incident_claim_expires_at,
+        triage.incident_claimed_by_task_id, triage.incident_claimed_at, triage.resolved_at,
+        triage.resolved_by_task_id, resolved_task.output_pr_url AS resolved_task_output_pr_url,
+        triage.resolution_note, triage.resolution_references, triage.expired_at,
+        triage.created_at, triage.updated_at
+       FROM platform_feedback_triages triage
+       LEFT JOIN tasks resolved_task ON resolved_task.id = triage.resolved_by_task_id
+       WHERE triage.signature = ?`
     )
       .bind(signature)
       .first<IncidentRow>()) ?? null
@@ -272,8 +357,27 @@ async function readIncidentRow(env: Env, signature: string): Promise<IncidentRow
 export async function markIncidentPending(
   env: Env,
   signature: string,
-  now: number = Date.now()
+  now: number = Date.now(),
+  occurrence: IncidentReopenEvidence = { timestamp: now },
+  config: IncidentConfig = getIncidentConfig(env)
 ): Promise<void> {
+  const row = await readIncidentRow(env, signature);
+  if (!row) return;
+  const shouldReopen = shouldReopenIncidentForOccurrence({
+    queueState: row.queue_state,
+    rejectedAt: row.rejected_at,
+    resolvedAt: row.resolved_at,
+    expiredAt: row.expired_at,
+    source: row.source,
+    resolutionNote: row.resolution_note,
+    resolvedTaskOutputPrUrl: row.resolved_task_output_pr_url,
+    resolutionReferences: parseStoredIncidentResolutionReferences(row.resolution_references),
+    occurrence,
+    config,
+    requiredVmAgentVersion: env.VM_AGENT_REQUIRED_VERSION,
+  });
+  if (!shouldReopen) return;
+
   await env.DATABASE.prepare(
     `UPDATE platform_feedback_triages SET
       queue_state = CASE
@@ -337,6 +441,25 @@ export async function upsertUserReportIncident(
     .bind(signature, REPORT_SOURCE, summary, now, now, evidenceRefs, now)
     .run();
 
+  const currentBeforeUpdate = await readIncidentRow(env, signature);
+  const shouldReopenExisting =
+    !currentBeforeUpdate ||
+    shouldReopenIncidentForOccurrence({
+      queueState: currentBeforeUpdate.queue_state,
+      rejectedAt: currentBeforeUpdate.rejected_at,
+      resolvedAt: currentBeforeUpdate.resolved_at,
+      expiredAt: currentBeforeUpdate.expired_at,
+      source: currentBeforeUpdate.source,
+      resolutionNote: currentBeforeUpdate.resolution_note,
+      resolvedTaskOutputPrUrl: currentBeforeUpdate.resolved_task_output_pr_url,
+      resolutionReferences: parseStoredIncidentResolutionReferences(
+        currentBeforeUpdate.resolution_references
+      ),
+      occurrence: { timestamp: now },
+      config,
+      requiredVmAgentVersion: env.VM_AGENT_REQUIRED_VERSION,
+    });
+
   await env.DATABASE.prepare(
     `UPDATE platform_feedback_triages SET
       first_seen_at = MIN(first_seen_at, ?),
@@ -345,19 +468,30 @@ export async function upsertUserReportIncident(
       evidence_refs = ?,
       queue_state = CASE
         WHEN rejected_at IS NOT NULL THEN 'rejected'
-        WHEN queue_state IN ('resolved', 'expired') THEN 'pending'
+        WHEN queue_state IN ('resolved', 'expired') AND ? THEN 'pending'
         ELSE queue_state
       END,
       queued_at = CASE
         WHEN rejected_at IS NOT NULL THEN queued_at
-        WHEN queued_at IS NULL OR queue_state IN ('resolved', 'expired') THEN ?
+        WHEN queue_state IN ('resolved', 'expired') AND ? THEN ?
+        WHEN queued_at IS NULL AND queue_state NOT IN ('resolved', 'expired') THEN ?
         ELSE queued_at
       END,
-      expired_at = CASE WHEN queue_state = 'expired' THEN NULL ELSE expired_at END,
+      expired_at = CASE WHEN queue_state = 'expired' AND ? THEN NULL ELSE expired_at END,
       updated_at = CURRENT_TIMESTAMP
      WHERE signature = ?`
   )
-    .bind(now, now, evidenceRefs, now, signature)
+    .bind(
+      now,
+      now,
+      evidenceRefs,
+      shouldReopenExisting ? 1 : 0,
+      shouldReopenExisting ? 1 : 0,
+      now,
+      now,
+      shouldReopenExisting ? 1 : 0,
+      signature
+    )
     .run();
 
   const row = await readIncidentRow(env, signature);
@@ -475,49 +609,101 @@ export async function reclaimExpiredIncidentDispatches(
   // prove the dispatched task is dead. Mirror the task row that
   // completeIncidentDispatchLink() writes and preserve the lease while that task
   // remains non-terminal; trigger cleanup/admission use the same liveness owner.
-  const liveDispatchedTaskPredicate = `NOT EXISTS (
+  const liveDispatchedTaskPredicateFor = (tableRef: string) => `NOT EXISTS (
     SELECT 1 FROM tasks live_task
      WHERE live_task.status NOT IN (${TERMINAL_TASK_STATUS_SQL})
        AND (
-         live_task.id = platform_feedback_triages.dispatched_task_id
+         live_task.id = ${tableRef}.dispatched_task_id
          OR live_task.id = (
            SELECT e.task_id FROM trigger_executions e
-            WHERE e.id = platform_feedback_triages.dispatched_execution_id
+            WHERE e.id = ${tableRef}.dispatched_execution_id
             LIMIT 1
          )
        )
   )`;
-  const reject = await env.DATABASE.prepare(
-    `UPDATE platform_feedback_triages SET queue_state = 'rejected', rejected_at = COALESCE(rejected_at, ?),
-      resolution_note = ?, dispatch_lease_token = NULL, dispatch_lease_expires_at = NULL,
-      updated_at = CURRENT_TIMESTAMP
-     WHERE queue_state = 'dispatched'
-       AND dispatch_lease_expires_at IS NOT NULL
-       AND dispatch_lease_expires_at < ?
-       AND dispatch_attempts >= ?` + ` AND ${liveDispatchedTaskPredicate}`
+  const liveDispatchedTaskPredicate = liveDispatchedTaskPredicateFor('triage');
+  const liveDispatchedTaskUpdatePredicate =
+    liveDispatchedTaskPredicateFor('platform_feedback_triages');
+  const expired = await env.DATABASE.prepare(
+    `SELECT triage.signature, triage.dispatch_attempts,
+       EXISTS (
+         SELECT 1 FROM task_status_events event
+         WHERE event.task_id = triage.dispatched_task_id
+           AND event.to_status = 'failed'
+           AND event.actor_type = 'workspace_callback'
+       ) AS agent_reported_failure
+     FROM platform_feedback_triages triage
+     WHERE triage.queue_state = 'dispatched'
+       AND triage.dispatch_lease_expires_at IS NOT NULL
+       AND triage.dispatch_lease_expires_at < ?
+       AND ${liveDispatchedTaskPredicate}
+     ORDER BY triage.dispatch_lease_expires_at ASC, triage.signature ASC
+     LIMIT ?`
   )
-    .bind(
-      now,
-      'incident dispatch attempts exhausted after lease expiry',
-      now,
-      config.maxDispatchAttempts
-    )
-    .run();
+    .bind(now, config.reclaimLimit)
+    .all<{
+      signature: string;
+      dispatch_attempts: number;
+      agent_reported_failure: number;
+    }>();
 
-  const requeue = await env.DATABASE.prepare(
-    `UPDATE platform_feedback_triages SET queue_state = 'pending',
-      dispatch_lease_token = NULL, dispatch_lease_expires_at = NULL,
-      dispatched_trigger_id = NULL, dispatched_execution_id = NULL, dispatched_task_id = NULL,
-      queued_at = COALESCE(queued_at, ?),
-      updated_at = CURRENT_TIMESTAMP
-     WHERE queue_state = 'dispatched'
-       AND dispatch_lease_expires_at IS NOT NULL
-       AND dispatch_lease_expires_at < ?
-       AND dispatch_attempts < ?` + ` AND ${liveDispatchedTaskPredicate}`
-  )
-    .bind(now, now, config.maxDispatchAttempts)
-    .run();
-  return { requeued: requeue.meta.changes ?? 0, rejected: reject.meta.changes ?? 0 };
+  let requeued = 0;
+  let rejected = 0;
+  for (const row of expired.results ?? []) {
+    const consumedAttempt = row.agent_reported_failure ? 1 : 0;
+    const nextAttempts = row.dispatch_attempts + consumedAttempt;
+    if (nextAttempts >= config.maxDispatchAttempts) {
+      const reject = await env.DATABASE.prepare(
+        `UPDATE platform_feedback_triages SET queue_state = 'rejected',
+          rejected_at = COALESCE(rejected_at, ?),
+          resolution_note = ?,
+          dispatch_attempts = ?,
+          dispatch_lease_token = NULL,
+          dispatch_lease_expires_at = NULL,
+          dispatched_trigger_id = NULL,
+          dispatched_execution_id = NULL,
+          dispatched_task_id = NULL,
+          updated_at = CURRENT_TIMESTAMP
+         WHERE signature = ?
+           AND queue_state = 'dispatched'
+           AND dispatch_lease_expires_at IS NOT NULL
+           AND dispatch_lease_expires_at < ?
+           AND ${liveDispatchedTaskUpdatePredicate}`
+      )
+        .bind(
+          now,
+          'incident dispatch attempts exhausted after lease expiry',
+          nextAttempts,
+          row.signature,
+          now
+        )
+        .run();
+      rejected += reject.meta.changes ?? 0;
+      continue;
+    }
+
+    const requeue = await env.DATABASE.prepare(
+      `UPDATE platform_feedback_triages SET queue_state = 'pending',
+        dispatch_lease_token = NULL,
+        dispatch_lease_expires_at = NULL,
+        dispatched_trigger_id = NULL,
+        dispatched_execution_id = NULL,
+        dispatched_task_id = NULL,
+        dispatch_attempts = ?,
+        queued_at = COALESCE(queued_at, ?),
+        updated_at = CURRENT_TIMESTAMP
+       WHERE signature = ?
+         AND queue_state = 'dispatched'
+         AND dispatch_lease_expires_at IS NOT NULL
+         AND dispatch_lease_expires_at < ?
+         AND ${liveDispatchedTaskUpdatePredicate}`
+    )
+      .bind(nextAttempts, now, row.signature, now)
+      .run();
+    requeued += requeue.meta.changes ?? 0;
+  }
+
+  return { requeued, rejected };
 }
 
 export async function reclaimExpiredIncidentClaims(
@@ -637,7 +823,6 @@ export async function reserveIncidentDispatch(
     `UPDATE platform_feedback_triages SET queue_state = 'dispatched',
       dispatch_lease_token = ?, dispatch_lease_expires_at = ?,
       dispatched_trigger_id = ?, dispatched_execution_id = ?, dispatched_at = ?,
-      dispatch_attempts = dispatch_attempts + 1,
       updated_at = CURRENT_TIMESTAMP
      WHERE signature IN (${placeholders(signatures)})
        AND queue_state = 'pending'

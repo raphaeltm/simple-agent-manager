@@ -35,6 +35,7 @@ function setup() {
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
+      output_pr_url TEXT,
       FOREIGN KEY (project_id) REFERENCES projects(id),
       FOREIGN KEY (user_id) REFERENCES users(id),
       FOREIGN KEY (created_by) REFERENCES users(id)

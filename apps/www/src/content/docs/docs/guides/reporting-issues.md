@@ -122,28 +122,32 @@ The private incident backlog has its own queue state (`pending`, `dispatched`, `
 
 There is no UI button for triage yet. A superadmin can `POST /api/admin/observability/feedback-triage` to sweep immediately rather than waiting for the next hourly run. Note that a manual sweep still only looks back over `PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES` (60 minutes by default), so it will not surface older errors — to test a fresh configuration, trigger it while a recent error is still inside that window.
 
-| Variable                                                | Default      | Description                                                     |
-| ------------------------------------------------------- | ------------ | --------------------------------------------------------------- |
-| `PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES`               | `60`         | Lookback window for grouping recent errors                      |
-| `PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT`                  | `100`        | Max error rows scanned per sweep                                |
-| `PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT`                  | `5`          | Max grouped candidates processed per sweep                      |
-| `PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT`               | `10`         | Max error references retained per group                         |
-| `PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS`                 | `600000`     | Claim lease before a later sweep can reclaim a group            |
-| `PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES`                 | `3`          | Failed attempts before a group is rejected                      |
-| `PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH`    | `240`        | Max characters stored for a sanitized failure reason            |
-| `PLATFORM_FEEDBACK_TRIAGE_BUDGET_DEFER_MS`              | `86400000`   | Retry delay for per-run budget deferrals                        |
-| `PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS`      | `7200000`    | Dispatch lease before a failed trigger handoff can be reclaimed |
-| `PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS`         | `3600000`    | Agent claim lease before another task can reclaim an incident   |
-| `PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS`      | `3`          | Expired dispatch attempts before an incident is rejected        |
-| `PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS`                 | `2592000000` | Max active incident age before expiry                           |
-| `PLATFORM_FEEDBACK_INCIDENT_AUTO_TRIGGER_ENABLED`       | `true`       | Auto-create one private incident trigger when needed            |
-| `PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT`              | `5`          | Max active incident triggers inspected per sweep                |
-| `PLATFORM_FEEDBACK_INCIDENT_TRIGGER_NAME`               | built-in     | Name for the auto-created private incident trigger              |
-| `PLATFORM_FEEDBACK_INCIDENT_TRIGGER_TEMPLATE`           | built-in     | Prompt template for the auto-created private incident trigger   |
-| `PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT`              | `10`         | Max incidents in one trigger backlog summary                    |
-| `PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT`         | `10`         | Max evidence references retained per incident                   |
-| `PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES`         | `32768`      | Max serialized evidence bytes per incident                      |
-| `PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH` | `2000`       | Max private resolution-note length                              |
+| Variable                                                | Default      | Description                                                                                                                                   |
+| ------------------------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES`               | `60`         | Lookback window for grouping recent errors                                                                                                    |
+| `PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT`                  | `100`        | Max error rows scanned per sweep                                                                                                              |
+| `PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT`                  | `5`          | Max grouped candidates processed per sweep                                                                                                    |
+| `PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT`               | `10`         | Max error references retained per group                                                                                                       |
+| `PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS`                 | `600000`     | Claim lease before a later sweep can reclaim a group                                                                                          |
+| `PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES`                 | `3`          | Failed attempts before a group is rejected                                                                                                    |
+| `PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH`    | `240`        | Max characters stored for a sanitized failure reason                                                                                          |
+| `PLATFORM_FEEDBACK_TRIAGE_BUDGET_DEFER_MS`              | `86400000`   | Retry delay for per-run budget deferrals                                                                                                      |
+| `PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS`      | `7200000`    | Dispatch lease before a failed trigger handoff can be reclaimed                                                                               |
+| `PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS`         | `3600000`    | Agent claim lease before another task can reclaim an incident                                                                                 |
+| `PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS`      | `3`          | Agent-reported failed dispatch attempts before an incident is rejected                                                                        |
+| `PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS`         | `1800000`    | Minimum elapsed time after resolution/expiry before a newer occurrence can reopen the signature; set `0` to disable cooldown-only suppression |
+| `PLATFORM_FEEDBACK_INCIDENT_RECLAIM_LIMIT`              | `25`         | Max expired dispatch leases reclaimed by one incident sweep                                                                                   |
+| `PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS`                 | `2592000000` | Max active incident age before expiry                                                                                                         |
+| `PLATFORM_FEEDBACK_INCIDENT_AUTO_TRIGGER_ENABLED`       | `true`       | Auto-create one private incident trigger when needed                                                                                          |
+| `PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT`              | `5`          | Max active incident triggers inspected per sweep                                                                                              |
+| `PLATFORM_FEEDBACK_INCIDENT_TRIGGER_NAME`               | built-in     | Name for the auto-created private incident trigger                                                                                            |
+| `PLATFORM_FEEDBACK_INCIDENT_TRIGGER_TEMPLATE`           | built-in     | Prompt template for the auto-created private incident trigger                                                                                 |
+| `PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT`              | `10`         | Max incidents in one trigger backlog summary                                                                                                  |
+| `PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT`         | `10`         | Max evidence references retained per incident                                                                                                 |
+| `PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES`         | `32768`      | Max serialized evidence bytes per incident                                                                                                    |
+| `PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH` | `2000`       | Max private resolution-note length                                                                                                            |
+
+Resolved and expired incident signatures reopen only when a newer occurrence arrives after `PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS`; older lookback-window occurrences remain closed. VM-agent incidents resolved with fix evidence also wait for occurrences from nodes reporting the current `VM_AGENT_REQUIRED_VERSION`, because Worker deploys do not update already-running VM binaries. Dispatch attempts are consumed only when the incident task reports its own failure; platform-side handoff/session failures release the dispatch without incrementing `dispatch_attempts`.
 
 Automated triage and superadmin-initiated diagnosis have **separate** daily token budgets. They read the same `DEBUG_AGENT_DAILY_TOKEN_LIMIT` value but count against independent per-feature counters, so a noisy hour of triage can never eat the allowance a superadmin wants for hands-on diagnosis. Budget accordingly: with triage enabled, worst-case daily spend on diagnosis is **twice** `DEBUG_AGENT_DAILY_TOKEN_LIMIT`. To cap triage specifically, lower `PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT` or `PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT`. When automated triage hits its daily budget, it defers the current signature until the next UTC day; per-run budget exhaustion uses `PLATFORM_FEEDBACK_TRIAGE_BUDGET_DEFER_MS`.
 

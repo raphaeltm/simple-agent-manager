@@ -17,6 +17,7 @@ function setup() {
   const sqlite = new Database(':memory:');
   sqlite.exec(`
     CREATE TABLE platform_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT, updated_by TEXT);
+    CREATE TABLE tasks (id TEXT PRIMARY KEY, output_pr_url TEXT);
     CREATE TABLE platform_feedback_triages (
       signature TEXT PRIMARY KEY, source TEXT NOT NULL, summary TEXT NOT NULL,
       first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, occurrence_count INTEGER NOT NULL,

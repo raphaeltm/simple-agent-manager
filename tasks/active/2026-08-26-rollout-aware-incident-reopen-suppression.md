@@ -25,34 +25,38 @@ SAM task: `01M0YGT4MPYKNS36GBJAETKAE1`
 
 ## Implementation checklist
 
-- [ ] Add `DEFAULT_PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS` and wire `PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS` through shared exports, `Env`, incident config, `.env.example`, and public configuration docs.
-- [ ] Extend platform-feedback triage row loading and observability row grouping to carry occurrence `node_id` and heartbeat-derived `agent_version` metadata.
-- [ ] Add a shared reopen decision helper that requires terminal incident occurrences to be newer than the terminal timestamp plus cooldown.
-- [ ] Apply the reopen helper in `runPlatformFeedbackTriage()` so old/cooldown/stale-vm-agent occurrences update bounded metadata but do not queue, diagnose, or dispatch closed signatures.
-- [ ] Apply the same terminal reopen policy to `markIncidentPending()` and `upsertUserReportIncident()` so direct incident paths cannot bypass the gate.
-- [ ] Change dispatch attempt accounting so reservation does not consume an attempt; expired dispatch reclamation increments attempts only for agent-reported failed tasks.
-- [ ] Treat platform-side dispatch deaths (`task_acp_session_not_live`, `workspace_deleted`, provisioning/startup failures, missing task boundary) as release/requeue without incrementing `dispatch_attempts`.
-- [ ] Add discriminating real-SQL tests:
-  - [ ] old occurrence predating `resolved_at` stays resolved and a newer occurrence reopens;
-  - [ ] occurrence inside `PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS` stays resolved and post-cooldown occurrence reopens;
-  - [ ] vm-agent occurrence from a stale node build stays resolved and current-build occurrence reopens;
-  - [ ] platform-side expired dispatch release preserves `dispatch_attempts`, while workspace-callback failed task consumes one attempt.
-- [ ] Update existing incident trigger tests for the new attempt-accounting point.
-- [ ] Run focused tests and full quality gates.
+- [x] Add `DEFAULT_PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS` and wire `PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS` through shared exports, `Env`, incident config, `.env.example`, and public configuration docs.
+- [x] Extend platform-feedback triage row loading and observability row grouping to carry occurrence `node_id` and heartbeat-derived `agent_version` metadata.
+- [x] Add a shared reopen decision helper that requires terminal incident occurrences to be newer than the terminal timestamp plus cooldown.
+- [x] Apply the reopen helper in `runPlatformFeedbackTriage()` so old/cooldown/stale-vm-agent occurrences update bounded metadata but do not queue, diagnose, or dispatch closed signatures.
+- [x] Apply the same terminal reopen policy to `markIncidentPending()` and `upsertUserReportIncident()` so direct incident paths cannot bypass the gate.
+- [x] Change dispatch attempt accounting so reservation does not consume an attempt; expired dispatch reclamation increments attempts only for agent-reported failed tasks.
+- [x] Treat platform-side dispatch deaths (`task_acp_session_not_live`, `workspace_deleted`, provisioning/startup failures, missing task boundary) as release/requeue without incrementing `dispatch_attempts`.
+- [x] Bound expired dispatch reclamation with `PLATFORM_FEEDBACK_INCIDENT_RECLAIM_LIMIT` and deterministic lease/signature ordering.
+- [x] Propagate new optional incident Worker variables through deploy config generation and reusable workflow env blocks.
+- [x] Add discriminating real-SQL tests:
+  - [x] old occurrence predating `resolved_at` stays resolved and a newer occurrence reopens;
+  - [x] occurrence inside `PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS` stays resolved and post-cooldown occurrence reopens;
+  - [x] vm-agent occurrence from a stale node build stays resolved and current-build occurrence reopens;
+  - [x] platform-side expired dispatch release preserves `dispatch_attempts`, while workspace-callback failed task consumes one attempt.
+  - [x] expired dispatch reclamation processes only the configured number of rows per sweep.
+- [x] Update existing incident trigger tests for the new attempt-accounting point.
+- [x] Run focused tests and full quality gates.
 - [ ] Run required specialist reviews: task-completion-validator, cloudflare-specialist, env-validator, constitution-validator, and test-engineer.
 - [ ] Deploy to staging and verify the backend behavior or document any explicit blocker.
 - [ ] Create PR, wait for CI, merge, monitor production deploy, then update idea `01M0YGMRX9BBMBENPKKBGKV769` with the merged PR link.
 
 ## Acceptance criteria
 
-- [ ] A resolved/expired signature is not reopened by an occurrence at or before its terminal timestamp.
-- [ ] A resolved/expired signature is not reopened by an occurrence inside the configured reopen cooldown window.
-- [ ] A vm-agent signature resolved with a fix reference is not reopened by occurrences from nodes whose `agent_version` does not match the current required vm-agent build.
-- [ ] A current-build vm-agent occurrence after the cooldown still reopens, proving the rollout guard is discriminating.
-- [ ] Platform-side task deaths release incident dispatch leases without increasing `dispatch_attempts`.
-- [ ] Agent-reported failed tasks consume bounded dispatch attempts and can still reject after the configured max.
-- [ ] Regression tests exercise production service entry points against a real SQLite-backed D1 adapter.
-- [ ] Env var documentation and examples match code.
+- [x] A resolved/expired signature is not reopened by an occurrence at or before its terminal timestamp.
+- [x] A resolved/expired signature is not reopened by an occurrence inside the configured reopen cooldown window.
+- [x] A vm-agent signature resolved with a fix reference is not reopened by occurrences from nodes whose `agent_version` does not match the current required vm-agent build.
+- [x] A current-build vm-agent occurrence after the cooldown still reopens, proving the rollout guard is discriminating.
+- [x] Platform-side task deaths release incident dispatch leases without increasing `dispatch_attempts`.
+- [x] Agent-reported failed tasks consume bounded dispatch attempts and can still reject after the configured max.
+- [x] Expired dispatch reclamation remains bounded per sweep.
+- [x] Regression tests exercise production service entry points against a real SQLite-backed D1 adapter.
+- [x] Env var documentation and examples match code.
 - [ ] PR includes control-loop load/escape-path notes and specialist review evidence.
 
 ## References

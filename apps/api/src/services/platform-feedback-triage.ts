@@ -15,7 +15,12 @@ import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { runDebugDiagnosis, SCHEDULED_TRIAGE_DEBUG_FEATURE_KEY } from './debug-agent';
 import { redactSensitiveData } from './observability';
-import { configuredFeedbackProjectId, markIncidentPending } from './platform-feedback-incidents';
+import {
+  configuredFeedbackProjectId,
+  getIncidentConfig,
+  type IncidentReopenEvidence,
+  shouldReopenIncidentForOccurrence,
+} from './platform-feedback-incidents';
 import { formatUntrustedIdeaContent } from './untrusted-idea-content';
 
 export type FeedbackTriageTrigger = 'cron' | 'manual';
@@ -37,8 +42,14 @@ interface ErrorRow {
   message: string;
   timestamp: number;
   task_id?: string | null;
+  node_id?: string | null;
+  nodeAgentVersion?: string | null;
 }
 type FeedbackSeverity = 'error' | 'warn';
+interface FeedbackErrorEvidence extends IncidentReopenEvidence {
+  errorId: string;
+  nodeId?: string;
+}
 export interface FeedbackErrorGroup {
   signature: string;
   source: string;
@@ -46,11 +57,12 @@ export interface FeedbackErrorGroup {
   summary: string;
   firstSeenAt: number;
   lastSeenAt: number;
-  evidence: Array<{ errorId: string; timestamp: number }>;
+  evidence: FeedbackErrorEvidence[];
   count: number;
 }
 interface ExistingTriagePriorityRow {
   signature: string;
+  source: string | null;
   diagnosis_id: string | null;
   idea_id: string | null;
   occurrence_count: number;
@@ -58,6 +70,11 @@ interface ExistingTriagePriorityRow {
   budget_deferred_until: number | null;
   rejected_at: number | null;
   queue_state: string | null;
+  resolved_at: number | null;
+  resolved_by_task_id: string | null;
+  resolved_task_output_pr_url: string | null;
+  resolution_note: string | null;
+  expired_at: number | null;
 }
 interface StoredTriageGroupRow {
   signature: string;
@@ -127,9 +144,18 @@ function parseStoredEvidenceRefs(
         if (typeof record.timestamp !== 'number' || !Number.isFinite(record.timestamp)) {
           return null;
         }
-        return { errorId: record.errorId, timestamp: record.timestamp };
+        const nodeId = typeof record.nodeId === 'string' ? record.nodeId.trim() : '';
+        const nodeAgentVersion =
+          typeof record.nodeAgentVersion === 'string' ? record.nodeAgentVersion.trim() : '';
+        const evidence: FeedbackErrorEvidence = {
+          errorId: record.errorId,
+          timestamp: record.timestamp,
+          ...(nodeId ? { nodeId } : {}),
+          ...(nodeAgentVersion ? { nodeAgentVersion } : {}),
+        };
+        return evidence;
       })
-      .filter((item): item is { errorId: string; timestamp: number } => item !== null)
+      .filter((item): item is FeedbackErrorEvidence => item !== null)
       .slice(0, evidenceLimit);
   } catch {
     return [];
@@ -170,7 +196,14 @@ export async function groupPlatformErrors(
       )
         ? row.id
         : 'invalid-redacted-id';
-    const evidence = { errorId: safeErrorId, timestamp: row.timestamp };
+    const nodeId = row.node_id?.trim();
+    const nodeAgentVersion = row.nodeAgentVersion?.trim();
+    const evidence: FeedbackErrorEvidence = {
+      errorId: safeErrorId,
+      timestamp: row.timestamp,
+      ...(nodeId ? { nodeId } : {}),
+      ...(nodeAgentVersion ? { nodeAgentVersion } : {}),
+    };
     if (current) {
       current.count += 1;
       current.severity =
@@ -266,15 +299,13 @@ async function recordGroupBudgetDeferral(
       claim_expires_at = NULL,
       queue_state = CASE
         WHEN rejected_at IS NOT NULL THEN 'rejected'
-        WHEN queue_state IN ('resolved', 'expired') THEN 'pending'
         ELSE queue_state
       END,
       queued_at = CASE
         WHEN rejected_at IS NOT NULL THEN queued_at
-        WHEN queued_at IS NULL OR queue_state IN ('resolved', 'expired') THEN ?
+        WHEN queued_at IS NULL AND queue_state NOT IN ('resolved', 'expired') THEN ?
         ELSE queued_at
       END,
-      expired_at = CASE WHEN queue_state = 'expired' THEN NULL ELSE expired_at END,
       updated_at = CURRENT_TIMESTAMP
      WHERE signature = ? AND claim_token = ?`
   )
@@ -302,6 +333,31 @@ async function excludeFeedbackProjectTaskErrors(
   return rows.filter((row) => !row.task_id || !selfTaskIds.has(row.task_id));
 }
 
+async function annotateNodeAgentVersions(env: Env, rows: ErrorRow[]): Promise<ErrorRow[]> {
+  const nodeIds = [
+    ...new Set(rows.map((row) => row.node_id?.trim()).filter((id): id is string => Boolean(id))),
+  ];
+  if (nodeIds.length === 0) return rows;
+
+  const versions = new Map<string, string | null>();
+  for (let offset = 0; offset < nodeIds.length; offset += D1_MAX_BOUND_PARAMETERS) {
+    const chunk = nodeIds.slice(offset, offset + D1_MAX_BOUND_PARAMETERS);
+    const query = await env.DATABASE.prepare(
+      `SELECT id, agent_version FROM nodes WHERE id IN (${chunk.map(() => '?').join(',')})`
+    )
+      .bind(...chunk)
+      .all<{ id: string; agent_version: string | null }>();
+    for (const row of query.results ?? []) {
+      versions.set(row.id, row.agent_version);
+    }
+  }
+
+  return rows.map((row) => {
+    const nodeId = row.node_id?.trim();
+    return nodeId ? { ...row, nodeAgentVersion: versions.get(nodeId) ?? null } : row;
+  });
+}
+
 async function loadExistingTriageRows(
   env: Env,
   signatures: string[]
@@ -311,16 +367,27 @@ async function loadExistingTriageRows(
     const chunk = signatures.slice(offset, offset + D1_MAX_BOUND_PARAMETERS);
     if (chunk.length === 0) continue;
     const query = await env.DATABASE.prepare(
-      `SELECT signature, diagnosis_id, idea_id, occurrence_count, severity,
-        budget_deferred_until, rejected_at, queue_state
-       FROM platform_feedback_triages
-       WHERE signature IN (${chunk.map(() => '?').join(',')})`
+      `SELECT triage.signature, triage.source, triage.diagnosis_id, triage.idea_id,
+        triage.occurrence_count, triage.severity, triage.budget_deferred_until,
+        triage.rejected_at, triage.queue_state, triage.resolved_at,
+        triage.resolved_by_task_id, resolved_task.output_pr_url AS resolved_task_output_pr_url,
+        triage.resolution_note, triage.expired_at
+       FROM platform_feedback_triages triage
+       LEFT JOIN tasks resolved_task ON resolved_task.id = triage.resolved_by_task_id
+       WHERE triage.signature IN (${chunk.map(() => '?').join(',')})`
     )
       .bind(...chunk)
       .all<ExistingTriagePriorityRow>();
     for (const row of query.results ?? []) rows.set(row.signature, row);
   }
   return rows;
+}
+
+async function readExistingTriageRow(
+  env: Env,
+  signature: string
+): Promise<ExistingTriagePriorityRow | undefined> {
+  return (await loadExistingTriageRows(env, [signature])).get(signature);
 }
 
 async function loadDueBudgetDeferredGroups(
@@ -396,6 +463,33 @@ function prioritizeFeedbackGroups(
     return right.lastSeenAt - left.lastSeenAt;
   });
 }
+
+function shouldReopenExistingTriage(
+  env: Env,
+  existing: ExistingTriagePriorityRow | undefined,
+  group: FeedbackErrorGroup
+): boolean {
+  if (!existing) return true;
+  if (!['resolved', 'expired'].includes(existing.queue_state ?? '')) return true;
+
+  return shouldReopenIncidentForOccurrence({
+    queueState: existing.queue_state,
+    rejectedAt: existing.rejected_at,
+    resolvedAt: existing.resolved_at,
+    expiredAt: existing.expired_at,
+    source: existing.source ?? group.source,
+    resolutionNote: existing.resolution_note,
+    resolvedTaskOutputPrUrl: existing.resolved_task_output_pr_url,
+    occurrence: {
+      timestamp: group.lastSeenAt,
+      nodeAgentVersion: group.evidence.find((item) => item.timestamp === group.lastSeenAt)
+        ?.nodeAgentVersion,
+    },
+    config: getIncidentConfig(env),
+    requiredVmAgentVersion: env.VM_AGENT_REQUIRED_VERSION,
+  });
+}
+
 export async function runPlatformFeedbackTriage(
   env: Env,
   trigger: FeedbackTriageTrigger,
@@ -453,7 +547,7 @@ export async function runPlatformFeedbackTriage(
     DEFAULT_PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH
   );
   const query = await env.OBSERVABILITY_DATABASE.prepare(
-    `SELECT id, source, level, message, timestamp, task_id
+    `SELECT id, source, level, message, timestamp, task_id, node_id
      FROM platform_errors
      WHERE level IN ('error', 'warn') AND timestamp BETWEEN ? AND ?
      ORDER BY timestamp DESC LIMIT ?`
@@ -465,7 +559,8 @@ export async function runPlatformFeedbackTriage(
     query.results ?? [],
     project.id
   );
-  const grouped = await groupPlatformErrors(candidateRows, evidenceLimit);
+  const rowsWithAgentVersions = await annotateNodeAgentVersions(env, candidateRows);
+  const grouped = await groupPlatformErrors(rowsWithAgentVersions, evidenceLimit);
   const dueBudgetDeferred = await loadDueBudgetDeferredGroups(
     env,
     now,
@@ -505,6 +600,12 @@ export async function runPlatformFeedbackTriage(
         now
       )
       .run();
+    const latestExisting = await readExistingTriageRow(env, group.signature);
+    const reopenTerminal = shouldReopenExistingTriage(
+      env,
+      latestExisting ?? existingPriorityRows.get(group.signature),
+      group
+    );
     await env.DATABASE.prepare(
       `UPDATE platform_feedback_triages SET first_seen_at = MIN(first_seen_at, ?),
       last_seen_at = MAX(last_seen_at, ?), occurrence_count = MAX(occurrence_count, ?),
@@ -512,15 +613,16 @@ export async function runPlatformFeedbackTriage(
       severity = CASE WHEN ? = 'error' THEN 'error' ELSE severity END,
       queue_state = CASE
         WHEN rejected_at IS NOT NULL THEN 'rejected'
-        WHEN queue_state IN ('resolved', 'expired') THEN 'pending'
+        WHEN queue_state IN ('resolved', 'expired') AND ? THEN 'pending'
         ELSE queue_state
       END,
       queued_at = CASE
         WHEN rejected_at IS NOT NULL THEN queued_at
-        WHEN queued_at IS NULL OR queue_state IN ('resolved', 'expired') THEN ?
+        WHEN queue_state IN ('resolved', 'expired') AND ? THEN ?
+        WHEN queued_at IS NULL AND queue_state NOT IN ('resolved', 'expired') THEN ?
         ELSE queued_at
       END,
-      expired_at = CASE WHEN queue_state = 'expired' THEN NULL ELSE expired_at END,
+      expired_at = CASE WHEN queue_state = 'expired' AND ? THEN NULL ELSE expired_at END,
       updated_at = CURRENT_TIMESTAMP WHERE signature = ?`
     )
       .bind(
@@ -529,13 +631,24 @@ export async function runPlatformFeedbackTriage(
         group.count,
         refs,
         group.severity,
+        reopenTerminal ? 1 : 0,
+        reopenTerminal ? 1 : 0,
         now,
+        now,
+        reopenTerminal ? 1 : 0,
         group.signature
       )
       .run();
-    await markIncidentPending(env, group.signature, now);
+    if (
+      latestExisting &&
+      ['resolved', 'expired'].includes(latestExisting.queue_state ?? '') &&
+      !reopenTerminal
+    ) {
+      result.groupsSkipped += 1;
+      continue;
+    }
     const existing = await env.DATABASE.prepare(
-      `SELECT t.idea_id, t.diagnosis_id, t.rejected_at, t.budget_deferred_until
+      `SELECT t.idea_id, t.diagnosis_id, t.rejected_at, t.budget_deferred_until, t.queue_state
        FROM platform_feedback_triages t
       WHERE t.signature = ?`
     )
@@ -545,8 +658,13 @@ export async function runPlatformFeedbackTriage(
         diagnosis_id: string | null;
         rejected_at: number | null;
         budget_deferred_until: number | null;
+        queue_state: string | null;
       }>();
     if (existing?.rejected_at) {
+      result.groupsSkipped += 1;
+      continue;
+    }
+    if (['resolved', 'expired'].includes(existing?.queue_state ?? '')) {
       result.groupsSkipped += 1;
       continue;
     }
@@ -584,6 +702,7 @@ export async function runPlatformFeedbackTriage(
         claim_expires_at = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE signature = ? AND idea_id IS NULL AND rejected_at IS NULL AND failure_count < ?
+        AND queue_state = 'pending'
         AND (budget_deferred_until IS NULL OR budget_deferred_until <= ?)
         AND (claim_expires_at IS NULL OR claim_expires_at < ?)`
     )

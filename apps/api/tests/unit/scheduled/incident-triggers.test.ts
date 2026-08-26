@@ -29,6 +29,9 @@ function setup(options: { withTrigger?: boolean } = {}) {
       status TEXT NOT NULL, skip_reason TEXT, event_type TEXT, scheduled_at TEXT,
       started_at TEXT, completed_at TEXT, sequence_number INTEGER NOT NULL,
       rendered_prompt TEXT, task_id TEXT, error_message TEXT, created_at TEXT NOT NULL);
+    CREATE TABLE task_status_events (
+      id TEXT PRIMARY KEY, task_id TEXT NOT NULL, from_status TEXT, to_status TEXT NOT NULL,
+      actor_type TEXT NOT NULL, actor_id TEXT, reason TEXT, created_at TEXT NOT NULL);
     CREATE TABLE platform_feedback_triages (
       signature TEXT PRIMARY KEY, source TEXT NOT NULL, summary TEXT NOT NULL,
       first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, occurrence_count INTEGER NOT NULL,
@@ -143,7 +146,7 @@ describe('incident trigger sweep', () => {
     ).toEqual({
       queue_state: 'dispatched',
       dispatched_task_id: 'task-from-auto-trigger',
-      dispatch_attempts: 1,
+      dispatch_attempts: 0,
     });
 
     const claim = await claimIncident(env, 'incident-a', 'task-from-auto-trigger', 5002);

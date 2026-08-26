@@ -20,7 +20,8 @@ function setup() {
     CREATE TABLE tasks (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, user_id TEXT NOT NULL,
       title TEXT NOT NULL, description TEXT, status TEXT NOT NULL, priority INTEGER NOT NULL,
       task_mode TEXT NOT NULL, dispatch_depth INTEGER NOT NULL, created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, output_pr_url TEXT);
+    CREATE TABLE nodes (id TEXT PRIMARY KEY, agent_version TEXT);
     CREATE TABLE debug_diagnoses (id TEXT PRIMARY KEY, diagnosis TEXT NOT NULL);
     CREATE TABLE platform_feedback_triages (
       signature TEXT PRIMARY KEY, source TEXT NOT NULL, summary TEXT NOT NULL,
@@ -44,8 +45,61 @@ function setup() {
   const observability = new Database(':memory:');
   observability.exec(`CREATE TABLE platform_errors (
     id TEXT PRIMARY KEY, source TEXT NOT NULL, level TEXT NOT NULL, message TEXT NOT NULL,
-    timestamp INTEGER NOT NULL, task_id TEXT);`);
+    timestamp INTEGER NOT NULL, task_id TEXT, node_id TEXT);`);
   return { main, observability };
+}
+
+async function seedResolvedTriage(
+  sqlite: Database.Database,
+  input: {
+    id?: string;
+    source?: string;
+    message: string;
+    timestamp: number;
+    resolvedAt: number;
+    resolutionNote?: string;
+    resolvedByTaskId?: string | null;
+    queueState?: 'resolved' | 'expired';
+    expiredAt?: number | null;
+  }
+): Promise<string> {
+  const [group] = await groupPlatformErrors(
+    [
+      {
+        id: input.id ?? '123e4567-e89b-42d3-a456-426614174000',
+        source: input.source ?? 'api',
+        message: input.message,
+        timestamp: input.timestamp,
+      },
+    ],
+    10
+  );
+  expect(group).toBeDefined();
+  sqlite
+    .prepare(
+      `INSERT INTO platform_feedback_triages
+        (signature, source, summary, first_seen_at, last_seen_at, occurrence_count, evidence_refs,
+         severity, queue_state, queued_at, resolved_at, resolved_by_task_id, resolution_note,
+         expired_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      group.signature,
+      group.source,
+      group.summary,
+      group.firstSeenAt,
+      group.lastSeenAt,
+      group.count,
+      JSON.stringify(group.evidence),
+      group.severity,
+      input.queueState ?? 'resolved',
+      input.timestamp,
+      input.resolvedAt,
+      input.resolvedByTaskId ?? null,
+      input.resolutionNote ?? null,
+      input.expiredAt ?? null
+    );
+  return group.signature;
 }
 
 describe('platform feedback triage', () => {
@@ -174,6 +228,216 @@ describe('platform feedback triage', () => {
     expect(idea.description.indexOf('Bounded evidence references:')).toBeGreaterThan(
       evidenceBoundary
     );
+  });
+
+  it('keeps resolved signatures closed for old occurrences and reopens for newer occurrences', async () => {
+    const { main, observability } = setup();
+    const oldOccurrenceAt = Date.parse('2026-08-26T05:01:00Z');
+    const resolvedAt = Date.parse('2026-08-26T06:54:00Z');
+    const message = 'stopped snapshot callback failed for workspace 424242';
+    const signature = await seedResolvedTriage(main, {
+      message,
+      timestamp: oldOccurrenceAt,
+      resolvedAt,
+      resolutionNote: 'Resolved by PR #1924',
+    });
+    observability
+      .prepare(
+        'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run('123e4567-e89b-42d3-a456-426614174001', 'api', 'error', message, oldOccurrenceAt);
+    const diagnose = vi.fn(async () => ({
+      id: 'diagnosis-1',
+      diagnosis: 'redacted',
+    })) as unknown as typeof runDebugDiagnosis;
+    const env = {
+      DATABASE: createSqliteD1(main),
+      OBSERVABILITY_DATABASE: createSqliteD1(observability),
+      PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project',
+      PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES: '180',
+      PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS: '0',
+    } as Env;
+
+    const oldSweep = await runPlatformFeedbackTriage(env, 'cron', {
+      now: () => resolvedAt + 1_000,
+      diagnose,
+    });
+
+    expect(oldSweep).toMatchObject({ groupsFound: 1, groupsSkipped: 1, ideasCreated: 0 });
+    expect(diagnose).not.toHaveBeenCalled();
+    expect(
+      main.prepare('SELECT queue_state, resolved_at, idea_id FROM platform_feedback_triages').get()
+    ).toEqual({ queue_state: 'resolved', resolved_at: resolvedAt, idea_id: null });
+
+    observability.prepare('DELETE FROM platform_errors').run();
+    const newerOccurrenceAt = resolvedAt + 1;
+    observability
+      .prepare(
+        'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run('223e4567-e89b-42d3-a456-426614174000', 'api', 'error', message, newerOccurrenceAt);
+    const newSweep = await runPlatformFeedbackTriage(env, 'cron', {
+      now: () => newerOccurrenceAt + 1_000,
+      diagnose,
+    });
+
+    expect(newSweep).toMatchObject({ groupsFound: 1, groupsSkipped: 0, ideasCreated: 1 });
+    expect(diagnose).toHaveBeenCalledTimes(1);
+    expect(
+      main.prepare('SELECT queue_state, resolved_at, idea_id FROM platform_feedback_triages').get()
+    ).toEqual({ queue_state: 'pending', resolved_at: resolvedAt, idea_id: expect.any(String) });
+    expect(signature).toEqual(
+      (
+        main.prepare('SELECT signature FROM platform_feedback_triages').get() as {
+          signature: string;
+        }
+      ).signature
+    );
+  });
+
+  it('suppresses resolved signature reopens during the configured cooldown window', async () => {
+    const { main, observability } = setup();
+    const resolvedAt = Date.parse('2026-08-26T12:00:00Z');
+    const message = 'durable object reset churn while deploying 99999';
+    await seedResolvedTriage(main, {
+      message,
+      timestamp: resolvedAt - 60_000,
+      resolvedAt,
+      resolutionNote: 'Resolved during deploy verification',
+    });
+    const diagnose = vi.fn(async () => ({
+      id: 'diagnosis-1',
+      diagnosis: 'redacted',
+    })) as unknown as typeof runDebugDiagnosis;
+    const env = {
+      DATABASE: createSqliteD1(main),
+      OBSERVABILITY_DATABASE: createSqliteD1(observability),
+      PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project',
+      PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES: '60',
+      PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS: String(10 * 60_000),
+    } as Env;
+
+    observability
+      .prepare(
+        'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run(
+        '123e4567-e89b-42d3-a456-426614174001',
+        'api',
+        'error',
+        message,
+        resolvedAt + 7 * 60_000
+      );
+    const cooldownSweep = await runPlatformFeedbackTriage(env, 'cron', {
+      now: () => resolvedAt + 8 * 60_000,
+      diagnose,
+    });
+
+    expect(cooldownSweep).toMatchObject({ groupsFound: 1, groupsSkipped: 1, ideasCreated: 0 });
+    expect(diagnose).not.toHaveBeenCalled();
+    expect(main.prepare('SELECT queue_state FROM platform_feedback_triages').get()).toEqual({
+      queue_state: 'resolved',
+    });
+
+    observability.prepare('DELETE FROM platform_errors').run();
+    observability
+      .prepare(
+        'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run(
+        '223e4567-e89b-42d3-a456-426614174000',
+        'api',
+        'error',
+        message,
+        resolvedAt + 11 * 60_000
+      );
+    const afterCooldownSweep = await runPlatformFeedbackTriage(env, 'cron', {
+      now: () => resolvedAt + 12 * 60_000,
+      diagnose,
+    });
+
+    expect(afterCooldownSweep).toMatchObject({ groupsFound: 1, ideasCreated: 1 });
+    expect(diagnose).toHaveBeenCalledTimes(1);
+    expect(main.prepare('SELECT queue_state FROM platform_feedback_triages').get()).toEqual({
+      queue_state: 'pending',
+    });
+  });
+
+  it('keeps resolved vm-agent signatures closed for stale node builds and reopens from the required build', async () => {
+    const { main, observability } = setup();
+    const resolvedAt = Date.parse('2026-08-26T12:00:00Z');
+    const message = 'vm-agent stopped snapshot incident callback crashed 11111';
+    await seedResolvedTriage(main, {
+      source: 'vm-agent',
+      message,
+      timestamp: resolvedAt - 60_000,
+      resolvedAt,
+      resolutionNote: 'Resolved by PR #1924',
+    });
+    main.prepare('INSERT INTO nodes (id, agent_version) VALUES (?, ?)').run('node-1', 'old-build');
+    const diagnose = vi.fn(async () => ({
+      id: 'diagnosis-1',
+      diagnosis: 'redacted',
+    })) as unknown as typeof runDebugDiagnosis;
+    const env = {
+      DATABASE: createSqliteD1(main),
+      OBSERVABILITY_DATABASE: createSqliteD1(observability),
+      PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project',
+      PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES: '120',
+      PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS: '0',
+      VM_AGENT_REQUIRED_VERSION: 'current-build',
+    } as Env;
+
+    observability
+      .prepare(
+        'INSERT INTO platform_errors (id, source, level, message, timestamp, node_id) VALUES (?, ?, ?, ?, ?, ?)'
+      )
+      .run(
+        '123e4567-e89b-42d3-a456-426614174001',
+        'vm-agent',
+        'error',
+        message,
+        resolvedAt + 45 * 60_000,
+        'node-1'
+      );
+    const staleSweep = await runPlatformFeedbackTriage(env, 'cron', {
+      now: () => resolvedAt + 46 * 60_000,
+      diagnose,
+    });
+
+    expect(staleSweep).toMatchObject({ groupsFound: 1, groupsSkipped: 1, ideasCreated: 0 });
+    expect(diagnose).not.toHaveBeenCalled();
+    expect(main.prepare('SELECT queue_state FROM platform_feedback_triages').get()).toEqual({
+      queue_state: 'resolved',
+    });
+
+    observability.prepare('DELETE FROM platform_errors').run();
+    main.prepare('UPDATE nodes SET agent_version = ? WHERE id = ?').run('current-build', 'node-1');
+    observability
+      .prepare(
+        'INSERT INTO platform_errors (id, source, level, message, timestamp, node_id) VALUES (?, ?, ?, ?, ?, ?)'
+      )
+      .run(
+        '223e4567-e89b-42d3-a456-426614174000',
+        'vm-agent',
+        'error',
+        message,
+        resolvedAt + 60 * 60_000,
+        'node-1'
+      );
+    const currentSweep = await runPlatformFeedbackTriage(env, 'cron', {
+      now: () => resolvedAt + 61 * 60_000,
+      diagnose,
+    });
+
+    expect(currentSweep).toMatchObject({ groupsFound: 1, groupsSkipped: 0, ideasCreated: 1 });
+    expect(diagnose).toHaveBeenCalledTimes(1);
+    expect(main.prepare('SELECT queue_state FROM platform_feedback_triages').get()).toEqual({
+      queue_state: 'pending',
+    });
+    expect(
+      String(main.prepare('SELECT evidence_refs FROM platform_feedback_triages').pluck().get())
+    ).toContain('current-build');
   });
 
   it('keeps malicious observability text out of free-form Idea instructions', async () => {
