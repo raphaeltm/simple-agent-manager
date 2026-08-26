@@ -48,7 +48,6 @@ import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
 import { DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS } from '../services/session-snapshot-artifacts';
 import { cleanupTaskRun } from '../services/task-runner';
-import { transitionTaskToTerminal } from '../services/task-terminal-transition';
 import {
   classifyTaskRuntimeLiveness,
   isSessionResumable,
@@ -65,6 +64,7 @@ import {
   type TaskRuntimeLivenessSignals,
   type TaskSupersession,
 } from '../services/task-runtime-liveness';
+import { transitionTaskToTerminal } from '../services/task-terminal-transition';
 import {
   getVmAdmissionDiagnostics,
   isActiveVmAdmissionState,

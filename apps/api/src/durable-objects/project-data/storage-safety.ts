@@ -30,8 +30,8 @@ import {
 } from './storage-safety-meta';
 import {
   enrichProjectDataStorageTelemetry,
-  type ProjectDataStorageTelemetryEnrichmentOptions,
   maybePersistProjectDataStorageAlert,
+  type ProjectDataStorageTelemetryEnrichmentOptions,
   upsertProjectDataStorageTelemetry,
 } from './storage-telemetry';
 import {
