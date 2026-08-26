@@ -1,6 +1,6 @@
 # Fix reconciliation check-in false deaths and attention-expiry terminal writer
 
-**Status**: backlog
+**Status**: active
 **Created**: 2026-08-26
 **SAM task**: `01M0XRNZWZVQACVKPGG1BJ75FW`
 **Branch**: `sam/stop-reconciliation-check-false-bj75fw`
