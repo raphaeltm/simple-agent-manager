@@ -31,6 +31,7 @@ export const DEFAULT_PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT = 10;
 export const DEFAULT_PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS = 600_000;
 export const DEFAULT_PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES = 3;
 export const DEFAULT_PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH = 240;
+export const DEFAULT_PLATFORM_FEEDBACK_TRIAGE_BUDGET_DEFER_MS = 24 * 60 * 60_000;
 export const DEFAULT_PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS = 2 * 60 * 60_000;
 export const DEFAULT_PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS = 60 * 60_000;
 export const DEFAULT_PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS = 3;
@@ -40,6 +41,15 @@ export const DEFAULT_PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT = 10;
 export const DEFAULT_PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT = 10;
 export const DEFAULT_PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES = 32_768;
 export const DEFAULT_PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH = 2_000;
+export const DEFAULT_PLATFORM_FEEDBACK_INCIDENT_AUTO_TRIGGER_ENABLED = true;
+export const DEFAULT_PLATFORM_FEEDBACK_INCIDENT_TRIGGER_NAME = 'SAM private incident triage';
+export const DEFAULT_PLATFORM_FEEDBACK_INCIDENT_TRIGGER_TEMPLATE = [
+  'Investigate and resolve private SAM feedback incidents.',
+  '',
+  '{{incident.backlogSummary}}',
+  '',
+  'Use the private incident MCP tools to claim and resolve incidents. Keep machine-generated diagnostics private and do not post them to public GitHub issues.',
+].join('\n');
 
 /** Default max generated title length. Override via TASK_TITLE_MAX_LENGTH env var. */
 export const DEFAULT_TASK_TITLE_MAX_LENGTH = 100;

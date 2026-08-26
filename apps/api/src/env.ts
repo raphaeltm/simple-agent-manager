@@ -129,6 +129,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS?: string;
   PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES?: string;
   PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH?: string;
+  PLATFORM_FEEDBACK_TRIAGE_BUDGET_DEFER_MS?: string;
   PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS?: string;
   PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS?: string;
   PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS?: string;
@@ -138,6 +139,9 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT?: string;
   PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES?: string;
   PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH?: string;
+  PLATFORM_FEEDBACK_INCIDENT_AUTO_TRIGGER_ENABLED?: string;
+  PLATFORM_FEEDBACK_INCIDENT_TRIGGER_NAME?: string;
+  PLATFORM_FEEDBACK_INCIDENT_TRIGGER_TEMPLATE?: string;
   JWT_PRIVATE_KEY: string;
   JWT_PUBLIC_KEY: string;
   ENCRYPTION_KEY: string;
@@ -654,6 +658,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP?: string; // Max candidates processed per alarm sweep (default: 5)
   TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS?: string; // Node heartbeat freshness threshold for reconciliation delivery (default: 300000 = 5 minutes)
   TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS?: string; // Short timeout for reconciliation-originated node calls (default: 5000 = 5 seconds)
+  TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS?: string; // Short timeout for task-liveness VM-agent health probes (default: 5000 = 5 seconds)
   // Durable mailbox (Phase 1 orchestrator messaging)
   MAILBOX_ACK_TIMEOUT_MS?: string; // Ack timeout before re-delivery (default: 300000)
   MAILBOX_REDELIVERY_MAX_ATTEMPTS?: string; // Max delivery attempts before expiry (default: 5)

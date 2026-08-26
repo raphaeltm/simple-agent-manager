@@ -17,13 +17,23 @@ import {
   storedObjectMatches,
 } from './diagnostic-artifact-lease';
 import { type IncidentConfig, resolveDiagnosticIncidentConfig } from './diagnostic-incident-config';
+import {
+  assertDiagnosticIncidentULID as assertULID,
+  getCanonicalIncidentIdForOccurrence,
+} from './diagnostic-incident-dedup';
 import { redactSensitiveData } from './observability';
 
-const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const SAFE_ARTIFACT_KIND = 'safe-vm-incident-v1';
 const SAFE_CONTENT_TYPE = 'application/gzip';
 const textEncoder = new TextEncoder();
+
+export type { PendingIncidentInput, PendingIncidentResult } from './diagnostic-incident-dedup';
+export {
+  diagnosticIncidentDeploymentId,
+  diagnosticIncidentSignature,
+  ensurePendingIncidents,
+} from './diagnostic-incident-dedup';
 
 // Mirrors DiagnosticIncidentManifest / DiagnosticCollectorOutcome
 // (packages/shared/src/types/debug-agent.ts) exactly. The admin UI
@@ -55,10 +65,6 @@ const diagnosticIncidentManifestSchema = v.object({
   unavailable: v.optional(v.boolean()),
 });
 
-function assertULID(value: string, label: string): void {
-  if (!ULID_PATTERN.test(value)) throw errors.badRequest(`${label} must be a ULID`);
-}
-
 function encodedBytes(value: unknown): number {
   return textEncoder.encode(JSON.stringify(value)).byteLength;
 }
@@ -70,54 +76,6 @@ function deterministicObjectKey(
   artifactId: string
 ): string {
   return `${config.r2Prefix}/${nodeId}/${incidentId}/${artifactId}.tar.gz`;
-}
-
-export interface PendingIncidentInput {
-  incidentId: string;
-  platformErrorId: string;
-  nodeId: string;
-  workspaceId: string | null;
-}
-
-export async function ensurePendingIncidents(
-  env: Env,
-  inputs: PendingIncidentInput[]
-): Promise<void> {
-  const config = resolveDiagnosticIncidentConfig(env);
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + config.retentionDays * 86_400_000).toISOString();
-  const deleteAfter = new Date(
-    now.getTime() + (config.retentionDays + config.metadataRetentionDays) * 86_400_000
-  ).toISOString();
-  for (const input of inputs) {
-    assertULID(input.incidentId, 'incidentId');
-    await env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO diagnostic_incidents
-       (id, platform_error_id, node_id, workspace_id, status, expires_at, delete_after)
-       VALUES (?, ?, ?, ?, 'pending', ?, ?)`
-    )
-      .bind(
-        input.incidentId,
-        input.platformErrorId,
-        input.nodeId,
-        input.workspaceId,
-        expiresAt,
-        deleteAfter
-      )
-      .run();
-    const authoritative = await env.DATABASE.prepare(
-      'SELECT node_id, platform_error_id FROM diagnostic_incidents WHERE id = ?'
-    )
-      .bind(input.incidentId)
-      .first<{ node_id: string; platform_error_id: string }>();
-    if (
-      !authoritative ||
-      authoritative.node_id !== input.nodeId ||
-      authoritative.platform_error_id !== input.platformErrorId
-    ) {
-      throw errors.conflict('Incident ID is already bound to another error or node');
-    }
-  }
 }
 
 export interface RegisterDiagnosticArtifactInput {
@@ -196,11 +154,29 @@ export async function registerDiagnosticArtifact(
     manifest: redactSensitiveData(input.manifest),
     preview: redactSensitiveData(input.preview),
   };
-  const incident = await env.DATABASE.prepare(
-    'SELECT node_id, expires_at FROM diagnostic_incidents WHERE id = ?'
+  let incident = await env.DATABASE.prepare(
+    'SELECT node_id, expires_at, status FROM diagnostic_incidents WHERE id = ?'
   )
     .bind(incidentId)
-    .first<{ node_id: string; expires_at: string }>();
+    .first<{ node_id: string; expires_at: string; status: DiagnosticIncidentStatus }>();
+  const duplicateOccurrence = !incident
+    ? await getCanonicalIncidentIdForOccurrence(env, incidentId)
+    : null;
+  if (!incident && duplicateOccurrence) {
+    if (duplicateOccurrence.nodeId !== nodeId)
+      throw errors.forbidden('Incident belongs to another node');
+    incident = await env.DATABASE.prepare(
+      'SELECT node_id, expires_at, status FROM diagnostic_incidents WHERE id = ?'
+    )
+      .bind(duplicateOccurrence.incidentId)
+      .first<{ node_id: string; expires_at: string; status: DiagnosticIncidentStatus }>();
+    if (incident) {
+      return {
+        artifactId: input.artifactId,
+        status: input.status === 'failed' ? 'failed' : 'available',
+      };
+    }
+  }
   if (!incident) throw errors.notFound('Diagnostic incident not found');
   if (incident.node_id !== nodeId) throw errors.forbidden('Incident belongs to another node');
 
@@ -496,8 +472,17 @@ export async function uploadDiagnosticArtifact(
         | 'expected_bytes'
       >
     >();
-  if (!row || row.incident_id !== incidentId)
+  if (!row || row.incident_id !== incidentId) {
+    const duplicateOccurrence = await getCanonicalIncidentIdForOccurrence(env, incidentId);
+    if (
+      duplicateOccurrence &&
+      duplicateOccurrence.nodeId === nodeId &&
+      artifactId === `${incidentId}-safe`
+    ) {
+      return;
+    }
     throw errors.notFound('Diagnostic artifact not found');
+  }
   if (row.node_id !== nodeId) throw errors.forbidden('Artifact belongs to another node');
   if (row.status === 'available') return;
   if (row.status !== 'pending') throw errors.conflict('Artifact is not accepting content');
@@ -611,6 +596,8 @@ interface IncidentRow {
   node_id: string;
   workspace_id: string | null;
   status: DiagnosticIncidentStatus;
+  occurrence_count: number;
+  last_seen_at: string | null;
   artifact_count: number;
   total_bytes: number;
   manifest_json: string | null;
@@ -665,6 +652,8 @@ async function summarizeIncidentRows(
     nodeId: row.node_id,
     workspaceId: row.workspace_id,
     status: row.status,
+    occurrenceCount: row.occurrence_count,
+    lastSeenAt: row.last_seen_at ?? row.updated_at,
     artifactCount: row.artifact_count,
     totalBytes: row.total_bytes,
     manifest: parseDiagnosticManifest(row.manifest_json, row.id),
@@ -683,20 +672,48 @@ export async function getDiagnosticIncidentsByErrorIds(
 ): Promise<Map<string, DiagnosticIncidentSummary>> {
   const ids = [...new Set(errorIds)].slice(0, 200);
   if (ids.length === 0) return new Map();
-  const incidentRows: IncidentRow[] = [];
+  const rowsByRequestedErrorId = new Map<string, IncidentRow>();
+  const rowsByIncidentId = new Map<string, IncidentRow>();
   for (let offset = 0; offset < ids.length; offset += D1_MAX_BOUND_PARAMETERS) {
     const chunk = ids.slice(offset, offset + D1_MAX_BOUND_PARAMETERS);
     const incidents = await env.DATABASE.prepare(
-      `SELECT id, platform_error_id, node_id, workspace_id, status, artifact_count,
-       total_bytes, manifest_json, preview_json, failure_reason, expires_at, created_at, updated_at
+      `SELECT id, platform_error_id, node_id, workspace_id, status, occurrence_count,
+       last_seen_at, artifact_count, total_bytes, manifest_json, preview_json, failure_reason,
+       expires_at, created_at, updated_at
        FROM diagnostic_incidents WHERE platform_error_id IN (${chunk.map(() => '?').join(',')})`
     )
       .bind(...chunk)
       .all<IncidentRow>();
-    incidentRows.push(...incidents.results);
+    for (const row of incidents.results) {
+      rowsByRequestedErrorId.set(row.platform_error_id, row);
+      rowsByIncidentId.set(row.id, row);
+    }
+    const occurrences = await env.DATABASE.prepare(
+      `SELECT o.platform_error_id AS requested_error_id,
+        i.id, i.platform_error_id, i.node_id, i.workspace_id, i.status, i.occurrence_count,
+        i.last_seen_at, i.artifact_count, i.total_bytes, i.manifest_json, i.preview_json,
+        i.failure_reason, i.expires_at, i.created_at, i.updated_at
+       FROM diagnostic_incident_occurrences o
+       JOIN diagnostic_incidents i ON i.id = o.incident_id
+       WHERE o.platform_error_id IN (${chunk.map(() => '?').join(',')})`
+    )
+      .bind(...chunk)
+      .all<IncidentRow & { requested_error_id: string }>();
+    for (const row of occurrences.results) {
+      rowsByRequestedErrorId.set(row.requested_error_id, row);
+      rowsByIncidentId.set(row.id, row);
+    }
   }
-  const summaries = await summarizeIncidentRows(env, incidentRows);
-  return new Map(summaries.map((summary) => [summary.platformErrorId, summary]));
+  const summaries = await summarizeIncidentRows(env, [...rowsByIncidentId.values()]);
+  const byIncidentId = new Map(summaries.map((summary) => [summary.id, summary]));
+  return new Map(
+    [...rowsByRequestedErrorId.entries()]
+      .map(([requestedErrorId, row]) => {
+        const summary = byIncidentId.get(row.id);
+        return summary ? ([requestedErrorId, summary] as const) : null;
+      })
+      .filter((entry): entry is readonly [string, DiagnosticIncidentSummary] => entry !== null)
+  );
 }
 
 /** List recent incident evidence by node without requiring the node row to still exist. */
@@ -706,8 +723,9 @@ export async function getDiagnosticIncidentsByNodeId(
   limit: number
 ): Promise<DiagnosticIncidentSummary[]> {
   const incidents = await env.DATABASE.prepare(
-    `SELECT id, platform_error_id, node_id, workspace_id, status, artifact_count,
-       total_bytes, manifest_json, preview_json, failure_reason, expires_at, created_at, updated_at
+    `SELECT id, platform_error_id, node_id, workspace_id, status, occurrence_count,
+       last_seen_at, artifact_count, total_bytes, manifest_json, preview_json, failure_reason,
+       expires_at, created_at, updated_at
        FROM diagnostic_incidents
        WHERE node_id = ?
        ORDER BY created_at DESC
@@ -736,9 +754,16 @@ export async function getDiagnosticArtifactForDownload(
      a.failure_reason, a.created_at, a.updated_at
      FROM diagnostic_artifacts a
      JOIN diagnostic_incidents i ON i.id = a.incident_id
-     WHERE i.platform_error_id = ? AND a.id = ?`
+     WHERE a.id = ?
+       AND (
+         i.platform_error_id = ?
+         OR EXISTS (
+           SELECT 1 FROM diagnostic_incident_occurrences o
+           WHERE o.incident_id = i.id AND o.platform_error_id = ?
+         )
+       )`
   )
-    .bind(errorId, artifactId)
+    .bind(artifactId, errorId, errorId)
     .first<ArtifactRow>();
   if (!row || row.status !== 'available')
     throw errors.notFound('Diagnostic artifact is unavailable');

@@ -17,6 +17,8 @@ const INCIDENT = {
   nodeId: 'node-debug',
   workspaceId: 'workspace-debug',
   status: 'available',
+  occurrenceCount: 77,
+  lastSeenAt: '2026-07-29T10:42:00.000Z',
   artifactCount: 1,
   totalBytes: 2048,
   manifest: {
@@ -252,6 +254,42 @@ async function setup(
     if (path.includes('/api/auth/')) return respond(200, ADMIN);
     if (path.startsWith('/api/notifications'))
       return respond(200, { notifications: [], unreadCount: 0 });
+    if (path === '/api/credentials/agent')
+      return respond(200, {
+        credentials: [
+          {
+            agentType: 'openai-codex',
+            provider: 'openai',
+            credentialKind: 'api-key',
+            isActive: true,
+            maskedKey: 'sk-...audit',
+            createdAt: '2026-07-29T09:00:00.000Z',
+            updatedAt: '2026-07-29T09:00:00.000Z',
+          },
+        ],
+      });
+    if (path === '/api/credentials')
+      return respond(200, [
+        {
+          id: 'credential-audit-hetzner',
+          provider: 'hetzner',
+          connected: true,
+          createdAt: '2026-07-29T09:00:00.000Z',
+        },
+      ]);
+    if (path === '/api/github/installations')
+      return respond(200, [
+        {
+          id: 'github-installation-audit',
+          userId: 'debug-admin',
+          installationId: '12345',
+          accountType: 'organization',
+          accountName: 'debug-org',
+          createdAt: '2026-07-29T09:00:00.000Z',
+          updatedAt: '2026-07-29T09:00:00.000Z',
+        },
+      ]);
+    if (path === '/api/agents') return respond(200, { agents: [] });
     if (path.startsWith('/api/projects')) return respond(200, { projects: [], nextCursor: null });
     if (path.includes('/api/chat-sessions'))
       return respond(200, { sessions: [], nextCursor: null });
@@ -425,6 +463,7 @@ test.describe('Deployment diagnosis visual audit', () => {
     ).toHaveCount(205);
     await expect(page.getByText('Completed diagnosis')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Automatic VM evidence' })).toBeVisible();
+    await expect(page.getByText(/77 · last/)).toBeVisible();
     await expect(page.getByText('structured-events')).toBeVisible();
     await expect(page.getByText(/3 redactions · truncated/)).toBeVisible();
     await page.getByText('Safe evidence preview').click();

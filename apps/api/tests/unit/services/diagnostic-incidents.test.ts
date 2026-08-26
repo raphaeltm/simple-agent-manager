@@ -10,6 +10,7 @@ import {
   resolveDiagnosticIncidentConfig,
 } from '../../../src/services/diagnostic-incident-config';
 import {
+  diagnosticIncidentSignature,
   ensurePendingIncidents,
   getDiagnosticIncidentByErrorId,
   getDiagnosticIncidentsByErrorIds,
@@ -17,12 +18,24 @@ import {
   registerDiagnosticArtifact,
   uploadDiagnosticArtifact,
 } from '../../../src/services/diagnostic-incidents';
+import { diagnosticDedupSchemaSql } from '../../helpers/diagnostic-dedup-schema';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const INCIDENT_ID = '01KZ8V0GMXQ4ZCSERPRT2X2K6M';
 const ERROR_ID = INCIDENT_ID;
 const ARTIFACT_ID = `${INCIDENT_ID}-safe`;
 const NODE_ID = 'node-1';
+const TEST_ULID_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+function testUlid(index: number): string {
+  let value = index;
+  let suffix = '';
+  for (let position = 0; position < 4; position++) {
+    suffix = TEST_ULID_ALPHABET[value % TEST_ULID_ALPHABET.length] + suffix;
+    value = Math.floor(value / TEST_ULID_ALPHABET.length);
+  }
+  return `01KZ8V0GMXQ4ZCSERPRT2X${suffix}`;
+}
 
 it.each([
   'agents/private-incidents',
@@ -77,17 +90,17 @@ function sha256(value: Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-function registration(bytes: Uint8Array) {
+function registration(bytes: Uint8Array, incidentId = INCIDENT_ID, nodeId = NODE_ID) {
   return {
-    artifactId: ARTIFACT_ID,
+    artifactId: `${incidentId}-safe`,
     kind: 'safe-vm-incident-v1',
     contentType: 'application/gzip',
     sizeBytes: bytes.byteLength,
     checksumSha256: sha256(bytes),
     manifest: {
       version: 1,
-      incidentId: INCIDENT_ID,
-      nodeId: NODE_ID,
+      incidentId,
+      nodeId,
       source: 'session-host',
       createdAt: '2026-08-05T12:00:00.000Z',
       collectors: [],
@@ -109,6 +122,7 @@ describe('diagnostic incident storage boundary', () => {
     sqlite = new Database(':memory:');
     sqlite.pragma('foreign_keys = ON');
     sqlite.exec(migrationSql);
+    sqlite.exec(diagnosticDedupSchemaSql);
     r2 = new MemoryR2();
     env = {
       DATABASE: createSqliteD1(sqlite),
@@ -126,6 +140,110 @@ describe('diagnostic incident storage boundary', () => {
       },
     ]);
   }
+
+  it('deduplicates repeated incidents per signature and deployment while preserving frequency', async () => {
+    const at = Date.parse('2026-08-25T12:00:00.000Z');
+    const ids = Array.from({ length: 100 }, (_, index) => testUlid(index));
+    const signature = await diagnosticIncidentSignature(
+      'vm-agent',
+      'snapshot failed because the devcontainer workspace is stopped'
+    );
+    const results = await ensurePendingIncidents(
+      env,
+      ids.map((id, index) => ({
+        incidentId: id,
+        platformErrorId: id,
+        nodeId: `node-${index}`,
+        workspaceId: `workspace-${index}`,
+        signature,
+        deploymentId: 'release-2026-08-25',
+        occurredAt: at + index,
+      }))
+    );
+
+    expect(results).toHaveLength(100);
+    expect(results.filter((result) => result.duplicate)).toHaveLength(99);
+    expect(results[0]).toMatchObject({
+      incidentId: ids[0],
+      canonicalIncidentId: ids[0],
+      duplicate: false,
+    });
+    expect(results.at(-1)).toMatchObject({
+      incidentId: ids[99],
+      canonicalIncidentId: ids[0],
+      duplicate: true,
+      occurrenceRecorded: true,
+    });
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM diagnostic_incidents').get()).toEqual({
+      count: 1,
+    });
+    expect(
+      sqlite
+        .prepare('SELECT id, occurrence_count, last_seen_at FROM diagnostic_incidents')
+        .get()
+    ).toEqual({
+      id: ids[0],
+      occurrence_count: 100,
+      last_seen_at: new Date(at + 99).toISOString(),
+    });
+    expect(
+      sqlite.prepare('SELECT COUNT(*) AS count FROM diagnostic_incident_occurrences').get()
+    ).toEqual({ count: 99 });
+
+    const bytes = new TextEncoder().encode('canonical-safe-archive');
+    await registerDiagnosticArtifact(env, 'node-0', ids[0], registration(bytes, ids[0], 'node-0'));
+    await uploadDiagnosticArtifact(
+      env,
+      'node-0',
+      ids[0],
+      `${ids[0]}-safe`,
+      new Request('https://api.example.test/content', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/gzip',
+          'Content-Length': String(bytes.byteLength),
+          'X-Content-SHA256': sha256(bytes),
+        },
+        body: bytes,
+      })
+    );
+
+    await expect(
+      registerDiagnosticArtifact(env, 'node-99', ids[99], registration(bytes, ids[99], 'node-99'))
+    ).resolves.toEqual({ artifactId: `${ids[99]}-safe`, status: 'available' });
+    await expect(
+      uploadDiagnosticArtifact(
+        env,
+        'node-99',
+        ids[99],
+        `${ids[99]}-safe`,
+        new Request('https://api.example.test/content', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/gzip',
+            'Content-Length': String(bytes.byteLength),
+            'X-Content-SHA256': sha256(bytes),
+          },
+          body: bytes,
+        })
+      )
+    ).resolves.toBeUndefined();
+
+    expect(r2.put).toHaveBeenCalledTimes(1);
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM diagnostic_artifacts').get()).toEqual({
+      count: 1,
+    });
+    const duplicateSummary = await getDiagnosticIncidentByErrorId(env, ids[99]);
+    expect(duplicateSummary).toMatchObject({
+      id: ids[0],
+      occurrenceCount: 100,
+      lastSeenAt: new Date(at + 99).toISOString(),
+      artifacts: [{ id: `${ids[0]}-safe`, status: 'available' }],
+    });
+    const byIds = await getDiagnosticIncidentsByErrorIds(env, [ids[0], ids[99]]);
+    expect(byIds.get(ids[0])?.id).toBe(ids[0]);
+    expect(byIds.get(ids[99])?.id).toBe(ids[0]);
+  });
 
   it('registers, streams, verifies, stores privately, and summarizes an artifact', async () => {
     const bytes = new TextEncoder().encode('bounded-safe-archive');

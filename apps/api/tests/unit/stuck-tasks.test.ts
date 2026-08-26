@@ -6,7 +6,10 @@
  * 2. In-progress tasks with stale heartbeats ARE marked as stuck
  * 3. Tasks without a node are treated as stuck (no heartbeat to check)
  */
-import { DEFAULT_STUCK_TASK_SCAN_CURSOR_KV_KEY } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_STUCK_TASK_SCAN_CURSOR_KV_KEY,
+  DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS,
+} from '@simple-agent-manager/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
@@ -20,11 +23,42 @@ import {
 } from '../../src/scheduled/stuck-tasks';
 import { persistError } from '../../src/services/observability';
 import { cleanupTaskRun } from '../../src/services/task-runner';
+import { getTaskLivenessNodeHealthProbeTimeoutMs } from '../../src/services/task-runtime-liveness';
 
 // Mock cleanupTaskRun
 vi.mock('../../src/services/task-runner', () => ({
   cleanupTaskRun: vi.fn().mockResolvedValue(undefined),
 }));
+
+const { fetchWithTimeoutMock } = vi.hoisted(() => ({
+  fetchWithTimeoutMock: vi.fn(),
+}));
+vi.mock('../../src/services/fetch-timeout', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/services/fetch-timeout')>();
+  return {
+    ...actual,
+    fetchWithTimeout: fetchWithTimeoutMock,
+  };
+});
+
+describe('task liveness node health probe timeout', () => {
+  it('uses the short control-loop timeout by default and allows env override', () => {
+    expect(getTaskLivenessNodeHealthProbeTimeoutMs({})).toBe(
+      DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS
+    );
+    expect(DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS).toBe(5_000);
+    expect(
+      getTaskLivenessNodeHealthProbeTimeoutMs({
+        TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS: '1234',
+      })
+    ).toBe(1234);
+    expect(
+      getTaskLivenessNodeHealthProbeTimeoutMs({
+        TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS: '30000',
+      })
+    ).toBe(30_000);
+  });
+});
 
 // Mock persistError
 vi.mock('../../src/services/observability', () => ({
@@ -137,6 +171,7 @@ function createMockEnv(
     TASK_STUCK_QUEUED_TIMEOUT_MS: '600000', // 10 min
     TASK_STUCK_DELEGATED_TIMEOUT_MS: '1860000', // 31 min
     NODE_HEARTBEAT_STALE_SECONDS: '180', // 3 min
+    BASE_DOMAIN: 'example.test',
     TASK_RUNNER: mockTaskRunnerDO,
     ...(containerLifecycle ? containerBinding(containerLifecycle) : {}),
     ...envOverrides,
@@ -144,9 +179,7 @@ function createMockEnv(
 }
 
 function persistedRecoveryTypes(): unknown[] {
-  return vi
-    .mocked(persistError)
-    .mock.calls.map(([, payload]) => payload.context?.recoveryType);
+  return vi.mocked(persistError).mock.calls.map(([, payload]) => payload.context?.recoveryType);
 }
 
 function expectNoPersistedTaskRunnerMismatch(): void {
@@ -156,6 +189,8 @@ function expectNoPersistedTaskRunnerMismatch(): void {
 describe('recoverStuckTasks', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    fetchWithTimeoutMock.mockReset();
+    fetchWithTimeoutMock.mockResolvedValue(new Response(null, { status: 200 }));
     projectDataMocks.getMessages.mockResolvedValue({ messages: [], hasMore: false });
     projectDataMocks.listSessions.mockResolvedValue({ sessions: [], total: 0 });
     projectDataMocks.listAcpSessions.mockResolvedValue({
@@ -345,6 +380,102 @@ describe('recoverStuckTasks', () => {
   });
 
   describe('heartbeat-aware in_progress recovery', () => {
+    function staleRunningWorkspaceResponses(taskId: string) {
+      const now = Date.now();
+      const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
+      const staleHeartbeat = new Date(now - 10 * 60 * 1000).toISOString();
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
+        results: [
+          {
+            id: taskId,
+            project_id: 'proj-1',
+            user_id: 'user-1',
+            status: 'in_progress',
+            execution_step: 'running',
+            updated_at: startedAt,
+            started_at: startedAt,
+            workspace_id: 'ws-1',
+            auto_provisioned_node_id: 'node-1',
+            chat_session_id: 'chat-1',
+          },
+        ],
+      });
+      responses.set('w.chat_session_id', {
+        results: [
+          {
+            workspace_status: 'running',
+            chat_session_id: 'chat-1',
+            node_id: 'node-1',
+            node_status: 'running',
+            health_status: 'healthy',
+            last_heartbeat_at: staleHeartbeat,
+            node_runtime: 'vm',
+            running_workspaces_on_node: 2,
+          },
+        ],
+      });
+      responses.set('node_id, status FROM workspaces', {
+        results: [{ id: 'ws-1', node_id: 'node-1', status: 'running' }],
+      });
+      responses.set('status, health_status FROM nodes', {
+        results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
+      });
+      responses.set("UPDATE tasks SET status = 'failed'", {
+        results: [],
+        changes: 1,
+      });
+      return responses;
+    }
+
+    it('preserves a stale-heartbeat task through the cron sweep when the node health probe succeeds', async () => {
+      const env = createMockEnv(staleRunningWorkspaceResponses('task-probe-ok'));
+
+      const result = await recoverStuckTasks(env);
+
+      expect(fetchWithTimeoutMock).toHaveBeenCalledWith(
+        'https://node-1.vm.example.test:8443/health',
+        { method: 'GET' },
+        DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS
+      );
+      expect(result.failedInProgress).toBe(0);
+      expect(result.heartbeatSkipped).toBe(1);
+    });
+
+    it('fails a stale-heartbeat task through the cron sweep when the node health probe fails', async () => {
+      const env = createMockEnv(staleRunningWorkspaceResponses('task-probe-failed'));
+      fetchWithTimeoutMock.mockResolvedValueOnce(new Response(null, { status: 503 }));
+
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(1);
+      expect(result.heartbeatSkipped).toBe(0);
+      expect(syncTriggerExecutionMock).toHaveBeenCalledWith(
+        env.DATABASE,
+        'task-probe-failed',
+        'failed',
+        expect.stringContaining('node_not_live')
+      );
+    });
+
+    it('preserves a stale-heartbeat task through the cron sweep when the node health probe times out', async () => {
+      const env = createMockEnv(staleRunningWorkspaceResponses('task-probe-timeout'));
+      fetchWithTimeoutMock.mockRejectedValueOnce(
+        new Error('Request timed out after 5000ms: https://node-1.vm.example.test:8443/health')
+      );
+
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(0);
+      expect(result.heartbeatSkipped).toBe(0);
+      expect(syncTriggerExecutionMock).not.toHaveBeenCalledWith(
+        env.DATABASE,
+        'task-probe-timeout',
+        'failed',
+        expect.any(String)
+      );
+    });
+
     it('preserves the task when task-scoped liveness cannot be read', async () => {
       const now = Date.now();
       const old = new Date(now - 5 * 60 * 60 * 1000).toISOString();
@@ -485,7 +616,7 @@ describe('recoverStuckTasks', () => {
       expect(result.heartbeatSkipped).toBe(1);
     });
 
-    it('fails in_progress tasks when node heartbeat is stale', async () => {
+    it('fails in_progress tasks when node heartbeat is stale and the node health probe fails', async () => {
       const now = Date.now();
       const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
       const updatedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
@@ -523,6 +654,8 @@ describe('recoverStuckTasks', () => {
             node_status: 'running',
             health_status: 'healthy',
             last_heartbeat_at: staleHeartbeat,
+            node_runtime: 'vm',
+            running_workspaces_on_node: 2,
           },
         ],
       });
@@ -541,6 +674,7 @@ describe('recoverStuckTasks', () => {
       });
 
       const env = createMockEnv(responses);
+      fetchWithTimeoutMock.mockResolvedValueOnce(new Response(null, { status: 503 }));
       const result = await recoverStuckTasks(env);
 
       expect(result.failedInProgress).toBe(1);
@@ -904,7 +1038,7 @@ describe('recoverStuckTasks', () => {
       expect(result.failedInProgress).toBe(0);
     });
 
-    it('terminates tasks in soft-hard window with stale heartbeat', async () => {
+    it('terminates tasks in soft-hard window with stale heartbeat after failed node health probe', async () => {
       const now = Date.now();
       // Task started 5 hours ago (past 4h soft, before 8h hard)
       const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
@@ -937,6 +1071,20 @@ describe('recoverStuckTasks', () => {
       responses.set('node_id, status FROM workspaces', {
         results: [{ id: 'ws-1', node_id: 'node-1', status: 'running' }],
       });
+      responses.set('w.chat_session_id', {
+        results: [
+          {
+            workspace_status: 'running',
+            chat_session_id: 'chat-1',
+            node_id: 'node-1',
+            node_status: 'running',
+            health_status: 'healthy',
+            last_heartbeat_at: staleHeartbeat,
+            node_runtime: 'vm',
+            running_workspaces_on_node: 2,
+          },
+        ],
+      });
       responses.set('status, health_status FROM nodes', {
         results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
       });
@@ -946,6 +1094,7 @@ describe('recoverStuckTasks', () => {
       });
 
       const env = createMockEnv(responses);
+      fetchWithTimeoutMock.mockResolvedValueOnce(new Response(null, { status: 503 }));
       const result = await recoverStuckTasks(env);
 
       // Stale heartbeat in the 4h-8h window — task should be terminated

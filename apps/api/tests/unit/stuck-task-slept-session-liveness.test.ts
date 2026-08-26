@@ -1,7 +1,8 @@
 import Database from 'better-sqlite3';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
+import { runMigrations } from '../../src/durable-objects/migrations';
 import { getLocalTaskRuntimeLiveness } from '../../src/durable-objects/project-data/task-runtime-liveness';
 import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
 import type { Env } from '../../src/env';
@@ -13,6 +14,17 @@ import {
 } from '../../src/services/task-runtime-liveness';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 import { createSqlStorage } from './durable-objects/sql-storage-test-utils';
+
+const { fetchWithTimeoutMock } = vi.hoisted(() => ({
+  fetchWithTimeoutMock: vi.fn(),
+}));
+vi.mock('../../src/services/fetch-timeout', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/services/fetch-timeout')>();
+  return {
+    ...actual,
+    fetchWithTimeout: fetchWithTimeoutMock,
+  };
+});
 
 /**
  * Vertical slice (`.claude/rules/35`) for the 2026-08-16 production incident,
@@ -60,6 +72,12 @@ function seedNode(): void {
      VALUES (?, 'user-1', 'node', 'running', 'healthy', ?, 'cpx21', 'nbg1', 'hetzner', ?, ?)`
     )
     .run(NODE_ID, iso(0), iso(-3_600_000), iso(0));
+}
+
+function makeNodeHeartbeatStale(): void {
+  sqlite
+    .prepare(`UPDATE nodes SET last_heartbeat_at = ? WHERE id = ?`)
+    .run(iso(-10 * 60 * 1000), NODE_ID);
 }
 
 function seedSnapshot(
@@ -166,7 +184,10 @@ beforeEach(() => {
     schema.sessionSnapshots,
     schema.tasks,
   ]);
-  env = { DATABASE: createSqliteD1(sqlite) } as Env;
+  env = { DATABASE: createSqliteD1(sqlite), BASE_DOMAIN: 'example.test' } as Env;
+  vi.clearAllMocks();
+  fetchWithTimeoutMock.mockReset();
+  fetchWithTimeoutMock.mockResolvedValue(new Response(null, { status: 200 }));
   seedNode();
   seedTask(TASK_ID);
 });
@@ -337,6 +358,7 @@ describe('stuck-task liveness for a slept session', () => {
           nodeStatus: 'running',
           nodeHealthStatus: 'healthy',
           nodeHeartbeatAt: Date.now(),
+          runningWorkspacesOnNode: 1,
         },
         'ok'
       )
@@ -353,7 +375,10 @@ describe('stuck-task liveness for a slept session', () => {
  */
 describe('ProjectData idle-cleanup liveness for a slept session', () => {
   function doEnv(): ProjectDataEnv {
-    return { DATABASE: createSqliteD1(sqlite) } as unknown as ProjectDataEnv;
+    return {
+      DATABASE: createSqliteD1(sqlite),
+      BASE_DOMAIN: 'example.test',
+    } as unknown as ProjectDataEnv;
   }
 
   const doTask = { taskId: TASK_ID, projectId: PROJECT_ID, workspaceId: WORKSPACE_ID };
@@ -390,6 +415,99 @@ describe('ProjectData idle-cleanup liveness for a slept session', () => {
       live: false,
       conclusive: false,
       reason: 'workspace_deleted_resumability_unknown',
+    });
+  });
+});
+
+/**
+ * First P0 regression from the 2026-08-25 production audit. The stale D1 node
+ * heartbeat is intentionally combined with a still-running workspace row, then
+ * exercised through the ProjectData liveness adapter — the same guard must hold
+ * here and in the cron sweep (`.claude/rules/61`).
+ */
+describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () => {
+  const doTask = { taskId: TASK_ID, projectId: PROJECT_ID, workspaceId: WORKSPACE_ID };
+
+  function doEnv(): ProjectDataEnv {
+    return {
+      DATABASE: createSqliteD1(sqlite),
+      BASE_DOMAIN: 'example.test',
+    } as unknown as ProjectDataEnv;
+  }
+
+  function sqlWithLiveAcpSession(): SqlStorage {
+    const db = new Database(':memory:');
+    const sql = createSqlStorage(db);
+    runMigrations(sql);
+    const now = Date.now();
+    sql.exec(
+      `INSERT INTO chat_sessions (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)
+       VALUES (?, ?, ?, 'Task', 'active', 0, ?, ?, ?)`,
+      CHAT_SESSION_ID,
+      WORKSPACE_ID,
+      TASK_ID,
+      now - 60_000,
+      now - 60_000,
+      now
+    );
+    sql.exec(
+      `INSERT INTO acp_sessions (id, chat_session_id, workspace_id, node_id, status, agent_type, last_heartbeat_at, created_at, updated_at, started_at)
+       VALUES ('acp-live', ?, ?, ?, 'running', 'codex', ?, ?, ?, ?)`,
+      CHAT_SESSION_ID,
+      WORKSPACE_ID,
+      NODE_ID,
+      now,
+      now - 60_000,
+      now,
+      now - 60_000
+    );
+    return sql;
+  }
+
+  beforeEach(() => {
+    seedWorkspace('running');
+    makeNodeHeartbeatStale();
+  });
+
+  it('uses the successful node health probe, then proves the task live from local ACP state', async () => {
+    const verdict = await getLocalTaskRuntimeLiveness(sqlWithLiveAcpSession(), doEnv(), doTask);
+
+    expect(fetchWithTimeoutMock).toHaveBeenCalledWith(
+      'https://01m064tg56ecjw1d127h32brvj.vm.example.test:8443/health',
+      { method: 'GET' },
+      5_000
+    );
+    expect(verdict).toMatchObject({
+      live: true,
+      conclusive: true,
+      reason: 'task_acp_session_live',
+      activeAcpSessionId: 'acp-live',
+    });
+  });
+
+  it('returns conclusive node_not_live only after a failed node health probe', async () => {
+    fetchWithTimeoutMock.mockResolvedValueOnce(new Response(null, { status: 503 }));
+
+    const verdict = await getLocalTaskRuntimeLiveness(sqlWithLiveAcpSession(), doEnv(), doTask);
+
+    expect(verdict).toMatchObject({
+      live: false,
+      conclusive: true,
+      reason: 'node_not_live',
+    });
+  });
+
+  it('preserves the task when the node health probe times out', async () => {
+    fetchWithTimeoutMock.mockRejectedValueOnce(
+      new Error('Request timed out after 5000ms: https://node-1.vm.example.test:8443/health')
+    );
+
+    const verdict = await getLocalTaskRuntimeLiveness(sqlWithLiveAcpSession(), doEnv(), doTask);
+
+    expect(verdict).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'node_health_probe_timeout',
     });
   });
 });
@@ -584,6 +702,7 @@ describe('task supersession — a successful wake must not fail its predecessor'
           nodeStatus: 'running',
           nodeHealthStatus: 'healthy',
           nodeHeartbeatAt: Date.now(),
+          runningWorkspacesOnNode: 1,
         },
         'ok'
       )

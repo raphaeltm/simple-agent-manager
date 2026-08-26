@@ -61,10 +61,19 @@ export function DiagnosticIncidentCard({ errorId, incident }: DiagnosticIncident
 
       {incident && (
         <div className="space-y-4 p-4">
-          <div className="grid gap-3 text-sm sm:grid-cols-3">
+          <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
             <div>
               <div className="text-xs text-fg-muted">Incident</div>
               <div className="mt-1 break-all font-mono text-xs">{incident.id}</div>
+            </div>
+            <div>
+              <div className="text-xs text-fg-muted">Occurrences</div>
+              <div className="mt-1">
+                {incident.occurrenceCount}
+                {incident.occurrenceCount > 1
+                  ? ` · last ${new Date(incident.lastSeenAt).toLocaleString()}`
+                  : ''}
+              </div>
             </div>
             <div>
               <div className="text-xs text-fg-muted">Snapshot size</div>

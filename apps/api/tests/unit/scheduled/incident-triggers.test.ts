@@ -3,9 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { runIncidentTriggerSweep } from '../../../src/scheduled/incident-triggers';
+import { claimIncident, resolveIncident } from '../../../src/services/platform-feedback-incidents';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
-function setup() {
+function setup(options: { withTrigger?: boolean } = {}) {
   const sqlite = new Database(':memory:');
   sqlite.exec(`
     CREATE TABLE platform_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT, updated_by TEXT);
@@ -28,9 +29,11 @@ function setup() {
     CREATE TABLE platform_feedback_triages (
       signature TEXT PRIMARY KEY, source TEXT NOT NULL, summary TEXT NOT NULL,
       first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, occurrence_count INTEGER NOT NULL,
-      evidence_refs TEXT NOT NULL, diagnosis_id TEXT, idea_id TEXT, claim_token TEXT,
+      severity TEXT NOT NULL DEFAULT 'error', evidence_refs TEXT NOT NULL, diagnosis_id TEXT, idea_id TEXT, claim_token TEXT,
       claim_expires_at INTEGER, failure_count INTEGER NOT NULL DEFAULT 0,
       last_failure_reason TEXT, last_failed_at INTEGER, rejected_at INTEGER,
+      budget_deferred_until INTEGER, budget_deferred_reason TEXT,
+      budget_defer_count INTEGER NOT NULL DEFAULT 0, last_budget_deferred_at INTEGER,
       queue_state TEXT NOT NULL DEFAULT 'resolved', queued_at INTEGER,
       dispatch_lease_token TEXT, dispatch_lease_expires_at INTEGER,
       dispatched_trigger_id TEXT, dispatched_execution_id TEXT, dispatched_task_id TEXT,
@@ -40,6 +43,9 @@ function setup() {
       resolved_at INTEGER, resolved_by_task_id TEXT, resolution_note TEXT, expired_at INTEGER,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
     INSERT INTO projects VALUES ('feedback-project', 'owner-1', 'Private Feedback');
+  `);
+  if (options.withTrigger !== false) {
+    sqlite.exec(`
     INSERT INTO triggers (
       id, project_id, user_id, name, description, status, source_type, cron_expression,
       cron_timezone, skip_if_running, prompt_template, agent_profile_id, skill_id, task_mode,
@@ -53,6 +59,7 @@ function setup() {
       '2026-08-21T00:00:00.000Z'
     );
   `);
+  }
   const env = {
     DATABASE: createSqliteD1(sqlite),
     PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project',
@@ -85,6 +92,73 @@ function seedIncident(
 }
 
 describe('incident trigger sweep', () => {
+  it('auto-creates one private incident trigger, dispatches once, and supports resolution', async () => {
+    const { sqlite, env } = setup({ withTrigger: false });
+    seedIncident(sqlite, 'incident-a', 1);
+    const submitter = vi.fn(async () => ({
+      taskId: 'task-from-auto-trigger',
+      sessionId: 'session-1',
+      branchName: 'sam/incident-trigger',
+    }));
+
+    const first = await runIncidentTriggerSweep(env, { now: () => 5000, submitter });
+    const second = await runIncidentTriggerSweep(env, { now: () => 5001, submitter });
+
+    expect(first).toMatchObject({
+      enabled: true,
+      autoTriggerCreated: 1,
+      checked: 1,
+      fired: 1,
+      pendingIncidents: 1,
+    });
+    expect(second).toMatchObject({ autoTriggerCreated: 0, fired: 0, pendingIncidents: 0 });
+    expect(submitter).toHaveBeenCalledTimes(1);
+    expect(
+      sqlite
+        .prepare("SELECT COUNT(*) AS count FROM triggers WHERE source_type = 'incident'")
+        .get()
+    ).toEqual({ count: 1 });
+    expect(
+      sqlite
+        .prepare("SELECT COUNT(*) AS count FROM trigger_executions WHERE task_id = ?")
+        .get('task-from-auto-trigger')
+    ).toEqual({ count: 1 });
+    expect(
+      sqlite
+        .prepare(
+          `SELECT queue_state, dispatched_task_id, dispatch_attempts
+           FROM platform_feedback_triages WHERE signature = 'incident-a'`
+        )
+        .get()
+    ).toEqual({
+      queue_state: 'dispatched',
+      dispatched_task_id: 'task-from-auto-trigger',
+      dispatch_attempts: 1,
+    });
+
+    const claim = await claimIncident(env, 'incident-a', 'task-from-auto-trigger', 5002);
+    expect(claim).toEqual({ claimToken: expect.any(String), leaseExpiresAt: expect.any(Number) });
+    await expect(
+      resolveIncident(
+        env,
+        'incident-a',
+        claim?.claimToken ?? '',
+        'resolved',
+        'task-from-auto-trigger',
+        'fixed by private incident task',
+        5003
+      )
+    ).resolves.toBe(true);
+    expect(
+      sqlite
+        .prepare('SELECT queue_state, resolved_by_task_id FROM platform_feedback_triages')
+        .get()
+    ).toEqual({
+      queue_state: 'resolved',
+      resolved_by_task_id: 'task-from-auto-trigger',
+    });
+  });
+
   it('dispatches one agent for a grouped backlog summary instead of one per occurrence', async () => {
     const { sqlite, env } = setup();
     seedIncident(sqlite, 'incident-a', 5);

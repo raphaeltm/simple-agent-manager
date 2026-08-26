@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   classifyTaskRuntimeLiveness,
+  needsNodeHealthProbe,
   needsSessionResumabilityProbe,
   type SessionResumabilitySnapshot,
   type TaskRuntimeLivenessSignals,
@@ -26,10 +27,12 @@ function signals(overrides: Partial<TaskRuntimeLivenessSignals> = {}): TaskRunti
       nodeStatus: 'running',
       nodeHealthStatus: 'healthy',
       nodeHeartbeatAt: NOW,
+      runningWorkspacesOnNode: 1,
     },
     nowMs: NOW,
     heartbeatStaleMs: STALE_MS,
     acpProbeOutcome: 'ok',
+    nodeHealthProbeOutcome: 'not_run',
     acpSessions: [
       {
         id: 'acp-1',
@@ -152,6 +155,113 @@ describe('classifyTaskRuntimeLiveness', () => {
       live: false,
       conclusive: true,
       reason: 'node_not_live',
+    });
+  });
+
+  it('requires a node health probe for stale VM heartbeat even with running workspaces', () => {
+    const base = signals();
+    const staleSignals = signals({
+      workspace: {
+        ...workspaceFrom(base),
+        nodeHeartbeatAt: NOW - STALE_MS - 1,
+        runningWorkspacesOnNode: 2,
+      },
+      acpProbeOutcome: 'not_run',
+      acpSessions: [],
+    });
+
+    expect(needsNodeHealthProbe(staleSignals)).toBe(true);
+    expect(classifyTaskRuntimeLiveness(staleSignals)).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'node_heartbeat_stale_running_workspaces',
+    });
+  });
+
+  it('treats stale heartbeat with running workspaces as conclusive after failed node probe', () => {
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: {
+            ...workspaceFrom(base),
+            nodeHeartbeatAt: NOW - STALE_MS - 1,
+            runningWorkspacesOnNode: 2,
+          },
+          acpProbeOutcome: 'not_run',
+          nodeHealthProbeOutcome: 'failed',
+          acpSessions: [],
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: true,
+      reason: 'node_not_live',
+    });
+  });
+
+  it('continues to task-scoped ACP liveness after successful node probe', () => {
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: {
+            ...workspaceFrom(base),
+            nodeHeartbeatAt: NOW - STALE_MS - 1,
+            runningWorkspacesOnNode: 2,
+          },
+          nodeHealthProbeOutcome: 'ok',
+        })
+      )
+    ).toMatchObject({
+      live: true,
+      conclusive: true,
+      reason: 'task_acp_session_live',
+      activeAcpSessionId: 'acp-1',
+    });
+  });
+
+  it('treats a timed-out node health probe as inconclusive', () => {
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: {
+            ...workspaceFrom(base),
+            nodeHeartbeatAt: NOW - STALE_MS - 1,
+            runningWorkspacesOnNode: 2,
+          },
+          acpProbeOutcome: 'not_run',
+          nodeHealthProbeOutcome: 'timeout',
+          acpSessions: [],
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'node_health_probe_timeout',
+    });
+  });
+
+  it('treats a node health probe configuration error as inconclusive', () => {
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: {
+            ...workspaceFrom(base),
+            nodeHeartbeatAt: NOW - STALE_MS - 1,
+            runningWorkspacesOnNode: 2,
+          },
+          acpProbeOutcome: 'not_run',
+          nodeHealthProbeOutcome: 'error',
+          acpSessions: [],
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'node_health_probe_error',
     });
   });
 

@@ -25,9 +25,11 @@ function setup() {
     CREATE TABLE platform_feedback_triages (
       signature TEXT PRIMARY KEY, source TEXT NOT NULL, summary TEXT NOT NULL,
       first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, occurrence_count INTEGER NOT NULL,
-      evidence_refs TEXT NOT NULL, diagnosis_id TEXT, idea_id TEXT, claim_token TEXT,
+      severity TEXT NOT NULL DEFAULT 'error', evidence_refs TEXT NOT NULL, diagnosis_id TEXT, idea_id TEXT, claim_token TEXT,
       claim_expires_at INTEGER, failure_count INTEGER NOT NULL DEFAULT 0,
       last_failure_reason TEXT, last_failed_at INTEGER, rejected_at INTEGER,
+      budget_deferred_until INTEGER, budget_deferred_reason TEXT,
+      budget_defer_count INTEGER NOT NULL DEFAULT 0, last_budget_deferred_at INTEGER,
       queue_state TEXT NOT NULL DEFAULT 'resolved', queued_at INTEGER,
       dispatch_lease_token TEXT, dispatch_lease_expires_at INTEGER,
       dispatched_trigger_id TEXT, dispatched_execution_id TEXT, dispatched_task_id TEXT,
@@ -356,6 +358,142 @@ describe('platform feedback triage', () => {
     expect(failed.claim_token).toBeNull();
     expect(failed.claim_expires_at).toBeNull();
     expect(String(failed.last_failure_reason)).not.toContain('alice@example.com');
+  });
+
+  it('prioritizes severe novel incidents ahead of low-severity repeat floods', async () => {
+    const { main, observability } = setup();
+    const at = Date.parse('2026-07-29T12:00:00Z');
+    const insert = observability.prepare(
+      'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+    );
+    for (let index = 0; index < 50; index++) {
+      insert.run(
+        `123e4567-e89b-42d3-a456-42661417${String(index).padStart(4, '0')}`,
+        'api',
+        'warn',
+        'low severity repeat flood 12345',
+        at + index
+      );
+    }
+    insert.run(
+      '223e4567-e89b-42d3-a456-426614174000',
+      'api',
+      'error',
+      'novel high severity failure',
+      at + 100
+    );
+    const diagnose = vi.fn(async () => ({
+      id: 'diagnosis-high',
+      diagnosis: 'redacted',
+    })) as unknown as typeof runDebugDiagnosis;
+
+    const result = await runPlatformFeedbackTriage(
+      {
+        DATABASE: createSqliteD1(main),
+        OBSERVABILITY_DATABASE: createSqliteD1(observability),
+        PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project',
+        PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT: '1',
+      } as Env,
+      'manual',
+      { now: () => at + 1000, diagnose }
+    );
+
+    expect(result).toMatchObject({ groupsFound: 1, ideasCreated: 1 });
+    expect(diagnose).toHaveBeenCalledWith(
+      expect.anything(),
+      'owner-1',
+      { errorId: '223e4567-e89b-42d3-a456-426614174000' },
+      { featureKey: SCHEDULED_TRIAGE_DEBUG_FEATURE_KEY }
+    );
+    expect(
+      main
+        .prepare(
+          'SELECT severity, occurrence_count FROM platform_feedback_triages WHERE idea_id IS NOT NULL'
+        )
+        .get()
+    ).toEqual({ severity: 'error', occurrence_count: 1 });
+  });
+
+  it('defers daily budget exhaustion without rejection and retries after the next daily refresh', async () => {
+    const { main, observability } = setup();
+    const at = Date.parse('2026-07-29T23:50:00Z');
+    observability
+      .prepare(
+        'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run(
+        '123e4567-e89b-42d3-a456-426614174000',
+        'api',
+        'error',
+        'budget retryable platform failure',
+        at
+      );
+    const diagnose = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Daily deployment debugging budget exhausted'))
+      .mockResolvedValueOnce({ id: 'diagnosis-after-refresh', diagnosis: 'redacted' });
+    const env = {
+      DATABASE: createSqliteD1(main),
+      OBSERVABILITY_DATABASE: createSqliteD1(observability),
+      PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project',
+      PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES: '1',
+    } as Env;
+
+    const first = await runPlatformFeedbackTriage(env, 'cron', { now: () => at + 1, diagnose });
+    const deferredUntil = Date.parse('2026-07-30T00:00:00.000Z');
+    expect(first).toMatchObject({
+      groupsBudgetDeferred: 1,
+      groupsFailed: 0,
+      ideasCreated: 0,
+    });
+    expect(
+      main
+        .prepare(
+          `SELECT failure_count, rejected_at, budget_deferred_until, budget_defer_count,
+            queue_state, claim_token, claim_expires_at
+           FROM platform_feedback_triages`
+        )
+        .get()
+    ).toEqual({
+      failure_count: 0,
+      rejected_at: null,
+      budget_deferred_until: deferredUntil,
+      budget_defer_count: 1,
+      queue_state: 'pending',
+      claim_token: null,
+      claim_expires_at: null,
+    });
+
+    const beforeRefresh = await runPlatformFeedbackTriage(env, 'cron', {
+      now: () => at + 5_000,
+      diagnose,
+    });
+    expect(beforeRefresh).toMatchObject({ groupsSkipped: 1, ideasCreated: 0 });
+    expect(diagnose).toHaveBeenCalledTimes(1);
+
+    const afterRefresh = await runPlatformFeedbackTriage(env, 'cron', {
+      now: () => deferredUntil + 2 * 60 * 60_000,
+      diagnose,
+    });
+    expect(afterRefresh).toMatchObject({
+      groupsBudgetDeferred: 0,
+      groupsFailed: 0,
+      ideasCreated: 1,
+    });
+    expect(diagnose).toHaveBeenCalledTimes(2);
+    expect(
+      main
+        .prepare(
+          'SELECT failure_count, rejected_at, budget_deferred_until, budget_deferred_reason, idea_id FROM platform_feedback_triages'
+        )
+        .get()
+    ).toMatchObject({
+      failure_count: 0,
+      rejected_at: null,
+      budget_deferred_until: null,
+      budget_deferred_reason: null,
+      idea_id: expect.any(String),
+    });
   });
 
   it('recovers an expired zombie claim on the next sweep', async () => {

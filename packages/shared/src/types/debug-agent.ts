@@ -74,6 +74,8 @@ export interface DiagnosticIncidentSummary {
   nodeId: string;
   workspaceId: string | null;
   status: DiagnosticIncidentStatus;
+  occurrenceCount: number;
+  lastSeenAt: string;
   artifactCount: number;
   totalBytes: number;
   manifest: DiagnosticIncidentManifest | null;

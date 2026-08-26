@@ -6,6 +6,7 @@ import expiryIndexMigrationSql from '../../../src/db/migrations/0107_diagnostic_
 import statusOrderMigrationSql from '../../../src/db/migrations/0108_diagnostic_reconciliation_status_order.sql?raw';
 import type { Env } from '../../../src/env';
 import { reconcileDiagnosticIncidents } from '../../../src/services/diagnostic-incident-reconciliation';
+import { diagnosticDedupSchemaSql } from '../../helpers/diagnostic-dedup-schema';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 interface Head {
@@ -36,6 +37,7 @@ describe('diagnostic incident reconciliation', () => {
     main.exec(migrationSql);
     main.exec(expiryIndexMigrationSql);
     main.exec(statusOrderMigrationSql);
+    main.exec(diagnosticDedupSchemaSql);
     observability = new Database(':memory:');
     observability.exec(`
       CREATE TABLE platform_errors (

@@ -27,40 +27,150 @@ vi.mock('../../../src/services/node-agent', () => ({
   sendPromptToAgentOnNode: vi.fn().mockResolvedValue(undefined),
   cancelAgentSessionOnNode: vi.fn().mockResolvedValue({ success: true, status: 200 }),
 }));
+vi.mock('../../../src/services/project-data', () => ({ reconcileTaskWaits: vi.fn() }));
+vi.mock('../../../src/services/vm-admission-control', () => ({
+  cancelVmTaskAdmission: vi.fn().mockResolvedValue(undefined),
+}));
 
 /** Helper to create a D1Database mock with configurable task queries */
+interface MockTaskRow {
+  id?: string;
+  task_mode: string;
+  status: string;
+  project_id?: string;
+  workspace_id?: string | null;
+  chat_session_id?: string | null;
+  parent_task_id?: string | null;
+  recovery_source_task_id?: string | null;
+  trigger_execution_id?: string | null;
+  triggered_by?: string;
+  created_at?: string;
+  error_message?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  execution_step?: string | null;
+}
+
+interface MockWorkspaceRow {
+  node_id: string | null;
+  user_id: string;
+  project_id?: string | null;
+  status?: string;
+  node_status?: string | null;
+  health_status?: string | null;
+  last_heartbeat_at?: string | null;
+}
+
 function createMockD1(
-  taskRows: Record<string, { task_mode: string; status: string }> = {},
-  workspaceRows: Record<
-    string,
-    {
-      node_id: string | null;
-      user_id: string;
-      project_id?: string | null;
-      node_status?: string | null;
-      health_status?: string | null;
-      last_heartbeat_at?: string | null;
-    }
-  > = {}
+  taskRows: Record<string, MockTaskRow> = {},
+  workspaceRows: Record<string, MockWorkspaceRow> = {}
 ) {
   const runCalls: Array<{ query: string; args: unknown[] }> = [];
+  const statusEvents: Array<Record<string, unknown>> = [];
+  function workspaceIdForTask(taskId: string): string | null {
+    if (taskRows[taskId]?.workspace_id !== undefined) return taskRows[taskId].workspace_id ?? null;
+    if (taskId === 'task-1') return 'ws-1';
+    return taskId.replace(/-task$/, '-ws');
+  }
+  function chatSessionIdForTask(taskId: string): string | null {
+    if (taskRows[taskId]?.chat_session_id !== undefined) {
+      return taskRows[taskId].chat_session_id ?? null;
+    }
+    if (taskId === 'task-1') return 'session-1';
+    return taskId.replace(/-task$/, '-session');
+  }
+  function richTaskRow(taskId: string): MockTaskRow | null {
+    const row = taskRows[taskId];
+    if (!row) return null;
+    return {
+      id: taskId,
+      project_id: 'project-1',
+      workspace_id: workspaceIdForTask(taskId),
+      chat_session_id: chatSessionIdForTask(taskId),
+      parent_task_id: null,
+      recovery_source_task_id: null,
+      trigger_execution_id: null,
+      triggered_by: 'user',
+      created_at: new Date(Date.now() - 60_000).toISOString(),
+      error_message: null,
+      started_at: null,
+      completed_at: null,
+      execution_step: 'awaiting_followup',
+      ...row,
+    };
+  }
+  async function runStatement(query: string, args: unknown[]) {
+    runCalls.push({ query, args });
+    if (query.includes('UPDATE tasks') && query.includes('execution_step = NULL')) {
+      const taskId = args[6] as string;
+      const projectId = args[7] as string;
+      const fromStatus = args[8] as string;
+      const workspaceId = args[9] as string | null;
+      const chatSessionId = args[11] as string | null;
+      const row = richTaskRow(taskId);
+      if (
+        row &&
+        row.project_id === projectId &&
+        row.status === fromStatus &&
+        (workspaceId === null || row.workspace_id === workspaceId) &&
+        (chatSessionId === null || row.chat_session_id === chatSessionId)
+      ) {
+        taskRows[taskId] = {
+          ...row,
+          status: args[0] as string,
+          error_message: args[1] as string | null,
+          started_at: (row.started_at ?? args[3]) as string | null,
+          completed_at: args[4] as string,
+          execution_step: null,
+        };
+        return { success: true, meta: { changes: 1 } };
+      }
+      return { success: true, meta: { changes: 0 } };
+    }
+    if (query.includes('INSERT INTO task_status_events')) {
+      const taskId = args[7] as string;
+      const row = richTaskRow(taskId);
+      if (row?.status === args[9] && row.completed_at === args[10]) {
+        statusEvents.push({
+          task_id: taskId,
+          from_status: args[1],
+          to_status: args[2],
+          actor_type: args[3],
+          actor_id: args[4],
+          reason: args[5],
+        });
+        return { success: true, meta: { changes: 1 } };
+      }
+      return { success: true, meta: { changes: 0 } };
+    }
+    if (query.includes('UPDATE workspaces')) {
+      const workspaceId = args[1] as string;
+      const row = workspaceRows[workspaceId];
+      if (row) row.status = 'stopped';
+      return { success: true, meta: { changes: row ? 1 : 0 } };
+    }
+    return { success: true, meta: { changes: 0 } };
+  }
   return {
     __runCalls: runCalls,
+    __statusEvents: statusEvents,
     prepare: vi.fn().mockImplementation((query: string) => ({
       bind: vi.fn().mockImplementation((...args: unknown[]) => ({
         first: vi.fn().mockImplementation(async () => {
           if (query.includes('FROM tasks')) {
-            return taskRows[args[0] as string] ?? null;
+            return richTaskRow(args[0] as string);
           }
           if (query.includes('FROM workspaces')) {
             const row = workspaceRows[args[0] as string];
             if (!row) return null;
-            if (!row.node_id) return row;
+            const fullRow = { project_id: 'project-1', ...row };
+            if (!fullRow.node_id) return fullRow;
             return {
+              project_id: 'project-1',
               node_status: 'running',
               health_status: 'healthy',
               last_heartbeat_at: new Date(Date.now()).toISOString(),
-              ...row,
+              ...fullRow,
             };
           }
           if (query.includes('FROM acp_sessions')) {
@@ -68,12 +178,14 @@ function createMockD1(
           }
           return null;
         }),
-        run: vi.fn().mockImplementation(async () => {
-          runCalls.push({ query, args });
-          return { success: true };
-        }),
+        run: vi.fn().mockImplementation(() => runStatement(query, args)),
       })),
     })),
+    batch: vi
+      .fn()
+      .mockImplementation(async (statements: Array<{ run: () => Promise<unknown> }>) =>
+        Promise.all(statements.map((statement) => statement.run()))
+      ),
   } as unknown as D1Database;
 }
 
@@ -658,11 +770,11 @@ describe('Task Reconciliation Module', () => {
       expect(runCalls).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            query: expect.stringContaining('WHERE id = ? AND project_id = ?'),
+            query: expect.stringContaining('AND project_id = ?'),
             args: expect.arrayContaining(['task-1', 'project-1']),
           }),
           expect.objectContaining({
-            query: expect.stringContaining('WHERE id = ? AND project_id = ?'),
+            query: expect.stringContaining('AND project_id = ?'),
             args: expect.arrayContaining(['ws-1', 'project-1']),
           }),
         ])

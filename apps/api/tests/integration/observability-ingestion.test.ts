@@ -41,6 +41,7 @@ import {
   type PersistErrorInput,
   queryErrors,
 } from '../../src/services/observability';
+import { diagnosticDedupSchemaSql } from '../helpers/diagnostic-dedup-schema';
 
 const PLATFORM_ERRORS_DDL = `CREATE TABLE platform_errors (
   id TEXT PRIMARY KEY,
@@ -797,15 +798,24 @@ describe('observability error ingestion pipeline (behavioral)', () => {
           completed_at TEXT
         );
         CREATE TABLE diagnostic_incidents (
-          id TEXT PRIMARY KEY,
-          platform_error_id TEXT NOT NULL,
+          id TEXT PRIMARY KEY NOT NULL,
+          platform_error_id TEXT NOT NULL UNIQUE,
           node_id TEXT NOT NULL,
           workspace_id TEXT,
-          status TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending', 'available', 'failed', 'expired')),
+          artifact_count INTEGER NOT NULL DEFAULT 0,
+          total_bytes INTEGER NOT NULL DEFAULT 0,
+          manifest_json TEXT,
+          preview_json TEXT,
+          failure_reason TEXT,
           expires_at TEXT NOT NULL,
-          delete_after TEXT NOT NULL
+          delete_after TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
       `);
+      mainSqlite.exec(diagnosticDedupSchemaSql);
       mainDb = createTestD1(mainSqlite);
       authEnv = {
         BASE_DOMAIN: 'test.example.com',

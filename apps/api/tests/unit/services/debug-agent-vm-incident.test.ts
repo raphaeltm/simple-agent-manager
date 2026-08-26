@@ -8,6 +8,7 @@ import {
   resolveDebugAgentConfig,
   type ToolCall,
 } from '../../../src/services/debug-agent';
+import { diagnosticDedupSchemaSql } from '../../helpers/diagnostic-dedup-schema';
 import {
   diagnosticSecretCanaries,
   expectDiagnosticCanariesAbsent,
@@ -28,6 +29,7 @@ describe('get_vm_incident diagnosis tool', () => {
   it('returns only bounded redacted summary data without R2 coordinates or raw bytes', async () => {
     const sqlite = new Database(':memory:');
     sqlite.exec(migrationSql);
+    sqlite.exec(diagnosticDedupSchemaSql);
     sqlite
       .prepare(
         `INSERT INTO diagnostic_incidents
@@ -95,6 +97,7 @@ describe('get_vm_incident diagnosis tool', () => {
   it('reports explicit missing and window-only states', async () => {
     const sqlite = new Database(':memory:');
     sqlite.exec(migrationSql);
+    sqlite.exec(diagnosticDedupSchemaSql);
     const env = { DATABASE: createSqliteD1(sqlite) } as Env;
     const config = resolveDebugAgentConfig(env);
 

@@ -7,6 +7,8 @@ import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
 import { resolveDiagnosticIncidentConfig } from '../services/diagnostic-incident-config';
 import {
+  diagnosticIncidentDeploymentId,
+  diagnosticIncidentSignature,
   ensurePendingIncidents,
   registerDiagnosticArtifact,
   type RegisterDiagnosticArtifactInput,
@@ -110,11 +112,15 @@ nodeDiagnosticIncidentRoutes.post('/:id/errors', async (c) => {
   const persistInputs: PersistErrorInput[] = [];
   const correlationTimestamps: Array<number | null> = [];
   const reportSources: string[] = [];
+  const deploymentId = diagnosticIncidentDeploymentId(c.env);
   const pendingIncidents: Array<{
     incidentId: string;
     platformErrorId: string;
     nodeId: string;
     workspaceId: string | null;
+    signature: string;
+    deploymentId: string;
+    occurredAt: number;
   }> = [];
   for (const entry of body.errors) {
     let value: Record<string, unknown>;
@@ -182,7 +188,7 @@ nodeDiagnosticIncidentRoutes.post('/:id/errors', async (c) => {
     }
   }
 
-  persistInputs.forEach((input, index) => {
+  for (const [index, input] of persistInputs.entries()) {
     const correlationResult = correlations[index];
     if (correlationResult?.correlation) {
       input.taskId = correlationResult.correlation.taskId;
@@ -219,9 +225,12 @@ nodeDiagnosticIncidentRoutes.post('/:id/errors', async (c) => {
         platformErrorId: input.id,
         nodeId,
         workspaceId: input.workspaceId ?? null,
+        signature: await diagnosticIncidentSignature(reportSources[index] ?? 'vm-agent', input.message),
+        deploymentId,
+        occurredAt: input.timestamp ?? Date.now(),
       });
     }
-  });
+  }
 
   if (persistInputs.length > 0 && c.env.OBSERVABILITY_DATABASE) {
     const strictInputs = persistInputs.filter((input) => input.id);

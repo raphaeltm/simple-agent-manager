@@ -13,8 +13,10 @@ import {
   loadRuntimeWorkspaceSnapshot,
   loadSessionResumabilitySnapshot,
   loadTaskSupersession,
+  needsNodeHealthProbe,
   needsSessionResumabilityProbe,
   needsTaskSupersessionProbe,
+  probeNodeHealthForTaskLiveness,
   type RuntimeAcpSessionSnapshot,
   type TaskRuntimeLiveness,
   type TaskRuntimeLivenessSignals,
@@ -123,7 +125,7 @@ export async function getLocalTaskRuntimeLiveness(
     }
   }
 
-  const baseSignals: TaskRuntimeLivenessSignals = {
+  let livenessSignals: TaskRuntimeLivenessSignals = {
     projectId: task.projectId,
     taskWorkspaceId: task.workspaceId,
     workspace,
@@ -133,6 +135,7 @@ export async function getLocalTaskRuntimeLiveness(
     nowMs,
     heartbeatStaleMs: staleMs,
     acpProbeOutcome: 'not_run',
+    nodeHealthProbeOutcome: 'not_run',
     acpSessions: [],
     containerProbeOutcome: 'not_run',
     containerLifecycle: null,
@@ -140,7 +143,31 @@ export async function getLocalTaskRuntimeLiveness(
     sessionResumability,
     resumabilityMaxRecoveryAttempts: maxRecoveryAttempts,
   };
-  const initialClassification = classifyTaskRuntimeLiveness(baseSignals);
+  let initialClassification = classifyTaskRuntimeLiveness(livenessSignals);
+  if (needsNodeHealthProbe(livenessSignals) && livenessSignals.workspace?.nodeId) {
+    const nodeId = livenessSignals.workspace.nodeId;
+    const probe = await probeNodeHealthForTaskLiveness(env, nodeId);
+    if (probe.outcome !== 'ok') {
+      log.warn('node_health_probe_unhealthy', {
+        projectId: task.projectId,
+        workspaceId: task.workspaceId,
+        nodeId,
+        outcome: probe.outcome,
+        status: probe.status,
+        timeoutMs: probe.timeoutMs,
+        action: probe.outcome === 'failed' ? 'terminal_candidate' : 'preserved',
+        error: probe.error,
+      });
+    }
+    livenessSignals = {
+      ...livenessSignals,
+      nodeHealthProbeOutcome: probe.outcome,
+    };
+    initialClassification = classifyTaskRuntimeLiveness(livenessSignals);
+    if (probe.outcome !== 'ok') {
+      return initialClassification;
+    }
+  }
   if (
     !workspace ||
     workspace.status !== 'running' ||
@@ -173,12 +200,12 @@ export async function getLocalTaskRuntimeLiveness(
           action: 'preserved',
         });
         return classifyTaskRuntimeLiveness({
-          ...baseSignals,
+          ...livenessSignals,
           containerProbeOutcome: 'timeout',
         });
       }
       return classifyTaskRuntimeLiveness({
-        ...baseSignals,
+        ...livenessSignals,
         containerProbeOutcome: 'ok',
         containerLifecycle: probe,
       });
@@ -190,7 +217,7 @@ export async function getLocalTaskRuntimeLiveness(
         error: err instanceof Error ? err.message : String(err),
       });
       return classifyTaskRuntimeLiveness({
-        ...baseSignals,
+        ...livenessSignals,
         containerProbeOutcome: 'error',
       });
     } finally {
@@ -208,7 +235,7 @@ export async function getLocalTaskRuntimeLiveness(
       limit,
     });
     return classifyTaskRuntimeLiveness({
-      ...baseSignals,
+      ...livenessSignals,
       acpProbeOutcome: 'ok',
       acpSessions: sessions as RuntimeAcpSessionSnapshot[],
     });
@@ -221,7 +248,7 @@ export async function getLocalTaskRuntimeLiveness(
       error: err instanceof Error ? err.message : String(err),
     });
     return classifyTaskRuntimeLiveness({
-      ...baseSignals,
+      ...livenessSignals,
       acpProbeOutcome: 'error',
     });
   }

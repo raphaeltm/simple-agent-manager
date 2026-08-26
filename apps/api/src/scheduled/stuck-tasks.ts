@@ -58,8 +58,10 @@ import {
   loadRuntimeWorkspaceSnapshot,
   loadSessionResumabilitySnapshot,
   loadTaskSupersession,
+  needsNodeHealthProbe,
   needsSessionResumabilityProbe,
   needsTaskSupersessionProbe,
+  probeNodeHealthForTaskLiveness,
   type RuntimeAcpSessionSnapshot,
   type TaskRuntimeLiveness,
   type TaskRuntimeLivenessSignals,
@@ -550,7 +552,7 @@ export async function getTaskRuntimeLiveness(
     }
   }
 
-  const baseSignals: TaskRuntimeLivenessSignals = {
+  let livenessSignals: TaskRuntimeLivenessSignals = {
     projectId: task.project_id,
     taskWorkspaceId: task.workspace_id,
     workspace,
@@ -560,6 +562,7 @@ export async function getTaskRuntimeLiveness(
     nowMs,
     heartbeatStaleMs: staleSeconds * 1000,
     acpProbeOutcome: 'not_run',
+    nodeHealthProbeOutcome: 'not_run',
     acpSessions: [],
     containerProbeOutcome: 'not_run',
     containerLifecycle: null,
@@ -567,7 +570,29 @@ export async function getTaskRuntimeLiveness(
     sessionResumability,
     resumabilityMaxRecoveryAttempts: maxRecoveryAttempts,
   };
-  const initialClassification = classifyTaskRuntimeLiveness(baseSignals);
+  let initialClassification = classifyTaskRuntimeLiveness(livenessSignals);
+  if (needsNodeHealthProbe(livenessSignals) && livenessSignals.workspace?.nodeId) {
+    const nodeId = livenessSignals.workspace.nodeId;
+    const probe = await probeNodeHealthForTaskLiveness(env, nodeId);
+    if (probe.outcome !== 'ok') {
+      log.warn('stuck_task.node_health_probe_unhealthy', {
+        workspaceId: task.workspace_id,
+        nodeId,
+        outcome: probe.outcome,
+        status: probe.status,
+        timeoutMs: probe.timeoutMs,
+        error: probe.error,
+      });
+    }
+    livenessSignals = {
+      ...livenessSignals,
+      nodeHealthProbeOutcome: probe.outcome,
+    };
+    initialClassification = classifyTaskRuntimeLiveness(livenessSignals);
+    if (probe.outcome !== 'ok') {
+      return initialClassification;
+    }
+  }
   if (
     !workspace ||
     workspace.status !== 'running' ||
@@ -590,12 +615,12 @@ export async function getTaskRuntimeLiveness(
       ]);
       if (probe === TIMEOUT) {
         return classifyTaskRuntimeLiveness({
-          ...baseSignals,
+          ...livenessSignals,
           containerProbeOutcome: 'timeout',
         });
       }
       return classifyTaskRuntimeLiveness({
-        ...baseSignals,
+        ...livenessSignals,
         containerProbeOutcome: 'ok',
         containerLifecycle: probe,
       });
@@ -606,7 +631,7 @@ export async function getTaskRuntimeLiveness(
         error: err instanceof Error ? err.message : String(err),
       });
       return classifyTaskRuntimeLiveness({
-        ...baseSignals,
+        ...livenessSignals,
         containerProbeOutcome: 'error',
       });
     } finally {
@@ -639,12 +664,12 @@ export async function getTaskRuntimeLiveness(
         probeTimeoutMs,
       });
       return classifyTaskRuntimeLiveness({
-        ...baseSignals,
+        ...livenessSignals,
         acpProbeOutcome: 'timeout',
       });
     }
     return classifyTaskRuntimeLiveness({
-      ...baseSignals,
+      ...livenessSignals,
       acpProbeOutcome: 'ok',
       acpSessions: probe.sessions as RuntimeAcpSessionSnapshot[],
     });
@@ -654,7 +679,7 @@ export async function getTaskRuntimeLiveness(
       error: err instanceof Error ? err.message : String(err),
     });
     return classifyTaskRuntimeLiveness({
-      ...baseSignals,
+      ...livenessSignals,
       acpProbeOutcome: 'error',
     });
   }
@@ -973,7 +998,10 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
      * which is exactly how the first cut of this fix missed the two timeout
      * branches below (`.claude/rules/66` requirement 3).
      */
-    const terminalReasonFor = (liveness: TaskRuntimeLiveness, deadRuntimeReason: string): string => {
+    const terminalReasonFor = (
+      liveness: TaskRuntimeLiveness,
+      deadRuntimeReason: string
+    ): string => {
       if (isSupersededTerminalReason(liveness.reason)) {
         supersededTermination = true;
         return SUPERSEDED_TERMINATION_MESSAGE;
@@ -1388,9 +1416,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       // same status we observed. This prevents TOCTOU races with the
       // TaskRunner DO which may have advanced the task in between our
       // SELECT and this UPDATE.
-      const terminalStatus: 'failed' | 'cancelled' = supersededTermination
-        ? 'cancelled'
-        : 'failed';
+      const terminalStatus: 'failed' | 'cancelled' = supersededTermination ? 'cancelled' : 'failed';
       const updateResult = await env.DATABASE.prepare(
         `UPDATE tasks SET status = ?, execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ?
          WHERE id = ? AND status = ?
@@ -1452,7 +1478,11 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       // Sync trigger execution status (best-effort) — without this, cron triggers
       // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
       await syncTriggerExecutionStatus(env.DATABASE, task.id, terminalStatus, reason);
-      await cancelVmTaskAdmission(env, task.id, supersededTermination ? 'task_cancelled' : 'task_failed');
+      await cancelVmTaskAdmission(
+        env,
+        task.id,
+        supersededTermination ? 'task_cancelled' : 'task_failed'
+      );
 
       if (compactionLoopRecovery?.sessionId) {
         try {

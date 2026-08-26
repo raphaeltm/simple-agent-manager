@@ -1,6 +1,6 @@
 # Emit task status events from attention-expiry failures
 
-**Status**: backlog
+**Status**: archived
 **Created**: 2026-08-06
 **Source**: idle-cleanup silent-terminalization recovery
 
@@ -16,12 +16,12 @@ expand into unrelated terminal writers.
 
 ## Acceptance Criteria
 
-- [ ] The task failure and its `task_status_events` system row are written atomically or with an
+- [x] The task failure and its `task_status_events` system row are written atomically or with an
       explicitly recoverable consistency design.
-- [ ] The event records the prior status, `to_status='failed'`, `actor_type='system'`, and the same
+- [x] The event records the prior status, `to_status='failed'`, `actor_type='system'`, and the same
       diagnostic reason stored on the task.
-- [ ] The task mutation is project-scoped; missing project identity is rejected rather than falling
+- [x] The task mutation is project-scoped; missing project identity is rejected rather than falling
       back to an unscoped write.
-- [ ] Trigger execution state is synchronized when the failed task belongs to a trigger execution.
-- [ ] Stateful tests prove one event per real transition and no event when the guarded task update
+- [x] Trigger execution state is synchronized when the failed task belongs to a trigger execution.
+- [x] Stateful tests prove one event per real transition and no event when the guarded task update
       does not match.

@@ -8,6 +8,7 @@ import observabilityInitSql from '../../../src/db/migrations/observability/0000_
 import observabilityCorrelationSql from '../../../src/db/migrations/observability/0001_task_session_ids.sql?raw';
 import type { Env } from '../../../src/env';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
+import { diagnosticDedupSchemaSql } from '../../helpers/diagnostic-dedup-schema';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 vi.mock('../../../src/middleware/auth', async () => {
@@ -49,6 +50,7 @@ describe('admin observability vertical slices', () => {
   beforeEach(() => {
     main = new Database(':memory:');
     main.exec(diagnosticMigrationSql);
+    main.exec(diagnosticDedupSchemaSql);
     observability = new Database(':memory:');
     observability.exec(observabilityInitSql);
     observability.exec(observabilityCorrelationSql);

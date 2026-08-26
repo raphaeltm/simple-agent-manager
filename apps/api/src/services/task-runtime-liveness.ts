@@ -1,5 +1,10 @@
-import type { AcpSessionStatus } from '@simple-agent-manager/shared';
+import {
+  type AcpSessionStatus,
+  DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS,
+} from '@simple-agent-manager/shared';
 
+import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
+import { getNodeBackendBaseUrl } from './node-agent-readiness';
 import { isRestorableSnapshot } from './session-snapshot-artifacts';
 
 export interface TaskRuntimeLiveness {
@@ -12,6 +17,7 @@ export interface TaskRuntimeLiveness {
 }
 
 export type RuntimeProbeOutcome = 'ok' | 'timeout' | 'error' | 'unknown' | 'not_run';
+export type NodeHealthProbeOutcome = 'ok' | 'failed' | 'timeout' | 'error' | 'not_run';
 
 export interface RuntimeWorkspaceSnapshot {
   id: string;
@@ -22,6 +28,7 @@ export interface RuntimeWorkspaceSnapshot {
   nodeStatus: string | null;
   nodeHealthStatus: string | null;
   nodeHeartbeatAt: number | null;
+  runningWorkspacesOnNode: number | null;
 }
 
 export interface RuntimeAcpSessionSnapshot {
@@ -104,6 +111,7 @@ export interface TaskRuntimeLivenessSignals {
   nowMs: number;
   heartbeatStaleMs: number;
   acpProbeOutcome: RuntimeProbeOutcome;
+  nodeHealthProbeOutcome: NodeHealthProbeOutcome;
   acpSessions: RuntimeAcpSessionSnapshot[];
   containerProbeOutcome: RuntimeProbeOutcome;
   containerLifecycle: ContainerLifecycleSnapshot | null;
@@ -129,11 +137,112 @@ export interface TaskRuntimeLivenessSignals {
   supersession: TaskSupersession;
 }
 
+export interface TaskLivenessNodeHealthProbeEnv {
+  BASE_DOMAIN?: string;
+  VM_AGENT_PROTOCOL?: string;
+  VM_AGENT_PORT?: string;
+  TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS?: string;
+}
+
+export interface TaskLivenessNodeHealthProbeResult {
+  outcome: Exclude<NodeHealthProbeOutcome, 'not_run'>;
+  timeoutMs: number;
+  url: string | null;
+  status: number | null;
+  error: string | null;
+}
+
 const ACTIVE_ACP_STATUSES = new Set<AcpSessionStatus>(['assigned', 'running']);
 const INCONCLUSIVE_WORKSPACE_STATUSES = new Set(['creating', 'sleeping', 'recovery']);
 const TERMINAL_CONTAINER_STATUSES = new Set(['stopping', 'stopped', 'expired', 'error']);
+const TERMINAL_NODE_STATUSES = new Set(['stopped', 'deleted', 'destroyed', 'destroying', 'error']);
 /** `session_snapshots.sleep_status` value meaning "asleep right now". */
 const RESUMABLE_SLEEP_STATUS = 'sleeping';
+
+export function getTaskLivenessNodeHealthProbeTimeoutMs(
+  env: Pick<TaskLivenessNodeHealthProbeEnv, 'TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS'>
+): number {
+  return getTimeoutMs(
+    env.TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS,
+    DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS
+  );
+}
+
+function isVmNodeHeartbeatStale(
+  workspace: RuntimeWorkspaceSnapshot,
+  nowMs: number,
+  heartbeatStaleMs: number
+): boolean {
+  return (
+    workspace.nodeHealthStatus !== 'healthy' ||
+    workspace.nodeHeartbeatAt === null ||
+    nowMs - workspace.nodeHeartbeatAt > heartbeatStaleMs
+  );
+}
+
+/**
+ * A stale D1 heartbeat/health field is a weak self-signal, not proof of VM
+ * death. Both liveness adapters must make the same bounded authority probe
+ * before converting that stale signal into a terminal `node_not_live` verdict
+ * (`.claude/rules/61`).
+ */
+export function needsNodeHealthProbe(signals: TaskRuntimeLivenessSignals): boolean {
+  const workspace = signals.workspace;
+  if (signals.workspaceProbeOutcome !== 'ok') return false;
+  if (!signals.taskWorkspaceId || !workspace) return false;
+  if (workspace.status !== 'running') return false;
+  if (workspace.nodeRuntime === 'cf-container') return false;
+  if (!workspace.nodeId) return false;
+  if (workspace.nodeStatus && TERMINAL_NODE_STATUSES.has(workspace.nodeStatus)) return false;
+  if (signals.nodeHealthProbeOutcome !== 'not_run') return false;
+  return isVmNodeHeartbeatStale(workspace, signals.nowMs, signals.heartbeatStaleMs);
+}
+
+function isNodeHealthProbeTimeout(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return err.name === 'AbortError' || err.message.startsWith('Request timed out after ');
+}
+
+export async function probeNodeHealthForTaskLiveness(
+  env: TaskLivenessNodeHealthProbeEnv,
+  nodeId: string
+): Promise<TaskLivenessNodeHealthProbeResult> {
+  const timeoutMs = getTaskLivenessNodeHealthProbeTimeoutMs(env);
+  if (!env.BASE_DOMAIN) {
+    return {
+      outcome: 'error',
+      timeoutMs,
+      url: null,
+      status: null,
+      error: 'BASE_DOMAIN is not configured',
+    };
+  }
+
+  const url = `${getNodeBackendBaseUrl(nodeId, {
+    BASE_DOMAIN: env.BASE_DOMAIN,
+    VM_AGENT_PROTOCOL: env.VM_AGENT_PROTOCOL,
+    VM_AGENT_PORT: env.VM_AGENT_PORT,
+  })}/health`;
+
+  try {
+    const response = await fetchWithTimeout(url, { method: 'GET' }, timeoutMs);
+    return {
+      outcome: response.ok ? 'ok' : 'failed',
+      timeoutMs,
+      url,
+      status: response.status,
+      error: null,
+    };
+  } catch (err) {
+    return {
+      outcome: isNodeHealthProbeTimeout(err) ? 'timeout' : 'failed',
+      timeoutMs,
+      url,
+      status: null,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
 
 /**
  * True when the session is currently asleep with a restorable, unexpired
@@ -219,9 +328,7 @@ export function needsTaskSupersessionProbe(
 ): boolean {
   if (workspaceProbeOutcome !== 'ok') return false;
   if (workspace === null) return true;
-  return (
-    workspace.status !== 'running' && !INCONCLUSIVE_WORKSPACE_STATUSES.has(workspace.status)
-  );
+  return workspace.status !== 'running' && !INCONCLUSIVE_WORKSPACE_STATUSES.has(workspace.status);
 }
 
 /**
@@ -420,18 +527,59 @@ export function classifyTaskRuntimeLiveness(
     });
   }
 
-  if (
-    workspace.nodeStatus !== 'running' ||
-    workspace.nodeHealthStatus !== 'healthy' ||
-    workspace.nodeHeartbeatAt === null ||
-    signals.nowMs - workspace.nodeHeartbeatAt > signals.heartbeatStaleMs
-  ) {
+  if (workspace.nodeStatus && TERMINAL_NODE_STATUSES.has(workspace.nodeStatus)) {
     return result(workspace, {
       live: false,
       conclusive: true,
       reason: 'node_not_live',
       activeAcpSessionId: null,
     });
+  }
+
+  const nodeHeartbeatStale = isVmNodeHeartbeatStale(
+    workspace,
+    signals.nowMs,
+    signals.heartbeatStaleMs
+  );
+  if (nodeHeartbeatStale) {
+    if (signals.nodeHealthProbeOutcome === 'failed') {
+      return result(workspace, {
+        live: false,
+        conclusive: true,
+        reason: 'node_not_live',
+        activeAcpSessionId: null,
+      });
+    }
+    if (signals.nodeHealthProbeOutcome === 'timeout') {
+      return result(workspace, {
+        live: false,
+        conclusive: false,
+        reason: 'node_health_probe_timeout',
+        activeAcpSessionId: null,
+      });
+    }
+    if (signals.nodeHealthProbeOutcome === 'error') {
+      return result(workspace, {
+        live: false,
+        conclusive: false,
+        reason: 'node_health_probe_error',
+        activeAcpSessionId: null,
+      });
+    }
+    if (signals.nodeHealthProbeOutcome !== 'ok') {
+      return result(workspace, {
+        live: false,
+        conclusive: false,
+        reason:
+          (workspace.runningWorkspacesOnNode ?? 0) > 0
+            ? 'node_heartbeat_stale_running_workspaces'
+            : 'node_heartbeat_stale_probe_required',
+        activeAcpSessionId: null,
+      });
+    }
+    // The stale D1 node fields have been contradicted by the runtime authority.
+    // Continue to the task-scoped ACP check; node health alone is not proof the
+    // specific task is still live.
   }
 
   if (signals.acpProbeOutcome === 'timeout') {
@@ -486,7 +634,8 @@ export async function loadRuntimeWorkspaceSnapshot(
     .prepare(
       `SELECT w.id, w.status AS workspace_status, w.chat_session_id, w.node_id,
             n.status AS node_status, n.health_status, n.last_heartbeat_at,
-            n.runtime AS node_runtime
+            n.runtime AS node_runtime,
+            (SELECT COUNT(*) FROM workspaces nw WHERE nw.node_id = w.node_id AND nw.status = 'running') AS running_workspaces_on_node
      FROM workspaces w
      LEFT JOIN nodes n ON n.id = w.node_id
      WHERE w.id = ? AND w.project_id = ?
@@ -502,6 +651,7 @@ export async function loadRuntimeWorkspaceSnapshot(
       health_status: string | null;
       last_heartbeat_at: string | null;
       node_runtime: string | null;
+      running_workspaces_on_node: number | null;
     }>();
   if (!row) return null;
 
@@ -515,6 +665,7 @@ export async function loadRuntimeWorkspaceSnapshot(
     nodeStatus: row.node_status,
     nodeHealthStatus: row.health_status,
     nodeHeartbeatAt: Number.isFinite(heartbeatAt) ? heartbeatAt : null,
+    runningWorkspacesOnNode: row.running_workspaces_on_node ?? null,
   };
 }
 

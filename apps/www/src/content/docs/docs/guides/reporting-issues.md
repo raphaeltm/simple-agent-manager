@@ -114,11 +114,11 @@ That fence matters when you point an agent at the resulting Idea. The reporter's
 
 ## For operators: automated error triage
 
-Beyond user-submitted reports, SAM files its **own** reports. Once an hour it groups recent platform errors, runs the [deployment diagnosis agent](#for-superadmins-diagnosing-errors-with-an-agent) on a representative error from each group, and writes a grouped incident plus draft Idea into the same feedback project.
+Beyond user-submitted reports, SAM files its **own** reports. Once an hour it groups recent platform errors and warnings, prioritizes severe and novel signatures ahead of low-severity repeat floods, runs the [deployment diagnosis agent](#for-superadmins-diagnosing-errors-with-an-agent) on a representative error from each eligible group, and writes a grouped incident plus draft Idea into the same feedback project.
 
-Grouping is by a redacted content signature, so a recurring error updates its existing incident/Idea instead of filing a new one every hour. A group that fails triage repeatedly is rejected rather than retried forever. Errors emitted by tasks in the feedback project are excluded from the hourly grouping pass so an incident-handling agent cannot recursively file incidents about its own failures.
+Grouping is by a redacted content signature, so a recurring error updates its existing incident/Idea instead of filing a new one every hour. A group that fails triage repeatedly is rejected rather than retried forever. Budget exhaustion is different: daily token exhaustion, per-run token exhaustion, and similar capacity blocks are persisted as retryable deferrals. Deferred signatures stay pending, are skipped until their retry time, and become eligible again after the budget refresh instead of being permanently rejected. Errors emitted by tasks in the feedback project are excluded from the hourly grouping pass so an incident-handling agent cannot recursively file incidents about its own failures.
 
-The private incident backlog has its own queue state (`pending`, `dispatched`, `claimed`, `resolved`, `rejected`, `expired`). Scheduled incident triggers, when configured in the feedback project, dispatch one agent for a bounded backlog summary, not one agent per occurrence. Agents then use private MCP tools (`list_incident_queue`, `get_incident`, `claim_incident`, `resolve_incident`) to claim and terminally resolve incidents. Those tools are server-scoped to the effective feedback project setting; they return only bounded, redacted evidence and explicitly label report/log/diagnosis text as untrusted. Machine-generated feedback and diagnostics should stay private and must not be copied into public GitHub issues.
+The private incident backlog has its own queue state (`pending`, `dispatched`, `claimed`, `resolved`, `rejected`, `expired`). By default, when pending incidents exist and no incident trigger exists in the feedback project, SAM creates one private incident trigger automatically. Existing operator-created incident triggers, including paused ones, are respected. Incident triggers dispatch one agent for a bounded backlog summary, not one agent per occurrence. Agents then use private MCP tools (`list_incident_queue`, `get_incident`, `claim_incident`, `resolve_incident`) to claim and terminally resolve incidents. Those tools are server-scoped to the effective feedback project setting; they return only bounded, redacted evidence and explicitly label report/log/diagnosis text as untrusted. Machine-generated feedback and diagnostics should stay private and must not be copied into public GitHub issues.
 
 There is no UI button for triage yet. A superadmin can `POST /api/admin/observability/feedback-triage` to sweep immediately rather than waiting for the next hourly run. Note that a manual sweep still only looks back over `PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES` (60 minutes by default), so it will not surface older errors — to test a fresh configuration, trigger it while a recent error is still inside that window.
 
@@ -131,17 +131,21 @@ There is no UI button for triage yet. A superadmin can `POST /api/admin/observab
 | `PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS`                 | `600000`     | Claim lease before a later sweep can reclaim a group            |
 | `PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES`                 | `3`          | Failed attempts before a group is rejected                      |
 | `PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH`    | `240`        | Max characters stored for a sanitized failure reason            |
+| `PLATFORM_FEEDBACK_TRIAGE_BUDGET_DEFER_MS`              | `86400000`   | Retry delay for per-run budget deferrals                        |
 | `PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS`      | `7200000`    | Dispatch lease before a failed trigger handoff can be reclaimed |
 | `PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS`         | `3600000`    | Agent claim lease before another task can reclaim an incident   |
 | `PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS`      | `3`          | Expired dispatch attempts before an incident is rejected        |
 | `PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS`                 | `2592000000` | Max active incident age before expiry                           |
+| `PLATFORM_FEEDBACK_INCIDENT_AUTO_TRIGGER_ENABLED`       | `true`       | Auto-create one private incident trigger when needed            |
 | `PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT`              | `5`          | Max active incident triggers inspected per sweep                |
+| `PLATFORM_FEEDBACK_INCIDENT_TRIGGER_NAME`               | built-in     | Name for the auto-created private incident trigger              |
+| `PLATFORM_FEEDBACK_INCIDENT_TRIGGER_TEMPLATE`           | built-in     | Prompt template for the auto-created private incident trigger   |
 | `PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT`              | `10`         | Max incidents in one trigger backlog summary                    |
 | `PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT`         | `10`         | Max evidence references retained per incident                   |
 | `PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES`         | `32768`      | Max serialized evidence bytes per incident                      |
 | `PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH` | `2000`       | Max private resolution-note length                              |
 
-Automated triage and superadmin-initiated diagnosis have **separate** daily token budgets. They read the same `DEBUG_AGENT_DAILY_TOKEN_LIMIT` value but count against independent per-feature counters, so a noisy hour of triage can never eat the allowance a superadmin wants for hands-on diagnosis. Budget accordingly: with triage enabled, worst-case daily spend on diagnosis is **twice** `DEBUG_AGENT_DAILY_TOKEN_LIMIT`. To cap triage specifically, lower `PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT` or `PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT`.
+Automated triage and superadmin-initiated diagnosis have **separate** daily token budgets. They read the same `DEBUG_AGENT_DAILY_TOKEN_LIMIT` value but count against independent per-feature counters, so a noisy hour of triage can never eat the allowance a superadmin wants for hands-on diagnosis. Budget accordingly: with triage enabled, worst-case daily spend on diagnosis is **twice** `DEBUG_AGENT_DAILY_TOKEN_LIMIT`. To cap triage specifically, lower `PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT` or `PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT`. When automated triage hits its daily budget, it defers the current signature until the next UTC day; per-run budget exhaustion uses `PLATFORM_FEEDBACK_TRIAGE_BUDGET_DEFER_MS`.
 
 ## For superadmins: diagnosing errors with an agent
 
@@ -164,7 +168,7 @@ The same redactor now also runs on the **Worker log query** behind `/admin/logs`
 
 ### Automatic VM diagnostic evidence
 
-For VM Agent failures, the error row can include a **Diagnostic evidence** card. The VM Agent assigns one stable incident ID, durably queues the error, and collects a small same-installation snapshot while it retries delivery. The snapshot is deliberately narrower than a debug package:
+For VM Agent failures, the error row can include a **Diagnostic evidence** card. The VM Agent assigns one stable incident ID, durably queues the error, and collects a small same-installation snapshot while it retries delivery. The Worker deduplicates repeated VM incidents by redacted signature and deployment: after the first occurrence, later repeats update occurrence count and last-seen time instead of creating another incident row or R2 artifact. The snapshot is deliberately narrower than a debug package:
 
 - allowlisted runtime health, agent version, bounded system resources, structured event metadata, and workspace lifecycle state;
 - recursive credential-shaped value redaction plus depth, item, string, document, archive, spool, and retention limits;
@@ -193,6 +197,6 @@ The diagnosis agent gets only the bounded redacted preview through its read-only
 | `DEBUG_AGENT_RETRY_MAX_DELAY_MS`  | `60000`               | Maximum classified transient retry delay                                                         |
 | `DEBUG_AGENT_STEP_MAX_RETRIES`    | `3`                   | Maximum transient retries for one checkpointed step                                              |
 
-Exhausting the daily budget does not block the request up front — the run is accepted, then fails with **"Daily deployment debugging budget exhausted"** and appears in **Recent diagnosis runs** as `failed`. Its **Retry** button will keep failing until the next day.
+For superadmin-initiated diagnosis, exhausting the daily budget does not block the request up front — the run is accepted, then fails with **"Daily deployment debugging budget exhausted"** and appears in **Recent diagnosis runs** as `failed`. Its **Retry** button will keep failing until the next day. Automated triage handles the same budget condition as a retryable deferral, as described above.
 
 See the [Configuration Reference](/docs/reference/configuration/) for the complete variable list.
