@@ -415,7 +415,9 @@ Secrets are sensitive values (API keys, tokens, passwords) that MUST NOT be expo
 **Rules:**
 
 - NEVER hardcode secrets in source code, config files, or commit history
-- Use Cloudflare Workers secrets: `wrangler secret put SECRET_NAME`
+- Use Cloudflare Workers secrets through the bounded deploy-secret workflow
+  (`scripts/deploy/configure-secrets.sh`, backed by `wrangler secret bulk`);
+  never log secret values
 - Local development uses `.dev.vars` file (gitignored)
 - Document all required secrets in README with descriptions (not values)
 - Secrets follow principle of least privilege (minimal required permissions)

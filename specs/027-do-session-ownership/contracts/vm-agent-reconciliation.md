@@ -114,16 +114,20 @@ async checkSessionHeartbeats(): Promise<void> {
   const cutoff = Date.now() - detectionWindow;
 
   const staleSessions = this.sql.exec(
-    `SELECT id FROM acp_sessions
+    `SELECT id, workspace_id, node_id FROM acp_sessions
      WHERE status IN ('assigned', 'running')
      AND last_heartbeat_at < ?`,
     cutoff
   ).toArray();
 
   for (const session of staleSessions) {
+    if (await this.shouldDeferVmHeartbeatTimeout(session)) {
+      await this.recordSuspectHeartbeat(session.id, 'projectdata_heartbeat_stale');
+      continue;
+    }
     await this.transitionAcpSession(session.id, 'interrupted', {
       actorType: 'alarm',
-      reason: 'Heartbeat timeout exceeded detection window',
+      reason: 'Conclusive runtime/workspace evidence exceeded detection window',
     });
   }
 }

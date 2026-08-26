@@ -48,9 +48,9 @@
 
 ## Phase 3: User Story 1 — Resilient Task Execution (Priority: P1) 🎯 MVP
 
-**Goal**: DO tracks ACP session state machine (pending → assigned → running → completed/failed/interrupted). VM failure detected via heartbeat timeout.
+**Goal**: DO tracks ACP session state machine (pending → assigned → running → completed/failed/interrupted). ProjectData heartbeat timeout marks storage-history data stale/suspect; VM interruption requires explicit terminal ACP evidence, terminal owning workspace/node state, cf-container terminal lifecycle, or another authoritative runtime signal.
 
-**Independent Test**: Submit a task, verify session record exists in DO with correct state transitions. Simulate VM failure, verify DO marks session as "interrupted".
+**Independent Test**: Submit a task, verify session record exists in DO with correct state transitions. Simulate conclusive VM failure evidence, verify DO marks session as "interrupted"; simulate stale ProjectData heartbeat data alone and verify VM-backed work is preserved.
 
 ### Implementation for User Story 1
 

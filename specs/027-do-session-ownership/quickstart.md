@@ -57,7 +57,8 @@ Build in this sequence (each step testable independently):
 
 1. Add DO alarm handler for heartbeat checking in `project-data.ts`
 2. Wire heartbeat endpoint processing
-3. **Test**: Simulate heartbeat timeout, verify session transitions to "interrupted"
+3. Treat stale ProjectData heartbeat rows as suspect for VM-backed sessions; only interrupt from explicit terminal ACP evidence, terminal owning workspace/node state, cf-container terminal lifecycle, or another authoritative runtime signal
+4. **Test**: Simulate conclusive runtime failure, verify session transitions to "interrupted"; simulate stale ProjectData heartbeat alone, verify VM work is preserved
 
 ### Step 7: Session Forking
 
