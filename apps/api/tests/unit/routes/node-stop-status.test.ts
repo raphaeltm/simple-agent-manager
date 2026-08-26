@@ -308,13 +308,8 @@ describe('DELETE /api/nodes/:id', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ success: true });
     expect(mocks.deleteNodeResources).toHaveBeenCalledWith('node-1', 'user-123', env);
-    expect(deleteWhere).toHaveBeenCalledTimes(3);
+    expect(deleteWhere).toHaveBeenCalledTimes(2);
     expect(finalizeDeletion).toHaveBeenCalledWith('node-1', 'user-123');
-    expect(operations).toEqual([
-      'd1-delete',
-      'd1-delete',
-      'd1-delete',
-      'lifecycle:node-1:user-123',
-    ]);
+    expect(operations).toEqual(['d1-delete', 'd1-delete', 'lifecycle:node-1:user-123']);
   });
 });

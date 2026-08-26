@@ -30,6 +30,10 @@ describe('compute usage metering pipeline', () => {
     resolve(process.cwd(), 'src/durable-objects/task-runner/state-machine.ts'),
     'utf8'
   );
+  const finalizerFile = readFileSync(
+    resolve(process.cwd(), 'src/services/workspace-lifecycle-finalizer.ts'),
+    'utf8'
+  );
   const workspaceStepsFile = readFileSync(
     resolve(process.cwd(), 'src/durable-objects/task-runner/workspace-steps.ts'),
     'utf8'
@@ -177,8 +181,10 @@ describe('compute usage metering pipeline', () => {
       expect(stopCount).toBeGreaterThanOrEqual(2);
     });
 
-    it('task-runner cleanup calls stopComputeTracking', () => {
-      expect(stateMachineFile).toContain('stopComputeTracking');
+    it('task-runner cleanup closes compute usage through the lifecycle finalizer', () => {
+      expect(stateMachineFile).toContain('finalizeWorkspaceLifecycleClosure');
+      expect(finalizerFile).toContain('UPDATE compute_usage');
+      expect(finalizerFile).toContain('ended_at IS NULL');
     });
   });
 

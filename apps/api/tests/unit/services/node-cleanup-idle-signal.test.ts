@@ -123,6 +123,13 @@ beforeEach(() => {
       id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT,
       auto_provisioned_node_id TEXT, updated_at TEXT
     );
+    CREATE TABLE agent_sessions (
+      id TEXT PRIMARY KEY, workspace_id TEXT, user_id TEXT, status TEXT,
+      stopped_at TEXT, error_message TEXT, updated_at TEXT
+    );
+    CREATE TABLE compute_usage (
+      id TEXT PRIMARY KEY, workspace_id TEXT, user_id TEXT, ended_at TEXT
+    );
   `);
 });
 

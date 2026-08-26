@@ -27,6 +27,10 @@ describe('workspace lifecycle synchronization', () => {
     resolve(process.cwd(), 'src/services/workspace-cleanup.ts'),
     'utf8'
   );
+  const finalizerFile = readFileSync(
+    resolve(process.cwd(), 'src/services/workspace-lifecycle-finalizer.ts'),
+    'utf8'
+  );
   const cleanupFile = ['index.ts', 'shared.ts', 'node-phases.ts', 'workspace-phases.ts']
     .map((f) => readFileSync(resolve(process.cwd(), `src/scheduled/node-cleanup/${f}`), 'utf8'))
     .join('\n');
@@ -39,25 +43,29 @@ describe('workspace lifecycle synchronization', () => {
 
   describe('workspace stop → session stop synchronization', () => {
     it('stop route calls projectDataService.stopSession', () => {
-      expect(lifecycleFile).toMatch(/projectDataService\s*\.\s*stopSession/);
-      expect(lifecycleFile).toContain('workspace.stop_session_failed');
+      expect(lifecycleFile).toContain('finalizeWorkspaceLifecycleClosure');
+      expect(finalizerFile).toMatch(/projectDataService\s*\.\s*stopSession/);
+      expect(finalizerFile).toContain('workspace_lifecycle_finalizer.project_session_failed');
     });
 
     it('stop route cleans up workspace activity', () => {
-      expect(lifecycleFile).toMatch(/projectDataService\s*\.\s*cleanupWorkspaceActivity/);
-      expect(lifecycleFile).toContain('workspace.cleanup_activity_failed');
+      expect(lifecycleFile).toContain('finalizeWorkspaceLifecycleClosure');
+      expect(finalizerFile).toMatch(/projectDataService\s*\.\s*cleanupWorkspaceActivity/);
+      expect(finalizerFile).toContain('workspace_lifecycle_finalizer.activity_cleanup_failed');
     });
 
     it('delete route calls projectDataService.stopSession', () => {
       expect(crudFile).toContain('cleanupWorkspaceForDeletion');
-      expect(workspaceCleanupFile).toMatch(/projectDataService\s*\.\s*stopSession/);
-      expect(workspaceCleanupFile).toContain('workspace.delete_stop_session_failed');
+      expect(workspaceCleanupFile).toContain('finalizeWorkspaceLifecycleClosure');
+      expect(finalizerFile).toMatch(/projectDataService\s*\.\s*stopSession/);
+      expect(finalizerFile).toContain('workspace_lifecycle_finalizer.project_session_failed');
     });
 
     it('delete route cleans up workspace activity', () => {
       expect(crudFile).toContain('cleanupWorkspaceForDeletion');
-      expect(workspaceCleanupFile).toMatch(/projectDataService\s*\.\s*cleanupWorkspaceActivity/);
-      expect(workspaceCleanupFile).toContain('workspace.delete_cleanup_activity_failed');
+      expect(workspaceCleanupFile).toContain('finalizeWorkspaceLifecycleClosure');
+      expect(finalizerFile).toMatch(/projectDataService\s*\.\s*cleanupWorkspaceActivity/);
+      expect(finalizerFile).toContain('workspace_lifecycle_finalizer.activity_cleanup_failed');
     });
   });
 
@@ -87,13 +95,15 @@ describe('workspace lifecycle synchronization', () => {
     });
 
     it('cron sweep stops chat session for orphaned workspaces', () => {
-      expect(cleanupFile).toContain('projectDataService.stopSession');
-      expect(cleanupFile).toContain('node_cleanup.orphan_session_stop_failed');
+      expect(cleanupFile).toContain('finalizeWorkspaceLifecycleClosure');
+      expect(cleanupFile).toContain('node_cleanup_orphaned_workspace_stopped');
+      expect(finalizerFile).toMatch(/projectDataService\s*\.\s*stopSession/);
     });
 
     it('cron sweep cleans up activity tracking for orphaned workspaces', () => {
-      expect(cleanupFile).toContain('projectDataService.cleanupWorkspaceActivity');
-      expect(cleanupFile).toContain('node_cleanup.orphan_activity_cleanup_failed');
+      expect(cleanupFile).toContain('finalizeWorkspaceLifecycleClosure');
+      expect(cleanupFile).toContain('node_cleanup_orphaned_workspace_stopped');
+      expect(finalizerFile).toMatch(/projectDataService\s*\.\s*cleanupWorkspaceActivity/);
     });
   });
 

@@ -148,7 +148,13 @@ beforeEach(() => {
   mocks.scheduleWorkspaceDeletion.mockResolvedValue(undefined);
 
   sqlite = new Database(':memory:');
-  createSchemaTables(sqlite, [schema.nodes, schema.workspaces, schema.tasks]);
+  createSchemaTables(sqlite, [
+    schema.nodes,
+    schema.workspaces,
+    schema.tasks,
+    schema.agentSessions,
+    schema.computeUsage,
+  ]);
 
   env = {
     DATABASE: createSqliteD1(sqlite),
