@@ -131,7 +131,7 @@ archives because those paths delete snapshot state first.
 - [x] Verify at least one new incident reproduction test fails on the pre-fix code, then passes.
 - [x] Update `.claude/rules/58-terminal-verdicts-must-match-the-resumer.md` with the process fix.
 - [x] Run targeted tests and full validation.
-- [ ] Run required specialist review and address findings.
+- [x] Run required specialist review and address findings.
 - [ ] Coordinate the staging lane with the unfiltered `gh run list` command before deploying.
 - [ ] Open PR, get CI green, merge, monitor production deploy, then verify a fresh production sleep
       survives its teardown window.
@@ -191,8 +191,21 @@ archives because those paths delete snapshot state first.
   stopped-session recovery unbrick, no-snapshot/expired-snapshot/degraded-restorable/
   non-restorable/cross-scope/user-archive/task-terminal controls, replacement-workspace-gated
   recovery wake authorization, and finalizer caller inventory.
-- Pending by design: specialist review, CI, staging verification, merge, production deploy monitoring,
-  and production post-deploy sleep survival verification.
+- Pending by design: CI, staging verification, merge, production deploy monitoring, and production
+  post-deploy sleep survival verification.
+
+## Specialist Review Evidence
+
+- `cloudflare-specialist`: PASS. D1 predicates, DO RPC compatibility, and worker coverage are sound.
+  Non-blocking recovery-claim predicate hardening was implemented.
+- `test-engineer`: PASS after fixes. Added degraded-restorable positive preservation coverage and
+  direct real-SQL finalizer discriminator cases.
+- `constitution-validator`: PASS. No Principle XI hardcoded-value violations.
+- `security-auditor`: PASS after fixes. Unauthorized recovery claims now return before ProjectData
+  RPC, and stopped-session wake is gated by the replacement workspace recorded in D1.
+- `doc-sync-validator`: PASS after fixes. Rule 58 and caller inventory now match implementation.
+- `task-completion-validator`: PASS for implementation/test completeness. Rollout gates remain
+  pending by design.
 
 ## References
 
