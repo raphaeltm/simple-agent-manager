@@ -609,7 +609,7 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
     });
   });
 
-  it('does not preserve a stale prompt-turn state after the configured freshness window', async () => {
+  it('treats stale prompt-turn ProjectData state as suspect instead of terminal death', async () => {
     const now = Date.now();
     const staleAt = now - 10 * 60 * 1000;
 
@@ -630,8 +630,8 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
 
     expect(verdict).toMatchObject({
       live: false,
-      conclusive: true,
-      reason: 'task_acp_session_not_live',
+      conclusive: false,
+      reason: 'task_acp_session_stale',
       activeAcpSessionId: null,
     });
   });
