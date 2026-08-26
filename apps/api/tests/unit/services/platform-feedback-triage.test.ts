@@ -36,7 +36,8 @@ function setup() {
       dispatched_at INTEGER, dispatch_attempts INTEGER NOT NULL DEFAULT 0,
       incident_claim_token TEXT, incident_claim_expires_at INTEGER,
       incident_claimed_by_task_id TEXT, incident_claimed_at INTEGER,
-      resolved_at INTEGER, resolved_by_task_id TEXT, resolution_note TEXT, expired_at INTEGER,
+      resolved_at INTEGER, resolved_by_task_id TEXT, resolution_note TEXT,
+      resolution_references TEXT, expired_at INTEGER,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
     INSERT INTO projects VALUES ('feedback-project', 'owner-1');
   `);

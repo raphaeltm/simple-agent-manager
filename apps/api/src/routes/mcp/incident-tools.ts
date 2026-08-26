@@ -13,6 +13,8 @@ import {
   getIncidentDetail,
   INCIDENT_QUEUE_STATES,
   type IncidentQueueState,
+  type IncidentResolutionReferenceInput,
+  IncidentResolutionValidationError,
   listIncidentQueue,
   resolveIncident,
 } from '../../services/platform-feedback-incidents';
@@ -85,6 +87,16 @@ function boundedLimit(params: Record<string, unknown>, env: Env): number {
   const limits = getMcpLimits(env);
   const requested = typeof params.limit === 'number' ? params.limit : limits.incidentListLimit;
   return Math.min(Math.max(1, Math.round(requested)), limits.incidentListMax);
+}
+
+function parseOptionalStringParam(
+  params: Record<string, unknown>,
+  key: 'note' | 'fixPrUrl' | 'dispatchedTaskId' | 'linkedRecordId'
+): string | null | undefined {
+  if (!(key in params) || params[key] === null || params[key] === undefined) return undefined;
+  if (typeof params[key] !== 'string') return null;
+  const sanitized = sanitizeUserInput(params[key].trim());
+  return sanitized || undefined;
 }
 
 export async function handleListIncidentQueue(
@@ -224,25 +236,49 @@ export async function handleResolveIncident(
   const incidentId = parseIncidentId(params);
   const claimToken = typeof params.claimToken === 'string' ? params.claimToken.trim() : '';
   const outcome = typeof params.outcome === 'string' ? params.outcome.trim() : '';
-  const note =
-    typeof params.note === 'string'
-      ? sanitizeUserInput(params.note.trim())
-      : 'Incident resolved by assigned agent';
+  const note = parseOptionalStringParam(params, 'note');
+  const fixPrUrl = parseOptionalStringParam(params, 'fixPrUrl');
+  const dispatchedTaskId = parseOptionalStringParam(params, 'dispatchedTaskId');
+  const linkedRecordId = parseOptionalStringParam(params, 'linkedRecordId');
 
   if (!incidentId) return jsonRpcError(requestId, INVALID_PARAMS, 'incidentId is required');
   if (!claimToken) return jsonRpcError(requestId, INVALID_PARAMS, 'claimToken is required');
   if (!VALID_RESOLUTION_OUTCOMES.has(outcome)) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'outcome must be "resolved" or "rejected"');
   }
+  if (note === null) return jsonRpcError(requestId, INVALID_PARAMS, 'note must be a string');
+  if (fixPrUrl === null)
+    return jsonRpcError(requestId, INVALID_PARAMS, 'fixPrUrl must be a string');
+  if (dispatchedTaskId === null) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'dispatchedTaskId must be a string');
+  }
+  if (linkedRecordId === null) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'linkedRecordId must be a string');
+  }
 
-  const resolved = await resolveIncident(
-    env,
-    incidentId,
-    claimToken,
-    outcome as 'resolved' | 'rejected',
-    tokenData.taskId,
-    note
-  );
+  const resolutionReferences: IncidentResolutionReferenceInput = {};
+  if (fixPrUrl) resolutionReferences.fixPrUrl = fixPrUrl;
+  if (dispatchedTaskId) resolutionReferences.dispatchedTaskId = dispatchedTaskId;
+  if (linkedRecordId) resolutionReferences.linkedRecordId = linkedRecordId;
+  let resolved: boolean;
+  try {
+    resolved = await resolveIncident(
+      env,
+      incidentId,
+      claimToken,
+      outcome as 'resolved' | 'rejected',
+      tokenData.taskId,
+      note ?? '',
+      {
+        resolutionReferences,
+      }
+    );
+  } catch (error) {
+    if (error instanceof IncidentResolutionValidationError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, error.message);
+    }
+    throw error;
+  }
   if (!resolved) {
     return jsonRpcError(
       requestId,
@@ -260,6 +296,7 @@ export async function handleResolveIncident(
             incidentId,
             outcome,
             resolvedByTaskId: tokenData.taskId,
+            resolutionReferences,
           },
           null,
           2

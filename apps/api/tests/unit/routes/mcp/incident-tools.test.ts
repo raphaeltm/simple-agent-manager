@@ -11,6 +11,8 @@ import {
 } from '../../../../src/routes/mcp/incident-tools';
 import { createSqliteD1 } from '../../../helpers/sqlite-d1';
 
+const IMPLEMENTATION_TASK_ID = '01M0YGSPRC0E17FPQMZYW012R8';
+
 function setup() {
   const sqlite = new Database(':memory:');
   sqlite.exec(`
@@ -29,7 +31,8 @@ function setup() {
       dispatched_at INTEGER, dispatch_attempts INTEGER NOT NULL DEFAULT 0,
       incident_claim_token TEXT, incident_claim_expires_at INTEGER,
       incident_claimed_by_task_id TEXT, incident_claimed_at INTEGER,
-      resolved_at INTEGER, resolved_by_task_id TEXT, resolution_note TEXT, expired_at INTEGER,
+      resolved_at INTEGER, resolved_by_task_id TEXT, resolution_note TEXT,
+      resolution_references TEXT, expired_at INTEGER,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
     INSERT INTO platform_feedback_triages
       (signature, source, summary, first_seen_at, last_seen_at, occurrence_count, evidence_refs,
@@ -146,7 +149,12 @@ describe('MCP incident tools', () => {
 
     const wrongToken = await handleResolveIncident(
       '2',
-      { incidentId: 'incident-a', claimToken: 'wrong-token', outcome: 'resolved' },
+      {
+        incidentId: 'incident-a',
+        claimToken: 'wrong-token',
+        outcome: 'resolved',
+        dispatchedTaskId: IMPLEMENTATION_TASK_ID,
+      },
       token(),
       env
     );
@@ -155,7 +163,12 @@ describe('MCP incident tools', () => {
     const resolved = parseToolText(
       await handleResolveIncident(
         '3',
-        { incidentId: 'incident-a', claimToken: claim.claimToken, outcome: 'resolved' },
+        {
+          incidentId: 'incident-a',
+          claimToken: claim.claimToken,
+          outcome: 'resolved',
+          dispatchedTaskId: IMPLEMENTATION_TASK_ID,
+        },
         token(),
         env
       )
@@ -167,6 +180,69 @@ describe('MCP incident tools', () => {
     });
     expect(sqlite.prepare('SELECT queue_state FROM platform_feedback_triages').get()).toEqual({
       queue_state: 'resolved',
+    });
+  });
+
+  it('rejects resolved incident calls without a structured ship-or-track reference', async () => {
+    const { sqlite, env } = setup();
+
+    const claim = parseToolText(
+      await handleClaimIncident('1', { incidentId: 'incident-a' }, token(), env)
+    );
+    const rejected = await handleResolveIncident(
+      '2',
+      {
+        incidentId: 'incident-a',
+        claimToken: claim.claimToken,
+        outcome: 'resolved',
+        note: 'fixed in this triage session',
+      },
+      token(),
+      env
+    );
+
+    expect(rejected.error?.message).toContain('provide fixPrUrl');
+    expect(rejected.error?.message).toContain('dispatchedTaskId');
+    expect(sqlite.prepare('SELECT queue_state FROM platform_feedback_triages').get()).toEqual({
+      queue_state: 'claimed',
+    });
+  });
+
+  it('rejects incidents only with a justification note and no fix reference', async () => {
+    const { sqlite, env } = setup();
+
+    const claim = parseToolText(
+      await handleClaimIncident('1', { incidentId: 'incident-a' }, token(), env)
+    );
+    const missingNote = await handleResolveIncident(
+      '2',
+      { incidentId: 'incident-a', claimToken: claim.claimToken, outcome: 'rejected' },
+      token(),
+      env
+    );
+    expect(missingNote.error?.message).toContain('Rejected incidents require a justification note');
+
+    const rejected = parseToolText(
+      await handleResolveIncident(
+        '3',
+        {
+          incidentId: 'incident-a',
+          claimToken: claim.claimToken,
+          outcome: 'rejected',
+          note: 'Expected behavior; no code change should be shipped.',
+        },
+        token(),
+        env
+      )
+    );
+
+    expect(rejected).toMatchObject({
+      incidentId: 'incident-a',
+      outcome: 'rejected',
+      resolvedByTaskId: 'task-1',
+    });
+    expect(sqlite.prepare('SELECT queue_state FROM platform_feedback_triages').get()).toEqual({
+      queue_state: 'rejected',
     });
   });
 });

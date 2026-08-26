@@ -102,6 +102,12 @@ If the requested specialist/profile/skill/mode is not available or cannot be obs
 
 When a dispatched task returns, treat its output as usable only after checking that it came from the intended task/profile/skill/mode and respected the original constraints. If the result was produced by the wrong profile or skill, ignored `draft PR`/`do not merge`, dropped the requested output branch or branch, or skipped `/do` when required, document the mismatch and do not use it as validation evidence.
 
+### Private Incident Triage Is Ship-or-Track
+
+Private incident triage trigger tasks are investigation-only. They may inspect incidents, classify signatures, link existing work, and dispatch implementation tasks, but they must not edit repository files or implement fixes in the triage session.
+
+Before resolving an incident, check whether the signature is already covered by merged code, an open PR, an active dispatched task, or an existing Idea/task. A `resolve_incident` call with `outcome: "resolved"` must include one structured ship-or-track reference: `fixPrUrl` for a merged/open PR, `dispatchedTaskId` for a separate implementation task, or `linkedRecordId` for an existing Idea/task. Do not resolve by citing a local branch, unpushed commit, or code changed in the triage session. Use `outcome: "rejected"` with a justification note for expected behavior or intentionally declined work.
+
 ### Before Retrying a Failed Dispatch
 
 Before retrying or redispatching the same work after a SAM task fails, diagnose the failed start:

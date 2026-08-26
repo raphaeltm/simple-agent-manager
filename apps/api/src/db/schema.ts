@@ -972,11 +972,15 @@ export const vmTaskAdmissions = sqliteTable(
     providerCode: text('provider_code'),
     providerStatusCode: integer('provider_status_code'),
     providerMessage: text('provider_message'),
-    enqueuedAt: text('enqueued_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    enqueuedAt: text('enqueued_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
     claimedAt: text('claimed_at'),
     lastEvaluatedAt: text('last_evaluated_at'),
     completedAt: text('completed_at'),
-    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
     userStateRetryIdx: index('idx_vm_task_admissions_user_state_retry').on(
@@ -1011,10 +1015,16 @@ export const vmProvisioningLeases = sqliteTable(
     providerDomainKey: text('provider_domain_key').notNull(),
     requestedVmSize: text('requested_vm_size').notNull(),
     inflightNodeId: text('inflight_node_id'),
-    acquiredAt: text('acquired_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-    heartbeatAt: text('heartbeat_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    acquiredAt: text('acquired_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    heartbeatAt: text('heartbeat_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
     expiresAt: text('expires_at').notNull(),
-    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
     ownerIdx: index('idx_vm_provisioning_leases_owner').on(table.ownerTaskId),
@@ -1041,7 +1051,9 @@ export const vmProviderCapacityState = sqliteTable(
     retryAt: text('retry_at'),
     lastFailureAt: text('last_failure_at'),
     lastSuccessAt: text('last_success_at'),
-    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
     retryIdx: index('idx_vm_provider_capacity_state_retry').on(table.state, table.retryAt),
@@ -2574,8 +2586,7 @@ export const projectDataStorageTelemetry = sqliteTable(
     databaseSizeBytes: integer('database_size_bytes').notNull(),
     limitBytes: integer('limit_bytes').notNull(),
     usageRatio: real('usage_ratio').notNull(),
-    status: text('status', { enum: ['ok', 'notice', 'warning', 'critical', 'degraded'] })
-      .notNull(),
+    status: text('status', { enum: ['ok', 'notice', 'warning', 'critical', 'degraded'] }).notNull(),
     growthRateBytesPerDay: real('growth_rate_bytes_per_day'),
     estimatedDaysToLimit: real('estimated_days_to_limit'),
     cleanupHealth: text('cleanup_health', {
@@ -2607,8 +2618,7 @@ export const projectDataStorageTelemetry = sqliteTable(
   })
 );
 
-export type ProjectDataStorageTelemetryRow =
-  typeof projectDataStorageTelemetry.$inferSelect;
+export type ProjectDataStorageTelemetryRow = typeof projectDataStorageTelemetry.$inferSelect;
 
 export const projectDataStorageTelemetryHistory = sqliteTable(
   'project_data_storage_telemetry_history',
@@ -2621,8 +2631,7 @@ export const projectDataStorageTelemetryHistory = sqliteTable(
     databaseSizeBytes: integer('database_size_bytes').notNull(),
     limitBytes: integer('limit_bytes').notNull(),
     usageRatio: real('usage_ratio').notNull(),
-    status: text('status', { enum: ['ok', 'notice', 'warning', 'critical', 'degraded'] })
-      .notNull(),
+    status: text('status', { enum: ['ok', 'notice', 'warning', 'critical', 'degraded'] }).notNull(),
     growthRateBytesPerDay: real('growth_rate_bytes_per_day'),
     estimatedDaysToLimit: real('estimated_days_to_limit'),
     cleanupHealth: text('cleanup_health', {
@@ -2937,6 +2946,7 @@ export const platformFeedbackTriages = sqliteTable(
       onDelete: 'set null',
     }),
     resolutionNote: text('resolution_note'),
+    resolutionReferences: text('resolution_references'),
     expiredAt: integer('expired_at'),
     createdAt: text('created_at')
       .notNull()

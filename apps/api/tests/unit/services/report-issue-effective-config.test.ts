@@ -76,6 +76,7 @@ function setup() {
       resolved_at INTEGER,
       resolved_by_task_id TEXT,
       resolution_note TEXT,
+      resolution_references TEXT,
       expired_at INTEGER,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP,

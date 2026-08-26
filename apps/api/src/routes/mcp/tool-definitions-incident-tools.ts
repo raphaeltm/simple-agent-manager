@@ -72,7 +72,9 @@ export const INCIDENT_TOOLS = [
     name: 'resolve_incident',
     description:
       'Terminally resolve or reject a claimed private incident. ' +
-      'Requires the claim token returned by claim_incident and the same task-scoped MCP token.',
+      'Requires the claim token returned by claim_incident and the same task-scoped MCP token. ' +
+      'Resolved outcomes require one ship-or-track reference: fixPrUrl, dispatchedTaskId, or linkedRecordId. ' +
+      'Rejected outcomes require a justification note but no fix reference.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -91,7 +93,23 @@ export const INCIDENT_TOOLS = [
         },
         note: {
           type: 'string',
-          description: 'Short private resolution note. The server redacts and bounds it.',
+          description:
+            'Short private resolution note. Required for rejected outcomes. The server redacts and bounds it.',
+        },
+        fixPrUrl: {
+          type: 'string',
+          description:
+            'Optional merged or open pull request URL that ships or tracks the fix for a resolved incident.',
+        },
+        dispatchedTaskId: {
+          type: 'string',
+          description:
+            'Optional SAM implementation task ID dispatched to ship the fix for a resolved incident.',
+        },
+        linkedRecordId: {
+          type: 'string',
+          description:
+            'Optional existing SAM Idea/task ID that tracks the fix for a resolved incident.',
         },
       },
       required: ['incidentId', 'claimToken', 'outcome'],

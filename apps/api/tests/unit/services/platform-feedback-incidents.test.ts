@@ -6,6 +6,7 @@ import {
   buildIncidentBacklogSummary,
   claimIncident,
   getIncidentDetail,
+  IncidentResolutionValidationError,
   listIncidentQueue,
   reclaimExpiredIncidentDispatches,
   reserveIncidentDispatch,
@@ -13,6 +14,9 @@ import {
   upsertUserReportIncident,
 } from '../../../src/services/platform-feedback-incidents';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
+
+const IMPLEMENTATION_TASK_ID = '01M0YGSPRC0E17FPQMZYW012R8';
+const TRACKING_ID = '01M0YGMAZTZ01Y0ESREF2AMVNC';
 
 function setup() {
   const sqlite = new Database(':memory:');
@@ -44,7 +48,8 @@ function setup() {
       dispatched_at INTEGER, dispatch_attempts INTEGER NOT NULL DEFAULT 0,
       incident_claim_token TEXT, incident_claim_expires_at INTEGER,
       incident_claimed_by_task_id TEXT, incident_claimed_at INTEGER,
-      resolved_at INTEGER, resolved_by_task_id TEXT, resolution_note TEXT, expired_at INTEGER,
+      resolved_at INTEGER, resolved_by_task_id TEXT, resolution_note TEXT,
+      resolution_references TEXT, expired_at INTEGER,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (idea_id) REFERENCES tasks(id) ON DELETE SET NULL);
     INSERT INTO users VALUES ('owner-1'), ('reporter-1'), ('task-1'), ('task-2');
@@ -159,15 +164,10 @@ describe('platform feedback incidents', () => {
     const reclaimed = await claimIncident(env, signature, 'task-2', 11_001);
     expect(reclaimed).toEqual({ claimToken: expect.any(String), leaseExpiresAt: 12_001 });
     expect(
-      await resolveIncident(
-        env,
-        signature,
-        first?.claimToken ?? '',
-        'resolved',
-        'task-1',
-        '',
-        11_002
-      )
+      await resolveIncident(env, signature, first?.claimToken ?? '', 'resolved', 'task-1', '', {
+        now: 11_002,
+        resolutionReferences: { dispatchedTaskId: IMPLEMENTATION_TASK_ID },
+      })
     ).toBe(false);
     expect(
       await resolveIncident(
@@ -177,13 +177,16 @@ describe('platform feedback incidents', () => {
         'resolved',
         'task-2',
         'fixed https://example.invalid/canary-resolution-token',
-        11_002
+        {
+          now: 11_002,
+          resolutionReferences: { dispatchedTaskId: IMPLEMENTATION_TASK_ID },
+        }
       )
     ).toBe(true);
     expect(await claimIncident(env, signature, 'task-3', 11_003)).toBeNull();
     const terminal = sqlite
       .prepare(
-        'SELECT queue_state, resolved_at, resolved_by_task_id, resolution_note, incident_claim_token FROM platform_feedback_triages'
+        'SELECT queue_state, resolved_at, resolved_by_task_id, resolution_note, resolution_references, incident_claim_token FROM platform_feedback_triages'
       )
       .get() as Record<string, unknown>;
     expect(terminal.queue_state).toBe('resolved');
@@ -191,6 +194,101 @@ describe('platform feedback incidents', () => {
     expect(terminal.resolved_by_task_id).toBe('task-2');
     expect(terminal.incident_claim_token).toBeNull();
     expect(String(terminal.resolution_note)).not.toContain('canary-resolution-token');
+    expect(JSON.parse(String(terminal.resolution_references))).toMatchObject({
+      dispatchedTaskId: IMPLEMENTATION_TASK_ID,
+    });
+  });
+
+  it('rejects resolved incidents that do not carry a ship-or-track reference', async () => {
+    const { sqlite, env } = setup();
+    const signature = seedIncident(sqlite);
+    const claim = await claimIncident(env, signature, 'task-1', 10_000);
+
+    await expect(
+      resolveIncident(
+        env,
+        signature,
+        claim?.claimToken ?? '',
+        'resolved',
+        'task-1',
+        'fixed in this triage session',
+        { now: 10_001 }
+      )
+    ).rejects.toThrow(IncidentResolutionValidationError);
+
+    expect(
+      sqlite
+        .prepare(
+          'SELECT queue_state, resolved_at, resolution_references, incident_claim_token FROM platform_feedback_triages'
+        )
+        .get()
+    ).toMatchObject({
+      queue_state: 'claimed',
+      resolved_at: null,
+      resolution_references: null,
+      incident_claim_token: claim?.claimToken,
+    });
+  });
+
+  it('resolves incidents with a structured linked task or Idea reference', async () => {
+    const { sqlite, env } = setup();
+    const signature = seedIncident(sqlite);
+    const claim = await claimIncident(env, signature, 'task-1', 10_000);
+
+    await expect(
+      resolveIncident(
+        env,
+        signature,
+        claim?.claimToken ?? '',
+        'resolved',
+        'task-1',
+        'Tracked by Idea',
+        {
+          now: 10_001,
+          resolutionReferences: { linkedRecordId: TRACKING_ID },
+        }
+      )
+    ).resolves.toBe(true);
+
+    const detail = await getIncidentDetail(env, signature);
+    expect(detail?.queueState).toBe('resolved');
+    expect(detail?.resolutionReferences).toMatchObject({ linkedRecordId: TRACKING_ID });
+  });
+
+  it('requires rejection justifications without requiring fix references', async () => {
+    const { sqlite, env } = setup();
+    const signature = seedIncident(sqlite);
+    const claim = await claimIncident(env, signature, 'task-1', 10_000);
+
+    await expect(
+      resolveIncident(env, signature, claim?.claimToken ?? '', 'rejected', 'task-1', '', {
+        now: 10_001,
+      })
+    ).rejects.toThrow(IncidentResolutionValidationError);
+
+    await expect(
+      resolveIncident(
+        env,
+        signature,
+        claim?.claimToken ?? '',
+        'rejected',
+        'task-1',
+        'Expected behavior: warning is emitted for operator visibility only.',
+        { now: 10_002 }
+      )
+    ).resolves.toBe(true);
+
+    expect(
+      sqlite
+        .prepare(
+          'SELECT queue_state, rejected_at, resolution_references FROM platform_feedback_triages'
+        )
+        .get()
+    ).toMatchObject({
+      queue_state: 'rejected',
+      rejected_at: 10_002,
+      resolution_references: null,
+    });
   });
 
   it('serves bounded redacted evidence and keeps injection strings behind an untrusted boundary', async () => {

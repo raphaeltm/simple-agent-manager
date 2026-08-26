@@ -27,6 +27,13 @@ const ACTIVE_INCIDENT_STATES = new Set<IncidentQueueState>(['pending', 'dispatch
 const TERMINAL_INCIDENT_STATES = new Set<IncidentQueueState>(['resolved', 'rejected', 'expired']);
 const REPORT_SOURCE = 'user-report';
 const TERMINAL_TASK_STATUS_SQL = TASK_TERMINAL_STATUSES.map((status) => `'${status}'`).join(', ');
+const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
+
+const EMPTY_RESOLUTION_REFERENCES = {
+  fixPrUrl: null,
+  dispatchedTaskId: null,
+  linkedRecordId: null,
+} as const satisfies IncidentResolutionReferences;
 
 interface IncidentRow {
   signature: string;
@@ -59,9 +66,35 @@ interface IncidentRow {
   resolved_at: number | null;
   resolved_by_task_id: string | null;
   resolution_note: string | null;
+  resolution_references: string | null;
   expired_at: number | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface IncidentResolutionReferenceInput {
+  fixPrUrl?: string | null;
+  dispatchedTaskId?: string | null;
+  linkedRecordId?: string | null;
+}
+
+export interface IncidentResolutionReferences {
+  fixPrUrl: string | null;
+  dispatchedTaskId: string | null;
+  linkedRecordId: string | null;
+}
+
+interface ResolveIncidentOptions {
+  now?: number;
+  config?: IncidentConfig;
+  resolutionReferences?: IncidentResolutionReferenceInput;
+}
+
+export class IncidentResolutionValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'IncidentResolutionValidationError';
+  }
 }
 
 export interface IncidentListItem {
@@ -84,6 +117,7 @@ export interface IncidentListItem {
   resolvedAt: number | null;
   expiredAt: number | null;
   lastFailureReason: string | null;
+  resolutionReferences: IncidentResolutionReferences;
 }
 
 export interface IncidentDetail extends IncidentListItem {
@@ -186,6 +220,140 @@ function toQueueState(value: string): IncidentQueueState {
     : 'pending';
 }
 
+function normalizeReferenceText(
+  value: string | null | undefined,
+  maxLength: number
+): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = stripControlCharacters(value).replace(/\s+/g, ' ').trim();
+  return normalized ? normalized.slice(0, maxLength) : null;
+}
+
+function normalizeRecordId(
+  value: string | null | undefined,
+  fieldName: 'dispatchedTaskId' | 'linkedRecordId',
+  maxLength: number
+): string | null {
+  const normalized = normalizeReferenceText(value, maxLength);
+  if (!normalized) return null;
+  if (!ULID_PATTERN.test(normalized)) {
+    throw new IncidentResolutionValidationError(`${fieldName} must be a SAM task or Idea ULID`);
+  }
+  return normalized.toUpperCase();
+}
+
+function normalizePullRequestUrl(
+  value: string | null | undefined,
+  maxLength: number
+): string | null {
+  const normalized = normalizeReferenceText(value, maxLength);
+  if (!normalized) return null;
+
+  let url: URL;
+  try {
+    url = new URL(normalized);
+  } catch {
+    throw new IncidentResolutionValidationError('fixPrUrl must be a valid pull request URL');
+  }
+
+  if (url.protocol !== 'https:') {
+    throw new IncidentResolutionValidationError('fixPrUrl must use https');
+  }
+
+  const pathSegments = url.pathname.split('/').filter(Boolean);
+  const pullIndex = pathSegments.indexOf('pull');
+  if (pullIndex === -1 || !/^\d+$/.test(pathSegments[pullIndex + 1] ?? '')) {
+    throw new IncidentResolutionValidationError(
+      'fixPrUrl must point to a pull request path such as /owner/repo/pull/123'
+    );
+  }
+
+  url.username = '';
+  url.password = '';
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+}
+
+function normalizeIncidentResolutionReferences(
+  input: IncidentResolutionReferenceInput | undefined,
+  maxLength: number
+): IncidentResolutionReferences {
+  return {
+    fixPrUrl: normalizePullRequestUrl(input?.fixPrUrl, maxLength),
+    dispatchedTaskId: normalizeRecordId(input?.dispatchedTaskId, 'dispatchedTaskId', maxLength),
+    linkedRecordId: normalizeRecordId(input?.linkedRecordId, 'linkedRecordId', maxLength),
+  };
+}
+
+function parseStoredIncidentResolutionReferences(
+  raw: string | null | undefined
+): IncidentResolutionReferences {
+  if (!raw) return { ...EMPTY_RESOLUTION_REFERENCES };
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return { ...EMPTY_RESOLUTION_REFERENCES };
+    }
+    const record = parsed as Record<string, unknown>;
+    return {
+      fixPrUrl: typeof record.fixPrUrl === 'string' ? record.fixPrUrl : null,
+      dispatchedTaskId:
+        typeof record.dispatchedTaskId === 'string' ? record.dispatchedTaskId : null,
+      linkedRecordId: typeof record.linkedRecordId === 'string' ? record.linkedRecordId : null,
+    };
+  } catch {
+    return { ...EMPTY_RESOLUTION_REFERENCES };
+  }
+}
+
+function hasIncidentResolutionReference(references: IncidentResolutionReferences): boolean {
+  return Boolean(references.fixPrUrl || references.dispatchedTaskId || references.linkedRecordId);
+}
+
+function serializeIncidentResolutionReferences(
+  references: IncidentResolutionReferences
+): string | null {
+  return hasIncidentResolutionReference(references) ? JSON.stringify(references) : null;
+}
+
+function requireIncidentResolutionContract(
+  outcome: Extract<IncidentQueueState, 'resolved' | 'rejected'>,
+  note: string,
+  references: IncidentResolutionReferences
+): void {
+  if (outcome === 'resolved' && !hasIncidentResolutionReference(references)) {
+    throw new IncidentResolutionValidationError(
+      'Resolved incidents require one ship-or-track reference: provide fixPrUrl (merged/open PR URL), dispatchedTaskId (implementation task ID), or linkedRecordId (Idea/task ID). Use outcome "rejected" with a justification note for expected-behavior or no-fix cases.'
+    );
+  }
+  if (outcome === 'rejected' && !note.trim()) {
+    throw new IncidentResolutionValidationError(
+      'Rejected incidents require a justification note explaining why this is expected behavior or will not be fixed.'
+    );
+  }
+}
+
+function resolveIncidentOptions(
+  env: Env,
+  nowOrOptions: number | ResolveIncidentOptions | undefined,
+  fallbackConfig: IncidentConfig | undefined
+): Required<Pick<ResolveIncidentOptions, 'config'>> &
+  Pick<ResolveIncidentOptions, 'now' | 'resolutionReferences'> {
+  if (typeof nowOrOptions === 'object' && nowOrOptions !== null) {
+    return {
+      now: nowOrOptions.now ?? Date.now(),
+      config: nowOrOptions.config ?? fallbackConfig ?? getIncidentConfig(env),
+      resolutionReferences: nowOrOptions.resolutionReferences,
+    };
+  }
+  return {
+    now: nowOrOptions ?? Date.now(),
+    config: fallbackConfig ?? getIncidentConfig(env),
+    resolutionReferences: undefined,
+  };
+}
+
 function toListItem(row: IncidentRow): IncidentListItem {
   return {
     id: row.signature,
@@ -207,6 +375,7 @@ function toListItem(row: IncidentRow): IncidentListItem {
     resolvedAt: row.resolved_at,
     expiredAt: row.expired_at,
     lastFailureReason: row.last_failure_reason,
+    resolutionReferences: parseStoredIncidentResolutionReferences(row.resolution_references),
   };
 }
 
@@ -219,7 +388,7 @@ async function readIncidentRow(env: Env, signature: string): Promise<IncidentRow
         dispatched_trigger_id, dispatched_execution_id, dispatched_task_id, dispatched_at,
         dispatch_attempts, incident_claim_token, incident_claim_expires_at,
         incident_claimed_by_task_id, incident_claimed_at, resolved_at, resolved_by_task_id,
-        resolution_note, expired_at, created_at, updated_at
+        resolution_note, resolution_references, expired_at, created_at, updated_at
        FROM platform_feedback_triages WHERE signature = ?`
     )
       .bind(signature)
@@ -513,7 +682,7 @@ export async function listIncidentQueue(
       dispatched_trigger_id, dispatched_execution_id, dispatched_task_id, dispatched_at,
       dispatch_attempts, incident_claim_token, incident_claim_expires_at,
       incident_claimed_by_task_id, incident_claimed_at, resolved_at, resolved_by_task_id,
-      resolution_note, expired_at, created_at, updated_at
+      resolution_note, resolution_references, expired_at, created_at, updated_at
      FROM platform_feedback_triages
      WHERE queue_state IN (${placeholders(selectedStates)})
      ORDER BY CASE severity WHEN 'error' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END ASC,
@@ -674,16 +843,26 @@ export async function resolveIncident(
   outcome: Extract<IncidentQueueState, 'resolved' | 'rejected'>,
   taskId: string,
   note: string,
-  now: number = Date.now(),
-  config: IncidentConfig = getIncidentConfig(env)
+  nowOrOptions: number | ResolveIncidentOptions = Date.now(),
+  config?: IncidentConfig
 ): Promise<boolean> {
-  const sanitizedNote = sanitizeText(note, config.resolutionNoteMaxLength);
+  const options = resolveIncidentOptions(env, nowOrOptions, config);
+  const now = options.now ?? Date.now();
+  const incidentConfig = options.config;
+  const sanitizedNote = sanitizeText(note, incidentConfig.resolutionNoteMaxLength);
+  const resolutionReferences = normalizeIncidentResolutionReferences(
+    options.resolutionReferences,
+    incidentConfig.resolutionNoteMaxLength
+  );
+  requireIncidentResolutionContract(outcome, sanitizedNote, resolutionReferences);
+  const serializedReferences = serializeIncidentResolutionReferences(resolutionReferences);
   const result = await env.DATABASE.prepare(
     `UPDATE platform_feedback_triages SET queue_state = ?,
       resolved_at = CASE WHEN ? = 'resolved' THEN ? ELSE resolved_at END,
       resolved_by_task_id = CASE WHEN ? = 'resolved' THEN ? ELSE resolved_by_task_id END,
       rejected_at = CASE WHEN ? = 'rejected' THEN COALESCE(rejected_at, ?) ELSE rejected_at END,
       resolution_note = ?,
+      resolution_references = ?,
       incident_claim_token = NULL, incident_claim_expires_at = NULL,
       incident_claimed_by_task_id = NULL, incident_claimed_at = NULL,
       dispatch_lease_token = NULL, dispatch_lease_expires_at = NULL,
@@ -703,6 +882,7 @@ export async function resolveIncident(
       outcome,
       now,
       sanitizedNote,
+      serializedReferences,
       signature,
       claimToken,
       taskId,

@@ -6,6 +6,8 @@ import { runIncidentTriggerSweep } from '../../../src/scheduled/incident-trigger
 import { claimIncident, resolveIncident } from '../../../src/services/platform-feedback-incidents';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
+const IMPLEMENTATION_TASK_ID = '01M0YGSPRC0E17FPQMZYW012R8';
+
 function setup(options: { withTrigger?: boolean } = {}) {
   const sqlite = new Database(':memory:');
   sqlite.exec(`
@@ -41,7 +43,8 @@ function setup(options: { withTrigger?: boolean } = {}) {
       dispatched_at INTEGER, dispatch_attempts INTEGER NOT NULL DEFAULT 0,
       incident_claim_token TEXT, incident_claim_expires_at INTEGER,
       incident_claimed_by_task_id TEXT, incident_claimed_at INTEGER,
-      resolved_at INTEGER, resolved_by_task_id TEXT, resolution_note TEXT, expired_at INTEGER,
+      resolved_at INTEGER, resolved_by_task_id TEXT, resolution_note TEXT,
+      resolution_references TEXT, expired_at INTEGER,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
     INSERT INTO projects VALUES ('feedback-project', 'owner-1', 'Private Feedback');
   `);
@@ -117,6 +120,14 @@ describe('incident trigger sweep', () => {
     expect(
       sqlite.prepare("SELECT COUNT(*) AS count FROM triggers WHERE source_type = 'incident'").get()
     ).toEqual({ count: 1 });
+    const trigger = sqlite
+      .prepare("SELECT prompt_template FROM triggers WHERE source_type = 'incident'")
+      .get() as { prompt_template: string };
+    expect(trigger.prompt_template).toContain('triage-only run');
+    expect(trigger.prompt_template).toContain('never implement code');
+    expect(trigger.prompt_template).toContain('merged code, an open PR, an active dispatched task');
+    expect(trigger.prompt_template).toContain('Execute this task using the /do skill.');
+    expect(trigger.prompt_template).toContain('dispatchedTaskId');
     expect(
       sqlite
         .prepare('SELECT COUNT(*) AS count FROM trigger_executions WHERE task_id = ?')
@@ -145,7 +156,10 @@ describe('incident trigger sweep', () => {
         'resolved',
         'task-from-auto-trigger',
         'fixed by private incident task',
-        5003
+        {
+          now: 5003,
+          resolutionReferences: { dispatchedTaskId: IMPLEMENTATION_TASK_ID },
+        }
       )
     ).resolves.toBe(true);
     expect(
