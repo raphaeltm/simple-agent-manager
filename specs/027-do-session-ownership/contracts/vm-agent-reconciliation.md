@@ -137,10 +137,10 @@ async checkSessionHeartbeats(): Promise<void> {
 
 | Scenario | VM Agent Behavior | DO Behavior |
 |----------|-------------------|-------------|
-| VM crash (sudden death) | Nothing (dead) | Heartbeat alarm fires → session "interrupted" |
+| VM crash (sudden death) | Nothing (dead) | ProjectData heartbeat becomes stale/suspect; session is interrupted only after conclusive runtime/workspace evidence |
 | VM restart (clean) | Reconciliation on startup | Continues receiving heartbeats after restart |
 | Network partition | Heartbeat POST fails, logs warning | Alarm fires if partition > detection window |
-| API unreachable on startup | Reconciliation times out, logs error, starts fresh | Sessions remain "assigned" until heartbeat timeout |
+| API unreachable on startup | Reconciliation times out, logs error, starts fresh | Sessions remain "assigned"; ProjectData heartbeat timeout is suspect until paired with conclusive runtime/workspace evidence |
 | Agent process crash (VM alive) | Detects process exit, reports "failed" | Transitions to "failed" |
 
 ## Configuration

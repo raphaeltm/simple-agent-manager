@@ -116,7 +116,7 @@ pnpm --filter @simple-agent-manager/web test     # UI tests (after step 8)
 - [ ] Migration 008 creates tables correctly
 - [ ] All 8 state transitions work (valid) and invalid transitions are rejected
 - [ ] Heartbeat resets detection alarm
-- [ ] Heartbeat timeout marks session as "interrupted"
+- [ ] Heartbeat timeout marks ProjectData data stale/suspect; VM-backed interruption requires conclusive runtime/workspace evidence
 - [ ] Fork creates child with correct lineage
 - [ ] Fork depth limit enforced
 - [ ] VM agent reconciles on startup
