@@ -96,7 +96,7 @@ reread before destructive cleanup.
 - [x] Update ProjectData runtime heartbeat timeout policy so non-container VM
   sessions are not interrupted solely because ProjectData ACP heartbeat data is
   stale.
-- [ ] Move stuck-task destructive cleanup toward the canonical idempotent
+- [x] Move stuck-task destructive cleanup toward the canonical idempotent
   terminal transition service, including just-in-time status checks/CAS before
   cleanup.
 - [ ] Add D1-backed runtime session leases and/or a scoped shadow lease path from

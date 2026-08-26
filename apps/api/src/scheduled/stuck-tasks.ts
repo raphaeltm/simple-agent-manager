@@ -36,21 +36,19 @@ import {
   DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS,
   type TaskExecutionStep,
 } from '@simple-agent-manager/shared';
-import { drizzle } from 'drizzle-orm/d1';
 
 const DEFAULT_INSTANT_START_STALE_TIMEOUT_MS = 10 * 60 * 1000;
 
-import * as schema from '../db/schema';
 import type { TaskRunner } from '../durable-objects/task-runner';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord } from '../lib/runtime-validation';
-import { ulid } from '../lib/ulid';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
 import { DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS } from '../services/session-snapshot-artifacts';
 import { cleanupTaskRun } from '../services/task-runner';
+import { transitionTaskToTerminal } from '../services/task-terminal-transition';
 import {
   classifyTaskRuntimeLiveness,
   isSessionResumable,
@@ -67,9 +65,7 @@ import {
   type TaskRuntimeLivenessSignals,
   type TaskSupersession,
 } from '../services/task-runtime-liveness';
-import { syncTriggerExecutionStatus } from '../services/trigger-execution-sync';
 import {
-  cancelVmTaskAdmission,
   getVmAdmissionDiagnostics,
   isActiveVmAdmissionState,
 } from '../services/vm-admission-control';
@@ -980,8 +976,6 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
   result.candidateCursorWrapped = candidateSelection.wrapped;
   result.candidateCursorErrors = candidateSelection.cursorErrors;
 
-  const db = drizzle(env.DATABASE, { schema });
-
   for (const task of candidateSelection.tasks) {
     const updatedAt = new Date(task.updated_at).getTime();
     const elapsedMs = now.getTime() - updatedAt;
@@ -1411,78 +1405,33 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         env
       );
 
-      const nowIso = now.toISOString();
-      // Use optimistic locking: only fail the task if it's still in the
-      // same status we observed. This prevents TOCTOU races with the
-      // TaskRunner DO which may have advanced the task in between our
-      // SELECT and this UPDATE.
       const terminalStatus: 'failed' | 'cancelled' = supersededTermination ? 'cancelled' : 'failed';
-      const updateResult = await env.DATABASE.prepare(
-        `UPDATE tasks SET status = ?, execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ?
-         WHERE id = ? AND status = ?
-           AND NOT EXISTS (
-             SELECT 1 FROM tasks succ
-              WHERE succ.project_id = tasks.project_id
-                AND succ.id <> tasks.id
-                AND succ.triggered_by = 'session-recovery'
-                AND succ.created_at > tasks.created_at
-                AND succ.status NOT IN ('completed', 'failed', 'cancelled')
-                AND (
-                  succ.id = COALESCE(tasks.recovery_source_task_id, tasks.id)
-                  OR succ.recovery_source_task_id = COALESCE(tasks.recovery_source_task_id, tasks.id)
-                )
-           )`
-      )
-        .bind(terminalStatus, reason, nowIso, nowIso, task.id, task.status)
-        .run();
-
-      if (!updateResult.meta.changes || updateResult.meta.changes === 0) {
-        let liveSupersessionAtWrite = false;
-        try {
-          liveSupersessionAtWrite =
-            (await loadTaskSupersession(env.DATABASE, task.project_id, task.id)) === 'live';
-        } catch (err) {
-          log.warn('stuck_task.supersession_guard_diagnosis_failed', {
-            taskId: task.id,
-            projectId: task.project_id,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-        if (liveSupersessionAtWrite) {
-          log.info('stuck_task.skipped_supersession_guard', {
-            taskId: task.id,
-            projectId: task.project_id,
-            expectedStatus: task.status,
-          });
-        } else {
-          // Task was advanced by the DO between our SELECT and UPDATE — skip
-          log.info('stuck_task.skipped_optimistic_lock', {
-            taskId: task.id,
-            expectedStatus: task.status,
-          });
-        }
-        continue;
-      }
-
-      await db.insert(schema.taskStatusEvents).values({
-        id: ulid(),
+      const transitionOutcome = await transitionTaskToTerminal(env, {
         taskId: task.id,
-        fromStatus: task.status as 'queued' | 'delegated' | 'in_progress',
-        toStatus: terminalStatus,
-        actorType: 'system',
-        actorId: null,
+        projectId: task.project_id,
+        status: terminalStatus,
         reason,
-        createdAt: nowIso,
+        source: compactionLoopRecovery
+          ? 'scheduled.stuck_tasks.compaction_loop'
+          : deadRuntimeRecovery
+            ? 'scheduled.stuck_tasks.dead_runtime'
+            : 'scheduled.stuck_tasks',
+        expectedWorkspaceId: task.workspace_id,
+        expectedChatSessionId: task.chat_session_id,
+        stopWorkspace: true,
+        fillMissingStartedAt: task.status === 'in_progress',
       });
 
-      // Sync trigger execution status (best-effort) — without this, cron triggers
-      // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
-      await syncTriggerExecutionStatus(env.DATABASE, task.id, terminalStatus, reason);
-      await cancelVmTaskAdmission(
-        env,
-        task.id,
-        supersededTermination ? 'task_cancelled' : 'task_failed'
-      );
+      if (transitionOutcome !== 'transitioned') {
+        log.info('stuck_task.skipped_terminal_transition', {
+          taskId: task.id,
+          projectId: task.project_id,
+          expectedStatus: task.status,
+          terminalStatus,
+          transitionOutcome,
+        });
+        continue;
+      }
 
       if (compactionLoopRecovery?.sessionId) {
         try {

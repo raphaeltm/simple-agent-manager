@@ -107,6 +107,51 @@ function mockPreparedStatement(results: unknown[] = [], changes = 1) {
   };
 }
 
+function collectTaskTerminalRows(
+  prepareResponses: Map<string, { results: unknown[]; changes?: number }>
+): Map<string, Record<string, unknown>> {
+  const rows = new Map<string, Record<string, unknown>>();
+
+  for (const config of prepareResponses.values()) {
+    for (const row of config.results) {
+      if (!row || typeof row !== 'object') continue;
+      const candidate = row as Record<string, unknown>;
+      if (
+        typeof candidate.id === 'string' &&
+        typeof candidate.project_id === 'string' &&
+        typeof candidate.status === 'string'
+      ) {
+        rows.set(candidate.id, {
+          id: candidate.id,
+          project_id: candidate.project_id,
+          status: candidate.status,
+          workspace_id: candidate.workspace_id ?? null,
+          chat_session_id: candidate.chat_session_id ?? null,
+          parent_task_id: candidate.parent_task_id ?? null,
+        });
+      }
+    }
+  }
+
+  return rows;
+}
+
+function mockTaskTerminalLoadStatement(taskRows: Map<string, Record<string, unknown>>) {
+  return {
+    bind: vi.fn((taskId: string) => {
+      const row = taskRows.get(taskId) ?? null;
+      return {
+        all: vi.fn().mockResolvedValue({ results: row ? [row] : [] }),
+        first: vi.fn().mockResolvedValue(row),
+        run: vi.fn().mockResolvedValue({ meta: { changes: 0 } }),
+      };
+    }),
+    all: vi.fn().mockResolvedValue({ results: [] }),
+    first: vi.fn().mockResolvedValue(null),
+    run: vi.fn().mockResolvedValue({ meta: { changes: 0 } }),
+  };
+}
+
 /**
  * Wire a mocked env.VM_AGENT_CONTAINER namespace whose stub.inspectLifecycle()
  * returns the given inspection (or a never-resolving promise for the timeout
@@ -130,8 +175,16 @@ function createMockEnv(
   taskRunnerStatus: unknown | Error = null,
   containerLifecycle?: ReturnType<typeof vi.fn>
 ): Env {
+  const taskTerminalRows = collectTaskTerminalRows(prepareResponses);
   const mockDb = {
     prepare: vi.fn((sql: string) => {
+      if (
+        sql.includes('id, project_id, status, workspace_id, chat_session_id, parent_task_id') &&
+        sql.includes('FROM tasks') &&
+        sql.includes('WHERE id = ?')
+      ) {
+        return mockTaskTerminalLoadStatement(taskTerminalRows);
+      }
       for (const [substring, config] of prepareResponses.entries()) {
         if (sql.includes(substring)) {
           return mockPreparedStatement(config.results, config.changes ?? 1);
@@ -139,7 +192,15 @@ function createMockEnv(
       }
       return mockPreparedStatement([]);
     }),
-    batch: vi.fn().mockResolvedValue([]),
+    batch: vi.fn(async (statements: Array<{ run?: () => Promise<unknown> }>) =>
+      Promise.all(
+        statements.map((statement) =>
+          typeof statement.run === 'function'
+            ? statement.run()
+            : Promise.resolve({ meta: { changes: 1 } })
+        )
+      )
+    ),
     dump: vi.fn(),
     exec: vi.fn(),
   } as unknown as D1Database;

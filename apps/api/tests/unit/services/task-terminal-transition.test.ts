@@ -184,6 +184,43 @@ describe('transitionTaskToTerminal', () => {
     expect(reconcileTaskWaits).toHaveBeenCalledWith(env, PROJECT_ID, 'task-1');
   });
 
+  it('terminalizes queued rows for scheduled timeout recovery', async () => {
+    seedTask('queued-task', {
+      workspaceId: null,
+      chatSessionId: null,
+      status: 'queued',
+      triggerExecutionId: null,
+      createdAt: new Date(NOW.getTime() - 60_000).toISOString(),
+    });
+
+    const outcome = await transitionTaskToTerminal(env, {
+      taskId: 'queued-task',
+      projectId: PROJECT_ID,
+      status: 'failed',
+      reason: 'Task stuck in queued state',
+      source: 'test.stuck_tasks',
+      fillMissingStartedAt: false,
+    });
+
+    expect(outcome).toBe('transitioned');
+    expect(taskRow('queued-task')).toMatchObject({
+      status: 'failed',
+      execution_step: null,
+      error_message: 'Task stuck in queued state',
+      started_at: null,
+      completed_at: NOW.toISOString(),
+    });
+    expect(statusEvents('queued-task')).toEqual([
+      {
+        from_status: 'queued',
+        to_status: 'failed',
+        actor_type: 'system',
+        actor_id: null,
+        reason: 'Task stuck in queued state',
+      },
+    ]);
+  });
+
   it('preserves an active predecessor when a live session-recovery successor owns the wake', async () => {
     seedWorkspace('workspace-2');
     seedTask('task-2', {
