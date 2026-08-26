@@ -189,7 +189,13 @@ agentActivityCallbackRoute.post(
       await cancelScheduledSessionSleep(
         drizzle(c.env.DATABASE, { schema }),
         existing.chatSessionId
-      );
+      ).catch((err) => {
+        log.warn('acp_activity.cancel_scheduled_sleep_failed', {
+          sessionId,
+          projectId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     }
 
     // Staleness guard (S2): reject a DESTRUCTIVE `error` callback that provably

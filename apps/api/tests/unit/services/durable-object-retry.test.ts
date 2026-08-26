@@ -12,24 +12,41 @@ import {
 
 describe('isTransientDurableObjectError', () => {
   it('matches the exact Cloudflare code-update reset string', () => {
-    expect(isTransientDurableObjectError(
-      new Error('Durable Object reset because its code was updated.')
-    )).toBe(true);
+    expect(
+      isTransientDurableObjectError(new Error('Durable Object reset because its code was updated.'))
+    ).toBe(true);
   });
 
   it('matches case variants of the code-update reset string', () => {
-    expect(isTransientDurableObjectError(
-      new Error('DURABLE OBJECT RESET BECAUSE ITS CODE WAS UPDATED.')
-    )).toBe(true);
-    expect(isTransientDurableObjectError(
-      new Error('durable object reset because its code was updated.')
-    )).toBe(true);
+    expect(
+      isTransientDurableObjectError(new Error('DURABLE OBJECT RESET BECAUSE ITS CODE WAS UPDATED.'))
+    ).toBe(true);
+    expect(
+      isTransientDurableObjectError(new Error('durable object reset because its code was updated.'))
+    ).toBe(true);
   });
 
   it('matches related Durable Object reset and overload conditions', () => {
     expect(isTransientDurableObjectError(new Error('Durable Object reset'))).toBe(true);
     expect(isTransientDurableObjectError(new Error('Durable Object overloaded'))).toBe(true);
-    expect(isTransientDurableObjectError(new Error('overloaded Durable Object instance'))).toBe(true);
+    expect(isTransientDurableObjectError(new Error('overloaded Durable Object instance'))).toBe(
+      true
+    );
+  });
+
+  it('matches production-shaped Durable Object memory and storage-timeout resets', () => {
+    expect(
+      isTransientDurableObjectError(
+        new Error("Durable Object's isolate exceeded its memory limit and was reset.")
+      )
+    ).toBe(true);
+    expect(
+      isTransientDurableObjectError(
+        new Error(
+          'Durable Object storage operation exceeded timeout which caused object to be reset.'
+        )
+      )
+    ).toBe(true);
   });
 
   it('does not treat unrelated errors as Durable Object transient errors', () => {
@@ -68,11 +85,13 @@ describe('getDurableObjectRetryConfig', () => {
       baseDelayMs: DEFAULT_DO_RETRY_BASE_DELAY_MS,
       maxDelayMs: DEFAULT_DO_RETRY_MAX_DELAY_MS,
     });
-    expect(getDurableObjectRetryConfig({
-      DO_RETRY_MAX_ATTEMPTS: '0',
-      DO_RETRY_BASE_DELAY_MS: 'not-a-number',
-      DO_RETRY_MAX_DELAY_MS: '-1',
-    })).toEqual({
+    expect(
+      getDurableObjectRetryConfig({
+        DO_RETRY_MAX_ATTEMPTS: '0',
+        DO_RETRY_BASE_DELAY_MS: 'not-a-number',
+        DO_RETRY_MAX_DELAY_MS: '-1',
+      })
+    ).toEqual({
       maxAttempts: DEFAULT_DO_RETRY_MAX_ATTEMPTS,
       baseDelayMs: DEFAULT_DO_RETRY_BASE_DELAY_MS,
       maxDelayMs: DEFAULT_DO_RETRY_MAX_DELAY_MS,
@@ -80,11 +99,13 @@ describe('getDurableObjectRetryConfig', () => {
   });
 
   it('uses positive integer env overrides', () => {
-    expect(getDurableObjectRetryConfig({
-      DO_RETRY_MAX_ATTEMPTS: '5',
-      DO_RETRY_BASE_DELAY_MS: '25',
-      DO_RETRY_MAX_DELAY_MS: '125',
-    })).toEqual({
+    expect(
+      getDurableObjectRetryConfig({
+        DO_RETRY_MAX_ATTEMPTS: '5',
+        DO_RETRY_BASE_DELAY_MS: '25',
+        DO_RETRY_MAX_DELAY_MS: '125',
+      })
+    ).toEqual({
       maxAttempts: 5,
       baseDelayMs: 25,
       maxDelayMs: 125,

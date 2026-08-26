@@ -339,8 +339,9 @@ export async function listSessions(
   taskId: string | null = null,
   createdByUserId: string | null = null
 ): Promise<{ sessions: Record<string, unknown>[]; total: number; hasMore: boolean }> {
-  const stub = await getStub(env, projectId);
-  return stub.listSessions(status, limit, offset, taskId, createdByUserId);
+  return callProjectDataWithRetry(env, projectId, 'listSessions', (stub) =>
+    stub.listSessions(status, limit, offset, taskId, createdByUserId)
+  );
 }
 
 /**
@@ -885,8 +886,9 @@ export async function recordSessionTurnEnd(
 
 /** Get the persisted session state snapshot (for page load catch-up). */
 export async function getSessionState(env: Env, projectId: string, sessionId: string) {
-  const stub = await getStub(env, projectId);
-  return stub.getSessionState(sessionId);
+  return callProjectDataWithRetry(env, projectId, 'getSessionState', (stub) =>
+    stub.getSessionState(sessionId)
+  );
 }
 
 export async function registerTaskWait(env: Env, projectId: string, input: RegisterTaskWaitInput) {

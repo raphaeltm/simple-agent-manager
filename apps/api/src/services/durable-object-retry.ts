@@ -7,6 +7,8 @@ export const DEFAULT_DO_RETRY_MAX_DELAY_MS = 250;
 const TRANSIENT_DURABLE_OBJECT_PATTERNS = [
   /durable object reset because its code was updated/i,
   /durable object reset/i,
+  /durable object'?s isolate exceeded its memory limit and was reset/i,
+  /durable object storage operation exceeded timeout which caused object to be reset/i,
   /durable object.*overload/i,
   /overload.*durable object/i,
 ];

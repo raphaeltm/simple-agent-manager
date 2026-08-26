@@ -5,6 +5,7 @@ import { AppError } from '../../../src/middleware/error';
 
 const mocks = vi.hoisted(() => ({
   updateSets: [] as Array<Record<string, unknown>>,
+  updateReject: null as Error | null,
   workspace: null as Record<string, unknown> | null,
   nodeStatus: 'running',
   workspaceStatus: 'running',
@@ -46,7 +47,12 @@ vi.mock('drizzle-orm/d1', () => ({
     update: () => ({
       set: (values: Record<string, unknown>) => {
         mocks.updateSets.push(values);
-        return { where: vi.fn().mockResolvedValue(undefined) };
+        return {
+          where: vi.fn().mockImplementation(() => {
+            if (mocks.updateReject) return Promise.reject(mocks.updateReject);
+            return Promise.resolve(undefined);
+          }),
+        };
       },
     }),
     // Supports both the idle-branch workspace⋈nodes read (selection includes
@@ -153,6 +159,7 @@ describe('agent activity callback', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.updateSets.length = 0;
+    mocks.updateReject = null;
     mocks.workspace = null;
     mocks.nodeStatus = 'running';
     mocks.workspaceStatus = 'running';
@@ -241,6 +248,38 @@ describe('agent activity callback', () => {
     expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
     expect(mocks.updateSets).toContainEqual(
       expect.objectContaining({ sleepStatus: null, sleepClaimId: null })
+    );
+  });
+
+  it('does not fail valid activity callbacks when best-effort sleep cancellation fails', async () => {
+    mocks.projectData.getSessionState.mockResolvedValueOnce({ runtimeWorkState: 'active' });
+    mocks.updateReject = new Error('Failed query: update "session_snapshots" set ...');
+    const app = await createTestApp();
+
+    const response = await postActivity(app, {
+      activity: 'idle',
+      nodeId: 'node-1',
+      agentType: 'claude-code',
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'claude_sdk',
+      runtimeWorkProgressAt: 1234,
+    });
+
+    expect(response.status).toBe(204);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledWith(
+      env,
+      'project-1',
+      'agent-session-1',
+      'idle',
+      expect.objectContaining({ runtimeWorkState: 'active' })
+    );
+    expect(mocks.log.warn).toHaveBeenCalledWith(
+      'acp_activity.cancel_scheduled_sleep_failed',
+      expect.objectContaining({
+        sessionId: 'agent-session-1',
+        projectId: 'project-1',
+      })
     );
   });
 
