@@ -154,6 +154,8 @@ reread before destructive cleanup.
 ## References
 
 - SAM idea `01M0Y6N63R23N7HDH4V0X1T49G`
+- Bootstrap task-file PR `#1926` was required because direct push to `main` was
+  rejected by branch protection. No implementation changes belong in that PR.
 - `apps/api/src/services/task-runtime-liveness.ts`
 - `apps/api/src/services/stuck-tasks.ts`
 - `apps/api/src/scheduled/stuck-tasks.ts`
