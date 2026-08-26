@@ -349,6 +349,8 @@ describe('ProjectData storage safety firebreak', () => {
         expect(telemetry?.database_size_bytes).toBeGreaterThan(0);
         expect(telemetry?.measured_at).toBeGreaterThan(0);
         expect(telemetry?.last_alarm_at).toBeGreaterThan(0);
+        expect(telemetry?.category_breakdown_json).toBeNull();
+        expect(telemetry?.reclaimable_bytes).toBeNull();
 
         const nextAlarm = await runInDurableObject(stub, async (_instance, state) =>
           state.storage.getAlarm()
@@ -409,7 +411,7 @@ describe('ProjectData storage safety firebreak', () => {
         expect(telemetry?.status).toBe('warning');
         expect(telemetry?.growth_rate_bytes_per_day).toBeGreaterThan(0);
         expect(telemetry?.estimated_days_to_limit).toBeGreaterThan(0);
-        expect(telemetry?.category_breakdown_json).toContain('"reclaimableBytes"');
+        expect(telemetry?.category_breakdown_json).toBeNull();
         expect(telemetry?.last_alert_status).toBe('warning');
         expect(telemetry?.last_alert_reason).toBe('threshold_exceeded');
 
@@ -424,6 +426,7 @@ describe('ProjectData storage safety firebreak', () => {
         expect(context.status).toBe('warning');
         expect(context.growthRateBytesPerDay).toBeGreaterThan(0);
         expect(context.estimatedDaysToLimit).toBeGreaterThan(0);
+        expect(context.categoryBreakdown).toBeNull();
       }
     );
   });
@@ -1286,7 +1289,7 @@ describe('ProjectData storage safety firebreak', () => {
         expect(telemetry?.cleanup_health).toBe('target_unreachable');
         expect(telemetry?.last_error).toMatch(/cleanup target unreachable/i);
         expect(telemetry?.last_alert_reason).toBe('cleanup_target_unreachable');
-        expect(telemetry?.category_breakdown_json).toContain('activeOrSleepingSessionBytes');
+        expect(telemetry?.category_breakdown_json).toBeNull();
 
         const history = await readTelemetryHistory(projectId);
         expect(history.some((row) => row.cleanup_health === 'target_unreachable')).toBe(true);
@@ -1302,7 +1305,8 @@ describe('ProjectData storage safety firebreak', () => {
         const context = parseAlertContext(alert ?? { context: null });
         expect(context.alertReason).toBe('cleanup_target_unreachable');
         expect(context.cleanupHealth).toBe('target_unreachable');
-        expect(context.reclaimableBytes).toBe(0);
+        expect(context.reclaimableBytes).toBeNull();
+        expect(context.categoryBreakdown).toBeNull();
       }
     );
   });
@@ -1323,8 +1327,10 @@ describe('ProjectData storage safety firebreak', () => {
     });
     expect(telemetry?.project_id).toBe(projectId);
     expect(telemetry?.database_size_bytes).toBe(measurement?.databaseSizeBytes);
+    expect(telemetry?.category_breakdown_json).toContain('"reclaimableBytes"');
     expect(firstHistory).toHaveLength(1);
     expect(firstHistory[0]?.project_id).toBe(projectId);
+    expect(firstHistory[0]?.category_breakdown_json).toContain('"reclaimableBytes"');
 
     await projectDataService.measureProjectDataStorage(testEnv, projectId);
     const secondHistory = await readTelemetryHistory(projectId);

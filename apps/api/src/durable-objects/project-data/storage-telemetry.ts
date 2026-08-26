@@ -48,6 +48,10 @@ export type ProjectDataStorageTelemetryUpdateFields = {
   lastError?: string | null;
 };
 
+export interface ProjectDataStorageTelemetryEnrichmentOptions {
+  includeCategoryBreakdown?: boolean;
+}
+
 function normalizeTrendSource(row: unknown): ProjectDataStorageTrendSource | null {
   if (!isJsonRecord(row)) return null;
   const measuredAt = row.measured_at;
@@ -143,18 +147,21 @@ export async function enrichProjectDataStorageTelemetry(
   sql: SqlStorage,
   env: Env,
   telemetry: ProjectDataStorageTelemetry,
-  config: StorageSafetyConfig
+  config: StorageSafetyConfig,
+  options: ProjectDataStorageTelemetryEnrichmentOptions = {}
 ): Promise<ProjectDataStorageTelemetry> {
-  const categoryBreakdown: ProjectDataStorageCategoryBreakdown =
-    telemetry.categoryBreakdown ??
-    measureProjectDataStorageCategories(sql, config, telemetry.measuredAt);
+  const includeCategoryBreakdown = options.includeCategoryBreakdown ?? true;
+  const categoryBreakdown: ProjectDataStorageCategoryBreakdown | null = includeCategoryBreakdown
+    ? (telemetry.categoryBreakdown ??
+      measureProjectDataStorageCategories(sql, config, telemetry.measuredAt))
+    : telemetry.categoryBreakdown;
   const source = await readGrowthTrendSource(env, telemetry.projectId, telemetry.measuredAt, config);
   const forecast = computeGrowthForecast(telemetry, source);
 
   return {
     ...telemetry,
     ...forecast,
-    reclaimableBytes: categoryBreakdown.reclaimableBytes,
+    reclaimableBytes: categoryBreakdown?.reclaimableBytes ?? telemetry.reclaimableBytes,
     categoryBreakdown,
   };
 }

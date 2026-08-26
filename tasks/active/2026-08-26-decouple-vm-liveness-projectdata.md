@@ -104,13 +104,13 @@ reread before destructive cleanup.
 - [ ] If runtime inventory is added, keep VM-agent rollout additive and
   version-aware; old agents must remain compatible and incompatible busy VMs must
   not be killed due to missing inventory.
-- [ ] Bound ProjectData alarm maintenance by keeping hot-path storage checks O(1)
+- [x] Bound ProjectData alarm maintenance by keeping hot-path storage checks O(1)
   with `sql.databaseSize`, moving category breakdown scans out of ordinary alarm
   execution, and ensuring cleanup batches are indexed/bounded with cursor/yield
   behavior.
-- [ ] Reorder or isolate ProjectData alarm work so lifecycle/control bookkeeping
+- [x] Reorder or isolate ProjectData alarm work so lifecycle/control bookkeeping
   is not delayed by optional storage maintenance.
-- [ ] Add telemetry for storage alarm duration, rows, bytes, and budget decisions
+- [x] Add telemetry for storage alarm duration, rows, bytes, and budget decisions
   where missing.
 - [ ] Replace repeated per-secret `wrangler secret put` / delete loops in
   `scripts/deploy/configure-secrets.sh` with a bulk/bounded secret workflow that

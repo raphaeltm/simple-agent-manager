@@ -22,6 +22,7 @@ import {
 import {
   enrichProjectDataStorageTelemetry,
   maybePersistProjectDataStorageAlert,
+  type ProjectDataStorageTelemetryEnrichmentOptions,
   STORAGE_ALERT_REASON_CLEANUP_TARGET_UNREACHABLE,
   upsertProjectDataStorageTelemetry,
 } from './storage-telemetry';
@@ -51,7 +52,8 @@ export interface ProjectDataStorageAlarmCallbacks {
     env: Env,
     projectId: string,
     measuredAt: number,
-    cleanupHealth: ProjectDataStorageCleanupHealth | null
+    cleanupHealth: ProjectDataStorageCleanupHealth | null,
+    options?: ProjectDataStorageTelemetryEnrichmentOptions
   ) => Promise<ProjectDataStorageTelemetry>;
 }
 
@@ -127,7 +129,8 @@ async function persistCleanupHealthTelemetryAndAlerts(
     env,
     projectId,
     measuredAt,
-    cleanupHealth
+    cleanupHealth,
+    { includeCategoryBreakdown: false }
   );
   const telemetry =
     measurement?.growthRateBytesPerDay !== null &&
@@ -207,6 +210,7 @@ export async function runProjectDataStorageSafetyAlarmCore(
   config: StorageSafetyConfig,
   callbacks: ProjectDataStorageAlarmCallbacks
 ): Promise<ProjectDataStorageAlarmResult> {
+  const startedAt = Date.now();
   const now = Date.now();
   let measurement: ProjectDataStorageTelemetry | null = null;
   if (callbacks.shouldMeasure(sql, env, now)) {
@@ -218,7 +222,9 @@ export async function runProjectDataStorageSafetyAlarmCore(
     now,
     classifyStatus: (databaseSizeBytes) => callbacks.classifyStatus(databaseSizeBytes, config),
     recordTelemetry: async (telemetry, fields) => {
-      const enriched = await enrichProjectDataStorageTelemetry(sql, env, telemetry, config);
+      const enriched = await enrichProjectDataStorageTelemetry(sql, env, telemetry, config, {
+        includeCategoryBreakdown: false,
+      });
       await upsertProjectDataStorageTelemetry(env, enriched, fields);
     },
   });
@@ -227,7 +233,9 @@ export async function runProjectDataStorageSafetyAlarmCore(
     now,
     classifyStatus: (databaseSizeBytes) => callbacks.classifyStatus(databaseSizeBytes, config),
     recordTelemetry: async (telemetry, fields) => {
-      const enriched = await enrichProjectDataStorageTelemetry(sql, env, telemetry, config);
+      const enriched = await enrichProjectDataStorageTelemetry(sql, env, telemetry, config, {
+        includeCategoryBreakdown: false,
+      });
       await upsertProjectDataStorageTelemetry(env, enriched, fields);
     },
   });
@@ -241,5 +249,35 @@ export async function runProjectDataStorageSafetyAlarmCore(
     cleanup,
     eventLogCleanup
   );
-  return { measurement, cleanup, eventLogCleanup, cleanupHealth };
+  const durationMs = Date.now() - startedAt;
+  log.info('completed', {
+    projectId,
+    durationMs,
+    measured: measurement !== null,
+    databaseSizeBytes: measurement?.databaseSizeBytes ?? sql.databaseSize,
+    cleanupHealth,
+    toolPayloadCleanup: cleanup
+      ? {
+          rowsScanned: cleanup.rowsScanned,
+          rowsUpdated: cleanup.rowsUpdated,
+          rowsFailed: cleanup.rowsFailed,
+          batchRows: cleanup.batchRows,
+          batchBytes: cleanup.batchBytes,
+          toolMetadataBytesScanned: cleanup.toolMetadataBytesScanned,
+          toolMetadataBytesRead: cleanup.toolMetadataBytesRead,
+          originalToolMetadataBytes: cleanup.originalToolMetadataBytes,
+          storedToolMetadataBytes: cleanup.storedToolMetadataBytes,
+          exhaustedCandidates: cleanup.exhaustedCandidates,
+        }
+      : null,
+    eventLogCleanup: eventLogCleanup
+      ? {
+          rowsDeleted: eventLogCleanup.rowsDeleted,
+          candidateBytesDeleted: eventLogCleanup.candidateBytesDeleted,
+          batchRows: eventLogCleanup.batchRows,
+          exhaustedCandidates: eventLogCleanup.exhaustedCandidates,
+        }
+      : null,
+  });
+  return { measurement, cleanup, eventLogCleanup, cleanupHealth, durationMs };
 }
