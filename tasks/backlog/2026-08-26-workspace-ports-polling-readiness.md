@@ -1,0 +1,84 @@
+# Make workspace ports polling readiness-aware
+
+## Problem
+
+The 2026-08-25 production stability audit found a high-volume `/ports` readiness/lifecycle gap. Cloudflare telemetry estimated 1,235 workspace `/ports` HTTP 503s in 48 hours, with about 1,085 from three workspaces. One workspace continued to be polled for roughly 32 minutes after its row was marked deleted.
+
+`apps/web/src/hooks/useWorkspacePorts.ts` currently polls at the fixed `WORKSPACE_PORTS_POLL_MS` cadence while the caller's `isRunning` boolean remains true. It has no readiness backoff, no circuit breaker, and no way to distinguish `running` from stale caller state such as `sleeping`, `stopped`, or `deleted`. A runtime that is not yet ready or has been torn down can therefore become hundreds of repeated 503s per open client.
+
+## Research findings
+
+- Audit context is in `.library/reliability/audits/production-stability-audit-2026-08-25.md/production-stability-audit-2026-08-25.md`, section "`/ports` is a concrete UI/lifecycle cross-product gap".
+- `apps/web/src/hooks/useWorkspacePorts.ts` uses TanStack Query with a fixed `refetchInterval: WORKSPACE_PORTS_POLL_MS`, tracks consecutive failures, logs each failed background fetch with `console.warn`, and clears displayed ports after three consecutive failures.
+- The same hook already preserves stale ports on a transient background failure and query-keys by workspace ID, workspace URL, and a non-raw token marker. Tests live in `apps/web/tests/unit/hooks/useWorkspacePorts.test.ts`.
+- The hook currently accepts only `isRunning: boolean`. It should accept the effective workspace status so it can stop immediately for `sleeping`, `stopped`, and `deleted`, then reset cleanly when the status becomes `running` or `recovery`.
+- Current callers:
+  - `apps/web/src/pages/workspace/useWorkspaceCore.ts`
+  - `apps/web/src/components/project-message-view/useSessionLifecycle.ts`
+- `apps/web/src/lib/poll-intervals.ts` centralizes poll cadences and already documents rule 60 hidden-tab behavior. New ports backoff/circuit budgets must live there with exported `DEFAULT_*` constants and `VITE_*` overrides.
+- The noisy browser path is not the REST API helper route; `listWorkspacePorts()` calls `workspaceUrl/workspaces/:workspaceId/ports?token=...`, which is routed through the API Worker wildcard workspace proxy in `apps/api/src/index.ts`.
+- `GET /api/workspaces/:id/ports` in `apps/api/src/routes/workspaces/crud.ts` exists for CLI/control-plane use and proxies via `getWorkspacePortsOnNode()` in `apps/api/src/services/node-agent.ts`.
+- Cheap server-side contract opportunity: for exact workspace port-list requests, the wildcard proxy can return a structured non-5xx readiness/lifecycle payload for expected states (`not_ready`, `sleeping`, `stopped`, `deleted`, `gone`) and can normalize upstream port-list 503/unreachable responses as `not_ready`. Token/auth/internal failures should remain real errors.
+- `packages/shared/src/types/workspace.ts` defines `PortsResponse`; extending it keeps VM agent, API, and web response shapes aligned while remaining backwards-compatible with VM-agent responses that only include `{ ports }`.
+- Prior task `tasks/archive/2026-03-31-fix-forwarded-ports-project-view.md` added stale-port retention and token refresh coverage. Preserve that behavior: already-displayed ports must not vanish during background refetch or transient failure.
+- Prior task `tasks/active/2026-08-18-ui-perf-chat-poll-and-memo-quick-wins.md` established hidden-tab polling hygiene and elapsed-gated catch-up semantics. TanStack Query's `refetchIntervalInBackground` must remain false for this hook.
+- Relevant incident lesson from `tasks/archive/2026-08-16-prevent-hidden-harness-work-sleep-and-add-durable-task-waits.md`: unbounded lifecycle-unaware polling is fragile. Polling must be bounded and explicit about ownership/lifecycle state.
+- The comment in `apps/web/src/lib/workspace-status-utils.ts` references `docs/notes/2026-04-03-port-detection-recovery-status-postmortem.md`, but that file is absent on current `main`. Do not rely on that path as evidence.
+- New Vite build-time knobs need wiring in:
+  - `apps/web/src/vite-env.d.ts`
+  - `apps/web/.env.example`
+  - `apps/www/src/content/docs/docs/reference/configuration.md`
+  - `.github/workflows/deploy-reusable.yml`
+  - `scripts/quality/deploy-reusable-workflow.test.ts`
+
+## Design decisions
+
+1. Use a readiness-aware TanStack Query interval rather than a hand-rolled interval. This preserves stale-while-revalidate behavior and hidden-tab pausing.
+2. Count both structured `not_ready` responses and fetch failures toward a shared unavailable budget. Use exponential backoff with jitter before the budget is exhausted.
+3. Use an open-circuit cooldown for recoverable `running`/`recovery` runtime unavailability. After the failure budget is exhausted, probe only at the configurable reset cadence until a success resets the circuit.
+4. Treat `sleeping`, `stopped`, and `deleted` as terminal for ports polling. Clear visible ports and stop polling until the effective workspace state returns to `running`/`recovery`.
+5. Treat startup port-list not-ready as normal readiness, not a console/error storm. Only genuine fetch errors should emit bounded warning logs.
+
+## Implementation checklist
+
+- [ ] Extend shared `PortsResponse` with optional readiness/lifecycle fields while preserving existing `{ ports }` compatibility.
+- [ ] Extend `apps/web/src/lib/api/workspaces.ts` and query options to return the structured ports response.
+- [ ] Add exported `DEFAULT_*` constants and `VITE_*` overrides for ports poll base interval, max backoff, jitter ratio, failure budget, and circuit reset cadence.
+- [ ] Wire the new Vite env vars into type declarations, `.env.example`, public configuration reference, deploy workflow env, and deployment workflow quality test.
+- [ ] Change `useWorkspacePorts` to accept effective `WorkspaceStatus`, stop for terminal states, reset on clean running/resume, preserve stale ready ports during transient background failures, and use backoff/circuit interval calculation.
+- [ ] Keep raw tokens out of query keys and preserve token-rotation behavior.
+- [ ] Update both web callers to pass `workspace?.status` instead of only an `isRunning` boolean.
+- [ ] Add cheap server-side structured readiness/lifecycle payload handling in the wildcard workspace proxy for exact port-list requests.
+- [ ] Add/adjust API tests proving expected lifecycle/not-ready port-list states do not produce 5xx responses while auth/token failures still fail.
+- [ ] Add browser/React Query behavior tests covering provisioning/not-ready, running-but-agent-not-ready, recovery, sleeping, stopped, deleted, token rotation, repeated 503, backoff intervals, circuit cooldown, hidden-tab pause, bounded warnings, and stale-port preservation.
+- [ ] Run the mandatory Playwright visual audit at 375x667 and 1280x800 with screenshots under `.codex/tmp/playwright-screenshots/`.
+- [ ] Run lint, typecheck, tests, and build.
+- [ ] Run specialist reviews: task-completion-validator, ui-ux-specialist, test-engineer, env-validator, constitution-validator, cloudflare-specialist, and doc-sync-validator if docs/API contract changed.
+- [ ] Deploy to staging, verify behavior, create PR, wait for CI, merge, and monitor production deploy to completion.
+
+## Acceptance criteria
+
+- Workspace port polling backs off exponentially with jitter after consecutive `not_ready` or failed responses.
+- Polling opens a circuit or hard-stops after a configurable bounded failure budget.
+- Polling stops promptly and clears ports when effective state is `sleeping`, `stopped`, or `deleted`.
+- Polling resumes cleanly when the effective state returns to `running` or `recovery`.
+- Startup runtime/port-scanner not-ready is a normal state and does not generate an error-level storm.
+- The browser stops/pauses polling while the tab is hidden.
+- Already-displayed ports remain visible during background refetch and transient failures.
+- New intervals/budgets have env-configurable `VITE_*` overrides with exported `DEFAULT_*` constants.
+- The server-side port-list contract distinguishes expected not-ready/lifecycle states from genuine failures without a large server feature.
+- Behavioral tests cover provisioning, running-but-agent-not-ready, recovery, sleeping, stopped, deleted, token rotation, and repeated 503.
+- Playwright visual audit passes at 375px and 1280px with screenshot evidence.
+
+## References
+
+- `apps/web/src/hooks/useWorkspacePorts.ts`
+- `apps/web/src/lib/poll-intervals.ts`
+- `apps/web/tests/unit/hooks/useWorkspacePorts.test.ts`
+- `apps/api/src/index.ts`
+- `apps/api/src/routes/workspaces/crud.ts`
+- `packages/shared/src/types/workspace.ts`
+- `.claude/rules/17-ui-visual-testing.md`
+- `.claude/rules/48-stale-while-revalidate-ui.md`
+- `.claude/rules/60-request-io-and-bundle-budgets.md`
+- `.library/reliability/audits/production-stability-audit-2026-08-25.md/production-stability-audit-2026-08-25.md`
