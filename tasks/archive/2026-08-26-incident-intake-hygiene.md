@@ -20,25 +20,38 @@ The intake loop needs cheap pre-dispatch hygiene: attach recurring occurrences t
 
 ## Implementation checklist
 
-- [ ] Add shared `DEFAULT_*` constants and Worker env/config fields for incident dispatch minimum severity, minimum batch size, minimum pending age, per-trigger rate cap/window, and stale-singleton expiry age.
-- [ ] Update deployment env propagation, `.env.example`, env reference/docs, and public reporting/config docs for the new knobs and changed debug-agent budget defaults.
-- [ ] Add incident queue helpers that classify dispatch eligibility without widening existing action predicates: open tracked work linkage via `idea_id`, `diagnosis_id -> debug_diagnoses.idea_id`, or `resolved_by_task_id`, severity floor, and stale singleton expiry.
-- [ ] Update platform feedback triage so recurrence is attached to linked/open or warn-only groups but those groups do not become dispatch-eligible.
-- [ ] Update incident trigger sweep admission so it applies the association/severity gate before dispatch, requires minimum batch size or pending age, and enforces a per-trigger dispatch rate cap before calling the submitter.
-- [ ] Raise `DEFAULT_DEBUG_AGENT_RUN_TOKEN_LIMIT` and `DEFAULT_DEBUG_AGENT_DAILY_TOKEN_LIMIT` so a six-turn diagnosis is reachable by default, while keeping `DEBUG_AGENT_*` overrides authoritative and budget exhaustion retryable.
-- [ ] Add/adjust tests for association-gate skip plus no-linkage dispatch control, severity floor, batch/age/rate admission cases, stale-singleton two-sweep expiry, and diagnosis completion beyond two turns under the new default ceiling.
-- [ ] Run focused tests for triage, incidents, incident triggers, and debug-agent config/vertical behavior.
-- [ ] Run full local quality gates and specialist reviews before PR.
+- [x] Add shared `DEFAULT_*` constants and Worker env/config fields for incident dispatch minimum severity, minimum batch size, minimum pending age, per-trigger rate cap/window, and stale-singleton expiry age.
+- [x] Update deployment env propagation, `.env.example`, env reference/docs, and public reporting/config docs for the new knobs and changed debug-agent budget defaults.
+- [x] Add incident queue helpers that classify dispatch eligibility without widening existing action predicates: open tracked work linkage via `idea_id`, `diagnosis_id -> debug_diagnoses.idea_id`, or `resolved_by_task_id`, severity floor, and stale singleton expiry.
+- [x] Keep platform feedback triage recurrence attachment intact while making linked/open and warn-only groups non-dispatchable through the shared dispatch-eligibility predicate.
+- [x] Update incident trigger sweep admission so it applies the association/severity gate before dispatch, requires minimum batch size or pending age, and enforces a per-trigger dispatch rate cap before calling the submitter.
+- [x] Raise `DEFAULT_DEBUG_AGENT_RUN_TOKEN_LIMIT` and `DEFAULT_DEBUG_AGENT_DAILY_TOKEN_LIMIT` so a six-turn diagnosis is reachable by default, while keeping `DEBUG_AGENT_*` overrides authoritative and budget exhaustion retryable.
+- [x] Add/adjust tests for association-gate skip plus no-linkage dispatch control, severity floor, batch/age/rate admission cases, stale-singleton two-sweep expiry, and diagnosis completion beyond two turns under the new default ceiling.
+- [x] Run focused tests for triage, incidents, incident triggers, and debug-agent config/vertical behavior.
+- [x] Run full local quality gates and specialist reviews before PR.
 
 ## Acceptance criteria
 
-- [ ] A signature linked to open tracked work has its occurrence/evidence attached and is skipped by incident-trigger dispatch; an otherwise identical unlinked error signature still dispatches.
-- [ ] Warn signatures are linked/recorded but excluded from dedicated incident-trigger dispatch by default.
-- [ ] A fresh singleton error is deferred until either the pending batch reaches the configured minimum size or the oldest pending item reaches the configured age.
-- [ ] Per-trigger dispatch rate limiting prevents more than the configured number of incident dispatches in the configured window.
-- [ ] Stale singleton signatures expire on the first sweep and are not reselected on the second sweep.
-- [ ] Debug diagnosis can complete more than two model turns under default config, and env overrides still control the ceilings.
-- [ ] Control-loop load remains bounded: no new unbounded D1 scans, no additional network calls before durable dispatch state, and every skipped/deferred candidate has an explicit retry or terminal path.
+- [x] A signature linked to open tracked work has its occurrence/evidence attached and is skipped by incident-trigger dispatch; an otherwise identical unlinked error signature still dispatches.
+- [x] Warn signatures are linked/recorded but excluded from dedicated incident-trigger dispatch by default.
+- [x] A fresh singleton error is deferred until either the pending batch reaches the configured minimum size or the oldest pending item reaches the configured age.
+- [x] Per-trigger dispatch rate limiting prevents more than the configured number of incident dispatches in the configured window.
+- [x] Stale singleton signatures expire on the first sweep and are not reselected on the second sweep.
+- [x] Debug diagnosis can complete more than two model turns under default config, and env overrides still control the ceilings.
+- [x] Control-loop load remains bounded: no new unbounded D1 scans, no additional network calls before durable dispatch state, and every skipped/deferred candidate has an explicit retry or terminal path.
+
+## Validation evidence
+
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/scheduled/incident-triggers.test.ts tests/unit/services/platform-feedback-incidents.test.ts tests/unit/services/platform-feedback-triage.test.ts tests/unit/services/trigger-execution-cleanup.test.ts tests/unit/services/debug-agent-vertical.test.ts tests/unit/services/debug-agent-config.test.ts` — passed (`6` files / `76` tests).
+- `pnpm vitest run --config scripts/quality/vitest.config.ts scripts/quality/sync-wrangler-config.test.ts scripts/quality/deploy-reusable-workflow.test.ts` — passed.
+- `pnpm typecheck` — passed.
+- `pnpm format:check` — passed.
+- `pnpm lint` — passed with pre-existing warnings in `packages/acp-client` and `apps/web`.
+- `pnpm test` — passed (`@simple-agent-manager/api`: 609 files / 8,345 tests; `@simple-agent-manager/web`: 294 files / 3,522 tests).
+- `pnpm build` — passed.
+- `pnpm lint:oxlint` — passed as advisory-only (`2677` report-only diagnostics; ESLint remains authoritative).
+- `pnpm quality:type-boundaries` — passed (`0` blocking findings).
+- `git diff --check` — passed.
 
 ## References
 

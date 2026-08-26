@@ -63,6 +63,7 @@ interface StaleExecution {
   id: string;
   trigger_id: string;
   task_id: string | null;
+  event_type: string | null;
   started_at: string | null;
   created_at: string;
 }
@@ -168,7 +169,7 @@ async function recoverStaleExecutionsByStatus(
   try {
     staleRows = await db
       .prepare(
-        `SELECT id, trigger_id, task_id, started_at, created_at
+        `SELECT id, trigger_id, task_id, event_type, started_at, created_at
          FROM trigger_executions
          WHERE status = ?
            AND COALESCE(started_at, created_at) <= ?
@@ -239,6 +240,21 @@ async function recoverStaleExecutionsByStatus(
         triggerId: exec.trigger_id,
         taskId: exec.task_id,
         status,
+      });
+      continue;
+    }
+    const linkedTask = exec.task_id ? taskMap.get(exec.task_id) : undefined;
+    if (
+      status === 'running' &&
+      exec.event_type === 'incident_backlog' &&
+      linkedTask &&
+      !TERMINAL_TASK_STATUSES.has(linkedTask.status)
+    ) {
+      log.info('stale_incident_trigger_execution_retained', {
+        executionId: exec.id,
+        triggerId: exec.trigger_id,
+        taskId: exec.task_id,
+        taskStatus: linkedTask.status,
       });
       continue;
     }

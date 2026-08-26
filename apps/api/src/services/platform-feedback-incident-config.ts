@@ -2,13 +2,20 @@ import {
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_AUTO_TRIGGER_ENABLED,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS,
+  DEFAULT_PLATFORM_FEEDBACK_INCIDENT_DISPATCH_RATE_WINDOW_MS,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS,
+  DEFAULT_PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCHES_PER_TRIGGER_WINDOW,
+  DEFAULT_PLATFORM_FEEDBACK_INCIDENT_MIN_DISPATCH_BATCH_SIZE,
+  DEFAULT_PLATFORM_FEEDBACK_INCIDENT_MIN_DISPATCH_SEVERITY,
+  DEFAULT_PLATFORM_FEEDBACK_INCIDENT_MIN_PENDING_AGE_MS,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_RECLAIM_LIMIT,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH,
+  DEFAULT_PLATFORM_FEEDBACK_INCIDENT_STALE_SINGLETON_EXPIRY_BATCH_SIZE,
+  DEFAULT_PLATFORM_FEEDBACK_INCIDENT_STALE_SINGLETON_MAX_AGE_MS,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT,
   DEFAULT_PLATFORM_FEEDBACK_INCIDENT_TRIGGER_NAME,
@@ -18,6 +25,8 @@ import {
 import type { Env } from '../env';
 import { ENV_KEYS, resolveSetting, SETTING_KEYS } from './platform-config-store';
 
+export type IncidentDispatchSeverity = 'warn' | 'error';
+
 export interface IncidentConfig {
   autoTriggerEnabled: boolean;
   dispatchLeaseTtlMs: number;
@@ -26,6 +35,13 @@ export interface IncidentConfig {
   reopenCooldownMs: number;
   reclaimLimit: number;
   maxAgeMs: number;
+  staleSingletonMaxAgeMs: number;
+  staleSingletonExpiryBatchSize: number;
+  minDispatchSeverity: IncidentDispatchSeverity;
+  minDispatchBatchSize: number;
+  minPendingAgeMs: number;
+  dispatchRateWindowMs: number;
+  maxDispatchesPerTriggerWindow: number;
   triggerLimit: number;
   triggerName: string;
   triggerTemplate: string;
@@ -53,7 +69,20 @@ function booleanSetting(value: string | undefined, fallback: boolean): boolean {
   return fallback;
 }
 
+function dispatchSeveritySetting(
+  value: string | undefined,
+  fallback: IncidentDispatchSeverity
+): IncidentDispatchSeverity {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === 'warn' || normalized === 'error') return normalized;
+  return fallback;
+}
+
 export function getIncidentConfig(env: Env): IncidentConfig {
+  const maxAgeMs = positive(
+    env.PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS,
+    DEFAULT_PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS
+  );
   return {
     autoTriggerEnabled: booleanSetting(
       env.PLATFORM_FEEDBACK_INCIDENT_AUTO_TRIGGER_ENABLED,
@@ -79,9 +108,37 @@ export function getIncidentConfig(env: Env): IncidentConfig {
       env.PLATFORM_FEEDBACK_INCIDENT_RECLAIM_LIMIT,
       DEFAULT_PLATFORM_FEEDBACK_INCIDENT_RECLAIM_LIMIT
     ),
-    maxAgeMs: positive(
-      env.PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS,
-      DEFAULT_PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS
+    maxAgeMs,
+    staleSingletonMaxAgeMs: Math.min(
+      positive(
+        env.PLATFORM_FEEDBACK_INCIDENT_STALE_SINGLETON_MAX_AGE_MS,
+        DEFAULT_PLATFORM_FEEDBACK_INCIDENT_STALE_SINGLETON_MAX_AGE_MS
+      ),
+      maxAgeMs
+    ),
+    staleSingletonExpiryBatchSize: positive(
+      env.PLATFORM_FEEDBACK_INCIDENT_STALE_SINGLETON_EXPIRY_BATCH_SIZE,
+      DEFAULT_PLATFORM_FEEDBACK_INCIDENT_STALE_SINGLETON_EXPIRY_BATCH_SIZE
+    ),
+    minDispatchSeverity: dispatchSeveritySetting(
+      env.PLATFORM_FEEDBACK_INCIDENT_MIN_DISPATCH_SEVERITY,
+      DEFAULT_PLATFORM_FEEDBACK_INCIDENT_MIN_DISPATCH_SEVERITY
+    ),
+    minDispatchBatchSize: positive(
+      env.PLATFORM_FEEDBACK_INCIDENT_MIN_DISPATCH_BATCH_SIZE,
+      DEFAULT_PLATFORM_FEEDBACK_INCIDENT_MIN_DISPATCH_BATCH_SIZE
+    ),
+    minPendingAgeMs: positive(
+      env.PLATFORM_FEEDBACK_INCIDENT_MIN_PENDING_AGE_MS,
+      DEFAULT_PLATFORM_FEEDBACK_INCIDENT_MIN_PENDING_AGE_MS
+    ),
+    dispatchRateWindowMs: positive(
+      env.PLATFORM_FEEDBACK_INCIDENT_DISPATCH_RATE_WINDOW_MS,
+      DEFAULT_PLATFORM_FEEDBACK_INCIDENT_DISPATCH_RATE_WINDOW_MS
+    ),
+    maxDispatchesPerTriggerWindow: positive(
+      env.PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCHES_PER_TRIGGER_WINDOW,
+      DEFAULT_PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCHES_PER_TRIGGER_WINDOW
     ),
     triggerLimit: positive(
       env.PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT,

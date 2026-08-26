@@ -15,6 +15,7 @@ import {
   configuredFeedbackProjectId,
   expireStaleIncidents,
   getIncidentConfig,
+  hasDispatchablePendingIncidents,
   reclaimExpiredIncidentClaims,
   reclaimExpiredIncidentDispatches,
   releaseIncidentDispatch,
@@ -38,6 +39,8 @@ export interface IncidentTriggerSweepStats {
   requeuedClaims: number;
   expiredIncidents: number;
   autoTriggerCreated: number;
+  deferredDispatches: number;
+  rateLimitedDispatches: number;
 }
 
 interface IncidentTriggerSweepDeps {
@@ -83,15 +86,6 @@ async function loadIncidentTriggers(
   return query.results ?? [];
 }
 
-async function hasPendingIncidents(env: Env): Promise<boolean> {
-  const row = await env.DATABASE.prepare(
-    `SELECT signature FROM platform_feedback_triages
-     WHERE queue_state = 'pending' AND rejected_at IS NULL
-     ORDER BY queued_at ASC LIMIT 1`
-  ).first<{ signature: string }>();
-  return Boolean(row);
-}
-
 async function hasAnyIncidentTrigger(env: Env, projectId: string): Promise<boolean> {
   const row = await env.DATABASE.prepare(
     `SELECT id FROM triggers
@@ -106,10 +100,11 @@ async function hasAnyIncidentTrigger(env: Env, projectId: string): Promise<boole
 async function ensureDefaultIncidentTrigger(
   env: Env,
   project: ProjectRow,
-  config: ReturnType<typeof getIncidentConfig>
+  config: ReturnType<typeof getIncidentConfig>,
+  nowMs: number
 ): Promise<boolean> {
   if (!config.autoTriggerEnabled) return false;
-  if (!(await hasPendingIncidents(env))) return false;
+  if (!(await hasDispatchablePendingIncidents(env, config, nowMs))) return false;
   if (await hasAnyIncidentTrigger(env, project.id)) return false;
 
   const maxTriggers = positive(env.MAX_TRIGGERS_PER_PROJECT, DEFAULT_MAX_TRIGGERS_PER_PROJECT);
@@ -161,6 +156,38 @@ async function ensureDefaultIncidentTrigger(
     projectId: project.id,
   });
   return true;
+}
+
+function incidentDispatchAdmissionReady(
+  summary: Awaited<ReturnType<typeof buildIncidentBacklogSummary>>,
+  config: ReturnType<typeof getIncidentConfig>,
+  now: number
+): boolean {
+  if (summary.pendingCount >= config.minDispatchBatchSize) return true;
+  const oldestQueuedAt = summary.incidents.reduce<number | null>((oldest, incident) => {
+    const queuedAt = incident.queuedAt ?? incident.firstSeenAt;
+    return oldest === null ? queuedAt : Math.min(oldest, queuedAt);
+  }, null);
+  return oldestQueuedAt !== null && now - oldestQueuedAt >= config.minPendingAgeMs;
+}
+
+async function triggerDispatchesInRateWindow(
+  env: Env,
+  triggerId: string,
+  now: number,
+  config: ReturnType<typeof getIncidentConfig>
+): Promise<number> {
+  const windowStart = new Date(now - config.dispatchRateWindowMs).toISOString();
+  const row = await env.DATABASE.prepare(
+    `SELECT COUNT(*) AS count FROM trigger_executions
+     WHERE trigger_id = ?
+       AND event_type = 'incident_backlog'
+       AND task_id IS NOT NULL
+       AND created_at >= ?`
+  )
+    .bind(triggerId, windowStart)
+    .first<{ count: number }>();
+  return row?.count ?? 0;
 }
 
 function buildIncidentContext(input: {
@@ -221,6 +248,8 @@ export async function runIncidentTriggerSweep(
     requeuedClaims: 0,
     expiredIncidents: 0,
     autoTriggerCreated: 0,
+    deferredDispatches: 0,
+    rateLimitedDispatches: 0,
   };
   if (!projectId) return base;
 
@@ -237,7 +266,7 @@ export async function runIncidentTriggerSweep(
   base.requeuedDispatches = reclaim.requeued;
   base.rejectedDispatches = reclaim.rejected;
   base.requeuedClaims = await reclaimExpiredIncidentClaims(env, now);
-  base.autoTriggerCreated = (await ensureDefaultIncidentTrigger(env, project, config)) ? 1 : 0;
+  base.autoTriggerCreated = (await ensureDefaultIncidentTrigger(env, project, config, now)) ? 1 : 0;
 
   const triggers = await loadIncidentTriggers(env, projectId, config.triggerLimit);
   base.checked = triggers.length;
@@ -246,9 +275,34 @@ export async function runIncidentTriggerSweep(
   const submitter = deps.submitter;
 
   for (const trigger of triggers) {
-    const summary = await buildIncidentBacklogSummary(env, config.summaryLimit, now);
+    const summary = await buildIncidentBacklogSummary(env, config.summaryLimit, now, config, {
+      expireStale: false,
+    });
     base.pendingIncidents = Math.max(base.pendingIncidents, summary.pendingCount);
     if (summary.pendingCount === 0) break;
+    if (!incidentDispatchAdmissionReady(summary, config, now)) {
+      base.deferredDispatches += 1;
+      log.info('incident_trigger_sweep.deferred', {
+        triggerId: trigger.id,
+        projectId,
+        pendingIncidents: summary.pendingCount,
+        minDispatchBatchSize: config.minDispatchBatchSize,
+        minPendingAgeMs: config.minPendingAgeMs,
+      });
+      continue;
+    }
+    const dispatchesInWindow = await triggerDispatchesInRateWindow(env, trigger.id, now, config);
+    if (dispatchesInWindow >= config.maxDispatchesPerTriggerWindow) {
+      base.rateLimitedDispatches += 1;
+      log.warn('incident_trigger_sweep.rate_limited', {
+        triggerId: trigger.id,
+        projectId,
+        dispatchesInWindow,
+        maxDispatchesPerTriggerWindow: config.maxDispatchesPerTriggerWindow,
+        dispatchRateWindowMs: config.dispatchRateWindowMs,
+      });
+      continue;
+    }
 
     const signatures = summary.incidents.map((incident) => incident.id);
     let reservedExecutionId: string | null = null;

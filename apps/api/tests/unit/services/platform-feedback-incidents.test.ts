@@ -2,9 +2,11 @@ import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import { D1_MAX_BOUND_PARAMETERS } from '../../../src/lib/d1-limits';
 import {
   buildIncidentBacklogSummary,
   claimIncident,
+  expireStaleIncidents,
   getIncidentDetail,
   IncidentResolutionValidationError,
   listIncidentQueue,
@@ -39,6 +41,7 @@ function setup() {
     CREATE TABLE task_status_events (
       id TEXT PRIMARY KEY, task_id TEXT NOT NULL, from_status TEXT, to_status TEXT NOT NULL,
       actor_type TEXT NOT NULL, actor_id TEXT, reason TEXT, created_at TEXT NOT NULL);
+    CREATE TABLE debug_diagnoses (id TEXT PRIMARY KEY, idea_id TEXT);
     CREATE TABLE platform_feedback_triages (
       signature TEXT PRIMARY KEY, source TEXT NOT NULL, summary TEXT NOT NULL,
       first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, occurrence_count INTEGER NOT NULL,
@@ -80,11 +83,12 @@ function seedIncident(
     .prepare(
       `INSERT INTO platform_feedback_triages
         (signature, source, summary, first_seen_at, last_seen_at, occurrence_count,
-         severity, evidence_refs, queue_state, queued_at, dispatch_lease_token,
-         dispatch_lease_expires_at, dispatched_trigger_id, dispatched_execution_id,
-         dispatched_task_id, dispatched_at, dispatch_attempts, rejected_at, incident_claim_token,
-         incident_claim_expires_at, incident_claimed_by_task_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         severity, evidence_refs, diagnosis_id, idea_id, queue_state, queued_at,
+         dispatch_lease_token, dispatch_lease_expires_at, dispatched_trigger_id,
+         dispatched_execution_id, dispatched_task_id, dispatched_at, dispatch_attempts,
+         rejected_at, incident_claim_token, incident_claim_expires_at,
+         incident_claimed_by_task_id, resolved_by_task_id, budget_deferred_until)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       signature,
@@ -95,6 +99,8 @@ function seedIncident(
       overrides.occurrence_count ?? 1,
       overrides.severity ?? 'error',
       overrides.evidence_refs ?? JSON.stringify([{ errorId: 'err-1', timestamp: 1000 }]),
+      overrides.diagnosis_id ?? null,
+      overrides.idea_id ?? null,
       overrides.queue_state ?? 'pending',
       overrides.queued_at ?? 1000,
       overrides.dispatch_lease_token ?? null,
@@ -107,7 +113,9 @@ function seedIncident(
       overrides.rejected_at ?? null,
       overrides.incident_claim_token ?? null,
       overrides.incident_claim_expires_at ?? null,
-      overrides.incident_claimed_by_task_id ?? null
+      overrides.incident_claimed_by_task_id ?? null,
+      overrides.resolved_by_task_id ?? null,
+      overrides.budget_deferred_until ?? null
     );
   return signature;
 }
@@ -582,7 +590,99 @@ describe('platform feedback incidents', () => {
     ).toEqual({ count: 95, attempts: 0 });
   });
 
-  it('orders dispatch candidates by severity and novelty ahead of low-severity repeats', async () => {
+  it('defensively rejects linked and warning signatures during final dispatch reservation', async () => {
+    const { sqlite, env } = setup();
+    const createdAt = '2026-08-26T00:00:00.000Z';
+    const insertTask = sqlite.prepare(
+      `INSERT INTO tasks (
+        id, project_id, user_id, title, description, status, priority, task_mode,
+        dispatch_depth, created_by, created_at, updated_at
+      ) VALUES (?, 'feedback-project', 'owner-1', ?, 'tracked work', ?, 0, 'task', 0,
+        'owner-1', ?, ?)`
+    );
+    insertTask.run('idea-linked', 'Linked idea', 'draft', createdAt, createdAt);
+    insertTask.run('diagnosis-idea', 'Diagnosis idea', 'ready', createdAt, createdAt);
+    insertTask.run('resolver-task', 'Resolver task', 'in_progress', createdAt, createdAt);
+    sqlite
+      .prepare("INSERT INTO debug_diagnoses (id, idea_id) VALUES ('diagnosis-linked', ?)")
+      .run('diagnosis-idea');
+    const signatures = [
+      seedIncident(sqlite, { signature: 'incident-warn', severity: 'warn' }),
+      seedIncident(sqlite, { signature: 'incident-linked-idea', idea_id: 'idea-linked' }),
+      seedIncident(sqlite, {
+        signature: 'incident-linked-diagnosis',
+        diagnosis_id: 'diagnosis-linked',
+      }),
+      seedIncident(sqlite, {
+        signature: 'incident-linked-resolution',
+        resolved_by_task_id: 'resolver-task',
+      }),
+      seedIncident(sqlite, { signature: 'incident-unlinked-error' }),
+    ];
+
+    const reserved = await reserveIncidentDispatch(env, signatures, 'trigger-1', 'exec-1', 5000);
+
+    expect(reserved.reserved).toBe(1);
+    expect(
+      sqlite
+        .prepare(
+          `SELECT signature, queue_state, dispatched_execution_id
+           FROM platform_feedback_triages ORDER BY signature`
+        )
+        .all()
+    ).toEqual([
+      {
+        signature: 'incident-linked-diagnosis',
+        queue_state: 'pending',
+        dispatched_execution_id: null,
+      },
+      {
+        signature: 'incident-linked-idea',
+        queue_state: 'pending',
+        dispatched_execution_id: null,
+      },
+      {
+        signature: 'incident-linked-resolution',
+        queue_state: 'pending',
+        dispatched_execution_id: null,
+      },
+      {
+        signature: 'incident-unlinked-error',
+        queue_state: 'dispatched',
+        dispatched_execution_id: 'exec-1',
+      },
+      { signature: 'incident-warn', queue_state: 'pending', dispatched_execution_id: null },
+    ]);
+  });
+
+  it('treats budget exhaustion as a retryable dispatch deferral', async () => {
+    const { sqlite, env } = setup();
+    const deferred = seedIncident(sqlite, {
+      signature: 'incident-budget-deferred',
+      budget_deferred_until: 10_000,
+    });
+    const due = seedIncident(sqlite, {
+      signature: 'incident-budget-due',
+      budget_deferred_until: 4_000,
+    });
+    const ready = seedIncident(sqlite, { signature: 'incident-ready-control' });
+
+    const summary = await buildIncidentBacklogSummary(env, 10, 5000);
+
+    expect(summary.incidents.map((incident) => incident.id).sort()).toEqual([due, ready].sort());
+    const deferredReserve = await reserveIncidentDispatch(
+      env,
+      [deferred],
+      'trigger-1',
+      'exec-1',
+      5000
+    );
+    expect(deferredReserve.reserved).toBe(0);
+    const dueReserve = await reserveIncidentDispatch(env, [due], 'trigger-1', 'exec-2', 5000);
+    expect(dueReserve.reserved).toBe(1);
+  });
+
+  it('applies the dispatch severity floor and preserves ordering when warnings are configured in', async () => {
     const { sqlite, env } = setup();
     seedIncident(sqlite, {
       signature: 'incident-warn-repeat',
@@ -599,12 +699,46 @@ describe('platform feedback incidents', () => {
 
     const summary = await buildIncidentBacklogSummary(env, 10, 5000);
 
-    expect(summary.incidents.map((incident) => incident.id)).toEqual([
+    expect(summary.incidents.map((incident) => incident.id)).toEqual(['incident-error-novel']);
+    expect(summary.rendered).toContain('severity error');
+    expect(summary.rendered).not.toContain('severity warn');
+
+    env.PLATFORM_FEEDBACK_INCIDENT_MIN_DISPATCH_SEVERITY = 'warn';
+    const loweredFloor = await buildIncidentBacklogSummary(env, 10, 5000);
+
+    expect(loweredFloor.incidents.map((incident) => incident.id)).toEqual([
       'incident-error-novel',
       'incident-warn-repeat',
     ]);
-    expect(summary.rendered).toContain('severity error');
-    expect(summary.rendered).toContain('severity warn');
+    expect(loweredFloor.rendered).toContain('severity error');
+    expect(loweredFloor.rendered).toContain('severity warn');
+  });
+
+  it('caps stale-singleton expiry batches below the D1 bind parameter limit', async () => {
+    const { sqlite, env } = setup();
+    env.PLATFORM_FEEDBACK_INCIDENT_STALE_SINGLETON_MAX_AGE_MS = '100';
+    env.PLATFORM_FEEDBACK_INCIDENT_STALE_SINGLETON_EXPIRY_BATCH_SIZE = '500';
+    const maxExpiredPerSweep = D1_MAX_BOUND_PARAMETERS - 2;
+    for (let index = 0; index < maxExpiredPerSweep + 5; index++) {
+      seedIncident(sqlite, {
+        signature: `incident-old-${String(index).padStart(3, '0')}`,
+        last_seen_at: 1000 + index,
+      });
+    }
+
+    const expired = await expireStaleIncidents(env, 10_000);
+
+    expect(expired).toBe(maxExpiredPerSweep);
+    expect(
+      sqlite
+        .prepare(
+          'SELECT queue_state, COUNT(*) AS count FROM platform_feedback_triages GROUP BY queue_state'
+        )
+        .all()
+    ).toEqual([
+      { queue_state: 'expired', count: maxExpiredPerSweep },
+      { queue_state: 'pending', count: 5 },
+    ]);
   });
 
   it('recovers expired agent claims through the backlog summary escape path', async () => {

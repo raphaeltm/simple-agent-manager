@@ -32,6 +32,7 @@ interface StaleRow {
   id: string;
   trigger_id: string;
   task_id: string | null;
+  event_type: string | null;
   started_at: string | null;
   created_at: string;
 }
@@ -187,6 +188,7 @@ function makeStaleExec(overrides: Partial<StaleRow> = {}): StaleRow {
     id: 'exec-1',
     trigger_id: 'trigger-1',
     task_id: 'task-1',
+    event_type: 'cron',
     started_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
     created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
     ...overrides,
@@ -400,6 +402,25 @@ describe('runTriggerExecutionCleanup', () => {
       const updateCall = db._calls.find((c) => c.sql.includes('UPDATE trigger_executions'));
       expect(updateCall!.bindings[0]).toBe('failed');
       expect(updateCall!.bindings[1]).toBe('Task was never created (submission failed)');
+    });
+
+    it('retains stale incident backlog execution while the linked VM task is still active', async () => {
+      const exec = makeStaleExec({
+        id: 'exec-incident-active',
+        task_id: 'task-live',
+        event_type: 'incident_backlog',
+      });
+      const db = createMockDb({
+        staleRunningExecutions: [exec],
+        taskLookups: { 'task-live': { id: 'task-live', status: 'in_progress' } },
+      });
+      const env = createMockEnv({ DATABASE: db });
+
+      const stats = await runTriggerExecutionCleanup(env);
+
+      expect(stats.staleRecovered).toBe(0);
+      expect(stats.errors).toBe(0);
+      expect(db._preparedStatements).toHaveLength(0);
     });
 
     it('handles multiple stale executions in one sweep', async () => {

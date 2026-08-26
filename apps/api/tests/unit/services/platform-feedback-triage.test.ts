@@ -156,6 +156,49 @@ describe('platform feedback triage', () => {
     expect(second[0]?.signature).toBe(first[0]?.signature);
   });
 
+  it('chunks feedback-project task exclusion below D1 parameter limits', async () => {
+    const { main, observability } = setup();
+    const at = Date.parse('2026-08-26T12:00:00Z');
+    const taskInsert = main.prepare(
+      `INSERT INTO tasks (
+        id, project_id, user_id, title, description, status, priority, task_mode,
+        dispatch_depth, created_by, created_at, updated_at
+      ) VALUES (?, 'feedback-project', 'owner-1', ?, 'self-reported incident task', 'in_progress',
+        0, 'task', 0, 'owner-1', ?, ?)`
+    );
+    const errorInsert = observability.prepare(
+      'INSERT INTO platform_errors (id, source, level, message, timestamp, task_id) VALUES (?, ?, ?, ?, ?, ?)'
+    );
+    for (let index = 0; index < 100; index++) {
+      const taskId = `feedback-task-${index}`;
+      const createdAt = new Date(at - index).toISOString();
+      taskInsert.run(taskId, `Feedback task ${index}`, createdAt, createdAt);
+      errorInsert.run(
+        `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+        'api',
+        'error',
+        'self feedback task error 12345',
+        at - index,
+        taskId
+      );
+    }
+    const diagnose = vi.fn();
+
+    const result = await runPlatformFeedbackTriage(
+      {
+        DATABASE: createSqliteD1(main),
+        OBSERVABILITY_DATABASE: createSqliteD1(observability),
+        PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project',
+        PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT: '100',
+      } as Env,
+      'manual',
+      { now: () => at + 1, diagnose }
+    );
+
+    expect(result).toMatchObject({ groupsFound: 0, ideasCreated: 0 });
+    expect(diagnose).not.toHaveBeenCalled();
+  });
+
   it('creates once, updates on repeat, and persists only redacted bounded Idea content', async () => {
     const { main, observability } = setup();
     const at = Date.parse('2026-07-29T12:00:00Z');

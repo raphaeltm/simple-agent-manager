@@ -57,6 +57,7 @@ export interface IncidentListItem {
   queueState: IncidentQueueState;
   firstSeenAt: number;
   lastSeenAt: number;
+  queuedAt: number | null;
   occurrenceCount: number;
   dispatchAttempts: number;
   dispatchedTaskId: string | null;
@@ -83,6 +84,10 @@ export interface IncidentBacklogSummary {
   totalOccurrenceCount: number;
   incidents: IncidentListItem[];
   rendered: string;
+}
+
+export interface BuildIncidentBacklogSummaryOptions {
+  expireStale?: boolean;
 }
 
 export interface UserReportIncidentInput {

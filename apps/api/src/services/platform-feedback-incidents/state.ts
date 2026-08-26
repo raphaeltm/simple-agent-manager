@@ -83,6 +83,7 @@ export function toListItem(row: IncidentRow): IncidentListItem {
     queueState: toQueueState(row.queue_state),
     firstSeenAt: row.first_seen_at,
     lastSeenAt: row.last_seen_at,
+    queuedAt: row.queued_at,
     occurrenceCount: row.occurrence_count,
     dispatchAttempts: row.dispatch_attempts,
     dispatchedTaskId: row.dispatched_task_id,

@@ -3,9 +3,15 @@ import { D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { ulid } from '../../lib/ulid';
 import { getIncidentConfig, type IncidentConfig } from '../platform-feedback-incident-config';
 import { TERMINAL_TASK_STATUS_SQL } from './constants';
+import {
+  dispatchSeverityRank,
+  INCIDENT_SEVERITY_RANK_SQL,
+  OPEN_TRACKED_WORK_SQL,
+  staleSingletonBefore,
+} from './selection';
 import { placeholders } from './state';
 
-const RESERVE_INCIDENT_DISPATCH_FIXED_BINDINGS = 6;
+const RESERVE_INCIDENT_DISPATCH_FIXED_BINDINGS = 9;
 const RESERVE_INCIDENT_DISPATCH_SIGNATURE_CHUNK_SIZE =
   D1_MAX_BOUND_PARAMETERS - RESERVE_INCIDENT_DISPATCH_FIXED_BINDINGS;
 
@@ -126,6 +132,7 @@ export async function reserveIncidentDispatch(
 ): Promise<{ leaseToken: string; reserved: number }> {
   if (signatures.length === 0) return { leaseToken: '', reserved: 0 };
   const leaseToken = ulid();
+  const staleSingletonCutoff = staleSingletonBefore(now, config);
   let reserved = 0;
   for (
     let offset = 0;
@@ -141,7 +148,11 @@ export async function reserveIncidentDispatch(
        WHERE signature IN (${placeholders(chunk)})
          AND queue_state = 'pending'
          AND rejected_at IS NULL
-         AND dispatch_attempts < ?`
+         AND dispatch_attempts < ?
+         AND (budget_deferred_until IS NULL OR budget_deferred_until <= ?)
+         AND NOT (occurrence_count = 1 AND last_seen_at < ?)
+         AND ${INCIDENT_SEVERITY_RANK_SQL} >= ?
+         AND NOT ${OPEN_TRACKED_WORK_SQL}`
     )
       .bind(
         leaseToken,
@@ -150,7 +161,10 @@ export async function reserveIncidentDispatch(
         executionId,
         now,
         ...chunk,
-        config.maxDispatchAttempts
+        config.maxDispatchAttempts,
+        now,
+        staleSingletonCutoff,
+        dispatchSeverityRank(config.minDispatchSeverity)
       )
       .run();
     reserved += result.meta.changes ?? 0;

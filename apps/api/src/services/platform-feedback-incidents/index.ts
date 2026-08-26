@@ -18,7 +18,13 @@ export {
   reserveIncidentDispatch,
 } from './dispatch';
 export { expireStaleIncidents } from './lifecycle';
-export { buildIncidentBacklogSummary, getIncidentDetail, listIncidentQueue } from './queries';
+export {
+  buildIncidentBacklogSummary,
+  getIncidentDetail,
+  hasDispatchablePendingIncidents,
+  listDispatchableIncidentQueue,
+  listIncidentQueue,
+} from './queries';
 export {
   isActiveIncidentState,
   isTerminalIncidentState,
@@ -26,6 +32,7 @@ export {
 } from './state';
 export { incidentSignature } from './text';
 export type {
+  BuildIncidentBacklogSummaryOptions,
   IncidentBacklogSummary,
   IncidentDetail,
   IncidentListItem,
