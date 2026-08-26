@@ -340,6 +340,12 @@ func TestBackgroundSessionSnapshotIncidentSeverity(t *testing.T) {
 			captureErr: wrapAsSnapshotResolveError(missingWorkspaceResolveError(t)),
 		},
 		{
+			// Deliberately a literal, unlike the two cases above. This one is matched by
+			// isContainerUnavailableError's pre-existing substring check, not by an errors.Is
+			// sentinel, so there is no %w chain for a real producer to exercise — and driving
+			// the real container resolver would need Docker-level mocking this package does
+			// not have. The literal is the production message verbatim; the substring the
+			// predicate depends on is pinned independently by TestIsContainerUnavailableError.
 			name:       "devcontainer already gone",
 			captureErr: errors.New("resolve snapshot devcontainer: failed to resolve container: no running devcontainer found (label: devcontainer.local_folder=/workspace)"),
 		},
