@@ -1,6 +1,6 @@
 ---
 name: doc-sync-validator
-description: 'Documentation synchronization validator. Ensures CLAUDE.md, self-hosting.md, constitution.md, and other docs match actual code implementation. Checks for stale references, missing documentation, and inconsistent descriptions. Use proactively when modifying code interfaces, adding features, or updating documentation.'
+description: 'Documentation synchronization validator. Ensures CLAUDE.md, self-hosting.mdx, constitution.md, and other docs match actual code implementation. Checks for stale references, missing documentation, and inconsistent descriptions. Use proactively when modifying code interfaces, adding features, or updating documentation.'
 metadata:
   short-description: 'Documentation synchronization validator. Ensures CLAUDE.md, self'
 ---

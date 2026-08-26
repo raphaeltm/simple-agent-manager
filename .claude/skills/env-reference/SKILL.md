@@ -268,7 +268,7 @@ by the read-only cron-liveness check.
 - `AGENT_SETTINGS_VALIDATION_LIMITS` — Optional JSON object overriding
   agent-settings validation bounds for model IDs, tool lists, additional env
   entries, provider display names, and OpenCode base URLs. See
-  `apps/api/.env.example` and `apps/www/src/content/docs/docs/guides/self-hosting.md` for supported keys
+  `apps/api/.env.example` and `apps/www/src/content/docs/docs/guides/self-hosting.mdx` for supported keys
   and defaults.
 
 ### Platform Feedback and Report an Issue

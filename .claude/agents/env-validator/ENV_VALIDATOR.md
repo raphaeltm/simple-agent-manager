@@ -62,7 +62,7 @@ GH_WEBHOOK_SECRET      →  GITHUB_WEBHOOK_SECRET
 **Files to Review**:
 
 - `CLAUDE.md` - Environment Variable Naming section
-- `apps/www/src/content/docs/docs/guides/self-hosting.md` - GitHub Environment Configuration
+- `apps/www/src/content/docs/docs/guides/self-hosting.mdx` - GitHub Environment Configuration
 - `.specify/memory/constitution.md` - Development Workflow
 - `.env.example` files (if any)
 
@@ -79,7 +79,7 @@ GH_WEBHOOK_SECRET      →  GITHUB_WEBHOOK_SECRET
 **Files to Review**:
 
 - `CLAUDE.md`
-- `apps/www/src/content/docs/docs/guides/self-hosting.md`
+- `apps/www/src/content/docs/docs/guides/self-hosting.mdx`
 - `.specify/memory/constitution.md`
 - `apps/www/src/content/docs/docs/reference/configuration.md`
 

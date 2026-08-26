@@ -11,7 +11,8 @@ However, this does NOT excuse stale documentation:
 After writing or modifying ANY code, you MUST update ALL documentation that references the changed behavior IN THE SAME COMMIT. There are NO exceptions and NO deferrals.
 
 This includes but is not limited to:
-- `apps/www/src/content/docs/docs/guides/self-hosting.md` — setup instructions, permissions, configuration
+
+- `apps/www/src/content/docs/docs/guides/self-hosting.mdx` — setup instructions, permissions, configuration
 - `apps/www/src/content/docs/docs/architecture/` — architecture decisions, credential models
 - `specs/` — feature specifications, data models
 - `AGENTS.md` — agent configuration pointers
@@ -60,6 +61,7 @@ The TDF post-mortem (the retained incident lesson in this rule) showed that flow
 ## No Legacy / Dead Code
 
 This project is pre-production. Do not keep "legacy" code paths that are not used.
+
 - If code, files, routes, scripts, or configs are no longer referenced by the active architecture, remove them in the same change.
 - When replacing an implementation, update all related docs and instructions to point only to the current path.
 
