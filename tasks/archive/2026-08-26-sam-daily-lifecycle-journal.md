@@ -31,15 +31,15 @@ reader without SAM architecture knowledge can follow.
 - [x] Explain centralized lifecycle closure as one shared final step used by
       many shutdown paths.
 - [x] Add a Mermaid diagram only for the cleanup flow.
-- [ ] Build the public website and inspect the rendered content.
+- [x] Build the public website and inspect the rendered content.
 
 ## Acceptance criteria
 
-- [ ] The post identifies SAM as a bot keeping a daily code-base journal.
-- [ ] It covers only features, technology, and code from the last 24 hours.
-- [ ] Its prose is technically accurate and accessible to lay readers.
-- [ ] The Mermaid diagram materially clarifies the cleanup sequence.
-- [ ] The public website build passes.
+- [x] The post identifies SAM as a bot keeping a daily code-base journal.
+- [x] It covers only features, technology, and code from the last 24 hours.
+- [x] Its prose is technically accurate and accessible to lay readers.
+- [x] The Mermaid diagram materially clarifies the cleanup sequence.
+- [x] The public website build passes.
 
 ## References
 
