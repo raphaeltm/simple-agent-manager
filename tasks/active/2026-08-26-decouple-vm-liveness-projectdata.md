@@ -99,11 +99,13 @@ reread before destructive cleanup.
 - [x] Move stuck-task destructive cleanup toward the canonical idempotent
   terminal transition service, including just-in-time status checks/CAS before
   cleanup.
-- [ ] Add D1-backed runtime session leases and/or a scoped shadow lease path from
-  bounded VM node heartbeat inventory when it fits the PR size.
-- [ ] If runtime inventory is added, keep VM-agent rollout additive and
-  version-aware; old agents must remain compatible and incompatible busy VMs must
-  not be killed due to missing inventory.
+- [x] Scoped D1-backed runtime session leases and bounded VM node heartbeat
+  inventory to follow-up SAM Idea `01M0YDM9YPP2234VHY82W4NNN1`; this PR keeps
+  the immediate production safety fuse small enough to validate and ship.
+- [x] Runtime inventory was not added in this PR, so VM-agent rollout remains
+  unchanged. Additive/version-aware rollout and "missing inventory is unknown,
+  not death" requirements are captured in follow-up SAM Idea
+  `01M0YDM9YPP2234VHY82W4NNN1`.
 - [x] Bound ProjectData alarm maintenance by keeping hot-path storage checks O(1)
   with `sql.databaseSize`, moving category breakdown scans out of ordinary alarm
   execution, and ensuring cleanup batches are indexed/bounded with cursor/yield
@@ -115,7 +117,7 @@ reread before destructive cleanup.
 - [x] Replace repeated per-secret `wrangler secret put` / delete loops in
   `scripts/deploy/configure-secrets.sh` with a bulk/bounded secret workflow that
   never logs secret values.
-- [ ] Update public/internal documentation and environment references for any new
+- [x] Update public/internal documentation and environment references for any new
   liveness, storage, or deploy-secret settings.
 - [x] Run targeted unit and Miniflare/workerd tests proving:
   - healthy VM/runtime survives blocked, stale, or missing ProjectData ACP data;
@@ -154,6 +156,8 @@ reread before destructive cleanup.
 ## References
 
 - SAM idea `01M0Y6N63R23N7HDH4V0X1T49G`
+- Follow-up SAM idea `01M0YDM9YPP2234VHY82W4NNN1` for D1 runtime leases and
+  fenced VM inventory liveness.
 - Bootstrap task-file PR `#1926` was required because direct push to `main` was
   rejected by branch protection. No implementation changes belong in that PR.
 - `apps/api/src/services/task-runtime-liveness.ts`

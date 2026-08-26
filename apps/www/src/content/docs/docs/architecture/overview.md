@@ -346,11 +346,11 @@ stateDiagram-v2
     assigned --> running : Agent started on VM
     running --> completed : Agent finished
     running --> failed : Agent error
-    running --> interrupted : Heartbeat lost
-    assigned --> interrupted : Heartbeat lost
+    running --> interrupted : Conclusive runtime loss
+    assigned --> interrupted : Conclusive runtime loss
 ```
 
-**Heartbeat detection**: VM agent sends heartbeats every 60 seconds. If no heartbeat within 5 minutes (`ACP_SESSION_DETECTION_WINDOW_MS`), the DO alarm marks the session as `interrupted`.
+**Heartbeat detection**: VM agent session heartbeats are durable ProjectData history. For VM-backed sessions, stale, missing, timed-out, or unobservable ProjectData ACP heartbeat rows are treated as suspect/unknown and do not by themselves prove runtime death. Terminalization requires explicit terminal session evidence, terminal owning workspace/node state, or another authoritative runtime signal. The `ACP_SESSION_DETECTION_WINDOW_MS` setting still bounds stale-session detection, but the ProjectData alarm defers VM session interruption when the only evidence is stale ProjectData heartbeat data.
 
 **Session forking**: Sessions track `parentSessionId` and `forkDepth` for lineage. Fork depth is limited to 10 (`ACP_SESSION_MAX_FORK_DEPTH`).
 

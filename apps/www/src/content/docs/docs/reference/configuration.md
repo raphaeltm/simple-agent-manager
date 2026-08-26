@@ -587,7 +587,7 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 
 | Variable                                | Default          | Description                                          |
 | --------------------------------------- | ---------------- | ---------------------------------------------------- |
-| `ACP_SESSION_DETECTION_WINDOW_MS`       | `300000` (5 min) | Heartbeat timeout before marking session interrupted |
+| `ACP_SESSION_DETECTION_WINDOW_MS`       | `300000` (5 min) | Stale ProjectData ACP heartbeat detection window. VM sessions are not interrupted solely from stale/missing ProjectData heartbeat rows; the timeout must be paired with conclusive runtime/workspace evidence. |
 | `ACP_SESSION_HEARTBEAT_INTERVAL_MS`     | `60000` (60s)    | How often VM agent sends heartbeats                  |
 | `ACP_SESSION_RECONCILIATION_TIMEOUT_MS` | `30000` (30s)    | VM agent startup reconciliation timeout              |
 | `ACP_SESSION_MAX_FORK_DEPTH`            | `10`             | Maximum session fork chain depth                     |
@@ -839,6 +839,8 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 | `DO_SUMMARY_SYNC_DEBOUNCE_MS`                 | `5000`            | Debounce for DO-to-D1 summary sync                                                                                                                                               |
 | `SESSION_INDEX_MAX_ROWS`                      | `1000`            | Sessions mirrored into the D1 `session_summaries` index per project. A project holding more is recorded as incomplete and its chat sidebar reads fall back to the Durable Object |
 | `SESSION_INDEX_MAX_STALENESS_MS`              | `900000` (15 min) | How stale the session index may be before the per-project sidebar list stops trusting it and falls back to the Durable Object                                                    |
+
+Ordinary ProjectData storage alarms record O(1) `databaseSize` telemetry and bounded cleanup row/byte counters. Category breakdown scans are reserved for explicit/admin measurement paths so hot ProjectData alarms do not delay lifecycle bookkeeping.
 
 ## Durable Object Retry
 
