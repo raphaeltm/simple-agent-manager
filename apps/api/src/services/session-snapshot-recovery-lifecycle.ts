@@ -265,6 +265,85 @@ export async function claimSessionSnapshotRecovery(
   return { status: 'unavailable', reason };
 }
 
+export async function hasRestorableSleepingSessionSnapshot(
+  database: D1Database,
+  env: Pick<Env, 'SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS'>,
+  input: {
+    projectId: string;
+    workspaceId: string;
+    chatSessionId: string;
+    now?: Date;
+  }
+): Promise<boolean> {
+  const now = input.now ?? new Date();
+  const maxAttempts = parsePositiveInt(
+    env.SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
+    DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS
+  );
+  const row = await database
+    .prepare(
+      `SELECT 1 AS found
+         FROM session_snapshots
+        WHERE chat_session_id = ?
+          AND project_id = ?
+          AND workspace_id = ?
+          AND sleeping_at IS NOT NULL
+          AND sleep_status = 'sleeping'
+          AND expires_at > ?
+          AND recovery_attempts < ?
+          AND (
+            (status = 'available' AND degradation = 'none')
+            OR (status = 'degraded' AND degradation IS NOT NULL AND degradation != 'none')
+          )
+        LIMIT 1`
+    )
+    .bind(input.chatSessionId, input.projectId, input.workspaceId, now.toISOString(), maxAttempts)
+    .first<{ found: number }>();
+  return Boolean(row);
+}
+
+export async function hasAuthorizedRestorableSnapshotWakeClaim(
+  database: D1Database,
+  input: {
+    projectId: string;
+    chatSessionId: string;
+    taskId: string;
+    now?: Date;
+  }
+): Promise<boolean> {
+  const now = input.now ?? new Date();
+  const row = await database
+    .prepare(
+      `SELECT 1 AS found
+         FROM session_snapshots snapshot
+         JOIN tasks recovery
+           ON recovery.id = ?
+          AND recovery.project_id = snapshot.project_id
+          AND recovery.chat_session_id = snapshot.chat_session_id
+          AND recovery.triggered_by = 'session-recovery'
+          AND recovery.status NOT IN ('completed', 'failed', 'cancelled')
+        WHERE snapshot.chat_session_id = ?
+          AND snapshot.project_id = ?
+          AND snapshot.recovery_task_id = ?
+          AND snapshot.recovery_status IN ('waking', 'restored')
+          AND snapshot.sleeping_at IS NOT NULL
+          AND snapshot.sleep_status = 'sleeping'
+          AND snapshot.expires_at > ?
+          AND (
+            (snapshot.status = 'available' AND snapshot.degradation = 'none')
+            OR (
+              snapshot.status = 'degraded'
+              AND snapshot.degradation IS NOT NULL
+              AND snapshot.degradation != 'none'
+            )
+          )
+        LIMIT 1`
+    )
+    .bind(input.taskId, input.chatSessionId, input.projectId, input.taskId, now.toISOString())
+    .first<{ found: number }>();
+  return Boolean(row);
+}
+
 export async function recordSessionSnapshotRecoveryWorkspace(
   db: Db,
   chatSessionId: string,

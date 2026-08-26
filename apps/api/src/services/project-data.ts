@@ -67,6 +67,7 @@ import {
 } from './durable-object-retry';
 import { ensureOncePerIsolate, forgetEnsuredProjectData } from './project-data-ensure-memo';
 import { toProjectDataStorageFullError } from './project-data-storage-errors';
+import { hasAuthorizedRestorableSnapshotWakeClaim } from './session-snapshots';
 import type { TaskAcpLivenessSignals } from './task-runtime-liveness';
 
 /**
@@ -249,6 +250,22 @@ export async function wakeSession(
 ): Promise<boolean> {
   const stub = await getStub(env, projectId);
   return stub.wakeSession(sessionId, workspaceId, taskId);
+}
+
+export async function wakeSessionForSnapshotRecovery(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  workspaceId: string,
+  taskId: string
+): Promise<boolean> {
+  const allowStopped = await hasAuthorizedRestorableSnapshotWakeClaim(env.DATABASE, {
+    projectId,
+    chatSessionId: sessionId,
+    taskId,
+  });
+  const stub = await getStub(env, projectId);
+  return stub.wakeSession(sessionId, workspaceId, taskId, { allowStopped });
 }
 
 export async function failSession(

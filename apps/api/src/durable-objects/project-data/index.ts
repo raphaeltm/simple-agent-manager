@@ -226,8 +226,13 @@ export class ProjectData extends DurableObject<Env> {
     return updated;
   }
 
-  async wakeSession(sessionId: string, workspaceId: string, taskId: string): Promise<boolean> {
-    const updated = sessions.wakeSession(this.sql, sessionId, workspaceId, taskId);
+  async wakeSession(
+    sessionId: string,
+    workspaceId: string,
+    taskId: string,
+    options?: sessions.WakeSessionOptions
+  ): Promise<boolean> {
+    const updated = sessions.wakeSession(this.sql, sessionId, workspaceId, taskId, options);
     if (updated) {
       this.scheduleSummarySync();
       this.broadcastEvent(

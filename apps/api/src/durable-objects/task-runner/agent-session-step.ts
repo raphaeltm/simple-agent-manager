@@ -152,7 +152,7 @@ export async function handleAgentSession(
     // idempotent wake. If this RPC fails, the snapshot remains claimable and a
     // later recovery attempt can safely converge instead of becoming stranded.
     await rc.assertRecoveryAuthority(state);
-    const sessionWoken = await projectDataService.wakeSession(
+    const sessionWoken = await projectDataService.wakeSessionForSnapshotRecovery(
       rc.env,
       state.projectId,
       state.config.resumeSnapshotChatSessionId,

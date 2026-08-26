@@ -100,11 +100,16 @@ export function sleepSession(sql: SqlStorage, sessionId: string): boolean {
   return cursor.rowsWritten > 0;
 }
 
+export interface WakeSessionOptions {
+  allowStopped?: boolean;
+}
+
 export function wakeSession(
   sql: SqlStorage,
   sessionId: string,
   workspaceId: string,
-  taskId: string
+  taskId: string,
+  options: WakeSessionOptions = {}
 ): boolean {
   const now = Date.now();
   const cursor = sql.exec(
@@ -113,12 +118,14 @@ export function wakeSession(
          agent_completed_at = NULL, updated_at = ?
      WHERE id = ? AND (
        status = 'sleeping' OR (status IN ('active', 'failed') AND workspace_id = ?)
+       OR (? = 1 AND status = 'stopped')
      )`,
     workspaceId,
     taskId,
     now,
     sessionId,
-    workspaceId
+    workspaceId,
+    options.allowStopped ? 1 : 0
   );
   return cursor.rowsWritten > 0;
 }

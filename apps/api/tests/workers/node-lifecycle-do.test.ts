@@ -22,6 +22,7 @@ import {
 import {
   captureNodeLifecycleExpectedError,
   type NodeLifecycleTestDouble,
+  type ProjectDataTestDouble,
 } from './support/expected-error-doubles';
 
 // ---------------------------------------------------------------------------
@@ -31,6 +32,11 @@ import {
 function getStub(nodeId: string): DurableObjectStub<NodeLifecycleTestDouble> {
   const id = env.NODE_LIFECYCLE.idFromName(nodeId);
   return env.NODE_LIFECYCLE.get(id) as DurableObjectStub<NodeLifecycleTestDouble>;
+}
+
+function getProjectDataStub(projectId: string): DurableObjectStub<ProjectDataTestDouble> {
+  const id = env.PROJECT_DATA.idFromName(projectId);
+  return env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectDataTestDouble>;
 }
 
 const TEST_USER_ID = 'user-nl-test-001';
@@ -90,6 +96,32 @@ async function seedAuthorizedRecoveryClaim(input: {
       input.chatSessionId,
       `snapshots/${input.chatSessionId}/manifest.json`,
       input.recoveryTaskId
+    )
+    .run();
+}
+
+async function seedSleepingSnapshot(input: {
+  nodeId: string;
+  workspaceId: string;
+  chatSessionId: string;
+}): Promise<void> {
+  await env.DATABASE.prepare(
+    `INSERT INTO session_snapshots
+       (id, project_id, workspace_id, node_id, user_id, chat_session_id, runtime, status,
+        degradation, manifest_r2_key, home_r2_key, expires_at, sleeping_at, sleep_status,
+        recovery_attempts, sleep_attempts, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'vm', 'available', 'none', ?, ?, '2099-01-01T00:00:00.000Z',
+             '2026-08-26T20:56:54.000Z', 'sleeping', 0, 0, datetime('now'), datetime('now'))`
+  )
+    .bind(
+      `snapshot-${input.workspaceId}`,
+      TEST_PROJECT_ID,
+      input.workspaceId,
+      input.nodeId,
+      TEST_USER_ID,
+      input.chatSessionId,
+      `snapshots/${input.chatSessionId}/manifest.json`,
+      `snapshots/${input.chatSessionId}/home.tar.zst`
     )
     .run();
 }
@@ -762,6 +794,65 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     });
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(await getAlarm(stub)).toBeNull();
+  });
+
+  it('preserves a ProjectData sleeping session when staged deletion finds a restorable snapshot', async () => {
+    const nodeId = 'nl-test-preserve-sleeping-session-001';
+    const wsId = 'ws-preserve-sleeping-session-001';
+    await seedUser(TEST_USER_ID);
+    await seedInstallation(TEST_INSTALLATION_ID, TEST_USER_ID);
+    await seedProject(TEST_PROJECT_ID, TEST_USER_ID, TEST_INSTALLATION_ID);
+    await seedTestNode(nodeId);
+    await seedWorkspace(wsId, nodeId, TEST_USER_ID, {
+      projectId: TEST_PROJECT_ID,
+      status: 'sleeping',
+    });
+
+    const projectData = getProjectDataStub(TEST_PROJECT_ID);
+    await projectData.ensureProjectId(TEST_PROJECT_ID);
+    const chatSessionId = await projectData.createSession(
+      wsId,
+      'Sleeping session',
+      null,
+      TEST_USER_ID
+    );
+    expect(await projectData.sleepSession(chatSessionId)).toBe(true);
+    await env.DATABASE.prepare(
+      `UPDATE workspaces SET chat_session_id = ?, updated_at = datetime('now') WHERE id = ?`
+    )
+      .bind(chatSessionId, wsId)
+      .run();
+    await seedSleepingSnapshot({ nodeId, workspaceId: wsId, chatSessionId });
+
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const stub = getStub(nodeId);
+    await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID);
+    await runInDurableObject(stub, async (instance) => {
+      const deletion = await instance.ctx.storage.get<{
+        nodeId: string;
+        workspaceId: string;
+        userId: string;
+        deleteAt: number;
+      }>(`ws-delete:${wsId}`);
+      if (!deletion) throw new Error('expected scheduled workspace deletion');
+      await instance.ctx.storage.put(`ws-delete:${wsId}`, {
+        ...deletion,
+        deleteAt: Date.now() - 1_000,
+      });
+      await instance.alarm();
+    });
+
+    const workspace = await env.DATABASE.prepare('SELECT status FROM workspaces WHERE id = ?')
+      .bind(wsId)
+      .first<{ status: string }>();
+    expect(workspace?.status).toBe('deleted');
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(await getAlarm(stub)).toBeNull();
+
+    const session = await projectData.getSession(chatSessionId);
+    expect(session).toMatchObject({ id: chatSessionId, status: 'sleeping' });
   });
 
   it('tryClaim on destroying node returns false', async () => {

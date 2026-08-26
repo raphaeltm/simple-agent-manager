@@ -93,43 +93,43 @@ Guard should apply whenever finalizer is called with `stopProjectSessions !== fa
 workspace row still carries a restorable sleeping chat session. It should not suppress genuine
 archives because those paths delete snapshot state first.
 
-| Caller | Runtime/path | Guard applies? | Notes |
-| --- | --- | --- | --- |
-| `services/task-runner.ts:cleanupTaskRun` | VM task cleanup | Yes | Completed task sleep should be preserved if teardown races the sleeping snapshot. |
-| `durable-objects/task-runner/state-machine.ts` | TaskRunner failure cleanup | Yes, unless failed/error | Failed/error sessions still call `failSession`; no preservation for terminal failure. |
-| `scheduled/node-cleanup/shared.ts:destroyNodeForCleanup` | Max-lifetime/warm/stopped node destroy | Yes | One of the confirmed incident writers. |
-| `scheduled/node-cleanup/workspace-phases.ts:sweepOrphanedWorkspaces` | Orphan workspace stop | Yes for stop status | Restorable sleep should not become archive; non-restorable orphan still stops. |
-| `scheduled/node-cleanup/workspace-phases.ts:sweepStaleStoppedWorkspaces` | Stale stopped workspace delete | Yes | Stale non-restorable sessions still stop. |
-| `durable-objects/node-lifecycle.ts:deleteWorkspace` | Staged workspace deletion | Yes | One of the confirmed incident writers. |
-| `routes/workspaces/lifecycle.ts` | Explicit workspace stop | Yes for sleep-preservation; explicit delete handled elsewhere | Explicit stop of a restorable slept session should not archive it accidentally. |
-| `services/workspace-cleanup.ts:cleanupWorkspaceForDeletion` | User/API workspace delete/archive | Guard does not preserve | Deletes snapshot state before finalizer, so no restorable row remains. |
-| `services/nodes.ts:stopNodeResources` | Node stop/delete cascade | Yes | Preserve if this is runtime teardown after sleep; genuine user archive has no snapshot. |
-| `services/nodes.ts:deleteNodeResources` | Node delete cascade | Yes | Same finalizer choke point. |
-| `services/nodes.ts:retireDeletedDeploymentNodeRecord` | Deployment node retirement | Mostly N/A | Deployment nodes should not own user chat sessions, but guard is harmless if a workspace row exists. |
-| `services/instant-session.ts` | cf-container launch failure | No preservation for failure | Uses failed status/error; should still fail ProjectData. |
-| `durable-objects/vm-agent-container-runtime.ts:persistRuntimeEnded` | cf-container runtime ended | No preservation for stopped/error runtime end | In-place container wake uses `markSessionSnapshotAwakeInPlace`; stopped/error means runtime ended. |
-| `scheduled/trial-expire.ts` | Anonymous trial expiry | Yes only if restorable row exists | Trial expiry normally deletes old anonymous resources; no snapshot row means unchanged stop. |
+| Caller                                                                   | Runtime/path                           | Guard applies?                                                | Notes                                                                                                |
+| ------------------------------------------------------------------------ | -------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `services/task-runner.ts:cleanupTaskRun`                                 | VM task cleanup                        | Yes                                                           | Completed task sleep should be preserved if teardown races the sleeping snapshot.                    |
+| `durable-objects/task-runner/state-machine.ts`                           | TaskRunner failure cleanup             | Yes, unless failed/error                                      | Failed/error sessions still call `failSession`; no preservation for terminal failure.                |
+| `scheduled/node-cleanup/shared.ts:destroyNodeForCleanup`                 | Max-lifetime/warm/stopped node destroy | Yes                                                           | One of the confirmed incident writers.                                                               |
+| `scheduled/node-cleanup/workspace-phases.ts:sweepOrphanedWorkspaces`     | Orphan workspace stop                  | Yes for stop status                                           | Restorable sleep should not become archive; non-restorable orphan still stops.                       |
+| `scheduled/node-cleanup/workspace-phases.ts:sweepStaleStoppedWorkspaces` | Stale stopped workspace delete         | Yes                                                           | Stale non-restorable sessions still stop.                                                            |
+| `durable-objects/node-lifecycle.ts:deleteWorkspace`                      | Staged workspace deletion              | Yes                                                           | One of the confirmed incident writers.                                                               |
+| `routes/workspaces/lifecycle.ts`                                         | Explicit workspace stop                | Yes for sleep-preservation; explicit delete handled elsewhere | Explicit stop of a restorable slept session should not archive it accidentally.                      |
+| `services/workspace-cleanup.ts:cleanupWorkspaceForDeletion`              | User/API workspace delete/archive      | Guard does not preserve                                       | Deletes snapshot state before finalizer, so no restorable row remains.                               |
+| `services/nodes.ts:stopNodeResources`                                    | Node stop/delete cascade               | Yes                                                           | Preserve if this is runtime teardown after sleep; genuine user archive has no snapshot.              |
+| `services/nodes.ts:deleteNodeResources`                                  | Node delete cascade                    | Yes                                                           | Same finalizer choke point.                                                                          |
+| `services/nodes.ts:retireDeletedDeploymentNodeRecord`                    | Deployment node retirement             | Mostly N/A                                                    | Deployment nodes should not own user chat sessions, but guard is harmless if a workspace row exists. |
+| `services/instant-session.ts`                                            | cf-container launch failure            | No preservation for failure                                   | Uses failed status/error; should still fail ProjectData.                                             |
+| `durable-objects/vm-agent-container-runtime.ts:persistRuntimeEnded`      | cf-container runtime ended             | No preservation for stopped/error runtime end                 | In-place container wake uses `markSessionSnapshotAwakeInPlace`; stopped/error means runtime ended.   |
+| `scheduled/trial-expire.ts`                                              | Anonymous trial expiry                 | Yes only if restorable row exists                             | Trial expiry normally deletes old anonymous resources; no snapshot row means unchanged stop.         |
 
 ## Implementation Checklist
 
-- [ ] Add a shared D1 predicate/helper for restorable sleeping snapshots, with comments naming
+- [x] Add a shared D1 predicate/helper for restorable sleeping snapshots, with comments naming
       `claimSessionSnapshotRecovery()`.
-- [ ] Call that predicate from `finalizeProjectDataSession()` before `stopSession()` and skip the
+- [x] Call that predicate from `finalizeProjectDataSession()` before `stopSession()` and skip the
       ProjectData stop when the snapshot is restorable/unexpired.
-- [ ] Treat snapshot-lookup failure as "do not stop" and log/count an error rather than performing
+- [x] Treat snapshot-lookup failure as "do not stop" and log/count an error rather than performing
       the destructive ProjectData transition.
-- [ ] Preserve `failSession()` behavior for failed/error lifecycle closures.
-- [ ] Add a recovery-wake path that can wake a ProjectData `stopped` session only when the D1
+- [x] Preserve `failSession()` behavior for failed/error lifecycle closures.
+- [x] Add a recovery-wake path that can wake a ProjectData `stopped` session only when the D1
       session-snapshot claim authorizes that recovery task.
-- [ ] Add real-SQL finalizer tests for no snapshot, expired snapshot, restorable snapshot, and
+- [x] Add real-SQL finalizer tests for no snapshot, expired snapshot, restorable snapshot, and
       failed/error closures.
-- [ ] Add an incident reproduction test through `destroyNodeForCleanup()` using a real SQL D1
+- [x] Add an incident reproduction test through `destroyNodeForCleanup()` using a real SQL D1
       adapter.
-- [ ] Add an incident reproduction test through NodeLifecycle staged deletion using the workers
+- [x] Add an incident reproduction test through NodeLifecycle staged deletion using the workers
       DO/D1 test harness.
-- [ ] Add controls proving user archive and task-terminal destructive cleanup still stop.
-- [ ] Verify at least one new incident reproduction test fails on the pre-fix code, then passes.
-- [ ] Update `.claude/rules/58-terminal-verdicts-must-match-the-resumer.md` with the process fix.
+- [x] Add controls proving user archive and task-terminal destructive cleanup still stop.
+- [x] Verify at least one new incident reproduction test fails on the pre-fix code, then passes.
+- [x] Update `.claude/rules/58-terminal-verdicts-must-match-the-resumer.md` with the process fix.
 - [ ] Run targeted tests and full validation.
 - [ ] Run required specialist review and address findings.
 - [ ] Coordinate the staging lane with the unfiltered `gh run list` command before deploying.

@@ -1,6 +1,7 @@
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import * as projectDataService from './project-data';
+import { hasRestorableSleepingSessionSnapshot } from './session-snapshots';
 
 export type WorkspaceLifecycleClosureStatus = 'completed' | 'stopped' | 'failed' | 'error';
 
@@ -173,10 +174,44 @@ async function closeComputeUsage(
 async function finalizeProjectDataSession(
   env: Env,
   row: WorkspaceLifecycleRow,
-  input: FinalizeWorkspaceLifecycleClosureInput
+  input: FinalizeWorkspaceLifecycleClosureInput,
+  nowIso: string
 ): Promise<'closed' | 'skipped' | 'failed'> {
   if (input.stopProjectSessions === false) return 'skipped';
   if (!row.project_id || !row.chat_session_id) return 'skipped';
+
+  if (input.agentSessionStatus !== 'failed' && input.agentSessionStatus !== 'error') {
+    try {
+      // Mirrors claimSessionSnapshotRecovery(): a sleeping, unexpired snapshot is the
+      // authoritative wake record. Per rule 66, explicit archive/delete paths remove that
+      // snapshot first, so preserving it here does not weaken genuine destructive intent.
+      if (
+        await hasRestorableSleepingSessionSnapshot(env.DATABASE, env, {
+          projectId: row.project_id,
+          workspaceId: row.id,
+          chatSessionId: row.chat_session_id,
+          now: new Date(nowIso),
+        })
+      ) {
+        log.info('workspace_lifecycle_finalizer.project_session_preserved_for_snapshot', {
+          workspaceId: row.id,
+          projectId: row.project_id,
+          sessionId: row.chat_session_id,
+          reason: input.reason,
+        });
+        return 'skipped';
+      }
+    } catch (err) {
+      log.warn('workspace_lifecycle_finalizer.project_session_resumability_lookup_failed', {
+        workspaceId: row.id,
+        projectId: row.project_id,
+        sessionId: row.chat_session_id,
+        reason: input.reason,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return 'failed';
+    }
+  }
 
   try {
     if (input.agentSessionStatus === 'failed' || input.agentSessionStatus === 'error') {
@@ -263,7 +298,7 @@ export async function finalizeWorkspaceLifecycleClosure(
   result.computeUsageClosed = await closeComputeUsage(env, workspaceIds, input, nowIso);
 
   for (const row of rows) {
-    const sessionResult = await finalizeProjectDataSession(env, row, input);
+    const sessionResult = await finalizeProjectDataSession(env, row, input, nowIso);
     if (sessionResult === 'closed') result.projectSessionsClosed++;
     if (sessionResult === 'failed') result.projectSessionErrors++;
 
