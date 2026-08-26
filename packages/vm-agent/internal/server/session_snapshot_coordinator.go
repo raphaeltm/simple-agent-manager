@@ -87,12 +87,35 @@ func (s *Server) startBackgroundSessionSnapshot(input *sessionSnapshotHandlerInp
 	return true
 }
 
+// isSnapshotTeardownRaceError reports whether a capture failed only because the workspace
+// it was snapshotting had already been torn down.
+//
+// A background capture races teardown by design: startBackgroundSessionSnapshot returns as
+// soon as the goroutine is running and the handler answers 202, so the workspace is free to
+// stop while the capture is still in flight. Losing that race is the expected terminal state,
+// not a fault — the authoritative snapshot was already written by the sleep path that stopped
+// the workspace in the first place.
+//
+// This composes isContainerUnavailableError rather than extending it, because that predicate
+// is a recovery trigger for three unrelated call sites.
+func isSnapshotTeardownRaceError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, errWorkspaceRuntimeNotFound) ||
+		errors.Is(err, errWorkspaceNotRunning) ||
+		isContainerUnavailableError(err)
+}
+
+// shouldReportBackgroundSnapshotIncident decides whether a failed background capture is worth
+// raising as a platform error incident.
+//
+// Only the teardown race is filtered. Everything else — including a capture that exceeds
+// SessionSnapshotOperationTimeout — still reports, because a snapshot that fails to preserve
+// resumable state must stay visible.
 func shouldReportBackgroundSnapshotIncident(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return false
-	}
-	return !isContainerUnavailableError(err)
+	return !isSnapshotTeardownRaceError(err)
 }

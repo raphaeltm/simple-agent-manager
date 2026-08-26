@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -231,21 +232,33 @@ func TestBackgroundSessionSnapshotReportsGenerationScopedFailure(t *testing.T) {
 	}
 }
 
-func TestBackgroundSessionSnapshotDoesNotReportStoppedDevcontainerAsIncident(t *testing.T) {
+// backgroundSnapshotIncidentProbe runs one background capture that fails with captureErr and
+// reports how the control plane was told about it.
+type backgroundSnapshotIncidentProbe struct {
+	errorPosts    int32
+	failureReport bool
+}
+
+// runBackgroundSnapshotIncidentProbe drives startBackgroundSessionSnapshot against a stub
+// control plane and waits for the capture goroutine to finish reporting.
+func runBackgroundSnapshotIncidentProbe(t *testing.T, captureErr error) backgroundSnapshotIncidentProbe {
+	t.Helper()
+
 	var errorPosts atomic.Int32
+	var failureReports atomic.Int32
 	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && r.URL.Path == "/api/nodes/node-1/errors" {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/nodes/node-1/errors":
 			errorPosts.Add(1)
-			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/workspaces/workspace-1/session-snapshot/failure":
+			failureReports.Add(1)
+		default:
+			http.NotFound(w, r)
 			return
 		}
-		if r.Method == http.MethodPost && r.URL.Path == "/api/workspaces/workspace-1/session-snapshot/failure" {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		http.NotFound(w, r)
+		w.WriteHeader(http.StatusNoContent)
 	}))
-	defer controlPlane.Close()
+	t.Cleanup(controlPlane.Close)
 
 	reporter := errorreport.New(controlPlane.URL, "node-1", "callback-token", errorreport.Config{
 		DBPath:        filepath.Join(t.TempDir(), "error-reports.db"),
@@ -253,6 +266,7 @@ func TestBackgroundSessionSnapshotDoesNotReportStoppedDevcontainerAsIncident(t *
 	})
 	reporter.Start()
 	t.Cleanup(reporter.Shutdown)
+
 	finished := make(chan struct{}, 1)
 	s := &Server{
 		config: &config.Config{
@@ -263,10 +277,7 @@ func TestBackgroundSessionSnapshotDoesNotReportStoppedDevcontainerAsIncident(t *
 		errorReporter: reporter,
 		sessionSnapshotRunner: func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error) {
 			defer func() { finished <- struct{}{} }()
-			return nil, &sessionSnapshotCaptureError{
-				generation: "generation-1",
-				err:        errors.New("resolve snapshot devcontainer: workspace is not running/recovery (status: stopped)"),
-			}
+			return nil, &sessionSnapshotCaptureError{generation: "generation-1", err: captureErr}
 		},
 	}
 	input := &sessionSnapshotHandlerInput{
@@ -284,68 +295,155 @@ func TestBackgroundSessionSnapshotDoesNotReportStoppedDevcontainerAsIncident(t *
 	case <-time.After(time.Second):
 		t.Fatal("background snapshot did not finish")
 	}
-	time.Sleep(50 * time.Millisecond)
-	if got := errorPosts.Load(); got != 0 {
-		t.Fatalf("error posts = %d, want 0 for stopped devcontainer race", got)
+	// The runner returns before the goroutine reports, so wait for the reporting tail rather
+	// than sampling immediately: a "no incident" assertion taken too early passes vacuously.
+	waitFor(t, func() bool {
+		return failureReports.Load() > 0 && (errorPosts.Load() > 0 || !shouldReportBackgroundSnapshotIncident(captureErr))
+	}, "control plane did not receive the expected snapshot reports")
+
+	return backgroundSnapshotIncidentProbe{
+		errorPosts:    errorPosts.Load(),
+		failureReport: failureReports.Load() > 0,
 	}
 }
 
-func TestBackgroundSessionSnapshotReportsMaterialIncident(t *testing.T) {
-	errorPosts := make(chan struct{}, 1)
-	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && r.URL.Path == "/api/nodes/node-1/errors" {
-			errorPosts <- struct{}{}
-			w.WriteHeader(http.StatusNoContent)
+func waitFor(t *testing.T, cond func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
 			return
 		}
-		if r.Method == http.MethodPost && r.URL.Path == "/api/workspaces/workspace-1/session-snapshot/failure" {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		http.NotFound(w, r)
-	}))
-	defer controlPlane.Close()
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal(msg)
+}
 
-	reporter := errorreport.New(controlPlane.URL, "node-1", "callback-token", errorreport.Config{
-		DBPath:        filepath.Join(t.TempDir(), "error-reports.db"),
-		FlushInterval: time.Hour,
-	})
-	reporter.Start()
-	t.Cleanup(reporter.Shutdown)
-	finished := make(chan struct{}, 1)
-	s := &Server{
-		config: &config.Config{
-			ControlPlaneURL:                      controlPlane.URL,
-			SessionSnapshotOperationTimeout:      time.Second,
-			SessionSnapshotProgressReportTimeout: time.Second,
+// TestBackgroundSessionSnapshotIncidentSeverity pins which capture failures are worth an
+// operator-visible incident. The teardown-race cases are the production noise this filters
+// (224 of 234 vm-agent error incidents over 2026-08-20..26); the material cases are the
+// discriminating controls that must keep reporting.
+func TestBackgroundSessionSnapshotIncidentSeverity(t *testing.T) {
+	tests := []struct {
+		name         string
+		captureErr   error
+		wantIncident bool
+	}{
+		{
+			// Built by resolveContainerForWorkspace, not hand-written, so this case still
+			// holds if that error is ever reworded. See .claude/rules/62.
+			name:       "stopped workspace teardown race",
+			captureErr: wrapAsSnapshotResolveError(stoppedWorkspaceResolveError(t)),
 		},
-		errorReporter: reporter,
-		sessionSnapshotRunner: func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error) {
-			defer func() { finished <- struct{}{} }()
-			return nil, &sessionSnapshotCaptureError{
-				generation: "generation-1",
-				err:        errors.New("snapshot control plane returned HTTP 400: checksum mismatch"),
+		{
+			name:       "workspace runtime already removed",
+			captureErr: wrapAsSnapshotResolveError(missingWorkspaceResolveError(t)),
+		},
+		{
+			name:       "devcontainer already gone",
+			captureErr: errors.New("resolve snapshot devcontainer: failed to resolve container: no running devcontainer found (label: devcontainer.local_folder=/workspace)"),
+		},
+		{
+			name:         "material upload failure",
+			captureErr:   errors.New("snapshot control plane returned HTTP 400: checksum mismatch"),
+			wantIncident: true,
+		},
+		{
+			// A capture that blows SessionSnapshotOperationTimeout has failed to preserve
+			// resumable state, so it must stay visible.
+			name:         "capture exceeded its time budget",
+			captureErr:   fmt.Errorf("create WIP bundle: %w", context.DeadlineExceeded),
+			wantIncident: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := runBackgroundSnapshotIncidentProbe(t, tt.captureErr)
+
+			if tt.wantIncident && got.errorPosts == 0 {
+				t.Fatalf("error posts = 0, want an incident for %q", tt.captureErr)
 			}
+			if !tt.wantIncident && got.errorPosts != 0 {
+				t.Fatalf("error posts = %d, want 0 for expected teardown race %q", got.errorPosts, tt.captureErr)
+			}
+			// Suppressing the incident must not blind the control plane: the
+			// generation-scoped failure callback fires either way.
+			if !got.failureReport {
+				t.Fatal("generation-scoped snapshot failure callback was not sent")
+			}
+		})
+	}
+}
+
+// stoppedWorkspaceResolveError returns the error the real resolver produces for a workspace
+// that has already been stopped — the production teardown race.
+func stoppedWorkspaceResolveError(t *testing.T) error {
+	t.Helper()
+	s := &Server{
+		config:     &config.Config{},
+		workspaces: map[string]*WorkspaceRuntime{"workspace-1": {ID: "workspace-1", Status: "stopped"}},
+	}
+	_, _, _, err := s.resolveContainerForWorkspace("workspace-1")
+	if err == nil {
+		t.Fatal("resolveContainerForWorkspace succeeded for a stopped workspace")
+	}
+	return err
+}
+
+// missingWorkspaceResolveError returns the error the real resolver produces once the workspace
+// runtime has been removed entirely.
+func missingWorkspaceResolveError(t *testing.T) error {
+	t.Helper()
+	s := &Server{config: &config.Config{}, workspaces: map[string]*WorkspaceRuntime{}}
+	_, _, _, err := s.resolveContainerForWorkspace("workspace-1")
+	if err == nil {
+		t.Fatal("resolveContainerForWorkspace succeeded for a missing workspace")
+	}
+	return err
+}
+
+// wrapAsSnapshotResolveError mirrors how session_snapshot.go boxes a resolver failure.
+func wrapAsSnapshotResolveError(err error) error {
+	return fmt.Errorf("resolve snapshot devcontainer: %w", err)
+}
+
+// TestWorkspaceLifecycleErrorsClassifyWithoutTriggeringRecovery pins the split this fix exists
+// to create. The shared recovery trigger must NOT match a deliberately stopped workspace — its
+// three call sites (websocket.go terminal + multi-terminal create, agent_ws.go SessionHost
+// start) all react by running recoverWorkspaceRuntime — while the snapshot classifier must.
+// See .claude/rules/67-shared-predicates-that-trigger-actions.md.
+func TestWorkspaceLifecycleErrorsClassifyWithoutTriggeringRecovery(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		wantMsg string
+	}{
+		{
+			name:    "stopped workspace",
+			err:     stoppedWorkspaceResolveError(t),
+			wantMsg: "workspace is not running/recovery (status: stopped)",
+		},
+		{
+			name:    "workspace runtime removed",
+			err:     missingWorkspaceResolveError(t),
+			wantMsg: "workspace not found",
 		},
 	}
-	input := &sessionSnapshotHandlerInput{
-		workspaceID:   "workspace-1",
-		sessionID:     "agent-1",
-		chatSessionID: "chat-1",
-		callbackToken: "callback-token",
-	}
 
-	if !s.startBackgroundSessionSnapshot(input) {
-		t.Fatal("background snapshot was not accepted")
-	}
-	select {
-	case <-finished:
-	case <-time.After(time.Second):
-		t.Fatal("background snapshot did not finish")
-	}
-	select {
-	case <-errorPosts:
-	case <-time.After(time.Second):
-		t.Fatal("expected material snapshot failure to post a VM incident")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// The operator-facing message must not drift when switching to sentinels: these
+			// strings appear verbatim in HTTP error responses and production logs.
+			if got := tt.err.Error(); got != tt.wantMsg {
+				t.Fatalf("message = %q, want %q", got, tt.wantMsg)
+			}
+			if isContainerUnavailableError(tt.err) {
+				t.Fatalf("isContainerUnavailableError(%q) = true; recovery must not fire for a stopped/absent workspace", tt.err)
+			}
+			if !isSnapshotTeardownRaceError(wrapAsSnapshotResolveError(tt.err)) {
+				t.Fatalf("isSnapshotTeardownRaceError(%q) = false; snapshot noise must still be classified", tt.err)
+			}
+		})
 	}
 }
