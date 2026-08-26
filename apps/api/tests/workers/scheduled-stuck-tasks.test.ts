@@ -14,6 +14,7 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
+import type { ProjectData } from '../../src/durable-objects/project-data';
 import type { TaskRunner, TaskRunnerState } from '../../src/durable-objects/task-runner';
 import type { Env } from '../../src/env';
 import {
@@ -33,6 +34,12 @@ import {
 const USER_ID = 'user-st-test';
 const INSTALL_ID = 'install-st-test';
 const PROJECT_ID = 'project-st-test';
+
+function getProjectStub(projectId: string): DurableObjectStub<ProjectData> {
+  return env.PROJECT_DATA.get(
+    env.PROJECT_DATA.idFromName(projectId)
+  ) as DurableObjectStub<ProjectData>;
+}
 
 async function seedBaseData(): Promise<void> {
   await seedUser(USER_ID);
@@ -424,6 +431,96 @@ describe('recoverStuckTasks — vertical slice', () => {
         live: false,
         conclusive: false,
         reason: 'task_acp_session_missing',
+        workspaceStatus: 'running',
+        nodeId,
+      });
+
+      const result = await recoverStuckTasks(testEnv);
+
+      expect(result.failedInProgress).toBe(0);
+      expect(result.deadRuntimeReconciled).toBe(0);
+      expect(result.heartbeatSkipped).toBe(0);
+      const task = await getTaskStatus(taskId);
+      expect(task?.status).toBe('in_progress');
+      expect(task?.error_message).toBeNull();
+      expect(task?.completed_at).toBeNull();
+      expect(await getTaskStatusEvents(taskId)).toEqual([]);
+    });
+
+    it('preserves a healthy VM runtime when ProjectData ACP session data is stale', async () => {
+      await seedBaseData();
+      const prefix = `stale-projectdata-acp-${Date.now()}-${crypto.randomUUID()}`;
+      const taskId = `${prefix}-task`;
+      const nodeId = `${prefix}-node`;
+      const workspaceId = `${prefix}-workspace`;
+      const fiveHoursAgo = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
+      const staleHeartbeatAt = Date.now() - 10 * 60 * 1000;
+      const cursorKey = `test:stuck-task-cursor:${prefix}`;
+
+      await seedNode(nodeId, USER_ID, {
+        status: 'running',
+        healthStatus: 'healthy',
+        lastHeartbeatAt: new Date().toISOString(),
+      });
+      await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'vm' WHERE id = ?`).bind(nodeId).run();
+
+      const stub = getProjectStub(PROJECT_ID);
+      const chatSessionId = await stub.createSession(null, 'Stale ProjectData ACP safety');
+      const acpSession = await stub.createAcpSession({
+        chatSessionId,
+        initialPrompt: 'Continue safely',
+        agentType: 'codex',
+      });
+
+      await seedWorkspace(workspaceId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'running',
+        chatSessionId,
+      });
+      await seedTask(taskId, PROJECT_ID, USER_ID, {
+        status: 'in_progress',
+        executionStep: 'running',
+        startedAt: fiveHoursAgo,
+        updatedAt: fiveHoursAgo,
+        workspaceId,
+      });
+      await stub.transitionAcpSession(acpSession.id, 'assigned', {
+        actorType: 'system',
+        workspaceId,
+        nodeId,
+      });
+      await stub.transitionAcpSession(acpSession.id, 'running', {
+        actorType: 'vm-agent',
+        actorId: nodeId,
+        acpSdkSessionId: `${prefix}-sdk`,
+      });
+      await runInDurableObject(stub, async (_instance, state) => {
+        state.storage.sql.exec(
+          `UPDATE acp_sessions SET last_heartbeat_at = ?, updated_at = ? WHERE id = ?`,
+          staleHeartbeatAt,
+          staleHeartbeatAt,
+          acpSession.id
+        );
+      });
+
+      const testEnv = {
+        ...env,
+        TASK_STUCK_QUEUED_TIMEOUT_MS: '300000',
+        TASK_STUCK_DELEGATED_TIMEOUT_MS: '300000',
+        TASK_RUN_MAX_EXECUTION_MS: '14400000',
+        TASK_RUN_HARD_TIMEOUT_MS: '28800000',
+        NODE_HEARTBEAT_STALE_SECONDS: '300',
+        STUCK_TASK_SCAN_CURSOR_KV_KEY: cursorKey,
+      } as unknown as Env;
+
+      await env.KV.delete(cursorKey);
+
+      const beforeSweep = await getTaskReconciliationDiagnostics(testEnv, taskId);
+      expect(beforeSweep?.decision).toBe('preserve_inconclusive_runtime');
+      expect(beforeSweep?.liveness).toMatchObject({
+        live: false,
+        conclusive: false,
+        reason: 'task_acp_session_stale',
         workspaceStatus: 'running',
         nodeId,
       });

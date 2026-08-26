@@ -1,4 +1,16 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
@@ -30,6 +42,11 @@ function workflow(path: string): string {
 function repoFile(path: string): string {
   return readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
 }
+
+const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
+const configureSecretsScript = fileURLToPath(
+  new URL('../../scripts/deploy/configure-secrets.sh', import.meta.url)
+);
 
 function parsedWorkflow(path: string): ParsedWorkflow {
   return parse(workflow(path)) as ParsedWorkflow;
@@ -74,6 +91,108 @@ function stepBlock(contents: string, stepName: string): string {
 
   expect(match?.[0]).toBeDefined();
   return match![0];
+}
+
+function installFakePnpm(binDir: string): void {
+  const fakePnpm = `#!/bin/sh
+set -eu
+
+if [ "$#" -ge 4 ] && [ "$1" = "exec" ] && [ "$2" = "tsx" ]; then
+  case "$3 $4" in
+    "scripts/deploy/deploy-signing-keys.ts derive-public")
+      printf '%s\\n' "$EXPECTED_DEPLOY_SIGNING_PUBLIC_KEY"
+      exit 0
+      ;;
+    "scripts/deploy/vapid-keys.ts derive-public-from-raw")
+      printf '%s\\n' "$EXPECTED_VAPID_PUBLIC_KEY"
+      exit 0
+      ;;
+  esac
+fi
+
+previous_arg=''
+for arg in "$@"; do
+  if [ "$previous_arg" = "bulk" ]; then
+    cp "$arg" "$CAPTURED_BULK_PAYLOAD"
+    printf '%s\\n' "$arg" > "$CAPTURED_BULK_SOURCE_PATH"
+    exit 0
+  fi
+  previous_arg="$arg"
+done
+
+echo "unexpected pnpm invocation: $*" >&2
+exit 64
+`;
+  const fakePath = join(binDir, 'pnpm');
+  writeFileSync(fakePath, fakePnpm, 'utf8');
+  chmodSync(fakePath, 0o755);
+}
+
+function configureSecretsEnv(
+  binDir: string,
+  captureDir: string,
+  overrides: Record<string, string | undefined> = {}
+): NodeJS.ProcessEnv {
+  const expectedDeployPublic = 'derived-deploy-signing-public';
+  const expectedVapidPublic = 'derived-vapid-public';
+  return {
+    PATH: `${binDir}:${process.env.PATH ?? ''}`,
+    CAPTURED_BULK_PAYLOAD: join(captureDir, 'worker-secret-bulk-payload.json'),
+    CAPTURED_BULK_SOURCE_PATH: join(captureDir, 'worker-secret-bulk-source-path.txt'),
+    EXPECTED_DEPLOY_SIGNING_PUBLIC_KEY: expectedDeployPublic,
+    EXPECTED_VAPID_PUBLIC_KEY: expectedVapidPublic,
+    SECRET_ENCRYPTION_KEY: 'encryption-secret',
+    SECRET_JWT_PRIVATE_KEY: 'jwt-private-secret',
+    SECRET_JWT_PUBLIC_KEY: 'jwt-public-secret',
+    PULUMI_PREVIEW_SIGNING_KEY: 'preview-signing-secret',
+    VAPID_PRIVATE_KEY: 'vapid-private-secret',
+    VAPID_PUBLIC_KEY: expectedVapidPublic,
+    VAPID_SUBJECT: 'https://app.example.test',
+    CF_API_TOKEN: 'cf-api-token-secret',
+    CF_ZONE_ID: 'cf-zone-id-secret',
+    CF_ACCOUNT_ID: 'cf-account-id-secret',
+    DEPLOY_SIGNING_PRIVATE_KEY: 'deploy-signing-private-secret',
+    DEPLOY_SIGNING_PUBLIC_KEY: expectedDeployPublic,
+    PULUMI_TRIAL_CLAIM_TOKEN_SECRET: 'trial-claim-secret',
+    GH_CLIENT_ID: 'github-client-id',
+    GH_CLIENT_SECRET: 'github-client-secret-line-1\ngithub-client-secret-line-2',
+    GH_APP_ID: 'github-app-id',
+    GH_APP_PRIVATE_KEY: 'github-app-private-key',
+    GH_APP_SLUG: 'github-app-slug',
+    ...overrides,
+  };
+}
+
+function runConfigureSecrets(overrides: Record<string, string | undefined> = {}) {
+  const tmpRoot = mkdtempSync(join(tmpdir(), 'sam-configure-secrets-'));
+  const binDir = join(tmpRoot, 'bin');
+  const captureDir = join(tmpRoot, 'capture');
+  writeFileSync(join(tmpRoot, '.keep'), '', 'utf8');
+  try {
+    rmSync(binDir, { force: true, recursive: true });
+    rmSync(captureDir, { force: true, recursive: true });
+    mkdirSync(binDir);
+    mkdirSync(captureDir);
+    installFakePnpm(binDir);
+
+    const result = spawnSync('bash', [configureSecretsScript, 'staging'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      env: configureSecretsEnv(binDir, captureDir, overrides),
+    });
+    const capturedPayloadPath = join(captureDir, 'worker-secret-bulk-payload.json');
+    const capturedSourcePath = join(captureDir, 'worker-secret-bulk-source-path.txt');
+    return {
+      ...result,
+      bulkPayload: result.status === 0 ? readFileSync(capturedPayloadPath, 'utf8') : null,
+      bulkSourcePath:
+        result.status === 0 ? readFileSync(capturedSourcePath, 'utf8').trim() : null,
+      cleanup: () => rmSync(tmpRoot, { force: true, recursive: true }),
+    };
+  } catch (error) {
+    rmSync(tmpRoot, { force: true, recursive: true });
+    throw error;
+  }
 }
 
 describe('deployment workflow hardening', () => {
@@ -481,6 +600,61 @@ describe('deployment workflow hardening', () => {
     expect(contents).not.toContain('wrangler secret delete');
     expect(contents).not.toContain('echo "$output"');
     expect(contents).not.toContain('ENVIRONMENT="${1:-production}"');
+  });
+
+  it('worker secret configuration applies one redacted bulk payload with stale deletes', () => {
+    const result = runConfigureSecrets();
+    try {
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(result.stdout).toContain('Applying ');
+      expect(result.stdout).toContain('wrangler secret bulk');
+      expect(result.stdout).toContain('Worker secrets configured in bulk');
+
+      const combinedOutput = `${result.stdout}\n${result.stderr}`;
+      expect(combinedOutput).not.toContain('github-client-secret-line-1');
+      expect(combinedOutput).not.toContain('github-client-secret-line-2');
+      expect(combinedOutput).not.toContain('encryption-secret');
+      expect(combinedOutput).not.toContain('deploy-signing-private-secret');
+      expect(result.bulkSourcePath).toBeTruthy();
+
+      const payload = JSON.parse(result.bulkPayload ?? '{}') as Record<string, unknown>;
+      expect(payload.ENCRYPTION_KEY).toBe('encryption-secret');
+      expect(payload.JWT_PRIVATE_KEY).toBe('jwt-private-secret');
+      expect(payload.JWT_PUBLIC_KEY).toBe('jwt-public-secret');
+      expect(payload.GITHUB_CLIENT_ID).toBe('github-client-id');
+      expect(payload.GITHUB_CLIENT_SECRET).toBe(
+        'github-client-secret-line-1\ngithub-client-secret-line-2'
+      );
+      expect(payload.GITHUB_APP_PRIVATE_KEY).toBe('github-app-private-key');
+      expect(payload.AI_PROXY_DEFAULT_MODEL).toBeNull();
+      expect(payload.AI_PROXY_ENABLED).toBeNull();
+      expect(Object.keys(payload).length).toBeGreaterThan(10);
+      expect(Object.keys(payload).length).toBeLessThanOrEqual(100);
+    } finally {
+      result.cleanup();
+    }
+  });
+
+  it('worker secret configuration fails before bulk apply when the operation budget is exceeded', () => {
+    const result = runConfigureSecrets({
+      WORKER_SECRET_BULK_MAX_OPS: '1',
+      SECRET_ENCRYPTION_KEY: 'budget-secret-line-1\nbudget-secret-line-2',
+    });
+    try {
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        'exceeding WORKER_SECRET_BULK_MAX_OPS=1'
+      );
+      expect(result.bulkPayload).toBeNull();
+
+      const combinedOutput = `${result.stdout}\n${result.stderr}`;
+      expect(combinedOutput).not.toContain('budget-secret-line-1');
+      expect(combinedOutput).not.toContain('budget-secret-line-2');
+      expect(combinedOutput).not.toContain('jwt-private-secret');
+    } finally {
+      result.cleanup();
+    }
   });
 
   it('remote migration helper requires an explicit environment', () => {

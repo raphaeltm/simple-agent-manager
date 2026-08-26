@@ -252,6 +252,7 @@ describe('recoverStuckTasks', () => {
     vi.clearAllMocks();
     fetchWithTimeoutMock.mockReset();
     fetchWithTimeoutMock.mockResolvedValue(new Response(null, { status: 200 }));
+    projectDataMocks.listAcpSessions.mockReset();
     projectDataMocks.getMessages.mockResolvedValue({ messages: [], hasMore: false });
     projectDataMocks.listSessions.mockResolvedValue({ sessions: [], total: 0 });
     projectDataMocks.listAcpSessions.mockResolvedValue({
@@ -485,6 +486,51 @@ describe('recoverStuckTasks', () => {
       responses.set("UPDATE tasks SET status = 'failed'", {
         results: [],
         changes: 1,
+      });
+      return responses;
+    }
+
+    function healthyVmRunningWorkspaceResponses(taskId: string) {
+      const now = Date.now();
+      const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
+      const recentHeartbeat = new Date(now - 30 * 1000).toISOString();
+      const taskRow = {
+        id: taskId,
+        project_id: 'proj-1',
+        user_id: 'user-1',
+        status: 'in_progress',
+        execution_step: 'running',
+        updated_at: startedAt,
+        started_at: startedAt,
+        workspace_id: 'ws-1',
+        auto_provisioned_node_id: 'node-1',
+      };
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
+        results: [taskRow],
+      });
+      responses.set('FROM tasks\n     WHERE id = ?', {
+        results: [taskRow],
+      });
+      responses.set('w.chat_session_id', {
+        results: [
+          {
+            workspace_status: 'running',
+            chat_session_id: 'chat-1',
+            node_id: 'node-1',
+            node_status: 'running',
+            health_status: 'healthy',
+            last_heartbeat_at: recentHeartbeat,
+            node_runtime: 'vm',
+            running_workspaces_on_node: 1,
+          },
+        ],
+      });
+      responses.set('node_id, status FROM workspaces', {
+        results: [{ id: 'ws-1', node_id: 'node-1', status: 'running' }],
+      });
+      responses.set('status, health_status FROM nodes', {
+        results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
       });
       return responses;
     }
@@ -800,6 +846,115 @@ describe('recoverStuckTasks', () => {
       const result = await recoverStuckTasks(env);
 
       expect(result.failedInProgress).toBe(0);
+      expect(result.heartbeatSkipped).toBe(0);
+      expect(syncTriggerExecutionMock).not.toHaveBeenCalled();
+      expect(cleanupTaskRun).not.toHaveBeenCalled();
+    });
+
+    it('preserves an in_progress VM task when ProjectData ACP data is stale but the node is healthy', async () => {
+      const now = Date.now();
+      const staleHeartbeatAt = now - 10 * 60 * 1000;
+      const env = createMockEnv(healthyVmRunningWorkspaceResponses('task-stale-projectdata-acp'));
+      projectDataMocks.listAcpSessions.mockResolvedValueOnce({
+        sessions: [
+          {
+            id: 'acp-stale',
+            status: 'running',
+            workspaceId: 'ws-1',
+            lastHeartbeatAt: staleHeartbeatAt,
+            updatedAt: staleHeartbeatAt,
+            startedAt: staleHeartbeatAt,
+            createdAt: staleHeartbeatAt,
+          },
+        ],
+        total: 1,
+      });
+
+      const diagnostics = await getTaskReconciliationDiagnostics(env, 'task-stale-projectdata-acp');
+      expect(diagnostics?.decision).toBe('preserve_inconclusive_runtime');
+      expect(diagnostics?.liveness).toMatchObject({
+        live: false,
+        conclusive: false,
+        reason: 'task_acp_session_stale',
+        workspaceStatus: 'running',
+        nodeId: 'node-1',
+      });
+
+      projectDataMocks.listAcpSessions.mockResolvedValueOnce({
+        sessions: [
+          {
+            id: 'acp-stale',
+            status: 'running',
+            workspaceId: 'ws-1',
+            lastHeartbeatAt: staleHeartbeatAt,
+            updatedAt: staleHeartbeatAt,
+            startedAt: staleHeartbeatAt,
+            createdAt: staleHeartbeatAt,
+          },
+        ],
+        total: 1,
+      });
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(0);
+      expect(result.deadRuntimeReconciled).toBe(0);
+      expect(result.heartbeatSkipped).toBe(0);
+      expect(syncTriggerExecutionMock).not.toHaveBeenCalled();
+      expect(cleanupTaskRun).not.toHaveBeenCalled();
+    });
+
+    it('preserves an in_progress VM task when the ProjectData ACP probe times out', async () => {
+      const env = createMockEnv(
+        healthyVmRunningWorkspaceResponses('task-projectdata-acp-timeout'),
+        {
+          TASK_LIVENESS_PROBE_TIMEOUT_MS: '1',
+        }
+      );
+      projectDataMocks.listAcpSessions.mockImplementationOnce(
+        () => new Promise(() => undefined)
+      );
+
+      const diagnostics = await getTaskReconciliationDiagnostics(env, 'task-projectdata-acp-timeout');
+      expect(diagnostics?.decision).toBe('preserve_inconclusive_runtime');
+      expect(diagnostics?.liveness).toMatchObject({
+        live: false,
+        conclusive: false,
+        reason: 'task_liveness_timeout',
+        workspaceStatus: 'running',
+        nodeId: 'node-1',
+      });
+
+      projectDataMocks.listAcpSessions.mockImplementationOnce(
+        () => new Promise(() => undefined)
+      );
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(0);
+      expect(result.deadRuntimeReconciled).toBe(0);
+      expect(result.heartbeatSkipped).toBe(0);
+      expect(syncTriggerExecutionMock).not.toHaveBeenCalled();
+      expect(cleanupTaskRun).not.toHaveBeenCalled();
+    });
+
+    it('preserves an in_progress VM task when the ProjectData ACP probe errors', async () => {
+      const env = createMockEnv(healthyVmRunningWorkspaceResponses('task-projectdata-acp-error'));
+      projectDataMocks.listAcpSessions.mockRejectedValueOnce(new Error('ProjectData unavailable'));
+
+      const diagnostics = await getTaskReconciliationDiagnostics(env, 'task-projectdata-acp-error');
+      expect(diagnostics?.decision).toBe('preserve_inconclusive_runtime');
+      expect(diagnostics?.liveness).toMatchObject({
+        live: false,
+        conclusive: false,
+        reason: 'task_liveness_unknown',
+        workspaceStatus: 'running',
+        nodeId: 'node-1',
+      });
+
+      projectDataMocks.listAcpSessions.mockRejectedValueOnce(new Error('ProjectData unavailable'));
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(0);
+      expect(result.deadRuntimeReconciled).toBe(0);
       expect(result.heartbeatSkipped).toBe(0);
       expect(syncTriggerExecutionMock).not.toHaveBeenCalled();
       expect(cleanupTaskRun).not.toHaveBeenCalled();
