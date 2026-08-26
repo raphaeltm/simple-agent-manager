@@ -3,13 +3,22 @@
  *
  * This module intentionally avoids sharding or broad data movement. It provides:
  * - direct per-object `databaseSize` measurement from SQLite-backed DO storage;
- * - D1 telemetry and throttled observability alerts;
+ * - latest-row and append-only D1 telemetry with growth forecasts;
+ * - throttled operator-visible observability alerts;
+ * - bounded automatic cleanup for safely reclaimable terminal-session payloads;
  * - a bounded, explicit emergency purge of low-value event logs.
  */
-import { isJsonRecord } from '@simple-agent-manager/shared';
-
 import { createModuleLogger, serializeError } from '../../lib/logger';
-import { persistError } from '../../services/observability';
+import {
+  type ProjectDataEventLogCleanupResult,
+  readProjectDataEventLogCleanupRecheckAt,
+} from './event-log-cleanup';
+import { runProjectDataStorageSafetyAlarmCore } from './storage-alarm';
+import {
+  type ProjectDataStorageCategoryBreakdown,
+  type ProjectDataStorageCleanupHealth,
+} from './storage-category-telemetry';
+import { runProjectDataStorageEmergencyPurgeCore } from './storage-emergency-purge';
 import {
   META_LAST_ERROR,
   META_LAST_MEASURED_AT,
@@ -20,9 +29,13 @@ import {
   writeStorageSafetyMeta as writeMeta,
 } from './storage-safety-meta';
 import {
+  enrichProjectDataStorageTelemetry,
+  maybePersistProjectDataStorageAlert,
+  upsertProjectDataStorageTelemetry,
+} from './storage-telemetry';
+import {
   type ProjectDataToolPayloadCleanupResult,
   readProjectDataToolPayloadCleanupRecheckAt,
-  runProjectDataToolPayloadCleanup,
 } from './tool-payload-cleanup';
 import type { Env } from './types';
 
@@ -48,6 +61,7 @@ export const DEFAULT_PROJECT_DATA_STORAGE_DEGRADED_RATIO = 0.95;
 export const DEFAULT_PROJECT_DATA_STORAGE_EMERGENCY_TARGET_RATIO = 0.9;
 export const DEFAULT_PROJECT_DATA_STORAGE_EMERGENCY_BATCH_ROWS = 500;
 export const DEFAULT_PROJECT_DATA_STORAGE_EMERGENCY_MAX_BATCHES = 4;
+export const DEFAULT_PROJECT_DATA_STORAGE_GROWTH_LOOKBACK_DAYS = 7;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO = 0.8;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO = 0.75;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS = 500;
@@ -55,9 +69,10 @@ export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES = 1024 * 1024
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS = 7;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS = 60 * 1000;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM = 25;
+export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS = 500;
+export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS = 7;
+export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS = 60 * 1000;
 
-const META_LAST_ALERT_AT = 'storageSafetyLastAlertAt';
-const META_LAST_ALERT_STATUS = 'storageSafetyLastAlertStatus';
 export interface ProjectDataStorageTelemetry {
   projectId: string;
   measuredAt: number;
@@ -65,6 +80,11 @@ export interface ProjectDataStorageTelemetry {
   limitBytes: number;
   usageRatio: number;
   status: ProjectDataStorageStatus;
+  growthRateBytesPerDay: number | null;
+  estimatedDaysToLimit: number | null;
+  cleanupHealth: ProjectDataStorageCleanupHealth | null;
+  reclaimableBytes: number | null;
+  categoryBreakdown: ProjectDataStorageCategoryBreakdown | null;
 }
 
 export interface ProjectDataStorageEmergencyPurgeInput {
@@ -96,6 +116,8 @@ export interface ProjectDataStorageEmergencyPurgeResult {
 export interface ProjectDataStorageAlarmResult {
   measurement: ProjectDataStorageTelemetry | null;
   cleanup: ProjectDataToolPayloadCleanupResult | null;
+  eventLogCleanup: ProjectDataEventLogCleanupResult | null;
+  cleanupHealth: ProjectDataStorageCleanupHealth | null;
 }
 
 export interface StorageSafetyConfig {
@@ -110,6 +132,7 @@ export interface StorageSafetyConfig {
   emergencyTargetRatio: number;
   emergencyBatchRows: number;
   emergencyMaxBatches: number;
+  growthLookbackMs: number;
   toolPayloadCleanupEnabled: boolean;
   toolPayloadCleanupTriggerRatio: number;
   toolPayloadCleanupTargetRatio: number;
@@ -118,6 +141,10 @@ export interface StorageSafetyConfig {
   toolPayloadCleanupMinSessionAgeMs: number;
   toolPayloadCleanupRecheckMs: number;
   toolPayloadCleanupMaxSessionsPerAlarm: number;
+  eventLogCleanupEnabled: boolean;
+  eventLogCleanupBatchRows: number;
+  eventLogCleanupMinSessionAgeMs: number;
+  eventLogCleanupRecheckMs: number;
 }
 
 function parsePositiveInteger(value: string | undefined, fallback: number): number {
@@ -176,6 +203,14 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
     env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS,
     DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS
   );
+  const growthLookbackDays = parsePositiveInteger(
+    env.PROJECT_DATA_STORAGE_GROWTH_LOOKBACK_DAYS,
+    DEFAULT_PROJECT_DATA_STORAGE_GROWTH_LOOKBACK_DAYS
+  );
+  const eventLogCleanupMinSessionAgeDays = parseNonNegativeInteger(
+    env.PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS,
+    DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS
+  );
 
   return {
     enabled: envFlagEnabled(env.PROJECT_DATA_STORAGE_TELEMETRY_ENABLED),
@@ -211,6 +246,7 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
       env.PROJECT_DATA_STORAGE_EMERGENCY_MAX_BATCHES,
       DEFAULT_PROJECT_DATA_STORAGE_EMERGENCY_MAX_BATCHES
     ),
+    growthLookbackMs: growthLookbackDays * 24 * 60 * 60 * 1000,
     toolPayloadCleanupEnabled: envFlagEnabled(env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED),
     toolPayloadCleanupTriggerRatio: cleanupRatiosAreOrdered
       ? cleanupTriggerRatio
@@ -235,6 +271,16 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
       env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM,
       DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM
     ),
+    eventLogCleanupEnabled: envFlagEnabled(env.PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED),
+    eventLogCleanupBatchRows: parsePositiveInteger(
+      env.PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS,
+      DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS
+    ),
+    eventLogCleanupMinSessionAgeMs: eventLogCleanupMinSessionAgeDays * 24 * 60 * 60 * 1000,
+    eventLogCleanupRecheckMs: parsePositiveInteger(
+      env.PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS,
+      DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS
+    ),
   };
 }
 
@@ -253,146 +299,30 @@ export function classifyStorageUsage(
   return 'ok';
 }
 
-function buildTelemetry(
+async function buildTelemetry(
   sql: SqlStorage,
   env: Env,
   projectId: string,
-  measuredAt: number = Date.now()
-): ProjectDataStorageTelemetry {
+  measuredAt: number = Date.now(),
+  cleanupHealth: ProjectDataStorageCleanupHealth | null = null
+): Promise<ProjectDataStorageTelemetry> {
   const config = resolveStorageSafetyConfig(env);
   const databaseSizeBytes = sql.databaseSize;
   const usageRatio = databaseSizeBytes / config.limitBytes;
-  return {
+  const baseTelemetry: ProjectDataStorageTelemetry = {
     projectId,
     measuredAt,
     databaseSizeBytes,
     limitBytes: config.limitBytes,
     usageRatio,
     status: classifyStorageUsage(databaseSizeBytes, config),
+    growthRateBytesPerDay: null,
+    estimatedDaysToLimit: null,
+    cleanupHealth,
+    reclaimableBytes: null,
+    categoryBreakdown: null,
   };
-}
-
-async function upsertTelemetry(
-  env: Env,
-  telemetry: ProjectDataStorageTelemetry,
-  fields: {
-    lastAlarmAt?: number | null;
-    lastAlertAt?: number | null;
-    lastAlertStatus?: ProjectDataStorageStatus | null;
-    lastPurgeAt?: number | null;
-    lastPurgeReason?: string | null;
-    lastPurgeRows?: number | null;
-    lastPurgeDatabaseSizeBytes?: number | null;
-    lastError?: string | null;
-  } = {}
-): Promise<void> {
-  await env.DATABASE.prepare(
-    `INSERT INTO project_data_storage_telemetry (
-       project_id,
-       measured_at,
-       database_size_bytes,
-       limit_bytes,
-       usage_ratio,
-       status,
-       last_alarm_at,
-       last_alert_at,
-       last_alert_status,
-       last_purge_at,
-       last_purge_reason,
-       last_purge_rows,
-       last_purge_database_size_bytes,
-       last_error,
-       updated_at
-     )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(project_id) DO UPDATE SET
-       measured_at = excluded.measured_at,
-       database_size_bytes = excluded.database_size_bytes,
-       limit_bytes = excluded.limit_bytes,
-       usage_ratio = excluded.usage_ratio,
-       status = excluded.status,
-       last_alarm_at = COALESCE(excluded.last_alarm_at, project_data_storage_telemetry.last_alarm_at),
-       last_alert_at = COALESCE(excluded.last_alert_at, project_data_storage_telemetry.last_alert_at),
-       last_alert_status = COALESCE(excluded.last_alert_status, project_data_storage_telemetry.last_alert_status),
-       last_purge_at = COALESCE(excluded.last_purge_at, project_data_storage_telemetry.last_purge_at),
-       last_purge_reason = COALESCE(excluded.last_purge_reason, project_data_storage_telemetry.last_purge_reason),
-       last_purge_rows = COALESCE(excluded.last_purge_rows, project_data_storage_telemetry.last_purge_rows),
-       last_purge_database_size_bytes = COALESCE(excluded.last_purge_database_size_bytes, project_data_storage_telemetry.last_purge_database_size_bytes),
-       last_error = excluded.last_error,
-       updated_at = excluded.updated_at`
-  )
-    .bind(
-      telemetry.projectId,
-      telemetry.measuredAt,
-      telemetry.databaseSizeBytes,
-      telemetry.limitBytes,
-      telemetry.usageRatio,
-      telemetry.status,
-      fields.lastAlarmAt ?? null,
-      fields.lastAlertAt ?? null,
-      fields.lastAlertStatus ?? null,
-      fields.lastPurgeAt ?? null,
-      fields.lastPurgeReason ? truncate(fields.lastPurgeReason, 500) : null,
-      fields.lastPurgeRows ?? null,
-      fields.lastPurgeDatabaseSizeBytes ?? null,
-      fields.lastError ? truncate(fields.lastError, 1000) : null,
-      Date.now()
-    )
-    .run();
-}
-
-async function maybePersistStorageAlert(
-  sql: SqlStorage,
-  env: Env,
-  telemetry: ProjectDataStorageTelemetry
-): Promise<void> {
-  if (telemetry.status !== 'critical' && telemetry.status !== 'degraded') return;
-  const config = resolveStorageSafetyConfig(env);
-  const now = Date.now();
-  const lastAlertAt = readMetaNumber(sql, META_LAST_ALERT_AT);
-  const lastAlertStatus = readMeta(sql, META_LAST_ALERT_STATUS);
-  if (
-    lastAlertAt !== null &&
-    now - lastAlertAt < config.alertIntervalMs &&
-    lastAlertStatus === telemetry.status
-  ) {
-    return;
-  }
-
-  writeMeta(sql, META_LAST_ALERT_AT, String(now));
-  writeMeta(sql, META_LAST_ALERT_STATUS, telemetry.status);
-
-  log.error('threshold_exceeded', {
-    projectId: telemetry.projectId,
-    status: telemetry.status,
-    databaseSizeBytes: telemetry.databaseSizeBytes,
-    limitBytes: telemetry.limitBytes,
-    usageRatio: telemetry.usageRatio,
-  });
-
-  if (!env.OBSERVABILITY_DATABASE) return;
-
-  await persistError(
-    env.OBSERVABILITY_DATABASE,
-    {
-      source: 'api',
-      level: telemetry.status === 'degraded' ? 'error' : 'warn',
-      message: `ProjectData storage usage is ${telemetry.status}`,
-      context: {
-        projectId: telemetry.projectId,
-        databaseSizeBytes: telemetry.databaseSizeBytes,
-        limitBytes: telemetry.limitBytes,
-        usageRatio: telemetry.usageRatio,
-        status: telemetry.status,
-      },
-    },
-    undefined
-  );
-
-  await upsertTelemetry(env, telemetry, {
-    lastAlertAt: now,
-    lastAlertStatus: telemetry.status,
-  });
+  return enrichProjectDataStorageTelemetry(sql, env, baseTelemetry, config);
 }
 
 export function computeStorageSafetyAlarmTime(
@@ -408,8 +338,15 @@ export function computeStorageSafetyAlarmTime(
   const cleanupRecheckAt = config.toolPayloadCleanupEnabled
     ? readProjectDataToolPayloadCleanupRecheckAt(sql)
     : null;
-  if (cleanupRecheckAt === null) return measureAt;
-  return Math.min(measureAt, cleanupRecheckAt);
+  const eventLogCleanupRecheckAt = config.eventLogCleanupEnabled
+    ? readProjectDataEventLogCleanupRecheckAt(sql)
+    : null;
+  return Math.min(
+    measureAt,
+    ...[cleanupRecheckAt, eventLogCleanupRecheckAt].filter(
+      (value): value is number => value !== null
+    )
+  );
 }
 
 export function shouldMeasureProjectDataStorage(
@@ -437,12 +374,12 @@ export async function measureAndPersistProjectDataStorage(
     return null;
   }
 
-  const telemetry = buildTelemetry(sql, env, projectId);
+  const telemetry = await buildTelemetry(sql, env, projectId);
   writeMeta(sql, META_LAST_MEASURED_AT, String(telemetry.measuredAt));
   writeMeta(sql, META_LAST_STATUS, telemetry.status);
 
   try {
-    await upsertTelemetry(env, telemetry, {
+    await upsertProjectDataStorageTelemetry(env, telemetry, {
       lastAlarmAt: reason === 'alarm' ? telemetry.measuredAt : null,
       lastError: null,
     });
@@ -456,7 +393,7 @@ export async function measureAndPersistProjectDataStorage(
   }
 
   try {
-    await maybePersistStorageAlert(sql, env, telemetry);
+    await maybePersistProjectDataStorageAlert(sql, env, telemetry, config);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     writeMeta(sql, META_LAST_ERROR, truncate(message, 500));
@@ -474,99 +411,19 @@ export async function runProjectDataStorageSafetyAlarm(
   env: Env,
   projectId: string | null
 ): Promise<ProjectDataStorageAlarmResult> {
-  const now = Date.now();
-  let measurement: ProjectDataStorageTelemetry | null = null;
-  if (shouldMeasureProjectDataStorage(sql, env, now)) {
-    measurement = await measureAndPersistProjectDataStorage(sql, env, projectId, 'alarm');
-  }
   const config = resolveStorageSafetyConfig(env);
-  const cleanup = await runProjectDataToolPayloadCleanup(sql, env, projectId, config, {
-    allowStart: measurement !== null,
-    now,
-    classifyStatus: (databaseSizeBytes) => classifyStorageUsage(databaseSizeBytes, config),
-    recordTelemetry: (telemetry, fields) => upsertTelemetry(env, telemetry, fields),
-  });
-  return { measurement, cleanup };
-}
-
-function normalizeCount(row: unknown): number {
-  if (!isJsonRecord(row)) return 0;
-  const count = (row as Record<string, unknown>).count;
-  return typeof count === 'number' && Number.isFinite(count) ? count : 0;
-}
-
-function countOldestActivityEventRows(sql: SqlStorage, limit: number): number {
-  const row = sql
-    .exec(
-      `SELECT COUNT(*) AS count
-       FROM (SELECT id FROM activity_events ORDER BY created_at ASC LIMIT ?)`,
-      limit
-    )
-    .toArray()[0];
-  return normalizeCount(row);
-}
-
-function countOldestAcpSessionEventRows(sql: SqlStorage, limit: number): number {
-  const row = sql
-    .exec(
-      `SELECT COUNT(*) AS count
-       FROM (SELECT id FROM acp_session_events ORDER BY created_at ASC LIMIT ?)`,
-      limit
-    )
-    .toArray()[0];
-  return normalizeCount(row);
-}
-
-function countOldestRows(
-  sql: SqlStorage,
-  table: 'activity_events' | 'acp_session_events',
-  limit: number
-): number {
-  if (table === 'activity_events') {
-    return countOldestActivityEventRows(sql, limit);
-  }
-  return countOldestAcpSessionEventRows(sql, limit);
-}
-
-function deleteOldestActivityEventRows(sql: SqlStorage, limit: number): void {
-  sql.exec(
-    `DELETE FROM activity_events
-     WHERE id IN (
-       SELECT id FROM activity_events
-       ORDER BY created_at ASC
-       LIMIT ?
-     )`,
-    limit
+  return runProjectDataStorageSafetyAlarmCore(
+    sql,
+    env,
+    projectId,
+    config,
+    {
+      shouldMeasure: shouldMeasureProjectDataStorage,
+      measureAndPersist: measureAndPersistProjectDataStorage,
+      classifyStatus: classifyStorageUsage,
+      buildTelemetry,
+    }
   );
-}
-
-function deleteOldestAcpSessionEventRows(sql: SqlStorage, limit: number): void {
-  sql.exec(
-    `DELETE FROM acp_session_events
-     WHERE id IN (
-       SELECT id FROM acp_session_events
-       ORDER BY created_at ASC
-       LIMIT ?
-     )`,
-    limit
-  );
-}
-
-function deleteOldestRows(
-  sql: SqlStorage,
-  table: 'activity_events' | 'acp_session_events',
-  limit: number
-): number {
-  const candidateCount = countOldestRows(sql, table, limit);
-  if (candidateCount <= 0) return 0;
-
-  if (table === 'activity_events') {
-    deleteOldestActivityEventRows(sql, limit);
-  } else {
-    deleteOldestAcpSessionEventRows(sql, limit);
-  }
-
-  return candidateCount;
 }
 
 export async function runProjectDataStorageEmergencyPurge(
@@ -575,90 +432,9 @@ export async function runProjectDataStorageEmergencyPurge(
   projectId: string | null,
   input: ProjectDataStorageEmergencyPurgeInput = {}
 ): Promise<ProjectDataStorageEmergencyPurgeResult> {
-  if (!projectId) {
-    throw new Error('ProjectData storage purge requires a persisted projectId');
-  }
-
   const config = resolveStorageSafetyConfig(env);
-  const targetRatio = input.targetRatio && input.targetRatio > 0 && input.targetRatio < 1
-    ? input.targetRatio
-    : config.emergencyTargetRatio;
-  const batchRows = input.batchRows && Number.isSafeInteger(input.batchRows) && input.batchRows > 0
-    ? input.batchRows
-    : config.emergencyBatchRows;
-  const maxBatches =
-    input.maxBatches && Number.isSafeInteger(input.maxBatches) && input.maxBatches > 0
-      ? input.maxBatches
-      : config.emergencyMaxBatches;
-  const targetBytes = Math.floor(config.limitBytes * targetRatio);
-  const reason = truncate(input.reason?.trim() || 'manual_emergency_purge', 500);
-  const beforeBytes = sql.databaseSize;
-  const statusBefore = classifyStorageUsage(beforeBytes, config);
-  const rowsDeleted = { activityEvents: 0, acpSessionEvents: 0 };
-  let batches = 0;
-  let exhaustedCandidates = false;
-
-  while (sql.databaseSize > targetBytes && batches < maxBatches) {
-    const activityDeleted = deleteOldestRows(sql, 'activity_events', batchRows);
-    const acpDeleted = deleteOldestRows(sql, 'acp_session_events', batchRows);
-    rowsDeleted.activityEvents += activityDeleted;
-    rowsDeleted.acpSessionEvents += acpDeleted;
-    batches++;
-
-    if (activityDeleted === 0 && acpDeleted === 0) {
-      exhaustedCandidates = true;
-      break;
-    }
-  }
-
-  const afterBytes = sql.databaseSize;
-  const statusAfter = classifyStorageUsage(afterBytes, config);
-  const totalRowsDeleted = rowsDeleted.activityEvents + rowsDeleted.acpSessionEvents;
-  const result: ProjectDataStorageEmergencyPurgeResult = {
-    projectId,
-    reason,
-    beforeBytes,
-    afterBytes,
-    limitBytes: config.limitBytes,
-    targetBytes,
-    statusBefore,
-    statusAfter,
-    batches,
-    maxBatches,
-    batchRows,
-    rowsDeleted,
-    exhaustedCandidates,
-  };
-
-  const measuredAt = Date.now();
-  const telemetry: ProjectDataStorageTelemetry = {
-    projectId,
-    measuredAt,
-    databaseSizeBytes: afterBytes,
-    limitBytes: config.limitBytes,
-    usageRatio: afterBytes / config.limitBytes,
-    status: statusAfter,
-  };
-  writeMeta(sql, META_LAST_MEASURED_AT, String(measuredAt));
-  writeMeta(sql, META_LAST_STATUS, statusAfter);
-
-  try {
-    await upsertTelemetry(env, telemetry, {
-      lastPurgeAt: measuredAt,
-      lastPurgeReason: reason,
-      lastPurgeRows: totalRowsDeleted,
-      lastPurgeDatabaseSizeBytes: afterBytes,
-      lastError: null,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    writeMeta(sql, META_LAST_ERROR, truncate(message, 500));
-    log.warn('purge_telemetry_upsert_failed', {
-      projectId,
-      ...serializeError(error),
-    });
-  }
-
-  log.warn('emergency_purge_completed', { ...result });
-  return result;
+  return runProjectDataStorageEmergencyPurgeCore(sql, env, projectId, input, config, {
+    classifyStatus: classifyStorageUsage,
+    buildTelemetry,
+  });
 }

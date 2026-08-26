@@ -65,7 +65,15 @@ async function readTelemetry(projectId: string) {
        limit_bytes,
        usage_ratio,
        status,
+       growth_rate_bytes_per_day,
+       estimated_days_to_limit,
+       cleanup_health,
+       reclaimable_bytes,
+       category_breakdown_json,
        last_alarm_at,
+       last_alert_at,
+       last_alert_status,
+       last_alert_reason,
        last_purge_rows,
        last_error
      FROM project_data_storage_telemetry
@@ -79,10 +87,121 @@ async function readTelemetry(projectId: string) {
       limit_bytes: number;
       usage_ratio: number;
       status: ProjectDataStorageStatus;
+      growth_rate_bytes_per_day: number | null;
+      estimated_days_to_limit: number | null;
+      cleanup_health: string | null;
+      reclaimable_bytes: number | null;
+      category_breakdown_json: string | null;
       last_alarm_at: number | null;
+      last_alert_at: number | null;
+      last_alert_status: ProjectDataStorageStatus | null;
+      last_alert_reason: string | null;
       last_purge_rows: number | null;
       last_error: string | null;
     }>();
+}
+
+async function readTelemetryHistory(projectId: string) {
+  const result = await env.DATABASE.prepare(
+    `SELECT
+       project_id,
+       measured_at,
+       database_size_bytes,
+       status,
+       growth_rate_bytes_per_day,
+       estimated_days_to_limit,
+       cleanup_health,
+       reclaimable_bytes,
+       category_breakdown_json
+     FROM project_data_storage_telemetry_history
+     WHERE project_id = ?
+     ORDER BY measured_at ASC, created_at ASC`
+  )
+    .bind(projectId)
+    .all<{
+      project_id: string;
+      measured_at: number;
+      database_size_bytes: number;
+      status: ProjectDataStorageStatus;
+      growth_rate_bytes_per_day: number | null;
+      estimated_days_to_limit: number | null;
+      cleanup_health: string | null;
+      reclaimable_bytes: number | null;
+      category_breakdown_json: string | null;
+    }>();
+  return result.results ?? [];
+}
+
+async function seedStorageGrowthBaseline(
+  projectId: string,
+  databaseSizeBytes: number,
+  limitBytes: number,
+  measuredAt: number = Date.now() - 24 * 60 * 60 * 1000
+): Promise<void> {
+  await env.DATABASE.prepare(
+    `INSERT INTO project_data_storage_telemetry (
+       project_id,
+       measured_at,
+       database_size_bytes,
+       limit_bytes,
+       usage_ratio,
+       status,
+       updated_at
+     )
+     VALUES (?, ?, ?, ?, ?, 'notice', ?)
+     ON CONFLICT(project_id) DO UPDATE SET
+       measured_at = excluded.measured_at,
+       database_size_bytes = excluded.database_size_bytes,
+       limit_bytes = excluded.limit_bytes,
+       usage_ratio = excluded.usage_ratio,
+       status = excluded.status,
+       updated_at = excluded.updated_at`
+  )
+    .bind(projectId, measuredAt, databaseSizeBytes, limitBytes, databaseSizeBytes / limitBytes, measuredAt)
+    .run();
+
+  await env.DATABASE.prepare(
+    `INSERT INTO project_data_storage_telemetry_history (
+       id,
+       project_id,
+       measured_at,
+       database_size_bytes,
+       limit_bytes,
+       usage_ratio,
+       status,
+       created_at
+     )
+     VALUES (?, ?, ?, ?, ?, ?, 'notice', ?)`
+  )
+    .bind(
+      crypto.randomUUID(),
+      projectId,
+      measuredAt,
+      databaseSizeBytes,
+      limitBytes,
+      databaseSizeBytes / limitBytes,
+      measuredAt
+    )
+    .run();
+}
+
+async function readProjectDataStorageAlerts(projectId: string) {
+  const result = await env.OBSERVABILITY_DATABASE.prepare(
+    `SELECT level, message, context
+     FROM platform_errors
+     ORDER BY created_at DESC
+     LIMIT 50`
+  )
+    .all<{ level: string; message: string; context: string | null }>();
+  return (result.results ?? []).filter((row) => parseAlertContext(row).projectId === projectId);
+}
+
+function parseAlertContext(row: { context: string | null }): Record<string, unknown> {
+  return JSON.parse(row.context ?? '{}') as Record<string, unknown>;
+}
+
+function stringifyNullable(value: unknown): string {
+  return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
 function makeToolMetadata(label: string): string {
@@ -258,6 +377,53 @@ describe('ProjectData storage safety firebreak', () => {
         const second = await readTelemetry(projectId);
         expect(second?.measured_at).toBe(first?.measured_at);
         expect(second?.last_alarm_at).toBe(first?.last_alarm_at);
+      }
+    );
+  });
+
+  it('emits warning-level operator alerts with growth and time-to-limit forecasts', async () => {
+    const projectId = `storage-warning-alert-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await stub.createSession(null, 'Warning alert forecast');
+
+    const currentSize = await runInDurableObject(
+      stub,
+      async (_instance, state) => state.storage.sql.databaseSize
+    );
+    const limitBytes = Math.ceil(currentSize / 0.85);
+    await seedStorageGrowthBaseline(projectId, Math.max(1, currentSize - 4096), limitBytes);
+
+    await withProjectDataStorageEnv(
+      {
+        PROJECT_DATA_STORAGE_LIMIT_BYTES: String(limitBytes),
+        PROJECT_DATA_STORAGE_ALERT_INTERVAL_MS: '1',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'false',
+        PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: 'false',
+      },
+      async () => {
+        await runInDurableObject(stub, async (instance) => instance.alarm());
+
+        const telemetry = await readTelemetry(projectId);
+        expect(telemetry?.status).toBe('warning');
+        expect(telemetry?.growth_rate_bytes_per_day).toBeGreaterThan(0);
+        expect(telemetry?.estimated_days_to_limit).toBeGreaterThan(0);
+        expect(telemetry?.category_breakdown_json).toContain('"reclaimableBytes"');
+        expect(telemetry?.last_alert_status).toBe('warning');
+        expect(telemetry?.last_alert_reason).toBe('threshold_exceeded');
+
+        const alerts = await readProjectDataStorageAlerts(projectId);
+        const alert = alerts.find((row) => row.message.includes('ProjectData storage usage'));
+        expect(alert?.level).toBe('warn');
+        expect(alert?.message).toContain('bytes/day');
+        expect(alert?.message).toContain('days to limit');
+
+        const context = parseAlertContext(alert ?? { context: null });
+        expect(context.alertReason).toBe('threshold_exceeded');
+        expect(context.status).toBe('warning');
+        expect(context.growthRateBytesPerDay).toBeGreaterThan(0);
+        expect(context.estimatedDaysToLimit).toBeGreaterThan(0);
       }
     );
   });
@@ -692,7 +858,7 @@ describe('ProjectData storage safety firebreak', () => {
         expect(stateAfter.alarm as number).toBeGreaterThan(Date.now());
 
         const telemetry = await readTelemetry(projectId);
-        expect(telemetry?.last_error).toMatch(/failed closed 1 candidate/);
+        expect(stringifyNullable(telemetry?.last_error)).toMatch(/failed closed 1 candidate/);
       }
     );
   });
@@ -737,6 +903,410 @@ describe('ProjectData storage safety firebreak', () => {
     );
   });
 
+  it('deletes only bounded terminal-session event-log cleanup candidates', async () => {
+    const projectId = `storage-event-cleanup-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+
+    const seeded = await runInDurableObject(stub, async (instance, state) => {
+      const terminalSession = await instance.createSession(null, 'Terminal event cleanup');
+      const activeSession = await instance.createSession(null, 'Active event cleanup guard');
+      const sleepingSession = await instance.createSession(null, 'Sleeping event cleanup guard');
+      await instance.persistMessage(terminalSession, 'user', 'keep terminal message', null);
+      await instance.persistMessage(activeSession, 'user', 'keep active message', null);
+      await instance.persistMessage(sleepingSession, 'user', 'keep sleeping message', null);
+      const terminalAcp = await instance.createAcpSession({
+        chatSessionId: terminalSession,
+        initialPrompt: null,
+        agentType: null,
+      });
+      const activeAcp = await instance.createAcpSession({
+        chatSessionId: activeSession,
+        initialPrompt: null,
+        agentType: null,
+      });
+
+      await instance.stopSession(terminalSession);
+      await instance.sleepSession(sleepingSession);
+
+      const sql = state.storage.sql;
+      sql.exec(
+        `UPDATE acp_sessions
+         SET status = 'completed', completed_at = ?, updated_at = ?
+         WHERE id = ?`,
+        Date.now(),
+        Date.now(),
+        terminalAcp.id
+      );
+
+      const terminalActivityIds: string[] = [];
+      const activeActivityIds: string[] = [];
+      const sleepingActivityIds: string[] = [];
+      const terminalAcpEventIds: string[] = [];
+      const activeAcpEventIds: string[] = [];
+      for (let index = 0; index < 3; index++) {
+        const suffix = `${index}-${crypto.randomUUID()}`;
+        terminalActivityIds.push(`terminal-activity-${suffix}`);
+        activeActivityIds.push(`active-activity-${suffix}`);
+        sleepingActivityIds.push(`sleeping-activity-${suffix}`);
+        terminalAcpEventIds.push(`terminal-acp-event-${suffix}`);
+        activeAcpEventIds.push(`active-acp-event-${suffix}`);
+
+        sql.exec(
+          `INSERT INTO activity_events
+             (id, event_type, actor_type, actor_id, workspace_id, session_id, task_id, payload, created_at)
+           VALUES (?, 'storage.test', 'system', NULL, NULL, ?, NULL, ?, ?)`,
+          terminalActivityIds[index],
+          terminalSession,
+          JSON.stringify({ terminal: index, payload: 't'.repeat(2048) }),
+          index + 1
+        );
+        sql.exec(
+          `INSERT INTO activity_events
+             (id, event_type, actor_type, actor_id, workspace_id, session_id, task_id, payload, created_at)
+           VALUES (?, 'storage.test', 'system', NULL, NULL, ?, NULL, ?, ?)`,
+          activeActivityIds[index],
+          activeSession,
+          JSON.stringify({ active: index, payload: 'a'.repeat(2048) }),
+          index + 1
+        );
+        sql.exec(
+          `INSERT INTO activity_events
+             (id, event_type, actor_type, actor_id, workspace_id, session_id, task_id, payload, created_at)
+           VALUES (?, 'storage.test', 'system', NULL, NULL, ?, NULL, ?, ?)`,
+          sleepingActivityIds[index],
+          sleepingSession,
+          JSON.stringify({ sleeping: index, payload: 's'.repeat(2048) }),
+          index + 1
+        );
+        sql.exec(
+          `INSERT INTO acp_session_events
+             (id, acp_session_id, from_status, to_status, actor_type, actor_id, reason, metadata, created_at)
+           VALUES (?, ?, NULL, 'completed', 'system', NULL, 'storage-test', ?, ?)`,
+          terminalAcpEventIds[index],
+          terminalAcp.id,
+          JSON.stringify({ terminal: index, payload: 'u'.repeat(2048) }),
+          index + 1
+        );
+        sql.exec(
+          `INSERT INTO acp_session_events
+             (id, acp_session_id, from_status, to_status, actor_type, actor_id, reason, metadata, created_at)
+           VALUES (?, ?, NULL, 'running', 'system', NULL, 'storage-test', ?, ?)`,
+          activeAcpEventIds[index],
+          activeAcp.id,
+          JSON.stringify({ active: index, payload: 'v'.repeat(2048) }),
+          index + 1
+        );
+      }
+
+      return {
+        terminalActivityIds,
+        activeActivityIds,
+        sleepingActivityIds,
+        terminalAcpEventIds,
+        activeAcpEventIds,
+      };
+    });
+
+    const currentSize = await runInDurableObject(
+      stub,
+      async (_instance, state) => state.storage.sql.databaseSize
+    );
+    await withProjectDataStorageEnv(
+      {
+        PROJECT_DATA_STORAGE_LIMIT_BYTES: String(Math.ceil(currentSize / 0.85)),
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'false',
+        PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS: '2',
+        PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS: '0',
+        PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS: '60000',
+      },
+      async () => {
+        await runInDurableObject(stub, async (instance) => instance.alarm());
+
+        const after = await runInDurableObject(stub, async (_instance, state) => {
+          const sql = state.storage.sql;
+          const activityRows = sql
+            .exec(
+              `SELECT id
+               FROM activity_events
+               WHERE id IN (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ORDER BY id ASC`,
+              ...seeded.terminalActivityIds,
+              ...seeded.activeActivityIds,
+              ...seeded.sleepingActivityIds
+            )
+            .toArray() as Array<{ id: string }>;
+          const acpRows = sql
+            .exec(
+              `SELECT id
+               FROM acp_session_events
+               WHERE id IN (?, ?, ?, ?, ?, ?)
+               ORDER BY id ASC`,
+              ...seeded.terminalAcpEventIds,
+              ...seeded.activeAcpEventIds
+            )
+            .toArray() as Array<{ id: string }>;
+          const messageCount = sql.exec('SELECT COUNT(*) AS count FROM chat_messages').toArray()[0] as {
+            count: number;
+          };
+          const alarm = await state.storage.getAlarm();
+          return { activityRows, acpRows, messageCount, alarm };
+        });
+
+        const activityIds = new Set(after.activityRows.map((row) => row.id));
+        const acpEventIds = new Set(after.acpRows.map((row) => row.id));
+
+        expect(seeded.terminalActivityIds.filter((id) => activityIds.has(id))).toHaveLength(1);
+        expect(seeded.activeActivityIds.every((id) => activityIds.has(id))).toBe(true);
+        expect(seeded.sleepingActivityIds.every((id) => activityIds.has(id))).toBe(true);
+        expect(seeded.terminalAcpEventIds.filter((id) => acpEventIds.has(id))).toHaveLength(1);
+        expect(seeded.activeAcpEventIds.every((id) => acpEventIds.has(id))).toBe(true);
+        expect(after.messageCount.count).toBe(3);
+        expect(after.alarm).toBeTypeOf('number');
+      }
+    );
+  });
+
+  it('surfaces target-unreachable health and an error alert when cleanup candidates exhaust above target', async () => {
+    const projectId = `storage-target-unreachable-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+
+    const seeded = await runInDurableObject(stub, async (instance, state) => {
+      const terminalSession = await instance.createSession(null, 'Target unreachable terminal');
+      const activeSession = await instance.createSession(null, 'Target unreachable active');
+      const sleepingSession = await instance.createSession(null, 'Target unreachable sleeping');
+      const terminalTool = await instance.persistMessage(
+        terminalSession,
+        'tool',
+        'visible terminal tool',
+        makeLegacyToolMetadata('terminal-unreachable', 16 * 1024),
+        'tool-terminal-unreachable'
+      );
+      const normalizedTool = await instance.persistMessage(
+        terminalSession,
+        'tool',
+        'visible normalized terminal tool',
+        JSON.stringify({
+          toolCallId: 'tool-normalized-unreachable',
+          title: 'Tool normalized unreachable',
+          status: 'completed',
+          contentSize: 64 * 1024,
+        }),
+        'tool-normalized-unreachable'
+      );
+      const activeTool = await instance.persistMessage(
+        activeSession,
+        'tool',
+        `visible active ${'a'.repeat(64 * 1024)}`,
+        makeToolMetadata('active-unreachable'),
+        'tool-active-unreachable'
+      );
+      const sleepingTool = await instance.persistMessage(
+        sleepingSession,
+        'tool',
+        `visible sleeping ${'s'.repeat(64 * 1024)}`,
+        makeToolMetadata('sleeping-unreachable'),
+        'tool-sleeping-unreachable'
+      );
+      const terminalAcp = await instance.createAcpSession({
+        chatSessionId: terminalSession,
+        initialPrompt: null,
+        agentType: null,
+      });
+      const activeAcp = await instance.createAcpSession({
+        chatSessionId: activeSession,
+        initialPrompt: null,
+        agentType: null,
+      });
+
+      await instance.stopSession(terminalSession);
+      await instance.sleepSession(sleepingSession);
+
+      const sql = state.storage.sql;
+      const now = Date.now();
+      sql.exec(
+        `UPDATE acp_sessions
+         SET status = 'completed', completed_at = ?, updated_at = ?
+         WHERE id = ?`,
+        now,
+        now,
+        terminalAcp.id
+      );
+
+      const terminalActivityIds: string[] = [];
+      const activeActivityIds: string[] = [];
+      const terminalAcpEventIds: string[] = [];
+      const activeAcpEventIds: string[] = [];
+      for (let index = 0; index < 2; index++) {
+        const suffix = `${index}-${crypto.randomUUID()}`;
+        terminalActivityIds.push(`target-terminal-activity-${suffix}`);
+        activeActivityIds.push(`target-active-activity-${suffix}`);
+        terminalAcpEventIds.push(`target-terminal-acp-event-${suffix}`);
+        activeAcpEventIds.push(`target-active-acp-event-${suffix}`);
+        sql.exec(
+          `INSERT INTO activity_events
+             (id, event_type, actor_type, actor_id, workspace_id, session_id, task_id, payload, created_at)
+           VALUES (?, 'storage.test', 'system', NULL, NULL, ?, NULL, ?, ?)`,
+          terminalActivityIds[index],
+          terminalSession,
+          JSON.stringify({ terminal: index, payload: 't'.repeat(2048) }),
+          index + 1
+        );
+        sql.exec(
+          `INSERT INTO activity_events
+             (id, event_type, actor_type, actor_id, workspace_id, session_id, task_id, payload, created_at)
+           VALUES (?, 'storage.test', 'system', NULL, NULL, ?, NULL, ?, ?)`,
+          activeActivityIds[index],
+          activeSession,
+          JSON.stringify({ active: index, payload: 'a'.repeat(2048) }),
+          index + 1
+        );
+        sql.exec(
+          `INSERT INTO acp_session_events
+             (id, acp_session_id, from_status, to_status, actor_type, actor_id, reason, metadata, created_at)
+           VALUES (?, ?, NULL, 'completed', 'system', NULL, 'storage-test', ?, ?)`,
+          terminalAcpEventIds[index],
+          terminalAcp.id,
+          JSON.stringify({ terminal: index, payload: 'u'.repeat(2048) }),
+          index + 1
+        );
+        sql.exec(
+          `INSERT INTO acp_session_events
+             (id, acp_session_id, from_status, to_status, actor_type, actor_id, reason, metadata, created_at)
+           VALUES (?, ?, NULL, 'running', 'system', NULL, 'storage-test', ?, ?)`,
+          activeAcpEventIds[index],
+          activeAcp.id,
+          JSON.stringify({ active: index, payload: 'v'.repeat(2048) }),
+          index + 1
+        );
+      }
+
+      return {
+        terminalTool,
+        normalizedTool,
+        activeTool,
+        sleepingTool,
+        terminalActivityIds,
+        activeActivityIds,
+        terminalAcpEventIds,
+        activeAcpEventIds,
+      };
+    });
+
+    const beforeSize = await runInDurableObject(
+      stub,
+      async (_instance, state) => state.storage.sql.databaseSize
+    );
+    const limitBytes = Math.ceil(beforeSize / 0.85);
+    await seedStorageGrowthBaseline(projectId, Math.max(1, beforeSize - 8192), limitBytes);
+
+    await withProjectDataStorageEnv(
+      {
+        PROJECT_DATA_STORAGE_LIMIT_BYTES: String(limitBytes),
+        PROJECT_DATA_STORAGE_ALERT_INTERVAL_MS: '1',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO: '0.8',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO: '0.75',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS: '100',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES: '1000000',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS: '0',
+        PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS: '100',
+        PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS: '0',
+      },
+      async () => {
+        await runInDurableObject(stub, async (instance) => instance.alarm());
+
+        const after = await runInDurableObject(stub, async (_instance, state) => {
+          const sql = state.storage.sql;
+          const messages = sql
+            .exec(
+              `SELECT id, tool_metadata
+               FROM chat_messages
+               WHERE id IN (?, ?, ?, ?)
+               ORDER BY id ASC`,
+              seeded.terminalTool,
+              seeded.normalizedTool,
+              seeded.activeTool,
+              seeded.sleepingTool
+            )
+            .toArray() as Array<{ id: string; tool_metadata: string }>;
+          const activityRows = sql
+            .exec(
+              `SELECT id
+               FROM activity_events
+               WHERE id IN (?, ?, ?, ?)
+               ORDER BY id ASC`,
+              ...seeded.terminalActivityIds,
+              ...seeded.activeActivityIds
+            )
+            .toArray() as Array<{ id: string }>;
+          const acpRows = sql
+            .exec(
+              `SELECT id
+               FROM acp_session_events
+               WHERE id IN (?, ?, ?, ?)
+               ORDER BY id ASC`,
+              ...seeded.terminalAcpEventIds,
+              ...seeded.activeAcpEventIds
+            )
+            .toArray() as Array<{ id: string }>;
+          return { messages, activityRows, acpRows, databaseSize: sql.databaseSize };
+        });
+
+        const messageById = new Map(after.messages.map((row) => [row.id, row]));
+        const terminalMeta = JSON.parse(
+          messageById.get(seeded.terminalTool)?.tool_metadata ?? '{}'
+        ) as Record<string, unknown>;
+        const normalizedMeta = JSON.parse(
+          messageById.get(seeded.normalizedTool)?.tool_metadata ?? '{}'
+        ) as Record<string, unknown>;
+        const activeMeta = JSON.parse(
+          messageById.get(seeded.activeTool)?.tool_metadata ?? '{}'
+        ) as Record<string, unknown>;
+        const sleepingMeta = JSON.parse(
+          messageById.get(seeded.sleepingTool)?.tool_metadata ?? '{}'
+        ) as Record<string, unknown>;
+        const activityIds = new Set(after.activityRows.map((row) => row.id));
+        const acpEventIds = new Set(after.acpRows.map((row) => row.id));
+
+        expect(terminalMeta.content).toBeUndefined();
+        expect(terminalMeta.contentSize).toBeGreaterThan(0);
+        expect(normalizedMeta.contentSize).toBe(64 * 1024);
+        expect(Array.isArray(activeMeta.content)).toBe(true);
+        expect(Array.isArray(sleepingMeta.content)).toBe(true);
+        expect(seeded.terminalActivityIds.some((id) => activityIds.has(id))).toBe(false);
+        expect(seeded.terminalAcpEventIds.some((id) => acpEventIds.has(id))).toBe(false);
+        expect(seeded.activeActivityIds.every((id) => activityIds.has(id))).toBe(true);
+        expect(seeded.activeAcpEventIds.every((id) => acpEventIds.has(id))).toBe(true);
+        expect(after.databaseSize).toBeGreaterThan(Math.floor(limitBytes * 0.75));
+
+        const telemetry = await readTelemetry(projectId);
+        expect(telemetry?.cleanup_health).toBe('target_unreachable');
+        expect(telemetry?.last_error).toMatch(/cleanup target unreachable/i);
+        expect(telemetry?.last_alert_reason).toBe('cleanup_target_unreachable');
+        expect(telemetry?.category_breakdown_json).toContain('activeOrSleepingSessionBytes');
+
+        const history = await readTelemetryHistory(projectId);
+        expect(history.some((row) => row.cleanup_health === 'target_unreachable')).toBe(true);
+
+        const alerts = await readProjectDataStorageAlerts(projectId);
+        const alert = alerts.find((row) =>
+          row.message.includes('ProjectData storage cleanup target unreachable')
+        );
+        expect(alert?.level).toBe('error');
+        expect(alert?.message).toContain('bytes/day');
+        expect(alert?.message).toContain('days to limit');
+
+        const context = parseAlertContext(alert ?? { context: null });
+        expect(context.alertReason).toBe('cleanup_target_unreachable');
+        expect(context.cleanupHealth).toBe('target_unreachable');
+        expect(context.reclaimableBytes).toBe(0);
+      }
+    );
+  });
+
   it('service measurement writes ProjectData storage telemetry directly', async () => {
     const projectId = `storage-service-measure-${crypto.randomUUID()}`;
     await seedProjectGraph(projectId);
@@ -744,6 +1314,7 @@ describe('ProjectData storage safety firebreak', () => {
 
     const measurement = await projectDataService.measureProjectDataStorage(testEnv, projectId);
     const telemetry = await readTelemetry(projectId);
+    const firstHistory = await readTelemetryHistory(projectId);
 
     expect(measurement).toMatchObject({
       projectId,
@@ -752,6 +1323,12 @@ describe('ProjectData storage safety firebreak', () => {
     });
     expect(telemetry?.project_id).toBe(projectId);
     expect(telemetry?.database_size_bytes).toBe(measurement?.databaseSizeBytes);
+    expect(firstHistory).toHaveLength(1);
+    expect(firstHistory[0]?.project_id).toBe(projectId);
+
+    await projectDataService.measureProjectDataStorage(testEnv, projectId);
+    const secondHistory = await readTelemetryHistory(projectId);
+    expect(secondHistory.length).toBeGreaterThanOrEqual(2);
   });
 
   it('emergency purge deletes only bounded low-value event-log batches', async () => {

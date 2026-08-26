@@ -71,48 +71,80 @@ perform any one-off production purge.
 
 ## Implementation checklist
 
-- [ ] Add an additive D1 migration for append-only ProjectData storage history
+- [x] Add an additive D1 migration for append-only ProjectData storage history
   and latest-row fields needed for growth rate, estimated days to limit,
   cleanup health, reclaimable bytes, and category breakdown.
-- [ ] Extend Drizzle schema/types for the latest telemetry row and new history
+- [x] Extend Drizzle schema/types for the latest telemetry row and new history
   table without changing the existing latest-row primary-key contract.
-- [ ] Compute growth bytes/day and estimated days to limit from prior telemetry
+- [x] Compute growth bytes/day and estimated days to limit from prior telemetry
   history or the existing latest row before writing the next measurement.
-- [ ] Append a history row on every persisted measurement or cleanup health
+- [x] Append a history row on every persisted measurement or cleanup health
   transition while preserving the existing latest-row upsert.
-- [ ] Extend warning-threshold alerting so `warning`, `critical`, and
+- [x] Extend warning-threshold alerting so `warning`, `critical`, and
   `degraded` states persist operator-visible platform-error rows with
   database bytes, limit bytes, usage ratio, bytes/day growth, and estimated
   time-to-limit.
-- [ ] Treat cleanup exhaustion while still above the target as an
+- [x] Treat cleanup exhaustion while still above the target as an
   error-severity operator alert and persist an explicit `target_unreachable`
   cleanup health state.
-- [ ] Add ProjectData category measurement for messages, activity/event logs,
+- [x] Add ProjectData category measurement for messages, activity/event logs,
   active/sleeping sessions, normalized tool payloads, terminal legacy payloads,
   eligible terminal event logs, and unattributed SQL/index overhead.
-- [ ] Add bounded automated event-log cleanup for old terminal-session
+- [x] Add bounded automated event-log cleanup for old terminal-session
   `activity_events` and `acp_session_events`, with env-configurable batch,
   age, and recheck limits, and with no active/sleeping or transcript deletion.
-- [ ] Update storage alarm scheduling to consider any event-log cleanup recheck
+- [x] Update storage alarm scheduling to consider any event-log cleanup recheck
   without starving other ProjectData alarm responsibilities.
-- [ ] Update admin storage telemetry output to expose growth, forecast, cleanup
+- [x] Update admin storage telemetry output to expose growth, forecast, cleanup
   health, and category breakdown while keeping existing fields stable.
-- [ ] Add or update env examples and public/internal configuration references
+- [x] Add or update env examples and public/internal configuration references
   for the new cleanup and history/forecast settings.
-- [ ] Add the audit-required Worker-runtime regression: seed bytes across
+- [x] Add the audit-required Worker-runtime regression: seed bytes across
   messages, activity/event logs, active/sleeping sessions, normalized tool
   payloads, and terminal legacy payloads; exhaust reclaimable candidates above
   target; assert `target_unreachable` health and an operator-visible error
   alert.
-- [ ] Add focused tests for warning-level operator alerts with growth/time-to-limit
+- [x] Add focused tests for warning-level operator alerts with growth/time-to-limit
   fields, append-only history rows, bounded terminal event-log cleanup, and
   active/sleeping preservation.
-- [ ] Add the process fix to the relevant rule/checklist so future computed
+- [x] Add the process fix to the relevant rule/checklist so future computed
   warning or cleanup-exhausted states must be routed to an operator-visible
   channel, not just logged.
 - [ ] Run local validation and specialist reviews required by `/do`.
 - [ ] Deploy to staging, verify the live admin/API behavior, create the PR, wait
   for CI, merge when green, and monitor production deploy to completion.
+
+## Implementation notes
+
+- Added D1 migration `0121_project_data_storage_growth_history.sql` with
+  additive latest-row fields and append-only
+  `project_data_storage_telemetry_history`.
+- Split ProjectData storage safety into focused modules for telemetry/history,
+  category measurement, alarm orchestration, automated event-log cleanup, and
+  explicit emergency purge.
+- Warning/critical/degraded storage states now persist platform-error alerts
+  through the existing observability error path. Cleanup target exhaustion above
+  the configured target persists an error-level `cleanup_target_unreachable`
+  alert.
+- Category telemetry measures message content/tool metadata, active/sleeping
+  session payload, terminal legacy tool payloads, normalized tool metadata,
+  activity events, ACP session events, task status events, and unattributed DB
+  overhead.
+- Automated cleanup reach now includes old terminal-session `activity_events`
+  and `acp_session_events` only, with bounded rows, age floor, recheck state,
+  and active/sleeping content excluded.
+- ProjectData storage admin endpoints were extracted to an admin sub-router and
+  expose the new latest-row fields plus bounded append-only history reads.
+
+## Validation evidence
+
+- `pnpm --filter @simple-agent-manager/api lint` — passed
+- `pnpm --filter @simple-agent-manager/api typecheck` — passed
+- `pnpm vitest run --config vitest.workers.config.ts tests/workers/project-data-storage-safety.test.ts --reporter=verbose` — passed, 14 tests
+- `pnpm vitest run tests/unit/routes/admin-security.test.ts --reporter=verbose` — passed, 7 tests
+- `pnpm quality:migration-safety` — passed, 152 FK relationships scanned, 0 new violations
+- Touched non-test source files are at or below 500 lines, except documented
+  existing exceptions (`apps/api/src/env.ts`, `apps/api/src/db/schema.ts`).
 
 ## Acceptance criteria
 

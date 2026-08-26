@@ -89,7 +89,8 @@ Comment threads are scoped to the ProjectData Durable Object addressed by `proje
 - `GET /api/admin/observability/errors` — Query platform errors; VM error rows include their same-installation diagnostic incident summary
 - `GET /api/admin/observability/errors/:errorId/incident` — Read one diagnostic incident summary and redacted preview
 - `GET /api/admin/observability/errors/:errorId/incident/artifacts/:artifactId/download` — Stream one private diagnostic artifact through the authenticated Worker; R2 keys and URLs are never exposed
-- `GET /api/admin/project-data/storage` — List latest per-project ProjectData storage telemetry from D1 (`projectId`, `status`, `limit` filters)
+- `GET /api/admin/project-data/storage` — List latest per-project ProjectData storage telemetry from D1 (`projectId`, `status`, `limit` filters), including growth forecast, cleanup health, reclaimable bytes, category breakdown JSON, and last alert reason
+- `GET /api/admin/project-data/storage/history` — List append-only ProjectData storage telemetry history from D1 (`projectId`, `status`, `cleanupHealth`, `limit` filters) for growth and cleanup-health trends
 - `POST /api/admin/project-data/storage/:projectId/measure` — Force one ProjectData `databaseSize` measurement and D1 telemetry upsert
 - `POST /api/admin/project-data/storage/:projectId/emergency-purge` — Run a bounded ProjectData emergency purge of oldest `activity_events` and `acp_session_events` rows only
 

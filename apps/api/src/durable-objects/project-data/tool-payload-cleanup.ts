@@ -1,16 +1,9 @@
 import { createModuleLogger, serializeError } from '../../lib/logger';
-import type {
-  ProjectDataStorageStatus,
-  ProjectDataStorageTelemetry,
-  StorageSafetyConfig,
-} from './storage-safety';
+import type { ProjectDataStorageTelemetry, StorageSafetyConfig } from './storage-safety';
 import {
-  deleteStorageSafetyMeta as deleteMeta,
   META_LAST_ERROR,
   META_LAST_MEASURED_AT,
   META_LAST_STATUS,
-  readStorageSafetyMeta as readMeta,
-  readStorageSafetyMetaNumber as readMetaNumber,
   truncateStorageSafetyMetaValue as truncate,
   writeStorageSafetyMeta as writeMeta,
 } from './storage-safety-meta';
@@ -20,155 +13,30 @@ import {
   selectToolPayloadCandidates,
   type ToolPayloadCleanupCursor,
 } from './tool-payload-cleanup-candidates';
+import {
+  buildSessionExhaustedCursor,
+  clearToolPayloadCleanupState,
+  isSessionExhaustedCursor,
+  publicToolPayloadCleanupCursor,
+  readProjectDataToolPayloadCleanupRecheckAt as readToolPayloadCleanupRecheckAt,
+  readToolPayloadCleanupCursor,
+  selectNextTerminalSessionId,
+  writeToolPayloadCleanupCursor,
+  writeToolPayloadCleanupRecheckAt,
+} from './tool-payload-cleanup-state';
+import type {
+  ProjectDataToolPayloadCleanupOptions,
+  ProjectDataToolPayloadCleanupResult,
+} from './tool-payload-cleanup-types';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.tool_payload_cleanup');
 
-const META_TOOL_CLEANUP_CURSOR_SESSION_ID = 'storageSafetyToolCleanupCursorSessionId';
-const META_TOOL_CLEANUP_CURSOR_CREATED_AT = 'storageSafetyToolCleanupCursorCreatedAt';
-const META_TOOL_CLEANUP_CURSOR_SEQUENCE = 'storageSafetyToolCleanupCursorSequence';
-const META_TOOL_CLEANUP_CURSOR_MESSAGE_ID = 'storageSafetyToolCleanupCursorMessageId';
-const META_TOOL_CLEANUP_RECHECK_AT = 'storageSafetyToolCleanupRecheckAt';
-const TOOL_PAYLOAD_SESSION_EXHAUSTED_MESSAGE_ID = '__session_exhausted__';
-
-export interface ProjectDataToolPayloadCleanupResult {
-  projectId: string;
-  beforeBytes: number;
-  afterBytes: number;
-  limitBytes: number;
-  triggerBytes: number;
-  targetBytes: number;
-  batchRows: number;
-  batchBytes: number;
-  sessionsScanned: number;
-  rowsScanned: number;
-  rowsUpdated: number;
-  rowsFailed: number;
-  toolMetadataBytesScanned: number;
-  toolMetadataBytesRead: number;
-  originalToolMetadataBytes: number;
-  storedToolMetadataBytes: number;
-  cursor:
-    | {
-        sessionId: string;
-        createdAt: number;
-        sequence: number;
-        messageId: string;
-      }
-    | null;
-  exhaustedCandidates: boolean;
-  recheckAt: number | null;
-}
-
-export interface ProjectDataToolPayloadCleanupOptions {
-  allowStart?: boolean;
-  now?: number;
-  classifyStatus: (databaseSizeBytes: number) => ProjectDataStorageStatus;
-  recordTelemetry: (
-    telemetry: ProjectDataStorageTelemetry,
-    fields: {
-      lastPurgeAt?: number | null;
-      lastPurgeReason?: string | null;
-      lastPurgeRows?: number | null;
-      lastPurgeDatabaseSizeBytes?: number | null;
-      lastError?: string | null;
-    }
-  ) => Promise<void>;
-}
-
-export function readProjectDataToolPayloadCleanupRecheckAt(sql: SqlStorage): number | null {
-  return readMetaNumber(sql, META_TOOL_CLEANUP_RECHECK_AT);
-}
-
-function readToolPayloadCleanupCursor(sql: SqlStorage): ToolPayloadCleanupCursor | null {
-  const sessionId = readMeta(sql, META_TOOL_CLEANUP_CURSOR_SESSION_ID);
-  const createdAt = readMetaNumber(sql, META_TOOL_CLEANUP_CURSOR_CREATED_AT);
-  const sequence = readMetaNumber(sql, META_TOOL_CLEANUP_CURSOR_SEQUENCE);
-  const messageId = readMeta(sql, META_TOOL_CLEANUP_CURSOR_MESSAGE_ID);
-  if (!sessionId || createdAt === null || sequence === null || !messageId) return null;
-  return { sessionId, createdAt, sequence, messageId };
-}
-
-function writeToolPayloadCleanupCursor(
-  sql: SqlStorage,
-  cursor: ToolPayloadCleanupCursor,
-  recheckAt: number
-): void {
-  writeMeta(sql, META_TOOL_CLEANUP_CURSOR_SESSION_ID, cursor.sessionId);
-  writeMeta(sql, META_TOOL_CLEANUP_CURSOR_CREATED_AT, String(cursor.createdAt));
-  writeMeta(sql, META_TOOL_CLEANUP_CURSOR_SEQUENCE, String(cursor.sequence));
-  writeMeta(sql, META_TOOL_CLEANUP_CURSOR_MESSAGE_ID, cursor.messageId);
-  writeMeta(sql, META_TOOL_CLEANUP_RECHECK_AT, String(recheckAt));
-}
-
-function writeToolPayloadCleanupRecheckAt(sql: SqlStorage, recheckAt: number): void {
-  writeMeta(sql, META_TOOL_CLEANUP_RECHECK_AT, String(recheckAt));
-}
-
-function clearToolPayloadCleanupState(sql: SqlStorage): void {
-  deleteMeta(sql, META_TOOL_CLEANUP_CURSOR_SESSION_ID);
-  deleteMeta(sql, META_TOOL_CLEANUP_CURSOR_CREATED_AT);
-  deleteMeta(sql, META_TOOL_CLEANUP_CURSOR_SEQUENCE);
-  deleteMeta(sql, META_TOOL_CLEANUP_CURSOR_MESSAGE_ID);
-  deleteMeta(sql, META_TOOL_CLEANUP_RECHECK_AT);
-}
-
-function isSessionExhaustedCursor(cursor: ToolPayloadCleanupCursor): boolean {
-  return (
-    cursor.createdAt === Number.MAX_SAFE_INTEGER &&
-    cursor.sequence === Number.MAX_SAFE_INTEGER &&
-    cursor.messageId === TOOL_PAYLOAD_SESSION_EXHAUSTED_MESSAGE_ID
-  );
-}
-
-function buildSessionExhaustedCursor(sessionId: string): ToolPayloadCleanupCursor {
-  return {
-    sessionId,
-    createdAt: Number.MAX_SAFE_INTEGER,
-    sequence: Number.MAX_SAFE_INTEGER,
-    messageId: TOOL_PAYLOAD_SESSION_EXHAUSTED_MESSAGE_ID,
-  };
-}
-
-function publicToolPayloadCleanupCursor(
-  cursor: ToolPayloadCleanupCursor | null
-): ProjectDataToolPayloadCleanupResult['cursor'] {
-  if (!cursor) return null;
-  return {
-    sessionId: cursor.sessionId,
-    createdAt: cursor.createdAt,
-    sequence: cursor.sequence,
-    messageId: cursor.messageId,
-  };
-}
-
-function selectNextTerminalSessionId(
-  sql: SqlStorage,
-  cutoffUpdatedAt: number,
-  afterSessionId: string
-): string | null {
-  const cursor = sql
-    .exec(
-      `SELECT id
-       FROM chat_sessions
-       WHERE status IN ('stopped', 'failed')
-         AND updated_at <= ?
-         AND id > ?
-       ORDER BY id ASC
-       LIMIT 1`,
-      cutoffUpdatedAt,
-      afterSessionId
-    )
-    .raw();
-
-  let sessionId: string | null = null;
-  for (const row of cursor) {
-    const id = row[0];
-    if (typeof id === 'string') sessionId = id;
-  }
-  return sessionId;
-}
-
+export { readProjectDataToolPayloadCleanupRecheckAt } from './tool-payload-cleanup-state';
+export type {
+  ProjectDataToolPayloadCleanupOptions,
+  ProjectDataToolPayloadCleanupResult,
+} from './tool-payload-cleanup-types';
 type ToolPayloadCleanupPlan = {
   projectId: string;
   now: number;
@@ -212,7 +80,7 @@ function createToolPayloadCleanupPlan(
   const triggerBytes = Math.floor(config.limitBytes * config.toolPayloadCleanupTriggerRatio);
   const targetBytes = Math.floor(config.limitBytes * config.toolPayloadCleanupTargetRatio);
   const pendingCursor = readToolPayloadCleanupCursor(sql);
-  const pendingRecheckAt = readMetaNumber(sql, META_TOOL_CLEANUP_RECHECK_AT);
+  const pendingRecheckAt = readToolPayloadCleanupRecheckAt(sql);
   const hasPendingCleanup = pendingCursor !== null || pendingRecheckAt !== null;
 
   if (beforeBytes <= targetBytes) {
@@ -473,6 +341,11 @@ async function recordToolPayloadCleanupTelemetry(
     limitBytes: config.limitBytes,
     usageRatio: afterBytes / config.limitBytes,
     status: statusAfter,
+    growthRateBytesPerDay: null,
+    estimatedDaysToLimit: null,
+    cleanupHealth: null,
+    reclaimableBytes: null,
+    categoryBreakdown: null,
   };
 
   try {

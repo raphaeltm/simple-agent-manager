@@ -2576,11 +2576,19 @@ export const projectDataStorageTelemetry = sqliteTable(
     usageRatio: real('usage_ratio').notNull(),
     status: text('status', { enum: ['ok', 'notice', 'warning', 'critical', 'degraded'] })
       .notNull(),
+    growthRateBytesPerDay: real('growth_rate_bytes_per_day'),
+    estimatedDaysToLimit: real('estimated_days_to_limit'),
+    cleanupHealth: text('cleanup_health', {
+      enum: ['not_needed', 'running', 'target_reached', 'target_unreachable', 'failed'],
+    }),
+    reclaimableBytes: integer('reclaimable_bytes'),
+    categoryBreakdownJson: text('category_breakdown_json'),
     lastAlarmAt: integer('last_alarm_at'),
     lastAlertAt: integer('last_alert_at'),
     lastAlertStatus: text('last_alert_status', {
       enum: ['ok', 'notice', 'warning', 'critical', 'degraded'],
     }),
+    lastAlertReason: text('last_alert_reason'),
     lastPurgeAt: integer('last_purge_at'),
     lastPurgeReason: text('last_purge_reason'),
     lastPurgeRows: integer('last_purge_rows'),
@@ -2601,6 +2609,46 @@ export const projectDataStorageTelemetry = sqliteTable(
 
 export type ProjectDataStorageTelemetryRow =
   typeof projectDataStorageTelemetry.$inferSelect;
+
+export const projectDataStorageTelemetryHistory = sqliteTable(
+  'project_data_storage_telemetry_history',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    measuredAt: integer('measured_at').notNull(),
+    databaseSizeBytes: integer('database_size_bytes').notNull(),
+    limitBytes: integer('limit_bytes').notNull(),
+    usageRatio: real('usage_ratio').notNull(),
+    status: text('status', { enum: ['ok', 'notice', 'warning', 'critical', 'degraded'] })
+      .notNull(),
+    growthRateBytesPerDay: real('growth_rate_bytes_per_day'),
+    estimatedDaysToLimit: real('estimated_days_to_limit'),
+    cleanupHealth: text('cleanup_health', {
+      enum: ['not_needed', 'running', 'target_reached', 'target_unreachable', 'failed'],
+    }),
+    reclaimableBytes: integer('reclaimable_bytes'),
+    categoryBreakdownJson: text('category_breakdown_json'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => ({
+    projectMeasuredAtIdx: index('idx_project_data_storage_telemetry_history_project_measured').on(
+      table.projectId,
+      table.measuredAt
+    ),
+    statusMeasuredAtIdx: index('idx_project_data_storage_telemetry_history_status_measured').on(
+      table.status,
+      table.measuredAt
+    ),
+    cleanupHealthMeasuredAtIdx: index(
+      'idx_project_data_storage_telemetry_history_cleanup_health_measured'
+    ).on(table.cleanupHealth, table.measuredAt),
+  })
+);
+
+export type ProjectDataStorageTelemetryHistoryRow =
+  typeof projectDataStorageTelemetryHistory.$inferSelect;
 
 export const diagnosticIncidents = sqliteTable(
   'diagnostic_incidents',

@@ -161,7 +161,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `PROJECT_DATA_STORAGE_TELEMETRY_ENABLED` — Enables ProjectData `databaseSize` alarm measurement and D1 telemetry writes (default: `true`)
 - `PROJECT_DATA_STORAGE_LIMIT_BYTES` — Cloudflare SQLite-backed Durable Object storage limit used for ProjectData usage classification (default: `10000000000`)
 - `PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS` — Minimum interval between per-object ProjectData storage measurements (default: `3600000`)
-- `PROJECT_DATA_STORAGE_ALERT_INTERVAL_MS` — Minimum interval between repeated critical/degraded ProjectData storage observability alerts (default: `21600000`)
+- `PROJECT_DATA_STORAGE_ALERT_INTERVAL_MS` — Minimum interval between repeated warning/critical/degraded ProjectData storage observability alerts and cleanup target-unreachable alerts (default: `21600000`)
 - `PROJECT_DATA_STORAGE_NOTICE_RATIO` — ProjectData storage usage ratio classified as `notice` (default: `0.6`)
 - `PROJECT_DATA_STORAGE_WARNING_RATIO` — ProjectData storage usage ratio classified as `warning` (default: `0.8`)
 - `PROJECT_DATA_STORAGE_CRITICAL_RATIO` — ProjectData storage usage ratio classified as `critical` (default: `0.9`)
@@ -169,6 +169,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `PROJECT_DATA_STORAGE_EMERGENCY_TARGET_RATIO` — Target usage ratio for explicit superadmin ProjectData emergency purge calls (default: `0.9`)
 - `PROJECT_DATA_STORAGE_EMERGENCY_BATCH_ROWS` — Oldest `activity_events` and `acp_session_events` rows deleted per table per emergency purge batch (default: `500`)
 - `PROJECT_DATA_STORAGE_EMERGENCY_MAX_BATCHES` — Maximum emergency purge batches per explicit call (default: `4`)
+- `PROJECT_DATA_STORAGE_GROWTH_LOOKBACK_DAYS` — Lookback window used to estimate ProjectData bytes/day growth and days to storage limit (default: `7`)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` — Enables automatic ProjectData cleanup that strips expandable `tool_metadata.content` payloads from old terminal-session tool messages under storage pressure (default: enabled)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO` — ProjectData storage usage ratio that starts automatic terminal-session tool payload cleanup (default: `0.8`)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO` — ProjectData storage usage ratio below which automatic tool payload cleanup stops (default: `0.75`)
@@ -177,6 +178,10 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS` — Minimum terminal-session age before automatic cleanup may strip stored tool payload content (default: `7`)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS` — Delay before the next automatic cleanup alarm batch when more candidates remain (default: `60000`)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM` — Maximum terminal sessions scanned by one automatic cleanup alarm batch (default: `25`)
+- `PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED` — Enables automatic deletion of old low-value terminal-session `activity_events` and terminal ACP event history when storage remains above the cleanup target (default: enabled)
+- `PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS` — Maximum terminal `activity_events` rows and terminal `acp_session_events` rows deleted per automatic cleanup alarm batch (default: `500`)
+- `PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS` — Minimum terminal-session age before automatic event-log cleanup may delete its activity/ACP event history (default: `7`)
+- `PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS` — Delay before the next terminal event-log cleanup alarm batch when more candidates remain (default: `60000`)
 
 Absent operational brake keys and KV read errors mean enabled. This fail-open
 behavior preserves availability and intentionally differs from the fail-closed

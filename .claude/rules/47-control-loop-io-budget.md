@@ -88,6 +88,13 @@ count is unbounded.
    one loop handles both, add a discriminating regression test proving the
    machine-liveness branch retains its intended terminal behavior.
 
+9. **Warning safety states and exhausted remediation need operator alerts.** A
+   control loop that classifies durable resource exhaustion risk (storage, quota,
+   billing, queue depth, or similar) MUST route warning-or-worse states through an
+   existing operator-visible alert channel, not only logs. If bounded remediation
+   exhausts all safe candidates while still above its target, surface an explicit
+   target-unreachable health state and emit an error-severity operator alert.
+
 ## Required Tests
 
 For every new or changed sweep/reconcile candidate class, include a zombie
@@ -102,6 +109,10 @@ prevention regression test:
 - For an alarm state that should terminate, run two alarm ticks and assert the
   first tick deletes or terminalizes durable state and the second tick does not
   re-arm or repeat work.
+- For warning-or-worse resource-safety states, assert the existing
+  operator-visible alert channel receives the alert. If cleanup candidates
+  exhaust above target, assert both the explicit target-unreachable health state
+  and the error-severity operator alert.
 - For feedback-prone ingestion paths, prove both that the request logger omits
   the ingest edge and that downstream failures cache zero demand.
 
@@ -126,6 +137,8 @@ Before merging a PR that touches an alarm, cron, sweep, or reconcile loop:
       channel accepted delivery, and what bounded grace applies when none did?
 - [ ] If the loop also handles machine-liveness markers, does a discriminating control
       test prove that branch was not weakened?
+- [ ] Do warning-or-worse resource-safety states and target-unreachable remediation
+      states reach an existing operator-visible alert channel with tests?
 
 ## References
 
