@@ -122,8 +122,7 @@ The tells:
 
 ## References
 
-- Task: `tasks/active/2026-08-26-suppress-stopped-snapshot-incident-noise.md` (moves to
-  `tasks/archive/` on completion); PR #1924
+- Task: `tasks/archive/2026-08-26-suppress-stopped-snapshot-incident-noise.md`; PR #1924
 - Implementation: `packages/vm-agent/internal/server/session_snapshot_coordinator.go`
   (`isSnapshotTeardownRaceError`), `internal/server/git.go` (`errWorkspaceNotRunning`,
   `errWorkspaceRuntimeNotFound`), `internal/server/workspace_provisioning.go`

@@ -1,6 +1,6 @@
 # Suppress stopped-devcontainer snapshot incident noise (complete PR #1924)
 
-- **Status**: active
+- **Status**: complete
 - **PR**: https://github.com/raphaeltm/simple-agent-manager/pull/1924
 - **Branch**: `sam/sam-private-incident-triage-aa86rx`
 - **Origin**: private feedback incident triage task `01M0Y5XQ7JDV0R6ZWHX7AA86RX`; picked up for completion by `01M0Y6ZDJEX69VTV10HPZ4KK2B`
@@ -111,7 +111,7 @@ Two smaller issues in the same diff:
 - [x] Cover all three teardown-race spellings plus a material-failure control in the table
 - [x] Prove the guard discriminating: delete it, confirm only the suppression cases go red, restore
 - [x] Add process-fix rule `.claude/rules/67-shared-predicates-that-trigger-actions.md`
-- [ ] Add the Agent Preflight block + Post-Mortem + Specialist Review Evidence to the PR body
+- [x] Add the Agent Preflight block + Post-Mortem + Specialist Review Evidence to the PR body
 - [x] File a SAM Idea for the unaddressed HTTP-409 stale-generation snapshot noise (7 occurrences)
       -> SAM Idea `01M0Y8FDWWPFAJ50WSYSEZQ5KD`
 
@@ -127,9 +127,28 @@ Two smaller issues in the same diff:
 - [x] The generation-scoped `reportSnapshotFailure` callback still fires for suppressed failures, so
       the control plane is not blinded (asserted in every table case)
 - [x] `go test ./...` green in `packages/vm-agent` (also `-race`); `go vet` and `gofmt` clean
-- [ ] SonarCloud quality gate passes; Preflight Evidence passes
-- [ ] Real-VM staging verification per `.claude/rules/27` + `/do` Phase 6b, with staging nodes
+- [x] SonarCloud quality gate passes; Preflight Evidence passes
+- [x] Real-VM staging verification per `.claude/rules/27` + `/do` Phase 6b, with staging nodes
       deleted afterwards (Hetzner 10-server shared cap, policy `a63e6a68`)
+
+## Staging verification result (2026-08-26)
+
+Deployed `f90e4b2e3` (run 32936025010). Deleted all staging nodes first so the new node pulled the
+new binary. Provisioned node `01M0YCA7Q4KJ75YBWJDJ6RSTXB` (06:32:26Z), heartbeat 06:34:53Z (2m27s).
+Agent ran a real prompt (Prompt completed 06:35:44Z), then `POST /api/workspaces/:id/sleep` at
+06:36:07Z provoked the teardown race.
+
+The race FIRED — node log 06:36:08.241557Z:
+`WARN Background session snapshot failed` /
+`error: resolve snapshot devcontainer: workspace is not running/recovery (status: stopped)`
+— two seconds after a successful capture, the exact production signature.
+
+Result: **0** matching rows in staging `platform_errors` after baseline, while **12** vm-agent rows
+were reported in the same window (liveness control — so the absence cannot be a dead reporter), and
+`session_snapshots` shows `available` / `degradation=none` / `home_r2_key` present / `capture_error`
+NULL. Pre-test baseline on the old binary had accumulated 15x + 2x of these signatures.
+
+Test node and workspace deleted; staging back to zero VMs at rest.
 
 ## Review findings addressed (Phase 5)
 
