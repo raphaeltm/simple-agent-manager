@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -71,7 +72,7 @@ func (s *Server) startBackgroundSessionSnapshot(input *sessionSnapshotHandlerInp
 				}
 				reportCancel()
 			}
-			if s.errorReporter != nil {
+			if s.errorReporter != nil && shouldReportBackgroundSnapshotIncident(err) {
 				s.errorReporter.ReportError(err, "session_snapshot.background_capture", input.workspaceID, map[string]interface{}{
 					"chatSessionId": input.chatSessionID,
 					"sessionId":     input.sessionID,
@@ -84,4 +85,14 @@ func (s *Server) startBackgroundSessionSnapshot(input *sessionSnapshotHandlerInp
 		slog.Info("Background session snapshot completed", "chatSessionId", input.chatSessionID, "workspaceId", input.workspaceID, "result", result)
 	}()
 	return true
+}
+
+func shouldReportBackgroundSnapshotIncident(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	return !isContainerUnavailableError(err)
 }

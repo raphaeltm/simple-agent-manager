@@ -7,11 +7,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/errorreport"
 )
 
 func TestHibernateHandlerAcceptsBackgroundCaptureBeforeWorkCompletes(t *testing.T) {
@@ -226,5 +228,124 @@ func TestBackgroundSessionSnapshotReportsGenerationScopedFailure(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("failure callback was not sent")
+	}
+}
+
+func TestBackgroundSessionSnapshotDoesNotReportStoppedDevcontainerAsIncident(t *testing.T) {
+	var errorPosts atomic.Int32
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/nodes/node-1/errors" {
+			errorPosts.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/api/workspaces/workspace-1/session-snapshot/failure" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer controlPlane.Close()
+
+	reporter := errorreport.New(controlPlane.URL, "node-1", "callback-token", errorreport.Config{
+		DBPath:        filepath.Join(t.TempDir(), "error-reports.db"),
+		FlushInterval: time.Hour,
+	})
+	reporter.Start()
+	t.Cleanup(reporter.Shutdown)
+	finished := make(chan struct{}, 1)
+	s := &Server{
+		config: &config.Config{
+			ControlPlaneURL:                      controlPlane.URL,
+			SessionSnapshotOperationTimeout:      time.Second,
+			SessionSnapshotProgressReportTimeout: time.Second,
+		},
+		errorReporter: reporter,
+		sessionSnapshotRunner: func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error) {
+			defer func() { finished <- struct{}{} }()
+			return nil, &sessionSnapshotCaptureError{
+				generation: "generation-1",
+				err:        errors.New("resolve snapshot devcontainer: workspace is not running/recovery (status: stopped)"),
+			}
+		},
+	}
+	input := &sessionSnapshotHandlerInput{
+		workspaceID:   "workspace-1",
+		sessionID:     "agent-1",
+		chatSessionID: "chat-1",
+		callbackToken: "callback-token",
+	}
+
+	if !s.startBackgroundSessionSnapshot(input) {
+		t.Fatal("background snapshot was not accepted")
+	}
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("background snapshot did not finish")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := errorPosts.Load(); got != 0 {
+		t.Fatalf("error posts = %d, want 0 for stopped devcontainer race", got)
+	}
+}
+
+func TestBackgroundSessionSnapshotReportsMaterialIncident(t *testing.T) {
+	errorPosts := make(chan struct{}, 1)
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/nodes/node-1/errors" {
+			errorPosts <- struct{}{}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/api/workspaces/workspace-1/session-snapshot/failure" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer controlPlane.Close()
+
+	reporter := errorreport.New(controlPlane.URL, "node-1", "callback-token", errorreport.Config{
+		DBPath:        filepath.Join(t.TempDir(), "error-reports.db"),
+		FlushInterval: time.Hour,
+	})
+	reporter.Start()
+	t.Cleanup(reporter.Shutdown)
+	finished := make(chan struct{}, 1)
+	s := &Server{
+		config: &config.Config{
+			ControlPlaneURL:                      controlPlane.URL,
+			SessionSnapshotOperationTimeout:      time.Second,
+			SessionSnapshotProgressReportTimeout: time.Second,
+		},
+		errorReporter: reporter,
+		sessionSnapshotRunner: func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error) {
+			defer func() { finished <- struct{}{} }()
+			return nil, &sessionSnapshotCaptureError{
+				generation: "generation-1",
+				err:        errors.New("snapshot control plane returned HTTP 400: checksum mismatch"),
+			}
+		},
+	}
+	input := &sessionSnapshotHandlerInput{
+		workspaceID:   "workspace-1",
+		sessionID:     "agent-1",
+		chatSessionID: "chat-1",
+		callbackToken: "callback-token",
+	}
+
+	if !s.startBackgroundSessionSnapshot(input) {
+		t.Fatal("background snapshot was not accepted")
+	}
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("background snapshot did not finish")
+	}
+	select {
+	case <-errorPosts:
+	case <-time.After(time.Second):
+		t.Fatal("expected material snapshot failure to post a VM incident")
 	}
 }

@@ -159,6 +159,7 @@ func isContainerUnavailableError(err error) bool {
 	}
 	errMsg := strings.ToLower(strings.TrimSpace(err.Error()))
 	return strings.Contains(errMsg, "devcontainer not available") ||
+		strings.Contains(errMsg, "workspace is not running/recovery") ||
 		strings.Contains(errMsg, "no running devcontainer found")
 }
 
