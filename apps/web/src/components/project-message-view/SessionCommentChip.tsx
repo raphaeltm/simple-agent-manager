@@ -1,7 +1,7 @@
 import { MessageSquareQuote } from 'lucide-react';
 
 /**
- * Always-visible comment discovery chip for unresolved session comments.
+ * Always-visible comment discovery chip.
  *
  * This intentionally lives outside the collapsed action row: comments are a
  * discovery surface, so the affordance must be visible before the user already
@@ -16,18 +16,22 @@ export function SessionCommentChip({
   needsAttentionCommentCount: number;
   onOpenComments: () => void;
 }>) {
-  if (unresolvedCommentCount <= 0) return null;
-
   const hasAttention = needsAttentionCommentCount > 0;
   const commentNoun = unresolvedCommentCount === 1 ? 'comment' : 'comments';
   const attentionSuffix = hasAttention
     ? `, ${needsAttentionCommentCount} needing your attention`
     : '';
-  const ariaLabel = `${unresolvedCommentCount} unresolved ${commentNoun}${attentionSuffix}`;
+  const ariaLabel =
+    unresolvedCommentCount > 0
+      ? `${unresolvedCommentCount} unresolved ${commentNoun}${attentionSuffix}`
+      : 'Comments';
   const attentionVerb = needsAttentionCommentCount === 1 ? 'needs' : 'need';
-  const chipText = hasAttention
-    ? `${needsAttentionCommentCount} ${attentionVerb} you`
-    : String(unresolvedCommentCount);
+  const chipText =
+    unresolvedCommentCount <= 0
+      ? 'Comments'
+      : hasAttention
+        ? `${needsAttentionCommentCount} ${attentionVerb} you`
+        : String(unresolvedCommentCount);
 
   return (
     <button

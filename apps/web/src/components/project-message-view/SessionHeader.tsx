@@ -381,7 +381,7 @@ export function SessionHeader({
             </button>
           )}
 
-          {onOpenComments && unresolvedCommentCount > 0 && (
+          {onOpenComments && (
             <SessionCommentChip
               unresolvedCommentCount={unresolvedCommentCount}
               needsAttentionCommentCount={needsAttentionCommentCount}

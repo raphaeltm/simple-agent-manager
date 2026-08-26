@@ -431,6 +431,69 @@ async function expectConversationCanScrollBehindOverlay(page: Page) {
 test.describe('message comments audit — desktop 1280x800', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false });
 
+  test('opens a visible empty rail from the always-visible header Comments control', async ({
+    page,
+  }) => {
+    await setupApiMocks(page);
+    await openChat(page);
+
+    await expect(page.getByRole('complementary', { name: 'Session comments' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Comments', exact: true }).click();
+
+    const rail = page.getByRole('complementary', { name: 'Session comments' });
+    await expect(rail).toBeVisible();
+    await expect(rail.getByRole('heading', { name: 'Comments' })).toBeVisible();
+    await expect(
+      rail.getByText(
+        'Select text in a user or agent message, or use a message Comment button to start a thread.'
+      )
+    ).toBeVisible();
+    await screenshot(page, 'message-comments-desktop-header-empty-rail');
+    await assertNoOverflow(page);
+  });
+
+  test('opens a visible draft rail from the message-level Comment button', async ({ page }) => {
+    await setupApiMocks(page);
+    await openChat(page);
+
+    await expect(page.getByRole('complementary', { name: 'Session comments' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Add comment on message msg-27' }).click();
+
+    const rail = page.getByRole('complementary', { name: 'Session comments' });
+    await expect(rail).toBeVisible();
+    await expect(rail.getByLabel('New message comment')).toBeVisible();
+    await expect(rail.getByText(/New comment on message msg-27/)).toBeVisible();
+    await expect(rail.getByLabel('Add a comment…')).toBeVisible();
+    await screenshot(page, 'message-comments-desktop-message-button-draft');
+    await assertNoOverflow(page);
+  });
+
+  test('opens a visible quoted draft rail from the selected-text Comment control', async ({
+    page,
+  }) => {
+    await setupApiMocks(page);
+    await openChat(page);
+
+    await expect(page.getByRole('complementary', { name: 'Session comments' })).toHaveCount(0);
+    const desktopTarget = page.getByText(/Assistant mobile comment target 27/);
+    await dragSelectText(page, desktopTarget);
+
+    const selectionDialog = page.getByRole('dialog', { name: 'Comment on selection' });
+    await expect(selectionDialog).toBeVisible();
+    const selectedQuote = await page.evaluate(() => window.getSelection()?.toString().trim() ?? '');
+    expect(selectedQuote.length).toBeGreaterThan(3);
+    await selectionDialog.getByRole('button', { name: 'Comment', exact: true }).click();
+
+    const rail = page.getByRole('complementary', { name: 'Session comments' });
+    await expect(rail).toBeVisible();
+    await expect(rail.getByLabel('New comment on selected text')).toBeVisible();
+    await expect(rail.getByText(/New comment on selected text msg-27/)).toBeVisible();
+    await expect(rail.getByText(selectedQuote)).toBeVisible();
+    await expect(rail.getByLabel('Add a comment…')).toBeVisible();
+    await screenshot(page, 'message-comments-desktop-selected-text-draft');
+    await assertNoOverflow(page);
+  });
+
   test('supports data-driven rail, selection create, reply, send, resolve, and reopen', async ({
     page,
   }) => {
@@ -570,8 +633,7 @@ test.describe('message comments audit — desktop 1280x800', () => {
     const controls = await setupApiMocks(page, { commentsMode: 'error-then-empty' });
     await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
 
-    await page.getByRole('button', { name: 'Show session details' }).click();
-    await page.getByRole('button', { name: 'Comments', exact: true }).click();
+    await page.getByRole('button', { name: 'Comments', description: 'Open comments' }).click();
     const rail = page.getByRole('complementary', { name: 'Session comments' });
 
     await expect(rail.getByText('Loading comments…')).toBeVisible();
