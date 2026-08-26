@@ -282,7 +282,7 @@ export function useWorkspaceCore(
     workspace?.url ?? undefined,
     id,
     terminalToken ?? undefined,
-    isRunning
+    workspace?.status
   );
 
   // Fetch workspace events from VM Agent.

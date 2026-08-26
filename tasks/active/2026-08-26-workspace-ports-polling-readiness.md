@@ -41,19 +41,19 @@ The 2026-08-25 production stability audit found a high-volume `/ports` readiness
 
 ## Implementation checklist
 
-- [ ] Extend shared `PortsResponse` with optional readiness/lifecycle fields while preserving existing `{ ports }` compatibility.
-- [ ] Extend `apps/web/src/lib/api/workspaces.ts` and query options to return the structured ports response.
-- [ ] Add exported `DEFAULT_*` constants and `VITE_*` overrides for ports poll base interval, max backoff, jitter ratio, failure budget, and circuit reset cadence.
-- [ ] Wire the new Vite env vars into type declarations, `.env.example`, public configuration reference, deploy workflow env, and deployment workflow quality test.
-- [ ] Change `useWorkspacePorts` to accept effective `WorkspaceStatus`, stop for terminal states, reset on clean running/resume, preserve stale ready ports during transient background failures, and use backoff/circuit interval calculation.
-- [ ] Keep raw tokens out of query keys and preserve token-rotation behavior.
-- [ ] Update both web callers to pass `workspace?.status` instead of only an `isRunning` boolean.
-- [ ] Add cheap server-side structured readiness/lifecycle payload handling in the wildcard workspace proxy for exact port-list requests.
-- [ ] Add/adjust API tests proving expected lifecycle/not-ready port-list states do not produce 5xx responses while auth/token failures still fail.
-- [ ] Add browser/React Query behavior tests covering provisioning/not-ready, running-but-agent-not-ready, recovery, sleeping, stopped, deleted, token rotation, repeated 503, backoff intervals, circuit cooldown, hidden-tab pause, bounded warnings, and stale-port preservation.
-- [ ] Run the mandatory Playwright visual audit at 375x667 and 1280x800 with screenshots under `.codex/tmp/playwright-screenshots/`.
-- [ ] Run lint, typecheck, tests, and build.
-- [ ] Run specialist reviews: task-completion-validator, ui-ux-specialist, test-engineer, env-validator, constitution-validator, cloudflare-specialist, and doc-sync-validator if docs/API contract changed.
+- [x] Extend shared `PortsResponse` with optional readiness/lifecycle fields while preserving existing `{ ports }` compatibility.
+- [x] Extend `apps/web/src/lib/api/workspaces.ts` and query options to return the structured ports response.
+- [x] Add exported `DEFAULT_*` constants and `VITE_*` overrides for ports poll base interval, max backoff, jitter ratio, failure budget, and circuit reset cadence.
+- [x] Wire the new Vite env vars into type declarations, `.env.example`, public configuration reference, deploy workflow env, and deployment workflow quality test.
+- [x] Change `useWorkspacePorts` to accept effective `WorkspaceStatus`, stop for terminal states, reset on clean running/resume, preserve stale ready ports during transient background failures, and use backoff/circuit interval calculation.
+- [x] Keep raw tokens out of query keys and preserve token-rotation behavior.
+- [x] Update both web callers to pass `workspace?.status` instead of only an `isRunning` boolean.
+- [x] Add cheap server-side structured readiness/lifecycle payload handling in the wildcard workspace proxy for exact port-list requests.
+- [x] Add/adjust API tests proving expected lifecycle/not-ready port-list states do not produce 5xx responses while auth/token failures still fail.
+- [x] Add browser/React Query behavior tests covering provisioning/not-ready, running-but-agent-not-ready, recovery, sleeping, stopped, deleted, token rotation, repeated 503, backoff intervals, circuit cooldown, hidden-tab pause, bounded warnings, and stale-port preservation.
+- [x] Run the mandatory Playwright visual audit at 375x667 and 1280x800 with screenshots under `.codex/tmp/playwright-screenshots/`.
+- [x] Run lint, typecheck, tests, and build.
+- [x] Run specialist reviews: task-completion-validator, ui-ux-specialist, test-engineer, env-validator, constitution-validator, cloudflare-specialist, and doc-sync-validator if docs/API contract changed.
 - [ ] Deploy to staging, verify behavior, create PR, wait for CI, merge, and monitor production deploy to completion.
 
 ## Acceptance criteria
@@ -82,3 +82,35 @@ The 2026-08-25 production stability audit found a high-volume `/ports` readiness
 - `.claude/rules/48-stale-while-revalidate-ui.md`
 - `.claude/rules/60-request-io-and-bundle-budgets.md`
 - `.library/reliability/audits/production-stability-audit-2026-08-25.md/production-stability-audit-2026-08-25.md`
+
+## Validation log
+
+- `pnpm --filter @simple-agent-manager/web test -- tests/unit/hooks/useWorkspacePorts.test.ts` — passed.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/workspace-proxy-port-access.test.ts` — passed.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/ws-proxy.test.ts` — passed after updating the refactored source-contract assertion.
+- `pnpm typecheck` — passed.
+- `pnpm lint` — passed with existing unrelated warnings in acp-client and web components.
+- `pnpm exec vitest run --config scripts/quality/vitest.config.ts scripts/quality/deploy-reusable-workflow.test.ts` — passed.
+- `pnpm build` — passed.
+- `pnpm exec turbo run test --concurrency=1` — all changed/relevant tests passed; the only rerun failure was an unrelated `tests/unit/routes/mcp-streamable-http.test.ts` `beforeEach` timeout, and `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/mcp-streamable-http.test.ts` passed immediately afterward.
+- `pnpm exec playwright test tests/playwright/session-header-agent-info-audit.spec.ts --project="iPhone SE (375x667)" --grep "title-led header handles long title|mobile switch toggles"` — passed after updating the existing audit mock to represent completed user setup.
+- `pnpm exec playwright test tests/playwright/session-header-agent-info-audit.spec.ts --project="Desktop (1280x800)" --grep "title-led stress scenario displays on desktop|desktop switch shows enabled"` — passed.
+- Screenshot evidence retained in `.codex/tmp/playwright-screenshots/`: `session-header-title-led-stress-mobile.png`, `session-header-title-led-stress-desktop.png`, `session-header-public-ports-mobile.png`, `session-header-public-ports-desktop.png`.
+- Post-Playwright reruns:
+  - `pnpm --filter @simple-agent-manager/web test -- tests/unit/hooks/useWorkspacePorts.test.ts` — passed.
+  - `pnpm --filter @simple-agent-manager/api test -- tests/unit/workspace-proxy-port-access.test.ts tests/unit/ws-proxy.test.ts` — passed.
+  - `pnpm exec vitest run --config scripts/quality/vitest.config.ts scripts/quality/deploy-reusable-workflow.test.ts` — passed.
+  - `git diff --check` — passed.
+  - `pnpm lint` — passed with existing unrelated warnings in acp-client and web components.
+  - `pnpm typecheck` — passed.
+
+## Specialist review notes
+
+- `ui-ux-specialist`: PASS. The changed surface is an existing session header/forwarded-ports presentation with no new layout variants; validated actual app shell with long title, special characters, 50 ports, and public-port toggle at 375x667 and 1280x800. Rubric scores: hierarchy 4, interaction clarity 4, mobile usability 4, accessibility 4, system consistency 4.
+- `test-engineer`: PASS. React Query coverage exercises provisioning, running-but-agent-not-ready, recovery, sleeping/stopped/deleted, server terminal states, token rotation, repeated failures/backoff/circuit cooldown, hidden-tab pause, stale-port preservation, and no `console.error` storm. API tests cover structured lifecycle/not-ready/gone and auth failure preservation.
+- `env-validator`: PASS. New `VITE_WORKSPACE_PORTS_*` variables are present in `apps/web/src/vite-env.d.ts`, `apps/web/.env.example`, `.github/workflows/deploy-reusable.yml`, `apps/www/src/content/docs/docs/reference/configuration.md`, and `scripts/quality/deploy-reusable-workflow.test.ts`.
+- `constitution-validator`: PASS. New poll/backoff/circuit values use exported `DEFAULT_*` constants plus `VITE_*` overrides. No new deployment-specific URLs or unconfigurable timeouts/limits were introduced in product code.
+- `cloudflare-specialist`: PASS. Worker proxy change is a cheap structured-response normalization for exact `/workspaces/:id/ports` requests only; it avoids extra D1/DO/KV round-trips and leaves non-ports proxy behavior untouched.
+- `security-auditor`: PASS. Terminal-token authentication still runs before lifecycle/gone payloads, token failures remain 401, raw tokens remain out of TanStack query keys, and the port-proxy `Set-Cookie` stripping path is unchanged.
+- `doc-sync-validator`: PASS. Shared `PortsResponse` contract and public Vite configuration reference were updated; no additional public API route documentation is required because this is an existing workspace proxy contract extension.
+- `task-completion-validator`: PASS. Research findings, checklist items, and acceptance criteria are covered by the diff plus automated/manual visual evidence; no uncovered acceptance criteria found before PR/deploy steps.

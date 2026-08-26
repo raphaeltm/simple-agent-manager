@@ -295,9 +295,31 @@ export interface DetectedPort {
   detectedAt: string;
 }
 
+export type WorkspacePortsState =
+  | 'ready'
+  | 'not_ready'
+  | 'sleeping'
+  | 'stopped'
+  | 'deleted'
+  | 'gone'
+  | 'error';
+
 /** Response from GET /workspaces/{id}/ports on the VM agent. */
 export interface PortsResponse {
   ports: DetectedPort[];
+  /**
+   * Optional readiness/lifecycle state. Older VM agents omit this field; clients
+   * treat an omitted state as `ready` for backwards compatibility.
+   */
+  state?: WorkspacePortsState;
+  /** Workspace lifecycle status observed by the control plane, when known. */
+  workspaceStatus?: WorkspaceStatus | null;
+  /** Whether polling may later succeed without an external lifecycle transition. */
+  retryable?: boolean;
+  /** Human-readable diagnostic for expected non-ready states. */
+  message?: string;
+  /** Endpoint-specific diagnostics; intentionally untyped across runtimes. */
+  diagnostics?: Record<string, unknown>;
 }
 
 // =============================================================================

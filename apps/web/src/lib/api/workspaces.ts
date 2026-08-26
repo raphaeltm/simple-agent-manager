@@ -4,8 +4,10 @@ import type {
   CreateWorkspaceRequest,
   DetectedPort,
   Event,
+  PortsResponse,
   TerminalTokenResponse,
   UpdateWorkspaceRequest,
+  WorkspacePortsState,
   WorkspaceResponse,
   WorkspaceTab,
 } from '@simple-agent-manager/shared';
@@ -139,7 +141,7 @@ export async function listWorkspacePorts(
   workspaceId: string,
   token: string,
   signal?: AbortSignal
-): Promise<DetectedPort[]> {
+): Promise<PortsResponse> {
   const params = new URLSearchParams();
   params.set('token', token);
 
@@ -152,7 +154,37 @@ export async function listWorkspacePorts(
     throw new Error(`Failed to load workspace ports: ${text}`);
   }
   const data = await readResponseJsonRecord(res, 'workspace.ports');
-  return requireArray(data, 'ports', 'workspace.ports') as DetectedPort[];
+  const ports = requireArray(data, 'ports', 'workspace.ports') as DetectedPort[];
+  const state = parseWorkspacePortsState(data.state);
+  return {
+    ports,
+    state,
+    workspaceStatus:
+      typeof data.workspaceStatus === 'string'
+        ? (data.workspaceStatus as PortsResponse['workspaceStatus'])
+        : null,
+    retryable: typeof data.retryable === 'boolean' ? data.retryable : state === 'not_ready',
+    message: typeof data.message === 'string' ? data.message : undefined,
+    diagnostics:
+      data.diagnostics && typeof data.diagnostics === 'object' && !Array.isArray(data.diagnostics)
+        ? (data.diagnostics as Record<string, unknown>)
+        : undefined,
+  };
+}
+
+function parseWorkspacePortsState(value: unknown): WorkspacePortsState {
+  switch (value) {
+    case 'ready':
+    case 'not_ready':
+    case 'sleeping':
+    case 'stopped':
+    case 'deleted':
+    case 'gone':
+    case 'error':
+      return value;
+    default:
+      return 'ready';
+  }
 }
 
 /** Build the authenticated port-access redirect URL (API mints token and 302-redirects). */

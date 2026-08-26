@@ -1,3 +1,4 @@
+import type { DetectedPort, PortsResponse, WorkspaceStatus } from '@simple-agent-manager/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
@@ -18,18 +19,31 @@ import { listWorkspacePorts } from '../../../src/lib/api';
 
 const mockListWorkspacePorts = vi.mocked(listWorkspacePorts);
 
-const PORT_A = {
+const PORT_A: DetectedPort = {
   port: 3000,
+  address: '0.0.0.0',
   label: 'vite',
   url: 'https://ws-abc--3000.example.com',
-  isLocal: false,
+  detectedAt: '2026-08-26T00:00:00.000Z',
 };
-const PORT_B = {
+const PORT_B: DetectedPort = {
   port: 8080,
+  address: '0.0.0.0',
   label: 'api',
   url: 'https://ws-abc--8080.example.com',
-  isLocal: false,
+  detectedAt: '2026-08-26T00:00:00.000Z',
 };
+
+function makePortsResponse(
+  ports: DetectedPort[],
+  overrides: Partial<PortsResponse> = {}
+): PortsResponse {
+  return {
+    ports,
+    state: 'ready',
+    ...overrides,
+  };
+}
 
 function createTestQueryClient() {
   return new QueryClient({
@@ -81,20 +95,22 @@ async function flushQueries() {
 describe('useWorkspacePorts', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
     mockListWorkspacePorts.mockReset();
     setVisibility('visible');
   });
 
   afterEach(() => {
     setVisibility('visible');
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
   it('fetches ports immediately when all dependencies are present', async () => {
-    mockListWorkspacePorts.mockResolvedValue([PORT_A]);
+    mockListWorkspacePorts.mockResolvedValue(makePortsResponse([PORT_A]));
 
     const { result } = renderHook(
-      () => useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', true),
+      () => useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', 'running'),
       { wrapper: createWrapper() }
     );
 
@@ -109,13 +125,16 @@ describe('useWorkspacePorts', () => {
   });
 
   it.each([
-    ['workspaceUrl missing', undefined, 'ws-1', 'tok-1', true],
-    ['workspaceId missing', 'https://ws.example.com', undefined, 'tok-1', true],
-    ['token missing', 'https://ws.example.com', 'ws-1', undefined, true],
-    ['workspace stopped', 'https://ws.example.com', 'ws-1', 'tok-1', false],
-  ])('returns empty ports when %s', async (_name, workspaceUrl, workspaceId, token, isRunning) => {
+    ['workspaceUrl missing', undefined, 'ws-1', 'tok-1', 'running'],
+    ['workspaceId missing', 'https://ws.example.com', undefined, 'tok-1', 'running'],
+    ['token missing', 'https://ws.example.com', 'ws-1', undefined, 'running'],
+    ['workspace provisioning', 'https://ws.example.com', 'ws-1', 'tok-1', 'creating'],
+    ['workspace sleeping', 'https://ws.example.com', 'ws-1', 'tok-1', 'sleeping'],
+    ['workspace stopped', 'https://ws.example.com', 'ws-1', 'tok-1', 'stopped'],
+    ['workspace deleted', 'https://ws.example.com', 'ws-1', 'tok-1', 'deleted'],
+  ] as const)('returns empty ports when %s', async (_name, workspaceUrl, workspaceId, token, status) => {
     const { result } = renderHook(
-      () => useWorkspacePorts(workspaceUrl, workspaceId, token, isRunning),
+      () => useWorkspacePorts(workspaceUrl, workspaceId, token, status),
       { wrapper: createWrapper() }
     );
 
@@ -128,9 +147,9 @@ describe('useWorkspacePorts', () => {
   });
 
   it('keeps stale ports visible during a background failure', async () => {
-    mockListWorkspacePorts.mockResolvedValueOnce([PORT_A, PORT_B]);
+    mockListWorkspacePorts.mockResolvedValueOnce(makePortsResponse([PORT_A, PORT_B]));
     const { result } = renderHook(
-      () => useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', true),
+      () => useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', 'running'),
       { wrapper: createWrapper() }
     );
     await flushQueries();
@@ -145,9 +164,9 @@ describe('useWorkspacePorts', () => {
 
   it('logs failed background fetches with the consecutive failure count', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    mockListWorkspacePorts.mockResolvedValueOnce([PORT_A]);
+    mockListWorkspacePorts.mockResolvedValueOnce(makePortsResponse([PORT_A]));
     const { result } = renderHook(
-      () => useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', true),
+      () => useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', 'running'),
       { wrapper: createWrapper() }
     );
     await flushQueries();
@@ -159,43 +178,161 @@ describe('useWorkspacePorts', () => {
     await flushQueries();
     expect(warnSpy).toHaveBeenCalledWith('useWorkspacePorts: fetch failed', {
       workspaceId: 'ws-1',
-      consecutiveFailures: 1,
+      circuitOpen: false,
+      consecutiveUnavailable: 1,
       error: '401 Unauthorized',
+      nextRefetchIntervalMs: 10_000,
     });
     warnSpy.mockRestore();
   });
 
-  it('clears ports after three consecutive failures and resets after success', async () => {
-    mockListWorkspacePorts.mockResolvedValueOnce([PORT_A]);
+  it('backs off repeated fetch failures, preserves stale ports, opens the circuit, and resets after success', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockListWorkspacePorts.mockResolvedValueOnce(makePortsResponse([PORT_A]));
     const { result } = renderHook(
-      () => useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', true),
+      () => useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', 'running'),
       { wrapper: createWrapper() }
     );
     await flushQueries();
     expect(result.current.ports).toEqual([PORT_A]);
 
-    mockListWorkspacePorts.mockRejectedValueOnce(new Error('fail 1'));
-    await advancePoll();
-    mockListWorkspacePorts.mockRejectedValueOnce(new Error('fail 2'));
-    await advancePoll();
-    expect(result.current.ports).toEqual([PORT_A]);
+    for (const [index, delay] of [10_000, 10_000, 20_000, 40_000, 80_000, 120_000].entries()) {
+      mockListWorkspacePorts.mockRejectedValueOnce(new Error(`fail ${index + 1}`));
+      await advancePoll(delay);
+    }
 
-    mockListWorkspacePorts.mockResolvedValueOnce([PORT_B]);
-    await advancePoll();
+    expect(mockListWorkspacePorts).toHaveBeenCalledTimes(7);
+    expect(result.current.ports).toEqual([PORT_A]);
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenLastCalledWith('useWorkspacePorts: fetch failed', {
+      workspaceId: 'ws-1',
+      circuitOpen: true,
+      consecutiveUnavailable: 6,
+      error: 'fail 6',
+      nextRefetchIntervalMs: 300_000,
+    });
+
+    await advancePoll(120_000);
+    expect(mockListWorkspacePorts).toHaveBeenCalledTimes(7);
+
+    mockListWorkspacePorts.mockResolvedValueOnce(makePortsResponse([PORT_B]));
+    await advancePoll(180_000);
     await flushQueries();
     expect(result.current.ports).toEqual([PORT_B]);
+    expect(mockListWorkspacePorts).toHaveBeenCalledTimes(8);
 
-    for (let i = 0; i < 3; i++) {
-      mockListWorkspacePorts.mockRejectedValueOnce(new Error(`fail ${i}`));
-      await advancePoll();
-    }
+    mockListWorkspacePorts.mockResolvedValueOnce(makePortsResponse([PORT_A, PORT_B]));
+    await advancePoll(10_000);
     await flushQueries();
-    expect(result.current.ports).toEqual([]);
+    expect(result.current.ports).toEqual([PORT_A, PORT_B]);
   });
 
+  it('treats running-but-agent-not-ready as a normal backoff state without error logging', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockListWorkspacePorts.mockResolvedValue(
+      makePortsResponse([], { state: 'not_ready', retryable: true })
+    );
+
+    renderHook(() => useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', 'running'), {
+      wrapper: createWrapper(),
+    });
+
+    await flushQueries();
+    expect(mockListWorkspacePorts).toHaveBeenCalledTimes(1);
+
+    await advancePoll(10_000);
+    expect(mockListWorkspacePorts).toHaveBeenCalledTimes(2);
+
+    await advancePoll(10_000);
+    expect(mockListWorkspacePorts).toHaveBeenCalledTimes(3);
+
+    await advancePoll(10_000);
+    expect(mockListWorkspacePorts).toHaveBeenCalledTimes(3);
+
+    await advancePoll(20_000);
+    expect(mockListWorkspacePorts).toHaveBeenCalledTimes(3);
+
+    await advancePoll(20_000);
+    expect(mockListWorkspacePorts).toHaveBeenCalledTimes(4);
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('polls recovery workspaces and resumes the normal interval after ports become ready', async () => {
+    mockListWorkspacePorts
+      .mockResolvedValueOnce(makePortsResponse([], { state: 'not_ready', retryable: true }))
+      .mockResolvedValueOnce(makePortsResponse([PORT_A]));
+
+    const { result } = renderHook(
+      () => useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', 'recovery'),
+      { wrapper: createWrapper() }
+    );
+
+    await flushQueries();
+    expect(result.current.ports).toEqual([]);
+
+    await advancePoll(10_000);
+    await flushQueries();
+    expect(result.current.ports).toEqual([PORT_A]);
+
+    mockListWorkspacePorts.mockResolvedValueOnce(makePortsResponse([PORT_B]));
+    await advancePoll(10_000);
+    await flushQueries();
+    expect(result.current.ports).toEqual([PORT_B]);
+  });
+
+  it.each(['sleeping', 'stopped', 'deleted'] as const)(
+    'clears ports and stops polling promptly when the workspace status becomes %s',
+    async (status) => {
+      mockListWorkspacePorts.mockResolvedValueOnce(makePortsResponse([PORT_A]));
+      const { result, rerender } = renderHook(
+        ({ workspaceStatus }: { workspaceStatus: WorkspaceStatus }) =>
+          useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', workspaceStatus),
+        { initialProps: { workspaceStatus: 'running' }, wrapper: createWrapper() }
+      );
+      await flushQueries();
+      expect(result.current.ports).toEqual([PORT_A]);
+
+      mockListWorkspacePorts.mockClear();
+      rerender({ workspaceStatus: status });
+      await flushQueries();
+      expect(result.current.ports).toEqual([]);
+
+      await advancePoll(300_000);
+      expect(mockListWorkspacePorts).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['sleeping', 'stopped', 'deleted', 'gone'] as const)(
+    'clears stale ports and hard-stops when the server reports terminal state %s',
+    async (state) => {
+      mockListWorkspacePorts
+        .mockResolvedValueOnce(makePortsResponse([PORT_A]))
+        .mockResolvedValueOnce(makePortsResponse([], { state, retryable: false }));
+
+      const { result } = renderHook(
+        () => useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', 'running'),
+        { wrapper: createWrapper() }
+      );
+
+      await flushQueries();
+      expect(result.current.ports).toEqual([PORT_A]);
+
+      await advancePoll(10_000);
+      await flushQueries();
+      expect(result.current.ports).toEqual([]);
+
+      mockListWorkspacePorts.mockClear();
+      await advancePoll(300_000);
+      expect(mockListWorkspacePorts).not.toHaveBeenCalled();
+    }
+  );
+
   it('polls at the configured interval', async () => {
-    mockListWorkspacePorts.mockResolvedValue([PORT_A]);
-    renderHook(() => useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', true), {
+    mockListWorkspacePorts.mockResolvedValue(makePortsResponse([PORT_A]));
+    renderHook(() => useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', 'running'), {
       wrapper: createWrapper(),
     });
 
@@ -208,7 +345,7 @@ describe('useWorkspacePorts', () => {
   });
 
   it('sets loading only while the first fetch has no data', async () => {
-    let resolvePromise!: (value: typeof PORT_A[]) => void;
+    let resolvePromise!: (value: PortsResponse) => void;
     mockListWorkspacePorts.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
@@ -217,13 +354,13 @@ describe('useWorkspacePorts', () => {
     );
 
     const { result } = renderHook(
-      () => useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', true),
+      () => useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', 'running'),
       { wrapper: createWrapper() }
     );
 
     expect(result.current.loading).toBe(true);
     await act(async () => {
-      resolvePromise([PORT_A]);
+      resolvePromise(makePortsResponse([PORT_A]));
       await Promise.resolve();
     });
     await flushQueries();
@@ -232,7 +369,7 @@ describe('useWorkspacePorts', () => {
   });
 
   it('uses the workspace id in the query key so late old responses cannot clobber the new target', async () => {
-    let resolveFirst!: (value: typeof PORT_A[]) => void;
+    let resolveFirst!: (value: PortsResponse) => void;
     mockListWorkspacePorts.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
@@ -242,25 +379,25 @@ describe('useWorkspacePorts', () => {
 
     const { result, rerender } = renderHook(
       ({ workspaceId }: { workspaceId: string }) =>
-        useWorkspacePorts('https://ws.example.com', workspaceId, 'tok-1', true),
+        useWorkspacePorts('https://ws.example.com', workspaceId, 'tok-1', 'running'),
       { initialProps: { workspaceId: 'ws-1' }, wrapper: createWrapper() }
     );
     await flushQueries();
     expect(mockListWorkspacePorts).toHaveBeenCalledTimes(1);
 
-    mockListWorkspacePorts.mockResolvedValueOnce([PORT_B]);
+    mockListWorkspacePorts.mockResolvedValueOnce(makePortsResponse([PORT_B]));
     rerender({ workspaceId: 'ws-2' });
     await flushQueries();
     expect(result.current.ports).toEqual([PORT_B]);
 
     await act(async () => {
-      resolveFirst([PORT_A]);
+      resolveFirst(makePortsResponse([PORT_A]));
     });
     expect(result.current.ports).toEqual([PORT_B]);
   });
 
   it('uses token changes as a new request generation without storing raw tokens in query keys', async () => {
-    let resolveFirst!: (value: typeof PORT_A[]) => void;
+    let resolveFirst!: (value: PortsResponse) => void;
     mockListWorkspacePorts.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
@@ -271,7 +408,7 @@ describe('useWorkspacePorts', () => {
 
     const { result, rerender } = renderHook(
       ({ token }: { token: string }) =>
-        useWorkspacePorts('https://ws.example.com', 'ws-1', token, true),
+        useWorkspacePorts('https://ws.example.com', 'ws-1', token, 'running'),
       { initialProps: { token: 'tok-1' }, wrapper: createWrapper(client) }
     );
     await flushQueries();
@@ -282,7 +419,7 @@ describe('useWorkspacePorts', () => {
       expect.any(AbortSignal)
     );
 
-    mockListWorkspacePorts.mockResolvedValueOnce([PORT_B]);
+    mockListWorkspacePorts.mockResolvedValueOnce(makePortsResponse([PORT_B]));
     rerender({ token: 'tok-2' });
     expect(result.current.ports).toEqual([]);
     expect(result.current.loading).toBe(true);
@@ -296,7 +433,7 @@ describe('useWorkspacePorts', () => {
     expect(result.current.ports).toEqual([PORT_B]);
 
     await act(async () => {
-      resolveFirst([PORT_A]);
+      resolveFirst(makePortsResponse([PORT_A]));
     });
     await flushQueries();
     expect(result.current.ports).toEqual([PORT_B]);
@@ -309,8 +446,8 @@ describe('useWorkspacePorts', () => {
   });
 
   it('does not issue interval refetches while the tab is hidden and resumes when visible', async () => {
-    mockListWorkspacePorts.mockResolvedValue([PORT_A]);
-    renderHook(() => useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', true), {
+    mockListWorkspacePorts.mockResolvedValue(makePortsResponse([PORT_A]));
+    renderHook(() => useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', 'running'), {
       wrapper: createWrapper(),
     });
     await flushQueries();

@@ -22,6 +22,7 @@ export { VmAgentContainer } from './durable-objects/vm-agent-container';
 export type { Env } from './env';
 export { Sandbox as SandboxDO } from '@cloudflare/sandbox';
 
+import type { WorkspacePortsState, WorkspaceStatus } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -151,6 +152,50 @@ import { assertUserNotSuspended } from './services/signup-approval';
 import { recordNodeRoutingMetric } from './services/telemetry';
 import { assertTerminalTokenSessionLive } from './services/terminal-token-liveness';
 import { fetchVmAgentContainer, getVmAgentContainerConfig } from './services/vm-agent-container';
+
+type WorkspacePortsReadinessPayload = {
+  ports: [];
+  state: WorkspacePortsState;
+  workspaceStatus: WorkspaceStatus | null;
+  retryable: boolean;
+  message: string;
+  diagnostics?: Record<string, unknown>;
+};
+
+function isWorkspacePortsListRequest(
+  method: string,
+  pathname: string,
+  workspaceId: string
+): boolean {
+  return method === 'GET' && pathname === `/workspaces/${workspaceId}/ports`;
+}
+
+function workspacePortsStateForStatus(status: WorkspaceStatus): WorkspacePortsState {
+  if (status === 'sleeping' || status === 'stopped' || status === 'deleted') return status;
+  if (status === 'error') return 'error';
+  return 'not_ready';
+}
+
+function workspacePortsReadinessPayload(
+  state: WorkspacePortsState,
+  workspaceStatus: WorkspaceStatus | null,
+  message: string,
+  retryable: boolean,
+  diagnostics?: Record<string, unknown>
+): WorkspacePortsReadinessPayload {
+  return {
+    ports: [],
+    state,
+    workspaceStatus,
+    retryable,
+    message,
+    ...(diagnostics ? { diagnostics } : {}),
+  };
+}
+
+function isExpectedWorkspacePortsUpstreamUnavailable(status: number): boolean {
+  return status === 502 || status === 503 || status === 504;
+}
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -375,10 +420,17 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     .where(and(eq(schema.workspaces.id, workspaceId), eq(schema.workspaces.userId, userId)))
     .get();
 
+  const portsListRequest = isWorkspacePortsListRequest(c.req.raw.method, url.pathname, workspaceId);
   if (!workspace) {
+    if (portsListRequest) {
+      return c.json(
+        workspacePortsReadinessPayload('gone', null, 'Workspace not found', false)
+      );
+    }
     return c.json({ error: 'NOT_FOUND', message: 'Workspace not found' }, 404);
   }
 
+  const workspaceStatus = workspace.status as WorkspaceStatus;
   const nodeRuntime = workspace.nodeId
     ? ((
         await db
@@ -389,12 +441,22 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
       )?.runtime ?? 'vm')
     : 'vm';
 
-  if (workspace.status !== 'running' && workspace.status !== 'recovery') {
+  if (workspaceStatus !== 'running' && workspaceStatus !== 'recovery') {
     // Allow boot-log WebSocket during creation for real-time streaming
-    if (workspace.status === 'creating' && url.pathname === '/boot-log/ws') {
+    if (workspaceStatus === 'creating' && url.pathname === '/boot-log/ws') {
       // Fall through to proxy
+    } else if (portsListRequest) {
+      const state = workspacePortsStateForStatus(workspaceStatus);
+      return c.json(
+        workspacePortsReadinessPayload(
+          state,
+          workspaceStatus,
+          `Workspace is ${workspaceStatus}`,
+          state === 'not_ready'
+        )
+      );
     } else {
-      return c.json({ error: 'NOT_READY', message: `Workspace is ${workspace.status}` }, 503);
+      return c.json({ error: 'NOT_READY', message: `Workspace is ${workspaceStatus}` }, 503);
     }
   }
 
@@ -479,7 +541,37 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
       // @ts-expect-error — Cloudflare Workers support duplex for streaming request bodies
       duplex: c.req.raw.body ? 'half' : undefined,
     });
-    const response = await fetchVmAgentContainer(c.env, containerId, containerRequest, vmAgentPort);
+    let response: Response;
+    try {
+      response = await fetchVmAgentContainer(c.env, containerId, containerRequest, vmAgentPort);
+    } catch (err) {
+      if (portsListRequest) {
+        return c.json(
+          workspacePortsReadinessPayload(
+            'not_ready',
+            workspaceStatus,
+            'Workspace ports are not ready',
+            true,
+            { runtime: 'cf-container', reason: 'fetch_exception' }
+          ),
+          202
+        );
+      }
+      throw err;
+    }
+
+    if (portsListRequest && isExpectedWorkspacePortsUpstreamUnavailable(response.status)) {
+      return c.json(
+        workspacePortsReadinessPayload(
+          'not_ready',
+          workspaceStatus,
+          'Workspace ports are not ready',
+          true,
+          { runtime: 'cf-container', upstreamStatus: response.status }
+        ),
+        202
+      );
+    }
 
     if (targetPort !== null) {
       const responseHeaders = new Headers(response.headers);
@@ -562,13 +654,43 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   headers.set('X-Forwarded-Host', hostname);
   headers.set('X-Forwarded-Proto', 'https');
 
-  const response = await fetch(vmUrl.toString(), {
-    method: c.req.raw.method,
-    headers,
-    body: c.req.raw.body,
-    // @ts-expect-error — Cloudflare Workers support duplex for streaming request bodies
-    duplex: c.req.raw.body ? 'half' : undefined,
-  });
+  let response: Response;
+  try {
+    response = await fetch(vmUrl.toString(), {
+      method: c.req.raw.method,
+      headers,
+      body: c.req.raw.body,
+      // @ts-expect-error — Cloudflare Workers support duplex for streaming request bodies
+      duplex: c.req.raw.body ? 'half' : undefined,
+    });
+  } catch (err) {
+    if (portsListRequest) {
+      return c.json(
+        workspacePortsReadinessPayload(
+          'not_ready',
+          workspaceStatus,
+          'Workspace ports are not ready',
+          true,
+          { runtime: 'vm', reason: 'fetch_exception' }
+        ),
+        202
+      );
+    }
+    throw err;
+  }
+
+  if (portsListRequest && isExpectedWorkspacePortsUpstreamUnavailable(response.status)) {
+    return c.json(
+      workspacePortsReadinessPayload(
+        'not_ready',
+        workspaceStatus,
+        'Workspace ports are not ready',
+        true,
+        { runtime: 'vm', upstreamStatus: response.status }
+      ),
+      202
+    );
+  }
 
   // 5e: Strip Set-Cookie headers from container responses on port-proxy path.
   // Prevents a malicious container app from overwriting the sam_port_access cookie.

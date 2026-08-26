@@ -98,6 +98,20 @@ const env = {
   VM_AGENT_PORT: '8443',
 };
 
+function workspacePortsRequest() {
+  return new Request(
+    `https://ws-${WORKSPACE_ID}.workspaces.example.com/workspaces/${WORKSPACE_ID}/ports?token=terminal-jwt`
+  );
+}
+
+function allowTerminalWorkspaceAccess() {
+  mockVerifyTerminalToken.mockResolvedValue({
+    workspace: WORKSPACE_ID,
+    subject: 'user-1',
+    sessionToken: 'token-session-1',
+  });
+}
+
 describe('workspace proxy port-access auth', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -333,5 +347,109 @@ describe('workspace proxy port-access auth', () => {
     // Non-port workspace request should still work with terminal token
     expect(response.status).toBe(200);
     expect(mockVerifyTerminalToken).toHaveBeenCalledWith('terminal-jwt', env);
+  });
+
+  it.each(['sleeping', 'stopped', 'deleted'] as const)(
+    'returns a structured non-retryable ports lifecycle payload when the workspace is %s',
+    async (status) => {
+      allowTerminalWorkspaceAccess();
+      workspaceResult = {
+        nodeId: 'node-1',
+        status,
+        userId: 'user-1',
+        portsPublicEnabled: false,
+      };
+      const fetchMock = vi.fn(async () => new Response('should not proxy', { status: 200 }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const response = await worker.default.fetch(workspacePortsRequest(), env);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        ports: [],
+        state: status,
+        workspaceStatus: status,
+        retryable: false,
+        message: `Workspace is ${status}`,
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it('returns a structured retryable ports payload while a creating workspace is not ready', async () => {
+    allowTerminalWorkspaceAccess();
+    workspaceResult = {
+      nodeId: 'node-1',
+      status: 'creating',
+      userId: 'user-1',
+      portsPublicEnabled: false,
+    };
+    const fetchMock = vi.fn(async () => new Response('should not proxy', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await worker.default.fetch(workspacePortsRequest(), env);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ports: [],
+      state: 'not_ready',
+      workspaceStatus: 'creating',
+      retryable: true,
+      message: 'Workspace is creating',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns a structured gone ports payload when the workspace row is absent', async () => {
+    allowTerminalWorkspaceAccess();
+    workspaceResult = null;
+    const fetchMock = vi.fn(async () => new Response('should not proxy', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await worker.default.fetch(workspacePortsRequest(), env);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ports: [],
+      state: 'gone',
+      workspaceStatus: null,
+      retryable: false,
+      message: 'Workspace not found',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('normalizes an expected upstream ports 503 into a retryable not_ready payload', async () => {
+    allowTerminalWorkspaceAccess();
+    const fetchMock = vi.fn(async () => new Response('vm agent not ready', { status: 503 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await worker.default.fetch(workspacePortsRequest(), env);
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ports: [],
+      state: 'not_ready',
+      workspaceStatus: 'running',
+      retryable: true,
+      message: 'Workspace ports are not ready',
+      diagnostics: {
+        runtime: 'vm',
+        upstreamStatus: 503,
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps terminal token failures as auth failures for workspace ports requests', async () => {
+    mockVerifyTerminalToken.mockRejectedValue(new Error('bad token'));
+
+    const response = await worker.default.fetch(workspacePortsRequest(), env);
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: 'UNAUTHORIZED',
+      message: 'Invalid workspace token',
+    });
   });
 });

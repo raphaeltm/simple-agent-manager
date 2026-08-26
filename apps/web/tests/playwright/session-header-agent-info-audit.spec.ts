@@ -173,9 +173,43 @@ async function setupApiMocks(
     }
     if (path.startsWith('/api/notifications'))
       return respond(200, { notifications: [], unreadCount: 0 });
-    if (path.startsWith('/api/credentials')) return respond(200, []);
+    if (path === '/api/credentials/agent') {
+      return respond(200, {
+        credentials: [
+          {
+            agentType: 'claude-code',
+            provider: 'anthropic',
+            credentialKind: 'oauth-token',
+            isActive: true,
+            maskedKey: 'oauth-••••',
+            label: 'Mock subscription',
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+          },
+        ],
+      });
+    }
+    if (path.startsWith('/api/credentials')) {
+      return respond(200, [
+        {
+          id: 'cred-hetzner-1',
+          provider: 'hetzner',
+          connected: true,
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+      ]);
+    }
     if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
-    if (path.startsWith('/api/github/installations')) return respond(200, []);
+    if (path.startsWith('/api/github/installations')) {
+      return respond(200, [
+        {
+          id: 'inst-1',
+          accountLogin: 'testuser',
+          accountType: 'User',
+          repositorySelection: 'all',
+        },
+      ]);
+    }
     if (path.startsWith('/api/trial-status')) {
       return respond(200, {
         available: false,

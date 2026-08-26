@@ -443,7 +443,7 @@ export function useSessionLifecycle(
     workspace?.url ?? undefined,
     session?.workspaceId ?? undefined,
     terminalToken ?? undefined,
-    isWorkspaceRunning
+    workspace?.status
   );
 
   // Degraded fallback while the DO WebSocket is unavailable. Connected active

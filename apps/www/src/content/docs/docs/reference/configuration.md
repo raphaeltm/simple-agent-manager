@@ -967,6 +967,11 @@ Applied via cloud-init on each node:
 | `VITE_PROJECT_LIST_LIMIT`                  | `50`               | Projects loaded into each shared list-cache entry                        |
 | `VITE_PROJECT_POLL_INTERVAL_MS`            | `30000`            | Project-list page refresh cadence in milliseconds; `0` disables          |
 | `VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS`    | `60000`            | App-shell project-list refresh cadence in milliseconds; `0` disables     |
+| `VITE_WORKSPACE_PORTS_POLL_MS`             | `10000`            | Workspace forwarded-port base refresh cadence in milliseconds            |
+| `VITE_WORKSPACE_PORTS_BACKOFF_MAX_MS`      | `120000`           | Maximum backoff between forwarded-port readiness polls                   |
+| `VITE_WORKSPACE_PORTS_FAILURE_BUDGET`      | `6`                | Consecutive unavailable port-list responses before circuit cooldown      |
+| `VITE_WORKSPACE_PORTS_BACKOFF_JITTER_RATIO` | `0.2`             | +/- jitter ratio applied to forwarded-port readiness backoff delays      |
+| `VITE_WORKSPACE_PORTS_CIRCUIT_RESET_MS`    | `300000`           | Open-circuit cooldown before probing forwarded-port readiness again      |
 | `VITE_PROJECT_PREFETCH_DELAY_MS`           | `120`              | Mouse dwell before project-detail prefetch; focus/touch are immediate    |
 | `VITE_BACKGROUND_FETCH_DELAY_MS`           | `150`              | Delay before background query activity is shown and announced            |
 | `VITE_CHUNK_LOAD_RETRY_DELAY_MS`           | `350`              | Wait before retrying a failed lazy route-chunk import                    |

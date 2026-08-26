@@ -8,6 +8,11 @@ interface ImportMetaEnv {
   readonly VITE_PROJECT_LIST_LIMIT?: string;
   readonly VITE_PROJECT_POLL_INTERVAL_MS?: string;
   readonly VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS?: string;
+  readonly VITE_WORKSPACE_PORTS_POLL_MS?: string;
+  readonly VITE_WORKSPACE_PORTS_BACKOFF_MAX_MS?: string;
+  readonly VITE_WORKSPACE_PORTS_FAILURE_BUDGET?: string;
+  readonly VITE_WORKSPACE_PORTS_BACKOFF_JITTER_RATIO?: string;
+  readonly VITE_WORKSPACE_PORTS_CIRCUIT_RESET_MS?: string;
   readonly VITE_PROJECT_PREFETCH_DELAY_MS?: string;
   readonly VITE_BACKGROUND_FETCH_DELAY_MS?: string;
   readonly VITE_CHUNK_LOAD_RETRY_DELAY_MS?: string;

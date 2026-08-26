@@ -100,6 +100,7 @@ export type {
   VMLocation,
   VMSize,
   Workspace,
+  WorkspacePortsState,
   WorkspaceProfile,
   WorkspaceResponse,
   WorkspaceRuntimeAssetsResponse,

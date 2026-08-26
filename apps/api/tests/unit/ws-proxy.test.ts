@@ -24,7 +24,7 @@ describe('ws proxy source contract', () => {
   });
 
   it('allows recovery workspaces to proxy traffic', () => {
-    expect(file).toContain("workspace.status !== 'running' && workspace.status !== 'recovery'");
+    expect(file).toContain("workspaceStatus !== 'running' && workspaceStatus !== 'recovery'");
   });
 
   it('constructs the backend VM URL from trusted routing config instead of cloning request origin', () => {

@@ -26,6 +26,16 @@ function resolveIntervalMs(raw: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function resolvePositiveInteger(raw: string | undefined, fallback: number): number {
+  const parsed = parseInt(raw ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function resolveRatio(raw: string | undefined, fallback: number): number {
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : fallback;
+}
+
 /** Node detail refresh (node record + its workspace list). */
 const DEFAULT_NODE_DETAIL_POLL_MS = 10_000;
 export const NODE_DETAIL_POLL_MS = resolveIntervalMs(
@@ -62,10 +72,38 @@ export const WORKSPACE_EVENTS_POLL_MS = resolveIntervalMs(
 );
 
 /** Detected-port refresh for the workspace port panel. */
-const DEFAULT_WORKSPACE_PORTS_POLL_MS = 10_000;
+export const DEFAULT_WORKSPACE_PORTS_POLL_MS = 10_000;
 export const WORKSPACE_PORTS_POLL_MS = resolveIntervalMs(
   import.meta.env.VITE_WORKSPACE_PORTS_POLL_MS,
   DEFAULT_WORKSPACE_PORTS_POLL_MS
+);
+
+/** Maximum delay for workspace port-list exponential backoff. */
+export const DEFAULT_WORKSPACE_PORTS_BACKOFF_MAX_MS = 120_000;
+export const WORKSPACE_PORTS_BACKOFF_MAX_MS = resolveIntervalMs(
+  import.meta.env.VITE_WORKSPACE_PORTS_BACKOFF_MAX_MS,
+  DEFAULT_WORKSPACE_PORTS_BACKOFF_MAX_MS
+);
+
+/** Consecutive unavailable responses before the workspace ports circuit opens. */
+export const DEFAULT_WORKSPACE_PORTS_FAILURE_BUDGET = 6;
+export const WORKSPACE_PORTS_FAILURE_BUDGET = resolvePositiveInteger(
+  import.meta.env.VITE_WORKSPACE_PORTS_FAILURE_BUDGET,
+  DEFAULT_WORKSPACE_PORTS_FAILURE_BUDGET
+);
+
+/** +/- jitter applied to workspace ports backoff delays. */
+export const DEFAULT_WORKSPACE_PORTS_BACKOFF_JITTER_RATIO = 0.2;
+export const WORKSPACE_PORTS_BACKOFF_JITTER_RATIO = resolveRatio(
+  import.meta.env.VITE_WORKSPACE_PORTS_BACKOFF_JITTER_RATIO,
+  DEFAULT_WORKSPACE_PORTS_BACKOFF_JITTER_RATIO
+);
+
+/** Open-circuit cooldown before a half-open workspace ports readiness probe. */
+export const DEFAULT_WORKSPACE_PORTS_CIRCUIT_RESET_MS = 300_000;
+export const WORKSPACE_PORTS_CIRCUIT_RESET_MS = resolveIntervalMs(
+  import.meta.env.VITE_WORKSPACE_PORTS_CIRCUIT_RESET_MS,
+  DEFAULT_WORKSPACE_PORTS_CIRCUIT_RESET_MS
 );
 
 /** Node list refresh on the `/nodes` page. */
