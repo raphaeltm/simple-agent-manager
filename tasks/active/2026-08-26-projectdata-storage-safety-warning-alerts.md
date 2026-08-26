@@ -148,6 +148,10 @@ perform any one-off production purge.
   passed, 55 files, 724 tests
 - `pnpm vitest run tests/unit/routes/admin-security.test.ts --reporter=verbose` — passed, 7 tests
 - `pnpm quality:migration-safety` — passed, 152 FK relationships scanned, 0 new violations
+- `pnpm lint` — passed with existing unrelated ACP/web warnings only
+- `pnpm typecheck` — passed with existing Astro template baseline report
+- `pnpm build` — passed
+- `pnpm test` — passed, 21 tasks; API package 605 files / 8249 tests
 - Touched non-test source files are at or below 500 lines, except documented
   existing exceptions (`apps/api/src/env.ts`, `apps/api/src/db/schema.ts`).
 
