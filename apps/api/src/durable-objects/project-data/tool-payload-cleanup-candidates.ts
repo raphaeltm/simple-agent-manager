@@ -1,4 +1,9 @@
 import { archiveToolPayloadCandidate } from './tool-payload-archive';
+import {
+  clearToolPayloadCleanupAttempt,
+  recordToolPayloadCleanupAttempt,
+  type ToolPayloadCleanupAttemptStatus,
+} from './tool-payload-cleanup-attempts';
 import type { Env } from './types';
 
 export type ToolPayloadCleanupCursor = {
@@ -35,6 +40,7 @@ type ToolPayloadCandidateUpdate = {
   storedToolMetadataBytes: number;
   retryableFailure: boolean;
   errorMessage: string | null;
+  cleanupAttemptStatus: ToolPayloadCleanupAttemptStatus | 'archived' | null;
 };
 
 type ToolPayloadCandidateProcessingContext = {
@@ -42,6 +48,9 @@ type ToolPayloadCandidateProcessingContext = {
   env: Env;
   projectId: string;
   archivePrefix: string;
+  archiveRetryDelayMs: number;
+  archiveWriteTimeoutMs: number;
+  transactionSync?: <T>(callback: () => T) => T;
   maxRowBytes: number;
   archivedAt: number;
 };
@@ -68,10 +77,12 @@ export function selectToolPayloadCandidates(
   sql: SqlStorage,
   cursor: ToolPayloadCleanupCursor | null,
   cutoffCreatedAt: number,
+  retryReadyAt: number,
   limit: number,
   maxMetadataBytes: number,
   allowOversizedFirst: boolean
 ): ToolPayloadCandidate[] {
+  const cursorSessionId = cursor?.sessionId ?? null;
   const cursorCreatedAt = cursor?.createdAt ?? null;
   const cursorSequence = cursor?.sequence ?? null;
   const cursorMessageId = cursor?.messageId ?? null;
@@ -87,15 +98,38 @@ export function selectToolPayloadCandidates(
          FROM chat_messages
          WHERE role = 'tool'
            AND tool_metadata IS NOT NULL
-           AND tool_metadata LIKE '%"content"%'
            AND created_at < ?
            AND (
              ? IS NULL
-             OR created_at > ?
-             OR (created_at = ? AND COALESCE(sequence, 0) > ?)
-             OR (created_at = ? AND COALESCE(sequence, 0) = ? AND id > ?)
+             OR session_id > ?
+             OR (
+               session_id = ?
+               AND (
+                 created_at > ?
+                 OR (created_at = ? AND COALESCE(sequence, 0) > ?)
+                 OR (created_at = ? AND COALESCE(sequence, 0) = ? AND id > ?)
+               )
+             )
            )
-         ORDER BY created_at ASC, COALESCE(sequence, 0) ASC, id ASC
+           AND NOT EXISTS (
+             SELECT 1
+             FROM tool_payload_archives archived
+             WHERE archived.message_id = chat_messages.id
+           )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM tool_payload_cleanup_attempts attempt
+             WHERE attempt.message_id = chat_messages.id
+               AND (
+                 attempt.status IN ('no_reclaimable_payload', 'invalid_metadata', 'oversized')
+                 OR (
+                   attempt.status = 'retryable_failure'
+                   AND attempt.next_attempt_at IS NOT NULL
+                   AND attempt.next_attempt_at > ?
+                 )
+               )
+           )
+         ORDER BY session_id ASC, created_at ASC, sequence ASC, id ASC
          LIMIT ?
        ),
        bounded AS (
@@ -105,9 +139,11 @@ export function selectToolPayloadCandidates(
            created_at,
            sequence,
            tool_metadata_bytes,
-           ROW_NUMBER() OVER (ORDER BY created_at ASC, sequence ASC, id ASC) AS row_number,
+           ROW_NUMBER() OVER (
+             ORDER BY session_id ASC, created_at ASC, sequence ASC, id ASC
+           ) AS row_number,
            SUM(tool_metadata_bytes) OVER (
-             ORDER BY created_at ASC, sequence ASC, id ASC
+             ORDER BY session_id ASC, created_at ASC, sequence ASC, id ASC
              ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
            ) AS cumulative_tool_metadata_bytes
          FROM limited
@@ -116,15 +152,18 @@ export function selectToolPayloadCandidates(
        FROM bounded
        WHERE cumulative_tool_metadata_bytes <= ?
           OR (? = 1 AND row_number = 1)
-       ORDER BY created_at ASC, sequence ASC, id ASC`,
+       ORDER BY session_id ASC, created_at ASC, sequence ASC, id ASC`,
       cutoffCreatedAt,
-      cursorCreatedAt,
+      cursorSessionId,
+      cursorSessionId ?? '',
+      cursorSessionId ?? '',
       cursorCreatedAt ?? 0,
       cursorCreatedAt ?? 0,
       cursorSequence ?? 0,
       cursorCreatedAt ?? 0,
       cursorSequence ?? 0,
       cursorMessageId ?? '',
+      retryReadyAt,
       limit,
       maxMetadataBytes,
       allowOversizedFirst ? 1 : 0
@@ -136,8 +175,10 @@ export function selectToolPayloadCandidates(
 export function hasToolPayloadCandidatesAfter(
   sql: SqlStorage,
   cursor: ToolPayloadCleanupCursor | null,
-  cutoffCreatedAt: number
+  cutoffCreatedAt: number,
+  retryReadyAt: number
 ): boolean {
+  const cursorSessionId = cursor?.sessionId ?? null;
   const cursorCreatedAt = cursor?.createdAt ?? null;
   const cursorSequence = cursor?.sequence ?? null;
   const cursorMessageId = cursor?.messageId ?? null;
@@ -147,24 +188,50 @@ export function hasToolPayloadCandidatesAfter(
        FROM chat_messages
        WHERE role = 'tool'
          AND tool_metadata IS NOT NULL
-         AND tool_metadata LIKE '%"content"%'
          AND created_at < ?
          AND (
            ? IS NULL
-           OR created_at > ?
-           OR (created_at = ? AND COALESCE(sequence, 0) > ?)
-           OR (created_at = ? AND COALESCE(sequence, 0) = ? AND id > ?)
+           OR session_id > ?
+           OR (
+             session_id = ?
+             AND (
+               created_at > ?
+               OR (created_at = ? AND COALESCE(sequence, 0) > ?)
+               OR (created_at = ? AND COALESCE(sequence, 0) = ? AND id > ?)
+             )
+           )
          )
-       ORDER BY created_at ASC, COALESCE(sequence, 0) ASC, id ASC
+         AND NOT EXISTS (
+           SELECT 1
+           FROM tool_payload_archives archived
+           WHERE archived.message_id = chat_messages.id
+         )
+         AND NOT EXISTS (
+           SELECT 1
+           FROM tool_payload_cleanup_attempts attempt
+           WHERE attempt.message_id = chat_messages.id
+             AND (
+               attempt.status IN ('no_reclaimable_payload', 'invalid_metadata', 'oversized')
+               OR (
+                 attempt.status = 'retryable_failure'
+                 AND attempt.next_attempt_at IS NOT NULL
+                 AND attempt.next_attempt_at > ?
+               )
+             )
+         )
+       ORDER BY session_id ASC, created_at ASC, sequence ASC, id ASC
        LIMIT ?`,
       cutoffCreatedAt,
-      cursorCreatedAt,
+      cursorSessionId,
+      cursorSessionId ?? '',
+      cursorSessionId ?? '',
       cursorCreatedAt ?? 0,
       cursorCreatedAt ?? 0,
       cursorSequence ?? 0,
       cursorCreatedAt ?? 0,
       cursorSequence ?? 0,
       cursorMessageId ?? '',
+      retryReadyAt,
       1
     )
     .raw();
@@ -228,6 +295,7 @@ function emptyCandidateUpdate(): ToolPayloadCandidateUpdate {
     storedToolMetadataBytes: 0,
     retryableFailure: false,
     errorMessage: null,
+    cleanupAttemptStatus: 'no_reclaimable_payload',
   };
 }
 
@@ -240,7 +308,31 @@ function failedBudgetUpdate(candidate: ToolPayloadCandidate): ToolPayloadCandida
     storedToolMetadataBytes: 0,
     retryableFailure: false,
     errorMessage: `tool_metadata row ${candidate.messageId} exceeded the cleanup per-row byte budget`,
+    cleanupAttemptStatus: 'oversized',
   };
+}
+
+function recordToolPayloadCleanupDisposition(
+  context: ToolPayloadCandidateProcessingContext,
+  candidate: ToolPayloadCandidate,
+  update: ToolPayloadCandidateUpdate
+): void {
+  if (update.cleanupAttemptStatus === null) return;
+  if (update.cleanupAttemptStatus === 'archived') {
+    clearToolPayloadCleanupAttempt(context.sql, candidate.messageId);
+    return;
+  }
+  const nextAttemptAt = update.cleanupAttemptStatus === 'retryable_failure'
+    ? context.archivedAt + context.archiveRetryDelayMs
+    : null;
+  recordToolPayloadCleanupAttempt(
+    context.sql,
+    candidate,
+    update.cleanupAttemptStatus,
+    context.archivedAt,
+    update.errorMessage,
+    nextAttemptAt
+  );
 }
 
 async function processToolPayloadCandidate(
@@ -259,6 +351,8 @@ async function processToolPayloadCandidate(
     env: context.env,
     projectId: context.projectId,
     archivePrefix: context.archivePrefix,
+    archiveWriteTimeoutMs: context.archiveWriteTimeoutMs,
+    ...(context.transactionSync ? { transactionSync: context.transactionSync } : {}),
     candidate,
     toolMetadata,
     archivedAt: context.archivedAt,
@@ -293,6 +387,9 @@ export async function scanToolPayloadCandidates(
     env: input.env,
     projectId: input.projectId,
     archivePrefix: input.archivePrefix,
+    archiveRetryDelayMs: input.archiveRetryDelayMs,
+    archiveWriteTimeoutMs: input.archiveWriteTimeoutMs,
+    ...(input.transactionSync ? { transactionSync: input.transactionSync } : {}),
     maxRowBytes: input.maxRowBytes,
     archivedAt: input.archivedAt,
   };
@@ -311,6 +408,7 @@ export async function scanToolPayloadCandidates(
         : remainingReadBytes;
 
     const updated = await processToolPayloadCandidate(processingContext, candidate, maxReadBytes);
+    recordToolPayloadCleanupDisposition(processingContext, candidate, updated);
 
     result.rowsScanned++;
     result.lastCursor = candidate;

@@ -130,6 +130,7 @@ async function runArchiveCleanup(
         allowStart: true,
         now: options.now ?? FIXED_NOW,
         ...(options.nowMs ? { nowMs: options.nowMs } : {}),
+        transactionSync: (callback) => state.storage.transactionSync(callback),
         classifyStatus: (databaseSizeBytes) => classifyStorageUsage(databaseSizeBytes, config),
         recordTelemetry: async () => undefined,
       });
@@ -185,6 +186,24 @@ async function readArchiveRows(
   });
 }
 
+async function readCleanupAttempts(
+  stub: DurableObjectStub<ProjectDataTestDouble>,
+  messageIds: string[]
+): Promise<Array<{ message_id: string; status: string; failure_count: number }>> {
+  return runInDurableObject(stub, async (_instance, state) => {
+    const placeholders = messageIds.map(() => '?').join(', ');
+    return state.storage.sql
+      .exec(
+        `SELECT message_id, status, failure_count
+         FROM tool_payload_cleanup_attempts
+         WHERE message_id IN (${placeholders})
+         ORDER BY message_id ASC`,
+        ...messageIds
+      )
+      .toArray() as Array<{ message_id: string; status: string; failure_count: number }>;
+  });
+}
+
 async function callMcpTool(
   token: string,
   name: string,
@@ -230,7 +249,7 @@ describe('ProjectData tool payload R2 archival', () => {
         PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
         PROJECT_DATA_ARCHIVE_R2: failingR2,
       },
-      { now: FIXED_NOW }
+      { now: FIXED_NOW, nowMs: () => FIXED_NOW }
     );
 
     expect(result?.rowsUpdated).toBe(0);
@@ -239,6 +258,144 @@ describe('ProjectData tool payload R2 archival', () => {
     const metadata = await readMessageMetadata(stub, seeded.messageIds);
     expect(Array.isArray(metadata.get(seeded.messageIds[0]!)?.content)).toBe(true);
     expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
+  });
+
+  it('fails closed when local archive bookkeeping fails after the R2 write', async () => {
+    const projectId = `${TEST_PREFIX}-local-atomicity`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'local-failure', createdAt: FIXED_NOW - 1_000, sequence: 1 },
+    ]);
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(`
+        CREATE TRIGGER fail_tool_payload_metadata_update
+        BEFORE UPDATE OF tool_metadata ON chat_messages
+        BEGIN
+          SELECT RAISE(ABORT, 'forced tool_metadata update failure');
+        END
+      `);
+    });
+
+    const result = await runArchiveCleanup(
+      stub,
+      projectId,
+      { PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0' },
+      { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+    );
+
+    expect(result?.rowsUpdated).toBe(0);
+    expect(result?.rowsFailed).toBe(1);
+    const metadata = await readMessageMetadata(stub, seeded.messageIds);
+    expect(Array.isArray(metadata.get(seeded.messageIds[0]!)?.content)).toBe(true);
+    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
+  });
+
+  it('bounds a slow R2 archive write with a configurable timeout', async () => {
+    const projectId = `${TEST_PREFIX}-archive-timeout`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'slow-r2', createdAt: FIXED_NOW - 1_000, sequence: 1 },
+    ]);
+    const slowR2 = {
+      put: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      },
+    } as unknown as R2Bucket;
+
+    const result = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS: '1',
+        PROJECT_DATA_ARCHIVE_R2: slowR2,
+      },
+      { now: FIXED_NOW }
+    );
+
+    expect(result?.rowsUpdated).toBe(0);
+    expect(result?.rowsFailed).toBe(1);
+    const metadata = await readMessageMetadata(stub, seeded.messageIds);
+    expect(Array.isArray(metadata.get(seeded.messageIds[0]!)?.content)).toBe(true);
+    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
+  });
+
+  it('preserves a deferred retry after later candidates are archived', async () => {
+    const projectId = `${TEST_PREFIX}-retry-carry-forward`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'retry-first', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+      { id: 'archive-second', createdAt: FIXED_NOW - 1_000, sequence: 2 },
+    ]);
+    const failingMessageId = seeded.messageIds[0]!;
+    const failingR2 = {
+      put: async (key: string) => {
+        if (key.includes(encodeURIComponent(failingMessageId))) {
+          throw new Error('forced retryable archive failure');
+        }
+      },
+    } as unknown as R2Bucket;
+
+    const first = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS: '300000',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS: '60000',
+        PROJECT_DATA_ARCHIVE_R2: failingR2,
+      },
+      { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+    );
+    expect(first?.rowsUpdated).toBe(0);
+    expect(first?.rowsFailed).toBe(1);
+
+    const second = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS: '300000',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS: '60000',
+        PROJECT_DATA_ARCHIVE_R2: failingR2,
+      },
+      { now: FIXED_NOW + 60_001, nowMs: () => FIXED_NOW + 60_001 }
+    );
+    expect(second?.rowsUpdated).toBe(1);
+    expect(second?.rowsFailed).toBe(0);
+    expect(second?.exhaustedCandidates).toBe(false);
+    expect(second?.recheckAt).toBe(FIXED_NOW + 300_000);
+
+    const metadataAfterSecond = await readMessageMetadata(stub, seeded.messageIds);
+    expect(Array.isArray(metadataAfterSecond.get(failingMessageId)?.content)).toBe(true);
+    expect(metadataAfterSecond.get(seeded.messageIds[1]!)?.content).toBeUndefined();
+    expect(await readCleanupAttempts(stub, seeded.messageIds)).toEqual([
+      expect.objectContaining({
+        message_id: failingMessageId,
+        status: 'retryable_failure',
+        failure_count: 1,
+      }),
+    ]);
+
+    const third = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS: '300000',
+      },
+      { now: FIXED_NOW + 300_001, nowMs: () => FIXED_NOW + 300_001 }
+    );
+    expect(third?.rowsUpdated).toBe(1);
+    expect(third?.rowsFailed).toBe(0);
+    const metadataAfterThird = await readMessageMetadata(stub, seeded.messageIds);
+    expect(metadataAfterThird.get(failingMessageId)?.content).toBeUndefined();
+    expect(await readCleanupAttempts(stub, seeded.messageIds)).toHaveLength(0);
+    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(2);
   });
 
   it('archives only tool payloads strictly older than the retention boundary', async () => {
@@ -282,6 +439,59 @@ describe('ProjectData tool payload R2 archival', () => {
     expect((archived.toolMetadata as Record<string, unknown>).content).toEqual(
       expect.arrayContaining([expect.objectContaining({ type: 'text' })])
     );
+  });
+
+  it('never archives recent or non-tool payload metadata controls', async () => {
+    const projectId = `${TEST_PREFIX}-ineligible-control`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const cutoff = FIXED_NOW - 7 * DAY_MS;
+    const messageIds = await runInDurableObject(stub, async (instance, state) => {
+      const sessionId = await instance.createSession(null, 'Ineligible archive controls');
+      const oldAssistant = await instance.persistMessage(
+        sessionId,
+        'assistant',
+        'assistant visible text must remain',
+        makeToolMetadata('old-assistant'),
+        'assistant-tool-like'
+      );
+      const recentTool = await instance.persistMessage(
+        sessionId,
+        'tool',
+        'recent visible text must remain',
+        makeToolMetadata('recent-tool'),
+        'recent-tool'
+      );
+      state.storage.sql.exec(
+        'UPDATE chat_messages SET created_at = ?, sequence = ? WHERE id = ?',
+        cutoff - 1,
+        1,
+        oldAssistant
+      );
+      state.storage.sql.exec(
+        'UPDATE chat_messages SET created_at = ?, sequence = ? WHERE id = ?',
+        cutoff + 1,
+        2,
+        recentTool
+      );
+      return [oldAssistant, recentTool];
+    });
+
+    const result = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '7',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS: '10',
+      },
+      { now: FIXED_NOW }
+    );
+
+    expect(result).toBeNull();
+    const metadata = await readMessageMetadata(stub, messageIds);
+    expect(Array.isArray(metadata.get(messageIds[0]!)?.content)).toBe(true);
+    expect(Array.isArray(metadata.get(messageIds[1]!)?.content)).toBe(true);
+    expect(await readArchiveRows(stub, messageIds)).toHaveLength(0);
   });
 
   it('enforces row, byte, and wall-time budgets with continuation rechecks', async () => {
@@ -358,6 +568,70 @@ describe('ProjectData tool payload R2 archival', () => {
     const wallMetadata = await readMessageMetadata(wallBudgetStub, wallBudgetSeeded.messageIds);
     expect(wallMetadata.get(wallBudgetSeeded.messageIds[0]!)?.content).toBeUndefined();
     expect(Array.isArray(wallMetadata.get(wallBudgetSeeded.messageIds[1]!)?.content)).toBe(true);
+  });
+
+  it('lets a non-reclaimable candidate escape across complete cleanup sweeps', async () => {
+    const projectId = `${TEST_PREFIX}-candidate-escape`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'poison', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+      { id: 'valid-after-poison', createdAt: FIXED_NOW - 1_000, sequence: 2 },
+    ]);
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        'UPDATE chat_messages SET tool_metadata = ? WHERE id = ?',
+        JSON.stringify([{ content: [{ type: 'text', text: 'poison' }] }]),
+        seeded.messageIds[0]
+      );
+    });
+
+    const first = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS: '1',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS: '10',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES: '1000000',
+      },
+      { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+    );
+    expect(first?.rowsFailed).toBe(1);
+    expect(first?.rowsUpdated).toBe(1);
+
+    const attemptsAfterFirst = await readCleanupAttempts(stub, seeded.messageIds);
+    expect(attemptsAfterFirst).toEqual([
+      expect.objectContaining({
+        message_id: seeded.messageIds[0],
+        status: 'invalid_metadata',
+        failure_count: 1,
+      }),
+    ]);
+
+    const second = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS: '1',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS: '10',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES: '1000000',
+      },
+      { now: FIXED_NOW + 2, nowMs: () => FIXED_NOW + 2 }
+    );
+    expect(second?.rowsFailed ?? 0).toBe(0);
+    expect(second?.rowsUpdated ?? 0).toBe(0);
+
+    const metadata = await readMessageMetadata(stub, seeded.messageIds);
+    const poisonMetadata = metadata.get(seeded.messageIds[0]!) as unknown;
+    expect(Array.isArray(poisonMetadata)).toBe(true);
+    expect(Array.isArray((poisonMetadata as Array<Record<string, unknown>>)[0]?.content)).toBe(
+      true
+    );
+    expect(metadata.get(seeded.messageIds[1]!)?.content).toBeUndefined();
+    const attemptsAfterSecond = await readCleanupAttempts(stub, seeded.messageIds);
+    expect(attemptsAfterSecond).toEqual(attemptsAfterFirst);
   });
 
   it('lazy-loads archived content from R2 and degrades explicitly when the object is missing', async () => {

@@ -7,6 +7,7 @@ import {
   truncateStorageSafetyMetaValue as truncate,
   writeStorageSafetyMeta as writeMeta,
 } from './storage-safety-meta';
+import { readNextToolPayloadCleanupRetryAt } from './tool-payload-cleanup-attempts';
 import {
   hasToolPayloadCandidatesAfter,
   scanToolPayloadCandidates,
@@ -56,9 +57,12 @@ type ToolPayloadCleanupPlan = {
   batchRows: number;
   batchBytes: number;
   maxRowBytes: number;
+  archiveRetryDelayMs: number;
+  archiveWriteTimeoutMs: number;
   cutoffCreatedAt: number;
   deadlineMs: number;
   pendingCursor: ToolPayloadCleanupCursor | null;
+  transactionSync?: <T>(callback: () => T) => T;
 };
 
 type ToolPayloadCleanupBatch = {
@@ -75,6 +79,7 @@ type ToolPayloadCleanupBatch = {
   pauseCursor: ToolPayloadCleanupCursor | null;
   retryableFailure: boolean;
   hasMoreCandidates: boolean;
+  nextRetryAt: number | null;
 };
 
 function createToolPayloadCleanupPlan(
@@ -127,10 +132,13 @@ function createToolPayloadCleanupPlan(
     batchRows: config.toolPayloadCleanupBatchRows,
     batchBytes: config.toolPayloadCleanupBatchBytes,
     maxRowBytes: config.toolPayloadCleanupMaxRowBytes,
+    archiveRetryDelayMs: config.toolPayloadArchiveRetryDelayMs,
+    archiveWriteTimeoutMs: config.toolPayloadArchiveWriteTimeoutMs,
     cutoffCreatedAt: now - config.toolPayloadArchiveRetentionMs,
     deadlineMs: now + config.toolPayloadCleanupWallTimeMs,
     pendingCursor,
     ...(options.nowMs ? { nowMs: options.nowMs } : {}),
+    ...(options.transactionSync ? { transactionSync: options.transactionSync } : {}),
   };
 }
 
@@ -149,6 +157,7 @@ function createEmptyToolPayloadCleanupBatch(): ToolPayloadCleanupBatch {
     pauseCursor: null,
     retryableFailure: false,
     hasMoreCandidates: false,
+    nextRetryAt: null,
   };
 }
 
@@ -167,12 +176,18 @@ async function scanToolPayloadCleanupBatch(
     sql,
     plan.pendingCursor,
     plan.cutoffCreatedAt,
+    plan.now,
     plan.batchRows,
     plan.batchBytes,
     true
   );
 
   if (candidates.length === 0) {
+    const nextRetryAt = readNextToolPayloadCleanupRetryAt(sql, plan.now);
+    if (nextRetryAt !== null) {
+      batch.hasMoreCandidates = true;
+      batch.nextRetryAt = nextRetryAt;
+    }
     return batch;
   }
 
@@ -181,6 +196,9 @@ async function scanToolPayloadCleanupBatch(
     env,
     projectId: plan.projectId,
     archivePrefix: config.toolPayloadArchiveR2Prefix,
+    archiveRetryDelayMs: plan.archiveRetryDelayMs,
+    archiveWriteTimeoutMs: plan.archiveWriteTimeoutMs,
+    ...(plan.transactionSync ? { transactionSync: plan.transactionSync } : {}),
     batchBytes: plan.batchBytes,
     maxRowBytes: plan.maxRowBytes,
     candidates,
@@ -215,9 +233,16 @@ async function scanToolPayloadCleanupBatch(
   }
 
   const lastCursor = scanned.lastCursor;
-  if (lastCursor && hasToolPayloadCandidatesAfter(sql, lastCursor, plan.cutoffCreatedAt)) {
+  if (lastCursor && hasToolPayloadCandidatesAfter(sql, lastCursor, plan.cutoffCreatedAt, plan.now)) {
     batch.hasMoreCandidates = true;
     batch.pauseCursor = lastCursor;
+    return batch;
+  }
+
+  const nextRetryAt = readNextToolPayloadCleanupRetryAt(sql, plan.now);
+  if (nextRetryAt !== null) {
+    batch.hasMoreCandidates = true;
+    batch.nextRetryAt = nextRetryAt;
   }
 
   return batch;
@@ -227,6 +252,7 @@ function resolveContinuationCursor(
   batch: ToolPayloadCleanupBatch
 ): ToolPayloadCleanupCursor | null {
   if (!batch.hasMoreCandidates) return null;
+  if (batch.nextRetryAt !== null) return null;
   if (batch.retryableFailure) return batch.pauseCursor;
   return batch.pauseCursor ?? batch.lastCursor;
 }
@@ -447,7 +473,9 @@ export async function runProjectDataToolPayloadCleanup(
   const afterBytes = sql.databaseSize;
   const continuationCursor = resolveContinuationCursor(batch);
   const shouldContinue = batch.hasMoreCandidates;
-  const recheckAt = shouldContinue ? plan.now + config.toolPayloadCleanupRecheckMs : null;
+  const recheckAt = shouldContinue
+    ? (batch.nextRetryAt ?? plan.now + config.toolPayloadCleanupRecheckMs)
+    : null;
   persistToolPayloadCleanupState(sql, continuationCursor, recheckAt);
 
   const exhaustedCandidates =

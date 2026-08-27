@@ -1,5 +1,6 @@
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { stripToolMetadataPayloadForStorage } from './tool-metadata-storage';
+import type { ToolPayloadCleanupAttemptStatus } from './tool-payload-cleanup-attempts';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.tool_payload_archive');
@@ -75,6 +76,7 @@ export type ToolPayloadArchiveUpdateResult = {
   storedToolMetadataBytes: number;
   retryableFailure: boolean;
   errorMessage: string | null;
+  cleanupAttemptStatus: ToolPayloadCleanupAttemptStatus | 'archived' | null;
 };
 
 type PreparedToolPayloadArchive = {
@@ -242,6 +244,7 @@ async function writeArchiveObject(
   r2: R2Bucket,
   key: string,
   body: string,
+  timeoutMs: number,
   input: {
     projectId: string;
     sessionId: string;
@@ -250,7 +253,7 @@ async function writeArchiveObject(
     contentBytes: number;
   }
 ): Promise<void> {
-  await r2.put(key, body, {
+  const write = r2.put(key, body, {
     httpMetadata: { contentType: 'application/json' },
     customMetadata: {
       projectId: input.projectId,
@@ -260,6 +263,23 @@ async function writeArchiveObject(
       contentBytes: String(input.contentBytes),
     },
   });
+  // If the timeout wins, keep the original payload in SQLite and let the
+  // deterministic key be overwritten by a later retry. Attach a catch so a
+  // late rejection from the underlying put is not unhandled after the timeout.
+  write.catch(() => undefined);
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      write,
+      new Promise<never>((_resolve, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`R2 archive write exceeded ${timeoutMs}ms timeout`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
 }
 
 function upsertArchiveRow(
@@ -315,6 +335,7 @@ function emptyArchiveUpdate(toolMetadataBytesRead: number): ToolPayloadArchiveUp
     storedToolMetadataBytes: 0,
     retryableFailure: false,
     errorMessage: null,
+    cleanupAttemptStatus: 'no_reclaimable_payload',
   };
 }
 
@@ -323,6 +344,7 @@ function failedArchiveUpdate(input: {
   originalToolMetadataBytes?: number;
   retryableFailure: boolean;
   errorMessage: string;
+  cleanupAttemptStatus: ToolPayloadCleanupAttemptStatus;
 }): ToolPayloadArchiveUpdateResult {
   return {
     rowsUpdated: 0,
@@ -332,7 +354,26 @@ function failedArchiveUpdate(input: {
     storedToolMetadataBytes: 0,
     retryableFailure: input.retryableFailure,
     errorMessage: input.errorMessage,
+    cleanupAttemptStatus: input.cleanupAttemptStatus,
   };
+}
+
+function writeArchiveBookkeeping(input: {
+  sql: SqlStorage;
+  transactionSync?: <T>(callback: () => T) => T;
+  candidate: ToolPayloadArchiveCandidate;
+  archivedAt: number;
+  prepared: PreparedToolPayloadArchive;
+}): void {
+  const transactionSync = input.transactionSync ?? (<T>(callback: () => T): T => callback());
+  transactionSync(() => {
+    upsertArchiveRow(input.sql, input.candidate, input.archivedAt, input.prepared);
+    updateToolMetadata(
+      input.sql,
+      input.candidate.messageId,
+      input.prepared.strippedToolMetadata
+    );
+  });
 }
 
 export async function archiveToolPayloadCandidate(input: {
@@ -340,6 +381,8 @@ export async function archiveToolPayloadCandidate(input: {
   env: Env;
   projectId: string;
   archivePrefix: string;
+  archiveWriteTimeoutMs: number;
+  transactionSync?: <T>(callback: () => T) => T;
   candidate: ToolPayloadArchiveCandidate;
   toolMetadata: string;
   archivedAt: number;
@@ -354,6 +397,7 @@ export async function archiveToolPayloadCandidate(input: {
       originalToolMetadataBytes: input.candidate.toolMetadataBytes,
       retryableFailure: false,
       errorMessage: error instanceof Error ? error.message : String(error),
+      cleanupAttemptStatus: 'invalid_metadata',
     });
   }
 
@@ -366,19 +410,25 @@ export async function archiveToolPayloadCandidate(input: {
       originalToolMetadataBytes: input.candidate.toolMetadataBytes,
       retryableFailure: true,
       errorMessage: 'PROJECT_DATA_ARCHIVE_R2 binding is not configured',
+      cleanupAttemptStatus: 'retryable_failure',
     });
   }
 
   try {
-    await writeArchiveObject(r2, prepared.key, prepared.body, {
+    await writeArchiveObject(r2, prepared.key, prepared.body, input.archiveWriteTimeoutMs, {
       projectId: input.projectId,
       sessionId: input.candidate.sessionId,
       messageId: input.candidate.messageId,
       archivedAt: input.archivedAt,
       contentBytes: prepared.contentBytes,
     });
-    upsertArchiveRow(input.sql, input.candidate, input.archivedAt, prepared);
-    updateToolMetadata(input.sql, input.candidate.messageId, prepared.strippedToolMetadata);
+    writeArchiveBookkeeping({
+      sql: input.sql,
+      ...(input.transactionSync ? { transactionSync: input.transactionSync } : {}),
+      candidate: input.candidate,
+      archivedAt: input.archivedAt,
+      prepared,
+    });
   } catch (error) {
     log.warn('archive_write_failed_closed', {
       projectId: input.projectId,
@@ -391,6 +441,7 @@ export async function archiveToolPayloadCandidate(input: {
       originalToolMetadataBytes: input.candidate.toolMetadataBytes,
       retryableFailure: true,
       errorMessage: error instanceof Error ? error.message : String(error),
+      cleanupAttemptStatus: 'retryable_failure',
     });
   }
 
@@ -402,6 +453,7 @@ export async function archiveToolPayloadCandidate(input: {
     storedToolMetadataBytes: prepared.strippedToolMetadataBytes,
     retryableFailure: false,
     errorMessage: null,
+    cleanupAttemptStatus: 'archived',
   };
 }
 

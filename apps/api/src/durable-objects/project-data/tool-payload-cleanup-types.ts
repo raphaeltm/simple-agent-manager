@@ -34,6 +34,7 @@ export interface ProjectDataToolPayloadCleanupOptions {
   allowStart?: boolean;
   now?: number;
   nowMs?: () => number;
+  transactionSync?: <T>(callback: () => T) => T;
   classifyStatus: (databaseSizeBytes: number) => ProjectDataStorageStatus;
   recordTelemetry: (
     telemetry: ProjectDataStorageTelemetry,

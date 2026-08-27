@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS,
+  DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS,
+  DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS,
   resolveStorageSafetyConfig,
@@ -41,6 +43,12 @@ describe('ProjectData tool payload archive helpers', () => {
     expect(defaults.toolPayloadArchiveIntervalMs).toBe(
       DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS
     );
+    expect(defaults.toolPayloadArchiveWriteTimeoutMs).toBe(
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS
+    );
+    expect(defaults.toolPayloadArchiveRetryDelayMs).toBe(
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS
+    );
     expect(defaults.toolPayloadArchiveR2Prefix).toBe(
       DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX
     );
@@ -51,11 +59,15 @@ describe('ProjectData tool payload archive helpers', () => {
       PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '3',
       PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS: '4567',
       PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX: '/custom/tool-payloads/',
+      PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS: '5678',
+      PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS: '6789',
     } as Env);
     expect(overrides.toolPayloadCleanupWallTimeMs).toBe(1234);
     expect(overrides.toolPayloadCleanupMaxRowBytes).toBe(2345);
     expect(overrides.toolPayloadArchiveRetentionMs).toBe(3 * 24 * 60 * 60 * 1000);
     expect(overrides.toolPayloadArchiveIntervalMs).toBe(4567);
+    expect(overrides.toolPayloadArchiveWriteTimeoutMs).toBe(5678);
+    expect(overrides.toolPayloadArchiveRetryDelayMs).toBe(6789);
     expect(overrides.toolPayloadArchiveR2Prefix).toBe('custom/tool-payloads');
   });
 });

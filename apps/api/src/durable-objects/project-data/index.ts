@@ -1071,7 +1071,9 @@ export class ProjectData extends DurableObject<Env> {
     // lifecycle maintenance sections so a large project can still reclaim bytes
     // even when idle/reconciliation work has accumulated.
     try {
-      await storageSafety.runProjectDataStorageSafetyAlarm(this.sql, this.env, this.getProjectId());
+      await storageSafety.runProjectDataStorageSafetyAlarm(this.sql, this.env, this.getProjectId(), {
+        transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
+      });
     } catch (err) {
       log.error('alarm.storage_safety_failed', {
         error: err instanceof Error ? err.message : String(err),

@@ -1252,6 +1252,31 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '037-tool-payload-cleanup-attempts',
+    run: (sql) => {
+      // Durable per-message cleanup disposition. This prevents non-reclaimable
+      // or retry-deferred candidates from being rediscovered on every
+      // retention sweep while preserving the original message row and payload
+      // unless archive+strip succeeds.
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS tool_payload_cleanup_attempts (
+          message_id TEXT PRIMARY KEY,
+          status TEXT NOT NULL,
+          failure_count INTEGER NOT NULL DEFAULT 0,
+          next_attempt_at INTEGER,
+          last_attempt_at INTEGER NOT NULL,
+          last_error TEXT,
+          message_created_at INTEGER NOT NULL,
+          message_sequence INTEGER NOT NULL
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_tool_payload_cleanup_attempts_retry
+        ON tool_payload_cleanup_attempts(status, next_attempt_at, message_created_at, message_sequence, message_id)
+      `);
+    },
+  },
 ];
 
 /**

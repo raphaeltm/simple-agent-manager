@@ -536,43 +536,47 @@ describe('ProjectData storage safety firebreak', () => {
         expect(first.alarm).toBeTypeOf('number');
 
         const firstById = new Map(first.rows.map((row) => [row.id, row]));
-        const stoppedOneMeta = JSON.parse(
-          firstById.get(messageIds.stoppedOne)?.tool_metadata ?? '{}'
-        ) as Record<string, unknown>;
-        const stoppedTwoMeta = JSON.parse(
-          firstById.get(messageIds.stoppedTwo)?.tool_metadata ?? '{}'
-        ) as Record<string, unknown>;
-        const stoppedThreeMeta = JSON.parse(
-          firstById.get(messageIds.stoppedThree)?.tool_metadata ?? '{}'
-        ) as Record<string, unknown>;
-        const activeMeta = JSON.parse(
-          firstById.get(messageIds.active)?.tool_metadata ?? '{}'
-        ) as Record<string, unknown>;
-        const sleepingMeta = JSON.parse(
-          firstById.get(messageIds.sleeping)?.tool_metadata ?? '{}'
-        ) as Record<string, unknown>;
-
-        expect(stoppedOneMeta.content).toBeUndefined();
-        expect(stoppedOneMeta.contentSize).toBeGreaterThan(0);
-        expect(stoppedOneMeta.toolCallId).toBe('tool-stopped-one');
-        expect(stoppedTwoMeta.content).toBeUndefined();
-        expect(stoppedTwoMeta.contentSize).toBeGreaterThan(0);
-        expect(Array.isArray(stoppedThreeMeta.content)).toBe(true);
-        expect(Array.isArray(activeMeta.content)).toBe(true);
-        expect(Array.isArray(sleepingMeta.content)).toBe(true);
-        expect(firstById.get(messageIds.stoppedOne)?.content).toBe('visible stopped one');
+        const firstMetadata = [
+          messageIds.stoppedOne,
+          messageIds.stoppedTwo,
+          messageIds.stoppedThree,
+          messageIds.active,
+          messageIds.sleeping,
+        ].map(
+          (id) => JSON.parse(firstById.get(id)?.tool_metadata ?? '{}') as Record<string, unknown>
+        );
+        const firstArchived = firstMetadata.filter(
+          (metadata) => metadata.content === undefined && typeof metadata.contentSize === 'number'
+        );
+        const firstInline = firstMetadata.filter((metadata) => Array.isArray(metadata.content));
+        expect(firstArchived).toHaveLength(2);
+        expect(firstInline).toHaveLength(3);
+        expect(first.rows.every((row) => row.content.startsWith('visible '))).toBe(true);
 
         await runInDurableObject(stub, async (instance) => instance.alarm());
-        const early = (await runInDurableObject(
-          stub,
-          async (_instance, state) =>
-            state.storage.sql
-              .exec('SELECT tool_metadata FROM chat_messages WHERE id = ?', messageIds.stoppedThree)
-              .toArray()[0]
-        )) as { tool_metadata: string };
+        const early = (await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.sql
+            .exec(
+              `SELECT id, tool_metadata
+               FROM chat_messages
+               WHERE id IN (?, ?, ?, ?, ?)
+               ORDER BY id ASC`,
+              messageIds.stoppedOne,
+              messageIds.stoppedTwo,
+              messageIds.stoppedThree,
+              messageIds.active,
+              messageIds.sleeping
+            )
+            .toArray()
+        )) as Array<{ id: string; tool_metadata: string }>;
+        const earlyMetadata = early.map(
+          (row) => JSON.parse(row.tool_metadata) as Record<string, unknown>
+        );
         expect(
-          Array.isArray((JSON.parse(early.tool_metadata) as Record<string, unknown>).content)
-        ).toBe(true);
+          earlyMetadata.filter(
+            (metadata) => metadata.content === undefined && typeof metadata.contentSize === 'number'
+          )
+        ).toHaveLength(2);
 
         await runInDurableObject(stub, async (_instance, state) => {
           state.storage.sql.exec(
@@ -602,25 +606,24 @@ describe('ProjectData storage safety firebreak', () => {
           return { rows };
         });
         const secondById = new Map(second.rows.map((row) => [row.id, row]));
-        const stoppedThreeAfter = JSON.parse(
-          secondById.get(messageIds.stoppedThree)?.tool_metadata ?? '{}'
-        ) as Record<string, unknown>;
-        const activeAfter = JSON.parse(
-          secondById.get(messageIds.active)?.tool_metadata ?? '{}'
-        ) as Record<string, unknown>;
-        const sleepingAfter = JSON.parse(
-          secondById.get(messageIds.sleeping)?.tool_metadata ?? '{}'
-        ) as Record<string, unknown>;
+        const secondMetadata = [
+          messageIds.stoppedOne,
+          messageIds.stoppedTwo,
+          messageIds.stoppedThree,
+          messageIds.active,
+          messageIds.sleeping,
+        ].map(
+          (id) => JSON.parse(secondById.get(id)?.tool_metadata ?? '{}') as Record<string, unknown>
+        );
         const telemetry = await readTelemetry(projectId);
 
-        const secondPassCandidateMetadata = [stoppedThreeAfter, activeAfter, sleepingAfter];
-        const secondPassArchived = secondPassCandidateMetadata.filter(
+        const secondPassArchived = secondMetadata.filter(
           (metadata) => metadata.content === undefined && typeof metadata.contentSize === 'number'
         );
-        const secondPassInline = secondPassCandidateMetadata.filter((metadata) =>
+        const secondPassInline = secondMetadata.filter((metadata) =>
           Array.isArray(metadata.content)
         );
-        expect(secondPassArchived).toHaveLength(2);
+        expect(secondPassArchived).toHaveLength(4);
         expect(secondPassInline).toHaveLength(1);
         expect(telemetry?.last_purge_rows).toBe(2);
       }

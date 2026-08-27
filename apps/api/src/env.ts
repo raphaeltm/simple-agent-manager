@@ -561,9 +561,11 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS?: string; // Wall-time budget for one archival cleanup pass (default: 20000)
-  PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS?: string; // Tool payload age before archive+strip eligibility (default: 7)
+  PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS?: string; // Tool payload age before archive+strip eligibility (default: 5)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS?: string; // Cadence for retention archive scans (default: 86400000)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX?: string; // Private R2 prefix for archived ProjectData tool payloads
+  PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS?: string; // Per-R2-write timeout for archival cleanup (default: 5000)
+  PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS?: string; // Retry deferral after archive/write failures (default: 300000)
   PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED?: string;
   PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS?: string;
   PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS?: string;

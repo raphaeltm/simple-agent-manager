@@ -36,6 +36,7 @@ import type { Env } from './types';
 const log = createModuleLogger('project_data.storage_alarm');
 
 export interface ProjectDataStorageAlarmCallbacks {
+  transactionSync?: <T>(callback: () => T) => T;
   shouldMeasure: (sql: SqlStorage, env: Env, now: number) => boolean;
   measureAndPersist: (
     sql: SqlStorage,
@@ -220,6 +221,7 @@ export async function runProjectDataStorageSafetyAlarmCore(
   const cleanup = await runProjectDataToolPayloadCleanup(sql, env, projectId, config, {
     allowStart: measurement !== null,
     now,
+    ...(callbacks.transactionSync ? { transactionSync: callbacks.transactionSync } : {}),
     classifyStatus: (databaseSizeBytes) => callbacks.classifyStatus(databaseSizeBytes, config),
     recordTelemetry: async (telemetry, fields) => {
       const enriched = await enrichProjectDataStorageTelemetry(sql, env, telemetry, config, {

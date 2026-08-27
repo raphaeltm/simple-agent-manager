@@ -11,8 +11,10 @@ const META_TOOL_CLEANUP_CURSOR_SESSION_ID = 'storageSafetyToolCleanupCursorSessi
 const META_TOOL_CLEANUP_CURSOR_CREATED_AT = 'storageSafetyToolCleanupCursorCreatedAt';
 const META_TOOL_CLEANUP_CURSOR_SEQUENCE = 'storageSafetyToolCleanupCursorSequence';
 const META_TOOL_CLEANUP_CURSOR_MESSAGE_ID = 'storageSafetyToolCleanupCursorMessageId';
+const META_TOOL_CLEANUP_CURSOR_VERSION = 'storageSafetyToolCleanupCursorVersion';
 const META_TOOL_CLEANUP_RECHECK_AT = 'storageSafetyToolCleanupRecheckAt';
 const META_TOOL_PAYLOAD_ARCHIVE_LAST_RUN_AT = 'storageSafetyToolPayloadArchiveLastRunAt';
+const TOOL_PAYLOAD_CLEANUP_CURSOR_VERSION = '2';
 
 export function readProjectDataToolPayloadCleanupRecheckAt(sql: SqlStorage): number | null {
   return readMetaNumber(sql, META_TOOL_CLEANUP_RECHECK_AT);
@@ -30,6 +32,9 @@ export function writeProjectDataToolPayloadArchiveLastRunAt(
 }
 
 export function readToolPayloadCleanupCursor(sql: SqlStorage): ToolPayloadCleanupCursor | null {
+  if (readMeta(sql, META_TOOL_CLEANUP_CURSOR_VERSION) !== TOOL_PAYLOAD_CLEANUP_CURSOR_VERSION) {
+    return null;
+  }
   const sessionId = readMeta(sql, META_TOOL_CLEANUP_CURSOR_SESSION_ID);
   const createdAt = readMetaNumber(sql, META_TOOL_CLEANUP_CURSOR_CREATED_AT);
   const sequence = readMetaNumber(sql, META_TOOL_CLEANUP_CURSOR_SEQUENCE);
@@ -47,6 +52,7 @@ export function writeToolPayloadCleanupCursor(
   writeMeta(sql, META_TOOL_CLEANUP_CURSOR_CREATED_AT, String(cursor.createdAt));
   writeMeta(sql, META_TOOL_CLEANUP_CURSOR_SEQUENCE, String(cursor.sequence));
   writeMeta(sql, META_TOOL_CLEANUP_CURSOR_MESSAGE_ID, cursor.messageId);
+  writeMeta(sql, META_TOOL_CLEANUP_CURSOR_VERSION, TOOL_PAYLOAD_CLEANUP_CURSOR_VERSION);
   writeMeta(sql, META_TOOL_CLEANUP_RECHECK_AT, String(recheckAt));
 }
 
@@ -59,6 +65,7 @@ export function clearToolPayloadCleanupState(sql: SqlStorage): void {
   deleteMeta(sql, META_TOOL_CLEANUP_CURSOR_CREATED_AT);
   deleteMeta(sql, META_TOOL_CLEANUP_CURSOR_SEQUENCE);
   deleteMeta(sql, META_TOOL_CLEANUP_CURSOR_MESSAGE_ID);
+  deleteMeta(sql, META_TOOL_CLEANUP_CURSOR_VERSION);
   deleteMeta(sql, META_TOOL_CLEANUP_RECHECK_AT);
 }
 

@@ -68,14 +68,16 @@ export const DEFAULT_PROJECT_DATA_STORAGE_GROWTH_LOOKBACK_DAYS = 7;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO = 0.8;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO = 0.75;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS = 500;
-export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES = 1024 * 1024;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES = 1024 * 1024;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS = 7;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS = 60 * 1000;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM = 25;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS = 20 * 1000;
-export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS = 7;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS = 5;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS = 5 * 1000;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS = 5 * 60 * 1000;
 export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS = 500;
 export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS = 7;
 export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS = 60 * 1000;
@@ -154,6 +156,8 @@ export interface StorageSafetyConfig {
   toolPayloadArchiveRetentionMs: number;
   toolPayloadArchiveIntervalMs: number;
   toolPayloadArchiveR2Prefix: string;
+  toolPayloadArchiveWriteTimeoutMs: number;
+  toolPayloadArchiveRetryDelayMs: number;
   eventLogCleanupEnabled: boolean;
   eventLogCleanupBatchRows: number;
   eventLogCleanupMinSessionAgeMs: number;
@@ -318,6 +322,14 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
       env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX,
       DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX
     ),
+    toolPayloadArchiveWriteTimeoutMs: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS
+    ),
+    toolPayloadArchiveRetryDelayMs: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS
+    ),
     eventLogCleanupEnabled: envFlagEnabled(env.PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED),
     eventLogCleanupBatchRows: parsePositiveInteger(
       env.PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS,
@@ -467,10 +479,12 @@ export async function measureAndPersistProjectDataStorage(
 export async function runProjectDataStorageSafetyAlarm(
   sql: SqlStorage,
   env: Env,
-  projectId: string | null
+  projectId: string | null,
+  options: { transactionSync?: <T>(callback: () => T) => T } = {}
 ): Promise<ProjectDataStorageAlarmResult> {
   const config = resolveStorageSafetyConfig(env);
   return runProjectDataStorageSafetyAlarmCore(sql, env, projectId, config, {
+    ...(options.transactionSync ? { transactionSync: options.transactionSync } : {}),
     shouldMeasure: shouldMeasureProjectDataStorage,
     measureAndPersist: measureAndPersistProjectDataStorage,
     classifyStatus: classifyStorageUsage,
