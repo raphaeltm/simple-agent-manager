@@ -109,6 +109,8 @@ candidate forever.
   unset.
 - Added `tasks.claimed_warm_node_at` so warm-reuse pre-placement claims have a fixed bounded expiry
   independent of general `tasks.updated_at` progress writes.
+- Added migration 0124 to rebuild the claim timestamp partial index with the cleanup guard's exact
+  active-status predicate; 0123 remains unchanged because it had already reached staging.
 - Rule 47 load review: the incident candidate volume is currently ~5–10 pinned nodes. Steady-state
   volume should be small because candidates need auto-provisioned ownership, workspace-role/managed
   gates, no active workspace, workspace-idle age, no recent warm-placement claim, and failure

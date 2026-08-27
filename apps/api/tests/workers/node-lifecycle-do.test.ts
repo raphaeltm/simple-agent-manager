@@ -12,7 +12,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
-
 import {
   seedAgentSession,
   seedInstallation,

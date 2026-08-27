@@ -26,12 +26,16 @@ describe('task claimed warm node migration', () => {
     expect(sql).toContain('SET claimed_warm_node_at = updated_at');
     expect(sql).toContain('CREATE INDEX idx_tasks_claimed_warm_node_at');
     expect(sql).toContain('ON tasks(claimed_warm_node_id, claimed_warm_node_at)');
-    expect(sql).toContain("status IN ('queued', 'delegated', 'in_progress')");
+    expect(sql).toContain("status NOT IN ('completed', 'failed', 'cancelled')");
   });
 
-  it('creates a partial index usable by the cleanup guard predicate', () => {
-    const sql = readFileSync(
+  it('corrects the partial index so the cleanup guard can use it on upgraded databases', () => {
+    const timestampMigration = readFileSync(
       join(process.cwd(), 'src/db/migrations/0123_task_claimed_warm_node_at.sql'),
+      'utf8'
+    );
+    const activeIndexMigration = readFileSync(
+      join(process.cwd(), 'src/db/migrations/0124_task_claimed_warm_node_active_index.sql'),
       'utf8'
     );
     const sqlite = new Database(':memory:');
@@ -44,7 +48,8 @@ describe('task claimed warm node migration', () => {
           updated_at TEXT NOT NULL
         );
       `);
-      sqlite.exec(sql);
+      sqlite.exec(timestampMigration);
+      sqlite.exec(activeIndexMigration);
       const plan = sqlite
         .prepare(
           `EXPLAIN QUERY PLAN
