@@ -1,0 +1,82 @@
+# Fix supersession lineage for direct successors of recovery tasks
+
+## Problem
+
+Production task `01M0ZHRRXA3KK6W9AN4ZR5V9FE` was superseded by successor
+`01M0ZKNFXC4FKJMDVN006T6WPT` at `2026-08-26T18:00:10.208Z`, but the stuck-task
+sweep still wrote `status='failed'` at `2026-08-26T18:06:09.760Z` with
+`Task runtime is conclusively gone after reconciliation grace (workspace_deleted).`
+
+The predecessor had already lost its chat/workspace ownership and its workspace row
+was `status='deleted'`, but its successor was live and owned the chat session. Per
+rule 66, a predecessor with a live successor must be preserved, then eventually
+resolved benignly after the successor ends.
+
+## Research findings
+
+- `apps/api/src/services/session-recovery.ts:createRecoveryTask` can create
+  successors with different lineage shapes:
+  - root-collapsed successor: `recovery_source_task_id = root`
+  - direct successor of a recovery middle link when a source task guard is used:
+    `recovery_source_task_id = self`
+- `apps/api/src/services/task-runtime-liveness.ts:loadTaskSupersession` currently
+  builds the family key as `COALESCE(self.recovery_source_task_id, self.id)` and
+  matches only:
+  - `owner.id = familyKey`
+  - `owner.recovery_source_task_id = familyKey`
+- That predicate misses a direct successor of a recovery-task middle link, because
+  for `self = 01M0ZHRR…`, `familyKey = 01M0ZDXB…`, while the live successor has
+  `recovery_source_task_id = 01M0ZHRR…`.
+- Production D1 evidence:
+  - predecessor `01M0ZHRR…`: `status='failed'`, `triggered_by='session-recovery'`,
+    `recovery_source_task_id='01M0ZDXBAZV88E4K3WJVMNVTX4'`,
+    `workspace_id='01M0ZHRYAHE52V24MF74V289MW'`, `chat_session_id=NULL`
+  - successor `01M0ZKNF…`: `status='in_progress'`, `triggered_by='session-recovery'`,
+    `recovery_source_task_id='01M0ZHRRXA3KK6W9AN4ZR5V9FE'`,
+    `chat_session_id='90ac3dd3-9fec-432f-8795-bf4e903c239a'`
+  - current `loadTaskSupersession` SQL returns zero rows for the predecessor;
+    adding `owner.recovery_source_task_id = self.id` returns the live successor.
+- `apps/api/src/scheduled/stuck-tasks.ts` now centralizes terminal writes through
+  `terminalReasonFor()` / `transitionTaskToTerminal()`, and the current writer
+  honors superseded terminal reasons. The observed failure happened because the
+  lineage lookup returned `none`, not because the sweep discarded a computed
+  supersession verdict.
+- `GET /api/admin/tasks/:taskId/reconciliation-diagnostics` is not useful for this
+  already-terminal predecessor because the endpoint only invokes the classifier for
+  active `in_progress` rows.
+
+## Implementation checklist
+
+- [ ] Add a regression test proving `loadTaskSupersession` returns `live` for a
+      recovery-task middle link whose newer successor points directly at the middle
+      link.
+- [ ] Prove the regression fails against pre-fix code.
+- [ ] Keep existing root-collapsed sibling coverage intact.
+- [ ] Keep never-superseded task terminalization intact.
+- [ ] Keep directionality intact: older family members never supersede newer rows.
+- [ ] Keep bounded escape intact: once the successor is terminal, predecessor resolves
+      as benign superseded terminal, not failure.
+- [ ] Apply the narrow SQL predicate fix in `loadTaskSupersession`.
+- [ ] Run real-SQL-engine tests for the changed predicate.
+- [ ] Run full API and repository quality gates required by `/do`.
+- [ ] Run specialist reviews and staging verification before merge.
+
+## Acceptance criteria
+
+- A superseded recovery-task predecessor with a live direct successor is preserved.
+- A superseded recovery-task predecessor with a terminal direct successor resolves as
+  benign cancelled, never failed.
+- A never-superseded deleted-workspace task still terminalizes as failed.
+- A newer task is not protected by older family members.
+- The fix is covered by real SQLite/D1-style tests, not source-contract assertions.
+- Staging verification confirms the production-equivalent classifier/writer behavior.
+
+## References
+
+- `apps/api/src/services/task-runtime-liveness.ts`
+- `apps/api/src/scheduled/stuck-tasks.ts`
+- `apps/api/src/services/session-recovery.ts`
+- `tasks/archive/2026-08-24-superseded-task-killed-after-successful-wake.md`
+- `.claude/rules/66-ownership-handoff-must-record-the-supersession.md`
+- `.claude/rules/58-terminal-verdicts-must-match-the-resumer.md`
+- `.claude/rules/28-credential-resolution-fallback-tests.md`
