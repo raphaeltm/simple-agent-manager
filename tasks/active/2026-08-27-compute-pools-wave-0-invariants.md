@@ -21,7 +21,7 @@ Wave 0 of compute/node-pools needs regression coverage around today's scheduler 
 - [x] Add a lightweight source-contract/TODO assertion documenting duplicated placement-resolution entry points without refactoring them.
 - [x] Run targeted API tests locally.
 - [x] Run CI-oriented local validation without staging.
-- [ ] Open a child PR against `sam/compute-pools-integration`.
+- [x] Open a child PR against `sam/compute-pools-integration`.
 
 ## Validation notes
 
@@ -39,6 +39,12 @@ Wave 0 of compute/node-pools needs regression coverage around today's scheduler 
 - `test-engineer` WARN findings were addressed by isolating the same-user cross-project fixture under its own user/projects, avoiding `node_class='user-owned'` as a stand-in for pool scope, and allowing placement fixtures to carry realistic project repository/installation metadata.
 - `cloudflare-specialist` PASS: D1/Miniflare coverage exercises the atomic `INSERT ... SELECT` reservation shape and real D1 state.
 - Known non-blocking Wave 0 gap: `selectNodeForTaskRun` already has same-user behavioral coverage in `apps/api/tests/unit/services/node-selector-user-scope.test.ts`, but this PR does not add new project-aware tests for that Drizzle selector because it has no project discriminator today. The source-contract test documents the duplicate entry points until the shared resolver exists.
+
+## PR
+
+- Draft child PR: https://github.com/raphaeltm/simple-agent-manager/pull/1944
+- Base: `sam/compute-pools-integration`
+- Head: `sam/execute-task-using-skill-a04wvw`
 
 ## Acceptance criteria
 
