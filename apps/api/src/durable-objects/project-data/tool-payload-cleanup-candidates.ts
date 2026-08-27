@@ -6,6 +6,8 @@ import {
 } from './tool-payload-cleanup-attempts';
 import type { Env } from './types';
 
+const TOOL_PAYLOAD_CONTENT_KEY_NEEDLE = '"content"';
+
 export type ToolPayloadCleanupCursor = {
   sessionId: string;
   createdAt: number;
@@ -98,6 +100,7 @@ export function selectToolPayloadCandidates(
          FROM chat_messages
          WHERE role = 'tool'
            AND tool_metadata IS NOT NULL
+           AND instr(tool_metadata, ?) > 0
            AND created_at < ?
            AND (
              ? IS NULL
@@ -153,6 +156,7 @@ export function selectToolPayloadCandidates(
        WHERE cumulative_tool_metadata_bytes <= ?
           OR (? = 1 AND row_number = 1)
        ORDER BY session_id ASC, created_at ASC, sequence ASC, id ASC`,
+      TOOL_PAYLOAD_CONTENT_KEY_NEEDLE,
       cutoffCreatedAt,
       cursorSessionId,
       cursorSessionId ?? '',
@@ -188,6 +192,7 @@ export function hasToolPayloadCandidatesAfter(
        FROM chat_messages
        WHERE role = 'tool'
          AND tool_metadata IS NOT NULL
+         AND instr(tool_metadata, ?) > 0
          AND created_at < ?
          AND (
            ? IS NULL
@@ -221,6 +226,7 @@ export function hasToolPayloadCandidatesAfter(
          )
        ORDER BY session_id ASC, created_at ASC, sequence ASC, id ASC
        LIMIT ?`,
+      TOOL_PAYLOAD_CONTENT_KEY_NEEDLE,
       cutoffCreatedAt,
       cursorSessionId,
       cursorSessionId ?? '',

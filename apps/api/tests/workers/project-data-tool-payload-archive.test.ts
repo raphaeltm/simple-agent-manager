@@ -73,6 +73,15 @@ function makeToolMetadata(label: string, payloadBytes = 1024): string {
   });
 }
 
+function makeToolMetadataWithoutContent(label: string): string {
+  return JSON.stringify({
+    toolCallId: `tool-${label}`,
+    title: `Tool ${label}`,
+    status: 'completed',
+    summary: `metadata only ${label}`,
+  });
+}
+
 async function withRuntimeEnv<T>(overrides: RuntimeEnvOverride, fn: () => Promise<T>): Promise<T> {
   const mutableEnv = testEnv as unknown as Record<string, unknown>;
   const previous = new Map<string, unknown>();
@@ -492,6 +501,49 @@ describe('ProjectData tool payload R2 archival', () => {
     expect(Array.isArray(metadata.get(messageIds[0]!)?.content)).toBe(true);
     expect(Array.isArray(metadata.get(messageIds[1]!)?.content)).toBe(true);
     expect(await readArchiveRows(stub, messageIds)).toHaveLength(0);
+  });
+
+  it('does not spend cleanup batch capacity on tool metadata without payload content', async () => {
+    const projectId = `${TEST_PREFIX}-payload-discriminator`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const cutoff = FIXED_NOW - 7 * DAY_MS;
+    const seeded = await seedToolMessages(stub, [
+      { id: 'metadata-only', createdAt: cutoff - 2_000, sequence: 1 },
+      { id: 'reclaimable', createdAt: cutoff - 1_000, sequence: 2 },
+    ]);
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        'UPDATE chat_messages SET tool_metadata = ? WHERE id = ?',
+        makeToolMetadataWithoutContent('metadata-only'),
+        seeded.messageIds[0]
+      );
+    });
+
+    const result = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '7',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS: '1',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES: '1000000',
+      },
+      { now: FIXED_NOW }
+    );
+
+    expect(result?.rowsScanned).toBe(1);
+    expect(result?.rowsUpdated).toBe(1);
+    const metadata = await readMessageMetadata(stub, seeded.messageIds);
+    expect(metadata.get(seeded.messageIds[0]!)?.summary).toBe('metadata only metadata-only');
+    expect(metadata.get(seeded.messageIds[0]!)?.content).toBeUndefined();
+    expect(metadata.get(seeded.messageIds[1]!)?.content).toBeUndefined();
+    expect(metadata.get(seeded.messageIds[1]!)?.toolPayloadArchive).toMatchObject({
+      status: 'archived',
+      archivedAt: FIXED_NOW,
+      version: 1,
+    });
+    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(1);
+    expect(await readCleanupAttempts(stub, seeded.messageIds)).toHaveLength(0);
   });
 
   it('enforces row, byte, and wall-time budgets with continuation rechecks', async () => {
