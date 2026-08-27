@@ -451,7 +451,8 @@ unauthenticated `/api/config/*` endpoints are marked `public`. Endpoints returni
 The cleanup sweep measures idleness from a node's last **workspace activity**
 (`COALESCE(MAX(workspaces.updated_at), nodes.created_at)`), never from
 `nodes.updated_at` — heartbeats rewrite `updated_at` on every beat, so it tracks
-liveness rather than idleness.
+liveness rather than idleness. The eligibility check is implemented by
+`claimNodeForCleanup()` in `apps/api/src/scheduled/node-cleanup/shared.ts`.
 
 Reaping only ever applies to nodes with `node_role = 'workspace'` and
 `node_class != 'user-owned'`. Deployment nodes host long-running user applications
