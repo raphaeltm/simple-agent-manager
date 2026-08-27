@@ -40,6 +40,22 @@ const serviceSource = readFileSync(
   resolve(process.cwd(), 'src/services/node-lifecycle.ts'),
   'utf8'
 );
+const submitRouteSource = readFileSync(
+  resolve(process.cwd(), 'src/routes/tasks/submit.ts'),
+  'utf8'
+);
+const mcpDispatchRouteSource = readFileSync(
+  resolve(process.cwd(), 'src/routes/mcp/dispatch-tool.ts'),
+  'utf8'
+);
+const samSessionDispatchSource = readFileSync(
+  resolve(process.cwd(), 'src/durable-objects/sam-session/tools/dispatch-task.ts'),
+  'utf8'
+);
+const triggerSubmitSource = readFileSync(
+  resolve(process.cwd(), 'src/services/trigger-submit.ts'),
+  'utf8'
+);
 const taskRunnerSource = [
   'index.ts',
   'types.ts',
@@ -182,6 +198,37 @@ describe('concurrent warm pool claiming safety', () => {
       expect(selectorSource).toContain('nodeLifecycle.tryClaim');
       expect(selectorSource).toContain("import * as nodeLifecycle from './node-lifecycle'");
     });
+  });
+});
+
+// =============================================================================
+// Placement resolution duplication — Wave 0 documentation only
+// =============================================================================
+
+describe('placement resolution entry points', () => {
+  it('keeps duplicated task submission resolution paths visible until a shared resolver replaces them', () => {
+    // TODO(compute-pools): replace these duplicate source-level assertions with
+    // behavioral tests around the shared effective-pool/placement resolver once
+    // that resolver exists. Wave 0 intentionally documents duplication without
+    // changing runtime behavior.
+    const entryPoints = [
+      { name: 'chat submit route', source: submitRouteSource },
+      { name: 'MCP dispatch route', source: mcpDispatchRouteSource },
+      { name: 'SAM session dispatch tool', source: samSessionDispatchSource },
+      { name: 'trigger submit bridge', source: triggerSubmitSource },
+    ];
+
+    for (const entryPoint of entryPoints) {
+      expect(entryPoint.source, entryPoint.name).toContain('resolveResourceReservation(');
+      expect(entryPoint.source, entryPoint.name).toContain('vmSizeSource');
+      expect(entryPoint.source, entryPoint.name).toContain('startTaskRunnerDO');
+    }
+  });
+
+  it('keeps TaskRunner final placement reservation centralized in reserveWorkspacePlacement', () => {
+    expect(taskRunnerSource).toContain('reserveWorkspacePlacement(');
+    expect(taskRunnerSource).toContain("workspace_placement_lost");
+    expect(taskRunnerSource).not.toContain('INSERT INTO workspaces');
   });
 });
 
