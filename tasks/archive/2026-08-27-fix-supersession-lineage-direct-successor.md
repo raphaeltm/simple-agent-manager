@@ -56,6 +56,8 @@ resolved benignly after the successor ends.
 - [x] Keep directionality intact: older family members never supersede newer rows.
 - [x] Keep bounded escape intact: once the successor is terminal, predecessor resolves
       as benign superseded terminal, not failure.
+- [x] Add real-handoff integration coverage proving `createRecoveryTask` can produce
+      the direct-child middle-link shape and the classifier protects it.
 - [x] Apply the narrow SQL predicate fix in `loadTaskSupersession`.
 - [x] Apply the matching write-time fence fix in `transitionTaskToTerminal`.
 - [x] Run real-SQL-engine tests for the changed predicate.
@@ -73,6 +75,14 @@ resolved benignly after the successor ends.
 - Post-fix targeted suite:
   - `pnpm --filter @simple-agent-manager/api test tests/unit/stuck-task-slept-session-liveness.test.ts tests/unit/stuck-task-superseded-termination.test.ts`
   - Result: 2 files passed, 56 tests passed.
+- Post-review real-writer hardening:
+  - Added `session-recovery-handoff.test.ts` coverage that first creates a recovery
+    middle link through `ensureSessionRecovery`, resets the snapshot claim, then
+    invokes `ensureSessionRecovery` with a guard on that middle link. The resulting
+    successor has `recovery_source_task_id = middleTaskId`, and the liveness classifier
+    preserves the middle link after its workspace is deleted.
+  - `pnpm --filter @simple-agent-manager/api test tests/integration/session-recovery-handoff.test.ts tests/unit/stuck-task-slept-session-liveness.test.ts tests/unit/stuck-task-superseded-termination.test.ts`
+  - Result: 3 files passed, 66 tests passed.
 - Additional post-fix API/Workers coverage:
   - `pnpm --filter @simple-agent-manager/api test tests/unit/services/task-terminal-transition.test.ts tests/unit/stuck-tasks.test.ts`
   - Result: 2 files passed, 63 tests passed.

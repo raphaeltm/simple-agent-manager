@@ -161,6 +161,82 @@ describe('session recovery handoff', () => {
     }
   });
 
+  it('creates a direct-child successor for a guarded recovery middle link and protects that middle link', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedRecoveryFixture(sqlite);
+      const database = createSqliteD1(sqlite);
+
+      const firstWake = await ensureSessionRecovery(
+        { DATABASE: database } as Env,
+        'project-1',
+        'chat-1',
+        guard()
+      );
+      expect(firstWake).toMatchObject({ status: 'waking' });
+      if (firstWake.status !== 'waking') throw new Error('first wake was not claimable');
+
+      const middleTaskId = firstWake.taskId;
+      sqlite
+        .prepare(
+          `UPDATE tasks
+              SET status = 'in_progress', execution_step = 'running',
+                  workspace_id = 'workspace-1', started_at = ?, updated_at = ?
+            WHERE id = ?`
+        )
+        .run('2026-08-15T00:01:00.000Z', '2026-08-15T00:01:00.000Z', middleTaskId);
+      sqlite
+        .prepare(
+          `UPDATE session_snapshots
+              SET recovery_status = NULL, recovery_task_id = NULL, sleep_status = 'sleeping',
+                  sleeping_at = ?, recovery_attempts = 0
+            WHERE chat_session_id = 'chat-1'`
+        )
+        .run('2026-08-15T00:02:00.000Z');
+
+      const secondWake = await ensureSessionRecovery(
+        { DATABASE: database } as Env,
+        'project-1',
+        'chat-1',
+        { taskId: middleTaskId, projectId: 'project-1', chatSessionId: 'chat-1' }
+      );
+      expect(secondWake).toMatchObject({ status: 'waking' });
+      if (secondWake.status !== 'waking') throw new Error('second wake was not claimable');
+
+      expect(
+        sqlite
+          .prepare(
+            `SELECT recovery_source_task_id, chat_session_id, triggered_by
+               FROM tasks WHERE id = ?`
+          )
+          .get(secondWake.taskId)
+      ).toMatchObject({
+        recovery_source_task_id: middleTaskId,
+        chat_session_id: 'chat-1',
+        triggered_by: 'session-recovery',
+      });
+      expect(
+        sqlite.prepare(`SELECT chat_session_id FROM tasks WHERE id = ?`).get(middleTaskId)
+      ).toEqual({ chat_session_id: null });
+
+      sqlite.prepare(`UPDATE workspaces SET status = 'deleted' WHERE id = 'workspace-1'`).run();
+
+      await expect(
+        getTaskRuntimeLiveness({ DATABASE: database } as Env, {
+          id: middleTaskId,
+          project_id: 'project-1',
+          workspace_id: 'workspace-1',
+        })
+      ).resolves.toMatchObject({
+        live: false,
+        conclusive: false,
+        reason: 'workspace_deleted_superseded_by_live_wake',
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
   /**
    * The load-bearing justification for this whole fix: `sourceTaskGuardCondition`
    * requires the source task to be NON-terminal, so a falsely-failed predecessor
