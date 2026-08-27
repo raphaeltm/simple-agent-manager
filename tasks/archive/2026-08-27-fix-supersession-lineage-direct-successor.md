@@ -19,9 +19,9 @@ resolved benignly after the successor ends.
   - root-collapsed successor: `recovery_source_task_id = root`
   - direct successor of a recovery middle link when a source task guard is used:
     `recovery_source_task_id = self`
-- `apps/api/src/services/task-runtime-liveness.ts:loadTaskSupersession` currently
-  builds the family key as `COALESCE(self.recovery_source_task_id, self.id)` and
-  matches only:
+- Before this fix, `apps/api/src/services/task-runtime-liveness.ts:loadTaskSupersession`
+  built the family key as `COALESCE(self.recovery_source_task_id, self.id)` and
+  matched only:
   - `owner.id = familyKey`
   - `owner.recovery_source_task_id = familyKey`
 - That predicate misses a direct successor of a recovery-task middle link, because
@@ -34,7 +34,7 @@ resolved benignly after the successor ends.
   - successor `01M0ZKNF…`: `status='in_progress'`, `triggered_by='session-recovery'`,
     `recovery_source_task_id='01M0ZHRRXA3KK6W9AN4ZR5V9FE'`,
     `chat_session_id='90ac3dd3-9fec-432f-8795-bf4e903c239a'`
-  - current `loadTaskSupersession` SQL returns zero rows for the predecessor;
+  - pre-fix `loadTaskSupersession` SQL returned zero rows for the predecessor;
     adding `owner.recovery_source_task_id = self.id` returns the live successor.
 - `apps/api/src/scheduled/stuck-tasks.ts` now centralizes terminal writes through
   `terminalReasonFor()` / `transitionTaskToTerminal()`, and the current writer
@@ -59,8 +59,7 @@ resolved benignly after the successor ends.
 - [x] Apply the narrow SQL predicate fix in `loadTaskSupersession`.
 - [x] Apply the matching write-time fence fix in `transitionTaskToTerminal`.
 - [x] Run real-SQL-engine tests for the changed predicate.
-- [ ] Run full API and repository quality gates required by `/do`.
-- [ ] Run specialist reviews and staging verification before merge.
+- [x] Run full API and repository quality gates required by `/do`.
 
 ## Implementation evidence
 
@@ -74,6 +73,16 @@ resolved benignly after the successor ends.
 - Post-fix targeted suite:
   - `pnpm --filter @simple-agent-manager/api test tests/unit/stuck-task-slept-session-liveness.test.ts tests/unit/stuck-task-superseded-termination.test.ts`
   - Result: 2 files passed, 56 tests passed.
+- Additional post-fix API/Workers coverage:
+  - `pnpm --filter @simple-agent-manager/api test tests/unit/services/task-terminal-transition.test.ts tests/unit/stuck-tasks.test.ts`
+  - Result: 2 files passed, 63 tests passed.
+  - `pnpm --filter @simple-agent-manager/api test:workers tests/workers/scheduled-stuck-tasks.test.ts`
+  - Result: 1 file passed, 15 tests passed.
+- Repository gates:
+  - `pnpm typecheck` passed.
+  - `pnpm lint` passed with pre-existing warnings only.
+  - `pnpm test` passed: 21/21 turbo tasks successful; API 618 files / 8433 tests passed; web 294 files / 3522 tests passed.
+  - `pnpm build` passed: 9/9 turbo tasks successful.
 
 ## Acceptance criteria
 
@@ -83,7 +92,12 @@ resolved benignly after the successor ends.
 - A never-superseded deleted-workspace task still terminalizes as failed.
 - A newer task is not protected by older family members.
 - The fix is covered by real SQLite/D1-style tests, not source-contract assertions.
-- Staging verification confirms the production-equivalent classifier/writer behavior.
+
+## Remaining `/do` gates
+
+Per `.claude/commands/do.md`, this task file is archived after Phase 4. Specialist
+reviews, staging verification, PR merge, and production deploy monitoring remain
+tracked in `.do-state.md`, the PR evidence, and final SAM completion evidence.
 
 ## References
 
