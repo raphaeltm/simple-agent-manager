@@ -406,7 +406,8 @@ describe('DO Migrations', () => {
       // updated_at + status/updated_at)
       // tool payload archives: 3 from migration 036 (session+created,
       // created_at, archived_at)
-      expect(indexes).toHaveLength(68);
+      // tool payload cleanup attempts: 1 from migration 037 (retry sweep)
+      expect(indexes).toHaveLength(69);
     });
   });
 });
