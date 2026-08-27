@@ -122,6 +122,7 @@ describe('runNodeCleanupSweep', () => {
           status: 'running',
           created_at: createdAt,
           active_ws_count: 1,
+          last_activity: createdAt,
         },
       ]);
       // Orphan checks: empty
@@ -150,6 +151,7 @@ describe('runNodeCleanupSweep', () => {
           status: 'running',
           created_at: createdAt,
           active_ws_count: 0,
+          last_activity: createdAt,
         },
       ]);
       responses.set("w.status = 'running'", []);
@@ -177,6 +179,7 @@ describe('runNodeCleanupSweep', () => {
           status: 'running',
           created_at: createdAt,
           active_ws_count: 0,
+          last_activity: createdAt,
         },
       ]);
       responses.set("w.status = 'running'", []);
@@ -202,10 +205,9 @@ describe('runNodeCleanupSweep', () => {
       ).toBe(true);
     });
 
-    it('always skips nodes with active workspaces (no absolute ceiling)', async () => {
+    it('skips nodes with active workspaces below the absolute ceiling', async () => {
       const now = Date.now();
-      // Node created 13 hours ago — would have been destroyed by old absolute ceiling,
-      // but now nodes with active workspaces are always skipped.
+      // Node created 13 hours ago — past the normal lifetime but below the 24h ceiling.
       const createdAt = new Date(now - 13 * 60 * 60 * 1000).toISOString();
 
       const responses = new Map<string, unknown[]>();
@@ -218,6 +220,7 @@ describe('runNodeCleanupSweep', () => {
           status: 'running',
           created_at: createdAt,
           active_ws_count: 2,
+          last_activity: createdAt,
         },
       ]);
       responses.set("w.status = 'running'", []);

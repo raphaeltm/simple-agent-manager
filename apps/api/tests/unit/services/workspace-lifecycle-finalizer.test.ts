@@ -141,13 +141,19 @@ function seedAgentSession(
     );
 }
 
-function seedTask(overrides: { status?: string; workspaceId?: string | null } = {}): void {
+function seedTask(
+  overrides: {
+    status?: string;
+    workspaceId?: string | null;
+    autoProvisionedNodeId?: string | null;
+  } = {}
+): void {
   sqlite
     .prepare(
       `INSERT INTO tasks
         (id, project_id, user_id, workspace_id, title, status, priority, task_mode,
-         created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'task', ?, 0, 'conversation', ?, ?, ?)`
+         created_by, auto_provisioned_node_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'task', ?, 0, 'conversation', ?, ?, ?, ?)`
     )
     .run(
       TASK_ID,
@@ -156,6 +162,7 @@ function seedTask(overrides: { status?: string; workspaceId?: string | null } = 
       overrides.workspaceId === undefined ? WORKSPACE_ID : overrides.workspaceId,
       overrides.status ?? 'completed',
       USER_ID,
+      overrides.autoProvisionedNodeId ?? null,
       iso(-60 * 60 * 1000),
       iso(-5 * 60 * 1000)
     );
@@ -365,9 +372,10 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
 describe('real teardown writers preserve sleeping sessions through the finalizer', () => {
   it('preserves a slept ProjectData session when destroyNodeForCleanup destroys its node', async () => {
     seedNode(NODE_ID, { status: 'running' });
-    seedWorkspace({ status: 'sleeping' });
+    seedWorkspace({ status: 'sleeping', updatedAt: iso(-31 * 60 * 1000) });
     seedAgentSession();
-    seedRestorableSnapshot();
+    seedTask({ status: 'in_progress', autoProvisionedNodeId: NODE_ID });
+    seedRestorableSnapshot({ sleepingAt: iso(-31 * 60 * 1000) });
     const db = drizzle(env.DATABASE, { schema });
 
     const result = await destroyNodeForCleanup(

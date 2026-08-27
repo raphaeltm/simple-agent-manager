@@ -58,6 +58,7 @@ function seedNode(row: {
   status: string;
   warmSince: string | null;
   runtime?: string;
+  createdAt?: string;
 }): void {
   sqlite
     ?.prepare(
@@ -73,8 +74,8 @@ function seedNode(row: {
       row.warmSince,
       row.nodeClass,
       row.runtime ?? 'vm',
-      OLD,
-      OLD
+      row.createdAt ?? OLD,
+      row.createdAt ?? OLD
     );
 }
 
@@ -128,7 +129,8 @@ beforeEach(() => {
       project_id TEXT, chat_session_id TEXT, created_at TEXT, updated_at TEXT
     );
     CREATE TABLE tasks (
-      id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT, auto_provisioned_node_id TEXT, updated_at TEXT
+      id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT, auto_provisioned_node_id TEXT,
+      claimed_warm_node_id TEXT, claimed_warm_node_at TEXT, updated_at TEXT
     );
     CREATE TABLE session_snapshots (
       chat_session_id TEXT PRIMARY KEY, status TEXT NOT NULL,
@@ -147,6 +149,8 @@ describe('node-cleanup sweep excludes user-owned nodes', () => {
   it('stale-warm: destroys a managed warm node but never a user-owned warm node (2 sweeps)', async () => {
     seedNode({ id: 'managed-warm', nodeClass: 'managed', status: 'running', warmSince: OLD });
     seedNode({ id: 'byo-warm', nodeClass: 'user-owned', status: 'running', warmSince: OLD });
+    seedAutoProvisionedTask('task-mw', 'managed-warm');
+    seedAutoProvisionedTask('task-bw', 'byo-warm');
     const env = makeEnv();
 
     await runNodeCleanupSweep(env);
@@ -161,8 +165,23 @@ describe('node-cleanup sweep excludes user-owned nodes', () => {
     // Orphaned = running, no warm_since, idle past the threshold, no active workspaces.
     // This phase used to only write an observability row, so an orphan lived forever;
     // it now destroys, and `deleteCalls` is the assertion that proves it.
-    seedNode({ id: 'managed-orphan', nodeClass: 'managed', status: 'running', warmSince: null });
-    seedNode({ id: 'byo-orphan', nodeClass: 'user-owned', status: 'running', warmSince: null });
+    const idleButBelowMaxLifetime = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    seedNode({
+      id: 'managed-orphan',
+      nodeClass: 'managed',
+      status: 'running',
+      warmSince: null,
+      createdAt: idleButBelowMaxLifetime,
+    });
+    seedNode({
+      id: 'byo-orphan',
+      nodeClass: 'user-owned',
+      status: 'running',
+      warmSince: null,
+      createdAt: idleButBelowMaxLifetime,
+    });
+    seedAutoProvisionedTask('task-mo', 'managed-orphan');
+    seedAutoProvisionedTask('task-bo', 'byo-orphan');
     const env = makeEnv();
 
     const result = await runNodeCleanupSweep(env);
@@ -202,8 +221,8 @@ describe('node-cleanup sweep excludes user-owned nodes', () => {
     // max-lifetime query: INNER JOIN tasks on auto_provisioned_node_id, running node, old created_at.
     seedNode({ id: 'managed-old', nodeClass: 'managed', status: 'running', warmSince: null });
     seedNode({ id: 'byo-old', nodeClass: 'user-owned', status: 'running', warmSince: null });
-    seedAutoProvisionedTask('task-mo', 'managed-old');
-    seedAutoProvisionedTask('task-bo', 'byo-old');
+    seedAutoProvisionedTask('task-mold', 'managed-old');
+    seedAutoProvisionedTask('task-bold', 'byo-old');
     const env = makeEnv();
 
     await runNodeCleanupSweep(env);
