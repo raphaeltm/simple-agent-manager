@@ -66,6 +66,8 @@ Confirmed production symptoms:
 - `pnpm --filter @simple-agent-manager/shared typecheck`
 - `pnpm --filter @simple-agent-manager/shared lint`
 - `go test ./internal/acp` from `packages/vm-agent`
+- Staging deploy: GitHub Actions `deploy-staging.yml` run `33043566947` for commit `0504cec1c`
+  completed successfully, including post-deploy smoke tests, at `2026-08-27T06:02:33Z`.
 
 ## Runtime coverage
 
