@@ -90,8 +90,6 @@ export function readNextToolPayloadCleanupRetryAt(
       afterMs
     )
     .raw();
-  for (const row of rows) {
-    return rawNumber(row[0]);
-  }
-  return null;
+  const firstRow = rows.next().value;
+  return firstRow === undefined ? null : rawNumber(firstRow[0]);
 }
