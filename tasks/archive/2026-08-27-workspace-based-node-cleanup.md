@@ -62,8 +62,8 @@ candidate forever.
   - Rule 51: every destroy/terminal-mutate candidate must keep server-side `node_role='workspace'`
     and `node_class!='user-owned'` gates.
   - Rule 53: idleness must not use `nodes.updated_at`; heartbeats rewrite it.
-  - Rule 54 item 9: a node claimed for provisioning before the workspace row exists needs a
-    bounded protection window.
+  - Rule 54 item 9: a recent `claimed_warm_node_id` placement before the workspace row exists needs
+    a bounded protection window; `auto_provisioned_node_id` and task status alone are not activity.
   - Rule 58: teardown finalizers must not archive a session that the snapshot resumer can wake.
   - Rule 62: tests must reach the feature through the production writer/trigger.
 

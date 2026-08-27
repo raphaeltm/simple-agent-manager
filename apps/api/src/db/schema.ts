@@ -934,7 +934,7 @@ export const tasks = sqliteTable(
     claimedWarmNodeAtIdx: index('idx_tasks_claimed_warm_node_at')
       .on(table.claimedWarmNodeId, table.claimedWarmNodeAt)
       .where(
-        sql`claimed_warm_node_id IS NOT NULL AND status NOT IN ('completed', 'failed', 'cancelled')`
+        sql`claimed_warm_node_id IS NOT NULL AND status IN ('queued', 'delegated', 'in_progress')`
       ),
     // Supports the `WHERE workspace_id = ? AND status IN (...)` lookups on the
     // mass-outage recovery hot path (persistRuntimeRecoveryFailed) and other

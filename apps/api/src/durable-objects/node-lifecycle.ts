@@ -1,7 +1,7 @@
 /**
  * NodeLifecycle Durable Object — per-node warm pool state machine.
  *
- * Manages the lifecycle of auto-provisioned nodes after task completion:
+ * Manages the lifecycle of auto-provisioned nodes after their active workspaces leave:
  * - `active`: Node has running workspaces. No alarm.
  * - `warm`: Node is idle (no workspaces). Alarm set at warm_timeout.
  * - `destroying`: Alarm fired. D1 marked for cron sweep to destroy.
@@ -91,7 +91,13 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     const guarded = sourceTaskGuard ? 1 : 0;
     const result = await this.env.DATABASE.prepare(
       `UPDATE tasks AS recovery
-          SET claimed_warm_node_id = ?, claimed_warm_node_at = ?, updated_at = ?
+          SET claimed_warm_node_at = CASE
+                WHEN recovery.claimed_warm_node_id = ?
+                 AND recovery.claimed_warm_node_at IS NOT NULL
+                  THEN recovery.claimed_warm_node_at
+                ELSE ?
+              END,
+              claimed_warm_node_id = ?, updated_at = ?
         WHERE recovery.id = ?
           AND recovery.status NOT IN ('completed', 'failed', 'cancelled')
           AND NOT EXISTS (
@@ -126,6 +132,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
       .bind(
         nodeId,
         now,
+        nodeId,
         now,
         taskId,
         nodeId,

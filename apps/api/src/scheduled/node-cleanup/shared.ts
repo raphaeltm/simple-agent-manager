@@ -198,6 +198,7 @@ interface DestroyNodeForCleanupOptions {
   level?: 'info' | 'warn';
   failureBackoffMs: number;
   allowActiveWorkspaces?: boolean;
+  requireWorkspaceIdle?: boolean;
   workspaceIdleThresholdIso?: string;
   context: CleanupContext;
 }
@@ -231,7 +232,11 @@ export async function claimNodeForCleanup(
   env: Env,
   node: CleanupNode,
   nowIso: string,
-  options: { allowActiveWorkspaces?: boolean; workspaceIdleThresholdIso?: string } = {}
+  options: {
+    allowActiveWorkspaces?: boolean;
+    requireWorkspaceIdle?: boolean;
+    workspaceIdleThresholdIso?: string;
+  } = {}
 ): Promise<boolean> {
   const workspaceIdleThresholdIso =
     options.workspaceIdleThresholdIso ??
@@ -250,6 +255,14 @@ export async function claimNodeForCleanup(
          WHERE active_workspace.node_id = nodes.id
            AND active_workspace.status IN ('running', 'creating', 'recovery')
        )`;
+  const workspaceIdleGuard =
+    options.requireWorkspaceIdle === false
+      ? ''
+      : `AND (
+         SELECT COALESCE(MAX(workspace_activity.updated_at), nodes.created_at)
+         FROM workspaces workspace_activity
+         WHERE workspace_activity.node_id = nodes.id
+       ) < ?`;
   const result = await env.DATABASE.prepare(
     `UPDATE nodes
      SET status = 'destroying', updated_at = ?
@@ -265,11 +278,7 @@ export async function claimNodeForCleanup(
        )
        ${activeWorkspaceGuard}
        ${boundedWarmPlacementClaimGuardSql('nodes.id')}
-       AND (
-         SELECT COALESCE(MAX(workspace_activity.updated_at), nodes.created_at)
-         FROM workspaces workspace_activity
-         WHERE workspace_activity.node_id = nodes.id
-       ) < ?`
+       ${workspaceIdleGuard}`
   )
     .bind(
       nowIso,
@@ -277,7 +286,7 @@ export async function claimNodeForCleanup(
       node.user_id,
       node.status,
       workspaceIdleThresholdIso,
-      workspaceIdleThresholdIso
+      ...(options.requireWorkspaceIdle === false ? [] : [workspaceIdleThresholdIso])
     )
     .run();
 
@@ -457,6 +466,7 @@ export async function destroyNodeForCleanup(
 ): Promise<NodeCleanupDestroyResult> {
   const claimed = await claimNodeForCleanup(env, node, nowIso, {
     allowActiveWorkspaces: options.allowActiveWorkspaces,
+    requireWorkspaceIdle: options.requireWorkspaceIdle,
     workspaceIdleThresholdIso: options.workspaceIdleThresholdIso,
   });
   if (!claimed) {

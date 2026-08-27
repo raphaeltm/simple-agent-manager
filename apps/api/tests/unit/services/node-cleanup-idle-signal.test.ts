@@ -207,6 +207,58 @@ describe('idle reaping is immune to heartbeat activity', () => {
     expect(result.orphanedNodesDestroyed).toBe(0);
   });
 
+  it('keeps the 4h zero-active-workspace backstop independent of recent inactive activity', async () => {
+    seedNode({ id: 'past-max-lifetime', createdAt: ago(5 * HOUR), updatedAt: ago(1000) });
+    seedAutoProvisionedTask('past-max-lifetime', 'completed', ago(5 * HOUR));
+    seedWorkspace({
+      id: 'ws-past-max-lifetime',
+      nodeId: 'past-max-lifetime',
+      status: 'stopped',
+      updatedAt: ago(5 * MINUTE),
+    });
+    const env = {
+      ...makeEnv(),
+      MAX_AUTO_NODE_LIFETIME_MS: String(4 * HOUR),
+      NODE_WORKSPACE_IDLE_TIMEOUT_MS: String(30 * MINUTE),
+    } as Env;
+
+    const result = await runNodeCleanupSweep(env);
+
+    expect(result.lifetimeDestroyed).toBe(1);
+    expect(deleteCalls).toContain('past-max-lifetime');
+  });
+
+  it('uses stale workspace activity to discriminate the 24h active-row backstop', async () => {
+    seedNode({ id: 'absolute-stale', createdAt: ago(25 * HOUR), updatedAt: ago(1000) });
+    seedAutoProvisionedTask('absolute-stale', 'in_progress', ago(25 * HOUR));
+    seedWorkspace({
+      id: 'ws-absolute-stale',
+      nodeId: 'absolute-stale',
+      status: 'running',
+      updatedAt: ago(2 * HOUR),
+    });
+    seedNode({ id: 'absolute-recent', createdAt: ago(25 * HOUR), updatedAt: ago(1000) });
+    seedAutoProvisionedTask('absolute-recent', 'in_progress', ago(25 * HOUR));
+    seedWorkspace({
+      id: 'ws-absolute-recent',
+      nodeId: 'absolute-recent',
+      status: 'running',
+      updatedAt: ago(5 * MINUTE),
+    });
+    const env = {
+      ...makeEnv(),
+      MAX_AUTO_NODE_LIFETIME_MS: String(4 * HOUR),
+      NODE_WORKSPACE_IDLE_TIMEOUT_MS: String(30 * MINUTE),
+    } as Env;
+
+    const result = await runNodeCleanupSweep(env);
+
+    expect(result.lifetimeDestroyed).toBe(1);
+    expect(result.lifetimeSkipped).toBeGreaterThanOrEqual(1);
+    expect(deleteCalls).toContain('absolute-stale');
+    expect(deleteCalls).not.toContain('absolute-recent');
+  });
+
   it('does NOT reap a freshly provisioned node that has no workspace yet', async () => {
     // No workspace rows at all, so idleness falls back to created_at. A node still
     // waiting for its first workspace must not be reaped out from under the task
@@ -281,7 +333,9 @@ describe('idle reaping is immune to heartbeat activity', () => {
     // Bounded: repeated sweeps do not silently succeed or escalate, and the node is
     // never reported as destroyed on either pass.
     expect(second.orphanedNodesDestroyed).toBe(0);
+    expect(second.errors).toBe(0);
     expect(first.orphanedNodesDestroyed).toBe(0);
+    expect(deleteNodeResourcesStrict).toHaveBeenCalledTimes(1);
   });
 });
 

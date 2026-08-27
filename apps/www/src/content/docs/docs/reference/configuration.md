@@ -439,7 +439,7 @@ unauthenticated `/api/config/*` endpoints are marked `public`. Endpoints returni
 
 | Variable                               | Default            | Description                                                                                                                      |
 | -------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| `NODE_WARM_TIMEOUT_MS`                 | `1800000` (30 min) | Time a node stays warm after idea execution completes                                                                            |
+| `NODE_WARM_TIMEOUT_MS`                 | `1800000` (30 min) | Time a managed auto-provisioned node stays warm after its last active workspace leaves                                            |
 | `MAX_AUTO_NODE_LIFETIME_MS`            | `14400000` (4 hr)  | Max lifetime for an auto-provisioned node holding no active workspaces                                                           |
 | `NODE_WARM_GRACE_PERIOD_MS`            | `2100000` (35 min) | Cron sweep grace period (must be > warm timeout)                                                                                 |
 | `NODE_LIFECYCLE_ALARM_RETRY_MS`        | `60000` (1 min)    | Retry delay for DO alarm failures                                                                                                |

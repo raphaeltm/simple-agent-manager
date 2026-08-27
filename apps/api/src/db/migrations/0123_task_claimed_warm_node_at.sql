@@ -11,4 +11,4 @@ UPDATE tasks
 CREATE INDEX idx_tasks_claimed_warm_node_at
   ON tasks(claimed_warm_node_id, claimed_warm_node_at)
   WHERE claimed_warm_node_id IS NOT NULL
-    AND status NOT IN ('completed', 'failed', 'cancelled');
+    AND status IN ('queued', 'delegated', 'in_progress');

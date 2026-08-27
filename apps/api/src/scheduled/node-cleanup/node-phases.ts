@@ -273,7 +273,7 @@ export async function sweepMaxLifetimeNodes(
     const pastAbsoluteCeiling = node.created_at < absoluteThreshold;
     const workspacesIdle = node.last_activity < idleThreshold;
 
-    if (!workspacesIdle) {
+    if (node.active_ws_count > 0 && !workspacesIdle) {
       // Recent workspace activity means the hardware is still within the bounded
       // reuse/placement window even if the task has already aged past max lifetime.
       log.info('node_cleanup.max_lifetime_skipped_recent_workspace_activity', {
@@ -322,6 +322,7 @@ export async function sweepMaxLifetimeNodes(
       failureRecoveryType: 'max_lifetime_node_cleanup_failure',
       failureBackoffMs: config.failureBackoffMs,
       allowActiveWorkspaces: viaAbsoluteCeiling,
+      requireWorkspaceIdle: viaAbsoluteCeiling,
       workspaceIdleThresholdIso: idleThreshold,
       context: {
         createdAt: node.created_at,

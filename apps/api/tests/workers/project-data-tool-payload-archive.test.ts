@@ -736,7 +736,10 @@ describe('ProjectData tool payload R2 archival', () => {
       projectId,
       userId,
       workspaceId: `${projectId}-workspace`,
-      createdAt: new Date(FIXED_NOW).toISOString(),
+      // Authentication lifetime is evaluated against the real Worker clock;
+      // FIXED_NOW belongs only to the archive-retention scenario and eventually
+      // ages beyond the MCP token's hard maximum lifetime.
+      createdAt: new Date().toISOString(),
     });
 
     const response = await callMcpTool(token, 'get_archived_tool_payloads', {

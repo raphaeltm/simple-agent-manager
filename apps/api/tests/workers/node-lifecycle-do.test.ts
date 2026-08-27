@@ -10,6 +10,9 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { Env } from '../../src/env';
+import { ensureSessionRecovery } from '../../src/services/session-recovery';
+
 import {
   seedAgentSession,
   seedInstallation,
@@ -259,6 +262,34 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     // D1 warm_since should be cleared
     const dbNode = await getNodeFromD1(nodeId);
     expect(dbNode!.warm_since).toBeNull();
+  });
+
+  it('does not renew the bounded warm-claim timestamp on an idempotent retry', async () => {
+    const nodeId = 'nl-test-claim-fixed-timestamp-001';
+    const taskId = 'task-claim-fixed-timestamp-001';
+    const originalClaimedAt = '2026-08-27T12:00:00.000Z';
+    await seedTestNode(nodeId);
+    await seedClaimTask(taskId);
+
+    const stub = getStub(nodeId);
+    await stub.markIdle(nodeId, TEST_USER_ID);
+    expect((await stub.tryClaim(taskId)).claimed).toBe(true);
+    await env.DATABASE.prepare(
+      `UPDATE tasks SET claimed_warm_node_at = ? WHERE id = ? AND claimed_warm_node_id = ?`
+    )
+      .bind(originalClaimedAt, taskId, nodeId)
+      .run();
+
+    expect((await stub.tryClaim(taskId)).claimed).toBe(true);
+    const retriedClaim = await env.DATABASE.prepare(
+      `SELECT claimed_warm_node_id, claimed_warm_node_at FROM tasks WHERE id = ?`
+    )
+      .bind(taskId)
+      .first<{ claimed_warm_node_id: string | null; claimed_warm_node_at: string | null }>();
+    expect(retriedClaim).toEqual({
+      claimed_warm_node_id: nodeId,
+      claimed_warm_node_at: originalClaimedAt,
+    });
   });
 
   it('rejects a guarded claim atomically when source authority is not live', async () => {
@@ -809,6 +840,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
   it('preserves a ProjectData sleeping session when staged deletion finds a restorable snapshot', async () => {
     const nodeId = 'nl-test-preserve-sleeping-session-001';
     const wsId = 'ws-preserve-sleeping-session-001';
+    const taskId = 'task-preserve-sleeping-session-001';
     await seedUser(TEST_USER_ID);
     await seedInstallation(TEST_INSTALLATION_ID, TEST_USER_ID);
     await seedProject(TEST_PROJECT_ID, TEST_USER_ID, TEST_INSTALLATION_ID);
@@ -831,6 +863,14 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       `UPDATE workspaces SET chat_session_id = ?, updated_at = datetime('now') WHERE id = ?`
     )
       .bind(chatSessionId, wsId)
+      .run();
+    await seedTask(taskId, TEST_PROJECT_ID, TEST_USER_ID, {
+      status: 'in_progress',
+      workspaceId: wsId,
+      taskMode: 'conversation',
+    });
+    await env.DATABASE.prepare(`UPDATE tasks SET chat_session_id = ? WHERE id = ?`)
+      .bind(chatSessionId, taskId)
       .run();
     await seedSleepingSnapshot({ nodeId, workspaceId: wsId, chatSessionId });
 
@@ -882,6 +922,14 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       sleep_status: 'sleeping',
       manifest_r2_key: expect.any(String),
     });
+
+    await expect(
+      ensureSessionRecovery(env as unknown as Env, TEST_PROJECT_ID, chatSessionId, {
+        taskId,
+        projectId: TEST_PROJECT_ID,
+        chatSessionId,
+      })
+    ).resolves.toMatchObject({ status: 'waking' });
   });
 
   it('tryClaim on destroying node returns false', async () => {
