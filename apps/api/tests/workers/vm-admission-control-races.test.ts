@@ -96,20 +96,29 @@ async function leaseRow(scopeKey = SCOPE_KEY): Promise<{
     }>();
 }
 
-function placement(workspaceId: string, nodeId: string): WorkspacePlacementInput {
+function placement(
+  workspaceId: string,
+  nodeId: string,
+  overrides: Partial<
+    Pick<
+      WorkspacePlacementInput,
+      'projectId' | 'userId' | 'installationId' | 'repository' | 'vmSize' | 'vmLocation'
+    >
+  > = {}
+): WorkspacePlacementInput {
   return {
     id: workspaceId,
     nodeId,
-    projectId: PROJECT_ID,
-    userId: USER_ID,
-    installationId: INSTALLATION_ID,
+    projectId: overrides.projectId ?? PROJECT_ID,
+    userId: overrides.userId ?? USER_ID,
+    installationId: overrides.installationId ?? INSTALLATION_ID,
     name: `Workspace ${workspaceId}`,
     displayName: `Workspace ${workspaceId}`,
     normalizedDisplayName: workspaceId,
-    repository: 'test-org/vm-admission-races',
+    repository: overrides.repository ?? 'test-org/vm-admission-races',
     branch: 'main',
-    vmSize: 'medium',
-    vmLocation: 'nbg1',
+    vmSize: overrides.vmSize ?? 'medium',
+    vmLocation: overrides.vmLocation ?? 'nbg1',
     workspaceProfile: 'full',
     devcontainerConfigName: null,
     agentProfileHint: null,
@@ -117,12 +126,19 @@ function placement(workspaceId: string, nodeId: string): WorkspacePlacementInput
   };
 }
 
-function taskState(userId: string, vmSize: 'small' | 'medium' | 'large'): TaskRunnerState {
+function taskState(
+  userId: string,
+  vmSize: 'small' | 'medium' | 'large',
+  overrides: Partial<Pick<TaskRunnerState, 'projectId'>> & {
+    installationId?: string;
+    repository?: string;
+  } = {}
+): TaskRunnerState {
   const now = Date.now();
   return {
     version: 1,
     taskId: `task-selector-${userId}-${vmSize}`,
-    projectId: PROJECT_ID,
+    projectId: overrides.projectId ?? PROJECT_ID,
     userId,
     currentStep: 'node_selection',
     stepResults: {
@@ -146,8 +162,8 @@ function taskState(userId: string, vmSize: 'small' | 'medium' | 'large'): TaskRu
       githubId: null,
       taskTitle: 'selector packing',
       taskDescription: null,
-      repository: 'test-org/vm-admission-races',
-      installationId: INSTALLATION_ID,
+      repository: overrides.repository ?? 'test-org/vm-admission-races',
+      installationId: overrides.installationId ?? INSTALLATION_ID,
       outputBranch: null,
       defaultBranch: 'main',
       projectDefaultVmSize: null,
@@ -211,10 +227,16 @@ function selectorContext(): TaskRunnerContext {
 async function makeReadyNode(
   nodeId: string,
   userId: string,
-  vmSize: 'small' | 'medium' | 'large'
+  vmSize: 'small' | 'medium' | 'large',
+  opts: { nodeClass?: 'managed' | 'user-owned' } = {}
 ): Promise<void> {
   const now = new Date().toISOString();
-  await seedNode(nodeId, userId, { vmSize, vmLocation: 'nbg1', status: 'running' });
+  await seedNode(nodeId, userId, {
+    vmSize,
+    vmLocation: 'nbg1',
+    status: 'running',
+    nodeClass: opts.nodeClass ?? 'managed',
+  });
   await env.DATABASE.prepare(
     `UPDATE nodes
      SET health_status = 'healthy',
@@ -406,6 +428,235 @@ describe('VM admission control D1 races', () => {
     expect(mediumPlacement).toBe(true);
     expect(await findNodeWithCapacity(taskState(USER_ID, 'medium'), rc)).toBe(largeNode);
     expect(await findNodeWithCapacity(taskState(USER_ID, 'large'), rc)).toBe(largeNode);
+  });
+
+  it('preserves same-user cross-project packing on user-scope workspace nodes', async () => {
+    const userId = 'user-vm-admission-cross-project';
+    const installationId = 'installation-vm-admission-cross-project';
+    const firstProjectId = 'project-vm-admission-cross-project-first';
+    const secondProjectId = 'project-vm-admission-cross-project-second';
+    const firstRepository = 'test-org/vm-admission-cross-project-first';
+    const secondRepository = 'test-org/vm-admission-cross-project-second';
+    const crossProjectNode = 'node-vm-admission-cross-project-user-scope';
+    await seedUser(userId);
+    await seedInstallation(installationId, userId, {
+      installationIdValue: 'inst-vm-admission-cross-project',
+      accountName: 'vm-admission-cross-project',
+    });
+    await seedProject(firstProjectId, userId, installationId, { repository: firstRepository });
+    await seedProject(secondProjectId, userId, installationId, { repository: secondRepository });
+    // Today there is no project-pool discriminator on reusable workspace nodes:
+    // `nodes.user_id` is the effective user-scope boundary.
+    await makeReadyNode(crossProjectNode, userId, 'medium');
+    await seedWorkspace('workspace-vm-admission-cross-project-first', crossProjectNode, userId, {
+      projectId: firstProjectId,
+      status: 'running',
+    });
+
+    const rc = selectorContext();
+    const selectedForSecondProject = await findNodeWithCapacity(
+      taskState(userId, 'medium', {
+        projectId: secondProjectId,
+        installationId,
+        repository: secondRepository,
+      }),
+      rc
+    );
+
+    expect(selectedForSecondProject).toBe(crossProjectNode);
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-admission-cross-project-second', crossProjectNode, {
+          projectId: secondProjectId,
+          userId,
+          installationId,
+          repository: secondRepository,
+        }),
+        2
+      )
+    ).resolves.toBe(true);
+
+    const packedProjects = await env.DATABASE.prepare(
+      `SELECT project_id
+       FROM workspaces
+       WHERE node_id = ? AND status IN ('running', 'creating', 'recovery')
+       ORDER BY project_id`
+    )
+      .bind(crossProjectNode)
+      .all<{ project_id: string | null }>();
+    expect(packedProjects.results.map((row) => row.project_id)).toEqual([
+      firstProjectId,
+      secondProjectId,
+    ]);
+  });
+
+  it('prevents different users from selecting or reserving the same workspace node', async () => {
+    const ownerUserId = 'user-vm-admission-share-owner';
+    const otherUserId = 'user-vm-admission-share-other';
+    const ownerInstallationId = 'installation-vm-admission-share-owner';
+    const otherInstallationId = 'installation-vm-admission-share-other';
+    const ownerProjectId = 'project-vm-admission-share-owner';
+    const otherProjectId = 'project-vm-admission-share-other';
+    const otherRepository = 'test-org/vm-admission-share-other';
+    const ownerNode = 'node-vm-admission-share-owner';
+    await seedUser(ownerUserId);
+    await seedUser(otherUserId);
+    await seedInstallation(ownerInstallationId, ownerUserId, {
+      installationIdValue: 'inst-vm-admission-share-owner',
+      accountName: 'vm-admission-share-owner',
+    });
+    await seedInstallation(otherInstallationId, otherUserId, {
+      installationIdValue: 'inst-vm-admission-share-other',
+      accountName: 'vm-admission-share-other',
+    });
+    await seedProject(ownerProjectId, ownerUserId, ownerInstallationId);
+    await seedProject(otherProjectId, otherUserId, otherInstallationId, {
+      repository: otherRepository,
+    });
+    await makeReadyNode(ownerNode, ownerUserId, 'medium', { nodeClass: 'user-owned' });
+    await seedWorkspace('workspace-vm-admission-share-owner', ownerNode, ownerUserId, {
+      projectId: ownerProjectId,
+      status: 'running',
+    });
+
+    const rc = selectorContext();
+
+    expect(
+      await findNodeWithCapacity(taskState(otherUserId, 'medium', { projectId: otherProjectId }), rc)
+    ).toBeNull();
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-admission-share-other', ownerNode, {
+          projectId: otherProjectId,
+          userId: otherUserId,
+          installationId: otherInstallationId,
+          repository: otherRepository,
+        }),
+        2
+      )
+    ).resolves.toBe(false);
+  });
+
+  it('atomically grants only one final reservation for the last workspace slot', async () => {
+    const nodeId = 'node-vm-admission-last-slot';
+    await makeReadyNode(nodeId, USER_ID, 'medium');
+
+    const outcomes = await Promise.all([
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-admission-last-slot-a', nodeId),
+        1
+      ),
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-admission-last-slot-b', nodeId),
+        1
+      ),
+    ]);
+
+    expect(outcomes.filter(Boolean)).toHaveLength(1);
+    const count = await env.DATABASE.prepare(
+      `SELECT COUNT(*) AS c
+       FROM workspaces
+       WHERE node_id = ? AND status IN ('running', 'creating', 'recovery')`
+    )
+      .bind(nodeId)
+      .first<{ c: number }>();
+    expect(count?.c).toBe(1);
+  });
+
+  it('vetoes final reservations when selected node state changed before insert', async () => {
+    const cases: Array<{
+      name: string;
+      nodeId: string;
+      mutate: (nodeId: string) => Promise<void>;
+    }> = [
+      {
+        name: 'status',
+        nodeId: 'node-vm-admission-veto-status',
+        mutate: async (nodeId) => {
+          await env.DATABASE.prepare(`UPDATE nodes SET status = 'deleting' WHERE id = ?`)
+            .bind(nodeId)
+            .run();
+        },
+      },
+      {
+        name: 'owner',
+        nodeId: 'node-vm-admission-veto-owner',
+        mutate: async (nodeId) => {
+          await env.DATABASE.prepare(`UPDATE nodes SET user_id = ? WHERE id = ?`)
+            .bind(OTHER_USER_ID, nodeId)
+            .run();
+        },
+      },
+      {
+        name: 'role',
+        nodeId: 'node-vm-admission-veto-role',
+        mutate: async (nodeId) => {
+          await env.DATABASE.prepare(`UPDATE nodes SET node_role = 'deployment' WHERE id = ?`)
+            .bind(nodeId)
+            .run();
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      await makeReadyNode(testCase.nodeId, USER_ID, 'medium');
+      await testCase.mutate(testCase.nodeId);
+
+      await expect(
+        reserveWorkspacePlacement(
+          env.DATABASE,
+          placement(`workspace-vm-admission-veto-${testCase.name}`, testCase.nodeId),
+          2
+        )
+      ).resolves.toBe(false);
+    }
+  });
+
+  it('counts creating and recovery workspaces against final reservation capacity', async () => {
+    const creatingNode = 'node-vm-admission-capacity-creating';
+    const recoveryNode = 'node-vm-admission-capacity-recovery';
+    const stoppedNode = 'node-vm-admission-capacity-stopped';
+    await makeReadyNode(creatingNode, USER_ID, 'medium');
+    await makeReadyNode(recoveryNode, USER_ID, 'medium');
+    await makeReadyNode(stoppedNode, USER_ID, 'medium');
+    await seedWorkspace('workspace-vm-admission-capacity-creating', creatingNode, USER_ID, {
+      projectId: PROJECT_ID,
+      status: 'creating',
+    });
+    await seedWorkspace('workspace-vm-admission-capacity-recovery', recoveryNode, USER_ID, {
+      projectId: PROJECT_ID,
+      status: 'recovery',
+    });
+    await seedWorkspace('workspace-vm-admission-capacity-stopped', stoppedNode, USER_ID, {
+      projectId: PROJECT_ID,
+      status: 'stopped',
+    });
+
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-admission-capacity-creating-denied', creatingNode),
+        1
+      )
+    ).resolves.toBe(false);
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-admission-capacity-recovery-denied', recoveryNode),
+        1
+      )
+    ).resolves.toBe(false);
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-admission-capacity-stopped-allowed', stoppedNode),
+        1
+      )
+    ).resolves.toBe(true);
   });
 
   it('expires admission waits only after the explicit wait deadline', async () => {
