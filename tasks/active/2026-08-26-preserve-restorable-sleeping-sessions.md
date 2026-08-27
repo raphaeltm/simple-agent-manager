@@ -132,8 +132,9 @@ archives because those paths delete snapshot state first.
 - [x] Update `.claude/rules/58-terminal-verdicts-must-match-the-resumer.md` with the process fix.
 - [x] Run targeted tests and full validation.
 - [x] Run required specialist review and address findings.
-- [ ] Coordinate the staging lane with the unfiltered `gh run list` command before deploying.
-- [ ] Open PR, get CI green, merge, monitor production deploy, then verify a fresh production sleep
+- [x] Coordinate the staging lane with the unfiltered `gh run list` command before deploying.
+- [x] Open PR, get CI green, and complete staging verification.
+- [ ] Merge, monitor production deploy, then verify a fresh production sleep
       survives its teardown window.
 
 ## Acceptance Criteria
@@ -183,6 +184,31 @@ archives because those paths delete snapshot state first.
   - `pnpm build`
   - `pnpm test` — 617 files, 8387 tests.
   - `pnpm --filter @simple-agent-manager/api test:workers` — 58 files, 755 tests.
+- Remote pre-staging gates:
+  - PR #1937 opened: <https://github.com/raphaeltm/simple-agent-manager/pull/1937>
+  - Manual CI workflow run `33023783692` passed on branch
+    `sam/fix-production-regression-shipped-nr49ps`.
+  - Manual CodSpeed workflow run `33023798244` passed on the same branch.
+  - Automatic PR checks did not enqueue for the app-authored PR/synchronize event; E2E Smoke has
+    no `workflow_dispatch` trigger, so the staging deploy smoke suite supplied the live smoke
+    signal.
+- Staging verification:
+  - Required unfiltered lane check before deploy:
+    `gh run list --workflow=deploy-staging.yml --limit=3 --json databaseId,status,conclusion,createdAt,headBranch`
+    returned only completed/successful runs.
+  - Deploy Staging workflow run `33024441560` passed, including 12/12 smoke tests.
+  - Local authenticated Playwright browser check against `https://app.sammy.party` and
+    `https://api.sammy.party` passed: health `200`, token-login `200`, dashboard/projects/settings/
+    API tokens loaded, and zero browser console/page/request errors.
+  - Feature-specific staging proof used the real staging API and D1 state:
+    `POST /api/workspaces/01M0Z49GAZ6ECHST64XSP4M71Y/sleep` at
+    `2026-08-27T00:06:49Z` returned `status=sleeping`, chat session
+    `736eed0e-67f1-4eed-be10-f53a3fa7a43b`, and snapshot expiry
+    `2026-09-03T00:07:00.810Z`.
+  - After the +5 minute teardown window, D1 showed the workspace was deleted at
+    `2026-08-27T00:12:08.746Z` while the snapshot remained `available`/`sleeping` and unexpired.
+    The ProjectData API still reported chat session
+    `736eed0e-67f1-4eed-be10-f53a3fa7a43b` as `sleeping`.
 
 ## Task Completion Validation
 
@@ -191,8 +217,8 @@ archives because those paths delete snapshot state first.
   stopped-session recovery unbrick, no-snapshot/expired-snapshot/degraded-restorable/
   non-restorable/cross-scope/user-archive/task-terminal controls, replacement-workspace-gated
   recovery wake authorization, and finalizer caller inventory.
-- Pending by design: CI, staging verification, merge, production deploy monitoring, and production
-  post-deploy sleep survival verification.
+- Pending by design: merge, production deploy monitoring, and production post-deploy sleep survival
+  verification.
 
 ## Specialist Review Evidence
 
