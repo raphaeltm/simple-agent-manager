@@ -98,6 +98,40 @@ function seedIncident(
     );
 }
 
+function createD1ThatFailsSecondDispatchReservation(sqlite: Database.Database): D1Database {
+  const database = createSqliteD1(sqlite) as D1Database & {
+    prepare(sql: string): D1PreparedStatement;
+  };
+  let reservationUpdates = 0;
+
+  return {
+    ...database,
+    prepare: (sql: string) => {
+      const statement = database.prepare(sql);
+      if (!sql.includes("UPDATE platform_feedback_triages SET queue_state = 'dispatched'")) {
+        return statement;
+      }
+
+      return {
+        ...statement,
+        bind: (...params: unknown[]) => {
+          const bound = statement.bind(...params);
+          return {
+            ...bound,
+            run: async () => {
+              reservationUpdates += 1;
+              if (reservationUpdates === 2) {
+                throw new Error('canary chunk reservation failure');
+              }
+              return bound.run();
+            },
+          };
+        },
+      };
+    },
+  } as unknown as D1Database;
+}
+
 describe('incident trigger sweep', () => {
   it('auto-creates one private incident trigger, dispatches once, and supports resolution', async () => {
     const { sqlite, env } = setup({ withTrigger: false });
@@ -262,6 +296,46 @@ describe('incident trigger sweep', () => {
     expect(sqlite.prepare('SELECT status, error_message FROM trigger_executions').get()).toEqual({
       status: 'failed',
       error_message: 'canary submission failure',
+    });
+  });
+
+  it('releases earlier incident dispatch chunks when a later reservation chunk fails', async () => {
+    const { sqlite, env } = setup();
+    for (let index = 0; index < 95; index++) {
+      seedIncident(sqlite, `incident-chunk-${String(index).padStart(2, '0')}`);
+    }
+    const chunkFailEnv = {
+      ...env,
+      DATABASE: createD1ThatFailsSecondDispatchReservation(sqlite),
+      PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT: '95',
+    } as Env;
+    const submitter = vi.fn();
+
+    const result = await runIncidentTriggerSweep(chunkFailEnv, { now: () => 5000, submitter });
+
+    expect(result).toMatchObject({ fired: 0, failed: 1, pendingIncidents: 95 });
+    expect(submitter).not.toHaveBeenCalled();
+    expect(
+      sqlite
+        .prepare(
+          `SELECT queue_state, COUNT(*) AS count
+           FROM platform_feedback_triages
+           GROUP BY queue_state
+           ORDER BY queue_state`
+        )
+        .all()
+    ).toEqual([{ queue_state: 'pending', count: 95 }]);
+    expect(
+      sqlite
+        .prepare(
+          `SELECT COUNT(*) AS count FROM platform_feedback_triages
+           WHERE dispatched_execution_id IS NOT NULL OR dispatch_lease_expires_at IS NOT NULL`
+        )
+        .get()
+    ).toEqual({ count: 0 });
+    expect(sqlite.prepare('SELECT status, error_message FROM trigger_executions').get()).toEqual({
+      status: 'failed',
+      error_message: 'canary chunk reservation failure',
     });
   });
 

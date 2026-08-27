@@ -34,6 +34,8 @@ import {
 import { prioritizeFeedbackGroups, shouldReopenExistingTriage } from './prioritization';
 import type { ErrorRow, FeedbackTriageResult, FeedbackTriageTrigger, TriageDeps } from './types';
 
+const DEFAULT_PLATFORM_FEEDBACK_TRIAGE_IDEA_TITLE_MAX_LENGTH = 200;
+
 export async function runPlatformFeedbackTriage(
   env: Env,
   trigger: FeedbackTriageTrigger,
@@ -89,6 +91,10 @@ export async function runPlatformFeedbackTriage(
   const failureReasonMaxLength = positive(
     env.PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH,
     DEFAULT_PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH
+  );
+  const ideaTitleMaxLength = positive(
+    env.SAM_IDEA_TITLE_MAX_LENGTH,
+    DEFAULT_PLATFORM_FEEDBACK_TRIAGE_IDEA_TITLE_MAX_LENGTH
   );
   const query = await env.OBSERVABILITY_DATABASE.prepare(
     `SELECT id, source, level, message, timestamp, task_id, node_id
@@ -302,7 +308,7 @@ export async function runPlatformFeedbackTriage(
           ideaId,
           project.id,
           project.user_id,
-          group.summary.slice(0, 200),
+          group.summary.slice(0, ideaTitleMaxLength),
           ideaDescription(group, diagnosis.id),
           project.user_id,
           isoNow,

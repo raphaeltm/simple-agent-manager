@@ -37,9 +37,12 @@ SAM task: `01M0YGT4MPYKNS36GBJAETKAE1`
 - [x] Add discriminating real-SQL tests:
   - [x] old occurrence predating `resolved_at` stays resolved and a newer occurrence reopens;
   - [x] occurrence inside `PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS` stays resolved and post-cooldown occurrence reopens;
-  - [x] vm-agent occurrence from a stale node build stays resolved and current-build occurrence reopens;
+  - [x] expired incidents stay expired for old/cooldown occurrences and reopen after cooldown;
+  - [x] vm-agent occurrence from a stale node build stays resolved and current-build occurrence reopens when fix evidence is stored in structured `resolution_references`;
+  - [x] direct `upsertUserReportIncident()` and `markIncidentPending()` paths apply the same terminal reopen policy;
   - [x] platform-side expired dispatch release preserves `dispatch_attempts`, while workspace-callback failed task consumes one attempt.
   - [x] expired dispatch reclamation processes only the configured number of rows per sweep.
+  - [x] D1 statements stay within Cloudflare's 100-bound-parameter ceiling for feedback-project task exclusion and incident dispatch reservation chunks.
 - [x] Update existing incident trigger tests for the new attempt-accounting point.
 - [x] Run focused tests and full quality gates.
 - [x] Run required specialist reviews: task-completion-validator, cloudflare-specialist, env-validator, constitution-validator, and test-engineer.
@@ -61,8 +64,10 @@ SAM task: `01M0YGT4MPYKNS36GBJAETKAE1`
 
 ## Validation evidence
 
-- `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/platform-feedback-triage.test.ts tests/unit/services/platform-feedback-incidents.test.ts tests/unit/scheduled/incident-triggers.test.ts tests/unit/routes/mcp/incident-tools.test.ts tests/unit/services/report-issue-effective-config.test.ts` passed: 5 files / 39 tests.
-- `pnpm --filter @simple-agent-manager/api test` passed: 609 files / 8,338 tests.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/platform-feedback-triage.test.ts tests/unit/services/platform-feedback-incidents.test.ts tests/unit/scheduled/incident-triggers.test.ts tests/unit/routes/mcp/incident-tools.test.ts tests/unit/services/report-issue-effective-config.test.ts tests/unit/report-issue.test.ts` passed: 6 files / 72 tests.
+- `pnpm --filter @simple-agent-manager/api test` passed: 616 files / 8,389 tests.
+- `pnpm check:fast` passed, including format ratchet, oxlint shadow, ESLint, and type-boundary audit.
+- `pnpm quality:file-sizes` passed after splitting `platform-feedback-incidents` and `platform-feedback-triage` into submodules.
 - `pnpm quality:scripts:test -- scripts/quality/sync-wrangler-config.test.ts scripts/quality/deploy-reusable-workflow.test.ts` passed: 39 files / 529 tests.
 - `pnpm --filter @simple-agent-manager/api typecheck` passed.
 - `pnpm --filter @simple-agent-manager/api lint` passed.
@@ -78,12 +83,12 @@ All Phase 5 local specialist reviews completed before staging.
 
 | Reviewer | Result | Evidence |
 | --- | --- | --- |
-| task-completion-validator | PASS | Checklist, diff, real-SQL tests, docs, and env wiring covered the idea requirements. |
-| cloudflare-specialist | PASS | Reclaim query is bounded/deterministic; deploy config wiring present; stale-row reopen paths re-read before terminal updates. |
+| task-completion-validator | PASS | Checklist, diff, real-SQL tests, docs, and env wiring covered the idea requirements. Post-split re-review confirmed structured `resolution_references`, expired-state, direct-path, and D1 bind-ceiling blockers resolved. |
+| cloudflare-specialist | PASS | Reclaim query is bounded/deterministic; deploy config wiring present; D1 bind-heavy statements are chunked within Cloudflare limits and partial chunk-reservation failures release leased rows. |
 | env-validator | PASS | Cooldown and reclaim env vars are consistent across `Env`, defaults, docs, deploy sync/workflow, and quality tests. |
 | doc-sync-validator | PASS | Public configuration docs and env-reference skill match the implemented behavior. |
-| constitution-validator | PASS | No Principle XI hardcoded-value blockers in the committed diff. |
-| test-engineer | PASS | Real-SQL trigger-path tests cover old occurrences, cooldown, VM rollout, platform-side releases, agent failures, and bounded reclaim. |
+| constitution-validator | PASS | No Principle XI hardcoded-value blockers in the committed diff or post-split remediation diff. |
+| test-engineer | PASS | Real-SQL trigger-path tests cover old occurrences, cooldown, expired states, direct incident entry points, VM rollout, platform-side releases, agent failures, D1 bind ceilings, and bounded reclaim. |
 
 ## Staging verification result (2026-08-26)
 

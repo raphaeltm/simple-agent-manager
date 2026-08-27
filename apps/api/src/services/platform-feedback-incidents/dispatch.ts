@@ -1,8 +1,13 @@
 import type { Env } from '../../env';
+import { D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { ulid } from '../../lib/ulid';
 import { getIncidentConfig, type IncidentConfig } from '../platform-feedback-incident-config';
 import { TERMINAL_TASK_STATUS_SQL } from './constants';
 import { placeholders } from './state';
+
+const RESERVE_INCIDENT_DISPATCH_FIXED_BINDINGS = 6;
+const RESERVE_INCIDENT_DISPATCH_SIGNATURE_CHUNK_SIZE =
+  D1_MAX_BOUND_PARAMETERS - RESERVE_INCIDENT_DISPATCH_FIXED_BINDINGS;
 
 export async function reclaimExpiredIncidentDispatches(
   env: Env,
@@ -121,27 +126,36 @@ export async function reserveIncidentDispatch(
 ): Promise<{ leaseToken: string; reserved: number }> {
   if (signatures.length === 0) return { leaseToken: '', reserved: 0 };
   const leaseToken = ulid();
-  const result = await env.DATABASE.prepare(
-    `UPDATE platform_feedback_triages SET queue_state = 'dispatched',
-      dispatch_lease_token = ?, dispatch_lease_expires_at = ?,
-      dispatched_trigger_id = ?, dispatched_execution_id = ?, dispatched_at = ?,
-      updated_at = CURRENT_TIMESTAMP
-     WHERE signature IN (${placeholders(signatures)})
-       AND queue_state = 'pending'
-       AND rejected_at IS NULL
-       AND dispatch_attempts < ?`
-  )
-    .bind(
-      leaseToken,
-      now + config.dispatchLeaseTtlMs,
-      triggerId,
-      executionId,
-      now,
-      ...signatures,
-      config.maxDispatchAttempts
+  let reserved = 0;
+  for (
+    let offset = 0;
+    offset < signatures.length;
+    offset += RESERVE_INCIDENT_DISPATCH_SIGNATURE_CHUNK_SIZE
+  ) {
+    const chunk = signatures.slice(offset, offset + RESERVE_INCIDENT_DISPATCH_SIGNATURE_CHUNK_SIZE);
+    const result = await env.DATABASE.prepare(
+      `UPDATE platform_feedback_triages SET queue_state = 'dispatched',
+        dispatch_lease_token = ?, dispatch_lease_expires_at = ?,
+        dispatched_trigger_id = ?, dispatched_execution_id = ?, dispatched_at = ?,
+        updated_at = CURRENT_TIMESTAMP
+       WHERE signature IN (${placeholders(chunk)})
+         AND queue_state = 'pending'
+         AND rejected_at IS NULL
+         AND dispatch_attempts < ?`
     )
-    .run();
-  return { leaseToken, reserved: result.meta.changes ?? 0 };
+      .bind(
+        leaseToken,
+        now + config.dispatchLeaseTtlMs,
+        triggerId,
+        executionId,
+        now,
+        ...chunk,
+        config.maxDispatchAttempts
+      )
+      .run();
+    reserved += result.meta.changes ?? 0;
+  }
+  return { leaseToken, reserved };
 }
 
 export async function completeIncidentDispatchLink(

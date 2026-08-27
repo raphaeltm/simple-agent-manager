@@ -52,6 +52,7 @@ export interface ExistingTriagePriorityRow {
   resolved_by_task_id: string | null;
   resolved_task_output_pr_url: string | null;
   resolution_note: string | null;
+  resolution_references: string | null;
   expired_at: number | null;
 }
 export interface StoredTriageGroupRow {

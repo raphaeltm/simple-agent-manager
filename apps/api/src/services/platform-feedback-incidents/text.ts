@@ -2,6 +2,9 @@ import { redactSensitiveData } from '../observability';
 import type { IncidentConfig } from '../platform-feedback-incident-config';
 import { redactSecretPatterns } from '../secret-redaction';
 
+const INCIDENT_SIGNATURE_INPUT_MAX_LENGTH = 2_000;
+const INCIDENT_SIGNATURE_CANONICAL_MAX_LENGTH = 500;
+
 function stripControlCharacters(value: string): string {
   // eslint-disable-next-line no-control-regex
   return value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
@@ -20,12 +23,12 @@ export function sanitizeText(value: string, maxLength: number): string {
 }
 
 function normalizeForSignature(value: string): string {
-  return sanitizeText(value, 2_000)
+  return sanitizeText(value, INCIDENT_SIGNATURE_INPUT_MAX_LENGTH)
     .toLowerCase()
     .replace(/\b\d{3,}\b/g, '[n]')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 500);
+    .slice(0, INCIDENT_SIGNATURE_CANONICAL_MAX_LENGTH);
 }
 
 export async function incidentSignature(source: string, fingerprintText: string): Promise<string> {

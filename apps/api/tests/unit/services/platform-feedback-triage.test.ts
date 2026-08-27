@@ -10,7 +10,7 @@ import {
   groupPlatformErrors,
   runPlatformFeedbackTriage,
 } from '../../../src/services/platform-feedback-triage';
-import { createSqliteD1 } from '../../helpers/sqlite-d1';
+import { createSqliteD1, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
 function setup() {
   const main = new Database(':memory:');
@@ -56,8 +56,9 @@ async function seedResolvedTriage(
     source?: string;
     message: string;
     timestamp: number;
-    resolvedAt: number;
+    resolvedAt?: number | null;
     resolutionNote?: string;
+    resolutionReferences?: Record<string, unknown>;
     resolvedByTaskId?: string | null;
     queueState?: 'resolved' | 'expired';
     expiredAt?: number | null;
@@ -80,8 +81,8 @@ async function seedResolvedTriage(
       `INSERT INTO platform_feedback_triages
         (signature, source, summary, first_seen_at, last_seen_at, occurrence_count, evidence_refs,
          severity, queue_state, queued_at, resolved_at, resolved_by_task_id, resolution_note,
-         expired_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         resolution_references, expired_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       group.signature,
@@ -94,9 +95,10 @@ async function seedResolvedTriage(
       group.severity,
       input.queueState ?? 'resolved',
       input.timestamp,
-      input.resolvedAt,
+      input.resolvedAt ?? null,
       input.resolvedByTaskId ?? null,
       input.resolutionNote ?? null,
+      input.resolutionReferences ? JSON.stringify(input.resolutionReferences) : null,
       input.expiredAt ?? null
     );
   return group.signature;
@@ -363,6 +365,88 @@ describe('platform feedback triage', () => {
     });
   });
 
+  it('keeps expired signatures closed for old/cooldown occurrences and reopens after cooldown', async () => {
+    const { main, observability } = setup();
+    const expiredAt = Date.parse('2026-08-26T12:00:00Z');
+    const message = 'expired websocket callback reset while rolling deployment';
+    await seedResolvedTriage(main, {
+      message,
+      timestamp: expiredAt - 60_000,
+      queueState: 'expired',
+      expiredAt,
+    });
+    const diagnose = vi.fn(async () => ({
+      id: 'diagnosis-1',
+      diagnosis: 'redacted',
+    })) as unknown as typeof runDebugDiagnosis;
+    const env = {
+      DATABASE: createSqliteD1(main),
+      OBSERVABILITY_DATABASE: createSqliteD1(observability),
+      PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project',
+      PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES: '120',
+      PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS: String(10 * 60_000),
+    } as Env;
+
+    observability
+      .prepare(
+        'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run('123e4567-e89b-42d3-a456-426614174001', 'api', 'error', message, expiredAt - 1);
+    const oldSweep = await runPlatformFeedbackTriage(env, 'cron', {
+      now: () => expiredAt + 1_000,
+      diagnose,
+    });
+
+    expect(oldSweep).toMatchObject({ groupsFound: 1, groupsSkipped: 1, ideasCreated: 0 });
+    expect(diagnose).not.toHaveBeenCalled();
+    expect(
+      main.prepare('SELECT queue_state, expired_at, idea_id FROM platform_feedback_triages').get()
+    ).toEqual({ queue_state: 'expired', expired_at: expiredAt, idea_id: null });
+
+    observability.prepare('DELETE FROM platform_errors').run();
+    observability
+      .prepare(
+        'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run('223e4567-e89b-42d3-a456-426614174000', 'api', 'error', message, expiredAt + 5 * 60_000);
+    const cooldownSweep = await runPlatformFeedbackTriage(env, 'cron', {
+      now: () => expiredAt + 6 * 60_000,
+      diagnose,
+    });
+
+    expect(cooldownSweep).toMatchObject({ groupsFound: 1, groupsSkipped: 1, ideasCreated: 0 });
+    expect(diagnose).not.toHaveBeenCalled();
+    expect(main.prepare('SELECT queue_state FROM platform_feedback_triages').get()).toEqual({
+      queue_state: 'expired',
+    });
+
+    observability.prepare('DELETE FROM platform_errors').run();
+    observability
+      .prepare(
+        'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run(
+        '323e4567-e89b-42d3-a456-426614174000',
+        'api',
+        'error',
+        message,
+        expiredAt + 11 * 60_000
+      );
+    const afterCooldownSweep = await runPlatformFeedbackTriage(env, 'cron', {
+      now: () => expiredAt + 12 * 60_000,
+      diagnose,
+    });
+
+    expect(afterCooldownSweep).toMatchObject({ groupsFound: 1, ideasCreated: 1 });
+    expect(diagnose).toHaveBeenCalledTimes(1);
+    expect(
+      main.prepare('SELECT queue_state, expired_at FROM platform_feedback_triages').get()
+    ).toEqual({
+      queue_state: 'pending',
+      expired_at: null,
+    });
+  });
+
   it('keeps resolved vm-agent signatures closed for stale node builds and reopens from the required build', async () => {
     const { main, observability } = setup();
     const resolvedAt = Date.parse('2026-08-26T12:00:00Z');
@@ -372,7 +456,10 @@ describe('platform feedback triage', () => {
       message,
       timestamp: resolvedAt - 60_000,
       resolvedAt,
-      resolutionNote: 'Resolved by PR #1924',
+      resolutionNote: 'Resolved through structured rollout reference',
+      resolutionReferences: {
+        fixPrUrl: 'https://github.com/raphaeltm/simple-agent-manager/pull/1924',
+      },
     });
     main.prepare('INSERT INTO nodes (id, agent_version) VALUES (?, ?)').run('node-1', 'old-build');
     const diagnose = vi.fn(async () => ({
@@ -941,6 +1028,78 @@ describe('platform feedback triage', () => {
     >;
     expect(row.evidence_refs).toContain('223e4567-e89b-42d3-a456-426614174000');
     expect(row.evidence_refs).not.toContain('123e4567-e89b-42d3-a456-426614174000');
+  });
+
+  it('chunks feedback-project task exclusions within the D1 bind parameter ceiling', async () => {
+    const { main, observability } = setup();
+    const at = Date.parse('2026-07-29T12:00:00Z');
+    const insertTask = main.prepare(
+      `INSERT INTO tasks (id, project_id, user_id, title, description, status, priority,
+        task_mode, dispatch_depth, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    const insertError = observability.prepare(
+      'INSERT INTO platform_errors (id, source, level, message, timestamp, task_id) VALUES (?, ?, ?, ?, ?, ?)'
+    );
+    const wordFor = (index: number) =>
+      `${String.fromCharCode(97 + (index % 26))}${String.fromCharCode(
+        97 + Math.floor(index / 26)
+      )}`;
+
+    for (let index = 0; index < 100; index++) {
+      const taskId = `task-bind-${wordFor(index)}`;
+      if (index < 50) {
+        insertTask.run(
+          taskId,
+          'feedback-project',
+          'owner-1',
+          `Feedback task ${wordFor(index)}`,
+          'self task',
+          'in_progress',
+          0,
+          'task',
+          0,
+          'owner-1',
+          new Date(at).toISOString(),
+          new Date(at).toISOString()
+        );
+      }
+      insertError.run(
+        `123e4567-e89b-42d3-a456-42661417${String(index).padStart(4, '0')}`,
+        'api',
+        'error',
+        index < 50
+          ? `feedback loop self task ${wordFor(index)}`
+          : `external platform bind ceiling ${wordFor(index)}`,
+        at + index,
+        taskId
+      );
+    }
+    const diagnose = vi.fn(async (_env, _userId, target) => ({
+      id: `diagnosis-${target.errorId}`,
+      diagnosis: 'redacted',
+    })) as unknown as typeof runDebugDiagnosis;
+
+    const result = await runPlatformFeedbackTriage(
+      {
+        DATABASE: createSqliteD1WithBindLimit(main, 100),
+        OBSERVABILITY_DATABASE: createSqliteD1(observability),
+        PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project',
+        PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT: '100',
+        PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT: '50',
+        PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES: '60',
+      } as Env,
+      'manual',
+      { now: () => at + 60_000, diagnose }
+    );
+
+    expect(result).toMatchObject({ groupsFound: 50, ideasCreated: 50 });
+    expect(diagnose).toHaveBeenCalledTimes(50);
+    expect(
+      main.prepare('SELECT COUNT(*) AS count FROM tasks WHERE status = ?').get('draft')
+    ).toEqual({
+      count: 50,
+    });
   });
 
   it('records a bounded triage annotation when a linked Idea is no longer draft', async () => {

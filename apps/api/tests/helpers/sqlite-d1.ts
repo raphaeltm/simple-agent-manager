@@ -114,6 +114,34 @@ export function createSqliteD1(sqlite: Database.Database): D1Database {
   } as unknown as D1Database;
 }
 
+/** D1 adapter wrapper that fails when one statement exceeds Cloudflare's bind parameter limit. */
+export function createSqliteD1WithBindLimit(
+  sqlite: Database.Database,
+  maxBoundParameters: number
+): D1Database {
+  const database = createSqliteD1(sqlite) as D1Database & {
+    prepare(sql: string): D1PreparedStatement;
+  };
+
+  return {
+    ...database,
+    prepare: (sql: string) => {
+      const statement = database.prepare(sql);
+      return {
+        ...statement,
+        bind: (...params: unknown[]) => {
+          if (params.length > maxBoundParameters) {
+            throw new Error(
+              `D1 bind parameter limit exceeded: ${params.length} > ${maxBoundParameters}`
+            );
+          }
+          return statement.bind(...params);
+        },
+      };
+    },
+  } as unknown as D1Database;
+}
+
 /** Small stateful KV boundary fake that preserves JSON get/put semantics. */
 export function createMemoryKv(): KVNamespace {
   const values = new Map<string, string>();

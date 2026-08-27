@@ -272,6 +272,7 @@ export async function runIncidentTriggerSweep(
           ).rendered;
         },
         beforeSubmit: async (executionId) => {
+          reservedExecutionId = executionId;
           const reserved = await reserveIncidentDispatch(
             env,
             signatures,
@@ -283,7 +284,6 @@ export async function runIncidentTriggerSweep(
           if (reserved.reserved === 0) {
             throw new Error('No pending incidents remained for incident trigger dispatch');
           }
-          reservedExecutionId = executionId;
         },
       },
       submitter

@@ -1,3 +1,8 @@
+import {
+  DEFAULT_REPORT_ISSUE_DESCRIPTION_MAX_LENGTH,
+  DEFAULT_REPORT_ISSUE_TITLE_MAX_LENGTH,
+} from '@simple-agent-manager/shared';
+
 import type { Env } from '../../env';
 import { ulid } from '../../lib/ulid';
 import { getIncidentConfig, type IncidentConfig } from '../platform-feedback-incident-config';
@@ -14,6 +19,12 @@ import {
   sanitizeText,
 } from './text';
 import type { IncidentReopenEvidence, IncidentRow, UserReportIncidentInput } from './types';
+
+const DEFAULT_REPORT_ISSUE_AUTHORIZED_REF_MAX_LENGTH = 200;
+
+function positiveLimit(value: number | undefined, fallback: number): number {
+  return Number.isSafeInteger(value) && value !== undefined && value > 0 ? value : fallback;
+}
 
 export async function markIncidentPending(
   env: Env,
@@ -66,8 +77,19 @@ export async function upsertUserReportIncident(
   const config = getIncidentConfig(env);
   const now = input.now ?? Date.now();
   const nowIso = new Date(now).toISOString();
-  const sanitizedTitle = sanitizeText(input.title, 200) || 'User-submitted feedback report';
-  const sanitizedDescription = sanitizeText(input.description, 5_000);
+  const titleMaxLength = positiveLimit(input.titleMaxLength, DEFAULT_REPORT_ISSUE_TITLE_MAX_LENGTH);
+  const descriptionMaxLength = positiveLimit(
+    input.descriptionMaxLength,
+    DEFAULT_REPORT_ISSUE_DESCRIPTION_MAX_LENGTH
+  );
+  const authorizedRefMaxLength = positiveLimit(
+    input.authorizedRefMaxLength,
+    DEFAULT_REPORT_ISSUE_AUTHORIZED_REF_MAX_LENGTH
+  );
+  const ideaTitleMaxLength = positiveLimit(input.ideaTitleMaxLength, titleMaxLength);
+  const sanitizedTitle =
+    sanitizeText(input.title, titleMaxLength) || 'User-submitted feedback report';
+  const sanitizedDescription = sanitizeText(input.description, descriptionMaxLength);
   const signature = await incidentSignature(
     REPORT_SOURCE,
     `${sanitizedTitle}\n${sanitizedDescription}`
@@ -80,7 +102,10 @@ export async function upsertUserReportIncident(
     description: sanitizedDescription,
     refs: Object.fromEntries(
       input.authorizedKeys
-        .map((key) => [key, sanitizeText(input.authorizedRefs[key] ?? '', 200)] as const)
+        .map(
+          (key) =>
+            [key, sanitizeText(input.authorizedRefs[key] ?? '', authorizedRefMaxLength)] as const
+        )
         .filter(([, value]) => value)
     ),
   };
@@ -173,7 +198,7 @@ export async function upsertUserReportIncident(
         ideaId,
         input.feedbackProjectId,
         input.feedbackProjectOwnerId,
-        sanitizedTitle.slice(0, 200),
+        sanitizedTitle.slice(0, ideaTitleMaxLength),
         ideaContent,
         input.userId,
         nowIso,

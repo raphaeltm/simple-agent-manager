@@ -8,12 +8,13 @@ import {
   getIncidentDetail,
   IncidentResolutionValidationError,
   listIncidentQueue,
+  markIncidentPending,
   reclaimExpiredIncidentDispatches,
   reserveIncidentDispatch,
   resolveIncident,
   upsertUserReportIncident,
 } from '../../../src/services/platform-feedback-incidents';
-import { createSqliteD1 } from '../../helpers/sqlite-d1';
+import { createSqliteD1, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
 const IMPLEMENTATION_TASK_ID = '01M0YGSPRC0E17FPQMZYW012R8';
 const TRACKING_ID = '01M0YGMAZTZ01Y0ESREF2AMVNC';
@@ -199,6 +200,105 @@ describe('platform feedback incidents', () => {
     expect(`${idea.title}\n${idea.description}`).not.toContain('alice@example.com');
     expect(`${idea.title}\n${idea.description}`).not.toContain('192.0.2.10');
     expect(idea.description).toContain('## Untrusted Evidence: Grouped User Reports');
+  });
+
+  it('keeps direct user-report incidents terminal during cooldown and reopens after cooldown', async () => {
+    const { sqlite, env } = setup();
+    const envWithCooldown = {
+      ...env,
+      PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS: String(10 * 60_000),
+    } as Env;
+    const report = {
+      userId: 'reporter-1',
+      feedbackProjectId: 'feedback-project',
+      feedbackProjectOwnerId: 'owner-1',
+      title: 'Workspace provisioning failed for grouped report',
+      description: 'Provisioning failed with redacted provider error',
+      authorizedRefs: {},
+      authorizedKeys: [],
+      contentMaxLength: 10_000,
+    };
+
+    const first = await upsertUserReportIncident(envWithCooldown, { ...report, now: 1000 });
+    const claim = await claimIncident(envWithCooldown, first.incidentId, 'task-1', 1500);
+    expect(claim).toBeTruthy();
+    await expect(
+      resolveIncident(
+        envWithCooldown,
+        first.incidentId,
+        claim?.claimToken ?? '',
+        'resolved',
+        'task-1',
+        'Tracked by follow-up Idea',
+        { now: 2000, resolutionReferences: { linkedRecordId: TRACKING_ID } }
+      )
+    ).resolves.toBe(true);
+
+    const duringCooldown = await upsertUserReportIncident(envWithCooldown, {
+      ...report,
+      now: 2000 + 5 * 60_000,
+    });
+    expect(duringCooldown.incidentId).toBe(first.incidentId);
+    expect(
+      sqlite
+        .prepare('SELECT queue_state, resolved_at, queued_at FROM platform_feedback_triages')
+        .get()
+    ).toEqual({
+      queue_state: 'resolved',
+      resolved_at: 2000,
+      queued_at: 1000,
+    });
+    expect(await listIncidentQueue(envWithCooldown, ['pending'], 10)).toHaveLength(0);
+
+    const afterCooldown = await upsertUserReportIncident(envWithCooldown, {
+      ...report,
+      now: 2000 + 11 * 60_000,
+    });
+    expect(afterCooldown.incidentId).toBe(first.incidentId);
+    expect(
+      sqlite
+        .prepare('SELECT queue_state, resolved_at, queued_at FROM platform_feedback_triages')
+        .get()
+    ).toEqual({
+      queue_state: 'pending',
+      resolved_at: 2000,
+      queued_at: 2000 + 11 * 60_000,
+    });
+  });
+
+  it('keeps markIncidentPending from reopening terminal incidents inside cooldown', async () => {
+    const { sqlite, env } = setup();
+    const envWithCooldown = {
+      ...env,
+      PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS: String(10 * 60_000),
+    } as Env;
+    const signature = seedIncident(sqlite, { queue_state: 'expired' });
+    sqlite
+      .prepare('UPDATE platform_feedback_triages SET expired_at = ? WHERE signature = ?')
+      .run(2000, signature);
+
+    await markIncidentPending(envWithCooldown, signature, 2000 + 5 * 60_000, {
+      timestamp: 2000 + 5 * 60_000,
+    });
+    expect(
+      sqlite.prepare('SELECT queue_state, expired_at FROM platform_feedback_triages').get()
+    ).toEqual({
+      queue_state: 'expired',
+      expired_at: 2000,
+    });
+
+    await markIncidentPending(envWithCooldown, signature, 2000 + 11 * 60_000, {
+      timestamp: 2000 + 11 * 60_000,
+    });
+    expect(
+      sqlite
+        .prepare('SELECT queue_state, expired_at, queued_at FROM platform_feedback_triages')
+        .get()
+    ).toEqual({
+      queue_state: 'pending',
+      expired_at: null,
+      queued_at: 2000 + 11 * 60_000,
+    });
   });
 
   it('allows only one simultaneous claim and permits reclaim after lease expiry', async () => {
@@ -448,6 +548,38 @@ describe('platform feedback incidents', () => {
         )
         .get('dispatched', 'exec-1')
     ).toEqual({ count: 2, attempts: 0 });
+  });
+
+  it('chunks large dispatch reservations within the D1 bind parameter ceiling', async () => {
+    const { sqlite, env } = setup();
+    const signatures: string[] = [];
+    for (let index = 0; index < 95; index++) {
+      signatures.push(
+        seedIncident(sqlite, {
+          signature: `incident-bind-${String(index).padStart(2, '0')}`,
+          summary: `Dispatch bind ceiling incident ${index}`,
+        })
+      );
+    }
+    const cappedEnv = { ...env, DATABASE: createSqliteD1WithBindLimit(sqlite, 100) } as Env;
+
+    const reserved = await reserveIncidentDispatch(
+      cappedEnv,
+      signatures,
+      'trigger-1',
+      'exec-bind-ceiling',
+      5000
+    );
+
+    expect(reserved).toMatchObject({ leaseToken: expect.any(String), reserved: 95 });
+    expect(
+      sqlite
+        .prepare(
+          `SELECT COUNT(*) AS count, SUM(dispatch_attempts) AS attempts
+           FROM platform_feedback_triages WHERE queue_state = ? AND dispatched_execution_id = ?`
+        )
+        .get('dispatched', 'exec-bind-ceiling')
+    ).toEqual({ count: 95, attempts: 0 });
   });
 
   it('orders dispatch candidates by severity and novelty ahead of low-severity repeats', async () => {

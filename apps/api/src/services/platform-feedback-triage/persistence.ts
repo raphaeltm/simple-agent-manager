@@ -8,6 +8,8 @@ import type {
   StoredTriageGroupRow,
 } from './types';
 
+const FEEDBACK_PROJECT_TASK_ID_CHUNK_SIZE = D1_MAX_BOUND_PARAMETERS - 1;
+
 export async function recordGroupFailure(
   env: Env,
   signature: string,
@@ -79,13 +81,19 @@ export async function excludeFeedbackProjectTaskErrors(
     ...new Set(rows.map((row) => row.task_id).filter((id): id is string => Boolean(id))),
   ];
   if (taskIds.length === 0) return rows;
-  const placeholders = taskIds.map(() => '?').join(', ');
-  const query = await env.DATABASE.prepare(
-    `SELECT id FROM tasks WHERE project_id = ? AND id IN (${placeholders})`
-  )
-    .bind(feedbackProjectId, ...taskIds)
-    .all<{ id: string }>();
-  const selfTaskIds = new Set((query.results ?? []).map((row) => row.id));
+  const selfTaskIds = new Set<string>();
+  for (let offset = 0; offset < taskIds.length; offset += FEEDBACK_PROJECT_TASK_ID_CHUNK_SIZE) {
+    const chunk = taskIds.slice(offset, offset + FEEDBACK_PROJECT_TASK_ID_CHUNK_SIZE);
+    const placeholders = chunk.map(() => '?').join(', ');
+    const query = await env.DATABASE.prepare(
+      `SELECT id FROM tasks WHERE project_id = ? AND id IN (${placeholders})`
+    )
+      .bind(feedbackProjectId, ...chunk)
+      .all<{ id: string }>();
+    for (const row of query.results ?? []) {
+      selfTaskIds.add(row.id);
+    }
+  }
   return rows.filter((row) => !row.task_id || !selfTaskIds.has(row.task_id));
 }
 
@@ -127,7 +135,7 @@ export async function loadExistingTriageRows(
         triage.occurrence_count, triage.severity, triage.budget_deferred_until,
         triage.rejected_at, triage.queue_state, triage.resolved_at,
         triage.resolved_by_task_id, resolved_task.output_pr_url AS resolved_task_output_pr_url,
-        triage.resolution_note, triage.expired_at
+        triage.resolution_note, triage.resolution_references, triage.expired_at
        FROM platform_feedback_triages triage
        LEFT JOIN tasks resolved_task ON resolved_task.id = triage.resolved_by_task_id
        WHERE triage.signature IN (${chunk.map(() => '?').join(',')})`

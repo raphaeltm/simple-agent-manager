@@ -1,4 +1,5 @@
 import type { Env } from '../../env';
+import { parseStoredIncidentResolutionReferences } from '../platform-feedback-incident-resolution-references';
 import {
   getIncidentConfig,
   shouldReopenIncidentForOccurrence,
@@ -54,6 +55,7 @@ export function shouldReopenExistingTriage(
     source: existing.source ?? group.source,
     resolutionNote: existing.resolution_note,
     resolvedTaskOutputPrUrl: existing.resolved_task_output_pr_url,
+    resolutionReferences: parseStoredIncidentResolutionReferences(existing.resolution_references),
     occurrence: {
       timestamp: group.lastSeenAt,
       nodeAgentVersion: group.evidence.find((item) => item.timestamp === group.lastSeenAt)

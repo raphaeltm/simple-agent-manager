@@ -214,6 +214,9 @@ export async function submitReport(
     authorizedRefs: { ...authorized },
     authorizedKeys,
     contentMaxLength: contentMaxLen,
+    titleMaxLength: titleMaxLen,
+    descriptionMaxLength: descMaxLen,
+    ideaTitleMaxLength: titleMaxLen,
   });
 
   return {

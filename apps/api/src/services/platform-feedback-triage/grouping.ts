@@ -7,6 +7,8 @@ import type {
   FeedbackSeverity,
 } from './types';
 
+const PLATFORM_ERROR_MESSAGE_GROUP_MAX_LENGTH = 500;
+
 export function sanitizeFailureReason(cause: unknown, maxLength: number): string {
   const raw = cause instanceof Error ? cause.message : String(cause);
   const redacted = String(redactSensitiveData(raw || 'unknown triage failure'))
@@ -38,7 +40,7 @@ function normalizeMessage(message: string): string {
     .replace(/\b\d{3,}\b/g, '[n]')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 500);
+    .slice(0, PLATFORM_ERROR_MESSAGE_GROUP_MAX_LENGTH);
 }
 
 export function parseStoredEvidenceRefs(

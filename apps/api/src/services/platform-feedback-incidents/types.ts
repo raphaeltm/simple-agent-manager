@@ -94,6 +94,10 @@ export interface UserReportIncidentInput {
   authorizedRefs: Record<string, string | undefined>;
   authorizedKeys: string[];
   contentMaxLength: number;
+  titleMaxLength?: number;
+  descriptionMaxLength?: number;
+  authorizedRefMaxLength?: number;
+  ideaTitleMaxLength?: number;
   now?: number;
 }
 
