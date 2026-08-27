@@ -24,6 +24,9 @@ import {
 
 import type { Env as DOEnv } from './types';
 
+export const DEFAULT_TASK_RECONCILIATION_ACTIVE_WORK_HARD_STALL_MS =
+  DEFAULT_TASK_RECONCILIATION_PROMPT_HARD_STALL_MS;
+
 function envNumber(env: DOEnv, key: string, fallback: number): number {
   const value = Number.parseInt(
     (env as unknown as Record<string, string | undefined>)[key] ?? '',
@@ -60,6 +63,16 @@ export function promptHardStallMs(env: DOEnv): number {
     DEFAULT_TASK_RECONCILIATION_PROMPT_HARD_STALL_MS
   );
   return Math.max(hardMs, softMs);
+}
+
+export function activeWorkHardStallMs(env: DOEnv): number {
+  const deadlineMs = reconciliationDeadlineMs(env);
+  const hardMs = envNumber(
+    env,
+    'TASK_RECONCILIATION_ACTIVE_WORK_HARD_STALL_MS',
+    DEFAULT_TASK_RECONCILIATION_ACTIVE_WORK_HARD_STALL_MS
+  );
+  return Math.max(hardMs, deadlineMs);
 }
 
 export function minReconciliationAlarmDelayMs(env: DOEnv): number {

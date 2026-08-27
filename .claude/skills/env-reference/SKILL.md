@@ -310,6 +310,7 @@ by the read-only cron-liveness check.
 - `TASK_RECONCILIATION_RESPONSE_DEADLINE_MS` — Response deadline after a visible task reconciliation check-in (default: 60000)
 - `TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS` — In-flight prompt observation threshold before SAM records a non-interrupting reconciliation event (default: 1800000)
 - `TASK_RECONCILIATION_PROMPT_HARD_STALL_MS` — In-flight prompt hard-stall threshold before SAM requests prompt cancellation and retries check-in later (default: 7200000)
+- `TASK_RECONCILIATION_ACTIVE_WORK_HARD_STALL_MS` — Hard ceiling for deferring an expired check-in because prompt/tool work is still active (default: 7200000)
 - `TASK_RECONCILIATION_MIN_ALARM_DELAY_MS` — Minimum delay before the next reconciliation alarm can fire (default: 10000)
 - `SESSION_TASK_REPAIR_BATCH_SIZE` — Maximum legacy taskless chat sessions repaired per 5-minute sweep (default: 25; capped at 200)
 - `TASK_RUN_ABSOLUTE_CEILING_MS` — Absolute runaway-cost ceiling that fails even a demonstrably live task (default: 86400000 / 24h)

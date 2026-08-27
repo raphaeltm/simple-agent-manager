@@ -304,6 +304,133 @@ describe('delivery-aware attention expiry', () => {
     ).toEqual([{ resolved_at: null, expires_at: START + 127_000 }]);
   });
 
+  it('fails reconciliation_checkin expiry when in-flight runtime work exceeds the hard ceiling', async () => {
+    env.TASK_RECONCILIATION_ACTIVE_WORK_HARD_STALL_MS = '120000';
+    createAttentionMarker(sql, {
+      sessionId: 'session-1',
+      taskId: 'task-1',
+      workspaceId: 'workspace-1',
+      kind: 'reconciliation_checkin',
+      source: 'sam_orchestrator',
+      expiresAt: START + 60_000,
+    });
+    insertActiveAcpState({
+      activity: 'idle',
+      activityAt: START + 1_000,
+      promptStartedAt: null,
+      runtimeWorkState: 'active',
+      runtimeWorkUpdatedAt: START + 1_000,
+      runtimeWorkProgressAt: START + 1_000,
+    });
+    vi.setSystemTime(START + 130_000);
+
+    await processExpiredAttentionMarkers(sql, env, failSession, processingHooks());
+
+    expect(taskRow()).toMatchObject({
+      status: 'failed',
+      error_message: 'Agent became unresponsive after SAM check-in',
+      execution_step: null,
+    });
+    expect(failSession).toHaveBeenCalledWith(
+      'session-1',
+      'Agent became unresponsive after SAM check-in'
+    );
+    await vi.waitFor(() => expect(cleanupTaskRun).toHaveBeenCalledWith('task-1', env));
+  });
+
+  it('fails reconciliation_checkin expiry when in-flight prompt activity exceeds the hard ceiling', async () => {
+    env.TASK_RECONCILIATION_ACTIVE_WORK_HARD_STALL_MS = '120000';
+    createAttentionMarker(sql, {
+      sessionId: 'session-1',
+      taskId: 'task-1',
+      workspaceId: 'workspace-1',
+      kind: 'reconciliation_checkin',
+      source: 'sam_orchestrator',
+      expiresAt: START + 60_000,
+    });
+    insertActiveAcpState({
+      activity: 'prompting',
+      promptStartedAt: START + 1_000,
+      activityAt: START + 122_000,
+    });
+    vi.setSystemTime(START + 130_000);
+
+    await processExpiredAttentionMarkers(sql, env, failSession, processingHooks());
+
+    expect(taskRow()).toMatchObject({
+      status: 'failed',
+      error_message: 'Agent became unresponsive after SAM check-in',
+      execution_step: null,
+    });
+    expect(failSession).toHaveBeenCalledWith(
+      'session-1',
+      'Agent became unresponsive after SAM check-in'
+    );
+  });
+
+  it('caps prompt-based reconciliation_checkin re-arm at the hard ceiling', async () => {
+    env.TASK_RECONCILIATION_ACTIVE_WORK_HARD_STALL_MS = '120000';
+    createAttentionMarker(sql, {
+      sessionId: 'session-1',
+      taskId: 'task-1',
+      workspaceId: 'workspace-1',
+      kind: 'reconciliation_checkin',
+      source: 'sam_orchestrator',
+      expiresAt: START + 60_000,
+    });
+    insertActiveAcpState({
+      activity: 'prompting',
+      promptStartedAt: START + 1_000,
+      activityAt: START + 67_000,
+    });
+    vi.setSystemTime(START + 67_000);
+
+    await processExpiredAttentionMarkers(sql, env, failSession, processingHooks());
+
+    expect(taskRow().status).toBe('in_progress');
+    expect(
+      sql.exec('SELECT resolved_at, expires_at FROM session_attention_markers').toArray()
+    ).toEqual([{ resolved_at: null, expires_at: START + 121_000 }]);
+  });
+
+  it('does not re-arm reconciliation_checkin forever without fresh runtime-work evidence', async () => {
+    env.TASK_RECONCILIATION_ACTIVE_WORK_HARD_STALL_MS = '120000';
+    createAttentionMarker(sql, {
+      sessionId: 'session-1',
+      taskId: 'task-1',
+      workspaceId: 'workspace-1',
+      kind: 'reconciliation_checkin',
+      source: 'sam_orchestrator',
+      expiresAt: START + 60_000,
+    });
+    insertActiveAcpState({
+      activity: 'idle',
+      activityAt: START + 1_000,
+      promptStartedAt: null,
+      runtimeWorkState: 'active',
+      runtimeWorkUpdatedAt: START + 1_000,
+      runtimeWorkProgressAt: START + 1_000,
+    });
+
+    vi.setSystemTime(START + 67_000);
+    await processExpiredAttentionMarkers(sql, env, failSession, processingHooks());
+
+    expect(taskRow().status).toBe('in_progress');
+    expect(
+      sql.exec('SELECT resolved_at, expires_at FROM session_attention_markers').toArray()
+    ).toEqual([{ resolved_at: null, expires_at: START + 121_000 }]);
+
+    vi.setSystemTime(START + 121_000);
+    await processExpiredAttentionMarkers(sql, env, failSession, processingHooks());
+
+    expect(taskRow()).toMatchObject({
+      status: 'failed',
+      error_message: 'Agent became unresponsive after SAM check-in',
+      execution_step: null,
+    });
+    expect(failSession).toHaveBeenCalledTimes(1);
+  });
+
   it('does not renew reconciliation_checkin from stale pre-check-in activity evidence', async () => {
     createAttentionMarker(sql, {
       sessionId: 'session-1',

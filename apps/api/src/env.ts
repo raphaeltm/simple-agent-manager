@@ -670,6 +670,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   TASK_RECONCILIATION_RESPONSE_DEADLINE_MS?: string; // Response deadline after check-in (default: 60000 = 1 minute)
   TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS?: string; // In-flight prompt observation threshold (default: 1800000 = 30 minutes)
   TASK_RECONCILIATION_PROMPT_HARD_STALL_MS?: string; // In-flight prompt cancel threshold (default: 7200000 = 2 hours)
+  TASK_RECONCILIATION_ACTIVE_WORK_HARD_STALL_MS?: string; // Hard ceiling for check-in expiry deferral by active prompt/tool work (default: 7200000 = 2 hours)
   TASK_RECONCILIATION_MIN_ALARM_DELAY_MS?: string; // Minimum reconciliation alarm delay (default: 10000 = 10 seconds)
   TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP?: string; // Max candidates processed per alarm sweep (default: 5)
   TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS?: string; // Node heartbeat freshness threshold for reconciliation delivery (default: 300000 = 5 minutes)

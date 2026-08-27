@@ -4,7 +4,10 @@ import { transitionTaskToTerminal } from '../../services/task-terminal-transitio
 import type { NotificationService } from '../notification';
 import * as activity from './activity';
 import * as attention from './attention';
-import { reconciliationDeadlineMs } from './reconciliation-thresholds';
+import {
+  activeWorkHardStallMs,
+  reconciliationDeadlineMs,
+} from './reconciliation-thresholds';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.attention_expiry');
@@ -255,11 +258,92 @@ function toFreshNumber(value: unknown, floor: number): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= floor ? value : null;
 }
 
+function toPositiveNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+}
+
 function maxFreshEvidence(floor: number, ...values: unknown[]): number | null {
   const freshValues = values
     .map((value) => toFreshNumber(value, floor))
     .filter((value): value is number => value !== null);
   return freshValues.length > 0 ? Math.max(...freshValues) : null;
+}
+
+interface ActiveCheckinEvidence {
+  evidenceAt: number;
+  extendedExpiry: number;
+  evidenceKinds: string[];
+  promptCeilingAt: number | null;
+  runtimeWorkCeilingAt: number | null;
+}
+
+function activeCheckinEvidence(
+  env: Env,
+  marker: ExpiredAttentionMarker,
+  active: Record<string, unknown>,
+  now: number
+): ActiveCheckinEvidence | null {
+  const hardStallMs = activeWorkHardStallMs(env);
+  const deadlineMs = reconciliationDeadlineMs(env);
+  const activityName = typeof active.activity === 'string' ? active.activity : null;
+  const runtimeWorkState =
+    typeof active.runtime_work_state === 'string' ? active.runtime_work_state : null;
+  const evidenceKinds: string[] = [];
+  const ceilings: number[] = [];
+  let evidenceAt = 0;
+  let promptCeilingAt: number | null = null;
+  let runtimeWorkCeilingAt: number | null = null;
+
+  if (activityName === 'prompting' || activityName === 'recovering') {
+    const activityEvidenceAt = maxFreshEvidence(
+      marker.createdAt,
+      active.prompt_started_at,
+      active.activity_at
+    );
+    const promptAnchor =
+      toPositiveNumber(active.prompt_started_at) ??
+      toPositiveNumber(active.activity_at) ??
+      activityEvidenceAt;
+
+    if (activityEvidenceAt !== null && promptAnchor !== null) {
+      promptCeilingAt = promptAnchor + hardStallMs;
+      if (promptCeilingAt > now) {
+        evidenceAt = Math.max(evidenceAt, activityEvidenceAt);
+        ceilings.push(promptCeilingAt);
+        evidenceKinds.push('prompt_activity');
+      }
+    }
+  }
+
+  if (runtimeWorkState === 'active' || runtimeWorkState === 'settling') {
+    const runtimeWorkEvidenceAt = maxFreshEvidence(
+      marker.createdAt,
+      active.runtime_work_progress_at,
+      active.runtime_work_updated_at
+    );
+    const runtimeWorkAnchor =
+      toPositiveNumber(active.runtime_work_progress_at) ??
+      toPositiveNumber(active.runtime_work_updated_at) ??
+      runtimeWorkEvidenceAt;
+
+    if (runtimeWorkEvidenceAt !== null && runtimeWorkAnchor !== null) {
+      runtimeWorkCeilingAt = runtimeWorkAnchor + hardStallMs;
+      if (runtimeWorkCeilingAt > now) {
+        evidenceAt = Math.max(evidenceAt, runtimeWorkEvidenceAt);
+        ceilings.push(runtimeWorkCeilingAt);
+        evidenceKinds.push('runtime_work');
+      }
+    }
+  }
+
+  if (evidenceAt <= 0 || ceilings.length === 0) return null;
+  return {
+    evidenceAt,
+    extendedExpiry: Math.min(now + deadlineMs, ...ceilings),
+    evidenceKinds,
+    promptCeilingAt,
+    runtimeWorkCeilingAt,
+  };
 }
 
 function deferActiveReconciliationCheckin(
@@ -295,23 +379,11 @@ function deferActiveReconciliationCheckin(
   const activityName = typeof active.activity === 'string' ? active.activity : null;
   const runtimeWorkState =
     typeof active.runtime_work_state === 'string' ? active.runtime_work_state : null;
-  const activityEvidenceAt =
-    activityName === 'prompting' || activityName === 'recovering'
-      ? maxFreshEvidence(marker.createdAt, active.prompt_started_at, active.activity_at)
-      : null;
-  const runtimeWorkEvidenceAt =
-    runtimeWorkState === 'active' || runtimeWorkState === 'settling'
-      ? maxFreshEvidence(
-          marker.createdAt,
-          active.runtime_work_progress_at,
-          active.runtime_work_updated_at
-        )
-      : null;
-  const evidenceAt = Math.max(activityEvidenceAt ?? 0, runtimeWorkEvidenceAt ?? 0);
-  if (evidenceAt <= 0) return false;
+  const now = Date.now();
+  const evidence = activeCheckinEvidence(env, marker, active, now);
+  if (!evidence) return false;
 
-  const extendedExpiry = Date.now() + reconciliationDeadlineMs(env);
-  attention.extendAttentionExpiry(sql, marker.id, extendedExpiry);
+  attention.extendAttentionExpiry(sql, marker.id, evidence.extendedExpiry);
   activity.recordActivityEventInternal(
     sql,
     'attention.expiry_deferred',
@@ -324,11 +396,15 @@ function deferActiveReconciliationCheckin(
       markerId: marker.id,
       kind: marker.kind,
       reason: 'current_generation_activity',
+      evidenceKinds: evidence.evidenceKinds,
       acpSessionId: active.acp_session_id,
       activity: activityName,
       runtimeWorkState,
-      evidenceAt,
-      extendedExpiry,
+      evidenceAt: evidence.evidenceAt,
+      extendedExpiry: evidence.extendedExpiry,
+      activeWorkHardStallMs: activeWorkHardStallMs(env),
+      promptCeilingAt: evidence.promptCeilingAt,
+      runtimeWorkCeilingAt: evidence.runtimeWorkCeilingAt,
     })
   );
   log.info('attention_marker.reconciliation_checkin_deferred_for_active_acp_work', {
@@ -339,8 +415,12 @@ function deferActiveReconciliationCheckin(
     acpSessionId: active.acp_session_id,
     activity: activityName,
     runtimeWorkState,
-    evidenceAt,
-    extendedExpiry,
+    evidenceKinds: evidence.evidenceKinds,
+    evidenceAt: evidence.evidenceAt,
+    extendedExpiry: evidence.extendedExpiry,
+    activeWorkHardStallMs: activeWorkHardStallMs(env),
+    promptCeilingAt: evidence.promptCeilingAt,
+    runtimeWorkCeilingAt: evidence.runtimeWorkCeilingAt,
   });
   return true;
 }

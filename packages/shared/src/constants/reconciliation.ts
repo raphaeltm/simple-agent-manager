@@ -24,6 +24,15 @@ export const DEFAULT_TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS = 30 * 60 * 1000; 
  */
 export const DEFAULT_TASK_RECONCILIATION_PROMPT_HARD_STALL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
+/**
+ * Hard ceiling for active work used to defer an already-sent reconciliation
+ * check-in expiry. This keeps an in-flight prompt/tool call from making a
+ * check-in marker immortal while still giving long foreground commands a
+ * generous window.
+ */
+export const DEFAULT_TASK_RECONCILIATION_ACTIVE_WORK_HARD_STALL_MS =
+  DEFAULT_TASK_RECONCILIATION_PROMPT_HARD_STALL_MS;
+
 /** Minimum delay before the next reconciliation alarm is allowed to fire. */
 export const DEFAULT_TASK_RECONCILIATION_MIN_ALARM_DELAY_MS = 10 * 1000; // 10 seconds
 
