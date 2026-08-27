@@ -280,10 +280,13 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     expect(result.reason).toBe('source_task_revoked');
     expect(result.state.status).toBe('warm');
     expect(await getAlarm(stub)).toBe(alarmBefore);
-    const task = await env.DATABASE.prepare(`SELECT claimed_warm_node_id FROM tasks WHERE id = ?`)
+    const task = await env.DATABASE.prepare(
+      `SELECT claimed_warm_node_id, claimed_warm_node_at FROM tasks WHERE id = ?`
+    )
       .bind(taskId)
-      .first<{ claimed_warm_node_id: string | null }>();
+      .first<{ claimed_warm_node_id: string | null; claimed_warm_node_at: string | null }>();
     expect(task?.claimed_warm_node_id).toBeNull();
+    expect(task?.claimed_warm_node_at).toBeNull();
   });
 
   it('accepts and persists a guarded claim when exact recovery authority is live', async () => {
@@ -313,10 +316,13 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       status: 'active',
       claimedByTask: recoveryTaskId,
     });
-    const task = await env.DATABASE.prepare(`SELECT claimed_warm_node_id FROM tasks WHERE id = ?`)
+    const task = await env.DATABASE.prepare(
+      `SELECT claimed_warm_node_id, claimed_warm_node_at FROM tasks WHERE id = ?`
+    )
       .bind(recoveryTaskId)
-      .first<{ claimed_warm_node_id: string | null }>();
+      .first<{ claimed_warm_node_id: string | null; claimed_warm_node_at: string | null }>();
     expect(task?.claimed_warm_node_id).toBe(nodeId);
+    expect(task?.claimed_warm_node_at).toEqual(expect.any(String));
   });
 
   it('persists and conditionally releases a claim after the caller-side crash window', async () => {
@@ -329,11 +335,12 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     await stub.markIdle(nodeId, TEST_USER_ID);
     expect((await stub.tryClaim(taskId)).claimed).toBe(true);
     const claimedTask = await env.DATABASE.prepare(
-      `SELECT claimed_warm_node_id FROM tasks WHERE id = ?`
+      `SELECT claimed_warm_node_id, claimed_warm_node_at FROM tasks WHERE id = ?`
     )
       .bind(taskId)
-      .first<{ claimed_warm_node_id: string | null }>();
+      .first<{ claimed_warm_node_id: string | null; claimed_warm_node_at: string | null }>();
     expect(claimedTask?.claimed_warm_node_id).toBe(nodeId);
+    expect(claimedTask?.claimed_warm_node_at).toEqual(expect.any(String));
 
     expect((await stub.releaseClaim('another-task')).released).toBe(false);
     const released = await stub.releaseClaim(taskId);
@@ -341,11 +348,12 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     expect(released.state.status).toBe('warm');
     expect(await getAlarm(stub)).toBeGreaterThan(Date.now());
     const releasedTask = await env.DATABASE.prepare(
-      `SELECT claimed_warm_node_id FROM tasks WHERE id = ?`
+      `SELECT claimed_warm_node_id, claimed_warm_node_at FROM tasks WHERE id = ?`
     )
       .bind(taskId)
-      .first<{ claimed_warm_node_id: string | null }>();
+      .first<{ claimed_warm_node_id: string | null; claimed_warm_node_at: string | null }>();
     expect(releasedTask?.claimed_warm_node_id).toBeNull();
+    expect(releasedTask?.claimed_warm_node_at).toBeNull();
   });
 
   it('keeps a D1-persisted claimant exclusive across a pre-storage crash window', async () => {
@@ -358,8 +366,10 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
 
     const stub = getStub(nodeId);
     await stub.markIdle(nodeId, TEST_USER_ID);
-    await env.DATABASE.prepare(`UPDATE tasks SET claimed_warm_node_id = ? WHERE id = ?`)
-      .bind(nodeId, firstTaskId)
+    await env.DATABASE.prepare(
+      `UPDATE tasks SET claimed_warm_node_id = ?, claimed_warm_node_at = ? WHERE id = ?`
+    )
+      .bind(nodeId, new Date().toISOString(), firstTaskId)
       .run();
 
     const conflicting = await stub.tryClaim(secondTaskId);
@@ -853,6 +863,25 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
 
     const session = await projectData.getSession(chatSessionId);
     expect(session).toMatchObject({ id: chatSessionId, status: 'sleeping' });
+
+    const snapshot = await env.DATABASE.prepare(
+      `SELECT status, degradation, sleep_status, manifest_r2_key
+       FROM session_snapshots
+       WHERE chat_session_id = ?`
+    )
+      .bind(chatSessionId)
+      .first<{
+        status: string;
+        degradation: string | null;
+        sleep_status: string | null;
+        manifest_r2_key: string | null;
+      }>();
+    expect(snapshot).toMatchObject({
+      status: 'available',
+      degradation: 'none',
+      sleep_status: 'sleeping',
+      manifest_r2_key: expect.any(String),
+    });
   });
 
   it('tryClaim on destroying node returns false', async () => {

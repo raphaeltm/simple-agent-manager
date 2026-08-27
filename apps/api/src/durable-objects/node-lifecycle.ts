@@ -91,7 +91,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     const guarded = sourceTaskGuard ? 1 : 0;
     const result = await this.env.DATABASE.prepare(
       `UPDATE tasks AS recovery
-          SET claimed_warm_node_id = ?, updated_at = ?
+          SET claimed_warm_node_id = ?, claimed_warm_node_at = ?, updated_at = ?
         WHERE recovery.id = ?
           AND recovery.status NOT IN ('completed', 'failed', 'cancelled')
           AND NOT EXISTS (
@@ -126,6 +126,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
       .bind(
         nodeId,
         now,
+        now,
         taskId,
         nodeId,
         guarded,
@@ -149,7 +150,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
   private async clearWarmClaim(taskId: string, nodeId: string): Promise<void> {
     await this.env.DATABASE.prepare(
       `UPDATE tasks
-          SET claimed_warm_node_id = NULL, updated_at = ?
+          SET claimed_warm_node_id = NULL, claimed_warm_node_at = NULL, updated_at = ?
         WHERE id = ? AND claimed_warm_node_id = ?`
     )
       .bind(new Date().toISOString(), taskId, nodeId)

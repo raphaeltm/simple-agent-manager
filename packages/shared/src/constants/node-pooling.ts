@@ -25,16 +25,23 @@ export const DEFAULT_NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS = 24 * 60 * 60 * 1000;
 // =============================================================================
 
 /**
- * Default idle window (ms) after which a running workspace node holding no active
- * workspaces is destroyed. Override via NODE_ORPHAN_IDLE_TIMEOUT_MS env var.
+ * Deprecated legacy default for NODE_ORPHAN_IDLE_TIMEOUT_MS. New node cleanup
+ * idleness uses DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS / NODE_WORKSPACE_IDLE_TIMEOUT_MS.
  *
- * Idleness is measured from the node's last WORKSPACE ACTIVITY, never from
- * `nodes.updated_at` — every heartbeat bumps `updated_at`, so it tracks liveness,
- * not idleness, and a predicate built on it can never match a healthy node.
- * Set above DEFAULT_NODE_WARM_TIMEOUT_MS so a node legitimately waiting in the
- * warm pool for reuse is reclaimed by the warm path first.
+ * Kept exported so old config references and downstream imports do not break.
  */
 export const DEFAULT_NODE_ORPHAN_IDLE_TIMEOUT_MS = 45 * 60 * 1000; // 45 minutes
+
+/**
+ * Default workspace-idle window (ms) after which an auto-provisioned workspace node
+ * holding no active workspaces is destroy-eligible. Override via
+ * NODE_WORKSPACE_IDLE_TIMEOUT_MS env var.
+ *
+ * This is intentionally aligned with DEFAULT_NODE_WARM_TIMEOUT_MS without replacing
+ * it: NodeLifecycle still keeps the full warm-retention window, and cron uses this
+ * clock only after a node is otherwise in a cleanup candidate shape.
+ */
+export const DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS = DEFAULT_NODE_WARM_TIMEOUT_MS; // 30 minutes
 
 /**
  * Default absolute ceiling (ms) on the age of an auto-provisioned workspace node.
@@ -44,7 +51,7 @@ export const DEFAULT_NODE_ORPHAN_IDLE_TIMEOUT_MS = 45 * 60 * 1000; // 45 minutes
  * whose workspaces are all inactive, so a node with a workspace row wedged in
  * `running` escapes it forever — two production nodes survived 1932h and 2135h that
  * way. This ceiling additionally requires that no workspace has *reported activity*
- * within DEFAULT_NODE_ORPHAN_IDLE_TIMEOUT_MS, which distinguishes a genuinely busy
+ * within DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS, which distinguishes a genuinely busy
  * node from one holding a stuck workspace row.
  */
 export const DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS = 24 * 60 * 60 * 1000; // 24 hours

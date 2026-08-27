@@ -19,7 +19,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../src/env';
 import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
 import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/node-phases';
-import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
+import {
+  claimNodeForCleanup,
+  emptyResult,
+  resolveCleanupConfig,
+} from '../../src/scheduled/node-cleanup/shared';
+import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import {
   seedAgentSession,
   seedInstallation,
@@ -35,6 +40,18 @@ const INSTALL_ID = 'install-nc-test';
 const PROJECT_ID = 'project-nc-test';
 
 const originalFetch = globalThis.fetch;
+
+type ProjectDataTestStub = DurableObjectStub<{
+  ensureProjectId(projectId: string): Promise<void>;
+  createSession(
+    workspaceId: string,
+    title: string,
+    initialMessage: string | null,
+    userId: string
+  ): Promise<string>;
+  sleepSession(chatSessionId: string): Promise<boolean>;
+  getSession(chatSessionId: string): Promise<{ id: string; status: string } | null>;
+}>;
 
 beforeEach(() => {
   vi.stubGlobal(
@@ -57,6 +74,55 @@ async function seedBaseData(): Promise<void> {
   await seedUser(USER_ID);
   await seedInstallation(INSTALL_ID, USER_ID);
   await seedProject(PROJECT_ID, USER_ID, INSTALL_ID);
+}
+
+async function seedAutoProvisionedTaskForNode(
+  taskId: string,
+  nodeId: string,
+  opts?: { status?: string; updatedAt?: string; workspaceId?: string | null }
+): Promise<void> {
+  await seedTask(taskId, PROJECT_ID, USER_ID, {
+    status: opts?.status ?? 'completed',
+    autoProvisionedNodeId: nodeId,
+    workspaceId: opts?.workspaceId ?? undefined,
+    updatedAt: opts?.updatedAt,
+  });
+}
+
+function getProjectDataStub(projectId: string): ProjectDataTestStub {
+  return env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(projectId)) as ProjectDataTestStub;
+}
+
+async function seedRestorableSleepingSnapshot(input: {
+  id: string;
+  workspaceId: string;
+  nodeId: string;
+  chatSessionId: string;
+  timestamp: string;
+}): Promise<void> {
+  await env.DATABASE.prepare(
+    `INSERT INTO session_snapshots
+       (id, project_id, workspace_id, node_id, user_id, chat_session_id, runtime, status,
+        degradation, manifest_r2_key, home_r2_key, expires_at, sleeping_at, sleep_status,
+        recovery_attempts, sleep_attempts, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'vm', 'available', 'none', ?, ?, ?, ?, 'sleeping',
+             0, 0, ?, ?)`
+  )
+    .bind(
+      input.id,
+      PROJECT_ID,
+      input.workspaceId,
+      input.nodeId,
+      USER_ID,
+      input.chatSessionId,
+      `session-snapshots/${input.chatSessionId}/manifest.json`,
+      `session-snapshots/${input.chatSessionId}/home.tar.zst`,
+      new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      input.timestamp,
+      input.timestamp,
+      input.timestamp
+    )
+    .run();
 }
 
 async function getNodeStatus(
@@ -369,6 +435,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
     it('destroys an idle orphan node (running, no workspaces, no warm_since)', async () => {
       await seedBaseData();
       const nodeId = 'node-nc-orphan-node';
+      const taskId = 'task-nc-orphan-node';
       const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
       await seedNode(nodeId, USER_ID, {
@@ -377,11 +444,12 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         createdAt: oldDate,
         updatedAt: oldDate,
       });
+      await seedAutoProvisionedTaskForNode(taskId, nodeId, { updatedAt: oldDate });
       // No workspaces on this node
 
       const testEnv = {
         ...env,
-        NODE_ORPHAN_IDLE_TIMEOUT_MS: '1000',
+        NODE_WORKSPACE_IDLE_TIMEOUT_MS: '1000',
       } as unknown as Env;
 
       const result = await runNodeCleanupSweep(testEnv);
@@ -455,10 +523,17 @@ describe('runNodeCleanupSweep — vertical slice', () => {
     it('releases a real D1 cleanup claim when container teardown fails', async () => {
       await seedBaseData();
       const nodeId = 'node-nc-stale-warm-container-failure';
+      const taskId = 'task-nc-stale-warm-container-failure';
       const warmSince = new Date(Date.now() - 60 * 60 * 1000).toISOString();
       const destroyForUser = vi.fn().mockRejectedValue(new Error('container teardown unavailable'));
 
-      await seedNode(nodeId, USER_ID, { status: 'running', warmSince });
+      await seedNode(nodeId, USER_ID, {
+        status: 'running',
+        warmSince,
+        createdAt: warmSince,
+        updatedAt: warmSince,
+      });
+      await seedAutoProvisionedTaskForNode(taskId, nodeId, { updatedAt: warmSince });
       await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
         .bind(nodeId)
         .run();
@@ -471,9 +546,12 @@ describe('runNodeCleanupSweep — vertical slice', () => {
           get: () => ({ destroyForUser }),
         },
         NODE_WARM_GRACE_PERIOD_MS: '1000',
+        NODE_WORKSPACE_IDLE_TIMEOUT_MS: '1000',
+        NODE_CLEANUP_FAILURE_BACKOFF_MS: '3600000',
       } as unknown as Env;
 
       const result = await runNodeCleanupSweep(testEnv);
+      const secondResult = await runNodeCleanupSweep(testEnv);
       const node = await env.DATABASE.prepare(
         'SELECT status, cleanup_backoff_until FROM nodes WHERE id = ?'
       )
@@ -483,6 +561,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       expect(destroyForUser).toHaveBeenCalledTimes(1);
       expect(result.staleDestroyed).toBe(0);
       expect(result.errors).toBeGreaterThanOrEqual(1);
+      expect(secondResult.staleDestroyed).toBe(0);
       expect(node?.status).toBe('running');
       expect(node?.cleanup_backoff_until).not.toBeNull();
     });
@@ -490,17 +569,22 @@ describe('runNodeCleanupSweep — vertical slice', () => {
     it('attempts to destroy stale warm node and counts error (no Hetzner in test)', async () => {
       await seedBaseData();
       const nodeId = 'node-nc-stale-warm';
+      const taskId = 'task-nc-stale-warm';
       const warmSince = new Date(Date.now() - 60 * 60 * 1000).toISOString(); // 1h ago
 
       await seedNode(nodeId, USER_ID, {
         status: 'running',
         warmSince,
+        createdAt: warmSince,
+        updatedAt: warmSince,
       });
+      await seedAutoProvisionedTaskForNode(taskId, nodeId, { updatedAt: warmSince });
       // No workspaces → warm node should be destroyed
 
       const testEnv = {
         ...env,
         NODE_WARM_GRACE_PERIOD_MS: '1000', // 1s
+        NODE_WORKSPACE_IDLE_TIMEOUT_MS: '1000',
       } as unknown as Env;
 
       const result = await runNodeCleanupSweep(testEnv);
@@ -512,12 +596,14 @@ describe('runNodeCleanupSweep — vertical slice', () => {
     it('clears warm_since for warm node that has active workspaces', async () => {
       await seedBaseData();
       const nodeId = 'node-nc-warm-active-ws';
+      const taskId = 'task-nc-warm-active-ws';
       const warmSince = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
       await seedNode(nodeId, USER_ID, {
         status: 'running',
         warmSince,
       });
+      await seedAutoProvisionedTaskForNode(taskId, nodeId, { updatedAt: warmSince });
       // Add a running workspace on this node
       await seedWorkspace('ws-nc-warm-running', nodeId, USER_ID, {
         status: 'running',
@@ -560,11 +646,292 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         ...env,
         MAX_AUTO_NODE_LIFETIME_MS: '1000',
         ORPHANED_WORKSPACE_GRACE_PERIOD_MS: '1000',
+        NODE_WORKSPACE_IDLE_TIMEOUT_MS: '1000',
       } as unknown as Env;
 
       const result = await runNodeCleanupSweep(testEnv);
 
       expect(result.lifetimeDestroyed + result.errors).toBeGreaterThanOrEqual(1);
+    });
+
+    it('destroys stopped workspace-less nodes even when the source task remains in_progress', async () => {
+      await seedBaseData();
+      const nodeId = 'node-nc-stopped-in-progress-sleeping-session';
+      const taskId = 'task-nc-stopped-in-progress-sleeping-session';
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+      await seedNode(nodeId, USER_ID, {
+        status: 'stopped',
+        warmSince: null,
+        createdAt: oldDate,
+        updatedAt: new Date().toISOString(),
+      });
+      await seedTask(taskId, PROJECT_ID, USER_ID, {
+        status: 'in_progress',
+        autoProvisionedNodeId: nodeId,
+        executionStep: 'running',
+        updatedAt: new Date().toISOString(),
+      });
+
+      const testEnv = {
+        ...env,
+        NODE_WORKSPACE_IDLE_TIMEOUT_MS: '1000',
+      } as unknown as Env;
+
+      const result = await runNodeCleanupSweep(testEnv);
+
+      expect(result.lifetimeDestroyed).toBeGreaterThanOrEqual(1);
+      expect(await getNodeStatus(nodeId)).toMatchObject({ status: 'deleted' });
+    });
+
+    it('preserves a sleeping session and restorable snapshot when cron destroys its stopped node, then provisions recovery', async () => {
+      await seedBaseData();
+      const nodeId = 'node-nc-stopped-sleeping-session-survival';
+      const wsId = 'ws-nc-stopped-sleeping-session-survival';
+      const taskId = 'task-nc-stopped-sleeping-session-survival';
+      const snapshotId = 'snapshot-nc-stopped-sleeping-session-survival';
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+      await seedNode(nodeId, USER_ID, {
+        status: 'stopped',
+        warmSince: null,
+        createdAt: oldDate,
+        updatedAt: new Date().toISOString(),
+      });
+      await seedWorkspace(wsId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'sleeping',
+        createdAt: oldDate,
+        updatedAt: oldDate,
+      });
+
+      const projectData = getProjectDataStub(PROJECT_ID);
+      await projectData.ensureProjectId(PROJECT_ID);
+      const chatSessionId = await projectData.createSession(
+        wsId,
+        'Sleeping session survival',
+        null,
+        USER_ID
+      );
+      expect(await projectData.sleepSession(chatSessionId)).toBe(true);
+
+      await env.DATABASE.prepare(
+        `UPDATE workspaces SET chat_session_id = ?, updated_at = ? WHERE id = ?`
+      )
+        .bind(chatSessionId, oldDate, wsId)
+        .run();
+      await seedTask(taskId, PROJECT_ID, USER_ID, {
+        status: 'in_progress',
+        workspaceId: wsId,
+        autoProvisionedNodeId: nodeId,
+        executionStep: 'running',
+        taskMode: 'conversation',
+        updatedAt: oldDate,
+      });
+      await env.DATABASE.prepare(`UPDATE tasks SET chat_session_id = ? WHERE id = ?`)
+        .bind(chatSessionId, taskId)
+        .run();
+      await seedRestorableSleepingSnapshot({
+        id: snapshotId,
+        workspaceId: wsId,
+        nodeId,
+        chatSessionId,
+        timestamp: oldDate,
+      });
+
+      const testEnv = {
+        ...env,
+        NODE_WORKSPACE_IDLE_TIMEOUT_MS: '1000',
+      } as unknown as Env;
+
+      const result = await runNodeCleanupSweep(testEnv);
+
+      expect(result.lifetimeDestroyed).toBeGreaterThanOrEqual(1);
+      expect(await getNodeStatus(nodeId)).toMatchObject({ status: 'deleted' });
+      expect(await projectData.getSession(chatSessionId)).toMatchObject({
+        id: chatSessionId,
+        status: 'sleeping',
+      });
+
+      const snapshot = await env.DATABASE.prepare(
+        `SELECT status, degradation, sleep_status, manifest_r2_key
+         FROM session_snapshots
+         WHERE id = ?`
+      )
+        .bind(snapshotId)
+        .first<{
+          status: string;
+          degradation: string | null;
+          sleep_status: string | null;
+          manifest_r2_key: string | null;
+        }>();
+      expect(snapshot).toMatchObject({
+        status: 'available',
+        degradation: 'none',
+        sleep_status: 'sleeping',
+        manifest_r2_key: expect.any(String),
+      });
+
+      await expect(
+        ensureSessionRecovery(testEnv, PROJECT_ID, chatSessionId, {
+          taskId,
+          projectId: PROJECT_ID,
+          chatSessionId,
+        })
+      ).resolves.toMatchObject({ status: 'waking' });
+
+      const recoveryTask = await env.DATABASE.prepare(
+        `SELECT chat_session_id, recovery_source_task_id, triggered_by
+         FROM tasks
+         WHERE triggered_by = 'session-recovery'
+           AND recovery_source_task_id = ?
+         ORDER BY created_at DESC
+         LIMIT 1`
+      )
+        .bind(taskId)
+        .first<{
+          chat_session_id: string | null;
+          recovery_source_task_id: string | null;
+          triggered_by: string;
+        }>();
+      expect(recoveryTask).toEqual({
+        chat_session_id: chatSessionId,
+        recovery_source_task_id: taskId,
+        triggered_by: 'session-recovery',
+      });
+    });
+
+    it.each(['running', 'creating', 'recovery'] as const)(
+      'does not destroy stopped handoff nodes with an active %s workspace',
+      async (workspaceStatus) => {
+        await seedBaseData();
+        const nodeId = `node-nc-stopped-active-${workspaceStatus}`;
+        const wsId = `ws-nc-stopped-active-${workspaceStatus}`;
+        const taskId = `task-nc-stopped-active-${workspaceStatus}`;
+        const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+        await seedNode(nodeId, USER_ID, {
+          status: 'stopped',
+          warmSince: null,
+          createdAt: oldDate,
+          updatedAt: oldDate,
+        });
+        await seedWorkspace(wsId, nodeId, USER_ID, {
+          projectId: PROJECT_ID,
+          status: workspaceStatus,
+          createdAt: oldDate,
+          updatedAt: oldDate,
+        });
+        await seedTask(taskId, PROJECT_ID, USER_ID, {
+          status: 'in_progress',
+          autoProvisionedNodeId: nodeId,
+          workspaceId: wsId,
+          updatedAt: oldDate,
+        });
+
+        const testEnv = {
+          ...env,
+          NODE_WORKSPACE_IDLE_TIMEOUT_MS: '1000',
+        } as unknown as Env;
+
+        await runNodeCleanupSweep(testEnv);
+
+        expect(await getNodeStatus(nodeId)).toMatchObject({ status: 'stopped' });
+        expect(await getWorkspaceStatus(wsId)).toMatchObject({ status: workspaceStatus });
+      }
+    );
+
+    it('does not destroy stopped handoff nodes with recent workspace activity', async () => {
+      await seedBaseData();
+      const nodeId = 'node-nc-stopped-recent-workspace-activity';
+      const wsId = 'ws-nc-stopped-recent-workspace-activity';
+      const taskId = 'task-nc-stopped-recent-workspace-activity';
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const recentDate = new Date().toISOString();
+
+      await seedNode(nodeId, USER_ID, {
+        status: 'stopped',
+        warmSince: null,
+        createdAt: oldDate,
+        updatedAt: oldDate,
+      });
+      await seedWorkspace(wsId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'deleted',
+        createdAt: oldDate,
+        updatedAt: recentDate,
+      });
+      await seedTask(taskId, PROJECT_ID, USER_ID, {
+        status: 'in_progress',
+        autoProvisionedNodeId: nodeId,
+        updatedAt: recentDate,
+      });
+
+      const testEnv = {
+        ...env,
+        NODE_WORKSPACE_IDLE_TIMEOUT_MS: '86400000',
+      } as unknown as Env;
+
+      await runNodeCleanupSweep(testEnv);
+
+      expect(await getNodeStatus(nodeId)).toMatchObject({ status: 'stopped' });
+    });
+
+    it('never selects deployment or user-owned nodes with zero workspaces', async () => {
+      await seedBaseData();
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const deployNodeId = 'node-nc-deployment-zero-workspaces';
+      const userOwnedNodeId = 'node-nc-user-owned-zero-workspaces';
+
+      await seedNode(deployNodeId, USER_ID, {
+        status: 'stopped',
+        warmSince: null,
+        createdAt: oldDate,
+        updatedAt: oldDate,
+      });
+      await env.DATABASE.prepare(`UPDATE nodes SET node_role = 'deployment' WHERE id = ?`)
+        .bind(deployNodeId)
+        .run();
+      await seedAutoProvisionedTaskForNode('task-nc-deployment-zero-workspaces', deployNodeId, {
+        status: 'in_progress',
+        updatedAt: oldDate,
+      });
+
+      await seedNode(userOwnedNodeId, USER_ID, {
+        status: 'stopped',
+        nodeClass: 'user-owned',
+        warmSince: null,
+        createdAt: oldDate,
+        updatedAt: oldDate,
+      });
+      await seedAutoProvisionedTaskForNode('task-nc-user-owned-zero-workspaces', userOwnedNodeId, {
+        status: 'in_progress',
+        updatedAt: oldDate,
+      });
+
+      const testEnv = {
+        ...env,
+        NODE_WORKSPACE_IDLE_TIMEOUT_MS: '1000',
+      } as unknown as Env;
+
+      await runNodeCleanupSweep(testEnv);
+
+      expect(await getNodeStatus(deployNodeId)).toMatchObject({ status: 'stopped' });
+      expect(await getNodeStatus(userOwnedNodeId)).toMatchObject({ status: 'stopped' });
+      await expect(
+        claimNodeForCleanup(
+          testEnv,
+          { id: deployNodeId, user_id: USER_ID, status: 'stopped' },
+          new Date().toISOString()
+        )
+      ).resolves.toBe(false);
+      await expect(
+        claimNodeForCleanup(
+          testEnv,
+          { id: userOwnedNodeId, user_id: USER_ID, status: 'stopped' },
+          new Date().toISOString()
+        )
+      ).resolves.toBe(false);
     });
   });
 
@@ -576,6 +943,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         NODE_WARM_GRACE_PERIOD_MS: '999999999', // very large → nothing triggers
         MAX_AUTO_NODE_LIFETIME_MS: '999999999',
         ORPHANED_WORKSPACE_GRACE_PERIOD_MS: '999999999',
+        NODE_WORKSPACE_IDLE_TIMEOUT_MS: '999999999',
         WORKSPACE_STOPPED_TTL_MS: '999999999',
       } as unknown as Env;
 

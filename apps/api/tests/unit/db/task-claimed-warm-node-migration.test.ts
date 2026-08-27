@@ -15,4 +15,16 @@ describe('task claimed warm node migration', () => {
     expect(sql).toContain('WHERE claimed_warm_node_id IS NOT NULL');
     expect(sql).toContain("status NOT IN ('completed', 'failed', 'cancelled')");
   });
+
+  it('adds a fixed timestamp for bounded cleanup placement-race protection', () => {
+    const sql = readFileSync(
+      join(process.cwd(), 'src/db/migrations/0123_task_claimed_warm_node_at.sql'),
+      'utf8'
+    );
+    expect(sql).toContain('ALTER TABLE tasks ADD COLUMN claimed_warm_node_at TEXT');
+    expect(sql).toContain('SET claimed_warm_node_at = updated_at');
+    expect(sql).toContain('CREATE INDEX idx_tasks_claimed_warm_node_at');
+    expect(sql).toContain('ON tasks(claimed_warm_node_id, claimed_warm_node_at)');
+    expect(sql).toContain("status NOT IN ('completed', 'failed', 'cancelled')");
+  });
 });

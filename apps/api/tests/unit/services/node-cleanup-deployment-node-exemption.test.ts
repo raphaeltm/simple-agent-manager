@@ -106,7 +106,8 @@ beforeEach(() => {
     );
     CREATE TABLE tasks (
       id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT,
-      auto_provisioned_node_id TEXT, updated_at TEXT
+      auto_provisioned_node_id TEXT, claimed_warm_node_id TEXT,
+      claimed_warm_node_at TEXT, updated_at TEXT
     );
     CREATE TABLE session_snapshots (
       chat_session_id TEXT PRIMARY KEY, status TEXT NOT NULL,
@@ -127,7 +128,12 @@ describe('node-cleanup sweep never destroys deployment nodes', () => {
     // indistinguishable except by node_role. This is the exact production shape.
     seedNode({ id: 'workspace-idle', nodeRole: 'workspace', status: 'running' });
     seedNode({ id: 'deployment-idle', nodeRole: 'deployment', status: 'running' });
-    const env = makeEnv();
+    seedAutoProvisionedTask('task-wi', 'workspace-idle');
+    seedAutoProvisionedTask('task-di', 'deployment-idle');
+    const env = {
+      ...makeEnv(),
+      MAX_AUTO_NODE_LIFETIME_MS: String(10 * 365 * 24 * 60 * 60 * 1000),
+    } as Env;
 
     const result = await runNodeCleanupSweep(env);
     await runNodeCleanupSweep(env); // rule 47: must not reappear as a candidate
@@ -170,6 +176,8 @@ describe('node-cleanup sweep never destroys deployment nodes', () => {
       status: 'running',
       warmSince: OLD,
     });
+    seedAutoProvisionedTask('task-ww', 'workspace-warm');
+    seedAutoProvisionedTask('task-dw', 'deployment-warm');
     const env = makeEnv();
 
     await runNodeCleanupSweep(env);

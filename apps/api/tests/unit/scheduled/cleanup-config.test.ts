@@ -85,14 +85,16 @@ describe('resolveCleanupConfig threshold ordering', () => {
     // reuse. It still sweeps — a warning, not a hard failure — but it must be visible.
     logWarn.mockClear();
     resolveCleanupConfig({
-      NODE_ORPHAN_IDLE_TIMEOUT_MS: String(60_000),
+      NODE_WORKSPACE_IDLE_TIMEOUT_MS: String(60_000),
       NODE_WARM_TIMEOUT_MS: String(30 * 60_000),
     } as Env);
 
     expect(logWarn).toHaveBeenCalledWith(
       'node_cleanup.threshold_ordering_inverted',
       expect.objectContaining({
-        problems: expect.arrayContaining([expect.stringContaining('NODE_ORPHAN_IDLE_TIMEOUT_MS')]),
+        problems: expect.arrayContaining([
+          expect.stringContaining('NODE_WORKSPACE_IDLE_TIMEOUT_MS'),
+        ]),
       })
     );
   });
@@ -119,22 +121,30 @@ describe('resolveCleanupConfig threshold ordering', () => {
   it('still returns a usable config when thresholds are inverted', () => {
     // Degraded precision beats not sweeping at all.
     const config = resolveCleanupConfig({
-      NODE_ORPHAN_IDLE_TIMEOUT_MS: String(60_000),
+      NODE_WORKSPACE_IDLE_TIMEOUT_MS: String(60_000),
     } as Env);
 
-    expect(config.orphanIdleTimeoutMs).toBe(60_000);
+    expect(config.workspaceIdleTimeoutMs).toBe(60_000);
     expect(config.nodeSweepLimit).toBeGreaterThan(0);
+  });
+
+  it('honors NODE_ORPHAN_IDLE_TIMEOUT_MS as a legacy alias when the primary value is unset', () => {
+    const config = resolveCleanupConfig({
+      NODE_ORPHAN_IDLE_TIMEOUT_MS: String(90_000),
+    } as Env);
+
+    expect(config.workspaceIdleTimeoutMs).toBe(90_000);
   });
 
   it('falls back to defaults for every invalid override', () => {
     const config = resolveCleanupConfig({
-      NODE_ORPHAN_IDLE_TIMEOUT_MS: 'not-a-number',
+      NODE_WORKSPACE_IDLE_TIMEOUT_MS: 'not-a-number',
       NODE_ABSOLUTE_MAX_LIFETIME_MS: '-5',
       NODE_CLEANUP_SWEEP_LIMIT: '0',
       WORKSPACE_CLEANUP_SWEEP_LIMIT: 'abc',
     } as Env);
 
-    expect(config.orphanIdleTimeoutMs).toBe(45 * 60_000);
+    expect(config.workspaceIdleTimeoutMs).toBe(30 * 60_000);
     expect(config.absoluteMaxLifetimeMs).toBe(24 * 60 * 60_000);
     expect(config.nodeSweepLimit).toBe(25);
     expect(config.workspaceSweepLimit).toBe(50);

@@ -89,10 +89,10 @@ function makeEnv(): Env {
     DATABASE: d1,
     OBSERVABILITY_DATABASE: d1,
     NODE_WARM_GRACE_PERIOD_MS: String(35 * MINUTE),
-    MAX_AUTO_NODE_LIFETIME_MS: String(4 * HOUR),
+    MAX_AUTO_NODE_LIFETIME_MS: String(12 * HOUR),
     NODE_ABSOLUTE_MAX_LIFETIME_MS: String(24 * HOUR),
     ORPHANED_WORKSPACE_GRACE_PERIOD_MS: String(10 * MINUTE),
-    NODE_ORPHAN_IDLE_TIMEOUT_MS: String(45 * MINUTE),
+    NODE_WORKSPACE_IDLE_TIMEOUT_MS: String(45 * MINUTE),
     WORKSPACE_STOPPED_TTL_MS: String(6 * HOUR),
     NODE_CLEANUP_SWEEP_LIMIT: '25',
     WORKSPACE_CLEANUP_SWEEP_LIMIT: '50',
@@ -121,7 +121,8 @@ beforeEach(() => {
     );
     CREATE TABLE tasks (
       id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT,
-      auto_provisioned_node_id TEXT, updated_at TEXT
+      auto_provisioned_node_id TEXT, claimed_warm_node_id TEXT,
+      claimed_warm_node_at TEXT, updated_at TEXT
     );
     CREATE TABLE agent_sessions (
       id TEXT PRIMARY KEY, workspace_id TEXT, user_id TEXT, status TEXT,
@@ -132,6 +133,15 @@ beforeEach(() => {
     );
   `);
 });
+
+function seedAutoProvisionedTask(nodeId: string, status = 'completed', updatedAt = ago(HOUR)): void {
+  sqlite
+    ?.prepare(
+      `INSERT INTO tasks (id, workspace_id, status, auto_provisioned_node_id, updated_at)
+       VALUES (?, NULL, ?, ?, ?)`
+    )
+    .run(`task-${nodeId}`, status, nodeId, updatedAt);
+}
 
 afterEach(() => {
   sqlite?.close();
@@ -144,7 +154,8 @@ describe('idle reaping is immune to heartbeat activity', () => {
     // The exact production shape: node created 10h ago, its only workspace stopped
     // 7h ago, and updated_at is CURRENT because the agent is heartbeating happily.
     // The old `updated_at < now - grace` predicate could never match this row.
-    seedNode({ id: 'heartbeating-idle', createdAt: ago(10 * HOUR), updatedAt: ago(2 * 1000) });
+    seedNode({ id: 'heartbeating-idle', createdAt: ago(3 * HOUR), updatedAt: ago(2 * 1000) });
+    seedAutoProvisionedTask('heartbeating-idle', 'completed', ago(3 * HOUR));
     seedWorkspace({
       id: 'ws-stopped',
       nodeId: 'heartbeating-idle',
@@ -161,6 +172,7 @@ describe('idle reaping is immune to heartbeat activity', () => {
 
   it('does NOT reap a node whose workspaces are currently active', async () => {
     seedNode({ id: 'busy', createdAt: ago(10 * HOUR), updatedAt: ago(2 * 1000) });
+    seedAutoProvisionedTask('busy', 'in_progress', ago(10 * HOUR));
     seedWorkspace({
       id: 'ws-running',
       nodeId: 'busy',
@@ -180,6 +192,7 @@ describe('idle reaping is immune to heartbeat activity', () => {
     // A shared node legitimately sits empty between tasks; reaping here would
     // destroy the warm-reuse behaviour the pool exists to provide.
     seedNode({ id: 'recently-idle', createdAt: ago(3 * HOUR), updatedAt: ago(1000) });
+    seedAutoProvisionedTask('recently-idle', 'completed', ago(3 * HOUR));
     seedWorkspace({
       id: 'ws-just-stopped',
       nodeId: 'recently-idle',
@@ -199,6 +212,7 @@ describe('idle reaping is immune to heartbeat activity', () => {
     // waiting for its first workspace must not be reaped out from under the task
     // that just provisioned it.
     seedNode({ id: 'brand-new', createdAt: ago(2 * MINUTE), updatedAt: ago(1000) });
+    seedAutoProvisionedTask('brand-new', 'queued', ago(2 * MINUTE));
     const env = makeEnv();
 
     const result = await runNodeCleanupSweep(env);
@@ -207,7 +221,7 @@ describe('idle reaping is immune to heartbeat activity', () => {
     expect(result.orphanedNodesDestroyed).toBe(0);
   });
 
-  it('respects NODE_ORPHAN_IDLE_TIMEOUT_MS instead of a hardcoded window', async () => {
+  it('respects NODE_WORKSPACE_IDLE_TIMEOUT_MS instead of a hardcoded window', async () => {
     // Each threshold gets FRESH state on purpose. Running both against one database
     // would not test what it looks like it tests: the stale-stopped-workspace phase
     // deletes `ws-20m` during the first sweep, and that write bumps the workspace's
@@ -218,6 +232,7 @@ describe('idle reaping is immune to heartbeat activity', () => {
     // meaningless.
     const seedIdleNode = () => {
       seedNode({ id: 'idle-20m', createdAt: ago(3 * HOUR), updatedAt: ago(1000) });
+      seedAutoProvisionedTask('idle-20m', 'completed', ago(3 * HOUR));
       seedWorkspace({
         id: 'ws-20m',
         nodeId: 'idle-20m',
@@ -232,10 +247,10 @@ describe('idle reaping is immune to heartbeat activity', () => {
     expect(deleteCalls).not.toContain('idle-20m');
 
     // Same node, threshold lowered to 10m — now eligible.
-    sqlite?.exec('DELETE FROM workspaces; DELETE FROM nodes;');
+    sqlite?.exec('DELETE FROM tasks; DELETE FROM workspaces; DELETE FROM nodes;');
     deleteCalls.length = 0;
     seedIdleNode();
-    const env = { ...makeEnv(), NODE_ORPHAN_IDLE_TIMEOUT_MS: String(10 * MINUTE) } as Env;
+    const env = { ...makeEnv(), NODE_WORKSPACE_IDLE_TIMEOUT_MS: String(10 * MINUTE) } as Env;
     expect((await runNodeCleanupSweep(env)).orphanedNodesDestroyed).toBe(1);
     expect(deleteCalls).toContain('idle-20m');
   });
@@ -246,7 +261,8 @@ describe('idle reaping is immune to heartbeat activity', () => {
     const { deleteNodeResourcesStrict } = await import('../../../src/services/nodes');
     vi.mocked(deleteNodeResourcesStrict).mockRejectedValue(new Error('provider unreachable'));
 
-    seedNode({ id: 'doomed', createdAt: ago(10 * HOUR), updatedAt: ago(1000) });
+    seedNode({ id: 'doomed', createdAt: ago(3 * HOUR), updatedAt: ago(1000) });
+    seedAutoProvisionedTask('doomed', 'completed', ago(3 * HOUR));
     seedWorkspace({
       id: 'ws-doomed',
       nodeId: 'doomed',
@@ -287,7 +303,7 @@ describe('incompatible vm-agent cleanup', () => {
 
     expect(deleteCalls).not.toContain('provisioning-claimed');
     expect(result.incompatibleDestroyed).toBe(0);
-    expect(result.incompatibleSkipped).toBe(1);
+    expect(result.incompatibleSkipped).toBe(0);
   });
 
   it('preserves a fresh unversioned VM during the configurable pre-heartbeat grace', async () => {
@@ -300,7 +316,7 @@ describe('incompatible vm-agent cleanup', () => {
     expect(result.incompatibleDestroyed).toBe(0);
   });
 
-  it('preserves an actively claimed unversioned VM even after the boot grace expires', async () => {
+  it('preserves an unversioned VM with recent workspace activity even after boot grace expires', async () => {
     seedNode({ id: 'old-but-claimed', createdAt: ago(2 * HOUR), updatedAt: ago(1000) });
     // Recent terminal workspace activity keeps the independent idle-orphan phase
     // out of this assertion; zero active workspaces still makes the node eligible
@@ -323,11 +339,12 @@ describe('incompatible vm-agent cleanup', () => {
 
     expect(deleteCalls).not.toContain('old-but-claimed');
     expect(result.incompatibleDestroyed).toBe(0);
-    expect(result.incompatibleSkipped).toBe(1);
+    expect(result.incompatibleSkipped).toBe(0);
   });
 
   it('eventually retires an old unclaimed VM that never reports an agent version', async () => {
     seedNode({ id: 'old-unversioned', createdAt: ago(2 * HOUR), updatedAt: ago(1000) });
+    seedAutoProvisionedTask('old-unversioned', 'completed', ago(2 * HOUR));
     const env = { ...makeEnv(), VM_AGENT_REQUIRED_VERSION: 'current-sha' } as Env;
 
     const result = await runNodeCleanupSweep(env);
@@ -336,7 +353,7 @@ describe('incompatible vm-agent cleanup', () => {
     expect(result.incompatibleDestroyed).toBe(1);
   });
 
-  it('protects an in-progress task claim but does not let a completed task pin a stale VM', async () => {
+  it('does not let task status pin stale incompatible VMs', async () => {
     for (const nodeId of ['claimed-in-progress', 'claimed-completed']) {
       seedNode({ id: nodeId, createdAt: ago(2 * HOUR), updatedAt: ago(1000) });
       sqlite?.prepare(`UPDATE nodes SET agent_version = 'old-sha' WHERE id = ?`).run(nodeId);
@@ -344,7 +361,7 @@ describe('incompatible vm-agent cleanup', () => {
         id: `ws-stopped-${nodeId}`,
         nodeId,
         status: 'stopped',
-        updatedAt: ago(1 * MINUTE),
+        updatedAt: ago(90 * MINUTE),
       });
     }
     sqlite
@@ -358,14 +375,15 @@ describe('incompatible vm-agent cleanup', () => {
 
     const result = await runNodeCleanupSweep(env);
 
-    expect(deleteCalls).not.toContain('claimed-in-progress');
+    expect(deleteCalls).toContain('claimed-in-progress');
     expect(deleteCalls).toContain('claimed-completed');
-    expect(result.incompatibleSkipped).toBe(1);
-    expect(result.incompatibleDestroyed).toBe(1);
+    expect(result.incompatibleSkipped).toBe(0);
+    expect(result.incompatibleDestroyed).toBe(2);
   });
 
   it('destroys an idle managed VM whose agent build does not match the deployment requirement', async () => {
     seedNode({ id: 'legacy-idle', createdAt: ago(10 * HOUR), updatedAt: ago(1000) });
+    seedAutoProvisionedTask('legacy-idle', 'completed', ago(10 * HOUR));
     sqlite?.prepare(`UPDATE nodes SET agent_version = 'old-sha' WHERE id = 'legacy-idle'`).run();
     const env = { ...makeEnv(), VM_AGENT_REQUIRED_VERSION: 'current-sha' } as Env;
 
@@ -377,6 +395,7 @@ describe('incompatible vm-agent cleanup', () => {
 
   it('preserves a busy incompatible VM so active work can drain naturally', async () => {
     seedNode({ id: 'legacy-busy', createdAt: ago(10 * HOUR), updatedAt: ago(1000) });
+    seedAutoProvisionedTask('legacy-busy', 'in_progress', ago(10 * HOUR));
     sqlite?.prepare(`UPDATE nodes SET agent_version = 'old-sha' WHERE id = 'legacy-busy'`).run();
     seedWorkspace({
       id: 'ws-running-legacy',
@@ -389,7 +408,7 @@ describe('incompatible vm-agent cleanup', () => {
     const result = await runNodeCleanupSweep(env);
 
     expect(deleteCalls).not.toContain('legacy-busy');
-    expect(result.incompatibleSkipped).toBe(1);
+    expect(result.incompatibleSkipped).toBe(0);
   });
 
   it('does not treat cf-container Instant nodes as reusable VM rollout candidates', async () => {

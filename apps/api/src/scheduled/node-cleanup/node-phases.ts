@@ -18,9 +18,11 @@ import { log } from '../../lib/logger';
 import { stopNodeResources } from '../../services/nodes';
 import { persistError } from '../../services/observability';
 import {
+  boundedWarmPlacementClaimGuardSql,
   type CleanupConfig,
   type CleanupDb,
   destroyNodeForCleanup,
+  getNodeWorkspaceIdleThresholdIso,
   LAST_WORKSPACE_ACTIVITY_SQL,
   markNodeCleanupBackoff,
   type NodeCleanupResult,
@@ -133,9 +135,11 @@ export async function sweepStaleWarmNodes(
   result: NodeCleanupResult
 ): Promise<void> {
   const staleThreshold = new Date(now.getTime() - config.gracePeriodMs).toISOString();
+  const workspaceIdleThreshold = getNodeWorkspaceIdleThresholdIso(now, config);
   const candidates = await env.DATABASE.prepare(
     `SELECT n.id, n.user_id, n.status, n.warm_since,
-            COUNT(CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN 1 END) as active_ws_count
+            COUNT(CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN 1 END) as active_ws_count,
+            ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
      FROM nodes n
      LEFT JOIN workspaces w ON w.node_id = n.id
      WHERE n.warm_since IS NOT NULL
@@ -143,18 +147,32 @@ export async function sweepStaleWarmNodes(
        AND n.status = 'running'
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
+       AND EXISTS (
+         SELECT 1 FROM tasks t
+         WHERE t.auto_provisioned_node_id = n.id
+       )
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
-     GROUP BY n.id, n.user_id, n.warm_since
+       ${boundedWarmPlacementClaimGuardSql('n.id')}
+     GROUP BY n.id, n.user_id, n.status, n.warm_since, n.created_at
+     HAVING COUNT(CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN 1 END) > 0
+        OR ${LAST_WORKSPACE_ACTIVITY_SQL} < ?
      ORDER BY n.warm_since ASC
      LIMIT ?`
   )
-    .bind(staleThreshold, now.toISOString(), config.nodeSweepLimit)
+    .bind(
+      staleThreshold,
+      now.toISOString(),
+      workspaceIdleThreshold,
+      workspaceIdleThreshold,
+      config.nodeSweepLimit
+    )
     .all<{
       id: string;
       user_id: string;
       status: string;
       warm_since: string;
       active_ws_count: number;
+      last_activity: string;
     }>();
 
   for (const node of candidates.results) {
@@ -177,7 +195,13 @@ export async function sweepStaleWarmNodes(
       failureRecoveryType: 'stale_warm_node_cleanup_failure',
       failureBackoffMs: config.failureBackoffMs,
       level: 'info',
-      context: { warmSince: node.warm_since, gracePeriodMs: config.gracePeriodMs },
+      workspaceIdleThresholdIso: workspaceIdleThreshold,
+      context: {
+        warmSince: node.warm_since,
+        gracePeriodMs: config.gracePeriodMs,
+        lastWorkspaceActivity: node.last_activity,
+        workspaceIdleTimeoutMs: config.workspaceIdleTimeoutMs,
+      },
     });
 
     if (destroyed === 'destroyed') {
@@ -213,26 +237,29 @@ export async function sweepMaxLifetimeNodes(
 ): Promise<void> {
   const lifetimeThreshold = new Date(now.getTime() - config.maxLifetimeMs).toISOString();
   const absoluteThreshold = new Date(now.getTime() - config.absoluteMaxLifetimeMs).toISOString();
-  const idleThreshold = new Date(now.getTime() - config.orphanIdleTimeoutMs).toISOString();
+  const idleThreshold = getNodeWorkspaceIdleThresholdIso(now, config);
 
   const candidates = await env.DATABASE.prepare(
     `SELECT n.id, n.user_id, n.status, n.created_at,
             COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
             ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
      FROM nodes n
-     INNER JOIN tasks t ON t.auto_provisioned_node_id = n.id
      LEFT JOIN workspaces w ON w.node_id = n.id
-     WHERE t.auto_provisioned_node_id IS NOT NULL
-       AND n.status NOT IN ('stopped', 'deleted')
+     WHERE n.status NOT IN ('stopped', 'deleted')
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
+       AND EXISTS (
+         SELECT 1 FROM tasks t
+         WHERE t.auto_provisioned_node_id = n.id
+       )
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
+       ${boundedWarmPlacementClaimGuardSql('n.id')}
        AND n.created_at < ?
      GROUP BY n.id, n.user_id, n.status, n.created_at
      ORDER BY n.created_at ASC
      LIMIT ?`
   )
-    .bind(now.toISOString(), lifetimeThreshold, config.nodeSweepLimit)
+    .bind(now.toISOString(), idleThreshold, lifetimeThreshold, config.nodeSweepLimit)
     .all<{
       id: string;
       user_id: string;
@@ -246,8 +273,24 @@ export async function sweepMaxLifetimeNodes(
     const pastAbsoluteCeiling = node.created_at < absoluteThreshold;
     const workspacesIdle = node.last_activity < idleThreshold;
 
-    if (node.active_ws_count > 0 && !(pastAbsoluteCeiling && workspacesIdle)) {
-      // Genuinely busy, or not yet at the hard ceiling — workspace-level idle
+    if (!workspacesIdle) {
+      // Recent workspace activity means the hardware is still within the bounded
+      // reuse/placement window even if the task has already aged past max lifetime.
+      log.info('node_cleanup.max_lifetime_skipped_recent_workspace_activity', {
+        nodeId: node.id,
+        userId: node.user_id,
+        activeWorkspaces: node.active_ws_count,
+        createdAt: node.created_at,
+        lastWorkspaceActivity: node.last_activity,
+        workspaceIdleTimeoutMs: config.workspaceIdleTimeoutMs,
+      });
+
+      result.lifetimeSkipped++;
+      continue;
+    }
+
+    if (node.active_ws_count > 0 && !pastAbsoluteCeiling) {
+      // Genuinely busy, and not yet at the hard ceiling — workspace-level idle
       // detection handles cleanup at a finer granularity.
       log.info('node_cleanup.max_lifetime_skipped_active_workspaces', {
         nodeId: node.id,
@@ -279,11 +322,13 @@ export async function sweepMaxLifetimeNodes(
       failureRecoveryType: 'max_lifetime_node_cleanup_failure',
       failureBackoffMs: config.failureBackoffMs,
       allowActiveWorkspaces: viaAbsoluteCeiling,
+      workspaceIdleThresholdIso: idleThreshold,
       context: {
         createdAt: node.created_at,
         lastWorkspaceActivity: node.last_activity,
         staleActiveWorkspaces: viaAbsoluteCeiling ? node.active_ws_count : 0,
         maxLifetimeMs: viaAbsoluteCeiling ? config.absoluteMaxLifetimeMs : config.maxLifetimeMs,
+        workspaceIdleTimeoutMs: config.workspaceIdleTimeoutMs,
       },
     });
 
@@ -310,30 +355,35 @@ export async function sweepStoppedHandoffNodes(
   config: CleanupConfig,
   result: NodeCleanupResult
 ): Promise<void> {
-  const threshold = new Date(now.getTime() - config.orphanGracePeriodMs).toISOString();
+  const workspaceIdleThreshold = getNodeWorkspaceIdleThresholdIso(now, config);
   const candidates = await env.DATABASE.prepare(
-    `SELECT n.id, n.user_id, n.status, n.created_at, n.updated_at,
-            COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count
+    `SELECT n.id, n.user_id, n.status, n.created_at,
+            COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
+            ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
      FROM nodes n
-     INNER JOIN tasks t ON t.auto_provisioned_node_id = n.id
      LEFT JOIN workspaces w ON w.node_id = n.id
      WHERE n.status = 'stopped'
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
+       AND EXISTS (
+         SELECT 1 FROM tasks t
+         WHERE t.auto_provisioned_node_id = n.id
+       )
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
-       AND n.created_at < ?
-     GROUP BY n.id, n.user_id, n.status, n.created_at, n.updated_at
-     ORDER BY n.created_at ASC
+       ${boundedWarmPlacementClaimGuardSql('n.id')}
+     GROUP BY n.id, n.user_id, n.status, n.created_at
+     HAVING ${LAST_WORKSPACE_ACTIVITY_SQL} < ?
+     ORDER BY last_activity ASC
      LIMIT ?`
   )
-    .bind(now.toISOString(), threshold, config.nodeSweepLimit)
+    .bind(now.toISOString(), workspaceIdleThreshold, workspaceIdleThreshold, config.nodeSweepLimit)
     .all<{
       id: string;
       user_id: string;
       status: string;
       created_at: string;
-      updated_at: string;
       active_ws_count: number;
+      last_activity: string;
     }>();
 
   for (const node of candidates.results) {
@@ -342,7 +392,7 @@ export async function sweepStoppedHandoffNodes(
         nodeId: node.id,
         userId: node.user_id,
         activeWorkspaces: node.active_ws_count,
-        updatedAt: node.updated_at,
+        lastWorkspaceActivity: node.last_activity,
       });
       result.lifetimeSkipped++;
       continue;
@@ -356,10 +406,11 @@ export async function sweepStoppedHandoffNodes(
       recoveryType: 'stopped_node_handoff_cleanup',
       failureRecoveryType: 'stopped_node_handoff_cleanup_failure',
       failureBackoffMs: config.failureBackoffMs,
+      workspaceIdleThresholdIso: workspaceIdleThreshold,
       context: {
         createdAt: node.created_at,
-        updatedAt: node.updated_at,
-        gracePeriodMs: config.orphanGracePeriodMs,
+        lastWorkspaceActivity: node.last_activity,
+        workspaceIdleTimeoutMs: config.workspaceIdleTimeoutMs,
       },
     });
 
@@ -393,31 +444,42 @@ export async function sweepIncompatibleVmAgentNodes(
     return;
   }
 
-  const unversionedGraceThreshold = new Date(
-    now.getTime() - config.orphanIdleTimeoutMs
-  ).toISOString();
+  const workspaceIdleThreshold = getNodeWorkspaceIdleThresholdIso(now, config);
 
   const candidates = await env.DATABASE.prepare(
     `SELECT n.id, n.user_id, n.status, n.created_at, n.agent_version,
             COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
-            EXISTS (
-              SELECT 1 FROM tasks active
-              WHERE active.auto_provisioned_node_id = n.id
-                AND active.status IN ('queued', 'delegated', 'in_progress')
-            ) as active_task_claim
+            ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
      FROM nodes n
      LEFT JOIN workspaces w ON w.node_id = n.id
      WHERE n.status = 'running'
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
+       AND EXISTS (
+         SELECT 1 FROM tasks t
+         WHERE t.auto_provisioned_node_id = n.id
+       )
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
+       ${boundedWarmPlacementClaimGuardSql('n.id')}
        AND (n.runtime IS NULL OR n.runtime = 'vm')
        AND (n.agent_version IS NULL OR n.agent_version != ?)
+       AND NOT EXISTS (
+         SELECT 1 FROM workspaces aw
+         WHERE aw.node_id = n.id
+           AND aw.status IN ('running', 'creating', 'recovery')
+       )
      GROUP BY n.id, n.user_id, n.status, n.created_at, n.agent_version
-     ORDER BY n.created_at ASC
+     HAVING ${LAST_WORKSPACE_ACTIVITY_SQL} < ?
+     ORDER BY last_activity ASC
      LIMIT ?`
   )
-    .bind(now.toISOString(), requiredVersion, config.nodeSweepLimit)
+    .bind(
+      now.toISOString(),
+      workspaceIdleThreshold,
+      requiredVersion,
+      workspaceIdleThreshold,
+      config.nodeSweepLimit
+    )
     .all<{
       id: string;
       user_id: string;
@@ -425,37 +487,10 @@ export async function sweepIncompatibleVmAgentNodes(
       created_at: string;
       agent_version: string | null;
       active_ws_count: number;
-      active_task_claim: number;
+      last_activity: string;
     }>();
 
   for (const node of candidates.results) {
-    if (node.active_task_claim > 0) {
-      log.info('node_cleanup.incompatible_vm_agent_skipped_active_task', {
-        nodeId: node.id,
-        userId: node.user_id,
-        agentVersion: node.agent_version,
-        requiredVersion,
-      });
-      result.incompatibleSkipped++;
-      continue;
-    }
-
-    // agent_version is absent during the normal pre-heartbeat boot window. Give
-    // unclaimed/manual provisioning the same configurable idle grace used by the
-    // orphan reaper; active TaskRunner provisioning is protected above regardless
-    // of age until its bounded provisioning/readiness lifecycle terminalizes.
-    if (node.agent_version === null && node.created_at >= unversionedGraceThreshold) {
-      log.info('node_cleanup.incompatible_vm_agent_skipped_pre_heartbeat', {
-        nodeId: node.id,
-        userId: node.user_id,
-        createdAt: node.created_at,
-        requiredVersion,
-        gracePeriodMs: config.orphanIdleTimeoutMs,
-      });
-      result.incompatibleSkipped++;
-      continue;
-    }
-
     if (node.active_ws_count > 0) {
       log.info('node_cleanup.incompatible_vm_agent_skipped_active_workspaces', {
         nodeId: node.id,
@@ -477,11 +512,13 @@ export async function sweepIncompatibleVmAgentNodes(
       failureRecoveryType: 'incompatible_vm_agent_cleanup_failure',
       failureBackoffMs: config.failureBackoffMs,
       level: 'warn',
+      workspaceIdleThresholdIso: workspaceIdleThreshold,
       context: {
         createdAt: node.created_at,
+        lastWorkspaceActivity: node.last_activity,
         agentVersion: node.agent_version,
         requiredVersion,
-        unversionedGracePeriodMs: config.orphanIdleTimeoutMs,
+        workspaceIdleTimeoutMs: config.workspaceIdleTimeoutMs,
       },
     });
 
@@ -515,7 +552,7 @@ export async function sweepIdleOrphanNodes(
   config: CleanupConfig,
   result: NodeCleanupResult
 ): Promise<void> {
-  const idleThreshold = new Date(now.getTime() - config.orphanIdleTimeoutMs).toISOString();
+  const idleThreshold = getNodeWorkspaceIdleThresholdIso(now, config);
 
   const candidates = await env.DATABASE.prepare(
     `SELECT n.id, n.user_id, n.status, n.created_at, n.warm_since,
@@ -525,7 +562,12 @@ export async function sweepIdleOrphanNodes(
      WHERE n.status = 'running'
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
+       AND EXISTS (
+         SELECT 1 FROM tasks t
+         WHERE t.auto_provisioned_node_id = n.id
+       )
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
+       ${boundedWarmPlacementClaimGuardSql('n.id')}
        AND n.warm_since IS NULL
        AND n.created_at < ?
        AND NOT EXISTS (
@@ -538,7 +580,7 @@ export async function sweepIdleOrphanNodes(
      ORDER BY last_activity ASC
      LIMIT ?`
   )
-    .bind(now.toISOString(), idleThreshold, idleThreshold, config.nodeSweepLimit)
+    .bind(now.toISOString(), idleThreshold, idleThreshold, idleThreshold, config.nodeSweepLimit)
     .all<{
       id: string;
       user_id: string;
@@ -557,10 +599,11 @@ export async function sweepIdleOrphanNodes(
       recoveryType: 'idle_orphan_node_cleanup',
       failureRecoveryType: 'idle_orphan_node_cleanup_failure',
       failureBackoffMs: config.failureBackoffMs,
+      workspaceIdleThresholdIso: idleThreshold,
       context: {
         createdAt: node.created_at,
         lastWorkspaceActivity: node.last_activity,
-        idleTimeoutMs: config.orphanIdleTimeoutMs,
+        workspaceIdleTimeoutMs: config.workspaceIdleTimeoutMs,
       },
     });
 

@@ -16,9 +16,9 @@ import {
   DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS,
   DEFAULT_NODE_CLEANUP_FAILURE_BACKOFF_MS,
   DEFAULT_NODE_CLEANUP_SWEEP_LIMIT,
-  DEFAULT_NODE_ORPHAN_IDLE_TIMEOUT_MS,
   DEFAULT_NODE_WARM_GRACE_PERIOD_MS,
   DEFAULT_NODE_WARM_TIMEOUT_MS,
+  DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS,
   DEFAULT_ORPHANED_WORKSPACE_GRACE_PERIOD_MS,
   DEFAULT_WORKSPACE_CLEANUP_SWEEP_LIMIT,
   DEFAULT_WORKSPACE_STOPPED_TTL_MS,
@@ -92,7 +92,7 @@ export interface CleanupConfig {
   maxLifetimeMs: number;
   absoluteMaxLifetimeMs: number;
   orphanGracePeriodMs: number;
-  orphanIdleTimeoutMs: number;
+  workspaceIdleTimeoutMs: number;
   stoppedTtlMs: number;
   nodeSweepLimit: number;
   workspaceSweepLimit: number;
@@ -105,7 +105,7 @@ export interface CleanupConfig {
 /**
  * Warn when overrides invert the intended threshold ordering.
  *
- * The shipped defaults are monotonic (warm 30m < warm-grace 35m < orphan-idle 45m <
+ * The shipped defaults are monotonic (warm/workspace-idle 30m < warm-grace 35m <
  * max-lifetime 4h < absolute-ceiling 24h), but nothing stops an operator from
  * overriding one into a nonsensical relationship. That would not throw — it would
  * silently make a phase unreachable or trivially satisfiable, reproducing exactly the
@@ -120,9 +120,9 @@ function warnOnInvertedThresholds(config: CleanupConfig, env: Env): void {
   const warmTimeoutMs = parseMs(env.NODE_WARM_TIMEOUT_MS, DEFAULT_NODE_WARM_TIMEOUT_MS);
   const problems: string[] = [];
 
-  if (config.orphanIdleTimeoutMs < warmTimeoutMs) {
+  if (config.workspaceIdleTimeoutMs < warmTimeoutMs) {
     problems.push(
-      `NODE_ORPHAN_IDLE_TIMEOUT_MS (${config.orphanIdleTimeoutMs}) is below NODE_WARM_TIMEOUT_MS (${warmTimeoutMs}); idle reaping may destroy nodes the warm pool intends to reuse`
+      `NODE_WORKSPACE_IDLE_TIMEOUT_MS (${config.workspaceIdleTimeoutMs}) is below NODE_WARM_TIMEOUT_MS (${warmTimeoutMs}); workspace-idle reaping may race the configured warm retention window`
     );
   }
   if (config.absoluteMaxLifetimeMs < config.maxLifetimeMs) {
@@ -159,9 +159,9 @@ function buildCleanupConfig(env: Env): CleanupConfig {
       env.ORPHANED_WORKSPACE_GRACE_PERIOD_MS,
       DEFAULT_ORPHANED_WORKSPACE_GRACE_PERIOD_MS
     ),
-    orphanIdleTimeoutMs: parseMs(
-      env.NODE_ORPHAN_IDLE_TIMEOUT_MS,
-      DEFAULT_NODE_ORPHAN_IDLE_TIMEOUT_MS
+    workspaceIdleTimeoutMs: parseMs(
+      env.NODE_WORKSPACE_IDLE_TIMEOUT_MS ?? env.NODE_ORPHAN_IDLE_TIMEOUT_MS,
+      DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS
     ),
     stoppedTtlMs: parseMs(env.WORKSPACE_STOPPED_TTL_MS, DEFAULT_WORKSPACE_STOPPED_TTL_MS),
     nodeSweepLimit: parsePositiveInt(
@@ -198,15 +198,50 @@ interface DestroyNodeForCleanupOptions {
   level?: 'info' | 'warn';
   failureBackoffMs: number;
   allowActiveWorkspaces?: boolean;
+  workspaceIdleThresholdIso?: string;
   context: CleanupContext;
+}
+
+export function getNodeWorkspaceIdleThresholdIso(now: Date, config: CleanupConfig): string {
+  return new Date(now.getTime() - config.workspaceIdleTimeoutMs).toISOString();
+}
+
+/**
+ * Bounded placement-race guard for warm-node reuse.
+ *
+ * NodeLifecycle persists `tasks.claimed_warm_node_id` before TaskRunner inserts
+ * the `workspaces.status='creating'` row. During that short cross-store window,
+ * the workspace-activity clock alone cannot see the pending placement on an old
+ * warm node. This guard protects only claims written within the same finite
+ * workspace-idle window; an abandoned claim ages out and cannot create another
+ * immortal candidate set.
+ */
+export function boundedWarmPlacementClaimGuardSql(nodeIdSql: string): string {
+  return `AND NOT EXISTS (
+    SELECT 1
+    FROM tasks placement_claim
+    WHERE placement_claim.claimed_warm_node_id = ${nodeIdSql}
+      AND placement_claim.status IN ('queued', 'delegated', 'in_progress')
+      AND placement_claim.claimed_warm_node_at IS NOT NULL
+      AND placement_claim.claimed_warm_node_at >= ?
+  )`;
 }
 
 export async function claimNodeForCleanup(
   env: Env,
   node: CleanupNode,
   nowIso: string,
-  options: { allowActiveWorkspaces?: boolean } = {}
+  options: { allowActiveWorkspaces?: boolean; workspaceIdleThresholdIso?: string } = {}
 ): Promise<boolean> {
+  const workspaceIdleThresholdIso =
+    options.workspaceIdleThresholdIso ??
+    new Date(
+      new Date(nowIso).getTime() -
+        parseMs(
+          env.NODE_WORKSPACE_IDLE_TIMEOUT_MS ?? env.NODE_ORPHAN_IDLE_TIMEOUT_MS,
+          DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS
+        )
+    ).toISOString();
   const activeWorkspaceGuard = options.allowActiveWorkspaces
     ? ''
     : `AND NOT EXISTS (
@@ -223,15 +258,27 @@ export async function claimNodeForCleanup(
        AND status = ?
        AND node_role = 'workspace'
        AND node_class != 'user-owned'
-       ${activeWorkspaceGuard}
-       AND NOT EXISTS (
+       AND EXISTS (
          SELECT 1
-         FROM tasks active_task
-         WHERE active_task.auto_provisioned_node_id = nodes.id
-           AND active_task.status IN ('queued', 'delegated', 'in_progress')
-       )`
+         FROM tasks auto_task
+         WHERE auto_task.auto_provisioned_node_id = nodes.id
+       )
+       ${activeWorkspaceGuard}
+       ${boundedWarmPlacementClaimGuardSql('nodes.id')}
+       AND (
+         SELECT COALESCE(MAX(workspace_activity.updated_at), nodes.created_at)
+         FROM workspaces workspace_activity
+         WHERE workspace_activity.node_id = nodes.id
+       ) < ?`
   )
-    .bind(nowIso, node.id, node.user_id, node.status)
+    .bind(
+      nowIso,
+      node.id,
+      node.user_id,
+      node.status,
+      workspaceIdleThresholdIso,
+      workspaceIdleThresholdIso
+    )
     .run();
 
   return (result.meta.changes ?? 0) > 0;
@@ -410,6 +457,7 @@ export async function destroyNodeForCleanup(
 ): Promise<NodeCleanupDestroyResult> {
   const claimed = await claimNodeForCleanup(env, node, nowIso, {
     allowActiveWorkspaces: options.allowActiveWorkspaces,
+    workspaceIdleThresholdIso: options.workspaceIdleThresholdIso,
   });
   if (!claimed) {
     log.info('node_cleanup.candidate_claim_lost', {

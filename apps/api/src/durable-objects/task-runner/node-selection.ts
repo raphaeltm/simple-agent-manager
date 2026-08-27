@@ -141,7 +141,7 @@ export async function tryClaimWarmNode(
       return persistedClaim.claimed_warm_node_id;
     }
     await rc.env.DATABASE.prepare(
-      `UPDATE tasks SET claimed_warm_node_id = NULL, updated_at = ?
+      `UPDATE tasks SET claimed_warm_node_id = NULL, claimed_warm_node_at = NULL, updated_at = ?
         WHERE id = ? AND claimed_warm_node_id = ?`
     )
       .bind(new Date().toISOString(), state.taskId, persistedClaim.claimed_warm_node_id)

@@ -69,38 +69,50 @@ candidate forever.
 
 ## Implementation checklist
 
-- [ ] Add a dedicated env-configurable node workspace-idleness window with a shared
+- [x] Add a dedicated env-configurable node workspace-idleness window with a shared
       `DEFAULT_*` constant, defaulting to 30 minutes and aligned with warm-timeout semantics without
       shortening warm retention.
-- [ ] Add shared SQL/utility for workspace-idle eligibility using
+- [x] Add shared SQL/utility for workspace-idle eligibility using
       `COALESCE(MAX(workspaces.updated_at), nodes.created_at)` and no `nodes.updated_at`.
-- [ ] Replace `claimNodeForCleanup()`'s blanket task-status exemption with workspace-based
+- [x] Replace `claimNodeForCleanup()`'s blanket task-status exemption with workspace-based
       idleness: no active workspaces, no workspace activity for the configured window, and the
       existing role/class/status/user CAS gates.
-- [ ] Preserve the absolute-lifetime exception for stale active workspace rows, but require stale
+- [x] Preserve the absolute-lifetime exception for stale active workspace rows, but require stale
       workspace activity there too.
-- [ ] Update node cleanup candidate queries so stopped handoff, stale warm, idle orphan, max
+- [x] Update node cleanup candidate queries so stopped handoff, stale warm, idle orphan, max
       lifetime, and incompatible rollout cleanup use the workspace-idle rule and retain
       `node_role='workspace'`, `node_class!='user-owned'`, and auto-provisioned scope where
       applicable.
-- [ ] Replace the sibling incompatible-rollout `active_task_claim` skip with the same bounded
+- [x] Replace the sibling incompatible-rollout `active_task_claim` skip with the same bounded
       created-at/workspace-activity grace.
-- [ ] Keep 4h max-lifetime and 24h absolute ceiling backstops unchanged.
-- [ ] Prove the placement race: a fresh claimed node with no workspace row is not destroyed, and
+- [x] Keep 4h max-lifetime and 24h absolute ceiling backstops unchanged.
+- [x] Prove the placement race: a fresh claimed node with no workspace row is not destroyed, and
       `reserveWorkspacePlacement()` creates a `creating` row that blocks cleanup by construction.
-- [ ] Add incident reproduction coverage: stopped/warm node, no active workspaces for the window,
+- [x] Add incident reproduction coverage: stopped/warm node, no active workspaces for the window,
       `tasks.auto_provisioned_node_id` on an `in_progress` task, and cleanup destroys the node.
-- [ ] Add controls for running/creating/recovery workspaces, recent workspace activity, deployment
+- [x] Add controls for running/creating/recovery workspaces, recent workspace activity, deployment
       nodes, user-owned nodes, and fresh claimed nodes.
-- [ ] Add a two-sweep rule-47 test for a permanently failing destroy candidate.
-- [ ] Extend sleeping-session survival coverage through `destroyNodeForCleanup()` and
+- [x] Add a two-sweep rule-47 test for a permanently failing destroy candidate.
+- [x] Extend sleeping-session survival coverage through `destroyNodeForCleanup()` and
       NodeLifecycle staged deletion: snapshot row remains restorable, ProjectData session remains
       `sleeping`, and wake/recovery remains claimable.
-- [ ] Update Env/shared constants documentation and any source comments whose old wording says task
+- [x] Update Env/shared constants documentation and any source comments whose old wording says task
       status is node work.
-- [ ] Include the rule-47 load review in the PR: expected candidate volume is the current 5–10
+- [x] Include the rule-47 load review in the PR: expected candidate volume is the current 5–10
       pinned nodes; steady state should be small; per-candidate cost is one D1 CAS plus strict
       provider/DNS teardown only for selected candidates, with existing failure backoff.
+
+## Implementation notes
+
+- Added `NODE_WORKSPACE_IDLE_TIMEOUT_MS` with default `DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS`
+  (30 minutes). `NODE_ORPHAN_IDLE_TIMEOUT_MS` remains a legacy alias when the primary variable is
+  unset.
+- Added `tasks.claimed_warm_node_at` so warm-reuse pre-placement claims have a fixed bounded expiry
+  independent of general `tasks.updated_at` progress writes.
+- Rule 47 load review: the incident candidate volume is currently ~5–10 pinned nodes. Steady-state
+  volume should be small because candidates need auto-provisioned ownership, workspace-role/managed
+  gates, no active workspace, workspace-idle age, no recent warm-placement claim, and failure
+  backoff escape after failed teardown.
 
 ## Acceptance criteria
 

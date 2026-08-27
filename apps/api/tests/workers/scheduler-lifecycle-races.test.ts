@@ -150,8 +150,14 @@ describe('scheduler lifecycle D1 races', () => {
   it('serializes cleanup and placement so both cannot own the node', async () => {
     for (let iteration = 0; iteration < RACE_REPETITIONS; iteration += 1) {
       const nodeId = `node-scheduler-cleanup-placement-${iteration}`;
-      const old = new Date(Date.now() - 60_000).toISOString();
+      const taskId = `task-scheduler-cleanup-placement-${iteration}`;
+      const old = new Date(Date.now() - 60 * 60_000).toISOString();
       await seedNode(nodeId, USER_ID, { createdAt: old, updatedAt: old });
+      await seedTask(taskId, PROJECT_ID, USER_ID, {
+        status: 'in_progress',
+        autoProvisionedNodeId: nodeId,
+        updatedAt: old,
+      });
 
       const claimCleanup = () =>
         claimNodeForCleanup(
@@ -187,7 +193,7 @@ describe('scheduler lifecycle D1 races', () => {
     }
   });
 
-  it('keeps an active provisioning task claim out of cleanup', async () => {
+  it('keeps a fresh pre-workspace provisioning claim out of cleanup via node created_at fallback', async () => {
     const nodeId = 'node-scheduler-provisioning-claim';
     const taskId = 'task-scheduler-provisioning-claim';
     await seedNode(nodeId, USER_ID);
@@ -205,6 +211,134 @@ describe('scheduler lifecycle D1 races', () => {
 
     expect(claimed).toBe(false);
     expect(await nodeState(nodeId)).toEqual({ status: 'running', active: 0 });
+  });
+
+  it('does not let an in-progress task pin an old workspace-less auto-provisioned node', async () => {
+    const nodeId = 'node-scheduler-old-in-progress-claim';
+    const taskId = 'task-scheduler-old-in-progress-claim';
+    const old = new Date(Date.now() - 60 * 60_000).toISOString();
+
+    await seedNode(nodeId, USER_ID, { createdAt: old, updatedAt: old });
+    await seedTask(taskId, PROJECT_ID, USER_ID, {
+      status: 'in_progress',
+      autoProvisionedNodeId: nodeId,
+      executionStep: 'running',
+      updatedAt: old,
+    });
+
+    const claimed = await claimNodeForCleanup(
+      env as unknown as Env,
+      { id: nodeId, user_id: USER_ID, status: 'running' },
+      new Date().toISOString()
+    );
+
+    expect(claimed).toBe(true);
+    expect(await nodeState(nodeId)).toEqual({ status: 'destroying', active: 0 });
+  });
+
+  it('protects a recent warm-reuse claim until reserveWorkspacePlacement creates the active row', async () => {
+    const nodeId = 'node-scheduler-warm-placement-race';
+    const priorTaskId = 'task-scheduler-warm-placement-prior';
+    const claimantTaskId = 'task-scheduler-warm-placement-claim';
+    const old = new Date(Date.now() - 60 * 60_000).toISOString();
+    const claimTime = new Date().toISOString();
+
+    await seedNode(nodeId, USER_ID, {
+      status: 'running',
+      warmSince: old,
+      createdAt: old,
+      updatedAt: old,
+    });
+    await seedTask(priorTaskId, PROJECT_ID, USER_ID, {
+      status: 'completed',
+      autoProvisionedNodeId: nodeId,
+      updatedAt: old,
+    });
+    await seedTask(claimantTaskId, PROJECT_ID, USER_ID, {
+      status: 'queued',
+      executionStep: 'node_selection',
+    });
+    await env.DATABASE.prepare(
+      `UPDATE tasks
+       SET claimed_warm_node_id = ?, claimed_warm_node_at = ?, updated_at = ?
+       WHERE id = ?`
+    )
+      .bind(nodeId, claimTime, claimTime, claimantTaskId)
+      .run();
+
+    const claimedDuringPreRowWindow = await claimNodeForCleanup(
+      env as unknown as Env,
+      { id: nodeId, user_id: USER_ID, status: 'running' },
+      claimTime
+    );
+
+    expect(claimedDuringPreRowWindow).toBe(false);
+    expect(await nodeState(nodeId)).toEqual({ status: 'running', active: 0 });
+
+    const placementReserved = await reserveWorkspacePlacement(
+      env.DATABASE,
+      placement('workspace-scheduler-warm-placement-race', nodeId, claimTime),
+      1
+    );
+
+    expect(placementReserved).toBe(true);
+
+    await env.DATABASE.prepare(
+      `UPDATE tasks
+       SET claimed_warm_node_at = ?
+       WHERE id = ?`
+    )
+      .bind(old, claimantTaskId)
+      .run();
+
+    const claimedAfterPlacement = await claimNodeForCleanup(
+      env as unknown as Env,
+      { id: nodeId, user_id: USER_ID, status: 'running' },
+      new Date().toISOString()
+    );
+
+    expect(claimedAfterPlacement).toBe(false);
+    expect(await nodeState(nodeId)).toEqual({ status: 'running', active: 1 });
+  });
+
+  it('lets an abandoned warm-reuse claim age out of the bounded placement guard', async () => {
+    const nodeId = 'node-scheduler-stale-warm-placement-claim';
+    const priorTaskId = 'task-scheduler-stale-warm-placement-prior';
+    const claimantTaskId = 'task-scheduler-stale-warm-placement-claim';
+    const old = new Date(Date.now() - 60 * 60_000).toISOString();
+
+    await seedNode(nodeId, USER_ID, {
+      status: 'running',
+      warmSince: old,
+      createdAt: old,
+      updatedAt: old,
+    });
+    await seedTask(priorTaskId, PROJECT_ID, USER_ID, {
+      status: 'completed',
+      autoProvisionedNodeId: nodeId,
+      updatedAt: old,
+    });
+    await seedTask(claimantTaskId, PROJECT_ID, USER_ID, {
+      status: 'delegated',
+      executionStep: 'workspace_creation',
+      updatedAt: new Date().toISOString(),
+    });
+    await env.DATABASE.prepare(
+      `UPDATE tasks
+       SET claimed_warm_node_id = ?, claimed_warm_node_at = ?, updated_at = ?
+       WHERE id = ?`
+    )
+      .bind(nodeId, old, new Date().toISOString(), claimantTaskId)
+      .run();
+
+    const claimed = await claimNodeForCleanup(
+      env as unknown as Env,
+      { id: nodeId, user_id: USER_ID, status: 'running' },
+      new Date().toISOString()
+    );
+
+    expect(claimed).toBe(true);
+    expect(await nodeState(nodeId)).toEqual({ status: 'destroying', active: 0 });
   });
 
   it('makes the real TaskRunner reselect when its advisory node slot was consumed', async () => {
