@@ -729,6 +729,77 @@ describe('task supersession — a successful wake must not fail its predecessor'
   });
 
   /**
+   * 2026-08-26 production incident: a guarded wake can point the successor at
+   * the recovery middle link itself. The previous root-family predicate missed
+   * this shape because `COALESCE(self.recovery_source_task_id, self.id)` reduced
+   * the middle link to its root and never matched `owner.recovery_source_task_id
+   * = self.id`.
+   */
+  it('preserves a recovery middle link superseded by a direct child wake', async () => {
+    const ROOT_ID = '01M064TG00ROOT00000000000';
+    const MIDDLE_ID = '01M064TG11MIDDLE000000000';
+    const DIRECT_CHILD_ID = '01M064TG22DIRECT00000000';
+    seedTask(MIDDLE_ID, {
+      status: 'in_progress',
+      triggeredBy: 'session-recovery',
+      recoverySourceTaskId: ROOT_ID,
+      createdAt: iso(-3_600_000),
+      chatSessionId: null,
+    });
+    seedRecoverySuccessor({
+      id: DIRECT_CHILD_ID,
+      rootId: MIDDLE_ID,
+      createdAt: iso(-6 * 60_000),
+    });
+    seedWorkspace('deleted');
+    sqlite.prepare(`UPDATE workspaces SET chat_session_id = NULL WHERE id = ?`).run(WORKSPACE_ID);
+
+    await expect(
+      getTaskRuntimeLiveness(env, {
+        id: MIDDLE_ID,
+        project_id: PROJECT_ID,
+        workspace_id: WORKSPACE_ID,
+      })
+    ).resolves.toMatchObject({
+      conclusive: false,
+      reason: 'workspace_deleted_superseded_by_live_wake',
+    });
+  });
+
+  it('terminalizes a direct-child superseded middle link benignly once the child ends', async () => {
+    const ROOT_ID = '01M064TG00ROOT00000000000';
+    const MIDDLE_ID = '01M064TG11MIDDLE000000000';
+    const DIRECT_CHILD_ID = '01M064TG22DIRECT00000000';
+    seedTask(MIDDLE_ID, {
+      status: 'in_progress',
+      triggeredBy: 'session-recovery',
+      recoverySourceTaskId: ROOT_ID,
+      createdAt: iso(-3_600_000),
+      chatSessionId: null,
+    });
+    seedRecoverySuccessor({
+      id: DIRECT_CHILD_ID,
+      rootId: MIDDLE_ID,
+      status: 'completed',
+      createdAt: iso(-6 * 60_000),
+    });
+    seedWorkspace('deleted');
+    sqlite.prepare(`UPDATE workspaces SET chat_session_id = NULL WHERE id = ?`).run(WORKSPACE_ID);
+
+    const verdict = await getTaskRuntimeLiveness(env, {
+      id: MIDDLE_ID,
+      project_id: PROJECT_ID,
+      workspace_id: WORKSPACE_ID,
+    });
+    expect(verdict).toMatchObject({
+      live: false,
+      conclusive: true,
+      reason: 'workspace_deleted_superseded_by_completed_wake',
+    });
+    expect(isSupersededTerminalReason(verdict.reason)).toBe(true);
+  });
+
+  /**
    * Discriminating control (`.claude/rules/58`). Without this, the suite passes
    * equally well with terminalization disabled outright.
    */

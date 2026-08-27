@@ -606,12 +606,12 @@ function parseTimestamp(value: string | null): number | null {
  * family owns the conversation now — i.e. this task was superseded by a
  * *successful* wake rather than losing its runtime.
  *
- * The family is keyed on the ROOT, not the direct child, because
+ * The family is keyed on both the ROOT and the direct successor edge.
  * `session-recovery.ts:createRecoveryTask` resolves its source as
- * `guard ?? sourceTask.recoverySourceTaskId ?? sourceTask.id` — every successor
- * therefore points at the original task, never at its immediate predecessor. A
- * direct-child check would miss every middle link of a chain (36 of 61 observed
- * production cases; one root has 8 successors).
+ * `guard ?? sourceTask.recoverySourceTaskId ?? sourceTask.id`: unguarded wakes
+ * can collapse to the root, while guarded wakes point at the exact source task
+ * the wake guard protects. A root-only check misses direct children of recovery
+ * middle links; a direct-child-only check misses root-collapsed siblings.
  *
  * `triggered_by = 'session-recovery'` is what makes this supersession rather than
  * an unrelated sibling task, and `created_at >` keeps the relation directional so
@@ -644,6 +644,7 @@ export async function loadTaskSupersession(
           AND (
                 owner.id = COALESCE(self.recovery_source_task_id, self.id)
              OR owner.recovery_source_task_id = COALESCE(self.recovery_source_task_id, self.id)
+             OR owner.recovery_source_task_id = self.id
               )
         WHERE self.id = ?
           AND self.project_id = ?

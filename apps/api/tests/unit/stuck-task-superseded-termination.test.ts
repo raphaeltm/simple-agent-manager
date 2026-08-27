@@ -464,6 +464,107 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
     expect(statusOf(siblingSuccessorId).status).toBe('in_progress');
   });
 
+  it('preserves a recovery middle link when a live successor points directly at it', async () => {
+    const rootId = '01M064TG9QK8ZQ3XW0M6P7ROOT';
+    seedTask(rootId, {
+      status: 'failed',
+      startedAt: iso(-3 * 60 * 60 * 1000),
+      createdAt: iso(-3 * 60 * 60 * 1000),
+      chatSessionId: null,
+    });
+    seedTask(PREDECESSOR_ID, {
+      startedAt: iso(-6 * 60 * 60 * 1000),
+      createdAt: iso(-2 * 60 * 60 * 1000),
+      triggeredBy: 'session-recovery',
+      recoverySourceTaskId: rootId,
+      chatSessionId: null,
+    });
+    seedSuccessor('in_progress', {
+      recoverySourceTaskId: PREDECESSOR_ID,
+      createdAt: iso(-6 * 60_000),
+      chatSessionId: CHAT_SESSION_ID,
+    });
+
+    const result = await recoverStuckTasks(env());
+
+    expect(result.failedInProgress).toBe(0);
+    expect(statusOf(PREDECESSOR_ID)).toMatchObject({
+      status: 'in_progress',
+      error_message: null,
+    });
+    expect(statusOf(SUCCESSOR_ID).status).toBe('in_progress');
+  });
+
+  it('cancels a direct-child superseded middle link benignly once that child ends', async () => {
+    const rootId = '01M064TG9QK8ZQ3XW0M6P7ROOT';
+    seedTask(rootId, {
+      status: 'failed',
+      startedAt: iso(-3 * 60 * 60 * 1000),
+      createdAt: iso(-3 * 60 * 60 * 1000),
+      chatSessionId: null,
+    });
+    seedTask(PREDECESSOR_ID, {
+      startedAt: iso(-6 * 60 * 60 * 1000),
+      createdAt: iso(-2 * 60 * 60 * 1000),
+      triggeredBy: 'session-recovery',
+      recoverySourceTaskId: rootId,
+      chatSessionId: null,
+    });
+    seedSuccessor('completed', {
+      recoverySourceTaskId: PREDECESSOR_ID,
+      createdAt: iso(-6 * 60_000),
+      chatSessionId: CHAT_SESSION_ID,
+    });
+
+    const result = await recoverStuckTasks(env());
+
+    expect(result.failedInProgress).toBe(1);
+    const row = statusOf(PREDECESSOR_ID);
+    expect(row.status).toBe('cancelled');
+    expect(row.error_message).toContain('Superseded by a later session wake');
+    expect(row.error_message).not.toContain('workspace_deleted');
+  });
+
+  it('keeps the write-time supersession fence for direct-child middle-link races', async () => {
+    const rootId = '01M064TG9QK8ZQ3XW0M6P7ROOT';
+    seedTask(rootId, {
+      status: 'failed',
+      startedAt: iso(-3 * 60 * 60 * 1000),
+      createdAt: iso(-3 * 60 * 60 * 1000),
+      chatSessionId: null,
+    });
+    seedTask(PREDECESSOR_ID, {
+      startedAt: iso(-10 * 60 * 1000),
+      createdAt: iso(-2 * 60 * 60 * 1000),
+      triggeredBy: 'session-recovery',
+      recoverySourceTaskId: rootId,
+      chatSessionId: null,
+    });
+    let insertedSuccessor = false;
+
+    const result = await recoverStuckTasks(
+      env({
+        beforeTerminalUpdate: () => {
+          if (insertedSuccessor) return;
+          insertedSuccessor = true;
+          seedSuccessor('queued', {
+            recoverySourceTaskId: PREDECESSOR_ID,
+            createdAt: iso(-30_000),
+            chatSessionId: CHAT_SESSION_ID,
+          });
+        },
+      })
+    );
+
+    expect(insertedSuccessor).toBe(true);
+    expect(result.failedInProgress).toBe(0);
+    expect(statusOf(PREDECESSOR_ID)).toMatchObject({
+      status: 'in_progress',
+      error_message: null,
+    });
+    expect(statusOf(SUCCESSOR_ID).status).toBe('queued');
+  });
+
   it('keeps the successor source-task guard valid when the atomic guard blocks the kill', async () => {
     seedTask(PREDECESSOR_ID, {
       startedAt: iso(-10 * 60 * 1000),

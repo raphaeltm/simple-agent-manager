@@ -194,6 +194,7 @@ export async function transitionTaskToTerminal(
             AND (
               succ.id = COALESCE(tasks.recovery_source_task_id, tasks.id)
               OR succ.recovery_source_task_id = COALESCE(tasks.recovery_source_task_id, tasks.id)
+              OR succ.recovery_source_task_id = tasks.id
             )
        )`
   ).bind(

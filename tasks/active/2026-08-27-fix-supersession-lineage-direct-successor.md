@@ -47,19 +47,33 @@ resolved benignly after the successor ends.
 
 ## Implementation checklist
 
-- [ ] Add a regression test proving `loadTaskSupersession` returns `live` for a
+- [x] Add a regression test proving `loadTaskSupersession` returns `live` for a
       recovery-task middle link whose newer successor points directly at the middle
       link.
-- [ ] Prove the regression fails against pre-fix code.
-- [ ] Keep existing root-collapsed sibling coverage intact.
-- [ ] Keep never-superseded task terminalization intact.
-- [ ] Keep directionality intact: older family members never supersede newer rows.
-- [ ] Keep bounded escape intact: once the successor is terminal, predecessor resolves
+- [x] Prove the regression fails against pre-fix code.
+- [x] Keep existing root-collapsed sibling coverage intact.
+- [x] Keep never-superseded task terminalization intact.
+- [x] Keep directionality intact: older family members never supersede newer rows.
+- [x] Keep bounded escape intact: once the successor is terminal, predecessor resolves
       as benign superseded terminal, not failure.
-- [ ] Apply the narrow SQL predicate fix in `loadTaskSupersession`.
-- [ ] Run real-SQL-engine tests for the changed predicate.
+- [x] Apply the narrow SQL predicate fix in `loadTaskSupersession`.
+- [x] Apply the matching write-time fence fix in `transitionTaskToTerminal`.
+- [x] Run real-SQL-engine tests for the changed predicate.
 - [ ] Run full API and repository quality gates required by `/do`.
 - [ ] Run specialist reviews and staging verification before merge.
+
+## Implementation evidence
+
+- Pre-fix targeted suite failed exactly on the direct-child middle-link gap:
+  - classifier cases returned `workspace_deleted` instead of
+    `workspace_deleted_superseded_by_live_wake` /
+    `workspace_deleted_superseded_by_completed_wake`
+  - sweep cases wrote `failed` or failed to preserve the predecessor
+- Fix: `loadTaskSupersession` and the `transitionTaskToTerminal` write-time
+  supersession fence now also match `owner/succ.recovery_source_task_id = self/tasks.id`.
+- Post-fix targeted suite:
+  - `pnpm --filter @simple-agent-manager/api test tests/unit/stuck-task-slept-session-liveness.test.ts tests/unit/stuck-task-superseded-termination.test.ts`
+  - Result: 2 files passed, 56 tests passed.
 
 ## Acceptance criteria
 
