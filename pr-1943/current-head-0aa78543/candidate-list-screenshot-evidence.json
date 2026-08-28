@@ -1,0 +1,264 @@
+{
+  "checkedAt": "2026-08-28T21:49:22.647Z",
+  "shots": [
+    {
+      "file": "/workspaces/simple-agent-manager/.codex/tmp/pr1943-validation/project-candidates-desktop.png",
+      "label": "project-candidates-desktop",
+      "url": "https://app.sammy.party/projects/01KTKXZ4ZZAT6MJFXRW1ZTQ7RB/settings/infrastructure",
+      "hiddenProject": false,
+      "hiddenUser": false,
+      "documentScrollWidth": 1280,
+      "viewportWidth": 1280,
+      "hasHorizontalOverflow": false,
+      "overflowOffenders": [],
+      "hasCandidateSurface": true,
+      "hasHetznerCandidates": true,
+      "hasControls": true
+    },
+    {
+      "file": "/workspaces/simple-agent-manager/.codex/tmp/pr1943-validation/project-candidates-mobile.png",
+      "label": "project-candidates-mobile",
+      "url": "https://app.sammy.party/projects/01KTKXZ4ZZAT6MJFXRW1ZTQ7RB/settings/infrastructure",
+      "hiddenProject": false,
+      "hiddenUser": false,
+      "documentScrollWidth": 375,
+      "viewportWidth": 375,
+      "hasHorizontalOverflow": false,
+      "overflowOffenders": [
+        {
+          "tag": "A",
+          "text": "General",
+          "left": -257,
+          "right": -175,
+          "width": 82,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Access",
+          "left": -175,
+          "right": -98,
+          "width": 77,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Connections",
+          "left": -98,
+          "right": 12,
+          "width": 110,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        }
+      ],
+      "hasCandidateSurface": true,
+      "hasHetznerCandidates": true,
+      "hasControls": true
+    },
+    {
+      "file": "/workspaces/simple-agent-manager/.codex/tmp/pr1943-validation/user-candidates-desktop.png",
+      "label": "user-candidates-desktop",
+      "url": "https://app.sammy.party/settings/cloud-provider",
+      "hiddenProject": false,
+      "hiddenUser": false,
+      "documentScrollWidth": 1280,
+      "viewportWidth": 1280,
+      "hasHorizontalOverflow": false,
+      "overflowOffenders": [],
+      "hasCandidateSurface": true,
+      "hasHetznerCandidates": true,
+      "hasControls": true
+    },
+    {
+      "file": "/workspaces/simple-agent-manager/.codex/tmp/pr1943-validation/user-candidates-mobile.png",
+      "label": "user-candidates-mobile",
+      "url": "https://app.sammy.party/settings/cloud-provider",
+      "hiddenProject": false,
+      "hiddenUser": false,
+      "documentScrollWidth": 375,
+      "viewportWidth": 375,
+      "hasHorizontalOverflow": false,
+      "overflowOffenders": [
+        {
+          "tag": "DIV",
+          "text": "Cloud ProviderGitHubConnectionsAgentsMCP ServersAdvancedNotificationsUsageAPI To",
+          "left": 12,
+          "right": 380,
+          "width": 368,
+          "className": "relative overflow-hidden glass-chrome border-b "
+        },
+        {
+          "tag": "DIV",
+          "text": "Cloud ProviderGitHubConnectionsAgentsMCP ServersAdvancedNotificationsUsageAPI To",
+          "left": 13,
+          "right": 379,
+          "width": 366,
+          "className": "flex overflow-x-auto snap-x snap-mandatory"
+        },
+        {
+          "tag": "A",
+          "text": "Agents",
+          "left": 323,
+          "right": 399,
+          "width": 76,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "MCP Servers",
+          "left": 399,
+          "right": 514,
+          "width": 115,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Advanced",
+          "left": 514,
+          "right": 608,
+          "width": 94,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Notifications",
+          "left": 608,
+          "right": 716,
+          "width": 108,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Usage",
+          "left": 716,
+          "right": 789,
+          "width": 72,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "API Tokens",
+          "left": 789,
+          "right": 891,
+          "width": 103,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        }
+      ],
+      "hasCandidateSurface": true,
+      "hasHetznerCandidates": true,
+      "hasControls": true
+    },
+    {
+      "file": "/workspaces/simple-agent-manager/.codex/tmp/pr1943-validation/admin-candidates-desktop.png",
+      "label": "admin-candidates-desktop",
+      "url": "https://app.sammy.party/admin/credentials",
+      "hiddenProject": false,
+      "hiddenUser": false,
+      "documentScrollWidth": 1280,
+      "viewportWidth": 1280,
+      "hasHorizontalOverflow": false,
+      "overflowOffenders": [
+        {
+          "tag": "A",
+          "text": "Analytics",
+          "left": 1280,
+          "right": 1368,
+          "width": 88,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        }
+      ],
+      "hasCandidateSurface": true,
+      "hasHetznerCandidates": true,
+      "hasControls": true
+    },
+    {
+      "file": "/workspaces/simple-agent-manager/.codex/tmp/pr1943-validation/admin-candidates-mobile.png",
+      "label": "admin-candidates-mobile",
+      "url": "https://app.sammy.party/admin/credentials",
+      "hiddenProject": false,
+      "hiddenUser": false,
+      "documentScrollWidth": 375,
+      "viewportWidth": 375,
+      "hasHorizontalOverflow": false,
+      "overflowOffenders": [
+        {
+          "tag": "A",
+          "text": "Trials",
+          "left": 374,
+          "right": 440,
+          "width": 66,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Costs",
+          "left": 440,
+          "right": 508,
+          "width": 68,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Usage",
+          "left": 508,
+          "right": 580,
+          "width": 72,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Quotas",
+          "left": 580,
+          "right": 658,
+          "width": 77,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Errors",
+          "left": 658,
+          "right": 728,
+          "width": 70,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Diagnoses",
+          "left": 728,
+          "right": 826,
+          "width": 98,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Overview",
+          "left": 826,
+          "right": 916,
+          "width": 90,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Logs",
+          "left": 916,
+          "right": 979,
+          "width": 62,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        }
+      ],
+      "hasCandidateSurface": true,
+      "hasHetznerCandidates": true,
+      "hasControls": true
+    }
+  ],
+  "consoleErrors": [],
+  "failedRequests": [
+    {
+      "url": "https://api.sammy.party/api/t",
+      "failure": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://api.sammy.party/api/t",
+      "failure": "net::ERR_ABORTED"
+    }
+  ]
+}

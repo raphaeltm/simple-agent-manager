@@ -1,0 +1,164 @@
+{
+  "queriedAt": "2026-08-28T21:59:00.351Z",
+  "scriptName": "sam-api-staging",
+  "window": {
+    "from": "2026-08-28T21:51:30Z",
+    "to": "2026-08-28T21:58:30Z"
+  },
+  "taskId": "01M155R0VZDZGX451HVEBPTANG",
+  "sessionId": "f4f3e6b0-1d06-4e55-9187-ebac9c39b74e",
+  "workspaceId": "01M155WWGQ5VFJVAYK69S6CG74",
+  "nodeId": "01M155RBHMBT9EMTMJT09MDYJ6",
+  "results": [
+    {
+      "search": "task_submit.created",
+      "count": 1,
+      "matched": []
+    },
+    {
+      "search": "task_runner_do.step.node_provisioning",
+      "count": 1,
+      "matched": []
+    },
+    {
+      "search": "Agent credential fetched",
+      "count": 1,
+      "matched": [
+        {
+          "timestamp": "2026-08-28T21:55:28.808Z",
+          "level": "info",
+          "entrypoint": null,
+          "request": "https://api.sammy.party/api/nodes/01M155RBHMBT9EMTMJT09MDYJ6/errors",
+          "messages": [
+            "Agent credential fetched"
+          ]
+        }
+      ]
+    },
+    {
+      "search": "Agent ready",
+      "count": 1,
+      "matched": [
+        {
+          "timestamp": "2026-08-28T21:55:39.679Z",
+          "level": "info",
+          "entrypoint": null,
+          "request": "https://api.sammy.party/api/nodes/01M155RBHMBT9EMTMJT09MDYJ6/errors",
+          "messages": [
+            "Agent ready"
+          ]
+        }
+      ]
+    },
+    {
+      "search": "ACP Initialize started",
+      "count": 1,
+      "matched": [
+        {
+          "timestamp": "2026-08-28T21:55:38.148Z",
+          "level": "info",
+          "entrypoint": null,
+          "request": "https://api.sammy.party/api/nodes/01M155RBHMBT9EMTMJT09MDYJ6/errors",
+          "messages": [
+            "ACP Initialize started"
+          ]
+        }
+      ]
+    },
+    {
+      "search": "ACP Initialize succeeded",
+      "count": 1,
+      "matched": [
+        {
+          "timestamp": "2026-08-28T21:55:38.775Z",
+          "level": "info",
+          "entrypoint": null,
+          "request": "https://api.sammy.party/api/nodes/01M155RBHMBT9EMTMJT09MDYJ6/errors",
+          "messages": [
+            "ACP Initialize succeeded"
+          ]
+        }
+      ]
+    },
+    {
+      "search": "ACP NewSession started",
+      "count": 1,
+      "matched": [
+        {
+          "timestamp": "2026-08-28T21:55:38.775Z",
+          "level": "info",
+          "entrypoint": null,
+          "request": "https://api.sammy.party/api/nodes/01M155RBHMBT9EMTMJT09MDYJ6/errors",
+          "messages": [
+            "ACP NewSession started"
+          ]
+        }
+      ]
+    },
+    {
+      "search": "ACP NewSession succeeded",
+      "count": 1,
+      "matched": [
+        {
+          "timestamp": "2026-08-28T21:55:39.679Z",
+          "level": "info",
+          "entrypoint": null,
+          "request": "https://api.sammy.party/api/nodes/01M155RBHMBT9EMTMJT09MDYJ6/errors",
+          "messages": [
+            "ACP NewSession succeeded"
+          ]
+        }
+      ]
+    },
+    {
+      "search": "ACP Prompt started",
+      "count": 1,
+      "matched": [
+        {
+          "timestamp": "2026-08-28T21:55:39.679Z",
+          "level": "info",
+          "entrypoint": null,
+          "request": "https://api.sammy.party/api/nodes/01M155RBHMBT9EMTMJT09MDYJ6/errors",
+          "messages": [
+            "ACP Prompt started"
+          ]
+        }
+      ]
+    },
+    {
+      "search": "ACP Prompt completed",
+      "count": 1,
+      "matched": [
+        {
+          "timestamp": "2026-08-28T21:55:55.563Z",
+          "level": "info",
+          "entrypoint": null,
+          "request": "https://api.sammy.party/api/nodes/01M155RBHMBT9EMTMJT09MDYJ6/errors",
+          "messages": [
+            "ACP Prompt completed"
+          ]
+        }
+      ]
+    },
+    {
+      "search": "SessionHost stopped",
+      "count": 1,
+      "matched": [
+        {
+          "timestamp": "2026-08-28T21:57:19.238Z",
+          "level": "info",
+          "entrypoint": null,
+          "request": "https://api.sammy.party/api/nodes/01M155RBHMBT9EMTMJT09MDYJ6/errors",
+          "messages": [
+            "SessionHost stopped"
+          ]
+        }
+      ]
+    },
+    {
+      "search": "placement_resolver.capacity_pool_unavailable",
+      "count": 0,
+      "matched": []
+    }
+  ]
+}

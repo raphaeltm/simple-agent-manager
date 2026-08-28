@@ -1,0 +1,550 @@
+{
+  "checkedAt": "2026-08-28T21:46:52.922Z",
+  "screenshots": [
+    {
+      "file": "/workspaces/simple-agent-manager/.codex/tmp/pr1943-validation/project-infrastructure-desktop.png",
+      "label": "project-infrastructure-desktop",
+      "url": "https://app.sammy.party/projects/01KTKXZ4ZZAT6MJFXRW1ZTQ7RB/settings/infrastructure",
+      "hiddenPlaceholdersAbsent": true,
+      "hasHorizontalOverflow": false,
+      "overflowOffenders": [],
+      "hasEditOrReconcile": false,
+      "hasCandidateSurface": false,
+      "hasHetznerCandidates": false
+    },
+    {
+      "file": "/workspaces/simple-agent-manager/.codex/tmp/pr1943-validation/user-cloud-provider-desktop.png",
+      "label": "user-cloud-provider-desktop",
+      "url": "https://app.sammy.party/settings/cloud-provider",
+      "hiddenPlaceholdersAbsent": true,
+      "hasHorizontalOverflow": false,
+      "overflowOffenders": [],
+      "hasEditOrReconcile": false,
+      "hasCandidateSurface": false,
+      "hasHetznerCandidates": false
+    },
+    {
+      "file": "/workspaces/simple-agent-manager/.codex/tmp/pr1943-validation/admin-credentials-desktop.png",
+      "label": "admin-credentials-desktop",
+      "url": "https://app.sammy.party/admin/credentials",
+      "hiddenPlaceholdersAbsent": true,
+      "hasHorizontalOverflow": false,
+      "overflowOffenders": [
+        {
+          "tag": "A",
+          "text": "Analytics",
+          "left": 1280,
+          "right": 1368,
+          "width": 88,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        }
+      ],
+      "hasEditOrReconcile": false,
+      "hasCandidateSurface": false,
+      "hasHetznerCandidates": false
+    },
+    {
+      "file": "/workspaces/simple-agent-manager/.codex/tmp/pr1943-validation/project-infrastructure-mobile.png",
+      "label": "project-infrastructure-mobile",
+      "url": "https://app.sammy.party/projects/01KTKXZ4ZZAT6MJFXRW1ZTQ7RB/settings/infrastructure",
+      "hiddenPlaceholdersAbsent": true,
+      "hasHorizontalOverflow": false,
+      "overflowOffenders": [
+        {
+          "tag": "A",
+          "text": "General",
+          "left": -257,
+          "right": -175,
+          "width": 82,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Access",
+          "left": -175,
+          "right": -98,
+          "width": 77,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Connections",
+          "left": -98,
+          "right": 12,
+          "width": 110,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        }
+      ],
+      "hasEditOrReconcile": true,
+      "hasCandidateSurface": false,
+      "hasHetznerCandidates": true
+    },
+    {
+      "file": "/workspaces/simple-agent-manager/.codex/tmp/pr1943-validation/user-cloud-provider-mobile.png",
+      "label": "user-cloud-provider-mobile",
+      "url": "https://app.sammy.party/settings/cloud-provider",
+      "hiddenPlaceholdersAbsent": true,
+      "hasHorizontalOverflow": false,
+      "overflowOffenders": [
+        {
+          "tag": "DIV",
+          "text": "Cloud ProviderGitHubConnectionsAgentsMCP ServersAdvancedNotificationsUsageAPI To",
+          "left": 12,
+          "right": 380,
+          "width": 368,
+          "className": "relative overflow-hidden glass-chrome border-b "
+        },
+        {
+          "tag": "DIV",
+          "text": "Cloud ProviderGitHubConnectionsAgentsMCP ServersAdvancedNotificationsUsageAPI To",
+          "left": 13,
+          "right": 379,
+          "width": 366,
+          "className": "flex overflow-x-auto snap-x snap-mandatory"
+        },
+        {
+          "tag": "A",
+          "text": "Agents",
+          "left": 323,
+          "right": 399,
+          "width": 76,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "MCP Servers",
+          "left": 399,
+          "right": 514,
+          "width": 115,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Advanced",
+          "left": 514,
+          "right": 608,
+          "width": 94,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Notifications",
+          "left": 608,
+          "right": 716,
+          "width": 108,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Usage",
+          "left": 716,
+          "right": 789,
+          "width": 72,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "API Tokens",
+          "left": 789,
+          "right": 891,
+          "width": 103,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        }
+      ],
+      "hasEditOrReconcile": true,
+      "hasCandidateSurface": true,
+      "hasHetznerCandidates": true
+    },
+    {
+      "file": "/workspaces/simple-agent-manager/.codex/tmp/pr1943-validation/admin-credentials-mobile.png",
+      "label": "admin-credentials-mobile",
+      "url": "https://app.sammy.party/admin/credentials",
+      "hiddenPlaceholdersAbsent": true,
+      "hasHorizontalOverflow": false,
+      "overflowOffenders": [
+        {
+          "tag": "A",
+          "text": "Trials",
+          "left": 374,
+          "right": 440,
+          "width": 66,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Costs",
+          "left": 440,
+          "right": 508,
+          "width": 68,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Usage",
+          "left": 508,
+          "right": 580,
+          "width": 72,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Quotas",
+          "left": 580,
+          "right": 658,
+          "width": 77,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Errors",
+          "left": 658,
+          "right": 728,
+          "width": 70,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Diagnoses",
+          "left": 728,
+          "right": 826,
+          "width": 98,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Overview",
+          "left": 826,
+          "right": 916,
+          "width": 90,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        },
+        {
+          "tag": "A",
+          "text": "Logs",
+          "left": 916,
+          "right": 979,
+          "width": 62,
+          "className": "sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-none border-b-2 bg-transparent no-underline whitespac"
+        }
+      ],
+      "hasEditOrReconcile": true,
+      "hasCandidateSurface": true,
+      "hasHetznerCandidates": true
+    },
+    {
+      "file": "/workspaces/simple-agent-manager/.codex/tmp/pr1943-validation/user-cloud-provider-disabled-ash-hil-desktop.png",
+      "label": "user-cloud-provider-disabled-ash-hil-desktop",
+      "url": "https://app.sammy.party/settings/cloud-provider",
+      "hiddenPlaceholdersAbsent": true,
+      "hasHorizontalOverflow": false,
+      "overflowOffenders": [],
+      "hasEditOrReconcile": false,
+      "hasCandidateSurface": false,
+      "hasHetznerCandidates": false
+    },
+    {
+      "file": "/workspaces/simple-agent-manager/.codex/tmp/pr1943-validation/user-cloud-provider-restored-desktop.png",
+      "label": "user-cloud-provider-restored-desktop",
+      "url": "https://app.sammy.party/settings/cloud-provider",
+      "hiddenPlaceholdersAbsent": true,
+      "hasHorizontalOverflow": false,
+      "overflowOffenders": [],
+      "hasEditOrReconcile": false,
+      "hasCandidateSurface": false,
+      "hasHetznerCandidates": false
+    }
+  ],
+  "edit": {
+    "baselineApi": {
+      "effectiveScope": "user",
+      "effectivePoolId": "cap-pool-default:user:toWzGjNW3IyUkCVItRQv3qSn0wI8c22y",
+      "effectiveActiveCount": 15,
+      "defaults": [
+        {
+          "scope": "project",
+          "visibility": "hidden",
+          "poolId": null,
+          "activeCount": null,
+          "locations": [],
+          "disabledByLocation": {}
+        },
+        {
+          "scope": "user",
+          "visibility": "visible",
+          "poolId": "cap-pool-default:user:toWzGjNW3IyUkCVItRQv3qSn0wI8c22y",
+          "activeCount": 15,
+          "locations": [
+            "ash",
+            "fsn1",
+            "hel1",
+            "hil",
+            "nbg1"
+          ],
+          "disabledByLocation": {}
+        },
+        {
+          "scope": "installation",
+          "visibility": "hidden",
+          "poolId": null,
+          "activeCount": null,
+          "locations": [],
+          "disabledByLocation": {}
+        }
+      ]
+    },
+    "targetCandidates": [
+      {
+        "id": "cap-candidate-default:cap-pool-default:user:toWzGjNW3IyUkCVItRQv3qSn0wI8c22y:cap-source-default:user:01KWRXEJH4RXW2NC5T8WCCQFTV:hetzner:ash:small",
+        "location": "ash",
+        "size": "small",
+        "status": "active"
+      },
+      {
+        "id": "cap-candidate-default:cap-pool-default:user:toWzGjNW3IyUkCVItRQv3qSn0wI8c22y:cap-source-default:user:01KWRXEJH4RXW2NC5T8WCCQFTV:hetzner:ash:medium",
+        "location": "ash",
+        "size": "medium",
+        "status": "active"
+      },
+      {
+        "id": "cap-candidate-default:cap-pool-default:user:toWzGjNW3IyUkCVItRQv3qSn0wI8c22y:cap-source-default:user:01KWRXEJH4RXW2NC5T8WCCQFTV:hetzner:ash:large",
+        "location": "ash",
+        "size": "large",
+        "status": "active"
+      },
+      {
+        "id": "cap-candidate-default:cap-pool-default:user:toWzGjNW3IyUkCVItRQv3qSn0wI8c22y:cap-source-default:user:01KWRXEJH4RXW2NC5T8WCCQFTV:hetzner:hil:small",
+        "location": "hil",
+        "size": "small",
+        "status": "active"
+      },
+      {
+        "id": "cap-candidate-default:cap-pool-default:user:toWzGjNW3IyUkCVItRQv3qSn0wI8c22y:cap-source-default:user:01KWRXEJH4RXW2NC5T8WCCQFTV:hetzner:hil:medium",
+        "location": "hil",
+        "size": "medium",
+        "status": "active"
+      },
+      {
+        "id": "cap-candidate-default:cap-pool-default:user:toWzGjNW3IyUkCVItRQv3qSn0wI8c22y:cap-source-default:user:01KWRXEJH4RXW2NC5T8WCCQFTV:hetzner:hil:large",
+        "location": "hil",
+        "size": "large",
+        "status": "active"
+      }
+    ],
+    "baselineD1": {
+      "name": "baseline_ash_hil_user",
+      "success": true,
+      "rows": [
+        {
+          "location": "ash",
+          "machine_size": "large",
+          "status": "active",
+          "count": 1
+        },
+        {
+          "location": "ash",
+          "machine_size": "medium",
+          "status": "active",
+          "count": 1
+        },
+        {
+          "location": "ash",
+          "machine_size": "small",
+          "status": "active",
+          "count": 1
+        },
+        {
+          "location": "hil",
+          "machine_size": "large",
+          "status": "active",
+          "count": 1
+        },
+        {
+          "location": "hil",
+          "machine_size": "medium",
+          "status": "active",
+          "count": 1
+        },
+        {
+          "location": "hil",
+          "machine_size": "small",
+          "status": "active",
+          "count": 1
+        }
+      ],
+      "errors": []
+    },
+    "disabledApi": {
+      "effectiveScope": "user",
+      "effectivePoolId": "cap-pool-default:user:toWzGjNW3IyUkCVItRQv3qSn0wI8c22y",
+      "effectiveActiveCount": 9,
+      "defaults": [
+        {
+          "scope": "project",
+          "visibility": "hidden",
+          "poolId": null,
+          "activeCount": null,
+          "locations": [],
+          "disabledByLocation": {}
+        },
+        {
+          "scope": "user",
+          "visibility": "visible",
+          "poolId": "cap-pool-default:user:toWzGjNW3IyUkCVItRQv3qSn0wI8c22y",
+          "activeCount": 9,
+          "locations": [
+            "fsn1",
+            "hel1",
+            "nbg1"
+          ],
+          "disabledByLocation": {
+            "ash": 3,
+            "hil": 3
+          }
+        },
+        {
+          "scope": "installation",
+          "visibility": "hidden",
+          "poolId": null,
+          "activeCount": null,
+          "locations": [],
+          "disabledByLocation": {}
+        }
+      ]
+    },
+    "disabledD1": {
+      "name": "disabled_ash_hil_user",
+      "success": true,
+      "rows": [
+        {
+          "location": "ash",
+          "machine_size": "large",
+          "status": "disabled",
+          "count": 1
+        },
+        {
+          "location": "ash",
+          "machine_size": "medium",
+          "status": "disabled",
+          "count": 1
+        },
+        {
+          "location": "ash",
+          "machine_size": "small",
+          "status": "disabled",
+          "count": 1
+        },
+        {
+          "location": "hil",
+          "machine_size": "large",
+          "status": "disabled",
+          "count": 1
+        },
+        {
+          "location": "hil",
+          "machine_size": "medium",
+          "status": "disabled",
+          "count": 1
+        },
+        {
+          "location": "hil",
+          "machine_size": "small",
+          "status": "disabled",
+          "count": 1
+        }
+      ],
+      "errors": []
+    },
+    "restoredApi": {
+      "effectiveScope": "user",
+      "effectivePoolId": "cap-pool-default:user:toWzGjNW3IyUkCVItRQv3qSn0wI8c22y",
+      "effectiveActiveCount": 15,
+      "defaults": [
+        {
+          "scope": "project",
+          "visibility": "hidden",
+          "poolId": null,
+          "activeCount": null,
+          "locations": [],
+          "disabledByLocation": {}
+        },
+        {
+          "scope": "user",
+          "visibility": "visible",
+          "poolId": "cap-pool-default:user:toWzGjNW3IyUkCVItRQv3qSn0wI8c22y",
+          "activeCount": 15,
+          "locations": [
+            "ash",
+            "fsn1",
+            "hel1",
+            "hil",
+            "nbg1"
+          ],
+          "disabledByLocation": {}
+        },
+        {
+          "scope": "installation",
+          "visibility": "hidden",
+          "poolId": null,
+          "activeCount": null,
+          "locations": [],
+          "disabledByLocation": {}
+        }
+      ]
+    },
+    "restoredD1": {
+      "name": "restored_ash_hil_user",
+      "success": true,
+      "rows": [
+        {
+          "location": "ash",
+          "machine_size": "large",
+          "status": "active",
+          "count": 1
+        },
+        {
+          "location": "ash",
+          "machine_size": "medium",
+          "status": "active",
+          "count": 1
+        },
+        {
+          "location": "ash",
+          "machine_size": "small",
+          "status": "active",
+          "count": 1
+        },
+        {
+          "location": "hil",
+          "machine_size": "large",
+          "status": "active",
+          "count": 1
+        },
+        {
+          "location": "hil",
+          "machine_size": "medium",
+          "status": "active",
+          "count": 1
+        },
+        {
+          "location": "hil",
+          "machine_size": "small",
+          "status": "active",
+          "count": 1
+        }
+      ],
+      "errors": []
+    },
+    "restoreUsed": "ui"
+  },
+  "consoleErrors": [],
+  "failedRequests": [
+    {
+      "url": "https://api.sammy.party/api/t",
+      "failure": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://api.sammy.party/api/t",
+      "failure": "net::ERR_ABORTED"
+    }
+  ]
+}
