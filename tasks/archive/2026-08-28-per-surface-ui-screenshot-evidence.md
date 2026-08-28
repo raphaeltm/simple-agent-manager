@@ -43,40 +43,52 @@
 
 ## Implementation Checklist
 
-- [ ] PR template: replace the flat 5-line `UI Screenshot Evidence` block with a clear
+- [x] PR template: replace the flat 5-line `UI Screenshot Evidence` block with a clear
       directive to enumerate every changed surface and a repeated per-surface block
       containing desktop evidence, mobile evidence, mock/stress data, and screenshot
       quality review (accepting image links or `#issuecomment-...`).
-- [ ] Checker: parse `UI Screenshot Evidence` into per-surface blocks via
+- [x] Checker: parse `UI Screenshot Evidence` into per-surface blocks via
       `#### Surface: <name>` headings; for each surface require desktop evidence link AND
       mobile evidence link; require mock/stress data and QC attestation per surface;
       reject section with zero enumerated surfaces (kills global-only evidence).
-- [ ] Checker: keep prior behaviors — Playwright mention, section required when `ui-change`
+- [x] Checker: keep prior behaviors — Playwright mention, section required when `ui-change`
       checked, non-UI PRs untouched.
-- [ ] Rule 17: update "Preflight Enforcement" + "PR Evidence Gate" to document the
+- [x] Rule 17: update "Preflight Enforcement" + "PR Evidence Gate" to document the
       per-surface contract.
-- [ ] Tests: rewrite existing pass tests to per-surface format (multi-surface case with
+- [x] Tests: rewrite existing pass tests to per-surface format (multi-surface case with
       image links and `#issuecomment-...`); add failing tests for (a) one surface missing
-      mobile/desktop, (b) global-only evidence that does not enumerate surfaces.
-- [ ] Keep `.tmp/` test scratch convention unchanged.
-- [ ] Run `pnpm quality:scripts:test scripts/quality/check-preflight-evidence.test.ts`.
-- [ ] Run relevant typecheck/lint for scripts/quality files.
+      mobile/desktop, (b) global-only evidence that does not enumerate surfaces; add a
+      non-UI preservation test.
+- [x] Keep `.tmp/` test scratch convention unchanged.
+- [x] Run `pnpm quality:scripts:test scripts/quality/check-preflight-evidence.test.ts`.
+- [x] Run relevant typecheck/lint for scripts/quality files.
 
 ## Acceptance Criteria
 
 - A ui-change PR whose `UI Screenshot Evidence` enumerates surfaces and gives each surface
-  desktop + mobile evidence (image link or `#issuecomment-...`) PASSES.
+  desktop + mobile evidence (image link or `#issuecomment-...`) PASSES. ✅
 - A ui-change PR with one surface missing mobile or desktop evidence FAILS with a message
-  naming the surface.
-- A ui-change PR with only global desktop/mobile lines (`libell Desktop screenshots:`/
-  `Mobile screenshots:` once for all surfaces, no surface enumeration) FAILS.
-- A non-UI PR (ui-change unchecked) is unaffected.
-- `.tmp/` convention intact; no staging; no merge.
+  naming the surface. ✅
+- A ui-change PR with only global desktop/mobile lines (`Desktop screenshots:`/
+  `Mobile screenshots:` once for all surfaces, no surface enumeration) FAILS. ✅
+- A non-UI PR (ui-change unchecked) is unaffected. ✅
+- `.tmp/` convention intact; no staging; no merge. ✅ (no staging run, no merge performed)
 
 ## Validation Log
 
-- `pnpm quality:scripts:test scripts/quality/check-preflight-evidence.test.ts` — baseline 3 pass.
-- (filled in during implementation)
+- `pnpm quality:scripts:test scripts/quality/check-preflight-evidence.test.ts` — 6/6 pass
+  (baseline was 3/3 before the change; new tests are discriminating: the missing-mobile and
+  global-only cases pass under the OLD checker logic and fail under the new one).
+- `pnpm quality:scripts:test` (full scripts quality suite) — 40 files / 538 tests pass.
+- `pnpm exec tsc --noEmit` on both changed script files — clean.
+- `pnpm exec oxlint` on changed script files — clean (removed pre-existing unused `tmpdir` import).
+- `pnpm format:check` — pass.
+- `pnpm quality:type-boundaries` — 0 blocking.
+- `pnpm lint:oxlint` — advisory-only diagnostics, none in changed files.
+- `waitForTimeout(600)`: NOT touched. This patch changes no Playwright audit code; the shared
+  settle helper (`apps/web/tests/playwright/audit-helpers.ts`) and ~60 call sites are outside
+  the narrow checker/template/rule scope, and swapping the shared fixed wait could destabilize
+  the whole visual-audit suite. Reported explicitly to the coordinator.
 
 ## Pull Request
 
