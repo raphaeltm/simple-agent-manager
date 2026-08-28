@@ -106,33 +106,34 @@ export function runProjectEventRetention(
   const batchLimit = Math.min(requestedLimit, limits.retentionBatchRows);
   const cutoff = now - limits.retentionDays * MILLISECONDS_PER_DAY;
   const expiredSubscriptions = expireDueSubscriptions(sql, projectId, now, batchLimit);
-  const deletedAttempts = deleteOldRows(
+  const deletedAttempts = deleteOldRows({
     sql,
-    'project_event_delivery_attempts',
+    table: 'project_event_delivery_attempts',
     projectId,
-    'created_at',
+    timestampColumn: 'created_at',
     cutoff,
-    batchLimit,
-    "AND state IN ('recorded_not_injected', 'accepted', 'failed', 'ambiguous')"
-  );
-  const deletedBatches = deleteOldRows(
+    limit: batchLimit,
+    extraWhere: "AND state IN ('recorded_not_injected', 'accepted', 'failed', 'ambiguous')",
+  });
+  const deletedBatches = deleteOldRows({
     sql,
-    'project_event_delivery_batches',
+    table: 'project_event_delivery_batches',
     projectId,
-    'updated_at',
+    timestampColumn: 'updated_at',
     cutoff,
-    batchLimit,
-    "AND state IN ('recorded_not_injected', 'acked', 'failed', 'ambiguous', 'expired', 'cancelled')"
-  );
-  const deletedMatches = deleteOldRows(
+    limit: batchLimit,
+    extraWhere:
+      "AND state IN ('recorded_not_injected', 'acked', 'failed', 'ambiguous', 'expired', 'cancelled')",
+  });
+  const deletedMatches = deleteOldRows({
     sql,
-    'project_event_matches',
+    table: 'project_event_matches',
     projectId,
-    'matched_at',
+    timestampColumn: 'matched_at',
     cutoff,
-    batchLimit,
-    "AND state IN ('recorded_not_injected', 'expired', 'cancelled')"
-  );
+    limit: batchLimit,
+    extraWhere: "AND state IN ('recorded_not_injected', 'expired', 'cancelled')",
+  });
   const deletedEvents = deleteOldEventsWithoutMatches(sql, projectId, cutoff, batchLimit);
   const accounting = refreshProjectEventStorageAccounting(sql, projectId, now);
   return {

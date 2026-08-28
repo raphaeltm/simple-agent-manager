@@ -14,15 +14,12 @@ import {
   type CreateProjectEventSubscriptionInput,
   type ExpireProjectEventSubscriptionsInput,
   ProjectEventIdempotencyConflictError,
-  ProjectEventLimitExceededError,
-  ProjectEventNotFoundError,
   ProjectEventValidationError,
 } from './project-events-contracts';
 import { resolveProjectEventLimits } from './project-events-limits';
 import { mapProjectEventSubscription } from './project-events-mappers';
 import {
   assertProjectBinding,
-  compileProjectEventFilter,
   normalizeListLimit,
   normalizeProjectEventInput,
   normalizeProjectId,
@@ -51,14 +48,6 @@ import {
 import type { Env } from './types';
 import { generateId } from './types';
 
-export {
-  compileProjectEventFilter,
-  ProjectEventIdempotencyConflictError,
-  ProjectEventLimitExceededError,
-  ProjectEventNotFoundError,
-  ProjectEventValidationError,
-  resolveProjectEventLimits,
-};
 export type {
   AdmitProjectEventInput,
   CancelProjectEventSubscriptionInput,
@@ -84,11 +73,19 @@ export type {
   RunProjectEventRetentionInput,
 } from './project-events-contracts';
 export {
+  ProjectEventIdempotencyConflictError,
+  ProjectEventLimitExceededError,
+  ProjectEventNotFoundError,
+  ProjectEventValidationError,
+} from './project-events-contracts';
+export {
   createProjectEventDeliveryBatch,
   listProjectEventDeliveryAttempts,
   listProjectEventDeliveryBatches,
   recordProjectEventDeliveryAttempt,
 } from './project-events-delivery';
+export { resolveProjectEventLimits } from './project-events-limits';
+export { compileProjectEventFilter } from './project-events-normalization';
 export {
   getProjectEventRecentStatus,
   refreshProjectEventStorageAccounting,

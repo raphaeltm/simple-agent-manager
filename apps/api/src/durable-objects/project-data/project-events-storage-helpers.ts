@@ -5,6 +5,7 @@ import {
   type ProjectEventDeliveryAttemptRecord,
   type ProjectEventDeliveryAttemptState,
   type ProjectEventDeliveryBatchRecord,
+  type ProjectEventDeliveryBatchState,
   type ProjectEventLimits,
   type ProjectEventMatchRecord,
   type ProjectEventRecord,
@@ -51,6 +52,16 @@ type AccountingAggregateRow = {
   estimated_bytes: number;
   oldest_created_at: number | null;
   newest_created_at: number | null;
+};
+type DeleteOldRowsInput = {
+  sql: SqlStorage;
+  table: ProjectEventTable;
+  projectId: string;
+  timestampColumn: string;
+  cutoff: number;
+  limit: number;
+  extraWhere?: string;
+  extraParams?: unknown[];
 };
 
 function isFingerprintRow(input: unknown): input is FingerprintRow {
@@ -476,8 +487,7 @@ export function updateBatchForAttempt(
   now: number,
   reason: string | null
 ): void {
-  const batchState =
-    attemptState === 'accepted' ? 'delivered' : attemptState === 'retry' ? 'pending' : attemptState;
+  const batchState = batchStateForAttempt(attemptState);
   const terminalAt = attemptState === 'retry' ? null : now;
   sql.exec(
     `UPDATE project_event_delivery_batches
@@ -490,6 +500,21 @@ export function updateBatchForAttempt(
     projectId,
     batchId
   );
+}
+
+export function batchStateForAttempt(
+  attemptState: ProjectEventDeliveryAttemptState
+): ProjectEventDeliveryBatchState {
+  switch (attemptState) {
+    case 'accepted':
+      return 'delivered';
+    case 'retry':
+      return 'pending';
+    case 'recorded_not_injected':
+    case 'failed':
+    case 'ambiguous':
+      return attemptState;
+  }
 }
 
 export function mapRows<T>(
@@ -545,16 +570,17 @@ export function readAccounting(
   return mapRows(rows, mapProjectEventStorageAccounting, rows.length, 'storage_accounting');
 }
 
-export function deleteOldRows(
-  sql: SqlStorage,
-  table: ProjectEventTable,
-  projectId: string,
-  timestampColumn: string,
-  cutoff: number,
-  limit: number,
-  extraWhere = '',
-  extraParams: unknown[] = []
-): number {
+export function deleteOldRows(input: DeleteOldRowsInput): number {
+  const {
+    sql,
+    table,
+    projectId,
+    timestampColumn,
+    cutoff,
+    limit,
+    extraWhere = '',
+    extraParams = [],
+  } = input;
   const rows = sql
     .exec(
       `SELECT id FROM ${table}
@@ -568,14 +594,7 @@ export function deleteOldRows(
     )
     .toArray();
   const ids = rows.filter(isIdRow).map((row) => row.id);
-  if (ids.length === 0) return 0;
-  sql.exec(
-    `DELETE FROM ${table}
-     WHERE project_id = ? AND id IN (${ids.map(() => '?').join(', ')})`,
-    projectId,
-    ...ids
-  );
-  return ids.length;
+  return deleteRowsByIds(sql, table, projectId, ids);
 }
 
 export function deleteOldEventsWithoutMatches(
@@ -602,9 +621,18 @@ export function deleteOldEventsWithoutMatches(
     )
     .toArray();
   const ids = rows.filter(isIdRow).map((row) => row.id);
+  return deleteRowsByIds(sql, 'project_events', projectId, ids);
+}
+
+function deleteRowsByIds(
+  sql: SqlStorage,
+  table: ProjectEventTable,
+  projectId: string,
+  ids: string[]
+): number {
   if (ids.length === 0) return 0;
   sql.exec(
-    `DELETE FROM project_events
+    `DELETE FROM ${table}
      WHERE project_id = ? AND id IN (${ids.map(() => '?').join(', ')})`,
     projectId,
     ...ids

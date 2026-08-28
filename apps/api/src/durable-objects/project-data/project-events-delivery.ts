@@ -5,6 +5,8 @@ import type {
   ProjectEventDeliveryAttemptMutationResult,
   ProjectEventDeliveryBatchListResult,
   ProjectEventDeliveryBatchMutationResult,
+  ProjectEventDeliveryBatchState,
+  ProjectEventSubscriptionState,
 } from '@simple-agent-manager/shared';
 
 import {
@@ -61,6 +63,28 @@ const TERMINAL_BATCH_STATES = new Set([
   'cancelled',
 ]);
 
+function initialDeliveryBatchStateFor(
+  subscriptionState: ProjectEventSubscriptionState
+): ProjectEventDeliveryBatchState {
+  switch (subscriptionState) {
+    case 'cancelled':
+      return 'cancelled';
+    case 'expired':
+      return 'expired';
+    case 'active':
+      return 'recorded_not_injected';
+  }
+}
+
+function terminalReasonForSubscriptionState(
+  subscriptionState: ProjectEventSubscriptionState,
+  fallback: string | null
+): string | null {
+  return subscriptionState === 'active'
+    ? fallback
+    : `subscription ${subscriptionState} before delivery`;
+}
+
 export function createProjectEventDeliveryBatch(
   sql: SqlStorage,
   env: Env,
@@ -102,16 +126,11 @@ export function createProjectEventDeliveryBatch(
     throw new ProjectEventNotFoundError('Event match');
   }
 
-  const terminalState =
-    subscription.state === 'cancelled'
-      ? 'cancelled'
-      : subscription.state === 'expired'
-        ? 'expired'
-        : 'recorded_not_injected';
-  const terminalReason =
-    subscription.state === 'active'
-      ? normalized.terminalReason
-      : `subscription ${subscription.state} before delivery`;
+  const terminalState = initialDeliveryBatchStateFor(subscription.state);
+  const terminalReason = terminalReasonForSubscriptionState(
+    subscription.state,
+    normalized.terminalReason
+  );
   const eventCount = new Set(matchRows.map((match) => match.eventId)).size;
   const batchId = generateId();
   sql.exec(

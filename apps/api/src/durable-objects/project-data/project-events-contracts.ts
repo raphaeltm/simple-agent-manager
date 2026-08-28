@@ -1,29 +1,3 @@
-import type {
-  AdmitProjectEventInput,
-  CancelProjectEventSubscriptionInput,
-  CreateProjectEventDeliveryBatchInput,
-  CreateProjectEventSubscriptionInput,
-  ExpireProjectEventSubscriptionsInput,
-  GetProjectEventRecentStatusInput,
-  GetProjectEventSubscriptionInput,
-  ListProjectEventDeliveryAttemptsInput,
-  ListProjectEventDeliveryBatchesInput,
-  ListProjectEventSubscriptionsInput,
-  ProjectEventAdmissionResult,
-  ProjectEventDeliveryAttemptListResult,
-  ProjectEventDeliveryAttemptMutationResult,
-  ProjectEventDeliveryBatchListResult,
-  ProjectEventDeliveryBatchMutationResult,
-  ProjectEventExpireSubscriptionsResult,
-  ProjectEventLimits,
-  ProjectEventRecentStatus,
-  ProjectEventRetentionResult,
-  ProjectEventSubscriptionListResult,
-  ProjectEventSubscriptionMutationResult,
-  RecordProjectEventDeliveryAttemptInput,
-  RunProjectEventRetentionInput,
-} from '@simple-agent-manager/shared';
-
 export type {
   AdmitProjectEventInput,
   CancelProjectEventSubscriptionInput,
@@ -48,7 +22,7 @@ export type {
   ProjectEventSubscriptionMutationResult,
   RecordProjectEventDeliveryAttemptInput,
   RunProjectEventRetentionInput,
-};
+} from '@simple-agent-manager/shared';
 
 export const PROJECT_EVENT_NOT_FOUND = 'PROJECT_EVENT_NOT_FOUND';
 export const PROJECT_EVENT_VALIDATION = 'PROJECT_EVENT_VALIDATION';

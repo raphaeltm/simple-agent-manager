@@ -311,10 +311,11 @@ export function compileProjectEventFilter(
     );
   }
 
+  matchKeys.sort((a, b) => a.matchKey.localeCompare(b.matchKey));
   return {
     filter: normalized,
     fingerprint: stableStringify(normalized),
-    matchKeys: matchKeys.sort((a, b) => a.matchKey.localeCompare(b.matchKey)),
+    matchKeys,
   };
 }
 

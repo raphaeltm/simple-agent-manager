@@ -146,7 +146,7 @@ function normalizeProjectDataRpcError(projectId: string, operation: string, err:
   return err;
 }
 
-function normalizeProjectDataCommentRpcError(err: unknown): unknown | null {
+function normalizeProjectDataCommentRpcError(err: unknown): Error | null {
   if (!(err instanceof Error)) return null;
 
   // Cloudflare DO RPC serializes custom Error subclasses across isolates as a
@@ -164,7 +164,7 @@ function normalizeProjectDataCommentRpcError(err: unknown): unknown | null {
   }
 }
 
-function normalizeProjectDataEventRpcError(err: unknown): unknown | null {
+function normalizeProjectDataEventRpcError(err: unknown): Error | null {
   if (!(err instanceof Error)) return null;
 
   const validationPrefix = 'ProjectEventValidationError: ';
@@ -269,8 +269,11 @@ function sleep(ms: number): Promise<void> {
 
 type ProjectDataEventInput<T extends { projectId: string }> = Omit<T, 'projectId'>;
 
-function withProjectId(projectId: string, input: object): { projectId: string } {
-  return { ...input, projectId };
+function withProjectId<T extends { projectId: string }>(
+  projectId: string,
+  input: ProjectDataEventInput<T>
+): T {
+  return { ...input, projectId } as T;
 }
 
 type ProjectDataEventRpc = {
@@ -312,6 +315,28 @@ type ProjectDataEventRpc = {
 
 function projectEventRpc(stub: DurableObjectStub<ProjectData>): ProjectDataEventRpc {
   return stub as unknown as ProjectDataEventRpc;
+}
+
+type ProjectDataEventOperation = keyof ProjectDataEventRpc;
+type ProjectDataEventOperationInput<T extends ProjectDataEventOperation> = Parameters<
+  ProjectDataEventRpc[T]
+>[0];
+type ProjectDataEventOperationResult<T extends ProjectDataEventOperation> = Awaited<
+  ReturnType<ProjectDataEventRpc[T]>
+>;
+
+function callProjectDataEvent<T extends ProjectDataEventOperation>(
+  env: Env,
+  projectId: string,
+  operation: T,
+  input: ProjectDataEventInput<ProjectDataEventOperationInput<T>>
+): Promise<ProjectDataEventOperationResult<T>> {
+  return callProjectDataNoRetry(env, projectId, operation, (stub) => {
+    const method = projectEventRpc(stub)[operation] as (
+      input: ProjectDataEventOperationInput<T>
+    ) => Promise<ProjectDataEventOperationResult<T>>;
+    return method(withProjectId(projectId, input));
+  });
 }
 
 // =========================================================================
@@ -673,11 +698,7 @@ export async function admitProjectEvent(
   projectId: string,
   input: ProjectDataEventInput<AdmitProjectEventInput>
 ): Promise<ProjectEventAdmissionResult> {
-  return callProjectDataNoRetry(env, projectId, 'admitProjectEvent', (stub) =>
-    projectEventRpc(stub).admitProjectEvent(
-      withProjectId(projectId, input) as AdmitProjectEventInput
-    )
-  );
+  return callProjectDataEvent(env, projectId, 'admitProjectEvent', input);
 }
 
 export async function createProjectEventSubscription(
@@ -685,11 +706,7 @@ export async function createProjectEventSubscription(
   projectId: string,
   input: ProjectDataEventInput<CreateProjectEventSubscriptionInput>
 ): Promise<ProjectEventSubscriptionMutationResult> {
-  return callProjectDataNoRetry(env, projectId, 'createProjectEventSubscription', (stub) =>
-    projectEventRpc(stub).createProjectEventSubscription(
-      withProjectId(projectId, input) as CreateProjectEventSubscriptionInput
-    )
-  );
+  return callProjectDataEvent(env, projectId, 'createProjectEventSubscription', input);
 }
 
 export async function listProjectEventSubscriptions(
@@ -697,11 +714,7 @@ export async function listProjectEventSubscriptions(
   projectId: string,
   input: ProjectDataEventInput<ListProjectEventSubscriptionsInput> = {}
 ): Promise<ProjectEventSubscriptionListResult> {
-  return callProjectDataNoRetry(env, projectId, 'listProjectEventSubscriptions', (stub) =>
-    projectEventRpc(stub).listProjectEventSubscriptions(
-      withProjectId(projectId, input) as ListProjectEventSubscriptionsInput
-    )
-  );
+  return callProjectDataEvent(env, projectId, 'listProjectEventSubscriptions', input);
 }
 
 export async function getProjectEventSubscription(
@@ -709,11 +722,7 @@ export async function getProjectEventSubscription(
   projectId: string,
   input: ProjectDataEventInput<GetProjectEventSubscriptionInput>
 ): Promise<ProjectEventSubscriptionMutationResult['subscription'] | null> {
-  return callProjectDataNoRetry(env, projectId, 'getProjectEventSubscription', (stub) =>
-    projectEventRpc(stub).getProjectEventSubscription(
-      withProjectId(projectId, input) as GetProjectEventSubscriptionInput
-    )
-  );
+  return callProjectDataEvent(env, projectId, 'getProjectEventSubscription', input);
 }
 
 export async function cancelProjectEventSubscription(
@@ -721,11 +730,7 @@ export async function cancelProjectEventSubscription(
   projectId: string,
   input: ProjectDataEventInput<CancelProjectEventSubscriptionInput>
 ): Promise<ProjectEventSubscriptionMutationResult> {
-  return callProjectDataNoRetry(env, projectId, 'cancelProjectEventSubscription', (stub) =>
-    projectEventRpc(stub).cancelProjectEventSubscription(
-      withProjectId(projectId, input) as CancelProjectEventSubscriptionInput
-    )
-  );
+  return callProjectDataEvent(env, projectId, 'cancelProjectEventSubscription', input);
 }
 
 export async function expireProjectEventSubscriptions(
@@ -733,11 +738,7 @@ export async function expireProjectEventSubscriptions(
   projectId: string,
   input: ProjectDataEventInput<ExpireProjectEventSubscriptionsInput> = {}
 ): Promise<ProjectEventExpireSubscriptionsResult> {
-  return callProjectDataNoRetry(env, projectId, 'expireProjectEventSubscriptions', (stub) =>
-    projectEventRpc(stub).expireProjectEventSubscriptions(
-      withProjectId(projectId, input) as ExpireProjectEventSubscriptionsInput
-    )
-  );
+  return callProjectDataEvent(env, projectId, 'expireProjectEventSubscriptions', input);
 }
 
 export async function createProjectEventDeliveryBatch(
@@ -745,11 +746,7 @@ export async function createProjectEventDeliveryBatch(
   projectId: string,
   input: ProjectDataEventInput<CreateProjectEventDeliveryBatchInput>
 ): Promise<ProjectEventDeliveryBatchMutationResult> {
-  return callProjectDataNoRetry(env, projectId, 'createProjectEventDeliveryBatch', (stub) =>
-    projectEventRpc(stub).createProjectEventDeliveryBatch(
-      withProjectId(projectId, input) as CreateProjectEventDeliveryBatchInput
-    )
-  );
+  return callProjectDataEvent(env, projectId, 'createProjectEventDeliveryBatch', input);
 }
 
 export async function listProjectEventDeliveryBatches(
@@ -757,11 +754,7 @@ export async function listProjectEventDeliveryBatches(
   projectId: string,
   input: ProjectDataEventInput<ListProjectEventDeliveryBatchesInput> = {}
 ): Promise<ProjectEventDeliveryBatchListResult> {
-  return callProjectDataNoRetry(env, projectId, 'listProjectEventDeliveryBatches', (stub) =>
-    projectEventRpc(stub).listProjectEventDeliveryBatches(
-      withProjectId(projectId, input) as ListProjectEventDeliveryBatchesInput
-    )
-  );
+  return callProjectDataEvent(env, projectId, 'listProjectEventDeliveryBatches', input);
 }
 
 export async function recordProjectEventDeliveryAttempt(
@@ -769,11 +762,7 @@ export async function recordProjectEventDeliveryAttempt(
   projectId: string,
   input: ProjectDataEventInput<RecordProjectEventDeliveryAttemptInput>
 ): Promise<ProjectEventDeliveryAttemptMutationResult> {
-  return callProjectDataNoRetry(env, projectId, 'recordProjectEventDeliveryAttempt', (stub) =>
-    projectEventRpc(stub).recordProjectEventDeliveryAttempt(
-      withProjectId(projectId, input) as RecordProjectEventDeliveryAttemptInput
-    )
-  );
+  return callProjectDataEvent(env, projectId, 'recordProjectEventDeliveryAttempt', input);
 }
 
 export async function listProjectEventDeliveryAttempts(
@@ -781,11 +770,7 @@ export async function listProjectEventDeliveryAttempts(
   projectId: string,
   input: ProjectDataEventInput<ListProjectEventDeliveryAttemptsInput> = {}
 ): Promise<ProjectEventDeliveryAttemptListResult> {
-  return callProjectDataNoRetry(env, projectId, 'listProjectEventDeliveryAttempts', (stub) =>
-    projectEventRpc(stub).listProjectEventDeliveryAttempts(
-      withProjectId(projectId, input) as ListProjectEventDeliveryAttemptsInput
-    )
-  );
+  return callProjectDataEvent(env, projectId, 'listProjectEventDeliveryAttempts', input);
 }
 
 export async function getProjectEventRecentStatus(
@@ -793,11 +778,7 @@ export async function getProjectEventRecentStatus(
   projectId: string,
   input: ProjectDataEventInput<GetProjectEventRecentStatusInput> = {}
 ): Promise<ProjectEventRecentStatus> {
-  return callProjectDataNoRetry(env, projectId, 'getProjectEventRecentStatus', (stub) =>
-    projectEventRpc(stub).getProjectEventRecentStatus(
-      withProjectId(projectId, input) as GetProjectEventRecentStatusInput
-    )
-  );
+  return callProjectDataEvent(env, projectId, 'getProjectEventRecentStatus', input);
 }
 
 export async function runProjectEventRetention(
@@ -805,11 +786,7 @@ export async function runProjectEventRetention(
   projectId: string,
   input: ProjectDataEventInput<RunProjectEventRetentionInput> = {}
 ): Promise<ProjectEventRetentionResult> {
-  return callProjectDataNoRetry(env, projectId, 'runProjectEventRetention', (stub) =>
-    projectEventRpc(stub).runProjectEventRetention(
-      withProjectId(projectId, input) as RunProjectEventRetentionInput
-    )
-  );
+  return callProjectDataEvent(env, projectId, 'runProjectEventRetention', input);
 }
 
 // --- Library file comments ---------------------------------------------------

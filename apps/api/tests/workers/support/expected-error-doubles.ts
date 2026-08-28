@@ -22,6 +22,40 @@ function capture(error: unknown): CapturedExpectedError {
   };
 }
 
+type ProjectDataExpectedErrorOperation =
+  | {
+      operation: 'persistMessageBatch';
+      args: Parameters<ProjectData['persistMessageBatch']>;
+    }
+  | {
+      operation: 'persistMessage';
+      args: Parameters<ProjectData['persistMessage']>;
+    }
+  | {
+      operation: 'enqueueMailboxMessage';
+      args: Parameters<ProjectData['enqueueMailboxMessage']>;
+    }
+  | {
+      operation: 'admitProjectEvent';
+      args: Parameters<ProjectData['admitProjectEvent']>;
+    }
+  | {
+      operation: 'createProjectEventSubscription';
+      args: Parameters<ProjectData['createProjectEventSubscription']>;
+    }
+  | {
+      operation: 'createProjectEventDeliveryBatch';
+      args: Parameters<ProjectData['createProjectEventDeliveryBatch']>;
+    }
+  | {
+      operation: 'recordProjectEventDeliveryAttempt';
+      args: Parameters<ProjectData['recordProjectEventDeliveryAttempt']>;
+    }
+  | {
+      operation: 'runProjectEventRetention';
+      args: Parameters<ProjectData['runProjectEventRetention']>;
+    };
+
 /**
  * The workers pool reports expected exceptions escaping a DO method as
  * unhandled errors, even when the caller catches the rejected RPC. Catching
@@ -89,39 +123,7 @@ export class ProjectDataTestDouble extends ProjectData {
       return super.fetch(request);
     }
 
-    const input = (await request.json()) as
-      | {
-          operation: 'persistMessageBatch';
-          args: Parameters<ProjectData['persistMessageBatch']>;
-        }
-      | {
-          operation: 'persistMessage';
-          args: Parameters<ProjectData['persistMessage']>;
-        }
-      | {
-          operation: 'enqueueMailboxMessage';
-          args: Parameters<ProjectData['enqueueMailboxMessage']>;
-        }
-      | {
-          operation: 'admitProjectEvent';
-          args: Parameters<ProjectData['admitProjectEvent']>;
-        }
-      | {
-          operation: 'createProjectEventSubscription';
-          args: Parameters<ProjectData['createProjectEventSubscription']>;
-        }
-      | {
-          operation: 'createProjectEventDeliveryBatch';
-          args: Parameters<ProjectData['createProjectEventDeliveryBatch']>;
-        }
-      | {
-          operation: 'recordProjectEventDeliveryAttempt';
-          args: Parameters<ProjectData['recordProjectEventDeliveryAttempt']>;
-        }
-      | {
-          operation: 'runProjectEventRetention';
-          args: Parameters<ProjectData['runProjectEventRetention']>;
-        };
+    const input = (await request.json()) as ProjectDataExpectedErrorOperation;
 
     try {
       if (input.operation === 'persistMessageBatch') {
@@ -169,39 +171,7 @@ export class NodeLifecycleTestDouble extends NodeLifecycle {
 
 export async function captureProjectDataExpectedError(
   stub: DurableObjectStub<ProjectDataTestDouble>,
-  input:
-    | {
-        operation: 'persistMessageBatch';
-        args: Parameters<ProjectData['persistMessageBatch']>;
-      }
-    | {
-        operation: 'persistMessage';
-        args: Parameters<ProjectData['persistMessage']>;
-      }
-    | {
-        operation: 'enqueueMailboxMessage';
-        args: Parameters<ProjectData['enqueueMailboxMessage']>;
-      }
-    | {
-        operation: 'admitProjectEvent';
-        args: Parameters<ProjectData['admitProjectEvent']>;
-      }
-    | {
-        operation: 'createProjectEventSubscription';
-        args: Parameters<ProjectData['createProjectEventSubscription']>;
-      }
-    | {
-        operation: 'createProjectEventDeliveryBatch';
-        args: Parameters<ProjectData['createProjectEventDeliveryBatch']>;
-      }
-    | {
-        operation: 'recordProjectEventDeliveryAttempt';
-        args: Parameters<ProjectData['recordProjectEventDeliveryAttempt']>;
-      }
-    | {
-        operation: 'runProjectEventRetention';
-        args: Parameters<ProjectData['runProjectEventRetention']>;
-      }
+  input: ProjectDataExpectedErrorOperation
 ): Promise<CapturedExpectedError> {
   const response = await stub.fetch('https://project-data.test/__capture-expected-error', {
     method: 'POST',

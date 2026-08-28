@@ -296,7 +296,7 @@ export type CreateProjectEventDeliveryBatchInput = {
   idempotencyKey: string;
   requestedDelivery?: ProjectEventRequestedDeliveryMode | null;
   resolvedDelivery?: ProjectEventResolvedDeliveryMode | null;
-  target?: ProjectEventDeliveryPreference['target'];
+  target?: NonNullable<ProjectEventDeliveryPreference['target']>;
   terminalReason?: string | null;
 };
 
