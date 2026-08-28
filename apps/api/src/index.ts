@@ -52,6 +52,7 @@ import { adminGithubInstallationLeakSweepRoutes } from './routes/admin-github-in
 import { adminGithubRepoIdBackfillRoutes } from './routes/admin-github-repo-id-backfill';
 import { adminPlatformConfigRoutes } from './routes/admin-platform-config';
 import { adminPlatformCredentialRoutes } from './routes/admin-platform-credentials';
+import { adminProjectEventRoutes } from './routes/admin-project-events';
 import { adminQuotaRoutes } from './routes/admin-quotas';
 import { adminRuntimeControlRoutes } from './routes/admin-runtime-controls';
 import { adminSandboxRoutes } from './routes/admin-sandbox';
@@ -849,6 +850,7 @@ app.route('/api/admin/analytics', adminAnalyticsRoutes);
 app.route('/api/admin/analytics/ai-usage', adminAiUsageRoutes);
 app.route('/api/admin/platform-config', adminPlatformConfigRoutes);
 app.route('/api/admin/platform-credentials', adminPlatformCredentialRoutes);
+app.route('/api/admin/project-events', adminProjectEventRoutes);
 app.route('/api/admin/trials', adminTrialsRoutes);
 app.route('/api/admin/quotas', adminQuotaRoutes);
 app.route('/api/admin/runtime-controls', adminRuntimeControlRoutes);
