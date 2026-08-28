@@ -55,12 +55,12 @@ import {
   jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
+import { recordDispatchActivityEvent } from './dispatch-activity';
 import {
   type DispatchExecutionContext,
   getRuntimeValidationError,
   launchDispatchedInstantSession,
 } from './dispatch-instant';
-import { recordDispatchActivityEvent } from './dispatch-activity';
 import { parseDispatchTaskParams } from './dispatch-tool-params';
 
 export function getConversationTaskModeWarning(): string {
