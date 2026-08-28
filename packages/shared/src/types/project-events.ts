@@ -142,6 +142,9 @@ export const PROJECT_EVENT_RESOLVED_DELIVERY_MODES = [
   'record_only',
   'recorded_not_injected',
   'queued_for_prompt_delivery',
+  'runtime_steer',
+  'runtime_interrupt',
+  'spawn_task',
   'unsupported',
   'unauthorized',
 ] as const;
@@ -158,6 +161,136 @@ export type ProjectEventDeliveryPreference = {
     runtimeId?: string | null;
     agentId?: string | null;
   };
+};
+
+export const PROJECT_EVENT_DELIVERY_CAPABILITY_MODES = [
+  'record_only',
+  'durable_prompt_queue',
+  'runtime_steer',
+  'runtime_interrupt',
+  'spawn_task',
+] as const;
+
+export type ProjectEventDeliveryCapabilityMode =
+  (typeof PROJECT_EVENT_DELIVERY_CAPABILITY_MODES)[number];
+
+export const PROJECT_EVENT_DELIVERY_ADAPTER_KINDS = [
+  'record',
+  'durable_queue',
+  'runtime_acp',
+  'runtime_native',
+  'claude_channel',
+  'task_spawn',
+] as const;
+
+export type ProjectEventDeliveryAdapterKind = (typeof PROJECT_EVENT_DELIVERY_ADAPTER_KINDS)[number];
+
+export type ProjectEventDeliveryAdapterVersionGate = {
+  dependencyName?: string | null;
+  currentVersion?: string | null;
+  minimumVersion?: string | null;
+  satisfied: boolean;
+};
+
+export type ProjectEventDeliveryAdapterCapability = {
+  adapterId: string;
+  adapterKind: ProjectEventDeliveryAdapterKind;
+  agentType?: string | null;
+  protocol?: string | null;
+  protocolVersion?: string | null;
+  capabilities: ProjectEventDeliveryCapabilityMode[];
+  durableAck: boolean;
+  available: boolean;
+  versionGate?: ProjectEventDeliveryAdapterVersionGate | null;
+};
+
+export type ProjectEventDeliveryAuthorization = {
+  allowPromptQueue: boolean;
+  allowRuntimeSteer: boolean;
+  allowRuntimeInterrupt: boolean;
+  allowTaskSpawn: boolean;
+};
+
+export const PROJECT_EVENT_DELIVERY_TARGET_STATES = [
+  'active',
+  'busy',
+  'idle',
+  'unknown',
+  'terminal',
+] as const;
+
+export type ProjectEventDeliveryTargetState = (typeof PROJECT_EVENT_DELIVERY_TARGET_STATES)[number];
+
+export const PROJECT_EVENT_DELIVERY_ADAPTER_ACTIONS = [
+  'record_only',
+  'recorded_not_injected',
+  'queue_prompt_delivery',
+  'runtime_steer',
+  'runtime_interrupt',
+  'spawn_task',
+  'unsupported',
+  'unauthorized',
+] as const;
+
+export type ProjectEventDeliveryAdapterAction =
+  (typeof PROJECT_EVENT_DELIVERY_ADAPTER_ACTIONS)[number];
+
+export const PROJECT_EVENT_DELIVERY_RESOLUTION_REASONS = [
+  'record_only_requested',
+  'adapter_supported',
+  'queue_fallback',
+  'recorded_not_injected_baseline',
+  'unsupported_delivery',
+  'unauthorized_delivery',
+  'target_terminal',
+  'subscription_inactive',
+  'ambiguous_delivery',
+] as const;
+
+export type ProjectEventDeliveryResolutionReason =
+  (typeof PROJECT_EVENT_DELIVERY_RESOLUTION_REASONS)[number];
+
+export type ProjectEventDeliveryAdapterDecision = {
+  action: ProjectEventDeliveryAdapterAction;
+  reason: ProjectEventDeliveryResolutionReason;
+  adapterId: string | null;
+  adapterKind: ProjectEventDeliveryAdapterKind | null;
+  capability: ProjectEventDeliveryCapabilityMode | null;
+  agentType: string | null;
+  protocol: string | null;
+  protocolVersion: string | null;
+  durableAck: boolean;
+  supported: boolean;
+  authorized: boolean;
+  terminal: boolean;
+};
+
+export type ProjectEventDeliverySummaryEvent = {
+  id: string;
+  source: string;
+  eventType: string;
+  subject: ProjectEventSubject;
+  severity: ProjectEventSeverity;
+  display: ProjectEventDisplayData;
+  occurredAt: number;
+  receivedAt: number;
+};
+
+export type ProjectEventDeliveryModelSummary = {
+  version: typeof PROJECT_EVENT_CONTRACT_VERSION;
+  eventCount: number;
+  events: ProjectEventDeliverySummaryEvent[];
+  truncated: boolean;
+};
+
+export type ProjectEventDeliveryResolution = {
+  requestedDelivery: ProjectEventRequestedDeliveryMode;
+  resolvedDelivery: ProjectEventResolvedDeliveryMode;
+  batchState: ProjectEventDeliveryBatchState;
+  target: NonNullable<ProjectEventDeliveryPreference['target']>;
+  adapterDecision: ProjectEventDeliveryAdapterDecision;
+  terminalReason: string | null;
+  modelVisibleSummary: ProjectEventDeliveryModelSummary;
 };
 
 export const PROJECT_EVENT_SUBSCRIPTION_STATES = ['active', 'cancelled', 'expired'] as const;
@@ -274,6 +407,7 @@ export type ProjectEventDeliveryBatchRecord = {
   state: ProjectEventDeliveryBatchState;
   requestedDelivery: ProjectEventRequestedDeliveryMode;
   resolvedDelivery: ProjectEventResolvedDeliveryMode;
+  adapterDecision: ProjectEventDeliveryAdapterDecision;
   target: NonNullable<ProjectEventDeliveryPreference['target']>;
   matchIds: string[];
   eventCount: number;
@@ -297,6 +431,10 @@ export type CreateProjectEventDeliveryBatchInput = {
   requestedDelivery?: ProjectEventRequestedDeliveryMode | null;
   resolvedDelivery?: ProjectEventResolvedDeliveryMode | null;
   target?: NonNullable<ProjectEventDeliveryPreference['target']>;
+  adapterCapabilities?: ProjectEventDeliveryAdapterCapability[] | null;
+  authorization?: Partial<ProjectEventDeliveryAuthorization> | null;
+  targetState?: ProjectEventDeliveryTargetState | null;
+  targetTerminalReason?: string | null;
   terminalReason?: string | null;
 };
 

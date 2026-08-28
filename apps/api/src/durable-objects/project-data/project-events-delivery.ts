@@ -5,8 +5,6 @@ import type {
   ProjectEventDeliveryAttemptMutationResult,
   ProjectEventDeliveryBatchListResult,
   ProjectEventDeliveryBatchMutationResult,
-  ProjectEventDeliveryBatchState,
-  ProjectEventSubscriptionState,
 } from '@simple-agent-manager/shared';
 
 import {
@@ -17,6 +15,7 @@ import {
   ProjectEventValidationError,
   type RecordProjectEventDeliveryAttemptInput,
 } from './project-events-contracts';
+import { resolveProjectEventDelivery } from './project-events-delivery-resolver';
 import { resolveProjectEventLimits } from './project-events-limits';
 import {
   mapProjectEventDeliveryAttempt,
@@ -41,6 +40,7 @@ import {
   readBatchById,
   readBatchByIdempotencyKey,
   readBatchFingerprint,
+  readEventsForMatches,
   readMatchesByIds,
   updateBatchForAttempt,
   updateMatchesForBatch,
@@ -62,28 +62,6 @@ const TERMINAL_BATCH_STATES = new Set([
   'expired',
   'cancelled',
 ]);
-
-function initialDeliveryBatchStateFor(
-  subscriptionState: ProjectEventSubscriptionState
-): ProjectEventDeliveryBatchState {
-  switch (subscriptionState) {
-    case 'cancelled':
-      return 'cancelled';
-    case 'expired':
-      return 'expired';
-    case 'active':
-      return 'recorded_not_injected';
-  }
-}
-
-function terminalReasonForSubscriptionState(
-  subscriptionState: ProjectEventSubscriptionState,
-  fallback: string | null
-): string | null {
-  return subscriptionState === 'active'
-    ? fallback
-    : `subscription ${subscriptionState} before delivery`;
-}
 
 export function createProjectEventDeliveryBatch(
   sql: SqlStorage,
@@ -125,37 +103,57 @@ export function createProjectEventDeliveryBatch(
   if (matchRows.length !== normalized.matchIds.length) {
     throw new ProjectEventNotFoundError('Event match');
   }
-
-  const terminalState = initialDeliveryBatchStateFor(subscription.state);
-  const terminalReason = terminalReasonForSubscriptionState(
-    subscription.state,
-    normalized.terminalReason
+  const events = readEventsForMatches(
+    sql,
+    normalized.projectId,
+    normalized.matchIds,
+    limits.maxDeliveryBatchEvents
   );
+  const resolution = resolveProjectEventDelivery({
+    subscription,
+    requestedDelivery: normalized.requestedDelivery,
+    resolvedDelivery: normalized.resolvedDelivery,
+    target: normalized.target,
+    adapterCapabilities: normalized.adapterCapabilities,
+    authorization: normalized.authorization,
+    targetState: normalized.targetState,
+    targetTerminalReason: normalized.targetTerminalReason,
+    events,
+    now,
+    maxSummaryEvents: limits.maxDeliveryBatchEvents,
+  });
+
+  const terminalReason =
+    resolution.batchState === 'pending'
+      ? null
+      : (normalized.terminalReason ?? resolution.terminalReason);
   const eventCount = new Set(matchRows.map((match) => match.eventId)).size;
   const batchId = generateId();
   sql.exec(
     `INSERT INTO project_event_delivery_batches
      (id, project_id, subscription_id, idempotency_key, idempotency_fingerprint, state,
-      requested_delivery, resolved_delivery, target_session_id, target_task_id, target_runtime_id,
-      target_agent_id, match_ids_json, event_count, created_at, updated_at, terminal_at, terminal_reason)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      requested_delivery, resolved_delivery, adapter_decision_json, target_session_id,
+      target_task_id, target_runtime_id, target_agent_id, match_ids_json, event_count,
+      created_at, updated_at, terminal_at, terminal_reason)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     batchId,
     normalized.projectId,
     normalized.subscriptionId,
     normalized.idempotencyKey,
     normalized.idempotencyFingerprint,
-    terminalState,
-    normalized.requestedDelivery,
-    'recorded_not_injected',
-    normalized.target.sessionId ?? null,
-    normalized.target.taskId ?? null,
-    normalized.target.runtimeId ?? null,
-    normalized.target.agentId ?? null,
+    resolution.batchState,
+    resolution.requestedDelivery,
+    resolution.resolvedDelivery,
+    stableStringify(resolution.adapterDecision),
+    resolution.target.sessionId ?? null,
+    resolution.target.taskId ?? null,
+    resolution.target.runtimeId ?? null,
+    resolution.target.agentId ?? null,
     stableStringify(normalized.matchIds),
     eventCount,
     now,
     now,
-    now,
+    resolution.batchState === 'pending' ? null : now,
     terminalReason
   );
   updateMatchesForBatch(
@@ -163,7 +161,7 @@ export function createProjectEventDeliveryBatch(
     normalized.projectId,
     normalized.matchIds,
     batchId,
-    terminalState,
+    resolution.batchState,
     now
   );
   return {

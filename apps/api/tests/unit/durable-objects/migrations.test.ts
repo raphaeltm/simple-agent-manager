@@ -219,6 +219,12 @@ describe('DO Migrations', () => {
               .get(index)
           ).toEqual({ name: index });
         }
+        const deliveryBatchColumns = db
+          .prepare('PRAGMA table_info(project_event_delivery_batches)')
+          .all() as Array<{ name: string }>;
+        expect(deliveryBatchColumns.map((column) => column.name)).toContain(
+          'adapter_decision_json'
+        );
       } finally {
         db.close();
       }
@@ -438,6 +444,7 @@ describe('DO Migrations', () => {
       // created_at, archived_at)
       // tool payload cleanup attempts: 1 from migration 037 (retry sweep)
       // project event subscriptions: 15 from migration 038
+      // project event delivery decisions: 0 from migration 039 (additive column only)
       expect(indexes).toHaveLength(84);
     });
   });

@@ -84,6 +84,11 @@ export {
   listProjectEventDeliveryBatches,
   recordProjectEventDeliveryAttempt,
 } from './project-events-delivery';
+export {
+  buildProjectEventDeliveryModelSummary,
+  resolveProjectEventDelivery,
+  type ResolveProjectEventDeliveryInput,
+} from './project-events-delivery-resolver';
 export { resolveProjectEventLimits } from './project-events-limits';
 export { compileProjectEventFilter } from './project-events-normalization';
 export {

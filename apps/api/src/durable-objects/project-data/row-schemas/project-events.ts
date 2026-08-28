@@ -93,6 +93,7 @@ export const ProjectEventDeliveryBatchRowSchema = v.object({
   state: v.picklist(PROJECT_EVENT_DELIVERY_BATCH_STATES),
   requested_delivery: v.picklist(PROJECT_EVENT_REQUESTED_DELIVERY_MODES),
   resolved_delivery: v.picklist(PROJECT_EVENT_RESOLVED_DELIVERY_MODES),
+  adapter_decision_json: v.nullable(v.string()),
   target_session_id: v.nullable(v.string()),
   target_task_id: v.nullable(v.string()),
   target_runtime_id: v.nullable(v.string()),

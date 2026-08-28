@@ -102,7 +102,7 @@ const PROJECT_EVENT_TABLE_SCHEMAS: readonly MigrationTableSchema[] = [
       requested_delivery:
         "TEXT NOT NULL CHECK (requested_delivery IN ('record_only', 'existing_session_prompt', 'runtime_steer', 'runtime_interrupt', 'spawn_task'))",
       resolved_delivery:
-        "TEXT NOT NULL CHECK (resolved_delivery IN ('record_only', 'recorded_not_injected', 'queued_for_prompt_delivery', 'unsupported', 'unauthorized'))",
+        "TEXT NOT NULL CHECK (resolved_delivery IN ('record_only', 'recorded_not_injected', 'queued_for_prompt_delivery', 'runtime_steer', 'runtime_interrupt', 'spawn_task', 'unsupported', 'unauthorized'))",
       target_session_id: 'TEXT',
       target_task_id: 'TEXT',
       target_runtime_id: 'TEXT',
@@ -165,7 +165,8 @@ const PROJECT_EVENT_TABLE_SCHEMAS: readonly MigrationTableSchema[] = [
       requested_delivery:
         "TEXT NOT NULL CHECK (requested_delivery IN ('record_only', 'existing_session_prompt', 'runtime_steer', 'runtime_interrupt', 'spawn_task'))",
       resolved_delivery:
-        "TEXT NOT NULL CHECK (resolved_delivery IN ('record_only', 'recorded_not_injected', 'queued_for_prompt_delivery', 'unsupported', 'unauthorized'))",
+        "TEXT NOT NULL CHECK (resolved_delivery IN ('record_only', 'recorded_not_injected', 'queued_for_prompt_delivery', 'runtime_steer', 'runtime_interrupt', 'spawn_task', 'unsupported', 'unauthorized'))",
+      adapter_decision_json: 'TEXT',
       target_session_id: 'TEXT',
       target_task_id: 'TEXT',
       target_runtime_id: 'TEXT',
@@ -1569,6 +1570,18 @@ export const MIGRATIONS: Migration[] = [
     name: '038-project-event-subscriptions',
     run: (sql) => {
       runProjectEventSubscriptionMigration(sql);
+    },
+  },
+  {
+    name: '039-project-event-delivery-decisions',
+    run: (sql) => {
+      try {
+        sql.exec(
+          `ALTER TABLE project_event_delivery_batches ADD COLUMN adapter_decision_json TEXT`
+        );
+      } catch {
+        // Column already exists when migration 038 created the current draft schema.
+      }
     },
   },
 ];

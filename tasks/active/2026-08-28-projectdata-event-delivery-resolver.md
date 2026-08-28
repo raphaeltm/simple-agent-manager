@@ -30,13 +30,13 @@ Implement Wave B2 on branch `sam/wave-b2-implement-event-w512yj`: add a capabili
 
 ## Implementation Checklist
 
-- [ ] Add shared adapter-capability and resolver output contracts/types for event delivery decisions.
-- [ ] Implement a pure resolver that maps a subscription delivery preference plus explicit capabilities/authorization/target state to requested delivery, resolved delivery, adapter action, reason, and model-visible summary.
-- [ ] Integrate the resolver into ProjectData delivery-batch creation without adding runtime adapter I/O or producers.
-- [ ] Preserve requested/resolved delivery separation and reject/resolve ambiguous caller-provided delivery overrides.
-- [ ] Ensure Codex/OpenCode/Claude live paths require explicit advertised capabilities and are not inferred from `agentType`.
-- [ ] Ensure model-visible delivery summaries contain only bounded normalized display/identity data, never raw metadata or payload references.
-- [ ] Add resolver tests for supported, unsupported, unauthorized, terminal target, expired/cancelled subscription, ambiguous delivery, record-only, queue fallback, and spawn/interrupt authorization boundaries.
+- [x] Add shared adapter-capability and resolver output contracts/types for event delivery decisions.
+- [x] Implement a pure resolver that maps a subscription delivery preference plus explicit capabilities/authorization/target state to requested delivery, resolved delivery, adapter action, reason, and model-visible summary.
+- [x] Integrate the resolver into ProjectData delivery-batch creation without adding runtime adapter I/O or producers.
+- [x] Preserve requested/resolved delivery separation and reject/resolve ambiguous caller-provided delivery overrides.
+- [x] Ensure Codex/OpenCode/Claude live paths require explicit advertised capabilities and are not inferred from `agentType`.
+- [x] Ensure model-visible delivery summaries contain only bounded normalized display/identity data, never raw metadata or payload references.
+- [x] Add resolver tests for supported, unsupported, unauthorized, terminal target, expired/cancelled subscription, ambiguous delivery, record-only, queue fallback, and spawn/interrupt authorization boundaries.
 - [ ] Run focused tests plus relevant typecheck/lint/format gates.
 - [ ] Run specialist review and document results.
 - [ ] Open a draft PR targeting `sam/weve-previously-talked-eventing-y207hp`.
@@ -57,3 +57,30 @@ Implement Wave B2 on branch `sam/wave-b2-implement-event-w512yj`: add a capabili
 - Worker ProjectData tests for batch creation using resolver decisions and continued absence of `session_inbox` writes.
 - Shared/API typecheck and lint/format checks proportional to touched packages.
 - Specialist reviews: task-completion-validator, test-engineer, cloudflare-specialist, constitution-validator, and security-auditor if security-sensitive boundaries are affected.
+
+## Implementation Notes
+
+- Shared contracts now include delivery capability modes, adapter descriptors, authorization flags, target lifecycle state, adapter decision, resolver reason, resolution output, and model-visible summary types.
+- Resolved delivery values now include future adapter-backed outcomes (`runtime_steer`, `runtime_interrupt`, `spawn_task`) in addition to the B1 durable baseline values.
+- `resolveProjectEventDelivery()` is pure: it selects queue/runtime/spawn only from explicit advertised capabilities plus matching authorization; otherwise it terminalizes as unsupported, unauthorized, target-terminal, subscription-inactive, ambiguous, record-only, or recorded-not-injected.
+- Codex and OpenCode decisions are not derived from `agentType`. Tests prove Codex ACP 1.1.2 with a failed version gate and OpenCode ACP with no advertised steer/queue capability remain unsupported.
+- `createProjectEventDeliveryBatch()` persists `adapter_decision_json`, requested delivery, and resolved delivery. Pending queue/runtime/spawn decisions do not perform adapter I/O, do not call `acceptPromptDelivery()`, and do not write `session_inbox`.
+- Model-visible summaries contain only event id/source/type/subject/severity/timestamps and bounded `display` data; metadata, delivery keys, fingerprints, and raw payload references are excluded.
+
+## Validation Evidence
+
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/project-events-delivery-resolver.test.ts tests/unit/durable-objects/migrations.test.ts` — passed, 26 tests.
+- `pnpm --filter @simple-agent-manager/shared typecheck` — passed.
+- `pnpm --filter @simple-agent-manager/shared build` — passed; required before worker tests because `@simple-agent-manager/shared` resolves through `dist`.
+- `pnpm vitest run --config vitest.workers.config.ts tests/workers/project-data-events.test.ts --reporter=verbose` from `apps/api` — passed, 9 tests.
+- `pnpm --filter @simple-agent-manager/api typecheck` — passed.
+- `pnpm --filter @simple-agent-manager/api lint` — passed.
+- `pnpm --filter @simple-agent-manager/api build` — passed.
+- `pnpm --filter @simple-agent-manager/shared lint` — passed.
+- `pnpm --filter @simple-agent-manager/www build` — passed.
+- `pnpm format:check` — passed.
+- `pnpm quality:do-migration-safety` — passed.
+- `pnpm quality:migration-safety` — passed.
+- `pnpm quality:type-boundaries` — passed; 0 blocking findings.
+- `pnpm quality:file-sizes` — passed; no files exceed 800 lines.
+- `git diff --check` — passed.
