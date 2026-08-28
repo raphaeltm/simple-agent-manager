@@ -8,6 +8,7 @@ import {
   type ProjectEventDeliveryBatchState,
   type ProjectEventLimits,
   type ProjectEventMatchRecord,
+  type ProjectEventMatchState,
   type ProjectEventRecord,
   type ProjectEventStorageAccountingRecord,
   type ProjectEventSubscriptionOwner,
@@ -339,6 +340,29 @@ export function readMatchesByIds(
   return mapRows(rows, mapProjectEventMatch, matchIds.length, 'event_match');
 }
 
+export function readEventsForMatches(
+  sql: SqlStorage,
+  projectId: string,
+  matchIds: string[],
+  limit: number
+): ProjectEventRecord[] {
+  const placeholders = matchIds.map(() => '?').join(', ');
+  const rows = sql
+    .exec(
+      `SELECT e.*
+       FROM project_event_matches m
+       JOIN project_events e ON e.project_id = m.project_id AND e.id = m.event_id
+       WHERE m.project_id = ? AND m.id IN (${placeholders})
+       ORDER BY m.matched_at ASC, m.id ASC
+       LIMIT ?`,
+      projectId,
+      ...matchIds,
+      limit
+    )
+    .toArray();
+  return mapRows(rows, mapProjectEvent, limit, 'project_event');
+}
+
 export function readBatchById(
   sql: SqlStorage,
   projectId: string,
@@ -397,11 +421,10 @@ export function updateMatchesForBatch(
   projectId: string,
   matchIds: string[],
   batchId: string,
-  terminalState: ProjectEventDeliveryBatchRecord['state'],
+  batchState: ProjectEventDeliveryBatchRecord['state'],
   now: number
 ): void {
-  const matchState =
-    terminalState === 'recorded_not_injected' ? 'recorded_not_injected' : terminalState;
+  const matchState = matchStateForBatchState(batchState);
   sql.exec(
     `UPDATE project_event_matches
      SET batch_id = ?, state = ?, lifecycle_checked_at = ?
@@ -412,6 +435,25 @@ export function updateMatchesForBatch(
     projectId,
     ...matchIds
   );
+}
+
+function matchStateForBatchState(
+  batchState: ProjectEventDeliveryBatchRecord['state']
+): ProjectEventMatchState {
+  switch (batchState) {
+    case 'recorded_not_injected':
+      return 'recorded_not_injected';
+    case 'expired':
+      return 'expired';
+    case 'cancelled':
+      return 'cancelled';
+    case 'pending':
+    case 'delivered':
+    case 'acked':
+    case 'failed':
+    case 'ambiguous':
+      return 'batch_created';
+  }
 }
 
 export function normalizeAttemptState(

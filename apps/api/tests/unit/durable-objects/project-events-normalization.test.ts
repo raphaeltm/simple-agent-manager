@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   compileProjectEventFilter,
+  normalizeDeliveryBatchInput,
   normalizeProjectEventInput,
 } from '../../../src/durable-objects/project-data/project-events-normalization';
 
@@ -125,5 +126,46 @@ describe('ProjectData event subscription normalization', () => {
         baseLimits
       )
     ).toThrow(/metadata/);
+  });
+
+  it('normalizes adapter capability records that advertise no delivery modes', () => {
+    const normalized = normalizeDeliveryBatchInput(
+      {
+        projectId: 'project-events-unit',
+        subscriptionId: 'subscription-1',
+        matchIds: ['match-1'],
+        idempotencyKey: 'batch-1',
+        adapterCapabilities: [
+          {
+            adapterId: 'opencode-acp',
+            adapterKind: 'runtime_acp',
+            agentType: 'opencode',
+            protocol: 'opencode-acp',
+            protocolVersion: '1.17.18',
+            capabilities: [],
+            durableAck: false,
+            available: true,
+          },
+        ],
+        authorization: { allowRuntimeSteer: true },
+        targetState: 'active',
+      },
+      baseLimits
+    );
+
+    expect(normalized.adapterCapabilities).toEqual([
+      {
+        adapterId: 'opencode-acp',
+        adapterKind: 'runtime_acp',
+        agentType: 'opencode',
+        protocol: 'opencode-acp',
+        protocolVersion: '1.17.18',
+        capabilities: [],
+        durableAck: false,
+        available: true,
+        versionGate: null,
+      },
+    ]);
+    expect(normalized.authorization.allowRuntimeSteer).toBe(true);
   });
 });

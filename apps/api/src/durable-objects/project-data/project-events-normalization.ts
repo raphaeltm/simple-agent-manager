@@ -8,7 +8,10 @@ import {
   PROJECT_EVENT_RESOLVED_DELIVERY_MODES,
   PROJECT_EVENT_SEVERITIES,
   PROJECT_EVENT_SUBSCRIPTION_OWNER_TYPES,
+  type ProjectEventDeliveryAdapterCapability,
+  type ProjectEventDeliveryAuthorization,
   type ProjectEventDeliveryPreference,
+  type ProjectEventDeliveryTargetState,
   type ProjectEventDisplayData,
   type ProjectEventFilterField,
   type ProjectEventFilterV1,
@@ -24,6 +27,11 @@ import {
   ProjectEventLimitExceededError,
   ProjectEventValidationError,
 } from './project-events-contracts';
+import {
+  normalizeAdapterCapabilities,
+  normalizeDeliveryAuthorization,
+  normalizeDeliveryTargetState,
+} from './project-events-delivery-input-normalization';
 import {
   byteLength,
   isPlainObject,
@@ -78,9 +86,13 @@ export type NormalizedDeliveryBatchInput = {
   matchIds: string[];
   idempotencyKey: string;
   idempotencyFingerprint: string;
-  requestedDelivery: ProjectEventDeliveryPreference['requested'];
-  resolvedDelivery: ProjectEventDeliveryPreference['resolved'];
+  requestedDelivery: ProjectEventDeliveryPreference['requested'] | null;
+  resolvedDelivery: ProjectEventDeliveryPreference['resolved'] | null;
   target: NonNullable<ProjectEventDeliveryPreference['target']>;
+  adapterCapabilities: ProjectEventDeliveryAdapterCapability[];
+  authorization: ProjectEventDeliveryAuthorization;
+  targetState: ProjectEventDeliveryTargetState | null;
+  targetTerminalReason: string | null;
   terminalReason: string | null;
 };
 
@@ -241,17 +253,19 @@ export function normalizeDeliveryBatchInput(
     'idempotencyKey',
     limits.maxFilterStringBytes
   );
-  const requestedDelivery = input.requestedDelivery ?? 'record_only';
-  if (!REQUESTED_DELIVERY_SET.has(requestedDelivery)) {
-    throw new ProjectEventValidationError('requestedDelivery is not allowed');
-  }
-  const resolvedDelivery = input.resolvedDelivery ?? 'recorded_not_injected';
-  if (!RESOLVED_DELIVERY_SET.has(resolvedDelivery)) {
-    throw new ProjectEventValidationError('resolvedDelivery is not allowed');
-  }
+  const requestedDelivery = normalizeOptionalRequestedDelivery(input.requestedDelivery);
+  const resolvedDelivery = normalizeOptionalResolvedDelivery(input.resolvedDelivery);
   const target = normalizeDeliveryTarget(input.target, limits);
+  const adapterCapabilities = normalizeAdapterCapabilities(input.adapterCapabilities, limits);
+  const authorization = normalizeDeliveryAuthorization(input.authorization);
+  const targetState = normalizeDeliveryTargetState(input.targetState);
+  const targetTerminalReason = normalizeNullableText(
+    input.targetTerminalReason ?? null,
+    'targetTerminalReason',
+    limits.maxReasonBytes
+  );
   const terminalReason = normalizeNullableText(
-    input.terminalReason ?? 'runtime injection deferred in durable foundation',
+    input.terminalReason ?? null,
     'terminalReason',
     limits.maxReasonBytes
   );
@@ -262,6 +276,10 @@ export function normalizeDeliveryBatchInput(
     requestedDelivery,
     resolvedDelivery,
     target,
+    adapterCapabilities,
+    authorization,
+    targetState,
+    targetTerminalReason,
     terminalReason,
   ]);
 
@@ -274,6 +292,10 @@ export function normalizeDeliveryBatchInput(
     requestedDelivery,
     resolvedDelivery,
     target,
+    adapterCapabilities,
+    authorization,
+    targetState,
+    targetTerminalReason,
     terminalReason,
   };
 }
@@ -412,6 +434,26 @@ function normalizeDeliveryPreference(
     resolved: input.resolved,
     target: normalizeDeliveryTarget(input.target, limits),
   };
+}
+
+function normalizeOptionalRequestedDelivery(
+  input: ProjectEventDeliveryPreference['requested'] | null | undefined
+): ProjectEventDeliveryPreference['requested'] | null {
+  if (input === null || input === undefined) return null;
+  if (!REQUESTED_DELIVERY_SET.has(input)) {
+    throw new ProjectEventValidationError('requestedDelivery is not allowed');
+  }
+  return input;
+}
+
+function normalizeOptionalResolvedDelivery(
+  input: ProjectEventDeliveryPreference['resolved'] | null | undefined
+): ProjectEventDeliveryPreference['resolved'] | null {
+  if (input === null || input === undefined) return null;
+  if (!RESOLVED_DELIVERY_SET.has(input)) {
+    throw new ProjectEventValidationError('resolvedDelivery is not allowed');
+  }
+  return input;
 }
 
 function normalizeDeliveryTarget(

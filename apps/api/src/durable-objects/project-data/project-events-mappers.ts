@@ -1,4 +1,5 @@
 import type {
+  ProjectEventDeliveryAdapterDecision,
   ProjectEventDeliveryAttemptRecord,
   ProjectEventDeliveryBatchRecord,
   ProjectEventDisplayData,
@@ -21,11 +22,23 @@ import {
   parseProjectEventSubscriptionRow,
   safeParseJson,
 } from './row-schemas';
+import type { ProjectEventDeliveryBatchRow } from './row-schemas/project-events';
 
 function parseJsonColumn<T>(value: string | null, context: string): T {
   const parsed = safeParseJson(value);
   if (parsed === null) throw new Error(`Invalid JSON in ${context}`);
   return parsed as T;
+}
+
+function parseAdapterDecisionColumn(
+  value: string | null,
+  fallback: ProjectEventDeliveryAdapterDecision
+): ProjectEventDeliveryAdapterDecision {
+  if (!value) return fallback;
+  return parseJsonColumn<ProjectEventDeliveryAdapterDecision>(
+    value,
+    'project_event_delivery_batches.adapter_decision_json'
+  );
 }
 
 function ownerFromColumns(
@@ -146,6 +159,10 @@ export function mapProjectEventDeliveryBatch(row: unknown): ProjectEventDelivery
     state: parsed.state,
     requestedDelivery: parsed.requested_delivery,
     resolvedDelivery: parsed.resolved_delivery,
+    adapterDecision: parseAdapterDecisionColumn(
+      parsed.adapter_decision_json,
+      legacyAdapterDecisionForBatch(parsed)
+    ),
     target: {
       sessionId: parsed.target_session_id,
       taskId: parsed.target_task_id,
@@ -161,6 +178,32 @@ export function mapProjectEventDeliveryBatch(row: unknown): ProjectEventDelivery
     updatedAt: parsed.updated_at,
     terminalAt: parsed.terminal_at,
     terminalReason: parsed.terminal_reason,
+  };
+}
+
+function legacyAdapterDecisionForBatch(
+  parsed: ProjectEventDeliveryBatchRow
+): ProjectEventDeliveryAdapterDecision {
+  return {
+    action:
+      parsed.resolved_delivery === 'record_only'
+        ? 'record_only'
+        : parsed.resolved_delivery === 'unsupported'
+          ? 'unsupported'
+          : parsed.resolved_delivery === 'unauthorized'
+            ? 'unauthorized'
+            : 'recorded_not_injected',
+    reason: 'recorded_not_injected_baseline',
+    adapterId: null,
+    adapterKind: null,
+    capability: null,
+    agentType: null,
+    protocol: null,
+    protocolVersion: null,
+    durableAck: false,
+    supported: parsed.resolved_delivery !== 'unsupported',
+    authorized: parsed.resolved_delivery !== 'unauthorized',
+    terminal: parsed.state !== 'pending',
   };
 }
 

@@ -54,6 +54,19 @@ function subscriptionInput(idempotencyKey: string) {
   };
 }
 
+function durableQueueCapability() {
+  return {
+    adapterId: 'projectdata-prompt-queue',
+    adapterKind: 'durable_queue' as const,
+    agentType: null,
+    protocol: 'projectdata',
+    protocolVersion: '1',
+    capabilities: ['durable_prompt_queue' as const],
+    durableAck: true,
+    available: true,
+  };
+}
+
 async function withEventEnv<T>(
   overrides: Record<string, string>,
   fn: () => Promise<T>
@@ -156,7 +169,12 @@ describe('ProjectData event subscription core', () => {
     expect(batch.batch).toMatchObject({
       state: 'recorded_not_injected',
       requestedDelivery: 'existing_session_prompt',
-      resolvedDelivery: 'recorded_not_injected',
+      resolvedDelivery: 'unsupported',
+      adapterDecision: {
+        action: 'unsupported',
+        reason: 'unsupported_delivery',
+        capability: 'durable_prompt_queue',
+      },
       eventCount: 1,
     });
 
@@ -215,6 +233,59 @@ describe('ProjectData event subscription core', () => {
       batchId: batch.batch.id,
     });
     expect(listedAttempts.attempts.map((item) => item.id)).toContain(attempt.attempt.id);
+    expect(await sessionInboxCount(projectId)).toBe(0);
+  });
+
+  it('persists queued resolver decisions without injecting prompts in this wave', async () => {
+    const projectId = 'project-events-queued-resolution';
+    const subscription = await svc.createProjectEventSubscription(
+      testEnv,
+      projectId,
+      subscriptionInput('sub-queue-1')
+    );
+    const admitted = await svc.admitProjectEvent(testEnv, projectId, eventInput());
+
+    const batch = await svc.createProjectEventDeliveryBatch(testEnv, projectId, {
+      subscriptionId: subscription.subscription.id,
+      matchIds: [admitted.matches[0].id],
+      idempotencyKey: 'batch-queue-1',
+      adapterCapabilities: [durableQueueCapability()],
+      authorization: { allowPromptQueue: true },
+    });
+
+    expect(batch.batch).toMatchObject({
+      state: 'pending',
+      requestedDelivery: 'existing_session_prompt',
+      resolvedDelivery: 'queued_for_prompt_delivery',
+      adapterDecision: {
+        action: 'queue_prompt_delivery',
+        adapterId: 'projectdata-prompt-queue',
+        adapterKind: 'durable_queue',
+        durableAck: true,
+        supported: true,
+        authorized: true,
+        terminal: false,
+      },
+      target: {
+        sessionId: 'session-1',
+        taskId: 'task-1',
+        agentId: 'agent-1',
+      },
+    });
+    const status = await svc.getProjectEventRecentStatus(testEnv, projectId);
+    expect(status.matches.find((match) => match.id === admitted.matches[0].id)).toMatchObject({
+      state: 'batch_created',
+      batchId: batch.batch.id,
+    });
+    const listed = await svc.listProjectEventDeliveryBatches(testEnv, projectId, {
+      subscriptionId: subscription.subscription.id,
+    });
+    expect(listed.batches.find((item) => item.id === batch.batch.id)).toMatchObject({
+      adapterDecision: {
+        action: 'queue_prompt_delivery',
+        adapterId: 'projectdata-prompt-queue',
+      },
+    });
     expect(await sessionInboxCount(projectId)).toBe(0);
   });
 
