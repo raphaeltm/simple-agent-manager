@@ -47,6 +47,12 @@ import {
 } from './deployment-tools';
 import { handleDispatchTask } from './dispatch-tool';
 import {
+  handleCancelProjectEventSubscription,
+  handleCreateProjectEventSubscription,
+  handleGetProjectEventSubscription,
+  handleListProjectEventSubscriptions,
+} from './event-subscription-tools';
+import {
   handleCreateIdea,
   handleFindRelatedIdeas,
   handleGetIdea,
@@ -317,6 +323,22 @@ mcpRoutes.post('/', async (c) => {
           }
           case 'wait_for_subtasks':
             return c.json(await handleWaitForSubtasks(requestId, toolArgs, tokenData, c.env));
+          case 'create_project_event_subscription':
+            return c.json(
+              await handleCreateProjectEventSubscription(requestId, toolArgs, tokenData, c.env)
+            );
+          case 'list_project_event_subscriptions':
+            return c.json(
+              await handleListProjectEventSubscriptions(requestId, toolArgs, tokenData, c.env)
+            );
+          case 'get_project_event_subscription':
+            return c.json(
+              await handleGetProjectEventSubscription(requestId, toolArgs, tokenData, c.env)
+            );
+          case 'cancel_project_event_subscription':
+            return c.json(
+              await handleCancelProjectEventSubscription(requestId, toolArgs, tokenData, c.env)
+            );
           // ─── Durable messaging tools ──────────────────────────────────
           case 'send_durable_message':
             return c.json(await handleSendDurableMessage(requestId, toolArgs, tokenData, c.env));

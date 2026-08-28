@@ -34,15 +34,23 @@ Implement Wave B3 internal API/MCP-adjacent service surfaces on top of the Wave 
 
 ## Implementation Checklist
 
-- [ ] Add typed internal request/response contracts for creating, listing, getting, cancelling, and expiring ProjectData event subscriptions.
-- [ ] Add an API service layer that derives project/owner/target identity from an agent or platform caller instead of trusting user-supplied project IDs.
-- [ ] Enforce agent session scoping, invalid owner/target/project rejection, authorization placeholders/gates for platform-owned policy/standing-watch/system subscriptions, idempotency conflict surfacing, TTL bounds, and cancellation/expiry semantics.
-- [ ] Add MCP tool definitions and handlers for task agents to create, list, get, and cancel their own ProjectData event subscriptions without exposing project or owner overrides.
-- [ ] Keep expiry and platform-owned subscription controls internal-service only for this wave.
-- [ ] Add focused tests covering agent-owned session subscriptions, policy/standing-watch ownership, required-subscription behavior, invalid owner/target/project access, and cancellation/expiry races.
-- [ ] Run focused tests plus relevant typecheck/lint/format/static gates.
-- [ ] Complete specialist reviews and task-completion validation before handoff.
+- [x] Add typed internal request/response contracts for creating, listing, getting, cancelling, and expiring ProjectData event subscriptions.
+- [x] Add an API service layer that derives project/owner/target identity from an agent or platform caller instead of trusting user-supplied project IDs.
+- [x] Enforce agent session scoping, invalid owner/target/project rejection, authorization placeholders/gates for platform-owned policy/standing-watch/system subscriptions, idempotency conflict surfacing, TTL bounds, and cancellation/expiry semantics.
+- [x] Add MCP tool definitions and handlers for task agents to create, list, get, and cancel their own ProjectData event subscriptions without exposing project or owner overrides.
+- [x] Keep expiry and platform-owned subscription controls internal-service only for this wave.
+- [x] Add focused tests covering agent-owned session subscriptions, policy/standing-watch ownership, required-subscription behavior, invalid owner/target/project access, and cancellation/expiry races.
+- [x] Run focused tests plus relevant typecheck/lint/format/static gates.
+- [x] Complete specialist reviews and task-completion validation before handoff.
 - [ ] Push commits and open a draft PR targeting `sam/weve-previously-talked-eventing-y207hp`.
+
+## Implementation Evidence
+
+- Added shared internal contracts in `packages/shared/src/types/project-event-subscriptions.ts` and re-exported them from `packages/shared/src/types/index.ts`.
+- Added `apps/api/src/services/project-event-subscriptions.ts` as the typed internal service facade over the B1 `project-data` RPC wrappers.
+- Added `apps/api/src/services/project-event-subscriptions-access.ts` for caller-derived project binding, D1 task/workspace/agent-session validation, owner/target guards, platform permission placeholders, MCP-token TTL caps, and Wave A delivery semantics.
+- Added MCP task-agent tools in `apps/api/src/routes/mcp/tool-definitions-event-subscription-tools.ts` and `apps/api/src/routes/mcp/event-subscription-tools.ts`, then registered them through `apps/api/src/routes/mcp/tool-definitions.ts` and `apps/api/src/routes/mcp/index.ts`.
+- Updated API-reference skill notes for the new internal MCP surface.
 
 ## Validation Plan
 
@@ -51,6 +59,44 @@ Implement Wave B3 internal API/MCP-adjacent service surfaces on top of the Wave 
 - Existing ProjectData event worker tests to verify the B1 durable layer remains intact.
 - Shared/API typecheck, lint, formatting, and relevant static quality gates.
 - No staging validation by explicit task instruction.
+
+## Validation Evidence
+
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/project-event-subscriptions.test.ts tests/unit/routes/mcp-event-subscription-tools.test.ts tests/unit/routes/mcp.test.ts` — passed, 3 files, 252 tests.
+- `pnpm vitest run --config vitest.workers.config.ts tests/workers/project-data-events.test.ts --reporter=verbose` from `apps/api` — passed, 1 file, 8 tests.
+- `pnpm --filter @simple-agent-manager/shared build && pnpm --filter @simple-agent-manager/api typecheck` — passed.
+- `pnpm --filter @simple-agent-manager/api lint` — passed.
+- `pnpm --filter @simple-agent-manager/shared typecheck && pnpm --filter @simple-agent-manager/shared lint` — passed.
+- `pnpm format:check` — passed.
+- `pnpm quality:file-sizes && pnpm quality:type-boundaries && pnpm quality:source-contract-tests && pnpm quality:migration-safety && git diff --check` — passed.
+
+## Specialist Review Results
+
+- Security audit: PASS. MCP handlers reject `projectId`, `owner`, `ownerScope`, and `cancelledBy`; service validates task/workspace/agent-session D1 bindings before ProjectData mutation; agent read/cancel returns 404 for out-of-scope subscriptions.
+- Cloudflare review: PASS. The change uses existing D1 and ProjectData Durable Object service boundaries, adds no migrations, no Wrangler changes, no KV/R2 changes, and no staging operations.
+- Constitution Principle XI review: PASS. TTL behavior derives from existing configurable MCP token settings; no hardcoded internal URLs, deployment identifiers, or new unconfigurable limits were added.
+- Documentation sync review: PASS. No public HTTP routes, env vars, or deployment docs changed; internal API-reference skill notes were updated for the new MCP tools.
+- Test-engineer review: PASS. Tests exercise realistic D1 task/workspace/agent-session state, service-to-ProjectData boundary payloads, MCP handler contracts, error paths, idempotency conflicts, and cancellation/expiry races.
+
+## Task Completion Validation Report
+
+### Verdict: PASS
+
+| Check | Status | Evidence |
+| --- | --- | --- |
+| A: Research → Checklist | PASS | Every research finding is represented in the implementation checklist. |
+| B: Checklist → Diff | PASS | Checked items map to shared contracts, API service/access code, MCP tool wiring, tests, and reference notes. |
+| C: Criteria → Tests | PASS | Focused service/MCP tests cover owner scopes, project/target binding, required semantics, idempotency, TTL, and cancel/expiry races. |
+| D: UI → Backend | N/A | No UI work was in scope or changed. |
+| E: Multi-resource selection | N/A | No provider/resource selection logic was introduced. |
+| F: Vertical slice coverage | PASS | Service tests use realistic D1 boundary state and assert ProjectData boundary payloads; MCP tests assert handler request/response contracts. |
+
+## Intentionally Deferred
+
+- Event producers and GitHub/deployment integrations.
+- Public auth/UI routes, broad user-facing subscription controls, and UI inspector.
+- Staging deploys, staging validation, or staging mutation.
+- Runtime injection, Claude/Codex/OpenCode fast paths, interrupt/steer/spawn behavior, and B2 delivery resolver integration.
 
 ## Handoff Notes
 
