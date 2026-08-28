@@ -4,14 +4,9 @@ import type {
   CapacityPoolScope,
   CapacitySourceIdentity,
   CredentialProvider,
-  VMSize,
+  DefaultCapacityPoolSummary,
 } from '@simple-agent-manager/shared';
-import {
-  getDefaultLocationForProvider,
-  getLocationsForProvider,
-  isValidProvider,
-  VM_SIZE_LABELS,
-} from '@simple-agent-manager/shared';
+import { isValidProvider } from '@simple-agent-manager/shared';
 import { and, asc, eq, isNotNull, isNull, notInArray } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -21,6 +16,17 @@ import {
   toCapacityPoolCandidate,
   toCapacitySourceIdentity,
 } from './capacity-pools';
+import {
+  defaultCandidateId,
+  defaultCapacitySourceId,
+  defaultPoolId,
+  type DefaultPoolScopeIdentity,
+  legacyCredentialReference,
+  orderedLocationsForProvider,
+  platformCredentialReference,
+  timestampVersion,
+  VM_SIZE_ORDER,
+} from './default-capacity-pool-helpers';
 
 type Db = ReturnType<typeof drizzle>;
 
@@ -39,13 +45,7 @@ const SOURCE_KIND_CLOUD_PROVIDER = 'cloud-provider-credential';
 const CREDENTIAL_TYPE_CLOUD_PROVIDER = 'cloud-provider';
 const ACTIVE_STATUS = 'active';
 const DISABLED_STATUS = 'disabled';
-const VM_SIZE_ORDER = Object.keys(VM_SIZE_LABELS) as VMSize[];
-
-interface ScopeIdentity {
-  scope: CapacityPoolScope;
-  ownerUserId: string | null;
-  ownerProjectId: string | null;
-}
+type ScopeIdentity = DefaultPoolScopeIdentity;
 
 interface CredentialCapacitySeed extends ScopeIdentity {
   id: string;
@@ -58,12 +58,12 @@ interface CredentialCapacitySeed extends ScopeIdentity {
   createdBy: string | null;
 }
 
-export interface CapacityPoolSummary {
+export type CapacityPoolSummary = DefaultCapacityPoolSummary & {
   pool: CapacityPoolDto;
   sources: CapacitySourceIdentity[];
   candidates: CapacityPoolCandidateDto[];
   activeCandidateCount: number;
-}
+};
 
 export interface DefaultCapacityPoolsEnsureResult {
   installation: CapacityPoolSummary | null;
@@ -127,12 +127,18 @@ export async function backfillDefaultCapacityPoolsForExistingCredentials(
 
 export async function resolveEffectiveDefaultCapacityPoolSummary(
   db: Db,
-  input: { userId: string; projectId?: string | null; ensure?: boolean }
+  input: {
+    userId: string;
+    projectId?: string | null;
+    ensure?: boolean;
+    includeInstallation?: boolean;
+  }
 ): Promise<CapacityPoolSummary | null> {
   if (input.ensure !== false) {
     await ensureDefaultCapacityPoolsForExistingCredentials(db, {
       userId: input.userId,
       projectId: input.projectId ?? null,
+      includeInstallation: input.includeInstallation,
     });
   }
 
@@ -152,11 +158,47 @@ export async function resolveEffectiveDefaultCapacityPoolSummary(
   });
   if (user) return user;
 
+  if (input.includeInstallation === false) return null;
+
   return readDefaultPoolSummary(db, {
     scope: 'installation',
     ownerUserId: null,
     ownerProjectId: null,
   });
+}
+
+export async function readDefaultCapacityPoolSummaries(
+  db: Db,
+  options: DefaultCapacityPoolsBackfillOptions & { ensure?: boolean } = {}
+): Promise<DefaultCapacityPoolsEnsureResult> {
+  if (options.ensure) {
+    await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
+  }
+
+  const installation =
+    options.includeInstallation === false
+      ? null
+      : await readDefaultPoolSummary(db, {
+          scope: 'installation',
+          ownerUserId: null,
+          ownerProjectId: null,
+        });
+  const user = options.userId
+    ? await readDefaultPoolSummary(db, {
+        scope: 'user',
+        ownerUserId: options.userId,
+        ownerProjectId: null,
+      })
+    : null;
+  const project = options.projectId
+    ? await readDefaultPoolSummary(db, {
+        scope: 'project',
+        ownerUserId: null,
+        ownerProjectId: options.projectId,
+      })
+    : null;
+
+  return { installation, user, project };
 }
 
 async function listCredentialUserIds(db: Db): Promise<string[]> {
@@ -695,17 +737,17 @@ async function readDefaultPoolSummary(
   if (rows.length === 0) return null;
 
   const sourcesById = new Map<string, CapacitySourceIdentity>();
+  const candidates: CapacityPoolCandidateDto[] = [];
   for (const row of rows) {
     sourcesById.set(row.source.id, toCapacitySourceIdentity(row.source));
+    candidates.push(toCapacityPoolCandidate(row.candidate));
   }
-
-  const candidates = rows.map((row) => toCapacityPoolCandidate(row.candidate));
 
   return {
     pool: toCapacityPool(pool),
     sources: [...sourcesById.values()],
     candidates,
-    activeCandidateCount: candidates.length,
+    activeCandidateCount: rows.length,
   };
 }
 
@@ -731,55 +773,4 @@ function sourceScopePredicates(scope: ScopeIdentity) {
       ? eq(schema.capacitySources.ownerProjectId, scope.ownerProjectId)
       : isNull(schema.capacitySources.ownerProjectId),
   ];
-}
-
-function orderedLocationsForProvider(provider: CredentialProvider) {
-  const locations = getLocationsForProvider(provider);
-  const defaultLocation = getDefaultLocationForProvider(provider);
-  return [
-    ...locations.filter((location) => location.id === defaultLocation),
-    ...locations.filter((location) => location.id !== defaultLocation),
-  ];
-}
-
-function defaultPoolId(scope: ScopeIdentity): string {
-  switch (scope.scope) {
-    case 'installation':
-      return 'cap-pool-default:installation';
-    case 'user':
-      return `cap-pool-default:user:${scope.ownerUserId}`;
-    case 'project':
-      return `cap-pool-default:project:${scope.ownerProjectId}`;
-  }
-}
-
-function defaultCapacitySourceId(seed: CredentialCapacitySeed): string {
-  if (seed.platformCredentialId) {
-    return `cap-source-default:platform:${seed.platformCredentialId}`;
-  }
-  return `cap-source-default:${seed.scope}:${seed.credentialId}`;
-}
-
-function defaultCandidateId(
-  poolId: string,
-  sourceId: string,
-  provider: CredentialProvider,
-  location: string,
-  size: VMSize
-): string {
-  return `cap-candidate-default:${poolId}:${sourceId}:${provider}:${location}:${size}`;
-}
-
-function legacyCredentialReference(credentialId: string): string {
-  return `credentials:${credentialId}`;
-}
-
-function platformCredentialReference(credentialId: string): string {
-  return `platform_credentials:${credentialId}`;
-}
-
-function timestampVersion(timestamp: string | null | undefined): number | null {
-  if (!timestamp) return null;
-  const parsed = Date.parse(timestamp);
-  return Number.isFinite(parsed) ? parsed : null;
 }

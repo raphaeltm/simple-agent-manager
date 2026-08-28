@@ -14,8 +14,7 @@ const MOCK_USER = makeMockUser({
 
 const project = {
   id: PROJECT_ID,
-  name:
-    'Project With A Very Long Name For Settings Navigation And Mobile Header Wrapping Validation',
+  name: 'Project With A Very Long Name For Settings Navigation And Mobile Header Wrapping Validation',
   repository: 'acme/extremely-long-project-settings-repository-name-that-should-not-overflow',
   repoProvider: 'github',
   defaultBranch: 'main',
@@ -136,6 +135,109 @@ const emptyCredentialHealth = {
   resources: [],
 };
 
+function capacityCandidate(index: number, overrides: Record<string, unknown> = {}) {
+  return {
+    id: `candidate-${index}`,
+    poolId: 'pool-project-default',
+    capacitySourceId: 'source-project-default',
+    provider: 'hetzner',
+    location: index === 0 ? 'fsn1' : `region-${index}`,
+    workloadRole: 'workspace',
+    runtime: 'vm',
+    machineClass: 'shared-vm',
+    machineSize: index % 3 === 0 ? 'small' : index % 3 === 1 ? 'medium' : 'large',
+    priority: index,
+    candidateOrder: index,
+    status: 'active',
+    createdAt: '2026-08-28T00:00:00.000Z',
+    updatedAt: '2026-08-28T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function capacitySummary(overrides: Record<string, unknown> = {}) {
+  const candidates = [
+    capacityCandidate(0, { machineSize: 'small' }),
+    capacityCandidate(1, { location: 'fsn1', machineSize: 'medium' }),
+    capacityCandidate(2, { location: 'nbg1', machineSize: 'large' }),
+  ];
+  return {
+    pool: {
+      id: 'pool-project-default',
+      scope: 'project',
+      ownerUserId: null,
+      ownerProjectId: PROJECT_ID,
+      name: 'Project default pool with a deliberately long name and unicode marker Ω for wrapping',
+      isDefault: true,
+      revision: 2,
+      status: 'active',
+      strategy: 'balanced',
+      exhaustionPolicy: 'queue',
+      createdAt: '2026-08-28T00:00:00.000Z',
+      updatedAt: '2026-08-28T00:00:00.000Z',
+    },
+    sources: [
+      {
+        id: 'source-project-default',
+        scope: 'project',
+        ownerUserId: null,
+        ownerProjectId: PROJECT_ID,
+        sourceKind: 'cloud-provider-credential',
+        provider: 'hetzner',
+        credentialSource: 'project',
+        credentialId: 'credential-project-default',
+        platformCredentialId: null,
+        credentialReference:
+          'credentials:credential-project-default-with-long-reference-for-wrapping-only',
+        credentialVersion: 1787875200000,
+        externalSourceRef: null,
+        status: 'active',
+        createdAt: '2026-08-28T00:00:00.000Z',
+        updatedAt: '2026-08-28T00:00:00.000Z',
+      },
+    ],
+    candidates,
+    activeCandidateCount: candidates.length,
+    ...overrides,
+  };
+}
+
+function capacityDefaults(effective: unknown) {
+  return {
+    effective,
+    effectiveScope: effective ? 'project' : null,
+    defaults: [
+      {
+        scope: 'project',
+        visibility: 'visible',
+        visibilityReason: 'project-secret-read',
+        canReconcile: true,
+        summary: effective,
+      },
+      {
+        scope: 'user',
+        visibility: 'visible',
+        visibilityReason: 'authenticated-user',
+        canReconcile: true,
+        summary: null,
+      },
+      {
+        scope: 'installation',
+        visibility: 'hidden',
+        visibilityReason: 'superadmin-required',
+        canReconcile: false,
+        summary: null,
+      },
+    ],
+    precedence: ['project', 'user', 'installation'],
+    reconciledScopes: ['project', 'user'],
+    policyMutationSupported: false,
+  };
+}
+
+let capacityDefaultsStatus = 200;
+let capacityDefaultsBody: unknown = capacityDefaults(capacitySummary());
+
 async function setupMocks(page: Page) {
   await page.addInitScript(() =>
     localStorage.setItem('sam-onboarding-wizard-dismissed-owner-user', 'true')
@@ -186,6 +288,12 @@ async function setupMocks(page: Page) {
         return respond(200, emptyCredentialHealth);
       }
       if (subPath === '/runtime-config') return respond(200, { envVars: [], files: [] });
+      if (
+        subPath === '/capacity-pools/defaults' ||
+        subPath === '/capacity-pools/defaults/reconcile'
+      ) {
+        return respond(capacityDefaultsStatus, capacityDefaultsBody);
+      }
       if (subPath.startsWith('/agent-profiles')) return respond(200, []);
       if (subPath === '/credentials') return respond(200, { credentials: [] });
       if (subPath.startsWith('/deployment')) return respond(404, { error: 'Not found' });
@@ -209,6 +317,8 @@ async function expectCompactTabs(page: Page) {
 
 test.describe('Project settings sub-pages', () => {
   test.beforeEach(async ({ page }) => {
+    capacityDefaultsStatus = 200;
+    capacityDefaultsBody = capacityDefaults(capacitySummary());
     await setupMocks(page);
   });
 
@@ -244,6 +354,53 @@ test.describe('Project settings sub-pages', () => {
 
     await page.getByRole('heading', { name: 'Invite Link' }).scrollIntoViewIfNeeded();
     await screenshot(page, 'project-settings-access-invite');
+    await assertNoOverflow(page);
+  });
+
+  test('Infrastructure sub-page exposes default compute pool states without overflow', async ({
+    page,
+  }) => {
+    await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure`);
+    await expect(page.getByRole('heading', { name: 'Default Compute Pool' })).toBeVisible();
+    await expect(page.getByText('Project default applies first for this context.')).toBeVisible();
+    await expect(page.getByText('Hetzner · fsn1')).toBeVisible();
+    await expectCompactTabs(page);
+    await screenshot(page, 'project-settings-infrastructure-capacity-pool-normal');
+    await assertNoOverflow(page);
+
+    capacityDefaultsBody = capacityDefaults(null);
+    await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=empty`);
+    await expect(page.getByText('No visible active default pool')).toBeVisible();
+    await screenshot(page, 'project-settings-infrastructure-capacity-pool-empty');
+    await assertNoOverflow(page);
+
+    const manyCandidates = Array.from({ length: 14 }, (_, index) =>
+      capacityCandidate(index, {
+        location:
+          index === 13
+            ? 'region-with-a-very-long-location-name-and-special-marker-ß'
+            : `region-${index}`,
+      })
+    );
+    capacityDefaultsBody = capacityDefaults(
+      capacitySummary({
+        candidates: manyCandidates,
+        activeCandidateCount: manyCandidates.length,
+      })
+    );
+    await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=many`);
+    await expect(page.getByText('+2 more provider/region groups')).toBeVisible();
+    await screenshot(page, 'project-settings-infrastructure-capacity-pool-many');
+    await assertNoOverflow(page);
+
+    capacityDefaultsStatus = 403;
+    capacityDefaultsBody = {
+      error: 'FORBIDDEN',
+      message: 'Project capability is required',
+    };
+    await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=error`);
+    await expect(page.getByText('Project capability is required')).toBeVisible();
+    await screenshot(page, 'project-settings-infrastructure-capacity-pool-error');
     await assertNoOverflow(page);
   });
 });

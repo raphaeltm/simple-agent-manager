@@ -128,6 +128,10 @@ export {
   upsertSkillRuntimeFile,
 } from './agents';
 export { getCurrentUser } from './auth';
+export {
+  fetchProjectDefaultCapacityPools,
+  reconcileProjectDefaultCapacityPools,
+} from './capacity-pools';
 export { type CliVersionInfo, getCliDownloadUrl, getCliVersion } from './cli';
 export { API_URL, ApiClientError, request } from './client';
 export type {

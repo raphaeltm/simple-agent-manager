@@ -53,6 +53,9 @@ export type {
   CapacitySourceIdentity,
   CapacitySourceKind,
   CapacityWorkloadRole,
+  DefaultCapacityPoolScopeSummary,
+  DefaultCapacityPoolSummary,
+  ProjectDefaultCapacityPoolsResponse,
 } from './capacity-pool';
 export {
   CAPACITY_CREDENTIAL_SOURCES,

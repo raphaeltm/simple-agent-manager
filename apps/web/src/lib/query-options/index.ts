@@ -36,6 +36,7 @@ export {
   agentQueryKeys,
   projectSkillsQueryOptions,
 } from './agents';
+export { capacityPoolQueryKeys, projectDefaultCapacityPoolsQueryOptions } from './capacity-pools';
 export {
   allChatsQueryOptions,
   chatQueryKeys,

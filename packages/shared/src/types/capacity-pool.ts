@@ -108,6 +108,34 @@ export interface CapacityPlacementSnapshot {
   placementExplanationJson?: string | null;
 }
 
+// =============================================================================
+// Capacity Pool API Response Types
+// =============================================================================
+
+export interface DefaultCapacityPoolSummary {
+  pool: CapacityPool;
+  sources: CapacitySourceIdentity[];
+  candidates: CapacityPoolCandidate[];
+  activeCandidateCount: number;
+}
+
+export interface DefaultCapacityPoolScopeSummary {
+  scope: CapacityPoolScope;
+  visibility: 'visible' | 'hidden';
+  visibilityReason: string;
+  canReconcile: boolean;
+  summary: DefaultCapacityPoolSummary | null;
+}
+
+export interface ProjectDefaultCapacityPoolsResponse {
+  effective: DefaultCapacityPoolSummary | null;
+  effectiveScope: CapacityPoolScope | null;
+  defaults: DefaultCapacityPoolScopeSummary[];
+  precedence: CapacityPoolScope[];
+  reconciledScopes: CapacityPoolScope[];
+  policyMutationSupported: false;
+}
+
 export function isCapacityPoolScope(value: unknown): value is CapacityPoolScope {
   return typeof value === 'string' && (CAPACITY_POOL_SCOPES as readonly string[]).includes(value);
 }
