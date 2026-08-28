@@ -44,7 +44,7 @@ export function ProjectSettings() {
 
   return (
     <div className="grid gap-4 min-w-0">
-      <div className="grid gap-1">
+      <div className="grid gap-1 min-w-0">
         <h1 className="sam-type-page-title m-0 text-fg-primary">Project Settings</h1>
         <div className="text-xs text-fg-muted truncate">{project?.name ?? projectId}</div>
       </div>
@@ -113,7 +113,7 @@ export function ProjectSettingsGeneral() {
   };
 
   return (
-    <div className="grid gap-4">
+    <div className="grid gap-4 min-w-0">
       <section className="glass-surface rounded-lg p-4 grid gap-3">
         <div>
           <h2 className="sam-type-section-heading m-0 text-fg-primary">Project Name</h2>
@@ -200,7 +200,7 @@ export function ProjectSettingsAccess() {
   const { projectId, project } = useProjectContext();
 
   return (
-    <div className="grid gap-4">
+    <div className="grid gap-4 min-w-0">
       {project && <RepositoryAccessSettings project={project} />}
       <ProjectMembersSection projectId={projectId} />
     </div>

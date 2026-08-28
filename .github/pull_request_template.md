@@ -32,7 +32,21 @@ All checkboxes below are mandatory for any PR that changes runtime code (`.ts`, 
 - [ ] Mobile-first layout verified
 - [ ] Accessibility checks completed
 - [ ] Shared UI components used or exception documented
-- [ ] Playwright visual audit run locally — mock data scenarios (normal, long text, empty, many items, error, special chars) tested at mobile (375x667) and desktop (1280x800); no horizontal overflow; screenshots in `.codex/tmp/playwright-screenshots/` (see `.claude/rules/17-ui-visual-testing.md`)
+- [ ] Playwright visual audit run locally — mock data scenarios that push the changed UI surface (normal, long text, empty, many items, error, special chars) tested at mobile (375x667) and desktop (1280x800); no horizontal overflow; screenshots in `.codex/tmp/playwright-screenshots/` (see `.claude/rules/17-ui-visual-testing.md`)
+- [ ] Desktop and mobile screenshots for every changed UI surface are posted in a PR comment and linked below
+- [ ] Agent/human reviewed the posted screenshots for quality control and found no visual issues, or fixed/documented every issue found
+
+### UI Screenshot Evidence
+
+<!-- Required when `ui-change` is checked in Agent Preflight. -->
+<!-- Link the PR comment containing Playwright screenshots, or embed image links here. -->
+<!-- State the mocked stress scenarios used and explicitly attest that screenshots were reviewed for layout quality, overflow, clipping, readability, and responsive behavior. -->
+
+- PR screenshot comment:
+- Desktop screenshots:
+- Mobile screenshots:
+- Mock/stress data used:
+- Screenshot quality review:
 
 ## End-to-End Verification (Required for multi-component changes)
 
@@ -86,8 +100,8 @@ If local subagents were used during Phase 5, list every reviewer below. **Do NOT
 - [ ] **All local reviewers completed and findings addressed before merge**
 - [ ] **If any reviewer did NOT complete: `needs-human-review` label added and merge deferred to human**
 
-| Reviewer | Status | Outcome |
-|----------|--------|---------|
+| Reviewer                    | Status                                       | Outcome                                                |
+| --------------------------- | -------------------------------------------- | ------------------------------------------------------ |
 | <!-- e.g. go-specialist --> | <!-- PASS / ADDRESSED / PENDING / FAILED --> | <!-- summary of findings or "no critical findings" --> |
 
 <!--

@@ -56,6 +56,15 @@ function getSectionContent(block: string, heading: string): string | null {
   return match?.[1]?.trim() ?? null;
 }
 
+function getMarkdownSectionContent(body: string, heading: string): string | null {
+  const pattern = new RegExp(
+    `(?:^|\\n)#{2,3} ${escapeRegExp(heading)}\\s*([\\s\\S]*?)(?=\\n#{2,3} |\\n${escapeRegExp(PREFLIGHT_START)}|\\s*$)`,
+    'i'
+  );
+  const match = body.match(pattern);
+  return match?.[1]?.trim() ?? null;
+}
+
 function hasCheckedLine(block: string, text: string): boolean {
   const pattern = new RegExp(`- \\[[xX]\\] ${escapeRegExp(text)}`, 'i');
   return pattern.test(block);
@@ -188,6 +197,50 @@ function main(): void {
       failures.push(
         'public-surface-change/docs-sync-change requires concrete Documentation & Specs updates (N/A is not allowed).'
       );
+    }
+  }
+
+  if (checkedClasses.includes('ui-change')) {
+    const uiScreenshots = getMarkdownSectionContent(body, 'UI Screenshot Evidence');
+    if (!uiScreenshots || isExplicitNA(uiScreenshots)) {
+      failures.push(
+        'ui-change requires a filled "UI Screenshot Evidence" section with desktop/mobile Playwright screenshots and review attestation.'
+      );
+    } else {
+      const hasDesktop = /\bdesktop\b/i.test(uiScreenshots);
+      const hasMobile = /\bmobile\b/i.test(uiScreenshots);
+      const hasPlaywright = /\bplaywright\b/i.test(uiScreenshots);
+      const hasStressData =
+        /\b(mock|edge|stress|long text|many items|empty|error|special characters|push(?:es|ed)? the limits)\b/i.test(
+          uiScreenshots
+        );
+      const hasScreenshotLink =
+        /!\[[^\]]+\]\([^)]+\)|https?:\/\/\S+\.(?:png|jpg|jpeg|webp)(?:\?\S*)?/i.test(uiScreenshots);
+      const hasReviewAttestation =
+        /\b(reviewed|inspected)\b/i.test(uiScreenshots) &&
+        /\b(no issues|no visual issues|quality|overflow|clipping|layout)\b/i.test(uiScreenshots);
+
+      if (!hasDesktop || !hasMobile) {
+        failures.push('UI Screenshot Evidence must identify both desktop and mobile screenshots.');
+      }
+      if (!hasPlaywright) {
+        failures.push(
+          'UI Screenshot Evidence must state that screenshots were taken with Playwright.'
+        );
+      }
+      if (!hasStressData) {
+        failures.push(
+          'UI Screenshot Evidence must mention mock/edge-case data that pushes the changed UI surface.'
+        );
+      }
+      if (!hasScreenshotLink) {
+        failures.push('UI Screenshot Evidence must include at least one screenshot image/link.');
+      }
+      if (!hasReviewAttestation) {
+        failures.push(
+          'UI Screenshot Evidence must explicitly attest that screenshots were reviewed for quality and note the result.'
+        );
+      }
     }
   }
 

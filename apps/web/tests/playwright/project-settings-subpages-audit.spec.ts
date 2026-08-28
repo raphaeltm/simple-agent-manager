@@ -315,6 +315,18 @@ async function expectCompactTabs(page: Page) {
   expect(metrics.height).toBeLessThanOrEqual(56);
 }
 
+async function screenshotDefaultComputePoolPanel(page: Page, name: string) {
+  await page.getByRole('heading', { name: 'Default Compute Pool' }).scrollIntoViewIfNeeded();
+  await page.evaluate(() => window.scrollTo(0, window.scrollY));
+  await page.waitForTimeout(600);
+  const viewport = page.viewportSize();
+  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
+  await page.screenshot({
+    path: `../../.codex/tmp/playwright-screenshots/${name}${suffix}.png`,
+    fullPage: false,
+  });
+}
+
 test.describe('Project settings sub-pages', () => {
   test.beforeEach(async ({ page }) => {
     capacityDefaultsStatus = 200;
@@ -366,6 +378,10 @@ test.describe('Project settings sub-pages', () => {
     await expect(page.getByText('Hetzner · fsn1')).toBeVisible();
     await expectCompactTabs(page);
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-normal');
+    await screenshotDefaultComputePoolPanel(
+      page,
+      'project-settings-default-compute-pool-normal-focused'
+    );
     await assertNoOverflow(page);
 
     capacityDefaultsBody = capacityDefaults(null);
@@ -391,6 +407,10 @@ test.describe('Project settings sub-pages', () => {
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=many`);
     await expect(page.getByText('+2 more provider/region groups')).toBeVisible();
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-many');
+    await screenshotDefaultComputePoolPanel(
+      page,
+      'project-settings-default-compute-pool-many-focused'
+    );
     await assertNoOverflow(page);
 
     capacityDefaultsStatus = 403;

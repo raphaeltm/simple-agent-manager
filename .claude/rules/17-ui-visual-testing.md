@@ -39,6 +39,11 @@ Every changed surface must be screenshotted at **both**:
 2. Use descriptive filenames: `<component>-<scenario>-<viewport>.png`
    - Example: `task-list-long-text-mobile.png`, `task-detail-error-desktop.png`
 3. Wait at least 500ms after navigation before capturing to allow render settling
+4. Post desktop and mobile screenshots for every changed UI surface in a PR
+   comment. Local screenshot paths alone are not review evidence because they
+   disappear with the agent workspace.
+5. Link the screenshot comment, or embed the image links, in the PR body's
+   `UI Screenshot Evidence` section.
 
 ### What to Check in Screenshots
 
@@ -142,6 +147,18 @@ If any visual audit reveals:
 - Style inconsistencies with the design system
 
 You MUST fix the issue before proceeding. Do NOT defer visual bugs to a follow-up task.
+
+### PR Evidence Gate
+
+When a PR checks `ui-change` in Agent Preflight, CI requires a filled
+`UI Screenshot Evidence` section in the PR body. That section must include:
+
+1. Desktop and mobile Playwright screenshot links for every changed surface.
+2. The mock/edge-case data used to push the surface, not only happy-path data.
+3. An explicit quality-control attestation that the screenshots were reviewed
+   for layout quality, overflow, clipping, readability, and responsive behavior.
+4. The result of that review: either no visual issues found, or the issues found
+   and fixed before handoff.
 
 ### Guided Flows Must Test the User Action
 
