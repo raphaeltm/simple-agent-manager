@@ -51,16 +51,16 @@ Selected direction: variant 1 for this PR. It keeps the existing query/mutation 
 
 ## Implementation checklist
 
-- [ ] Add/adjust shared frontend types and an isolated adapter that normalizes current and future provider-native catalog shapes into `ComputePoolOffering` rows containing provider, region, SKU/type, vCPU, RAM, disk, price, availability/staleness, and matching candidate IDs when present.
-- [ ] Move user compute-pool management from Settings → Cloud Provider to a new Settings → Infrastructure route/tab, leaving credential setup forms on the Cloud Provider page.
-- [ ] Move installation compute-pool management from Admin → Credentials to a new Admin → Infrastructure route/tab, leaving platform credential management on Admin → Credentials.
-- [ ] Keep project compute-pool management on Project Settings → Infrastructure and update it in place.
-- [ ] Implement scope-aware empty/blocked states that explain the required credential scope and link users to the relevant setup page: user cloud credentials, project-shared cloud credentials, or admin platform cloud credentials.
-- [ ] Replace read-only candidate pills with allowed instance rows/cards showing provider, region/location, concrete SKU/type, vCPU, RAM, disk, price when known, runtime/class/status, and remove/restore actions.
-- [ ] Replace checkbox/t-shirt-size editor with provider-native add/remove controls. Removed offerings must disappear from the active allowed list and appear as removed/restorable, not as unchecked small/medium/large pills.
-- [ ] Add a fast catalog picker with filters for provider, region/location, minimum vCPU, minimum memory, and maximum price where parseable/available.
-- [ ] Add bulk-friendly affordances for filtered catalog results and selected allowed offerings, while preserving scope-specific PATCH requests through the existing API clients.
-- [ ] Ensure add/remove UI state propagates into `DefaultCapacityPoolUpdateRequest.candidates` and route-specific API clients for project/user/installation scopes.
+- [x] Add/adjust shared frontend types and an isolated adapter that normalizes current and future provider-native catalog shapes into `ComputePoolOffering` rows containing provider, region, SKU/type, vCPU, RAM, disk, price, availability/staleness, and matching candidate IDs when present.
+- [x] Move user compute-pool management from Settings → Cloud Provider to a new Settings → Infrastructure route/tab, leaving credential setup forms on the Cloud Provider page.
+- [x] Move installation compute-pool management from Admin → Credentials to a new Admin → Infrastructure route/tab, leaving platform credential management on Admin → Credentials.
+- [x] Keep project compute-pool management on Project Settings → Infrastructure and update it in place.
+- [x] Implement scope-aware empty/blocked states that explain the required credential scope and link users to the relevant setup page: user cloud credentials, project-shared cloud credentials, or admin platform cloud credentials.
+- [x] Replace read-only candidate pills with allowed instance rows/cards showing provider, region/location, concrete SKU/type, vCPU, RAM, disk, price when known, runtime/class/status, and remove/restore actions.
+- [x] Replace checkbox/t-shirt-size editor with provider-native add/remove controls. Removed offerings must disappear from the active allowed list and appear as removed/restorable, not as unchecked small/medium/large pills.
+- [x] Add a fast catalog picker with filters for provider, region/location, minimum vCPU, minimum memory, and maximum price where parseable/available.
+- [x] Add bulk-friendly affordances for filtered catalog results and selected allowed offerings, while preserving scope-specific PATCH requests through the existing API clients.
+- [x] Ensure add/remove UI state propagates into `DefaultCapacityPoolUpdateRequest.candidates` and route-specific API clients for project/user/installation scopes.
 - [ ] Update component/unit tests for provider-native offering display, add/remove payloads, blocked credential states, user/admin/project route placement, and no secret text leakage.
 - [ ] Update Playwright audits for project, user, and installation pool pages on desktop and mobile with stress data: many providers, 30+ offerings, long instance names, multiple regions, missing price, high price, unavailable/stale offerings, special characters, and a small mobile viewport.
 - [ ] Run Playwright screenshot capture into `.codex/tmp/playwright-screenshots/`, review screenshots for overflow/clipping/readability, and record screenshot artifact paths/QC results.

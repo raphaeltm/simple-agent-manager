@@ -152,7 +152,13 @@ export type {
 // Node class runtime guards (value exports, not types)
 export { isNodeClass, isUserOwnedNodeClass } from './workspace';
 // Provider Catalog
-export type { LocationInfo, ProviderCatalog, ProviderCatalogResponse, SizeInfo } from './provider';
+export type {
+  LocationInfo,
+  ProviderCatalog,
+  ProviderCatalogOfferingInfo,
+  ProviderCatalogResponse,
+  SizeInfo,
+} from './provider';
 
 // Project
 export type {

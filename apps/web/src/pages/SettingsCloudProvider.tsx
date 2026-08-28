@@ -4,7 +4,6 @@ import { DigitalOceanCredentialForm } from '../components/DigitalOceanCredential
 import { GcpCredentialForm } from '../components/GcpCredentialForm';
 import { HetznerTokenForm } from '../components/HetznerTokenForm';
 import { InfomaniakCredentialForm } from '../components/InfomaniakCredentialForm';
-import { DefaultCapacityPoolsPanel } from '../components/project-settings/DefaultCapacityPoolsPanel';
 import { ScalewayCredentialForm } from '../components/ScalewayCredentialForm';
 import { UpCloudCredentialForm } from '../components/UpCloudCredentialForm';
 import { VultrCredentialForm } from '../components/VultrCredentialForm';
@@ -32,8 +31,6 @@ export function SettingsCloudProvider() {
 
   return (
     <div className="flex flex-col gap-8">
-      <DefaultCapacityPoolsPanel scope="user" />
-
       <section className="glass-surface rounded-lg p-4">
         <h3 className="text-base font-semibold text-fg-primary mb-3">Hetzner</h3>
         <HetznerTokenForm credential={hetznerCredential} onUpdate={reload} />
