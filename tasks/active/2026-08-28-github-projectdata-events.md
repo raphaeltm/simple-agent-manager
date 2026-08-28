@@ -21,9 +21,9 @@ metadata/display data, and use idempotent delivery keys with payload fingerprint
 - B4 event admission is exposed through `apps/api/src/services/project-data.ts` as
   `admitProjectEvent(env, projectId, input)`, backed by the per-project
   `ProjectData` Durable Object.
-- ProjectData admission already detects duplicate replay when `(project_id, source,
-  delivery_key)` repeats with the same `payloadFingerprint`, and marks conflicts when
-  the same key arrives with a different fingerprint.
+- ProjectData admission detects duplicate replay when `(project_id, source, delivery_key)`
+  repeats with the same `payloadFingerprint`, and marks conflicts when the same key
+  arrives with a different fingerprint.
 - `packages/shared/src/types/project-events.ts` defines bounded event fields:
   `source`, `eventType`, `subject`, `severity`, `deliveryKey`,
   `payloadFingerprint`, `metadata`, `display`, and optional `rawPayloadRef`.
@@ -35,19 +35,19 @@ metadata/display data, and use idempotent delivery keys with payload fingerprint
 
 ## Checklist
 
-- [ ] Add a GitHub ProjectData event producer service for existing verified webhook paths.
-- [ ] Admit events for supported GitHub trigger paths: `pull_request`, `issue_comment`,
+- [x] Add a GitHub ProjectData event producer service for existing verified webhook paths.
+- [x] Admit events for supported GitHub trigger paths: `pull_request`, `issue_comment`,
   `issues`, and `push`.
-- [ ] Admit repository maintenance events where a project can be matched by repository
+- [x] Admit repository maintenance events where a project can be matched by repository
   id/name.
-- [ ] Use bounded normalized metadata/display only; do not persist raw webhook bodies.
-- [ ] Use deterministic delivery keys and payload fingerprints.
-- [ ] Wire producer admission into GitHub webhook ingress independently from trigger task routing.
-- [ ] Add tests for normalized event construction, duplicate replay, and same-key /
+- [x] Use bounded normalized metadata/display only; do not persist raw webhook bodies.
+- [x] Use deterministic delivery keys and payload fingerprints.
+- [x] Wire producer admission into GitHub webhook ingress independently from trigger task routing.
+- [x] Add tests for normalized event construction, duplicate replay, and same-key /
   different-fingerprint conflicts.
-- [ ] Add route/service tests proving the real webhook path schedules ProjectData
+- [x] Add route/service tests proving the real webhook path schedules ProjectData
   admission without changing trigger behavior.
-- [ ] Run focused API tests and relevant typecheck/lint/format quality gates.
+- [x] Run focused API tests and relevant typecheck/lint/format quality gates.
 - [ ] Run specialist review: task-completion-validator, cloudflare-specialist,
   constitution-validator, security-auditor, and test-engineer.
 - [ ] Open draft PR targeting `sam/weve-previously-talked-eventing-y207hp`.

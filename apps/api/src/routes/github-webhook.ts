@@ -16,6 +16,7 @@ import {
   upsertCanonicalInstallationAccount,
 } from '../services/github-installation-accounts';
 import { getStoredInstallationId } from '../services/github-installation-ids';
+import { handleGitHubProjectEventAdmission } from '../services/github-project-event-producer';
 import { handleGitHubEventForTriggers } from '../services/github-trigger-handler';
 import { getGitHubWebhookSecret } from '../services/platform-config';
 
@@ -61,6 +62,13 @@ export async function handleGitHubWebhook(c: GitHubContext): Promise<Response> {
 
   const deliveryId = c.req.header('x-github-delivery');
   if (event && deliveryId) {
+    c.executionCtx.waitUntil(
+      handleGitHubProjectEventAdmission(c.env, {
+        deliveryId,
+        eventType: event,
+        payload: data,
+      })
+    );
     c.executionCtx.waitUntil(handleTriggerRouting(c, deliveryId, event, data));
   }
 
