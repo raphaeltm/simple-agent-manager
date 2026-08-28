@@ -48,12 +48,14 @@ Every changed surface must be screenshotted at **both**:
 ### Preflight Enforcement
 
 The `scripts/quality/check-preflight-evidence.ts` checker enforces the UI evidence
-requirement as a CI gate for PRs that check `ui-change` in Agent Preflight. It
-requires the `UI Screenshot Evidence` section to include at least one screenshot
-link on the line identifying the **desktop** screenshots and at least one on the
-line identifying the **mobile** screenshots (Markdown image, direct image URL, or
-a GitHub `#issuecomment-…` URL), so a single link cannot satisfy multiple changed
-surfaces. Keep this checker and this section aligned.
+requirement as a CI gate for PRs that check `ui-change` in Agent Preflight. The
+`UI Screenshot Evidence` section must enumerate every changed surface under its own
+`#### Surface: <name>` heading, and each surface block must carry a **desktop**
+screenshot link and a **mobile** screenshot link (Markdown image, direct image URL,
+or a GitHub `#issuecomment-…` URL), plus the surface's mock/stress data and its
+screenshot quality review attestation. Global-only desktop/mobile links that are not
+bound to an enumerated surface are rejected — a single link cannot satisfy multiple
+changed surfaces. Keep this checker and this section aligned.
 
 ### What to Check in Screenshots
 
@@ -161,13 +163,16 @@ You MUST fix the issue before proceeding. Do NOT defer visual bugs to a follow-u
 ### PR Evidence Gate
 
 When a PR checks `ui-change` in Agent Preflight, CI requires a filled
-`UI Screenshot Evidence` section in the PR body. That section must include:
+`UI Screenshot Evidence` section in the PR body. The section must enumerate every
+changed surface and, for each surface, include:
 
-1. Desktop and mobile Playwright screenshot links for every changed surface.
-2. The mock/edge-case data used to push the surface, not only happy-path data.
-3. An explicit quality-control attestation that the screenshots were reviewed
-   for layout quality, overflow, clipping, readability, and responsive behavior.
-4. The result of that review: either no visual issues found, or the issues found
+1. A `#### Surface: <name>` heading identifying the surface.
+2. Desktop and mobile Playwright screenshot links for that surface (image link or
+   PR comment `#issuecomment-…` URL).
+3. The mock/edge-case data used to push that surface, not only happy-path data.
+4. An explicit quality-control attestation that the surface's screenshots were
+   reviewed for layout quality, overflow, clipping, readability, and responsive
+   behavior, plus the result: either no visual issues found, or the issues found
    and fixed before handoff.
 
 ### Guided Flows Must Test the User Action

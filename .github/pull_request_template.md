@@ -39,14 +39,21 @@ All checkboxes below are mandatory for any PR that changes runtime code (`.ts`, 
 ### UI Screenshot Evidence
 
 <!-- Required when `ui-change` is checked in Agent Preflight. -->
-<!-- Link the PR comment containing Playwright screenshots, or embed image links here. -->
-<!-- State the mocked stress scenarios used and explicitly attest that screenshots were reviewed for layout quality, overflow, clipping, readability, and responsive behavior. -->
+<!-- List EVERY changed UI surface below. Each changed surface gets its own repeated
+     `#### Surface: <name>` block with desktop evidence, mobile evidence, mock/stress
+     data, and a quality-control attestation for that surface.
+     Evidence may be an embedded/direct image link or a GitHub PR comment URL
+     (`#issuecomment-...`). The preflight checker REJECTS global-only desktop/mobile
+     links that do not enumerate surfaces. -->
 
-- PR screenshot comment:
-- Desktop screenshots:
-- Mobile screenshots:
-- Mock/stress data used:
-- Screenshot quality review:
+#### Surface: <name of the changed UI surface>
+
+- Desktop evidence: <!-- image link or PR comment #issuecomment-... -->
+- Mobile evidence: <!-- image link or PR comment #issuecomment-... -->
+- Mock/stress data used: <!-- Playwright mock data that pushed this surface (long text, many items, empty, error, special characters, etc.) -->
+- Screenshot quality review: <!-- attest each screenshot was reviewed for layout quality, overflow, clipping, readability, and responsive behavior; state result: no issues found, or issues found and fixed/documented -->
+
+<!-- Copy the block above for EVERY changed surface (one `#### Surface:` block per surface). -->
 
 ## End-to-End Verification (Required for multi-component changes)
 
