@@ -52,3 +52,10 @@ Compute pools Wave 2B needs an internal, idempotent service that can lazily crea
 - `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/capacity-pools.test.ts tests/unit/services/default-capacity-pools.test.ts tests/unit/db/capacity-pool-migration.test.ts` — passed, 3 files / 18 tests.
 - `pnpm --filter @simple-agent-manager/api typecheck` — passed.
 - `pnpm --filter @simple-agent-manager/api lint` — passed.
+- `pnpm format:check` — passed.
+- `pnpm --filter @simple-agent-manager/api test` — passed, 622 files / 8,471 tests.
+- `pnpm --filter @simple-agent-manager/api build` — passed.
+- `pnpm quality:migration-safety` — passed, 174 FK relationships scanned, 0 violations.
+- `pnpm check:fast` — passed.
+- `pnpm build` — passed, 9 successful tasks.
+- `pnpm typecheck` — passed, 19 successful tasks.
