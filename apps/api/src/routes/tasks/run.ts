@@ -10,9 +10,8 @@
  * 3. Returns immediately with 202 Accepted
  * 4. Async: selects/creates node, creates workspace, runs agent, creates PR, cleans up
  */
-import type { CredentialProvider,RunTaskResponse, TaskStatus, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider,getLocationsForProvider, isValidLocationForProvider, isValidProvider } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import type { RunTaskResponse, TaskStatus, VMSize } from '@simple-agent-manager/shared';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -24,6 +23,11 @@ import { getAuth, requireApproved,requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
 import { parseOptionalBody, RunTaskSchema } from '../../schemas';
+import {
+  PlacementResolutionError,
+  resolvePlacementCredentialAttribution,
+  resolveTaskStartPlacement,
+} from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
 import { isTaskBlocked } from '../../services/task-graph';
 import { cleanupTaskRun } from '../../services/task-runner';
@@ -103,22 +107,6 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
     }
   }
 
-  // Check the user has cloud provider credentials (required for node provisioning)
-  const [credential] = await db
-    .select({ id: schema.credentials.id })
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.credentialType, 'cloud-provider')
-      )
-    )
-    .limit(1);
-
-  if (!credential) {
-    throw errors.badRequest('Cloud provider credentials required. Connect your account in Settings.');
-  }
-
   // Parse request body (optional — empty body means use defaults)
   const body = await parseOptionalBody(c.req.raw, RunTaskSchema, {} as Record<string, never>);
 
@@ -133,36 +121,78 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
   // 403 if access was revoked or the repository id drifted.
   await requireRepositoryUserAccess(c, db, project, userId);
 
-  // Determine VM config (precedence: explicit override > project default > platform default)
-  const vmSize: VMSize = body.vmSize
-    ?? (project.defaultVmSize as VMSize | null)
-    ?? DEFAULT_VM_SIZE;
-  const provider: CredentialProvider | null =
-    typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
-      ? project.defaultProvider
-      : null;
-  const vmLocation: VMLocation = (body.vmLocation as VMLocation)
-    ?? (project.defaultLocation as VMLocation | null)
-    ?? (provider ? getDefaultLocationForProvider(provider) as VMLocation | null : null)
-    ?? DEFAULT_VM_LOCATION;
-  const workspaceProfile: WorkspaceProfile = body.workspaceProfile
-    ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
-    ?? DEFAULT_WORKSPACE_PROFILE;
-  const devcontainerConfigName: string | null = workspaceProfile === 'lightweight'
-    ? null
-    : (body.devcontainerConfigName ?? project.defaultDevcontainerConfigName ?? null);
+  const placement = (() => {
+    try {
+      return resolveTaskStartPlacement({
+        entryPoint: 'task-run',
+        taskId: task.id,
+        projectId,
+        userId,
+        project,
+        explicit: {
+          vmSize: body.vmSize ?? null,
+          vmSizeSource: 'task',
+          vmLocation: body.vmLocation ?? null,
+          workspaceProfile: body.workspaceProfile ?? null,
+          devcontainerConfigName: body.devcontainerConfigName,
+        },
+        credentialProjectPolicy: 'current-project',
+        taskModeDefault: 'task',
+        resourceRequirements: {},
+      });
+    } catch (err) {
+      if (err instanceof PlacementResolutionError) {
+        throw errors.badRequest(err.message);
+      }
+      throw err;
+    }
+  })();
+
+  const { resolveCredentialSource } = await import('../../services/provider-credentials');
+  const credResult = await resolveCredentialSource(
+    db,
+    placement.credentialLookup.userId,
+    placement.credentialLookup.provider,
+    placement.credentialLookup.projectId
+  );
+  if (!credResult) {
+    throw errors.badRequest('Cloud provider credentials required. Connect your account in Settings.');
+  }
+  if (credResult.credentialSource === 'platform') {
+    const quotaEnforcementEnabled = c.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
+    if (quotaEnforcementEnabled) {
+      const { checkQuotaForUser } = await import('../../services/compute-quotas');
+      const quotaCheck = await checkQuotaForUser(db, userId);
+      if (!quotaCheck.allowed) {
+        throw errors.forbidden(
+          `Monthly compute quota exceeded. You've used ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours this month. ` +
+          'Add your own cloud provider credentials in Settings or contact your admin to increase your quota.'
+        );
+      }
+    }
+  }
+
+  const {
+    effectiveProvider,
+    credentialAttributionUserId,
+    credentialAttributionProjectId,
+    credentialAttributionSource,
+  } = resolvePlacementCredentialAttribution(placement, credResult);
+  const {
+    vmSize,
+    vmSizeSource,
+    vmLocation,
+    workspaceProfile,
+    devcontainerConfigName,
+    taskMode,
+    agentType,
+    resolvedReservation,
+  } = placement;
+
   // Explicit run branch means "continue work from this branch". Otherwise,
   // use the task output branch when present so VM-agent completion pushes cannot
   // land on the repository default branch.
   const branch = body.branch?.trim() || task.outputBranch || project.defaultBranch;
-
-  // Validate location against provider
-  if (provider !== null && !isValidLocationForProvider(provider, vmLocation)) {
-    const validLocations = getLocationsForProvider(provider).map((l) => l.id);
-    throw errors.badRequest(
-      `Location '${vmLocation}' is not valid for provider '${provider}'. Valid locations: ${validLocations.join(', ')}`
-    );
-  }
 
   // Look up user's githubId for noreply email fallback
   const [userRow] = await db
@@ -174,8 +204,29 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
   // Transition task to queued with initial execution step (optimistic lock on 'ready')
   const now = new Date().toISOString();
   const transitionResult = await c.env.DATABASE.prepare(
-    `UPDATE tasks SET status = 'queued', execution_step = 'node_selection', updated_at = ? WHERE id = ? AND status = 'ready'`
-  ).bind(now, task.id).run();
+    `UPDATE tasks
+     SET status = 'queued',
+         execution_step = 'node_selection',
+         requested_vm_size = ?,
+         requested_vm_size_source = ?,
+         resource_requirements_source = ?,
+         resolved_reservation_json = ?,
+         credential_attribution_user_id = ?,
+         credential_attribution_project_id = ?,
+         credential_attribution_source = ?,
+         updated_at = ?
+     WHERE id = ? AND status = 'ready'`
+  ).bind(
+    vmSize,
+    vmSizeSource,
+    resolvedReservation.source,
+    JSON.stringify(resolvedReservation),
+    credentialAttributionUserId,
+    credentialAttributionProjectId,
+    credentialAttributionSource,
+    now,
+    task.id
+  ).run();
 
   // If another request already transitioned this task, reject (double-click protection)
   if (!transitionResult.meta.changes || transitionResult.meta.changes === 0) {
@@ -251,10 +302,14 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
       installationId: project.installationId,
       projectDefaultVmSize: project.defaultVmSize as VMSize | null,
       chatSessionId: sessionId,
-      agentType: project.defaultAgentType ?? null,
+      agentType,
       workspaceProfile,
       devcontainerConfigName,
-      cloudProvider: provider,
+      cloudProvider: effectiveProvider,
+      credentialAttributionUserId,
+      credentialAttributionProjectId,
+      credentialAttributionSource,
+      taskMode,
       agentProfileHint: task.agentProfileHint ?? null,
       // Full profile resolution is not supported on the kanban Run path, but the
       // persisted profile hint must still reach TaskRunner so workspace
@@ -269,6 +324,8 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
         nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
       },
+      resolvedReservation,
+      vmSizeSource,
     });
   } catch (err) {
     const failedAt = new Date().toISOString();

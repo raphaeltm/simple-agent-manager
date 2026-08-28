@@ -22,9 +22,12 @@ describe('skill submit path source contracts', () => {
 
   it('trigger submit resolves stored skill id and persists skill metadata', () => {
     const triggerSubmit = apiSrc('services/trigger-submit.ts');
+    const placementResolver = apiSrc('services/placement-resolver.ts');
     expect(triggerSubmit).toContain('resolveSkillProfile');
     expect(triggerSubmit).toContain('input.skillId');
-    expect(triggerSubmit).toContain('skillId: resolvedProfile?.skillId ?? undefined');
+    expect(triggerSubmit).toContain('resolveTaskStartPlacement');
+    expect(triggerSubmit).toContain('skill: skillResourceRequirements');
+    expect(placementResolver).toContain('skillId: profile?.skillId ?? undefined');
     expect(triggerSubmit).toContain('skillId: resolvedProfile?.skillId ?? null');
     expect(triggerSubmit).toContain('skillHint: input.skillId');
   });

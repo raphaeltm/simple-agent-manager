@@ -6,22 +6,7 @@
  *
  * Flow: trigger fires → submitTriggeredTask() → creates task + session → starts TaskRunner DO
  */
-import type {
-  CredentialProvider,
-  TaskMode,
-  VMLocation,
-  VMSize,
-  WorkspaceProfile,
-} from '@simple-agent-manager/shared';
-import {
-  DEFAULT_VM_LOCATION,
-  DEFAULT_VM_SIZE,
-  DEFAULT_WORKSPACE_PROFILE,
-  getDefaultLocationForProvider,
-  isValidProvider,
-  resolveResourceReservation,
-  type TriggeredBy,
-} from '@simple-agent-manager/shared';
+import type { TaskMode, TriggeredBy, VMSize } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -31,6 +16,11 @@ import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { requireRepositoryOwnerAccess } from '../routes/projects/_helpers';
 import { generateBranchName } from './branch-name';
+import {
+  PlacementResolutionError,
+  resolvePlacementCredentialAttribution,
+  resolveTaskStartPlacement,
+} from './placement-resolver';
 import * as projectDataService from './project-data';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from './skills';
 import { markQueuedTaskFailed } from './task-failure';
@@ -106,62 +96,66 @@ export async function submitTriggeredTask(
     resolvedProfile?.resourceRequirementsJson
   );
 
-  // VM config precedence: trigger override → profile → project default → platform default
-  const vmSizeSource = input.vmSizeOverride
-    ? ('trigger' as const)
-    : resolvedProfile?.vmSizeOverride
-      ? ('agent-profile' as const)
-      : project.defaultVmSize
-        ? ('project' as const)
-        : ('platform' as const);
-  const vmSize: VMSize =
-    (input.vmSizeOverride as VMSize | null) ??
-    (resolvedProfile?.vmSizeOverride as VMSize | null) ??
-    (project.defaultVmSize as VMSize | null) ??
-    DEFAULT_VM_SIZE;
-
-  const profileProvider =
-    typeof resolvedProfile?.provider === 'string' && isValidProvider(resolvedProfile.provider)
-      ? resolvedProfile.provider
-      : null;
-  const projectDefaultProvider =
-    typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
-      ? project.defaultProvider
-      : null;
-  const provider: CredentialProvider | null = profileProvider ?? projectDefaultProvider ?? null;
+  const taskId = ulid();
+  const placement = (() => {
+    try {
+      return resolveTaskStartPlacement({
+        entryPoint: 'trigger-submit',
+        taskId,
+        triggerId: input.triggerId,
+        projectId: input.projectId,
+        userId: input.userId,
+        project,
+        profile: resolvedProfile,
+        explicit: {
+          vmSize: (input.vmSizeOverride as VMSize | null) ?? null,
+          vmSizeSource: 'trigger',
+          taskMode: input.taskMode ?? null,
+        },
+        credentialProjectPolicy: 'current-project',
+        taskModeDefault: 'workspace-profile',
+        resourceRequirements: {
+          skill: skillResourceRequirements,
+        },
+      });
+    } catch (err) {
+      if (err instanceof PlacementResolutionError) {
+        throw new Error(err.message);
+      }
+      throw err;
+    }
+  })();
 
   const { resolveCredentialSource } = await import('./provider-credentials');
   const credResult = await resolveCredentialSource(
     db,
-    input.userId,
-    provider ?? undefined,
-    input.projectId
+    placement.credentialLookup.userId,
+    placement.credentialLookup.provider,
+    placement.credentialLookup.projectId
   );
   if (!credResult) {
     throw new Error(`No cloud provider credentials available for trigger ${input.triggerId}`);
   }
-  const effectiveProvider = provider ?? credResult.providerName;
-
-  const vmLocation: VMLocation =
-    (resolvedProfile?.vmLocation as VMLocation | null) ??
-    (project.defaultLocation as VMLocation | null) ??
-    (provider ? (getDefaultLocationForProvider(provider) as VMLocation | null) : null) ??
-    DEFAULT_VM_LOCATION;
-
-  const workspaceProfile: WorkspaceProfile =
-    (resolvedProfile?.workspaceProfile as WorkspaceProfile | null) ??
-    (project.defaultWorkspaceProfile as WorkspaceProfile | null) ??
-    DEFAULT_WORKSPACE_PROFILE;
-
-  const taskMode: TaskMode =
-    input.taskMode ??
-    (resolvedProfile?.taskMode as TaskMode | null) ??
-    (workspaceProfile === 'lightweight' ? 'conversation' : 'task');
+  const {
+    effectiveProvider,
+    credentialAttributionUserId,
+    credentialAttributionProjectId,
+    credentialAttributionSource,
+  } = resolvePlacementCredentialAttribution(placement, credResult);
+  const {
+    vmSize,
+    vmSizeSource,
+    vmLocation,
+    workspaceProfile,
+    devcontainerConfigName,
+    taskMode,
+    resolvedReservation,
+    agentType,
+  } = placement;
 
   // Generate branch name from trigger name + date
   const branchPrefix = env.BRANCH_NAME_PREFIX || 'sam/';
   const branchMaxLength = parseInt(env.BRANCH_NAME_MAX_LENGTH || '60', 10);
-  const taskId = ulid();
   const branchName = generateBranchName(input.triggerName, taskId, {
     prefix: branchPrefix,
     maxLength: branchMaxLength,
@@ -170,21 +164,6 @@ export async function submitTriggeredTask(
   // Generate concise task title
   const titleConfig = getTaskTitleConfig(env);
   const taskTitle = await generateTaskTitle(env, input.renderedPrompt, titleConfig);
-
-  // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
-  const resolvedReservation = resolveResourceReservation(
-    {
-      skill: skillResourceRequirements,
-    },
-    {
-      taskId,
-      triggerId: input.triggerId,
-      skillId: resolvedProfile?.skillId ?? undefined,
-      agentProfileId: resolvedProfile?.profileId ?? undefined,
-      projectId: input.projectId,
-      userId: input.userId,
-    }
-  );
 
   const now = new Date().toISOString();
 
@@ -211,10 +190,9 @@ export async function submitTriggeredTask(
     resourceRequirementsJson: resolvedProfile?.resourceRequirementsJson ?? null,
     resourceRequirementsSource: resolvedReservation.source,
     resolvedReservationJson: JSON.stringify(resolvedReservation),
-    credentialAttributionUserId: input.userId,
-    credentialAttributionProjectId:
-      credResult.credentialSource === 'project' ? input.projectId : null,
-    credentialAttributionSource: credResult.credentialSource,
+    credentialAttributionUserId,
+    credentialAttributionProjectId,
+    credentialAttributionSource,
     createdBy: input.userId,
     createdAt: now,
     updatedAt: now,
@@ -296,13 +274,13 @@ export async function submitTriggeredTask(
         outputBranch: branchName,
         projectDefaultVmSize: project.defaultVmSize as VMSize | null,
         chatSessionId: sessionId,
-        agentType: resolvedProfile?.agentType ?? project.defaultAgentType ?? null,
+        agentType,
         workspaceProfile,
+        devcontainerConfigName,
         cloudProvider: effectiveProvider,
-        credentialAttributionUserId: input.userId,
-        credentialAttributionProjectId:
-          credResult.credentialSource === 'project' ? input.projectId : null,
-        credentialAttributionSource: credResult.credentialSource,
+        credentialAttributionUserId,
+        credentialAttributionProjectId,
+        credentialAttributionSource,
         taskMode,
         model: resolvedProfile?.model ?? null,
         effort: resolvedProfile?.effort ?? null,

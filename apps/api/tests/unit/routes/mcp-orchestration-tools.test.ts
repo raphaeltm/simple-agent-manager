@@ -5,10 +5,24 @@ const MCP_ORCHESTRATION_SETUP_TIMEOUT_MS = 30_000;
 
 const mockStopAgentSessionOnNode = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const mockSendPromptToAgentOnNode = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const mockResolveCredentialSource = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ credentialSource: 'user', providerName: 'hetzner' })
+);
+const mockCheckQuotaForUser = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ allowed: true, used: 0, limit: 100 })
+);
 
 vi.mock('../../../src/services/node-agent', () => ({
   stopAgentSessionOnNode: mockStopAgentSessionOnNode,
   sendPromptToAgentOnNode: mockSendPromptToAgentOnNode,
+}));
+
+vi.mock('../../../src/services/provider-credentials', () => ({
+  resolveCredentialSource: mockResolveCredentialSource,
+}));
+
+vi.mock('../../../src/services/compute-quotas', () => ({
+  checkQuotaForUser: mockCheckQuotaForUser,
 }));
 
 // Mock KV namespace
@@ -292,6 +306,11 @@ describe('MCP Orchestration Tools', () => {
     mockKV.get.mockResolvedValue(validTokenData);
     mockStopAgentSessionOnNode.mockResolvedValue(undefined);
     mockSendPromptToAgentOnNode.mockResolvedValue(undefined);
+    mockResolveCredentialSource.mockResolvedValue({
+      credentialSource: 'user',
+      providerName: 'hetzner',
+    });
+    mockCheckQuotaForUser.mockResolvedValue({ allowed: true, used: 0, limit: 100 });
     mockDoStub.createSession = vi.fn().mockResolvedValue('session-new');
     mockDoStub.persistMessage = vi.fn().mockResolvedValue('msg-1');
     const { mcpRoutes } = await import('../../../src/routes/mcp');

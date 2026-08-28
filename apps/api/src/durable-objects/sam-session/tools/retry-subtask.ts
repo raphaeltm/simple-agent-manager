@@ -5,15 +5,8 @@
  * the task runner. The original task is left unchanged for history.
  */
 import {
-  DEFAULT_VM_LOCATION,
-  DEFAULT_VM_SIZE,
-  DEFAULT_WORKSPACE_PROFILE,
-  getDefaultLocationForProvider,
-  isValidProvider,
-  resolveResourceReservation,
   type TaskMode,
   type VMSize,
-  type WorkspaceProfile,
 } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -23,6 +16,11 @@ import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { ulid } from '../../../lib/ulid';
 import { generateBranchName } from '../../../services/branch-name';
+import {
+  PlacementResolutionError,
+  resolvePlacementCredentialAttribution,
+  resolveTaskStartPlacement,
+} from '../../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../../services/skills';
@@ -90,6 +88,7 @@ export async function retrySubtask(
       projectDefaultProvider: schema.projects.defaultProvider,
       projectDefaultLocation: schema.projects.defaultLocation,
       projectDefaultWorkspaceProfile: schema.projects.defaultWorkspaceProfile,
+      projectDefaultDevcontainerConfigName: schema.projects.defaultDevcontainerConfigName,
       projectDefaultAgentType: schema.projects.defaultAgentType,
       projectAgentDefaults: schema.projects.agentDefaults,
       projectTaskExecutionTimeoutMs: schema.projects.taskExecutionTimeoutMs,
@@ -126,61 +125,88 @@ export async function retrySubtask(
   const resolvedProfile = original.agentProfileHint || original.skillId
     ? await resolveSkillProfile(db, original.projectId, original.agentProfileHint, original.skillId, ctx.userId, env)
     : null;
+  const newTaskId = ulid();
+  const skillResourceRequirements = parseSkillResourceRequirementsJson(resolvedProfile?.resourceRequirementsJson);
 
-  const profileProvider =
-    typeof resolvedProfile?.provider === 'string' && isValidProvider(resolvedProfile.provider)
-      ? resolvedProfile.provider
-      : null;
-  const projectProvider =
-    typeof original.projectDefaultProvider === 'string' && isValidProvider(original.projectDefaultProvider)
-      ? original.projectDefaultProvider
-      : null;
-  const resolvedProvider = profileProvider ?? projectProvider;
-
-  const vmSizeSource = resolvedProfile?.vmSizeOverride ? 'skill' as const
-    : original.projectDefaultVmSize ? 'project' as const
-    : 'platform' as const;
-  const resolvedVmSize: VMSize =
-    (resolvedProfile?.vmSizeOverride as VMSize | null)
-    ?? (original.projectDefaultVmSize as VMSize | null)
-    ?? DEFAULT_VM_SIZE;
-
-  const resolvedVmLocation =
-    (resolvedProfile?.vmLocation as string | null)
-    ?? (original.projectDefaultLocation as string | null)
-    ?? (resolvedProvider ? getDefaultLocationForProvider(resolvedProvider) : null)
-    ?? DEFAULT_VM_LOCATION;
-
-  const resolvedWorkspaceProfile: WorkspaceProfile =
-    (resolvedProfile?.workspaceProfile as WorkspaceProfile | null)
-    ?? (original.projectDefaultWorkspaceProfile as WorkspaceProfile | null)
-    ?? DEFAULT_WORKSPACE_PROFILE;
-
-  const resolvedTaskMode = (original.taskMode as TaskMode | null)
-    ?? (resolvedProfile?.taskMode as TaskMode | null)
-    ?? (resolvedWorkspaceProfile === 'lightweight' ? 'conversation' : 'task');
-  const resolvedAgentType = resolvedProfile?.agentType ?? original.projectDefaultAgentType ?? null;
-
-  // Verify cloud credentials
-  const { resolveCredentialSource } = await import('../../../services/provider-credentials');
   const credentialAttributionUserId = original.credentialAttributionUserId ?? original.userId;
   const credentialAttributionSource = (original.credentialAttributionSource ?? 'user') as import('@simple-agent-manager/shared').CredentialSource;
   const credentialAttributionProjectId = credentialAttributionSource === 'project'
     ? (original.credentialAttributionProjectId ?? original.projectId)
     : null;
+
+  const placement = (() => {
+    try {
+      return resolveTaskStartPlacement({
+        entryPoint: 'retry-subtask',
+        taskId: newTaskId,
+        projectId: original.projectId,
+        userId: ctx.userId,
+        project: {
+          id: original.projectId,
+          defaultVmSize: original.projectDefaultVmSize,
+          defaultProvider: original.projectDefaultProvider,
+          defaultLocation: original.projectDefaultLocation,
+          defaultWorkspaceProfile: original.projectDefaultWorkspaceProfile,
+          defaultDevcontainerConfigName: original.projectDefaultDevcontainerConfigName,
+          defaultAgentType: original.projectDefaultAgentType,
+        },
+        profile: resolvedProfile,
+        explicit: {
+          taskMode: (original.taskMode as TaskMode | null) ?? null,
+        },
+        inheritedCredentialAttribution: {
+          userId: credentialAttributionUserId,
+          projectId: credentialAttributionProjectId,
+          source: credentialAttributionSource,
+        },
+        credentialProjectPolicy: 'inherited-or-none',
+        taskModeDefault: 'workspace-profile',
+        profileVmSizeSource: 'skill',
+        resourceRequirements: {
+          skill: skillResourceRequirements,
+        },
+      });
+    } catch (err) {
+      if (err instanceof PlacementResolutionError) {
+        return { error: err.message } as const;
+      }
+      throw err;
+    }
+  })();
+  if ('error' in placement) {
+    return placement;
+  }
+
+  // Verify cloud credentials
+  const { resolveCredentialSource } = await import('../../../services/provider-credentials');
   const credResult = await resolveCredentialSource(
     db,
-    credentialAttributionUserId,
-    resolvedProvider ?? undefined,
-    credentialAttributionProjectId
+    placement.credentialLookup.userId,
+    placement.credentialLookup.provider,
+    placement.credentialLookup.projectId
   );
   if (!credResult) {
     return { error: 'No cloud provider credentials found. The user must connect a cloud provider in Settings.' };
   }
-  const effectiveProvider = resolvedProvider ?? credResult.providerName;
+  const credentialAttribution = resolvePlacementCredentialAttribution(placement, credResult);
+  const {
+    effectiveProvider,
+    credentialAttributionUserId: resolvedCredentialAttributionUserId,
+    credentialAttributionProjectId: resolvedCredentialAttributionProjectId,
+    credentialAttributionSource: resolvedCredentialAttributionSource,
+  } = credentialAttribution;
+  const {
+    vmSize: resolvedVmSize,
+    vmSizeSource,
+    vmLocation: resolvedVmLocation,
+    workspaceProfile: resolvedWorkspaceProfile,
+    devcontainerConfigName: resolvedDevcontainerConfigName,
+    taskMode: resolvedTaskMode,
+    agentType: resolvedAgentType,
+    resolvedReservation,
+  } = placement;
 
   // Generate new task
-  const newTaskId = ulid();
   const titleConfig = getTaskTitleConfig(env);
   const taskTitle = await generateTaskTitle(env, description, titleConfig);
 
@@ -190,18 +216,6 @@ export async function retrySubtask(
     prefix: branchPrefix,
     maxLength: branchMaxLength,
   });
-
-  // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
-  const resolvedReservation = resolveResourceReservation(
-    { skill: parseSkillResourceRequirementsJson(resolvedProfile?.resourceRequirementsJson) },
-    {
-      taskId: newTaskId,
-      skillId: resolvedProfile?.skillId ?? undefined,
-      agentProfileId: resolvedProfile?.profileId ?? undefined,
-      projectId: original.projectId,
-      userId: ctx.userId,
-    },
-  );
 
   const now = new Date().toISOString();
 
@@ -226,7 +240,7 @@ export async function retrySubtask(
       resolvedTaskMode, resolvedProfile?.profileId ?? original.agentProfileHint ?? null,
       resolvedProfile?.skillId ?? original.skillId ?? null, original.skillHint ?? original.skillId ?? null, original.missionId ?? null,
       resolvedVmSize, vmSizeSource, resolvedProfile?.resourceRequirementsJson ?? null, resolvedReservation.source, JSON.stringify(resolvedReservation),
-      credentialAttributionUserId, credentialAttributionProjectId, credentialAttributionSource,
+      resolvedCredentialAttributionUserId, resolvedCredentialAttributionProjectId, resolvedCredentialAttributionSource,
       now, now,
     ),
     env.DATABASE.prepare(
@@ -289,10 +303,11 @@ export async function retrySubtask(
       chatSessionId: sessionId,
       agentType: resolvedAgentType,
       workspaceProfile: resolvedWorkspaceProfile,
+      devcontainerConfigName: resolvedDevcontainerConfigName,
       cloudProvider: effectiveProvider,
-      credentialAttributionUserId,
-      credentialAttributionProjectId,
-      credentialAttributionSource,
+      credentialAttributionUserId: resolvedCredentialAttributionUserId,
+      credentialAttributionProjectId: resolvedCredentialAttributionProjectId,
+      credentialAttributionSource: resolvedCredentialAttributionSource,
       taskMode: resolvedTaskMode,
       model: resolvedProfile?.model ?? agentDefaults.model,
       effort: resolvedProfile?.effort ?? null,

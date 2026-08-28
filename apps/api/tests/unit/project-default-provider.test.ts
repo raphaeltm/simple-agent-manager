@@ -254,10 +254,12 @@ describe('Project default provider — task submit', () => {
 
 describe('Project default provider — task runs route', () => {
   const run = apiSrc('routes/tasks/run.ts');
+  const placementResolver = apiSrc('services/placement-resolver.ts');
 
   it('passes cloudProvider from project.defaultProvider to startTaskRunnerDO', () => {
-    expect(run).toContain('cloudProvider:');
-    expect(run).toContain('project.defaultProvider');
+    expect(run).toContain('resolveTaskStartPlacement');
+    expect(run).toContain('cloudProvider: effectiveProvider');
+    expect(placementResolver).toContain('project.defaultProvider');
   });
 });
 

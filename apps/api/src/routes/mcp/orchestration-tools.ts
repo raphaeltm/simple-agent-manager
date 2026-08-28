@@ -3,18 +3,7 @@
  * for agent-to-agent communication.
  */
 import type {
-  CredentialProvider,
-  VMLocation,
   VMSize,
-  WorkspaceProfile,
-} from '@simple-agent-manager/shared';
-import {
-  DEFAULT_VM_LOCATION,
-  DEFAULT_VM_SIZE,
-  DEFAULT_WORKSPACE_PROFILE,
-  getDefaultLocationForProvider,
-  isValidProvider,
-  resolveResourceReservation,
 } from '@simple-agent-manager/shared';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
@@ -26,6 +15,11 @@ import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { generateBranchName } from '../../services/branch-name';
 import { stopAgentSessionOnNode } from '../../services/node-agent';
+import {
+  PlacementResolutionError,
+  resolvePlacementCredentialAttribution,
+  resolveTaskStartPlacement,
+} from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
@@ -282,6 +276,91 @@ export async function handleRetrySubtask(
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Project not found');
   }
 
+  const inheritedCredentialAttributionUserId =
+    childTask.credentialAttributionUserId ?? childTask.userId;
+  const inheritedCredentialAttributionSource = (childTask.credentialAttributionSource ??
+    'user') as import('@simple-agent-manager/shared').CredentialSource;
+  const inheritedCredentialAttributionProjectId =
+    inheritedCredentialAttributionSource === 'project'
+      ? (childTask.credentialAttributionProjectId ?? childTask.projectId)
+      : null;
+
+  const placement = (() => {
+    try {
+      return resolveTaskStartPlacement({
+        entryPoint: 'orchestration-retry',
+        taskId,
+        projectId: tokenData.projectId,
+        userId: tokenData.userId,
+        project,
+        profile: null,
+        inheritedCredentialAttribution: {
+          userId: inheritedCredentialAttributionUserId,
+          projectId: inheritedCredentialAttributionProjectId,
+          source: inheritedCredentialAttributionSource,
+        },
+        credentialProjectPolicy: 'inherited-or-none',
+        taskModeDefault: 'task',
+        resourceRequirements: {},
+      });
+    } catch (err) {
+      if (err instanceof PlacementResolutionError) {
+        return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+      }
+      throw err;
+    }
+  })();
+  if ('jsonrpc' in placement) {
+    return placement;
+  }
+
+  const { resolveCredentialSource } = await import('../../services/provider-credentials');
+  const credResult = await resolveCredentialSource(
+    db,
+    placement.credentialLookup.userId,
+    placement.credentialLookup.provider,
+    placement.credentialLookup.projectId
+  );
+  if (!credResult) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Cloud provider credentials required. The user must connect a cloud provider in Settings.'
+    );
+  }
+  if (credResult.credentialSource === 'platform') {
+    const quotaEnforcementEnabled = env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
+    if (quotaEnforcementEnabled) {
+      const { checkQuotaForUser } = await import('../../services/compute-quotas');
+      const quotaCheck = await checkQuotaForUser(db, tokenData.userId);
+      if (!quotaCheck.allowed) {
+        return jsonRpcError(
+          requestId,
+          INVALID_PARAMS,
+          `Monthly compute quota exceeded. You've used ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours this month. ` +
+            'Add your own cloud provider credentials in Settings or contact your admin to increase your quota.'
+        );
+      }
+    }
+  }
+
+  const {
+    effectiveProvider,
+    credentialAttributionUserId,
+    credentialAttributionProjectId,
+    credentialAttributionSource,
+  } = resolvePlacementCredentialAttribution(placement, credResult);
+  const {
+    vmSize: resolvedVmSize,
+    vmSizeSource,
+    vmLocation: resolvedVmLocation,
+    workspaceProfile: resolvedWorkspaceProfile,
+    devcontainerConfigName: resolvedDevcontainerConfigName,
+    taskMode: resolvedTaskMode,
+    agentType: resolvedAgentType,
+    resolvedReservation,
+  } = placement;
+
   const titleConfig = getTaskTitleConfig(env);
   const taskTitle = await generateTaskTitle(env, replacementDescription, titleConfig);
 
@@ -292,40 +371,10 @@ export async function handleRetrySubtask(
     maxLength: branchMaxLength,
   });
 
-  // Resolve VM size from project defaults (not executionStep, which tracks runner state)
-  const vmSizeSource = project.defaultVmSize ? ('project' as const) : ('platform' as const);
-  const resolvedVmSize: VMSize = (project.defaultVmSize as VMSize | null) ?? DEFAULT_VM_SIZE;
-  const resolvedProvider: CredentialProvider | null =
-    typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
-      ? project.defaultProvider
-      : null;
-  const resolvedVmLocation: VMLocation =
-    (project.defaultLocation as VMLocation | null) ??
-    (resolvedProvider
-      ? (getDefaultLocationForProvider(resolvedProvider) as VMLocation | null)
-      : null) ??
-    DEFAULT_VM_LOCATION;
-  const resolvedWorkspaceProfile: WorkspaceProfile =
-    (project.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE;
-  const resolvedDevcontainerConfigName: string | null =
-    resolvedWorkspaceProfile === 'lightweight'
-      ? null
-      : (project.defaultDevcontainerConfigName ?? null);
-
   // Retried/replacement subtasks have their own output branch. Check that out
   // from the start so VM-agent completion pushes cannot land on the project
   // default branch.
   const checkoutBranch = branchName;
-
-  // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
-  const resolvedReservation = resolveResourceReservation(
-    {}, // MCP orchestration retry: no task-level resource requirements in Phase 0
-    {
-      taskId,
-      projectId: tokenData.projectId,
-      userId: tokenData.userId,
-    }
-  );
 
   // Insert replacement task
   await db.insert(schema.tasks).values({
@@ -340,10 +389,15 @@ export async function handleRetrySubtask(
     priority: childTask.priority,
     dispatchDepth: childTask.dispatchDepth,
     outputBranch: branchName,
+    taskMode: resolvedTaskMode,
     requestedVmSize: resolvedVmSize,
     requestedVmSizeSource: vmSizeSource,
     agentProfileHint: childTask.agentProfileHint,
+    resourceRequirementsSource: resolvedReservation.source,
     resolvedReservationJson: JSON.stringify(resolvedReservation),
+    credentialAttributionUserId,
+    credentialAttributionProjectId,
+    credentialAttributionSource,
     createdBy: tokenData.userId,
     createdAt: now,
     updatedAt: now,
@@ -421,10 +475,14 @@ export async function handleRetrySubtask(
       outputBranch: branchName,
       projectDefaultVmSize: project.defaultVmSize as VMSize | null,
       chatSessionId: sessionId,
-      agentType: project.defaultAgentType ?? null,
+      agentType: resolvedAgentType,
       workspaceProfile: resolvedWorkspaceProfile,
       devcontainerConfigName: resolvedDevcontainerConfigName,
-      cloudProvider: resolvedProvider,
+      cloudProvider: effectiveProvider,
+      credentialAttributionUserId,
+      credentialAttributionProjectId,
+      credentialAttributionSource,
+      taskMode: resolvedTaskMode,
       model: null,
       effort: null,
       permissionMode: null,
