@@ -98,7 +98,7 @@ three surfaces without adding navigation or a second canonical settings location
       screenshots with stressed editable data and no hidden placeholder cards.
 - [x] Run focused tests, typecheck, lint, Playwright visual audits, and relevant
       specialist reviews.
-- [ ] Push the child branch and update PR #1943 evidence/comments while keeping it
+- [x] Push the child branch and update PR #1943 evidence/comments while keeping it
       draft and unmerged.
 
 ## Acceptance criteria
@@ -177,6 +177,9 @@ exercise the owner/admin edit workflow rather than only the read-only happy path
   - Screenshots generated under `.codex/tmp/playwright-screenshots/` and
     `.tmp/playwright-screenshots/` for project/user/installation desktop/mobile
     read, edit, and fallback/error stress states.
+- Child draft PR: <https://github.com/raphaeltm/simple-agent-manager/pull/1963>
+- Parent PR #1943 coordination comment:
+  <https://github.com/raphaeltm/simple-agent-manager/pull/1943#issuecomment-5454964872>
 
 ## Specialist review
 
