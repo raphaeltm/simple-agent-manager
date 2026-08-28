@@ -1277,6 +1277,222 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '038-project-event-subscriptions',
+    run: (sql) => {
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_events (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          contract_version INTEGER NOT NULL DEFAULT 1,
+          source TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          subject_type TEXT NOT NULL,
+          subject_id TEXT NOT NULL,
+          severity TEXT NOT NULL CHECK (severity IN ('debug', 'info', 'notice', 'warning', 'error', 'critical')),
+          delivery_key TEXT NOT NULL,
+          payload_fingerprint TEXT NOT NULL,
+          metadata_json TEXT NOT NULL,
+          metadata_bytes INTEGER NOT NULL,
+          display_json TEXT NOT NULL,
+          display_bytes INTEGER NOT NULL,
+          raw_payload_ref_json TEXT,
+          raw_payload_ref_bytes INTEGER NOT NULL DEFAULT 0,
+          occurred_at INTEGER NOT NULL,
+          received_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          state TEXT NOT NULL CHECK (state IN ('recorded', 'conflicted')),
+          duplicate_count INTEGER NOT NULL DEFAULT 0,
+          conflict_count INTEGER NOT NULL DEFAULT 0,
+          conflict_fingerprint TEXT,
+          conflict_detected_at INTEGER,
+          UNIQUE(project_id, source, delivery_key)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_events_project_received
+        ON project_events(project_id, received_at DESC, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_events_project_source_type
+        ON project_events(project_id, source, event_type, received_at DESC, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_events_project_subject
+        ON project_events(project_id, subject_type, subject_id, received_at DESC, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_events_project_severity
+        ON project_events(project_id, severity, received_at DESC, id)
+      `);
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_event_subscriptions (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          contract_version INTEGER NOT NULL DEFAULT 1,
+          owner_type TEXT NOT NULL CHECK (owner_type IN ('human', 'agent', 'system', 'policy', 'standing_watch')),
+          owner_id TEXT NOT NULL,
+          owner_name TEXT,
+          idempotency_key TEXT NOT NULL,
+          idempotency_fingerprint TEXT NOT NULL,
+          filter_version INTEGER NOT NULL DEFAULT 1,
+          filter_json TEXT NOT NULL,
+          filter_fingerprint TEXT NOT NULL,
+          match_key_count INTEGER NOT NULL,
+          requested_delivery TEXT NOT NULL CHECK (requested_delivery IN ('record_only', 'existing_session_prompt', 'runtime_steer', 'runtime_interrupt', 'spawn_task')),
+          resolved_delivery TEXT NOT NULL CHECK (resolved_delivery IN ('record_only', 'recorded_not_injected', 'queued_for_prompt_delivery', 'unsupported', 'unauthorized')),
+          target_session_id TEXT,
+          target_task_id TEXT,
+          target_runtime_id TEXT,
+          target_agent_id TEXT,
+          lifecycle_state TEXT NOT NULL CHECK (lifecycle_state IN ('active', 'cancelled', 'expired')),
+          reason TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          expires_at INTEGER,
+          cancelled_at INTEGER,
+          cancelled_by_type TEXT CHECK (cancelled_by_type IS NULL OR cancelled_by_type IN ('human', 'agent', 'system', 'policy', 'standing_watch')),
+          cancelled_by_id TEXT,
+          cancelled_by_name TEXT,
+          cancel_reason TEXT,
+          last_matched_at INTEGER,
+          UNIQUE(project_id, owner_type, owner_id, idempotency_key)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_project_state
+        ON project_event_subscriptions(project_id, lifecycle_state, updated_at DESC, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_project_expiry
+        ON project_event_subscriptions(project_id, lifecycle_state, expires_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_project_owner
+        ON project_event_subscriptions(project_id, owner_type, owner_id, updated_at DESC, id)
+      `);
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_event_subscription_match_keys (
+          project_id TEXT NOT NULL,
+          subscription_id TEXT NOT NULL REFERENCES project_event_subscriptions(id) ON DELETE CASCADE,
+          field_name TEXT NOT NULL CHECK (field_name IN ('source', 'eventType', 'subjectType', 'subjectId', 'severity')),
+          field_value TEXT NOT NULL,
+          match_key TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (subscription_id, match_key)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_subscription_match_keys_lookup
+        ON project_event_subscription_match_keys(project_id, match_key, subscription_id)
+      `);
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_event_matches (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          event_id TEXT NOT NULL REFERENCES project_events(id) ON DELETE CASCADE,
+          subscription_id TEXT NOT NULL REFERENCES project_event_subscriptions(id) ON DELETE CASCADE,
+          state TEXT NOT NULL CHECK (state IN ('matched', 'batch_created', 'recorded_not_injected', 'expired', 'cancelled')),
+          matched_at INTEGER NOT NULL,
+          lifecycle_checked_at INTEGER NOT NULL,
+          batch_id TEXT,
+          reason TEXT,
+          UNIQUE(project_id, event_id, subscription_id)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_project_event
+        ON project_event_matches(project_id, event_id, matched_at DESC, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_project_subscription
+        ON project_event_matches(project_id, subscription_id, matched_at DESC, id)
+      `);
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_event_delivery_batches (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          subscription_id TEXT NOT NULL REFERENCES project_event_subscriptions(id) ON DELETE CASCADE,
+          idempotency_key TEXT NOT NULL,
+          idempotency_fingerprint TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN ('pending', 'recorded_not_injected', 'delivered', 'acked', 'failed', 'ambiguous', 'expired', 'cancelled')),
+          requested_delivery TEXT NOT NULL CHECK (requested_delivery IN ('record_only', 'existing_session_prompt', 'runtime_steer', 'runtime_interrupt', 'spawn_task')),
+          resolved_delivery TEXT NOT NULL CHECK (resolved_delivery IN ('record_only', 'recorded_not_injected', 'queued_for_prompt_delivery', 'unsupported', 'unauthorized')),
+          target_session_id TEXT,
+          target_task_id TEXT,
+          target_runtime_id TEXT,
+          target_agent_id TEXT,
+          match_ids_json TEXT NOT NULL,
+          event_count INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          terminal_at INTEGER,
+          terminal_reason TEXT,
+          UNIQUE(project_id, subscription_id, idempotency_key)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_delivery_batches_project_state
+        ON project_event_delivery_batches(project_id, state, updated_at DESC, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_delivery_batches_project_subscription
+        ON project_event_delivery_batches(project_id, subscription_id, updated_at DESC, id)
+      `);
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_event_delivery_attempts (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          batch_id TEXT NOT NULL REFERENCES project_event_delivery_batches(id) ON DELETE CASCADE,
+          idempotency_key TEXT NOT NULL,
+          idempotency_fingerprint TEXT NOT NULL,
+          attempt_number INTEGER NOT NULL,
+          state TEXT NOT NULL CHECK (state IN ('recorded_not_injected', 'accepted', 'retry', 'failed', 'ambiguous')),
+          adapter TEXT,
+          protocol_version TEXT,
+          runtime_id TEXT,
+          receipt_id TEXT,
+          error_code TEXT,
+          error_message TEXT,
+          started_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          created_at INTEGER NOT NULL,
+          UNIQUE(project_id, batch_id, idempotency_key),
+          UNIQUE(project_id, batch_id, attempt_number)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_delivery_attempts_project_batch
+        ON project_event_delivery_attempts(project_id, batch_id, attempt_number, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_delivery_attempts_project_state
+        ON project_event_delivery_attempts(project_id, state, created_at DESC, id)
+      `);
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_event_storage_accounting (
+          project_id TEXT NOT NULL,
+          category TEXT NOT NULL,
+          record_count INTEGER NOT NULL,
+          estimated_bytes INTEGER NOT NULL,
+          oldest_created_at INTEGER,
+          newest_created_at INTEGER,
+          measured_at INTEGER NOT NULL,
+          PRIMARY KEY (project_id, category)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_storage_accounting_project_measured
+        ON project_event_storage_accounting(project_id, measured_at DESC, category)
+      `);
+    },
+  },
 ];
 
 /**

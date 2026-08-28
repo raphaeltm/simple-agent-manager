@@ -101,6 +101,26 @@ export class ProjectDataTestDouble extends ProjectData {
       | {
           operation: 'enqueueMailboxMessage';
           args: Parameters<ProjectData['enqueueMailboxMessage']>;
+        }
+      | {
+          operation: 'admitProjectEvent';
+          args: Parameters<ProjectData['admitProjectEvent']>;
+        }
+      | {
+          operation: 'createProjectEventSubscription';
+          args: Parameters<ProjectData['createProjectEventSubscription']>;
+        }
+      | {
+          operation: 'createProjectEventDeliveryBatch';
+          args: Parameters<ProjectData['createProjectEventDeliveryBatch']>;
+        }
+      | {
+          operation: 'recordProjectEventDeliveryAttempt';
+          args: Parameters<ProjectData['recordProjectEventDeliveryAttempt']>;
+        }
+      | {
+          operation: 'runProjectEventRetention';
+          args: Parameters<ProjectData['runProjectEventRetention']>;
         };
 
     try {
@@ -108,6 +128,16 @@ export class ProjectDataTestDouble extends ProjectData {
         messages.persistMessageBatch(this.ctx.storage.sql, this.env, ...input.args);
       } else if (input.operation === 'persistMessage') {
         messages.persistMessage(this.ctx.storage.sql, this.env, ...input.args);
+      } else if (input.operation === 'admitProjectEvent') {
+        this.admitProjectEvent(...input.args);
+      } else if (input.operation === 'createProjectEventSubscription') {
+        this.createProjectEventSubscription(...input.args);
+      } else if (input.operation === 'createProjectEventDeliveryBatch') {
+        this.createProjectEventDeliveryBatch(...input.args);
+      } else if (input.operation === 'recordProjectEventDeliveryAttempt') {
+        this.recordProjectEventDeliveryAttempt(...input.args);
+      } else if (input.operation === 'runProjectEventRetention') {
+        this.runProjectEventRetention(...input.args);
       } else {
         mailbox.enqueueMessage(this.ctx.storage.sql, ...input.args);
       }
@@ -151,6 +181,26 @@ export async function captureProjectDataExpectedError(
     | {
         operation: 'enqueueMailboxMessage';
         args: Parameters<ProjectData['enqueueMailboxMessage']>;
+      }
+    | {
+        operation: 'admitProjectEvent';
+        args: Parameters<ProjectData['admitProjectEvent']>;
+      }
+    | {
+        operation: 'createProjectEventSubscription';
+        args: Parameters<ProjectData['createProjectEventSubscription']>;
+      }
+    | {
+        operation: 'createProjectEventDeliveryBatch';
+        args: Parameters<ProjectData['createProjectEventDeliveryBatch']>;
+      }
+    | {
+        operation: 'recordProjectEventDeliveryAttempt';
+        args: Parameters<ProjectData['recordProjectEventDeliveryAttempt']>;
+      }
+    | {
+        operation: 'runProjectEventRetention';
+        args: Parameters<ProjectData['runProjectEventRetention']>;
       }
 ): Promise<CapturedExpectedError> {
   const response = await stub.fetch('https://project-data.test/__capture-expected-error', {

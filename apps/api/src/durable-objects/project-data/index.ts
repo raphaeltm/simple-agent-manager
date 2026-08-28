@@ -45,6 +45,7 @@ import * as messages from './messages';
 import * as missionState from './missions';
 import * as policies from './policies';
 import * as projectCommentInbox from './project-comment-inbox';
+import * as projectEvents from './project-events';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from './prompt-delivery';
 import * as promptDelivery from './prompt-delivery';
 import * as reconciliation from './reconciliation';
@@ -570,6 +571,124 @@ export class ProjectData extends DurableObject<Env> {
     return projectCommentInbox.listProjectCommentInbox(this.sql, this.env, input);
   }
 
+  // --- Project event subscriptions -----------------------------------------
+  // Durable foundation only. These RPCs store normalized events, subscriptions,
+  // matches, delivery batches, and attempts in this per-project DO. They do not
+  // inject prompts, steer runtimes, spawn tasks, or expose API/MCP producers.
+
+  admitProjectEvent(
+    input: projectEvents.AdmitProjectEventInput
+  ): projectEvents.ProjectEventAdmissionResult {
+    this.ensureProjectId(input.projectId);
+    return this.ctx.storage.transactionSync(() =>
+      projectEvents.admitProjectEvent(this.sql, this.env, this.getProjectId(), input)
+    );
+  }
+
+  createProjectEventSubscription(
+    input: projectEvents.CreateProjectEventSubscriptionInput
+  ): projectEvents.ProjectEventSubscriptionMutationResult {
+    this.ensureProjectId(input.projectId);
+    return this.ctx.storage.transactionSync(() =>
+      projectEvents.createProjectEventSubscription(this.sql, this.env, this.getProjectId(), input)
+    );
+  }
+
+  listProjectEventSubscriptions(
+    input: projectEvents.ListProjectEventSubscriptionsInput
+  ): projectEvents.ProjectEventSubscriptionListResult {
+    this.ensureProjectId(input.projectId);
+    return this.ctx.storage.transactionSync(() =>
+      projectEvents.listProjectEventSubscriptions(this.sql, this.env, this.getProjectId(), input)
+    );
+  }
+
+  getProjectEventSubscription(
+    input: projectEvents.GetProjectEventSubscriptionInput
+  ): projectEvents.ProjectEventSubscriptionMutationResult['subscription'] | null {
+    this.ensureProjectId(input.projectId);
+    return this.ctx.storage.transactionSync(() =>
+      projectEvents.getProjectEventSubscription(this.sql, this.env, this.getProjectId(), input)
+    );
+  }
+
+  cancelProjectEventSubscription(
+    input: projectEvents.CancelProjectEventSubscriptionInput
+  ): projectEvents.ProjectEventSubscriptionMutationResult {
+    this.ensureProjectId(input.projectId);
+    return this.ctx.storage.transactionSync(() =>
+      projectEvents.cancelProjectEventSubscription(this.sql, this.env, this.getProjectId(), input)
+    );
+  }
+
+  expireProjectEventSubscriptions(
+    input: projectEvents.ExpireProjectEventSubscriptionsInput
+  ): projectEvents.ProjectEventExpireSubscriptionsResult {
+    this.ensureProjectId(input.projectId);
+    return this.ctx.storage.transactionSync(() =>
+      projectEvents.expireProjectEventSubscriptions(this.sql, this.env, this.getProjectId(), input)
+    );
+  }
+
+  createProjectEventDeliveryBatch(
+    input: projectEvents.CreateProjectEventDeliveryBatchInput
+  ): projectEvents.ProjectEventDeliveryBatchMutationResult {
+    this.ensureProjectId(input.projectId);
+    return this.ctx.storage.transactionSync(() =>
+      projectEvents.createProjectEventDeliveryBatch(this.sql, this.env, this.getProjectId(), input)
+    );
+  }
+
+  listProjectEventDeliveryBatches(
+    input: projectEvents.ListProjectEventDeliveryBatchesInput
+  ): projectEvents.ProjectEventDeliveryBatchListResult {
+    this.ensureProjectId(input.projectId);
+    return this.ctx.storage.transactionSync(() =>
+      projectEvents.listProjectEventDeliveryBatches(this.sql, this.env, this.getProjectId(), input)
+    );
+  }
+
+  recordProjectEventDeliveryAttempt(
+    input: projectEvents.RecordProjectEventDeliveryAttemptInput
+  ): projectEvents.ProjectEventDeliveryAttemptMutationResult {
+    this.ensureProjectId(input.projectId);
+    return this.ctx.storage.transactionSync(() =>
+      projectEvents.recordProjectEventDeliveryAttempt(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        input
+      )
+    );
+  }
+
+  listProjectEventDeliveryAttempts(
+    input: projectEvents.ListProjectEventDeliveryAttemptsInput
+  ): projectEvents.ProjectEventDeliveryAttemptListResult {
+    this.ensureProjectId(input.projectId);
+    return this.ctx.storage.transactionSync(() =>
+      projectEvents.listProjectEventDeliveryAttempts(this.sql, this.env, this.getProjectId(), input)
+    );
+  }
+
+  getProjectEventRecentStatus(
+    input: projectEvents.GetProjectEventRecentStatusInput
+  ): projectEvents.ProjectEventRecentStatus {
+    this.ensureProjectId(input.projectId);
+    return this.ctx.storage.transactionSync(() =>
+      projectEvents.getProjectEventRecentStatus(this.sql, this.env, this.getProjectId(), input)
+    );
+  }
+
+  runProjectEventRetention(
+    input: projectEvents.RunProjectEventRetentionInput
+  ): projectEvents.ProjectEventRetentionResult {
+    this.ensureProjectId(input.projectId);
+    return this.ctx.storage.transactionSync(() =>
+      projectEvents.runProjectEventRetention(this.sql, this.env, this.getProjectId(), input)
+    );
+  }
+
   // --- Library file comments ------------------------------------------------
   // Separate storage from message comments (DO migration 033). Callers must have
   // already verified the file belongs to this project — the DO has no D1 access.
@@ -1071,9 +1190,14 @@ export class ProjectData extends DurableObject<Env> {
     // lifecycle maintenance sections so a large project can still reclaim bytes
     // even when idle/reconciliation work has accumulated.
     try {
-      await storageSafety.runProjectDataStorageSafetyAlarm(this.sql, this.env, this.getProjectId(), {
-        transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
-      });
+      await storageSafety.runProjectDataStorageSafetyAlarm(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        {
+          transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
+        }
+      );
     } catch (err) {
       log.error('alarm.storage_safety_failed', {
         error: err instanceof Error ? err.message : String(err),

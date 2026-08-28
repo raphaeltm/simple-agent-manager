@@ -8,20 +8,42 @@
  * See: specs/018-project-first-architecture/research.md (Decision 3)
  */
 import type {
+  AdmitProjectEventInput,
   AgentMailboxMessage,
+  CancelProjectEventSubscriptionInput,
   CheckpointEpisode,
   CheckpointEpisodeTransitionInput,
   CommentAuthor,
   CommentReply,
   CommentStatus,
   CreateCheckpointEpisodeInput,
+  CreateProjectEventDeliveryBatchInput,
+  CreateProjectEventSubscriptionInput,
   DeliveryState,
+  ExpireProjectEventSubscriptionsInput,
+  GetProjectEventRecentStatusInput,
+  GetProjectEventSubscriptionInput,
   LibraryFileCommentMutationResponse,
+  ListProjectEventDeliveryAttemptsInput,
+  ListProjectEventDeliveryBatchesInput,
+  ListProjectEventSubscriptionsInput,
   MessageClass,
   MessageCommentListResponse,
   MessageCommentMutationResponse,
   MessageCommentReplyMutationResponse,
   MessageCommentThread,
+  ProjectEventAdmissionResult,
+  ProjectEventDeliveryAttemptListResult,
+  ProjectEventDeliveryAttemptMutationResult,
+  ProjectEventDeliveryBatchListResult,
+  ProjectEventDeliveryBatchMutationResult,
+  ProjectEventExpireSubscriptionsResult,
+  ProjectEventRecentStatus,
+  ProjectEventRetentionResult,
+  ProjectEventSubscriptionListResult,
+  ProjectEventSubscriptionMutationResult,
+  RecordProjectEventDeliveryAttemptInput,
+  RunProjectEventRetentionInput,
   SessionActivityTerminalReason,
 } from '@simple-agent-manager/shared';
 import { resolveHandoffLimits, resolveMissionStateLimits } from '@simple-agent-manager/shared';
@@ -41,6 +63,12 @@ import type {
   UpdateFileCommentStatusInput,
 } from '../durable-objects/project-data/comment-contracts';
 import { CommentNotFoundError } from '../durable-objects/project-data/comment-contracts';
+import {
+  ProjectEventIdempotencyConflictError,
+  ProjectEventLimitExceededError,
+  ProjectEventNotFoundError,
+  ProjectEventValidationError,
+} from '../durable-objects/project-data/project-events-contracts';
 import type {
   ArchivedToolPayloadListResult,
   ArchivedToolPayloadQuery,
@@ -52,6 +80,12 @@ export {
   CommentNotFoundError,
   CommentValidationError,
 } from '../durable-objects/project-data/comment-contracts';
+export {
+  ProjectEventIdempotencyConflictError,
+  ProjectEventLimitExceededError,
+  ProjectEventNotFoundError,
+  ProjectEventValidationError,
+} from '../durable-objects/project-data/project-events-contracts';
 import type {
   AcceptedPromptDelivery,
   AcceptPromptDeliveryInput,
@@ -107,6 +141,8 @@ function normalizeProjectDataRpcError(projectId: string, operation: string, err:
   }
   const commentError = normalizeProjectDataCommentRpcError(err);
   if (commentError) return commentError;
+  const eventError = normalizeProjectDataEventRpcError(err);
+  if (eventError) return eventError;
   return err;
 }
 
@@ -123,6 +159,38 @@ function normalizeProjectDataCommentRpcError(err: unknown): unknown | null {
       return new CommentNotFoundError('Message');
     case 'CommentNotFoundError: Comment thread not found':
       return new CommentNotFoundError('Comment thread');
+    default:
+      return null;
+  }
+}
+
+function normalizeProjectDataEventRpcError(err: unknown): unknown | null {
+  if (!(err instanceof Error)) return null;
+
+  const validationPrefix = 'ProjectEventValidationError: ';
+  if (err.message.startsWith(validationPrefix)) {
+    return new ProjectEventValidationError(err.message.slice(validationPrefix.length));
+  }
+  const limitPrefix = 'ProjectEventLimitExceededError: ';
+  if (err.message.startsWith(limitPrefix)) {
+    return new ProjectEventLimitExceededError(err.message.slice(limitPrefix.length));
+  }
+  const conflictPrefix = 'ProjectEventIdempotencyConflictError: ';
+  if (err.message.startsWith(conflictPrefix)) {
+    return new ProjectEventIdempotencyConflictError(err.message.slice(conflictPrefix.length));
+  }
+
+  switch (err.message) {
+    case 'ProjectEventNotFoundError: Project event not found':
+      return new ProjectEventNotFoundError('Project event');
+    case 'ProjectEventNotFoundError: Event subscription not found':
+      return new ProjectEventNotFoundError('Event subscription');
+    case 'ProjectEventNotFoundError: Event match not found':
+      return new ProjectEventNotFoundError('Event match');
+    case 'ProjectEventNotFoundError: Delivery batch not found':
+      return new ProjectEventNotFoundError('Delivery batch');
+    case 'ProjectEventNotFoundError: Delivery attempt not found':
+      return new ProjectEventNotFoundError('Delivery attempt');
     default:
       return null;
   }
@@ -197,6 +265,53 @@ async function callProjectDataWithRetry<T>(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type ProjectDataEventInput<T extends { projectId: string }> = Omit<T, 'projectId'>;
+
+function withProjectId(projectId: string, input: object): { projectId: string } {
+  return { ...input, projectId };
+}
+
+type ProjectDataEventRpc = {
+  admitProjectEvent(input: AdmitProjectEventInput): Promise<ProjectEventAdmissionResult>;
+  createProjectEventSubscription(
+    input: CreateProjectEventSubscriptionInput
+  ): Promise<ProjectEventSubscriptionMutationResult>;
+  listProjectEventSubscriptions(
+    input: ListProjectEventSubscriptionsInput
+  ): Promise<ProjectEventSubscriptionListResult>;
+  getProjectEventSubscription(
+    input: GetProjectEventSubscriptionInput
+  ): Promise<ProjectEventSubscriptionMutationResult['subscription'] | null>;
+  cancelProjectEventSubscription(
+    input: CancelProjectEventSubscriptionInput
+  ): Promise<ProjectEventSubscriptionMutationResult>;
+  expireProjectEventSubscriptions(
+    input: ExpireProjectEventSubscriptionsInput
+  ): Promise<ProjectEventExpireSubscriptionsResult>;
+  createProjectEventDeliveryBatch(
+    input: CreateProjectEventDeliveryBatchInput
+  ): Promise<ProjectEventDeliveryBatchMutationResult>;
+  listProjectEventDeliveryBatches(
+    input: ListProjectEventDeliveryBatchesInput
+  ): Promise<ProjectEventDeliveryBatchListResult>;
+  recordProjectEventDeliveryAttempt(
+    input: RecordProjectEventDeliveryAttemptInput
+  ): Promise<ProjectEventDeliveryAttemptMutationResult>;
+  listProjectEventDeliveryAttempts(
+    input: ListProjectEventDeliveryAttemptsInput
+  ): Promise<ProjectEventDeliveryAttemptListResult>;
+  getProjectEventRecentStatus(
+    input: GetProjectEventRecentStatusInput
+  ): Promise<ProjectEventRecentStatus>;
+  runProjectEventRetention(
+    input: RunProjectEventRetentionInput
+  ): Promise<ProjectEventRetentionResult>;
+};
+
+function projectEventRpc(stub: DurableObjectStub<ProjectData>): ProjectDataEventRpc {
+  return stub as unknown as ProjectDataEventRpc;
 }
 
 // =========================================================================
@@ -546,6 +661,154 @@ export async function listProjectCommentInbox(
 ): Promise<ProjectCommentInboxResult> {
   return callProjectDataWithRetry(env, projectId, 'listProjectCommentInbox', (stub) =>
     stub.listProjectCommentInbox(input)
+  );
+}
+
+// =========================================================================
+// ProjectData Event Subscription Core
+// =========================================================================
+
+export async function admitProjectEvent(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<AdmitProjectEventInput>
+): Promise<ProjectEventAdmissionResult> {
+  return callProjectDataNoRetry(env, projectId, 'admitProjectEvent', (stub) =>
+    projectEventRpc(stub).admitProjectEvent(
+      withProjectId(projectId, input) as AdmitProjectEventInput
+    )
+  );
+}
+
+export async function createProjectEventSubscription(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<CreateProjectEventSubscriptionInput>
+): Promise<ProjectEventSubscriptionMutationResult> {
+  return callProjectDataNoRetry(env, projectId, 'createProjectEventSubscription', (stub) =>
+    projectEventRpc(stub).createProjectEventSubscription(
+      withProjectId(projectId, input) as CreateProjectEventSubscriptionInput
+    )
+  );
+}
+
+export async function listProjectEventSubscriptions(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ListProjectEventSubscriptionsInput> = {}
+): Promise<ProjectEventSubscriptionListResult> {
+  return callProjectDataNoRetry(env, projectId, 'listProjectEventSubscriptions', (stub) =>
+    projectEventRpc(stub).listProjectEventSubscriptions(
+      withProjectId(projectId, input) as ListProjectEventSubscriptionsInput
+    )
+  );
+}
+
+export async function getProjectEventSubscription(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<GetProjectEventSubscriptionInput>
+): Promise<ProjectEventSubscriptionMutationResult['subscription'] | null> {
+  return callProjectDataNoRetry(env, projectId, 'getProjectEventSubscription', (stub) =>
+    projectEventRpc(stub).getProjectEventSubscription(
+      withProjectId(projectId, input) as GetProjectEventSubscriptionInput
+    )
+  );
+}
+
+export async function cancelProjectEventSubscription(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<CancelProjectEventSubscriptionInput>
+): Promise<ProjectEventSubscriptionMutationResult> {
+  return callProjectDataNoRetry(env, projectId, 'cancelProjectEventSubscription', (stub) =>
+    projectEventRpc(stub).cancelProjectEventSubscription(
+      withProjectId(projectId, input) as CancelProjectEventSubscriptionInput
+    )
+  );
+}
+
+export async function expireProjectEventSubscriptions(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ExpireProjectEventSubscriptionsInput> = {}
+): Promise<ProjectEventExpireSubscriptionsResult> {
+  return callProjectDataNoRetry(env, projectId, 'expireProjectEventSubscriptions', (stub) =>
+    projectEventRpc(stub).expireProjectEventSubscriptions(
+      withProjectId(projectId, input) as ExpireProjectEventSubscriptionsInput
+    )
+  );
+}
+
+export async function createProjectEventDeliveryBatch(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<CreateProjectEventDeliveryBatchInput>
+): Promise<ProjectEventDeliveryBatchMutationResult> {
+  return callProjectDataNoRetry(env, projectId, 'createProjectEventDeliveryBatch', (stub) =>
+    projectEventRpc(stub).createProjectEventDeliveryBatch(
+      withProjectId(projectId, input) as CreateProjectEventDeliveryBatchInput
+    )
+  );
+}
+
+export async function listProjectEventDeliveryBatches(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ListProjectEventDeliveryBatchesInput> = {}
+): Promise<ProjectEventDeliveryBatchListResult> {
+  return callProjectDataNoRetry(env, projectId, 'listProjectEventDeliveryBatches', (stub) =>
+    projectEventRpc(stub).listProjectEventDeliveryBatches(
+      withProjectId(projectId, input) as ListProjectEventDeliveryBatchesInput
+    )
+  );
+}
+
+export async function recordProjectEventDeliveryAttempt(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<RecordProjectEventDeliveryAttemptInput>
+): Promise<ProjectEventDeliveryAttemptMutationResult> {
+  return callProjectDataNoRetry(env, projectId, 'recordProjectEventDeliveryAttempt', (stub) =>
+    projectEventRpc(stub).recordProjectEventDeliveryAttempt(
+      withProjectId(projectId, input) as RecordProjectEventDeliveryAttemptInput
+    )
+  );
+}
+
+export async function listProjectEventDeliveryAttempts(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ListProjectEventDeliveryAttemptsInput> = {}
+): Promise<ProjectEventDeliveryAttemptListResult> {
+  return callProjectDataNoRetry(env, projectId, 'listProjectEventDeliveryAttempts', (stub) =>
+    projectEventRpc(stub).listProjectEventDeliveryAttempts(
+      withProjectId(projectId, input) as ListProjectEventDeliveryAttemptsInput
+    )
+  );
+}
+
+export async function getProjectEventRecentStatus(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<GetProjectEventRecentStatusInput> = {}
+): Promise<ProjectEventRecentStatus> {
+  return callProjectDataNoRetry(env, projectId, 'getProjectEventRecentStatus', (stub) =>
+    projectEventRpc(stub).getProjectEventRecentStatus(
+      withProjectId(projectId, input) as GetProjectEventRecentStatusInput
+    )
+  );
+}
+
+export async function runProjectEventRetention(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<RunProjectEventRetentionInput> = {}
+): Promise<ProjectEventRetentionResult> {
+  return callProjectDataNoRetry(env, projectId, 'runProjectEventRetention', (stub) =>
+    projectEventRpc(stub).runProjectEventRetention(
+      withProjectId(projectId, input) as RunProjectEventRetentionInput
+    )
   );
 }
 

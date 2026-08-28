@@ -261,6 +261,8 @@ When a sleeping VM conversation needs a replacement runtime, one D1 transaction 
 
 ProjectData also owns the single durable prompt-delivery queue used by browser followups and agent handoffs. Acceptance persists the visible transcript message and its stable delivery identity before runtime I/O. Alarm-driven attempts use bounded exponential backoff, a finite lifetime, compare-and-set attempt tokens, and stable VM receipts. A lost response is reconciled before retry; if receipt evidence is unavailable or belongs to another runtime, the delivery becomes explicitly ambiguous and is not replayed.
 
+ProjectData stores the durable foundation for project event subscriptions in the same per-project SQLite database. Normalized events are admitted by project, source, delivery key, and payload fingerprint; duplicate replays are idempotent, while the same source/key with a different fingerprint becomes a visible conflict. V1 subscription filters compile only allowlisted exact/set match keys for source, event type, subject type, subject ID, and severity. Delivery batches and attempts are durable inspection records in this foundation; they do not inject prompts or steer runtimes. Future delivery surfaces must reuse the existing prompt-delivery queue and receipt/ambiguity handling rather than creating a second prompt-delivery engine.
+
 Checkpoint episodes are stored idempotently by ACP session and prompt epoch, including state transitions, attempt/error metadata, and a progress envelope for inspection. Automatic long-turn selection and checkpoint preemption remain disabled. Task agents can explicitly park on a bounded `wait_for_subtasks` subscription: ProjectData reconciles selected same-project task terminal state and enqueues one immutable caller wake through the existing durable prompt-delivery queue. See [Configuration](/docs/reference/configuration/) for the durable-execution settings and rollout flags.
 
 Conversation and message text stays in ProjectData for long-term searchability. Large
@@ -284,6 +286,13 @@ or time range without receiving raw R2 keys.
 - `acp_session_events` — ACP session state transition history
 - `task_wait_subscriptions` — idempotent bounded parent waits, immutable wake payloads, and retry state
 - `task_wait_children` — normalized same-project task observations for each durable wait
+- `project_events` — bounded normalized project events keyed by source delivery identity and payload fingerprint
+- `project_event_subscriptions` — explicit owner/lifecycle/filter/delivery-preference records for project-scoped event subscriptions
+- `project_event_subscription_match_keys` — deterministic compiled v1 exact/set match keys used for bounded candidate selection
+- `project_event_matches` — durable event-to-subscription matches after lifecycle and filter rechecks
+- `project_event_delivery_batches` — durable delivery-batch records that currently terminalize as `recorded_not_injected`
+- `project_event_delivery_attempts` — durable delivery-attempt results including `recorded_not_injected` and `ambiguous`
+- `project_event_storage_accounting` — bounded event-subscription storage accounting by category
 
 **Key features:**
 
