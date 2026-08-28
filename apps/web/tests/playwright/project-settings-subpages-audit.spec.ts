@@ -1,9 +1,13 @@
-import { mkdirSync } from 'node:fs';
-import { resolve } from 'node:path';
-
 import { expect, type Page, test } from '@playwright/test';
 
-import { assertNoOverflow, makeMockUser, screenshot, setupAuditRoutes } from './audit-helpers';
+import {
+  applyMockCapacityDefaultsUpdate,
+  assertNoOverflow,
+  makeMockUser,
+  screenshot,
+  screenshotNearHeading,
+  setupAuditRoutes,
+} from './audit-helpers';
 
 const PROJECT_ID = 'proj-settings-1';
 
@@ -239,7 +243,9 @@ function userCapacitySummary() {
   };
 }
 
-function capacityDefaults(effective: unknown) {
+type ProjectSettingsCapacitySummary = ReturnType<typeof capacitySummary>;
+
+function capacityDefaults(effective: ProjectSettingsCapacitySummary | null) {
   const effectiveScope =
     effective && typeof effective === 'object' && 'pool' in effective
       ? ((effective as { pool?: { scope?: string } }).pool?.scope ?? null)
@@ -274,35 +280,6 @@ function capacityDefaults(effective: unknown) {
     reconciledScopes: ['project', 'user'],
     policyMutationSupported: true,
   };
-}
-
-function applyCapacityDefaultsUpdate(
-  current: ReturnType<typeof capacityDefaults>,
-  update: {
-    policy?: { strategy?: string; exhaustionPolicy?: string };
-    candidates?: { id: string; status: string }[];
-  }
-) {
-  const next = JSON.parse(JSON.stringify(current)) as ReturnType<typeof capacityDefaults>;
-  const summary = next.effective as ReturnType<typeof capacitySummary> | null;
-  if (!summary) return next;
-
-  if (update.policy?.strategy) summary.pool.strategy = update.policy.strategy;
-  if (update.policy?.exhaustionPolicy) {
-    summary.pool.exhaustionPolicy = update.policy.exhaustionPolicy;
-  }
-  for (const candidateUpdate of update.candidates ?? []) {
-    const candidate = summary.candidates.find((item) => item.id === candidateUpdate.id);
-    if (candidate) candidate.status = candidateUpdate.status;
-  }
-  summary.activeCandidateCount = summary.candidates.filter(
-    (candidate) => candidate.status === 'active'
-  ).length;
-  summary.pool.revision += 1;
-  for (const item of next.defaults) {
-    if (item.summary && item.summary.pool.id === summary.pool.id) item.summary = summary;
-  }
-  return next;
 }
 
 let capacityDefaultsStatus = 200;
@@ -363,7 +340,7 @@ async function setupMocks(page: Page) {
         subPath === '/capacity-pools/defaults/reconcile'
       ) {
         if (subPath === '/capacity-pools/defaults' && route.request().method() === 'PATCH') {
-          capacityDefaultsBody = applyCapacityDefaultsUpdate(
+          capacityDefaultsBody = applyMockCapacityDefaultsUpdate(
             capacityDefaultsBody as ReturnType<typeof capacityDefaults>,
             route.request().postDataJSON()
           );
@@ -389,35 +366,6 @@ async function expectCompactTabs(page: Page) {
   }));
   expect(metrics.tabCount).toBe(7);
   expect(metrics.height).toBeLessThanOrEqual(56);
-}
-
-async function screenshotDefaultComputePoolPanel(page: Page, name: string) {
-  const screenshotDir = resolve(process.cwd(), '../../.tmp/playwright-screenshots');
-  mkdirSync(screenshotDir, { recursive: true });
-  await page
-    .getByRole('heading', { name: 'Project Default Compute Pool' })
-    .scrollIntoViewIfNeeded();
-  await page.evaluate(() => window.scrollTo(0, window.scrollY));
-  await page.waitForTimeout(600);
-  const viewport = page.viewportSize();
-  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
-  await page.screenshot({
-    path: `${screenshotDir}/${name}${suffix}.png`,
-    fullPage: false,
-  });
-}
-
-async function screenshotDefaultComputePoolEditor(page: Page, name: string) {
-  const screenshotDir = resolve(process.cwd(), '../../.tmp/playwright-screenshots');
-  mkdirSync(screenshotDir, { recursive: true });
-  await page.getByRole('heading', { name: 'Edit project default' }).scrollIntoViewIfNeeded();
-  await page.waitForTimeout(600);
-  const viewport = page.viewportSize();
-  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
-  await page.screenshot({
-    path: `${screenshotDir}/${name}${suffix}.png`,
-    fullPage: false,
-  });
 }
 
 test.describe('Project settings sub-pages', () => {
@@ -473,18 +421,22 @@ test.describe('Project settings sub-pages', () => {
     await expect(page.getByText(/Installation defaults require/i)).toHaveCount(0);
     await expectCompactTabs(page);
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-normal');
-    await screenshotDefaultComputePoolPanel(
+    await screenshotNearHeading(
       page,
-      'project-settings-default-compute-pool-normal-focused'
+      'Project Default Compute Pool',
+      'project-settings-default-compute-pool-normal-focused',
+      { outputDir: '../../.tmp/playwright-screenshots' }
     );
 
     await page.getByRole('button', { name: 'Edit' }).click();
     await expect(page.getByRole('heading', { name: 'Edit project default' })).toBeVisible();
     await page.getByRole('button', { name: 'Remove Hetzner ash Small candidate' }).click();
     await page.getByRole('button', { name: 'Remove Hetzner hil Medium candidate' }).click();
-    await screenshotDefaultComputePoolEditor(
+    await screenshotNearHeading(
       page,
-      'project-settings-default-compute-pool-edit-focused'
+      'Edit project default',
+      'project-settings-default-compute-pool-edit-focused',
+      { outputDir: '../../.tmp/playwright-screenshots' }
     );
     await page.getByRole('button', { name: 'Save changes' }).click();
     await expect(page.getByText(/Active candidates\s*3/)).toBeVisible();
@@ -498,12 +450,24 @@ test.describe('Project settings sub-pages', () => {
     await expect(page.getByRole('button', { name: 'Edit' })).toHaveCount(0);
     await expect(page.getByText(/Hidden outside this settings context/i)).toHaveCount(0);
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-user-fallback');
+    await screenshotNearHeading(
+      page,
+      'Project Default Compute Pool',
+      'project-settings-default-compute-pool-user-fallback-focused',
+      { outputDir: '../../.tmp/playwright-screenshots' }
+    );
     await assertNoOverflow(page);
 
     capacityDefaultsBody = capacityDefaults(null);
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=empty`);
     await expect(page.getByText('No visible active default pool')).toBeVisible();
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-empty');
+    await screenshotNearHeading(
+      page,
+      'Project Default Compute Pool',
+      'project-settings-default-compute-pool-empty-focused',
+      { outputDir: '../../.tmp/playwright-screenshots' }
+    );
     await assertNoOverflow(page);
 
     const manyCandidates = Array.from({ length: 36 }, (_, index) =>
@@ -521,11 +485,16 @@ test.describe('Project settings sub-pages', () => {
       })
     );
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=many`);
-    await expect(page.getByText('+24 more provider/region groups')).toBeVisible();
+    await expect(
+      page.getByText('Hetzner · region-with-a-very-long-location-name-and-special-marker-ß')
+    ).toBeVisible();
+    await expect(page.getByText(/\+\d+ more provider\/region groups/)).toHaveCount(0);
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-many');
-    await screenshotDefaultComputePoolPanel(
+    await screenshotNearHeading(
       page,
-      'project-settings-default-compute-pool-many-focused'
+      'Project Default Compute Pool',
+      'project-settings-default-compute-pool-many-focused',
+      { outputDir: '../../.tmp/playwright-screenshots' }
     );
     await assertNoOverflow(page);
 
@@ -537,6 +506,12 @@ test.describe('Project settings sub-pages', () => {
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=error`);
     await expect(page.getByText('Project capability is required')).toBeVisible();
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-error');
+    await screenshotNearHeading(
+      page,
+      'Project Default Compute Pool',
+      'project-settings-default-compute-pool-error-focused',
+      { outputDir: '../../.tmp/playwright-screenshots' }
+    );
     await assertNoOverflow(page);
   });
 });

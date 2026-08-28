@@ -353,7 +353,7 @@ describe('DefaultCapacityPoolsPanel', () => {
     );
   });
 
-  it('summarizes overflow candidate groups deterministically', async () => {
+  it('renders all active candidate groups in the bounded list', async () => {
     const many = summary('project');
     many.candidates = Array.from({ length: 13 }, (_, index) =>
       candidate({
@@ -370,7 +370,8 @@ describe('DefaultCapacityPoolsPanel', () => {
     renderPanel();
 
     expect(await screen.findByText('Hetzner · region-0')).toBeInTheDocument();
-    expect(screen.getByText('+1 more provider/region groups')).toBeInTheDocument();
+    expect(screen.getByText('Hetzner · region-12')).toBeInTheDocument();
+    expect(screen.queryByText(/\+\d+ more provider\/region groups/)).not.toBeInTheDocument();
   });
 
   it('shows a deterministic error state', async () => {

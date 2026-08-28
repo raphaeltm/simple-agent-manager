@@ -8,13 +8,15 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
-import { errors } from '../middleware/error';
 import { updateDefaultCapacityPool } from '../services/default-capacity-pool-updates';
 import {
   type DefaultCapacityPoolsEnsureResult,
   readDefaultCapacityPoolSummaries,
 } from '../services/default-capacity-pools';
-import { parseDefaultCapacityPoolUpdateRequest } from './capacity-pool-update-request';
+import {
+  assertDefaultCapacityPoolUpdateResult,
+  readDefaultCapacityPoolUpdateRequest,
+} from './capacity-pool-update-request';
 
 const PRECEDENCE: CapacityPoolScope[] = ['project', 'user', 'installation'];
 
@@ -63,14 +65,6 @@ function buildUserDefaultPoolResponse(
   };
 }
 
-async function readJsonBody(c: { req: { json(): Promise<unknown> } }) {
-  try {
-    return await c.req.json();
-  } catch {
-    throw errors.badRequest('Request body must be valid JSON');
-  }
-}
-
 /**
  * GET /api/capacity-pools/defaults
  *
@@ -117,7 +111,7 @@ capacityPoolsRoutes.post('/defaults/reconcile', async (c) => {
 capacityPoolsRoutes.patch('/defaults', async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
-  const update = parseDefaultCapacityPoolUpdateRequest(await readJsonBody(c));
+  const update = await readDefaultCapacityPoolUpdateRequest(c);
   const result = await updateDefaultCapacityPool(db, {
     scope: 'user',
     ownerUserId: userId,
@@ -125,12 +119,10 @@ capacityPoolsRoutes.patch('/defaults', async (c) => {
     ...update,
   });
 
-  if (!result.poolFound) throw errors.notFound('Default capacity pool');
-  if (result.missingCandidateIds.length > 0) {
-    throw errors.badRequest('Candidate updates must belong to the default capacity pool', {
-      missingCandidateIds: result.missingCandidateIds,
-    });
-  }
+  assertDefaultCapacityPoolUpdateResult(
+    result,
+    'Candidate updates must belong to the default capacity pool'
+  );
 
   const summaries = await readDefaultCapacityPoolSummaries(db, {
     userId,

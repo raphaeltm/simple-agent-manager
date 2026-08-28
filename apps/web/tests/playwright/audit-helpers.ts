@@ -48,6 +48,75 @@ export async function screenshot(page: Page, name: string) {
   });
 }
 
+type MutableCapacityCandidate = { id: string; status: string };
+type MutableCapacitySummary = {
+  pool: {
+    id: string;
+    strategy: string;
+    exhaustionPolicy: string;
+    revision: number;
+  };
+  candidates: MutableCapacityCandidate[];
+  activeCandidateCount: number;
+};
+
+type MutableCapacityDefaultsResponse = {
+  effective: MutableCapacitySummary | null;
+  defaults: { summary: MutableCapacitySummary | null }[];
+};
+
+export type MockCapacityDefaultsUpdate = {
+  policy?: { strategy?: string; exhaustionPolicy?: string };
+  candidates?: MutableCapacityCandidate[];
+};
+
+export function applyMockCapacityDefaultsUpdate<T extends MutableCapacityDefaultsResponse>(
+  current: T,
+  update: MockCapacityDefaultsUpdate
+): T {
+  const next = JSON.parse(JSON.stringify(current)) as T;
+  const summary = next.effective;
+  if (!summary) return next;
+
+  if (update.policy?.strategy) summary.pool.strategy = update.policy.strategy;
+  if (update.policy?.exhaustionPolicy) {
+    summary.pool.exhaustionPolicy = update.policy.exhaustionPolicy;
+  }
+  for (const candidateUpdate of update.candidates ?? []) {
+    const candidate = summary.candidates.find((item) => item.id === candidateUpdate.id);
+    if (candidate) candidate.status = candidateUpdate.status;
+  }
+  summary.activeCandidateCount = summary.candidates.filter(
+    (candidate) => candidate.status === 'active'
+  ).length;
+  summary.pool.revision += 1;
+  for (const item of next.defaults) {
+    if (item.summary?.pool.id === summary.pool.id) item.summary = summary;
+  }
+  return next;
+}
+
+export async function screenshotNearHeading(
+  page: Page,
+  heading: string,
+  name: string,
+  options: { outputDir?: string } = {}
+) {
+  await page.getByRole('heading', { name: heading }).scrollIntoViewIfNeeded();
+  await page.waitForTimeout(600);
+  const viewport = page.viewportSize();
+  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
+  const screenshotDir = resolve(
+    process.cwd(),
+    options.outputDir ?? '../../.codex/tmp/playwright-screenshots'
+  );
+  mkdirSync(screenshotDir, { recursive: true });
+  await page.screenshot({
+    path: `${screenshotDir}/${name}${suffix}.png`,
+    fullPage: false,
+  });
+}
+
 export async function assertNoOverflow(page: Page) {
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth

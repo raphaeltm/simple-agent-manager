@@ -16,7 +16,7 @@ import {
 } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { useToast } from '../../hooks/useToast';
@@ -38,8 +38,6 @@ const SCOPE_LABELS: Record<CapacityPoolScope, string> = {
   user: 'User',
   installation: 'Installation',
 };
-
-const MAX_VISIBLE_CANDIDATE_GROUPS = 12;
 
 interface CandidateGroup {
   key: string;
@@ -237,10 +235,37 @@ function SourcesList({ sources }: { sources: CapacitySourceIdentity[] }) {
   );
 }
 
+function CandidateGroupFrame({ group, children }: { group: CandidateGroup; children: ReactNode }) {
+  return (
+    <div className="rounded-md border border-border-default bg-inset p-2 text-xs min-w-0">
+      <div className="font-medium text-fg-primary break-words">
+        {formatLabel(group.provider)} · {group.location}
+      </div>
+      <div className="mt-1 text-fg-muted">
+        {formatLabel(group.runtime)} · {formatLabel(group.machineClass)}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function CandidateSizePills({ candidates }: { candidates: CapacityPoolCandidate[] }) {
+  return (
+    <div className="mt-2 flex flex-wrap gap-1">
+      {candidates.map((candidate) => (
+        <span
+          key={candidate.id}
+          className="rounded-full border border-border-default bg-bg-card px-2 py-0.5 text-fg-primary"
+        >
+          {candidate.machineSize ?? 'size not set'}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function CandidatesList({ candidates }: { candidates: CapacityPoolCandidate[] }) {
   const groups = groupCandidates(candidates.filter((candidate) => candidate.status === 'active'));
-  const visible = groups.slice(0, MAX_VISIBLE_CANDIDATE_GROUPS);
-  const hiddenCount = groups.length - visible.length;
 
   if (groups.length === 0) {
     return <div className="text-xs text-fg-muted">No active machine candidates.</div>;
@@ -248,32 +273,11 @@ function CandidatesList({ candidates }: { candidates: CapacityPoolCandidate[] })
 
   return (
     <div className="grid max-h-64 gap-2 overflow-y-auto pr-1">
-      {visible.map((group) => (
-        <div
-          key={group.key}
-          className="rounded-md border border-border-default bg-inset p-2 text-xs min-w-0"
-        >
-          <div className="font-medium text-fg-primary break-words">
-            {formatLabel(group.provider)} · {group.location}
-          </div>
-          <div className="mt-1 text-fg-muted">
-            {formatLabel(group.runtime)} · {formatLabel(group.machineClass)}
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1">
-            {group.candidates.map((candidate) => (
-              <span
-                key={candidate.id}
-                className="rounded-full border border-border-default bg-bg-card px-2 py-0.5 text-fg-primary"
-              >
-                {candidate.machineSize ?? 'size not set'}
-              </span>
-            ))}
-          </div>
-        </div>
+      {groups.map((group) => (
+        <CandidateGroupFrame key={group.key} group={group}>
+          <CandidateSizePills candidates={group.candidates} />
+        </CandidateGroupFrame>
       ))}
-      {hiddenCount > 0 && (
-        <div className="text-xs text-fg-muted">+{hiddenCount} more provider/region groups</div>
-      )}
     </div>
   );
 }
@@ -299,6 +303,51 @@ function FallbackNotice({
   );
 }
 
+function CandidateStatusRow({
+  candidate,
+  group,
+  status,
+  onStatusChange,
+}: {
+  candidate: CapacityPoolCandidate;
+  group: CandidateGroup;
+  status: CapacityPoolStatus;
+  onStatusChange: (candidateId: string, status: CapacityPoolStatus) => void;
+}) {
+  const candidateLabel = `${formatLabel(candidate.provider)} ${group.location} ${formatLabel(candidate.machineSize)}`;
+  const isRemoved = status === 'deleted';
+
+  return (
+    <div className="flex flex-col gap-2 rounded border border-border-default bg-bg-card p-2 sm:flex-row sm:items-center sm:justify-between">
+      <label className="flex min-w-0 items-center gap-2">
+        <input
+          type="checkbox"
+          className="h-4 w-4 rounded border-border-default"
+          checked={status === 'active'}
+          disabled={isRemoved}
+          aria-label={`${candidateLabel} candidate active`}
+          onChange={(event) =>
+            onStatusChange(candidate.id, event.currentTarget.checked ? 'active' : 'disabled')
+          }
+        />
+        <span className="font-medium text-fg-primary">
+          {candidate.machineSize ?? 'size not set'}
+        </span>
+        <span className="text-fg-muted">{formatLabel(status)}</span>
+      </label>
+      <Button
+        size="sm"
+        variant={isRemoved ? 'secondary' : 'ghost'}
+        className="w-full sm:w-auto"
+        aria-label={`${isRemoved ? 'Restore' : 'Remove'} ${candidateLabel} candidate`}
+        onClick={() => onStatusChange(candidate.id, isRemoved ? 'active' : 'deleted')}
+      >
+        {isRemoved ? 'Restore' : 'Remove'}
+      </Button>
+    </div>
+  );
+}
+
 function CandidateEditor({
   candidates,
   draftStatuses,
@@ -317,60 +366,53 @@ function CandidateEditor({
   return (
     <div className="grid max-h-96 gap-2 overflow-y-auto pr-1">
       {groups.map((group) => (
-        <div
-          key={group.key}
-          className="rounded-md border border-border-default bg-inset p-2 text-xs min-w-0"
-        >
-          <div className="font-medium text-fg-primary break-words">
-            {formatLabel(group.provider)} · {group.location}
-          </div>
-          <div className="mt-1 text-fg-muted">
-            {formatLabel(group.runtime)} · {formatLabel(group.machineClass)}
-          </div>
+        <CandidateGroupFrame key={group.key} group={group}>
           <div className="mt-2 grid gap-2">
             {group.candidates.map((candidate) => {
               const status = draftStatuses[candidate.id] ?? candidate.status;
-              const isRemoved = status === 'deleted';
               return (
-                <div
+                <CandidateStatusRow
                   key={candidate.id}
-                  className="flex flex-col gap-2 rounded border border-border-default bg-bg-card p-2 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <label className="flex min-w-0 items-center gap-2">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-border-default"
-                      checked={status === 'active'}
-                      disabled={isRemoved}
-                      aria-label={`${formatLabel(candidate.provider)} ${group.location} ${formatLabel(candidate.machineSize)} candidate active`}
-                      onChange={(event) =>
-                        onStatusChange(
-                          candidate.id,
-                          event.currentTarget.checked ? 'active' : 'disabled'
-                        )
-                      }
-                    />
-                    <span className="font-medium text-fg-primary">
-                      {candidate.machineSize ?? 'size not set'}
-                    </span>
-                    <span className="text-fg-muted">{formatLabel(status)}</span>
-                  </label>
-                  <Button
-                    size="sm"
-                    variant={isRemoved ? 'secondary' : 'ghost'}
-                    className="w-full sm:w-auto"
-                    aria-label={`${isRemoved ? 'Restore' : 'Remove'} ${formatLabel(candidate.provider)} ${group.location} ${formatLabel(candidate.machineSize)} candidate`}
-                    onClick={() => onStatusChange(candidate.id, isRemoved ? 'active' : 'deleted')}
-                  >
-                    {isRemoved ? 'Restore' : 'Remove'}
-                  </Button>
-                </div>
+                  candidate={candidate}
+                  group={group}
+                  status={status}
+                  onStatusChange={onStatusChange}
+                />
               );
             })}
           </div>
-        </div>
+        </CandidateGroupFrame>
       ))}
     </div>
+  );
+}
+
+function PolicySelect<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: readonly T[];
+  onChange: (value: T) => void;
+}) {
+  return (
+    <label className="grid gap-1 text-xs text-fg-muted">
+      {label}
+      <select
+        className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+        value={value}
+        onChange={(event) => onChange(event.currentTarget.value as T)}
+      >
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {formatLabel(option)}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -578,40 +620,18 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
-                <label className="grid gap-1 text-xs text-fg-muted">
-                  Strategy
-                  <select
-                    className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
-                    value={draftStrategy}
-                    onChange={(event) =>
-                      setDraftStrategy(event.currentTarget.value as CapacityPoolStrategy)
-                    }
-                  >
-                    {CAPACITY_POOL_STRATEGIES.map((strategy) => (
-                      <option key={strategy} value={strategy}>
-                        {formatLabel(strategy)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="grid gap-1 text-xs text-fg-muted">
-                  Exhaustion policy
-                  <select
-                    className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
-                    value={draftExhaustionPolicy}
-                    onChange={(event) =>
-                      setDraftExhaustionPolicy(
-                        event.currentTarget.value as CapacityExhaustionPolicy
-                      )
-                    }
-                  >
-                    {CAPACITY_EXHAUSTION_POLICIES.map((policy) => (
-                      <option key={policy} value={policy}>
-                        {formatLabel(policy)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <PolicySelect
+                  label="Strategy"
+                  value={draftStrategy}
+                  options={CAPACITY_POOL_STRATEGIES}
+                  onChange={setDraftStrategy}
+                />
+                <PolicySelect
+                  label="Exhaustion policy"
+                  value={draftExhaustionPolicy}
+                  options={CAPACITY_EXHAUSTION_POLICIES}
+                  onChange={setDraftExhaustionPolicy}
+                />
               </div>
 
               <div className="grid gap-2 min-w-0">

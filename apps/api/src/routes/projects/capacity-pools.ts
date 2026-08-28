@@ -9,14 +9,16 @@ import { Hono } from 'hono';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { getAuth, getUserId, requireApproved, requireAuth } from '../../middleware/auth';
-import { errors } from '../../middleware/error';
 import { hasProjectCapability, requireProjectCapability } from '../../middleware/project-auth';
 import { updateDefaultCapacityPool } from '../../services/default-capacity-pool-updates';
 import {
   type DefaultCapacityPoolsEnsureResult,
   readDefaultCapacityPoolSummaries,
 } from '../../services/default-capacity-pools';
-import { parseDefaultCapacityPoolUpdateRequest } from '../capacity-pool-update-request';
+import {
+  assertDefaultCapacityPoolUpdateResult,
+  readDefaultCapacityPoolUpdateRequest,
+} from '../capacity-pool-update-request';
 
 const PRECEDENCE: CapacityPoolScope[] = ['project', 'user', 'installation'];
 
@@ -117,14 +119,6 @@ async function buildDefaultPoolResponse(
   };
 }
 
-async function readJsonBody(c: { req: { json(): Promise<unknown> } }) {
-  try {
-    return await c.req.json();
-  } catch {
-    throw errors.badRequest('Request body must be valid JSON');
-  }
-}
-
 /**
  * GET /api/projects/:id/capacity-pools/defaults
  *
@@ -141,12 +135,7 @@ capacityPoolRoutes.get('/:id/capacity-pools/defaults', async (c) => {
   await requireProjectCapability(db, projectId, userId, 'secret:read');
 
   const includeInstallation = auth.user.role === 'superadmin';
-  const policyMutationSupported = await hasProjectCapability(
-    db,
-    projectId,
-    userId,
-    'secret:write'
-  );
+  const policyMutationSupported = await hasProjectCapability(db, projectId, userId, 'secret:write');
   c.header('Cache-Control', 'private, no-store');
   return c.json(
     await buildDefaultPoolResponse(db, {
@@ -173,12 +162,7 @@ capacityPoolRoutes.post('/:id/capacity-pools/defaults/reconcile', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'secret:read');
-  const policyMutationSupported = await hasProjectCapability(
-    db,
-    projectId,
-    userId,
-    'secret:write'
-  );
+  const policyMutationSupported = await hasProjectCapability(db, projectId, userId, 'secret:write');
 
   return c.json(
     await buildDefaultPoolResponse(db, {
@@ -206,7 +190,7 @@ capacityPoolRoutes.patch('/:id/capacity-pools/defaults', async (c) => {
 
   await requireProjectCapability(db, projectId, userId, 'secret:write');
 
-  const update = parseDefaultCapacityPoolUpdateRequest(await readJsonBody(c));
+  const update = await readDefaultCapacityPoolUpdateRequest(c);
   const result = await updateDefaultCapacityPool(db, {
     scope: 'project',
     ownerUserId: null,
@@ -214,12 +198,10 @@ capacityPoolRoutes.patch('/:id/capacity-pools/defaults', async (c) => {
     ...update,
   });
 
-  if (!result.poolFound) throw errors.notFound('Default capacity pool');
-  if (result.missingCandidateIds.length > 0) {
-    throw errors.badRequest('Candidate updates must belong to the project default capacity pool', {
-      missingCandidateIds: result.missingCandidateIds,
-    });
-  }
+  assertDefaultCapacityPoolUpdateResult(
+    result,
+    'Candidate updates must belong to the project default capacity pool'
+  );
 
   c.header('Cache-Control', 'private, no-store');
   return c.json(

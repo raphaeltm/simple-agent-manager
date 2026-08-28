@@ -19,7 +19,7 @@ Raphaël reviewed draft PR #1943 on staging and found two blocking UX gaps:
 - Current child branch: `sam/execute-task-using-skill-t4d292`.
 - Do not deploy to staging.
 - Do not merge.
-- Keep PR #1943 draft.
+- Keep PR #1963 draft/open; PR #1943 remains coordinator-owned.
 - Preserve v1 precedence: project default → user default → installation default.
 - Preserve v1 one-effective-pool semantics; do not build fallback-between-pools UI.
 - Preserve centralized placement resolution; do not duplicate scheduler decision logic.
@@ -98,8 +98,8 @@ three surfaces without adding navigation or a second canonical settings location
       screenshots with stressed editable data and no hidden placeholder cards.
 - [x] Run focused tests, typecheck, lint, Playwright visual audits, and relevant
       specialist reviews.
-- [x] Push the child branch and update PR #1943 evidence/comments while keeping it
-      draft and unmerged.
+- [x] Push the child branch and update PR #1963 evidence/comments while keeping it
+      draft/open and unmerged.
 
 ## Acceptance criteria
 
@@ -117,8 +117,8 @@ three surfaces without adding navigation or a second canonical settings location
   centralized resolver.
 - API and UI tests cover the new behavior with realistic state.
 - Desktop and mobile Playwright screenshots are captured/reviewed for each changed
-  surface and posted/linked on PR #1943.
-- No staging deployment, no merge, and PR #1943 remains draft.
+  surface and posted/linked on PR #1963.
+- No staging deployment, no merge, and PR #1963 remains draft/open.
 
 ## Post-mortem
 
@@ -177,9 +177,9 @@ exercise the owner/admin edit workflow rather than only the read-only happy path
   - Screenshots generated under `.codex/tmp/playwright-screenshots/` and
     `.tmp/playwright-screenshots/` for project/user/installation desktop/mobile
     read, edit, and fallback/error stress states.
+- `pnpm dlx jscpd apps/api/src/services/placement-resolver.ts apps/api/src/services/default-capacity-pool-updates.ts apps/api/src/routes/capacity-pool-update-request.ts apps/web/src/components/project-settings/DefaultCapacityPoolsPanel.tsx apps/web/tests/playwright/default-capacity-pools-scopes-audit.spec.ts apps/web/tests/playwright/project-settings-subpages-audit.spec.ts apps/web/tests/playwright/audit-helpers.ts --min-lines 8 --min-tokens 50 --reporters console --mode strict`
+  - Passed: 0 clones, 0.00% duplicated lines/tokens in the SonarCloud-flagged files.
 - Child draft PR: <https://github.com/raphaeltm/simple-agent-manager/pull/1963>
-- Parent PR #1943 coordination comment:
-  <https://github.com/raphaeltm/simple-agent-manager/pull/1943#issuecomment-5454964872>
 
 ## Specialist review
 

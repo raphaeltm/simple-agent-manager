@@ -31,6 +31,19 @@ export interface DefaultCapacityPoolUpdateResult {
   missingCandidateIds: string[];
 }
 
+type CandidateStatusUpdate = { id: string; status: CapacityPoolStatus };
+type PolicyUpdate = NonNullable<DefaultCapacityPoolUpdateInput['policy']>;
+
+interface CandidateStatusUpdateResult {
+  changed: boolean;
+  missingCandidateIds: string[];
+}
+
+interface PolicyUpdateResult {
+  changed: boolean;
+  values: Partial<PolicyUpdate>;
+}
+
 export async function updateDefaultCapacityPool(
   db: Db,
   input: DefaultCapacityPoolUpdateInput
@@ -38,72 +51,21 @@ export async function updateDefaultCapacityPool(
   const pool = await findDefaultPool(db, input);
   if (!pool) return { poolFound: false, summary: null, missingCandidateIds: [] };
 
-  const candidateUpdates = dedupeCandidateStatusUpdates(input.candidates ?? []);
-  let candidatesChanged = false;
-
-  if (candidateUpdates.length > 0) {
-    const candidateRows = await db
-      .select({
-        id: schema.capacityPoolCandidates.id,
-        status: schema.capacityPoolCandidates.status,
-      })
-      .from(schema.capacityPoolCandidates)
-      .where(
-        and(
-          eq(schema.capacityPoolCandidates.poolId, pool.id),
-          inArray(
-            schema.capacityPoolCandidates.id,
-            candidateUpdates.map((candidate) => candidate.id)
-          )
-        )
-      );
-
-    const candidateById = new Map(candidateRows.map((candidate) => [candidate.id, candidate]));
-    const missingCandidateIds = candidateUpdates
-      .map((candidate) => candidate.id)
-      .filter((candidateId) => !candidateById.has(candidateId));
-
-    if (missingCandidateIds.length > 0) {
-      return { poolFound: true, summary: null, missingCandidateIds };
-    }
-
-    const now = new Date().toISOString();
-    for (const candidate of candidateUpdates) {
-      const existing = candidateById.get(candidate.id);
-      if (!existing || existing.status === candidate.status) continue;
-
-      await db
-        .update(schema.capacityPoolCandidates)
-        .set({ status: candidate.status, updatedAt: now })
-        .where(
-          and(
-            eq(schema.capacityPoolCandidates.poolId, pool.id),
-            eq(schema.capacityPoolCandidates.id, candidate.id)
-          )
-        );
-      candidatesChanged = true;
-    }
+  const candidateResult = await updateCandidateStatuses(db, pool.id, input.candidates ?? []);
+  if (candidateResult.missingCandidateIds.length > 0) {
+    return {
+      poolFound: true,
+      summary: null,
+      missingCandidateIds: candidateResult.missingCandidateIds,
+    };
   }
 
-  const policy = input.policy ?? {};
-  const strategyChanged = policy.strategy !== undefined && policy.strategy !== pool.strategy;
-  const exhaustionPolicyChanged =
-    policy.exhaustionPolicy !== undefined && policy.exhaustionPolicy !== pool.exhaustionPolicy;
-  const policyChanged = strategyChanged || exhaustionPolicyChanged;
-
-  if (policyChanged || candidatesChanged) {
-    await db
-      .update(schema.capacityPools)
-      .set({
-        ...(strategyChanged ? { strategy: policy.strategy } : {}),
-        ...(exhaustionPolicyChanged ? { exhaustionPolicy: policy.exhaustionPolicy } : {}),
-        revision: sql`${schema.capacityPools.revision} + 1`,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(schema.capacityPools.id, pool.id));
+  const policyResult = resolvePolicyUpdate(pool, input.policy);
+  if (policyResult.changed || candidateResult.changed) {
+    await updatePoolPolicyAndRevision(db, pool.id, policyResult.values);
   }
 
-  if (candidatesChanged) {
+  if (candidateResult.changed) {
     await reconcileDefaultPoolStatus(db, pool.id);
   }
 
@@ -114,9 +76,99 @@ export async function updateDefaultCapacityPool(
   };
 }
 
+async function updateCandidateStatuses(
+  db: Db,
+  poolId: string,
+  candidates: CandidateStatusUpdate[]
+): Promise<CandidateStatusUpdateResult> {
+  const updates = dedupeCandidateStatusUpdates(candidates);
+  if (updates.length === 0) return { changed: false, missingCandidateIds: [] };
+
+  const existingById = await readCandidateStatuses(
+    db,
+    poolId,
+    updates.map(({ id }) => id)
+  );
+  const missingCandidateIds = updates
+    .map(({ id }) => id)
+    .filter((candidateId) => !existingById.has(candidateId));
+  if (missingCandidateIds.length > 0) return { changed: false, missingCandidateIds };
+
+  const changedUpdates = updates.filter(({ id, status }) => existingById.get(id) !== status);
+  if (changedUpdates.length === 0) return { changed: false, missingCandidateIds: [] };
+
+  const now = new Date().toISOString();
+  for (const candidate of changedUpdates) {
+    await db
+      .update(schema.capacityPoolCandidates)
+      .set({ status: candidate.status, updatedAt: now })
+      .where(
+        and(
+          eq(schema.capacityPoolCandidates.poolId, poolId),
+          eq(schema.capacityPoolCandidates.id, candidate.id)
+        )
+      );
+  }
+
+  return { changed: true, missingCandidateIds: [] };
+}
+
+async function readCandidateStatuses(
+  db: Db,
+  poolId: string,
+  candidateIds: string[]
+): Promise<Map<string, CapacityPoolStatus>> {
+  const rows = await db
+    .select({
+      id: schema.capacityPoolCandidates.id,
+      status: schema.capacityPoolCandidates.status,
+    })
+    .from(schema.capacityPoolCandidates)
+    .where(
+      and(
+        eq(schema.capacityPoolCandidates.poolId, poolId),
+        inArray(schema.capacityPoolCandidates.id, candidateIds)
+      )
+    );
+
+  return new Map(
+    rows.map((candidate) => [candidate.id, candidate.status as CapacityPoolStatus])
+  );
+}
+
+function resolvePolicyUpdate(
+  pool: schema.CapacityPool,
+  policy: DefaultCapacityPoolUpdateInput['policy']
+): PolicyUpdateResult {
+  const values: Partial<PolicyUpdate> = {};
+  if (policy?.strategy !== undefined && policy.strategy !== pool.strategy) {
+    values.strategy = policy.strategy;
+  }
+  if (policy?.exhaustionPolicy !== undefined && policy.exhaustionPolicy !== pool.exhaustionPolicy) {
+    values.exhaustionPolicy = policy.exhaustionPolicy;
+  }
+
+  return { changed: Object.keys(values).length > 0, values };
+}
+
+async function updatePoolPolicyAndRevision(
+  db: Db,
+  poolId: string,
+  values: Partial<PolicyUpdate>
+): Promise<void> {
+  await db
+    .update(schema.capacityPools)
+    .set({
+      ...values,
+      revision: sql`${schema.capacityPools.revision} + 1`,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(schema.capacityPools.id, poolId));
+}
+
 function dedupeCandidateStatusUpdates(
-  candidates: { id: string; status: CapacityPoolStatus }[]
-): { id: string; status: CapacityPoolStatus }[] {
+  candidates: CandidateStatusUpdate[]
+): CandidateStatusUpdate[] {
   const statusesByCandidateId = new Map<string, CapacityPoolStatus>();
   for (const candidate of candidates) {
     const id = candidate.id.trim();

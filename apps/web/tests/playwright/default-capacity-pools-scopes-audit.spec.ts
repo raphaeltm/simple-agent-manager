@@ -1,11 +1,13 @@
 import { expect, type Page, test } from '@playwright/test';
 
 import {
+  applyMockCapacityDefaultsUpdate,
   assertNoOverflow,
   getProjectSuffix,
   jsonResponse,
   makeMockUser,
   screenshot,
+  screenshotNearHeading,
   setupAuditRoutes,
 } from './audit-helpers';
 
@@ -135,35 +137,6 @@ function defaultsResponse(scope: 'user' | 'installation') {
   };
 }
 
-function applyDefaultsUpdate(
-  current: ReturnType<typeof defaultsResponse>,
-  update: {
-    policy?: { strategy?: string; exhaustionPolicy?: string };
-    candidates?: { id: string; status: string }[];
-  }
-) {
-  const next = JSON.parse(JSON.stringify(current)) as ReturnType<typeof defaultsResponse>;
-  const summary = next.effective;
-  if (!summary) return next;
-
-  if (update.policy?.strategy) summary.pool.strategy = update.policy.strategy;
-  if (update.policy?.exhaustionPolicy) {
-    summary.pool.exhaustionPolicy = update.policy.exhaustionPolicy;
-  }
-  for (const candidateUpdate of update.candidates ?? []) {
-    const candidate = summary.candidates.find((item) => item.id === candidateUpdate.id);
-    if (candidate) candidate.status = candidateUpdate.status;
-  }
-  summary.activeCandidateCount = summary.candidates.filter(
-    (candidate) => candidate.status === 'active'
-  ).length;
-  summary.pool.revision += 1;
-  for (const item of next.defaults) {
-    if (item.summary?.pool.id === summary.pool.id) item.summary = summary;
-  }
-  return next;
-}
-
 async function setupCommonMocks(page: Page, authUser: unknown) {
   await page.addInitScript(() =>
     ['pool-user', 'pool-admin'].forEach((userId) =>
@@ -192,7 +165,7 @@ async function setupUserPoolMocks(page: Page) {
   let responseBody = defaultsResponse('user');
   await page.route('**/api/capacity-pools/defaults*', async (route) => {
     if (route.request().method() === 'PATCH') {
-      responseBody = applyDefaultsUpdate(responseBody, route.request().postDataJSON());
+      responseBody = applyMockCapacityDefaultsUpdate(responseBody, route.request().postDataJSON());
     }
     return jsonResponse(route, 200, responseBody);
   });
@@ -224,7 +197,7 @@ async function setupInstallationPoolMocks(page: Page) {
   let responseBody = defaultsResponse('installation');
   await page.route('**/api/admin/capacity-pools/defaults*', async (route) => {
     if (route.request().method() === 'PATCH') {
-      responseBody = applyDefaultsUpdate(responseBody, route.request().postDataJSON());
+      responseBody = applyMockCapacityDefaultsUpdate(responseBody, route.request().postDataJSON());
     }
     return jsonResponse(route, 200, responseBody);
   });
@@ -247,37 +220,43 @@ async function setupInstallationPoolMocks(page: Page) {
   );
 }
 
-async function screenshotPoolPanel(page: Page, heading: string, name: string) {
-  await page.getByRole('heading', { name: heading }).scrollIntoViewIfNeeded();
-  await page.waitForTimeout(600);
-  const viewport = page.viewportSize();
-  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
-  await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}${suffix}.png`,
-    fullPage: false,
-  });
+async function expectStressedDefaultPool(
+  page: Page,
+  heading: string,
+  scope: 'user' | 'installation'
+) {
+  await expect(page.getByRole('heading', { name: heading })).toBeVisible();
+  await expect(page.getByText(/Active candidates\s*36/)).toBeVisible();
+  await expect(
+    page.getByText(new RegExp(`region-with-a-deliberately-long-location-name-${scope}`))
+  ).toBeVisible();
+  await expect(page.getByText(/\+\d+ more provider\/region groups/)).toHaveCount(0);
+  await expect(page.getByText(/Hidden outside this settings context/i)).toHaveCount(0);
+  await expect(page.getByText(/Installation defaults require/i)).toHaveCount(0);
 }
 
-async function screenshotPoolDetails(page: Page, name: string) {
-  await page.getByRole('heading', { name: 'Active Sources' }).scrollIntoViewIfNeeded();
-  await page.waitForTimeout(600);
-  const viewport = page.viewportSize();
-  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
-  await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}${suffix}.png`,
-    fullPage: false,
-  });
+async function screenshotDefaultPoolScope(
+  page: Page,
+  heading: string,
+  namePrefix: string,
+  suffix: string
+) {
+  await screenshot(page, `${namePrefix}-${suffix}`);
+  await screenshotNearHeading(page, heading, `${namePrefix}-focused-${suffix}`);
+  await screenshotNearHeading(page, 'Active Sources', `${namePrefix}-details-${suffix}`);
 }
 
-async function screenshotPoolEditor(page: Page, heading: string, name: string) {
-  await page.getByRole('heading', { name: heading }).scrollIntoViewIfNeeded();
-  await page.waitForTimeout(600);
-  const viewport = page.viewportSize();
-  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
-  await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}${suffix}.png`,
-    fullPage: false,
-  });
+async function removeAshHilCandidates(page: Page, editHeading: string, screenshotName: string) {
+  await page.getByRole('button', { name: 'Edit' }).click();
+  await expect(page.getByRole('heading', { name: editHeading })).toBeVisible();
+  await page.getByRole('button', { name: 'Remove Hetzner ash Small candidate' }).click();
+  await page.getByRole('button', { name: 'Remove Hetzner hil Medium candidate' }).click();
+  await screenshotNearHeading(page, editHeading, screenshotName);
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.getByText(/Active candidates\s*34/)).toBeVisible();
+  await expect(page.getByText('Hetzner · ash')).toHaveCount(0);
+  await expect(page.getByText('Hetzner · hil')).toHaveCount(0);
+  await assertNoOverflow(page);
 }
 
 test.describe('Default capacity pool scope surfaces', () => {
@@ -287,40 +266,19 @@ test.describe('Default capacity pool scope surfaces', () => {
     await setupUserPoolMocks(page);
     await page.goto('/settings/cloud-provider');
 
-    await expect(page.getByRole('heading', { name: 'Your Default Compute Pool' })).toBeVisible();
-    await expect(page.getByText(/Active candidates\s*36/)).toBeVisible();
-    await expect(page.getByText('+24 more provider/region groups')).toBeVisible();
-    await expect(page.getByText(/Hidden outside this settings context/i)).toHaveCount(0);
-    await expect(page.getByText(/Installation defaults require/i)).toHaveCount(0);
-
-    await screenshot(
-      page,
-      `default-capacity-pools-user-${getProjectSuffix(testInfo.project.name)}`
-    );
-    await screenshotPoolPanel(
+    const suffix = getProjectSuffix(testInfo.project.name);
+    await expectStressedDefaultPool(page, 'Your Default Compute Pool', 'user');
+    await screenshotDefaultPoolScope(
       page,
       'Your Default Compute Pool',
-      `default-capacity-pools-user-focused-${getProjectSuffix(testInfo.project.name)}`
+      'default-capacity-pools-user',
+      suffix
     );
-    await screenshotPoolDetails(
-      page,
-      `default-capacity-pools-user-details-${getProjectSuffix(testInfo.project.name)}`
-    );
-
-    await page.getByRole('button', { name: 'Edit' }).click();
-    await expect(page.getByRole('heading', { name: 'Edit user default' })).toBeVisible();
-    await page.getByRole('button', { name: 'Remove Hetzner ash Small candidate' }).click();
-    await page.getByRole('button', { name: 'Remove Hetzner hil Medium candidate' }).click();
-    await screenshotPoolEditor(
+    await removeAshHilCandidates(
       page,
       'Edit user default',
-      `default-capacity-pools-user-edit-${getProjectSuffix(testInfo.project.name)}`
+      `default-capacity-pools-user-edit-${suffix}`
     );
-    await page.getByRole('button', { name: 'Save changes' }).click();
-    await expect(page.getByText(/Active candidates\s*34/)).toBeVisible();
-    await expect(page.getByText('Hetzner · ash')).toHaveCount(0);
-    await expect(page.getByText('Hetzner · hil')).toHaveCount(0);
-    await assertNoOverflow(page);
   });
 
   test('admin surface renders stressed installation default pool without overflow', async ({
@@ -329,41 +287,22 @@ test.describe('Default capacity pool scope surfaces', () => {
     await setupInstallationPoolMocks(page);
     await page.goto('/admin/credentials');
 
-    await expect(
-      page.getByRole('heading', { name: 'Installation Default Compute Pool' })
-    ).toBeVisible();
-    await expect(page.getByText(/Active candidates\s*36/)).toBeVisible();
-    await expect(page.getByText('+24 more provider/region groups')).toBeVisible();
-    await expect(page.getByText(/Hidden outside this settings context/i)).toHaveCount(0);
-    await expect(page.getByText(/Installation defaults require/i)).toHaveCount(0);
-
-    await screenshot(
-      page,
-      `default-capacity-pools-installation-${getProjectSuffix(testInfo.project.name)}`
-    );
-    await screenshotPoolPanel(
+    const suffix = getProjectSuffix(testInfo.project.name);
+    await expectStressedDefaultPool(
       page,
       'Installation Default Compute Pool',
-      `default-capacity-pools-installation-focused-${getProjectSuffix(testInfo.project.name)}`
+      'installation'
     );
-    await screenshotPoolDetails(
+    await screenshotDefaultPoolScope(
       page,
-      `default-capacity-pools-installation-details-${getProjectSuffix(testInfo.project.name)}`
+      'Installation Default Compute Pool',
+      'default-capacity-pools-installation',
+      suffix
     );
-
-    await page.getByRole('button', { name: 'Edit' }).click();
-    await expect(page.getByRole('heading', { name: 'Edit installation default' })).toBeVisible();
-    await page.getByRole('button', { name: 'Remove Hetzner ash Small candidate' }).click();
-    await page.getByRole('button', { name: 'Remove Hetzner hil Medium candidate' }).click();
-    await screenshotPoolEditor(
+    await removeAshHilCandidates(
       page,
       'Edit installation default',
-      `default-capacity-pools-installation-edit-${getProjectSuffix(testInfo.project.name)}`
+      `default-capacity-pools-installation-edit-${suffix}`
     );
-    await page.getByRole('button', { name: 'Save changes' }).click();
-    await expect(page.getByText(/Active candidates\s*34/)).toBeVisible();
-    await expect(page.getByText('Hetzner · ash')).toHaveCount(0);
-    await expect(page.getByText('Hetzner · hil')).toHaveCount(0);
-    await assertNoOverflow(page);
   });
 });
