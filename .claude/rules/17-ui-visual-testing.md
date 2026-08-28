@@ -35,7 +35,7 @@ Every changed surface must be screenshotted at **both**:
 
 ### Screenshot Capture
 
-1. Store screenshots in `.codex/tmp/playwright-screenshots/` (gitignored)
+1. Store screenshots in `.tmp/playwright-screenshots/` (gitignored)
 2. Use descriptive filenames: `<component>-<scenario>-<viewport>.png`
    - Example: `task-list-long-text-mobile.png`, `task-detail-error-desktop.png`
 3. Wait at least 500ms after navigation before capturing to allow render settling
@@ -44,6 +44,16 @@ Every changed surface must be screenshotted at **both**:
    disappear with the agent workspace.
 5. Link the screenshot comment, or embed the image links, in the PR body's
    `UI Screenshot Evidence` section.
+
+### Preflight Enforcement
+
+The `scripts/quality/check-preflight-evidence.ts` checker enforces the UI evidence
+requirement as a CI gate for PRs that check `ui-change` in Agent Preflight. It
+requires the `UI Screenshot Evidence` section to include at least one screenshot
+link on the line identifying the **desktop** screenshots and at least one on the
+line identifying the **mobile** screenshots (Markdown image, direct image URL, or
+a GitHub `#issuecomment-…` URL), so a single link cannot satisfy multiple changed
+surfaces. Keep this checker and this section aligned.
 
 ### What to Check in Screenshots
 

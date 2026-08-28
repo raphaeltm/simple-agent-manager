@@ -69,7 +69,7 @@ Compute pools Wave 2B needs an internal, idempotent service that can lazily crea
 
 | Reviewer | Status | Outcome |
 | --- | --- | --- |
-| task-completion-validator | PASS | Research findings, checked checklist items, and acceptance criteria map to the diff and validation evidence. Remaining unchecked item is the PR-opening step. No UI-to-backend path applies because this slice intentionally adds an unwired internal service. |
+| task-completion-validator | PASS | Research findings, checked checklist items, and acceptance criteria map to the diff and validation evidence. The combined validation/review/child-PR item is complete with child PR #1949 open. No UI-to-backend path applies because this slice intentionally adds an unwired internal service. |
 | cloudflare-specialist | PASS | D1 usage is Drizzle/SQLite-compatible, uses existing Wave 1A schema and indexes, avoids new migrations, and keeps candidate generation bounded to shared static catalogs. No KV/R2/wrangler/deployment changes. |
 | security-auditor | PASS | Production service does not read, decrypt, log, or copy credential secrets. Capacity sources persist only credential IDs, non-secret references, provider identity, status, and timestamp-derived version metadata. |
 | constitution-validator | PASS | No new URLs, timeouts, retry delays, quotas, or deployment-specific identifiers. Default literals are schema/shared-contract values for the new capacity-pool records. |

@@ -207,6 +207,8 @@ function main(): void {
         'ui-change requires a filled "UI Screenshot Evidence" section with desktop/mobile Playwright screenshots and review attestation.'
       );
     } else {
+      const screenshotLinkPattern =
+        /!\[[^\]]+\]\([^)]+\)|https?:\/\/\S+\.(?:png|jpg|jpeg|webp)(?:\?\S*)?|#issuecomment-\d+/i;
       const hasDesktop = /\bdesktop\b/i.test(uiScreenshots);
       const hasMobile = /\bmobile\b/i.test(uiScreenshots);
       const hasPlaywright = /\bplaywright\b/i.test(uiScreenshots);
@@ -214,8 +216,17 @@ function main(): void {
         /\b(mock|edge|stress|long text|many items|empty|error|special characters|push(?:es|ed)? the limits)\b/i.test(
           uiScreenshots
         );
-      const hasScreenshotLink =
-        /!\[[^\]]+\]\([^)]+\)|https?:\/\/\S+\.(?:png|jpg|jpeg|webp)(?:\?\S*)?/i.test(uiScreenshots);
+      const screenshotLines = uiScreenshots
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const hasScreenshotLink = screenshotLinkPattern.test(uiScreenshots);
+      const hasDesktopScreenshot = screenshotLines.some(
+        (line) => /\bdesktop\b/i.test(line) && screenshotLinkPattern.test(line)
+      );
+      const hasMobileScreenshot = screenshotLines.some(
+        (line) => /\bmobile\b/i.test(line) && screenshotLinkPattern.test(line)
+      );
       const hasReviewAttestation =
         /\b(reviewed|inspected)\b/i.test(uiScreenshots) &&
         /\b(no issues|no visual issues|quality|overflow|clipping|layout)\b/i.test(uiScreenshots);
@@ -235,6 +246,16 @@ function main(): void {
       }
       if (!hasScreenshotLink) {
         failures.push('UI Screenshot Evidence must include at least one screenshot image/link.');
+      }
+      if (!hasDesktopScreenshot) {
+        failures.push(
+          'UI Screenshot Evidence must include a screenshot link on the line identifying the desktop screenshots.'
+        );
+      }
+      if (!hasMobileScreenshot) {
+        failures.push(
+          'UI Screenshot Evidence must include a screenshot link on the line identifying the mobile screenshots.'
+        );
       }
       if (!hasReviewAttestation) {
         failures.push(

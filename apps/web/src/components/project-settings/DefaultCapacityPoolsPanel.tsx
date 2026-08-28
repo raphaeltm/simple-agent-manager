@@ -352,13 +352,17 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
             </div>
           )}
 
-          <EffectivePoolCard scope={scope} summary={effective} />
+          {query.data && (
+            <>
+              <EffectivePoolCard scope={scope} summary={effective} />
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 min-w-0">
-            {(query.data?.defaults ?? []).map((item) => (
-              <ScopeRow key={item.scope} item={item} />
-            ))}
-          </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 min-w-0">
+                {query.data.defaults.map((item) => (
+                  <ScopeRow key={item.scope} item={item} />
+                ))}
+              </div>
+            </>
+          )}
 
           {effective && (
             <div className="grid gap-3 lg:grid-cols-2 min-w-0">

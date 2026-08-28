@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFileSync, type ExecFileSyncOptions } from 'node:child_process';
@@ -9,7 +9,9 @@ const repoRoot = resolve(import.meta.dirname, '../..');
 const checker = resolve(repoRoot, 'scripts/quality/check-preflight-evidence.ts');
 
 function writePayload(body: string): string {
-  const dir = mkdtempSync(join(tmpdir(), 'sam-preflight-'));
+  const tmpRoot = join(repoRoot, '.tmp');
+  mkdirSync(tmpRoot, { recursive: true });
+  const dir = mkdtempSync(join(tmpRoot, 'sam-preflight-'));
   const eventPath = join(dir, 'event.json');
   writeFileSync(
     eventPath,
@@ -104,6 +106,23 @@ describe('check-preflight-evidence', () => {
 - Mobile screenshots: ![mobile](https://example.com/mobile.png)
 - Mock/stress data used: Playwright mock data covered long text, many items, empty, error, and special characters to push the limits of the UI.
 - Screenshot quality review: Reviewed the screenshots for quality, overflow, clipping, readability, and responsive behavior; no visual issues found.`;
+
+    const result = runChecker(body);
+
+    expect(result.output).toContain('Preflight evidence check passed.');
+    expect(result.status).toBe(0);
+  });
+
+  it('passes ui-change PRs whose screenshots are referenced by a PR comment link', () => {
+    const body = `${baseBody('- [x] ui-change')}
+
+### UI Screenshot Evidence
+
+- PR screenshot comment: https://github.com/example/repo/pull/123#issuecomment-42
+- Desktop screenshots: https://github.com/example/repo/pull/123#issuecomment-42
+- Mobile screenshots: https://github.com/example/repo/pull/123#issuecomment-42
+- Mock/stress data used: Playwright mock data covered long text, many items, empty, error, and special characters to push the limits of the UI.
+- Screenshot quality review: Reviewed the inbound comment screenshots for quality, overflow, clipping, readability, and responsive behavior; no visual issues found.`;
 
     const result = runChecker(body);
 

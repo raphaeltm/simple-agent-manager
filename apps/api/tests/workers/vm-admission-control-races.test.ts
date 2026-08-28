@@ -16,6 +16,7 @@ import type {
   TaskRunnerContext,
   TaskRunnerState,
 } from '../../src/durable-objects/task-runner/types';
+import type { TaskStartCapacityPoolSelection } from '../../src/services/placement-resolver';
 import {
   assertVmProvisioningLease,
   markVmProvisioningLeaseInflightNode,
@@ -562,12 +563,55 @@ describe('VM admission control D1 races', () => {
       status: 'running',
     });
 
+    // Exercise the user-scope capacity-pool path across projects: the node and
+    // both reservations share one user-scope pool, and cross-project reuse must
+    // still pack onto the same node.
+    const snapshot = capacitySnapshot({
+      poolId: 'pool-vm-admission-cross-project-user',
+      sourceId: 'source-vm-admission-cross-project-user',
+      candidateId: 'candidate-vm-admission-cross-project-user',
+      scope: 'user',
+    });
+    await assignNodeCapacity(crossProjectNode, snapshot);
+
+    const selection: TaskStartCapacityPoolSelection = {
+      poolId: snapshot.capacityPoolId,
+      scope: 'user',
+      revision: 1,
+      strategy: 'balanced',
+      capacityPoolProjectId: null,
+      workloadRole: 'workspace',
+      poolSnapshot: snapshot,
+      candidates: [
+        {
+          id: snapshot.capacityPoolCandidateId,
+          poolId: snapshot.capacityPoolId,
+          capacitySourceId: snapshot.capacitySourceId,
+          provider: 'hetzner',
+          location: 'nbg1',
+          workloadRole: 'workspace',
+          runtime: 'vm',
+          machineClass: 'shared-vm',
+          machineSize: 'medium',
+          priority: 1,
+          candidateOrder: 0,
+          credentialAttributionSource: 'user',
+          placementCredentialSource: 'user',
+          placementCredentialReference: snapshot.placementCredentialReference,
+          placementCredentialVersion: 1,
+          capacityPoolProjectId: null,
+          snapshot,
+        },
+      ],
+    };
+
     const rc = selectorContext();
     const selectedForSecondProject = await findNodeWithCapacity(
       taskState(userId, 'medium', {
         projectId: secondProjectId,
         installationId,
         repository: secondRepository,
+        capacityPoolSelection: selection,
       }),
       rc
     );
@@ -576,12 +620,15 @@ describe('VM admission control D1 races', () => {
     await expect(
       reserveWorkspacePlacement(
         env.DATABASE,
-        placement('workspace-vm-admission-cross-project-second', crossProjectNode, {
-          projectId: secondProjectId,
-          userId,
-          installationId,
-          repository: secondRepository,
-        }),
+        {
+          ...placement('workspace-vm-admission-cross-project-second', crossProjectNode, {
+            projectId: secondProjectId,
+            userId,
+            installationId,
+            repository: secondRepository,
+          }),
+          capacityPlacementSnapshot: snapshot,
+        },
         2
       )
     ).resolves.toBe(true);

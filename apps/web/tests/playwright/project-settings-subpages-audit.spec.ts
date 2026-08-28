@@ -1,3 +1,6 @@
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { expect, type Page, test } from '@playwright/test';
 
 import { assertNoOverflow, makeMockUser, screenshot, setupAuditRoutes } from './audit-helpers';
@@ -316,6 +319,8 @@ async function expectCompactTabs(page: Page) {
 }
 
 async function screenshotDefaultComputePoolPanel(page: Page, name: string) {
+  const screenshotDir = resolve(process.cwd(), '../../.tmp/playwright-screenshots');
+  mkdirSync(screenshotDir, { recursive: true });
   await page
     .getByRole('heading', { name: 'Project Default Compute Pool' })
     .scrollIntoViewIfNeeded();
@@ -324,7 +329,7 @@ async function screenshotDefaultComputePoolPanel(page: Page, name: string) {
   const viewport = page.viewportSize();
   const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
   await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}${suffix}.png`,
+    path: `${screenshotDir}/${name}${suffix}.png`,
     fullPage: false,
   });
 }
