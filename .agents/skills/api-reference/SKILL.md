@@ -30,4 +30,5 @@ The reference covers:
 - Authentication (BetterAuth)
 - Credentials
 - GitHub Integration
+- Superadmin project eventing inspector (`/api/admin/project-events/:projectId/inspector`)
 - Error Format

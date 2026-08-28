@@ -1,6 +1,7 @@
 export type {
   AdminErrorsFilter,
   AdminLogQueryParams,
+  AdminProjectEventInspectorResponse,
   AdminTrialsConfigResponse,
   AIProxyConfigResponse,
   BillingMode,
@@ -55,6 +56,7 @@ export {
   fetchAdminHealth,
   fetchAdminNodeUsage,
   fetchAdminPlatformConfig,
+  fetchAdminProjectEventInspector,
   fetchAdminTrialsConfig,
   fetchAdminUserComputeUsage,
   fetchAdminUserNodeUsage,

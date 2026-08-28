@@ -85,6 +85,10 @@ vi.mock('../../src/pages/AdminOverview', () => ({
   AdminOverview: () => <div data-testid="admin-overview-page" />,
 }));
 
+vi.mock('../../src/pages/AdminProjectEvents', () => ({
+  AdminProjectEvents: () => <div data-testid="admin-project-events-page" />,
+}));
+
 vi.mock('../../src/pages/AdminLogs', () => ({
   AdminLogs: () => <div data-testid="admin-logs-page" />,
 }));
@@ -263,6 +267,15 @@ describe('App routes', () => {
 
     expect(await screen.findByTestId('admin-layout')).toBeInTheDocument();
     expect(await screen.findByTestId('admin-users-page')).toBeInTheDocument();
+  });
+
+  it('routes the internal admin project eventing inspector for superadmins', async () => {
+    mockUseAuth.mockReturnValue({ isSuperadmin: true });
+
+    renderAt('/admin/project-events');
+
+    expect(await screen.findByTestId('admin-layout')).toBeInTheDocument();
+    expect(await screen.findByTestId('admin-project-events-page')).toBeInTheDocument();
   });
 
   it('does not render inventoried dev-only routes under production env flags', () => {

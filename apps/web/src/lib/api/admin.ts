@@ -1,4 +1,5 @@
 import type {
+  AdminProjectEventInspectorResponse,
   AdminUsersResponse,
   CreatePlatformCredentialRequest,
   DebugDiagnosisListResponse,
@@ -22,6 +23,8 @@ import type {
 import { DEFAULT_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES } from '@simple-agent-manager/shared';
 
 import { API_URL, request } from './client';
+
+export type { AdminProjectEventInspectorResponse };
 
 const parsedDiagnosisEventMaxPages = Number.parseInt(
   import.meta.env.VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES ?? '',
@@ -113,6 +116,20 @@ export async function fetchAdminErrors(filter?: AdminErrorsFilter): Promise<Erro
 
 export async function fetchAdminHealth(): Promise<HealthSummary> {
   return request<HealthSummary>('/api/admin/observability/health');
+}
+
+export async function fetchAdminProjectEventInspector(
+  projectId: string,
+  limit?: number
+): Promise<AdminProjectEventInspectorResponse> {
+  const params = new URLSearchParams();
+  if (limit !== undefined) params.set('limit', String(limit));
+  const query = params.toString();
+  return request<AdminProjectEventInspectorResponse>(
+    `/api/admin/project-events/${encodeURIComponent(projectId)}/inspector${
+      query ? `?${query}` : ''
+    }`
+  );
 }
 
 export async function fetchAdminErrorTrends(range?: string): Promise<ErrorTrendResponse> {
@@ -619,10 +636,7 @@ export type {
   PlatformIntegrationConfigInput,
   PlatformIntegrationStatus,
 } from './admin-platform-config';
-export {
-  fetchAdminPlatformConfig,
-  updateAdminPlatformConfig,
-} from './admin-platform-config';
+export { fetchAdminPlatformConfig, updateAdminPlatformConfig } from './admin-platform-config';
 
 // =============================================================================
 // Admin Compute Usage

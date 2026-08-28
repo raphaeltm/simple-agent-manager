@@ -42,6 +42,10 @@ const AdminPlatformCredentials = lazyNamed(
   () => import('./pages/AdminPlatformCredentials'),
   'AdminPlatformCredentials'
 );
+const AdminProjectEvents = lazyNamed(
+  () => import('./pages/AdminProjectEvents'),
+  'AdminProjectEvents'
+);
 const AdminStream = lazyNamed(() => import('./pages/AdminStream'), 'AdminStream');
 const AdminTrials = lazyNamed(() => import('./pages/AdminTrials'), 'AdminTrials');
 const AdminUsers = lazyNamed(() => import('./pages/AdminUsers'), 'AdminUsers');
@@ -372,6 +376,7 @@ export default function App() {
                         <Route path="diagnoses" element={page(<AdminDiagnoses />)} />
                         <Route path="diagnoses/:runId" element={page(<AdminDiagnosis />)} />
                         <Route path="overview" element={page(<AdminOverview />)} />
+                        <Route path="project-events" element={page(<AdminProjectEvents />)} />
                         <Route path="logs" element={page(<AdminLogs />)} />
                         <Route path="stream" element={page(<AdminStream />)} />
                         <Route path="analytics" element={page(<AdminAnalytics />)} />

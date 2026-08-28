@@ -1,4 +1,18 @@
 import type { DiagnosticIncidentSummary } from './debug-agent';
+import type {
+  ProjectEventDeliveryAttemptState,
+  ProjectEventDeliveryBatchState,
+  ProjectEventDisplayData,
+  ProjectEventFilterV1,
+  ProjectEventMatchState,
+  ProjectEventRequestedDeliveryMode,
+  ProjectEventResolvedDeliveryMode,
+  ProjectEventSeverity,
+  ProjectEventStorageAccountingRecord,
+  ProjectEventSubject,
+  ProjectEventSubscriptionOwner,
+  ProjectEventSubscriptionState,
+} from './project-events';
 
 // =============================================================================
 // Admin Observability (spec 023)
@@ -56,6 +70,145 @@ export interface HealthSummary {
   inProgressTasks: number;
   errorCount24h: number;
   timestamp: string; // ISO 8601
+}
+
+// =============================================================================
+// Admin Project Event Inspector (superadmin-only, sanitized)
+// =============================================================================
+
+export interface AdminProjectEventInspectorProject {
+  id: string;
+  name: string;
+  repository: string | null;
+  repoProvider: string | null;
+  status: string | null;
+  activeSessionCount: number;
+  lastActivityAt: string | null;
+}
+
+export interface AdminProjectEventInspectorTarget {
+  sessionId: string | null;
+  taskId: string | null;
+  runtimeId: string | null;
+  agentId: string | null;
+}
+
+export interface AdminProjectEventInspectorSubscription {
+  id: string;
+  owner: ProjectEventSubscriptionOwner;
+  state: ProjectEventSubscriptionState;
+  reason: string | null;
+  filter: ProjectEventFilterV1;
+  matchKeyCount: number;
+  requestedDelivery: ProjectEventRequestedDeliveryMode;
+  resolvedDelivery: ProjectEventResolvedDeliveryMode;
+  target: AdminProjectEventInspectorTarget;
+  createdAt: number;
+  updatedAt: number;
+  expiresAt: number | null;
+  cancelledAt: number | null;
+  cancelledBy: ProjectEventSubscriptionOwner | null;
+  cancelReason: string | null;
+  lastMatchedAt: number | null;
+}
+
+export interface AdminProjectEventInspectorEvent {
+  id: string;
+  source: string;
+  eventType: string;
+  subject: ProjectEventSubject;
+  severity: ProjectEventSeverity;
+  state: string;
+  display: ProjectEventDisplayData;
+  occurredAt: number;
+  receivedAt: number;
+  updatedAt: number;
+  duplicateCount: number;
+  conflictCount: number;
+  hasRawPayloadRef: boolean;
+}
+
+export interface AdminProjectEventInspectorMatch {
+  id: string;
+  eventId: string;
+  subscriptionId: string;
+  state: ProjectEventMatchState;
+  matchedAt: number;
+  lifecycleCheckedAt: number;
+  batchId: string | null;
+  reason: string | null;
+}
+
+export interface AdminProjectEventInspectorAdapterDecision {
+  action: string;
+  reason: string;
+  adapterId: string | null;
+  adapterKind: string | null;
+  capability: string | null;
+  agentType: string | null;
+  protocol: string | null;
+  protocolVersion: string | null;
+  durableAck: boolean;
+  supported: boolean;
+  authorized: boolean;
+  terminal: boolean;
+}
+
+export interface AdminProjectEventInspectorBatch {
+  id: string;
+  subscriptionId: string;
+  state: ProjectEventDeliveryBatchState;
+  requestedDelivery: ProjectEventRequestedDeliveryMode;
+  resolvedDelivery: ProjectEventResolvedDeliveryMode;
+  target: AdminProjectEventInspectorTarget;
+  eventCount: number;
+  matchCount: number;
+  createdAt: number;
+  updatedAt: number;
+  terminalAt: number | null;
+  terminalReason: string | null;
+  adapterDecision: AdminProjectEventInspectorAdapterDecision;
+}
+
+export interface AdminProjectEventInspectorAttempt {
+  id: string;
+  batchId: string;
+  attemptNumber: number;
+  state: ProjectEventDeliveryAttemptState;
+  adapter: string | null;
+  protocolVersion: string | null;
+  runtimeId: string | null;
+  receiptId: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  startedAt: number;
+  completedAt: number | null;
+  createdAt: number;
+}
+
+export interface AdminProjectEventInspectorTotals {
+  activeSubscriptions: number;
+  terminalSubscriptions: number;
+  recentEvents: number;
+  recentMatches: number;
+  recentBatches: number;
+  recentAttempts: number;
+  attentionBatches: number;
+  attentionAttempts: number;
+}
+
+export interface AdminProjectEventInspectorResponse {
+  generatedAt: number;
+  limit: number;
+  project: AdminProjectEventInspectorProject;
+  totals: AdminProjectEventInspectorTotals;
+  subscriptions: AdminProjectEventInspectorSubscription[];
+  events: AdminProjectEventInspectorEvent[];
+  matches: AdminProjectEventInspectorMatch[];
+  batches: AdminProjectEventInspectorBatch[];
+  attempts: AdminProjectEventInspectorAttempt[];
+  accounting: ProjectEventStorageAccountingRecord[];
+  hasMore: boolean;
 }
 
 export interface ErrorTrendBucket {
