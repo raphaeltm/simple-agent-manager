@@ -65,15 +65,23 @@ type ExtendedCandidate = CapacityPoolCandidate & {
   sku?: string | null;
   instanceType?: string | null;
   type?: string | null;
+  providerInstanceType?: string | null;
   vcpu?: number | null;
+  providerInstanceVcpuCount?: number | null;
   ramGb?: number | null;
   memoryGb?: number | null;
   memoryMb?: number | null;
+  providerInstanceMemoryMb?: number | null;
   storageGb?: number | null;
   diskGb?: number | null;
+  providerInstanceDiskGb?: number | null;
   price?: string | null;
+  providerInstancePriceDisplay?: string | null;
   priceMonthlyUsd?: number | null;
   priceHourlyUsd?: number | null;
+  providerInstancePriceMonthlyCents?: number | null;
+  providerInstancePriceHourlyMicros?: number | null;
+  providerInstancePriceCurrency?: string | null;
   available?: boolean | null;
   stale?: boolean | null;
   catalogStatus?: string | null;
@@ -257,6 +265,7 @@ export function flattenProviderCatalogOfferings(catalogs: ProviderCatalog[]): Co
 
 function candidateSku(candidate: ExtendedCandidate): string | null {
   return (
+    candidate.providerInstanceType ??
     candidate.sku ??
     candidate.instanceType ??
     candidate.type ??
@@ -269,7 +278,20 @@ function candidateFallbackOffering(candidate: ExtendedCandidate): ComputePoolOff
   const provider = candidate.provider ?? 'unknown-provider';
   const location = candidate.location ?? 'unknown-region';
   const sku = candidateSku(candidate) ?? 'Provider SKU pending';
-  const priceLabel = priceLabelForOffering(candidate);
+  const priceLabel =
+    candidate.providerInstancePriceDisplay ??
+    priceLabelForOffering({
+      ...candidate,
+      currency: candidate.providerInstancePriceCurrency,
+    });
+  const monthlyFromCents =
+    typeof candidate.providerInstancePriceMonthlyCents === 'number'
+      ? candidate.providerInstancePriceMonthlyCents / 100
+      : null;
+  const hourlyFromMicros =
+    typeof candidate.providerInstancePriceHourlyMicros === 'number'
+      ? candidate.providerInstancePriceHourlyMicros / 1_000_000
+      : null;
 
   return {
     key: offeringKey(provider, location, sku),
@@ -279,13 +301,19 @@ function candidateFallbackOffering(candidate: ExtendedCandidate): ComputePoolOff
     locationLabel: location,
     country: null,
     sku,
-    vcpu: normalizeNumber(candidate.vcpu),
-    ramGb: normalizeRamGb(candidate),
-    diskGb: normalizeDiskGb(candidate),
+    vcpu: normalizeNumber(candidate.providerInstanceVcpuCount ?? candidate.vcpu),
+    ramGb: normalizeRamGb({
+      ramGb: candidate.ramGb ?? candidate.memoryGb,
+      memoryMb: candidate.providerInstanceMemoryMb ?? candidate.memoryMb,
+    }),
+    diskGb: normalizeDiskGb({
+      storageGb: candidate.storageGb,
+      diskGb: candidate.providerInstanceDiskGb ?? candidate.diskGb,
+    }),
     priceLabel,
     monthlyPriceAmount: monthlyPriceAmount(
-      candidate.priceMonthlyUsd,
-      candidate.priceHourlyUsd,
+      monthlyFromCents ?? candidate.priceMonthlyUsd,
+      hourlyFromMicros ?? candidate.priceHourlyUsd,
       priceLabel
     ),
     available: typeof candidate.available === 'boolean' ? candidate.available : null,
