@@ -7,6 +7,9 @@ const mockStartBuildPublishJobOnVm = vi.fn();
 const mockCreateDeploymentPublishJob = vi.fn();
 const mockAppendDeploymentPublishJobEvent = vi.fn();
 const mockGetDeploymentPublishJobForMcp = vi.fn();
+const recordDeploymentPublishJobLifecycleEventBestEffort = vi.hoisted(() =>
+  vi.fn(async () => undefined)
+);
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: vi.fn(() => ({ mockedDb: true })),
@@ -28,6 +31,10 @@ vi.mock('../../src/services/deployment-publish-jobs', () => ({
   getDeploymentPublishJobForMcp: (...args: unknown[]) => mockGetDeploymentPublishJobForMcp(...args),
   sanitizePublishEventText: (value: unknown) =>
     String(value).replace(/X-Amz-Signature=[^&\s"]+/g, 'X-Amz-Signature=[redacted]'),
+}));
+
+vi.mock('../../src/services/project-lifecycle-events', () => ({
+  recordDeploymentPublishJobLifecycleEventBestEffort,
 }));
 
 vi.mock('../../src/routes/mcp/workspace-tools', async () => {
@@ -80,7 +87,10 @@ describe('async build_and_publish MCP tools', () => {
       nodeId: 'node-1',
       projectId: 'proj-1',
     });
-    mockCreateDeploymentPublishJob.mockResolvedValue({ id: 'job-1' });
+    mockCreateDeploymentPublishJob.mockResolvedValue({
+      id: 'job-1',
+      createdAt: '2026-08-28T12:00:00.000Z',
+    });
     mockStartBuildPublishJobOnVm.mockResolvedValue({ publishJobId: 'job-1', status: 'accepted' });
   });
 
@@ -114,6 +124,7 @@ describe('async build_and_publish MCP tools', () => {
   });
 
   it('creates a durable job, starts the VM job with a short timeout, and returns polling instructions', async () => {
+    const testEnv = env();
     const result = await handleBuildAndPublish(
       'req-1',
       {
@@ -122,7 +133,7 @@ describe('async build_and_publish MCP tools', () => {
         workingDir: ' /workspaces/app-wt-feature ',
       },
       tokenData(),
-      env()
+      testEnv
     );
 
     expect(result.error).toBeUndefined();
@@ -160,6 +171,19 @@ describe('async build_and_publish MCP tools', () => {
       expect.anything(),
       expect.objectContaining({ publishJobId: 'job-1', eventType: 'publish.job.accepted' })
     );
+    expect(recordDeploymentPublishJobLifecycleEventBestEffort).toHaveBeenCalledWith(testEnv, {
+      projectId: 'proj-1',
+      publishJobId: 'job-1',
+      environmentId: 'env-1',
+      status: 'queued',
+      fromStatus: null,
+      currentStep: 'queued',
+      nodeId: 'node-1',
+      workspaceId: 'ws-1',
+      taskId: 'task-1',
+      source: 'mcp.build_and_publish.create_job',
+      occurredAt: '2026-08-28T12:00:00.000Z',
+    });
 
     const payload = JSON.parse(result.result?.content?.[0]?.text as string);
     expect(payload).toMatchObject({

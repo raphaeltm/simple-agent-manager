@@ -21,6 +21,7 @@ import {
   getDeploymentPublishJobForMcp,
   sanitizePublishEventText,
 } from '../../services/deployment-publish-jobs';
+import { recordDeploymentPublishJobLifecycleEventBestEffort } from '../../services/project-lifecycle-events';
 import {
   INVALID_PARAMS,
   jsonRpcError,
@@ -119,6 +120,19 @@ export async function handleBuildAndPublish(
     currentStep: 'queued',
     eventType: 'publish.job.created',
     message: 'publish job created',
+  });
+  await recordDeploymentPublishJobLifecycleEventBestEffort(env, {
+    projectId,
+    publishJobId: job.id,
+    environmentId: policyResult.environmentId,
+    status: 'queued',
+    fromStatus: null,
+    currentStep: 'queued',
+    nodeId: workspace.nodeId,
+    workspaceId: tokenData.workspaceId,
+    taskId: tokenData.taskId || null,
+    source: 'mcp.build_and_publish.create_job',
+    occurredAt: job.createdAt,
   });
 
   const proxyBody: Record<string, unknown> = {

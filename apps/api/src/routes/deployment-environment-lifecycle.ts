@@ -25,6 +25,7 @@ import {
 } from '../services/deployment-volumes';
 import { teardownDeploymentEnvironmentOnNode } from '../services/node-agent';
 import { deleteNodeResources, retireDeletedDeploymentNodeRecord } from '../services/nodes';
+import { recordDeploymentEnvironmentLifecycleEventBestEffort } from '../services/project-lifecycle-events';
 
 type DeploymentDb = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -423,6 +424,7 @@ async function stopDeploymentEnvironment(params: {
   userId: string;
   projectId: string;
   envId: string;
+  executionCtx: Pick<ExecutionContext, 'waitUntil'>;
 }) {
   const { db, env, userId, projectId, envId } = params;
   const environment = await requireDeploymentEnvironment(db, projectId, envId);
@@ -447,13 +449,15 @@ async function stopDeploymentEnvironment(params: {
 
   const volumes = await listEnvironmentVolumes(db, envId);
   const attachedVolumes = hasAttachedVolumes(volumes);
+  const previousStatus = environment.status;
+  const previousNodeId = environment.nodeId;
 
   await db
     .update(schema.deploymentEnvironments)
     .set({ status: 'stopping', updatedAt: new Date().toISOString() })
     .where(eq(schema.deploymentEnvironments.id, envId));
 
-  const teardown = await teardownLinkedDeploymentNode(db, env, userId, envId, environment.nodeId, {
+  const teardown = await teardownLinkedDeploymentNode(db, env, userId, envId, previousNodeId, {
     requireLiveTeardownBeforeDetach: attachedVolumes,
   });
   const volumesDetached = await detachVolumesForEnvironmentStop(
@@ -466,25 +470,39 @@ async function stopDeploymentEnvironment(params: {
 
   await markEnvironmentStopped(db, envId);
 
-  const nodeCleanup = await cleanupDeploymentNodeIfUnassigned(db, env, userId, environment.nodeId);
+  const nodeCleanup = await cleanupDeploymentNodeIfUnassigned(db, env, userId, previousNodeId);
   const warnings = [...teardown.warnings, ...nodeCleanup.warnings];
   const updated = await requireDeploymentEnvironment(db, projectId, envId);
   log.info('deployment_environment.stopped', {
     projectId,
     envId,
-    nodeId: environment.nodeId,
+    nodeId: previousNodeId,
     nodeStatus: teardown.nodeStatus,
     nodeDeleted: nodeCleanup.nodeDeleted,
     volumesDetached,
     warningCount: warnings.length,
   });
 
+  params.executionCtx.waitUntil(
+    recordDeploymentEnvironmentLifecycleEventBestEffort(env, {
+      projectId,
+      environmentId: envId,
+      lifecycle: 'stopped',
+      status: 'stopped',
+      fromStatus: previousStatus,
+      nodeId: previousNodeId,
+      userId,
+      source: 'deployment_environment.stop',
+      occurredAt: Date.now(),
+    })
+  );
+
   return {
     environment: await buildDeploymentEnvironmentResponse(db, env, updated),
     lifecycle: {
       stopped: true,
       alreadyStopped: false,
-      nodeId: environment.nodeId,
+      nodeId: previousNodeId,
       nodeDeleted: nodeCleanup.nodeDeleted,
       volumesDetached,
       warnings,
@@ -618,6 +636,7 @@ async function startDeploymentEnvironment(params: {
   }
   const volumePlacement = resolveVolumePlacementConstraint(volumes);
   const requiresVolumes = environment.requiresVolumes || volumes.length > 0;
+  const previousStatus = environment.status;
 
   await markEnvironmentStarting(db, envId, latestRelease.id);
 
@@ -659,6 +678,22 @@ async function startDeploymentEnvironment(params: {
     latestReleaseVersion: latestRelease.version,
   });
 
+  params.executionCtx.waitUntil(
+    recordDeploymentEnvironmentLifecycleEventBestEffort(env, {
+      projectId,
+      environmentId: envId,
+      lifecycle: 'starting',
+      status: updated.status,
+      fromStatus: previousStatus,
+      releaseId: latestRelease.id,
+      releaseVersion: latestRelease.version,
+      nodeId: result.nodeId,
+      userId,
+      source: 'deployment_environment.start',
+      occurredAt: Date.now(),
+    })
+  );
+
   return {
     environment: await buildDeploymentEnvironmentResponse(db, env, updated),
     lifecycle: {
@@ -693,12 +728,19 @@ export function registerDeploymentEnvironmentLifecycleRoutes(
       const userId = getUserId(c);
       const db = drizzle(c.env.DATABASE, { schema });
       await requireProjectCapability(db, projectId, userId, 'deployment:manage');
+      let executionCtx: Pick<ExecutionContext, 'waitUntil'>;
+      try {
+        executionCtx = c.executionCtx;
+      } catch {
+        executionCtx = { waitUntil: () => undefined };
+      }
       const result = await stopDeploymentEnvironment({
         db,
         env: c.env,
         userId,
         projectId,
         envId,
+        executionCtx,
       });
       return c.json(result);
     }

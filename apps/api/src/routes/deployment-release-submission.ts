@@ -22,6 +22,7 @@ import {
   markDeploymentReleaseVolumeAttachFailed,
 } from '../services/deployment-volumes';
 import { teardownDeploymentEnvironmentOnNode } from '../services/node-agent';
+import { recordDeploymentReleaseLifecycleEventBestEffort } from '../services/project-lifecycle-events';
 
 export type CreateDeploymentReleaseResult = {
   id: string;
@@ -491,6 +492,21 @@ export async function createDeploymentReleaseFromManifest(
     requiresVolumes,
     now,
   });
+
+  const releaseCreatedEvent = recordDeploymentReleaseLifecycleEventBestEffort(params.env, {
+    projectId: params.projectId,
+    releaseId: id,
+    environmentId: params.envId,
+    status: 'created',
+    version: nextVersion,
+    source: 'deployment_release_submission.create',
+    occurredAt: now,
+  });
+  if (params.executionCtx) {
+    params.executionCtx.waitUntil(releaseCreatedEvent);
+  } else {
+    await releaseCreatedEvent;
+  }
 
   const nodeId = await placeReleaseOnDeploymentNode({
     db,

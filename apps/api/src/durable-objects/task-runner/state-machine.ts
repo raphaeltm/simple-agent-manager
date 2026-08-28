@@ -6,8 +6,10 @@
  */
 import { log } from '../../lib/logger';
 import { persistError, redactSensitiveData } from '../../services/observability';
+import { recordTaskLifecycleEventBestEffort } from '../../services/project-lifecycle-events';
 import { restoreSessionRecoveryHandoff } from '../../services/session-recovery-authority';
 import {
+  createProjectEventTaskTerminalTransitionHook,
   createTaskWaitTerminalTransitionHook,
   runTaskTerminalTransitionHooks,
 } from '../../services/task-terminal-transition-hooks';
@@ -273,6 +275,21 @@ export async function transitionToInProgress(
     )
     .run();
 
+  rc.ctx.waitUntil(
+    recordTaskLifecycleEventBestEffort(rc.env, {
+      projectId: state.projectId,
+      taskId: state.taskId,
+      status: 'in_progress',
+      fromStatus: 'delegated',
+      workspaceId: state.stepResults.workspaceId,
+      sessionId: state.stepResults.chatSessionId,
+      nodeId: state.stepResults.nodeId,
+      agentSessionId: state.stepResults.agentSessionId,
+      source: 'task_runner.transition_to_in_progress',
+      occurredAt: now,
+    })
+  );
+
   log.info('task_runner_do.step.in_progress', {
     taskId: state.taskId,
     workspaceId: state.stepResults.workspaceId,
@@ -411,7 +428,10 @@ export async function failTask(
       occurredAt: now,
       source: 'task_runner.fail_task',
     },
-    [createTaskWaitTerminalTransitionHook(rc.env)]
+    [
+      createTaskWaitTerminalTransitionHook(rc.env),
+      createProjectEventTaskTerminalTransitionHook(rc.env),
+    ]
   );
 
   // Notify orchestrator of task failure (best-effort) — triggers scheduling cycle

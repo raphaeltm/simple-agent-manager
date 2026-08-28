@@ -24,6 +24,7 @@ import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-
 import { getLatestAssistantMessageForTask } from '../../services/task-final-assistant-message';
 import { cleanupTerminalTaskResources } from '../../services/task-terminal-cleanup';
 import {
+  createProjectEventTaskTerminalTransitionHook,
   createTaskWaitTerminalTransitionHook,
   runTaskTerminalTransitionHooks,
 } from '../../services/task-terminal-transition-hooks';
@@ -554,7 +555,7 @@ export async function handleCompleteTask(
       occurredAt: now,
       source: 'mcp.complete_task',
     },
-    [createTaskWaitTerminalTransitionHook(env)]
+    [createTaskWaitTerminalTransitionHook(env), createProjectEventTaskTerminalTransitionHook(env)]
   );
 
   log.info('mcp.complete_task', {

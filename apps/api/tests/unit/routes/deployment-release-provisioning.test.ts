@@ -34,9 +34,15 @@ let releaseRows: Array<{ version: number }> = [];
 
 // Mock provisionDeploymentNode
 const mockProvisionDeploymentNode = vi.fn();
+const recordDeploymentReleaseLifecycleEventBestEffort = vi.hoisted(() =>
+  vi.fn(async () => undefined)
+);
 vi.mock('../../../src/services/deployment-provisioning', () => ({
   provisionDeploymentNode: (...args: unknown[]) => mockProvisionDeploymentNode(...args),
   resolveDeploymentPlacement: vi.fn(async () => null),
+}));
+vi.mock('../../../src/services/project-lifecycle-events', () => ({
+  recordDeploymentReleaseLifecycleEventBestEffort,
 }));
 
 vi.mock('../../../src/services/deployment-volumes', () => ({
@@ -280,6 +286,17 @@ describe('POST /:projectId/environments/:envId/releases — provisioning trigger
       'test-user-id',
       expect.anything(),
       { requiresVolumes: false }
+    );
+    expect(recordDeploymentReleaseLifecycleEventBestEffort).toHaveBeenCalledWith(
+      mockEnv,
+      expect.objectContaining({
+        projectId: 'proj-1',
+        releaseId: 'release-test-id',
+        environmentId: 'env-1',
+        status: 'created',
+        version: 1,
+        source: 'deployment_release_submission.create',
+      })
     );
   });
 

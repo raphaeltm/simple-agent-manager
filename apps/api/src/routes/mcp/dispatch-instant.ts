@@ -95,7 +95,11 @@ export function launchDispatchedInstantSession(
     // window already mark the task failed; the queued-status guard makes this
     // a no-op then.
     try {
-      await markQueuedTaskFailed(db, input.taskId, `Instant launch failed: ${errorMsg}`);
+      await markQueuedTaskFailed(db, input.taskId, `Instant launch failed: ${errorMsg}`, {
+        env,
+        projectId: input.project.id,
+        source: 'mcp.dispatch_task.instant_launch',
+      });
     } catch (persistErr) {
       log.error('mcp.dispatch_task.instant_failure_persist_failed', {
         taskId: input.taskId,

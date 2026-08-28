@@ -40,6 +40,10 @@ import {
 } from '../services/node-callback-auth';
 import { issueNodeOriginCertificate } from '../services/origin-ca-certificates';
 import * as projectDataService from '../services/project-data';
+import {
+  recordDeploymentEnvironmentLifecycleEventBestEffort,
+  recordDeploymentReleaseLifecycleEventBestEffort,
+} from '../services/project-lifecycle-events';
 import { wakeVmAdmissionWaiters } from '../services/vm-admission-control';
 import { resolveWorkspaceGitSourceByProjectId } from '../services/workspace-git-source';
 import { nodeDiagnosticIncidentRoutes } from './node-diagnostic-incidents';
@@ -571,9 +575,11 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
       const envRows = await db
         .select({
           envId: schema.deploymentEnvironments.id,
+          projectId: schema.deploymentEnvironments.projectId,
           status: schema.deploymentEnvironments.status,
           requiresVolumes: schema.deploymentEnvironments.requiresVolumes,
           observedAppliedSeq: schema.deploymentEnvironments.observedAppliedSeq,
+          observedStatus: schema.deploymentEnvironments.observedStatus,
           desiredRoutingRevision: schema.deploymentEnvironments.desiredRoutingRevision,
           observedRoutingRevision: schema.deploymentEnvironments.observedRoutingRevision,
         })
@@ -634,7 +640,61 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
               )
             );
 
-          await reconcileDeploymentReleaseStatuses(db, envId, deploymentState);
+          const nextObservedStatus =
+            typeof observedUpdate.observedStatus === 'string'
+              ? observedUpdate.observedStatus
+              : null;
+          const nextObservedAppliedSeq =
+            typeof observedUpdate.observedAppliedSeq === 'number'
+              ? observedUpdate.observedAppliedSeq
+              : null;
+          const nextEnvironmentStatus =
+            typeof observedUpdate.status === 'string' ? observedUpdate.status : envRow.status;
+          const environmentStatusChanged = nextEnvironmentStatus !== envRow.status;
+          const observedStatusChanged =
+            nextObservedStatus !== null && nextObservedStatus !== (envRow.observedStatus ?? null);
+          const observedAppliedSeqChanged =
+            nextObservedAppliedSeq !== null &&
+            nextObservedAppliedSeq !== (envRow.observedAppliedSeq ?? null);
+          if (environmentStatusChanged || observedStatusChanged || observedAppliedSeqChanged) {
+            c.executionCtx.waitUntil(
+              recordDeploymentEnvironmentLifecycleEventBestEffort(c.env, {
+                projectId: envRow.projectId,
+                environmentId: envId,
+                lifecycle:
+                  environmentStatusChanged && nextEnvironmentStatus === 'active'
+                    ? 'active'
+                    : environmentStatusChanged && nextEnvironmentStatus === 'error'
+                      ? 'error'
+                      : 'observed',
+                status: nextEnvironmentStatus,
+                fromStatus: envRow.status,
+                observedStatus: nextObservedStatus,
+                observedAppliedSeq: nextObservedAppliedSeq,
+                nodeId,
+                source: 'node.heartbeat_deployment_observation',
+                occurredAt: now,
+              })
+            );
+          }
+
+          const releaseTransitions =
+            (await reconcileDeploymentReleaseStatuses(db, envId, deploymentState)) ?? [];
+          for (const transition of releaseTransitions) {
+            c.executionCtx.waitUntil(
+              recordDeploymentReleaseLifecycleEventBestEffort(c.env, {
+                projectId: envRow.projectId,
+                releaseId: transition.releaseId,
+                environmentId: envId,
+                status: transition.toStatus,
+                fromStatus: transition.fromStatus,
+                version: transition.version,
+                nodeId,
+                source: 'node.heartbeat_release_reconciliation',
+                occurredAt: transition.occurredAt,
+              })
+            );
+          }
           if (typeof deploymentState.routingRevision === 'number') {
             await reconcileCustomDomainRoutingObservation(
               db,

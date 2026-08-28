@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   requireRepositoryUserAccess: vi.fn(),
   createSession: vi.fn(),
   cleanupWorkspaceForDeletion: vi.fn(),
+  recordTaskLifecycleEventBestEffort: vi.fn(async () => undefined),
 }));
 
 // The caller is MEMBER: a project member with task:write who did NOT create the task.
@@ -59,6 +60,11 @@ vi.mock('../../../src/services/project-data', () => ({
   createSession: mocks.createSession,
   stopSession: vi.fn(),
   failSession: vi.fn(),
+}));
+vi.mock('../../../src/services/project-lifecycle-events', () => ({
+  isLifecycleTaskStatus: (status: string) =>
+    ['in_progress', 'completed', 'failed', 'cancelled'].includes(status),
+  recordTaskLifecycleEventBestEffort: mocks.recordTaskLifecycleEventBestEffort,
 }));
 vi.mock('../../../src/services/task-runner-do', () => ({
   startTaskRunnerDO: mocks.startTaskRunnerDO,
@@ -210,6 +216,24 @@ describe('shared-project task lifecycle — positive paths for a non-creator mem
       'task-1',
       expect.objectContaining({ status: 'cancelled', requiredUserId: MEMBER, projectId: PROJECT })
     );
+  });
+
+  it('POST /:taskId/status: same-status in_progress replay does not emit lifecycle noise', async () => {
+    await seedTask({ status: 'in_progress' });
+
+    const response = await makeApp(crudRoutes).fetch(
+      new Request(`https://api.test/api/projects/${PROJECT}/tasks/task-1/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ toStatus: 'in_progress' }),
+      }),
+      env,
+      mockCtx
+    );
+
+    expect(response.status).toBe(200);
+    expect((await readTask())?.status).toBe('in_progress');
+    expect(mocks.recordTaskLifecycleEventBestEffort).not.toHaveBeenCalled();
   });
 
   it('POST /:taskId/run/cleanup: a member can clean up another member terminal task', async () => {
