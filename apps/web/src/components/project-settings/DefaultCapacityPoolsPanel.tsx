@@ -4,17 +4,22 @@ import type {
   CapacitySourceIdentity,
   DefaultCapacityPoolScopeSummary,
   DefaultCapacityPoolSummary,
+  ProjectDefaultCapacityPoolsResponse,
 } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { useToast } from '../../hooks/useToast';
-import { reconcileProjectDefaultCapacityPools } from '../../lib/api/capacity-pools';
 import {
-  capacityPoolQueryKeys,
-  projectDefaultCapacityPoolsQueryOptions,
-} from '../../lib/query-options/capacity-pools';
+  fetchInstallationDefaultCapacityPools,
+  fetchProjectDefaultCapacityPools,
+  fetchUserDefaultCapacityPools,
+  reconcileInstallationDefaultCapacityPools,
+  reconcileProjectDefaultCapacityPools,
+  reconcileUserDefaultCapacityPools,
+} from '../../lib/api/capacity-pools';
+import { capacityPoolQueryKeys } from '../../lib/query-options/capacity-pools';
 
 const SCOPE_LABELS: Record<CapacityPoolScope, string> = {
   project: 'Project',
@@ -33,9 +38,40 @@ interface CandidateGroup {
   machineSizes: string[];
 }
 
-interface DefaultCapacityPoolsPanelProps {
-  projectId: string;
-}
+type DefaultCapacityPoolsPanelProps =
+  | { scope?: 'project'; projectId: string }
+  | { scope: 'user'; projectId?: never }
+  | { scope: 'installation'; projectId?: never };
+
+const PANEL_COPY: Record<
+  CapacityPoolScope,
+  { title: string; description: string; empty: string; success: string }
+> = {
+  project: {
+    title: 'Project Default Compute Pool',
+    description:
+      'Controls the default pool SAM resolves for new work in this project. Project pools override user and installation defaults, and project-scoped nodes only pack work for this project.',
+    empty:
+      'Connect an active project cloud credential, then reconcile defaults. Without a project pool, SAM falls back to the user pool and then the installation pool.',
+    success: 'Project default compute pool reconciled',
+  },
+  user: {
+    title: 'Your Default Compute Pool',
+    description:
+      'Controls your personal default pool. SAM uses it when a project has no project-scoped pool, and your nodes can pack your work across multiple projects just like today.',
+    empty:
+      'Connect an active personal cloud credential, then reconcile defaults. Projects with their own pool override this personal default.',
+    success: 'User default compute pool reconciled',
+  },
+  installation: {
+    title: 'Installation Default Compute Pool',
+    description:
+      'Controls the SAM installation fallback pool. SAM uses this platform-admin pool when neither the project nor the user has a default pool.',
+    empty:
+      'Add and enable a platform cloud credential, then reconcile defaults. This fallback remains superadmin-only.',
+    success: 'Installation default compute pool reconciled',
+  },
+};
 
 function formatLabel(value: string | null | undefined): string {
   if (!value) return 'Not set';
@@ -84,15 +120,18 @@ function sourceReference(source: CapacitySourceIdentity): string {
   );
 }
 
-function EffectivePoolCard({ summary }: { summary: DefaultCapacityPoolSummary | null }) {
+function EffectivePoolCard({
+  scope,
+  summary,
+}: {
+  scope: CapacityPoolScope;
+  summary: DefaultCapacityPoolSummary | null;
+}) {
   if (!summary) {
     return (
       <div className="rounded-md border border-border-default bg-inset p-3 min-w-0">
         <div className="text-sm font-medium text-fg-primary">No visible active default pool</div>
-        <p className="m-0 mt-1 text-xs text-fg-muted">
-          Connect an active project or user cloud credential, then reconcile defaults. Installation
-          defaults are shown only to superadmins.
-        </p>
+        <p className="m-0 mt-1 text-xs text-fg-muted">{PANEL_COPY[scope].empty}</p>
       </div>
     );
   }
@@ -134,12 +173,15 @@ function EffectivePoolCard({ summary }: { summary: DefaultCapacityPoolSummary | 
 
 function ScopeRow({ item }: { item: DefaultCapacityPoolScopeSummary }) {
   if (item.visibility === 'hidden') {
+    const reason =
+      item.visibilityReason === 'superadmin-required'
+        ? 'Hidden. Installation defaults require superadmin access.'
+        : 'Hidden outside this settings context.';
+
     return (
       <div className="rounded-md border border-dashed border-border-default p-3 min-w-0">
         <div className="text-sm font-medium text-fg-primary">{SCOPE_LABELS[item.scope]}</div>
-        <div className="text-xs text-fg-muted">
-          Hidden. Installation defaults require superadmin access.
-        </div>
+        <div className="text-xs text-fg-muted">{reason}</div>
       </div>
     );
   }
@@ -232,19 +274,41 @@ function CandidatesList({ candidates }: { candidates: CapacityPoolCandidate[] })
   );
 }
 
-export function DefaultCapacityPoolsPanel({ projectId }: DefaultCapacityPoolsPanelProps) {
+export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps) {
   const queryScope = useQueryScope();
   const toast = useToast();
   const queryClient = useQueryClient();
-  const query = useQuery(projectDefaultCapacityPoolsQueryOptions(queryScope, projectId));
-  const queryKey = capacityPoolQueryKeys.projectDefaults(queryScope, projectId);
+  const scope = props.scope ?? 'project';
+  const projectId = scope === 'project' ? props.projectId : null;
+  const queryKey =
+    scope === 'project'
+      ? capacityPoolQueryKeys.projectDefaults(queryScope, projectId ?? '')
+      : scope === 'user'
+        ? capacityPoolQueryKeys.userDefaults(queryScope)
+        : capacityPoolQueryKeys.installationDefaults(queryScope);
+  const queryFn = () =>
+    scope === 'project'
+      ? fetchProjectDefaultCapacityPools(projectId ?? '')
+      : scope === 'user'
+        ? fetchUserDefaultCapacityPools()
+        : fetchInstallationDefaultCapacityPools();
+  const query = useQuery<ProjectDefaultCapacityPoolsResponse>({
+    queryKey,
+    queryFn,
+    enabled: Boolean(queryScope),
+  });
   const effective = query.data?.effective ?? null;
 
   const reconcileMutation = useMutation({
-    mutationFn: () => reconcileProjectDefaultCapacityPools(projectId),
+    mutationFn: () =>
+      scope === 'project'
+        ? reconcileProjectDefaultCapacityPools(projectId ?? '')
+        : scope === 'user'
+          ? reconcileUserDefaultCapacityPools()
+          : reconcileInstallationDefaultCapacityPools(),
     onSuccess: (data) => {
       queryClient.setQueryData(queryKey, data);
-      toast.success('Default compute pools reconciled');
+      toast.success(PANEL_COPY[scope].success);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : 'Failed to reconcile compute pools');
@@ -255,18 +319,19 @@ export function DefaultCapacityPoolsPanel({ projectId }: DefaultCapacityPoolsPan
     <section className="glass-surface rounded-lg p-4 grid gap-3 min-w-0">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between min-w-0">
         <div className="min-w-0">
-          <h2 className="sam-type-section-heading m-0 text-fg-primary">Default Compute Pool</h2>
-          <p className="m-0 mt-1 text-xs text-fg-muted">
-            Shows the default pool SAM will resolve for new project work. Precedence is project,
-            then user, then installation. Pool policy controls capacity exhaustion.
-          </p>
+          <h2 className="sam-type-section-heading m-0 text-fg-primary">
+            {PANEL_COPY[scope].title}
+          </h2>
+          <p className="m-0 mt-1 text-xs text-fg-muted">{PANEL_COPY[scope].description}</p>
         </div>
         <Button
           size="sm"
           variant="secondary"
           className="w-full sm:w-auto"
           loading={reconcileMutation.isPending}
-          disabled={reconcileMutation.isPending || !queryScope || !projectId}
+          disabled={
+            reconcileMutation.isPending || !queryScope || (scope === 'project' && !projectId)
+          }
           onClick={() => reconcileMutation.mutate()}
         >
           Reconcile
@@ -287,7 +352,7 @@ export function DefaultCapacityPoolsPanel({ projectId }: DefaultCapacityPoolsPan
             </div>
           )}
 
-          <EffectivePoolCard summary={effective} />
+          <EffectivePoolCard scope={scope} summary={effective} />
 
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 min-w-0">
             {(query.data?.defaults ?? []).map((item) => (

@@ -129,8 +129,12 @@ export {
 } from './agents';
 export { getCurrentUser } from './auth';
 export {
+  fetchInstallationDefaultCapacityPools,
   fetchProjectDefaultCapacityPools,
+  fetchUserDefaultCapacityPools,
+  reconcileInstallationDefaultCapacityPools,
   reconcileProjectDefaultCapacityPools,
+  reconcileUserDefaultCapacityPools,
 } from './capacity-pools';
 export { type CliVersionInfo, getCliDownloadUrl, getCliVersion } from './cli';
 export { API_URL, ApiClientError, request } from './client';

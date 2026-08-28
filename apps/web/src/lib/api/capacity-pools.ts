@@ -10,6 +10,27 @@ export function fetchProjectDefaultCapacityPools(
   );
 }
 
+export function fetchUserDefaultCapacityPools(): Promise<ProjectDefaultCapacityPoolsResponse> {
+  return request<ProjectDefaultCapacityPoolsResponse>('/api/capacity-pools/defaults');
+}
+
+export function reconcileUserDefaultCapacityPools(): Promise<ProjectDefaultCapacityPoolsResponse> {
+  return request<ProjectDefaultCapacityPoolsResponse>('/api/capacity-pools/defaults/reconcile', {
+    method: 'POST',
+  });
+}
+
+export function fetchInstallationDefaultCapacityPools(): Promise<ProjectDefaultCapacityPoolsResponse> {
+  return request<ProjectDefaultCapacityPoolsResponse>('/api/admin/capacity-pools/defaults');
+}
+
+export function reconcileInstallationDefaultCapacityPools(): Promise<ProjectDefaultCapacityPoolsResponse> {
+  return request<ProjectDefaultCapacityPoolsResponse>(
+    '/api/admin/capacity-pools/defaults/reconcile',
+    { method: 'POST' }
+  );
+}
+
 export function reconcileProjectDefaultCapacityPools(
   projectId: string
 ): Promise<ProjectDefaultCapacityPoolsResponse> {

@@ -13,7 +13,11 @@ import { DefaultCapacityPoolsPanel } from '../../../src/components/project-setti
 
 const mocks = vi.hoisted(() => ({
   fetchProjectDefaultCapacityPools: vi.fn(),
+  fetchUserDefaultCapacityPools: vi.fn(),
+  fetchInstallationDefaultCapacityPools: vi.fn(),
   reconcileProjectDefaultCapacityPools: vi.fn(),
+  reconcileUserDefaultCapacityPools: vi.fn(),
+  reconcileInstallationDefaultCapacityPools: vi.fn(),
   toast: {
     success: vi.fn(),
     error: vi.fn(),
@@ -30,17 +34,26 @@ vi.mock('../../../src/hooks/useToast', () => ({
 
 vi.mock('../../../src/lib/api/capacity-pools', () => ({
   fetchProjectDefaultCapacityPools: mocks.fetchProjectDefaultCapacityPools,
+  fetchUserDefaultCapacityPools: mocks.fetchUserDefaultCapacityPools,
+  fetchInstallationDefaultCapacityPools: mocks.fetchInstallationDefaultCapacityPools,
   reconcileProjectDefaultCapacityPools: mocks.reconcileProjectDefaultCapacityPools,
+  reconcileUserDefaultCapacityPools: mocks.reconcileUserDefaultCapacityPools,
+  reconcileInstallationDefaultCapacityPools: mocks.reconcileInstallationDefaultCapacityPools,
 }));
 
-function renderPanel() {
+function renderPanel(
+  props:
+    | { scope?: 'project'; projectId: string }
+    | { scope: 'user' }
+    | { scope: 'installation' } = { projectId: 'project-1' }
+) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
       mutations: { retry: false },
     },
   });
-  return render(<DefaultCapacityPoolsPanel projectId="project-1" />, {
+  return render(<DefaultCapacityPoolsPanel {...props} />, {
     wrapper: ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     ),
@@ -185,7 +198,43 @@ describe('DefaultCapacityPoolsPanel', () => {
 
     expect(await screen.findByText('user default pool')).toBeInTheDocument();
     expect(mocks.reconcileProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1');
-    expect(mocks.toast.success).toHaveBeenCalledWith('Default compute pools reconciled');
+    expect(mocks.toast.success).toHaveBeenCalledWith('Project default compute pool reconciled');
+  });
+
+  it('renders and reconciles the user default pool variant', async () => {
+    mocks.fetchUserDefaultCapacityPools.mockResolvedValue(response('user', summary('user')));
+    mocks.reconcileUserDefaultCapacityPools.mockResolvedValue(response('user', summary('user')));
+
+    renderPanel({ scope: 'user' });
+
+    expect(await screen.findByText('Your Default Compute Pool')).toBeInTheDocument();
+    expect(screen.getByText(/personal default pool/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reconcile' }));
+
+    await waitFor(() => expect(mocks.reconcileUserDefaultCapacityPools).toHaveBeenCalledTimes(1));
+    expect(mocks.toast.success).toHaveBeenCalledWith('User default compute pool reconciled');
+  });
+
+  it('renders and reconciles the installation default pool variant', async () => {
+    mocks.fetchInstallationDefaultCapacityPools.mockResolvedValue(
+      response('installation', summary('installation'))
+    );
+    mocks.reconcileInstallationDefaultCapacityPools.mockResolvedValue(
+      response('installation', summary('installation'))
+    );
+
+    renderPanel({ scope: 'installation' });
+
+    expect(await screen.findByText('Installation Default Compute Pool')).toBeInTheDocument();
+    expect(screen.getByText(/platform-admin pool/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reconcile' }));
+
+    await waitFor(() =>
+      expect(mocks.reconcileInstallationDefaultCapacityPools).toHaveBeenCalledTimes(1)
+    );
+    expect(mocks.toast.success).toHaveBeenCalledWith(
+      'Installation default compute pool reconciled'
+    );
   });
 
   it('summarizes overflow candidate groups deterministically', async () => {

@@ -316,7 +316,9 @@ async function expectCompactTabs(page: Page) {
 }
 
 async function screenshotDefaultComputePoolPanel(page: Page, name: string) {
-  await page.getByRole('heading', { name: 'Default Compute Pool' }).scrollIntoViewIfNeeded();
+  await page
+    .getByRole('heading', { name: 'Project Default Compute Pool' })
+    .scrollIntoViewIfNeeded();
   await page.evaluate(() => window.scrollTo(0, window.scrollY));
   await page.waitForTimeout(600);
   const viewport = page.viewportSize();
@@ -373,7 +375,7 @@ test.describe('Project settings sub-pages', () => {
     page,
   }) => {
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure`);
-    await expect(page.getByRole('heading', { name: 'Default Compute Pool' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Project Default Compute Pool' })).toBeVisible();
     await expect(page.getByText('Project default applies first for this context.')).toBeVisible();
     await expect(page.getByText('Hetzner · fsn1')).toBeVisible();
     await expectCompactTabs(page);
@@ -390,10 +392,10 @@ test.describe('Project settings sub-pages', () => {
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-empty');
     await assertNoOverflow(page);
 
-    const manyCandidates = Array.from({ length: 14 }, (_, index) =>
+    const manyCandidates = Array.from({ length: 36 }, (_, index) =>
       capacityCandidate(index, {
         location:
-          index === 13
+          index === 35
             ? 'region-with-a-very-long-location-name-and-special-marker-ß'
             : `region-${index}`,
       })
@@ -405,7 +407,7 @@ test.describe('Project settings sub-pages', () => {
       })
     );
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=many`);
-    await expect(page.getByText('+2 more provider/region groups')).toBeVisible();
+    await expect(page.getByText('+24 more provider/region groups')).toBeVisible();
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-many');
     await screenshotDefaultComputePoolPanel(
       page,

@@ -7,6 +7,7 @@ import { Body, Button, Card, Spinner } from '@simple-agent-manager/ui';
 import { Plus, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { DefaultCapacityPoolsPanel } from '../components/project-settings/DefaultCapacityPoolsPanel';
 import {
   createPlatformCredential,
   deletePlatformCredential,
@@ -104,6 +105,8 @@ export function AdminPlatformCredentials() {
 
   return (
     <div className="space-y-4">
+      <DefaultCapacityPoolsPanel scope="installation" />
+
       <div className="flex items-center justify-between">
         <Body>
           Platform credentials are shared fallback keys. When a user doesn&apos;t have their own
