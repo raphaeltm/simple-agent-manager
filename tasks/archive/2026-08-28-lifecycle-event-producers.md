@@ -4,6 +4,7 @@ SAM task: `01M1456R5Y0RPM40GDPCYQ7FCK`
 Parent task: `01M1450K5MW05BES9H5CYEX3ZP`
 Output branch: `sam/wave-c2-add-deploymenttasksession-yq7fck`
 PR target: `sam/weve-previously-talked-eventing-y207hp`
+Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/1961
 Base: `sam/wave-b4-reconcile-integrate-nbmzfm`
 
 ## Constraints
@@ -33,7 +34,12 @@ Base: `sam/wave-b4-reconcile-integrate-nbmzfm`
 - [x] Add focused tests for producer paths and duplicate replay/idempotency.
 - [x] Run api/shared typecheck/lint/build/test gates proportional to the diff.
 - [x] Run specialist reviews and archive only after task-completion validation.
-- [ ] Push branch, open draft PR, and check PR CI.
+- [x] Push branch, open draft PR, and check PR CI.
+
+## PR
+
+- Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/1961
+- CI was checked after push; final status is tracked in the PR.
 
 ## Deferred by scope
 
