@@ -710,7 +710,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
     });
 
     await expect(handleNodeSelection(state, rc)).rejects.toMatchObject({
-      message: 'Specified node is smaller than the requested VM size',
+      message: 'Specified node does not satisfy the requested resources',
       permanent: true,
     });
     expect(rc.advanceToStep).not.toHaveBeenCalled();

@@ -203,7 +203,7 @@ export async function handleNodeSelection(
       throw Object.assign(new Error('Specified node is not available'), { permanent: true });
     }
     if (!nodeSatisfiesTaskResources(node, state)) {
-      throw Object.assign(new Error('Specified node is smaller than the requested VM size'), {
+      throw Object.assign(new Error('Specified node does not satisfy the requested resources'), {
         permanent: true,
       });
     }
