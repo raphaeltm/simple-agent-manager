@@ -253,14 +253,16 @@ describe('compute quota pipeline', () => {
     });
 
     it('passes resolved provider and attribution scope to credential source check', () => {
-      expect(submitRoute).toContain('placement.credentialLookup.userId');
-      expect(submitRoute).toContain('placement.credentialLookup.provider');
-      expect(submitRoute).toContain('placement.credentialLookup.projectId');
+      expect(submitRoute).toContain('resolveCapacityAwareCredentialLookup');
+      expect(submitRoute).toContain('credentialLookup.userId');
+      expect(submitRoute).toContain('credentialLookup.provider');
+      expect(submitRoute).toContain('credentialLookup.projectId');
       expect(placementResolver).toContain("'current-project-unless-inherited'");
     });
 
     it('enforces quota only when credential source is platform', () => {
-      expect(submitRoute).toContain("credResult.credentialSource === 'platform'");
+      expect(submitRoute).toContain('resolveCapacityAwareQuotaCredentialSource');
+      expect(submitRoute).toContain("quotaCredentialSource === 'platform'");
     });
 
     it('checks quota for platform users', () => {
@@ -294,7 +296,8 @@ describe('compute quota pipeline', () => {
     });
 
     it('enforces quota only when credential source is platform', () => {
-      expect(nodeStepsFile).toContain("credResult.credentialSource === 'platform'");
+      expect(nodeStepsFile).toContain('resolveCapacityAwareQuotaCredentialSource');
+      expect(nodeStepsFile).toContain("quotaCredentialSource === 'platform'");
     });
 
     it('re-checks quota before provisioning', () => {
@@ -352,11 +355,13 @@ describe('compute quota pipeline', () => {
     it('passes resolvedProvider and inherited attribution scope to credential source check', () => {
       expect(dispatchToolFile).toContain('inheritedAttributionUserId');
       expect(dispatchToolFile).toContain('inheritedAttributionProjectId');
-      expect(dispatchToolFile).toContain('placement.credentialLookup.provider');
+      expect(dispatchToolFile).toContain('resolveCapacityAwareCredentialLookup');
+      expect(dispatchToolFile).toContain('credentialLookup.provider');
     });
 
     it('enforces quota when credential source is platform', () => {
-      expect(dispatchToolFile).toContain("credResult.credentialSource === 'platform'");
+      expect(dispatchToolFile).toContain('resolveCapacityAwareQuotaCredentialSource');
+      expect(dispatchToolFile).toContain("quotaCredentialSource === 'platform'");
     });
 
     it('checks quota before task INSERT', () => {

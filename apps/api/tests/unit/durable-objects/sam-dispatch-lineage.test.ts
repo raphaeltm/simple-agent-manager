@@ -149,9 +149,8 @@ describe('SAM dispatch_task lineage propagation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ulidCounter = 0;
-    mocks.db.select
-      .mockImplementationOnce(() => selectRows([project]))
-      .mockImplementationOnce(() => selectRows([{ name: 'User', email: 'user@example.com', githubId: '12345' }]));
+    mocks.db.select.mockImplementation(() => selectRows([]));
+    mocks.db.select.mockImplementationOnce(() => selectRows([project]));
     mocks.resolveAgentProfile.mockResolvedValue(null);
     mocks.resolveCredentialSource.mockResolvedValue({ credentialSource: 'user', providerName: 'hetzner' });
     mocks.generateTaskTitle.mockResolvedValue('Child task title');

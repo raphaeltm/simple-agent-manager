@@ -110,9 +110,8 @@ function buildCtx() {
 describe('SAM dispatch_task taskMode visibility', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.db.select
-      .mockImplementationOnce(() => selectRows([project]))
-      .mockImplementationOnce(() => selectRows([{ name: 'User', email: 'user@example.com', githubId: '12345' }]));
+    mocks.db.select.mockImplementation(() => selectRows([]));
+    mocks.db.select.mockImplementationOnce(() => selectRows([project]));
     mocks.resolveAgentProfile.mockResolvedValue(null);
     mocks.resolveCredentialSource.mockResolvedValue({
       credentialSource: 'user',

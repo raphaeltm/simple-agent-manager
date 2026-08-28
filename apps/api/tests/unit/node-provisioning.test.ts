@@ -24,6 +24,8 @@ const doSource = [
   readFileSync(resolve(doDir, 'index.ts'), 'utf8'),
   readFileSync(resolve(doDir, 'types.ts'), 'utf8'),
   readFileSync(resolve(doDir, 'node-steps.ts'), 'utf8'),
+  readFileSync(resolve(doDir, 'node-agent-ready-step.ts'), 'utf8'),
+  readFileSync(resolve(doDir, 'node-provisioning-target.ts'), 'utf8'),
   readFileSync(resolve(doDir, 'node-selection.ts'), 'utf8'),
   readFileSync(resolve(doDir, 'workspace-steps.ts'), 'utf8'),
   readFileSync(resolve(doDir, 'agent-session-step.ts'), 'utf8'),
@@ -178,7 +180,9 @@ describe('node provisioning success path', () => {
       doSource.indexOf('export async function handleNodeAgentReady(')
     );
     expect(section).toContain('auto_provisioned_node_id');
-    expect(section).toContain('UPDATE tasks SET auto_provisioned_node_id = ?');
+    expect(section.replace(/\s+/g, ' ')).toContain(
+      'UPDATE tasks SET auto_provisioned_node_id = ?'
+    );
   });
 
   it('persists state to DO storage after creating node', () => {

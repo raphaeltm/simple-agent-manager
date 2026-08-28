@@ -271,7 +271,10 @@ describe('Project default provider — TaskRunner DO service', () => {
   });
 
   it('passes cloudProvider into config', () => {
-    expect(service).toContain('cloudProvider: input.cloudProvider');
+    expect(service).toContain('const initialCapacityCandidate = input.capacityPoolSelection?.candidates[0] ?? null');
+    expect(service).toContain(
+      'cloudProvider: initialCapacityCandidate?.provider ?? input.cloudProvider ?? null'
+    );
   });
 });
 
