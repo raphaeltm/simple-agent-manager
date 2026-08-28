@@ -231,7 +231,9 @@ describe('task submit — configurable MAX_TASK_MESSAGE_LENGTH', () => {
 
   it('falls back to default when env var is absent', () => {
     // Uses parsePositiveInt helper for safe fallback
-    expect(submitSource).toContain('parsePositiveInt(c.env.MAX_TASK_MESSAGE_LENGTH, DEFAULT_MAX_MESSAGE_LENGTH)');
+    expect(submitSource).toMatch(
+      /parsePositiveInt\(\s*c\.env\.MAX_TASK_MESSAGE_LENGTH,\s*DEFAULT_MAX_MESSAGE_LENGTH\s*\)/
+    );
   });
 
   it('error message references the configurable limit variable', () => {

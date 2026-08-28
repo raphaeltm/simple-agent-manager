@@ -9,14 +9,7 @@
 import type {
   CredentialProvider,
   CredentialSource,
-  TaskMode,
   VMSize,
-  WorkspaceProfile,
-} from '@simple-agent-manager/shared';
-import {
-  DEVCONTAINER_CONFIG_NAME_MAX_LENGTH,
-  DEVCONTAINER_CONFIG_NAME_REGEX,
-  isValidAgentType,
 } from '@simple-agent-manager/shared';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -66,13 +59,9 @@ import {
   type DispatchExecutionContext,
   getRuntimeValidationError,
   launchDispatchedInstantSession,
-  parseDispatchRuntime,
 } from './dispatch-instant';
-
-/** Valid task modes for dispatch */
-const VALID_TASK_MODES: TaskMode[] = ['task', 'conversation'];
-/** Valid workspace profiles for dispatch */
-const VALID_WORKSPACE_PROFILES: WorkspaceProfile[] = ['full', 'lightweight'];
+import { recordDispatchActivityEvent } from './dispatch-activity';
+import { parseDispatchTaskParams } from './dispatch-tool-params';
 
 export function getConversationTaskModeWarning(): string {
   return (
@@ -92,163 +81,27 @@ export async function handleDispatchTask(
   const limits = getMcpLimits(env);
   const db = drizzle(env.DATABASE, { schema });
 
-  // ── Validate description ────────────────────────────────────────────────
-  const description = typeof params.description === 'string' ? params.description.trim() : '';
-  if (!description) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'description is required and must be a non-empty string'
-    );
+  const parsedParams = parseDispatchTaskParams(requestId, params, limits);
+  if ('error' in parsedParams) {
+    return parsedParams.error;
   }
-  if (description.length > limits.dispatchDescriptionMaxLength) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      `description exceeds maximum length of ${limits.dispatchDescriptionMaxLength} characters`
-    );
-  }
-
-  let vmSize: VMSize | undefined;
-  if (params.vmSize !== undefined) {
-    if (
-      typeof params.vmSize !== 'string' ||
-      !['small', 'medium', 'large'].includes(params.vmSize)
-    ) {
-      return jsonRpcError(requestId, INVALID_PARAMS, 'vmSize must be small, medium, or large');
-    }
-    vmSize = params.vmSize as VMSize;
-  }
-
-  let explicitRuntime;
-  if (params.runtime !== undefined) {
-    explicitRuntime = parseDispatchRuntime(params.runtime);
-    if (!explicitRuntime) {
-      return jsonRpcError(requestId, INVALID_PARAMS, 'runtime must be vm or cf-container');
-    }
-  }
-
-  // Clamp priority to [0, max] to prevent agents from monopolizing the task queue
-  const priority =
-    typeof params.priority === 'number'
-      ? Math.min(Math.max(0, Math.round(params.priority)), limits.dispatchMaxPriority)
-      : 0;
-  const references = Array.isArray(params.references)
-    ? params.references
-        .filter((r): r is string => typeof r === 'string')
-        .slice(0, limits.dispatchMaxReferences)
-        .map((r) => r.slice(0, limits.dispatchMaxReferenceLength))
-    : [];
-
-  // Validate optional branch parameter
-  let explicitBranch: string | undefined;
-  if (params.branch !== undefined) {
-    if (typeof params.branch !== 'string' || params.branch.trim().length === 0) {
-      return jsonRpcError(requestId, INVALID_PARAMS, 'branch must be a non-empty string');
-    }
-    explicitBranch = params.branch.trim();
-  }
-
-  // ── Validate new config parameters ──────────────────────────────────────
-
-  // agentProfileId — validated later via resolveAgentProfile
-  const agentProfileId =
-    typeof params.agentProfileId === 'string' ? params.agentProfileId.trim() : undefined;
-  if (params.agentProfileId !== undefined && !agentProfileId) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'agentProfileId must be a non-empty string');
-  }
-  const skillId = typeof params.skillId === 'string' ? params.skillId.trim() : undefined;
-  if (params.skillId !== undefined && !skillId) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'skillId must be a non-empty string');
-  }
-
-  // taskMode
-  let explicitTaskMode: TaskMode | undefined;
-  if (params.taskMode !== undefined) {
-    if (
-      typeof params.taskMode !== 'string' ||
-      !VALID_TASK_MODES.includes(params.taskMode as TaskMode)
-    ) {
-      return jsonRpcError(
-        requestId,
-        INVALID_PARAMS,
-        `taskMode must be one of: ${VALID_TASK_MODES.join(', ')}`
-      );
-    }
-    explicitTaskMode = params.taskMode as TaskMode;
-  }
-
-  // agentType
-  let explicitAgentType: string | undefined;
-  if (params.agentType !== undefined) {
-    if (typeof params.agentType !== 'string' || !isValidAgentType(params.agentType)) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `agentType is not a recognized agent type`);
-    }
-    explicitAgentType = params.agentType;
-  }
-
-  // workspaceProfile
-  let explicitWorkspaceProfile: WorkspaceProfile | undefined;
-  if (params.workspaceProfile !== undefined) {
-    if (
-      typeof params.workspaceProfile !== 'string' ||
-      !VALID_WORKSPACE_PROFILES.includes(params.workspaceProfile as WorkspaceProfile)
-    ) {
-      return jsonRpcError(
-        requestId,
-        INVALID_PARAMS,
-        `workspaceProfile must be one of: ${VALID_WORKSPACE_PROFILES.join(', ')}`
-      );
-    }
-    explicitWorkspaceProfile = params.workspaceProfile as WorkspaceProfile;
-  }
-
-  // devcontainerConfigName
-  let explicitDevcontainerConfigName: string | null | undefined;
-  if (params.devcontainerConfigName !== undefined) {
-    if (params.devcontainerConfigName === null) {
-      explicitDevcontainerConfigName = null;
-    } else if (
-      typeof params.devcontainerConfigName !== 'string' ||
-      !DEVCONTAINER_CONFIG_NAME_REGEX.test(params.devcontainerConfigName)
-    ) {
-      return jsonRpcError(
-        requestId,
-        INVALID_PARAMS,
-        'devcontainerConfigName must be alphanumeric with hyphens/underscores'
-      );
-    } else if (params.devcontainerConfigName.length > DEVCONTAINER_CONFIG_NAME_MAX_LENGTH) {
-      return jsonRpcError(
-        requestId,
-        INVALID_PARAMS,
-        `devcontainerConfigName must be at most ${DEVCONTAINER_CONFIG_NAME_MAX_LENGTH} characters`
-      );
-    } else {
-      explicitDevcontainerConfigName = params.devcontainerConfigName;
-    }
-  }
-
-  // provider
-  let explicitProvider: string | undefined;
-  if (params.provider !== undefined) {
-    if (typeof params.provider !== 'string') {
-      return jsonRpcError(requestId, INVALID_PARAMS, 'provider must be a string');
-    }
-    explicitProvider = params.provider;
-  }
-
-  // vmLocation — validated against provider after resolution
-  let explicitVmLocation: string | undefined;
-  if (params.vmLocation !== undefined) {
-    if (typeof params.vmLocation !== 'string' || params.vmLocation.trim().length === 0) {
-      return jsonRpcError(requestId, INVALID_PARAMS, 'vmLocation must be a non-empty string');
-    }
-    explicitVmLocation = params.vmLocation.trim();
-  }
-
-  // missionId — inherit from parent task or explicit override
-  const explicitMissionId =
-    typeof params.missionId === 'string' ? params.missionId.trim() : undefined;
+  const {
+    description,
+    vmSize,
+    explicitRuntime,
+    priority,
+    references,
+    explicitBranch,
+    agentProfileId,
+    skillId,
+    explicitTaskMode,
+    explicitAgentType,
+    explicitWorkspaceProfile,
+    explicitDevcontainerConfigName,
+    explicitProvider,
+    explicitVmLocation,
+    explicitMissionId,
+  } = parsedParams.parsed;
 
   // ── Look up current task to get dispatch depth ──────────────────────────
   const [currentTask] = await db
@@ -863,38 +716,19 @@ export async function handleDispatchTask(
   }
 
   // ── Record activity event (best-effort) ─────────────────────────────────
-  try {
-    const doId = env.PROJECT_DATA.idFromName(tokenData.projectId);
-    const doStub = env.PROJECT_DATA.get(doId);
-    await doStub.fetch(
-      new Request('https://do/activity', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'task.dispatched',
-          actorType: 'agent',
-          actorId: tokenData.workspaceId,
-          metadata: {
-            taskId,
-            parentTaskId: tokenData.taskId,
-            dispatchDepth: newDepth,
-            title: taskTitle,
-            branchName,
-            runtime: executionRuntime,
-            runtimeReason: placement.runtime.reason,
-            agentProfileId: agentProfileId ?? undefined,
-            skillId: skillId ?? undefined,
-            taskMode: resolvedTaskMode,
-          },
-        }),
-      })
-    );
-  } catch (err) {
-    log.warn('mcp.dispatch_task.activity_event_failed', {
-      taskId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+  await recordDispatchActivityEvent({
+    env,
+    tokenData,
+    taskId,
+    newDepth,
+    taskTitle,
+    branchName,
+    executionRuntime,
+    runtimeReason: placement.runtime.reason,
+    agentProfileId: agentProfileId ?? undefined,
+    skillId: skillId ?? undefined,
+    taskMode: resolvedTaskMode,
+  });
 
   // Recompute scheduler states if the new task belongs to a mission (best-effort)
   const resolvedMissionId = explicitMissionId ?? currentTask.missionId ?? null;

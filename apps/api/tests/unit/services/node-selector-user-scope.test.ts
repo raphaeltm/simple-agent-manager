@@ -47,6 +47,7 @@ function createDb() {
       capacity_pool_scope TEXT,
       capacity_pool_revision INTEGER,
       capacity_source_id TEXT,
+      capacity_pool_candidate_id TEXT,
       placement_credential_source TEXT,
       placement_credential_reference TEXT,
       placement_credential_version INTEGER,

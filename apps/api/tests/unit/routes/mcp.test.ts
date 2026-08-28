@@ -5,6 +5,10 @@ import { groupTokensIntoMessages } from '../../../src/routes/mcp';
 import * as projectHelpers from '../../../src/routes/projects/_helpers';
 import * as agentProfileService from '../../../src/services/agent-profiles';
 
+const providerCredentialMocks = vi.hoisted(() => ({
+  resolveCredentialSource: vi.fn(),
+}));
+
 const deploymentToolMocks = vi.hoisted(() => ({
   handleListDeploymentRoutes: vi.fn(),
   handlePreviewDeploymentRoutes: vi.fn(),
@@ -29,6 +33,10 @@ vi.mock('../../../src/routes/projects/_helpers', () => ({
 
 vi.mock('../../../src/services/instant-session', () => ({
   launchInstantSession: instantSessionMocks.launchInstantSession,
+}));
+
+vi.mock('../../../src/services/provider-credentials', () => ({
+  resolveCredentialSource: providerCredentialMocks.resolveCredentialSource,
 }));
 
 vi.mock('../../../src/routes/mcp/deployment-tools', async () => {
@@ -334,6 +342,10 @@ describe('MCP Routes', () => {
     mockD1 = createMockD1();
     mockEnv.DATABASE = mockD1;
     mockEnv.CF_CONTAINER_ENABLED = 'false';
+    providerCredentialMocks.resolveCredentialSource.mockResolvedValue({
+      credentialSource: 'user',
+      providerName: 'hetzner',
+    });
     const { mcpRoutes } = await import('../../../src/routes/mcp');
     app = new Hono();
     app.route('/mcp', mcpRoutes);
@@ -2558,6 +2570,7 @@ describe('MCP Routes', () => {
     });
 
     it('should reject when cloud credentials are missing', async () => {
+      providerCredentialMocks.resolveCredentialSource.mockResolvedValueOnce(null);
       const noCredProject = {
         id: 'proj-456',
         name: 'Test',
