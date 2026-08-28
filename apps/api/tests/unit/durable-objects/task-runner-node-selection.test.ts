@@ -10,6 +10,7 @@ import { SessionRecoveryAuthorityRevokedError } from '../../../src/services/sess
 
 type D1ResultMap = {
   persistedWarmClaim?: string | null;
+  runs?: Array<{ sql: string; bound: unknown[] }>;
   preferredNode?: {
     id: string;
     status: string;
@@ -211,6 +212,7 @@ function createStatement(sql: string, results: D1ResultMap) {
       return Promise.resolve(null);
     },
     run() {
+      results.runs?.push({ sql, bound });
       return Promise.resolve({ meta: { changes: 1 } });
     },
     all() {
@@ -452,6 +454,56 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
     });
     expect(rc.ctx.storage.put).toHaveBeenCalledWith('state', state);
     expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+  });
+
+  it('releases an unusable D1-persisted warm claim before clearing the task pointer', async () => {
+    const runs: Array<{ sql: string; bound: unknown[] }> = [];
+    const state = createState({
+      config: {
+        ...createState().config,
+        capacityPoolSelection: capacityPoolSelection('project', {
+          poolId: 'pool-project-1',
+          sourceId: 'source-project-1',
+          candidateId: 'candidate-project-1',
+          projectId: 'project-1',
+        }),
+      },
+    });
+    const releaseClaim = vi.fn().mockResolvedValue({
+      released: true,
+      state: {
+        nodeId: 'warm-legacy-unusable',
+        status: 'warm',
+        warmSince: Date.now(),
+        claimedByTask: null,
+      },
+    });
+    const tryClaim = vi.fn();
+    const rc = createContext({
+      persistedWarmClaim: 'warm-legacy-unusable',
+      warmNodes: [],
+      existingNodes: [],
+      runs,
+    });
+    rc.env.NODE_LIFECYCLE = {
+      idFromName: vi.fn((id: string) => id),
+      get: vi.fn(() => ({ tryClaim, releaseClaim })),
+    } as unknown as DurableObjectNamespace;
+
+    await handleNodeSelection(state, rc);
+
+    expect(tryClaim).not.toHaveBeenCalled();
+    expect(releaseClaim).toHaveBeenCalledWith(state.taskId);
+    expect(
+      runs.some(
+        (run) =>
+          run.sql.includes('UPDATE tasks SET claimed_warm_node_id = NULL') &&
+          run.bound[1] === state.taskId &&
+          run.bound[2] === 'warm-legacy-unusable'
+      )
+    ).toBe(true);
+    expect(state.stepResults.claimedWarmNodeId ?? null).toBeNull();
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_provisioning');
   });
 
   it('persists a warm claim locally and advances only after post-claim authority validation', async () => {

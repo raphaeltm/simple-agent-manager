@@ -115,9 +115,10 @@ function buildCapacityPlacementPredicate(input: WorkspacePlacementInput): {
   }
 
   if (!snapshot.capacitySourceId) {
+    const canUseLegacyNode = snapshot.capacityPoolScope !== 'project';
     return {
-      sql: `AND n.capacity_pool_id IS NULL AND ? != 'project'`,
-      binds: [snapshot.capacityPoolScope],
+      sql: canUseLegacyNode ? `AND n.capacity_pool_id IS NULL` : `AND 0 = 1`,
+      binds: [],
     };
   }
 

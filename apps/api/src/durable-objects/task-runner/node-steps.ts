@@ -534,11 +534,14 @@ export async function handleNodeProvisioning(
   const sizeIsDefaultDerived =
     state.config.vmSizeSource === 'project' || state.config.vmSizeSource === 'platform';
   const fallbackAllowed = fallbackEnabled && sizeIsDefaultDerived;
-  const chain: VMSize[] = selectedCapacityCandidate
-    ? [selectedCapacityCandidate.machineSize]
-    : fallbackAllowed
-      ? vmSizeFallbackChain(requestedSizeBeforeProvisioning)
-      : [requestedSizeBeforeProvisioning];
+  let chain: VMSize[];
+  if (selectedCapacityCandidate) {
+    chain = [selectedCapacityCandidate.machineSize];
+  } else if (fallbackAllowed) {
+    chain = vmSizeFallbackChain(requestedSizeBeforeProvisioning);
+  } else {
+    chain = [requestedSizeBeforeProvisioning];
+  }
 
   for (const [i, size] of chain.entries()) {
     const isLastSize = i === chain.length - 1;

@@ -535,20 +535,51 @@ describe('project capacity pool routes', () => {
   it('sets Cache-Control: private, no-store on identity-varying GET responses', async () => {
     const { sqlite, env } = createEnv();
     seedUser(sqlite, 'user-1');
+    seedUser(sqlite, 'superadmin-1', 'superadmin');
     seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
+    sqlite
+      .prepare(
+        `INSERT INTO project_members (project_id, user_id, role, status)
+         VALUES ('project-1', 'superadmin-1', 'owner', 'active')`
+      )
+      .run();
     seedCloudCredential(sqlite, {
       id: 'project-cloud-1',
       userId: 'user-1',
       projectId: 'project-1',
     });
+    seedPlatformCloudCredential(sqlite);
 
-    const res = await createApp().request(
-      '/api/projects/project-1/capacity-pools/defaults',
+    const userRes = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults?ensure=true',
       { method: 'GET' },
       env
     );
+    expect(userRes.status).toBe(200);
+    expect(userRes.headers.get('cache-control')).toBe('private, no-store');
+    const userBody = await userRes.json();
+    expect(
+      userBody.defaults.find((item: { scope: string }) => item.scope === 'installation')
+    ).toMatchObject({
+      visibility: 'hidden',
+      summary: null,
+    });
 
-    expect(res.status).toBe(200);
-    expect(res.headers.get('cache-control')).toBe('private, no-store');
+    authState.userId = 'superadmin-1';
+    authState.role = 'superadmin';
+    const superadminRes = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults?ensure=true',
+      { method: 'GET' },
+      env
+    );
+    expect(superadminRes.status).toBe(200);
+    expect(superadminRes.headers.get('cache-control')).toBe('private, no-store');
+    const superadminBody = await superadminRes.json();
+    expect(
+      superadminBody.defaults.find((item: { scope: string }) => item.scope === 'installation')
+    ).toMatchObject({
+      visibility: 'visible',
+      summary: expect.any(Object),
+    });
   });
 });

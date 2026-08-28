@@ -459,6 +459,103 @@ describe('default capacity pool creation', () => {
     });
   });
 
+  it('keeps capacity candidates aligned with the resolved provider and explicit location', async () => {
+    const providerMismatchDb = createDb();
+    const providerMismatchSqlite = sqlite;
+    seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
+    await ensureDefaultCapacityPoolsForExistingCredentials(providerMismatchDb as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+    });
+
+    const hetznerPlacement = resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'candidate-provider-mismatch-task',
+      projectId: 'project-1',
+      userId: 'user-1',
+      project: {
+        id: 'project-1',
+        defaultProvider: 'hetzner',
+        defaultLocation: 'fsn1',
+        defaultVmSize: 'small',
+      },
+      explicit: { provider: 'hetzner' },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+      resourceRequirements: {},
+    });
+
+    await expect(
+      resolveTaskStartCapacityPoolSelection(providerMismatchDb as never, hetznerPlacement, {
+        ensure: false,
+      })
+    ).resolves.toBeNull();
+    providerMismatchSqlite?.close();
+    sqlite = null;
+
+    const locationDb = createDb();
+    seedUserCredential({ id: 'user-hetzner', provider: 'hetzner' });
+    await ensureDefaultCapacityPoolsForExistingCredentials(locationDb as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+    });
+    const hetznerLocations = getLocationsForProvider('hetzner').map((location) => location.id);
+    const explicitLocation = hetznerLocations.find((location) => location !== 'fsn1') ?? 'hel1';
+
+    const flexiblePlacement = resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'candidate-flexible-location-task',
+      projectId: 'project-1',
+      userId: 'user-1',
+      project: {
+        id: 'project-1',
+        defaultProvider: 'hetzner',
+        defaultLocation: 'fsn1',
+        defaultVmSize: 'small',
+      },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+      resourceRequirements: {},
+    });
+    const flexibleSelection = await resolveTaskStartCapacityPoolSelection(
+      locationDb as never,
+      flexiblePlacement,
+      { ensure: false }
+    );
+    expect(new Set(flexibleSelection?.candidates.map((candidate) => candidate.location)).size).toBe(
+      hetznerLocations.length
+    );
+
+    const explicitLocationPlacement = resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'candidate-explicit-location-task',
+      projectId: 'project-1',
+      userId: 'user-1',
+      project: {
+        id: 'project-1',
+        defaultProvider: 'hetzner',
+        defaultLocation: 'fsn1',
+        defaultVmSize: 'small',
+      },
+      explicit: { vmLocation: explicitLocation },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+      resourceRequirements: {},
+    });
+    const explicitLocationSelection = await resolveTaskStartCapacityPoolSelection(
+      locationDb as never,
+      explicitLocationPlacement,
+      { ensure: false }
+    );
+
+    expect(explicitLocationSelection?.candidates.length).toBeGreaterThan(0);
+    expect(
+      explicitLocationSelection?.candidates.every(
+        (candidate) => candidate.location === explicitLocation
+      )
+    ).toBe(true);
+  });
+
   it('preserves disabled and removed candidates across reconciliation and excludes them from placement', async () => {
     const db = createDb();
     seedUserCredential({ id: 'user-hetzner' });

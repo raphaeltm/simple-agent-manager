@@ -7,7 +7,10 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+import type { Env } from '../../src/env';
+import { startTaskRunnerDO } from '../../src/services/task-runner-do';
 
 const serviceSource = readFileSync(
   resolve(process.cwd(), 'src/services/task-runner-do.ts'),
@@ -29,6 +32,83 @@ const stuckTasksSource = readFileSync(
   resolve(process.cwd(), 'src/scheduled/stuck-tasks.ts'),
   'utf8'
 );
+
+function createTaskRunnerEnv(start = vi.fn().mockResolvedValue(undefined)) {
+  return {
+    env: {
+      TASK_RUNNER: {
+        idFromName: vi.fn((taskId: string) => `task-runner:${taskId}`),
+        get: vi.fn(() => ({ start })),
+      },
+    } as unknown as Env,
+    start,
+  };
+}
+
+function capacityPoolSelection(
+  overrides: { provider: 'hetzner' | 'scaleway'; location: 'nbg1' | 'fsn1' | 'fr-par-1' }
+) {
+  const snapshot = {
+    capacityPoolId: 'pool-task-runner-unit',
+    capacityPoolScope: 'user' as const,
+    capacityPoolRevision: 1,
+    capacitySourceId: 'source-task-runner-unit',
+    capacityPoolCandidateId: 'candidate-task-runner-unit',
+    placementCredentialSource: 'user' as const,
+    placementCredentialReference: 'credentials:user-cloud-unit',
+    placementCredentialVersion: 1,
+    capacityPoolProjectId: null,
+    workloadRole: 'workspace' as const,
+    placementExplanationJson: JSON.stringify({
+      poolId: 'pool-task-runner-unit',
+      capacitySourceId: 'source-task-runner-unit',
+      capacityPoolCandidateId: 'candidate-task-runner-unit',
+    }),
+  };
+
+  return {
+    poolId: snapshot.capacityPoolId,
+    scope: 'user' as const,
+    revision: 1,
+    strategy: 'balanced' as const,
+    capacityPoolProjectId: null,
+    workloadRole: 'workspace' as const,
+    poolSnapshot: { ...snapshot, capacitySourceId: null, capacityPoolCandidateId: null },
+    candidates: [
+      {
+        id: snapshot.capacityPoolCandidateId,
+        poolId: snapshot.capacityPoolId,
+        capacitySourceId: snapshot.capacitySourceId,
+        provider: overrides.provider,
+        location: overrides.location,
+        workloadRole: 'workspace' as const,
+        runtime: 'vm',
+        machineClass: 'shared-vm',
+        machineSize: 'medium' as const,
+        priority: 0,
+        candidateOrder: 0,
+        credentialAttributionSource: 'user' as const,
+        placementCredentialSource: 'user' as const,
+        placementCredentialReference: snapshot.placementCredentialReference,
+        placementCredentialVersion: snapshot.placementCredentialVersion,
+        capacityPoolProjectId: null,
+        snapshot,
+      },
+    ],
+  };
+}
+
+const minimalStartInput = {
+  taskId: 'task-runner-unit',
+  projectId: 'project-runner-unit',
+  userId: 'user-runner-unit',
+  vmSize: 'medium' as const,
+  vmLocation: 'nbg1' as const,
+  branch: 'main',
+  taskTitle: 'TaskRunner unit contract',
+  repository: 'test-org/test-repo',
+  installationId: 'installation-runner-unit',
+};
 
 describe('task-runner-do service', () => {
   it('exports startTaskRunnerDO function', () => {
@@ -83,6 +163,47 @@ describe('task-runner-do service', () => {
     for (const field of configFields) {
       expect(serviceSource).toContain(field);
     }
+  });
+
+  it('does not forward a capacity candidate that conflicts with explicit placement', async () => {
+    const { env, start } = createTaskRunnerEnv();
+
+    await startTaskRunnerDO(env, {
+      ...minimalStartInput,
+      cloudProvider: 'hetzner',
+      explicitVmLocation: true,
+      capacityPoolSelection: capacityPoolSelection({
+        provider: 'scaleway',
+        location: 'fr-par-1',
+      }),
+    });
+
+    const forwarded = start.mock.calls[0]?.[0];
+    expect(forwarded.config.cloudProvider).toBe('hetzner');
+    expect(forwarded.config.vmLocation).toBe('nbg1');
+    expect(forwarded.config.capacityPoolSelection).toBeNull();
+  });
+
+  it('forwards matching capacity candidates so flexible location choice is preserved', async () => {
+    const { env, start } = createTaskRunnerEnv();
+
+    await startTaskRunnerDO(env, {
+      ...minimalStartInput,
+      cloudProvider: 'hetzner',
+      explicitVmLocation: false,
+      capacityPoolSelection: capacityPoolSelection({
+        provider: 'hetzner',
+        location: 'fsn1',
+      }),
+    });
+
+    const forwarded = start.mock.calls[0]?.[0];
+    expect(forwarded.config.cloudProvider).toBe('hetzner');
+    expect(forwarded.config.vmLocation).toBe('fsn1');
+    expect(forwarded.config.capacityPoolSelection?.candidates[0]).toMatchObject({
+      provider: 'hetzner',
+      location: 'fsn1',
+    });
   });
 });
 

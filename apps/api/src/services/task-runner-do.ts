@@ -22,7 +22,10 @@ import type {
 import type { StartTaskInput, TaskRunner } from '../durable-objects/task-runner';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import type { TaskStartCapacityPoolSelection } from './placement-resolver';
+import type {
+  TaskStartCapacityCandidate,
+  TaskStartCapacityPoolSelection,
+} from './placement-resolver';
 
 /**
  * Get a typed DO stub for the given task.
@@ -31,6 +34,31 @@ import type { TaskStartCapacityPoolSelection } from './placement-resolver';
 function getStub(env: Env, taskId: string): DurableObjectStub<TaskRunner> {
   const id = env.TASK_RUNNER.idFromName(taskId);
   return env.TASK_RUNNER.get(id) as DurableObjectStub<TaskRunner>;
+}
+
+function capacityCandidateMatchesStartInput(
+  candidate: TaskStartCapacityCandidate,
+  input: {
+    cloudProvider?: CredentialProvider | null;
+    explicitVmLocation?: boolean | null;
+    vmLocation: VMLocation;
+  }
+): boolean {
+  if (input.cloudProvider && candidate.provider !== input.cloudProvider) return false;
+  if (input.explicitVmLocation === true && candidate.location !== input.vmLocation) return false;
+  return true;
+}
+
+function capacityPoolSelectionForStart(input: {
+  capacityPoolSelection?: TaskStartCapacityPoolSelection | null;
+  cloudProvider?: CredentialProvider | null;
+  explicitVmLocation?: boolean | null;
+  vmLocation: VMLocation;
+}): TaskStartCapacityPoolSelection | null {
+  const selection = input.capacityPoolSelection ?? null;
+  const candidate = selection?.candidates[0] ?? null;
+  if (!selection || !candidate) return selection;
+  return capacityCandidateMatchesStartInput(candidate, input) ? selection : null;
 }
 
 /**
@@ -67,6 +95,8 @@ export async function startTaskRunnerDO(
     devcontainerConfigName?: string | null;
     /** Cloud provider for auto-provisioned nodes. Falls back to any available credential. */
     cloudProvider?: CredentialProvider | null;
+    /** Whether vmLocation came from a caller-supplied explicit placement override. */
+    explicitVmLocation?: boolean | null;
     /** Root-pinned credential attribution user for this task tree. */
     credentialAttributionUserId?: string | null;
     /** Project scope when credentialAttributionSource is 'project'. */
@@ -114,7 +144,8 @@ export async function startTaskRunnerDO(
   }
 ): Promise<void> {
   const stub = getStub(env, input.taskId);
-  const initialCapacityCandidate = input.capacityPoolSelection?.candidates[0] ?? null;
+  const capacityPoolSelection = capacityPoolSelectionForStart(input);
+  const initialCapacityCandidate = capacityPoolSelection?.candidates[0] ?? null;
 
   const startInput: StartTaskInput = {
     taskId: input.taskId,
@@ -164,7 +195,7 @@ export async function startTaskRunnerDO(
       projectScaling: input.projectScaling ?? null,
       resourceRequirements: input.resourceRequirements ?? null,
       resolvedReservation: input.resolvedReservation ?? null,
-      capacityPoolSelection: input.capacityPoolSelection ?? null,
+      capacityPoolSelection,
       vmSizeSource: input.vmSizeSource ?? null,
       resumeSnapshotChatSessionId: input.resumeSnapshotChatSessionId ?? null,
       recoverySourceTaskId: input.recoverySourceTaskId ?? null,

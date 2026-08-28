@@ -700,6 +700,75 @@ describe('VM admission control D1 races', () => {
     });
   });
 
+  it('handles source-less capacity pool snapshots without SQL truthiness binds', async () => {
+    const userLegacyNodeId = 'node-vm-admission-source-less-user';
+    const projectLegacyNodeId = 'node-vm-admission-source-less-project';
+    await makeReadyNode(userLegacyNodeId, USER_ID, 'medium');
+    await makeReadyNode(projectLegacyNodeId, USER_ID, 'medium');
+
+    const userBaseSnapshot = capacitySnapshot({
+      poolId: 'pool-vm-admission-source-less-user',
+      sourceId: 'source-vm-admission-source-less-user',
+      candidateId: 'candidate-vm-admission-source-less-user',
+      scope: 'user',
+    });
+    const projectBaseSnapshot = capacitySnapshot({
+      poolId: 'pool-vm-admission-source-less-project',
+      sourceId: 'source-vm-admission-source-less-project',
+      candidateId: 'candidate-vm-admission-source-less-project',
+      scope: 'project',
+      projectId: PROJECT_ID,
+    });
+    await seedCapacityRecords(userBaseSnapshot);
+    await seedCapacityRecords(projectBaseSnapshot);
+
+    const sourceLessUserSnapshot: CapacityPlacementSnapshot = {
+      ...userBaseSnapshot,
+      capacitySourceId: null,
+      capacityPoolCandidateId: null,
+      placementCredentialSource: null,
+      placementCredentialReference: null,
+      placementCredentialVersion: null,
+    };
+    const sourceLessProjectSnapshot: CapacityPlacementSnapshot = {
+      ...projectBaseSnapshot,
+      capacitySourceId: null,
+      capacityPoolCandidateId: null,
+      placementCredentialSource: null,
+      placementCredentialReference: null,
+      placementCredentialVersion: null,
+    };
+
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        {
+          ...placement('workspace-vm-admission-source-less-user', userLegacyNodeId),
+          capacityPlacementSnapshot: sourceLessUserSnapshot,
+        },
+        2
+      )
+    ).resolves.toBe(true);
+
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        {
+          ...placement('workspace-vm-admission-source-less-project', projectLegacyNodeId),
+          capacityPlacementSnapshot: sourceLessProjectSnapshot,
+        },
+        2
+      )
+    ).resolves.toBe(false);
+
+    const projectWorkspace = await env.DATABASE.prepare(
+      `SELECT id FROM workspaces WHERE id = ?`
+    )
+      .bind('workspace-vm-admission-source-less-project')
+      .first<{ id: string }>();
+    expect(projectWorkspace).toBeNull();
+  });
+
   it('rejects final reservation when the selected project pool does not match the node', async () => {
     const nodeId = 'node-vm-admission-project-pool-mismatch';
     const nodeSnapshot = capacitySnapshot({
