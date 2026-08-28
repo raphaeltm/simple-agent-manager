@@ -16,9 +16,14 @@ import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { requireRepositoryOwnerAccess } from '../routes/projects/_helpers';
 import { generateBranchName } from './branch-name';
+import { capacityPlacementSnapshotDbValues } from './capacity-placement-snapshot';
 import {
+  capacityPlacementSnapshotForTaskStart,
   PlacementResolutionError,
+  resolveCapacityAwareCredentialLookup,
+  resolveCapacityPlacementCredentialAttribution,
   resolvePlacementCredentialAttribution,
+  resolveTaskStartCapacityPoolSelection,
   resolveTaskStartPlacement,
 } from './placement-resolver';
 import * as projectDataService from './project-data';
@@ -26,10 +31,7 @@ import { parseSkillResourceRequirementsJson, resolveSkillProfile } from './skill
 import { markQueuedTaskFailed } from './task-failure';
 import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from './task-title';
-import {
-  type SubmittedTriggerTask,
-  TriggerTaskSubmissionPendingError,
-} from './trigger-submission';
+import { type SubmittedTriggerTask, TriggerTaskSubmissionPendingError } from './trigger-submission';
 
 export { TriggerTaskSubmissionPendingError } from './trigger-submission';
 export type SubmitTriggeredTaskResult = SubmittedTriggerTask;
@@ -127,11 +129,13 @@ export async function submitTriggeredTask(
   })();
 
   const { resolveCredentialSource } = await import('./provider-credentials');
+  const capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement);
+  const credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
   const credResult = await resolveCredentialSource(
     db,
-    placement.credentialLookup.userId,
-    placement.credentialLookup.provider,
-    placement.credentialLookup.projectId
+    credentialLookup.userId,
+    credentialLookup.provider,
+    credentialLookup.projectId
   );
   if (!credResult) {
     throw new Error(`No cloud provider credentials available for trigger ${input.triggerId}`);
@@ -141,7 +145,10 @@ export async function submitTriggeredTask(
     credentialAttributionUserId,
     credentialAttributionProjectId,
     credentialAttributionSource,
-  } = resolvePlacementCredentialAttribution(placement, credResult);
+  } = capacityPoolSelection?.candidates[0]
+    ? resolveCapacityPlacementCredentialAttribution(placement, capacityPoolSelection.candidates[0])
+    : resolvePlacementCredentialAttribution(placement, credResult);
+  const capacityPlacementSnapshot = capacityPlacementSnapshotForTaskStart(capacityPoolSelection);
   const {
     vmSize,
     vmSizeSource,
@@ -193,6 +200,7 @@ export async function submitTriggeredTask(
     credentialAttributionUserId,
     credentialAttributionProjectId,
     credentialAttributionSource,
+    ...capacityPlacementSnapshotDbValues(capacityPlacementSnapshot),
     createdBy: input.userId,
     createdAt: now,
     updatedAt: now,
@@ -298,6 +306,7 @@ export async function submitTriggeredTask(
           warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
         },
         resolvedReservation,
+        capacityPoolSelection,
         vmSizeSource,
       });
     } catch (startError) {

@@ -148,6 +148,7 @@ export interface CapacityPlacementSnapshotRow {
   capacityPoolScope: string | null;
   capacityPoolRevision: number | null;
   capacitySourceId: string | null;
+  capacityPoolCandidateId: string | null;
   placementCredentialSource: string | null;
   placementCredentialReference: string | null;
   placementCredentialVersion: number | null;
@@ -168,6 +169,7 @@ export function toCapacityPlacementSnapshot(
     ),
     capacityPoolRevision: row.capacityPoolRevision,
     capacitySourceId: row.capacitySourceId,
+    capacityPoolCandidateId: row.capacityPoolCandidateId,
     placementCredentialSource: nullablePersistedValue<CapacityPlacementCredentialSource>(
       'placement_credential_source',
       row.placementCredentialSource,

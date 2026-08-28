@@ -10,6 +10,14 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
+import {
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
+  capacityPlacementSnapshotSqlValues,
+} from '../../services/capacity-placement-snapshot';
+import {
+  type CapacityPlacementSnapshotRow,
+  toCapacityPlacementSnapshot,
+} from '../../services/capacity-pools';
 import type { DevcontainerCacheCredentials } from '../../services/devcontainer-cache';
 import { SessionRecoveryAuthorityRevokedError } from '../../services/session-recovery-authority';
 import {
@@ -116,22 +124,42 @@ async function recoverWorkspaceFromD1(
   }
 
   const existingTask = await rc.env.DATABASE.prepare(
-    `SELECT workspace_id, status FROM tasks WHERE id = ?`
+    `SELECT
+       workspace_id AS workspaceId,
+       status,
+       capacity_pool_id AS capacityPoolId,
+       capacity_pool_scope AS capacityPoolScope,
+       capacity_pool_revision AS capacityPoolRevision,
+       capacity_source_id AS capacitySourceId,
+       capacity_pool_candidate_id AS capacityPoolCandidateId,
+       placement_credential_source AS placementCredentialSource,
+       placement_credential_reference AS placementCredentialReference,
+       placement_credential_version AS placementCredentialVersion,
+       capacity_pool_project_id AS capacityPoolProjectId,
+       workload_role AS workloadRole,
+       placement_explanation_json AS placementExplanationJson
+     FROM tasks WHERE id = ?`
   )
     .bind(state.taskId)
-    .first<{ workspace_id: string | null; status: string }>();
+    .first<
+      (CapacityPlacementSnapshotRow & { workspaceId: string | null; status: string }) | null
+    >();
 
-  if (!existingTask?.workspace_id) {
+  if (!existingTask?.workspaceId) {
     return;
   }
 
   // D1 has a workspace — recover it into DO state (crash recovery)
-  state.stepResults.workspaceId = existingTask.workspace_id;
+  state.stepResults.workspaceId = existingTask.workspaceId;
+  if (state.stepResults.capacityPlacementSnapshot === undefined) {
+    const snapshot = toCapacityPlacementSnapshot(existingTask);
+    state.stepResults.capacityPlacementSnapshot = snapshot.capacityPoolId ? snapshot : null;
+  }
   await rc.ctx.storage.put('state', state);
 
   log.info('task_runner_do.workspace_recovered_from_d1', {
     taskId: state.taskId,
-    workspaceId: existingTask.workspace_id,
+    workspaceId: existingTask.workspaceId,
   });
 }
 
@@ -187,6 +215,7 @@ async function createAndProvisionWorkspace(
       workspaceProfile: state.config.workspaceProfile ?? DEFAULT_WORKSPACE_PROFILE,
       devcontainerConfigName: state.config.devcontainerConfigName ?? null,
       agentProfileHint: state.config.agentProfileHint ?? null,
+      capacityPlacementSnapshot: state.stepResults.capacityPlacementSnapshot ?? null,
       createdAt: now,
     },
     maxWorkspaces
@@ -208,6 +237,7 @@ async function createAndProvisionWorkspace(
     state.stepResults.nodeId = null;
     state.stepResults.autoProvisioned = false;
     state.stepResults.provisionedVmSize = null;
+    state.stepResults.capacityPlacementSnapshot = null;
     await releaseVmProvisioningLease(
       rc.env,
       state.admissionScopeKey,
@@ -221,8 +251,17 @@ async function createAndProvisionWorkspace(
     return false;
   }
 
-  await rc.env.DATABASE.prepare(`UPDATE tasks SET workspace_id = ?, updated_at = ? WHERE id = ?`)
-    .bind(workspaceId, now, state.taskId)
+  await rc.env.DATABASE.prepare(
+    `UPDATE tasks
+     SET workspace_id = ?, ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS}, updated_at = ?
+     WHERE id = ?`
+  )
+    .bind(
+      workspaceId,
+      ...capacityPlacementSnapshotSqlValues(state.stepResults.capacityPlacementSnapshot),
+      now,
+      state.taskId
+    )
     .run();
 
   state.stepResults.workspaceId = workspaceId;

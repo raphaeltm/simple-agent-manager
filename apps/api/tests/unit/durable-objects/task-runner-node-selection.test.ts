@@ -5,6 +5,7 @@ import type {
   TaskRunnerContext,
   TaskRunnerState,
 } from '../../../src/durable-objects/task-runner/types';
+import type { TaskStartCapacityPoolSelection } from '../../../src/services/placement-resolver';
 import { SessionRecoveryAuthorityRevokedError } from '../../../src/services/session-recovery-authority';
 
 type D1ResultMap = {
@@ -13,18 +14,55 @@ type D1ResultMap = {
     id: string;
     status: string;
     vm_size: string;
+    vm_location?: string;
     agent_version?: string | null;
+    capacity_pool_id?: string | null;
+    capacity_pool_scope?: string | null;
+    capacity_pool_revision?: number | null;
+    capacity_source_id?: string | null;
+    capacity_pool_candidate_id?: string | null;
+    placement_credential_source?: string | null;
+    placement_credential_reference?: string | null;
+    placement_credential_version?: number | null;
+    capacity_pool_project_id?: string | null;
+    workload_role?: string | null;
+    placement_explanation_json?: string | null;
   } | null;
   warmNodes?: Array<{
     id: string;
     vm_size: string;
     vm_location: string;
     agent_version?: string | null;
+    capacity_pool_id?: string | null;
+    capacity_pool_scope?: string | null;
+    capacity_pool_revision?: number | null;
+    capacity_source_id?: string | null;
+    capacity_pool_candidate_id?: string | null;
+    placement_credential_source?: string | null;
+    placement_credential_reference?: string | null;
+    placement_credential_version?: number | null;
+    capacity_pool_project_id?: string | null;
+    workload_role?: string | null;
+    placement_explanation_json?: string | null;
   }>;
   freshWarmNode?: {
+    id?: string;
     status: string;
     warm_since: string | null;
+    vm_size?: string;
+    vm_location?: string;
     agent_version?: string | null;
+    capacity_pool_id?: string | null;
+    capacity_pool_scope?: string | null;
+    capacity_pool_revision?: number | null;
+    capacity_source_id?: string | null;
+    capacity_pool_candidate_id?: string | null;
+    placement_credential_source?: string | null;
+    placement_credential_reference?: string | null;
+    placement_credential_version?: number | null;
+    capacity_pool_project_id?: string | null;
+    workload_role?: string | null;
+    placement_explanation_json?: string | null;
   } | null;
   existingNodes?: Array<{
     id: string;
@@ -33,6 +71,17 @@ type D1ResultMap = {
     health_status: string;
     last_metrics: string | null;
     agent_version?: string | null;
+    capacity_pool_id?: string | null;
+    capacity_pool_scope?: string | null;
+    capacity_pool_revision?: number | null;
+    capacity_source_id?: string | null;
+    capacity_pool_candidate_id?: string | null;
+    placement_credential_source?: string | null;
+    placement_credential_reference?: string | null;
+    placement_credential_version?: number | null;
+    capacity_pool_project_id?: string | null;
+    workload_role?: string | null;
+    placement_explanation_json?: string | null;
   }>;
   workspaceCounts?: Array<{ node_id: string; c: number }>;
   warmWorkspaceCount?: number;
@@ -47,6 +96,54 @@ type D1ResultMap = {
   >;
 };
 
+type MockNode = NonNullable<D1ResultMap['preferredNode']>;
+
+function toPlacementRow(node: MockNode | null | undefined) {
+  if (!node) return null;
+  return {
+    id: node.id,
+    status: 'status' in node ? node.status : undefined,
+    vmSize: node.vm_size,
+    vmLocation: node.vm_location ?? 'fsn1',
+    cloudProvider:
+      'cloud_provider' in node
+        ? ((node as { cloud_provider?: string | null }).cloud_provider ?? null)
+        : null,
+    capacityPoolId: node.capacity_pool_id ?? null,
+    capacityPoolScope: node.capacity_pool_scope ?? null,
+    capacityPoolRevision: node.capacity_pool_revision ?? null,
+    capacitySourceId: node.capacity_source_id ?? null,
+    capacityPoolCandidateId: node.capacity_pool_candidate_id ?? null,
+    placementCredentialSource: node.placement_credential_source ?? null,
+    placementCredentialReference: node.placement_credential_reference ?? null,
+    placementCredentialVersion: node.placement_credential_version ?? null,
+    capacityPoolProjectId: node.capacity_pool_project_id ?? null,
+    workloadRole: node.workload_role ?? null,
+    placementExplanationJson: node.placement_explanation_json ?? null,
+    agentVersion: node.agent_version ?? null,
+    healthStatus:
+      'health_status' in node ? (node as { health_status?: string }).health_status : undefined,
+    lastMetrics:
+      'last_metrics' in node
+        ? ((node as { last_metrics?: string | null }).last_metrics ?? null)
+        : undefined,
+    warmSince:
+      'warm_since' in node
+        ? ((node as { warm_since?: string | null }).warm_since ?? null)
+        : undefined,
+  };
+}
+
+function defaultPlacementNode(id: string): MockNode {
+  return {
+    id,
+    status: 'running',
+    vm_size: 'large',
+    vm_location: 'fsn1',
+    agent_version: 'current-sha',
+  };
+}
+
 function createStatement(sql: string, results: D1ResultMap) {
   let bound: unknown[] = [];
   return {
@@ -55,14 +152,28 @@ function createStatement(sql: string, results: D1ResultMap) {
       return this;
     },
     first() {
-      if (sql.includes('SELECT claimed_warm_node_id FROM tasks')) {
-        return Promise.resolve({ claimed_warm_node_id: results.persistedWarmClaim ?? null });
+      if (sql.includes('claimed_warm_node_id AS claimedWarmNodeId')) {
+        const claimedWarmNodeId = results.persistedWarmClaim ?? null;
+        return Promise.resolve({
+          claimedWarmNodeId,
+          ...(claimedWarmNodeId ? toPlacementRow(defaultPlacementNode(claimedWarmNodeId)) : {}),
+        });
       }
-      if (sql.includes('SELECT id, status, vm_size')) {
-        return Promise.resolve(results.preferredNode ?? null);
+      if (sql.includes('FROM nodes WHERE id = ? AND user_id = ?')) {
+        return Promise.resolve(toPlacementRow(results.preferredNode ?? null));
       }
-      if (sql.includes('SELECT status, warm_since')) {
-        return Promise.resolve(results.freshWarmNode ?? null);
+      if (
+        sql.includes("FROM nodes WHERE id = ? AND status = 'running' AND warm_since IS NOT NULL")
+      ) {
+        const node = results.freshWarmNode
+          ? {
+              id: results.freshWarmNode.id ?? String(bound[0]),
+              vm_size: results.freshWarmNode.vm_size ?? 'large',
+              vm_location: results.freshWarmNode.vm_location ?? 'fsn1',
+              ...results.freshWarmNode,
+            }
+          : null;
+        return Promise.resolve(toPlacementRow(node as MockNode | null));
       }
       if (sql.includes('SELECT health_status, last_heartbeat_at, agent_ready_at')) {
         return Promise.resolve(results.healthByNode?.[String(bound[0])] ?? null);
@@ -77,10 +188,11 @@ function createStatement(sql: string, results: D1ResultMap) {
     },
     all() {
       if (sql.includes('warm_since IS NOT NULL')) {
-        return Promise.resolve({ results: results.warmNodes ?? [] });
+        return Promise.resolve({ results: (results.warmNodes ?? []).map(toPlacementRow) });
       }
-      if (sql.includes('SELECT id, vm_size, vm_location, health_status, last_metrics')) {
-        return Promise.resolve({ results: results.existingNodes ?? [] });
+      if (sql.includes('health_status AS healthStatus')) {
+        const rows = (results.existingNodes ?? []).map(toPlacementRow);
+        return Promise.resolve({ results: rows });
       }
       if (sql.includes('SELECT node_id, COUNT(*) as c FROM workspaces')) {
         return Promise.resolve({ results: results.workspaceCounts ?? [] });
@@ -134,6 +246,8 @@ function createState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState 
       agentSessionId: null,
       agentStarted: false,
       mcpToken: null,
+      provisionedVmSize: null,
+      capacityPlacementSnapshot: null,
     },
     config: {
       vmSize: 'large',
@@ -154,12 +268,17 @@ function createState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState 
       workspaceProfile: null,
       devcontainerConfigName: null,
       cloudProvider: null,
+      credentialAttributionUserId: 'user-1',
+      credentialAttributionProjectId: null,
+      credentialAttributionSource: 'user',
       taskMode: 'task',
       model: null,
+      effort: null,
       permissionMode: null,
       opencodeProvider: null,
       opencodeBaseUrl: null,
       systemPromptAppend: null,
+      agentProfileHint: null,
       attachments: null,
       projectScaling: null,
     },
@@ -173,6 +292,96 @@ function createState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState 
     workspaceReadyStartedAt: null,
     completed: false,
     ...overrides,
+  };
+}
+
+function capacityPoolSelection(
+  scope: 'project' | 'user' | 'installation',
+  overrides: {
+    poolId?: string;
+    sourceId?: string;
+    candidateId?: string;
+    projectId?: string | null;
+    provider?: 'hetzner' | 'vultr' | 'scaleway';
+    location?: string;
+    machineSize?: 'small' | 'medium' | 'large';
+  } = {}
+): TaskStartCapacityPoolSelection {
+  const poolId = overrides.poolId ?? `pool-${scope}`;
+  const sourceId = overrides.sourceId ?? `source-${scope}`;
+  const candidateId = overrides.candidateId ?? `candidate-${scope}`;
+  const projectId = scope === 'project' ? (overrides.projectId ?? 'project-1') : null;
+  const provider = overrides.provider ?? 'hetzner';
+  const location = overrides.location ?? 'fsn1';
+  const machineSize = overrides.machineSize ?? 'large';
+  const placementCredentialSource = scope === 'installation' ? 'platform' : scope;
+  const snapshot = {
+    capacityPoolId: poolId,
+    capacityPoolScope: scope,
+    capacityPoolRevision: 3,
+    capacitySourceId: sourceId,
+    capacityPoolCandidateId: candidateId,
+    placementCredentialSource,
+    placementCredentialReference:
+      scope === 'installation'
+        ? 'platform_credentials:platform-hetzner'
+        : `credentials:${sourceId}`,
+    placementCredentialVersion: 123,
+    capacityPoolProjectId: projectId,
+    workloadRole: 'workspace' as const,
+    placementExplanationJson: JSON.stringify({
+      poolId,
+      capacitySourceId: sourceId,
+      capacityPoolCandidateId: candidateId,
+    }),
+  };
+  return {
+    poolId,
+    scope,
+    revision: 3,
+    strategy: 'balanced',
+    capacityPoolProjectId: projectId,
+    workloadRole: 'workspace',
+    poolSnapshot: { ...snapshot, capacitySourceId: null, capacityPoolCandidateId: null },
+    candidates: [
+      {
+        id: candidateId,
+        poolId,
+        capacitySourceId: sourceId,
+        provider,
+        location,
+        workloadRole: 'workspace',
+        runtime: 'vm',
+        machineClass: 'shared-vm',
+        machineSize,
+        priority: 0,
+        candidateOrder: 0,
+        credentialAttributionSource: placementCredentialSource,
+        placementCredentialSource,
+        placementCredentialReference: snapshot.placementCredentialReference,
+        placementCredentialVersion: snapshot.placementCredentialVersion,
+        capacityPoolProjectId: projectId,
+        snapshot,
+      },
+    ],
+  };
+}
+
+function nodeCapacityFields(selection: TaskStartCapacityPoolSelection) {
+  const candidate = selection.candidates[0];
+  return {
+    cloud_provider: candidate.provider,
+    capacity_pool_id: selection.poolId,
+    capacity_pool_scope: selection.scope,
+    capacity_pool_revision: selection.revision,
+    capacity_source_id: candidate.capacitySourceId,
+    capacity_pool_candidate_id: candidate.id,
+    placement_credential_source: candidate.placementCredentialSource,
+    placement_credential_reference: candidate.placementCredentialReference,
+    placement_credential_version: candidate.placementCredentialVersion,
+    capacity_pool_project_id: candidate.capacityPoolProjectId,
+    workload_role: candidate.workloadRole,
+    placement_explanation_json: candidate.snapshot.placementExplanationJson,
   };
 }
 
@@ -390,6 +599,178 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
     await handleNodeSelection(state, rc);
 
     expect(state.stepResults.nodeId).toBe('node-large');
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+  });
+
+  it('isolates project-pool nodes to the same project and pool/source', async () => {
+    const state = createState({
+      projectId: 'project-1',
+      config: {
+        ...createState().config,
+        capacityPoolSelection: capacityPoolSelection('project', {
+          poolId: 'pool-project-1',
+          sourceId: 'source-project-1',
+          candidateId: 'candidate-project-1',
+          projectId: 'project-1',
+        }),
+      },
+    });
+    const sameProject = state.config.capacityPoolSelection!;
+    const otherProject = capacityPoolSelection('project', {
+      poolId: 'pool-project-2',
+      sourceId: 'source-project-2',
+      candidateId: 'candidate-project-2',
+      projectId: 'project-2',
+    });
+    const now = new Date().toISOString();
+    const rc = createContext({
+      existingNodes: [
+        {
+          id: 'node-project-2',
+          vm_size: 'large',
+          vm_location: 'fsn1',
+          health_status: 'healthy',
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 1, memoryPercent: 1 }),
+          agent_version: 'current-sha',
+          ...nodeCapacityFields(otherProject),
+        },
+        {
+          id: 'node-project-1',
+          vm_size: 'large',
+          vm_location: 'fsn1',
+          health_status: 'healthy',
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 20, memoryPercent: 20 }),
+          agent_version: 'current-sha',
+          ...nodeCapacityFields(sameProject),
+        },
+      ],
+      healthByNode: {
+        'node-project-1': {
+          health_status: 'healthy',
+          last_heartbeat_at: now,
+          agent_ready_at: now,
+          agent_version: 'current-sha',
+        },
+      },
+    });
+
+    await handleNodeSelection(state, rc);
+
+    expect(state.stepResults.nodeId).toBe('node-project-1');
+    expect(state.stepResults.capacityPlacementSnapshot).toMatchObject({
+      capacityPoolId: 'pool-project-1',
+      capacitySourceId: 'source-project-1',
+      capacityPoolCandidateId: 'candidate-project-1',
+      capacityPoolProjectId: 'project-1',
+    });
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+  });
+
+  it('allows same-user cross-project reuse for user-scope pool nodes', async () => {
+    const selection = capacityPoolSelection('user', {
+      poolId: 'pool-user-1',
+      sourceId: 'source-user-1',
+      candidateId: 'candidate-user-1',
+    });
+    const state = createState({
+      projectId: 'project-2',
+      config: {
+        ...createState().config,
+        capacityPoolSelection: selection,
+      },
+    });
+    const now = new Date().toISOString();
+    const rc = createContext({
+      existingNodes: [
+        {
+          id: 'node-user-pool-cross-project',
+          vm_size: 'large',
+          vm_location: 'fsn1',
+          health_status: 'healthy',
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 1, memoryPercent: 1 }),
+          agent_version: 'current-sha',
+          ...nodeCapacityFields(selection),
+        },
+      ],
+      healthByNode: {
+        'node-user-pool-cross-project': {
+          health_status: 'healthy',
+          last_heartbeat_at: now,
+          agent_ready_at: now,
+          agent_version: 'current-sha',
+        },
+      },
+    });
+
+    await handleNodeSelection(state, rc);
+
+    expect(state.stepResults.nodeId).toBe('node-user-pool-cross-project');
+    expect(state.stepResults.capacityPlacementSnapshot).toMatchObject({
+      capacityPoolId: 'pool-user-1',
+      capacitySourceId: 'source-user-1',
+      capacityPoolProjectId: null,
+    });
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+  });
+
+  it('preserves null-pool legacy reuse while rejecting project-pool nodes without a selected pool', async () => {
+    const sameProject = capacityPoolSelection('project', {
+      poolId: 'pool-project-1',
+      sourceId: 'source-project-1',
+      candidateId: 'candidate-project-1',
+      projectId: 'project-1',
+    });
+    const otherProject = capacityPoolSelection('project', {
+      poolId: 'pool-project-2',
+      sourceId: 'source-project-2',
+      candidateId: 'candidate-project-2',
+      projectId: 'project-2',
+    });
+    const state = createState({ projectId: 'project-1' });
+    const now = new Date().toISOString();
+    const rc = createContext({
+      existingNodes: [
+        {
+          id: 'node-project-2',
+          vm_size: 'large',
+          vm_location: 'fsn1',
+          health_status: 'healthy',
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 1, memoryPercent: 1 }),
+          agent_version: 'current-sha',
+          ...nodeCapacityFields(otherProject),
+        },
+        {
+          id: 'node-project-1',
+          vm_size: 'large',
+          vm_location: 'fsn1',
+          health_status: 'healthy',
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 2, memoryPercent: 2 }),
+          agent_version: 'current-sha',
+          ...nodeCapacityFields(sameProject),
+        },
+        {
+          id: 'node-legacy',
+          vm_size: 'large',
+          vm_location: 'fsn1',
+          health_status: 'healthy',
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 40, memoryPercent: 40 }),
+          agent_version: 'current-sha',
+        },
+      ],
+      healthByNode: {
+        'node-legacy': {
+          health_status: 'healthy',
+          last_heartbeat_at: now,
+          agent_ready_at: now,
+          agent_version: 'current-sha',
+        },
+      },
+    });
+
+    await handleNodeSelection(state, rc);
+
+    expect(state.stepResults.nodeId).toBe('node-legacy');
+    expect(state.stepResults.capacityPlacementSnapshot).toBeNull();
     expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
   });
 
