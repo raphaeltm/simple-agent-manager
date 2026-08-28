@@ -258,17 +258,17 @@ You made a mistake. Close the PR, complete staging verification, then re-open. D
 
 3. **If CI fails:** inspect logs, fix issues, commit, push, repeat.
 
-4. **Once CI is fully green and every non-CodeRabbit gate is satisfied**, request CodeRabbit review:
+4. **Once CI is fully green and every non-CodeRabbit gate is satisfied**, request CodeRabbit review by applying the opt-in label:
    ```
-   gh pr comment <pr-number> --body "@coderabbitai review"
+   gh pr edit <pr-number> --add-label coderabbit-review
    ```
 
 5. **Complete the iterative CodeRabbit review loop before merge.** The PR is NOT good to go until the agent and CodeRabbit are in agreement:
    - Read every CodeRabbit review comment, thread, and summary.
    - Implement valid feedback, push fixes, and re-run the affected validation/CI checks.
    - For feedback you believe is not applicable, explicitly review it, document the reason, and close/resolve the thread when GitHub supports that state.
-   - After all CodeRabbit feedback is implemented or reviewed/closed, request a fresh review with `gh pr comment <pr-number> --body "@coderabbitai review"`.
-   - Repeat this loop until the latest CodeRabbit review has no unresolved feedback and you independently agree the PR is ready.
+   - Keep the `coderabbit-review` label on the PR so CodeRabbit performs incremental reviews for subsequent commits.
+   - Repeat this loop until the latest CodeRabbit review after the final pushed fixes has no unresolved feedback and you independently agree the PR is ready.
 
    **If CodeRabbit is unavailable, does not respond, or its feedback state cannot be inspected, the PR is not self-mergeable. Add `needs-human-review`, document the blocker, and do NOT merge.**
 

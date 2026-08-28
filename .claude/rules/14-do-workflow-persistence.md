@@ -52,7 +52,7 @@ Phase 1: Research & Task Creation
 
 ## Phase 7: CodeRabbit Review Tracker
 
-<populated when CodeRabbit review is requested — include request comments, unresolved findings, fix commits, repeat-review requests, and final no-unresolved-feedback status>
+<populated when CodeRabbit review is requested — include `coderabbit-review` label application, unresolved findings, fix commits, incremental review status, and final no-unresolved-feedback status>
 <Phase 7 is NOT merge-ready until the latest CodeRabbit review has no unresolved feedback and the agent agrees the PR is ready>
 
 ## Implementation Progress
@@ -117,7 +117,7 @@ fallback bounded and record it in the workflow state file.
 | Repeating already-done work                           | Checked items + notes show what's been accomplished                                                          |
 | Jumping to PR creation early                          | Phase checklist enforces ordering                                                                            |
 | Merging before reviewers finish                       | Review Tracker blocks Phase 5 completion until all reviewers report back                                     |
-| Forgetting unresolved CodeRabbit feedback             | Phase 7 CodeRabbit Review Tracker records requests, fix commits, repeat reviews, and final agreement         |
+| Forgetting unresolved CodeRabbit feedback             | Phase 7 CodeRabbit Review Tracker records label trigger, fix commits, incremental reviews, and final agreement |
 | Silently failing production deploy                    | Phase 7 checklist includes deploy monitoring — task is not complete until deploy succeeds or user is alerted |
 | Harness poller disappears after ACP prompt completion | Durable wait subscription wakes the parent through SAM-owned delivery                                        |
 

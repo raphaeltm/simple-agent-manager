@@ -6,9 +6,9 @@ If you run specialist local subagents during Phase 5 of the `/do` workflow, **ev
 
 ## Rule: CodeRabbit Must Agree Before Agent Merge
 
-For `/do` workflow PRs, once CI and every non-CodeRabbit gate are green, the agent MUST comment `@coderabbitai review` on the PR. The PR is not merge-ready until all CodeRabbit feedback is implemented or explicitly reviewed and closed/resolved, and the latest CodeRabbit review has no unresolved feedback.
+For `/do` workflow PRs, once CI and every non-CodeRabbit gate are green, the agent MUST apply the `coderabbit-review` label with `gh pr edit <pr-number> --add-label coderabbit-review`. The PR is not merge-ready until all CodeRabbit feedback is implemented or explicitly reviewed and closed/resolved, and the latest CodeRabbit review has no unresolved feedback.
 
-This is an iterative gate: after pushing fixes for CodeRabbit feedback, request another CodeRabbit review with `@coderabbitai review` and repeat until the agent and CodeRabbit agree there is no unresolved feedback. If CodeRabbit is unavailable, does not respond, or the agent cannot inspect whether feedback remains unresolved, add `needs-human-review` and do not self-merge.
+This is an iterative gate: keep the `coderabbit-review` label on the PR so CodeRabbit performs incremental reviews for subsequent commits, then repeat until the agent and CodeRabbit agree there is no unresolved feedback. Do not use `@coderabbitai review` comments as the trigger for SAM bot-authored PRs. If CodeRabbit is unavailable, does not respond, or the agent cannot inspect whether feedback remains unresolved, add `needs-human-review` and do not self-merge.
 
 ### Why This Rule Exists
 

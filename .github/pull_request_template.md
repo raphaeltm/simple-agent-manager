@@ -104,16 +104,16 @@ If this is not an agent-authored PR, write `N/A: human-authored PR`.
 
 ## CodeRabbit Review Evidence (Required for agent-authored PRs)
 
-When every non-CodeRabbit gate is satisfied, the agent must comment `@coderabbitai review` on this PR. Do **not** merge until all CodeRabbit feedback is either implemented or explicitly reviewed and closed/resolved. After addressing feedback, request another CodeRabbit review and repeat until the latest review has no unresolved feedback and the agent agrees the PR is ready.
+When every non-CodeRabbit gate is satisfied, the agent must apply the `coderabbit-review` label to this PR. Do **not** merge until all CodeRabbit feedback is either implemented or explicitly reviewed and closed/resolved. Keep the label on the PR so pushed fixes receive incremental CodeRabbit reviews; repeat until the latest review has no unresolved feedback and the agent agrees the PR is ready.
 
-- [ ] `@coderabbitai review` requested after local review, staging if applicable, and CI gates passed
+- [ ] `coderabbit-review` label applied after local review, staging if applicable, and CI gates passed
 - [ ] All CodeRabbit findings implemented or explicitly reviewed and closed/resolved
-- [ ] Fresh CodeRabbit review requested after final fixes, or no fixes were needed
+- [ ] Incremental CodeRabbit review completed after final pushed fixes, or no fixes were needed
 - [ ] Latest CodeRabbit review has no unresolved feedback
 
 ### CodeRabbit Notes
 
-<!-- Include CodeRabbit review request comments, findings addressed, commit hashes for fixes, and final no-unresolved-feedback status. If this is not an agent-authored PR, write `N/A: human-authored PR`. -->
+<!-- Include label application, findings addressed, commit hashes for fixes, incremental review status, and final no-unresolved-feedback status. If this is not an agent-authored PR, write `N/A: human-authored PR`. -->
 
 ## Exceptions (If any)
 
