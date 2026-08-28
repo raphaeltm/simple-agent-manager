@@ -12,6 +12,7 @@ The reference covers:
 - Node Management (`/api/nodes/*`)
 - Workspace Management (`/api/workspaces/*`)
 - Project Management (`/api/projects/*`)
+- Default Capacity Pools (`/api/projects/:id/capacity-pools/defaults*`)
 - Task Management (`/api/projects/:projectId/tasks/*`)
 - MCP orchestration (`wait_for_subtasks`, `dispatch_task`, task inspection)
 - MCP private incident backlog tools (`list_incident_queue`, `get_incident`, `claim_incident`, `resolve_incident`)

@@ -34,6 +34,8 @@ user-invocable: false
 - `GET /api/projects` — List user's projects (supports `limit` and `cursor`)
 - `GET /api/projects/:id` — Get project detail (includes task status counts and linked workspace count)
 - `GET /api/projects/:projectId/comments` — List project-wide comment inbox across chat and library threads (supports `status=open|sent|resolved`, `limit`)
+- `GET /api/projects/:id/capacity-pools/defaults` — Read visible default capacity pool summaries for the current project/user context. Performs idempotent lazy reconciliation unless `?ensure=false` is passed; project/user summaries require project `secret:read`, installation summaries are superadmin-only, and encrypted credential material is never returned.
+- `POST /api/projects/:id/capacity-pools/defaults/reconcile` — Explicitly reconcile visible default capacity pool metadata from existing credentials and return the same safe summary payload.
 - `PATCH /api/projects/:id` — Update project metadata (`name`, `description`, `defaultBranch`)
 - `DELETE /api/projects/:id` — Delete project (cascades project tasks/dependencies/events)
 

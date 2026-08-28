@@ -11,6 +11,7 @@ import { Navigate, Outlet, useLocation, useNavigate } from 'react-router';
 
 import { DeploymentSettings } from '../components/DeploymentSettings';
 import { McpServersManager } from '../components/mcp-servers/McpServersManager';
+import { DefaultCapacityPoolsPanel } from '../components/project-settings/DefaultCapacityPoolsPanel';
 import { ProjectConnectionsSection } from '../components/project-settings/ProjectConnectionsSection';
 import { ProjectMembersSection } from '../components/project-settings/ProjectMembersSection';
 import { ProjectRuntimeConfigSection } from '../components/project-settings/ProjectRuntimeConfigSection';
@@ -209,9 +210,7 @@ export function ProjectSettingsAccess() {
 export function ProjectSettingsConnections() {
   const { projectId, reload } = useProjectContext();
 
-  return (
-    <ProjectConnectionsSection projectId={projectId} onUpdated={() => void reload()} />
-  );
+  return <ProjectConnectionsSection projectId={projectId} onUpdated={() => void reload()} />;
 }
 
 export function ProjectSettingsAgents() {
@@ -454,6 +453,8 @@ export function ProjectSettingsInfrastructure() {
           </Button>
         </div>
       </section>
+
+      <DefaultCapacityPoolsPanel projectId={projectId} />
 
       {project && <ScalingSettings projectId={projectId} project={project} reload={reload} />}
     </div>
