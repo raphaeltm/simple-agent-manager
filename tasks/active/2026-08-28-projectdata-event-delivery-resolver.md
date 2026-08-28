@@ -39,7 +39,7 @@ Implement Wave B2 on branch `sam/wave-b2-implement-event-w512yj`: add a capabili
 - [x] Add resolver tests for supported, unsupported, unauthorized, terminal target, expired/cancelled subscription, ambiguous delivery, record-only, queue fallback, and spawn/interrupt authorization boundaries.
 - [x] Run focused tests plus relevant typecheck/lint/format gates.
 - [x] Run specialist review and document results.
-- [ ] Open a draft PR targeting `sam/weve-previously-talked-eventing-y207hp`.
+- [x] Open a draft PR targeting `sam/weve-previously-talked-eventing-y207hp`.
 
 ## Acceptance Criteria
 
@@ -96,3 +96,9 @@ Implement Wave B2 on branch `sam/wave-b2-implement-event-w512yj`: add a capabili
 - `pnpm quality:type-boundaries` — passed; 0 blocking findings.
 - `pnpm quality:file-sizes` — passed; no files exceed 800 lines.
 - `git diff --check` — passed.
+
+## Pull Request
+
+- Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/1955
+- Target branch: `sam/weve-previously-talked-eventing-y207hp`
+- Status: open draft; not merged
