@@ -126,6 +126,7 @@ export interface TaskStartPlacement {
   vmSizeSource: ResourceRequirementsSource;
   provider: CredentialProvider | null;
   vmLocation: VMLocation;
+  explicitVmLocation?: boolean;
   workspaceProfile: WorkspaceProfile;
   devcontainerConfigName: string | null;
   taskMode: TaskMode;

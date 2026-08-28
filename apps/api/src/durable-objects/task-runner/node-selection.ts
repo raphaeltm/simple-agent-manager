@@ -193,6 +193,11 @@ export async function tryClaimWarmNode(
     if (selection && (await claimWarmNodeCandidate(state, rc, selection))) {
       return selection;
     }
+    // The persisted warm claim can no longer be used: either the referenced
+    // node is no longer a reusable selection, or claiming it failed. Release
+    // the NodeLifecycle claim first (NodeLifecycle.alarm() does not expire
+    // active claims), then clear the D1 pointer so the node becomes reusable.
+    await releaseClaimedWarmNode(state, rc, persistedClaim.claimedWarmNodeId).catch(() => undefined);
     await rc.env.DATABASE.prepare(
       `UPDATE tasks SET claimed_warm_node_id = NULL, claimed_warm_node_at = NULL, updated_at = ?
         WHERE id = ? AND claimed_warm_node_id = ?`

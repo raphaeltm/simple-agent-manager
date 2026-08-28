@@ -20,7 +20,7 @@ const capacityPoolsRoutes = new Hono<{ Bindings: Env }>();
 capacityPoolsRoutes.use('/*', requireAuth(), requireApproved());
 
 function parseEnsureQuery(value: string | undefined): boolean {
-  return value !== 'false';
+  return value === 'true';
 }
 
 function buildUserDefaultPoolResponse(

@@ -210,8 +210,15 @@ export function parseDispatchTaskParams(
     explicitVmLocation = params.vmLocation.trim();
   }
 
-  const explicitMissionId =
-    typeof params.missionId === 'string' ? params.missionId.trim() : undefined;
+  let explicitMissionId: string | undefined;
+  if (params.missionId !== undefined) {
+    if (typeof params.missionId !== 'string' || params.missionId.trim().length === 0) {
+      return {
+        error: jsonRpcError(requestId, INVALID_PARAMS, 'missionId must be a non-empty string'),
+      };
+    }
+    explicitMissionId = params.missionId.trim();
+  }
 
   return {
     parsed: {

@@ -159,7 +159,7 @@ describe('project capacity pool routes', () => {
     seedPlatformCloudCredential(sqlite);
 
     const res = await createApp().request(
-      '/api/projects/project-1/capacity-pools/defaults',
+      '/api/projects/project-1/capacity-pools/defaults?ensure=true',
       { method: 'GET' },
       env
     );
@@ -221,7 +221,7 @@ describe('project capacity pool routes', () => {
     seedPlatformCloudCredential(sqlite);
 
     const res = await createApp().request(
-      '/api/projects/project-1/capacity-pools/defaults',
+      '/api/projects/project-1/capacity-pools/defaults?ensure=true',
       { method: 'GET' },
       env
     );
@@ -260,7 +260,7 @@ describe('project capacity pool routes', () => {
     seedCloudCredential(sqlite, { id: 'user-cloud-1', userId: 'user-1', provider: 'scaleway' });
 
     const res = await createApp().request(
-      '/api/projects/project-1/capacity-pools/defaults',
+      '/api/projects/project-1/capacity-pools/defaults?ensure=true',
       { method: 'GET' },
       env
     );
@@ -370,5 +370,53 @@ describe('project capacity pool routes', () => {
       count: number;
     };
     expect(poolCount.count).toBe(0);
+  });
+
+  it('is read-only by default: GET without ensure does not reconcile', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
+    seedCloudCredential(sqlite, {
+      id: 'project-cloud-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+    });
+
+    const res = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults',
+      { method: 'GET' },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      effectiveScope: null,
+      reconciledScopes: [],
+    });
+
+    const poolCount = sqlite.prepare(`SELECT COUNT(*) AS count FROM capacity_pools`).get() as {
+      count: number;
+    };
+    expect(poolCount.count).toBe(0);
+  });
+
+  it('sets Cache-Control: private, no-store on identity-varying GET responses', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
+    seedCloudCredential(sqlite, {
+      id: 'project-cloud-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+    });
+
+    const res = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults',
+      { method: 'GET' },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
   });
 });

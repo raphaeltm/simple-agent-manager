@@ -23,7 +23,7 @@ const capacityPoolRoutes = new Hono<{ Bindings: Env }>();
 capacityPoolRoutes.use('/*', requireAuth(), requireApproved());
 
 function parseEnsureQuery(value: string | undefined): boolean {
-  return value !== 'false';
+  return value === 'true';
 }
 
 function reconciledScopes(includeInstallation: boolean): CapacityPoolScope[] {
@@ -116,9 +116,9 @@ async function buildDefaultPoolResponse(
 /**
  * GET /api/projects/:id/capacity-pools/defaults
  *
- * Reads the default capacity pool summaries visible to the caller. By default the
- * endpoint also performs the same idempotent lazy reconciliation used by backend
- * placement code. Pass `?ensure=false` for a read-only view of existing rows.
+ * Reads the default capacity pool summaries visible to the caller. This is a
+ * read-only view of existing rows; pass `?ensure=true` to also perform the same
+ * idempotent lazy reconciliation used by backend placement code.
  */
 capacityPoolRoutes.get('/:id/capacity-pools/defaults', async (c) => {
   const auth = getAuth(c);
@@ -129,6 +129,7 @@ capacityPoolRoutes.get('/:id/capacity-pools/defaults', async (c) => {
   await requireProjectCapability(db, projectId, userId, 'secret:read');
 
   const includeInstallation = auth.user.role === 'superadmin';
+  c.header('Cache-Control', 'private, no-store');
   return c.json(
     await buildDefaultPoolResponse(db, {
       userId,

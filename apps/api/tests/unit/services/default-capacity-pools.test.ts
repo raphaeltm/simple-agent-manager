@@ -226,7 +226,7 @@ afterEach(() => {
 });
 
 describe('default capacity pool creation', () => {
-  it('lazily creates project, user, and installation default records from legacy no-pool state', async () => {
+  it('creates project, user, and installation default records from legacy no-pool state when ensure is requested', async () => {
     const db = createDb();
     seedPlatformCredential({ id: 'platform-hetzner' });
     seedUserCredential({ id: 'user-hetzner' });
@@ -235,8 +235,8 @@ describe('default capacity pool creation', () => {
     const effective = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
       userId: 'user-1',
       projectId: 'project-1',
+      ensure: true,
     });
-
     expect(effective?.pool.scope).toBe('project');
     expect(effective?.sources).toHaveLength(1);
     expect(effective?.sources[0]).toMatchObject({
@@ -281,6 +281,23 @@ describe('default capacity pool creation', () => {
     );
     expect(sourceColumns).not.toContain('encrypted_token');
     expect(sourceColumns).not.toContain('iv');
+  });
+
+  it('is read-only by default: does not ensure pools unless ensure is requested', async () => {
+    const db = createDb();
+    seedPlatformCredential({ id: 'platform-hetzner' });
+    seedUserCredential({ id: 'user-hetzner' });
+    seedUserCredential({ id: 'project-hetzner', projectId: 'project-1' });
+
+    const effective = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1',
+      projectId: 'project-1',
+    });
+
+    expect(effective).toBeNull();
+    expect(getCount('capacity_pools')).toBe(0);
+    expect(getCount('capacity_sources')).toBe(0);
+    expect(getCount('capacity_pool_candidates')).toBe(0);
   });
 
   it('is idempotent across repeated ensures', async () => {
@@ -341,6 +358,7 @@ describe('default capacity pool creation', () => {
     const effective = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
       userId: 'user-1',
       projectId: 'project-2',
+      ensure: true,
     });
 
     expect(effective?.pool.scope).toBe('user');
@@ -452,6 +470,7 @@ describe('default capacity pool creation', () => {
 
     const effective = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
       userId: 'user-1',
+      ensure: true,
     });
 
     expect(effective?.pool.scope).toBe('installation');
@@ -486,6 +505,7 @@ describe('default capacity pool creation', () => {
     const effective = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
       userId: 'user-1',
       projectId: 'project-1',
+      ensure: true,
     });
 
     expect(effective?.pool.scope).toBe('user');

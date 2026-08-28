@@ -161,6 +161,7 @@ export function resolveTaskStartPlacement(input: TaskStartPlacementInput): TaskS
     ),
     provider,
     vmLocation,
+    explicitVmLocation: explicit.vmLocation != null,
     workspaceProfile,
     devcontainerConfigName: resolveDevcontainerConfigName(
       workspaceProfile,
@@ -220,7 +221,7 @@ export async function resolveTaskStartCapacityPoolSelection(
     const summary = await resolveEffectiveDefaultCapacityPoolSummary(db, {
       userId: placement.userId,
       projectId: placement.projectId,
-      ensure: options.ensure,
+      ensure: options.ensure ?? true,
     });
     if (!summary) return null;
 
@@ -450,6 +451,13 @@ function normalizeCapacityCandidate(
   ) {
     return null;
   }
+  // Keep the candidate aligned with the resolved placement: reject a candidate
+  // whose provider differs from the resolved provider (credential/source may be
+  // provider-specific), and reject a candidate whose location differs from an
+  // explicitly requested vmLocation. When no location is explicitly requested,
+  // preserve flexible location matching for the resolved provider.
+  if (placement.provider && candidate.provider !== placement.provider) return null;
+  if (placement.explicitVmLocation && candidate.location !== placement.vmLocation) return null;
   if (!isCredentialPlacementSource(source.credentialSource)) return null;
 
   const capacityPoolProjectId =

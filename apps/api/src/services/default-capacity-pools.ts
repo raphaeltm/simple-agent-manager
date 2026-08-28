@@ -134,7 +134,7 @@ export async function resolveEffectiveDefaultCapacityPoolSummary(
     includeInstallation?: boolean;
   }
 ): Promise<CapacityPoolSummary | null> {
-  if (input.ensure !== false) {
+  if (input.ensure === true) {
     await ensureDefaultCapacityPoolsForExistingCredentials(db, {
       userId: input.userId,
       projectId: input.projectId ?? null,

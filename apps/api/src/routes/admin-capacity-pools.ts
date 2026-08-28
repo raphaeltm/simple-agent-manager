@@ -20,7 +20,7 @@ const adminCapacityPoolsRoutes = new Hono<{ Bindings: Env }>();
 adminCapacityPoolsRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
 
 function parseEnsureQuery(value: string | undefined): boolean {
-  return value !== 'false';
+  return value === 'true';
 }
 
 function buildInstallationDefaultPoolResponse(

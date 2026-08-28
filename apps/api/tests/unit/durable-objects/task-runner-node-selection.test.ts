@@ -98,7 +98,34 @@ type D1ResultMap = {
 
 type MockNode = NonNullable<D1ResultMap['preferredNode']>;
 
-function toPlacementRow(node: MockNode | null | undefined) {
+// Shared shape for every node source fed into toPlacementRow (preferredNode,
+// freshWarmNode, warmNodes, existingNodes). status/health_status/warm_since are
+// optional because only some sources carry them, so passing any element type to
+// a map callback typed against this is valid under strict callback checking.
+type PlacementRowNodeSource = {
+  id: string;
+  status?: string | null;
+  vm_size: string;
+  vm_location?: string | null;
+  agent_version?: string | null;
+  cloud_provider?: string | null;
+  health_status?: string | null;
+  last_metrics?: string | null;
+  warm_since?: string | null;
+  capacity_pool_id?: string | null;
+  capacity_pool_scope?: string | null;
+  capacity_pool_revision?: number | null;
+  capacity_source_id?: string | null;
+  capacity_pool_candidate_id?: string | null;
+  placement_credential_source?: string | null;
+  placement_credential_reference?: string | null;
+  placement_credential_version?: number | null;
+  capacity_pool_project_id?: string | null;
+  workload_role?: string | null;
+  placement_explanation_json?: string | null;
+};
+
+function toPlacementRow(node: PlacementRowNodeSource | null | undefined) {
   if (!node) return null;
   return {
     id: node.id,

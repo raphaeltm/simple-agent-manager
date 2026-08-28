@@ -43,6 +43,7 @@ import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
+import { capacityPlacementSnapshotForTaskStart } from '../../services/placement-resolver';
 import {
   isSessionRecoveryTaskAuthorized,
   SessionRecoveryAuthorityRevokedError,
@@ -106,10 +107,9 @@ export class TaskRunner extends DurableObject<Env> {
         agentStarted: false,
         mcpToken: null,
         provisionedVmSize: null,
-        capacityPlacementSnapshot:
-          input.config.capacityPoolSelection?.candidates[0]?.snapshot ??
-          input.config.capacityPoolSelection?.poolSnapshot ??
-          null,
+        capacityPlacementSnapshot: capacityPlacementSnapshotForTaskStart(
+          input.config.capacityPoolSelection
+        ),
       },
       config: input.config,
       retryCount: 0,
@@ -434,6 +434,7 @@ export class TaskRunner extends DurableObject<Env> {
     raw.config.resumeSnapshotChatSessionId ??= null;
     raw.config.recoverySourceTaskId ??= null;
     raw.stepResults.claimedWarmNodeId ??= null;
+    raw.stepResults.capacityPlacementSnapshot ??= null;
     raw.lastD1Step ??= null;
     return raw;
   }
