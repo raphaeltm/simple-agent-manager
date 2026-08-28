@@ -50,8 +50,8 @@ metadata/display data, and use idempotent delivery keys with payload fingerprint
 - [x] Run focused API tests and relevant typecheck/lint/format quality gates.
 - [x] Run specialist review: task-completion-validator, cloudflare-specialist,
   constitution-validator, security-auditor, and test-engineer.
-- [ ] Open draft PR targeting `sam/weve-previously-talked-eventing-y207hp`.
-- [ ] Check PR CI after push.
+- [x] Open draft PR targeting `sam/weve-previously-talked-eventing-y207hp`.
+- [x] Check PR CI after push.
 
 ## Implementation summary
 
@@ -90,6 +90,15 @@ metadata/display data, and use idempotent delivery keys with payload fingerprint
 | constitution-validator | PASS | No new source hardcoded URLs, timeouts, limits, or deployment identifiers; GitHub event allowlist is protocol/domain shape. |
 | security-auditor | PASS | Webhook signature verification remains required; no raw webhook body is persisted, injected, or logged; logs contain only delivery/event/outcome/error summary fields. |
 | test-engineer | PASS | Tests cover signed route→producer→ProjectData, service→D1→ProjectData subscription matching, duplicate replay, same-key/different-fingerprint conflict, and unsupported event no-op. |
+
+## PR and CI
+
+- Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/1958
+- Target: `sam/weve-previously-talked-eventing-y207hp`
+- CI: PASS — CodSpeed `Run benchmarks` and `CodSpeed Performance Analysis`
+  passed for the pushed branch.
+- Staging: skipped by explicit Wave C1 instruction; no staging deployment,
+  mutation, or validation was performed.
 
 ## Acceptance criteria
 
