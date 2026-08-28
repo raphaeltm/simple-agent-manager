@@ -40,6 +40,7 @@ import {
 } from '../../services/vm-admission-control';
 import { assertClaimedNodeAvailable } from './claimed-node-availability';
 import { parseEnvInt } from './helpers';
+import { applyCapacityCandidateProvisioningTarget } from './node-provisioning-target';
 import {
   findNodeWithCapacity,
   releaseClaimedWarmNode,
@@ -47,7 +48,6 @@ import {
   tryClaimWarmNode,
   verifyNodeAgentHealthy,
 } from './node-selection';
-import { applyCapacityCandidateProvisioningTarget } from './node-provisioning-target';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 export { handleNodeAgentReady } from './node-agent-ready-step';

@@ -39,7 +39,6 @@ import {
   type CapacityPoolSummary,
   resolveEffectiveDefaultCapacityPoolSummary,
 } from './default-capacity-pools';
-import { resolveCredentialSource } from './provider-credentials';
 import type {
   CapacityAwareNodePlacementRow,
   PlacementCredentialAttribution,
@@ -60,6 +59,7 @@ import type {
   TaskStartPlacementInput,
   TaskStartPlacementWithCredential,
 } from './placement-resolver-types';
+import { resolveCredentialSource } from './provider-credentials';
 import type { WorkspaceRuntimeDecision } from './workspace-runtime';
 
 export type {
