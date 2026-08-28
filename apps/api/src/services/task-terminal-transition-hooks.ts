@@ -3,6 +3,7 @@ import type { TaskTerminalTransitionEvent } from '@simple-agent-manager/shared';
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
 import * as projectDataService from './project-data';
+import { recordTaskLifecycleEventBestEffort } from './project-lifecycle-events';
 
 const log = createModuleLogger('task_terminal_transition_hooks');
 
@@ -27,6 +28,28 @@ export function createTaskWaitTerminalTransitionHook(env: Env): TaskTerminalTran
     name: 'durable-parent-wake',
     async handle(event) {
       await projectDataService.reconcileTaskWaits(env, event.projectId, event.taskId);
+    },
+  };
+}
+
+/**
+ * Best-effort ProjectData lifecycle event producer for terminal task status
+ * changes. This records only the normalized transition summary; callback and
+ * runtime payloads remain outside ProjectData event storage.
+ */
+export function createProjectEventTaskTerminalTransitionHook(env: Env): TaskTerminalTransitionHook {
+  return {
+    name: 'project-lifecycle-task-terminal',
+    async handle(event) {
+      await recordTaskLifecycleEventBestEffort(env, {
+        projectId: event.projectId,
+        taskId: event.taskId,
+        status: event.status,
+        parentTaskId: event.parentTaskId,
+        reason: event.reason,
+        source: event.source,
+        occurredAt: event.occurredAt,
+      });
     },
   };
 }

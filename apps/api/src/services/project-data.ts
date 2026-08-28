@@ -101,6 +101,10 @@ import {
 } from './durable-object-retry';
 import { ensureOncePerIsolate, forgetEnsuredProjectData } from './project-data-ensure-memo';
 import { toProjectDataStorageFullError } from './project-data-storage-errors';
+import {
+  buildSessionLifecycleEventInput,
+  type SessionLifecycleEventInput,
+} from './project-lifecycle-event-inputs';
 import { hasAuthorizedRestorableSnapshotWakeClaim } from './session-snapshots';
 import type { TaskAcpLivenessSignals } from './task-runtime-liveness';
 
@@ -343,6 +347,28 @@ function callProjectDataEvent<T extends ProjectDataEventOperation>(
 // Chat Sessions
 // =========================================================================
 
+async function recordSessionLifecycleEventBestEffort(
+  env: Env,
+  input: SessionLifecycleEventInput
+): Promise<void> {
+  try {
+    const event = await buildSessionLifecycleEventInput(input);
+    const { projectId, ...withoutProjectId } = event;
+    await admitProjectEvent(env, projectId, withoutProjectId);
+  } catch (err) {
+    log.warn('project_data.session_lifecycle_event_failed', {
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      lifecycle: input.lifecycle,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+function sessionStatus(session: Record<string, unknown> | null): string | null {
+  return typeof session?.status === 'string' ? session.status : null;
+}
+
 export async function createSession(
   env: Env,
   projectId: string,
@@ -351,9 +377,20 @@ export async function createSession(
   taskId: string | null = null,
   createdByUserId: string | null = null
 ): Promise<string> {
-  return callProjectDataNoRetry(env, projectId, 'createSession', (stub) =>
+  const sessionId = await callProjectDataNoRetry(env, projectId, 'createSession', (stub) =>
     stub.createSession(workspaceId, topic, taskId, createdByUserId)
   );
+  await recordSessionLifecycleEventBestEffort(env, {
+    projectId,
+    sessionId,
+    lifecycle: 'started',
+    status: 'active',
+    taskId,
+    workspaceId,
+    source: 'project_data.create_session',
+    occurredAt: Date.now(),
+  });
+  return sessionId;
 }
 
 export async function linkSessionToWorkspace(
@@ -367,9 +404,24 @@ export async function linkSessionToWorkspace(
   );
 }
 
-export async function stopSession(env: Env, projectId: string, sessionId: string): Promise<void> {
+export async function stopSession(
+  env: Env,
+  projectId: string,
+  sessionId: string
+): Promise<boolean> {
   const stub = await getStub(env, projectId);
-  return stub.stopSession(sessionId);
+  const stopped = await stub.stopSession(sessionId);
+  if (stopped) {
+    await recordSessionLifecycleEventBestEffort(env, {
+      projectId,
+      sessionId,
+      lifecycle: 'archived',
+      status: 'stopped',
+      source: 'project_data.stop_session',
+      occurredAt: Date.now(),
+    });
+  }
+  return stopped;
 }
 
 export async function sleepSession(
@@ -378,7 +430,18 @@ export async function sleepSession(
   sessionId: string
 ): Promise<boolean> {
   const stub = await getStub(env, projectId);
-  return stub.sleepSession(sessionId);
+  const sleeping = await stub.sleepSession(sessionId);
+  if (sleeping) {
+    await recordSessionLifecycleEventBestEffort(env, {
+      projectId,
+      sessionId,
+      lifecycle: 'sleeping',
+      status: 'sleeping',
+      source: 'project_data.sleep_session',
+      occurredAt: Date.now(),
+    });
+  }
+  return sleeping;
 }
 
 export async function wakeSession(
@@ -389,7 +452,21 @@ export async function wakeSession(
   taskId: string
 ): Promise<boolean> {
   const stub = await getStub(env, projectId);
-  return stub.wakeSession(sessionId, workspaceId, taskId);
+  const previousStatus = sessionStatus(await stub.getSession(sessionId));
+  const woke = await stub.wakeSession(sessionId, workspaceId, taskId);
+  if (woke && previousStatus !== 'active') {
+    await recordSessionLifecycleEventBestEffort(env, {
+      projectId,
+      sessionId,
+      lifecycle: 'woke',
+      status: 'active',
+      taskId,
+      workspaceId,
+      source: 'project_data.wake_session',
+      occurredAt: Date.now(),
+    });
+  }
+  return woke;
 }
 
 export async function wakeSessionForSnapshotRecovery(
@@ -407,7 +484,21 @@ export async function wakeSessionForSnapshotRecovery(
   });
   if (!allowStopped) return false;
   const stub = await getStub(env, projectId);
-  return stub.wakeSession(sessionId, workspaceId, taskId, { allowStopped });
+  const previousStatus = sessionStatus(await stub.getSession(sessionId));
+  const woke = await stub.wakeSession(sessionId, workspaceId, taskId, { allowStopped });
+  if (woke && previousStatus !== 'active') {
+    await recordSessionLifecycleEventBestEffort(env, {
+      projectId,
+      sessionId,
+      lifecycle: 'woke',
+      status: 'active',
+      taskId,
+      workspaceId,
+      source: 'project_data.snapshot_recovery_wake_session',
+      occurredAt: Date.now(),
+    });
+  }
+  return woke;
 }
 
 export async function failSession(
@@ -415,9 +506,21 @@ export async function failSession(
   projectId: string,
   sessionId: string,
   errorMessage: string | null = null
-): Promise<void> {
+): Promise<boolean> {
   const stub = await getStub(env, projectId);
-  return stub.failSession(sessionId, errorMessage);
+  const failed = await stub.failSession(sessionId, errorMessage);
+  if (failed) {
+    await recordSessionLifecycleEventBestEffort(env, {
+      projectId,
+      sessionId,
+      lifecycle: 'failed',
+      status: 'failed',
+      reason: errorMessage,
+      source: 'project_data.fail_session',
+      occurredAt: Date.now(),
+    });
+  }
+  return failed;
 }
 
 export async function updateSessionTopic(

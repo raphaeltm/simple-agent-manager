@@ -195,7 +195,7 @@ export class ProjectData extends DurableObject<Env> {
     return updated;
   }
 
-  async stopSession(sessionId: string): Promise<void> {
+  async stopSession(sessionId: string): Promise<boolean> {
     const result = sessions.stopSession(this.sql, sessionId);
     if (result) {
       activity.recordActivityEventInternal(
@@ -208,14 +208,16 @@ export class ProjectData extends DurableObject<Env> {
         null,
         JSON.stringify({ message_count: result.messageCount })
       );
+      try {
+        materialization.materializeSession(this.sql, sessionId);
+      } catch (e) {
+        log.error('materialize_session_on_stop_failed', { sessionId, error: String(e) });
+      }
+      this.scheduleSummarySync();
+      this.broadcastEvent('session.stopped', { sessionId }, sessionId);
+      return true;
     }
-    try {
-      materialization.materializeSession(this.sql, sessionId);
-    } catch (e) {
-      log.error('materialize_session_on_stop_failed', { sessionId, error: String(e) });
-    }
-    this.scheduleSummarySync();
-    this.broadcastEvent('session.stopped', { sessionId }, sessionId);
+    return false;
   }
 
   async sleepSession(sessionId: string): Promise<boolean> {
@@ -265,7 +267,7 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
-  async failSession(sessionId: string, errorMessage: string | null = null): Promise<void> {
+  async failSession(sessionId: string, errorMessage: string | null = null): Promise<boolean> {
     const result = sessions.failSession(this.sql, sessionId);
     if (result) {
       activity.recordActivityEventInternal(
@@ -278,14 +280,16 @@ export class ProjectData extends DurableObject<Env> {
         null,
         JSON.stringify({ message_count: result.messageCount, error: errorMessage })
       );
+      try {
+        materialization.materializeSession(this.sql, sessionId);
+      } catch (e) {
+        log.error('materialize_session_on_fail_failed', { sessionId, error: String(e) });
+      }
+      this.scheduleSummarySync();
+      this.broadcastEvent('session.failed', { sessionId }, sessionId);
+      return true;
     }
-    try {
-      materialization.materializeSession(this.sql, sessionId);
-    } catch (e) {
-      log.error('materialize_session_on_fail_failed', { sessionId, error: String(e) });
-    }
-    this.scheduleSummarySync();
-    this.broadcastEvent('session.failed', { sessionId }, sessionId);
+    return false;
   }
 
   async persistMessage(
@@ -1263,7 +1267,9 @@ export class ProjectData extends DurableObject<Env> {
     await attentionExpiry.processExpiredAttentionMarkers(
       this.sql,
       this.env,
-      (sessionId, errorMessage) => this.failSession(sessionId, errorMessage),
+      async (sessionId, errorMessage) => {
+        await this.failSession(sessionId, errorMessage);
+      },
       {
         projectId: this.getProjectId(),
         scheduleSummarySync: () => this.scheduleSummarySync(),

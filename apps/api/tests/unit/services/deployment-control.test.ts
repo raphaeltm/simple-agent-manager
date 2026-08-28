@@ -243,7 +243,7 @@ describe('reconcileDeploymentReleaseStatuses', () => {
   it('marks the latest pending release as applying while the node applies it', async () => {
     const db = createReleaseDb([{ id: 'rel-3', version: 3, status: 'created' }]);
 
-    await reconcileDeploymentReleaseStatuses(db as any, 'env-1', {
+    const transitions = await reconcileDeploymentReleaseStatuses(db as any, 'env-1', {
       appliedSeq: 2,
       status: 'applying',
     });
@@ -251,12 +251,36 @@ describe('reconcileDeploymentReleaseStatuses', () => {
     expect(db.updates.map((update) => update.values)).toEqual([
       expect.objectContaining({ status: 'applying', statusUpdatedAt: expect.any(String) }),
     ]);
+    expect(transitions).toEqual([
+      expect.objectContaining({
+        releaseId: 'rel-3',
+        environmentId: 'env-1',
+        version: 3,
+        fromStatus: 'created',
+        toStatus: 'applying',
+        occurredAt: expect.any(String),
+      }),
+    ]);
+  });
+
+  it('returns no release lifecycle transition for duplicate applying heartbeat state', async () => {
+    const db = createReleaseDb([{ id: 'rel-3', version: 3, status: 'applying' }]);
+
+    const transitions = await reconcileDeploymentReleaseStatuses(db as any, 'env-1', {
+      appliedSeq: 2,
+      status: 'applying',
+    });
+
+    expect(db.updates.map((update) => update.values)).toEqual([
+      expect.objectContaining({ status: 'applying', statusUpdatedAt: expect.any(String) }),
+    ]);
+    expect(transitions).toEqual([]);
   });
 
   it('marks applied release applied and newer failed release failed after revert', async () => {
     const db = createReleaseDb([{ id: 'rel-3', version: 3, status: 'applying' }]);
 
-    await reconcileDeploymentReleaseStatuses(db as any, 'env-1', {
+    const transitions = await reconcileDeploymentReleaseStatuses(db as any, 'env-1', {
       appliedSeq: 2,
       status: 'reverted',
     });
@@ -264,6 +288,15 @@ describe('reconcileDeploymentReleaseStatuses', () => {
     expect(db.updates.map((update) => update.values)).toEqual([
       expect.objectContaining({ status: 'applied', statusUpdatedAt: expect.any(String) }),
       expect.objectContaining({ status: 'failed', statusUpdatedAt: expect.any(String) }),
+    ]);
+    expect(transitions).toEqual([
+      expect.objectContaining({
+        releaseId: 'rel-3',
+        environmentId: 'env-1',
+        version: 3,
+        fromStatus: 'applying',
+        toStatus: 'failed',
+      }),
     ]);
   });
 

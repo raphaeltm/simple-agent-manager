@@ -134,7 +134,10 @@ export function stopSession(
   sql: SqlStorage,
   sessionId: string
 ): { workspaceId: string | null; messageCount: number } | null {
-  return terminateSession(sql, sessionId, 'stopped');
+  const result = terminateSession(sql, sessionId, 'stopped');
+  // If no rows were updated, session was already stopped/failed — skip
+  if (!result || result.rowsWritten === 0) return null;
+  return result;
 }
 
 export function stopSessionInternal(sql: SqlStorage, sessionId: string): void {

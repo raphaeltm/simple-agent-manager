@@ -97,6 +97,9 @@ const mockAttachEnvironmentVolumesToLinkedNode = vi.fn();
 const mockDetachEnvironmentVolumes = vi.fn();
 const mockDeleteNodeResources = vi.fn();
 const mockBuildDeploymentEnvironmentResponse = vi.fn();
+const recordDeploymentEnvironmentLifecycleEventBestEffort = vi.hoisted(() =>
+  vi.fn(async () => undefined)
+);
 
 let envRows: EnvironmentRow[] = [];
 let releaseRows: ReleaseRow[] = [];
@@ -150,6 +153,10 @@ vi.mock('../../../src/services/nodes', () => ({
 vi.mock('../../../src/services/deployment-environment-summary', () => ({
   buildDeploymentEnvironmentResponse: (...args: unknown[]) =>
     mockBuildDeploymentEnvironmentResponse(...args),
+}));
+
+vi.mock('../../../src/services/project-lifecycle-events', () => ({
+  recordDeploymentEnvironmentLifecycleEventBestEffort,
 }));
 
 vi.mock('../../../src/lib/logger', () => ({
@@ -391,6 +398,19 @@ describe('deployment environment stop/start lifecycle', () => {
     const stoppedEnv = envRows.find((row) => row.id === 'env-1');
     expect(stoppedEnv?.status).toBe('stopped');
     expect(stoppedEnv?.nodeId).toBeNull();
+    expect(recordDeploymentEnvironmentLifecycleEventBestEffort).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        projectId: 'proj-1',
+        environmentId: 'env-1',
+        lifecycle: 'stopped',
+        status: 'stopped',
+        fromStatus: 'active',
+        nodeId: 'node-1',
+        userId: 'user-1',
+        source: 'deployment_environment.stop',
+      })
+    );
 
     // --- START ---
     const startResponse = await start(app);
@@ -424,6 +444,20 @@ describe('deployment environment stop/start lifecycle', () => {
     expect(startBody.lifecycle.started).toBe(true);
     expect(startBody.lifecycle.alreadyActive).toBe(false);
     expect(startBody.lifecycle.nodeId).toBe('node-2');
+    expect(recordDeploymentEnvironmentLifecycleEventBestEffort).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        projectId: 'proj-1',
+        environmentId: 'env-1',
+        lifecycle: 'starting',
+        fromStatus: 'stopped',
+        releaseId: 'rel-1',
+        releaseVersion: 7,
+        nodeId: 'node-2',
+        userId: 'user-1',
+        source: 'deployment_environment.start',
+      })
+    );
   });
 
   it('returns 409 when stopping an environment that is already stopping', async () => {

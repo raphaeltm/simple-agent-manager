@@ -17,6 +17,7 @@ const {
   notifyTaskEventMock,
   persistErrorMock,
   persistMessageMock,
+  recordTaskLifecycleEventBestEffortMock,
   revokeMcpTokenMock,
   restoreSessionRecoveryHandoffMock,
   sleepSessionMock,
@@ -31,6 +32,7 @@ const {
   notifyTaskEventMock: vi.fn(async () => undefined),
   persistErrorMock: vi.fn(async () => undefined),
   persistMessageMock: vi.fn(async () => undefined),
+  recordTaskLifecycleEventBestEffortMock: vi.fn(async () => undefined),
   revokeMcpTokenMock: vi.fn(async () => undefined),
   restoreSessionRecoveryHandoffMock: vi.fn(async () => undefined),
   sleepSessionMock: vi.fn(async () => true),
@@ -59,6 +61,10 @@ vi.mock('../../../src/services/project-data', () => ({
   persistMessage: persistMessageMock,
   reconcileTaskWaits: vi.fn(async () => undefined),
   sleepSession: sleepSessionMock,
+}));
+
+vi.mock('../../../src/services/project-lifecycle-events', () => ({
+  recordTaskLifecycleEventBestEffort: recordTaskLifecycleEventBestEffortMock,
 }));
 
 vi.mock('../../../src/services/session-snapshots', () => ({
@@ -358,6 +364,19 @@ describe('transitionToInProgress', () => {
       to_status: 'in_progress',
       reason: 'Agent session agent-session-1 created. Task execution started.',
     });
+    expect(recordTaskLifecycleEventBestEffortMock).toHaveBeenCalledWith(
+      rc.env,
+      expect.objectContaining({
+        projectId: 'project-1',
+        taskId: 'task-1',
+        status: 'in_progress',
+        fromStatus: 'delegated',
+        workspaceId: 'workspace-1',
+        nodeId: 'node-1',
+        agentSessionId: 'agent-session-1',
+        source: 'task_runner.transition_to_in_progress',
+      })
+    );
     expect(state.currentStep).toBe('running');
     expect(state.completed).toBe(true);
     expect(storageWrites.at(-1)).toMatchObject({ currentStep: 'running', completed: true });
@@ -610,6 +629,16 @@ describe('failTask', () => {
       'task-1',
       'failed',
       'agent session failed permanently'
+    );
+    expect(recordTaskLifecycleEventBestEffortMock).toHaveBeenCalledWith(
+      rc.env,
+      expect.objectContaining({
+        projectId: 'project-1',
+        taskId: 'task-1',
+        status: 'failed',
+        reason: 'agent session failed permanently',
+        source: 'task_runner.fail_task',
+      })
     );
     expect(storageWrites.at(-1)).toMatchObject({ completed: true });
     expect(persistErrorMock).toHaveBeenCalledWith(

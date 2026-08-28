@@ -41,6 +41,15 @@ export interface ObservedDeploymentState {
   observedAt: string | null;
 }
 
+export interface DeploymentReleaseStatusTransition {
+  releaseId: string;
+  environmentId: string;
+  version: number;
+  fromStatus: string;
+  toStatus: 'applying' | 'applied' | 'failed';
+  occurredAt: string;
+}
+
 export interface DeploymentAgentPolicy {
   agentDeployEnabled: boolean;
   agentDeployEnabledBy: string | null;
@@ -207,11 +216,12 @@ export async function reconcileDeploymentReleaseStatuses(
   db: ReturnType<typeof drizzle<typeof schema>>,
   environmentId: string,
   deployment: DeploymentHeartbeatState
-): Promise<void> {
+): Promise<DeploymentReleaseStatusTransition[]> {
+  const transitions: DeploymentReleaseStatusTransition[] = [];
   const statusUpdatedAt = new Date().toISOString();
   const appliedSeq = normalizeAppliedSeq(deployment.appliedSeq) ?? 0;
   const status = normalizeStatus(deployment.status);
-  if (!status) return;
+  if (!status) return transitions;
 
   const latestRows = await db
     .select({
@@ -238,22 +248,40 @@ export async function reconcileDeploymentReleaseStatuses(
       );
   }
 
-  if (!latest) return;
+  if (!latest) return transitions;
 
   if (status === 'applying' && latest.version > appliedSeq) {
+    if (latest.status !== 'applying') {
+      transitions.push({
+        releaseId: latest.id,
+        environmentId,
+        version: latest.version,
+        fromStatus: latest.status,
+        toStatus: 'applying',
+        occurredAt: statusUpdatedAt,
+      });
+    }
     await db
       .update(schema.deploymentReleases)
       .set({ status: 'applying', statusUpdatedAt })
       .where(eq(schema.deploymentReleases.id, latest.id));
-    return;
+    return transitions;
   }
 
   if (status === 'applied' && latest.version === appliedSeq && latest.status !== 'applied') {
+    transitions.push({
+      releaseId: latest.id,
+      environmentId,
+      version: latest.version,
+      fromStatus: latest.status,
+      toStatus: 'applied',
+      occurredAt: statusUpdatedAt,
+    });
     await db
       .update(schema.deploymentReleases)
       .set({ status: 'applied', statusUpdatedAt })
       .where(eq(schema.deploymentReleases.id, latest.id));
-    return;
+    return transitions;
   }
 
   if (TERMINAL_FAILURE_STATUSES.has(status) && latest.version > appliedSeq) {
@@ -272,13 +300,22 @@ export async function reconcileDeploymentReleaseStatuses(
       )
       .limit(1);
     const failedRelease = failedRows[0];
-    if (!failedRelease || failedRelease.status === 'failed') return;
+    if (!failedRelease || failedRelease.status === 'failed') return transitions;
 
+    transitions.push({
+      releaseId: failedRelease.id,
+      environmentId,
+      version: failedVersion,
+      fromStatus: failedRelease.status,
+      toStatus: 'failed',
+      occurredAt: statusUpdatedAt,
+    });
     await db
       .update(schema.deploymentReleases)
       .set({ status: 'failed', statusUpdatedAt })
       .where(eq(schema.deploymentReleases.id, failedRelease.id));
   }
+  return transitions;
 }
 
 export async function getTaskAgentProfileId(

@@ -17,6 +17,9 @@ const mockMintProjectRegistryCredential = vi.fn();
 const mockLoadResolvedSecrets = vi.fn().mockResolvedValue({});
 const mockLoadDeploymentInterpolationEnv = vi.fn().mockResolvedValue({ values: {} });
 const mockBuildVolumeMountDescriptors = vi.fn().mockResolvedValue([]);
+const recordDeploymentReleaseLifecycleEventBestEffort = vi.hoisted(() =>
+  vi.fn(async () => undefined)
+);
 const mockOrderBy = vi.fn().mockResolvedValue([]);
 const mockUpdateSet = vi.fn();
 const mockUpdateWhere = vi.fn();
@@ -30,6 +33,7 @@ let customDomainRows: Array<{
   verifiedCnameTarget?: string | null;
 }> = [];
 const currentProviderServerId = 'provider-server-current';
+let waitUntilMock = vi.fn();
 
 function createWhereResult() {
   return {
@@ -100,6 +104,10 @@ vi.mock('../../../src/services/deployment-volumes', async (importOriginal) => {
     buildVolumeMountDescriptors: (...args: unknown[]) => mockBuildVolumeMountDescriptors(...args),
   };
 });
+
+vi.mock('../../../src/services/project-lifecycle-events', () => ({
+  recordDeploymentReleaseLifecycleEventBestEffort,
+}));
 
 const { deployReleaseCallbackRoute } = await import('../../../src/routes/deploy-release-callback');
 const { nodesRoutes } = await import('../../../src/routes/nodes');
@@ -210,7 +218,9 @@ function stubHappyPathDb() {
       },
     ])
     .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
-    .mockResolvedValueOnce([{ id: 'rel-1', manifest: JSON.stringify(manifest()), version: 7 }]);
+    .mockResolvedValueOnce([
+      { id: 'rel-1', manifest: JSON.stringify(manifest()), version: 7, status: 'created' },
+    ]);
 }
 
 /** Stub the four CF DNS API calls (two list, two create) for the happy path. */
@@ -234,7 +244,8 @@ function requestDeployRelease() {
   return createTestApp().request(
     '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-1',
     { headers: { Authorization: 'Bearer callback-token' } },
-    env()
+    env(),
+    { waitUntil: waitUntilMock, passThroughOnException: vi.fn() }
   );
 }
 
@@ -305,6 +316,7 @@ describe('deploy release callback route', () => {
     mockOrderBy.mockReset();
     mockOrderBy.mockResolvedValue([]);
     customDomainRows = [];
+    waitUntilMock = vi.fn();
     mockSignDeployPayload.mockResolvedValue('signed-payload');
     mockSignRouteConfigPayload.mockResolvedValue('signed-route-config');
     mockVerifyCallbackToken.mockResolvedValue({
@@ -340,6 +352,19 @@ describe('deploy release callback route', () => {
     );
     expect(mockD1Bind).toHaveBeenCalledWith(expect.any(String), 'rel-1');
     expect(mockD1Run).toHaveBeenCalledTimes(1);
+    expect(recordDeploymentReleaseLifecycleEventBestEffort).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        projectId: 'proj-1',
+        releaseId: 'rel-1',
+        environmentId: 'env-1',
+        status: 'applying',
+        fromStatus: 'created',
+        version: 7,
+        nodeId: 'node-deploy-1',
+        source: 'deploy_release_callback.apply_claim',
+      })
+    );
 
     // Port base includes per-environment offset to prevent cross-env collisions
     const envOffset = environmentPortOffset('env-1', 10, 36_000);

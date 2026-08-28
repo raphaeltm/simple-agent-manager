@@ -5,6 +5,7 @@ import { createModuleLogger } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { loadTaskSupersession } from './task-runtime-liveness';
 import {
+  createProjectEventTaskTerminalTransitionHook,
   createTaskWaitTerminalTransitionHook,
   runTaskTerminalTransitionHooks,
 } from './task-terminal-transition-hooks';
@@ -297,7 +298,7 @@ export async function transitionTaskToTerminal(
       occurredAt: now,
       source: options.source,
     },
-    [createTaskWaitTerminalTransitionHook(env)]
+    [createTaskWaitTerminalTransitionHook(env), createProjectEventTaskTerminalTransitionHook(env)]
   );
 
   return 'transitioned';

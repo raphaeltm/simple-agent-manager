@@ -41,6 +41,10 @@ import { cronToHumanReadable } from '../../services/cron-utils';
 import { getRuntimeLimits } from '../../services/limits';
 import * as projectDataService from '../../services/project-data';
 import {
+  isLifecycleTaskStatus,
+  recordTaskLifecycleEventBestEffort,
+} from '../../services/project-lifecycle-events';
+import {
   type TaskDependencyEdge,
   wouldCreateTaskDependencyCycle,
 } from '../../services/task-graph';
@@ -450,6 +454,24 @@ crudRoutes.post('/:taskId/status', requireAuth(), requireApproved(), jsonValidat
     errorMessage: body.errorMessage,
   });
 
+  if (task.status !== body.toStatus && isLifecycleTaskStatus(body.toStatus)) {
+    c.executionCtx.waitUntil(
+      recordTaskLifecycleEventBestEffort(c.env, {
+        projectId,
+        taskId,
+        status: body.toStatus,
+        fromStatus: task.status,
+        workspaceId: task.workspaceId,
+        actorType: 'user',
+        actorId: userId,
+        reason: body.reason ?? body.errorMessage ?? null,
+        source: 'tasks.user_status',
+        occurredAt: updatedTask.updatedAt,
+        title: task.title,
+      })
+    );
+  }
+
   // Record activity event for task status change
   c.executionCtx.waitUntil(
     projectDataService.recordActivityEvent(
@@ -714,6 +736,22 @@ crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) =>
     .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.projectId, projectId)));
 
   await appendStatusEvent(db, taskId, task.status as TaskStatus, 'completed', 'user', userId, 'Conversation closed by user');
+
+  c.executionCtx.waitUntil(
+    recordTaskLifecycleEventBestEffort(c.env, {
+      projectId,
+      taskId,
+      status: 'completed',
+      fromStatus: task.status,
+      workspaceId: task.workspaceId,
+      actorType: 'user',
+      actorId: userId,
+      reason: 'Conversation closed by user',
+      source: 'tasks.conversation_close',
+      occurredAt: now,
+      title: task.title,
+    })
+  );
 
   // Record activity event (best-effort)
   c.executionCtx.waitUntil(

@@ -19,14 +19,18 @@ let workspaceRows: Array<{
   nodeId?: string | null;
   nodeStatus?: string | null;
 }> = [];
-let jobRows: Array<{ environmentId: string; nodeId: string }> = [];
+let jobRows: Array<{ environmentId: string; nodeId: string; status: string }> = [];
 let verifiedPayload: { workspace: string; type: string; scope?: string } = {
   workspace: 'ws-1',
   type: 'callback',
   scope: 'workspace',
 };
+let waitUntilMock = vi.fn();
 
-const appendMock = vi.hoisted(() => vi.fn(async () => undefined));
+const { appendMock, recordDeploymentPublishJobLifecycleEventBestEffort } = vi.hoisted(() => ({
+  appendMock: vi.fn(async () => undefined),
+  recordDeploymentPublishJobLifecycleEventBestEffort: vi.fn(async () => undefined),
+}));
 
 vi.mock('drizzle-orm', () => ({
   and: (...conds: unknown[]) => ({ op: 'and', conds }),
@@ -72,6 +76,9 @@ vi.mock('../../../src/services/jwt', () => ({
 vi.mock('../../../src/services/deployment-publish-jobs', () => ({
   appendDeploymentPublishJobEvent: (...args: unknown[]) => appendMock(...args),
 }));
+vi.mock('../../../src/services/project-lifecycle-events', () => ({
+  recordDeploymentPublishJobLifecycleEventBestEffort,
+}));
 
 vi.mock('../../../src/lib/logger', () => ({
   log: { debug: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() },
@@ -99,7 +106,8 @@ function request(app: Hono, projectId: string, jobId: string, body: unknown) {
       headers: { Authorization: 'Bearer cb-token', 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     },
-    { DATABASE: {} }
+    { DATABASE: {} },
+    { waitUntil: waitUntilMock, passThroughOnException: vi.fn() }
   );
 }
 
@@ -126,8 +134,9 @@ describe('deployment-publish-job-callback (vertical slice)', () => {
         nodeStatus: 'running',
       },
     ];
-    jobRows = [{ environmentId: 'env-1', nodeId: 'node-1' }];
+    jobRows = [{ environmentId: 'env-1', nodeId: 'node-1', status: 'queued' }];
     verifiedPayload = { workspace: 'ws-1', type: 'callback', scope: 'workspace' };
+    waitUntilMock = vi.fn();
   });
 
   it('records a valid publish job event, including the free-form detail payload', async () => {
@@ -155,6 +164,32 @@ describe('deployment-publish-job-callback (vertical slice)', () => {
         detail: { note: 'ok' },
       })
     );
+    expect(recordDeploymentPublishJobLifecycleEventBestEffort).toHaveBeenCalledWith(
+      { DATABASE: {} },
+      expect.objectContaining({
+        projectId: 'proj-1',
+        publishJobId: 'job-1',
+        environmentId: 'env-1',
+        status: 'running',
+        fromStatus: 'queued',
+        currentStep: 'push',
+        nodeId: 'node-1',
+        workspaceId: 'ws-1',
+        releaseVersion: 3,
+        source: 'deployment_publish_job_callback.status',
+      })
+    );
+    expect(waitUntilMock).toHaveBeenCalledOnce();
+  });
+
+  it('does not emit a lifecycle event when the publish job status is unchanged', async () => {
+    jobRows = [{ environmentId: 'env-1', nodeId: 'node-1', status: 'running' }];
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', 'job-1', validEvent);
+
+    expect(res.status).toBe(200);
+    expect(appendMock).toHaveBeenCalled();
+    expect(recordDeploymentPublishJobLifecycleEventBestEffort).not.toHaveBeenCalled();
   });
 
   it('rejects when the publish job is not found', async () => {
@@ -183,7 +218,8 @@ describe('deployment-publish-job-callback (vertical slice)', () => {
         headers: { Authorization: 'Bearer cb-token', 'Content-Type': 'application/json' },
         body: '{not valid json',
       },
-      { DATABASE: {} }
+      { DATABASE: {} },
+      { waitUntil: waitUntilMock, passThroughOnException: vi.fn() }
     );
 
     expect(res.status).toBe(400);

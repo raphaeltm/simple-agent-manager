@@ -69,11 +69,15 @@ const mockMarkDeploymentReleaseVolumeAttachFailed = vi.hoisted(() => vi.fn(async
 const mockListEnvironmentVolumes = vi.hoisted(() => vi.fn(async () => []));
 const mockDetachEnvironmentVolumes = vi.hoisted(() => vi.fn(async () => undefined));
 const mockTeardownDeploymentEnvironmentOnNode = vi.hoisted(() => vi.fn(async () => undefined));
+const recordDeploymentReleaseLifecycleEventBestEffort = vi.hoisted(() =>
+  vi.fn(async () => undefined)
+);
 let verifiedPayload: { workspace: string; type: string; scope?: string } = {
   workspace: 'ws-1',
   type: 'callback',
   scope: 'workspace',
 };
+let waitUntilMock = vi.fn();
 
 vi.mock('drizzle-orm', () => ({
   and: (...conds: unknown[]) => ({ op: 'and', conds }),
@@ -116,6 +120,9 @@ vi.mock('../../../src/services/deployment-volumes', () => ({
 vi.mock('../../../src/services/node-agent', () => ({
   teardownDeploymentEnvironmentOnNode: (...args: unknown[]) =>
     mockTeardownDeploymentEnvironmentOnNode(...args),
+}));
+vi.mock('../../../src/services/project-lifecycle-events', () => ({
+  recordDeploymentReleaseLifecycleEventBestEffort,
 }));
 
 function createMockDb() {
@@ -216,7 +223,8 @@ function request(app: Hono, projectId: string, body: unknown, env: Record<string
       headers: { Authorization: 'Bearer cb-token', 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     },
-    { DATABASE: {}, ...env }
+    { DATABASE: {}, ...env },
+    { waitUntil: waitUntilMock, passThroughOnException: vi.fn() }
   );
 }
 
@@ -261,6 +269,7 @@ describe('compose-publish-release callback (vertical slice)', () => {
       },
     ];
     verifiedPayload = { workspace: 'ws-1', type: 'callback', scope: 'workspace' };
+    waitUntilMock = vi.fn();
   });
 
   it('records a compose-publish release with the next version and source discriminator', async () => {
@@ -300,6 +309,20 @@ describe('compose-publish-release callback (vertical slice)', () => {
         agentProfileId: 'profile-1',
       },
     });
+    expect(recordDeploymentReleaseLifecycleEventBestEffort).toHaveBeenCalledWith(
+      { DATABASE: {} },
+      expect.objectContaining({
+        projectId: 'proj-1',
+        releaseId: 'release-ulid-1',
+        environmentId: 'env-1',
+        status: 'created',
+        version: 5,
+        workspaceId: 'ws-1',
+        taskId: 'task-1',
+        source: 'compose_publish_release_callback.create',
+      })
+    );
+    expect(waitUntilMock).toHaveBeenCalled();
   });
 
   it('records a stopped environment release without provisioning a node', async () => {

@@ -1,8 +1,14 @@
 import { and, eq } from 'drizzle-orm';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import { markQueuedTaskFailed } from '../../../src/services/task-failure';
+
+const recordTaskLifecycleEventBestEffort = vi.hoisted(() => vi.fn(async () => undefined));
+
+vi.mock('../../../src/services/project-lifecycle-events', () => ({
+  recordTaskLifecycleEventBestEffort,
+}));
 
 interface RecordedUpdate {
   table: unknown;
@@ -37,13 +43,22 @@ function createRecordingDb(updateChanges: number) {
 }
 
 describe('markQueuedTaskFailed', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('marks the queued task failed and records the queued→failed status event', async () => {
     const { db, calls } = createRecordingDb(1);
 
     const transitioned = await markQueuedTaskFailed(
       db,
       'task-123',
-      'Session creation failed: DO unavailable'
+      'Session creation failed: DO unavailable',
+      {
+        env: { PROJECT_DATA: {} } as never,
+        projectId: 'project-123',
+        source: 'test.queued_failure',
+      }
     );
 
     expect(transitioned).toBe(true);
@@ -73,15 +88,32 @@ describe('markQueuedTaskFailed', () => {
     expect(calls.inserts[0].values.id).not.toHaveLength(0);
     // Task row and status event carry the same failure instant
     expect(calls.inserts[0].values.createdAt).toBe(calls.updates[0].set.updatedAt);
+    expect(recordTaskLifecycleEventBestEffort).toHaveBeenCalledWith(
+      { PROJECT_DATA: {} },
+      expect.objectContaining({
+        projectId: 'project-123',
+        taskId: 'task-123',
+        status: 'failed',
+        fromStatus: 'queued',
+        reason: 'Session creation failed: DO unavailable',
+        source: 'test.queued_failure',
+        occurredAt: calls.updates[0].set.updatedAt,
+      })
+    );
   });
 
   it('does not record a status event when the task already left queued', async () => {
     const { db, calls } = createRecordingDb(0);
 
-    const transitioned = await markQueuedTaskFailed(db, 'task-123', 'Instant launch failed: boom');
+    const transitioned = await markQueuedTaskFailed(db, 'task-123', 'Instant launch failed: boom', {
+      env: { PROJECT_DATA: {} } as never,
+      projectId: 'project-123',
+      source: 'test.queued_failure',
+    });
 
     expect(transitioned).toBe(false);
     expect(calls.updates).toHaveLength(1);
     expect(calls.inserts).toHaveLength(0);
+    expect(recordTaskLifecycleEventBestEffort).not.toHaveBeenCalled();
   });
 });

@@ -15,6 +15,10 @@ import { verifyCallbackToken } from '../../services/jwt';
 import * as notificationService from '../../services/notification';
 import * as projectDataService from '../../services/project-data';
 import {
+  isLifecycleTaskStatus,
+  recordTaskLifecycleEventBestEffort,
+} from '../../services/project-lifecycle-events';
+import {
   canTransitionTaskStatus,
   getAllowedTaskTransitions,
   isTaskStatus,
@@ -321,6 +325,24 @@ taskCallbackRoute.post(
         errorMessage: body.errorMessage,
       }
     );
+
+    if (task.status !== body.toStatus && isLifecycleTaskStatus(body.toStatus)) {
+      c.executionCtx.waitUntil(
+        recordTaskLifecycleEventBestEffort(c.env, {
+          projectId,
+          taskId,
+          status: body.toStatus,
+          fromStatus: task.status,
+          workspaceId: task.workspaceId,
+          actorType: 'workspace_callback',
+          actorId: payload.workspace,
+          reason: body.reason ?? body.errorMessage ?? null,
+          source: 'tasks.callback_status',
+          occurredAt: updatedTask.updatedAt,
+          title: task.title,
+        })
+      );
+    }
 
     // Record activity event for task status change (from workspace callback)
     c.executionCtx.waitUntil(
