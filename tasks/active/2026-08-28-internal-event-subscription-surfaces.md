@@ -42,7 +42,7 @@ Implement Wave B3 internal API/MCP-adjacent service surfaces on top of the Wave 
 - [x] Add focused tests covering agent-owned session subscriptions, policy/standing-watch ownership, required-subscription behavior, invalid owner/target/project access, and cancellation/expiry races.
 - [x] Run focused tests plus relevant typecheck/lint/format/static gates.
 - [x] Complete specialist reviews and task-completion validation before handoff.
-- [ ] Push commits and open a draft PR targeting `sam/weve-previously-talked-eventing-y207hp`.
+- [x] Push commits and open a draft PR targeting `sam/weve-previously-talked-eventing-y207hp`.
 
 ## Implementation Evidence
 
@@ -100,5 +100,5 @@ Implement Wave B3 internal API/MCP-adjacent service surfaces on top of the Wave 
 
 ## Handoff Notes
 
-- PR must remain draft and must not be merged.
+- Draft PR: <https://github.com/raphaeltm/simple-agent-manager/pull/1956>
 - Handoff must list contracts exposed, tests run, commit IDs, PR URL, CI status if available, and deferred public/UI/runtime work.
