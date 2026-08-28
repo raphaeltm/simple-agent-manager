@@ -38,6 +38,41 @@ export type {
 } from './user';
 export { CREDENTIAL_PROVIDERS, GCP_CREDENTIAL_VERSION } from './user';
 
+// Capacity pools
+export type {
+  CapacityCredentialSource,
+  CapacityExhaustionPolicy,
+  CapacityPlacementCredentialSource,
+  CapacityPlacementSnapshot,
+  CapacityPool,
+  CapacityPoolCandidate,
+  CapacityPoolFallback,
+  CapacityPoolScope,
+  CapacityPoolStatus,
+  CapacityPoolStrategy,
+  CapacitySourceIdentity,
+  CapacitySourceKind,
+  CapacityWorkloadRole,
+} from './capacity-pool';
+export {
+  CAPACITY_CREDENTIAL_SOURCES,
+  CAPACITY_EXHAUSTION_POLICIES,
+  CAPACITY_PLACEMENT_CREDENTIAL_SOURCES,
+  CAPACITY_POOL_SCOPES,
+  CAPACITY_POOL_STATUSES,
+  CAPACITY_POOL_STRATEGIES,
+  CAPACITY_SOURCE_KINDS,
+  CAPACITY_WORKLOAD_ROLES,
+  isCapacityCredentialSource,
+  isCapacityExhaustionPolicy,
+  isCapacityPlacementCredentialSource,
+  isCapacityPoolScope,
+  isCapacityPoolStatus,
+  isCapacityPoolStrategy,
+  isCapacitySourceKind,
+  isCapacityWorkloadRole,
+} from './capacity-pool';
+
 // GitHub
 export type {
   AccountType,
