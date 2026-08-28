@@ -17,9 +17,7 @@ import { log } from '../../../lib/logger';
 import { ulid } from '../../../lib/ulid';
 import { generateBranchName } from '../../../services/branch-name';
 import {
-  PlacementResolutionError,
-  resolvePlacementCredentialAttribution,
-  resolveTaskStartPlacement,
+  resolveTaskStartPlacementCredentialAttribution,
 } from '../../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
@@ -134,67 +132,46 @@ export async function retrySubtask(
     ? (original.credentialAttributionProjectId ?? original.projectId)
     : null;
 
-  const placement = (() => {
-    try {
-      return resolveTaskStartPlacement({
-        entryPoint: 'retry-subtask',
-        taskId: newTaskId,
-        projectId: original.projectId,
-        userId: ctx.userId,
-        project: {
-          id: original.projectId,
-          defaultVmSize: original.projectDefaultVmSize,
-          defaultProvider: original.projectDefaultProvider,
-          defaultLocation: original.projectDefaultLocation,
-          defaultWorkspaceProfile: original.projectDefaultWorkspaceProfile,
-          defaultDevcontainerConfigName: original.projectDefaultDevcontainerConfigName,
-          defaultAgentType: original.projectDefaultAgentType,
-        },
-        profile: resolvedProfile,
-        explicit: {
-          taskMode: (original.taskMode as TaskMode | null) ?? null,
-        },
-        inheritedCredentialAttribution: {
-          userId: credentialAttributionUserId,
-          projectId: credentialAttributionProjectId,
-          source: credentialAttributionSource,
-        },
-        credentialProjectPolicy: 'inherited-or-none',
-        taskModeDefault: 'workspace-profile',
-        profileVmSizeSource: 'skill',
-        resourceRequirements: {
-          skill: skillResourceRequirements,
-        },
-      });
-    } catch (err) {
-      if (err instanceof PlacementResolutionError) {
-        return { error: err.message } as const;
-      }
-      throw err;
-    }
-  })();
-  if ('error' in placement) {
-    return placement;
+  const placementResolution = await resolveTaskStartPlacementCredentialAttribution(db, {
+    entryPoint: 'retry-subtask',
+    taskId: newTaskId,
+    projectId: original.projectId,
+    userId: ctx.userId,
+    project: {
+      id: original.projectId,
+      defaultVmSize: original.projectDefaultVmSize,
+      defaultProvider: original.projectDefaultProvider,
+      defaultLocation: original.projectDefaultLocation,
+      defaultWorkspaceProfile: original.projectDefaultWorkspaceProfile,
+      defaultDevcontainerConfigName: original.projectDefaultDevcontainerConfigName,
+      defaultAgentType: original.projectDefaultAgentType,
+    },
+    profile: resolvedProfile,
+    explicit: {
+      taskMode: (original.taskMode as TaskMode | null) ?? null,
+    },
+    inheritedCredentialAttribution: {
+      userId: credentialAttributionUserId,
+      projectId: credentialAttributionProjectId,
+      source: credentialAttributionSource,
+    },
+    credentialProjectPolicy: 'inherited-or-none',
+    taskModeDefault: 'workspace-profile',
+    profileVmSizeSource: 'skill',
+    resourceRequirements: {
+      skill: skillResourceRequirements,
+    },
+  });
+  if ('error' in placementResolution) {
+    return placementResolution;
   }
-
-  // Verify cloud credentials
-  const { resolveCredentialSource } = await import('../../../services/provider-credentials');
-  const credResult = await resolveCredentialSource(
-    db,
-    placement.credentialLookup.userId,
-    placement.credentialLookup.provider,
-    placement.credentialLookup.projectId
-  );
-  if (!credResult) {
-    return { error: 'No cloud provider credentials found. The user must connect a cloud provider in Settings.' };
-  }
-  const credentialAttribution = resolvePlacementCredentialAttribution(placement, credResult);
   const {
+    placement,
     effectiveProvider,
     credentialAttributionUserId: resolvedCredentialAttributionUserId,
     credentialAttributionProjectId: resolvedCredentialAttributionProjectId,
     credentialAttributionSource: resolvedCredentialAttributionSource,
-  } = credentialAttribution;
+  } = placementResolution;
   const {
     vmSize: resolvedVmSize,
     vmSizeSource,

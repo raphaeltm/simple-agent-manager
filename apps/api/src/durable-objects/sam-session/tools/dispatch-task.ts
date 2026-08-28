@@ -20,9 +20,7 @@ import { ulid } from '../../../lib/ulid';
 import { requireRepositoryOwnerAccess } from '../../../routes/projects/_helpers';
 import { generateBranchName } from '../../../services/branch-name';
 import {
-  PlacementResolutionError,
-  resolvePlacementCredentialAttribution,
-  resolveTaskStartPlacement,
+  resolveTaskStartPlacementCredentialAttribution,
 } from '../../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
@@ -234,61 +232,41 @@ export async function dispatchTask(
   const explicitBranch = input.branch?.trim();
   const taskId = ulid();
 
-  const placement = (() => {
-    try {
-      return resolveTaskStartPlacement({
-        entryPoint: 'sam-session-dispatch',
-        taskId,
-        projectId: input.projectId,
-        userId: ctx.userId,
-        project,
-        profile: resolvedProfile,
-        explicit: {
-          vmSize: vmSize ?? null,
-          vmSizeSource: 'task',
-          workspaceProfile: (input.workspaceProfile as WorkspaceProfile | undefined) ?? null,
-          taskMode: (input.taskMode as TaskMode | undefined) ?? null,
-          agentType: input.agentType ?? null,
-        },
-        inheritedCredentialAttribution: {
-          userId: inheritedAttributionUserId,
-          projectId: inheritedAttributionProjectId,
-          source: inheritedAttributionSource,
-        },
-        credentialProjectPolicy: 'current-project-unless-inherited',
-        taskModeDefault: 'task',
-        resourceRequirements: {
-          skill: skillResourceRequirements,
-        },
-      });
-    } catch (err) {
-      if (err instanceof PlacementResolutionError) {
-        return { error: err.message } as const;
-      }
-      throw err;
-    }
-  })();
-  if ('error' in placement) {
-    return placement;
-  }
-
-  // ── Verify cloud credentials ──────────────────────────────────────────
-  const { resolveCredentialSource } = await import('../../../services/provider-credentials');
-  const credResult = await resolveCredentialSource(
-    db,
-    placement.credentialLookup.userId,
-    placement.credentialLookup.provider,
-    placement.credentialLookup.projectId
-  );
-  if (!credResult) {
-    return { error: 'No cloud provider credentials found. The user must connect a cloud provider in Settings.' };
+  const placementResolution = await resolveTaskStartPlacementCredentialAttribution(db, {
+    entryPoint: 'sam-session-dispatch',
+    taskId,
+    projectId: input.projectId,
+    userId: ctx.userId,
+    project,
+    profile: resolvedProfile,
+    explicit: {
+      vmSize: vmSize ?? null,
+      vmSizeSource: 'task',
+      workspaceProfile: (input.workspaceProfile as WorkspaceProfile | undefined) ?? null,
+      taskMode: (input.taskMode as TaskMode | undefined) ?? null,
+      agentType: input.agentType ?? null,
+    },
+    inheritedCredentialAttribution: {
+      userId: inheritedAttributionUserId,
+      projectId: inheritedAttributionProjectId,
+      source: inheritedAttributionSource,
+    },
+    credentialProjectPolicy: 'current-project-unless-inherited',
+    taskModeDefault: 'task',
+    resourceRequirements: {
+      skill: skillResourceRequirements,
+    },
+  });
+  if ('error' in placementResolution) {
+    return placementResolution;
   }
   const {
+    placement,
     effectiveProvider,
     credentialAttributionUserId,
     credentialAttributionProjectId,
     credentialAttributionSource,
-  } = resolvePlacementCredentialAttribution(placement, credResult);
+  } = placementResolution;
   const {
     vmSize: resolvedVmSize,
     vmSizeSource,
