@@ -37,7 +37,7 @@ Compute pools Wave 2B needs an internal, idempotent service that can lazily crea
 - [x] Add a manual/backfill service helper that can ensure records for existing credentials without running a global backfill automatically.
 - [x] Add an internal helper to lazily resolve effective default pool summaries with project → user → installation precedence.
 - [x] Add tests for legacy no-pool state, idempotency, unique default per scope, scope/secret safety, candidate generation, and disabled/deleted behavior.
-- [ ] Run focused local validation, specialist reviews, and open a child PR against `sam/compute-pools-integration`.
+- [x] Run focused local validation, specialist reviews, and open a child PR against `sam/compute-pools-integration`.
 
 ## Acceptance criteria
 
@@ -59,6 +59,8 @@ Compute pools Wave 2B needs an internal, idempotent service that can lazily crea
 - `pnpm check:fast` — passed.
 - `pnpm build` — passed, 9 successful tasks.
 - `pnpm typecheck` — passed, 19 successful tasks.
+- `pnpm lint` — passed, 13 successful tasks with warning-only diagnostics in unrelated packages.
+- `pnpm test` — passed, 21 successful tasks. API: 622 files / 8,471 tests. Web: 294 files / 3,522 tests.
 - Post-review patch validation:
   - `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/default-capacity-pools.test.ts` — passed, 1 file / 7 tests.
   - `pnpm --filter @simple-agent-manager/api typecheck` — passed.
@@ -74,3 +76,9 @@ Compute pools Wave 2B needs an internal, idempotent service that can lazily crea
 | test-engineer | PASS | Added service-to-D1 vertical-slice tests using the real Wave 1A migration, realistic foreign-key rows, multiple providers/scopes, idempotency, secret safety, and disabled/deleted credential behavior. |
 
 Review hardening applied: project capacity seeds now set `ownerProjectId` from the requested `projectId` scope rather than the nullable selected column, making the project-scope invariant explicit.
+
+## Pull request
+
+- Child PR: https://github.com/raphaeltm/simple-agent-manager/pull/1949
+- Base: `sam/compute-pools-integration`
+- Head: `sam/execute-task-using-skill-v8p1qk`
