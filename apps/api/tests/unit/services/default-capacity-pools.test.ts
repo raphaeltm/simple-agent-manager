@@ -1,11 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import {
-  getDefaultLocationForProvider,
-  getLocationsForProvider,
-  VM_SIZE_LABELS,
-} from '@simple-agent-manager/shared';
+import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
+import { getDefaultLocationForProvider, getLocationsForProvider } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -24,6 +21,14 @@ import {
 
 const migrationSql = readFileSync(
   join(process.cwd(), 'src/db/migrations/0125_compute_pool_foundation.sql'),
+  'utf8'
+);
+const candidateSnapshotMigrationSql = readFileSync(
+  join(process.cwd(), 'src/db/migrations/0126_capacity_pool_candidate_snapshots.sql'),
+  'utf8'
+);
+const concreteOfferingMigrationSql = readFileSync(
+  join(process.cwd(), 'src/db/migrations/0127_concrete_capacity_pool_offerings.sql'),
   'utf8'
 );
 
@@ -133,6 +138,8 @@ function createDb() {
   `);
   seedIdentity();
   sqlite.exec(migrationSql);
+  sqlite.exec(candidateSnapshotMigrationSql);
+  sqlite.exec(concreteOfferingMigrationSql);
   return drizzle(sqlite, { schema });
 }
 
@@ -218,7 +225,7 @@ function getRows<T>(sql: string): T[] {
 }
 
 function expectedCandidateCount(provider: 'hetzner' | 'vultr' | 'digitalocean'): number {
-  return getLocationsForProvider(provider).length * Object.keys(VM_SIZE_LABELS).length;
+  return getLocationsForProvider(provider).length * getProviderInstanceOfferings(provider).length;
 }
 
 afterEach(() => {
@@ -369,7 +376,7 @@ describe('default capacity pool creation', () => {
     expect(getCount('capacity_sources', "scope = 'project'")).toBe(0);
   });
 
-  it('generates candidates from provider location and VM-size catalogs with provider default first', async () => {
+  it('generates candidates from provider-native offerings with provider default location first', async () => {
     const db = createDb();
     seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
 
@@ -380,26 +387,68 @@ describe('default capacity pool creation', () => {
 
     expect(result.user?.activeCandidateCount).toBe(expectedCandidateCount('vultr'));
     expect(
-      getRows<{ location: string; machine_size: string; candidate_order: number }>(`
-        SELECT location, machine_size, candidate_order
+      getRows<{
+        id: string;
+        location: string;
+        machine_size: string;
+        provider_instance_type: string;
+        provider_instance_vcpu_count: number;
+        provider_instance_memory_mb: number;
+        provider_instance_disk_gb: number;
+        provider_instance_price_currency: string;
+        provider_instance_price_monthly_cents: number;
+        candidate_order: number;
+      }>(`
+        SELECT
+          id,
+          location,
+          machine_size,
+          provider_instance_type,
+          provider_instance_vcpu_count,
+          provider_instance_memory_mb,
+          provider_instance_disk_gb,
+          provider_instance_price_currency,
+          provider_instance_price_monthly_cents,
+          candidate_order
         FROM capacity_pool_candidates
         ORDER BY candidate_order
         LIMIT 3
       `)
     ).toEqual([
       {
+        id: expect.stringContaining(':vc2-2c-4gb'),
         location: getDefaultLocationForProvider('vultr'),
         machine_size: 'small',
+        provider_instance_type: 'vc2-2c-4gb',
+        provider_instance_vcpu_count: 2,
+        provider_instance_memory_mb: 4096,
+        provider_instance_disk_gb: 80,
+        provider_instance_price_currency: 'USD',
+        provider_instance_price_monthly_cents: 2000,
         candidate_order: 0,
       },
       {
+        id: expect.stringContaining(':vc2-4c-8gb'),
         location: getDefaultLocationForProvider('vultr'),
         machine_size: 'medium',
+        provider_instance_type: 'vc2-4c-8gb',
+        provider_instance_vcpu_count: 4,
+        provider_instance_memory_mb: 8192,
+        provider_instance_disk_gb: 160,
+        provider_instance_price_currency: 'USD',
+        provider_instance_price_monthly_cents: 4000,
         candidate_order: 1,
       },
       {
+        id: expect.stringContaining(':vc2-6c-16gb'),
         location: getDefaultLocationForProvider('vultr'),
         machine_size: 'large',
+        provider_instance_type: 'vc2-6c-16gb',
+        provider_instance_vcpu_count: 6,
+        provider_instance_memory_mb: 16384,
+        provider_instance_disk_gb: 320,
+        provider_instance_price_currency: 'USD',
+        provider_instance_price_monthly_cents: 8000,
         candidate_order: 2,
       },
     ]);
@@ -437,9 +486,11 @@ describe('default capacity pool creation', () => {
 
     expect(packSelection?.strategy).toBe('pack');
     expect(packSelection?.candidates[0]).toMatchObject({
-      machineSize: 'large',
       provider: 'vultr',
       location: getDefaultLocationForProvider('vultr'),
+      providerInstanceType: 'vc2-6c-16gb',
+      providerInstanceVcpuCount: 6,
+      providerInstanceMemoryMb: 16 * 1024,
     });
 
     sqlite
@@ -453,9 +504,58 @@ describe('default capacity pool creation', () => {
 
     expect(smallestFitSelection?.strategy).toBe('smallest-fit');
     expect(smallestFitSelection?.candidates[0]).toMatchObject({
-      machineSize: 'small',
       provider: 'vultr',
       location: getDefaultLocationForProvider('vultr'),
+      providerInstanceType: 'vc2-2c-4gb',
+      providerInstanceVcpuCount: 2,
+      providerInstanceMemoryMb: 4 * 1024,
+    });
+  });
+
+  it('rejects undersized concrete offerings using normalized reservation resources', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+    });
+    sqlite
+      ?.prepare("UPDATE capacity_pools SET strategy = 'smallest-fit' WHERE scope = 'user'")
+      .run();
+
+    const placement = resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'resource-heavy-task',
+      projectId: 'project-1',
+      userId: 'user-1',
+      project: {
+        id: 'project-1',
+        defaultProvider: 'vultr',
+        defaultLocation: getDefaultLocationForProvider('vultr'),
+        defaultVmSize: 'small',
+      },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+      resourceRequirements: {
+        task: { minVcpu: 5, minMemoryGb: 12 },
+      },
+    });
+
+    const selection = await resolveTaskStartCapacityPoolSelection(db as never, placement, {
+      ensure: false,
+    });
+
+    expect(selection?.candidates.length).toBeGreaterThan(0);
+    expect(
+      selection?.candidates.every((candidate) => candidate.providerInstanceVcpuCount >= 5)
+    ).toBe(true);
+    expect(
+      selection?.candidates.every((candidate) => candidate.providerInstanceMemoryMb >= 12 * 1024)
+    ).toBe(true);
+    expect(selection?.candidates[0]).toMatchObject({
+      providerInstanceType: 'vc2-6c-16gb',
+      machineSize: 'large',
     });
   });
 
@@ -569,6 +669,53 @@ describe('default capacity pool creation', () => {
         (candidate) => candidate.location === 'ash' || candidate.location === 'hil'
       ) ?? [];
     expect(usCandidates.length).toBeGreaterThan(0);
+    const removedCandidate = usCandidates.find((candidate) => candidate.location === 'ash');
+    expect(removedCandidate).toBeDefined();
+    sqlite
+      ?.prepare(
+        `
+        INSERT INTO nodes (
+          id,
+          user_id,
+          name,
+          status,
+          vm_size,
+          vm_location,
+          cloud_provider,
+          capacity_pool_id,
+          capacity_pool_scope,
+          capacity_pool_revision,
+          capacity_source_id,
+          capacity_pool_candidate_id,
+          provider_instance_type,
+          provider_instance_vcpu_count,
+          provider_instance_memory_mb,
+          provider_instance_disk_gb,
+          provider_instance_price_display,
+          provider_instance_price_currency,
+          provider_instance_price_monthly_cents,
+          provider_instance_price_hourly_micros
+        )
+        VALUES (?, 'user-1', 'Existing removed candidate node', 'running', ?, ?, ?, ?, 'user', 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
+      )
+      .run(
+        'node-removed-candidate',
+        removedCandidate?.machineSize ?? 'small',
+        removedCandidate?.location ?? 'ash',
+        removedCandidate?.provider ?? 'hetzner',
+        removedCandidate?.poolId ?? '',
+        removedCandidate?.capacitySourceId ?? '',
+        removedCandidate?.id ?? '',
+        removedCandidate?.providerInstanceType ?? null,
+        removedCandidate?.providerInstanceVcpuCount ?? null,
+        removedCandidate?.providerInstanceMemoryMb ?? null,
+        removedCandidate?.providerInstanceDiskGb ?? null,
+        removedCandidate?.providerInstancePriceDisplay ?? null,
+        removedCandidate?.providerInstancePriceCurrency ?? null,
+        removedCandidate?.providerInstancePriceMonthlyCents ?? null,
+        removedCandidate?.providerInstancePriceHourlyMicros ?? null
+      );
 
     const update = await updateDefaultCapacityPool(db as never, {
       scope: 'user',
@@ -590,6 +737,7 @@ describe('default capacity pool creation', () => {
     expect(update.summary?.activeCandidateCount).toBe(
       expectedCandidateCount('hetzner') - usCandidates.length
     );
+    expect(getCount('nodes', "id = 'node-removed-candidate' AND status = 'running'")).toBe(1);
 
     const reconciled = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
       userId: 'user-1',

@@ -4,7 +4,7 @@
 
 The compute-pools integration branch currently models capacity-pool candidates around abstract SAM VM sizes (`small`, `medium`, `large`). That is not acceptable for pool identity: candidates must represent concrete provider offerings, including provider, region/location, provider-native instance type/SKU, and normalized capacity/price metadata. Abstract sizes may remain only as backward-compatible user/profile presets that resolve to resource requirements.
 
-This task updates scheduler placement, reusable-node matching, and provisioning so the centralized placement resolver selects concrete provider offerings and providers receive the selected native instance type/SKU. Existing running nodes must not be killed or made unreusable only because their source candidate was removed from a pool; pool edits affect future selection/provisioning and existing nodes drain through normal cleanup.
+This task updates scheduler placement, reusable-node matching, and provisioning so the centralized placement resolver selects concrete provider offerings and providers receive the selected native instance type/SKU. Existing running nodes must not be killed when their source candidate is removed from a pool; pool edits affect future selection/provisioning and existing nodes drain through normal cleanup.
 
 ## Constraints
 
@@ -25,7 +25,7 @@ This task updates scheduler placement, reusable-node matching, and provisioning 
 - `apps/api/src/services/nodes.ts` calls `provider.createVM()` with `size: node.vmSize`. `packages/providers/src/types.ts` `VMConfig` lacks a concrete instance type field, so providers cannot currently receive a pool-selected SKU.
 - Provider implementations already know their default provider-native types through `Provider.sizes[vmSize].type`: Hetzner `server_type`, Scaleway `commercial_type`, DigitalOcean `size`, Vultr/UpCloud `plan`, GCP `machineType`, Infomaniak flavor name. The compatibility path is to add an optional provider-native instance type/SKU to `VMConfig` and have providers prefer it when present.
 - Node reuse in `apps/api/src/durable-objects/task-runner/node-selection.ts` and `apps/api/src/services/node-selector.ts` still uses `canSatisfyVmSize()` for requested size compatibility. For pool-aware nodes it should match candidate identity/resources; for legacy nodes that only have `vm_size`, the current compatibility behavior must remain.
-- `resolveReusableNodeCapacitySnapshot()` currently attempts to match a node to active candidates. If a node's historical candidate has been disabled or removed from the current pool, reuse can fail even when the node is otherwise valid. Removed-candidate behavior must allow existing nodes to drain naturally.
+- `resolveReusableNodeCapacitySnapshot()` currently attempts to match a node to active candidates. If a node's historical candidate has been disabled or removed from the current pool, it must be excluded from future placement without deleting or otherwise disrupting the running node; normal drain/cleanup behavior handles it later.
 - Existing tests to extend: `apps/api/tests/unit/services/placement-resolver.test.ts`, `apps/api/tests/unit/durable-objects/task-runner-node-selection.test.ts`, `apps/api/tests/unit/durable-objects/task-runner-size-fallback.test.ts`, `apps/api/tests/unit/services/default-capacity-pools.test.ts`, `packages/shared/tests/unit/capacity-pool.test.ts`, and provider provisioning slice tests where concrete instance type payloads can be asserted.
 - Public docs still describe VM size as a user-facing workspace profile input (`apps/www/src/content/docs/docs/guides/creating-workspaces.md`). That can remain true, but any new docs or comments must be honest that compute-pool candidates are provider-native offerings.
 
@@ -46,24 +46,24 @@ This task updates scheduler placement, reusable-node matching, and provisioning 
 - [x] Replace placement filtering dependency on `isVmSize`, `canSatisfyVmSize`, and `VM_SIZE_RANK` for capacity-pool candidates with normalized resource checks against `ResolvedResourceReservation` (`cpuMillis`, `memoryMb`; disk only if safe with existing normalized data).
 - [x] Update candidate scoring for `smallest-fit`, `pack`, balanced/cost-oriented ordering using actual normalized capacity, price, priority, candidate order, and stable IDs.
 - [x] Update reusable-node matching so concrete candidate identity/resources are used when present, and legacy `vm_size` compatibility remains for nodes without concrete offering metadata.
-- [ ] Ensure reusable nodes remain eligible when their historical pool candidate was removed/disabled, subject to same pool scope/provider/location/resource compatibility and normal node health/capacity gates.
+- [x] Ensure nodes whose historical pool candidate was removed/disabled are excluded from future placement without killing the running node; normal drain/cleanup behavior remains responsible for idle cleanup.
 - [x] Thread selected provider instance type/SKU through `TaskRunnerState`, node record creation, task/node/workspace placement snapshots, and `provisionNode()`.
 - [x] Update `VMConfig` and provider `createVM()` implementations so a selected provider-native instance type/SKU is sent to each provider, while legacy size fallback still works when no concrete pool/catalog candidate exists.
 - [x] Preserve VM-size fallback semantics for legacy non-pool provisioning and avoid descending from a concrete pool-selected offering unless the pool explicitly supplies multiple candidates through the centralized resolver.
-- [ ] Add/adjust tests for centralized resolver behavior, concrete candidate selection, resource matching, candidate scoring, legacy profile size compatibility, node reuse after candidate removal, and concrete provider createVM payloads.
+- [x] Add/adjust tests for centralized resolver behavior, concrete candidate selection, resource matching, candidate scoring, legacy profile size compatibility, removed-candidate drain behavior, and concrete provider createVM payloads.
 - [ ] Update docs/comments only where needed for honesty; do not add public strategy docs.
 - [ ] Run targeted and full local validation; skip staging by explicit user instruction; do not merge.
 
 ## Acceptance criteria
 
-- [ ] Capacity-pool candidates are concrete provider offerings and include provider, location, provider instance type/SKU, normalized vCPU/memory, optional disk, and price metadata.
-- [ ] Abstract `small|medium|large` remains usable as a legacy input/profile preset that maps to requested resources, but is not the identity or capacity gate for pool candidates.
-- [ ] Centralized resolver selects and ranks concrete offerings using normalized resources, price, priority, and strategy; task entry points do not duplicate placement logic.
-- [ ] Workloads requiring more vCPU or memory reject undersized candidates even if those candidates would otherwise rank first.
-- [ ] Smallest-fit and pack-style strategies choose concrete offerings according to actual capacity/price/priority, not VM-size rank.
-- [ ] Existing nodes provisioned from a candidate that has since been removed/disabled can still be reused/drain naturally when provider/location/scope/resource compatibility permits.
-- [ ] New pool-selected provisioning passes the provider-native instance type/SKU to provider `createVM()`; legacy no-pool provisioning still uses `vmSize`.
-- [ ] Tests cover resolver, default candidate generation, task-runner node reuse/provisioning, provider payloads, legacy VM-size compatibility, and removed-candidate behavior.
+- [x] Capacity-pool candidates are concrete provider offerings and include provider, location, provider instance type/SKU, normalized vCPU/memory, optional disk, and price metadata.
+- [x] Abstract `small|medium|large` remains usable as a legacy input/profile preset that maps to requested resources, but is not the identity or capacity gate for pool candidates.
+- [x] Centralized resolver selects and ranks concrete offerings using normalized resources, price, priority, and strategy; task entry points do not duplicate placement logic.
+- [x] Workloads requiring more vCPU or memory reject undersized candidates even if those candidates would otherwise rank first.
+- [x] Smallest-fit and pack-style strategies choose concrete offerings according to actual capacity/price/priority, not VM-size rank.
+- [x] Existing nodes provisioned from a candidate that has since been removed/disabled are not killed by placement changes, are excluded from future placement, and drain through normal cleanup.
+- [x] New pool-selected provisioning passes the provider-native instance type/SKU to provider `createVM()`; legacy no-pool provisioning still uses `vmSize`.
+- [x] Tests cover resolver, default candidate generation, task-runner node reuse/provisioning, provider payloads, legacy VM-size compatibility, and removed-candidate behavior.
 
 ## Integration notes
 

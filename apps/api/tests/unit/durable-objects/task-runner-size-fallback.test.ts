@@ -219,6 +219,14 @@ function capacityPoolSelection(): NonNullable<TaskRunnerState['config']['capacit
     placementCredentialVersion: 42,
     capacityPoolProjectId: null,
     workloadRole: 'workspace' as const,
+    providerInstanceType: 'vc2-6c-16gb',
+    providerInstanceVcpuCount: 6,
+    providerInstanceMemoryMb: 16 * 1024,
+    providerInstanceDiskGb: 320,
+    providerInstancePriceDisplay: '~$80/mo',
+    providerInstancePriceCurrency: 'USD',
+    providerInstancePriceMonthlyCents: 8000,
+    providerInstancePriceHourlyMicros: 109589,
     placementExplanationJson: JSON.stringify({ candidate: 'candidate-user-large' }),
   };
   return {
@@ -240,6 +248,14 @@ function capacityPoolSelection(): NonNullable<TaskRunnerState['config']['capacit
         runtime: 'vm',
         machineClass: 'shared-vm',
         machineSize: 'large',
+        providerInstanceType: 'vc2-6c-16gb',
+        providerInstanceVcpuCount: 6,
+        providerInstanceMemoryMb: 16 * 1024,
+        providerInstanceDiskGb: 320,
+        providerInstancePriceDisplay: '~$80/mo',
+        providerInstancePriceCurrency: 'USD',
+        providerInstancePriceMonthlyCents: 8000,
+        providerInstancePriceHourlyMicros: 109589,
         priority: 0,
         candidateOrder: 0,
         credentialAttributionSource: 'user',
@@ -363,21 +379,25 @@ describe('TaskRunner size-fallback descent', () => {
         vmSize: 'large',
         vmLocation: 'ewr',
         cloudProvider: 'vultr',
+        providerInstanceType: 'vc2-6c-16gb',
         credentialAttributionSource: 'user',
         capacityPlacementSnapshot: expect.objectContaining({
           capacityPoolId: 'pool-user-1',
           capacitySourceId: 'source-user-1',
           capacityPoolCandidateId: 'candidate-user-large',
+          providerInstanceType: 'vc2-6c-16gb',
         }),
       })
     );
     expect(state.config.vmSize).toBe('large');
     expect(state.config.vmLocation).toBe('ewr');
     expect(state.config.cloudProvider).toBe('vultr');
+    expect(state.config.providerInstanceType).toBe('vc2-6c-16gb');
     expect(state.stepResults.capacityPlacementSnapshot).toMatchObject({
       capacityPoolId: 'pool-user-1',
       capacitySourceId: 'source-user-1',
       capacityPoolCandidateId: 'candidate-user-large',
+      providerInstanceType: 'vc2-6c-16gb',
     });
     expect(
       runCalls.find(

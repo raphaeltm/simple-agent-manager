@@ -12,6 +12,10 @@ const candidateSnapshotMigrationSql = readFileSync(
   join(process.cwd(), 'src/db/migrations/0126_capacity_pool_candidate_snapshots.sql'),
   'utf8'
 );
+const concreteOfferingMigrationSql = readFileSync(
+  join(process.cwd(), 'src/db/migrations/0127_concrete_capacity_pool_offerings.sql'),
+  'utf8'
+);
 
 let sqlite: Database.Database | null = null;
 
@@ -554,5 +558,90 @@ describe('0126_capacity_pool_candidate_snapshots migration', () => {
         )
         .get()
     ).toEqual({ capacity_pool_candidate_id: 'deleted-candidate-id' });
+  });
+});
+
+describe('0127_concrete_capacity_pool_offerings migration', () => {
+  it('adds nullable concrete offering columns without rewriting existing placement rows', () => {
+    const database = db();
+    database.exec(migrationSql);
+    database.exec(candidateSnapshotMigrationSql);
+    insertPool({ id: 'pool-primary', scope: 'user', ownerUserId: 'user-1', isDefault: 1 });
+    run(`
+      INSERT INTO capacity_sources
+        (id, scope, owner_user_id, source_kind, provider, credential_source, credential_id)
+      VALUES
+        ('source-user-credential', 'user', 'user-1', 'cloud-provider-credential', 'hetzner', 'user', 'credential-user-1')
+    `);
+    run(`
+      INSERT INTO capacity_pool_candidates
+        (id, pool_id, capacity_source_id, provider, location, workload_role, runtime, machine_class, machine_size)
+      VALUES
+        ('candidate-legacy', 'pool-primary', 'source-user-credential', 'hetzner', 'nbg1', 'workspace', 'vm', 'shared-vm', 'medium')
+    `);
+    database.exec(`
+      INSERT INTO nodes (id, user_id, name, status)
+      VALUES ('node-existing', 'user-1', 'Existing node', 'running');
+
+      INSERT INTO workspaces
+        (id, node_id, project_id, user_id, name, repository, status, vm_size, vm_location)
+      VALUES
+        ('workspace-existing', 'node-existing', 'project-1', 'user-1', 'Existing workspace', 'repo-1', 'running', 'medium', 'nbg1');
+
+      INSERT INTO tasks
+        (id, project_id, user_id, workspace_id, title, status, created_by)
+      VALUES
+        ('task-existing', 'project-1', 'user-1', 'workspace-existing', 'Existing task', 'queued', 'user-1');
+    `);
+
+    database.exec(concreteOfferingMigrationSql);
+
+    const offeringColumns = [
+      'provider_instance_type',
+      'provider_instance_vcpu_count',
+      'provider_instance_memory_mb',
+      'provider_instance_disk_gb',
+      'provider_instance_price_display',
+      'provider_instance_price_currency',
+      'provider_instance_price_monthly_cents',
+      'provider_instance_price_hourly_micros',
+    ];
+
+    for (const table of ['capacity_pool_candidates', 'nodes', 'workspaces', 'tasks']) {
+      const columns = database
+        .prepare(`PRAGMA table_info(${table})`)
+        .all()
+        .map((row) => (row as { name: string }).name);
+      for (const column of offeringColumns) {
+        expect(columns).toContain(column);
+      }
+    }
+
+    expect(
+      database
+        .prepare(
+          `
+          SELECT ${offeringColumns.join(', ')}
+          FROM capacity_pool_candidates
+          WHERE id = 'candidate-legacy'
+        `
+        )
+        .get()
+    ).toEqual(Object.fromEntries(offeringColumns.map((column) => [column, null])));
+
+    for (const table of ['nodes', 'workspaces', 'tasks']) {
+      expect(
+        database.prepare(`SELECT ${offeringColumns.join(', ')} FROM ${table} LIMIT 1`).get()
+      ).toEqual(Object.fromEntries(offeringColumns.map((column) => [column, null])));
+    }
+  });
+
+  it('contains no destructive statements', () => {
+    const sql = concreteOfferingMigrationSql.toUpperCase();
+    expect(sql).not.toContain('DROP TABLE');
+    expect(sql).not.toContain('DELETE FROM');
+    expect(sql).not.toContain('PRAGMA FOREIGN_KEYS = OFF');
+    expect(sql).toContain('ALTER TABLE CAPACITY_POOL_CANDIDATES ADD COLUMN PROVIDER_INSTANCE_TYPE');
+    expect(sql).toContain('ALTER TABLE NODES ADD COLUMN PROVIDER_INSTANCE_TYPE');
   });
 });

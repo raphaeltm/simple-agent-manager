@@ -168,6 +168,19 @@ describe('provisionNode backend DNS records', () => {
     );
   });
 
+  it('passes the concrete provider instance type from the node row to createVM', async () => {
+    (nodeRows[0] as { providerInstanceType?: string }).providerInstanceType = 'cx42';
+
+    await provisionNode('node-1', ENV);
+
+    expect(createVM).toHaveBeenCalledWith(
+      expect.objectContaining({
+        size: 'large',
+        instanceType: 'cx42',
+      })
+    );
+  });
+
   it('keeps provisioning compatible but omits ownership when identity is unavailable', async () => {
     await provisionNode('node-1', { ...ENV, SAM_INSTALLATION_ID: undefined });
 

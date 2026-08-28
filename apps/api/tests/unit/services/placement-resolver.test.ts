@@ -3,13 +3,101 @@ import { describe, expect, it } from 'vitest';
 import type {
   PlacementProfileDefaults,
   PlacementProjectDefaults,
+  TaskStartCapacityPoolSelection,
 } from '../../../src/services/placement-resolver';
 import {
   PlacementResolutionError,
   resolveEffectivePlacementRuntime,
   resolvePlacementCredentialAttribution,
+  resolveReusableNodeCapacitySnapshot,
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
+
+function reservation(overrides: Partial<ReturnType<typeof resolveTaskStartPlacement>['resolvedReservation']> = {}) {
+  return {
+    cpuMillis: 2000,
+    memoryMb: 4096,
+    diskMb: 20 * 1024,
+    exclusiveNode: false,
+    maxCoTenants: 1,
+    source: 'platform' as const,
+    sourceId: 'platform',
+    ...overrides,
+  };
+}
+
+function capacitySelection(
+  overrides: {
+    candidateId?: string;
+    providerInstanceType?: string;
+    machineSize?: 'small' | 'medium' | 'large' | null;
+    vcpuCount?: number;
+    memoryMb?: number;
+    diskGb?: number | null;
+  } = {}
+): TaskStartCapacityPoolSelection {
+  const providerInstanceType = overrides.providerInstanceType ?? 'cx32';
+  const machineSize = overrides.machineSize ?? 'large';
+  const snapshot = {
+    capacityPoolId: 'pool-user',
+    capacityPoolScope: 'user' as const,
+    capacityPoolRevision: 4,
+    capacitySourceId: 'source-user',
+    capacityPoolCandidateId: overrides.candidateId ?? 'candidate-cx32',
+    placementCredentialSource: 'user' as const,
+    placementCredentialReference: 'credentials:user-hetzner',
+    placementCredentialVersion: 1700000000000,
+    capacityPoolProjectId: null,
+    workloadRole: 'workspace' as const,
+    providerInstanceType,
+    providerInstanceVcpuCount: overrides.vcpuCount ?? 8,
+    providerInstanceMemoryMb: overrides.memoryMb ?? 16 * 1024,
+    providerInstanceDiskGb: overrides.diskGb ?? 160,
+    providerInstancePriceDisplay: '€18.49/mo',
+    providerInstancePriceCurrency: 'EUR',
+    providerInstancePriceMonthlyCents: 1849,
+    providerInstancePriceHourlyMicros: 25329,
+    placementExplanationJson: '{"kind":"capacity_pool_default"}',
+  };
+  return {
+    poolId: 'pool-user',
+    scope: 'user',
+    revision: 4,
+    strategy: 'balanced',
+    capacityPoolProjectId: null,
+    workloadRole: 'workspace',
+    poolSnapshot: { ...snapshot, capacitySourceId: null, capacityPoolCandidateId: null },
+    candidates: [
+      {
+        id: snapshot.capacityPoolCandidateId,
+        poolId: 'pool-user',
+        capacitySourceId: 'source-user',
+        provider: 'hetzner',
+        location: 'fsn1',
+        workloadRole: 'workspace',
+        runtime: 'vm',
+        machineClass: 'shared-vm',
+        machineSize,
+        providerInstanceType,
+        providerInstanceVcpuCount: snapshot.providerInstanceVcpuCount,
+        providerInstanceMemoryMb: snapshot.providerInstanceMemoryMb,
+        providerInstanceDiskGb: snapshot.providerInstanceDiskGb,
+        providerInstancePriceDisplay: snapshot.providerInstancePriceDisplay,
+        providerInstancePriceCurrency: snapshot.providerInstancePriceCurrency,
+        providerInstancePriceMonthlyCents: snapshot.providerInstancePriceMonthlyCents,
+        providerInstancePriceHourlyMicros: snapshot.providerInstancePriceHourlyMicros,
+        priority: 0,
+        candidateOrder: 0,
+        credentialAttributionSource: 'user',
+        placementCredentialSource: 'user',
+        placementCredentialReference: snapshot.placementCredentialReference,
+        placementCredentialVersion: snapshot.placementCredentialVersion,
+        capacityPoolProjectId: null,
+        snapshot,
+      },
+    ],
+  };
+}
 
 const PROJECT: PlacementProjectDefaults = {
   id: 'project-1',
@@ -438,5 +526,117 @@ describe('placement resolver parity', () => {
         resourceRequirements: {},
       })
     ).toThrow(PlacementResolutionError);
+  });
+});
+
+describe('capacity-aware reusable node resolution', () => {
+  it('matches concrete instance identity and normalized node resources before legacy vmSize', () => {
+    const selection = capacitySelection({
+      providerInstanceType: 'ccx13',
+      machineSize: 'small',
+      vcpuCount: 8,
+      memoryMb: 16 * 1024,
+    });
+
+    const snapshot = resolveReusableNodeCapacitySnapshot({
+      selection,
+      projectId: 'project-1',
+      requestedVmSize: 'large',
+      requestedReservation: reservation({ cpuMillis: 6000, memoryMb: 12 * 1024 }),
+      node: {
+        vmSize: 'small',
+        vmLocation: 'fsn1',
+        cloudProvider: 'hetzner',
+        capacityPoolId: 'pool-user',
+        capacityPoolScope: 'user',
+        capacityPoolRevision: 2,
+        capacitySourceId: 'source-user',
+        capacityPoolCandidateId: 'candidate-cx32',
+        placementCredentialSource: 'user',
+        placementCredentialReference: 'credentials:user-hetzner',
+        placementCredentialVersion: 1700000000000,
+        capacityPoolProjectId: null,
+        workloadRole: 'workspace',
+        providerInstanceType: 'ccx13',
+        providerInstanceVcpuCount: 8,
+        providerInstanceMemoryMb: 16 * 1024,
+        providerInstanceDiskGb: 160,
+      },
+    });
+
+    expect(snapshot).toMatchObject({
+      capacityPoolCandidateId: 'candidate-cx32',
+      providerInstanceType: 'ccx13',
+      providerInstanceVcpuCount: 8,
+      providerInstanceMemoryMb: 16 * 1024,
+    });
+  });
+
+  it('preserves legacy vm_size compatibility for nodes without concrete offering metadata', () => {
+    const selection = capacitySelection({
+      providerInstanceType: 'cx23',
+      machineSize: 'medium',
+      vcpuCount: 2,
+      memoryMb: 4 * 1024,
+    });
+
+    const snapshot = resolveReusableNodeCapacitySnapshot({
+      selection,
+      projectId: 'project-1',
+      requestedVmSize: 'medium',
+      requestedReservation: reservation({ cpuMillis: 2000, memoryMb: 4 * 1024 }),
+      node: {
+        vmSize: 'large',
+        vmLocation: 'fsn1',
+        cloudProvider: 'hetzner',
+        capacityPoolId: 'pool-user',
+        capacityPoolScope: 'user',
+        capacityPoolRevision: 2,
+        capacitySourceId: 'source-user',
+        capacityPoolCandidateId: null,
+        capacityPoolProjectId: null,
+        workloadRole: 'workspace',
+      },
+    });
+
+    expect(snapshot).toMatchObject({
+      capacityPoolCandidateId: 'candidate-cx32',
+      providerInstanceType: 'cx23',
+    });
+  });
+
+  it('excludes nodes whose historical concrete candidate is no longer active so they drain naturally', () => {
+    const selection = capacitySelection({
+      candidateId: 'candidate-current',
+      providerInstanceType: 'cx23',
+      machineSize: 'medium',
+      vcpuCount: 2,
+      memoryMb: 4 * 1024,
+    });
+
+    const snapshot = resolveReusableNodeCapacitySnapshot({
+      selection,
+      projectId: 'project-1',
+      requestedVmSize: 'medium',
+      requestedReservation: reservation({ cpuMillis: 2000, memoryMb: 4 * 1024 }),
+      node: {
+        vmSize: 'medium',
+        vmLocation: 'fsn1',
+        cloudProvider: 'hetzner',
+        capacityPoolId: 'pool-user',
+        capacityPoolScope: 'user',
+        capacityPoolRevision: 2,
+        capacitySourceId: 'source-user',
+        capacityPoolCandidateId: 'candidate-removed',
+        capacityPoolProjectId: null,
+        workloadRole: 'workspace',
+        providerInstanceType: 'cx22',
+        providerInstanceVcpuCount: 2,
+        providerInstanceMemoryMb: 4 * 1024,
+        providerInstanceDiskGb: 40,
+      },
+    });
+
+    expect(snapshot).toBeUndefined();
   });
 });

@@ -71,6 +71,22 @@ describe('VultrProvider createVM', () => {
     expect((createCall![1].headers as Record<string, string>).Authorization).toBe('Bearer test-token');
   });
 
+  it('uses a concrete provider instance type when supplied', async () => {
+    const fetchMock = createVultrFetchMock();
+    const provider = newProvider(fetchMock);
+
+    await provider.createVM({
+      name: 'node',
+      size: 'small',
+      instanceType: 'vc2-4c-8gb',
+      location: 'fra',
+      userData: 'x',
+    });
+
+    const body = JSON.parse(findCall(fetchMock, 'POST', /\/v2\/instances$/)![1].body as string);
+    expect(body.plan).toBe('vc2-4c-8gb');
+  });
+
   it('accepts an explicit numeric os_id via config.image without calling GET /os', async () => {
     const fetchMock = createVultrFetchMock();
     const provider = newProvider(fetchMock);

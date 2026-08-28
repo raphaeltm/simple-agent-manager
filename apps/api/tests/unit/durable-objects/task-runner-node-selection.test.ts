@@ -27,6 +27,14 @@ type D1ResultMap = {
     placement_credential_version?: number | null;
     capacity_pool_project_id?: string | null;
     workload_role?: string | null;
+    provider_instance_type?: string | null;
+    provider_instance_vcpu_count?: number | null;
+    provider_instance_memory_mb?: number | null;
+    provider_instance_disk_gb?: number | null;
+    provider_instance_price_display?: string | null;
+    provider_instance_price_currency?: string | null;
+    provider_instance_price_monthly_cents?: number | null;
+    provider_instance_price_hourly_micros?: number | null;
     placement_explanation_json?: string | null;
   } | null;
   warmNodes?: Array<{
@@ -44,6 +52,14 @@ type D1ResultMap = {
     placement_credential_version?: number | null;
     capacity_pool_project_id?: string | null;
     workload_role?: string | null;
+    provider_instance_type?: string | null;
+    provider_instance_vcpu_count?: number | null;
+    provider_instance_memory_mb?: number | null;
+    provider_instance_disk_gb?: number | null;
+    provider_instance_price_display?: string | null;
+    provider_instance_price_currency?: string | null;
+    provider_instance_price_monthly_cents?: number | null;
+    provider_instance_price_hourly_micros?: number | null;
     placement_explanation_json?: string | null;
   }>;
   freshWarmNode?: {
@@ -63,6 +79,14 @@ type D1ResultMap = {
     placement_credential_version?: number | null;
     capacity_pool_project_id?: string | null;
     workload_role?: string | null;
+    provider_instance_type?: string | null;
+    provider_instance_vcpu_count?: number | null;
+    provider_instance_memory_mb?: number | null;
+    provider_instance_disk_gb?: number | null;
+    provider_instance_price_display?: string | null;
+    provider_instance_price_currency?: string | null;
+    provider_instance_price_monthly_cents?: number | null;
+    provider_instance_price_hourly_micros?: number | null;
     placement_explanation_json?: string | null;
   } | null;
   existingNodes?: Array<{
@@ -82,6 +106,14 @@ type D1ResultMap = {
     placement_credential_version?: number | null;
     capacity_pool_project_id?: string | null;
     workload_role?: string | null;
+    provider_instance_type?: string | null;
+    provider_instance_vcpu_count?: number | null;
+    provider_instance_memory_mb?: number | null;
+    provider_instance_disk_gb?: number | null;
+    provider_instance_price_display?: string | null;
+    provider_instance_price_currency?: string | null;
+    provider_instance_price_monthly_cents?: number | null;
+    provider_instance_price_hourly_micros?: number | null;
     placement_explanation_json?: string | null;
   }>;
   workspaceCounts?: Array<{ node_id: string; c: number }>;
@@ -123,6 +155,14 @@ type PlacementRowNodeSource = {
   placement_credential_version?: number | null;
   capacity_pool_project_id?: string | null;
   workload_role?: string | null;
+  provider_instance_type?: string | null;
+  provider_instance_vcpu_count?: number | null;
+  provider_instance_memory_mb?: number | null;
+  provider_instance_disk_gb?: number | null;
+  provider_instance_price_display?: string | null;
+  provider_instance_price_currency?: string | null;
+  provider_instance_price_monthly_cents?: number | null;
+  provider_instance_price_hourly_micros?: number | null;
   placement_explanation_json?: string | null;
 };
 
@@ -147,6 +187,14 @@ function toPlacementRow(node: PlacementRowNodeSource | null | undefined) {
     placementCredentialVersion: node.placement_credential_version ?? null,
     capacityPoolProjectId: node.capacity_pool_project_id ?? null,
     workloadRole: node.workload_role ?? null,
+    providerInstanceType: node.provider_instance_type ?? null,
+    providerInstanceVcpuCount: node.provider_instance_vcpu_count ?? null,
+    providerInstanceMemoryMb: node.provider_instance_memory_mb ?? null,
+    providerInstanceDiskGb: node.provider_instance_disk_gb ?? null,
+    providerInstancePriceDisplay: node.provider_instance_price_display ?? null,
+    providerInstancePriceCurrency: node.provider_instance_price_currency ?? null,
+    providerInstancePriceMonthlyCents: node.provider_instance_price_monthly_cents ?? null,
+    providerInstancePriceHourlyMicros: node.provider_instance_price_hourly_micros ?? null,
     placementExplanationJson: node.placement_explanation_json ?? null,
     agentVersion: node.agent_version ?? null,
     healthStatus:
@@ -334,6 +382,10 @@ function capacityPoolSelection(
     provider?: 'hetzner' | 'vultr' | 'scaleway';
     location?: string;
     machineSize?: 'small' | 'medium' | 'large';
+    providerInstanceType?: string;
+    vcpuCount?: number;
+    memoryMb?: number;
+    diskGb?: number | null;
   } = {}
 ): TaskStartCapacityPoolSelection {
   const poolId = overrides.poolId ?? `pool-${scope}`;
@@ -343,6 +395,22 @@ function capacityPoolSelection(
   const provider = overrides.provider ?? 'hetzner';
   const location = overrides.location ?? 'fsn1';
   const machineSize = overrides.machineSize ?? 'large';
+  const providerInstanceType =
+    overrides.providerInstanceType ??
+    ({ small: 'cx22', medium: 'cx23', large: 'cx32' } satisfies Record<string, string>)[
+      machineSize
+    ];
+  const providerInstanceVcpuCount =
+    overrides.vcpuCount ?? ({ small: 2, medium: 2, large: 8 } satisfies Record<string, number>)[
+      machineSize
+    ];
+  const providerInstanceMemoryMb =
+    overrides.memoryMb ??
+    ({ small: 4096, medium: 4096, large: 16384 } satisfies Record<string, number>)[machineSize];
+  const providerInstanceDiskGb =
+    overrides.diskGb ?? ({ small: 40, medium: 80, large: 160 } satisfies Record<string, number>)[
+      machineSize
+    ];
   const placementCredentialSource = scope === 'installation' ? 'platform' : scope;
   const snapshot = {
     capacityPoolId: poolId,
@@ -358,10 +426,19 @@ function capacityPoolSelection(
     placementCredentialVersion: 123,
     capacityPoolProjectId: projectId,
     workloadRole: 'workspace' as const,
+    providerInstanceType,
+    providerInstanceVcpuCount,
+    providerInstanceMemoryMb,
+    providerInstanceDiskGb,
+    providerInstancePriceDisplay: '€18.49/mo',
+    providerInstancePriceCurrency: 'EUR',
+    providerInstancePriceMonthlyCents: 1849,
+    providerInstancePriceHourlyMicros: 25329,
     placementExplanationJson: JSON.stringify({
       poolId,
       capacitySourceId: sourceId,
       capacityPoolCandidateId: candidateId,
+      providerInstanceType,
     }),
   };
   return {
@@ -383,6 +460,14 @@ function capacityPoolSelection(
         runtime: 'vm',
         machineClass: 'shared-vm',
         machineSize,
+        providerInstanceType,
+        providerInstanceVcpuCount,
+        providerInstanceMemoryMb,
+        providerInstanceDiskGb,
+        providerInstancePriceDisplay: snapshot.providerInstancePriceDisplay,
+        providerInstancePriceCurrency: snapshot.providerInstancePriceCurrency,
+        providerInstancePriceMonthlyCents: snapshot.providerInstancePriceMonthlyCents,
+        providerInstancePriceHourlyMicros: snapshot.providerInstancePriceHourlyMicros,
         priority: 0,
         candidateOrder: 0,
         credentialAttributionSource: placementCredentialSource,
@@ -410,6 +495,14 @@ function nodeCapacityFields(selection: TaskStartCapacityPoolSelection) {
     placement_credential_version: candidate.placementCredentialVersion,
     capacity_pool_project_id: candidate.capacityPoolProjectId,
     workload_role: candidate.workloadRole,
+    provider_instance_type: candidate.providerInstanceType,
+    provider_instance_vcpu_count: candidate.providerInstanceVcpuCount,
+    provider_instance_memory_mb: candidate.providerInstanceMemoryMb,
+    provider_instance_disk_gb: candidate.providerInstanceDiskGb,
+    provider_instance_price_display: candidate.providerInstancePriceDisplay,
+    provider_instance_price_currency: candidate.providerInstancePriceCurrency,
+    provider_instance_price_monthly_cents: candidate.providerInstancePriceMonthlyCents,
+    provider_instance_price_hourly_micros: candidate.providerInstancePriceHourlyMicros,
     placement_explanation_json: candidate.snapshot.placementExplanationJson,
   };
 }
@@ -678,6 +771,69 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
     await handleNodeSelection(state, rc);
 
     expect(state.stepResults.nodeId).toBe('node-large');
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+  });
+
+  it('selects a concrete pool node when normalized resources satisfy the task despite legacy vm_size', async () => {
+    const selection = capacityPoolSelection('user', {
+      poolId: 'pool-user-concrete',
+      sourceId: 'source-user-concrete',
+      candidateId: 'candidate-ccx13',
+      machineSize: 'small',
+      providerInstanceType: 'ccx13',
+      vcpuCount: 8,
+      memoryMb: 16 * 1024,
+      diskGb: 160,
+    });
+    const state = createState({
+      config: {
+        ...createState().config,
+        vmSize: 'large',
+        capacityPoolSelection: selection,
+        resolvedReservation: {
+          cpuMillis: 6000,
+          memoryMb: 12 * 1024,
+          diskMb: 80 * 1024,
+          exclusiveNode: false,
+          maxCoTenants: 1,
+          source: 'task',
+          sourceId: 'task-1',
+        },
+      },
+    });
+    const now = new Date().toISOString();
+    const rc = createContext({
+      existingNodes: [
+        {
+          id: 'node-concrete-small-legacy',
+          vm_size: 'small',
+          vm_location: 'fsn1',
+          health_status: 'healthy',
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 5, memoryPercent: 5 }),
+          agent_version: 'current-sha',
+          ...nodeCapacityFields(selection),
+        },
+      ],
+      healthByNode: {
+        'node-concrete-small-legacy': {
+          health_status: 'healthy',
+          last_heartbeat_at: now,
+          agent_ready_at: now,
+          agent_version: 'current-sha',
+        },
+      },
+    });
+
+    await handleNodeSelection(state, rc);
+
+    expect(state.stepResults.nodeId).toBe('node-concrete-small-legacy');
+    expect(state.stepResults.capacityPlacementSnapshot).toMatchObject({
+      capacityPoolId: 'pool-user-concrete',
+      capacityPoolCandidateId: 'candidate-ccx13',
+      providerInstanceType: 'ccx13',
+      providerInstanceVcpuCount: 8,
+      providerInstanceMemoryMb: 16 * 1024,
+    });
     expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
   });
 

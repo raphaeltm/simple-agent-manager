@@ -69,8 +69,8 @@ export {
   DEFAULT_DIGITALOCEAN_IP_POLL_TIMEOUT_MS,
   DEFAULT_DIGITALOCEAN_MAX_LIST_PAGES,
   DEFAULT_DIGITALOCEAN_REQUEST_TIMEOUT_MS,
-  DIGITALOCEAN_SIZE_CONFIGS,
   DIGITALOCEAN_LOCATIONS,
+  DIGITALOCEAN_SIZE_CONFIGS,
   DigitalOceanProvider,
   extractPublicIp,
   mapDigitalOceanStatus,
@@ -119,13 +119,20 @@ export {
   DEFAULT_INFOMANIAK_REQUEST_TIMEOUT_MS,
   DEFAULT_INFOMANIAK_VOLUME_TYPE,
   INFOMANIAK_LOCATIONS,
-  INFOMANIAK_VOLUME_CAPABILITIES,
   INFOMANIAK_SIZE_CONFIGS,
+  INFOMANIAK_VOLUME_CAPABILITIES,
   INFOMANIAK_VOLUME_MAX_SIZE_GB,
   INFOMANIAK_VOLUME_MIN_SIZE_GB,
   InfomaniakProvider,
   mapInfomaniakStatus,
 } from './infomaniak';
+export {
+  getProviderInstanceOfferingForLegacySize,
+  getProviderInstanceOfferings,
+  type NormalizedProviderPrice,
+  normalizeProviderPrice,
+  type ProviderInstanceOffering,
+} from './instance-offerings';
 export {
   classifyScalewayError,
   SCALEWAY_LOCATIONS,
@@ -167,13 +174,6 @@ export {
   VultrProvider,
 } from './vultr';
 export { VULTR_VOLUME_MAX_SIZE_GB, VULTR_VOLUME_MIN_SIZE_GB } from './vultr-volumes';
-export {
-  getProviderInstanceOfferingForLegacySize,
-  getProviderInstanceOfferings,
-  normalizeProviderPrice,
-  type NormalizedProviderPrice,
-  type ProviderInstanceOffering,
-} from './instance-offerings';
 
 /**
  * Create a provider instance from explicit configuration.

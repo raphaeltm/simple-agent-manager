@@ -1,3 +1,7 @@
+import {
+  getProviderInstanceOfferings,
+  type ProviderInstanceOffering,
+} from '@simple-agent-manager/providers';
 import type {
   CapacityPool as CapacityPoolDto,
   CapacityPoolCandidate as CapacityPoolCandidateDto,
@@ -7,10 +11,6 @@ import type {
   DefaultCapacityPoolSummary,
 } from '@simple-agent-manager/shared';
 import { isValidProvider } from '@simple-agent-manager/shared';
-import {
-  getProviderInstanceOfferings,
-  type ProviderInstanceOffering,
-} from '@simple-agent-manager/providers';
 import { and, asc, eq, isNotNull, isNull, notInArray, sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
