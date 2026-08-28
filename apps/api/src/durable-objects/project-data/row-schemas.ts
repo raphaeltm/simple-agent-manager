@@ -24,7 +24,11 @@ export {
   parseMinEarliest,
   parseWorkspaceId,
 } from './row-schemas/aggregates';
-export { parseAttentionExpiryRow, parseAttentionMarkerRow, parseAttentionSummaryRow } from './row-schemas/attention';
+export {
+  parseAttentionExpiryRow,
+  parseAttentionMarkerRow,
+  parseAttentionSummaryRow,
+} from './row-schemas/attention';
 export {
   parseCheckpointEpisodeRow,
   parseCheckpointProgressEnvelope,
@@ -39,7 +43,12 @@ export {
   parseKnowledgeRelationRow,
 } from './row-schemas/knowledge';
 export { parseInboxMessageRow, parseMailboxMessageRow } from './row-schemas/mailbox';
-export { parseMaterializationCheck, parseMaterializationToken, parseRowid, parseSessionId } from './row-schemas/materialization';
+export {
+  parseMaterializationCheck,
+  parseMaterializationToken,
+  parseRowid,
+  parseSessionId,
+} from './row-schemas/materialization';
 export {
   type CompactMessageOptions,
   DEFAULT_DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES,
@@ -52,4 +61,16 @@ export {
 export { parseMetaValue, parseMigrationName } from './row-schemas/meta';
 export { parseHandoffPacketRow, parseMissionStateEntryRow } from './row-schemas/missions';
 export { parsePolicyRow } from './row-schemas/policies';
-export { parseChatSessionListRow, parseSessionStatus, parseSessionStop } from './row-schemas/sessions';
+export {
+  parseProjectEventDeliveryAttemptRow,
+  parseProjectEventDeliveryBatchRow,
+  parseProjectEventMatchRow,
+  parseProjectEventRow,
+  parseProjectEventStorageAccountingRow,
+  parseProjectEventSubscriptionRow,
+} from './row-schemas/project-events';
+export {
+  parseChatSessionListRow,
+  parseSessionStatus,
+  parseSessionStop,
+} from './row-schemas/sessions';
