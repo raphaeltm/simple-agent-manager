@@ -291,7 +291,7 @@ async function ensureProjectDefaultPool(
         {
           scope: 'project',
           ownerUserId: null,
-          ownerProjectId: row.projectId,
+          ownerProjectId: projectId,
           id: row.id,
           provider: row.provider,
           active: row.isActive,

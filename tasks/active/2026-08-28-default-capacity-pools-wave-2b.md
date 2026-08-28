@@ -59,3 +59,18 @@ Compute pools Wave 2B needs an internal, idempotent service that can lazily crea
 - `pnpm check:fast` — passed.
 - `pnpm build` — passed, 9 successful tasks.
 - `pnpm typecheck` — passed, 19 successful tasks.
+- Post-review patch validation:
+  - `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/default-capacity-pools.test.ts` — passed, 1 file / 7 tests.
+  - `pnpm --filter @simple-agent-manager/api typecheck` — passed.
+
+## Specialist review notes
+
+| Reviewer | Status | Outcome |
+| --- | --- | --- |
+| task-completion-validator | PASS | Research findings, checked checklist items, and acceptance criteria map to the diff and validation evidence. Remaining unchecked item is the PR-opening step. No UI-to-backend path applies because this slice intentionally adds an unwired internal service. |
+| cloudflare-specialist | PASS | D1 usage is Drizzle/SQLite-compatible, uses existing Wave 1A schema and indexes, avoids new migrations, and keeps candidate generation bounded to shared static catalogs. No KV/R2/wrangler/deployment changes. |
+| security-auditor | PASS | Production service does not read, decrypt, log, or copy credential secrets. Capacity sources persist only credential IDs, non-secret references, provider identity, status, and timestamp-derived version metadata. |
+| constitution-validator | PASS | No new URLs, timeouts, retry delays, quotas, or deployment-specific identifiers. Default literals are schema/shared-contract values for the new capacity-pool records. |
+| test-engineer | PASS | Added service-to-D1 vertical-slice tests using the real Wave 1A migration, realistic foreign-key rows, multiple providers/scopes, idempotency, secret safety, and disabled/deleted credential behavior. |
+
+Review hardening applied: project capacity seeds now set `ownerProjectId` from the requested `projectId` scope rather than the nullable selected column, making the project-scope invariant explicit.
