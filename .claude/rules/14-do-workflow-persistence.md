@@ -43,12 +43,17 @@ Phase 1: Research & Task Creation
 - [ ] Phase 4: Pre-PR Validation
 - [ ] Phase 5: Review
 - [ ] Phase 6: Staging Verification
-- [ ] Phase 7: Pull Request & Post-Merge Deploy Monitoring
+- [ ] Phase 7: Pull Request, CodeRabbit Review & Post-Merge Deploy Monitoring
 
 ## Phase 5: Review Tracker
 
 <populated when Phase 5 starts — one line per local reviewer>
 <Phase 5 is NOT complete until every entry shows PASS or ADDRESSED>
+
+## Phase 7: CodeRabbit Review Tracker
+
+<populated when CodeRabbit review is requested — include request comments, unresolved findings, fix commits, repeat-review requests, and final no-unresolved-feedback status>
+<Phase 7 is NOT merge-ready until the latest CodeRabbit review has no unresolved feedback and the agent agrees the PR is ready>
 
 ## Implementation Progress
 
@@ -112,12 +117,13 @@ fallback bounded and record it in the workflow state file.
 | Repeating already-done work                           | Checked items + notes show what's been accomplished                                                          |
 | Jumping to PR creation early                          | Phase checklist enforces ordering                                                                            |
 | Merging before reviewers finish                       | Review Tracker blocks Phase 5 completion until all reviewers report back                                     |
+| Forgetting unresolved CodeRabbit feedback             | Phase 7 CodeRabbit Review Tracker records requests, fix commits, repeat reviews, and final agreement         |
 | Silently failing production deploy                    | Phase 7 checklist includes deploy monitoring — task is not complete until deploy succeeds or user is alerted |
 | Harness poller disappears after ACP prompt completion | Durable wait subscription wakes the parent through SAM-owned delivery                                        |
 
 ## Cleanup
 
-Delete `.do-state.md` at the end of Phase 7 (after PR merge, deploy monitoring, and worktree cleanup). It's gitignored, so even if you forget, it won't pollute the repo.
+Delete `.do-state.md` at the end of Phase 7 (after CodeRabbit review completion, PR merge, deploy monitoring, and worktree cleanup). It's gitignored, so even if you forget, it won't pollute the repo.
 
 ## Phase 5 → Phase 6 Transition Guard
 
@@ -161,7 +167,7 @@ When the reviewer finds issues deferred to backlog:
 
 `.do-state.md` is gitignored and lives in the worktree. It is destroyed when the workspace is killed. The PR description, by contrast, is durable — it lives on GitHub and is visible to humans.
 
-**When you create the PR in Phase 7, you MUST copy the Review Tracker into the PR description's "Specialist Review Evidence" table.** This is the authoritative record. If `.do-state.md` is lost (workspace killed, worktree removed), the PR description is what humans will use to verify whether reviews were actually completed.
+**When you create the PR in Phase 7, you MUST copy the Review Tracker into the PR description's "Specialist Review Evidence" table and maintain the PR template's "CodeRabbit Review Evidence" section.** This is the authoritative record. If `.do-state.md` is lost (workspace killed, worktree removed), the PR description is what humans will use to verify whether reviews were actually completed.
 
 If you cannot populate the PR's review table because you've lost track of reviewer state (context compaction, workspace killed), you MUST add the `needs-human-review` label and stop. See `.claude/rules/25-review-merge-gate.md`.
 
