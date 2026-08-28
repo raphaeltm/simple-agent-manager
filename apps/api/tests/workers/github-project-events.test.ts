@@ -1,8 +1,11 @@
 import { env } from 'cloudflare:test';
+import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 
 import type { Env } from '../../src/env';
+import { handleGitHubWebhook } from '../../src/routes/github-webhook';
 import { admitGitHubWebhookProjectEvents } from '../../src/services/github-project-event-producer';
+import { __resetPlatformConfigCacheForTest } from '../../src/services/platform-config';
 import * as projectDataService from '../../src/services/project-data';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 
@@ -70,7 +73,82 @@ function pullRequestPayload(
   };
 }
 
+async function githubWebhookSignature(secret: string, body: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(body));
+  return `sha256=${Array.from(new Uint8Array(signature))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')}`;
+}
+
 describe('GitHub ProjectData event producer', () => {
+  it('admits signed webhook route events through the producer into ProjectData', async () => {
+    const { projectId } = await seedProjectGraph('signed-route', {
+      repository: 'acme/signed-route',
+      githubRepoId: 9101,
+    });
+    const payload = pullRequestPayload({
+      repositoryFullName: 'acme/signed-route',
+      repositoryId: 9101,
+    });
+    const body = JSON.stringify(payload);
+    const webhookSecret = 'test-webhook-secret';
+    const mutableEnv = testEnv as Env & { GITHUB_WEBHOOK_SECRET?: string };
+    const previousWebhookSecret = mutableEnv.GITHUB_WEBHOOK_SECRET;
+    mutableEnv.GITHUB_WEBHOOK_SECRET = webhookSecret;
+    __resetPlatformConfigCacheForTest();
+
+    try {
+      const app = new Hono<{ Bindings: Env }>();
+      app.post('/api/github/webhook', handleGitHubWebhook);
+      const waitUntilPromises: Promise<unknown>[] = [];
+
+      const response = await app.fetch(
+        new Request('https://api.test.local/api/github/webhook', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-github-delivery': 'delivery-signed-route',
+            'x-github-event': 'pull_request',
+            'x-hub-signature-256': await githubWebhookSignature(webhookSecret, body),
+          },
+          body,
+        }),
+        mutableEnv,
+        {
+          waitUntil: (promise) => waitUntilPromises.push(promise),
+          passThroughOnException: () => undefined,
+        } as ExecutionContext
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ received: true });
+      expect(waitUntilPromises).toHaveLength(2);
+      await expect(Promise.all(waitUntilPromises)).resolves.toEqual([undefined, undefined]);
+
+      const status = await projectDataService.getProjectEventRecentStatus(testEnv, projectId);
+      expect(status.events).toEqual([
+        expect.objectContaining({
+          source: 'github',
+          eventType: 'pull_request.opened',
+          deliveryKey: 'delivery:delivery-signed-route',
+          subject: { type: 'pull_request', id: '42' },
+          rawPayloadRef: null,
+        }),
+      ]);
+    } finally {
+      mutableEnv.GITHUB_WEBHOOK_SECRET = previousWebhookSecret;
+      __resetPlatformConfigCacheForTest();
+    }
+  });
+
   it('admits pull request webhooks into project-scoped ProjectData events and subscription matches', async () => {
     const { projectId } = await seedProjectGraph('pull-request', {
       repository: 'acme/pr-events',
