@@ -32,7 +32,7 @@ Wave 1A needs the durable D1/Drizzle foundation for compute/node pools without c
 - [x] Add type/mapper tests covering source identity and placement snapshot shape.
 - [x] Run focused local tests for the new migration/types.
 - [x] Run CI-oriented local validation without staging.
-- [ ] Open child PR against `sam/compute-pools-integration`.
+- [x] Open child PR against `sam/compute-pools-integration`.
 
 ## Acceptance criteria
 
@@ -64,6 +64,7 @@ Wave 1A needs the durable D1/Drizzle foundation for compute/node pools without c
 - `pnpm check:fast` — passed.
 - `pnpm build` — passed.
 - `git diff --check` — passed.
+- Child PR opened against `sam/compute-pools-integration`: https://github.com/raphaeltm/simple-agent-manager/pull/1946.
 
 ## Review notes
 
@@ -71,4 +72,4 @@ Wave 1A needs the durable D1/Drizzle foundation for compute/node pools without c
 - `$constitution-validator`: PASS — no new URLs, timeouts, runtime limits, issuer/audience IDs, or deployment-specific values were added; schema enum/check values are domain invariants.
 - `$test-engineer`: PASS — new migration/schema tests cover legacy-null snapshots, scope/default uniqueness, credential-source constraints, candidates/fallbacks, and destructive-statement guard; mapper/shared tests cover type guards and fail-closed invalid persisted values.
 - `$security-auditor`: PASS — capacity sources only reference `credentials`/`platform_credentials`; no token/IV/secret columns were added to pool tables; mapper and shared DTO tests assert no secret-shaped fields.
-- `$task-completion-validator`: PASS — all research findings and checked checklist items are represented in the diff; acceptance criteria are covered by local tests/validation except PR opening, which remains pending.
+- `$task-completion-validator`: PASS — all research findings, checked checklist items, and acceptance criteria are represented in the diff, local validation, and child PR.
