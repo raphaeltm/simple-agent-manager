@@ -7,6 +7,7 @@ import type {
   ProjectEventDeliveryBatchMutationResult,
 } from '@simple-agent-manager/shared';
 
+import { createModuleLogger } from '../../lib/logger';
 import {
   type CreateProjectEventDeliveryBatchInput,
   ProjectEventIdempotencyConflictError,
@@ -54,8 +55,11 @@ import {
 import type { Env } from './types';
 import { generateId } from './types';
 
+const log = createModuleLogger('project_data.project_events_delivery');
+
 const TERMINAL_BATCH_STATES = new Set([
   'recorded_not_injected',
+  'delivered',
   'acked',
   'failed',
   'ambiguous',
@@ -102,6 +106,16 @@ export function createProjectEventDeliveryBatch(
   );
   if (matchRows.length !== normalized.matchIds.length) {
     throw new ProjectEventNotFoundError('Event match');
+  }
+  const assignedMatch = matchRows.find((match) => match.batchId !== null);
+  if (assignedMatch) {
+    log.warn('match_reassignment_rejected', {
+      projectId: normalized.projectId,
+      subscriptionId: normalized.subscriptionId,
+      matchId: assignedMatch.id,
+      existingBatchId: assignedMatch.batchId,
+    });
+    throw new ProjectEventValidationError('Event match already belongs to a delivery batch');
   }
   const events = readEventsForMatches(
     sql,

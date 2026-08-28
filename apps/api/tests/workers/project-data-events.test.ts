@@ -188,6 +188,24 @@ describe('ProjectData event subscription core', () => {
     expect(replay.idempotent).toBe(true);
     expect(replay.batch.id).toBe(batch.batch.id);
 
+    const duplicateBatch = await captureProjectDataExpectedError(getStub(projectId), {
+      operation: 'createProjectEventDeliveryBatch',
+      args: [
+        {
+          projectId,
+          subscriptionId: subscription.subscription.id,
+          matchIds: [admitted.matches[0].id],
+          idempotencyKey: 'batch-duplicate-match',
+          requestedDelivery: 'existing_session_prompt',
+        },
+      ],
+    });
+    expect(duplicateBatch).toMatchObject({
+      threw: true,
+      code: 'PROJECT_EVENT_VALIDATION',
+    });
+    expect(duplicateBatch.message).toMatch(/already belongs to a delivery batch/);
+
     const secondAdmitted = await svc.admitProjectEvent(
       testEnv,
       projectId,
@@ -445,6 +463,84 @@ describe('ProjectData event subscription core', () => {
         ).toMatchObject({
           state: 'batch_created',
         });
+
+        const terminalProject = 'project-events-retention-prunes-terminal-batches';
+        const terminalSubscription = await svc.createProjectEventSubscription(
+          testEnv,
+          terminalProject,
+          subscriptionInput('sub-terminal-retention')
+        );
+        const terminalEvent = await svc.admitProjectEvent(
+          testEnv,
+          terminalProject,
+          eventInput({ receivedAt: 1000, occurredAt: 1000 })
+        );
+        const terminalBatch = await svc.createProjectEventDeliveryBatch(testEnv, terminalProject, {
+          subscriptionId: terminalSubscription.subscription.id,
+          matchIds: [terminalEvent.matches[0].id],
+          idempotencyKey: 'terminal-batch-retention',
+          adapterCapabilities: [durableQueueCapability()],
+          authorization: { allowPromptQueue: true },
+        });
+        await svc.recordProjectEventDeliveryAttempt(testEnv, terminalProject, {
+          batchId: terminalBatch.batch.id,
+          idempotencyKey: 'terminal-attempt-retention',
+          state: 'accepted',
+          adapter: 'durable-queue-test',
+        });
+        const retryAfterDelivered = await captureProjectDataExpectedError(
+          getStub(terminalProject),
+          {
+            operation: 'recordProjectEventDeliveryAttempt',
+            args: [
+              {
+                projectId: terminalProject,
+                batchId: terminalBatch.batch.id,
+                idempotencyKey: 'terminal-attempt-retry',
+                state: 'retry',
+                adapter: 'durable-queue-test',
+              },
+            ],
+          }
+        );
+        expect(retryAfterDelivered).toMatchObject({
+          threw: true,
+          code: 'PROJECT_EVENT_VALIDATION',
+        });
+        await runInDurableObject(getStub(terminalProject), async (_instance, state) => {
+          state.storage.sql.exec(
+            `UPDATE project_event_delivery_batches
+             SET state = 'delivered',
+                 updated_at = 1000,
+                 terminal_at = 1000,
+                 terminal_reason = 'delivered'
+             WHERE id = ?`,
+            terminalBatch.batch.id
+          );
+          state.storage.sql.exec(
+            `UPDATE project_event_delivery_attempts
+             SET created_at = 1000,
+                 started_at = 1000,
+                 completed_at = 1000
+             WHERE batch_id = ?`,
+            terminalBatch.batch.id
+          );
+        });
+        const terminalRetention = await svc.runProjectEventRetention(testEnv, terminalProject, {
+          now: 3 * 24 * 60 * 60 * 1000,
+          limit: 10,
+        });
+        expect(terminalRetention).toMatchObject({
+          deletedEvents: 1,
+          deletedMatches: 1,
+          deletedBatches: 1,
+          deletedAttempts: 1,
+        });
+        const terminalStatus = await svc.getProjectEventRecentStatus(testEnv, terminalProject);
+        expect(terminalStatus.events).toHaveLength(0);
+        expect(terminalStatus.matches).toHaveLength(0);
+        expect(terminalStatus.batches).toHaveLength(0);
+        expect(terminalStatus.attempts).toHaveLength(0);
       }
     );
   });
@@ -544,6 +640,23 @@ describe('ProjectData event subscription core', () => {
       attempt: { state: 'ambiguous' },
       batch: { state: 'ambiguous' },
     });
+    const replayAfterTerminal = await captureProjectDataExpectedError(stub, {
+      operation: 'recordProjectEventDeliveryAttempt',
+      args: [
+        {
+          projectId,
+          batchId: batch.batch.id,
+          idempotencyKey: 'attempt-after-terminal',
+          state: 'retry',
+          adapter: 'runtime-adapter-test',
+        },
+      ],
+    });
+    expect(replayAfterTerminal).toMatchObject({
+      threw: true,
+      code: 'PROJECT_EVENT_VALIDATION',
+    });
+    expect(replayAfterTerminal.message).toMatch(/terminal delivery batch/);
     expect(await sessionInboxCount(projectId)).toBe(0);
   });
 

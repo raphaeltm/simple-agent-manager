@@ -30,6 +30,9 @@ import { normalizeTimestamp } from './project-events-values';
 import type { Env } from './types';
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+const TERMINAL_BATCH_STATES_SQL =
+  "'recorded_not_injected', 'delivered', 'acked', 'failed', 'ambiguous', 'expired', 'cancelled'";
+const TERMINAL_MATCH_STATES_SQL = "'recorded_not_injected', 'expired', 'cancelled'";
 
 export function getProjectEventRecentStatus(
   sql: SqlStorage,
@@ -115,16 +118,6 @@ export function runProjectEventRetention(
     limit: batchLimit,
     extraWhere: "AND state IN ('recorded_not_injected', 'accepted', 'failed', 'ambiguous')",
   });
-  const deletedBatches = deleteOldRows({
-    sql,
-    table: 'project_event_delivery_batches',
-    projectId,
-    timestampColumn: 'updated_at',
-    cutoff,
-    limit: batchLimit,
-    extraWhere:
-      "AND state IN ('recorded_not_injected', 'acked', 'failed', 'ambiguous', 'expired', 'cancelled')",
-  });
   const deletedMatches = deleteOldRows({
     sql,
     table: 'project_event_matches',
@@ -132,7 +125,30 @@ export function runProjectEventRetention(
     timestampColumn: 'matched_at',
     cutoff,
     limit: batchLimit,
-    extraWhere: "AND state IN ('recorded_not_injected', 'expired', 'cancelled')",
+    extraWhere: `AND (
+      state IN (${TERMINAL_MATCH_STATES_SQL})
+      OR (
+        state = 'batch_created'
+        AND batch_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM project_event_delivery_batches b
+          WHERE b.project_id = project_event_matches.project_id
+            AND b.id = project_event_matches.batch_id
+            AND b.updated_at < ?
+            AND b.state IN (${TERMINAL_BATCH_STATES_SQL})
+        )
+      )
+    )`,
+    extraParams: [cutoff],
+  });
+  const deletedBatches = deleteOldRows({
+    sql,
+    table: 'project_event_delivery_batches',
+    projectId,
+    timestampColumn: 'updated_at',
+    cutoff,
+    limit: batchLimit,
+    extraWhere: `AND state IN (${TERMINAL_BATCH_STATES_SQL})`,
   });
   const deletedEvents = deleteOldEventsWithoutMatches(sql, projectId, cutoff, batchLimit);
   const accounting = refreshProjectEventStorageAccounting(sql, projectId, now);
