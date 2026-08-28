@@ -15,6 +15,19 @@ const CLASSIFICATIONS = [
   'infra-change',
 ] as const;
 
+const SCREENSHOT_LINK_PATTERN =
+  /!\[[^\]]+\]\([^)]+\)|https?:\/\/\S+\.(?:png|jpg|jpeg|webp)(?:\?\S*)?|#issuecomment-\d+/i;
+
+const SURFACE_HEADING_PATTERN = /^#{4,6}\s+Surface:\s+(.+)\s*$/i;
+
+const STRESS_DATA_PATTERN =
+  /\b(mock|edge|stress|long text|many items|empty|error|special characters|push(?:es|ed)? the limits)\b/i;
+
+const QC_REVIEW_PATTERN = /\b(reviewed|inspected)\b/i;
+
+const QC_RESULT_PATTERN =
+  /\b(no issues|no visual issues|quality|overflow|clipping|layout|found|fixed|documented)\b/i;
+
 function fail(message: string): never {
   console.error(`\nPreflight evidence check failed:\n- ${message}\n`);
   process.exit(1);
@@ -75,6 +88,43 @@ function getCheckedClasses(block: string): string[] {
     const pattern = new RegExp(`- \\[[xX]\\] ${escapeRegExp(classification)}`, 'i');
     return pattern.test(block);
   });
+}
+
+/**
+ * Splits the `UI Screenshot Evidence` section into per-surface blocks. Each block
+ * starts at a `#### Surface: <name>` heading and runs until the next such heading.
+ * Returns an empty array when the section does not enumerate surfaces, which the
+ * caller treats as an invalid global-only evidence layout.
+ */
+function extractSurfaceBlocks(section: string): Array<{ name: string; block: string }> {
+  const lines = section.split('\n');
+  const headings: Array<{ index: number; name: string }> = [];
+  for (const [index, line] of lines.entries()) {
+    const match = line.match(SURFACE_HEADING_PATTERN);
+    if (match) headings.push({ index, name: match[1].trim() });
+  }
+  if (headings.length === 0) return [];
+
+  return headings.map((heading, i) => ({
+    name: heading.name,
+    block: lines
+      .slice(heading.index + 1, headings[i + 1]?.index)
+      .join('\n')
+      .trim(),
+  }));
+}
+
+/**
+ * Returns the single-line value of a `- <label>: <value>` field inside a surface
+ * block. Returns an empty string when the field is absent or has no value.
+ */
+function getSurfaceFieldValue(block: string, label: string): string {
+  const pattern = new RegExp(`-\\s*${escapeRegExp(label)}\\s*:\\s*(.+)\\s*$`, 'im');
+  for (const line of block.split('\n')) {
+    const match = line.match(pattern);
+    if (match) return match[1].trim();
+  }
+  return '';
 }
 
 function isExplicitNA(content: string): boolean {
@@ -204,63 +254,52 @@ function main(): void {
     const uiScreenshots = getMarkdownSectionContent(body, 'UI Screenshot Evidence');
     if (!uiScreenshots || isExplicitNA(uiScreenshots)) {
       failures.push(
-        'ui-change requires a filled "UI Screenshot Evidence" section with desktop/mobile Playwright screenshots and review attestation.'
+        'ui-change requires a filled "UI Screenshot Evidence" section with per-surface desktop/mobile Playwright screenshots and review attestation.'
       );
     } else {
-      const screenshotLinkPattern =
-        /!\[[^\]]+\]\([^)]+\)|https?:\/\/\S+\.(?:png|jpg|jpeg|webp)(?:\?\S*)?|#issuecomment-\d+/i;
-      const hasDesktop = /\bdesktop\b/i.test(uiScreenshots);
-      const hasMobile = /\bmobile\b/i.test(uiScreenshots);
-      const hasPlaywright = /\bplaywright\b/i.test(uiScreenshots);
-      const hasStressData =
-        /\b(mock|edge|stress|long text|many items|empty|error|special characters|push(?:es|ed)? the limits)\b/i.test(
-          uiScreenshots
-        );
-      const screenshotLines = uiScreenshots
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
-      const hasScreenshotLink = screenshotLinkPattern.test(uiScreenshots);
-      const hasDesktopScreenshot = screenshotLines.some(
-        (line) => /\bdesktop\b/i.test(line) && screenshotLinkPattern.test(line)
-      );
-      const hasMobileScreenshot = screenshotLines.some(
-        (line) => /\bmobile\b/i.test(line) && screenshotLinkPattern.test(line)
-      );
-      const hasReviewAttestation =
-        /\b(reviewed|inspected)\b/i.test(uiScreenshots) &&
-        /\b(no issues|no visual issues|quality|overflow|clipping|layout)\b/i.test(uiScreenshots);
-
-      if (!hasDesktop || !hasMobile) {
-        failures.push('UI Screenshot Evidence must identify both desktop and mobile screenshots.');
-      }
-      if (!hasPlaywright) {
+      if (!/\bplaywright\b/i.test(uiScreenshots)) {
         failures.push(
           'UI Screenshot Evidence must state that screenshots were taken with Playwright.'
         );
       }
-      if (!hasStressData) {
+
+      const surfaces = extractSurfaceBlocks(uiScreenshots);
+      if (surfaces.length === 0) {
         failures.push(
-          'UI Screenshot Evidence must mention mock/edge-case data that pushes the changed UI surface.'
+          'UI Screenshot Evidence must enumerate every changed UI surface under a "#### Surface: <name>" heading with desktop and mobile evidence per surface. Global-only desktop/mobile links cannot satisfy per-surface evidence.'
         );
       }
-      if (!hasScreenshotLink) {
-        failures.push('UI Screenshot Evidence must include at least one screenshot image/link.');
-      }
-      if (!hasDesktopScreenshot) {
-        failures.push(
-          'UI Screenshot Evidence must include a screenshot link on the line identifying the desktop screenshots.'
-        );
-      }
-      if (!hasMobileScreenshot) {
-        failures.push(
-          'UI Screenshot Evidence must include a screenshot link on the line identifying the mobile screenshots.'
-        );
-      }
-      if (!hasReviewAttestation) {
-        failures.push(
-          'UI Screenshot Evidence must explicitly attest that screenshots were reviewed for quality and note the result.'
-        );
+
+      for (const surface of surfaces) {
+        const desktop = getSurfaceFieldValue(surface.block, 'Desktop evidence');
+        const mobile = getSurfaceFieldValue(surface.block, 'Mobile evidence');
+        const stressData = getSurfaceFieldValue(surface.block, 'Mock/stress data used');
+        const qualityReview = getSurfaceFieldValue(surface.block, 'Screenshot quality review');
+
+        if (!desktop || !SCREENSHOT_LINK_PATTERN.test(desktop)) {
+          failures.push(
+            `Surface "${surface.name}" is missing desktop screenshot evidence (a "Desktop evidence:" line with an image link or #issuecomment-... URL).`
+          );
+        }
+        if (!mobile || !SCREENSHOT_LINK_PATTERN.test(mobile)) {
+          failures.push(
+            `Surface "${surface.name}" is missing mobile screenshot evidence (a "Mobile evidence:" line with an image link or #issuecomment-... URL).`
+          );
+        }
+        if (!stressData || !STRESS_DATA_PATTERN.test(stressData)) {
+          failures.push(
+            `Surface "${surface.name}" must describe the mock/stress data used to push the surface (for example long text, many items, empty, error, special characters).`
+          );
+        }
+        if (
+          !qualityReview ||
+          !QC_REVIEW_PATTERN.test(qualityReview) ||
+          !QC_RESULT_PATTERN.test(qualityReview)
+        ) {
+          failures.push(
+            `Surface "${surface.name}" must explicitly attest that its screenshots were reviewed for quality and note the result.`
+          );
+        }
       }
     }
   }
