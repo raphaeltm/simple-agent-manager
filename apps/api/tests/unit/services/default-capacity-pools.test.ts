@@ -16,6 +16,10 @@ import {
   ensureDefaultCapacityPoolsForExistingCredentials,
   resolveEffectiveDefaultCapacityPoolSummary,
 } from '../../../src/services/default-capacity-pools';
+import {
+  resolveTaskStartCapacityPoolSelection,
+  resolveTaskStartPlacement,
+} from '../../../src/services/placement-resolver';
 
 const migrationSql = readFileSync(
   join(process.cwd(), 'src/db/migrations/0125_compute_pool_foundation.sql'),
@@ -201,9 +205,11 @@ function seedPlatformCredential(input: {
 }
 
 function getCount(table: string, where = '1 = 1'): number {
-  return (sqlite?.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${where}`).get() as {
-    count: number;
-  }).count;
+  return (
+    sqlite?.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${where}`).get() as {
+      count: number;
+    }
+  ).count;
 }
 
 function getRows<T>(sql: string): T[] {
@@ -362,10 +368,76 @@ describe('default capacity pool creation', () => {
         LIMIT 3
       `)
     ).toEqual([
-      { location: getDefaultLocationForProvider('vultr'), machine_size: 'small', candidate_order: 0 },
-      { location: getDefaultLocationForProvider('vultr'), machine_size: 'medium', candidate_order: 1 },
-      { location: getDefaultLocationForProvider('vultr'), machine_size: 'large', candidate_order: 2 },
+      {
+        location: getDefaultLocationForProvider('vultr'),
+        machine_size: 'small',
+        candidate_order: 0,
+      },
+      {
+        location: getDefaultLocationForProvider('vultr'),
+        machine_size: 'medium',
+        candidate_order: 1,
+      },
+      {
+        location: getDefaultLocationForProvider('vultr'),
+        machine_size: 'large',
+        candidate_order: 2,
+      },
     ]);
+  });
+
+  it('orders effective default-pool candidates by the selected v1 strategy', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+    });
+
+    const placement = resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'strategy-task',
+      projectId: 'project-1',
+      userId: 'user-1',
+      project: {
+        id: 'project-1',
+        defaultProvider: 'vultr',
+        defaultLocation: getDefaultLocationForProvider('vultr'),
+        defaultVmSize: 'small',
+      },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+      resourceRequirements: {},
+    });
+
+    sqlite?.prepare("UPDATE capacity_pools SET strategy = 'pack' WHERE scope = 'user'").run();
+    const packSelection = await resolveTaskStartCapacityPoolSelection(db as never, placement, {
+      ensure: false,
+    });
+
+    expect(packSelection?.strategy).toBe('pack');
+    expect(packSelection?.candidates[0]).toMatchObject({
+      machineSize: 'large',
+      provider: 'vultr',
+      location: getDefaultLocationForProvider('vultr'),
+    });
+
+    sqlite
+      ?.prepare("UPDATE capacity_pools SET strategy = 'smallest-fit' WHERE scope = 'user'")
+      .run();
+    const smallestFitSelection = await resolveTaskStartCapacityPoolSelection(
+      db as never,
+      placement,
+      { ensure: false }
+    );
+
+    expect(smallestFitSelection?.strategy).toBe('smallest-fit');
+    expect(smallestFitSelection?.candidates[0]).toMatchObject({
+      machineSize: 'small',
+      provider: 'vultr',
+      location: getDefaultLocationForProvider('vultr'),
+    });
   });
 
   it('disables pool availability when a backing credential is disabled', async () => {

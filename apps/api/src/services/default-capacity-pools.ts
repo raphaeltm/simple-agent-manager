@@ -1,4 +1,5 @@
 import type {
+  CapacityPool as CapacityPoolDto,
   CapacityPoolCandidate as CapacityPoolCandidateDto,
   CapacityPoolScope,
   CapacitySourceIdentity,
@@ -57,7 +58,12 @@ interface CredentialCapacitySeed extends ScopeIdentity {
   createdBy: string | null;
 }
 
-export type CapacityPoolSummary = DefaultCapacityPoolSummary;
+export type CapacityPoolSummary = DefaultCapacityPoolSummary & {
+  pool: CapacityPoolDto;
+  sources: CapacitySourceIdentity[];
+  candidates: CapacityPoolCandidateDto[];
+  activeCandidateCount: number;
+};
 
 export interface DefaultCapacityPoolsEnsureResult {
   installation: CapacityPoolSummary | null;

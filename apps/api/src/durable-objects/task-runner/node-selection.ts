@@ -6,6 +6,7 @@
  */
 import {
   canSatisfyVmSize,
+  type CapacityPlacementSnapshot,
   DEFAULT_MAX_WORKSPACES_PER_NODE,
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
@@ -14,12 +15,39 @@ import {
 import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import {
+  type CapacityAwareNodePlacementRow,
+  resolveReusableNodeCapacitySnapshot,
+} from '../../services/placement-resolver';
+import {
   SessionRecoveryAuthorityRevokedError,
   type SessionRecoverySourceTaskGuard,
 } from '../../services/session-recovery-authority';
 import type { NodeLifecycle } from '../node-lifecycle';
 import { parseEnvInt } from './helpers';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
+
+export interface ReusableNodeSelection {
+  nodeId: string;
+  capacityPlacementSnapshot: CapacityPlacementSnapshot | null;
+}
+
+type NodePlacementFields = {
+  id: string;
+  vmSize: string;
+  vmLocation: string;
+  cloudProvider: string | null;
+  capacityPoolId: string | null;
+  capacityPoolScope: string | null;
+  capacityPoolRevision?: number | null;
+  capacitySourceId: string | null;
+  capacityPoolCandidateId?: string | null;
+  placementCredentialSource?: string | null;
+  placementCredentialReference?: string | null;
+  placementCredentialVersion?: number | null;
+  capacityPoolProjectId: string | null;
+  workloadRole: string | null;
+  placementExplanationJson?: string | null;
+};
 
 function recoverySourceTaskGuard(
   state: TaskRunnerState
@@ -43,6 +71,7 @@ export async function releaseClaimedWarmNode(
   if (result.released || result.state.claimedByTask !== state.taskId) {
     if (state.stepResults.nodeId === nodeId && !state.stepResults.workspaceId) {
       state.stepResults.nodeId = null;
+      state.stepResults.capacityPlacementSnapshot = null;
     }
     if (state.stepResults.claimedWarmNodeId === nodeId) {
       state.stepResults.claimedWarmNodeId = null;
@@ -55,8 +84,9 @@ export async function releaseClaimedWarmNode(
 async function claimWarmNodeCandidate(
   state: TaskRunnerState,
   rc: TaskRunnerContext,
-  nodeId: string
+  selection: ReusableNodeSelection
 ): Promise<boolean> {
+  const nodeId = selection.nodeId;
   const doId = rc.env.NODE_LIFECYCLE.idFromName(nodeId);
   const stub = rc.env.NODE_LIFECYCLE.get(doId) as DurableObjectStub<NodeLifecycle>;
   await rc.assertRecoveryAuthority(state);
@@ -72,6 +102,7 @@ async function claimWarmNodeCandidate(
   state.stepResults.nodeId = nodeId;
   state.stepResults.claimedWarmNodeId = nodeId;
   state.stepResults.autoProvisioned = false;
+  state.stepResults.capacityPlacementSnapshot = selection.capacityPlacementSnapshot;
   await rc.ctx.storage.put('state', state);
   try {
     await rc.assertRecoveryAuthority(state);
@@ -126,50 +157,93 @@ export async function verifyNodeAgentHealthy(
 export async function tryClaimWarmNode(
   state: TaskRunnerState,
   rc: TaskRunnerContext
-): Promise<string | null> {
+): Promise<ReusableNodeSelection | null> {
   if (!rc.env.NODE_LIFECYCLE) return null;
 
   // Recover a claim persisted by NodeLifecycle if the TaskRunner crashed after
   // the DO mutation but before its own storage.put.
   const persistedClaim = await rc.env.DATABASE.prepare(
-    `SELECT claimed_warm_node_id FROM tasks WHERE id = ?`
+    `SELECT
+       t.claimed_warm_node_id AS claimedWarmNodeId,
+       n.id,
+       n.vm_size AS vmSize,
+       n.vm_location AS vmLocation,
+       n.cloud_provider AS cloudProvider,
+       n.capacity_pool_id AS capacityPoolId,
+       n.capacity_pool_scope AS capacityPoolScope,
+       n.capacity_pool_revision AS capacityPoolRevision,
+       n.capacity_source_id AS capacitySourceId,
+       n.capacity_pool_candidate_id AS capacityPoolCandidateId,
+       n.placement_credential_source AS placementCredentialSource,
+       n.placement_credential_reference AS placementCredentialReference,
+       n.placement_credential_version AS placementCredentialVersion,
+       n.capacity_pool_project_id AS capacityPoolProjectId,
+       n.workload_role AS workloadRole,
+       n.placement_explanation_json AS placementExplanationJson
+     FROM tasks t
+     LEFT JOIN nodes n ON n.id = t.claimed_warm_node_id
+     WHERE t.id = ?`
   )
     .bind(state.taskId)
-    .first<{ claimed_warm_node_id: string | null }>();
-  if (persistedClaim?.claimed_warm_node_id) {
-    if (await claimWarmNodeCandidate(state, rc, persistedClaim.claimed_warm_node_id)) {
-      return persistedClaim.claimed_warm_node_id;
+    .first<(NodePlacementFields & { claimedWarmNodeId: string | null }) | null>();
+  if (persistedClaim?.claimedWarmNodeId) {
+    const selection = persistedClaim.id
+      ? resolveReusableNodeSelection(state, persistedClaim)
+      : null;
+    if (selection && (await claimWarmNodeCandidate(state, rc, selection))) {
+      return selection;
     }
     await rc.env.DATABASE.prepare(
       `UPDATE tasks SET claimed_warm_node_id = NULL, claimed_warm_node_at = NULL, updated_at = ?
         WHERE id = ? AND claimed_warm_node_id = ?`
     )
-      .bind(new Date().toISOString(), state.taskId, persistedClaim.claimed_warm_node_id)
+      .bind(new Date().toISOString(), state.taskId, persistedClaim.claimedWarmNodeId)
       .run();
   }
 
   const warmNodes = await rc.env.DATABASE.prepare(
-    `SELECT id, vm_size, vm_location, agent_version FROM nodes
+    `SELECT
+       id,
+       vm_size AS vmSize,
+       vm_location AS vmLocation,
+       cloud_provider AS cloudProvider,
+       capacity_pool_id AS capacityPoolId,
+       capacity_pool_scope AS capacityPoolScope,
+       capacity_pool_revision AS capacityPoolRevision,
+       capacity_source_id AS capacitySourceId,
+       capacity_pool_candidate_id AS capacityPoolCandidateId,
+       placement_credential_source AS placementCredentialSource,
+       placement_credential_reference AS placementCredentialReference,
+       placement_credential_version AS placementCredentialVersion,
+       capacity_pool_project_id AS capacityPoolProjectId,
+       workload_role AS workloadRole,
+       placement_explanation_json AS placementExplanationJson,
+       agent_version AS agentVersion
+     FROM nodes
      WHERE user_id = ? AND status = 'running' AND warm_since IS NOT NULL AND node_role = 'workspace'
        AND (runtime IS NULL OR runtime != 'cf-container')`
   )
     .bind(state.userId)
-    .all<{ id: string; vm_size: string; vm_location: string; agent_version: string | null }>();
+    .all<NodePlacementFields & { agentVersion: string | null }>();
 
   if (!warmNodes.results.length) return null;
 
   // Sort nodes that can satisfy the requested size, preferring exact size/location.
   const sorted = warmNodes.results
     .filter((node) =>
-      isNodeAgentVersionCompatible(node.agent_version, rc.env.VM_AGENT_REQUIRED_VERSION)
+      isNodeAgentVersionCompatible(node.agentVersion, rc.env.VM_AGENT_REQUIRED_VERSION)
     )
-    .filter((node) => canSatisfyVmSize(node.vm_size, state.config.vmSize))
+    .filter((node) => canSatisfyVmSize(node.vmSize, state.config.vmSize))
+    .flatMap((node) => {
+      const selection = resolveReusableNodeSelection(state, node);
+      return selection ? [{ ...node, selection }] : [];
+    })
     .sort((a, b) => {
-      const aSizeMatch = a.vm_size === state.config.vmSize ? 1 : 0;
-      const bSizeMatch = b.vm_size === state.config.vmSize ? 1 : 0;
+      const aSizeMatch = a.vmSize === state.config.vmSize ? 1 : 0;
+      const bSizeMatch = b.vmSize === state.config.vmSize ? 1 : 0;
       if (aSizeMatch !== bSizeMatch) return bSizeMatch - aSizeMatch;
-      const aLocMatch = a.vm_location === state.config.vmLocation ? 1 : 0;
-      const bLocMatch = b.vm_location === state.config.vmLocation ? 1 : 0;
+      const aLocMatch = a.vmLocation === state.config.vmLocation ? 1 : 0;
+      const bLocMatch = b.vmLocation === state.config.vmLocation ? 1 : 0;
       return bLocMatch - aLocMatch;
     });
 
@@ -177,19 +251,47 @@ export async function tryClaimWarmNode(
     try {
       // Re-check freshness
       const fresh = await rc.env.DATABASE.prepare(
-        `SELECT status, warm_since, agent_version FROM nodes WHERE id = ? AND status = 'running' AND warm_since IS NOT NULL`
+        `SELECT
+           id,
+           status,
+           warm_since AS warmSince,
+           vm_size AS vmSize,
+           vm_location AS vmLocation,
+           cloud_provider AS cloudProvider,
+           capacity_pool_id AS capacityPoolId,
+           capacity_pool_scope AS capacityPoolScope,
+           capacity_pool_revision AS capacityPoolRevision,
+           capacity_source_id AS capacitySourceId,
+           capacity_pool_candidate_id AS capacityPoolCandidateId,
+           placement_credential_source AS placementCredentialSource,
+           placement_credential_reference AS placementCredentialReference,
+           placement_credential_version AS placementCredentialVersion,
+           capacity_pool_project_id AS capacityPoolProjectId,
+           workload_role AS workloadRole,
+           placement_explanation_json AS placementExplanationJson,
+           agent_version AS agentVersion
+         FROM nodes WHERE id = ? AND status = 'running' AND warm_since IS NOT NULL`
       )
         .bind(warmNode.id)
-        .first<{ status: string; warm_since: string | null; agent_version: string | null }>();
+        .first<
+          | (NodePlacementFields & {
+              status: string;
+              warmSince: string | null;
+              agentVersion: string | null;
+            })
+          | null
+        >();
 
       if (
         !fresh ||
-        !isNodeAgentVersionCompatible(fresh.agent_version, rc.env.VM_AGENT_REQUIRED_VERSION)
+        !isNodeAgentVersionCompatible(fresh.agentVersion, rc.env.VM_AGENT_REQUIRED_VERSION)
       ) {
         continue;
       }
+      const selection = resolveReusableNodeSelection(state, fresh);
+      if (!selection) continue;
 
-      if (await claimWarmNodeCandidate(state, rc, warmNode.id)) {
+      if (await claimWarmNodeCandidate(state, rc, selection)) {
         // Defense-in-depth: verify workspace count even for warm nodes
         const wsCount = await rc.env.DATABASE.prepare(
           `SELECT COUNT(*) as c FROM workspaces WHERE node_id = ? AND status IN ('running', 'creating', 'recovery')`
@@ -206,8 +308,12 @@ export async function tryClaimWarmNode(
         log.info('task_runner_do.warm_node_claimed', {
           taskId: state.taskId,
           nodeId: warmNode.id,
+          capacityPoolId: selection.capacityPlacementSnapshot?.capacityPoolId ?? null,
+          capacitySourceId: selection.capacityPlacementSnapshot?.capacitySourceId ?? null,
+          capacityPoolCandidateId:
+            selection.capacityPlacementSnapshot?.capacityPoolCandidateId ?? null,
         });
-        return warmNode.id;
+        return selection;
       }
     } catch (error) {
       if (error instanceof SessionRecoveryAuthorityRevokedError) throw error;
@@ -224,7 +330,7 @@ export async function tryClaimWarmNode(
 export async function findNodeWithCapacity(
   state: TaskRunnerState,
   rc: TaskRunnerContext
-): Promise<string | null> {
+): Promise<ReusableNodeSelection | null> {
   const scaling = state.config.projectScaling;
   const cpuThreshold =
     scaling?.nodeCpuThresholdPercent ??
@@ -243,18 +349,49 @@ export async function findNodeWithCapacity(
     parseEnvInt(rc.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE);
 
   const nodes = await rc.env.DATABASE.prepare(
-    `SELECT id, vm_size, vm_location, health_status, last_metrics, agent_version FROM nodes
+    `SELECT
+       id,
+       vm_size AS vmSize,
+       vm_location AS vmLocation,
+       cloud_provider AS cloudProvider,
+       capacity_pool_id AS capacityPoolId,
+       capacity_pool_scope AS capacityPoolScope,
+       capacity_pool_revision AS capacityPoolRevision,
+       capacity_source_id AS capacitySourceId,
+       capacity_pool_candidate_id AS capacityPoolCandidateId,
+       placement_credential_source AS placementCredentialSource,
+       placement_credential_reference AS placementCredentialReference,
+       placement_credential_version AS placementCredentialVersion,
+       capacity_pool_project_id AS capacityPoolProjectId,
+       workload_role AS workloadRole,
+       placement_explanation_json AS placementExplanationJson,
+       health_status AS healthStatus,
+       last_metrics AS lastMetrics,
+       agent_version AS agentVersion
+     FROM nodes
      WHERE user_id = ? AND status = 'running' AND health_status != 'unhealthy' AND node_role = 'workspace'
        AND (runtime IS NULL OR runtime != 'cf-container')`
   )
     .bind(state.userId)
     .all<{
       id: string;
-      vm_size: string;
-      vm_location: string;
-      health_status: string;
-      last_metrics: string | null;
-      agent_version: string | null;
+      vmSize: string;
+      vmLocation: string;
+      cloudProvider: string | null;
+      capacityPoolId: string | null;
+      capacityPoolScope: string | null;
+      capacityPoolRevision: number | null;
+      capacitySourceId: string | null;
+      capacityPoolCandidateId: string | null;
+      placementCredentialSource: string | null;
+      placementCredentialReference: string | null;
+      placementCredentialVersion: number | null;
+      capacityPoolProjectId: string | null;
+      workloadRole: string | null;
+      placementExplanationJson: string | null;
+      healthStatus: string;
+      lastMetrics: string | null;
+      agentVersion: string | null;
     }>();
 
   if (!nodes.results.length) return null;
@@ -276,24 +413,30 @@ export async function findNodeWithCapacity(
     id: string;
     vmSize: string;
     vmLocation: string;
+    capacityPlacementSnapshot: CapacityPlacementSnapshot | null;
     score: number | null;
   };
 
   const candidates: ScoredNode[] = [];
 
   for (const node of nodes.results) {
-    if (!isNodeAgentVersionCompatible(node.agent_version, rc.env.VM_AGENT_REQUIRED_VERSION)) {
+    if (!isNodeAgentVersionCompatible(node.agentVersion, rc.env.VM_AGENT_REQUIRED_VERSION)) {
       continue;
     }
-    if (!canSatisfyVmSize(node.vm_size, state.config.vmSize)) continue;
+    if (!canSatisfyVmSize(node.vmSize, state.config.vmSize)) continue;
+    const selection = resolveReusableNodeSelection(state, node);
+    if (!selection) continue;
 
     // Hard workspace count limit — reject node regardless of CPU/memory metrics
     if ((countByNode.get(node.id) ?? 0) >= maxWorkspaces) continue;
-    let metrics: { cpuLoadAvg1?: number; memoryPercent?: number; creatingWorkspaces?: number } | null =
-      null;
-    if (node.last_metrics) {
+    let metrics: {
+      cpuLoadAvg1?: number;
+      memoryPercent?: number;
+      creatingWorkspaces?: number;
+    } | null = null;
+    if (node.lastMetrics) {
       try {
-        metrics = JSON.parse(node.last_metrics);
+        metrics = JSON.parse(node.lastMetrics);
       } catch {
         /* ignore */
       }
@@ -306,15 +449,17 @@ export async function findNodeWithCapacity(
       if (cpu >= cpuThreshold || mem >= memThreshold) continue;
       candidates.push({
         id: node.id,
-        vmSize: node.vm_size,
-        vmLocation: node.vm_location,
+        vmSize: node.vmSize,
+        vmLocation: node.vmLocation,
+        capacityPlacementSnapshot: selection.capacityPlacementSnapshot,
         score: cpu * 0.4 + mem * 0.6,
       });
     } else {
       candidates.push({
         id: node.id,
-        vmSize: node.vm_size,
-        vmLocation: node.vm_location,
+        vmSize: node.vmSize,
+        vmLocation: node.vmLocation,
+        capacityPlacementSnapshot: selection.capacityPlacementSnapshot,
         score: null,
       });
     }
@@ -341,5 +486,22 @@ export async function findNodeWithCapacity(
     // candidates.length was already checked above — this should never happen.
     return null;
   }
-  return best.id;
+  return { nodeId: best.id, capacityPlacementSnapshot: best.capacityPlacementSnapshot };
+}
+
+function resolveReusableNodeSelection(
+  state: TaskRunnerState,
+  node: NodePlacementFields
+): ReusableNodeSelection | null {
+  const capacityPlacementSnapshot = resolveReusableNodeCapacitySnapshot({
+    selection: state.config.capacityPoolSelection,
+    node: node as CapacityAwareNodePlacementRow,
+    projectId: state.projectId,
+    requestedVmSize: state.config.vmSize,
+  });
+  if (capacityPlacementSnapshot === undefined) return null;
+  return {
+    nodeId: node.id,
+    capacityPlacementSnapshot,
+  };
 }

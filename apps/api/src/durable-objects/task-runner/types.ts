@@ -5,6 +5,7 @@
  */
 import type {
   AgentEffort,
+  CapacityPlacementSnapshot,
   CredentialProvider,
   CredentialSource,
   ResolvedResourceReservation,
@@ -19,6 +20,7 @@ import type {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
+import type { TaskStartCapacityPoolSelection } from '../../services/placement-resolver';
 
 // TaskRunner uses the full Env type because it delegates to service functions
 // (createNodeRecord, provisionNode, createWorkspaceOnNode, etc.) that expect
@@ -38,6 +40,8 @@ export interface StepResults {
   /** VM size actually provisioned for an auto-provisioned node. May be smaller
    *  than the requested size when size-fallback descended on capacity exhaustion. */
   provisionedVmSize: VMSize | null;
+  /** Capacity pool/source/candidate audit snapshot selected for this run placement. */
+  capacityPlacementSnapshot?: CapacityPlacementSnapshot | null;
 }
 
 export interface TaskRunConfig {
@@ -103,6 +107,8 @@ export interface TaskRunConfig {
   resourceRequirements?: ResourceRequirements | null;
   /** Resolved reservation in scheduler units (audit-only, Phase 0). */
   resolvedReservation?: ResolvedResourceReservation | null;
+  /** Effective one-pool placement selection for VM tasks. Null preserves legacy placement. */
+  capacityPoolSelection?: TaskStartCapacityPoolSelection | null;
   /** Where the VM size came from in the precedence chain. */
   vmSizeSource?: ResourceRequirementsSource | 'explicit' | null;
   /** Existing sleeping chat whose R2 snapshot must be strictly restored instead of starting fresh. */

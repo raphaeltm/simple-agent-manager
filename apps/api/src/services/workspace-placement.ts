@@ -1,4 +1,15 @@
-import type { VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type {
+  CapacityPlacementSnapshot,
+  VMLocation,
+  VMSize,
+  WorkspaceProfile,
+} from '@simple-agent-manager/shared';
+
+import {
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
+  capacityPlacementSnapshotSqlValues,
+} from './capacity-placement-snapshot';
 
 export interface WorkspacePlacementInput {
   id: string;
@@ -16,6 +27,7 @@ export interface WorkspacePlacementInput {
   workspaceProfile: WorkspaceProfile;
   devcontainerConfigName: string | null;
   agentProfileHint: string | null;
+  capacityPlacementSnapshot?: CapacityPlacementSnapshot | null;
   createdAt: string;
 }
 
@@ -33,18 +45,24 @@ export async function reserveWorkspacePlacement(
   input: WorkspacePlacementInput,
   maxWorkspaces: number
 ): Promise<boolean> {
+  const capacityPredicate = buildCapacityPlacementPredicate(input);
   const result = await database
     .prepare(
       `INSERT INTO workspaces
          (id, node_id, project_id, user_id, installation_id, name, display_name,
           normalized_display_name, repository, branch, status, vm_size, vm_location,
-          workspace_profile, devcontainer_config_name, agent_profile_hint, created_at, updated_at)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?, ?, ?
+          workspace_profile, devcontainer_config_name, agent_profile_hint,
+          ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
+          created_at, updated_at)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?,
+          ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
+          ?, ?
        FROM nodes n
        WHERE n.id = ?
          AND n.user_id = ?
          AND n.status = 'running'
          AND n.node_role = 'workspace'
+         ${capacityPredicate.sql}
          AND (
            SELECT COUNT(*)
            FROM workspaces active
@@ -68,13 +86,55 @@ export async function reserveWorkspacePlacement(
       input.workspaceProfile,
       input.devcontainerConfigName,
       input.agentProfileHint,
+      ...capacityPlacementSnapshotSqlValues(input.capacityPlacementSnapshot),
       input.createdAt,
       input.createdAt,
       input.nodeId,
       input.userId,
+      ...capacityPredicate.binds,
       maxWorkspaces
     )
     .run();
 
   return (result.meta.changes ?? 0) > 0;
+}
+
+function buildCapacityPlacementPredicate(input: WorkspacePlacementInput): {
+  sql: string;
+  binds: Array<string | number | null>;
+} {
+  const snapshot = input.capacityPlacementSnapshot ?? null;
+  if (!snapshot?.capacityPoolId) {
+    return {
+      sql: `AND (
+        n.capacity_pool_scope IS NULL
+        OR n.capacity_pool_scope != 'project'
+      )`,
+      binds: [],
+    };
+  }
+
+  if (!snapshot.capacitySourceId) {
+    return {
+      sql: `AND n.capacity_pool_id IS NULL AND ? != 'project'`,
+      binds: [snapshot.capacityPoolScope],
+    };
+  }
+
+  if (snapshot.capacityPoolScope === 'project') {
+    return {
+      sql: `AND n.capacity_pool_scope = 'project'
+        AND n.capacity_pool_id = ?
+        AND n.capacity_source_id = ?
+        AND n.capacity_pool_project_id = ?`,
+      binds: [snapshot.capacityPoolId, snapshot.capacitySourceId, input.projectId],
+    };
+  }
+
+  return {
+    sql: `AND (n.capacity_pool_scope IS NULL OR n.capacity_pool_scope != 'project')
+      AND n.capacity_pool_id = ?
+      AND n.capacity_source_id = ?`,
+    binds: [snapshot.capacityPoolId, snapshot.capacitySourceId],
+  };
 }

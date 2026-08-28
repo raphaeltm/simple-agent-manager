@@ -7,6 +7,7 @@
  * classification boundary.
  */
 import { ProviderError } from '@simple-agent-manager/providers';
+import type { CapacityPlacementSnapshot } from '@simple-agent-manager/shared';
 import { env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -132,6 +133,7 @@ function taskState(
   overrides: Partial<Pick<TaskRunnerState, 'projectId'>> & {
     installationId?: string;
     repository?: string;
+    capacityPoolSelection?: TaskRunnerState['config']['capacityPoolSelection'];
   } = {}
 ): TaskRunnerState {
   const now = Date.now();
@@ -187,6 +189,7 @@ function taskState(
       projectScaling: { maxWorkspacesPerNode: 2 },
       resourceRequirements: null,
       resolvedReservation: null,
+      capacityPoolSelection: overrides.capacityPoolSelection ?? null,
       vmSizeSource: null,
       resumeSnapshotChatSessionId: null,
       recoverySourceTaskId: null,
@@ -210,6 +213,110 @@ function taskState(
     lastD1Step: null,
     completed: false,
   };
+}
+
+function capacitySnapshot(input: {
+  poolId: string;
+  sourceId: string;
+  candidateId: string;
+  scope: 'project' | 'user' | 'installation';
+  projectId?: string | null;
+}): CapacityPlacementSnapshot {
+  return {
+    capacityPoolId: input.poolId,
+    capacityPoolScope: input.scope,
+    capacityPoolRevision: 1,
+    capacitySourceId: input.sourceId,
+    capacityPoolCandidateId: input.candidateId,
+    placementCredentialSource: input.scope === 'installation' ? 'platform' : input.scope,
+    placementCredentialReference: `test:${input.sourceId}`,
+    placementCredentialVersion: 1,
+    capacityPoolProjectId: input.scope === 'project' ? (input.projectId ?? PROJECT_ID) : null,
+    workloadRole: 'workspace',
+    placementExplanationJson: JSON.stringify({
+      poolId: input.poolId,
+      sourceId: input.sourceId,
+      candidateId: input.candidateId,
+    }),
+  };
+}
+
+async function seedCapacityRecords(
+  snapshot: CapacityPlacementSnapshot,
+  ownerUserId = USER_ID
+): Promise<void> {
+  if (!snapshot.capacityPoolId || !snapshot.capacityPoolScope || !snapshot.capacitySourceId) {
+    throw new Error('snapshot must include pool and source IDs');
+  }
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO capacity_pools
+       (id, scope, owner_user_id, owner_project_id, name, is_default, revision, status, strategy,
+        exhaustion_policy, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 0, ?, 'active', 'balanced', 'queue', ?, ?)`
+  )
+    .bind(
+      snapshot.capacityPoolId,
+      snapshot.capacityPoolScope,
+      snapshot.capacityPoolScope === 'user' ? ownerUserId : null,
+      snapshot.capacityPoolScope === 'project' ? snapshot.capacityPoolProjectId : null,
+      `Pool ${snapshot.capacityPoolId}`,
+      snapshot.capacityPoolRevision ?? 1,
+      new Date().toISOString(),
+      new Date().toISOString()
+    )
+    .run();
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO capacity_sources
+       (id, scope, owner_user_id, owner_project_id, source_kind, provider, credential_source,
+        credential_id, platform_credential_id, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'registered-runner', NULL, NULL, NULL, NULL, 'active', ?, ?)`
+  )
+    .bind(
+      snapshot.capacitySourceId,
+      snapshot.capacityPoolScope,
+      snapshot.capacityPoolScope === 'user' ? ownerUserId : null,
+      snapshot.capacityPoolScope === 'project' ? snapshot.capacityPoolProjectId : null,
+      new Date().toISOString(),
+      new Date().toISOString()
+    )
+    .run();
+}
+
+async function assignNodeCapacity(
+  nodeId: string,
+  snapshot: CapacityPlacementSnapshot
+): Promise<void> {
+  await seedCapacityRecords(snapshot);
+  await env.DATABASE.prepare(
+    `UPDATE nodes
+     SET capacity_pool_id = ?,
+         capacity_pool_scope = ?,
+         capacity_pool_revision = ?,
+         capacity_source_id = ?,
+         capacity_pool_candidate_id = ?,
+         placement_credential_source = ?,
+         placement_credential_reference = ?,
+         placement_credential_version = ?,
+         capacity_pool_project_id = ?,
+         workload_role = ?,
+         placement_explanation_json = ?
+     WHERE id = ?`
+  )
+    .bind(
+      snapshot.capacityPoolId,
+      snapshot.capacityPoolScope,
+      snapshot.capacityPoolRevision,
+      snapshot.capacitySourceId,
+      snapshot.capacityPoolCandidateId,
+      snapshot.placementCredentialSource,
+      snapshot.placementCredentialReference,
+      snapshot.placementCredentialVersion,
+      snapshot.capacityPoolProjectId,
+      snapshot.workloadRole,
+      snapshot.placementExplanationJson,
+      nodeId
+    )
+    .run();
 }
 
 function selectorContext(): TaskRunnerContext {
@@ -339,9 +446,9 @@ describe('VM admission control D1 races', () => {
     await expect(
       assertVmProvisioningLease(env, scopeKey, taskA, firstGrant.fencingToken)
     ).rejects.toThrow('VM provisioning lease lost');
-    expect(
-      await releaseVmProvisioningLease(env, scopeKey, taskA, firstGrant.fencingToken)
-    ).toBe(false);
+    expect(await releaseVmProvisioningLease(env, scopeKey, taskA, firstGrant.fencingToken)).toBe(
+      false
+    );
     expect(await leaseRow(scopeKey)).toMatchObject({
       owner_task_id: taskB,
       fencing_token: recovered.fencingToken,
@@ -412,8 +519,10 @@ describe('VM admission control D1 races', () => {
     });
 
     const rc = selectorContext();
-    expect(await findNodeWithCapacity(taskState(USER_ID, 'large'), rc)).toBe(largeNode);
-    expect(await findNodeWithCapacity(taskState(OTHER_USER_ID, 'large'), rc)).toBe(otherUserNode);
+    expect((await findNodeWithCapacity(taskState(USER_ID, 'large'), rc))?.nodeId).toBe(largeNode);
+    expect((await findNodeWithCapacity(taskState(OTHER_USER_ID, 'large'), rc))?.nodeId).toBe(
+      otherUserNode
+    );
 
     await reserveWorkspacePlacement(
       env.DATABASE,
@@ -426,8 +535,8 @@ describe('VM admission control D1 races', () => {
       2
     );
     expect(mediumPlacement).toBe(true);
-    expect(await findNodeWithCapacity(taskState(USER_ID, 'medium'), rc)).toBe(largeNode);
-    expect(await findNodeWithCapacity(taskState(USER_ID, 'large'), rc)).toBe(largeNode);
+    expect((await findNodeWithCapacity(taskState(USER_ID, 'medium'), rc))?.nodeId).toBe(largeNode);
+    expect((await findNodeWithCapacity(taskState(USER_ID, 'large'), rc))?.nodeId).toBe(largeNode);
   });
 
   it('preserves same-user cross-project packing on user-scope workspace nodes', async () => {
@@ -463,7 +572,7 @@ describe('VM admission control D1 races', () => {
       rc
     );
 
-    expect(selectedForSecondProject).toBe(crossProjectNode);
+    expect(selectedForSecondProject?.nodeId).toBe(crossProjectNode);
     await expect(
       reserveWorkspacePlacement(
         env.DATABASE,
@@ -489,6 +598,119 @@ describe('VM admission control D1 races', () => {
       firstProjectId,
       secondProjectId,
     ]);
+  });
+
+  it('persists capacity snapshots during final workspace reservation', async () => {
+    const nodeId = 'node-vm-admission-capacity-snapshot';
+    const workspaceId = 'workspace-vm-admission-capacity-snapshot';
+    const snapshot = capacitySnapshot({
+      poolId: 'pool-vm-admission-project',
+      sourceId: 'source-vm-admission-project',
+      candidateId: 'candidate-vm-admission-project',
+      scope: 'project',
+      projectId: PROJECT_ID,
+    });
+    await makeReadyNode(nodeId, USER_ID, 'large');
+    await assignNodeCapacity(nodeId, snapshot);
+
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        {
+          ...placement(workspaceId, nodeId, { vmSize: 'large' }),
+          capacityPlacementSnapshot: snapshot,
+        },
+        2
+      )
+    ).resolves.toBe(true);
+
+    const row = await env.DATABASE.prepare(
+      `SELECT capacity_pool_id, capacity_pool_scope, capacity_source_id,
+              capacity_pool_candidate_id, capacity_pool_project_id, workload_role,
+              placement_explanation_json
+       FROM workspaces
+       WHERE id = ?`
+    )
+      .bind(workspaceId)
+      .first<{
+        capacity_pool_id: string | null;
+        capacity_pool_scope: string | null;
+        capacity_source_id: string | null;
+        capacity_pool_candidate_id: string | null;
+        capacity_pool_project_id: string | null;
+        workload_role: string | null;
+        placement_explanation_json: string | null;
+      }>();
+
+    expect(row).toMatchObject({
+      capacity_pool_id: snapshot.capacityPoolId,
+      capacity_pool_scope: 'project',
+      capacity_source_id: snapshot.capacitySourceId,
+      capacity_pool_candidate_id: snapshot.capacityPoolCandidateId,
+      capacity_pool_project_id: PROJECT_ID,
+      workload_role: 'workspace',
+      placement_explanation_json: snapshot.placementExplanationJson,
+    });
+  });
+
+  it('rejects final reservation when the selected project pool does not match the node', async () => {
+    const nodeId = 'node-vm-admission-project-pool-mismatch';
+    const nodeSnapshot = capacitySnapshot({
+      poolId: 'pool-vm-admission-project-owned',
+      sourceId: 'source-vm-admission-project-owned',
+      candidateId: 'candidate-vm-admission-project-owned',
+      scope: 'project',
+      projectId: PROJECT_ID,
+    });
+    const otherSnapshot = capacitySnapshot({
+      poolId: 'pool-vm-admission-project-other',
+      sourceId: 'source-vm-admission-project-other',
+      candidateId: 'candidate-vm-admission-project-other',
+      scope: 'project',
+      projectId: 'project-vm-admission-other-pool',
+    });
+    await seedProject('project-vm-admission-other-pool', USER_ID, INSTALLATION_ID, {
+      repository: 'test-org/vm-admission-other-pool',
+    });
+    await makeReadyNode(nodeId, USER_ID, 'large');
+    await assignNodeCapacity(nodeId, nodeSnapshot);
+    await seedCapacityRecords(otherSnapshot);
+
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        {
+          ...placement('workspace-vm-admission-project-pool-mismatch', nodeId, {
+            vmSize: 'large',
+          }),
+          capacityPlacementSnapshot: otherSnapshot,
+        },
+        2
+      )
+    ).resolves.toBe(false);
+  });
+
+  it('rejects final reservation on project-pool nodes without a selected pool snapshot', async () => {
+    const nodeId = 'node-vm-admission-project-pool-no-snapshot';
+    const nodeSnapshot = capacitySnapshot({
+      poolId: 'pool-vm-admission-project-no-snapshot',
+      sourceId: 'source-vm-admission-project-no-snapshot',
+      candidateId: 'candidate-vm-admission-project-no-snapshot',
+      scope: 'project',
+      projectId: PROJECT_ID,
+    });
+    await makeReadyNode(nodeId, USER_ID, 'large');
+    await assignNodeCapacity(nodeId, nodeSnapshot);
+
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-admission-project-pool-no-snapshot', nodeId, {
+          vmSize: 'large',
+        }),
+        2
+      )
+    ).resolves.toBe(false);
   });
 
   it('prevents different users from selecting or reserving the same workspace node', async () => {
@@ -523,7 +745,10 @@ describe('VM admission control D1 races', () => {
     const rc = selectorContext();
 
     expect(
-      await findNodeWithCapacity(taskState(otherUserId, 'medium', { projectId: otherProjectId }), rc)
+      await findNodeWithCapacity(
+        taskState(otherUserId, 'medium', { projectId: otherProjectId }),
+        rc
+      )
     ).toBeNull();
     await expect(
       reserveWorkspacePlacement(
