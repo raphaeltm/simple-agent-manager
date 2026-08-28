@@ -6,7 +6,7 @@
  */
 import { isTransientCapacityError, ProviderError } from '@simple-agent-manager/providers';
 import type { CredentialProvider, VMSize } from '@simple-agent-manager/shared';
-import { canSatisfyVmSize, vmSizeFallbackChain } from '@simple-agent-manager/shared';
+import { vmSizeFallbackChain } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
 import {
@@ -43,6 +43,7 @@ import { parseEnvInt } from './helpers';
 import { applyCapacityCandidateProvisioningTarget } from './node-provisioning-target';
 import {
   findNodeWithCapacity,
+  nodeSatisfiesTaskResources,
   releaseClaimedWarmNode,
   type ReusableNodeSelection,
   tryClaimWarmNode,
@@ -176,6 +177,14 @@ export async function handleNodeSelection(
          placement_credential_version AS placementCredentialVersion,
          capacity_pool_project_id AS capacityPoolProjectId,
          workload_role AS workloadRole,
+         provider_instance_type AS providerInstanceType,
+         provider_instance_vcpu_count AS providerInstanceVcpuCount,
+         provider_instance_memory_mb AS providerInstanceMemoryMb,
+         provider_instance_disk_gb AS providerInstanceDiskGb,
+         provider_instance_price_display AS providerInstancePriceDisplay,
+         provider_instance_price_currency AS providerInstancePriceCurrency,
+         provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
+         provider_instance_price_hourly_micros AS providerInstancePriceHourlyMicros,
          placement_explanation_json AS placementExplanationJson,
          agent_version AS agentVersion
        FROM nodes WHERE id = ? AND user_id = ?`
@@ -193,7 +202,7 @@ export async function handleNodeSelection(
     if (!node || node.status !== 'running') {
       throw Object.assign(new Error('Specified node is not available'), { permanent: true });
     }
-    if (!canSatisfyVmSize(node.vmSize, state.config.vmSize)) {
+    if (!nodeSatisfiesTaskResources(node, state)) {
       throw Object.assign(new Error('Specified node is smaller than the requested VM size'), {
         permanent: true,
       });
@@ -208,6 +217,7 @@ export async function handleNodeSelection(
       node,
       projectId: state.projectId,
       requestedVmSize: state.config.vmSize,
+      requestedReservation: state.config.resolvedReservation ?? null,
     });
     if (capacityPlacementSnapshot === undefined) {
       throw Object.assign(new Error('Specified node is outside the selected capacity pool'), {
@@ -303,6 +313,14 @@ export async function handleNodeProvisioning(
            placement_credential_version AS placementCredentialVersion,
            capacity_pool_project_id AS capacityPoolProjectId,
            workload_role AS workloadRole,
+           provider_instance_type AS providerInstanceType,
+           provider_instance_vcpu_count AS providerInstanceVcpuCount,
+           provider_instance_memory_mb AS providerInstanceMemoryMb,
+           provider_instance_disk_gb AS providerInstanceDiskGb,
+           provider_instance_price_display AS providerInstancePriceDisplay,
+           provider_instance_price_currency AS providerInstancePriceCurrency,
+           provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
+           provider_instance_price_hourly_micros AS providerInstancePriceHourlyMicros,
            placement_explanation_json AS placementExplanationJson
          FROM nodes WHERE id = ?`
       )
@@ -536,7 +554,7 @@ export async function handleNodeProvisioning(
   const fallbackAllowed = fallbackEnabled && sizeIsDefaultDerived;
   let chain: VMSize[];
   if (selectedCapacityCandidate) {
-    chain = [selectedCapacityCandidate.machineSize];
+    chain = [selectedCapacityCandidate.machineSize ?? requestedSizeBeforeProvisioning];
   } else if (fallbackAllowed) {
     chain = vmSizeFallbackChain(requestedSizeBeforeProvisioning);
   } else {
@@ -566,6 +584,7 @@ export async function handleNodeProvisioning(
       vmLocation: state.config.vmLocation,
       heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
       cloudProvider: state.config.cloudProvider ?? undefined,
+      providerInstanceType: state.config.providerInstanceType ?? null,
       capacityPlacementSnapshot: state.stepResults.capacityPlacementSnapshot ?? null,
     });
 

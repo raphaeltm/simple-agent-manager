@@ -71,6 +71,8 @@ export interface TaskRunConfig {
   devcontainerConfigName: string | null;
   /** Cloud provider for auto-provisioned nodes. Null means system picks any available credential. */
   cloudProvider: CredentialProvider | null;
+  /** Provider-native instance type/SKU selected from a compute pool. Null preserves legacy size mapping. */
+  providerInstanceType?: string | null;
   /** Root-pinned credential attribution user for this task tree. */
   credentialAttributionUserId: string;
   /** Project scope when credentialAttributionSource is 'project'. */

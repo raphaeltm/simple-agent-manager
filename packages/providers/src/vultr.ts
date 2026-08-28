@@ -63,6 +63,7 @@ export {
   findVultrOs,
   mapVultrStatus,
   VULTR_LOCATIONS,
+  VULTR_SIZE_CONFIGS,
   type VultrProviderRuntimeOptions,
 } from './vultr-metadata';
 
@@ -118,6 +119,7 @@ export class VultrProvider implements Provider {
       });
     }
     const region = config.location || this.region;
+    const plan = config.instanceType ?? sizeConfig.type;
     const osId = await this.resolveOsId(config.image, context);
     throwIfProviderRequestAborted(context);
 
@@ -127,7 +129,7 @@ export class VultrProvider implements Provider {
         method: 'POST',
         body: JSON.stringify({
           region,
-          plan: sizeConfig.type,
+          plan,
           os_id: osId,
           label: config.name,
           hostname: sanitizeVultrHostname(config.name),

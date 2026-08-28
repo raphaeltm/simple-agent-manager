@@ -68,6 +68,7 @@ export {
   DEFAULT_DIGITALOCEAN_MAX_LIST_PAGES,
   DEFAULT_DIGITALOCEAN_REQUEST_TIMEOUT_MS,
   DIGITALOCEAN_LOCATIONS,
+  DIGITALOCEAN_SIZE_CONFIGS,
   extractPublicIp,
   mapDigitalOceanStatus,
 } from './digitalocean-metadata';
@@ -139,6 +140,7 @@ export class DigitalOceanProvider implements Provider {
       });
     }
     const region = config.location || this.region;
+    const dropletSize = config.instanceType ?? sizeConfig.type;
 
     const response = await this.doFetch(
       '/droplets',
@@ -147,7 +149,7 @@ export class DigitalOceanProvider implements Provider {
         body: JSON.stringify({
           name: sanitizeDropletName(config.name),
           region,
-          size: sizeConfig.type,
+          size: dropletSize,
           image: resolveDigitalOceanImage(config.image || this.image),
           // DigitalOcean user_data is PLAIN TEXT (max 64 KiB) — no base64 needed.
           user_data: config.userData,

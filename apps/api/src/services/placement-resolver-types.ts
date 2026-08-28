@@ -146,7 +146,16 @@ export interface TaskStartCapacityCandidate {
   workloadRole: CapacityWorkloadRole;
   runtime: string | null;
   machineClass: string | null;
-  machineSize: VMSize;
+  /** Backward-compatible requested-size preset. Not capacity-pool candidate identity. */
+  machineSize: VMSize | null;
+  providerInstanceType: string;
+  providerInstanceVcpuCount: number;
+  providerInstanceMemoryMb: number;
+  providerInstanceDiskGb: number | null;
+  providerInstancePriceDisplay: string | null;
+  providerInstancePriceCurrency: string | null;
+  providerInstancePriceMonthlyCents: number | null;
+  providerInstancePriceHourlyMicros: number | null;
   priority: number;
   candidateOrder: number;
   credentialAttributionSource: CredentialSource;
@@ -182,6 +191,14 @@ export interface CapacityAwareNodePlacementRow {
   placementCredentialVersion?: number | null;
   capacityPoolProjectId: string | null;
   workloadRole: string | null;
+  providerInstanceType?: string | null;
+  providerInstanceVcpuCount?: number | null;
+  providerInstanceMemoryMb?: number | null;
+  providerInstanceDiskGb?: number | null;
+  providerInstancePriceDisplay?: string | null;
+  providerInstancePriceCurrency?: string | null;
+  providerInstancePriceMonthlyCents?: number | null;
+  providerInstancePriceHourlyMicros?: number | null;
   placementExplanationJson?: string | null;
 }
 

@@ -171,6 +171,7 @@ export async function startTaskRunnerDO(
       workspaceProfile: input.workspaceProfile ?? null,
       devcontainerConfigName: input.devcontainerConfigName ?? null,
       cloudProvider: initialCapacityCandidate?.provider ?? input.cloudProvider ?? null,
+      providerInstanceType: initialCapacityCandidate?.providerInstanceType ?? null,
       credentialAttributionUserId: input.credentialAttributionUserId ?? input.userId,
       credentialAttributionProjectId:
         (input.credentialAttributionSource ??

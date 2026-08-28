@@ -7,7 +7,8 @@ export function applyCapacityCandidateProvisioningTarget(
 ): void {
   state.config.cloudProvider = candidate.provider;
   state.config.vmLocation = candidate.location;
-  state.config.vmSize = candidate.machineSize;
+  state.config.providerInstanceType = candidate.providerInstanceType;
+  state.config.vmSize = candidate.machineSize ?? state.config.vmSize;
   state.config.credentialAttributionProjectId =
     candidate.credentialAttributionSource === 'project'
       ? (candidate.capacityPoolProjectId ?? state.projectId)

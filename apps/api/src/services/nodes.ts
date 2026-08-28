@@ -47,6 +47,8 @@ export interface CreateNodeInput {
   vmLocation: string;
   heartbeatStaleAfterSeconds: number;
   cloudProvider?: string;
+  /** Provider-native instance type/SKU selected from a compute pool. */
+  providerInstanceType?: string | null;
   /** 'workspace' (default) or 'deployment'. */
   nodeRole?: 'workspace' | 'deployment';
   /** 'shared' (default) or 'exclusive'. Exclusive deployment nodes accept one environment. */
@@ -100,6 +102,7 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date().toISOString();
   const nodeId = ulid();
+  const capacitySnapshotValues = capacityPlacementSnapshotDbValues(input.capacityPlacementSnapshot);
 
   await db.insert(schema.nodes).values({
     id: nodeId,
@@ -120,7 +123,8 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
     nodeRole: input.nodeRole ?? 'workspace',
     nodeMode: input.nodeMode ?? 'shared',
     runtime: input.runtime ?? 'vm',
-    ...capacityPlacementSnapshotDbValues(input.capacityPlacementSnapshot),
+    ...capacitySnapshotValues,
+    providerInstanceType: input.providerInstanceType ?? capacitySnapshotValues.providerInstanceType,
     createdAt: now,
     updatedAt: now,
   });
@@ -318,6 +322,7 @@ export async function provisionNode(
       name: `node-${node.id.toLowerCase()}`,
       size: node.vmSize as 'small' | 'medium' | 'large',
       location: node.vmLocation,
+      instanceType: node.providerInstanceType ?? undefined,
       userData: cloudInit,
       ...(baseImageOverride ? { image: baseImageOverride } : {}),
       labels: buildNodeProviderLabels({

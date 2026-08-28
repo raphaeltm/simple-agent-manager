@@ -918,6 +918,15 @@ export const tasks = sqliteTable(
     }),
     /** Workload role used for placement, e.g. 'workspace' or 'deployment'. */
     workloadRole: text('workload_role'),
+    /** Provider-native offering selected for this placement, if resolved from a compute pool. */
+    providerInstanceType: text('provider_instance_type'),
+    providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
+    providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
+    providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+    providerInstancePriceDisplay: text('provider_instance_price_display'),
+    providerInstancePriceCurrency: text('provider_instance_price_currency'),
+    providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
+    providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
     /** Durable VM admission status mirrored for UI/API visibility. */
     admissionState: text('admission_state'),
     /** Durable VM admission/backpressure reason mirrored for UI/API visibility. */
@@ -1221,6 +1230,15 @@ export const nodes = sqliteTable(
     }),
     /** Workload role this node was provisioned/adopted to serve. */
     workloadRole: text('workload_role'),
+    /** Provider-native offering selected for this node, if resolved from a compute pool. */
+    providerInstanceType: text('provider_instance_type'),
+    providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
+    providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
+    providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+    providerInstancePriceDisplay: text('provider_instance_price_display'),
+    providerInstancePriceCurrency: text('provider_instance_price_currency'),
+    providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
+    providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
     /** JSON snapshot of PlacementExplanation for node-level provisioning audit. */
     placementExplanationJson: text('placement_explanation_json'),
     offboardingStatus: text('offboarding_status'),
@@ -1344,6 +1362,15 @@ export const workspaces = sqliteTable(
     }),
     /** Workload role used for placement, e.g. 'workspace' or 'deployment'. */
     workloadRole: text('workload_role'),
+    /** Provider-native offering selected for this workspace, if resolved from a compute pool. */
+    providerInstanceType: text('provider_instance_type'),
+    providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
+    providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
+    providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+    providerInstancePriceDisplay: text('provider_instance_price_display'),
+    providerInstancePriceCurrency: text('provider_instance_price_currency'),
+    providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
+    providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -2585,6 +2612,16 @@ export const capacityPoolCandidates = sqliteTable(
     runtime: text('runtime'),
     machineClass: text('machine_class'),
     machineSize: text('machine_size'),
+    /** Provider-native instance type/SKU selected by this candidate. */
+    providerInstanceType: text('provider_instance_type'),
+    /** Normalized concrete offering capacity and price metadata. */
+    providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
+    providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
+    providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+    providerInstancePriceDisplay: text('provider_instance_price_display'),
+    providerInstancePriceCurrency: text('provider_instance_price_currency'),
+    providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
+    providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
     priority: integer('priority').notNull().default(0),
     candidateOrder: integer('candidate_order').notNull().default(0),
     status: text('status').notNull().default('active'),

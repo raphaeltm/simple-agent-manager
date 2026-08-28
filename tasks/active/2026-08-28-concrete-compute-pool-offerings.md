@@ -40,16 +40,16 @@ This task updates scheduler placement, reusable-node matching, and provisioning 
 
 ## Implementation checklist
 
-- [ ] Add provider-native offering fields to capacity-pool candidate shared types and D1 schema/migrations: instance type/SKU, normalized vCPU, memory, optional disk, optional price metadata.
-- [ ] Update capacity-pool row mappers and placement snapshots/explanations so candidate metadata is available to resolver/task runner without secrets.
-- [ ] Update default candidate generation to seed concrete provider offerings from provider/catalog metadata: provider + ordered location + provider instance type/SKU + normalized resources/price. Keep abstract size only as a backward-compatible preset/source field, not candidate identity.
-- [ ] Replace placement filtering dependency on `isVmSize`, `canSatisfyVmSize`, and `VM_SIZE_RANK` for capacity-pool candidates with normalized resource checks against `ResolvedResourceReservation` (`cpuMillis`, `memoryMb`; disk only if safe with existing normalized data).
-- [ ] Update candidate scoring for `smallest-fit`, `pack`, balanced/cost-oriented ordering using actual normalized capacity, price, priority, candidate order, and stable IDs.
-- [ ] Update reusable-node matching so concrete candidate identity/resources are used when present, and legacy `vm_size` compatibility remains for nodes without concrete offering metadata.
+- [x] Add provider-native offering fields to capacity-pool candidate shared types and D1 schema/migrations: instance type/SKU, normalized vCPU, memory, optional disk, optional price metadata.
+- [x] Update capacity-pool row mappers and placement snapshots/explanations so candidate metadata is available to resolver/task runner without secrets.
+- [x] Update default candidate generation to seed concrete provider offerings from provider/catalog metadata: provider + ordered location + provider instance type/SKU + normalized resources/price. Keep abstract size only as a backward-compatible preset/source field, not candidate identity.
+- [x] Replace placement filtering dependency on `isVmSize`, `canSatisfyVmSize`, and `VM_SIZE_RANK` for capacity-pool candidates with normalized resource checks against `ResolvedResourceReservation` (`cpuMillis`, `memoryMb`; disk only if safe with existing normalized data).
+- [x] Update candidate scoring for `smallest-fit`, `pack`, balanced/cost-oriented ordering using actual normalized capacity, price, priority, candidate order, and stable IDs.
+- [x] Update reusable-node matching so concrete candidate identity/resources are used when present, and legacy `vm_size` compatibility remains for nodes without concrete offering metadata.
 - [ ] Ensure reusable nodes remain eligible when their historical pool candidate was removed/disabled, subject to same pool scope/provider/location/resource compatibility and normal node health/capacity gates.
-- [ ] Thread selected provider instance type/SKU through `TaskRunnerState`, node record creation, task/node/workspace placement snapshots, and `provisionNode()`.
-- [ ] Update `VMConfig` and provider `createVM()` implementations so a selected provider-native instance type/SKU is sent to each provider, while legacy size fallback still works when no concrete pool/catalog candidate exists.
-- [ ] Preserve VM-size fallback semantics for legacy non-pool provisioning and avoid descending from a concrete pool-selected offering unless the pool explicitly supplies multiple candidates through the centralized resolver.
+- [x] Thread selected provider instance type/SKU through `TaskRunnerState`, node record creation, task/node/workspace placement snapshots, and `provisionNode()`.
+- [x] Update `VMConfig` and provider `createVM()` implementations so a selected provider-native instance type/SKU is sent to each provider, while legacy size fallback still works when no concrete pool/catalog candidate exists.
+- [x] Preserve VM-size fallback semantics for legacy non-pool provisioning and avoid descending from a concrete pool-selected offering unless the pool explicitly supplies multiple candidates through the centralized resolver.
 - [ ] Add/adjust tests for centralized resolver behavior, concrete candidate selection, resource matching, candidate scoring, legacy profile size compatibility, node reuse after candidate removal, and concrete provider createVM payloads.
 - [ ] Update docs/comments only where needed for honesty; do not add public strategy docs.
 - [ ] Run targeted and full local validation; skip staging by explicit user instruction; do not merge.

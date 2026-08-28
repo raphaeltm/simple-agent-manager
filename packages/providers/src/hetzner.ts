@@ -34,7 +34,6 @@ import type {
   Provider,
   ProviderLogger,
   ProviderRequestContext,
-  SizeConfig,
   VMConfig,
   VMInstance,
   VolumeAttachmentConfig,
@@ -127,6 +126,7 @@ export class HetznerProvider implements Provider {
     if (!sizeConfig) {
       throw new ProviderError(this.name, undefined, `Unknown VM size: ${config.size}`);
     }
+    const serverType = config.instanceType ?? sizeConfig.type;
 
     const deadline = Date.now() + this.capacityRetryBudgetMs;
     let lastCapacityError: ProviderError | undefined;
@@ -137,14 +137,14 @@ export class HetznerProvider implements Provider {
       capacityAttempt++
     ) {
       try {
-        return await this.attemptCreateWithPlacementFallback(config, sizeConfig, context);
+        return await this.attemptCreateWithPlacementFallback(config, serverType, context);
       } catch (err) {
         lastCapacityError = await this.retryAfterCapacityError(
           err,
           capacityAttempt,
           deadline,
           config,
-          sizeConfig,
+          serverType,
           context
         );
       }
@@ -161,7 +161,7 @@ export class HetznerProvider implements Provider {
     attempt: number,
     deadline: number,
     config: VMConfig,
-    sizeConfig: SizeConfig,
+    serverType: string,
     context?: ProviderRequestContext
   ): Promise<ProviderError> {
     rethrowIfProviderRequestAborted(error, context);
@@ -175,7 +175,7 @@ export class HetznerProvider implements Provider {
         this.name,
         422,
         `Capacity exhausted after ${attempt + 1} attempts for ` +
-          `server type ${sizeConfig.type} in ${config.location || this.datacenter}: ` +
+          `server type ${serverType} in ${config.location || this.datacenter}: ` +
           error.message,
         { cause: error, providerCode: error.providerCode, category: 'transient_capacity' }
       );
@@ -186,7 +186,7 @@ export class HetznerProvider implements Provider {
       attempt: attempt + 1,
       maxAttempts: this.capacityRetryMaxAttempts,
       budgetRemainingMs: Math.max(0, deadline - Date.now()),
-      serverType: sizeConfig.type,
+      serverType,
       location: config.location || this.datacenter,
       statusCode: error.statusCode,
       providerCode: error.providerCode,
@@ -210,7 +210,7 @@ export class HetznerProvider implements Provider {
    */
   private async attemptCreateWithPlacementFallback(
     config: VMConfig,
-    sizeConfig: SizeConfig,
+    serverType: string,
     context?: ProviderRequestContext
   ): Promise<VMInstance> {
     throwIfProviderRequestAborted(context);
@@ -248,7 +248,7 @@ export class HetznerProvider implements Provider {
             },
             body: JSON.stringify({
               name: config.name,
-              server_type: sizeConfig.type,
+              server_type: serverType,
               image: config.image || DEFAULT_HETZNER_IMAGE,
               location: attempt.location,
               user_data: config.userData,

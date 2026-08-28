@@ -7,6 +7,10 @@ import type {
   DefaultCapacityPoolSummary,
 } from '@simple-agent-manager/shared';
 import { isValidProvider } from '@simple-agent-manager/shared';
+import {
+  getProviderInstanceOfferings,
+  type ProviderInstanceOffering,
+} from '@simple-agent-manager/providers';
 import { and, asc, eq, isNotNull, isNull, notInArray, sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -25,7 +29,6 @@ import {
   orderedLocationsForProvider,
   platformCredentialReference,
   timestampVersion,
-  VM_SIZE_ORDER,
 } from './default-capacity-pool-helpers';
 
 type Db = ReturnType<typeof drizzle>;
@@ -47,7 +50,7 @@ const ACTIVE_STATUS = 'active';
 const DISABLED_STATUS = 'disabled';
 // Cloudflare D1 accepts at most 100 bound parameters per statement.
 const D1_BIND_PARAMETER_LIMIT = 100;
-const CANDIDATE_INSERT_BIND_COUNT = 14;
+const CANDIDATE_INSERT_BIND_COUNT = 22;
 const CANDIDATE_UPSERT_UPDATE_BIND_COUNT = 1;
 const CANDIDATE_UPSERT_CHUNK_SIZE = Math.max(
   1,
@@ -575,10 +578,11 @@ async function ensureCandidatesForSource(
   const candidateIds: string[] = [];
   const candidateValues: schema.NewCapacityPoolCandidate[] = [];
   let candidateOrder = 0;
+  const offerings = getProviderInstanceOfferings(provider);
 
   for (const location of orderedLocationsForProvider(provider)) {
-    for (const size of VM_SIZE_ORDER) {
-      const id = defaultCandidateId(poolId, sourceId, provider, location.id, size);
+    for (const offering of offerings) {
+      const id = defaultCandidateId(poolId, sourceId, provider, location.id, offering.instanceType);
       candidateIds.push(id);
       candidateValues.push({
         id,
@@ -589,7 +593,8 @@ async function ensureCandidatesForSource(
         workloadRole: DEFAULT_WORKLOAD_ROLE,
         runtime: DEFAULT_RUNTIME,
         machineClass: DEFAULT_MACHINE_CLASS,
-        machineSize: size,
+        machineSize: offering.legacyVmSize,
+        ...providerInstanceOfferingDbValues(offering),
         priority: candidateOrder,
         candidateOrder,
         status: ACTIVE_STATUS,
@@ -614,6 +619,14 @@ async function ensureCandidatesForSource(
           runtime: sql`excluded.runtime`,
           machineClass: sql`excluded.machine_class`,
           machineSize: sql`excluded.machine_size`,
+          providerInstanceType: sql`excluded.provider_instance_type`,
+          providerInstanceVcpuCount: sql`excluded.provider_instance_vcpu_count`,
+          providerInstanceMemoryMb: sql`excluded.provider_instance_memory_mb`,
+          providerInstanceDiskGb: sql`excluded.provider_instance_disk_gb`,
+          providerInstancePriceDisplay: sql`excluded.provider_instance_price_display`,
+          providerInstancePriceCurrency: sql`excluded.provider_instance_price_currency`,
+          providerInstancePriceMonthlyCents: sql`excluded.provider_instance_price_monthly_cents`,
+          providerInstancePriceHourlyMicros: sql`excluded.provider_instance_price_hourly_micros`,
           priority: sql`excluded.priority`,
           candidateOrder: sql`excluded.candidate_order`,
           updatedAt: now,
@@ -622,6 +635,29 @@ async function ensureCandidatesForSource(
   }
 
   await disableMissingCandidatesForSource(db, poolId, sourceId, candidateIds);
+}
+
+function providerInstanceOfferingDbValues(offering: ProviderInstanceOffering): Pick<
+  schema.NewCapacityPoolCandidate,
+  | 'providerInstanceType'
+  | 'providerInstanceVcpuCount'
+  | 'providerInstanceMemoryMb'
+  | 'providerInstanceDiskGb'
+  | 'providerInstancePriceDisplay'
+  | 'providerInstancePriceCurrency'
+  | 'providerInstancePriceMonthlyCents'
+  | 'providerInstancePriceHourlyMicros'
+> {
+  return {
+    providerInstanceType: offering.instanceType,
+    providerInstanceVcpuCount: offering.vcpuCount,
+    providerInstanceMemoryMb: offering.memoryMb,
+    providerInstanceDiskGb: offering.diskGb,
+    providerInstancePriceDisplay: offering.priceDisplay,
+    providerInstancePriceCurrency: offering.priceCurrency,
+    providerInstancePriceMonthlyCents: offering.priceMonthlyCents,
+    providerInstancePriceHourlyMicros: offering.priceHourlyMicros,
+  };
 }
 
 async function disableMissingCandidatesForSource(

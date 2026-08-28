@@ -11,10 +11,18 @@ export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS = `
   placement_credential_version,
   capacity_pool_project_id,
   workload_role,
+  provider_instance_type,
+  provider_instance_vcpu_count,
+  provider_instance_memory_mb,
+  provider_instance_disk_gb,
+  provider_instance_price_display,
+  provider_instance_price_currency,
+  provider_instance_price_monthly_cents,
+  provider_instance_price_hourly_micros,
   placement_explanation_json
 `;
 
-export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS = `?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`;
+export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS = `?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`;
 
 export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS = `
   capacity_pool_id = ?,
@@ -27,6 +35,14 @@ export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS = `
   placement_credential_version = ?,
   capacity_pool_project_id = ?,
   workload_role = ?,
+  provider_instance_type = ?,
+  provider_instance_vcpu_count = ?,
+  provider_instance_memory_mb = ?,
+  provider_instance_disk_gb = ?,
+  provider_instance_price_display = ?,
+  provider_instance_price_currency = ?,
+  provider_instance_price_monthly_cents = ?,
+  provider_instance_price_hourly_micros = ?,
   placement_explanation_json = ?
 `;
 
@@ -44,6 +60,14 @@ export function capacityPlacementSnapshotSqlValues(
     snapshot?.placementCredentialVersion ?? null,
     snapshot?.capacityPoolProjectId ?? null,
     snapshot?.workloadRole ?? null,
+    snapshot?.providerInstanceType ?? null,
+    snapshot?.providerInstanceVcpuCount ?? null,
+    snapshot?.providerInstanceMemoryMb ?? null,
+    snapshot?.providerInstanceDiskGb ?? null,
+    snapshot?.providerInstancePriceDisplay ?? null,
+    snapshot?.providerInstancePriceCurrency ?? null,
+    snapshot?.providerInstancePriceMonthlyCents ?? null,
+    snapshot?.providerInstancePriceHourlyMicros ?? null,
     snapshot?.placementExplanationJson ?? null,
   ];
 }
@@ -61,6 +85,14 @@ export function capacityPlacementSnapshotDbValues(
   placementCredentialVersion: number | null;
   capacityPoolProjectId: string | null;
   workloadRole: string | null;
+  providerInstanceType: string | null;
+  providerInstanceVcpuCount: number | null;
+  providerInstanceMemoryMb: number | null;
+  providerInstanceDiskGb: number | null;
+  providerInstancePriceDisplay: string | null;
+  providerInstancePriceCurrency: string | null;
+  providerInstancePriceMonthlyCents: number | null;
+  providerInstancePriceHourlyMicros: number | null;
   placementExplanationJson: string | null;
 } {
   return {
@@ -74,6 +106,14 @@ export function capacityPlacementSnapshotDbValues(
     placementCredentialVersion: snapshot?.placementCredentialVersion ?? null,
     capacityPoolProjectId: snapshot?.capacityPoolProjectId ?? null,
     workloadRole: snapshot?.workloadRole ?? null,
+    providerInstanceType: snapshot?.providerInstanceType ?? null,
+    providerInstanceVcpuCount: snapshot?.providerInstanceVcpuCount ?? null,
+    providerInstanceMemoryMb: snapshot?.providerInstanceMemoryMb ?? null,
+    providerInstanceDiskGb: snapshot?.providerInstanceDiskGb ?? null,
+    providerInstancePriceDisplay: snapshot?.providerInstancePriceDisplay ?? null,
+    providerInstancePriceCurrency: snapshot?.providerInstancePriceCurrency ?? null,
+    providerInstancePriceMonthlyCents: snapshot?.providerInstancePriceMonthlyCents ?? null,
+    providerInstancePriceHourlyMicros: snapshot?.providerInstancePriceHourlyMicros ?? null,
     placementExplanationJson: snapshot?.placementExplanationJson ?? null,
   };
 }

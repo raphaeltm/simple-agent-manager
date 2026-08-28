@@ -18,7 +18,6 @@ import type {
 import {
   canSatisfyVmSize,
   CREDENTIAL_PROVIDERS,
-  DEFAULT_VM_CAPACITY,
   DEFAULT_VM_LOCATION,
   DEFAULT_VM_SIZE,
   DEFAULT_WORKSPACE_PROFILE,
@@ -27,9 +26,7 @@ import {
   isCapacityPlacementCredentialSource,
   isValidLocationForProvider,
   isValidProvider,
-  PROVIDER_VM_CAPACITY,
   resolveResourceReservation,
-  VM_SIZE_LABELS,
 } from '@simple-agent-manager/shared';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -360,6 +357,7 @@ export function resolveReusableNodeCapacitySnapshot(input: {
   node: CapacityAwareNodePlacementRow;
   projectId: string;
   requestedVmSize: string;
+  requestedReservation?: ResolvedResourceReservation | null;
 }): CapacityPlacementSnapshot | null | undefined {
   const selection = input.selection ?? null;
   const node = input.node;
@@ -382,7 +380,12 @@ export function resolveReusableNodeCapacitySnapshot(input: {
     if (node.capacityPoolId !== selection.poolId) return undefined;
   }
 
-  const candidate = selectCandidateForReusableNode(selection, node, input.requestedVmSize);
+  const candidate = selectCandidateForReusableNode(
+    selection,
+    node,
+    input.requestedVmSize,
+    input.requestedReservation ?? null
+  );
   return candidate?.snapshot;
 }
 
@@ -417,7 +420,7 @@ function buildCapacityPoolSelection(
       );
       return normalized ? [normalized] : [];
     })
-    .sort((a, b) => compareCapacityCandidates(a, b, pool.strategy));
+    .sort((a, b) => compareCapacityCandidates(a, b, pool.strategy, placement.resolvedReservation));
 
   return {
     ...baseSelection,
@@ -441,12 +444,19 @@ function normalizeCapacityCandidate(
   if (!candidate.location || !isValidLocationForProvider(candidate.provider, candidate.location)) {
     return null;
   }
-  if (!isVmSize(candidate.machineSize)) return null;
-  if (!canSatisfyVmSize(candidate.machineSize, placement.vmSize)) return null;
+  const providerInstanceType = nonEmptyString(candidate.providerInstanceType);
+  if (!providerInstanceType) return null;
+  const providerInstanceVcpuCount = positiveInteger(candidate.providerInstanceVcpuCount);
+  const providerInstanceMemoryMb = positiveInteger(candidate.providerInstanceMemoryMb);
+  if (providerInstanceVcpuCount === null || providerInstanceMemoryMb === null) return null;
+  const providerInstanceDiskGb = optionalPositiveInteger(candidate.providerInstanceDiskGb);
   if (
-    !candidateSatisfiesReservation(
-      candidate.provider,
-      candidate.machineSize,
+    !capacityCandidateSatisfiesReservation(
+      {
+        providerInstanceVcpuCount,
+        providerInstanceMemoryMb,
+        providerInstanceDiskGb,
+      },
       placement.resolvedReservation
     )
   ) {
@@ -472,7 +482,19 @@ function normalizeCapacityCandidate(
     workloadRole: candidate.workloadRole,
     runtime: candidate.runtime,
     machineClass: candidate.machineClass,
-    machineSize: candidate.machineSize,
+    machineSize: normalizeLegacyVmSize(candidate.machineSize),
+    providerInstanceType,
+    providerInstanceVcpuCount,
+    providerInstanceMemoryMb,
+    providerInstanceDiskGb,
+    providerInstancePriceDisplay: candidate.providerInstancePriceDisplay,
+    providerInstancePriceCurrency: nonEmptyString(candidate.providerInstancePriceCurrency),
+    providerInstancePriceMonthlyCents: nonNegativeInteger(
+      candidate.providerInstancePriceMonthlyCents
+    ),
+    providerInstancePriceHourlyMicros: nonNegativeInteger(
+      candidate.providerInstancePriceHourlyMicros
+    ),
     priority: candidate.priority,
     candidateOrder: candidate.candidateOrder,
     credentialAttributionSource: source.credentialSource,
@@ -495,6 +517,18 @@ function normalizeCapacityCandidate(
       placementCredentialVersion: source.credentialVersion,
       capacityPoolProjectId,
       workloadRole: candidate.workloadRole,
+      providerInstanceType,
+      providerInstanceVcpuCount,
+      providerInstanceMemoryMb,
+      providerInstanceDiskGb,
+      providerInstancePriceDisplay: candidate.providerInstancePriceDisplay,
+      providerInstancePriceCurrency: nonEmptyString(candidate.providerInstancePriceCurrency),
+      providerInstancePriceMonthlyCents: nonNegativeInteger(
+        candidate.providerInstancePriceMonthlyCents
+      ),
+      providerInstancePriceHourlyMicros: nonNegativeInteger(
+        candidate.providerInstancePriceHourlyMicros
+      ),
       placementExplanationJson: buildCapacityPlacementExplanation(
         {
           poolId: pool.id,
@@ -521,20 +555,24 @@ function isActiveCapacityPlacementOption(
 function selectCandidateForReusableNode(
   selection: TaskStartCapacityPoolSelection,
   node: CapacityAwareNodePlacementRow,
-  requestedVmSize: string
+  requestedVmSize: string,
+  requestedReservation: ResolvedResourceReservation | null
 ): TaskStartCapacityCandidate | null {
   if (!node.capacitySourceId) return null;
 
   const exactCandidate = node.capacityPoolCandidateId
     ? selection.candidates.find((candidate) => candidate.id === node.capacityPoolCandidateId)
     : null;
-  if (exactCandidate && capacityCandidateMatchesNode(exactCandidate, node, requestedVmSize)) {
+  if (
+    exactCandidate &&
+    capacityCandidateMatchesNode(exactCandidate, node, requestedVmSize, requestedReservation)
+  ) {
     return exactCandidate;
   }
 
   return (
     selection.candidates.find((candidate) =>
-      capacityCandidateMatchesNode(candidate, node, requestedVmSize)
+      capacityCandidateMatchesNode(candidate, node, requestedVmSize, requestedReservation)
     ) ?? null
   );
 }
@@ -542,42 +580,222 @@ function selectCandidateForReusableNode(
 function capacityCandidateMatchesNode(
   candidate: TaskStartCapacityCandidate,
   node: CapacityAwareNodePlacementRow,
-  requestedVmSize: string
+  requestedVmSize: string,
+  requestedReservation: ResolvedResourceReservation | null
 ): boolean {
   if (candidate.capacitySourceId !== node.capacitySourceId) return false;
   if (node.cloudProvider && candidate.provider !== node.cloudProvider) return false;
   if (node.vmLocation && candidate.location !== node.vmLocation) return false;
-  if (!node.vmSize) return false;
-  return canSatisfyVmSize(node.vmSize, requestedVmSize);
+  if (node.providerInstanceType) {
+    if (candidate.providerInstanceType !== node.providerInstanceType) return false;
+  } else if (candidate.machineSize && node.vmSize) {
+    if (!canSatisfyVmSize(node.vmSize, candidate.machineSize)) return false;
+  } else {
+    return false;
+  }
+
+  if (requestedReservation) {
+    if (
+      !nodeOfferingSatisfiesReservation(
+        node,
+        requestedReservation,
+        node.providerInstanceType ? candidate : null
+      )
+    ) {
+      return false;
+    }
+  }
+
+  if (node.providerInstanceType) return true;
+  return node.vmSize ? canSatisfyVmSize(node.vmSize, requestedVmSize) : false;
 }
 
 function compareCapacityCandidates(
   a: TaskStartCapacityCandidate,
   b: TaskStartCapacityCandidate,
-  strategy: CapacityPoolStrategy
+  strategy: CapacityPoolStrategy,
+  reservation: ResolvedResourceReservation
 ): number {
-  const sizeDiff = VM_SIZE_RANK[a.machineSize] - VM_SIZE_RANK[b.machineSize];
-  if (strategy === 'pack' && sizeDiff !== 0) return -sizeDiff;
-  if (strategy === 'smallest-fit' && sizeDiff !== 0) return sizeDiff;
+  const capacityDiff = compareOfferingCapacity(a, b);
+  if (strategy === 'pack' && capacityDiff !== 0) return -capacityDiff;
+  if (strategy === 'smallest-fit') {
+    const fitDiff = compareOfferingFitSurplus(a, b, reservation);
+    if (fitDiff !== 0) return fitDiff;
+    const priceDiff = compareOfferingPrice(a, b);
+    if (priceDiff !== 0) return priceDiff;
+    if (capacityDiff !== 0) return capacityDiff;
+  }
   if (a.priority !== b.priority) return a.priority - b.priority;
+  const priceDiff = compareOfferingPrice(a, b);
+  if (priceDiff !== 0) return priceDiff;
+  if (strategy !== 'pack' && capacityDiff !== 0) return capacityDiff;
   if (a.candidateOrder !== b.candidateOrder) return a.candidateOrder - b.candidateOrder;
   return a.id.localeCompare(b.id);
 }
 
-function candidateSatisfiesReservation(
-  provider: CredentialProvider,
-  machineSize: VMSize,
+function capacityCandidateSatisfiesReservation(
+  candidate: Pick<
+    TaskStartCapacityCandidate,
+    'providerInstanceVcpuCount' | 'providerInstanceMemoryMb' | 'providerInstanceDiskGb'
+  >,
   reservation: ResolvedResourceReservation
 ): boolean {
-  const providerCapacity = PROVIDER_VM_CAPACITY[provider] ?? DEFAULT_VM_CAPACITY;
-  const capacity = providerCapacity[machineSize] ?? DEFAULT_VM_CAPACITY[machineSize];
-  return (
-    capacity.vcpu * 1000 >= reservation.cpuMillis && capacity.ramGb * 1024 >= reservation.memoryMb
-  );
+  if (candidate.providerInstanceVcpuCount * 1000 < reservation.cpuMillis) return false;
+  if (candidate.providerInstanceMemoryMb < reservation.memoryMb) return false;
+  if (
+    candidate.providerInstanceDiskGb !== null &&
+    candidate.providerInstanceDiskGb * 1024 < reservation.diskMb
+  ) {
+    return false;
+  }
+  return true;
 }
 
-function isVmSize(value: string | null): value is VMSize {
-  return typeof value === 'string' && Object.hasOwn(VM_SIZE_LABELS, value);
+function nodeOfferingSatisfiesReservation(
+  node: CapacityAwareNodePlacementRow,
+  reservation: ResolvedResourceReservation,
+  fallbackCandidate: TaskStartCapacityCandidate | null
+): boolean {
+  const vcpuCount = positiveInteger(node.providerInstanceVcpuCount);
+  const memoryMb = positiveInteger(node.providerInstanceMemoryMb);
+  const diskGb = optionalPositiveInteger(node.providerInstanceDiskGb);
+
+  if (vcpuCount !== null && memoryMb !== null) {
+    return capacityCandidateSatisfiesReservation(
+      {
+        providerInstanceVcpuCount: vcpuCount,
+        providerInstanceMemoryMb: memoryMb,
+        providerInstanceDiskGb: diskGb,
+      },
+      reservation
+    );
+  }
+
+  if (fallbackCandidate) {
+    return capacityCandidateSatisfiesReservation(fallbackCandidate, reservation);
+  }
+
+  return true;
+}
+
+function compareOfferingCapacity(
+  a: Pick<
+    TaskStartCapacityCandidate,
+    'providerInstanceVcpuCount' | 'providerInstanceMemoryMb' | 'providerInstanceDiskGb'
+  >,
+  b: Pick<
+    TaskStartCapacityCandidate,
+    'providerInstanceVcpuCount' | 'providerInstanceMemoryMb' | 'providerInstanceDiskGb'
+  >
+): number {
+  const cpuDiff = a.providerInstanceVcpuCount - b.providerInstanceVcpuCount;
+  if (cpuDiff !== 0) return cpuDiff;
+  const memoryDiff = a.providerInstanceMemoryMb - b.providerInstanceMemoryMb;
+  if (memoryDiff !== 0) return memoryDiff;
+  return (a.providerInstanceDiskGb ?? 0) - (b.providerInstanceDiskGb ?? 0);
+}
+
+function compareOfferingFitSurplus(
+  a: Pick<
+    TaskStartCapacityCandidate,
+    'providerInstanceVcpuCount' | 'providerInstanceMemoryMb' | 'providerInstanceDiskGb'
+  >,
+  b: Pick<
+    TaskStartCapacityCandidate,
+    'providerInstanceVcpuCount' | 'providerInstanceMemoryMb' | 'providerInstanceDiskGb'
+  >,
+  reservation: ResolvedResourceReservation
+): number {
+  return offeringFitSurplus(a, reservation) - offeringFitSurplus(b, reservation);
+}
+
+function offeringFitSurplus(
+  candidate: Pick<
+    TaskStartCapacityCandidate,
+    'providerInstanceVcpuCount' | 'providerInstanceMemoryMb' | 'providerInstanceDiskGb'
+  >,
+  reservation: ResolvedResourceReservation
+): number {
+  const cpuBase = Math.max(1, reservation.cpuMillis);
+  const memoryBase = Math.max(1, reservation.memoryMb);
+  const diskBase = Math.max(1, reservation.diskMb);
+  const cpuSurplus = Math.max(0, candidate.providerInstanceVcpuCount * 1000 - reservation.cpuMillis);
+  const memorySurplus = Math.max(0, candidate.providerInstanceMemoryMb - reservation.memoryMb);
+  const diskSurplus =
+    candidate.providerInstanceDiskGb === null
+      ? 0
+      : Math.max(0, candidate.providerInstanceDiskGb * 1024 - reservation.diskMb);
+  return cpuSurplus / cpuBase + memorySurplus / memoryBase + diskSurplus / diskBase;
+}
+
+function compareOfferingPrice(
+  a: Pick<
+    TaskStartCapacityCandidate,
+    | 'providerInstancePriceCurrency'
+    | 'providerInstancePriceMonthlyCents'
+    | 'providerInstancePriceHourlyMicros'
+  >,
+  b: Pick<
+    TaskStartCapacityCandidate,
+    | 'providerInstancePriceCurrency'
+    | 'providerInstancePriceMonthlyCents'
+    | 'providerInstancePriceHourlyMicros'
+  >
+): number {
+  const aPrice = comparablePriceMicros(a);
+  const bPrice = comparablePriceMicros(b);
+  if (aPrice === null && bPrice === null) return 0;
+  if (aPrice === null) return 1;
+  if (bPrice === null) return -1;
+  if (aPrice.currency !== bPrice.currency) return 0;
+  return aPrice.value - bPrice.value;
+}
+
+function comparablePriceMicros(
+  candidate: Pick<
+    TaskStartCapacityCandidate,
+    | 'providerInstancePriceCurrency'
+    | 'providerInstancePriceMonthlyCents'
+    | 'providerInstancePriceHourlyMicros'
+  >
+): { currency: string; value: number } | null {
+  const currency = nonEmptyString(candidate.providerInstancePriceCurrency);
+  if (!currency) return null;
+  const hourly = nonNegativeInteger(candidate.providerInstancePriceHourlyMicros);
+  if (hourly !== null) return { currency, value: hourly };
+  const monthly = nonNegativeInteger(candidate.providerInstancePriceMonthlyCents);
+  if (monthly !== null) return { currency, value: monthly };
+  return null;
+}
+
+function nonEmptyString(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function positiveInteger(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function optionalPositiveInteger(value: number | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  return positiveInteger(value);
+}
+
+function nonNegativeInteger(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function normalizeLegacyVmSize(value: string | null): VMSize | null {
+  switch (value) {
+    case 'small':
+    case 'medium':
+    case 'large':
+      return value;
+    default:
+      return null;
+  }
 }
 
 function isCredentialPlacementSource(value: unknown): value is CredentialSource {
@@ -594,7 +812,19 @@ function buildCapacityPlacementExplanation(
   >,
   candidate?: Pick<
     TaskStartCapacityCandidate,
-    'id' | 'capacitySourceId' | 'provider' | 'location' | 'machineSize'
+    | 'id'
+    | 'capacitySourceId'
+    | 'provider'
+    | 'location'
+    | 'machineSize'
+    | 'providerInstanceType'
+    | 'providerInstanceVcpuCount'
+    | 'providerInstanceMemoryMb'
+    | 'providerInstanceDiskGb'
+    | 'providerInstancePriceDisplay'
+    | 'providerInstancePriceCurrency'
+    | 'providerInstancePriceMonthlyCents'
+    | 'providerInstancePriceHourlyMicros'
   >
 ): string {
   return JSON.stringify({
@@ -610,15 +840,17 @@ function buildCapacityPlacementExplanation(
     provider: candidate?.provider ?? null,
     location: candidate?.location ?? null,
     machineSize: candidate?.machineSize ?? null,
+    providerInstanceType: candidate?.providerInstanceType ?? null,
+    providerInstanceVcpuCount: candidate?.providerInstanceVcpuCount ?? null,
+    providerInstanceMemoryMb: candidate?.providerInstanceMemoryMb ?? null,
+    providerInstanceDiskGb: candidate?.providerInstanceDiskGb ?? null,
+    providerInstancePriceDisplay: candidate?.providerInstancePriceDisplay ?? null,
+    providerInstancePriceCurrency: candidate?.providerInstancePriceCurrency ?? null,
+    providerInstancePriceMonthlyCents: candidate?.providerInstancePriceMonthlyCents ?? null,
+    providerInstancePriceHourlyMicros: candidate?.providerInstancePriceHourlyMicros ?? null,
     decidedAt: new Date().toISOString(),
   });
 }
-
-const VM_SIZE_RANK: Record<VMSize, number> = {
-  small: 1,
-  medium: 2,
-  large: 3,
-};
 
 function resolveProvider(
   explicitProvider: CredentialProvider | string | null | undefined,

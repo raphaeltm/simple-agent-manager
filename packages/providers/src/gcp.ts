@@ -282,7 +282,7 @@ export class GcpProvider implements Provider {
     if (!sizeConfig) {
       throw new ProviderError(this.name, undefined, `Unknown VM size: ${config.size}`);
     }
-    const machineType = sizeConfig.type;
+    const machineType = config.instanceType ?? sizeConfig.type;
     const headers = await this.authHeaders(context);
 
     // Ensure firewall rules exist before creating VM

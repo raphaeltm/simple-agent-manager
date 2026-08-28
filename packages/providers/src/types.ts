@@ -13,6 +13,9 @@ export interface VMConfig {
   /** VM size tier */
   size: VMSize;
 
+  /** Provider-native instance type/SKU. When present, overrides the legacy size mapping. */
+  instanceType?: string;
+
   /** Datacenter/region identifier */
   location: string;
 

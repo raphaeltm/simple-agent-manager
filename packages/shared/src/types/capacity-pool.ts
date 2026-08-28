@@ -78,7 +78,18 @@ export interface CapacityPoolCandidate {
   workloadRole: CapacityWorkloadRole;
   runtime: string | null;
   machineClass: string | null;
+  /** Backward-compatible preset that seeded/requested this offering. Not candidate identity. */
   machineSize: string | null;
+  /** Provider-native instance type, plan, flavor, machine type, or SKU. */
+  providerInstanceType: string | null;
+  /** Normalized concrete offering capacity. */
+  providerInstanceVcpuCount: number | null;
+  providerInstanceMemoryMb: number | null;
+  providerInstanceDiskGb: number | null;
+  providerInstancePriceDisplay: string | null;
+  providerInstancePriceCurrency: string | null;
+  providerInstancePriceMonthlyCents: number | null;
+  providerInstancePriceHourlyMicros: number | null;
   priority: number;
   candidateOrder: number;
   status: CapacityPoolStatus;
@@ -105,6 +116,14 @@ export interface CapacityPlacementSnapshot {
   placementCredentialVersion: number | null;
   capacityPoolProjectId: string | null;
   workloadRole: CapacityWorkloadRole | null;
+  providerInstanceType?: string | null;
+  providerInstanceVcpuCount?: number | null;
+  providerInstanceMemoryMb?: number | null;
+  providerInstanceDiskGb?: number | null;
+  providerInstancePriceDisplay?: string | null;
+  providerInstancePriceCurrency?: string | null;
+  providerInstancePriceMonthlyCents?: number | null;
+  providerInstancePriceHourlyMicros?: number | null;
   placementExplanationJson?: string | null;
 }
 

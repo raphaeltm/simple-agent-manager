@@ -1,11 +1,5 @@
-import type { CapacityPoolScope, CredentialProvider, VMSize } from '@simple-agent-manager/shared';
-import {
-  getDefaultLocationForProvider,
-  getLocationsForProvider,
-  VM_SIZE_LABELS,
-} from '@simple-agent-manager/shared';
-
-export const VM_SIZE_ORDER = Object.keys(VM_SIZE_LABELS) as VMSize[];
+import type { CapacityPoolScope, CredentialProvider } from '@simple-agent-manager/shared';
+import { getDefaultLocationForProvider, getLocationsForProvider } from '@simple-agent-manager/shared';
 
 export interface DefaultPoolScopeIdentity {
   scope: CapacityPoolScope;
@@ -51,9 +45,9 @@ export function defaultCandidateId(
   sourceId: string,
   provider: CredentialProvider,
   location: string,
-  size: VMSize
+  instanceType: string
 ): string {
-  return `cap-candidate-default:${poolId}:${sourceId}:${provider}:${location}:${size}`;
+  return `cap-candidate-default:${poolId}:${sourceId}:${provider}:${location}:${instanceType}`;
 }
 
 export function legacyCredentialReference(credentialId: string): string {

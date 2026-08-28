@@ -131,6 +131,14 @@ export function toCapacityPoolCandidate(
     runtime: row.runtime,
     machineClass: row.machineClass,
     machineSize: row.machineSize,
+    providerInstanceType: row.providerInstanceType,
+    providerInstanceVcpuCount: row.providerInstanceVcpuCount,
+    providerInstanceMemoryMb: row.providerInstanceMemoryMb,
+    providerInstanceDiskGb: row.providerInstanceDiskGb,
+    providerInstancePriceDisplay: row.providerInstancePriceDisplay,
+    providerInstancePriceCurrency: row.providerInstancePriceCurrency,
+    providerInstancePriceMonthlyCents: row.providerInstancePriceMonthlyCents,
+    providerInstancePriceHourlyMicros: row.providerInstancePriceHourlyMicros,
     priority: row.priority,
     candidateOrder: row.candidateOrder,
     status: expectPersistedValue<CapacityPoolStatus>(
@@ -154,6 +162,14 @@ export interface CapacityPlacementSnapshotRow {
   placementCredentialVersion: number | null;
   capacityPoolProjectId: string | null;
   workloadRole: string | null;
+  providerInstanceType?: string | null;
+  providerInstanceVcpuCount?: number | null;
+  providerInstanceMemoryMb?: number | null;
+  providerInstanceDiskGb?: number | null;
+  providerInstancePriceDisplay?: string | null;
+  providerInstancePriceCurrency?: string | null;
+  providerInstancePriceMonthlyCents?: number | null;
+  providerInstancePriceHourlyMicros?: number | null;
   placementExplanationJson?: string | null;
 }
 
@@ -183,6 +199,14 @@ export function toCapacityPlacementSnapshot(
       row.workloadRole,
       isCapacityWorkloadRole
     ),
+    providerInstanceType: row.providerInstanceType ?? null,
+    providerInstanceVcpuCount: row.providerInstanceVcpuCount ?? null,
+    providerInstanceMemoryMb: row.providerInstanceMemoryMb ?? null,
+    providerInstanceDiskGb: row.providerInstanceDiskGb ?? null,
+    providerInstancePriceDisplay: row.providerInstancePriceDisplay ?? null,
+    providerInstancePriceCurrency: row.providerInstancePriceCurrency ?? null,
+    providerInstancePriceMonthlyCents: row.providerInstancePriceMonthlyCents ?? null,
+    providerInstancePriceHourlyMicros: row.providerInstancePriceHourlyMicros ?? null,
     placementExplanationJson: row.placementExplanationJson ?? null,
   };
 }

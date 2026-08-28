@@ -10,6 +10,7 @@ import {
   DEFAULT_MAX_WORKSPACES_PER_NODE,
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
+  type ResolvedResourceReservation,
 } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
@@ -31,10 +32,10 @@ export interface ReusableNodeSelection {
   capacityPlacementSnapshot: CapacityPlacementSnapshot | null;
 }
 
-type NodePlacementFields = {
+export type NodePlacementFields = {
   id: string;
-  vmSize: string;
-  vmLocation: string;
+  vmSize: string | null;
+  vmLocation: string | null;
   cloudProvider: string | null;
   capacityPoolId: string | null;
   capacityPoolScope: string | null;
@@ -46,6 +47,14 @@ type NodePlacementFields = {
   placementCredentialVersion?: number | null;
   capacityPoolProjectId: string | null;
   workloadRole: string | null;
+  providerInstanceType?: string | null;
+  providerInstanceVcpuCount?: number | null;
+  providerInstanceMemoryMb?: number | null;
+  providerInstanceDiskGb?: number | null;
+  providerInstancePriceDisplay?: string | null;
+  providerInstancePriceCurrency?: string | null;
+  providerInstancePriceMonthlyCents?: number | null;
+  providerInstancePriceHourlyMicros?: number | null;
   placementExplanationJson?: string | null;
 };
 
@@ -179,6 +188,14 @@ export async function tryClaimWarmNode(
        n.placement_credential_version AS placementCredentialVersion,
        n.capacity_pool_project_id AS capacityPoolProjectId,
        n.workload_role AS workloadRole,
+       n.provider_instance_type AS providerInstanceType,
+       n.provider_instance_vcpu_count AS providerInstanceVcpuCount,
+       n.provider_instance_memory_mb AS providerInstanceMemoryMb,
+       n.provider_instance_disk_gb AS providerInstanceDiskGb,
+       n.provider_instance_price_display AS providerInstancePriceDisplay,
+       n.provider_instance_price_currency AS providerInstancePriceCurrency,
+       n.provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
+       n.provider_instance_price_hourly_micros AS providerInstancePriceHourlyMicros,
        n.placement_explanation_json AS placementExplanationJson
      FROM tasks t
      LEFT JOIN nodes n ON n.id = t.claimed_warm_node_id
@@ -222,6 +239,14 @@ export async function tryClaimWarmNode(
        placement_credential_version AS placementCredentialVersion,
        capacity_pool_project_id AS capacityPoolProjectId,
        workload_role AS workloadRole,
+       provider_instance_type AS providerInstanceType,
+       provider_instance_vcpu_count AS providerInstanceVcpuCount,
+       provider_instance_memory_mb AS providerInstanceMemoryMb,
+       provider_instance_disk_gb AS providerInstanceDiskGb,
+       provider_instance_price_display AS providerInstancePriceDisplay,
+       provider_instance_price_currency AS providerInstancePriceCurrency,
+       provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
+       provider_instance_price_hourly_micros AS providerInstancePriceHourlyMicros,
        placement_explanation_json AS placementExplanationJson,
        agent_version AS agentVersion
      FROM nodes
@@ -238,7 +263,7 @@ export async function tryClaimWarmNode(
     .filter((node) =>
       isNodeAgentVersionCompatible(node.agentVersion, rc.env.VM_AGENT_REQUIRED_VERSION)
     )
-    .filter((node) => canSatisfyVmSize(node.vmSize, state.config.vmSize))
+    .filter((node) => nodeSatisfiesTaskResources(node, state))
     .flatMap((node) => {
       const selection = resolveReusableNodeSelection(state, node);
       return selection ? [{ ...node, selection }] : [];
@@ -273,6 +298,14 @@ export async function tryClaimWarmNode(
            placement_credential_version AS placementCredentialVersion,
            capacity_pool_project_id AS capacityPoolProjectId,
            workload_role AS workloadRole,
+           provider_instance_type AS providerInstanceType,
+           provider_instance_vcpu_count AS providerInstanceVcpuCount,
+           provider_instance_memory_mb AS providerInstanceMemoryMb,
+           provider_instance_disk_gb AS providerInstanceDiskGb,
+           provider_instance_price_display AS providerInstancePriceDisplay,
+           provider_instance_price_currency AS providerInstancePriceCurrency,
+           provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
+           provider_instance_price_hourly_micros AS providerInstancePriceHourlyMicros,
            placement_explanation_json AS placementExplanationJson,
            agent_version AS agentVersion
          FROM nodes WHERE id = ? AND status = 'running' AND warm_since IS NOT NULL`
@@ -369,6 +402,14 @@ export async function findNodeWithCapacity(
        placement_credential_version AS placementCredentialVersion,
        capacity_pool_project_id AS capacityPoolProjectId,
        workload_role AS workloadRole,
+       provider_instance_type AS providerInstanceType,
+       provider_instance_vcpu_count AS providerInstanceVcpuCount,
+       provider_instance_memory_mb AS providerInstanceMemoryMb,
+       provider_instance_disk_gb AS providerInstanceDiskGb,
+       provider_instance_price_display AS providerInstancePriceDisplay,
+       provider_instance_price_currency AS providerInstancePriceCurrency,
+       provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
+       provider_instance_price_hourly_micros AS providerInstancePriceHourlyMicros,
        placement_explanation_json AS placementExplanationJson,
        health_status AS healthStatus,
        last_metrics AS lastMetrics,
@@ -393,6 +434,14 @@ export async function findNodeWithCapacity(
       placementCredentialVersion: number | null;
       capacityPoolProjectId: string | null;
       workloadRole: string | null;
+      providerInstanceType: string | null;
+      providerInstanceVcpuCount: number | null;
+      providerInstanceMemoryMb: number | null;
+      providerInstanceDiskGb: number | null;
+      providerInstancePriceDisplay: string | null;
+      providerInstancePriceCurrency: string | null;
+      providerInstancePriceMonthlyCents: number | null;
+      providerInstancePriceHourlyMicros: number | null;
       placementExplanationJson: string | null;
       healthStatus: string;
       lastMetrics: string | null;
@@ -428,7 +477,7 @@ export async function findNodeWithCapacity(
     if (!isNodeAgentVersionCompatible(node.agentVersion, rc.env.VM_AGENT_REQUIRED_VERSION)) {
       continue;
     }
-    if (!canSatisfyVmSize(node.vmSize, state.config.vmSize)) continue;
+    if (!nodeSatisfiesTaskResources(node, state)) continue;
     const selection = resolveReusableNodeSelection(state, node);
     if (!selection) continue;
 
@@ -503,10 +552,54 @@ function resolveReusableNodeSelection(
     node: node as CapacityAwareNodePlacementRow,
     projectId: state.projectId,
     requestedVmSize: state.config.vmSize,
+    requestedReservation: state.config.resolvedReservation ?? null,
   });
   if (capacityPlacementSnapshot === undefined) return null;
   return {
     nodeId: node.id,
     capacityPlacementSnapshot,
   };
+}
+
+export function nodeSatisfiesTaskResources(
+  node: NodePlacementFields,
+  state: TaskRunnerState
+): boolean {
+  const reservation = state.config.resolvedReservation ?? null;
+  if (
+    reservation &&
+    node.providerInstanceType &&
+    positiveInteger(node.providerInstanceVcpuCount) !== null &&
+    positiveInteger(node.providerInstanceMemoryMb) !== null
+  ) {
+    return offeringSatisfiesReservation(
+      {
+        vcpuCount: positiveInteger(node.providerInstanceVcpuCount) ?? 0,
+        memoryMb: positiveInteger(node.providerInstanceMemoryMb) ?? 0,
+        diskGb: optionalPositiveInteger(node.providerInstanceDiskGb),
+      },
+      reservation
+    );
+  }
+
+  return canSatisfyVmSize(node.vmSize, state.config.vmSize);
+}
+
+function offeringSatisfiesReservation(
+  offering: { vcpuCount: number; memoryMb: number; diskGb: number | null },
+  reservation: ResolvedResourceReservation
+): boolean {
+  if (offering.vcpuCount * 1000 < reservation.cpuMillis) return false;
+  if (offering.memoryMb < reservation.memoryMb) return false;
+  if (offering.diskGb !== null && offering.diskGb * 1024 < reservation.diskMb) return false;
+  return true;
+}
+
+function positiveInteger(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function optionalPositiveInteger(value: number | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  return positiveInteger(value);
 }
