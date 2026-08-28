@@ -9,11 +9,16 @@ import { Hono } from 'hono';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { getAuth, getUserId, requireApproved, requireAuth } from '../../middleware/auth';
-import { requireProjectCapability } from '../../middleware/project-auth';
+import { hasProjectCapability, requireProjectCapability } from '../../middleware/project-auth';
+import { updateDefaultCapacityPool } from '../../services/default-capacity-pool-updates';
 import {
   type DefaultCapacityPoolsEnsureResult,
   readDefaultCapacityPoolSummaries,
 } from '../../services/default-capacity-pools';
+import {
+  assertDefaultCapacityPoolUpdateResult,
+  readDefaultCapacityPoolUpdateRequest,
+} from '../capacity-pool-update-request';
 
 const PRECEDENCE: CapacityPoolScope[] = ['project', 'user', 'installation'];
 
@@ -94,6 +99,7 @@ async function buildDefaultPoolResponse(
     projectId: string;
     includeInstallation: boolean;
     ensure: boolean;
+    policyMutationSupported: boolean;
   }
 ): Promise<ProjectDefaultCapacityPoolsResponse> {
   const summaries = await readDefaultCapacityPoolSummaries(db, {
@@ -109,7 +115,7 @@ async function buildDefaultPoolResponse(
     defaults: toScopeSummaries(summaries, input.includeInstallation),
     precedence: PRECEDENCE,
     reconciledScopes: input.ensure ? reconciledScopes(input.includeInstallation) : [],
-    policyMutationSupported: false,
+    policyMutationSupported: input.policyMutationSupported,
   };
 }
 
@@ -129,6 +135,7 @@ capacityPoolRoutes.get('/:id/capacity-pools/defaults', async (c) => {
   await requireProjectCapability(db, projectId, userId, 'secret:read');
 
   const includeInstallation = auth.user.role === 'superadmin';
+  const policyMutationSupported = await hasProjectCapability(db, projectId, userId, 'secret:write');
   c.header('Cache-Control', 'private, no-store');
   return c.json(
     await buildDefaultPoolResponse(db, {
@@ -136,6 +143,7 @@ capacityPoolRoutes.get('/:id/capacity-pools/defaults', async (c) => {
       projectId,
       includeInstallation,
       ensure: parseEnsureQuery(c.req.query('ensure')),
+      policyMutationSupported,
     })
   );
 });
@@ -154,6 +162,7 @@ capacityPoolRoutes.post('/:id/capacity-pools/defaults/reconcile', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'secret:read');
+  const policyMutationSupported = await hasProjectCapability(db, projectId, userId, 'secret:write');
 
   return c.json(
     await buildDefaultPoolResponse(db, {
@@ -161,6 +170,47 @@ capacityPoolRoutes.post('/:id/capacity-pools/defaults/reconcile', async (c) => {
       projectId,
       includeInstallation: auth.user.role === 'superadmin',
       ensure: true,
+      policyMutationSupported,
+    })
+  );
+});
+
+/**
+ * PATCH /api/projects/:id/capacity-pools/defaults
+ *
+ * Updates only the project-owned default pool. If the project has no default
+ * pool yet, the UI should reconcile/create it from project credentials first;
+ * this route intentionally cannot mutate user or installation fallbacks.
+ */
+capacityPoolRoutes.patch('/:id/capacity-pools/defaults', async (c) => {
+  const auth = getAuth(c);
+  const userId = getUserId(c);
+  const projectId = c.req.param('id');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireProjectCapability(db, projectId, userId, 'secret:write');
+
+  const update = await readDefaultCapacityPoolUpdateRequest(c);
+  const result = await updateDefaultCapacityPool(db, {
+    scope: 'project',
+    ownerUserId: null,
+    ownerProjectId: projectId,
+    ...update,
+  });
+
+  assertDefaultCapacityPoolUpdateResult(
+    result,
+    'Candidate updates must belong to the project default capacity pool'
+  );
+
+  c.header('Cache-Control', 'private, no-store');
+  return c.json(
+    await buildDefaultPoolResponse(db, {
+      userId,
+      projectId,
+      includeInstallation: auth.user.role === 'superadmin',
+      ensure: false,
+      policyMutationSupported: true,
     })
   );
 });

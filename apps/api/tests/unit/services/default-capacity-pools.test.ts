@@ -11,6 +11,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
+import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
 import {
   backfillDefaultCapacityPoolsForExistingCredentials,
   ensureDefaultCapacityPoolsForExistingCredentials,
@@ -458,6 +459,105 @@ describe('default capacity pool creation', () => {
     });
   });
 
+  it('preserves disabled and removed candidates across reconciliation and excludes them from placement', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+
+    const ensured = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+    });
+    const usCandidates =
+      ensured.user?.candidates.filter(
+        (candidate) => candidate.location === 'ash' || candidate.location === 'hil'
+      ) ?? [];
+    expect(usCandidates.length).toBeGreaterThan(0);
+
+    const update = await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      policy: { strategy: 'smallest-fit', exhaustionPolicy: 'fail' },
+      candidates: usCandidates.map((candidate) => ({
+        id: candidate.id,
+        status: candidate.location === 'ash' ? 'deleted' : 'disabled',
+      })),
+    });
+
+    expect(update.poolFound).toBe(true);
+    expect(update.summary?.pool).toMatchObject({
+      strategy: 'smallest-fit',
+      exhaustionPolicy: 'fail',
+      revision: 2,
+    });
+    expect(update.summary?.activeCandidateCount).toBe(
+      expectedCandidateCount('hetzner') - usCandidates.length
+    );
+
+    const reconciled = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1',
+      projectId: 'project-1',
+      ensure: true,
+      includeInstallation: false,
+    });
+    const candidateStatuses = new Map(
+      (reconciled?.candidates ?? []).map((candidate) => [candidate.id, candidate.status])
+    );
+
+    for (const candidate of usCandidates) {
+      expect(candidateStatuses.get(candidate.id)).toBe(
+        candidate.location === 'ash' ? 'deleted' : 'disabled'
+      );
+    }
+
+    const flexiblePlacement = resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'candidate-edit-flexible-task',
+      projectId: 'project-1',
+      userId: 'user-1',
+      project: {
+        id: 'project-1',
+        defaultProvider: 'hetzner',
+        defaultLocation: 'fsn1',
+        defaultVmSize: 'small',
+      },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+      resourceRequirements: {},
+    });
+    const flexibleSelection = await resolveTaskStartCapacityPoolSelection(
+      db as never,
+      flexiblePlacement,
+      { ensure: false }
+    );
+
+    expect(
+      flexibleSelection?.candidates.some(
+        (candidate) => candidate.location === 'ash' || candidate.location === 'hil'
+      )
+    ).toBe(false);
+
+    const ashPlacement = resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'candidate-edit-ash-task',
+      projectId: 'project-1',
+      userId: 'user-1',
+      explicit: { vmLocation: 'ash' },
+      project: {
+        id: 'project-1',
+        defaultProvider: 'hetzner',
+        defaultLocation: 'fsn1',
+        defaultVmSize: 'small',
+      },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+      resourceRequirements: {},
+    });
+    await expect(
+      resolveTaskStartCapacityPoolSelection(db as never, ashPlacement, { ensure: false })
+    ).resolves.toBeNull();
+  });
+
   it('disables pool availability when a backing credential is disabled', async () => {
     const db = createDb();
     seedPlatformCredential({ id: 'platform-hetzner' });
@@ -485,7 +585,7 @@ describe('default capacity pool creation', () => {
       `)[0]
     ).toEqual({
       source_status: 'disabled',
-      candidate_status: 'disabled',
+      candidate_status: 'active',
       pool_status: 'disabled',
     });
   });

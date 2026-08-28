@@ -8,10 +8,15 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
+import { updateDefaultCapacityPool } from '../services/default-capacity-pool-updates';
 import {
   type DefaultCapacityPoolsEnsureResult,
   readDefaultCapacityPoolSummaries,
 } from '../services/default-capacity-pools';
+import {
+  assertDefaultCapacityPoolUpdateResult,
+  readDefaultCapacityPoolUpdateRequest,
+} from './capacity-pool-update-request';
 
 const PRECEDENCE: CapacityPoolScope[] = ['project', 'user', 'installation'];
 
@@ -56,7 +61,7 @@ function buildUserDefaultPoolResponse(
     ],
     precedence: PRECEDENCE,
     reconciledScopes: ensure ? ['user'] : [],
-    policyMutationSupported: false,
+    policyMutationSupported: true,
   };
 }
 
@@ -95,6 +100,35 @@ capacityPoolsRoutes.post('/defaults/reconcile', async (c) => {
   });
 
   return c.json(buildUserDefaultPoolResponse(summaries, true));
+});
+
+/**
+ * PATCH /api/capacity-pools/defaults
+ *
+ * Updates the authenticated user's owned default pool policy and candidate
+ * statuses. It never mutates project or installation fallback pools.
+ */
+capacityPoolsRoutes.patch('/defaults', async (c) => {
+  const userId = getUserId(c);
+  const db = drizzle(c.env.DATABASE, { schema });
+  const update = await readDefaultCapacityPoolUpdateRequest(c);
+  const result = await updateDefaultCapacityPool(db, {
+    scope: 'user',
+    ownerUserId: userId,
+    ownerProjectId: null,
+    ...update,
+  });
+
+  assertDefaultCapacityPoolUpdateResult(
+    result,
+    'Candidate updates must belong to the default capacity pool'
+  );
+
+  const summaries = await readDefaultCapacityPoolSummaries(db, {
+    userId,
+    includeInstallation: false,
+  });
+  return c.json(buildUserDefaultPoolResponse(summaries, false));
 });
 
 export { capacityPoolsRoutes };

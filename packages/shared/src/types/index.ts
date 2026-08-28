@@ -53,8 +53,11 @@ export type {
   CapacitySourceIdentity,
   CapacitySourceKind,
   CapacityWorkloadRole,
+  DefaultCapacityPoolCandidateStatusUpdate,
+  DefaultCapacityPoolPolicyUpdate,
   DefaultCapacityPoolScopeSummary,
   DefaultCapacityPoolSummary,
+  DefaultCapacityPoolUpdateRequest,
   ProjectDefaultCapacityPoolsResponse,
 } from './capacity-pool';
 export {

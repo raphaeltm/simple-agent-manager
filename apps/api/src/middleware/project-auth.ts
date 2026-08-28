@@ -191,6 +191,27 @@ export async function requireProjectCapability(
   return project;
 }
 
+export async function hasProjectCapability(
+  db: AppDb,
+  projectId: string,
+  userId: string,
+  capability: ProjectCapability
+): Promise<boolean> {
+  const memberRows = await db
+    .select({ role: schema.projectMembers.role })
+    .from(schema.projectMembers)
+    .where(
+      and(
+        eq(schema.projectMembers.projectId, projectId),
+        eq(schema.projectMembers.userId, userId),
+        eq(schema.projectMembers.status, 'active')
+      )
+    )
+    .limit(1);
+  const membership = memberRows[0];
+  return membership ? roleHasCapability(membership.role, capability) : false;
+}
+
 export async function requireOwnedProject(
   db: AppDb,
   projectId: string,

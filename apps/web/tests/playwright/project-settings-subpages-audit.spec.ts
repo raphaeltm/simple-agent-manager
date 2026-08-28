@@ -1,9 +1,13 @@
-import { mkdirSync } from 'node:fs';
-import { resolve } from 'node:path';
-
 import { expect, type Page, test } from '@playwright/test';
 
-import { assertNoOverflow, makeMockUser, screenshot, setupAuditRoutes } from './audit-helpers';
+import {
+  applyMockCapacityDefaultsUpdate,
+  assertNoOverflow,
+  makeMockUser,
+  screenshot,
+  screenshotNearHeading,
+  setupAuditRoutes,
+} from './audit-helpers';
 
 const PROJECT_ID = 'proj-settings-1';
 
@@ -139,12 +143,13 @@ const emptyCredentialHealth = {
 };
 
 function capacityCandidate(index: number, overrides: Record<string, unknown> = {}) {
+  const visibleLocations = ['fsn1', 'nbg1', 'hel1', 'ash', 'hil'];
   return {
     id: `candidate-${index}`,
     poolId: 'pool-project-default',
     capacitySourceId: 'source-project-default',
     provider: 'hetzner',
-    location: index === 0 ? 'fsn1' : `region-${index}`,
+    location: visibleLocations[index] ?? `region-${index}`,
     workloadRole: 'workspace',
     runtime: 'vm',
     machineClass: 'shared-vm',
@@ -161,8 +166,10 @@ function capacityCandidate(index: number, overrides: Record<string, unknown> = {
 function capacitySummary(overrides: Record<string, unknown> = {}) {
   const candidates = [
     capacityCandidate(0, { machineSize: 'small' }),
-    capacityCandidate(1, { location: 'fsn1', machineSize: 'medium' }),
-    capacityCandidate(2, { location: 'nbg1', machineSize: 'large' }),
+    capacityCandidate(1, { machineSize: 'medium' }),
+    capacityCandidate(2, { machineSize: 'large' }),
+    capacityCandidate(3, { machineSize: 'small' }),
+    capacityCandidate(4, { machineSize: 'medium' }),
   ];
   return {
     pool: {
@@ -205,24 +212,61 @@ function capacitySummary(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function capacityDefaults(effective: unknown) {
+function userCapacitySummary() {
+  const projectSummary = capacitySummary();
+  return {
+    ...projectSummary,
+    pool: {
+      ...projectSummary.pool,
+      id: 'pool-user-default',
+      scope: 'user',
+      ownerUserId: 'owner-user',
+      ownerProjectId: null,
+      name: 'Owner user fallback pool visible to project settings without project override',
+    },
+    sources: projectSummary.sources.map((source) => ({
+      ...source,
+      id: 'source-user-default',
+      scope: 'user',
+      ownerUserId: 'owner-user',
+      ownerProjectId: null,
+      credentialSource: 'user',
+      credentialId: 'credential-user-default',
+      credentialReference: 'credentials:credential-user-default',
+    })),
+    candidates: projectSummary.candidates.map((candidate, index) => ({
+      ...candidate,
+      id: `user-fallback-candidate-${index}`,
+      poolId: 'pool-user-default',
+      capacitySourceId: 'source-user-default',
+    })),
+  };
+}
+
+type ProjectSettingsCapacitySummary = ReturnType<typeof capacitySummary>;
+
+function capacityDefaults(effective: ProjectSettingsCapacitySummary | null) {
+  const effectiveScope =
+    effective && typeof effective === 'object' && 'pool' in effective
+      ? ((effective as { pool?: { scope?: string } }).pool?.scope ?? null)
+      : null;
   return {
     effective,
-    effectiveScope: effective ? 'project' : null,
+    effectiveScope,
     defaults: [
       {
         scope: 'project',
         visibility: 'visible',
         visibilityReason: 'project-secret-read',
         canReconcile: true,
-        summary: effective,
+        summary: effectiveScope === 'project' ? effective : null,
       },
       {
         scope: 'user',
         visibility: 'visible',
         visibilityReason: 'authenticated-user',
         canReconcile: true,
-        summary: null,
+        summary: effectiveScope === 'user' ? effective : null,
       },
       {
         scope: 'installation',
@@ -234,7 +278,7 @@ function capacityDefaults(effective: unknown) {
     ],
     precedence: ['project', 'user', 'installation'],
     reconciledScopes: ['project', 'user'],
-    policyMutationSupported: false,
+    policyMutationSupported: true,
   };
 }
 
@@ -246,7 +290,7 @@ async function setupMocks(page: Page) {
     localStorage.setItem('sam-onboarding-wizard-dismissed-owner-user', 'true')
   );
 
-  await setupAuditRoutes(page, (path, respond) => {
+  await setupAuditRoutes(page, (path, respond, route) => {
     if (path.startsWith('/api/auth/')) return respond(200, MOCK_USER);
     if (path === '/api/projects') return respond(200, { projects: [project] });
     if (path === '/api/agents') return respond(200, { agents: [] });
@@ -295,6 +339,12 @@ async function setupMocks(page: Page) {
         subPath === '/capacity-pools/defaults' ||
         subPath === '/capacity-pools/defaults/reconcile'
       ) {
+        if (subPath === '/capacity-pools/defaults' && route.request().method() === 'PATCH') {
+          capacityDefaultsBody = applyMockCapacityDefaultsUpdate(
+            capacityDefaultsBody as ReturnType<typeof capacityDefaults>,
+            route.request().postDataJSON()
+          );
+        }
         return respond(capacityDefaultsStatus, capacityDefaultsBody);
       }
       if (subPath.startsWith('/agent-profiles')) return respond(200, []);
@@ -316,22 +366,6 @@ async function expectCompactTabs(page: Page) {
   }));
   expect(metrics.tabCount).toBe(7);
   expect(metrics.height).toBeLessThanOrEqual(56);
-}
-
-async function screenshotDefaultComputePoolPanel(page: Page, name: string) {
-  const screenshotDir = resolve(process.cwd(), '../../.tmp/playwright-screenshots');
-  mkdirSync(screenshotDir, { recursive: true });
-  await page
-    .getByRole('heading', { name: 'Project Default Compute Pool' })
-    .scrollIntoViewIfNeeded();
-  await page.evaluate(() => window.scrollTo(0, window.scrollY));
-  await page.waitForTimeout(600);
-  const viewport = page.viewportSize();
-  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
-  await page.screenshot({
-    path: `${screenshotDir}/${name}${suffix}.png`,
-    fullPage: false,
-  });
 }
 
 test.describe('Project settings sub-pages', () => {
@@ -381,13 +415,46 @@ test.describe('Project settings sub-pages', () => {
   }) => {
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure`);
     await expect(page.getByRole('heading', { name: 'Project Default Compute Pool' })).toBeVisible();
-    await expect(page.getByText('Project default applies first for this context.')).toBeVisible();
+    await expect(page.getByText('Project default applies to this context.')).toBeVisible();
     await expect(page.getByText('Hetzner · fsn1')).toBeVisible();
+    await expect(page.getByText(/Hidden outside this settings context/i)).toHaveCount(0);
+    await expect(page.getByText(/Installation defaults require/i)).toHaveCount(0);
     await expectCompactTabs(page);
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-normal');
-    await screenshotDefaultComputePoolPanel(
+    await screenshotNearHeading(
       page,
-      'project-settings-default-compute-pool-normal-focused'
+      'Project Default Compute Pool',
+      'project-settings-default-compute-pool-normal-focused',
+      { outputDir: '../../.tmp/playwright-screenshots' }
+    );
+
+    await page.getByRole('button', { name: 'Edit' }).click();
+    await expect(page.getByRole('heading', { name: 'Edit project default' })).toBeVisible();
+    await page.getByRole('button', { name: 'Remove Hetzner ash Small candidate' }).click();
+    await page.getByRole('button', { name: 'Remove Hetzner hil Medium candidate' }).click();
+    await screenshotNearHeading(
+      page,
+      'Edit project default',
+      'project-settings-default-compute-pool-edit-focused',
+      { outputDir: '../../.tmp/playwright-screenshots' }
+    );
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByText(/Active candidates\s*3/)).toBeVisible();
+    await expect(page.getByText('Hetzner · ash')).toHaveCount(0);
+    await expect(page.getByText('Hetzner · hil')).toHaveCount(0);
+    await assertNoOverflow(page);
+
+    capacityDefaultsBody = capacityDefaults(userCapacitySummary());
+    await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=fallback`);
+    await expect(page.getByText('Using user fallback.', { exact: false })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Edit' })).toHaveCount(0);
+    await expect(page.getByText(/Hidden outside this settings context/i)).toHaveCount(0);
+    await screenshot(page, 'project-settings-infrastructure-capacity-pool-user-fallback');
+    await screenshotNearHeading(
+      page,
+      'Project Default Compute Pool',
+      'project-settings-default-compute-pool-user-fallback-focused',
+      { outputDir: '../../.tmp/playwright-screenshots' }
     );
     await assertNoOverflow(page);
 
@@ -395,6 +462,12 @@ test.describe('Project settings sub-pages', () => {
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=empty`);
     await expect(page.getByText('No visible active default pool')).toBeVisible();
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-empty');
+    await screenshotNearHeading(
+      page,
+      'Project Default Compute Pool',
+      'project-settings-default-compute-pool-empty-focused',
+      { outputDir: '../../.tmp/playwright-screenshots' }
+    );
     await assertNoOverflow(page);
 
     const manyCandidates = Array.from({ length: 36 }, (_, index) =>
@@ -412,11 +485,16 @@ test.describe('Project settings sub-pages', () => {
       })
     );
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=many`);
-    await expect(page.getByText('+24 more provider/region groups')).toBeVisible();
+    await expect(
+      page.getByText('Hetzner · region-with-a-very-long-location-name-and-special-marker-ß')
+    ).toBeVisible();
+    await expect(page.getByText(/\+\d+ more provider\/region groups/)).toHaveCount(0);
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-many');
-    await screenshotDefaultComputePoolPanel(
+    await screenshotNearHeading(
       page,
-      'project-settings-default-compute-pool-many-focused'
+      'Project Default Compute Pool',
+      'project-settings-default-compute-pool-many-focused',
+      { outputDir: '../../.tmp/playwright-screenshots' }
     );
     await assertNoOverflow(page);
 
@@ -428,6 +506,12 @@ test.describe('Project settings sub-pages', () => {
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=error`);
     await expect(page.getByText('Project capability is required')).toBeVisible();
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-error');
+    await screenshotNearHeading(
+      page,
+      'Project Default Compute Pool',
+      'project-settings-default-compute-pool-error-focused',
+      { outputDir: '../../.tmp/playwright-screenshots' }
+    );
     await assertNoOverflow(page);
   });
 });

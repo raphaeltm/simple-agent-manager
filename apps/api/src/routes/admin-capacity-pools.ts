@@ -8,10 +8,15 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
+import { updateDefaultCapacityPool } from '../services/default-capacity-pool-updates';
 import {
   type DefaultCapacityPoolsEnsureResult,
   readDefaultCapacityPoolSummaries,
 } from '../services/default-capacity-pools';
+import {
+  assertDefaultCapacityPoolUpdateResult,
+  readDefaultCapacityPoolUpdateRequest,
+} from './capacity-pool-update-request';
 
 const PRECEDENCE: CapacityPoolScope[] = ['project', 'user', 'installation'];
 
@@ -56,7 +61,7 @@ function buildInstallationDefaultPoolResponse(
     ],
     precedence: PRECEDENCE,
     reconciledScopes: ensure ? ['installation'] : [],
-    policyMutationSupported: false,
+    policyMutationSupported: true,
   };
 }
 
@@ -91,6 +96,33 @@ adminCapacityPoolsRoutes.post('/defaults/reconcile', async (c) => {
   });
 
   return c.json(buildInstallationDefaultPoolResponse(summaries, true));
+});
+
+/**
+ * PATCH /api/admin/capacity-pools/defaults
+ *
+ * Updates the installation-owned default pool. Superadmin middleware protects
+ * this route from regular users and project members.
+ */
+adminCapacityPoolsRoutes.patch('/defaults', async (c) => {
+  const db = drizzle(c.env.DATABASE, { schema });
+  const update = await readDefaultCapacityPoolUpdateRequest(c);
+  const result = await updateDefaultCapacityPool(db, {
+    scope: 'installation',
+    ownerUserId: null,
+    ownerProjectId: null,
+    ...update,
+  });
+
+  assertDefaultCapacityPoolUpdateResult(
+    result,
+    'Candidate updates must belong to the default capacity pool'
+  );
+
+  const summaries = await readDefaultCapacityPoolSummaries(db, {
+    includeInstallation: true,
+  });
+  return c.json(buildInstallationDefaultPoolResponse(summaries, false));
 });
 
 export { adminCapacityPoolsRoutes };

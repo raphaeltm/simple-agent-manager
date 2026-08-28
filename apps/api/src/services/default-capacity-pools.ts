@@ -7,7 +7,7 @@ import type {
   DefaultCapacityPoolSummary,
 } from '@simple-agent-manager/shared';
 import { isValidProvider } from '@simple-agent-manager/shared';
-import { and, asc, eq, isNotNull, isNull, notInArray } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull, notInArray, sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -392,7 +392,10 @@ async function ensureDefaultPoolForCredentialSeeds(
   return readDefaultPoolSummary(db, scope);
 }
 
-async function findDefaultPool(db: Db, scope: ScopeIdentity): Promise<schema.CapacityPool | null> {
+export async function findDefaultPool(
+  db: Db,
+  scope: ScopeIdentity
+): Promise<schema.CapacityPool | null> {
   const [pool] = await db
     .select()
     .from(schema.capacityPools)
@@ -560,47 +563,51 @@ async function ensureCandidatesForSource(
 ): Promise<void> {
   const now = new Date().toISOString();
   const candidateIds: string[] = [];
+  const candidateValues: schema.NewCapacityPoolCandidate[] = [];
   let candidateOrder = 0;
 
   for (const location of orderedLocationsForProvider(provider)) {
     for (const size of VM_SIZE_ORDER) {
       const id = defaultCandidateId(poolId, sourceId, provider, location.id, size);
       candidateIds.push(id);
-      await db
-        .insert(schema.capacityPoolCandidates)
-        .values({
-          id,
-          poolId,
-          capacitySourceId: sourceId,
-          provider,
-          location: location.id,
-          workloadRole: DEFAULT_WORKLOAD_ROLE,
-          runtime: DEFAULT_RUNTIME,
-          machineClass: DEFAULT_MACHINE_CLASS,
-          machineSize: size,
-          priority: candidateOrder,
-          candidateOrder,
-          status: ACTIVE_STATUS,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .onConflictDoUpdate({
-          target: schema.capacityPoolCandidates.id,
-          set: {
-            provider,
-            location: location.id,
-            workloadRole: DEFAULT_WORKLOAD_ROLE,
-            runtime: DEFAULT_RUNTIME,
-            machineClass: DEFAULT_MACHINE_CLASS,
-            machineSize: size,
-            priority: candidateOrder,
-            candidateOrder,
-            status: ACTIVE_STATUS,
-            updatedAt: now,
-          },
-        });
+      candidateValues.push({
+        id,
+        poolId,
+        capacitySourceId: sourceId,
+        provider,
+        location: location.id,
+        workloadRole: DEFAULT_WORKLOAD_ROLE,
+        runtime: DEFAULT_RUNTIME,
+        machineClass: DEFAULT_MACHINE_CLASS,
+        machineSize: size,
+        priority: candidateOrder,
+        candidateOrder,
+        status: ACTIVE_STATUS,
+        createdAt: now,
+        updatedAt: now,
+      });
       candidateOrder += 1;
     }
+  }
+
+  if (candidateValues.length > 0) {
+    await db
+      .insert(schema.capacityPoolCandidates)
+      .values(candidateValues)
+      .onConflictDoUpdate({
+        target: schema.capacityPoolCandidates.id,
+        set: {
+          provider: sql`excluded.provider`,
+          location: sql`excluded.location`,
+          workloadRole: sql`excluded.workload_role`,
+          runtime: sql`excluded.runtime`,
+          machineClass: sql`excluded.machine_class`,
+          machineSize: sql`excluded.machine_size`,
+          priority: sql`excluded.priority`,
+          candidateOrder: sql`excluded.candidate_order`,
+          updatedAt: now,
+        },
+      });
   }
 
   await disableMissingCandidatesForSource(db, poolId, sourceId, candidateIds);
@@ -629,7 +636,7 @@ async function disableMissingCandidatesForSource(
 
 async function disableCapacitySourceAvailability(
   db: Db,
-  poolId: string,
+  _poolId: string,
   sourceId: string
 ): Promise<void> {
   const now = new Date().toISOString();
@@ -637,15 +644,6 @@ async function disableCapacitySourceAvailability(
     .update(schema.capacitySources)
     .set({ status: DISABLED_STATUS, updatedAt: now })
     .where(eq(schema.capacitySources.id, sourceId));
-  await db
-    .update(schema.capacityPoolCandidates)
-    .set({ status: DISABLED_STATUS, updatedAt: now })
-    .where(
-      and(
-        eq(schema.capacityPoolCandidates.poolId, poolId),
-        eq(schema.capacityPoolCandidates.capacitySourceId, sourceId)
-      )
-    );
 }
 
 async function disableDefaultPoolAvailability(db: Db, poolId: string): Promise<void> {
@@ -668,7 +666,7 @@ async function disableDefaultPoolAvailability(db: Db, poolId: string): Promise<v
     .where(eq(schema.capacityPools.id, poolId));
 }
 
-async function reconcileDefaultPoolStatus(db: Db, poolId: string): Promise<void> {
+export async function reconcileDefaultPoolStatus(db: Db, poolId: string): Promise<void> {
   const [activeCandidate] = await db
     .select({ id: schema.capacityPoolCandidates.id })
     .from(schema.capacityPoolCandidates)
@@ -694,7 +692,7 @@ async function reconcileDefaultPoolStatus(db: Db, poolId: string): Promise<void>
     .where(eq(schema.capacityPools.id, poolId));
 }
 
-async function readDefaultPoolSummary(
+export async function readDefaultPoolSummary(
   db: Db,
   scope: ScopeIdentity
 ): Promise<CapacityPoolSummary | null> {
@@ -724,7 +722,6 @@ async function readDefaultPoolSummary(
     .where(
       and(
         eq(schema.capacityPoolCandidates.poolId, pool.id),
-        eq(schema.capacityPoolCandidates.status, ACTIVE_STATUS),
         eq(schema.capacitySources.status, ACTIVE_STATUS)
       )
     )
@@ -738,16 +735,19 @@ async function readDefaultPoolSummary(
 
   const sourcesById = new Map<string, CapacitySourceIdentity>();
   const candidates: CapacityPoolCandidateDto[] = [];
+  let activeCandidateCount = 0;
   for (const row of rows) {
     sourcesById.set(row.source.id, toCapacitySourceIdentity(row.source));
-    candidates.push(toCapacityPoolCandidate(row.candidate));
+    const candidate = toCapacityPoolCandidate(row.candidate);
+    if (candidate.status === ACTIVE_STATUS) activeCandidateCount += 1;
+    candidates.push(candidate);
   }
 
   return {
     pool: toCapacityPool(pool),
     sources: [...sourcesById.values()],
     candidates,
-    activeCandidateCount: rows.length,
+    activeCandidateCount,
   };
 }
 
