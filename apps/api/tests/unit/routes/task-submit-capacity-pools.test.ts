@@ -187,6 +187,14 @@ describe('task submit capacity-pool placement', () => {
            placement_credential_version,
            capacity_pool_project_id,
            workload_role,
+           provider_instance_type,
+           provider_instance_vcpu_count,
+           provider_instance_memory_mb,
+           provider_instance_disk_gb,
+           provider_instance_price_display,
+           provider_instance_price_currency,
+           provider_instance_price_monthly_cents,
+           provider_instance_price_hourly_micros,
            placement_explanation_json
          FROM tasks
          WHERE project_id = 'project-1'`
@@ -202,6 +210,14 @@ describe('task submit capacity-pool placement', () => {
       placement_credential_version: number | null;
       capacity_pool_project_id: string | null;
       workload_role: string | null;
+      provider_instance_type: string | null;
+      provider_instance_vcpu_count: number | null;
+      provider_instance_memory_mb: number | null;
+      provider_instance_disk_gb: number | null;
+      provider_instance_price_display: string | null;
+      provider_instance_price_currency: string | null;
+      provider_instance_price_monthly_cents: number | null;
+      provider_instance_price_hourly_micros: number | null;
       placement_explanation_json: string | null;
     };
 
@@ -211,12 +227,18 @@ describe('task submit capacity-pool placement', () => {
       capacity_pool_revision: 1,
       capacity_source_id: 'cap-source-default:project:project-cloud-1',
       capacity_pool_candidate_id:
-        'cap-candidate-default:cap-pool-default:project:project-1:cap-source-default:project:project-cloud-1:hetzner:fsn1:small',
+        'cap-candidate-default:cap-pool-default:project:project-1:cap-source-default:project:project-cloud-1:hetzner:fsn1:cx23',
       placement_credential_source: 'project',
       placement_credential_reference: 'credentials:project-cloud-1',
       placement_credential_version: Date.parse('2026-08-28T00:00:00.000Z'),
       capacity_pool_project_id: 'project-1',
       workload_role: 'workspace',
+      provider_instance_type: 'cx23',
+      provider_instance_vcpu_count: 2,
+      provider_instance_memory_mb: 4096,
+      provider_instance_disk_gb: 40,
+      provider_instance_price_display: '€3.99/mo',
+      provider_instance_price_currency: 'EUR',
     });
     expect(taskRow.placement_explanation_json).toContain('capacity_pool_default');
 
@@ -239,10 +261,16 @@ describe('task submit capacity-pool placement', () => {
               provider: 'hetzner',
               location: 'fsn1',
               machineSize: 'small',
+              providerInstanceType: 'cx23',
+              providerInstanceVcpuCount: 2,
+              providerInstanceMemoryMb: 4096,
               snapshot: expect.objectContaining({
                 capacityPoolId: taskRow.capacity_pool_id,
                 capacitySourceId: taskRow.capacity_source_id,
                 capacityPoolCandidateId: taskRow.capacity_pool_candidate_id,
+                providerInstanceType: 'cx23',
+                providerInstanceVcpuCount: 2,
+                providerInstanceMemoryMb: 4096,
               }),
             }),
           ]),
