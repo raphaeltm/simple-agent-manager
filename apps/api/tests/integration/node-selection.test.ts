@@ -206,13 +206,15 @@ describe('concurrent warm pool claiming safety', () => {
 // =============================================================================
 
 describe('placement resolution entry points', () => {
-  it('keeps duplicated task submission resolution paths visible until a shared resolver replaces them', () => {
-    // TODO(compute-pools): replace these duplicate source-level assertions with
-    // behavioral tests around the shared effective-pool/placement resolver once
-    // that resolver exists. Wave 0 intentionally documents duplication without
-    // changing runtime behavior.
+  it('tracks migrated and remaining duplicated task submission resolution paths', () => {
+    expect(submitRouteSource).toContain("from '../../services/placement-resolver'");
+    expect(submitRouteSource).toContain('resolveTaskStartPlacement');
+
+    // TODO(compute-pools): replace these remaining duplicate source-level
+    // assertions with shared resolver call-site coverage as each entry point is
+    // migrated. Wave 1B migrates chat submit only; the other paths retain their
+    // local resolution until their runtime/secondary-tool differences are wired.
     const entryPoints = [
-      { name: 'chat submit route', source: submitRouteSource },
       { name: 'MCP dispatch route', source: mcpDispatchRouteSource },
       { name: 'SAM session dispatch tool', source: samSessionDispatchSource },
       { name: 'trigger submit bridge', source: triggerSubmitSource },

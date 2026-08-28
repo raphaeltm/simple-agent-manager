@@ -234,18 +234,21 @@ describe('Project default provider — mapper', () => {
 
 describe('Project default provider — task submit', () => {
   const submit = apiSrc('routes/tasks/submit.ts');
+  const placementResolver = apiSrc('services/placement-resolver.ts');
 
   it('reads provider from body and project default with fallback', () => {
     expect(submit).toContain('body.provider');
-    expect(submit).toContain('project.defaultProvider');
+    expect(submit).toContain('resolveTaskStartPlacement');
+    expect(placementResolver).toContain('project.defaultProvider');
   });
 
   it('passes cloudProvider to startTaskRunnerDO', () => {
     expect(submit).toContain('cloudProvider: effectiveProvider');
   });
 
-  it('validates provider against CREDENTIAL_PROVIDERS', () => {
-    expect(submit).toContain('CREDENTIAL_PROVIDERS.includes(provider)');
+  it('validates provider through the shared placement resolver', () => {
+    expect(placementResolver).toContain('CREDENTIAL_PROVIDERS');
+    expect(placementResolver).toContain('isValidProvider(explicitProvider)');
   });
 });
 
