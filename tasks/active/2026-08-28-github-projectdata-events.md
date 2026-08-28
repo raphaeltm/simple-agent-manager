@@ -48,10 +48,48 @@ metadata/display data, and use idempotent delivery keys with payload fingerprint
 - [x] Add route/service tests proving the real webhook path schedules ProjectData
   admission without changing trigger behavior.
 - [x] Run focused API tests and relevant typecheck/lint/format quality gates.
-- [ ] Run specialist review: task-completion-validator, cloudflare-specialist,
+- [x] Run specialist review: task-completion-validator, cloudflare-specialist,
   constitution-validator, security-auditor, and test-engineer.
 - [ ] Open draft PR targeting `sam/weve-previously-talked-eventing-y207hp`.
 - [ ] Check PR CI after push.
+
+## Implementation summary
+
+- Added `apps/api/src/services/github-project-event-producer.ts` to admit
+  bounded ProjectData events for existing GitHub webhook paths.
+- Wired `apps/api/src/routes/github-webhook.ts` to schedule ProjectData event
+  admission independently from existing trigger routing.
+- Emitted GitHub ProjectData event types for `pull_request.<action>`,
+  `issues.<action>`, `issue_comment.<action>`, `push`, and
+  `repository.<action>`.
+- Deferred `check_run`, `check_suite`, `pull_request_review`, and
+  `pull_request_review_comment` because SAM has no existing product handlers
+  for those webhook surfaces today.
+
+## Local verification
+
+- `pnpm --filter @simple-agent-manager/api exec tsc --noEmit --pretty false`
+- `pnpm --filter @simple-agent-manager/api lint`
+- `pnpm exec vitest run tests/unit/routes/github-webhook-project-events.test.ts tests/unit/services/github-trigger-handler.test.ts --reporter=verbose`
+- `pnpm exec vitest run --config vitest.workers.config.ts tests/workers/github-project-events.test.ts tests/workers/project-data-events.test.ts --reporter=verbose --testTimeout=20000`
+- `pnpm format:check`
+- `pnpm --filter @simple-agent-manager/api build`
+- `pnpm --filter @simple-agent-manager/shared typecheck`
+- `pnpm --filter @simple-agent-manager/shared lint`
+- `pnpm --filter @simple-agent-manager/shared build`
+- `pnpm lint:oxlint`
+- `pnpm quality:type-boundaries`
+- `git diff --check origin/sam/wave-b4-reconcile-integrate-nbmzfm..HEAD`
+
+## Specialist review
+
+| Reviewer | Status | Evidence |
+| --- | --- | --- |
+| task-completion-validator | PASS | Research findings map to checked checklist items; checked items appear in the B4-base diff; acceptance criteria have local test evidence or explicit PR/CI follow-up. |
+| cloudflare-specialist | PASS | No wrangler, migration, KV, or R2 changes; Worker `waitUntil` use is best-effort and locally covered; Miniflare tests exercise D1 and ProjectData DO admission. |
+| constitution-validator | PASS | No new source hardcoded URLs, timeouts, limits, or deployment identifiers; GitHub event allowlist is protocol/domain shape. |
+| security-auditor | PASS | Webhook signature verification remains required; no raw webhook body is persisted, injected, or logged; logs contain only delivery/event/outcome/error summary fields. |
+| test-engineer | PASS | Tests cover signed route→producer→ProjectData, service→D1→ProjectData subscription matching, duplicate replay, same-key/different-fingerprint conflict, and unsupported event no-op. |
 
 ## Acceptance criteria
 
