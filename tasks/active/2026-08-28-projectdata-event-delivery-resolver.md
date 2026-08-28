@@ -37,8 +37,8 @@ Implement Wave B2 on branch `sam/wave-b2-implement-event-w512yj`: add a capabili
 - [x] Ensure Codex/OpenCode/Claude live paths require explicit advertised capabilities and are not inferred from `agentType`.
 - [x] Ensure model-visible delivery summaries contain only bounded normalized display/identity data, never raw metadata or payload references.
 - [x] Add resolver tests for supported, unsupported, unauthorized, terminal target, expired/cancelled subscription, ambiguous delivery, record-only, queue fallback, and spawn/interrupt authorization boundaries.
-- [ ] Run focused tests plus relevant typecheck/lint/format gates.
-- [ ] Run specialist review and document results.
+- [x] Run focused tests plus relevant typecheck/lint/format gates.
+- [x] Run specialist review and document results.
 - [ ] Open a draft PR targeting `sam/weve-previously-talked-eventing-y207hp`.
 
 ## Acceptance Criteria
@@ -66,10 +66,22 @@ Implement Wave B2 on branch `sam/wave-b2-implement-event-w512yj`: add a capabili
 - Codex and OpenCode decisions are not derived from `agentType`. Tests prove Codex ACP 1.1.2 with a failed version gate and OpenCode ACP with no advertised steer/queue capability remain unsupported.
 - `createProjectEventDeliveryBatch()` persists `adapter_decision_json`, requested delivery, and resolved delivery. Pending queue/runtime/spawn decisions do not perform adapter I/O, do not call `acceptPromptDelivery()`, and do not write `session_inbox`.
 - Model-visible summaries contain only event id/source/type/subject/severity/timestamps and bounded `display` data; metadata, delivery keys, fingerprints, and raw payload references are excluded.
+- Review follow-up: ProjectData delivery-batch normalization now accepts adapter records with an empty capability list so unsupported integrations such as current OpenCode ACP can be represented without failing boundary validation. Adapter-delivery input normalization was split into `project-events-delivery-input-normalization.ts`, reducing `project-events-normalization.ts` from 783 to 587 lines.
+
+## Specialist Review Evidence
+
+| Skill | Verdict | Evidence |
+| --- | --- | --- |
+| task-completion-validator | PASS after fix | Research findings, checked implementation items, and acceptance criteria map to the B2 diff. One review gap was fixed: empty advertised capability arrays now pass ProjectData normalization and have a unit test. |
+| test-engineer | PASS | Pure resolver matrix test covers supported, unsupported, unauthorized, terminal, inactive, ambiguous, record-only, queue fallback, spawn, interrupt, and model-summary safety. Worker slice covers persisted queue decisions and no `session_inbox` writes. |
+| cloudflare-specialist | PASS | DO migration 038 schema and 039 compatibility ALTER are additive/non-destructive; ProjectData SQL remains bounded by normalized match IDs and existing limits. |
+| constitution-validator | PASS | Scoped diff scan found no hardcoded URLs, timeouts, expiry values, operational limits, or deployment identifiers. New mode strings are protocol/contract constants. |
+| security-auditor | PASS | Resolver is fail-closed by default, requires explicit authorization for queue/steer/interrupt/spawn, and model-visible summaries omit raw payload refs, metadata, fingerprints, and delivery keys. |
+| doc-sync-validator | PASS | Architecture docs now describe adapter-capability resolution, separate requested/resolved/adapter-decision audit data, and intentionally deferred runtime injection/steering/spawn work. No env, route, or public API docs needed for this no-API/no-UI wave. |
 
 ## Validation Evidence
 
-- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/project-events-delivery-resolver.test.ts tests/unit/durable-objects/migrations.test.ts` — passed, 26 tests.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/project-events-delivery-resolver.test.ts tests/unit/durable-objects/project-events-normalization.test.ts tests/unit/durable-objects/migrations.test.ts` — passed, 31 tests.
 - `pnpm --filter @simple-agent-manager/shared typecheck` — passed.
 - `pnpm --filter @simple-agent-manager/shared build` — passed; required before worker tests because `@simple-agent-manager/shared` resolves through `dist`.
 - `pnpm vitest run --config vitest.workers.config.ts tests/workers/project-data-events.test.ts --reporter=verbose` from `apps/api` — passed, 9 tests.
