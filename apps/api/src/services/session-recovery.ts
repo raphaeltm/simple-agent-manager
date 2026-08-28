@@ -19,8 +19,12 @@ import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
 import {
-  failAndRestoreSessionRecoveryHandoff,
-} from './session-recovery-authority';
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
+  capacityPlacementSnapshotSqlValues,
+} from './capacity-placement-snapshot';
+import { toCapacityPlacementSnapshot } from './capacity-pools';
+import { failAndRestoreSessionRecoveryHandoff } from './session-recovery-authority';
 import {
   claimSessionSnapshotRecovery,
   failSessionSnapshotRecovery,
@@ -190,6 +194,7 @@ async function createRecoveryTask(
   }
 
   const now = new Date().toISOString();
+  const capacityPlacementSnapshot = toCapacityPlacementSnapshot(context.workspace);
   try {
     // D1 batches are transactional. The INSERT ... SELECT is the parent-state
     // compare-and-set: if the source is terminal or no longer owns this
@@ -206,6 +211,7 @@ async function createRecoveryTask(
               resource_requirements_json, resource_requirements_source,
               resolved_reservation_json, credential_attribution_user_id,
               credential_attribution_project_id, credential_attribution_source,
+              ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
               triggered_by, created_by, created_at, updated_at)
            SELECT ?, source.project_id, ?, NULL, source.id,
                   COALESCE(NULLIF(source.title, ''), 'Resume conversation'), ?,
@@ -218,6 +224,7 @@ async function createRecoveryTask(
                   COALESCE(source.credential_attribution_user_id, ?),
                   source.credential_attribution_project_id,
                   COALESCE(source.credential_attribution_source, 'user'),
+                  ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
                   'session-recovery', ?, ?, ?
              FROM tasks source
             WHERE source.id = ?
@@ -242,6 +249,9 @@ async function createRecoveryTask(
           context.workspace.agentProfileHint,
           context.workspace.vmSize,
           context.snapshot.userId,
+          ...capacityPlacementSnapshotSqlValues(
+            capacityPlacementSnapshot.capacityPoolId ? capacityPlacementSnapshot : null
+          ),
           context.snapshot.userId,
           now,
           now,

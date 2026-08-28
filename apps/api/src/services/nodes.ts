@@ -7,6 +7,7 @@ import {
   throwIfProviderRequestAborted,
 } from '@simple-agent-manager/providers';
 import {
+  type CapacityPlacementSnapshot,
   type CredentialProvider,
   type CredentialSource,
   isUserOwnedNodeClass,
@@ -20,6 +21,7 @@ import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
+import { capacityPlacementSnapshotDbValues } from './capacity-placement-snapshot';
 import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
 import { GcpApiError, sanitizeGcpError } from './gcp-errors';
 import { signNodeCallbackToken } from './jwt';
@@ -51,6 +53,8 @@ export interface CreateNodeInput {
   nodeMode?: 'shared' | 'exclusive';
   /** Runtime substrate. Defaults to traditional VM. */
   runtime?: 'vm' | 'cf-container';
+  /** Capacity pool/source/candidate audit snapshot for auto-provisioned placement. */
+  capacityPlacementSnapshot?: CapacityPlacementSnapshot | null;
 }
 
 export interface ProvisionedNode {
@@ -116,6 +120,7 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
     nodeRole: input.nodeRole ?? 'workspace',
     nodeMode: input.nodeMode ?? 'shared',
     runtime: input.runtime ?? 'vm',
+    ...capacityPlacementSnapshotDbValues(input.capacityPlacementSnapshot),
     createdAt: now,
     updatedAt: now,
   });

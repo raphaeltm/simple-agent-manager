@@ -904,6 +904,8 @@ export const tasks = sqliteTable(
     capacitySourceId: text('capacity_source_id').references(() => capacitySources.id, {
       onDelete: 'set null',
     }),
+    /** Capacity pool candidate selected for placement/provisioning. Snapshot only; do not cascade historical audit fields. */
+    capacityPoolCandidateId: text('capacity_pool_candidate_id'),
     /** Credential provenance snapshot used for placement/provisioning, without secret material. */
     placementCredentialSource: text('placement_credential_source'),
     /** Non-secret reference to the canonical credential record used for placement/provisioning. */
@@ -981,6 +983,9 @@ export const tasks = sqliteTable(
     capacitySourceIdx: index('idx_tasks_capacity_source')
       .on(table.capacitySourceId)
       .where(sql`capacity_source_id IS NOT NULL`),
+    capacityPoolCandidateIdx: index('idx_tasks_capacity_pool_candidate')
+      .on(table.capacityPoolCandidateId)
+      .where(sql`capacity_pool_candidate_id IS NOT NULL`),
     capacityPoolProjectIdx: index('idx_tasks_capacity_pool_project')
       .on(table.capacityPoolProjectId)
       .where(sql`capacity_pool_project_id IS NOT NULL`),
@@ -1202,6 +1207,8 @@ export const nodes = sqliteTable(
     capacitySourceId: text('capacity_source_id').references(() => capacitySources.id, {
       onDelete: 'set null',
     }),
+    /** Capacity pool candidate selected when this node was provisioned or adopted. Snapshot only. */
+    capacityPoolCandidateId: text('capacity_pool_candidate_id'),
     /** Credential provenance snapshot used for node provisioning, without secret material. */
     placementCredentialSource: text('placement_credential_source'),
     /** Non-secret reference to the canonical credential record used for node provisioning. */
@@ -1256,6 +1263,9 @@ export const nodes = sqliteTable(
     capacitySourceIdx: index('idx_nodes_capacity_source')
       .on(table.capacitySourceId)
       .where(sql`capacity_source_id IS NOT NULL`),
+    capacityPoolCandidateIdx: index('idx_nodes_capacity_pool_candidate')
+      .on(table.capacityPoolCandidateId)
+      .where(sql`capacity_pool_candidate_id IS NOT NULL`),
     capacityPoolProjectIdx: index('idx_nodes_capacity_pool_project')
       .on(table.capacityPoolProjectId)
       .where(sql`capacity_pool_project_id IS NOT NULL`),
@@ -1320,6 +1330,8 @@ export const workspaces = sqliteTable(
     capacitySourceId: text('capacity_source_id').references(() => capacitySources.id, {
       onDelete: 'set null',
     }),
+    /** Capacity pool candidate selected for this workspace placement. Snapshot only. */
+    capacityPoolCandidateId: text('capacity_pool_candidate_id'),
     /** Credential provenance snapshot used for workspace placement/provisioning, without secret material. */
     placementCredentialSource: text('placement_credential_source'),
     /** Non-secret reference to the canonical credential record used for workspace placement/provisioning. */
@@ -1363,6 +1375,9 @@ export const workspaces = sqliteTable(
     capacitySourceIdx: index('idx_workspaces_capacity_source')
       .on(table.capacitySourceId)
       .where(sql`capacity_source_id IS NOT NULL`),
+    capacityPoolCandidateIdx: index('idx_workspaces_capacity_pool_candidate')
+      .on(table.capacityPoolCandidateId)
+      .where(sql`capacity_pool_candidate_id IS NOT NULL`),
     capacityPoolProjectIdx: index('idx_workspaces_capacity_pool_project')
       .on(table.capacityPoolProjectId)
       .where(sql`capacity_pool_project_id IS NOT NULL`),

@@ -19,13 +19,22 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
-import { getAuth, requireApproved,requireAuth } from '../../middleware/auth';
+import { getAuth, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
 import { parseOptionalBody, RunTaskSchema } from '../../schemas';
 import {
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
+  capacityPlacementSnapshotSqlValues,
+} from '../../services/capacity-placement-snapshot';
+import {
+  capacityPlacementSnapshotForTaskStart,
   PlacementResolutionError,
+  resolveCapacityAwareCredentialLookup,
+  resolveCapacityAwareQuotaCredentialSource,
+  resolveCapacityPlacementCredentialAttribution,
   resolvePlacementCredentialAttribution,
+  resolveTaskStartCapacityPoolSelection,
   resolveTaskStartPlacement,
 } from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
@@ -93,9 +102,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
     const depTasks = await db
       .select({ id: schema.tasks.id, status: schema.tasks.status })
       .from(schema.tasks)
-      .where(
-        eq(schema.tasks.projectId, projectId)
-      );
+      .where(eq(schema.tasks.projectId, projectId));
 
     const statusMap: Record<string, TaskStatus> = {};
     for (const t of depTasks) {
@@ -149,16 +156,24 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
   })();
 
   const { resolveCredentialSource } = await import('../../services/provider-credentials');
+  const capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement);
+  const credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
   const credResult = await resolveCredentialSource(
     db,
-    placement.credentialLookup.userId,
-    placement.credentialLookup.provider,
-    placement.credentialLookup.projectId
+    credentialLookup.userId,
+    credentialLookup.provider,
+    credentialLookup.projectId
   );
   if (!credResult) {
-    throw errors.badRequest('Cloud provider credentials required. Connect your account in Settings.');
+    throw errors.badRequest(
+      'Cloud provider credentials required. Connect your account in Settings.'
+    );
   }
-  if (credResult.credentialSource === 'platform') {
+  const quotaCredentialSource = resolveCapacityAwareQuotaCredentialSource(
+    credResult,
+    capacityPoolSelection
+  );
+  if (quotaCredentialSource === 'platform') {
     const quotaEnforcementEnabled = c.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
     if (quotaEnforcementEnabled) {
       const { checkQuotaForUser } = await import('../../services/compute-quotas');
@@ -166,7 +181,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
       if (!quotaCheck.allowed) {
         throw errors.forbidden(
           `Monthly compute quota exceeded. You've used ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours this month. ` +
-          'Add your own cloud provider credentials in Settings or contact your admin to increase your quota.'
+            'Add your own cloud provider credentials in Settings or contact your admin to increase your quota.'
         );
       }
     }
@@ -177,7 +192,10 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
     credentialAttributionUserId,
     credentialAttributionProjectId,
     credentialAttributionSource,
-  } = resolvePlacementCredentialAttribution(placement, credResult);
+  } = capacityPoolSelection?.candidates[0]
+    ? resolveCapacityPlacementCredentialAttribution(placement, capacityPoolSelection.candidates[0])
+    : resolvePlacementCredentialAttribution(placement, credResult);
+  const capacityPlacementSnapshot = capacityPlacementSnapshotForTaskStart(capacityPoolSelection);
   const {
     vmSize,
     vmSizeSource,
@@ -214,19 +232,23 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
          credential_attribution_user_id = ?,
          credential_attribution_project_id = ?,
          credential_attribution_source = ?,
+         ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS},
          updated_at = ?
      WHERE id = ? AND status = 'ready'`
-  ).bind(
-    vmSize,
-    vmSizeSource,
-    resolvedReservation.source,
-    JSON.stringify(resolvedReservation),
-    credentialAttributionUserId,
-    credentialAttributionProjectId,
-    credentialAttributionSource,
-    now,
-    task.id
-  ).run();
+  )
+    .bind(
+      vmSize,
+      vmSizeSource,
+      resolvedReservation.source,
+      JSON.stringify(resolvedReservation),
+      credentialAttributionUserId,
+      credentialAttributionProjectId,
+      credentialAttributionSource,
+      ...capacityPlacementSnapshotSqlValues(capacityPlacementSnapshot),
+      now,
+      task.id
+    )
+    .run();
 
   // If another request already transitioned this task, reject (double-click protection)
   if (!transitionResult.meta.changes || transitionResult.meta.changes === 0) {
@@ -259,8 +281,13 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
   } catch (err) {
     const failedAt = new Date().toISOString();
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await db.update(schema.tasks)
-      .set({ status: 'failed', errorMessage: `Session creation failed: ${errorMsg}`, updatedAt: failedAt })
+    await db
+      .update(schema.tasks)
+      .set({
+        status: 'failed',
+        errorMessage: `Session creation failed: ${errorMsg}`,
+        updatedAt: failedAt,
+      })
       .where(eq(schema.tasks.id, task.id));
     await db.insert(schema.taskStatusEvents).values({
       id: ulid(),
@@ -325,13 +352,19 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
         warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
       },
       resolvedReservation,
+      capacityPoolSelection,
       vmSizeSource,
     });
   } catch (err) {
     const failedAt = new Date().toISOString();
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await db.update(schema.tasks)
-      .set({ status: 'failed', errorMessage: `Task runner startup failed: ${errorMsg}`, updatedAt: failedAt })
+    await db
+      .update(schema.tasks)
+      .set({
+        status: 'failed',
+        errorMessage: `Task runner startup failed: ${errorMsg}`,
+        updatedAt: failedAt,
+      })
       .where(eq(schema.tasks.id, task.id));
     await db.insert(schema.taskStatusEvents).values({
       id: ulid(),
@@ -346,7 +379,11 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
     log.error('task_run.do_startup_failed', { taskId: task.id, projectId, error: errorMsg });
     // Stop the orphaned session (best-effort — it has no workspace and will never be cleaned up otherwise)
     await projectDataService.stopSession(c.env, projectId, sessionId).catch((e) => {
-      log.error('task_run.orphaned_session_stop_failed', { projectId, sessionId, error: String(e) });
+      log.error('task_run.orphaned_session_stop_failed', {
+        projectId,
+        sessionId,
+        error: String(e),
+      });
     });
     throw err;
   }
@@ -385,11 +422,7 @@ runRoutes.post('/:taskId/run/cleanup', requireAuth(), requireApproved(), async (
   const task = await requireProjectTaskById(db, projectId, taskId);
 
   // Only allow cleanup for terminal states
-  if (
-    task.status !== 'completed' &&
-    task.status !== 'failed' &&
-    task.status !== 'cancelled'
-  ) {
+  if (task.status !== 'completed' && task.status !== 'failed' && task.status !== 'cancelled') {
     throw errors.conflict(
       `Task must be in completed, failed, or cancelled status for cleanup, currently '${task.status}'`
     );

@@ -2,9 +2,7 @@
  * MCP orchestration tools — retry, dependency management, and task removal
  * for agent-to-agent communication.
  */
-import type {
-  VMSize,
-} from '@simple-agent-manager/shared';
+import type { VMSize } from '@simple-agent-manager/shared';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { drizzle } from 'drizzle-orm/d1';
@@ -14,10 +12,16 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { generateBranchName } from '../../services/branch-name';
+import { capacityPlacementSnapshotDbValues } from '../../services/capacity-placement-snapshot';
 import { stopAgentSessionOnNode } from '../../services/node-agent';
 import {
+  capacityPlacementSnapshotForTaskStart,
   PlacementResolutionError,
+  resolveCapacityAwareCredentialLookup,
+  resolveCapacityAwareQuotaCredentialSource,
+  resolveCapacityPlacementCredentialAttribution,
   resolvePlacementCredentialAttribution,
+  resolveTaskStartCapacityPoolSelection,
   resolveTaskStartPlacement,
 } from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
@@ -315,11 +319,13 @@ export async function handleRetrySubtask(
   }
 
   const { resolveCredentialSource } = await import('../../services/provider-credentials');
+  const capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement);
+  const credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
   const credResult = await resolveCredentialSource(
     db,
-    placement.credentialLookup.userId,
-    placement.credentialLookup.provider,
-    placement.credentialLookup.projectId
+    credentialLookup.userId,
+    credentialLookup.provider,
+    credentialLookup.projectId
   );
   if (!credResult) {
     return jsonRpcError(
@@ -328,7 +334,11 @@ export async function handleRetrySubtask(
       'Cloud provider credentials required. The user must connect a cloud provider in Settings.'
     );
   }
-  if (credResult.credentialSource === 'platform') {
+  const quotaCredentialSource = resolveCapacityAwareQuotaCredentialSource(
+    credResult,
+    capacityPoolSelection
+  );
+  if (quotaCredentialSource === 'platform') {
     const quotaEnforcementEnabled = env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
     if (quotaEnforcementEnabled) {
       const { checkQuotaForUser } = await import('../../services/compute-quotas');
@@ -349,7 +359,10 @@ export async function handleRetrySubtask(
     credentialAttributionUserId,
     credentialAttributionProjectId,
     credentialAttributionSource,
-  } = resolvePlacementCredentialAttribution(placement, credResult);
+  } = capacityPoolSelection?.candidates[0]
+    ? resolveCapacityPlacementCredentialAttribution(placement, capacityPoolSelection.candidates[0])
+    : resolvePlacementCredentialAttribution(placement, credResult);
+  const capacityPlacementSnapshot = capacityPlacementSnapshotForTaskStart(capacityPoolSelection);
   const {
     vmSize: resolvedVmSize,
     vmSizeSource,
@@ -398,6 +411,7 @@ export async function handleRetrySubtask(
     credentialAttributionUserId,
     credentialAttributionProjectId,
     credentialAttributionSource,
+    ...capacityPlacementSnapshotDbValues(capacityPlacementSnapshot),
     createdBy: tokenData.userId,
     createdAt: now,
     updatedAt: now,
@@ -495,6 +509,7 @@ export async function handleRetrySubtask(
         warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
       },
       resolvedReservation,
+      capacityPoolSelection,
       vmSizeSource,
     });
   } catch (err) {

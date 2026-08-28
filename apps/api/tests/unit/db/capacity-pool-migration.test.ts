@@ -8,6 +8,10 @@ const migrationSql = readFileSync(
   join(process.cwd(), 'src/db/migrations/0125_compute_pool_foundation.sql'),
   'utf8'
 );
+const candidateSnapshotMigrationSql = readFileSync(
+  join(process.cwd(), 'src/db/migrations/0126_capacity_pool_candidate_snapshots.sql'),
+  'utf8'
+);
 
 let sqlite: Database.Database | null = null;
 
@@ -477,5 +481,78 @@ describe('0125_compute_pool_foundation migration', () => {
     expect(sql).not.toContain('PRAGMA FOREIGN_KEYS = OFF');
     expect(sql).toContain('ALTER TABLE NODES ADD COLUMN CAPACITY_POOL_ID');
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS CAPACITY_SOURCES');
+  });
+});
+
+describe('0126_capacity_pool_candidate_snapshots migration', () => {
+  it('adds nullable candidate snapshot columns and indexes without rewriting existing rows', () => {
+    const database = db();
+    database.exec(`
+      INSERT INTO nodes (id, user_id, name, status)
+      VALUES ('node-existing', 'user-1', 'Existing node', 'running');
+
+      INSERT INTO workspaces
+        (id, node_id, project_id, user_id, name, repository, status, vm_size, vm_location)
+      VALUES
+        ('workspace-existing', 'node-existing', 'project-1', 'user-1', 'Existing workspace', 'repo-1', 'running', 'medium', 'nbg1');
+
+      INSERT INTO tasks
+        (id, project_id, user_id, workspace_id, title, status, created_by)
+      VALUES
+        ('task-existing', 'project-1', 'user-1', 'workspace-existing', 'Existing task', 'queued', 'user-1');
+    `);
+    database.exec(migrationSql);
+    database.exec(candidateSnapshotMigrationSql);
+
+    for (const table of ['nodes', 'workspaces', 'tasks']) {
+      const columns = database
+        .prepare(`PRAGMA table_info(${table})`)
+        .all()
+        .map((row) => (row as { name: string }).name);
+      expect(columns).toContain('capacity_pool_candidate_id');
+      expect(
+        database.prepare(`SELECT capacity_pool_candidate_id FROM ${table} LIMIT 1`).get()
+      ).toEqual({ capacity_pool_candidate_id: null });
+    }
+
+    expect(
+      database
+        .prepare(
+          `SELECT name
+           FROM sqlite_master
+           WHERE type = 'index'
+             AND name IN (
+               'idx_nodes_capacity_pool_candidate',
+               'idx_workspaces_capacity_pool_candidate',
+               'idx_tasks_capacity_pool_candidate'
+             )
+           ORDER BY name`
+        )
+        .all()
+    ).toEqual([
+      { name: 'idx_nodes_capacity_pool_candidate' },
+      { name: 'idx_tasks_capacity_pool_candidate' },
+      { name: 'idx_workspaces_capacity_pool_candidate' },
+    ]);
+  });
+
+  it('stores candidate IDs as snapshots rather than live candidate foreign keys', () => {
+    const database = db();
+    database.exec(migrationSql);
+    database.exec(candidateSnapshotMigrationSql);
+    database.exec(`
+      INSERT INTO nodes (id, user_id, name, status, capacity_pool_candidate_id)
+      VALUES ('node-snapshot', 'user-1', 'Snapshot node', 'running', 'deleted-candidate-id');
+    `);
+
+    expect(
+      database
+        .prepare(
+          `SELECT capacity_pool_candidate_id
+           FROM nodes
+           WHERE id = 'node-snapshot'`
+        )
+        .get()
+    ).toEqual({ capacity_pool_candidate_id: 'deleted-candidate-id' });
   });
 });

@@ -99,6 +99,7 @@ export interface CapacityPlacementSnapshot {
   capacityPoolScope: CapacityPoolScope | null;
   capacityPoolRevision: number | null;
   capacitySourceId: string | null;
+  capacityPoolCandidateId: string | null;
   placementCredentialSource: CapacityPlacementCredentialSource | null;
   placementCredentialReference: string | null;
   placementCredentialVersion: number | null;

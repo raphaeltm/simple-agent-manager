@@ -8,25 +8,23 @@
 import type { HandoffFact } from '@simple-agent-manager/shared';
 import type { HandoffPacket } from '@simple-agent-manager/shared';
 import type { OrchestratorConfig } from '@simple-agent-manager/shared';
-import type {
-  CredentialProvider,
-  VMLocation,
-  VMSize,
-  WorkspaceProfile,
-} from '@simple-agent-manager/shared';
-import {
-  DEFAULT_VM_LOCATION,
-  DEFAULT_VM_SIZE,
-  DEFAULT_WORKSPACE_PROFILE,
-  getDefaultLocationForProvider,
-  isValidProvider,
-} from '@simple-agent-manager/shared';
+import type { VMSize } from '@simple-agent-manager/shared';
+import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
+import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
+import {
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
+  capacityPlacementSnapshotSqlValues,
+} from '../../services/capacity-placement-snapshot';
+import {
+  capacityPlacementSnapshotForTaskStart,
+  resolveTaskStartPlacementCredentialAttribution,
+} from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
@@ -390,6 +388,7 @@ async function autoDispatchSchedulableTasks(
     return;
   }
 
+  const db = drizzle(env.DATABASE, { schema });
   const toDispatch = schedulable.slice(0, Math.min(slotsAvailable, config.maxDispatchesPerCycle));
   let dispatched = 0;
 
@@ -402,27 +401,48 @@ async function autoDispatchSchedulableTasks(
         .bind(task.user_id)
         .first<{ name: string | null; email: string | null; github_id: string | null }>();
 
-      // Resolve VM config from project defaults
-      const resolvedProvider: CredentialProvider | null =
-        typeof projectRow.default_provider === 'string' &&
-        isValidProvider(projectRow.default_provider)
-          ? projectRow.default_provider
-          : null;
-      const resolvedVmSize: VMSize =
-        (projectRow.default_vm_size as VMSize | null) ?? DEFAULT_VM_SIZE;
-      const resolvedVmLocation: VMLocation =
-        (projectRow.default_location as VMLocation | null) ??
-        (resolvedProvider
-          ? (getDefaultLocationForProvider(resolvedProvider) as VMLocation | null)
-          : null) ??
-        DEFAULT_VM_LOCATION;
-      const resolvedWorkspaceProfile: WorkspaceProfile =
-        (projectRow.default_workspace_profile as WorkspaceProfile | null) ??
-        DEFAULT_WORKSPACE_PROFILE;
-      const resolvedDevcontainerConfig: string | null =
-        resolvedWorkspaceProfile === 'lightweight'
-          ? null
-          : (projectRow.default_devcontainer_config_name ?? null);
+      const placementResolution = await resolveTaskStartPlacementCredentialAttribution(db, {
+        entryPoint: 'orchestrator-dispatch',
+        taskId: task.id,
+        projectId,
+        userId: task.user_id,
+        project: {
+          id: projectId,
+          defaultVmSize: projectRow.default_vm_size,
+          defaultProvider: projectRow.default_provider,
+          defaultLocation: projectRow.default_location,
+          defaultWorkspaceProfile: projectRow.default_workspace_profile,
+          defaultDevcontainerConfigName: projectRow.default_devcontainer_config_name,
+          defaultAgentType: projectRow.default_agent_type,
+        },
+        profile: null,
+        credentialProjectPolicy: 'current-project',
+        taskModeDefault: 'task',
+        resourceRequirements: {},
+      });
+      if ('error' in placementResolution) {
+        logDecision(sql, missionId, task.id, 'skip', placementResolution.error, now);
+        continue;
+      }
+      const {
+        placement,
+        effectiveProvider,
+        credentialAttributionUserId,
+        credentialAttributionProjectId,
+        credentialAttributionSource,
+        capacityPoolSelection,
+      } = placementResolution;
+      const capacityPlacementSnapshot =
+        capacityPlacementSnapshotForTaskStart(capacityPoolSelection);
+      const {
+        vmSize: resolvedVmSize,
+        vmSizeSource,
+        vmLocation: resolvedVmLocation,
+        workspaceProfile: resolvedWorkspaceProfile,
+        devcontainerConfigName: resolvedDevcontainerConfig,
+        agentType: resolvedAgentType,
+        resolvedReservation,
+      } = placement;
 
       // Create chat session for the task
       const sessionId = await projectDataService.createSession(
@@ -448,10 +468,34 @@ async function autoDispatchSchedulableTasks(
       // Transition task to queued → provisioning via status update
       const dispatchTransition = await env.DATABASE.prepare(
         `UPDATE tasks
-         SET status = 'queued', chat_session_id = ?, execution_step = 'node_selection', updated_at = ?
+         SET status = 'queued',
+             chat_session_id = ?,
+             execution_step = 'node_selection',
+             requested_vm_size = ?,
+             requested_vm_size_source = ?,
+             resource_requirements_source = ?,
+             resolved_reservation_json = ?,
+             credential_attribution_user_id = ?,
+             credential_attribution_project_id = ?,
+             credential_attribution_source = ?,
+             ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS},
+             updated_at = ?
          WHERE id = ? AND (chat_session_id IS NULL OR chat_session_id = ?)`
       )
-        .bind(sessionId, new Date().toISOString(), task.id, sessionId)
+        .bind(
+          sessionId,
+          resolvedVmSize,
+          vmSizeSource,
+          resolvedReservation.source,
+          JSON.stringify(resolvedReservation),
+          credentialAttributionUserId,
+          credentialAttributionProjectId,
+          credentialAttributionSource,
+          ...capacityPlacementSnapshotSqlValues(capacityPlacementSnapshot),
+          new Date().toISOString(),
+          task.id,
+          sessionId
+        )
         .run();
       if (!dispatchTransition.meta.changes) {
         throw new Error('Task was already bound to a different chat session');
@@ -476,10 +520,13 @@ async function autoDispatchSchedulableTasks(
         outputBranch: task.output_branch ?? null,
         projectDefaultVmSize: projectRow.default_vm_size as VMSize | null,
         chatSessionId: sessionId,
-        agentType: projectRow.default_agent_type ?? null,
+        agentType: resolvedAgentType,
         workspaceProfile: resolvedWorkspaceProfile,
         devcontainerConfigName: resolvedDevcontainerConfig,
-        cloudProvider: resolvedProvider,
+        cloudProvider: effectiveProvider,
+        credentialAttributionUserId,
+        credentialAttributionProjectId,
+        credentialAttributionSource,
         agentProfileHint: task.agent_profile_hint ?? null,
         effort: null,
         projectScaling: {
@@ -489,6 +536,9 @@ async function autoDispatchSchedulableTasks(
           nodeMemoryThresholdPercent: projectRow.node_memory_threshold_percent ?? null,
           warmNodeTimeoutMs: projectRow.warm_node_timeout_ms ?? null,
         },
+        resolvedReservation,
+        capacityPoolSelection,
+        vmSizeSource,
       });
 
       // Record in scheduling_queue

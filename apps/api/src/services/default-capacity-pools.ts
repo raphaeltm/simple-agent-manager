@@ -1,5 +1,6 @@
 import type {
   CapacityPool as CapacityPoolDto,
+  CapacityPoolCandidate as CapacityPoolCandidateDto,
   CapacityPoolScope,
   CapacitySourceIdentity,
   CredentialProvider,
@@ -11,11 +12,15 @@ import {
   isValidProvider,
   VM_SIZE_LABELS,
 } from '@simple-agent-manager/shared';
-import { and, eq, isNotNull, isNull, notInArray } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull, notInArray } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
-import { toCapacityPool, toCapacitySourceIdentity } from './capacity-pools';
+import {
+  toCapacityPool,
+  toCapacityPoolCandidate,
+  toCapacitySourceIdentity,
+} from './capacity-pools';
 
 type Db = ReturnType<typeof drizzle>;
 
@@ -56,6 +61,7 @@ interface CredentialCapacitySeed extends ScopeIdentity {
 export interface CapacityPoolSummary {
   pool: CapacityPoolDto;
   sources: CapacitySourceIdentity[];
+  candidates: CapacityPoolCandidateDto[];
   activeCandidateCount: number;
 }
 
@@ -344,10 +350,7 @@ async function ensureDefaultPoolForCredentialSeeds(
   return readDefaultPoolSummary(db, scope);
 }
 
-async function findDefaultPool(
-  db: Db,
-  scope: ScopeIdentity
-): Promise<schema.CapacityPool | null> {
+async function findDefaultPool(db: Db, scope: ScopeIdentity): Promise<schema.CapacityPool | null> {
   const [pool] = await db
     .select()
     .from(schema.capacityPools)
@@ -669,7 +672,7 @@ async function readDefaultPoolSummary(
   const rows = await db
     .select({
       source: schema.capacitySources,
-      candidateId: schema.capacityPoolCandidates.id,
+      candidate: schema.capacityPoolCandidates,
     })
     .from(schema.capacityPoolCandidates)
     .innerJoin(
@@ -682,6 +685,11 @@ async function readDefaultPoolSummary(
         eq(schema.capacityPoolCandidates.status, ACTIVE_STATUS),
         eq(schema.capacitySources.status, ACTIVE_STATUS)
       )
+    )
+    .orderBy(
+      asc(schema.capacityPoolCandidates.priority),
+      asc(schema.capacityPoolCandidates.candidateOrder),
+      asc(schema.capacityPoolCandidates.id)
     );
 
   if (rows.length === 0) return null;
@@ -691,10 +699,13 @@ async function readDefaultPoolSummary(
     sourcesById.set(row.source.id, toCapacitySourceIdentity(row.source));
   }
 
+  const candidates = rows.map((row) => toCapacityPoolCandidate(row.candidate));
+
   return {
     pool: toCapacityPool(pool),
     sources: [...sourcesById.values()],
-    activeCandidateCount: rows.length,
+    candidates,
+    activeCandidateCount: candidates.length,
   };
 }
 

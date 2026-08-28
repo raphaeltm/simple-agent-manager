@@ -106,6 +106,10 @@ export class TaskRunner extends DurableObject<Env> {
         agentStarted: false,
         mcpToken: null,
         provisionedVmSize: null,
+        capacityPlacementSnapshot:
+          input.config.capacityPoolSelection?.candidates[0]?.snapshot ??
+          input.config.capacityPoolSelection?.poolSnapshot ??
+          null,
       },
       config: input.config,
       retryCount: 0,
