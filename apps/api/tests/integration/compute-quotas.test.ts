@@ -25,6 +25,10 @@ describe('compute quota pipeline', () => {
   const adminQuotaRoute = readFileSync(resolve(process.cwd(), 'src/routes/admin-quotas.ts'), 'utf8');
   const usageRoute = readFileSync(resolve(process.cwd(), 'src/routes/usage.ts'), 'utf8');
   const submitRoute = readFileSync(resolve(process.cwd(), 'src/routes/tasks/submit.ts'), 'utf8');
+  const placementResolver = readFileSync(
+    resolve(process.cwd(), 'src/services/placement-resolver.ts'),
+    'utf8',
+  );
   const nodeStepsFile = readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner/node-steps.ts'), 'utf8');
   const nodesRoute = readFileSync(resolve(process.cwd(), 'src/routes/nodes.ts'), 'utf8');
   const migrationFile = readFileSync(resolve(process.cwd(), 'src/db/migrations/0039_compute_quotas.sql'), 'utf8');
@@ -249,9 +253,10 @@ describe('compute quota pipeline', () => {
     });
 
     it('passes resolved provider and attribution scope to credential source check', () => {
-      expect(submitRoute).toContain('credentialResolutionUserId');
-      expect(submitRoute).toContain('credentialResolutionProjectId');
-      expect(submitRoute).toContain('provider ?? undefined');
+      expect(submitRoute).toContain('placement.credentialLookup.userId');
+      expect(submitRoute).toContain('placement.credentialLookup.provider');
+      expect(submitRoute).toContain('placement.credentialLookup.projectId');
+      expect(placementResolver).toContain("'current-project-unless-inherited'");
     });
 
     it('enforces quota only when credential source is platform', () => {

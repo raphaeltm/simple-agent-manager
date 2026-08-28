@@ -265,6 +265,10 @@ describe('quota enforcement pattern: credential source, not existence', () => {
     resolve(process.cwd(), 'src/routes/mcp/dispatch-tool.ts'),
     'utf8',
   );
+  const placementResolverSource = readFileSync(
+    resolve(process.cwd(), 'src/services/placement-resolver.ts'),
+    'utf8',
+  );
 
   // =========================================================================
   // Regression: The OLD pattern that must NOT exist
@@ -338,8 +342,10 @@ describe('quota enforcement pattern: credential source, not existence', () => {
   // =========================================================================
   describe('target provider is passed to credential resolution', () => {
     it('submit.ts passes root or inherited project scope', () => {
-      expect(submitSource).toContain('credentialResolutionProjectId');
-      expect(submitSource).toContain('provider ?? undefined');
+      expect(submitSource).toContain('placement.credentialLookup.userId');
+      expect(submitSource).toContain('placement.credentialLookup.projectId');
+      expect(submitSource).toContain('placement.credentialLookup.provider');
+      expect(placementResolverSource).toContain("'current-project-unless-inherited'");
     });
 
     it('node-steps.ts passes cloudProvider from config', () => {

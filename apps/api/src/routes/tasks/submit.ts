@@ -10,27 +10,15 @@
  * See: specs/022-simplified-chat-ux/contracts/task-submit.md
  */
 import type {
-  CredentialProvider,
   SubmitTaskResponse,
   TaskAttachment,
-  VMLocation,
   VMSize,
-  WorkspaceProfile,
 } from '@simple-agent-manager/shared';
 import {
   ACP_SESSION_DEFAULTS,
   ATTACHMENT_DEFAULTS,
-  CREDENTIAL_PROVIDERS,
   DEFAULT_TASK_TITLE_MAX_LENGTH,
-  DEFAULT_VM_LOCATION,
-  DEFAULT_VM_SIZE,
-  DEFAULT_WORKSPACE_PROFILE,
-  getDefaultLocationForProvider,
-  getLocationsForProvider,
-  isValidLocationForProvider,
-  isValidProvider,
   MAX_CONTEXT_SUMMARY_BYTES,
-  resolveResourceReservation,
   SAFE_FILENAME_REGEX,
 } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
@@ -49,6 +37,11 @@ import { jsonValidator, SubmitTaskSchema } from '../../schemas';
 import { validateAttachments } from '../../services/attachment-upload';
 import { generateBranchName } from '../../services/branch-name';
 import { enrichMessageWithMentions } from '../../services/mention-enrichment';
+import {
+  PlacementResolutionError,
+  resolvePlacementCredentialAttribution,
+  resolveTaskStartPlacement,
+} from '../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../services/skills';
@@ -279,101 +272,68 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
 
   // Resolve agent profile if specified.
   // Precedence: explicit task field > profile value > project default > platform default.
-  const resolvedProfile = body.agentProfileId || body.skillId
-    ? await resolveSkillProfile(db, projectId, body.agentProfileId, body.skillId, userId, c.env)
-    : null;
-  const skillResourceRequirements = parseSkillResourceRequirementsJson(resolvedProfile?.resourceRequirementsJson);
-
-  // Determine VM config (with profile overrides in the middle of the precedence chain)
-  // Track which level provided the VM size for audit
-  const vmSizeSource = body.vmSize ? 'task' as const
-    : resolvedProfile?.vmSizeOverride ? 'agent-profile' as const
-    : project.defaultVmSize ? 'project' as const
-    : 'platform' as const;
-  const vmSize: VMSize = body.vmSize
-    ?? (resolvedProfile?.vmSizeOverride as VMSize | null)
-    ?? (project.defaultVmSize as VMSize | null)
-    ?? DEFAULT_VM_SIZE;
-  // Determine cloud provider: explicit override > profile > project default > null (system picks)
-  const projectDefaultProvider =
-    typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
-      ? project.defaultProvider
+  const resolvedProfile =
+    body.agentProfileId || body.skillId
+      ? await resolveSkillProfile(db, projectId, body.agentProfileId, body.skillId, userId, c.env)
       : null;
-  const profileProvider =
-    typeof resolvedProfile?.provider === 'string' && isValidProvider(resolvedProfile.provider)
-      ? resolvedProfile.provider
-      : null;
-  const provider: CredentialProvider | null = body.provider
-    ?? profileProvider
-    ?? projectDefaultProvider
-    ?? null;
-  // Location resolution: explicit > profile > project default > provider default > platform default
-  const vmLocation: VMLocation = (body.vmLocation as VMLocation)
-    ?? (resolvedProfile?.vmLocation as VMLocation | null)
-    ?? (project.defaultLocation as VMLocation | null)
-    ?? (provider ? getDefaultLocationForProvider(provider) as VMLocation | null : null)
-    ?? DEFAULT_VM_LOCATION;
-  const workspaceProfile: WorkspaceProfile = body.workspaceProfile
-    ?? (resolvedProfile?.workspaceProfile as WorkspaceProfile | null)
-    ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
-    ?? DEFAULT_WORKSPACE_PROFILE;
-
-  // Devcontainer config name resolution: explicit > profile > project default > null (auto-discover).
-  // Only meaningful when workspaceProfile is 'full' — lightweight skips devcontainer build entirely.
-  const devcontainerConfigName: string | null = workspaceProfile === 'lightweight'
-    ? null
-    : (body.devcontainerConfigName
-      ?? resolvedProfile?.devcontainerConfigName
-      ?? project.defaultDevcontainerConfigName
-      ?? null);
-
-  // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
-  // Resolve using the same precedence chain: task > profile > project > platform.
-  // The resolved reservation is persisted for observability but does NOT affect placement.
-  const resolvedReservation = resolveResourceReservation(
-    {
-      task: body.resourceRequirements,
-      skill: skillResourceRequirements,
-    },
-    {
-      taskId,
-      skillId: resolvedProfile?.skillId ?? undefined,
-      agentProfileId: resolvedProfile?.profileId ?? undefined,
-      projectId,
-      userId,
-    },
+  const skillResourceRequirements = parseSkillResourceRequirementsJson(
+    resolvedProfile?.resourceRequirementsJson
   );
 
-  if (provider !== null && !CREDENTIAL_PROVIDERS.includes(provider)) {
-    throw errors.badRequest(`provider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`);
-  }
-
-  // Validate location against provider
-  if (provider !== null && !isValidLocationForProvider(provider, vmLocation)) {
-    const validLocations = getLocationsForProvider(provider).map((l) => l.id);
-    throw errors.badRequest(
-      `Location '${vmLocation}' is not valid for provider '${provider}'. Valid locations: ${validLocations.join(', ')}`
-    );
-  }
+  const placement = (() => {
+    try {
+      return resolveTaskStartPlacement({
+        entryPoint: 'task-submit',
+        taskId,
+        projectId,
+        userId,
+        project,
+        profile: resolvedProfile,
+        explicit: {
+          vmSize: body.vmSize ?? null,
+          vmSizeSource: 'task',
+          provider: body.provider ?? null,
+          vmLocation: body.vmLocation ?? null,
+          workspaceProfile: body.workspaceProfile ?? null,
+          devcontainerConfigName: body.devcontainerConfigName,
+          taskMode: body.taskMode ?? null,
+          agentType: body.agentType ?? null,
+        },
+        inheritedCredentialAttribution: {
+          userId: inheritedAttributionUserId,
+          projectId: inheritedAttributionProjectId,
+          source: inheritedAttributionSource,
+        },
+        credentialProjectPolicy: 'current-project-unless-inherited',
+        taskModeDefault: 'workspace-profile',
+        resourceRequirements: {
+          task: body.resourceRequirements,
+          skill: skillResourceRequirements,
+        },
+      });
+    } catch (err) {
+      if (err instanceof PlacementResolutionError) {
+        throw errors.badRequest(err.message);
+      }
+      throw err;
+    }
+  })();
 
   // Check cloud provider credentials and enforce compute quota.
   // This runs AFTER provider resolution so we know which provider will be used,
   // ensuring quota enforcement is based on the actual credential source — not
   // just whether the user has ANY cloud credential registered.
   const { resolveCredentialSource } = await import('../../services/provider-credentials');
-  const credentialResolutionUserId = inheritedAttributionUserId ?? userId;
-  const credentialResolutionProjectId = inheritedAttributionUserId ? inheritedAttributionProjectId : projectId;
   const credResult = await resolveCredentialSource(
     db,
-    credentialResolutionUserId,
-    provider ?? undefined,
-    credentialResolutionProjectId
+    placement.credentialLookup.userId,
+    placement.credentialLookup.provider,
+    placement.credentialLookup.projectId
   );
 
   if (!credResult) {
     throw errors.forbidden('Cloud provider credentials required. Connect your account in Settings.');
   }
-  const effectiveProvider = provider ?? credResult.providerName;
 
   if (credResult.credentialSource === 'platform') {
     const quotaEnforcementEnabled = c.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
@@ -389,16 +349,24 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
     }
   }
 
-  const credentialAttributionUserId = inheritedAttributionUserId ?? userId;
-  const credentialAttributionSource = inheritedAttributionSource ?? credResult.credentialSource;
-  const credentialAttributionProjectId = credentialAttributionSource === 'project'
-    ? (inheritedAttributionProjectId ?? projectId)
-    : null;
-
-  // Determine task mode: explicit override > profile > inferred from workspace profile > default 'task'
-  const taskMode = body.taskMode
-    ?? (resolvedProfile?.taskMode as import('@simple-agent-manager/shared').TaskMode | null)
-    ?? (workspaceProfile === 'lightweight' ? 'conversation' : 'task');
+  const credentialAttribution = resolvePlacementCredentialAttribution(placement, credResult);
+  const {
+    effectiveProvider,
+    credentialAttributionUserId,
+    credentialAttributionProjectId,
+    credentialAttributionSource,
+  } = credentialAttribution;
+  const {
+    vmSize,
+    vmSizeSource,
+    vmLocation,
+    workspaceProfile,
+    devcontainerConfigName,
+    taskMode,
+    resolvedReservation,
+    agentType,
+  } = placement;
+  const projectAgentDefaults = resolveProjectAgentDefault(project.agentDefaults, agentType);
 
   // Start new task work on its generated output branch so VM-agent completion
   // pushes cannot land on the repository default branch. Forked tasks get parent
@@ -589,7 +557,7 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
       outputBranch: branchName,
       projectDefaultVmSize: project.defaultVmSize as VMSize | null,
       chatSessionId: sessionId,
-      agentType: body.agentType ?? resolvedProfile?.agentType ?? project.defaultAgentType ?? null,
+      agentType,
       workspaceProfile,
       devcontainerConfigName,
       cloudProvider: effectiveProvider,
@@ -599,19 +567,9 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
       taskMode,
       // Resolution chain: agent profile > project.agentDefaults[agentType] > null (VM agent
       // then falls through to user agent_settings via callback, then platform default).
-      model:
-        resolvedProfile?.model ??
-        resolveProjectAgentDefault(
-          project.agentDefaults,
-          body.agentType ?? resolvedProfile?.agentType ?? project.defaultAgentType ?? null
-        ).model,
+      model: resolvedProfile?.model ?? projectAgentDefaults.model,
       effort: resolvedProfile?.effort ?? null,
-      permissionMode:
-        resolvedProfile?.permissionMode ??
-        resolveProjectAgentDefault(
-          project.agentDefaults,
-          body.agentType ?? resolvedProfile?.agentType ?? project.defaultAgentType ?? null
-        ).permissionMode,
+      permissionMode: resolvedProfile?.permissionMode ?? projectAgentDefaults.permissionMode,
       // OpenCode provider/baseUrl: null = no profile-level override.
       // The VM agent fetches user-level agent settings via the POST /:id/agent-settings callback.
       opencodeProvider: null,
