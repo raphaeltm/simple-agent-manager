@@ -5,7 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError, errors } from '../../../src/middleware/error';
-import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import {
+  createSchemaTables,
+  createSqliteD1,
+  createSqliteD1WithBindLimit,
+} from '../../helpers/sqlite-d1';
 
 const authState = vi.hoisted(() => ({
   userId: 'user-1',
@@ -40,7 +44,7 @@ function createApp() {
   return app;
 }
 
-function createEnv() {
+function createEnv(options: { bindLimit?: number } = {}) {
   const sqlite = new Database(':memory:');
   createSchemaTables(sqlite, [
     schema.users,
@@ -53,7 +57,9 @@ function createEnv() {
   return {
     sqlite,
     env: {
-      DATABASE: createSqliteD1(sqlite),
+      DATABASE: options.bindLimit
+        ? createSqliteD1WithBindLimit(sqlite, options.bindLimit)
+        : createSqliteD1(sqlite),
     } as Env,
   };
 }
@@ -144,6 +150,35 @@ describe('default capacity pool routes', () => {
         expect.objectContaining({ scope: 'installation', visibility: 'hidden' }),
       ])
     );
+  });
+
+  it('GET ensure=true reconciles user defaults without exceeding D1 bind limits', async () => {
+    const { sqlite, env } = createEnv({ bindLimit: 100 });
+    seedUser(sqlite, 'user-1');
+    seedCloudCredential(sqlite, { id: 'user-cloud-1', userId: 'user-1' });
+
+    const res = await createApp().request(
+      '/api/capacity-pools/defaults?ensure=true',
+      {
+        method: 'GET',
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      effectiveScope: 'user',
+      reconciledScopes: ['user'],
+      effective: {
+        pool: { scope: 'user', ownerUserId: 'user-1' },
+        sources: [
+          expect.objectContaining({
+            credentialSource: 'user',
+            credentialReference: 'credentials:user-cloud-1',
+          }),
+        ],
+      },
+    });
   });
 
   it('updates the authenticated user default pool policy and candidate status', async () => {
@@ -250,6 +285,37 @@ describe('default capacity pool routes', () => {
         expect.objectContaining({ scope: 'user', visibility: 'hidden' }),
       ])
     );
+  });
+
+  it('GET ensure=true reconciles installation defaults without exceeding D1 bind limits', async () => {
+    authState.userId = 'superadmin-1';
+    authState.role = 'superadmin';
+    const { sqlite, env } = createEnv({ bindLimit: 100 });
+    seedUser(sqlite, 'superadmin-1', 'superadmin');
+    seedPlatformCloudCredential(sqlite);
+
+    const res = await createApp().request(
+      '/api/admin/capacity-pools/defaults?ensure=true',
+      {
+        method: 'GET',
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      effectiveScope: 'installation',
+      reconciledScopes: ['installation'],
+      effective: {
+        pool: { scope: 'installation' },
+        sources: [
+          expect.objectContaining({
+            credentialSource: 'platform',
+            credentialReference: 'platform_credentials:platform-cloud-1',
+          }),
+        ],
+      },
+    });
   });
 
   it('updates installation defaults only for superadmins', async () => {

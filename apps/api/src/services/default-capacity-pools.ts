@@ -45,6 +45,16 @@ const SOURCE_KIND_CLOUD_PROVIDER = 'cloud-provider-credential';
 const CREDENTIAL_TYPE_CLOUD_PROVIDER = 'cloud-provider';
 const ACTIVE_STATUS = 'active';
 const DISABLED_STATUS = 'disabled';
+// Cloudflare D1 accepts at most 100 bound parameters per statement.
+const D1_BIND_PARAMETER_LIMIT = 100;
+const CANDIDATE_INSERT_BIND_COUNT = 14;
+const CANDIDATE_UPSERT_UPDATE_BIND_COUNT = 1;
+const CANDIDATE_UPSERT_CHUNK_SIZE = Math.max(
+  1,
+  Math.floor(
+    (D1_BIND_PARAMETER_LIMIT - CANDIDATE_UPSERT_UPDATE_BIND_COUNT) / CANDIDATE_INSERT_BIND_COUNT
+  )
+);
 type ScopeIdentity = DefaultPoolScopeIdentity;
 
 interface CredentialCapacitySeed extends ScopeIdentity {
@@ -590,10 +600,11 @@ async function ensureCandidatesForSource(
     }
   }
 
-  if (candidateValues.length > 0) {
+  for (let offset = 0; offset < candidateValues.length; offset += CANDIDATE_UPSERT_CHUNK_SIZE) {
+    const chunk = candidateValues.slice(offset, offset + CANDIDATE_UPSERT_CHUNK_SIZE);
     await db
       .insert(schema.capacityPoolCandidates)
-      .values(candidateValues)
+      .values(chunk)
       .onConflictDoUpdate({
         target: schema.capacityPoolCandidates.id,
         set: {

@@ -5,7 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
-import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import {
+  createSchemaTables,
+  createSqliteD1,
+  createSqliteD1WithBindLimit,
+} from '../../helpers/sqlite-d1';
 
 const authState = vi.hoisted(() => ({
   userId: 'user-1',
@@ -43,7 +47,7 @@ function createApp() {
   return app;
 }
 
-function createEnv() {
+function createEnv(options: { bindLimit?: number } = {}) {
   const sqlite = new Database(':memory:');
   createSchemaTables(sqlite, [
     schema.users,
@@ -58,7 +62,9 @@ function createEnv() {
   return {
     sqlite,
     env: {
-      DATABASE: createSqliteD1(sqlite),
+      DATABASE: options.bindLimit
+        ? createSqliteD1WithBindLimit(sqlite, options.bindLimit)
+        : createSqliteD1(sqlite),
     } as Env,
   };
 }
@@ -207,6 +213,38 @@ describe('project capacity pool routes', () => {
       .prepare(`SELECT COUNT(*) AS count FROM capacity_pools WHERE scope = 'installation'`)
       .get() as { count: number };
     expect(installationPoolCount.count).toBe(0);
+  });
+
+  it('GET ensure=true reconciles project defaults without exceeding D1 bind limits', async () => {
+    const { sqlite, env } = createEnv({ bindLimit: 100 });
+    seedUser(sqlite, 'user-1');
+    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
+    seedCloudCredential(sqlite, {
+      id: 'project-cloud-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+    });
+
+    const res = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults?ensure=true',
+      { method: 'GET' },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      effectiveScope: 'project',
+      reconciledScopes: ['project', 'user'],
+      effective: {
+        pool: { scope: 'project', ownerProjectId: 'project-1' },
+        sources: [
+          expect.objectContaining({
+            credentialSource: 'project',
+            credentialReference: 'credentials:project-cloud-1',
+          }),
+        ],
+      },
+    });
   });
 
   it('exposes installation defaults to superadmins with project access', async () => {
@@ -403,6 +441,57 @@ describe('project capacity pool routes', () => {
         .prepare(`SELECT strategy FROM capacity_pools WHERE scope = 'user' AND owner_user_id = ?`)
         .get('user-1')
     ).toEqual({ strategy: 'balanced' });
+  });
+
+  it('preserves edited project candidate statuses during GET ensure=true reconciliation', async () => {
+    const { sqlite, env } = createEnv({ bindLimit: 100 });
+    seedUser(sqlite, 'user-1');
+    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
+    seedCloudCredential(sqlite, {
+      id: 'project-cloud-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+    });
+
+    const initialRes = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults?ensure=true',
+      { method: 'GET' },
+      env
+    );
+    expect(initialRes.status).toBe(200);
+    const initial = await initialRes.json();
+    const candidate = initial.effective.candidates.find(
+      (item: { location: string; machineSize: string }) =>
+        item.location === 'ash' && item.machineSize === 'large'
+    );
+    expect(candidate).toBeTruthy();
+
+    const patchRes = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          candidates: [{ id: candidate.id, status: 'disabled' }],
+        }),
+      },
+      env
+    );
+    expect(patchRes.status).toBe(200);
+
+    const reconciledRes = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults?ensure=true',
+      { method: 'GET' },
+      env
+    );
+    expect(reconciledRes.status).toBe(200);
+    const reconciled = await reconciledRes.json();
+
+    expect(
+      reconciled.effective.candidates.find((item: { id: string }) => item.id === candidate.id)
+    ).toMatchObject({ status: 'disabled' });
+    expect(
+      sqlite.prepare(`SELECT status FROM capacity_pool_candidates WHERE id = ?`).get(candidate.id)
+    ).toEqual({ status: 'disabled' });
   });
 
   it('requires project secret-write capability for project default edits', async () => {
