@@ -161,7 +161,10 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
     mocks.failSession.mockResolvedValue(undefined);
     mocks.getGitHubUserAccessToken.mockResolvedValue('github-token');
     mocks.getUserInstallationRepositories.mockResolvedValue([{ id: 42, fullName: 'org/repo' }]);
-    mocks.resolveCredentialSource.mockResolvedValue({ credentialSource: 'user' });
+    mocks.resolveCredentialSource.mockResolvedValue({
+      credentialSource: 'user',
+      providerName: 'hetzner',
+    });
   });
 
   // ───────────────────────────────────────────────────────────────────────────

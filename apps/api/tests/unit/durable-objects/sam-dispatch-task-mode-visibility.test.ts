@@ -114,7 +114,10 @@ describe('SAM dispatch_task taskMode visibility', () => {
       .mockImplementationOnce(() => selectRows([project]))
       .mockImplementationOnce(() => selectRows([{ name: 'User', email: 'user@example.com', githubId: '12345' }]));
     mocks.resolveAgentProfile.mockResolvedValue(null);
-    mocks.resolveCredentialSource.mockResolvedValue({ source: 'user', credential: { id: 'cred-1' } });
+    mocks.resolveCredentialSource.mockResolvedValue({
+      credentialSource: 'user',
+      providerName: 'hetzner',
+    });
     mocks.generateTaskTitle.mockResolvedValue('Generated task title');
     mocks.requireRepositoryOwnerAccess.mockResolvedValue(undefined);
     mocks.createSession.mockResolvedValue('session-1');

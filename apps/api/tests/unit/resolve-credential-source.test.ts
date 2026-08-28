@@ -359,7 +359,8 @@ describe('quota enforcement pattern: credential source, not existence', () => {
     it('dispatch-tool.ts passes inherited root attribution scope', () => {
       expect(dispatchSource).toContain('inheritedAttributionUserId');
       expect(dispatchSource).toContain('inheritedAttributionProjectId');
-      expect(dispatchSource).toContain('resolvedProvider ?? undefined');
+      expect(dispatchSource).toContain('placement.credentialLookup.provider');
+      expect(dispatchSource).toContain('placement.credentialLookup.projectId');
     });
   });
 

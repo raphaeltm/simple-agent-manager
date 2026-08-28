@@ -352,7 +352,7 @@ describe('compute quota pipeline', () => {
     it('passes resolvedProvider and inherited attribution scope to credential source check', () => {
       expect(dispatchToolFile).toContain('inheritedAttributionUserId');
       expect(dispatchToolFile).toContain('inheritedAttributionProjectId');
-      expect(dispatchToolFile).toContain('resolvedProvider ?? undefined');
+      expect(dispatchToolFile).toContain('placement.credentialLookup.provider');
     });
 
     it('enforces quota when credential source is platform', () => {

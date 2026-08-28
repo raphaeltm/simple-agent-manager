@@ -6,23 +6,9 @@
  * are set so the UI groups it as a subtask (same semantics as the
  * workspace-MCP dispatch path in `routes/mcp/dispatch-tool.ts`).
  */
-import type {
-  CredentialProvider,
-  TaskMode,
-  VMLocation,
-  VMSize,
-  WorkspaceProfile,
-} from '@simple-agent-manager/shared';
+import type { TaskMode, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import {
-  DEFAULT_VM_LOCATION,
-  DEFAULT_VM_SIZE,
-  DEFAULT_WORKSPACE_PROFILE,
-  getDefaultLocationForProvider,
-  getLocationsForProvider,
   isValidAgentType,
-  isValidLocationForProvider,
-  isValidProvider,
-  resolveResourceReservation,
 } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -33,6 +19,9 @@ import { log } from '../../../lib/logger';
 import { ulid } from '../../../lib/ulid';
 import { requireRepositoryOwnerAccess } from '../../../routes/projects/_helpers';
 import { generateBranchName } from '../../../services/branch-name';
+import {
+  resolveTaskStartPlacementCredentialAttribution,
+} from '../../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../../services/skills';
@@ -240,85 +229,59 @@ export async function dispatchTask(
     : null;
   const skillResourceRequirements = parseSkillResourceRequirementsJson(resolvedProfile?.resourceRequirementsJson);
 
-  // ── Resolve config (explicit → profile → project default → platform default) ──
-  const profileProvider =
-    typeof resolvedProfile?.provider === 'string' && isValidProvider(resolvedProfile.provider)
-      ? resolvedProfile.provider
-      : null;
-  const projectDefaultProvider =
-    typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
-      ? project.defaultProvider
-      : null;
-  const resolvedProvider: CredentialProvider | null = profileProvider
-    ?? projectDefaultProvider
-    ?? null;
-
-  const vmSizeSource = vmSize ? 'task' as const
-    : resolvedProfile?.vmSizeOverride ? 'agent-profile' as const
-    : project.defaultVmSize ? 'project' as const
-    : 'platform' as const;
-  const resolvedVmSize: VMSize = vmSize
-    ?? (resolvedProfile?.vmSizeOverride as VMSize | null)
-    ?? (project.defaultVmSize as VMSize | null)
-    ?? DEFAULT_VM_SIZE;
-
-  const resolvedVmLocation: VMLocation = (
-    (resolvedProfile?.vmLocation as VMLocation | null)
-    ?? (project.defaultLocation as VMLocation | null)
-    ?? (resolvedProvider ? getDefaultLocationForProvider(resolvedProvider) as VMLocation | null : null)
-    ?? DEFAULT_VM_LOCATION
-  ) as VMLocation;
-
-  const resolvedWorkspaceProfile: WorkspaceProfile = (input.workspaceProfile as WorkspaceProfile | undefined)
-    ?? (resolvedProfile?.workspaceProfile as WorkspaceProfile | null)
-    ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
-    ?? DEFAULT_WORKSPACE_PROFILE;
-
-  // Task mode: explicit -> profile -> task.
-  // MCP dispatch is agent-to-agent delegated work; workspace profile controls
-  // provisioning shape, not whether the task reports completion.
-  const resolvedTaskMode: TaskMode = (input.taskMode as TaskMode | undefined)
-    ?? (resolvedProfile?.taskMode as TaskMode | null)
-    ?? 'task';
-
-  const resolvedAgentType: string | null = input.agentType
-    ?? resolvedProfile?.agentType
-    ?? project.defaultAgentType
-    ?? null;
-
   const explicitBranch = input.branch?.trim();
+  const taskId = ulid();
 
-  // Validate location against resolved provider
-  if (resolvedProvider !== null && !isValidLocationForProvider(resolvedProvider, resolvedVmLocation)) {
-    const validLocations = getLocationsForProvider(resolvedProvider).map((l) => l.id);
-    return { error: `Location '${resolvedVmLocation}' is not valid for provider '${resolvedProvider}'. Valid: ${validLocations.join(', ')}` };
+  const placementResolution = await resolveTaskStartPlacementCredentialAttribution(db, {
+    entryPoint: 'sam-session-dispatch',
+    taskId,
+    projectId: input.projectId,
+    userId: ctx.userId,
+    project,
+    profile: resolvedProfile,
+    explicit: {
+      vmSize: vmSize ?? null,
+      vmSizeSource: 'task',
+      workspaceProfile: (input.workspaceProfile as WorkspaceProfile | undefined) ?? null,
+      taskMode: (input.taskMode as TaskMode | undefined) ?? null,
+      agentType: input.agentType ?? null,
+    },
+    inheritedCredentialAttribution: {
+      userId: inheritedAttributionUserId,
+      projectId: inheritedAttributionProjectId,
+      source: inheritedAttributionSource,
+    },
+    credentialProjectPolicy: 'current-project-unless-inherited',
+    taskModeDefault: 'task',
+    resourceRequirements: {
+      skill: skillResourceRequirements,
+    },
+  });
+  if ('error' in placementResolution) {
+    return placementResolution;
   }
-
-  // ── Verify cloud credentials ──────────────────────────────────────────
-  const { resolveCredentialSource } = await import('../../../services/provider-credentials');
-  const credentialResolutionUserId = inheritedAttributionUserId ?? ctx.userId;
-  const credentialResolutionProjectId = inheritedAttributionUserId ? inheritedAttributionProjectId : input.projectId;
-  const credResult = await resolveCredentialSource(
-    db,
-    credentialResolutionUserId,
-    resolvedProvider ?? undefined,
-    credentialResolutionProjectId
-  );
-  if (!credResult) {
-    return { error: 'No cloud provider credentials found. The user must connect a cloud provider in Settings.' };
-  }
-  const credentialAttributionUserId = inheritedAttributionUserId ?? ctx.userId;
-  const credentialAttributionSource = inheritedAttributionSource ?? credResult.credentialSource;
-  const credentialAttributionProjectId = credentialAttributionSource === 'project'
-    ? (inheritedAttributionProjectId ?? input.projectId)
-    : null;
-  const effectiveProvider = resolvedProvider ?? credResult.providerName;
+  const {
+    placement,
+    effectiveProvider,
+    credentialAttributionUserId,
+    credentialAttributionProjectId,
+    credentialAttributionSource,
+  } = placementResolution;
+  const {
+    vmSize: resolvedVmSize,
+    vmSizeSource,
+    vmLocation: resolvedVmLocation,
+    workspaceProfile: resolvedWorkspaceProfile,
+    devcontainerConfigName: resolvedDevcontainerConfigName,
+    taskMode: resolvedTaskMode,
+    agentType: resolvedAgentType,
+    resolvedReservation,
+  } = placement;
 
   // ── Generate title and branch name ────────────────────────────────────
   const titleConfig = getTaskTitleConfig(env);
   const taskTitle = await generateTaskTitle(env, description, titleConfig);
 
-  const taskId = ulid();
   const branchPrefix = env.BRANCH_NAME_PREFIX || 'sam/';
   const branchMaxLength = parseInt(env.BRANCH_NAME_MAX_LENGTH || '60', 10);
   const branchName = generateBranchName(description, taskId, {
@@ -329,18 +292,6 @@ export async function dispatchTask(
   // work must start on the generated output branch so VM-agent completion
   // pushes cannot land on the repository default branch.
   const checkoutBranch = explicitBranch || branchName;
-
-  // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
-  const resolvedReservation = resolveResourceReservation(
-    { skill: skillResourceRequirements },
-    {
-      taskId,
-      skillId: resolvedProfile?.skillId ?? undefined,
-      agentProfileId: resolvedProfile?.profileId ?? undefined,
-      projectId: input.projectId,
-      userId: ctx.userId,
-    },
-  );
 
   const now = new Date().toISOString();
 
@@ -443,6 +394,7 @@ export async function dispatchTask(
       chatSessionId: sessionId,
       agentType: resolvedAgentType,
       workspaceProfile: resolvedWorkspaceProfile,
+      devcontainerConfigName: resolvedDevcontainerConfigName,
       cloudProvider: effectiveProvider,
       credentialAttributionUserId,
       credentialAttributionProjectId,

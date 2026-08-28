@@ -300,6 +300,109 @@ describe('placement resolver parity', () => {
     });
   });
 
+  it('matches task-run caller-scope placement and keeps lightweight runs in task mode', () => {
+    const placement = resolveTaskStartPlacement({
+      entryPoint: 'task-run',
+      taskId: 'ready-task-1',
+      projectId: PROJECT.id,
+      userId: 'runner-user',
+      project: {
+        ...PROJECT,
+        defaultVmSize: null,
+        defaultProvider: 'hetzner',
+        defaultLocation: 'hel1',
+      },
+      explicit: {
+        vmSize: 'small',
+        vmSizeSource: 'task',
+        vmLocation: 'nbg1',
+        workspaceProfile: 'lightweight',
+        devcontainerConfigName: 'ignored-for-lightweight',
+      },
+      credentialProjectPolicy: 'current-project',
+      taskModeDefault: 'task',
+      resourceRequirements: {},
+    });
+
+    expect(placement).toMatchObject({
+      vmSize: 'small',
+      vmSizeSource: 'task',
+      provider: 'hetzner',
+      vmLocation: 'nbg1',
+      workspaceProfile: 'lightweight',
+      devcontainerConfigName: null,
+      taskMode: 'task',
+      credentialLookup: {
+        userId: 'runner-user',
+        projectId: PROJECT.id,
+        provider: 'hetzner',
+      },
+    });
+
+    expect(
+      resolvePlacementCredentialAttribution(placement, {
+        credentialSource: 'platform',
+        providerName: 'hetzner',
+      })
+    ).toEqual({
+      effectiveProvider: 'hetzner',
+      credentialAttributionUserId: 'runner-user',
+      credentialAttributionProjectId: null,
+      credentialAttributionSource: 'platform',
+    });
+  });
+
+  it('matches orchestration retry inheritance from the retried child task', () => {
+    const placement = resolveTaskStartPlacement({
+      entryPoint: 'orchestration-retry',
+      taskId: 'replacement-task-1',
+      projectId: PROJECT.id,
+      userId: 'parent-agent-user',
+      project: {
+        ...PROJECT,
+        defaultVmSize: 'small',
+        defaultProvider: 'hetzner',
+        defaultLocation: 'hel1',
+        defaultWorkspaceProfile: 'full',
+      },
+      inheritedCredentialAttribution: {
+        userId: 'child-attribution-user',
+        projectId: PROJECT.id,
+        source: 'project',
+      },
+      credentialProjectPolicy: 'inherited-or-none',
+      taskModeDefault: 'task',
+      resourceRequirements: {},
+    });
+
+    expect(placement).toMatchObject({
+      vmSize: 'small',
+      vmSizeSource: 'project',
+      provider: 'hetzner',
+      vmLocation: 'hel1',
+      workspaceProfile: 'full',
+      taskMode: 'task',
+      agentType: 'openai-codex',
+      credentialLookup: {
+        userId: 'child-attribution-user',
+        projectId: PROJECT.id,
+        provider: 'hetzner',
+      },
+    });
+
+    expect(
+      resolvePlacementCredentialAttribution(placement, {
+        credentialSource: 'user',
+        providerName: 'hetzner',
+      })
+    ).toEqual({
+      effectiveProvider: 'hetzner',
+      credentialAttributionUserId: 'child-attribution-user',
+      credentialAttributionProjectId: PROJECT.id,
+      credentialAttributionSource: 'project',
+    });
+  });
+
   it('rejects an invalid explicit provider at the resolver boundary', () => {
     expect(() =>
       resolveTaskStartPlacement({

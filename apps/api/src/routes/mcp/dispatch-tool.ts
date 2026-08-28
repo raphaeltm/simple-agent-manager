@@ -6,8 +6,8 @@
  *
  * Config precedence: explicit field → profile value → project default → platform default.
  */
-import type { CredentialProvider, TaskMode, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, DEVCONTAINER_CONFIG_NAME_REGEX, getDefaultLocationForProvider, getLocationsForProvider, isValidAgentType, isValidLocationForProvider, isValidProvider, resolveResourceReservation } from '@simple-agent-manager/shared';
+import type { CredentialProvider, CredentialSource, TaskMode, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import { DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, DEVCONTAINER_CONFIG_NAME_REGEX, isValidAgentType } from '@simple-agent-manager/shared';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -16,6 +16,13 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { generateBranchName } from '../../services/branch-name';
+import {
+  PlacementResolutionError,
+  resolvePlacementCredentialAttribution,
+  resolveTaskStartPlacement,
+  type TaskStartPlacement,
+  type TaskStartPlacementInput,
+} from '../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
@@ -138,12 +145,12 @@ export async function handleDispatchTask(requestId: string | number | null, para
   }
 
   // provider
-  let explicitProvider: CredentialProvider | undefined;
+  let explicitProvider: string | undefined;
   if (params.provider !== undefined) {
-    if (typeof params.provider !== 'string' || !CREDENTIAL_PROVIDERS.includes(params.provider as CredentialProvider)) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `provider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`);
+    if (typeof params.provider !== 'string') {
+      return jsonRpcError(requestId, INVALID_PARAMS, 'provider must be a string');
     }
-    explicitProvider = params.provider as CredentialProvider;
+    explicitProvider = params.provider;
   }
 
   // vmLocation — validated against provider after resolution
@@ -287,17 +294,6 @@ export async function handleDispatchTask(requestId: string | number | null, para
     fullDescription = fullDescription.slice(0, limits.dispatchDescriptionMaxLength);
   }
 
-  // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
-  const resolvedReservation = resolveResourceReservation(
-    { skill: skillResourceRequirements },
-    {
-      skillId: resolvedProfile?.skillId ?? undefined,
-      agentProfileId: resolvedProfile?.profileId ?? undefined,
-      projectId: tokenData.projectId,
-      userId: tokenData.userId,
-    }
-  );
-
   // ── Create the task ─────────────────────────────────────────────────────
   const taskId = ulid();
   const now = new Date().toISOString();
@@ -310,51 +306,87 @@ export async function handleDispatchTask(requestId: string | number | null, para
     maxLength: branchMaxLength,
   });
 
-  // ── Resolve config (explicit → profile → project default → platform default) ──
-  const vmSizeSource = vmSize ? ('task' as const) : resolvedProfile?.vmSizeOverride ? ('agent-profile' as const) : project.defaultVmSize ? ('project' as const) : ('platform' as const);
-  const resolvedVmSize: VMSize = vmSize ?? (resolvedProfile?.vmSizeOverride as VMSize | null) ?? (project.defaultVmSize as VMSize | null) ?? DEFAULT_VM_SIZE;
+  const placementInput: Omit<TaskStartPlacementInput, 'runtimeDecision' | 'validateLocation'> = {
+    entryPoint: 'mcp-dispatch',
+    taskId,
+    projectId: tokenData.projectId,
+    userId: tokenData.userId,
+    project,
+    profile: resolvedProfile,
+    explicit: {
+      vmSize: vmSize ?? null,
+      vmSizeSource: 'task',
+      provider: explicitProvider ?? null,
+      vmLocation: explicitVmLocation ?? null,
+      workspaceProfile: explicitWorkspaceProfile ?? null,
+      devcontainerConfigName: explicitDevcontainerConfigName,
+      taskMode: explicitTaskMode ?? null,
+      agentType: explicitAgentType ?? null,
+      runtime: explicitRuntime ?? null,
+    },
+    inheritedCredentialAttribution: {
+      userId: inheritedAttributionUserId,
+      projectId: inheritedAttributionProjectId,
+      source: inheritedAttributionSource,
+    },
+    credentialProjectPolicy: 'inherited-or-none',
+    taskModeDefault: 'task',
+    resourceRequirements: {
+      skill: skillResourceRequirements,
+    },
+  };
 
-  const profileProvider = typeof resolvedProfile?.provider === 'string' && isValidProvider(resolvedProfile.provider) ? resolvedProfile.provider : null;
-  const projectDefaultProvider = typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider) ? project.defaultProvider : null;
-  const resolvedProvider: CredentialProvider | null = explicitProvider ?? profileProvider ?? projectDefaultProvider ?? null;
+  let preliminaryPlacement: TaskStartPlacement;
+  try {
+    preliminaryPlacement = resolveTaskStartPlacement({
+      ...placementInput,
+      validateLocation: false,
+    });
+  } catch (err) {
+    if (err instanceof PlacementResolutionError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+    }
+    throw err;
+  }
 
-  const resolvedVmLocation: VMLocation = (explicitVmLocation as VMLocation) ?? (resolvedProfile?.vmLocation as VMLocation | null) ?? (project.defaultLocation as VMLocation | null) ?? (resolvedProvider ? (getDefaultLocationForProvider(resolvedProvider) as VMLocation | null) : null) ?? DEFAULT_VM_LOCATION;
-
-  const resolvedWorkspaceProfile: WorkspaceProfile = explicitWorkspaceProfile ?? (resolvedProfile?.workspaceProfile as WorkspaceProfile | null) ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE;
-
-  // Devcontainer config name: explicit → profile → project default → null (auto-discover).
-  // Irrelevant when workspace profile is 'lightweight' (devcontainer build skipped entirely).
-  const resolvedDevcontainerConfigName: string | null = resolvedWorkspaceProfile === 'lightweight' ? null : (explicitDevcontainerConfigName ?? resolvedProfile?.devcontainerConfigName ?? project.defaultDevcontainerConfigName ?? null);
-
-  const effectiveRuntime = explicitRuntime ?? resolvedProfile?.runtime ?? null;
-  const runtimeValidationError = getRuntimeValidationError(params, effectiveRuntime);
+  const runtimeValidationError = getRuntimeValidationError(
+    params,
+    preliminaryPlacement.runtime.requestedRuntime
+  );
   if (runtimeValidationError) {
     return jsonRpcError(requestId, INVALID_PARAMS, runtimeValidationError);
   }
   const runtimeDecision = await resolveWorkspaceRuntime(db, env, {
-    userId: inheritedAttributionUserId,
+    userId: preliminaryPlacement.credentialLookup.userId,
     projectId: tokenData.projectId,
-    provider: resolvedProvider,
-    explicitRuntime: effectiveRuntime,
+    provider: preliminaryPlacement.provider,
+    explicitRuntime: preliminaryPlacement.runtime.requestedRuntime,
   });
-  // Zero-config routing remains deferred to idea 01KXZNPR69JGK7S99KMPFCRZWJ.
-  // Only an explicit/profile cf-container choice enters the Instant path.
-  const isInstantRuntime = runtimeDecision.reason === 'explicit-cf-container';
-  const executionRuntime = isInstantRuntime ? 'cf-container' : 'vm';
-
-  // Validate location against resolved provider
-  if (!isInstantRuntime && resolvedProvider !== null && !isValidLocationForProvider(resolvedProvider, resolvedVmLocation)) {
-    const validLocations = getLocationsForProvider(resolvedProvider).map((l) => l.id);
-    return jsonRpcError(requestId, INVALID_PARAMS, `Location '${resolvedVmLocation}' is not valid for provider '${resolvedProvider}'. Valid locations: ${validLocations.join(', ')}`);
+  let placement: TaskStartPlacement;
+  try {
+    placement = resolveTaskStartPlacement({
+      ...placementInput,
+      runtimeDecision,
+    });
+  } catch (err) {
+    if (err instanceof PlacementResolutionError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+    }
+    throw err;
   }
 
-  // Task mode: explicit → profile → task.
-  // MCP dispatch is agent-to-agent delegated work; workspace profile controls
-  // provisioning shape, not whether the task reports completion.
-  const resolvedTaskMode: TaskMode = explicitTaskMode ?? (resolvedProfile?.taskMode as TaskMode | null) ?? 'task';
-
-  // Agent type: explicit → profile → project default → platform default
-  const resolvedAgentType: string | null = explicitAgentType ?? resolvedProfile?.agentType ?? project.defaultAgentType ?? null;
+  const {
+    vmSize: resolvedVmSize,
+    vmSizeSource,
+    vmLocation: resolvedVmLocation,
+    workspaceProfile: resolvedWorkspaceProfile,
+    devcontainerConfigName: resolvedDevcontainerConfigName,
+    taskMode: resolvedTaskMode,
+    agentType: resolvedAgentType,
+    resolvedReservation,
+  } = placement;
+  const isInstantRuntime = placement.runtime.isInstantRuntime;
+  const executionRuntime = placement.runtime.executionRuntime;
 
   // Explicit branch means "continue work from this branch"; otherwise task
   // work must start on the generated output branch so VM-agent completion
@@ -366,22 +398,41 @@ export async function handleDispatchTask(requestId: string | number | null, para
   // or a platform credential will be used for the resolved provider. Quota is
   // enforced only when platform credentials are used. Instant containers do
   // not consume cloud credentials or platform VM compute quota.
-  let effectiveProvider: CredentialProvider | null = resolvedProvider;
+  let effectiveProvider: CredentialProvider | null = placement.provider;
+  let credentialAttributionUserId =
+    placement.inheritedCredentialAttribution.userId ?? placement.credentialLookup.userId;
+  let credentialAttributionSource = (placement.inheritedCredentialAttribution.source ??
+    'user') as CredentialSource;
+  let credentialAttributionProjectId =
+    credentialAttributionSource === 'project'
+      ? (placement.inheritedCredentialAttribution.projectId ??
+        placement.credentialLookup.projectId ??
+        tokenData.projectId)
+      : null;
   if (!isInstantRuntime) {
-  const { resolveCredentialSource } = await import('../../services/provider-credentials');
-    const credResult = await resolveCredentialSource(db, inheritedAttributionUserId, resolvedProvider ?? undefined, inheritedAttributionProjectId);
+    const { resolveCredentialSource } = await import('../../services/provider-credentials');
+    const credResult = await resolveCredentialSource(
+      db,
+      placement.credentialLookup.userId,
+      placement.credentialLookup.provider,
+      placement.credentialLookup.projectId
+    );
 
-  if (!credResult) {
+    if (!credResult) {
       return jsonRpcError(requestId, INVALID_PARAMS, 'Cloud provider credentials required. The user must connect a cloud provider in Settings.');
-  }
-    effectiveProvider = resolvedProvider ?? credResult.providerName;
+    }
+    const credentialAttribution = resolvePlacementCredentialAttribution(placement, credResult);
+    effectiveProvider = credentialAttribution.effectiveProvider;
+    credentialAttributionUserId = credentialAttribution.credentialAttributionUserId;
+    credentialAttributionProjectId = credentialAttribution.credentialAttributionProjectId;
+    credentialAttributionSource = credentialAttribution.credentialAttributionSource;
 
-  if (credResult.credentialSource === 'platform') {
-    const quotaEnforcementEnabled = env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
-    if (quotaEnforcementEnabled) {
-      const { checkQuotaForUser } = await import('../../services/compute-quotas');
-      const quotaCheck = await checkQuotaForUser(db, tokenData.userId);
-      if (!quotaCheck.allowed) {
+    if (credResult.credentialSource === 'platform') {
+      const quotaEnforcementEnabled = env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
+      if (quotaEnforcementEnabled) {
+        const { checkQuotaForUser } = await import('../../services/compute-quotas');
+        const quotaCheck = await checkQuotaForUser(db, tokenData.userId);
+        if (!quotaCheck.allowed) {
           return jsonRpcError(requestId, INVALID_PARAMS, `Monthly compute quota exceeded. You've used ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours this month. ` + 'Add your own cloud provider credentials in Settings or contact your admin to increase your quota.');
         }
       }
@@ -435,9 +486,9 @@ export async function handleDispatchTask(requestId: string | number | null, para
       resolvedProfile?.resourceRequirementsJson ?? null,
       resolvedReservation.source,
       JSON.stringify(resolvedReservation),
-      inheritedAttributionUserId,
-      inheritedAttributionProjectId,
-      inheritedAttributionSource,
+      credentialAttributionUserId,
+      credentialAttributionProjectId,
+      credentialAttributionSource,
       now,
       now,
     // Per-task child count subquery
@@ -576,9 +627,9 @@ export async function handleDispatchTask(requestId: string | number | null, para
       workspaceProfile: resolvedWorkspaceProfile,
       devcontainerConfigName: resolvedDevcontainerConfigName,
       cloudProvider: effectiveProvider,
-      credentialAttributionUserId: inheritedAttributionUserId,
-      credentialAttributionProjectId: inheritedAttributionProjectId,
-      credentialAttributionSource: inheritedAttributionSource,
+      credentialAttributionUserId,
+      credentialAttributionProjectId,
+      credentialAttributionSource,
       taskMode: resolvedTaskMode,
       // Resolution chain: agent profile > project.agentDefaults[agentType] > null (VM agent
       // falls through to user agent_settings via callback, then platform default).
@@ -639,7 +690,7 @@ export async function handleDispatchTask(requestId: string | number | null, para
           title: taskTitle,
           branchName,
             runtime: executionRuntime,
-            runtimeReason: runtimeDecision.reason,
+            runtimeReason: placement.runtime.reason,
           agentProfileId: agentProfileId ?? undefined,
           skillId: skillId ?? undefined,
           taskMode: resolvedTaskMode,
@@ -676,7 +727,7 @@ export async function handleDispatchTask(requestId: string | number | null, para
     projectId: tokenData.projectId,
     dispatchDepth: newDepth,
     runtime: executionRuntime,
-    runtimeReason: runtimeDecision.reason,
+    runtimeReason: placement.runtime.reason,
     vmSize: resolvedVmSize,
     vmLocation: resolvedVmLocation,
     taskMode: resolvedTaskMode,
@@ -697,7 +748,7 @@ export async function handleDispatchTask(requestId: string | number | null, para
         taskId,
         sessionId,
             runtime: executionRuntime,
-            runtimeReason: runtimeDecision.reason,
+            runtimeReason: placement.runtime.reason,
         branchName,
         title: taskTitle,
         status: 'queued',

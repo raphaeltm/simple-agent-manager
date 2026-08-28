@@ -56,6 +56,18 @@ const triggerSubmitSource = readFileSync(
   resolve(process.cwd(), 'src/services/trigger-submit.ts'),
   'utf8'
 );
+const retrySubtaskSource = readFileSync(
+  resolve(process.cwd(), 'src/durable-objects/sam-session/tools/retry-subtask.ts'),
+  'utf8'
+);
+const taskRunSource = readFileSync(
+  resolve(process.cwd(), 'src/routes/tasks/run.ts'),
+  'utf8'
+);
+const mcpOrchestrationToolsSource = readFileSync(
+  resolve(process.cwd(), 'src/routes/mcp/orchestration-tools.ts'),
+  'utf8'
+);
 const taskRunnerSource = [
   'index.ts',
   'types.ts',
@@ -202,28 +214,26 @@ describe('concurrent warm pool claiming safety', () => {
 });
 
 // =============================================================================
-// Placement resolution duplication — Wave 0 documentation only
+// Placement resolution duplication — Wave 2A migration guard
 // =============================================================================
 
 describe('placement resolution entry points', () => {
-  it('tracks migrated and remaining duplicated task submission resolution paths', () => {
-    expect(submitRouteSource).toContain("from '../../services/placement-resolver'");
-    expect(submitRouteSource).toContain('resolveTaskStartPlacement');
-
-    // TODO(compute-pools): replace these remaining duplicate source-level
-    // assertions with shared resolver call-site coverage as each entry point is
-    // migrated. Wave 1B migrates chat submit only; the other paths retain their
-    // local resolution until their runtime/secondary-tool differences are wired.
+  it('keeps task-start placement resolution centralized across entry points', () => {
     const entryPoints = [
+      { name: 'chat submit route', source: submitRouteSource },
       { name: 'MCP dispatch route', source: mcpDispatchRouteSource },
       { name: 'SAM session dispatch tool', source: samSessionDispatchSource },
       { name: 'trigger submit bridge', source: triggerSubmitSource },
+      { name: 'SAM session retry tool', source: retrySubtaskSource },
+      { name: 'task run route', source: taskRunSource },
+      { name: 'MCP orchestration retry tool', source: mcpOrchestrationToolsSource },
     ];
 
     for (const entryPoint of entryPoints) {
-      expect(entryPoint.source, entryPoint.name).toContain('resolveResourceReservation(');
-      expect(entryPoint.source, entryPoint.name).toContain('vmSizeSource');
+      expect(entryPoint.source, entryPoint.name).toContain('placement-resolver');
+      expect(entryPoint.source, entryPoint.name).toContain('resolveTaskStartPlacement');
       expect(entryPoint.source, entryPoint.name).toContain('startTaskRunnerDO');
+      expect(entryPoint.source, entryPoint.name).not.toContain('resolveResourceReservation(');
     }
   });
 

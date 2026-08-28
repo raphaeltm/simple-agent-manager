@@ -21,8 +21,13 @@ import {
   isValidProvider,
   resolveResourceReservation,
 } from '@simple-agent-manager/shared';
+import { type drizzle } from 'drizzle-orm/d1';
 
+import type * as schema from '../db/schema';
+import { resolveCredentialSource } from './provider-credentials';
 import type { WorkspaceRuntimeDecision } from './workspace-runtime';
+
+type Db = ReturnType<typeof drizzle<typeof schema>>;
 
 export type PlacementEntryPoint =
   | 'task-submit'
@@ -149,6 +154,11 @@ export interface PlacementCredentialAttribution {
   credentialAttributionSource: CredentialSource;
 }
 
+export interface TaskStartPlacementWithCredential extends PlacementCredentialAttribution {
+  placement: TaskStartPlacement;
+  credential: PlacementCredentialSourceResult;
+}
+
 export type PlacementResolutionErrorCode = 'invalid-provider' | 'invalid-location';
 
 export class PlacementResolutionError extends Error {
@@ -270,6 +280,42 @@ export function resolvePlacementCredentialAttribution(
     credentialAttributionUserId: inherited.userId ?? placement.credentialLookup.userId,
     credentialAttributionProjectId,
     credentialAttributionSource,
+  };
+}
+
+export async function resolveTaskStartPlacementCredentialAttribution(
+  db: Db,
+  input: TaskStartPlacementInput,
+  options?: { credentialsRequiredMessage?: string }
+): Promise<TaskStartPlacementWithCredential | { error: string }> {
+  let placement: TaskStartPlacement;
+  try {
+    placement = resolveTaskStartPlacement(input);
+  } catch (err) {
+    if (err instanceof PlacementResolutionError) {
+      return { error: err.message };
+    }
+    throw err;
+  }
+
+  const credential = await resolveCredentialSource(
+    db,
+    placement.credentialLookup.userId,
+    placement.credentialLookup.provider,
+    placement.credentialLookup.projectId
+  );
+  if (!credential) {
+    return {
+      error:
+        options?.credentialsRequiredMessage ??
+        'No cloud provider credentials found. The user must connect a cloud provider in Settings.',
+    };
+  }
+
+  return {
+    placement,
+    credential,
+    ...resolvePlacementCredentialAttribution(placement, credential),
   };
 }
 
