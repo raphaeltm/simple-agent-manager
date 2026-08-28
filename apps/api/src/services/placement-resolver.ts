@@ -433,6 +433,9 @@ function normalizeCapacityCandidate(
   placement: TaskStartPlacement,
   workloadRole: CapacityWorkloadRole
 ): TaskStartCapacityCandidate | null {
+  if (pool.status !== 'active') return null;
+  if (source.status !== 'active') return null;
+  if (candidate.status !== 'active') return null;
   if (candidate.workloadRole !== workloadRole) return null;
   if (candidate.runtime && candidate.runtime !== placement.runtime.executionRuntime) return null;
   if (source.sourceKind !== 'cloud-provider-credential') return null;

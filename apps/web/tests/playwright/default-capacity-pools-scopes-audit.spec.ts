@@ -32,15 +32,16 @@ const superadmin = makeMockUser({
 
 function capacityCandidate(scope: 'user' | 'installation', index: number) {
   const providers = ['hetzner', 'scaleway', 'gcp', 'vultr', 'digitalocean', 'upcloud'];
+  const visibleLocations = ['fsn1', 'nbg1', 'hel1', 'ash', 'hil'];
   return {
     id: `${scope}-candidate-${index}`,
     poolId: `${scope}-default-pool`,
     capacitySourceId: `${scope}-source-${index % 6}`,
-    provider: providers[index % providers.length],
+    provider: index < visibleLocations.length ? 'hetzner' : providers[index % providers.length],
     location:
       index === 35
         ? `region-with-a-deliberately-long-location-name-${scope}-${LONG_MARKER}`
-        : `${scope}-region-${index}`,
+        : (visibleLocations[index] ?? `${scope}-region-${index}`),
     workloadRole: 'workspace',
     runtime: index % 5 === 0 ? 'cf-container' : 'vm',
     machineClass: index % 4 === 0 ? 'dedicated-vm' : 'shared-vm',
@@ -68,7 +69,7 @@ function capacitySummary(scope: 'user' | 'installation') {
       isDefault: true,
       revision: 7,
       status: 'active',
-      strategy: scope === 'user' ? 'smallest-fit' : 'pack-largest',
+      strategy: scope === 'user' ? 'smallest-fit' : 'pack',
       exhaustionPolicy: 'queue',
       createdAt: TIMESTAMP,
       updatedAt: TIMESTAMP,
@@ -130,8 +131,37 @@ function defaultsResponse(scope: 'user' | 'installation') {
     ],
     precedence: ['project', 'user', 'installation'],
     reconciledScopes: [scope],
-    policyMutationSupported: false,
+    policyMutationSupported: true,
   };
+}
+
+function applyDefaultsUpdate(
+  current: ReturnType<typeof defaultsResponse>,
+  update: {
+    policy?: { strategy?: string; exhaustionPolicy?: string };
+    candidates?: { id: string; status: string }[];
+  }
+) {
+  const next = JSON.parse(JSON.stringify(current)) as ReturnType<typeof defaultsResponse>;
+  const summary = next.effective;
+  if (!summary) return next;
+
+  if (update.policy?.strategy) summary.pool.strategy = update.policy.strategy;
+  if (update.policy?.exhaustionPolicy) {
+    summary.pool.exhaustionPolicy = update.policy.exhaustionPolicy;
+  }
+  for (const candidateUpdate of update.candidates ?? []) {
+    const candidate = summary.candidates.find((item) => item.id === candidateUpdate.id);
+    if (candidate) candidate.status = candidateUpdate.status;
+  }
+  summary.activeCandidateCount = summary.candidates.filter(
+    (candidate) => candidate.status === 'active'
+  ).length;
+  summary.pool.revision += 1;
+  for (const item of next.defaults) {
+    if (item.summary?.pool.id === summary.pool.id) item.summary = summary;
+  }
+  return next;
 }
 
 async function setupCommonMocks(page: Page, authUser: unknown) {
@@ -159,9 +189,13 @@ async function setupCommonMocks(page: Page, authUser: unknown) {
 
 async function setupUserPoolMocks(page: Page) {
   await setupCommonMocks(page, user);
-  await page.route('**/api/capacity-pools/defaults*', (route) =>
-    jsonResponse(route, 200, defaultsResponse('user'))
-  );
+  let responseBody = defaultsResponse('user');
+  await page.route('**/api/capacity-pools/defaults*', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      responseBody = applyDefaultsUpdate(responseBody, route.request().postDataJSON());
+    }
+    return jsonResponse(route, 200, responseBody);
+  });
   await page.route('**/api/credentials', (route) => {
     if (route.request().method() !== 'GET') {
       return jsonResponse(route, 200, { id: 'credential-user-cloud-long-id' });
@@ -187,9 +221,13 @@ async function setupUserPoolMocks(page: Page) {
 
 async function setupInstallationPoolMocks(page: Page) {
   await setupCommonMocks(page, superadmin);
-  await page.route('**/api/admin/capacity-pools/defaults*', (route) =>
-    jsonResponse(route, 200, defaultsResponse('installation'))
-  );
+  let responseBody = defaultsResponse('installation');
+  await page.route('**/api/admin/capacity-pools/defaults*', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      responseBody = applyDefaultsUpdate(responseBody, route.request().postDataJSON());
+    }
+    return jsonResponse(route, 200, responseBody);
+  });
   await page.route('**/api/admin/platform-credentials', (route) =>
     jsonResponse(route, 200, {
       credentials: [
@@ -231,6 +269,17 @@ async function screenshotPoolDetails(page: Page, name: string) {
   });
 }
 
+async function screenshotPoolEditor(page: Page, heading: string, name: string) {
+  await page.getByRole('heading', { name: heading }).scrollIntoViewIfNeeded();
+  await page.waitForTimeout(600);
+  const viewport = page.viewportSize();
+  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
+  await page.screenshot({
+    path: `../../.codex/tmp/playwright-screenshots/${name}${suffix}.png`,
+    fullPage: false,
+  });
+}
+
 test.describe('Default capacity pool scope surfaces', () => {
   test('user settings surface renders stressed user default pool without overflow', async ({
     page,
@@ -241,6 +290,8 @@ test.describe('Default capacity pool scope surfaces', () => {
     await expect(page.getByRole('heading', { name: 'Your Default Compute Pool' })).toBeVisible();
     await expect(page.getByText(/Active candidates\s*36/)).toBeVisible();
     await expect(page.getByText('+24 more provider/region groups')).toBeVisible();
+    await expect(page.getByText(/Hidden outside this settings context/i)).toHaveCount(0);
+    await expect(page.getByText(/Installation defaults require/i)).toHaveCount(0);
 
     await screenshot(
       page,
@@ -255,6 +306,20 @@ test.describe('Default capacity pool scope surfaces', () => {
       page,
       `default-capacity-pools-user-details-${getProjectSuffix(testInfo.project.name)}`
     );
+
+    await page.getByRole('button', { name: 'Edit' }).click();
+    await expect(page.getByRole('heading', { name: 'Edit user default' })).toBeVisible();
+    await page.getByRole('button', { name: 'Remove Hetzner ash Small candidate' }).click();
+    await page.getByRole('button', { name: 'Remove Hetzner hil Medium candidate' }).click();
+    await screenshotPoolEditor(
+      page,
+      'Edit user default',
+      `default-capacity-pools-user-edit-${getProjectSuffix(testInfo.project.name)}`
+    );
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByText(/Active candidates\s*34/)).toBeVisible();
+    await expect(page.getByText('Hetzner · ash')).toHaveCount(0);
+    await expect(page.getByText('Hetzner · hil')).toHaveCount(0);
     await assertNoOverflow(page);
   });
 
@@ -269,6 +334,8 @@ test.describe('Default capacity pool scope surfaces', () => {
     ).toBeVisible();
     await expect(page.getByText(/Active candidates\s*36/)).toBeVisible();
     await expect(page.getByText('+24 more provider/region groups')).toBeVisible();
+    await expect(page.getByText(/Hidden outside this settings context/i)).toHaveCount(0);
+    await expect(page.getByText(/Installation defaults require/i)).toHaveCount(0);
 
     await screenshot(
       page,
@@ -283,6 +350,20 @@ test.describe('Default capacity pool scope surfaces', () => {
       page,
       `default-capacity-pools-installation-details-${getProjectSuffix(testInfo.project.name)}`
     );
+
+    await page.getByRole('button', { name: 'Edit' }).click();
+    await expect(page.getByRole('heading', { name: 'Edit installation default' })).toBeVisible();
+    await page.getByRole('button', { name: 'Remove Hetzner ash Small candidate' }).click();
+    await page.getByRole('button', { name: 'Remove Hetzner hil Medium candidate' }).click();
+    await screenshotPoolEditor(
+      page,
+      'Edit installation default',
+      `default-capacity-pools-installation-edit-${getProjectSuffix(testInfo.project.name)}`
+    );
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByText(/Active candidates\s*34/)).toBeVisible();
+    await expect(page.getByText('Hetzner · ash')).toHaveCount(0);
+    await expect(page.getByText('Hetzner · hil')).toHaveCount(0);
     await assertNoOverflow(page);
   });
 });

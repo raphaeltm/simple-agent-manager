@@ -311,13 +311,13 @@ export function describeThemeAudit(
  */
 export async function setupAuditRoutes(
   page: Page,
-  handler: (path: string, respond: AuditResponder) => Promise<void> | undefined,
+  handler: (path: string, respond: AuditResponder, route: Route) => Promise<void> | undefined,
 ) {
   await page.route('**/api/**', async (route: Route) => {
     const path = new URL(route.request().url()).pathname;
     const respond: AuditResponder = (status, body) =>
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-    const result = handler(path, respond);
+    const result = handler(path, respond, route);
     if (result === undefined) return respond(200, {});
     return result;
   });

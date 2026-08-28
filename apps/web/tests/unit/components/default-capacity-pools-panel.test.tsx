@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => ({
   reconcileProjectDefaultCapacityPools: vi.fn(),
   reconcileUserDefaultCapacityPools: vi.fn(),
   reconcileInstallationDefaultCapacityPools: vi.fn(),
+  updateProjectDefaultCapacityPools: vi.fn(),
+  updateUserDefaultCapacityPools: vi.fn(),
+  updateInstallationDefaultCapacityPools: vi.fn(),
   toast: {
     success: vi.fn(),
     error: vi.fn(),
@@ -39,6 +42,9 @@ vi.mock('../../../src/lib/api/capacity-pools', () => ({
   reconcileProjectDefaultCapacityPools: mocks.reconcileProjectDefaultCapacityPools,
   reconcileUserDefaultCapacityPools: mocks.reconcileUserDefaultCapacityPools,
   reconcileInstallationDefaultCapacityPools: mocks.reconcileInstallationDefaultCapacityPools,
+  updateProjectDefaultCapacityPools: mocks.updateProjectDefaultCapacityPools,
+  updateUserDefaultCapacityPools: mocks.updateUserDefaultCapacityPools,
+  updateInstallationDefaultCapacityPools: mocks.updateInstallationDefaultCapacityPools,
 }));
 
 function renderPanel(
@@ -130,35 +136,38 @@ function response(
   effectiveScope: CapacityPoolScope | null,
   effective: DefaultCapacityPoolSummary | null
 ): ProjectDefaultCapacityPoolsResponse {
+  const installationContext = effectiveScope === 'installation';
   return {
     effective,
     effectiveScope,
     defaults: [
       {
         scope: 'project',
-        visibility: 'visible',
-        visibilityReason: 'project-secret-read',
-        canReconcile: true,
+        visibility: installationContext ? 'hidden' : 'visible',
+        visibilityReason: installationContext ? 'project-context-required' : 'project-secret-read',
+        canReconcile: !installationContext,
         summary: effectiveScope === 'project' ? effective : null,
       },
       {
         scope: 'user',
-        visibility: 'visible',
-        visibilityReason: 'authenticated-user',
-        canReconcile: true,
+        visibility: installationContext ? 'hidden' : 'visible',
+        visibilityReason: installationContext
+          ? 'authenticated-user-context-required'
+          : 'authenticated-user',
+        canReconcile: !installationContext,
         summary: effectiveScope === 'user' ? effective : null,
       },
       {
         scope: 'installation',
-        visibility: 'hidden',
-        visibilityReason: 'superadmin-required',
-        canReconcile: false,
-        summary: null,
+        visibility: installationContext ? 'visible' : 'hidden',
+        visibilityReason: installationContext ? 'superadmin' : 'superadmin-required',
+        canReconcile: installationContext,
+        summary: effectiveScope === 'installation' ? effective : null,
       },
     ],
     precedence: ['project', 'user', 'installation'],
     reconciledScopes: ['project', 'user'],
-    policyMutationSupported: false,
+    policyMutationSupported: true,
   };
 }
 
@@ -175,7 +184,7 @@ describe('DefaultCapacityPoolsPanel', () => {
     renderPanel();
 
     expect(await screen.findByText('project default pool')).toBeInTheDocument();
-    expect(screen.getByText('Project default applies first for this context.')).toBeInTheDocument();
+    expect(screen.getByText('Project default applies to this context.')).toBeInTheDocument();
     expect(screen.getByText('Balanced')).toBeInTheDocument();
     expect(screen.getByText('Queue')).toBeInTheDocument();
     expect(screen.getByText('Hetzner · Project')).toBeInTheDocument();
@@ -185,6 +194,113 @@ describe('DefaultCapacityPoolsPanel', () => {
     expect(screen.getByText('medium')).toBeInTheDocument();
     expect(screen.queryByText(/encrypted/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/token/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Hidden outside this settings context/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Installation defaults require/i)).not.toBeInTheDocument();
+  });
+
+  it('shows project fallback read-only without hidden-scope placeholder cards', async () => {
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('user', summary('user')));
+
+    renderPanel();
+
+    expect(await screen.findByText('user default pool')).toBeInTheDocument();
+    expect(screen.getByText('Using user fallback.', { exact: false })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Hidden outside this settings context/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Installation defaults require/i)).not.toBeInTheDocument();
+  });
+
+  it('updates project-owned policy and candidate statuses', async () => {
+    const current = summary('project');
+    current.candidates = [
+      candidate({ id: 'candidate-project-fsn1-small', location: 'fsn1', machineSize: 'small' }),
+      candidate({
+        id: 'candidate-project-ash-medium',
+        location: 'ash',
+        machineSize: 'medium',
+        priority: 1,
+        candidateOrder: 1,
+      }),
+      candidate({
+        id: 'candidate-project-hil-large',
+        location: 'hil',
+        machineSize: 'large',
+        priority: 2,
+        candidateOrder: 2,
+      }),
+    ];
+    current.activeCandidateCount = 3;
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('project', current));
+    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(
+      response('project', {
+        ...current,
+        pool: { ...current.pool, strategy: 'pack', revision: 4 },
+        candidates: current.candidates.map((candidateItem) =>
+          candidateItem.id === 'candidate-project-ash-medium'
+            ? { ...candidateItem, status: 'deleted' }
+            : candidateItem.id === 'candidate-project-hil-large'
+              ? { ...candidateItem, status: 'disabled' }
+              : candidateItem
+        ),
+        activeCandidateCount: 1,
+      })
+    );
+
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Strategy'), { target: { value: 'pack' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Hetzner ash Medium candidate' }));
+    fireEvent.click(screen.getByLabelText('Hetzner hil Large candidate active'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() =>
+      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
+        policy: { strategy: 'pack' },
+        candidates: [
+          { id: 'candidate-project-ash-medium', status: 'deleted' },
+          { id: 'candidate-project-hil-large', status: 'disabled' },
+        ],
+      })
+    );
+    expect(mocks.toast.success).toHaveBeenCalledWith('Project default compute pool updated');
+  });
+
+  it('routes user and installation edits to their owned default APIs', async () => {
+    mocks.fetchUserDefaultCapacityPools.mockResolvedValue(response('user', summary('user')));
+    mocks.updateUserDefaultCapacityPools.mockResolvedValue(response('user', summary('user')));
+
+    const userRender = renderPanel({ scope: 'user' });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Hetzner fsn1 Small candidate' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() =>
+      expect(mocks.updateUserDefaultCapacityPools).toHaveBeenCalledWith({
+        candidates: [{ id: 'candidate-user-small', status: 'deleted' }],
+      })
+    );
+    userRender.unmount();
+
+    mocks.fetchInstallationDefaultCapacityPools.mockResolvedValue(
+      response('installation', summary('installation'))
+    );
+    mocks.updateInstallationDefaultCapacityPools.mockResolvedValue(
+      response('installation', summary('installation'))
+    );
+
+    renderPanel({ scope: 'installation' });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Hetzner fsn1 Small candidate' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() =>
+      expect(mocks.updateInstallationDefaultCapacityPools).toHaveBeenCalledWith({
+        candidates: [{ id: 'candidate-installation-small', status: 'deleted' }],
+      })
+    );
   });
 
   it('reconciles defaults and replaces the stale summary', async () => {

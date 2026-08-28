@@ -171,6 +171,7 @@ describe('project capacity pool routes', () => {
     expect(text).not.toContain('platform-encrypted-token-for-platform-cloud-1');
 
     const body = JSON.parse(text);
+    expect(body.policyMutationSupported).toBe(false);
     expect(body.effectiveScope).toBe('project');
     expect(body.effective.pool).toMatchObject({
       scope: 'project',
@@ -341,6 +342,137 @@ describe('project capacity pool routes', () => {
       .get() as { count: number };
     expect(poolCount.count).toBe(1);
     expect(candidateCount.count).toBeGreaterThan(0);
+  });
+
+  it('updates only the project-owned default pool for owners and admins', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
+    seedCloudCredential(sqlite, {
+      id: 'user-cloud-1',
+      userId: 'user-1',
+    });
+    seedCloudCredential(sqlite, {
+      id: 'project-cloud-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+    });
+
+    const reconcile = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+    const initial = await reconcile.json();
+    expect(initial.policyMutationSupported).toBe(true);
+    const projectCandidate = initial.effective.candidates.find(
+      (candidate: { location: string; machineSize: string }) =>
+        candidate.location === 'ash' && candidate.machineSize === 'medium'
+    );
+    expect(projectCandidate).toBeTruthy();
+
+    const res = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          policy: { strategy: 'spread' },
+          candidates: [{ id: projectCandidate.id, status: 'deleted' }],
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
+    const body = await res.json();
+    expect(body.effective.pool).toMatchObject({
+      scope: 'project',
+      ownerProjectId: 'project-1',
+      strategy: 'spread',
+      revision: 2,
+    });
+    expect(
+      body.effective.candidates.find(
+        (candidate: { id: string }) => candidate.id === projectCandidate.id
+      )
+    ).toMatchObject({ status: 'deleted' });
+
+    expect(
+      sqlite
+        .prepare(`SELECT strategy FROM capacity_pools WHERE scope = 'user' AND owner_user_id = ?`)
+        .get('user-1')
+    ).toEqual({ strategy: 'balanced' });
+  });
+
+  it('requires project secret-write capability for project default edits', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'maintainer' });
+    seedCloudCredential(sqlite, {
+      id: 'project-cloud-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+    });
+
+    const reconcile = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+    expect(reconcile.status).toBe(200);
+    const initial = await reconcile.json();
+    const candidate = initial.effective.candidates[0];
+
+    const res = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          candidates: [{ id: candidate.id, status: 'disabled' }],
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'FORBIDDEN',
+    });
+  });
+
+  it('does not let project edits mutate user fallbacks when no project default exists', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
+    seedCloudCredential(sqlite, { id: 'user-cloud-1', userId: 'user-1' });
+
+    const reconcile = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+    const initial = await reconcile.json();
+    expect(initial.effectiveScope).toBe('user');
+    const fallbackCandidate = initial.effective.candidates[0];
+
+    const res = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          candidates: [{ id: fallbackCandidate.id, status: 'deleted' }],
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(404);
+    expect(
+      sqlite
+        .prepare(`SELECT status FROM capacity_pool_candidates WHERE id = ?`)
+        .get(fallbackCandidate.id)
+    ).toEqual({ status: 'active' });
   });
 
   it('supports read-only inspection with ensure=false', async () => {

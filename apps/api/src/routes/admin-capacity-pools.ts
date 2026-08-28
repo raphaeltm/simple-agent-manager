@@ -8,10 +8,13 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
+import { errors } from '../middleware/error';
+import { updateDefaultCapacityPool } from '../services/default-capacity-pool-updates';
 import {
   type DefaultCapacityPoolsEnsureResult,
   readDefaultCapacityPoolSummaries,
 } from '../services/default-capacity-pools';
+import { parseDefaultCapacityPoolUpdateRequest } from './capacity-pool-update-request';
 
 const PRECEDENCE: CapacityPoolScope[] = ['project', 'user', 'installation'];
 
@@ -56,8 +59,16 @@ function buildInstallationDefaultPoolResponse(
     ],
     precedence: PRECEDENCE,
     reconciledScopes: ensure ? ['installation'] : [],
-    policyMutationSupported: false,
+    policyMutationSupported: true,
   };
+}
+
+async function readJsonBody(c: { req: { json(): Promise<unknown> } }) {
+  try {
+    return await c.req.json();
+  } catch {
+    throw errors.badRequest('Request body must be valid JSON');
+  }
 }
 
 /**
@@ -91,6 +102,35 @@ adminCapacityPoolsRoutes.post('/defaults/reconcile', async (c) => {
   });
 
   return c.json(buildInstallationDefaultPoolResponse(summaries, true));
+});
+
+/**
+ * PATCH /api/admin/capacity-pools/defaults
+ *
+ * Updates the installation-owned default pool. Superadmin middleware protects
+ * this route from regular users and project members.
+ */
+adminCapacityPoolsRoutes.patch('/defaults', async (c) => {
+  const db = drizzle(c.env.DATABASE, { schema });
+  const update = parseDefaultCapacityPoolUpdateRequest(await readJsonBody(c));
+  const result = await updateDefaultCapacityPool(db, {
+    scope: 'installation',
+    ownerUserId: null,
+    ownerProjectId: null,
+    ...update,
+  });
+
+  if (!result.poolFound) throw errors.notFound('Default capacity pool');
+  if (result.missingCandidateIds.length > 0) {
+    throw errors.badRequest('Candidate updates must belong to the default capacity pool', {
+      missingCandidateIds: result.missingCandidateIds,
+    });
+  }
+
+  const summaries = await readDefaultCapacityPoolSummaries(db, {
+    includeInstallation: true,
+  });
+  return c.json(buildInstallationDefaultPoolResponse(summaries, false));
 });
 
 export { adminCapacityPoolsRoutes };

@@ -146,6 +146,59 @@ describe('default capacity pool routes', () => {
     );
   });
 
+  it('updates the authenticated user default pool policy and candidate status', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedCloudCredential(sqlite, { id: 'user-cloud-1', userId: 'user-1', provider: 'hetzner' });
+
+    const reconcile = await createApp().request(
+      '/api/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+    const initial = await reconcile.json();
+    const ashCandidate = initial.effective.candidates.find(
+      (candidate: { location: string; machineSize: string }) =>
+        candidate.location === 'ash' && candidate.machineSize === 'large'
+    );
+    expect(ashCandidate).toBeTruthy();
+
+    const res = await createApp().request(
+      '/api/capacity-pools/defaults',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          policy: { strategy: 'pack', exhaustionPolicy: 'fail' },
+          candidates: [{ id: ashCandidate.id, status: 'deleted' }],
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain('encrypted-token-for-user-cloud-1');
+    const body = JSON.parse(text);
+    expect(body.effective.pool).toMatchObject({
+      scope: 'user',
+      ownerUserId: 'user-1',
+      strategy: 'pack',
+      exhaustionPolicy: 'fail',
+      revision: 2,
+    });
+    expect(
+      body.effective.candidates.find(
+        (candidate: { id: string }) => candidate.id === ashCandidate.id
+      )
+    ).toMatchObject({ status: 'deleted' });
+
+    expect(
+      sqlite
+        .prepare(`SELECT strategy, exhaustion_policy FROM capacity_pools WHERE scope = 'user'`)
+        .get()
+    ).toEqual({ strategy: 'pack', exhaustion_policy: 'fail' });
+  });
+
   it('requires superadmin access for installation default pool metadata', async () => {
     const { sqlite, env } = createEnv();
     seedUser(sqlite, 'user-1');
@@ -197,5 +250,61 @@ describe('default capacity pool routes', () => {
         expect.objectContaining({ scope: 'user', visibility: 'hidden' }),
       ])
     );
+  });
+
+  it('updates installation defaults only for superadmins', async () => {
+    authState.userId = 'superadmin-1';
+    authState.role = 'superadmin';
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'superadmin-1', 'superadmin');
+    seedPlatformCloudCredential(sqlite);
+
+    const reconcile = await createApp().request(
+      '/api/admin/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+    const initial = await reconcile.json();
+    const hilCandidate = initial.effective.candidates.find(
+      (candidate: { location: string; machineSize: string }) =>
+        candidate.location === 'hil' && candidate.machineSize === 'small'
+    );
+    expect(hilCandidate).toBeTruthy();
+
+    const res = await createApp().request(
+      '/api/admin/capacity-pools/defaults',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          candidates: [{ id: hilCandidate.id, status: 'disabled' }],
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.effective.pool.scope).toBe('installation');
+    expect(
+      body.effective.candidates.find(
+        (candidate: { id: string }) => candidate.id === hilCandidate.id
+      )
+    ).toMatchObject({ status: 'disabled' });
+
+    authState.userId = 'user-1';
+    authState.role = 'user';
+    seedUser(sqlite, 'user-1');
+    const forbidden = await createApp().request(
+      '/api/admin/capacity-pools/defaults',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          candidates: [{ id: hilCandidate.id, status: 'active' }],
+        }),
+      },
+      env
+    );
+
+    expect(forbidden.status).toBe(403);
   });
 });

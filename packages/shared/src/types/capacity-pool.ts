@@ -127,13 +127,28 @@ export interface DefaultCapacityPoolScopeSummary {
   summary: DefaultCapacityPoolSummary | null;
 }
 
+export interface DefaultCapacityPoolPolicyUpdate {
+  strategy?: CapacityPoolStrategy;
+  exhaustionPolicy?: CapacityExhaustionPolicy;
+}
+
+export interface DefaultCapacityPoolCandidateStatusUpdate {
+  id: string;
+  status: CapacityPoolStatus;
+}
+
+export interface DefaultCapacityPoolUpdateRequest {
+  policy?: DefaultCapacityPoolPolicyUpdate;
+  candidates?: DefaultCapacityPoolCandidateStatusUpdate[];
+}
+
 export interface ProjectDefaultCapacityPoolsResponse {
   effective: DefaultCapacityPoolSummary | null;
   effectiveScope: CapacityPoolScope | null;
   defaults: DefaultCapacityPoolScopeSummary[];
   precedence: CapacityPoolScope[];
   reconciledScopes: CapacityPoolScope[];
-  policyMutationSupported: false;
+  policyMutationSupported: boolean;
 }
 
 export function isCapacityPoolScope(value: unknown): value is CapacityPoolScope {

@@ -8,10 +8,13 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
+import { errors } from '../middleware/error';
+import { updateDefaultCapacityPool } from '../services/default-capacity-pool-updates';
 import {
   type DefaultCapacityPoolsEnsureResult,
   readDefaultCapacityPoolSummaries,
 } from '../services/default-capacity-pools';
+import { parseDefaultCapacityPoolUpdateRequest } from './capacity-pool-update-request';
 
 const PRECEDENCE: CapacityPoolScope[] = ['project', 'user', 'installation'];
 
@@ -56,8 +59,16 @@ function buildUserDefaultPoolResponse(
     ],
     precedence: PRECEDENCE,
     reconciledScopes: ensure ? ['user'] : [],
-    policyMutationSupported: false,
+    policyMutationSupported: true,
   };
+}
+
+async function readJsonBody(c: { req: { json(): Promise<unknown> } }) {
+  try {
+    return await c.req.json();
+  } catch {
+    throw errors.badRequest('Request body must be valid JSON');
+  }
 }
 
 /**
@@ -95,6 +106,37 @@ capacityPoolsRoutes.post('/defaults/reconcile', async (c) => {
   });
 
   return c.json(buildUserDefaultPoolResponse(summaries, true));
+});
+
+/**
+ * PATCH /api/capacity-pools/defaults
+ *
+ * Updates the authenticated user's owned default pool policy and candidate
+ * statuses. It never mutates project or installation fallback pools.
+ */
+capacityPoolsRoutes.patch('/defaults', async (c) => {
+  const userId = getUserId(c);
+  const db = drizzle(c.env.DATABASE, { schema });
+  const update = parseDefaultCapacityPoolUpdateRequest(await readJsonBody(c));
+  const result = await updateDefaultCapacityPool(db, {
+    scope: 'user',
+    ownerUserId: userId,
+    ownerProjectId: null,
+    ...update,
+  });
+
+  if (!result.poolFound) throw errors.notFound('Default capacity pool');
+  if (result.missingCandidateIds.length > 0) {
+    throw errors.badRequest('Candidate updates must belong to the default capacity pool', {
+      missingCandidateIds: result.missingCandidateIds,
+    });
+  }
+
+  const summaries = await readDefaultCapacityPoolSummaries(db, {
+    userId,
+    includeInstallation: false,
+  });
+  return c.json(buildUserDefaultPoolResponse(summaries, false));
 });
 
 export { capacityPoolsRoutes };
