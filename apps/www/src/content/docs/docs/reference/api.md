@@ -15,6 +15,10 @@ Task agents can call `wait_for_subtasks` with a stable workflow-step `waitKey`, 
 
 Private feedback-project agents can also call `list_incident_queue`, `get_incident`, `claim_incident`, and `resolve_incident`. These tools are scoped server-side to the effective private feedback project setting (Admin → Integrations runtime value first, then `PLATFORM_FEEDBACK_PROJECT_ID` fallback); callers cannot provide a project id. `claim_incident` and `resolve_incident` require a task-scoped MCP token, use bounded leases/CAS tokens, and return only private redacted incident evidence labelled as untrusted. `resolve_incident` accepts structured ship-or-track fields for resolved outcomes: `fixPrUrl`, `dispatchedTaskId`, or `linkedRecordId`; rejected outcomes require a justification note instead.
 
+Project eventing uses a pull loop over the canonical ProjectData `project_event_*` tables. Agents create a short-lived subscription with `create_project_event_subscription`, using v1 exact/set filters for `source`, `eventType`, `subjectType`, `subjectId`, and `severity`; recover existing subscriptions with `list_project_event_subscriptions`; inspect or cancel with `get_project_event_subscription` and `cancel_project_event_subscription`. Project, task, session, workspace, owner, and agent identity come from the verified MCP token, not tool arguments.
+
+After subscribing, call `list_subscription_events` with the `subscriptionId` to replay missed or queued matches. The list response is payload-free: it returns summaries, delivery IDs, delivery state, `hasMore`, and an opaque `nextCursor` that is valid only for the same subscription. Call `get_event` only when a summary needs full stored event details, then call `ack_event_delivery` after processing each returned `deliveryId`; ack is idempotent. V1 records matches, delivery decisions, and pull acknowledgements only. It does not inject prompts, steer runtimes, interrupt sessions, spawn tasks, or expose human/UI controls.
+
 ## Authentication
 
 ### `POST /api/auth/sign-in/social`
@@ -139,10 +143,10 @@ price metadata when available, and a `catalogSource` value such as `api` or `sta
 
 Optional query parameters:
 
-| Parameter   | Values                            | Description                                                                                    |
-| ----------- | --------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Parameter   | Values                            | Description                                                                                     |
+| ----------- | --------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `scope`     | `user`, `project`, `installation` | Selects the credential scope to inspect. Omit it for the authenticated user's personal catalog. |
-| `projectId` | Project ID                        | Required when `scope=project`; the caller must have the project `secret:read` capability.      |
+| `projectId` | Project ID                        | Required when `scope=project`; the caller must have the project `secret:read` capability.       |
 
 Installation scope is restricted to superadmins and uses enabled platform compute credentials.
 User scope uses the caller's active personal compute credentials. Project scope returns active

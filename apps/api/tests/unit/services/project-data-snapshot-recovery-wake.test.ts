@@ -104,6 +104,7 @@ beforeEach(() => {
   );
   const stub = {
     ensureProjectId: vi.fn(async () => {}),
+    getSession: vi.fn(async () => ({ status: 'stopped' })),
     wakeSession: wakeSessionRpc,
   };
   env = {

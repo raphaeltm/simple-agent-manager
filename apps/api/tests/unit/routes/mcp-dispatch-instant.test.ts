@@ -98,7 +98,11 @@ describe('launchDispatchedInstantSession', () => {
     expect(taskFailureMocks.markQueuedTaskFailed).toHaveBeenCalledWith(
       fakeDb,
       'task-1',
-      'Instant launch failed: container pool exhausted'
+      'Instant launch failed: container pool exhausted',
+      expect.objectContaining({
+        projectId: 'proj-1',
+        source: 'mcp.dispatch_task.instant_launch',
+      })
     );
   });
 
@@ -114,7 +118,11 @@ describe('launchDispatchedInstantSession', () => {
     expect(taskFailureMocks.markQueuedTaskFailed).toHaveBeenCalledWith(
       fakeDb,
       'task-1',
-      'Instant launch failed: container pool exhausted'
+      'Instant launch failed: container pool exhausted',
+      expect.objectContaining({
+        projectId: 'proj-1',
+        source: 'mcp.dispatch_task.instant_launch',
+      })
     );
   });
 

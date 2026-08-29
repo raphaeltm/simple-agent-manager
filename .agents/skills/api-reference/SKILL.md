@@ -16,7 +16,7 @@ The reference covers:
 - Provider Catalog (`/api/providers/catalog`)
 - Task Management (`/api/projects/:projectId/tasks/*`)
 - MCP orchestration (`wait_for_subtasks`, `dispatch_task`, task inspection)
-- MCP ProjectData event subscriptions (`create/list/get/cancel_project_event_subscription`)
+- MCP ProjectData event subscriptions and pull delivery (`create/list/get/cancel_project_event_subscription`, `list_subscription_events`, `get_event`, `ack_event_delivery`)
 - MCP private incident backlog tools (`list_incident_queue`, `get_incident`, `claim_incident`, `resolve_incident`)
 - Agent Sessions (`/api/workspaces/:id/agent-sessions/*`)
 - Message-anchored chat comments (`/api/projects/:projectId/sessions/:sessionId/comments*`)

@@ -32,7 +32,7 @@ const EVENT_FILTER_SCHEMA = {
     version: {
       type: 'integer',
       enum: [1],
-      description: 'ProjectData event filter version. B3 accepts only v1.',
+      description: 'ProjectData event filter version. The canonical pull model accepts only v1.',
     },
     source: {
       ...STRING_OR_STRING_ARRAY,

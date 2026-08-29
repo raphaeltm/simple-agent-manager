@@ -44,6 +44,7 @@ type ProjectEventTable =
   | 'project_event_matches'
   | 'project_event_delivery_batches'
   | 'project_event_delivery_attempts';
+type ProjectEventTimestampColumn = 'created_at' | 'matched_at' | 'received_at' | 'updated_at';
 
 type FingerprintRow = { idempotency_fingerprint: string };
 type CountRow = { cnt: number };
@@ -58,7 +59,7 @@ type DeleteOldRowsInput = {
   sql: SqlStorage;
   table: ProjectEventTable;
   projectId: string;
-  timestampColumn: string;
+  timestampColumn: ProjectEventTimestampColumn;
   cutoff: number;
   limit: number;
   extraWhere?: string;
@@ -283,10 +284,11 @@ export function expireDueSubscriptions(
     .toArray();
   const ids = rows.filter(isIdRow).map((row) => row.id);
   if (ids.length === 0) return 0;
+  const placeholders = ids.map(() => '?').join(', ');
   sql.exec(
     `UPDATE project_event_subscriptions
      SET lifecycle_state = 'expired', updated_at = ?
-     WHERE project_id = ? AND id IN (${ids.map(() => '?').join(', ')})`,
+     WHERE project_id = ? AND id IN (${placeholders})`,
     now,
     projectId,
     ...ids
@@ -295,7 +297,7 @@ export function expireDueSubscriptions(
     `UPDATE project_event_matches
      SET state = 'expired', lifecycle_checked_at = ?, reason = ?
      WHERE project_id = ?
-       AND subscription_id IN (${ids.map(() => '?').join(', ')})
+       AND subscription_id IN (${placeholders})
        AND batch_id IS NULL
        AND state = 'matched'`,
     now,
@@ -425,10 +427,11 @@ export function updateMatchesForBatch(
   now: number
 ): void {
   const matchState = matchStateForBatchState(batchState);
+  const placeholders = matchIds.map(() => '?').join(', ');
   sql.exec(
     `UPDATE project_event_matches
      SET batch_id = ?, state = ?, lifecycle_checked_at = ?
-     WHERE project_id = ? AND id IN (${matchIds.map(() => '?').join(', ')})`,
+     WHERE project_id = ? AND id IN (${placeholders})`,
     batchId,
     matchState,
     now,
@@ -531,17 +534,31 @@ export function updateBatchForAttempt(
 ): void {
   const batchState = batchStateForAttempt(attemptState);
   const terminalAt = attemptState === 'retry' ? null : now;
-  const deliveredAtExpression =
-    attemptState === 'accepted' ? 'delivered_at = COALESCE(delivered_at, ?),' : '';
-  const params =
-    attemptState === 'accepted'
-      ? [batchState, now, now, terminalAt, reason, projectId, batchId]
-      : [batchState, now, terminalAt, reason, projectId, batchId];
+  if (attemptState === 'accepted') {
+    sql.exec(
+      `UPDATE project_event_delivery_batches
+       SET state = ?, updated_at = ?, delivered_at = COALESCE(delivered_at, ?), terminal_at = ?, terminal_reason = COALESCE(?, terminal_reason)
+       WHERE project_id = ? AND id = ?`,
+      batchState,
+      now,
+      now,
+      terminalAt,
+      reason,
+      projectId,
+      batchId
+    );
+    return;
+  }
   sql.exec(
     `UPDATE project_event_delivery_batches
-     SET state = ?, updated_at = ?, ${deliveredAtExpression} terminal_at = ?, terminal_reason = COALESCE(?, terminal_reason)
+     SET state = ?, updated_at = ?, terminal_at = ?, terminal_reason = COALESCE(?, terminal_reason)
      WHERE project_id = ? AND id = ?`,
-    ...params
+    batchState,
+    now,
+    terminalAt,
+    reason,
+    projectId,
+    batchId
   );
 }
 
@@ -581,20 +598,12 @@ export function readRecentRows<T>(
   sql: SqlStorage,
   table: ProjectEventTable,
   projectId: string,
-  orderColumn: string,
+  orderColumn: ProjectEventTimestampColumn,
   limit: number,
   mapper: (row: unknown) => T
 ): { items: T[]; hasMore: boolean } {
-  const rows = sql
-    .exec(
-      `SELECT * FROM ${table}
-       WHERE project_id = ?
-       ORDER BY ${orderColumn} DESC, id
-       LIMIT ?`,
-      projectId,
-      limit + 1
-    )
-    .toArray();
+  const selectSql = recentRowsSelectSql(table, orderColumn);
+  const rows = sql.exec(selectSql, projectId, limit + 1).toArray();
   return { items: mapRows(rows, mapper, limit, table), hasMore: rows.length > limit };
 }
 
@@ -624,18 +633,8 @@ export function deleteOldRows(input: DeleteOldRowsInput): number {
     extraWhere = '',
     extraParams = [],
   } = input;
-  const rows = sql
-    .exec(
-      `SELECT id FROM ${table}
-       WHERE project_id = ? AND ${timestampColumn} < ? ${extraWhere}
-       ORDER BY ${timestampColumn} ASC, id
-       LIMIT ?`,
-      projectId,
-      cutoff,
-      ...extraParams,
-      limit
-    )
-    .toArray();
+  const selectSql = deleteOldRowsSelectSql(table, timestampColumn, extraWhere);
+  const rows = sql.exec(selectSql, projectId, cutoff, ...extraParams, limit).toArray();
   const ids = rows.filter(isIdRow).map((row) => row.id);
   return deleteRowsByIds(sql, table, projectId, ids);
 }
@@ -674,12 +673,9 @@ function deleteRowsByIds(
   ids: string[]
 ): number {
   if (ids.length === 0) return 0;
-  sql.exec(
-    `DELETE FROM ${table}
-     WHERE project_id = ? AND id IN (${ids.map(() => '?').join(', ')})`,
-    projectId,
-    ...ids
-  );
+  const placeholders = ids.map(() => '?').join(', ');
+  const deleteSql = deleteRowsByIdsSql(table, placeholders);
+  sql.exec(deleteSql, projectId, ...ids);
   return ids.length;
 }
 
@@ -687,21 +683,12 @@ export function accountingFor(
   sql: SqlStorage,
   projectId: string,
   category: ProjectEventTable,
-  timestampColumn: string,
+  timestampColumn: ProjectEventTimestampColumn,
   byteExpression: string,
   measuredAt: number
 ): ProjectEventStorageAccountingRecord {
-  const row = sql
-    .exec(
-      `SELECT COUNT(*) AS record_count,
-              COALESCE(SUM(${byteExpression}), 0) AS estimated_bytes,
-              MIN(${timestampColumn}) AS oldest_created_at,
-              MAX(${timestampColumn}) AS newest_created_at
-       FROM ${category}
-       WHERE project_id = ?`,
-      projectId
-    )
-    .toArray()[0];
+  const selectSql = accountingSelectSql(category, timestampColumn, byteExpression);
+  const row = sql.exec(selectSql, projectId).toArray()[0];
   const parsed = isAccountingAggregateRow(row)
     ? row
     : {
@@ -719,6 +706,45 @@ export function accountingFor(
     newestCreatedAt: parsed.newest_created_at,
     measuredAt,
   };
+}
+
+function recentRowsSelectSql(
+  table: ProjectEventTable,
+  orderColumn: ProjectEventTimestampColumn
+): string {
+  return `SELECT * FROM ${table}
+       WHERE project_id = ?
+       ORDER BY ${orderColumn} DESC, id
+       LIMIT ?`;
+}
+
+function deleteOldRowsSelectSql(
+  table: ProjectEventTable,
+  timestampColumn: ProjectEventTimestampColumn,
+  extraWhere: string
+): string {
+  return `SELECT id FROM ${table}
+       WHERE project_id = ? AND ${timestampColumn} < ? ${extraWhere}
+       ORDER BY ${timestampColumn} ASC, id
+       LIMIT ?`;
+}
+
+function deleteRowsByIdsSql(table: ProjectEventTable, placeholders: string): string {
+  return `DELETE FROM ${table}
+     WHERE project_id = ? AND id IN (${placeholders})`;
+}
+
+function accountingSelectSql(
+  category: ProjectEventTable,
+  timestampColumn: ProjectEventTimestampColumn,
+  byteExpression: string
+): string {
+  return `SELECT COUNT(*) AS record_count,
+              COALESCE(SUM(${byteExpression}), 0) AS estimated_bytes,
+              MIN(${timestampColumn}) AS oldest_created_at,
+              MAX(${timestampColumn}) AS newest_created_at
+       FROM ${category}
+       WHERE project_id = ?`;
 }
 
 function insertMatchIfAbsent(

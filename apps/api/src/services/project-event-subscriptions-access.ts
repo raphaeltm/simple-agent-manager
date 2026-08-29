@@ -131,7 +131,9 @@ function isRequestedDelivery(value: unknown): value is ProjectEventRequestedDeli
 
 export function normalizeRequestedDelivery(value: unknown): ProjectEventRequestedDeliveryMode {
   if (!isRequestedDelivery(value)) {
-    throw errors.badRequest('requestedDelivery must be a supported ProjectData event delivery mode');
+    throw errors.badRequest(
+      'requestedDelivery must be a supported ProjectData event delivery mode'
+    );
   }
   return value;
 }
@@ -142,8 +144,8 @@ export function resolveDeliveryPreference(
 ): ProjectEventDeliveryPreference {
   return {
     requested,
-    // B3 records caller delivery intent but does not queue prompts, steer runtimes,
-    // interrupt runtimes, or spawn tasks. Wave B2 owns future delivery resolution.
+    // The canonical pull model records caller delivery intent but does not queue
+    // prompts, steer runtimes, interrupt runtimes, or spawn tasks.
     resolved: requested === 'record_only' ? 'record_only' : 'recorded_not_injected',
     target,
   };
@@ -154,7 +156,9 @@ async function firstRow<T extends object>(
   sql: string,
   ...params: unknown[]
 ): Promise<T | null> {
-  const row = await env.DATABASE.prepare(sql).bind(...params).first<T>();
+  const row = await env.DATABASE.prepare(sql)
+    .bind(...params)
+    .first<T>();
   return row ?? null;
 }
 
@@ -246,7 +250,9 @@ async function resolveAgentContext(
 
   const sessionId = tokenSessionId ?? task.chat_session_id ?? workspace.chat_session_id;
   if (!sessionId) {
-    throw errors.badRequest('Calling task has no durable chat session for event subscription target');
+    throw errors.badRequest(
+      'Calling task has no durable chat session for event subscription target'
+    );
   }
   const ownerId = agentSessionId ?? `${taskId}:${sessionId}`;
 
@@ -377,7 +383,9 @@ export function requireAgentCreateIdentity(
     throw errors.forbidden('Agent event subscription target task must match the caller task');
   }
   if (requestedAgentId && requestedAgentId !== context.target.agentId) {
-    throw errors.forbidden('Agent event subscription target agent must match the caller agent session');
+    throw errors.forbidden(
+      'Agent event subscription target agent must match the caller agent session'
+    );
   }
   if (requestedRuntimeId) {
     throw errors.forbidden('Agent callers cannot target runtimes directly in this surface');

@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: Pre-existing VM node lifecycle route surface; splitting is tracked separately from eventing reconciliation. See .claude/rules/18-file-size-limits.md
 /**
  * Node lifecycle routes — VM-agent callbacks plus browser token issuance.
  *

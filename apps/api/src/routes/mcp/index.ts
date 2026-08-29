@@ -53,11 +53,6 @@ import {
   handleListProjectEventSubscriptions,
 } from './event-subscription-tools';
 import {
-  handleAckEventDelivery,
-  handleGetEvent,
-  handleListSubscriptionEvents,
-} from './project-event-tools';
-import {
   handleCreateIdea,
   handleFindRelatedIdeas,
   handleGetIdea,
@@ -144,6 +139,11 @@ import {
   handleRemoveProfileEnvVar,
   handleUpdateAgentProfile,
 } from './profile-tools';
+import {
+  handleAckEventDelivery,
+  handleGetEvent,
+  handleListSubscriptionEvents,
+} from './project-event-tools';
 import {
   handleGetArchivedToolPayloads,
   handleGetSessionMessages,

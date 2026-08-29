@@ -210,6 +210,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `PROJECT_EVENT_DELIVERY_ATTEMPT_MAX_PER_BATCH` — Maximum recorded delivery attempts for one event delivery batch (default: `10`)
 - `PROJECT_EVENT_LIST_LIMIT` — Default ProjectData event-subscription list/status page size (default: `50`)
 - `PROJECT_EVENT_LIST_MAX` — Maximum ProjectData event-subscription list/status page size (default: `200`)
+- `PROJECT_EVENT_SUBSCRIPTION_EVENT_CURSOR_MAX_LENGTH` — Maximum opaque `list_subscription_events` cursor length accepted by ProjectData pull delivery (default: `512`)
 - `PROJECT_EVENT_RECENT_STATUS_LIMIT` — Maximum rows returned per section in recent event-subscription status inspection (default: `50`)
 - `PROJECT_EVENT_RETENTION_DAYS` — Retention window for terminal ProjectData event-subscription records (default: `30`)
 - `PROJECT_EVENT_RETENTION_BATCH_ROWS` — Maximum old rows pruned per event-subscription retention category per pass (default: `500`)

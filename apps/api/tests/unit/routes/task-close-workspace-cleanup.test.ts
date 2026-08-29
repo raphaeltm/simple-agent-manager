@@ -119,7 +119,7 @@ describe('POST /api/projects/:projectId/tasks/:taskId/close workspace cleanup', 
       }),
     }));
     expect(db.update).toHaveBeenCalled();
-    expect(waitUntil).toHaveBeenCalledTimes(1);
+    expect(waitUntil).toHaveBeenCalledTimes(2);
   });
 
   it('does not clean up a workspace when the task belongs to a different project route', async () => {

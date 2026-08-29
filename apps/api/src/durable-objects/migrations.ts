@@ -32,23 +32,46 @@ type MigrationIndexSchema = {
   where?: string;
 };
 
+const MIGRATION_IDENTIFIER_PATTERN = /^[a-z][a-z0-9_]*$/;
+const MIGRATION_INDEX_COLUMN_LIST_PATTERN =
+  /^[a-z][a-z0-9_]*(?:\s+(?:ASC|DESC))?(?:,\s*[a-z][a-z0-9_]*(?:\s+(?:ASC|DESC))?)*$/;
+
 function createTable(sql: SqlStorage, schema: MigrationTableSchema): void {
+  assertMigrationIdentifier(schema.name, 'table name');
+  for (const column of Object.keys(schema.columns)) {
+    assertMigrationIdentifier(column, `${schema.name} column`);
+  }
   const definitions = [
     ...Object.entries(schema.columns).map(([name, definition]) => `${name} ${definition}`),
     ...(schema.constraints ?? []),
   ];
-  sql.exec(`
+  const statement = `
     CREATE TABLE IF NOT EXISTS ${schema.name} (
       ${definitions.join(',\n      ')}
     )
-  `);
+  `;
+  sql.exec(statement);
 }
 
 function createIndex(sql: SqlStorage, schema: MigrationIndexSchema): void {
+  assertMigrationIdentifier(schema.name, 'index name');
+  assertMigrationIdentifier(schema.table, `${schema.name} table`);
+  assertMigrationIndexColumnList(schema.columns, `${schema.name} columns`);
   const where = schema.where ? ` WHERE ${schema.where}` : '';
-  sql.exec(
-    `CREATE INDEX IF NOT EXISTS ${schema.name} ON ${schema.table}(${schema.columns})${where}`
-  );
+  const statement = `CREATE INDEX IF NOT EXISTS ${schema.name} ON ${schema.table}(${schema.columns})${where}`;
+  sql.exec(statement);
+}
+
+function assertMigrationIdentifier(value: string, label: string): void {
+  if (!MIGRATION_IDENTIFIER_PATTERN.test(value)) {
+    throw new Error(`Invalid migration ${label}: ${value}`);
+  }
+}
+
+function assertMigrationIndexColumnList(value: string, label: string): void {
+  if (!MIGRATION_INDEX_COLUMN_LIST_PATTERN.test(value)) {
+    throw new Error(`Invalid migration ${label}: ${value}`);
+  }
 }
 
 const PROJECT_EVENT_TABLE_SCHEMAS: readonly MigrationTableSchema[] = [

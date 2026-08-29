@@ -4,7 +4,7 @@ import type {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
-import { createModuleLogger } from '../lib/logger';
+import { log } from '../lib/logger';
 import * as projectDataService from './project-data';
 import {
   buildDeploymentEnvironmentLifecycleEventInput,
@@ -21,8 +21,6 @@ import {
   type TaskLifecycleEventInput,
   taskLifecycleEventType,
 } from './project-lifecycle-event-inputs';
-
-const log = createModuleLogger('project_lifecycle_events');
 
 type ProjectLifecycleEventWithoutProjectId = Omit<AdmitProjectEventInput, 'projectId'>;
 
@@ -46,7 +44,7 @@ async function recordBestEffort(
   try {
     await admitProjectLifecycleEvent(env, await eventPromise);
   } catch (err) {
-    log.warn('project_lifecycle_event.admission_failed', {
+    log.warn('project_lifecycle_events.project_lifecycle_event.admission_failed', {
       projectId: context.projectId,
       eventType: context.eventType,
       subjectId: context.subjectId,
