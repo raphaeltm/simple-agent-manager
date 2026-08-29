@@ -48,6 +48,7 @@ import {
   parseEventPayload,
   parseEventRow,
   parseSubscriptionRow,
+  readRequiredStringColumn,
   subscriptionMatchesEvent,
 } from './event-bus-row-parsers';
 
@@ -83,6 +84,8 @@ export {
   EventBusPayloadTooLargeError,
 } from './event-bus-contracts';
 export { DEFAULT_MCP_EVENT_BUS_CURSOR_MAX_LENGTH } from './event-bus-cursors';
+export type { EventBusRetentionResult } from './event-bus-retention';
+export { computeEventBusRetentionAlarmTime, runEventBusRetention } from './event-bus-retention';
 
 const DEFAULT_EVENT_BUS_STORAGE_CONFIG: EventBusStorageConfig = {
   payloadMaxBytes: DEFAULT_PROJECT_DATA_EVENT_BUS_PAYLOAD_MAX_BYTES,
@@ -227,14 +230,18 @@ export function publishEventBusEvent(
       event.sequence,
       now
     );
-    const inserted = sql
+    const insertedRow = sql
       .exec(
         'SELECT id FROM event_bus_deliveries WHERE subscription_id = ? AND event_id = ?',
         subscription.id,
         id
       )
-      .toArray()[0] as { id: string } | undefined;
-    if (inserted) deliveryIds.push(inserted.id);
+      .toArray()[0];
+    if (insertedRow) {
+      deliveryIds.push(
+        readRequiredStringColumn(insertedRow, 'id', 'event_bus.delivery.inserted_row')
+      );
+    }
   }
 
   return {
@@ -494,94 +501,6 @@ function getVisibleDelivery(
   return row ? parseDeliveryRecordRow(row) : null;
 }
 
-export interface EventBusRetentionResult {
-  cutoffCreatedAt: number;
-  eventsDeleted: number;
-  deliveriesDeleted: number;
-  exhaustedCandidates: boolean;
-}
-
-export function runEventBusRetention(
-  sql: SqlStorage,
-  config: Pick<EventBusStorageConfig, 'retentionMs' | 'retentionBatchRows'>,
-  now = Date.now()
-): EventBusRetentionResult {
-  const cutoffCreatedAt = now - config.retentionMs;
-  const candidateRows = sql
-    .exec(
-      `SELECT e.id
-       FROM event_bus_events e
-       WHERE e.created_at < ?
-         AND NOT EXISTS (
-           SELECT 1
-           FROM event_bus_deliveries d
-           JOIN event_bus_delivery_policies p ON p.subscription_id = d.subscription_id
-           WHERE d.event_id = e.id
-             AND p.policy = 'ack_required'
-             AND d.state IN ('queued', 'delivered')
-         )
-       ORDER BY e.created_at ASC, e.sequence ASC
-       LIMIT ?`,
-      cutoffCreatedAt,
-      config.retentionBatchRows + 1
-    )
-    .toArray() as Array<{ id?: unknown }>;
-  const eventIds = candidateRows
-    .slice(0, config.retentionBatchRows)
-    .map((row) => row.id)
-    .filter((id): id is string => typeof id === 'string' && id.length > 0);
-
-  if (eventIds.length === 0) {
-    return {
-      cutoffCreatedAt,
-      eventsDeleted: 0,
-      deliveriesDeleted: 0,
-      exhaustedCandidates: true,
-    };
-  }
-
-  const placeholders = eventIds.map(() => '?').join(', ');
-  const deliveriesBefore = readCount(
-    sql,
-    `SELECT COUNT(*) AS count FROM event_bus_deliveries WHERE event_id IN (${placeholders})`,
-    eventIds
-  );
-  sql.exec(`DELETE FROM event_bus_deliveries WHERE event_id IN (${placeholders})`, ...eventIds);
-  sql.exec(`DELETE FROM event_bus_events WHERE id IN (${placeholders})`, ...eventIds);
-
-  return {
-    cutoffCreatedAt,
-    eventsDeleted: eventIds.length,
-    deliveriesDeleted: deliveriesBefore,
-    exhaustedCandidates: candidateRows.length <= config.retentionBatchRows,
-  };
-}
-
-export function computeEventBusRetentionAlarmTime(
-  sql: SqlStorage,
-  config: Pick<EventBusStorageConfig, 'retentionMs'>,
-  now = Date.now()
-): number | null {
-  const [row] = sql
-    .exec(
-      `SELECT e.created_at
-       FROM event_bus_events e
-       WHERE NOT EXISTS (
-         SELECT 1
-         FROM event_bus_deliveries d
-         JOIN event_bus_delivery_policies p ON p.subscription_id = d.subscription_id
-         WHERE d.event_id = e.id
-           AND p.policy = 'ack_required'
-           AND d.state IN ('queued', 'delivered')
-       )
-       ORDER BY e.created_at ASC, e.sequence ASC
-       LIMIT 1`
-    )
-    .toArray() as Array<{ created_at?: unknown }>;
-  const createdAt = typeof row?.created_at === 'number' ? row.created_at : null;
-  return createdAt === null ? null : Math.max(createdAt + config.retentionMs, now);
-}
-
 function selectMatchingSubscriptions(
   sql: SqlStorage,
   subject: { type: string; id: string | null },
@@ -789,9 +708,4 @@ function stringifyJson(value: unknown): string {
 
 function byteLength(value: string): number {
   return new TextEncoder().encode(value).byteLength;
-}
-
-function readCount(sql: SqlStorage, statement: string, bindings: unknown[]): number {
-  const [row] = sql.exec(statement, ...bindings).toArray() as Array<{ count?: unknown }>;
-  return typeof row?.count === 'number' && Number.isFinite(row.count) ? row.count : 0;
 }

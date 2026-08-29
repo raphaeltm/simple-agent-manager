@@ -172,6 +172,22 @@ export function parseDeliveryRecordRow(row: unknown): SamEventBusDeliveryRecord 
   };
 }
 
+export function readRequiredStringColumn(row: unknown, column: string, context: string): string {
+  const record = expectJsonRecord(row, context);
+  return requireString(record[column], `${context}.${column}`);
+}
+
+export function readOptionalNumberColumn(
+  row: unknown,
+  column: string,
+  context: string
+): number | null {
+  if (!row) return null;
+  const record = expectJsonRecord(row, context);
+  const value = record[column];
+  return value === null || value === undefined ? null : requireNumber(value, `${context}.${column}`);
+}
+
 export function subscriptionMatchesEvent(
   subscription: EventBusSubscriptionRecord,
   event: EventBusEventSummaryRow
