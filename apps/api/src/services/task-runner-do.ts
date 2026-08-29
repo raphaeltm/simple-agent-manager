@@ -27,6 +27,8 @@ import type {
   TaskStartCapacityPoolSelection,
 } from './placement-resolver';
 
+const TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES = 96 * 1024;
+
 /**
  * Get a typed DO stub for the given task.
  * Uses `idFromName(taskId)` for deterministic mapping — one DO per task.
@@ -58,7 +60,59 @@ function capacityPoolSelectionForStart(input: {
   const selection = input.capacityPoolSelection ?? null;
   const candidate = selection?.candidates[0] ?? null;
   if (!selection || !candidate) return selection;
-  return capacityCandidateMatchesStartInput(candidate, input) ? selection : null;
+  if (!capacityCandidateMatchesStartInput(candidate, input)) return null;
+  return compactCapacityPoolSelectionForTaskRunner(selection);
+}
+
+function compactCapacityPoolSelectionForTaskRunner(
+  selection: TaskStartCapacityPoolSelection
+): TaskStartCapacityPoolSelection {
+  const compactSelection: TaskStartCapacityPoolSelection = {
+    ...selection,
+    poolSnapshot: {
+      ...selection.poolSnapshot,
+      placementExplanationJson: null,
+    },
+    candidates: selection.candidates.map((candidate, index) =>
+      compactCapacityCandidateForTaskRunner(candidate, { primary: index === 0 })
+    ),
+  };
+
+  if (
+    new TextEncoder().encode(JSON.stringify(compactSelection)).length <=
+    TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES
+  ) {
+    return compactSelection;
+  }
+
+  return {
+    ...compactSelection,
+    candidates: compactSelection.candidates.slice(0, 1),
+  };
+}
+
+function compactCapacityCandidateForTaskRunner(
+  candidate: TaskStartCapacityCandidate,
+  options: { primary: boolean }
+): TaskStartCapacityCandidate {
+  const rest = { ...candidate };
+  delete rest.snapshot;
+  const {
+    machineClass,
+    providerInstancePriceDisplay,
+    providerInstancePriceCurrency,
+    providerInstancePriceMonthlyCents,
+    providerInstancePriceHourlyMicros,
+  } = candidate;
+
+  return {
+    ...rest,
+    machineClass: options.primary ? machineClass : null,
+    providerInstancePriceDisplay: options.primary ? providerInstancePriceDisplay : null,
+    providerInstancePriceCurrency: options.primary ? providerInstancePriceCurrency : null,
+    providerInstancePriceMonthlyCents: options.primary ? providerInstancePriceMonthlyCents : null,
+    providerInstancePriceHourlyMicros: options.primary ? providerInstancePriceHourlyMicros : null,
+  };
 }
 
 /**

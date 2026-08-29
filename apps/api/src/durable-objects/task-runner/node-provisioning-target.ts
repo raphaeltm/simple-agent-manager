@@ -1,4 +1,5 @@
 import type { TaskStartCapacityCandidate } from '../../services/placement-resolver';
+import { capacityPlacementSnapshotForCandidate } from '../../services/placement-resolver';
 import type { TaskRunnerState } from './types';
 
 export function applyCapacityCandidateProvisioningTarget(
@@ -14,5 +15,7 @@ export function applyCapacityCandidateProvisioningTarget(
       ? (candidate.capacityPoolProjectId ?? state.projectId)
       : null;
   state.config.credentialAttributionSource = candidate.credentialAttributionSource;
-  state.stepResults.capacityPlacementSnapshot = candidate.snapshot;
+  state.stepResults.capacityPlacementSnapshot = state.config.capacityPoolSelection
+    ? capacityPlacementSnapshotForCandidate(state.config.capacityPoolSelection, candidate)
+    : null;
 }

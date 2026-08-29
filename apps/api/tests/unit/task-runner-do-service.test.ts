@@ -16,14 +16,8 @@ const serviceSource = readFileSync(
   resolve(process.cwd(), 'src/services/task-runner-do.ts'),
   'utf8'
 );
-const taskSubmitSource = readFileSync(
-  resolve(process.cwd(), 'src/routes/tasks/submit.ts'),
-  'utf8'
-);
-const taskRunsSource = readFileSync(
-  resolve(process.cwd(), 'src/routes/tasks/run.ts'),
-  'utf8'
-);
+const taskSubmitSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/submit.ts'), 'utf8');
+const taskRunsSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/run.ts'), 'utf8');
 const workspacesSource = [
   readFileSync(resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'), 'utf8'),
   readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime.ts'), 'utf8'),
@@ -45,9 +39,11 @@ function createTaskRunnerEnv(start = vi.fn().mockResolvedValue(undefined)) {
   };
 }
 
-function capacityPoolSelection(
-  overrides: { provider: 'hetzner' | 'scaleway'; location: 'nbg1' | 'fsn1' | 'fr-par-1' }
-) {
+function capacityPoolSelection(overrides: {
+  provider: 'hetzner' | 'scaleway';
+  location: 'nbg1' | 'fsn1' | 'fr-par-1';
+  candidateCount?: number;
+}) {
   const snapshot = {
     capacityPoolId: 'pool-task-runner-unit',
     capacityPoolScope: 'user' as const,
@@ -66,6 +62,69 @@ function capacityPoolSelection(
     }),
   };
 
+  const candidateCount = overrides.candidateCount ?? 1;
+  const candidates = Array.from({ length: candidateCount }, (_, index) => {
+    const id =
+      index === 0
+        ? snapshot.capacityPoolCandidateId
+        : `candidate-task-runner-unit-${String(index).padStart(3, '0')}`;
+    const providerInstanceType =
+      overrides.provider === 'hetzner'
+        ? index === 0
+          ? 'cx23'
+          : `cx${23 + index}`
+        : index === 0
+          ? 'DEV1-M'
+          : `DEV1-${index}`;
+    const candidateSnapshot = {
+      ...snapshot,
+      capacityPoolCandidateId: id,
+      providerInstanceType,
+      providerInstanceVcpuCount: 2 + (index % 8),
+      providerInstanceMemoryMb: 4096 + index * 1024,
+      providerInstanceDiskGb: 40 + index,
+      providerInstancePriceDisplay: `€${(5 + index).toFixed(2)}/mo`,
+      providerInstancePriceCurrency: 'EUR',
+      providerInstancePriceMonthlyCents: 500 + index,
+      providerInstancePriceHourlyMicros: 8_000 + index,
+      placementExplanationJson: JSON.stringify({
+        poolId: 'pool-task-runner-unit',
+        capacitySourceId: 'source-task-runner-unit',
+        capacityPoolCandidateId: id,
+        providerInstanceType,
+        repeatedLiveCatalogMetadata: 'x'.repeat(1800),
+      }),
+    };
+
+    return {
+      id,
+      poolId: snapshot.capacityPoolId,
+      capacitySourceId: snapshot.capacitySourceId,
+      provider: overrides.provider,
+      location: overrides.location,
+      workloadRole: 'workspace' as const,
+      runtime: 'vm',
+      machineClass: 'shared-vm',
+      machineSize: 'medium' as const,
+      providerInstanceType,
+      providerInstanceVcpuCount: candidateSnapshot.providerInstanceVcpuCount,
+      providerInstanceMemoryMb: candidateSnapshot.providerInstanceMemoryMb,
+      providerInstanceDiskGb: candidateSnapshot.providerInstanceDiskGb,
+      providerInstancePriceDisplay: candidateSnapshot.providerInstancePriceDisplay,
+      providerInstancePriceCurrency: candidateSnapshot.providerInstancePriceCurrency,
+      providerInstancePriceMonthlyCents: candidateSnapshot.providerInstancePriceMonthlyCents,
+      providerInstancePriceHourlyMicros: candidateSnapshot.providerInstancePriceHourlyMicros,
+      priority: index,
+      candidateOrder: index,
+      credentialAttributionSource: 'user' as const,
+      placementCredentialSource: 'user' as const,
+      placementCredentialReference: snapshot.placementCredentialReference,
+      placementCredentialVersion: snapshot.placementCredentialVersion,
+      capacityPoolProjectId: null,
+      snapshot: candidateSnapshot,
+    };
+  });
+
   return {
     poolId: snapshot.capacityPoolId,
     scope: 'user' as const,
@@ -74,27 +133,7 @@ function capacityPoolSelection(
     capacityPoolProjectId: null,
     workloadRole: 'workspace' as const,
     poolSnapshot: { ...snapshot, capacitySourceId: null, capacityPoolCandidateId: null },
-    candidates: [
-      {
-        id: snapshot.capacityPoolCandidateId,
-        poolId: snapshot.capacityPoolId,
-        capacitySourceId: snapshot.capacitySourceId,
-        provider: overrides.provider,
-        location: overrides.location,
-        workloadRole: 'workspace' as const,
-        runtime: 'vm',
-        machineClass: 'shared-vm',
-        machineSize: 'medium' as const,
-        priority: 0,
-        candidateOrder: 0,
-        credentialAttributionSource: 'user' as const,
-        placementCredentialSource: 'user' as const,
-        placementCredentialReference: snapshot.placementCredentialReference,
-        placementCredentialVersion: snapshot.placementCredentialVersion,
-        capacityPoolProjectId: null,
-        snapshot,
-      },
-    ],
+    candidates,
   };
 }
 
@@ -129,7 +168,9 @@ describe('task-runner-do service', () => {
   });
 
   it('uses typed DO stub via getStub helper', () => {
-    expect(serviceSource).toContain('function getStub(env: Env, taskId: string): DurableObjectStub<TaskRunner>');
+    expect(serviceSource).toContain(
+      'function getStub(env: Env, taskId: string): DurableObjectStub<TaskRunner>'
+    );
   });
 
   it('uses idFromName(taskId) for deterministic mapping', () => {
@@ -154,11 +195,22 @@ describe('task-runner-do service', () => {
 
   it('passes all config fields to StartTaskInput', () => {
     const configFields = [
-      'vmSize', 'vmLocation', 'branch', 'preferredNodeId',
-      'userName', 'userEmail', 'githubId', 'taskTitle',
-      'taskDescription', 'repository', 'installationId',
-      'outputBranch', 'projectDefaultVmSize', 'agentType',
-      'model', 'permissionMode',
+      'vmSize',
+      'vmLocation',
+      'branch',
+      'preferredNodeId',
+      'userName',
+      'userEmail',
+      'githubId',
+      'taskTitle',
+      'taskDescription',
+      'repository',
+      'installationId',
+      'outputBranch',
+      'projectDefaultVmSize',
+      'agentType',
+      'model',
+      'permissionMode',
     ];
     for (const field of configFields) {
       expect(serviceSource).toContain(field);
@@ -205,11 +257,71 @@ describe('task-runner-do service', () => {
       location: 'fsn1',
     });
   });
+
+  it('strips duplicated candidate snapshots while retaining compact catalog breadth', async () => {
+    const { env, start } = createTaskRunnerEnv();
+
+    await startTaskRunnerDO(env, {
+      ...minimalStartInput,
+      cloudProvider: 'hetzner',
+      explicitVmLocation: false,
+      capacityPoolSelection: capacityPoolSelection({
+        provider: 'hetzner',
+        location: 'fsn1',
+        candidateCount: 4,
+      }),
+    });
+
+    const forwarded = start.mock.calls[0]?.[0];
+    const candidates = forwarded.config.capacityPoolSelection?.candidates ?? [];
+    expect(candidates).toHaveLength(4);
+    expect(candidates.every((candidate: object) => !('snapshot' in candidate))).toBe(true);
+    expect(candidates[0]).toMatchObject({
+      providerInstanceType: 'cx23',
+      providerInstancePriceCurrency: 'EUR',
+    });
+    expect(candidates[1]).toMatchObject({
+      providerInstanceType: 'cx24',
+      providerInstancePriceCurrency: null,
+      providerInstancePriceMonthlyCents: null,
+      providerInstancePriceHourlyMicros: null,
+    });
+  });
+
+  it('keeps large provider-native catalogs below the Durable Object value-size limit', async () => {
+    const { env, start } = createTaskRunnerEnv();
+
+    await startTaskRunnerDO(env, {
+      ...minimalStartInput,
+      taskDescription: 'x'.repeat(16_000),
+      cloudProvider: 'hetzner',
+      explicitVmLocation: false,
+      capacityPoolSelection: capacityPoolSelection({
+        provider: 'hetzner',
+        location: 'fsn1',
+        candidateCount: 160,
+      }),
+    });
+
+    const forwarded = start.mock.calls[0]?.[0];
+    const serializedBytes = new TextEncoder().encode(JSON.stringify(forwarded.config)).length;
+
+    expect(serializedBytes).toBeLessThan(131_072);
+    expect(forwarded.config.capacityPoolSelection?.candidates[0]).toMatchObject({
+      provider: 'hetzner',
+      location: 'fsn1',
+      providerInstanceType: 'cx23',
+      providerInstancePriceDisplay: '€5.00/mo',
+      providerInstancePriceCurrency: 'EUR',
+    });
+  });
 });
 
 describe('task-submit route uses TaskRunner DO', () => {
   it('imports startTaskRunnerDO (not executeTaskRun)', () => {
-    expect(taskSubmitSource).toContain("import { startTaskRunnerDO } from '../../services/task-runner-do'");
+    expect(taskSubmitSource).toContain(
+      "import { startTaskRunnerDO } from '../../services/task-runner-do'"
+    );
     expect(taskSubmitSource).not.toContain('executeTaskRun');
     expect(taskSubmitSource).not.toContain('initiateTaskRun');
   });
@@ -237,7 +349,9 @@ describe('task-submit route uses TaskRunner DO', () => {
 
 describe('task-runs route uses TaskRunner DO', () => {
   it('imports startTaskRunnerDO (not initiateTaskRun)', () => {
-    expect(taskRunsSource).toContain("import { startTaskRunnerDO } from '../../services/task-runner-do'");
+    expect(taskRunsSource).toContain(
+      "import { startTaskRunnerDO } from '../../services/task-runner-do'"
+    );
     expect(taskRunsSource).not.toContain('initiateTaskRun');
   });
 
@@ -329,9 +443,7 @@ describe('stuck-tasks cron compatibility with TaskRunner DO', () => {
 describe('no waitUntil(executeTaskRun) remaining in routes', () => {
   it('task-submit does not use waitUntil for orchestration', () => {
     // waitUntil should only be used for best-effort operations (activity events)
-    const submitSection = taskSubmitSource.slice(
-      taskSubmitSource.indexOf('startTaskRunnerDO'),
-    );
+    const submitSection = taskSubmitSource.slice(taskSubmitSource.indexOf('startTaskRunnerDO'));
     expect(submitSection).not.toContain('waitUntil(\n    executeTaskRun');
   });
 

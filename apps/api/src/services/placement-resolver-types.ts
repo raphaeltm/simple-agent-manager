@@ -163,7 +163,12 @@ export interface TaskStartCapacityCandidate {
   placementCredentialReference: string | null;
   placementCredentialVersion: number | null;
   capacityPoolProjectId: string | null;
-  snapshot: CapacityPlacementSnapshot;
+  /**
+   * Optional precomputed placement snapshot. TaskRunner state may omit this to
+   * stay below Cloudflare Durable Object value-size limits; placement helpers
+   * can rebuild the same snapshot from the compact candidate fields.
+   */
+  snapshot?: CapacityPlacementSnapshot;
 }
 
 export interface TaskStartCapacityPoolSelection {

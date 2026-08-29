@@ -49,7 +49,11 @@ export function capacityPoolSnapshotForPool(
 export function capacityPlacementSnapshotForTaskStart(
   selection: TaskStartCapacityPoolSelection | null | undefined
 ): CapacityPlacementSnapshot | null {
-  return selection?.candidates[0]?.snapshot ?? selection?.poolSnapshot ?? null;
+  const candidate = selection?.candidates[0] ?? null;
+  if (!selection) return null;
+  return candidate
+    ? capacityPlacementSnapshotForCandidate(selection, candidate)
+    : selection.poolSnapshot;
 }
 
 export function hasNoCapacityPoolCandidates(
@@ -110,7 +114,39 @@ export function resolveReusableNodeCapacitySnapshot(input: {
     input.requestedVmSize,
     input.requestedReservation ?? null
   );
-  return candidate?.snapshot;
+  return candidate ? capacityPlacementSnapshotForCandidate(selection, candidate) : undefined;
+}
+
+export function capacityPlacementSnapshotForCandidate(
+  selection: Pick<
+    TaskStartCapacityPoolSelection,
+    'poolId' | 'scope' | 'revision' | 'strategy' | 'capacityPoolProjectId' | 'workloadRole'
+  >,
+  candidate: TaskStartCapacityCandidate
+): CapacityPlacementSnapshot {
+  return (
+    candidate.snapshot ?? {
+      capacityPoolId: selection.poolId,
+      capacityPoolScope: selection.scope,
+      capacityPoolRevision: selection.revision,
+      capacitySourceId: candidate.capacitySourceId,
+      capacityPoolCandidateId: candidate.id,
+      placementCredentialSource: candidate.placementCredentialSource,
+      placementCredentialReference: candidate.placementCredentialReference,
+      placementCredentialVersion: candidate.placementCredentialVersion,
+      capacityPoolProjectId: candidate.capacityPoolProjectId,
+      workloadRole: candidate.workloadRole,
+      providerInstanceType: candidate.providerInstanceType,
+      providerInstanceVcpuCount: candidate.providerInstanceVcpuCount,
+      providerInstanceMemoryMb: candidate.providerInstanceMemoryMb,
+      providerInstanceDiskGb: candidate.providerInstanceDiskGb,
+      providerInstancePriceDisplay: candidate.providerInstancePriceDisplay,
+      providerInstancePriceCurrency: candidate.providerInstancePriceCurrency,
+      providerInstancePriceMonthlyCents: candidate.providerInstancePriceMonthlyCents,
+      providerInstancePriceHourlyMicros: candidate.providerInstancePriceHourlyMicros,
+      placementExplanationJson: buildCapacityPlacementExplanation(selection, candidate),
+    }
+  );
 }
 
 export function buildCapacityPoolSelection(
@@ -443,7 +479,10 @@ function offeringFitSurplus(
   const cpuBase = Math.max(1, reservation.cpuMillis);
   const memoryBase = Math.max(1, reservation.memoryMb);
   const diskBase = Math.max(1, reservation.diskMb);
-  const cpuSurplus = Math.max(0, candidate.providerInstanceVcpuCount * 1000 - reservation.cpuMillis);
+  const cpuSurplus = Math.max(
+    0,
+    candidate.providerInstanceVcpuCount * 1000 - reservation.cpuMillis
+  );
   const memorySurplus = Math.max(0, candidate.providerInstanceMemoryMb - reservation.memoryMb);
   const diskSurplus =
     candidate.providerInstanceDiskGb === null

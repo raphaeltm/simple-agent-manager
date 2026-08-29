@@ -53,6 +53,7 @@ import { resolveCredentialSource } from './provider-credentials';
 import type { WorkspaceRuntimeDecision } from './workspace-runtime';
 
 export {
+  capacityPlacementSnapshotForCandidate,
   capacityPlacementSnapshotForTaskStart,
   capacityPoolNoCandidatesError,
   capacityPoolNoCandidatesMessage,
