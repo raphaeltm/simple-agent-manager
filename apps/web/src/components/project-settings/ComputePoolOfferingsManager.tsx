@@ -209,7 +209,7 @@ function CatalogOfferingCard({
         variant="ghost"
         className="w-full sm:w-auto"
         disabled
-        aria-label={`Cannot add ${offering.providerLabel} ${offering.location} ${offering.sku} until backend candidate support lands`}
+        aria-label={`Cannot add ${offering.providerLabel} ${offering.location} ${offering.sku} until backend add support lands`}
       >
         Needs backend
       </Button>
@@ -263,7 +263,7 @@ function FilterControls({
           Provider
           <select
             aria-label="Filter provider"
-            className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+            className="min-h-10 w-full min-w-0 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
             value={filters.provider}
             onChange={(event) => update('provider', event.currentTarget.value)}
           >
@@ -280,7 +280,7 @@ function FilterControls({
           Region / location
           <input
             aria-label="Filter region or location"
-            className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+            className="min-h-10 w-full min-w-0 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
             value={filters.location}
             onChange={(event) => update('location', event.currentTarget.value)}
             placeholder="fsn1, Ashburn, DE…"
@@ -294,7 +294,7 @@ function FilterControls({
             type="number"
             min="0"
             inputMode="numeric"
-            className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+            className="min-h-10 w-full min-w-0 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
             value={filters.minVcpu}
             onChange={(event) => update('minVcpu', event.currentTarget.value)}
           />
@@ -307,7 +307,7 @@ function FilterControls({
             type="number"
             min="0"
             inputMode="decimal"
-            className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+            className="min-h-10 w-full min-w-0 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
             value={filters.minRamGb}
             onChange={(event) => update('minRamGb', event.currentTarget.value)}
           />
@@ -320,7 +320,7 @@ function FilterControls({
             type="number"
             min="0"
             inputMode="decimal"
-            className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+            className="min-h-10 w-full min-w-0 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
             value={filters.maxMonthlyPrice}
             onChange={(event) => update('maxMonthlyPrice', event.currentTarget.value)}
           />
@@ -330,7 +330,7 @@ function FilterControls({
           Availability
           <select
             aria-label="Filter availability"
-            className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+            className="min-h-10 w-full min-w-0 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
             value={filters.availability}
             onChange={(event) =>
               update(
@@ -524,8 +524,8 @@ export function ComputePoolOfferingsManager({
 
           {model.catalog.some((offering) => !offering.canUpdateExistingCandidate) && (
             <div className="rounded-md border border-warning/30 bg-warning-tint p-3 text-xs text-fg-muted">
-              Catalog rows without an existing pool candidate are shown for discovery, but adding
-              them requires the backend provider-native candidate mutation that is landing in the
+              Catalog offerings without an existing backend pool row are shown for discovery, but
+              adding them requires the backend provider-native add mutation that is landing in the
               compute-pools integration work.
             </div>
           )}

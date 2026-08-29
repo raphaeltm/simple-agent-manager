@@ -117,6 +117,29 @@ export async function screenshotNearHeading(
   });
 }
 
+export async function screenshotSectionNearHeading(
+  page: Page,
+  heading: string,
+  name: string,
+  options: { outputDir?: string } = {}
+) {
+  const headingLocator = page.getByRole('heading', { name: heading }).first();
+  await headingLocator.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(600);
+  const viewport = page.viewportSize();
+  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
+  const screenshotDir = resolve(
+    process.cwd(),
+    options.outputDir ?? '../../.codex/tmp/playwright-screenshots'
+  );
+  mkdirSync(screenshotDir, { recursive: true });
+  const section = headingLocator.locator('xpath=ancestor::section[1]').first();
+  const target = (await section.count()) > 0 ? section : headingLocator;
+  await target.screenshot({
+    path: `${screenshotDir}/${name}${suffix}.png`,
+  });
+}
+
 export async function assertNoOverflow(page: Page) {
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth

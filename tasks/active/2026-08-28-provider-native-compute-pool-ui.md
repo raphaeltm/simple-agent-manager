@@ -62,8 +62,8 @@ Selected direction: variant 1 for this PR. It keeps the existing query/mutation 
 - [x] Add bulk-friendly affordances for filtered catalog results and selected allowed offerings, while preserving scope-specific PATCH requests through the existing API clients.
 - [x] Ensure add/remove UI state propagates into `DefaultCapacityPoolUpdateRequest.candidates` and route-specific API clients for project/user/installation scopes.
 - [x] Update component/unit tests for provider-native offering display, add/remove payloads, blocked credential states, user/admin/project route placement, and no secret text leakage.
-- [ ] Update Playwright audits for project, user, and installation pool pages on desktop and mobile with stress data: many providers, 30+ offerings, long instance names, multiple regions, missing price, high price, unavailable/stale offerings, special characters, and a small mobile viewport.
-- [ ] Run Playwright screenshot capture into `.codex/tmp/playwright-screenshots/`, review screenshots for overflow/clipping/readability, and record screenshot artifact paths/QC results.
+- [x] Update Playwright audits for project, user, and installation pool pages on desktop and mobile with stress data: many providers, 30+ offerings, long instance names, multiple regions, missing price, high price, unavailable/stale offerings, special characters, and a small mobile viewport.
+- [x] Run Playwright screenshot capture into `.codex/tmp/playwright-screenshots/`, review screenshots for overflow/clipping/readability, and record screenshot artifact paths/QC results.
 - [ ] Run focused and repo-level validation, specialist review, and push final changes to `sam/compute-pools-integration`.
 
 ## Acceptance criteria

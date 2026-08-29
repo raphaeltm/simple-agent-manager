@@ -609,7 +609,7 @@ describe('DefaultCapacityPoolsPanel', () => {
     expect(
       within(catalogOnlyCard as HTMLElement).getByRole('button', { name: /Cannot add Hetzner hel1/i })
     ).toBeDisabled();
-    expect(screen.getByText(/requires the backend provider-native candidate mutation/i)).toBeInTheDocument();
+    expect(screen.getByText(/requires the backend provider-native add mutation/i)).toBeInTheDocument();
   });
 
   it('shows a deterministic error state', async () => {

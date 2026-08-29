@@ -6,10 +6,19 @@ import {
   makeMockUser,
   screenshot,
   screenshotNearHeading,
+  screenshotSectionNearHeading,
   setupAuditRoutes,
 } from './audit-helpers';
 
 const PROJECT_ID = 'proj-settings-1';
+const POOL_LONG_MARKER =
+  'unicode Ω emoji 🚀 and xss text <script>alert("project-pool")</script> repeated for wrapping '.repeat(
+    3
+  );
+const REMOVE_TARGETS = [
+  { location: 'ash', sku: 'hcx-project-ash-4vcpu-8gb' },
+  { location: 'hil', sku: 'hcx-project-hil-8vcpu-16gb' },
+] as const;
 
 const MOCK_USER = makeMockUser({
   userId: 'owner-user',
@@ -142,18 +151,51 @@ const emptyCredentialHealth = {
   resources: [],
 };
 
+function providerForIndex(index: number) {
+  const providers = ['hetzner', 'scaleway', 'gcp', 'vultr', 'digitalocean', 'upcloud'];
+  return index < 6 ? 'hetzner' : providers[index % providers.length];
+}
+
+function skuForIndex(index: number) {
+  if (index === 3) return REMOVE_TARGETS[0].sku;
+  if (index === 4) return REMOVE_TARGETS[1].sku;
+  if (index === 35) return `project-provider-native-sku-with-a-long-name-${POOL_LONG_MARKER}`;
+  const shape = index % 5 === 0 ? 'dedicated' : 'shared';
+  return `${providerForIndex(index)}-${shape}-${index + 1}vcpu-${(index % 8) + 4}gb`;
+}
+
+function priceForIndex(index: number) {
+  if (index === 7) return null;
+  if (index === 14) return '€899.99/mo';
+  if (index % 6 === 0) return '~€0.031/hr';
+  return `€${(4.1 + index * 2.35).toFixed(2)}/mo`;
+}
+
 function capacityCandidate(index: number, overrides: Record<string, unknown> = {}) {
   const visibleLocations = ['fsn1', 'nbg1', 'hel1', 'ash', 'hil'];
+  const price = priceForIndex(index);
   return {
     id: `candidate-${index}`,
     poolId: 'pool-project-default',
     capacitySourceId: 'source-project-default',
-    provider: 'hetzner',
+    provider: providerForIndex(index),
     location: visibleLocations[index] ?? `region-${index}`,
     workloadRole: 'workspace',
     runtime: 'vm',
     machineClass: 'shared-vm',
     machineSize: index % 3 === 0 ? 'small' : index % 3 === 1 ? 'medium' : 'large',
+    providerInstanceType: skuForIndex(index),
+    providerInstanceVcpuCount: index === 3 ? 4 : index === 4 ? 8 : (index % 12) + 1,
+    providerInstanceMemoryMb: index === 3 ? 8192 : index === 4 ? 16_384 : ((index % 16) + 4) * 1024,
+    providerInstanceDiskGb: index % 7 === 0 ? 0 : (index + 1) * 20,
+    providerInstancePriceDisplay: price,
+    providerInstancePriceCurrency: price ? 'EUR' : null,
+    providerInstancePriceMonthlyCents:
+      price && price.includes('/mo') ? Math.round(Number(price.replace(/[^0-9.]/g, '')) * 100) : null,
+    providerInstancePriceHourlyMicros:
+      price && price.includes('/hr')
+        ? Math.round(Number(price.replace(/[^0-9.]/g, '')) * 1_000_000)
+        : null,
     priority: index,
     candidateOrder: index,
     status: 'active',
@@ -285,6 +327,91 @@ function capacityDefaults(effective: ProjectSettingsCapacitySummary | null) {
 let capacityDefaultsStatus = 200;
 let capacityDefaultsBody: unknown = capacityDefaults(capacitySummary());
 
+function providerCatalogResponse() {
+  const candidates = Array.from({ length: 36 }, (_, index) =>
+    index === 35
+      ? capacityCandidate(index, {
+          location: 'region-with-a-very-long-location-name-and-special-marker-ß',
+        })
+      : capacityCandidate(index)
+  );
+  const byProvider = new Map<string, ReturnType<typeof capacityCandidate>[]>();
+  for (const candidate of candidates) {
+    const items = byProvider.get(candidate.provider) ?? [];
+    items.push(candidate);
+    byProvider.set(candidate.provider, items);
+  }
+
+  return {
+    catalogs: [...byProvider.entries()].map(([provider, providerCandidates]) => ({
+      provider,
+      defaultLocation: providerCandidates[0]?.location ?? 'default-region',
+      locations: [...new Set(providerCandidates.map((candidate) => candidate.location))]
+        .filter((location): location is string => Boolean(location))
+        .map((location) => ({
+          id: location,
+          name: location.startsWith('region-with-a-very-long')
+            ? location
+            : `${location.toUpperCase()} project region`,
+          country: location === 'ash' || location === 'hil' ? 'US' : 'EU',
+        })),
+      sizes: {
+        small: {
+          type: `${provider}-legacy-compat-a`,
+          price: '€3.99/mo',
+          vcpu: 2,
+          ramGb: 4,
+          storageGb: 40,
+        },
+        medium: {
+          type: `${provider}-legacy-compat-b`,
+          price: '€12.99/mo',
+          vcpu: 4,
+          ramGb: 8,
+          storageGb: 120,
+        },
+        large: {
+          type: `${provider}-legacy-compat-c`,
+          price: '€49.99/mo',
+          vcpu: 8,
+          ramGb: 32,
+          storageGb: 240,
+        },
+      },
+      offerings: [
+        ...providerCandidates.map((candidate, index) => ({
+          sku: candidate.providerInstanceType,
+          location: candidate.location,
+          locationName: candidate.location?.startsWith('region-with-a-very-long')
+            ? candidate.location
+            : `${candidate.location?.toUpperCase()} project region`,
+          country: candidate.location === 'ash' || candidate.location === 'hil' ? 'US' : 'EU',
+          vcpu: candidate.providerInstanceVcpuCount,
+          memoryMb: candidate.providerInstanceMemoryMb,
+          diskGb: candidate.providerInstanceDiskGb,
+          price: candidate.providerInstancePriceDisplay,
+          available: index === 13 ? false : true,
+          stale: index === 21,
+          status:
+            index === 13 ? 'provider capacity unavailable' : index === 21 ? 'stale catalog row' : null,
+        })),
+        {
+          sku: `project-catalog-only-gpu-offering-${POOL_LONG_MARKER}`,
+          location: 'catalog-only-project-region',
+          locationName: `Catalog Only Project Region ${POOL_LONG_MARKER}`,
+          country: 'CA',
+          vcpu: 64,
+          memoryGb: 512,
+          diskGb: 4096,
+          price: '€1999.99/mo',
+          available: false,
+          status: 'not yet seedable from this UI',
+        },
+      ],
+    })),
+  };
+}
+
 async function setupMocks(page: Page) {
   await page.addInitScript(() =>
     localStorage.setItem('sam-onboarding-wizard-dismissed-owner-user', 'true')
@@ -295,7 +422,7 @@ async function setupMocks(page: Page) {
     if (path === '/api/projects') return respond(200, { projects: [project] });
     if (path === '/api/agents') return respond(200, { agents: [] });
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
-    if (path === '/api/providers/catalog') return respond(200, { catalogs: [] });
+    if (path === '/api/providers/catalog') return respond(200, providerCatalogResponse());
     if (path.startsWith('/api/notifications')) {
       return respond(200, { notifications: [], unreadCount: 0 });
     }
@@ -414,34 +541,58 @@ test.describe('Project settings sub-pages', () => {
     page,
   }) => {
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure`);
-    await expect(page.getByRole('heading', { name: 'Project Default Compute Pool' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Project Infrastructure Compute Pool' })
+    ).toBeVisible();
     await expect(page.getByText('Project default applies to this context.')).toBeVisible();
-    await expect(page.getByText('Hetzner · fsn1')).toBeVisible();
+    await expect(page.getByText('hetzner-dedicated-1vcpu-4gb')).toBeVisible();
+    await expect(page.getByText(/Hetzner · FSN1 project region/)).toBeVisible();
     await expect(page.getByText(/Hidden outside this settings context/i)).toHaveCount(0);
     await expect(page.getByText(/Installation defaults require/i)).toHaveCount(0);
     await expectCompactTabs(page);
-    await screenshot(page, 'project-settings-infrastructure-capacity-pool-normal');
     await screenshotNearHeading(
       page,
-      'Project Default Compute Pool',
+      'Project Infrastructure Compute Pool',
       'project-settings-default-compute-pool-normal-focused',
-      { outputDir: '../../.tmp/playwright-screenshots' }
+    );
+    await screenshotSectionNearHeading(
+      page,
+      'Project Infrastructure Compute Pool',
+      'project-settings-default-compute-pool-normal-section'
     );
 
     await page.getByRole('button', { name: 'Edit' }).click();
     await expect(page.getByRole('heading', { name: 'Edit project default' })).toBeVisible();
-    await page.getByRole('button', { name: 'Remove Hetzner ash Small candidate' }).click();
-    await page.getByRole('button', { name: 'Remove Hetzner hil Medium candidate' }).click();
+    await page
+      .getByRole('button', { name: `Remove Hetzner ${REMOVE_TARGETS[0].location} ${REMOVE_TARGETS[0].sku}` })
+      .click();
+    await page
+      .getByRole('button', { name: `Remove Hetzner ${REMOVE_TARGETS[1].location} ${REMOVE_TARGETS[1].sku}` })
+      .click();
+    await expect(page.getByText(/3 allowed · 2 removed\/disabled/)).toBeVisible();
     await screenshotNearHeading(
       page,
       'Edit project default',
       'project-settings-default-compute-pool-edit-focused',
-      { outputDir: '../../.tmp/playwright-screenshots' }
+    );
+    await screenshotNearHeading(
+      page,
+      'Removed or disabled instances',
+      'project-settings-default-compute-pool-edit-removed-focused'
+    );
+    await screenshotNearHeading(
+      page,
+      'Catalog filters',
+      'project-settings-default-compute-pool-edit-catalog-focused'
+    );
+    await screenshotNearHeading(
+      page,
+      'Add instances from catalog',
+      'project-settings-default-compute-pool-edit-catalog-results-focused'
     );
     await page.getByRole('button', { name: 'Save changes' }).click();
-    await expect(page.getByText(/Active candidates\s*3/)).toBeVisible();
-    await expect(page.getByText('Hetzner · ash')).toHaveCount(0);
-    await expect(page.getByText('Hetzner · hil')).toHaveCount(0);
+    await expect(page.getByText(/3 allowed · 2 removed\/disabled/)).toBeVisible();
+    await expect(page.getByText('Removed or disabled instances')).toBeVisible();
     await assertNoOverflow(page);
 
     capacityDefaultsBody = capacityDefaults(userCapacitySummary());
@@ -449,24 +600,32 @@ test.describe('Project settings sub-pages', () => {
     await expect(page.getByText('Using user fallback.', { exact: false })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Edit' })).toHaveCount(0);
     await expect(page.getByText(/Hidden outside this settings context/i)).toHaveCount(0);
-    await screenshot(page, 'project-settings-infrastructure-capacity-pool-user-fallback');
     await screenshotNearHeading(
       page,
-      'Project Default Compute Pool',
+      'Project Infrastructure Compute Pool',
       'project-settings-default-compute-pool-user-fallback-focused',
-      { outputDir: '../../.tmp/playwright-screenshots' }
+    );
+    await screenshotSectionNearHeading(
+      page,
+      'Project Infrastructure Compute Pool',
+      'project-settings-default-compute-pool-user-fallback-section'
     );
     await assertNoOverflow(page);
 
     capacityDefaultsBody = capacityDefaults(null);
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=empty`);
     await expect(page.getByText('No visible active default pool')).toBeVisible();
-    await screenshot(page, 'project-settings-infrastructure-capacity-pool-empty');
+    await expect(page.getByText('Project compute credentials are required')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Set up project credentials' })).toBeVisible();
     await screenshotNearHeading(
       page,
-      'Project Default Compute Pool',
+      'Project Infrastructure Compute Pool',
       'project-settings-default-compute-pool-empty-focused',
-      { outputDir: '../../.tmp/playwright-screenshots' }
+    );
+    await screenshotSectionNearHeading(
+      page,
+      'Project Infrastructure Compute Pool',
+      'project-settings-default-compute-pool-empty-section'
     );
     await assertNoOverflow(page);
 
@@ -486,15 +645,20 @@ test.describe('Project settings sub-pages', () => {
     );
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=many`);
     await expect(
-      page.getByText('Hetzner · region-with-a-very-long-location-name-and-special-marker-ß')
+      page.getByText('project-provider-native-sku-with-a-long-name-', { exact: false })
     ).toBeVisible();
     await expect(page.getByText(/\+\d+ more provider\/region groups/)).toHaveCount(0);
-    await screenshot(page, 'project-settings-infrastructure-capacity-pool-many');
+    await expect(page.getByText('Price unavailable')).toBeVisible();
+    await expect(page.getByText('€899.99/mo')).toBeVisible();
     await screenshotNearHeading(
       page,
-      'Project Default Compute Pool',
+      'Project Infrastructure Compute Pool',
       'project-settings-default-compute-pool-many-focused',
-      { outputDir: '../../.tmp/playwright-screenshots' }
+    );
+    await screenshotSectionNearHeading(
+      page,
+      'Project Infrastructure Compute Pool',
+      'project-settings-default-compute-pool-many-section'
     );
     await assertNoOverflow(page);
 
@@ -505,12 +669,15 @@ test.describe('Project settings sub-pages', () => {
     };
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=error`);
     await expect(page.getByText('Project capability is required')).toBeVisible();
-    await screenshot(page, 'project-settings-infrastructure-capacity-pool-error');
     await screenshotNearHeading(
       page,
-      'Project Default Compute Pool',
+      'Project Infrastructure Compute Pool',
       'project-settings-default-compute-pool-error-focused',
-      { outputDir: '../../.tmp/playwright-screenshots' }
+    );
+    await screenshotSectionNearHeading(
+      page,
+      'Project Infrastructure Compute Pool',
+      'project-settings-default-compute-pool-error-section'
     );
     await assertNoOverflow(page);
   });
