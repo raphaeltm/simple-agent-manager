@@ -1,5 +1,6 @@
-import type { VMSize } from '@simple-agent-manager/shared';
+import type { CredentialProvider, VMSize } from '@simple-agent-manager/shared';
 
+import { getProviderCatalogOfferings } from './instance-offerings';
 import {
   getTimeoutMs,
   providerDelay,
@@ -10,6 +11,7 @@ import {
 import type {
   Provider,
   ProviderLogger,
+  ProviderOfferingListOptions,
   ProviderRequestContext,
   SizeConfig,
   VMConfig,
@@ -279,6 +281,17 @@ export class UpCloudProvider implements Provider {
       'validateToken'
     );
     return true;
+  }
+  async listInstanceOfferings(
+    _options?: ProviderOfferingListOptions,
+    context?: ProviderRequestContext
+  ) {
+    throwIfProviderRequestAborted(context);
+    return getProviderCatalogOfferings(
+      this.name as CredentialProvider,
+      this.locations,
+      this.locationMetadata
+    );
   }
   async createVolume(
     config: VolumeConfig,

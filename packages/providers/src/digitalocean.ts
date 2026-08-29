@@ -1,4 +1,4 @@
-import type { VMSize } from '@simple-agent-manager/shared';
+import type { CredentialProvider, VMSize } from '@simple-agent-manager/shared';
 import {
   DEFAULT_DIGITALOCEAN_IMAGE,
   DEFAULT_DIGITALOCEAN_REGION,
@@ -28,6 +28,7 @@ import {
   DIGITALOCEAN_VOLUME_CAPABILITIES,
   DigitalOceanVolumeClient,
 } from './digitalocean-volumes';
+import { getProviderCatalogOfferings } from './instance-offerings';
 import {
   providerDelay,
   providerFetch,
@@ -38,6 +39,7 @@ import type {
   LocationMeta,
   Provider,
   ProviderLogger,
+  ProviderOfferingListOptions,
   ProviderRequestContext,
   SizeConfig,
   VMConfig,
@@ -235,6 +237,18 @@ export class DigitalOceanProvider implements Provider {
     await this.doFetch('/account', undefined, undefined, context);
     throwIfProviderRequestAborted(context);
     return true;
+  }
+
+  async listInstanceOfferings(
+    _options?: ProviderOfferingListOptions,
+    context?: ProviderRequestContext
+  ) {
+    throwIfProviderRequestAborted(context);
+    return getProviderCatalogOfferings(
+      this.name as CredentialProvider,
+      this.locations,
+      this.locationMetadata
+    );
   }
 
   createVolume(config: VolumeConfig, context?: ProviderRequestContext): Promise<VolumeInstance> {

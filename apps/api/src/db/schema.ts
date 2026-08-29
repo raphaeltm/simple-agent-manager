@@ -2550,6 +2550,8 @@ export const capacityPoolCandidates = sqliteTable(
     machineSize: text('machine_size'),
     /** Provider-native instance type/SKU selected by this candidate. */
     providerInstanceType: text('provider_instance_type'),
+    providerInstanceSku: text('provider_instance_sku'),
+    providerInstanceDisplayName: text('provider_instance_display_name'),
     /** Normalized concrete offering capacity and price metadata. */
     providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
     providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
@@ -2558,6 +2560,8 @@ export const capacityPoolCandidates = sqliteTable(
     providerInstancePriceCurrency: text('provider_instance_price_currency'),
     providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
     providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
+    providerInstanceCatalogSource: text('provider_instance_catalog_source'),
+    providerInstanceCatalogLastSeenAt: text('provider_instance_catalog_last_seen_at'),
     priority: integer('priority').notNull().default(0),
     candidateOrder: integer('candidate_order').notNull().default(0),
     status: text('status').notNull().default('active'),

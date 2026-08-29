@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { getProviderInstanceOfferings, normalizeProviderPrice } from '../../src/instance-offerings';
+import {
+  getProviderCatalogOfferings,
+  getProviderInstanceOfferings,
+  normalizeProviderPrice,
+} from '../../src/instance-offerings';
 
 describe('provider instance offerings', () => {
   it.each(['hetzner', 'scaleway', 'vultr', 'digitalocean', 'upcloud', 'gcp', 'infomaniak'] as const)(
@@ -31,11 +35,15 @@ describe('provider instance offerings', () => {
         provider: 'vultr',
         legacyVmSize: 'small',
         instanceType: 'vc2-2c-4gb',
+        instanceSku: null,
+        displayName: 'vc2-2c-4gb · 2 vCPU · 4 GB RAM · 80 GB disk',
         vcpuCount: 2,
         memoryMb: 4096,
         diskGb: 80,
         priceCurrency: 'USD',
         priceMonthlyCents: 2000,
+        catalogSource: 'static',
+        catalogLastSeenAt: null,
       }),
       expect.objectContaining({
         provider: 'vultr',
@@ -48,6 +56,35 @@ describe('provider instance offerings', () => {
         instanceType: 'vc2-6c-16gb',
       }),
     ]);
+  });
+
+  it('projects static metadata into location-specific provider catalog offerings', () => {
+    expect(
+      getProviderCatalogOfferings('vultr', ['fra'], {
+        fra: { name: 'Frankfurt', country: 'DE' },
+      })[0]
+    ).toMatchObject({
+      provider: 'vultr',
+      location: 'fra',
+      locationName: 'Frankfurt',
+      country: 'DE',
+      providerInstanceType: 'vc2-2c-4gb',
+      providerInstanceSku: null,
+      displayName: 'vc2-2c-4gb · 2 vCPU · 4 GB RAM · 80 GB disk',
+      sku: 'vc2-2c-4gb',
+      instanceType: 'vc2-2c-4gb',
+      type: 'vc2-2c-4gb',
+      vcpu: 2,
+      memoryMb: 4096,
+      ramGb: 4,
+      diskGb: 80,
+      price: '~$20/mo',
+      priceMonthlyUsd: 20,
+      currency: 'USD',
+      machineSize: 'small',
+      catalogSource: 'static',
+      catalogLastSeenAt: null,
+    });
   });
 
   it('normalizes monthly and hourly provider price displays without inventing unknown prices', () => {

@@ -157,8 +157,11 @@ export type {
   ProviderCatalog,
   ProviderCatalogOfferingInfo,
   ProviderCatalogResponse,
+  ProviderInstanceCatalogSource,
+  ProviderInstanceOffering,
   SizeInfo,
 } from './provider';
+export { isProviderInstanceCatalogSource, PROVIDER_INSTANCE_CATALOG_SOURCES } from './provider';
 
 // Project
 export type {

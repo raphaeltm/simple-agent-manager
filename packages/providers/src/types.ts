@@ -1,4 +1,4 @@
-import type { VMSize } from '@simple-agent-manager/shared';
+import type { ProviderInstanceOffering, VMSize } from '@simple-agent-manager/shared';
 
 /**
  * Configuration for creating a VM.
@@ -78,6 +78,11 @@ export interface SizeConfig {
 
   /** Storage in GB */
   storageGb: number;
+}
+
+export interface ProviderOfferingListOptions {
+  /** Prefer provider APIs when implemented and credentials are available. */
+  preferApi?: boolean;
 }
 
 /** Location metadata for display purposes */
@@ -264,6 +269,12 @@ export interface Provider {
 
   /** Validate provider credentials. Returns true if valid, throws ProviderError on failure. */
   validateToken(context?: ProviderRequestContext): Promise<boolean>;
+
+  /** List provider-native instance offerings available for compute-pool candidates. */
+  listInstanceOfferings(
+    options?: ProviderOfferingListOptions,
+    context?: ProviderRequestContext
+  ): Promise<ProviderInstanceOffering[]>;
 
   /** Create a provider block volume. */
   createVolume(config: VolumeConfig, context?: ProviderRequestContext): Promise<VolumeInstance>;

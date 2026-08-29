@@ -1,5 +1,6 @@
-import type { VMSize } from '@simple-agent-manager/shared';
+import type { CredentialProvider, VMSize } from '@simple-agent-manager/shared';
 
+import { getProviderCatalogOfferings } from './instance-offerings';
 import {
   providerDelay,
   providerFetch,
@@ -13,6 +14,7 @@ import {
   ProviderError,
   type ProviderErrorCategory,
   type ProviderLogger,
+  type ProviderOfferingListOptions,
   type ProviderRequestContext,
   SAM_VOLUME_FILESYSTEM_FORMAT,
   SAM_VOLUME_FSTAB_OPTIONS,
@@ -347,6 +349,18 @@ export class InfomaniakProvider implements Provider {
     return true;
   }
 
+  async listInstanceOfferings(
+    _options?: ProviderOfferingListOptions,
+    context?: ProviderRequestContext
+  ) {
+    throwIfProviderRequestAborted(context);
+    return getProviderCatalogOfferings(
+      this.name as CredentialProvider,
+      this.locations,
+      this.locationMetadata
+    );
+  }
+
   private async resolve(
     endpoint: string,
     path: string,
@@ -390,13 +404,7 @@ export class InfomaniakProvider implements Provider {
         config.image ?? this.imageName,
         context
       ),
-      this.resolve(
-        session.endpoints.compute,
-        'flavors/detail',
-        'flavors',
-        flavorName,
-        context
-      ),
+      this.resolve(session.endpoints.compute, 'flavors/detail', 'flavors', flavorName, context),
       this.resolve(
         session.endpoints.network,
         'v2.0/networks',

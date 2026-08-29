@@ -22,6 +22,7 @@ export type {
   ProviderErrorContextValue,
   ProviderLogContext,
   ProviderLogger,
+  ProviderOfferingListOptions,
   ProviderRequestContext,
   ScalewayProviderConfig,
   SizeConfig,
@@ -127,6 +128,7 @@ export {
   mapInfomaniakStatus,
 } from './infomaniak';
 export {
+  getProviderCatalogOfferings,
   getProviderInstanceOfferingForLegacySize,
   getProviderInstanceOfferings,
   type NormalizedProviderPrice,

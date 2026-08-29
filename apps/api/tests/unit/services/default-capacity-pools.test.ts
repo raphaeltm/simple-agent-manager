@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
-import { getDefaultLocationForProvider, getLocationsForProvider } from '@simple-agent-manager/shared';
+import {
+  getDefaultLocationForProvider,
+  getLocationsForProvider,
+} from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -393,11 +396,15 @@ describe('default capacity pool creation', () => {
         location: string;
         machine_size: string;
         provider_instance_type: string;
+        provider_instance_sku: string | null;
+        provider_instance_display_name: string;
         provider_instance_vcpu_count: number;
         provider_instance_memory_mb: number;
         provider_instance_disk_gb: number;
         provider_instance_price_currency: string;
         provider_instance_price_monthly_cents: number;
+        provider_instance_catalog_source: string;
+        provider_instance_catalog_last_seen_at: string | null;
         candidate_order: number;
       }>(`
         SELECT
@@ -405,11 +412,15 @@ describe('default capacity pool creation', () => {
           location,
           machine_size,
           provider_instance_type,
+          provider_instance_sku,
+          provider_instance_display_name,
           provider_instance_vcpu_count,
           provider_instance_memory_mb,
           provider_instance_disk_gb,
           provider_instance_price_currency,
           provider_instance_price_monthly_cents,
+          provider_instance_catalog_source,
+          provider_instance_catalog_last_seen_at,
           candidate_order
         FROM capacity_pool_candidates
         ORDER BY candidate_order
@@ -421,11 +432,15 @@ describe('default capacity pool creation', () => {
         location: getDefaultLocationForProvider('vultr'),
         machine_size: 'small',
         provider_instance_type: 'vc2-2c-4gb',
+        provider_instance_sku: null,
+        provider_instance_display_name: 'vc2-2c-4gb · 2 vCPU · 4 GB RAM · 80 GB disk',
         provider_instance_vcpu_count: 2,
         provider_instance_memory_mb: 4096,
         provider_instance_disk_gb: 80,
         provider_instance_price_currency: 'USD',
         provider_instance_price_monthly_cents: 2000,
+        provider_instance_catalog_source: 'static',
+        provider_instance_catalog_last_seen_at: null,
         candidate_order: 0,
       },
       {
@@ -433,11 +448,15 @@ describe('default capacity pool creation', () => {
         location: getDefaultLocationForProvider('vultr'),
         machine_size: 'medium',
         provider_instance_type: 'vc2-4c-8gb',
+        provider_instance_sku: null,
+        provider_instance_display_name: 'vc2-4c-8gb · 4 vCPU · 8 GB RAM · 160 GB disk',
         provider_instance_vcpu_count: 4,
         provider_instance_memory_mb: 8192,
         provider_instance_disk_gb: 160,
         provider_instance_price_currency: 'USD',
         provider_instance_price_monthly_cents: 4000,
+        provider_instance_catalog_source: 'static',
+        provider_instance_catalog_last_seen_at: null,
         candidate_order: 1,
       },
       {
@@ -445,11 +464,15 @@ describe('default capacity pool creation', () => {
         location: getDefaultLocationForProvider('vultr'),
         machine_size: 'large',
         provider_instance_type: 'vc2-6c-16gb',
+        provider_instance_sku: null,
+        provider_instance_display_name: 'vc2-6c-16gb · 6 vCPU · 16 GB RAM · 320 GB disk',
         provider_instance_vcpu_count: 6,
         provider_instance_memory_mb: 16384,
         provider_instance_disk_gb: 320,
         provider_instance_price_currency: 'USD',
         provider_instance_price_monthly_cents: 8000,
+        provider_instance_catalog_source: 'static',
+        provider_instance_catalog_last_seen_at: null,
         candidate_order: 2,
       },
     ]);
@@ -501,6 +524,92 @@ describe('default capacity pool creation', () => {
         )
         .all(candidate?.id)
     ).toEqual([{ priority: 42, candidate_order: 17 }]);
+  });
+
+  it('preserves pre-native legacy size candidate removals when reconciling native offerings', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+
+    const poolId = 'cap-pool-default:user:user-1';
+    const sourceId = 'cap-source-default:user:user-hetzner';
+    const legacyCandidateId = `cap-candidate-default:${poolId}:${sourceId}:hetzner:fsn1:small`;
+    sqlite
+      ?.prepare(
+        `
+        INSERT INTO capacity_pools (
+          id, scope, owner_user_id, name, is_default, revision, status,
+          strategy, exhaustion_policy, created_by
+        )
+        VALUES (?, 'user', 'user-1', 'User default', 1, 1, 'active', 'balanced', 'queue', 'user-1')
+      `
+      )
+      .run(poolId);
+    sqlite
+      ?.prepare(
+        `
+        INSERT INTO capacity_sources (
+          id, scope, owner_user_id, source_kind, provider, credential_source,
+          credential_id, credential_reference, status, created_by
+        )
+        VALUES (?, 'user', 'user-1', 'cloud-provider-credential', 'hetzner', 'user',
+          'user-hetzner', 'credentials:user-hetzner', 'active', 'user-1')
+      `
+      )
+      .run(sourceId);
+    sqlite
+      ?.prepare(
+        `
+        INSERT INTO capacity_pool_candidates (
+          id, pool_id, capacity_source_id, provider, location, workload_role,
+          runtime, machine_class, machine_size, status
+        )
+        VALUES (?, ?, ?, 'hetzner', 'fsn1', 'workspace', 'vm', 'shared-vm', 'small', 'deleted')
+      `
+      )
+      .run(legacyCandidateId, poolId, sourceId);
+
+    const reconciled = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+    });
+
+    const nativeCandidateId = `cap-candidate-default:${poolId}:${sourceId}:hetzner:fsn1:cx23`;
+    expect(reconciled.user?.activeCandidateCount).toBe(expectedCandidateCount('hetzner') - 1);
+    const preservedRows = getRows<{
+      id: string;
+      status: string;
+      provider_instance_type: string | null;
+      provider_instance_display_name: string | null;
+      provider_instance_catalog_source: string | null;
+    }>(`
+        SELECT
+          id,
+          status,
+          provider_instance_type,
+          provider_instance_display_name,
+          provider_instance_catalog_source
+        FROM capacity_pool_candidates
+        WHERE id IN ('${legacyCandidateId}', '${nativeCandidateId}')
+        ORDER BY id
+      `);
+    expect(preservedRows).toEqual(
+      expect.arrayContaining([
+        {
+          id: legacyCandidateId,
+          status: 'deleted',
+          provider_instance_type: null,
+          provider_instance_display_name: null,
+          provider_instance_catalog_source: null,
+        },
+        {
+          id: nativeCandidateId,
+          status: 'deleted',
+          provider_instance_type: 'cx23',
+          provider_instance_display_name: 'cx23 · 2 vCPU · 4 GB RAM · 40 GB disk',
+          provider_instance_catalog_source: 'static',
+        },
+      ])
+    );
   });
 
   it('orders effective default-pool candidates by the selected v1 strategy', async () => {

@@ -1,5 +1,6 @@
 import {
   type CredentialProvider,
+  type ProviderInstanceOffering as SharedProviderInstanceOffering,
   resolveApproximateBillingMonthHours,
   type VMSize,
 } from '@simple-agent-manager/shared';
@@ -9,7 +10,7 @@ import { SIZE_MAP as GCP_SIZE_CONFIGS } from './gcp-metadata';
 import { HETZNER_SIZE_CONFIGS } from './hetzner-metadata';
 import { INFOMANIAK_SIZE_CONFIGS } from './infomaniak';
 import { SCALEWAY_SIZE_CONFIGS } from './scaleway';
-import type { SizeConfig } from './types';
+import type { LocationMeta, SizeConfig } from './types';
 import { UPCLOUD_SIZE_CONFIGS } from './upcloud';
 import { VULTR_SIZE_CONFIGS } from './vultr';
 
@@ -18,6 +19,7 @@ const PRICE_CURRENCIES: Record<string, string> = {
   '€': 'EUR',
   '£': 'GBP',
 };
+const STATIC_CATALOG_SOURCE = 'static';
 
 export interface ProviderPriceNormalizationOptions {
   approximateBillingMonthHours?: number | null;
@@ -34,9 +36,13 @@ export interface ProviderInstanceOffering extends NormalizedProviderPrice {
   provider: CredentialProvider;
   legacyVmSize: VMSize;
   instanceType: string;
+  instanceSku: string | null;
+  displayName: string;
   vcpuCount: number;
   memoryMb: number;
   diskGb: number;
+  catalogSource: typeof STATIC_CATALOG_SOURCE;
+  catalogLastSeenAt: string | null;
 }
 
 export function normalizeProviderPrice(
@@ -121,6 +127,63 @@ export function getProviderInstanceOfferings(
   );
 }
 
+export function getProviderCatalogOfferings(
+  provider: CredentialProvider,
+  locations: readonly string[],
+  locationMetadata: Readonly<Record<string, LocationMeta>>
+): SharedProviderInstanceOffering[] {
+  const offerings = getProviderInstanceOfferings(provider);
+
+  return locations.flatMap((location) =>
+    offerings.map((offering) => {
+      const locationMeta = locationMetadata[location];
+      const priceMonthly =
+        offering.priceMonthlyCents === null ? null : offering.priceMonthlyCents / 100;
+      const priceHourly =
+        offering.priceHourlyMicros === null ? null : offering.priceHourlyMicros / 1_000_000;
+      const isUsd = offering.priceCurrency === 'USD';
+
+      return {
+        provider,
+        location,
+        providerInstanceType: offering.instanceType,
+        providerInstanceSku: offering.instanceSku,
+        displayName: offering.displayName,
+        id: offering.instanceType,
+        sku: offering.instanceSku ?? offering.instanceType,
+        instanceType: offering.instanceType,
+        type: offering.instanceType,
+        name: offering.displayName,
+        vcpu: offering.vcpuCount,
+        ramGb: offering.memoryMb / 1024,
+        memoryGb: offering.memoryMb / 1024,
+        memoryMb: offering.memoryMb,
+        storageGb: offering.diskGb,
+        diskGb: offering.diskGb,
+        priceMonthlyUsd: isUsd ? priceMonthly : null,
+        priceHourlyUsd: isUsd ? priceHourly : null,
+        priceMonthly,
+        priceHourly,
+        currency: offering.priceCurrency,
+        available: true,
+        stale: false,
+        status: null,
+        machineSize: offering.legacyVmSize,
+        catalogSource: offering.catalogSource,
+        catalogLastSeenAt: offering.catalogLastSeenAt,
+        catalogMetadata: {
+          priceLabel: offering.priceDisplay,
+          ...(locationMeta
+            ? { locationName: locationMeta.name, locationCountry: locationMeta.country }
+            : {}),
+        },
+        ...(offering.priceDisplay ? { price: offering.priceDisplay } : {}),
+        ...(locationMeta ? { locationName: locationMeta.name, country: locationMeta.country } : {}),
+      };
+    })
+  );
+}
+
 export function getProviderInstanceOfferingForLegacySize(
   provider: CredentialProvider,
   legacyVmSize: VMSize,
@@ -130,7 +193,9 @@ export function getProviderInstanceOfferingForLegacySize(
   return config ? toOffering(provider, legacyVmSize, config, options) : null;
 }
 
-function getProviderSizeConfigs(provider: CredentialProvider): Readonly<Record<VMSize, SizeConfig>> {
+function getProviderSizeConfigs(
+  provider: CredentialProvider
+): Readonly<Record<VMSize, SizeConfig>> {
   switch (provider) {
     case 'hetzner':
       return HETZNER_SIZE_CONFIGS;
@@ -159,9 +224,17 @@ function toOffering(
     provider,
     legacyVmSize,
     instanceType: config.type,
+    instanceSku: null,
+    displayName: displayNameForSize(config),
     vcpuCount: config.vcpu,
     memoryMb: config.ramGb * 1024,
     diskGb: config.storageGb,
+    catalogSource: STATIC_CATALOG_SOURCE,
+    catalogLastSeenAt: null,
     ...normalizeProviderPrice(config.price, options),
   };
+}
+
+function displayNameForSize(config: SizeConfig): string {
+  return `${config.type} · ${config.vcpu} vCPU · ${config.ramGb} GB RAM · ${config.storageGb} GB disk`;
 }

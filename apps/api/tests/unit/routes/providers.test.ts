@@ -11,7 +11,7 @@
  * - @simple-agent-manager/providers createProvider is mocked so we control
  *   the provider instances returned (locations, sizes, locationMetadata, defaultLocation)
  */
-import type { ProviderCatalogResponse } from '@simple-agent-manager/shared';
+import type { ProviderCatalogResponse, SizeInfo, VMSize } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -69,11 +69,17 @@ function createTestApp() {
   return app;
 }
 
-function createMockDB(rows: Array<{ provider: string; encryptedToken: string; iv: string }>) {
+function createMockDB(
+  rows: Array<{ id?: string; provider: string; encryptedToken: string; iv: string }>
+) {
+  const selectedRows = rows.map((row, index) => ({
+    ...row,
+    id: row.id ?? `credential-${index + 1}`,
+  }));
   const mockDB: any = {
     select: vi.fn().mockReturnThis(),
     from: vi.fn().mockReturnThis(),
-    where: vi.fn().mockResolvedValue(rows),
+    where: vi.fn().mockResolvedValue(selectedRows),
   };
   (drizzle as any).mockReturnValue(mockDB);
   return mockDB;
@@ -93,19 +99,54 @@ function makeMockProvider(overrides: {
   sizes?: Record<string, any>;
   defaultLocation?: string;
 }) {
+  const name = overrides.name ?? 'hetzner';
+  const locations = overrides.locations ?? ['fsn1', 'nbg1'];
+  const locationMetadata = overrides.locationMetadata ?? {
+    fsn1: { name: 'Falkenstein', country: 'DE' },
+    nbg1: { name: 'Nuremberg', country: 'DE' },
+  };
+  const sizes = (overrides.sizes ?? {
+    small: { type: 'cx23', price: '€3.99/mo', vcpu: 2, ramGb: 4, storageGb: 40 },
+    medium: { type: 'cx33', price: '€7.49/mo', vcpu: 4, ramGb: 8, storageGb: 80 },
+    large: { type: 'cx43', price: '€14.49/mo', vcpu: 8, ramGb: 16, storageGb: 160 },
+  }) as Record<VMSize, SizeInfo>;
+
   return {
-    name: overrides.name ?? 'hetzner',
-    locations: overrides.locations ?? ['fsn1', 'nbg1'],
-    locationMetadata: overrides.locationMetadata ?? {
-      fsn1: { name: 'Falkenstein', country: 'DE' },
-      nbg1: { name: 'Nuremberg', country: 'DE' },
-    },
-    sizes: overrides.sizes ?? {
-      small: { type: 'cx23', price: '€3.99/mo', vcpu: 2, ramGb: 4, storageGb: 40 },
-      medium: { type: 'cx33', price: '€7.49/mo', vcpu: 4, ramGb: 8, storageGb: 80 },
-      large: { type: 'cx43', price: '€14.49/mo', vcpu: 8, ramGb: 16, storageGb: 160 },
-    },
+    name,
+    locations,
+    locationMetadata,
+    sizes,
     defaultLocation: overrides.defaultLocation ?? 'fsn1',
+    listInstanceOfferings: vi.fn(async () =>
+      locations.flatMap((location) =>
+        (Object.entries(sizes) as Array<[VMSize, SizeInfo]>).map(([machineSize, size]) => {
+          const meta = locationMetadata[location];
+          return {
+            provider: name,
+            location,
+            locationName: meta?.name,
+            country: meta?.country,
+            providerInstanceType: size.type,
+            providerInstanceSku: null,
+            displayName: `${size.type} · ${size.vcpu} vCPU · ${size.ramGb} GB RAM · ${size.storageGb} GB disk`,
+            sku: size.type,
+            instanceType: size.type,
+            type: size.type,
+            name: size.type,
+            vcpu: size.vcpu,
+            ramGb: size.ramGb,
+            memoryMb: size.ramGb * 1024,
+            storageGb: size.storageGb,
+            diskGb: size.storageGb,
+            price: size.price,
+            currency: size.price.includes('$') ? 'USD' : size.price.includes('€') ? 'EUR' : null,
+            catalogSource: 'static',
+            catalogLastSeenAt: null,
+            machineSize,
+          };
+        })
+      )
+    ),
   };
 }
 
@@ -129,6 +170,8 @@ describe('GET /api/providers/catalog', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as ProviderCatalogResponse;
     expect(body.catalogs).toEqual([]);
+    expect(body.credentialSetupRequired).toBe(true);
+    expect(body.credentialSetupMessage).toContain('cloud-provider credential');
   });
 
   it('should return catalog with correct locations and sizes for a single provider credential', async () => {
@@ -154,6 +197,8 @@ describe('GET /api/providers/catalog', () => {
 
     const catalog = body.catalogs[0]!;
     expect(catalog.provider).toBe('hetzner');
+    expect(catalog.credentialSource).toBe('user');
+    expect(catalog.credentialId).toBe('credential-1');
     expect(catalog.defaultLocation).toBe('fsn1');
     expect(catalog.locations).toEqual([
       { id: 'fsn1', name: 'Falkenstein', country: 'DE' },
@@ -161,6 +206,18 @@ describe('GET /api/providers/catalog', () => {
       { id: 'hel1', name: 'Helsinki', country: 'FI' },
     ]);
     expect(catalog.sizes).toEqual(mockProvider.sizes);
+    expect(catalog.offerings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          providerInstanceSku: null,
+          catalogSource: 'static',
+          machineSize: 'small',
+        }),
+      ])
+    );
+    expect(mockProvider.listInstanceOfferings).toHaveBeenCalledWith({ preferApi: true });
   });
 
   it('should return catalogs for multiple provider credentials', async () => {
@@ -304,20 +361,17 @@ describe('GET /api/providers/catalog', () => {
     createMockDB([{ provider: 'hetzner', encryptedToken: 'enc-token', iv: 'test-iv' }]);
 
     // Provider with a location that has no metadata entry
-    mockCreateProvider.mockReturnValue({
-      name: 'hetzner',
-      locations: ['fsn1', 'unknown-dc'],
-      locationMetadata: {
-        fsn1: { name: 'Falkenstein', country: 'DE' },
-        // 'unknown-dc' intentionally missing
-      },
-      sizes: {
-        small: { type: 'cx23', price: '€3.99/mo', vcpu: 2, ramGb: 4, storageGb: 40 },
-        medium: { type: 'cx33', price: '€7.49/mo', vcpu: 4, ramGb: 8, storageGb: 80 },
-        large: { type: 'cx43', price: '€14.49/mo', vcpu: 8, ramGb: 16, storageGb: 160 },
-      },
-      defaultLocation: 'fsn1',
-    });
+    mockCreateProvider.mockReturnValue(
+      makeMockProvider({
+        name: 'hetzner',
+        locations: ['fsn1', 'unknown-dc'],
+        locationMetadata: {
+          fsn1: { name: 'Falkenstein', country: 'DE' },
+          // 'unknown-dc' intentionally missing
+        },
+        defaultLocation: 'fsn1',
+      })
+    );
 
     const res = await app.request('/api/providers/catalog', { method: 'GET' }, makeEnv());
 

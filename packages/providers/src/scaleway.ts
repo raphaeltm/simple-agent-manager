@@ -1,6 +1,7 @@
-import type { VMSize } from '@simple-agent-manager/shared';
+import type { CredentialProvider, VMSize } from '@simple-agent-manager/shared';
 import { DEFAULT_SCALEWAY_IMAGE_NAME, DEFAULT_SCALEWAY_ZONE } from '@simple-agent-manager/shared';
 
+import { getProviderCatalogOfferings } from './instance-offerings';
 import {
   providerFetch,
   rethrowIfProviderRequestAborted,
@@ -13,6 +14,7 @@ import type {
   Provider,
   ProviderErrorCategory,
   ProviderErrorContext,
+  ProviderOfferingListOptions,
   ProviderRequestContext,
   SizeConfig,
   VMConfig,
@@ -471,6 +473,18 @@ export class ScalewayProvider implements Provider {
     );
     throwIfProviderRequestAborted(context);
     return true;
+  }
+
+  async listInstanceOfferings(
+    _options?: ProviderOfferingListOptions,
+    context?: ProviderRequestContext
+  ) {
+    throwIfProviderRequestAborted(context);
+    return getProviderCatalogOfferings(
+      this.name as CredentialProvider,
+      this.locations,
+      this.locationMetadata
+    );
   }
 
   async createVolume(

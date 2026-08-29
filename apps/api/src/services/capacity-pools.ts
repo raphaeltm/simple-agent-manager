@@ -21,6 +21,7 @@ import {
   isCapacityPoolStrategy,
   isCapacitySourceKind,
   isCapacityWorkloadRole,
+  isProviderInstanceCatalogSource,
 } from '@simple-agent-manager/shared';
 
 import type * as schema from '../db/schema';
@@ -132,6 +133,8 @@ export function toCapacityPoolCandidate(
     machineClass: row.machineClass,
     machineSize: row.machineSize,
     providerInstanceType: row.providerInstanceType,
+    providerInstanceSku: row.providerInstanceSku,
+    providerInstanceDisplayName: row.providerInstanceDisplayName,
     providerInstanceVcpuCount: row.providerInstanceVcpuCount,
     providerInstanceMemoryMb: row.providerInstanceMemoryMb,
     providerInstanceDiskGb: row.providerInstanceDiskGb,
@@ -139,6 +142,12 @@ export function toCapacityPoolCandidate(
     providerInstancePriceCurrency: row.providerInstancePriceCurrency,
     providerInstancePriceMonthlyCents: row.providerInstancePriceMonthlyCents,
     providerInstancePriceHourlyMicros: row.providerInstancePriceHourlyMicros,
+    providerInstanceCatalogSource: nullablePersistedValue(
+      'capacity_pool_candidates.provider_instance_catalog_source',
+      row.providerInstanceCatalogSource ?? null,
+      isProviderInstanceCatalogSource
+    ),
+    providerInstanceCatalogLastSeenAt: row.providerInstanceCatalogLastSeenAt ?? null,
     priority: row.priority,
     candidateOrder: row.candidateOrder,
     status: expectPersistedValue<CapacityPoolStatus>(

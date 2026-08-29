@@ -2,6 +2,8 @@
 // Capacity Pool Core Types
 // =============================================================================
 
+import type { ProviderInstanceCatalogSource } from './provider';
+
 export const CAPACITY_POOL_SCOPES = ['installation', 'user', 'project'] as const;
 export type CapacityPoolScope = (typeof CAPACITY_POOL_SCOPES)[number];
 
@@ -82,6 +84,10 @@ export interface CapacityPoolCandidate {
   machineSize: string | null;
   /** Provider-native instance type, plan, flavor, machine type, or SKU. */
   providerInstanceType: string | null;
+  /** Optional provider-native SKU when distinct from the instance type. */
+  providerInstanceSku?: string | null;
+  /** Human-readable provider-native offering label. */
+  providerInstanceDisplayName?: string | null;
   /** Normalized concrete offering capacity. */
   providerInstanceVcpuCount: number | null;
   providerInstanceMemoryMb: number | null;
@@ -90,6 +96,8 @@ export interface CapacityPoolCandidate {
   providerInstancePriceCurrency: string | null;
   providerInstancePriceMonthlyCents: number | null;
   providerInstancePriceHourlyMicros: number | null;
+  providerInstanceCatalogSource?: ProviderInstanceCatalogSource | null;
+  providerInstanceCatalogLastSeenAt?: string | null;
   priority: number;
   candidateOrder: number;
   status: CapacityPoolStatus;

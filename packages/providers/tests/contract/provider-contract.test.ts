@@ -74,6 +74,18 @@ export function runProviderContractTests(
         expect(p.sizes.medium.ramGb).toBeGreaterThanOrEqual(p.sizes.small.ramGb);
         expect(p.sizes.large.ramGb).toBeGreaterThanOrEqual(p.sizes.medium.ramGb);
       });
+
+      it('should expose provider-native instance offerings', async () => {
+        const p = getProvider();
+        const offerings = await p.listInstanceOfferings({ preferApi: false });
+        expect(offerings.length).toBeGreaterThan(0);
+        expect(offerings[0]).toMatchObject({
+          provider: p.name,
+          providerInstanceType: expect.any(String),
+          displayName: expect.any(String),
+          catalogSource: 'static',
+        });
+      });
     });
 
     describe('createVM', () => {

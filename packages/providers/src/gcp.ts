@@ -1,3 +1,5 @@
+import type { CredentialProvider } from '@simple-agent-manager/shared';
+
 import {
   COMPUTE_API_BASE,
   DEFAULT_GCP_AGENT_PORTS,
@@ -17,6 +19,7 @@ import {
   SAM_NETWORK_TAG,
   SIZE_MAP,
 } from './gcp-metadata';
+import { getProviderCatalogOfferings } from './instance-offerings';
 import {
   providerDelay,
   providerFetch,
@@ -25,6 +28,7 @@ import {
 } from './provider-fetch';
 import type {
   Provider,
+  ProviderOfferingListOptions,
   ProviderRequestContext,
   VMConfig,
   VMInstance,
@@ -510,6 +514,18 @@ export class GcpProvider implements Provider {
     await providerFetch('gcp', url, { headers }, this.timeoutMs, undefined, context);
     throwIfProviderRequestAborted(context);
     return true;
+  }
+
+  async listInstanceOfferings(
+    _options?: ProviderOfferingListOptions,
+    context?: ProviderRequestContext
+  ) {
+    throwIfProviderRequestAborted(context);
+    return getProviderCatalogOfferings(
+      this.name as CredentialProvider,
+      this.locations,
+      this.locationMetadata
+    );
   }
 
   async createVolume(

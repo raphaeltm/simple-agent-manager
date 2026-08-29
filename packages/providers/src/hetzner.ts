@@ -1,3 +1,4 @@
+import type { CredentialProvider, ProviderInstanceOffering } from '@simple-agent-manager/shared';
 import { DEFAULT_HETZNER_DATACENTER, DEFAULT_HETZNER_IMAGE } from '@simple-agent-manager/shared';
 
 import {
@@ -23,6 +24,7 @@ import {
   mapHetznerVolumeToInstance,
   recordHetznerListPage,
 } from './hetzner-metadata';
+import { getProviderCatalogOfferings } from './instance-offerings';
 import {
   providerDelay,
   providerFetch,
@@ -33,6 +35,7 @@ import type {
   LocationMeta,
   Provider,
   ProviderLogger,
+  ProviderOfferingListOptions,
   ProviderRequestContext,
   VMConfig,
   VMInstance,
@@ -47,10 +50,12 @@ import type {
 import { noopProviderLogger, ProviderError, SAM_VOLUME_FILESYSTEM_FORMAT } from './types';
 import {
   type HetznerServerPayload,
+  type HetznerServerTypePayload,
   type HetznerVolumePayload,
   parseProviderJson,
   validateHetznerServerResponse,
   validateHetznerServersResponse,
+  validateHetznerServerTypesResponse,
   validateHetznerVolumeResponse,
   validateHetznerVolumesResponse,
 } from './validation';
@@ -69,6 +74,14 @@ export {
   HETZNER_VOLUME_MIN_SIZE_GB,
   isTransientCapacityError,
 } from './hetzner-metadata';
+
+const HETZNER_CATALOG_CURRENCY = 'EUR';
+const HETZNER_CATALOG_CURRENCY_SYMBOL = '€';
+
+function parseHetznerCatalogPrice(value: string): number | null {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 export class HetznerProvider implements Provider {
   readonly name = 'hetzner';
@@ -426,6 +439,97 @@ export class HetznerProvider implements Provider {
     return true;
   }
 
+  async listInstanceOfferings(
+    options: ProviderOfferingListOptions = {},
+    context?: ProviderRequestContext
+  ): Promise<ProviderInstanceOffering[]> {
+    if (options.preferApi === false) {
+      return getProviderCatalogOfferings(
+        this.name as CredentialProvider,
+        this.locations,
+        this.locationMetadata
+      );
+    }
+
+    throwIfProviderRequestAborted(context);
+    const serverTypes: HetznerServerTypePayload[] = [];
+    const lastSeenAt = new Date().toISOString();
+
+    await this.fetchPaginatedHetznerList(
+      'server_types',
+      new URLSearchParams(),
+      'listInstanceOfferings',
+      (data) => {
+        const validated = validateHetznerServerTypesResponse(data, 'listInstanceOfferings');
+        serverTypes.push(...validated.serverTypes);
+        return validated.nextPage;
+      },
+      [],
+      context
+    );
+
+    throwIfProviderRequestAborted(context);
+    return serverTypes.flatMap((serverType) =>
+      this.mapHetznerServerTypeOfferings(serverType, lastSeenAt)
+    );
+  }
+
+  private mapHetznerServerTypeOfferings(
+    serverType: HetznerServerTypePayload,
+    lastSeenAt: string
+  ): ProviderInstanceOffering[] {
+    if (serverType.deprecated === true) return [];
+
+    return serverType.prices.map((price) => {
+      const hourly = parseHetznerCatalogPrice(price.price_hourly.gross);
+      const monthly = parseHetznerCatalogPrice(price.price_monthly.gross);
+      const locationMeta = this.locationMetadata[price.location];
+      const displayName =
+        serverType.description ||
+        `${serverType.name} · ${serverType.cores} vCPU · ${serverType.memory} GB RAM · ${serverType.disk} GB disk`;
+
+      return {
+        provider: this.name,
+        location: price.location,
+        providerInstanceType: serverType.name,
+        providerInstanceSku: null,
+        displayName,
+        id: serverType.name,
+        sku: serverType.name,
+        instanceType: serverType.name,
+        type: serverType.name,
+        name: displayName,
+        vcpu: serverType.cores,
+        ramGb: serverType.memory,
+        memoryGb: serverType.memory,
+        memoryMb: serverType.memory * 1024,
+        storageGb: serverType.disk,
+        diskGb: serverType.disk,
+        ...(monthly !== null
+          ? { price: `${HETZNER_CATALOG_CURRENCY_SYMBOL}${monthly.toFixed(2)}/mo` }
+          : {}),
+        priceMonthlyUsd: monthly,
+        priceHourlyUsd: hourly,
+        priceMonthly: monthly,
+        priceHourly: hourly,
+        currency: HETZNER_CATALOG_CURRENCY,
+        available: true,
+        stale: false,
+        catalogSource: 'api',
+        catalogLastSeenAt: lastSeenAt,
+        catalogMetadata: {
+          hetznerServerTypeId: serverType.id,
+          ...(serverType.architecture ? { architecture: serverType.architecture } : {}),
+          ...(serverType.cpu_type ? { cpuType: serverType.cpu_type } : {}),
+          ...(locationMeta
+            ? { locationName: locationMeta.name, locationCountry: locationMeta.country }
+            : {}),
+        },
+        ...(locationMeta ? { locationName: locationMeta.name, country: locationMeta.country } : {}),
+      };
+    });
+  }
+
   async createVolume(
     config: VolumeConfig,
     context?: ProviderRequestContext
@@ -691,9 +795,9 @@ export class HetznerProvider implements Provider {
   }
 
   private async fetchPaginatedHetznerList(
-    resource: 'servers' | 'volumes',
+    resource: 'servers' | 'volumes' | 'server_types',
     baseParams: URLSearchParams,
-    operation: 'listVMs' | 'listVolumes',
+    operation: 'listVMs' | 'listVolumes' | 'listInstanceOfferings',
     handlePage: (payload: unknown) => number | undefined,
     labelParts: string[],
     context?: ProviderRequestContext

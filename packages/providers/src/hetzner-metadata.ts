@@ -45,7 +45,7 @@ export const DEFAULT_HETZNER_MAX_LIST_PAGES = 100;
 export function recordHetznerListPage(
   seenPages: Set<number>,
   page: number,
-  operation: 'listVMs' | 'listVolumes'
+  operation: 'listVMs' | 'listVolumes' | 'listInstanceOfferings'
 ): void {
   if (seenPages.has(page)) {
     throw new ProviderError(
@@ -59,7 +59,7 @@ export function recordHetznerListPage(
 }
 
 export function buildHetznerListUrl(
-  resource: 'servers' | 'volumes',
+  resource: 'servers' | 'volumes' | 'server_types',
   baseParams: URLSearchParams,
   labelParts: string[],
   page: number

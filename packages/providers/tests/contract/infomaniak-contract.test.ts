@@ -21,6 +21,7 @@ describe('InfomaniakProvider contract surface', () => {
       'powerOff',
       'powerOn',
       'validateToken',
+      'listInstanceOfferings',
       'createVolume',
       'attachVolume',
       'detachVolume',

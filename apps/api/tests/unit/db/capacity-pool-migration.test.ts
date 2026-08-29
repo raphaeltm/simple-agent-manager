@@ -596,7 +596,7 @@ describe('0127_concrete_capacity_pool_offerings migration', () => {
 
     database.exec(concreteOfferingMigrationSql);
 
-    const offeringColumns = [
+    const snapshotOfferingColumns = [
       'provider_instance_type',
       'provider_instance_vcpu_count',
       'provider_instance_memory_mb',
@@ -606,33 +606,48 @@ describe('0127_concrete_capacity_pool_offerings migration', () => {
       'provider_instance_price_monthly_cents',
       'provider_instance_price_hourly_micros',
     ];
+    const candidateOfferingColumns = [
+      'provider_instance_sku',
+      'provider_instance_display_name',
+      'provider_instance_catalog_source',
+      'provider_instance_catalog_last_seen_at',
+      ...snapshotOfferingColumns,
+    ];
 
-    for (const table of ['capacity_pool_candidates', 'nodes', 'workspaces', 'tasks']) {
+    for (const table of ['nodes', 'workspaces', 'tasks']) {
       const columns = database
         .prepare(`PRAGMA table_info(${table})`)
         .all()
         .map((row) => (row as { name: string }).name);
-      for (const column of offeringColumns) {
+      for (const column of snapshotOfferingColumns) {
         expect(columns).toContain(column);
       }
+    }
+
+    const candidateColumns = database
+      .prepare('PRAGMA table_info(capacity_pool_candidates)')
+      .all()
+      .map((row) => (row as { name: string }).name);
+    for (const column of candidateOfferingColumns) {
+      expect(candidateColumns).toContain(column);
     }
 
     expect(
       database
         .prepare(
           `
-          SELECT ${offeringColumns.join(', ')}
+          SELECT ${candidateOfferingColumns.join(', ')}
           FROM capacity_pool_candidates
           WHERE id = 'candidate-legacy'
         `
         )
         .get()
-    ).toEqual(Object.fromEntries(offeringColumns.map((column) => [column, null])));
+    ).toEqual(Object.fromEntries(candidateOfferingColumns.map((column) => [column, null])));
 
     for (const table of ['nodes', 'workspaces', 'tasks']) {
       expect(
-        database.prepare(`SELECT ${offeringColumns.join(', ')} FROM ${table} LIMIT 1`).get()
-      ).toEqual(Object.fromEntries(offeringColumns.map((column) => [column, null])));
+        database.prepare(`SELECT ${snapshotOfferingColumns.join(', ')} FROM ${table} LIMIT 1`).get()
+      ).toEqual(Object.fromEntries(snapshotOfferingColumns.map((column) => [column, null])));
     }
   });
 

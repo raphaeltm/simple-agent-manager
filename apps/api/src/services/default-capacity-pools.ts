@@ -24,6 +24,7 @@ import {
   defaultPoolId,
   type DefaultPoolScopeIdentity,
   legacyCredentialReference,
+  legacyDefaultCandidateId,
   orderedLocationsForProvider,
   platformCredentialReference,
   timestampVersion,
@@ -46,9 +47,10 @@ const SOURCE_KIND_CLOUD_PROVIDER = 'cloud-provider-credential';
 const CREDENTIAL_TYPE_CLOUD_PROVIDER = 'cloud-provider';
 const ACTIVE_STATUS = 'active';
 const DISABLED_STATUS = 'disabled';
+const DELETED_STATUS = 'deleted';
 // Cloudflare D1 accepts at most 100 bound parameters per statement.
 const D1_BIND_PARAMETER_LIMIT = 100;
-const CANDIDATE_INSERT_BIND_COUNT = 22;
+const CANDIDATE_INSERT_BIND_COUNT = 26;
 const CANDIDATE_UPSERT_UPDATE_BIND_COUNT = 1;
 const CANDIDATE_UPSERT_CHUNK_SIZE = Math.max(
   1,
@@ -573,6 +575,7 @@ async function ensureCandidatesForSource(
   provider: CredentialProvider
 ): Promise<void> {
   const now = new Date().toISOString();
+  const existingStatuses = await readExistingCandidateStatuses(db, poolId, sourceId);
   const candidateIds: string[] = [];
   const candidateValues: schema.NewCapacityPoolCandidate[] = [];
   let candidateOrder = 0;
@@ -580,7 +583,21 @@ async function ensureCandidatesForSource(
 
   for (const location of orderedLocationsForProvider(provider)) {
     for (const offering of offerings) {
-      const id = defaultCandidateId(poolId, sourceId, provider, location.id, offering.instanceType);
+      const id = defaultCandidateId(
+        poolId,
+        sourceId,
+        provider,
+        location.id,
+        offering.instanceType,
+        offering.instanceSku
+      );
+      const legacyStatus = existingStatuses.get(
+        legacyDefaultCandidateId(poolId, sourceId, provider, location.id, offering.legacyVmSize)
+      );
+      const initialStatus =
+        legacyStatus === DISABLED_STATUS || legacyStatus === DELETED_STATUS
+          ? legacyStatus
+          : ACTIVE_STATUS;
       candidateIds.push(id);
       candidateValues.push({
         id,
@@ -595,7 +612,7 @@ async function ensureCandidatesForSource(
         ...providerInstanceOfferingDbValues(offering),
         priority: candidateOrder,
         candidateOrder,
-        status: ACTIVE_STATUS,
+        status: initialStatus,
         createdAt: now,
         updatedAt: now,
       });
@@ -618,6 +635,8 @@ async function ensureCandidatesForSource(
           machineClass: sql`excluded.machine_class`,
           machineSize: sql`excluded.machine_size`,
           providerInstanceType: sql`excluded.provider_instance_type`,
+          providerInstanceSku: sql`excluded.provider_instance_sku`,
+          providerInstanceDisplayName: sql`excluded.provider_instance_display_name`,
           providerInstanceVcpuCount: sql`excluded.provider_instance_vcpu_count`,
           providerInstanceMemoryMb: sql`excluded.provider_instance_memory_mb`,
           providerInstanceDiskGb: sql`excluded.provider_instance_disk_gb`,
@@ -625,6 +644,10 @@ async function ensureCandidatesForSource(
           providerInstancePriceCurrency: sql`excluded.provider_instance_price_currency`,
           providerInstancePriceMonthlyCents: sql`excluded.provider_instance_price_monthly_cents`,
           providerInstancePriceHourlyMicros: sql`excluded.provider_instance_price_hourly_micros`,
+          providerInstanceCatalogSource: sql`excluded.provider_instance_catalog_source`,
+          providerInstanceCatalogLastSeenAt: sql`excluded.provider_instance_catalog_last_seen_at`,
+          priority: sql`excluded.priority`,
+          candidateOrder: sql`excluded.candidate_order`,
           updatedAt: now,
         },
       });
@@ -649,8 +672,12 @@ async function disableMissingCandidatesForSource(
     .set({ status: DISABLED_STATUS, updatedAt: now })
     .where(
       activeCandidateIds.length > 0
-        ? and(...predicates, notInArray(schema.capacityPoolCandidates.id, activeCandidateIds))
-        : and(...predicates)
+        ? and(
+            ...predicates,
+            eq(schema.capacityPoolCandidates.status, ACTIVE_STATUS),
+            notInArray(schema.capacityPoolCandidates.id, activeCandidateIds)
+          )
+        : and(...predicates, eq(schema.capacityPoolCandidates.status, ACTIVE_STATUS))
     );
 }
 
