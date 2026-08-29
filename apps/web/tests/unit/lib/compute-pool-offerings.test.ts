@@ -7,6 +7,8 @@ import {
   matchesComputePoolFilters,
 } from '../../../src/lib/compute-pool-offerings';
 
+type CatalogOffering = NonNullable<ProviderCatalog['offerings']>[number];
+
 const BASE_FILTERS: ComputePoolOfferingFilters = {
   provider: 'all',
   location: '',
@@ -15,6 +17,34 @@ const BASE_FILTERS: ComputePoolOfferingFilters = {
   maxMonthlyPrice: '',
   availability: 'all',
 };
+
+const CATALOG_LAST_SEEN_AT = '2026-08-28T00:00:00.000Z';
+
+function offering(overrides: Partial<CatalogOffering> & Pick<
+  CatalogOffering,
+  | 'providerInstanceType'
+  | 'displayName'
+  | 'sku'
+  | 'location'
+  | 'locationName'
+  | 'country'
+  | 'vcpu'
+  | 'memoryMb'
+  | 'memoryGb'
+  | 'diskGb'
+  | 'price'
+  | 'priceMonthly'
+>): CatalogOffering {
+  return {
+    provider: 'hetzner',
+    providerInstanceSku: null,
+    currency: 'EUR',
+    available: true,
+    catalogSource: 'api',
+    catalogLastSeenAt: CATALOG_LAST_SEEN_AT,
+    ...overrides,
+  };
+}
 
 function catalog(): ProviderCatalog {
   return {
@@ -32,10 +62,8 @@ function catalog(): ProviderCatalog {
       large: { type: 'ccx33', price: '€55.20/mo', vcpu: 8, ramGb: 32, storageGb: 240 },
     },
     offerings: [
-      {
-        provider: 'hetzner',
+      offering({
         providerInstanceType: 'cx22',
-        providerInstanceSku: null,
         displayName: 'CX22',
         sku: 'cx22',
         location: 'fsn1',
@@ -47,15 +75,9 @@ function catalog(): ProviderCatalog {
         diskGb: 40,
         price: '€3.79/mo',
         priceMonthly: 3.79,
-        currency: 'EUR',
-        available: true,
-        catalogSource: 'api',
-        catalogLastSeenAt: '2026-08-28T00:00:00.000Z',
-      },
-      {
-        provider: 'hetzner',
+      }),
+      offering({
         providerInstanceType: 'cpx31',
-        providerInstanceSku: null,
         displayName: 'CPX31',
         sku: 'cpx31',
         location: 'ash',
@@ -67,15 +89,9 @@ function catalog(): ProviderCatalog {
         diskGb: 160,
         price: '€13.10/mo',
         priceMonthly: 13.1,
-        currency: 'EUR',
-        available: true,
-        catalogSource: 'api',
-        catalogLastSeenAt: '2026-08-28T00:00:00.000Z',
-      },
-      {
-        provider: 'hetzner',
+      }),
+      offering({
         providerInstanceType: 'ccx33',
-        providerInstanceSku: null,
         displayName: 'CCX33',
         sku: 'ccx33',
         location: 'hel1',
@@ -87,16 +103,11 @@ function catalog(): ProviderCatalog {
         diskGb: 240,
         price: '€55.20/mo',
         priceMonthly: 55.2,
-        currency: 'EUR',
         available: false,
         status: 'temporarily unavailable',
-        catalogSource: 'api',
-        catalogLastSeenAt: '2026-08-28T00:00:00.000Z',
-      },
-      {
-        provider: 'hetzner',
+      }),
+      offering({
         providerInstanceType: 'stale-16c-64gb',
-        providerInstanceSku: null,
         displayName: 'Stale large',
         sku: 'stale-16c-64gb',
         location: 'hel1',
@@ -108,12 +119,9 @@ function catalog(): ProviderCatalog {
         diskGb: 480,
         price: '€220.00/mo',
         priceMonthly: 220,
-        currency: 'EUR',
-        available: true,
         stale: true,
-        catalogSource: 'api',
         catalogLastSeenAt: '2026-08-27T00:00:00.000Z',
-      },
+      }),
     ],
     defaultLocation: 'fsn1',
   };

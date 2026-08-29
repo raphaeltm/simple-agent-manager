@@ -7,55 +7,6 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({
-  db: {
-    select: vi.fn(),
-  },
-  createSession: vi.fn(),
-  persistMessage: vi.fn(),
-  resolveCredentialSource: vi.fn(),
-  resolveTaskStartPlacementCredentialAttribution: vi.fn(),
-  resolveAgentProfile: vi.fn(),
-  generateTaskTitle: vi.fn(),
-  requireRepositoryOwnerAccess: vi.fn(),
-  startTaskRunnerDO: vi.fn(),
-}));
-
-vi.mock('drizzle-orm/d1', () => ({
-  drizzle: vi.fn(() => mocks.db),
-}));
-
-vi.mock('../../../src/services/agent-profiles', () => ({
-  resolveAgentProfile: mocks.resolveAgentProfile,
-}));
-
-vi.mock('../../../src/services/provider-credentials', () => ({
-  resolveCredentialSource: mocks.resolveCredentialSource,
-}));
-
-vi.mock('../../../src/services/placement-resolver', () => ({
-  resolveTaskStartPlacementCredentialAttribution:
-    mocks.resolveTaskStartPlacementCredentialAttribution,
-}));
-
-vi.mock('../../../src/services/project-data', () => ({
-  createSession: mocks.createSession,
-  persistMessage: mocks.persistMessage,
-}));
-
-vi.mock('../../../src/services/task-title', () => ({
-  generateTaskTitle: mocks.generateTaskTitle,
-  getTaskTitleConfig: vi.fn(() => ({})),
-}));
-
-vi.mock('../../../src/services/task-runner-do', () => ({
-  startTaskRunnerDO: mocks.startTaskRunnerDO,
-}));
-
-vi.mock('../../../src/routes/projects/_helpers', () => ({
-  requireRepositoryOwnerAccess: mocks.requireRepositoryOwnerAccess,
-}));
-
 let ulidCounter = 0;
 vi.mock('../../../src/lib/ulid', () => ({
   ulid: vi.fn(() => `ULID_${++ulidCounter}`),
@@ -64,164 +15,25 @@ vi.mock('../../../src/lib/ulid', () => ({
 import { hasHierarchy } from '../../../../web/src/components/task-hierarchy/buildHierarchyTree';
 import { isRetryOrFork } from '../../../../web/src/pages/project-chat/lineageUtils';
 import { buildTaskInfoMap } from '../../../../web/src/pages/project-chat/useTaskGroups';
-import { dispatchTask } from '../../../src/durable-objects/sam-session/tools/dispatch-task';
+import {
+  buildDispatchCtx,
+  getDispatchTaskMocks,
+  resetDispatchTaskMocks,
+} from './sam-dispatch-test-helpers';
 
-const project = {
-  id: 'proj-1',
-  name: 'Project',
-  repository: 'owner/repo',
-  defaultBranch: 'main',
-  installationId: 'inst-1',
-  defaultVmSize: null,
-  defaultWorkspaceProfile: null,
-  defaultProvider: null,
-  defaultAgentType: null,
-  defaultLocation: null,
-  agentDefaults: null,
-  taskExecutionTimeoutMs: null,
-  maxWorkspacesPerNode: null,
-  nodeCpuThresholdPercent: null,
-  nodeMemoryThresholdPercent: null,
-  warmNodeTimeoutMs: null,
-};
+const { dispatchTask } = await import('../../../src/durable-objects/sam-session/tools/dispatch-task');
 
-function selectRows(rows: unknown[]) {
-  return {
-    from: vi.fn(() => ({
-      where: vi.fn(() => ({
-        limit: vi.fn(() => Promise.resolve(rows)),
-      })),
-    })),
-  };
-}
-
-function buildPlacementResolution(input: {
-  userId: string;
-  projectId: string;
-  explicit?: {
-    vmSize?: string | null;
-    workspaceProfile?: string | null;
-    taskMode?: string | null;
-    agentType?: string | null;
-  };
-  inheritedCredentialAttribution?: {
-    userId?: string | null;
-    projectId?: string | null;
-    source?: 'user' | 'project' | 'platform' | null;
-  };
-}) {
-  const inherited = input.inheritedCredentialAttribution ?? {};
-  const credentialAttributionSource = inherited.source ?? 'user';
-  return {
-    placement: {
-      vmSize: input.explicit?.vmSize ?? 'small',
-      vmSizeSource: input.explicit?.vmSize ? 'task' : 'default',
-      vmLocation: 'fsn1',
-      explicitVmLocation: false,
-      provider: 'hetzner',
-      workspaceProfile: input.explicit?.workspaceProfile ?? 'full',
-      devcontainerConfigName: null,
-      taskMode: input.explicit?.taskMode ?? 'task',
-      agentType: input.explicit?.agentType ?? null,
-      resolvedReservation: {
-        cpuMillis: 1000,
-        memoryMb: 2048,
-        diskMb: 20480,
-        source: 'legacy-vm-size',
-      },
-    },
-    credential: { credentialSource: 'user', providerName: 'hetzner' },
-    capacityPoolSelection: null,
-    quotaCredentialSource: 'user',
-    capacityPlacementSnapshot: null,
-    effectiveProvider: 'hetzner',
-    credentialAttributionUserId: inherited.userId ?? input.userId,
-    credentialAttributionProjectId:
-      credentialAttributionSource === 'project'
-        ? (inherited.projectId ?? input.projectId)
-        : null,
-    credentialAttributionSource,
-  };
-}
-
-/**
- * Build a context with a DATABASE mock that:
- * - Tracks all prepare().bind() calls for assertion
- * - Optionally returns a parent task row for the lineage lookup
- */
-function buildCtx(parentTaskRow?: {
-  id: string;
-  dispatch_depth: number;
-  user_id?: string;
-  credential_attribution_user_id?: string | null;
-  credential_attribution_project_id?: string | null;
-  credential_attribution_source?: string | null;
-} | null) {
-  const hydratedParentTaskRow = parentTaskRow
-    ? {
-        user_id: 'user-1',
-        credential_attribution_user_id: null,
-        credential_attribution_project_id: null,
-        credential_attribution_source: 'user',
-        ...parentTaskRow,
-      }
-    : parentTaskRow;
-  const bindCalls: unknown[][] = [];
-  const statement = {
-    bind: vi.fn((...args: unknown[]) => {
-      bindCalls.push(args);
-      return statement;
-    }),
-    run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
-    first: vi.fn().mockResolvedValue(hydratedParentTaskRow ?? null),
-  };
-
-  return {
-    ctx: {
-      env: {
-        DATABASE: {
-          prepare: vi.fn(() => statement),
-        },
-        PROJECT_DATA: {
-          idFromName: vi.fn(() => 'project-data-id'),
-          get: vi.fn(() => ({
-            fetch: vi.fn().mockResolvedValue(new Response('ok')),
-          })),
-        },
-        AI: {},
-        BASE_DOMAIN: 'example.com',
-        BRANCH_NAME_PREFIX: 'sam/',
-        BRANCH_NAME_MAX_LENGTH: '60',
-      },
-      userId: 'user-1',
-    },
-    bindCalls,
-    statement,
-  };
-}
+const dispatchTaskMocks = getDispatchTaskMocks();
 
 describe('SAM dispatch_task lineage propagation', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     ulidCounter = 0;
-    mocks.db.select.mockImplementation(() => selectRows([]));
-    mocks.db.select.mockImplementationOnce(() => selectRows([project]));
-    mocks.resolveAgentProfile.mockResolvedValue(null);
-    mocks.resolveCredentialSource.mockResolvedValue({ credentialSource: 'user', providerName: 'hetzner' });
-    mocks.resolveTaskStartPlacementCredentialAttribution.mockImplementation(
-      (_db: unknown, input: Parameters<typeof buildPlacementResolution>[0]) =>
-        Promise.resolve(buildPlacementResolution(input)),
-    );
-    mocks.generateTaskTitle.mockResolvedValue('Child task title');
-    mocks.requireRepositoryOwnerAccess.mockResolvedValue(undefined);
-    mocks.createSession.mockResolvedValue('session-1');
-    mocks.persistMessage.mockResolvedValue('message-1');
-    mocks.startTaskRunnerDO.mockResolvedValue(undefined);
+    resetDispatchTaskMocks({ title: 'Child task title' });
   });
 
   describe('with parentTaskId provided', () => {
     it('sets parent_task_id and dispatch_depth in the INSERT', async () => {
-      const { ctx } = buildCtx({ id: 'parent-task-1', dispatch_depth: 0 });
+      const { ctx } = buildDispatchCtx({ id: 'parent-task-1', dispatch_depth: 0 });
 
       const result = await dispatchTask(
         { projectId: 'proj-1', description: 'Fix the bug', parentTaskId: 'parent-task-1' },
@@ -241,7 +53,7 @@ describe('SAM dispatch_task lineage propagation', () => {
     });
 
     it('computes dispatch_depth from parent depth + 1', async () => {
-      const { ctx } = buildCtx({ id: 'grandparent-task', dispatch_depth: 2 });
+      const { ctx } = buildDispatchCtx({ id: 'grandparent-task', dispatch_depth: 2 });
 
       const result = await dispatchTask(
         { projectId: 'proj-1', description: 'Deep subtask', parentTaskId: 'grandparent-task' },
@@ -252,7 +64,7 @@ describe('SAM dispatch_task lineage propagation', () => {
     });
 
     it('returns error when parent task not found', async () => {
-      const { ctx } = buildCtx(null);
+      const { ctx } = buildDispatchCtx(null);
 
       const result = await dispatchTask(
         { projectId: 'proj-1', description: 'Orphan', parentTaskId: 'nonexistent' },
@@ -264,7 +76,7 @@ describe('SAM dispatch_task lineage propagation', () => {
 
     it('returns error when dispatch depth exceeds the limit', async () => {
       // Default max depth is 3, so parent at depth 3 → child at depth 4 should fail
-      const { ctx } = buildCtx({ id: 'deep-parent', dispatch_depth: 3 });
+      const { ctx } = buildDispatchCtx({ id: 'deep-parent', dispatch_depth: 3 });
 
       const result = await dispatchTask(
         { projectId: 'proj-1', description: 'Too deep', parentTaskId: 'deep-parent' },
@@ -274,11 +86,11 @@ describe('SAM dispatch_task lineage propagation', () => {
       expect(result.error).toContain('Dispatch depth limit');
       expect(result.error).toContain('exceeded');
       // Ensure no task was actually created (startTaskRunnerDO not called)
-      expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+      expect(dispatchTaskMocks.startTaskRunnerDO).not.toHaveBeenCalled();
     });
 
     it('scopes parent lookup to the correct project and user', async () => {
-      const { ctx, bindCalls } = buildCtx({ id: 'parent-task-1', dispatch_depth: 0 });
+      const { ctx, bindCalls } = buildDispatchCtx({ id: 'parent-task-1', dispatch_depth: 0 });
 
       await dispatchTask(
         { projectId: 'proj-1', description: 'Subtask', parentTaskId: 'parent-task-1' },
@@ -292,7 +104,7 @@ describe('SAM dispatch_task lineage propagation', () => {
     });
 
     it('inherits the parent credential attribution pin for child resolution and TaskRunner start', async () => {
-      const { ctx } = buildCtx({
+      const { ctx } = buildDispatchCtx({
         id: 'parent-task-1',
         dispatch_depth: 0,
         user_id: 'member-a',
@@ -306,7 +118,7 @@ describe('SAM dispatch_task lineage propagation', () => {
         ctx,
       );
 
-      expect(mocks.resolveTaskStartPlacementCredentialAttribution).toHaveBeenCalledWith(
+      expect(dispatchTaskMocks.resolveTaskStartPlacementCredentialAttribution).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           credentialProjectPolicy: 'current-project-unless-inherited',
@@ -317,7 +129,7 @@ describe('SAM dispatch_task lineage propagation', () => {
           },
         }),
       );
-      expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
+      expect(dispatchTaskMocks.startTaskRunnerDO).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           credentialAttributionUserId: 'member-a',
@@ -329,7 +141,7 @@ describe('SAM dispatch_task lineage propagation', () => {
     });
 
     it('sets triggered_by to mcp so isRetryOrFork returns false', async () => {
-      const { ctx } = buildCtx({ id: 'parent-task-1', dispatch_depth: 0 });
+      const { ctx } = buildDispatchCtx({ id: 'parent-task-1', dispatch_depth: 0 });
 
       const result = await dispatchTask(
         { projectId: 'proj-1', description: 'Subtask', parentTaskId: 'parent-task-1' },
@@ -354,7 +166,7 @@ describe('SAM dispatch_task lineage propagation', () => {
 
   describe('without parentTaskId (backwards compatible)', () => {
     it('sets dispatch_depth to 0 and parent_task_id to null', async () => {
-      const { ctx } = buildCtx();
+      const { ctx } = buildDispatchCtx();
 
       const result = await dispatchTask(
         { projectId: 'proj-1', description: 'Top-level task' },
@@ -366,7 +178,7 @@ describe('SAM dispatch_task lineage propagation', () => {
     });
 
     it('treats whitespace-only parentTaskId as absent', async () => {
-      const { ctx } = buildCtx(null);
+      const { ctx } = buildDispatchCtx(null);
 
       const result = await dispatchTask(
         { projectId: 'proj-1', description: 'Top-level task', parentTaskId: '   ' },
@@ -393,7 +205,7 @@ describe('SAM dispatch_task lineage propagation', () => {
       // 3. UI fetches task list and builds taskInfoMap
       // 4. hasHierarchy returns true for the parent
 
-      const { ctx } = buildCtx({ id: 'parent-task-1', dispatch_depth: 0 });
+      const { ctx } = buildDispatchCtx({ id: 'parent-task-1', dispatch_depth: 0 });
       const result = await dispatchTask(
         { projectId: 'proj-1', description: 'Child work', parentTaskId: 'parent-task-1' },
         ctx,

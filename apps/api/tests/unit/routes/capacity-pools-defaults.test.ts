@@ -74,6 +74,83 @@ function seedUser(sqlite: Database.Database, id: string, role = 'user') {
     .run(id, `${id}@example.com`, role);
 }
 
+type DefaultsVisibilityExpectation = {
+  hiddenDefaults: string[];
+  visibleDefaults: string[];
+};
+
+type DefaultsReconcileExpectation = DefaultsVisibilityExpectation & {
+  effectivePool: Record<string, unknown>;
+  effectiveScope: string;
+  env: Env;
+  path: string;
+  reconciledScopes: string[];
+  secretValue: string;
+  source: Record<string, unknown>;
+};
+
+async function expectDefaultsReconciled({
+  effectivePool,
+  effectiveScope,
+  env,
+  hiddenDefaults,
+  path,
+  reconciledScopes,
+  secretValue,
+  source,
+  visibleDefaults,
+}: DefaultsReconcileExpectation) {
+  const res = await createApp().request(path, { method: 'POST' }, env);
+
+  expect(res.status).toBe(200);
+  expect(res.headers.get('cache-control')).toBe('private, no-store');
+  const text = await res.text();
+  expect(text).not.toContain(secretValue);
+  const body = JSON.parse(text);
+  expect(body.effectiveScope).toBe(effectiveScope);
+  expect(body.reconciledScopes).toEqual(reconciledScopes);
+  expect(body.effective.pool).toMatchObject(effectivePool);
+  expect(body.effective.sources[0]).toMatchObject(source);
+  expect(body.defaults).toEqual(
+    expect.arrayContaining([
+      ...visibleDefaults.map((scope) => expect.objectContaining({ scope, visibility: 'visible' })),
+      ...hiddenDefaults.map((scope) => expect.objectContaining({ scope, visibility: 'hidden' })),
+    ])
+  );
+  return body;
+}
+
+type DefaultsEnsureExpectation = {
+  effectivePool: Record<string, unknown>;
+  effectiveScope: string;
+  env: Env;
+  path: string;
+  reconciledScopes: string[];
+  source: Record<string, unknown>;
+};
+
+async function expectDefaultsEnsured({
+  effectivePool,
+  effectiveScope,
+  env,
+  path,
+  reconciledScopes,
+  source,
+}: DefaultsEnsureExpectation) {
+  const res = await createApp().request(path, { method: 'GET' }, env);
+
+  expect(res.status).toBe(200);
+  expect(res.headers.get('cache-control')).toBe('private, no-store');
+  await expect(res.json()).resolves.toMatchObject({
+    effectiveScope,
+    reconciledScopes,
+    effective: {
+      pool: effectivePool,
+      sources: [expect.objectContaining(source)],
+    },
+  });
+}
+
 describe('default capacity pool routes', () => {
   beforeEach(() => {
     authState.userId = 'user-1';
@@ -85,35 +162,23 @@ describe('default capacity pool routes', () => {
     seedUser(sqlite, 'user-1');
     seedCloudCredential(sqlite, { id: 'user-cloud-1', userId: 'user-1', provider: 'scaleway' });
 
-    const res = await createApp().request(
-      '/api/capacity-pools/defaults/reconcile',
-      {
-        method: 'POST',
+    await expectDefaultsReconciled({
+      effectivePool: {
+        scope: 'user',
+        ownerUserId: 'user-1',
       },
-      env
-    );
-
-    expect(res.status).toBe(200);
-    expect(res.headers.get('cache-control')).toBe('private, no-store');
-    const text = await res.text();
-    expect(text).not.toContain('encrypted-token-for-user-cloud-1');
-    const body = JSON.parse(text);
-    expect(body.effectiveScope).toBe('user');
-    expect(body.reconciledScopes).toEqual(['user']);
-    expect(body.effective.pool).toMatchObject({
-      scope: 'user',
-      ownerUserId: 'user-1',
+      effectiveScope: 'user',
+      env,
+      hiddenDefaults: ['installation'],
+      path: '/api/capacity-pools/defaults/reconcile',
+      reconciledScopes: ['user'],
+      secretValue: 'encrypted-token-for-user-cloud-1',
+      source: {
+        credentialSource: 'user',
+        credentialReference: 'credentials:user-cloud-1',
+      },
+      visibleDefaults: ['user'],
     });
-    expect(body.effective.sources[0]).toMatchObject({
-      credentialSource: 'user',
-      credentialReference: 'credentials:user-cloud-1',
-    });
-    expect(body.defaults).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ scope: 'user', visibility: 'visible' }),
-        expect.objectContaining({ scope: 'installation', visibility: 'hidden' }),
-      ])
-    );
   });
 
   it('GET ensure=true reconciles user defaults without exceeding D1 bind limits', async () => {
@@ -121,27 +186,15 @@ describe('default capacity pool routes', () => {
     seedUser(sqlite, 'user-1');
     seedCloudCredential(sqlite, { id: 'user-cloud-1', userId: 'user-1' });
 
-    const res = await createApp().request(
-      '/api/capacity-pools/defaults?ensure=true',
-      {
-        method: 'GET',
-      },
-      env
-    );
-
-    expect(res.status).toBe(200);
-    expect(res.headers.get('cache-control')).toBe('private, no-store');
-    await expect(res.json()).resolves.toMatchObject({
+    await expectDefaultsEnsured({
+      effectivePool: { scope: 'user', ownerUserId: 'user-1' },
       effectiveScope: 'user',
+      env,
+      path: '/api/capacity-pools/defaults?ensure=true',
       reconciledScopes: ['user'],
-      effective: {
-        pool: { scope: 'user', ownerUserId: 'user-1' },
-        sources: [
-          expect.objectContaining({
-            credentialSource: 'user',
-            credentialReference: 'credentials:user-cloud-1',
-          }),
-        ],
+      source: {
+        credentialSource: 'user',
+        credentialReference: 'credentials:user-cloud-1',
       },
     });
   });
@@ -266,37 +319,24 @@ describe('default capacity pool routes', () => {
     seedUser(sqlite, 'superadmin-1', 'superadmin');
     seedPlatformCloudCredential(sqlite);
 
-    const res = await createApp().request(
-      '/api/admin/capacity-pools/defaults/reconcile',
-      {
-        method: 'POST',
+    await expectDefaultsReconciled({
+      effectivePool: {
+        scope: 'installation',
+        ownerUserId: null,
+        ownerProjectId: null,
       },
-      env
-    );
-
-    expect(res.status).toBe(200);
-    expect(res.headers.get('cache-control')).toBe('private, no-store');
-    const text = await res.text();
-    expect(text).not.toContain('platform-encrypted-token-for-platform-cloud-1');
-    const body = JSON.parse(text);
-    expect(body.effectiveScope).toBe('installation');
-    expect(body.reconciledScopes).toEqual(['installation']);
-    expect(body.effective.pool).toMatchObject({
-      scope: 'installation',
-      ownerUserId: null,
-      ownerProjectId: null,
+      effectiveScope: 'installation',
+      env,
+      hiddenDefaults: ['project', 'user'],
+      path: '/api/admin/capacity-pools/defaults/reconcile',
+      reconciledScopes: ['installation'],
+      secretValue: 'platform-encrypted-token-for-platform-cloud-1',
+      source: {
+        credentialSource: 'platform',
+        credentialReference: 'platform_credentials:platform-cloud-1',
+      },
+      visibleDefaults: ['installation'],
     });
-    expect(body.effective.sources[0]).toMatchObject({
-      credentialSource: 'platform',
-      credentialReference: 'platform_credentials:platform-cloud-1',
-    });
-    expect(body.defaults).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ scope: 'installation', visibility: 'visible' }),
-        expect.objectContaining({ scope: 'project', visibility: 'hidden' }),
-        expect.objectContaining({ scope: 'user', visibility: 'hidden' }),
-      ])
-    );
   });
 
   it('GET ensure=true reconciles installation defaults without exceeding D1 bind limits', async () => {
@@ -306,27 +346,15 @@ describe('default capacity pool routes', () => {
     seedUser(sqlite, 'superadmin-1', 'superadmin');
     seedPlatformCloudCredential(sqlite);
 
-    const res = await createApp().request(
-      '/api/admin/capacity-pools/defaults?ensure=true',
-      {
-        method: 'GET',
-      },
-      env
-    );
-
-    expect(res.status).toBe(200);
-    expect(res.headers.get('cache-control')).toBe('private, no-store');
-    await expect(res.json()).resolves.toMatchObject({
+    await expectDefaultsEnsured({
+      effectivePool: { scope: 'installation' },
       effectiveScope: 'installation',
+      env,
+      path: '/api/admin/capacity-pools/defaults?ensure=true',
       reconciledScopes: ['installation'],
-      effective: {
-        pool: { scope: 'installation' },
-        sources: [
-          expect.objectContaining({
-            credentialSource: 'platform',
-            credentialReference: 'platform_credentials:platform-cloud-1',
-          }),
-        ],
+      source: {
+        credentialSource: 'platform',
+        credentialReference: 'platform_credentials:platform-cloud-1',
       },
     });
   });
