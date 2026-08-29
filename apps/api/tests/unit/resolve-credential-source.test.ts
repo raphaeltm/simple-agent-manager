@@ -295,11 +295,12 @@ describe('quota enforcement pattern: credential source, not existence', () => {
   });
 
   // =========================================================================
-  // NEW pattern: resolveCredentialSource at all enforcement points
+  // NEW pattern: centralized credential resolution at all enforcement points
   // =========================================================================
-  describe('all enforcement points use resolveCredentialSource', () => {
-    it('submit.ts uses resolveCredentialSource', () => {
-      expect(submitSource).toContain('resolveCredentialSource');
+  describe('all enforcement points use centralized credential resolution', () => {
+    it('submit.ts uses the task-start placement credential resolver', () => {
+      expect(submitSource).toContain('resolveTaskStartPlacementCredentialAttributionFromPlacement');
+      expect(submitSource).not.toContain('resolveCredentialSource');
     });
 
     it('node-steps.ts uses resolveCredentialSource', () => {
@@ -310,8 +311,15 @@ describe('quota enforcement pattern: credential source, not existence', () => {
       expect(nodesSource).toContain('resolveCredentialSource');
     });
 
-    it('dispatch-tool.ts (MCP dispatch) uses resolveCredentialSource', () => {
-      expect(dispatchSource).toContain('resolveCredentialSource');
+    it('dispatch-tool.ts (MCP dispatch) uses the task-start placement credential resolver', () => {
+      expect(dispatchSource).toContain(
+        'resolveTaskStartPlacementCredentialAttributionFromPlacement'
+      );
+      expect(dispatchSource).not.toContain('resolveCredentialSource');
+    });
+
+    it('placement-resolver owns task-start credential source resolution', () => {
+      expect(placementResolverSource).toContain('resolveCredentialSource');
     });
   });
 
@@ -320,7 +328,7 @@ describe('quota enforcement pattern: credential source, not existence', () => {
   // =========================================================================
   describe('quota enforced only for platform credential source', () => {
     it('submit.ts checks capacity-aware quota source === platform', () => {
-      expect(submitSource).toContain('resolveCapacityAwareQuotaCredentialSource');
+      expect(placementResolverSource).toContain('resolveCapacityAwareQuotaCredentialSource');
       expect(submitSource).toContain("quotaCredentialSource === 'platform'");
     });
 
@@ -334,7 +342,8 @@ describe('quota enforcement pattern: credential source, not existence', () => {
     });
 
     it('dispatch-tool.ts checks capacity-aware quota source === platform', () => {
-      expect(dispatchSource).toContain('resolveCapacityAwareQuotaCredentialSource');
+      expect(placementResolverSource).toContain('resolveCapacityAwareQuotaCredentialSource');
+      expect(dispatchSource).toContain('placementResolution.quotaCredentialSource');
       expect(dispatchSource).toContain("quotaCredentialSource === 'platform'");
     });
   });
@@ -344,11 +353,13 @@ describe('quota enforcement pattern: credential source, not existence', () => {
   // =========================================================================
   describe('target provider is passed to credential resolution', () => {
     it('submit.ts passes root or inherited project scope', () => {
-      expect(submitSource).toContain('resolveCapacityAwareCredentialLookup');
-      expect(submitSource).toContain('credentialLookup.userId');
-      expect(submitSource).toContain('credentialLookup.projectId');
-      expect(submitSource).toContain('credentialLookup.provider');
-      expect(placementResolverSource).toContain("'current-project-unless-inherited'");
+      expect(submitSource).toContain('inheritedAttributionUserId');
+      expect(submitSource).toContain('inheritedAttributionProjectId');
+      expect(submitSource).toContain("'current-project-unless-inherited'");
+      expect(placementResolverSource).toContain('resolveCapacityAwareCredentialLookup');
+      expect(placementResolverSource).toContain('credentialLookup.userId');
+      expect(placementResolverSource).toContain('credentialLookup.projectId');
+      expect(placementResolverSource).toContain('credentialLookup.provider');
     });
 
     it('node-steps.ts passes cloudProvider from config', () => {
@@ -362,9 +373,12 @@ describe('quota enforcement pattern: credential source, not existence', () => {
     it('dispatch-tool.ts passes inherited root attribution scope', () => {
       expect(dispatchSource).toContain('inheritedAttributionUserId');
       expect(dispatchSource).toContain('inheritedAttributionProjectId');
-      expect(dispatchSource).toContain('resolveCapacityAwareCredentialLookup');
-      expect(dispatchSource).toContain('credentialLookup.provider');
-      expect(dispatchSource).toContain('credentialLookup.projectId');
+      expect(dispatchSource).toContain(
+        'resolveTaskStartPlacementCredentialAttributionFromPlacement'
+      );
+      expect(placementResolverSource).toContain('resolveCapacityAwareCredentialLookup');
+      expect(placementResolverSource).toContain('credentialLookup.provider');
+      expect(placementResolverSource).toContain('credentialLookup.projectId');
     });
   });
 
@@ -429,7 +443,9 @@ describe('quota enforcement pattern: credential source, not existence', () => {
   // =========================================================================
   describe('quota check order', () => {
     it('submit.ts checks quota before task creation', () => {
-      const quotaIdx = submitSource.indexOf('resolveCredentialSource');
+      const quotaIdx = submitSource.indexOf(
+        'resolveTaskStartPlacementCredentialAttributionFromPlacement'
+      );
       const insertIdx = submitSource.indexOf('db.insert(schema.tasks)');
       expect(quotaIdx).toBeGreaterThan(0);
       expect(insertIdx).toBeGreaterThan(0);
@@ -445,7 +461,9 @@ describe('quota enforcement pattern: credential source, not existence', () => {
     });
 
     it('dispatch-tool.ts checks quota before task INSERT', () => {
-      const quotaIdx = dispatchSource.indexOf('resolveCredentialSource');
+      const quotaIdx = dispatchSource.indexOf(
+        'resolveTaskStartPlacementCredentialAttributionFromPlacement'
+      );
       const insertIdx = dispatchSource.indexOf('INSERT INTO tasks');
       expect(quotaIdx).toBeGreaterThan(0);
       expect(insertIdx).toBeGreaterThan(0);

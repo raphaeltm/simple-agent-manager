@@ -372,8 +372,8 @@ export async function handleDispatchTask(
   const checkoutBranch = explicitBranch || branchName;
 
   // ── Verify cloud credentials and enforce quota ──────────────────────────
-  // Uses resolveCredentialSource to determine whether the user's own credential
-  // or a platform credential will be used for the resolved provider. Quota is
+  // Uses the centralized placement resolver to determine whether user,
+  // project, or platform credentials back the resolved provider. Quota is
   // enforced only when platform credentials are used. Instant containers do
   // not consume cloud credentials or platform VM compute quota.
   let effectiveProvider: CredentialProvider | null = placement.provider;
