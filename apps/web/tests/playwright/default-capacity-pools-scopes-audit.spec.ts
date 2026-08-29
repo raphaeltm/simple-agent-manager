@@ -1,3 +1,6 @@
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { expect, type Page, test } from '@playwright/test';
 
 import {
@@ -13,6 +16,9 @@ import {
 } from './audit-helpers';
 
 const TIMESTAMP = '2026-08-28T00:00:00.000Z';
+const SCREENSHOT_DIR = '../../.codex/tmp/playwright-screenshots';
+const EXPENSIVE_HETZNER_GPU_SKU =
+  'bare-metal-gpu-ultra-long-provider-native-instance-name-2026-08-stress-row';
 const LONG_MARKER =
   'unicode Ω emoji 🚀 and xss text <script>alert("pool")</script> repeated to force wrapping '.repeat(
     3
@@ -247,11 +253,10 @@ function providerCatalogs(scope: PoolScope) {
     {
       provider: 'hetzner',
       location: 'fsn1',
-      providerInstanceType:
-        'bare-metal-gpu-ultra-long-provider-native-instance-name-2026-08-stress-row',
+      providerInstanceType: EXPENSIVE_HETZNER_GPU_SKU,
       providerInstanceSku: null,
       displayName: 'bare-metal gpu ultra long provider native instance name 2026-08 stress row',
-      sku: 'bare-metal-gpu-ultra-long-provider-native-instance-name-2026-08-stress-row',
+      sku: EXPENSIVE_HETZNER_GPU_SKU,
       vcpu: 48,
       memoryMb: 196_608,
       diskGb: 960,
@@ -475,7 +480,7 @@ async function expectStressedDefaultPool(page: Page, heading: string, scope: Poo
   ).toBeVisible();
   await expect(
     page
-      .getByText('bare-metal-gpu-ultra-long-provider-native-instance-name-2026-08-stress-row')
+      .getByText(EXPENSIVE_HETZNER_GPU_SKU)
       .first()
   ).toBeVisible();
   await expect(page.getByText('Not selected').first()).toBeVisible();
@@ -525,7 +530,7 @@ async function removeAshHilCandidates(
   await expect(page.getByText('1 matching offering across 1 region.')).toBeVisible();
   await expect(
     page
-      .getByText('bare-metal-gpu-ultra-long-provider-native-instance-name-2026-08-stress-row')
+      .getByText(EXPENSIVE_HETZNER_GPU_SKU)
       .first()
   ).toBeVisible();
   await expect(page.getByText('€1036.00/mo').first()).toBeVisible();
@@ -535,6 +540,11 @@ async function removeAshHilCandidates(
       name: /Add Hetzner fsn1 bare-metal-gpu-ultra-long-provider-native-instance-name/,
     })
   ).toBeVisible();
+  await screenshotCatalogOfferingCard(
+    page,
+    EXPENSIVE_HETZNER_GPU_SKU,
+    `${screenshotName}-catalog-expensive-card-not-selected`
+  );
   await screenshotSectionNearHeading(
     page,
     'Catalog filters',
@@ -612,6 +622,27 @@ async function removeAshHilCandidates(
   await expect(page.getByText(/Hetzner · Ashburn \(ash\)/).first()).toBeVisible();
   await expect(page.getByText(/Hetzner · Hillsboro \(hil\)/).first()).toBeVisible();
   await assertNoOverflow(page);
+}
+
+async function screenshotCatalogOfferingCard(page: Page, sku: string, name: string) {
+  const viewport = page.viewportSize();
+  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
+  const screenshotDir = resolve(process.cwd(), SCREENSHOT_DIR);
+  mkdirSync(screenshotDir, { recursive: true });
+  const card = page
+    .getByRole('button', { name: new RegExp(`^Add (?!back\\b).*${escapeRegExp(sku)}`) })
+    .first()
+    .locator('xpath=ancestor::article[1]')
+    .first();
+  await card.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(600);
+  await card.screenshot({
+    path: `${screenshotDir}/${name}${suffix}.png`,
+  });
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 test.describe('Default capacity pool scope surfaces', () => {

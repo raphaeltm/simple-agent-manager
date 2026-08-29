@@ -531,7 +531,7 @@ export function ComputePoolOfferingsManager({
                 actionLabel={isEditing ? 'Add back' : undefined}
                 actionStatus={isEditing ? 'active' : undefined}
                 onStatusChange={onStatusChange}
-                isRemoved
+                isRemoved={offering.candidateStatus === 'deleted'}
               />
             ))}
           </div>

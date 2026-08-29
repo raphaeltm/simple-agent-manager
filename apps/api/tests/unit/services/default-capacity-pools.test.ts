@@ -1760,6 +1760,90 @@ describe('default capacity pool creation', () => {
     );
   });
 
+  it('translates disabled legacy size rows onto matching live catalog offerings only', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+
+    const poolId = 'cap-pool-default:user:user-1';
+    const sourceId = 'cap-source-default:user:user-hetzner';
+    const legacyCandidateId = `cap-candidate-default:${poolId}:${sourceId}:hetzner:fsn1:small`;
+    sqlite
+      ?.prepare(
+        `
+        INSERT INTO capacity_pools (
+          id, scope, owner_user_id, name, is_default, revision, status,
+          strategy, exhaustion_policy, created_by
+        )
+        VALUES (?, 'user', 'user-1', 'User default', 1, 1, 'active', 'balanced', 'queue', 'user-1')
+      `
+      )
+      .run(poolId);
+    sqlite
+      ?.prepare(
+        `
+        INSERT INTO capacity_sources (
+          id, scope, owner_user_id, source_kind, provider, credential_source,
+          credential_id, credential_reference, status, created_by
+        )
+        VALUES (?, 'user', 'user-1', 'cloud-provider-credential', 'hetzner', 'user',
+          'user-hetzner', 'credentials:user-hetzner', 'active', 'user-1')
+      `
+      )
+      .run(sourceId);
+    sqlite
+      ?.prepare(
+        `
+        INSERT INTO capacity_pool_candidates (
+          id, pool_id, capacity_source_id, provider, location, workload_role,
+          runtime, machine_class, machine_size, status
+        )
+        VALUES (?, ?, ?, 'hetzner', 'fsn1', 'workspace', 'vm', 'shared-vm', 'small', 'disabled')
+      `
+      )
+      .run(legacyCandidateId, poolId, sourceId);
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+        }),
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cpx62',
+          displayName: 'CPX62',
+          vcpu: 32,
+          memoryMb: 65_536,
+          diskGb: 480,
+          price: '€48.12/mo',
+          priceMonthly: 48.12,
+        }),
+      ],
+    });
+
+    expect(
+      getRows<{
+        provider_instance_type: string | null;
+        status: string;
+        machine_size: string | null;
+      }>(`
+        SELECT provider_instance_type, status, machine_size
+        FROM capacity_pool_candidates
+        WHERE provider_instance_type IN ('cx23', 'cpx62') OR id = '${legacyCandidateId}'
+        ORDER BY provider_instance_type
+      `)
+    ).toEqual(
+      expect.arrayContaining([
+        { provider_instance_type: null, status: 'disabled', machine_size: 'small' },
+        { provider_instance_type: 'cx23', status: 'disabled', machine_size: 'small' },
+        { provider_instance_type: 'cpx62', status: 'disabled', machine_size: null },
+      ])
+    );
+  });
+
   it('preserves existing candidate priority and order during default reconciliation', async () => {
     const db = createDb();
     seedUserCredential({ id: 'user-vultr', provider: 'vultr' });

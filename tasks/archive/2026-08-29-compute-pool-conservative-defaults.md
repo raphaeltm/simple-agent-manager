@@ -70,7 +70,7 @@ This task must open a new draft child PR against `sam/compute-pools-integration`
 
 These `/do` workflow gates remain tracked in `.do-state.md` through PR completion rather than being treated as implementation checklist items.
 
-- [ ] Run required Phase 5 local reviews: task-completion-validator, cloudflare-specialist, constitution-validator, test-engineer, and ui-ux-specialist if UI or Playwright artifacts change.
+- [x] Run required Phase 5 local reviews: task-completion-validator, cloudflare-specialist, constitution-validator, test-engineer, and ui-ux-specialist if UI or Playwright artifacts change.
 - [ ] Deploy the child branch to staging via `deploy-staging.yml` and validate the live feature with Playwright, D1/API evidence, and a real VM prompt/session.
 - [ ] Clean up staging workspaces/nodes/VMs created during validation and confirm staging returns to zero VMs/nodes at rest.
 - [ ] Open a draft child PR targeting `sam/compute-pools-integration`, trigger CodeRabbit with the `coderabbit-review` label only, and address or document actionable feedback.
