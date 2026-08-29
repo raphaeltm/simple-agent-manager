@@ -2,6 +2,7 @@ import { expect, type Page, test } from '@playwright/test';
 
 import {
   applyMockCapacityDefaultsUpdate,
+  assertNoClippedOverflow,
   assertNoOverflow,
   getProjectSuffix,
   jsonResponse,
@@ -402,6 +403,7 @@ async function removeTargetOfferings(page: Page, editHeading: string, screenshot
   await expect(page.getByText(/34 allowed · 2 removed\/disabled/)).toBeVisible();
   await expect(page.getByText('Removed').first()).toBeVisible();
   await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
 }
 
 test.describe('Default capacity pool scope surfaces', () => {

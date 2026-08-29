@@ -82,6 +82,39 @@ Selected direction: variant 1 for this PR. It keeps the existing query/mutation 
 - Desktop and mobile Playwright screenshot artifacts are captured and QC-reviewed for every changed surface.
 - No staging deployment is performed and the PR remains unmerged.
 
+## UI Screenshot Evidence
+
+Playwright generated all screenshots under `.codex/tmp/playwright-screenshots/` from stress mocks with 36 candidate rows, many provider catalogs, long provider-native SKU/location strings, multiple regions, missing prices, high prices, unavailable/stale offerings, special characters, and the 375×667 mobile viewport. The directory is intentionally gitignored; these exact artifact paths were recorded for PR handoff.
+
+User Infrastructure:
+
+- `.codex/tmp/playwright-screenshots/default-capacity-pools-user-section-desktop-1280x800--1280x800.png`
+- `.codex/tmp/playwright-screenshots/default-capacity-pools-user-section-iphone-se-375x667--375x667.png`
+- `.codex/tmp/playwright-screenshots/default-capacity-pools-user-edit-desktop-1280x800--catalog-results-1280x800.png`
+- `.codex/tmp/playwright-screenshots/default-capacity-pools-user-edit-iphone-se-375x667--catalog-results-375x667.png`
+
+Installation Infrastructure:
+
+- `.codex/tmp/playwright-screenshots/default-capacity-pools-installation-section-desktop-1280x800--1280x800.png`
+- `.codex/tmp/playwright-screenshots/default-capacity-pools-installation-section-iphone-se-375x667--375x667.png`
+- `.codex/tmp/playwright-screenshots/default-capacity-pools-installation-edit-desktop-1280x800--catalog-results-1280x800.png`
+- `.codex/tmp/playwright-screenshots/default-capacity-pools-installation-edit-iphone-se-375x667--catalog-results-375x667.png`
+
+Project Infrastructure:
+
+- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-normal-section-1280x800.png`
+- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-normal-section-375x667.png`
+- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-empty-section-1280x800.png`
+- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-empty-section-375x667.png`
+- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-many-section-1280x800.png`
+- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-many-section-375x667.png`
+- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-edit-catalog-results-focused-1280x800.png`
+- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-edit-catalog-results-focused-375x667.png`
+- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-edit-removed-focused-1280x800.png`
+- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-edit-removed-focused-375x667.png`
+
+QC result: manually reviewed representative desktop and mobile screenshots for all three scopes. The compute-pool sections show concrete SKU/provider/region/spec/price data, removed offerings move out of the active allowed list into removed/restorable cards, catalog filters and bulk actions remain readable on mobile, long strings wrap, and no compute-pool horizontal overflow or clipping was observed. The only clipped-overflow advisory emitted by the Playwright run was on the unrelated project Access settings page.
+
 ## References
 
 - User request in SAM task `01M159NJYQMMXHDZE23A96DMFD`

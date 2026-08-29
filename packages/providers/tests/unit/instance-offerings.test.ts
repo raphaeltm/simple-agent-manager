@@ -46,4 +46,24 @@ describe('provider instance offerings', () => {
       priceHourlyMicros: null,
     });
   });
+
+  it('allows callers to override approximate billing month hours for price normalization', () => {
+    expect(
+      normalizeProviderPrice('~€0.024/hr', { approximateBillingMonthHours: 700 })
+    ).toMatchObject({
+      priceDisplay: '~€0.024/hr',
+      priceCurrency: 'EUR',
+      priceHourlyMicros: 24_000,
+      priceMonthlyCents: 1680,
+    });
+
+    expect(
+      normalizeProviderPrice('~$700/mo', { approximateBillingMonthHours: 700 })
+    ).toMatchObject({
+      priceDisplay: '~$700/mo',
+      priceCurrency: 'USD',
+      priceMonthlyCents: 70_000,
+      priceHourlyMicros: 1_000_000,
+    });
+  });
 });

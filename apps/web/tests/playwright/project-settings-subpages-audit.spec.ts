@@ -2,6 +2,7 @@ import { expect, type Page, test } from '@playwright/test';
 
 import {
   applyMockCapacityDefaultsUpdate,
+  assertNoClippedOverflow,
   assertNoOverflow,
   makeMockUser,
   screenshot,
@@ -594,6 +595,7 @@ test.describe('Project settings sub-pages', () => {
     await expect(page.getByText(/3 allowed · 2 removed\/disabled/)).toBeVisible();
     await expect(page.getByText('Removed or disabled instances')).toBeVisible();
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
 
     capacityDefaultsBody = capacityDefaults(userCapacitySummary());
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=fallback`);
@@ -611,6 +613,7 @@ test.describe('Project settings sub-pages', () => {
       'project-settings-default-compute-pool-user-fallback-section'
     );
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
 
     capacityDefaultsBody = capacityDefaults(null);
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=empty`);
@@ -628,6 +631,7 @@ test.describe('Project settings sub-pages', () => {
       'project-settings-default-compute-pool-empty-section'
     );
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
 
     const manyCandidates = Array.from({ length: 36 }, (_, index) =>
       capacityCandidate(index, {
@@ -661,6 +665,7 @@ test.describe('Project settings sub-pages', () => {
       'project-settings-default-compute-pool-many-section'
     );
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
 
     capacityDefaultsStatus = 403;
     capacityDefaultsBody = {
@@ -680,5 +685,6 @@ test.describe('Project settings sub-pages', () => {
       'project-settings-default-compute-pool-error-section'
     );
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 });

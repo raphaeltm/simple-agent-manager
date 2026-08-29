@@ -1,5 +1,11 @@
 // Constants barrel — named re-exports only (no `export *`)
 
+// Billing normalization
+export {
+  DEFAULT_APPROXIMATE_BILLING_MONTH_HOURS,
+  resolveApproximateBillingMonthHours,
+} from './billing';
+
 // VM Sizes
 export {
   canSatisfyVmSize,

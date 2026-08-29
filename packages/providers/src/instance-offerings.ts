@@ -1,4 +1,8 @@
-import type { CredentialProvider, VMSize } from '@simple-agent-manager/shared';
+import {
+  type CredentialProvider,
+  resolveApproximateBillingMonthHours,
+  type VMSize,
+} from '@simple-agent-manager/shared';
 
 import { DIGITALOCEAN_SIZE_CONFIGS } from './digitalocean';
 import { SIZE_MAP as GCP_SIZE_CONFIGS } from './gcp-metadata';
@@ -9,12 +13,15 @@ import type { SizeConfig } from './types';
 import { UPCLOUD_SIZE_CONFIGS } from './upcloud';
 import { VULTR_SIZE_CONFIGS } from './vultr';
 
-const MONTHLY_HOURS = 730;
 const PRICE_CURRENCIES: Record<string, string> = {
   $: 'USD',
   '€': 'EUR',
   '£': 'GBP',
 };
+
+export interface ProviderPriceNormalizationOptions {
+  approximateBillingMonthHours?: number | null;
+}
 
 export interface NormalizedProviderPrice {
   priceDisplay: string | null;
@@ -32,7 +39,10 @@ export interface ProviderInstanceOffering extends NormalizedProviderPrice {
   diskGb: number;
 }
 
-export function normalizeProviderPrice(price: string | null | undefined): NormalizedProviderPrice {
+export function normalizeProviderPrice(
+  price: string | null | undefined,
+  options: ProviderPriceNormalizationOptions = {}
+): NormalizedProviderPrice {
   const priceDisplay = price?.trim() || null;
   if (!priceDisplay) {
     return {
@@ -69,21 +79,27 @@ export function normalizeProviderPrice(price: string | null | undefined): Normal
 
   if (isHourly) {
     const priceHourlyMicros = Math.round(amount * 1_000_000);
+    const billingMonthHours = resolveApproximateBillingMonthHours(
+      options.approximateBillingMonthHours
+    );
     return {
       priceDisplay,
       priceCurrency: currency,
       priceHourlyMicros,
-      priceMonthlyCents: Math.round((priceHourlyMicros * MONTHLY_HOURS) / 10_000),
+      priceMonthlyCents: Math.round((priceHourlyMicros * billingMonthHours) / 10_000),
     };
   }
 
   if (isMonthly) {
     const priceMonthlyCents = Math.round(amount * 100);
+    const billingMonthHours = resolveApproximateBillingMonthHours(
+      options.approximateBillingMonthHours
+    );
     return {
       priceDisplay,
       priceCurrency: currency,
       priceMonthlyCents,
-      priceHourlyMicros: Math.round((priceMonthlyCents * 10_000) / MONTHLY_HOURS),
+      priceHourlyMicros: Math.round((priceMonthlyCents * 10_000) / billingMonthHours),
     };
   }
 
@@ -96,20 +112,22 @@ export function normalizeProviderPrice(price: string | null | undefined): Normal
 }
 
 export function getProviderInstanceOfferings(
-  provider: CredentialProvider
+  provider: CredentialProvider,
+  options: ProviderPriceNormalizationOptions = {}
 ): ProviderInstanceOffering[] {
   const sizeConfigs = getProviderSizeConfigs(provider);
   return (Object.entries(sizeConfigs) as Array<[VMSize, SizeConfig]>).map(([legacyVmSize, config]) =>
-    toOffering(provider, legacyVmSize, config)
+    toOffering(provider, legacyVmSize, config, options)
   );
 }
 
 export function getProviderInstanceOfferingForLegacySize(
   provider: CredentialProvider,
-  legacyVmSize: VMSize
+  legacyVmSize: VMSize,
+  options: ProviderPriceNormalizationOptions = {}
 ): ProviderInstanceOffering | null {
   const config = getProviderSizeConfigs(provider)[legacyVmSize];
-  return config ? toOffering(provider, legacyVmSize, config) : null;
+  return config ? toOffering(provider, legacyVmSize, config, options) : null;
 }
 
 function getProviderSizeConfigs(provider: CredentialProvider): Readonly<Record<VMSize, SizeConfig>> {
@@ -134,7 +152,8 @@ function getProviderSizeConfigs(provider: CredentialProvider): Readonly<Record<V
 function toOffering(
   provider: CredentialProvider,
   legacyVmSize: VMSize,
-  config: SizeConfig
+  config: SizeConfig,
+  options: ProviderPriceNormalizationOptions
 ): ProviderInstanceOffering {
   return {
     provider,
@@ -143,6 +162,6 @@ function toOffering(
     vcpuCount: config.vcpu,
     memoryMb: config.ramGb * 1024,
     diskGb: config.storageGb,
-    ...normalizeProviderPrice(config.price),
+    ...normalizeProviderPrice(config.price, options),
   };
 }

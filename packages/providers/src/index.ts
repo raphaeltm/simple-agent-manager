@@ -132,6 +132,7 @@ export {
   type NormalizedProviderPrice,
   normalizeProviderPrice,
   type ProviderInstanceOffering,
+  type ProviderPriceNormalizationOptions,
 } from './instance-offerings';
 export {
   classifyScalewayError,

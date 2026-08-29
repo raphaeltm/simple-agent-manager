@@ -1,13 +1,19 @@
-import type {
-  CapacityPoolCandidate,
-  CapacityPoolStatus,
-  ProviderCatalog,
-  ProviderCatalogOfferingInfo,
-  SizeInfo,
-  VMSize,
+import {
+  type CapacityPoolCandidate,
+  type CapacityPoolStatus,
+  DEFAULT_APPROXIMATE_BILLING_MONTH_HOURS,
+  type ProviderCatalog,
+  type ProviderCatalogOfferingInfo,
+  type SizeInfo,
+  type VMSize,
 } from '@simple-agent-manager/shared';
 
-const HOURS_PER_APPROXIMATE_BILLING_MONTH = 730;
+/*
+ * Frontend fallback only. Backend-normalized providerInstancePrice* fields are
+ * preferred whenever available; this shared default is used for legacy catalog
+ * strings that only expose an hourly or monthly display price.
+ */
+const FALLBACK_BILLING_MONTH_HOURS = DEFAULT_APPROXIMATE_BILLING_MONTH_HOURS;
 
 export interface ComputePoolOffering {
   key: string;
@@ -120,7 +126,7 @@ function parsePriceAmount(value: string | null | undefined): number | null {
   if (!Number.isFinite(amount)) return null;
 
   if (/\/\s*(h|hr|hour)/i.test(value)) {
-    return amount * HOURS_PER_APPROXIMATE_BILLING_MONTH;
+    return amount * FALLBACK_BILLING_MONTH_HOURS;
   }
 
   return amount;
@@ -135,7 +141,7 @@ function monthlyPriceAmount(
     return priceMonthlyUsd;
   }
   if (typeof priceHourlyUsd === 'number' && Number.isFinite(priceHourlyUsd)) {
-    return priceHourlyUsd * HOURS_PER_APPROXIMATE_BILLING_MONTH;
+    return priceHourlyUsd * FALLBACK_BILLING_MONTH_HOURS;
   }
   return parsePriceAmount(priceLabel);
 }
@@ -323,8 +329,7 @@ function candidateFallbackOffering(candidate: ExtendedCandidate): ComputePoolOff
   };
 }
 
-function sortOfferings<T extends ComputePoolOffering>(offerings: T[]): T[] {
-  return [...offerings].sort((a, b) => {
+function compareOfferings(a: ComputePoolOffering, b: ComputePoolOffering): number {
     const provider = a.providerLabel.localeCompare(b.providerLabel);
     if (provider !== 0) return provider;
     const location = a.location.localeCompare(b.location);
@@ -333,7 +338,20 @@ function sortOfferings<T extends ComputePoolOffering>(offerings: T[]): T[] {
     const priceB = b.monthlyPriceAmount ?? Number.POSITIVE_INFINITY;
     if (priceA !== priceB) return priceA - priceB;
     return a.sku.localeCompare(b.sku);
-  });
+}
+
+function sortOfferings<T extends ComputePoolOffering>(offerings: T[]): T[] {
+  return [...offerings].sort(compareOfferings);
+}
+
+function catalogActionRank(offering: ComputePoolCatalogOffering): number {
+  if (!offering.canUpdateExistingCandidate) return 2;
+  if (offering.candidateStatus === 'active') return 1;
+  return 0;
+}
+
+function sortCatalogOfferings(offerings: ComputePoolCatalogOffering[]): ComputePoolCatalogOffering[] {
+  return [...offerings].sort((a, b) => catalogActionRank(a) - catalogActionRank(b) || compareOfferings(a, b));
 }
 
 export function buildComputePoolOfferingsModel(
@@ -386,7 +404,7 @@ export function buildComputePoolOfferingsModel(
     excluded: sortOfferings(
       candidateOfferings.filter((offering) => offering.candidateStatus !== 'active')
     ),
-    catalog: sortOfferings(
+    catalog: sortCatalogOfferings(
       catalogOfferings.map((offering) => {
         const matchingCandidate = byCandidateKey.get(offering.key);
         return {

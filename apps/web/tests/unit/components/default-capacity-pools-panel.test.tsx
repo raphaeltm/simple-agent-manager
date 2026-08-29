@@ -158,8 +158,78 @@ function providerCatalog(): ProviderCatalog {
         available: false,
         status: 'temporarily unavailable',
       },
+      {
+        sku: 'stale-provider-native-sku-without-price',
+        location: 'hel1',
+        locationName: 'Helsinki',
+        country: 'FI',
+        vcpu: 32,
+        memoryGb: 128,
+        diskGb: 960,
+        available: true,
+        stale: true,
+        status: 'last-known-good catalog row',
+      },
     ],
     defaultLocation: 'fsn1',
+  };
+}
+
+function digitalOceanProviderCatalog(): ProviderCatalog {
+  return {
+    provider: 'digitalocean',
+    locations: [
+      { id: 'nyc1', name: 'New York 1', country: 'US' },
+      { id: 'sfo3', name: 'San Francisco 3', country: 'US' },
+    ],
+    sizes: {
+      small: {
+        type: 's-2vcpu-4gb',
+        price: '$12.00/mo',
+        vcpu: 2,
+        ramGb: 4,
+        storageGb: 80,
+      },
+      medium: {
+        type: 's-4vcpu-8gb',
+        price: '$24.00/mo',
+        vcpu: 4,
+        ramGb: 8,
+        storageGb: 160,
+      },
+      large: {
+        type: 's-8vcpu-16gb',
+        price: '$48.00/mo',
+        vcpu: 8,
+        ramGb: 16,
+        storageGb: 320,
+      },
+    },
+    offerings: [
+      {
+        sku: 's-2vcpu-4gb-provider-native-catalog',
+        location: 'nyc1',
+        locationName: 'New York 1',
+        country: 'US',
+        vcpu: 2,
+        memoryGb: 4,
+        diskGb: 80,
+        price: '$12.00/mo',
+        available: true,
+      },
+      {
+        sku: 's-8vcpu-16gb-flexible-provider-native-catalog',
+        location: 'sfo3',
+        locationName: 'San Francisco 3',
+        country: 'US',
+        vcpu: 8,
+        memoryGb: 16,
+        diskGb: 320,
+        price: '$48.00/mo',
+        available: true,
+      },
+    ],
+    defaultLocation: 'nyc1',
   };
 }
 
@@ -451,6 +521,71 @@ describe('DefaultCapacityPoolsPanel', () => {
         candidates: [{ id: 'candidate-project-ash-cpx31', status: 'active' }],
       })
     );
+  });
+
+  it('filters catalog offerings by provider, vCPU, RAM, price, and no-match state', async () => {
+    mocks.providerCatalogs = [providerCatalog(), digitalOceanProviderCatalog()];
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('project', summary('project')));
+    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(response('project', summary('project')));
+
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+
+    fireEvent.change(screen.getByLabelText('Filter provider'), {
+      target: { value: 'digitalocean' },
+    });
+    expect(screen.getByText(/2 matching offerings across 2 regions/)).toBeInTheDocument();
+    expect(
+      screen.getByText('s-8vcpu-16gb-flexible-provider-native-catalog')
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Minimum vCPU'), { target: { value: '8' } });
+    expect(screen.getByText(/1 matching offering across 1 region/)).toBeInTheDocument();
+    expect(
+      screen.queryByText('s-2vcpu-4gb-provider-native-catalog')
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Minimum RAM in GB'), { target: { value: '32' } });
+    expect(screen.getByText('No catalog offerings match the current filters.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
+    fireEvent.change(screen.getByLabelText('Maximum monthly price'), { target: { value: '15' } });
+    expect(screen.getByText(/3 matching offerings across 3 regions/)).toBeInTheDocument();
+    expect(screen.queryByText('ccx33')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('stale-provider-native-sku-without-price')
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Filter region or location'), {
+      target: { value: 'moon-base-alpha' },
+    });
+    expect(screen.getByText('No catalog offerings match the current filters.')).toBeInTheDocument();
+  });
+
+  it('filters catalog offerings by unavailable and stale availability states', async () => {
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('project', summary('project')));
+
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+
+    fireEvent.change(screen.getByLabelText('Filter availability'), {
+      target: { value: 'unavailable' },
+    });
+    expect(screen.getByText(/1 matching offering across 1 region/)).toBeInTheDocument();
+    expect(
+      screen.getByText('long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only')
+    ).toBeInTheDocument();
+    expect(screen.getByText('temporarily unavailable')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Filter availability'), {
+      target: { value: 'stale' },
+    });
+    expect(screen.getByText(/1 matching offering across 1 region/)).toBeInTheDocument();
+    expect(screen.getByText('stale-provider-native-sku-without-price')).toBeInTheDocument();
+    expect(screen.getByText('Stale catalog data')).toBeInTheDocument();
+    expect(screen.getByText('Price unavailable')).toBeInTheDocument();
   });
 
   it('routes user and installation edits to their owned default APIs', async () => {
