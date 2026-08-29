@@ -51,8 +51,8 @@ This task updates scheduler placement, reusable-node matching, and provisioning 
 - [x] Update `VMConfig` and provider `createVM()` implementations so a selected provider-native instance type/SKU is sent to each provider, while legacy size fallback still works when no concrete pool/catalog candidate exists.
 - [x] Preserve VM-size fallback semantics for legacy non-pool provisioning and avoid descending from a concrete pool-selected offering unless the pool explicitly supplies multiple candidates through the centralized resolver.
 - [x] Add/adjust tests for centralized resolver behavior, concrete candidate selection, resource matching, candidate scoring, legacy profile size compatibility, removed-candidate drain behavior, and concrete provider createVM payloads.
-- [ ] Update docs/comments only where needed for honesty; do not add public strategy docs.
-- [ ] Run targeted and full local validation; skip staging by explicit user instruction; do not merge.
+- [x] Update docs/comments only where needed for honesty; do not add public strategy docs.
+- [x] Run targeted and full local validation; skip staging by explicit user instruction; do not merge.
 
 ## Acceptance criteria
 
