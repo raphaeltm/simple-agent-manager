@@ -9,8 +9,10 @@ import {
   screenshot,
   screenshotNearHeading,
   screenshotSectionNearHeading,
+  screenshotViewport,
   setupAuditRoutes,
 } from './audit-helpers';
+import { legacyHetznerMachineSizeForSku } from './compute-pool-audit-fixtures';
 
 const TIMESTAMP = '2026-08-28T00:00:00.000Z';
 const LONG_MARKER =
@@ -87,20 +89,13 @@ function isStaleOffering(offering: (typeof nativeOfferings)[number]) {
   return offering.sku === 'ccx33';
 }
 
-function legacyMachineSizeForSku(sku: string): 'small' | 'medium' | 'large' | null {
-  if (sku === 'cx23') return 'small';
-  if (sku === 'cx33') return 'medium';
-  if (sku === 'cx43') return 'large';
-  return null;
-}
-
 function capacityCandidate(scope: PoolScope, index: number) {
   const visibleLocations = ['fsn1', 'nbg1', 'hel1', 'ash', 'hil'];
   const offering = nativeOffering(index);
   const provider =
     index < visibleLocations.length ? 'hetzner' : providerNames[index % providerNames.length];
   const legacyMachineSize =
-    provider === 'hetzner' && index < 3 ? legacyMachineSizeForSku(offering.sku) : null;
+    provider === 'hetzner' && index < 3 ? legacyHetznerMachineSizeForSku(offering.sku) : null;
   return {
     id: `${scope}-candidate-${index}`,
     poolId: `${scope}-default-pool`,
@@ -497,12 +492,15 @@ async function removeAshHilCandidates(page: Page, editHeading: string, screensho
   await page
     .getByRole('button', { name: /Add Hetzner fsn1 cpx62-catalog-only-live-api-extra/ })
     .click();
-  await expect(page.getByRole('button', { name: 'Pending add' })).toBeVisible();
+  const pendingAddButton = page.getByRole('button', { name: 'Pending add' }).first();
+  await expect(pendingAddButton).toBeVisible();
   await screenshotSectionNearHeading(
     page,
     'Catalog filters',
     `${screenshotName}-catalog-pending-add`
   );
+  await pendingAddButton.scrollIntoViewIfNeeded();
+  await screenshotViewport(page, `${screenshotName}-catalog-pending-add-row`);
   await page.getByLabel('Filter provider').selectOption('hetzner');
   await page.getByLabel('Filter region or location').fill('hel1');
   await page.getByLabel('Minimum vCPU').fill('48');

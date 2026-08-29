@@ -50,6 +50,18 @@ export async function screenshot(page: Page, name: string) {
   });
 }
 
+export async function screenshotViewport(page: Page, name: string) {
+  await page.waitForTimeout(600);
+  const viewport = page.viewportSize();
+  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
+  const screenshotDir = resolve(process.cwd(), DEFAULT_SCREENSHOT_DIR);
+  mkdirSync(screenshotDir, { recursive: true });
+  await page.screenshot({
+    path: `${screenshotDir}/${name}${suffix}.png`,
+    fullPage: false,
+  });
+}
+
 type MutableCapacityCandidate = {
   id: string;
   status: string;
@@ -155,10 +167,7 @@ export async function screenshotNearHeading(
   await page.waitForTimeout(600);
   const viewport = page.viewportSize();
   const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
-  const screenshotDir = resolve(
-    process.cwd(),
-    options.outputDir ?? DEFAULT_SCREENSHOT_DIR
-  );
+  const screenshotDir = resolve(process.cwd(), options.outputDir ?? DEFAULT_SCREENSHOT_DIR);
   mkdirSync(screenshotDir, { recursive: true });
   await page.screenshot({
     path: `${screenshotDir}/${name}${suffix}.png`,
@@ -177,10 +186,7 @@ export async function screenshotSectionNearHeading(
   await page.waitForTimeout(600);
   const viewport = page.viewportSize();
   const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
-  const screenshotDir = resolve(
-    process.cwd(),
-    options.outputDir ?? DEFAULT_SCREENSHOT_DIR
-  );
+  const screenshotDir = resolve(process.cwd(), options.outputDir ?? DEFAULT_SCREENSHOT_DIR);
   mkdirSync(screenshotDir, { recursive: true });
   const section = headingLocator.locator('xpath=ancestor::section[1]').first();
   const target = (await section.count()) > 0 ? section : headingLocator;
@@ -275,8 +281,10 @@ export async function findClippedOverflow(page: Page): Promise<string[]> {
 /** Blocking form. Use on surfaces that are already clean. */
 export async function assertNoClippedOverflow(page: Page) {
   const offenders = await findClippedOverflow(page);
-  expect(offenders, `Horizontally clipped content (invisible to the user):\n${offenders.join('\n')}`)
-    .toEqual([]);
+  expect(
+    offenders,
+    `Horizontally clipped content (invisible to the user):\n${offenders.join('\n')}`
+  ).toEqual([]);
 }
 
 /**
@@ -330,7 +338,7 @@ export async function assertThemeButtonsNotClipped(page: Page) {
 export async function seedTheme(
   page: Page,
   theme: 'dark' | 'light' | 'system',
-  prefersDark = true,
+  prefersDark = true
 ) {
   await page.addInitScript(
     ({ value, dark }) => {
@@ -360,7 +368,7 @@ export async function seedTheme(
         };
       }
     },
-    { value: theme, dark: prefersDark },
+    { value: theme, dark: prefersDark }
   );
 }
 
@@ -371,9 +379,7 @@ export async function seedTheme(
  */
 export async function expectTheme(page: Page, effective: 'dark' | 'light') {
   const expected = effective === 'dark' ? 'sam' : 'sam-light';
-  const attr = await page.evaluate(() =>
-    document.documentElement.getAttribute('data-ui-theme')
-  );
+  const attr = await page.evaluate(() => document.documentElement.getAttribute('data-ui-theme'));
   expect(attr).toBe(expected);
 }
 
@@ -409,7 +415,7 @@ export async function visitAndCapture(
   page: Page,
   path: string,
   name: string,
-  theme: 'dark' | 'light',
+  theme: 'dark' | 'light'
 ) {
   await page.goto(path);
   await expectThemePoll(page, theme);
@@ -430,7 +436,7 @@ export type AuditResponder = (status: number, body: unknown) => Promise<void>;
 export function describeThemeAudit(
   label: string,
   setupMocks: (page: Page) => Promise<void>,
-  run: (page: Page, theme: 'dark' | 'light', suffix: string) => Promise<void>,
+  run: (page: Page, theme: 'dark' | 'light', suffix: string) => Promise<void>
 ) {
   for (const theme of ['dark', 'light'] as const) {
     test.describe(`${label} — ${theme}`, () => {
@@ -452,7 +458,7 @@ export function describeThemeAudit(
  */
 export async function setupAuditRoutes(
   page: Page,
-  handler: (path: string, respond: AuditResponder, route: Route) => Promise<void> | undefined,
+  handler: (path: string, respond: AuditResponder, route: Route) => Promise<void> | undefined
 ) {
   await page.route('**/api/**', async (route: Route) => {
     const path = new URL(route.request().url()).pathname;
@@ -493,11 +499,11 @@ export async function setupProjectChatMocks(page: Page, options: ProjectChatMock
   }, user.id);
 
   await page.route('**/api/auth/get-session', (route: Route) =>
-    route.fulfill({ status: 200, json: { user } }),
+    route.fulfill({ status: 200, json: { user } })
   );
 
   await page.route('**/api/github/installations', (route: Route) =>
-    route.fulfill({ status: 200, json: [] }),
+    route.fulfill({ status: 200, json: [] })
   );
 
   await page.route(new RegExp(`/api/projects/${projectId}(?:\\?.*)?$`), (route: Route) => {
@@ -507,35 +513,36 @@ export async function setupProjectChatMocks(page: Page, options: ProjectChatMock
     return route.continue();
   });
 
-  await page.route(new RegExp(`/api/projects/${projectId}/sessions/[^/]+(?:\\?.*)?$`), (route: Route) =>
-    route.fulfill({ status: 200, json: { session, messages, hasMore: false } }),
+  await page.route(
+    new RegExp(`/api/projects/${projectId}/sessions/[^/]+(?:\\?.*)?$`),
+    (route: Route) => route.fulfill({ status: 200, json: { session, messages, hasMore: false } })
   );
 
   await page.route(`**/api/projects/${projectId}/sessions*`, (route: Route) =>
-    route.fulfill({ status: 200, json: { sessions: [session], total: 1 } }),
+    route.fulfill({ status: 200, json: { sessions: [session], total: 1 } })
   );
 
   await page.route(`**/api/projects/${projectId}/tasks*`, (route: Route) =>
-    route.fulfill({ status: 200, json: { tasks: [], total: 0 } }),
+    route.fulfill({ status: 200, json: { tasks: [], total: 0 } })
   );
 
   await page.route(`**/api/projects/${projectId}/agent-profiles`, (route: Route) =>
-    route.fulfill({ status: 200, json: { items: [] } }),
+    route.fulfill({ status: 200, json: { items: [] } })
   );
 
   await page.route('**/api/credentials', (route: Route) =>
-    route.fulfill({ status: 200, json: [{ provider: 'hetzner', status: 'valid' }] }),
+    route.fulfill({ status: 200, json: [{ provider: 'hetzner', status: 'valid' }] })
   );
 
   await page.route('**/api/trial/status', (route: Route) =>
-    route.fulfill({ status: 200, json: { available: false } }),
+    route.fulfill({ status: 200, json: { available: false } })
   );
 
   await page.route('**/api/agents', (route: Route) =>
-    route.fulfill({ status: 200, json: { agents: [] } }),
+    route.fulfill({ status: 200, json: { agents: [] } })
   );
 
   await page.route(`**/api/projects/${projectId}/commands*`, (route: Route) =>
-    route.fulfill({ status: 200, json: { commands: [] } }),
+    route.fulfill({ status: 200, json: { commands: [] } })
   );
 }

@@ -162,8 +162,6 @@ function legacyVmSizeHintForOffering(
   provider: CredentialProvider,
   offering: ProviderInstanceOffering
 ): VMSize | null {
-  if (isLegacyVmSize(offering.machineSize)) return offering.machineSize;
-
   const staticMatch = getProviderInstanceOfferings(provider).find(
     (legacyOffering) =>
       legacyOffering.instanceType === offering.providerInstanceType ||
@@ -171,10 +169,6 @@ function legacyVmSizeHintForOffering(
         legacyOffering.instanceSku === offering.providerInstanceSku)
   );
   return staticMatch?.legacyVmSize ?? null;
-}
-
-function isLegacyVmSize(value: unknown): value is VMSize {
-  return value === 'small' || value === 'medium' || value === 'large';
 }
 
 async function readExistingCandidateStatuses(

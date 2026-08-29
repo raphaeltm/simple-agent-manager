@@ -9,6 +9,7 @@ import {
   screenshotSectionNearHeading,
   setupAuditRoutes,
 } from './audit-helpers';
+import { legacyHetznerMachineSizeForSku } from './compute-pool-audit-fixtures';
 
 const PROJECT_ID = 'proj-settings-1';
 const nativeOfferings = [
@@ -40,13 +41,6 @@ function priceMonthly(offering: (typeof nativeOfferings)[number]) {
 
 function priceHourlyMicros(offering: (typeof nativeOfferings)[number]) {
   return offering.priceCents === null ? null : Math.round((offering.priceCents * 10_000) / 730);
-}
-
-function legacyMachineSizeForSku(sku: string): 'small' | 'medium' | 'large' | null {
-  if (sku === 'cx23') return 'small';
-  if (sku === 'cx33') return 'medium';
-  if (sku === 'cx43') return 'large';
-  return null;
 }
 
 const MOCK_USER = makeMockUser({
@@ -183,7 +177,7 @@ const emptyCredentialHealth = {
 function capacityCandidate(index: number, overrides: Record<string, unknown> = {}) {
   const visibleLocations = ['fsn1', 'nbg1', 'hel1', 'ash', 'hil'];
   const offering = nativeOffering(index);
-  const legacyMachineSize = index < 3 ? legacyMachineSizeForSku(offering.sku) : null;
+  const legacyMachineSize = index < 3 ? legacyHetznerMachineSizeForSku(offering.sku) : null;
   return {
     id: `candidate-${index}`,
     poolId: 'pool-project-default',

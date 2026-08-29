@@ -139,10 +139,10 @@ price metadata when available, and a `catalogSource` value such as `api` or `sta
 
 Optional query parameters:
 
-| Parameter   | Values                            | Description                                                                                    |
-| ----------- | --------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Parameter   | Values                            | Description                                                                                     |
+| ----------- | --------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `scope`     | `user`, `project`, `installation` | Selects the credential scope to inspect. Omit it for the authenticated user's personal catalog. |
-| `projectId` | Project ID                        | Required when `scope=project`; the caller must have the project `secret:read` capability.      |
+| `projectId` | Project ID                        | Required when `scope=project`; the caller must have the project `secret:read` capability.       |
 
 Installation scope is restricted to superadmins and uses enabled platform compute credentials.
 User scope uses the caller's active personal compute credentials. Project scope returns active
@@ -162,6 +162,12 @@ matching `/reconcile` endpoint, to refresh pool metadata from the credential-sco
 catalog. Provider API failures fall back to static curated catalog rows for that provider. Provider
 catalog offerings expose `catalogSource`; capacity-pool candidates expose the persisted
 `providerInstanceCatalogSource` snapshot.
+
+Reconciliation discovers broadly but selects conservatively: it creates or refreshes rows for the
+full provider-native catalog, while initial/default active candidates are limited to concrete
+provider SKUs that match SAM's legacy small/medium/large metadata. Other catalog rows stay disabled
+until a user explicitly adds or re-enables them. `activeCandidateCount` counts selected active
+candidates, not every catalog-visible row.
 
 ### `GET /api/capacity-pools/defaults`
 

@@ -9,15 +9,15 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 ### For everyone
 
-| Change                                | What users notice                                                                                                                                              | Where to use it                   |
-| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| Change                                | What users notice                                                                                                                                                                                             | Where to use it                             |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
 | **Comments have somewhere to look**   | A **Comments** page in the project nav collects every thread from chat and the library in one place, grouped by whether it is waiting on you. Chat sessions gain a matching count chip and a comments drawer. | Project → **Comments**; chat session header |
-| **Report an issue in-app**            | A **Report** button in the expanded chat session header, and a **Report this issue** link on the crash screen. You choose whether to attach technical context. | Chat session header; crash screen |
-| **Sessions survive runtime teardown** | Sleeping Instant and VM sessions wake from a seven-day snapshot instead of losing harness context or uncommitted work.                                         | Project chat                      |
-| **Starting a chat is durable**        | Closing the tab while a chat is starting no longer strands it — the launch finishes server-side.                                                               | Project chat                      |
-| **Work lands on its own branch**      | Task workspaces start checked out on the task's `sam/…` output branch, and SAM refuses to auto-push to your default branch.                                    | Any task or chat-started work     |
-| **Codex has its tools on Instant**    | Codex sessions on the Instant runtime now get SAM's MCP tools instead of silently starting without them.                                                       | Any Codex profile                 |
-| **Library cards always render**       | A document an agent shares renders as a rich card no matter which agent sent it.                                                                               | Project chat timeline             |
+| **Report an issue in-app**            | A **Report** button in the expanded chat session header, and a **Report this issue** link on the crash screen. You choose whether to attach technical context.                                                | Chat session header; crash screen           |
+| **Sessions survive runtime teardown** | Sleeping Instant and VM sessions wake from a seven-day snapshot instead of losing harness context or uncommitted work.                                                                                        | Project chat                                |
+| **Starting a chat is durable**        | Closing the tab while a chat is starting no longer strands it — the launch finishes server-side.                                                                                                              | Project chat                                |
+| **Work lands on its own branch**      | Task workspaces start checked out on the task's `sam/…` output branch, and SAM refuses to auto-push to your default branch.                                                                                   | Any task or chat-started work               |
+| **Codex has its tools on Instant**    | Codex sessions on the Instant runtime now get SAM's MCP tools instead of silently starting without them.                                                                                                      | Any Codex profile                           |
+| **Library cards always render**       | A document an agent shares renders as a rich card no matter which agent sent it.                                                                                                                              | Project chat timeline                       |
 
 ### For self-hosters & admins
 
@@ -120,6 +120,9 @@ catalog, then edited by adding or removing specific instance types and filtering
 location, vCPU, memory, and price. Removed entries stay removed until you add them back, and old
 small/medium/large presets are only used as migration hints for older profiles rather than as the
 editing catalog.
+To keep upgrades safe, reconciliation discovers the full catalog but only preselects the concrete
+offerings that correspond to those legacy presets; larger or otherwise new provider-native SKUs stay
+available to add explicitly.
 
 ### Claude Opus 5 is available
 

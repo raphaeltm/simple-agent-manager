@@ -907,6 +907,43 @@ describe('default capacity pool creation', () => {
     );
   });
 
+  it('does not activate non-legacy provider SKUs from legacy-looking machine size hints', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cpx62',
+          displayName: 'CPX62',
+          machineSize: 'large',
+          vcpu: 32,
+          memoryMb: 65_536,
+          diskGb: 480,
+          price: '€48.12/mo',
+          priceMonthly: 48.12,
+        }),
+      ],
+    });
+
+    expect(
+      getRows<{ status: string; count: number }>(`
+        SELECT status, COUNT(*) AS count
+        FROM capacity_pool_candidates
+        GROUP BY status
+      `)
+    ).toEqual([{ status: 'disabled', count: 1 }]);
+    expect(
+      getRows<{ provider_instance_type: string; status: string; machine_size: string | null }>(`
+        SELECT provider_instance_type, status, machine_size
+        FROM capacity_pool_candidates
+      `)
+    ).toEqual([{ provider_instance_type: 'cpx62', status: 'disabled', machine_size: null }]);
+  });
+
   it('tracks full live catalogs conservatively for installation, user, and project defaults', async () => {
     const db = createDb();
     seedPlatformCredential({ id: 'platform-hetzner' });
@@ -1480,6 +1517,22 @@ describe('default capacity pool creation', () => {
           providerInstancePriceCurrency: 'EUR',
           providerInstancePriceMonthlyCents: 4812,
           providerInstanceCatalogSource: 'api',
+          status: 'active',
+        }),
+      ])
+    );
+    expect(update.summary?.activeCandidateCount).toBe(2);
+
+    const reconciledAfterAdd = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => expandedOfferings,
+    });
+    expect(reconciledAfterAdd.user?.activeCandidateCount).toBe(2);
+    expect(reconciledAfterAdd.user?.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          providerInstanceType: 'cpx62',
           status: 'active',
         }),
       ])
