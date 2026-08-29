@@ -372,6 +372,10 @@ The Workers Paid plan ($5/month) is required for Durable Objects and Cloudflare 
 
 VMs are billed to the cloud provider credential SAM uses for the node. In a typical self-hosted setup, that is each user's own BYOC credential; admins may also configure a platform credential for shared zero-config provisioning. SAM supports Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP. The example prices below cover the built-in Hetzner, Scaleway, Vultr, DigitalOcean, and UpCloud size mappings; Infomaniak and GCP pricing depend on the selected region and machine configuration.
 
+When Infrastructure Compute Pools are enabled, the editor uses the provider-native catalog for the
+project, user, or platform credential in scope. The small/medium/large prices below remain useful as
+legacy preset examples, but pool editing is based on concrete provider instance types.
+
 **Hetzner:**
 
 | Size          | Specs            | Hourly  | Monthly |

@@ -313,6 +313,20 @@ describe('GET /api/providers/catalog scope filtering with real SQL', () => {
     expect(JSON.stringify(body)).not.toContain('iv-for-user-active');
   });
 
+  it('treats unscoped catalog requests as personal-only', async () => {
+    const { sqlite, env } = createEnv();
+    seedMixedCredentials(sqlite);
+
+    const res = await createApp().request('/api/providers/catalog', {}, env);
+
+    expect(res.status).toBe(200);
+    expect(mockRequireProjectCapability).not.toHaveBeenCalled();
+    const body = (await res.json()) as ProviderCatalogResponse;
+    expect(body.catalogs.map((catalog) => catalog.credentialId)).toEqual(['user-active']);
+    expect(JSON.stringify(body)).not.toContain('project-active');
+    expect(JSON.stringify(body)).not.toContain('project-other');
+  });
+
   it('returns only active project-scoped credentials after secret-read authorization', async () => {
     const { sqlite, env } = createEnv();
     seedMixedCredentials(sqlite);
@@ -367,6 +381,29 @@ describe('GET /api/providers/catalog scope filtering with real SQL', () => {
     });
     expect(JSON.stringify(body)).not.toContain('cc-encrypted-token-for-cc-cred-user');
     expect(JSON.stringify(body)).not.toContain('cc-iv-for-cc-cred-user');
+  });
+
+  it('excludes composable credential rows with mismatched owner lineage', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'test-user-id');
+    seedUser(sqlite, 'other-user-id');
+    seedComposableCloudCredential(sqlite, {
+      credentialId: 'cc-cred-user',
+      configurationId: 'cc-cfg-user',
+      attachmentId: 'cc-att-user',
+      userId: 'test-user-id',
+      provider: 'digitalocean',
+    });
+    sqlite
+      .prepare(`UPDATE cc_configurations SET owner_id = 'other-user-id' WHERE id = 'cc-cfg-user'`)
+      .run();
+
+    const res = await createApp().request('/api/providers/catalog?scope=user', {}, env);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ProviderCatalogResponse;
+    expect(body.catalogs).toEqual([]);
+    expect(JSON.stringify(body)).not.toContain('cc-cred-user');
   });
 
   it('includes project-scoped composable compute credentials from any authorized project member', async () => {

@@ -192,6 +192,46 @@ function capacitySummary(scope: PoolScope) {
 }
 
 function providerCatalogs(scope: PoolScope) {
+  const catalogOnlyOfferings = [
+    {
+      provider: 'hetzner',
+      location: 'fsn1',
+      providerInstanceType: 'cpx62-catalog-only-live-api-extra',
+      providerInstanceSku: null,
+      displayName: 'cpx62 catalog-only live API extra',
+      sku: 'cpx62-catalog-only-live-api-extra',
+      vcpu: 32,
+      memoryMb: 65_536,
+      diskGb: 480,
+      price: '€48.12/mo',
+      priceMonthly: 48.12,
+      currency: 'EUR',
+      available: true,
+      stale: false,
+      status: null,
+      catalogSource: 'api',
+      catalogLastSeenAt: TIMESTAMP,
+    },
+    {
+      provider: 'hetzner',
+      location: 'nbg1',
+      providerInstanceType: 'ccx43-catalog-only-live-api-extra',
+      providerInstanceSku: null,
+      displayName: 'ccx43 catalog-only live API extra',
+      sku: 'ccx43-catalog-only-live-api-extra',
+      vcpu: 16,
+      memoryMb: 65_536,
+      diskGb: 360,
+      price: '€138.49/mo',
+      priceMonthly: 138.49,
+      currency: 'EUR',
+      available: true,
+      stale: false,
+      status: null,
+      catalogSource: 'api',
+      catalogLastSeenAt: TIMESTAMP,
+    },
+  ];
   return [
     {
       provider: 'hetzner',
@@ -210,32 +250,36 @@ function providerCatalogs(scope: PoolScope) {
         medium: { type: 'cx33', price: '€7.49/mo', vcpu: 4, ramGb: 8, storageGb: 80 },
         large: { type: 'cx43', price: '€14.49/mo', vcpu: 8, ramGb: 16, storageGb: 160 },
       },
-      offerings: ['fsn1', 'nbg1', 'hel1', 'ash', 'hil'].map((location, index) => {
-        const offering = nativeOffering(index);
-        return {
-          provider: 'hetzner',
-          location,
-          providerInstanceType: offering.sku,
-          providerInstanceSku: null,
-          displayName: `${offering.sku} catalog row`,
-          sku: offering.sku,
-          vcpu: offering.vcpu,
-          memoryMb: offering.memoryMb,
-          diskGb: offering.diskGb,
-          price: priceDisplay(offering),
-          priceMonthly: priceMonthly(offering),
-          currency: offering.priceCents === null ? null : 'EUR',
-          available: isUnavailableOnlyOffering(offering) || isStaleOffering(offering) ? false : true,
-          stale: isStaleOffering(offering),
-          status: isUnavailableOnlyOffering(offering)
-            ? 'temporarily unavailable'
-            : isStaleOffering(offering)
-              ? 'stale catalog data'
-              : null,
-          catalogSource: 'static',
-          catalogLastSeenAt: isStaleOffering(offering) ? '2026-07-01T00:00:00.000Z' : null,
-        };
-      }),
+      offerings: [
+        ...['fsn1', 'nbg1', 'hel1', 'ash', 'hil'].map((location, index) => {
+          const offering = nativeOffering(index);
+          return {
+            provider: 'hetzner',
+            location,
+            providerInstanceType: offering.sku,
+            providerInstanceSku: null,
+            displayName: `${offering.sku} catalog row`,
+            sku: offering.sku,
+            vcpu: offering.vcpu,
+            memoryMb: offering.memoryMb,
+            diskGb: offering.diskGb,
+            price: priceDisplay(offering),
+            priceMonthly: priceMonthly(offering),
+            currency: offering.priceCents === null ? null : 'EUR',
+            available:
+              isUnavailableOnlyOffering(offering) || isStaleOffering(offering) ? false : true,
+            stale: isStaleOffering(offering),
+            status: isUnavailableOnlyOffering(offering)
+              ? 'temporarily unavailable'
+              : isStaleOffering(offering)
+                ? 'stale catalog data'
+                : null,
+            catalogSource: 'static',
+            catalogLastSeenAt: isStaleOffering(offering) ? '2026-07-01T00:00:00.000Z' : null,
+          };
+        }),
+        ...catalogOnlyOfferings,
+      ],
       defaultLocation: 'fsn1',
     },
   ];
@@ -425,6 +469,28 @@ async function removeAshHilCandidates(page: Page, editHeading: string, screensho
   await page.getByRole('button', { name: /Remove Hetzner hil ccx33/ }).click();
   await screenshotNearHeading(page, editHeading, screenshotName);
   await page.getByLabel('Filter provider').selectOption('hetzner');
+  await page.getByLabel('Filter region or location').fill('fsn1');
+  await page.getByLabel('Minimum vCPU').fill('32');
+  await page.getByLabel('Minimum RAM in GB').fill('64');
+  await page.getByLabel('Maximum monthly price').fill('250');
+  await page.getByLabel('Filter availability').selectOption('available');
+  await expect(page.getByText('1 matching offering across 1 region.')).toBeVisible();
+  await expect(page.getByText('cpx62-catalog-only-live-api-extra').first()).toBeVisible();
+  await screenshotSectionNearHeading(
+    page,
+    'Catalog filters',
+    `${screenshotName}-catalog-filters-available`
+  );
+  await page
+    .getByRole('button', { name: /Add Hetzner fsn1 cpx62-catalog-only-live-api-extra/ })
+    .click();
+  await expect(page.getByRole('button', { name: 'Pending add' })).toBeVisible();
+  await screenshotSectionNearHeading(
+    page,
+    'Catalog filters',
+    `${screenshotName}-catalog-pending-add`
+  );
+  await page.getByLabel('Filter provider').selectOption('hetzner');
   await page.getByLabel('Filter region or location').fill('ash');
   await page.getByLabel('Minimum vCPU').fill('4');
   await page.getByLabel('Minimum RAM in GB').fill('8');
@@ -463,7 +529,7 @@ async function removeAshHilCandidates(page: Page, editHeading: string, screensho
     `${screenshotName}-catalog-results`
   );
   await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText(/34 allowed · 2 removed\/disabled/)).toBeVisible();
+  await expect(page.getByText(/35 allowed · 2 removed\/disabled/)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Removed or disabled instances' })).toBeVisible();
   await expect(page.getByText(/Hetzner · Ashburn \(ash\)/).first()).toBeVisible();
   await expect(page.getByText(/Hetzner · Hillsboro \(hil\)/).first()).toBeVisible();

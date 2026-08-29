@@ -463,6 +463,184 @@ describe('project capacity pool routes', () => {
     ).toEqual({ strategy: 'balanced' });
   });
 
+  it('re-adds a removed project catalog offering through the PATCH catalogAdditions path', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
+    seedCloudCredential(sqlite, {
+      id: 'project-cloud-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+      provider: 'hetzner',
+    });
+
+    const reconcile = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+    expect(reconcile.status).toBe(200);
+    const initial = await reconcile.json();
+    const candidate = initial.effective.candidates.find(
+      (item: { location: string; providerInstanceType: string | null }) =>
+        item.location === 'ash' && item.providerInstanceType
+    );
+    expect(candidate).toBeTruthy();
+    const source = initial.effective.sources.find(
+      (item: { id: string }) => item.id === candidate.capacitySourceId
+    );
+    expect(source).toBeTruthy();
+
+    const remove = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          candidates: [{ id: candidate.id, status: 'deleted' }],
+        }),
+      },
+      env
+    );
+    expect(remove.status).toBe(200);
+
+    const addBack = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          catalogAdditions: [
+            {
+              sourceId: source.id,
+              provider: candidate.provider,
+              location: candidate.location,
+              providerInstanceType: candidate.providerInstanceType,
+              providerInstanceSku: candidate.providerInstanceSku ?? null,
+            },
+          ],
+        }),
+      },
+      env
+    );
+
+    expect(addBack.status).toBe(200);
+    const body = await addBack.json();
+    expect(
+      body.effective.candidates.find((item: { id: string }) => item.id === candidate.id)
+    ).toMatchObject({ status: 'active' });
+    expect(
+      sqlite.prepare(`SELECT status FROM capacity_pool_candidates WHERE id = ?`).get(candidate.id)
+    ).toEqual({ status: 'active' });
+  });
+
+  it('rejects catalog additions outside the project default pool', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
+    seedCloudCredential(sqlite, {
+      id: 'project-cloud-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+      provider: 'hetzner',
+    });
+
+    const reconcile = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+    expect(reconcile.status).toBe(200);
+
+    const res = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          catalogAdditions: [
+            {
+              sourceId: 'source-from-another-pool',
+              provider: 'hetzner',
+              location: 'ash',
+              providerInstanceType: 'cx43',
+              providerInstanceSku: null,
+            },
+          ],
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'BAD_REQUEST',
+      details: {
+        missingCatalogAdditions: ['source-from-another-pool:hetzner:ash:cx43'],
+      },
+    });
+  });
+
+  it('chunks catalog addition source reads below the D1 bind limit', async () => {
+    const { sqlite, env } = createEnv({ bindLimit: 100 });
+    seedUser(sqlite, 'user-1');
+    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
+    for (let index = 0; index < 99; index += 1) {
+      seedCloudCredential(sqlite, {
+        id: `project-cloud-${index}`,
+        userId: 'user-1',
+        projectId: 'project-1',
+        provider: 'hetzner',
+      });
+    }
+
+    const reconcile = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+    expect(reconcile.status).toBe(200);
+    const initial = await reconcile.json();
+    const candidateBySourceId = new Map(
+      initial.effective.candidates
+        .filter((candidate: { providerInstanceType: string | null }) => candidate.providerInstanceType)
+        .map((candidate: { capacitySourceId: string }) => [candidate.capacitySourceId, candidate])
+    );
+    const additions = initial.effective.sources.map((source: { id: string }) => {
+      const candidate = candidateBySourceId.get(source.id) as
+        | {
+            provider: string;
+            location: string;
+            providerInstanceType: string;
+            providerInstanceSku?: string | null;
+          }
+        | undefined;
+      if (!candidate) throw new Error(`Missing candidate for source ${source.id}`);
+      return {
+        sourceId: source.id,
+        provider: candidate.provider,
+        location: candidate.location,
+        providerInstanceType: candidate.providerInstanceType,
+        providerInstanceSku: candidate.providerInstanceSku ?? null,
+      };
+    });
+    expect(additions).toHaveLength(99);
+
+    const res = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ catalogAdditions: additions }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      effectiveScope: 'project',
+      effective: {
+        pool: { scope: 'project', ownerProjectId: 'project-1' },
+      },
+    });
+  });
+
   it('preserves edited project candidate statuses during GET ensure=true reconciliation', async () => {
     const { sqlite, env } = createEnv({ bindLimit: 100 });
     seedUser(sqlite, 'user-1');

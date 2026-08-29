@@ -21,9 +21,11 @@ import {
 } from './capacity-pools';
 import { ensureCandidatesForSource } from './default-capacity-pool-candidates';
 import {
+  CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE,
   defaultCapacitySourceId,
   defaultPoolId,
   type DefaultPoolScopeIdentity,
+  externalCapacitySourceCredentialId,
 } from './default-capacity-pool-helpers';
 import {
   buildProviderCatalogForCredential,
@@ -386,23 +388,77 @@ async function ensureDefaultPoolForCredentialSeeds(
     }));
 
   for (const seed of seeds) {
-    const existingSource = await findCapacitySourceForCredential(db, seed);
-    if (!seed.active) {
+    const materializedSeed = seed.active
+      ? await materializeCapacitySourceCredential(db, seed)
+      : seed;
+    const existingSource = await findCapacitySourceForCredential(db, materializedSeed);
+    if (!materializedSeed.active) {
       if (existingSource) await disableCapacitySourceAvailability(db, pool.id, existingSource.id);
       continue;
     }
 
     const source = existingSource
-      ? await updateCapacitySourceForSeed(db, existingSource.id, seed)
-      : await insertCapacitySourceForSeed(db, seed);
+      ? await updateCapacitySourceForSeed(db, existingSource.id, materializedSeed)
+      : await insertCapacitySourceForSeed(db, materializedSeed);
 
-    const offerings = await resolveOfferingsForSeed(seed, options);
-    await ensureCandidatesForSource(db, pool.id, source.id, seed.provider, offerings);
+    const offerings = await resolveOfferingsForSeed(materializedSeed, options);
+    await ensureCandidatesForSource(db, pool.id, source.id, materializedSeed.provider, offerings);
   }
 
-  await disableCapacitySourcesMissingFromSeeds(db, pool.id, scope, activeSeeds);
+  await disableCapacitySourcesMissingFromSeeds(
+    db,
+    pool.id,
+    scope,
+    await Promise.all(activeSeeds.map((seed) => materializeCapacitySourceCredential(db, seed)))
+  );
   await reconcileDefaultPoolStatus(db, pool.id);
   return readDefaultPoolSummary(db, scope);
+}
+
+async function materializeCapacitySourceCredential(
+  db: Db,
+  seed: CredentialCapacitySeed
+): Promise<CredentialCapacitySeed> {
+  if (seed.credentialId || seed.platformCredentialId || !seed.externalSourceRef) return seed;
+
+  const ownerUserId = seed.createdBy ?? seed.ownerUserId;
+  if (!ownerUserId) {
+    throw new Error(`External capacity source seed ${seed.id} has no owning user`);
+  }
+
+  const credentialId = externalCapacitySourceCredentialId(seed.externalSourceRef);
+  const now = new Date().toISOString();
+  await db
+    .insert(schema.credentials)
+    .values({
+      id: credentialId,
+      userId: ownerUserId,
+      projectId: seed.scope === 'project' ? seed.ownerProjectId : null,
+      provider: seed.provider,
+      credentialType: CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE,
+      credentialKind: 'api-key',
+      isActive: seed.active,
+      encryptedToken: seed.encryptedToken,
+      iv: seed.iv,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: schema.credentials.id,
+      set: {
+        userId: ownerUserId,
+        projectId: seed.scope === 'project' ? seed.ownerProjectId : null,
+        provider: seed.provider,
+        credentialType: CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE,
+        credentialKind: 'api-key',
+        isActive: seed.active,
+        encryptedToken: seed.encryptedToken,
+        iv: seed.iv,
+        updatedAt: now,
+      },
+    });
+
+  return { ...seed, credentialId };
 }
 
 async function resolveOfferingsForSeed(
@@ -519,15 +575,15 @@ async function findCapacitySourceForCredential(
   seed: CredentialCapacitySeed
 ): Promise<schema.CapacitySource | null> {
   let credentialPredicate;
-  if (seed.credentialId) {
-    credentialPredicate = eq(schema.capacitySources.credentialId, seed.credentialId);
-  } else if (seed.platformCredentialId) {
+  if (seed.platformCredentialId) {
     credentialPredicate = eq(
       schema.capacitySources.platformCredentialId,
       seed.platformCredentialId
     );
   } else if (seed.externalSourceRef) {
     credentialPredicate = eq(schema.capacitySources.externalSourceRef, seed.externalSourceRef);
+  } else if (seed.credentialId) {
+    credentialPredicate = eq(schema.capacitySources.credentialId, seed.credentialId);
   } else if (seed.credentialReference) {
     credentialPredicate = eq(schema.capacitySources.credentialReference, seed.credentialReference);
   } else {
@@ -644,13 +700,8 @@ async function disableCapacitySourcesMissingFromSeeds(
   const rows = await db
     .select({ source: schema.capacitySources })
     .from(schema.capacitySources)
-    .innerJoin(
-      schema.capacityPoolCandidates,
-      eq(schema.capacityPoolCandidates.capacitySourceId, schema.capacitySources.id)
-    )
     .where(
       and(
-        eq(schema.capacityPoolCandidates.poolId, poolId),
         eq(schema.capacitySources.sourceKind, SOURCE_KIND_CLOUD_PROVIDER),
         eq(schema.capacitySources.status, ACTIVE_STATUS),
         ...sourceScopePredicates(scope)
@@ -670,16 +721,16 @@ async function disableCapacitySourcesMissingFromSeeds(
 }
 
 function sourceIdentityKeyForSeed(seed: CredentialCapacitySeed): string {
-  if (seed.credentialId) return `credential:${seed.credentialId}`;
   if (seed.platformCredentialId) return `platform:${seed.platformCredentialId}`;
   if (seed.externalSourceRef) return `external:${seed.externalSourceRef}`;
+  if (seed.credentialId) return `credential:${seed.credentialId}`;
   return `reference:${seed.credentialReference}`;
 }
 
 function sourceIdentityKeyForRow(source: schema.CapacitySource): string | null {
-  if (source.credentialId) return `credential:${source.credentialId}`;
   if (source.platformCredentialId) return `platform:${source.platformCredentialId}`;
   if (source.externalSourceRef) return `external:${source.externalSourceRef}`;
+  if (source.credentialId) return `credential:${source.credentialId}`;
   if (source.credentialReference) return `reference:${source.credentialReference}`;
   return null;
 }

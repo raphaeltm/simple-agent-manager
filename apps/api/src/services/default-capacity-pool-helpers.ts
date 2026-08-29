@@ -18,6 +18,8 @@ export interface DefaultCapacitySourceReference {
   externalSourceRef?: string | null;
 }
 
+export const CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE = 'capacity-source-external-ref';
+
 export function orderedLocationsForProvider(provider: CredentialProvider) {
   const locations = getLocationsForProvider(provider);
   const defaultLocation = getDefaultLocationForProvider(provider);
@@ -42,13 +44,17 @@ export function defaultCapacitySourceId(seed: DefaultCapacitySourceReference): s
   if (seed.platformCredentialId) {
     return `cap-source-default:platform:${seed.platformCredentialId}`;
   }
-  if (seed.credentialId) {
-    return `cap-source-default:${seed.scope}:${seed.credentialId}`;
-  }
   if (seed.externalSourceRef) {
     return `cap-source-default:${seed.scope}:external:${encodeURIComponent(seed.externalSourceRef)}`;
   }
+  if (seed.credentialId) {
+    return `cap-source-default:${seed.scope}:${seed.credentialId}`;
+  }
   return `cap-source-default:${seed.scope}:unknown`;
+}
+
+export function externalCapacitySourceCredentialId(externalSourceRef: string): string {
+  return `cap-source-external-credential:${encodeURIComponent(externalSourceRef)}`;
 }
 
 export function defaultCandidateId(

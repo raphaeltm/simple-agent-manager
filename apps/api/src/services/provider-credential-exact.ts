@@ -261,6 +261,8 @@ async function createProviderForExactComposableCredential<TEnv extends Env>(
         eq(schema.ccConfigurations.consumerKind, 'compute'),
         eq(schema.ccConfigurations.consumerTarget, targetProvider),
         eq(schema.ccConfigurations.isActive, true),
+        eq(schema.ccConfigurations.ownerId, schema.ccAttachments.userId),
+        eq(schema.ccCredentials.ownerId, schema.ccConfigurations.ownerId),
         ...attachmentPredicates
       )
     )

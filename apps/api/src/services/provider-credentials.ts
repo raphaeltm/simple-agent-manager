@@ -408,12 +408,13 @@ async function createProviderForUserLegacy(
 }
 
 /**
- * Lightweight credential source resolution — determines whether 'user' or 'platform'
- * credentials would be used for a given target provider WITHOUT decrypting tokens
- * or instantiating provider instances. Used for quota enforcement gating.
+ * Lightweight credential source resolution — determines whether project, user,
+ * or platform credentials would be used for a given target provider WITHOUT
+ * decrypting tokens or instantiating provider instances. Used for quota
+ * enforcement gating.
  *
- * Returns 'user' if the user has a cloud-provider credential for the target provider,
- * 'platform' if only a platform credential is available, or null if no credential exists.
+ * Returns the first available source in project → user → platform precedence,
+ * or null if no credential exists.
  */
 export async function resolveCredentialSource(
   db: ReturnType<typeof drizzle>,

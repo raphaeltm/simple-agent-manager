@@ -141,7 +141,7 @@ Optional query parameters:
 
 | Parameter   | Values                            | Description                                                                                    |
 | ----------- | --------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `scope`     | `user`, `project`, `installation` | Selects the credential scope to inspect. Omit it for the authenticated user's default catalog. |
+| `scope`     | `user`, `project`, `installation` | Selects the credential scope to inspect. Omit it for the authenticated user's personal catalog. |
 | `projectId` | Project ID                        | Required when `scope=project`; the caller must have the project `secret:read` capability.      |
 
 Installation scope is restricted to superadmins and uses enabled platform compute credentials.
@@ -149,6 +149,9 @@ User scope uses the caller's active personal compute credentials. Project scope 
 compute credentials attached to that project after project `secret:read` authorization, including
 composable-credential attachments from other project members. Effective default pool summaries expose
 project → user → installation fallback separately.
+
+If no credentials are visible for the requested scope, the response still returns `catalogs: []`
+with `credentialSetupRequired: true` and a `credentialSetupMessage` suitable for setup UI.
 
 ## Capacity pools
 
@@ -173,8 +176,26 @@ credentials.
 
 ### `PATCH /api/capacity-pools/defaults`
 
-Update the authenticated user's owned default-pool policy or candidate statuses. This endpoint does
-not mutate project or installation fallback pools.
+Update the authenticated user's owned default-pool policy, candidate statuses, or provider-native
+`catalogAdditions`. This endpoint does not mutate project or installation fallback pools.
+
+`catalogAdditions` reactivates a currently available provider-native offering from the same
+credential-scoped catalog used by reconciliation. It identifies the active source plus concrete
+provider/location/instance type; it does not accept secret material:
+
+```json
+{
+  "catalogAdditions": [
+    {
+      "sourceId": "cap-source-default:user:user-credential-id",
+      "provider": "hetzner",
+      "location": "fsn1",
+      "providerInstanceType": "cpx62",
+      "providerInstanceSku": null
+    }
+  ]
+}
+```
 
 ### `GET /api/projects/:id/capacity-pools/defaults`
 
@@ -205,7 +226,8 @@ Superadmin only.
 
 ### `PATCH /api/admin/capacity-pools/defaults`
 
-Update only the installation-owned default-pool policy or candidate statuses. Superadmin only.
+Update only the installation-owned default-pool policy, candidate statuses, or provider-native
+`catalogAdditions`. Superadmin only.
 
 ## GitHub
 

@@ -114,6 +114,13 @@ Connect one under **Settings → Connections**: pick a provider, follow the link
 
 SAM resolves compute through project, personal, then platform/installation credentials. If none of those are available for your workspace, use an agent profile set to the **Instant container** runtime — see [Instant Sessions](/docs/guides/instant-sessions/#am-i-on-an-instant-session).
 
+Infrastructure **Compute Pools** now expose the concrete provider-native catalog behind those
+credentials. Project, personal, and installation pools can be reconciled from the full provider
+catalog, then edited by adding or removing specific instance types and filtering by provider,
+location, vCPU, memory, and price. Removed entries stay removed until you add them back, and old
+small/medium/large presets are only used as migration hints for older profiles rather than as the
+editing catalog.
+
 ### Claude Opus 5 is available
 
 Anthropic's **Claude Opus 5** — a frontier model with a 1M-token context window — is now selectable for Claude Code (and through the SAM AI proxy). Choose it in an [agent profile](/docs/guides/agents/#agent-profiles): the model you set on a profile is the model that runs when you pick that profile for a chat or attach it to a trigger.

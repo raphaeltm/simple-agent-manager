@@ -59,8 +59,13 @@ function db(): Database.Database {
       project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
       provider TEXT NOT NULL,
       credential_type TEXT NOT NULL DEFAULT 'cloud-provider',
+      agent_type TEXT,
+      credential_kind TEXT NOT NULL DEFAULT 'api-key',
+      is_active INTEGER NOT NULL DEFAULT 1,
       encrypted_token TEXT NOT NULL,
-      iv TEXT NOT NULL
+      iv TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE platform_credentials (
@@ -72,6 +77,43 @@ function db(): Database.Database {
       iv TEXT NOT NULL,
       is_enabled INTEGER NOT NULL DEFAULT 1,
       created_by TEXT NOT NULL REFERENCES users(id)
+    );
+
+    CREATE TABLE cc_credentials (
+      id TEXT PRIMARY KEY,
+      owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      encrypted_token TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE cc_configurations (
+      id TEXT PRIMARY KEY,
+      owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      consumer_kind TEXT NOT NULL,
+      consumer_target TEXT NOT NULL,
+      credential_id TEXT REFERENCES cc_credentials(id) ON DELETE SET NULL,
+      settings_json TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE cc_attachments (
+      id TEXT PRIMARY KEY,
+      configuration_id TEXT NOT NULL REFERENCES cc_configurations(id) ON DELETE CASCADE,
+      consumer_kind TEXT NOT NULL,
+      consumer_target TEXT NOT NULL,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE nodes (
@@ -671,7 +713,7 @@ describe('0127_concrete_capacity_pool_offerings migration', () => {
 });
 
 describe('0129_capacity_source_external_credentials migration', () => {
-  it('preserves existing source and candidate rows while allowing composable credential refs', () => {
+  it('adds provider-native catalog indexes without rewriting capacity rows', () => {
     const database = db();
     database.exec(migrationSql);
     database.exec(candidateSnapshotMigrationSql);
@@ -717,6 +759,29 @@ describe('0129_capacity_source_external_credentials migration', () => {
 
     database.exec(capacitySourceExternalCredentialsMigrationSql);
 
+    const indexNames = database
+      .prepare(
+        `
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'index'
+          AND name IN (
+            'idx_credentials_cloud_provider_project_active',
+            'idx_credentials_cloud_provider_user_project_active',
+            'idx_cc_attachments_project_compute_active',
+            'idx_capacity_pool_candidates_pool_order'
+          )
+        ORDER BY name
+      `
+      )
+      .all()
+      .map((row) => (row as { name: string }).name);
+    expect(indexNames).toEqual([
+      'idx_capacity_pool_candidates_pool_order',
+      'idx_cc_attachments_project_compute_active',
+      'idx_credentials_cloud_provider_project_active',
+      'idx_credentials_cloud_provider_user_project_active',
+    ]);
     expect(
       database
         .prepare(
@@ -782,25 +847,6 @@ describe('0129_capacity_source_external_credentials migration', () => {
         .get()
     ).toEqual({ capacity_source_id: 'source-user-credential' });
 
-    run(`
-      INSERT INTO capacity_sources
-        (
-          id, scope, owner_user_id, source_kind, provider, credential_source,
-          credential_reference, external_source_ref
-        )
-      VALUES
-        (
-          'source-cc-credential', 'user', 'user-1', 'cloud-provider-credential',
-          'hetzner', 'user', 'cc_credentials:cc-cred-1', 'cc_attachments:cc-att-1'
-        )
-    `);
-    run(`
-      INSERT INTO capacity_pool_candidates
-        (id, pool_id, capacity_source_id, provider, location, workload_role, runtime, machine_class, machine_size)
-      VALUES
-        ('candidate-cc', 'pool-primary', 'source-cc-credential', 'hetzner', 'fsn1', 'workspace', 'vm', 'shared-vm', 'large')
-    `);
-
     expect(() =>
       run(`
         INSERT INTO capacity_sources
@@ -810,5 +856,13 @@ describe('0129_capacity_source_external_credentials migration', () => {
       `)
     ).toThrow();
     expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
+
+  it('contains no destructive statements', () => {
+    const sql = capacitySourceExternalCredentialsMigrationSql.toUpperCase();
+    expect(sql).not.toContain('DROP TABLE');
+    expect(sql).not.toContain('DELETE FROM');
+    expect(sql).not.toContain('PRAGMA FOREIGN_KEYS = OFF');
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS IDX_CREDENTIALS_CLOUD_PROVIDER_PROJECT_ACTIVE');
   });
 });

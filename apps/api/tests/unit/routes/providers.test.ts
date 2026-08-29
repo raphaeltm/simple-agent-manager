@@ -249,7 +249,7 @@ describe('GET /api/providers/catalog', () => {
     expect(mockProvider.listInstanceOfferings).toHaveBeenCalledWith({ preferApi: true });
   });
 
-  it('identifies project-scoped provider catalogs separately from user credentials', async () => {
+  it('identifies project-scoped provider catalogs on the authorized project scope', async () => {
     createMockDB([
       {
         id: 'project-credential-1',
@@ -268,7 +268,11 @@ describe('GET /api/providers/catalog', () => {
     });
     mockCreateProvider.mockReturnValue(mockProvider);
 
-    const res = await app.request('/api/providers/catalog', { method: 'GET' }, makeEnv());
+    const res = await app.request(
+      '/api/providers/catalog?scope=project&projectId=project-1',
+      { method: 'GET' },
+      makeEnv()
+    );
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as ProviderCatalogResponse;

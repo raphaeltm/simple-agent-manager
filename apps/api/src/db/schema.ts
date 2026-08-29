@@ -34,8 +34,9 @@
 //     a session in the ProjectData Durable Object, not a D1 table).
 //
 // Credential tables:
-//   - `credentials`: Per-user credentials (BYOC model). Users provide their own
-//     cloud provider tokens and agent API keys. Encrypted per-user, cascade on
+//   - `credentials`: Legacy per-user/project credentials (BYOC model) plus
+//     non-user-facing capacity-source FK mirrors. Users provide their own cloud
+//     provider tokens and agent API keys. Encrypted per credential, cascade on
 //     user delete.
 //   - `platformCredentials`: Admin-managed fallback credentials shared across
 //     users. Used when a user lacks their own credential. No cascade on creator
@@ -2400,7 +2401,7 @@ export const platformCredentials = sqliteTable(
   {
     id: text('id').primaryKey(),
     credentialType: text('credential_type').notNull(), // 'cloud-provider' | 'agent-api-key'
-    /** Null for agent-api-key type. Set to 'hetzner' | 'scaleway' | 'gcp' for cloud-provider type. */
+    /** Null for agent-api-key type. Set to a supported provider id for cloud-provider type. */
     provider: text('provider'),
     /** Null for cloud-provider type. Set to 'claude-code' | 'openai-codex' for agent-api-key type. */
     agentType: text('agent_type'),

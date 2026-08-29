@@ -537,22 +537,24 @@ Infrastructure changes require testing before production deployment.
 
 ## Multi-Tenant Architecture Guidelines
 
-This platform operates as a multi-tenant SaaS where users bring their own cloud credentials. We manage
-authentication, orchestration, and workspace metadata while users retain ownership of their infrastructure.
+This platform operates as a multi-tenant SaaS where compute can come from project, user, or
+installation/platform cloud credentials. We manage authentication, orchestration, and workspace
+metadata while the selected provider account retains ownership and billing for the infrastructure.
 
 ### Data Ownership Model
 
 **What We Store (Cloudflare D1/KV):**
 
 - User profiles (from GitHub OAuth)
-- User's Hetzner API tokens (AES-GCM encrypted with per-user initialization vectors)
+- Cloud-provider credentials for supported compute providers (AES-GCM encrypted with unique
+  initialization vectors)
 - Workspace metadata (name, repo, status, VM ID, DNS record ID)
 - JWT signing keys
 - Sessions and rate limiting data
 
 **What We DON'T Store:**
 
-- VMs (created on user's Hetzner account, billed to them)
+- VMs (created in the selected project, user, or platform cloud provider account and billed there)
 - Code (lives on Git provider and in user's VMs)
 
 **Rules:**
@@ -560,7 +562,8 @@ authentication, orchestration, and workspace metadata while users retain ownersh
 - Users MUST be able to delete all their data via account deletion
 - Encrypted credentials use AES-GCM with unique IVs per credential
 - Workspace metadata is soft-deleted first, hard-deleted after 30 days
-- Users can revoke their Hetzner token at any time (workspaces stop working)
+- Users or admins can revoke provider credentials at any time; future reconciliation and
+  provisioning fall back only to still-active project → user → installation credentials.
 
 ### User Credential Security
 
@@ -570,7 +573,8 @@ authentication, orchestration, and workspace metadata while users retain ownersh
 - Credentials are decrypted only at point of use (just-in-time)
 - Encryption key is a Worker secret, never in source code
 - Failed decryption attempts are logged for security monitoring
-- Credential rotation: users can update their Hetzner token without recreating workspaces
+- Credential rotation: users and admins can update provider credentials without recreating
+  existing workspaces.
 
 ### Privacy Principles
 

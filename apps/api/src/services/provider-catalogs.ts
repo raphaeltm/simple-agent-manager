@@ -157,17 +157,7 @@ export async function listAuthenticatedProviderCatalogSeeds(
   db: Db,
   input: { userId: string; activeOnly?: boolean }
 ): Promise<ProviderCatalogCredentialSeed[]> {
-  return dedupeCatalogSeeds([
-    ...(await listComposableProviderCatalogSeeds(db, {
-      userId: input.userId,
-      activeOnly: input.activeOnly,
-    })),
-    ...(await listLegacyProviderCatalogSeeds(db, {
-      userId: input.userId,
-      scope: 'authenticated',
-      activeOnly: input.activeOnly,
-    })),
-  ]);
+  return listUserProviderCatalogSeeds(db, input);
 }
 
 export async function listUserProviderCatalogSeeds(
@@ -265,7 +255,7 @@ async function listLegacyProviderCatalogSeeds(
       : [
           eq(schema.credentials.userId, input.userId),
           eq(schema.credentials.credentialType, 'cloud-provider'),
-          ...(input.scope === 'user' ? [isNull(schema.credentials.projectId)] : []),
+          isNull(schema.credentials.projectId),
         ];
   if (input.activeOnly) predicates.push(eq(schema.credentials.isActive, true));
 
@@ -319,6 +309,8 @@ async function listComposableProviderCatalogSeeds(
   const predicates = [
     eq(schema.ccAttachments.consumerKind, 'compute'),
     eq(schema.ccCredentials.kind, 'cloud-provider'),
+    eq(schema.ccConfigurations.ownerId, schema.ccAttachments.userId),
+    eq(schema.ccCredentials.ownerId, schema.ccConfigurations.ownerId),
   ];
   if (input.userId && input.scope !== 'project') {
     predicates.push(eq(schema.ccAttachments.userId, input.userId));
@@ -327,6 +319,8 @@ async function listComposableProviderCatalogSeeds(
     predicates.push(isNull(schema.ccAttachments.projectId));
   } else if (input.scope === 'project') {
     predicates.push(eq(schema.ccAttachments.projectId, input.projectId ?? ''));
+  } else if (input.userId && !input.projectId) {
+    predicates.push(isNull(schema.ccAttachments.projectId));
   } else if (input.projectId) {
     const projectScopePredicate = or(
       isNull(schema.ccAttachments.projectId),

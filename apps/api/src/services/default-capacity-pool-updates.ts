@@ -41,7 +41,7 @@ export interface DefaultCapacityPoolUpdateResult {
 type CandidateStatusUpdate = { id: string; status: CapacityPoolStatus };
 type PolicyUpdate = NonNullable<DefaultCapacityPoolUpdateInput['policy']>;
 const READ_CANDIDATE_STATUS_CHUNK_SIZE = D1_MAX_BOUND_PARAMETERS - 1;
-const READ_SOURCE_CHUNK_SIZE = D1_MAX_BOUND_PARAMETERS - 1;
+const READ_SOURCE_CHUNK_SIZE = D1_MAX_BOUND_PARAMETERS - 3;
 
 interface CandidateStatusUpdateResult {
   changed: boolean;

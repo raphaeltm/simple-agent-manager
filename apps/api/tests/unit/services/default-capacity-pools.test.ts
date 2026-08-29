@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -14,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { externalCapacitySourceCredentialId } from '../../../src/services/default-capacity-pool-helpers';
 import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
 import {
   backfillDefaultCapacityPoolsForExistingCredentials,
@@ -53,7 +55,7 @@ const capacitySourceExternalCredentialsMigrationSql = readFileSync(
 );
 
 let sqlite: Database.Database | null = null;
-const TEST_ENCRYPTION_KEY = 'iZEI8rg5FHtTo2yvt6Qw3m4z6aTfqj5MdLEGqOvdqw0=';
+const TEST_ENCRYPTION_KEY = Buffer.from('0123456789abcdef0123456789abcdef').toString('base64');
 const originalFetch = globalThis.fetch;
 
 function createDb() {
@@ -1060,7 +1062,7 @@ describe('default capacity pool creation', () => {
       scope: 'user',
       provider: 'hetzner',
       credentialSource: 'user',
-      credentialId: null,
+      credentialId: externalCapacitySourceCredentialId('cc_attachments:cc-att-user'),
       platformCredentialId: null,
       credentialReference: 'cc_credentials:cc-cred-user',
       externalSourceRef: 'cc_attachments:cc-att-user',
@@ -1069,7 +1071,7 @@ describe('default capacity pool creation', () => {
       scope: 'project',
       provider: 'vultr',
       credentialSource: 'project',
-      credentialId: null,
+      credentialId: externalCapacitySourceCredentialId('cc_attachments:cc-att-project'),
       platformCredentialId: null,
       credentialReference: 'cc_credentials:cc-cred-project',
       externalSourceRef: 'cc_attachments:cc-att-project',
@@ -1084,6 +1086,25 @@ describe('default capacity pool creation', () => {
       providerInstanceType: 'vultr-native-large',
       providerInstanceCatalogSource: 'api',
     });
+    expect(
+      getRows<{ id: string; credential_type: string; provider: string }>(`
+        SELECT id, credential_type, provider
+        FROM credentials
+        WHERE credential_type = 'capacity-source-external-ref'
+        ORDER BY id
+      `)
+    ).toEqual([
+      {
+        id: externalCapacitySourceCredentialId('cc_attachments:cc-att-project'),
+        credential_type: 'capacity-source-external-ref',
+        provider: 'vultr',
+      },
+      {
+        id: externalCapacitySourceCredentialId('cc_attachments:cc-att-user'),
+        credential_type: 'capacity-source-external-ref',
+        provider: 'hetzner',
+      },
+    ]);
   });
 
   it('disables active composable sources that disappeared from current credential seeds', async () => {
@@ -1159,6 +1180,73 @@ describe('default capacity pool creation', () => {
         },
       ])
     );
+  });
+
+  it('disables stale scoped sources even when they have no candidates', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
+    sqlite
+      ?.prepare(
+        `
+        INSERT INTO credentials (
+          id, user_id, project_id, provider, credential_type, is_active,
+          encrypted_token, iv, created_at, updated_at
+        )
+        VALUES
+          (
+            'orphan-source-ref', 'user-1', NULL, 'hetzner',
+            'capacity-source-external-ref', 1,
+            'orphan-ciphertext', 'orphan-iv',
+            '2026-08-28T00:00:00.000Z', '2026-08-28T00:00:00.000Z'
+          )
+      `
+      )
+      .run();
+    sqlite
+      ?.prepare(
+        `
+        INSERT INTO capacity_pools
+          (id, scope, owner_user_id, owner_project_id, name, is_default, status)
+        VALUES
+          ('cap-pool-default:user:user-1', 'user', 'user-1', NULL, 'User default', 1, 'active')
+      `
+      )
+      .run();
+    sqlite
+      ?.prepare(
+        `
+        INSERT INTO capacity_sources
+          (
+            id, scope, owner_user_id, owner_project_id, source_kind, provider,
+            credential_source, credential_id, platform_credential_id,
+            credential_reference, status, created_by
+          )
+        VALUES
+          (
+            'source-no-candidates', 'user', 'user-1', NULL, 'cloud-provider-credential',
+            'hetzner', 'user', 'orphan-source-ref', NULL,
+            'credentials:orphan-source-ref', 'active', 'user-1'
+          )
+      `
+      )
+      .run();
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async (seed) => [
+        liveHetznerOffering({
+          provider: seed.provider,
+          location: 'ewr',
+          providerInstanceType: `${seed.provider}-native-large`,
+          displayName: `${seed.provider} native large`,
+        }),
+      ],
+    });
+
+    expect(
+      sqlite?.prepare(`SELECT status FROM capacity_sources WHERE id = 'source-no-candidates'`).get()
+    ).toEqual({ status: 'disabled' });
   });
 
   it('activates refreshed catalog additions and places work on the provider-native SKU', async () => {
