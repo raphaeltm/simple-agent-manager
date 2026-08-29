@@ -6,7 +6,7 @@ export const EVENT_BUS_TOOLS = [
   {
     name: 'get_event',
     description:
-      'Fetch one durable project event by stable event ID when it is visible through a subscription owned by or targeted at the calling agent. Returns normalized metadata and the full payload. Caller identity is derived from the MCP token.',
+      'Fetch one durable project event by stable event ID when it is visible through an active, unexpired subscription owned by or targeted at the calling agent. Returns normalized metadata and the full payload. Caller identity is derived from the MCP token.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -23,7 +23,7 @@ export const EVENT_BUS_TOOLS = [
   {
     name: 'list_subscription_events',
     description:
-      'Cursor-paginate durable event deliveries visible through one authorized subscription. Use this after waking to retrieve missed or queued events. Summaries never include payload; call get_event with an event ID for full payload.',
+      'Cursor-paginate durable event deliveries visible through one authorized active/unexpired subscription. Use this after waking to retrieve missed or queued events. Summaries never include payload; call get_event with an event ID for full payload.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -33,7 +33,7 @@ export const EVENT_BUS_TOOLS = [
           description: 'Authorized durable event-bus subscription ID',
         },
         limit: {
-          type: 'number',
+          type: 'integer',
           minimum: 1,
           description:
             'Optional page size. Oversized values are capped by MCP_EVENT_BUS_LIST_MAX.',
@@ -52,7 +52,7 @@ export const EVENT_BUS_TOOLS = [
   {
     name: 'ack_event_delivery',
     description:
-      'Idempotently acknowledge a durable event delivery when that subscription delivery policy requires acknowledgement. Rejects deliveries that do not require ack.',
+      'Idempotently acknowledge an already-acknowledged durable event delivery, or acknowledge a queued/delivered delivery when that subscription delivery policy requires acknowledgement. Rejects non-ack, failed, and expired deliveries.',
     inputSchema: {
       type: 'object' as const,
       properties: {

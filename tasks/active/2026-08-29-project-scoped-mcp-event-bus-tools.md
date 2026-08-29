@@ -23,7 +23,7 @@ This task adds the MCP-facing read/ack layer without deploying or mutating stagi
 - [x] Add append-only ProjectData DO migration for durable event-bus events, subscriptions, delivery policies, and deliveries.
 - [x] Add ProjectData event-bus module with stable event IDs, normalized metadata/payload handling, subscription visibility checks, cursor pagination, and idempotent acknowledgement.
 - [x] Add project-data service wrapper methods for event lookup, subscription delivery listing, and delivery acknowledgement.
-- [ ] Add MCP tools:
+- [x] Add MCP tools:
   - [x] `get_event`
   - [x] `list_subscription_events`
   - [x] `ack_event_delivery`
@@ -31,10 +31,12 @@ This task adds the MCP-facing read/ack layer without deploying or mutating stagi
 - [x] Return nondisclosing errors for nonexistent and unauthorized event/subscription/delivery cases.
 - [x] Keep list summaries payload-free; return full payload only from the single-event fetch path.
 - [x] Use environment-configurable bounded limits and opaque/stable cursors.
+- [x] Bound persisted event metadata/payload bytes and include event-bus bytes in ProjectData storage telemetry.
+- [x] Use delivery-sequence pagination indexes and bounded retention for old events without pending ack-required deliveries.
 - [x] Register tool definitions consistently in MCP `tools/list`.
 - [x] Update MCP API reference and environment/configuration docs.
 - [x] Add comprehensive tests for success, pagination, missed events, ownership/project boundaries, nonexistent-vs-unauthorized non-disclosure, malformed cursors/limits, idempotent ack, and ack-policy behavior.
-- [ ] Run local validation and requested specialist reviews.
+- [x] Run local validation and requested specialist reviews.
 - [ ] Open a draft PR; do not deploy staging and do not merge.
 
 ## Acceptance criteria
@@ -46,6 +48,7 @@ This task adds the MCP-facing read/ack layer without deploying or mutating stagi
 - [x] Cross-project or ownership-boundary access is rejected at read/ack time without distinguishing unauthorized from nonexistent records.
 - [x] Cursors are opaque, stable, bound to the requested subscription, and rejected when malformed.
 - [x] Limits are bounded and configurable; hardcoded operational limits are avoided.
+- [x] Read/ack authorization requires the subscription to remain active and unexpired.
 - [x] MCP reference/docs and tool registration match implementation.
 - [x] Tests cover all requested scenarios and pass locally.
 
@@ -62,9 +65,30 @@ This task adds the MCP-facing read/ack layer without deploying or mutating stagi
 
 Current evidence:
 
-- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/event-bus.test.ts tests/unit/routes/mcp-event-bus-tools.test.ts` — 17 tests passed
-- `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/event-bus-do.test.ts` — 1 workers-pool test passed
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/event-bus.test.ts tests/unit/routes/mcp-event-bus-tools.test.ts` — 25 tests passed
+- `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/event-bus-do.test.ts` — 4 workers-pool tests passed, including real `/mcp` vertical coverage
 - `pnpm --filter @simple-agent-manager/api typecheck` — passed
+- `pnpm --filter @simple-agent-manager/api lint` — passed
+- `pnpm --filter @simple-agent-manager/shared typecheck` — passed
+- `pnpm --filter @simple-agent-manager/shared build` — passed
+- `pnpm --filter @simple-agent-manager/www typecheck` — passed with existing baseline Astro template findings only
+- `pnpm format:check` — passed
+- `pnpm quality:do-migration-safety` — passed
+- `pnpm quality:file-sizes` — passed
+- `pnpm quality:skill-references` — passed
+- `pnpm quality:type-boundaries` — passed
+- `pnpm quality:source-contract-tests` — passed
+- `pnpm quality:wrangler-bindings` — passed
+- `git diff --check` — passed
+
+## Review findings and disposition
+
+- `$api-reference`: initial findings on fractional limits and narrower identity-field rejection. Addressed with integer-only limit handling, server-side unexpected-parameter rejection, snake_case identity-field rejection, and tests.
+- `$cloudflare-specialist`: initial findings on unbounded payload storage, list payload reads, non-covered pagination ordering, active-subscription scan shape, per-row delivered updates, and duplicate indexes. Addressed with configurable metadata/payload byte caps, payload-free summary queries, `event_sequence` on deliveries plus `(subscription_id, event_sequence, id)` index, normalized event-type routing table plus routing index and route cap, bulk delivered marking, redundant index removal, retention, and storage telemetry accounting.
+- `$security-auditor`: initial findings on closed/expired subscription authorization and cursor validation. Addressed with active/unexpired read/ack predicates and route/DO cursor length, alphabet, and structural validation that maps to `Invalid cursor`.
+- `$doc-sync-validator`: initial findings on ack terminal-state docs and ProjectData table inventory. Addressed in tool definitions, API reference, guide docs, architecture inventory, `CLAUDE.md`, `AGENTS.md`, and ProjectData source comments.
+- `$constitution-validator`: passed before the review-fix patch; re-review requested after adding the new env-configurable storage limits.
+- `$test-engineer`: initial findings on missing real `/mcp` vertical coverage, project-boundary coverage, malformed cursor mapping, and terminal ack-state tests. Addressed with workers-pool `/mcp` tests, real D1 project-boundary cases, handler/DO cursor tests, and terminal ack-state unit/handler tests.
 
 ## Review plan
 

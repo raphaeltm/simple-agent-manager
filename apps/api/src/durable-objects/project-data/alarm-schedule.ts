@@ -9,6 +9,8 @@ import { createModuleLogger } from '../../lib/logger';
 import * as acpSessions from './acp-sessions';
 import * as attention from './attention';
 import { resolveDurableExecutionConfig } from './durable-execution-config';
+import { computeEventBusRetentionAlarmTime } from './event-bus';
+import { resolveEventBusStorageConfig } from './event-bus-config';
 import * as idleCleanup from './idle-cleanup';
 import * as mailbox from './mailbox';
 import { computePromptDeliveryAlarmTime } from './prompt-delivery';
@@ -51,6 +53,10 @@ export function computeProjectDataAlarmTime(sql: SqlStorage, env: Env): number |
   const activityProbeTime = computeSessionActivityProbeAlarmTime(sql, env);
   const taskWaitTime = computeTaskWaitAlarmTime(sql);
   const storageSafetyTime = computeStorageSafetyAlarmTime(sql, env);
+  const eventBusRetentionTime = computeEventBusRetentionAlarmTime(
+    sql,
+    resolveEventBusStorageConfig(env)
+  );
 
   const candidates = [
     idleCleanupTime,
@@ -62,6 +68,7 @@ export function computeProjectDataAlarmTime(sql: SqlStorage, env: Env): number |
     activityProbeTime,
     taskWaitTime,
     storageSafetyTime,
+    eventBusRetentionTime,
   ].filter((time): time is number => time !== null);
 
   return candidates.length > 0 ? Math.min(...candidates) : null;

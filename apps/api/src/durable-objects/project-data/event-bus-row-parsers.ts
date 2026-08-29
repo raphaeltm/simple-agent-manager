@@ -1,6 +1,7 @@
 import { expectJsonRecord, parseJsonRecord } from '../../lib/runtime-validation';
 import type {
   EventBusEventRow,
+  EventBusEventSummaryRow,
   EventBusSubscriptionRecord,
   SamEventBusDeliveryInfo,
   SamEventBusDeliveryPolicy,
@@ -18,7 +19,7 @@ import {
 } from './event-bus-contracts';
 
 export function eventToSummary(
-  event: EventBusEventRow,
+  event: EventBusEventSummaryRow,
   delivery: SamEventBusDeliveryInfo
 ): SamEventBusEventSummary {
   return {
@@ -27,7 +28,7 @@ export function eventToSummary(
   };
 }
 
-export function eventToStoredEvent(event: EventBusEventRow): SamEventBusStoredEvent {
+export function eventToStoredEvent(event: EventBusEventSummaryRow): SamEventBusStoredEvent {
   return {
     id: event.id,
     sequence: event.sequence,
@@ -46,7 +47,7 @@ export function parseEventPayload(raw: string): unknown {
   return JSON.parse(raw) as unknown;
 }
 
-export function parseEventRow(row: unknown): EventBusEventRow {
+export function parseEventSummaryRow(row: unknown): EventBusEventSummaryRow {
   const record = expectJsonRecord(row, 'event_bus.event.row');
   return {
     id: requireString(record.id, 'event_bus.event.id'),
@@ -58,9 +59,16 @@ export function parseEventRow(row: unknown): EventBusEventRow {
     actor_type: requireString(record.actor_type, 'event_bus.event.actor_type'),
     actor_id: optionalString(record.actor_id),
     metadata: requireString(record.metadata, 'event_bus.event.metadata'),
-    payload: requireString(record.payload, 'event_bus.event.payload'),
     occurred_at: requireNumber(record.occurred_at, 'event_bus.event.occurred_at'),
     created_at: requireNumber(record.created_at, 'event_bus.event.created_at'),
+  };
+}
+
+export function parseEventRow(row: unknown): EventBusEventRow {
+  const record = expectJsonRecord(row, 'event_bus.event.row');
+  return {
+    ...parseEventSummaryRow(record),
+    payload: requireString(record.payload, 'event_bus.event.payload'),
   };
 }
 
@@ -120,6 +128,31 @@ export function parseEventDeliveryJoinRow(row: unknown): {
   };
 }
 
+export function parseEventDeliverySummaryJoinRow(row: unknown): {
+  event: EventBusEventSummaryRow;
+  delivery: SamEventBusDeliveryInfo;
+} {
+  const record = expectJsonRecord(row, 'event_bus.delivery.summary_join_row');
+  const event = parseEventSummaryRow(record);
+  const deliveryState = requireString(record.delivery_state, 'event_bus.delivery.state');
+  assertDeliveryState(deliveryState);
+  const policy = (optionalString(record.policy) ?? 'none') as SamEventBusDeliveryPolicy;
+  assertDeliveryPolicy(policy);
+  return {
+    event,
+    delivery: {
+      id: requireString(record.delivery_id, 'event_bus.delivery.id'),
+      subscriptionId: requireString(record.subscription_id, 'event_bus.delivery.subscription_id'),
+      state: deliveryState,
+      policy,
+      ackRequired: policy === 'ack_required',
+      createdAt: requireNumber(record.delivery_created_at, 'event_bus.delivery.created_at'),
+      deliveredAt: optionalNumber(record.delivered_at),
+      acknowledgedAt: optionalNumber(record.acknowledged_at),
+    },
+  };
+}
+
 export function parseDeliveryRecordRow(row: unknown): SamEventBusDeliveryRecord {
   const record = expectJsonRecord(row, 'event_bus.delivery.row');
   const state = requireString(record.state, 'event_bus.delivery.state');
@@ -141,7 +174,7 @@ export function parseDeliveryRecordRow(row: unknown): SamEventBusDeliveryRecord 
 
 export function subscriptionMatchesEvent(
   subscription: EventBusSubscriptionRecord,
-  event: EventBusEventRow
+  event: EventBusEventSummaryRow
 ): boolean {
   if (subscription.eventTypes && !subscription.eventTypes.includes(event.type)) return false;
   if (subscription.subject) {

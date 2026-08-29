@@ -6,6 +6,10 @@ import type {
   SamEventBusEventListResult,
   SamEventBusEventSummary,
 } from '../../../src/durable-objects/project-data/event-bus';
+import {
+  EventBusAckStateError,
+  EventBusCursorError,
+} from '../../../src/durable-objects/project-data/event-bus';
 import type { Env } from '../../../src/env';
 import type { JsonRpcResponse, McpTokenData } from '../../../src/routes/mcp/_helpers';
 import { MCP_TOOLS } from '../../../src/routes/mcp/_helpers';
@@ -285,7 +289,7 @@ describe('MCP project event-bus tools', () => {
     const adapter = storage();
     const response = await handleGetEvent(
       1,
-      { eventId: 'event-1', projectId: 'project-2', sessionId: 'session-2' },
+      { eventId: 'event-1', project_id: 'project-2', session_id: 'session-2' },
       token(),
       env(),
       adapter
@@ -294,6 +298,21 @@ describe('MCP project event-bus tools', () => {
     expect(response.error?.code).toBe(-32602);
     expect(response.error?.message).toContain('derived from the MCP token');
     expect(adapter.getEventBusEvent).not.toHaveBeenCalled();
+  });
+
+  it('rejects unexpected parameters before storage access', async () => {
+    const adapter = storage();
+    const response = await handleAckEventDelivery(
+      1,
+      { deliveryId: 'delivery-1', extra: 'ignored' },
+      token(),
+      env(),
+      adapter
+    );
+
+    expect(response.error?.code).toBe(-32602);
+    expect(response.error?.message).toBe('Unexpected parameter: extra');
+    expect(adapter.acknowledgeEventBusDelivery).not.toHaveBeenCalled();
   });
 
   it('rejects malformed list cursors and structurally invalid limits', async () => {
@@ -312,9 +331,44 @@ describe('MCP project event-bus tools', () => {
       env(),
       adapter
     );
+    const fractionalLimit = await handleListSubscriptionEvents(
+      3,
+      { subscriptionId: 'sub-1', limit: 0.99 },
+      token(),
+      env(),
+      adapter
+    );
+    const zeroLimit = await handleListSubscriptionEvents(
+      4,
+      { subscriptionId: 'sub-1', limit: 0 },
+      token(),
+      env(),
+      adapter
+    );
 
     expect(malformedCursor.error?.message).toBe('cursor must be a string when provided');
     expect(malformedLimit.error?.message).toBe('limit must be a finite number when provided');
+    expect(fractionalLimit.error?.message).toBe('limit must be an integer when provided');
+    expect(zeroLimit.error?.message).toBe('limit must be greater than 0');
+    expect(adapter.listEventBusSubscriptionEvents).not.toHaveBeenCalled();
+  });
+
+  it('maps opaque cursor decoding failures to a client error', async () => {
+    const adapter = storage({
+      listEventBusSubscriptionEvents: vi.fn().mockRejectedValue(new EventBusCursorError()),
+    });
+
+    const response = await handleListSubscriptionEvents(
+      1,
+      { subscriptionId: 'sub-1', cursor: 'not-a-cursor' },
+      token(),
+      env(),
+      adapter
+    );
+
+    expect(response.error?.code).toBe(-32602);
+    expect(response.error?.message).toBe('Invalid cursor');
+    expect(JSON.stringify(response)).not.toContain('not-a-cursor');
     expect(adapter.listEventBusSubscriptionEvents).not.toHaveBeenCalled();
   });
 
@@ -376,6 +430,25 @@ describe('MCP project event-bus tools', () => {
 
     expect(response.error?.code).toBe(-32602);
     expect(response.error?.message).toBe('Delivery does not require acknowledgement');
+    expect(JSON.stringify(response)).not.toContain('payload');
+  });
+
+  it('returns explicit terminal ack-state errors without leaking payload data', async () => {
+    const adapter = storage({
+      acknowledgeEventBusDelivery: vi.fn().mockRejectedValue(new EventBusAckStateError()),
+    });
+
+    const response = await handleAckEventDelivery(
+      1,
+      { deliveryId: 'delivery-failed' },
+      token(),
+      env(),
+      adapter
+    );
+
+    expect(response.error?.code).toBe(-32602);
+    expect(response.error?.message).toBe('Delivery cannot be acknowledged in its current state');
+    expect(JSON.stringify(response)).not.toContain('delivery-failed');
     expect(JSON.stringify(response)).not.toContain('payload');
   });
 });

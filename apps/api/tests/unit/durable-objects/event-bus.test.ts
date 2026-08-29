@@ -6,11 +6,16 @@ import {
   acknowledgeEventBusDelivery,
   createEventBusSubscription,
   EventBusAckPolicyError,
+  EventBusAckStateError,
   EventBusCursorError,
+  EventBusMetadataTooLargeError,
+  EventBusPayloadTooLargeError,
   getEventBusEventForIdentity,
   listEventBusSubscriptionEvents,
   publishEventBusEvent,
+  runEventBusRetention,
 } from '../../../src/durable-objects/project-data/event-bus';
+import { measureProjectDataStorageCategories } from '../../../src/durable-objects/project-data/storage-category-telemetry';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 function identity(overrides: Parameters<typeof getEventBusEventForIdentity>[2] = {}) {
@@ -23,6 +28,10 @@ function identity(overrides: Parameters<typeof getEventBusEventForIdentity>[2] =
     agentSessionId: 'agent-session-1',
     ...overrides,
   };
+}
+
+function base64UrlJson(value: unknown): string {
+  return btoa(JSON.stringify(value)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
 describe('ProjectData event bus', () => {
@@ -155,6 +164,46 @@ describe('ProjectData event bus', () => {
     expect(second.hasMore).toBe(false);
   });
 
+  it('uses an index-covered delivery sequence cursor plan for subscription replay', () => {
+    createTaskSubscription();
+    publish('event-1');
+
+    const plan = db
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT e.id,
+                e.sequence,
+                e.type,
+                e.source,
+                e.subject_type,
+                e.subject_id,
+                e.actor_type,
+                e.actor_id,
+                e.metadata,
+                e.occurred_at,
+                e.created_at,
+                d.id AS delivery_id,
+                d.subscription_id AS subscription_id,
+                d.state AS delivery_state,
+                d.created_at AS delivery_created_at,
+                d.delivered_at AS delivered_at,
+                d.acknowledged_at AS acknowledged_at,
+                p.policy AS policy
+         FROM event_bus_deliveries d
+         JOIN event_bus_events e ON e.id = d.event_id
+         LEFT JOIN event_bus_delivery_policies p ON p.subscription_id = d.subscription_id
+         WHERE d.subscription_id = ?
+           AND (d.event_sequence > ? OR (d.event_sequence = ? AND d.id > ?))
+         ORDER BY d.event_sequence ASC, d.id ASC
+         LIMIT ?`
+      )
+      .all('sub-task-1', 0, 0, '', 3) as Array<{ detail: string }>;
+    const details = plan.map((entry) => entry.detail).join('\n');
+
+    expect(details).toContain('idx_event_bus_deliveries_subscription_sequence');
+    expect(details).not.toContain('USE TEMP B-TREE');
+  });
+
   it('rejects malformed or subscription-mismatched cursors', () => {
     createTaskSubscription();
     createTaskSubscription({
@@ -187,6 +236,124 @@ describe('ProjectData event bus', () => {
         identity()
       )
     ).toThrow(EventBusCursorError);
+
+    expect(() =>
+      listEventBusSubscriptionEvents(
+        sql,
+        { subscriptionId: 'sub-task-1', limit: 1, cursor: base64UrlJson(null) },
+        identity()
+      )
+    ).toThrow(EventBusCursorError);
+
+    expect(() =>
+      listEventBusSubscriptionEvents(
+        sql,
+        {
+          subscriptionId: 'sub-task-1',
+          limit: 1,
+          cursor: base64UrlJson({
+            version: 1,
+            subscriptionId: 'sub-task-1',
+            afterSequence: 'bad',
+            afterDeliveryId: '',
+          }),
+        },
+        identity()
+      )
+    ).toThrow(EventBusCursorError);
+
+    expect(() =>
+      listEventBusSubscriptionEvents(
+        sql,
+        { subscriptionId: 'sub-task-1', limit: 1, cursor: 'a'.repeat(513) },
+        identity()
+      )
+    ).toThrow(EventBusCursorError);
+  });
+
+  it('requires subscriptions to be active and unexpired at read and ack time', () => {
+    createTaskSubscription({ expiresAt: 10_000 });
+    publish('event-1');
+    const delivery = db
+      .prepare('SELECT id FROM event_bus_deliveries WHERE subscription_id = ?')
+      .get('sub-task-1') as { id: string };
+
+    db.prepare("UPDATE event_bus_subscriptions SET state = 'paused' WHERE id = ?").run(
+      'sub-task-1'
+    );
+    expect(getEventBusEventForIdentity(sql, 'event-1', identity(), 3_000)).toBeNull();
+    expect(
+      listEventBusSubscriptionEvents(
+        sql,
+        { subscriptionId: 'sub-task-1', limit: 5 },
+        identity(),
+        3_000
+      )
+    ).toBeNull();
+    expect(acknowledgeEventBusDelivery(sql, { deliveryId: delivery.id }, identity(), 3_000)).toBeNull();
+
+    db.prepare("UPDATE event_bus_subscriptions SET state = 'closed' WHERE id = ?").run(
+      'sub-task-1'
+    );
+    expect(getEventBusEventForIdentity(sql, 'event-1', identity(), 3_000)).toBeNull();
+
+    db.prepare(
+      "UPDATE event_bus_subscriptions SET state = 'active', expires_at = ? WHERE id = ?"
+    ).run(2_500, 'sub-task-1');
+    expect(getEventBusEventForIdentity(sql, 'event-1', identity(), 3_000)).toBeNull();
+    expect(
+      listEventBusSubscriptionEvents(
+        sql,
+        { subscriptionId: 'sub-task-1', limit: 5 },
+        identity(),
+        3_000
+      )
+    ).toBeNull();
+  });
+
+  it('rejects oversized event metadata and payload before durable storage', () => {
+    createTaskSubscription();
+    const baseEvent = {
+      id: 'event-large',
+      type: 'task.completed',
+      source: 'orchestrator',
+      subject: { type: 'task', id: 'child-task-1' },
+      actor: { type: 'system', id: null },
+      occurredAt: 2_000,
+      now: 2_100,
+    };
+    const config = {
+      payloadMaxBytes: 32,
+      metadataMaxBytes: 32,
+      maxRoutedSubscriptions: 10,
+      retentionMs: 1_000,
+      retentionBatchRows: 10,
+    };
+
+    expect(() =>
+      publishEventBusEvent(
+        sql,
+        {
+          ...baseEvent,
+          metadata: { reason: 'x'.repeat(64) },
+          payload: { ok: true },
+        },
+        config
+      )
+    ).toThrow(EventBusMetadataTooLargeError);
+    expect(() =>
+      publishEventBusEvent(
+        sql,
+        {
+          ...baseEvent,
+          id: 'event-large-payload',
+          metadata: { ok: true },
+          payload: { reason: 'x'.repeat(64) },
+        },
+        config
+      )
+    ).toThrow(EventBusPayloadTooLargeError);
+    expect(db.prepare('SELECT COUNT(*) AS cnt FROM event_bus_events').get()).toEqual({ cnt: 0 });
   });
 
   it('enforces subscription ownership boundaries across task, session, and agent-session owners', () => {
@@ -277,6 +444,78 @@ describe('ProjectData event bus', () => {
       { subscription_id: 'sub-ack', state: 'queued' },
       { subscription_id: 'sub-no-ack', state: 'queued' },
     ]);
+    expect(
+      db
+        .prepare(
+          'SELECT event_type FROM event_bus_subscription_event_types WHERE subscription_id = ?'
+        )
+        .all('sub-ack')
+    ).toEqual([{ event_type: 'task.completed' }]);
+  });
+
+  it('runs bounded event-bus retention without dropping pending ack-required deliveries', () => {
+    createEventBusSubscription(sql, {
+      id: 'sub-ack',
+      ownerType: 'task',
+      ownerId: 'task-1',
+      targetTaskId: 'task-1',
+      eventTypes: ['task.completed'],
+      deliveryPolicy: 'ack_required',
+      now: 1_000,
+    });
+    createEventBusSubscription(sql, {
+      id: 'sub-no-ack',
+      ownerType: 'task',
+      ownerId: 'task-1',
+      targetTaskId: 'task-1',
+      eventTypes: ['task.info'],
+      deliveryPolicy: 'none',
+      now: 1_000,
+    });
+    publish('event-acknowledged', 'task.completed');
+    publish('event-pending', 'task.completed');
+    publish('event-no-ack', 'task.info');
+
+    const acknowledgedDelivery = db
+      .prepare(
+        'SELECT id FROM event_bus_deliveries WHERE event_id = ? AND subscription_id = ?'
+      )
+      .get('event-acknowledged', 'sub-ack') as { id: string };
+    acknowledgeEventBusDelivery(sql, { deliveryId: acknowledgedDelivery.id }, identity(), 3_000);
+
+    const before = measureProjectDataStorageCategories(
+      sql,
+      {
+        toolPayloadCleanupMinSessionAgeMs: 1_000,
+        toolPayloadArchiveRetentionMs: 1_000,
+        eventLogCleanupMinSessionAgeMs: 1_000,
+        eventBusRetentionMs: 1_000,
+      },
+      10_000
+    );
+    expect(before.eventBus.eventRows).toBe(3);
+    expect(before.eventBus.payloadBytes).toBeGreaterThan(0);
+    expect(before.eventBus.retentionEligibleEventRows).toBe(2);
+    expect(before.reclaimableBytes).toBeGreaterThanOrEqual(
+      before.eventBus.retentionEligibleEventBytes
+    );
+
+    const result = runEventBusRetention(
+      sql,
+      { retentionMs: 1_000, retentionBatchRows: 10 },
+      10_000
+    );
+
+    expect(result).toMatchObject({
+      eventsDeleted: 2,
+      exhaustedCandidates: true,
+    });
+    expect(
+      db.prepare('SELECT id FROM event_bus_events ORDER BY id').all()
+    ).toEqual([{ id: 'event-pending' }]);
+    expect(
+      db.prepare('SELECT event_id, state FROM event_bus_deliveries ORDER BY event_id').all()
+    ).toEqual([{ event_id: 'event-pending', state: 'queued' }]);
   });
 
   it('acknowledges ack-required deliveries idempotently and rejects non-ack policy', () => {
@@ -329,5 +568,31 @@ describe('ProjectData event bus', () => {
     expect(() =>
       acknowledgeEventBusDelivery(sql, { deliveryId: noAckDelivery.id }, identity())
     ).toThrow(EventBusAckPolicyError);
+  });
+
+  it('rejects acknowledgement for terminal failed or expired deliveries', () => {
+    createTaskSubscription();
+    publish('event-1');
+    publish('event-2');
+
+    const deliveries = db
+      .prepare(
+        'SELECT id, event_id FROM event_bus_deliveries WHERE subscription_id = ? ORDER BY event_id'
+      )
+      .all('sub-task-1') as Array<{ id: string; event_id: string }>;
+
+    db.prepare("UPDATE event_bus_deliveries SET state = 'failed' WHERE event_id = ?").run(
+      'event-1'
+    );
+    db.prepare("UPDATE event_bus_deliveries SET state = 'expired' WHERE event_id = ?").run(
+      'event-2'
+    );
+
+    expect(() =>
+      acknowledgeEventBusDelivery(sql, { deliveryId: deliveries[0]!.id }, identity())
+    ).toThrow(EventBusAckStateError);
+    expect(() =>
+      acknowledgeEventBusDelivery(sql, { deliveryId: deliveries[1]!.id }, identity())
+    ).toThrow(EventBusAckStateError);
   });
 });

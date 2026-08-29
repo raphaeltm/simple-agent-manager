@@ -10,6 +10,10 @@
  */
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import {
+  DEFAULT_PROJECT_DATA_EVENT_BUS_RETENTION_BATCH_ROWS,
+  DEFAULT_PROJECT_DATA_EVENT_BUS_RETENTION_DAYS,
+} from './event-bus-config';
+import {
   type ProjectDataEventLogCleanupResult,
   readProjectDataEventLogCleanupRecheckAt,
 } from './event-log-cleanup';
@@ -162,6 +166,8 @@ export interface StorageSafetyConfig {
   eventLogCleanupBatchRows: number;
   eventLogCleanupMinSessionAgeMs: number;
   eventLogCleanupRecheckMs: number;
+  eventBusRetentionMs: number;
+  eventBusRetentionBatchRows: number;
 }
 
 function parsePositiveInteger(value: string | undefined, fallback: number): number {
@@ -244,6 +250,10 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
   const eventLogCleanupMinSessionAgeDays = parseNonNegativeInteger(
     env.PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS,
     DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS
+  );
+  const eventBusRetentionDays = parsePositiveInteger(
+    env.PROJECT_DATA_EVENT_BUS_RETENTION_DAYS,
+    DEFAULT_PROJECT_DATA_EVENT_BUS_RETENTION_DAYS
   );
 
   return {
@@ -339,6 +349,11 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
     eventLogCleanupRecheckMs: parsePositiveInteger(
       env.PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS,
       DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS
+    ),
+    eventBusRetentionMs: eventBusRetentionDays * 24 * 60 * 60 * 1000,
+    eventBusRetentionBatchRows: parsePositiveInteger(
+      env.PROJECT_DATA_EVENT_BUS_RETENTION_BATCH_ROWS,
+      DEFAULT_PROJECT_DATA_EVENT_BUS_RETENTION_BATCH_ROWS
     ),
   };
 }

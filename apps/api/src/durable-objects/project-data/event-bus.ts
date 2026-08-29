@@ -1,5 +1,13 @@
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
+import {
+  DEFAULT_PROJECT_DATA_EVENT_BUS_MAX_ROUTED_SUBSCRIPTIONS,
+  DEFAULT_PROJECT_DATA_EVENT_BUS_METADATA_MAX_BYTES,
+  DEFAULT_PROJECT_DATA_EVENT_BUS_PAYLOAD_MAX_BYTES,
+  DEFAULT_PROJECT_DATA_EVENT_BUS_RETENTION_BATCH_ROWS,
+  DEFAULT_PROJECT_DATA_EVENT_BUS_RETENTION_DAYS,
+  type EventBusStorageConfig,
+} from './event-bus-config';
 import type {
   AcknowledgeEventBusDeliveryInput,
   CreateEventBusSubscriptionInput,
@@ -17,6 +25,8 @@ import type {
 import {
   EventBusAckPolicyError,
   EventBusAckStateError,
+  EventBusMetadataTooLargeError,
+  EventBusPayloadTooLargeError,
 } from './event-bus-contracts';
 import { decodeEventBusCursor, encodeEventBusCursor } from './event-bus-cursors';
 import {
@@ -30,12 +40,14 @@ import {
   normalizeReference,
   parseDeliveryRecordRow,
   parseEventDeliveryJoinRow,
+  parseEventDeliverySummaryJoinRow,
   parseEventPayload,
   parseEventRow,
   parseSubscriptionRow,
   subscriptionMatchesEvent,
 } from './event-bus-row-parsers';
 
+export type { EventBusStorageConfig } from './event-bus-config';
 export type {
   AcknowledgeEventBusDeliveryInput,
   CreateEventBusSubscriptionInput,
@@ -63,7 +75,18 @@ export {
   EventBusAckPolicyError,
   EventBusAckStateError,
   EventBusCursorError,
+  EventBusMetadataTooLargeError,
+  EventBusPayloadTooLargeError,
 } from './event-bus-contracts';
+export { EVENT_BUS_CURSOR_MAX_LENGTH } from './event-bus-cursors';
+
+const DEFAULT_EVENT_BUS_STORAGE_CONFIG: EventBusStorageConfig = {
+  payloadMaxBytes: DEFAULT_PROJECT_DATA_EVENT_BUS_PAYLOAD_MAX_BYTES,
+  metadataMaxBytes: DEFAULT_PROJECT_DATA_EVENT_BUS_METADATA_MAX_BYTES,
+  maxRoutedSubscriptions: DEFAULT_PROJECT_DATA_EVENT_BUS_MAX_ROUTED_SUBSCRIPTIONS,
+  retentionMs: DEFAULT_PROJECT_DATA_EVENT_BUS_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+  retentionBatchRows: DEFAULT_PROJECT_DATA_EVENT_BUS_RETENTION_BATCH_ROWS,
+};
 
 export function createEventBusSubscription(
   sql: SqlStorage,
@@ -111,6 +134,16 @@ export function createEventBusSubscription(
     now,
     now
   );
+  if (eventTypes) {
+    for (const eventType of eventTypes) {
+      sql.exec(
+        `INSERT OR IGNORE INTO event_bus_subscription_event_types (subscription_id, event_type)
+         VALUES (?, ?)`,
+        id,
+        eventType
+      );
+    }
+  }
 
   return {
     id,
@@ -133,7 +166,8 @@ export function createEventBusSubscription(
 
 export function publishEventBusEvent(
   sql: SqlStorage,
-  input: PublishEventBusEventInput
+  input: PublishEventBusEventInput,
+  config: EventBusStorageConfig = DEFAULT_EVENT_BUS_STORAGE_CONFIG
 ): EventBusPublishResult {
   const id = input.id ?? ulid();
   const now = input.now ?? Date.now();
@@ -141,6 +175,15 @@ export function publishEventBusEvent(
   const subject = normalizeReference(input.subject, 'event_bus.event.subject');
   const actor = normalizeReference(input.actor, 'event_bus.event.actor');
   const metadata = expectJsonRecord(input.metadata ?? {}, 'event_bus.event.metadata');
+  const metadataJson = serializeEventBusMetadata(metadata, config.metadataMaxBytes);
+  const payloadJson = serializeEventBusPayload(input.payload, config.payloadMaxBytes);
+  const subscriptions = selectMatchingSubscriptions(
+    sql,
+    subject,
+    input.type,
+    now,
+    config.maxRoutedSubscriptions
+  );
 
   sql.exec(
     `INSERT INTO event_bus_events
@@ -154,41 +197,26 @@ export function publishEventBusEvent(
     subject.id,
     actor.type,
     actor.id,
-    JSON.stringify(metadata),
-    JSON.stringify(input.payload),
+    metadataJson,
+    payloadJson,
     occurredAt,
     now
   );
 
   const [eventRow] = sql.exec('SELECT * FROM event_bus_events WHERE id = ?', id).toArray();
   const event = parseEventRow(eventRow);
-  const subscriptions = sql
-    .exec(
-      `SELECT s.*, p.policy, p.ack_timeout_ms, p.max_attempts
-       FROM event_bus_subscriptions s
-       LEFT JOIN event_bus_delivery_policies p ON p.subscription_id = s.id
-       WHERE s.state = 'active'
-         AND (s.expires_at IS NULL OR s.expires_at > ?)
-         AND (s.subject_type IS NULL OR s.subject_type = ?)
-         AND (s.subject_id IS NULL OR s.subject_id = ?)`,
-      now,
-      subject.type,
-      subject.id
-    )
-    .toArray()
-    .map(parseSubscriptionRow)
-    .filter((subscription) => subscriptionMatchesEvent(subscription, event));
 
   const deliveryIds: string[] = [];
   for (const subscription of subscriptions) {
     const deliveryId = ulid();
     sql.exec(
       `INSERT OR IGNORE INTO event_bus_deliveries
-        (id, subscription_id, event_id, state, created_at, delivered_at, acknowledged_at, last_error)
-       VALUES (?, ?, ?, 'queued', ?, NULL, NULL, NULL)`,
+        (id, subscription_id, event_id, event_sequence, state, created_at, delivered_at, acknowledged_at, last_error)
+       VALUES (?, ?, ?, ?, 'queued', ?, NULL, NULL, NULL)`,
       deliveryId,
       subscription.id,
       id,
+      event.sequence,
       now
     );
     const inserted = sql
@@ -228,10 +256,12 @@ export function getEventBusEventForIdentity(
        JOIN event_bus_subscriptions s ON s.id = d.subscription_id
        LEFT JOIN event_bus_delivery_policies p ON p.subscription_id = s.id
        WHERE e.id = ?
+         AND ${applicableSubscriptionSqlPredicate()}
          AND ${visibilitySqlPredicate()}
        ORDER BY d.created_at ASC, d.id ASC
        LIMIT 1`,
       eventId,
+      now,
       ...visibilityParams(identity)
     )
     .toArray();
@@ -251,7 +281,7 @@ export function listEventBusSubscriptionEvents(
   identity: EventBusIdentity,
   now = Date.now()
 ): SamEventBusEventListResult | null {
-  const subscription = getVisibleSubscription(sql, input.subscriptionId, identity);
+  const subscription = getVisibleSubscription(sql, input.subscriptionId, identity, now);
   if (!subscription) return null;
 
   const cursor = input.cursor
@@ -265,7 +295,17 @@ export function listEventBusSubscriptionEvents(
 
   const rows = sql
     .exec(
-      `SELECT e.*,
+      `SELECT e.id,
+              e.sequence,
+              e.type,
+              e.source,
+              e.subject_type,
+              e.subject_id,
+              e.actor_type,
+              e.actor_id,
+              e.metadata,
+              e.occurred_at,
+              e.created_at,
               d.id AS delivery_id,
               d.subscription_id AS subscription_id,
               d.state AS delivery_state,
@@ -277,8 +317,8 @@ export function listEventBusSubscriptionEvents(
        JOIN event_bus_events e ON e.id = d.event_id
        LEFT JOIN event_bus_delivery_policies p ON p.subscription_id = d.subscription_id
        WHERE d.subscription_id = ?
-         AND (e.sequence > ? OR (e.sequence = ? AND d.id > ?))
-       ORDER BY e.sequence ASC, d.id ASC
+         AND (d.event_sequence > ? OR (d.event_sequence = ? AND d.id > ?))
+       ORDER BY d.event_sequence ASC, d.id ASC
        LIMIT ?`,
       input.subscriptionId,
       cursor.afterSequence,
@@ -287,12 +327,19 @@ export function listEventBusSubscriptionEvents(
       input.limit + 1
     )
     .toArray()
-    .map(parseEventDeliveryJoinRow);
+    .map(parseEventDeliverySummaryJoinRow);
 
   const page = rows.slice(0, input.limit);
-  const summaries = page.map((parsed) =>
-    eventToSummary(parsed.event, markDeliveryDeliveredIfQueued(sql, parsed.delivery, now))
+  const deliveries = markDeliveriesDeliveredIfQueued(
+    sql,
+    page.map((parsed) => parsed.delivery),
+    now
   );
+  const summaries = page.map((parsed, index) => {
+    const delivery = deliveries[index];
+    if (!delivery) throw new Error('Event bus delivery page index mismatch');
+    return eventToSummary(parsed.event, delivery);
+  });
   const last = page.at(-1);
 
   return {
@@ -317,7 +364,7 @@ export function acknowledgeEventBusDelivery(
   identity: EventBusIdentity,
   now = Date.now()
 ): SamEventBusAckResult | null {
-  const delivery = getVisibleDelivery(sql, input.deliveryId, identity);
+  const delivery = getVisibleDelivery(sql, input.deliveryId, identity, now);
   if (!delivery) return null;
   if (delivery.policy !== 'ack_required') {
     throw new EventBusAckPolicyError();
@@ -345,7 +392,7 @@ export function acknowledgeEventBusDelivery(
     input.deliveryId
   );
 
-  const updated = getVisibleDelivery(sql, input.deliveryId, identity);
+  const updated = getVisibleDelivery(sql, input.deliveryId, identity, now);
   if (!updated) return null;
   return {
     acknowledged: true,
@@ -357,7 +404,8 @@ export function acknowledgeEventBusDelivery(
 function getVisibleSubscription(
   sql: SqlStorage,
   subscriptionId: string,
-  identity: EventBusIdentity
+  identity: EventBusIdentity,
+  now: number
 ): EventBusSubscriptionRecord | null {
   const [row] = sql
     .exec(
@@ -365,9 +413,11 @@ function getVisibleSubscription(
        FROM event_bus_subscriptions s
        LEFT JOIN event_bus_delivery_policies p ON p.subscription_id = s.id
        WHERE s.id = ?
+         AND ${applicableSubscriptionSqlPredicate()}
          AND ${visibilitySqlPredicate()}
        LIMIT 1`,
       subscriptionId,
+      now,
       ...visibilityParams(identity)
     )
     .toArray();
@@ -377,7 +427,8 @@ function getVisibleSubscription(
 function getVisibleDelivery(
   sql: SqlStorage,
   deliveryId: string,
-  identity: EventBusIdentity
+  identity: EventBusIdentity,
+  now: number
 ): SamEventBusDeliveryRecord | null {
   const [row] = sql
     .exec(
@@ -393,13 +444,168 @@ function getVisibleDelivery(
        JOIN event_bus_subscriptions s ON s.id = d.subscription_id
        LEFT JOIN event_bus_delivery_policies p ON p.subscription_id = s.id
        WHERE d.id = ?
+         AND ${applicableSubscriptionSqlPredicate()}
          AND ${visibilitySqlPredicate()}
        LIMIT 1`,
       deliveryId,
+      now,
       ...visibilityParams(identity)
     )
     .toArray();
   return row ? parseDeliveryRecordRow(row) : null;
+}
+
+export interface EventBusRetentionResult {
+  cutoffCreatedAt: number;
+  eventsDeleted: number;
+  deliveriesDeleted: number;
+  exhaustedCandidates: boolean;
+}
+
+export function runEventBusRetention(
+  sql: SqlStorage,
+  config: Pick<EventBusStorageConfig, 'retentionMs' | 'retentionBatchRows'>,
+  now = Date.now()
+): EventBusRetentionResult {
+  const cutoffCreatedAt = now - config.retentionMs;
+  const candidateRows = sql
+    .exec(
+      `SELECT e.id
+       FROM event_bus_events e
+       WHERE e.created_at < ?
+         AND NOT EXISTS (
+           SELECT 1
+           FROM event_bus_deliveries d
+           JOIN event_bus_delivery_policies p ON p.subscription_id = d.subscription_id
+           WHERE d.event_id = e.id
+             AND p.policy = 'ack_required'
+             AND d.state IN ('queued', 'delivered')
+         )
+       ORDER BY e.sequence ASC
+       LIMIT ?`,
+      cutoffCreatedAt,
+      config.retentionBatchRows + 1
+    )
+    .toArray() as Array<{ id?: unknown }>;
+  const eventIds = candidateRows
+    .slice(0, config.retentionBatchRows)
+    .map((row) => row.id)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
+
+  if (eventIds.length === 0) {
+    return {
+      cutoffCreatedAt,
+      eventsDeleted: 0,
+      deliveriesDeleted: 0,
+      exhaustedCandidates: true,
+    };
+  }
+
+  const placeholders = eventIds.map(() => '?').join(', ');
+  const deliveriesBefore = readCount(
+    sql,
+    `SELECT COUNT(*) AS count FROM event_bus_deliveries WHERE event_id IN (${placeholders})`,
+    eventIds
+  );
+  sql.exec(`DELETE FROM event_bus_deliveries WHERE event_id IN (${placeholders})`, ...eventIds);
+  sql.exec(`DELETE FROM event_bus_events WHERE id IN (${placeholders})`, ...eventIds);
+
+  return {
+    cutoffCreatedAt,
+    eventsDeleted: eventIds.length,
+    deliveriesDeleted: deliveriesBefore,
+    exhaustedCandidates: candidateRows.length <= config.retentionBatchRows,
+  };
+}
+
+export function computeEventBusRetentionAlarmTime(
+  sql: SqlStorage,
+  config: Pick<EventBusStorageConfig, 'retentionMs'>,
+  now = Date.now()
+): number | null {
+  const [row] = sql
+    .exec(
+      `SELECT MIN(e.created_at) AS created_at
+       FROM event_bus_events e
+       WHERE NOT EXISTS (
+         SELECT 1
+         FROM event_bus_deliveries d
+         JOIN event_bus_delivery_policies p ON p.subscription_id = d.subscription_id
+         WHERE d.event_id = e.id
+           AND p.policy = 'ack_required'
+           AND d.state IN ('queued', 'delivered')
+       )`
+    )
+    .toArray() as Array<{ created_at?: unknown }>;
+  const createdAt = typeof row?.created_at === 'number' ? row.created_at : null;
+  return createdAt === null ? null : Math.max(createdAt + config.retentionMs, now);
+}
+
+function selectMatchingSubscriptions(
+  sql: SqlStorage,
+  subject: { type: string; id: string | null },
+  eventType: string,
+  now: number,
+  maxRoutedSubscriptions: number
+): EventBusSubscriptionRecord[] {
+  const routeLimit = Number.isSafeInteger(maxRoutedSubscriptions)
+    ? Math.max(maxRoutedSubscriptions, 1)
+    : DEFAULT_PROJECT_DATA_EVENT_BUS_MAX_ROUTED_SUBSCRIPTIONS;
+  const subscriptions = sql
+    .exec(
+      `SELECT s.*, p.policy, p.ack_timeout_ms, p.max_attempts
+       FROM event_bus_subscriptions s
+       LEFT JOIN event_bus_delivery_policies p ON p.subscription_id = s.id
+       WHERE s.state = 'active'
+         AND (s.expires_at IS NULL OR s.expires_at > ?)
+         AND (s.subject_type IS NULL OR s.subject_type = ?)
+         AND (s.subject_id IS NULL OR s.subject_id = ?)
+         AND (
+           NOT EXISTS (
+             SELECT 1
+             FROM event_bus_subscription_event_types et_any
+             WHERE et_any.subscription_id = s.id
+           )
+           OR EXISTS (
+             SELECT 1
+             FROM event_bus_subscription_event_types et_match
+             WHERE et_match.subscription_id = s.id
+               AND et_match.event_type = ?
+           )
+         )
+       ORDER BY s.created_at ASC, s.id ASC
+       LIMIT ?`,
+      now,
+      subject.type,
+      subject.id,
+      eventType,
+      routeLimit + 1
+    )
+    .toArray()
+    .map(parseSubscriptionRow)
+    .filter((subscription) =>
+      subscriptionMatchesEvent(subscription, {
+        id: '',
+        sequence: 0,
+        type: eventType,
+        source: '',
+        subject_type: subject.type,
+        subject_id: subject.id,
+        actor_type: '',
+        actor_id: null,
+        metadata: '{}',
+        occurred_at: now,
+        created_at: now,
+      })
+    );
+  if (subscriptions.length > routeLimit) {
+    throw new Error('Event bus routed subscription limit exceeded');
+  }
+  return subscriptions;
+}
+
+function applicableSubscriptionSqlPredicate(): string {
+  return "s.state = 'active' AND (s.expires_at IS NULL OR s.expires_at > ?)";
 }
 
 function visibilitySqlPredicate(): string {
@@ -431,17 +637,67 @@ function markDeliveryDeliveredIfQueued(
   delivery: SamEventBusDeliveryInfo,
   now: number
 ): SamEventBusDeliveryInfo {
-  if (delivery.state !== 'queued') return delivery;
-  sql.exec(
-    `UPDATE event_bus_deliveries
-     SET state = 'delivered', delivered_at = COALESCE(delivered_at, ?)
-     WHERE id = ? AND state = 'queued'`,
-    now,
-    delivery.id
+  const [updated] = markDeliveriesDeliveredIfQueued(sql, [delivery], now);
+  return updated ?? delivery;
+}
+
+function markDeliveriesDeliveredIfQueued(
+  sql: SqlStorage,
+  deliveries: SamEventBusDeliveryInfo[],
+  now: number
+): SamEventBusDeliveryInfo[] {
+  const queuedIds = deliveries
+    .filter((delivery) => delivery.state === 'queued')
+    .map((delivery) => delivery.id);
+  if (queuedIds.length > 0) {
+    const placeholders = queuedIds.map(() => '?').join(', ');
+    sql.exec(
+      `UPDATE event_bus_deliveries
+       SET state = 'delivered', delivered_at = COALESCE(delivered_at, ?)
+       WHERE state = 'queued' AND id IN (${placeholders})`,
+      now,
+      ...queuedIds
+    );
+  }
+  return deliveries.map((delivery) =>
+    delivery.state === 'queued' ? asDeliveredDelivery(delivery, now) : delivery
   );
+}
+
+function asDeliveredDelivery(
+  delivery: SamEventBusDeliveryInfo,
+  now: number
+): SamEventBusDeliveryInfo {
   return {
     ...delivery,
     state: 'delivered',
     deliveredAt: delivery.deliveredAt ?? now,
   };
+}
+
+function serializeEventBusMetadata(value: Record<string, unknown>, maxBytes: number): string {
+  const raw = stringifyJson(value);
+  const actualBytes = byteLength(raw);
+  if (actualBytes > maxBytes) throw new EventBusMetadataTooLargeError(actualBytes, maxBytes);
+  return raw;
+}
+
+function serializeEventBusPayload(value: unknown, maxBytes: number): string {
+  const raw = stringifyJson(value);
+  const actualBytes = byteLength(raw);
+  if (actualBytes > maxBytes) throw new EventBusPayloadTooLargeError(actualBytes, maxBytes);
+  return raw;
+}
+
+function stringifyJson(value: unknown): string {
+  return JSON.stringify(value) ?? 'null';
+}
+
+function byteLength(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+function readCount(sql: SqlStorage, statement: string, bindings: unknown[]): number {
+  const [row] = sql.exec(statement, ...bindings).toArray() as Array<{ count?: unknown }>;
+  return typeof row?.count === 'number' && Number.isFinite(row.count) ? row.count : 0;
 }

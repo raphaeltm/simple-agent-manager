@@ -82,7 +82,7 @@ Workflow prompts in `.codex/prompts/` (Codex) and `.claude/commands/` (Claude Co
 
 ## Durable Object Patterns
 
-Per-project data (chat sessions, messages, activity events) is stored in a `ProjectData` Durable Object with embedded SQLite:
+Per-project data (chat sessions, messages, activity events, and durable event-bus records) is stored in a `ProjectData` Durable Object with embedded SQLite:
 
 - **Access**: `env.PROJECT_DATA.idFromName(projectId)` → deterministic DO stub
 - **Service layer**: `apps/api/src/services/project-data.ts` — typed wrapper for all DO RPC calls

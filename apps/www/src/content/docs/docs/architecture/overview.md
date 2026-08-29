@@ -284,6 +284,11 @@ or time range without receiving raw R2 keys.
 - `acp_session_events` — ACP session state transition history
 - `task_wait_subscriptions` — idempotent bounded parent waits, immutable wake payloads, and retry state
 - `task_wait_children` — normalized same-project task observations for each durable wait
+- `event_bus_events` — durable project event records with bounded metadata and payload JSON
+- `event_bus_subscriptions` — project event-bus routing ownership, target, lifecycle, and subject filters
+- `event_bus_subscription_event_types` — normalized event-type filters for subscription routing
+- `event_bus_delivery_policies` — independent per-subscription delivery policy and acknowledgement settings
+- `event_bus_deliveries` — per-subscription event delivery state, event sequence, and acknowledgement timestamps
 
 **Key features:**
 

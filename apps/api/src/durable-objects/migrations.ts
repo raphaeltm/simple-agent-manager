@@ -1300,10 +1300,6 @@ export const MIGRATIONS: Migration[] = [
         )
       `);
       sql.exec(`
-        CREATE INDEX IF NOT EXISTS idx_event_bus_events_id
-        ON event_bus_events(id)
-      `);
-      sql.exec(`
         CREATE INDEX IF NOT EXISTS idx_event_bus_events_type_sequence
         ON event_bus_events(type, sequence)
       `);
@@ -1341,6 +1337,21 @@ export const MIGRATIONS: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_event_bus_subscriptions_agent_target
         ON event_bus_subscriptions(target_agent_session_id, state)
       `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_event_bus_subscriptions_routing
+        ON event_bus_subscriptions(state, subject_type, subject_id, expires_at, id)
+      `);
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS event_bus_subscription_event_types (
+          subscription_id TEXT NOT NULL REFERENCES event_bus_subscriptions(id) ON DELETE CASCADE,
+          event_type TEXT NOT NULL,
+          PRIMARY KEY (subscription_id, event_type)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_event_bus_subscription_event_types_type
+        ON event_bus_subscription_event_types(event_type, subscription_id)
+      `);
 
       sql.exec(`
         CREATE TABLE IF NOT EXISTS event_bus_delivery_policies (
@@ -1358,6 +1369,7 @@ export const MIGRATIONS: Migration[] = [
           id TEXT PRIMARY KEY,
           subscription_id TEXT NOT NULL REFERENCES event_bus_subscriptions(id) ON DELETE CASCADE,
           event_id TEXT NOT NULL REFERENCES event_bus_events(id) ON DELETE CASCADE,
+          event_sequence INTEGER NOT NULL,
           state TEXT NOT NULL DEFAULT 'queued' CHECK (state IN ('queued', 'delivered', 'acknowledged', 'failed', 'expired')),
           created_at INTEGER NOT NULL,
           delivered_at INTEGER,
@@ -1367,8 +1379,8 @@ export const MIGRATIONS: Migration[] = [
         )
       `);
       sql.exec(`
-        CREATE INDEX IF NOT EXISTS idx_event_bus_deliveries_subscription_event
-        ON event_bus_deliveries(subscription_id, event_id)
+        CREATE INDEX IF NOT EXISTS idx_event_bus_deliveries_subscription_sequence
+        ON event_bus_deliveries(subscription_id, event_sequence, id)
       `);
       sql.exec(`
         CREATE INDEX IF NOT EXISTS idx_event_bus_deliveries_subscription_state

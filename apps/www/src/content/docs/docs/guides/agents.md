@@ -188,7 +188,7 @@ Running agents have access to project-aware MCP tools:
 | `search_messages`      | Search messages by keyword — uses FTS5 full-text search for completed sessions; keyword matching for active sessions      |
 | `get_event`            | Fetch one authorized durable project event by stable event ID, including metadata and payload                             |
 | `list_subscription_events` | Retrieve missed event deliveries for an authorized subscription with opaque cursor pagination and payload-free summaries |
-| `ack_event_delivery`   | Idempotently acknowledge an ack-required event delivery                                                                   |
+| `ack_event_delivery`   | Idempotently acknowledge ack-required queued/delivered deliveries; rejects non-ack, failed, and expired deliveries        |
 | `list_triggers`        | List this project's automation triggers, optionally filtered by status or source type                                     |
 | `list_incident_queue`  | List grouped private feedback incidents; available only inside the configured feedback project                            |
 | `get_incident`         | Read one bounded, redacted private incident and its untrusted evidence                                                    |

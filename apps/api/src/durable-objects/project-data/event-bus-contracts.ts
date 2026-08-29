@@ -97,6 +97,26 @@ export class EventBusAckStateError extends Error {
   }
 }
 
+export class EventBusPayloadTooLargeError extends Error {
+  constructor(
+    public readonly actualBytes: number,
+    public readonly maxBytes: number
+  ) {
+    super('Event bus payload exceeds configured byte limit');
+    this.name = 'EventBusPayloadTooLargeError';
+  }
+}
+
+export class EventBusMetadataTooLargeError extends Error {
+  constructor(
+    public readonly actualBytes: number,
+    public readonly maxBytes: number
+  ) {
+    super('Event bus metadata exceeds configured byte limit');
+    this.name = 'EventBusMetadataTooLargeError';
+  }
+}
+
 export interface EventBusIdentity {
   projectId: string;
   userId: string;
@@ -174,7 +194,7 @@ export interface EventBusCursor {
   afterDeliveryId: string;
 }
 
-export interface EventBusEventRow {
+export interface EventBusEventSummaryRow {
   id: string;
   sequence: number;
   type: string;
@@ -184,7 +204,10 @@ export interface EventBusEventRow {
   actor_type: string;
   actor_id: string | null;
   metadata: string;
-  payload: string;
   occurred_at: number;
   created_at: number;
+}
+
+export interface EventBusEventRow extends EventBusEventSummaryRow {
+  payload: string;
 }

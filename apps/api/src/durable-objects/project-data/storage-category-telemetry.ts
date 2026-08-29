@@ -67,6 +67,19 @@ export interface ProjectDataStorageCategoryBreakdown {
     totalRows: number;
     reasonBytes: number;
   };
+  eventBus: {
+    eventRows: number;
+    subscriptionRows: number;
+    deliveryRows: number;
+    metadataBytes: number;
+    payloadBytes: number;
+    subscriptionFilterBytes: number;
+    deliveryLastErrorBytes: number;
+    retentionEligibleEventRows: number;
+    retentionEligibleEventBytes: number;
+    retentionEligibleDeliveryRows: number;
+    retentionEligibleDeliveryBytes: number;
+  };
 }
 
 function readNumber(row: unknown, key: string): number {
@@ -355,6 +368,107 @@ function measureTaskStatusEvents(
   };
 }
 
+function measureEventBus(
+  sql: SqlStorage,
+  retentionCutoffCreatedAt: number
+): ProjectDataStorageCategoryBreakdown['eventBus'] {
+  const eventRow = firstRow(
+    sql,
+    `SELECT
+       COUNT(*) AS event_rows,
+       COALESCE(SUM(length(CAST(COALESCE(metadata, '') AS BLOB))), 0) AS metadata_bytes,
+       COALESCE(SUM(length(CAST(COALESCE(payload, '') AS BLOB))), 0) AS payload_bytes,
+       COALESCE(SUM(
+         CASE WHEN created_at < ?
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM event_bus_deliveries d
+                  JOIN event_bus_delivery_policies p ON p.subscription_id = d.subscription_id
+                  WHERE d.event_id = event_bus_events.id
+                    AND p.policy = 'ack_required'
+                    AND d.state IN ('queued', 'delivered')
+                )
+           THEN 1
+           ELSE 0
+         END
+       ), 0) AS retention_eligible_event_rows,
+       COALESCE(SUM(
+         CASE WHEN created_at < ?
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM event_bus_deliveries d
+                  JOIN event_bus_delivery_policies p ON p.subscription_id = d.subscription_id
+                  WHERE d.event_id = event_bus_events.id
+                    AND p.policy = 'ack_required'
+                    AND d.state IN ('queued', 'delivered')
+                )
+           THEN length(CAST(COALESCE(metadata, '') AS BLOB))
+              + length(CAST(COALESCE(payload, '') AS BLOB))
+           ELSE 0
+         END
+       ), 0) AS retention_eligible_event_bytes
+     FROM event_bus_events`,
+    retentionCutoffCreatedAt,
+    retentionCutoffCreatedAt
+  );
+  const subscriptionRow = firstRow(
+    sql,
+    `SELECT
+       COUNT(*) AS subscription_rows,
+       COALESCE(SUM(
+         length(CAST(COALESCE(event_types, '') AS BLOB))
+         + length(CAST(COALESCE(subject_type, '') AS BLOB))
+         + length(CAST(COALESCE(subject_id, '') AS BLOB))
+       ), 0) AS subscription_filter_bytes
+     FROM event_bus_subscriptions`
+  );
+  const deliveryRow = firstRow(
+    sql,
+    `SELECT
+       COUNT(*) AS delivery_rows,
+       COALESCE(SUM(length(CAST(COALESCE(last_error, '') AS BLOB))), 0) AS delivery_last_error_bytes
+     FROM event_bus_deliveries`
+  );
+  const retentionDeliveryRow = firstRow(
+    sql,
+    `SELECT
+       COUNT(*) AS retention_eligible_delivery_rows,
+       COALESCE(SUM(length(CAST(COALESCE(d.last_error, '') AS BLOB))), 0) AS retention_eligible_delivery_bytes
+     FROM event_bus_deliveries d
+     JOIN event_bus_events e ON e.id = d.event_id
+     WHERE e.created_at < ?
+       AND NOT EXISTS (
+         SELECT 1
+         FROM event_bus_deliveries pending
+         JOIN event_bus_delivery_policies p ON p.subscription_id = pending.subscription_id
+         WHERE pending.event_id = e.id
+           AND p.policy = 'ack_required'
+           AND pending.state IN ('queued', 'delivered')
+       )`,
+    retentionCutoffCreatedAt
+  );
+
+  return {
+    eventRows: readNumber(eventRow, 'event_rows'),
+    subscriptionRows: readNumber(subscriptionRow, 'subscription_rows'),
+    deliveryRows: readNumber(deliveryRow, 'delivery_rows'),
+    metadataBytes: readNumber(eventRow, 'metadata_bytes'),
+    payloadBytes: readNumber(eventRow, 'payload_bytes'),
+    subscriptionFilterBytes: readNumber(subscriptionRow, 'subscription_filter_bytes'),
+    deliveryLastErrorBytes: readNumber(deliveryRow, 'delivery_last_error_bytes'),
+    retentionEligibleEventRows: readNumber(eventRow, 'retention_eligible_event_rows'),
+    retentionEligibleEventBytes: readNumber(eventRow, 'retention_eligible_event_bytes'),
+    retentionEligibleDeliveryRows: readNumber(
+      retentionDeliveryRow,
+      'retention_eligible_delivery_rows'
+    ),
+    retentionEligibleDeliveryBytes: readNumber(
+      retentionDeliveryRow,
+      'retention_eligible_delivery_bytes'
+    ),
+  };
+}
+
 export function measureProjectDataStorageCategories(
   sql: SqlStorage,
   config: Pick<
@@ -362,12 +476,14 @@ export function measureProjectDataStorageCategories(
     | 'toolPayloadCleanupMinSessionAgeMs'
     | 'toolPayloadArchiveRetentionMs'
     | 'eventLogCleanupMinSessionAgeMs'
+    | 'eventBusRetentionMs'
   >,
   measuredAt: number
 ): ProjectDataStorageCategoryBreakdown {
   const toolPayloadCutoffUpdatedAt = measuredAt - config.toolPayloadCleanupMinSessionAgeMs;
   const toolPayloadArchiveCutoffCreatedAt = measuredAt - config.toolPayloadArchiveRetentionMs;
   const eventCutoffUpdatedAt = measuredAt - config.eventLogCleanupMinSessionAgeMs;
+  const eventBusRetentionCutoffCreatedAt = measuredAt - config.eventBusRetentionMs;
   const sessions = measureSessions(sql);
   const acpSessions = measureAcpSessions(sql);
   const messages = measureMessages(
@@ -378,6 +494,7 @@ export function measureProjectDataStorageCategories(
   const activityEvents = measureActivityEvents(sql, eventCutoffUpdatedAt);
   const acpSessionEvents = measureAcpSessionEvents(sql, eventCutoffUpdatedAt);
   const taskStatusEvents = measureTaskStatusEvents(sql);
+  const eventBus = measureEventBus(sql, eventBusRetentionCutoffCreatedAt);
   const accountedPayloadBytes =
     sessions.topicBytes +
     acpSessions.promptBytes +
@@ -387,11 +504,17 @@ export function measureProjectDataStorageCategories(
     activityEvents.payloadBytes +
     acpSessionEvents.reasonBytes +
     acpSessionEvents.metadataBytes +
-    taskStatusEvents.reasonBytes;
+    taskStatusEvents.reasonBytes +
+    eventBus.metadataBytes +
+    eventBus.payloadBytes +
+    eventBus.subscriptionFilterBytes +
+    eventBus.deliveryLastErrorBytes;
   const reclaimableBytes =
     messages.toolPayloadArchiveEligibleBytes +
     activityEvents.terminalEligiblePayloadBytes +
-    acpSessionEvents.terminalEligibleBytes;
+    acpSessionEvents.terminalEligibleBytes +
+    eventBus.retentionEligibleEventBytes +
+    eventBus.retentionEligibleDeliveryBytes;
   const totalDatabaseBytes = sql.databaseSize;
 
   return {
@@ -406,5 +529,6 @@ export function measureProjectDataStorageCategories(
     activityEvents,
     acpSessionEvents,
     taskStatusEvents,
+    eventBus,
   };
 }

@@ -571,6 +571,11 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS?: string;
   PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS?: string;
   PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS?: string;
+  PROJECT_DATA_EVENT_BUS_PAYLOAD_MAX_BYTES?: string; // Max stored ProjectData event-bus payload bytes (default: 262144)
+  PROJECT_DATA_EVENT_BUS_METADATA_MAX_BYTES?: string; // Max stored ProjectData event-bus metadata bytes (default: 16384)
+  PROJECT_DATA_EVENT_BUS_MAX_ROUTED_SUBSCRIPTIONS?: string; // Max subscriptions routed per ProjectData event publish (default: 1000)
+  PROJECT_DATA_EVENT_BUS_RETENTION_DAYS?: string; // Retention for old ProjectData event-bus events without pending deliveries (default: 14)
+  PROJECT_DATA_EVENT_BUS_RETENTION_BATCH_ROWS?: string; // Rows deleted per ProjectData event-bus retention pass (default: 500)
   MESSAGE_SIZE_THRESHOLD?: string;
   ACTIVITY_RETENTION_DAYS?: string;
   SESSION_IDLE_TIMEOUT_MINUTES?: string;

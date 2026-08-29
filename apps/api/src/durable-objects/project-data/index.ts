@@ -2,8 +2,9 @@
 /**
  * ProjectData Durable Object — per-project isolated data store.
  *
- * Manages chat sessions, chat messages, task status events, and activity events
- * with embedded SQLite. Supports Hibernatable WebSockets for real-time streaming.
+ * Manages chat sessions, chat messages, task status events, activity events,
+ * ACP sessions, and durable project event-bus records with embedded SQLite.
+ * Supports Hibernatable WebSockets for real-time streaming.
  *
  * See: specs/018-project-first-architecture/research.md
  * See: specs/018-project-first-architecture/data-model.md
@@ -35,6 +36,7 @@ import * as comments from './comments';
 import { stopTimedOutConversationWorkspaces } from './conversation-timeout';
 import * as durability from './durability-foundation';
 import * as eventBus from './event-bus';
+import { resolveEventBusStorageConfig } from './event-bus-config';
 import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
 import * as knowledge from './knowledge';
@@ -1081,6 +1083,20 @@ export class ProjectData extends DurableObject<Env> {
       });
     }
 
+    try {
+      const retention = eventBus.runEventBusRetention(
+        this.sql,
+        resolveEventBusStorageConfig(this.env)
+      );
+      if (retention.eventsDeleted > 0 || retention.deliveriesDeleted > 0) {
+        log.info('event_bus.retention_completed', { ...retention });
+      }
+    } catch (err) {
+      log.error('alarm.event_bus_retention_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     await idleCleanup.checkWorkspaceIdleTimeouts(
       this.sql,
       this.env,
@@ -1551,12 +1567,17 @@ export class ProjectData extends DurableObject<Env> {
   async publishEventBusEvent(
     input: eventBus.PublishEventBusEventInput
   ): Promise<ReturnType<typeof eventBus.publishEventBusEvent>> {
-    const result = eventBus.publishEventBusEvent(this.sql, input);
+    const result = eventBus.publishEventBusEvent(
+      this.sql,
+      input,
+      resolveEventBusStorageConfig(this.env)
+    );
     this.broadcastEvent('event_bus.event_published', {
       eventId: result.event.id,
       eventType: result.event.type,
       deliveryCount: result.deliveryIds.length,
     });
+    await this.recalculateAlarm();
     return result;
   }
 

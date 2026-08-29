@@ -7,10 +7,12 @@ import type {
   SamEventBusEventSummary,
 } from '../../durable-objects/project-data/event-bus';
 import {
+  EVENT_BUS_CURSOR_MAX_LENGTH,
   EventBusAckPolicyError,
   EventBusAckStateError,
   EventBusCursorError,
 } from '../../durable-objects/project-data/event-bus';
+import { decodeEventBusCursor } from '../../durable-objects/project-data/event-bus-cursors';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import * as projectDataService from '../../services/project-data';
@@ -25,6 +27,8 @@ import {
 } from './_helpers';
 
 type EventBusToolStorageErrorCode = 'invalid_cursor' | 'ack_not_required' | 'ack_invalid_state';
+
+const EVENT_BUS_CURSOR_ALPHABET = /^[A-Za-z0-9_-]+$/;
 
 export class EventBusToolStorageError extends Error {
   constructor(public readonly code: EventBusToolStorageErrorCode) {
@@ -41,15 +45,35 @@ export interface EventBusToolStorageAdapter {
 
 const defaultStorage: EventBusToolStorageAdapter = projectDataService;
 
-const DERIVED_IDENTITY_FIELDS = [
+const DERIVED_IDENTITY_FIELDS = new Set([
   'projectId',
+  'project_id',
   'userId',
+  'user_id',
   'taskId',
+  'task_id',
   'sessionId',
+  'session_id',
   'chatSessionId',
+  'chat_session_id',
   'workspaceId',
+  'workspace_id',
   'agentSessionId',
-];
+  'agent_session_id',
+  'ownerId',
+  'owner_id',
+  'ownerType',
+  'owner_type',
+  'targetTaskId',
+  'target_task_id',
+  'targetSessionId',
+  'target_session_id',
+  'targetAgentSessionId',
+  'target_agent_session_id',
+]);
+const GET_EVENT_FIELDS = new Set(['eventId']);
+const LIST_SUBSCRIPTION_EVENTS_FIELDS = new Set(['subscriptionId', 'limit', 'cursor']);
+const ACK_EVENT_DELIVERY_FIELDS = new Set(['deliveryId']);
 
 export async function handleGetEvent(
   requestId: string | number | null,
@@ -58,7 +82,7 @@ export async function handleGetEvent(
   env: Env,
   storage: EventBusToolStorageAdapter = defaultStorage
 ): Promise<JsonRpcResponse> {
-  const identityValidation = rejectCallerSuppliedIdentity(requestId, params);
+  const identityValidation = rejectUnexpectedParams(requestId, params, GET_EVENT_FIELDS);
   if (identityValidation) return identityValidation;
 
   const eventId = typeof params.eventId === 'string' ? params.eventId.trim() : '';
@@ -97,7 +121,11 @@ export async function handleListSubscriptionEvents(
   env: Env,
   storage: EventBusToolStorageAdapter = defaultStorage
 ): Promise<JsonRpcResponse> {
-  const identityValidation = rejectCallerSuppliedIdentity(requestId, params);
+  const identityValidation = rejectUnexpectedParams(
+    requestId,
+    params,
+    LIST_SUBSCRIPTION_EVENTS_FIELDS
+  );
   if (identityValidation) return identityValidation;
 
   const subscriptionId =
@@ -106,7 +134,7 @@ export async function handleListSubscriptionEvents(
     return jsonRpcError(requestId, INVALID_PARAMS, 'subscriptionId is required');
   }
 
-  const cursorResult = resolveCursorParam(requestId, params.cursor);
+  const cursorResult = resolveCursorParam(requestId, params.cursor, subscriptionId);
   if ('jsonrpc' in cursorResult) return cursorResult;
 
   const limitResult = resolveEventBusListLimit(requestId, params.limit, env);
@@ -158,7 +186,7 @@ export async function handleAckEventDelivery(
   env: Env,
   storage: EventBusToolStorageAdapter = defaultStorage
 ): Promise<JsonRpcResponse> {
-  const identityValidation = rejectCallerSuppliedIdentity(requestId, params);
+  const identityValidation = rejectUnexpectedParams(requestId, params, ACK_EVENT_DELIVERY_FIELDS);
   if (identityValidation) return identityValidation;
 
   const deliveryId = typeof params.deliveryId === 'string' ? params.deliveryId.trim() : '';
@@ -267,25 +295,29 @@ function adoptMatchingValue(existing: string | null, candidate: string | null): 
   return !existing || !candidate || existing === candidate;
 }
 
-function rejectCallerSuppliedIdentity(
+function rejectUnexpectedParams(
   requestId: string | number | null,
-  params: Record<string, unknown>
+  params: Record<string, unknown>,
+  allowedFields: ReadonlySet<string>
 ): JsonRpcResponse | null {
-  for (const field of DERIVED_IDENTITY_FIELDS) {
-    if (Object.prototype.hasOwnProperty.call(params, field)) {
+  for (const field of Object.keys(params)) {
+    if (allowedFields.has(field)) continue;
+    if (DERIVED_IDENTITY_FIELDS.has(field)) {
       return jsonRpcError(
         requestId,
         INVALID_PARAMS,
         'Project, user, task, session, workspace, and agent identity are derived from the MCP token'
       );
     }
+    return jsonRpcError(requestId, INVALID_PARAMS, `Unexpected parameter: ${field}`);
   }
   return null;
 }
 
 function resolveCursorParam(
   requestId: string | number | null,
-  raw: unknown
+  raw: unknown,
+  subscriptionId: string
 ): { cursor: string | null } | JsonRpcResponse {
   if (raw === undefined || raw === null) return { cursor: null };
   if (typeof raw !== 'string') {
@@ -294,6 +326,14 @@ function resolveCursorParam(
   const cursor = raw.trim();
   if (!cursor) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'cursor must be non-empty when provided');
+  }
+  if (cursor.length > EVENT_BUS_CURSOR_MAX_LENGTH || !EVENT_BUS_CURSOR_ALPHABET.test(cursor)) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'Invalid cursor');
+  }
+  try {
+    decodeEventBusCursor(cursor, subscriptionId);
+  } catch {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'Invalid cursor');
   }
   return { cursor };
 }
@@ -307,12 +347,15 @@ function resolveEventBusListLimit(
   if (raw !== undefined && (typeof raw !== 'number' || !Number.isFinite(raw))) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'limit must be a finite number when provided');
   }
+  if (raw !== undefined && !Number.isInteger(raw)) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'limit must be an integer when provided');
+  }
   const requested = raw === undefined ? limits.eventBusListLimit : raw;
   if (requested <= 0) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'limit must be greater than 0');
   }
   return {
-    limit: Math.min(Math.round(requested), limits.eventBusListMax),
+    limit: Math.min(requested, limits.eventBusListMax),
   };
 }
 
