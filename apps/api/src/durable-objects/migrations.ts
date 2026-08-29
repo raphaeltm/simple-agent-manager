@@ -19,6 +19,126 @@ export interface Migration {
   run: (sql: SqlStorage) => void;
 }
 
+function runMigrationStatements(sql: SqlStorage, statements: readonly string[]): void {
+  for (const statement of statements) {
+    sql.exec(statement);
+  }
+}
+
+const PROJECT_EVENT_BUS_ACCESS_MIGRATION_SQL: readonly string[] = [
+  `
+    CREATE TABLE IF NOT EXISTS event_bus_events (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT NOT NULL UNIQUE,
+      type TEXT NOT NULL,
+      source TEXT NOT NULL,
+      subject_type TEXT NOT NULL,
+      subject_id TEXT,
+      actor_type TEXT NOT NULL,
+      actor_id TEXT,
+      metadata TEXT NOT NULL DEFAULT '{}',
+      payload TEXT NOT NULL,
+      occurred_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `,
+  `
+    CREATE INDEX IF NOT EXISTS idx_event_bus_events_type_sequence
+    ON event_bus_events(type, sequence)
+  `,
+  `
+    CREATE INDEX IF NOT EXISTS idx_event_bus_events_created_sequence
+    ON event_bus_events(created_at, sequence, id)
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS event_bus_subscriptions (
+      id TEXT PRIMARY KEY,
+      owner_type TEXT NOT NULL CHECK (owner_type IN ('task', 'session', 'agent_session', 'policy', 'system')),
+      owner_id TEXT NOT NULL,
+      target_task_id TEXT,
+      target_session_id TEXT,
+      target_agent_session_id TEXT,
+      event_types TEXT,
+      subject_type TEXT,
+      subject_id TEXT,
+      state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'paused', 'closed')),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      expires_at INTEGER
+    )
+  `,
+  `
+    CREATE INDEX IF NOT EXISTS idx_event_bus_subscriptions_owner
+    ON event_bus_subscriptions(owner_type, owner_id, state)
+  `,
+  `
+    CREATE INDEX IF NOT EXISTS idx_event_bus_subscriptions_task_target
+    ON event_bus_subscriptions(target_task_id, state)
+  `,
+  `
+    CREATE INDEX IF NOT EXISTS idx_event_bus_subscriptions_session_target
+    ON event_bus_subscriptions(target_session_id, state)
+  `,
+  `
+    CREATE INDEX IF NOT EXISTS idx_event_bus_subscriptions_agent_target
+    ON event_bus_subscriptions(target_agent_session_id, state)
+  `,
+  `
+    CREATE INDEX IF NOT EXISTS idx_event_bus_subscriptions_routing
+    ON event_bus_subscriptions(state, subject_type, subject_id, created_at, id, expires_at)
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS event_bus_subscription_event_types (
+      subscription_id TEXT NOT NULL REFERENCES event_bus_subscriptions(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL,
+      subject_type TEXT,
+      subject_id TEXT,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (subscription_id, event_type)
+    )
+  `,
+  `
+    CREATE INDEX IF NOT EXISTS idx_event_bus_subscription_event_types_routing
+    ON event_bus_subscription_event_types(event_type, subject_type, subject_id, created_at, subscription_id)
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS event_bus_delivery_policies (
+      subscription_id TEXT PRIMARY KEY REFERENCES event_bus_subscriptions(id) ON DELETE CASCADE,
+      policy TEXT NOT NULL DEFAULT 'none' CHECK (policy IN ('none', 'ack_required')),
+      ack_timeout_ms INTEGER,
+      max_attempts INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS event_bus_deliveries (
+      id TEXT PRIMARY KEY,
+      subscription_id TEXT NOT NULL REFERENCES event_bus_subscriptions(id) ON DELETE CASCADE,
+      event_id TEXT NOT NULL REFERENCES event_bus_events(id) ON DELETE CASCADE,
+      event_sequence INTEGER NOT NULL,
+      state TEXT NOT NULL DEFAULT 'queued' CHECK (state IN ('queued', 'delivered', 'acknowledged', 'failed', 'expired')),
+      created_at INTEGER NOT NULL,
+      delivered_at INTEGER,
+      acknowledged_at INTEGER,
+      last_error TEXT,
+      UNIQUE(subscription_id, event_id)
+    )
+  `,
+  `
+    CREATE INDEX IF NOT EXISTS idx_event_bus_deliveries_subscription_sequence
+    ON event_bus_deliveries(subscription_id, event_sequence, id)
+  `,
+  `
+    CREATE INDEX IF NOT EXISTS idx_event_bus_deliveries_subscription_state
+    ON event_bus_deliveries(subscription_id, state, created_at)
+  `,
+  `
+    CREATE INDEX IF NOT EXISTS idx_event_bus_deliveries_event
+    ON event_bus_deliveries(event_id)
+  `,
+];
+
 /**
  * Ordered list of migrations. New migrations MUST be appended to the end.
  * Never remove or reorder existing migrations.
@@ -1283,120 +1403,7 @@ export const MIGRATIONS: Migration[] = [
       // Additive-only durable event bus tables. Subscription ownership and
       // routing fields are kept separate from the per-subscription delivery
       // policy so acknowledgement behavior never changes event matching.
-      sql.exec(`
-        CREATE TABLE IF NOT EXISTS event_bus_events (
-          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-          id TEXT NOT NULL UNIQUE,
-          type TEXT NOT NULL,
-          source TEXT NOT NULL,
-          subject_type TEXT NOT NULL,
-          subject_id TEXT,
-          actor_type TEXT NOT NULL,
-          actor_id TEXT,
-          metadata TEXT NOT NULL DEFAULT '{}',
-          payload TEXT NOT NULL,
-          occurred_at INTEGER NOT NULL,
-          created_at INTEGER NOT NULL
-        )
-      `);
-      sql.exec(`
-        CREATE INDEX IF NOT EXISTS idx_event_bus_events_type_sequence
-        ON event_bus_events(type, sequence)
-      `);
-      sql.exec(`
-        CREATE INDEX IF NOT EXISTS idx_event_bus_events_created_sequence
-        ON event_bus_events(created_at, sequence, id)
-      `);
-
-      sql.exec(`
-        CREATE TABLE IF NOT EXISTS event_bus_subscriptions (
-          id TEXT PRIMARY KEY,
-          owner_type TEXT NOT NULL CHECK (owner_type IN ('task', 'session', 'agent_session', 'policy', 'system')),
-          owner_id TEXT NOT NULL,
-          target_task_id TEXT,
-          target_session_id TEXT,
-          target_agent_session_id TEXT,
-          event_types TEXT,
-          subject_type TEXT,
-          subject_id TEXT,
-          state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'paused', 'closed')),
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL,
-          expires_at INTEGER
-        )
-      `);
-      sql.exec(`
-        CREATE INDEX IF NOT EXISTS idx_event_bus_subscriptions_owner
-        ON event_bus_subscriptions(owner_type, owner_id, state)
-      `);
-      sql.exec(`
-        CREATE INDEX IF NOT EXISTS idx_event_bus_subscriptions_task_target
-        ON event_bus_subscriptions(target_task_id, state)
-      `);
-      sql.exec(`
-        CREATE INDEX IF NOT EXISTS idx_event_bus_subscriptions_session_target
-        ON event_bus_subscriptions(target_session_id, state)
-      `);
-      sql.exec(`
-        CREATE INDEX IF NOT EXISTS idx_event_bus_subscriptions_agent_target
-        ON event_bus_subscriptions(target_agent_session_id, state)
-      `);
-      sql.exec(`
-        CREATE INDEX IF NOT EXISTS idx_event_bus_subscriptions_routing
-        ON event_bus_subscriptions(state, subject_type, subject_id, created_at, id, expires_at)
-      `);
-      sql.exec(`
-        CREATE TABLE IF NOT EXISTS event_bus_subscription_event_types (
-          subscription_id TEXT NOT NULL REFERENCES event_bus_subscriptions(id) ON DELETE CASCADE,
-          event_type TEXT NOT NULL,
-          subject_type TEXT,
-          subject_id TEXT,
-          created_at INTEGER NOT NULL,
-          PRIMARY KEY (subscription_id, event_type)
-        )
-      `);
-      sql.exec(`
-        CREATE INDEX IF NOT EXISTS idx_event_bus_subscription_event_types_routing
-        ON event_bus_subscription_event_types(event_type, subject_type, subject_id, created_at, subscription_id)
-      `);
-
-      sql.exec(`
-        CREATE TABLE IF NOT EXISTS event_bus_delivery_policies (
-          subscription_id TEXT PRIMARY KEY REFERENCES event_bus_subscriptions(id) ON DELETE CASCADE,
-          policy TEXT NOT NULL DEFAULT 'none' CHECK (policy IN ('none', 'ack_required')),
-          ack_timeout_ms INTEGER,
-          max_attempts INTEGER,
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL
-        )
-      `);
-
-      sql.exec(`
-        CREATE TABLE IF NOT EXISTS event_bus_deliveries (
-          id TEXT PRIMARY KEY,
-          subscription_id TEXT NOT NULL REFERENCES event_bus_subscriptions(id) ON DELETE CASCADE,
-          event_id TEXT NOT NULL REFERENCES event_bus_events(id) ON DELETE CASCADE,
-          event_sequence INTEGER NOT NULL,
-          state TEXT NOT NULL DEFAULT 'queued' CHECK (state IN ('queued', 'delivered', 'acknowledged', 'failed', 'expired')),
-          created_at INTEGER NOT NULL,
-          delivered_at INTEGER,
-          acknowledged_at INTEGER,
-          last_error TEXT,
-          UNIQUE(subscription_id, event_id)
-        )
-      `);
-      sql.exec(`
-        CREATE INDEX IF NOT EXISTS idx_event_bus_deliveries_subscription_sequence
-        ON event_bus_deliveries(subscription_id, event_sequence, id)
-      `);
-      sql.exec(`
-        CREATE INDEX IF NOT EXISTS idx_event_bus_deliveries_subscription_state
-        ON event_bus_deliveries(subscription_id, state, created_at)
-      `);
-      sql.exec(`
-        CREATE INDEX IF NOT EXISTS idx_event_bus_deliveries_event
-        ON event_bus_deliveries(event_id)
-      `);
+      runMigrationStatements(sql, PROJECT_EVENT_BUS_ACCESS_MIGRATION_SQL);
     },
   },
 ];

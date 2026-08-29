@@ -108,23 +108,9 @@ export function parseEventDeliveryJoinRow(row: unknown): {
   delivery: SamEventBusDeliveryInfo;
 } {
   const record = expectJsonRecord(row, 'event_bus.delivery.join_row');
-  const event = parseEventRow(record);
-  const deliveryState = requireString(record.delivery_state, 'event_bus.delivery.state');
-  assertDeliveryState(deliveryState);
-  const policy = (optionalString(record.policy) ?? 'none') as SamEventBusDeliveryPolicy;
-  assertDeliveryPolicy(policy);
   return {
-    event,
-    delivery: {
-      id: requireString(record.delivery_id, 'event_bus.delivery.id'),
-      subscriptionId: requireString(record.subscription_id, 'event_bus.delivery.subscription_id'),
-      state: deliveryState,
-      policy,
-      ackRequired: policy === 'ack_required',
-      createdAt: requireNumber(record.delivery_created_at, 'event_bus.delivery.created_at'),
-      deliveredAt: optionalNumber(record.delivered_at),
-      acknowledgedAt: optionalNumber(record.acknowledged_at),
-    },
+    event: parseEventRow(record),
+    delivery: parseDeliveryInfo(record),
   };
 }
 
@@ -133,23 +119,26 @@ export function parseEventDeliverySummaryJoinRow(row: unknown): {
   delivery: SamEventBusDeliveryInfo;
 } {
   const record = expectJsonRecord(row, 'event_bus.delivery.summary_join_row');
-  const event = parseEventSummaryRow(record);
+  return {
+    event: parseEventSummaryRow(record),
+    delivery: parseDeliveryInfo(record),
+  };
+}
+
+function parseDeliveryInfo(record: Record<string, unknown>): SamEventBusDeliveryInfo {
   const deliveryState = requireString(record.delivery_state, 'event_bus.delivery.state');
   assertDeliveryState(deliveryState);
   const policy = (optionalString(record.policy) ?? 'none') as SamEventBusDeliveryPolicy;
   assertDeliveryPolicy(policy);
   return {
-    event,
-    delivery: {
-      id: requireString(record.delivery_id, 'event_bus.delivery.id'),
-      subscriptionId: requireString(record.subscription_id, 'event_bus.delivery.subscription_id'),
-      state: deliveryState,
-      policy,
-      ackRequired: policy === 'ack_required',
-      createdAt: requireNumber(record.delivery_created_at, 'event_bus.delivery.created_at'),
-      deliveredAt: optionalNumber(record.delivered_at),
-      acknowledgedAt: optionalNumber(record.acknowledged_at),
-    },
+    id: requireString(record.delivery_id, 'event_bus.delivery.id'),
+    subscriptionId: requireString(record.subscription_id, 'event_bus.delivery.subscription_id'),
+    state: deliveryState,
+    policy,
+    ackRequired: policy === 'ack_required',
+    createdAt: requireNumber(record.delivery_created_at, 'event_bus.delivery.created_at'),
+    deliveredAt: optionalNumber(record.delivered_at),
+    acknowledgedAt: optionalNumber(record.acknowledged_at),
   };
 }
 
