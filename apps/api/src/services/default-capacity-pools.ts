@@ -1,4 +1,5 @@
 import type {
+  CapacityCredentialSource,
   CapacityPool as CapacityPoolDto,
   CapacityPoolCandidate as CapacityPoolCandidateDto,
   CapacityPoolScope,
@@ -7,13 +8,12 @@ import type {
   DefaultCapacityPoolSummary,
   ProviderInstanceOffering,
 } from '@simple-agent-manager/shared';
-import { isValidProvider } from '@simple-agent-manager/shared';
 import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { log } from '../lib/logger';
+import { log, serializeError } from '../lib/logger';
 import {
   toCapacityPool,
   toCapacityPoolCandidate,
@@ -24,13 +24,14 @@ import {
   defaultCapacitySourceId,
   defaultPoolId,
   type DefaultPoolScopeIdentity,
-  legacyCredentialReference,
-  platformCredentialReference,
-  timestampVersion,
 } from './default-capacity-pool-helpers';
 import {
   buildProviderCatalogForCredential,
   getStaticProviderCatalogOfferings,
+  listInstallationProviderCatalogSeeds,
+  listProjectProviderCatalogSeeds,
+  listUserProviderCatalogSeeds,
+  type ProviderCatalogCredentialSeed,
 } from './provider-catalogs';
 
 type Db = ReturnType<typeof drizzle>;
@@ -62,10 +63,15 @@ export interface CredentialCapacitySeed extends ScopeIdentity {
   id: string;
   provider: CredentialProvider;
   active: boolean;
+  credentialSource: CapacityCredentialSource;
   credentialReference: string;
   credentialVersion: number | null;
+  /** Legacy credentials FK. Null for CC-backed and platform-backed sources. */
   credentialId: string | null;
+  /** Browser-safe catalog credential id. May be a CC credential id. */
+  catalogCredentialId: string | null;
   platformCredentialId: string | null;
+  externalSourceRef: string | null;
   encryptedToken: string;
   iv: string;
   createdBy: string | null;
@@ -242,7 +248,7 @@ export async function readDefaultCapacityPoolSummaries(
 }
 
 async function listCredentialUserIds(db: Db): Promise<string[]> {
-  const rows = await db
+  const legacyRows = await db
     .select({ userId: schema.credentials.userId })
     .from(schema.credentials)
     .where(
@@ -251,11 +257,20 @@ async function listCredentialUserIds(db: Db): Promise<string[]> {
         isNull(schema.credentials.projectId)
       )
     );
-  return [...new Set(rows.map((row) => row.userId))];
+  const ccRows = await db
+    .select({ userId: schema.ccAttachments.userId })
+    .from(schema.ccAttachments)
+    .where(
+      and(
+        eq(schema.ccAttachments.consumerKind, 'compute'),
+        isNull(schema.ccAttachments.projectId)
+      )
+    );
+  return [...new Set([...legacyRows.map((row) => row.userId), ...ccRows.map((row) => row.userId)])];
 }
 
 async function listCredentialProjectIds(db: Db): Promise<string[]> {
-  const rows = await db
+  const legacyRows = await db
     .select({ projectId: schema.credentials.projectId })
     .from(schema.credentials)
     .where(
@@ -264,50 +279,33 @@ async function listCredentialProjectIds(db: Db): Promise<string[]> {
         isNotNull(schema.credentials.projectId)
       )
     );
-  return [...new Set(rows.flatMap((row) => (row.projectId ? [row.projectId] : [])))];
+  const ccRows = await db
+    .select({ projectId: schema.ccAttachments.projectId })
+    .from(schema.ccAttachments)
+    .where(
+      and(
+        eq(schema.ccAttachments.consumerKind, 'compute'),
+        isNotNull(schema.ccAttachments.projectId)
+      )
+    );
+  return [
+    ...new Set(
+      [...legacyRows, ...ccRows].flatMap((row) => (row.projectId ? [row.projectId] : []))
+    ),
+  ];
 }
 
 async function ensureInstallationDefaultPool(
   db: Db,
   options: DefaultCapacityPoolsBackfillOptions
 ): Promise<CapacityPoolSummary | null> {
-  const rows = await db
-    .select({
-      id: schema.platformCredentials.id,
-      provider: schema.platformCredentials.provider,
-      isEnabled: schema.platformCredentials.isEnabled,
-      encryptedToken: schema.platformCredentials.encryptedToken,
-      iv: schema.platformCredentials.iv,
-      createdBy: schema.platformCredentials.createdBy,
-      createdAt: schema.platformCredentials.createdAt,
-      updatedAt: schema.platformCredentials.updatedAt,
-    })
-    .from(schema.platformCredentials)
-    .where(eq(schema.platformCredentials.credentialType, CREDENTIAL_TYPE_CLOUD_PROVIDER));
-
   return ensureDefaultPoolForCredentialSeeds(
     db,
     { scope: 'installation', ownerUserId: null, ownerProjectId: null },
-    rows.flatMap((row): CredentialCapacitySeed[] => {
-      if (!row.provider || !isValidProvider(row.provider)) return [];
-      return [
-        {
-          scope: 'installation',
-          ownerUserId: null,
-          ownerProjectId: null,
-          id: row.id,
-          provider: row.provider,
-          active: row.isEnabled,
-          credentialReference: platformCredentialReference(row.id),
-          credentialVersion: timestampVersion(row.updatedAt ?? row.createdAt),
-          credentialId: null,
-          platformCredentialId: row.id,
-          encryptedToken: row.encryptedToken,
-          iv: row.iv,
-          createdBy: row.createdBy,
-        },
-      ];
-    }),
+    catalogSeedsToCapacitySeeds(
+      { scope: 'installation', ownerUserId: null, ownerProjectId: null },
+      await listInstallationProviderCatalogSeeds(db)
+    ),
     options
   );
 }
@@ -317,50 +315,13 @@ async function ensureUserDefaultPool(
   userId: string,
   options: DefaultCapacityPoolsBackfillOptions
 ): Promise<CapacityPoolSummary | null> {
-  const rows = await db
-    .select({
-      id: schema.credentials.id,
-      userId: schema.credentials.userId,
-      projectId: schema.credentials.projectId,
-      provider: schema.credentials.provider,
-      isActive: schema.credentials.isActive,
-      encryptedToken: schema.credentials.encryptedToken,
-      iv: schema.credentials.iv,
-      createdAt: schema.credentials.createdAt,
-      updatedAt: schema.credentials.updatedAt,
-    })
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.credentialType, CREDENTIAL_TYPE_CLOUD_PROVIDER),
-        isNull(schema.credentials.projectId)
-      )
-    );
-
   return ensureDefaultPoolForCredentialSeeds(
     db,
     { scope: 'user', ownerUserId: userId, ownerProjectId: null },
-    rows.flatMap((row): CredentialCapacitySeed[] => {
-      if (!isValidProvider(row.provider)) return [];
-      return [
-        {
-          scope: 'user',
-          ownerUserId: row.userId,
-          ownerProjectId: null,
-          id: row.id,
-          provider: row.provider,
-          active: row.isActive,
-          credentialReference: legacyCredentialReference(row.id),
-          credentialVersion: timestampVersion(row.updatedAt ?? row.createdAt),
-          credentialId: row.id,
-          platformCredentialId: null,
-          encryptedToken: row.encryptedToken,
-          iv: row.iv,
-          createdBy: row.userId,
-        },
-      ];
-    }),
+    catalogSeedsToCapacitySeeds(
+      { scope: 'user', ownerUserId: userId, ownerProjectId: null },
+      await listUserProviderCatalogSeeds(db, { userId })
+    ),
     options
   );
 }
@@ -370,51 +331,37 @@ async function ensureProjectDefaultPool(
   projectId: string,
   options: DefaultCapacityPoolsBackfillOptions
 ): Promise<CapacityPoolSummary | null> {
-  const rows = await db
-    .select({
-      id: schema.credentials.id,
-      userId: schema.credentials.userId,
-      projectId: schema.credentials.projectId,
-      provider: schema.credentials.provider,
-      isActive: schema.credentials.isActive,
-      encryptedToken: schema.credentials.encryptedToken,
-      iv: schema.credentials.iv,
-      createdAt: schema.credentials.createdAt,
-      updatedAt: schema.credentials.updatedAt,
-    })
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.projectId, projectId),
-        eq(schema.credentials.credentialType, CREDENTIAL_TYPE_CLOUD_PROVIDER)
-      )
-    );
-
   return ensureDefaultPoolForCredentialSeeds(
     db,
     { scope: 'project', ownerUserId: null, ownerProjectId: projectId },
-    rows.flatMap((row): CredentialCapacitySeed[] => {
-      if (!isValidProvider(row.provider)) return [];
-      return [
-        {
-          scope: 'project',
-          ownerUserId: null,
-          ownerProjectId: projectId,
-          id: row.id,
-          provider: row.provider,
-          active: row.isActive,
-          credentialReference: legacyCredentialReference(row.id),
-          credentialVersion: timestampVersion(row.updatedAt ?? row.createdAt),
-          credentialId: row.id,
-          platformCredentialId: null,
-          encryptedToken: row.encryptedToken,
-          iv: row.iv,
-          createdBy: row.userId,
-        },
-      ];
-    }),
+    catalogSeedsToCapacitySeeds(
+      { scope: 'project', ownerUserId: null, ownerProjectId: projectId },
+      await listProjectProviderCatalogSeeds(db, { projectId, userId: options.userId ?? undefined })
+    ),
     options
   );
+}
+
+function catalogSeedsToCapacitySeeds(
+  scope: ScopeIdentity,
+  seeds: ProviderCatalogCredentialSeed[]
+): CredentialCapacitySeed[] {
+  return seeds.map((seed) => ({
+    ...scope,
+    id: seed.id,
+    provider: seed.provider,
+    active: seed.active,
+    credentialSource: seed.credentialSource,
+    credentialReference: seed.credentialReference,
+    credentialVersion: seed.credentialVersion,
+    credentialId: seed.capacitySourceCredentialId,
+    catalogCredentialId: seed.credentialId,
+    platformCredentialId: seed.platformCredentialId,
+    externalSourceRef: seed.externalSourceRef,
+    encryptedToken: seed.encryptedToken,
+    iv: seed.iv,
+    createdBy: seed.createdBy,
+  }));
 }
 
 async function ensureDefaultPoolForCredentialSeeds(
@@ -474,9 +421,15 @@ async function resolveOfferingsForSeed(
           provider: seed.provider,
           encryptedToken: seed.encryptedToken,
           iv: seed.iv,
-          credentialSource: seed.scope === 'installation' ? 'platform' : seed.scope,
-          credentialId: seed.credentialId,
+          credentialSource: seed.credentialSource,
+          credentialId: seed.catalogCredentialId,
           platformCredentialId: seed.platformCredentialId,
+          capacitySourceCredentialId: seed.credentialId,
+          credentialReference: seed.credentialReference,
+          credentialVersion: seed.credentialVersion,
+          externalSourceRef: seed.externalSourceRef,
+          active: seed.active,
+          createdBy: seed.createdBy,
         },
       });
       return catalog.offerings ?? [];
@@ -484,8 +437,8 @@ async function resolveOfferingsForSeed(
       log.warn('default_capacity_pools.catalog_build_failed', {
         provider: seed.provider,
         scope: seed.scope,
-        credentialSource: seed.scope === 'installation' ? 'platform' : seed.scope,
-        error: error instanceof Error ? error.message : String(error),
+        credentialSource: seed.credentialSource,
+        ...serializeError(error),
       });
     }
   }
@@ -572,6 +525,10 @@ async function findCapacitySourceForCredential(
       schema.capacitySources.platformCredentialId,
       seed.platformCredentialId
     );
+  } else if (seed.externalSourceRef) {
+    credentialPredicate = eq(schema.capacitySources.externalSourceRef, seed.externalSourceRef);
+  } else if (seed.credentialReference) {
+    credentialPredicate = eq(schema.capacitySources.credentialReference, seed.credentialReference);
   } else {
     throw new Error(`Capacity source seed ${seed.id} has no credential reference`);
   }
@@ -599,12 +556,12 @@ async function insertCapacitySourceForSeed(
       ownerProjectId: seed.ownerProjectId,
       sourceKind: SOURCE_KIND_CLOUD_PROVIDER,
       provider: seed.provider,
-      credentialSource: seed.scope === 'installation' ? 'platform' : seed.scope,
+      credentialSource: seed.credentialSource,
       credentialId: seed.credentialId,
       platformCredentialId: seed.platformCredentialId,
       credentialReference: seed.credentialReference,
       credentialVersion: seed.credentialVersion,
-      externalSourceRef: null,
+      externalSourceRef: seed.externalSourceRef,
       status: ACTIVE_STATUS,
       createdBy: seed.createdBy,
       createdAt: now,
@@ -614,8 +571,12 @@ async function insertCapacitySourceForSeed(
       target: schema.capacitySources.id,
       set: {
         provider: seed.provider,
+        credentialSource: seed.credentialSource,
+        credentialId: seed.credentialId,
+        platformCredentialId: seed.platformCredentialId,
         credentialReference: seed.credentialReference,
         credentialVersion: seed.credentialVersion,
+        externalSourceRef: seed.externalSourceRef,
         status: ACTIVE_STATUS,
         updatedAt: now,
       },
@@ -640,8 +601,12 @@ async function updateCapacitySourceForSeed(
     .update(schema.capacitySources)
     .set({
       provider: seed.provider,
+      credentialSource: seed.credentialSource,
+      credentialId: seed.credentialId,
+      platformCredentialId: seed.platformCredentialId,
       credentialReference: seed.credentialReference,
       credentialVersion: seed.credentialVersion,
+      externalSourceRef: seed.externalSourceRef,
       status: ACTIVE_STATUS,
       updatedAt: now,
     })

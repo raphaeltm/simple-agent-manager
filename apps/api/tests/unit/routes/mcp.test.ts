@@ -63,6 +63,7 @@ const mockKV = {
 // Note: drizzle v0.34+ uses .raw() for queries with specific column selection
 // (db.select({id: ...})) and .all() for full select (db.select()).
 function createMockD1() {
+  let currentSql = '';
   const stmt = {
     bind: vi.fn().mockReturnThis(),
     all: vi.fn().mockResolvedValue({ results: [] }),
@@ -71,10 +72,23 @@ function createMockD1() {
     run: vi.fn().mockResolvedValue({ success: true }),
   };
   return {
-    prepare: vi.fn().mockReturnValue(stmt),
+    prepare: vi.fn((sql: string) => {
+      currentSql = sql;
+      return stmt;
+    }),
     batch: vi.fn(),
     _stmt: stmt,
+    _currentSql: () => currentSql,
   };
+}
+
+function isCapacityPoolSql(sql: string): boolean {
+  const normalized = sql.toLowerCase();
+  return (
+    normalized.includes('capacity_pools') ||
+    normalized.includes('capacity_pool_candidates') ||
+    normalized.includes('capacity_sources')
+  );
 }
 
 /**
@@ -2095,22 +2109,33 @@ describe('MCP Routes', () => {
       defaultLocation: null,
     };
 
+    function mockProjectAllResults(project: typeof mockProject) {
+      mockD1._stmt.all.mockImplementation(async () => {
+        if (isCapacityPoolSql(mockD1._currentSql())) return { results: [] };
+        return { results: [project] };
+      });
+    }
+
     function setupHappyPathMocks() {
       // The handler makes many sequential D1 queries. Drizzle may use
       // either .raw() or .all() depending on query shape. We set a
       // persistent .all() default for the project query and resolveCredentialSource.
       // resolveCredentialSource uses .all() — return user credential to simulate BYOC user.
-      mockD1._stmt.all.mockResolvedValue({ results: [mockProject] });
+      mockProjectAllResults(mockProject);
 
-      // Sequential .raw() calls (credential check removed from Promise.all — now uses resolveCredentialSource)
-      mockD1._stmt.raw
-        .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
-        .mockResolvedValueOnce([[0]]) // child count (advisory)
-        .mockResolvedValueOnce([[0]]) // active dispatched count (advisory)
-        .mockResolvedValueOnce([Object.values(mockProject)]) // project (if raw)
-        .mockResolvedValueOnce([]) // project compute attachment lookup
-        .mockResolvedValueOnce([['cred-1', 'hetzner']]) // user credential lookup
-        .mockResolvedValueOnce([['User', 'user@test.com', '12345']]); // user lookup
+      const rawQueue = [
+        [['task-123', 0, 'in_progress']], // current task
+        [[0]], // child count (advisory)
+        [[0]], // active dispatched count (advisory)
+        [Object.values(mockProject)], // project (if raw)
+        [], // project compute attachment lookup
+        [['cred-1', 'hetzner']], // user credential lookup
+        [['User', 'user@test.com', '12345']], // user lookup
+      ];
+      mockD1._stmt.raw.mockImplementation(async () => {
+        if (isCapacityPoolSql(mockD1._currentSql())) return [];
+        return rawQueue.shift() ?? [];
+      });
 
       // .run() for conditional INSERT + status event insert
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
@@ -3173,14 +3198,19 @@ describe('MCP Routes', () => {
     it('should use explicit vmSize over project default', async () => {
       // Set up with a project that has defaultVmSize='small'
       const projectWithDefaults = { ...mockProject, defaultVmSize: 'small' };
-      mockD1._stmt.all.mockResolvedValue({ results: [projectWithDefaults] });
-      mockD1._stmt.raw
-        .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
-        .mockResolvedValueOnce([[0]]) // child count
-        .mockResolvedValueOnce([[0]]) // active dispatched count
-        .mockResolvedValueOnce([['cred-1']]) // credential
-        .mockResolvedValueOnce([Object.values(projectWithDefaults)]) // project (if raw)
-        .mockResolvedValueOnce([['User', 'user@test.com', '12345']]); // user lookup
+      mockProjectAllResults(projectWithDefaults);
+      const rawQueue = [
+        [['task-123', 0, 'in_progress']], // current task
+        [[0]], // child count
+        [[0]], // active dispatched count
+        [['cred-1']], // credential
+        [Object.values(projectWithDefaults)], // project (if raw)
+        [['User', 'user@test.com', '12345']], // user lookup
+      ];
+      mockD1._stmt.raw.mockImplementation(async () => {
+        if (isCapacityPoolSql(mockD1._currentSql())) return [];
+        return rawQueue.shift() ?? [];
+      });
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
       mockDoStub.createSession = vi.fn().mockResolvedValue('sess-new-1');
       mockDoStub.persistMessage = vi.fn().mockResolvedValue('msg-new-1');

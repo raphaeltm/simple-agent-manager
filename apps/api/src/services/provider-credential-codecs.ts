@@ -317,7 +317,7 @@ export function parseGcpCredential(decryptedToken: string): GcpCredential {
   }
   const obj = expectJsonRecord(parsed, 'provider.gcp_credential');
   if (typeof obj.provider === 'string' && obj.provider !== 'gcp') {
-    throw new Error(`Invalid GCP credential format: provider is ${obj.provider}`);
+    throw new Error('Invalid GCP credential format: provider mismatch');
   }
 
   const legacy = obj.authType === undefined && obj.version === undefined;
@@ -354,4 +354,31 @@ export function parseGcpCredential(decryptedToken: string): GcpCredential {
   }
 
   throw new Error('Invalid GCP credential format: unsupported authType');
+}
+
+/**
+ * Normalize a stored cloud-provider credential payload into the provider token
+ * consumed by provider constructors. Legacy rows store raw provider tokens;
+ * composable credentials may store `{ provider, token }` wrapper JSON.
+ */
+export function extractCloudProviderToken(
+  provider: string,
+  decryptedToken: string
+): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(decryptedToken);
+  } catch {
+    return decryptedToken;
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return decryptedToken;
+  const record = parsed as Record<string, unknown>;
+  const parsedProvider = record.provider;
+  if (typeof parsedProvider === 'string' && parsedProvider.trim() && parsedProvider !== provider) {
+    throw new Error('Invalid cloud provider credential format: provider mismatch');
+  }
+
+  const token = record.token;
+  return typeof token === 'string' && token.trim() ? token : decryptedToken;
 }

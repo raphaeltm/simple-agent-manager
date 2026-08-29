@@ -238,7 +238,7 @@ describe('versioned GCP credential parsing', () => {
           authType: 'workload-identity',
         })
       )
-    ).toThrow('provider is scaleway');
+    ).toThrow('provider mismatch');
   });
 
   it('rejects unsupported versions and auth modes', () => {

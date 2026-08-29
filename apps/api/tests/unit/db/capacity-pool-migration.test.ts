@@ -20,6 +20,10 @@ const candidateCatalogMetadataMigrationSql = readFileSync(
   join(process.cwd(), 'src/db/migrations/0128_capacity_pool_candidate_catalog_metadata.sql'),
   'utf8'
 );
+const capacitySourceExternalCredentialsMigrationSql = readFileSync(
+  join(process.cwd(), 'src/db/migrations/0129_capacity_source_external_credentials.sql'),
+  'utf8'
+);
 
 let sqlite: Database.Database | null = null;
 
@@ -663,5 +667,99 @@ describe('0127_concrete_capacity_pool_offerings migration', () => {
     expect(sql).not.toContain('PRAGMA FOREIGN_KEYS = OFF');
     expect(sql).toContain('ALTER TABLE CAPACITY_POOL_CANDIDATES ADD COLUMN PROVIDER_INSTANCE_TYPE');
     expect(sql).toContain('ALTER TABLE NODES ADD COLUMN PROVIDER_INSTANCE_TYPE');
+  });
+});
+
+describe('0129_capacity_source_external_credentials migration', () => {
+  it('preserves existing source and candidate rows while allowing composable credential refs', () => {
+    const database = db();
+    database.exec(migrationSql);
+    database.exec(candidateSnapshotMigrationSql);
+    database.exec(concreteOfferingMigrationSql);
+    database.exec(candidateCatalogMetadataMigrationSql);
+
+    insertPool({ id: 'pool-primary', scope: 'user', ownerUserId: 'user-1', isDefault: 1 });
+    run(`
+      INSERT INTO capacity_sources
+        (id, scope, owner_user_id, source_kind, provider, credential_source, credential_id, credential_reference)
+      VALUES
+        ('source-user-credential', 'user', 'user-1', 'cloud-provider-credential', 'hetzner', 'user', 'credential-user-1', 'credentials:credential-user-1')
+    `);
+    run(`
+      INSERT INTO capacity_pool_candidates
+        (
+          id, pool_id, capacity_source_id, provider, location, workload_role, runtime,
+          machine_class, machine_size, provider_instance_type,
+          provider_instance_catalog_source
+        )
+      VALUES
+        (
+          'candidate-live', 'pool-primary', 'source-user-credential', 'hetzner',
+          'fsn1', 'workspace', 'vm', 'shared-vm', 'medium', 'cx43', 'api'
+        )
+    `);
+
+    database.exec(capacitySourceExternalCredentialsMigrationSql);
+
+    expect(
+      database
+        .prepare(
+          `
+          SELECT id, credential_id, credential_reference
+          FROM capacity_sources
+          WHERE id = 'source-user-credential'
+        `
+        )
+        .get()
+    ).toEqual({
+      id: 'source-user-credential',
+      credential_id: 'credential-user-1',
+      credential_reference: 'credentials:credential-user-1',
+    });
+    expect(
+      database
+        .prepare(
+          `
+          SELECT id, capacity_source_id, provider_instance_type, provider_instance_catalog_source
+          FROM capacity_pool_candidates
+          WHERE id = 'candidate-live'
+        `
+        )
+        .get()
+    ).toEqual({
+      id: 'candidate-live',
+      capacity_source_id: 'source-user-credential',
+      provider_instance_type: 'cx43',
+      provider_instance_catalog_source: 'api',
+    });
+
+    run(`
+      INSERT INTO capacity_sources
+        (
+          id, scope, owner_user_id, source_kind, provider, credential_source,
+          credential_reference, external_source_ref
+        )
+      VALUES
+        (
+          'source-cc-credential', 'user', 'user-1', 'cloud-provider-credential',
+          'hetzner', 'user', 'cc_credentials:cc-cred-1', 'cc_attachments:cc-att-1'
+        )
+    `);
+    run(`
+      INSERT INTO capacity_pool_candidates
+        (id, pool_id, capacity_source_id, provider, location, workload_role, runtime, machine_class, machine_size)
+      VALUES
+        ('candidate-cc', 'pool-primary', 'source-cc-credential', 'hetzner', 'fsn1', 'workspace', 'vm', 'shared-vm', 'large')
+    `);
+
+    expect(() =>
+      run(`
+        INSERT INTO capacity_sources
+          (id, scope, owner_user_id, source_kind, provider, credential_source)
+        VALUES
+          ('source-missing-ref', 'user', 'user-1', 'cloud-provider-credential', 'hetzner', 'user')
+      `)
+    ).toThrow();
+    expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
   });
 });

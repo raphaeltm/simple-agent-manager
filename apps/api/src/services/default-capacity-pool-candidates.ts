@@ -38,11 +38,12 @@ export async function ensureCandidatesForSource(
 ): Promise<void> {
   const now = new Date().toISOString();
   const existingStatuses = await readExistingCandidateStatuses(db, poolId, sourceId);
+  const selectableOfferings = offerings.filter(isCurrentlySelectableOffering);
   const candidateIds: string[] = [];
   const candidateValues: schema.NewCapacityPoolCandidate[] = [];
   let candidateOrder = 0;
 
-  for (const offering of offerings) {
+  for (const offering of selectableOfferings) {
     const id = defaultCandidateId(
       poolId,
       sourceId,
@@ -114,7 +115,11 @@ export async function ensureCandidatesForSource(
       });
   }
 
-  await disableMissingCandidatesForSource(db, poolId, sourceId, existingStatuses, candidateIds);
+  await markMissingCandidatesForSource(db, poolId, sourceId, existingStatuses, candidateIds);
+}
+
+function isCurrentlySelectableOffering(offering: ProviderInstanceOffering): boolean {
+  return offering.available !== false && !offering.stale;
 }
 
 function legacyStatusForOffering(
@@ -169,7 +174,7 @@ async function readExistingCandidateStatuses(
   return new Map(rows.map((row) => [row.id, row.status]));
 }
 
-async function disableMissingCandidatesForSource(
+async function markMissingCandidatesForSource(
   db: Db,
   poolId: string,
   sourceId: string,
@@ -178,14 +183,31 @@ async function disableMissingCandidatesForSource(
 ): Promise<void> {
   const now = new Date().toISOString();
   const nextCandidateIds = new Set(activeCandidateIds);
-  const staleActiveCandidateIds = [...existingStatuses.entries()]
-    .filter(([id, status]) => status === ACTIVE_STATUS && !nextCandidateIds.has(id))
-    .map(([id]) => id);
-  const fixedBindCount = 5; // status, updatedAt, poolId, sourceId, status predicate
+  const missingCandidateIds = [...existingStatuses.keys()].filter((id) => !nextCandidateIds.has(id));
+  const fixedBindCount = 5; // status/update metadata plus pool/source/status predicates
   const chunkSize = Math.max(1, D1_MAX_BOUND_PARAMETERS - fixedBindCount);
 
-  for (let offset = 0; offset < staleActiveCandidateIds.length; offset += chunkSize) {
-    const chunk = staleActiveCandidateIds.slice(offset, offset + chunkSize);
+  for (let offset = 0; offset < missingCandidateIds.length; offset += chunkSize) {
+    const chunk = missingCandidateIds.slice(offset, offset + chunkSize);
+    await db
+      .update(schema.capacityPoolCandidates)
+      .set({
+        providerInstanceCatalogSource: null,
+        providerInstanceCatalogLastSeenAt: null,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(schema.capacityPoolCandidates.poolId, poolId),
+          eq(schema.capacityPoolCandidates.capacitySourceId, sourceId),
+          inArray(schema.capacityPoolCandidates.id, chunk)
+        )
+      );
+
+    const staleActiveCandidateIds = chunk.filter(
+      (id) => existingStatuses.get(id) === ACTIVE_STATUS
+    );
+    if (staleActiveCandidateIds.length === 0) continue;
     await db
       .update(schema.capacityPoolCandidates)
       .set({ status: DISABLED_STATUS, updatedAt: now })
@@ -194,7 +216,7 @@ async function disableMissingCandidatesForSource(
           eq(schema.capacityPoolCandidates.poolId, poolId),
           eq(schema.capacityPoolCandidates.capacitySourceId, sourceId),
           eq(schema.capacityPoolCandidates.status, ACTIVE_STATUS),
-          inArray(schema.capacityPoolCandidates.id, chunk)
+          inArray(schema.capacityPoolCandidates.id, staleActiveCandidateIds)
         )
       );
   }

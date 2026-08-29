@@ -15,6 +15,7 @@ export interface DefaultCapacitySourceReference {
   scope: CapacityPoolScope;
   credentialId: string | null;
   platformCredentialId: string | null;
+  externalSourceRef?: string | null;
 }
 
 export function orderedLocationsForProvider(provider: CredentialProvider) {
@@ -41,7 +42,13 @@ export function defaultCapacitySourceId(seed: DefaultCapacitySourceReference): s
   if (seed.platformCredentialId) {
     return `cap-source-default:platform:${seed.platformCredentialId}`;
   }
-  return `cap-source-default:${seed.scope}:${seed.credentialId}`;
+  if (seed.credentialId) {
+    return `cap-source-default:${seed.scope}:${seed.credentialId}`;
+  }
+  if (seed.externalSourceRef) {
+    return `cap-source-default:${seed.scope}:external:${encodeURIComponent(seed.externalSourceRef)}`;
+  }
+  return `cap-source-default:${seed.scope}:unknown`;
 }
 
 export function defaultCandidateId(
@@ -72,6 +79,14 @@ export function legacyCredentialReference(credentialId: string): string {
 
 export function platformCredentialReference(credentialId: string): string {
   return `platform_credentials:${credentialId}`;
+}
+
+export function composableCredentialReference(credentialId: string): string {
+  return `cc_credentials:${credentialId}`;
+}
+
+export function composableAttachmentReference(attachmentId: string): string {
+  return `cc_attachments:${attachmentId}`;
 }
 
 export function timestampVersion(timestamp: string | null | undefined): number | null {

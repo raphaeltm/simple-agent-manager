@@ -64,7 +64,7 @@ async function readProviderCatalogsForRequest(
     const projectId = c.req.query('projectId')?.trim();
     if (!projectId) throw errors.badRequest('projectId is required for project provider catalogs');
     await requireProjectCapability(db, projectId, userId, 'secret:read');
-    return listProjectProviderCatalogs(db, { projectId, env: c.env });
+    return listProjectProviderCatalogs(db, { projectId, userId, env: c.env });
   }
 
   if (scope === 'installation') {

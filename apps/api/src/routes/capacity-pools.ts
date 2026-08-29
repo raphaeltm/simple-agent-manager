@@ -126,6 +126,13 @@ capacityPoolsRoutes.patch('/defaults', async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
   const update = await readDefaultCapacityPoolUpdateRequest(c);
+  await readDefaultCapacityPoolSummaries(db, {
+    userId,
+    includeInstallation: false,
+    ensure: true,
+    includeDisabled: true,
+    env: c.env,
+  });
   const result = await updateDefaultCapacityPool(db, {
     scope: 'user',
     ownerUserId: userId,

@@ -7,6 +7,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import type { DefaultPoolScopeIdentity } from './default-capacity-pool-helpers';
 import {
   type CapacityPoolSummary,
@@ -29,14 +30,17 @@ export interface DefaultCapacityPoolUpdateResult {
   poolFound: boolean;
   summary: CapacityPoolSummary | null;
   missingCandidateIds: string[];
+  unavailableCandidateIds: string[];
 }
 
 type CandidateStatusUpdate = { id: string; status: CapacityPoolStatus };
 type PolicyUpdate = NonNullable<DefaultCapacityPoolUpdateInput['policy']>;
+const READ_CANDIDATE_STATUS_CHUNK_SIZE = D1_MAX_BOUND_PARAMETERS - 1;
 
 interface CandidateStatusUpdateResult {
   changed: boolean;
   missingCandidateIds: string[];
+  unavailableCandidateIds: string[];
 }
 
 interface PolicyUpdateResult {
@@ -49,7 +53,14 @@ export async function updateDefaultCapacityPool(
   input: DefaultCapacityPoolUpdateInput
 ): Promise<DefaultCapacityPoolUpdateResult> {
   const pool = await findDefaultPool(db, input);
-  if (!pool) return { poolFound: false, summary: null, missingCandidateIds: [] };
+  if (!pool) {
+    return {
+      poolFound: false,
+      summary: null,
+      missingCandidateIds: [],
+      unavailableCandidateIds: [],
+    };
+  }
 
   const candidateResult = await updateCandidateStatuses(db, pool.id, input.candidates ?? []);
   if (candidateResult.missingCandidateIds.length > 0) {
@@ -57,6 +68,15 @@ export async function updateDefaultCapacityPool(
       poolFound: true,
       summary: null,
       missingCandidateIds: candidateResult.missingCandidateIds,
+      unavailableCandidateIds: [],
+    };
+  }
+  if (candidateResult.unavailableCandidateIds.length > 0) {
+    return {
+      poolFound: true,
+      summary: null,
+      missingCandidateIds: [],
+      unavailableCandidateIds: candidateResult.unavailableCandidateIds,
     };
   }
 
@@ -73,6 +93,7 @@ export async function updateDefaultCapacityPool(
     poolFound: true,
     summary: await readDefaultPoolSummary(db, input, { includeDisabled: true }),
     missingCandidateIds: [],
+    unavailableCandidateIds: [],
   };
 }
 
@@ -82,7 +103,9 @@ async function updateCandidateStatuses(
   candidates: CandidateStatusUpdate[]
 ): Promise<CandidateStatusUpdateResult> {
   const updates = dedupeCandidateStatusUpdates(candidates);
-  if (updates.length === 0) return { changed: false, missingCandidateIds: [] };
+  if (updates.length === 0) {
+    return { changed: false, missingCandidateIds: [], unavailableCandidateIds: [] };
+  }
 
   const existingById = await readCandidateStatuses(
     db,
@@ -92,10 +115,24 @@ async function updateCandidateStatuses(
   const missingCandidateIds = updates
     .map(({ id }) => id)
     .filter((candidateId) => !existingById.has(candidateId));
-  if (missingCandidateIds.length > 0) return { changed: false, missingCandidateIds };
+  if (missingCandidateIds.length > 0) {
+    return { changed: false, missingCandidateIds, unavailableCandidateIds: [] };
+  }
 
-  const changedUpdates = updates.filter(({ id, status }) => existingById.get(id) !== status);
-  if (changedUpdates.length === 0) return { changed: false, missingCandidateIds: [] };
+  const unavailableCandidateIds = updates
+    .filter(({ id, status }) => {
+      const existing = existingById.get(id);
+      return status === 'active' && !existing?.currentlyAddable;
+    })
+    .map(({ id }) => id);
+  if (unavailableCandidateIds.length > 0) {
+    return { changed: false, missingCandidateIds: [], unavailableCandidateIds };
+  }
+
+  const changedUpdates = updates.filter(({ id, status }) => existingById.get(id)?.status !== status);
+  if (changedUpdates.length === 0) {
+    return { changed: false, missingCandidateIds: [], unavailableCandidateIds: [] };
+  }
 
   const now = new Date().toISOString();
   for (const candidate of changedUpdates) {
@@ -110,28 +147,47 @@ async function updateCandidateStatuses(
       );
   }
 
-  return { changed: true, missingCandidateIds: [] };
+  return { changed: true, missingCandidateIds: [], unavailableCandidateIds: [] };
 }
 
 async function readCandidateStatuses(
   db: Db,
   poolId: string,
   candidateIds: string[]
-): Promise<Map<string, CapacityPoolStatus>> {
-  const rows = await db
-    .select({
-      id: schema.capacityPoolCandidates.id,
-      status: schema.capacityPoolCandidates.status,
-    })
-    .from(schema.capacityPoolCandidates)
-    .where(
-      and(
-        eq(schema.capacityPoolCandidates.poolId, poolId),
-        inArray(schema.capacityPoolCandidates.id, candidateIds)
-      )
+): Promise<Map<string, { status: CapacityPoolStatus; currentlyAddable: boolean }>> {
+  const rows: {
+    id: string;
+    status: string;
+    providerInstanceCatalogSource: string | null;
+  }[] = [];
+  for (let offset = 0; offset < candidateIds.length; offset += READ_CANDIDATE_STATUS_CHUNK_SIZE) {
+    const chunk = candidateIds.slice(offset, offset + READ_CANDIDATE_STATUS_CHUNK_SIZE);
+    rows.push(
+      ...(await db
+        .select({
+          id: schema.capacityPoolCandidates.id,
+          status: schema.capacityPoolCandidates.status,
+          providerInstanceCatalogSource: schema.capacityPoolCandidates.providerInstanceCatalogSource,
+        })
+        .from(schema.capacityPoolCandidates)
+        .where(
+          and(
+            eq(schema.capacityPoolCandidates.poolId, poolId),
+            inArray(schema.capacityPoolCandidates.id, chunk)
+          )
+        ))
     );
+  }
 
-  return new Map(rows.map((candidate) => [candidate.id, candidate.status as CapacityPoolStatus]));
+  return new Map(
+    rows.map((candidate) => [
+      candidate.id,
+      {
+        status: candidate.status as CapacityPoolStatus,
+        currentlyAddable: candidate.providerInstanceCatalogSource !== null,
+      },
+    ])
+  );
 }
 
 function resolvePolicyUpdate(

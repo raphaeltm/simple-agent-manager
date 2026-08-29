@@ -146,8 +146,9 @@ Optional query parameters:
 
 Installation scope is restricted to superadmins and uses enabled platform compute credentials.
 User scope uses the caller's active personal compute credentials. Project scope returns active
-project-scoped compute credentials for that project only. Effective default pool summaries expose
-project → user → installation fallback separately.
+compute credentials attached to that project for the caller, including composable-credential
+attachments. Effective default pool summaries expose project → user → installation fallback
+separately.
 
 ## Capacity pools
 

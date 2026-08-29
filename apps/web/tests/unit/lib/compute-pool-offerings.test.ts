@@ -1,4 +1,8 @@
-import type { ProviderCatalog } from '@simple-agent-manager/shared';
+import type {
+  CapacityPoolCandidate,
+  CapacitySourceIdentity,
+  ProviderCatalog,
+} from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -21,6 +25,59 @@ const BASE_FILTERS: ComputePoolOfferingFilters = {
 };
 
 const CATALOG_LAST_SEEN_AT = '2026-08-28T00:00:00.000Z';
+
+function candidate(overrides: Partial<CapacityPoolCandidate>): CapacityPoolCandidate {
+  return {
+    id: 'candidate-cx22',
+    poolId: 'pool-1',
+    capacitySourceId: 'source-project',
+    provider: 'hetzner',
+    location: 'fsn1',
+    workloadRole: 'workspace',
+    runtime: 'vm',
+    machineClass: 'shared-vm',
+    machineSize: null,
+    providerInstanceType: 'cx22',
+    providerInstanceSku: null,
+    providerInstanceDisplayName: 'CX22',
+    providerInstanceVcpuCount: 2,
+    providerInstanceMemoryMb: 4096,
+    providerInstanceDiskGb: 40,
+    providerInstancePriceDisplay: '€3.79/mo',
+    providerInstancePriceCurrency: 'EUR',
+    providerInstancePriceMonthlyCents: 379,
+    providerInstancePriceHourlyMicros: 5190,
+    providerInstanceCatalogSource: 'api',
+    providerInstanceCatalogLastSeenAt: CATALOG_LAST_SEEN_AT,
+    priority: 0,
+    candidateOrder: 0,
+    status: 'active',
+    createdAt: CATALOG_LAST_SEEN_AT,
+    updatedAt: CATALOG_LAST_SEEN_AT,
+    ...overrides,
+  };
+}
+
+function sourceIdentity(overrides: Partial<CapacitySourceIdentity> = {}): CapacitySourceIdentity {
+  return {
+    id: 'source-project',
+    scope: 'project',
+    ownerUserId: null,
+    ownerProjectId: 'project-1',
+    sourceKind: 'cloud-provider-credential',
+    provider: 'hetzner',
+    credentialSource: 'project',
+    credentialId: 'credential-project',
+    platformCredentialId: null,
+    credentialReference: 'credentials:credential-project',
+    credentialVersion: Date.parse(CATALOG_LAST_SEEN_AT),
+    externalSourceRef: null,
+    status: 'active',
+    createdAt: CATALOG_LAST_SEEN_AT,
+    updatedAt: CATALOG_LAST_SEEN_AT,
+    ...overrides,
+  };
+}
 
 function offering(
   overrides: Partial<CatalogOffering> &
@@ -174,6 +231,12 @@ describe('compute-pool offering filters', () => {
       matchesComputePoolFilters(bySku.ccx33!, { ...BASE_FILTERS, availability: 'available' })
     ).toBe(false);
     expect(
+      matchesComputePoolFilters(bySku['stale-16c-64gb']!, {
+        ...BASE_FILTERS,
+        availability: 'available',
+      })
+    ).toBe(false);
+    expect(
       matchesComputePoolFilters(bySku.ccx33!, { ...BASE_FILTERS, availability: 'unavailable' })
     ).toBe(true);
     expect(
@@ -285,6 +348,47 @@ describe('compute-pool offering filters', () => {
     expect(model.catalog.map((offering) => offering.sku)).not.toEqual(
       expect.arrayContaining(['small', 'medium', 'large'])
     );
+  });
+
+  it('does not allow adding back removed candidates missing from the current catalog', () => {
+    const currentCatalog = catalog();
+    const model = buildComputePoolOfferingsModel(
+      [
+        candidate({
+          id: 'candidate-cpx31',
+          location: 'ash',
+          providerInstanceType: 'cpx31',
+          providerInstanceDisplayName: 'CPX31',
+          providerInstanceVcpuCount: 4,
+          providerInstanceMemoryMb: 8192,
+          providerInstanceDiskGb: 160,
+          providerInstancePriceDisplay: '€13.10/mo',
+          providerInstancePriceMonthlyCents: 1310,
+          providerInstancePriceHourlyMicros: 17_945,
+          status: 'deleted',
+        }),
+      ],
+      [
+        {
+          ...currentCatalog,
+          offerings: currentCatalog.offerings?.filter(
+            (offering) => offering.providerInstanceType !== 'cpx31'
+          ),
+        },
+      ],
+      [sourceIdentity()]
+    );
+
+    const removed = model.excluded.find((offering) => offering.sku === 'cpx31');
+    expect(removed).toMatchObject({
+      candidateId: 'candidate-cpx31',
+      candidateStatus: 'deleted',
+      available: false,
+      stale: true,
+      statusLabel: 'No longer present in the current provider catalog',
+    });
+    expect(canAddComputePoolOffering(removed!)).toBe(false);
+    expect(model.catalog.find((offering) => offering.sku === 'cpx31')).toBeUndefined();
   });
 
   it('does not hide provider-native catalog rows that have not been reconciled yet', () => {

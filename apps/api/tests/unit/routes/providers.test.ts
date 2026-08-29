@@ -48,13 +48,20 @@ vi.mock('@simple-agent-manager/providers', async (importOriginal) => {
   };
 });
 
-// Mock buildProviderConfig to return a pass-through config
-vi.mock('../../../src/services/provider-credentials', () => ({
-  buildProviderConfig: vi.fn((provider: string, _token: string) => ({
-    provider,
-    apiToken: 'mock-token',
-  })),
-}));
+// Mock buildProviderConfig to return a pass-through config. The provider catalog
+// route uses the shared credential codec path directly rather than the legacy
+// provider-credentials service facade.
+vi.mock('../../../src/services/provider-credential-codecs', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../../../src/services/provider-credential-codecs')>();
+  return {
+    ...original,
+    buildProviderConfig: vi.fn((provider: string, _token: string) => ({
+      provider,
+      apiToken: 'mock-token',
+    })),
+  };
+});
 
 // ============================================================================
 // Helpers
@@ -88,10 +95,17 @@ function createMockDB(
     ...row,
     id: row.id ?? `credential-${index + 1}`,
     projectId: row.projectId ?? null,
+    userId: 'test-user-id',
+    isActive: true,
+    isEnabled: true,
+    createdBy: 'test-user-id',
+    createdAt: '2026-08-29T00:00:00.000Z',
+    updatedAt: '2026-08-29T00:00:00.000Z',
   }));
   const mockDB: any = {
     select: vi.fn().mockReturnThis(),
     from: vi.fn().mockReturnThis(),
+    innerJoin: vi.fn().mockReturnThis(),
     where: vi.fn().mockResolvedValue(selectedRows),
   };
   (drizzle as any).mockReturnValue(mockDB);

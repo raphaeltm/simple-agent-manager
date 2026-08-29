@@ -6,6 +6,7 @@ import { type drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { decrypt } from './encryption';
+import { extractCloudProviderToken } from './provider-credential-codecs';
 
 export type ProviderResolutionResult = {
   provider: Provider;
@@ -29,6 +30,7 @@ export interface ProviderCredentialPlacementSnapshot {
 
 type ParsedProviderCredentialReference =
   | { kind: 'credential'; id: string }
+  | { kind: 'ccCredential'; id: string }
   | { kind: 'platformCredential'; id: string };
 
 type ProviderFactory<TEnv extends Env> = (
@@ -49,6 +51,11 @@ function parseProviderCredentialReference(
   if (trimmed.startsWith(credentialPrefix)) {
     const id = trimmed.slice(credentialPrefix.length).trim();
     return id ? { kind: 'credential', id } : null;
+  }
+  const ccCredentialPrefix = 'cc_credentials:';
+  if (trimmed.startsWith(ccCredentialPrefix)) {
+    const id = trimmed.slice(ccCredentialPrefix.length).trim();
+    return id ? { kind: 'ccCredential', id } : null;
   }
   const platformPrefix = 'platform_credentials:';
   if (trimmed.startsWith(platformPrefix)) {
@@ -122,6 +129,19 @@ export async function createProviderForExactCredential<TEnv extends Env>(
   }
 
   if (exactCredential.credentialSource === 'user') {
+    if (reference.kind === 'ccCredential') {
+      return createProviderForExactComposableCredential(
+        db,
+        userId,
+        encryptionKey,
+        env,
+        targetProvider,
+        projectId ?? null,
+        reference.id,
+        'user',
+        createProviderFromDecryptedToken
+      );
+    }
     if (reference.kind !== 'credential') return null;
     const [cred] = await db
       .select()
@@ -151,6 +171,20 @@ export async function createProviderForExactCredential<TEnv extends Env>(
   }
 
   if (exactCredential.credentialSource === 'project') {
+    if (reference.kind === 'ccCredential') {
+      if (!projectId) return null;
+      return createProviderForExactComposableCredential(
+        db,
+        userId,
+        encryptionKey,
+        env,
+        targetProvider,
+        projectId,
+        reference.id,
+        'project',
+        createProviderFromDecryptedToken
+      );
+    }
     if (reference.kind !== 'credential' || !projectId) return null;
     const [cred] = await db
       .select()
@@ -179,4 +213,66 @@ export async function createProviderForExactCredential<TEnv extends Env>(
   }
 
   return null;
+}
+
+async function createProviderForExactComposableCredential<TEnv extends Env>(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  encryptionKey: string,
+  env: TEnv,
+  targetProvider: CredentialProvider,
+  projectId: string | null,
+  credentialId: string,
+  credentialSource: 'user' | 'project',
+  createProviderFromDecryptedToken: ProviderFactory<TEnv>
+): Promise<ProviderResolutionResult | null> {
+  const attachmentPredicates = [
+    eq(schema.ccAttachments.userId, userId),
+    eq(schema.ccAttachments.consumerKind, 'compute'),
+    eq(schema.ccAttachments.consumerTarget, targetProvider),
+    eq(schema.ccAttachments.isActive, true),
+    credentialSource === 'project'
+      ? eq(schema.ccAttachments.projectId, projectId ?? '')
+      : isNull(schema.ccAttachments.projectId),
+  ];
+
+  const [row] = await db
+    .select({
+      encryptedToken: schema.ccCredentials.encryptedToken,
+      iv: schema.ccCredentials.iv,
+    })
+    .from(schema.ccCredentials)
+    .innerJoin(
+      schema.ccConfigurations,
+      eq(schema.ccConfigurations.credentialId, schema.ccCredentials.id)
+    )
+    .innerJoin(
+      schema.ccAttachments,
+      eq(schema.ccAttachments.configurationId, schema.ccConfigurations.id)
+    )
+    .where(
+      and(
+        eq(schema.ccCredentials.id, credentialId),
+        eq(schema.ccCredentials.ownerId, userId),
+        eq(schema.ccCredentials.kind, 'cloud-provider'),
+        eq(schema.ccCredentials.isActive, true),
+        eq(schema.ccConfigurations.consumerKind, 'compute'),
+        eq(schema.ccConfigurations.consumerTarget, targetProvider),
+        eq(schema.ccConfigurations.isActive, true),
+        ...attachmentPredicates
+      )
+    )
+    .limit(1);
+
+  if (!row) return null;
+  const decryptedToken = await decrypt(row.encryptedToken, row.iv, encryptionKey);
+  const providerToken = extractCloudProviderToken(targetProvider, decryptedToken);
+  return createProviderFromDecryptedToken(
+    targetProvider,
+    providerToken,
+    credentialSource,
+    userId,
+    projectId,
+    env
+  );
 }

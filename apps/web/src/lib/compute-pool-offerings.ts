@@ -121,6 +121,9 @@ function identityPart(value: string | null | undefined): string {
 
 function catalogSourceKey(catalog: ProviderCatalog): string | null {
   const source = catalog.credentialSource?.trim();
+  if (source && catalog.externalSourceRef?.trim()) {
+    return `${source}:${catalog.externalSourceRef.trim()}`;
+  }
   const id =
     source === 'platform' ? catalog.platformCredentialId?.trim() : catalog.credentialId?.trim();
   return source && id ? `${source}:${id}` : null;
@@ -148,6 +151,9 @@ function sourceKeyFromIdentity(source: CapacitySourceIdentity): string | null {
   if (source.platformCredentialId) return `platform:${source.platformCredentialId}`;
   if (source.credentialId && source.credentialSource) {
     return `${source.credentialSource}:${source.credentialId}`;
+  }
+  if (source.externalSourceRef && source.credentialSource) {
+    return `${source.credentialSource}:${source.externalSourceRef}`;
   }
   if (source.externalSourceRef) return `external:${source.externalSourceRef}`;
   return null;
@@ -523,6 +529,8 @@ export function buildComputePoolOfferingsModel(
       exactCatalogOffering ??
       legacyCatalogOffering ??
       candidateFallbackOffering(extended, sourceKey, sourceLabel);
+    const missingFromCurrentCatalog =
+      nativeSku !== null && !exactCatalogOffering && !legacyCatalogOffering;
 
     return {
       ...base,
@@ -532,6 +540,11 @@ export function buildComputePoolOfferingsModel(
       machineClass: candidate.machineClass,
       priority: candidate.priority,
       candidateOrder: candidate.candidateOrder,
+      available: missingFromCurrentCatalog ? false : base.available,
+      stale: missingFromCurrentCatalog ? true : base.stale,
+      statusLabel: missingFromCurrentCatalog
+        ? 'No longer present in the current provider catalog'
+        : base.statusLabel,
     };
   });
 
@@ -601,7 +614,7 @@ export function matchesComputePoolFilters(
     }
   }
 
-  if (filters.availability === 'available' && offering.available === false) return false;
+  if (filters.availability === 'available' && !canAddComputePoolOffering(offering)) return false;
   if (filters.availability === 'unavailable' && offering.available !== false) return false;
   if (filters.availability === 'stale' && !offering.stale) return false;
 

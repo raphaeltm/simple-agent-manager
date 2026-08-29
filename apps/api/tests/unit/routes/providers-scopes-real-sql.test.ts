@@ -59,7 +59,14 @@ function createApp() {
 
 function createEnv() {
   const sqlite = new Database(':memory:');
-  createSchemaTables(sqlite, [schema.users, schema.credentials, schema.platformCredentials]);
+  createSchemaTables(sqlite, [
+    schema.users,
+    schema.credentials,
+    schema.platformCredentials,
+    schema.ccCredentials,
+    schema.ccConfigurations,
+    schema.ccAttachments,
+  ]);
   return {
     sqlite,
     env: {
@@ -67,6 +74,75 @@ function createEnv() {
       ENCRYPTION_KEY: 'test-encryption-key',
     } as Env,
   };
+}
+
+function seedComposableCloudCredential(
+  sqlite: Database.Database,
+  input: {
+    credentialId: string;
+    configurationId: string;
+    attachmentId: string;
+    userId: string;
+    provider?: string;
+    projectId?: string | null;
+    active?: boolean;
+  }
+) {
+  const provider = input.provider ?? 'hetzner';
+  sqlite
+    .prepare(
+      `INSERT INTO cc_credentials (
+        id, owner_id, name, kind, encrypted_token, iv, is_active,
+        created_at, updated_at
+       )
+       VALUES (?, ?, ?, 'cloud-provider', ?, ?, ?, ?, ?)`
+    )
+    .run(
+      input.credentialId,
+      input.userId,
+      `${provider} composable credential`,
+      `cc-encrypted-token-for-${input.credentialId}`,
+      `cc-iv-for-${input.credentialId}`,
+      input.active === false ? 0 : 1,
+      '2026-08-29T00:00:00.000Z',
+      '2026-08-29T00:00:00.000Z'
+    );
+  sqlite
+    .prepare(
+      `INSERT INTO cc_configurations (
+        id, owner_id, name, consumer_kind, consumer_target, credential_id,
+        settings_json, is_active, created_at, updated_at
+       )
+       VALUES (?, ?, ?, 'compute', ?, ?, NULL, ?, ?, ?)`
+    )
+    .run(
+      input.configurationId,
+      input.userId,
+      `${provider} compute`,
+      provider,
+      input.credentialId,
+      input.active === false ? 0 : 1,
+      '2026-08-29T00:00:00.000Z',
+      '2026-08-29T00:00:00.000Z'
+    );
+  sqlite
+    .prepare(
+      `INSERT INTO cc_attachments (
+        id, configuration_id, consumer_kind, consumer_target, user_id, project_id,
+        is_active, created_at, updated_at
+       )
+       VALUES (?, ?, 'compute', ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      input.attachmentId,
+      input.configurationId,
+      provider,
+      input.userId,
+      input.projectId ?? null,
+      input.active === false ? 0 : 1,
+      '2026-08-29T00:00:00.000Z',
+      '2026-08-29T00:00:00.000Z'
+    );
 }
 
 function seedUser(sqlite: Database.Database, id: string, role = 'user') {
@@ -263,6 +339,73 @@ describe('GET /api/providers/catalog scope filtering with real SQL', () => {
     });
     expect(JSON.stringify(body)).not.toContain('encrypted-token-for-project-active');
     expect(JSON.stringify(body)).not.toContain('iv-for-project-active');
+  });
+
+  it('includes active user-scoped composable compute credentials', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'test-user-id');
+    seedComposableCloudCredential(sqlite, {
+      credentialId: 'cc-cred-user',
+      configurationId: 'cc-cfg-user',
+      attachmentId: 'cc-att-user',
+      userId: 'test-user-id',
+      provider: 'digitalocean',
+    });
+
+    const res = await createApp().request('/api/providers/catalog?scope=user', {}, env);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ProviderCatalogResponse;
+    expect(body.catalogs).toHaveLength(1);
+    expect(body.catalogs[0]).toMatchObject({
+      provider: 'digitalocean',
+      credentialSource: 'user',
+      credentialId: 'cc-cred-user',
+      platformCredentialId: null,
+      externalSourceRef: 'cc_attachments:cc-att-user',
+      credentialReference: 'cc_credentials:cc-cred-user',
+    });
+    expect(JSON.stringify(body)).not.toContain('cc-encrypted-token-for-cc-cred-user');
+    expect(JSON.stringify(body)).not.toContain('cc-iv-for-cc-cred-user');
+  });
+
+  it('includes only the caller project-scoped composable compute credentials', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'test-user-id');
+    seedUser(sqlite, 'other-user-id');
+    seedComposableCloudCredential(sqlite, {
+      credentialId: 'cc-cred-project',
+      configurationId: 'cc-cfg-project',
+      attachmentId: 'cc-att-project',
+      userId: 'test-user-id',
+      provider: 'digitalocean',
+      projectId: 'project-1',
+    });
+    seedComposableCloudCredential(sqlite, {
+      credentialId: 'cc-cred-other-project-user',
+      configurationId: 'cc-cfg-other-project-user',
+      attachmentId: 'cc-att-other-project-user',
+      userId: 'other-user-id',
+      provider: 'vultr',
+      projectId: 'project-1',
+    });
+
+    const res = await createApp().request(
+      '/api/providers/catalog?scope=project&projectId=project-1',
+      {},
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ProviderCatalogResponse;
+    expect(body.catalogs.map((catalog) => catalog.credentialId)).toEqual(['cc-cred-project']);
+    expect(body.catalogs[0]).toMatchObject({
+      provider: 'digitalocean',
+      credentialSource: 'project',
+      externalSourceRef: 'cc_attachments:cc-att-project',
+      credentialReference: 'cc_credentials:cc-cred-project',
+    });
+    expect(JSON.stringify(body)).not.toContain('cc-cred-other-project-user');
   });
 
   it('returns only enabled platform credentials for installation scope', async () => {

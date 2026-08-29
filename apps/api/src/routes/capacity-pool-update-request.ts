@@ -30,11 +30,18 @@ export function assertDefaultCapacityPoolUpdateResult(
   missingCandidatesMessage: string
 ): void {
   if (!result.poolFound) throw errors.notFound('Default capacity pool');
-  if (result.missingCandidateIds.length === 0) return;
+  if (result.missingCandidateIds.length > 0) {
+    throw errors.badRequest(missingCandidatesMessage, {
+      missingCandidateIds: result.missingCandidateIds,
+    });
+  }
+  if (result.unavailableCandidateIds.length > 0) {
+    throw errors.badRequest('Candidate updates must be currently available in the provider catalog', {
+      unavailableCandidateIds: result.unavailableCandidateIds,
+    });
+  }
 
-  throw errors.badRequest(missingCandidatesMessage, {
-    missingCandidateIds: result.missingCandidateIds,
-  });
+  return;
 }
 
 export function parseDefaultCapacityPoolUpdateRequest(

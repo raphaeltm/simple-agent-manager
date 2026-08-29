@@ -209,6 +209,14 @@ capacityPoolRoutes.patch('/:id/capacity-pools/defaults', async (c) => {
   await requireProjectCapability(db, projectId, userId, 'secret:write');
 
   const update = await readDefaultCapacityPoolUpdateRequest(c);
+  await readDefaultCapacityPoolSummaries(db, {
+    userId,
+    projectId,
+    includeInstallation: auth.user.role === 'superadmin',
+    ensure: true,
+    includeDisabled: true,
+    env: c.env,
+  });
   const result = await updateDefaultCapacityPool(db, {
     scope: 'project',
     ownerUserId: null,

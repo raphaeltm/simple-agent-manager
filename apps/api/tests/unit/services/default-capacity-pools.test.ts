@@ -47,6 +47,10 @@ const candidateCatalogMetadataMigrationSql = readFileSync(
   join(process.cwd(), 'src/db/migrations/0128_capacity_pool_candidate_catalog_metadata.sql'),
   'utf8'
 );
+const capacitySourceExternalCredentialsMigrationSql = readFileSync(
+  join(process.cwd(), 'src/db/migrations/0129_capacity_source_external_credentials.sql'),
+  'utf8'
+);
 
 let sqlite: Database.Database | null = null;
 const TEST_ENCRYPTION_KEY = 'iZEI8rg5FHtTo2yvt6Qw3m4z6aTfqj5MdLEGqOvdqw0=';
@@ -153,12 +157,50 @@ function createDb() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE cc_credentials (
+      id TEXT PRIMARY KEY,
+      owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      encrypted_token TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE cc_configurations (
+      id TEXT PRIMARY KEY,
+      owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      consumer_kind TEXT NOT NULL,
+      consumer_target TEXT NOT NULL,
+      credential_id TEXT REFERENCES cc_credentials(id) ON DELETE SET NULL,
+      settings_json TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE cc_attachments (
+      id TEXT PRIMARY KEY,
+      configuration_id TEXT NOT NULL REFERENCES cc_configurations(id) ON DELETE CASCADE,
+      consumer_kind TEXT NOT NULL,
+      consumer_target TEXT NOT NULL,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `);
   seedIdentity();
   sqlite.exec(migrationSql);
   sqlite.exec(candidateSnapshotMigrationSql);
   sqlite.exec(concreteOfferingMigrationSql);
   sqlite.exec(candidateCatalogMetadataMigrationSql);
+  sqlite.exec(capacitySourceExternalCredentialsMigrationSql);
   return drizzle(sqlite, { schema });
 }
 
@@ -232,6 +274,79 @@ function seedPlatformCredential(input: {
       input.isEnabled ?? 1,
       '2026-08-28T00:00:00.000Z',
       input.updatedAt ?? '2026-08-28T00:00:00.000Z'
+    );
+}
+
+function seedComposableCloudCredential(input: {
+  credentialId: string;
+  configurationId: string;
+  attachmentId: string;
+  userId?: string;
+  projectId?: string | null;
+  provider?: string;
+  isActive?: 0 | 1;
+}): void {
+  const userId = input.userId ?? 'user-1';
+  const provider = input.provider ?? 'hetzner';
+  const active = input.isActive ?? 1;
+  sqlite
+    ?.prepare(
+      `
+      INSERT INTO cc_credentials (
+        id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at
+      )
+      VALUES (?, ?, ?, 'cloud-provider', ?, ?, ?, ?, ?)
+    `
+    )
+    .run(
+      input.credentialId,
+      userId,
+      `${provider} composable credential`,
+      `encrypted-token-for-${input.credentialId}`,
+      `iv-for-${input.credentialId}`,
+      active,
+      '2026-08-28T00:00:00.000Z',
+      '2026-08-28T00:00:00.000Z'
+    );
+  sqlite
+    ?.prepare(
+      `
+      INSERT INTO cc_configurations (
+        id, owner_id, name, consumer_kind, consumer_target, credential_id, settings_json,
+        is_active, created_at, updated_at
+      )
+      VALUES (?, ?, ?, 'compute', ?, ?, NULL, ?, ?, ?)
+    `
+    )
+    .run(
+      input.configurationId,
+      userId,
+      `${provider} compute`,
+      provider,
+      input.credentialId,
+      active,
+      '2026-08-28T00:00:00.000Z',
+      '2026-08-28T00:00:00.000Z'
+    );
+  sqlite
+    ?.prepare(
+      `
+      INSERT INTO cc_attachments (
+        id, configuration_id, consumer_kind, consumer_target, user_id, project_id,
+        is_active, created_at, updated_at
+      )
+      VALUES (?, ?, 'compute', ?, ?, ?, ?, ?, ?)
+    `
+    )
+    .run(
+      input.attachmentId,
+      input.configurationId,
+      provider,
+      userId,
+      input.projectId ?? null,
+      active,
+      '2026-08-28T00:00:00.000Z',
+      '2026-08-28T00:00:00.000Z'
     );
 }
 
@@ -873,6 +988,146 @@ describe('default capacity pool creation', () => {
       { status: 'active', count: 120 },
       { status: 'disabled', count: 30 },
     ]);
+  });
+
+  it('updates large provider catalogs without exceeding D1 bind limits', async () => {
+    createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    const db = drizzleD1(createSqliteD1WithBindLimit(sqlite!, 100), { schema });
+    const offerings = manyLiveOfferings(150);
+
+    const ensured = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => offerings,
+    });
+    const activeCandidates = ensured.user?.candidates ?? [];
+
+    const update = await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      candidates: activeCandidates.map((candidate) => ({
+        id: candidate.id,
+        status: 'deleted',
+      })),
+    });
+
+    expect(update.missingCandidateIds).toEqual([]);
+    expect(update.unavailableCandidateIds).toEqual([]);
+    expect(update.summary?.activeCandidateCount).toBe(0);
+    expect(
+      getRows<{ status: string; count: number }>(`
+        SELECT status, COUNT(*) AS count
+        FROM capacity_pool_candidates
+        GROUP BY status
+        ORDER BY status
+      `)
+    ).toEqual([{ status: 'deleted', count: 150 }]);
+  });
+
+  it('seeds user and project pools from composable compute credentials', async () => {
+    const db = createDb();
+    seedComposableCloudCredential({
+      credentialId: 'cc-cred-user',
+      configurationId: 'cc-cfg-user',
+      attachmentId: 'cc-att-user',
+      provider: 'hetzner',
+    });
+    seedComposableCloudCredential({
+      credentialId: 'cc-cred-project',
+      configurationId: 'cc-cfg-project',
+      attachmentId: 'cc-att-project',
+      provider: 'vultr',
+      projectId: 'project-1',
+    });
+
+    const ensured = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      projectId: 'project-1',
+      includeInstallation: false,
+      offeringResolver: async (seed) => [
+        liveHetznerOffering({
+          provider: seed.provider,
+          location: seed.provider === 'vultr' ? 'ewr' : 'fsn1',
+          providerInstanceType: `${seed.provider}-native-large`,
+          displayName: `${seed.provider} native large`,
+        }),
+      ],
+    });
+
+    expect(ensured.user?.sources[0]).toMatchObject({
+      scope: 'user',
+      provider: 'hetzner',
+      credentialSource: 'user',
+      credentialId: null,
+      platformCredentialId: null,
+      credentialReference: 'cc_credentials:cc-cred-user',
+      externalSourceRef: 'cc_attachments:cc-att-user',
+    });
+    expect(ensured.project?.sources[0]).toMatchObject({
+      scope: 'project',
+      provider: 'vultr',
+      credentialSource: 'project',
+      credentialId: null,
+      platformCredentialId: null,
+      credentialReference: 'cc_credentials:cc-cred-project',
+      externalSourceRef: 'cc_attachments:cc-att-project',
+    });
+    expect(ensured.user?.candidates[0]).toMatchObject({
+      provider: 'hetzner',
+      providerInstanceType: 'hetzner-native-large',
+      providerInstanceCatalogSource: 'api',
+    });
+    expect(ensured.project?.candidates[0]).toMatchObject({
+      provider: 'vultr',
+      providerInstanceType: 'vultr-native-large',
+      providerInstanceCatalogSource: 'api',
+    });
+  });
+
+  it('rejects reactivating removed candidates that are no longer in the current catalog', async () => {
+    createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    const db = drizzleD1(createSqliteD1WithBindLimit(sqlite!, 100), { schema });
+    const offerings = manyLiveOfferings(2);
+
+    const ensured = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => offerings,
+    });
+    const staleCandidate = ensured.user?.candidates[1];
+    expect(staleCandidate).toBeDefined();
+
+    await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      candidates: [{ id: staleCandidate!.id, status: 'deleted' }],
+    });
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => offerings.slice(0, 1),
+    });
+
+    const update = await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      candidates: [{ id: staleCandidate!.id, status: 'active' }],
+    });
+
+    expect(update.summary).toBeNull();
+    expect(update.unavailableCandidateIds).toEqual([staleCandidate!.id]);
+    expect(
+      getRows<{ status: string; provider_instance_catalog_source: string | null }>(`
+        SELECT status, provider_instance_catalog_source
+        FROM capacity_pool_candidates
+        WHERE id = '${staleCandidate!.id}'
+      `)[0]
+    ).toEqual({ status: 'deleted', provider_instance_catalog_source: null });
   });
 
   it('translates deleted legacy size rows onto matching live catalog offerings only', async () => {

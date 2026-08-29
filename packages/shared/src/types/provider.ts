@@ -121,6 +121,10 @@ export interface ProviderCatalog {
   credentialId?: string | null;
   /** Non-secret platform credential row ID for installation-scoped catalogs, when applicable. */
   platformCredentialId?: string | null;
+  /** Non-secret source binding id for catalog rows backed by composable credentials. */
+  externalSourceRef?: string | null;
+  /** Non-secret durable credential reference used by capacity-pool placement snapshots. */
+  credentialReference?: string | null;
   locations: LocationInfo[];
   sizes: Record<VMSize, SizeInfo>;
   /** Provider-native instance offerings for compute-pool setup. */
