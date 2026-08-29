@@ -14,13 +14,7 @@ const PROJECT_ID = 'proj-settings-1';
 const nativeOfferings = [
   { sku: 'cx23', vcpu: 2, memoryMb: 4096, diskGb: 40, priceCents: 399 },
   { sku: 'cx33', vcpu: 4, memoryMb: 8192, diskGb: 80, priceCents: 749 },
-  {
-    sku: 'cx43-provider-native-sku-with-deliberately-long-name-for-mobile-wrapping',
-    vcpu: 8,
-    memoryMb: 16_384,
-    diskGb: 160,
-    priceCents: 1449,
-  },
+  { sku: 'cx43', vcpu: 8, memoryMb: 16_384, diskGb: 160, priceCents: 1449 },
   { sku: 'cpx31', vcpu: 4, memoryMb: 8192, diskGb: 160, priceCents: null },
   { sku: 'ccx33', vcpu: 8, memoryMb: 32_768, diskGb: 240, priceCents: 22000 },
   {
@@ -28,7 +22,7 @@ const nativeOfferings = [
     vcpu: 48,
     memoryMb: 196_608,
     diskGb: 960,
-    priceCents: 99000,
+    priceCents: 103600,
   },
 ] as const;
 
@@ -46,6 +40,13 @@ function priceMonthly(offering: (typeof nativeOfferings)[number]) {
 
 function priceHourlyMicros(offering: (typeof nativeOfferings)[number]) {
   return offering.priceCents === null ? null : Math.round((offering.priceCents * 10_000) / 730);
+}
+
+function legacyMachineSizeForSku(sku: string): 'small' | 'medium' | 'large' | null {
+  if (sku === 'cx23') return 'small';
+  if (sku === 'cx33') return 'medium';
+  if (sku === 'cx43') return 'large';
+  return null;
 }
 
 const MOCK_USER = makeMockUser({
@@ -182,6 +183,7 @@ const emptyCredentialHealth = {
 function capacityCandidate(index: number, overrides: Record<string, unknown> = {}) {
   const visibleLocations = ['fsn1', 'nbg1', 'hel1', 'ash', 'hil'];
   const offering = nativeOffering(index);
+  const legacyMachineSize = index < 3 ? legacyMachineSizeForSku(offering.sku) : null;
   return {
     id: `candidate-${index}`,
     poolId: 'pool-project-default',
@@ -191,7 +193,7 @@ function capacityCandidate(index: number, overrides: Record<string, unknown> = {
     workloadRole: 'workspace',
     runtime: 'vm',
     machineClass: 'shared-vm',
-    machineSize: index % 3 === 0 ? 'small' : index % 3 === 1 ? 'medium' : 'large',
+    machineSize: legacyMachineSize,
     providerInstanceType: offering.sku,
     providerInstanceSku: null,
     providerInstanceDisplayName: `${offering.sku} · ${offering.vcpu} vCPU · ${offering.memoryMb / 1024} GB RAM · ${offering.diskGb} GB disk`,
@@ -202,14 +204,14 @@ function capacityCandidate(index: number, overrides: Record<string, unknown> = {
     providerInstancePriceCurrency: offering.priceCents === null ? null : 'EUR',
     providerInstancePriceMonthlyCents: offering.priceCents,
     providerInstancePriceHourlyMicros: priceHourlyMicros(offering),
-    providerInstanceCatalogSource: 'static',
+    providerInstanceCatalogSource: 'api',
     providerInstanceCatalogLastSeenAt: offering.sku === 'ccx33' ? '2026-07-01T00:00:00.000Z' : null,
     available: offering.sku === 'ccx33' ? false : true,
     stale: offering.sku === 'ccx33',
     catalogStatus: offering.sku === 'ccx33' ? 'temporarily unavailable' : null,
     priority: index,
     candidateOrder: index,
-    status: 'active',
+    status: legacyMachineSize ? 'active' : 'disabled',
     createdAt: '2026-08-28T00:00:00.000Z',
     updatedAt: '2026-08-28T00:00:00.000Z',
     ...overrides,
@@ -260,7 +262,7 @@ function capacitySummary(overrides: Record<string, unknown> = {}) {
       },
     ],
     candidates,
-    activeCandidateCount: candidates.length,
+    activeCandidateCount: candidates.filter((candidate) => candidate.status === 'active').length,
     ...overrides,
   };
 }
@@ -528,8 +530,8 @@ test.describe('Project settings sub-pages', () => {
 
     await page.getByRole('button', { name: 'Edit' }).click();
     await expect(page.getByRole('heading', { name: 'Edit project default' })).toBeVisible();
-    await page.getByRole('button', { name: /Remove Hetzner ash cpx31/ }).click();
-    await page.getByRole('button', { name: /Remove Hetzner hil ccx33/ }).click();
+    await page.getByRole('button', { name: /Remove Hetzner fsn1 cx23/ }).click();
+    await page.getByRole('button', { name: /Remove Hetzner nbg1 cx33/ }).click();
     await screenshotNearHeading(
       page,
       'Edit project default',
@@ -548,7 +550,8 @@ test.describe('Project settings sub-pages', () => {
       'Catalog filters',
       'project-settings-default-compute-pool-catalog-filters-focused'
     );
-    await expect(page.getByRole('button', { name: /Add Hetzner hil ccx33/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Add Hetzner hil ccx33/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Stale' }).first()).toBeDisabled();
     await page
       .getByRole('heading', { name: 'Add instances from catalog' })
       .evaluate((element) => element.scrollIntoView({ block: 'start', inline: 'nearest' }));
@@ -558,7 +561,7 @@ test.describe('Project settings sub-pages', () => {
       'project-settings-default-compute-pool-catalog-results-focused'
     );
     await page.getByRole('button', { name: 'Save changes' }).click();
-    await expect(page.getByText(/3 allowed · 2 removed\/disabled/)).toBeVisible();
+    await expect(page.getByText(/1 allowed · 4 removed\/disabled/)).toBeVisible();
     await expect(
       page.getByRole('heading', { name: 'Removed or disabled instances' })
     ).toBeVisible();
@@ -601,7 +604,8 @@ test.describe('Project settings sub-pages', () => {
     capacityDefaultsBody = capacityDefaults(
       capacitySummary({
         candidates: manyCandidates,
-        activeCandidateCount: manyCandidates.length,
+        activeCandidateCount: manyCandidates.filter((candidate) => candidate.status === 'active')
+          .length,
       })
     );
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=many`);

@@ -51,13 +51,7 @@ const MOCK_PROJECT = {
 const nativeOfferings = [
   { sku: 'cx23', vcpu: 2, memoryMb: 4096, diskGb: 40, priceCents: 399 },
   { sku: 'cx33', vcpu: 4, memoryMb: 8192, diskGb: 80, priceCents: 749 },
-  {
-    sku: 'cx43-provider-native-sku-with-deliberately-long-name-for-mobile-wrapping',
-    vcpu: 8,
-    memoryMb: 16_384,
-    diskGb: 160,
-    priceCents: 1449,
-  },
+  { sku: 'cx43', vcpu: 8, memoryMb: 16_384, diskGb: 160, priceCents: 1449 },
   { sku: 'cpx31', vcpu: 4, memoryMb: 8192, diskGb: 160, priceCents: 1310 },
   { sku: 'ccx33', vcpu: 8, memoryMb: 32_768, diskGb: 240, priceCents: 22000 },
   {
@@ -65,7 +59,7 @@ const nativeOfferings = [
     vcpu: 48,
     memoryMb: 196_608,
     diskGb: 960,
-    priceCents: 99000,
+    priceCents: 103600,
   },
 ] as const;
 
@@ -93,11 +87,20 @@ function isStaleOffering(offering: (typeof nativeOfferings)[number]) {
   return offering.sku === 'ccx33';
 }
 
+function legacyMachineSizeForSku(sku: string): 'small' | 'medium' | 'large' | null {
+  if (sku === 'cx23') return 'small';
+  if (sku === 'cx33') return 'medium';
+  if (sku === 'cx43') return 'large';
+  return null;
+}
+
 function capacityCandidate(scope: PoolScope, index: number) {
   const visibleLocations = ['fsn1', 'nbg1', 'hel1', 'ash', 'hil'];
   const offering = nativeOffering(index);
   const provider =
     index < visibleLocations.length ? 'hetzner' : providerNames[index % providerNames.length];
+  const legacyMachineSize =
+    provider === 'hetzner' && index < 3 ? legacyMachineSizeForSku(offering.sku) : null;
   return {
     id: `${scope}-candidate-${index}`,
     poolId: `${scope}-default-pool`,
@@ -108,9 +111,9 @@ function capacityCandidate(scope: PoolScope, index: number) {
         ? `region-with-a-deliberately-long-location-name-${scope}-${LONG_MARKER}`
         : (visibleLocations[index] ?? `${scope}-region-${index}`),
     workloadRole: 'workspace',
-    runtime: index % 5 === 0 ? 'cf-container' : 'vm',
-    machineClass: index % 4 === 0 ? 'dedicated-vm' : 'shared-vm',
-    machineSize: index % 3 === 0 ? 'small' : index % 3 === 1 ? 'medium' : 'large',
+    runtime: legacyMachineSize ? 'vm' : index % 5 === 0 ? 'cf-container' : 'vm',
+    machineClass: legacyMachineSize ? 'shared-vm' : index % 4 === 0 ? 'dedicated-vm' : 'shared-vm',
+    machineSize: legacyMachineSize,
     providerInstanceType: offering.sku,
     providerInstanceSku: null,
     providerInstanceDisplayName: `${offering.sku} · ${offering.vcpu} vCPU · ${offering.memoryMb / 1024} GB RAM · ${offering.diskGb} GB disk`,
@@ -121,7 +124,7 @@ function capacityCandidate(scope: PoolScope, index: number) {
     providerInstancePriceCurrency: offering.priceCents === null ? null : 'EUR',
     providerInstancePriceMonthlyCents: offering.priceCents,
     providerInstancePriceHourlyMicros: priceHourlyMicros(offering),
-    providerInstanceCatalogSource: 'static',
+    providerInstanceCatalogSource: 'api',
     providerInstanceCatalogLastSeenAt: isStaleOffering(offering)
       ? '2026-07-01T00:00:00.000Z'
       : null,
@@ -134,7 +137,7 @@ function capacityCandidate(scope: PoolScope, index: number) {
         : null,
     priority: index,
     candidateOrder: index,
-    status: 'active',
+    status: legacyMachineSize ? 'active' : 'disabled',
     createdAt: TIMESTAMP,
     updatedAt: TIMESTAMP,
   };
@@ -171,8 +174,7 @@ function capacitySummary(scope: PoolScope) {
       provider,
       credentialSource:
         scope === 'installation' ? 'platform' : scope === 'project' ? 'project' : 'user',
-      credentialId:
-        scope === 'installation' ? null : `credential-${scope}-cloud-${provider}`,
+      credentialId: scope === 'installation' ? null : `credential-${scope}-cloud-${provider}`,
       platformCredentialId: scope === 'installation' ? `platform-credential-${provider}` : null,
       credentialReference:
         scope === 'installation'
@@ -187,7 +189,7 @@ function capacitySummary(scope: PoolScope) {
       updatedAt: TIMESTAMP,
     })),
     candidates,
-    activeCandidateCount: candidates.length,
+    activeCandidateCount: candidates.filter((candidate) => candidate.status === 'active').length,
   };
 }
 
@@ -224,6 +226,26 @@ function providerCatalogs(scope: PoolScope) {
       diskGb: 360,
       price: '€138.49/mo',
       priceMonthly: 138.49,
+      currency: 'EUR',
+      available: true,
+      stale: false,
+      status: null,
+      catalogSource: 'api',
+      catalogLastSeenAt: TIMESTAMP,
+    },
+    {
+      provider: 'hetzner',
+      location: 'hel1',
+      providerInstanceType:
+        'bare-metal-gpu-ultra-long-provider-native-instance-name-2026-08-stress-row',
+      providerInstanceSku: null,
+      displayName: 'Bare metal GPU ultra stress row',
+      sku: 'bare-metal-gpu-ultra-long-provider-native-instance-name-2026-08-stress-row',
+      vcpu: 48,
+      memoryMb: 196_608,
+      diskGb: 960,
+      price: '€1036.00/mo',
+      priceMonthly: 1036,
       currency: 'EUR',
       available: true,
       stale: false,
@@ -303,8 +325,7 @@ function defaultsResponse(scope: PoolScope) {
       {
         scope: 'user',
         visibility: scope === 'installation' ? 'hidden' : 'visible',
-        visibilityReason:
-          scope === 'installation' ? 'user-context-required' : 'authenticated-user',
+        visibilityReason: scope === 'installation' ? 'user-context-required' : 'authenticated-user',
         canReconcile: scope !== 'installation',
         summary: userSummary,
       },
@@ -322,11 +343,7 @@ function defaultsResponse(scope: PoolScope) {
   };
 }
 
-async function setupCommonMocks(
-  page: Page,
-  authUser: unknown,
-  catalogScope: PoolScope
-) {
+async function setupCommonMocks(page: Page, authUser: unknown, catalogScope: PoolScope) {
   await page.addInitScript(() =>
     ['pool-user', 'pool-admin'].forEach((userId) =>
       localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true')
@@ -436,13 +453,9 @@ async function setupProjectPoolMocks(page: Page) {
   );
 }
 
-async function expectStressedDefaultPool(
-  page: Page,
-  heading: string,
-  scope: PoolScope
-) {
+async function expectStressedDefaultPool(page: Page, heading: string, scope: PoolScope) {
   await expect(page.getByRole('heading', { name: heading })).toBeVisible();
-  await expect(page.getByText(/36 allowed · 0 removed\/disabled/)).toBeVisible();
+  await expect(page.getByText(/3 allowed · 33 removed\/disabled/)).toBeVisible();
   await expect(
     page.getByText(new RegExp(`region-with-a-deliberately-long-location-name-${scope}`))
   ).toBeVisible();
@@ -465,8 +478,8 @@ async function screenshotDefaultPoolScope(
 async function removeAshHilCandidates(page: Page, editHeading: string, screenshotName: string) {
   await page.getByRole('button', { name: 'Edit' }).click();
   await expect(page.getByRole('heading', { name: editHeading })).toBeVisible();
-  await page.getByRole('button', { name: /Remove Hetzner ash cpx31/ }).click();
-  await page.getByRole('button', { name: /Remove Hetzner hil ccx33/ }).click();
+  await page.getByRole('button', { name: /Remove Hetzner fsn1 cx23/ }).click();
+  await page.getByRole('button', { name: /Remove Hetzner nbg1 cx33/ }).click();
   await screenshotNearHeading(page, editHeading, screenshotName);
   await page.getByLabel('Filter provider').selectOption('hetzner');
   await page.getByLabel('Filter region or location').fill('fsn1');
@@ -489,6 +502,25 @@ async function removeAshHilCandidates(page: Page, editHeading: string, screensho
     page,
     'Catalog filters',
     `${screenshotName}-catalog-pending-add`
+  );
+  await page.getByLabel('Filter provider').selectOption('hetzner');
+  await page.getByLabel('Filter region or location').fill('hel1');
+  await page.getByLabel('Minimum vCPU').fill('48');
+  await page.getByLabel('Minimum RAM in GB').fill('192');
+  await page.getByLabel('Maximum monthly price').fill('1100');
+  await page.getByLabel('Filter availability').selectOption('available');
+  await expect(page.getByText('1 matching offering across 1 region.')).toBeVisible();
+  await expect(
+    page
+      .getByText('bare-metal-gpu-ultra-long-provider-native-instance-name-2026-08-stress-row')
+      .first()
+  ).toBeVisible();
+  await expect(page.getByText('€1036.00/mo').first()).toBeVisible();
+  await expect(page.getByText('Catalog only').first()).toBeVisible();
+  await screenshotSectionNearHeading(
+    page,
+    'Catalog filters',
+    `${screenshotName}-catalog-expensive-catalog-only`
   );
   await page.getByLabel('Filter provider').selectOption('hetzner');
   await page.getByLabel('Filter region or location').fill('ash');
@@ -529,7 +561,7 @@ async function removeAshHilCandidates(page: Page, editHeading: string, screensho
     `${screenshotName}-catalog-results`
   );
   await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText(/35 allowed · 2 removed\/disabled/)).toBeVisible();
+  await expect(page.getByText(/2 allowed · 35 removed\/disabled/)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Removed or disabled instances' })).toBeVisible();
   await expect(page.getByText(/Hetzner · Ashburn \(ash\)/).first()).toBeVisible();
   await expect(page.getByText(/Hetzner · Hillsboro \(hil\)/).first()).toBeVisible();

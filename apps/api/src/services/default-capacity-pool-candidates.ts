@@ -1,5 +1,6 @@
 import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
 import type {
+  CapacityPoolStatus,
   CredentialProvider,
   ProviderInstanceOffering,
   VMSize,
@@ -17,9 +18,9 @@ type Db = ReturnType<typeof drizzle>;
 const DEFAULT_WORKLOAD_ROLE = 'workspace';
 const DEFAULT_RUNTIME = 'vm';
 const DEFAULT_MACHINE_CLASS = 'shared-vm';
-const ACTIVE_STATUS = 'active';
-const DISABLED_STATUS = 'disabled';
-const DELETED_STATUS = 'deleted';
+const ACTIVE_STATUS: CapacityPoolStatus = 'active';
+const DISABLED_STATUS: CapacityPoolStatus = 'disabled';
+const DELETED_STATUS: CapacityPoolStatus = 'deleted';
 const CANDIDATE_INSERT_BIND_COUNT = 26;
 const CANDIDATE_UPSERT_UPDATE_BIND_COUNT = 1;
 const CANDIDATE_UPSERT_CHUNK_SIZE = Math.max(
@@ -52,17 +53,21 @@ export async function ensureCandidatesForSource(
       offering.providerInstanceType,
       offering.providerInstanceSku
     );
+    const existingStatus = existingStatuses.get(id) ?? null;
+    const legacyVmSize = legacyVmSizeHintForOffering(provider, offering);
     const legacyStatus = legacyStatusForOffering(
       existingStatuses,
       poolId,
       sourceId,
       provider,
-      offering
+      offering,
+      legacyVmSize
     );
-    const initialStatus =
-      legacyStatus === DISABLED_STATUS || legacyStatus === DELETED_STATUS
-        ? legacyStatus
-        : ACTIVE_STATUS;
+    const initialStatus = initialStatusForProviderOffering({
+      existingStatus,
+      legacyStatus,
+      legacyVmSize,
+    });
     candidateIds.push(id);
     candidateValues.push({
       id,
@@ -73,7 +78,7 @@ export async function ensureCandidatesForSource(
       workloadRole: DEFAULT_WORKLOAD_ROLE,
       runtime: DEFAULT_RUNTIME,
       machineClass: DEFAULT_MACHINE_CLASS,
-      machineSize: legacyVmSizeHintForOffering(provider, offering),
+      machineSize: legacyVmSize,
       ...providerInstanceOfferingDbValues(offering),
       priority: candidateOrder,
       candidateOrder,
@@ -118,18 +123,33 @@ export async function ensureCandidatesForSource(
   await markMissingCandidatesForSource(db, poolId, sourceId, existingStatuses, candidateIds);
 }
 
+export function initialStatusForProviderOffering(input: {
+  existingStatus?: CapacityPoolStatus | null;
+  legacyStatus?: CapacityPoolStatus | null;
+  legacyVmSize?: VMSize | null;
+}): CapacityPoolStatus {
+  if (input.existingStatus) return input.existingStatus;
+  if (
+    input.legacyVmSize &&
+    (input.legacyStatus === DISABLED_STATUS || input.legacyStatus === DELETED_STATUS)
+  ) {
+    return input.legacyStatus;
+  }
+  return input.legacyVmSize ? ACTIVE_STATUS : DISABLED_STATUS;
+}
+
 function isCurrentlySelectableOffering(offering: ProviderInstanceOffering): boolean {
   return offering.available !== false && !offering.stale;
 }
 
 function legacyStatusForOffering(
-  existingStatuses: ReadonlyMap<string, string>,
+  existingStatuses: ReadonlyMap<string, CapacityPoolStatus>,
   poolId: string,
   sourceId: string,
   provider: CredentialProvider,
-  offering: ProviderInstanceOffering
-): string | null {
-  const legacyVmSize = legacyVmSizeHintForOffering(provider, offering);
+  offering: ProviderInstanceOffering,
+  legacyVmSize: VMSize | null = legacyVmSizeHintForOffering(provider, offering)
+): CapacityPoolStatus | null {
   if (!legacyVmSize) return null;
   return (
     existingStatuses.get(
@@ -161,7 +181,7 @@ async function readExistingCandidateStatuses(
   db: Db,
   poolId: string,
   sourceId: string
-): Promise<Map<string, string>> {
+): Promise<Map<string, CapacityPoolStatus>> {
   const rows = await db
     .select({ id: schema.capacityPoolCandidates.id, status: schema.capacityPoolCandidates.status })
     .from(schema.capacityPoolCandidates)
@@ -171,19 +191,21 @@ async function readExistingCandidateStatuses(
         eq(schema.capacityPoolCandidates.capacitySourceId, sourceId)
       )
     );
-  return new Map(rows.map((row) => [row.id, row.status]));
+  return new Map(rows.map((row) => [row.id, row.status as CapacityPoolStatus]));
 }
 
 async function markMissingCandidatesForSource(
   db: Db,
   poolId: string,
   sourceId: string,
-  existingStatuses: ReadonlyMap<string, string>,
+  existingStatuses: ReadonlyMap<string, CapacityPoolStatus>,
   activeCandidateIds: string[]
 ): Promise<void> {
   const now = new Date().toISOString();
   const nextCandidateIds = new Set(activeCandidateIds);
-  const missingCandidateIds = [...existingStatuses.keys()].filter((id) => !nextCandidateIds.has(id));
+  const missingCandidateIds = [...existingStatuses.keys()].filter(
+    (id) => !nextCandidateIds.has(id)
+  );
   const fixedBindCount = 5; // status/update metadata plus pool/source/status predicates
   const chunkSize = Math.max(1, D1_MAX_BOUND_PARAMETERS - fixedBindCount);
 

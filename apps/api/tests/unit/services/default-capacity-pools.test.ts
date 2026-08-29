@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
 import {
+  type CredentialProvider,
   getDefaultLocationForProvider,
   getLocationsForProvider,
   type ProviderInstanceOffering,
@@ -15,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { initialStatusForProviderOffering } from '../../../src/services/default-capacity-pool-candidates';
 import { externalCapacitySourceCredentialId } from '../../../src/services/default-capacity-pool-helpers';
 import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
 import {
@@ -458,6 +460,53 @@ function liveHetznerOffering(
   };
 }
 
+function legacyLiveOfferingsForProvider(
+  provider: CredentialProvider,
+  location: string
+): ProviderInstanceOffering[] {
+  return getProviderInstanceOfferings(provider).map((offering) =>
+    liveHetznerOffering({
+      provider,
+      location,
+      providerInstanceType: offering.instanceType,
+      providerInstanceSku: offering.instanceSku,
+      displayName: offering.displayName,
+      vcpu: offering.vcpuCount,
+      ramGb: offering.memoryMb / 1024,
+      memoryGb: offering.memoryMb / 1024,
+      memoryMb: offering.memoryMb,
+      storageGb: offering.diskGb,
+      diskGb: offering.diskGb,
+      price: offering.priceDisplay ?? undefined,
+      priceMonthly: offering.priceMonthlyCents === null ? null : offering.priceMonthlyCents / 100,
+      priceHourly:
+        offering.priceHourlyMicros === null ? null : offering.priceHourlyMicros / 1_000_000,
+      currency: offering.priceCurrency,
+    })
+  );
+}
+
+function legacyHetznerLiveOfferings(location = 'fsn1'): ProviderInstanceOffering[] {
+  return legacyLiveOfferingsForProvider('hetzner', location);
+}
+
+function expensiveCpx62Offering(location = 'fsn1'): ProviderInstanceOffering {
+  return liveHetznerOffering({
+    location,
+    providerInstanceType: 'cpx62',
+    displayName: 'CPX62',
+    vcpu: 32,
+    ramGb: 64,
+    memoryGb: 64,
+    memoryMb: 65_536,
+    storageGb: 480,
+    diskGb: 480,
+    price: '€48.12/mo',
+    priceMonthly: 48.12,
+    priceHourly: 0.06592,
+  });
+}
+
 function catalogEnv(database: D1Database = {} as D1Database): Env {
   return {
     DATABASE: database,
@@ -520,6 +569,37 @@ afterEach(() => {
   vi.restoreAllMocks();
   sqlite?.close();
   sqlite = null;
+});
+
+describe('default capacity pool candidate initial status policy', () => {
+  it('activates only legacy-supported concrete provider offerings on first discovery', () => {
+    expect(initialStatusForProviderOffering({ legacyVmSize: 'small' })).toBe('active');
+    expect(initialStatusForProviderOffering({ legacyVmSize: null })).toBe('disabled');
+  });
+
+  it('preserves explicit native candidate statuses ahead of migration defaults', () => {
+    expect(initialStatusForProviderOffering({ existingStatus: 'active', legacyVmSize: null })).toBe(
+      'active'
+    );
+    expect(
+      initialStatusForProviderOffering({ existingStatus: 'disabled', legacyVmSize: 'small' })
+    ).toBe('disabled');
+    expect(
+      initialStatusForProviderOffering({ existingStatus: 'deleted', legacyVmSize: 'small' })
+    ).toBe('deleted');
+  });
+
+  it('transfers legacy removals only onto matching legacy-supported offerings', () => {
+    expect(
+      initialStatusForProviderOffering({ legacyStatus: 'disabled', legacyVmSize: 'small' })
+    ).toBe('disabled');
+    expect(
+      initialStatusForProviderOffering({ legacyStatus: 'deleted', legacyVmSize: 'medium' })
+    ).toBe('deleted');
+    expect(initialStatusForProviderOffering({ legacyStatus: 'deleted', legacyVmSize: null })).toBe(
+      'disabled'
+    );
+  });
 });
 
 describe('default capacity pool creation', () => {
@@ -767,29 +847,8 @@ describe('default capacity pool creation', () => {
     const db = createDb();
     seedUserCredential({ id: 'user-hetzner' });
     const liveOfferings: ProviderInstanceOffering[] = [
-      liveHetznerOffering({
-        location: 'fsn1',
-        locationName: 'Falkenstein',
-        country: 'DE',
-        providerInstanceType: 'cx23',
-        displayName: 'CX23',
-      }),
-      liveHetznerOffering({
-        location: 'fsn1',
-        locationName: 'Falkenstein',
-        country: 'DE',
-        providerInstanceType: 'cpx62',
-        displayName: 'CPX62',
-        vcpu: 32,
-        ramGb: 64,
-        memoryGb: 64,
-        memoryMb: 65_536,
-        storageGb: 480,
-        diskGb: 480,
-        price: '€48.12/mo',
-        priceMonthly: 48.12,
-        priceHourly: 0.06592,
-      }),
+      ...legacyHetznerLiveOfferings('fsn1'),
+      expensiveCpx62Offering('fsn1'),
       liveHetznerOffering({
         location: 'hel1',
         locationName: 'Helsinki',
@@ -824,9 +883,74 @@ describe('default capacity pool creation', () => {
       },
     });
 
-    expect(result.user?.activeCandidateCount).toBe(liveOfferings.length);
+    expect(result.user?.activeCandidateCount).toBe(3);
     expect(getCount('capacity_pool_candidates')).toBe(liveOfferings.length);
     expectCpx62CatalogCandidate(LIVE_CATALOG_LAST_SEEN_AT);
+    expect(
+      getRows<{
+        provider_instance_type: string;
+        status: string;
+        machine_size: string | null;
+      }>(`
+        SELECT provider_instance_type, status, machine_size
+        FROM capacity_pool_candidates
+        ORDER BY provider_instance_type
+      `)
+    ).toEqual(
+      expect.arrayContaining([
+        { provider_instance_type: 'cx23', status: 'active', machine_size: 'small' },
+        { provider_instance_type: 'cx33', status: 'active', machine_size: 'medium' },
+        { provider_instance_type: 'cx43', status: 'active', machine_size: 'large' },
+        { provider_instance_type: 'cpx62', status: 'disabled', machine_size: null },
+        { provider_instance_type: 'ccx63', status: 'disabled', machine_size: null },
+      ])
+    );
+  });
+
+  it('tracks full live catalogs conservatively for installation, user, and project defaults', async () => {
+    const db = createDb();
+    seedPlatformCredential({ id: 'platform-hetzner' });
+    seedUserCredential({ id: 'user-hetzner' });
+    seedUserCredential({ id: 'project-hetzner', projectId: 'project-1' });
+    const liveOfferings = [...legacyHetznerLiveOfferings('fsn1'), expensiveCpx62Offering('fsn1')];
+
+    const result = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      projectId: 'project-1',
+      includeInstallation: true,
+      offeringResolver: async () => liveOfferings,
+    });
+
+    expect(result.installation?.activeCandidateCount).toBe(3);
+    expect(result.user?.activeCandidateCount).toBe(3);
+    expect(result.project?.activeCandidateCount).toBe(3);
+    expect(getCount('capacity_pool_candidates')).toBe(liveOfferings.length * 3);
+
+    const statusesByScope = getRows<{
+      scope: string;
+      provider_instance_type: string;
+      status: string;
+      machine_size: string | null;
+    }>(`
+      SELECT
+        p.scope,
+        c.provider_instance_type,
+        c.status,
+        c.machine_size
+      FROM capacity_pool_candidates c
+      INNER JOIN capacity_pools p ON p.id = c.pool_id
+      ORDER BY p.scope, c.provider_instance_type
+    `);
+    for (const scope of ['installation', 'project', 'user']) {
+      expect(statusesByScope).toEqual(
+        expect.arrayContaining([
+          { scope, provider_instance_type: 'cx23', status: 'active', machine_size: 'small' },
+          { scope, provider_instance_type: 'cx33', status: 'active', machine_size: 'medium' },
+          { scope, provider_instance_type: 'cx43', status: 'active', machine_size: 'large' },
+          { scope, provider_instance_type: 'cpx62', status: 'disabled', machine_size: null },
+        ])
+      );
+    }
   });
 
   it('reconciles Hetzner defaults through the credential-backed live provider catalog path', async () => {
@@ -881,8 +1005,19 @@ describe('default capacity pool creation', () => {
         headers: expect.objectContaining({ Authorization: 'Bearer live-hetzner-token' }),
       })
     );
-    expect(result.user?.activeCandidateCount).toBe(2);
+    expect(result.user?.activeCandidateCount).toBe(1);
+    expect(getCount('capacity_pool_candidates')).toBe(2);
     expectCpx62CatalogCandidate(expect.any(String));
+    expect(
+      getRows<{ provider_instance_type: string; status: string; machine_size: string | null }>(`
+        SELECT provider_instance_type, status, machine_size
+        FROM capacity_pool_candidates
+        ORDER BY provider_instance_type
+      `)
+    ).toEqual([
+      { provider_instance_type: 'cpx62', status: 'disabled', machine_size: null },
+      { provider_instance_type: 'cx23', status: 'active', machine_size: 'small' },
+    ]);
   });
 
   it('logs sanitized provider catalog fallback warnings and marks static Hetzner rows', async () => {
@@ -926,8 +1061,10 @@ describe('default capacity pool creation', () => {
     createDb();
     seedUserCredential({ id: 'user-hetzner' });
     const db = drizzleD1(createSqliteD1WithBindLimit(sqlite!, 100), { schema });
-    const initialOfferings = manyLiveOfferings(150);
-    const updatedOfferings = initialOfferings.slice(0, 120);
+    const syntheticOfferings = manyLiveOfferings(150);
+    const legacyOfferings = legacyHetznerLiveOfferings('fsn1');
+    const initialOfferings = [...legacyOfferings, ...syntheticOfferings];
+    const updatedOfferings = [...legacyOfferings, ...syntheticOfferings.slice(0, 120)];
 
     await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
@@ -948,8 +1085,8 @@ describe('default capacity pool creation', () => {
         ORDER BY status
       `)
     ).toEqual([
-      { status: 'active', count: 120 },
-      { status: 'disabled', count: 30 },
+      { status: 'active', count: 3 },
+      { status: 'disabled', count: 150 },
     ]);
   });
 
@@ -957,7 +1094,7 @@ describe('default capacity pool creation', () => {
     createDb();
     seedUserCredential({ id: 'user-hetzner' });
     const db = drizzleD1(createSqliteD1WithBindLimit(sqlite!, 100), { schema });
-    const offerings = manyLiveOfferings(150);
+    const offerings = [...legacyHetznerLiveOfferings('fsn1'), ...manyLiveOfferings(150)];
 
     const ensured = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
@@ -979,6 +1116,7 @@ describe('default capacity pool creation', () => {
     expect(update.missingCandidateIds).toEqual([]);
     expect(update.unavailableCandidateIds).toEqual([]);
     expect(update.summary?.activeCandidateCount).toBe(0);
+    expect(activeCandidates).toHaveLength(153);
     expect(
       getRows<{ status: string; count: number }>(`
         SELECT status, COUNT(*) AS count
@@ -986,7 +1124,7 @@ describe('default capacity pool creation', () => {
         GROUP BY status
         ORDER BY status
       `)
-    ).toEqual([{ status: 'deleted', count: 150 }]);
+    ).toEqual([{ status: 'deleted', count: 153 }]);
   });
 
   it('seeds user and project pools from composable compute credentials', async () => {
@@ -1009,15 +1147,44 @@ describe('default capacity pool creation', () => {
       userId: 'user-1',
       projectId: 'project-1',
       includeInstallation: false,
-      offeringResolver: async (seed) => [
-        liveHetznerOffering({
-          provider: seed.provider,
-          location: seed.provider === 'vultr' ? 'ewr' : 'fsn1',
-          providerInstanceType: `${seed.provider}-native-large`,
-          displayName: `${seed.provider} native large`,
-        }),
-      ],
+      offeringResolver: async (seed) => {
+        const location = seed.provider === 'vultr' ? 'ewr' : 'fsn1';
+        return [
+          ...legacyLiveOfferingsForProvider(seed.provider, location),
+          liveHetznerOffering({
+            provider: seed.provider,
+            location,
+            providerInstanceType: `${seed.provider}-native-large`,
+            displayName: `${seed.provider} native large`,
+          }),
+        ];
+      },
     });
+
+    expect(ensured.user?.activeCandidateCount).toBe(getProviderInstanceOfferings('hetzner').length);
+    expect(ensured.project?.activeCandidateCount).toBe(
+      getProviderInstanceOfferings('vultr').length
+    );
+    expect(ensured.user?.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          provider: 'hetzner',
+          providerInstanceType: 'hetzner-native-large',
+          providerInstanceCatalogSource: 'api',
+          status: 'disabled',
+        }),
+      ])
+    );
+    expect(ensured.project?.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          provider: 'vultr',
+          providerInstanceType: 'vultr-native-large',
+          providerInstanceCatalogSource: 'api',
+          status: 'disabled',
+        }),
+      ])
+    );
 
     expect(ensured.user?.sources[0]).toMatchObject({
       scope: 'user',
@@ -1036,16 +1203,6 @@ describe('default capacity pool creation', () => {
       platformCredentialId: null,
       credentialReference: 'cc_credentials:cc-cred-project',
       externalSourceRef: 'cc_attachments:cc-att-project',
-    });
-    expect(ensured.user?.candidates[0]).toMatchObject({
-      provider: 'hetzner',
-      providerInstanceType: 'hetzner-native-large',
-      providerInstanceCatalogSource: 'api',
-    });
-    expect(ensured.project?.candidates[0]).toMatchObject({
-      provider: 'vultr',
-      providerInstanceType: 'vultr-native-large',
-      providerInstanceCatalogSource: 'api',
     });
     expect(
       getRows<{ id: string; credential_type: string; provider: string }>(`
@@ -1249,11 +1406,49 @@ describe('default capacity pool creation', () => {
       'cx23',
     ]);
 
-    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+    const expanded = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
       includeInstallation: false,
       offeringResolver: async () => expandedOfferings,
     });
+    expect(expanded.user?.activeCandidateCount).toBe(1);
+    expect(expanded.user?.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          providerInstanceType: 'cpx62',
+          status: 'disabled',
+          providerInstanceCatalogSource: 'api',
+        }),
+      ])
+    );
+    const heavyPlacementBeforeAdd = resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'catalog-disabled-placement-task',
+      projectId: 'project-1',
+      userId: 'user-1',
+      project: {
+        id: 'project-1',
+        defaultProvider: 'hetzner',
+        defaultLocation: 'fsn1',
+        defaultVmSize: 'small',
+      },
+      explicit: { provider: 'hetzner', vmLocation: 'fsn1' },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+      resourceRequirements: {
+        task: { minVcpu: 32, minMemoryGb: 64 },
+      },
+    });
+    const selectionBeforeAdd = await resolveTaskStartCapacityPoolSelection(
+      db as never,
+      heavyPlacementBeforeAdd,
+      { ensure: false }
+    );
+    expect(selectionBeforeAdd?.candidates).toHaveLength(0);
+    expect(() =>
+      resolveCapacityAwareCredentialLookup(heavyPlacementBeforeAdd, selectionBeforeAdd)
+    ).toThrow(PlacementResolutionError);
+
     const update = await updateDefaultCapacityPool(db as never, {
       scope: 'user',
       ownerUserId: 'user-1',
@@ -1325,14 +1520,17 @@ describe('default capacity pool creation', () => {
     createDb();
     seedUserCredential({ id: 'user-hetzner' });
     const db = drizzleD1(createSqliteD1WithBindLimit(sqlite!, 100), { schema });
-    const offerings = manyLiveOfferings(2);
+    const syntheticOfferings = manyLiveOfferings(2);
+    const offerings = [...legacyHetznerLiveOfferings('fsn1'), ...syntheticOfferings];
 
     const ensured = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
       includeInstallation: false,
       offeringResolver: async () => offerings,
     });
-    const staleCandidate = ensured.user?.candidates[1];
+    const staleCandidate = ensured.user?.candidates.find(
+      (candidate) => candidate.providerInstanceType === 'provider-native-1'
+    );
     expect(staleCandidate).toBeDefined();
 
     await updateDefaultCapacityPool(db as never, {
@@ -1344,7 +1542,7 @@ describe('default capacity pool creation', () => {
     await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
       includeInstallation: false,
-      offeringResolver: async () => offerings.slice(0, 1),
+      offeringResolver: async () => [...legacyHetznerLiveOfferings('fsn1'), syntheticOfferings[0]!],
     });
 
     const update = await updateDefaultCapacityPool(db as never, {
@@ -1444,7 +1642,7 @@ describe('default capacity pool creation', () => {
       expect.arrayContaining([
         { provider_instance_type: null, status: 'deleted', machine_size: 'small' },
         { provider_instance_type: 'cx23', status: 'deleted', machine_size: 'small' },
-        { provider_instance_type: 'cpx62', status: 'active', machine_size: null },
+        { provider_instance_type: 'cpx62', status: 'disabled', machine_size: null },
       ])
     );
   });

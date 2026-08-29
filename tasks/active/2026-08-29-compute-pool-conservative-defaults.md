@@ -109,30 +109,30 @@ nodes. Desired invariant: **DISCOVER BROADLY; SELECT CONSERVATIVELY**.
 
 ## Implementation checklist
 
-- [ ] Add a testable policy helper such as `initialStatusForProviderOffering(...)`
+- [x] Add a testable policy helper such as `initialStatusForProviderOffering(...)`
       that returns active only for legacy-supported concrete provider SKUs on first
       default creation/migration, and disabled for non-legacy catalog discoveries.
-- [ ] Distinguish existing explicit native candidate status from legacy migration
+- [x] Distinguish existing explicit native candidate status from legacy migration
       status: existing native active/disabled/deleted must win; legacy
       disabled/deleted should transfer only to the matching concrete legacy SKU.
-- [ ] Preserve full catalog row creation/tracking during reconciliation for
+- [x] Preserve full catalog row creation/tracking during reconciliation for
       installation, user, and project default pools.
-- [ ] Ensure non-legacy full-catalog discoveries default to disabled/catalog-only,
+- [x] Ensure non-legacy full-catalog discoveries default to disabled/catalog-only,
       not active, without relying on price thresholds.
-- [ ] Preserve explicit user additions of non-default catalog offerings as active
+- [x] Preserve explicit user additions of non-default catalog offerings as active
       across subsequent reconciliation.
-- [ ] Preserve disabled/deleted/removed offerings across reconciliation and prevent
+- [x] Preserve disabled/deleted/removed offerings across reconciliation and prevent
       broad reactivation.
-- [ ] Keep legacy `small|medium|large` values as `machineSize` migration/profile
+- [x] Keep legacy `small|medium|large` values as `machineSize` migration/profile
       hints only and verify user-facing pool add choices remain concrete SKUs.
-- [ ] Add/update service tests proving full catalog rows are created but only
+- [x] Add/update service tests proving full catalog rows are created but only
       legacy-supported concrete SKUs are active by default, including Hetzner
       `cx23/cx33/cx43` and an expensive non-legacy offering.
-- [ ] Add tests for project/user/installation scopes, explicit non-legacy catalog
+- [x] Add tests for project/user/installation scopes, explicit non-legacy catalog
       add persistence, and disabled/deleted preservation.
-- [ ] Add/update placement tests proving scheduler selection ignores disabled
+- [x] Add/update placement tests proving scheduler selection ignores disabled
       catalog-visible offerings.
-- [ ] Add/adjust web unit and Playwright tests only if UI code/copy changes are
+- [x] Add/adjust web unit and Playwright tests only if UI code/copy changes are
       needed; otherwise run existing compute-pool Playwright audits with stress data.
 - [ ] Run focused tests after implementation, then full `pnpm lint && pnpm typecheck
       && pnpm test && pnpm build`.
