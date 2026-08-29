@@ -185,7 +185,9 @@ export function readOptionalNumberColumn(
   if (!row) return null;
   const record = expectJsonRecord(row, context);
   const value = record[column];
-  return value === null || value === undefined ? null : requireNumber(value, `${context}.${column}`);
+  return value === null || value === undefined
+    ? null
+    : requireNumber(value, `${context}.${column}`);
 }
 
 export function subscriptionMatchesEvent(
@@ -232,9 +234,7 @@ export function normalizeNullablePositiveInteger(value: number | null): number |
   return Math.round(value);
 }
 
-export function assertOwnerType(
-  value: string
-): asserts value is SamEventBusSubscriptionOwnerType {
+export function assertOwnerType(value: string): asserts value is SamEventBusSubscriptionOwnerType {
   if (!(EVENT_BUS_SUBSCRIPTION_OWNER_TYPES as readonly string[]).includes(value)) {
     throw new Error(`Invalid event bus subscription owner type: ${value}`);
   }
@@ -260,7 +260,7 @@ function parseEventTypes(raw: string | null): string[] | null {
 }
 
 function requireString(value: unknown, context: string): string {
-  if (typeof value !== 'string') throw new Error(`${context} must be a string`);
+  if (typeof value !== 'string') throw new TypeError(`${context} must be a string`);
   return value;
 }
 
@@ -270,7 +270,7 @@ function optionalString(value: unknown): string | null {
 
 function requireNumber(value: unknown, context: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new Error(`${context} must be a finite number`);
+    throw new TypeError(`${context} must be a finite number`);
   }
   return value;
 }

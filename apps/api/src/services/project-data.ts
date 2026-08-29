@@ -77,6 +77,9 @@ import { toProjectDataStorageFullError } from './project-data-storage-errors';
 import { hasAuthorizedRestorableSnapshotWakeClaim } from './session-snapshots';
 import type { TaskAcpLivenessSignals } from './task-runtime-liveness';
 
+const PROJECT_DATA_WEBSOCKET_URL = 'https://project-data.internal/ws';
+const PROJECT_DATA_WEBSOCKET_SESSION_ID_PATTERN = /^[0-9a-f-]{36}$/i;
+
 /**
  * Get a typed DO stub for the given project and ensure the DO knows its projectId.
  * Uses `idFromName(projectId)` for deterministic mapping.
@@ -1535,15 +1538,23 @@ export async function forwardWebSocket(
   request: Request
 ): Promise<Response> {
   return callProjectDataWithRetry(env, projectId, 'forwardWebSocket', (stub) => {
-    const url = new URL(request.url);
-    url.pathname = '/ws';
-    return stub.fetch(new Request(url.toString(), request));
+    const forwardedUrl = buildProjectDataWebSocketUrl(request);
+    if (!forwardedUrl)
+      return Promise.resolve(new Response('Invalid sessionId format', { status: 400 }));
+    return stub.fetch(new Request(forwardedUrl, request));
   });
 }
 
 // =========================================================================
 // Attention Markers
 // =========================================================================
+
+function buildProjectDataWebSocketUrl(request: Request): string | null {
+  const sessionId = new URL(request.url).searchParams.get('sessionId');
+  if (!sessionId) return PROJECT_DATA_WEBSOCKET_URL;
+  if (!PROJECT_DATA_WEBSOCKET_SESSION_ID_PATTERN.test(sessionId)) return null;
+  return `${PROJECT_DATA_WEBSOCKET_URL}?sessionId=${encodeURIComponent(sessionId)}`;
+}
 
 export async function createAttentionMarker(
   env: Env,

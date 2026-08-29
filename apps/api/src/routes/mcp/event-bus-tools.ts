@@ -28,7 +28,9 @@ import {
   type McpTokenData,
 } from './_helpers';
 
+type JsonRpcRequestId = string | number | null;
 type EventBusToolStorageErrorCode = 'invalid_cursor' | 'ack_not_required' | 'ack_invalid_state';
+type ResolvedSessionScope = { sessionId: string | null };
 
 export class EventBusToolStorageError extends Error {
   constructor(public readonly code: EventBusToolStorageErrorCode) {
@@ -76,7 +78,7 @@ const LIST_SUBSCRIPTION_EVENTS_FIELDS = new Set(['subscriptionId', 'limit', 'cur
 const ACK_EVENT_DELIVERY_FIELDS = new Set(['deliveryId']);
 
 export async function handleGetEvent(
-  requestId: string | number | null,
+  requestId: JsonRpcRequestId,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env,
@@ -115,7 +117,7 @@ export async function handleGetEvent(
 }
 
 export async function handleListSubscriptionEvents(
-  requestId: string | number | null,
+  requestId: JsonRpcRequestId,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env,
@@ -180,7 +182,7 @@ export async function handleListSubscriptionEvents(
 }
 
 export async function handleAckEventDelivery(
-  requestId: string | number | null,
+  requestId: JsonRpcRequestId,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env,
@@ -240,55 +242,83 @@ async function resolveCallerEventBusIdentity(
   tokenData: McpTokenData,
   env: Env
 ): Promise<EventBusIdentity | null> {
-  let sessionId = tokenData.chatSessionId ?? null;
   const workspaceId = tokenData.workspaceId || null;
+  const taskScope = await resolveTaskIdentityScope(tokenData, env, tokenData.chatSessionId ?? null);
+  if (!taskScope) return null;
 
-  if (tokenData.taskId) {
-    const task = await env.DATABASE.prepare(
-      'SELECT chat_session_id, workspace_id FROM tasks WHERE id = ? AND project_id = ?'
-    )
-      .bind(tokenData.taskId, tokenData.projectId)
-      .first<{ chat_session_id: string | null; workspace_id: string | null }>();
-    if (!task) return null;
-    if (!adoptMatchingValue(sessionId, task.chat_session_id)) return null;
-    sessionId = task.chat_session_id ?? sessionId;
-    if (workspaceId && task.workspace_id && workspaceId !== task.workspace_id) return null;
-  }
+  const workspaceScope = await resolveWorkspaceIdentityScope(tokenData, env, taskScope.sessionId);
+  if (!workspaceScope) return null;
 
-  if (workspaceId) {
-    const workspace = await env.DATABASE.prepare(
-      'SELECT chat_session_id FROM workspaces WHERE id = ? AND project_id = ?'
-    )
-      .bind(workspaceId, tokenData.projectId)
-      .first<{ chat_session_id: string | null }>();
-    if (!workspace) return null;
-    if (!adoptMatchingValue(sessionId, workspace.chat_session_id)) return null;
-    sessionId = workspace.chat_session_id ?? sessionId;
-  }
+  const agentSessionValid = await verifyAgentSessionIdentityScope(tokenData, env, workspaceId);
+  if (!agentSessionValid) return null;
 
-  if (tokenData.agentSessionId) {
-    const agentSession = await env.DATABASE.prepare(
-      `SELECT agent_sessions.id, agent_sessions.workspace_id
-       FROM agent_sessions
-       INNER JOIN workspaces ON workspaces.id = agent_sessions.workspace_id
-       WHERE agent_sessions.id = ? AND workspaces.project_id = ?`
-    )
-      .bind(tokenData.agentSessionId, tokenData.projectId)
-      .first<{ id: string; workspace_id: string }>();
-    if (!agentSession) return null;
-    if (workspaceId && workspaceId !== agentSession.workspace_id) return null;
-  }
-
-  if (!tokenData.taskId && !sessionId && !tokenData.agentSessionId) return null;
+  if (!hasResolvedEventBusSubject(tokenData, workspaceScope.sessionId)) return null;
 
   return {
     projectId: tokenData.projectId,
     userId: tokenData.userId,
     taskId: tokenData.taskId || null,
-    sessionId,
+    sessionId: workspaceScope.sessionId,
     workspaceId,
     agentSessionId: tokenData.agentSessionId || null,
   };
+}
+
+async function resolveTaskIdentityScope(
+  tokenData: McpTokenData,
+  env: Env,
+  sessionId: string | null
+): Promise<ResolvedSessionScope | null> {
+  if (!tokenData.taskId) return { sessionId };
+  const task = await env.DATABASE.prepare(
+    'SELECT chat_session_id, workspace_id FROM tasks WHERE id = ? AND project_id = ?'
+  )
+    .bind(tokenData.taskId, tokenData.projectId)
+    .first<{ chat_session_id: string | null; workspace_id: string | null }>();
+  if (!task) return null;
+  if (!adoptMatchingValue(sessionId, task.chat_session_id)) return null;
+  if (tokenData.workspaceId && task.workspace_id && tokenData.workspaceId !== task.workspace_id) {
+    return null;
+  }
+  return { sessionId: task.chat_session_id ?? sessionId };
+}
+
+async function resolveWorkspaceIdentityScope(
+  tokenData: McpTokenData,
+  env: Env,
+  sessionId: string | null
+): Promise<ResolvedSessionScope | null> {
+  if (!tokenData.workspaceId) return { sessionId };
+  const workspace = await env.DATABASE.prepare(
+    'SELECT chat_session_id FROM workspaces WHERE id = ? AND project_id = ?'
+  )
+    .bind(tokenData.workspaceId, tokenData.projectId)
+    .first<{ chat_session_id: string | null }>();
+  if (!workspace) return null;
+  if (!adoptMatchingValue(sessionId, workspace.chat_session_id)) return null;
+  return { sessionId: workspace.chat_session_id ?? sessionId };
+}
+
+async function verifyAgentSessionIdentityScope(
+  tokenData: McpTokenData,
+  env: Env,
+  workspaceId: string | null
+): Promise<boolean> {
+  if (!tokenData.agentSessionId) return true;
+  const agentSession = await env.DATABASE.prepare(
+    `SELECT agent_sessions.id, agent_sessions.workspace_id
+     FROM agent_sessions
+     INNER JOIN workspaces ON workspaces.id = agent_sessions.workspace_id
+     WHERE agent_sessions.id = ? AND workspaces.project_id = ?`
+  )
+    .bind(tokenData.agentSessionId, tokenData.projectId)
+    .first<{ id: string; workspace_id: string }>();
+  if (!agentSession) return false;
+  return !workspaceId || workspaceId === agentSession.workspace_id;
+}
+
+function hasResolvedEventBusSubject(tokenData: McpTokenData, sessionId: string | null): boolean {
+  return Boolean(tokenData.taskId || sessionId || tokenData.agentSessionId);
 }
 
 function adoptMatchingValue(existing: string | null, candidate: string | null): boolean {
@@ -296,7 +326,7 @@ function adoptMatchingValue(existing: string | null, candidate: string | null): 
 }
 
 function rejectUnexpectedParams(
-  requestId: string | number | null,
+  requestId: JsonRpcRequestId,
   params: Record<string, unknown>,
   allowedFields: ReadonlySet<string>
 ): JsonRpcResponse | null {
@@ -315,7 +345,7 @@ function rejectUnexpectedParams(
 }
 
 function resolveCursorParam(
-  requestId: string | number | null,
+  requestId: JsonRpcRequestId,
   raw: unknown,
   subscriptionId: string,
   env: Env
@@ -341,23 +371,25 @@ function resolveCursorParam(
 }
 
 function resolveEventBusListLimit(
-  requestId: string | number | null,
+  requestId: JsonRpcRequestId,
   raw: unknown,
   env: Env
 ): { limit: number } | JsonRpcResponse {
   const limits = getMcpLimits(env);
-  if (raw !== undefined && (typeof raw !== 'number' || !Number.isFinite(raw))) {
+  if (raw === undefined) {
+    return { limit: Math.min(limits.eventBusListLimit, limits.eventBusListMax) };
+  }
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'limit must be a finite number when provided');
   }
-  if (raw !== undefined && !Number.isInteger(raw)) {
+  if (!Number.isInteger(raw)) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'limit must be an integer when provided');
   }
-  const requested = raw === undefined ? limits.eventBusListLimit : raw;
-  if (requested <= 0) {
+  if (raw <= 0) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'limit must be greater than 0');
   }
   return {
-    limit: Math.min(requested, limits.eventBusListMax),
+    limit: Math.min(raw, limits.eventBusListMax),
   };
 }
 

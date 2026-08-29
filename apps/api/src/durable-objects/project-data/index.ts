@@ -1070,37 +1070,8 @@ export class ProjectData extends DurableObject<Env> {
 
     await stopTimedOutConversationWorkspaces(this.env, timedOut);
 
-    // Storage safety is the DO quota firebreak. Run it before the heavier
-    // lifecycle maintenance sections so a large project can still reclaim bytes
-    // even when idle/reconciliation work has accumulated.
-    try {
-      await storageSafety.runProjectDataStorageSafetyAlarm(
-        this.sql,
-        this.env,
-        this.getProjectId(),
-        {
-          transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
-        }
-      );
-    } catch (err) {
-      log.error('alarm.storage_safety_failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    try {
-      const retention = eventBus.runEventBusRetention(
-        this.sql,
-        resolveEventBusStorageConfig(this.env)
-      );
-      if (retention.eventsDeleted > 0 || retention.deliveriesDeleted > 0) {
-        log.info('event_bus.retention_completed', { ...retention });
-      }
-    } catch (err) {
-      log.error('alarm.event_bus_retention_failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    await this.runStorageSafetyAlarm();
+    this.runEventBusRetentionAlarm();
 
     await idleCleanup.checkWorkspaceIdleTimeouts(
       this.sql,
@@ -1111,34 +1082,7 @@ export class ProjectData extends DurableObject<Env> {
       (type, payload, sid) => this.broadcastEvent(type, payload, sid),
       () => this.scheduleSummarySync()
     );
-    await idleCleanup.processExpiredCleanups(
-      this.sql,
-      this.env,
-      this.getProjectId(),
-      async (workspaceId, projectId) => {
-        await idleCleanup.stopWorkspaceInD1(this.env.DATABASE, workspaceId, projectId);
-        // Schedule automatic deletion after TTL (best-effort)
-        try {
-          const workerEnv = this.env as unknown as import('../../env').Env;
-          const wsRow = await workerEnv.DATABASE.prepare(
-            'SELECT node_id, user_id FROM workspaces WHERE id = ? AND project_id = ?'
-          )
-            .bind(workspaceId, projectId)
-            .first<{ node_id: string | null; user_id: string }>();
-          if (wsRow?.node_id) {
-            const doId = workerEnv.NODE_LIFECYCLE.idFromName(wsRow.node_id);
-            const stub = workerEnv.NODE_LIFECYCLE.get(doId);
-            await (
-              stub as unknown as import('../node-lifecycle').NodeLifecycle
-            ).scheduleWorkspaceDeletion(wsRow.node_id, workspaceId, wsRow.user_id);
-          }
-        } catch {
-          // Best-effort — cron safety-net will catch it
-        }
-      },
-      (type, payload, sid) => this.broadcastEvent(type, payload, sid),
-      () => this.scheduleSummarySync()
-    );
+    await this.processExpiredIdleCleanups();
 
     // Task-mode reconciliation: check-in on idle task agents
     try {
@@ -1222,6 +1166,75 @@ export class ProjectData extends DurableObject<Env> {
     durability.processPromptDeliveryAlarm(this.sql, this.env, this.durabilityHooks());
 
     await this.recalculateAlarm();
+  }
+
+  private async runStorageSafetyAlarm(): Promise<void> {
+    // Storage safety is the DO quota firebreak. Run it before the heavier
+    // lifecycle maintenance sections so a large project can still reclaim bytes
+    // even when idle/reconciliation work has accumulated.
+    try {
+      await storageSafety.runProjectDataStorageSafetyAlarm(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        {
+          transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
+        }
+      );
+    } catch (err) {
+      log.error('alarm.storage_safety_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  private runEventBusRetentionAlarm(): void {
+    try {
+      const retention = eventBus.runEventBusRetention(
+        this.sql,
+        resolveEventBusStorageConfig(this.env)
+      );
+      if (retention.eventsDeleted > 0 || retention.deliveriesDeleted > 0) {
+        log.info('event_bus.retention_completed', { ...retention });
+      }
+    } catch (err) {
+      log.error('alarm.event_bus_retention_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  private async processExpiredIdleCleanups(): Promise<void> {
+    await idleCleanup.processExpiredCleanups(
+      this.sql,
+      this.env,
+      this.getProjectId(),
+      (workspaceId, projectId) => this.stopExpiredWorkspace(workspaceId, projectId),
+      (type, payload, sid) => this.broadcastEvent(type, payload, sid),
+      () => this.scheduleSummarySync()
+    );
+  }
+
+  private async stopExpiredWorkspace(workspaceId: string, projectId: string): Promise<void> {
+    await idleCleanup.stopWorkspaceInD1(this.env.DATABASE, workspaceId, projectId);
+    // Schedule automatic deletion after TTL (best-effort)
+    try {
+      const workerEnv = this.env as unknown as import('../../env').Env;
+      const wsRow = await workerEnv.DATABASE.prepare(
+        'SELECT node_id, user_id FROM workspaces WHERE id = ? AND project_id = ?'
+      )
+        .bind(workspaceId, projectId)
+        .first<{ node_id: string | null; user_id: string }>();
+      if (wsRow?.node_id) {
+        const doId = workerEnv.NODE_LIFECYCLE.idFromName(wsRow.node_id);
+        const stub = workerEnv.NODE_LIFECYCLE.get(doId);
+        await (
+          stub as unknown as import('../node-lifecycle').NodeLifecycle
+        ).scheduleWorkspaceDeletion(wsRow.node_id, workspaceId, wsRow.user_id);
+      }
+    } catch {
+      // Best-effort — cron safety-net will catch it
+    }
   }
 
   // --- Hibernatable WebSocket Support ---
