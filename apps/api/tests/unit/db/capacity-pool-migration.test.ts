@@ -698,6 +698,22 @@ describe('0129_capacity_source_external_credentials migration', () => {
           'fsn1', 'workspace', 'vm', 'shared-vm', 'medium', 'cx43', 'api'
         )
     `);
+    database.exec(`
+      INSERT INTO nodes
+        (id, user_id, name, status, capacity_source_id)
+      VALUES
+        ('node-live-source', 'user-1', 'Live source node', 'running', 'source-user-credential');
+
+      INSERT INTO workspaces
+        (id, node_id, project_id, user_id, name, repository, status, vm_size, vm_location, capacity_source_id)
+      VALUES
+        ('workspace-live-source', 'node-live-source', 'project-1', 'user-1', 'Live source workspace', 'repo-1', 'running', 'medium', 'fsn1', 'source-user-credential');
+
+      INSERT INTO tasks
+        (id, project_id, user_id, workspace_id, title, status, created_by, capacity_source_id)
+      VALUES
+        ('task-live-source', 'project-1', 'user-1', 'workspace-live-source', 'Live source task', 'queued', 'user-1', 'source-user-credential');
+    `);
 
     database.exec(capacitySourceExternalCredentialsMigrationSql);
 
@@ -732,6 +748,39 @@ describe('0129_capacity_source_external_credentials migration', () => {
       provider_instance_type: 'cx43',
       provider_instance_catalog_source: 'api',
     });
+    expect(
+      database
+        .prepare(
+          `
+          SELECT capacity_source_id
+          FROM nodes
+          WHERE id = 'node-live-source'
+        `
+        )
+        .get()
+    ).toEqual({ capacity_source_id: 'source-user-credential' });
+    expect(
+      database
+        .prepare(
+          `
+          SELECT capacity_source_id
+          FROM workspaces
+          WHERE id = 'workspace-live-source'
+        `
+        )
+        .get()
+    ).toEqual({ capacity_source_id: 'source-user-credential' });
+    expect(
+      database
+        .prepare(
+          `
+          SELECT capacity_source_id
+          FROM tasks
+          WHERE id = 'task-live-source'
+        `
+        )
+        .get()
+    ).toEqual({ capacity_source_id: 'source-user-credential' });
 
     run(`
       INSERT INTO capacity_sources

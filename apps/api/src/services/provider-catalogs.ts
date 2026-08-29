@@ -320,7 +320,9 @@ async function listComposableProviderCatalogSeeds(
     eq(schema.ccAttachments.consumerKind, 'compute'),
     eq(schema.ccCredentials.kind, 'cloud-provider'),
   ];
-  if (input.userId) predicates.push(eq(schema.ccAttachments.userId, input.userId));
+  if (input.userId && input.scope !== 'project') {
+    predicates.push(eq(schema.ccAttachments.userId, input.userId));
+  }
   if (input.scope === 'user') {
     predicates.push(isNull(schema.ccAttachments.projectId));
   } else if (input.scope === 'project') {
@@ -397,13 +399,42 @@ async function listComposableProviderCatalogSeeds(
 function dedupeCatalogSeeds(
   seeds: ProviderCatalogCredentialSeed[]
 ): ProviderCatalogCredentialSeed[] {
-  const seen = new Set<string>();
-  return seeds.filter((seed) => {
-    const key = `${seed.credentialSource}:${seed.provider}:${seed.credentialReference}:${seed.externalSourceRef ?? ''}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  const selected = new Map<string, ProviderCatalogCredentialSeed>();
+  for (const seed of seeds) {
+    const key = catalogSeedDedupeKey(seed);
+    const existing = selected.get(key);
+    if (!existing || (isLegacyCredentialSeed(seed) && isLegacyComposableMirrorSeed(existing))) {
+      selected.set(key, seed);
+    }
+  }
+  return [...selected.values()];
+}
+
+function catalogSeedDedupeKey(seed: ProviderCatalogCredentialSeed): string {
+  const legacyMirrorId = legacyCredentialIdForComposableMirror(seed);
+  if (legacyMirrorId) return `${seed.credentialSource}:${seed.provider}:legacy:${legacyMirrorId}`;
+  if (seed.capacitySourceCredentialId) {
+    return `${seed.credentialSource}:${seed.provider}:legacy:${seed.capacitySourceCredentialId}`;
+  }
+  return `${seed.credentialSource}:${seed.provider}:${seed.credentialReference}:${seed.externalSourceRef ?? ''}`;
+}
+
+function legacyCredentialIdForComposableMirror(seed: ProviderCatalogCredentialSeed): string | null {
+  const ccPrefix = 'cc_credentials:cc-legacy-cloud-cred-';
+  const attachmentPrefix = 'cc_attachments:cc-legacy-cloud-att-';
+  if (!seed.credentialReference.startsWith(ccPrefix)) return null;
+  const credentialId = seed.credentialReference.slice(ccPrefix.length);
+  if (!credentialId) return null;
+  const expectedAttachment = `${attachmentPrefix}${credentialId}`;
+  return seed.externalSourceRef === expectedAttachment ? credentialId : null;
+}
+
+function isLegacyCredentialSeed(seed: ProviderCatalogCredentialSeed): boolean {
+  return seed.capacitySourceCredentialId !== null && seed.externalSourceRef === null;
+}
+
+function isLegacyComposableMirrorSeed(seed: ProviderCatalogCredentialSeed): boolean {
+  return legacyCredentialIdForComposableMirror(seed) !== null;
 }
 
 function createCatalogProvider(

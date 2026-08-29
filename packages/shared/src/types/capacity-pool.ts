@@ -3,6 +3,7 @@
 // =============================================================================
 
 import type { ProviderInstanceCatalogSource } from './provider';
+import type { CredentialProvider } from './user';
 
 export const CAPACITY_POOL_SCOPES = ['installation', 'user', 'project'] as const;
 export type CapacityPoolScope = (typeof CAPACITY_POOL_SCOPES)[number];
@@ -164,9 +165,18 @@ export interface DefaultCapacityPoolCandidateStatusUpdate {
   status: CapacityPoolStatus;
 }
 
+export interface DefaultCapacityPoolCandidateCatalogAddition {
+  sourceId: string;
+  provider: CredentialProvider;
+  location: string;
+  providerInstanceType: string;
+  providerInstanceSku?: string | null;
+}
+
 export interface DefaultCapacityPoolUpdateRequest {
   policy?: DefaultCapacityPoolPolicyUpdate;
   candidates?: DefaultCapacityPoolCandidateStatusUpdate[];
+  catalogAdditions?: DefaultCapacityPoolCandidateCatalogAddition[];
 }
 
 export interface ProjectDefaultCapacityPoolsResponse {

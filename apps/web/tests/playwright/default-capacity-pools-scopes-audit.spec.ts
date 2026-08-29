@@ -34,6 +34,20 @@ const superadmin = makeMockUser({
 });
 
 const providerNames = ['hetzner', 'scaleway', 'gcp', 'vultr', 'digitalocean', 'upcloud'] as const;
+type PoolScope = 'project' | 'user' | 'installation';
+const MOCK_PROJECT = {
+  id: 'proj-pool-1',
+  name: `Compute pool project with long settings label — ${LONG_MARKER}`,
+  repository: 'acme/provider-native-compute-pool-project',
+  defaultBranch: 'main',
+  defaultVmSize: null,
+  defaultProvider: 'hetzner',
+  defaultLocation: 'fsn1',
+  workspaceIdleTimeoutMs: null,
+  status: 'active',
+  createdAt: TIMESTAMP,
+  updatedAt: TIMESTAMP,
+};
 const nativeOfferings = [
   { sku: 'cx23', vcpu: 2, memoryMb: 4096, diskGb: 40, priceCents: 399 },
   { sku: 'cx33', vcpu: 4, memoryMb: 8192, diskGb: 80, priceCents: 749 },
@@ -44,7 +58,7 @@ const nativeOfferings = [
     diskGb: 160,
     priceCents: 1449,
   },
-  { sku: 'cpx31', vcpu: 4, memoryMb: 8192, diskGb: 160, priceCents: null },
+  { sku: 'cpx31', vcpu: 4, memoryMb: 8192, diskGb: 160, priceCents: 1310 },
   { sku: 'ccx33', vcpu: 8, memoryMb: 32_768, diskGb: 240, priceCents: 22000 },
   {
     sku: 'bare-metal-gpu-ultra-long-provider-native-instance-name-2026-08-stress-row',
@@ -71,7 +85,15 @@ function priceHourlyMicros(offering: (typeof nativeOfferings)[number]) {
   return offering.priceCents === null ? null : Math.round((offering.priceCents * 10_000) / 730);
 }
 
-function capacityCandidate(scope: 'user' | 'installation', index: number) {
+function isUnavailableOnlyOffering(offering: (typeof nativeOfferings)[number]) {
+  return offering.sku === 'cpx31';
+}
+
+function isStaleOffering(offering: (typeof nativeOfferings)[number]) {
+  return offering.sku === 'ccx33';
+}
+
+function capacityCandidate(scope: PoolScope, index: number) {
   const visibleLocations = ['fsn1', 'nbg1', 'hel1', 'ash', 'hil'];
   const offering = nativeOffering(index);
   const provider =
@@ -100,10 +122,16 @@ function capacityCandidate(scope: 'user' | 'installation', index: number) {
     providerInstancePriceMonthlyCents: offering.priceCents,
     providerInstancePriceHourlyMicros: priceHourlyMicros(offering),
     providerInstanceCatalogSource: 'static',
-    providerInstanceCatalogLastSeenAt: offering.sku === 'ccx33' ? '2026-07-01T00:00:00.000Z' : null,
-    available: offering.sku === 'ccx33' ? false : true,
-    stale: offering.sku === 'ccx33',
-    catalogStatus: offering.sku === 'ccx33' ? 'temporarily unavailable' : null,
+    providerInstanceCatalogLastSeenAt: isStaleOffering(offering)
+      ? '2026-07-01T00:00:00.000Z'
+      : null,
+    available: isUnavailableOnlyOffering(offering) || isStaleOffering(offering) ? false : true,
+    stale: isStaleOffering(offering),
+    catalogStatus: isUnavailableOnlyOffering(offering)
+      ? 'temporarily unavailable'
+      : isStaleOffering(offering)
+        ? 'stale catalog data'
+        : null,
     priority: index,
     candidateOrder: index,
     status: 'active',
@@ -112,18 +140,20 @@ function capacityCandidate(scope: 'user' | 'installation', index: number) {
   };
 }
 
-function capacitySummary(scope: 'user' | 'installation') {
+function capacitySummary(scope: PoolScope) {
   const candidates = Array.from({ length: 36 }, (_, index) => capacityCandidate(scope, index));
   return {
     pool: {
       id: `${scope}-default-pool`,
       scope,
       ownerUserId: scope === 'user' ? 'pool-user' : null,
-      ownerProjectId: null,
+      ownerProjectId: scope === 'project' ? MOCK_PROJECT.id : null,
       name:
-        scope === 'user'
-          ? `Personal default compute pool with very long owner-managed name — ${LONG_MARKER}`
-          : `SAM installation fallback compute pool with very long admin-managed name — ${LONG_MARKER}`,
+        scope === 'project'
+          ? `Project default compute pool with very long shared-project name — ${LONG_MARKER}`
+          : scope === 'user'
+            ? `Personal default compute pool with very long owner-managed name — ${LONG_MARKER}`
+            : `SAM installation fallback compute pool with very long admin-managed name — ${LONG_MARKER}`,
       isDefault: true,
       revision: 7,
       status: 'active',
@@ -136,16 +166,20 @@ function capacitySummary(scope: 'user' | 'installation') {
       id: `${scope}-source-${provider}`,
       scope,
       ownerUserId: scope === 'user' ? 'pool-user' : null,
-      ownerProjectId: null,
+      ownerProjectId: scope === 'project' ? MOCK_PROJECT.id : null,
       sourceKind: 'cloud-provider-credential',
       provider,
-      credentialSource: scope === 'user' ? 'user' : 'platform',
-      credentialId: scope === 'user' ? `credential-user-cloud-${provider}` : null,
+      credentialSource:
+        scope === 'installation' ? 'platform' : scope === 'project' ? 'project' : 'user',
+      credentialId:
+        scope === 'installation' ? null : `credential-${scope}-cloud-${provider}`,
       platformCredentialId: scope === 'installation' ? `platform-credential-${provider}` : null,
       credentialReference:
-        scope === 'user'
-          ? `credentials:user-cloud-reference-${provider}-${LONG_MARKER}`
-          : `platform_credentials:platform-cloud-reference-${provider}-${LONG_MARKER}`,
+        scope === 'installation'
+          ? `platform_credentials:platform-cloud-reference-${provider}-${LONG_MARKER}`
+          : scope === 'project'
+            ? `credentials:project-cloud-reference-${provider}-${LONG_MARKER}`
+            : `credentials:user-cloud-reference-${provider}-${LONG_MARKER}`,
       credentialVersion: 1787875200000,
       externalSourceRef: null,
       status: 'active',
@@ -157,12 +191,12 @@ function capacitySummary(scope: 'user' | 'installation') {
   };
 }
 
-function providerCatalogs(scope: 'user' | 'installation') {
+function providerCatalogs(scope: PoolScope) {
   return [
     {
       provider: 'hetzner',
-      credentialSource: scope === 'user' ? 'user' : 'platform',
-      credentialId: scope === 'user' ? 'credential-user-cloud-hetzner' : null,
+      credentialSource: scope === 'installation' ? 'platform' : scope,
+      credentialId: scope === 'installation' ? null : `credential-${scope}-cloud-hetzner`,
       platformCredentialId: scope === 'installation' ? 'platform-credential-hetzner' : null,
       locations: [
         { id: 'fsn1', name: 'Falkenstein', country: 'DE' },
@@ -191,11 +225,15 @@ function providerCatalogs(scope: 'user' | 'installation') {
           price: priceDisplay(offering),
           priceMonthly: priceMonthly(offering),
           currency: offering.priceCents === null ? null : 'EUR',
-          available: offering.sku === 'ccx33' ? false : true,
-          stale: offering.sku === 'ccx33',
-          status: offering.sku === 'ccx33' ? 'temporarily unavailable' : null,
+          available: isUnavailableOnlyOffering(offering) || isStaleOffering(offering) ? false : true,
+          stale: isStaleOffering(offering),
+          status: isUnavailableOnlyOffering(offering)
+            ? 'temporarily unavailable'
+            : isStaleOffering(offering)
+              ? 'stale catalog data'
+              : null,
           catalogSource: 'static',
-          catalogLastSeenAt: offering.sku === 'ccx33' ? '2026-07-01T00:00:00.000Z' : null,
+          catalogLastSeenAt: isStaleOffering(offering) ? '2026-07-01T00:00:00.000Z' : null,
         };
       }),
       defaultLocation: 'fsn1',
@@ -203,25 +241,28 @@ function providerCatalogs(scope: 'user' | 'installation') {
   ];
 }
 
-function defaultsResponse(scope: 'user' | 'installation') {
+function defaultsResponse(scope: PoolScope) {
   const summary = capacitySummary(scope);
+  const userSummary =
+    scope === 'project' ? capacitySummary('user') : scope === 'user' ? summary : null;
   return {
     effective: summary,
     effectiveScope: scope,
     defaults: [
       {
         scope: 'project',
-        visibility: 'hidden',
-        visibilityReason: 'project-context-required',
-        canReconcile: false,
-        summary: null,
+        visibility: scope === 'project' ? 'visible' : 'hidden',
+        visibilityReason: scope === 'project' ? 'project-secret-read' : 'project-context-required',
+        canReconcile: scope === 'project',
+        summary: scope === 'project' ? summary : null,
       },
       {
         scope: 'user',
-        visibility: scope === 'user' ? 'visible' : 'hidden',
-        visibilityReason: scope === 'user' ? 'authenticated-user' : 'user-context-required',
-        canReconcile: scope === 'user',
-        summary: scope === 'user' ? summary : null,
+        visibility: scope === 'installation' ? 'hidden' : 'visible',
+        visibilityReason:
+          scope === 'installation' ? 'user-context-required' : 'authenticated-user',
+        canReconcile: scope !== 'installation',
+        summary: userSummary,
       },
       {
         scope: 'installation',
@@ -232,7 +273,7 @@ function defaultsResponse(scope: 'user' | 'installation') {
       },
     ],
     precedence: ['project', 'user', 'installation'],
-    reconciledScopes: [scope],
+    reconciledScopes: scope === 'project' ? ['project', 'user'] : [scope],
     policyMutationSupported: true,
   };
 }
@@ -240,7 +281,7 @@ function defaultsResponse(scope: 'user' | 'installation') {
 async function setupCommonMocks(
   page: Page,
   authUser: unknown,
-  catalogScope: 'user' | 'installation'
+  catalogScope: PoolScope
 ) {
   await page.addInitScript(() =>
     ['pool-user', 'pool-admin'].forEach((userId) =>
@@ -253,7 +294,12 @@ async function setupCommonMocks(
     if (path.startsWith('/api/notifications')) {
       return respond(200, { notifications: [], unreadCount: 0 });
     }
-    if (path === '/api/projects') return respond(200, { projects: [], nextCursor: null });
+    if (path === '/api/projects') {
+      return respond(200, {
+        projects: catalogScope === 'project' ? [MOCK_PROJECT] : [],
+        nextCursor: null,
+      });
+    }
     if (path === '/api/agents') return respond(200, { agents: [] });
     if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
     if (path === '/api/credentials') return respond(200, []);
@@ -326,10 +372,30 @@ async function setupInstallationPoolMocks(page: Page) {
   );
 }
 
+async function setupProjectPoolMocks(page: Page) {
+  await setupCommonMocks(page, user, 'project');
+  let responseBody = defaultsResponse('project');
+  await page.route(`**/api/projects/${MOCK_PROJECT.id}/capacity-pools/defaults*`, async (route) => {
+    if (route.request().method() === 'PATCH') {
+      responseBody = applyMockCapacityDefaultsUpdate(responseBody, route.request().postDataJSON());
+    }
+    return jsonResponse(route, 200, responseBody);
+  });
+  await page.route(`**/api/projects/${MOCK_PROJECT.id}/members`, (route) =>
+    jsonResponse(route, 200, { members: [] })
+  );
+  await page.route(`**/api/projects/${MOCK_PROJECT.id}/runtime-config`, (route) =>
+    jsonResponse(route, 200, { envVars: [], files: [] })
+  );
+  await page.route(`**/api/projects/${MOCK_PROJECT.id}`, (route) =>
+    jsonResponse(route, 200, MOCK_PROJECT)
+  );
+}
+
 async function expectStressedDefaultPool(
   page: Page,
   heading: string,
-  scope: 'user' | 'installation'
+  scope: PoolScope
 ) {
   await expect(page.getByRole('heading', { name: heading })).toBeVisible();
   await expect(page.getByText(/36 allowed · 0 removed\/disabled/)).toBeVisible();
@@ -359,6 +425,21 @@ async function removeAshHilCandidates(page: Page, editHeading: string, screensho
   await page.getByRole('button', { name: /Remove Hetzner hil ccx33/ }).click();
   await screenshotNearHeading(page, editHeading, screenshotName);
   await page.getByLabel('Filter provider').selectOption('hetzner');
+  await page.getByLabel('Filter region or location').fill('ash');
+  await page.getByLabel('Minimum vCPU').fill('4');
+  await page.getByLabel('Minimum RAM in GB').fill('8');
+  await page.getByLabel('Maximum monthly price').fill('250');
+  await page.getByLabel('Filter availability').selectOption('unavailable');
+  await expect(page.getByText('1 matching offering across 1 region.')).toBeVisible();
+  await expect(page.getByText('temporarily unavailable').first()).toBeVisible();
+  await screenshotSectionNearHeading(
+    page,
+    'Catalog filters',
+    `${screenshotName}-catalog-filters-unavailable`
+  );
+  await expect(page.getByRole('button', { name: /Add Hetzner ash cpx31/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Unavailable' }).first()).toBeDisabled();
+
   await page.getByLabel('Filter region or location').fill('hil');
   await page.getByLabel('Minimum vCPU').fill('8');
   await page.getByLabel('Minimum RAM in GB').fill('32');
@@ -366,7 +447,11 @@ async function removeAshHilCandidates(page: Page, editHeading: string, screensho
   await page.getByLabel('Filter availability').selectOption('stale');
   await expect(page.getByText('1 matching offering across 1 region.')).toBeVisible();
   await expect(page.getByText('Stale catalog data').first()).toBeVisible();
-  await screenshotSectionNearHeading(page, 'Catalog filters', `${screenshotName}-catalog-filters`);
+  await screenshotSectionNearHeading(
+    page,
+    'Catalog filters',
+    `${screenshotName}-catalog-filters-stale`
+  );
   await expect(page.getByRole('button', { name: /Add Hetzner hil ccx33/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Stale' }).first()).toBeDisabled();
   await page
@@ -386,6 +471,27 @@ async function removeAshHilCandidates(page: Page, editHeading: string, screensho
 }
 
 test.describe('Default capacity pool scope surfaces', () => {
+  test('project settings surface renders stressed project default pool without overflow', async ({
+    page,
+  }, testInfo) => {
+    await setupProjectPoolMocks(page);
+    await page.goto(`/projects/${MOCK_PROJECT.id}/settings/infrastructure`);
+
+    const suffix = getProjectSuffix(testInfo.project.name);
+    await expectStressedDefaultPool(page, 'Project Infrastructure Compute Pool', 'project');
+    await screenshotDefaultPoolScope(
+      page,
+      'Project Infrastructure Compute Pool',
+      'default-capacity-pools-project',
+      suffix
+    );
+    await removeAshHilCandidates(
+      page,
+      'Edit project default',
+      `default-capacity-pools-project-edit-${suffix}`
+    );
+  });
+
   test('user settings surface renders stressed user default pool without overflow', async ({
     page,
   }, testInfo) => {

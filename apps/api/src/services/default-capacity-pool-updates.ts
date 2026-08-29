@@ -2,13 +2,15 @@ import type {
   CapacityExhaustionPolicy,
   CapacityPoolStatus,
   CapacityPoolStrategy,
+  DefaultCapacityPoolCandidateCatalogAddition,
 } from '@simple-agent-manager/shared';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import type { DefaultPoolScopeIdentity } from './default-capacity-pool-helpers';
+import { defaultCandidateId } from './default-capacity-pool-helpers';
 import {
   type CapacityPoolSummary,
   findDefaultPool,
@@ -24,6 +26,7 @@ export interface DefaultCapacityPoolUpdateInput extends DefaultPoolScopeIdentity
     exhaustionPolicy?: CapacityExhaustionPolicy;
   };
   candidates?: { id: string; status: CapacityPoolStatus }[];
+  catalogAdditions?: DefaultCapacityPoolCandidateCatalogAddition[];
 }
 
 export interface DefaultCapacityPoolUpdateResult {
@@ -31,16 +34,25 @@ export interface DefaultCapacityPoolUpdateResult {
   summary: CapacityPoolSummary | null;
   missingCandidateIds: string[];
   unavailableCandidateIds: string[];
+  missingCatalogAdditions: string[];
+  unavailableCatalogAdditions: string[];
 }
 
 type CandidateStatusUpdate = { id: string; status: CapacityPoolStatus };
 type PolicyUpdate = NonNullable<DefaultCapacityPoolUpdateInput['policy']>;
 const READ_CANDIDATE_STATUS_CHUNK_SIZE = D1_MAX_BOUND_PARAMETERS - 1;
+const READ_SOURCE_CHUNK_SIZE = D1_MAX_BOUND_PARAMETERS - 1;
 
 interface CandidateStatusUpdateResult {
   changed: boolean;
   missingCandidateIds: string[];
   unavailableCandidateIds: string[];
+}
+
+interface CatalogAdditionUpdateResult {
+  candidateUpdates: CandidateStatusUpdate[];
+  missingCatalogAdditions: string[];
+  additionKeysByCandidateId: Map<string, string[]>;
 }
 
 interface PolicyUpdateResult {
@@ -59,24 +71,55 @@ export async function updateDefaultCapacityPool(
       summary: null,
       missingCandidateIds: [],
       unavailableCandidateIds: [],
+      missingCatalogAdditions: [],
+      unavailableCatalogAdditions: [],
     };
   }
 
-  const candidateResult = await updateCandidateStatuses(db, pool.id, input.candidates ?? []);
-  if (candidateResult.missingCandidateIds.length > 0) {
-    return {
-      poolFound: true,
-      summary: null,
-      missingCandidateIds: candidateResult.missingCandidateIds,
-      unavailableCandidateIds: [],
-    };
-  }
-  if (candidateResult.unavailableCandidateIds.length > 0) {
+  const catalogAdditionResult = await resolveCatalogAdditionUpdates(db, pool, input);
+  if (catalogAdditionResult.missingCatalogAdditions.length > 0) {
     return {
       poolFound: true,
       summary: null,
       missingCandidateIds: [],
-      unavailableCandidateIds: candidateResult.unavailableCandidateIds,
+      unavailableCandidateIds: [],
+      missingCatalogAdditions: catalogAdditionResult.missingCatalogAdditions,
+      unavailableCatalogAdditions: [],
+    };
+  }
+
+  const candidateResult = await updateCandidateStatuses(db, pool.id, [
+    ...(input.candidates ?? []),
+    ...catalogAdditionResult.candidateUpdates,
+  ]);
+  if (candidateResult.missingCandidateIds.length > 0) {
+    const missingCatalogAdditions = candidateResult.missingCandidateIds.flatMap(
+      (candidateId) => catalogAdditionResult.additionKeysByCandidateId.get(candidateId) ?? []
+    );
+    return {
+      poolFound: true,
+      summary: null,
+      missingCandidateIds: candidateResult.missingCandidateIds.filter(
+        (candidateId) => !catalogAdditionResult.additionKeysByCandidateId.has(candidateId)
+      ),
+      unavailableCandidateIds: [],
+      missingCatalogAdditions,
+      unavailableCatalogAdditions: [],
+    };
+  }
+  if (candidateResult.unavailableCandidateIds.length > 0) {
+    const unavailableCatalogAdditions = candidateResult.unavailableCandidateIds.flatMap(
+      (candidateId) => catalogAdditionResult.additionKeysByCandidateId.get(candidateId) ?? []
+    );
+    return {
+      poolFound: true,
+      summary: null,
+      missingCandidateIds: [],
+      unavailableCandidateIds: candidateResult.unavailableCandidateIds.filter(
+        (candidateId) => !catalogAdditionResult.additionKeysByCandidateId.has(candidateId)
+      ),
+      missingCatalogAdditions: [],
+      unavailableCatalogAdditions,
     };
   }
 
@@ -94,7 +137,113 @@ export async function updateDefaultCapacityPool(
     summary: await readDefaultPoolSummary(db, input, { includeDisabled: true }),
     missingCandidateIds: [],
     unavailableCandidateIds: [],
+    missingCatalogAdditions: [],
+    unavailableCatalogAdditions: [],
   };
+}
+
+async function resolveCatalogAdditionUpdates(
+  db: Db,
+  pool: schema.CapacityPool,
+  input: DefaultCapacityPoolUpdateInput
+): Promise<CatalogAdditionUpdateResult> {
+  const additions = dedupeCatalogAdditions(input.catalogAdditions ?? []);
+  if (additions.length === 0) {
+    return {
+      candidateUpdates: [],
+      missingCatalogAdditions: [],
+      additionKeysByCandidateId: new Map(),
+    };
+  }
+
+  const sourceIds = [...new Set(additions.map((addition) => addition.sourceId))];
+  const sourceById = await readActiveSourcesById(db, input, sourceIds);
+  const candidateUpdates: CandidateStatusUpdate[] = [];
+  const missingCatalogAdditions: string[] = [];
+  const additionKeysByCandidateId = new Map<string, string[]>();
+
+  for (const addition of additions) {
+    const source = sourceById.get(addition.sourceId);
+    const additionKey = catalogAdditionKey(addition);
+    if (!source || source.provider !== addition.provider) {
+      missingCatalogAdditions.push(additionKey);
+      continue;
+    }
+
+    const candidateId = defaultCandidateId(
+      pool.id,
+      source.id,
+      addition.provider,
+      addition.location,
+      addition.providerInstanceType,
+      addition.providerInstanceSku ?? null
+    );
+    candidateUpdates.push({ id: candidateId, status: 'active' });
+    additionKeysByCandidateId.set(candidateId, [
+      ...(additionKeysByCandidateId.get(candidateId) ?? []),
+      additionKey,
+    ]);
+  }
+
+  return { candidateUpdates, missingCatalogAdditions, additionKeysByCandidateId };
+}
+
+async function readActiveSourcesById(
+  db: Db,
+  scope: DefaultPoolScopeIdentity,
+  sourceIds: string[]
+): Promise<Map<string, schema.CapacitySource>> {
+  const rows: schema.CapacitySource[] = [];
+  for (let offset = 0; offset < sourceIds.length; offset += READ_SOURCE_CHUNK_SIZE) {
+    const chunk = sourceIds.slice(offset, offset + READ_SOURCE_CHUNK_SIZE);
+    rows.push(
+      ...(await db
+        .select()
+        .from(schema.capacitySources)
+        .where(
+          and(
+            ...sourceScopePredicates(scope),
+            eq(schema.capacitySources.status, 'active'),
+            inArray(schema.capacitySources.id, chunk)
+          )
+        ))
+    );
+  }
+  return new Map(rows.map((source) => [source.id, source]));
+}
+
+function dedupeCatalogAdditions(
+  additions: DefaultCapacityPoolCandidateCatalogAddition[]
+): DefaultCapacityPoolCandidateCatalogAddition[] {
+  const byKey = new Map<string, DefaultCapacityPoolCandidateCatalogAddition>();
+  for (const addition of additions) {
+    const normalized = {
+      ...addition,
+      sourceId: addition.sourceId.trim(),
+      location: addition.location.trim(),
+      providerInstanceType: addition.providerInstanceType.trim(),
+      providerInstanceSku: addition.providerInstanceSku?.trim() || null,
+    };
+    if (
+      !normalized.sourceId ||
+      !normalized.location ||
+      !normalized.providerInstanceType ||
+      !normalized.provider
+    ) {
+      continue;
+    }
+    byKey.set(catalogAdditionKey(normalized), normalized);
+  }
+  return [...byKey.values()];
+}
+
+function catalogAdditionKey(addition: DefaultCapacityPoolCandidateCatalogAddition): string {
+  return [
+    addition.sourceId,
+    addition.provider,
+    addition.location,
+    addition.providerInstanceSku ?? addition.providerInstanceType,
+  ].join(':');
 }
 
 async function updateCandidateStatuses(
@@ -230,4 +379,16 @@ function dedupeCandidateStatusUpdates(
     statusesByCandidateId.set(id, candidate.status);
   }
   return [...statusesByCandidateId.entries()].map(([id, status]) => ({ id, status }));
+}
+
+function sourceScopePredicates(scope: DefaultPoolScopeIdentity) {
+  return [
+    eq(schema.capacitySources.scope, scope.scope),
+    scope.ownerUserId
+      ? eq(schema.capacitySources.ownerUserId, scope.ownerUserId)
+      : isNull(schema.capacitySources.ownerUserId),
+    scope.ownerProjectId
+      ? eq(schema.capacitySources.ownerProjectId, scope.ownerProjectId)
+      : isNull(schema.capacitySources.ownerProjectId),
+  ];
 }

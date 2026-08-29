@@ -776,7 +776,7 @@ This enables self-hosting in air-gapped or restricted environments and ensures v
 - User's Git provider (GitHub, GitLab, etc.) - required for repository access
 - Container registries (Docker Hub, GHCR) - required for devcontainer images
 - OS package repositories (apt, apk) - required for system packages
-- User's cloud provider APIs (Hetzner, etc.) - required for VM provisioning
+- Effective project, user, or platform cloud provider APIs (Hetzner, etc.) - required for VM provisioning
 
 **Version Consistency:**
 

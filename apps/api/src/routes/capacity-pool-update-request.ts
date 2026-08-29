@@ -1,4 +1,5 @@
 import type {
+  DefaultCapacityPoolCandidateCatalogAddition,
   DefaultCapacityPoolCandidateStatusUpdate,
   DefaultCapacityPoolPolicyUpdate,
   DefaultCapacityPoolUpdateRequest,
@@ -7,6 +8,7 @@ import {
   isCapacityExhaustionPolicy,
   isCapacityPoolStatus,
   isCapacityPoolStrategy,
+  isValidProvider,
 } from '@simple-agent-manager/shared';
 
 import { errors } from '../middleware/error';
@@ -40,6 +42,16 @@ export function assertDefaultCapacityPoolUpdateResult(
       unavailableCandidateIds: result.unavailableCandidateIds,
     });
   }
+  if (result.missingCatalogAdditions.length > 0) {
+    throw errors.badRequest('Catalog additions must belong to the default capacity pool', {
+      missingCatalogAdditions: result.missingCatalogAdditions,
+    });
+  }
+  if (result.unavailableCatalogAdditions.length > 0) {
+    throw errors.badRequest('Catalog additions must be currently available in the provider catalog', {
+      unavailableCatalogAdditions: result.unavailableCatalogAdditions,
+    });
+  }
 
   return;
 }
@@ -56,14 +68,21 @@ export function parseDefaultCapacityPoolUpdateRequest(
         );
   const candidates =
     record.candidates === undefined ? undefined : parseCandidateUpdates(record.candidates);
+  const catalogAdditions =
+    record.catalogAdditions === undefined
+      ? undefined
+      : parseCatalogAdditions(record.catalogAdditions);
 
-  if (!policy && !candidates) {
-    throw errors.badRequest('Default capacity pool update must include policy or candidates');
+  if (!policy && !candidates && !catalogAdditions) {
+    throw errors.badRequest(
+      'Default capacity pool update must include policy, candidates, or catalogAdditions'
+    );
   }
 
   return {
     ...(policy ? { policy } : {}),
     ...(candidates ? { candidates } : {}),
+    ...(catalogAdditions ? { catalogAdditions } : {}),
   };
 }
 
@@ -112,6 +131,46 @@ function parseCandidateUpdates(value: unknown): DefaultCapacityPoolCandidateStat
   });
 }
 
+function parseCatalogAdditions(value: unknown): DefaultCapacityPoolCandidateCatalogAddition[] {
+  if (!Array.isArray(value)) {
+    throw errors.badRequest('Default capacity pool catalog additions must be an array');
+  }
+
+  return value.map((addition) => {
+    const record = requireObject(
+      addition,
+      'Default capacity pool catalog addition must be an object'
+    );
+    const provider = requiredTrimmedString(
+      record,
+      'provider',
+      'Default capacity pool catalog addition provider is required'
+    );
+    if (!isValidProvider(provider)) {
+      throw errors.badRequest('Invalid default capacity pool catalog addition provider');
+    }
+    return {
+      sourceId: requiredTrimmedString(
+        record,
+        'sourceId',
+        'Default capacity pool catalog addition source id is required'
+      ),
+      provider,
+      location: requiredTrimmedString(
+        record,
+        'location',
+        'Default capacity pool catalog addition location is required'
+      ),
+      providerInstanceType: requiredTrimmedString(
+        record,
+        'providerInstanceType',
+        'Default capacity pool catalog addition provider instance type is required'
+      ),
+      providerInstanceSku: optionalNullableTrimmedString(record, 'providerInstanceSku'),
+    };
+  });
+}
+
 function requireObject(value: unknown, message: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw errors.badRequest(message);
@@ -141,6 +200,19 @@ function optionalEnum<T extends string>(
   if (value === undefined) return undefined;
   if (!isValid(value)) throw errors.badRequest(message);
   return value;
+}
+
+function optionalNullableTrimmedString(
+  record: Record<string, unknown>,
+  field: string
+): string | null {
+  const value = record[field];
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') {
+    throw errors.badRequest(`Default capacity pool catalog addition ${field} must be a string`);
+  }
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? null : trimmed;
 }
 
 function requiredEnum<T extends string>(

@@ -146,9 +146,9 @@ Optional query parameters:
 
 Installation scope is restricted to superadmins and uses enabled platform compute credentials.
 User scope uses the caller's active personal compute credentials. Project scope returns active
-compute credentials attached to that project for the caller, including composable-credential
-attachments. Effective default pool summaries expose project → user → installation fallback
-separately.
+compute credentials attached to that project after project `secret:read` authorization, including
+composable-credential attachments from other project members. Effective default pool summaries expose
+project → user → installation fallback separately.
 
 ## Capacity pools
 
@@ -156,8 +156,9 @@ Default capacity-pool endpoints expose non-secret pool, source, and concrete can
 Responses have this shape: `effective`, `effectiveScope`, `defaults`, `precedence`,
 `reconciledScopes`, and `policyMutationSupported`. Use `ensure=true` on GET endpoints, or call the
 matching `/reconcile` endpoint, to refresh pool metadata from the credential-scoped provider-native
-catalog. Provider API failures fall back to static curated catalog rows for that provider and mark
-those candidates with `catalogSource: static`.
+catalog. Provider API failures fall back to static curated catalog rows for that provider. Provider
+catalog offerings expose `catalogSource`; capacity-pool candidates expose the persisted
+`providerInstanceCatalogSource` snapshot.
 
 ### `GET /api/capacity-pools/defaults`
 
@@ -183,13 +184,14 @@ installation fallback details.
 
 ### `POST /api/projects/:id/capacity-pools/defaults/reconcile`
 
-Explicitly reconcile the project default pool from active project-scoped compute credentials.
-Requires project `secret:read`.
+Explicitly reconcile visible default capacity-pool metadata from existing credentials in the project
+context. Project-scoped metadata comes from active project compute credentials. Requires project
+`secret:read`.
 
 ### `PATCH /api/projects/:id/capacity-pools/defaults`
 
-Update only the project-owned default-pool policy or candidate statuses. Requires project
-`secret:write`.
+Update only the project-owned default-pool policy, candidate statuses, or provider-native
+`catalogAdditions`. Requires project `secret:write`.
 
 ### `GET /api/admin/capacity-pools/defaults`
 

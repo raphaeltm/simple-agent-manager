@@ -13,6 +13,7 @@ const HOURS_PER_APPROXIMATE_BILLING_MONTH = DEFAULT_APPROXIMATE_BILLING_MONTH_HO
 
 export interface ComputePoolOffering {
   key: string;
+  sourceId: string | null;
   sourceKey: string | null;
   sourceLabel: string | null;
   provider: string;
@@ -21,6 +22,8 @@ export interface ComputePoolOffering {
   locationLabel: string;
   country: string | null;
   sku: string;
+  providerInstanceType: string;
+  providerInstanceSku: string | null;
   vcpu: number | null;
   ramGb: number | null;
   diskGb: number | null;
@@ -43,7 +46,7 @@ export interface ComputePoolCandidateOffering extends ComputePoolOffering {
 
 export interface ComputePoolCatalogOffering extends ComputePoolOffering {
   candidateId: string | null;
-  candidateStatus: CapacityPoolStatus | 'not-configured';
+  candidateStatus: CapacityPoolStatus | 'not-configured' | 'pending-add';
   runtime: string | null;
   machineClass: string | null;
   canUpdateExistingCandidate: boolean;
@@ -296,6 +299,7 @@ function offeringFromLegacySize(
 
   return {
     key,
+    sourceId: null,
     sourceKey,
     sourceLabel,
     provider: catalog.provider,
@@ -304,6 +308,8 @@ function offeringFromLegacySize(
     locationLabel,
     country,
     sku: size.type,
+    providerInstanceType: size.type,
+    providerInstanceSku: null,
     vcpu: size.vcpu,
     ramGb: size.ramGb,
     diskGb: size.storageGb,
@@ -339,6 +345,7 @@ function offeringFromNativeCatalog(
 
   return {
     key: offeringKey(sourceKey, catalog.provider, location, sku),
+    sourceId: null,
     sourceKey,
     sourceLabel,
     provider: catalog.provider,
@@ -347,6 +354,14 @@ function offeringFromNativeCatalog(
     locationLabel: offering.locationName ?? locationInfo?.name ?? location,
     country: offering.country ?? locationInfo?.country ?? null,
     sku,
+    providerInstanceType:
+      offering.providerInstanceType ??
+      offering.instanceType ??
+      offering.type ??
+      offering.sku ??
+      offering.id ??
+      sku,
+    providerInstanceSku: offering.providerInstanceSku ?? null,
     vcpu: normalizeNumber(offering.vcpu),
     ramGb: normalizeRamGb(offering),
     diskGb: normalizeDiskGb(offering),
@@ -425,6 +440,7 @@ function candidateFallbackOffering(
 
   return {
     key: offeringKey(sourceKey, provider, location, sku),
+    sourceId: candidate.capacitySourceId ?? null,
     sourceKey,
     sourceLabel,
     provider,
@@ -433,6 +449,9 @@ function candidateFallbackOffering(
     locationLabel: location,
     country: null,
     sku,
+    providerInstanceType:
+      candidate.providerInstanceType ?? candidate.instanceType ?? candidate.type ?? sku,
+    providerInstanceSku: candidate.providerInstanceSku ?? null,
     vcpu: normalizeNumber(candidate.providerInstanceVcpuCount ?? candidate.vcpu),
     ramGb: normalizeRamGb({
       ramGb: candidate.ramGb ?? candidate.memoryGb,
@@ -474,7 +493,8 @@ export function buildComputePoolOfferingsModel(
   candidates: CapacityPoolCandidate[],
   catalogs: ProviderCatalog[],
   sources: CapacitySourceIdentity[] = [],
-  draftStatuses: Record<string, CapacityPoolStatus> = {}
+  draftStatuses: Record<string, CapacityPoolStatus> = {},
+  draftCatalogAdditionKeys: ReadonlySet<string> = new Set()
 ): ComputePoolOfferingsModel {
   const sourceKeysById = new Map(
     sources.map((source) => [source.id, sourceKeyFromIdentity(source)])
@@ -482,6 +502,11 @@ export function buildComputePoolOfferingsModel(
   const sourceLabelsById = new Map(
     sources.map((source) => [source.id, sourceLabelFromIdentity(source)])
   );
+  const sourceIdsByKey = new Map<string, string>();
+  for (const source of sources) {
+    const key = sourceKeyFromIdentity(source);
+    if (key) sourceIdsByKey.set(key, source.id);
+  }
   const catalogOfferings = flattenProviderCatalogOfferings(catalogs);
   const byKey = new Map(catalogOfferings.map((offering) => [offering.key, offering]));
   const byLegacyCandidate = new Map<string, ComputePoolOffering>();
@@ -534,6 +559,7 @@ export function buildComputePoolOfferingsModel(
 
     return {
       ...base,
+      sourceId: extended.capacitySourceId ?? base.sourceId,
       candidateId: candidate.id,
       candidateStatus: draftStatuses[candidate.id] ?? candidate.status,
       runtime: candidate.runtime,
@@ -561,10 +587,16 @@ export function buildComputePoolOfferingsModel(
       catalogOfferings.map((offering) => {
         const matchingCandidate = byCandidateKey.get(offering.key);
         if (!matchingCandidate) {
+          const sourceId = offering.sourceKey
+            ? (sourceIdsByKey.get(offering.sourceKey) ?? null)
+            : null;
           return {
             ...offering,
+            sourceId,
             candidateId: null,
-            candidateStatus: 'not-configured',
+            candidateStatus: draftCatalogAdditionKeys.has(offering.key)
+              ? 'pending-add'
+              : 'not-configured',
             runtime: null,
             machineClass: null,
             canUpdateExistingCandidate: false,
@@ -572,6 +604,7 @@ export function buildComputePoolOfferingsModel(
         }
         return {
           ...offering,
+          sourceId: matchingCandidate.sourceId,
           candidateId: matchingCandidate.candidateId,
           candidateStatus: matchingCandidate.candidateStatus,
           runtime: matchingCandidate.runtime,
@@ -615,7 +648,9 @@ export function matchesComputePoolFilters(
   }
 
   if (filters.availability === 'available' && !canAddComputePoolOffering(offering)) return false;
-  if (filters.availability === 'unavailable' && offering.available !== false) return false;
+  if (filters.availability === 'unavailable' && (offering.available !== false || offering.stale)) {
+    return false;
+  }
   if (filters.availability === 'stale' && !offering.stale) return false;
 
   return true;

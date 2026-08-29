@@ -361,6 +361,48 @@ describe('createProviderForUser exact credential binding', () => {
     });
     expect(mockDecrypt).toHaveBeenCalledWith('ciphertext', 'iv', 'enc-key');
   });
+
+  it('creates a provider from an exact project composable credential owned by another member', async () => {
+    mockDecrypt.mockClear();
+    mockDecrypt.mockResolvedValueOnce('hetzner-api-token');
+    const db = {
+      select: vi.fn(() => {
+        const builder = {
+          from: () => builder,
+          innerJoin: () => builder,
+          where: () => builder,
+          limit: () =>
+            Promise.resolve([
+              {
+                encryptedToken: 'cc-ciphertext',
+                iv: 'cc-iv',
+              },
+            ]),
+        };
+        return builder;
+      }),
+    } as any;
+
+    const result = await createProviderForUser(
+      db,
+      'project-member',
+      'enc-key',
+      {} as any,
+      'hetzner',
+      'project-1',
+      {
+        credentialSource: 'project',
+        credentialReference: 'cc_credentials:cc-project-cloud-1',
+        credentialVersion: 1700000000000,
+      }
+    );
+
+    expect(result).toMatchObject({
+      providerName: 'hetzner',
+      credentialSource: 'project',
+    });
+    expect(mockDecrypt).toHaveBeenCalledWith('cc-ciphertext', 'cc-iv', 'enc-key');
+  });
 });
 
 describe('createProviderForUser composable credential project halt', () => {

@@ -242,6 +242,12 @@ describe('compute-pool offering filters', () => {
     expect(
       matchesComputePoolFilters(bySku['stale-16c-64gb']!, {
         ...BASE_FILTERS,
+        availability: 'unavailable',
+      })
+    ).toBe(false);
+    expect(
+      matchesComputePoolFilters(bySku['stale-16c-64gb']!, {
+        ...BASE_FILTERS,
         availability: 'stale',
       })
     ).toBe(true);
@@ -399,6 +405,33 @@ describe('compute-pool offering filters', () => {
       candidateId: null,
       candidateStatus: 'not-configured',
       canUpdateExistingCandidate: false,
+    });
+  });
+
+  it('keeps catalog-only rows addable when they map to an active capacity source', () => {
+    const model = buildComputePoolOfferingsModel([], [catalog()], [sourceIdentity()]);
+    const cpx31 = model.catalog.find((offering) => offering.sku === 'cpx31');
+
+    expect(cpx31).toMatchObject({
+      sourceId: 'source-project',
+      candidateId: null,
+      candidateStatus: 'not-configured',
+      canUpdateExistingCandidate: false,
+      providerInstanceType: 'cpx31',
+      providerInstanceSku: null,
+    });
+    expect(canAddComputePoolOffering(cpx31!)).toBe(true);
+
+    const pendingModel = buildComputePoolOfferingsModel(
+      [],
+      [catalog()],
+      [sourceIdentity()],
+      {},
+      new Set([cpx31!.key])
+    );
+    expect(pendingModel.catalog.find((offering) => offering.sku === 'cpx31')).toMatchObject({
+      sourceId: 'source-project',
+      candidateStatus: 'pending-add',
     });
   });
 });

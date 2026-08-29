@@ -4,6 +4,7 @@ import type {
   CapacityPoolStatus,
   CapacityPoolStrategy,
   CapacitySourceIdentity,
+  DefaultCapacityPoolCandidateCatalogAddition,
   DefaultCapacityPoolScopeSummary,
   DefaultCapacityPoolSummary,
   DefaultCapacityPoolUpdateRequest,
@@ -42,6 +43,7 @@ const SCOPE_LABELS: Record<CapacityPoolScope, string> = {
 };
 
 type CandidateStatusDraft = Record<string, CapacityPoolStatus>;
+type CatalogAdditionDraft = Record<string, DefaultCapacityPoolCandidateCatalogAddition>;
 
 type DefaultCapacityPoolsPanelProps =
   | { scope?: 'project'; projectId: string }
@@ -310,7 +312,8 @@ function buildUpdateRequest(
   summary: DefaultCapacityPoolSummary,
   draftStrategy: CapacityPoolStrategy,
   draftExhaustionPolicy: CapacityExhaustionPolicy,
-  draftStatuses: CandidateStatusDraft
+  draftStatuses: CandidateStatusDraft,
+  draftCatalogAdditions: CatalogAdditionDraft
 ): DefaultCapacityPoolUpdateRequest | null {
   const policy: DefaultCapacityPoolUpdateRequest['policy'] = {};
   if (draftStrategy !== summary.pool.strategy) policy.strategy = draftStrategy;
@@ -327,8 +330,10 @@ function buildUpdateRequest(
   const request: DefaultCapacityPoolUpdateRequest = {};
   if (policy.strategy || policy.exhaustionPolicy) request.policy = policy;
   if (candidates.length > 0) request.candidates = candidates;
+  const catalogAdditions = Object.values(draftCatalogAdditions);
+  if (catalogAdditions.length > 0) request.catalogAdditions = catalogAdditions;
 
-  return request.policy || request.candidates ? request : null;
+  return request.policy || request.candidates || request.catalogAdditions ? request : null;
 }
 
 export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps) {
@@ -373,6 +378,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
     CAPACITY_EXHAUSTION_POLICIES[0]
   );
   const [draftCandidateStatuses, setDraftCandidateStatuses] = useState<CandidateStatusDraft>({});
+  const [draftCatalogAdditions, setDraftCatalogAdditions] = useState<CatalogAdditionDraft>({});
 
   const reconcileMutation = useMutation({
     mutationFn: () =>
@@ -400,6 +406,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
       queryClient.setQueryData(queryKey, data);
       setIsEditing(false);
       setDraftCandidateStatuses({});
+      setDraftCatalogAdditions({});
       toast.success(`${SCOPE_LABELS[scope]} default compute pool updated`);
     },
     onError: (error) => {
@@ -416,6 +423,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
         ownedDefault.candidates.map((candidate) => [candidate.id, candidate.status])
       )
     );
+    setDraftCatalogAdditions({});
     setIsEditing(true);
   };
 
@@ -425,7 +433,8 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
       ownedDefault,
       draftStrategy,
       draftExhaustionPolicy,
-      draftCandidateStatuses
+      draftCandidateStatuses,
+      draftCatalogAdditions
     );
     if (!request) {
       setIsEditing(false);
@@ -541,11 +550,18 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
                   sources={ownedDefault.sources}
                   catalogs={providerCatalog.catalogs}
                   draftStatuses={draftCandidateStatuses}
+                  draftCatalogAdditionKeys={new Set(Object.keys(draftCatalogAdditions))}
                   isEditing
                   onStatusChange={(candidateId, status) =>
                     setDraftCandidateStatuses((current) => ({
                       ...current,
                       [candidateId]: status,
+                    }))
+                  }
+                  onCatalogAdd={(addition, key) =>
+                    setDraftCatalogAdditions((current) => ({
+                      ...current,
+                      [key]: addition,
                     }))
                   }
                 />
@@ -560,6 +576,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
                   onClick={() => {
                     setIsEditing(false);
                     setDraftCandidateStatuses({});
+                    setDraftCatalogAdditions({});
                   }}
                 >
                   Cancel

@@ -50,7 +50,16 @@ export async function screenshot(page: Page, name: string) {
   });
 }
 
-type MutableCapacityCandidate = { id: string; status: string };
+type MutableCapacityCandidate = {
+  id: string;
+  status: string;
+  capacitySourceId?: string;
+  provider?: string | null;
+  location?: string | null;
+  providerInstanceType?: string | null;
+  providerInstanceSku?: string | null;
+  [key: string]: unknown;
+};
 type MutableCapacitySummary = {
   pool: {
     id: string;
@@ -70,6 +79,13 @@ type MutableCapacityDefaultsResponse = {
 export type MockCapacityDefaultsUpdate = {
   policy?: { strategy?: string; exhaustionPolicy?: string };
   candidates?: MutableCapacityCandidate[];
+  catalogAdditions?: Array<{
+    sourceId: string;
+    provider: string;
+    location: string;
+    providerInstanceType: string;
+    providerInstanceSku?: string | null;
+  }>;
 };
 
 export function applyMockCapacityDefaultsUpdate<T extends MutableCapacityDefaultsResponse>(
@@ -87,6 +103,37 @@ export function applyMockCapacityDefaultsUpdate<T extends MutableCapacityDefault
   for (const candidateUpdate of update.candidates ?? []) {
     const candidate = summary.candidates.find((item) => item.id === candidateUpdate.id);
     if (candidate) candidate.status = candidateUpdate.status;
+  }
+  for (const addition of update.catalogAdditions ?? []) {
+    const candidate = summary.candidates.find(
+      (item) =>
+        item.capacitySourceId === addition.sourceId &&
+        item.provider === addition.provider &&
+        item.location === addition.location &&
+        item.providerInstanceType === addition.providerInstanceType &&
+        (item.providerInstanceSku ?? null) === (addition.providerInstanceSku ?? null)
+    );
+    if (candidate) {
+      candidate.status = 'active';
+      continue;
+    }
+    summary.candidates.push({
+      id: `mock-catalog-addition:${addition.sourceId}:${addition.provider}:${addition.location}:${addition.providerInstanceSku ?? addition.providerInstanceType}`,
+      status: 'active',
+      capacitySourceId: addition.sourceId,
+      provider: addition.provider,
+      location: addition.location,
+      providerInstanceType: addition.providerInstanceType,
+      providerInstanceSku: addition.providerInstanceSku ?? null,
+      workloadRole: 'workspace',
+      runtime: 'vm',
+      machineClass: 'shared-vm',
+      machineSize: null,
+      priority: summary.candidates.length,
+      candidateOrder: summary.candidates.length,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
   }
   summary.activeCandidateCount = summary.candidates.filter(
     (candidate) => candidate.status === 'active'

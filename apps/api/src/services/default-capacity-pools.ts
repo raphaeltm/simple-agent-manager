@@ -400,6 +400,7 @@ async function ensureDefaultPoolForCredentialSeeds(
     await ensureCandidatesForSource(db, pool.id, source.id, seed.provider, offerings);
   }
 
+  await disableCapacitySourcesMissingFromSeeds(db, pool.id, scope, activeSeeds);
   await reconcileDefaultPoolStatus(db, pool.id);
   return readDefaultPoolSummary(db, scope);
 }
@@ -631,6 +632,56 @@ async function disableCapacitySourceAvailability(
     .update(schema.capacitySources)
     .set({ status: DISABLED_STATUS, updatedAt: now })
     .where(eq(schema.capacitySources.id, sourceId));
+}
+
+async function disableCapacitySourcesMissingFromSeeds(
+  db: Db,
+  poolId: string,
+  scope: ScopeIdentity,
+  activeSeeds: CredentialCapacitySeed[]
+): Promise<void> {
+  const activeSeedKeys = new Set(activeSeeds.map(sourceIdentityKeyForSeed));
+  const rows = await db
+    .select({ source: schema.capacitySources })
+    .from(schema.capacitySources)
+    .innerJoin(
+      schema.capacityPoolCandidates,
+      eq(schema.capacityPoolCandidates.capacitySourceId, schema.capacitySources.id)
+    )
+    .where(
+      and(
+        eq(schema.capacityPoolCandidates.poolId, poolId),
+        eq(schema.capacitySources.sourceKind, SOURCE_KIND_CLOUD_PROVIDER),
+        eq(schema.capacitySources.status, ACTIVE_STATUS),
+        ...sourceScopePredicates(scope)
+      )
+    );
+
+  const sourceIdsToDisable = new Set<string>();
+  for (const { source } of rows) {
+    const key = sourceIdentityKeyForRow(source);
+    if (!key || activeSeedKeys.has(key)) continue;
+    sourceIdsToDisable.add(source.id);
+  }
+
+  for (const sourceId of sourceIdsToDisable) {
+    await disableCapacitySourceAvailability(db, poolId, sourceId);
+  }
+}
+
+function sourceIdentityKeyForSeed(seed: CredentialCapacitySeed): string {
+  if (seed.credentialId) return `credential:${seed.credentialId}`;
+  if (seed.platformCredentialId) return `platform:${seed.platformCredentialId}`;
+  if (seed.externalSourceRef) return `external:${seed.externalSourceRef}`;
+  return `reference:${seed.credentialReference}`;
+}
+
+function sourceIdentityKeyForRow(source: schema.CapacitySource): string | null {
+  if (source.credentialId) return `credential:${source.credentialId}`;
+  if (source.platformCredentialId) return `platform:${source.platformCredentialId}`;
+  if (source.externalSourceRef) return `external:${source.externalSourceRef}`;
+  if (source.credentialReference) return `reference:${source.credentialReference}`;
+  return null;
 }
 
 async function disableDefaultPoolAvailability(db: Db, poolId: string): Promise<void> {

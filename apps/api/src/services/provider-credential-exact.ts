@@ -227,13 +227,18 @@ async function createProviderForExactComposableCredential<TEnv extends Env>(
   createProviderFromDecryptedToken: ProviderFactory<TEnv>
 ): Promise<ProviderResolutionResult | null> {
   const attachmentPredicates = [
-    eq(schema.ccAttachments.userId, userId),
     eq(schema.ccAttachments.consumerKind, 'compute'),
     eq(schema.ccAttachments.consumerTarget, targetProvider),
     eq(schema.ccAttachments.isActive, true),
-    credentialSource === 'project'
-      ? eq(schema.ccAttachments.projectId, projectId ?? '')
-      : isNull(schema.ccAttachments.projectId),
+    ...(credentialSource === 'project'
+      ? [eq(schema.ccAttachments.projectId, projectId ?? '')]
+      : [eq(schema.ccAttachments.userId, userId), isNull(schema.ccAttachments.projectId)]),
+  ];
+  const credentialPredicates = [
+    eq(schema.ccCredentials.id, credentialId),
+    eq(schema.ccCredentials.kind, 'cloud-provider'),
+    eq(schema.ccCredentials.isActive, true),
+    ...(credentialSource === 'project' ? [] : [eq(schema.ccCredentials.ownerId, userId)]),
   ];
 
   const [row] = await db
@@ -252,10 +257,7 @@ async function createProviderForExactComposableCredential<TEnv extends Env>(
     )
     .where(
       and(
-        eq(schema.ccCredentials.id, credentialId),
-        eq(schema.ccCredentials.ownerId, userId),
-        eq(schema.ccCredentials.kind, 'cloud-provider'),
-        eq(schema.ccCredentials.isActive, true),
+        ...credentialPredicates,
         eq(schema.ccConfigurations.consumerKind, 'compute'),
         eq(schema.ccConfigurations.consumerTarget, targetProvider),
         eq(schema.ccConfigurations.isActive, true),

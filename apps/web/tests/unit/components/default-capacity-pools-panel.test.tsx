@@ -849,7 +849,52 @@ describe('DefaultCapacityPoolsPanel', () => {
     expect(screen.queryByText(/\+\d+ more provider\/region groups/)).not.toBeInTheDocument();
   });
 
-  it('shows provider-native catalog-only offerings while preventing unknown candidate updates', async () => {
+  it('submits provider-native catalog-only offerings as catalog additions', async () => {
+    const catalogWithAvailableNativeRow = providerCatalog();
+    catalogWithAvailableNativeRow.offerings = catalogWithAvailableNativeRow.offerings?.map(
+      (offering) =>
+        offering.providerInstanceType ===
+        'long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only'
+          ? { ...offering, available: true, status: null }
+          : offering
+    );
+    mocks.providerCatalogs = [catalogWithAvailableNativeRow];
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(
+      response('project', summary('project'))
+    );
+    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(
+      response('project', summary('project'))
+    );
+
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    const catalogOnlySku = 'long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only';
+    expect(screen.getByText(catalogOnlySku)).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: new RegExp(`Add Hetzner hel1 ${catalogOnlySku}`),
+      })
+    );
+    expect(screen.getAllByRole('button', { name: 'Pending add' })[0]).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() =>
+      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
+        catalogAdditions: [
+          {
+            sourceId: 'source-project',
+            provider: 'hetzner',
+            location: 'hel1',
+            providerInstanceType: catalogOnlySku,
+            providerInstanceSku: null,
+          },
+        ],
+      })
+    );
+  });
+
+  it('shows unavailable provider-native catalog-only offerings without enabling add', async () => {
     mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(
       response('project', summary('project'))
     );

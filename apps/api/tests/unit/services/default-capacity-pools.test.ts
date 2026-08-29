@@ -1086,6 +1086,192 @@ describe('default capacity pool creation', () => {
     });
   });
 
+  it('disables active composable sources that disappeared from current credential seeds', async () => {
+    const db = createDb();
+    seedComposableCloudCredential({
+      credentialId: 'cc-cred-old',
+      configurationId: 'cc-cfg-old',
+      attachmentId: 'cc-att-old',
+      provider: 'hetzner',
+    });
+    seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async (seed) => [
+        liveHetznerOffering({
+          provider: seed.provider,
+          location: seed.provider === 'vultr' ? 'ewr' : 'fsn1',
+          providerInstanceType: `${seed.provider}-native-large`,
+          displayName: `${seed.provider} native large`,
+        }),
+      ],
+    });
+    sqlite?.prepare("DELETE FROM cc_attachments WHERE id = 'cc-att-old'").run();
+    seedComposableCloudCredential({
+      credentialId: 'cc-cred-new',
+      configurationId: 'cc-cfg-new',
+      attachmentId: 'cc-att-new',
+      provider: 'hetzner',
+    });
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async (seed) => [
+        liveHetznerOffering({
+          provider: seed.provider,
+          location: seed.provider === 'vultr' ? 'ewr' : 'fsn1',
+          providerInstanceType: `${seed.provider}-native-large`,
+          displayName: `${seed.provider} native large`,
+        }),
+      ],
+    });
+
+    expect(
+      getRows<{
+        credential_reference: string;
+        external_source_ref: string | null;
+        status: string;
+      }>(`
+        SELECT credential_reference, external_source_ref, status
+        FROM capacity_sources
+        WHERE scope = 'user'
+        ORDER BY credential_reference
+      `)
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          credential_reference: 'cc_credentials:cc-cred-old',
+          external_source_ref: 'cc_attachments:cc-att-old',
+          status: 'disabled',
+        },
+        {
+          credential_reference: 'cc_credentials:cc-cred-new',
+          external_source_ref: 'cc_attachments:cc-att-new',
+          status: 'active',
+        },
+        {
+          credential_reference: 'credentials:user-vultr',
+          external_source_ref: null,
+          status: 'active',
+        },
+      ])
+    );
+  });
+
+  it('activates refreshed catalog additions and places work on the provider-native SKU', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    const initialOfferings = [
+      liveHetznerOffering({
+        location: 'fsn1',
+        providerInstanceType: 'cx23',
+        displayName: 'CX23',
+      }),
+    ];
+    const expandedOfferings = [
+      ...initialOfferings,
+      liveHetznerOffering({
+        location: 'fsn1',
+        providerInstanceType: 'cpx62',
+        displayName: 'CPX62',
+        vcpu: 32,
+        ramGb: 64,
+        memoryGb: 64,
+        memoryMb: 65_536,
+        storageGb: 480,
+        diskGb: 480,
+        price: '€48.12/mo',
+        priceMonthly: 48.12,
+        priceHourly: 0.06592,
+      }),
+    ];
+
+    const initial = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => initialOfferings,
+    });
+    const sourceId = initial.user?.sources[0]?.id;
+    expect(sourceId).toBeDefined();
+    expect(initial.user?.candidates.map((candidate) => candidate.providerInstanceType)).toEqual([
+      'cx23',
+    ]);
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => expandedOfferings,
+    });
+    const update = await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      catalogAdditions: [
+        {
+          sourceId: sourceId!,
+          provider: 'hetzner',
+          location: 'fsn1',
+          providerInstanceType: 'cpx62',
+          providerInstanceSku: null,
+        },
+      ],
+    });
+
+    expect(update).toMatchObject({
+      poolFound: true,
+      missingCatalogAdditions: [],
+      unavailableCatalogAdditions: [],
+      missingCandidateIds: [],
+      unavailableCandidateIds: [],
+    });
+    expect(update.summary?.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          providerInstanceType: 'cpx62',
+          providerInstanceVcpuCount: 32,
+          providerInstanceMemoryMb: 65_536,
+          providerInstancePriceCurrency: 'EUR',
+          providerInstancePriceMonthlyCents: 4812,
+          providerInstanceCatalogSource: 'api',
+          status: 'active',
+        }),
+      ])
+    );
+
+    const placement = resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'catalog-addition-placement-task',
+      projectId: 'project-1',
+      userId: 'user-1',
+      project: {
+        id: 'project-1',
+        defaultProvider: 'hetzner',
+        defaultLocation: 'fsn1',
+        defaultVmSize: 'small',
+      },
+      explicit: { provider: 'hetzner', vmLocation: 'fsn1' },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+      resourceRequirements: {
+        task: { minVcpu: 32, minMemoryGb: 64 },
+      },
+    });
+    const selection = await resolveTaskStartCapacityPoolSelection(db as never, placement, {
+      ensure: false,
+    });
+
+    expect(selection?.candidates[0]).toMatchObject({
+      provider: 'hetzner',
+      location: 'fsn1',
+      providerInstanceType: 'cpx62',
+      providerInstanceVcpuCount: 32,
+      providerInstanceMemoryMb: 65_536,
+    });
+  });
+
   it('rejects reactivating removed candidates that are no longer in the current catalog', async () => {
     createDb();
     seedUserCredential({ id: 'user-hetzner' });

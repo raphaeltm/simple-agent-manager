@@ -369,7 +369,7 @@ describe('GET /api/providers/catalog scope filtering with real SQL', () => {
     expect(JSON.stringify(body)).not.toContain('cc-iv-for-cc-cred-user');
   });
 
-  it('includes only the caller project-scoped composable compute credentials', async () => {
+  it('includes project-scoped composable compute credentials from any authorized project member', async () => {
     const { sqlite, env } = createEnv();
     seedUser(sqlite, 'test-user-id');
     seedUser(sqlite, 'other-user-id');
@@ -398,14 +398,59 @@ describe('GET /api/providers/catalog scope filtering with real SQL', () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as ProviderCatalogResponse;
-    expect(body.catalogs.map((catalog) => catalog.credentialId)).toEqual(['cc-cred-project']);
-    expect(body.catalogs[0]).toMatchObject({
-      provider: 'digitalocean',
-      credentialSource: 'project',
-      externalSourceRef: 'cc_attachments:cc-att-project',
-      credentialReference: 'cc_credentials:cc-cred-project',
+    expect(body.catalogs.map((catalog) => catalog.credentialId).sort()).toEqual([
+      'cc-cred-other-project-user',
+      'cc-cred-project',
+    ]);
+    expect(body.catalogs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          provider: 'digitalocean',
+          credentialSource: 'project',
+          externalSourceRef: 'cc_attachments:cc-att-project',
+          credentialReference: 'cc_credentials:cc-cred-project',
+        }),
+        expect.objectContaining({
+          provider: 'vultr',
+          credentialSource: 'project',
+          externalSourceRef: 'cc_attachments:cc-att-other-project-user',
+          credentialReference: 'cc_credentials:cc-cred-other-project-user',
+        }),
+      ])
+    );
+    expect(JSON.stringify(body)).not.toContain(
+      'cc-encrypted-token-for-cc-cred-other-project-user'
+    );
+  });
+
+  it('deduplicates deterministic composable mirrors of legacy cloud credentials', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'test-user-id');
+    seedCloudCredential(sqlite, {
+      id: 'legacy-user-cloud',
+      userId: 'test-user-id',
+      provider: 'hetzner',
     });
-    expect(JSON.stringify(body)).not.toContain('cc-cred-other-project-user');
+    seedComposableCloudCredential(sqlite, {
+      credentialId: 'cc-legacy-cloud-cred-legacy-user-cloud',
+      configurationId: 'cc-legacy-cloud-cfg-legacy-user-cloud',
+      attachmentId: 'cc-legacy-cloud-att-legacy-user-cloud',
+      userId: 'test-user-id',
+      provider: 'hetzner',
+    });
+
+    const res = await createApp().request('/api/providers/catalog?scope=user', {}, env);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ProviderCatalogResponse;
+    expect(body.catalogs).toHaveLength(1);
+    expect(body.catalogs[0]).toMatchObject({
+      provider: 'hetzner',
+      credentialSource: 'user',
+      credentialId: 'legacy-user-cloud',
+      externalSourceRef: null,
+      credentialReference: 'credentials:legacy-user-cloud',
+    });
   });
 
   it('returns only enabled platform credentials for installation scope', async () => {

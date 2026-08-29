@@ -6,6 +6,21 @@
 -- table. Dropping the old child first avoids the cascade-loss class from prior
 -- parent-table rebuild incidents while keeping foreign keys enabled.
 
+CREATE TEMP TABLE capacity_source_lineage_nodes_0129 AS
+SELECT id, capacity_source_id
+FROM nodes
+WHERE capacity_source_id IS NOT NULL;
+
+CREATE TEMP TABLE capacity_source_lineage_workspaces_0129 AS
+SELECT id, capacity_source_id
+FROM workspaces
+WHERE capacity_source_id IS NOT NULL;
+
+CREATE TEMP TABLE capacity_source_lineage_tasks_0129 AS
+SELECT id, capacity_source_id
+FROM tasks
+WHERE capacity_source_id IS NOT NULL;
+
 CREATE TABLE capacity_sources_new (
   id TEXT PRIMARY KEY,
   scope TEXT NOT NULL CHECK (scope IN ('installation', 'user', 'project')),
@@ -195,6 +210,34 @@ DROP TABLE capacity_sources;
 
 ALTER TABLE capacity_sources_new RENAME TO capacity_sources;
 ALTER TABLE capacity_pool_candidates_new RENAME TO capacity_pool_candidates;
+
+UPDATE nodes
+SET capacity_source_id = (
+  SELECT capacity_source_id
+  FROM capacity_source_lineage_nodes_0129
+  WHERE capacity_source_lineage_nodes_0129.id = nodes.id
+)
+WHERE id IN (SELECT id FROM capacity_source_lineage_nodes_0129);
+
+UPDATE workspaces
+SET capacity_source_id = (
+  SELECT capacity_source_id
+  FROM capacity_source_lineage_workspaces_0129
+  WHERE capacity_source_lineage_workspaces_0129.id = workspaces.id
+)
+WHERE id IN (SELECT id FROM capacity_source_lineage_workspaces_0129);
+
+UPDATE tasks
+SET capacity_source_id = (
+  SELECT capacity_source_id
+  FROM capacity_source_lineage_tasks_0129
+  WHERE capacity_source_lineage_tasks_0129.id = tasks.id
+)
+WHERE id IN (SELECT id FROM capacity_source_lineage_tasks_0129);
+
+DROP TABLE capacity_source_lineage_nodes_0129;
+DROP TABLE capacity_source_lineage_workspaces_0129;
+DROP TABLE capacity_source_lineage_tasks_0129;
 
 CREATE INDEX IF NOT EXISTS idx_capacity_sources_owner_user
   ON capacity_sources(owner_user_id)

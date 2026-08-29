@@ -2,6 +2,7 @@ import type {
   CapacityPoolCandidate,
   CapacityPoolStatus,
   CapacitySourceIdentity,
+  DefaultCapacityPoolCandidateCatalogAddition,
   ProviderCatalog,
 } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
@@ -47,6 +48,7 @@ function availabilityLabel(offering: ComputePoolOffering, status: string) {
   if (offering.stale) return 'Stale catalog data';
   if (offering.available === false) return offering.statusLabel ?? 'Unavailable';
   if (status === 'active') return 'Allowed';
+  if (status === 'pending-add') return 'Pending add';
   if (status === 'deleted') return 'Removed';
   if (status === 'disabled') return 'Disabled';
   if (status === 'not-configured') return 'Catalog only';
@@ -197,9 +199,11 @@ function CandidateOfferingCard({
 function CatalogOfferingCard({
   offering,
   onStatusChange,
+  onCatalogAdd,
 }: {
   offering: ComputePoolCatalogOffering;
   onStatusChange: (candidateId: string, status: CapacityPoolStatus) => void;
+  onCatalogAdd: (addition: DefaultCapacityPoolCandidateCatalogAddition, key: string) => void;
 }) {
   const sourceSuffix = offering.sourceLabel ? ` via ${offering.sourceLabel}` : '';
   let action: ReactNode;
@@ -215,10 +219,43 @@ function CatalogOfferingCard({
         {offering.stale ? 'Stale' : 'Unavailable'}
       </Button>
     );
-  } else if (!offering.candidateId) {
+  } else if (offering.candidateStatus === 'pending-add') {
     action = (
       <Button size="sm" variant="ghost" className="w-full sm:w-auto" disabled>
-        Reconcile first
+        Pending add
+      </Button>
+    );
+  } else if (!offering.candidateId && !offering.sourceId) {
+    action = (
+      <Button size="sm" variant="ghost" className="w-full sm:w-auto" disabled>
+        Reconcile source
+      </Button>
+    );
+  } else if (!offering.candidateId) {
+    const sourceId = offering.sourceId;
+    action = (
+      <Button
+        size="sm"
+        className="w-full sm:w-auto"
+        aria-label={`Add ${offering.providerLabel} ${offering.location} ${offering.sku}${sourceSuffix}`}
+        onClick={() => {
+          if (!sourceId) {
+            return;
+          }
+
+          onCatalogAdd(
+            {
+              sourceId,
+              provider: offering.provider as DefaultCapacityPoolCandidateCatalogAddition['provider'],
+              location: offering.location,
+              providerInstanceType: offering.providerInstanceType,
+              providerInstanceSku: offering.providerInstanceSku,
+            },
+            offering.key
+          );
+        }}
+      >
+        Add
       </Button>
     );
   } else {
@@ -387,8 +424,10 @@ interface ComputePoolOfferingsManagerProps {
   sources?: CapacitySourceIdentity[];
   catalogs: ProviderCatalog[];
   draftStatuses?: Record<string, CapacityPoolStatus>;
+  draftCatalogAdditionKeys?: ReadonlySet<string>;
   isEditing: boolean;
   onStatusChange: (candidateId: string, status: CapacityPoolStatus) => void;
+  onCatalogAdd?: (addition: DefaultCapacityPoolCandidateCatalogAddition, key: string) => void;
 }
 
 export function ComputePoolOfferingsManager({
@@ -396,13 +435,22 @@ export function ComputePoolOfferingsManager({
   sources = [],
   catalogs,
   draftStatuses = {},
+  draftCatalogAdditionKeys = new Set(),
   isEditing,
   onStatusChange,
+  onCatalogAdd = () => undefined,
 }: ComputePoolOfferingsManagerProps) {
   const [filters, setFilters] = useState<ComputePoolOfferingFilters>(DEFAULT_FILTERS);
   const model = useMemo(
-    () => buildComputePoolOfferingsModel(candidates, catalogs, sources, draftStatuses),
-    [candidates, catalogs, draftStatuses, sources]
+    () =>
+      buildComputePoolOfferingsModel(
+        candidates,
+        catalogs,
+        sources,
+        draftStatuses,
+        draftCatalogAdditionKeys
+      ),
+    [candidates, catalogs, draftCatalogAdditionKeys, draftStatuses, sources]
   );
   const providers = useMemo(() => {
     const byId = new Map<string, string>();
@@ -422,8 +470,9 @@ export function ComputePoolOfferingsManager({
   );
   const addableCatalog = filteredCatalog.filter(
     (offering) =>
-      offering.candidateId &&
+      (offering.candidateId || offering.sourceId) &&
       offering.candidateStatus !== 'active' &&
+      offering.candidateStatus !== 'pending-add' &&
       canAddComputePoolOffering(offering)
   );
   const removableAllowed = filteredAllowed.filter(
@@ -516,7 +565,21 @@ export function ComputePoolOfferingsManager({
                   disabled={addableCatalog.length === 0}
                   onClick={() => {
                     for (const offering of addableCatalog) {
-                      if (offering.candidateId) onStatusChange(offering.candidateId, 'active');
+                      if (offering.candidateId) {
+                        onStatusChange(offering.candidateId, 'active');
+                      } else if (offering.sourceId) {
+                        onCatalogAdd(
+                          {
+                            sourceId: offering.sourceId,
+                            provider:
+                              offering.provider as DefaultCapacityPoolCandidateCatalogAddition['provider'],
+                            location: offering.location,
+                            providerInstanceType: offering.providerInstanceType,
+                            providerInstanceSku: offering.providerInstanceSku,
+                          },
+                          offering.key
+                        );
+                      }
                     }
                   }}
                 >
@@ -549,6 +612,7 @@ export function ComputePoolOfferingsManager({
                     key={offering.key}
                     offering={offering}
                     onStatusChange={onStatusChange}
+                    onCatalogAdd={onCatalogAdd}
                   />
                 ))
               )}

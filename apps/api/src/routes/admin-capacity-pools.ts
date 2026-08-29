@@ -121,6 +121,12 @@ adminCapacityPoolsRoutes.post('/defaults/reconcile', async (c) => {
 adminCapacityPoolsRoutes.patch('/defaults', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const update = await readDefaultCapacityPoolUpdateRequest(c);
+  await readDefaultCapacityPoolSummaries(db, {
+    includeInstallation: true,
+    ensure: true,
+    includeDisabled: true,
+    env: c.env,
+  });
   const result = await updateDefaultCapacityPool(db, {
     scope: 'installation',
     ownerUserId: null,

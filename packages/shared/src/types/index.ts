@@ -53,6 +53,7 @@ export type {
   CapacitySourceIdentity,
   CapacitySourceKind,
   CapacityWorkloadRole,
+  DefaultCapacityPoolCandidateCatalogAddition,
   DefaultCapacityPoolCandidateStatusUpdate,
   DefaultCapacityPoolPolicyUpdate,
   DefaultCapacityPoolScopeSummary,
