@@ -145,10 +145,10 @@ nodes. Desired invariant: **DISCOVER BROADLY; SELECT CONSERVATIVELY**.
       needed; otherwise run existing compute-pool Playwright audits with stress data.
 - [x] Run focused tests after implementation, then full `pnpm lint && pnpm typecheck
       && pnpm test && pnpm build`.
-- [ ] Run mandatory specialist reviews: task-completion-validator,
+- [x] Run mandatory specialist reviews: task-completion-validator,
       cloudflare-specialist, constitution-validator, test-engineer, and UI review
       if `apps/web` changes or screenshot evidence is refreshed.
-- [ ] Deploy child branch to staging and verify full Hetzner catalog visible/addable,
+- [x] Deploy child branch to staging and verify full Hetzner catalog visible/addable,
       default active set limited to legacy concrete SKUs, expensive offerings
       available but not selected, real VM prompt/session provisions through an active
       selected offering, and cleanup returns staging to zero VMs/nodes at rest.
@@ -156,9 +156,28 @@ nodes. Desired invariant: **DISCOVER BROADLY; SELECT CONSERVATIVELY**.
       CodeRabbit with the `coderabbit-review` label, address/document actionable
       feedback, and post required evidence on child and parent PRs.
 
-Workflow-gate status: the remaining unchecked review, staging, and PR evidence
-items are tracked in `.do-state.md` and will be completed after the Phase 4
-archive commit per the `/do` phase ordering.
+Workflow-gate status: review and staging evidence completed after the Phase 4
+archive commit per the `/do` phase ordering. PR/CodeRabbit evidence remains
+tracked in `.do-state.md` until the draft child PR is opened.
+
+## Validation evidence added after archive
+
+- Staging deploy succeeded for commit `691158a9f33fd7d10be6eb9be6dfede879d0970f`:
+  <https://github.com/raphaeltm/simple-agent-manager/actions/runs/33264524059>.
+- Live staging user and installation scopes both exposed 114 Hetzner offerings /
+  25 SKUs while default pool reconciliation tracked 135 Hetzner candidates and
+  left only `cx23`, `cx33`, and `cx43` active.
+- Live staging showed `ccx63` in `sin` at `€1036.49/mo` as disabled/not selected;
+  an explicit temporary add made it active, a reconciliation preserved it, and
+  the validator restored it to disabled.
+- Real staging task `01M17910ZMJE4A7CF0P5EH3PH0` reached `in_progress` /
+  `running`; placement snapshot selected user-scope Hetzner `fsn1` `cx23`
+  (`€5.49/mo`), proving scheduler placement uses an active selected legacy SKU.
+- Validation workspace `01M1798R64H50CNM5D00SFZJ9S` and node
+  `01M1791704YB7BPWZXHSNGGTYM` were deleted; final staging resting state returned
+  zero active workspaces and zero active nodes.
+- Screenshot evidence is stored in
+  `tasks/archive/evidence/2026-08-29-compute-pool-conservative-defaults/`.
 
 ## Acceptance criteria
 
