@@ -15,6 +15,10 @@ import { defaultCandidateId, legacyDefaultCandidateId } from './default-capacity
 
 type Db = ReturnType<typeof drizzle>;
 type CandidateSelectionOrigin = 'system' | 'user';
+type CandidateState = {
+  status: CapacityPoolStatus;
+  selectionOrigin: CandidateSelectionOrigin;
+};
 
 const DEFAULT_WORKLOAD_ROLE = 'workspace';
 const DEFAULT_RUNTIME = 'vm';
@@ -59,7 +63,7 @@ export async function ensureCandidatesForSource(
     const existingState = existingStatuses.get(id) ?? null;
     const existingStatus = existingState?.status ?? null;
     const legacyVmSize = legacyVmSizeHintForOffering(provider, offering);
-    const legacyStatus = legacyStatusForOffering(
+    const legacyState = legacyStateForOffering(
       existingStatuses,
       poolId,
       sourceId,
@@ -70,7 +74,8 @@ export async function ensureCandidatesForSource(
     const initialStatus = initialStatusForProviderOffering({
       existingStatus,
       existingSelectionOrigin: existingState?.selectionOrigin ?? null,
-      legacyStatus,
+      legacyStatus: legacyState?.status ?? null,
+      legacySelectionOrigin: legacyState?.selectionOrigin ?? null,
       legacyVmSize,
     });
     candidateIds.push(id);
@@ -138,20 +143,28 @@ export function initialStatusForProviderOffering(input: {
   existingStatus?: CapacityPoolStatus | null;
   existingSelectionOrigin?: CandidateSelectionOrigin | null;
   legacyStatus?: CapacityPoolStatus | null;
+  legacySelectionOrigin?: CandidateSelectionOrigin | null;
   legacyVmSize?: VMSize | null;
 }): CapacityPoolStatus {
   if (input.existingSelectionOrigin === USER_SELECTION_ORIGIN && input.existingStatus) {
     return input.existingStatus;
   }
+  if (input.legacyVmSize && input.legacyStatus === DELETED_STATUS) {
+    return DELETED_STATUS;
+  }
   if (
     input.legacyVmSize &&
-    (input.legacyStatus === DISABLED_STATUS || input.legacyStatus === DELETED_STATUS)
+    input.legacySelectionOrigin === USER_SELECTION_ORIGIN &&
+    input.legacyStatus === DISABLED_STATUS
   ) {
-    return input.legacyStatus;
+    return DISABLED_STATUS;
   }
   if (input.existingStatus) {
-    if (input.existingStatus === DISABLED_STATUS || input.existingStatus === DELETED_STATUS) {
-      return input.existingStatus;
+    if (input.existingStatus === DELETED_STATUS) {
+      return DELETED_STATUS;
+    }
+    if (input.existingStatus === DISABLED_STATUS) {
+      return input.legacyVmSize ? ACTIVE_STATUS : DISABLED_STATUS;
     }
     return input.legacyVmSize ? ACTIVE_STATUS : DISABLED_STATUS;
   }
@@ -162,19 +175,19 @@ function isCurrentlySelectableOffering(offering: ProviderInstanceOffering): bool
   return offering.available !== false && !offering.stale;
 }
 
-function legacyStatusForOffering(
-  existingStatuses: ReadonlyMap<string, { status: CapacityPoolStatus }>,
+function legacyStateForOffering(
+  existingStatuses: ReadonlyMap<string, CandidateState>,
   poolId: string,
   sourceId: string,
   provider: CredentialProvider,
   offering: ProviderInstanceOffering,
   legacyVmSize: VMSize | null = legacyVmSizeHintForOffering(provider, offering)
-): CapacityPoolStatus | null {
+): CandidateState | null {
   if (!legacyVmSize) return null;
   return (
     existingStatuses.get(
       legacyDefaultCandidateId(poolId, sourceId, provider, offering.location, legacyVmSize)
-    )?.status ?? null
+    ) ?? null
   );
 }
 
@@ -195,7 +208,7 @@ async function readExistingCandidateStatuses(
   db: Db,
   poolId: string,
   sourceId: string
-): Promise<Map<string, { status: CapacityPoolStatus; selectionOrigin: CandidateSelectionOrigin }>> {
+): Promise<Map<string, CandidateState>> {
   const rows = await db
     .select({
       id: schema.capacityPoolCandidates.id,
@@ -227,7 +240,7 @@ async function markMissingCandidatesForSource(
   db: Db,
   poolId: string,
   sourceId: string,
-  existingStatuses: ReadonlyMap<string, { status: CapacityPoolStatus }>,
+  existingStatuses: ReadonlyMap<string, CandidateState>,
   activeCandidateIds: string[]
 ): Promise<void> {
   const now = new Date().toISOString();

@@ -601,7 +601,18 @@ describe('default capacity pool candidate initial status policy', () => {
       })
     ).toBe('active');
     expect(
-      initialStatusForProviderOffering({ existingStatus: 'disabled', legacyVmSize: 'small' })
+      initialStatusForProviderOffering({
+        existingStatus: 'disabled',
+        existingSelectionOrigin: 'system',
+        legacyVmSize: 'small',
+      })
+    ).toBe('active');
+    expect(
+      initialStatusForProviderOffering({
+        existingStatus: 'disabled',
+        existingSelectionOrigin: 'user',
+        legacyVmSize: 'small',
+      })
     ).toBe('disabled');
     expect(
       initialStatusForProviderOffering({ existingStatus: 'deleted', legacyVmSize: 'small' })
@@ -627,6 +638,13 @@ describe('default capacity pool candidate initial status policy', () => {
   it('transfers legacy removals only onto matching legacy-supported offerings', () => {
     expect(
       initialStatusForProviderOffering({ legacyStatus: 'disabled', legacyVmSize: 'small' })
+    ).toBe('active');
+    expect(
+      initialStatusForProviderOffering({
+        legacyStatus: 'disabled',
+        legacySelectionOrigin: 'user',
+        legacyVmSize: 'small',
+      })
     ).toBe('disabled');
     expect(
       initialStatusForProviderOffering({ legacyStatus: 'deleted', legacyVmSize: 'medium' })
@@ -1988,6 +2006,82 @@ describe('default capacity pool creation', () => {
       expect.arrayContaining([
         { id: legacyCandidateId, status: 'deleted', selection_origin: 'user' },
         { id: nativeCandidateId, status: 'deleted', selection_origin: 'system' },
+      ])
+    );
+  });
+
+  it('does not let system-origin disabled legacy shadows suppress native legacy defaults', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+
+    const poolId = 'cap-pool-default:user:user-1';
+    const sourceId = 'cap-source-default:user:user-hetzner';
+    const legacyCandidateId = `cap-candidate-default:${poolId}:${sourceId}:hetzner:fsn1:small`;
+    const nativeCandidateId = `cap-candidate-default:${poolId}:${sourceId}:hetzner:fsn1:cx23`;
+    sqlite
+      ?.prepare(
+        `
+        INSERT INTO capacity_pools (
+          id, scope, owner_user_id, name, is_default, revision, status,
+          strategy, exhaustion_policy, created_by
+        )
+        VALUES (?, 'user', 'user-1', 'User default', 1, 1, 'active', 'balanced', 'queue', 'user-1')
+      `
+      )
+      .run(poolId);
+    sqlite
+      ?.prepare(
+        `
+        INSERT INTO capacity_sources (
+          id, scope, owner_user_id, source_kind, provider, credential_source,
+          credential_id, credential_reference, status, created_by
+        )
+        VALUES (?, 'user', 'user-1', 'cloud-provider-credential', 'hetzner', 'user',
+          'user-hetzner', 'credentials:user-hetzner', 'active', 'user-1')
+      `
+      )
+      .run(sourceId);
+    sqlite
+      ?.prepare(
+        `
+        INSERT INTO capacity_pool_candidates (
+          id, pool_id, capacity_source_id, provider, location, workload_role,
+          runtime, machine_class, machine_size, status, selection_origin
+        )
+        VALUES (?, ?, ?, 'hetzner', 'fsn1', 'workspace', 'vm', 'shared-vm', 'small', 'disabled', 'system')
+      `
+      )
+      .run(legacyCandidateId, poolId, sourceId);
+    sqlite
+      ?.prepare(
+        `
+        INSERT INTO capacity_pool_candidates (
+          id, pool_id, capacity_source_id, provider, location, workload_role,
+          runtime, machine_class, machine_size, provider_instance_type, status, selection_origin
+        )
+        VALUES (?, ?, ?, 'hetzner', 'fsn1', 'workspace', 'vm', 'shared-vm', 'small', 'cx23', 'disabled', 'system')
+      `
+      )
+      .run(nativeCandidateId, poolId, sourceId);
+
+    const reconciled = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => legacyHetznerLiveOfferings('fsn1'),
+    });
+
+    expect(reconciled.user?.activeCandidateCount).toBe(3);
+    expect(
+      getRows<{ id: string; status: string; selection_origin: string }>(`
+        SELECT id, status, selection_origin
+        FROM capacity_pool_candidates
+        WHERE id IN ('${legacyCandidateId}', '${nativeCandidateId}')
+        ORDER BY id
+      `)
+    ).toEqual(
+      expect.arrayContaining([
+        { id: legacyCandidateId, status: 'disabled', selection_origin: 'system' },
+        { id: nativeCandidateId, status: 'active', selection_origin: 'system' },
       ])
     );
   });
