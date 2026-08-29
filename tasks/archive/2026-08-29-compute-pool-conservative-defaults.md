@@ -134,7 +134,7 @@ nodes. Desired invariant: **DISCOVER BROADLY; SELECT CONSERVATIVELY**.
       catalog-visible offerings.
 - [x] Add/adjust web unit and Playwright tests only if UI code/copy changes are
       needed; otherwise run existing compute-pool Playwright audits with stress data.
-- [ ] Run focused tests after implementation, then full `pnpm lint && pnpm typecheck
+- [x] Run focused tests after implementation, then full `pnpm lint && pnpm typecheck
       && pnpm test && pnpm build`.
 - [ ] Run mandatory specialist reviews: task-completion-validator,
       cloudflare-specialist, constitution-validator, test-engineer, and UI review
@@ -146,6 +146,10 @@ nodes. Desired invariant: **DISCOVER BROADLY; SELECT CONSERVATIVELY**.
 - [ ] Open draft child PR targeting `sam/compute-pools-integration`, trigger
       CodeRabbit with the `coderabbit-review` label, address/document actionable
       feedback, and post required evidence on child and parent PRs.
+
+Workflow-gate status: the remaining unchecked review, staging, and PR evidence
+items are tracked in `.do-state.md` and will be completed after the Phase 4
+archive commit per the `/do` phase ordering.
 
 ## Acceptance criteria
 
