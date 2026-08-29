@@ -1,5 +1,3 @@
-import type { Env } from '../../env';
-import { log } from '../../lib/logger';
 import type {
   AcknowledgeEventBusDeliveryInput,
   EventBusIdentity,
@@ -13,6 +11,8 @@ import {
   EventBusAckStateError,
   EventBusCursorError,
 } from '../../durable-objects/project-data/event-bus';
+import type { Env } from '../../env';
+import { log } from '../../lib/logger';
 import * as projectDataService from '../../services/project-data';
 import {
   getMcpLimits,
