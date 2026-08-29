@@ -31,15 +31,16 @@ import {
   recordVmProviderCapacitySuccess,
   releaseVmProvisioningLease,
   renewVmProvisioningLease,
-  resolveVmAdmissionScope,
   tryAcquireVmProvisioningLease,
-  type VmAdmissionWait,
-  type VmProvisioningLeaseResult,
-  type VmTaskAdmissionIdentity,
   waitForVmAdmissionCapacity,
 } from '../../services/vm-admission-control';
 import { assertClaimedNodeAvailable } from './claimed-node-availability';
 import { parseEnvInt } from './helpers';
+import {
+  buildAdmissionIdentity,
+  handleLeaseResult,
+  scheduleAdmissionWait,
+} from './node-provisioning-admission';
 import { applyCapacityCandidateProvisioningTarget } from './node-provisioning-target';
 import {
   findNodeWithCapacity,
@@ -57,41 +58,6 @@ export { verifyNodeAgentHealthy } from './node-selection';
 // =========================================================================
 // Step Handlers
 // =========================================================================
-
-async function scheduleAdmissionWait(
-  state: TaskRunnerState,
-  rc: TaskRunnerContext,
-  result: VmAdmissionWait
-): Promise<void> {
-  await rc.updateD1ExecutionStep(state.taskId, 'waiting_for_node_capacity');
-  await rc.ctx.storage.put('state', state);
-  const nextRetryMs = Date.parse(result.nextRetryAt);
-  await rc.ctx.storage.setAlarm(Number.isFinite(nextRetryMs) ? nextRetryMs : Date.now());
-  log.info('task_runner_do.node_provisioning.admission_wait', {
-    taskId: state.taskId,
-    reason: result.reason,
-    nextRetryAt: result.nextRetryAt,
-    waitDeadlineAt: result.waitDeadlineAt,
-  });
-}
-
-async function handleLeaseResult(
-  state: TaskRunnerState,
-  rc: TaskRunnerContext,
-  result: VmProvisioningLeaseResult
-): Promise<'granted' | 'waiting'> {
-  if (result.kind === 'expired') {
-    throw Object.assign(new Error('Timed out waiting for VM capacity'), { permanent: true });
-  }
-  if (result.kind === 'waiting') {
-    await scheduleAdmissionWait(state, rc, result);
-    return 'waiting';
-  }
-  state.admissionScopeKey = result.scopeKey;
-  state.admissionLeaseToken = result.fencingToken > 0 ? result.fencingToken : null;
-  await rc.ctx.storage.put('state', state);
-  return 'granted';
-}
 
 async function trySelectReusableNodeForProvisioning(
   state: TaskRunnerState,
@@ -121,30 +87,6 @@ async function trySelectReusableNodeForProvisioning(
   }
 
   return null;
-}
-
-async function buildAdmissionIdentity(
-  state: TaskRunnerState,
-  rc: TaskRunnerContext
-): Promise<VmTaskAdmissionIdentity | null> {
-  const scope = await resolveVmAdmissionScope(rc.env, {
-    userId: state.userId,
-    projectId: state.projectId,
-    targetProvider: state.config.cloudProvider,
-    credentialAttributionUserId: state.config.credentialAttributionUserId,
-    credentialAttributionProjectId: state.config.credentialAttributionProjectId,
-    credentialAttributionSource: state.config.credentialAttributionSource,
-  });
-  if (!scope) return null;
-  return {
-    ...scope,
-    taskId: state.taskId,
-    projectId: state.projectId,
-    userId: state.userId,
-    requestedVmSize: state.config.vmSize,
-    requestedVmLocation: state.config.vmLocation,
-    preferredNodeId: state.config.preferredNodeId,
-  };
 }
 
 export async function handleNodeSelection(

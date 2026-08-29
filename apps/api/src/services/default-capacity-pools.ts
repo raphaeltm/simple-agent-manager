@@ -1,7 +1,4 @@
-import {
-  getProviderInstanceOfferings,
-  type ProviderInstanceOffering,
-} from '@simple-agent-manager/providers';
+import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
 import type {
   CapacityPool as CapacityPoolDto,
   CapacityPoolCandidate as CapacityPoolCandidateDto,
@@ -20,6 +17,7 @@ import {
   toCapacityPoolCandidate,
   toCapacitySourceIdentity,
 } from './capacity-pools';
+import { providerInstanceOfferingDbValues } from './default-capacity-pool-candidate-values';
 import {
   defaultCandidateId,
   defaultCapacitySourceId,
@@ -635,29 +633,6 @@ async function ensureCandidatesForSource(
   }
 
   await disableMissingCandidatesForSource(db, poolId, sourceId, candidateIds);
-}
-
-function providerInstanceOfferingDbValues(offering: ProviderInstanceOffering): Pick<
-  schema.NewCapacityPoolCandidate,
-  | 'providerInstanceType'
-  | 'providerInstanceVcpuCount'
-  | 'providerInstanceMemoryMb'
-  | 'providerInstanceDiskGb'
-  | 'providerInstancePriceDisplay'
-  | 'providerInstancePriceCurrency'
-  | 'providerInstancePriceMonthlyCents'
-  | 'providerInstancePriceHourlyMicros'
-> {
-  return {
-    providerInstanceType: offering.instanceType,
-    providerInstanceVcpuCount: offering.vcpuCount,
-    providerInstanceMemoryMb: offering.memoryMb,
-    providerInstanceDiskGb: offering.diskGb,
-    providerInstancePriceDisplay: offering.priceDisplay,
-    providerInstancePriceCurrency: offering.priceCurrency,
-    providerInstancePriceMonthlyCents: offering.priceMonthlyCents,
-    providerInstancePriceHourlyMicros: offering.priceHourlyMicros,
-  };
 }
 
 async function disableMissingCandidatesForSource(
