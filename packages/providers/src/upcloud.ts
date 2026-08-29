@@ -1,5 +1,6 @@
-import type { VMSize } from '@simple-agent-manager/shared';
+import type { CredentialProvider, VMSize } from '@simple-agent-manager/shared';
 
+import { getProviderCatalogOfferings } from './instance-offerings';
 import {
   getTimeoutMs,
   providerDelay,
@@ -10,6 +11,7 @@ import {
 import type {
   Provider,
   ProviderLogger,
+  ProviderOfferingListOptions,
   ProviderRequestContext,
   SizeConfig,
   VMConfig,
@@ -91,7 +93,7 @@ const locationMetadata = {
   'sg-sin1': { name: 'Singapore', country: 'SG' },
   'au-syd1': { name: 'Sydney', country: 'AU' },
 } as const;
-const sizes: Record<VMSize, SizeConfig> = {
+export const UPCLOUD_SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
   small: { type: '2xCPU-4GB', price: 'provider-priced', vcpu: 2, ramGb: 4, storageGb: 50 },
   medium: { type: '4xCPU-8GB', price: 'provider-priced', vcpu: 4, ramGb: 8, storageGb: 80 },
   large: { type: '8xCPU-16GB', price: 'provider-priced', vcpu: 8, ramGb: 16, storageGb: 160 },
@@ -130,7 +132,7 @@ export class UpCloudProvider implements Provider {
   readonly name = 'upcloud';
   readonly locations = UPCLOUD_LOCATIONS;
   readonly locationMetadata = locationMetadata;
-  readonly sizes = sizes;
+  readonly sizes = UPCLOUD_SIZE_CONFIGS;
   readonly defaultLocation: string;
   readonly volumeCapabilities = UPCLOUD_VOLUME_CAPABILITIES;
   private readonly auth: string;
@@ -161,15 +163,22 @@ export class UpCloudProvider implements Provider {
   }
   async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
     throwIfProviderRequestAborted(context);
+    const sizeConfig = this.sizes[config.size];
+    if (!sizeConfig) {
+      throw new ProviderError(this.name, undefined, `Unknown VM size: ${config.size}`, {
+        category: 'invalid_config',
+      });
+    }
+    const plan = config.instanceType ?? sizeConfig.type;
     await this.assertZoneAvailable(config.location, context);
-    await this.assertPlanAvailable(this.sizes[config.size].type, context);
+    await this.assertPlanAvailable(plan, context);
     const template = config.image ?? (await this.resolveTemplate(context));
     const body = {
       server: {
         zone: config.location,
         title: config.name,
         hostname: sanitizeUpCloudHostname(config.name),
-        plan: this.sizes[config.size].type,
+        plan,
         user_data: config.userData,
         metadata: 'yes',
         labels: { label: toUpCloudLabels(config.labels) },
@@ -272,6 +281,17 @@ export class UpCloudProvider implements Provider {
       'validateToken'
     );
     return true;
+  }
+  async listInstanceOfferings(
+    _options?: ProviderOfferingListOptions,
+    context?: ProviderRequestContext
+  ) {
+    throwIfProviderRequestAborted(context);
+    return getProviderCatalogOfferings(
+      this.name as CredentialProvider,
+      this.locations,
+      this.locationMetadata
+    );
   }
   async createVolume(
     config: VolumeConfig,

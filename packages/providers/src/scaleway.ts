@@ -1,6 +1,7 @@
-import type { VMSize } from '@simple-agent-manager/shared';
+import type { CredentialProvider, VMSize } from '@simple-agent-manager/shared';
 import { DEFAULT_SCALEWAY_IMAGE_NAME, DEFAULT_SCALEWAY_ZONE } from '@simple-agent-manager/shared';
 
+import { getProviderCatalogOfferings } from './instance-offerings';
 import {
   providerFetch,
   rethrowIfProviderRequestAborted,
@@ -13,6 +14,7 @@ import type {
   Provider,
   ProviderErrorCategory,
   ProviderErrorContext,
+  ProviderOfferingListOptions,
   ProviderRequestContext,
   SizeConfig,
   VMConfig,
@@ -113,7 +115,7 @@ const SCALEWAY_LOCATION_META: Record<string, LocationMeta> = {
   'pl-waw-2': { name: 'Warsaw 2', country: 'PL' },
 };
 
-const SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
+export const SCALEWAY_SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
   small: {
     type: 'DEV1-M',
     price: '~€0.024/hr',
@@ -141,7 +143,7 @@ export class ScalewayProvider implements Provider {
   readonly name = 'scaleway';
   readonly locations: readonly string[] = SCALEWAY_LOCATIONS;
   readonly locationMetadata: Readonly<Record<string, LocationMeta>> = SCALEWAY_LOCATION_META;
-  readonly sizes: Readonly<Record<VMSize, SizeConfig>> = SIZE_CONFIGS;
+  readonly sizes: Readonly<Record<VMSize, SizeConfig>> = SCALEWAY_SIZE_CONFIGS;
   readonly volumeCapabilities: VolumeCapabilities = SCALEWAY_VOLUME_CAPABILITIES;
   readonly defaultLocation: string;
 
@@ -179,6 +181,7 @@ export class ScalewayProvider implements Provider {
       throw new ProviderError(this.name, undefined, `Unknown VM size: ${config.size}`);
     }
     const location = config.location || this.zone;
+    const commercialType = config.instanceType ?? sizeConfig.type;
 
     // Resolve image UUID by name for the target zone
     const imageId = await this.resolveImageId(location, config.image, context);
@@ -198,7 +201,7 @@ export class ScalewayProvider implements Provider {
         },
         body: JSON.stringify({
           name: config.name,
-          commercial_type: sizeConfig.type,
+          commercial_type: commercialType,
           image: imageId,
           project: this.projectId,
           dynamic_ip_required: true,
@@ -470,6 +473,18 @@ export class ScalewayProvider implements Provider {
     );
     throwIfProviderRequestAborted(context);
     return true;
+  }
+
+  async listInstanceOfferings(
+    _options?: ProviderOfferingListOptions,
+    context?: ProviderRequestContext
+  ) {
+    throwIfProviderRequestAborted(context);
+    return getProviderCatalogOfferings(
+      this.name as CredentialProvider,
+      this.locations,
+      this.locationMetadata
+    );
   }
 
   async createVolume(

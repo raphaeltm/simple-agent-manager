@@ -199,6 +199,49 @@ describe('InfomaniakProvider', () => {
     });
   });
 
+  it('uses config.instanceType as the concrete flavor name when provided', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/auth/tokens')) return auth();
+      if (url === `${IMAGE}/v2/images?name=Ubuntu%2024.04%20noble`)
+        return json({ images: [{ id: 'image-1', name: 'Ubuntu 24.04 noble' }] });
+      if (url === `${COMPUTE}/flavors/detail?name=a8-ram16-disk20-perf1`)
+        return json({ flavors: [{ id: 'flavor-custom', name: 'a8-ram16-disk20-perf1' }] });
+      if (url === `${NETWORK}/v2.0/networks?name=ext-net1`)
+        return json({ networks: [{ id: 'network-1', name: 'ext-net1' }] });
+      if (url === `${COMPUTE}/servers` && init?.method === 'POST')
+        return json({ server: { id: 'server-1' } }, 202);
+      if (url === `${COMPUTE}/servers/server-1`)
+        return json({
+          server: {
+            id: 'server-1',
+            name: 'sam-node',
+            status: 'ACTIVE',
+            addresses: { 'ext-net1': [{ version: 4, addr: '203.0.113.10' }] },
+            flavor: { id: 'flavor-custom', original_name: 'a8-ram16-disk20-perf1' },
+            created: '2026-07-25T00:00:00Z',
+            metadata: {},
+          },
+        });
+      throw new Error(`Unexpected request ${init?.method ?? 'GET'} ${url}`);
+    });
+    const provider = new InfomaniakProvider('id', 'secret', { authUrl: AUTH_URL });
+
+    await provider.createVM({
+      name: 'sam-node',
+      size: 'small',
+      location: 'dc4-a',
+      image: 'Ubuntu 24.04 noble',
+      instanceType: 'a8-ram16-disk20-perf1',
+      userData: '#cloud-config\nusers: []',
+    });
+
+    const createCall = fetchMock.mock.calls.find(
+      ([input, init]) => String(input) === `${COMPUTE}/servers` && init?.method === 'POST'
+    );
+    expect(JSON.parse(String(createCall?.[1]?.body)).server.flavorRef).toBe('flavor-custom');
+  });
+
   it('stops IP polling at caller cancellation without another provider read', async () => {
     vi.useFakeTimers();
     let serverReads = 0;

@@ -41,8 +41,12 @@ const GCP_TOKEN = JSON.stringify({
 });
 
 function makeCredentialDbMock(row?: Record<string, unknown>) {
+  let credentialLimitCount = 0;
   function rowsFor(table: unknown, limited: boolean): unknown[] {
-    return table === schema.credentials && limited && row ? [row] : [];
+    if (table !== schema.credentials || !limited || !row) return [];
+    const queryIndex = credentialLimitCount++;
+    const isProjectCredential = row.projectId != null;
+    return isProjectCredential === (queryIndex === 0) ? [row] : [];
   }
   const makeBuilder = () => {
     let table: unknown;

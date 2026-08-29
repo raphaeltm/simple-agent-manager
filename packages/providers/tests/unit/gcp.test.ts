@@ -308,6 +308,27 @@ describe('GcpProvider', () => {
       expect(body.metadata.items[0].value).toBe('#cloud-config\nruncmd: []');
     });
 
+    it('uses config.instanceType as the concrete machineType when provided', async () => {
+      let capturedBody: string | undefined;
+      globalThis.fetch = vi.fn(async (url: string, init: RequestInit = {}) => {
+        if (String(url).endsWith('/instances') && init.method === 'POST') {
+          capturedBody = String(init.body);
+        }
+        return successfulCreateResponse(String(url), init);
+      });
+
+      await provider.createVM({
+        name: 'cancelled-vm',
+        size: 'small',
+        location: 'us-central1-a',
+        instanceType: 'e2-standard-8',
+        userData: '#cloud-config',
+      });
+
+      const body = JSON.parse(expectDefined(capturedBody));
+      expect(body.machineType).toContain('/machineTypes/e2-standard-8');
+    });
+
     it('explicitly requests no attached VM service account', async () => {
       let capturedBody: string | undefined;
       globalThis.fetch = vi.fn()

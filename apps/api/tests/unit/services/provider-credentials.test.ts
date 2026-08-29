@@ -153,6 +153,26 @@ describe('buildProviderConfig', () => {
     expect(config).toEqual({ provider: 'hetzner', apiToken: 'test-token-123' });
   });
 
+  it('threads Hetzner capacity and list-page tuning into the provider config', () => {
+    expect(
+      buildProviderConfig('hetzner', 'test-token-123', {
+        HETZNER_CAPACITY_RETRY_INITIAL_DELAY_MS: '1500',
+        HETZNER_CAPACITY_RETRY_MAX_DELAY_MS: '12000',
+        HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS: '6',
+        HETZNER_CAPACITY_RETRY_BUDGET_MS: '45000',
+        HETZNER_MAX_LIST_PAGES: '7',
+      })
+    ).toMatchObject({
+      provider: 'hetzner',
+      apiToken: 'test-token-123',
+      capacityRetryInitialDelayMs: 1500,
+      capacityRetryMaxDelayMs: 12000,
+      capacityRetryMaxAttempts: 6,
+      capacityRetryBudgetMs: 45000,
+      maxListPages: 7,
+    });
+  });
+
   it('should round-trip scaleway serialize -> build', () => {
     const fields = { secretKey: 'key-abc', projectId: 'proj-xyz' };
     const serialized = serializeCredentialToken('scaleway', fields);
@@ -218,7 +238,7 @@ describe('versioned GCP credential parsing', () => {
           authType: 'workload-identity',
         })
       )
-    ).toThrow('provider is scaleway');
+    ).toThrow('provider mismatch');
   });
 
   it('rejects unsupported versions and auth modes', () => {

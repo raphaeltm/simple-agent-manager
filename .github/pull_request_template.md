@@ -32,7 +32,28 @@ All checkboxes below are mandatory for any PR that changes runtime code (`.ts`, 
 - [ ] Mobile-first layout verified
 - [ ] Accessibility checks completed
 - [ ] Shared UI components used or exception documented
-- [ ] Playwright visual audit run locally — mock data scenarios (normal, long text, empty, many items, error, special chars) tested at mobile (375x667) and desktop (1280x800); no horizontal overflow; screenshots in `.codex/tmp/playwright-screenshots/` (see `.claude/rules/17-ui-visual-testing.md`)
+- [ ] Playwright visual audit run locally — mock data scenarios that push the changed UI surface (normal, long text, empty, many items, error, special chars) tested at mobile (375x667) and desktop (1280x800); no horizontal overflow; screenshots in `.tmp/playwright-screenshots/` (see `.claude/rules/17-ui-visual-testing.md`)
+- [ ] Desktop and mobile screenshots for every changed UI surface are posted in a PR comment and linked below
+- [ ] Agent/human reviewed the posted screenshots for quality control and found no visual issues, or fixed/documented every issue found
+
+### UI Screenshot Evidence
+
+<!-- Required when `ui-change` is checked in Agent Preflight. -->
+<!-- List EVERY changed UI surface below. Each changed surface gets its own repeated
+     `#### Surface: <name>` block with desktop evidence, mobile evidence, mock/stress
+     data, and a quality-control attestation for that surface.
+     Evidence may be an embedded/direct image link or a GitHub PR comment URL
+     (`#issuecomment-...`). The preflight checker REJECTS global-only desktop/mobile
+     links that do not enumerate surfaces. -->
+
+#### Surface: <name of the changed UI surface>
+
+- Desktop evidence: <!-- image link or PR comment #issuecomment-... -->
+- Mobile evidence: <!-- image link or PR comment #issuecomment-... -->
+- Mock/stress data used: <!-- Playwright mock data that pushed this surface (long text, many items, empty, error, special characters, etc.) -->
+- Screenshot quality review: <!-- attest each screenshot was reviewed for layout quality, overflow, clipping, readability, and responsive behavior; state result: no issues found, or issues found and fixed/documented -->
+
+<!-- Copy the block above for EVERY changed surface (one `#### Surface:` block per surface). -->
 
 ## End-to-End Verification (Required for multi-component changes)
 
@@ -86,8 +107,8 @@ If local subagents were used during Phase 5, list every reviewer below. **Do NOT
 - [ ] **All local reviewers completed and findings addressed before merge**
 - [ ] **If any reviewer did NOT complete: `needs-human-review` label added and merge deferred to human**
 
-| Reviewer | Status | Outcome |
-|----------|--------|---------|
+| Reviewer                    | Status                                       | Outcome                                                |
+| --------------------------- | -------------------------------------------- | ------------------------------------------------------ |
 | <!-- e.g. go-specialist --> | <!-- PASS / ADDRESSED / PENDING / FAILED --> | <!-- summary of findings or "no critical findings" --> |
 
 <!--

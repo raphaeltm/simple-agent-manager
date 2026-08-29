@@ -10,9 +10,8 @@
  * 3. Returns immediately with 202 Accepted
  * 4. Async: selects/creates node, creates workspace, runs agent, creates PR, cleans up
  */
-import type { CredentialProvider,RunTaskResponse, TaskStatus, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider,getLocationsForProvider, isValidLocationForProvider, isValidProvider } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import type { RunTaskResponse, TaskStatus, VMSize } from '@simple-agent-manager/shared';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -20,10 +19,19 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
-import { getAuth, requireApproved,requireAuth } from '../../middleware/auth';
+import { getAuth, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
 import { parseOptionalBody, RunTaskSchema } from '../../schemas';
+import {
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
+  capacityPlacementSnapshotSqlValues,
+} from '../../services/capacity-placement-snapshot';
+import {
+  PlacementResolutionError,
+  resolveTaskStartPlacement,
+  resolveTaskStartPlacementCredentialAttributionFromPlacement,
+} from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
 import { isTaskBlocked } from '../../services/task-graph';
 import { cleanupTaskRun } from '../../services/task-runner';
@@ -89,9 +97,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
     const depTasks = await db
       .select({ id: schema.tasks.id, status: schema.tasks.status })
       .from(schema.tasks)
-      .where(
-        eq(schema.tasks.projectId, projectId)
-      );
+      .where(eq(schema.tasks.projectId, projectId));
 
     const statusMap: Record<string, TaskStatus> = {};
     for (const t of depTasks) {
@@ -101,22 +107,6 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
     if (isTaskBlocked(task.id, dependencies, statusMap)) {
       throw errors.conflict('Task is blocked by unresolved dependencies');
     }
-  }
-
-  // Check the user has cloud provider credentials (required for node provisioning)
-  const [credential] = await db
-    .select({ id: schema.credentials.id })
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.credentialType, 'cloud-provider')
-      )
-    )
-    .limit(1);
-
-  if (!credential) {
-    throw errors.badRequest('Cloud provider credentials required. Connect your account in Settings.');
   }
 
   // Parse request body (optional — empty body means use defaults)
@@ -133,36 +123,83 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
   // 403 if access was revoked or the repository id drifted.
   await requireRepositoryUserAccess(c, db, project, userId);
 
-  // Determine VM config (precedence: explicit override > project default > platform default)
-  const vmSize: VMSize = body.vmSize
-    ?? (project.defaultVmSize as VMSize | null)
-    ?? DEFAULT_VM_SIZE;
-  const provider: CredentialProvider | null =
-    typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
-      ? project.defaultProvider
-      : null;
-  const vmLocation: VMLocation = (body.vmLocation as VMLocation)
-    ?? (project.defaultLocation as VMLocation | null)
-    ?? (provider ? getDefaultLocationForProvider(provider) as VMLocation | null : null)
-    ?? DEFAULT_VM_LOCATION;
-  const workspaceProfile: WorkspaceProfile = body.workspaceProfile
-    ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
-    ?? DEFAULT_WORKSPACE_PROFILE;
-  const devcontainerConfigName: string | null = workspaceProfile === 'lightweight'
-    ? null
-    : (body.devcontainerConfigName ?? project.defaultDevcontainerConfigName ?? null);
+  const placement = (() => {
+    try {
+      return resolveTaskStartPlacement({
+        entryPoint: 'task-run',
+        taskId: task.id,
+        projectId,
+        userId,
+        project,
+        explicit: {
+          vmSize: body.vmSize ?? null,
+          vmSizeSource: 'task',
+          vmLocation: body.vmLocation ?? null,
+          workspaceProfile: body.workspaceProfile ?? null,
+          devcontainerConfigName: body.devcontainerConfigName,
+        },
+        credentialProjectPolicy: 'current-project',
+        taskModeDefault: 'task',
+        resourceRequirements: {},
+      });
+    } catch (err) {
+      if (err instanceof PlacementResolutionError) {
+        throw errors.badRequest(err.message);
+      }
+      throw err;
+    }
+  })();
+
+  const placementResolution = await resolveTaskStartPlacementCredentialAttributionFromPlacement(
+    db,
+    placement,
+    {
+      credentialsRequiredMessage:
+        'Cloud provider credentials required. Connect your account in Settings.',
+      env: c.env,
+    }
+  );
+  if ('error' in placementResolution) {
+    throw errors.badRequest(placementResolution.error);
+  }
+  const {
+    capacityPoolSelection,
+    quotaCredentialSource,
+    capacityPlacementSnapshot,
+    effectiveProvider,
+    credentialAttributionUserId,
+    credentialAttributionProjectId,
+    credentialAttributionSource,
+  } = placementResolution;
+  if (quotaCredentialSource === 'platform') {
+    const quotaEnforcementEnabled = c.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
+    if (quotaEnforcementEnabled) {
+      const { checkQuotaForUser } = await import('../../services/compute-quotas');
+      const quotaCheck = await checkQuotaForUser(db, userId);
+      if (!quotaCheck.allowed) {
+        throw errors.forbidden(
+          `Monthly compute quota exceeded. You've used ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours this month. ` +
+            'Add your own cloud provider credentials in Settings or contact your admin to increase your quota.'
+        );
+      }
+    }
+  }
+
+  const {
+    vmSize,
+    vmSizeSource,
+    vmLocation,
+    workspaceProfile,
+    devcontainerConfigName,
+    taskMode,
+    agentType,
+    resolvedReservation,
+  } = placement;
+
   // Explicit run branch means "continue work from this branch". Otherwise,
   // use the task output branch when present so VM-agent completion pushes cannot
   // land on the repository default branch.
   const branch = body.branch?.trim() || task.outputBranch || project.defaultBranch;
-
-  // Validate location against provider
-  if (provider !== null && !isValidLocationForProvider(provider, vmLocation)) {
-    const validLocations = getLocationsForProvider(provider).map((l) => l.id);
-    throw errors.badRequest(
-      `Location '${vmLocation}' is not valid for provider '${provider}'. Valid locations: ${validLocations.join(', ')}`
-    );
-  }
 
   // Look up user's githubId for noreply email fallback
   const [userRow] = await db
@@ -174,8 +211,33 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
   // Transition task to queued with initial execution step (optimistic lock on 'ready')
   const now = new Date().toISOString();
   const transitionResult = await c.env.DATABASE.prepare(
-    `UPDATE tasks SET status = 'queued', execution_step = 'node_selection', updated_at = ? WHERE id = ? AND status = 'ready'`
-  ).bind(now, task.id).run();
+    `UPDATE tasks
+     SET status = 'queued',
+         execution_step = 'node_selection',
+         requested_vm_size = ?,
+         requested_vm_size_source = ?,
+         resource_requirements_source = ?,
+         resolved_reservation_json = ?,
+         credential_attribution_user_id = ?,
+         credential_attribution_project_id = ?,
+         credential_attribution_source = ?,
+         ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS},
+         updated_at = ?
+     WHERE id = ? AND status = 'ready'`
+  )
+    .bind(
+      vmSize,
+      vmSizeSource,
+      resolvedReservation.source,
+      JSON.stringify(resolvedReservation),
+      credentialAttributionUserId,
+      credentialAttributionProjectId,
+      credentialAttributionSource,
+      ...capacityPlacementSnapshotSqlValues(capacityPlacementSnapshot),
+      now,
+      task.id
+    )
+    .run();
 
   // If another request already transitioned this task, reject (double-click protection)
   if (!transitionResult.meta.changes || transitionResult.meta.changes === 0) {
@@ -208,8 +270,13 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
   } catch (err) {
     const failedAt = new Date().toISOString();
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await db.update(schema.tasks)
-      .set({ status: 'failed', errorMessage: `Session creation failed: ${errorMsg}`, updatedAt: failedAt })
+    await db
+      .update(schema.tasks)
+      .set({
+        status: 'failed',
+        errorMessage: `Session creation failed: ${errorMsg}`,
+        updatedAt: failedAt,
+      })
       .where(eq(schema.tasks.id, task.id));
     await db.insert(schema.taskStatusEvents).values({
       id: ulid(),
@@ -251,10 +318,15 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
       installationId: project.installationId,
       projectDefaultVmSize: project.defaultVmSize as VMSize | null,
       chatSessionId: sessionId,
-      agentType: project.defaultAgentType ?? null,
+      agentType,
       workspaceProfile,
       devcontainerConfigName,
-      cloudProvider: provider,
+      cloudProvider: placement.provider ?? effectiveProvider,
+      explicitVmLocation: placement.explicitVmLocation === true,
+      credentialAttributionUserId,
+      credentialAttributionProjectId,
+      credentialAttributionSource,
+      taskMode,
       agentProfileHint: task.agentProfileHint ?? null,
       // Full profile resolution is not supported on the kanban Run path, but the
       // persisted profile hint must still reach TaskRunner so workspace
@@ -269,12 +341,20 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
         nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
       },
+      resolvedReservation,
+      capacityPoolSelection,
+      vmSizeSource,
     });
   } catch (err) {
     const failedAt = new Date().toISOString();
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await db.update(schema.tasks)
-      .set({ status: 'failed', errorMessage: `Task runner startup failed: ${errorMsg}`, updatedAt: failedAt })
+    await db
+      .update(schema.tasks)
+      .set({
+        status: 'failed',
+        errorMessage: `Task runner startup failed: ${errorMsg}`,
+        updatedAt: failedAt,
+      })
       .where(eq(schema.tasks.id, task.id));
     await db.insert(schema.taskStatusEvents).values({
       id: ulid(),
@@ -289,7 +369,11 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
     log.error('task_run.do_startup_failed', { taskId: task.id, projectId, error: errorMsg });
     // Stop the orphaned session (best-effort — it has no workspace and will never be cleaned up otherwise)
     await projectDataService.stopSession(c.env, projectId, sessionId).catch((e) => {
-      log.error('task_run.orphaned_session_stop_failed', { projectId, sessionId, error: String(e) });
+      log.error('task_run.orphaned_session_stop_failed', {
+        projectId,
+        sessionId,
+        error: String(e),
+      });
     });
     throw err;
   }
@@ -328,11 +412,7 @@ runRoutes.post('/:taskId/run/cleanup', requireAuth(), requireApproved(), async (
   const task = await requireProjectTaskById(db, projectId, taskId);
 
   // Only allow cleanup for terminal states
-  if (
-    task.status !== 'completed' &&
-    task.status !== 'failed' &&
-    task.status !== 'cancelled'
-  ) {
+  if (task.status !== 'completed' && task.status !== 'failed' && task.status !== 'cancelled') {
     throw errors.conflict(
       `Task must be in completed, failed, or cancelled status for cleanup, currently '${task.status}'`
     );

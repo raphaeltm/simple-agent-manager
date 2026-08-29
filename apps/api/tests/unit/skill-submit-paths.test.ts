@@ -10,18 +10,24 @@ function apiSrc(path: string) {
 describe('skill submit path source contracts', () => {
   it('user task submit resolves skill/profile settings and persists skill metadata', () => {
     const submit = apiSrc('routes/tasks/submit.ts');
+    const placementResolver = apiSrc('services/placement-resolver.ts');
     expect(submit).toContain('resolveSkillProfile');
     expect(submit).toContain('body.skillId');
-    expect(submit).toContain('skillId: resolvedProfile?.skillId ?? undefined');
+    expect(submit).toContain('resolveTaskStartPlacement');
+    expect(submit).toContain('skill: skillResourceRequirements');
+    expect(placementResolver).toContain('skillId: profile?.skillId ?? undefined');
     expect(submit).toContain('skillId: resolvedProfile?.skillId ?? null');
     expect(submit).toContain('skillHint: body.skillId ?? null');
   });
 
   it('trigger submit resolves stored skill id and persists skill metadata', () => {
     const triggerSubmit = apiSrc('services/trigger-submit.ts');
+    const placementResolver = apiSrc('services/placement-resolver.ts');
     expect(triggerSubmit).toContain('resolveSkillProfile');
     expect(triggerSubmit).toContain('input.skillId');
-    expect(triggerSubmit).toContain('skillId: resolvedProfile?.skillId ?? undefined');
+    expect(triggerSubmit).toContain('resolveTaskStartPlacement');
+    expect(triggerSubmit).toContain('skill: skillResourceRequirements');
+    expect(placementResolver).toContain('skillId: profile?.skillId ?? undefined');
     expect(triggerSubmit).toContain('skillId: resolvedProfile?.skillId ?? null');
     expect(triggerSubmit).toContain('skillHint: input.skillId');
   });
@@ -33,7 +39,7 @@ describe('skill submit path source contracts', () => {
     expect(dispatchTask).toContain('resolveSkillProfile');
     expect(dispatchTask).toContain('input.skillId');
     expect(dispatchTask).toContain('skill_id, skill_hint');
-    expect(dispatchTask).toContain('resolvedProfile?.skillId ?? null, input.skillId ?? null');
+    expect(dispatchTask).toMatch(/resolvedProfile\?\.skillId \?\? null,\s+input\.skillId \?\? null/);
   });
 
   it('retry_subtask preserves original skill id and hint when creating the retry task', () => {
@@ -47,7 +53,10 @@ describe('skill submit path source contracts', () => {
   });
 
   it('HTTP MCP dispatch_task validates optional skillId and propagates it into the task record', () => {
-    const mcpDispatch = apiSrc('routes/mcp/dispatch-tool.ts');
+    const mcpDispatch = [
+      apiSrc('routes/mcp/dispatch-tool.ts'),
+      apiSrc('routes/mcp/dispatch-tool-params.ts'),
+    ].join('\n');
     const toolDefinition = apiSrc('routes/mcp/tool-definitions-task-tools.ts');
     expect(toolDefinition).toContain('skillId: {');
     expect(mcpDispatch).toContain('params.skillId');

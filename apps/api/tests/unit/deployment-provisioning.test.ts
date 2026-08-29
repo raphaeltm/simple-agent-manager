@@ -7,6 +7,7 @@
  * 3. Links the environment to the node with placement constraints (conditional on nodeId IS NULL)
  * 4. Returns a provisioning promise for waitUntil()
  */
+import type { CredentialProvider } from '@simple-agent-manager/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock the dependencies before importing the module under test
@@ -17,6 +18,10 @@ vi.mock('drizzle-orm/d1', () => ({
 vi.mock('../../src/services/nodes', () => ({
   createNodeRecord: vi.fn(),
   provisionNode: vi.fn(),
+}));
+
+vi.mock('../../src/services/provider-credentials', () => ({
+  resolveCredentialSource: vi.fn(),
 }));
 
 vi.mock('../../src/lib/logger', () => ({
@@ -46,6 +51,7 @@ import {
   provisionDeploymentNode,
 } from '../../src/services/deployment-provisioning';
 import { createNodeRecord, provisionNode } from '../../src/services/nodes';
+import { resolveCredentialSource } from '../../src/services/provider-credentials';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -63,6 +69,25 @@ function createMockDb(options: {
   platformCredProvider?: string | null;
   projectCredProvider?: string | null;
 }) {
+  const mockedCredentialSource =
+    options.projectCredProvider != null
+      ? {
+          credentialSource: 'project' as const,
+          providerName: options.projectCredProvider as CredentialProvider,
+        }
+      : options.userCredProvider != null
+        ? {
+            credentialSource: 'user' as const,
+            providerName: options.userCredProvider as CredentialProvider,
+          }
+        : options.platformCredProvider != null
+          ? {
+              credentialSource: 'platform' as const,
+              providerName: options.platformCredProvider as CredentialProvider,
+            }
+          : null;
+  vi.mocked(resolveCredentialSource).mockResolvedValue(mockedCredentialSource);
+
   const tracker: MockDbTracker = {
     selectCalls: 0,
     updateSetValues: [],

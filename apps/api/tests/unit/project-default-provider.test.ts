@@ -22,19 +22,137 @@ import { resolve } from 'node:path';
 
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as ts from 'typescript';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
+import type { StartTaskInput } from '../../src/durable-objects/task-runner';
 import type { Env } from '../../src/env';
 import type { AuthContext } from '../../src/middleware/auth';
 import { AppError } from '../../src/middleware/error';
 import { crudRoutes } from '../../src/routes/projects/crud';
+import type { TaskStartCapacityPoolSelection } from '../../src/services/placement-resolver';
+import { startTaskRunnerDO } from '../../src/services/task-runner-do';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const apiSrc = (rel: string) => readFileSync(resolve(process.cwd(), 'src', rel), 'utf8');
 const webSrc = (rel: string) => readFileSync(resolve(process.cwd(), '../web/src', rel), 'utf8');
 const sharedSrc = (rel: string) =>
   readFileSync(resolve(process.cwd(), '../../packages/shared/src', rel), 'utf8');
+
+function getStartTaskRunnerCloudProviderInitializers(source: string): string[] {
+  const sourceFile = ts.createSourceFile('entry-point.ts', source, ts.ScriptTarget.Latest, true);
+  const initializers: string[] = [];
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      const configArg = node.arguments[1];
+      if (node.expression.text === 'startTaskRunnerDO' && ts.isObjectLiteralExpression(configArg)) {
+        for (const property of configArg.properties) {
+          if (
+            ts.isPropertyAssignment(property) &&
+            ts.isIdentifier(property.name) &&
+            property.name.text === 'cloudProvider'
+          ) {
+            initializers.push(property.initializer.getText(sourceFile).replace(/\s+/g, ' '));
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+  return initializers;
+}
+
+function expectTaskEntryPointUsesResolvedProviderHandoff(source: string): void {
+  expect(getStartTaskRunnerCloudProviderInitializers(source)).toContain(
+    'placement.provider ?? effectiveProvider'
+  );
+  expect(source).not.toContain('cloudProvider: project.defaultProvider');
+}
+
+function createTaskRunnerEnv(start = vi.fn().mockResolvedValue(undefined)): {
+  env: Env;
+  start: typeof start;
+} {
+  return {
+    env: {
+      TASK_RUNNER: {
+        idFromName: vi.fn((taskId: string) => `task-runner:${taskId}`),
+        get: vi.fn(() => ({ start })),
+      },
+    } as unknown as Env,
+    start,
+  };
+}
+
+const minimalTaskRunnerInput = {
+  taskId: 'task-runner-default-provider',
+  projectId: 'project-default-provider',
+  userId: 'user-default-provider',
+  vmSize: 'medium',
+  vmLocation: 'fr-par-1',
+  branch: 'main',
+  taskTitle: 'Project default provider task',
+  repository: 'acme/repo',
+  installationId: 'installation-default-provider',
+} as const;
+
+function capacityPoolSelection(overrides: {
+  provider: 'hetzner' | 'scaleway';
+  location: 'nbg1' | 'fr-par-1';
+}): TaskStartCapacityPoolSelection {
+  const snapshot = {
+    capacityPoolId: 'pool-default-provider',
+    capacityPoolScope: 'user' as const,
+    capacityPoolRevision: 1,
+    capacitySourceId: 'source-default-provider',
+    capacityPoolCandidateId: 'candidate-default-provider',
+    placementCredentialSource: 'user' as const,
+    placementCredentialReference: 'credentials:user-default-provider',
+    placementCredentialVersion: 1,
+    capacityPoolProjectId: null,
+    workloadRole: 'workspace' as const,
+    placementExplanationJson: JSON.stringify({
+      poolId: 'pool-default-provider',
+      capacitySourceId: 'source-default-provider',
+      capacityPoolCandidateId: 'candidate-default-provider',
+    }),
+  };
+
+  return {
+    poolId: snapshot.capacityPoolId,
+    scope: 'user',
+    revision: 1,
+    strategy: 'balanced',
+    capacityPoolProjectId: null,
+    workloadRole: 'workspace',
+    poolSnapshot: { ...snapshot, capacitySourceId: null, capacityPoolCandidateId: null },
+    candidates: [
+      {
+        id: snapshot.capacityPoolCandidateId,
+        poolId: snapshot.capacityPoolId,
+        capacitySourceId: snapshot.capacitySourceId,
+        provider: overrides.provider,
+        location: overrides.location,
+        workloadRole: 'workspace',
+        runtime: 'vm',
+        machineClass: 'shared-vm',
+        machineSize: 'medium',
+        priority: 0,
+        candidateOrder: 0,
+        credentialAttributionSource: 'user',
+        placementCredentialSource: 'user',
+        placementCredentialReference: snapshot.placementCredentialReference,
+        placementCredentialVersion: snapshot.placementCredentialVersion,
+        capacityPoolProjectId: null,
+        snapshot,
+      },
+    ],
+  };
+}
 
 describe('Project default provider — schema', () => {
   const schema = apiSrc('db/schema.ts');
@@ -234,27 +352,33 @@ describe('Project default provider — mapper', () => {
 
 describe('Project default provider — task submit', () => {
   const submit = apiSrc('routes/tasks/submit.ts');
+  const placementResolver = apiSrc('services/placement-resolver.ts');
 
   it('reads provider from body and project default with fallback', () => {
     expect(submit).toContain('body.provider');
-    expect(submit).toContain('project.defaultProvider');
+    expect(submit).toContain('resolveTaskStartPlacement');
+    expect(placementResolver).toContain('project.defaultProvider');
   });
 
-  it('passes cloudProvider to startTaskRunnerDO', () => {
-    expect(submit).toContain('cloudProvider: effectiveProvider');
+  it('hands the resolved placement provider to startTaskRunnerDO', () => {
+    expect(submit).toContain('resolveTaskStartPlacement');
+    expectTaskEntryPointUsesResolvedProviderHandoff(submit);
   });
 
-  it('validates provider against CREDENTIAL_PROVIDERS', () => {
-    expect(submit).toContain('CREDENTIAL_PROVIDERS.includes(provider)');
+  it('validates provider through the shared placement resolver', () => {
+    expect(placementResolver).toContain('CREDENTIAL_PROVIDERS');
+    expect(placementResolver).toContain('isValidProvider(explicitProvider)');
   });
 });
 
 describe('Project default provider — task runs route', () => {
   const run = apiSrc('routes/tasks/run.ts');
+  const placementResolver = apiSrc('services/placement-resolver.ts');
 
-  it('passes cloudProvider from project.defaultProvider to startTaskRunnerDO', () => {
-    expect(run).toContain('cloudProvider:');
-    expect(run).toContain('project.defaultProvider');
+  it('hands the resolved placement provider to startTaskRunnerDO', () => {
+    expect(run).toContain('resolveTaskStartPlacement');
+    expectTaskEntryPointUsesResolvedProviderHandoff(run);
+    expect(placementResolver).toContain('project.defaultProvider');
   });
 });
 
@@ -265,8 +389,60 @@ describe('Project default provider — TaskRunner DO service', () => {
     expect(service).toContain('cloudProvider?:');
   });
 
-  it('passes cloudProvider into config', () => {
-    expect(service).toContain('cloudProvider: input.cloudProvider');
+  it('forwards the resolved default provider into TaskRunner config when no capacity candidate applies', async () => {
+    const { env, start } = createTaskRunnerEnv();
+
+    await startTaskRunnerDO(env, {
+      ...minimalTaskRunnerInput,
+      cloudProvider: 'scaleway',
+    });
+
+    const forwarded = start.mock.calls[0]?.[0] as StartTaskInput | undefined;
+    expect(forwarded?.config.cloudProvider).toBe('scaleway');
+    expect(forwarded?.config.vmLocation).toBe('fr-par-1');
+    expect(forwarded?.config.capacityPoolSelection).toBeNull();
+  });
+
+  it('uses matching capacity-pool candidates as the final provider and location contract', async () => {
+    const { env, start } = createTaskRunnerEnv();
+
+    await startTaskRunnerDO(env, {
+      ...minimalTaskRunnerInput,
+      vmLocation: 'nbg1',
+      cloudProvider: 'scaleway',
+      explicitVmLocation: false,
+      capacityPoolSelection: capacityPoolSelection({
+        provider: 'scaleway',
+        location: 'fr-par-1',
+      }),
+    });
+
+    const forwarded = start.mock.calls[0]?.[0] as StartTaskInput | undefined;
+    expect(forwarded?.config.cloudProvider).toBe('scaleway');
+    expect(forwarded?.config.vmLocation).toBe('fr-par-1');
+    expect(forwarded?.config.capacityPoolSelection?.candidates[0]).toMatchObject({
+      provider: 'scaleway',
+      location: 'fr-par-1',
+    });
+  });
+
+  it('drops conflicting capacity-pool candidates instead of overriding resolved placement', async () => {
+    const { env, start } = createTaskRunnerEnv();
+
+    await startTaskRunnerDO(env, {
+      ...minimalTaskRunnerInput,
+      cloudProvider: 'scaleway',
+      explicitVmLocation: true,
+      capacityPoolSelection: capacityPoolSelection({
+        provider: 'hetzner',
+        location: 'nbg1',
+      }),
+    });
+
+    const forwarded = start.mock.calls[0]?.[0] as StartTaskInput | undefined;
+    expect(forwarded?.config.cloudProvider).toBe('scaleway');
+    expect(forwarded?.config.vmLocation).toBe('fr-par-1');
+    expect(forwarded?.config.capacityPoolSelection).toBeNull();
   });
 });
 

@@ -1,48 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({
-  db: {
-    select: vi.fn(),
-  },
-  createSession: vi.fn(),
-  persistMessage: vi.fn(),
-  resolveCredentialSource: vi.fn(),
-  resolveAgentProfile: vi.fn(),
-  generateTaskTitle: vi.fn(),
-  requireRepositoryOwnerAccess: vi.fn(),
-  startTaskRunnerDO: vi.fn(),
-}));
-
-vi.mock('drizzle-orm/d1', () => ({
-  drizzle: vi.fn(() => mocks.db),
-}));
-
-vi.mock('../../../src/services/agent-profiles', () => ({
-  resolveAgentProfile: mocks.resolveAgentProfile,
-}));
-
-vi.mock('../../../src/services/provider-credentials', () => ({
-  resolveCredentialSource: mocks.resolveCredentialSource,
-}));
-
-vi.mock('../../../src/services/project-data', () => ({
-  createSession: mocks.createSession,
-  persistMessage: mocks.persistMessage,
-}));
-
-vi.mock('../../../src/services/task-title', () => ({
-  generateTaskTitle: mocks.generateTaskTitle,
-  getTaskTitleConfig: vi.fn(() => ({})),
-}));
-
-vi.mock('../../../src/services/task-runner-do', () => ({
-  startTaskRunnerDO: mocks.startTaskRunnerDO,
-}));
-
-vi.mock('../../../src/routes/projects/_helpers', () => ({
-  requireRepositoryOwnerAccess: mocks.requireRepositoryOwnerAccess,
-}));
-
 vi.mock('../../../src/lib/ulid', () => ({
   ulid: vi.fn()
     .mockReturnValueOnce('01TASKMODETASKID')
@@ -50,76 +7,23 @@ vi.mock('../../../src/lib/ulid', () => ({
     .mockReturnValue('01TASKMODEOTHER'),
 }));
 
-import { dispatchTask } from '../../../src/durable-objects/sam-session/tools/dispatch-task';
+import {
+  buildDispatchCtx,
+  getDispatchTaskMocks,
+  resetDispatchTaskMocks,
+} from './sam-dispatch-test-helpers';
 
-const project = {
-  id: 'proj-1',
-  name: 'Project',
-  repository: 'owner/repo',
-  defaultBranch: 'main',
-  installationId: 'inst-1',
-  defaultVmSize: null,
-  defaultWorkspaceProfile: null,
-  defaultProvider: null,
-  defaultAgentType: null,
-  defaultLocation: null,
-  agentDefaults: null,
-  taskExecutionTimeoutMs: null,
-  maxWorkspacesPerNode: null,
-  nodeCpuThresholdPercent: null,
-  nodeMemoryThresholdPercent: null,
-  warmNodeTimeoutMs: null,
-};
+const { dispatchTask } = await import('../../../src/durable-objects/sam-session/tools/dispatch-task');
 
-function selectRows(rows: unknown[]) {
-  return {
-    from: vi.fn(() => ({
-      where: vi.fn(() => ({
-        limit: vi.fn(() => Promise.resolve(rows)),
-      })),
-    })),
-  };
-}
+const dispatchTaskMocks = getDispatchTaskMocks();
 
 function buildCtx() {
-  const statement = {
-    bind: vi.fn().mockReturnThis(),
-    run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
-  };
-
-  return {
-    env: {
-      DATABASE: {
-        prepare: vi.fn(() => statement),
-      },
-      PROJECT_DATA: {
-        idFromName: vi.fn(() => 'project-data-id'),
-        get: vi.fn(() => ({
-          fetch: vi.fn().mockResolvedValue(new Response('ok')),
-        })),
-      },
-      AI: {},
-      BASE_DOMAIN: 'example.com',
-      BRANCH_NAME_PREFIX: 'sam/',
-      BRANCH_NAME_MAX_LENGTH: '60',
-    },
-    userId: 'user-1',
-  };
+  return buildDispatchCtx().ctx;
 }
 
 describe('SAM dispatch_task taskMode visibility', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.db.select
-      .mockImplementationOnce(() => selectRows([project]))
-      .mockImplementationOnce(() => selectRows([{ name: 'User', email: 'user@example.com', githubId: '12345' }]));
-    mocks.resolveAgentProfile.mockResolvedValue(null);
-    mocks.resolveCredentialSource.mockResolvedValue({ source: 'user', credential: { id: 'cred-1' } });
-    mocks.generateTaskTitle.mockResolvedValue('Generated task title');
-    mocks.requireRepositoryOwnerAccess.mockResolvedValue(undefined);
-    mocks.createSession.mockResolvedValue('session-1');
-    mocks.persistMessage.mockResolvedValue('message-1');
-    mocks.startTaskRunnerDO.mockResolvedValue(undefined);
+    resetDispatchTaskMocks();
   });
 
   it('includes taskMode in the dispatch response', async () => {
@@ -151,20 +55,20 @@ describe('SAM dispatch_task taskMode visibility', () => {
     ) as { taskMode?: string };
 
     expect(result.taskMode).toBe('task');
-    expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
+    expect(dispatchTaskMocks.startTaskRunnerDO).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         workspaceProfile: 'lightweight',
         taskMode: 'task',
       }),
     );
-    const taskRunnerInput = mocks.startTaskRunnerDO.mock.calls[0]?.[1];
+    const taskRunnerInput = dispatchTaskMocks.startTaskRunnerDO.mock.calls[0]?.[1];
     expect(taskRunnerInput.branch).toBe(taskRunnerInput.outputBranch);
     expect(taskRunnerInput.branch).toMatch(/^sam\//);
   });
 
   it('blocks before provisioning when SAM-session GitHub owner access is revoked', async () => {
-    mocks.requireRepositoryOwnerAccess.mockRejectedValueOnce(
+    dispatchTaskMocks.requireRepositoryOwnerAccess.mockRejectedValueOnce(
       new Error('Repository access is no longer available'),
     );
 
@@ -174,13 +78,13 @@ describe('SAM dispatch_task taskMode visibility', () => {
     ) as { error?: string };
 
     expect(result.error).toContain('Repository access is no longer available');
-    expect(mocks.requireRepositoryOwnerAccess).toHaveBeenCalledWith(
+    expect(dispatchTaskMocks.requireRepositoryOwnerAccess).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
       expect.objectContaining({ id: 'proj-1', repository: 'owner/repo' }),
       'user-1',
       'sam-session-dispatch',
     );
-    expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+    expect(dispatchTaskMocks.startTaskRunnerDO).not.toHaveBeenCalled();
   });
 });

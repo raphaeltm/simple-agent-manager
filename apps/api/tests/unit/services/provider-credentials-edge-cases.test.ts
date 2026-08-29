@@ -6,18 +6,40 @@
  * - Empty and missing field inputs
  * - getUserCloudProviderConfig: all three DB outcome branches
  */
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import { decrypt } from '../../../src/services/encryption';
+import { createProviderForExactCredential } from '../../../src/services/provider-credential-exact';
 import {
   buildProviderConfig,
+  createProviderForUser,
   extractScalewaySecretKey,
   getUserCloudProviderConfig,
   serializeCredentialToken,
 } from '../../../src/services/provider-credentials';
+import { createSchemaTables } from '../../helpers/sqlite-d1';
 
 vi.mock('../../../src/services/encryption', () => ({
   decrypt: vi.fn(),
+}));
+
+const composableMocks = vi.hoisted(() => ({
+  resolveForConsumer: vi.fn(),
+  lazyBackfillIfNeeded: vi.fn(),
+  getPlatformCloudCredential: vi.fn(),
+}));
+
+vi.mock('../../../src/services/composable-credentials/resolve', () => ({
+  resolveForConsumer: composableMocks.resolveForConsumer,
+}));
+vi.mock('../../../src/services/composable-credentials/lazy-backfill', () => ({
+  lazyBackfillIfNeeded: composableMocks.lazyBackfillIfNeeded,
+}));
+vi.mock('../../../src/services/platform-credentials', () => ({
+  getPlatformCloudCredential: composableMocks.getPlatformCloudCredential,
 }));
 
 const mockDecrypt = decrypt as ReturnType<typeof vi.fn>;
@@ -275,6 +297,245 @@ describe('getUserCloudProviderConfig', () => {
     const result = await getUserCloudProviderConfig(db, 'user-1', 'enc-key');
     expect(result).not.toBeNull();
     expect(result!.provider).toBe('hetzner');
+  });
+});
+
+describe('createProviderForUser exact credential binding', () => {
+  const makeDbMock = (rows: any[]) => ({
+    select: vi.fn().mockReturnThis(),
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockResolvedValue(rows),
+  });
+
+  it('refuses fallback when an exact pool credential reference is unavailable', async () => {
+    mockDecrypt.mockClear();
+    const db = makeDbMock([]) as any;
+
+    const result = await createProviderForUser(
+      db,
+      'user-1',
+      'enc-key',
+      {} as any,
+      'hetzner',
+      null,
+      {
+        credentialSource: 'user',
+        credentialReference: 'credentials:missing-credential',
+      }
+    );
+
+    expect(result).toBeNull();
+    expect(mockDecrypt).not.toHaveBeenCalled();
+  });
+
+  it('creates a provider from the exact project credential reference and source', async () => {
+    mockDecrypt.mockClear();
+    mockDecrypt.mockResolvedValueOnce('hetzner-api-token');
+    const db = makeDbMock([
+      {
+        id: 'project-cloud-1',
+        userId: 'project-owner',
+        projectId: 'project-1',
+        provider: 'hetzner',
+        credentialType: 'cloud-provider',
+        isActive: true,
+        encryptedToken: 'ciphertext',
+        iv: 'iv',
+      },
+    ]) as any;
+
+    const result = await createProviderForUser(
+      db,
+      'project-member',
+      'enc-key',
+      {} as any,
+      'hetzner',
+      'project-1',
+      {
+        credentialSource: 'project',
+        credentialReference: 'credentials:project-cloud-1',
+        credentialVersion: 1700000000000,
+      }
+    );
+
+    expect(result).toMatchObject({
+      providerName: 'hetzner',
+      credentialSource: 'project',
+    });
+    expect(mockDecrypt).toHaveBeenCalledWith('ciphertext', 'iv', 'enc-key');
+  });
+
+  it('creates a provider from an exact project composable credential owned by another member', async () => {
+    mockDecrypt.mockClear();
+    mockDecrypt.mockResolvedValueOnce('hetzner-api-token');
+    const db = {
+      select: vi.fn(() => {
+        const builder = {
+          from: () => builder,
+          innerJoin: () => builder,
+          where: () => builder,
+          limit: () =>
+            Promise.resolve([
+              {
+                encryptedToken: 'cc-ciphertext',
+                iv: 'cc-iv',
+              },
+            ]),
+        };
+        return builder;
+      }),
+    } as any;
+
+    const result = await createProviderForUser(
+      db,
+      'project-member',
+      'enc-key',
+      {} as any,
+      'hetzner',
+      'project-1',
+      {
+        credentialSource: 'project',
+        credentialReference: 'cc_credentials:cc-project-cloud-1',
+        credentialVersion: 1700000000000,
+      }
+    );
+
+    expect(result).toMatchObject({
+      providerName: 'hetzner',
+      credentialSource: 'project',
+    });
+    expect(mockDecrypt).toHaveBeenCalledWith('cc-ciphertext', 'cc-iv', 'enc-key');
+  });
+
+  it('refuses an exact project composable credential with mismatched owner lineage', async () => {
+    mockDecrypt.mockClear();
+    const sqlite = new Database(':memory:');
+    try {
+      createSchemaTables(sqlite, [
+        schema.ccCredentials,
+        schema.ccConfigurations,
+        schema.ccAttachments,
+      ]);
+      sqlite
+        .prepare(
+          `INSERT INTO cc_credentials (
+            id, owner_id, name, kind, encrypted_token, iv, is_active
+          )
+          VALUES ('cc-project-cloud-1', 'credential-owner', 'Project cloud', 'cloud-provider',
+            'cc-ciphertext', 'cc-iv', 1)`
+        )
+        .run();
+      sqlite
+        .prepare(
+          `INSERT INTO cc_configurations (
+            id, owner_id, name, consumer_kind, consumer_target, credential_id, is_active
+          )
+          VALUES ('cc-cfg-project-cloud-1', 'different-owner', 'Project compute', 'compute',
+            'hetzner', 'cc-project-cloud-1', 1)`
+        )
+        .run();
+      sqlite
+        .prepare(
+          `INSERT INTO cc_attachments (
+            id, configuration_id, consumer_kind, consumer_target, user_id, project_id, is_active
+          )
+          VALUES ('cc-att-project-cloud-1', 'cc-cfg-project-cloud-1', 'compute',
+            'hetzner', 'credential-owner', 'project-1', 1)`
+        )
+        .run();
+      const db = drizzle(sqlite, { schema });
+      const providerFactory = vi.fn();
+
+      const result = await createProviderForExactCredential(
+        db as never,
+        'project-member',
+        'enc-key',
+        {} as any,
+        'hetzner',
+        'project-1',
+        {
+          credentialSource: 'project',
+          credentialReference: 'cc_credentials:cc-project-cloud-1',
+        },
+        providerFactory
+      );
+
+      expect(result).toBeNull();
+      expect(providerFactory).not.toHaveBeenCalled();
+      expect(mockDecrypt).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
+describe('createProviderForUser composable credential project halt', () => {
+  it('does not fall through to legacy user or platform credentials after a project CC halt', async () => {
+    mockDecrypt.mockClear();
+    composableMocks.resolveForConsumer.mockResolvedValueOnce(null);
+    composableMocks.lazyBackfillIfNeeded.mockResolvedValueOnce(false);
+    composableMocks.getPlatformCloudCredential.mockResolvedValueOnce({
+      decryptedToken: 'platform-token',
+      provider: 'hetzner',
+    });
+    mockDecrypt.mockResolvedValueOnce('legacy-user-token');
+
+    const selectedTables: unknown[] = [];
+    const legacyUserCredential = {
+      id: 'legacy-user-cloud-1',
+      userId: 'user-1',
+      projectId: null,
+      provider: 'hetzner',
+      credentialType: 'cloud-provider',
+      isActive: true,
+      encryptedToken: 'ciphertext',
+      iv: 'iv',
+    };
+    const db = {
+      select: vi.fn(() => {
+        let table: unknown;
+        const builder = {
+          from: (value: unknown) => {
+            table = value;
+            selectedTables.push(value);
+            return builder;
+          },
+          where: () => builder,
+          limit: () =>
+            Promise.resolve(
+              table === schema.ccAttachments
+                ? [{ id: 'inactive-project-compute-attachment' }]
+                : table === schema.credentials
+                  ? [legacyUserCredential]
+                  : []
+            ),
+        };
+        return builder;
+      }),
+    } as any;
+
+    const result = await createProviderForUser(
+      db,
+      'user-1',
+      'enc-key',
+      {} as any,
+      'hetzner',
+      'project-1'
+    );
+
+    expect(result).toBeNull();
+    expect(composableMocks.resolveForConsumer).toHaveBeenCalledWith(
+      db,
+      'user-1',
+      'enc-key',
+      { kind: 'compute', provider: 'hetzner' },
+      'project-1'
+    );
+    expect(composableMocks.lazyBackfillIfNeeded).not.toHaveBeenCalled();
+    expect(composableMocks.getPlatformCloudCredential).not.toHaveBeenCalled();
+    expect(selectedTables).toEqual([schema.ccAttachments]);
+    expect(mockDecrypt).not.toHaveBeenCalledWith('ciphertext', 'iv', 'enc-key');
   });
 });
 

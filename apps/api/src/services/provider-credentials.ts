@@ -8,363 +8,46 @@ import {
   computeAssembler,
   type CredentialProvider,
   type CredentialSource,
-  GCP_CREDENTIAL_VERSION,
-  type GcpCredential,
-  type GcpCredentialMetadata,
 } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { expectJsonRecord } from '../lib/runtime-validation';
 import { lazyBackfillIfNeeded } from './composable-credentials/lazy-backfill';
 import { resolveForConsumer } from './composable-credentials/resolve';
 import { decrypt } from './encryption';
 import { getPlatformCloudCredential } from './platform-credentials';
+import {
+  buildProviderConfig,
+  type HetznerRuntimeEnv,
+  parseGcpCredential,
+} from './provider-credential-codecs';
+import {
+  createProviderForExactCredential,
+  type ExactProviderCredentialBinding,
+  type ProviderResolutionResult,
+} from './provider-credential-exact';
 
-/**
- * Serialize provider-specific credential fields into a single string for encryption.
- * Hetzner stores the raw API token; multi-field providers store JSON.
- */
-export function serializeCredentialToken(
-  provider: CredentialProvider,
-  fields: Record<string, string>
-): string {
-  switch (provider) {
-    case 'hetzner':
-      return fields.token ?? '';
-    case 'scaleway':
-      return JSON.stringify({ secretKey: fields.secretKey, projectId: fields.projectId });
-    case 'vultr':
-      return fields.token ?? '';
-    case 'infomaniak':
-      return JSON.stringify({
-        applicationCredentialId: fields.applicationCredentialId,
-        applicationCredentialSecret: fields.applicationCredentialSecret,
-      });
-    case 'digitalocean':
-      return fields.token ?? '';
-    case 'upcloud':
-      return JSON.stringify({ username: fields.username, password: fields.password });
-    case 'gcp':
-      return JSON.stringify({
-        version: GCP_CREDENTIAL_VERSION,
-        provider: 'gcp',
-        authType: 'workload-identity',
-        gcpProjectId: fields.gcpProjectId,
-        gcpProjectNumber: fields.gcpProjectNumber,
-        serviceAccountEmail: fields.serviceAccountEmail,
-        wifPoolId: fields.wifPoolId,
-        wifProviderId: fields.wifProviderId,
-        defaultZone: fields.defaultZone,
-      });
-    default: {
-      const _exhaustive: never = provider;
-      throw new Error(`Unsupported provider: ${_exhaustive}`);
-    }
-  }
-}
+export type {
+  DigitalOceanRuntimeEnv,
+  HetznerCapacityRetryEnv,
+  HetznerRuntimeEnv,
+  InfomaniakRuntimeEnv,
+  UpCloudRuntimeEnv,
+  VultrRuntimeEnv,
+} from './provider-credential-codecs';
+export {
+  buildProviderConfig,
+  extractScalewaySecretKey,
+  parseGcpCredential,
+  serializeCredentialToken,
+  serializeGcpCredential,
+  toGcpCredentialMetadata,
+} from './provider-credential-codecs';
+export { exactProviderCredentialBindingFromPlacementSnapshot } from './provider-credential-exact';
 
-/**
- * Extract the Scaleway secret key from a decrypted Scaleway cloud credential token.
- * Returns null if the token is not valid JSON or does not contain a secretKey field.
- * Used by both the provider system and the OpenCode agent key fallback.
- */
-export function extractScalewaySecretKey(decryptedToken: string): string | null {
-  try {
-    const parsed = expectJsonRecord(JSON.parse(decryptedToken), 'provider.scaleway_credential');
-    if (typeof parsed?.secretKey === 'string' && parsed.secretKey) {
-      return parsed.secretKey;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/** Parse an optional env var string to a positive integer, or return undefined. */
-function parseOptionalInt(value: string | undefined): number | undefined {
-  if (!value) return undefined;
-  const n = Number.parseInt(value, 10);
-  return Number.isFinite(n) && n > 0 ? n : undefined;
-}
-
-/** Env vars that tune Hetzner capacity retry behavior. */
-export interface HetznerCapacityRetryEnv {
-  HETZNER_CAPACITY_RETRY_INITIAL_DELAY_MS?: string;
-  HETZNER_CAPACITY_RETRY_MAX_DELAY_MS?: string;
-  HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS?: string;
-  HETZNER_CAPACITY_RETRY_BUDGET_MS?: string;
-}
-
-/** Env vars that tune Vultr provider behavior (all optional; DEFAULT_VULTR_* apply otherwise). */
-export interface InfomaniakRuntimeEnv {
-  INFOMANIAK_AUTH_URL?: string;
-  INFOMANIAK_REGION?: string;
-  INFOMANIAK_ENDPOINT_INTERFACE?: string;
-  INFOMANIAK_NETWORK_NAME?: string;
-  INFOMANIAK_IMAGE_NAME?: string;
-  INFOMANIAK_VOLUME_TYPE?: string;
-  INFOMANIAK_SMALL_FLAVOR?: string;
-  INFOMANIAK_MEDIUM_FLAVOR?: string;
-  INFOMANIAK_LARGE_FLAVOR?: string;
-  INFOMANIAK_API_TIMEOUT_MS?: string;
-  INFOMANIAK_IP_POLL_TIMEOUT_MS?: string;
-  INFOMANIAK_IP_POLL_INTERVAL_MS?: string;
-}
-
-export interface UpCloudRuntimeEnv {
-  UPCLOUD_API_URL?: string;
-  UPCLOUD_ZONE?: string;
-  UPCLOUD_IMAGE_TITLE?: string;
-  UPCLOUD_API_TIMEOUT_MS?: string;
-  UPCLOUD_IP_POLL_TIMEOUT_MS?: string;
-  UPCLOUD_IP_POLL_INTERVAL_MS?: string;
-  UPCLOUD_STOP_TIMEOUT_SECONDS?: string;
-}
-
-export interface VultrRuntimeEnv {
-  VULTR_REGION?: string;
-  VULTR_OS_NAME?: string;
-  VULTR_API_TIMEOUT_MS?: string;
-  VULTR_IP_POLL_TIMEOUT_MS?: string;
-  VULTR_IP_POLL_INTERVAL_MS?: string;
-}
-
-/** Env vars that tune DigitalOcean provider behavior (all optional; DEFAULT_DIGITALOCEAN_* apply otherwise). */
-export interface DigitalOceanRuntimeEnv {
-  DIGITALOCEAN_REGION?: string;
-  DIGITALOCEAN_IMAGE?: string;
-  DIGITALOCEAN_API_TIMEOUT_MS?: string;
-  DIGITALOCEAN_IP_POLL_TIMEOUT_MS?: string;
-  DIGITALOCEAN_IP_POLL_INTERVAL_MS?: string;
-  DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS?: string;
-  DIGITALOCEAN_ACTION_POLL_INTERVAL_MS?: string;
-  DIGITALOCEAN_MAX_LIST_PAGES?: string;
-}
-
-/**
- * Build a ProviderConfig from a provider name and decrypted credential token.
- * Handles both raw token strings (Hetzner, Vultr, DigitalOcean) and JSON blobs (Scaleway).
- */
-export function buildProviderConfig(
-  provider: CredentialProvider,
-  decryptedToken: string,
-  providerEnv?: HetznerCapacityRetryEnv &
-    VultrRuntimeEnv &
-    InfomaniakRuntimeEnv &
-    DigitalOceanRuntimeEnv &
-    UpCloudRuntimeEnv
-): ProviderConfig {
-  switch (provider) {
-    case 'hetzner':
-      return {
-        provider: 'hetzner',
-        apiToken: decryptedToken,
-        capacityRetryInitialDelayMs: parseOptionalInt(
-          providerEnv?.HETZNER_CAPACITY_RETRY_INITIAL_DELAY_MS
-        ),
-        capacityRetryMaxDelayMs: parseOptionalInt(providerEnv?.HETZNER_CAPACITY_RETRY_MAX_DELAY_MS),
-        capacityRetryMaxAttempts: parseOptionalInt(
-          providerEnv?.HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS
-        ),
-        capacityRetryBudgetMs: parseOptionalInt(providerEnv?.HETZNER_CAPACITY_RETRY_BUDGET_MS),
-      };
-    case 'vultr':
-      return {
-        provider: 'vultr',
-        apiToken: decryptedToken,
-        region: providerEnv?.VULTR_REGION,
-        osName: providerEnv?.VULTR_OS_NAME,
-        requestTimeoutMs: parseOptionalInt(providerEnv?.VULTR_API_TIMEOUT_MS),
-        ipPollTimeoutMs: parseOptionalInt(providerEnv?.VULTR_IP_POLL_TIMEOUT_MS),
-        ipPollIntervalMs: parseOptionalInt(providerEnv?.VULTR_IP_POLL_INTERVAL_MS),
-      };
-    case 'infomaniak': {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(decryptedToken);
-      } catch {
-        throw new Error('Invalid Infomaniak credential format: malformed stored data');
-      }
-      const obj = expectJsonRecord(parsed, 'provider.infomaniak_credential');
-      if (
-        typeof obj.applicationCredentialId !== 'string' ||
-        !obj.applicationCredentialId ||
-        typeof obj.applicationCredentialSecret !== 'string' ||
-        !obj.applicationCredentialSecret
-      )
-        throw new Error(
-          'Invalid Infomaniak credential format: missing application credential ID or secret'
-        );
-      return {
-        provider: 'infomaniak',
-        applicationCredentialId: obj.applicationCredentialId,
-        applicationCredentialSecret: obj.applicationCredentialSecret,
-        authUrl: providerEnv?.INFOMANIAK_AUTH_URL,
-        region: providerEnv?.INFOMANIAK_REGION,
-        endpointInterface: providerEnv?.INFOMANIAK_ENDPOINT_INTERFACE,
-        networkName: providerEnv?.INFOMANIAK_NETWORK_NAME,
-        imageName: providerEnv?.INFOMANIAK_IMAGE_NAME,
-        volumeType: providerEnv?.INFOMANIAK_VOLUME_TYPE,
-        flavors: {
-          small: providerEnv?.INFOMANIAK_SMALL_FLAVOR ?? 'a2-ram4-disk20-perf1',
-          medium: providerEnv?.INFOMANIAK_MEDIUM_FLAVOR ?? 'a4-ram8-disk20-perf1',
-          large: providerEnv?.INFOMANIAK_LARGE_FLAVOR ?? 'a8-ram16-disk20-perf1',
-        },
-        requestTimeoutMs: parseOptionalInt(providerEnv?.INFOMANIAK_API_TIMEOUT_MS),
-        ipPollTimeoutMs: parseOptionalInt(providerEnv?.INFOMANIAK_IP_POLL_TIMEOUT_MS),
-        ipPollIntervalMs: parseOptionalInt(providerEnv?.INFOMANIAK_IP_POLL_INTERVAL_MS),
-      };
-    }
-    case 'digitalocean':
-      return {
-        provider: 'digitalocean',
-        apiToken: decryptedToken,
-        region: providerEnv?.DIGITALOCEAN_REGION,
-        image: providerEnv?.DIGITALOCEAN_IMAGE,
-        requestTimeoutMs: parseOptionalInt(providerEnv?.DIGITALOCEAN_API_TIMEOUT_MS),
-        ipPollTimeoutMs: parseOptionalInt(providerEnv?.DIGITALOCEAN_IP_POLL_TIMEOUT_MS),
-        ipPollIntervalMs: parseOptionalInt(providerEnv?.DIGITALOCEAN_IP_POLL_INTERVAL_MS),
-        actionPollTimeoutMs: parseOptionalInt(providerEnv?.DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS),
-        actionPollIntervalMs: parseOptionalInt(providerEnv?.DIGITALOCEAN_ACTION_POLL_INTERVAL_MS),
-        maxListPages: parseOptionalInt(providerEnv?.DIGITALOCEAN_MAX_LIST_PAGES),
-      };
-    case 'upcloud': {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(decryptedToken);
-      } catch {
-        throw new Error('Invalid UpCloud credential format: malformed stored data');
-      }
-      const obj = expectJsonRecord(parsed, 'provider.upcloud_credential');
-      if (
-        typeof obj.username !== 'string' ||
-        !obj.username ||
-        typeof obj.password !== 'string' ||
-        !obj.password
-      )
-        throw new Error('Invalid UpCloud credential format: missing username or password');
-      return {
-        provider: 'upcloud',
-        username: obj.username,
-        password: obj.password,
-        apiUrl: providerEnv?.UPCLOUD_API_URL,
-        zone: providerEnv?.UPCLOUD_ZONE,
-        imageTitle: providerEnv?.UPCLOUD_IMAGE_TITLE,
-        requestTimeoutMs: parseOptionalInt(providerEnv?.UPCLOUD_API_TIMEOUT_MS),
-        ipPollTimeoutMs: parseOptionalInt(providerEnv?.UPCLOUD_IP_POLL_TIMEOUT_MS),
-        ipPollIntervalMs: parseOptionalInt(providerEnv?.UPCLOUD_IP_POLL_INTERVAL_MS),
-        stopTimeoutSeconds: parseOptionalInt(providerEnv?.UPCLOUD_STOP_TIMEOUT_SECONDS),
-      };
-    }
-    case 'scaleway': {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(decryptedToken);
-      } catch {
-        throw new Error('Invalid Scaleway credential format: malformed stored data');
-      }
-      const obj = expectJsonRecord(parsed, 'provider.scaleway_credential');
-      if (
-        typeof obj?.secretKey !== 'string' ||
-        !obj.secretKey ||
-        typeof obj?.projectId !== 'string' ||
-        !obj.projectId
-      ) {
-        throw new Error('Invalid Scaleway credential format: missing secretKey or projectId');
-      }
-      return { provider: 'scaleway', secretKey: obj.secretKey, projectId: obj.projectId };
-    }
-    case 'gcp':
-      // GCP credentials are metadata (not secrets). The tokenProvider must be injected
-      // at a higher layer via buildGcpProviderConfig() since it depends on the env/JWT context.
-      throw new Error(
-        'GCP credentials require buildGcpProviderConfig() — cannot use buildProviderConfig() directly'
-      );
-    default:
-      throw new Error(`Unsupported provider: ${provider}`);
-  }
-}
-
-function requiredGcpString(obj: Record<string, unknown>, field: string): string {
-  const value = obj[field];
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new Error(`Invalid GCP credential format: missing ${field}`);
-  }
-  return value;
-}
-
-/** Return the browser-safe projection of a normalized GCP credential. */
-export function toGcpCredentialMetadata(credential: GcpCredential): GcpCredentialMetadata {
-  return {
-    authType: credential.authType,
-    gcpProjectId: credential.gcpProjectId,
-    serviceAccountEmail: credential.serviceAccountEmail,
-    defaultZone: credential.defaultZone,
-    ...(credential.authType === 'service-account-key'
-      ? { privateKeyId: credential.privateKeyId }
-      : {}),
-  };
-}
-
-/** Serialize a normalized, versioned GCP credential for encrypted storage. */
-export function serializeGcpCredential(credential: GcpCredential): string {
-  return JSON.stringify(credential);
-}
-
-/**
- * Parse a decrypted GCP credential token. Existing unversioned blobs are
- * normalized as workload-identity credentials for migration-free compatibility.
- */
-export function parseGcpCredential(decryptedToken: string): GcpCredential {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(decryptedToken);
-  } catch {
-    throw new Error('Invalid GCP credential format: malformed stored data');
-  }
-  const obj = expectJsonRecord(parsed, 'provider.gcp_credential');
-  if (typeof obj.provider === 'string' && obj.provider !== 'gcp') {
-    throw new Error(`Invalid GCP credential format: provider is ${obj.provider}`);
-  }
-
-  const legacy = obj.authType === undefined && obj.version === undefined;
-  if (!legacy && obj.version !== GCP_CREDENTIAL_VERSION) {
-    throw new Error('Invalid GCP credential format: unsupported version');
-  }
-  const authType = legacy ? 'workload-identity' : obj.authType;
-
-  if (authType === 'workload-identity') {
-    return {
-      version: GCP_CREDENTIAL_VERSION,
-      provider: 'gcp',
-      authType,
-      gcpProjectId: requiredGcpString(obj, 'gcpProjectId'),
-      gcpProjectNumber: requiredGcpString(obj, 'gcpProjectNumber'),
-      serviceAccountEmail: requiredGcpString(obj, 'serviceAccountEmail'),
-      wifPoolId: requiredGcpString(obj, 'wifPoolId'),
-      wifProviderId: requiredGcpString(obj, 'wifProviderId'),
-      defaultZone: requiredGcpString(obj, 'defaultZone'),
-    };
-  }
-
-  if (authType === 'service-account-key') {
-    return {
-      version: GCP_CREDENTIAL_VERSION,
-      provider: 'gcp',
-      authType,
-      gcpProjectId: requiredGcpString(obj, 'gcpProjectId'),
-      serviceAccountEmail: requiredGcpString(obj, 'serviceAccountEmail'),
-      privateKeyId: requiredGcpString(obj, 'privateKeyId'),
-      privateKey: requiredGcpString(obj, 'privateKey'),
-      defaultZone: requiredGcpString(obj, 'defaultZone'),
-    };
-  }
-
-  throw new Error('Invalid GCP credential format: unsupported authType');
-}
+export type { ExactProviderCredentialBinding, ProviderResolutionResult };
 
 /**
  * Look up a user's cloud-provider credential, decrypt it, and return a ProviderConfig.
@@ -382,7 +65,9 @@ export async function getUserCloudProviderConfig(
 ): Promise<{ config: ProviderConfig; provider: CredentialProvider } | null> {
   const conditions = [
     eq(schema.credentials.userId, userId),
+    isNull(schema.credentials.projectId),
     eq(schema.credentials.credentialType, 'cloud-provider'),
+    eq(schema.credentials.isActive, true),
   ];
   if (targetProvider) {
     conditions.push(eq(schema.credentials.provider, targetProvider));
@@ -420,21 +105,33 @@ export async function getUserCloudProviderConfig(
  *
  * Resolution order (composable-credentials PRIMARY, old path FALLBACK):
  *   1. CC resolver: project-attachment → user-attachment → platform default
- *   2. If cc_* tables are empty, lazy-backfill from legacy tables, retry
- *   3. If CC still returns null, fall back to legacy single-table lookup
+ *   2. If a project-scoped CC attachment exists but cannot resolve, halt
+ *      rather than falling through to user/platform credentials
+ *   3. If cc_* tables are empty, lazy-backfill from legacy tables, retry
+ *   4. If CC still has no data, fall back to legacy single-table lookup
  */
 export async function createProviderForUser(
   db: ReturnType<typeof drizzle>,
   userId: string,
   encryptionKey: string,
-  env: Env & Partial<HetznerCapacityRetryEnv>,
+  env: Env & Partial<HetznerRuntimeEnv>,
   targetProvider?: CredentialProvider,
-  projectId?: string | null
-): Promise<{
-  provider: Provider;
-  providerName: CredentialProvider;
-  credentialSource: CredentialSource;
-} | null> {
+  projectId?: string | null,
+  exactCredential?: ExactProviderCredentialBinding | null
+): Promise<ProviderResolutionResult | null> {
+  if (exactCredential) {
+    return createProviderForExactCredential(
+      db,
+      userId,
+      encryptionKey,
+      env,
+      targetProvider,
+      projectId,
+      exactCredential,
+      createProviderFromDecryptedToken
+    );
+  }
+
   // --- Primary path: composable-credentials resolver -------------------------
   // CC resolver requires a specific provider name (compute consumers are always
   // provider-specific). When targetProvider is undefined, we skip CC and use the
@@ -458,6 +155,37 @@ export async function createProviderForUser(
   return createProviderForUserLegacy(db, userId, encryptionKey, env, targetProvider, projectId);
 }
 
+async function createProviderFromDecryptedToken(
+  providerName: CredentialProvider,
+  decryptedToken: string,
+  credentialSource: CredentialSource,
+  userId: string,
+  projectId: string | null,
+  env: Env & Partial<HetznerRuntimeEnv>
+): Promise<ProviderResolutionResult> {
+  if (providerName === 'gcp') {
+    const gcpCred = parseGcpCredential(decryptedToken);
+    const { getGcpAccessToken } = await import('./gcp-sts');
+    const cacheUserId =
+      credentialSource === 'platform'
+        ? `platform:${userId}`
+        : credentialSource === 'project' && projectId
+          ? `project:${projectId}:${userId}`
+          : userId;
+    const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
+    const tokenProvider = (context?: ProviderRequestContext) =>
+      getGcpAccessToken(cacheUserId, cacheProjectId, gcpCred, env, context);
+    return {
+      provider: new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone),
+      providerName,
+      credentialSource,
+    };
+  }
+
+  const config = buildProviderConfig(providerName, decryptedToken, env);
+  return { provider: createProvider(config), providerName, credentialSource };
+}
+
 /**
  * Try composable-credentials resolution for compute providers with lazy backfill.
  * Returns `undefined` when CC has no data and fallback should be attempted.
@@ -466,7 +194,7 @@ async function resolveProviderViaCC(
   db: ReturnType<typeof drizzle>,
   userId: string,
   encryptionKey: string,
-  env: Env & Partial<HetznerCapacityRetryEnv>,
+  env: Env & Partial<HetznerRuntimeEnv>,
   targetProvider: CredentialProvider,
   projectId?: string | null
 ): Promise<
@@ -475,7 +203,20 @@ async function resolveProviderViaCC(
   | undefined
 > {
   const consumer = { kind: 'compute' as const, provider: targetProvider };
+  const hasProjectAttachment = await hasProjectComputeCredentialAttachment(
+    db,
+    userId,
+    targetProvider,
+    projectId
+  );
   let resolved = await resolveForConsumer(db, userId, encryptionKey, consumer, projectId);
+
+  // Rule 28: once a project-scoped compute attachment exists, a null CC
+  // resolution represents an explicit halt or a broken scoped binding, not an
+  // invitation to fall through to personal/platform legacy credentials.
+  if (!resolved && hasProjectAttachment) {
+    return null;
+  }
 
   // A platform-only first resolution (isPlatform) must be treated like a miss:
   // an enabled platform default resolves non-null at Tier 3 on the first pass,
@@ -520,6 +261,30 @@ async function resolveProviderViaCC(
   return { provider: createProvider(config), providerName, credentialSource };
 }
 
+async function hasProjectComputeCredentialAttachment(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  targetProvider: CredentialProvider,
+  projectId?: string | null
+): Promise<boolean> {
+  if (!projectId) return false;
+
+  const rows = await db
+    .select({ id: schema.ccAttachments.id })
+    .from(schema.ccAttachments)
+    .where(
+      and(
+        eq(schema.ccAttachments.userId, userId),
+        eq(schema.ccAttachments.projectId, projectId),
+        eq(schema.ccAttachments.consumerKind, 'compute'),
+        eq(schema.ccAttachments.consumerTarget, targetProvider)
+      )
+    )
+    .limit(1);
+
+  return rows.length > 0;
+}
+
 /**
  * Legacy single-table provider resolution (fallback when CC has no data).
  */
@@ -527,7 +292,7 @@ async function createProviderForUserLegacy(
   db: ReturnType<typeof drizzle>,
   userId: string,
   encryptionKey: string,
-  env: Env & Partial<HetznerCapacityRetryEnv>,
+  env: Env & Partial<HetznerRuntimeEnv>,
   targetProvider?: CredentialProvider,
   projectId?: string | null
 ): Promise<{
@@ -535,10 +300,55 @@ async function createProviderForUserLegacy(
   providerName: CredentialProvider;
   credentialSource: CredentialSource;
 } | null> {
-  // 1. Try user's own credential first
+  // 1. Try a project-scoped credential only when the caller has already
+  // authorized this project context.
+  if (projectId) {
+    const projectConditions = [
+      eq(schema.credentials.projectId, projectId),
+      eq(schema.credentials.credentialType, 'cloud-provider'),
+    ];
+    if (targetProvider) {
+      projectConditions.push(eq(schema.credentials.provider, targetProvider));
+    }
+
+    const projectCreds = await db
+      .select()
+      .from(schema.credentials)
+      .where(and(...projectConditions))
+      .limit(targetProvider ? 1 : 2);
+
+    if (projectCreds.length > 1) return null;
+    const projectCred = projectCreds[0];
+    if (projectCred) {
+      if (!projectCred.isActive) return null;
+      const providerName = projectCred.provider as CredentialProvider;
+      const decryptedToken = await decrypt(
+        projectCred.encryptedToken,
+        projectCred.iv,
+        encryptionKey
+      );
+
+      if (providerName === 'gcp') {
+        const gcpCred = parseGcpCredential(decryptedToken);
+        const { getGcpAccessToken } = await import('./gcp-sts');
+        const tokenProvider = (context?: ProviderRequestContext) =>
+          getGcpAccessToken(`project:${projectId}:${userId}`, projectId, gcpCred, env, context);
+
+        const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
+        return { provider, providerName, credentialSource: 'project' };
+      }
+
+      const config = buildProviderConfig(providerName, decryptedToken, env);
+      return { provider: createProvider(config), providerName, credentialSource: 'project' };
+    }
+  }
+
+  // 2. Try user's own personal credential.
   const conditions = [
     eq(schema.credentials.userId, userId),
+    isNull(schema.credentials.projectId),
     eq(schema.credentials.credentialType, 'cloud-provider'),
+    eq(schema.credentials.isActive, true),
   ];
   if (targetProvider) {
     conditions.push(eq(schema.credentials.provider, targetProvider));
@@ -570,7 +380,7 @@ async function createProviderForUserLegacy(
     return { provider: createProvider(config), providerName, credentialSource: 'user' };
   }
 
-  // 2. Fall back to platform credential
+  // 3. Fall back to platform credential
   const platformCred = await getPlatformCloudCredential(db, encryptionKey, targetProvider);
   if (!platformCred) {
     return null;
@@ -598,12 +408,13 @@ async function createProviderForUserLegacy(
 }
 
 /**
- * Lightweight credential source resolution — determines whether 'user' or 'platform'
- * credentials would be used for a given target provider WITHOUT decrypting tokens
- * or instantiating provider instances. Used for quota enforcement gating.
+ * Lightweight credential source resolution — determines whether project, user,
+ * or platform credentials would be used for a given target provider WITHOUT
+ * decrypting tokens or instantiating provider instances. Used for quota
+ * enforcement gating.
  *
- * Returns 'user' if the user has a cloud-provider credential for the target provider,
- * 'platform' if only a platform credential is available, or null if no credential exists.
+ * Returns the first available source in project → user → platform precedence,
+ * or null if no credential exists.
  */
 export async function resolveCredentialSource(
   db: ReturnType<typeof drizzle>,
@@ -624,7 +435,9 @@ export async function resolveCredentialSource(
   // 1. Check user's own credential for the target provider
   const userConditions = [
     eq(schema.credentials.userId, userId),
+    isNull(schema.credentials.projectId),
     eq(schema.credentials.credentialType, 'cloud-provider'),
+    eq(schema.credentials.isActive, true),
   ];
   if (targetProvider) {
     userConditions.push(eq(schema.credentials.provider, targetProvider));
@@ -707,7 +520,35 @@ async function resolveProjectComputeCredentialSource(
     .where(and(...conditions))
     .limit(targetProvider ? 1 : 2);
 
-  if (rows.length === 0) return undefined;
+  if (rows.length === 0) {
+    const legacyProjectConditions = [
+      eq(schema.credentials.projectId, projectId),
+      eq(schema.credentials.credentialType, 'cloud-provider'),
+    ];
+    if (targetProvider) {
+      legacyProjectConditions.push(eq(schema.credentials.provider, targetProvider));
+    }
+
+    const legacyRows = await db
+      .select({
+        provider: schema.credentials.provider,
+        isActive: schema.credentials.isActive,
+      })
+      .from(schema.credentials)
+      .where(and(...legacyProjectConditions))
+      .limit(targetProvider ? 1 : 2);
+
+    if (legacyRows.length === 0) return undefined;
+    if (legacyRows.length > 1) return null;
+
+    const legacyRow = legacyRows[0];
+    if (!legacyRow?.isActive) return null;
+
+    return {
+      credentialSource: 'project',
+      providerName: legacyRow.provider as CredentialProvider,
+    };
+  }
   if (rows.length > 1) return null;
 
   const row = rows[0];

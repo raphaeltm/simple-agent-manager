@@ -70,6 +70,8 @@ vi.mock('../../../src/lib/ulid', () => ({
 vi.mock('../../../src/services/session-snapshots', () => ({
   claimSessionSnapshotRecovery: claimSessionSnapshotRecoveryMock,
   failSessionSnapshotRecovery: failSessionSnapshotRecoveryMock,
+  sessionLifecycleError: (_env: unknown, error: unknown) =>
+    error instanceof Error ? error.message : String(error),
 }));
 
 vi.mock('../../../src/services/task-runner-do', () => ({
@@ -81,6 +83,20 @@ import {
   ensureSessionRecovery,
   SESSION_RECOVERY_INITIAL_PROMPT,
 } from '../../../src/services/session-recovery';
+
+const emptyCapacityPlacement = {
+  capacityPoolId: null,
+  capacityPoolScope: null,
+  capacityPoolRevision: null,
+  capacitySourceId: null,
+  capacityPoolCandidateId: null,
+  placementCredentialSource: null,
+  placementCredentialReference: null,
+  placementCredentialVersion: null,
+  capacityPoolProjectId: null,
+  workloadRole: null,
+  placementExplanationJson: null,
+};
 
 describe('ensureSessionRecovery', () => {
   beforeEach(() => {
@@ -121,6 +137,7 @@ describe('ensureSessionRecovery', () => {
       },
       {
         id: 'workspace-sleeping',
+        ...emptyCapacityPlacement,
         userId: 'user-1',
         vmSize: 'small',
         vmLocation: 'nbg1',
@@ -203,7 +220,7 @@ describe('ensureSessionRecovery', () => {
         manifestJson: '{}',
       },
       { id: 'project-1' },
-      { id: 'workspace-sleeping', userId: 'user-1' },
+      { id: 'workspace-sleeping', ...emptyCapacityPlacement, userId: 'user-1' },
       { id: 'user-1' },
       { id: 'source-task-1', title: 'Parent', recoverySourceTaskId: null },
       null,

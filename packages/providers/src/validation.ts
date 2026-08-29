@@ -34,6 +34,31 @@ export interface HetznerVolumePayload {
   status: string;
 }
 
+export interface HetznerServerTypePricePayload {
+  location: string;
+  price_hourly: {
+    net: string;
+    gross: string;
+  };
+  price_monthly: {
+    net: string;
+    gross: string;
+  };
+}
+
+export interface HetznerServerTypePayload {
+  id: number;
+  name: string;
+  description: string;
+  cores: number;
+  memory: number;
+  disk: number;
+  prices: HetznerServerTypePricePayload[];
+  architecture?: string;
+  cpu_type?: string;
+  deprecated?: boolean;
+}
+
 export interface ScalewayServerPayload {
   id: string;
   name: string;
@@ -82,86 +107,99 @@ export interface GcpInstancePayload {
 export async function parseProviderJson(
   response: Response,
   providerName: string,
-  context: string,
+  context: string
 ): Promise<unknown> {
   try {
     return await response.json();
   } catch (err) {
-    throw validationError(
-      providerName,
-      context,
-      'expected valid JSON response body',
-      err,
-    );
+    throw validationError(providerName, context, 'expected valid JSON response body', err);
   }
 }
 
 export function validateHetznerServerResponse(
   payload: unknown,
-  context: string,
+  context: string
 ): { server: HetznerServerPayload } {
   const root = expectObject(payload, 'hetzner', context);
   return {
     server: validateHetznerServer(
       requireObject(root, 'server', 'hetzner', context),
-      `${context}.server`,
+      `${context}.server`
     ),
   };
 }
 
 export function validateHetznerServersResponse(
   payload: unknown,
-  context: string,
+  context: string
 ): { servers: HetznerServerPayload[]; nextPage?: number } {
   const root = expectObject(payload, 'hetzner', context);
   const servers = requireArray(root, 'servers', 'hetzner', context);
   return {
-    servers: servers.map((server, index) => validateHetznerServer(server, `${context}.servers[${index}]`)),
+    servers: servers.map((server, index) =>
+      validateHetznerServer(server, `${context}.servers[${index}]`)
+    ),
+    ...readHetznerNextPage(root, context),
+  };
+}
+
+export function validateHetznerServerTypesResponse(
+  payload: unknown,
+  context: string
+): { serverTypes: HetznerServerTypePayload[]; nextPage?: number } {
+  const root = expectObject(payload, 'hetzner', context);
+  const serverTypes = requireArray(root, 'server_types', 'hetzner', context);
+  return {
+    serverTypes: serverTypes.map((serverType, index) =>
+      validateHetznerServerType(serverType, `${context}.server_types[${index}]`)
+    ),
     ...readHetznerNextPage(root, context),
   };
 }
 
 export function validateHetznerVolumeResponse(
   payload: unknown,
-  context: string,
+  context: string
 ): { volume: HetznerVolumePayload } {
   const root = expectObject(payload, 'hetzner', context);
   return {
     volume: validateHetznerVolume(
       requireObject(root, 'volume', 'hetzner', context),
-      `${context}.volume`,
+      `${context}.volume`
     ),
   };
 }
 
 export function validateHetznerVolumesResponse(
   payload: unknown,
-  context: string,
+  context: string
 ): { volumes: HetznerVolumePayload[]; nextPage?: number } {
   const root = expectObject(payload, 'hetzner', context);
   const volumes = requireArray(root, 'volumes', 'hetzner', context);
   return {
-    volumes: volumes.map((volume, index) => validateHetznerVolume(volume, `${context}.volumes[${index}]`)),
+    volumes: volumes.map((volume, index) =>
+      validateHetznerVolume(volume, `${context}.volumes[${index}]`)
+    ),
     ...readHetznerNextPage(root, context),
   };
 }
 
 export function validateScalewayServerResponse(
   payload: unknown,
-  context: string,
+  context: string
 ): { server: ScalewayServerPayload } {
   const root = expectObject(payload, 'scaleway', context);
   return {
     server: validateScalewayServer(
       requireObject(root, 'server', 'scaleway', context),
-      `${context}.server`,
+      `${context}.server`
     ),
   };
 }
 
 export function validateScalewayBlockVolumeResponse(
   payload: unknown,
-  context: string,
+  context: string
 ): { volume: ScalewayBlockVolumePayload } {
   const volume = validateScalewayBlockVolume(payload, context);
   return { volume };
@@ -169,29 +207,33 @@ export function validateScalewayBlockVolumeResponse(
 
 export function validateScalewayBlockVolumesResponse(
   payload: unknown,
-  context: string,
+  context: string
 ): { volumes: ScalewayBlockVolumePayload[] } {
   const root = expectObject(payload, 'scaleway', context);
   const volumes = requireArray(root, 'volumes', 'scaleway', context);
   return {
-    volumes: volumes.map((volume, index) => validateScalewayBlockVolume(volume, `${context}.volumes[${index}]`)),
+    volumes: volumes.map((volume, index) =>
+      validateScalewayBlockVolume(volume, `${context}.volumes[${index}]`)
+    ),
   };
 }
 
 export function validateScalewayServersResponse(
   payload: unknown,
-  context: string,
+  context: string
 ): { servers: ScalewayServerPayload[] } {
   const root = expectObject(payload, 'scaleway', context);
   const servers = requireArray(root, 'servers', 'scaleway', context);
   return {
-    servers: servers.map((server, index) => validateScalewayServer(server, `${context}.servers[${index}]`)),
+    servers: servers.map((server, index) =>
+      validateScalewayServer(server, `${context}.servers[${index}]`)
+    ),
   };
 }
 
 export function validateScalewayImageResponse(
   payload: unknown,
-  context: string,
+  context: string
 ): { images: Array<{ id: string; name: string }> } {
   const root = expectObject(payload, 'scaleway', context);
   const images = requireArray(root, 'images', 'scaleway', context);
@@ -209,17 +251,17 @@ export function validateScalewayImageResponse(
 export function validateGcpOperation(
   payload: unknown,
   context: string,
-  options: { requireName: true },
+  options: { requireName: true }
 ): GcpOperationPayload & { name: string };
 export function validateGcpOperation(
   payload: unknown,
   context: string,
-  options?: { requireName?: false },
+  options?: { requireName?: false }
 ): GcpOperationPayload;
 export function validateGcpOperation(
   payload: unknown,
   context: string,
-  options?: { requireName?: boolean },
+  options?: { requireName?: boolean }
 ): GcpOperationPayload {
   const root = expectObject(payload, 'gcp', context);
   const name = optionalString(root, 'name', 'gcp', context);
@@ -252,7 +294,7 @@ export function validateGcpInstance(payload: unknown, context: string): GcpInsta
 
 export function validateGcpInstancesList(
   payload: unknown,
-  context: string,
+  context: string
 ): { items?: GcpInstancePayload[]; nextPageToken?: string } {
   const root = expectObject(payload, 'gcp', context);
   const items = optionalArray(root, 'items', 'gcp', context);
@@ -261,14 +303,20 @@ export function validateGcpInstancesList(
     throw validationError('gcp', `${context}.nextPageToken`, 'expected non-empty string');
   }
   return {
-    ...(items ? { items: items.map((instance, index) => validateGcpInstance(instance, `${context}.items[${index}]`)) } : {}),
+    ...(items
+      ? {
+          items: items.map((instance, index) =>
+            validateGcpInstance(instance, `${context}.items[${index}]`)
+          ),
+        }
+      : {}),
     ...(nextPageToken ? { nextPageToken } : {}),
   };
 }
 
 export function validateGcpAggregatedInstances(
   payload: unknown,
-  context: string,
+  context: string
 ): { items?: Record<string, { instances?: GcpInstancePayload[] }>; nextPageToken?: string } {
   const root = expectObject(payload, 'gcp', context);
   const items = optionalObject(root, 'items', 'gcp', context);
@@ -283,7 +331,11 @@ export function validateGcpAggregatedInstances(
     const scopeObj = expectObject(scopePayload, 'gcp', `${context}.items.${scope}`);
     const instances = optionalArray(scopeObj, 'instances', 'gcp', `${context}.items.${scope}`);
     scopes[scope] = instances
-      ? { instances: instances.map((instance, index) => validateGcpInstance(instance, `${context}.items.${scope}.instances[${index}]`)) }
+      ? {
+          instances: instances.map((instance, index) =>
+            validateGcpInstance(instance, `${context}.items.${scope}.instances[${index}]`)
+          ),
+        }
       : {};
   }
 
@@ -293,7 +345,6 @@ export function validateGcpAggregatedInstances(
   };
 }
 
-
 function readHetznerNextPage(root: JsonObject, context: string): { nextPage?: number } {
   const meta = optionalObject(root, 'meta', 'hetzner', context);
   if (!meta) return {};
@@ -302,7 +353,11 @@ function readHetznerNextPage(root: JsonObject, context: string): { nextPage?: nu
   const nextPage = pagination.next_page;
   if (nextPage === undefined || nextPage === null) return {};
   if (typeof nextPage !== 'number' || !Number.isInteger(nextPage) || nextPage < 1) {
-    throw validationError('hetzner', `${context}.meta.pagination.next_page`, 'expected positive integer or null');
+    throw validationError(
+      'hetzner',
+      `${context}.meta.pagination.next_page`,
+      'expected positive integer or null'
+    );
   }
   return { nextPage };
 }
@@ -350,12 +405,59 @@ function validateHetznerVolume(payload: unknown, context: string): HetznerVolume
   };
 }
 
+function validateHetznerServerType(payload: unknown, context: string): HetznerServerTypePayload {
+  const serverType = expectObject(payload, 'hetzner', context);
+  const architecture = optionalString(serverType, 'architecture', 'hetzner', context);
+  const cpuType = optionalString(serverType, 'cpu_type', 'hetzner', context);
+  const deprecatedValue = serverType.deprecated;
+  if (deprecatedValue !== undefined && typeof deprecatedValue !== 'boolean') {
+    throw validationError('hetzner', `${context}.deprecated`, 'expected boolean');
+  }
+
+  return {
+    id: requireNumber(serverType, 'id', 'hetzner', context),
+    name: requireString(serverType, 'name', 'hetzner', context),
+    description: requireString(serverType, 'description', 'hetzner', context),
+    cores: requireNumber(serverType, 'cores', 'hetzner', context),
+    memory: requireNumber(serverType, 'memory', 'hetzner', context),
+    disk: requireNumber(serverType, 'disk', 'hetzner', context),
+    prices: requireArray(serverType, 'prices', 'hetzner', context).map((price, index) =>
+      validateHetznerServerTypePrice(price, `${context}.prices[${index}]`)
+    ),
+    ...(architecture ? { architecture } : {}),
+    ...(cpuType ? { cpu_type: cpuType } : {}),
+    ...(typeof deprecatedValue === 'boolean' ? { deprecated: deprecatedValue } : {}),
+  };
+}
+
+function validateHetznerServerTypePrice(
+  payload: unknown,
+  context: string
+): HetznerServerTypePricePayload {
+  const price = expectObject(payload, 'hetzner', context);
+  const hourly = requireObject(price, 'price_hourly', 'hetzner', context);
+  const monthly = requireObject(price, 'price_monthly', 'hetzner', context);
+  return {
+    location: requireString(price, 'location', 'hetzner', context),
+    price_hourly: {
+      net: requireString(hourly, 'net', 'hetzner', `${context}.price_hourly`),
+      gross: requireString(hourly, 'gross', 'hetzner', `${context}.price_hourly`),
+    },
+    price_monthly: {
+      net: requireString(monthly, 'net', 'hetzner', `${context}.price_monthly`),
+      gross: requireString(monthly, 'gross', 'hetzner', `${context}.price_monthly`),
+    },
+  };
+}
+
 function validateScalewayServer(payload: unknown, context: string): ScalewayServerPayload {
   const server = expectObject(payload, 'scaleway', context);
   const publicIp = optionalNullableAddress(server, 'public_ip', 'scaleway', context);
   const publicIps = requireArray(server, 'public_ips', 'scaleway', context).map((ip, index) => {
     const ipObj = expectObject(ip, 'scaleway', `${context}.public_ips[${index}]`);
-    return { address: requireString(ipObj, 'address', 'scaleway', `${context}.public_ips[${index}]`) };
+    return {
+      address: requireString(ipObj, 'address', 'scaleway', `${context}.public_ips[${index}]`),
+    };
   });
 
   return {
@@ -370,16 +472,21 @@ function validateScalewayServer(payload: unknown, context: string): ScalewayServ
   };
 }
 
-function validateScalewayBlockVolume(payload: unknown, context: string): ScalewayBlockVolumePayload {
+function validateScalewayBlockVolume(
+  payload: unknown,
+  context: string
+): ScalewayBlockVolumePayload {
   const volume = expectObject(payload, 'scaleway', context);
-  const references = requireArray(volume, 'references', 'scaleway', context).map((reference, index) => {
-    const refObj = expectObject(reference, 'scaleway', `${context}.references[${index}]`);
-    return {
-      id: requireString(refObj, 'id', 'scaleway', `${context}.references[${index}]`),
-      type: requireString(refObj, 'type', 'scaleway', `${context}.references[${index}]`),
-      status: requireString(refObj, 'status', 'scaleway', `${context}.references[${index}]`),
-    };
-  });
+  const references = requireArray(volume, 'references', 'scaleway', context).map(
+    (reference, index) => {
+      const refObj = expectObject(reference, 'scaleway', `${context}.references[${index}]`);
+      return {
+        id: requireString(refObj, 'id', 'scaleway', `${context}.references[${index}]`),
+        type: requireString(refObj, 'type', 'scaleway', `${context}.references[${index}]`),
+        status: requireString(refObj, 'status', 'scaleway', `${context}.references[${index}]`),
+      };
+    }
+  );
 
   return {
     id: requireString(volume, 'id', 'scaleway', context),
@@ -400,7 +507,7 @@ function optionalNullableIdObject(
   root: JsonObject,
   key: string,
   providerName: string,
-  context: string,
+  context: string
 ): { id: number } | null {
   const value = root[key];
   if (value === undefined || value === null) return null;
@@ -415,7 +522,7 @@ function optionalNullableString(
   root: JsonObject,
   key: string,
   providerName: string,
-  context: string,
+  context: string
 ): string | null {
   const value = root[key];
   if (value === undefined || value === null) return null;
@@ -427,7 +534,7 @@ function optionalNullableString(
 
 function optionalGcpOperationError(
   root: JsonObject,
-  context: string,
+  context: string
 ): { errors?: Array<{ code: string; message: string }> } | undefined {
   const error = optionalObject(root, 'error', 'gcp', context);
   if (!error) return undefined;
@@ -447,23 +554,33 @@ function optionalGcpOperationError(
 
 function optionalGcpNetworkInterfaces(
   root: JsonObject,
-  context: string,
+  context: string
 ): GcpNetworkInterfacePayload[] | undefined {
   const networkInterfaces = optionalArray(root, 'networkInterfaces', 'gcp', context);
   if (!networkInterfaces) return undefined;
 
   return networkInterfaces.map((networkInterface, index) => {
     const iface = expectObject(networkInterface, 'gcp', `${context}.networkInterfaces[${index}]`);
-    const accessConfigs = optionalArray(iface, 'accessConfigs', 'gcp', `${context}.networkInterfaces[${index}]`);
+    const accessConfigs = optionalArray(
+      iface,
+      'accessConfigs',
+      'gcp',
+      `${context}.networkInterfaces[${index}]`
+    );
     if (!accessConfigs) return {};
     return {
       accessConfigs: accessConfigs.map((accessConfig, configIndex) => {
         const config = expectObject(
           accessConfig,
           'gcp',
-          `${context}.networkInterfaces[${index}].accessConfigs[${configIndex}]`,
+          `${context}.networkInterfaces[${index}].accessConfigs[${configIndex}]`
         );
-        const natIP = optionalString(config, 'natIP', 'gcp', `${context}.networkInterfaces[${index}].accessConfigs[${configIndex}]`);
+        const natIP = optionalString(
+          config,
+          'natIP',
+          'gcp',
+          `${context}.networkInterfaces[${index}].accessConfigs[${configIndex}]`
+        );
         return natIP ? { natIP } : {};
       }),
     };
@@ -474,7 +591,7 @@ function optionalNullableAddress(
   root: JsonObject,
   key: string,
   providerName: string,
-  context: string,
+  context: string
 ): { address: string } | null {
   const value = root[key];
   if (value === null) return null;
@@ -486,7 +603,7 @@ function requireStringArray(
   root: JsonObject,
   key: string,
   providerName: string,
-  context: string,
+  context: string
 ): string[] {
   return requireArray(root, key, providerName, context).map((value, index) => {
     if (typeof value !== 'string') {

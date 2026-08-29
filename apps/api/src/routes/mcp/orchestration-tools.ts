@@ -2,22 +2,8 @@
  * MCP orchestration tools — retry, dependency management, and task removal
  * for agent-to-agent communication.
  */
-import type {
-  CredentialProvider,
-  VMLocation,
-  VMSize,
-  WorkspaceProfile,
-} from '@simple-agent-manager/shared';
-import {
-  DEFAULT_VM_LOCATION,
-  DEFAULT_VM_SIZE,
-  DEFAULT_WORKSPACE_PROFILE,
-  getDefaultLocationForProvider,
-  isValidProvider,
-  resolveResourceReservation,
-} from '@simple-agent-manager/shared';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
-import type { DrizzleD1Database } from 'drizzle-orm/d1';
+import type { VMSize } from '@simple-agent-manager/shared';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
@@ -25,7 +11,12 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { generateBranchName } from '../../services/branch-name';
-import { stopAgentSessionOnNode } from '../../services/node-agent';
+import { capacityPlacementSnapshotDbValues } from '../../services/capacity-placement-snapshot';
+import {
+  PlacementResolutionError,
+  resolveTaskStartPlacement,
+  resolveTaskStartPlacementCredentialAttributionFromPlacement,
+} from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
@@ -41,99 +32,7 @@ import {
   type McpTokenData,
   sanitizeUserInput,
 } from './_helpers';
-
-async function stopActiveChildAgentForRetry(
-  requestId: string | number | null,
-  childTask: typeof schema.tasks.$inferSelect,
-  tokenData: McpTokenData,
-  env: Env,
-  db: DrizzleD1Database<typeof schema>
-): Promise<{ chatSessionId: string | null } | JsonRpcResponse> {
-  if (!childTask.workspaceId) {
-    return { chatSessionId: null };
-  }
-
-  const [agentSession] = await db
-    .select({ id: schema.agentSessions.id })
-    .from(schema.agentSessions)
-    .where(
-      and(
-        eq(schema.agentSessions.workspaceId, childTask.workspaceId),
-        eq(schema.agentSessions.status, 'running')
-      )
-    )
-    .orderBy(desc(schema.agentSessions.createdAt))
-    .limit(1);
-
-  if (!agentSession) {
-    return { chatSessionId: null };
-  }
-
-  const [workspace] = await db
-    .select({
-      id: schema.workspaces.id,
-      nodeId: schema.workspaces.nodeId,
-      nodeStatus: schema.nodes.status,
-      chatSessionId: schema.workspaces.chatSessionId,
-    })
-    .from(schema.workspaces)
-    .leftJoin(schema.nodes, eq(schema.workspaces.nodeId, schema.nodes.id))
-    .where(eq(schema.workspaces.id, childTask.workspaceId))
-    .limit(1);
-
-  if (!workspace?.nodeId) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'Cannot retry active child task because its workspace or node was not found'
-    );
-  }
-
-  if (workspace.nodeStatus !== 'running') {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      `Cannot retry active child task because its node is not running (status: ${workspace.nodeStatus ?? 'unknown'})`
-    );
-  }
-
-  try {
-    await stopAgentSessionOnNode(
-      workspace.nodeId,
-      workspace.id,
-      agentSession.id,
-      env,
-      tokenData.userId
-    );
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    log.error('orchestration.retry_stop_agent_failed', {
-      childTaskId: childTask.id,
-      workspaceId: workspace.id,
-      nodeId: workspace.nodeId,
-      agentSessionId: agentSession.id,
-      error: errorMsg,
-    });
-    return jsonRpcError(
-      requestId,
-      INTERNAL_ERROR,
-      `Failed to stop active child agent before retry: ${errorMsg}`
-    );
-  }
-
-  const now = new Date().toISOString();
-  await db
-    .update(schema.agentSessions)
-    .set({
-      status: 'stopped',
-      stoppedAt: now,
-      errorMessage: null,
-      updatedAt: now,
-    })
-    .where(eq(schema.agentSessions.id, agentSession.id));
-
-  return { chatSessionId: workspace.chatSessionId ?? null };
-}
+import { stopActiveChildAgentForRetry } from './orchestration-retry-stop';
 
 // ─── retry_subtask ──────────────────────────────────────────────────────────
 
@@ -282,6 +181,92 @@ export async function handleRetrySubtask(
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Project not found');
   }
 
+  const inheritedCredentialAttributionUserId =
+    childTask.credentialAttributionUserId ?? childTask.userId;
+  const inheritedCredentialAttributionSource = (childTask.credentialAttributionSource ??
+    'user') as import('@simple-agent-manager/shared').CredentialSource;
+  const inheritedCredentialAttributionProjectId =
+    inheritedCredentialAttributionSource === 'project'
+      ? (childTask.credentialAttributionProjectId ?? childTask.projectId)
+      : null;
+
+  const placement = (() => {
+    try {
+      return resolveTaskStartPlacement({
+        entryPoint: 'orchestration-retry',
+        taskId,
+        projectId: tokenData.projectId,
+        userId: tokenData.userId,
+        project,
+        profile: null,
+        inheritedCredentialAttribution: {
+          userId: inheritedCredentialAttributionUserId,
+          projectId: inheritedCredentialAttributionProjectId,
+          source: inheritedCredentialAttributionSource,
+        },
+        credentialProjectPolicy: 'inherited-or-none',
+        taskModeDefault: 'task',
+        resourceRequirements: {},
+      });
+    } catch (err) {
+      if (err instanceof PlacementResolutionError) {
+        return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+      }
+      throw err;
+    }
+  })();
+  if ('jsonrpc' in placement) {
+    return placement;
+  }
+
+  const placementResolution = await resolveTaskStartPlacementCredentialAttributionFromPlacement(
+    db,
+    placement,
+    {
+      credentialsRequiredMessage:
+        'Cloud provider credentials required. The user must connect a cloud provider in Settings.',
+      env,
+    }
+  );
+  if ('error' in placementResolution) {
+    return jsonRpcError(requestId, INVALID_PARAMS, placementResolution.error);
+  }
+  const {
+    capacityPoolSelection,
+    quotaCredentialSource,
+    capacityPlacementSnapshot,
+    effectiveProvider,
+    credentialAttributionUserId,
+    credentialAttributionProjectId,
+    credentialAttributionSource,
+  } = placementResolution;
+  if (quotaCredentialSource === 'platform') {
+    const quotaEnforcementEnabled = env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
+    if (quotaEnforcementEnabled) {
+      const { checkQuotaForUser } = await import('../../services/compute-quotas');
+      const quotaCheck = await checkQuotaForUser(db, tokenData.userId);
+      if (!quotaCheck.allowed) {
+        return jsonRpcError(
+          requestId,
+          INVALID_PARAMS,
+          `Monthly compute quota exceeded. You've used ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours this month. ` +
+            'Add your own cloud provider credentials in Settings or contact your admin to increase your quota.'
+        );
+      }
+    }
+  }
+
+  const {
+    vmSize: resolvedVmSize,
+    vmSizeSource,
+    vmLocation: resolvedVmLocation,
+    workspaceProfile: resolvedWorkspaceProfile,
+    devcontainerConfigName: resolvedDevcontainerConfigName,
+    taskMode: resolvedTaskMode,
+    agentType: resolvedAgentType,
+    resolvedReservation,
+  } = placement;
+
   const titleConfig = getTaskTitleConfig(env);
   const taskTitle = await generateTaskTitle(env, replacementDescription, titleConfig);
 
@@ -292,40 +277,10 @@ export async function handleRetrySubtask(
     maxLength: branchMaxLength,
   });
 
-  // Resolve VM size from project defaults (not executionStep, which tracks runner state)
-  const vmSizeSource = project.defaultVmSize ? ('project' as const) : ('platform' as const);
-  const resolvedVmSize: VMSize = (project.defaultVmSize as VMSize | null) ?? DEFAULT_VM_SIZE;
-  const resolvedProvider: CredentialProvider | null =
-    typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
-      ? project.defaultProvider
-      : null;
-  const resolvedVmLocation: VMLocation =
-    (project.defaultLocation as VMLocation | null) ??
-    (resolvedProvider
-      ? (getDefaultLocationForProvider(resolvedProvider) as VMLocation | null)
-      : null) ??
-    DEFAULT_VM_LOCATION;
-  const resolvedWorkspaceProfile: WorkspaceProfile =
-    (project.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE;
-  const resolvedDevcontainerConfigName: string | null =
-    resolvedWorkspaceProfile === 'lightweight'
-      ? null
-      : (project.defaultDevcontainerConfigName ?? null);
-
   // Retried/replacement subtasks have their own output branch. Check that out
   // from the start so VM-agent completion pushes cannot land on the project
   // default branch.
   const checkoutBranch = branchName;
-
-  // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
-  const resolvedReservation = resolveResourceReservation(
-    {}, // MCP orchestration retry: no task-level resource requirements in Phase 0
-    {
-      taskId,
-      projectId: tokenData.projectId,
-      userId: tokenData.userId,
-    }
-  );
 
   // Insert replacement task
   await db.insert(schema.tasks).values({
@@ -340,10 +295,16 @@ export async function handleRetrySubtask(
     priority: childTask.priority,
     dispatchDepth: childTask.dispatchDepth,
     outputBranch: branchName,
+    taskMode: resolvedTaskMode,
     requestedVmSize: resolvedVmSize,
     requestedVmSizeSource: vmSizeSource,
     agentProfileHint: childTask.agentProfileHint,
+    resourceRequirementsSource: resolvedReservation.source,
     resolvedReservationJson: JSON.stringify(resolvedReservation),
+    credentialAttributionUserId,
+    credentialAttributionProjectId,
+    credentialAttributionSource,
+    ...capacityPlacementSnapshotDbValues(capacityPlacementSnapshot),
     createdBy: tokenData.userId,
     createdAt: now,
     updatedAt: now,
@@ -421,10 +382,15 @@ export async function handleRetrySubtask(
       outputBranch: branchName,
       projectDefaultVmSize: project.defaultVmSize as VMSize | null,
       chatSessionId: sessionId,
-      agentType: project.defaultAgentType ?? null,
+      agentType: resolvedAgentType,
       workspaceProfile: resolvedWorkspaceProfile,
       devcontainerConfigName: resolvedDevcontainerConfigName,
-      cloudProvider: resolvedProvider,
+      cloudProvider: placement.provider ?? effectiveProvider,
+      explicitVmLocation: placement.explicitVmLocation === true,
+      credentialAttributionUserId,
+      credentialAttributionProjectId,
+      credentialAttributionSource,
+      taskMode: resolvedTaskMode,
       model: null,
       effort: null,
       permissionMode: null,
@@ -437,6 +403,7 @@ export async function handleRetrySubtask(
         warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
       },
       resolvedReservation,
+      capacityPoolSelection,
       vmSizeSource,
     });
   } catch (err) {

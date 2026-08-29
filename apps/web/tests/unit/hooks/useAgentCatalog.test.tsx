@@ -178,6 +178,22 @@ describe('useProviderCatalog', () => {
     expect(mocks.getProviderCatalog).toHaveBeenCalledTimes(1);
   });
 
+  it('passes scoped catalog options into the query function', async () => {
+    const { Wrapper } = createWrapper();
+
+    renderHook(
+      () => useProviderCatalog('user-1', { scope: 'project', projectId: 'project-1' }),
+      { wrapper: Wrapper }
+    );
+
+    await waitFor(() =>
+      expect(mocks.getProviderCatalog).toHaveBeenCalledWith({
+        scope: 'project',
+        projectId: 'project-1',
+      })
+    );
+  });
+
   it('degrades to an empty catalog rather than an error when the request fails', async () => {
     const { Wrapper } = createWrapper();
     mocks.getProviderCatalog.mockRejectedValue(new Error('unavailable'));

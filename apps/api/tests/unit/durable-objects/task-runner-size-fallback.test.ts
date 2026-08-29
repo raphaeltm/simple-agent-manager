@@ -129,7 +129,11 @@ function createContext(
 }
 
 function createState(
-  overrides: { vmSize?: 'small' | 'medium' | 'large'; vmSizeSource?: string } = {}
+  overrides: {
+    vmSize?: 'small' | 'medium' | 'large';
+    vmSizeSource?: string;
+    capacityPoolSelection?: TaskRunnerState['config']['capacityPoolSelection'];
+  } = {}
 ): TaskRunnerState {
   return {
     version: 1,
@@ -167,8 +171,12 @@ function createState(
       workspaceProfile: null,
       devcontainerConfigName: null,
       cloudProvider: null,
+      credentialAttributionUserId: 'user-1',
+      credentialAttributionProjectId: null,
+      credentialAttributionSource: 'user',
       taskMode: 'task',
       model: null,
+      effort: null,
       permissionMode: null,
       opencodeProvider: null,
       opencodeBaseUrl: null,
@@ -176,6 +184,7 @@ function createState(
       agentProfileHint: null,
       attachments: null,
       projectScaling: null,
+      capacityPoolSelection: overrides.capacityPoolSelection ?? null,
       vmSizeSource: (overrides.vmSizeSource ??
         'project') as TaskRunnerState['config']['vmSizeSource'],
     },
@@ -198,6 +207,68 @@ function createState(
   };
 }
 
+function capacityPoolSelection(): NonNullable<TaskRunnerState['config']['capacityPoolSelection']> {
+  const snapshot = {
+    capacityPoolId: 'pool-user-1',
+    capacityPoolScope: 'user' as const,
+    capacityPoolRevision: 2,
+    capacitySourceId: 'source-user-1',
+    capacityPoolCandidateId: 'candidate-user-large',
+    placementCredentialSource: 'user' as const,
+    placementCredentialReference: 'credentials:credential-user-1',
+    placementCredentialVersion: 42,
+    capacityPoolProjectId: null,
+    workloadRole: 'workspace' as const,
+    providerInstanceType: 'vc2-6c-16gb',
+    providerInstanceVcpuCount: 6,
+    providerInstanceMemoryMb: 16 * 1024,
+    providerInstanceDiskGb: 320,
+    providerInstancePriceDisplay: '~$80/mo',
+    providerInstancePriceCurrency: 'USD',
+    providerInstancePriceMonthlyCents: 8000,
+    providerInstancePriceHourlyMicros: 109589,
+    placementExplanationJson: JSON.stringify({ candidate: 'candidate-user-large' }),
+  };
+  return {
+    poolId: 'pool-user-1',
+    scope: 'user',
+    revision: 2,
+    strategy: 'pack',
+    capacityPoolProjectId: null,
+    workloadRole: 'workspace',
+    poolSnapshot: { ...snapshot, capacitySourceId: null, capacityPoolCandidateId: null },
+    candidates: [
+      {
+        id: 'candidate-user-large',
+        poolId: 'pool-user-1',
+        capacitySourceId: 'source-user-1',
+        provider: 'vultr',
+        location: 'ewr',
+        workloadRole: 'workspace',
+        runtime: 'vm',
+        machineClass: 'shared-vm',
+        machineSize: 'large',
+        providerInstanceType: 'vc2-6c-16gb',
+        providerInstanceVcpuCount: 6,
+        providerInstanceMemoryMb: 16 * 1024,
+        providerInstanceDiskGb: 320,
+        providerInstancePriceDisplay: '~$80/mo',
+        providerInstancePriceCurrency: 'USD',
+        providerInstancePriceMonthlyCents: 8000,
+        providerInstancePriceHourlyMicros: 109589,
+        priority: 0,
+        candidateOrder: 0,
+        credentialAttributionSource: 'user',
+        placementCredentialSource: 'user',
+        placementCredentialReference: 'credentials:credential-user-1',
+        placementCredentialVersion: 42,
+        capacityPoolProjectId: null,
+        snapshot,
+      },
+    ],
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   getRuntimeLimits.mockReturnValue({ nodeHeartbeatStaleSeconds: 180 });
@@ -207,6 +278,25 @@ beforeEach(() => {
 });
 
 describe('TaskRunner size-fallback descent', () => {
+  it('does not provision through legacy fallback when the selected pool has no candidates', async () => {
+    const { DATABASE } = createDbMock({});
+    const rc = createContext(DATABASE);
+    const state = createState({
+      capacityPoolSelection: {
+        ...capacityPoolSelection(),
+        candidates: [],
+      },
+    });
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      message: 'No active compute pool offerings in the selected user pool satisfy the requested resources.',
+      permanent: true,
+    });
+
+    expect(createNodeRecord).not.toHaveBeenCalled();
+    expect(provisionNode).not.toHaveBeenCalled();
+  });
+
   it('rechecks source authority after alarm entry and before creating a node record', async () => {
     const { DATABASE } = createDbMock({});
     const rc = createContext(DATABASE);
@@ -288,6 +378,53 @@ describe('TaskRunner size-fallback descent', () => {
     expect(state.config.vmSize).toBe('large');
     expect(findDowngradeWrite(runCalls)).toBeUndefined();
     expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
+  });
+
+  it('auto-provisions with the selected capacity-pool candidate target and task snapshot', async () => {
+    const { DATABASE, runCalls } = createDbMock({});
+    const rc = createContext(DATABASE);
+    const selection = capacityPoolSelection();
+    const state = createState({
+      vmSize: 'small',
+      vmSizeSource: 'project',
+      capacityPoolSelection: selection,
+    });
+
+    await handleNodeProvisioning(state, rc);
+
+    expect(createNodeRecord).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        vmSize: 'large',
+        vmLocation: 'ewr',
+        cloudProvider: 'vultr',
+        providerInstanceType: 'vc2-6c-16gb',
+        credentialAttributionSource: 'user',
+        capacityPlacementSnapshot: expect.objectContaining({
+          capacityPoolId: 'pool-user-1',
+          capacitySourceId: 'source-user-1',
+          capacityPoolCandidateId: 'candidate-user-large',
+          providerInstanceType: 'vc2-6c-16gb',
+        }),
+      })
+    );
+    expect(state.config.vmSize).toBe('large');
+    expect(state.config.vmLocation).toBe('ewr');
+    expect(state.config.cloudProvider).toBe('vultr');
+    expect(state.config.providerInstanceType).toBe('vc2-6c-16gb');
+    expect(state.stepResults.capacityPlacementSnapshot).toMatchObject({
+      capacityPoolId: 'pool-user-1',
+      capacitySourceId: 'source-user-1',
+      capacityPoolCandidateId: 'candidate-user-large',
+      providerInstanceType: 'vc2-6c-16gb',
+    });
+    expect(
+      runCalls.find(
+        (call) =>
+          call.sql.includes('auto_provisioned_node_id') &&
+          call.sql.includes('capacity_pool_candidate_id')
+      )?.args
+    ).toContain('candidate-user-large');
   });
 
   it('never downgrades an explicit size — fails with a clear message', async () => {
@@ -419,8 +556,23 @@ describe('TaskRunner size-fallback descent', () => {
         if (sql.includes('SELECT auto_provisioned_node_id FROM tasks')) {
           return { auto_provisioned_node_id: 'node-medium' };
         }
-        if (sql.includes('SELECT id, status, vm_size FROM nodes')) {
-          return { id: 'node-medium', status: 'running', vm_size: 'medium' };
+        if (sql.includes('vm_size AS vmSize')) {
+          return {
+            id: 'node-medium',
+            status: 'running',
+            vmSize: 'medium',
+            capacityPoolId: null,
+            capacityPoolScope: null,
+            capacityPoolRevision: null,
+            capacitySourceId: null,
+            capacityPoolCandidateId: null,
+            placementCredentialSource: null,
+            placementCredentialReference: null,
+            placementCredentialVersion: null,
+            capacityPoolProjectId: null,
+            workloadRole: null,
+            placementExplanationJson: null,
+          };
         }
         if (sql.includes('SELECT id, status, error_message FROM nodes')) {
           return { id: 'node-medium', status: 'running', error_message: null };
@@ -457,7 +609,7 @@ describe('TaskRunner size-fallback descent', () => {
         if (sql.includes('SELECT auto_provisioned_node_id FROM tasks')) {
           return { auto_provisioned_node_id: 'node-deleted' };
         }
-        if (sql.includes('SELECT id, status, vm_size FROM nodes')) {
+        if (sql.includes('vm_size AS vmSize')) {
           return null; // deleted row
         }
         return FALLTHROUGH;

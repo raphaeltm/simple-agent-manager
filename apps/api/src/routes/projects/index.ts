@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
 
 import type { Env } from '../../env';
-import { requireApproved,requireAuth } from '../../middleware/auth';
+import { requireApproved, requireAuth } from '../../middleware/auth';
 import { acpSessionRoutes } from './acp-sessions';
+import { capacityPoolRoutes } from './capacity-pools';
 import { credentialHealthRoutes } from './credential-health';
 import { projectCredentialsRoutes } from './credentials';
 import { crudRoutes } from './crud';
@@ -16,6 +17,7 @@ const projectsRoutes = new Hono<{ Bindings: Env }>();
 projectsRoutes.use('/*', requireAuth(), requireApproved());
 projectsRoutes.route('/', crudRoutes);
 projectsRoutes.route('/', acpSessionRoutes);
+projectsRoutes.route('/', capacityPoolRoutes);
 projectsRoutes.route('/', fileProxyRoutes);
 projectsRoutes.route('/', projectCredentialsRoutes);
 projectsRoutes.route('/', credentialHealthRoutes);

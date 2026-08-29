@@ -35,10 +35,27 @@ Every changed surface must be screenshotted at **both**:
 
 ### Screenshot Capture
 
-1. Store screenshots in `.codex/tmp/playwright-screenshots/` (gitignored)
+1. Store screenshots in `.tmp/playwright-screenshots/` (gitignored)
 2. Use descriptive filenames: `<component>-<scenario>-<viewport>.png`
    - Example: `task-list-long-text-mobile.png`, `task-detail-error-desktop.png`
 3. Wait at least 500ms after navigation before capturing to allow render settling
+4. Post desktop and mobile screenshots for every changed UI surface in a PR
+   comment. Local screenshot paths alone are not review evidence because they
+   disappear with the agent workspace.
+5. Link the screenshot comment, or embed the image links, in the PR body's
+   `UI Screenshot Evidence` section.
+
+### Preflight Enforcement
+
+The `scripts/quality/check-preflight-evidence.ts` checker enforces the UI evidence
+requirement as a CI gate for PRs that check `ui-change` in Agent Preflight. The
+`UI Screenshot Evidence` section must enumerate every changed surface under its own
+`#### Surface: <name>` heading, and each surface block must carry a **desktop**
+screenshot link and a **mobile** screenshot link (Markdown image, direct image URL,
+or a GitHub `#issuecomment-…` URL), plus the surface's mock/stress data and its
+screenshot quality review attestation. Global-only desktop/mobile links that are not
+bound to an enumerated surface are rejected — a single link cannot satisfy multiple
+changed surfaces. Keep this checker and this section aligned.
 
 ### What to Check in Screenshots
 
@@ -93,7 +110,7 @@ async function setupApiMocks(page: Page, options: { ... }) {
 async function screenshot(page: Page, name: string) {
   await page.waitForTimeout(600);
   await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
+    path: `../../.tmp/playwright-screenshots/${name}.png`,
     fullPage: true,
   });
 }
@@ -142,6 +159,21 @@ If any visual audit reveals:
 - Style inconsistencies with the design system
 
 You MUST fix the issue before proceeding. Do NOT defer visual bugs to a follow-up task.
+
+### PR Evidence Gate
+
+When a PR checks `ui-change` in Agent Preflight, CI requires a filled
+`UI Screenshot Evidence` section in the PR body. The section must enumerate every
+changed surface and, for each surface, include:
+
+1. A `#### Surface: <name>` heading identifying the surface.
+2. Desktop and mobile Playwright screenshot links for that surface (image link or
+   PR comment `#issuecomment-…` URL).
+3. The mock/edge-case data used to push that surface, not only happy-path data.
+4. An explicit quality-control attestation that the surface's screenshots were
+   reviewed for layout quality, overflow, clipping, readability, and responsive
+   behavior, plus the result: either no visual issues found, or the issues found
+   and fixed before handoff.
 
 ### Guided Flows Must Test the User Action
 

@@ -115,6 +115,9 @@ export const DEFAULT_TASK_RUNNER_RETRY_MAX_DELAY_MS = 60_000;
 /** Default health check poll interval (ms) for agent readiness. Override via TASK_RUNNER_AGENT_POLL_INTERVAL_MS env var. */
 export const DEFAULT_TASK_RUNNER_AGENT_POLL_INTERVAL_MS = 5_000;
 
+/** Default freshness skew (ms) tolerated between TaskRunner wait start, heartbeat, and /ready timestamps. Override via TASK_RUNNER_AGENT_READY_FRESHNESS_SKEW_MS env var. */
+export const DEFAULT_TASK_RUNNER_AGENT_READY_FRESHNESS_SKEW_MS = 30_000;
+
 /**
  * Default timeout (ms) for VM agent to become healthy after node provisioning.
  * Fresh VMs need cloud-init to complete: install packages, start Docker, set up

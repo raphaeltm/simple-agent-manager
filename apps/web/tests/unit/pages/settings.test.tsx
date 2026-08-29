@@ -55,12 +55,17 @@ vi.mock('../../../src/components/UserMenu', () => ({
   UserMenu: () => <div data-testid="user-menu">user-menu</div>,
 }));
 
+vi.mock('../../../src/components/project-settings/DefaultCapacityPoolsPanel', () => ({
+  DefaultCapacityPoolsPanel: () => <div data-testid="default-capacity-pools-panel" />,
+}));
+
 import { ToastProvider } from '../../../src/hooks/useToast';
 import { Settings } from '../../../src/pages/Settings';
 import { SettingsAgents } from '../../../src/pages/SettingsAgents';
 import { SettingsCloudProvider } from '../../../src/pages/SettingsCloudProvider';
 import { SettingsConnections } from '../../../src/pages/SettingsConnections';
 import { SettingsGitHub } from '../../../src/pages/SettingsGitHub';
+import { SettingsInfrastructure } from '../../../src/pages/SettingsInfrastructure';
 import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 function renderSettings(path = '/settings/cloud-provider') {
@@ -71,6 +76,7 @@ function renderSettings(path = '/settings/cloud-provider') {
           <Route path="/settings" element={<Settings />}>
             <Route index element={<Navigate to="cloud-provider" replace />} />
             <Route path="cloud-provider" element={<SettingsCloudProvider />} />
+            <Route path="infrastructure" element={<SettingsInfrastructure />} />
             <Route path="github" element={<SettingsGitHub />} />
             <Route path="connections" element={<SettingsConnections />} />
             <Route path="agents" element={<SettingsAgents />} />
@@ -102,6 +108,7 @@ describe('Settings shell', () => {
     });
 
     expect(screen.getByRole('tab', { name: 'Cloud Provider' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Infrastructure' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'GitHub' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Connections' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Agents' })).toBeInTheDocument();
@@ -125,6 +132,18 @@ describe('Settings shell', () => {
     await waitFor(() => {
       expect(screen.getByTestId('hetzner-token-form')).toHaveTextContent('connected');
     });
+    expect(screen.queryByTestId('default-capacity-pools-panel')).not.toBeInTheDocument();
+  });
+
+  it('renders infrastructure sub-route with the compute-pool panel', async () => {
+    renderSettings('/settings/infrastructure');
+
+    await waitFor(() => {
+      expect(mocks.listCredentials).toHaveBeenCalled();
+    });
+
+    expect(screen.getByRole('heading', { name: 'Infrastructure' })).toBeInTheDocument();
+    expect(screen.getByTestId('default-capacity-pools-panel')).toBeInTheDocument();
   });
 
   it('renders github sub-route', async () => {
@@ -138,6 +157,7 @@ describe('Settings shell', () => {
   });
 
   it.each([
+    ['/settings/infrastructure', 'default-capacity-pools-panel'],
     ['/settings/connections', 'connections-overview'],
     ['/settings/agents', 'agents-section'],
   ])('renders %s sub-route', async (path, testId) => {

@@ -34,8 +34,9 @@
 //     a session in the ProjectData Durable Object, not a D1 table).
 //
 // Credential tables:
-//   - `credentials`: Per-user credentials (BYOC model). Users provide their own
-//     cloud provider tokens and agent API keys. Encrypted per-user, cascade on
+//   - `credentials`: Legacy per-user/project credentials (BYOC model) plus
+//     non-user-facing capacity-source FK mirrors. Users provide their own cloud
+//     provider tokens and agent API keys. Encrypted per credential, cascade on
 //     user delete.
 //   - `platformCredentials`: Admin-managed fallback credentials shared across
 //     users. Used when a user lacks their own credential. No cascade on creator
@@ -54,6 +55,44 @@ import {
   text,
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
+
+const capacityPlacementColumns = () => ({
+  /** Capacity pool selected for placement/provisioning. Null for legacy rows. */
+  capacityPoolId: text('capacity_pool_id').references(() => capacityPools.id, {
+    onDelete: 'set null',
+  }),
+  /** Scope snapshot for the selected capacity pool: 'installation' | 'user' | 'project'. */
+  capacityPoolScope: text('capacity_pool_scope'),
+  /** Pool revision used for placement; copied so later edits do not rewrite audit history. */
+  capacityPoolRevision: integer('capacity_pool_revision'),
+  /** Capacity source selected from the pool. */
+  capacitySourceId: text('capacity_source_id').references(() => capacitySources.id, {
+    onDelete: 'set null',
+  }),
+  /** Capacity pool candidate selected for placement/provisioning. Snapshot only. */
+  capacityPoolCandidateId: text('capacity_pool_candidate_id'),
+  /** Credential provenance snapshot used for placement/provisioning, without secret material. */
+  placementCredentialSource: text('placement_credential_source'),
+  /** Non-secret reference to the canonical credential record used for placement/provisioning. */
+  placementCredentialReference: text('placement_credential_reference'),
+  /** Optional credential version snapshot for future rotating credential records. */
+  placementCredentialVersion: integer('placement_credential_version'),
+  /** Project scope snapshot for project-scoped pools. */
+  capacityPoolProjectId: text('capacity_pool_project_id').references(() => projects.id, {
+    onDelete: 'set null',
+  }),
+  /** Workload role used for placement, e.g. 'workspace' or 'deployment'. */
+  workloadRole: text('workload_role'),
+  /** Provider-native offering selected from a compute pool. */
+  providerInstanceType: text('provider_instance_type'),
+  providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
+  providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
+  providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+  providerInstancePriceDisplay: text('provider_instance_price_display'),
+  providerInstancePriceCurrency: text('provider_instance_price_currency'),
+  providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
+  providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
+});
 
 // =============================================================================
 // Users (BetterAuth compatible + custom fields)
@@ -892,6 +931,7 @@ export const tasks = sqliteTable(
     resolvedReservationJson: text('resolved_reservation_json'),
     /** JSON snapshot of PlacementExplanation (audit trail). */
     placementExplanationJson: text('placement_explanation_json'),
+    ...capacityPlacementColumns(),
     /** Durable VM admission status mirrored for UI/API visibility. */
     admissionState: text('admission_state'),
     /** Durable VM admission/backpressure reason mirrored for UI/API visibility. */
@@ -951,6 +991,18 @@ export const tasks = sqliteTable(
     admissionStateIdx: index('idx_tasks_admission_state')
       .on(table.admissionState)
       .where(sql`admission_state IS NOT NULL`),
+    capacityPoolIdx: index('idx_tasks_capacity_pool')
+      .on(table.capacityPoolId)
+      .where(sql`capacity_pool_id IS NOT NULL`),
+    capacitySourceIdx: index('idx_tasks_capacity_source')
+      .on(table.capacitySourceId)
+      .where(sql`capacity_source_id IS NOT NULL`),
+    capacityPoolCandidateIdx: index('idx_tasks_capacity_pool_candidate')
+      .on(table.capacityPoolCandidateId)
+      .where(sql`capacity_pool_candidate_id IS NOT NULL`),
+    capacityPoolProjectIdx: index('idx_tasks_capacity_pool_project')
+      .on(table.capacityPoolProjectId)
+      .where(sql`capacity_pool_project_id IS NOT NULL`),
   })
 );
 
@@ -1157,6 +1209,9 @@ export const nodes = sqliteTable(
     ),
     /** Credential attribution source used at node creation: 'user' | 'project' | 'platform'. */
     credentialAttributionSource: text('credential_attribution_source').default('user'),
+    ...capacityPlacementColumns(),
+    /** JSON snapshot of PlacementExplanation for node-level provisioning audit. */
+    placementExplanationJson: text('placement_explanation_json'),
     offboardingStatus: text('offboarding_status'),
     offboardingBlockedReason: text('offboarding_blocked_reason'),
     offboardingBlockedAt: text('offboarding_blocked_at'),
@@ -1191,6 +1246,18 @@ export const nodes = sqliteTable(
     userIdIdx: index('idx_nodes_user_id').on(table.userId),
     runtimeIdx: index('idx_nodes_runtime').on(table.runtime),
     nodeClassIdx: index('idx_nodes_node_class').on(table.nodeClass),
+    capacityPoolIdx: index('idx_nodes_capacity_pool')
+      .on(table.capacityPoolId)
+      .where(sql`capacity_pool_id IS NOT NULL`),
+    capacitySourceIdx: index('idx_nodes_capacity_source')
+      .on(table.capacitySourceId)
+      .where(sql`capacity_source_id IS NOT NULL`),
+    capacityPoolCandidateIdx: index('idx_nodes_capacity_pool_candidate')
+      .on(table.capacityPoolCandidateId)
+      .where(sql`capacity_pool_candidate_id IS NOT NULL`),
+    capacityPoolProjectIdx: index('idx_nodes_capacity_pool_project')
+      .on(table.capacityPoolProjectId)
+      .where(sql`capacity_pool_project_id IS NOT NULL`),
   })
 );
 
@@ -1240,6 +1307,7 @@ export const workspaces = sqliteTable(
     resolvedReservationJson: text('resolved_reservation_json'),
     /** JSON snapshot of PlacementExplanation for audit. */
     placementExplanationJson: text('placement_explanation_json'),
+    ...capacityPlacementColumns(),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -1265,6 +1333,18 @@ export const workspaces = sqliteTable(
     chatSessionIdUnique: uniqueIndex('idx_workspaces_chat_session_id_unique')
       .on(table.chatSessionId)
       .where(sql`chat_session_id IS NOT NULL`),
+    capacityPoolIdx: index('idx_workspaces_capacity_pool')
+      .on(table.capacityPoolId)
+      .where(sql`capacity_pool_id IS NOT NULL`),
+    capacitySourceIdx: index('idx_workspaces_capacity_source')
+      .on(table.capacitySourceId)
+      .where(sql`capacity_source_id IS NOT NULL`),
+    capacityPoolCandidateIdx: index('idx_workspaces_capacity_pool_candidate')
+      .on(table.capacityPoolCandidateId)
+      .where(sql`capacity_pool_candidate_id IS NOT NULL`),
+    capacityPoolProjectIdx: index('idx_workspaces_capacity_pool_project')
+      .on(table.capacityPoolProjectId)
+      .where(sql`capacity_pool_project_id IS NOT NULL`),
   })
 );
 
@@ -2321,7 +2401,7 @@ export const platformCredentials = sqliteTable(
   {
     id: text('id').primaryKey(),
     credentialType: text('credential_type').notNull(), // 'cloud-provider' | 'agent-api-key'
-    /** Null for agent-api-key type. Set to 'hetzner' | 'scaleway' | 'gcp' for cloud-provider type. */
+    /** Null for agent-api-key type. Set to a supported provider id for cloud-provider type. */
     provider: text('provider'),
     /** Null for cloud-provider type. Set to 'claude-code' | 'openai-codex' for agent-api-key type. */
     agentType: text('agent_type'),
@@ -2357,6 +2437,186 @@ export const platformCredentials = sqliteTable(
 
 export type PlatformCredentialRow = typeof platformCredentials.$inferSelect;
 export type NewPlatformCredentialRow = typeof platformCredentials.$inferInsert;
+
+// =============================================================================
+// Capacity Pools
+// =============================================================================
+
+/**
+ * Non-secret identity for something SAM can schedule capacity from. Cloud-provider sources point
+ * at canonical credential rows; future registered-runner and instant-runtime sources do not require
+ * credentials here.
+ */
+export const capacitySources = sqliteTable(
+  'capacity_sources',
+  {
+    id: text('id').primaryKey(),
+    scope: text('scope').notNull(),
+    ownerUserId: text('owner_user_id').references(() => users.id, { onDelete: 'cascade' }),
+    ownerProjectId: text('owner_project_id').references(() => projects.id, {
+      onDelete: 'cascade',
+    }),
+    sourceKind: text('source_kind').notNull(),
+    provider: text('provider'),
+    credentialSource: text('credential_source'),
+    credentialId: text('credential_id').references(() => credentials.id, { onDelete: 'cascade' }),
+    platformCredentialId: text('platform_credential_id').references(() => platformCredentials.id, {
+      onDelete: 'cascade',
+    }),
+    credentialReference: text('credential_reference'),
+    credentialVersion: integer('credential_version'),
+    externalSourceRef: text('external_source_ref'),
+    status: text('status').notNull().default('active'),
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    ownerUserIdx: index('idx_capacity_sources_owner_user')
+      .on(table.ownerUserId)
+      .where(sql`owner_user_id IS NOT NULL`),
+    ownerProjectIdx: index('idx_capacity_sources_owner_project')
+      .on(table.ownerProjectId)
+      .where(sql`owner_project_id IS NOT NULL`),
+    credentialIdx: index('idx_capacity_sources_credential')
+      .on(table.credentialId)
+      .where(sql`credential_id IS NOT NULL`),
+    platformCredentialIdx: index('idx_capacity_sources_platform_credential')
+      .on(table.platformCredentialId)
+      .where(sql`platform_credential_id IS NOT NULL`),
+  })
+);
+
+/**
+ * Product-neutral pool policy. V1 resolves at most one default pool per scope using
+ * project -> user -> installation precedence; multiple rows and fallback links support future waves.
+ */
+export const capacityPools = sqliteTable(
+  'capacity_pools',
+  {
+    id: text('id').primaryKey(),
+    scope: text('scope').notNull(),
+    ownerUserId: text('owner_user_id').references(() => users.id, { onDelete: 'cascade' }),
+    ownerProjectId: text('owner_project_id').references(() => projects.id, {
+      onDelete: 'cascade',
+    }),
+    name: text('name').notNull(),
+    isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
+    revision: integer('revision').notNull().default(1),
+    status: text('status').notNull().default('active'),
+    strategy: text('strategy').notNull().default('balanced'),
+    exhaustionPolicy: text('exhaustion_policy').notNull().default('queue'),
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    defaultInstallationUnique: uniqueIndex('idx_capacity_pools_default_installation')
+      .on(table.scope)
+      .where(sql`scope = 'installation' AND is_default = 1`),
+    defaultUserUnique: uniqueIndex('idx_capacity_pools_default_user')
+      .on(table.ownerUserId)
+      .where(sql`scope = 'user' AND is_default = 1`),
+    defaultProjectUnique: uniqueIndex('idx_capacity_pools_default_project')
+      .on(table.ownerProjectId)
+      .where(sql`scope = 'project' AND is_default = 1`),
+    scopeStatusIdx: index('idx_capacity_pools_scope_status').on(table.scope, table.status),
+  })
+);
+
+/** Candidate capacity entries ranked within a pool. */
+export const capacityPoolCandidates = sqliteTable(
+  'capacity_pool_candidates',
+  {
+    id: text('id').primaryKey(),
+    poolId: text('pool_id')
+      .notNull()
+      .references(() => capacityPools.id, { onDelete: 'cascade' }),
+    capacitySourceId: text('capacity_source_id')
+      .notNull()
+      .references(() => capacitySources.id, { onDelete: 'cascade' }),
+    provider: text('provider'),
+    location: text('location'),
+    workloadRole: text('workload_role').notNull().default('workspace'),
+    runtime: text('runtime'),
+    machineClass: text('machine_class'),
+    machineSize: text('machine_size'),
+    /** Provider-native instance type/SKU selected by this candidate. */
+    providerInstanceType: text('provider_instance_type'),
+    providerInstanceSku: text('provider_instance_sku'),
+    providerInstanceDisplayName: text('provider_instance_display_name'),
+    /** Normalized concrete offering capacity and price metadata. */
+    providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
+    providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
+    providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+    providerInstancePriceDisplay: text('provider_instance_price_display'),
+    providerInstancePriceCurrency: text('provider_instance_price_currency'),
+    providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
+    providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
+    providerInstanceCatalogSource: text('provider_instance_catalog_source'),
+    providerInstanceCatalogLastSeenAt: text('provider_instance_catalog_last_seen_at'),
+    priority: integer('priority').notNull().default(0),
+    candidateOrder: integer('candidate_order').notNull().default(0),
+    status: text('status').notNull().default('active'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    poolStatusOrderIdx: index('idx_capacity_pool_candidates_pool_status_order').on(
+      table.poolId,
+      table.status,
+      table.priority,
+      table.candidateOrder
+    ),
+    sourceIdx: index('idx_capacity_pool_candidates_source').on(table.capacitySourceId),
+  })
+);
+
+/** Future fallback-chain edges between pools. No current scheduler behavior reads this table. */
+export const capacityPoolFallbacks = sqliteTable(
+  'capacity_pool_fallbacks',
+  {
+    poolId: text('pool_id')
+      .notNull()
+      .references(() => capacityPools.id, { onDelete: 'cascade' }),
+    fallbackPoolId: text('fallback_pool_id')
+      .notNull()
+      .references(() => capacityPools.id, { onDelete: 'cascade' }),
+    fallbackOrder: integer('fallback_order').notNull().default(0),
+    condition: text('condition'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.poolId, table.fallbackPoolId] }),
+    orderUnique: uniqueIndex('idx_capacity_pool_fallbacks_order').on(
+      table.poolId,
+      table.fallbackOrder
+    ),
+  })
+);
+
+export type CapacitySource = typeof capacitySources.$inferSelect;
+export type NewCapacitySource = typeof capacitySources.$inferInsert;
+export type CapacityPool = typeof capacityPools.$inferSelect;
+export type NewCapacityPool = typeof capacityPools.$inferInsert;
+export type CapacityPoolCandidate = typeof capacityPoolCandidates.$inferSelect;
+export type NewCapacityPoolCandidate = typeof capacityPoolCandidates.$inferInsert;
+export type CapacityPoolFallback = typeof capacityPoolFallbacks.$inferSelect;
+export type NewCapacityPoolFallback = typeof capacityPoolFallbacks.$inferInsert;
 
 // =============================================================================
 // Compute Usage

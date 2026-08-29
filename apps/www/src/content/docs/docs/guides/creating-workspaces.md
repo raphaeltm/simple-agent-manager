@@ -112,6 +112,10 @@ SAM offers small, medium, and large sizes, trading cost for CPU and memory:
 
 Exact specs and pricing are shown in the size picker when you create a workspace and vary by cloud provider. Start with **Medium** for most work, and set a per-project default in project settings.
 
+Projects that use Infrastructure Compute Pools can go beyond the three legacy size presets. Pool
+editors reconcile from the selected provider credential's native instance catalog and let you add or
+remove concrete offerings by provider, location, vCPU, memory, and price.
+
 :::note
 Creating a workspace directly (rather than through chat) is an advanced path intended for hands-on infrastructure control. It requires a project to already be imported, and — on a self-hosted instance — a connected [cloud provider](#where-your-workspaces-run-bring-your-own-cloud). On the hosted platform, compute is typically provided for you.
 :::

@@ -234,6 +234,28 @@ describe('HetznerProvider lifecycle', () => {
       expect(fetch).toHaveBeenCalledTimes(DEFAULT_HETZNER_MAX_LIST_PAGES);
     });
 
+    it('honors explicit Hetzner max-page tuning for server pagination', async () => {
+      const tunedProvider = new HetznerProvider(
+        'token',
+        'fsn1',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { maxListPages: 3 }
+      );
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        const page = Number(new URL(url).searchParams.get('page') || '1');
+        return new Response(JSON.stringify({
+          servers: [],
+          meta: { pagination: { page, next_page: page + 1 } },
+        }), { status: 200 });
+      });
+
+      await expect(tunedProvider.listVMs()).rejects.toThrow(/exceeded 3 pages/);
+      expect(fetch).toHaveBeenCalledTimes(3);
+    });
+
     it('should return empty array when no VMs match', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(
         new Response(JSON.stringify({ servers: [] }), { status: 200 }),

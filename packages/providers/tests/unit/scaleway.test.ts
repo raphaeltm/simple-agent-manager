@@ -293,6 +293,15 @@ describe('ScalewayProvider', () => {
       ]);
     });
 
+    it('uses config.instanceType as the concrete commercial_type when provided', async () => {
+      globalThis.fetch = createScalewayFetchMock();
+
+      await provider.createVM({ ...vmConfig, size: 'small', instanceType: 'GP1-S' });
+
+      const body = jsonBody(fetchCall(fetch as ReturnType<typeof vi.fn>, 1).init);
+      expect(body.commercial_type).toBe('GP1-S');
+    });
+
     it('should use X-Auth-Token header', async () => {
       globalThis.fetch = createScalewayFetchMock();
 

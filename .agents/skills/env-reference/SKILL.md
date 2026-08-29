@@ -16,7 +16,8 @@ The reference covers:
   - Cloudflare Container instant-session runtime flags
   - Resource limits (MAX_NODES_PER_USER, MAX_AGENT_SESSIONS_PER_WORKSPACE, etc.)
   - Pagination settings
-  - Timeouts (heartbeat, Hetzner API, Cloudflare API, Node Agent)
+  - Timeouts and retry controls (TaskRunner readiness/provisioning, heartbeat, Hetzner API/capacity retry, Cloudflare API, Node Agent)
+  - Provider runtime tuning (including Hetzner list-page bounds)
   - VM agent rollout requirement (`VM_AGENT_REQUIRED_VERSION`)
   - Audio/Transcription settings
   - Client error reporting settings

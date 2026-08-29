@@ -54,6 +54,20 @@ const providerCredentialMocks = vi.hoisted(() => ({
 
 vi.mock('../../../src/services/provider-credentials', () => providerCredentialMocks);
 
+const placementMocks = vi.hoisted(() => ({
+  resolveTaskStartPlacementCredentialAttributionFromPlacement: vi.fn(),
+}));
+
+vi.mock('../../../src/services/placement-resolver', async (importActual) => {
+  const actual =
+    await importActual<typeof import('../../../src/services/placement-resolver')>();
+  return {
+    ...actual,
+    resolveTaskStartPlacementCredentialAttributionFromPlacement:
+      placementMocks.resolveTaskStartPlacementCredentialAttributionFromPlacement,
+  };
+});
+
 let ulidCounter = 0;
 vi.mock('../../../src/lib/ulid', () => ({
   ulid: () => `ULID${String(++ulidCounter).padStart(6, '0')}`,
@@ -138,6 +152,26 @@ function queueTriggerSubmitLookups(project = triggerProjectRow()) {
   );
 }
 
+function placementResolution(
+  overrides: Record<string, unknown> = {}
+) {
+  return {
+    placement: expect.anything(),
+    credential: {
+      credentialSource: 'user',
+      providerName: 'hetzner',
+    },
+    capacityPoolSelection: null,
+    quotaCredentialSource: 'user',
+    capacityPlacementSnapshot: null,
+    effectiveProvider: 'hetzner',
+    credentialAttributionUserId: 'user-1',
+    credentialAttributionProjectId: null,
+    credentialAttributionSource: 'user',
+    ...overrides,
+  };
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -151,6 +185,9 @@ describe('submitTriggeredTask', () => {
       credentialSource: 'user',
       providerName: 'hetzner',
     });
+    placementMocks.resolveTaskStartPlacementCredentialAttributionFromPlacement.mockResolvedValue(
+      placementResolution()
+    );
     vi.mocked(taskRunnerDo.startTaskRunnerDO).mockResolvedValue(undefined);
     vi.mocked(taskRunnerDo.ensureTaskRunnerStarted).mockResolvedValue(false);
   });
@@ -178,10 +215,18 @@ describe('submitTriggeredTask', () => {
   });
 
   it('pins project credential attribution for member A trigger even if another member edited it', async () => {
-    providerCredentialMocks.resolveCredentialSource.mockResolvedValueOnce({
-      credentialSource: 'project',
-      providerName: 'hetzner',
-    });
+    placementMocks.resolveTaskStartPlacementCredentialAttributionFromPlacement.mockResolvedValueOnce(
+      placementResolution({
+        credential: {
+          credentialSource: 'project',
+          providerName: 'hetzner',
+        },
+        quotaCredentialSource: 'project',
+        credentialAttributionUserId: 'member-a',
+        credentialAttributionProjectId: 'project-1',
+        credentialAttributionSource: 'project',
+      })
+    );
     queueTriggerSubmitLookups(triggerProjectRow({ userId: 'member-b' }));
 
     const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
@@ -191,11 +236,21 @@ describe('submitTriggeredTask', () => {
       projectId: 'project-1',
     });
 
-    expect(providerCredentialMocks.resolveCredentialSource).toHaveBeenCalledWith(
+    expect(
+      placementMocks.resolveTaskStartPlacementCredentialAttributionFromPlacement
+    ).toHaveBeenCalledWith(
       expect.anything(),
-      'member-a',
-      undefined,
-      'project-1'
+      expect.objectContaining({
+        projectId: 'project-1',
+        userId: 'member-a',
+        credentialLookup: expect.objectContaining({
+          projectId: 'project-1',
+          userId: 'member-a',
+        }),
+      }),
+      expect.objectContaining({
+        credentialsRequiredMessage: expect.stringContaining('trigger trigger-1'),
+      })
     );
     const insertCall = mockInsertValues.mock.calls[0]![0];
     expect(insertCall.credentialAttributionUserId).toBe('member-a');
@@ -336,7 +391,10 @@ describe('submitTriggeredTask', () => {
   });
 
   it('throws when user has no cloud provider credentials', async () => {
-    providerCredentialMocks.resolveCredentialSource.mockResolvedValueOnce(null);
+    placementMocks.resolveTaskStartPlacementCredentialAttributionFromPlacement.mockResolvedValueOnce({
+      error: 'No cloud provider credentials available for trigger trigger-1',
+      errorKind: 'credentials',
+    });
     mockSelectResult.push([triggerProjectRow({ installationId: 'i1' })]);
 
     const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');

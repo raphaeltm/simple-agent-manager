@@ -1,6 +1,7 @@
-import type { VMSize } from '@simple-agent-manager/shared';
+import type { CredentialProvider, VMSize } from '@simple-agent-manager/shared';
 import { DEFAULT_VULTR_OS_NAME, DEFAULT_VULTR_REGION } from '@simple-agent-manager/shared';
 
+import { getProviderCatalogOfferings } from './instance-offerings';
 import { kvTagsToLabels, labelsToKvTags } from './kv-tags';
 import {
   providerDelay,
@@ -12,6 +13,7 @@ import type {
   LocationMeta,
   Provider,
   ProviderLogger,
+  ProviderOfferingListOptions,
   ProviderRequestContext,
   SizeConfig,
   VMConfig,
@@ -63,6 +65,7 @@ export {
   findVultrOs,
   mapVultrStatus,
   VULTR_LOCATIONS,
+  VULTR_SIZE_CONFIGS,
   type VultrProviderRuntimeOptions,
 } from './vultr-metadata';
 
@@ -118,6 +121,7 @@ export class VultrProvider implements Provider {
       });
     }
     const region = config.location || this.region;
+    const plan = config.instanceType ?? sizeConfig.type;
     const osId = await this.resolveOsId(config.image, context);
     throwIfProviderRequestAborted(context);
 
@@ -127,7 +131,7 @@ export class VultrProvider implements Provider {
         method: 'POST',
         body: JSON.stringify({
           region,
-          plan: sizeConfig.type,
+          plan,
           os_id: osId,
           label: config.name,
           hostname: sanitizeVultrHostname(config.name),
@@ -210,6 +214,18 @@ export class VultrProvider implements Provider {
     await this.vultrFetch('/account', undefined, undefined, context);
     throwIfProviderRequestAborted(context);
     return true;
+  }
+
+  async listInstanceOfferings(
+    _options?: ProviderOfferingListOptions,
+    context?: ProviderRequestContext
+  ) {
+    throwIfProviderRequestAborted(context);
+    return getProviderCatalogOfferings(
+      this.name as CredentialProvider,
+      this.locations,
+      this.locationMetadata
+    );
   }
 
   createVolume(config: VolumeConfig, context?: ProviderRequestContext): Promise<VolumeInstance> {

@@ -112,7 +112,14 @@ SAM's Bring-Your-Own-Cloud model now spans **seven providers**. Vultr, DigitalOc
 
 Connect one under **Settings → Connections**: pick a provider, follow the linked console to create a credential, and paste it in. See [Bring Your Own Cloud](/docs/guides/creating-workspaces/#where-your-workspaces-run-bring-your-own-cloud) for the full provider table and [User VM Costs](/docs/guides/self-hosting/#user-vm-costs) for per-provider sizes and example pricing.
 
-A cloud credential is what lets you submit tasks at all. To work without one, use an agent profile set to the **Instant container** runtime — see [Instant Sessions](/docs/guides/instant-sessions/#am-i-on-an-instant-session).
+SAM resolves compute through project, personal, then platform/installation credentials. If none of those are available for your workspace, use an agent profile set to the **Instant container** runtime — see [Instant Sessions](/docs/guides/instant-sessions/#am-i-on-an-instant-session).
+
+Infrastructure **Compute Pools** now expose the concrete provider-native catalog behind those
+credentials. Project, personal, and installation pools can be reconciled from the full provider
+catalog, then edited by adding or removing specific instance types and filtering by provider,
+location, vCPU, memory, and price. Removed entries stay removed until you add them back, and old
+small/medium/large presets are only used as migration hints for older profiles rather than as the
+editing catalog.
 
 ### Claude Opus 5 is available
 

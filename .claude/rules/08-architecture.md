@@ -58,7 +58,7 @@ Before making ANY changes related to architecture, secrets, credentials, data mo
 
 ### Architecture Principles (Quick Reference)
 
-1. **Bring-Your-Own-Cloud (BYOC)**: Users provide their own Hetzner tokens. The platform does NOT have cloud provider credentials.
+1. **Bring-Your-Own-Cloud (BYOC) with platform fallback**: Users can provide their own cloud provider tokens, and administrators can configure enabled platform compute credentials for installation fallback. A user cloud credential is not required when SAM resolves to that platform fallback.
 2. **User credentials are encrypted per-user** in the database, NOT stored as environment variables or Worker secrets.
 3. **Platform secrets** (ENCRYPTION_KEY, JWT keys, CF_API_TOKEN) are Cloudflare Worker secrets set during deployment.
 
