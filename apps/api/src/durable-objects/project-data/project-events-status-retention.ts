@@ -33,6 +33,16 @@ const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const TERMINAL_BATCH_STATES_SQL =
   "'recorded_not_injected', 'delivered', 'acked', 'failed', 'ambiguous', 'expired', 'cancelled'";
 const TERMINAL_MATCH_STATES_SQL = "'recorded_not_injected', 'expired', 'cancelled'";
+const RETENTION_SAFE_BATCH_PREDICATE = `(
+  COALESCE(ack_required, 0) = 0
+  OR acked_at IS NOT NULL
+  OR state IN ('acked', 'failed', 'ambiguous', 'expired', 'cancelled')
+)`;
+const RETENTION_SAFE_MATCH_BATCH_PREDICATE = `(
+  COALESCE(b.ack_required, 0) = 0
+  OR b.acked_at IS NOT NULL
+  OR b.state IN ('acked', 'failed', 'ambiguous', 'expired', 'cancelled')
+)`;
 
 export function getProjectEventRecentStatus(
   sql: SqlStorage,
@@ -136,6 +146,7 @@ export function runProjectEventRetention(
             AND b.id = project_event_matches.batch_id
             AND b.updated_at < ?
             AND b.state IN (${TERMINAL_BATCH_STATES_SQL})
+            AND ${RETENTION_SAFE_MATCH_BATCH_PREDICATE}
         )
       )
     )`,
@@ -148,7 +159,7 @@ export function runProjectEventRetention(
     timestampColumn: 'updated_at',
     cutoff,
     limit: batchLimit,
-    extraWhere: `AND state IN (${TERMINAL_BATCH_STATES_SQL})`,
+    extraWhere: `AND state IN (${TERMINAL_BATCH_STATES_SQL}) AND ${RETENTION_SAFE_BATCH_PREDICATE}`,
   });
   const deletedEvents = deleteOldEventsWithoutMatches(sql, projectId, cutoff, batchLimit);
   const accounting = refreshProjectEventStorageAccounting(sql, projectId, now);
@@ -205,7 +216,7 @@ export function refreshProjectEventStorageAccounting(
       projectId,
       'project_event_delivery_batches',
       'created_at',
-      'LENGTH(match_ids_json) + COALESCE(LENGTH(terminal_reason), 0)',
+      'LENGTH(match_ids_json) + COALESCE(LENGTH(terminal_reason), 0) + COALESCE(LENGTH(acked_by_id), 0)',
       measuredAt
     ),
     accountingFor(

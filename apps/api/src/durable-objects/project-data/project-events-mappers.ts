@@ -157,6 +157,7 @@ export function mapProjectEventDeliveryBatch(row: unknown): ProjectEventDelivery
     subscriptionId: parsed.subscription_id,
     idempotencyKey: parsed.idempotency_key,
     state: parsed.state,
+    ackRequired: parsed.ack_required === 1,
     requestedDelivery: parsed.requested_delivery,
     resolvedDelivery: parsed.resolved_delivery,
     adapterDecision: parseAdapterDecisionColumn(
@@ -176,6 +177,9 @@ export function mapProjectEventDeliveryBatch(row: unknown): ProjectEventDelivery
     eventCount: parsed.event_count,
     createdAt: parsed.created_at,
     updatedAt: parsed.updated_at,
+    deliveredAt: parsed.delivered_at,
+    ackedAt: parsed.acked_at,
+    ackedBy: ownerFromColumns(parsed.acked_by_type, parsed.acked_by_id, parsed.acked_by_name),
     terminalAt: parsed.terminal_at,
     terminalReason: parsed.terminal_reason,
   };

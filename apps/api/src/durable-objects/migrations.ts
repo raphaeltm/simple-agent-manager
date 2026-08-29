@@ -1584,6 +1584,29 @@ export const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    name: '040-project-event-pull-ack',
+    run: (sql) => {
+      for (const statement of [
+        `ALTER TABLE project_event_delivery_batches ADD COLUMN ack_required INTEGER NOT NULL DEFAULT 0`,
+        `ALTER TABLE project_event_delivery_batches ADD COLUMN delivered_at INTEGER`,
+        `ALTER TABLE project_event_delivery_batches ADD COLUMN acked_at INTEGER`,
+        `ALTER TABLE project_event_delivery_batches ADD COLUMN acked_by_type TEXT`,
+        `ALTER TABLE project_event_delivery_batches ADD COLUMN acked_by_id TEXT`,
+        `ALTER TABLE project_event_delivery_batches ADD COLUMN acked_by_name TEXT`,
+      ]) {
+        try {
+          sql.exec(statement);
+        } catch {
+          // Additive compatibility: local/dev databases may already have a draft column.
+        }
+      }
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_project_subscription_replay
+        ON project_event_matches(project_id, subscription_id, matched_at ASC, id ASC)
+      `);
+    },
+  },
 ];
 
 /**

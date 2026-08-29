@@ -49,17 +49,21 @@ import type { Env } from './types';
 import { generateId } from './types';
 
 export type {
+  AckProjectEventDeliveryInput,
   AdmitProjectEventInput,
   CancelProjectEventSubscriptionInput,
   CreateProjectEventDeliveryBatchInput,
   CreateProjectEventSubscriptionInput,
   ExpireProjectEventSubscriptionsInput,
+  GetProjectEventInput,
   GetProjectEventRecentStatusInput,
   GetProjectEventSubscriptionInput,
   ListProjectEventDeliveryAttemptsInput,
   ListProjectEventDeliveryBatchesInput,
+  ListProjectEventSubscriptionEventsInput,
   ListProjectEventSubscriptionsInput,
   ProjectEventAdmissionResult,
+  ProjectEventDeliveryAckResult,
   ProjectEventDeliveryAttemptListResult,
   ProjectEventDeliveryAttemptMutationResult,
   ProjectEventDeliveryBatchListResult,
@@ -67,12 +71,17 @@ export type {
   ProjectEventExpireSubscriptionsResult,
   ProjectEventRecentStatus,
   ProjectEventRetentionResult,
+  ProjectEventSubscriptionEvent,
+  ProjectEventSubscriptionEventListResult,
   ProjectEventSubscriptionListResult,
   ProjectEventSubscriptionMutationResult,
   RecordProjectEventDeliveryAttemptInput,
   RunProjectEventRetentionInput,
 } from './project-events-contracts';
 export {
+  ProjectEventAckPolicyError,
+  ProjectEventAckStateError,
+  ProjectEventCursorError,
   ProjectEventIdempotencyConflictError,
   ProjectEventLimitExceededError,
   ProjectEventNotFoundError,
@@ -91,6 +100,11 @@ export {
 } from './project-events-delivery-resolver';
 export { resolveProjectEventLimits } from './project-events-limits';
 export { compileProjectEventFilter } from './project-events-normalization';
+export {
+  ackProjectEventDelivery,
+  getProjectEvent,
+  listProjectEventSubscriptionEvents,
+} from './project-events-pull';
 export {
   getProjectEventRecentStatus,
   refreshProjectEventStorageAccounting,

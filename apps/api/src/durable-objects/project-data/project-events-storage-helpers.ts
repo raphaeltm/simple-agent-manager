@@ -531,16 +531,17 @@ export function updateBatchForAttempt(
 ): void {
   const batchState = batchStateForAttempt(attemptState);
   const terminalAt = attemptState === 'retry' ? null : now;
+  const deliveredAtExpression =
+    attemptState === 'accepted' ? 'delivered_at = COALESCE(delivered_at, ?),' : '';
+  const params =
+    attemptState === 'accepted'
+      ? [batchState, now, now, terminalAt, reason, projectId, batchId]
+      : [batchState, now, terminalAt, reason, projectId, batchId];
   sql.exec(
     `UPDATE project_event_delivery_batches
-     SET state = ?, updated_at = ?, terminal_at = ?, terminal_reason = COALESCE(?, terminal_reason)
+     SET state = ?, updated_at = ?, ${deliveredAtExpression} terminal_at = ?, terminal_reason = COALESCE(?, terminal_reason)
      WHERE project_id = ? AND id = ?`,
-    batchState,
-    now,
-    terminalAt,
-    reason,
-    projectId,
-    batchId
+    ...params
   );
 }
 

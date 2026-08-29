@@ -73,8 +73,7 @@ const DELIVERY_TARGET_SCHEMA = {
     },
     agentId: {
       type: 'string',
-      description:
-        'Optional safety check. If provided, it must match the calling agent session.',
+      description: 'Optional safety check. If provided, it must match the calling agent session.',
     },
   },
   additionalProperties: false,
@@ -84,7 +83,7 @@ export const PROJECT_EVENT_SUBSCRIPTION_TOOLS = [
   {
     name: 'create_project_event_subscription',
     description:
-      'Create or replay a short-lived ProjectData event subscription owned by the calling task agent. Project, owner, session, task, and agent identity are derived from the MCP token; do not provide projectId or owner. Delivery selection records intent only in this wave and does not inject prompts or steer runtimes.',
+      'Create or replay a short-lived ProjectData event subscription owned by the calling task agent. Project, owner, session, task, and agent identity are derived from the MCP token; do not provide projectId or owner. After creating, call list_subscription_events with the returned subscriptionId to replay missed/queued matching events, get_event for full stored event details, then ack_event_delivery after processing each delivery. Delivery selection records intent only in this wave and does not inject prompts, steer runtimes, interrupt runtimes, or spawn tasks.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -98,7 +97,7 @@ export const PROJECT_EVENT_SUBSCRIPTION_TOOLS = [
           type: 'string',
           enum: PROJECT_EVENT_REQUESTED_DELIVERY_MODES,
           description:
-            'Requested delivery policy. B3 stores this separately from matching/routing and resolves non-record-only modes to recorded_not_injected.',
+            'Requested delivery policy. The current pull model records this separately from matching/routing and resolves non-record-only modes to recorded_not_injected until a future delivery adapter wave explicitly enables injection.',
         },
         target: DELIVERY_TARGET_SCHEMA,
         reason: {
@@ -118,7 +117,7 @@ export const PROJECT_EVENT_SUBSCRIPTION_TOOLS = [
   {
     name: 'list_project_event_subscriptions',
     description:
-      'List the calling task agent’s own ProjectData event subscriptions for the current session. Project and owner are derived from the MCP token.',
+      'List the calling task agent’s own ProjectData event subscriptions for the current session. Use this to recover the subscriptionId before list_subscription_events. Project and owner are derived from the MCP token.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -139,7 +138,7 @@ export const PROJECT_EVENT_SUBSCRIPTION_TOOLS = [
   {
     name: 'get_project_event_subscription',
     description:
-      'Get one ProjectData event subscription owned by the calling task agent in the current session. Missing subscriptions error by default; set required=false for optional checks.',
+      'Get one ProjectData event subscription owned by the calling task agent in the current session, including filters, target, and recorded delivery preference. Missing subscriptions error by default; set required=false for optional checks.',
     inputSchema: {
       type: 'object' as const,
       properties: {

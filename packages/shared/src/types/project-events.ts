@@ -405,6 +405,7 @@ export type ProjectEventDeliveryBatchRecord = {
   subscriptionId: string;
   idempotencyKey: string;
   state: ProjectEventDeliveryBatchState;
+  ackRequired: boolean;
   requestedDelivery: ProjectEventRequestedDeliveryMode;
   resolvedDelivery: ProjectEventResolvedDeliveryMode;
   adapterDecision: ProjectEventDeliveryAdapterDecision;
@@ -413,6 +414,9 @@ export type ProjectEventDeliveryBatchRecord = {
   eventCount: number;
   createdAt: number;
   updatedAt: number;
+  deliveredAt: number | null;
+  ackedAt: number | null;
+  ackedBy: ProjectEventSubscriptionOwner | null;
   terminalAt: number | null;
   terminalReason: string | null;
 };
@@ -448,6 +452,96 @@ export type ListProjectEventDeliveryBatchesInput = {
 export type ProjectEventDeliveryBatchListResult = {
   batches: ProjectEventDeliveryBatchRecord[];
   hasMore: boolean;
+};
+
+export type ProjectEventAgentVisibility = {
+  owner: ProjectEventSubscriptionOwner;
+  target: NonNullable<ProjectEventDeliveryPreference['target']>;
+};
+
+export type ProjectEventPullDeliveryInfo = {
+  id: string;
+  subscriptionId: string;
+  state: ProjectEventDeliveryBatchState;
+  ackRequired: boolean;
+  requestedDelivery: ProjectEventRequestedDeliveryMode;
+  resolvedDelivery: ProjectEventResolvedDeliveryMode;
+  createdAt: number;
+  deliveredAt: number | null;
+  acknowledgedAt: number | null;
+};
+
+export type ProjectEventPullDeliveryRecord = ProjectEventPullDeliveryInfo & {
+  eventId: string | null;
+  eventIds: string[];
+};
+
+export type ProjectEventSubscriptionEventSummary = Pick<
+  ProjectEventRecord,
+  | 'id'
+  | 'source'
+  | 'eventType'
+  | 'subject'
+  | 'severity'
+  | 'metadata'
+  | 'display'
+  | 'occurredAt'
+  | 'receivedAt'
+> & {
+  matchId: string;
+  payloadRefAvailable: boolean;
+  delivery: ProjectEventPullDeliveryInfo;
+};
+
+export type ProjectEventSubscriptionEvent = ProjectEventSubscriptionEventSummary &
+  Pick<
+    ProjectEventRecord,
+    | 'projectId'
+    | 'contractVersion'
+    | 'deliveryKey'
+    | 'payloadFingerprint'
+    | 'rawPayloadRef'
+    | 'updatedAt'
+    | 'state'
+    | 'duplicateCount'
+    | 'conflictCount'
+    | 'conflictFingerprint'
+    | 'conflictDetectedAt'
+  >;
+
+export type ListProjectEventSubscriptionEventsInput = {
+  projectId: string;
+  subscriptionId: string;
+  visibility: ProjectEventAgentVisibility;
+  limit?: number | null;
+  cursor?: string | null;
+  cursorMaxLength?: number | null;
+};
+
+export type ProjectEventSubscriptionEventListResult = {
+  subscriptionId: string;
+  events: ProjectEventSubscriptionEventSummary[];
+  nextCursor: string | null;
+  hasMore: boolean;
+};
+
+export type GetProjectEventInput = {
+  projectId: string;
+  eventId: string;
+  visibility: ProjectEventAgentVisibility;
+};
+
+export type AckProjectEventDeliveryInput = {
+  projectId: string;
+  deliveryId: string;
+  visibility: ProjectEventAgentVisibility;
+  acknowledgedBy: ProjectEventSubscriptionOwner;
+};
+
+export type ProjectEventDeliveryAckResult = {
+  acknowledged: true;
+  idempotent: boolean;
+  delivery: ProjectEventPullDeliveryRecord;
 };
 
 export const PROJECT_EVENT_DELIVERY_ATTEMPT_STATES = [
@@ -571,6 +665,7 @@ export type ProjectEventLimits = {
   maxAttemptsPerBatch: number;
   listLimitDefault: number;
   listLimitMax: number;
+  subscriptionEventCursorMaxLength: number;
   recentStatusLimit: number;
   retentionDays: number;
   retentionBatchRows: number;

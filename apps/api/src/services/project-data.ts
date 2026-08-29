@@ -8,6 +8,7 @@
  * See: specs/018-project-first-architecture/research.md (Decision 3)
  */
 import type {
+  AckProjectEventDeliveryInput,
   AdmitProjectEventInput,
   AgentMailboxMessage,
   CancelProjectEventSubscriptionInput,
@@ -21,11 +22,13 @@ import type {
   CreateProjectEventSubscriptionInput,
   DeliveryState,
   ExpireProjectEventSubscriptionsInput,
+  GetProjectEventInput,
   GetProjectEventRecentStatusInput,
   GetProjectEventSubscriptionInput,
   LibraryFileCommentMutationResponse,
   ListProjectEventDeliveryAttemptsInput,
   ListProjectEventDeliveryBatchesInput,
+  ListProjectEventSubscriptionEventsInput,
   ListProjectEventSubscriptionsInput,
   MessageClass,
   MessageCommentListResponse,
@@ -33,6 +36,7 @@ import type {
   MessageCommentReplyMutationResponse,
   MessageCommentThread,
   ProjectEventAdmissionResult,
+  ProjectEventDeliveryAckResult,
   ProjectEventDeliveryAttemptListResult,
   ProjectEventDeliveryAttemptMutationResult,
   ProjectEventDeliveryBatchListResult,
@@ -40,6 +44,8 @@ import type {
   ProjectEventExpireSubscriptionsResult,
   ProjectEventRecentStatus,
   ProjectEventRetentionResult,
+  ProjectEventSubscriptionEvent,
+  ProjectEventSubscriptionEventListResult,
   ProjectEventSubscriptionListResult,
   ProjectEventSubscriptionMutationResult,
   RecordProjectEventDeliveryAttemptInput,
@@ -64,6 +70,9 @@ import type {
 } from '../durable-objects/project-data/comment-contracts';
 import { CommentNotFoundError } from '../durable-objects/project-data/comment-contracts';
 import {
+  ProjectEventAckPolicyError,
+  ProjectEventAckStateError,
+  ProjectEventCursorError,
   ProjectEventIdempotencyConflictError,
   ProjectEventLimitExceededError,
   ProjectEventNotFoundError,
@@ -81,6 +90,9 @@ export {
   CommentValidationError,
 } from '../durable-objects/project-data/comment-contracts';
 export {
+  ProjectEventAckPolicyError,
+  ProjectEventAckStateError,
+  ProjectEventCursorError,
   ProjectEventIdempotencyConflictError,
   ProjectEventLimitExceededError,
   ProjectEventNotFoundError,
@@ -182,6 +194,18 @@ function normalizeProjectDataEventRpcError(err: unknown): Error | null {
   const conflictPrefix = 'ProjectEventIdempotencyConflictError: ';
   if (err.message.startsWith(conflictPrefix)) {
     return new ProjectEventIdempotencyConflictError(err.message.slice(conflictPrefix.length));
+  }
+  const cursorPrefix = 'ProjectEventCursorError: ';
+  if (err.message.startsWith(cursorPrefix)) {
+    return new ProjectEventCursorError(err.message.slice(cursorPrefix.length));
+  }
+  const ackPolicyPrefix = 'ProjectEventAckPolicyError: ';
+  if (err.message.startsWith(ackPolicyPrefix)) {
+    return new ProjectEventAckPolicyError(err.message.slice(ackPolicyPrefix.length));
+  }
+  const ackStatePrefix = 'ProjectEventAckStateError: ';
+  if (err.message.startsWith(ackStatePrefix)) {
+    return new ProjectEventAckStateError(err.message.slice(ackStatePrefix.length));
   }
 
   switch (err.message) {
@@ -300,6 +324,13 @@ type ProjectDataEventRpc = {
   createProjectEventDeliveryBatch(
     input: CreateProjectEventDeliveryBatchInput
   ): Promise<ProjectEventDeliveryBatchMutationResult>;
+  listProjectEventSubscriptionEvents(
+    input: ListProjectEventSubscriptionEventsInput
+  ): Promise<ProjectEventSubscriptionEventListResult | null>;
+  getProjectEvent(input: GetProjectEventInput): Promise<ProjectEventSubscriptionEvent | null>;
+  ackProjectEventDelivery(
+    input: AckProjectEventDeliveryInput
+  ): Promise<ProjectEventDeliveryAckResult | null>;
   listProjectEventDeliveryBatches(
     input: ListProjectEventDeliveryBatchesInput
   ): Promise<ProjectEventDeliveryBatchListResult>;
@@ -850,6 +881,30 @@ export async function createProjectEventDeliveryBatch(
   input: ProjectDataEventInput<CreateProjectEventDeliveryBatchInput>
 ): Promise<ProjectEventDeliveryBatchMutationResult> {
   return callProjectDataEvent(env, projectId, 'createProjectEventDeliveryBatch', input);
+}
+
+export async function listProjectEventSubscriptionEvents(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ListProjectEventSubscriptionEventsInput>
+): Promise<ProjectEventSubscriptionEventListResult | null> {
+  return callProjectDataEvent(env, projectId, 'listProjectEventSubscriptionEvents', input);
+}
+
+export async function getProjectEvent(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<GetProjectEventInput>
+): Promise<ProjectEventSubscriptionEvent | null> {
+  return callProjectDataEvent(env, projectId, 'getProjectEvent', input);
+}
+
+export async function ackProjectEventDelivery(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<AckProjectEventDeliveryInput>
+): Promise<ProjectEventDeliveryAckResult | null> {
+  return callProjectDataEvent(env, projectId, 'ackProjectEventDelivery', input);
 }
 
 export async function listProjectEventDeliveryBatches(

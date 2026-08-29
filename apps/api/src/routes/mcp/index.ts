@@ -53,6 +53,11 @@ import {
   handleListProjectEventSubscriptions,
 } from './event-subscription-tools';
 import {
+  handleAckEventDelivery,
+  handleGetEvent,
+  handleListSubscriptionEvents,
+} from './project-event-tools';
+import {
   handleCreateIdea,
   handleFindRelatedIdeas,
   handleGetIdea,
@@ -339,6 +344,14 @@ mcpRoutes.post('/', async (c) => {
             return c.json(
               await handleCancelProjectEventSubscription(requestId, toolArgs, tokenData, c.env)
             );
+          case 'list_subscription_events':
+            return c.json(
+              await handleListSubscriptionEvents(requestId, toolArgs, tokenData, c.env)
+            );
+          case 'get_event':
+            return c.json(await handleGetEvent(requestId, toolArgs, tokenData, c.env));
+          case 'ack_event_delivery':
+            return c.json(await handleAckEventDelivery(requestId, toolArgs, tokenData, c.env));
           // ─── Durable messaging tools ──────────────────────────────────
           case 'send_durable_message':
             return c.json(await handleSendDurableMessage(requestId, toolArgs, tokenData, c.env));

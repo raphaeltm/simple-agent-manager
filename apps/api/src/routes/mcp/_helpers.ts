@@ -3,6 +3,8 @@
  *
  * Used across all MCP tool handler files (instruction-tools, task-tools, session-tools, idea-tools).
  */
+import { DEFAULT_PROJECT_EVENT_LIMITS } from '@simple-agent-manager/shared';
+
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
@@ -168,6 +170,18 @@ export function getMcpLimits(env: Env) {
     archivedToolPayloadListMax: parsePositiveInt(
       env.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX,
       DEFAULT_MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX
+    ),
+    projectEventListLimit: parsePositiveInt(
+      env.PROJECT_EVENT_LIST_LIMIT,
+      DEFAULT_PROJECT_EVENT_LIMITS.listLimitDefault
+    ),
+    projectEventListMax: parsePositiveInt(
+      env.PROJECT_EVENT_LIST_MAX,
+      DEFAULT_PROJECT_EVENT_LIMITS.listLimitMax
+    ),
+    projectEventCursorMaxLength: parsePositiveInt(
+      env.PROJECT_EVENT_SUBSCRIPTION_EVENT_CURSOR_MAX_LENGTH,
+      DEFAULT_PROJECT_EVENT_LIMITS.subscriptionEventCursorMaxLength
     ),
     triggerListLimit: parsePositiveInt(env.MCP_TRIGGER_LIST_LIMIT, DEFAULT_MCP_TRIGGER_LIST_LIMIT),
     triggerListMax: parsePositiveInt(env.MCP_TRIGGER_LIST_MAX, DEFAULT_MCP_TRIGGER_LIST_MAX),

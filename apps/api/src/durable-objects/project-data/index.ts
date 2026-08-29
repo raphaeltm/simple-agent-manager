@@ -643,6 +643,38 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
+  listProjectEventSubscriptionEvents(
+    input: projectEvents.ListProjectEventSubscriptionEventsInput
+  ): projectEvents.ProjectEventSubscriptionEventListResult | null {
+    this.ensureProjectId(input.projectId);
+    return this.ctx.storage.transactionSync(() =>
+      projectEvents.listProjectEventSubscriptionEvents(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        input
+      )
+    );
+  }
+
+  getProjectEvent(
+    input: projectEvents.GetProjectEventInput
+  ): projectEvents.ProjectEventSubscriptionEvent | null {
+    this.ensureProjectId(input.projectId);
+    return this.ctx.storage.transactionSync(() =>
+      projectEvents.getProjectEvent(this.sql, this.env, this.getProjectId(), input)
+    );
+  }
+
+  ackProjectEventDelivery(
+    input: projectEvents.AckProjectEventDeliveryInput
+  ): projectEvents.ProjectEventDeliveryAckResult | null {
+    this.ensureProjectId(input.projectId);
+    return this.ctx.storage.transactionSync(() =>
+      projectEvents.ackProjectEventDelivery(this.sql, this.env, this.getProjectId(), input)
+    );
+  }
+
   listProjectEventDeliveryBatches(
     input: projectEvents.ListProjectEventDeliveryBatchesInput
   ): projectEvents.ProjectEventDeliveryBatchListResult {

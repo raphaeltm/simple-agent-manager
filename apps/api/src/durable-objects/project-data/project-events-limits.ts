@@ -107,6 +107,11 @@ export function resolveProjectEventLimits(env: Env): ProjectEventLimits {
       DEFAULT_PROJECT_EVENT_LIMITS.listLimitMax,
       'PROJECT_EVENT_LIST_MAX'
     ),
+    subscriptionEventCursorMaxLength: parsePositiveInteger(
+      env.PROJECT_EVENT_SUBSCRIPTION_EVENT_CURSOR_MAX_LENGTH,
+      DEFAULT_PROJECT_EVENT_LIMITS.subscriptionEventCursorMaxLength,
+      'PROJECT_EVENT_SUBSCRIPTION_EVENT_CURSOR_MAX_LENGTH'
+    ),
     recentStatusLimit: parsePositiveInteger(
       env.PROJECT_EVENT_RECENT_STATUS_LIMIT,
       DEFAULT_PROJECT_EVENT_LIMITS.recentStatusLimit,

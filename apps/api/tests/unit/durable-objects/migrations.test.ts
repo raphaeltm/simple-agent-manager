@@ -209,6 +209,7 @@ describe('DO Migrations', () => {
           'idx_project_event_subscriptions_project_state',
           'idx_project_event_subscription_match_keys_lookup',
           'idx_project_event_matches_project_event',
+          'idx_project_event_matches_project_subscription_replay',
           'idx_project_event_delivery_batches_project_state',
           'idx_project_event_delivery_attempts_project_batch',
           'idx_project_event_storage_accounting_project_measured',
@@ -224,6 +225,16 @@ describe('DO Migrations', () => {
           .all() as Array<{ name: string }>;
         expect(deliveryBatchColumns.map((column) => column.name)).toContain(
           'adapter_decision_json'
+        );
+        expect(deliveryBatchColumns.map((column) => column.name)).toEqual(
+          expect.arrayContaining([
+            'ack_required',
+            'delivered_at',
+            'acked_at',
+            'acked_by_type',
+            'acked_by_id',
+            'acked_by_name',
+          ])
         );
       } finally {
         db.close();
@@ -445,7 +456,8 @@ describe('DO Migrations', () => {
       // tool payload cleanup attempts: 1 from migration 037 (retry sweep)
       // project event subscriptions: 15 from migration 038
       // project event delivery decisions: 0 from migration 039 (additive column only)
-      expect(indexes).toHaveLength(84);
+      // project event pull ack: 1 replay index from migration 040
+      expect(indexes).toHaveLength(85);
     });
   });
 });
