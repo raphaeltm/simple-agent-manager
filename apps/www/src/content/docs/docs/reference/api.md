@@ -131,6 +131,23 @@ List all credentials for the authenticated user (tokens are not returned).
 
 Delete a stored cloud-provider credential.
 
+### `GET /api/providers/catalog`
+
+List non-secret compute-provider catalog metadata for cloud-provider credentials the caller can use.
+The response includes provider-native instance offerings, locations, normalized resource metadata,
+price metadata when available, and a `catalogSource` value such as `api` or `static`.
+
+Optional query parameters:
+
+| Parameter | Values | Description |
+| --- | --- | --- |
+| `scope` | `user`, `project`, `installation` | Selects the credential scope to inspect. Omit it for the authenticated user's default catalog. |
+| `projectId` | Project ID | Required when `scope=project`; the caller must have project access. |
+
+Installation scope is restricted to superadmins and uses enabled platform compute credentials.
+User scope uses the caller's compute credentials. Project scope uses compute credentials available
+to the project, including project-owned credentials and configured fallback sources.
+
 ## GitHub
 
 ### `GET /api/github/installations`
