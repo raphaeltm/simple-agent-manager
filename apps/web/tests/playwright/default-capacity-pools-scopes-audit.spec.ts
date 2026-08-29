@@ -8,6 +8,7 @@ import {
   makeMockUser,
   screenshot,
   screenshotNearHeading,
+  screenshotSectionNearHeading,
   setupAuditRoutes,
 } from './audit-helpers';
 
@@ -36,19 +37,45 @@ const providerNames = ['hetzner', 'scaleway', 'gcp', 'vultr', 'digitalocean', 'u
 const nativeOfferings = [
   { sku: 'cx23', vcpu: 2, memoryMb: 4096, diskGb: 40, priceCents: 399 },
   { sku: 'cx33', vcpu: 4, memoryMb: 8192, diskGb: 80, priceCents: 749 },
-  { sku: 'cx43', vcpu: 8, memoryMb: 16_384, diskGb: 160, priceCents: 1449 },
-  { sku: 'cpx31', vcpu: 4, memoryMb: 8192, diskGb: 160, priceCents: 1310 },
-  { sku: 'ccx33', vcpu: 8, memoryMb: 32_768, diskGb: 240, priceCents: 5520 },
+  {
+    sku: 'cx43-provider-native-sku-with-deliberately-long-name-for-mobile-wrapping',
+    vcpu: 8,
+    memoryMb: 16_384,
+    diskGb: 160,
+    priceCents: 1449,
+  },
+  { sku: 'cpx31', vcpu: 4, memoryMb: 8192, diskGb: 160, priceCents: null },
+  { sku: 'ccx33', vcpu: 8, memoryMb: 32_768, diskGb: 240, priceCents: 22000 },
+  {
+    sku: 'bare-metal-gpu-ultra-long-provider-native-instance-name-2026-08-stress-row',
+    vcpu: 48,
+    memoryMb: 196_608,
+    diskGb: 960,
+    priceCents: 99000,
+  },
 ] as const;
 
 function nativeOffering(index: number) {
   return nativeOfferings[index % nativeOfferings.length]!;
 }
 
+function priceDisplay(offering: (typeof nativeOfferings)[number]) {
+  return offering.priceCents === null ? null : `€${(offering.priceCents / 100).toFixed(2)}/mo`;
+}
+
+function priceMonthly(offering: (typeof nativeOfferings)[number]) {
+  return offering.priceCents === null ? null : offering.priceCents / 100;
+}
+
+function priceHourlyMicros(offering: (typeof nativeOfferings)[number]) {
+  return offering.priceCents === null ? null : Math.round((offering.priceCents * 10_000) / 730);
+}
+
 function capacityCandidate(scope: 'user' | 'installation', index: number) {
   const visibleLocations = ['fsn1', 'nbg1', 'hel1', 'ash', 'hil'];
   const offering = nativeOffering(index);
-  const provider = index < visibleLocations.length ? 'hetzner' : providerNames[index % providerNames.length];
+  const provider =
+    index < visibleLocations.length ? 'hetzner' : providerNames[index % providerNames.length];
   return {
     id: `${scope}-candidate-${index}`,
     poolId: `${scope}-default-pool`,
@@ -68,12 +95,15 @@ function capacityCandidate(scope: 'user' | 'installation', index: number) {
     providerInstanceVcpuCount: offering.vcpu,
     providerInstanceMemoryMb: offering.memoryMb,
     providerInstanceDiskGb: offering.diskGb,
-    providerInstancePriceDisplay: `€${(offering.priceCents / 100).toFixed(2)}/mo`,
-    providerInstancePriceCurrency: 'EUR',
+    providerInstancePriceDisplay: priceDisplay(offering),
+    providerInstancePriceCurrency: offering.priceCents === null ? null : 'EUR',
     providerInstancePriceMonthlyCents: offering.priceCents,
-    providerInstancePriceHourlyMicros: Math.round((offering.priceCents * 10_000) / 730),
+    providerInstancePriceHourlyMicros: priceHourlyMicros(offering),
     providerInstanceCatalogSource: 'static',
-    providerInstanceCatalogLastSeenAt: null,
+    providerInstanceCatalogLastSeenAt: offering.sku === 'ccx33' ? '2026-07-01T00:00:00.000Z' : null,
+    available: offering.sku === 'ccx33' ? false : true,
+    stale: offering.sku === 'ccx33',
+    catalogStatus: offering.sku === 'ccx33' ? 'temporarily unavailable' : null,
     priority: index,
     candidateOrder: index,
     status: 'active',
@@ -103,25 +133,25 @@ function capacitySummary(scope: 'user' | 'installation') {
       updatedAt: TIMESTAMP,
     },
     sources: providerNames.map((provider) => ({
-        id: `${scope}-source-${provider}`,
-        scope,
-        ownerUserId: scope === 'user' ? 'pool-user' : null,
-        ownerProjectId: null,
-        sourceKind: 'cloud-provider-credential',
-        provider,
-        credentialSource: scope === 'user' ? 'user' : 'platform',
-        credentialId: scope === 'user' ? `credential-user-cloud-${provider}` : null,
-        platformCredentialId: scope === 'installation' ? `platform-credential-${provider}` : null,
-        credentialReference:
-          scope === 'user'
-            ? `credentials:user-cloud-reference-${provider}-${LONG_MARKER}`
-            : `platform_credentials:platform-cloud-reference-${provider}-${LONG_MARKER}`,
-        credentialVersion: 1787875200000,
-        externalSourceRef: null,
-        status: 'active',
-        createdAt: TIMESTAMP,
-        updatedAt: TIMESTAMP,
-      })),
+      id: `${scope}-source-${provider}`,
+      scope,
+      ownerUserId: scope === 'user' ? 'pool-user' : null,
+      ownerProjectId: null,
+      sourceKind: 'cloud-provider-credential',
+      provider,
+      credentialSource: scope === 'user' ? 'user' : 'platform',
+      credentialId: scope === 'user' ? `credential-user-cloud-${provider}` : null,
+      platformCredentialId: scope === 'installation' ? `platform-credential-${provider}` : null,
+      credentialReference:
+        scope === 'user'
+          ? `credentials:user-cloud-reference-${provider}-${LONG_MARKER}`
+          : `platform_credentials:platform-cloud-reference-${provider}-${LONG_MARKER}`,
+      credentialVersion: 1787875200000,
+      externalSourceRef: null,
+      status: 'active',
+      createdAt: TIMESTAMP,
+      updatedAt: TIMESTAMP,
+    })),
     candidates,
     activeCandidateCount: candidates.length,
   };
@@ -158,12 +188,14 @@ function providerCatalogs(scope: 'user' | 'installation') {
           vcpu: offering.vcpu,
           memoryMb: offering.memoryMb,
           diskGb: offering.diskGb,
-          price: `€${(offering.priceCents / 100).toFixed(2)}/mo`,
-          priceMonthly: offering.priceCents / 100,
-          currency: 'EUR',
-          available: true,
+          price: priceDisplay(offering),
+          priceMonthly: priceMonthly(offering),
+          currency: offering.priceCents === null ? null : 'EUR',
+          available: offering.sku === 'ccx33' ? false : true,
+          stale: offering.sku === 'ccx33',
+          status: offering.sku === 'ccx33' ? 'temporarily unavailable' : null,
           catalogSource: 'static',
-          catalogLastSeenAt: null,
+          catalogLastSeenAt: offering.sku === 'ccx33' ? '2026-07-01T00:00:00.000Z' : null,
         };
       }),
       defaultLocation: 'fsn1',
@@ -326,6 +358,24 @@ async function removeAshHilCandidates(page: Page, editHeading: string, screensho
   await page.getByRole('button', { name: /Remove Hetzner ash cpx31/ }).click();
   await page.getByRole('button', { name: /Remove Hetzner hil ccx33/ }).click();
   await screenshotNearHeading(page, editHeading, screenshotName);
+  await page.getByLabel('Filter provider').selectOption('hetzner');
+  await page.getByLabel('Filter region or location').fill('hil');
+  await page.getByLabel('Minimum vCPU').fill('8');
+  await page.getByLabel('Minimum RAM in GB').fill('32');
+  await page.getByLabel('Maximum monthly price').fill('250');
+  await page.getByLabel('Filter availability').selectOption('stale');
+  await expect(page.getByText('1 matching offering across 1 region.')).toBeVisible();
+  await expect(page.getByText('Stale catalog data').first()).toBeVisible();
+  await screenshotSectionNearHeading(page, 'Catalog filters', `${screenshotName}-catalog-filters`);
+  await expect(page.getByRole('button', { name: /Add Hetzner hil ccx33/ })).toBeVisible();
+  await page
+    .getByRole('heading', { name: 'Add instances from catalog' })
+    .evaluate((element) => element.scrollIntoView({ block: 'start', inline: 'nearest' }));
+  await screenshotNearHeading(
+    page,
+    'Add instances from catalog',
+    `${screenshotName}-catalog-results`
+  );
   await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByText(/34 allowed · 2 removed\/disabled/)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Removed or disabled instances' })).toBeVisible();

@@ -57,7 +57,9 @@ function OfferingSpecGrid({ offering }: { offering: ComputePoolOffering }) {
     <dl className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
       <div className="min-w-0">
         <dt className="text-fg-muted">vCPU</dt>
-        <dd className="m-0 font-medium text-fg-primary">{formatOfferingNumber(offering.vcpu, '')}</dd>
+        <dd className="m-0 font-medium text-fg-primary">
+          {formatOfferingNumber(offering.vcpu, '')}
+        </dd>
       </div>
       <div className="min-w-0">
         <dt className="text-fg-muted">RAM</dt>
@@ -97,9 +99,7 @@ function OfferingCard({
   return (
     <article
       className={`grid min-w-0 gap-3 rounded-md border p-3 ${
-        isRemoved
-          ? 'border-border-default bg-inset opacity-80'
-          : 'border-border-default bg-bg-card'
+        isRemoved ? 'border-border-default bg-inset opacity-80' : 'border-border-default bg-bg-card'
       }`}
     >
       <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -259,12 +259,12 @@ function FilterControls({
         </Button>
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
-        <label className="grid gap-1 text-xs text-fg-muted">
+      <div className="grid min-w-0 gap-2 sm:grid-cols-2 lg:grid-cols-6">
+        <label className="grid min-w-0 gap-1 text-xs text-fg-muted">
           Provider
           <select
             aria-label="Filter provider"
-            className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+            className="min-h-10 w-full min-w-0 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
             value={filters.provider}
             onChange={(event) => update('provider', event.currentTarget.value)}
           >
@@ -277,61 +277,61 @@ function FilterControls({
           </select>
         </label>
 
-        <label className="grid gap-1 text-xs text-fg-muted lg:col-span-2">
+        <label className="grid min-w-0 gap-1 text-xs text-fg-muted lg:col-span-2">
           Region / location
           <input
             aria-label="Filter region or location"
-            className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+            className="min-h-10 w-full min-w-0 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
             value={filters.location}
             onChange={(event) => update('location', event.currentTarget.value)}
             placeholder="fsn1, Ashburn, DE…"
           />
         </label>
 
-        <label className="grid gap-1 text-xs text-fg-muted">
+        <label className="grid min-w-0 gap-1 text-xs text-fg-muted">
           Min vCPU
           <input
             aria-label="Minimum vCPU"
             type="number"
             min="0"
             inputMode="numeric"
-            className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+            className="min-h-10 w-full min-w-0 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
             value={filters.minVcpu}
             onChange={(event) => update('minVcpu', event.currentTarget.value)}
           />
         </label>
 
-        <label className="grid gap-1 text-xs text-fg-muted">
+        <label className="grid min-w-0 gap-1 text-xs text-fg-muted">
           Min RAM
           <input
             aria-label="Minimum RAM in GB"
             type="number"
             min="0"
             inputMode="decimal"
-            className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+            className="min-h-10 w-full min-w-0 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
             value={filters.minRamGb}
             onChange={(event) => update('minRamGb', event.currentTarget.value)}
           />
         </label>
 
-        <label className="grid gap-1 text-xs text-fg-muted">
+        <label className="grid min-w-0 gap-1 text-xs text-fg-muted">
           Max price
           <input
             aria-label="Maximum monthly price"
             type="number"
             min="0"
             inputMode="decimal"
-            className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+            className="min-h-10 w-full min-w-0 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
             value={filters.maxMonthlyPrice}
             onChange={(event) => update('maxMonthlyPrice', event.currentTarget.value)}
           />
         </label>
 
-        <label className="grid gap-1 text-xs text-fg-muted sm:col-span-2 lg:col-span-2">
+        <label className="grid min-w-0 gap-1 text-xs text-fg-muted sm:col-span-2 lg:col-span-2">
           Availability
           <select
             aria-label="Filter availability"
-            className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+            className="min-h-10 w-full min-w-0 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
             value={filters.availability}
             onChange={(event) =>
               update(
@@ -400,7 +400,9 @@ export function ComputePoolOfferingsManager({
   const addableCatalog = filteredCatalog.filter(
     (offering) => offering.candidateId && offering.candidateStatus !== 'active'
   );
-  const removableAllowed = filteredAllowed.filter((offering) => offering.candidateStatus === 'active');
+  const removableAllowed = filteredAllowed.filter(
+    (offering) => offering.candidateStatus === 'active'
+  );
   const filteredRegionCount = new Set(
     filteredCatalog.map((offering) => `${offering.provider}:${offering.location}`)
   ).size;
@@ -512,7 +514,9 @@ export function ComputePoolOfferingsManager({
 
             <div className="mt-3 grid max-h-[32rem] gap-2 overflow-y-auto pr-1">
               {filteredCatalog.length === 0 ? (
-                <EmptyOfferingState>No catalog offerings match the current filters.</EmptyOfferingState>
+                <EmptyOfferingState>
+                  No catalog offerings match the current filters.
+                </EmptyOfferingState>
               ) : (
                 filteredCatalog.map((offering) => (
                   <CatalogOfferingCard
@@ -524,7 +528,6 @@ export function ComputePoolOfferingsManager({
               )}
             </div>
           </div>
-
         </section>
       )}
     </div>

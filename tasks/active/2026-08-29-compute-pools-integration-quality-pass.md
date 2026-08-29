@@ -19,7 +19,7 @@ Compute pools must be infrastructure-scoped resources backed by concrete provide
 
 ## Research findings
 
-- PR #1943 is open/draft, base `main`, head `sam/compute-pools-integration`, and the latest pushed integration-pass head is `6270514b6`.
+- PR #1943 is open/draft, base `main`, head `sam/compute-pools-integration`, and the latest inspected head before this evidence refresh was `8828daf5e`.
 - The local branch matches `origin/sam/compute-pools-integration`; a sibling worktree is checked out at `/workspaces/sam-compute-pools-integration`.
 - The PR diff is too large for `gh pr diff`; local `git diff origin/main...HEAD` must be used for inspection.
 - The PR touches backend migrations/schema, capacity-pool/default-pool services, provider catalog metadata, scheduler/provisioning placement, project/user/admin routes, web infrastructure settings, tests, preflight evidence tooling, and task records.
@@ -30,7 +30,9 @@ Compute pools must be infrastructure-scoped resources backed by concrete provide
 - Product gap found in the integrated branch: removing every candidate disabled the default pool, and active-only summary reads made that owned pool disappear from the editor. The fix keeps scheduler/effective reads active-only while allowing infrastructure editor reads to include disabled owned pools so users can add concrete offerings back.
 - Identity-varying user/admin/project capacity-pool responses need `Cache-Control: private, no-store`; project GET/PATCH already had this, while project POST and user/admin default-pool routes did not.
 - Centralization gap found in the integrated branch: several task entry points still duplicated capacity selection, credential lookup, attribution, and snapshot logic outside `placement-resolver`. The fix moves task-start capacity/credential/snapshot output into one resolver helper and updates task submit/run, trigger submit, MCP dispatch/orchestration, SAM-session dispatch/retry, and project orchestrator scheduling to consume it.
-- Playwright screenshot artifacts were missing locally at the start of this pass. After installing Chromium runtime dependencies, the focused compute-pool/infrastructure audits passed at 375x667 and 1280x800 and generated canonical screenshots under `.tmp/playwright-screenshots/`. Representative normal/edit/empty/error/many screenshots were visually inspected with no compute-pool panel clipping or horizontal overflow found.
+- Playwright screenshot artifacts were missing locally at the start of this pass. After installing Chromium runtime dependencies, the focused compute-pool/infrastructure audits passed at 375x667 and 1280x800 and generated canonical screenshots under `.tmp/playwright-screenshots/`.
+- The screenshot stress data now includes many providers, long owner/source/SKU strings, many regions, missing price, high price, stale/unavailable catalog offerings, filter interactions, and the 375x667 mobile viewport.
+- Manual screenshot QC found one desktop catalog-filter defect: the Max price input could overflow its grid column. The fix adds `min-w-0`/`w-full` sizing constraints to the filter grid and controls. Refreshed screenshots confirm no horizontal clipping on desktop or mobile.
 - Relevant process lessons/rules: `.claude/rules/09-task-tracking.md`, `.claude/rules/10-e2e-verification.md`, `.claude/rules/17-ui-visual-testing.md`, `.claude/rules/25-review-merge-gate.md`, `.claude/rules/28-credential-resolution-fallback-tests.md`, `.claude/rules/31-migration-safety.md`, `.claude/rules/35-vertical-slice-testing.md`, `.claude/rules/44-dual-write-migration-enumerate-writers.md`, `.claude/rules/47-control-loop-io-budget.md`, and `.claude/rules/56-destructive-provider-ownership-proof.md`.
 - Relevant task records: `tasks/archive/2026-08-28-concrete-compute-pool-offerings.md`, `tasks/archive/2026-08-28-provider-native-compute-pool-ui.md`, `tasks/archive/2026-08-28-wave-2a-placement-resolver-migration.md`, and `tasks/active/2026-08-28-repair-compute-pool-default-editing.md`.
 - Staging evidence exists in PR comments for older PR heads, but this pass must not trigger another staging deploy or claim fresh staging validation.
@@ -50,6 +52,8 @@ Compute pools must be infrastructure-scoped resources backed by concrete provide
 - [x] Run focused tests for shared capacity types, provider catalogs, default-pool services/routes, placement resolver, task runner/provisioning, workspace placement, and web compute-pool UI.
 - [x] Run repo-level typecheck/lint/build/test as far as practical; document any remaining CI-only or time-bounded validation.
 - [x] Inspect local and PR-linked Playwright screenshot evidence and note whether artifacts are missing or outdated after fixes.
+- [x] Refresh desktop/mobile screenshots for user, installation, and project infrastructure pool surfaces with stress catalog filters/results.
+- [x] Manually review refreshed screenshots and fix the catalog filter overflow found during QC.
 - [x] Run required specialist reviews for touched areas and address blocking findings.
 - [x] Update PR #1943 body/comment with integration findings, validation results, reviewer evidence, and explicit “no staging deploy performed in this pass.”
 - [x] Push commits to `sam/compute-pools-integration`.
@@ -60,10 +64,15 @@ Compute pools must be infrastructure-scoped resources backed by concrete provide
 - Baseline `pnpm typecheck && pnpm lint` passed before fixes.
 - Focused API default-pool route/service tests passed: `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/default-capacity-pools.test.ts tests/unit/routes/capacity-pools-defaults.test.ts tests/unit/routes/project-capacity-pools.test.ts`.
 - Focused web compute-pool panel tests passed: `pnpm --filter @simple-agent-manager/web test -- tests/unit/components/default-capacity-pools-panel.test.tsx`.
+- Focused web typecheck passed after the screenshot/QC fixes: `pnpm --filter @simple-agent-manager/web typecheck`.
+- Focused web lint passed after the screenshot/QC fixes with existing warning-only diagnostics: `pnpm --filter @simple-agent-manager/web lint`.
+- Focused web compute-pool panel test passed again after the screenshot/QC fixes: `pnpm --filter @simple-agent-manager/web test -- tests/unit/components/default-capacity-pools-panel.test.tsx` — 1 file / 16 tests.
 - Focused scheduler/provisioning tests passed after centralizing placement resolution, including task submit/run, MCP dispatch/orchestration, trigger submit, task runner node selection, size fallback, workspace placement, and node-selection integration tests.
 - Shared/provider/API seam tests passed for capacity-pool types, provider instance offerings/contracts, provider catalog route, D1 capacity-pool migration, VM admission-control races, and workspace recovery.
 - Focused Playwright audit passed after installing Chromium runtime dependencies: `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/default-capacity-pools-scopes-audit.spec.ts tests/playwright/project-settings-subpages-audit.spec.ts --project="iPhone SE (375x667)" --project="Desktop (1280x800)" -g "Default capacity pool|Infrastructure sub-page"` — 6 passed.
-- Local screenshot artifacts now exist under `.tmp/playwright-screenshots/`; representative mobile/desktop normal/edit/empty/error/many screenshots were visually inspected.
+- Focused Playwright audit passed again after adding stress filter/result captures and fixing the catalog filter layout: same command — 6 passed.
+- Local screenshot artifacts now exist under `.tmp/playwright-screenshots/`; representative mobile/desktop normal/edit/filter/result/empty/error/many screenshots were visually inspected.
+- Manual visual QC result for refreshed evidence: PASS. Compute-pool management appears under Settings/Admin/Project Infrastructure, provider credentials remain separate, concrete provider-native offerings render with long/missing/high-price/stale data, filter controls fit on desktop/mobile, and no horizontal overflow or clipped primary actions were observed.
 - Full `pnpm lint` passed 13/13 Turbo tasks with existing warning-only diagnostics in `packages/acp-client` and unrelated web files.
 - Full `pnpm typecheck` passed 19/19 Turbo tasks.
 - Targeted review-fix API suite passed: `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/placement-resolver-fail-closed.test.ts tests/unit/services/nodes-delete.test.ts tests/unit/services/provision-node-rethrow.test.ts tests/unit/resolve-credential-source.test.ts tests/unit/services/provider-credentials.test.ts tests/unit/services/provider-credentials-edge-cases.test.ts tests/unit/routes/providers.test.ts tests/unit/services/trigger-submit-capacity-pools.test.ts tests/unit/task-runner-health-check.test.ts tests/unit/durable-objects/task-runner-readiness.test.ts tests/unit/node-provisioning.test.ts`.
