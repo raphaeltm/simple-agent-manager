@@ -75,6 +75,7 @@ Current evidence:
 - `pnpm --filter @simple-agent-manager/shared build` — passed
 - `pnpm --filter @simple-agent-manager/www typecheck` — passed with existing baseline Astro template findings only
 - `pnpm format:check` — passed
+- `pnpm quality:ast-checks` — passed with zero blocking errors; existing repository warning inventory remains
 - `pnpm quality:do-migration-safety` — passed
 - `pnpm quality:file-sizes` — passed
 - `pnpm quality:skill-references` — passed

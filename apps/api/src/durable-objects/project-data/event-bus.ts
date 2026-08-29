@@ -264,8 +264,18 @@ export function getEventBusEventForIdentity(
        JOIN event_bus_subscriptions s ON s.id = d.subscription_id
        LEFT JOIN event_bus_delivery_policies p ON p.subscription_id = s.id
        WHERE e.id = ?
-         AND ${applicableSubscriptionSqlPredicate()}
-         AND ${visibilitySqlPredicate()}
+         AND s.state = 'active'
+         AND (s.expires_at IS NULL OR s.expires_at > ?)
+         AND (
+           (s.owner_type = 'task' AND s.owner_id = ?)
+           OR (s.owner_type = 'session' AND s.owner_id = ?)
+           OR (s.owner_type = 'agent_session' AND s.owner_id = ?)
+           OR (s.owner_type IN ('policy', 'system') AND (
+             (s.target_task_id IS NOT NULL AND s.target_task_id = ?)
+             OR (s.target_session_id IS NOT NULL AND s.target_session_id = ?)
+             OR (s.target_agent_session_id IS NOT NULL AND s.target_agent_session_id = ?)
+           ))
+         )
        ORDER BY d.created_at ASC, d.id ASC
        LIMIT 1`,
       eventId,
@@ -422,8 +432,18 @@ function getVisibleSubscription(
        FROM event_bus_subscriptions s
        LEFT JOIN event_bus_delivery_policies p ON p.subscription_id = s.id
        WHERE s.id = ?
-         AND ${applicableSubscriptionSqlPredicate()}
-         AND ${visibilitySqlPredicate()}
+         AND s.state = 'active'
+         AND (s.expires_at IS NULL OR s.expires_at > ?)
+         AND (
+           (s.owner_type = 'task' AND s.owner_id = ?)
+           OR (s.owner_type = 'session' AND s.owner_id = ?)
+           OR (s.owner_type = 'agent_session' AND s.owner_id = ?)
+           OR (s.owner_type IN ('policy', 'system') AND (
+             (s.target_task_id IS NOT NULL AND s.target_task_id = ?)
+             OR (s.target_session_id IS NOT NULL AND s.target_session_id = ?)
+             OR (s.target_agent_session_id IS NOT NULL AND s.target_agent_session_id = ?)
+           ))
+         )
        LIMIT 1`,
       subscriptionId,
       now,
@@ -453,8 +473,18 @@ function getVisibleDelivery(
        JOIN event_bus_subscriptions s ON s.id = d.subscription_id
        LEFT JOIN event_bus_delivery_policies p ON p.subscription_id = s.id
        WHERE d.id = ?
-         AND ${applicableSubscriptionSqlPredicate()}
-         AND ${visibilitySqlPredicate()}
+         AND s.state = 'active'
+         AND (s.expires_at IS NULL OR s.expires_at > ?)
+         AND (
+           (s.owner_type = 'task' AND s.owner_id = ?)
+           OR (s.owner_type = 'session' AND s.owner_id = ?)
+           OR (s.owner_type = 'agent_session' AND s.owner_id = ?)
+           OR (s.owner_type IN ('policy', 'system') AND (
+             (s.target_task_id IS NOT NULL AND s.target_task_id = ?)
+             OR (s.target_session_id IS NOT NULL AND s.target_session_id = ?)
+             OR (s.target_agent_session_id IS NOT NULL AND s.target_agent_session_id = ?)
+           ))
+         )
        LIMIT 1`,
       deliveryId,
       now,
@@ -686,23 +716,6 @@ function collectSubscriptionRows(
       throw new Error('Event bus routed subscription limit exceeded');
     }
   }
-}
-
-function applicableSubscriptionSqlPredicate(): string {
-  return "s.state = 'active' AND (s.expires_at IS NULL OR s.expires_at > ?)";
-}
-
-function visibilitySqlPredicate(): string {
-  return `(
-    (s.owner_type = 'task' AND s.owner_id = ?)
-    OR (s.owner_type = 'session' AND s.owner_id = ?)
-    OR (s.owner_type = 'agent_session' AND s.owner_id = ?)
-    OR (s.owner_type IN ('policy', 'system') AND (
-      (s.target_task_id IS NOT NULL AND s.target_task_id = ?)
-      OR (s.target_session_id IS NOT NULL AND s.target_session_id = ?)
-      OR (s.target_agent_session_id IS NOT NULL AND s.target_agent_session_id = ?)
-    ))
-  )`;
 }
 
 function visibilityParams(identity: EventBusIdentity): unknown[] {
