@@ -65,6 +65,11 @@ nodes. Desired invariant: **DISCOVER BROADLY; SELECT CONSERVATIVELY**.
 - `apps/api/src/services/default-capacity-pool-updates.ts` already supports explicit
   `catalogAdditions` and candidate status updates; explicit non-default adds must
   stay active after reconciliation.
+- Staging validation of the initial fix exposed an upgraded-state gap: rows already
+  created by the previous broad-selection bug had no way to distinguish
+  system-seeded activation from an explicit user add. A candidate-level
+  `selection_origin` marker is required so reconciliation can heal system-origin
+  non-legacy active rows while preserving future user-origin active additions.
 - `apps/api/src/services/placement-resolver-capacity.ts` already filters scheduler
   candidates through `isActiveCapacityPlacementOption(pool, source, candidate)`.
   Add a focused regression so disabled catalog-visible offerings cannot be selected.
@@ -112,15 +117,19 @@ nodes. Desired invariant: **DISCOVER BROADLY; SELECT CONSERVATIVELY**.
 - [x] Add a testable policy helper such as `initialStatusForProviderOffering(...)`
       that returns active only for legacy-supported concrete provider SKUs on first
       default creation/migration, and disabled for non-legacy catalog discoveries.
-- [x] Distinguish existing explicit native candidate status from legacy migration
-      status: existing native active/disabled/deleted must win; legacy
-      disabled/deleted should transfer only to the matching concrete legacy SKU.
+- [x] Distinguish explicit user candidate status from system/default reconciliation
+      status: user-origin active/disabled/deleted must win; system-origin
+      non-legacy active rows should be healed to disabled; legacy disabled/deleted
+      should transfer only to the matching concrete legacy SKU.
 - [x] Preserve full catalog row creation/tracking during reconciliation for
       installation, user, and project default pools.
 - [x] Ensure non-legacy full-catalog discoveries default to disabled/catalog-only,
       not active, without relying on price thresholds.
 - [x] Preserve explicit user additions of non-default catalog offerings as active
       across subsequent reconciliation.
+- [x] Add a D1 migration/schema field for candidate selection origin so upgraded
+      installs with system-seeded broad active rows can be reconciled back to
+      conservative defaults without breaking future explicit user adds.
 - [x] Preserve disabled/deleted/removed offerings across reconciliation and prevent
       broad reactivation.
 - [x] Keep legacy `small|medium|large` values as `machineSize` migration/profile

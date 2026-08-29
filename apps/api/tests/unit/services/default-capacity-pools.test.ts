@@ -55,6 +55,10 @@ const capacitySourceExternalCredentialsMigrationSql = readFileSync(
   join(process.cwd(), 'src/db/migrations/0129_capacity_source_external_credentials.sql'),
   'utf8'
 );
+const candidateSelectionOriginMigrationSql = readFileSync(
+  join(process.cwd(), 'src/db/migrations/0130_capacity_pool_candidate_selection_origin.sql'),
+  'utf8'
+);
 
 let sqlite: Database.Database | null = null;
 const TEST_ENCRYPTION_KEY = Buffer.from('0123456789abcdef0123456789abcdef').toString('base64');
@@ -205,6 +209,7 @@ function createDb() {
   sqlite.exec(concreteOfferingMigrationSql);
   sqlite.exec(candidateCatalogMetadataMigrationSql);
   sqlite.exec(capacitySourceExternalCredentialsMigrationSql);
+  sqlite.exec(candidateSelectionOriginMigrationSql);
   return drizzle(sqlite, { schema });
 }
 
@@ -577,10 +582,24 @@ describe('default capacity pool candidate initial status policy', () => {
     expect(initialStatusForProviderOffering({ legacyVmSize: null })).toBe('disabled');
   });
 
-  it('preserves explicit native candidate statuses ahead of migration defaults', () => {
+  it('heals system-seeded native active rows but preserves explicit user statuses', () => {
     expect(initialStatusForProviderOffering({ existingStatus: 'active', legacyVmSize: null })).toBe(
-      'active'
+      'disabled'
     );
+    expect(
+      initialStatusForProviderOffering({
+        existingStatus: 'active',
+        existingSelectionOrigin: 'system',
+        legacyVmSize: null,
+      })
+    ).toBe('disabled');
+    expect(
+      initialStatusForProviderOffering({
+        existingStatus: 'active',
+        existingSelectionOrigin: 'user',
+        legacyVmSize: null,
+      })
+    ).toBe('active');
     expect(
       initialStatusForProviderOffering({ existingStatus: 'disabled', legacyVmSize: 'small' })
     ).toBe('disabled');
@@ -942,6 +961,46 @@ describe('default capacity pool creation', () => {
         FROM capacity_pool_candidates
       `)
     ).toEqual([{ provider_instance_type: 'cpx62', status: 'disabled', machine_size: null }]);
+  });
+
+  it('demotes system-seeded active non-legacy rows during reconciliation', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    const liveOfferings = [legacyHetznerLiveOfferings('fsn1')[0], expensiveCpx62Offering('fsn1')];
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => liveOfferings,
+    });
+
+    sqlite
+      ?.prepare(
+        `
+        UPDATE capacity_pool_candidates
+        SET status = 'active', selection_origin = 'system'
+        WHERE provider_instance_type = 'cpx62'
+      `
+      )
+      .run();
+
+    const reconciled = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => liveOfferings,
+    });
+
+    expect(reconciled.user?.activeCandidateCount).toBe(1);
+    expect(
+      getRows<{ provider_instance_type: string; status: string; selection_origin: string }>(`
+        SELECT provider_instance_type, status, selection_origin
+        FROM capacity_pool_candidates
+        ORDER BY provider_instance_type
+      `)
+    ).toEqual([
+      { provider_instance_type: 'cpx62', status: 'disabled', selection_origin: 'system' },
+      { provider_instance_type: 'cx23', status: 'active', selection_origin: 'system' },
+    ]);
   });
 
   it('tracks full live catalogs conservatively for installation, user, and project defaults', async () => {
@@ -1522,6 +1581,13 @@ describe('default capacity pool creation', () => {
       ])
     );
     expect(update.summary?.activeCandidateCount).toBe(2);
+    expect(
+      getRows<{ status: string; selection_origin: string }>(`
+        SELECT status, selection_origin
+        FROM capacity_pool_candidates
+        WHERE provider_instance_type = 'cpx62'
+      `)[0]
+    ).toEqual({ status: 'active', selection_origin: 'user' });
 
     const reconciledAfterAdd = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',

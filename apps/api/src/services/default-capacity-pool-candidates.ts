@@ -14,14 +14,17 @@ import { providerInstanceOfferingDbValues } from './default-capacity-pool-candid
 import { defaultCandidateId, legacyDefaultCandidateId } from './default-capacity-pool-helpers';
 
 type Db = ReturnType<typeof drizzle>;
+type CandidateSelectionOrigin = 'system' | 'user';
 
 const DEFAULT_WORKLOAD_ROLE = 'workspace';
 const DEFAULT_RUNTIME = 'vm';
 const DEFAULT_MACHINE_CLASS = 'shared-vm';
+const SYSTEM_SELECTION_ORIGIN: CandidateSelectionOrigin = 'system';
+const USER_SELECTION_ORIGIN: CandidateSelectionOrigin = 'user';
 const ACTIVE_STATUS: CapacityPoolStatus = 'active';
 const DISABLED_STATUS: CapacityPoolStatus = 'disabled';
 const DELETED_STATUS: CapacityPoolStatus = 'deleted';
-const CANDIDATE_INSERT_BIND_COUNT = 26;
+const CANDIDATE_INSERT_BIND_COUNT = 27;
 const CANDIDATE_UPSERT_UPDATE_BIND_COUNT = 1;
 const CANDIDATE_UPSERT_CHUNK_SIZE = Math.max(
   1,
@@ -53,7 +56,8 @@ export async function ensureCandidatesForSource(
       offering.providerInstanceType,
       offering.providerInstanceSku
     );
-    const existingStatus = existingStatuses.get(id) ?? null;
+    const existingState = existingStatuses.get(id) ?? null;
+    const existingStatus = existingState?.status ?? null;
     const legacyVmSize = legacyVmSizeHintForOffering(provider, offering);
     const legacyStatus = legacyStatusForOffering(
       existingStatuses,
@@ -65,6 +69,7 @@ export async function ensureCandidatesForSource(
     );
     const initialStatus = initialStatusForProviderOffering({
       existingStatus,
+      existingSelectionOrigin: existingState?.selectionOrigin ?? null,
       legacyStatus,
       legacyVmSize,
     });
@@ -83,6 +88,10 @@ export async function ensureCandidatesForSource(
       priority: candidateOrder,
       candidateOrder,
       status: initialStatus,
+      selectionOrigin:
+        existingState?.selectionOrigin === USER_SELECTION_ORIGIN
+          ? USER_SELECTION_ORIGIN
+          : SYSTEM_SELECTION_ORIGIN,
       createdAt: now,
       updatedAt: now,
     });
@@ -115,6 +124,8 @@ export async function ensureCandidatesForSource(
           providerInstancePriceHourlyMicros: sql`excluded.provider_instance_price_hourly_micros`,
           providerInstanceCatalogSource: sql`excluded.provider_instance_catalog_source`,
           providerInstanceCatalogLastSeenAt: sql`excluded.provider_instance_catalog_last_seen_at`,
+          status: sql`excluded.status`,
+          selectionOrigin: sql`excluded.selection_origin`,
           updatedAt: now,
         },
       });
@@ -125,10 +136,17 @@ export async function ensureCandidatesForSource(
 
 export function initialStatusForProviderOffering(input: {
   existingStatus?: CapacityPoolStatus | null;
+  existingSelectionOrigin?: CandidateSelectionOrigin | null;
   legacyStatus?: CapacityPoolStatus | null;
   legacyVmSize?: VMSize | null;
 }): CapacityPoolStatus {
-  if (input.existingStatus) return input.existingStatus;
+  if (input.existingStatus) {
+    if (input.existingSelectionOrigin === USER_SELECTION_ORIGIN) return input.existingStatus;
+    if (input.existingStatus === DISABLED_STATUS || input.existingStatus === DELETED_STATUS) {
+      return input.existingStatus;
+    }
+    return input.legacyVmSize ? ACTIVE_STATUS : DISABLED_STATUS;
+  }
   if (
     input.legacyVmSize &&
     (input.legacyStatus === DISABLED_STATUS || input.legacyStatus === DELETED_STATUS)
@@ -143,7 +161,7 @@ function isCurrentlySelectableOffering(offering: ProviderInstanceOffering): bool
 }
 
 function legacyStatusForOffering(
-  existingStatuses: ReadonlyMap<string, CapacityPoolStatus>,
+  existingStatuses: ReadonlyMap<string, { status: CapacityPoolStatus }>,
   poolId: string,
   sourceId: string,
   provider: CredentialProvider,
@@ -154,7 +172,7 @@ function legacyStatusForOffering(
   return (
     existingStatuses.get(
       legacyDefaultCandidateId(poolId, sourceId, provider, offering.location, legacyVmSize)
-    ) ?? null
+    )?.status ?? null
   );
 }
 
@@ -175,9 +193,13 @@ async function readExistingCandidateStatuses(
   db: Db,
   poolId: string,
   sourceId: string
-): Promise<Map<string, CapacityPoolStatus>> {
+): Promise<Map<string, { status: CapacityPoolStatus; selectionOrigin: CandidateSelectionOrigin }>> {
   const rows = await db
-    .select({ id: schema.capacityPoolCandidates.id, status: schema.capacityPoolCandidates.status })
+    .select({
+      id: schema.capacityPoolCandidates.id,
+      status: schema.capacityPoolCandidates.status,
+      selectionOrigin: schema.capacityPoolCandidates.selectionOrigin,
+    })
     .from(schema.capacityPoolCandidates)
     .where(
       and(
@@ -185,14 +207,25 @@ async function readExistingCandidateStatuses(
         eq(schema.capacityPoolCandidates.capacitySourceId, sourceId)
       )
     );
-  return new Map(rows.map((row) => [row.id, row.status as CapacityPoolStatus]));
+  return new Map(
+    rows.map((row) => [
+      row.id,
+      {
+        status: row.status as CapacityPoolStatus,
+        selectionOrigin:
+          row.selectionOrigin === USER_SELECTION_ORIGIN
+            ? USER_SELECTION_ORIGIN
+            : SYSTEM_SELECTION_ORIGIN,
+      },
+    ])
+  );
 }
 
 async function markMissingCandidatesForSource(
   db: Db,
   poolId: string,
   sourceId: string,
-  existingStatuses: ReadonlyMap<string, CapacityPoolStatus>,
+  existingStatuses: ReadonlyMap<string, { status: CapacityPoolStatus }>,
   activeCandidateIds: string[]
 ): Promise<void> {
   const now = new Date().toISOString();
@@ -221,7 +254,7 @@ async function markMissingCandidatesForSource(
       );
 
     const staleActiveCandidateIds = chunk.filter(
-      (id) => existingStatuses.get(id) === ACTIVE_STATUS
+      (id) => existingStatuses.get(id)?.status === ACTIVE_STATUS
     );
     if (staleActiveCandidateIds.length === 0) continue;
     await db

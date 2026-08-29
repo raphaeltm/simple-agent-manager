@@ -278,7 +278,9 @@ async function updateCandidateStatuses(
     return { changed: false, missingCandidateIds: [], unavailableCandidateIds };
   }
 
-  const changedUpdates = updates.filter(({ id, status }) => existingById.get(id)?.status !== status);
+  const changedUpdates = updates.filter(
+    ({ id, status }) => existingById.get(id)?.status !== status
+  );
   if (changedUpdates.length === 0) {
     return { changed: false, missingCandidateIds: [], unavailableCandidateIds: [] };
   }
@@ -287,7 +289,7 @@ async function updateCandidateStatuses(
   for (const candidate of changedUpdates) {
     await db
       .update(schema.capacityPoolCandidates)
-      .set({ status: candidate.status, updatedAt: now })
+      .set({ status: candidate.status, selectionOrigin: 'user', updatedAt: now })
       .where(
         and(
           eq(schema.capacityPoolCandidates.poolId, poolId),
@@ -316,7 +318,8 @@ async function readCandidateStatuses(
         .select({
           id: schema.capacityPoolCandidates.id,
           status: schema.capacityPoolCandidates.status,
-          providerInstanceCatalogSource: schema.capacityPoolCandidates.providerInstanceCatalogSource,
+          providerInstanceCatalogSource:
+            schema.capacityPoolCandidates.providerInstanceCatalogSource,
         })
         .from(schema.capacityPoolCandidates)
         .where(

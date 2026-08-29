@@ -2563,6 +2563,8 @@ export const capacityPoolCandidates = sqliteTable(
     providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
     providerInstanceCatalogSource: text('provider_instance_catalog_source'),
     providerInstanceCatalogLastSeenAt: text('provider_instance_catalog_last_seen_at'),
+    /** Whether candidate selection status was last set by the system default policy or user action. */
+    selectionOrigin: text('selection_origin').notNull().default('system'),
     priority: integer('priority').notNull().default(0),
     candidateOrder: integer('candidate_order').notNull().default(0),
     status: text('status').notNull().default('active'),
