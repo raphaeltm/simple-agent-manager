@@ -47,7 +47,6 @@ import {
   INVALID_PARAMS,
   jsonRpcError,
   type JsonRpcResponse,
-  jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
 import { recordDispatchActivityEvent } from './dispatch-activity';
@@ -57,15 +56,10 @@ import {
   getRuntimeValidationError,
   launchDispatchedInstantSession,
 } from './dispatch-instant';
+import { buildDispatchTaskSuccessResponse } from './dispatch-task-response';
 import { parseDispatchTaskParams } from './dispatch-tool-params';
 
-export function getConversationTaskModeWarning(): string {
-  return (
-    'Resolved taskMode is "conversation": the dispatched agent will not auto-complete. ' +
-    'Actively manage its lifecycle with send_message_to_subtask and get_session_messages, ' +
-    'or pass taskMode: "task" explicitly to use task completion semantics.'
-  );
-}
+export { getConversationTaskModeWarning } from './dispatch-task-response';
 
 export async function handleDispatchTask(
   requestId: string | number | null,
@@ -762,36 +756,18 @@ export async function handleDispatchTask(
     skillId: skillId ?? null,
   });
 
-  const appDomain = `app.${env.BASE_DOMAIN}`;
-  const taskUrl = `https://${appDomain}/projects/${tokenData.projectId}/ideas/${taskId}`;
-
-  return jsonRpcSuccess(requestId, {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify(
-          {
-            taskId,
-            sessionId,
-            runtime: executionRuntime,
-            runtimeReason: placement.runtime.reason,
-            branchName,
-            title: taskTitle,
-            status: 'queued',
-            taskMode: resolvedTaskMode,
-            ...(resolvedTaskMode === 'conversation'
-              ? { warning: getConversationTaskModeWarning() }
-              : {}),
-            dispatchDepth: newDepth,
-            url: taskUrl,
-            message: isInstantRuntime
-              ? 'Task queued for Instant launch. The chat session is created asynchronously; use get_task_details to obtain sessionId.'
-              : `Task dispatched successfully. The agent will start working independently. Track progress at: ${taskUrl}`,
-          },
-          null,
-          2
-        ),
-      },
-    ],
+  return buildDispatchTaskSuccessResponse({
+    requestId,
+    env,
+    projectId: tokenData.projectId,
+    taskId,
+    sessionId,
+    executionRuntime,
+    runtimeReason: placement.runtime.reason,
+    branchName,
+    taskTitle,
+    resolvedTaskMode,
+    newDepth,
+    isInstantRuntime,
   });
 }
