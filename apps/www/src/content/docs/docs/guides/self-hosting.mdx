@@ -184,8 +184,10 @@ instead of choosing a generic prefix.
 
 Leaving `CF_CONTAINER_ENABLED` at the `true` the deploy workflow injects lets users start work
 without their own cloud credential, on [Instant sessions](/docs/guides/instant-sessions/).
-Setting it to `false` means every session provisions a cloud VM, so **each user
-must connect their own cloud provider credential before they can do anything**.
+Setting it to `false` means every session provisions a cloud VM. SAM chooses a
+project-scoped compute credential first when one is attached to the project, then
+falls back to the user's personal compute credential, then to an enabled platform
+compute credential configured by an administrator.
 
 **GitHub Environment secrets:**
 
@@ -369,6 +371,10 @@ The Workers Paid plan ($5/month) is required for Durable Objects and Cloudflare 
 ### User VM Costs
 
 VMs are billed to the cloud provider credential SAM uses for the node. In a typical self-hosted setup, that is each user's own BYOC credential; admins may also configure a platform credential for shared zero-config provisioning. SAM supports Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP. The example prices below cover the built-in Hetzner, Scaleway, Vultr, DigitalOcean, and UpCloud size mappings; Infomaniak and GCP pricing depend on the selected region and machine configuration.
+
+When Infrastructure Compute Pools are enabled, the editor uses the provider-native catalog for the
+project, user, or platform credential in scope. The small/medium/large prices below remain useful as
+legacy preset examples, but pool editing is based on concrete provider instance types.
 
 **Hetzner:**
 

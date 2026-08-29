@@ -109,6 +109,7 @@ function makeContext(overrides: Partial<TaskRunnerContext> = {}): TaskRunnerCont
     advanceToStep: vi.fn().mockResolvedValue(undefined),
     getAgentPollIntervalMs: () => 5000,
     getAgentReadyTimeoutMs: () => 900_000,
+    getAgentReadyFreshnessSkewMs: () => 30_000,
     getWorkspaceReadyTimeoutMs: () => 1_800_000,
     getWorkspaceReadyPollIntervalMs: () => 30_000,
     getProvisionPollIntervalMs: () => 10_000,

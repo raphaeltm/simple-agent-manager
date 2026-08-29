@@ -183,8 +183,24 @@ describe('shared-project task lifecycle — positive paths for a non-creator mem
     expect(response.status).toBe(202);
     expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
       env,
-      expect.objectContaining({ taskId: 'task-1', projectId: PROJECT, userId: MEMBER })
+      expect.objectContaining({
+        taskId: 'task-1',
+        projectId: PROJECT,
+        userId: MEMBER,
+        cloudProvider: 'hetzner',
+        credentialAttributionUserId: MEMBER,
+        credentialAttributionProjectId: null,
+        credentialAttributionSource: 'user',
+        vmSizeSource: 'platform',
+      })
     );
+    const updatedTask = await readTask();
+    expect(updatedTask?.credentialAttributionUserId).toBe(MEMBER);
+    expect(updatedTask?.credentialAttributionProjectId).toBeNull();
+    expect(updatedTask?.credentialAttributionSource).toBe('user');
+    expect(updatedTask?.requestedVmSizeSource).toBe('platform');
+    expect(updatedTask?.resourceRequirementsSource).toBe('platform');
+    expect(updatedTask?.resolvedReservationJson).toContain('"source":"platform"');
     // Repo access is re-verified for the CALLER, not the task creator.
     expect(mocks.requireRepositoryUserAccess).toHaveBeenCalledWith(
       expect.anything(), expect.anything(), expect.anything(), MEMBER

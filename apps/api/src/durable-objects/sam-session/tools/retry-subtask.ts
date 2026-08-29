@@ -4,17 +4,7 @@
  * Creates a new task with the same description and project, then starts
  * the task runner. The original task is left unchanged for history.
  */
-import {
-  DEFAULT_VM_LOCATION,
-  DEFAULT_VM_SIZE,
-  DEFAULT_WORKSPACE_PROFILE,
-  getDefaultLocationForProvider,
-  isValidProvider,
-  resolveResourceReservation,
-  type TaskMode,
-  type VMSize,
-  type WorkspaceProfile,
-} from '@simple-agent-manager/shared';
+import { type TaskMode, type VMSize } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -23,6 +13,12 @@ import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { ulid } from '../../../lib/ulid';
 import { generateBranchName } from '../../../services/branch-name';
+import {
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
+  capacityPlacementSnapshotSqlValues,
+} from '../../../services/capacity-placement-snapshot';
+import { resolveTaskStartPlacementCredentialAttribution } from '../../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../../services/skills';
@@ -56,7 +52,7 @@ export const retrySubtaskDef: AnthropicToolDef = {
 
 export async function retrySubtask(
   input: { taskId: string; newDescription?: string },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   if (!input.taskId?.trim()) {
     return { error: 'taskId is required.' };
@@ -90,6 +86,7 @@ export async function retrySubtask(
       projectDefaultProvider: schema.projects.defaultProvider,
       projectDefaultLocation: schema.projects.defaultLocation,
       projectDefaultWorkspaceProfile: schema.projects.defaultWorkspaceProfile,
+      projectDefaultDevcontainerConfigName: schema.projects.defaultDevcontainerConfigName,
       projectDefaultAgentType: schema.projects.defaultAgentType,
       projectAgentDefaults: schema.projects.agentDefaults,
       projectTaskExecutionTimeoutMs: schema.projects.taskExecutionTimeoutMs,
@@ -100,12 +97,7 @@ export async function retrySubtask(
     })
     .from(schema.tasks)
     .innerJoin(schema.projects, eq(schema.tasks.projectId, schema.projects.id))
-    .where(
-      and(
-        eq(schema.tasks.id, taskId),
-        eq(schema.projects.userId, ctx.userId),
-      ),
-    )
+    .where(and(eq(schema.tasks.id, taskId), eq(schema.projects.userId, ctx.userId)))
     .limit(1);
 
   const original = rows[0];
@@ -114,7 +106,9 @@ export async function retrySubtask(
   }
 
   if (!RETRYABLE_STATUSES.includes(original.status)) {
-    return { error: `Task is in '${original.status}' status — only failed or cancelled tasks can be retried.` };
+    return {
+      error: `Task is in '${original.status}' status — only failed or cancelled tasks can be retried.`,
+    };
   }
 
   // Use new description or fall back to original
@@ -123,64 +117,88 @@ export async function retrySubtask(
     return { error: 'Task has no description and no newDescription was provided.' };
   }
 
-  const resolvedProfile = original.agentProfileHint || original.skillId
-    ? await resolveSkillProfile(db, original.projectId, original.agentProfileHint, original.skillId, ctx.userId, env)
-    : null;
-
-  const profileProvider =
-    typeof resolvedProfile?.provider === 'string' && isValidProvider(resolvedProfile.provider)
-      ? resolvedProfile.provider
+  const resolvedProfile =
+    original.agentProfileHint || original.skillId
+      ? await resolveSkillProfile(
+          db,
+          original.projectId,
+          original.agentProfileHint,
+          original.skillId,
+          ctx.userId,
+          env
+        )
       : null;
-  const projectProvider =
-    typeof original.projectDefaultProvider === 'string' && isValidProvider(original.projectDefaultProvider)
-      ? original.projectDefaultProvider
-      : null;
-  const resolvedProvider = profileProvider ?? projectProvider;
-
-  const vmSizeSource = resolvedProfile?.vmSizeOverride ? 'skill' as const
-    : original.projectDefaultVmSize ? 'project' as const
-    : 'platform' as const;
-  const resolvedVmSize: VMSize =
-    (resolvedProfile?.vmSizeOverride as VMSize | null)
-    ?? (original.projectDefaultVmSize as VMSize | null)
-    ?? DEFAULT_VM_SIZE;
-
-  const resolvedVmLocation =
-    (resolvedProfile?.vmLocation as string | null)
-    ?? (original.projectDefaultLocation as string | null)
-    ?? (resolvedProvider ? getDefaultLocationForProvider(resolvedProvider) : null)
-    ?? DEFAULT_VM_LOCATION;
-
-  const resolvedWorkspaceProfile: WorkspaceProfile =
-    (resolvedProfile?.workspaceProfile as WorkspaceProfile | null)
-    ?? (original.projectDefaultWorkspaceProfile as WorkspaceProfile | null)
-    ?? DEFAULT_WORKSPACE_PROFILE;
-
-  const resolvedTaskMode = (original.taskMode as TaskMode | null)
-    ?? (resolvedProfile?.taskMode as TaskMode | null)
-    ?? (resolvedWorkspaceProfile === 'lightweight' ? 'conversation' : 'task');
-  const resolvedAgentType = resolvedProfile?.agentType ?? original.projectDefaultAgentType ?? null;
-
-  // Verify cloud credentials
-  const { resolveCredentialSource } = await import('../../../services/provider-credentials');
-  const credentialAttributionUserId = original.credentialAttributionUserId ?? original.userId;
-  const credentialAttributionSource = (original.credentialAttributionSource ?? 'user') as import('@simple-agent-manager/shared').CredentialSource;
-  const credentialAttributionProjectId = credentialAttributionSource === 'project'
-    ? (original.credentialAttributionProjectId ?? original.projectId)
-    : null;
-  const credResult = await resolveCredentialSource(
-    db,
-    credentialAttributionUserId,
-    resolvedProvider ?? undefined,
-    credentialAttributionProjectId
+  const newTaskId = ulid();
+  const skillResourceRequirements = parseSkillResourceRequirementsJson(
+    resolvedProfile?.resourceRequirementsJson
   );
-  if (!credResult) {
-    return { error: 'No cloud provider credentials found. The user must connect a cloud provider in Settings.' };
+
+  const credentialAttributionUserId = original.credentialAttributionUserId ?? original.userId;
+  const credentialAttributionSource = (original.credentialAttributionSource ??
+    'user') as import('@simple-agent-manager/shared').CredentialSource;
+  const credentialAttributionProjectId =
+    credentialAttributionSource === 'project'
+      ? (original.credentialAttributionProjectId ?? original.projectId)
+      : null;
+
+  const placementResolution = await resolveTaskStartPlacementCredentialAttribution(
+    db,
+    {
+      entryPoint: 'retry-subtask',
+      taskId: newTaskId,
+      projectId: original.projectId,
+      userId: ctx.userId,
+      project: {
+        id: original.projectId,
+        defaultVmSize: original.projectDefaultVmSize,
+        defaultProvider: original.projectDefaultProvider,
+        defaultLocation: original.projectDefaultLocation,
+        defaultWorkspaceProfile: original.projectDefaultWorkspaceProfile,
+        defaultDevcontainerConfigName: original.projectDefaultDevcontainerConfigName,
+        defaultAgentType: original.projectDefaultAgentType,
+      },
+      profile: resolvedProfile,
+      explicit: {
+        taskMode: (original.taskMode as TaskMode | null) ?? null,
+      },
+      inheritedCredentialAttribution: {
+        userId: credentialAttributionUserId,
+        projectId: credentialAttributionProjectId,
+        source: credentialAttributionSource,
+      },
+      credentialProjectPolicy: 'inherited-or-none',
+      taskModeDefault: 'workspace-profile',
+      profileVmSizeSource: 'skill',
+      resourceRequirements: {
+        skill: skillResourceRequirements,
+      },
+    },
+    { env: ctx.env as unknown as Env }
+  );
+  if ('error' in placementResolution) {
+    return placementResolution;
   }
-  const effectiveProvider = resolvedProvider ?? credResult.providerName;
+  const {
+    placement,
+    effectiveProvider,
+    credentialAttributionUserId: resolvedCredentialAttributionUserId,
+    credentialAttributionProjectId: resolvedCredentialAttributionProjectId,
+    credentialAttributionSource: resolvedCredentialAttributionSource,
+    capacityPoolSelection,
+    capacityPlacementSnapshot,
+  } = placementResolution;
+  const {
+    vmSize: resolvedVmSize,
+    vmSizeSource,
+    vmLocation: resolvedVmLocation,
+    workspaceProfile: resolvedWorkspaceProfile,
+    devcontainerConfigName: resolvedDevcontainerConfigName,
+    taskMode: resolvedTaskMode,
+    agentType: resolvedAgentType,
+    resolvedReservation,
+  } = placement;
 
   // Generate new task
-  const newTaskId = ulid();
   const titleConfig = getTaskTitleConfig(env);
   const taskTitle = await generateTaskTitle(env, description, titleConfig);
 
@@ -190,18 +208,6 @@ export async function retrySubtask(
     prefix: branchPrefix,
     maxLength: branchMaxLength,
   });
-
-  // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
-  const resolvedReservation = resolveResourceReservation(
-    { skill: parseSkillResourceRequirementsJson(resolvedProfile?.resourceRequirementsJson) },
-    {
-      taskId: newTaskId,
-      skillId: resolvedProfile?.skillId ?? undefined,
-      agentProfileId: resolvedProfile?.profileId ?? undefined,
-      projectId: original.projectId,
-      userId: ctx.userId,
-    },
-  );
 
   const now = new Date().toISOString();
 
@@ -213,26 +219,43 @@ export async function retrySubtask(
        task_mode, agent_profile_hint, skill_id, skill_hint, mission_id,
        requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirements_source, resolved_reservation_json,
        credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
+       ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
        created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, 'queued', 'node_selection', 0, 0, ?, ?,
        ?, ?, ?, ?, ?,
        ?, ?, ?, ?, ?,
        ?, ?, ?,
-       ?, ?)`,
+       ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
+       ?, ?)`
     ).bind(
-      newTaskId, original.projectId, ctx.userId,
-      taskTitle, description, branchName,
+      newTaskId,
+      original.projectId,
       ctx.userId,
-      resolvedTaskMode, resolvedProfile?.profileId ?? original.agentProfileHint ?? null,
-      resolvedProfile?.skillId ?? original.skillId ?? null, original.skillHint ?? original.skillId ?? null, original.missionId ?? null,
-      resolvedVmSize, vmSizeSource, resolvedProfile?.resourceRequirementsJson ?? null, resolvedReservation.source, JSON.stringify(resolvedReservation),
-      credentialAttributionUserId, credentialAttributionProjectId, credentialAttributionSource,
-      now, now,
+      taskTitle,
+      description,
+      branchName,
+      ctx.userId,
+      resolvedTaskMode,
+      resolvedProfile?.profileId ?? original.agentProfileHint ?? null,
+      resolvedProfile?.skillId ?? original.skillId ?? null,
+      original.skillHint ?? original.skillId ?? null,
+      original.missionId ?? null,
+      resolvedVmSize,
+      vmSizeSource,
+      resolvedProfile?.resourceRequirementsJson ?? null,
+      resolvedReservation.source,
+      JSON.stringify(resolvedReservation),
+      resolvedCredentialAttributionUserId,
+      resolvedCredentialAttributionProjectId,
+      resolvedCredentialAttributionSource,
+      ...capacityPlacementSnapshotSqlValues(capacityPlacementSnapshot),
+      now,
+      now
     ),
     env.DATABASE.prepare(
       `INSERT INTO task_status_events (id, task_id, from_status, to_status,
        actor_type, actor_id, reason, created_at)
-       VALUES (?, ?, NULL, 'queued', 'user', ?, ?, ?)`,
+       VALUES (?, ?, NULL, 'queued', 'user', ?, ?, ?)`
     ).bind(ulid(), newTaskId, ctx.userId, `Retry of task ${taskId} via SAM`, now),
   ]);
 
@@ -240,17 +263,31 @@ export async function retrySubtask(
   let sessionId: string;
   try {
     sessionId = await projectDataService.createSession(
-      env, original.projectId, null, taskTitle, newTaskId, ctx.userId,
+      env,
+      original.projectId,
+      null,
+      taskTitle,
+      newTaskId,
+      ctx.userId
     );
     await projectDataService.persistMessage(
-      env, original.projectId, sessionId, 'user', description, null,
+      env,
+      original.projectId,
+      sessionId,
+      'user',
+      description,
+      null
     );
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     await env.DATABASE.prepare(
-      `UPDATE tasks SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`,
-    ).bind(`Session creation failed: ${errorMsg}`, new Date().toISOString(), newTaskId).run();
-    return { error: 'Failed to create chat session for the retried task. The error has been logged.' };
+      `UPDATE tasks SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`
+    )
+      .bind(`Session creation failed: ${errorMsg}`, new Date().toISOString(), newTaskId)
+      .run();
+    return {
+      error: 'Failed to create chat session for the retried task. The error has been logged.',
+    };
   }
 
   // Start TaskRunner DO
@@ -262,7 +299,7 @@ export async function retrySubtask(
 
   const agentDefaults = resolveProjectAgentDefault(
     original.projectAgentDefaults as string | null,
-    resolvedAgentType,
+    resolvedAgentType
   );
 
   try {
@@ -289,10 +326,12 @@ export async function retrySubtask(
       chatSessionId: sessionId,
       agentType: resolvedAgentType,
       workspaceProfile: resolvedWorkspaceProfile,
-      cloudProvider: effectiveProvider,
-      credentialAttributionUserId,
-      credentialAttributionProjectId,
-      credentialAttributionSource,
+      devcontainerConfigName: resolvedDevcontainerConfigName,
+      cloudProvider: placement.provider ?? effectiveProvider,
+      explicitVmLocation: placement.explicitVmLocation === true,
+      credentialAttributionUserId: resolvedCredentialAttributionUserId,
+      credentialAttributionProjectId: resolvedCredentialAttributionProjectId,
+      credentialAttributionSource: resolvedCredentialAttributionSource,
       taskMode: resolvedTaskMode,
       model: resolvedProfile?.model ?? agentDefaults.model,
       effort: resolvedProfile?.effort ?? null,
@@ -309,14 +348,19 @@ export async function retrySubtask(
         warmNodeTimeoutMs: original.projectWarmNodeTimeoutMs ?? null,
       },
       resolvedReservation,
+      capacityPoolSelection,
       vmSizeSource,
     });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     await env.DATABASE.prepare(
-      `UPDATE tasks SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`,
-    ).bind(`Task runner startup failed: ${errorMsg}`, new Date().toISOString(), newTaskId).run();
-    return { error: 'Failed to start task runner for the retried task. The error has been logged.' };
+      `UPDATE tasks SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`
+    )
+      .bind(`Task runner startup failed: ${errorMsg}`, new Date().toISOString(), newTaskId)
+      .run();
+    return {
+      error: 'Failed to start task runner for the retried task. The error has been logged.',
+    };
   }
 
   const appDomain = `app.${env.BASE_DOMAIN}`;

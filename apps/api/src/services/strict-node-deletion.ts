@@ -12,7 +12,10 @@ import { log, serializeError } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { deleteDNSRecord } from './dns';
 import { persistError } from './observability';
-import { createProviderForUser } from './provider-credentials';
+import {
+  createProviderForUser,
+  exactProviderCredentialBindingFromPlacementSnapshot,
+} from './provider-credentials';
 import { destroyVmAgentContainer } from './vm-agent-container';
 
 type NodeDb = ReturnType<typeof drizzle<typeof schema>>;
@@ -40,7 +43,8 @@ function getStrictNodeCredentialContext(node: NodeRow, userId: string) {
     node.credentialAttributionSource === 'project'
       ? (node.credentialAttributionProjectId ?? null)
       : null;
-  return { targetProvider, attributionUserId, attributionProjectId };
+  const exactCredential = exactProviderCredentialBindingFromPlacementSnapshot(node);
+  return { targetProvider, attributionUserId, attributionProjectId, exactCredential };
 }
 
 async function requireStrictNodeProvider(
@@ -49,7 +53,7 @@ async function requireStrictNodeProvider(
   userId: string,
   env: Env
 ): Promise<ProviderForUserResult> {
-  const { targetProvider, attributionUserId, attributionProjectId } =
+  const { targetProvider, attributionUserId, attributionProjectId, exactCredential } =
     getStrictNodeCredentialContext(node, userId);
   const providerResult = await createProviderForUser(
     db,
@@ -57,7 +61,8 @@ async function requireStrictNodeProvider(
     getCredentialEncryptionKey(env),
     env,
     targetProvider,
-    attributionProjectId
+    attributionProjectId,
+    exactCredential
   );
   if (!providerResult) {
     throw new Error(
@@ -81,7 +86,7 @@ async function resolveStrictNodeProvider(
   if (!providerInstanceId) {
     throw new Error(`Cannot strictly resolve provider for node ${node.id}: instance ID is missing`);
   }
-  const { targetProvider, attributionUserId, attributionProjectId } =
+  const { targetProvider, attributionUserId, attributionProjectId, exactCredential } =
     getStrictNodeCredentialContext(node, userId);
 
   if (targetProvider) {
@@ -92,6 +97,12 @@ async function resolveStrictNodeProvider(
       );
     }
     return { state: 'present', providerResult };
+  }
+
+  if (exactCredential) {
+    throw new Error(
+      `Cannot strictly delete node ${node.id}: exact credential snapshot requires a persisted cloud provider`
+    );
   }
 
   const candidates: ProviderForUserResult[] = [];

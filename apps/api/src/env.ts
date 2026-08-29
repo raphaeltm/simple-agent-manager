@@ -478,6 +478,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   HETZNER_CAPACITY_RETRY_MAX_DELAY_MS?: string;
   HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS?: string;
   HETZNER_CAPACITY_RETRY_BUDGET_MS?: string;
+  HETZNER_MAX_LIST_PAGES?: string;
   // Vultr provider tuning (optional; DEFAULT_VULTR_* apply otherwise)
   VULTR_REGION?: string;
   VULTR_OS_NAME?: string;
@@ -653,6 +654,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   TASK_RUNNER_RETRY_MAX_DELAY_MS?: string;
   TASK_RUNNER_AGENT_POLL_INTERVAL_MS?: string;
   TASK_RUNNER_AGENT_READY_TIMEOUT_MS?: string;
+  TASK_RUNNER_AGENT_READY_FRESHNESS_SKEW_MS?: string;
   TASK_RUNNER_WORKSPACE_DISPATCH_TIMEOUT_MS?: string;
   TASK_RUNNER_WORKSPACE_DISPATCH_BASE_DELAY_MS?: string;
   TASK_RUNNER_WORKSPACE_DISPATCH_MAX_DELAY_MS?: string;

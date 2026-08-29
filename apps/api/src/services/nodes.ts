@@ -7,6 +7,7 @@ import {
   throwIfProviderRequestAborted,
 } from '@simple-agent-manager/providers';
 import {
+  type CapacityPlacementSnapshot,
   type CredentialProvider,
   type CredentialSource,
   isUserOwnedNodeClass,
@@ -20,6 +21,7 @@ import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
+import { capacityPlacementSnapshotDbValues } from './capacity-placement-snapshot';
 import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
 import { GcpApiError, sanitizeGcpError } from './gcp-errors';
 import { signNodeCallbackToken } from './jwt';
@@ -29,7 +31,10 @@ import {
   resolveInstallationId,
 } from './node-provider-labels';
 import { persistError } from './observability';
-import { createProviderForUser } from './provider-credentials';
+import {
+  createProviderForUser,
+  exactProviderCredentialBindingFromPlacementSnapshot,
+} from './provider-credentials';
 import { destroyVmAgentContainer } from './vm-agent-container';
 import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
 
@@ -45,12 +50,16 @@ export interface CreateNodeInput {
   vmLocation: string;
   heartbeatStaleAfterSeconds: number;
   cloudProvider?: string;
+  /** Provider-native instance type/SKU selected from a compute pool. */
+  providerInstanceType?: string | null;
   /** 'workspace' (default) or 'deployment'. */
   nodeRole?: 'workspace' | 'deployment';
   /** 'shared' (default) or 'exclusive'. Exclusive deployment nodes accept one environment. */
   nodeMode?: 'shared' | 'exclusive';
   /** Runtime substrate. Defaults to traditional VM. */
   runtime?: 'vm' | 'cf-container';
+  /** Capacity pool/source/candidate audit snapshot for auto-provisioned placement. */
+  capacityPlacementSnapshot?: CapacityPlacementSnapshot | null;
 }
 
 export interface ProvisionedNode {
@@ -96,6 +105,7 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date().toISOString();
   const nodeId = ulid();
+  const capacitySnapshotValues = capacityPlacementSnapshotDbValues(input.capacityPlacementSnapshot);
 
   await db.insert(schema.nodes).values({
     id: nodeId,
@@ -116,6 +126,8 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
     nodeRole: input.nodeRole ?? 'workspace',
     nodeMode: input.nodeMode ?? 'shared',
     runtime: input.runtime ?? 'vm',
+    ...capacitySnapshotValues,
+    providerInstanceType: input.providerInstanceType ?? capacitySnapshotValues.providerInstanceType,
     createdAt: now,
     updatedAt: now,
   });
@@ -199,6 +211,7 @@ export async function provisionNode(
     node.credentialAttributionSource === 'project'
       ? (node.credentialAttributionProjectId ?? taskContext?.projectId ?? null)
       : null;
+  const exactCredential = exactProviderCredentialBindingFromPlacementSnapshot(node);
 
   try {
     const providerResult = await createProviderForUser(
@@ -207,7 +220,8 @@ export async function provisionNode(
       getCredentialEncryptionKey(env),
       env,
       targetProvider,
-      attributionProjectId
+      attributionProjectId,
+      exactCredential
     );
     if (!providerResult) {
       throw new Error(
@@ -313,6 +327,7 @@ export async function provisionNode(
       name: `node-${node.id.toLowerCase()}`,
       size: node.vmSize as 'small' | 'medium' | 'large',
       location: node.vmLocation,
+      instanceType: node.providerInstanceType ?? undefined,
       userData: cloudInit,
       ...(baseImageOverride ? { image: baseImageOverride } : {}),
       labels: buildNodeProviderLabels({
@@ -541,13 +556,15 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
       node.credentialAttributionSource === 'project'
         ? (node.credentialAttributionProjectId ?? null)
         : null;
+    const exactCredential = exactProviderCredentialBindingFromPlacementSnapshot(node);
     const providerResult = await createProviderForUser(
       db,
       attributionUserId,
       getCredentialEncryptionKey(env),
       env,
       targetProvider,
-      attributionProjectId
+      attributionProjectId,
+      exactCredential
     );
     if (providerResult) {
       try {
@@ -555,6 +572,15 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
       } catch (err) {
         log.error('node_stop.delete_vm_failed', { nodeId, ...serializeError(err) });
       }
+    } else if (exactCredential) {
+      log.error('node_stop.exact_credential_missing_vm_orphaned', {
+        nodeId,
+        userId,
+        providerInstanceId: node.providerInstanceId,
+        cloudProvider: node.cloudProvider,
+        credentialSource: exactCredential.credentialSource,
+        credentialReference: exactCredential.credentialReference,
+      });
     }
   }
 
@@ -651,13 +677,15 @@ export async function deleteNodeResources(
       node.credentialAttributionSource === 'project'
         ? (node.credentialAttributionProjectId ?? null)
         : null;
+    const exactCredential = exactProviderCredentialBindingFromPlacementSnapshot(node);
     const providerResult2 = await createProviderForUser(
       db,
       attributionUserId,
       getCredentialEncryptionKey(env),
       env,
       targetProvider,
-      attributionProjectId
+      attributionProjectId,
+      exactCredential
     );
     if (providerResult2) {
       try {

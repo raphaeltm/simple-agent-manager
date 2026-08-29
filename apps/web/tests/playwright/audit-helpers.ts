@@ -3,6 +3,8 @@ import { resolve } from 'node:path';
 
 import { expect, type Page, type Route, test } from '@playwright/test';
 
+const DEFAULT_SCREENSHOT_DIR = '../../.codex/tmp/playwright-screenshots';
+
 interface MockUserOptions {
   email: string;
   name: string;
@@ -40,11 +42,150 @@ export async function screenshot(page: Page, name: string) {
   await page.waitForTimeout(600);
   const viewport = page.viewportSize();
   const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
-  const screenshotDir = resolve(process.cwd(), '../../.codex/tmp/playwright-screenshots');
+  const screenshotDir = resolve(process.cwd(), DEFAULT_SCREENSHOT_DIR);
   mkdirSync(screenshotDir, { recursive: true });
   await page.screenshot({
     path: `${screenshotDir}/${name}${suffix}.png`,
     fullPage: true,
+  });
+}
+
+type MutableCapacityCandidate = {
+  id: string;
+  status: string;
+  capacitySourceId?: string;
+  provider?: string | null;
+  location?: string | null;
+  providerInstanceType?: string | null;
+  providerInstanceSku?: string | null;
+  [key: string]: unknown;
+};
+type MutableCapacitySummary = {
+  pool: {
+    id: string;
+    strategy: string;
+    exhaustionPolicy: string;
+    revision: number;
+  };
+  candidates: MutableCapacityCandidate[];
+  activeCandidateCount: number;
+};
+
+type MutableCapacityDefaultsResponse = {
+  effective: MutableCapacitySummary | null;
+  defaults: { summary: MutableCapacitySummary | null }[];
+};
+
+export type MockCapacityDefaultsUpdate = {
+  policy?: { strategy?: string; exhaustionPolicy?: string };
+  candidates?: MutableCapacityCandidate[];
+  catalogAdditions?: Array<{
+    sourceId: string;
+    provider: string;
+    location: string;
+    providerInstanceType: string;
+    providerInstanceSku?: string | null;
+  }>;
+};
+
+export function applyMockCapacityDefaultsUpdate<T extends MutableCapacityDefaultsResponse>(
+  current: T,
+  update: MockCapacityDefaultsUpdate
+): T {
+  const next = JSON.parse(JSON.stringify(current)) as T;
+  const summary = next.effective;
+  if (!summary) return next;
+
+  if (update.policy?.strategy) summary.pool.strategy = update.policy.strategy;
+  if (update.policy?.exhaustionPolicy) {
+    summary.pool.exhaustionPolicy = update.policy.exhaustionPolicy;
+  }
+  for (const candidateUpdate of update.candidates ?? []) {
+    const candidate = summary.candidates.find((item) => item.id === candidateUpdate.id);
+    if (candidate) candidate.status = candidateUpdate.status;
+  }
+  for (const addition of update.catalogAdditions ?? []) {
+    const candidate = summary.candidates.find(
+      (item) =>
+        item.capacitySourceId === addition.sourceId &&
+        item.provider === addition.provider &&
+        item.location === addition.location &&
+        item.providerInstanceType === addition.providerInstanceType &&
+        (item.providerInstanceSku ?? null) === (addition.providerInstanceSku ?? null)
+    );
+    if (candidate) {
+      candidate.status = 'active';
+      continue;
+    }
+    summary.candidates.push({
+      id: `mock-catalog-addition:${addition.sourceId}:${addition.provider}:${addition.location}:${addition.providerInstanceSku ?? addition.providerInstanceType}`,
+      status: 'active',
+      capacitySourceId: addition.sourceId,
+      provider: addition.provider,
+      location: addition.location,
+      providerInstanceType: addition.providerInstanceType,
+      providerInstanceSku: addition.providerInstanceSku ?? null,
+      workloadRole: 'workspace',
+      runtime: 'vm',
+      machineClass: 'shared-vm',
+      machineSize: null,
+      priority: summary.candidates.length,
+      candidateOrder: summary.candidates.length,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+  summary.activeCandidateCount = summary.candidates.filter(
+    (candidate) => candidate.status === 'active'
+  ).length;
+  summary.pool.revision += 1;
+  for (const item of next.defaults) {
+    if (item.summary?.pool.id === summary.pool.id) item.summary = summary;
+  }
+  return next;
+}
+
+export async function screenshotNearHeading(
+  page: Page,
+  heading: string,
+  name: string,
+  options: { outputDir?: string } = {}
+) {
+  await page.getByRole('heading', { name: heading }).scrollIntoViewIfNeeded();
+  await page.waitForTimeout(600);
+  const viewport = page.viewportSize();
+  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
+  const screenshotDir = resolve(
+    process.cwd(),
+    options.outputDir ?? DEFAULT_SCREENSHOT_DIR
+  );
+  mkdirSync(screenshotDir, { recursive: true });
+  await page.screenshot({
+    path: `${screenshotDir}/${name}${suffix}.png`,
+    fullPage: false,
+  });
+}
+
+export async function screenshotSectionNearHeading(
+  page: Page,
+  heading: string,
+  name: string,
+  options: { outputDir?: string } = {}
+) {
+  const headingLocator = page.getByRole('heading', { name: heading }).first();
+  await headingLocator.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(600);
+  const viewport = page.viewportSize();
+  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
+  const screenshotDir = resolve(
+    process.cwd(),
+    options.outputDir ?? DEFAULT_SCREENSHOT_DIR
+  );
+  mkdirSync(screenshotDir, { recursive: true });
+  const section = headingLocator.locator('xpath=ancestor::section[1]').first();
+  const target = (await section.count()) > 0 ? section : headingLocator;
+  await target.screenshot({
+    path: `${screenshotDir}/${name}${suffix}.png`,
   });
 }
 
@@ -311,13 +452,13 @@ export function describeThemeAudit(
  */
 export async function setupAuditRoutes(
   page: Page,
-  handler: (path: string, respond: AuditResponder) => Promise<void> | undefined,
+  handler: (path: string, respond: AuditResponder, route: Route) => Promise<void> | undefined,
 ) {
   await page.route('**/api/**', async (route: Route) => {
     const path = new URL(route.request().url()).pathname;
     const respond: AuditResponder = (status, body) =>
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-    const result = handler(path, respond);
+    const result = handler(path, respond, route);
     if (result === undefined) return respond(200, {});
     return result;
   });

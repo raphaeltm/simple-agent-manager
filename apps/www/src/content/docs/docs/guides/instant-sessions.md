@@ -33,7 +33,7 @@ The practical trade: an Instant session needs **no cloud provider credential**, 
 
 |                                   | Instant                                            | VM workspace                                  |
 | --------------------------------- | -------------------------------------------------- | --------------------------------------------- |
-| Your own cloud credential needed  | No                                                 | Yes                                           |
+| Your own cloud credential needed  | No                                                 | Only when no project or platform credential is available |
 | Start time                        | Seconds                                            | Minutes                                       |
 | Repository clone                  | Yes — partial clone by default                     | Yes                                           |
 | SAM MCP tools                     | Yes                                                | Yes                                           |
@@ -212,6 +212,6 @@ Instant sessions require **Cloudflare Containers**, which requires a Workers Pai
 
 The runtime is enabled only when `CF_CONTAINER_ENABLED` is exactly `true` (or the legacy `SANDBOX_ENABLED`) — it is **off when neither is set**. The deploy workflow injects `true` for you, so a deployment made through it has Instant sessions on by default; a Worker started some other way (a local `wrangler dev`, a hand-rolled config) does not, and every session falls back to a VM.
 
-Set it to `false` in your GitHub Environment before deploying if your account cannot use Containers. With Containers off, every session provisions a cloud VM, so **each user must connect their own cloud provider credential before they can start any work**.
+Set it to `false` in your GitHub Environment before deploying if your account cannot use Containers. With Containers off, every session provisions a cloud VM. SAM uses a project-scoped compute credential first, then a personal compute credential, then an administrator-configured platform compute credential as the installation fallback.
 
 See the [Self-Hosting Guide](/docs/guides/self-hosting/).

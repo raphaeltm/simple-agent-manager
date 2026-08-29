@@ -130,6 +130,14 @@ export {
   upsertSkillRuntimeFile,
 } from './agents';
 export { getCurrentUser } from './auth';
+export {
+  fetchInstallationDefaultCapacityPools,
+  fetchProjectDefaultCapacityPools,
+  fetchUserDefaultCapacityPools,
+  reconcileInstallationDefaultCapacityPools,
+  reconcileProjectDefaultCapacityPools,
+  reconcileUserDefaultCapacityPools,
+} from './capacity-pools';
 export { type CliVersionInfo, getCliDownloadUrl, getCliVersion } from './cli';
 export { API_URL, ApiClientError, request } from './client';
 export type {
@@ -423,7 +431,7 @@ export {
   upsertProjectRuntimeEnvVar,
   upsertProjectRuntimeFile,
 } from './projects';
-export { getProviderCatalog } from './providers';
+export { getProviderCatalog, type ProviderCatalogRequestOptions } from './providers';
 export {
   getRepoBranches,
   getRepoCompare,

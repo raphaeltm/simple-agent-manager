@@ -1,5 +1,6 @@
-import type { VMSize } from '@simple-agent-manager/shared';
+import type { CredentialProvider, VMSize } from '@simple-agent-manager/shared';
 
+import { getProviderCatalogOfferings } from './instance-offerings';
 import {
   providerDelay,
   providerFetch,
@@ -13,6 +14,7 @@ import {
   ProviderError,
   type ProviderErrorCategory,
   type ProviderLogger,
+  type ProviderOfferingListOptions,
   type ProviderRequestContext,
   SAM_VOLUME_FILESYSTEM_FORMAT,
   SAM_VOLUME_FSTAB_OPTIONS,
@@ -49,15 +51,33 @@ const LOCATIONS: Readonly<Record<string, LocationMeta>> = {
   'dc3-a': { name: 'Geneva (DC3)', country: 'CH' },
   'dc4-a': { name: 'Geneva (DC4)', country: 'CH' },
 };
-const FLAVORS: Readonly<Record<VMSize, string>> = {
+export const INFOMANIAK_FLAVORS: Readonly<Record<VMSize, string>> = {
   small: 'a2-ram4-disk20-perf1',
   medium: 'a4-ram8-disk20-perf1',
   large: 'a8-ram16-disk20-perf1',
 };
-const SIZES: Readonly<Record<VMSize, SizeConfig>> = {
-  small: { type: FLAVORS.small, price: 'usage-based', vcpu: 2, ramGb: 4, storageGb: 20 },
-  medium: { type: FLAVORS.medium, price: 'usage-based', vcpu: 4, ramGb: 8, storageGb: 20 },
-  large: { type: FLAVORS.large, price: 'usage-based', vcpu: 8, ramGb: 16, storageGb: 20 },
+export const INFOMANIAK_SIZE_CONFIGS: Readonly<Record<VMSize, SizeConfig>> = {
+  small: {
+    type: INFOMANIAK_FLAVORS.small,
+    price: 'usage-based',
+    vcpu: 2,
+    ramGb: 4,
+    storageGb: 20,
+  },
+  medium: {
+    type: INFOMANIAK_FLAVORS.medium,
+    price: 'usage-based',
+    vcpu: 4,
+    ramGb: 8,
+    storageGb: 20,
+  },
+  large: {
+    type: INFOMANIAK_FLAVORS.large,
+    price: 'usage-based',
+    vcpu: 8,
+    ramGb: 16,
+    storageGb: 20,
+  },
 };
 export const INFOMANIAK_VOLUME_CAPABILITIES: VolumeCapabilities = {
   supported: true,
@@ -187,7 +207,7 @@ export class InfomaniakProvider implements Provider {
   readonly name = 'infomaniak';
   readonly locations = INFOMANIAK_LOCATIONS;
   readonly locationMetadata = LOCATIONS;
-  readonly sizes = SIZES;
+  readonly sizes = INFOMANIAK_SIZE_CONFIGS;
   readonly volumeCapabilities = INFOMANIAK_VOLUME_CAPABILITIES;
   readonly defaultLocation: string;
   private readonly authUrl: string;
@@ -215,7 +235,7 @@ export class InfomaniakProvider implements Provider {
     this.networkName = options.networkName ?? DEFAULT_INFOMANIAK_NETWORK_NAME;
     this.imageName = options.imageName ?? DEFAULT_INFOMANIAK_IMAGE_NAME;
     this.volumeType = options.volumeType ?? DEFAULT_INFOMANIAK_VOLUME_TYPE;
-    this.flavors = { ...FLAVORS, ...options.flavors };
+    this.flavors = { ...INFOMANIAK_FLAVORS, ...options.flavors };
     this.timeout = options.requestTimeoutMs ?? DEFAULT_INFOMANIAK_REQUEST_TIMEOUT_MS;
     this.pollTimeout = options.ipPollTimeoutMs ?? DEFAULT_INFOMANIAK_IP_POLL_TIMEOUT_MS;
     this.pollInterval = options.ipPollIntervalMs ?? DEFAULT_INFOMANIAK_IP_POLL_INTERVAL_MS;
@@ -329,6 +349,18 @@ export class InfomaniakProvider implements Provider {
     return true;
   }
 
+  async listInstanceOfferings(
+    _options?: ProviderOfferingListOptions,
+    context?: ProviderRequestContext
+  ) {
+    throwIfProviderRequestAborted(context);
+    return getProviderCatalogOfferings(
+      this.name as CredentialProvider,
+      this.locations,
+      this.locationMetadata
+    );
+  }
+
   private async resolve(
     endpoint: string,
     path: string,
@@ -363,6 +395,7 @@ export class InfomaniakProvider implements Provider {
         { category: 'invalid_config' }
       );
     const session = await this.authenticate(false, context);
+    const flavorName = config.instanceType ?? this.flavors[config.size];
     const [imageRef, flavorRef, networkId] = await Promise.all([
       this.resolve(
         session.endpoints.image,
@@ -371,13 +404,7 @@ export class InfomaniakProvider implements Provider {
         config.image ?? this.imageName,
         context
       ),
-      this.resolve(
-        session.endpoints.compute,
-        'flavors/detail',
-        'flavors',
-        this.flavors[config.size],
-        context
-      ),
+      this.resolve(session.endpoints.compute, 'flavors/detail', 'flavors', flavorName, context),
       this.resolve(
         session.endpoints.network,
         'v2.0/networks',

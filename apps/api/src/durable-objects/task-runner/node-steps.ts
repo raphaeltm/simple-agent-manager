@@ -6,130 +6,89 @@
  */
 import { isTransientCapacityError, ProviderError } from '@simple-agent-manager/providers';
 import type { CredentialProvider, VMSize } from '@simple-agent-manager/shared';
-import { canSatisfyVmSize, vmSizeFallbackChain } from '@simple-agent-manager/shared';
+import { vmSizeFallbackChain } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
+import {
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
+  capacityPlacementSnapshotSqlValues,
+} from '../../services/capacity-placement-snapshot';
+import {
+  type CapacityPlacementSnapshotRow,
+  toCapacityPlacementSnapshot,
+} from '../../services/capacity-pools';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
+import {
+  type CapacityAwareNodePlacementRow,
+  capacityPoolNoCandidatesError,
+  hasNoCapacityPoolCandidates,
+  resolveCapacityAwareQuotaCredentialSource,
+  resolveReusableNodeCapacitySnapshot,
+} from '../../services/placement-resolver';
 import {
   assertVmProvisioningLease,
   getVmAdmissionConfig,
-  markVmAdmissionNodeReady,
   markVmProvisioningLeaseInflightNode,
   recordVmProviderCapacityFailure,
   recordVmProviderCapacitySuccess,
   releaseVmProvisioningLease,
   renewVmProvisioningLease,
-  resolveVmAdmissionScope,
   tryAcquireVmProvisioningLease,
-  type VmAdmissionWait,
-  type VmProvisioningLeaseResult,
-  type VmTaskAdmissionIdentity,
   waitForVmAdmissionCapacity,
 } from '../../services/vm-admission-control';
 import { assertClaimedNodeAvailable } from './claimed-node-availability';
 import { parseEnvInt } from './helpers';
 import {
+  buildAdmissionIdentity,
+  handleLeaseResult,
+  scheduleAdmissionWait,
+} from './node-provisioning-admission';
+import { applyCapacityCandidateProvisioningTarget } from './node-provisioning-target';
+import {
   findNodeWithCapacity,
+  nodeSatisfiesTaskResources,
   releaseClaimedWarmNode,
+  type ReusableNodeSelection,
   tryClaimWarmNode,
   verifyNodeAgentHealthy,
 } from './node-selection';
-import { isNodeAgentReadyForWorkspaceDispatch } from './readiness';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
+export { handleNodeAgentReady } from './node-agent-ready-step';
 export { verifyNodeAgentHealthy } from './node-selection';
 
 // =========================================================================
 // Step Handlers
 // =========================================================================
 
-async function scheduleAdmissionWait(
-  state: TaskRunnerState,
-  rc: TaskRunnerContext,
-  result: VmAdmissionWait
-): Promise<void> {
-  await rc.updateD1ExecutionStep(state.taskId, 'waiting_for_node_capacity');
-  await rc.ctx.storage.put('state', state);
-  const nextRetryMs = Date.parse(result.nextRetryAt);
-  await rc.ctx.storage.setAlarm(Number.isFinite(nextRetryMs) ? nextRetryMs : Date.now());
-  log.info('task_runner_do.node_provisioning.admission_wait', {
-    taskId: state.taskId,
-    reason: result.reason,
-    nextRetryAt: result.nextRetryAt,
-    waitDeadlineAt: result.waitDeadlineAt,
-  });
-}
-
-async function handleLeaseResult(
-  state: TaskRunnerState,
-  rc: TaskRunnerContext,
-  result: VmProvisioningLeaseResult
-): Promise<'granted' | 'waiting'> {
-  if (result.kind === 'expired') {
-    throw Object.assign(new Error('Timed out waiting for VM capacity'), { permanent: true });
-  }
-  if (result.kind === 'waiting') {
-    await scheduleAdmissionWait(state, rc, result);
-    return 'waiting';
-  }
-  state.admissionScopeKey = result.scopeKey;
-  state.admissionLeaseToken = result.fencingToken > 0 ? result.fencingToken : null;
-  await rc.ctx.storage.put('state', state);
-  return 'granted';
-}
-
 async function trySelectReusableNodeForProvisioning(
   state: TaskRunnerState,
   rc: TaskRunnerContext
-): Promise<string | null> {
-  const warmNodeId = await tryClaimWarmNode(state, rc);
-  if (warmNodeId) {
-    if (await verifyNodeAgentHealthy(warmNodeId, rc)) {
-      return warmNodeId;
+): Promise<ReusableNodeSelection | null> {
+  const warmNode = await tryClaimWarmNode(state, rc);
+  if (warmNode) {
+    if (await verifyNodeAgentHealthy(warmNode.nodeId, rc)) {
+      return warmNode;
     }
-    await releaseClaimedWarmNode(state, rc, warmNodeId);
+    await releaseClaimedWarmNode(state, rc, warmNode.nodeId);
     log.warn('task_runner_do.node_provisioning.warm_node_unhealthy', {
       taskId: state.taskId,
-      nodeId: warmNodeId,
+      nodeId: warmNode.nodeId,
     });
   }
 
-  const existingNodeId = await findNodeWithCapacity(state, rc);
-  if (existingNodeId) {
-    if (await verifyNodeAgentHealthy(existingNodeId, rc)) {
-      return existingNodeId;
+  const existingNode = await findNodeWithCapacity(state, rc);
+  if (existingNode) {
+    if (await verifyNodeAgentHealthy(existingNode.nodeId, rc)) {
+      return existingNode;
     }
     log.warn('task_runner_do.node_provisioning.existing_node_unhealthy', {
       taskId: state.taskId,
-      nodeId: existingNodeId,
+      nodeId: existingNode.nodeId,
     });
   }
 
   return null;
-}
-
-async function buildAdmissionIdentity(
-  state: TaskRunnerState,
-  rc: TaskRunnerContext
-): Promise<VmTaskAdmissionIdentity | null> {
-  const scope = await resolveVmAdmissionScope(rc.env, {
-    userId: state.userId,
-    projectId: state.projectId,
-    targetProvider: state.config.cloudProvider,
-    credentialAttributionUserId: state.config.credentialAttributionUserId,
-    credentialAttributionProjectId: state.config.credentialAttributionProjectId,
-    credentialAttributionSource: state.config.credentialAttributionSource,
-  });
-  if (!scope) return null;
-  return {
-    ...scope,
-    taskId: state.taskId,
-    projectId: state.projectId,
-    userId: state.userId,
-    requestedVmSize: state.config.vmSize,
-    requestedVmLocation: state.config.vmLocation,
-    preferredNodeId: state.config.preferredNodeId,
-  };
 }
 
 export async function handleNodeSelection(
@@ -143,24 +102,76 @@ export async function handleNodeSelection(
     preferredNodeId: state.config.preferredNodeId,
   });
 
+  if (
+    state.config.capacityPoolSelection &&
+    hasNoCapacityPoolCandidates(state.config.capacityPoolSelection)
+  ) {
+    throw capacityPoolNoCandidatesError(state.config.capacityPoolSelection);
+  }
+
   if (state.config.preferredNodeId) {
     // Validate the preferred node
     const node = await rc.env.DATABASE.prepare(
-      `SELECT id, status, vm_size, agent_version FROM nodes WHERE id = ? AND user_id = ?`
+      `SELECT
+         id,
+         status,
+         vm_size AS vmSize,
+         vm_location AS vmLocation,
+         cloud_provider AS cloudProvider,
+         capacity_pool_id AS capacityPoolId,
+         capacity_pool_scope AS capacityPoolScope,
+         capacity_pool_revision AS capacityPoolRevision,
+         capacity_source_id AS capacitySourceId,
+         capacity_pool_candidate_id AS capacityPoolCandidateId,
+         placement_credential_source AS placementCredentialSource,
+         placement_credential_reference AS placementCredentialReference,
+         placement_credential_version AS placementCredentialVersion,
+         capacity_pool_project_id AS capacityPoolProjectId,
+         workload_role AS workloadRole,
+         provider_instance_type AS providerInstanceType,
+         provider_instance_vcpu_count AS providerInstanceVcpuCount,
+         provider_instance_memory_mb AS providerInstanceMemoryMb,
+         provider_instance_disk_gb AS providerInstanceDiskGb,
+         provider_instance_price_display AS providerInstancePriceDisplay,
+         provider_instance_price_currency AS providerInstancePriceCurrency,
+         provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
+         provider_instance_price_hourly_micros AS providerInstancePriceHourlyMicros,
+         placement_explanation_json AS placementExplanationJson,
+         agent_version AS agentVersion
+       FROM nodes WHERE id = ? AND user_id = ?`
     )
       .bind(state.config.preferredNodeId, state.userId)
-      .first<{ id: string; status: string; vm_size: string; agent_version: string | null }>();
+      .first<
+        | (CapacityAwareNodePlacementRow & {
+            id: string;
+            status: string;
+            agentVersion: string | null;
+          })
+        | null
+      >();
 
     if (!node || node.status !== 'running') {
       throw Object.assign(new Error('Specified node is not available'), { permanent: true });
     }
-    if (!canSatisfyVmSize(node.vm_size, state.config.vmSize)) {
-      throw Object.assign(new Error('Specified node is smaller than the requested VM size'), {
+    if (!nodeSatisfiesTaskResources(node, state)) {
+      throw Object.assign(new Error('Specified node does not satisfy the requested resources'), {
         permanent: true,
       });
     }
-    if (!isNodeAgentVersionCompatible(node.agent_version, rc.env.VM_AGENT_REQUIRED_VERSION)) {
+    if (!isNodeAgentVersionCompatible(node.agentVersion, rc.env.VM_AGENT_REQUIRED_VERSION)) {
       throw Object.assign(new Error('Specified node is running an incompatible VM agent build'), {
+        permanent: true,
+      });
+    }
+    const capacityPlacementSnapshot = resolveReusableNodeCapacitySnapshot({
+      selection: state.config.capacityPoolSelection,
+      node,
+      projectId: state.projectId,
+      requestedVmSize: state.config.vmSize,
+      requestedReservation: state.config.resolvedReservation ?? null,
+    });
+    if (capacityPlacementSnapshot === undefined) {
+      throw Object.assign(new Error('Specified node is outside the selected capacity pool'), {
         permanent: true,
       });
     }
@@ -168,6 +179,7 @@ export async function handleNodeSelection(
     // Verify the VM agent is actually reachable before reusing
     if (await verifyNodeAgentHealthy(node.id, rc)) {
       state.stepResults.nodeId = node.id;
+      state.stepResults.capacityPlacementSnapshot = capacityPlacementSnapshot;
       await rc.advanceToStep(state, 'workspace_creation');
       return;
     }
@@ -179,33 +191,35 @@ export async function handleNodeSelection(
   }
 
   // Try warm pool first
-  const nodeId = await tryClaimWarmNode(state, rc);
-  if (nodeId) {
-    if (await verifyNodeAgentHealthy(nodeId, rc)) {
-      state.stepResults.nodeId = nodeId;
+  const warmNode = await tryClaimWarmNode(state, rc);
+  if (warmNode) {
+    if (await verifyNodeAgentHealthy(warmNode.nodeId, rc)) {
+      state.stepResults.nodeId = warmNode.nodeId;
+      state.stepResults.capacityPlacementSnapshot = warmNode.capacityPlacementSnapshot;
       await rc.advanceToStep(state, 'workspace_creation');
       return;
     }
-    await releaseClaimedWarmNode(state, rc, nodeId);
+    await releaseClaimedWarmNode(state, rc, warmNode.nodeId);
     // Warm node agent not healthy — fall through to try other options
     log.warn('task_runner_do.warm_node_unhealthy', {
       taskId: state.taskId,
-      nodeId,
+      nodeId: warmNode.nodeId,
     });
   }
 
   // Try existing running nodes with capacity
-  const existingNodeId = await findNodeWithCapacity(state, rc);
-  if (existingNodeId) {
-    if (await verifyNodeAgentHealthy(existingNodeId, rc)) {
-      state.stepResults.nodeId = existingNodeId;
+  const existingNode = await findNodeWithCapacity(state, rc);
+  if (existingNode) {
+    if (await verifyNodeAgentHealthy(existingNode.nodeId, rc)) {
+      state.stepResults.nodeId = existingNode.nodeId;
+      state.stepResults.capacityPlacementSnapshot = existingNode.capacityPlacementSnapshot;
       await rc.advanceToStep(state, 'workspace_creation');
       return;
     }
     // Existing node agent not healthy — fall through to provision
     log.warn('task_runner_do.existing_node_unhealthy', {
       taskId: state.taskId,
-      nodeId: existingNodeId,
+      nodeId: existingNode.nodeId,
     });
   }
 
@@ -218,6 +232,14 @@ export async function handleNodeProvisioning(
   rc: TaskRunnerContext
 ): Promise<void> {
   await rc.updateD1ExecutionStep(state.taskId, 'node_provisioning');
+  const requestedSizeBeforeProvisioning: VMSize = state.config.vmSize;
+
+  if (
+    state.config.capacityPoolSelection &&
+    hasNoCapacityPoolCandidates(state.config.capacityPoolSelection)
+  ) {
+    throw capacityPoolNoCandidatesError(state.config.capacityPoolSelection);
+  }
 
   // Self-healing recovery: a prior attempt may have provisioned a node in D1
   // (and in the cloud) but crashed before persisting nodeId to DO storage. The
@@ -235,21 +257,50 @@ export async function handleNodeProvisioning(
     const recoveredNodeId = taskRow?.auto_provisioned_node_id ?? null;
     if (recoveredNodeId) {
       const existing = await rc.env.DATABASE.prepare(
-        `SELECT id, status, vm_size FROM nodes WHERE id = ?`
+        `SELECT
+           id,
+           status,
+           vm_size AS vmSize,
+           capacity_pool_id AS capacityPoolId,
+           capacity_pool_scope AS capacityPoolScope,
+           capacity_pool_revision AS capacityPoolRevision,
+           capacity_source_id AS capacitySourceId,
+           capacity_pool_candidate_id AS capacityPoolCandidateId,
+           placement_credential_source AS placementCredentialSource,
+           placement_credential_reference AS placementCredentialReference,
+           placement_credential_version AS placementCredentialVersion,
+           capacity_pool_project_id AS capacityPoolProjectId,
+           workload_role AS workloadRole,
+           provider_instance_type AS providerInstanceType,
+           provider_instance_vcpu_count AS providerInstanceVcpuCount,
+           provider_instance_memory_mb AS providerInstanceMemoryMb,
+           provider_instance_disk_gb AS providerInstanceDiskGb,
+           provider_instance_price_display AS providerInstancePriceDisplay,
+           provider_instance_price_currency AS providerInstancePriceCurrency,
+           provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
+           provider_instance_price_hourly_micros AS providerInstancePriceHourlyMicros,
+           placement_explanation_json AS placementExplanationJson
+         FROM nodes WHERE id = ?`
       )
         .bind(recoveredNodeId)
-        .first<{ id: string; status: string; vm_size: string }>();
+        .first<
+          (CapacityPlacementSnapshotRow & { id: string; status: string; vmSize: string }) | null
+        >();
       if (
         existing &&
         (existing.status === 'running' ||
           existing.status === 'creating' ||
           existing.status === 'recovery')
       ) {
-        const recoveredSize = existing.vm_size as VMSize;
+        const recoveredSize = existing.vmSize as VMSize;
         const requestedBeforeRecovery = state.config.vmSize;
         state.stepResults.nodeId = existing.id;
         state.stepResults.autoProvisioned = true;
         state.stepResults.provisionedVmSize = recoveredSize;
+        const recoveredSnapshot = toCapacityPlacementSnapshot(existing);
+        state.stepResults.capacityPlacementSnapshot = recoveredSnapshot.capacityPoolId
+          ? recoveredSnapshot
+          : null;
         state.config.vmSize = recoveredSize;
         state.provisioningStartedAt ??= Date.now();
         await rc.ctx.storage.put('state', state);
@@ -320,14 +371,20 @@ export async function handleNodeProvisioning(
     return;
   }
 
+  const selectedCapacityCandidate = state.config.capacityPoolSelection?.candidates[0] ?? null;
+  if (selectedCapacityCandidate) {
+    applyCapacityCandidateProvisioningTarget(state, selectedCapacityCandidate);
+  }
+
   const admissionIdentity = await buildAdmissionIdentity(state, rc);
 
   // A waiter woken by capacity changes should try packing onto an existing
   // compatible node before claiming the provisioning lease.
   if (admissionIdentity) {
-    const reusableNodeId = await trySelectReusableNodeForProvisioning(state, rc);
-    if (reusableNodeId) {
-      state.stepResults.nodeId = reusableNodeId;
+    const reusableNode = await trySelectReusableNodeForProvisioning(state, rc);
+    if (reusableNode) {
+      state.stepResults.nodeId = reusableNode.nodeId;
+      state.stepResults.capacityPlacementSnapshot = reusableNode.capacityPlacementSnapshot;
       await rc.advanceToStep(state, 'workspace_creation');
       return;
     }
@@ -350,9 +407,12 @@ export async function handleNodeProvisioning(
         'user_node_limit'
       );
       if (waitResult.kind === 'expired') {
-        throw Object.assign(new Error(`Maximum ${maxNodes} nodes allowed. Cannot auto-provision.`), {
-          permanent: true,
-        });
+        throw Object.assign(
+          new Error(`Maximum ${maxNodes} nodes allowed. Cannot auto-provision.`),
+          {
+            permanent: true,
+          }
+        );
       }
       await scheduleAdmissionWait(state, rc, waitResult);
       return;
@@ -389,7 +449,11 @@ export async function handleNodeProvisioning(
       });
     }
 
-    if (credResult.credentialSource === 'platform') {
+    const quotaCredentialSource = resolveCapacityAwareQuotaCredentialSource(
+      credResult,
+      state.config.capacityPoolSelection ?? null
+    );
+    if (quotaCredentialSource === 'platform') {
       const { checkQuotaForUser } = await import('../../services/compute-quotas');
       const quotaCheck = await checkQuotaForUser(db, state.userId);
 
@@ -411,8 +475,8 @@ export async function handleNodeProvisioning(
 
     // Re-select after winning the claim. A compatible node may have become
     // reusable while this task was competing for the fenced provisioning lease.
-    const reusableNodeId = await trySelectReusableNodeForProvisioning(state, rc);
-    if (reusableNodeId) {
+    const reusableNode = await trySelectReusableNodeForProvisioning(state, rc);
+    if (reusableNode) {
       await releaseVmProvisioningLease(
         rc.env,
         state.admissionScopeKey,
@@ -422,7 +486,8 @@ export async function handleNodeProvisioning(
       );
       state.admissionScopeKey = null;
       state.admissionLeaseToken = null;
-      state.stepResults.nodeId = reusableNodeId;
+      state.stepResults.nodeId = reusableNode.nodeId;
+      state.stepResults.capacityPlacementSnapshot = reusableNode.capacityPlacementSnapshot;
       await rc.advanceToStep(state, 'workspace_creation');
       return;
     }
@@ -445,8 +510,14 @@ export async function handleNodeProvisioning(
   const sizeIsDefaultDerived =
     state.config.vmSizeSource === 'project' || state.config.vmSizeSource === 'platform';
   const fallbackAllowed = fallbackEnabled && sizeIsDefaultDerived;
-  const requestedSize: VMSize = state.config.vmSize;
-  const chain: VMSize[] = fallbackAllowed ? vmSizeFallbackChain(requestedSize) : [requestedSize];
+  let chain: VMSize[];
+  if (selectedCapacityCandidate) {
+    chain = [selectedCapacityCandidate.machineSize ?? requestedSizeBeforeProvisioning];
+  } else if (fallbackAllowed) {
+    chain = vmSizeFallbackChain(requestedSizeBeforeProvisioning);
+  } else {
+    chain = [requestedSizeBeforeProvisioning];
+  }
 
   for (const [i, size] of chain.entries()) {
     const isLastSize = i === chain.length - 1;
@@ -471,13 +542,22 @@ export async function handleNodeProvisioning(
       vmLocation: state.config.vmLocation,
       heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
       cloudProvider: state.config.cloudProvider ?? undefined,
+      providerInstanceType: state.config.providerInstanceType ?? null,
+      capacityPlacementSnapshot: state.stepResults.capacityPlacementSnapshot ?? null,
     });
 
     // Store autoProvisionedNodeId on the task
     await rc.env.DATABASE.prepare(
-      `UPDATE tasks SET auto_provisioned_node_id = ?, updated_at = ? WHERE id = ?`
+      `UPDATE tasks
+       SET auto_provisioned_node_id = ?, ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS}, updated_at = ?
+       WHERE id = ?`
     )
-      .bind(createdNode.id, new Date().toISOString(), state.taskId)
+      .bind(
+        createdNode.id,
+        ...capacityPlacementSnapshotSqlValues(state.stepResults.capacityPlacementSnapshot),
+        new Date().toISOString(),
+        state.taskId
+      )
       .run();
 
     // Persist ownership before the provider call so a revocation or crash
@@ -503,9 +583,13 @@ export async function handleNodeProvisioning(
       taskId: state.taskId,
       nodeId: createdNode.id,
       vmSize: size,
-      requestedVmSize: requestedSize,
+      requestedVmSize: requestedSizeBeforeProvisioning,
       attempt: i + 1,
       chainLength: chain.length,
+      capacityPoolId: state.stepResults.capacityPlacementSnapshot?.capacityPoolId ?? null,
+      capacitySourceId: state.stepResults.capacityPlacementSnapshot?.capacitySourceId ?? null,
+      capacityPoolCandidateId:
+        state.stepResults.capacityPlacementSnapshot?.capacityPoolCandidateId ?? null,
     });
 
     try {
@@ -631,7 +715,7 @@ export async function handleNodeProvisioning(
           taskId: state.taskId,
           fromVmSize: size,
           toVmSize: nextSize,
-          requestedVmSize: requestedSize,
+          requestedVmSize: requestedSizeBeforeProvisioning,
           providerCode: err instanceof ProviderError ? err.providerCode : undefined,
         });
         continue;
@@ -640,7 +724,7 @@ export async function handleNodeProvisioning(
       // Capacity exhausted at the last size in the chain — terminal.
       const terminalMessage =
         chain.length === 1
-          ? `There were no ${requestedSize} machines available.`
+          ? `There were no ${size} machines available.`
           : `No capacity for any available VM size (tried ${chain.join(', ')}).`;
       await releaseVmProvisioningLease(
         rc.env,
@@ -664,7 +748,7 @@ export async function handleNodeProvisioning(
       await recordVmProviderCapacitySuccess(rc.env, admissionIdentity);
     }
 
-    if (size !== requestedSize) {
+    if (size !== requestedSizeBeforeProvisioning) {
       // Persist the downgraded size on the task so the UI can surface it.
       await rc.env.DATABASE.prepare(
         `UPDATE tasks SET provisioned_vm_size = ?, updated_at = ? WHERE id = ?`
@@ -689,101 +773,4 @@ export async function handleNodeProvisioning(
     await rc.advanceToStep(state, 'node_agent_ready');
     return;
   }
-}
-
-export async function handleNodeAgentReady(
-  state: TaskRunnerState,
-  rc: TaskRunnerContext
-): Promise<void> {
-  await rc.updateD1ExecutionStep(state.taskId, 'node_agent_ready');
-
-  if (!state.stepResults.nodeId) {
-    throw new Error('No nodeId in state — cannot check agent readiness');
-  }
-
-  // Initialize timeout tracking on first entry
-  if (!state.agentReadyStartedAt) {
-    state.agentReadyStartedAt = Date.now();
-    await rc.ctx.storage.put('state', state);
-  }
-  const agentReadyStartedAt = state.agentReadyStartedAt;
-  await renewVmProvisioningLease(
-    rc.env,
-    state.admissionScopeKey,
-    state.taskId,
-    state.admissionLeaseToken
-  );
-
-  // Check agent health via D1 heartbeat records.
-  //
-  // IMPORTANT: We do NOT fetch the VM agent directly via its vm-{nodeId} hostname.
-  // Cloudflare same-zone routing intercepts Worker subrequests to hostnames matching
-  // the wildcard Worker route (*.domain/*), routing them back to the API Worker
-  // instead of the VM. The identity verification detects this (the API's /health
-  // lacks nodeId), but the request never reaches the actual VM agent.
-  //
-  // Instead, we check D1 for the node's heartbeat status. The VM agent sends
-  // POST /api/nodes/:id/ready on startup and POST /api/nodes/:id/heartbeat
-  // periodically, which update healthStatus and lastHeartbeatAt in D1.
-  const node = await rc.env.DATABASE.prepare(
-    `SELECT health_status, last_heartbeat_at, agent_ready_at, agent_version, status FROM nodes WHERE id = ?`
-  )
-    .bind(state.stepResults.nodeId)
-    .first<{
-      health_status: string | null;
-      last_heartbeat_at: string | null;
-      agent_ready_at: string | null;
-      agent_version: string | null;
-      status: string;
-    }>();
-
-  await assertClaimedNodeAvailable(state, rc, node, 'node_agent_ready');
-
-  // As in provisioning, classify a missing/deleted node before the timeout so
-  // failure cleanup cannot attempt to warm a resource that no longer exists.
-  const timeoutMs = rc.getAgentReadyTimeoutMs();
-  const elapsed = Date.now() - agentReadyStartedAt;
-  if (elapsed > timeoutMs) {
-    throw Object.assign(new Error(`Node agent not ready within ${timeoutMs}ms`), {
-      permanent: true,
-    });
-  }
-
-  if (
-    isNodeAgentReadyForWorkspaceDispatch(
-      node,
-      agentReadyStartedAt,
-      30_000,
-      rc.env.VM_AGENT_REQUIRED_VERSION
-    )
-  ) {
-    log.info('task_runner_do.step.node_agent_ready', {
-      taskId: state.taskId,
-      nodeId: state.stepResults.nodeId,
-      elapsedMs: elapsed,
-      lastHeartbeatAt: node?.last_heartbeat_at,
-      agentReadyAt: node?.agent_ready_at,
-    });
-    await markVmAdmissionNodeReady(rc.env, {
-      taskId: state.taskId,
-      nodeId: state.stepResults.nodeId,
-    });
-    await rc.advanceToStep(state, 'workspace_creation');
-    return;
-  }
-
-  if (node?.health_status === 'healthy' && node.last_heartbeat_at) {
-    log.info('task_runner_do.step.node_agent_ready.stale_heartbeat', {
-      taskId: state.taskId,
-      nodeId: state.stepResults.nodeId,
-      elapsedMs: elapsed,
-      lastHeartbeatAt: node.last_heartbeat_at,
-      agentReadyAt: node.agent_ready_at,
-      agentReadyStartedAt: new Date(agentReadyStartedAt).toISOString(),
-      message: 'Node has heartbeat but no fresh /ready signal for this provisioning cycle',
-    });
-  }
-
-  // Not ready — schedule another poll
-  await rc.ctx.storage.setAlarm(Date.now() + rc.getAgentPollIntervalMs());
 }

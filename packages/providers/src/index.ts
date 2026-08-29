@@ -22,6 +22,7 @@ export type {
   ProviderErrorContextValue,
   ProviderLogContext,
   ProviderLogger,
+  ProviderOfferingListOptions,
   ProviderRequestContext,
   ScalewayProviderConfig,
   SizeConfig,
@@ -70,6 +71,7 @@ export {
   DEFAULT_DIGITALOCEAN_MAX_LIST_PAGES,
   DEFAULT_DIGITALOCEAN_REQUEST_TIMEOUT_MS,
   DIGITALOCEAN_LOCATIONS,
+  DIGITALOCEAN_SIZE_CONFIGS,
   DigitalOceanProvider,
   extractPublicIp,
   mapDigitalOceanStatus,
@@ -90,6 +92,7 @@ export {
   GCP_LOCATIONS,
   GcpProvider,
 } from './gcp';
+export { SIZE_MAP as GCP_SIZE_CONFIGS } from './gcp-metadata';
 export type { HetznerProviderRuntimeOptions } from './hetzner';
 export {
   classifyHetznerError,
@@ -105,6 +108,7 @@ export {
   HetznerProvider,
   isTransientCapacityError,
 } from './hetzner';
+export { HETZNER_SIZE_CONFIGS } from './hetzner-metadata';
 export {
   classifyInfomaniakError,
   DEFAULT_INFOMANIAK_AUTH_URL,
@@ -116,13 +120,28 @@ export {
   DEFAULT_INFOMANIAK_REQUEST_TIMEOUT_MS,
   DEFAULT_INFOMANIAK_VOLUME_TYPE,
   INFOMANIAK_LOCATIONS,
+  INFOMANIAK_SIZE_CONFIGS,
   INFOMANIAK_VOLUME_CAPABILITIES,
   INFOMANIAK_VOLUME_MAX_SIZE_GB,
   INFOMANIAK_VOLUME_MIN_SIZE_GB,
   InfomaniakProvider,
   mapInfomaniakStatus,
 } from './infomaniak';
-export { classifyScalewayError, SCALEWAY_LOCATIONS, ScalewayProvider } from './scaleway';
+export {
+  getProviderCatalogOfferings,
+  getProviderInstanceOfferingForLegacySize,
+  getProviderInstanceOfferings,
+  type NormalizedProviderPrice,
+  normalizeProviderPrice,
+  type ProviderInstanceOffering,
+  type ProviderPriceNormalizationOptions,
+} from './instance-offerings';
+export {
+  classifyScalewayError,
+  SCALEWAY_LOCATIONS,
+  SCALEWAY_SIZE_CONFIGS,
+  ScalewayProvider,
+} from './scaleway';
 export {
   SCALEWAY_DEFAULT_VOLUME_IOPS,
   SCALEWAY_MAX_VOLUMES_PER_SERVER,
@@ -140,6 +159,7 @@ export {
   DEFAULT_UPCLOUD_ZONE,
   mapUpCloudStatus,
   UPCLOUD_LOCATIONS,
+  UPCLOUD_SIZE_CONFIGS,
   UPCLOUD_VOLUME_MAX_SIZE_GB,
   UPCLOUD_VOLUME_MIN_SIZE_GB,
   UpCloudProvider,
@@ -153,6 +173,7 @@ export {
   findVultrOs,
   mapVultrStatus,
   VULTR_LOCATIONS,
+  VULTR_SIZE_CONFIGS,
   VultrProvider,
 } from './vultr';
 export { VULTR_VOLUME_MAX_SIZE_GB, VULTR_VOLUME_MIN_SIZE_GB } from './vultr-volumes';
@@ -174,6 +195,7 @@ export function createProvider(config: ProviderConfig): Provider {
         {
           capacityRetryMaxAttempts: config.capacityRetryMaxAttempts,
           capacityRetryBudgetMs: config.capacityRetryBudgetMs,
+          maxListPages: config.maxListPages,
           logger: config.logger,
         }
       );

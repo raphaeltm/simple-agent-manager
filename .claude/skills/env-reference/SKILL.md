@@ -324,6 +324,7 @@ by the read-only cron-liveness check.
 - `MCP_TRIGGER_LIST_MAX` — Maximum result count accepted by the `list_triggers` MCP tool (default: 100)
 - `MCP_INCIDENT_LIST_LIMIT` — Default result count for the private `list_incident_queue` MCP tool (default: 10)
 - `MCP_INCIDENT_LIST_MAX` — Maximum result count accepted by the private `list_incident_queue` MCP tool (default: 50)
+- `HETZNER_MAX_LIST_PAGES` — Maximum pages per Hetzner list request (default: 100)
 
 ### Timeouts
 
@@ -344,7 +345,24 @@ by the read-only cron-liveness check.
 - `NODE_AGENT_READY_TIMEOUT_MS` — Max wait for freshly provisioned node-agent health
 - `NODE_AGENT_READY_POLL_INTERVAL_MS` — Polling interval for fresh-node readiness checks
 - `VM_AGENT_REQUIRED_VERSION` — Deployment-generated required vm-agent build for reusable VM nodes. Official deploys set this from the Git commit SHA after publishing matching binaries; unset disables rollout gating for local/manual or skip-agent deploys.
+- `TASK_RUNNER_STEP_MAX_RETRIES` — Max retries per TaskRunner step before failing the task (default: 3)
+- `TASK_RUNNER_RETRY_BASE_DELAY_MS` — Base delay for TaskRunner retry backoff (default: 5000)
+- `TASK_RUNNER_RETRY_MAX_DELAY_MS` — Maximum delay for TaskRunner retry backoff (default: 60000)
+- `TASK_RUNNER_AGENT_POLL_INTERVAL_MS` — TaskRunner D1 poll interval while waiting for a fresh provisioned VM agent (default: 5000)
+- `TASK_RUNNER_AGENT_READY_TIMEOUT_MS` — TaskRunner max wait for a provisioned VM agent before failing the task (default: 900000)
+- `TASK_RUNNER_AGENT_READY_FRESHNESS_SKEW_MS` — Timestamp skew tolerated between TaskRunner wait start, node heartbeat, and `/ready` signals (default: 30000)
+- `TASK_RUNNER_WORKSPACE_DISPATCH_TIMEOUT_MS` — Max wait for VM-agent workspace dispatch acknowledgement (default: 600000)
+- `TASK_RUNNER_WORKSPACE_DISPATCH_BASE_DELAY_MS` — Base delay for workspace dispatch retry backoff (default: 30000)
+- `TASK_RUNNER_WORKSPACE_DISPATCH_MAX_DELAY_MS` — Maximum delay for workspace dispatch retry backoff (default: 120000)
+- `TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS` — Max wait for workspace-ready callback (default: 1800000)
+- `TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS` — D1 poll interval during the TaskRunner workspace-ready step (default: 30000)
+- `TASK_RUNNER_PROVISION_POLL_INTERVAL_MS` — TaskRunner provision status poll interval (default: 10000)
+- `TASK_RUNNER_PROVISION_TIMEOUT_MS` — Max time for TaskRunner node provisioning before permanent failure (default: 900000)
 - `HETZNER_API_TIMEOUT_MS` — Timeout for Hetzner Cloud API calls (default: 30000)
+- `HETZNER_CAPACITY_RETRY_INITIAL_DELAY_MS` — Initial delay for transient Hetzner capacity retry backoff (default: 15000)
+- `HETZNER_CAPACITY_RETRY_MAX_DELAY_MS` — Maximum delay per transient Hetzner capacity retry wait (default: 120000)
+- `HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS` — Maximum transient Hetzner capacity retry attempts (default: 10)
+- `HETZNER_CAPACITY_RETRY_BUDGET_MS` — Total transient Hetzner capacity retry budget (default: 300000)
 - `CF_API_TIMEOUT_MS` — Timeout for Cloudflare DNS API calls (default: 30000)
 - `NODE_AGENT_REQUEST_TIMEOUT_MS` — Timeout for Node Agent HTTP requests (default: 30000)
 

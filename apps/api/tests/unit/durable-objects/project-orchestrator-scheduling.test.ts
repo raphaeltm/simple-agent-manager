@@ -12,6 +12,35 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { runSchedulingCycle } from '../../../src/durable-objects/project-orchestrator/scheduling';
 
+vi.mock('../../../src/services/placement-resolver', () => ({
+  capacityPlacementSnapshotForTaskStart: vi.fn(() => null),
+  resolveTaskStartPlacementCredentialAttribution: vi.fn(async () => ({
+    placement: {
+      vmSize: 'small',
+      vmSizeSource: 'platform',
+      vmLocation: 'fsn1',
+      workspaceProfile: 'lightweight',
+      devcontainerConfigName: null,
+      agentType: null,
+      resolvedReservation: {
+        cpuMillis: 1000,
+        memoryMb: 1024,
+        diskMb: 10240,
+        exclusiveNode: false,
+        maxCoTenants: 1,
+        source: 'platform',
+        sourceId: 'platform',
+        version: 1,
+      },
+    },
+    effectiveProvider: 'hetzner',
+    credentialAttributionUserId: 'user-1',
+    credentialAttributionProjectId: null,
+    credentialAttributionSource: 'user',
+    capacityPoolSelection: null,
+  })),
+}));
+
 // ── Mock helpers ──────────────────────────────────────────────────────────────
 
 function makeSqlStorage(tables: Record<string, unknown[]> = {}) {

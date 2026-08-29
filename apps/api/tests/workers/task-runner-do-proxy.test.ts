@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ProjectData } from '../../src/durable-objects/project-data';
 import type { TaskRunner } from '../../src/durable-objects/task-runner';
 import type { TaskRunnerState } from '../../src/durable-objects/task-runner/types';
+import type { TaskStartCapacityPoolSelection } from '../../src/services/placement-resolver';
 import {
   advanceTaskRunnerWorkspaceReady,
   ensureTaskRunnerStarted,
@@ -79,6 +80,61 @@ function makeStartInput(taskId: string) {
   };
 }
 
+function makeCapacityPoolSelection(
+  overrides: { provider?: 'hetzner' | 'scaleway'; location?: 'nbg1' | 'fsn1' | 'fr-par-1' } = {}
+): TaskStartCapacityPoolSelection {
+  const provider = overrides.provider ?? 'hetzner';
+  const location = overrides.location ?? 'fsn1';
+  const snapshot = {
+    capacityPoolId: 'pool-task-runner-start',
+    capacityPoolScope: 'user' as const,
+    capacityPoolRevision: 1,
+    capacitySourceId: 'source-task-runner-start',
+    capacityPoolCandidateId: 'candidate-task-runner-start',
+    placementCredentialSource: 'user' as const,
+    placementCredentialReference: 'credentials:user-cloud-start',
+    placementCredentialVersion: 1,
+    capacityPoolProjectId: null,
+    workloadRole: 'workspace' as const,
+    placementExplanationJson: JSON.stringify({
+      poolId: 'pool-task-runner-start',
+      capacitySourceId: 'source-task-runner-start',
+      capacityPoolCandidateId: 'candidate-task-runner-start',
+    }),
+  };
+
+  return {
+    poolId: snapshot.capacityPoolId,
+    scope: 'user',
+    revision: snapshot.capacityPoolRevision,
+    strategy: 'balanced',
+    capacityPoolProjectId: null,
+    workloadRole: 'workspace',
+    poolSnapshot: { ...snapshot, capacitySourceId: null, capacityPoolCandidateId: null },
+    candidates: [
+      {
+        id: snapshot.capacityPoolCandidateId,
+        poolId: snapshot.capacityPoolId,
+        capacitySourceId: snapshot.capacitySourceId,
+        provider,
+        location,
+        workloadRole: 'workspace',
+        runtime: 'vm',
+        machineClass: 'shared-vm',
+        machineSize: 'medium',
+        priority: 0,
+        candidateOrder: 0,
+        credentialAttributionSource: 'user',
+        placementCredentialSource: 'user',
+        placementCredentialReference: snapshot.placementCredentialReference,
+        placementCredentialVersion: snapshot.placementCredentialVersion,
+        capacityPoolProjectId: null,
+        snapshot,
+      },
+    ],
+  };
+}
+
 // ---------------------------------------------------------------------------
 // D1 fixtures
 // ---------------------------------------------------------------------------
@@ -94,6 +150,8 @@ const TASK_IDS = [
   'task-status-init-001',
   'task-redact-mcp-001',
   'task-deterministic-001',
+  'task-capacity-explicit-guard-001',
+  'task-capacity-flexible-location-001',
 ];
 
 beforeEach(async () => {
@@ -242,6 +300,54 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
     expect(status.config.systemPromptAppend).toBeNull();
     expect(status.config.attachments).toBeNull();
     expect(status.config.projectScaling).toBeNull();
+  });
+
+  it('does not let a mismatched capacity candidate override explicit provider or location', async () => {
+    const taskId = 'task-capacity-explicit-guard-001';
+
+    await startTaskRunnerDO(env, {
+      ...makeStartInput(taskId),
+      preferredNodeId: null,
+      cloudProvider: 'hetzner',
+      vmLocation: 'nbg1',
+      explicitVmLocation: true,
+      capacityPoolSelection: makeCapacityPoolSelection({
+        provider: 'scaleway',
+        location: 'fr-par-1',
+      }),
+    });
+
+    const status = (await getStub(taskId).getStatus()) as TaskRunnerState;
+    expect(status.config.cloudProvider).toBe('hetzner');
+    expect(status.config.vmLocation).toBe('nbg1');
+    expect(status.config.capacityPoolSelection).toBeNull();
+    expect(status.stepResults.capacityPlacementSnapshot).toBeNull();
+  });
+
+  it('preserves flexible location choice when no explicit vmLocation was requested', async () => {
+    const taskId = 'task-capacity-flexible-location-001';
+
+    await startTaskRunnerDO(env, {
+      ...makeStartInput(taskId),
+      preferredNodeId: null,
+      cloudProvider: 'hetzner',
+      vmLocation: 'nbg1',
+      explicitVmLocation: false,
+      capacityPoolSelection: makeCapacityPoolSelection({ provider: 'hetzner', location: 'fsn1' }),
+    });
+
+    const status = (await getStub(taskId).getStatus()) as TaskRunnerState;
+    expect(status.config.cloudProvider).toBe('hetzner');
+    expect(status.config.vmLocation).toBe('fsn1');
+    expect(status.config.capacityPoolSelection?.candidates[0]).toMatchObject({
+      provider: 'hetzner',
+      location: 'fsn1',
+    });
+    expect(status.stepResults.capacityPlacementSnapshot).toMatchObject({
+      capacityPoolId: 'pool-task-runner-start',
+      capacitySourceId: 'source-task-runner-start',
+      capacityPoolCandidateId: 'candidate-task-runner-start',
+    });
   });
 
   it('startTaskRunnerDO is idempotent — second call is a no-op', async () => {

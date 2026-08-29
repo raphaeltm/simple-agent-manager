@@ -129,6 +129,46 @@ describe('UpCloudProvider', () => {
       },
     });
   });
+
+  it('uses config.instanceType as the concrete plan when provided', async () => {
+    const fetchMock = mock((url, _init) =>
+      url.endsWith('/zone')
+        ? json({ zones: { zone: [{ id: 'de-fra1' }] } })
+        : url.endsWith('/plan')
+          ? json({ plans: { plan: [{ name: '4xCPU-8GB' }] } })
+          : url.endsWith('/storage/template')
+            ? json({
+                storages: {
+                  storage: [
+                    storage({
+                      uuid: 'template-1',
+                      title: 'Ubuntu Server 24.04 LTS',
+                      type: 'template',
+                      template_type: 'cloud-init',
+                      zone: '',
+                    }),
+                  ],
+                },
+              })
+            : json({ server: server({ plan: '4xCPU-8GB' }) })
+    );
+    const p = new UpCloudProvider('api-user', 'secret', { ipPollTimeoutMs: 1 });
+
+    await p.createVM({
+      name: 'Node One',
+      size: 'small',
+      location: 'de-fra1',
+      instanceType: '4xCPU-8GB',
+      userData: '#cloud-config\n',
+    });
+
+    const call = fetchMock.mock.calls.find(
+      ([url, init]) => String(url).endsWith('/server') && (init as RequestInit).method === 'POST'
+    );
+    const init = call?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body)).server.plan).toBe('4xCPU-8GB');
+  });
+
   it('stops IP polling at caller cancellation without another provider read', async () => {
     vi.useFakeTimers();
     let serverReads = 0;

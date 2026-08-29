@@ -40,6 +40,34 @@ const serviceSource = readFileSync(
   resolve(process.cwd(), 'src/services/node-lifecycle.ts'),
   'utf8'
 );
+const submitRouteSource = readFileSync(
+  resolve(process.cwd(), 'src/routes/tasks/submit.ts'),
+  'utf8'
+);
+const mcpDispatchRouteSource = readFileSync(
+  resolve(process.cwd(), 'src/routes/mcp/dispatch-tool.ts'),
+  'utf8'
+);
+const samSessionDispatchSource = readFileSync(
+  resolve(process.cwd(), 'src/durable-objects/sam-session/tools/dispatch-task.ts'),
+  'utf8'
+);
+const triggerSubmitSource = readFileSync(
+  resolve(process.cwd(), 'src/services/trigger-submit.ts'),
+  'utf8'
+);
+const retrySubtaskSource = readFileSync(
+  resolve(process.cwd(), 'src/durable-objects/sam-session/tools/retry-subtask.ts'),
+  'utf8'
+);
+const taskRunSource = readFileSync(
+  resolve(process.cwd(), 'src/routes/tasks/run.ts'),
+  'utf8'
+);
+const mcpOrchestrationToolsSource = readFileSync(
+  resolve(process.cwd(), 'src/routes/mcp/orchestration-tools.ts'),
+  'utf8'
+);
 const taskRunnerSource = [
   'index.ts',
   'types.ts',
@@ -182,6 +210,37 @@ describe('concurrent warm pool claiming safety', () => {
       expect(selectorSource).toContain('nodeLifecycle.tryClaim');
       expect(selectorSource).toContain("import * as nodeLifecycle from './node-lifecycle'");
     });
+  });
+});
+
+// =============================================================================
+// Placement resolution duplication — Wave 2A migration guard
+// =============================================================================
+
+describe('placement resolution entry points', () => {
+  it('keeps task-start placement resolution centralized across entry points', () => {
+    const entryPoints = [
+      { name: 'chat submit route', source: submitRouteSource },
+      { name: 'MCP dispatch route', source: mcpDispatchRouteSource },
+      { name: 'SAM session dispatch tool', source: samSessionDispatchSource },
+      { name: 'trigger submit bridge', source: triggerSubmitSource },
+      { name: 'SAM session retry tool', source: retrySubtaskSource },
+      { name: 'task run route', source: taskRunSource },
+      { name: 'MCP orchestration retry tool', source: mcpOrchestrationToolsSource },
+    ];
+
+    for (const entryPoint of entryPoints) {
+      expect(entryPoint.source, entryPoint.name).toContain('placement-resolver');
+      expect(entryPoint.source, entryPoint.name).toContain('resolveTaskStartPlacement');
+      expect(entryPoint.source, entryPoint.name).toContain('startTaskRunnerDO');
+      expect(entryPoint.source, entryPoint.name).not.toContain('resolveResourceReservation(');
+    }
+  });
+
+  it('keeps TaskRunner final placement reservation centralized in reserveWorkspacePlacement', () => {
+    expect(taskRunnerSource).toContain('reserveWorkspacePlacement(');
+    expect(taskRunnerSource).toContain("workspace_placement_lost");
+    expect(taskRunnerSource).not.toContain('INSERT INTO workspaces');
   });
 });
 

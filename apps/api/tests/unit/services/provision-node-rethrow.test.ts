@@ -64,6 +64,29 @@ const createVM = vi.fn();
 const createProviderForUser = vi.fn();
 vi.mock('../../../src/services/provider-credentials', () => ({
   createProviderForUser: (...args: unknown[]) => createProviderForUser(...args),
+  exactProviderCredentialBindingFromPlacementSnapshot: (snapshot: {
+    capacityPoolId?: string | null;
+    placementCredentialSource?: string | null;
+    placementCredentialReference?: string | null;
+    placementCredentialVersion?: number | null;
+  }) => {
+    if (
+      !snapshot.capacityPoolId ||
+      !(
+        snapshot.placementCredentialSource === 'user' ||
+        snapshot.placementCredentialSource === 'project' ||
+        snapshot.placementCredentialSource === 'platform'
+      ) ||
+      !snapshot.placementCredentialReference
+    ) {
+      return null;
+    }
+    return {
+      credentialSource: snapshot.placementCredentialSource,
+      credentialReference: snapshot.placementCredentialReference,
+      credentialVersion: snapshot.placementCredentialVersion ?? null,
+    };
+  },
 }));
 
 vi.mock('../../../src/lib/secrets', () => ({
@@ -168,6 +191,19 @@ describe('provisionNode backend DNS records', () => {
     );
   });
 
+  it('passes the concrete provider instance type from the node row to createVM', async () => {
+    (nodeRows[0] as { providerInstanceType?: string }).providerInstanceType = 'cx42';
+
+    await provisionNode('node-1', ENV);
+
+    expect(createVM).toHaveBeenCalledWith(
+      expect.objectContaining({
+        size: 'large',
+        instanceType: 'cx42',
+      })
+    );
+  });
+
   it('keeps provisioning compatible but omits ownership when identity is unavailable', async () => {
     await provisionNode('node-1', { ...ENV, SAM_INSTALLATION_ID: undefined });
 
@@ -251,7 +287,8 @@ describe('provisionNode backend DNS records', () => {
       'test-key',
       ENV,
       'hetzner',
-      'project-1'
+      'project-1',
+      null
     );
     expect(ops).toContainEqual(
       expect.objectContaining({
@@ -263,6 +300,45 @@ describe('provisionNode backend DNS records', () => {
           credentialAttributionSource: 'project',
         }),
       })
+    );
+  });
+
+  it('uses the selected pool credential reference as the exact provider authority', async () => {
+    nodeRows.length = 0;
+    nodeRows.push({
+      id: 'node-project-pool',
+      userId: 'member-b',
+      credentialAttributionUserId: 'member-b',
+      credentialAttributionProjectId: 'project-1',
+      credentialAttributionSource: 'project',
+      vmSize: 'large',
+      vmLocation: 'fsn1',
+      cloudProvider: 'hetzner',
+      capacityPoolId: 'pool-project-1',
+      placementCredentialSource: 'project',
+      placementCredentialReference: 'credentials:project-cloud-owner',
+      placementCredentialVersion: 1700000000000,
+    });
+    createProviderForUser.mockResolvedValueOnce({
+      provider: { createVM },
+      providerName: 'hetzner',
+      credentialSource: 'project',
+    });
+
+    await provisionNode('node-project-pool', ENV, { projectId: 'project-1', chatSessionId: '', taskId: 'task-1' });
+
+    expect(createProviderForUser).toHaveBeenCalledWith(
+      expect.anything(),
+      'member-b',
+      'test-key',
+      ENV,
+      'hetzner',
+      'project-1',
+      {
+        credentialSource: 'project',
+        credentialReference: 'credentials:project-cloud-owner',
+        credentialVersion: 1700000000000,
+      }
     );
   });
 

@@ -77,7 +77,10 @@ vi.mock('../../../src/services/branch-name', () => ({
 }));
 
 vi.mock('../../../src/services/provider-credentials', () => ({
-  resolveCredentialSource: vi.fn().mockResolvedValue({ credentialId: 'cred-1', provider: 'hetzner' }),
+  resolveCredentialSource: vi.fn().mockResolvedValue({
+    credentialSource: 'user',
+    providerName: 'hetzner',
+  }),
 }));
 
 vi.mock('../../../src/services/project-agent-defaults', () => ({

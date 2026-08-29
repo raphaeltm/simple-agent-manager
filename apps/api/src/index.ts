@@ -46,6 +46,7 @@ import { adminAiAllowanceRoutes } from './routes/admin-ai-allowance';
 import { adminAIProxyRoutes } from './routes/admin-ai-proxy';
 import { adminAiUsageRoutes } from './routes/admin-ai-usage';
 import { adminAnalyticsRoutes } from './routes/admin-analytics';
+import { adminCapacityPoolsRoutes } from './routes/admin-capacity-pools';
 import { adminCcBackfillRoutes } from './routes/admin-cc-backfill';
 import { adminCostRoutes } from './routes/admin-costs';
 import { adminGithubInstallationLeakSweepRoutes } from './routes/admin-github-installation-leak-sweep';
@@ -71,6 +72,7 @@ import { apiTokenRoutes } from './routes/api-tokens';
 import { authRoutes } from './routes/auth';
 import { bootstrapRoutes } from './routes/bootstrap';
 import { cachedCommandRoutes } from './routes/cached-commands';
+import { capacityPoolsRoutes } from './routes/capacity-pools';
 import { chatRoutes } from './routes/chat';
 import { chatStartRoutes } from './routes/chat-start';
 import { chatsRoutes } from './routes/chats';
@@ -102,10 +104,7 @@ import { libraryRoutes } from './routes/library';
 import { libraryCommentRoutes } from './routes/library-comments';
 import { mailboxRoutes } from './routes/mailbox';
 import { mcpRoutes } from './routes/mcp';
-import {
-  projectMcpConnectionRoutes,
-  userMcpConnectionRoutes,
-} from './routes/mcp-connections';
+import { projectMcpConnectionRoutes, userMcpConnectionRoutes } from './routes/mcp-connections';
 import { missionRoutes } from './routes/missions';
 import { modelCatalogRoutes } from './routes/model-catalog';
 import { nodeLifecycleRoutes } from './routes/node-lifecycle';
@@ -387,9 +386,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   const portsListRequest = isWorkspacePortsListRequest(c.req.raw.method, url.pathname, workspaceId);
   if (!workspace) {
     if (portsListRequest) {
-      return c.json(
-        workspacePortsReadinessPayload('gone', null, 'Workspace not found', false)
-      );
+      return c.json(workspacePortsReadinessPayload('gone', null, 'Workspace not found', false));
     }
     return c.json({ error: 'NOT_FOUND', message: 'Workspace not found' }, 404);
   }
@@ -773,6 +770,7 @@ app.route('/api/auth', authRoutes);
 app.route('/api/setup', setupRoutes);
 app.route('/api/credentials', resolutionStatusRoute);
 app.route('/api/credentials', credentialsRoutes);
+app.route('/api/capacity-pools', capacityPoolsRoutes);
 app.route('/api/agent-credential-setup-sessions', agentCredentialSetupSessionsRoutes);
 app.route('/api/mcp-connections', userMcpConnectionRoutes);
 app.route('/api/cc', ccRoutes);
@@ -845,6 +843,7 @@ app.route('/api/projects', deploymentVolumeRoutes);
 app.route('/api/deployment', gcpDeployCallbackRoute);
 app.route('/api/admin/observability/logs/ingest', observabilityIngestRoutes);
 app.route('/api/admin', adminRoutes);
+app.route('/api/admin/capacity-pools', adminCapacityPoolsRoutes);
 app.route('/api/admin/ai-proxy', adminAIProxyRoutes);
 app.route('/api/admin/analytics', adminAnalyticsRoutes);
 app.route('/api/admin/analytics/ai-usage', adminAiUsageRoutes);

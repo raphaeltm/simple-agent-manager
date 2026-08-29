@@ -57,6 +57,10 @@ vi.mock('../../src/pages/AdminPlatformCredentials', () => ({
   AdminPlatformCredentials: () => <div data-testid="admin-credentials-page" />,
 }));
 
+vi.mock('../../src/pages/AdminInfrastructure', () => ({
+  AdminInfrastructure: () => <div data-testid="admin-infrastructure-page" />,
+}));
+
 vi.mock('../../src/pages/AdminAIProxy', () => ({
   AdminAIProxy: () => <div data-testid="admin-ai-proxy-page" />,
 }));
@@ -103,6 +107,10 @@ vi.mock('../../src/pages/AdminAnalytics', () => ({
 
 vi.mock('../../src/pages/Settings', () => ({
   Settings: () => <div data-testid="settings-page" />,
+}));
+
+vi.mock('../../src/pages/SettingsInfrastructure', () => ({
+  SettingsInfrastructure: () => <div data-testid="settings-infrastructure-page" />,
 }));
 
 vi.mock('../../src/pages/CreateWorkspace', () => ({
@@ -276,6 +284,21 @@ describe('App routes', () => {
 
     expect(await screen.findByTestId('admin-layout')).toBeInTheDocument();
     expect(await screen.findByTestId('admin-project-events-page')).toBeInTheDocument();
+  });
+
+  it('routes admin Infrastructure for superadmins', async () => {
+    mockUseAuth.mockReturnValue({ isSuperadmin: true });
+
+    renderAt('/admin/infrastructure');
+
+    expect(await screen.findByTestId('admin-layout')).toBeInTheDocument();
+    expect(await screen.findByTestId('admin-infrastructure-page')).toBeInTheDocument();
+  });
+
+  it('routes user settings Infrastructure', async () => {
+    renderAt('/settings/infrastructure');
+
+    expect(await screen.findByTestId('settings-page')).toBeInTheDocument();
   });
 
   it('does not render inventoried dev-only routes under production env flags', () => {

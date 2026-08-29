@@ -26,6 +26,7 @@
 import type { TaskExecutionStep } from '@simple-agent-manager/shared';
 import {
   DEFAULT_TASK_RUNNER_AGENT_POLL_INTERVAL_MS,
+  DEFAULT_TASK_RUNNER_AGENT_READY_FRESHNESS_SKEW_MS,
   DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS,
   DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS,
   DEFAULT_TASK_RUNNER_PROVISION_TIMEOUT_MS,
@@ -43,6 +44,7 @@ import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
+import { capacityPlacementSnapshotForTaskStart } from '../../services/placement-resolver';
 import {
   isSessionRecoveryTaskAuthorized,
   SessionRecoveryAuthorityRevokedError,
@@ -106,6 +108,9 @@ export class TaskRunner extends DurableObject<Env> {
         agentStarted: false,
         mcpToken: null,
         provisionedVmSize: null,
+        capacityPlacementSnapshot: capacityPlacementSnapshotForTaskStart(
+          input.config.capacityPoolSelection
+        ),
       },
       config: input.config,
       retryCount: 0,
@@ -362,6 +367,7 @@ export class TaskRunner extends DurableObject<Env> {
       },
       getAgentPollIntervalMs: () => this.getAgentPollIntervalMs(),
       getAgentReadyTimeoutMs: () => this.getAgentReadyTimeoutMs(),
+      getAgentReadyFreshnessSkewMs: () => this.getAgentReadyFreshnessSkewMs(),
       getWorkspaceDispatchTimeoutMs: () => this.getWorkspaceDispatchTimeoutMs(),
       getWorkspaceDispatchBaseDelayMs: () => this.getWorkspaceDispatchBaseDelayMs(),
       getWorkspaceDispatchMaxDelayMs: () => this.getWorkspaceDispatchMaxDelayMs(),
@@ -430,6 +436,7 @@ export class TaskRunner extends DurableObject<Env> {
     raw.config.resumeSnapshotChatSessionId ??= null;
     raw.config.recoverySourceTaskId ??= null;
     raw.stepResults.claimedWarmNodeId ??= null;
+    raw.stepResults.capacityPlacementSnapshot ??= null;
     raw.lastD1Step ??= null;
     return raw;
   }
@@ -489,6 +496,13 @@ export class TaskRunner extends DurableObject<Env> {
     return parseEnvInt(
       this.env.TASK_RUNNER_AGENT_READY_TIMEOUT_MS,
       DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS
+    );
+  }
+
+  private getAgentReadyFreshnessSkewMs(): number {
+    return parseEnvInt(
+      this.env.TASK_RUNNER_AGENT_READY_FRESHNESS_SKEW_MS,
+      DEFAULT_TASK_RUNNER_AGENT_READY_FRESHNESS_SKEW_MS
     );
   }
 

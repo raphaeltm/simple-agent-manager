@@ -1,4 +1,4 @@
-import type { VMSize } from '@simple-agent-manager/shared';
+import type { ProviderInstanceOffering, VMSize } from '@simple-agent-manager/shared';
 
 /**
  * Configuration for creating a VM.
@@ -12,6 +12,9 @@ export interface VMConfig {
 
   /** VM size tier */
   size: VMSize;
+
+  /** Provider-native instance type/SKU. When present, overrides the legacy size mapping. */
+  instanceType?: string;
 
   /** Datacenter/region identifier */
   location: string;
@@ -75,6 +78,11 @@ export interface SizeConfig {
 
   /** Storage in GB */
   storageGb: number;
+}
+
+export interface ProviderOfferingListOptions {
+  /** Prefer provider APIs when implemented and credentials are available. */
+  preferApi?: boolean;
 }
 
 /** Location metadata for display purposes */
@@ -262,6 +270,12 @@ export interface Provider {
   /** Validate provider credentials. Returns true if valid, throws ProviderError on failure. */
   validateToken(context?: ProviderRequestContext): Promise<boolean>;
 
+  /** List provider-native instance offerings available for compute-pool candidates. */
+  listInstanceOfferings(
+    options?: ProviderOfferingListOptions,
+    context?: ProviderRequestContext
+  ): Promise<ProviderInstanceOffering[]>;
+
   /** Create a provider block volume. */
   createVolume(config: VolumeConfig, context?: ProviderRequestContext): Promise<VolumeInstance>;
 
@@ -330,6 +344,8 @@ export interface HetznerProviderConfig {
   capacityRetryMaxAttempts?: number;
   /** Total time budget in ms for capacity retries (default: 300000 = 5 min) */
   capacityRetryBudgetMs?: number;
+  /** Maximum list pages fetched per Hetzner list operation. */
+  maxListPages?: number;
 }
 
 export interface ScalewayProviderConfig {

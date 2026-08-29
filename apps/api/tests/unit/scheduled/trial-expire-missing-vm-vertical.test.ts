@@ -47,6 +47,7 @@ vi.mock('drizzle-orm/d1', () => ({
 
 vi.mock('../../../src/services/provider-credentials', () => ({
   createProviderForUser: (...args: unknown[]) => createProviderForUser(...args),
+  exactProviderCredentialBindingFromPlacementSnapshot: () => null,
 }));
 vi.mock('../../../src/lib/secrets', () => ({ getCredentialEncryptionKey: () => 'test-key' }));
 vi.mock('../../../src/services/dns', () => ({

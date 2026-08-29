@@ -12,6 +12,8 @@ The reference covers:
 - Node Management (`/api/nodes/*`)
 - Workspace Management (`/api/workspaces/*`)
 - Project Management (`/api/projects/*`)
+- Default Capacity Pools (`/api/projects/:id/capacity-pools/defaults*`, `/api/capacity-pools/defaults*`, `/api/admin/capacity-pools/defaults*`)
+- Provider Catalog (`/api/providers/catalog`)
 - Task Management (`/api/projects/:projectId/tasks/*`)
 - MCP orchestration (`wait_for_subtasks`, `dispatch_task`, task inspection)
 - MCP ProjectData event subscriptions (`create/list/get/cancel_project_event_subscription`)

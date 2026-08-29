@@ -24,6 +24,8 @@ const doSource = [
   readFileSync(resolve(doDir, 'index.ts'), 'utf8'),
   readFileSync(resolve(doDir, 'types.ts'), 'utf8'),
   readFileSync(resolve(doDir, 'node-steps.ts'), 'utf8'),
+  readFileSync(resolve(doDir, 'node-agent-ready-step.ts'), 'utf8'),
+  readFileSync(resolve(doDir, 'node-provisioning-target.ts'), 'utf8'),
   readFileSync(resolve(doDir, 'node-selection.ts'), 'utf8'),
   readFileSync(resolve(doDir, 'workspace-steps.ts'), 'utf8'),
   readFileSync(resolve(doDir, 'agent-session-step.ts'), 'utf8'),
@@ -178,7 +180,9 @@ describe('node provisioning success path', () => {
       doSource.indexOf('export async function handleNodeAgentReady(')
     );
     expect(section).toContain('auto_provisioned_node_id');
-    expect(section).toContain('UPDATE tasks SET auto_provisioned_node_id = ?');
+    expect(section.replace(/\s+/g, ' ')).toContain(
+      'UPDATE tasks SET auto_provisioned_node_id = ?'
+    );
   });
 
   it('persists state to DO storage after creating node', () => {
@@ -339,6 +343,15 @@ describe('handleNodeAgentReady', () => {
     expect(section).toContain('rc.getAgentReadyTimeoutMs()');
   });
 
+  it('uses configurable agent ready freshness skew', () => {
+    const section = doSource.slice(
+      doSource.indexOf('export async function handleNodeAgentReady('),
+      doSource.indexOf('export async function handleWorkspaceCreation(')
+    );
+    expect(section).toContain('rc.getAgentReadyFreshnessSkewMs()');
+    expect(section).not.toContain('30_000');
+  });
+
   it('checks health via D1 heartbeat query (not direct VM fetch)', () => {
     const section = doSource.slice(
       doSource.indexOf('export async function handleNodeAgentReady('),
@@ -462,7 +475,7 @@ describe('provider-aware node provisioning', () => {
       nodesSource.indexOf('async function stopNodeResources')
     );
     expect(section).toMatch(
-      /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId\s*\)/
+      /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId,\s*exactCredential\s*\)/
     );
   });
 
@@ -510,16 +523,18 @@ describe('provider-aware node provisioning', () => {
       nodesSource.indexOf('async function deleteNodeResources')
     );
     expect(section).toContain('node.cloudProvider as CredentialProvider');
+    expect(section).toContain('exactProviderCredentialBindingFromPlacementSnapshot(node)');
     expect(section).toMatch(
-      /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId\s*\)/
+      /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId,\s*exactCredential\s*\)/
     );
   });
 
   it('deleteNodeResources uses node cloudProvider for credential lookup', () => {
     const section = nodesSource.slice(nodesSource.indexOf('async function deleteNodeResources'));
     expect(section).toContain('node.cloudProvider as CredentialProvider');
+    expect(section).toContain('exactProviderCredentialBindingFromPlacementSnapshot(node)');
     expect(section).toMatch(
-      /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId\s*\)/
+      /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId,\s*exactCredential\s*\)/
     );
   });
 

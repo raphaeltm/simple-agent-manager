@@ -79,6 +79,22 @@ describe('DigitalOceanProvider droplets', () => {
     expect((call?.[1].headers as Record<string, string>).Authorization).toBe('Bearer secret-token');
   });
 
+  it('uses a concrete provider instance type when supplied', async () => {
+    const mock = createDigitalOceanFetchMock({ createDroplet: createMockDigitalOceanDroplet() });
+
+    await provider(mock).createVM({
+      name: 'node',
+      size: 'small',
+      instanceType: 'c-4',
+      location: 'fra1',
+      image: '',
+      userData: 'plain',
+    });
+
+    const body = JSON.parse(findCall(mock, 'POST', /\/v2\/droplets$/)?.[1].body as string);
+    expect(body.size).toBe('c-4');
+  });
+
   it('accepts a numeric image id override and polls asynchronously for public IPv4', async () => {
     const mock = createDigitalOceanFetchMock({
       createDroplet: createMockDigitalOceanDroplet({ status: 'new', networks: { v4: [] } }),

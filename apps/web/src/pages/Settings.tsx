@@ -8,6 +8,7 @@ import { SettingsContext } from './SettingsContext';
 
 const BASE_TABS = [
   { id: 'cloud-provider', label: 'Cloud Provider', path: 'cloud-provider' },
+  { id: 'infrastructure', label: 'Infrastructure', path: 'infrastructure' },
   { id: 'github', label: 'GitHub', path: 'github' },
   { id: 'connections', label: 'Connections', path: 'connections' },
   { id: 'agents', label: 'Agents', path: 'agents' },

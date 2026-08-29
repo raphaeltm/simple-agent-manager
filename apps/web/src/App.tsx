@@ -32,6 +32,10 @@ const AdminCosts = lazyNamed(() => import('./pages/AdminCosts'), 'AdminCosts');
 const AdminDiagnoses = lazyNamed(() => import('./pages/AdminDiagnoses'), 'AdminDiagnoses');
 const AdminDiagnosis = lazyNamed(() => import('./pages/AdminDiagnosis'), 'AdminDiagnosis');
 const AdminErrors = lazyNamed(() => import('./pages/AdminErrors'), 'AdminErrors');
+const AdminInfrastructure = lazyNamed(
+  () => import('./pages/AdminInfrastructure'),
+  'AdminInfrastructure'
+);
 const AdminLogs = lazyNamed(() => import('./pages/AdminLogs'), 'AdminLogs');
 const AdminOverview = lazyNamed(() => import('./pages/AdminOverview'), 'AdminOverview');
 const AdminPlatformConfig = lazyNamed(
@@ -164,6 +168,10 @@ const SettingsCredentials = lazyNamed(
   'SettingsCredentials'
 );
 const SettingsGitHub = lazyNamed(() => import('./pages/SettingsGitHub'), 'SettingsGitHub');
+const SettingsInfrastructure = lazyNamed(
+  () => import('./pages/SettingsInfrastructure'),
+  'SettingsInfrastructure'
+);
 const SettingsNotifications = lazyNamed(
   () => import('./pages/SettingsNotifications'),
   'SettingsNotifications'
@@ -335,6 +343,7 @@ export default function App() {
                       <Route path="/settings" element={page(<Settings />)}>
                         <Route index element={<Navigate to="cloud-provider" replace />} />
                         <Route path="cloud-provider" element={page(<SettingsCloudProvider />)} />
+                        <Route path="infrastructure" element={page(<SettingsInfrastructure />)} />
                         <Route path="github" element={page(<SettingsGitHub />)} />
                         <Route path="connections" element={page(<SettingsConnections />)} />
                         <Route path="agents" element={page(<SettingsAgents />)} />
@@ -367,6 +376,7 @@ export default function App() {
                         <Route path="users" element={page(<AdminUsers />)} />
                         <Route path="integrations" element={page(<AdminPlatformConfig />)} />
                         <Route path="credentials" element={page(<AdminPlatformCredentials />)} />
+                        <Route path="infrastructure" element={page(<AdminInfrastructure />)} />
                         <Route path="ai-proxy" element={page(<AdminAIProxy />)} />
                         <Route path="trials" element={page(<AdminTrials />)} />
                         <Route path="costs" element={page(<AdminCosts />)} />

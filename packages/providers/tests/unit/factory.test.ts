@@ -26,6 +26,16 @@ describe('createProvider', () => {
     expect(provider).toBeInstanceOf(HetznerProvider);
   });
 
+  it('should pass Hetzner list-page tuning to HetznerProvider', () => {
+    const provider = createProvider({
+      provider: 'hetzner',
+      apiToken: 'test-token',
+      maxListPages: 4,
+    });
+    expect(provider).toBeInstanceOf(HetznerProvider);
+    expect((provider as unknown as { maxListPages: number }).maxListPages).toBe(4);
+  });
+
   it('should throw ProviderError for unknown provider type', () => {
     expect(() => createProvider({ provider: 'unknown' as 'hetzner', apiToken: 'x' })).toThrow(
       ProviderError

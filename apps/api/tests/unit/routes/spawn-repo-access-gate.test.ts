@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => ({
   getTaskTitleConfig: vi.fn(),
   truncateTitle: vi.fn(),
   enrichMessageWithMentions: vi.fn(),
+  resolveTaskStartPlacementCredentialAttributionFromPlacement: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1');
@@ -75,6 +76,15 @@ vi.mock('../../../src/services/project-data', () => ({
 vi.mock('../../../src/services/provider-credentials', () => ({
   resolveCredentialSource: mocks.resolveCredentialSource,
 }));
+vi.mock('../../../src/services/placement-resolver', async (importActual) => {
+  const actual =
+    await importActual<typeof import('../../../src/services/placement-resolver')>();
+  return {
+    ...actual,
+    resolveTaskStartPlacementCredentialAttributionFromPlacement:
+      mocks.resolveTaskStartPlacementCredentialAttributionFromPlacement,
+  };
+});
 vi.mock('../../../src/services/task-title', () => ({
   generateTaskTitle: mocks.generateTaskTitle,
   getTaskTitleConfig: mocks.getTaskTitleConfig,
@@ -180,7 +190,24 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
 
     // Downstream submit/run boundaries — default to success so the happy-path
     // tests reach provisioning. Each is mocked at its system boundary (rule 35).
-    mocks.resolveCredentialSource.mockResolvedValue({ credentialSource: 'user' });
+    mocks.resolveCredentialSource.mockResolvedValue({
+      credentialSource: 'user',
+      providerName: 'hetzner',
+    });
+    mocks.resolveTaskStartPlacementCredentialAttributionFromPlacement.mockResolvedValue({
+      placement: expect.anything(),
+      credential: {
+        credentialSource: 'user',
+        providerName: 'hetzner',
+      },
+      capacityPoolSelection: null,
+      quotaCredentialSource: 'user',
+      capacityPlacementSnapshot: null,
+      effectiveProvider: 'hetzner',
+      credentialAttributionUserId: 'user-1',
+      credentialAttributionProjectId: null,
+      credentialAttributionSource: 'user',
+    });
     mocks.getTaskTitleConfig.mockReturnValue({});
     mocks.generateTaskTitle.mockResolvedValue('Task title');
     mocks.truncateTitle.mockImplementation((message: string) => message);
@@ -389,10 +416,9 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
 
   it('task run: returns 403 and does NOT start the Task Runner when access is revoked', async () => {
     // run.ts pre-gate db sequence: task lookup (.limit) -> dependencies (.where, no limit) ->
-    // credentials (.limit) -> installation lookup (.limit). Project comes from requireProjectCapability.
+    // installation lookup (.limit). Credential resolution is mocked at the service boundary.
     limitResponses.push([{ id: 'task-1', projectId: 'proj-1', userId: 'owner-user', status: 'ready', title: 'Task One', description: 'do the work', outputBranch: null, agentProfileHint: null }]);
     whereResponses.push([]); // no task dependencies
-    limitResponses.push([{ id: 'cred-1' }]); // caller cloud-provider credential present
     limitResponses.push([INSTALLATION_ROW]); // installation lookup (gate)
     mocks.getUserInstallationRepositories.mockResolvedValue([OTHER_REPO]);
 
@@ -406,7 +432,6 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     mocks.requireProjectCapability.mockResolvedValue(makeProject({ githubRepoId: 42 }));
     limitResponses.push([{ id: 'task-1', projectId: 'proj-1', userId: 'owner-user', status: 'ready', title: 'Task One', description: 'do the work', outputBranch: null, agentProfileHint: null }]);
     whereResponses.push([]);
-    limitResponses.push([{ id: 'cred-1' }]);
     limitResponses.push([INSTALLATION_ROW]);
     // User can still see a repo with the bound full name, but a DIFFERENT id.
     mocks.getUserInstallationRepositories.mockResolvedValue([{ ...VISIBLE_REPO, id: 999 }]);
@@ -424,7 +449,6 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     // are mocked at their boundaries (rule 35) so the request reaches provisioning.
     limitResponses.push([{ id: 'task-1', projectId: 'proj-1', userId: 'owner-user', status: 'ready', title: 'Task One', description: 'do the work', outputBranch: null, agentProfileHint: null }]);
     whereResponses.push([]); // no task dependencies
-    limitResponses.push([{ id: 'cred-1' }]); // caller cloud-provider credential present
     limitResponses.push([INSTALLATION_ROW]); // installation lookup (gate)
     limitResponses.push([{ githubId: null }]); // caller githubId fallback lookup
     mocks.getUserInstallationRepositories.mockResolvedValue([VISIBLE_REPO]);

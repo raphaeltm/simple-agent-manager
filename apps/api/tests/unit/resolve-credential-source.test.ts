@@ -21,16 +21,17 @@ function makeCredentialSourceDbMock(
   projectRows: unknown[],
   userRows: unknown[],
   platformRows: unknown[] = [],
+  legacyProjectRows: unknown[] = []
 ) {
-  const resultSets = [projectRows, userRows, platformRows];
-  let selectCount = 0;
+  const nonJoinResultSets = [legacyProjectRows, userRows, platformRows];
+  let nonJoinSelectCount = 0;
 
-  const makeBuilder = () => ({
-    from: () => makeBuilder(),
-    innerJoin: () => makeBuilder(),
-    leftJoin: () => makeBuilder(),
-    where: () => makeBuilder(),
-    limit: async () => resultSets[selectCount++] ?? [],
+  const makeBuilder = (usesJoin = false): Record<string, unknown> => ({
+    from: () => makeBuilder(usesJoin),
+    innerJoin: () => makeBuilder(true),
+    leftJoin: () => makeBuilder(true),
+    where: () => makeBuilder(usesJoin),
+    limit: async () => (usesJoin ? projectRows : (nonJoinResultSets[nonJoinSelectCount++] ?? [])),
   });
 
   return {
@@ -41,7 +42,7 @@ function makeCredentialSourceDbMock(
 describe('resolveCredentialSource', () => {
   const providerCredsSource = readFileSync(
     resolve(process.cwd(), 'src/services/provider-credentials.ts'),
-    'utf8',
+    'utf8'
   );
 
   it('exports resolveCredentialSource function', async () => {
@@ -60,39 +61,49 @@ describe('resolveCredentialSource', () => {
     expect(providerCredsSource).toContain('eq(schema.credentials.provider, targetProvider)');
   });
 
+  it('filters legacy personal credentials to active user-owned rows', () => {
+    const resolveFunc = providerCredsSource.substring(
+      providerCredsSource.indexOf('export async function resolveCredentialSource')
+    );
+    expect(resolveFunc).toContain('isNull(schema.credentials.projectId)');
+    expect(resolveFunc).toContain('eq(schema.credentials.isActive, true)');
+  });
+
   it('checks platform credentials with isEnabled filter', () => {
     expect(providerCredsSource).toContain('eq(schema.platformCredentials.isEnabled, true)');
   });
 
   it('filters platform credentials by targetProvider when specified', () => {
-    expect(providerCredsSource).toContain('eq(schema.platformCredentials.provider, targetProvider)');
+    expect(providerCredsSource).toContain(
+      'eq(schema.platformCredentials.provider, targetProvider)'
+    );
   });
 
   it('returns credentialSource user when user has matching credential', () => {
     // Verify the user credential path returns 'user'
     const resolveFunc = providerCredsSource.substring(
-      providerCredsSource.indexOf('export async function resolveCredentialSource'),
+      providerCredsSource.indexOf('export async function resolveCredentialSource')
     );
     expect(resolveFunc).toContain("credentialSource: 'user'");
   });
 
   it('returns credentialSource platform when falling back to platform', () => {
     const resolveFunc = providerCredsSource.substring(
-      providerCredsSource.indexOf('export async function resolveCredentialSource'),
+      providerCredsSource.indexOf('export async function resolveCredentialSource')
     );
     expect(resolveFunc).toContain("credentialSource: 'platform'");
   });
 
   it('returns null when no credentials exist', () => {
     const resolveFunc = providerCredsSource.substring(
-      providerCredsSource.indexOf('export async function resolveCredentialSource'),
+      providerCredsSource.indexOf('export async function resolveCredentialSource')
     );
     expect(resolveFunc).toContain('return null;');
   });
 
   it('resolves project credentials BEFORE user and platform credentials', () => {
     const resolveFunc = providerCredsSource.substring(
-      providerCredsSource.indexOf('export async function resolveCredentialSource'),
+      providerCredsSource.indexOf('export async function resolveCredentialSource')
     );
     const projectCheckIdx = resolveFunc.indexOf('resolveProjectComputeCredentialSource');
     const userCheckIdx = resolveFunc.indexOf('schema.credentials.userId');
@@ -108,7 +119,7 @@ describe('resolveCredentialSource', () => {
     // the system will use whatever provider the user has).
     const createProviderFunc = providerCredsSource.substring(
       providerCredsSource.indexOf('export async function createProviderForUser'),
-      providerCredsSource.indexOf('export async function resolveCredentialSource'),
+      providerCredsSource.indexOf('export async function resolveCredentialSource')
     );
     // createProviderForUser also checks user creds first, then platform
     expect(createProviderFunc).toContain("credentialSource: 'user'");
@@ -119,54 +130,81 @@ describe('resolveCredentialSource', () => {
 describe('resolveCredentialSource project compute precedence', () => {
   it('returns project source when an active project attachment exists', async () => {
     const db = makeCredentialSourceDbMock(
-      [{
-        attachmentActive: true,
-        consumerTarget: 'hetzner',
-        configurationActive: true,
-        credentialId: 'cc-project-cred',
-        credentialActive: true,
-      }],
-      [{ id: 'personal-cred', provider: 'hetzner' }],
+      [
+        {
+          attachmentActive: true,
+          consumerTarget: 'hetzner',
+          configurationActive: true,
+          credentialId: 'cc-project-cred',
+          credentialActive: true,
+        },
+      ],
+      [{ id: 'personal-cred', provider: 'hetzner' }]
     );
 
     await expect(
-      resolveCredentialSource(db as never, 'member-a', 'hetzner', 'project-1'),
+      resolveCredentialSource(db as never, 'member-a', 'hetzner', 'project-1')
     ).resolves.toEqual({ credentialSource: 'project', providerName: 'hetzner' });
   });
 
   it('halts on an inactive project attachment instead of falling through to personal credentials', async () => {
     const db = makeCredentialSourceDbMock(
-      [{
-        attachmentActive: false,
-        consumerTarget: 'hetzner',
-        configurationActive: true,
-        credentialId: 'cc-project-cred',
-        credentialActive: true,
-      }],
-      [{ id: 'personal-cred', provider: 'hetzner' }],
+      [
+        {
+          attachmentActive: false,
+          consumerTarget: 'hetzner',
+          configurationActive: true,
+          credentialId: 'cc-project-cred',
+          credentialActive: true,
+        },
+      ],
+      [{ id: 'personal-cred', provider: 'hetzner' }]
     );
 
     await expect(
-      resolveCredentialSource(db as never, 'member-a', 'hetzner', 'project-1'),
+      resolveCredentialSource(db as never, 'member-a', 'hetzner', 'project-1')
     ).resolves.toBeNull();
   });
 
   it('falls back to the pinned creator personal credential when no project attachment exists', async () => {
+    const db = makeCredentialSourceDbMock([], [{ id: 'personal-cred', provider: 'hetzner' }]);
+
+    await expect(
+      resolveCredentialSource(db as never, 'member-a', 'hetzner', 'project-1')
+    ).resolves.toEqual({ credentialSource: 'user', providerName: 'hetzner' });
+  });
+
+  it('uses an active legacy project-scoped cloud credential before personal credentials', async () => {
     const db = makeCredentialSourceDbMock(
       [],
       [{ id: 'personal-cred', provider: 'hetzner' }],
+      [],
+      [{ id: 'legacy-project-cred', provider: 'hetzner', isActive: true }]
     );
 
     await expect(
-      resolveCredentialSource(db as never, 'member-a', 'hetzner', 'project-1'),
-    ).resolves.toEqual({ credentialSource: 'user', providerName: 'hetzner' });
+      resolveCredentialSource(db as never, 'member-a', 'hetzner', 'project-1')
+    ).resolves.toEqual({ credentialSource: 'project', providerName: 'hetzner' });
+  });
+
+  it('halts on an inactive legacy project-scoped credential instead of falling through', async () => {
+    const db = makeCredentialSourceDbMock(
+      [],
+      [{ id: 'personal-cred', provider: 'hetzner' }],
+      [{ id: 'platform-cred', provider: 'hetzner' }],
+      [{ id: 'legacy-project-cred', provider: 'hetzner', isActive: false }]
+    );
+
+    await expect(
+      resolveCredentialSource(db as never, 'member-a', 'hetzner', 'project-1')
+    ).resolves.toBeNull();
   });
 
   it('returns null when no project, personal, or platform credential exists', async () => {
     const db = makeCredentialSourceDbMock([], [], []);
 
     await expect(
-      resolveCredentialSource(db as never, 'member-a', 'scaleway', 'project-1'),
+      resolveCredentialSource(db as never, 'member-a', 'scaleway', 'project-1')
     ).resolves.toBeNull();
   });
 });
@@ -186,38 +224,38 @@ describe('resolveCredentialSource vultr fallback matrix (rule 28)', () => {
   it('active project attachment → project', async () => {
     const db = makeCredentialSourceDbMock([activeProjectRow], [{ id: 'u', provider: 'vultr' }]);
     await expect(
-      resolveCredentialSource(db as never, 'member-a', 'vultr', 'project-1'),
+      resolveCredentialSource(db as never, 'member-a', 'vultr', 'project-1')
     ).resolves.toEqual({ credentialSource: 'project', providerName: 'vultr' });
   });
 
   it('inactive project attachment halts — does NOT fall through to the user vultr credential', async () => {
     const db = makeCredentialSourceDbMock(
       [{ ...activeProjectRow, attachmentActive: false }],
-      [{ id: 'u', provider: 'vultr' }],
+      [{ id: 'u', provider: 'vultr' }]
     );
     await expect(
-      resolveCredentialSource(db as never, 'member-a', 'vultr', 'project-1'),
+      resolveCredentialSource(db as never, 'member-a', 'vultr', 'project-1')
     ).resolves.toBeNull();
   });
 
   it('no project attachment → user vultr credential', async () => {
     const db = makeCredentialSourceDbMock([], [{ id: 'u', provider: 'vultr' }]);
     await expect(
-      resolveCredentialSource(db as never, 'member-a', 'vultr', 'project-1'),
+      resolveCredentialSource(db as never, 'member-a', 'vultr', 'project-1')
     ).resolves.toEqual({ credentialSource: 'user', providerName: 'vultr' });
   });
 
   it('no project, no user → platform vultr credential', async () => {
     const db = makeCredentialSourceDbMock([], [], [{ id: 'p', provider: 'vultr' }]);
     await expect(
-      resolveCredentialSource(db as never, 'member-a', 'vultr', 'project-1'),
+      resolveCredentialSource(db as never, 'member-a', 'vultr', 'project-1')
     ).resolves.toEqual({ credentialSource: 'platform', providerName: 'vultr' });
   });
 
   it('nothing at any tier → null', async () => {
     const db = makeCredentialSourceDbMock([], [], []);
     await expect(
-      resolveCredentialSource(db as never, 'member-a', 'vultr', 'project-1'),
+      resolveCredentialSource(db as never, 'member-a', 'vultr', 'project-1')
     ).resolves.toBeNull();
   });
 });
@@ -225,7 +263,7 @@ describe('resolveCredentialSource vultr fallback matrix (rule 28)', () => {
 describe('userHasOwnCloudCredentials with targetProvider', () => {
   const serviceSource = readFileSync(
     resolve(process.cwd(), 'src/services/compute-quotas.ts'),
-    'utf8',
+    'utf8'
   );
 
   it('exports userHasOwnCloudCredentials function', async () => {
@@ -249,21 +287,19 @@ describe('userHasOwnCloudCredentials with targetProvider', () => {
 });
 
 describe('quota enforcement pattern: credential source, not existence', () => {
-  const submitSource = readFileSync(
-    resolve(process.cwd(), 'src/routes/tasks/submit.ts'),
-    'utf8',
-  );
+  const submitSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/submit.ts'), 'utf8');
   const nodeStepsSource = readFileSync(
     resolve(process.cwd(), 'src/durable-objects/task-runner/node-steps.ts'),
-    'utf8',
+    'utf8'
   );
-  const nodesSource = readFileSync(
-    resolve(process.cwd(), 'src/routes/nodes.ts'),
-    'utf8',
-  );
+  const nodesSource = readFileSync(resolve(process.cwd(), 'src/routes/nodes.ts'), 'utf8');
   const dispatchSource = readFileSync(
     resolve(process.cwd(), 'src/routes/mcp/dispatch-tool.ts'),
-    'utf8',
+    'utf8'
+  );
+  const placementResolverSource = readFileSync(
+    resolve(process.cwd(), 'src/services/placement-resolver.ts'),
+    'utf8'
   );
 
   // =========================================================================
@@ -287,16 +323,19 @@ describe('quota enforcement pattern: credential source, not existence', () => {
 
     it('dispatch-tool.ts does NOT have raw credential existence check in Promise.all', () => {
       // The old pattern: query credentials table in parallel and gate on !credential
-      expect(dispatchSource).not.toContain("eq(schema.credentials.credentialType, 'cloud-provider')");
+      expect(dispatchSource).not.toContain(
+        "eq(schema.credentials.credentialType, 'cloud-provider')"
+      );
     });
   });
 
   // =========================================================================
-  // NEW pattern: resolveCredentialSource at all enforcement points
+  // NEW pattern: centralized credential resolution at all enforcement points
   // =========================================================================
-  describe('all enforcement points use resolveCredentialSource', () => {
-    it('submit.ts uses resolveCredentialSource', () => {
-      expect(submitSource).toContain('resolveCredentialSource');
+  describe('all enforcement points use centralized credential resolution', () => {
+    it('submit.ts uses the task-start placement credential resolver', () => {
+      expect(submitSource).toContain('resolveTaskStartPlacementCredentialAttributionFromPlacement');
+      expect(submitSource).not.toContain('resolveCredentialSource');
     });
 
     it('node-steps.ts uses resolveCredentialSource', () => {
@@ -307,8 +346,15 @@ describe('quota enforcement pattern: credential source, not existence', () => {
       expect(nodesSource).toContain('resolveCredentialSource');
     });
 
-    it('dispatch-tool.ts (MCP dispatch) uses resolveCredentialSource', () => {
-      expect(dispatchSource).toContain('resolveCredentialSource');
+    it('dispatch-tool.ts (MCP dispatch) uses the task-start placement credential resolver', () => {
+      expect(dispatchSource).toContain(
+        'resolveTaskStartPlacementCredentialAttributionFromPlacement'
+      );
+      expect(dispatchSource).not.toContain('resolveCredentialSource');
+    });
+
+    it('placement-resolver owns task-start credential source resolution', () => {
+      expect(placementResolverSource).toContain('resolveCredentialSource');
     });
   });
 
@@ -316,20 +362,24 @@ describe('quota enforcement pattern: credential source, not existence', () => {
   // Enforcement based on credential SOURCE
   // =========================================================================
   describe('quota enforced only for platform credential source', () => {
-    it('submit.ts checks credentialSource === platform', () => {
-      expect(submitSource).toContain("credResult.credentialSource === 'platform'");
+    it('submit.ts checks capacity-aware quota source === platform', () => {
+      expect(placementResolverSource).toContain('resolveCapacityAwareQuotaCredentialSource');
+      expect(submitSource).toContain("quotaCredentialSource === 'platform'");
     });
 
-    it('node-steps.ts checks credentialSource === platform', () => {
-      expect(nodeStepsSource).toContain("credResult.credentialSource === 'platform'");
+    it('node-steps.ts checks capacity-aware quota source === platform', () => {
+      expect(nodeStepsSource).toContain('resolveCapacityAwareQuotaCredentialSource');
+      expect(nodeStepsSource).toContain("quotaCredentialSource === 'platform'");
     });
 
     it('nodes.ts checks credentialSource === platform', () => {
       expect(nodesSource).toContain("credResult.credentialSource === 'platform'");
     });
 
-    it('dispatch-tool.ts checks credentialSource === platform', () => {
-      expect(dispatchSource).toContain("credResult.credentialSource === 'platform'");
+    it('dispatch-tool.ts checks capacity-aware quota source === platform', () => {
+      expect(placementResolverSource).toContain('resolveCapacityAwareQuotaCredentialSource');
+      expect(dispatchSource).toContain('placementResolution.quotaCredentialSource');
+      expect(dispatchSource).toContain("quotaCredentialSource === 'platform'");
     });
   });
 
@@ -338,8 +388,13 @@ describe('quota enforcement pattern: credential source, not existence', () => {
   // =========================================================================
   describe('target provider is passed to credential resolution', () => {
     it('submit.ts passes root or inherited project scope', () => {
-      expect(submitSource).toContain('credentialResolutionProjectId');
-      expect(submitSource).toContain('provider ?? undefined');
+      expect(submitSource).toContain('inheritedAttributionUserId');
+      expect(submitSource).toContain('inheritedAttributionProjectId');
+      expect(submitSource).toContain("'current-project-unless-inherited'");
+      expect(placementResolverSource).toContain('resolveCapacityAwareCredentialLookup');
+      expect(placementResolverSource).toContain('credentialLookup.userId');
+      expect(placementResolverSource).toContain('credentialLookup.projectId');
+      expect(placementResolverSource).toContain('credentialLookup.provider');
     });
 
     it('node-steps.ts passes cloudProvider from config', () => {
@@ -353,7 +408,12 @@ describe('quota enforcement pattern: credential source, not existence', () => {
     it('dispatch-tool.ts passes inherited root attribution scope', () => {
       expect(dispatchSource).toContain('inheritedAttributionUserId');
       expect(dispatchSource).toContain('inheritedAttributionProjectId');
-      expect(dispatchSource).toContain('resolvedProvider ?? undefined');
+      expect(dispatchSource).toContain(
+        'resolveTaskStartPlacementCredentialAttributionFromPlacement'
+      );
+      expect(placementResolverSource).toContain('resolveCapacityAwareCredentialLookup');
+      expect(placementResolverSource).toContain('credentialLookup.provider');
+      expect(placementResolverSource).toContain('credentialLookup.projectId');
     });
   });
 
@@ -418,7 +478,9 @@ describe('quota enforcement pattern: credential source, not existence', () => {
   // =========================================================================
   describe('quota check order', () => {
     it('submit.ts checks quota before task creation', () => {
-      const quotaIdx = submitSource.indexOf('resolveCredentialSource');
+      const quotaIdx = submitSource.indexOf(
+        'resolveTaskStartPlacementCredentialAttributionFromPlacement'
+      );
       const insertIdx = submitSource.indexOf('db.insert(schema.tasks)');
       expect(quotaIdx).toBeGreaterThan(0);
       expect(insertIdx).toBeGreaterThan(0);
@@ -434,7 +496,9 @@ describe('quota enforcement pattern: credential source, not existence', () => {
     });
 
     it('dispatch-tool.ts checks quota before task INSERT', () => {
-      const quotaIdx = dispatchSource.indexOf('resolveCredentialSource');
+      const quotaIdx = dispatchSource.indexOf(
+        'resolveTaskStartPlacementCredentialAttributionFromPlacement'
+      );
       const insertIdx = dispatchSource.indexOf('INSERT INTO tasks');
       expect(quotaIdx).toBeGreaterThan(0);
       expect(insertIdx).toBeGreaterThan(0);
@@ -455,40 +519,43 @@ describe('resolveCredentialSource digitalocean fallback matrix (rule 28)', () =>
   };
 
   it('active project attachment → project', async () => {
-    const db = makeCredentialSourceDbMock([activeProjectRow], [{ id: 'u', provider: 'digitalocean' }]);
+    const db = makeCredentialSourceDbMock(
+      [activeProjectRow],
+      [{ id: 'u', provider: 'digitalocean' }]
+    );
     await expect(
-      resolveCredentialSource(db as never, 'member-a', 'digitalocean', 'project-1'),
+      resolveCredentialSource(db as never, 'member-a', 'digitalocean', 'project-1')
     ).resolves.toEqual({ credentialSource: 'project', providerName: 'digitalocean' });
   });
 
   it('inactive project attachment halts — does NOT fall through to the user digitalocean credential', async () => {
     const db = makeCredentialSourceDbMock(
       [{ ...activeProjectRow, attachmentActive: false }],
-      [{ id: 'u', provider: 'digitalocean' }],
+      [{ id: 'u', provider: 'digitalocean' }]
     );
     await expect(
-      resolveCredentialSource(db as never, 'member-a', 'digitalocean', 'project-1'),
+      resolveCredentialSource(db as never, 'member-a', 'digitalocean', 'project-1')
     ).resolves.toBeNull();
   });
 
   it('no project attachment → user digitalocean credential', async () => {
     const db = makeCredentialSourceDbMock([], [{ id: 'u', provider: 'digitalocean' }]);
     await expect(
-      resolveCredentialSource(db as never, 'member-a', 'digitalocean', 'project-1'),
+      resolveCredentialSource(db as never, 'member-a', 'digitalocean', 'project-1')
     ).resolves.toEqual({ credentialSource: 'user', providerName: 'digitalocean' });
   });
 
   it('no project, no user → platform digitalocean credential', async () => {
     const db = makeCredentialSourceDbMock([], [], [{ id: 'p', provider: 'digitalocean' }]);
     await expect(
-      resolveCredentialSource(db as never, 'member-a', 'digitalocean', 'project-1'),
+      resolveCredentialSource(db as never, 'member-a', 'digitalocean', 'project-1')
     ).resolves.toEqual({ credentialSource: 'platform', providerName: 'digitalocean' });
   });
 
   it('nothing at any tier → null', async () => {
     const db = makeCredentialSourceDbMock([], [], []);
     await expect(
-      resolveCredentialSource(db as never, 'member-a', 'digitalocean', 'project-1'),
+      resolveCredentialSource(db as never, 'member-a', 'digitalocean', 'project-1')
     ).resolves.toBeNull();
   });
 });

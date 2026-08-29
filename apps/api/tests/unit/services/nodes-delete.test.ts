@@ -31,6 +31,29 @@ const scalewayGetVM = vi.fn(async () => null);
 const createProviderForUser = vi.fn();
 vi.mock('../../../src/services/provider-credentials', () => ({
   createProviderForUser: (...args: unknown[]) => createProviderForUser(...args),
+  exactProviderCredentialBindingFromPlacementSnapshot: (snapshot: {
+    capacityPoolId?: string | null;
+    placementCredentialSource?: string | null;
+    placementCredentialReference?: string | null;
+    placementCredentialVersion?: number | null;
+  }) => {
+    if (
+      !snapshot.capacityPoolId ||
+      !(
+        snapshot.placementCredentialSource === 'user' ||
+        snapshot.placementCredentialSource === 'project' ||
+        snapshot.placementCredentialSource === 'platform'
+      ) ||
+      !snapshot.placementCredentialReference
+    ) {
+      return null;
+    }
+    return {
+      credentialSource: snapshot.placementCredentialSource,
+      credentialReference: snapshot.placementCredentialReference,
+      credentialVersion: snapshot.placementCredentialVersion ?? null,
+    };
+  },
 }));
 
 vi.mock('../../../src/lib/secrets', () => ({
@@ -123,6 +146,28 @@ describe('node resource deletion services', () => {
     };
   }
 
+  function managedPoolNode(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'pool-node-1',
+      userId: 'user-1',
+      name: 'pool node',
+      status: 'running',
+      nodeClass: 'managed',
+      runtime: 'vm',
+      providerInstanceId: 'vm-pool-1',
+      cloudProvider: 'hetzner',
+      backendDnsRecordId: null,
+      credentialAttributionUserId: 'pool-owner-1',
+      credentialAttributionSource: 'project',
+      credentialAttributionProjectId: 'project-1',
+      capacityPoolId: 'pool-project-1',
+      placementCredentialSource: 'project',
+      placementCredentialReference: 'credentials:project-cloud-1',
+      placementCredentialVersion: 1787875200000,
+      ...overrides,
+    };
+  }
+
   it('stopNodeResources takes a user-owned node OFFLINE (stopped), never deletes it or its VM', async () => {
     nodeRows.push(userOwnedNode());
 
@@ -199,6 +244,49 @@ describe('node resource deletion services', () => {
     await deleteNodeResources('cf-1', 'user-1', ENV);
 
     expect(destroyVmAgentContainer).toHaveBeenCalledWith(ENV, 'cf-1');
+  });
+
+  it('stopNodeResources deletes a pool-provisioned VM with its exact placement credential', async () => {
+    nodeRows.push(managedPoolNode());
+
+    await stopNodeResources('pool-node-1', 'user-1', ENV);
+
+    expect(createProviderForUser).toHaveBeenCalledWith(
+      expect.anything(),
+      'pool-owner-1',
+      'test-key',
+      ENV,
+      'hetzner',
+      'project-1',
+      {
+        credentialSource: 'project',
+        credentialReference: 'credentials:project-cloud-1',
+        credentialVersion: 1787875200000,
+      }
+    );
+    expect(providerDeleteVM).toHaveBeenCalledWith('vm-pool-1');
+  });
+
+  it('deleteNodeResources deletes a pool-provisioned VM with its exact placement credential', async () => {
+    nodeRows.push(managedPoolNode());
+
+    const result = await deleteNodeResources('pool-node-1', 'user-1', ENV);
+
+    expect(result.providerVmDeleted).toBe(true);
+    expect(createProviderForUser).toHaveBeenCalledWith(
+      expect.anything(),
+      'pool-owner-1',
+      'test-key',
+      ENV,
+      'hetzner',
+      'project-1',
+      {
+        credentialSource: 'project',
+        credentialReference: 'credentials:project-cloud-1',
+        credentialVersion: 1787875200000,
+      }
+    );
+    expect(providerDeleteVM).toHaveBeenCalledWith('vm-pool-1');
   });
 
   it('deleteNodeResources does NOT destroy a container for a user-owned node', async () => {
@@ -475,5 +563,29 @@ describe('node resource deletion services', () => {
       }),
       expect.anything()
     );
+  });
+
+  it('deleteNodeResourcesStrict deletes a pool-provisioned VM with its exact placement credential', async () => {
+    nodeRows.push(managedPoolNode({ status: 'destroying', backendDnsRecordId: 'dns-pool-1' }));
+
+    await expect(deleteNodeResourcesStrict('pool-node-1', 'user-1', ENV)).resolves.toEqual({
+      providerVm: 'deleted',
+    });
+
+    expect(createProviderForUser).toHaveBeenCalledWith(
+      expect.anything(),
+      'pool-owner-1',
+      'test-key',
+      ENV,
+      'hetzner',
+      'project-1',
+      {
+        credentialSource: 'project',
+        credentialReference: 'credentials:project-cloud-1',
+        credentialVersion: 1787875200000,
+      }
+    );
+    expect(providerDeleteVM).toHaveBeenCalledWith('vm-pool-1');
+    expect(deleteDNSRecord).toHaveBeenCalledWith('dns-pool-1', ENV);
   });
 });
