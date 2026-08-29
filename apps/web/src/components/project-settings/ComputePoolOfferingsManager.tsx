@@ -50,7 +50,8 @@ function availabilityLabel(offering: ComputePoolOffering, status: string) {
   if (status === 'active') return 'Allowed';
   if (status === 'pending-add') return 'Pending add';
   if (status === 'deleted') return 'Removed';
-  if (status === 'disabled') return 'Disabled';
+  if (status === 'disabled')
+    return canAddComputePoolOffering(offering) ? 'Not selected' : 'Disabled';
   if (status === 'not-configured') return 'Catalog only';
   return offering.statusLabel ?? 'Available';
 }
@@ -246,7 +247,8 @@ function CatalogOfferingCard({
           onCatalogAdd(
             {
               sourceId,
-              provider: offering.provider as DefaultCapacityPoolCandidateCatalogAddition['provider'],
+              provider:
+                offering.provider as DefaultCapacityPoolCandidateCatalogAddition['provider'],
               location: offering.location,
               providerInstanceType: offering.providerInstanceType,
               providerInstanceSku: offering.providerInstanceSku,
@@ -495,7 +497,7 @@ export function ComputePoolOfferingsManager({
             </p>
           </div>
           <div className="text-xs text-fg-muted">
-            {model.allowed.length} allowed · {model.excluded.length} removed/disabled
+            {model.allowed.length} allowed · {model.excluded.length} not selected/removed
           </div>
         </div>
 
@@ -519,7 +521,7 @@ export function ComputePoolOfferingsManager({
       {model.excluded.length > 0 && (
         <section className="grid gap-2 min-w-0">
           <h4 className="m-0 text-xs font-semibold uppercase tracking-wide text-fg-muted">
-            Removed or disabled instances
+            Not selected or removed instances
           </h4>
           <div className="grid max-h-72 gap-2 overflow-y-auto pr-1">
             {model.excluded.map((offering) => (
@@ -529,7 +531,7 @@ export function ComputePoolOfferingsManager({
                 actionLabel={isEditing ? 'Add back' : undefined}
                 actionStatus={isEditing ? 'active' : undefined}
                 onStatusChange={onStatusChange}
-                isRemoved
+                isRemoved={offering.candidateStatus === 'deleted'}
               />
             ))}
           </div>

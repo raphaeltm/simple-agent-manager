@@ -1,29 +1,13 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
-const migrationSql = readFileSync(
-  join(process.cwd(), 'src/db/migrations/0125_compute_pool_foundation.sql'),
-  'utf8'
-);
-const candidateSnapshotMigrationSql = readFileSync(
-  join(process.cwd(), 'src/db/migrations/0126_capacity_pool_candidate_snapshots.sql'),
-  'utf8'
-);
-const concreteOfferingMigrationSql = readFileSync(
-  join(process.cwd(), 'src/db/migrations/0127_concrete_capacity_pool_offerings.sql'),
-  'utf8'
-);
-const candidateCatalogMetadataMigrationSql = readFileSync(
-  join(process.cwd(), 'src/db/migrations/0128_capacity_pool_candidate_catalog_metadata.sql'),
-  'utf8'
-);
-const capacitySourceExternalCredentialsMigrationSql = readFileSync(
-  join(process.cwd(), 'src/db/migrations/0129_capacity_source_external_credentials.sql'),
-  'utf8'
-);
+import {
+  candidateCatalogMetadataMigrationSql,
+  candidateSnapshotMigrationSql,
+  capacitySourceExternalCredentialsMigrationSql,
+  concreteOfferingMigrationSql,
+  migrationSql,
+} from '../../helpers/capacity-pool-migrations';
 
 let sqlite: Database.Database | null = null;
 
@@ -703,7 +687,8 @@ describe('0127_concrete_capacity_pool_offerings migration', () => {
   });
 
   it('contains no destructive statements', () => {
-    const sql = `${concreteOfferingMigrationSql}\n${candidateCatalogMetadataMigrationSql}`.toUpperCase();
+    const sql =
+      `${concreteOfferingMigrationSql}\n${candidateCatalogMetadataMigrationSql}`.toUpperCase();
     expect(sql).not.toContain('DROP TABLE');
     expect(sql).not.toContain('DELETE FROM');
     expect(sql).not.toContain('PRAGMA FOREIGN_KEYS = OFF');
@@ -863,6 +848,8 @@ describe('0129_capacity_source_external_credentials migration', () => {
     expect(sql).not.toContain('DROP TABLE');
     expect(sql).not.toContain('DELETE FROM');
     expect(sql).not.toContain('PRAGMA FOREIGN_KEYS = OFF');
-    expect(sql).toContain('CREATE INDEX IF NOT EXISTS IDX_CREDENTIALS_CLOUD_PROVIDER_PROJECT_ACTIVE');
+    expect(sql).toContain(
+      'CREATE INDEX IF NOT EXISTS IDX_CREDENTIALS_CLOUD_PROVIDER_PROJECT_ACTIVE'
+    );
   });
 });

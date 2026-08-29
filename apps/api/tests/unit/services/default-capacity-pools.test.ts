@@ -1,6 +1,4 @@
 import { Buffer } from 'node:buffer';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
 import {
@@ -15,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { initialStatusForProviderOffering } from '../../../src/services/default-capacity-pool-candidates';
 import { externalCapacitySourceCredentialId } from '../../../src/services/default-capacity-pool-helpers';
 import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
 import {
@@ -31,28 +30,8 @@ import {
   resolveTaskStartCapacityPoolSelection,
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
+import { applyCapacityPoolSchemaMigrations } from '../../helpers/capacity-pool-migrations';
 import { createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
-
-const migrationSql = readFileSync(
-  join(process.cwd(), 'src/db/migrations/0125_compute_pool_foundation.sql'),
-  'utf8'
-);
-const candidateSnapshotMigrationSql = readFileSync(
-  join(process.cwd(), 'src/db/migrations/0126_capacity_pool_candidate_snapshots.sql'),
-  'utf8'
-);
-const concreteOfferingMigrationSql = readFileSync(
-  join(process.cwd(), 'src/db/migrations/0127_concrete_capacity_pool_offerings.sql'),
-  'utf8'
-);
-const candidateCatalogMetadataMigrationSql = readFileSync(
-  join(process.cwd(), 'src/db/migrations/0128_capacity_pool_candidate_catalog_metadata.sql'),
-  'utf8'
-);
-const capacitySourceExternalCredentialsMigrationSql = readFileSync(
-  join(process.cwd(), 'src/db/migrations/0129_capacity_source_external_credentials.sql'),
-  'utf8'
-);
 
 let sqlite: Database.Database | null = null;
 const TEST_ENCRYPTION_KEY = Buffer.from('0123456789abcdef0123456789abcdef').toString('base64');
@@ -198,11 +177,7 @@ function createDb() {
     );
   `);
   seedIdentity();
-  sqlite.exec(migrationSql);
-  sqlite.exec(candidateSnapshotMigrationSql);
-  sqlite.exec(concreteOfferingMigrationSql);
-  sqlite.exec(candidateCatalogMetadataMigrationSql);
-  sqlite.exec(capacitySourceExternalCredentialsMigrationSql);
+  applyCapacityPoolSchemaMigrations(sqlite);
   return drizzle(sqlite, { schema });
 }
 
@@ -380,6 +355,13 @@ type CatalogCandidateRow = {
   provider_instance_catalog_last_seen_at: string | null;
 };
 
+type CandidateStatusRow = {
+  location: string;
+  machine_size: string | null;
+  provider_instance_type: string;
+  status: string;
+};
+
 function getCatalogCandidateRow(providerInstanceType: string): CatalogCandidateRow | undefined {
   return getRows<CatalogCandidateRow>(`
     SELECT
@@ -399,6 +381,15 @@ function getCatalogCandidateRow(providerInstanceType: string): CatalogCandidateR
     FROM capacity_pool_candidates
     WHERE provider_instance_type = '${providerInstanceType}'
   `)[0];
+}
+
+function getCandidateStatusRows(providerInstanceTypes: string[]): CandidateStatusRow[] {
+  return getRows<CandidateStatusRow>(`
+    SELECT location, machine_size, provider_instance_type, status
+    FROM capacity_pool_candidates
+    WHERE provider_instance_type IN (${providerInstanceTypes.map((type) => `'${type}'`).join(', ')})
+    ORDER BY provider_instance_type, location
+  `);
 }
 
 function expectCpx62CatalogCandidate(lastSeenAt: string | ReturnType<typeof expect.any>) {
@@ -458,11 +449,163 @@ function liveHetznerOffering(
   };
 }
 
+type LegacyCapacityCandidateStatus = 'deleted' | 'disabled';
+
+function seedLegacyHetznerDefaultCandidate(status: LegacyCapacityCandidateStatus): string {
+  seedUserCredential({ id: 'user-hetzner' });
+
+  const poolId = 'cap-pool-default:user:user-1';
+  const sourceId = 'cap-source-default:user:user-hetzner';
+  const legacyCandidateId = `cap-candidate-default:${poolId}:${sourceId}:hetzner:fsn1:small`;
+
+  sqlite
+    ?.prepare(
+      `
+      INSERT INTO capacity_pools (
+        id, scope, owner_user_id, name, is_default, revision, status,
+        strategy, exhaustion_policy, created_by
+      )
+      VALUES (?, 'user', 'user-1', 'User default', 1, 1, 'active', 'balanced', 'queue', 'user-1')
+    `
+    )
+    .run(poolId);
+  sqlite
+    ?.prepare(
+      `
+      INSERT INTO capacity_sources (
+        id, scope, owner_user_id, source_kind, provider, credential_source,
+        credential_id, credential_reference, status, created_by
+      )
+      VALUES (?, 'user', 'user-1', 'cloud-provider-credential', 'hetzner', 'user',
+        'user-hetzner', 'credentials:user-hetzner', 'active', 'user-1')
+    `
+    )
+    .run(sourceId);
+  sqlite
+    ?.prepare(
+      `
+      INSERT INTO capacity_pool_candidates (
+        id, pool_id, capacity_source_id, provider, location, workload_role,
+        runtime, machine_class, machine_size, status
+      )
+      VALUES (?, ?, ?, 'hetzner', 'fsn1', 'workspace', 'vm', 'shared-vm', 'small', ?)
+    `
+    )
+    .run(legacyCandidateId, poolId, sourceId, status);
+
+  return legacyCandidateId;
+}
+
+function legacySizeReconciliationOfferings(): ProviderInstanceOffering[] {
+  return [
+    liveHetznerOffering({
+      location: 'fsn1',
+      providerInstanceType: 'cx23',
+      displayName: 'CX23',
+    }),
+    liveHetznerOffering({
+      location: 'fsn1',
+      providerInstanceType: 'cpx62',
+      displayName: 'CPX62',
+      vcpu: 32,
+      memoryMb: 65_536,
+      diskGb: 480,
+      price: '€48.12/mo',
+      priceMonthly: 48.12,
+    }),
+  ];
+}
+
+async function expectLegacyStatusMappedToLiveCatalog(
+  legacyStatus: LegacyCapacityCandidateStatus
+): Promise<void> {
+  const db = createDb();
+  const legacyCandidateId = seedLegacyHetznerDefaultCandidate(legacyStatus);
+
+  await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+    userId: 'user-1',
+    includeInstallation: false,
+    offeringResolver: async () => legacySizeReconciliationOfferings(),
+  });
+
+  expect(
+    getRows<{
+      provider_instance_type: string | null;
+      status: string;
+      machine_size: string | null;
+    }>(`
+      SELECT provider_instance_type, status, machine_size
+      FROM capacity_pool_candidates
+      WHERE provider_instance_type IN ('cx23', 'cpx62') OR id = '${legacyCandidateId}'
+      ORDER BY provider_instance_type
+    `)
+  ).toEqual(
+    expect.arrayContaining([
+      { provider_instance_type: null, status: legacyStatus, machine_size: 'small' },
+      { provider_instance_type: 'cx23', status: legacyStatus, machine_size: 'small' },
+      { provider_instance_type: 'cpx62', status: 'disabled', machine_size: null },
+    ])
+  );
+}
+
 function catalogEnv(database: D1Database = {} as D1Database): Env {
   return {
     DATABASE: database,
     ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
   } as Env;
+}
+
+type TaskStartResourceRequirements = Parameters<
+  typeof resolveTaskStartPlacement
+>[0]['resourceRequirements'];
+
+async function seedVultrDefaultPool(): Promise<ReturnType<typeof createDb>> {
+  const db = createDb();
+  seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
+
+  await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+    userId: 'user-1',
+    includeInstallation: false,
+  });
+
+  return db;
+}
+
+function setUserDefaultPoolStrategy(strategy: 'pack' | 'smallest-fit'): void {
+  sqlite?.prepare("UPDATE capacity_pools SET strategy = ? WHERE scope = 'user'").run(strategy);
+}
+
+function vultrTaskStartPlacement(
+  taskId: string,
+  resourceRequirements: TaskStartResourceRequirements = {}
+) {
+  return resolveTaskStartPlacement({
+    entryPoint: 'task-submit',
+    taskId,
+    projectId: 'project-1',
+    userId: 'user-1',
+    project: {
+      id: 'project-1',
+      defaultProvider: 'vultr',
+      defaultLocation: getDefaultLocationForProvider('vultr'),
+      defaultVmSize: 'small',
+    },
+    credentialProjectPolicy: 'current-project-unless-inherited',
+    taskModeDefault: 'task',
+    resourceRequirements,
+  });
+}
+
+async function selectVultrDefaultPoolCandidates(
+  db: ReturnType<typeof createDb>,
+  taskId: string,
+  resourceRequirements: TaskStartResourceRequirements = {}
+) {
+  return resolveTaskStartCapacityPoolSelection(
+    db as never,
+    vultrTaskStartPlacement(taskId, resourceRequirements),
+    { ensure: false }
+  );
 }
 
 function hetznerServerType(input: {
@@ -520,6 +663,25 @@ afterEach(() => {
   vi.restoreAllMocks();
   sqlite?.close();
   sqlite = null;
+});
+
+describe('initialStatusForProviderOffering', () => {
+  it('preserves explicit concrete candidate status before applying migration defaults', () => {
+    expect(initialStatusForProviderOffering('active', 'deleted', null)).toBe('active');
+    expect(initialStatusForProviderOffering('disabled', 'active', 'small')).toBe('disabled');
+    expect(initialStatusForProviderOffering('deleted', null, 'medium')).toBe('deleted');
+  });
+
+  it('selects only legacy-mapped offerings by default and disables new catalog discoveries', () => {
+    expect(initialStatusForProviderOffering(null, null, 'small')).toBe('active');
+    expect(initialStatusForProviderOffering(undefined, undefined, null)).toBe('disabled');
+  });
+
+  it('preserves legacy migration removals for matching concrete offerings', () => {
+    expect(initialStatusForProviderOffering(null, 'disabled', 'small')).toBe('disabled');
+    expect(initialStatusForProviderOffering(null, 'deleted', 'large')).toBe('deleted');
+    expect(initialStatusForProviderOffering(null, 'active', 'medium')).toBe('active');
+  });
 });
 
 describe('default capacity pool creation', () => {
@@ -778,6 +940,38 @@ describe('default capacity pool creation', () => {
         location: 'fsn1',
         locationName: 'Falkenstein',
         country: 'DE',
+        providerInstanceType: 'cx33',
+        displayName: 'CX33',
+        vcpu: 4,
+        ramGb: 8,
+        memoryGb: 8,
+        memoryMb: 8192,
+        storageGb: 80,
+        diskGb: 80,
+        price: '€7.59/mo',
+        priceMonthly: 7.59,
+        priceHourly: 0.0121,
+      }),
+      liveHetznerOffering({
+        location: 'fsn1',
+        locationName: 'Falkenstein',
+        country: 'DE',
+        providerInstanceType: 'cx43',
+        displayName: 'CX43',
+        vcpu: 8,
+        ramGb: 16,
+        memoryGb: 16,
+        memoryMb: 16_384,
+        storageGb: 160,
+        diskGb: 160,
+        price: '€15.19/mo',
+        priceMonthly: 15.19,
+        priceHourly: 0.0242,
+      }),
+      liveHetznerOffering({
+        location: 'fsn1',
+        locationName: 'Falkenstein',
+        country: 'DE',
         providerInstanceType: 'cpx62',
         displayName: 'CPX62',
         vcpu: 32,
@@ -824,9 +1018,112 @@ describe('default capacity pool creation', () => {
       },
     });
 
-    expect(result.user?.activeCandidateCount).toBe(liveOfferings.length);
+    expect(result.user?.activeCandidateCount).toBe(3);
     expect(getCount('capacity_pool_candidates')).toBe(liveOfferings.length);
+    expect(getCandidateStatusRows(['cx23', 'cx33', 'cx43', 'cpx62', 'ccx63'])).toEqual([
+      {
+        location: 'hel1',
+        machine_size: null,
+        provider_instance_type: 'ccx63',
+        status: 'disabled',
+      },
+      {
+        location: 'fsn1',
+        machine_size: null,
+        provider_instance_type: 'cpx62',
+        status: 'disabled',
+      },
+      {
+        location: 'fsn1',
+        machine_size: 'small',
+        provider_instance_type: 'cx23',
+        status: 'active',
+      },
+      {
+        location: 'fsn1',
+        machine_size: 'medium',
+        provider_instance_type: 'cx33',
+        status: 'active',
+      },
+      {
+        location: 'fsn1',
+        machine_size: 'large',
+        provider_instance_type: 'cx43',
+        status: 'active',
+      },
+    ]);
     expectCpx62CatalogCandidate(LIVE_CATALOG_LAST_SEEN_AT);
+  });
+
+  it('applies conservative live catalog defaults at installation, user, and project scope', async () => {
+    const db = createDb();
+    seedPlatformCredential({ id: 'platform-hetzner' });
+    seedUserCredential({ id: 'user-hetzner' });
+    seedUserCredential({ id: 'project-hetzner', projectId: 'project-1' });
+    const liveOfferings: ProviderInstanceOffering[] = [
+      liveHetznerOffering({
+        location: 'fsn1',
+        providerInstanceType: 'cx23',
+        displayName: 'CX23',
+      }),
+      liveHetznerOffering({
+        location: 'fsn1',
+        providerInstanceType: 'cpx62',
+        displayName: 'CPX62',
+        vcpu: 32,
+        ramGb: 64,
+        memoryGb: 64,
+        memoryMb: 65_536,
+        storageGb: 480,
+        diskGb: 480,
+        price: '€48.12/mo',
+        priceMonthly: 48.12,
+        priceHourly: 0.06592,
+      }),
+    ];
+
+    const result = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      projectId: 'project-1',
+      offeringResolver: async () => liveOfferings,
+    });
+
+    for (const summary of [result.installation, result.user, result.project]) {
+      expect(summary?.activeCandidateCount).toBe(1);
+      expect(summary?.candidates).toHaveLength(liveOfferings.length);
+      expect(summary?.candidates).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            providerInstanceType: 'cx23',
+            machineSize: 'small',
+            status: 'active',
+          }),
+          expect.objectContaining({
+            providerInstanceType: 'cpx62',
+            machineSize: null,
+            status: 'disabled',
+          }),
+        ])
+      );
+    }
+
+    expect(
+      getRows<{ scope: string; provider_instance_type: string; status: string; count: number }>(`
+        SELECT pool.scope, cand.provider_instance_type, cand.status, COUNT(*) AS count
+        FROM capacity_pools pool
+        JOIN capacity_pool_candidates cand ON cand.pool_id = pool.id
+        WHERE cand.provider_instance_type IN ('cx23', 'cpx62')
+        GROUP BY pool.scope, cand.provider_instance_type, cand.status
+        ORDER BY pool.scope, cand.provider_instance_type, cand.status
+      `)
+    ).toEqual([
+      { scope: 'installation', provider_instance_type: 'cpx62', status: 'disabled', count: 1 },
+      { scope: 'installation', provider_instance_type: 'cx23', status: 'active', count: 1 },
+      { scope: 'project', provider_instance_type: 'cpx62', status: 'disabled', count: 1 },
+      { scope: 'project', provider_instance_type: 'cx23', status: 'active', count: 1 },
+      { scope: 'user', provider_instance_type: 'cpx62', status: 'disabled', count: 1 },
+      { scope: 'user', provider_instance_type: 'cx23', status: 'active', count: 1 },
+    ]);
   });
 
   it('reconciles Hetzner defaults through the credential-backed live provider catalog path', async () => {
@@ -881,7 +1178,21 @@ describe('default capacity pool creation', () => {
         headers: expect.objectContaining({ Authorization: 'Bearer live-hetzner-token' }),
       })
     );
-    expect(result.user?.activeCandidateCount).toBe(2);
+    expect(result.user?.activeCandidateCount).toBe(1);
+    expect(getCandidateStatusRows(['cx23', 'cpx62'])).toEqual([
+      {
+        location: 'fsn1',
+        machine_size: null,
+        provider_instance_type: 'cpx62',
+        status: 'disabled',
+      },
+      {
+        location: 'fsn1',
+        machine_size: 'small',
+        provider_instance_type: 'cx23',
+        status: 'active',
+      },
+    ]);
     expectCpx62CatalogCandidate(expect.any(String));
   });
 
@@ -947,9 +1258,17 @@ describe('default capacity pool creation', () => {
         GROUP BY status
         ORDER BY status
       `)
+    ).toEqual([{ status: 'disabled', count: 150 }]);
+    expect(
+      getRows<{ provider_instance_catalog_source: string | null; count: number }>(`
+        SELECT provider_instance_catalog_source, COUNT(*) AS count
+        FROM capacity_pool_candidates
+        GROUP BY provider_instance_catalog_source
+        ORDER BY provider_instance_catalog_source
+      `)
     ).toEqual([
-      { status: 'active', count: 120 },
-      { status: 'disabled', count: 30 },
+      { provider_instance_catalog_source: null, count: 30 },
+      { provider_instance_catalog_source: 'api', count: 120 },
     ]);
   });
 
@@ -964,13 +1283,21 @@ describe('default capacity pool creation', () => {
       includeInstallation: false,
       offeringResolver: async () => offerings,
     });
-    const activeCandidates = ensured.user?.candidates ?? [];
+    expect(ensured.user).toBeNull();
+    const editorRead = await readDefaultCapacityPoolSummaries(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      includeDisabled: true,
+    });
+    const catalogCandidates = editorRead.user?.candidates ?? [];
+    expect(editorRead.user?.activeCandidateCount).toBe(0);
+    expect(catalogCandidates).toHaveLength(150);
 
     const update = await updateDefaultCapacityPool(db as never, {
       scope: 'user',
       ownerUserId: 'user-1',
       ownerProjectId: null,
-      candidates: activeCandidates.map((candidate) => ({
+      candidates: catalogCandidates.map((candidate) => ({
         id: candidate.id,
         status: 'deleted',
       })),
@@ -1013,8 +1340,8 @@ describe('default capacity pool creation', () => {
         liveHetznerOffering({
           provider: seed.provider,
           location: seed.provider === 'vultr' ? 'ewr' : 'fsn1',
-          providerInstanceType: `${seed.provider}-native-large`,
-          displayName: `${seed.provider} native large`,
+          providerInstanceType: seed.provider === 'vultr' ? 'vc2-2c-4gb' : 'cx23',
+          displayName: seed.provider === 'vultr' ? 'vc2-2c-4gb' : 'CX23',
         }),
       ],
     });
@@ -1039,12 +1366,12 @@ describe('default capacity pool creation', () => {
     });
     expect(ensured.user?.candidates[0]).toMatchObject({
       provider: 'hetzner',
-      providerInstanceType: 'hetzner-native-large',
+      providerInstanceType: 'cx23',
       providerInstanceCatalogSource: 'api',
     });
     expect(ensured.project?.candidates[0]).toMatchObject({
       provider: 'vultr',
-      providerInstanceType: 'vultr-native-large',
+      providerInstanceType: 'vc2-2c-4gb',
       providerInstanceCatalogSource: 'api',
     });
     expect(
@@ -1249,11 +1576,18 @@ describe('default capacity pool creation', () => {
       'cx23',
     ]);
 
-    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+    const discovered = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
       includeInstallation: false,
       offeringResolver: async () => expandedOfferings,
     });
+    expect(discovered.user?.activeCandidateCount).toBe(1);
+    expect(discovered.user?.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ providerInstanceType: 'cpx62', status: 'disabled' }),
+      ])
+    );
+
     const update = await updateDefaultCapacityPool(db as never, {
       scope: 'user',
       ownerUserId: 'user-1',
@@ -1319,13 +1653,116 @@ describe('default capacity pool creation', () => {
       providerInstanceVcpuCount: 32,
       providerInstanceMemoryMb: 65_536,
     });
+
+    const reconciled = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => expandedOfferings,
+    });
+    expect(reconciled.user?.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ providerInstanceType: 'cpx62', status: 'active' }),
+      ])
+    );
+  });
+
+  it('preserves disabled and deleted concrete non-legacy offerings across reconciliation', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    const offerings = [
+      liveHetznerOffering({
+        location: 'fsn1',
+        providerInstanceType: 'cx23',
+        displayName: 'CX23',
+      }),
+      liveHetznerOffering({
+        location: 'fsn1',
+        providerInstanceType: 'cpx62',
+        displayName: 'CPX62',
+        vcpu: 32,
+        ramGb: 64,
+        memoryGb: 64,
+        memoryMb: 65_536,
+        storageGb: 480,
+        diskGb: 480,
+        price: '€48.12/mo',
+        priceMonthly: 48.12,
+        priceHourly: 0.06592,
+      }),
+      liveHetznerOffering({
+        location: 'hel1',
+        providerInstanceType: 'ccx63',
+        displayName: 'CCX63',
+        vcpu: 48,
+        ramGb: 192,
+        memoryGb: 192,
+        memoryMb: 196_608,
+        storageGb: 960,
+        diskGb: 960,
+        price: '€168.44/mo',
+        priceMonthly: 168.44,
+        priceHourly: 0.23074,
+      }),
+    ];
+
+    const initial = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => offerings,
+    });
+    const cpx62 = initial.user?.candidates.find(
+      (candidate) => candidate.providerInstanceType === 'cpx62'
+    );
+    const ccx63 = initial.user?.candidates.find(
+      (candidate) => candidate.providerInstanceType === 'ccx63'
+    );
+    expect(cpx62?.status).toBe('disabled');
+    expect(ccx63?.status).toBe('disabled');
+
+    const update = await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      candidates: [
+        { id: cpx62!.id, status: 'disabled' },
+        { id: ccx63!.id, status: 'deleted' },
+      ],
+    });
+    expect(update.unavailableCandidateIds).toEqual([]);
+    expect(update.missingCandidateIds).toEqual([]);
+
+    const reconciled = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => offerings,
+    });
+
+    expect(reconciled.user?.activeCandidateCount).toBe(1);
+    expect(reconciled.user?.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ providerInstanceType: 'cx23', status: 'active' }),
+        expect.objectContaining({ providerInstanceType: 'cpx62', status: 'disabled' }),
+        expect.objectContaining({ providerInstanceType: 'ccx63', status: 'deleted' }),
+      ])
+    );
   });
 
   it('rejects reactivating removed candidates that are no longer in the current catalog', async () => {
     createDb();
     seedUserCredential({ id: 'user-hetzner' });
     const db = drizzleD1(createSqliteD1WithBindLimit(sqlite!, 100), { schema });
-    const offerings = manyLiveOfferings(2);
+    const offerings = [
+      liveHetznerOffering({
+        location: 'fsn1',
+        providerInstanceType: 'cx23',
+        displayName: 'CX23',
+      }),
+      liveHetznerOffering({
+        location: 'fsn1',
+        providerInstanceType: 'provider-native-stale',
+        displayName: 'Provider native stale',
+      }),
+    ];
 
     const ensured = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
@@ -1365,89 +1802,12 @@ describe('default capacity pool creation', () => {
     ).toEqual({ status: 'deleted', provider_instance_catalog_source: null });
   });
 
-  it('translates deleted legacy size rows onto matching live catalog offerings only', async () => {
-    const db = createDb();
-    seedUserCredential({ id: 'user-hetzner' });
-
-    const poolId = 'cap-pool-default:user:user-1';
-    const sourceId = 'cap-source-default:user:user-hetzner';
-    const legacyCandidateId = `cap-candidate-default:${poolId}:${sourceId}:hetzner:fsn1:small`;
-    sqlite
-      ?.prepare(
-        `
-        INSERT INTO capacity_pools (
-          id, scope, owner_user_id, name, is_default, revision, status,
-          strategy, exhaustion_policy, created_by
-        )
-        VALUES (?, 'user', 'user-1', 'User default', 1, 1, 'active', 'balanced', 'queue', 'user-1')
-      `
-      )
-      .run(poolId);
-    sqlite
-      ?.prepare(
-        `
-        INSERT INTO capacity_sources (
-          id, scope, owner_user_id, source_kind, provider, credential_source,
-          credential_id, credential_reference, status, created_by
-        )
-        VALUES (?, 'user', 'user-1', 'cloud-provider-credential', 'hetzner', 'user',
-          'user-hetzner', 'credentials:user-hetzner', 'active', 'user-1')
-      `
-      )
-      .run(sourceId);
-    sqlite
-      ?.prepare(
-        `
-        INSERT INTO capacity_pool_candidates (
-          id, pool_id, capacity_source_id, provider, location, workload_role,
-          runtime, machine_class, machine_size, status
-        )
-        VALUES (?, ?, ?, 'hetzner', 'fsn1', 'workspace', 'vm', 'shared-vm', 'small', 'deleted')
-      `
-      )
-      .run(legacyCandidateId, poolId, sourceId);
-
-    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
-      userId: 'user-1',
-      includeInstallation: false,
-      offeringResolver: async () => [
-        liveHetznerOffering({
-          location: 'fsn1',
-          providerInstanceType: 'cx23',
-          displayName: 'CX23',
-        }),
-        liveHetznerOffering({
-          location: 'fsn1',
-          providerInstanceType: 'cpx62',
-          displayName: 'CPX62',
-          vcpu: 32,
-          memoryMb: 65_536,
-          diskGb: 480,
-          price: '€48.12/mo',
-          priceMonthly: 48.12,
-        }),
-      ],
-    });
-
-    expect(
-      getRows<{
-        provider_instance_type: string | null;
-        status: string;
-        machine_size: string | null;
-      }>(`
-        SELECT provider_instance_type, status, machine_size
-        FROM capacity_pool_candidates
-        WHERE provider_instance_type IN ('cx23', 'cpx62') OR id = '${legacyCandidateId}'
-        ORDER BY provider_instance_type
-      `)
-    ).toEqual(
-      expect.arrayContaining([
-        { provider_instance_type: null, status: 'deleted', machine_size: 'small' },
-        { provider_instance_type: 'cx23', status: 'deleted', machine_size: 'small' },
-        { provider_instance_type: 'cpx62', status: 'active', machine_size: null },
-      ])
-    );
-  });
+  it.each(['deleted', 'disabled'] as const)(
+    'translates %s legacy size rows onto matching live catalog offerings only',
+    async (legacyStatus) => {
+      await expectLegacyStatusMappedToLiveCatalog(legacyStatus);
+    }
+  );
 
   it('preserves existing candidate priority and order during default reconciliation', async () => {
     const db = createDb();
@@ -1584,35 +1944,10 @@ describe('default capacity pool creation', () => {
   });
 
   it('orders effective default-pool candidates by the selected v1 strategy', async () => {
-    const db = createDb();
-    seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
+    const db = await seedVultrDefaultPool();
 
-    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
-      userId: 'user-1',
-      includeInstallation: false,
-    });
-
-    const placement = resolveTaskStartPlacement({
-      entryPoint: 'task-submit',
-      taskId: 'strategy-task',
-      projectId: 'project-1',
-      userId: 'user-1',
-      project: {
-        id: 'project-1',
-        defaultProvider: 'vultr',
-        defaultLocation: getDefaultLocationForProvider('vultr'),
-        defaultVmSize: 'small',
-      },
-      credentialProjectPolicy: 'current-project-unless-inherited',
-      taskModeDefault: 'task',
-      resourceRequirements: {},
-    });
-
-    sqlite?.prepare("UPDATE capacity_pools SET strategy = 'pack' WHERE scope = 'user'").run();
-    const packSelection = await resolveTaskStartCapacityPoolSelection(db as never, placement, {
-      ensure: false,
-    });
-
+    setUserDefaultPoolStrategy('pack');
+    const packSelection = await selectVultrDefaultPoolCandidates(db, 'strategy-task');
     expect(packSelection?.strategy).toBe('pack');
     expect(packSelection?.candidates[0]).toMatchObject({
       provider: 'vultr',
@@ -1622,15 +1957,8 @@ describe('default capacity pool creation', () => {
       providerInstanceMemoryMb: 16 * 1024,
     });
 
-    sqlite
-      ?.prepare("UPDATE capacity_pools SET strategy = 'smallest-fit' WHERE scope = 'user'")
-      .run();
-    const smallestFitSelection = await resolveTaskStartCapacityPoolSelection(
-      db as never,
-      placement,
-      { ensure: false }
-    );
-
+    setUserDefaultPoolStrategy('smallest-fit');
+    const smallestFitSelection = await selectVultrDefaultPoolCandidates(db, 'strategy-task');
     expect(smallestFitSelection?.strategy).toBe('smallest-fit');
     expect(smallestFitSelection?.candidates[0]).toMatchObject({
       provider: 'vultr',
@@ -1642,37 +1970,11 @@ describe('default capacity pool creation', () => {
   });
 
   it('rejects undersized concrete offerings using normalized reservation resources', async () => {
-    const db = createDb();
-    seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
+    const db = await seedVultrDefaultPool();
+    setUserDefaultPoolStrategy('smallest-fit');
 
-    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
-      userId: 'user-1',
-      includeInstallation: false,
-    });
-    sqlite
-      ?.prepare("UPDATE capacity_pools SET strategy = 'smallest-fit' WHERE scope = 'user'")
-      .run();
-
-    const placement = resolveTaskStartPlacement({
-      entryPoint: 'task-submit',
-      taskId: 'resource-heavy-task',
-      projectId: 'project-1',
-      userId: 'user-1',
-      project: {
-        id: 'project-1',
-        defaultProvider: 'vultr',
-        defaultLocation: getDefaultLocationForProvider('vultr'),
-        defaultVmSize: 'small',
-      },
-      credentialProjectPolicy: 'current-project-unless-inherited',
-      taskModeDefault: 'task',
-      resourceRequirements: {
-        task: { minVcpu: 5, minMemoryGb: 12 },
-      },
-    });
-
-    const selection = await resolveTaskStartCapacityPoolSelection(db as never, placement, {
-      ensure: false,
+    const selection = await selectVultrDefaultPoolCandidates(db, 'resource-heavy-task', {
+      task: { minVcpu: 5, minMemoryGb: 12 },
     });
 
     expect(selection?.candidates.length).toBeGreaterThan(0);
@@ -1689,34 +1991,10 @@ describe('default capacity pool creation', () => {
   });
 
   it('returns an authoritative empty selection when no concrete offering satisfies resources', async () => {
-    const db = createDb();
-    seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
+    const db = await seedVultrDefaultPool();
 
-    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
-      userId: 'user-1',
-      includeInstallation: false,
-    });
-
-    const placement = resolveTaskStartPlacement({
-      entryPoint: 'task-submit',
-      taskId: 'resource-too-heavy-task',
-      projectId: 'project-1',
-      userId: 'user-1',
-      project: {
-        id: 'project-1',
-        defaultProvider: 'vultr',
-        defaultLocation: getDefaultLocationForProvider('vultr'),
-        defaultVmSize: 'small',
-      },
-      credentialProjectPolicy: 'current-project-unless-inherited',
-      taskModeDefault: 'task',
-      resourceRequirements: {
-        task: { minVcpu: 128, minMemoryGb: 512 },
-      },
-    });
-
-    const selection = await resolveTaskStartCapacityPoolSelection(db as never, placement, {
-      ensure: false,
+    const selection = await selectVultrDefaultPoolCandidates(db, 'resource-too-heavy-task', {
+      task: { minVcpu: 128, minMemoryGb: 512 },
     });
 
     expect(selection).toMatchObject({
@@ -1729,6 +2007,74 @@ describe('default capacity pool creation', () => {
       capacityPoolCandidateId: null,
       capacitySourceId: null,
     });
+  });
+
+  it('ignores disabled catalog-visible offerings during placement even when they satisfy resources', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+
+    const ensured = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+        }),
+        liveHetznerOffering({
+          location: 'hel1',
+          providerInstanceType: 'ccx63',
+          displayName: 'CCX63',
+          vcpu: 48,
+          ramGb: 192,
+          memoryGb: 192,
+          memoryMb: 196_608,
+          storageGb: 960,
+          diskGb: 960,
+          price: '€168.44/mo',
+          priceMonthly: 168.44,
+          priceHourly: 0.23074,
+        }),
+      ],
+    });
+    expect(ensured.user?.activeCandidateCount).toBe(1);
+    expect(ensured.user?.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ providerInstanceType: 'cx23', status: 'active' }),
+        expect.objectContaining({ providerInstanceType: 'ccx63', status: 'disabled' }),
+      ])
+    );
+
+    const placement = resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'disabled-expensive-catalog-placement-task',
+      projectId: 'project-1',
+      userId: 'user-1',
+      project: {
+        id: 'project-1',
+        defaultProvider: 'hetzner',
+        defaultLocation: 'fsn1',
+        defaultVmSize: 'small',
+      },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+      resourceRequirements: {
+        task: { minVcpu: 48, minMemoryGb: 192 },
+      },
+    });
+    const selection = await resolveTaskStartCapacityPoolSelection(db as never, placement, {
+      ensure: false,
+    });
+
+    expect(selection).toMatchObject({
+      scope: 'user',
+      poolId: 'cap-pool-default:user:user-1',
+      candidates: [],
+    });
+    expect(() => resolveCapacityAwareCredentialLookup(placement, selection)).toThrow(
+      PlacementResolutionError
+    );
   });
 
   it('keeps capacity candidates aligned with the resolved provider and explicit location', async () => {

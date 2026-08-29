@@ -558,9 +558,9 @@ test.describe('Project settings sub-pages', () => {
       'project-settings-default-compute-pool-catalog-results-focused'
     );
     await page.getByRole('button', { name: 'Save changes' }).click();
-    await expect(page.getByText(/3 allowed · 2 removed\/disabled/)).toBeVisible();
+    await expect(page.getByText(/3 allowed · 2 not selected\/removed/)).toBeVisible();
     await expect(
-      page.getByRole('heading', { name: 'Removed or disabled instances' })
+      page.getByRole('heading', { name: 'Not selected or removed instances' })
     ).toBeVisible();
     await expect(page.getByText(/Hetzner · Ashburn \(ash\)/).first()).toBeVisible();
     await expect(page.getByText(/Hetzner · Hillsboro \(hil\)/).first()).toBeVisible();
