@@ -63,6 +63,7 @@ This task adds the MCP-facing read/ack layer without deploying or mutating stagi
 Current evidence:
 
 - `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/event-bus.test.ts tests/unit/routes/mcp-event-bus-tools.test.ts` — 17 tests passed
+- `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/event-bus-do.test.ts` — 1 workers-pool test passed
 - `pnpm --filter @simple-agent-manager/api typecheck` — passed
 
 ## Review plan
