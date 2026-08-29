@@ -646,14 +646,29 @@ async function ensureCandidatesForSource(
           providerInstancePriceHourlyMicros: sql`excluded.provider_instance_price_hourly_micros`,
           providerInstanceCatalogSource: sql`excluded.provider_instance_catalog_source`,
           providerInstanceCatalogLastSeenAt: sql`excluded.provider_instance_catalog_last_seen_at`,
-          priority: sql`excluded.priority`,
-          candidateOrder: sql`excluded.candidate_order`,
           updatedAt: now,
         },
       });
   }
 
   await disableMissingCandidatesForSource(db, poolId, sourceId, candidateIds);
+}
+
+async function readExistingCandidateStatuses(
+  db: Db,
+  poolId: string,
+  sourceId: string
+): Promise<Map<string, string>> {
+  const rows = await db
+    .select({ id: schema.capacityPoolCandidates.id, status: schema.capacityPoolCandidates.status })
+    .from(schema.capacityPoolCandidates)
+    .where(
+      and(
+        eq(schema.capacityPoolCandidates.poolId, poolId),
+        eq(schema.capacityPoolCandidates.capacitySourceId, sourceId)
+      )
+    );
+  return new Map(rows.map((row) => [row.id, row.status]));
 }
 
 async function disableMissingCandidatesForSource(
