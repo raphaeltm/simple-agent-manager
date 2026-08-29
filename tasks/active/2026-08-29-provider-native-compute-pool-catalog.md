@@ -41,8 +41,8 @@ Target: existing PR #1943 / branch `sam/compute-pools-integration`. Do not merge
 - [x] Add tests proving live provider API failure falls back per-provider to static offerings and marks `catalogSource: static`.
 - [x] Add route/service tests for installation, user, and project scope credential catalogs and no secret leakage.
 - [x] Add web unit/interaction tests proving API catalog offerings not currently active are visible in add flow, removed offerings can be added back, and `small | medium | large` do not appear as add choices.
-- [ ] Refresh Playwright desktop/mobile screenshots for compute-pool read/edit/add/filter states with more than the old three instance types.
-- [ ] Run local targeted tests for provider catalog, default capacity-pool reconciliation, API routes, and UI add/remove/filter behavior.
+- [x] Refresh Playwright desktop/mobile screenshots for compute-pool read/edit/add/filter states with more than the old three instance types.
+- [x] Run local targeted tests for provider catalog, default capacity-pool reconciliation, API routes, and UI add/remove/filter behavior.
 - [ ] Run full pre-PR validation: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
 - [ ] Run required specialist reviews and address/document every actionable finding.
 - [ ] Deploy `sam/compute-pools-integration` to staging and verify the live Hetzner pool add list uses API catalog entries beyond old defaults, with `catalogSource=api` and EUR price metadata.

@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-const DEFAULT_SCREENSHOT_DIR = '../../.tmp/playwright-screenshots';
+const DEFAULT_SCREENSHOT_DIR = '../../.codex/tmp/playwright-screenshots';
 
 interface MockUserOptions {
   email: string;
