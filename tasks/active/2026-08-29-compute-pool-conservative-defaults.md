@@ -49,19 +49,19 @@ This task must open a new draft child PR against `sam/compute-pools-integration`
 
 ## Implementation checklist
 
-- [ ] Add a pure, exported policy helper in `apps/api/src/services/default-capacity-pool-candidates.ts` that returns initial candidate status from: existing concrete status, inherited legacy migration status, and whether the provider offering maps to a legacy-supported SKU.
-- [ ] Update `ensureCandidatesForSource()` so new non-legacy provider catalog discoveries are inserted as `disabled`, while legacy-supported concrete SKUs are inserted as `active`.
-- [ ] Preserve existing concrete `active`, `disabled`, and `deleted` candidate statuses across reconciliation.
-- [ ] Preserve disabled/deleted legacy `small|medium|large` rows by applying their status only to matching concrete legacy-supported SKUs.
-- [ ] Add service tests proving live Hetzner catalog rows are all created but only `cx23`, `cx33`, and `cx43` are active by default.
-- [ ] Add service tests covering installation, user, and project default pools with the same conservative policy.
-- [ ] Add service tests proving explicit activation/addition of a non-legacy offering remains active after later reconciliation.
-- [ ] Add service tests proving disabled/deleted concrete and legacy-mapped rows remain disabled/deleted after reconciliation.
-- [ ] Add scheduler/placement regression coverage proving disabled catalog-visible offerings are ignored even when they satisfy requested resources.
-- [ ] Update route or UI tests as needed so response bodies/editor models expose full catalog rows but active counts remain conservative.
-- [ ] If UI copy is changed, update component/unit tests for available-but-not-selected catalog rows and ensure no `small|medium|large` add choices appear.
-- [ ] Update Playwright audit mocks/screenshots to show full catalog visibility with only legacy concrete SKUs selected and expensive offerings visible but not selected.
-- [ ] Run targeted API/web tests during implementation and fix failures.
+- [x] Add a pure, exported policy helper in `apps/api/src/services/default-capacity-pool-candidates.ts` that returns initial candidate status from: existing concrete status, inherited legacy migration status, and whether the provider offering maps to a legacy-supported SKU.
+- [x] Update `ensureCandidatesForSource()` so new non-legacy provider catalog discoveries are inserted as `disabled`, while legacy-supported concrete SKUs are inserted as `active`.
+- [x] Preserve existing concrete `active`, `disabled`, and `deleted` candidate statuses across reconciliation.
+- [x] Preserve disabled/deleted legacy `small|medium|large` rows by applying their status only to matching concrete legacy-supported SKUs.
+- [x] Add service tests proving live Hetzner catalog rows are all created but only `cx23`, `cx33`, and `cx43` are active by default.
+- [x] Add service tests covering installation, user, and project default pools with the same conservative policy.
+- [x] Add service tests proving explicit activation/addition of a non-legacy offering remains active after later reconciliation.
+- [x] Add service tests proving disabled/deleted concrete and legacy-mapped rows remain disabled/deleted after reconciliation.
+- [x] Add scheduler/placement regression coverage proving disabled catalog-visible offerings are ignored even when they satisfy requested resources.
+- [x] Update route or UI tests as needed so response bodies/editor models expose full catalog rows but active counts remain conservative.
+- [x] If UI copy is changed, update component/unit tests for available-but-not-selected catalog rows and ensure no `small|medium|large` add choices appear.
+- [x] Update Playwright audit mocks/screenshots to show full catalog visibility with only legacy concrete SKUs selected and expensive offerings visible but not selected.
+- [x] Run targeted API/web tests during implementation and fix failures.
 - [ ] Re-read this task file and `.do-state.md`, then confirm every acceptance criterion before Phase 4.
 - [ ] Run full pre-PR validation: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
 - [ ] Run task-completion-validator before archiving.

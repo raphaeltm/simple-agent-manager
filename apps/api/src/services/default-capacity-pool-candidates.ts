@@ -1,5 +1,7 @@
 import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
-import type {
+import {
+  isCapacityPoolStatus,
+  type CapacityPoolStatus,
   CredentialProvider,
   ProviderInstanceOffering,
   VMSize,
@@ -17,9 +19,9 @@ type Db = ReturnType<typeof drizzle>;
 const DEFAULT_WORKLOAD_ROLE = 'workspace';
 const DEFAULT_RUNTIME = 'vm';
 const DEFAULT_MACHINE_CLASS = 'shared-vm';
-const ACTIVE_STATUS = 'active';
-const DISABLED_STATUS = 'disabled';
-const DELETED_STATUS = 'deleted';
+const ACTIVE_STATUS = 'active' satisfies CapacityPoolStatus;
+const DISABLED_STATUS = 'disabled' satisfies CapacityPoolStatus;
+const DELETED_STATUS = 'deleted' satisfies CapacityPoolStatus;
 const CANDIDATE_INSERT_BIND_COUNT = 26;
 const CANDIDATE_UPSERT_UPDATE_BIND_COUNT = 1;
 const CANDIDATE_UPSERT_CHUNK_SIZE = Math.max(
@@ -44,6 +46,7 @@ export async function ensureCandidatesForSource(
   let candidateOrder = 0;
 
   for (const offering of selectableOfferings) {
+    const legacyVmSize = legacyVmSizeHintForOffering(provider, offering);
     const id = defaultCandidateId(
       poolId,
       sourceId,
@@ -57,12 +60,14 @@ export async function ensureCandidatesForSource(
       poolId,
       sourceId,
       provider,
-      offering
+      offering,
+      legacyVmSize
     );
-    const initialStatus =
-      legacyStatus === DISABLED_STATUS || legacyStatus === DELETED_STATUS
-        ? legacyStatus
-        : ACTIVE_STATUS;
+    const initialStatus = initialStatusForProviderOffering(
+      existingStatuses.get(id),
+      legacyStatus,
+      legacyVmSize
+    );
     candidateIds.push(id);
     candidateValues.push({
       id,
@@ -73,7 +78,7 @@ export async function ensureCandidatesForSource(
       workloadRole: DEFAULT_WORKLOAD_ROLE,
       runtime: DEFAULT_RUNTIME,
       machineClass: DEFAULT_MACHINE_CLASS,
-      machineSize: legacyVmSizeHintForOffering(provider, offering),
+      machineSize: legacyVmSize,
       ...providerInstanceOfferingDbValues(offering),
       priority: candidateOrder,
       candidateOrder,
@@ -122,14 +127,43 @@ function isCurrentlySelectableOffering(offering: ProviderInstanceOffering): bool
   return offering.available !== false && !offering.stale;
 }
 
+/**
+ * Default pools discover the full provider-native catalog, but first creation only
+ * selects concrete offerings that map to SAM's legacy supported sizes.
+ *
+ * Status priority:
+ * 1. Existing concrete row status: explicit user additions/removals win.
+ * 2. Legacy small/medium/large migration status: preserves old removals.
+ * 3. Legacy metadata match: old supported concrete SKU starts active.
+ * 4. New non-legacy catalog row: visible in editor, disabled for placement.
+ */
+export function initialStatusForProviderOffering(
+  existingConcreteStatus: string | null | undefined,
+  legacyMigrationStatus: string | null | undefined,
+  legacyVmSize: VMSize | null
+): CapacityPoolStatus {
+  const concreteStatus = normalizeCapacityPoolStatus(existingConcreteStatus);
+  if (concreteStatus) return concreteStatus;
+
+  const legacyStatus = normalizeCapacityPoolStatus(legacyMigrationStatus);
+  if (legacyStatus === DISABLED_STATUS || legacyStatus === DELETED_STATUS) return legacyStatus;
+  if (legacyStatus === ACTIVE_STATUS) return ACTIVE_STATUS;
+
+  return legacyVmSize ? ACTIVE_STATUS : DISABLED_STATUS;
+}
+
+function normalizeCapacityPoolStatus(value: string | null | undefined): CapacityPoolStatus | null {
+  return isCapacityPoolStatus(value) ? value : null;
+}
+
 function legacyStatusForOffering(
   existingStatuses: ReadonlyMap<string, string>,
   poolId: string,
   sourceId: string,
   provider: CredentialProvider,
-  offering: ProviderInstanceOffering
+  offering: ProviderInstanceOffering,
+  legacyVmSize: VMSize | null
 ): string | null {
-  const legacyVmSize = legacyVmSizeHintForOffering(provider, offering);
   if (!legacyVmSize) return null;
   return (
     existingStatuses.get(
@@ -183,7 +217,9 @@ async function markMissingCandidatesForSource(
 ): Promise<void> {
   const now = new Date().toISOString();
   const nextCandidateIds = new Set(activeCandidateIds);
-  const missingCandidateIds = [...existingStatuses.keys()].filter((id) => !nextCandidateIds.has(id));
+  const missingCandidateIds = [...existingStatuses.keys()].filter(
+    (id) => !nextCandidateIds.has(id)
+  );
   const fixedBindCount = 5; // status/update metadata plus pool/source/status predicates
   const chunkSize = Math.max(1, D1_MAX_BOUND_PARAMETERS - fixedBindCount);
 

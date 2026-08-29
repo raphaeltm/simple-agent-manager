@@ -479,7 +479,8 @@ describe('DefaultCapacityPoolsPanel', () => {
     ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    expect(screen.getByText('Removed or disabled instances')).toBeInTheDocument();
+    expect(screen.getByText('Not selected or removed instances')).toBeInTheDocument();
+    expect(screen.getAllByText('Not selected').length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: /Add back Hetzner fsn1 cx22/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
