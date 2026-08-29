@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
   acknowledgeEventBusDelivery,
+  computeEventBusRetentionAlarmTime,
   createEventBusSubscription,
   EventBusAckPolicyError,
   EventBusAckStateError,
@@ -49,21 +50,18 @@ describe('ProjectData event bus', () => {
   function createTaskSubscription(
     overrides: Partial<Parameters<typeof createEventBusSubscription>[1]> = {}
   ) {
-    return createEventBusSubscription(
-      sql,
-      {
-        id: 'sub-task-1',
-        ownerType: 'task',
-        ownerId: 'task-1',
-        targetTaskId: 'task-1',
-        targetSessionId: 'session-1',
-        targetAgentSessionId: 'agent-session-1',
-        eventTypes: ['task.completed', 'task.failed'],
-        deliveryPolicy: 'ack_required',
-        now: 1_000,
-        ...overrides,
-      }
-    );
+    return createEventBusSubscription(sql, {
+      id: 'sub-task-1',
+      ownerType: 'task',
+      ownerId: 'task-1',
+      targetTaskId: 'task-1',
+      targetSessionId: 'session-1',
+      targetAgentSessionId: 'agent-session-1',
+      eventTypes: ['task.completed', 'task.failed'],
+      deliveryPolicy: 'ack_required',
+      now: 1_000,
+      ...overrides,
+    });
   }
 
   function publish(id: string, type = 'task.completed') {
@@ -104,9 +102,9 @@ describe('ProjectData event bus', () => {
     });
     expect(event?.sequence).toBeGreaterThan(0);
     expect(
-      db.prepare('SELECT state, delivered_at FROM event_bus_deliveries WHERE event_id = ?').get(
-        'event-1'
-      )
+      db
+        .prepare('SELECT state, delivered_at FROM event_bus_deliveries WHERE event_id = ?')
+        .get('event-1')
     ).toEqual({ state: 'delivered', delivered_at: 3_000 });
   });
 
@@ -144,9 +142,11 @@ describe('ProjectData event bus', () => {
     expect(first.nextCursor).toEqual(expect.any(String));
     expect(JSON.stringify(first.events)).not.toContain('payload-secret');
     expect(
-      db.prepare(
-        "SELECT COUNT(*) AS cnt FROM event_bus_deliveries WHERE subscription_id = ? AND state = 'delivered'"
-      ).get('sub-task-1')
+      db
+        .prepare(
+          "SELECT COUNT(*) AS cnt FROM event_bus_deliveries WHERE subscription_id = ? AND state = 'delivered'"
+        )
+        .get('sub-task-1')
     ).toEqual({ cnt: 2 });
 
     const late = publish('event-4');
@@ -201,6 +201,83 @@ describe('ProjectData event bus', () => {
     const details = plan.map((entry) => entry.detail).join('\n');
 
     expect(details).toContain('idx_event_bus_deliveries_subscription_sequence');
+    expect(details).not.toContain('USE TEMP B-TREE');
+  });
+
+  it('uses index-covered plans for retention and publish routing candidates', () => {
+    createTaskSubscription({
+      id: 'sub-exact',
+      subject: { type: 'task', id: 'child-task-1' },
+      eventTypes: ['task.completed'],
+    });
+    createTaskSubscription({
+      id: 'sub-wildcard-type',
+      subject: { type: 'task', id: null },
+      eventTypes: null,
+      deliveryPolicy: 'none',
+    });
+    publish('event-1');
+
+    const retentionPlan = db
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT e.id
+         FROM event_bus_events e
+         WHERE e.created_at < ?
+           AND NOT EXISTS (
+             SELECT 1
+             FROM event_bus_deliveries d
+             JOIN event_bus_delivery_policies p ON p.subscription_id = d.subscription_id
+             WHERE d.event_id = e.id
+               AND p.policy = 'ack_required'
+               AND d.state IN ('queued', 'delivered')
+           )
+         ORDER BY e.created_at ASC, e.sequence ASC
+         LIMIT ?`
+      )
+      .all(10_000, 10) as Array<{ detail: string }>;
+    const exactRoutePlan = db
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT s.id
+         FROM event_bus_subscription_event_types et
+         JOIN event_bus_subscriptions s ON s.id = et.subscription_id
+         LEFT JOIN event_bus_delivery_policies p ON p.subscription_id = s.id
+         WHERE et.event_type = ?
+           AND et.subject_type = ?
+           AND et.subject_id = ?
+           AND s.state = 'active'
+           AND (s.expires_at IS NULL OR s.expires_at > ?)
+         ORDER BY et.created_at ASC, et.subscription_id ASC
+         LIMIT ?`
+      )
+      .all('task.completed', 'task', 'child-task-1', 3_000, 10) as Array<{ detail: string }>;
+    const wildcardRoutePlan = db
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT s.id
+         FROM event_bus_subscriptions s
+         LEFT JOIN event_bus_delivery_policies p ON p.subscription_id = s.id
+         WHERE s.state = 'active'
+           AND s.subject_type = ?
+           AND s.subject_id IS NULL
+           AND (s.expires_at IS NULL OR s.expires_at > ?)
+           AND NOT EXISTS (
+             SELECT 1
+             FROM event_bus_subscription_event_types et_any
+             WHERE et_any.subscription_id = s.id
+           )
+         ORDER BY s.created_at ASC, s.id ASC
+         LIMIT ?`
+      )
+      .all('task', 3_000, 10) as Array<{ detail: string }>;
+    const details = [...retentionPlan, ...exactRoutePlan, ...wildcardRoutePlan]
+      .map((entry) => entry.detail)
+      .join('\n');
+
+    expect(details).toContain('idx_event_bus_events_created_sequence');
+    expect(details).toContain('idx_event_bus_subscription_event_types_routing');
+    expect(details).toContain('idx_event_bus_subscriptions_routing');
     expect(details).not.toContain('USE TEMP B-TREE');
   });
 
@@ -290,7 +367,9 @@ describe('ProjectData event bus', () => {
         3_000
       )
     ).toBeNull();
-    expect(acknowledgeEventBusDelivery(sql, { deliveryId: delivery.id }, identity(), 3_000)).toBeNull();
+    expect(
+      acknowledgeEventBusDelivery(sql, { deliveryId: delivery.id }, identity(), 3_000)
+    ).toBeNull();
 
     db.prepare("UPDATE event_bus_subscriptions SET state = 'closed' WHERE id = ?").run(
       'sub-task-1'
@@ -477,9 +556,7 @@ describe('ProjectData event bus', () => {
     publish('event-no-ack', 'task.info');
 
     const acknowledgedDelivery = db
-      .prepare(
-        'SELECT id FROM event_bus_deliveries WHERE event_id = ? AND subscription_id = ?'
-      )
+      .prepare('SELECT id FROM event_bus_deliveries WHERE event_id = ? AND subscription_id = ?')
       .get('event-acknowledged', 'sub-ack') as { id: string };
     acknowledgeEventBusDelivery(sql, { deliveryId: acknowledgedDelivery.id }, identity(), 3_000);
 
@@ -510,12 +587,29 @@ describe('ProjectData event bus', () => {
       eventsDeleted: 2,
       exhaustedCandidates: true,
     });
-    expect(
-      db.prepare('SELECT id FROM event_bus_events ORDER BY id').all()
-    ).toEqual([{ id: 'event-pending' }]);
+    expect(db.prepare('SELECT id FROM event_bus_events ORDER BY id').all()).toEqual([
+      { id: 'event-pending' },
+    ]);
     expect(
       db.prepare('SELECT event_id, state FROM event_bus_deliveries ORDER BY event_id').all()
     ).toEqual([{ event_id: 'event-pending', state: 'queued' }]);
+  });
+
+  it('makes old ack-required events retention-eligible only after acknowledgement', () => {
+    createTaskSubscription();
+    publish('event-1');
+
+    expect(computeEventBusRetentionAlarmTime(sql, { retentionMs: 1_000 }, 10_000)).toBeNull();
+
+    const delivery = db
+      .prepare('SELECT id FROM event_bus_deliveries WHERE event_id = ?')
+      .get('event-1') as { id: string };
+    acknowledgeEventBusDelivery(sql, { deliveryId: delivery.id }, identity(), 10_000);
+
+    expect(computeEventBusRetentionAlarmTime(sql, { retentionMs: 1_000 }, 10_000)).toBe(10_000);
+    expect(
+      runEventBusRetention(sql, { retentionMs: 1_000, retentionBatchRows: 10 }, 10_000)
+    ).toMatchObject({ eventsDeleted: 1, deliveriesDeleted: 1 });
   });
 
   it('acknowledges ack-required deliveries idempotently and rejects non-ack policy', () => {

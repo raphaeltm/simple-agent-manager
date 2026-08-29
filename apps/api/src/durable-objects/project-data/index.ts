@@ -36,7 +36,7 @@ import * as comments from './comments';
 import { stopTimedOutConversationWorkspaces } from './conversation-timeout';
 import * as durability from './durability-foundation';
 import * as eventBus from './event-bus';
-import { resolveEventBusStorageConfig } from './event-bus-config';
+import { resolveEventBusCursorMaxLength, resolveEventBusStorageConfig } from './event-bus-config';
 import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
 import * as knowledge from './knowledge';
@@ -1074,9 +1074,14 @@ export class ProjectData extends DurableObject<Env> {
     // lifecycle maintenance sections so a large project can still reclaim bytes
     // even when idle/reconciliation work has accumulated.
     try {
-      await storageSafety.runProjectDataStorageSafetyAlarm(this.sql, this.env, this.getProjectId(), {
-        transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
-      });
+      await storageSafety.runProjectDataStorageSafetyAlarm(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        {
+          transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
+        }
+      );
     } catch (err) {
       log.error('alarm.storage_safety_failed', {
         error: err instanceof Error ? err.message : String(err),
@@ -1592,7 +1597,13 @@ export class ProjectData extends DurableObject<Env> {
     input: eventBus.ListEventBusSubscriptionEventsInput,
     identity: eventBus.EventBusIdentity
   ): Promise<ReturnType<typeof eventBus.listEventBusSubscriptionEvents>> {
-    return eventBus.listEventBusSubscriptionEvents(this.sql, input, identity);
+    return eventBus.listEventBusSubscriptionEvents(
+      this.sql,
+      input,
+      identity,
+      Date.now(),
+      resolveEventBusCursorMaxLength(this.env)
+    );
   }
 
   async acknowledgeEventBusDelivery(
@@ -1606,6 +1617,7 @@ export class ProjectData extends DurableObject<Env> {
         deliveryId: result.delivery.id,
         subscriptionId: result.delivery.subscriptionId,
       });
+      await this.recalculateAlarm();
     }
     return result;
   }

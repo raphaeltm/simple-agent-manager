@@ -302,6 +302,7 @@ by the read-only cron-liveness check.
 - `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX` — Maximum result count accepted by the `get_archived_tool_payloads` MCP tool (default: 50)
 - `MCP_EVENT_BUS_LIST_LIMIT` — Default result count for the `list_subscription_events` MCP tool (default: 25)
 - `MCP_EVENT_BUS_LIST_MAX` — Maximum result count accepted by the `list_subscription_events` MCP tool (default: 100)
+- `MCP_EVENT_BUS_CURSOR_MAX_LENGTH` — Maximum opaque cursor characters accepted by the `list_subscription_events` MCP tool (default: 512)
 - `PROJECT_DATA_EVENT_BUS_PAYLOAD_MAX_BYTES` — Maximum stored ProjectData event-bus payload bytes per event (default: 262144)
 - `PROJECT_DATA_EVENT_BUS_METADATA_MAX_BYTES` — Maximum stored ProjectData event-bus metadata bytes per event (default: 16384)
 - `PROJECT_DATA_EVENT_BUS_MAX_ROUTED_SUBSCRIPTIONS` — Maximum active subscriptions routed by one ProjectData event publish (default: 1000)

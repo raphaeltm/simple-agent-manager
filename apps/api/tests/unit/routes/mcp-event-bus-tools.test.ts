@@ -68,7 +68,9 @@ function event(overrides: Partial<SamEventBusEvent> = {}): SamEventBusEvent {
   };
 }
 
-function listResult(overrides: Partial<SamEventBusEventListResult> = {}): SamEventBusEventListResult {
+function listResult(
+  overrides: Partial<SamEventBusEventListResult> = {}
+): SamEventBusEventListResult {
   return {
     subscriptionId: 'sub-1',
     events: [eventSummary()],
@@ -97,9 +99,7 @@ function ackResult(overrides: Partial<SamEventBusAckResult> = {}): SamEventBusAc
   };
 }
 
-function storage(
-  overrides: Partial<EventBusToolStorageAdapter> = {}
-): EventBusToolStorageAdapter {
+function storage(overrides: Partial<EventBusToolStorageAdapter> = {}): EventBusToolStorageAdapter {
   return {
     getEventBusEvent: vi.fn().mockResolvedValue(event()),
     listEventBusSubscriptionEvents: vi.fn().mockResolvedValue(listResult()),
@@ -270,7 +270,13 @@ describe('MCP project event-bus tools', () => {
     const missingStorage = storage({ getEventBusEvent: vi.fn().mockResolvedValue(null) });
     const unauthorizedStorage = storage({ getEventBusEvent: vi.fn().mockResolvedValue(null) });
 
-    const missing = await handleGetEvent(1, { eventId: 'missing-event' }, token(), env(), missingStorage);
+    const missing = await handleGetEvent(
+      1,
+      { eventId: 'missing-event' },
+      token(),
+      env(),
+      missingStorage
+    );
     const unauthorized = await handleGetEvent(
       2,
       { eventId: 'event-from-other-subscription' },
@@ -345,11 +351,19 @@ describe('MCP project event-bus tools', () => {
       env(),
       adapter
     );
+    const oversizedCursor = await handleListSubscriptionEvents(
+      5,
+      { subscriptionId: 'sub-1', cursor: 'a'.repeat(11) },
+      token(),
+      env({ MCP_EVENT_BUS_CURSOR_MAX_LENGTH: '10' }),
+      adapter
+    );
 
     expect(malformedCursor.error?.message).toBe('cursor must be a string when provided');
     expect(malformedLimit.error?.message).toBe('limit must be a finite number when provided');
     expect(fractionalLimit.error?.message).toBe('limit must be an integer when provided');
     expect(zeroLimit.error?.message).toBe('limit must be greater than 0');
+    expect(oversizedCursor.error?.message).toBe('Invalid cursor');
     expect(adapter.listEventBusSubscriptionEvents).not.toHaveBeenCalled();
   });
 

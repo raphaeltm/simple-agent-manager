@@ -2,15 +2,26 @@ import { expectJsonRecord } from '../../lib/runtime-validation';
 import type { EventBusCursor } from './event-bus-contracts';
 import { EventBusCursorError } from './event-bus-contracts';
 
-export const EVENT_BUS_CURSOR_MAX_LENGTH = 512;
+export const DEFAULT_MCP_EVENT_BUS_CURSOR_MAX_LENGTH = 512;
 const EVENT_BUS_CURSOR_ALPHABET = /^[A-Za-z0-9_-]+$/;
 
 export function encodeEventBusCursor(cursor: EventBusCursor): string {
   return encodeBase64Url(JSON.stringify(cursor));
 }
 
-export function decodeEventBusCursor(raw: string, subscriptionId: string): EventBusCursor {
-  if (raw.length > EVENT_BUS_CURSOR_MAX_LENGTH || !EVENT_BUS_CURSOR_ALPHABET.test(raw)) {
+export function isEventBusCursorToken(
+  raw: string,
+  maxLength = DEFAULT_MCP_EVENT_BUS_CURSOR_MAX_LENGTH
+): boolean {
+  return raw.length <= maxLength && EVENT_BUS_CURSOR_ALPHABET.test(raw);
+}
+
+export function decodeEventBusCursor(
+  raw: string,
+  subscriptionId: string,
+  maxLength = DEFAULT_MCP_EVENT_BUS_CURSOR_MAX_LENGTH
+): EventBusCursor {
+  if (!isEventBusCursorToken(raw, maxLength)) {
     throw new EventBusCursorError();
   }
 

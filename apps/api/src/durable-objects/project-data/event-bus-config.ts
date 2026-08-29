@@ -1,3 +1,4 @@
+import { DEFAULT_MCP_EVENT_BUS_CURSOR_MAX_LENGTH } from './event-bus-cursors';
 import type { Env } from './types';
 
 export const DEFAULT_PROJECT_DATA_EVENT_BUS_PAYLOAD_MAX_BYTES = 262_144;
@@ -38,6 +39,13 @@ export function resolveEventBusStorageConfig(env: Env): EventBusStorageConfig {
       DEFAULT_PROJECT_DATA_EVENT_BUS_RETENTION_BATCH_ROWS
     ),
   };
+}
+
+export function resolveEventBusCursorMaxLength(env: Env): number {
+  return parsePositiveInteger(
+    env.MCP_EVENT_BUS_CURSOR_MAX_LENGTH,
+    DEFAULT_MCP_EVENT_BUS_CURSOR_MAX_LENGTH
+  );
 }
 
 function parsePositiveInteger(value: string | undefined, fallback: number): number {

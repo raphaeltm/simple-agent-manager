@@ -28,7 +28,11 @@ import {
   EventBusMetadataTooLargeError,
   EventBusPayloadTooLargeError,
 } from './event-bus-contracts';
-import { decodeEventBusCursor, encodeEventBusCursor } from './event-bus-cursors';
+import {
+  decodeEventBusCursor,
+  DEFAULT_MCP_EVENT_BUS_CURSOR_MAX_LENGTH,
+  encodeEventBusCursor,
+} from './event-bus-cursors';
 import {
   assertDeliveryPolicy,
   assertOwnerType,
@@ -78,7 +82,7 @@ export {
   EventBusMetadataTooLargeError,
   EventBusPayloadTooLargeError,
 } from './event-bus-contracts';
-export { EVENT_BUS_CURSOR_MAX_LENGTH } from './event-bus-cursors';
+export { DEFAULT_MCP_EVENT_BUS_CURSOR_MAX_LENGTH } from './event-bus-cursors';
 
 const DEFAULT_EVENT_BUS_STORAGE_CONFIG: EventBusStorageConfig = {
   payloadMaxBytes: DEFAULT_PROJECT_DATA_EVENT_BUS_PAYLOAD_MAX_BYTES,
@@ -137,10 +141,14 @@ export function createEventBusSubscription(
   if (eventTypes) {
     for (const eventType of eventTypes) {
       sql.exec(
-        `INSERT OR IGNORE INTO event_bus_subscription_event_types (subscription_id, event_type)
-         VALUES (?, ?)`,
+        `INSERT OR IGNORE INTO event_bus_subscription_event_types
+          (subscription_id, event_type, subject_type, subject_id, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
         id,
-        eventType
+        eventType,
+        subject?.type ?? null,
+        subject?.id ?? null,
+        now
       );
     }
   }
@@ -279,13 +287,14 @@ export function listEventBusSubscriptionEvents(
   sql: SqlStorage,
   input: ListEventBusSubscriptionEventsInput,
   identity: EventBusIdentity,
-  now = Date.now()
+  now = Date.now(),
+  cursorMaxLength = DEFAULT_MCP_EVENT_BUS_CURSOR_MAX_LENGTH
 ): SamEventBusEventListResult | null {
   const subscription = getVisibleSubscription(sql, input.subscriptionId, identity, now);
   if (!subscription) return null;
 
   const cursor = input.cursor
-    ? decodeEventBusCursor(input.cursor, input.subscriptionId)
+    ? decodeEventBusCursor(input.cursor, input.subscriptionId, cursorMaxLength)
     : {
         version: 1 as const,
         subscriptionId: input.subscriptionId,
@@ -481,7 +490,7 @@ export function runEventBusRetention(
              AND p.policy = 'ack_required'
              AND d.state IN ('queued', 'delivered')
          )
-       ORDER BY e.sequence ASC
+       ORDER BY e.created_at ASC, e.sequence ASC
        LIMIT ?`,
       cutoffCreatedAt,
       config.retentionBatchRows + 1
@@ -525,7 +534,7 @@ export function computeEventBusRetentionAlarmTime(
 ): number | null {
   const [row] = sql
     .exec(
-      `SELECT MIN(e.created_at) AS created_at
+      `SELECT e.created_at
        FROM event_bus_events e
        WHERE NOT EXISTS (
          SELECT 1
@@ -534,7 +543,9 @@ export function computeEventBusRetentionAlarmTime(
          WHERE d.event_id = e.id
            AND p.policy = 'ack_required'
            AND d.state IN ('queued', 'delivered')
-       )`
+       )
+       ORDER BY e.created_at ASC, e.sequence ASC
+       LIMIT 1`
     )
     .toArray() as Array<{ created_at?: unknown }>;
   const createdAt = typeof row?.created_at === 'number' ? row.created_at : null;
@@ -551,38 +562,36 @@ function selectMatchingSubscriptions(
   const routeLimit = Number.isSafeInteger(maxRoutedSubscriptions)
     ? Math.max(maxRoutedSubscriptions, 1)
     : DEFAULT_PROJECT_DATA_EVENT_BUS_MAX_ROUTED_SUBSCRIPTIONS;
-  const subscriptions = sql
-    .exec(
-      `SELECT s.*, p.policy, p.ack_timeout_ms, p.max_attempts
-       FROM event_bus_subscriptions s
-       LEFT JOIN event_bus_delivery_policies p ON p.subscription_id = s.id
-       WHERE s.state = 'active'
-         AND (s.expires_at IS NULL OR s.expires_at > ?)
-         AND (s.subject_type IS NULL OR s.subject_type = ?)
-         AND (s.subject_id IS NULL OR s.subject_id = ?)
-         AND (
-           NOT EXISTS (
-             SELECT 1
-             FROM event_bus_subscription_event_types et_any
-             WHERE et_any.subscription_id = s.id
-           )
-           OR EXISTS (
-             SELECT 1
-             FROM event_bus_subscription_event_types et_match
-             WHERE et_match.subscription_id = s.id
-               AND et_match.event_type = ?
-           )
-         )
-       ORDER BY s.created_at ASC, s.id ASC
-       LIMIT ?`,
-      now,
-      subject.type,
-      subject.id,
-      eventType,
-      routeLimit + 1
-    )
-    .toArray()
-    .map(parseSubscriptionRow)
+  const subscriptionsById = new Map<string, EventBusSubscriptionRecord>();
+  for (const branch of subjectRoutingBranches(subject)) {
+    collectSubscriptionRows(
+      subscriptionsById,
+      sql
+        .exec(
+          wildcardEventTypeRoutingSql(branch.subscriptionWhere),
+          ...branch.params,
+          now,
+          routeLimit + 1
+        )
+        .toArray(),
+      routeLimit
+    );
+    collectSubscriptionRows(
+      subscriptionsById,
+      sql
+        .exec(
+          exactEventTypeRoutingSql(branch.eventTypeWhere),
+          eventType,
+          ...branch.params,
+          now,
+          routeLimit + 1
+        )
+        .toArray(),
+      routeLimit
+    );
+  }
+  const subscriptions = [...subscriptionsById.values()]
+    .sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))
     .filter((subscription) =>
       subscriptionMatchesEvent(subscription, {
         id: '',
@@ -602,6 +611,81 @@ function selectMatchingSubscriptions(
     throw new Error('Event bus routed subscription limit exceeded');
   }
   return subscriptions;
+}
+
+interface SubjectRoutingBranch {
+  subscriptionWhere: string;
+  eventTypeWhere: string;
+  params: unknown[];
+}
+
+function subjectRoutingBranches(subject: {
+  type: string;
+  id: string | null;
+}): SubjectRoutingBranch[] {
+  const branches: SubjectRoutingBranch[] = [
+    {
+      subscriptionWhere: 's.subject_type IS NULL AND s.subject_id IS NULL',
+      eventTypeWhere: 'et.subject_type IS NULL AND et.subject_id IS NULL',
+      params: [],
+    },
+    {
+      subscriptionWhere: 's.subject_type = ? AND s.subject_id IS NULL',
+      eventTypeWhere: 'et.subject_type = ? AND et.subject_id IS NULL',
+      params: [subject.type],
+    },
+  ];
+  if (subject.id !== null) {
+    branches.push({
+      subscriptionWhere: 's.subject_type = ? AND s.subject_id = ?',
+      eventTypeWhere: 'et.subject_type = ? AND et.subject_id = ?',
+      params: [subject.type, subject.id],
+    });
+  }
+  return branches;
+}
+
+function wildcardEventTypeRoutingSql(subjectWhere: string): string {
+  return `SELECT s.*, p.policy, p.ack_timeout_ms, p.max_attempts
+          FROM event_bus_subscriptions s
+          LEFT JOIN event_bus_delivery_policies p ON p.subscription_id = s.id
+          WHERE s.state = 'active'
+            AND ${subjectWhere}
+            AND (s.expires_at IS NULL OR s.expires_at > ?)
+            AND NOT EXISTS (
+              SELECT 1
+              FROM event_bus_subscription_event_types et_any
+              WHERE et_any.subscription_id = s.id
+            )
+          ORDER BY s.created_at ASC, s.id ASC
+          LIMIT ?`;
+}
+
+function exactEventTypeRoutingSql(subjectWhere: string): string {
+  return `SELECT s.*, p.policy, p.ack_timeout_ms, p.max_attempts
+          FROM event_bus_subscription_event_types et
+          JOIN event_bus_subscriptions s ON s.id = et.subscription_id
+          LEFT JOIN event_bus_delivery_policies p ON p.subscription_id = s.id
+          WHERE et.event_type = ?
+            AND ${subjectWhere}
+            AND s.state = 'active'
+            AND (s.expires_at IS NULL OR s.expires_at > ?)
+          ORDER BY et.created_at ASC, et.subscription_id ASC
+          LIMIT ?`;
+}
+
+function collectSubscriptionRows(
+  subscriptions: Map<string, EventBusSubscriptionRecord>,
+  rows: unknown[],
+  routeLimit: number
+): void {
+  for (const row of rows) {
+    const subscription = parseSubscriptionRow(row);
+    subscriptions.set(subscription.id, subscription);
+    if (subscriptions.size > routeLimit) {
+      throw new Error('Event bus routed subscription limit exceeded');
+    }
+  }
 }
 
 function applicableSubscriptionSqlPredicate(): string {

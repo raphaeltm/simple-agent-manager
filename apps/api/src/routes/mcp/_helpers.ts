@@ -72,6 +72,7 @@ const DEFAULT_MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT = 10;
 const DEFAULT_MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX = 50;
 const DEFAULT_MCP_EVENT_BUS_LIST_LIMIT = 25;
 const DEFAULT_MCP_EVENT_BUS_LIST_MAX = 100;
+const DEFAULT_MCP_EVENT_BUS_CURSOR_MAX_LENGTH = 512;
 
 /** Default dispatch limits for agent-to-agent task spawning. */
 const DEFAULT_MCP_DISPATCH_MAX_DEPTH = 3;
@@ -176,6 +177,10 @@ export function getMcpLimits(env: Env) {
       DEFAULT_MCP_EVENT_BUS_LIST_LIMIT
     ),
     eventBusListMax: parsePositiveInt(env.MCP_EVENT_BUS_LIST_MAX, DEFAULT_MCP_EVENT_BUS_LIST_MAX),
+    eventBusCursorMaxLength: parsePositiveInt(
+      env.MCP_EVENT_BUS_CURSOR_MAX_LENGTH,
+      DEFAULT_MCP_EVENT_BUS_CURSOR_MAX_LENGTH
+    ),
     triggerListLimit: parsePositiveInt(env.MCP_TRIGGER_LIST_LIMIT, DEFAULT_MCP_TRIGGER_LIST_LIMIT),
     triggerListMax: parsePositiveInt(env.MCP_TRIGGER_LIST_MAX, DEFAULT_MCP_TRIGGER_LIST_MAX),
     incidentListLimit: parsePositiveInt(

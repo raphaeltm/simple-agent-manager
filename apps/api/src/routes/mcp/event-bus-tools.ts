@@ -7,12 +7,14 @@ import type {
   SamEventBusEventSummary,
 } from '../../durable-objects/project-data/event-bus';
 import {
-  EVENT_BUS_CURSOR_MAX_LENGTH,
   EventBusAckPolicyError,
   EventBusAckStateError,
   EventBusCursorError,
 } from '../../durable-objects/project-data/event-bus';
-import { decodeEventBusCursor } from '../../durable-objects/project-data/event-bus-cursors';
+import {
+  decodeEventBusCursor,
+  isEventBusCursorToken,
+} from '../../durable-objects/project-data/event-bus-cursors';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import * as projectDataService from '../../services/project-data';
@@ -27,8 +29,6 @@ import {
 } from './_helpers';
 
 type EventBusToolStorageErrorCode = 'invalid_cursor' | 'ack_not_required' | 'ack_invalid_state';
-
-const EVENT_BUS_CURSOR_ALPHABET = /^[A-Za-z0-9_-]+$/;
 
 export class EventBusToolStorageError extends Error {
   constructor(public readonly code: EventBusToolStorageErrorCode) {
@@ -134,7 +134,7 @@ export async function handleListSubscriptionEvents(
     return jsonRpcError(requestId, INVALID_PARAMS, 'subscriptionId is required');
   }
 
-  const cursorResult = resolveCursorParam(requestId, params.cursor, subscriptionId);
+  const cursorResult = resolveCursorParam(requestId, params.cursor, subscriptionId, env);
   if ('jsonrpc' in cursorResult) return cursorResult;
 
   const limitResult = resolveEventBusListLimit(requestId, params.limit, env);
@@ -317,7 +317,8 @@ function rejectUnexpectedParams(
 function resolveCursorParam(
   requestId: string | number | null,
   raw: unknown,
-  subscriptionId: string
+  subscriptionId: string,
+  env: Env
 ): { cursor: string | null } | JsonRpcResponse {
   if (raw === undefined || raw === null) return { cursor: null };
   if (typeof raw !== 'string') {
@@ -327,11 +328,12 @@ function resolveCursorParam(
   if (!cursor) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'cursor must be non-empty when provided');
   }
-  if (cursor.length > EVENT_BUS_CURSOR_MAX_LENGTH || !EVENT_BUS_CURSOR_ALPHABET.test(cursor)) {
+  const cursorMaxLength = getMcpLimits(env).eventBusCursorMaxLength;
+  if (!isEventBusCursorToken(cursor, cursorMaxLength)) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'Invalid cursor');
   }
   try {
-    decodeEventBusCursor(cursor, subscriptionId);
+    decodeEventBusCursor(cursor, subscriptionId, cursorMaxLength);
   } catch {
     return jsonRpcError(requestId, INVALID_PARAMS, 'Invalid cursor');
   }

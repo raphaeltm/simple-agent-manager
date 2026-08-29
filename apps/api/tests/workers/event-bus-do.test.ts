@@ -1,4 +1,4 @@
-import { env, SELF } from 'cloudflare:test';
+import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { EventBusIdentity } from '../../src/durable-objects/project-data/event-bus';
@@ -75,9 +75,7 @@ async function seedProjectGraph(suffix: string): Promise<SeededProjectGraph> {
     title: 'Event bus vertical task',
     status: 'in_progress',
   });
-  await env.DATABASE.prepare(
-    'UPDATE tasks SET chat_session_id = ? WHERE id = ? AND project_id = ?'
-  )
+  await env.DATABASE.prepare('UPDATE tasks SET chat_session_id = ? WHERE id = ? AND project_id = ?')
     .bind(sessionId, taskId, projectId)
     .run();
   await seedAgentSession(agentSessionId, workspaceId, userId);
@@ -191,6 +189,80 @@ describe('ProjectData event bus RPC', () => {
       idempotent: false,
       delivery: { eventId: 'event-1', state: 'acknowledged' },
     });
+  });
+
+  it('arms event-bus retention after acknowledging a protected delivery', async () => {
+    const projectId = `event-bus-retention-${crypto.randomUUID()}`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await runInDurableObject(stub, async (instance) => {
+      instance.env.PROJECT_DATA_EVENT_BUS_RETENTION_DAYS = '1';
+    });
+    const retentionMs = 24 * 60 * 60 * 1000;
+    const eventCreatedAt = Date.now() - retentionMs + 60_000;
+    const identity: EventBusIdentity = {
+      projectId,
+      userId: 'user-1',
+      taskId: 'task-1',
+      sessionId: 'session-1',
+      workspaceId: 'workspace-1',
+      agentSessionId: 'agent-session-1',
+    };
+
+    await stub.createEventBusSubscription({
+      id: 'subscription-retention',
+      ownerType: 'task',
+      ownerId: 'task-1',
+      targetTaskId: 'task-1',
+      eventTypes: ['task.completed'],
+      deliveryPolicy: 'ack_required',
+      now: 1_000,
+    });
+    const published = await stub.publishEventBusEvent({
+      id: 'event-retention',
+      type: 'task.completed',
+      source: 'orchestrator',
+      subject: { type: 'task', id: 'child-task-1' },
+      actor: { type: 'system', id: null },
+      metadata: { reason: 'condition_met' },
+      payload: { output: 'done' },
+      occurredAt: eventCreatedAt,
+      now: eventCreatedAt,
+    });
+
+    const beforeAck = await runInDurableObject(stub, async (_instance, state) => {
+      const eventCount = state.storage.sql
+        .exec('SELECT COUNT(*) AS count FROM event_bus_events')
+        .toArray()[0] as { count: number };
+      const deliveryCount = state.storage.sql
+        .exec('SELECT COUNT(*) AS count FROM event_bus_deliveries')
+        .toArray()[0] as { count: number };
+      return {
+        alarm: await state.storage.getAlarm(),
+        events: eventCount.count,
+        deliveries: deliveryCount.count,
+      };
+    });
+    expect(beforeAck).toEqual({ alarm: null, events: 1, deliveries: 1 });
+
+    const ack = await stub.acknowledgeEventBusDelivery(
+      { deliveryId: published.deliveryIds[0]! },
+      identity
+    );
+    expect(ack).toMatchObject({ acknowledged: true, idempotent: false });
+    const afterAck = await runInDurableObject(stub, async (_instance, state) => {
+      const eventCount = state.storage.sql
+        .exec('SELECT COUNT(*) AS count FROM event_bus_events')
+        .toArray()[0] as { count: number };
+      return {
+        alarm: await state.storage.getAlarm(),
+        events: eventCount.count,
+      };
+    });
+    expect(afterAck.events).toBe(1);
+    expect(afterAck.alarm).not.toBeNull();
+    expect(afterAck.alarm!).toBeGreaterThan(Date.now());
+    expect(afterAck.alarm!).toBeLessThanOrEqual(eventCreatedAt + retentionMs);
   });
 
   it('retrieves and acknowledges event deliveries through the real /mcp route', async () => {

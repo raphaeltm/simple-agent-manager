@@ -1303,6 +1303,10 @@ export const MIGRATIONS: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_event_bus_events_type_sequence
         ON event_bus_events(type, sequence)
       `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_event_bus_events_created_sequence
+        ON event_bus_events(created_at, sequence, id)
+      `);
 
       sql.exec(`
         CREATE TABLE IF NOT EXISTS event_bus_subscriptions (
@@ -1339,18 +1343,21 @@ export const MIGRATIONS: Migration[] = [
       `);
       sql.exec(`
         CREATE INDEX IF NOT EXISTS idx_event_bus_subscriptions_routing
-        ON event_bus_subscriptions(state, subject_type, subject_id, expires_at, id)
+        ON event_bus_subscriptions(state, subject_type, subject_id, created_at, id, expires_at)
       `);
       sql.exec(`
         CREATE TABLE IF NOT EXISTS event_bus_subscription_event_types (
           subscription_id TEXT NOT NULL REFERENCES event_bus_subscriptions(id) ON DELETE CASCADE,
           event_type TEXT NOT NULL,
+          subject_type TEXT,
+          subject_id TEXT,
+          created_at INTEGER NOT NULL,
           PRIMARY KEY (subscription_id, event_type)
         )
       `);
       sql.exec(`
-        CREATE INDEX IF NOT EXISTS idx_event_bus_subscription_event_types_type
-        ON event_bus_subscription_event_types(event_type, subscription_id)
+        CREATE INDEX IF NOT EXISTS idx_event_bus_subscription_event_types_routing
+        ON event_bus_subscription_event_types(event_type, subject_type, subject_id, created_at, subscription_id)
       `);
 
       sql.exec(`

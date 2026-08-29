@@ -32,7 +32,7 @@ This task adds the MCP-facing read/ack layer without deploying or mutating stagi
 - [x] Keep list summaries payload-free; return full payload only from the single-event fetch path.
 - [x] Use environment-configurable bounded limits and opaque/stable cursors.
 - [x] Bound persisted event metadata/payload bytes and include event-bus bytes in ProjectData storage telemetry.
-- [x] Use delivery-sequence pagination indexes and bounded retention for old events without pending ack-required deliveries.
+- [x] Use delivery-sequence pagination indexes, indexed routing/retention paths, and bounded retention for old events without pending ack-required deliveries.
 - [x] Register tool definitions consistently in MCP `tools/list`.
 - [x] Update MCP API reference and environment/configuration docs.
 - [x] Add comprehensive tests for success, pagination, missed events, ownership/project boundaries, nonexistent-vs-unauthorized non-disclosure, malformed cursors/limits, idempotent ack, and ack-policy behavior.
@@ -65,8 +65,8 @@ This task adds the MCP-facing read/ack layer without deploying or mutating stagi
 
 Current evidence:
 
-- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/event-bus.test.ts tests/unit/routes/mcp-event-bus-tools.test.ts` — 25 tests passed
-- `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/event-bus-do.test.ts` — 4 workers-pool tests passed, including real `/mcp` vertical coverage
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/event-bus.test.ts tests/unit/routes/mcp-event-bus-tools.test.ts` — 27 tests passed
+- `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/event-bus-do.test.ts` — 5 workers-pool tests passed, including real `/mcp` vertical coverage and post-ack retention alarm scheduling
 - `pnpm --filter @simple-agent-manager/api typecheck` — passed
 - `pnpm --filter @simple-agent-manager/api lint` — passed
 - `pnpm --filter @simple-agent-manager/shared typecheck` — passed
@@ -83,12 +83,12 @@ Current evidence:
 
 ## Review findings and disposition
 
-- `$api-reference`: initial findings on fractional limits and narrower identity-field rejection. Addressed with integer-only limit handling, server-side unexpected-parameter rejection, snake_case identity-field rejection, and tests.
-- `$cloudflare-specialist`: initial findings on unbounded payload storage, list payload reads, non-covered pagination ordering, active-subscription scan shape, per-row delivered updates, and duplicate indexes. Addressed with configurable metadata/payload byte caps, payload-free summary queries, `event_sequence` on deliveries plus `(subscription_id, event_sequence, id)` index, normalized event-type routing table plus routing index and route cap, bulk delivered marking, redundant index removal, retention, and storage telemetry accounting.
-- `$security-auditor`: initial findings on closed/expired subscription authorization and cursor validation. Addressed with active/unexpired read/ack predicates and route/DO cursor length, alphabet, and structural validation that maps to `Invalid cursor`.
-- `$doc-sync-validator`: initial findings on ack terminal-state docs and ProjectData table inventory. Addressed in tool definitions, API reference, guide docs, architecture inventory, `CLAUDE.md`, `AGENTS.md`, and ProjectData source comments.
-- `$constitution-validator`: passed before the review-fix patch; re-review requested after adding the new env-configurable storage limits.
-- `$test-engineer`: initial findings on missing real `/mcp` vertical coverage, project-boundary coverage, malformed cursor mapping, and terminal ack-state tests. Addressed with workers-pool `/mcp` tests, real D1 project-boundary cases, handler/DO cursor tests, and terminal ack-state unit/handler tests.
+- `$api-reference`: PASS after addressing fractional limits and narrower identity-field rejection with integer-only limit handling, server-side unexpected-parameter rejection, snake_case identity-field rejection, and tests.
+- `$cloudflare-specialist`: PASS after addressing payload/list bounds, indexed delivery pagination, indexed routing and retention plans, bulk delivered marking, redundant index removal, retention alarm recalculation after ack, and storage telemetry accounting.
+- `$security-auditor`: PASS after addressing closed/expired subscription authorization and cursor validation with active/unexpired read/ack predicates plus route/DO cursor length, alphabet, and structural validation that maps to `Invalid cursor`.
+- `$doc-sync-validator`: PASS after documenting ack terminal-state behavior, ProjectData event-bus table inventory, durable event-bus storage summaries, and `MCP_EVENT_BUS_CURSOR_MAX_LENGTH`.
+- `$constitution-validator`: PASS after making `MCP_EVENT_BUS_CURSOR_MAX_LENGTH` configurable and documenting it alongside the other event-bus bounds.
+- `$test-engineer`: PASS after adding workers-pool `/mcp` tests, real D1 project-boundary cases, handler/DO cursor tests, terminal ack-state unit/handler tests, indexed SQL plan tests, and post-ack retention alarm coverage.
 
 ## Review plan
 

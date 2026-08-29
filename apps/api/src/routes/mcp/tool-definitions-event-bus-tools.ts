@@ -35,14 +35,13 @@ export const EVENT_BUS_TOOLS = [
         limit: {
           type: 'integer',
           minimum: 1,
-          description:
-            'Optional page size. Oversized values are capped by MCP_EVENT_BUS_LIST_MAX.',
+          description: 'Optional page size. Oversized values are capped by MCP_EVENT_BUS_LIST_MAX.',
         },
         cursor: {
           type: 'string',
           minLength: 1,
           description:
-            'Opaque cursor returned by the previous list_subscription_events response for this same subscription',
+            'Opaque cursor returned by the previous list_subscription_events response for this same subscription. Length is bounded by MCP_EVENT_BUS_CURSOR_MAX_LENGTH.',
         },
       },
       required: ['subscriptionId'],
