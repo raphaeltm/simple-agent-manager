@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildComputePoolOfferingsModel,
+  canAddComputePoolOffering,
   type ComputePoolOfferingFilters,
   flattenProviderCatalogOfferings,
   matchesComputePoolFilters,
@@ -21,21 +22,24 @@ const BASE_FILTERS: ComputePoolOfferingFilters = {
 
 const CATALOG_LAST_SEEN_AT = '2026-08-28T00:00:00.000Z';
 
-function offering(overrides: Partial<CatalogOffering> & Pick<
-  CatalogOffering,
-  | 'providerInstanceType'
-  | 'displayName'
-  | 'sku'
-  | 'location'
-  | 'locationName'
-  | 'country'
-  | 'vcpu'
-  | 'memoryMb'
-  | 'memoryGb'
-  | 'diskGb'
-  | 'price'
-  | 'priceMonthly'
->): CatalogOffering {
+function offering(
+  overrides: Partial<CatalogOffering> &
+    Pick<
+      CatalogOffering,
+      | 'providerInstanceType'
+      | 'displayName'
+      | 'sku'
+      | 'location'
+      | 'locationName'
+      | 'country'
+      | 'vcpu'
+      | 'memoryMb'
+      | 'memoryGb'
+      | 'diskGb'
+      | 'price'
+      | 'priceMonthly'
+    >
+): CatalogOffering {
   return {
     provider: 'hetzner',
     providerInstanceSku: null,
@@ -150,18 +154,16 @@ describe('compute-pool offering filters', () => {
   it('filters by minimum vCPU, minimum RAM, and maximum monthly price', () => {
     expect(matchesComputePoolFilters(bySku.cpx31!, { ...BASE_FILTERS, minVcpu: '4' })).toBe(true);
     expect(matchesComputePoolFilters(bySku.cx22!, { ...BASE_FILTERS, minVcpu: '4' })).toBe(false);
-    expect(matchesComputePoolFilters(bySku.ccx33!, { ...BASE_FILTERS, minRamGb: '32' })).toBe(
-      true
-    );
+    expect(matchesComputePoolFilters(bySku.ccx33!, { ...BASE_FILTERS, minRamGb: '32' })).toBe(true);
     expect(matchesComputePoolFilters(bySku.cpx31!, { ...BASE_FILTERS, minRamGb: '32' })).toBe(
       false
     );
-    expect(matchesComputePoolFilters(bySku.cpx31!, { ...BASE_FILTERS, maxMonthlyPrice: '15' })).toBe(
-      true
-    );
-    expect(matchesComputePoolFilters(bySku.ccx33!, { ...BASE_FILTERS, maxMonthlyPrice: '15' })).toBe(
-      false
-    );
+    expect(
+      matchesComputePoolFilters(bySku.cpx31!, { ...BASE_FILTERS, maxMonthlyPrice: '15' })
+    ).toBe(true);
+    expect(
+      matchesComputePoolFilters(bySku.ccx33!, { ...BASE_FILTERS, maxMonthlyPrice: '15' })
+    ).toBe(false);
   });
 
   it('filters by availability state including unavailable and stale catalog rows', () => {
@@ -180,9 +182,9 @@ describe('compute-pool offering filters', () => {
         availability: 'stale',
       })
     ).toBe(true);
-    expect(
-      matchesComputePoolFilters(bySku.cx22!, { ...BASE_FILTERS, availability: 'stale' })
-    ).toBe(false);
+    expect(matchesComputePoolFilters(bySku.cx22!, { ...BASE_FILTERS, availability: 'stale' })).toBe(
+      false
+    );
   });
 
   it('keeps removed provider-native catalog rows addable without exposing legacy size choices', () => {
@@ -266,12 +268,17 @@ describe('compute-pool offering filters', () => {
     );
 
     const cpx31 = model.catalog.find((offering) => offering.sku === 'cpx31');
+    const ccx33 = model.catalog.find((offering) => offering.sku === 'ccx33');
+    const stale = model.catalog.find((offering) => offering.sku === 'stale-16c-64gb');
     expect(cpx31).toMatchObject({
       candidateId: 'candidate-cpx31',
       candidateStatus: 'deleted',
       canUpdateExistingCandidate: true,
       machineSizeHint: null,
     });
+    expect(canAddComputePoolOffering(cpx31!)).toBe(true);
+    expect(canAddComputePoolOffering(ccx33!)).toBe(false);
+    expect(canAddComputePoolOffering(stale!)).toBe(false);
     expect(model.catalog.map((offering) => offering.sku)).toEqual(
       expect.arrayContaining(['cx22', 'cpx31', 'ccx33', 'stale-16c-64gb'])
     );

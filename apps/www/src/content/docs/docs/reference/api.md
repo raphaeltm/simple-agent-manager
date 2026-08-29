@@ -139,14 +139,70 @@ price metadata when available, and a `catalogSource` value such as `api` or `sta
 
 Optional query parameters:
 
-| Parameter | Values | Description |
-| --- | --- | --- |
-| `scope` | `user`, `project`, `installation` | Selects the credential scope to inspect. Omit it for the authenticated user's default catalog. |
-| `projectId` | Project ID | Required when `scope=project`; the caller must have project access. |
+| Parameter   | Values                            | Description                                                                                    |
+| ----------- | --------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `scope`     | `user`, `project`, `installation` | Selects the credential scope to inspect. Omit it for the authenticated user's default catalog. |
+| `projectId` | Project ID                        | Required when `scope=project`; the caller must have the project `secret:read` capability.      |
 
 Installation scope is restricted to superadmins and uses enabled platform compute credentials.
-User scope uses the caller's compute credentials. Project scope uses compute credentials available
-to the project, including project-owned credentials and configured fallback sources.
+User scope uses the caller's active personal compute credentials. Project scope returns active
+project-scoped compute credentials for that project only. Effective default pool summaries expose
+project → user → installation fallback separately.
+
+## Capacity pools
+
+Default capacity-pool endpoints expose non-secret pool, source, and concrete candidate metadata.
+Responses have this shape: `effective`, `effectiveScope`, `defaults`, `precedence`,
+`reconciledScopes`, and `policyMutationSupported`. Use `ensure=true` on GET endpoints, or call the
+matching `/reconcile` endpoint, to refresh pool metadata from the credential-scoped provider-native
+catalog. Provider API failures fall back to static curated catalog rows for that provider and mark
+those candidates with `catalogSource: static`.
+
+### `GET /api/capacity-pools/defaults`
+
+Read the authenticated user's default compute pool. Optional `ensure=true` reconciles it from the
+user's active personal compute credentials. Disabled zero-active owned pools remain visible for the
+editor; they are not selected as `effective`.
+
+### `POST /api/capacity-pools/defaults/reconcile`
+
+Explicitly reconcile the authenticated user's default pool from active personal compute
+credentials.
+
+### `PATCH /api/capacity-pools/defaults`
+
+Update the authenticated user's owned default-pool policy or candidate statuses. This endpoint does
+not mutate project or installation fallback pools.
+
+### `GET /api/projects/:id/capacity-pools/defaults`
+
+Read a project's default pool context. Requires project `secret:read`. Optional `ensure=true`
+reconciles project credentials plus visible fallback summaries. Non-superadmins do not receive
+installation fallback details.
+
+### `POST /api/projects/:id/capacity-pools/defaults/reconcile`
+
+Explicitly reconcile the project default pool from active project-scoped compute credentials.
+Requires project `secret:read`.
+
+### `PATCH /api/projects/:id/capacity-pools/defaults`
+
+Update only the project-owned default-pool policy or candidate statuses. Requires project
+`secret:write`.
+
+### `GET /api/admin/capacity-pools/defaults`
+
+Read the installation default pool. Superadmin only. Optional `ensure=true` reconciles enabled
+platform compute credentials.
+
+### `POST /api/admin/capacity-pools/defaults/reconcile`
+
+Explicitly reconcile the installation default pool from enabled platform compute credentials.
+Superadmin only.
+
+### `PATCH /api/admin/capacity-pools/defaults`
+
+Update only the installation-owned default-pool policy or candidate statuses. Superadmin only.
 
 ## GitHub
 

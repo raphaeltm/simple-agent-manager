@@ -1,10 +1,12 @@
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
+import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
@@ -124,6 +126,14 @@ function seedRunRows(sqlite: Database.Database): void {
     .run();
 }
 
+async function seedProjectDefaultPool(env: Env): Promise<void> {
+  await ensureDefaultCapacityPoolsForExistingCredentials(drizzle(env.DATABASE, { schema }), {
+    userId: 'user-1',
+    projectId: 'project-1',
+    includeInstallation: false,
+  });
+}
+
 const executionCtx = {
   waitUntil: vi.fn(),
   passThroughOnException: vi.fn(),
@@ -141,6 +151,7 @@ describe('task run capacity-pool placement', () => {
   it('persists concrete pool candidate metadata and passes it to TaskRunner start', async () => {
     const { sqlite, env } = createEnv();
     seedRunRows(sqlite);
+    await seedProjectDefaultPool(env);
 
     const res = await createApp().request(
       '/api/projects/project-1/tasks/task-1/run',

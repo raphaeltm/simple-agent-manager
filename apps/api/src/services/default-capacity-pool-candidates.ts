@@ -1,15 +1,16 @@
 import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
-import type { CredentialProvider, ProviderInstanceOffering, VMSize } from '@simple-agent-manager/shared';
-import { and, eq, notInArray, sql } from 'drizzle-orm';
+import type {
+  CredentialProvider,
+  ProviderInstanceOffering,
+  VMSize,
+} from '@simple-agent-manager/shared';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { providerInstanceOfferingDbValues } from './default-capacity-pool-candidate-values';
-import {
-  defaultCandidateId,
-  legacyDefaultCandidateId,
-} from './default-capacity-pool-helpers';
+import { defaultCandidateId, legacyDefaultCandidateId } from './default-capacity-pool-helpers';
 
 type Db = ReturnType<typeof drizzle>;
 
@@ -24,8 +25,7 @@ const CANDIDATE_UPSERT_UPDATE_BIND_COUNT = 1;
 const CANDIDATE_UPSERT_CHUNK_SIZE = Math.max(
   1,
   Math.floor(
-    (D1_MAX_BOUND_PARAMETERS - CANDIDATE_UPSERT_UPDATE_BIND_COUNT) /
-      CANDIDATE_INSERT_BIND_COUNT
+    (D1_MAX_BOUND_PARAMETERS - CANDIDATE_UPSERT_UPDATE_BIND_COUNT) / CANDIDATE_INSERT_BIND_COUNT
   )
 );
 
@@ -114,7 +114,7 @@ export async function ensureCandidatesForSource(
       });
   }
 
-  await disableMissingCandidatesForSource(db, poolId, sourceId, candidateIds);
+  await disableMissingCandidatesForSource(db, poolId, sourceId, existingStatuses, candidateIds);
 }
 
 function legacyStatusForOffering(
@@ -173,23 +173,29 @@ async function disableMissingCandidatesForSource(
   db: Db,
   poolId: string,
   sourceId: string,
+  existingStatuses: ReadonlyMap<string, string>,
   activeCandidateIds: string[]
 ): Promise<void> {
   const now = new Date().toISOString();
-  const predicates = [
-    eq(schema.capacityPoolCandidates.poolId, poolId),
-    eq(schema.capacityPoolCandidates.capacitySourceId, sourceId),
-  ];
-  await db
-    .update(schema.capacityPoolCandidates)
-    .set({ status: DISABLED_STATUS, updatedAt: now })
-    .where(
-      activeCandidateIds.length > 0
-        ? and(
-            ...predicates,
-            eq(schema.capacityPoolCandidates.status, ACTIVE_STATUS),
-            notInArray(schema.capacityPoolCandidates.id, activeCandidateIds)
-          )
-        : and(...predicates, eq(schema.capacityPoolCandidates.status, ACTIVE_STATUS))
-    );
+  const nextCandidateIds = new Set(activeCandidateIds);
+  const staleActiveCandidateIds = [...existingStatuses.entries()]
+    .filter(([id, status]) => status === ACTIVE_STATUS && !nextCandidateIds.has(id))
+    .map(([id]) => id);
+  const fixedBindCount = 5; // status, updatedAt, poolId, sourceId, status predicate
+  const chunkSize = Math.max(1, D1_MAX_BOUND_PARAMETERS - fixedBindCount);
+
+  for (let offset = 0; offset < staleActiveCandidateIds.length; offset += chunkSize) {
+    const chunk = staleActiveCandidateIds.slice(offset, offset + chunkSize);
+    await db
+      .update(schema.capacityPoolCandidates)
+      .set({ status: DISABLED_STATUS, updatedAt: now })
+      .where(
+        and(
+          eq(schema.capacityPoolCandidates.poolId, poolId),
+          eq(schema.capacityPoolCandidates.capacitySourceId, sourceId),
+          eq(schema.capacityPoolCandidates.status, ACTIVE_STATUS),
+          inArray(schema.capacityPoolCandidates.id, chunk)
+        )
+      );
+  }
 }

@@ -219,7 +219,7 @@ export async function resolveTaskStartCapacityPoolSelection(
     const summary = await resolveEffectiveDefaultCapacityPoolSummary(db, {
       userId: placement.userId,
       projectId: placement.projectId,
-      ensure: options.ensure ?? true,
+      ensure: options.ensure ?? false,
       env: options.env,
     });
     if (!summary) return null;
@@ -294,7 +294,7 @@ export function resolveCapacityAwareQuotaCredentialSource(
 export async function resolveTaskStartPlacementCredentialAttribution(
   db: Db,
   input: TaskStartPlacementInput,
-  options?: { credentialsRequiredMessage?: string; env?: Env }
+  options?: { capacityPoolEnsure?: boolean; credentialsRequiredMessage?: string; env?: Env }
 ): Promise<
   TaskStartPlacementWithCredential | { error: string; errorKind: 'placement' | 'credentials' }
 > {
@@ -314,7 +314,7 @@ export async function resolveTaskStartPlacementCredentialAttribution(
 export async function resolveTaskStartPlacementCredentialAttributionFromPlacement(
   db: Db,
   placement: TaskStartPlacement,
-  options?: { credentialsRequiredMessage?: string; env?: Env }
+  options?: { capacityPoolEnsure?: boolean; credentialsRequiredMessage?: string; env?: Env }
 ): Promise<
   TaskStartPlacementWithCredential | { error: string; errorKind: 'placement' | 'credentials' }
 > {
@@ -323,6 +323,7 @@ export async function resolveTaskStartPlacementCredentialAttributionFromPlacemen
   try {
     capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement, {
       failOpen: false,
+      ensure: options?.capacityPoolEnsure,
       env: options?.env,
     });
     credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);

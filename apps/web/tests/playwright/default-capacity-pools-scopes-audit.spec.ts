@@ -367,7 +367,8 @@ async function removeAshHilCandidates(page: Page, editHeading: string, screensho
   await expect(page.getByText('1 matching offering across 1 region.')).toBeVisible();
   await expect(page.getByText('Stale catalog data').first()).toBeVisible();
   await screenshotSectionNearHeading(page, 'Catalog filters', `${screenshotName}-catalog-filters`);
-  await expect(page.getByRole('button', { name: /Add Hetzner hil ccx33/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Add Hetzner hil ccx33/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Stale' }).first()).toBeDisabled();
   await page
     .getByRole('heading', { name: 'Add instances from catalog' })
     .evaluate((element) => element.scrollIntoView({ block: 'start', inline: 'nearest' }));

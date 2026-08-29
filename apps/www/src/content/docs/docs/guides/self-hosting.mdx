@@ -184,8 +184,10 @@ instead of choosing a generic prefix.
 
 Leaving `CF_CONTAINER_ENABLED` at the `true` the deploy workflow injects lets users start work
 without their own cloud credential, on [Instant sessions](/docs/guides/instant-sessions/).
-Setting it to `false` means every session provisions a cloud VM, so **each user
-must connect their own cloud provider credential before they can do anything**.
+Setting it to `false` means every session provisions a cloud VM. Users need an
+active personal cloud provider credential unless an administrator has configured
+an enabled platform compute credential that SAM can use as the installation
+fallback.
 
 **GitHub Environment secrets:**
 

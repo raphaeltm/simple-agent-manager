@@ -1,8 +1,10 @@
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
@@ -102,6 +104,14 @@ function seedTriggerRows(sqlite: Database.Database): void {
     .run();
 }
 
+async function seedProjectDefaultPool(env: Env): Promise<void> {
+  await ensureDefaultCapacityPoolsForExistingCredentials(drizzle(env.DATABASE, { schema }), {
+    userId: 'user-1',
+    projectId: 'project-1',
+    includeInstallation: false,
+  });
+}
+
 describe('submitTriggeredTask capacity-pool integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -117,6 +127,7 @@ describe('submitTriggeredTask capacity-pool integration', () => {
   it('uses centralized placement to persist concrete pool snapshots and start TaskRunner', async () => {
     const { sqlite, env } = createEnv();
     seedTriggerRows(sqlite);
+    await seedProjectDefaultPool(env);
 
     await submitTriggeredTask(env, {
       triggerId: 'trigger-1',

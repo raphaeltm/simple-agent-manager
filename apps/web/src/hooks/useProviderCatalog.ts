@@ -13,10 +13,11 @@ interface UseProviderCatalogResult {
 }
 
 /**
- * VM sizes, locations and prices per cloud provider.
+ * Provider-native instance offerings, locations, and price metadata for the
+ * caller's selected credential scope.
  *
- * Effectively static between deploys, so it carries a long `staleTime`
- * (`lib/query-stale-times.ts`) — in practice a session fetches it once.
+ * The API uses live provider catalogs when credentials/API calls permit it and
+ * falls back to static curated metadata per provider on catalog failure.
  *
  * Failures stay silent, preserving the previous behaviour: every consumer has its
  * own fallback size/location list, so an unavailable catalog degrades to those

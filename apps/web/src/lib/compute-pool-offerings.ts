@@ -359,7 +359,9 @@ function offeringFromNativeCatalog(
   };
 }
 
-export function flattenProviderCatalogOfferings(catalogs: ProviderCatalog[]): ComputePoolOffering[] {
+export function flattenProviderCatalogOfferings(
+  catalogs: ProviderCatalog[]
+): ComputePoolOffering[] {
   return catalogs.flatMap((catalog) => {
     if (catalog.offerings && catalog.offerings.length > 0) {
       return catalog.offerings.map((offering) => offeringFromNativeCatalog(catalog, offering));
@@ -503,15 +505,19 @@ export function buildComputePoolOfferingsModel(
     const sourceLabel =
       sourceLabelsById.get(extended.capacitySourceId) ??
       (sourceKey ? `Capacity source ${extended.capacitySourceId}` : null);
-    const sourceScopedKey = nativeSku ? offeringKey(sourceKey, provider, location, nativeSku) : null;
+    const sourceScopedKey = nativeSku
+      ? offeringKey(sourceKey, provider, location, nativeSku)
+      : null;
     const unscopedKey = nativeSku ? offeringKey(null, provider, location, nativeSku) : null;
-    const unscopedMatches = unscopedKey ? byUnscopedKey.get(unscopedKey) ?? [] : [];
+    const unscopedMatches = unscopedKey ? (byUnscopedKey.get(unscopedKey) ?? []) : [];
     const exactCatalogOffering = nativeSku
-      ? byKey.get(sourceScopedKey ?? '') ??
-        (unscopedMatches.length === 1 ? unscopedMatches[0] : null)
+      ? (byKey.get(sourceScopedKey ?? '') ??
+        (unscopedMatches.length === 1 ? unscopedMatches[0] : null))
       : null;
     const legacyCatalogOffering = extended.machineSize
-      ? byLegacyCandidate.get(legacyOfferingKey(sourceKey, provider, location, extended.machineSize))
+      ? byLegacyCandidate.get(
+          legacyOfferingKey(sourceKey, provider, location, extended.machineSize)
+        )
       : null;
     const base =
       exactCatalogOffering ??
@@ -539,28 +545,27 @@ export function buildComputePoolOfferingsModel(
       candidateOfferings.filter((offering) => offering.candidateStatus !== 'active')
     ),
     catalog: sortOfferings(
-      catalogOfferings
-        .map((offering) => {
-          const matchingCandidate = byCandidateKey.get(offering.key);
-          if (!matchingCandidate) {
-            return {
-              ...offering,
-              candidateId: null,
-              candidateStatus: 'not-configured',
-              runtime: null,
-              machineClass: null,
-              canUpdateExistingCandidate: false,
-            };
-          }
+      catalogOfferings.map((offering) => {
+        const matchingCandidate = byCandidateKey.get(offering.key);
+        if (!matchingCandidate) {
           return {
             ...offering,
-            candidateId: matchingCandidate.candidateId,
-            candidateStatus: matchingCandidate.candidateStatus,
-            runtime: matchingCandidate.runtime,
-            machineClass: matchingCandidate.machineClass,
-            canUpdateExistingCandidate: true,
+            candidateId: null,
+            candidateStatus: 'not-configured',
+            runtime: null,
+            machineClass: null,
+            canUpdateExistingCandidate: false,
           };
-        })
+        }
+        return {
+          ...offering,
+          candidateId: matchingCandidate.candidateId,
+          candidateStatus: matchingCandidate.candidateStatus,
+          runtime: matchingCandidate.runtime,
+          machineClass: matchingCandidate.machineClass,
+          canUpdateExistingCandidate: true,
+        };
+      })
     ),
   };
 }
@@ -601,6 +606,12 @@ export function matchesComputePoolFilters(
   if (filters.availability === 'stale' && !offering.stale) return false;
 
   return true;
+}
+
+export function canAddComputePoolOffering(
+  offering: Pick<ComputePoolOffering, 'available' | 'stale'>
+): boolean {
+  return offering.available !== false && !offering.stale;
 }
 
 export function formatOfferingNumber(value: number | null, unit: string): string {

@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   updateProjectDefaultCapacityPools: vi.fn(),
   updateUserDefaultCapacityPools: vi.fn(),
   updateInstallationDefaultCapacityPools: vi.fn(),
+  useProviderCatalog: vi.fn(),
   providerCatalogs: [] as ProviderCatalog[],
   toast: {
     success: vi.fn(),
@@ -35,12 +36,15 @@ vi.mock('../../../src/hooks/useQueryScope', () => ({
 }));
 
 vi.mock('../../../src/hooks/useProviderCatalog', () => ({
-  useProviderCatalog: () => ({
-    catalogs: mocks.providerCatalogs,
-    catalog: mocks.providerCatalogs[0] ?? null,
-    loading: false,
-    isRefreshing: false,
-  }),
+  useProviderCatalog: (...args: unknown[]) => {
+    mocks.useProviderCatalog(...args);
+    return {
+      catalogs: mocks.providerCatalogs,
+      catalog: mocks.providerCatalogs[0] ?? null,
+      loading: false,
+      isRefreshing: false,
+    };
+  },
 }));
 
 vi.mock('../../../src/hooks/useToast', () => ({
@@ -340,6 +344,38 @@ describe('DefaultCapacityPoolsPanel', () => {
     mocks.providerCatalogs = [providerCatalog()];
   });
 
+  it.each([
+    {
+      props: { projectId: 'project-1' } as const,
+      setup: () =>
+        mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(
+          response('project', summary('project'))
+        ),
+      expected: { scope: 'project', projectId: 'project-1' },
+    },
+    {
+      props: { scope: 'user' } as const,
+      setup: () =>
+        mocks.fetchUserDefaultCapacityPools.mockResolvedValue(response('user', summary('user'))),
+      expected: { scope: 'user', projectId: null },
+    },
+    {
+      props: { scope: 'installation' } as const,
+      setup: () =>
+        mocks.fetchInstallationDefaultCapacityPools.mockResolvedValue(
+          response('installation', summary('installation'))
+        ),
+      expected: { scope: 'installation', projectId: null },
+    },
+  ])('requests $expected.scope-scoped provider catalogs', ({ props, setup, expected }) => {
+    setup();
+
+    const rendered = renderPanel(props);
+
+    expect(mocks.useProviderCatalog).toHaveBeenCalledWith('user-1', expected);
+    rendered.unmount();
+  });
+
   it('renders effective pool policy, sources, and provider-native allowed instances without secret fields', async () => {
     mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(
       response('project', summary('project'))
@@ -627,6 +663,49 @@ describe('DefaultCapacityPoolsPanel', () => {
     );
   });
 
+  it('keeps unavailable removed offerings visible without enabling add-back', async () => {
+    const longSku = 'long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only';
+    const current = summary('project');
+    current.candidates = [
+      candidate({
+        id: 'candidate-project-fsn1-cx22',
+        location: 'fsn1',
+        machineSize: 'small',
+        providerInstanceType: 'cx22',
+      }),
+      candidate({
+        id: 'candidate-project-hel1-long-unavailable',
+        location: 'hel1',
+        machineSize: null,
+        providerInstanceType: longSku,
+        providerInstanceDisplayName: 'Long catalog-only SKU',
+        providerInstanceVcpuCount: 16,
+        providerInstanceMemoryMb: 65_536,
+        providerInstanceDiskGb: 480,
+        providerInstancePriceDisplay: '€220.00/mo',
+        providerInstancePriceMonthlyCents: 22_000,
+        providerInstancePriceHourlyMicros: null,
+        status: 'deleted',
+        priority: 1,
+        candidateOrder: 1,
+      }),
+    ];
+    current.activeCandidateCount = 1;
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('project', current));
+
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+
+    expect(screen.getAllByText(longSku).length).toBeGreaterThan(0);
+    expect(
+      screen.queryByRole('button', {
+        name: new RegExp(`Add back Hetzner hel1 ${longSku}`),
+      })
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Unavailable' })[0]).toBeDisabled();
+  });
+
   it('routes user and installation edits to their owned default APIs', async () => {
     mocks.fetchUserDefaultCapacityPools.mockResolvedValue(response('user', summary('user')));
     mocks.updateUserDefaultCapacityPools.mockResolvedValue(response('user', summary('user')));
@@ -781,7 +860,7 @@ describe('DefaultCapacityPoolsPanel', () => {
     expect(
       screen.getByText('long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only')
     ).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Reconcile first' })[0]).toBeDisabled();
+    expect(screen.getAllByRole('button', { name: 'Unavailable' })[0]).toBeDisabled();
   });
 
   it('shows a deterministic error state', async () => {

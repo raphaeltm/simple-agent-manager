@@ -1,10 +1,12 @@
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
+import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
 const authState = vi.hoisted(() => ({
@@ -134,6 +136,14 @@ function seedTaskSubmitRows(sqlite: Database.Database): void {
     .run();
 }
 
+async function seedProjectDefaultPool(env: Env): Promise<void> {
+  await ensureDefaultCapacityPoolsForExistingCredentials(drizzle(env.DATABASE, { schema }), {
+    userId: 'user-1',
+    projectId: 'project-1',
+    includeInstallation: false,
+  });
+}
+
 const executionCtx = {
   waitUntil: vi.fn(),
   passThroughOnException: vi.fn(),
@@ -158,9 +168,10 @@ describe('task submit capacity-pool placement', () => {
     });
   });
 
-  it('reconciles the effective default pool and persists task placement snapshots before TaskRunner start', async () => {
+  it('uses the effective default pool and persists task placement snapshots before TaskRunner start', async () => {
     const { sqlite, env } = createEnv();
     seedTaskSubmitRows(sqlite);
+    await seedProjectDefaultPool(env);
 
     const res = await createApp().request(
       '/api/projects/project-1/tasks/submit',
@@ -284,6 +295,7 @@ describe('task submit capacity-pool placement', () => {
   it('fails closed when the effective default pool has no eligible offering for the task', async () => {
     const { sqlite, env } = createEnv();
     seedTaskSubmitRows(sqlite);
+    await seedProjectDefaultPool(env);
 
     const res = await createApp().request(
       '/api/projects/project-1/tasks/submit',

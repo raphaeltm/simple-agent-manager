@@ -9,9 +9,11 @@ import {
 } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { afterEach, describe, expect, it } from 'vitest';
+import { drizzle as drizzleD1 } from 'drizzle-orm/d1';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
+import type { Env } from '../../../src/env';
 import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
 import {
   backfillDefaultCapacityPoolsForExistingCredentials,
@@ -19,6 +21,7 @@ import {
   readDefaultCapacityPoolSummaries,
   resolveEffectiveDefaultCapacityPoolSummary,
 } from '../../../src/services/default-capacity-pools';
+import { encrypt } from '../../../src/services/encryption';
 import {
   capacityPlacementSnapshotForTaskStart,
   PlacementResolutionError,
@@ -26,6 +29,7 @@ import {
   resolveTaskStartCapacityPoolSelection,
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
+import { createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
 const migrationSql = readFileSync(
   join(process.cwd(), 'src/db/migrations/0125_compute_pool_foundation.sql'),
@@ -45,6 +49,8 @@ const candidateCatalogMetadataMigrationSql = readFileSync(
 );
 
 let sqlite: Database.Database | null = null;
+const TEST_ENCRYPTION_KEY = 'iZEI8rg5FHtTo2yvt6Qw3m4z6aTfqj5MdLEGqOvdqw0=';
+const originalFetch = globalThis.fetch;
 
 function createDb() {
   sqlite = new Database(':memory:');
@@ -176,6 +182,8 @@ function seedUserCredential(input: {
   projectId?: string | null;
   provider?: string;
   isActive?: 0 | 1;
+  encryptedToken?: string;
+  iv?: string;
   updatedAt?: string;
 }): void {
   sqlite
@@ -185,7 +193,7 @@ function seedUserCredential(input: {
         id, user_id, project_id, provider, credential_type, is_active,
         encrypted_token, iv, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, 'cloud-provider', ?, 'ciphertext-secret', 'iv-secret', ?, ?)
+      VALUES (?, ?, ?, ?, 'cloud-provider', ?, ?, ?, ?, ?)
     `
     )
     .run(
@@ -194,6 +202,8 @@ function seedUserCredential(input: {
       input.projectId ?? null,
       input.provider ?? 'hetzner',
       input.isActive ?? 1,
+      input.encryptedToken ?? 'ciphertext-secret',
+      input.iv ?? 'iv-secret',
       '2026-08-28T00:00:00.000Z',
       input.updatedAt ?? '2026-08-28T00:00:00.000Z'
     );
@@ -276,7 +286,66 @@ function liveHetznerOffering(
   };
 }
 
+function catalogEnv(database: D1Database = {} as D1Database): Env {
+  return {
+    DATABASE: database,
+    ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
+  } as Env;
+}
+
+function hetznerServerType(input: {
+  id: number;
+  name: string;
+  description: string;
+  cores: number;
+  memory: number;
+  disk: number;
+  hourlyGross: string;
+  monthlyGross: string;
+  location?: string;
+}) {
+  return {
+    id: input.id,
+    name: input.name,
+    description: input.description,
+    cores: input.cores,
+    memory: input.memory,
+    disk: input.disk,
+    architecture: 'x86',
+    cpu_type: 'shared',
+    deprecated: false,
+    prices: [
+      {
+        location: input.location ?? 'fsn1',
+        price_hourly: { net: input.hourlyGross, gross: input.hourlyGross },
+        price_monthly: { net: input.monthlyGross, gross: input.monthlyGross },
+      },
+    ],
+  };
+}
+
+function manyLiveOfferings(count: number): ProviderInstanceOffering[] {
+  return Array.from({ length: count }, (_, index) =>
+    liveHetznerOffering({
+      location: 'fsn1',
+      providerInstanceType: `provider-native-${index}`,
+      displayName: `Provider native ${index}`,
+      vcpu: 2 + (index % 8),
+      ramGb: 4 + (index % 16),
+      memoryGb: 4 + (index % 16),
+      memoryMb: (4 + (index % 16)) * 1024,
+      storageGb: 40 + index,
+      diskGb: 40 + index,
+      price: `€${(4 + index).toFixed(2)}/mo`,
+      priceMonthly: 4 + index,
+      priceHourly: (4 + index) / 730,
+    })
+  );
+}
+
 afterEach(() => {
+  globalThis.fetch = originalFetch;
+  vi.restoreAllMocks();
   sqlite?.close();
   sqlite = null;
 });
@@ -635,6 +704,177 @@ describe('default capacity pool creation', () => {
     });
   });
 
+  it('reconciles Hetzner defaults through the credential-backed live provider catalog path', async () => {
+    const db = createDb();
+    const encrypted = await encrypt('live-hetzner-token', TEST_ENCRYPTION_KEY);
+    seedUserCredential({
+      id: 'user-hetzner',
+      encryptedToken: encrypted.ciphertext,
+      iv: encrypted.iv,
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          server_types: [
+            hetznerServerType({
+              id: 1,
+              name: 'cx23',
+              description: 'CX23',
+              cores: 2,
+              memory: 4,
+              disk: 40,
+              hourlyGross: '0.0048',
+              monthlyGross: '3.99',
+            }),
+            hetznerServerType({
+              id: 62,
+              name: 'cpx62',
+              description: 'CPX62',
+              cores: 32,
+              memory: 64,
+              disk: 480,
+              hourlyGross: '0.06592',
+              monthlyGross: '48.12',
+            }),
+          ],
+          meta: { pagination: { next_page: null } },
+        }),
+        { status: 200 }
+      )
+    );
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const result = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      env: catalogEnv(),
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.hetzner.cloud/v1/server_types',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer live-hetzner-token' }),
+      })
+    );
+    expect(result.user?.activeCandidateCount).toBe(2);
+    expect(
+      getRows<{
+        location: string;
+        machine_size: string | null;
+        provider_instance_type: string;
+        provider_instance_display_name: string;
+        provider_instance_vcpu_count: number;
+        provider_instance_memory_mb: number;
+        provider_instance_disk_gb: number;
+        provider_instance_price_display: string;
+        provider_instance_price_currency: string;
+        provider_instance_price_monthly_cents: number;
+        provider_instance_price_hourly_micros: number;
+        provider_instance_catalog_source: string;
+        provider_instance_catalog_last_seen_at: string | null;
+      }>(`
+        SELECT
+          location,
+          machine_size,
+          provider_instance_type,
+          provider_instance_display_name,
+          provider_instance_vcpu_count,
+          provider_instance_memory_mb,
+          provider_instance_disk_gb,
+          provider_instance_price_display,
+          provider_instance_price_currency,
+          provider_instance_price_monthly_cents,
+          provider_instance_price_hourly_micros,
+          provider_instance_catalog_source,
+          provider_instance_catalog_last_seen_at
+        FROM capacity_pool_candidates
+        WHERE provider_instance_type = 'cpx62'
+      `)[0]
+    ).toEqual({
+      location: 'fsn1',
+      machine_size: null,
+      provider_instance_type: 'cpx62',
+      provider_instance_display_name: 'CPX62',
+      provider_instance_vcpu_count: 32,
+      provider_instance_memory_mb: 65_536,
+      provider_instance_disk_gb: 480,
+      provider_instance_price_display: '€48.12/mo',
+      provider_instance_price_currency: 'EUR',
+      provider_instance_price_monthly_cents: 4812,
+      provider_instance_price_hourly_micros: 65_920,
+      provider_instance_catalog_source: 'api',
+      provider_instance_catalog_last_seen_at: expect.any(String),
+    });
+  });
+
+  it('logs sanitized provider catalog fallback warnings and marks static Hetzner rows', async () => {
+    const db = createDb();
+    const encrypted = await encrypt('live-hetzner-token', TEST_ENCRYPTION_KEY);
+    seedUserCredential({
+      id: 'user-hetzner',
+      encryptedToken: encrypted.ciphertext,
+      iv: encrypted.iv,
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: 'catalog unavailable' } }), {
+        status: 503,
+      })
+    ) as typeof fetch;
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      env: catalogEnv(),
+    });
+
+    const warningPayloads = warnSpy.mock.calls
+      .map(([payload]) => String(payload))
+      .filter((payload) => payload.includes('catalog.provider_warning'));
+    expect(warningPayloads.length).toBeGreaterThan(0);
+    expect(warningPayloads[0]).toContain('hetzner catalog API unavailable');
+    expect(warningPayloads.join('\n')).not.toContain('live-hetzner-token');
+    expect(
+      getRows<{ provider_instance_catalog_source: string }>(`
+        SELECT provider_instance_catalog_source
+        FROM capacity_pool_candidates
+        WHERE provider_instance_type = 'cx23'
+        LIMIT 1
+      `)[0]
+    ).toEqual({ provider_instance_catalog_source: 'static' });
+  });
+
+  it('reconciles large provider catalogs without exceeding D1 bind limits', async () => {
+    createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    const db = drizzleD1(createSqliteD1WithBindLimit(sqlite!, 100), { schema });
+    const initialOfferings = manyLiveOfferings(150);
+    const updatedOfferings = initialOfferings.slice(0, 120);
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => initialOfferings,
+    });
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => updatedOfferings,
+    });
+
+    expect(
+      getRows<{ status: string; count: number }>(`
+        SELECT status, COUNT(*) AS count
+        FROM capacity_pool_candidates
+        GROUP BY status
+        ORDER BY status
+      `)
+    ).toEqual([
+      { status: 'active', count: 120 },
+      { status: 'disabled', count: 30 },
+    ]);
+  });
+
   it('translates deleted legacy size rows onto matching live catalog offerings only', async () => {
     const db = createDb();
     seedUserCredential({ id: 'user-hetzner' });
@@ -700,7 +940,11 @@ describe('default capacity pool creation', () => {
     });
 
     expect(
-      getRows<{ provider_instance_type: string | null; status: string; machine_size: string | null }>(`
+      getRows<{
+        provider_instance_type: string | null;
+        status: string;
+        machine_size: string | null;
+      }>(`
         SELECT provider_instance_type, status, machine_size
         FROM capacity_pool_candidates
         WHERE provider_instance_type IN ('cx23', 'cpx62') OR id = '${legacyCandidateId}'

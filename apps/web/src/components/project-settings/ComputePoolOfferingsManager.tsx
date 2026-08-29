@@ -9,6 +9,7 @@ import { type ReactNode, useMemo, useState } from 'react';
 
 import {
   buildComputePoolOfferingsModel,
+  canAddComputePoolOffering,
   type ComputePoolCandidateOffering,
   type ComputePoolCatalogOffering,
   type ComputePoolOffering,
@@ -153,6 +154,12 @@ function CandidateOfferingCard({
     actionLabel && actionStatus
       ? `${actionLabel} ${offering.providerLabel} ${offering.location} ${offering.sku}${sourceSuffix}`
       : null;
+  const blockedAddLabel =
+    actionStatus === 'active' && !canAddComputePoolOffering(offering)
+      ? offering.stale
+        ? 'Stale'
+        : 'Unavailable'
+      : null;
   const metadata = [
     offering.sourceLabel ? `Source: ${offering.sourceLabel}` : null,
     [offering.runtime, offering.machineClass].filter(Boolean).join(' · ')
@@ -167,7 +174,11 @@ function CandidateOfferingCard({
       isRemoved={isRemoved}
       metadata={metadata.length > 0 ? metadata.join(' · ') : undefined}
       action={
-        ariaLabel && actionStatus ? (
+        blockedAddLabel ? (
+          <Button size="sm" variant="ghost" className="w-full sm:w-auto" disabled>
+            {blockedAddLabel}
+          </Button>
+        ) : ariaLabel && actionStatus ? (
           <Button
             size="sm"
             variant={actionStatus === 'deleted' ? 'secondary' : 'primary'}
@@ -196,6 +207,12 @@ function CatalogOfferingCard({
     action = (
       <Button size="sm" variant="ghost" className="w-full sm:w-auto" disabled>
         Already allowed
+      </Button>
+    );
+  } else if (!canAddComputePoolOffering(offering)) {
+    action = (
+      <Button size="sm" variant="ghost" className="w-full sm:w-auto" disabled>
+        {offering.stale ? 'Stale' : 'Unavailable'}
       </Button>
     );
   } else if (!offering.candidateId) {
@@ -404,7 +421,10 @@ export function ComputePoolOfferingsManager({
     matchesComputePoolFilters(offering, filters)
   );
   const addableCatalog = filteredCatalog.filter(
-    (offering) => offering.candidateId && offering.candidateStatus !== 'active'
+    (offering) =>
+      offering.candidateId &&
+      offering.candidateStatus !== 'active' &&
+      canAddComputePoolOffering(offering)
   );
   const removableAllowed = filteredAllowed.filter(
     (offering) => offering.candidateStatus === 'active'

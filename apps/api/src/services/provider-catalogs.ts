@@ -3,6 +3,9 @@ import {
   GcpProvider,
   getProviderCatalogOfferings,
   type Provider as CloudProvider,
+  type ProviderConfig,
+  type ProviderLogContext,
+  type ProviderLogger,
 } from '@simple-agent-manager/providers';
 import type {
   CredentialProvider,
@@ -61,10 +64,7 @@ export function getStaticProviderCatalogOfferings(
 ): ProviderInstanceOffering[] {
   const locations = getLocationsForProvider(provider);
   const locationMetadata = Object.fromEntries(
-    locations.map((location) => [
-      location.id,
-      { name: location.name, country: location.country },
-    ])
+    locations.map((location) => [location.id, { name: location.name, country: location.country }])
   );
   return getProviderCatalogOfferings(
     provider,
@@ -267,7 +267,35 @@ function createCatalogProvider(
   }
 
   const config = buildProviderConfig(providerName, decryptedToken, env);
-  return createProvider(config);
+  return createProvider(withCatalogProviderLogger(config, providerName));
+}
+
+function withCatalogProviderLogger(
+  config: ProviderConfig,
+  providerName: CredentialProvider
+): ProviderConfig {
+  if (config.provider === 'gcp' || config.provider === 'scaleway') return config;
+  return {
+    ...config,
+    logger: catalogProviderLogger(providerName),
+  };
+}
+
+function catalogProviderLogger(providerName: CredentialProvider): ProviderLogger {
+  return {
+    warn: (message: string, context?: ProviderLogContext) =>
+      log.warn('catalog.provider_warning', {
+        provider: providerName,
+        message,
+        ...(context ?? {}),
+      }),
+    info: (message: string, context?: ProviderLogContext) =>
+      log.info('catalog.provider_info', {
+        provider: providerName,
+        message,
+        ...(context ?? {}),
+      }),
+  };
 }
 
 function buildProviderCatalog(input: {
