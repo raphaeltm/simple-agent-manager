@@ -4,6 +4,7 @@
  * Config precedence: explicit field → profile value → project default → platform default.
  */
 import type {
+  CapacityPlacementSnapshot,
   CredentialProvider,
   CredentialSource,
   VMSize,
@@ -23,11 +24,9 @@ import {
 } from '../../services/capacity-placement-snapshot';
 import {
   PlacementResolutionError,
-  resolveCapacityAwareCredentialLookup,
-  resolveCapacityAwareQuotaCredentialSource,
-  resolveCapacityPlacementCredentialAttribution,
-  resolvePlacementCredentialAttribution,
   resolveTaskStartPlacement,
+  resolveTaskStartPlacementCredentialAttributionFromPlacement,
+  type TaskStartCapacityPoolSelection,
   type TaskStartPlacement,
   type TaskStartPlacementInput,
 } from '../../services/placement-resolver';
@@ -50,7 +49,6 @@ import {
   type McpTokenData,
 } from './_helpers';
 import { recordDispatchActivityEvent } from './dispatch-activity';
-import { resolveDispatchCapacityPlacement } from './dispatch-capacity';
 import {
   type DispatchExecutionContext,
   getRuntimeValidationError,
@@ -367,14 +365,6 @@ export async function handleDispatchTask(
   } = placement;
   const isInstantRuntime = placement.runtime.isInstantRuntime;
   const executionRuntime = placement.runtime.executionRuntime;
-  const capacityResolution = await resolveDispatchCapacityPlacement({
-    db,
-    placement,
-    isInstantRuntime,
-    requestId,
-  });
-  if ('error' in capacityResolution) return capacityResolution.error;
-  const { capacityPoolSelection, capacityPlacementSnapshot } = capacityResolution;
 
   // Explicit branch means "continue work from this branch"; otherwise task
   // work must start on the generated output branch so VM-agent completion
@@ -397,44 +387,28 @@ export async function handleDispatchTask(
         placement.credentialLookup.projectId ??
         tokenData.projectId)
       : null;
+  let capacityPoolSelection: TaskStartCapacityPoolSelection | null = null;
+  let capacityPlacementSnapshot: CapacityPlacementSnapshot | null = null;
   if (!isInstantRuntime) {
-    const { resolveCredentialSource } = await import('../../services/provider-credentials');
-    let credentialLookup;
-    try {
-      credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
-    } catch (err) {
-      if (err instanceof PlacementResolutionError) {
-        return jsonRpcError(requestId, INVALID_PARAMS, err.message);
-      }
-      throw err;
-    }
-    const credResult = await resolveCredentialSource(
+    const placementResolution = await resolveTaskStartPlacementCredentialAttributionFromPlacement(
       db,
-      credentialLookup.userId,
-      credentialLookup.provider,
-      credentialLookup.projectId
+      placement,
+      {
+        credentialsRequiredMessage:
+          'Cloud provider credentials required. The user must connect a cloud provider in Settings.',
+      }
     );
-
-    if (!credResult) {
-      return jsonRpcError(
-        requestId,
-        INVALID_PARAMS,
-        'Cloud provider credentials required. The user must connect a cloud provider in Settings.'
-      );
+    if ('error' in placementResolution) {
+      return jsonRpcError(requestId, INVALID_PARAMS, placementResolution.error);
     }
-    const capacityCandidate = capacityPoolSelection?.candidates[0] ?? null;
-    const credentialAttribution = capacityCandidate
-      ? resolveCapacityPlacementCredentialAttribution(placement, capacityCandidate)
-      : resolvePlacementCredentialAttribution(placement, credResult);
-    effectiveProvider = credentialAttribution.effectiveProvider;
-    credentialAttributionUserId = credentialAttribution.credentialAttributionUserId;
-    credentialAttributionProjectId = credentialAttribution.credentialAttributionProjectId;
-    credentialAttributionSource = credentialAttribution.credentialAttributionSource;
+    capacityPoolSelection = placementResolution.capacityPoolSelection;
+    capacityPlacementSnapshot = placementResolution.capacityPlacementSnapshot;
+    effectiveProvider = placementResolution.effectiveProvider;
+    credentialAttributionUserId = placementResolution.credentialAttributionUserId;
+    credentialAttributionProjectId = placementResolution.credentialAttributionProjectId;
+    credentialAttributionSource = placementResolution.credentialAttributionSource;
 
-    const quotaCredentialSource = resolveCapacityAwareQuotaCredentialSource(
-      credResult,
-      capacityPoolSelection
-    );
+    const quotaCredentialSource = placementResolution.quotaCredentialSource;
     if (quotaCredentialSource === 'platform') {
       const quotaEnforcementEnabled = env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
       if (quotaEnforcementEnabled) {

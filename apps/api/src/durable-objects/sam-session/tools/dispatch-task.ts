@@ -22,10 +22,7 @@ import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
   capacityPlacementSnapshotSqlValues,
 } from '../../../services/capacity-placement-snapshot';
-import {
-  capacityPlacementSnapshotForTaskStart,
-  resolveTaskStartPlacementCredentialAttribution,
-} from '../../../services/placement-resolver';
+import { resolveTaskStartPlacementCredentialAttribution } from '../../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../../services/skills';
@@ -287,8 +284,8 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
     credentialAttributionProjectId,
     credentialAttributionSource,
     capacityPoolSelection,
+    capacityPlacementSnapshot,
   } = placementResolution;
-  const capacityPlacementSnapshot = capacityPlacementSnapshotForTaskStart(capacityPoolSelection);
   const {
     vmSize: resolvedVmSize,
     vmSizeSource,

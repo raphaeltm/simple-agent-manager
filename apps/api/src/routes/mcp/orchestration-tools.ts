@@ -13,14 +13,9 @@ import { ulid } from '../../lib/ulid';
 import { generateBranchName } from '../../services/branch-name';
 import { capacityPlacementSnapshotDbValues } from '../../services/capacity-placement-snapshot';
 import {
-  capacityPlacementSnapshotForTaskStart,
   PlacementResolutionError,
-  resolveCapacityAwareCredentialLookup,
-  resolveCapacityAwareQuotaCredentialSource,
-  resolveCapacityPlacementCredentialAttribution,
-  resolvePlacementCredentialAttribution,
-  resolveTaskStartCapacityPoolSelection,
   resolveTaskStartPlacement,
+  resolveTaskStartPlacementCredentialAttributionFromPlacement,
 } from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
@@ -224,35 +219,26 @@ export async function handleRetrySubtask(
     return placement;
   }
 
-  const { resolveCredentialSource } = await import('../../services/provider-credentials');
-  let capacityPoolSelection;
-  let credentialLookup;
-  try {
-    capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement);
-    credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
-  } catch (err) {
-    if (err instanceof PlacementResolutionError) {
-      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
-    }
-    throw err;
-  }
-  const credResult = await resolveCredentialSource(
+  const placementResolution = await resolveTaskStartPlacementCredentialAttributionFromPlacement(
     db,
-    credentialLookup.userId,
-    credentialLookup.provider,
-    credentialLookup.projectId
+    placement,
+    {
+      credentialsRequiredMessage:
+        'Cloud provider credentials required. The user must connect a cloud provider in Settings.',
+    }
   );
-  if (!credResult) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'Cloud provider credentials required. The user must connect a cloud provider in Settings.'
-    );
+  if ('error' in placementResolution) {
+    return jsonRpcError(requestId, INVALID_PARAMS, placementResolution.error);
   }
-  const quotaCredentialSource = resolveCapacityAwareQuotaCredentialSource(
-    credResult,
-    capacityPoolSelection
-  );
+  const {
+    capacityPoolSelection,
+    quotaCredentialSource,
+    capacityPlacementSnapshot,
+    effectiveProvider,
+    credentialAttributionUserId,
+    credentialAttributionProjectId,
+    credentialAttributionSource,
+  } = placementResolution;
   if (quotaCredentialSource === 'platform') {
     const quotaEnforcementEnabled = env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
     if (quotaEnforcementEnabled) {
@@ -269,15 +255,6 @@ export async function handleRetrySubtask(
     }
   }
 
-  const {
-    effectiveProvider,
-    credentialAttributionUserId,
-    credentialAttributionProjectId,
-    credentialAttributionSource,
-  } = capacityPoolSelection?.candidates[0]
-    ? resolveCapacityPlacementCredentialAttribution(placement, capacityPoolSelection.candidates[0])
-    : resolvePlacementCredentialAttribution(placement, credResult);
-  const capacityPlacementSnapshot = capacityPlacementSnapshotForTaskStart(capacityPoolSelection);
   const {
     vmSize: resolvedVmSize,
     vmSizeSource,

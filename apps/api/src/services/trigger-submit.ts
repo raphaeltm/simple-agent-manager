@@ -18,13 +18,9 @@ import { requireRepositoryOwnerAccess } from '../routes/projects/_helpers';
 import { generateBranchName } from './branch-name';
 import { capacityPlacementSnapshotDbValues } from './capacity-placement-snapshot';
 import {
-  capacityPlacementSnapshotForTaskStart,
   PlacementResolutionError,
-  resolveCapacityAwareCredentialLookup,
-  resolveCapacityPlacementCredentialAttribution,
-  resolvePlacementCredentialAttribution,
-  resolveTaskStartCapacityPoolSelection,
   resolveTaskStartPlacement,
+  resolveTaskStartPlacementCredentialAttributionFromPlacement,
 } from './placement-resolver';
 import * as projectDataService from './project-data';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from './skills';
@@ -128,36 +124,24 @@ export async function submitTriggeredTask(
     }
   })();
 
-  const { resolveCredentialSource } = await import('./provider-credentials');
-  let capacityPoolSelection;
-  let credentialLookup;
-  try {
-    capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement);
-    credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
-  } catch (err) {
-    if (err instanceof PlacementResolutionError) {
-      throw new Error(err.message);
-    }
-    throw err;
-  }
-  const credResult = await resolveCredentialSource(
+  const placementResolution = await resolveTaskStartPlacementCredentialAttributionFromPlacement(
     db,
-    credentialLookup.userId,
-    credentialLookup.provider,
-    credentialLookup.projectId
+    placement,
+    {
+      credentialsRequiredMessage: `No cloud provider credentials available for trigger ${input.triggerId}`,
+    }
   );
-  if (!credResult) {
-    throw new Error(`No cloud provider credentials available for trigger ${input.triggerId}`);
+  if ('error' in placementResolution) {
+    throw new Error(placementResolution.error);
   }
   const {
+    capacityPoolSelection,
+    capacityPlacementSnapshot,
     effectiveProvider,
     credentialAttributionUserId,
     credentialAttributionProjectId,
     credentialAttributionSource,
-  } = capacityPoolSelection?.candidates[0]
-    ? resolveCapacityPlacementCredentialAttribution(placement, capacityPoolSelection.candidates[0])
-    : resolvePlacementCredentialAttribution(placement, credResult);
-  const capacityPlacementSnapshot = capacityPlacementSnapshotForTaskStart(capacityPoolSelection);
+  } = placementResolution;
   const {
     vmSize,
     vmSizeSource,

@@ -21,10 +21,7 @@ import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
   capacityPlacementSnapshotSqlValues,
 } from '../../services/capacity-placement-snapshot';
-import {
-  capacityPlacementSnapshotForTaskStart,
-  resolveTaskStartPlacementCredentialAttribution,
-} from '../../services/placement-resolver';
+import { resolveTaskStartPlacementCredentialAttribution } from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
@@ -431,9 +428,8 @@ async function autoDispatchSchedulableTasks(
         credentialAttributionProjectId,
         credentialAttributionSource,
         capacityPoolSelection,
+        capacityPlacementSnapshot,
       } = placementResolution;
-      const capacityPlacementSnapshot =
-        capacityPlacementSnapshotForTaskStart(capacityPoolSelection);
       const {
         vmSize: resolvedVmSize,
         vmSizeSource,

@@ -35,14 +35,9 @@ import { generateBranchName } from '../../services/branch-name';
 import { capacityPlacementSnapshotDbValues } from '../../services/capacity-placement-snapshot';
 import { enrichMessageWithMentions } from '../../services/mention-enrichment';
 import {
-  capacityPlacementSnapshotForTaskStart,
   PlacementResolutionError,
-  resolveCapacityAwareCredentialLookup,
-  resolveCapacityAwareQuotaCredentialSource,
-  resolveCapacityPlacementCredentialAttribution,
-  resolvePlacementCredentialAttribution,
-  resolveTaskStartCapacityPoolSelection,
   resolveTaskStartPlacement,
+  resolveTaskStartPlacementCredentialAttributionFromPlacement,
 } from '../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
@@ -332,39 +327,30 @@ submitRoutes.post(
       }
     })();
 
-    // Check cloud provider credentials and enforce compute quota.
-    // This runs AFTER provider resolution so we know which provider will be used,
-    // ensuring quota enforcement is based on the actual credential source — not
-    // just whether the user has ANY cloud credential registered.
-    const { resolveCredentialSource } = await import('../../services/provider-credentials');
-    let capacityPoolSelection;
-    let credentialLookup;
-    try {
-      capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement);
-      credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
-    } catch (err) {
-      if (err instanceof PlacementResolutionError) {
-        throw errors.badRequest(err.message);
-      }
-      throw err;
-    }
-    const credResult = await resolveCredentialSource(
+    const placementResolution = await resolveTaskStartPlacementCredentialAttributionFromPlacement(
       db,
-      credentialLookup.userId,
-      credentialLookup.provider,
-      credentialLookup.projectId
+      placement,
+      {
+        credentialsRequiredMessage:
+          'Cloud provider credentials required. Connect your account in Settings.',
+      }
     );
-
-    if (!credResult) {
-      throw errors.forbidden(
-        'Cloud provider credentials required. Connect your account in Settings.'
-      );
+    if ('error' in placementResolution) {
+      if (placementResolution.errorKind === 'credentials') {
+        throw errors.forbidden(placementResolution.error);
+      }
+      throw errors.badRequest(placementResolution.error);
     }
 
-    const quotaCredentialSource = resolveCapacityAwareQuotaCredentialSource(
-      credResult,
-      capacityPoolSelection
-    );
+    const {
+      capacityPoolSelection,
+      quotaCredentialSource,
+      capacityPlacementSnapshot,
+      effectiveProvider,
+      credentialAttributionUserId,
+      credentialAttributionProjectId,
+      credentialAttributionSource,
+    } = placementResolution;
     if (quotaCredentialSource === 'platform') {
       const quotaEnforcementEnabled = c.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
       if (quotaEnforcementEnabled) {
@@ -379,17 +365,6 @@ submitRoutes.post(
       }
     }
 
-    const capacityCandidate = capacityPoolSelection?.candidates[0] ?? null;
-    const credentialAttribution = capacityCandidate
-      ? resolveCapacityPlacementCredentialAttribution(placement, capacityCandidate)
-      : resolvePlacementCredentialAttribution(placement, credResult);
-    const {
-      effectiveProvider,
-      credentialAttributionUserId,
-      credentialAttributionProjectId,
-      credentialAttributionSource,
-    } = credentialAttribution;
-    const capacityPlacementSnapshot = capacityPlacementSnapshotForTaskStart(capacityPoolSelection);
     const {
       vmSize,
       vmSizeSource,

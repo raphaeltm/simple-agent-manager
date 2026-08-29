@@ -28,14 +28,9 @@ import {
   capacityPlacementSnapshotSqlValues,
 } from '../../services/capacity-placement-snapshot';
 import {
-  capacityPlacementSnapshotForTaskStart,
   PlacementResolutionError,
-  resolveCapacityAwareCredentialLookup,
-  resolveCapacityAwareQuotaCredentialSource,
-  resolveCapacityPlacementCredentialAttribution,
-  resolvePlacementCredentialAttribution,
-  resolveTaskStartCapacityPoolSelection,
   resolveTaskStartPlacement,
+  resolveTaskStartPlacementCredentialAttributionFromPlacement,
 } from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
 import { isTaskBlocked } from '../../services/task-graph';
@@ -155,33 +150,26 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
     }
   })();
 
-  const { resolveCredentialSource } = await import('../../services/provider-credentials');
-  let capacityPoolSelection;
-  let credentialLookup;
-  try {
-    capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement);
-    credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
-  } catch (err) {
-    if (err instanceof PlacementResolutionError) {
-      throw errors.badRequest(err.message);
-    }
-    throw err;
-  }
-  const credResult = await resolveCredentialSource(
+  const placementResolution = await resolveTaskStartPlacementCredentialAttributionFromPlacement(
     db,
-    credentialLookup.userId,
-    credentialLookup.provider,
-    credentialLookup.projectId
+    placement,
+    {
+      credentialsRequiredMessage:
+        'Cloud provider credentials required. Connect your account in Settings.',
+    }
   );
-  if (!credResult) {
-    throw errors.badRequest(
-      'Cloud provider credentials required. Connect your account in Settings.'
-    );
+  if ('error' in placementResolution) {
+    throw errors.badRequest(placementResolution.error);
   }
-  const quotaCredentialSource = resolveCapacityAwareQuotaCredentialSource(
-    credResult,
-    capacityPoolSelection
-  );
+  const {
+    capacityPoolSelection,
+    quotaCredentialSource,
+    capacityPlacementSnapshot,
+    effectiveProvider,
+    credentialAttributionUserId,
+    credentialAttributionProjectId,
+    credentialAttributionSource,
+  } = placementResolution;
   if (quotaCredentialSource === 'platform') {
     const quotaEnforcementEnabled = c.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
     if (quotaEnforcementEnabled) {
@@ -196,15 +184,6 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
     }
   }
 
-  const {
-    effectiveProvider,
-    credentialAttributionUserId,
-    credentialAttributionProjectId,
-    credentialAttributionSource,
-  } = capacityPoolSelection?.candidates[0]
-    ? resolveCapacityPlacementCredentialAttribution(placement, capacityPoolSelection.candidates[0])
-    : resolvePlacementCredentialAttribution(placement, credResult);
-  const capacityPlacementSnapshot = capacityPlacementSnapshotForTaskStart(capacityPoolSelection);
   const {
     vmSize,
     vmSizeSource,

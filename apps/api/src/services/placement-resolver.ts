@@ -26,6 +26,7 @@ import { log } from '../lib/logger';
 import { resolveEffectiveDefaultCapacityPoolSummary } from './default-capacity-pools';
 import {
   buildCapacityPoolSelection,
+  capacityPlacementSnapshotForTaskStart,
   hasNoCapacityPoolCandidates,
 } from './placement-resolver-capacity';
 import type {
@@ -292,17 +293,29 @@ export async function resolveTaskStartPlacementCredentialAttribution(
   db: Db,
   input: TaskStartPlacementInput,
   options?: { credentialsRequiredMessage?: string }
-): Promise<TaskStartPlacementWithCredential | { error: string }> {
+): Promise<
+  TaskStartPlacementWithCredential | { error: string; errorKind: 'placement' | 'credentials' }
+> {
   let placement: TaskStartPlacement;
   try {
     placement = resolveTaskStartPlacement(input);
   } catch (err) {
     if (err instanceof PlacementResolutionError) {
-      return { error: err.message };
+      return { error: err.message, errorKind: 'placement' };
     }
     throw err;
   }
 
+  return resolveTaskStartPlacementCredentialAttributionFromPlacement(db, placement, options);
+}
+
+export async function resolveTaskStartPlacementCredentialAttributionFromPlacement(
+  db: Db,
+  placement: TaskStartPlacement,
+  options?: { credentialsRequiredMessage?: string }
+): Promise<
+  TaskStartPlacementWithCredential | { error: string; errorKind: 'placement' | 'credentials' }
+> {
   let capacityPoolSelection: TaskStartCapacityPoolSelection | null;
   let credentialLookup: PlacementCredentialLookup;
   try {
@@ -310,7 +323,7 @@ export async function resolveTaskStartPlacementCredentialAttribution(
     credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
   } catch (err) {
     if (err instanceof PlacementResolutionError) {
-      return { error: err.message };
+      return { error: err.message, errorKind: 'placement' };
     }
     throw err;
   }
@@ -325,6 +338,7 @@ export async function resolveTaskStartPlacementCredentialAttribution(
       error:
         options?.credentialsRequiredMessage ??
         'No cloud provider credentials found. The user must connect a cloud provider in Settings.',
+      errorKind: 'credentials',
     };
   }
 
@@ -334,6 +348,11 @@ export async function resolveTaskStartPlacementCredentialAttribution(
     placement,
     credential,
     capacityPoolSelection,
+    quotaCredentialSource: resolveCapacityAwareQuotaCredentialSource(
+      credential,
+      capacityPoolSelection
+    ),
+    capacityPlacementSnapshot: capacityPlacementSnapshotForTaskStart(capacityPoolSelection),
     ...(capacityCandidate
       ? resolveCapacityPlacementCredentialAttribution(placement, capacityCandidate)
       : resolvePlacementCredentialAttribution(placement, credential)),

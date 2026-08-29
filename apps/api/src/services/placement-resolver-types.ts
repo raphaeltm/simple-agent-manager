@@ -213,6 +213,8 @@ export interface TaskStartPlacementWithCredential extends PlacementCredentialAtt
   placement: TaskStartPlacement;
   credential: PlacementCredentialSourceResult;
   capacityPoolSelection: TaskStartCapacityPoolSelection | null;
+  quotaCredentialSource: CredentialSource;
+  capacityPlacementSnapshot: CapacityPlacementSnapshot | null;
 }
 
 export type PlacementResolutionErrorCode =
