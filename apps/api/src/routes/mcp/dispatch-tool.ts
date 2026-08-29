@@ -1,9 +1,6 @@
 /**
  * MCP dispatch_task tool — spawns a new task in the current project.
  *
- * Supports full task execution configuration parity with the normal submit path:
- * agentProfileId, taskMode, agentType, workspaceProfile, provider, vmLocation.
- *
  * Config precedence: explicit field → profile value → project default → platform default.
  */
 import type {
@@ -25,15 +22,11 @@ import {
   capacityPlacementSnapshotSqlValues,
 } from '../../services/capacity-placement-snapshot';
 import {
-  capacityPlacementSnapshotForTaskStart,
-  capacityPoolNoCandidatesMessage,
-  hasNoCapacityPoolCandidates,
   PlacementResolutionError,
   resolveCapacityAwareCredentialLookup,
   resolveCapacityAwareQuotaCredentialSource,
   resolveCapacityPlacementCredentialAttribution,
   resolvePlacementCredentialAttribution,
-  resolveTaskStartCapacityPoolSelection,
   resolveTaskStartPlacement,
   type TaskStartPlacement,
   type TaskStartPlacementInput,
@@ -58,6 +51,7 @@ import {
   type McpTokenData,
 } from './_helpers';
 import { recordDispatchActivityEvent } from './dispatch-activity';
+import { resolveDispatchCapacityPlacement } from './dispatch-capacity';
 import {
   type DispatchExecutionContext,
   getRuntimeValidationError,
@@ -379,17 +373,14 @@ export async function handleDispatchTask(
   } = placement;
   const isInstantRuntime = placement.runtime.isInstantRuntime;
   const executionRuntime = placement.runtime.executionRuntime;
-  const capacityPoolSelection = isInstantRuntime
-    ? null
-    : await resolveTaskStartCapacityPoolSelection(db, placement);
-  if (capacityPoolSelection && hasNoCapacityPoolCandidates(capacityPoolSelection)) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      capacityPoolNoCandidatesMessage(capacityPoolSelection)
-    );
-  }
-  const capacityPlacementSnapshot = capacityPlacementSnapshotForTaskStart(capacityPoolSelection);
+  const capacityResolution = await resolveDispatchCapacityPlacement({
+    db,
+    placement,
+    isInstantRuntime,
+    requestId,
+  });
+  if ('error' in capacityResolution) return capacityResolution.error;
+  const { capacityPoolSelection, capacityPlacementSnapshot } = capacityResolution;
 
   // Explicit branch means "continue work from this branch"; otherwise task
   // work must start on the generated output branch so VM-agent completion
