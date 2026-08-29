@@ -37,7 +37,9 @@ This task adds the MCP-facing read/ack layer without deploying or mutating stagi
 - [x] Update MCP API reference and environment/configuration docs.
 - [x] Add comprehensive tests for success, pagination, missed events, ownership/project boundaries, nonexistent-vs-unauthorized non-disclosure, malformed cursors/limits, idempotent ack, and ack-policy behavior.
 - [x] Run local validation and requested specialist reviews.
-- [ ] Open a draft PR; do not deploy staging and do not merge.
+- [x] Open a draft PR; do not deploy staging and do not merge.
+
+Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/1965
 
 ## Acceptance criteria
 
@@ -89,6 +91,7 @@ Current evidence:
 - `$doc-sync-validator`: PASS after documenting ack terminal-state behavior, ProjectData event-bus table inventory, durable event-bus storage summaries, and `MCP_EVENT_BUS_CURSOR_MAX_LENGTH`.
 - `$constitution-validator`: PASS after making `MCP_EVENT_BUS_CURSOR_MAX_LENGTH` configurable and documenting it alongside the other event-bus bounds.
 - `$test-engineer`: PASS after adding workers-pool `/mcp` tests, real D1 project-boundary cases, handler/DO cursor tests, terminal ack-state unit/handler tests, indexed SQL plan tests, and post-ack retention alarm coverage.
+- `$task-completion-validator`: implementation scope PASS before PR creation; sole remaining gap was that the draft PR had not been opened yet. Addressed by opening draft PR #1965.
 
 ## Review plan
 
