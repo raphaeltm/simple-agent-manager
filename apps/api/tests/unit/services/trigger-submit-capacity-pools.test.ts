@@ -161,7 +161,7 @@ describe('submitTriggeredTask capacity-pool integration', () => {
       provider_instance_memory_mb: 4096,
       provider_instance_disk_gb: 40,
     });
-    expect(String(taskRow.capacity_pool_candidate_id)).toContain(':hetzner:fsn1:cx23');
+    expect(String(taskRow.capacity_pool_candidate_id)).toContain(':hetzner:nbg1:cx23');
     expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
       env,
       expect.objectContaining({
@@ -176,7 +176,7 @@ describe('submitTriggeredTask capacity-pool integration', () => {
           candidates: expect.arrayContaining([
             expect.objectContaining({
               provider: 'hetzner',
-              location: 'fsn1',
+              location: 'nbg1',
               providerInstanceType: 'cx23',
             }),
           ]),
