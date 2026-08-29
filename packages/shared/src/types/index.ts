@@ -286,6 +286,25 @@ export {
   wakePhaseLabel,
 } from './task';
 
+// Durable project event bus
+export type {
+  SamEventBusAckResult,
+  SamEventBusDeliveryInfo,
+  SamEventBusDeliveryPolicy,
+  SamEventBusDeliveryRecord,
+  SamEventBusDeliveryState,
+  SamEventBusEvent,
+  SamEventBusEventListResult,
+  SamEventBusEventSummary,
+  SamEventBusReference,
+  SamEventBusSubscriptionOwnerType,
+} from './event-bus';
+export {
+  SAM_EVENT_BUS_DELIVERY_POLICIES,
+  SAM_EVENT_BUS_DELIVERY_STATES,
+  SAM_EVENT_BUS_SUBSCRIPTION_OWNER_TYPES,
+} from './event-bus';
+
 // Session (Chat, Agent, ACP)
 export type {
   AcpSession,

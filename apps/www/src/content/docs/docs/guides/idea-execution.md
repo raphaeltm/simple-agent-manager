@@ -123,6 +123,7 @@ An agent running inside a workspace has access to MCP tools that provide project
 | `update_task_status`  | Report progress                                                               |
 | `complete_task`       | Mark the current work as done, optionally with structured completion evidence |
 | `request_human_input` | Ask the user for a decision                                                   |
+| `get_event` / `list_subscription_events` / `ack_event_delivery` | Retrieve and acknowledge durable project event-bus deliveries visible to the current agent |
 
 `dispatch_task` accepts an optional `runtime` value of `vm` or `cf-container`. Container dispatch starts an [Instant](/docs/guides/instant-sessions/) task without VM sizing or cloud credentials — but only when asked: dispatch defaults to a VM unless `cf-container` is set explicitly or comes from the dispatching profile. Explicit VM-only options such as `vmSize`, `provider`, `vmLocation`, `workspaceProfile`, and `devcontainerConfigName` cannot be combined with a container runtime; choose `runtime: "vm"` or remove those options.
 

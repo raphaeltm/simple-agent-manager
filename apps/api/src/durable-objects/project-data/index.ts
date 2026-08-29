@@ -34,6 +34,7 @@ import type * as commentContracts from './comment-contracts';
 import * as comments from './comments';
 import { stopTimedOutConversationWorkspaces } from './conversation-timeout';
 import * as durability from './durability-foundation';
+import * as eventBus from './event-bus';
 import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
 import * as knowledge from './knowledge';
@@ -1537,6 +1538,55 @@ export class ProjectData extends DurableObject<Env> {
 
   async getMailboxStats() {
     return mailbox.getMailboxStats(this.sql);
+  }
+
+  // --- Project Event Bus ---
+
+  async createEventBusSubscription(
+    input: eventBus.CreateEventBusSubscriptionInput
+  ): Promise<ReturnType<typeof eventBus.createEventBusSubscription>> {
+    return eventBus.createEventBusSubscription(this.sql, input);
+  }
+
+  async publishEventBusEvent(
+    input: eventBus.PublishEventBusEventInput
+  ): Promise<ReturnType<typeof eventBus.publishEventBusEvent>> {
+    const result = eventBus.publishEventBusEvent(this.sql, input);
+    this.broadcastEvent('event_bus.event_published', {
+      eventId: result.event.id,
+      eventType: result.event.type,
+      deliveryCount: result.deliveryIds.length,
+    });
+    return result;
+  }
+
+  async getEventBusEvent(
+    eventId: string,
+    identity: eventBus.EventBusIdentity
+  ): Promise<ReturnType<typeof eventBus.getEventBusEventForIdentity>> {
+    return eventBus.getEventBusEventForIdentity(this.sql, eventId, identity);
+  }
+
+  async listEventBusSubscriptionEvents(
+    input: eventBus.ListEventBusSubscriptionEventsInput,
+    identity: eventBus.EventBusIdentity
+  ): Promise<ReturnType<typeof eventBus.listEventBusSubscriptionEvents>> {
+    return eventBus.listEventBusSubscriptionEvents(this.sql, input, identity);
+  }
+
+  async acknowledgeEventBusDelivery(
+    input: eventBus.AcknowledgeEventBusDeliveryInput,
+    identity: eventBus.EventBusIdentity
+  ): Promise<ReturnType<typeof eventBus.acknowledgeEventBusDelivery>> {
+    const result = eventBus.acknowledgeEventBusDelivery(this.sql, input, identity);
+    if (result && !result.idempotent) {
+      this.broadcastEvent('event_bus.delivery_acknowledged', {
+        eventId: result.delivery.eventId,
+        deliveryId: result.delivery.id,
+        subscriptionId: result.delivery.subscriptionId,
+      });
+    }
+    return result;
   }
 
   // --- Mission State & Handoffs ---

@@ -8,6 +8,7 @@
  *   - tool-definitions-session-idea-tools.ts  (session management, idea CRUD, linking)
  *   - tool-definitions-workspace-tools.ts     (workspace info, env, CI, cost, onboarding)
  *   - tool-definitions-library-tools.ts       (project file library)
+ *   - tool-definitions-event-bus-tools.ts     (durable project event-bus retrieval)
  *   - tool-definitions-orchestration-tools.ts (agent-to-agent communication & control)
  *   - tool-definitions-comment-tools.ts       (message comment threads)
  *   - tool-definitions-trigger-tools.ts       (trigger management — cron automation)
@@ -16,6 +17,7 @@
 
 export { COMMENT_TOOLS } from './tool-definitions-comment-tools';
 export { DEPLOYMENT_TOOLS } from './tool-definitions-deployment-tools';
+export { EVENT_BUS_TOOLS } from './tool-definitions-event-bus-tools';
 export { INCIDENT_TOOLS } from './tool-definitions-incident-tools';
 export { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
 export { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
@@ -34,6 +36,7 @@ export { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';
 
 import { COMMENT_TOOLS } from './tool-definitions-comment-tools';
 import { DEPLOYMENT_TOOLS } from './tool-definitions-deployment-tools';
+import { EVENT_BUS_TOOLS } from './tool-definitions-event-bus-tools';
 import { INCIDENT_TOOLS } from './tool-definitions-incident-tools';
 import { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
 import { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
@@ -57,6 +60,7 @@ export const MCP_TOOLS = [
   ...WORKSPACE_TOOLS,
   ...DEPLOYMENT_TOOLS,
   ...LIBRARY_TOOLS,
+  ...EVENT_BUS_TOOLS,
   ...ORCHESTRATION_TOOLS,
   ...COMMENT_TOOLS,
   ...LIBRARY_FILE_COMMENT_TOOLS,

@@ -706,6 +706,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MCP_MESSAGE_SEARCH_MAX?: string; // Max search results for search_messages (default: 20)
   MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT?: string; // Default archived payloads per get_archived_tool_payloads (default: 10)
   MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX?: string; // Max archived payloads per get_archived_tool_payloads (default: 50)
+  MCP_EVENT_BUS_LIST_LIMIT?: string; // Default event summaries per list_subscription_events (default: 25)
+  MCP_EVENT_BUS_LIST_MAX?: string; // Max event summaries per list_subscription_events (default: 100)
   MCP_COMMENT_LIST_LIMIT?: string; // Default message-comment threads per request (default: 10)
   MCP_COMMENT_LIST_MAX?: string; // Max message-comment threads per request (default: 25)
   MCP_COMMENT_BODY_MAX_LENGTH?: string; // Max comment/reply body characters accepted via MCP (default: 4000)

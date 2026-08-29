@@ -300,6 +300,8 @@ by the read-only cron-liveness check.
 - `CHAT_SESSION_DELTA_MESSAGE_LIMIT` — Default page size for forward-cursor chat delta fetches after the newest cached browser message (default: 5000)
 - `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT` — Default result count for the `get_archived_tool_payloads` MCP tool (default: 10)
 - `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX` — Maximum result count accepted by the `get_archived_tool_payloads` MCP tool (default: 50)
+- `MCP_EVENT_BUS_LIST_LIMIT` — Default result count for the `list_subscription_events` MCP tool (default: 25)
+- `MCP_EVENT_BUS_LIST_MAX` — Maximum result count accepted by the `list_subscription_events` MCP tool (default: 100)
 - `MCP_TRIGGER_LIST_LIMIT` — Default result count for the `list_triggers` MCP tool (default: 20)
 - `MCP_TRIGGER_LIST_MAX` — Maximum result count accepted by the `list_triggers` MCP tool (default: 100)
 - `MCP_INCIDENT_LIST_LIMIT` — Default result count for the private `list_incident_queue` MCP tool (default: 10)

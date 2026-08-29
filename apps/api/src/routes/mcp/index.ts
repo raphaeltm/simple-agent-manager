@@ -47,6 +47,11 @@ import {
 } from './deployment-tools';
 import { handleDispatchTask } from './dispatch-tool';
 import {
+  handleAckEventDelivery,
+  handleGetEvent,
+  handleListSubscriptionEvents,
+} from './event-bus-tools';
+import {
   handleCreateIdea,
   handleFindRelatedIdeas,
   handleGetIdea,
@@ -324,6 +329,14 @@ mcpRoutes.post('/', async (c) => {
             return c.json(await handleGetPendingMessages(requestId, toolArgs, tokenData, c.env));
           case 'ack_message':
             return c.json(await handleAckMessage(requestId, toolArgs, tokenData, c.env));
+          case 'get_event':
+            return c.json(await handleGetEvent(requestId, toolArgs, tokenData, c.env));
+          case 'list_subscription_events':
+            return c.json(
+              await handleListSubscriptionEvents(requestId, toolArgs, tokenData, c.env)
+            );
+          case 'ack_event_delivery':
+            return c.json(await handleAckEventDelivery(requestId, toolArgs, tokenData, c.env));
           case 'list_message_comment_threads':
             return c.json(
               await handleListMessageCommentThreads(requestId, toolArgs, tokenData, c.env)

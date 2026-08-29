@@ -79,9 +79,14 @@ Comment threads are scoped to the ProjectData Durable Object addressed by `proje
 - `dispatch_task` — Create a direct child task subject to project dispatch depth and concurrency limits.
 - `get_task_details` / `get_peer_agent_output` — Read authoritative child status and output after a durable wake.
 - `get_archived_tool_payloads` — Retrieve ProjectData tool-call payload JSON that has been archived to private R2 and stripped from message rows. Accepts `messageId`, `sessionId`, or `startTime`/`endTime` with bounded `limit`; returns payloads through the Worker without exposing R2 keys.
+- `get_event` — Fetch one durable project event by stable event ID when it is visible through a subscription owned by or targeted at the calling agent. Returns normalized metadata and full payload.
+- `list_subscription_events` — Cursor-paginate event deliveries visible through one authorized subscription. Returns compact summaries with metadata and delivery state but never event payloads; use `get_event` for payload retrieval. `limit` is bounded by `MCP_EVENT_BUS_LIST_MAX`, and cursors are opaque and subscription-bound.
+- `ack_event_delivery` — Idempotently acknowledge an event delivery when its delivery policy requires acknowledgement. Subscriptions/routing decide visibility; the separate delivery policy decides whether acknowledgement is required.
 - `list_incident_queue` / `get_incident` / `claim_incident` / `resolve_incident` — Private feedback-project-only incident backlog tools. The server derives scope from the MCP token and the effective private feedback project setting (Admin → Integrations runtime value first, then `PLATFORM_FEEDBACK_PROJECT_ID` fallback); agents cannot pass a project id. Claim/resolve require a task-scoped token and use bounded leases/CAS tokens. Returned evidence is allowlisted, bounded, recursively redacted, and labelled as untrusted; agents must not copy machine-generated diagnostics or feedback into public GitHub issues.
 
 `wait_for_subtasks` rejects conversation/direct-workspace agents, cross-project task IDs, terminal callers, duplicate IDs, mismatched caller sessions, invalid wait keys, and installations where durable prompt delivery is disabled. Reusing the same `waitKey` and intent is idempotent even after resolution; using a key for a different intent is rejected. Automatic wake prompts contain only trusted task IDs/statuses—peer-authored summaries, errors, and URLs must be fetched explicitly and treated as untrusted data.
+
+Event-bus tools reject caller-supplied project/task/session/workspace identity fields; scope comes from the verified MCP token plus current D1 project predicates. Event, subscription, and delivery misses intentionally use nondisclosing not-found-or-not-visible errors so agents cannot enumerate cross-project or cross-subscription data.
 
 ## Administration (Superadmin Only)
 

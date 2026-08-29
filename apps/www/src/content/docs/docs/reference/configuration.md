@@ -735,8 +735,10 @@ Durable prompt delivery is enabled by default so a follow-up can remain queued w
 | `ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT`   | `100`             | Maximum active durable parent waits per project.                                                                |
 | `ORCHESTRATOR_WAIT_MAX_DURATION_MS`          | `86400000`        | Maximum finite wait deadline.                                                                                   |
 | `ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM` | `10`              | Maximum wait subscriptions reconciled by one ProjectData alarm.                                                 |
+| `MCP_EVENT_BUS_LIST_LIMIT`                   | `25`              | Default event summaries returned by `list_subscription_events`.                                                 |
+| `MCP_EVENT_BUS_LIST_MAX`                     | `100`             | Maximum event summaries accepted for one `list_subscription_events` request.                                    |
 
-ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed by ACP session and prompt epoch. Sleeping-session prompts stay in that queue until strict restore succeeds, then use stable receipts for exactly-once acceptance. Task agents can register `wait_for_subtasks` for same-project tasks; terminal hooks provide low-latency nudges, bounded alarms reconcile missed writers, and one stable delivery ID wakes the caller exactly once. Automatic checkpoint preemption remains disabled.
+ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed by ACP session and prompt epoch. Sleeping-session prompts stay in that queue until strict restore succeeds, then use stable receipts for exactly-once acceptance. Task agents can register `wait_for_subtasks` for same-project tasks; terminal hooks provide low-latency nudges, bounded alarms reconcile missed writers, and one stable delivery ID wakes the caller exactly once. ProjectData also stores durable project event-bus events, subscriptions, delivery policies, and delivery rows so agents can list missed subscription events by opaque cursor, fetch full payloads by stable event ID, and acknowledge only ack-required deliveries. Automatic checkpoint preemption remains disabled.
 
 > **Liveness-gated recovery.** Stuck-task recovery for `in_progress` tasks (including task-mode work paused at the `awaiting_followup` execution step) is gated on **task-scoped** liveness — a live workspace, a healthy node with a recent heartbeat, **and** an active task-scoped ACP session. A shared-node heartbeat alone is never sufficient. Consequently, `TASK_RUN_HARD_TIMEOUT_MS` and `TASK_RUN_MAX_EXECUTION_MS` bound the point at which a task with **no** proven live runtime is failed; a task with a demonstrably live runtime is preserved past those thresholds, but remains bounded by `TASK_RUN_ABSOLUTE_CEILING_MS` (24 hours by default) as a runaway-cost backstop. When liveness cannot be determined (probe timeout or error), the task is left untouched (fail-safe) until it reaches that absolute ceiling.
 
@@ -999,6 +1001,8 @@ Applied via cloud-init on each node:
 | `MCP_MESSAGE_LIST_MAX`                 | `200`   | Max messages per `get_session_messages` request         |
 | `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT` | `10`    | Default page size for `get_archived_tool_payloads`      |
 | `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX`   | `50`    | Max archived payloads per `get_archived_tool_payloads`  |
+| `MCP_EVENT_BUS_LIST_LIMIT`             | `25`    | Default page size for `list_subscription_events`        |
+| `MCP_EVENT_BUS_LIST_MAX`               | `100`   | Max summaries per `list_subscription_events` request    |
 | `MCP_COMMENT_LIST_LIMIT`               | `10`    | Default page size for `list_message_comment_threads`    |
 | `MCP_COMMENT_LIST_MAX`                 | `25`    | Max threads per `list_message_comment_threads` request  |
 | `MCP_COMMENT_BODY_MAX_LENGTH`          | `4000`  | Max comment/reply body characters accepted through MCP  |

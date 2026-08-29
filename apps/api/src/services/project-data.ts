@@ -46,6 +46,13 @@ import type {
   ArchivedToolPayloadQuery,
   MessageToolContentResult,
 } from '../durable-objects/project-data/tool-payload-archive';
+import type {
+  AcknowledgeEventBusDeliveryInput,
+  CreateEventBusSubscriptionInput,
+  EventBusIdentity,
+  ListEventBusSubscriptionEventsInput,
+  PublishEventBusEventInput,
+} from '../durable-objects/project-data/event-bus';
 export {
   CommentIdempotencyConflictError,
   CommentLimitExceededError,
@@ -1344,6 +1351,54 @@ export async function getMailboxStats(
 ): Promise<Record<string, number>> {
   const stub = await getStub(env, projectId);
   return stub.getMailboxStats();
+}
+
+export async function createEventBusSubscription(
+  env: Env,
+  projectId: string,
+  input: CreateEventBusSubscriptionInput
+) {
+  const stub = await getStub(env, projectId);
+  return stub.createEventBusSubscription(input);
+}
+
+export async function publishEventBusEvent(
+  env: Env,
+  projectId: string,
+  input: PublishEventBusEventInput
+) {
+  const stub = await getStub(env, projectId);
+  return stub.publishEventBusEvent(input);
+}
+
+export async function getEventBusEvent(
+  env: Env,
+  projectId: string,
+  eventId: string,
+  identity: EventBusIdentity
+) {
+  const stub = await getStub(env, projectId);
+  return stub.getEventBusEvent(eventId, identity);
+}
+
+export async function listEventBusSubscriptionEvents(
+  env: Env,
+  projectId: string,
+  input: ListEventBusSubscriptionEventsInput,
+  identity: EventBusIdentity
+) {
+  const stub = await getStub(env, projectId);
+  return stub.listEventBusSubscriptionEvents(input, identity);
+}
+
+export async function acknowledgeEventBusDelivery(
+  env: Env,
+  projectId: string,
+  input: AcknowledgeEventBusDeliveryInput,
+  identity: EventBusIdentity
+) {
+  const stub = await getStub(env, projectId);
+  return stub.acknowledgeEventBusDelivery(input, identity);
 }
 
 export async function createCheckpointEpisode(

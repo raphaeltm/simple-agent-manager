@@ -13,7 +13,7 @@ The reference covers:
 - Workspace Management (`/api/workspaces/*`)
 - Project Management (`/api/projects/*`)
 - Task Management (`/api/projects/:projectId/tasks/*`)
-- MCP orchestration (`wait_for_subtasks`, `dispatch_task`, task inspection)
+- MCP orchestration (`wait_for_subtasks`, `dispatch_task`, task inspection, durable event-bus retrieval)
 - MCP private incident backlog tools (`list_incident_queue`, `get_incident`, `claim_incident`, `resolve_incident`)
 - Agent Sessions (`/api/workspaces/:id/agent-sessions/*`)
 - Message-anchored chat comments (`/api/projects/:projectId/sessions/:sessionId/comments*`)
