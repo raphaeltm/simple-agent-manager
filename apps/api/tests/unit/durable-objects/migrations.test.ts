@@ -407,7 +407,8 @@ describe('DO Migrations', () => {
       // tool payload archives: 3 from migration 036 (session+created,
       // created_at, archived_at)
       // tool payload cleanup attempts: 1 from migration 037 (retry sweep)
-      expect(indexes).toHaveLength(69);
+      // project event bus: 11 from migration 038
+      expect(indexes).toHaveLength(80);
     });
   });
 });
