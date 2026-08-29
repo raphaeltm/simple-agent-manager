@@ -187,7 +187,7 @@ describe('task run capacity-pool placement', () => {
       capacity_pool_scope: 'project',
       capacity_source_id: 'cap-source-default:project:project-cloud-1',
       capacity_pool_candidate_id:
-        'cap-candidate-default:cap-pool-default:project:project-1:cap-source-default:project:project-cloud-1:hetzner:fsn1:cx23',
+        'cap-candidate-default:cap-pool-default:project:project-1:cap-source-default:project:project-cloud-1:hetzner:nbg1:cx23',
       placement_credential_source: 'project',
       placement_credential_reference: 'credentials:project-cloud-1',
       capacity_pool_project_id: 'project-1',

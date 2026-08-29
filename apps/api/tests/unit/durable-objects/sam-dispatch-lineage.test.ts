@@ -128,6 +128,9 @@ describe('SAM dispatch_task lineage propagation', () => {
             source: 'project',
           },
         }),
+        expect.objectContaining({
+          env: expect.anything(),
+        }),
       );
       expect(dispatchTaskMocks.startTaskRunnerDO).toHaveBeenCalledWith(
         expect.anything(),

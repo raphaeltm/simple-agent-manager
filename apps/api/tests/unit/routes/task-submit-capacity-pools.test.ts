@@ -227,7 +227,7 @@ describe('task submit capacity-pool placement', () => {
       capacity_pool_revision: 1,
       capacity_source_id: 'cap-source-default:project:project-cloud-1',
       capacity_pool_candidate_id:
-        'cap-candidate-default:cap-pool-default:project:project-1:cap-source-default:project:project-cloud-1:hetzner:fsn1:cx23',
+        'cap-candidate-default:cap-pool-default:project:project-1:cap-source-default:project:project-cloud-1:hetzner:nbg1:cx23',
       placement_credential_source: 'project',
       placement_credential_reference: 'credentials:project-cloud-1',
       placement_credential_version: Date.parse('2026-08-28T00:00:00.000Z'),
@@ -261,7 +261,7 @@ describe('task submit capacity-pool placement', () => {
               id: taskRow.capacity_pool_candidate_id,
               capacitySourceId: taskRow.capacity_source_id,
               provider: 'hetzner',
-              location: 'fsn1',
+              location: 'nbg1',
               machineSize: 'small',
               providerInstanceType: 'cx23',
               providerInstanceVcpuCount: 2,
