@@ -10,7 +10,12 @@ import {
   createSqliteD1,
   createSqliteD1WithBindLimit,
 } from '../../helpers/sqlite-d1';
-import { seedCloudCredential, seedPlatformCloudCredential } from './capacity-pool-test-seeds';
+import {
+  seedCloudCredential,
+  seedPlatformCloudCredential,
+  seedProjectWithMember as seedProjectMember,
+  seedUser,
+} from './capacity-pool-test-seeds';
 
 const authState = vi.hoisted(() => ({
   userId: 'user-1',
@@ -73,35 +78,34 @@ function createEnv(options: { bindLimit?: number } = {}) {
   };
 }
 
-function seedUser(sqlite: Database.Database, id: string, role = 'user') {
-  sqlite
-    .prepare(
-      `INSERT INTO users (id, email, role, status)
-       VALUES (?, ?, ?, 'active')`
-    )
-    .run(id, `${id}@example.com`, role);
+function seedProjectCredentialFixture(
+  sqlite: Database.Database,
+  options: {
+    userId?: string;
+    memberRole?: string;
+    credentialId?: string;
+    provider?: string;
+    projectId?: string;
+  } = {}
+) {
+  const userId = options.userId ?? 'user-1';
+  const projectId = options.projectId ?? 'project-1';
+  seedUser(sqlite, userId);
+  seedProjectMember(sqlite, { projectId, userId, role: options.memberRole ?? 'owner' });
+  seedCloudCredential(sqlite, {
+    id: options.credentialId ?? 'project-cloud-1',
+    userId,
+    projectId,
+    provider: options.provider ?? 'hetzner',
+  });
 }
 
-function seedProjectMember(
-  sqlite: Database.Database,
-  input: { projectId: string; userId: string; role: string }
+function requestProjectDefaults(
+  env: Env,
+  pathSuffix = '/capacity-pools/defaults/reconcile',
+  init: RequestInit = { method: 'POST' }
 ) {
-  sqlite
-    .prepare(
-      `INSERT INTO projects (
-        id, user_id, name, normalized_name, installation_id, repository,
-        default_branch, status, created_by
-       )
-       VALUES (?, ?, 'Capacity Project', 'capacity-project', 'installation-1',
-        'acme/capacity-project', 'main', 'active', ?)`
-    )
-    .run(input.projectId, input.userId, input.userId);
-  sqlite
-    .prepare(
-      `INSERT INTO project_members (project_id, user_id, role, status)
-       VALUES (?, ?, ?, 'active')`
-    )
-    .run(input.projectId, input.userId, input.role);
+  return createApp().request(`/api/projects/project-1${pathSuffix}`, init, env);
 }
 
 describe('project capacity pool routes', () => {
@@ -176,13 +180,7 @@ describe('project capacity pool routes', () => {
 
   it('GET ensure=true reconciles project defaults without exceeding D1 bind limits', async () => {
     const { sqlite, env } = createEnv({ bindLimit: 100 });
-    seedUser(sqlite, 'user-1');
-    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
-    seedCloudCredential(sqlite, {
-      id: 'project-cloud-1',
-      userId: 'user-1',
-      projectId: 'project-1',
-    });
+    seedProjectCredentialFixture(sqlite);
 
     const res = await createApp().request(
       '/api/projects/project-1/capacity-pools/defaults?ensure=true',
@@ -364,24 +362,10 @@ describe('project capacity pool routes', () => {
 
   it('reconciles idempotently through the explicit POST path', async () => {
     const { sqlite, env } = createEnv();
-    seedUser(sqlite, 'user-1');
-    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
-    seedCloudCredential(sqlite, {
-      id: 'project-cloud-1',
-      userId: 'user-1',
-      projectId: 'project-1',
-    });
+    seedProjectCredentialFixture(sqlite);
 
-    const first = await createApp().request(
-      '/api/projects/project-1/capacity-pools/defaults/reconcile',
-      { method: 'POST' },
-      env
-    );
-    const second = await createApp().request(
-      '/api/projects/project-1/capacity-pools/defaults/reconcile',
-      { method: 'POST' },
-      env
-    );
+    const first = await requestProjectDefaults(env);
+    const second = await requestProjectDefaults(env);
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
@@ -465,20 +449,9 @@ describe('project capacity pool routes', () => {
 
   it('re-adds a removed project catalog offering through the PATCH catalogAdditions path', async () => {
     const { sqlite, env } = createEnv();
-    seedUser(sqlite, 'user-1');
-    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
-    seedCloudCredential(sqlite, {
-      id: 'project-cloud-1',
-      userId: 'user-1',
-      projectId: 'project-1',
-      provider: 'hetzner',
-    });
+    seedProjectCredentialFixture(sqlite);
 
-    const reconcile = await createApp().request(
-      '/api/projects/project-1/capacity-pools/defaults/reconcile',
-      { method: 'POST' },
-      env
-    );
+    const reconcile = await requestProjectDefaults(env);
     expect(reconcile.status).toBe(200);
     const initial = await reconcile.json();
     const candidate = initial.effective.candidates.find(
@@ -491,20 +464,21 @@ describe('project capacity pool routes', () => {
     );
     expect(source).toBeTruthy();
 
-    const remove = await createApp().request(
-      '/api/projects/project-1/capacity-pools/defaults',
+    const remove = await requestProjectDefaults(
+      env,
+      '/capacity-pools/defaults',
       {
         method: 'PATCH',
         body: JSON.stringify({
           candidates: [{ id: candidate.id, status: 'deleted' }],
         }),
-      },
-      env
+      }
     );
     expect(remove.status).toBe(200);
 
-    const addBack = await createApp().request(
-      '/api/projects/project-1/capacity-pools/defaults',
+    const addBack = await requestProjectDefaults(
+      env,
+      '/capacity-pools/defaults',
       {
         method: 'PATCH',
         body: JSON.stringify({
@@ -518,8 +492,7 @@ describe('project capacity pool routes', () => {
             },
           ],
         }),
-      },
-      env
+      }
     );
 
     expect(addBack.status).toBe(200);
@@ -534,20 +507,9 @@ describe('project capacity pool routes', () => {
 
   it('rejects catalog additions outside the project default pool', async () => {
     const { sqlite, env } = createEnv();
-    seedUser(sqlite, 'user-1');
-    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
-    seedCloudCredential(sqlite, {
-      id: 'project-cloud-1',
-      userId: 'user-1',
-      projectId: 'project-1',
-      provider: 'hetzner',
-    });
+    seedProjectCredentialFixture(sqlite);
 
-    const reconcile = await createApp().request(
-      '/api/projects/project-1/capacity-pools/defaults/reconcile',
-      { method: 'POST' },
-      env
-    );
+    const reconcile = await requestProjectDefaults(env);
     expect(reconcile.status).toBe(200);
 
     const res = await createApp().request(
@@ -643,13 +605,7 @@ describe('project capacity pool routes', () => {
 
   it('preserves edited project candidate statuses during GET ensure=true reconciliation', async () => {
     const { sqlite, env } = createEnv({ bindLimit: 100 });
-    seedUser(sqlite, 'user-1');
-    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
-    seedCloudCredential(sqlite, {
-      id: 'project-cloud-1',
-      userId: 'user-1',
-      projectId: 'project-1',
-    });
+    seedProjectCredentialFixture(sqlite);
 
     const initialRes = await createApp().request(
       '/api/projects/project-1/capacity-pools/defaults?ensure=true',
@@ -694,19 +650,9 @@ describe('project capacity pool routes', () => {
 
   it('requires project secret-write capability for project default edits', async () => {
     const { sqlite, env } = createEnv();
-    seedUser(sqlite, 'user-1');
-    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'maintainer' });
-    seedCloudCredential(sqlite, {
-      id: 'project-cloud-1',
-      userId: 'user-1',
-      projectId: 'project-1',
-    });
+    seedProjectCredentialFixture(sqlite, { memberRole: 'maintainer' });
 
-    const reconcile = await createApp().request(
-      '/api/projects/project-1/capacity-pools/defaults/reconcile',
-      { method: 'POST' },
-      env
-    );
+    const reconcile = await requestProjectDefaults(env);
     expect(reconcile.status).toBe(200);
     const initial = await reconcile.json();
     const candidate = initial.effective.candidates[0];
@@ -764,13 +710,7 @@ describe('project capacity pool routes', () => {
 
   it('supports read-only inspection with ensure=false', async () => {
     const { sqlite, env } = createEnv();
-    seedUser(sqlite, 'user-1');
-    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
-    seedCloudCredential(sqlite, {
-      id: 'project-cloud-1',
-      userId: 'user-1',
-      projectId: 'project-1',
-    });
+    seedProjectCredentialFixture(sqlite);
 
     const res = await createApp().request(
       '/api/projects/project-1/capacity-pools/defaults?ensure=false',
@@ -793,13 +733,7 @@ describe('project capacity pool routes', () => {
 
   it('is read-only by default: GET without ensure does not reconcile', async () => {
     const { sqlite, env } = createEnv();
-    seedUser(sqlite, 'user-1');
-    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
-    seedCloudCredential(sqlite, {
-      id: 'project-cloud-1',
-      userId: 'user-1',
-      projectId: 'project-1',
-    });
+    seedProjectCredentialFixture(sqlite);
 
     const res = await createApp().request(
       '/api/projects/project-1/capacity-pools/defaults',

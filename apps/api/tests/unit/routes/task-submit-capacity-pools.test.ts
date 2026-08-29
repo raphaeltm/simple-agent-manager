@@ -8,6 +8,11 @@ import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
+import {
+  seedCloudCredential,
+  seedProjectWithMember,
+  seedUser,
+} from './capacity-pool-test-seeds';
 
 const authState = vi.hoisted(() => ({
   userId: 'user-1',
@@ -95,45 +100,13 @@ function createEnv() {
 }
 
 function seedTaskSubmitRows(sqlite: Database.Database): void {
-  sqlite
-    .prepare(
-      `INSERT INTO users (id, email, role, status, github_id)
-       VALUES ('user-1', 'user-1@example.com', 'user', 'active', NULL)`
-    )
-    .run();
-  sqlite
-    .prepare(
-      `INSERT INTO projects (
-         id, user_id, name, normalized_name, installation_id, repository,
-         default_branch, default_provider, default_location, default_vm_size,
-         status, created_by
-       )
-       VALUES (
-         'project-1', 'user-1', 'Capacity Project', 'capacity-project',
-         'installation-1', 'acme/capacity-project', 'main',
-         'hetzner', 'fsn1', 'small', 'active', 'user-1'
-       )`
-    )
-    .run();
-  sqlite
-    .prepare(
-      `INSERT INTO project_members (project_id, user_id, role, status)
-       VALUES ('project-1', 'user-1', 'owner', 'active')`
-    )
-    .run();
-  sqlite
-    .prepare(
-      `INSERT INTO credentials (
-         id, user_id, project_id, provider, credential_type, credential_kind,
-         is_active, encrypted_token, iv, created_at, updated_at
-       )
-       VALUES (
-         'project-cloud-1', 'user-1', 'project-1', 'hetzner',
-         'cloud-provider', 'api-key', 1, 'encrypted-token', 'iv',
-         '2026-08-28T00:00:00.000Z', '2026-08-28T00:00:00.000Z'
-       )`
-    )
-    .run();
+  seedUser(sqlite, 'user-1');
+  seedProjectWithMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
+  seedCloudCredential(sqlite, {
+    id: 'project-cloud-1',
+    userId: 'user-1',
+    projectId: 'project-1',
+  });
 }
 
 async function seedProjectDefaultPool(env: Env): Promise<void> {

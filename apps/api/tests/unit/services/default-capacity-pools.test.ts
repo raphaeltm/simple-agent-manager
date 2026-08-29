@@ -364,6 +364,61 @@ function getRows<T>(sql: string): T[] {
   return sqlite?.prepare(sql).all() as T[];
 }
 
+type CatalogCandidateRow = {
+  location: string;
+  machine_size: string | null;
+  provider_instance_type: string;
+  provider_instance_display_name: string;
+  provider_instance_vcpu_count: number;
+  provider_instance_memory_mb: number;
+  provider_instance_disk_gb: number;
+  provider_instance_price_display: string;
+  provider_instance_price_currency: string;
+  provider_instance_price_monthly_cents: number;
+  provider_instance_price_hourly_micros: number;
+  provider_instance_catalog_source: string;
+  provider_instance_catalog_last_seen_at: string | null;
+};
+
+function getCatalogCandidateRow(providerInstanceType: string): CatalogCandidateRow | undefined {
+  return getRows<CatalogCandidateRow>(`
+    SELECT
+      location,
+      machine_size,
+      provider_instance_type,
+      provider_instance_display_name,
+      provider_instance_vcpu_count,
+      provider_instance_memory_mb,
+      provider_instance_disk_gb,
+      provider_instance_price_display,
+      provider_instance_price_currency,
+      provider_instance_price_monthly_cents,
+      provider_instance_price_hourly_micros,
+      provider_instance_catalog_source,
+      provider_instance_catalog_last_seen_at
+    FROM capacity_pool_candidates
+    WHERE provider_instance_type = '${providerInstanceType}'
+  `)[0];
+}
+
+function expectCpx62CatalogCandidate(lastSeenAt: string | ReturnType<typeof expect.any>) {
+  expect(getCatalogCandidateRow('cpx62')).toEqual({
+    location: 'fsn1',
+    machine_size: null,
+    provider_instance_type: 'cpx62',
+    provider_instance_display_name: 'CPX62',
+    provider_instance_vcpu_count: 32,
+    provider_instance_memory_mb: 65_536,
+    provider_instance_disk_gb: 480,
+    provider_instance_price_display: '€48.12/mo',
+    provider_instance_price_currency: 'EUR',
+    provider_instance_price_monthly_cents: 4812,
+    provider_instance_price_hourly_micros: 65_920,
+    provider_instance_catalog_source: 'api',
+    provider_instance_catalog_last_seen_at: lastSeenAt,
+  });
+}
+
 function expectedCandidateCount(provider: 'hetzner' | 'vultr' | 'digitalocean'): number {
   return getLocationsForProvider(provider).length * getProviderInstanceOfferings(provider).length;
 }
@@ -771,54 +826,7 @@ describe('default capacity pool creation', () => {
 
     expect(result.user?.activeCandidateCount).toBe(liveOfferings.length);
     expect(getCount('capacity_pool_candidates')).toBe(liveOfferings.length);
-    expect(
-      getRows<{
-        location: string;
-        machine_size: string | null;
-        provider_instance_type: string;
-        provider_instance_display_name: string;
-        provider_instance_vcpu_count: number;
-        provider_instance_memory_mb: number;
-        provider_instance_disk_gb: number;
-        provider_instance_price_display: string;
-        provider_instance_price_currency: string;
-        provider_instance_price_monthly_cents: number;
-        provider_instance_price_hourly_micros: number;
-        provider_instance_catalog_source: string;
-        provider_instance_catalog_last_seen_at: string | null;
-      }>(`
-        SELECT
-          location,
-          machine_size,
-          provider_instance_type,
-          provider_instance_display_name,
-          provider_instance_vcpu_count,
-          provider_instance_memory_mb,
-          provider_instance_disk_gb,
-          provider_instance_price_display,
-          provider_instance_price_currency,
-          provider_instance_price_monthly_cents,
-          provider_instance_price_hourly_micros,
-          provider_instance_catalog_source,
-          provider_instance_catalog_last_seen_at
-        FROM capacity_pool_candidates
-        WHERE provider_instance_type = 'cpx62'
-      `)[0]
-    ).toEqual({
-      location: 'fsn1',
-      machine_size: null,
-      provider_instance_type: 'cpx62',
-      provider_instance_display_name: 'CPX62',
-      provider_instance_vcpu_count: 32,
-      provider_instance_memory_mb: 65_536,
-      provider_instance_disk_gb: 480,
-      provider_instance_price_display: '€48.12/mo',
-      provider_instance_price_currency: 'EUR',
-      provider_instance_price_monthly_cents: 4812,
-      provider_instance_price_hourly_micros: 65_920,
-      provider_instance_catalog_source: 'api',
-      provider_instance_catalog_last_seen_at: LIVE_CATALOG_LAST_SEEN_AT,
-    });
+    expectCpx62CatalogCandidate(LIVE_CATALOG_LAST_SEEN_AT);
   });
 
   it('reconciles Hetzner defaults through the credential-backed live provider catalog path', async () => {
@@ -874,54 +882,7 @@ describe('default capacity pool creation', () => {
       })
     );
     expect(result.user?.activeCandidateCount).toBe(2);
-    expect(
-      getRows<{
-        location: string;
-        machine_size: string | null;
-        provider_instance_type: string;
-        provider_instance_display_name: string;
-        provider_instance_vcpu_count: number;
-        provider_instance_memory_mb: number;
-        provider_instance_disk_gb: number;
-        provider_instance_price_display: string;
-        provider_instance_price_currency: string;
-        provider_instance_price_monthly_cents: number;
-        provider_instance_price_hourly_micros: number;
-        provider_instance_catalog_source: string;
-        provider_instance_catalog_last_seen_at: string | null;
-      }>(`
-        SELECT
-          location,
-          machine_size,
-          provider_instance_type,
-          provider_instance_display_name,
-          provider_instance_vcpu_count,
-          provider_instance_memory_mb,
-          provider_instance_disk_gb,
-          provider_instance_price_display,
-          provider_instance_price_currency,
-          provider_instance_price_monthly_cents,
-          provider_instance_price_hourly_micros,
-          provider_instance_catalog_source,
-          provider_instance_catalog_last_seen_at
-        FROM capacity_pool_candidates
-        WHERE provider_instance_type = 'cpx62'
-      `)[0]
-    ).toEqual({
-      location: 'fsn1',
-      machine_size: null,
-      provider_instance_type: 'cpx62',
-      provider_instance_display_name: 'CPX62',
-      provider_instance_vcpu_count: 32,
-      provider_instance_memory_mb: 65_536,
-      provider_instance_disk_gb: 480,
-      provider_instance_price_display: '€48.12/mo',
-      provider_instance_price_currency: 'EUR',
-      provider_instance_price_monthly_cents: 4812,
-      provider_instance_price_hourly_micros: 65_920,
-      provider_instance_catalog_source: 'api',
-      provider_instance_catalog_last_seen_at: expect.any(String),
-    });
+    expectCpx62CatalogCandidate(expect.any(String));
   });
 
   it('logs sanitized provider catalog fallback warnings and marks static Hetzner rows', async () => {

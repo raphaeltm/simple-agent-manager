@@ -2,6 +2,38 @@ import type Database from 'better-sqlite3';
 
 const SEEDED_AT = '2026-08-28T00:00:00.000Z';
 
+export function seedUser(sqlite: Database.Database, id: string, role = 'user') {
+  sqlite
+    .prepare(
+      `INSERT INTO users (id, email, role, status)
+       VALUES (?, ?, ?, 'active')`
+    )
+    .run(id, `${id}@example.com`, role);
+}
+
+export function seedProjectWithMember(
+  sqlite: Database.Database,
+  input: { projectId: string; userId: string; role: string }
+) {
+  sqlite
+    .prepare(
+      `INSERT INTO projects (
+        id, user_id, name, normalized_name, installation_id, repository,
+        default_branch, default_provider, default_location, default_vm_size,
+        status, created_by
+       )
+       VALUES (?, ?, 'Capacity Project', 'capacity-project', 'installation-1',
+        'acme/capacity-project', 'main', 'hetzner', 'fsn1', 'small', 'active', ?)`
+    )
+    .run(input.projectId, input.userId, input.userId);
+  sqlite
+    .prepare(
+      `INSERT INTO project_members (project_id, user_id, role, status)
+       VALUES (?, ?, ?, 'active')`
+    )
+    .run(input.projectId, input.userId, input.role);
+}
+
 export function seedCloudCredential(
   sqlite: Database.Database,
   input: {
