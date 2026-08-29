@@ -140,18 +140,20 @@ export function initialStatusForProviderOffering(input: {
   legacyStatus?: CapacityPoolStatus | null;
   legacyVmSize?: VMSize | null;
 }): CapacityPoolStatus {
-  if (input.existingStatus) {
-    if (input.existingSelectionOrigin === USER_SELECTION_ORIGIN) return input.existingStatus;
-    if (input.existingStatus === DISABLED_STATUS || input.existingStatus === DELETED_STATUS) {
-      return input.existingStatus;
-    }
-    return input.legacyVmSize ? ACTIVE_STATUS : DISABLED_STATUS;
+  if (input.existingSelectionOrigin === USER_SELECTION_ORIGIN && input.existingStatus) {
+    return input.existingStatus;
   }
   if (
     input.legacyVmSize &&
     (input.legacyStatus === DISABLED_STATUS || input.legacyStatus === DELETED_STATUS)
   ) {
     return input.legacyStatus;
+  }
+  if (input.existingStatus) {
+    if (input.existingStatus === DISABLED_STATUS || input.existingStatus === DELETED_STATUS) {
+      return input.existingStatus;
+    }
+    return input.legacyVmSize ? ACTIVE_STATUS : DISABLED_STATUS;
   }
   return input.legacyVmSize ? ACTIVE_STATUS : DISABLED_STATUS;
 }
