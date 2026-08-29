@@ -3,6 +3,8 @@ import { resolve } from 'node:path';
 
 import { expect, type Page, type Route, test } from '@playwright/test';
 
+const DEFAULT_SCREENSHOT_DIR = '../../.tmp/playwright-screenshots';
+
 interface MockUserOptions {
   email: string;
   name: string;
@@ -40,7 +42,7 @@ export async function screenshot(page: Page, name: string) {
   await page.waitForTimeout(600);
   const viewport = page.viewportSize();
   const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
-  const screenshotDir = resolve(process.cwd(), '../../.codex/tmp/playwright-screenshots');
+  const screenshotDir = resolve(process.cwd(), DEFAULT_SCREENSHOT_DIR);
   mkdirSync(screenshotDir, { recursive: true });
   await page.screenshot({
     path: `${screenshotDir}/${name}${suffix}.png`,
@@ -108,7 +110,7 @@ export async function screenshotNearHeading(
   const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
   const screenshotDir = resolve(
     process.cwd(),
-    options.outputDir ?? '../../.codex/tmp/playwright-screenshots'
+    options.outputDir ?? DEFAULT_SCREENSHOT_DIR
   );
   mkdirSync(screenshotDir, { recursive: true });
   await page.screenshot({
@@ -130,7 +132,7 @@ export async function screenshotSectionNearHeading(
   const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
   const screenshotDir = resolve(
     process.cwd(),
-    options.outputDir ?? '../../.codex/tmp/playwright-screenshots'
+    options.outputDir ?? DEFAULT_SCREENSHOT_DIR
   );
   mkdirSync(screenshotDir, { recursive: true });
   const section = headingLocator.locator('xpath=ancestor::section[1]').first();
