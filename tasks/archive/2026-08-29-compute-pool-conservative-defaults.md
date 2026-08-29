@@ -62,9 +62,14 @@ This task must open a new draft child PR against `sam/compute-pools-integration`
 - [x] If UI copy is changed, update component/unit tests for available-but-not-selected catalog rows and ensure no `small|medium|large` add choices appear.
 - [x] Update Playwright audit mocks/screenshots to show full catalog visibility with only legacy concrete SKUs selected and expensive offerings visible but not selected.
 - [x] Run targeted API/web tests during implementation and fix failures.
-- [ ] Re-read this task file and `.do-state.md`, then confirm every acceptance criterion before Phase 4.
-- [ ] Run full pre-PR validation: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
-- [ ] Run task-completion-validator before archiving.
+- [x] Re-read this task file and `.do-state.md`, then confirm every code-level acceptance criterion before Phase 4; staging/PR acceptance criteria remain assigned to Phases 6-7.
+- [x] Run full pre-PR validation: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
+- [x] Run task-completion-validator before archiving.
+
+## Post-archive workflow gates
+
+These `/do` workflow gates remain tracked in `.do-state.md` through PR completion rather than being treated as implementation checklist items.
+
 - [ ] Run required Phase 5 local reviews: task-completion-validator, cloudflare-specialist, constitution-validator, test-engineer, and ui-ux-specialist if UI or Playwright artifacts change.
 - [ ] Deploy the child branch to staging via `deploy-staging.yml` and validate the live feature with Playwright, D1/API evidence, and a real VM prompt/session.
 - [ ] Clean up staging workspaces/nodes/VMs created during validation and confirm staging returns to zero VMs/nodes at rest.

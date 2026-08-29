@@ -1,11 +1,11 @@
 import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
-import {
-  isCapacityPoolStatus,
-  type CapacityPoolStatus,
+import type {
+  CapacityPoolStatus,
   CredentialProvider,
   ProviderInstanceOffering,
   VMSize,
 } from '@simple-agent-manager/shared';
+import { isCapacityPoolStatus } from '@simple-agent-manager/shared';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
