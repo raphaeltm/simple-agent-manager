@@ -3,6 +3,28 @@ import { describe, expect, it } from 'vitest';
 import { getProviderInstanceOfferings, normalizeProviderPrice } from '../../src/instance-offerings';
 
 describe('provider instance offerings', () => {
+  it.each(['hetzner', 'scaleway', 'vultr', 'digitalocean', 'upcloud', 'gcp', 'infomaniak'] as const)(
+    'returns concrete normalized offerings for %s',
+    (provider) => {
+      const offerings = getProviderInstanceOfferings(provider);
+
+      expect(offerings.length).toBeGreaterThanOrEqual(3);
+      expect(new Set(offerings.map((offering) => offering.legacyVmSize))).toEqual(
+        new Set(['small', 'medium', 'large'])
+      );
+      expect(
+        offerings.every(
+          (offering) =>
+            offering.provider === provider &&
+            offering.instanceType.length > 0 &&
+            offering.vcpuCount > 0 &&
+            offering.memoryMb > 0 &&
+            (offering.diskGb === null || offering.diskGb > 0)
+        )
+      ).toBe(true);
+    }
+  );
+
   it('flattens provider size metadata into concrete provider-native offerings', () => {
     expect(getProviderInstanceOfferings('vultr')).toEqual([
       expect.objectContaining({

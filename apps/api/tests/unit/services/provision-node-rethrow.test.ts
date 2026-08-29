@@ -264,7 +264,8 @@ describe('provisionNode backend DNS records', () => {
       'test-key',
       ENV,
       'hetzner',
-      'project-1'
+      'project-1',
+      null
     );
     expect(ops).toContainEqual(
       expect.objectContaining({
@@ -276,6 +277,45 @@ describe('provisionNode backend DNS records', () => {
           credentialAttributionSource: 'project',
         }),
       })
+    );
+  });
+
+  it('uses the selected pool credential reference as the exact provider authority', async () => {
+    nodeRows.length = 0;
+    nodeRows.push({
+      id: 'node-project-pool',
+      userId: 'member-b',
+      credentialAttributionUserId: 'member-b',
+      credentialAttributionProjectId: 'project-1',
+      credentialAttributionSource: 'project',
+      vmSize: 'large',
+      vmLocation: 'fsn1',
+      cloudProvider: 'hetzner',
+      capacityPoolId: 'pool-project-1',
+      placementCredentialSource: 'project',
+      placementCredentialReference: 'credentials:project-cloud-owner',
+      placementCredentialVersion: 1700000000000,
+    });
+    createProviderForUser.mockResolvedValueOnce({
+      provider: { createVM },
+      providerName: 'hetzner',
+      credentialSource: 'project',
+    });
+
+    await provisionNode('node-project-pool', ENV, { projectId: 'project-1', chatSessionId: '', taskId: 'task-1' });
+
+    expect(createProviderForUser).toHaveBeenCalledWith(
+      expect.anything(),
+      'member-b',
+      'test-key',
+      ENV,
+      'hetzner',
+      'project-1',
+      {
+        credentialSource: 'project',
+        credentialReference: 'credentials:project-cloud-owner',
+        credentialVersion: 1700000000000,
+      }
     );
   });
 

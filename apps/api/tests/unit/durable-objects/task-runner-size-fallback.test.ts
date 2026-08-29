@@ -278,6 +278,25 @@ beforeEach(() => {
 });
 
 describe('TaskRunner size-fallback descent', () => {
+  it('does not provision through legacy fallback when the selected pool has no candidates', async () => {
+    const { DATABASE } = createDbMock({});
+    const rc = createContext(DATABASE);
+    const state = createState({
+      capacityPoolSelection: {
+        ...capacityPoolSelection(),
+        candidates: [],
+      },
+    });
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      message: 'No active compute pool offerings in the selected user pool satisfy the requested resources.',
+      permanent: true,
+    });
+
+    expect(createNodeRecord).not.toHaveBeenCalled();
+    expect(provisionNode).not.toHaveBeenCalled();
+  });
+
   it('rechecks source authority after alarm entry and before creating a node record', async () => {
     const { DATABASE } = createDbMock({});
     const rc = createContext(DATABASE);

@@ -24,7 +24,11 @@ import { type drizzle } from 'drizzle-orm/d1';
 import type * as schema from '../db/schema';
 import { log } from '../lib/logger';
 import { resolveEffectiveDefaultCapacityPoolSummary } from './default-capacity-pools';
-import { buildCapacityPoolSelection } from './placement-resolver-capacity';
+import {
+  buildCapacityPoolSelection,
+  capacityPoolNoCandidatesMessage,
+  hasNoCapacityPoolCandidates,
+} from './placement-resolver-capacity';
 import type {
   PlacementCredentialAttribution,
   PlacementCredentialAttributionInput,
@@ -49,7 +53,10 @@ import type { WorkspaceRuntimeDecision } from './workspace-runtime';
 
 export {
   capacityPlacementSnapshotForTaskStart,
+  capacityPoolNoCandidatesError,
+  capacityPoolNoCandidatesMessage,
   capacityPoolSnapshotForPool,
+  hasNoCapacityPoolCandidates,
   resolveReusableNodeCapacitySnapshot,
 } from './placement-resolver-capacity';
 export type {
@@ -215,8 +222,7 @@ export async function resolveTaskStartCapacityPoolSelection(
     });
     if (!summary) return null;
 
-    const selection = buildCapacityPoolSelection(summary, placement, 'workspace');
-    return selection?.candidates.length ? selection : null;
+    return buildCapacityPoolSelection(summary, placement, 'workspace');
   } catch (error) {
     if (options.failOpen === false) throw error;
     log.warn('placement_resolver.capacity_pool_unavailable', {
@@ -291,6 +297,9 @@ export async function resolveTaskStartPlacementCredentialAttribution(
   }
 
   const capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement);
+  if (capacityPoolSelection && hasNoCapacityPoolCandidates(capacityPoolSelection)) {
+    return { error: capacityPoolNoCandidatesMessage(capacityPoolSelection) };
+  }
   const credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
   const credential = await resolveCredentialSource(
     db,

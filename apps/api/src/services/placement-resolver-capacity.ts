@@ -52,6 +52,26 @@ export function capacityPlacementSnapshotForTaskStart(
   return selection?.candidates[0]?.snapshot ?? selection?.poolSnapshot ?? null;
 }
 
+export function hasNoCapacityPoolCandidates(
+  selection: TaskStartCapacityPoolSelection | null | undefined
+): boolean {
+  return !!selection && selection.candidates.length === 0;
+}
+
+export function capacityPoolNoCandidatesMessage(
+  selection: Pick<TaskStartCapacityPoolSelection, 'scope'>
+): string {
+  return `No active compute pool offerings in the selected ${selection.scope} pool satisfy the requested resources.`;
+}
+
+export function capacityPoolNoCandidatesError(
+  selection: Pick<TaskStartCapacityPoolSelection, 'scope'>
+): Error & { permanent: true } {
+  return Object.assign(new Error(capacityPoolNoCandidatesMessage(selection)), {
+    permanent: true as const,
+  });
+}
+
 export function resolveReusableNodeCapacitySnapshot(input: {
   selection: TaskStartCapacityPoolSelection | null | undefined;
   node: CapacityAwareNodePlacementRow;
@@ -65,6 +85,10 @@ export function resolveReusableNodeCapacitySnapshot(input: {
   if (!selection) {
     if (node.capacityPoolScope === 'project') return undefined;
     return null;
+  }
+
+  if (hasNoCapacityPoolCandidates(selection)) {
+    return undefined;
   }
 
   if (!node.capacityPoolId) {

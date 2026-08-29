@@ -15,6 +15,7 @@ import {
   resolveEffectiveDefaultCapacityPoolSummary,
 } from '../../../src/services/default-capacity-pools';
 import {
+  capacityPlacementSnapshotForTaskStart,
   resolveTaskStartCapacityPoolSelection,
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
@@ -454,6 +455,54 @@ describe('default capacity pool creation', () => {
     ]);
   });
 
+  it('preserves existing candidate priority and order during default reconciliation', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+    });
+
+    const [candidate] = getRows<{
+      id: string;
+      provider_instance_type: string;
+    }>(`
+      SELECT id, provider_instance_type
+      FROM capacity_pool_candidates
+      WHERE provider_instance_type = 'vc2-4c-8gb'
+      LIMIT 1
+    `);
+    expect(candidate).toBeDefined();
+
+    sqlite
+      ?.prepare(
+        `
+        UPDATE capacity_pool_candidates
+        SET priority = 42, candidate_order = 17
+        WHERE id = ?
+      `
+      )
+      .run(candidate?.id);
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+    });
+
+    expect(
+      sqlite
+        ?.prepare(
+          `
+          SELECT priority, candidate_order
+          FROM capacity_pool_candidates
+          WHERE id = ?
+        `
+        )
+        .all(candidate?.id)
+    ).toEqual([{ priority: 42, candidate_order: 17 }]);
+  });
+
   it('orders effective default-pool candidates by the selected v1 strategy', async () => {
     const db = createDb();
     seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
@@ -559,6 +608,49 @@ describe('default capacity pool creation', () => {
     });
   });
 
+  it('returns an authoritative empty selection when no concrete offering satisfies resources', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+    });
+
+    const placement = resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'resource-too-heavy-task',
+      projectId: 'project-1',
+      userId: 'user-1',
+      project: {
+        id: 'project-1',
+        defaultProvider: 'vultr',
+        defaultLocation: getDefaultLocationForProvider('vultr'),
+        defaultVmSize: 'small',
+      },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+      resourceRequirements: {
+        task: { minVcpu: 128, minMemoryGb: 512 },
+      },
+    });
+
+    const selection = await resolveTaskStartCapacityPoolSelection(db as never, placement, {
+      ensure: false,
+    });
+
+    expect(selection).toMatchObject({
+      scope: 'user',
+      poolId: 'cap-pool-default:user:user-1',
+      candidates: [],
+    });
+    expect(capacityPlacementSnapshotForTaskStart(selection)).toMatchObject({
+      capacityPoolId: 'cap-pool-default:user:user-1',
+      capacityPoolCandidateId: null,
+      capacitySourceId: null,
+    });
+  });
+
   it('keeps capacity candidates aligned with the resolved provider and explicit location', async () => {
     const providerMismatchDb = createDb();
     const providerMismatchSqlite = sqlite;
@@ -585,11 +677,15 @@ describe('default capacity pool creation', () => {
       resourceRequirements: {},
     });
 
-    await expect(
-      resolveTaskStartCapacityPoolSelection(providerMismatchDb as never, hetznerPlacement, {
-        ensure: false,
-      })
-    ).resolves.toBeNull();
+    const mismatchSelection = await resolveTaskStartCapacityPoolSelection(
+      providerMismatchDb as never,
+      hetznerPlacement,
+      { ensure: false }
+    );
+    expect(mismatchSelection).toMatchObject({
+      scope: 'user',
+      candidates: [],
+    });
     providerMismatchSqlite?.close();
     sqlite = null;
 
@@ -798,9 +894,13 @@ describe('default capacity pool creation', () => {
       taskModeDefault: 'task',
       resourceRequirements: {},
     });
-    await expect(
-      resolveTaskStartCapacityPoolSelection(db as never, ashPlacement, { ensure: false })
-    ).resolves.toBeNull();
+    const ashSelection = await resolveTaskStartCapacityPoolSelection(db as never, ashPlacement, {
+      ensure: false,
+    });
+    expect(ashSelection).toMatchObject({
+      scope: 'user',
+      candidates: [],
+    });
   });
 
   it('disables pool availability when a backing credential is disabled', async () => {

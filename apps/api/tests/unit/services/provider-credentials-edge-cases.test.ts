@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { decrypt } from '../../../src/services/encryption';
 import {
   buildProviderConfig,
+  createProviderForUser,
   extractScalewaySecretKey,
   getUserCloudProviderConfig,
   serializeCredentialToken,
@@ -275,6 +276,73 @@ describe('getUserCloudProviderConfig', () => {
     const result = await getUserCloudProviderConfig(db, 'user-1', 'enc-key');
     expect(result).not.toBeNull();
     expect(result!.provider).toBe('hetzner');
+  });
+});
+
+describe('createProviderForUser exact credential binding', () => {
+  const makeDbMock = (rows: any[]) => ({
+    select: vi.fn().mockReturnThis(),
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockResolvedValue(rows),
+  });
+
+  it('refuses fallback when an exact pool credential reference is unavailable', async () => {
+    mockDecrypt.mockClear();
+    const db = makeDbMock([]) as any;
+
+    const result = await createProviderForUser(
+      db,
+      'user-1',
+      'enc-key',
+      {} as any,
+      'hetzner',
+      null,
+      {
+        credentialSource: 'user',
+        credentialReference: 'credentials:missing-credential',
+      }
+    );
+
+    expect(result).toBeNull();
+    expect(mockDecrypt).not.toHaveBeenCalled();
+  });
+
+  it('creates a provider from the exact project credential reference and source', async () => {
+    mockDecrypt.mockClear();
+    mockDecrypt.mockResolvedValueOnce('hetzner-api-token');
+    const db = makeDbMock([
+      {
+        id: 'project-cloud-1',
+        userId: 'project-owner',
+        projectId: 'project-1',
+        provider: 'hetzner',
+        credentialType: 'cloud-provider',
+        isActive: true,
+        encryptedToken: 'ciphertext',
+        iv: 'iv',
+      },
+    ]) as any;
+
+    const result = await createProviderForUser(
+      db,
+      'project-member',
+      'enc-key',
+      {} as any,
+      'hetzner',
+      'project-1',
+      {
+        credentialSource: 'project',
+        credentialReference: 'credentials:project-cloud-1',
+        credentialVersion: 1700000000000,
+      }
+    );
+
+    expect(result).toMatchObject({
+      providerName: 'hetzner',
+      credentialSource: 'project',
+    });
+    expect(mockDecrypt).toHaveBeenCalledWith('ciphertext', 'iv', 'enc-key');
   });
 });
 

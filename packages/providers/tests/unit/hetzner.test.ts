@@ -206,6 +206,22 @@ describe('HetznerProvider', () => {
       });
     });
 
+    it('uses config.instanceType as the concrete server_type when provided', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            server: createMockServer({ status: 'initializing', server_type: { name: 'cx42' } }),
+          }),
+          { status: 200 }
+        )
+      );
+
+      await provider.createVM({ ...vmConfig, size: 'small', instanceType: 'cx42' });
+
+      const body = jsonBody(fetchCall(fetch as ReturnType<typeof vi.fn>, 0).init);
+      expect(body.server_type).toBe('cx42');
+    });
+
     it('should throw ProviderError on API failure', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(
         new Response(JSON.stringify({ error: { message: 'Quota exceeded' } }), { status: 403 }),

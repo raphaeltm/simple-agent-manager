@@ -508,6 +508,22 @@ function nodeCapacityFields(selection: TaskStartCapacityPoolSelection) {
 }
 
 describe('TaskRunner node selection VM size minimum behavior', () => {
+  it('does not reuse legacy nodes when the selected pool has no candidates', async () => {
+    const rc = createContext({});
+    const state = createState();
+    state.config.capacityPoolSelection = {
+      ...capacityPoolSelection('user'),
+      candidates: [],
+    };
+
+    await expect(handleNodeSelection(state, rc)).rejects.toMatchObject({
+      message: 'No active compute pool offerings in the selected user pool satisfy the requested resources.',
+      permanent: true,
+    });
+
+    expect(rc.advanceToStep).not.toHaveBeenCalled();
+  });
+
   it('recovers a D1-persisted warm claim before discovering new candidates', async () => {
     const now = new Date().toISOString();
     const state = createState();

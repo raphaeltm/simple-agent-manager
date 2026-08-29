@@ -104,6 +104,7 @@ function buildCapacityPlacementPredicate(input: WorkspacePlacementInput): {
   binds: Array<string | number | null>;
 } {
   const snapshot = input.capacityPlacementSnapshot ?? null;
+  const concretePredicate = snapshot ? buildConcretePlacementPredicate(snapshot) : null;
   if (!snapshot?.capacityPoolId) {
     return {
       sql: `AND (
@@ -127,15 +128,45 @@ function buildCapacityPlacementPredicate(input: WorkspacePlacementInput): {
       sql: `AND n.capacity_pool_scope = 'project'
         AND n.capacity_pool_id = ?
         AND n.capacity_source_id = ?
-        AND n.capacity_pool_project_id = ?`,
-      binds: [snapshot.capacityPoolId, snapshot.capacitySourceId, input.projectId],
+        AND n.capacity_pool_project_id = ?
+        ${concretePredicate?.sql ?? ''}`,
+      binds: [
+        snapshot.capacityPoolId,
+        snapshot.capacitySourceId,
+        input.projectId,
+        ...(concretePredicate?.binds ?? []),
+      ],
     };
   }
 
   return {
     sql: `AND (n.capacity_pool_scope IS NULL OR n.capacity_pool_scope != 'project')
       AND n.capacity_pool_id = ?
-      AND n.capacity_source_id = ?`,
-    binds: [snapshot.capacityPoolId, snapshot.capacitySourceId],
+      AND n.capacity_source_id = ?
+      ${concretePredicate?.sql ?? ''}`,
+    binds: [snapshot.capacityPoolId, snapshot.capacitySourceId, ...(concretePredicate?.binds ?? [])],
+  };
+}
+
+function buildConcretePlacementPredicate(snapshot: CapacityPlacementSnapshot): {
+  sql: string;
+  binds: Array<string | number | null>;
+} {
+  const clauses: string[] = [];
+  const binds: Array<string | number | null> = [];
+
+  if (snapshot.capacityPoolCandidateId) {
+    clauses.push('(n.capacity_pool_candidate_id IS NULL OR n.capacity_pool_candidate_id = ?)');
+    binds.push(snapshot.capacityPoolCandidateId);
+  }
+
+  if (snapshot.providerInstanceType) {
+    clauses.push('(n.provider_instance_type IS NULL OR n.provider_instance_type = ?)');
+    binds.push(snapshot.providerInstanceType);
+  }
+
+  return {
+    sql: clauses.length ? `AND ${clauses.join('\n        AND ')}` : '',
+    binds,
   };
 }

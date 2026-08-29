@@ -625,8 +625,6 @@ async function ensureCandidatesForSource(
           providerInstancePriceCurrency: sql`excluded.provider_instance_price_currency`,
           providerInstancePriceMonthlyCents: sql`excluded.provider_instance_price_monthly_cents`,
           providerInstancePriceHourlyMicros: sql`excluded.provider_instance_price_hourly_micros`,
-          priority: sql`excluded.priority`,
-          candidateOrder: sql`excluded.candidate_order`,
           updatedAt: now,
         },
       });

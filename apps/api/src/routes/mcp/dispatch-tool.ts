@@ -26,6 +26,8 @@ import {
 } from '../../services/capacity-placement-snapshot';
 import {
   capacityPlacementSnapshotForTaskStart,
+  capacityPoolNoCandidatesMessage,
+  hasNoCapacityPoolCandidates,
   PlacementResolutionError,
   resolveCapacityAwareCredentialLookup,
   resolveCapacityAwareQuotaCredentialSource,
@@ -380,6 +382,13 @@ export async function handleDispatchTask(
   const capacityPoolSelection = isInstantRuntime
     ? null
     : await resolveTaskStartCapacityPoolSelection(db, placement);
+  if (capacityPoolSelection && hasNoCapacityPoolCandidates(capacityPoolSelection)) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      capacityPoolNoCandidatesMessage(capacityPoolSelection)
+    );
+  }
   const capacityPlacementSnapshot = capacityPlacementSnapshotForTaskStart(capacityPoolSelection);
 
   // Explicit branch means "continue work from this branch"; otherwise task

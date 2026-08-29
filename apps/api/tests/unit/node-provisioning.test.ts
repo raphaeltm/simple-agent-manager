@@ -466,7 +466,7 @@ describe('provider-aware node provisioning', () => {
       nodesSource.indexOf('async function stopNodeResources')
     );
     expect(section).toMatch(
-      /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId\s*\)/
+      /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId,\s*exactCredential\s*\)/
     );
   });
 

@@ -29,6 +29,8 @@ import {
 } from '../../services/capacity-placement-snapshot';
 import {
   capacityPlacementSnapshotForTaskStart,
+  capacityPoolNoCandidatesMessage,
+  hasNoCapacityPoolCandidates,
   PlacementResolutionError,
   resolveCapacityAwareCredentialLookup,
   resolveCapacityAwareQuotaCredentialSource,
@@ -157,6 +159,9 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
 
   const { resolveCredentialSource } = await import('../../services/provider-credentials');
   const capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement);
+  if (capacityPoolSelection && hasNoCapacityPoolCandidates(capacityPoolSelection)) {
+    throw errors.badRequest(capacityPoolNoCandidatesMessage(capacityPoolSelection));
+  }
   const credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
   const credResult = await resolveCredentialSource(
     db,

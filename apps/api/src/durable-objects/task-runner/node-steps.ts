@@ -20,6 +20,8 @@ import {
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import {
   type CapacityAwareNodePlacementRow,
+  capacityPoolNoCandidatesError,
+  hasNoCapacityPoolCandidates,
   resolveCapacityAwareQuotaCredentialSource,
   resolveReusableNodeCapacitySnapshot,
 } from '../../services/placement-resolver';
@@ -99,6 +101,13 @@ export async function handleNodeSelection(
     taskId: state.taskId,
     preferredNodeId: state.config.preferredNodeId,
   });
+
+  if (
+    state.config.capacityPoolSelection &&
+    hasNoCapacityPoolCandidates(state.config.capacityPoolSelection)
+  ) {
+    throw capacityPoolNoCandidatesError(state.config.capacityPoolSelection);
+  }
 
   if (state.config.preferredNodeId) {
     // Validate the preferred node
@@ -224,6 +233,13 @@ export async function handleNodeProvisioning(
 ): Promise<void> {
   await rc.updateD1ExecutionStep(state.taskId, 'node_provisioning');
   const requestedSizeBeforeProvisioning: VMSize = state.config.vmSize;
+
+  if (
+    state.config.capacityPoolSelection &&
+    hasNoCapacityPoolCandidates(state.config.capacityPoolSelection)
+  ) {
+    throw capacityPoolNoCandidatesError(state.config.capacityPoolSelection);
+  }
 
   // Self-healing recovery: a prior attempt may have provisioned a node in D1
   // (and in the cloud) but crashed before persisting nodeId to DO storage. The

@@ -137,6 +137,14 @@ async function recoverWorkspaceFromD1(
        placement_credential_version AS placementCredentialVersion,
        capacity_pool_project_id AS capacityPoolProjectId,
        workload_role AS workloadRole,
+       provider_instance_type AS providerInstanceType,
+       provider_instance_vcpu_count AS providerInstanceVcpuCount,
+       provider_instance_memory_mb AS providerInstanceMemoryMb,
+       provider_instance_disk_gb AS providerInstanceDiskGb,
+       provider_instance_price_display AS providerInstancePriceDisplay,
+       provider_instance_price_currency AS providerInstancePriceCurrency,
+       provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
+       provider_instance_price_hourly_micros AS providerInstancePriceHourlyMicros,
        placement_explanation_json AS placementExplanationJson
      FROM tasks WHERE id = ?`
   )

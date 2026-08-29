@@ -19,6 +19,8 @@ import { generateBranchName } from './branch-name';
 import { capacityPlacementSnapshotDbValues } from './capacity-placement-snapshot';
 import {
   capacityPlacementSnapshotForTaskStart,
+  capacityPoolNoCandidatesMessage,
+  hasNoCapacityPoolCandidates,
   PlacementResolutionError,
   resolveCapacityAwareCredentialLookup,
   resolveCapacityPlacementCredentialAttribution,
@@ -130,6 +132,9 @@ export async function submitTriggeredTask(
 
   const { resolveCredentialSource } = await import('./provider-credentials');
   const capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement);
+  if (capacityPoolSelection && hasNoCapacityPoolCandidates(capacityPoolSelection)) {
+    throw new Error(capacityPoolNoCandidatesMessage(capacityPoolSelection));
+  }
   const credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
   const credResult = await resolveCredentialSource(
     db,

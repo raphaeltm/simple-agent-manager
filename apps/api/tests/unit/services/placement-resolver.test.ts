@@ -605,6 +605,37 @@ describe('capacity-aware reusable node resolution', () => {
     });
   });
 
+  it('does not fall back to legacy vm_size reuse when the selected pool has no candidates', () => {
+    const selection = {
+      ...capacitySelection({
+        providerInstanceType: 'cx23',
+        machineSize: 'medium',
+        vcpuCount: 2,
+        memoryMb: 4 * 1024,
+      }),
+      candidates: [],
+    };
+
+    const snapshot = resolveReusableNodeCapacitySnapshot({
+      selection,
+      projectId: 'project-1',
+      requestedVmSize: 'medium',
+      requestedReservation: reservation({ cpuMillis: 2000, memoryMb: 4 * 1024 }),
+      node: {
+        vmSize: 'large',
+        vmLocation: 'fsn1',
+        cloudProvider: 'hetzner',
+        capacityPoolId: null,
+        capacityPoolScope: null,
+        capacitySourceId: null,
+        capacityPoolProjectId: null,
+        workloadRole: null,
+      },
+    });
+
+    expect(snapshot).toBeUndefined();
+  });
+
   it('excludes nodes whose historical concrete candidate is no longer active so they drain naturally', () => {
     const selection = capacitySelection({
       candidateId: 'candidate-current',

@@ -31,7 +31,7 @@ import {
   resolveInstallationId,
 } from './node-provider-labels';
 import { persistError } from './observability';
-import { createProviderForUser } from './provider-credentials';
+import { createProviderForUser, type ExactProviderCredentialBinding } from './provider-credentials';
 import { destroyVmAgentContainer } from './vm-agent-container';
 import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
 
@@ -208,6 +208,14 @@ export async function provisionNode(
     node.credentialAttributionSource === 'project'
       ? (node.credentialAttributionProjectId ?? taskContext?.projectId ?? null)
       : null;
+  const exactCredential =
+    node.capacityPoolId && node.placementCredentialSource && node.placementCredentialReference
+      ? ({
+          credentialSource: node.placementCredentialSource as CredentialSource,
+          credentialReference: node.placementCredentialReference,
+          credentialVersion: node.placementCredentialVersion,
+        } satisfies ExactProviderCredentialBinding)
+      : null;
 
   try {
     const providerResult = await createProviderForUser(
@@ -216,7 +224,8 @@ export async function provisionNode(
       getCredentialEncryptionKey(env),
       env,
       targetProvider,
-      attributionProjectId
+      attributionProjectId,
+      exactCredential
     );
     if (!providerResult) {
       throw new Error(
