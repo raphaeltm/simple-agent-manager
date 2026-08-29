@@ -1,4 +1,3 @@
-import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
 import type {
   CapacityPool as CapacityPoolDto,
   CapacityPoolCandidate as CapacityPoolCandidateDto,
@@ -8,25 +7,21 @@ import type {
   DefaultCapacityPoolSummary,
 } from '@simple-agent-manager/shared';
 import { isValidProvider } from '@simple-agent-manager/shared';
-import { and, asc, eq, isNotNull, isNull, notInArray, sql } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
-import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import {
   toCapacityPool,
   toCapacityPoolCandidate,
   toCapacitySourceIdentity,
 } from './capacity-pools';
-import { providerInstanceOfferingDbValues } from './default-capacity-pool-candidate-values';
+import { ensureCandidatesForSource } from './default-capacity-pool-candidates';
 import {
-  defaultCandidateId,
   defaultCapacitySourceId,
   defaultPoolId,
   type DefaultPoolScopeIdentity,
   legacyCredentialReference,
-  legacyDefaultCandidateId,
-  orderedLocationsForProvider,
   platformCredentialReference,
   timestampVersion,
 } from './default-capacity-pool-helpers';
@@ -41,23 +36,10 @@ const DEFAULT_POOL_NAMES: Record<CapacityPoolScope, string> = {
 
 const DEFAULT_POOL_STRATEGY = 'balanced';
 const DEFAULT_EXHAUSTION_POLICY = 'queue';
-const DEFAULT_WORKLOAD_ROLE = 'workspace';
-const DEFAULT_RUNTIME = 'vm';
-const DEFAULT_MACHINE_CLASS = 'shared-vm';
 const SOURCE_KIND_CLOUD_PROVIDER = 'cloud-provider-credential';
 const CREDENTIAL_TYPE_CLOUD_PROVIDER = 'cloud-provider';
 const ACTIVE_STATUS = 'active';
 const DISABLED_STATUS = 'disabled';
-const DELETED_STATUS = 'deleted';
-const CANDIDATE_INSERT_BIND_COUNT = 26;
-const CANDIDATE_UPSERT_UPDATE_BIND_COUNT = 1;
-const CANDIDATE_UPSERT_CHUNK_SIZE = Math.max(
-  1,
-  Math.floor(
-    (D1_MAX_BOUND_PARAMETERS - CANDIDATE_UPSERT_UPDATE_BIND_COUNT) /
-      CANDIDATE_INSERT_BIND_COUNT
-  )
-);
 type ScopeIdentity = DefaultPoolScopeIdentity;
 
 interface CredentialCapacitySeed extends ScopeIdentity {
@@ -566,134 +548,6 @@ async function updateCapacitySourceForSeed(
     .limit(1);
   if (!source) throw new Error(`Capacity source ${sourceId} disappeared during update`);
   return source;
-}
-
-async function ensureCandidatesForSource(
-  db: Db,
-  poolId: string,
-  sourceId: string,
-  provider: CredentialProvider
-): Promise<void> {
-  const now = new Date().toISOString();
-  const existingStatuses = await readExistingCandidateStatuses(db, poolId, sourceId);
-  const candidateIds: string[] = [];
-  const candidateValues: schema.NewCapacityPoolCandidate[] = [];
-  let candidateOrder = 0;
-  const offerings = getProviderInstanceOfferings(provider);
-
-  for (const location of orderedLocationsForProvider(provider)) {
-    for (const offering of offerings) {
-      const id = defaultCandidateId(
-        poolId,
-        sourceId,
-        provider,
-        location.id,
-        offering.instanceType,
-        offering.instanceSku
-      );
-      const legacyStatus = existingStatuses.get(
-        legacyDefaultCandidateId(poolId, sourceId, provider, location.id, offering.legacyVmSize)
-      );
-      const initialStatus =
-        legacyStatus === DISABLED_STATUS || legacyStatus === DELETED_STATUS
-          ? legacyStatus
-          : ACTIVE_STATUS;
-      candidateIds.push(id);
-      candidateValues.push({
-        id,
-        poolId,
-        capacitySourceId: sourceId,
-        provider,
-        location: location.id,
-        workloadRole: DEFAULT_WORKLOAD_ROLE,
-        runtime: DEFAULT_RUNTIME,
-        machineClass: DEFAULT_MACHINE_CLASS,
-        machineSize: offering.legacyVmSize,
-        ...providerInstanceOfferingDbValues(offering),
-        priority: candidateOrder,
-        candidateOrder,
-        status: initialStatus,
-        createdAt: now,
-        updatedAt: now,
-      });
-      candidateOrder += 1;
-    }
-  }
-
-  for (let offset = 0; offset < candidateValues.length; offset += CANDIDATE_UPSERT_CHUNK_SIZE) {
-    const chunk = candidateValues.slice(offset, offset + CANDIDATE_UPSERT_CHUNK_SIZE);
-    await db
-      .insert(schema.capacityPoolCandidates)
-      .values(chunk)
-      .onConflictDoUpdate({
-        target: schema.capacityPoolCandidates.id,
-        set: {
-          provider: sql`excluded.provider`,
-          location: sql`excluded.location`,
-          workloadRole: sql`excluded.workload_role`,
-          runtime: sql`excluded.runtime`,
-          machineClass: sql`excluded.machine_class`,
-          machineSize: sql`excluded.machine_size`,
-          providerInstanceType: sql`excluded.provider_instance_type`,
-          providerInstanceSku: sql`excluded.provider_instance_sku`,
-          providerInstanceDisplayName: sql`excluded.provider_instance_display_name`,
-          providerInstanceVcpuCount: sql`excluded.provider_instance_vcpu_count`,
-          providerInstanceMemoryMb: sql`excluded.provider_instance_memory_mb`,
-          providerInstanceDiskGb: sql`excluded.provider_instance_disk_gb`,
-          providerInstancePriceDisplay: sql`excluded.provider_instance_price_display`,
-          providerInstancePriceCurrency: sql`excluded.provider_instance_price_currency`,
-          providerInstancePriceMonthlyCents: sql`excluded.provider_instance_price_monthly_cents`,
-          providerInstancePriceHourlyMicros: sql`excluded.provider_instance_price_hourly_micros`,
-          providerInstanceCatalogSource: sql`excluded.provider_instance_catalog_source`,
-          providerInstanceCatalogLastSeenAt: sql`excluded.provider_instance_catalog_last_seen_at`,
-          updatedAt: now,
-        },
-      });
-  }
-
-  await disableMissingCandidatesForSource(db, poolId, sourceId, candidateIds);
-}
-
-async function readExistingCandidateStatuses(
-  db: Db,
-  poolId: string,
-  sourceId: string
-): Promise<Map<string, string>> {
-  const rows = await db
-    .select({ id: schema.capacityPoolCandidates.id, status: schema.capacityPoolCandidates.status })
-    .from(schema.capacityPoolCandidates)
-    .where(
-      and(
-        eq(schema.capacityPoolCandidates.poolId, poolId),
-        eq(schema.capacityPoolCandidates.capacitySourceId, sourceId)
-      )
-    );
-  return new Map(rows.map((row) => [row.id, row.status]));
-}
-
-async function disableMissingCandidatesForSource(
-  db: Db,
-  poolId: string,
-  sourceId: string,
-  activeCandidateIds: string[]
-): Promise<void> {
-  const now = new Date().toISOString();
-  const predicates = [
-    eq(schema.capacityPoolCandidates.poolId, poolId),
-    eq(schema.capacityPoolCandidates.capacitySourceId, sourceId),
-  ];
-  await db
-    .update(schema.capacityPoolCandidates)
-    .set({ status: DISABLED_STATUS, updatedAt: now })
-    .where(
-      activeCandidateIds.length > 0
-        ? and(
-            ...predicates,
-            eq(schema.capacityPoolCandidates.status, ACTIVE_STATUS),
-            notInArray(schema.capacityPoolCandidates.id, activeCandidateIds)
-          )
-        : and(...predicates, eq(schema.capacityPoolCandidates.status, ACTIVE_STATUS))
-    );
 }
 
 async function disableCapacitySourceAvailability(

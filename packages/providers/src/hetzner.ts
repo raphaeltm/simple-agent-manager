@@ -1,13 +1,12 @@
 import type { CredentialProvider, ProviderInstanceOffering } from '@simple-agent-manager/shared';
 import { DEFAULT_HETZNER_DATACENTER, DEFAULT_HETZNER_IMAGE } from '@simple-agent-manager/shared';
 
+import { mapHetznerServerTypeOfferings } from './hetzner-instance-offerings';
 import {
-  buildHetznerListUrl,
   DEFAULT_CAPACITY_RETRY_BUDGET_MS,
   DEFAULT_CAPACITY_RETRY_INITIAL_DELAY_MS,
   DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS,
   DEFAULT_CAPACITY_RETRY_MAX_DELAY_MS,
-  DEFAULT_HETZNER_MAX_LIST_PAGES,
   DEFAULT_PLACEMENT_RETRY_DELAY_MS,
   HETZNER_API_URL,
   HETZNER_LOCATION_META,
@@ -22,8 +21,8 @@ import {
   mapHetznerProviderError,
   mapHetznerServerToVMInstance,
   mapHetznerVolumeToInstance,
-  recordHetznerListPage,
 } from './hetzner-metadata';
+import { fetchPaginatedHetznerList } from './hetzner-pagination';
 import { getProviderCatalogOfferings } from './instance-offerings';
 import {
   providerDelay,
@@ -74,14 +73,6 @@ export {
   HETZNER_VOLUME_MIN_SIZE_GB,
   isTransientCapacityError,
 } from './hetzner-metadata';
-
-const HETZNER_CATALOG_CURRENCY = 'EUR';
-const HETZNER_CATALOG_CURRENCY_SYMBOL = '€';
-
-function parseHetznerCatalogPrice(value: string): number | null {
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
 
 export class HetznerProvider implements Provider {
   readonly name = 'hetzner';
@@ -370,18 +361,19 @@ export class HetznerProvider implements Provider {
     const labelParts = this.toHetznerLabelSelectorParts(labels);
     const servers: HetznerServerPayload[] = [];
 
-    await this.fetchPaginatedHetznerList(
-      'servers',
-      new URLSearchParams(),
-      'listVMs',
-      (data) => {
+    await fetchPaginatedHetznerList({
+      apiToken: this.apiToken,
+      resource: 'servers',
+      baseParams: new URLSearchParams(),
+      operation: 'listVMs',
+      handlePage: (data) => {
         const validated = validateHetznerServersResponse(data, 'listVMs');
         servers.push(...validated.servers);
         return validated.nextPage;
       },
       labelParts,
-      context
-    );
+      context,
+    });
 
     throwIfProviderRequestAborted(context);
     return servers.map(mapHetznerServerToVMInstance);
@@ -456,22 +448,23 @@ export class HetznerProvider implements Provider {
       const serverTypes: HetznerServerTypePayload[] = [];
       const lastSeenAt = new Date().toISOString();
 
-      await this.fetchPaginatedHetznerList(
-        'server_types',
-        new URLSearchParams(),
-        'listInstanceOfferings',
-        (data) => {
+      await fetchPaginatedHetznerList({
+        apiToken: this.apiToken,
+        resource: 'server_types',
+        baseParams: new URLSearchParams(),
+        operation: 'listInstanceOfferings',
+        handlePage: (data) => {
           const validated = validateHetznerServerTypesResponse(data, 'listInstanceOfferings');
           serverTypes.push(...validated.serverTypes);
           return validated.nextPage;
         },
-        [],
-        context
-      );
+        labelParts: [],
+        context,
+      });
 
       throwIfProviderRequestAborted(context);
       return serverTypes.flatMap((serverType) =>
-        this.mapHetznerServerTypeOfferings(serverType, lastSeenAt)
+        mapHetznerServerTypeOfferings(serverType, lastSeenAt, this.locationMetadata)
       );
     } catch (error) {
       rethrowIfProviderRequestAborted(error, context);
@@ -484,62 +477,6 @@ export class HetznerProvider implements Provider {
         this.locationMetadata
       );
     }
-  }
-
-  private mapHetznerServerTypeOfferings(
-    serverType: HetznerServerTypePayload,
-    lastSeenAt: string
-  ): ProviderInstanceOffering[] {
-    if (serverType.deprecated === true) return [];
-
-    return serverType.prices.map((price) => {
-      const hourly = parseHetznerCatalogPrice(price.price_hourly.gross);
-      const monthly = parseHetznerCatalogPrice(price.price_monthly.gross);
-      const locationMeta = this.locationMetadata[price.location];
-      const displayName =
-        serverType.description ||
-        `${serverType.name} · ${serverType.cores} vCPU · ${serverType.memory} GB RAM · ${serverType.disk} GB disk`;
-
-      return {
-        provider: this.name,
-        location: price.location,
-        providerInstanceType: serverType.name,
-        providerInstanceSku: null,
-        displayName,
-        id: serverType.name,
-        sku: serverType.name,
-        instanceType: serverType.name,
-        type: serverType.name,
-        name: displayName,
-        vcpu: serverType.cores,
-        ramGb: serverType.memory,
-        memoryGb: serverType.memory,
-        memoryMb: serverType.memory * 1024,
-        storageGb: serverType.disk,
-        diskGb: serverType.disk,
-        ...(monthly !== null
-          ? { price: `${HETZNER_CATALOG_CURRENCY_SYMBOL}${monthly.toFixed(2)}/mo` }
-          : {}),
-        priceMonthlyUsd: null,
-        priceHourlyUsd: null,
-        priceMonthly: monthly,
-        priceHourly: hourly,
-        currency: HETZNER_CATALOG_CURRENCY,
-        available: true,
-        stale: false,
-        catalogSource: 'api',
-        catalogLastSeenAt: lastSeenAt,
-        catalogMetadata: {
-          hetznerServerTypeId: serverType.id,
-          ...(serverType.architecture ? { architecture: serverType.architecture } : {}),
-          ...(serverType.cpu_type ? { cpuType: serverType.cpu_type } : {}),
-          ...(locationMeta
-            ? { locationName: locationMeta.name, locationCountry: locationMeta.country }
-            : {}),
-        },
-        ...(locationMeta ? { locationName: locationMeta.name, country: locationMeta.country } : {}),
-      };
-    });
   }
 
   async createVolume(
@@ -784,18 +721,19 @@ export class HetznerProvider implements Provider {
     throwIfProviderRequestAborted(context);
     const volumes: HetznerVolumePayload[] = [];
 
-    await this.fetchPaginatedHetznerList(
-      'volumes',
-      new URLSearchParams({ location: config.location }),
-      'listVolumes',
-      (data) => {
+    await fetchPaginatedHetznerList({
+      apiToken: this.apiToken,
+      resource: 'volumes',
+      baseParams: new URLSearchParams({ location: config.location }),
+      operation: 'listVolumes',
+      handlePage: (data) => {
         const validated = validateHetznerVolumesResponse(data, 'listVolumes');
         volumes.push(...validated.volumes);
         return validated.nextPage;
       },
-      this.toHetznerLabelSelectorParts(config.labels),
-      context
-    );
+      labelParts: this.toHetznerLabelSelectorParts(config.labels),
+      context,
+    });
 
     throwIfProviderRequestAborted(context);
     return volumes.map(mapHetznerVolumeToInstance);
@@ -804,54 +742,6 @@ export class HetznerProvider implements Provider {
   private toHetznerLabelSelectorParts(labels?: Record<string, string>): string[] {
     if (!labels) return [];
     return Object.entries(labels).map(([key, value]) => `${key}=${value}`);
-  }
-
-  private async fetchPaginatedHetznerList(
-    resource: 'servers' | 'volumes' | 'server_types',
-    baseParams: URLSearchParams,
-    operation: 'listVMs' | 'listVolumes' | 'listInstanceOfferings',
-    handlePage: (payload: unknown) => number | undefined,
-    labelParts: string[],
-    context?: ProviderRequestContext
-  ): Promise<void> {
-    throwIfProviderRequestAborted(context);
-    const seenPages = new Set<number>();
-    let page = 1;
-
-    for (let pageCount = 0; pageCount < DEFAULT_HETZNER_MAX_LIST_PAGES; pageCount += 1) {
-      throwIfProviderRequestAborted(context);
-      recordHetznerListPage(seenPages, page, operation);
-
-      const url = buildHetznerListUrl(resource, baseParams, labelParts, page);
-      const response = await providerFetch(
-        this.name,
-        url,
-        {
-          headers: {
-            Authorization: `Bearer ${this.apiToken}`,
-          },
-        },
-        undefined,
-        undefined,
-        context
-      );
-
-      throwIfProviderRequestAborted(context);
-      const payload = await parseProviderJson(response, this.name, operation);
-      throwIfProviderRequestAborted(context);
-      const nextPage = handlePage(payload);
-      if (nextPage === undefined) return;
-      page = nextPage;
-    }
-
-    throw new ProviderError(
-      this.name,
-      undefined,
-      `Hetzner ${operation} exceeded ${DEFAULT_HETZNER_MAX_LIST_PAGES} pages`,
-      {
-        category: 'invalid_config',
-      }
-    );
   }
 
   private validateRequestedVolumeSize(sizeGb: number): void {
