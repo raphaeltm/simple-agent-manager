@@ -13,7 +13,6 @@ import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { log, serializeError } from '../lib/logger';
 import {
   toCapacityPool,
   toCapacityPoolCandidate,
@@ -21,15 +20,15 @@ import {
 } from './capacity-pools';
 import { ensureCandidatesForSource } from './default-capacity-pool-candidates';
 import {
-  CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE,
   defaultCapacitySourceId,
   defaultPoolId,
   type DefaultPoolScopeIdentity,
-  externalCapacitySourceCredentialId,
 } from './default-capacity-pool-helpers';
 import {
-  buildProviderCatalogForCredential,
-  getStaticProviderCatalogOfferings,
+  materializeCapacitySourceCredential,
+  resolveOfferingsForSeed,
+} from './default-capacity-source-credentials';
+import {
   listInstallationProviderCatalogSeeds,
   listProjectProviderCatalogSeeds,
   listUserProviderCatalogSeeds,
@@ -413,94 +412,6 @@ async function ensureDefaultPoolForCredentialSeeds(
   );
   await reconcileDefaultPoolStatus(db, pool.id);
   return readDefaultPoolSummary(db, scope);
-}
-
-async function materializeCapacitySourceCredential(
-  db: Db,
-  seed: CredentialCapacitySeed
-): Promise<CredentialCapacitySeed> {
-  if (seed.credentialId || seed.platformCredentialId || !seed.externalSourceRef) return seed;
-
-  const ownerUserId = seed.createdBy ?? seed.ownerUserId;
-  if (!ownerUserId) {
-    throw new Error(`External capacity source seed ${seed.id} has no owning user`);
-  }
-
-  const credentialId = externalCapacitySourceCredentialId(seed.externalSourceRef);
-  const now = new Date().toISOString();
-  await db
-    .insert(schema.credentials)
-    .values({
-      id: credentialId,
-      userId: ownerUserId,
-      projectId: seed.scope === 'project' ? seed.ownerProjectId : null,
-      provider: seed.provider,
-      credentialType: CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE,
-      credentialKind: 'api-key',
-      isActive: seed.active,
-      encryptedToken: seed.encryptedToken,
-      iv: seed.iv,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: schema.credentials.id,
-      set: {
-        userId: ownerUserId,
-        projectId: seed.scope === 'project' ? seed.ownerProjectId : null,
-        provider: seed.provider,
-        credentialType: CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE,
-        credentialKind: 'api-key',
-        isActive: seed.active,
-        encryptedToken: seed.encryptedToken,
-        iv: seed.iv,
-        updatedAt: now,
-      },
-    });
-
-  return { ...seed, credentialId };
-}
-
-async function resolveOfferingsForSeed(
-  seed: CredentialCapacitySeed,
-  options: DefaultCapacityPoolsBackfillOptions
-): Promise<ProviderInstanceOffering[]> {
-  if (options.offeringResolver) {
-    return options.offeringResolver(seed);
-  }
-
-  if (options.env) {
-    try {
-      const catalog = await buildProviderCatalogForCredential({
-        env: options.env,
-        seed: {
-          id: seed.id,
-          provider: seed.provider,
-          encryptedToken: seed.encryptedToken,
-          iv: seed.iv,
-          credentialSource: seed.credentialSource,
-          credentialId: seed.catalogCredentialId,
-          platformCredentialId: seed.platformCredentialId,
-          capacitySourceCredentialId: seed.credentialId,
-          credentialReference: seed.credentialReference,
-          credentialVersion: seed.credentialVersion,
-          externalSourceRef: seed.externalSourceRef,
-          active: seed.active,
-          createdBy: seed.createdBy,
-        },
-      });
-      return catalog.offerings ?? [];
-    } catch (error) {
-      log.warn('default_capacity_pools.catalog_build_failed', {
-        provider: seed.provider,
-        scope: seed.scope,
-        credentialSource: seed.credentialSource,
-        ...serializeError(error),
-      });
-    }
-  }
-
-  return getStaticProviderCatalogOfferings(seed.provider);
 }
 
 export async function findDefaultPool(

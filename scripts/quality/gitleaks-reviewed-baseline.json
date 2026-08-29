@@ -142,6 +142,16 @@
       "digests": [
         "a36d27de181226037bea3c4b4b8213525696b3d3a8a94adc48d03797bc412a01"
       ]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Reviewed deterministic unit-test encryption key literal introduced in an intermediate compute-pool reconciliation commit and removed from the current tree; exact PR-range finding only, not live credential material.",
+      "owner": "security",
+      "reviewedAt": "2026-08-29T00:00:00.000Z",
+      "expiresAt": "2026-11-27T00:00:00.000Z",
+      "digests": [
+        "1c07295d3aedeb8f1aaa6f5e33e7d9150bdd0171741d258ee02cc59809aae0c9"
+      ]
     }
   ]
 }
