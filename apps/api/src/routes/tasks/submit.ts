@@ -333,6 +333,7 @@ submitRoutes.post(
       {
         credentialsRequiredMessage:
           'Cloud provider credentials required. Connect your account in Settings.',
+        env: c.env,
       }
     );
     if ('error' in placementResolution) {

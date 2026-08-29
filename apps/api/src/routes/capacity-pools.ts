@@ -88,6 +88,7 @@ capacityPoolsRoutes.get('/defaults', async (c) => {
     includeInstallation: false,
     ensure,
     includeDisabled: true,
+    env: c.env,
   });
 
   c.header('Cache-Control', 'private, no-store');
@@ -108,6 +109,7 @@ capacityPoolsRoutes.post('/defaults/reconcile', async (c) => {
     includeInstallation: false,
     ensure: true,
     includeDisabled: true,
+    env: c.env,
   });
 
   c.header('Cache-Control', 'private, no-store');
@@ -140,6 +142,7 @@ capacityPoolsRoutes.patch('/defaults', async (c) => {
     userId,
     includeInstallation: false,
     includeDisabled: true,
+    env: c.env,
   });
   c.header('Cache-Control', 'private, no-store');
   return c.json(buildUserDefaultPoolResponse(summaries, false));

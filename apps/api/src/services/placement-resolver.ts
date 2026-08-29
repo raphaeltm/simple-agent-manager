@@ -22,6 +22,7 @@ import {
 import { type drizzle } from 'drizzle-orm/d1';
 
 import type * as schema from '../db/schema';
+import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { resolveEffectiveDefaultCapacityPoolSummary } from './default-capacity-pools';
 import {
@@ -210,7 +211,7 @@ export function resolvePlacementCredentialAttribution(
 export async function resolveTaskStartCapacityPoolSelection(
   db: Db,
   placement: TaskStartPlacement,
-  options: { ensure?: boolean; failOpen?: boolean } = {}
+  options: { ensure?: boolean; failOpen?: boolean; env?: Env } = {}
 ): Promise<TaskStartCapacityPoolSelection | null> {
   if (placement.runtime.isInstantRuntime) return null;
 
@@ -219,6 +220,7 @@ export async function resolveTaskStartCapacityPoolSelection(
       userId: placement.userId,
       projectId: placement.projectId,
       ensure: options.ensure ?? true,
+      env: options.env,
     });
     if (!summary) return null;
 
@@ -292,7 +294,7 @@ export function resolveCapacityAwareQuotaCredentialSource(
 export async function resolveTaskStartPlacementCredentialAttribution(
   db: Db,
   input: TaskStartPlacementInput,
-  options?: { credentialsRequiredMessage?: string }
+  options?: { credentialsRequiredMessage?: string; env?: Env }
 ): Promise<
   TaskStartPlacementWithCredential | { error: string; errorKind: 'placement' | 'credentials' }
 > {
@@ -312,7 +314,7 @@ export async function resolveTaskStartPlacementCredentialAttribution(
 export async function resolveTaskStartPlacementCredentialAttributionFromPlacement(
   db: Db,
   placement: TaskStartPlacement,
-  options?: { credentialsRequiredMessage?: string }
+  options?: { credentialsRequiredMessage?: string; env?: Env }
 ): Promise<
   TaskStartPlacementWithCredential | { error: string; errorKind: 'placement' | 'credentials' }
 > {
@@ -321,6 +323,7 @@ export async function resolveTaskStartPlacementCredentialAttributionFromPlacemen
   try {
     capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement, {
       failOpen: false,
+      env: options?.env,
     });
     credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
   } catch (err) {

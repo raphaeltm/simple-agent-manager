@@ -249,31 +249,35 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
   const explicitBranch = input.branch?.trim();
   const taskId = ulid();
 
-  const placementResolution = await resolveTaskStartPlacementCredentialAttribution(db, {
-    entryPoint: 'sam-session-dispatch',
-    taskId,
-    projectId: input.projectId,
-    userId: ctx.userId,
-    project,
-    profile: resolvedProfile,
-    explicit: {
-      vmSize: vmSize ?? null,
-      vmSizeSource: 'task',
-      workspaceProfile: (input.workspaceProfile as WorkspaceProfile | undefined) ?? null,
-      taskMode: (input.taskMode as TaskMode | undefined) ?? null,
-      agentType: input.agentType ?? null,
+  const placementResolution = await resolveTaskStartPlacementCredentialAttribution(
+    db,
+    {
+      entryPoint: 'sam-session-dispatch',
+      taskId,
+      projectId: input.projectId,
+      userId: ctx.userId,
+      project,
+      profile: resolvedProfile,
+      explicit: {
+        vmSize: vmSize ?? null,
+        vmSizeSource: 'task',
+        workspaceProfile: (input.workspaceProfile as WorkspaceProfile | undefined) ?? null,
+        taskMode: (input.taskMode as TaskMode | undefined) ?? null,
+        agentType: input.agentType ?? null,
+      },
+      inheritedCredentialAttribution: {
+        userId: inheritedAttributionUserId,
+        projectId: inheritedAttributionProjectId,
+        source: inheritedAttributionSource,
+      },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+      resourceRequirements: {
+        skill: skillResourceRequirements,
+      },
     },
-    inheritedCredentialAttribution: {
-      userId: inheritedAttributionUserId,
-      projectId: inheritedAttributionProjectId,
-      source: inheritedAttributionSource,
-    },
-    credentialProjectPolicy: 'current-project-unless-inherited',
-    taskModeDefault: 'task',
-    resourceRequirements: {
-      skill: skillResourceRequirements,
-    },
-  });
+    { env: ctx.env as unknown as Env }
+  );
   if ('error' in placementResolution) {
     return placementResolution;
   }

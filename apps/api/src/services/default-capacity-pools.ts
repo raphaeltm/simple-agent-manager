@@ -5,12 +5,15 @@ import type {
   CapacitySourceIdentity,
   CredentialProvider,
   DefaultCapacityPoolSummary,
+  ProviderInstanceOffering,
 } from '@simple-agent-manager/shared';
 import { isValidProvider } from '@simple-agent-manager/shared';
 import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import type { Env } from '../env';
+import { log } from '../lib/logger';
 import {
   toCapacityPool,
   toCapacityPoolCandidate,
@@ -25,6 +28,10 @@ import {
   platformCredentialReference,
   timestampVersion,
 } from './default-capacity-pool-helpers';
+import {
+  buildProviderCatalogForCredential,
+  getStaticProviderCatalogOfferings,
+} from './provider-catalogs';
 
 type Db = ReturnType<typeof drizzle>;
 
@@ -51,7 +58,7 @@ interface ReadDefaultPoolSummaryOptions {
   includeDisabled?: boolean;
 }
 
-interface CredentialCapacitySeed extends ScopeIdentity {
+export interface CredentialCapacitySeed extends ScopeIdentity {
   id: string;
   provider: CredentialProvider;
   active: boolean;
@@ -59,8 +66,14 @@ interface CredentialCapacitySeed extends ScopeIdentity {
   credentialVersion: number | null;
   credentialId: string | null;
   platformCredentialId: string | null;
+  encryptedToken: string;
+  iv: string;
   createdBy: string | null;
 }
+
+export type DefaultCapacityPoolOfferingResolver = (
+  seed: CredentialCapacitySeed
+) => Promise<ProviderInstanceOffering[]>;
 
 export type CapacityPoolSummary = DefaultCapacityPoolSummary & {
   pool: CapacityPoolDto;
@@ -87,6 +100,8 @@ export interface DefaultCapacityPoolsBackfillOptions {
    */
   projectId?: string | null;
   includeInstallation?: boolean;
+  env?: Env;
+  offeringResolver?: DefaultCapacityPoolOfferingResolver;
 }
 
 export async function ensureDefaultCapacityPoolsForExistingCredentials(
@@ -94,9 +109,11 @@ export async function ensureDefaultCapacityPoolsForExistingCredentials(
   options: DefaultCapacityPoolsBackfillOptions = {}
 ): Promise<DefaultCapacityPoolsEnsureResult> {
   const installation =
-    options.includeInstallation === false ? null : await ensureInstallationDefaultPool(db);
-  const user = options.userId ? await ensureUserDefaultPool(db, options.userId) : null;
-  const project = options.projectId ? await ensureProjectDefaultPool(db, options.projectId) : null;
+    options.includeInstallation === false ? null : await ensureInstallationDefaultPool(db, options);
+  const user = options.userId ? await ensureUserDefaultPool(db, options.userId, options) : null;
+  const project = options.projectId
+    ? await ensureProjectDefaultPool(db, options.projectId, options)
+    : null;
   return { installation, user, project };
 }
 
@@ -109,20 +126,20 @@ export async function backfillDefaultCapacityPoolsForExistingCredentials(
   projectsEnsured: number;
 }> {
   const installation =
-    options.includeInstallation === false ? null : await ensureInstallationDefaultPool(db);
+    options.includeInstallation === false ? null : await ensureInstallationDefaultPool(db, options);
 
   const userIds = options.userId ? [options.userId] : await listCredentialUserIds(db);
   const projectIds = options.projectId ? [options.projectId] : await listCredentialProjectIds(db);
 
   let usersEnsured = 0;
   for (const userId of userIds) {
-    await ensureUserDefaultPool(db, userId);
+    await ensureUserDefaultPool(db, userId, options);
     usersEnsured += 1;
   }
 
   let projectsEnsured = 0;
   for (const projectId of projectIds) {
-    await ensureProjectDefaultPool(db, projectId);
+    await ensureProjectDefaultPool(db, projectId, options);
     projectsEnsured += 1;
   }
 
@@ -136,6 +153,8 @@ export async function resolveEffectiveDefaultCapacityPoolSummary(
     projectId?: string | null;
     ensure?: boolean;
     includeInstallation?: boolean;
+    env?: Env;
+    offeringResolver?: DefaultCapacityPoolOfferingResolver;
   }
 ): Promise<CapacityPoolSummary | null> {
   if (input.ensure === true) {
@@ -143,6 +162,8 @@ export async function resolveEffectiveDefaultCapacityPoolSummary(
       userId: input.userId,
       projectId: input.projectId ?? null,
       includeInstallation: input.includeInstallation,
+      env: input.env,
+      offeringResolver: input.offeringResolver,
     });
   }
 
@@ -246,12 +267,17 @@ async function listCredentialProjectIds(db: Db): Promise<string[]> {
   return [...new Set(rows.flatMap((row) => (row.projectId ? [row.projectId] : [])))];
 }
 
-async function ensureInstallationDefaultPool(db: Db): Promise<CapacityPoolSummary | null> {
+async function ensureInstallationDefaultPool(
+  db: Db,
+  options: DefaultCapacityPoolsBackfillOptions
+): Promise<CapacityPoolSummary | null> {
   const rows = await db
     .select({
       id: schema.platformCredentials.id,
       provider: schema.platformCredentials.provider,
       isEnabled: schema.platformCredentials.isEnabled,
+      encryptedToken: schema.platformCredentials.encryptedToken,
+      iv: schema.platformCredentials.iv,
       createdBy: schema.platformCredentials.createdBy,
       createdAt: schema.platformCredentials.createdAt,
       updatedAt: schema.platformCredentials.updatedAt,
@@ -276,14 +302,21 @@ async function ensureInstallationDefaultPool(db: Db): Promise<CapacityPoolSummar
           credentialVersion: timestampVersion(row.updatedAt ?? row.createdAt),
           credentialId: null,
           platformCredentialId: row.id,
+          encryptedToken: row.encryptedToken,
+          iv: row.iv,
           createdBy: row.createdBy,
         },
       ];
-    })
+    }),
+    options
   );
 }
 
-async function ensureUserDefaultPool(db: Db, userId: string): Promise<CapacityPoolSummary | null> {
+async function ensureUserDefaultPool(
+  db: Db,
+  userId: string,
+  options: DefaultCapacityPoolsBackfillOptions
+): Promise<CapacityPoolSummary | null> {
   const rows = await db
     .select({
       id: schema.credentials.id,
@@ -291,6 +324,8 @@ async function ensureUserDefaultPool(db: Db, userId: string): Promise<CapacityPo
       projectId: schema.credentials.projectId,
       provider: schema.credentials.provider,
       isActive: schema.credentials.isActive,
+      encryptedToken: schema.credentials.encryptedToken,
+      iv: schema.credentials.iv,
       createdAt: schema.credentials.createdAt,
       updatedAt: schema.credentials.updatedAt,
     })
@@ -320,16 +355,20 @@ async function ensureUserDefaultPool(db: Db, userId: string): Promise<CapacityPo
           credentialVersion: timestampVersion(row.updatedAt ?? row.createdAt),
           credentialId: row.id,
           platformCredentialId: null,
+          encryptedToken: row.encryptedToken,
+          iv: row.iv,
           createdBy: row.userId,
         },
       ];
-    })
+    }),
+    options
   );
 }
 
 async function ensureProjectDefaultPool(
   db: Db,
-  projectId: string
+  projectId: string,
+  options: DefaultCapacityPoolsBackfillOptions
 ): Promise<CapacityPoolSummary | null> {
   const rows = await db
     .select({
@@ -338,6 +377,8 @@ async function ensureProjectDefaultPool(
       projectId: schema.credentials.projectId,
       provider: schema.credentials.provider,
       isActive: schema.credentials.isActive,
+      encryptedToken: schema.credentials.encryptedToken,
+      iv: schema.credentials.iv,
       createdAt: schema.credentials.createdAt,
       updatedAt: schema.credentials.updatedAt,
     })
@@ -366,17 +407,21 @@ async function ensureProjectDefaultPool(
           credentialVersion: timestampVersion(row.updatedAt ?? row.createdAt),
           credentialId: row.id,
           platformCredentialId: null,
+          encryptedToken: row.encryptedToken,
+          iv: row.iv,
           createdBy: row.userId,
         },
       ];
-    })
+    }),
+    options
   );
 }
 
 async function ensureDefaultPoolForCredentialSeeds(
   db: Db,
   scope: ScopeIdentity,
-  seeds: CredentialCapacitySeed[]
+  seeds: CredentialCapacitySeed[],
+  options: DefaultCapacityPoolsBackfillOptions
 ): Promise<CapacityPoolSummary | null> {
   const activeSeeds = seeds.filter((seed) => seed.active);
   const existingPool = await findDefaultPool(db, scope);
@@ -404,11 +449,48 @@ async function ensureDefaultPoolForCredentialSeeds(
       ? await updateCapacitySourceForSeed(db, existingSource.id, seed)
       : await insertCapacitySourceForSeed(db, seed);
 
-    await ensureCandidatesForSource(db, pool.id, source.id, seed.provider);
+    const offerings = await resolveOfferingsForSeed(seed, options);
+    await ensureCandidatesForSource(db, pool.id, source.id, seed.provider, offerings);
   }
 
   await reconcileDefaultPoolStatus(db, pool.id);
   return readDefaultPoolSummary(db, scope);
+}
+
+async function resolveOfferingsForSeed(
+  seed: CredentialCapacitySeed,
+  options: DefaultCapacityPoolsBackfillOptions
+): Promise<ProviderInstanceOffering[]> {
+  if (options.offeringResolver) {
+    return options.offeringResolver(seed);
+  }
+
+  if (options.env) {
+    try {
+      const catalog = await buildProviderCatalogForCredential({
+        env: options.env,
+        seed: {
+          id: seed.id,
+          provider: seed.provider,
+          encryptedToken: seed.encryptedToken,
+          iv: seed.iv,
+          credentialSource: seed.scope === 'installation' ? 'platform' : seed.scope,
+          credentialId: seed.credentialId,
+          platformCredentialId: seed.platformCredentialId,
+        },
+      });
+      return catalog.offerings ?? [];
+    } catch (error) {
+      log.warn('default_capacity_pools.catalog_build_failed', {
+        provider: seed.provider,
+        scope: seed.scope,
+        credentialSource: seed.scope === 'installation' ? 'platform' : seed.scope,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return getStaticProviderCatalogOfferings(seed.provider);
 }
 
 export async function findDefaultPool(

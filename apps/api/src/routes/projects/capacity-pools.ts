@@ -112,6 +112,7 @@ async function buildDefaultPoolResponse(
     includeInstallation: boolean;
     ensure: boolean;
     policyMutationSupported: boolean;
+    env: Env;
   }
 ): Promise<ProjectDefaultCapacityPoolsResponse> {
   const summaries = await readDefaultCapacityPoolSummaries(db, {
@@ -120,6 +121,7 @@ async function buildDefaultPoolResponse(
     includeInstallation: input.includeInstallation,
     ensure: input.ensure,
     includeDisabled: true,
+    env: input.env,
   });
   const effective = resolveVisibleEffective(summaries, input.includeInstallation);
 
@@ -157,6 +159,7 @@ capacityPoolRoutes.get('/:id/capacity-pools/defaults', async (c) => {
       includeInstallation,
       ensure: parseEnsureQuery(c.req.query('ensure')),
       policyMutationSupported,
+      env: c.env,
     })
   );
 });
@@ -185,6 +188,7 @@ capacityPoolRoutes.post('/:id/capacity-pools/defaults/reconcile', async (c) => {
       includeInstallation: auth.user.role === 'superadmin',
       ensure: true,
       policyMutationSupported,
+      env: c.env,
     })
   );
 });
@@ -225,6 +229,7 @@ capacityPoolRoutes.patch('/:id/capacity-pools/defaults', async (c) => {
       includeInstallation: auth.user.role === 'superadmin',
       ensure: false,
       policyMutationSupported: true,
+      env: c.env,
     })
   );
 });

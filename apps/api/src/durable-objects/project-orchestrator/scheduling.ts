@@ -398,25 +398,29 @@ async function autoDispatchSchedulableTasks(
         .bind(task.user_id)
         .first<{ name: string | null; email: string | null; github_id: string | null }>();
 
-      const placementResolution = await resolveTaskStartPlacementCredentialAttribution(db, {
-        entryPoint: 'orchestrator-dispatch',
-        taskId: task.id,
-        projectId,
-        userId: task.user_id,
-        project: {
-          id: projectId,
-          defaultVmSize: projectRow.default_vm_size,
-          defaultProvider: projectRow.default_provider,
-          defaultLocation: projectRow.default_location,
-          defaultWorkspaceProfile: projectRow.default_workspace_profile,
-          defaultDevcontainerConfigName: projectRow.default_devcontainer_config_name,
-          defaultAgentType: projectRow.default_agent_type,
+      const placementResolution = await resolveTaskStartPlacementCredentialAttribution(
+        db,
+        {
+          entryPoint: 'orchestrator-dispatch',
+          taskId: task.id,
+          projectId,
+          userId: task.user_id,
+          project: {
+            id: projectId,
+            defaultVmSize: projectRow.default_vm_size,
+            defaultProvider: projectRow.default_provider,
+            defaultLocation: projectRow.default_location,
+            defaultWorkspaceProfile: projectRow.default_workspace_profile,
+            defaultDevcontainerConfigName: projectRow.default_devcontainer_config_name,
+            defaultAgentType: projectRow.default_agent_type,
+          },
+          profile: null,
+          credentialProjectPolicy: 'current-project',
+          taskModeDefault: 'task',
+          resourceRequirements: {},
         },
-        profile: null,
-        credentialProjectPolicy: 'current-project',
-        taskModeDefault: 'task',
-        resourceRequirements: {},
-      });
+        { env }
+      );
       if ('error' in placementResolution) {
         logDecision(sql, missionId, task.id, 'skip', placementResolution.error, now);
         continue;

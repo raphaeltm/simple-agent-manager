@@ -24,7 +24,13 @@ vi.mock('drizzle-orm/d1');
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((c: any, next: any) => next()),
   requireApproved: () => vi.fn((c: any, next: any) => next()),
+  getAuth: () => ({ user: { id: 'test-user-id', role: 'superadmin' } }),
   getUserId: () => 'test-user-id',
+}));
+
+const mockRequireProjectCapability = vi.fn();
+vi.mock('../../../src/middleware/project-auth', () => ({
+  requireProjectCapability: (...args: unknown[]) => mockRequireProjectCapability(...args),
 }));
 
 vi.mock('../../../src/services/encryption', () => ({
@@ -167,6 +173,7 @@ describe('GET /api/providers/catalog', () => {
   beforeEach(() => {
     app = createTestApp();
     vi.clearAllMocks();
+    mockRequireProjectCapability.mockResolvedValue({});
   });
 
   it('should return empty catalogs array when user has no cloud-provider credentials', async () => {
@@ -257,6 +264,103 @@ describe('GET /api/providers/catalog', () => {
       credentialSource: 'project',
       credentialId: 'project-credential-1',
     });
+  });
+
+  it('returns a user-scoped catalog for compute-pool user editing', async () => {
+    createMockDB([
+      {
+        id: 'user-credential-1',
+        projectId: null,
+        provider: 'hetzner',
+        encryptedToken: 'enc-user-token',
+        iv: 'user-iv',
+      },
+    ]);
+    mockCreateProvider.mockReturnValue(makeMockProvider({ name: 'hetzner' }));
+
+    const res = await app.request('/api/providers/catalog?scope=user', { method: 'GET' }, makeEnv());
+    const body = (await res.json()) as ProviderCatalogResponse;
+
+    expect(res.status).toBe(200);
+    expect(body.credentialSetupRequired).toBe(false);
+    expect(body.catalogs).toEqual([
+      expect.objectContaining({
+        provider: 'hetzner',
+        credentialSource: 'user',
+        credentialId: 'user-credential-1',
+        platformCredentialId: null,
+      }),
+    ]);
+  });
+
+  it('returns a project-scoped catalog after project capability verification without secrets', async () => {
+    createMockDB([
+      {
+        id: 'project-credential-1',
+        projectId: 'project-1',
+        provider: 'hetzner',
+        encryptedToken: 'enc-project-token',
+        iv: 'project-iv',
+      },
+    ]);
+    mockCreateProvider.mockReturnValue(makeMockProvider({ name: 'hetzner' }));
+
+    const res = await app.request(
+      '/api/providers/catalog?scope=project&projectId=project-1',
+      { method: 'GET' },
+      makeEnv()
+    );
+    const body = (await res.json()) as ProviderCatalogResponse;
+
+    expect(res.status).toBe(200);
+    expect(mockRequireProjectCapability).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-1',
+      'test-user-id',
+      'secret:read'
+    );
+    expect(body.catalogs).toHaveLength(1);
+    expect(body.catalogs[0]).toMatchObject({
+      provider: 'hetzner',
+      credentialSource: 'project',
+      credentialId: 'project-credential-1',
+    });
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain('enc-project-token');
+    expect(serialized).not.toContain('project-iv');
+  });
+
+  it('returns installation platform catalogs for superadmin compute-pool editing', async () => {
+    createMockDB([
+      {
+        id: 'platform-credential-1',
+        projectId: null,
+        provider: 'hetzner',
+        encryptedToken: 'enc-platform-token',
+        iv: 'platform-iv',
+      },
+    ]);
+    mockCreateProvider.mockReturnValue(makeMockProvider({ name: 'hetzner' }));
+
+    const res = await app.request(
+      '/api/providers/catalog?scope=installation',
+      { method: 'GET' },
+      makeEnv()
+    );
+    const body = (await res.json()) as ProviderCatalogResponse;
+
+    expect(res.status).toBe(200);
+    expect(body.catalogs).toEqual([
+      expect.objectContaining({
+        provider: 'hetzner',
+        credentialSource: 'platform',
+        credentialId: null,
+        platformCredentialId: 'platform-credential-1',
+      }),
+    ]);
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain('enc-platform-token');
+    expect(serialized).not.toContain('platform-iv');
   });
 
   it('should return catalogs for multiple provider credentials', async () => {

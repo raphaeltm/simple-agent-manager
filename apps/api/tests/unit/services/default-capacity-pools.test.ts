@@ -5,6 +5,7 @@ import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
 import {
   getDefaultLocationForProvider,
   getLocationsForProvider,
+  type ProviderInstanceOffering,
 } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
@@ -238,6 +239,41 @@ function getRows<T>(sql: string): T[] {
 
 function expectedCandidateCount(provider: 'hetzner' | 'vultr' | 'digitalocean'): number {
   return getLocationsForProvider(provider).length * getProviderInstanceOfferings(provider).length;
+}
+
+const LIVE_CATALOG_LAST_SEEN_AT = '2026-08-29T09:00:00.000Z';
+
+function liveHetznerOffering(
+  overrides: Partial<ProviderInstanceOffering> &
+    Pick<ProviderInstanceOffering, 'location' | 'providerInstanceType' | 'displayName'>
+): ProviderInstanceOffering {
+  return {
+    provider: 'hetzner',
+    providerInstanceSku: null,
+    id: overrides.providerInstanceType,
+    sku: overrides.providerInstanceType,
+    instanceType: overrides.providerInstanceType,
+    type: overrides.providerInstanceType,
+    name: overrides.displayName,
+    vcpu: 2,
+    ramGb: 4,
+    memoryGb: 4,
+    memoryMb: 4096,
+    storageGb: 40,
+    diskGb: 40,
+    price: '€3.99/mo',
+    priceMonthlyUsd: null,
+    priceHourlyUsd: null,
+    priceMonthly: 3.99,
+    priceHourly: 0.006,
+    currency: 'EUR',
+    available: true,
+    stale: false,
+    status: null,
+    catalogSource: 'api',
+    catalogLastSeenAt: LIVE_CATALOG_LAST_SEEN_AT,
+    ...overrides,
+  };
 }
 
 afterEach(() => {
@@ -484,6 +520,199 @@ describe('default capacity pool creation', () => {
         candidate_order: 2,
       },
     ]);
+  });
+
+  it('seeds Hetzner reconciliation from live API offerings beyond legacy sizes with EUR prices', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    const liveOfferings: ProviderInstanceOffering[] = [
+      liveHetznerOffering({
+        location: 'fsn1',
+        locationName: 'Falkenstein',
+        country: 'DE',
+        providerInstanceType: 'cx23',
+        displayName: 'CX23',
+      }),
+      liveHetznerOffering({
+        location: 'fsn1',
+        locationName: 'Falkenstein',
+        country: 'DE',
+        providerInstanceType: 'cpx62',
+        displayName: 'CPX62',
+        vcpu: 32,
+        ramGb: 64,
+        memoryGb: 64,
+        memoryMb: 65_536,
+        storageGb: 480,
+        diskGb: 480,
+        price: '€48.12/mo',
+        priceMonthly: 48.12,
+        priceHourly: 0.06592,
+      }),
+      liveHetznerOffering({
+        location: 'hel1',
+        locationName: 'Helsinki',
+        country: 'FI',
+        providerInstanceType: 'ccx63',
+        displayName: 'CCX63',
+        vcpu: 48,
+        ramGb: 192,
+        memoryGb: 192,
+        memoryMb: 196_608,
+        storageGb: 960,
+        diskGb: 960,
+        price: '€168.44/mo',
+        priceMonthly: 168.44,
+        priceHourly: 0.23074,
+      }),
+    ];
+
+    const result = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async (seed) => {
+        expect(seed).toMatchObject({
+          id: 'user-hetzner',
+          provider: 'hetzner',
+          scope: 'user',
+          credentialId: 'user-hetzner',
+          encryptedToken: 'ciphertext-secret',
+          iv: 'iv-secret',
+        });
+        return liveOfferings;
+      },
+    });
+
+    expect(result.user?.activeCandidateCount).toBe(liveOfferings.length);
+    expect(getCount('capacity_pool_candidates')).toBe(liveOfferings.length);
+    expect(
+      getRows<{
+        location: string;
+        machine_size: string | null;
+        provider_instance_type: string;
+        provider_instance_display_name: string;
+        provider_instance_vcpu_count: number;
+        provider_instance_memory_mb: number;
+        provider_instance_disk_gb: number;
+        provider_instance_price_display: string;
+        provider_instance_price_currency: string;
+        provider_instance_price_monthly_cents: number;
+        provider_instance_price_hourly_micros: number;
+        provider_instance_catalog_source: string;
+        provider_instance_catalog_last_seen_at: string | null;
+      }>(`
+        SELECT
+          location,
+          machine_size,
+          provider_instance_type,
+          provider_instance_display_name,
+          provider_instance_vcpu_count,
+          provider_instance_memory_mb,
+          provider_instance_disk_gb,
+          provider_instance_price_display,
+          provider_instance_price_currency,
+          provider_instance_price_monthly_cents,
+          provider_instance_price_hourly_micros,
+          provider_instance_catalog_source,
+          provider_instance_catalog_last_seen_at
+        FROM capacity_pool_candidates
+        WHERE provider_instance_type = 'cpx62'
+      `)[0]
+    ).toEqual({
+      location: 'fsn1',
+      machine_size: null,
+      provider_instance_type: 'cpx62',
+      provider_instance_display_name: 'CPX62',
+      provider_instance_vcpu_count: 32,
+      provider_instance_memory_mb: 65_536,
+      provider_instance_disk_gb: 480,
+      provider_instance_price_display: '€48.12/mo',
+      provider_instance_price_currency: 'EUR',
+      provider_instance_price_monthly_cents: 4812,
+      provider_instance_price_hourly_micros: 65_920,
+      provider_instance_catalog_source: 'api',
+      provider_instance_catalog_last_seen_at: LIVE_CATALOG_LAST_SEEN_AT,
+    });
+  });
+
+  it('translates deleted legacy size rows onto matching live catalog offerings only', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+
+    const poolId = 'cap-pool-default:user:user-1';
+    const sourceId = 'cap-source-default:user:user-hetzner';
+    const legacyCandidateId = `cap-candidate-default:${poolId}:${sourceId}:hetzner:fsn1:small`;
+    sqlite
+      ?.prepare(
+        `
+        INSERT INTO capacity_pools (
+          id, scope, owner_user_id, name, is_default, revision, status,
+          strategy, exhaustion_policy, created_by
+        )
+        VALUES (?, 'user', 'user-1', 'User default', 1, 1, 'active', 'balanced', 'queue', 'user-1')
+      `
+      )
+      .run(poolId);
+    sqlite
+      ?.prepare(
+        `
+        INSERT INTO capacity_sources (
+          id, scope, owner_user_id, source_kind, provider, credential_source,
+          credential_id, credential_reference, status, created_by
+        )
+        VALUES (?, 'user', 'user-1', 'cloud-provider-credential', 'hetzner', 'user',
+          'user-hetzner', 'credentials:user-hetzner', 'active', 'user-1')
+      `
+      )
+      .run(sourceId);
+    sqlite
+      ?.prepare(
+        `
+        INSERT INTO capacity_pool_candidates (
+          id, pool_id, capacity_source_id, provider, location, workload_role,
+          runtime, machine_class, machine_size, status
+        )
+        VALUES (?, ?, ?, 'hetzner', 'fsn1', 'workspace', 'vm', 'shared-vm', 'small', 'deleted')
+      `
+      )
+      .run(legacyCandidateId, poolId, sourceId);
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+        }),
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cpx62',
+          displayName: 'CPX62',
+          vcpu: 32,
+          memoryMb: 65_536,
+          diskGb: 480,
+          price: '€48.12/mo',
+          priceMonthly: 48.12,
+        }),
+      ],
+    });
+
+    expect(
+      getRows<{ provider_instance_type: string | null; status: string; machine_size: string | null }>(`
+        SELECT provider_instance_type, status, machine_size
+        FROM capacity_pool_candidates
+        WHERE provider_instance_type IN ('cx23', 'cpx62') OR id = '${legacyCandidateId}'
+        ORDER BY provider_instance_type
+      `)
+    ).toEqual(
+      expect.arrayContaining([
+        { provider_instance_type: null, status: 'deleted', machine_size: 'small' },
+        { provider_instance_type: 'cx23', status: 'deleted', machine_size: 'small' },
+        { provider_instance_type: 'cpx62', status: 'active', machine_size: null },
+      ])
+    );
   });
 
   it('preserves existing candidate priority and order during default reconciliation', async () => {

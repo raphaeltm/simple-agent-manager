@@ -141,36 +141,40 @@ export async function retrySubtask(
       ? (original.credentialAttributionProjectId ?? original.projectId)
       : null;
 
-  const placementResolution = await resolveTaskStartPlacementCredentialAttribution(db, {
-    entryPoint: 'retry-subtask',
-    taskId: newTaskId,
-    projectId: original.projectId,
-    userId: ctx.userId,
-    project: {
-      id: original.projectId,
-      defaultVmSize: original.projectDefaultVmSize,
-      defaultProvider: original.projectDefaultProvider,
-      defaultLocation: original.projectDefaultLocation,
-      defaultWorkspaceProfile: original.projectDefaultWorkspaceProfile,
-      defaultDevcontainerConfigName: original.projectDefaultDevcontainerConfigName,
-      defaultAgentType: original.projectDefaultAgentType,
+  const placementResolution = await resolveTaskStartPlacementCredentialAttribution(
+    db,
+    {
+      entryPoint: 'retry-subtask',
+      taskId: newTaskId,
+      projectId: original.projectId,
+      userId: ctx.userId,
+      project: {
+        id: original.projectId,
+        defaultVmSize: original.projectDefaultVmSize,
+        defaultProvider: original.projectDefaultProvider,
+        defaultLocation: original.projectDefaultLocation,
+        defaultWorkspaceProfile: original.projectDefaultWorkspaceProfile,
+        defaultDevcontainerConfigName: original.projectDefaultDevcontainerConfigName,
+        defaultAgentType: original.projectDefaultAgentType,
+      },
+      profile: resolvedProfile,
+      explicit: {
+        taskMode: (original.taskMode as TaskMode | null) ?? null,
+      },
+      inheritedCredentialAttribution: {
+        userId: credentialAttributionUserId,
+        projectId: credentialAttributionProjectId,
+        source: credentialAttributionSource,
+      },
+      credentialProjectPolicy: 'inherited-or-none',
+      taskModeDefault: 'workspace-profile',
+      profileVmSizeSource: 'skill',
+      resourceRequirements: {
+        skill: skillResourceRequirements,
+      },
     },
-    profile: resolvedProfile,
-    explicit: {
-      taskMode: (original.taskMode as TaskMode | null) ?? null,
-    },
-    inheritedCredentialAttribution: {
-      userId: credentialAttributionUserId,
-      projectId: credentialAttributionProjectId,
-      source: credentialAttributionSource,
-    },
-    credentialProjectPolicy: 'inherited-or-none',
-    taskModeDefault: 'workspace-profile',
-    profileVmSizeSource: 'skill',
-    resourceRequirements: {
-      skill: skillResourceRequirements,
-    },
-  });
+    { env: ctx.env as unknown as Env }
+  );
   if ('error' in placementResolution) {
     return placementResolution;
   }

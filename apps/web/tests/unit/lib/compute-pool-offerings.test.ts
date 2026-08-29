@@ -2,6 +2,7 @@ import type { ProviderCatalog } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildComputePoolOfferingsModel,
   type ComputePoolOfferingFilters,
   flattenProviderCatalogOfferings,
   matchesComputePoolFilters,
@@ -182,5 +183,111 @@ describe('compute-pool offering filters', () => {
     expect(
       matchesComputePoolFilters(bySku.cx22!, { ...BASE_FILTERS, availability: 'stale' })
     ).toBe(false);
+  });
+
+  it('keeps removed provider-native catalog rows addable without exposing legacy size choices', () => {
+    const model = buildComputePoolOfferingsModel(
+      [
+        {
+          id: 'candidate-cx22',
+          poolId: 'pool-1',
+          capacitySourceId: 'source-project',
+          provider: 'hetzner',
+          location: 'fsn1',
+          workloadRole: 'workspace',
+          runtime: 'vm',
+          machineClass: 'shared-vm',
+          machineSize: null,
+          providerInstanceType: 'cx22',
+          providerInstanceSku: null,
+          providerInstanceDisplayName: 'CX22',
+          providerInstanceVcpuCount: 2,
+          providerInstanceMemoryMb: 4096,
+          providerInstanceDiskGb: 40,
+          providerInstancePriceDisplay: '€3.79/mo',
+          providerInstancePriceCurrency: 'EUR',
+          providerInstancePriceMonthlyCents: 379,
+          providerInstancePriceHourlyMicros: 5190,
+          providerInstanceCatalogSource: 'api',
+          providerInstanceCatalogLastSeenAt: CATALOG_LAST_SEEN_AT,
+          priority: 0,
+          candidateOrder: 0,
+          status: 'active',
+          createdAt: CATALOG_LAST_SEEN_AT,
+          updatedAt: CATALOG_LAST_SEEN_AT,
+        },
+        {
+          id: 'candidate-cpx31',
+          poolId: 'pool-1',
+          capacitySourceId: 'source-project',
+          provider: 'hetzner',
+          location: 'ash',
+          workloadRole: 'workspace',
+          runtime: 'vm',
+          machineClass: 'shared-vm',
+          machineSize: null,
+          providerInstanceType: 'cpx31',
+          providerInstanceSku: null,
+          providerInstanceDisplayName: 'CPX31',
+          providerInstanceVcpuCount: 4,
+          providerInstanceMemoryMb: 8192,
+          providerInstanceDiskGb: 160,
+          providerInstancePriceDisplay: '€13.10/mo',
+          providerInstancePriceCurrency: 'EUR',
+          providerInstancePriceMonthlyCents: 1310,
+          providerInstancePriceHourlyMicros: 17_945,
+          providerInstanceCatalogSource: 'api',
+          providerInstanceCatalogLastSeenAt: CATALOG_LAST_SEEN_AT,
+          priority: 1,
+          candidateOrder: 1,
+          status: 'deleted',
+          createdAt: CATALOG_LAST_SEEN_AT,
+          updatedAt: CATALOG_LAST_SEEN_AT,
+        },
+      ],
+      [catalog()],
+      [
+        {
+          id: 'source-project',
+          scope: 'project',
+          ownerUserId: null,
+          ownerProjectId: 'project-1',
+          sourceKind: 'cloud-provider-credential',
+          provider: 'hetzner',
+          credentialSource: 'project',
+          credentialId: 'credential-project',
+          platformCredentialId: null,
+          credentialReference: 'credentials:credential-project',
+          credentialVersion: Date.parse(CATALOG_LAST_SEEN_AT),
+          externalSourceRef: null,
+          status: 'active',
+        },
+      ]
+    );
+
+    const cpx31 = model.catalog.find((offering) => offering.sku === 'cpx31');
+    expect(cpx31).toMatchObject({
+      candidateId: 'candidate-cpx31',
+      candidateStatus: 'deleted',
+      canUpdateExistingCandidate: true,
+      machineSizeHint: null,
+    });
+    expect(model.catalog.map((offering) => offering.sku)).toEqual(
+      expect.arrayContaining(['cx22', 'cpx31', 'ccx33', 'stale-16c-64gb'])
+    );
+    expect(model.catalog.map((offering) => offering.sku)).not.toEqual(
+      expect.arrayContaining(['small', 'medium', 'large'])
+    );
+  });
+
+  it('does not hide provider-native catalog rows that have not been reconciled yet', () => {
+    const model = buildComputePoolOfferingsModel([], [catalog()], []);
+
+    const catalogOnly = model.catalog.find((offering) => offering.sku === 'stale-16c-64gb');
+    expect(catalogOnly).toMatchObject({
+      candidateId: null,
+      candidateStatus: 'not-configured',
+      canUpdateExistingCandidate: false,
+    });
   });
 });

@@ -32,7 +32,7 @@ export function projectDefaultCapacityPoolsQueryOptions(queryScope: string, proj
 export function userDefaultCapacityPoolsQueryOptions(queryScope: string) {
   return queryOptions({
     queryKey: capacityPoolQueryKeys.userDefaults(queryScope),
-    queryFn: fetchUserDefaultCapacityPools,
+    queryFn: () => fetchUserDefaultCapacityPools(),
     enabled: Boolean(queryScope),
   });
 }
@@ -40,7 +40,7 @@ export function userDefaultCapacityPoolsQueryOptions(queryScope: string) {
 export function installationDefaultCapacityPoolsQueryOptions(queryScope: string) {
   return queryOptions({
     queryKey: capacityPoolQueryKeys.installationDefaults(queryScope),
-    queryFn: fetchInstallationDefaultCapacityPools,
+    queryFn: () => fetchInstallationDefaultCapacityPools(),
     enabled: Boolean(queryScope),
   });
 }

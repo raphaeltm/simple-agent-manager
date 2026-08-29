@@ -335,9 +335,12 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
   const queryScope = useQueryScope();
   const toast = useToast();
   const queryClient = useQueryClient();
-  const providerCatalog = useProviderCatalog(queryScope);
   const scope = props.scope ?? 'project';
   const projectId = scope === 'project' ? (props.projectId ?? null) : null;
+  const providerCatalog = useProviderCatalog(queryScope, {
+    scope,
+    projectId: scope === 'project' ? projectId : null,
+  });
   const queryKey =
     scope === 'project'
       ? capacityPoolQueryKeys.projectDefaults(queryScope, projectId ?? '')
@@ -346,10 +349,10 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
         : capacityPoolQueryKeys.installationDefaults(queryScope);
   const queryFn = () =>
     scope === 'project'
-      ? fetchProjectDefaultCapacityPools(projectId ?? '')
+      ? fetchProjectDefaultCapacityPools(projectId ?? '', { ensure: true })
       : scope === 'user'
-        ? fetchUserDefaultCapacityPools()
-        : fetchInstallationDefaultCapacityPools();
+        ? fetchUserDefaultCapacityPools({ ensure: true })
+        : fetchInstallationDefaultCapacityPools({ ensure: true });
   const query = useQuery<ProjectDefaultCapacityPoolsResponse>({
     queryKey,
     queryFn,

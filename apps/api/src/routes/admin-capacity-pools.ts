@@ -86,6 +86,7 @@ adminCapacityPoolsRoutes.get('/defaults', async (c) => {
     includeInstallation: true,
     ensure,
     includeDisabled: true,
+    env: c.env,
   });
 
   c.header('Cache-Control', 'private, no-store');
@@ -104,6 +105,7 @@ adminCapacityPoolsRoutes.post('/defaults/reconcile', async (c) => {
     includeInstallation: true,
     ensure: true,
     includeDisabled: true,
+    env: c.env,
   });
 
   c.header('Cache-Control', 'private, no-store');
@@ -134,6 +136,7 @@ adminCapacityPoolsRoutes.patch('/defaults', async (c) => {
   const summaries = await readDefaultCapacityPoolSummaries(db, {
     includeInstallation: true,
     includeDisabled: true,
+    env: c.env,
   });
   c.header('Cache-Control', 'private, no-store');
   return c.json(buildInstallationDefaultPoolResponse(summaries, false));

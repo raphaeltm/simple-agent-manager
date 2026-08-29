@@ -225,6 +225,7 @@ export async function handleRetrySubtask(
     {
       credentialsRequiredMessage:
         'Cloud provider credentials required. The user must connect a cloud provider in Settings.',
+      env,
     }
   );
   if ('error' in placementResolution) {

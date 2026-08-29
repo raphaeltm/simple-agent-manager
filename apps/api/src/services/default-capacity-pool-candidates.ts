@@ -1,5 +1,5 @@
 import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
-import type { CredentialProvider } from '@simple-agent-manager/shared';
+import type { CredentialProvider, ProviderInstanceOffering, VMSize } from '@simple-agent-manager/shared';
 import { and, eq, notInArray, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
@@ -9,7 +9,6 @@ import { providerInstanceOfferingDbValues } from './default-capacity-pool-candid
 import {
   defaultCandidateId,
   legacyDefaultCandidateId,
-  orderedLocationsForProvider,
 } from './default-capacity-pool-helpers';
 
 type Db = ReturnType<typeof drizzle>;
@@ -34,52 +33,54 @@ export async function ensureCandidatesForSource(
   db: Db,
   poolId: string,
   sourceId: string,
-  provider: CredentialProvider
+  provider: CredentialProvider,
+  offerings: ProviderInstanceOffering[]
 ): Promise<void> {
   const now = new Date().toISOString();
   const existingStatuses = await readExistingCandidateStatuses(db, poolId, sourceId);
   const candidateIds: string[] = [];
   const candidateValues: schema.NewCapacityPoolCandidate[] = [];
   let candidateOrder = 0;
-  const offerings = getProviderInstanceOfferings(provider);
 
-  for (const location of orderedLocationsForProvider(provider)) {
-    for (const offering of offerings) {
-      const id = defaultCandidateId(
-        poolId,
-        sourceId,
-        provider,
-        location.id,
-        offering.instanceType,
-        offering.instanceSku
-      );
-      const legacyStatus = existingStatuses.get(
-        legacyDefaultCandidateId(poolId, sourceId, provider, location.id, offering.legacyVmSize)
-      );
-      const initialStatus =
-        legacyStatus === DISABLED_STATUS || legacyStatus === DELETED_STATUS
-          ? legacyStatus
-          : ACTIVE_STATUS;
-      candidateIds.push(id);
-      candidateValues.push({
-        id,
-        poolId,
-        capacitySourceId: sourceId,
-        provider,
-        location: location.id,
-        workloadRole: DEFAULT_WORKLOAD_ROLE,
-        runtime: DEFAULT_RUNTIME,
-        machineClass: DEFAULT_MACHINE_CLASS,
-        machineSize: offering.legacyVmSize,
-        ...providerInstanceOfferingDbValues(offering),
-        priority: candidateOrder,
-        candidateOrder,
-        status: initialStatus,
-        createdAt: now,
-        updatedAt: now,
-      });
-      candidateOrder += 1;
-    }
+  for (const offering of offerings) {
+    const id = defaultCandidateId(
+      poolId,
+      sourceId,
+      provider,
+      offering.location,
+      offering.providerInstanceType,
+      offering.providerInstanceSku
+    );
+    const legacyStatus = legacyStatusForOffering(
+      existingStatuses,
+      poolId,
+      sourceId,
+      provider,
+      offering
+    );
+    const initialStatus =
+      legacyStatus === DISABLED_STATUS || legacyStatus === DELETED_STATUS
+        ? legacyStatus
+        : ACTIVE_STATUS;
+    candidateIds.push(id);
+    candidateValues.push({
+      id,
+      poolId,
+      capacitySourceId: sourceId,
+      provider,
+      location: offering.location,
+      workloadRole: DEFAULT_WORKLOAD_ROLE,
+      runtime: DEFAULT_RUNTIME,
+      machineClass: DEFAULT_MACHINE_CLASS,
+      machineSize: legacyVmSizeHintForOffering(provider, offering),
+      ...providerInstanceOfferingDbValues(offering),
+      priority: candidateOrder,
+      candidateOrder,
+      status: initialStatus,
+      createdAt: now,
+      updatedAt: now,
+    });
+    candidateOrder += 1;
   }
 
   for (let offset = 0; offset < candidateValues.length; offset += CANDIDATE_UPSERT_CHUNK_SIZE) {
@@ -114,6 +115,41 @@ export async function ensureCandidatesForSource(
   }
 
   await disableMissingCandidatesForSource(db, poolId, sourceId, candidateIds);
+}
+
+function legacyStatusForOffering(
+  existingStatuses: ReadonlyMap<string, string>,
+  poolId: string,
+  sourceId: string,
+  provider: CredentialProvider,
+  offering: ProviderInstanceOffering
+): string | null {
+  const legacyVmSize = legacyVmSizeHintForOffering(provider, offering);
+  if (!legacyVmSize) return null;
+  return (
+    existingStatuses.get(
+      legacyDefaultCandidateId(poolId, sourceId, provider, offering.location, legacyVmSize)
+    ) ?? null
+  );
+}
+
+function legacyVmSizeHintForOffering(
+  provider: CredentialProvider,
+  offering: ProviderInstanceOffering
+): VMSize | null {
+  if (isLegacyVmSize(offering.machineSize)) return offering.machineSize;
+
+  const staticMatch = getProviderInstanceOfferings(provider).find(
+    (legacyOffering) =>
+      legacyOffering.instanceType === offering.providerInstanceType ||
+      (legacyOffering.instanceSku !== null &&
+        legacyOffering.instanceSku === offering.providerInstanceSku)
+  );
+  return staticMatch?.legacyVmSize ?? null;
+}
+
+function isLegacyVmSize(value: unknown): value is VMSize {
+  return value === 'small' || value === 'medium' || value === 'large';
 }
 
 async function readExistingCandidateStatuses(

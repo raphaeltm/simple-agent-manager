@@ -429,7 +429,7 @@ export {
   upsertProjectRuntimeEnvVar,
   upsertProjectRuntimeFile,
 } from './projects';
-export { getProviderCatalog } from './providers';
+export { getProviderCatalog, type ProviderCatalogRequestOptions } from './providers';
 export {
   getRepoBranches,
   getRepoCompare,

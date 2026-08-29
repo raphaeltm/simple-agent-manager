@@ -1,6 +1,12 @@
 import { queryOptions } from '@tanstack/react-query';
 
-import { getProviderCatalog, listNodes, listWorkspacePorts, listWorkspaces } from '../api';
+import {
+  getProviderCatalog,
+  listNodes,
+  listWorkspacePorts,
+  listWorkspaces,
+  type ProviderCatalogRequestOptions,
+} from '../api';
 import { PROVIDER_CATALOG_STALE_TIME_MS } from '../query-stale-times';
 
 const FNV_1A_OFFSET_BASIS = 0x811c9dc5;
@@ -52,7 +58,12 @@ function workspacePortTokenCacheMarker(token: string): string {
 export const nodeQueryKeys = {
   all: (queryScope: string) => ['auth', queryScope, 'nodes'] as const,
   list: (queryScope: string) => [...nodeQueryKeys.all(queryScope), 'list'] as const,
-  catalog: (queryScope: string) => [...nodeQueryKeys.all(queryScope), 'catalog'] as const,
+  catalog: (queryScope: string, options?: ProviderCatalogRequestOptions) =>
+    [
+      ...nodeQueryKeys.all(queryScope),
+      'catalog',
+      { scope: options?.scope ?? null, projectId: options?.projectId ?? null },
+    ] as const,
 };
 
 export const workspaceQueryKeys = {
@@ -83,10 +94,13 @@ export function workspaceListQueryOptions(queryScope: string, status?: string) {
   });
 }
 
-export function providerCatalogQueryOptions(queryScope: string) {
+export function providerCatalogQueryOptions(
+  queryScope: string,
+  options?: ProviderCatalogRequestOptions
+) {
   return queryOptions({
-    queryKey: nodeQueryKeys.catalog(queryScope),
-    queryFn: async () => (await getProviderCatalog()).catalogs ?? [],
+    queryKey: nodeQueryKeys.catalog(queryScope, options),
+    queryFn: async () => (await getProviderCatalog(options)).catalogs ?? [],
     staleTime: PROVIDER_CATALOG_STALE_TIME_MS,
   });
 }

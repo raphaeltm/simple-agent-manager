@@ -28,19 +28,19 @@ Target: existing PR #1943 / branch `sam/compute-pools-integration`. Do not merge
 
 ## Implementation checklist
 
-- [ ] Extract or add a scope-aware provider catalog service that can build non-secret `ProviderCatalog` results for installation/platform, user, and project compute credentials using credential-backed provider instances.
-- [ ] Share the live provider offering fetch/normalization path used by `/api/providers/catalog`, including sanitized API-failure logging and static fallback with `catalogSource: static`.
-- [ ] Update `/api/providers/catalog` to use the shared catalog service and include the catalogs relevant to the authenticated editing context without leaking tokens.
-- [ ] Extend `ensureCandidatesForSource()` / default pool reconciliation so each active capacity source seeds from the credential-backed provider-native offering catalog, not `getProviderInstanceOfferings(provider)`.
-- [ ] Preserve user-disabled/user-deleted candidate status on reconciliation while refreshing metadata for existing rows and disabling only active rows that disappear from the provider catalog.
-- [ ] Keep legacy size hints only as best-effort internal metadata for old profile/default migration/backfill; never expose `small | medium | large` as add choices.
-- [ ] Ensure project, user, and installation default pools each resolve all compute credentials available at that scope and seed/edit against the same provider-native universe.
-- [ ] Adjust the web compute-pool offerings model so the edit catalog includes provider-native API offerings beyond currently active candidates and keeps removed offerings addable again.
-- [ ] Verify add filters work across full catalog metadata: provider, region/location, vCPU, RAM, price, availability/catalog source.
-- [ ] Add API/service tests proving Hetzner reconciliation uses API-returned offerings beyond legacy static sizes and persists live EUR price/resource metadata with `catalogSource: api`.
-- [ ] Add tests proving live provider API failure falls back per-provider to static offerings and marks `catalogSource: static`.
-- [ ] Add route/service tests for installation, user, and project scope credential catalogs and no secret leakage.
-- [ ] Add web unit/interaction tests proving API catalog offerings not currently active are visible in add flow, removed offerings can be added back, and `small | medium | large` do not appear as add choices.
+- [x] Extract or add a scope-aware provider catalog service that can build non-secret `ProviderCatalog` results for installation/platform, user, and project compute credentials using credential-backed provider instances.
+- [x] Share the live provider offering fetch/normalization path used by `/api/providers/catalog`, including sanitized API-failure logging and static fallback with `catalogSource: static`.
+- [x] Update `/api/providers/catalog` to use the shared catalog service and include the catalogs relevant to the authenticated editing context without leaking tokens.
+- [x] Extend `ensureCandidatesForSource()` / default pool reconciliation so each active capacity source seeds from the credential-backed provider-native offering catalog, not `getProviderInstanceOfferings(provider)`.
+- [x] Preserve user-disabled/user-deleted candidate status on reconciliation while refreshing metadata for existing rows and disabling only active rows that disappear from the provider catalog.
+- [x] Keep legacy size hints only as best-effort internal metadata for old profile/default migration/backfill; never expose `small | medium | large` as add choices.
+- [x] Ensure project, user, and installation default pools each resolve all compute credentials available at that scope and seed/edit against the same provider-native universe.
+- [x] Adjust the web compute-pool offerings model so the edit catalog includes provider-native API offerings beyond currently active candidates and keeps removed offerings addable again.
+- [x] Verify add filters work across full catalog metadata: provider, region/location, vCPU, RAM, price, availability/catalog source.
+- [x] Add API/service tests proving Hetzner reconciliation uses API-returned offerings beyond legacy static sizes and persists live EUR price/resource metadata with `catalogSource: api`.
+- [x] Add tests proving live provider API failure falls back per-provider to static offerings and marks `catalogSource: static`.
+- [x] Add route/service tests for installation, user, and project scope credential catalogs and no secret leakage.
+- [x] Add web unit/interaction tests proving API catalog offerings not currently active are visible in add flow, removed offerings can be added back, and `small | medium | large` do not appear as add choices.
 - [ ] Refresh Playwright desktop/mobile screenshots for compute-pool read/edit/add/filter states with more than the old three instance types.
 - [ ] Run local targeted tests for provider catalog, default capacity-pool reconciliation, API routes, and UI add/remove/filter behavior.
 - [ ] Run full pre-PR validation: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.

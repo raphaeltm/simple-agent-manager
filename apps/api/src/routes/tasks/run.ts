@@ -156,6 +156,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
     {
       credentialsRequiredMessage:
         'Cloud provider credentials required. Connect your account in Settings.',
+      env: c.env,
     }
   );
   if ('error' in placementResolution) {

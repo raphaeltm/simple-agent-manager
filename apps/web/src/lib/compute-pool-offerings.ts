@@ -42,8 +42,8 @@ export interface ComputePoolCandidateOffering extends ComputePoolOffering {
 }
 
 export interface ComputePoolCatalogOffering extends ComputePoolOffering {
-  candidateId: string;
-  candidateStatus: CapacityPoolStatus;
+  candidateId: string | null;
+  candidateStatus: CapacityPoolStatus | 'not-configured';
   runtime: string | null;
   machineClass: string | null;
   canUpdateExistingCandidate: boolean;
@@ -542,7 +542,16 @@ export function buildComputePoolOfferingsModel(
       catalogOfferings
         .map((offering) => {
           const matchingCandidate = byCandidateKey.get(offering.key);
-          if (!matchingCandidate) return null;
+          if (!matchingCandidate) {
+            return {
+              ...offering,
+              candidateId: null,
+              candidateStatus: 'not-configured',
+              runtime: null,
+              machineClass: null,
+              canUpdateExistingCandidate: false,
+            };
+          }
           return {
             ...offering,
             candidateId: matchingCandidate.candidateId,
@@ -552,7 +561,6 @@ export function buildComputePoolOfferingsModel(
             canUpdateExistingCandidate: true,
           };
         })
-        .filter((offering): offering is ComputePoolCatalogOffering => offering !== null)
     ),
   };
 }

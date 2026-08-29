@@ -129,6 +129,7 @@ export async function submitTriggeredTask(
     placement,
     {
       credentialsRequiredMessage: `No cloud provider credentials available for trigger ${input.triggerId}`,
+      env,
     }
   );
   if ('error' in placementResolution) {

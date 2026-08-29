@@ -198,6 +198,12 @@ function CatalogOfferingCard({
         Already allowed
       </Button>
     );
+  } else if (!offering.candidateId) {
+    action = (
+      <Button size="sm" variant="ghost" className="w-full sm:w-auto" disabled>
+        Reconcile first
+      </Button>
+    );
   } else {
     const candidateId = offering.candidateId;
     action = (

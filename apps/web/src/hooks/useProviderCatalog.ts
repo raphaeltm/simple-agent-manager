@@ -1,6 +1,7 @@
 import type { ProviderCatalog } from '@simple-agent-manager/shared';
 import { useQuery } from '@tanstack/react-query';
 
+import type { ProviderCatalogRequestOptions } from '../lib/api';
 import { providerCatalogQueryOptions } from '../lib/query-options';
 
 interface UseProviderCatalogResult {
@@ -21,9 +22,12 @@ interface UseProviderCatalogResult {
  * own fallback size/location list, so an unavailable catalog degrades to those
  * defaults rather than blocking workspace creation behind an error.
  */
-export function useProviderCatalog(queryScope: string): UseProviderCatalogResult {
+export function useProviderCatalog(
+  queryScope: string,
+  options?: ProviderCatalogRequestOptions
+): UseProviderCatalogResult {
   const query = useQuery({
-    ...providerCatalogQueryOptions(queryScope),
+    ...providerCatalogQueryOptions(queryScope, options),
     enabled: Boolean(queryScope),
   });
 

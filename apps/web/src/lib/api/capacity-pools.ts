@@ -5,16 +5,34 @@ import type {
 
 import { request } from './client';
 
+interface DefaultCapacityPoolsFetchOptions {
+  ensure?: boolean;
+}
+
+function defaultCapacityPoolsPath(path: string, options?: DefaultCapacityPoolsFetchOptions): string {
+  if (!options?.ensure) return path;
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}ensure=true`;
+}
+
 export function fetchProjectDefaultCapacityPools(
-  projectId: string
+  projectId: string,
+  options?: DefaultCapacityPoolsFetchOptions
 ): Promise<ProjectDefaultCapacityPoolsResponse> {
   return request<ProjectDefaultCapacityPoolsResponse>(
-    `/api/projects/${encodeURIComponent(projectId)}/capacity-pools/defaults`
+    defaultCapacityPoolsPath(
+      `/api/projects/${encodeURIComponent(projectId)}/capacity-pools/defaults`,
+      options
+    )
   );
 }
 
-export function fetchUserDefaultCapacityPools(): Promise<ProjectDefaultCapacityPoolsResponse> {
-  return request<ProjectDefaultCapacityPoolsResponse>('/api/capacity-pools/defaults');
+export function fetchUserDefaultCapacityPools(
+  options?: DefaultCapacityPoolsFetchOptions
+): Promise<ProjectDefaultCapacityPoolsResponse> {
+  return request<ProjectDefaultCapacityPoolsResponse>(
+    defaultCapacityPoolsPath('/api/capacity-pools/defaults', options)
+  );
 }
 
 export function reconcileUserDefaultCapacityPools(): Promise<ProjectDefaultCapacityPoolsResponse> {
@@ -32,8 +50,12 @@ export function updateUserDefaultCapacityPools(
   });
 }
 
-export function fetchInstallationDefaultCapacityPools(): Promise<ProjectDefaultCapacityPoolsResponse> {
-  return request<ProjectDefaultCapacityPoolsResponse>('/api/admin/capacity-pools/defaults');
+export function fetchInstallationDefaultCapacityPools(
+  options?: DefaultCapacityPoolsFetchOptions
+): Promise<ProjectDefaultCapacityPoolsResponse> {
+  return request<ProjectDefaultCapacityPoolsResponse>(
+    defaultCapacityPoolsPath('/api/admin/capacity-pools/defaults', options)
+  );
 }
 
 export function reconcileInstallationDefaultCapacityPools(): Promise<ProjectDefaultCapacityPoolsResponse> {

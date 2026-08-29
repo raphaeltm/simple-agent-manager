@@ -770,7 +770,7 @@ describe('DefaultCapacityPoolsPanel', () => {
     expect(screen.queryByText(/\+\d+ more provider\/region groups/)).not.toBeInTheDocument();
   });
 
-  it('hides catalog-only offerings until backend candidate rows exist', async () => {
+  it('shows provider-native catalog-only offerings while preventing unknown candidate updates', async () => {
     mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(
       response('project', summary('project'))
     );
@@ -779,11 +779,9 @@ describe('DefaultCapacityPoolsPanel', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
     expect(
-      screen.queryByText('long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only')
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText(/requires the backend provider-native candidate mutation/i)
-    ).not.toBeInTheDocument();
+      screen.getByText('long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only')
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Reconcile first' })[0]).toBeDisabled();
   });
 
   it('shows a deterministic error state', async () => {
