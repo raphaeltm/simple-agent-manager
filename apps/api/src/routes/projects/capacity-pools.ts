@@ -83,13 +83,25 @@ function resolveVisibleEffective(
   effective: ProjectDefaultCapacityPoolsResponse['effective'];
   effectiveScope: CapacityPoolScope | null;
 } {
-  const effective =
-    summaries.project ?? summaries.user ?? (includeInstallation ? summaries.installation : null);
+  const activeProject = activeDefaultSummary(summaries.project);
+  const activeUser = activeDefaultSummary(summaries.user);
+  const activeInstallation = includeInstallation
+    ? activeDefaultSummary(summaries.installation)
+    : null;
+  const effective = activeProject ?? activeUser ?? activeInstallation;
 
   return {
     effective,
     effectiveScope: effective?.pool.scope ?? null,
   };
+}
+
+function activeDefaultSummary(
+  summary: DefaultCapacityPoolsEnsureResult[keyof DefaultCapacityPoolsEnsureResult]
+): ProjectDefaultCapacityPoolsResponse['effective'] {
+  if (!summary || summary.pool.status !== 'active' || summary.activeCandidateCount <= 0)
+    return null;
+  return summary;
 }
 
 async function buildDefaultPoolResponse(
@@ -107,6 +119,7 @@ async function buildDefaultPoolResponse(
     projectId: input.projectId,
     includeInstallation: input.includeInstallation,
     ensure: input.ensure,
+    includeDisabled: true,
   });
   const effective = resolveVisibleEffective(summaries, input.includeInstallation);
 
@@ -164,6 +177,7 @@ capacityPoolRoutes.post('/:id/capacity-pools/defaults/reconcile', async (c) => {
   await requireProjectCapability(db, projectId, userId, 'secret:read');
   const policyMutationSupported = await hasProjectCapability(db, projectId, userId, 'secret:write');
 
+  c.header('Cache-Control', 'private, no-store');
   return c.json(
     await buildDefaultPoolResponse(db, {
       userId,

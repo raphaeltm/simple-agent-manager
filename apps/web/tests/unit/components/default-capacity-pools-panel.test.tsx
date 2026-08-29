@@ -177,7 +177,8 @@ function providerCatalog(credentialId = 'credential-project'): ProviderCatalog {
       },
       {
         provider: 'hetzner',
-        providerInstanceType: 'long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only',
+        providerInstanceType:
+          'long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only',
         providerInstanceSku: null,
         displayName: 'Long catalog-only SKU',
         sku: 'long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only',
@@ -227,8 +228,7 @@ function candidate(overrides: Partial<CapacityPoolCandidate> = {}): CapacityPool
     providerInstanceDiskGb: diskGb,
     providerInstancePriceDisplay: priceDisplay,
     providerInstancePriceCurrency: 'EUR',
-    providerInstancePriceMonthlyCents:
-      sku === 'cx22' ? 379 : sku === 'ccx33' ? 5520 : 1310,
+    providerInstancePriceMonthlyCents: sku === 'cx22' ? 379 : sku === 'ccx33' ? 5520 : 1310,
     providerInstancePriceHourlyMicros: null,
     priority: 0,
     candidateOrder: 0,
@@ -278,7 +278,11 @@ function summary(scope: CapacityPoolScope): DefaultCapacityPoolSummary {
       },
     ],
     candidates: [
-      candidate({ id: `candidate-${scope}-cx22`, machineSize: 'small', providerInstanceType: 'cx22' }),
+      candidate({
+        id: `candidate-${scope}-cx22`,
+        machineSize: 'small',
+        providerInstanceType: 'cx22',
+      }),
       candidate({
         id: `candidate-${scope}-cpx31`,
         location: 'ash',
@@ -344,7 +348,9 @@ describe('DefaultCapacityPoolsPanel', () => {
     renderPanel();
 
     expect(await screen.findByText('project default pool')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Project Infrastructure Compute Pool' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'Project Infrastructure Compute Pool' })
+    ).toBeInTheDocument();
     expect(screen.getByText('Project default applies to this context.')).toBeInTheDocument();
     expect(screen.getByText('Balanced')).toBeInTheDocument();
     expect(screen.getByText('Queue')).toBeInTheDocument();
@@ -381,6 +387,71 @@ describe('DefaultCapacityPoolsPanel', () => {
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
     expect(screen.queryByText(/Hidden outside this settings context/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Installation defaults require/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps a zero-active owned pool editable so offerings can be added back', async () => {
+    const disabledProject = summary('project');
+    disabledProject.pool = { ...disabledProject.pool, status: 'disabled' };
+    disabledProject.candidates = disabledProject.candidates.map((candidateItem, index) => ({
+      ...candidateItem,
+      status: index === 0 ? 'deleted' : 'disabled',
+    }));
+    disabledProject.activeCandidateCount = 0;
+    const disabledProjectResponse: ProjectDefaultCapacityPoolsResponse = {
+      effective: null,
+      effectiveScope: null,
+      defaults: [
+        {
+          scope: 'project',
+          visibility: 'visible',
+          visibilityReason: 'project-secret-read',
+          canReconcile: true,
+          summary: disabledProject,
+        },
+        {
+          scope: 'user',
+          visibility: 'visible',
+          visibilityReason: 'authenticated-user',
+          canReconcile: true,
+          summary: null,
+        },
+        {
+          scope: 'installation',
+          visibility: 'hidden',
+          visibilityReason: 'superadmin-required',
+          canReconcile: false,
+          summary: null,
+        },
+      ],
+      precedence: ['project', 'user', 'installation'],
+      reconciledScopes: [],
+      policyMutationSupported: true,
+    };
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(disabledProjectResponse);
+    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(disabledProjectResponse);
+
+    renderPanel();
+
+    expect(await screen.findByText('No visible active default pool')).toBeInTheDocument();
+    expect(
+      screen.getAllByText((_, element) =>
+        Boolean(element?.textContent?.includes('0 allowed instances · Balanced'))
+      ).length
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryByRole('link', { name: 'Set up project credentials' })
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.getByText('Removed or disabled instances')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Add back Hetzner fsn1 cx22/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() =>
+      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
+        candidates: [{ id: 'candidate-project-cx22', status: 'active' }],
+      })
+    );
   });
 
   it('updates project-owned policy and add/remove offering statuses', async () => {
@@ -492,7 +563,10 @@ describe('DefaultCapacityPoolsPanel', () => {
   });
 
   it('keeps same provider location and SKU rows distinct by credential source', async () => {
-    mocks.providerCatalogs = [providerCatalog('credential-alpha'), providerCatalog('credential-beta')];
+    mocks.providerCatalogs = [
+      providerCatalog('credential-alpha'),
+      providerCatalog('credential-beta'),
+    ];
     const current = summary('project');
     current.sources = [
       {
@@ -533,12 +607,12 @@ describe('DefaultCapacityPoolsPanel', () => {
     renderPanel();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    expect(screen.getAllByText(/Source: Project credential credential-alpha/).length).toBeGreaterThan(
-      0
-    );
-    expect(screen.getAllByText(/Source: Project credential credential-beta/).length).toBeGreaterThan(
-      0
-    );
+    expect(
+      screen.getAllByText(/Source: Project credential credential-alpha/).length
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(/Source: Project credential credential-beta/).length
+    ).toBeGreaterThan(0);
     fireEvent.click(
       screen.getByRole('button', {
         name: /Remove Hetzner ash cpx31 via Project credential credential-alpha/,
@@ -612,14 +686,17 @@ describe('DefaultCapacityPoolsPanel', () => {
       action: 'Set up platform credentials',
       href: '/admin/credentials',
     },
-  ])('renders scoped credential setup guidance for $title', async ({ props, fetchMock, title, action, href }) => {
-    fetchMock().mockResolvedValue(response(null, null));
+  ])(
+    'renders scoped credential setup guidance for $title',
+    async ({ props, fetchMock, title, action, href }) => {
+      fetchMock().mockResolvedValue(response(null, null));
 
-    renderPanel(props);
+      renderPanel(props);
 
-    expect(await screen.findByText(title)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: action })).toHaveAttribute('href', href);
-  });
+      expect(await screen.findByText(title)).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: action })).toHaveAttribute('href', href);
+    }
+  );
 
   it('reconciles defaults and replaces the stale summary', async () => {
     mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response(null, null));
@@ -704,7 +781,9 @@ describe('DefaultCapacityPoolsPanel', () => {
     expect(
       screen.queryByText('long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only')
     ).not.toBeInTheDocument();
-    expect(screen.queryByText(/requires the backend provider-native candidate mutation/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/requires the backend provider-native candidate mutation/i)
+    ).not.toBeInTheDocument();
   });
 
   it('shows a deterministic error state', async () => {

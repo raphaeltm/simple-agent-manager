@@ -32,7 +32,7 @@ function buildInstallationDefaultPoolResponse(
   summaries: DefaultCapacityPoolsEnsureResult,
   ensure: boolean
 ): ProjectDefaultCapacityPoolsResponse {
-  const effective = summaries.installation;
+  const effective = activeDefaultSummary(summaries.installation);
   return {
     effective,
     effectiveScope: effective?.pool.scope ?? null,
@@ -65,6 +65,14 @@ function buildInstallationDefaultPoolResponse(
   };
 }
 
+function activeDefaultSummary(
+  summary: DefaultCapacityPoolsEnsureResult[keyof DefaultCapacityPoolsEnsureResult]
+): ProjectDefaultCapacityPoolsResponse['effective'] {
+  if (!summary || summary.pool.status !== 'active' || summary.activeCandidateCount <= 0)
+    return null;
+  return summary;
+}
+
 /**
  * GET /api/admin/capacity-pools/defaults
  *
@@ -77,8 +85,10 @@ adminCapacityPoolsRoutes.get('/defaults', async (c) => {
   const summaries = await readDefaultCapacityPoolSummaries(db, {
     includeInstallation: true,
     ensure,
+    includeDisabled: true,
   });
 
+  c.header('Cache-Control', 'private, no-store');
   return c.json(buildInstallationDefaultPoolResponse(summaries, ensure));
 });
 
@@ -93,8 +103,10 @@ adminCapacityPoolsRoutes.post('/defaults/reconcile', async (c) => {
   const summaries = await readDefaultCapacityPoolSummaries(db, {
     includeInstallation: true,
     ensure: true,
+    includeDisabled: true,
   });
 
+  c.header('Cache-Control', 'private, no-store');
   return c.json(buildInstallationDefaultPoolResponse(summaries, true));
 });
 
@@ -121,7 +133,9 @@ adminCapacityPoolsRoutes.patch('/defaults', async (c) => {
 
   const summaries = await readDefaultCapacityPoolSummaries(db, {
     includeInstallation: true,
+    includeDisabled: true,
   });
+  c.header('Cache-Control', 'private, no-store');
   return c.json(buildInstallationDefaultPoolResponse(summaries, false));
 });
 

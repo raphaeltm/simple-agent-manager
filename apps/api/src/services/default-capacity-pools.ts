@@ -7,7 +7,7 @@ import type {
   DefaultCapacityPoolSummary,
 } from '@simple-agent-manager/shared';
 import { isValidProvider } from '@simple-agent-manager/shared';
-import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -41,6 +41,15 @@ const CREDENTIAL_TYPE_CLOUD_PROVIDER = 'cloud-provider';
 const ACTIVE_STATUS = 'active';
 const DISABLED_STATUS = 'disabled';
 type ScopeIdentity = DefaultPoolScopeIdentity;
+
+interface ReadDefaultPoolSummaryOptions {
+  /**
+   * Default placement reads must remain active-only. UI/editor reads opt into
+   * disabled default pools so users can add back offerings after removing the
+   * last active candidate.
+   */
+  includeDisabled?: boolean;
+}
 
 interface CredentialCapacitySeed extends ScopeIdentity {
   id: string;
@@ -164,7 +173,10 @@ export async function resolveEffectiveDefaultCapacityPoolSummary(
 
 export async function readDefaultCapacityPoolSummaries(
   db: Db,
-  options: DefaultCapacityPoolsBackfillOptions & { ensure?: boolean } = {}
+  options: DefaultCapacityPoolsBackfillOptions & {
+    ensure?: boolean;
+    includeDisabled?: boolean;
+  } = {}
 ): Promise<DefaultCapacityPoolsEnsureResult> {
   if (options.ensure) {
     await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
@@ -173,24 +185,36 @@ export async function readDefaultCapacityPoolSummaries(
   const installation =
     options.includeInstallation === false
       ? null
-      : await readDefaultPoolSummary(db, {
-          scope: 'installation',
-          ownerUserId: null,
-          ownerProjectId: null,
-        });
+      : await readDefaultPoolSummary(
+          db,
+          {
+            scope: 'installation',
+            ownerUserId: null,
+            ownerProjectId: null,
+          },
+          options
+        );
   const user = options.userId
-    ? await readDefaultPoolSummary(db, {
-        scope: 'user',
-        ownerUserId: options.userId,
-        ownerProjectId: null,
-      })
+    ? await readDefaultPoolSummary(
+        db,
+        {
+          scope: 'user',
+          ownerUserId: options.userId,
+          ownerProjectId: null,
+        },
+        options
+      )
     : null;
   const project = options.projectId
-    ? await readDefaultPoolSummary(db, {
-        scope: 'project',
-        ownerUserId: null,
-        ownerProjectId: options.projectId,
-      })
+    ? await readDefaultPoolSummary(
+        db,
+        {
+          scope: 'project',
+          ownerUserId: null,
+          ownerProjectId: options.projectId,
+        },
+        options
+      )
     : null;
 
   return { installation, user, project };
@@ -610,8 +634,14 @@ export async function reconcileDefaultPoolStatus(db: Db, poolId: string): Promis
 
 export async function readDefaultPoolSummary(
   db: Db,
-  scope: ScopeIdentity
+  scope: ScopeIdentity,
+  options: ReadDefaultPoolSummaryOptions = {}
 ): Promise<CapacityPoolSummary | null> {
+  const poolStatusPredicate =
+    options.includeDisabled === true
+      ? inArray(schema.capacityPools.status, [ACTIVE_STATUS, DISABLED_STATUS])
+      : eq(schema.capacityPools.status, ACTIVE_STATUS);
+
   const [pool] = await db
     .select()
     .from(schema.capacityPools)
@@ -619,7 +649,7 @@ export async function readDefaultPoolSummary(
       and(
         ...poolScopePredicates(scope),
         eq(schema.capacityPools.isDefault, true),
-        eq(schema.capacityPools.status, ACTIVE_STATUS)
+        poolStatusPredicate
       )
     )
     .limit(1);

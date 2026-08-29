@@ -15,6 +15,7 @@ import { updateDefaultCapacityPool } from '../../../src/services/default-capacit
 import {
   backfillDefaultCapacityPoolsForExistingCredentials,
   ensureDefaultCapacityPoolsForExistingCredentials,
+  readDefaultCapacityPoolSummaries,
   resolveEffectiveDefaultCapacityPoolSummary,
 } from '../../../src/services/default-capacity-pools';
 import {
@@ -1019,6 +1020,53 @@ describe('default capacity pool creation', () => {
     expect(() => resolveCapacityAwareCredentialLookup(ashPlacement, ashSelection)).toThrow(
       PlacementResolutionError
     );
+  });
+
+  it('keeps zero-active default pools visible only for editor reads', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
+
+    const ensured = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+    });
+    const candidates = ensured.user?.candidates ?? [];
+    expect(candidates.length).toBe(expectedCandidateCount('vultr'));
+
+    const update = await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      candidates: candidates.map((candidate) => ({ id: candidate.id, status: 'deleted' })),
+    });
+
+    expect(update.poolFound).toBe(true);
+    expect(update.summary?.pool).toMatchObject({ scope: 'user', status: 'disabled' });
+    expect(update.summary?.activeCandidateCount).toBe(0);
+    expect(update.summary?.candidates).toHaveLength(candidates.length);
+
+    const activeOnly = await readDefaultCapacityPoolSummaries(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+    });
+    expect(activeOnly.user).toBeNull();
+
+    const editorRead = await readDefaultCapacityPoolSummaries(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      includeDisabled: true,
+    });
+    expect(editorRead.user?.pool).toMatchObject({ scope: 'user', status: 'disabled' });
+    expect(editorRead.user?.activeCandidateCount).toBe(0);
+    expect(editorRead.user?.candidates).toHaveLength(candidates.length);
+
+    const placementRead = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1',
+      projectId: 'project-1',
+      ensure: false,
+      includeInstallation: false,
+    });
+    expect(placementRead).toBeNull();
   });
 
   it('disables pool availability when a backing credential is disabled', async () => {

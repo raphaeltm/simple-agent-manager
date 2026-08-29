@@ -10,10 +10,7 @@ import {
   createSqliteD1,
   createSqliteD1WithBindLimit,
 } from '../../helpers/sqlite-d1';
-import {
-  seedCloudCredential,
-  seedPlatformCloudCredential,
-} from './capacity-pool-test-seeds';
+import { seedCloudCredential, seedPlatformCloudCredential } from './capacity-pool-test-seeds';
 
 const authState = vi.hoisted(() => ({
   userId: 'user-1',
@@ -97,6 +94,7 @@ describe('default capacity pool routes', () => {
     );
 
     expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
     const text = await res.text();
     expect(text).not.toContain('encrypted-token-for-user-cloud-1');
     const body = JSON.parse(text);
@@ -132,6 +130,7 @@ describe('default capacity pool routes', () => {
     );
 
     expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
     await expect(res.json()).resolves.toMatchObject({
       effectiveScope: 'user',
       reconciledScopes: ['user'],
@@ -177,6 +176,7 @@ describe('default capacity pool routes', () => {
     );
 
     expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
     const text = await res.text();
     expect(text).not.toContain('encrypted-token-for-user-cloud-1');
     const body = JSON.parse(text);
@@ -198,6 +198,51 @@ describe('default capacity pool routes', () => {
         .prepare(`SELECT strategy, exhaustion_policy FROM capacity_pools WHERE scope = 'user'`)
         .get()
     ).toEqual({ strategy: 'pack', exhaustion_policy: 'fail' });
+  });
+
+  it('keeps a zero-active user default visible to the editor but not effective', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedCloudCredential(sqlite, { id: 'user-cloud-1', userId: 'user-1', provider: 'vultr' });
+
+    const reconcile = await createApp().request(
+      '/api/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+    expect(reconcile.status).toBe(200);
+    const initial = await reconcile.json();
+    expect(initial.effective.candidates.length).toBeGreaterThan(0);
+
+    const res = await createApp().request(
+      '/api/capacity-pools/defaults',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          candidates: initial.effective.candidates.map((candidate: { id: string }) => ({
+            id: candidate.id,
+            status: 'deleted',
+          })),
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
+    const body = await res.json();
+    expect(body.effective).toBeNull();
+    expect(body.effectiveScope).toBeNull();
+    expect(body.defaults.find((item: { scope: string }) => item.scope === 'user')).toMatchObject({
+      visibility: 'visible',
+      summary: {
+        pool: { scope: 'user', status: 'disabled' },
+        activeCandidateCount: 0,
+        candidates: expect.arrayContaining([
+          expect.objectContaining({ id: initial.effective.candidates[0].id, status: 'deleted' }),
+        ]),
+      },
+    });
   });
 
   it('requires superadmin access for installation default pool metadata', async () => {
@@ -230,6 +275,7 @@ describe('default capacity pool routes', () => {
     );
 
     expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
     const text = await res.text();
     expect(text).not.toContain('platform-encrypted-token-for-platform-cloud-1');
     const body = JSON.parse(text);
@@ -269,6 +315,7 @@ describe('default capacity pool routes', () => {
     );
 
     expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
     await expect(res.json()).resolves.toMatchObject({
       effectiveScope: 'installation',
       reconciledScopes: ['installation'],
@@ -315,6 +362,7 @@ describe('default capacity pool routes', () => {
     );
 
     expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
     const body = await res.json();
     expect(body.effective.pool.scope).toBe('installation');
     expect(

@@ -71,7 +71,7 @@ export async function updateDefaultCapacityPool(
 
   return {
     poolFound: true,
-    summary: await readDefaultPoolSummary(db, input),
+    summary: await readDefaultPoolSummary(db, input, { includeDisabled: true }),
     missingCandidateIds: [],
   };
 }
@@ -131,9 +131,7 @@ async function readCandidateStatuses(
       )
     );
 
-  return new Map(
-    rows.map((candidate) => [candidate.id, candidate.status as CapacityPoolStatus])
-  );
+  return new Map(rows.map((candidate) => [candidate.id, candidate.status as CapacityPoolStatus]));
 }
 
 function resolvePolicyUpdate(

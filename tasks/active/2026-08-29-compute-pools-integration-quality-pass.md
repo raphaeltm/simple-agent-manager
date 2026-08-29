@@ -27,22 +27,24 @@ Compute pools must be infrastructure-scoped resources backed by concrete provide
 - Stored project knowledge and this task require provider-native offering identity: credential/source + provider + region/location + provider instance type/SKU with normalized vCPU/memory/disk/price metadata where available.
 - Stored project knowledge and archived placement-resolver task records require centralized scheduler placement resolution across task entry points.
 - Public docs still describe small/medium/large workspace sizes. That can remain only as legacy/profile/workspace-size compatibility copy, not pool candidate identity.
+- Product gap found in the integrated branch: removing every candidate disabled the default pool, and active-only summary reads made that owned pool disappear from the editor. The fix keeps scheduler/effective reads active-only while allowing infrastructure editor reads to include disabled owned pools so users can add concrete offerings back.
+- Identity-varying user/admin/project capacity-pool responses need `Cache-Control: private, no-store`; project GET/PATCH already had this, while project POST and user/admin default-pool routes did not.
 - Relevant process lessons/rules: `.claude/rules/09-task-tracking.md`, `.claude/rules/10-e2e-verification.md`, `.claude/rules/17-ui-visual-testing.md`, `.claude/rules/25-review-merge-gate.md`, `.claude/rules/28-credential-resolution-fallback-tests.md`, `.claude/rules/31-migration-safety.md`, `.claude/rules/35-vertical-slice-testing.md`, `.claude/rules/44-dual-write-migration-enumerate-writers.md`, `.claude/rules/47-control-loop-io-budget.md`, and `.claude/rules/56-destructive-provider-ownership-proof.md`.
 - Relevant task records: `tasks/archive/2026-08-28-concrete-compute-pool-offerings.md`, `tasks/archive/2026-08-28-provider-native-compute-pool-ui.md`, `tasks/archive/2026-08-28-wave-2a-placement-resolver-migration.md`, and `tasks/active/2026-08-28-repair-compute-pool-default-editing.md`.
 - Staging evidence exists in PR comments for older PR heads, but this pass must not trigger another staging deploy or claim fresh staging validation.
 
 ## Implementation checklist
 
-- [ ] Inspect current PR #1943 metadata, commits, files, CI status, and CodeRabbit comments against the actual branch head.
-- [ ] Verify the branch contains backend catalog/reconciliation, scheduler/provisioning, and UI waves together and no later push reverted required earlier behavior.
-- [ ] Search actual user-facing UI/copy/tests for compute-pool candidate references to small/medium/large; fix violations while preserving legacy non-pool size copy.
-- [ ] Search actual UI for checkbox-based compute-pool candidate management; fix violations.
-- [ ] Search actual routing/pages for compute-pool controls on credential pages; fix violations.
-- [ ] Search actual UI for hidden-context scope rows such as “Project/User Hidden outside this settings context”; fix violations.
-- [ ] Verify backend migrations/schema/shared types/service mappers/routes/default reconciliation/provider interfaces are coherent.
-- [ ] Verify default-pool reconciliation preserves user-disabled/deleted offerings and does not silently reactivate removals.
-- [ ] Verify scheduler/provisioning consumes concrete offerings through centralized placement resolver and legacy non-pool paths still fall back safely.
-- [ ] Verify removed pool offerings exclude future placement/reuse without destroying existing running nodes.
+- [x] Inspect current PR #1943 metadata, commits, files, CI status, and CodeRabbit comments against the actual branch head.
+- [x] Verify the branch contains backend catalog/reconciliation, scheduler/provisioning, and UI waves together and no later push reverted required earlier behavior.
+- [x] Search actual user-facing UI/copy/tests for compute-pool candidate references to small/medium/large; fix violations while preserving legacy non-pool size copy.
+- [x] Search actual UI for checkbox-based compute-pool candidate management; fix violations.
+- [x] Search actual routing/pages for compute-pool controls on credential pages; fix violations.
+- [x] Search actual UI for hidden-context scope rows such as “Project/User Hidden outside this settings context”; fix violations.
+- [x] Verify backend migrations/schema/shared types/service mappers/routes/default reconciliation/provider interfaces are coherent.
+- [x] Verify default-pool reconciliation preserves user-disabled/deleted offerings and does not silently reactivate removals.
+- [x] Verify scheduler/provisioning consumes concrete offerings through centralized placement resolver and legacy non-pool paths still fall back safely.
+- [x] Verify removed pool offerings exclude future placement/reuse without destroying existing running nodes.
 - [ ] Run focused tests for shared capacity types, provider catalogs, default-pool services/routes, placement resolver, task runner/provisioning, workspace placement, and web compute-pool UI.
 - [ ] Run repo-level typecheck/lint/build/test as far as practical; document any remaining CI-only or time-bounded validation.
 - [ ] Inspect local and PR-linked Playwright screenshot evidence and note whether artifacts are missing or outdated after fixes.

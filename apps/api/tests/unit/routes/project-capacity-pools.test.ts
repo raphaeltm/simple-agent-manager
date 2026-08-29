@@ -10,10 +10,7 @@ import {
   createSqliteD1,
   createSqliteD1WithBindLimit,
 } from '../../helpers/sqlite-d1';
-import {
-  seedCloudCredential,
-  seedPlatformCloudCredential,
-} from './capacity-pool-test-seeds';
+import { seedCloudCredential, seedPlatformCloudCredential } from './capacity-pool-test-seeds';
 
 const authState = vi.hoisted(() => ({
   userId: 'user-1',
@@ -281,6 +278,65 @@ describe('project capacity pool routes', () => {
     });
   });
 
+  it('keeps a zero-active project default editable while falling back to the user pool', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
+    seedCloudCredential(sqlite, { id: 'user-cloud-1', userId: 'user-1', provider: 'vultr' });
+    seedCloudCredential(sqlite, {
+      id: 'project-cloud-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+      provider: 'hetzner',
+    });
+
+    const reconcile = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+    expect(reconcile.status).toBe(200);
+    const initial = await reconcile.json();
+    expect(initial.effectiveScope).toBe('project');
+    const projectDefault = initial.defaults.find(
+      (item: { scope: string }) => item.scope === 'project'
+    )?.summary;
+    if (!projectDefault) throw new Error('Expected project default summary');
+    expect(projectDefault?.candidates.length).toBeGreaterThan(0);
+
+    const res = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          candidates: projectDefault.candidates.map((candidate: { id: string }) => ({
+            id: candidate.id,
+            status: 'deleted',
+          })),
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
+    const body = await res.json();
+    expect(body.effectiveScope).toBe('user');
+    expect(body.effective.pool).toMatchObject({ scope: 'user', ownerUserId: 'user-1' });
+    expect(body.defaults.find((item: { scope: string }) => item.scope === 'project')).toMatchObject(
+      {
+        visibility: 'visible',
+        summary: {
+          pool: { scope: 'project', status: 'disabled' },
+          activeCandidateCount: 0,
+          candidates: expect.arrayContaining([
+            expect.objectContaining({ id: projectDefault.candidates[0].id, status: 'deleted' }),
+          ]),
+        },
+      }
+    );
+  });
+
   it('requires project secret-read capability', async () => {
     const { sqlite, env } = createEnv();
     seedUser(sqlite, 'user-1');
@@ -326,6 +382,8 @@ describe('project capacity pool routes', () => {
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
+    expect(first.headers.get('cache-control')).toBe('private, no-store');
+    expect(second.headers.get('cache-control')).toBe('private, no-store');
     await expect(second.json()).resolves.toMatchObject({
       effectiveScope: 'project',
       reconciledScopes: ['project', 'user'],
