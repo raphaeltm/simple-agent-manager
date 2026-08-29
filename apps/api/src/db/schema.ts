@@ -55,6 +55,44 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 
+const capacityPlacementColumns = () => ({
+  /** Capacity pool selected for placement/provisioning. Null for legacy rows. */
+  capacityPoolId: text('capacity_pool_id').references(() => capacityPools.id, {
+    onDelete: 'set null',
+  }),
+  /** Scope snapshot for the selected capacity pool: 'installation' | 'user' | 'project'. */
+  capacityPoolScope: text('capacity_pool_scope'),
+  /** Pool revision used for placement; copied so later edits do not rewrite audit history. */
+  capacityPoolRevision: integer('capacity_pool_revision'),
+  /** Capacity source selected from the pool. */
+  capacitySourceId: text('capacity_source_id').references(() => capacitySources.id, {
+    onDelete: 'set null',
+  }),
+  /** Capacity pool candidate selected for placement/provisioning. Snapshot only. */
+  capacityPoolCandidateId: text('capacity_pool_candidate_id'),
+  /** Credential provenance snapshot used for placement/provisioning, without secret material. */
+  placementCredentialSource: text('placement_credential_source'),
+  /** Non-secret reference to the canonical credential record used for placement/provisioning. */
+  placementCredentialReference: text('placement_credential_reference'),
+  /** Optional credential version snapshot for future rotating credential records. */
+  placementCredentialVersion: integer('placement_credential_version'),
+  /** Project scope snapshot for project-scoped pools. */
+  capacityPoolProjectId: text('capacity_pool_project_id').references(() => projects.id, {
+    onDelete: 'set null',
+  }),
+  /** Workload role used for placement, e.g. 'workspace' or 'deployment'. */
+  workloadRole: text('workload_role'),
+  /** Provider-native offering selected from a compute pool. */
+  providerInstanceType: text('provider_instance_type'),
+  providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
+  providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
+  providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+  providerInstancePriceDisplay: text('provider_instance_price_display'),
+  providerInstancePriceCurrency: text('provider_instance_price_currency'),
+  providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
+  providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
+});
+
 // =============================================================================
 // Users (BetterAuth compatible + custom fields)
 // BetterAuth requires integer timestamps with mode: 'timestamp_ms' so that
@@ -892,41 +930,7 @@ export const tasks = sqliteTable(
     resolvedReservationJson: text('resolved_reservation_json'),
     /** JSON snapshot of PlacementExplanation (audit trail). */
     placementExplanationJson: text('placement_explanation_json'),
-    /** Capacity pool selected for this task. Null for legacy/current behavior before pool resolution. */
-    capacityPoolId: text('capacity_pool_id').references(() => capacityPools.id, {
-      onDelete: 'set null',
-    }),
-    /** Scope snapshot for the selected capacity pool: 'installation' | 'user' | 'project'. */
-    capacityPoolScope: text('capacity_pool_scope'),
-    /** Pool revision used for placement; copied so later pool edits do not rewrite audit history. */
-    capacityPoolRevision: integer('capacity_pool_revision'),
-    /** Capacity source selected from the pool. Null before pool-aware placement exists. */
-    capacitySourceId: text('capacity_source_id').references(() => capacitySources.id, {
-      onDelete: 'set null',
-    }),
-    /** Capacity pool candidate selected for placement/provisioning. Snapshot only; do not cascade historical audit fields. */
-    capacityPoolCandidateId: text('capacity_pool_candidate_id'),
-    /** Credential provenance snapshot used for placement/provisioning, without secret material. */
-    placementCredentialSource: text('placement_credential_source'),
-    /** Non-secret reference to the canonical credential record used for placement/provisioning. */
-    placementCredentialReference: text('placement_credential_reference'),
-    /** Optional credential version snapshot for future rotating credential records. */
-    placementCredentialVersion: integer('placement_credential_version'),
-    /** Project scope snapshot for project-scoped pools. */
-    capacityPoolProjectId: text('capacity_pool_project_id').references(() => projects.id, {
-      onDelete: 'set null',
-    }),
-    /** Workload role used for placement, e.g. 'workspace' or 'deployment'. */
-    workloadRole: text('workload_role'),
-    /** Provider-native offering selected for this placement, if resolved from a compute pool. */
-    providerInstanceType: text('provider_instance_type'),
-    providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
-    providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
-    providerInstanceDiskGb: integer('provider_instance_disk_gb'),
-    providerInstancePriceDisplay: text('provider_instance_price_display'),
-    providerInstancePriceCurrency: text('provider_instance_price_currency'),
-    providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
-    providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
+    ...capacityPlacementColumns(),
     /** Durable VM admission status mirrored for UI/API visibility. */
     admissionState: text('admission_state'),
     /** Durable VM admission/backpressure reason mirrored for UI/API visibility. */
@@ -1204,41 +1208,7 @@ export const nodes = sqliteTable(
     ),
     /** Credential attribution source used at node creation: 'user' | 'project' | 'platform'. */
     credentialAttributionSource: text('credential_attribution_source').default('user'),
-    /** Capacity pool selected when this node was provisioned or adopted. */
-    capacityPoolId: text('capacity_pool_id').references(() => capacityPools.id, {
-      onDelete: 'set null',
-    }),
-    /** Scope snapshot for the selected capacity pool: 'installation' | 'user' | 'project'. */
-    capacityPoolScope: text('capacity_pool_scope'),
-    /** Pool revision used for node placement/provisioning. */
-    capacityPoolRevision: integer('capacity_pool_revision'),
-    /** Capacity source selected from the pool. */
-    capacitySourceId: text('capacity_source_id').references(() => capacitySources.id, {
-      onDelete: 'set null',
-    }),
-    /** Capacity pool candidate selected when this node was provisioned or adopted. Snapshot only. */
-    capacityPoolCandidateId: text('capacity_pool_candidate_id'),
-    /** Credential provenance snapshot used for node provisioning, without secret material. */
-    placementCredentialSource: text('placement_credential_source'),
-    /** Non-secret reference to the canonical credential record used for node provisioning. */
-    placementCredentialReference: text('placement_credential_reference'),
-    /** Optional credential version snapshot for future rotating credential records. */
-    placementCredentialVersion: integer('placement_credential_version'),
-    /** Project scope snapshot for project-scoped pools; null for user/installation pools. */
-    capacityPoolProjectId: text('capacity_pool_project_id').references(() => projects.id, {
-      onDelete: 'set null',
-    }),
-    /** Workload role this node was provisioned/adopted to serve. */
-    workloadRole: text('workload_role'),
-    /** Provider-native offering selected for this node, if resolved from a compute pool. */
-    providerInstanceType: text('provider_instance_type'),
-    providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
-    providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
-    providerInstanceDiskGb: integer('provider_instance_disk_gb'),
-    providerInstancePriceDisplay: text('provider_instance_price_display'),
-    providerInstancePriceCurrency: text('provider_instance_price_currency'),
-    providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
-    providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
+    ...capacityPlacementColumns(),
     /** JSON snapshot of PlacementExplanation for node-level provisioning audit. */
     placementExplanationJson: text('placement_explanation_json'),
     offboardingStatus: text('offboarding_status'),
@@ -1336,41 +1306,7 @@ export const workspaces = sqliteTable(
     resolvedReservationJson: text('resolved_reservation_json'),
     /** JSON snapshot of PlacementExplanation for audit. */
     placementExplanationJson: text('placement_explanation_json'),
-    /** Capacity pool selected for this workspace. Null for legacy/current behavior before pool resolution. */
-    capacityPoolId: text('capacity_pool_id').references(() => capacityPools.id, {
-      onDelete: 'set null',
-    }),
-    /** Scope snapshot for the selected capacity pool: 'installation' | 'user' | 'project'. */
-    capacityPoolScope: text('capacity_pool_scope'),
-    /** Pool revision used for workspace placement. */
-    capacityPoolRevision: integer('capacity_pool_revision'),
-    /** Capacity source selected from the pool. */
-    capacitySourceId: text('capacity_source_id').references(() => capacitySources.id, {
-      onDelete: 'set null',
-    }),
-    /** Capacity pool candidate selected for this workspace placement. Snapshot only. */
-    capacityPoolCandidateId: text('capacity_pool_candidate_id'),
-    /** Credential provenance snapshot used for workspace placement/provisioning, without secret material. */
-    placementCredentialSource: text('placement_credential_source'),
-    /** Non-secret reference to the canonical credential record used for workspace placement/provisioning. */
-    placementCredentialReference: text('placement_credential_reference'),
-    /** Optional credential version snapshot for future rotating credential records. */
-    placementCredentialVersion: integer('placement_credential_version'),
-    /** Project scope snapshot for project-scoped pools. */
-    capacityPoolProjectId: text('capacity_pool_project_id').references(() => projects.id, {
-      onDelete: 'set null',
-    }),
-    /** Workload role used for placement, e.g. 'workspace' or 'deployment'. */
-    workloadRole: text('workload_role'),
-    /** Provider-native offering selected for this workspace, if resolved from a compute pool. */
-    providerInstanceType: text('provider_instance_type'),
-    providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
-    providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
-    providerInstanceDiskGb: integer('provider_instance_disk_gb'),
-    providerInstancePriceDisplay: text('provider_instance_price_display'),
-    providerInstancePriceCurrency: text('provider_instance_price_currency'),
-    providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
-    providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
+    ...capacityPlacementColumns(),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
