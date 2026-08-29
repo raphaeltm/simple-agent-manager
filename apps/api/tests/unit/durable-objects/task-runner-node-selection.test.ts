@@ -11,111 +11,26 @@ import { SessionRecoveryAuthorityRevokedError } from '../../../src/services/sess
 type D1ResultMap = {
   persistedWarmClaim?: string | null;
   runs?: Array<{ sql: string; bound: unknown[] }>;
-  preferredNode?: {
-    id: string;
+  preferredNode?: PlacementSeedFields & {
     status: string;
-    vm_size: string;
-    vm_location?: string;
-    agent_version?: string | null;
-    capacity_pool_id?: string | null;
-    capacity_pool_scope?: string | null;
-    capacity_pool_revision?: number | null;
-    capacity_source_id?: string | null;
-    capacity_pool_candidate_id?: string | null;
-    placement_credential_source?: string | null;
-    placement_credential_reference?: string | null;
-    placement_credential_version?: number | null;
-    capacity_pool_project_id?: string | null;
-    workload_role?: string | null;
-    provider_instance_type?: string | null;
-    provider_instance_vcpu_count?: number | null;
-    provider_instance_memory_mb?: number | null;
-    provider_instance_disk_gb?: number | null;
-    provider_instance_price_display?: string | null;
-    provider_instance_price_currency?: string | null;
-    provider_instance_price_monthly_cents?: number | null;
-    provider_instance_price_hourly_micros?: number | null;
-    placement_explanation_json?: string | null;
   } | null;
-  warmNodes?: Array<{
-    id: string;
-    vm_size: string;
-    vm_location: string;
-    agent_version?: string | null;
-    capacity_pool_id?: string | null;
-    capacity_pool_scope?: string | null;
-    capacity_pool_revision?: number | null;
-    capacity_source_id?: string | null;
-    capacity_pool_candidate_id?: string | null;
-    placement_credential_source?: string | null;
-    placement_credential_reference?: string | null;
-    placement_credential_version?: number | null;
-    capacity_pool_project_id?: string | null;
-    workload_role?: string | null;
-    provider_instance_type?: string | null;
-    provider_instance_vcpu_count?: number | null;
-    provider_instance_memory_mb?: number | null;
-    provider_instance_disk_gb?: number | null;
-    provider_instance_price_display?: string | null;
-    provider_instance_price_currency?: string | null;
-    provider_instance_price_monthly_cents?: number | null;
-    provider_instance_price_hourly_micros?: number | null;
-    placement_explanation_json?: string | null;
-  }>;
-  freshWarmNode?: {
+  warmNodes?: Array<PlacementSeedFields & { vm_location: string }>;
+  freshWarmNode?: PlacementMetadataFields & {
     id?: string;
     status: string;
     warm_since: string | null;
     vm_size?: string;
     vm_location?: string;
     agent_version?: string | null;
-    capacity_pool_id?: string | null;
-    capacity_pool_scope?: string | null;
-    capacity_pool_revision?: number | null;
-    capacity_source_id?: string | null;
-    capacity_pool_candidate_id?: string | null;
-    placement_credential_source?: string | null;
-    placement_credential_reference?: string | null;
-    placement_credential_version?: number | null;
-    capacity_pool_project_id?: string | null;
-    workload_role?: string | null;
-    provider_instance_type?: string | null;
-    provider_instance_vcpu_count?: number | null;
-    provider_instance_memory_mb?: number | null;
-    provider_instance_disk_gb?: number | null;
-    provider_instance_price_display?: string | null;
-    provider_instance_price_currency?: string | null;
-    provider_instance_price_monthly_cents?: number | null;
-    provider_instance_price_hourly_micros?: number | null;
     placement_explanation_json?: string | null;
   } | null;
-  existingNodes?: Array<{
-    id: string;
-    vm_size: string;
+  existingNodes?: Array<
+    PlacementSeedFields & {
     vm_location: string;
     health_status: string;
     last_metrics: string | null;
-    agent_version?: string | null;
-    capacity_pool_id?: string | null;
-    capacity_pool_scope?: string | null;
-    capacity_pool_revision?: number | null;
-    capacity_source_id?: string | null;
-    capacity_pool_candidate_id?: string | null;
-    placement_credential_source?: string | null;
-    placement_credential_reference?: string | null;
-    placement_credential_version?: number | null;
-    capacity_pool_project_id?: string | null;
-    workload_role?: string | null;
-    provider_instance_type?: string | null;
-    provider_instance_vcpu_count?: number | null;
-    provider_instance_memory_mb?: number | null;
-    provider_instance_disk_gb?: number | null;
-    provider_instance_price_display?: string | null;
-    provider_instance_price_currency?: string | null;
-    provider_instance_price_monthly_cents?: number | null;
-    provider_instance_price_hourly_micros?: number | null;
-    placement_explanation_json?: string | null;
-  }>;
+    }
+  >;
   workspaceCounts?: Array<{ node_id: string; c: number }>;
   warmWorkspaceCount?: number;
   healthByNode?: Record<
@@ -131,20 +46,7 @@ type D1ResultMap = {
 
 type MockNode = NonNullable<D1ResultMap['preferredNode']>;
 
-// Shared shape for every node source fed into toPlacementRow (preferredNode,
-// freshWarmNode, warmNodes, existingNodes). status/health_status/warm_since are
-// optional because only some sources carry them, so passing any element type to
-// a map callback typed against this is valid under strict callback checking.
-type PlacementRowNodeSource = {
-  id: string;
-  status?: string | null;
-  vm_size: string;
-  vm_location?: string | null;
-  agent_version?: string | null;
-  cloud_provider?: string | null;
-  health_status?: string | null;
-  last_metrics?: string | null;
-  warm_since?: string | null;
+type PlacementMetadataFields = {
   capacity_pool_id?: string | null;
   capacity_pool_scope?: string | null;
   capacity_pool_revision?: number | null;
@@ -163,7 +65,30 @@ type PlacementRowNodeSource = {
   provider_instance_price_currency?: string | null;
   provider_instance_price_monthly_cents?: number | null;
   provider_instance_price_hourly_micros?: number | null;
+};
+
+type PlacementSeedFields = PlacementMetadataFields & {
+  id: string;
+  vm_size: string;
+  vm_location?: string | null;
+  agent_version?: string | null;
   placement_explanation_json?: string | null;
+};
+
+// Shared shape for every node source fed into toPlacementRow (preferredNode,
+// freshWarmNode, warmNodes, existingNodes). status/health_status/warm_since are
+// optional because only some sources carry them, so passing any element type to
+// a map callback typed against this is valid under strict callback checking.
+type PlacementRowNodeSource = PlacementSeedFields & {
+  id: string;
+  status?: string | null;
+  vm_size: string;
+  vm_location?: string | null;
+  agent_version?: string | null;
+  cloud_provider?: string | null;
+  health_status?: string | null;
+  last_metrics?: string | null;
+  warm_since?: string | null;
 };
 
 function toPlacementRow(node: PlacementRowNodeSource | null | undefined) {

@@ -10,6 +10,10 @@ import {
   createSqliteD1,
   createSqliteD1WithBindLimit,
 } from '../../helpers/sqlite-d1';
+import {
+  seedCloudCredential,
+  seedPlatformCloudCredential,
+} from './capacity-pool-test-seeds';
 
 const authState = vi.hoisted(() => ({
   userId: 'user-1',
@@ -71,44 +75,6 @@ function seedUser(sqlite: Database.Database, id: string, role = 'user') {
        VALUES (?, ?, ?, 'active')`
     )
     .run(id, `${id}@example.com`, role);
-}
-
-function seedCloudCredential(
-  sqlite: Database.Database,
-  input: { id: string; userId: string; provider?: string; active?: boolean }
-) {
-  sqlite
-    .prepare(
-      `INSERT INTO credentials (
-        id, user_id, project_id, provider, credential_type, credential_kind,
-        is_active, encrypted_token, iv, created_at, updated_at
-       )
-       VALUES (?, ?, NULL, ?, 'cloud-provider', 'api-key', ?, ?, ?, ?, ?)`
-    )
-    .run(
-      input.id,
-      input.userId,
-      input.provider ?? 'hetzner',
-      input.active === false ? 0 : 1,
-      `encrypted-token-for-${input.id}`,
-      `iv-for-${input.id}`,
-      '2026-08-28T00:00:00.000Z',
-      '2026-08-28T00:00:00.000Z'
-    );
-}
-
-function seedPlatformCloudCredential(sqlite: Database.Database, id = 'platform-cloud-1') {
-  sqlite
-    .prepare(
-      `INSERT INTO platform_credentials (
-        id, credential_type, provider, agent_type, credential_kind, label,
-        encrypted_token, iv, is_enabled, created_by, created_at, updated_at
-       )
-       VALUES (?, 'cloud-provider', 'hetzner', NULL, 'api-key', 'Platform Hetzner',
-        ?, ?, 1, 'superadmin-1', '2026-08-28T00:00:00.000Z',
-        '2026-08-28T00:00:00.000Z')`
-    )
-    .run(id, `platform-encrypted-token-for-${id}`, `platform-iv-for-${id}`);
 }
 
 describe('default capacity pool routes', () => {
