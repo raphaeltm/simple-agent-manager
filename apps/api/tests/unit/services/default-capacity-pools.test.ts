@@ -1,6 +1,4 @@
 import { Buffer } from 'node:buffer';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
 import {
@@ -32,28 +30,8 @@ import {
   resolveTaskStartCapacityPoolSelection,
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
+import { applyCapacityPoolSchemaMigrations } from '../../helpers/capacity-pool-migrations';
 import { createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
-
-const migrationSql = readFileSync(
-  join(process.cwd(), 'src/db/migrations/0125_compute_pool_foundation.sql'),
-  'utf8'
-);
-const candidateSnapshotMigrationSql = readFileSync(
-  join(process.cwd(), 'src/db/migrations/0126_capacity_pool_candidate_snapshots.sql'),
-  'utf8'
-);
-const concreteOfferingMigrationSql = readFileSync(
-  join(process.cwd(), 'src/db/migrations/0127_concrete_capacity_pool_offerings.sql'),
-  'utf8'
-);
-const candidateCatalogMetadataMigrationSql = readFileSync(
-  join(process.cwd(), 'src/db/migrations/0128_capacity_pool_candidate_catalog_metadata.sql'),
-  'utf8'
-);
-const capacitySourceExternalCredentialsMigrationSql = readFileSync(
-  join(process.cwd(), 'src/db/migrations/0129_capacity_source_external_credentials.sql'),
-  'utf8'
-);
 
 let sqlite: Database.Database | null = null;
 const TEST_ENCRYPTION_KEY = Buffer.from('0123456789abcdef0123456789abcdef').toString('base64');
@@ -199,11 +177,7 @@ function createDb() {
     );
   `);
   seedIdentity();
-  sqlite.exec(migrationSql);
-  sqlite.exec(candidateSnapshotMigrationSql);
-  sqlite.exec(concreteOfferingMigrationSql);
-  sqlite.exec(candidateCatalogMetadataMigrationSql);
-  sqlite.exec(capacitySourceExternalCredentialsMigrationSql);
+  applyCapacityPoolSchemaMigrations(sqlite);
   return drizzle(sqlite, { schema });
 }
 
@@ -475,11 +449,163 @@ function liveHetznerOffering(
   };
 }
 
+type LegacyCapacityCandidateStatus = 'deleted' | 'disabled';
+
+function seedLegacyHetznerDefaultCandidate(status: LegacyCapacityCandidateStatus): string {
+  seedUserCredential({ id: 'user-hetzner' });
+
+  const poolId = 'cap-pool-default:user:user-1';
+  const sourceId = 'cap-source-default:user:user-hetzner';
+  const legacyCandidateId = `cap-candidate-default:${poolId}:${sourceId}:hetzner:fsn1:small`;
+
+  sqlite
+    ?.prepare(
+      `
+      INSERT INTO capacity_pools (
+        id, scope, owner_user_id, name, is_default, revision, status,
+        strategy, exhaustion_policy, created_by
+      )
+      VALUES (?, 'user', 'user-1', 'User default', 1, 1, 'active', 'balanced', 'queue', 'user-1')
+    `
+    )
+    .run(poolId);
+  sqlite
+    ?.prepare(
+      `
+      INSERT INTO capacity_sources (
+        id, scope, owner_user_id, source_kind, provider, credential_source,
+        credential_id, credential_reference, status, created_by
+      )
+      VALUES (?, 'user', 'user-1', 'cloud-provider-credential', 'hetzner', 'user',
+        'user-hetzner', 'credentials:user-hetzner', 'active', 'user-1')
+    `
+    )
+    .run(sourceId);
+  sqlite
+    ?.prepare(
+      `
+      INSERT INTO capacity_pool_candidates (
+        id, pool_id, capacity_source_id, provider, location, workload_role,
+        runtime, machine_class, machine_size, status
+      )
+      VALUES (?, ?, ?, 'hetzner', 'fsn1', 'workspace', 'vm', 'shared-vm', 'small', ?)
+    `
+    )
+    .run(legacyCandidateId, poolId, sourceId, status);
+
+  return legacyCandidateId;
+}
+
+function legacySizeReconciliationOfferings(): ProviderInstanceOffering[] {
+  return [
+    liveHetznerOffering({
+      location: 'fsn1',
+      providerInstanceType: 'cx23',
+      displayName: 'CX23',
+    }),
+    liveHetznerOffering({
+      location: 'fsn1',
+      providerInstanceType: 'cpx62',
+      displayName: 'CPX62',
+      vcpu: 32,
+      memoryMb: 65_536,
+      diskGb: 480,
+      price: '€48.12/mo',
+      priceMonthly: 48.12,
+    }),
+  ];
+}
+
+async function expectLegacyStatusMappedToLiveCatalog(
+  legacyStatus: LegacyCapacityCandidateStatus
+): Promise<void> {
+  const db = createDb();
+  const legacyCandidateId = seedLegacyHetznerDefaultCandidate(legacyStatus);
+
+  await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+    userId: 'user-1',
+    includeInstallation: false,
+    offeringResolver: async () => legacySizeReconciliationOfferings(),
+  });
+
+  expect(
+    getRows<{
+      provider_instance_type: string | null;
+      status: string;
+      machine_size: string | null;
+    }>(`
+      SELECT provider_instance_type, status, machine_size
+      FROM capacity_pool_candidates
+      WHERE provider_instance_type IN ('cx23', 'cpx62') OR id = '${legacyCandidateId}'
+      ORDER BY provider_instance_type
+    `)
+  ).toEqual(
+    expect.arrayContaining([
+      { provider_instance_type: null, status: legacyStatus, machine_size: 'small' },
+      { provider_instance_type: 'cx23', status: legacyStatus, machine_size: 'small' },
+      { provider_instance_type: 'cpx62', status: 'disabled', machine_size: null },
+    ])
+  );
+}
+
 function catalogEnv(database: D1Database = {} as D1Database): Env {
   return {
     DATABASE: database,
     ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
   } as Env;
+}
+
+type TaskStartResourceRequirements = Parameters<
+  typeof resolveTaskStartPlacement
+>[0]['resourceRequirements'];
+
+async function seedVultrDefaultPool(): Promise<ReturnType<typeof createDb>> {
+  const db = createDb();
+  seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
+
+  await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+    userId: 'user-1',
+    includeInstallation: false,
+  });
+
+  return db;
+}
+
+function setUserDefaultPoolStrategy(strategy: 'pack' | 'smallest-fit'): void {
+  sqlite?.prepare("UPDATE capacity_pools SET strategy = ? WHERE scope = 'user'").run(strategy);
+}
+
+function vultrTaskStartPlacement(
+  taskId: string,
+  resourceRequirements: TaskStartResourceRequirements = {}
+) {
+  return resolveTaskStartPlacement({
+    entryPoint: 'task-submit',
+    taskId,
+    projectId: 'project-1',
+    userId: 'user-1',
+    project: {
+      id: 'project-1',
+      defaultProvider: 'vultr',
+      defaultLocation: getDefaultLocationForProvider('vultr'),
+      defaultVmSize: 'small',
+    },
+    credentialProjectPolicy: 'current-project-unless-inherited',
+    taskModeDefault: 'task',
+    resourceRequirements,
+  });
+}
+
+async function selectVultrDefaultPoolCandidates(
+  db: ReturnType<typeof createDb>,
+  taskId: string,
+  resourceRequirements: TaskStartResourceRequirements = {}
+) {
+  return resolveTaskStartCapacityPoolSelection(
+    db as never,
+    vultrTaskStartPlacement(taskId, resourceRequirements),
+    { ensure: false }
+  );
 }
 
 function hetznerServerType(input: {
@@ -1676,173 +1802,12 @@ describe('default capacity pool creation', () => {
     ).toEqual({ status: 'deleted', provider_instance_catalog_source: null });
   });
 
-  it('translates deleted legacy size rows onto matching live catalog offerings only', async () => {
-    const db = createDb();
-    seedUserCredential({ id: 'user-hetzner' });
-
-    const poolId = 'cap-pool-default:user:user-1';
-    const sourceId = 'cap-source-default:user:user-hetzner';
-    const legacyCandidateId = `cap-candidate-default:${poolId}:${sourceId}:hetzner:fsn1:small`;
-    sqlite
-      ?.prepare(
-        `
-        INSERT INTO capacity_pools (
-          id, scope, owner_user_id, name, is_default, revision, status,
-          strategy, exhaustion_policy, created_by
-        )
-        VALUES (?, 'user', 'user-1', 'User default', 1, 1, 'active', 'balanced', 'queue', 'user-1')
-      `
-      )
-      .run(poolId);
-    sqlite
-      ?.prepare(
-        `
-        INSERT INTO capacity_sources (
-          id, scope, owner_user_id, source_kind, provider, credential_source,
-          credential_id, credential_reference, status, created_by
-        )
-        VALUES (?, 'user', 'user-1', 'cloud-provider-credential', 'hetzner', 'user',
-          'user-hetzner', 'credentials:user-hetzner', 'active', 'user-1')
-      `
-      )
-      .run(sourceId);
-    sqlite
-      ?.prepare(
-        `
-        INSERT INTO capacity_pool_candidates (
-          id, pool_id, capacity_source_id, provider, location, workload_role,
-          runtime, machine_class, machine_size, status
-        )
-        VALUES (?, ?, ?, 'hetzner', 'fsn1', 'workspace', 'vm', 'shared-vm', 'small', 'deleted')
-      `
-      )
-      .run(legacyCandidateId, poolId, sourceId);
-
-    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
-      userId: 'user-1',
-      includeInstallation: false,
-      offeringResolver: async () => [
-        liveHetznerOffering({
-          location: 'fsn1',
-          providerInstanceType: 'cx23',
-          displayName: 'CX23',
-        }),
-        liveHetznerOffering({
-          location: 'fsn1',
-          providerInstanceType: 'cpx62',
-          displayName: 'CPX62',
-          vcpu: 32,
-          memoryMb: 65_536,
-          diskGb: 480,
-          price: '€48.12/mo',
-          priceMonthly: 48.12,
-        }),
-      ],
-    });
-
-    expect(
-      getRows<{
-        provider_instance_type: string | null;
-        status: string;
-        machine_size: string | null;
-      }>(`
-        SELECT provider_instance_type, status, machine_size
-        FROM capacity_pool_candidates
-        WHERE provider_instance_type IN ('cx23', 'cpx62') OR id = '${legacyCandidateId}'
-        ORDER BY provider_instance_type
-      `)
-    ).toEqual(
-      expect.arrayContaining([
-        { provider_instance_type: null, status: 'deleted', machine_size: 'small' },
-        { provider_instance_type: 'cx23', status: 'deleted', machine_size: 'small' },
-        { provider_instance_type: 'cpx62', status: 'disabled', machine_size: null },
-      ])
-    );
-  });
-
-  it('translates disabled legacy size rows onto matching live catalog offerings only', async () => {
-    const db = createDb();
-    seedUserCredential({ id: 'user-hetzner' });
-
-    const poolId = 'cap-pool-default:user:user-1';
-    const sourceId = 'cap-source-default:user:user-hetzner';
-    const legacyCandidateId = `cap-candidate-default:${poolId}:${sourceId}:hetzner:fsn1:small`;
-    sqlite
-      ?.prepare(
-        `
-        INSERT INTO capacity_pools (
-          id, scope, owner_user_id, name, is_default, revision, status,
-          strategy, exhaustion_policy, created_by
-        )
-        VALUES (?, 'user', 'user-1', 'User default', 1, 1, 'active', 'balanced', 'queue', 'user-1')
-      `
-      )
-      .run(poolId);
-    sqlite
-      ?.prepare(
-        `
-        INSERT INTO capacity_sources (
-          id, scope, owner_user_id, source_kind, provider, credential_source,
-          credential_id, credential_reference, status, created_by
-        )
-        VALUES (?, 'user', 'user-1', 'cloud-provider-credential', 'hetzner', 'user',
-          'user-hetzner', 'credentials:user-hetzner', 'active', 'user-1')
-      `
-      )
-      .run(sourceId);
-    sqlite
-      ?.prepare(
-        `
-        INSERT INTO capacity_pool_candidates (
-          id, pool_id, capacity_source_id, provider, location, workload_role,
-          runtime, machine_class, machine_size, status
-        )
-        VALUES (?, ?, ?, 'hetzner', 'fsn1', 'workspace', 'vm', 'shared-vm', 'small', 'disabled')
-      `
-      )
-      .run(legacyCandidateId, poolId, sourceId);
-
-    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
-      userId: 'user-1',
-      includeInstallation: false,
-      offeringResolver: async () => [
-        liveHetznerOffering({
-          location: 'fsn1',
-          providerInstanceType: 'cx23',
-          displayName: 'CX23',
-        }),
-        liveHetznerOffering({
-          location: 'fsn1',
-          providerInstanceType: 'cpx62',
-          displayName: 'CPX62',
-          vcpu: 32,
-          memoryMb: 65_536,
-          diskGb: 480,
-          price: '€48.12/mo',
-          priceMonthly: 48.12,
-        }),
-      ],
-    });
-
-    expect(
-      getRows<{
-        provider_instance_type: string | null;
-        status: string;
-        machine_size: string | null;
-      }>(`
-        SELECT provider_instance_type, status, machine_size
-        FROM capacity_pool_candidates
-        WHERE provider_instance_type IN ('cx23', 'cpx62') OR id = '${legacyCandidateId}'
-        ORDER BY provider_instance_type
-      `)
-    ).toEqual(
-      expect.arrayContaining([
-        { provider_instance_type: null, status: 'disabled', machine_size: 'small' },
-        { provider_instance_type: 'cx23', status: 'disabled', machine_size: 'small' },
-        { provider_instance_type: 'cpx62', status: 'disabled', machine_size: null },
-      ])
-    );
-  });
+  it.each(['deleted', 'disabled'] as const)(
+    'translates %s legacy size rows onto matching live catalog offerings only',
+    async (legacyStatus) => {
+      await expectLegacyStatusMappedToLiveCatalog(legacyStatus);
+    }
+  );
 
   it('preserves existing candidate priority and order during default reconciliation', async () => {
     const db = createDb();
@@ -1979,35 +1944,10 @@ describe('default capacity pool creation', () => {
   });
 
   it('orders effective default-pool candidates by the selected v1 strategy', async () => {
-    const db = createDb();
-    seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
+    const db = await seedVultrDefaultPool();
 
-    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
-      userId: 'user-1',
-      includeInstallation: false,
-    });
-
-    const placement = resolveTaskStartPlacement({
-      entryPoint: 'task-submit',
-      taskId: 'strategy-task',
-      projectId: 'project-1',
-      userId: 'user-1',
-      project: {
-        id: 'project-1',
-        defaultProvider: 'vultr',
-        defaultLocation: getDefaultLocationForProvider('vultr'),
-        defaultVmSize: 'small',
-      },
-      credentialProjectPolicy: 'current-project-unless-inherited',
-      taskModeDefault: 'task',
-      resourceRequirements: {},
-    });
-
-    sqlite?.prepare("UPDATE capacity_pools SET strategy = 'pack' WHERE scope = 'user'").run();
-    const packSelection = await resolveTaskStartCapacityPoolSelection(db as never, placement, {
-      ensure: false,
-    });
-
+    setUserDefaultPoolStrategy('pack');
+    const packSelection = await selectVultrDefaultPoolCandidates(db, 'strategy-task');
     expect(packSelection?.strategy).toBe('pack');
     expect(packSelection?.candidates[0]).toMatchObject({
       provider: 'vultr',
@@ -2017,15 +1957,8 @@ describe('default capacity pool creation', () => {
       providerInstanceMemoryMb: 16 * 1024,
     });
 
-    sqlite
-      ?.prepare("UPDATE capacity_pools SET strategy = 'smallest-fit' WHERE scope = 'user'")
-      .run();
-    const smallestFitSelection = await resolveTaskStartCapacityPoolSelection(
-      db as never,
-      placement,
-      { ensure: false }
-    );
-
+    setUserDefaultPoolStrategy('smallest-fit');
+    const smallestFitSelection = await selectVultrDefaultPoolCandidates(db, 'strategy-task');
     expect(smallestFitSelection?.strategy).toBe('smallest-fit');
     expect(smallestFitSelection?.candidates[0]).toMatchObject({
       provider: 'vultr',
@@ -2037,37 +1970,11 @@ describe('default capacity pool creation', () => {
   });
 
   it('rejects undersized concrete offerings using normalized reservation resources', async () => {
-    const db = createDb();
-    seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
+    const db = await seedVultrDefaultPool();
+    setUserDefaultPoolStrategy('smallest-fit');
 
-    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
-      userId: 'user-1',
-      includeInstallation: false,
-    });
-    sqlite
-      ?.prepare("UPDATE capacity_pools SET strategy = 'smallest-fit' WHERE scope = 'user'")
-      .run();
-
-    const placement = resolveTaskStartPlacement({
-      entryPoint: 'task-submit',
-      taskId: 'resource-heavy-task',
-      projectId: 'project-1',
-      userId: 'user-1',
-      project: {
-        id: 'project-1',
-        defaultProvider: 'vultr',
-        defaultLocation: getDefaultLocationForProvider('vultr'),
-        defaultVmSize: 'small',
-      },
-      credentialProjectPolicy: 'current-project-unless-inherited',
-      taskModeDefault: 'task',
-      resourceRequirements: {
-        task: { minVcpu: 5, minMemoryGb: 12 },
-      },
-    });
-
-    const selection = await resolveTaskStartCapacityPoolSelection(db as never, placement, {
-      ensure: false,
+    const selection = await selectVultrDefaultPoolCandidates(db, 'resource-heavy-task', {
+      task: { minVcpu: 5, minMemoryGb: 12 },
     });
 
     expect(selection?.candidates.length).toBeGreaterThan(0);
@@ -2084,34 +1991,10 @@ describe('default capacity pool creation', () => {
   });
 
   it('returns an authoritative empty selection when no concrete offering satisfies resources', async () => {
-    const db = createDb();
-    seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
+    const db = await seedVultrDefaultPool();
 
-    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
-      userId: 'user-1',
-      includeInstallation: false,
-    });
-
-    const placement = resolveTaskStartPlacement({
-      entryPoint: 'task-submit',
-      taskId: 'resource-too-heavy-task',
-      projectId: 'project-1',
-      userId: 'user-1',
-      project: {
-        id: 'project-1',
-        defaultProvider: 'vultr',
-        defaultLocation: getDefaultLocationForProvider('vultr'),
-        defaultVmSize: 'small',
-      },
-      credentialProjectPolicy: 'current-project-unless-inherited',
-      taskModeDefault: 'task',
-      resourceRequirements: {
-        task: { minVcpu: 128, minMemoryGb: 512 },
-      },
-    });
-
-    const selection = await resolveTaskStartCapacityPoolSelection(db as never, placement, {
-      ensure: false,
+    const selection = await selectVultrDefaultPoolCandidates(db, 'resource-too-heavy-task', {
+      task: { minVcpu: 128, minMemoryGb: 512 },
     });
 
     expect(selection).toMatchObject({
