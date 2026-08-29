@@ -649,10 +649,7 @@ interface SubjectRoutingBranch {
   params: unknown[];
 }
 
-function subjectRoutingBranches(subject: {
-  type: string;
-  id: string | null;
-}): SubjectRoutingBranch[] {
+function subjectRoutingBranches(subject: { type: string; id: string | null }): SubjectRoutingBranch[] {
   const branches: SubjectRoutingBranch[] = [
     {
       subscriptionWhere: 's.subject_type IS NULL AND s.subject_id IS NULL',
