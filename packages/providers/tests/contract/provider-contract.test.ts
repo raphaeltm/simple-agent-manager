@@ -79,12 +79,36 @@ export function runProviderContractTests(
         const p = getProvider();
         const offerings = await p.listInstanceOfferings({ preferApi: false });
         expect(offerings.length).toBeGreaterThan(0);
-        expect(offerings[0]).toMatchObject({
-          provider: p.name,
-          providerInstanceType: expect.any(String),
-          displayName: expect.any(String),
-          catalogSource: 'static',
-        });
+        const uniqueKeys = new Set<string>();
+        for (const offering of offerings) {
+          expect(offering).toMatchObject({
+            provider: p.name,
+            location: expect.any(String),
+            providerInstanceType: expect.any(String),
+            displayName: expect.any(String),
+            catalogSource: 'static',
+            catalogLastSeenAt: null,
+          });
+          expect(
+            offering.providerInstanceSku === null ||
+              typeof offering.providerInstanceSku === 'string'
+          ).toBe(true);
+          expect(typeof offering.vcpu === 'number' || offering.vcpu === null).toBe(true);
+          expect(typeof offering.memoryMb === 'number' || offering.memoryMb === null).toBe(true);
+          expect(typeof offering.diskGb === 'number' || offering.diskGb === null).toBe(true);
+          expect(typeof offering.currency === 'string' || offering.currency === null).toBe(true);
+          const key = [
+            offering.provider,
+            offering.location,
+            offering.providerInstanceType,
+            offering.providerInstanceSku ?? offering.providerInstanceType,
+          ].join(':');
+          expect(uniqueKeys.has(key)).toBe(false);
+          uniqueKeys.add(key);
+        }
+        for (const location of p.locations) {
+          expect(offerings.some((offering) => offering.location === location)).toBe(true);
+        }
       });
     });
 

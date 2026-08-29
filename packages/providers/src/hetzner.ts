@@ -451,27 +451,39 @@ export class HetznerProvider implements Provider {
       );
     }
 
-    throwIfProviderRequestAborted(context);
-    const serverTypes: HetznerServerTypePayload[] = [];
-    const lastSeenAt = new Date().toISOString();
+    try {
+      throwIfProviderRequestAborted(context);
+      const serverTypes: HetznerServerTypePayload[] = [];
+      const lastSeenAt = new Date().toISOString();
 
-    await this.fetchPaginatedHetznerList(
-      'server_types',
-      new URLSearchParams(),
-      'listInstanceOfferings',
-      (data) => {
-        const validated = validateHetznerServerTypesResponse(data, 'listInstanceOfferings');
-        serverTypes.push(...validated.serverTypes);
-        return validated.nextPage;
-      },
-      [],
-      context
-    );
+      await this.fetchPaginatedHetznerList(
+        'server_types',
+        new URLSearchParams(),
+        'listInstanceOfferings',
+        (data) => {
+          const validated = validateHetznerServerTypesResponse(data, 'listInstanceOfferings');
+          serverTypes.push(...validated.serverTypes);
+          return validated.nextPage;
+        },
+        [],
+        context
+      );
 
-    throwIfProviderRequestAborted(context);
-    return serverTypes.flatMap((serverType) =>
-      this.mapHetznerServerTypeOfferings(serverType, lastSeenAt)
-    );
+      throwIfProviderRequestAborted(context);
+      return serverTypes.flatMap((serverType) =>
+        this.mapHetznerServerTypeOfferings(serverType, lastSeenAt)
+      );
+    } catch (error) {
+      rethrowIfProviderRequestAborted(error, context);
+      this.logger.warn('hetzner catalog API unavailable; using static instance offerings', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return getProviderCatalogOfferings(
+        this.name as CredentialProvider,
+        this.locations,
+        this.locationMetadata
+      );
+    }
   }
 
   private mapHetznerServerTypeOfferings(
@@ -508,8 +520,8 @@ export class HetznerProvider implements Provider {
         ...(monthly !== null
           ? { price: `${HETZNER_CATALOG_CURRENCY_SYMBOL}${monthly.toFixed(2)}/mo` }
           : {}),
-        priceMonthlyUsd: monthly,
-        priceHourlyUsd: hourly,
+        priceMonthlyUsd: null,
+        priceHourlyUsd: null,
         priceMonthly: monthly,
         priceHourly: hourly,
         currency: HETZNER_CATALOG_CURRENCY,

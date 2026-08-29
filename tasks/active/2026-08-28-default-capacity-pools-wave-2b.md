@@ -23,6 +23,7 @@ Compute pools Wave 2B needs an internal, idempotent service that can lazily crea
 - User default pools must only use user-scoped `credentials.project_id IS NULL` rows. They must not seed project pools from personal credentials.
 - Installation default pools use enabled `platform_credentials` rows with `credential_type = 'cloud-provider'`.
 - Candidate generation can use static provider/location and VM-size catalogs from `@simple-agent-manager/shared`; it must not fetch provider catalogs during task/login startup.
+- Superseded by the concrete-offering follow-up on `sam/compute-pools-integration`: default candidate generation now uses provider-native offering catalogs with native SKU/spec/price metadata. Legacy VM sizes remain compatibility hints only and should not be exposed as pool choices.
 - Disabled credentials should not leave active default capacity available. Existing schema supports `status` on sources, pools, and candidates, and deleted credential rows cascade source/candidate rows.
 - Wave 1B placement resolver centralizes task-start placement inputs but this wave must not flip scheduler behavior.
 
@@ -30,7 +31,7 @@ Compute pools Wave 2B needs an internal, idempotent service that can lazily crea
 
 - [x] Add an internal default capacity-pool service that ensures installation/user/project default pools from existing active credentials.
 - [x] Use deterministic IDs and D1-compatible idempotent upserts so concurrent calls safely converge.
-- [x] Generate workspace VM candidates from shared provider locations and VM-size constants for each active source.
+- [x] Generate workspace VM candidates from provider-native offering catalogs for each active source, with the original VM-size generation model superseded by the concrete-offering follow-up.
 - [x] Store only non-secret credential references/version metadata on sources.
 - [x] Ensure user pools are seeded only from user-scoped credentials and project pools only from project-scoped credentials.
 - [x] Reconcile disabled/deleted backing credentials by disabling empty/default pool availability where existing schema supports it.

@@ -199,6 +199,9 @@ describe('capacity pool mappers', () => {
       'Invalid persisted capacity_pool_candidates.workload_role: agent-session'
     );
     expect(() =>
+      toCapacityPoolCandidate(makeCandidate({ providerInstanceCatalogSource: 'manual' }))
+    ).toThrow('Invalid persisted capacity_pool_candidates.provider_instance_catalog_source: manual');
+    expect(() =>
       toCapacityPlacementSnapshot({
         capacityPoolId: 'pool-1',
         capacityPoolScope: 'tenant',

@@ -535,6 +535,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
               <div className="grid gap-2 min-w-0">
                 <ComputePoolOfferingsManager
                   candidates={ownedDefault.candidates}
+                  sources={ownedDefault.sources}
                   catalogs={providerCatalog.catalogs}
                   draftStatuses={draftCandidateStatuses}
                   isEditing
@@ -584,6 +585,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
                   </h3>
                   <ComputePoolOfferingsManager
                     candidates={effective.candidates}
+                    sources={effective.sources}
                     catalogs={providerCatalog.catalogs}
                     isEditing={false}
                     onStatusChange={() => undefined}

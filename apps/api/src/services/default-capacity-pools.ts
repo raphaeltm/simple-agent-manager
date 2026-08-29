@@ -12,6 +12,7 @@ import { and, asc, eq, isNotNull, isNull, notInArray, sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import {
   toCapacityPool,
   toCapacityPoolCandidate,
@@ -48,14 +49,13 @@ const CREDENTIAL_TYPE_CLOUD_PROVIDER = 'cloud-provider';
 const ACTIVE_STATUS = 'active';
 const DISABLED_STATUS = 'disabled';
 const DELETED_STATUS = 'deleted';
-// Cloudflare D1 accepts at most 100 bound parameters per statement.
-const D1_BIND_PARAMETER_LIMIT = 100;
 const CANDIDATE_INSERT_BIND_COUNT = 26;
 const CANDIDATE_UPSERT_UPDATE_BIND_COUNT = 1;
 const CANDIDATE_UPSERT_CHUNK_SIZE = Math.max(
   1,
   Math.floor(
-    (D1_BIND_PARAMETER_LIMIT - CANDIDATE_UPSERT_UPDATE_BIND_COUNT) / CANDIDATE_INSERT_BIND_COUNT
+    (D1_MAX_BOUND_PARAMETERS - CANDIDATE_UPSERT_UPDATE_BIND_COUNT) /
+      CANDIDATE_INSERT_BIND_COUNT
   )
 );
 type ScopeIdentity = DefaultPoolScopeIdentity;

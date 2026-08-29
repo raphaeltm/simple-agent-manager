@@ -6,7 +6,7 @@ import type {
   ProviderCatalog,
 } from '@simple-agent-manager/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -80,9 +80,11 @@ function renderPanel(
   });
 }
 
-function providerCatalog(): ProviderCatalog {
+function providerCatalog(credentialId = 'credential-project'): ProviderCatalog {
   return {
     provider: 'hetzner',
+    credentialSource: 'project',
+    credentialId,
     locations: [
       { id: 'fsn1', name: 'Nuremberg', country: 'DE' },
       { id: 'ash', name: 'Ashburn', country: 'US' },
@@ -114,122 +116,88 @@ function providerCatalog(): ProviderCatalog {
     },
     offerings: [
       {
+        provider: 'hetzner',
+        providerInstanceType: 'cx22',
+        providerInstanceSku: null,
+        displayName: 'CX22',
         sku: 'cx22',
         location: 'fsn1',
         locationName: 'Nuremberg',
         country: 'DE',
         vcpu: 2,
+        memoryMb: 4096,
         memoryGb: 4,
         diskGb: 40,
         price: '€3.79/mo',
+        priceMonthly: 3.79,
+        currency: 'EUR',
         available: true,
+        catalogSource: 'api',
+        catalogLastSeenAt: '2026-08-28T00:00:00.000Z',
       },
       {
+        provider: 'hetzner',
+        providerInstanceType: 'cpx31',
+        providerInstanceSku: null,
+        displayName: 'CPX31',
         sku: 'cpx31',
         location: 'ash',
         locationName: 'Ashburn',
         country: 'US',
         vcpu: 4,
+        memoryMb: 8192,
         memoryGb: 8,
         diskGb: 160,
         price: '€13.10/mo',
+        priceMonthly: 13.1,
+        currency: 'EUR',
         available: true,
+        catalogSource: 'api',
+        catalogLastSeenAt: '2026-08-28T00:00:00.000Z',
       },
       {
+        provider: 'hetzner',
+        providerInstanceType: 'ccx33',
+        providerInstanceSku: null,
+        displayName: 'CCX33',
         sku: 'ccx33',
         location: 'hil',
         locationName: 'Hillsboro',
         country: 'US',
         vcpu: 8,
+        memoryMb: 32_768,
         memoryGb: 32,
         diskGb: 240,
         price: '€55.20/mo',
+        priceMonthly: 55.2,
+        currency: 'EUR',
         available: true,
+        catalogSource: 'api',
+        catalogLastSeenAt: '2026-08-28T00:00:00.000Z',
       },
       {
+        provider: 'hetzner',
+        providerInstanceType: 'long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only',
+        providerInstanceSku: null,
+        displayName: 'Long catalog-only SKU',
         sku: 'long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only',
         location: 'hel1',
         locationName: 'Helsinki',
         country: 'FI',
         vcpu: 16,
+        memoryMb: 65_536,
         memoryGb: 64,
         diskGb: 480,
         price: '€220.00/mo',
+        priceMonthly: 220,
+        currency: 'EUR',
         available: false,
         status: 'temporarily unavailable',
-      },
-      {
-        sku: 'stale-provider-native-sku-without-price',
-        location: 'hel1',
-        locationName: 'Helsinki',
-        country: 'FI',
-        vcpu: 32,
-        memoryGb: 128,
-        diskGb: 960,
-        available: true,
-        stale: true,
-        status: 'last-known-good catalog row',
+        catalogSource: 'api',
+        catalogLastSeenAt: '2026-08-28T00:00:00.000Z',
       },
     ],
     defaultLocation: 'fsn1',
-  };
-}
-
-function digitalOceanProviderCatalog(): ProviderCatalog {
-  return {
-    provider: 'digitalocean',
-    locations: [
-      { id: 'nyc1', name: 'New York 1', country: 'US' },
-      { id: 'sfo3', name: 'San Francisco 3', country: 'US' },
-    ],
-    sizes: {
-      small: {
-        type: 's-2vcpu-4gb',
-        price: '$12.00/mo',
-        vcpu: 2,
-        ramGb: 4,
-        storageGb: 80,
-      },
-      medium: {
-        type: 's-4vcpu-8gb',
-        price: '$24.00/mo',
-        vcpu: 4,
-        ramGb: 8,
-        storageGb: 160,
-      },
-      large: {
-        type: 's-8vcpu-16gb',
-        price: '$48.00/mo',
-        vcpu: 8,
-        ramGb: 16,
-        storageGb: 320,
-      },
-    },
-    offerings: [
-      {
-        sku: 's-2vcpu-4gb-provider-native-catalog',
-        location: 'nyc1',
-        locationName: 'New York 1',
-        country: 'US',
-        vcpu: 2,
-        memoryGb: 4,
-        diskGb: 80,
-        price: '$12.00/mo',
-        available: true,
-      },
-      {
-        sku: 's-8vcpu-16gb-flexible-provider-native-catalog',
-        location: 'sfo3',
-        locationName: 'San Francisco 3',
-        country: 'US',
-        vcpu: 8,
-        memoryGb: 16,
-        diskGb: 320,
-        price: '$48.00/mo',
-        available: true,
-      },
-    ],
-    defaultLocation: 'nyc1',
   };
 }
 
@@ -463,8 +431,8 @@ describe('DefaultCapacityPoolsPanel', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
     fireEvent.change(screen.getByLabelText('Strategy'), { target: { value: 'pack' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Remove Hetzner ash cpx31' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add back Hetzner hil ccx33' }));
+    fireEvent.click(screen.getByRole('button', { name: /Remove Hetzner ash cpx31/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Add back Hetzner hil ccx33/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() =>
@@ -523,69 +491,66 @@ describe('DefaultCapacityPoolsPanel', () => {
     );
   });
 
-  it('filters catalog offerings by provider, vCPU, RAM, price, and no-match state', async () => {
-    mocks.providerCatalogs = [providerCatalog(), digitalOceanProviderCatalog()];
-    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('project', summary('project')));
-    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(response('project', summary('project')));
+  it('keeps same provider location and SKU rows distinct by credential source', async () => {
+    mocks.providerCatalogs = [providerCatalog('credential-alpha'), providerCatalog('credential-beta')];
+    const current = summary('project');
+    current.sources = [
+      {
+        ...current.sources[0]!,
+        id: 'source-alpha',
+        credentialId: 'credential-alpha',
+        credentialReference: 'credentials:credential-alpha',
+      },
+      {
+        ...current.sources[0]!,
+        id: 'source-beta',
+        credentialId: 'credential-beta',
+        credentialReference: 'credentials:credential-beta',
+      },
+    ];
+    current.candidates = [
+      candidate({
+        id: 'candidate-alpha-ash-cpx31',
+        capacitySourceId: 'source-alpha',
+        location: 'ash',
+        machineSize: 'medium',
+        providerInstanceType: 'cpx31',
+      }),
+      candidate({
+        id: 'candidate-beta-ash-cpx31',
+        capacitySourceId: 'source-beta',
+        location: 'ash',
+        machineSize: 'medium',
+        providerInstanceType: 'cpx31',
+        candidateOrder: 1,
+        priority: 1,
+      }),
+    ];
+    current.activeCandidateCount = 2;
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('project', current));
+    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(response('project', current));
 
     renderPanel();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    expect(screen.getAllByText(/Source: Project credential credential-alpha/).length).toBeGreaterThan(
+      0
+    );
+    expect(screen.getAllByText(/Source: Project credential credential-beta/).length).toBeGreaterThan(
+      0
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /Remove Hetzner ash cpx31 via Project credential credential-alpha/,
+      })
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
-    fireEvent.change(screen.getByLabelText('Filter provider'), {
-      target: { value: 'digitalocean' },
-    });
-    expect(screen.getByText(/2 matching offerings across 2 regions/)).toBeInTheDocument();
-    expect(
-      screen.getByText('s-8vcpu-16gb-flexible-provider-native-catalog')
-    ).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText('Minimum vCPU'), { target: { value: '8' } });
-    expect(screen.getByText(/1 matching offering across 1 region/)).toBeInTheDocument();
-    expect(
-      screen.queryByText('s-2vcpu-4gb-provider-native-catalog')
-    ).not.toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText('Minimum RAM in GB'), { target: { value: '32' } });
-    expect(screen.getByText('No catalog offerings match the current filters.')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
-    fireEvent.change(screen.getByLabelText('Maximum monthly price'), { target: { value: '15' } });
-    expect(screen.getByText(/3 matching offerings across 3 regions/)).toBeInTheDocument();
-    expect(screen.queryByText('ccx33')).not.toBeInTheDocument();
-    expect(
-      screen.queryByText('stale-provider-native-sku-without-price')
-    ).not.toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText('Filter region or location'), {
-      target: { value: 'moon-base-alpha' },
-    });
-    expect(screen.getByText('No catalog offerings match the current filters.')).toBeInTheDocument();
-  });
-
-  it('filters catalog offerings by unavailable and stale availability states', async () => {
-    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('project', summary('project')));
-
-    renderPanel();
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-
-    fireEvent.change(screen.getByLabelText('Filter availability'), {
-      target: { value: 'unavailable' },
-    });
-    expect(screen.getByText(/1 matching offering across 1 region/)).toBeInTheDocument();
-    expect(
-      screen.getByText('long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only')
-    ).toBeInTheDocument();
-    expect(screen.getByText('temporarily unavailable')).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText('Filter availability'), {
-      target: { value: 'stale' },
-    });
-    expect(screen.getByText(/1 matching offering across 1 region/)).toBeInTheDocument();
-    expect(screen.getByText('stale-provider-native-sku-without-price')).toBeInTheDocument();
-    expect(screen.getByText('Stale catalog data')).toBeInTheDocument();
-    expect(screen.getByText('Price unavailable')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
+        candidates: [{ id: 'candidate-alpha-ash-cpx31', status: 'deleted' }],
+      })
+    );
   });
 
   it('routes user and installation edits to their owned default APIs', async () => {
@@ -595,7 +560,7 @@ describe('DefaultCapacityPoolsPanel', () => {
     const userRender = renderPanel({ scope: 'user' });
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Remove Hetzner fsn1 cx22' }));
+    fireEvent.click(screen.getByRole('button', { name: /Remove Hetzner fsn1 cx22/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() =>
@@ -615,7 +580,7 @@ describe('DefaultCapacityPoolsPanel', () => {
     renderPanel({ scope: 'installation' });
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Remove Hetzner fsn1 cx22' }));
+    fireEvent.click(screen.getByRole('button', { name: /Remove Hetzner fsn1 cx22/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() =>
@@ -728,7 +693,7 @@ describe('DefaultCapacityPoolsPanel', () => {
     expect(screen.queryByText(/\+\d+ more provider\/region groups/)).not.toBeInTheDocument();
   });
 
-  it('marks catalog-only offerings as visible but not addable until backend support exists', async () => {
+  it('hides catalog-only offerings until backend candidate rows exist', async () => {
     mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(
       response('project', summary('project'))
     );
@@ -736,15 +701,10 @@ describe('DefaultCapacityPoolsPanel', () => {
     renderPanel();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    const catalogOnlyCard = screen
-      .getByText('long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only')
-      .closest('article');
-
-    expect(catalogOnlyCard).not.toBeNull();
     expect(
-      within(catalogOnlyCard as HTMLElement).getByRole('button', { name: /Cannot add Hetzner hel1/i })
-    ).toBeDisabled();
-    expect(screen.getByText(/requires the backend provider-native add mutation/i)).toBeInTheDocument();
+      screen.queryByText('long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only')
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/requires the backend provider-native candidate mutation/i)).not.toBeInTheDocument();
   });
 
   it('shows a deterministic error state', async () => {

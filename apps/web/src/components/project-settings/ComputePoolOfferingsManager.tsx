@@ -1,6 +1,7 @@
 import type {
   CapacityPoolCandidate,
   CapacityPoolStatus,
+  CapacitySourceIdentity,
   ProviderCatalog,
 } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
@@ -147,18 +148,24 @@ function CandidateOfferingCard({
   onStatusChange: (candidateId: string, status: CapacityPoolStatus) => void;
   isRemoved?: boolean;
 }) {
+  const sourceSuffix = offering.sourceLabel ? ` via ${offering.sourceLabel}` : '';
   const ariaLabel =
     actionLabel && actionStatus
-      ? `${actionLabel} ${offering.providerLabel} ${offering.location} ${offering.sku}`
+      ? `${actionLabel} ${offering.providerLabel} ${offering.location} ${offering.sku}${sourceSuffix}`
       : null;
-  const metadata = [offering.runtime, offering.machineClass].filter(Boolean).join(' · ');
+  const metadata = [
+    offering.sourceLabel ? `Source: ${offering.sourceLabel}` : null,
+    [offering.runtime, offering.machineClass].filter(Boolean).join(' · ')
+      ? `Runtime/class: ${[offering.runtime, offering.machineClass].filter(Boolean).join(' · ')}`
+      : null,
+  ].filter(Boolean);
 
   return (
     <OfferingCard
       offering={offering}
       status={offering.candidateStatus}
       isRemoved={isRemoved}
-      metadata={metadata ? `Runtime/class: ${metadata}` : undefined}
+      metadata={metadata.length > 0 ? metadata.join(' · ') : undefined}
       action={
         ariaLabel && actionStatus ? (
           <Button
@@ -183,6 +190,7 @@ function CatalogOfferingCard({
   offering: ComputePoolCatalogOffering;
   onStatusChange: (candidateId: string, status: CapacityPoolStatus) => void;
 }) {
+  const sourceSuffix = offering.sourceLabel ? ` via ${offering.sourceLabel}` : '';
   let action: ReactNode;
   if (offering.candidateStatus === 'active') {
     action = (
@@ -190,40 +198,33 @@ function CatalogOfferingCard({
         Already allowed
       </Button>
     );
-  } else if (offering.candidateId) {
+  } else {
     const candidateId = offering.candidateId;
     action = (
       <Button
         size="sm"
         className="w-full sm:w-auto"
-        aria-label={`Add ${offering.providerLabel} ${offering.location} ${offering.sku}`}
+        aria-label={`Add ${offering.providerLabel} ${offering.location} ${offering.sku}${sourceSuffix}`}
         onClick={() => onStatusChange(candidateId, 'active')}
       >
         Add
       </Button>
     );
-  } else {
-    action = (
-      <Button
-        size="sm"
-        variant="ghost"
-        className="w-full sm:w-auto"
-        disabled
-        aria-label={`Cannot add ${offering.providerLabel} ${offering.location} ${offering.sku} until backend add support lands`}
-      >
-        Needs backend
-      </Button>
-    );
   }
 
-  const metadata = [offering.runtime, offering.machineClass].filter(Boolean).join(' · ');
+  const metadata = [
+    offering.sourceLabel ? `Source: ${offering.sourceLabel}` : null,
+    [offering.runtime, offering.machineClass].filter(Boolean).join(' · ')
+      ? `Runtime/class: ${[offering.runtime, offering.machineClass].filter(Boolean).join(' · ')}`
+      : null,
+  ].filter(Boolean);
 
   return (
     <OfferingCard
       offering={offering}
       status={offering.candidateStatus}
       action={action}
-      metadata={metadata ? `Runtime/class: ${metadata}` : undefined}
+      metadata={metadata.length > 0 ? metadata.join(' · ') : undefined}
     />
   );
 }
@@ -263,7 +264,7 @@ function FilterControls({
           Provider
           <select
             aria-label="Filter provider"
-            className="min-h-10 w-full min-w-0 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+            className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
             value={filters.provider}
             onChange={(event) => update('provider', event.currentTarget.value)}
           >
@@ -280,7 +281,7 @@ function FilterControls({
           Region / location
           <input
             aria-label="Filter region or location"
-            className="min-h-10 w-full min-w-0 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+            className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
             value={filters.location}
             onChange={(event) => update('location', event.currentTarget.value)}
             placeholder="fsn1, Ashburn, DE…"
@@ -294,7 +295,7 @@ function FilterControls({
             type="number"
             min="0"
             inputMode="numeric"
-            className="min-h-10 w-full min-w-0 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+            className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
             value={filters.minVcpu}
             onChange={(event) => update('minVcpu', event.currentTarget.value)}
           />
@@ -307,7 +308,7 @@ function FilterControls({
             type="number"
             min="0"
             inputMode="decimal"
-            className="min-h-10 w-full min-w-0 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+            className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
             value={filters.minRamGb}
             onChange={(event) => update('minRamGb', event.currentTarget.value)}
           />
@@ -320,7 +321,7 @@ function FilterControls({
             type="number"
             min="0"
             inputMode="decimal"
-            className="min-h-10 w-full min-w-0 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+            className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
             value={filters.maxMonthlyPrice}
             onChange={(event) => update('maxMonthlyPrice', event.currentTarget.value)}
           />
@@ -330,7 +331,7 @@ function FilterControls({
           Availability
           <select
             aria-label="Filter availability"
-            className="min-h-10 w-full min-w-0 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+            className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
             value={filters.availability}
             onChange={(event) =>
               update(
@@ -360,6 +361,7 @@ function EmptyOfferingState({ children }: { children: ReactNode }) {
 
 interface ComputePoolOfferingsManagerProps {
   candidates: CapacityPoolCandidate[];
+  sources?: CapacitySourceIdentity[];
   catalogs: ProviderCatalog[];
   draftStatuses?: Record<string, CapacityPoolStatus>;
   isEditing: boolean;
@@ -368,6 +370,7 @@ interface ComputePoolOfferingsManagerProps {
 
 export function ComputePoolOfferingsManager({
   candidates,
+  sources = [],
   catalogs,
   draftStatuses = {},
   isEditing,
@@ -375,8 +378,8 @@ export function ComputePoolOfferingsManager({
 }: ComputePoolOfferingsManagerProps) {
   const [filters, setFilters] = useState<ComputePoolOfferingFilters>(DEFAULT_FILTERS);
   const model = useMemo(
-    () => buildComputePoolOfferingsModel(candidates, catalogs, draftStatuses),
-    [candidates, catalogs, draftStatuses]
+    () => buildComputePoolOfferingsModel(candidates, catalogs, sources, draftStatuses),
+    [candidates, catalogs, draftStatuses, sources]
   );
   const providers = useMemo(() => {
     const byId = new Map<string, string>();
@@ -522,13 +525,6 @@ export function ComputePoolOfferingsManager({
             </div>
           </div>
 
-          {model.catalog.some((offering) => !offering.canUpdateExistingCandidate) && (
-            <div className="rounded-md border border-warning/30 bg-warning-tint p-3 text-xs text-fg-muted">
-              Catalog offerings without an existing backend pool row are shown for discovery, but
-              adding them requires the backend provider-native add mutation that is landing in the
-              compute-pools integration work.
-            </div>
-          )}
         </section>
       )}
     </div>

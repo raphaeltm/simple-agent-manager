@@ -215,4 +215,7 @@ export interface TaskStartPlacementWithCredential extends PlacementCredentialAtt
   capacityPoolSelection: TaskStartCapacityPoolSelection | null;
 }
 
-export type PlacementResolutionErrorCode = 'invalid-provider' | 'invalid-location';
+export type PlacementResolutionErrorCode =
+  | 'invalid-provider'
+  | 'invalid-location'
+  | 'no-eligible-capacity-candidate';

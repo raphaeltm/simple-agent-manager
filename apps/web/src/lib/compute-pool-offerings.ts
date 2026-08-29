@@ -1,6 +1,7 @@
 import {
   type CapacityPoolCandidate,
   type CapacityPoolStatus,
+  type CapacitySourceIdentity,
   DEFAULT_APPROXIMATE_BILLING_MONTH_HOURS,
   type ProviderCatalog,
   type ProviderCatalogOfferingInfo,
@@ -8,15 +9,12 @@ import {
   type VMSize,
 } from '@simple-agent-manager/shared';
 
-/*
- * Frontend fallback only. Backend-normalized providerInstancePrice* fields are
- * preferred whenever available; this shared default is used for legacy catalog
- * strings that only expose an hourly or monthly display price.
- */
-const FALLBACK_BILLING_MONTH_HOURS = DEFAULT_APPROXIMATE_BILLING_MONTH_HOURS;
+const HOURS_PER_APPROXIMATE_BILLING_MONTH = DEFAULT_APPROXIMATE_BILLING_MONTH_HOURS;
 
 export interface ComputePoolOffering {
   key: string;
+  sourceKey: string | null;
+  sourceLabel: string | null;
   provider: string;
   providerLabel: string;
   location: string;
@@ -44,8 +42,8 @@ export interface ComputePoolCandidateOffering extends ComputePoolOffering {
 }
 
 export interface ComputePoolCatalogOffering extends ComputePoolOffering {
-  candidateId: string | null;
-  candidateStatus: CapacityPoolStatus | 'not-configured';
+  candidateId: string;
+  candidateStatus: CapacityPoolStatus;
   runtime: string | null;
   machineClass: string | null;
   canUpdateExistingCandidate: boolean;
@@ -83,6 +81,8 @@ type ExtendedCandidate = CapacityPoolCandidate & {
   providerInstanceDiskGb?: number | null;
   price?: string | null;
   providerInstancePriceDisplay?: string | null;
+  priceMonthly?: number | null;
+  priceHourly?: number | null;
   priceMonthlyUsd?: number | null;
   priceHourlyUsd?: number | null;
   providerInstancePriceMonthlyCents?: number | null;
@@ -114,8 +114,80 @@ function titleCaseProvider(value: string | null | undefined): string {
   );
 }
 
-function offeringKey(provider: string, location: string, sku: string): string {
-  return [provider, location, sku].map((part) => part.trim().toLowerCase()).join(':');
+function identityPart(value: string | null | undefined): string {
+  const normalized = value?.trim();
+  return normalized ? normalized.toLowerCase() : 'unknown';
+}
+
+function catalogSourceKey(catalog: ProviderCatalog): string | null {
+  const source = catalog.credentialSource?.trim();
+  const id =
+    source === 'platform' ? catalog.platformCredentialId?.trim() : catalog.credentialId?.trim();
+  return source && id ? `${source}:${id}` : null;
+}
+
+function sourceLabelFromParts(
+  credentialSource: string | null | undefined,
+  credentialId: string | null | undefined
+): string | null {
+  if (!credentialSource && !credentialId) return null;
+  const source =
+    credentialSource === 'platform'
+      ? 'Platform credential'
+      : credentialSource === 'project'
+        ? 'Project credential'
+        : credentialSource === 'user'
+          ? 'User credential'
+          : credentialSource
+            ? `${titleCaseProvider(credentialSource)} credential`
+            : 'Credential';
+  return credentialId ? `${source} ${credentialId}` : source;
+}
+
+function sourceKeyFromIdentity(source: CapacitySourceIdentity): string | null {
+  if (source.platformCredentialId) return `platform:${source.platformCredentialId}`;
+  if (source.credentialId && source.credentialSource) {
+    return `${source.credentialSource}:${source.credentialId}`;
+  }
+  if (source.externalSourceRef) return `external:${source.externalSourceRef}`;
+  return null;
+}
+
+function sourceLabelFromIdentity(source: CapacitySourceIdentity): string | null {
+  return sourceLabelFromParts(
+    source.credentialSource,
+    source.credentialId ?? source.platformCredentialId ?? source.externalSourceRef
+  );
+}
+
+function offeringKey(
+  sourceKey: string | null | undefined,
+  provider: string,
+  location: string,
+  sku: string
+): string {
+  return [sourceKey ?? 'source-unscoped', provider, location, sku]
+    .map((part) => identityPart(part))
+    .join(':');
+}
+
+function legacyOfferingKey(
+  sourceKey: string | null | undefined,
+  provider: string,
+  location: string,
+  machineSize: string
+): string {
+  return offeringKey(sourceKey, provider, location, machineSize);
+}
+
+function candidateSourceKey(
+  candidate: ExtendedCandidate,
+  sourceKeysById: ReadonlyMap<string, string | null>
+): string | null {
+  const mapped = sourceKeysById.get(candidate.capacitySourceId);
+  if (mapped) return mapped;
+  const sourceId = candidate.capacitySourceId?.trim();
+  return sourceId ? `capacity-source:${sourceId}` : null;
 }
 
 function parsePriceAmount(value: string | null | undefined): number | null {
@@ -126,24 +198,32 @@ function parsePriceAmount(value: string | null | undefined): number | null {
   if (!Number.isFinite(amount)) return null;
 
   if (/\/\s*(h|hr|hour)/i.test(value)) {
-    return amount * FALLBACK_BILLING_MONTH_HOURS;
+    return amount * HOURS_PER_APPROXIMATE_BILLING_MONTH;
   }
 
   return amount;
 }
 
-function monthlyPriceAmount(
-  priceMonthlyUsd: number | null | undefined,
-  priceHourlyUsd: number | null | undefined,
-  priceLabel: string | null | undefined
-): number | null {
-  if (typeof priceMonthlyUsd === 'number' && Number.isFinite(priceMonthlyUsd)) {
-    return priceMonthlyUsd;
+function monthlyPriceAmount(input: {
+  priceMonthly?: number | null;
+  priceHourly?: number | null;
+  priceMonthlyUsd?: number | null;
+  priceHourlyUsd?: number | null;
+  priceLabel?: string | null;
+}): number | null {
+  if (typeof input.priceMonthly === 'number' && Number.isFinite(input.priceMonthly)) {
+    return input.priceMonthly;
   }
-  if (typeof priceHourlyUsd === 'number' && Number.isFinite(priceHourlyUsd)) {
-    return priceHourlyUsd * FALLBACK_BILLING_MONTH_HOURS;
+  if (typeof input.priceHourly === 'number' && Number.isFinite(input.priceHourly)) {
+    return input.priceHourly * HOURS_PER_APPROXIMATE_BILLING_MONTH;
   }
-  return parsePriceAmount(priceLabel);
+  if (typeof input.priceMonthlyUsd === 'number' && Number.isFinite(input.priceMonthlyUsd)) {
+    return input.priceMonthlyUsd;
+  }
+  if (typeof input.priceHourlyUsd === 'number' && Number.isFinite(input.priceHourlyUsd)) {
+    return input.priceHourlyUsd * HOURS_PER_APPROXIMATE_BILLING_MONTH;
+  }
+  return parsePriceAmount(input.priceLabel);
 }
 
 function normalizeNumber(value: number | null | undefined): number | null {
@@ -170,11 +250,19 @@ function normalizeDiskGb(offering: {
 
 function priceLabelForOffering(offering: {
   price?: string | null;
+  priceMonthly?: number | null;
+  priceHourly?: number | null;
   priceMonthlyUsd?: number | null;
   priceHourlyUsd?: number | null;
   currency?: string | null;
 }): string | null {
   if (offering.price) return offering.price;
+  if (typeof offering.priceMonthly === 'number' && Number.isFinite(offering.priceMonthly)) {
+    return `${offering.currency ?? 'CUR'} ${offering.priceMonthly.toFixed(2)}/mo`;
+  }
+  if (typeof offering.priceHourly === 'number' && Number.isFinite(offering.priceHourly)) {
+    return `${offering.currency ?? 'CUR'} ${offering.priceHourly.toFixed(4)}/hr`;
+  }
   if (typeof offering.priceMonthlyUsd === 'number' && Number.isFinite(offering.priceMonthlyUsd)) {
     return `${offering.currency ?? 'USD'} ${offering.priceMonthlyUsd.toFixed(2)}/mo`;
   }
@@ -193,10 +281,17 @@ function offeringFromLegacySize(
   size: SizeInfo
 ): ComputePoolOffering {
   const priceLabel = size.price || null;
-  const key = offeringKey(catalog.provider, locationId, size.type);
+  const sourceKey = catalogSourceKey(catalog);
+  const sourceLabel = sourceLabelFromParts(
+    catalog.credentialSource,
+    catalog.credentialSource === 'platform' ? catalog.platformCredentialId : catalog.credentialId
+  );
+  const key = offeringKey(sourceKey, catalog.provider, locationId, size.type);
 
   return {
     key,
+    sourceKey,
+    sourceLabel,
     provider: catalog.provider,
     providerLabel: titleCaseProvider(catalog.provider),
     location: locationId,
@@ -207,7 +302,7 @@ function offeringFromLegacySize(
     ramGb: size.ramGb,
     diskGb: size.storageGb,
     priceLabel,
-    monthlyPriceAmount: monthlyPriceAmount(null, null, priceLabel),
+    monthlyPriceAmount: monthlyPriceAmount({ priceLabel }),
     available: true,
     stale: false,
     statusLabel: null,
@@ -221,11 +316,25 @@ function offeringFromNativeCatalog(
 ): ComputePoolOffering {
   const location = offering.location;
   const locationInfo = catalog.locations.find((item) => item.id === location);
-  const sku = offering.sku ?? offering.instanceType ?? offering.type ?? offering.id ?? 'sku pending';
+  const sku =
+    offering.providerInstanceSku ??
+    offering.providerInstanceType ??
+    offering.sku ??
+    offering.instanceType ??
+    offering.type ??
+    offering.id ??
+    'sku pending';
   const priceLabel = priceLabelForOffering(offering);
+  const sourceKey = catalogSourceKey(catalog);
+  const sourceLabel = sourceLabelFromParts(
+    catalog.credentialSource,
+    catalog.credentialSource === 'platform' ? catalog.platformCredentialId : catalog.credentialId
+  );
 
   return {
-    key: offeringKey(catalog.provider, location, sku),
+    key: offeringKey(sourceKey, catalog.provider, location, sku),
+    sourceKey,
+    sourceLabel,
     provider: catalog.provider,
     providerLabel: titleCaseProvider(catalog.provider),
     location,
@@ -236,11 +345,13 @@ function offeringFromNativeCatalog(
     ramGb: normalizeRamGb(offering),
     diskGb: normalizeDiskGb(offering),
     priceLabel,
-    monthlyPriceAmount: monthlyPriceAmount(
-      offering.priceMonthlyUsd,
-      offering.priceHourlyUsd,
-      priceLabel
-    ),
+    monthlyPriceAmount: monthlyPriceAmount({
+      priceMonthly: offering.priceMonthly,
+      priceHourly: offering.priceHourly,
+      priceMonthlyUsd: offering.priceMonthlyUsd,
+      priceHourlyUsd: offering.priceHourlyUsd,
+      priceLabel,
+    }),
     available: typeof offering.available === 'boolean' ? offering.available : null,
     stale: Boolean(offering.stale),
     statusLabel: offering.status ?? null,
@@ -271,6 +382,7 @@ export function flattenProviderCatalogOfferings(catalogs: ProviderCatalog[]): Co
 
 function candidateSku(candidate: ExtendedCandidate): string | null {
   return (
+    candidate.providerInstanceSku ??
     candidate.providerInstanceType ??
     candidate.sku ??
     candidate.instanceType ??
@@ -280,7 +392,11 @@ function candidateSku(candidate: ExtendedCandidate): string | null {
   );
 }
 
-function candidateFallbackOffering(candidate: ExtendedCandidate): ComputePoolOffering {
+function candidateFallbackOffering(
+  candidate: ExtendedCandidate,
+  sourceKey: string | null,
+  sourceLabel: string | null
+): ComputePoolOffering {
   const provider = candidate.provider ?? 'unknown-provider';
   const location = candidate.location ?? 'unknown-region';
   const sku = candidateSku(candidate) ?? 'Provider SKU pending';
@@ -300,7 +416,9 @@ function candidateFallbackOffering(candidate: ExtendedCandidate): ComputePoolOff
       : null;
 
   return {
-    key: offeringKey(provider, location, sku),
+    key: offeringKey(sourceKey, provider, location, sku),
+    sourceKey,
+    sourceLabel,
     provider,
     providerLabel: titleCaseProvider(provider),
     location,
@@ -317,11 +435,13 @@ function candidateFallbackOffering(candidate: ExtendedCandidate): ComputePoolOff
       diskGb: candidate.providerInstanceDiskGb ?? candidate.diskGb,
     }),
     priceLabel,
-    monthlyPriceAmount: monthlyPriceAmount(
-      monthlyFromCents ?? candidate.priceMonthlyUsd,
-      hourlyFromMicros ?? candidate.priceHourlyUsd,
-      priceLabel
-    ),
+    monthlyPriceAmount: monthlyPriceAmount({
+      priceMonthly: monthlyFromCents,
+      priceHourly: hourlyFromMicros,
+      priceMonthlyUsd: candidate.priceMonthlyUsd,
+      priceHourlyUsd: candidate.priceHourlyUsd,
+      priceLabel,
+    }),
     available: typeof candidate.available === 'boolean' ? candidate.available : null,
     stale: Boolean(candidate.stale),
     statusLabel: candidate.catalogStatus ?? null,
@@ -329,7 +449,8 @@ function candidateFallbackOffering(candidate: ExtendedCandidate): ComputePoolOff
   };
 }
 
-function compareOfferings(a: ComputePoolOffering, b: ComputePoolOffering): number {
+function sortOfferings<T extends ComputePoolOffering>(offerings: T[]): T[] {
+  return [...offerings].sort((a, b) => {
     const provider = a.providerLabel.localeCompare(b.providerLabel);
     if (provider !== 0) return provider;
     const location = a.location.localeCompare(b.location);
@@ -338,35 +459,37 @@ function compareOfferings(a: ComputePoolOffering, b: ComputePoolOffering): numbe
     const priceB = b.monthlyPriceAmount ?? Number.POSITIVE_INFINITY;
     if (priceA !== priceB) return priceA - priceB;
     return a.sku.localeCompare(b.sku);
-}
-
-function sortOfferings<T extends ComputePoolOffering>(offerings: T[]): T[] {
-  return [...offerings].sort(compareOfferings);
-}
-
-function catalogActionRank(offering: ComputePoolCatalogOffering): number {
-  if (!offering.canUpdateExistingCandidate) return 2;
-  if (offering.candidateStatus === 'active') return 1;
-  return 0;
-}
-
-function sortCatalogOfferings(offerings: ComputePoolCatalogOffering[]): ComputePoolCatalogOffering[] {
-  return [...offerings].sort((a, b) => catalogActionRank(a) - catalogActionRank(b) || compareOfferings(a, b));
+  });
 }
 
 export function buildComputePoolOfferingsModel(
   candidates: CapacityPoolCandidate[],
   catalogs: ProviderCatalog[],
+  sources: CapacitySourceIdentity[] = [],
   draftStatuses: Record<string, CapacityPoolStatus> = {}
 ): ComputePoolOfferingsModel {
+  const sourceKeysById = new Map(
+    sources.map((source) => [source.id, sourceKeyFromIdentity(source)])
+  );
+  const sourceLabelsById = new Map(
+    sources.map((source) => [source.id, sourceLabelFromIdentity(source)])
+  );
   const catalogOfferings = flattenProviderCatalogOfferings(catalogs);
   const byKey = new Map(catalogOfferings.map((offering) => [offering.key, offering]));
   const byLegacyCandidate = new Map<string, ComputePoolOffering>();
+  const byUnscopedKey = new Map<string, ComputePoolOffering[]>();
 
   for (const offering of catalogOfferings) {
+    const unscopedKey = offeringKey(null, offering.provider, offering.location, offering.sku);
+    byUnscopedKey.set(unscopedKey, [...(byUnscopedKey.get(unscopedKey) ?? []), offering]);
     if (!offering.machineSizeHint) continue;
     byLegacyCandidate.set(
-      offeringKey(offering.provider, offering.location, offering.machineSizeHint),
+      legacyOfferingKey(
+        offering.sourceKey,
+        offering.provider,
+        offering.location,
+        offering.machineSizeHint
+      ),
       offering
     );
   }
@@ -376,13 +499,24 @@ export function buildComputePoolOfferingsModel(
     const provider = extended.provider ?? 'unknown-provider';
     const location = extended.location ?? 'unknown-region';
     const nativeSku = candidateSku(extended);
+    const sourceKey = candidateSourceKey(extended, sourceKeysById);
+    const sourceLabel =
+      sourceLabelsById.get(extended.capacitySourceId) ??
+      (sourceKey ? `Capacity source ${extended.capacitySourceId}` : null);
+    const sourceScopedKey = nativeSku ? offeringKey(sourceKey, provider, location, nativeSku) : null;
+    const unscopedKey = nativeSku ? offeringKey(null, provider, location, nativeSku) : null;
+    const unscopedMatches = unscopedKey ? byUnscopedKey.get(unscopedKey) ?? [] : [];
     const exactCatalogOffering = nativeSku
-      ? byKey.get(offeringKey(provider, location, nativeSku))
+      ? byKey.get(sourceScopedKey ?? '') ??
+        (unscopedMatches.length === 1 ? unscopedMatches[0] : null)
       : null;
     const legacyCatalogOffering = extended.machineSize
-      ? byLegacyCandidate.get(offeringKey(provider, location, extended.machineSize))
+      ? byLegacyCandidate.get(legacyOfferingKey(sourceKey, provider, location, extended.machineSize))
       : null;
-    const base = exactCatalogOffering ?? legacyCatalogOffering ?? candidateFallbackOffering(extended);
+    const base =
+      exactCatalogOffering ??
+      legacyCatalogOffering ??
+      candidateFallbackOffering(extended, sourceKey, sourceLabel);
 
     return {
       ...base,
@@ -404,18 +538,21 @@ export function buildComputePoolOfferingsModel(
     excluded: sortOfferings(
       candidateOfferings.filter((offering) => offering.candidateStatus !== 'active')
     ),
-    catalog: sortCatalogOfferings(
-      catalogOfferings.map((offering) => {
-        const matchingCandidate = byCandidateKey.get(offering.key);
-        return {
-          ...offering,
-          candidateId: matchingCandidate?.candidateId ?? null,
-          candidateStatus: matchingCandidate?.candidateStatus ?? 'not-configured',
-          runtime: matchingCandidate?.runtime ?? null,
-          machineClass: matchingCandidate?.machineClass ?? null,
-          canUpdateExistingCandidate: Boolean(matchingCandidate),
-        };
-      })
+    catalog: sortOfferings(
+      catalogOfferings
+        .map((offering) => {
+          const matchingCandidate = byCandidateKey.get(offering.key);
+          if (!matchingCandidate) return null;
+          return {
+            ...offering,
+            candidateId: matchingCandidate.candidateId,
+            candidateStatus: matchingCandidate.candidateStatus,
+            runtime: matchingCandidate.runtime,
+            machineClass: matchingCandidate.machineClass,
+            canUpdateExistingCandidate: true,
+          };
+        })
+        .filter((offering): offering is ComputePoolCatalogOffering => offering !== null)
     ),
   };
 }

@@ -399,7 +399,15 @@ export async function handleDispatchTask(
       : null;
   if (!isInstantRuntime) {
     const { resolveCredentialSource } = await import('../../services/provider-credentials');
-    const credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
+    let credentialLookup;
+    try {
+      credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
+    } catch (err) {
+      if (err instanceof PlacementResolutionError) {
+        return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+      }
+      throw err;
+    }
     const credResult = await resolveCredentialSource(
       db,
       credentialLookup.userId,

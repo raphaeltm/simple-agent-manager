@@ -2,14 +2,12 @@ import { expect, type Page, test } from '@playwright/test';
 
 import {
   applyMockCapacityDefaultsUpdate,
-  assertNoClippedOverflow,
   assertNoOverflow,
   getProjectSuffix,
   jsonResponse,
   makeMockUser,
   screenshot,
   screenshotNearHeading,
-  screenshotSectionNearHeading,
   setupAuditRoutes,
 } from './audit-helpers';
 
@@ -18,10 +16,6 @@ const LONG_MARKER =
   'unicode Ω emoji 🚀 and xss text <script>alert("pool")</script> repeated to force wrapping '.repeat(
     3
   );
-const REMOVE_TARGETS = [
-  { location: 'ash', sku: 'hcx-ash-4vcpu-8gb' },
-  { location: 'hil', sku: 'hcx-hil-8vcpu-16gb' },
-] as const;
 
 const user = makeMockUser({
   email: 'pool-user@example.com',
@@ -38,84 +32,48 @@ const superadmin = makeMockUser({
   userId: 'pool-admin',
 });
 
-function providerForIndex(index: number) {
-  const providers = ['hetzner', 'scaleway', 'gcp', 'vultr', 'digitalocean', 'upcloud'];
-  return index < 6 ? 'hetzner' : providers[index % providers.length];
-}
+const providerNames = ['hetzner', 'scaleway', 'gcp', 'vultr', 'digitalocean', 'upcloud'] as const;
+const nativeOfferings = [
+  { sku: 'cx23', vcpu: 2, memoryMb: 4096, diskGb: 40, priceCents: 399 },
+  { sku: 'cx33', vcpu: 4, memoryMb: 8192, diskGb: 80, priceCents: 749 },
+  { sku: 'cx43', vcpu: 8, memoryMb: 16_384, diskGb: 160, priceCents: 1449 },
+  { sku: 'cpx31', vcpu: 4, memoryMb: 8192, diskGb: 160, priceCents: 1310 },
+  { sku: 'ccx33', vcpu: 8, memoryMb: 32_768, diskGb: 240, priceCents: 5520 },
+] as const;
 
-function locationForIndex(scope: 'user' | 'installation', index: number) {
-  const visibleLocations = ['fsn1', 'nbg1', 'hel1', 'ash', 'hil', 'sin'];
-  if (index === 35) {
-    return `region-with-a-deliberately-long-location-name-${scope}-${LONG_MARKER}`;
-  }
-  return visibleLocations[index] ?? `${scope}-region-${index}`;
-}
-
-function skuForIndex(index: number) {
-  if (index === 3) return REMOVE_TARGETS[0].sku;
-  if (index === 4) return REMOVE_TARGETS[1].sku;
-  if (index === 35) {
-    return `provider-native-sku-with-a-deliberately-long-name-${LONG_MARKER}`;
-  }
-  const shape = index % 5 === 0 ? 'dedicated' : 'shared';
-  return `${providerForIndex(index)}-${shape}-${index + 1}vcpu-${(index % 8) + 4}gb`;
-}
-
-function vcpuForIndex(index: number) {
-  if (index === 3) return 4;
-  if (index === 4) return 8;
-  return (index % 12) + 1;
-}
-
-function memoryMbForIndex(index: number) {
-  if (index === 3) return 8192;
-  if (index === 4) return 16_384;
-  return ((index % 16) + 4) * 1024;
-}
-
-function diskGbForIndex(index: number) {
-  return index % 7 === 0 ? 0 : (index + 1) * 20;
-}
-
-function priceForIndex(index: number) {
-  if (index === 11) return null;
-  if (index === 17) return '€499.99/mo';
-  if (index % 6 === 0) return '~€0.024/hr';
-  return `€${(3.5 + index * 2.71).toFixed(2)}/mo`;
-}
-
-function catalogAvailabilityForIndex(index: number) {
-  if (index === 13) return { available: false, stale: false, status: 'provider capacity unavailable' };
-  if (index === 21) return { available: true, stale: true, status: 'last-known catalog row' };
-  return { available: true, stale: false, status: null };
+function nativeOffering(index: number) {
+  return nativeOfferings[index % nativeOfferings.length]!;
 }
 
 function capacityCandidate(scope: 'user' | 'installation', index: number) {
-  const price = priceForIndex(index);
+  const visibleLocations = ['fsn1', 'nbg1', 'hel1', 'ash', 'hil'];
+  const offering = nativeOffering(index);
+  const provider = index < visibleLocations.length ? 'hetzner' : providerNames[index % providerNames.length];
   return {
     id: `${scope}-candidate-${index}`,
     poolId: `${scope}-default-pool`,
-    capacitySourceId: `${scope}-source-${index % 6}`,
-    provider: providerForIndex(index),
-    location: locationForIndex(scope, index),
+    capacitySourceId: `${scope}-source-${provider}`,
+    provider,
+    location:
+      index === 35
+        ? `region-with-a-deliberately-long-location-name-${scope}-${LONG_MARKER}`
+        : (visibleLocations[index] ?? `${scope}-region-${index}`),
     workloadRole: 'workspace',
     runtime: index % 5 === 0 ? 'cf-container' : 'vm',
     machineClass: index % 4 === 0 ? 'dedicated-vm' : 'shared-vm',
     machineSize: index % 3 === 0 ? 'small' : index % 3 === 1 ? 'medium' : 'large',
-    providerInstanceType: skuForIndex(index),
-    providerInstanceVcpuCount: vcpuForIndex(index),
-    providerInstanceMemoryMb: memoryMbForIndex(index),
-    providerInstanceDiskGb: diskGbForIndex(index),
-    providerInstancePriceDisplay: price,
-    providerInstancePriceCurrency: price ? 'EUR' : null,
-    providerInstancePriceMonthlyCents:
-      price && price.includes('/mo')
-        ? Math.round(Number(price.replace(/[^0-9.]/g, '')) * 100)
-        : null,
-    providerInstancePriceHourlyMicros:
-      price && price.includes('/hr')
-        ? Math.round(Number(price.replace(/[^0-9.]/g, '')) * 1_000_000)
-        : null,
+    providerInstanceType: offering.sku,
+    providerInstanceSku: null,
+    providerInstanceDisplayName: `${offering.sku} · ${offering.vcpu} vCPU · ${offering.memoryMb / 1024} GB RAM · ${offering.diskGb} GB disk`,
+    providerInstanceVcpuCount: offering.vcpu,
+    providerInstanceMemoryMb: offering.memoryMb,
+    providerInstanceDiskGb: offering.diskGb,
+    providerInstancePriceDisplay: `€${(offering.priceCents / 100).toFixed(2)}/mo`,
+    providerInstancePriceCurrency: 'EUR',
+    providerInstancePriceMonthlyCents: offering.priceCents,
+    providerInstancePriceHourlyMicros: Math.round((offering.priceCents * 10_000) / 730),
+    providerInstanceCatalogSource: 'static',
+    providerInstanceCatalogLastSeenAt: null,
     priority: index,
     candidateOrder: index,
     status: 'active',
@@ -134,8 +92,8 @@ function capacitySummary(scope: 'user' | 'installation') {
       ownerProjectId: null,
       name:
         scope === 'user'
-          ? `Personal infrastructure compute pool with very long owner-managed name — ${LONG_MARKER}`
-          : `SAM installation infrastructure fallback pool with very long admin-managed name — ${LONG_MARKER}`,
+          ? `Personal default compute pool with very long owner-managed name — ${LONG_MARKER}`
+          : `SAM installation fallback compute pool with very long admin-managed name — ${LONG_MARKER}`,
       isDefault: true,
       revision: 7,
       status: 'active',
@@ -144,31 +102,73 @@ function capacitySummary(scope: 'user' | 'installation') {
       createdAt: TIMESTAMP,
       updatedAt: TIMESTAMP,
     },
-    sources: [
-      {
-        id: `${scope}-source-0`,
+    sources: providerNames.map((provider) => ({
+        id: `${scope}-source-${provider}`,
         scope,
         ownerUserId: scope === 'user' ? 'pool-user' : null,
         ownerProjectId: null,
         sourceKind: 'cloud-provider-credential',
-        provider: 'hetzner',
+        provider,
         credentialSource: scope === 'user' ? 'user' : 'platform',
-        credentialId: scope === 'user' ? 'credential-user-cloud-long-id' : null,
-        platformCredentialId: scope === 'installation' ? 'platform-credential-long-id' : null,
+        credentialId: scope === 'user' ? `credential-user-cloud-${provider}` : null,
+        platformCredentialId: scope === 'installation' ? `platform-credential-${provider}` : null,
         credentialReference:
           scope === 'user'
-            ? `credentials:user-cloud-reference-${LONG_MARKER}`
-            : `platform_credentials:platform-cloud-reference-${LONG_MARKER}`,
+            ? `credentials:user-cloud-reference-${provider}-${LONG_MARKER}`
+            : `platform_credentials:platform-cloud-reference-${provider}-${LONG_MARKER}`,
         credentialVersion: 1787875200000,
         externalSourceRef: null,
         status: 'active',
         createdAt: TIMESTAMP,
         updatedAt: TIMESTAMP,
-      },
-    ],
+      })),
     candidates,
     activeCandidateCount: candidates.length,
   };
+}
+
+function providerCatalogs(scope: 'user' | 'installation') {
+  return [
+    {
+      provider: 'hetzner',
+      credentialSource: scope === 'user' ? 'user' : 'platform',
+      credentialId: scope === 'user' ? 'credential-user-cloud-hetzner' : null,
+      platformCredentialId: scope === 'installation' ? 'platform-credential-hetzner' : null,
+      locations: [
+        { id: 'fsn1', name: 'Falkenstein', country: 'DE' },
+        { id: 'nbg1', name: 'Nuremberg', country: 'DE' },
+        { id: 'hel1', name: 'Helsinki', country: 'FI' },
+        { id: 'ash', name: 'Ashburn', country: 'US' },
+        { id: 'hil', name: 'Hillsboro', country: 'US' },
+      ],
+      sizes: {
+        small: { type: 'cx23', price: '€3.99/mo', vcpu: 2, ramGb: 4, storageGb: 40 },
+        medium: { type: 'cx33', price: '€7.49/mo', vcpu: 4, ramGb: 8, storageGb: 80 },
+        large: { type: 'cx43', price: '€14.49/mo', vcpu: 8, ramGb: 16, storageGb: 160 },
+      },
+      offerings: ['fsn1', 'nbg1', 'hel1', 'ash', 'hil'].map((location, index) => {
+        const offering = nativeOffering(index);
+        return {
+          provider: 'hetzner',
+          location,
+          providerInstanceType: offering.sku,
+          providerInstanceSku: null,
+          displayName: `${offering.sku} catalog row`,
+          sku: offering.sku,
+          vcpu: offering.vcpu,
+          memoryMb: offering.memoryMb,
+          diskGb: offering.diskGb,
+          price: `€${(offering.priceCents / 100).toFixed(2)}/mo`,
+          priceMonthly: offering.priceCents / 100,
+          currency: 'EUR',
+          available: true,
+          catalogSource: 'static',
+          catalogLastSeenAt: null,
+        };
+      }),
+      defaultLocation: 'fsn1',
+    },
+  ];
 }
 
 function defaultsResponse(scope: 'user' | 'installation') {
@@ -205,73 +205,10 @@ function defaultsResponse(scope: 'user' | 'installation') {
   };
 }
 
-function catalogResponse(scope: 'user' | 'installation') {
-  const candidates = Array.from({ length: 36 }, (_, index) => capacityCandidate(scope, index));
-  const byProvider = new Map<string, ReturnType<typeof capacityCandidate>[]>();
-  for (const candidate of candidates) {
-    const items = byProvider.get(candidate.provider) ?? [];
-    items.push(candidate);
-    byProvider.set(candidate.provider, items);
-  }
-
-  return {
-    catalogs: [...byProvider.entries()].map(([provider, providerCandidates]) => ({
-      provider,
-      defaultLocation: providerCandidates[0]?.location ?? 'default-region',
-      locations: [...new Set(providerCandidates.map((candidate) => candidate.location))].map(
-        (location) => ({
-          id: location,
-          name: location.includes('region-with-a-deliberately-long-location-name')
-            ? location
-            : `${location.toUpperCase()} provider region`,
-          country: location === 'ash' || location === 'hil' ? 'US' : 'EU',
-        })
-      ),
-      sizes: {
-        small: { type: `${provider}-legacy-compat-a`, price: '€3.99/mo', vcpu: 2, ramGb: 4, storageGb: 40 },
-        medium: { type: `${provider}-legacy-compat-b`, price: '€12.99/mo', vcpu: 4, ramGb: 8, storageGb: 120 },
-        large: { type: `${provider}-legacy-compat-c`, price: '€49.99/mo', vcpu: 8, ramGb: 32, storageGb: 240 },
-      },
-      offerings: [
-        ...providerCandidates.map((candidate, index) => {
-          const availability = catalogAvailabilityForIndex(index);
-          return {
-            sku: candidate.providerInstanceType,
-            location: candidate.location,
-            locationName: candidate.location.includes('region-with-a-deliberately-long-location-name')
-              ? candidate.location
-              : `${candidate.location.toUpperCase()} provider region`,
-            country: candidate.location === 'ash' || candidate.location === 'hil' ? 'US' : 'EU',
-            vcpu: candidate.providerInstanceVcpuCount,
-            memoryMb: candidate.providerInstanceMemoryMb,
-            diskGb: candidate.providerInstanceDiskGb,
-            price: candidate.providerInstancePriceDisplay,
-            available: availability.available,
-            stale: availability.stale,
-            status: availability.status,
-          };
-        }),
-        {
-          sku: `catalog-only-ultra-gpu-offering-${LONG_MARKER}`,
-          location: 'catalog-only-region',
-          locationName: `Catalog Only Region ${LONG_MARKER}`,
-          country: 'CA',
-          vcpu: 64,
-          memoryGb: 512,
-          diskGb: 4096,
-          price: '€1999.99/mo',
-          available: false,
-          status: 'not yet seedable from this UI',
-        },
-      ],
-    })),
-  };
-}
-
 async function setupCommonMocks(
   page: Page,
   authUser: unknown,
-  scope: 'user' | 'installation'
+  catalogScope: 'user' | 'installation'
 ) {
   await page.addInitScript(() =>
     ['pool-user', 'pool-admin'].forEach((userId) =>
@@ -290,7 +227,9 @@ async function setupCommonMocks(
     if (path === '/api/credentials') return respond(200, []);
     if (path.startsWith('/api/github')) return respond(200, []);
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
-    if (path === '/api/providers/catalog') return respond(200, catalogResponse(scope));
+    if (path === '/api/providers/catalog') {
+      return respond(200, { catalogs: providerCatalogs(catalogScope) });
+    }
     return undefined;
   });
 }
@@ -312,7 +251,7 @@ async function setupUserPoolMocks(page: Page) {
       {
         id: 'credential-user-cloud-long-id',
         provider: 'hetzner',
-        name: `Hetzner personal credential with a long visible label ${LONG_MARKER}`,
+        name: `Hetzner personal token with a long visible label ${LONG_MARKER}`,
         createdAt: TIMESTAMP,
         updatedAt: TIMESTAMP,
       },
@@ -361,15 +300,13 @@ async function expectStressedDefaultPool(
   scope: 'user' | 'installation'
 ) {
   await expect(page.getByRole('heading', { name: heading })).toBeVisible();
-  await expect(page.getByText(/36 allowed/).first()).toBeVisible();
+  await expect(page.getByText(/36 allowed · 0 removed\/disabled/)).toBeVisible();
   await expect(
     page.getByText(new RegExp(`region-with-a-deliberately-long-location-name-${scope}`))
   ).toBeVisible();
-  await expect(page.getByText('Price unavailable')).toBeVisible();
-  await expect(page.getByText('€499.99/mo')).toBeVisible();
+  await expect(page.getByText(/\+\d+ more provider\/region groups/)).toHaveCount(0);
   await expect(page.getByText(/Hidden outside this settings context/i)).toHaveCount(0);
   await expect(page.getByText(/Installation defaults require/i)).toHaveCount(0);
-  await expect(page.getByText(/Small candidate|Medium candidate|Large candidate/)).toHaveCount(0);
 }
 
 async function screenshotDefaultPoolScope(
@@ -380,34 +317,25 @@ async function screenshotDefaultPoolScope(
 ) {
   await screenshot(page, `${namePrefix}-${suffix}`);
   await screenshotNearHeading(page, heading, `${namePrefix}-focused-${suffix}`);
-  await screenshotSectionNearHeading(page, heading, `${namePrefix}-section-${suffix}`);
   await screenshotNearHeading(page, 'Active Sources', `${namePrefix}-details-${suffix}`);
 }
 
-async function removeTargetOfferings(page: Page, editHeading: string, screenshotName: string) {
+async function removeAshHilCandidates(page: Page, editHeading: string, screenshotName: string) {
   await page.getByRole('button', { name: 'Edit' }).click();
   await expect(page.getByRole('heading', { name: editHeading })).toBeVisible();
-  await page.getByRole('button', { name: `Remove Hetzner ${REMOVE_TARGETS[0].location} ${REMOVE_TARGETS[0].sku}` }).click();
-  await page.getByRole('button', { name: `Remove Hetzner ${REMOVE_TARGETS[1].location} ${REMOVE_TARGETS[1].sku}` }).click();
-  await expect(page.getByText(/34 allowed · 2 removed\/disabled/)).toBeVisible();
-  await expect(page.getByText('Removed or disabled instances')).toBeVisible();
+  await page.getByRole('button', { name: /Remove Hetzner ash cpx31/ }).click();
+  await page.getByRole('button', { name: /Remove Hetzner hil ccx33/ }).click();
   await screenshotNearHeading(page, editHeading, screenshotName);
-  await screenshotNearHeading(page, 'Removed or disabled instances', `${screenshotName}-removed`);
-  await screenshotNearHeading(page, 'Catalog filters', `${screenshotName}-catalog`);
-  await screenshotNearHeading(
-    page,
-    'Add instances from catalog',
-    `${screenshotName}-catalog-results`
-  );
   await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByText(/34 allowed · 2 removed\/disabled/)).toBeVisible();
-  await expect(page.getByText('Removed').first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Removed or disabled instances' })).toBeVisible();
+  await expect(page.getByText(/Hetzner · Ashburn \(ash\)/).first()).toBeVisible();
+  await expect(page.getByText(/Hetzner · Hillsboro \(hil\)/).first()).toBeVisible();
   await assertNoOverflow(page);
-  await assertNoClippedOverflow(page);
 }
 
 test.describe('Default capacity pool scope surfaces', () => {
-  test('user Infrastructure surface renders stressed user pool without overflow', async ({
+  test('user settings surface renders stressed user default pool without overflow', async ({
     page,
   }, testInfo) => {
     await setupUserPoolMocks(page);
@@ -421,14 +349,14 @@ test.describe('Default capacity pool scope surfaces', () => {
       'default-capacity-pools-user',
       suffix
     );
-    await removeTargetOfferings(
+    await removeAshHilCandidates(
       page,
       'Edit user default',
       `default-capacity-pools-user-edit-${suffix}`
     );
   });
 
-  test('admin Infrastructure surface renders stressed installation pool without overflow', async ({
+  test('admin surface renders stressed installation default pool without overflow', async ({
     page,
   }, testInfo) => {
     await setupInstallationPoolMocks(page);
@@ -446,7 +374,7 @@ test.describe('Default capacity pool scope surfaces', () => {
       'default-capacity-pools-installation',
       suffix
     );
-    await removeTargetOfferings(
+    await removeAshHilCandidates(
       page,
       'Edit installation default',
       `default-capacity-pools-installation-edit-${suffix}`

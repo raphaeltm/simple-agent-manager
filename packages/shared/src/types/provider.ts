@@ -88,7 +88,7 @@ export interface ProviderCatalogOfferingInfo {
   stale?: boolean;
   /** Provider/backend status string for unavailable/stale offerings. */
   status?: string | null;
-  /** Temporary bridge to legacy default-pool candidates until backend native candidates land. */
+  /** Legacy VM-size preset hint retained for compatibility and grouping only. */
   machineSize?: VMSize | string;
   /** Whether the offering came from a provider API or curated static metadata. */
   catalogSource?: ProviderInstanceCatalogSource;
@@ -119,6 +119,8 @@ export interface ProviderCatalog {
   credentialSource?: 'user' | 'project' | 'platform';
   /** Non-secret credential row ID for user/project credentials, when applicable. */
   credentialId?: string | null;
+  /** Non-secret platform credential row ID for installation-scoped catalogs, when applicable. */
+  platformCredentialId?: string | null;
   locations: LocationInfo[];
   sizes: Record<VMSize, SizeInfo>;
   /** Provider-native instance offerings for compute-pool setup. */

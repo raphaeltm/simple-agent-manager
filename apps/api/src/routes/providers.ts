@@ -1,8 +1,13 @@
-import { createProvider, GcpProvider } from '@simple-agent-manager/providers';
+import {
+  createProvider,
+  GcpProvider,
+  type Provider as CloudProvider,
+} from '@simple-agent-manager/providers';
 import type {
   CredentialProvider,
   ProviderCatalog,
   ProviderCatalogResponse,
+  ProviderInstanceOffering,
   SizeInfo,
   VMSize,
 } from '@simple-agent-manager/shared';
@@ -22,6 +27,21 @@ const providersRoutes = new Hono<{ Bindings: Env }>();
 const CLOUD_PROVIDER_CREDENTIAL_SETUP_MESSAGE =
   'Configure a cloud-provider credential before creating compute pools.';
 
+async function listProviderCatalogOfferings(
+  providerName: CredentialProvider,
+  provider: CloudProvider
+): Promise<ProviderInstanceOffering[]> {
+  try {
+    return await provider.listInstanceOfferings({ preferApi: true });
+  } catch (error) {
+    log.warn('catalog.live_offerings_failed', {
+      provider: providerName,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return provider.listInstanceOfferings({ preferApi: false });
+  }
+}
+
 providersRoutes.use('*', requireAuth(), requireApproved());
 
 /**
@@ -37,6 +57,7 @@ providersRoutes.get('/catalog', async (c) => {
   const creds = await db
     .select({
       id: schema.credentials.id,
+      projectId: schema.credentials.projectId,
       provider: schema.credentials.provider,
       encryptedToken: schema.credentials.encryptedToken,
       iv: schema.credentials.iv,
@@ -77,7 +98,7 @@ providersRoutes.get('/catalog', async (c) => {
         const config = buildProviderConfig(providerName, decryptedToken);
         provider = createProvider(config);
       }
-      const offerings = await provider.listInstanceOfferings({ preferApi: true });
+      const offerings = await listProviderCatalogOfferings(providerName, provider);
       const locationIds = [
         ...provider.locations,
         ...offerings.flatMap((offering) =>
@@ -87,7 +108,7 @@ providersRoutes.get('/catalog', async (c) => {
 
       return {
         provider: providerName,
-        credentialSource: 'user',
+        credentialSource: cred.projectId ? 'project' : 'user',
         credentialId: cred.id,
         locations: [...new Set(locationIds)].map((id) => {
           const meta = provider.locationMetadata[id];
@@ -121,13 +142,13 @@ providersRoutes.get('/catalog', async (c) => {
   }
 
   const response: ProviderCatalogResponse =
-    catalogs.length === 0
+    creds.length === 0
       ? {
           catalogs,
           credentialSetupRequired: true,
           credentialSetupMessage: CLOUD_PROVIDER_CREDENTIAL_SETUP_MESSAGE,
         }
-      : { catalogs };
+      : { catalogs, credentialSetupRequired: false };
   return c.json(response);
 });
 

@@ -16,6 +16,10 @@ const concreteOfferingMigrationSql = readFileSync(
   join(process.cwd(), 'src/db/migrations/0127_concrete_capacity_pool_offerings.sql'),
   'utf8'
 );
+const candidateCatalogMetadataMigrationSql = readFileSync(
+  join(process.cwd(), 'src/db/migrations/0128_capacity_pool_candidate_catalog_metadata.sql'),
+  'utf8'
+);
 
 let sqlite: Database.Database | null = null;
 
@@ -595,6 +599,7 @@ describe('0127_concrete_capacity_pool_offerings migration', () => {
     `);
 
     database.exec(concreteOfferingMigrationSql);
+    database.exec(candidateCatalogMetadataMigrationSql);
 
     const snapshotOfferingColumns = [
       'provider_instance_type',
@@ -652,7 +657,7 @@ describe('0127_concrete_capacity_pool_offerings migration', () => {
   });
 
   it('contains no destructive statements', () => {
-    const sql = concreteOfferingMigrationSql.toUpperCase();
+    const sql = `${concreteOfferingMigrationSql}\n${candidateCatalogMetadataMigrationSql}`.toUpperCase();
     expect(sql).not.toContain('DROP TABLE');
     expect(sql).not.toContain('DELETE FROM');
     expect(sql).not.toContain('PRAGMA FOREIGN_KEYS = OFF');

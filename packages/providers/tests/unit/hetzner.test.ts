@@ -224,8 +224,8 @@ describe('HetznerProvider', () => {
         ramGb: 4,
         diskGb: 40,
         price: '€3.99/mo',
-        priceMonthlyUsd: 3.99,
-        priceHourlyUsd: 0.0048,
+        priceMonthlyUsd: null,
+        priceHourlyUsd: null,
         priceMonthly: 3.99,
         priceHourly: 0.0048,
         currency: 'EUR',
@@ -239,6 +239,36 @@ describe('HetznerProvider', () => {
         },
       });
       expect(offerings[0]?.catalogLastSeenAt).toEqual(expect.any(String));
+    });
+
+    it('falls back to static offerings when the Hetzner server_types API fails', async () => {
+      const logger = mockLogger();
+      provider = new HetznerProvider('test-token', 'fsn1', undefined, undefined, undefined, undefined, {
+        logger,
+      });
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { message: 'catalog unavailable' } }), {
+          status: 500,
+        })
+      );
+
+      const offerings = await provider.listInstanceOfferings({ preferApi: true });
+
+      expect(offerings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            provider: 'hetzner',
+            location: 'fsn1',
+            providerInstanceType: 'cx23',
+            catalogSource: 'static',
+            catalogLastSeenAt: null,
+          }),
+        ])
+      );
+      expect(logger.warn).toHaveBeenCalledWith(
+        'hetzner catalog API unavailable; using static instance offerings',
+        expect.objectContaining({ error: expect.stringContaining('500') })
+      );
     });
 
     it('uses static metadata without provider API calls when requested', async () => {

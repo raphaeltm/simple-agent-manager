@@ -239,6 +239,8 @@ describe('task submit capacity-pool placement', () => {
       provider_instance_disk_gb: 40,
       provider_instance_price_display: '€3.99/mo',
       provider_instance_price_currency: 'EUR',
+      provider_instance_price_monthly_cents: 399,
+      provider_instance_price_hourly_micros: 5466,
     });
     expect(taskRow.placement_explanation_json).toContain('capacity_pool_default');
 
@@ -277,5 +279,33 @@ describe('task submit capacity-pool placement', () => {
         }),
       })
     );
+  });
+
+  it('fails closed when the effective default pool has no eligible offering for the task', async () => {
+    const { sqlite, env } = createEnv();
+    seedTaskSubmitRows(sqlite);
+
+    const res = await createApp().request(
+      '/api/projects/project-1/tasks/submit',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: 'Run a task that exceeds the default pool',
+          resourceRequirements: { minVcpu: 999 },
+        }),
+      },
+      env,
+      executionCtx
+    );
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.message).toContain('No eligible compute-pool offering is available');
+    expect(body.message).toContain('999 vCPU');
+    expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+    expect(
+      sqlite.prepare("SELECT COUNT(*) AS count FROM tasks WHERE project_id = 'project-1'").get()
+    ).toEqual({ count: 0 });
   });
 });

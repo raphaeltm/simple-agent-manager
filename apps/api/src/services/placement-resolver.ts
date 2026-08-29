@@ -26,7 +26,6 @@ import { log } from '../lib/logger';
 import { resolveEffectiveDefaultCapacityPoolSummary } from './default-capacity-pools';
 import {
   buildCapacityPoolSelection,
-  capacityPoolNoCandidatesMessage,
   hasNoCapacityPoolCandidates,
 } from './placement-resolver-capacity';
 import type {
@@ -239,6 +238,14 @@ export function resolveCapacityAwareCredentialLookup(
   placement: TaskStartPlacement,
   capacityPoolSelection: TaskStartCapacityPoolSelection | null
 ): PlacementCredentialLookup {
+  if (capacityPoolSelection && hasNoCapacityPoolCandidates(capacityPoolSelection)) {
+    throw new PlacementResolutionError(
+      'no-eligible-capacity-candidate',
+      noEligibleCapacityCandidateMessage(placement, capacityPoolSelection),
+      []
+    );
+  }
+
   const candidate = capacityPoolSelection?.candidates[0] ?? null;
   if (!candidate) return placement.credentialLookup;
 
@@ -296,11 +303,17 @@ export async function resolveTaskStartPlacementCredentialAttribution(
     throw err;
   }
 
-  const capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement);
-  if (capacityPoolSelection && hasNoCapacityPoolCandidates(capacityPoolSelection)) {
-    return { error: capacityPoolNoCandidatesMessage(capacityPoolSelection) };
+  let capacityPoolSelection: TaskStartCapacityPoolSelection | null;
+  let credentialLookup: PlacementCredentialLookup;
+  try {
+    capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement);
+    credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
+  } catch (err) {
+    if (err instanceof PlacementResolutionError) {
+      return { error: err.message };
+    }
+    throw err;
   }
-  const credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
   const credential = await resolveCredentialSource(
     db,
     credentialLookup.userId,
@@ -325,6 +338,26 @@ export async function resolveTaskStartPlacementCredentialAttribution(
       ? resolveCapacityPlacementCredentialAttribution(placement, capacityCandidate)
       : resolvePlacementCredentialAttribution(placement, credential)),
   };
+}
+
+function noEligibleCapacityCandidateMessage(
+  placement: TaskStartPlacement,
+  selection: TaskStartCapacityPoolSelection
+): string {
+  const requirements = [
+    `${Math.ceil(placement.resolvedReservation.cpuMillis / 1000)} vCPU`,
+    `${placement.resolvedReservation.memoryMb} MB memory`,
+    placement.resolvedReservation.diskMb > 0
+      ? `${Math.ceil(placement.resolvedReservation.diskMb / 1024)} GB disk`
+      : null,
+  ].filter(Boolean);
+  const provider = placement.provider ? ` provider ${placement.provider}` : '';
+  const location = placement.explicitVmLocation ? ` location ${placement.vmLocation}` : '';
+  return (
+    `No eligible compute-pool offering is available in the ${selection.scope} default pool` +
+    `${provider}${location} for this task's requirements (${requirements.join(', ')}). ` +
+    'Reconcile the pool or add an active provider-native offering that satisfies the request.'
+  );
 }
 
 function resolveProvider(

@@ -19,8 +19,6 @@ import { generateBranchName } from './branch-name';
 import { capacityPlacementSnapshotDbValues } from './capacity-placement-snapshot';
 import {
   capacityPlacementSnapshotForTaskStart,
-  capacityPoolNoCandidatesMessage,
-  hasNoCapacityPoolCandidates,
   PlacementResolutionError,
   resolveCapacityAwareCredentialLookup,
   resolveCapacityPlacementCredentialAttribution,
@@ -131,11 +129,17 @@ export async function submitTriggeredTask(
   })();
 
   const { resolveCredentialSource } = await import('./provider-credentials');
-  const capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement);
-  if (capacityPoolSelection && hasNoCapacityPoolCandidates(capacityPoolSelection)) {
-    throw new Error(capacityPoolNoCandidatesMessage(capacityPoolSelection));
+  let capacityPoolSelection;
+  let credentialLookup;
+  try {
+    capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement);
+    credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
+  } catch (err) {
+    if (err instanceof PlacementResolutionError) {
+      throw new Error(err.message);
+    }
+    throw err;
   }
-  const credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
   const credResult = await resolveCredentialSource(
     db,
     credentialLookup.userId,

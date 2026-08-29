@@ -70,11 +70,18 @@ function createTestApp() {
 }
 
 function createMockDB(
-  rows: Array<{ id?: string; provider: string; encryptedToken: string; iv: string }>
+  rows: Array<{
+    id?: string;
+    projectId?: string | null;
+    provider: string;
+    encryptedToken: string;
+    iv: string;
+  }>
 ) {
   const selectedRows = rows.map((row, index) => ({
     ...row,
     id: row.id ?? `credential-${index + 1}`,
+    projectId: row.projectId ?? null,
   }));
   const mockDB: any = {
     select: vi.fn().mockReturnThis(),
@@ -220,6 +227,37 @@ describe('GET /api/providers/catalog', () => {
     expect(mockProvider.listInstanceOfferings).toHaveBeenCalledWith({ preferApi: true });
   });
 
+  it('identifies project-scoped provider catalogs separately from user credentials', async () => {
+    createMockDB([
+      {
+        id: 'project-credential-1',
+        projectId: 'project-1',
+        provider: 'hetzner',
+        encryptedToken: 'enc-token',
+        iv: 'test-iv',
+      },
+    ]);
+
+    const mockProvider = makeMockProvider({
+      name: 'hetzner',
+      locations: ['ash'],
+      locationMetadata: { ash: { name: 'Ashburn', country: 'US' } },
+      defaultLocation: 'ash',
+    });
+    mockCreateProvider.mockReturnValue(mockProvider);
+
+    const res = await app.request('/api/providers/catalog', { method: 'GET' }, makeEnv());
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ProviderCatalogResponse;
+    expect(body.catalogs).toHaveLength(1);
+    expect(body.catalogs[0]).toMatchObject({
+      provider: 'hetzner',
+      credentialSource: 'project',
+      credentialId: 'project-credential-1',
+    });
+  });
+
   it('should return catalogs for multiple provider credentials', async () => {
     createMockDB([
       { provider: 'hetzner', encryptedToken: 'enc-hetzner', iv: 'iv-1' },
@@ -357,6 +395,38 @@ describe('GET /api/providers/catalog', () => {
     expect(body.catalogs[0]!.provider).toBe('scaleway');
   });
 
+  it('falls back to static offerings when live provider catalog enumeration fails', async () => {
+    createMockDB([{ provider: 'hetzner', encryptedToken: 'enc-token', iv: 'test-iv' }]);
+
+    const mockProvider = makeMockProvider({
+      name: 'hetzner',
+      locations: ['fsn1'],
+      locationMetadata: { fsn1: { name: 'Falkenstein', country: 'DE' } },
+      defaultLocation: 'fsn1',
+    });
+    const staticOfferings = await mockProvider.listInstanceOfferings({ preferApi: false });
+    mockProvider.listInstanceOfferings
+      .mockRejectedValueOnce(new Error('server_types timed out'))
+      .mockResolvedValueOnce(staticOfferings);
+    mockCreateProvider.mockReturnValue(mockProvider);
+
+    const res = await app.request('/api/providers/catalog', { method: 'GET' }, makeEnv());
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ProviderCatalogResponse;
+    expect(body.credentialSetupRequired).toBe(false);
+    expect(body.catalogs).toHaveLength(1);
+    expect(body.catalogs[0]).toMatchObject({
+      provider: 'hetzner',
+      credentialSource: 'user',
+      credentialId: 'credential-1',
+    });
+    expect(body.catalogs[0]!.offerings).toEqual(staticOfferings);
+    expect(mockProvider.listInstanceOfferings).toHaveBeenNthCalledWith(1, { preferApi: false });
+    expect(mockProvider.listInstanceOfferings).toHaveBeenNthCalledWith(2, { preferApi: true });
+    expect(mockProvider.listInstanceOfferings).toHaveBeenNthCalledWith(3, { preferApi: false });
+  });
+
   it('should use location id as fallback name when metadata is missing', async () => {
     createMockDB([{ provider: 'hetzner', encryptedToken: 'enc-token', iv: 'test-iv' }]);
 
@@ -393,5 +463,7 @@ describe('GET /api/providers/catalog', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as ProviderCatalogResponse;
     expect(body.catalogs).toEqual([]);
+    expect(body.credentialSetupRequired).toBe(false);
+    expect(body.credentialSetupMessage).toBeUndefined();
   });
 });

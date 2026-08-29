@@ -58,6 +58,20 @@ describe('provider instance offerings', () => {
     ]);
   });
 
+  it.each([
+    ['digitalocean', ['s-2vcpu-4gb', 's-4vcpu-8gb', 's-8vcpu-16gb']],
+    ['gcp', ['e2-medium', 'e2-standard-2', 'e2-standard-4']],
+    ['hetzner', ['cx23', 'cx33', 'cx43']],
+    ['infomaniak', ['a2-ram4-disk20-perf1', 'a4-ram8-disk20-perf1', 'a8-ram16-disk20-perf1']],
+    ['scaleway', ['DEV1-M', 'DEV1-XL', 'GP1-S']],
+    ['upcloud', ['2xCPU-4GB', '4xCPU-8GB', '8xCPU-16GB']],
+    ['vultr', ['vc2-2c-4gb', 'vc2-4c-8gb', 'vc2-6c-16gb']],
+  ] as const)('pins curated static provider-native SKUs for %s', (provider, expectedSkus) => {
+    expect(getProviderInstanceOfferings(provider).map((offering) => offering.instanceType)).toEqual(
+      expectedSkus
+    );
+  });
+
   it('projects static metadata into location-specific provider catalog offerings', () => {
     expect(
       getProviderCatalogOfferings('vultr', ['fra'], {

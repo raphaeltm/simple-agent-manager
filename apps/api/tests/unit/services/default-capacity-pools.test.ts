@@ -19,6 +19,8 @@ import {
 } from '../../../src/services/default-capacity-pools';
 import {
   capacityPlacementSnapshotForTaskStart,
+  PlacementResolutionError,
+  resolveCapacityAwareCredentialLookup,
   resolveTaskStartCapacityPoolSelection,
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
@@ -33,6 +35,10 @@ const candidateSnapshotMigrationSql = readFileSync(
 );
 const concreteOfferingMigrationSql = readFileSync(
   join(process.cwd(), 'src/db/migrations/0127_concrete_capacity_pool_offerings.sql'),
+  'utf8'
+);
+const candidateCatalogMetadataMigrationSql = readFileSync(
+  join(process.cwd(), 'src/db/migrations/0128_capacity_pool_candidate_catalog_metadata.sql'),
   'utf8'
 );
 
@@ -144,6 +150,7 @@ function createDb() {
   sqlite.exec(migrationSql);
   sqlite.exec(candidateSnapshotMigrationSql);
   sqlite.exec(concreteOfferingMigrationSql);
+  sqlite.exec(candidateCatalogMetadataMigrationSql);
   return drizzle(sqlite, { schema });
 }
 
@@ -786,15 +793,16 @@ describe('default capacity pool creation', () => {
       resourceRequirements: {},
     });
 
-    const mismatchSelection = await resolveTaskStartCapacityPoolSelection(
+    const providerMismatchSelection = await resolveTaskStartCapacityPoolSelection(
       providerMismatchDb as never,
       hetznerPlacement,
       { ensure: false }
     );
-    expect(mismatchSelection).toMatchObject({
-      scope: 'user',
-      candidates: [],
-    });
+    expect(providerMismatchSelection?.poolId).toBe('cap-pool-default:user:user-1');
+    expect(providerMismatchSelection?.candidates).toHaveLength(0);
+    expect(() =>
+      resolveCapacityAwareCredentialLookup(hetznerPlacement, providerMismatchSelection)
+    ).toThrow(PlacementResolutionError);
     providerMismatchSqlite?.close();
     sqlite = null;
 
@@ -1006,10 +1014,11 @@ describe('default capacity pool creation', () => {
     const ashSelection = await resolveTaskStartCapacityPoolSelection(db as never, ashPlacement, {
       ensure: false,
     });
-    expect(ashSelection).toMatchObject({
-      scope: 'user',
-      candidates: [],
-    });
+    expect(ashSelection?.poolId).toBe('cap-pool-default:user:user-1');
+    expect(ashSelection?.candidates).toHaveLength(0);
+    expect(() => resolveCapacityAwareCredentialLookup(ashPlacement, ashSelection)).toThrow(
+      PlacementResolutionError
+    );
   });
 
   it('disables pool availability when a backing credential is disabled', async () => {

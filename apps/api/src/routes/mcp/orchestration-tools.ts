@@ -14,8 +14,6 @@ import { generateBranchName } from '../../services/branch-name';
 import { capacityPlacementSnapshotDbValues } from '../../services/capacity-placement-snapshot';
 import {
   capacityPlacementSnapshotForTaskStart,
-  capacityPoolNoCandidatesMessage,
-  hasNoCapacityPoolCandidates,
   PlacementResolutionError,
   resolveCapacityAwareCredentialLookup,
   resolveCapacityAwareQuotaCredentialSource,
@@ -227,15 +225,17 @@ export async function handleRetrySubtask(
   }
 
   const { resolveCredentialSource } = await import('../../services/provider-credentials');
-  const capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement);
-  if (capacityPoolSelection && hasNoCapacityPoolCandidates(capacityPoolSelection)) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      capacityPoolNoCandidatesMessage(capacityPoolSelection)
-    );
+  let capacityPoolSelection;
+  let credentialLookup;
+  try {
+    capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement);
+    credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
+  } catch (err) {
+    if (err instanceof PlacementResolutionError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+    }
+    throw err;
   }
-  const credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
   const credResult = await resolveCredentialSource(
     db,
     credentialLookup.userId,
