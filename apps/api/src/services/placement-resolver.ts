@@ -319,7 +319,9 @@ export async function resolveTaskStartPlacementCredentialAttributionFromPlacemen
   let capacityPoolSelection: TaskStartCapacityPoolSelection | null;
   let credentialLookup: PlacementCredentialLookup;
   try {
-    capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement);
+    capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement, {
+      failOpen: false,
+    });
     credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
   } catch (err) {
     if (err instanceof PlacementResolutionError) {

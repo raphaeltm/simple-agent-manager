@@ -175,6 +175,7 @@ describe('GET /api/providers/catalog', () => {
     const res = await app.request('/api/providers/catalog', { method: 'GET' }, makeEnv());
 
     expect(res.status).toBe(200);
+    expect(res.headers.get('Cache-Control')).toBe('private, no-store');
     const body = (await res.json()) as ProviderCatalogResponse;
     expect(body.catalogs).toEqual([]);
     expect(body.credentialSetupRequired).toBe(true);

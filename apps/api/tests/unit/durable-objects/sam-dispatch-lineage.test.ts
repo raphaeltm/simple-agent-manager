@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   persistMessage: vi.fn(),
   resolveCredentialSource: vi.fn(),
+  resolveTaskStartPlacementCredentialAttribution: vi.fn(),
   resolveAgentProfile: vi.fn(),
   generateTaskTitle: vi.fn(),
   requireRepositoryOwnerAccess: vi.fn(),
@@ -30,6 +31,11 @@ vi.mock('../../../src/services/agent-profiles', () => ({
 
 vi.mock('../../../src/services/provider-credentials', () => ({
   resolveCredentialSource: mocks.resolveCredentialSource,
+}));
+
+vi.mock('../../../src/services/placement-resolver', () => ({
+  resolveTaskStartPlacementCredentialAttribution:
+    mocks.resolveTaskStartPlacementCredentialAttribution,
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
@@ -86,6 +92,55 @@ function selectRows(rows: unknown[]) {
         limit: vi.fn(() => Promise.resolve(rows)),
       })),
     })),
+  };
+}
+
+function buildPlacementResolution(input: {
+  userId: string;
+  projectId: string;
+  explicit?: {
+    vmSize?: string | null;
+    workspaceProfile?: string | null;
+    taskMode?: string | null;
+    agentType?: string | null;
+  };
+  inheritedCredentialAttribution?: {
+    userId?: string | null;
+    projectId?: string | null;
+    source?: 'user' | 'project' | 'platform' | null;
+  };
+}) {
+  const inherited = input.inheritedCredentialAttribution ?? {};
+  const credentialAttributionSource = inherited.source ?? 'user';
+  return {
+    placement: {
+      vmSize: input.explicit?.vmSize ?? 'small',
+      vmSizeSource: input.explicit?.vmSize ? 'task' : 'default',
+      vmLocation: 'fsn1',
+      explicitVmLocation: false,
+      provider: 'hetzner',
+      workspaceProfile: input.explicit?.workspaceProfile ?? 'full',
+      devcontainerConfigName: null,
+      taskMode: input.explicit?.taskMode ?? 'task',
+      agentType: input.explicit?.agentType ?? null,
+      resolvedReservation: {
+        cpuMillis: 1000,
+        memoryMb: 2048,
+        diskMb: 20480,
+        source: 'legacy-vm-size',
+      },
+    },
+    credential: { credentialSource: 'user', providerName: 'hetzner' },
+    capacityPoolSelection: null,
+    quotaCredentialSource: 'user',
+    capacityPlacementSnapshot: null,
+    effectiveProvider: 'hetzner',
+    credentialAttributionUserId: inherited.userId ?? input.userId,
+    credentialAttributionProjectId:
+      credentialAttributionSource === 'project'
+        ? (inherited.projectId ?? input.projectId)
+        : null,
+    credentialAttributionSource,
   };
 }
 
@@ -153,6 +208,10 @@ describe('SAM dispatch_task lineage propagation', () => {
     mocks.db.select.mockImplementationOnce(() => selectRows([project]));
     mocks.resolveAgentProfile.mockResolvedValue(null);
     mocks.resolveCredentialSource.mockResolvedValue({ credentialSource: 'user', providerName: 'hetzner' });
+    mocks.resolveTaskStartPlacementCredentialAttribution.mockImplementation(
+      (_db: unknown, input: Parameters<typeof buildPlacementResolution>[0]) =>
+        Promise.resolve(buildPlacementResolution(input)),
+    );
     mocks.generateTaskTitle.mockResolvedValue('Child task title');
     mocks.requireRepositoryOwnerAccess.mockResolvedValue(undefined);
     mocks.createSession.mockResolvedValue('session-1');
@@ -247,11 +306,16 @@ describe('SAM dispatch_task lineage propagation', () => {
         ctx,
       );
 
-      expect(mocks.resolveCredentialSource).toHaveBeenCalledWith(
+      expect(mocks.resolveTaskStartPlacementCredentialAttribution).toHaveBeenCalledWith(
         expect.anything(),
-        'member-a',
-        undefined,
-        'proj-1',
+        expect.objectContaining({
+          credentialProjectPolicy: 'current-project-unless-inherited',
+          inheritedCredentialAttribution: {
+            userId: 'member-a',
+            projectId: 'proj-1',
+            source: 'project',
+          },
+        }),
       );
       expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
         expect.anything(),

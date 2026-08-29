@@ -95,7 +95,7 @@ providersRoutes.get('/catalog', async (c) => {
           gcpCred.defaultZone
         );
       } else {
-        const config = buildProviderConfig(providerName, decryptedToken);
+        const config = buildProviderConfig(providerName, decryptedToken, c.env);
         provider = createProvider(config);
       }
       const offerings = await listProviderCatalogOfferings(providerName, provider);
@@ -149,6 +149,7 @@ providersRoutes.get('/catalog', async (c) => {
           credentialSetupMessage: CLOUD_PROVIDER_CREDENTIAL_SETUP_MESSAGE,
         }
       : { catalogs, credentialSetupRequired: false };
+  c.header('Cache-Control', 'private, no-store');
   return c.json(response);
 });
 

@@ -63,7 +63,7 @@ Selected direction: variant 1 for this PR. It keeps the existing query/mutation 
 - [x] Ensure add/remove UI state propagates into `DefaultCapacityPoolUpdateRequest.candidates` and route-specific API clients for project/user/installation scopes.
 - [x] Update component/unit tests for provider-native offering display, add/remove payloads, blocked credential states, user/admin/project route placement, and no secret text leakage.
 - [x] Update Playwright audits for project, user, and installation pool pages on desktop and mobile with stress data: many providers, 30+ offerings, long instance names, multiple regions, missing price, high price, unavailable/stale offerings, special characters, and a small mobile viewport.
-- [x] Run Playwright screenshot capture into `.codex/tmp/playwright-screenshots/`, review screenshots for overflow/clipping/readability, and record screenshot artifact paths/QC results.
+- [x] Run Playwright screenshot capture into `.tmp/playwright-screenshots/`, review screenshots for overflow/clipping/readability, and record screenshot artifact paths/QC results.
 - [x] Run focused and repo-level validation for task-owned changes before specialist review.
 
 ## Acceptance criteria
@@ -84,34 +84,34 @@ Selected direction: variant 1 for this PR. It keeps the existing query/mutation 
 
 ## UI Screenshot Evidence
 
-Playwright generated all screenshots under `.codex/tmp/playwright-screenshots/` from stress mocks with 36 candidate rows, many provider catalogs, long provider-native SKU/location strings, multiple regions, missing prices, high prices, unavailable/stale offerings, special characters, and the 375×667 mobile viewport. The directory is intentionally gitignored; these exact artifact paths were recorded for PR handoff.
+Playwright generated all screenshots under `.tmp/playwright-screenshots/` from stress mocks with 36 candidate rows, many provider catalogs, long provider-native SKU/location strings, multiple regions, missing prices, high prices, unavailable/stale offerings, special characters, and the 375×667 mobile viewport. The directory is intentionally gitignored; these exact artifact paths were recorded for PR handoff.
 
 User Infrastructure:
 
-- `.codex/tmp/playwright-screenshots/default-capacity-pools-user-section-desktop-1280x800--1280x800.png`
-- `.codex/tmp/playwright-screenshots/default-capacity-pools-user-section-iphone-se-375x667--375x667.png`
-- `.codex/tmp/playwright-screenshots/default-capacity-pools-user-edit-desktop-1280x800--catalog-results-1280x800.png`
-- `.codex/tmp/playwright-screenshots/default-capacity-pools-user-edit-iphone-se-375x667--catalog-results-375x667.png`
+- `.tmp/playwright-screenshots/default-capacity-pools-user-section-desktop-1280x800--1280x800.png`
+- `.tmp/playwright-screenshots/default-capacity-pools-user-section-iphone-se-375x667--375x667.png`
+- `.tmp/playwright-screenshots/default-capacity-pools-user-edit-desktop-1280x800--catalog-results-1280x800.png`
+- `.tmp/playwright-screenshots/default-capacity-pools-user-edit-iphone-se-375x667--catalog-results-375x667.png`
 
 Installation Infrastructure:
 
-- `.codex/tmp/playwright-screenshots/default-capacity-pools-installation-section-desktop-1280x800--1280x800.png`
-- `.codex/tmp/playwright-screenshots/default-capacity-pools-installation-section-iphone-se-375x667--375x667.png`
-- `.codex/tmp/playwright-screenshots/default-capacity-pools-installation-edit-desktop-1280x800--catalog-results-1280x800.png`
-- `.codex/tmp/playwright-screenshots/default-capacity-pools-installation-edit-iphone-se-375x667--catalog-results-375x667.png`
+- `.tmp/playwright-screenshots/default-capacity-pools-installation-section-desktop-1280x800--1280x800.png`
+- `.tmp/playwright-screenshots/default-capacity-pools-installation-section-iphone-se-375x667--375x667.png`
+- `.tmp/playwright-screenshots/default-capacity-pools-installation-edit-desktop-1280x800--catalog-results-1280x800.png`
+- `.tmp/playwright-screenshots/default-capacity-pools-installation-edit-iphone-se-375x667--catalog-results-375x667.png`
 
 Project Infrastructure:
 
-- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-normal-section-1280x800.png`
-- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-normal-section-375x667.png`
-- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-empty-section-1280x800.png`
-- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-empty-section-375x667.png`
-- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-many-section-1280x800.png`
-- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-many-section-375x667.png`
-- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-edit-catalog-results-focused-1280x800.png`
-- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-edit-catalog-results-focused-375x667.png`
-- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-edit-removed-focused-1280x800.png`
-- `.codex/tmp/playwright-screenshots/project-settings-default-compute-pool-edit-removed-focused-375x667.png`
+- `.tmp/playwright-screenshots/project-settings-default-compute-pool-normal-section-1280x800.png`
+- `.tmp/playwright-screenshots/project-settings-default-compute-pool-normal-section-375x667.png`
+- `.tmp/playwright-screenshots/project-settings-default-compute-pool-empty-section-1280x800.png`
+- `.tmp/playwright-screenshots/project-settings-default-compute-pool-empty-section-375x667.png`
+- `.tmp/playwright-screenshots/project-settings-default-compute-pool-many-section-1280x800.png`
+- `.tmp/playwright-screenshots/project-settings-default-compute-pool-many-section-375x667.png`
+- `.tmp/playwright-screenshots/project-settings-default-compute-pool-edit-catalog-results-focused-1280x800.png`
+- `.tmp/playwright-screenshots/project-settings-default-compute-pool-edit-catalog-results-focused-375x667.png`
+- `.tmp/playwright-screenshots/project-settings-default-compute-pool-edit-removed-focused-1280x800.png`
+- `.tmp/playwright-screenshots/project-settings-default-compute-pool-edit-removed-focused-375x667.png`
 
 QC result: manually reviewed representative desktop and mobile screenshots for all three scopes. The compute-pool sections show concrete SKU/provider/region/spec/price data, removed offerings move out of the active allowed list into removed/restorable cards, catalog filters and bulk actions remain readable on mobile, long strings wrap, and no compute-pool horizontal overflow or clipping was observed. The only clipped-overflow advisory emitted by the Playwright run was on the unrelated project Access settings page.
 

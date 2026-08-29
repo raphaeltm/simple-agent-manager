@@ -64,6 +64,29 @@ const createVM = vi.fn();
 const createProviderForUser = vi.fn();
 vi.mock('../../../src/services/provider-credentials', () => ({
   createProviderForUser: (...args: unknown[]) => createProviderForUser(...args),
+  exactProviderCredentialBindingFromPlacementSnapshot: (snapshot: {
+    capacityPoolId?: string | null;
+    placementCredentialSource?: string | null;
+    placementCredentialReference?: string | null;
+    placementCredentialVersion?: number | null;
+  }) => {
+    if (
+      !snapshot.capacityPoolId ||
+      !(
+        snapshot.placementCredentialSource === 'user' ||
+        snapshot.placementCredentialSource === 'project' ||
+        snapshot.placementCredentialSource === 'platform'
+      ) ||
+      !snapshot.placementCredentialReference
+    ) {
+      return null;
+    }
+    return {
+      credentialSource: snapshot.placementCredentialSource,
+      credentialReference: snapshot.placementCredentialReference,
+      credentialVersion: snapshot.placementCredentialVersion ?? null,
+    };
+  },
 }));
 
 vi.mock('../../../src/lib/secrets', () => ({

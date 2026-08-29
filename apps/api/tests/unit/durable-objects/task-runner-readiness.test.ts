@@ -92,4 +92,18 @@ describe('isNodeAgentReadyForWorkspaceDispatch', () => {
 
     expect(ready).toBe(false);
   });
+
+  it('honors a caller-supplied freshness skew budget', () => {
+    const waitStartedAt = Date.parse('2026-05-21T10:00:00.000Z');
+
+    const row = {
+      status: 'running',
+      health_status: 'healthy',
+      agent_ready_at: '2026-05-21T10:00:42.000Z',
+      last_heartbeat_at: '2026-05-21T10:00:05.000Z',
+    };
+
+    expect(isNodeAgentReadyForWorkspaceDispatch(row, waitStartedAt, 30_000)).toBe(false);
+    expect(isNodeAgentReadyForWorkspaceDispatch(row, waitStartedAt, 45_000)).toBe(true);
+  });
 });

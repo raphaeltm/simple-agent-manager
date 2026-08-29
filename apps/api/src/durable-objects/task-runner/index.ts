@@ -26,6 +26,7 @@
 import type { TaskExecutionStep } from '@simple-agent-manager/shared';
 import {
   DEFAULT_TASK_RUNNER_AGENT_POLL_INTERVAL_MS,
+  DEFAULT_TASK_RUNNER_AGENT_READY_FRESHNESS_SKEW_MS,
   DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS,
   DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS,
   DEFAULT_TASK_RUNNER_PROVISION_TIMEOUT_MS,
@@ -366,6 +367,7 @@ export class TaskRunner extends DurableObject<Env> {
       },
       getAgentPollIntervalMs: () => this.getAgentPollIntervalMs(),
       getAgentReadyTimeoutMs: () => this.getAgentReadyTimeoutMs(),
+      getAgentReadyFreshnessSkewMs: () => this.getAgentReadyFreshnessSkewMs(),
       getWorkspaceDispatchTimeoutMs: () => this.getWorkspaceDispatchTimeoutMs(),
       getWorkspaceDispatchBaseDelayMs: () => this.getWorkspaceDispatchBaseDelayMs(),
       getWorkspaceDispatchMaxDelayMs: () => this.getWorkspaceDispatchMaxDelayMs(),
@@ -494,6 +496,13 @@ export class TaskRunner extends DurableObject<Env> {
     return parseEnvInt(
       this.env.TASK_RUNNER_AGENT_READY_TIMEOUT_MS,
       DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS
+    );
+  }
+
+  private getAgentReadyFreshnessSkewMs(): number {
+    return parseEnvInt(
+      this.env.TASK_RUNNER_AGENT_READY_FRESHNESS_SKEW_MS,
+      DEFAULT_TASK_RUNNER_AGENT_READY_FRESHNESS_SKEW_MS
     );
   }
 

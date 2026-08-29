@@ -66,7 +66,7 @@ export async function handleNodeAgentReady(
     isNodeAgentReadyForWorkspaceDispatch(
       node,
       agentReadyStartedAt,
-      30_000,
+      rc.getAgentReadyFreshnessSkewMs(),
       rc.env.VM_AGENT_REQUIRED_VERSION
     )
   ) {

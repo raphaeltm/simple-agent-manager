@@ -18,6 +18,7 @@ interface FetchPaginatedHetznerListOptions {
   operation: HetznerListOperation;
   handlePage: (payload: unknown) => number | undefined;
   labelParts: string[];
+  maxPages?: number;
   context?: ProviderRequestContext;
 }
 
@@ -27,8 +28,9 @@ export async function fetchPaginatedHetznerList(
   throwIfProviderRequestAborted(options.context);
   const seenPages = new Set<number>();
   let page = 1;
+  const maxPages = options.maxPages ?? DEFAULT_HETZNER_MAX_LIST_PAGES;
 
-  for (let pageCount = 0; pageCount < DEFAULT_HETZNER_MAX_LIST_PAGES; pageCount += 1) {
+  for (let pageCount = 0; pageCount < maxPages; pageCount += 1) {
     throwIfProviderRequestAborted(options.context);
     recordHetznerListPage(seenPages, page, options.operation);
 
@@ -62,7 +64,7 @@ export async function fetchPaginatedHetznerList(
   throw new ProviderError(
     'hetzner',
     undefined,
-    `Hetzner ${options.operation} exceeded ${DEFAULT_HETZNER_MAX_LIST_PAGES} pages`,
+    `Hetzner ${options.operation} exceeded ${maxPages} pages`,
     {
       category: 'invalid_config',
     }

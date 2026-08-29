@@ -344,6 +344,8 @@ export interface HetznerProviderConfig {
   capacityRetryMaxAttempts?: number;
   /** Total time budget in ms for capacity retries (default: 300000 = 5 min) */
   capacityRetryBudgetMs?: number;
+  /** Maximum list pages fetched per Hetzner list operation. */
+  maxListPages?: number;
 }
 
 export interface ScalewayProviderConfig {

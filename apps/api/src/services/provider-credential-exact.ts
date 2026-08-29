@@ -16,7 +16,15 @@ export type ProviderResolutionResult = {
 export interface ExactProviderCredentialBinding {
   credentialSource: CredentialSource;
   credentialReference: string | null | undefined;
+  /** Audit-only until durable provider credential version history exists. */
   credentialVersion?: number | null;
+}
+
+export interface ProviderCredentialPlacementSnapshot {
+  capacityPoolId?: string | null;
+  placementCredentialSource?: string | null;
+  placementCredentialReference?: string | null;
+  placementCredentialVersion?: number | null;
 }
 
 type ParsedProviderCredentialReference =
@@ -48,6 +56,28 @@ function parseProviderCredentialReference(
     return id ? { kind: 'platformCredential', id } : null;
   }
   return null;
+}
+
+function isExactCredentialSource(value: string | null | undefined): value is CredentialSource {
+  return value === 'user' || value === 'project' || value === 'platform';
+}
+
+export function exactProviderCredentialBindingFromPlacementSnapshot(
+  snapshot: ProviderCredentialPlacementSnapshot
+): ExactProviderCredentialBinding | null {
+  if (
+    !snapshot.capacityPoolId ||
+    !isExactCredentialSource(snapshot.placementCredentialSource) ||
+    !snapshot.placementCredentialReference
+  ) {
+    return null;
+  }
+
+  return {
+    credentialSource: snapshot.placementCredentialSource,
+    credentialReference: snapshot.placementCredentialReference,
+    credentialVersion: snapshot.placementCredentialVersion ?? null,
+  };
 }
 
 export async function createProviderForExactCredential<TEnv extends Env>(

@@ -195,6 +195,7 @@ export function createProvider(config: ProviderConfig): Provider {
         {
           capacityRetryMaxAttempts: config.capacityRetryMaxAttempts,
           capacityRetryBudgetMs: config.capacityRetryBudgetMs,
+          maxListPages: config.maxListPages,
           logger: config.logger,
         }
       );

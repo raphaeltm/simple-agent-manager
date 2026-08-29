@@ -7,6 +7,7 @@ import {
   DEFAULT_CAPACITY_RETRY_INITIAL_DELAY_MS,
   DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS,
   DEFAULT_CAPACITY_RETRY_MAX_DELAY_MS,
+  DEFAULT_HETZNER_MAX_LIST_PAGES,
   DEFAULT_PLACEMENT_RETRY_DELAY_MS,
   HETZNER_API_URL,
   HETZNER_LOCATION_META,
@@ -90,6 +91,7 @@ export class HetznerProvider implements Provider {
   private readonly capacityRetryMaxDelayMs: number;
   private readonly capacityRetryMaxAttempts: number;
   private readonly capacityRetryBudgetMs: number;
+  private readonly maxListPages: number;
   private readonly logger: ProviderLogger;
 
   constructor(
@@ -121,6 +123,7 @@ export class HetznerProvider implements Provider {
     this.capacityRetryMaxAttempts = capacityRetryMaxAttempts ?? DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS;
     this.capacityRetryBudgetMs =
       runtimeOptions?.capacityRetryBudgetMs ?? DEFAULT_CAPACITY_RETRY_BUDGET_MS;
+    this.maxListPages = runtimeOptions?.maxListPages ?? DEFAULT_HETZNER_MAX_LIST_PAGES;
     this.logger = runtimeOptions?.logger ?? noopProviderLogger;
   }
 
@@ -372,6 +375,7 @@ export class HetznerProvider implements Provider {
         return validated.nextPage;
       },
       labelParts,
+      maxPages: this.maxListPages,
       context,
     });
 
@@ -459,6 +463,7 @@ export class HetznerProvider implements Provider {
           return validated.nextPage;
         },
         labelParts: [],
+        maxPages: this.maxListPages,
         context,
       });
 
@@ -732,6 +737,7 @@ export class HetznerProvider implements Provider {
         return validated.nextPage;
       },
       labelParts: this.toHetznerLabelSelectorParts(config.labels),
+      maxPages: this.maxListPages,
       context,
     });
 

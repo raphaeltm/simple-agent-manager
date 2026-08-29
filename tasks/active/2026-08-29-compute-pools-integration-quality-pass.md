@@ -19,7 +19,7 @@ Compute pools must be infrastructure-scoped resources backed by concrete provide
 
 ## Research findings
 
-- PR #1943 is open/draft, base `main`, head `sam/compute-pools-integration`, and current head is `1f5d9dfe7`.
+- PR #1943 is open/draft, base `main`, head `sam/compute-pools-integration`, and the latest pushed integration-pass head is `0c8d56f53`.
 - The local branch matches `origin/sam/compute-pools-integration`; a sibling worktree is checked out at `/workspaces/sam-compute-pools-integration`.
 - The PR diff is too large for `gh pr diff`; local `git diff origin/main...HEAD` must be used for inspection.
 - The PR touches backend migrations/schema, capacity-pool/default-pool services, provider catalog metadata, scheduler/provisioning placement, project/user/admin routes, web infrastructure settings, tests, preflight evidence tooling, and task records.
@@ -48,11 +48,33 @@ Compute pools must be infrastructure-scoped resources backed by concrete provide
 - [x] Verify scheduler/provisioning consumes concrete offerings through centralized placement resolver and legacy non-pool paths still fall back safely.
 - [x] Verify removed pool offerings exclude future placement/reuse without destroying existing running nodes.
 - [x] Run focused tests for shared capacity types, provider catalogs, default-pool services/routes, placement resolver, task runner/provisioning, workspace placement, and web compute-pool UI.
-- [ ] Run repo-level typecheck/lint/build/test as far as practical; document any remaining CI-only or time-bounded validation.
+- [x] Run repo-level typecheck/lint/build/test as far as practical; document any remaining CI-only or time-bounded validation.
 - [x] Inspect local and PR-linked Playwright screenshot evidence and note whether artifacts are missing or outdated after fixes.
-- [ ] Run required specialist reviews for touched areas and address blocking findings.
+- [x] Run required specialist reviews for touched areas and address blocking findings.
 - [ ] Update PR #1943 body/comment with integration findings, validation results, reviewer evidence, and explicit “no staging deploy performed in this pass.”
-- [ ] Push commits to `sam/compute-pools-integration`.
+- [x] Push commits to `sam/compute-pools-integration`.
+
+## Validation results
+
+- `pnpm install` passed with an unchanged lockfile.
+- Baseline `pnpm typecheck && pnpm lint` passed before fixes.
+- Focused API default-pool route/service tests passed: `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/default-capacity-pools.test.ts tests/unit/routes/capacity-pools-defaults.test.ts tests/unit/routes/project-capacity-pools.test.ts`.
+- Focused web compute-pool panel tests passed: `pnpm --filter @simple-agent-manager/web test -- tests/unit/components/default-capacity-pools-panel.test.tsx`.
+- Focused scheduler/provisioning tests passed after centralizing placement resolution, including task submit/run, MCP dispatch/orchestration, trigger submit, task runner node selection, size fallback, workspace placement, and node-selection integration tests.
+- Shared/provider/API seam tests passed for capacity-pool types, provider instance offerings/contracts, provider catalog route, D1 capacity-pool migration, VM admission-control races, and workspace recovery.
+- Focused Playwright audit passed after installing Chromium runtime dependencies: `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/default-capacity-pools-scopes-audit.spec.ts tests/playwright/project-settings-subpages-audit.spec.ts --project="iPhone SE (375x667)" --project="Desktop (1280x800)" -g "Default capacity pool|Infrastructure sub-page"` — 6 passed.
+- Local screenshot artifacts now exist under `.tmp/playwright-screenshots/`; representative mobile/desktop normal/edit/empty/error/many screenshots were visually inspected.
+- Full `pnpm lint` passed 13/13 Turbo tasks with existing warning-only diagnostics in `packages/acp-client` and unrelated web files.
+- Full `pnpm typecheck` passed 19/19 Turbo tasks.
+- Targeted review-fix API suite passed: `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/placement-resolver-fail-closed.test.ts tests/unit/services/nodes-delete.test.ts tests/unit/services/provision-node-rethrow.test.ts tests/unit/resolve-credential-source.test.ts tests/unit/services/provider-credentials.test.ts tests/unit/services/provider-credentials-edge-cases.test.ts tests/unit/routes/providers.test.ts tests/unit/services/trigger-submit-capacity-pools.test.ts tests/unit/task-runner-health-check.test.ts tests/unit/durable-objects/task-runner-readiness.test.ts tests/unit/node-provisioning.test.ts`.
+- Provider focused suite passed: `pnpm --filter @simple-agent-manager/providers test -- tests/unit/factory.test.ts tests/unit/hetzner-lifecycle.test.ts tests/unit/volume-operations.test.ts tests/unit/instance-offerings.test.ts tests/contract/provider-contract.test.ts`.
+- Web focused suite passed: `pnpm --filter @simple-agent-manager/web test -- tests/unit/lib/compute-pool-offerings.test.ts tests/unit/components/default-capacity-pools-panel.test.tsx`.
+- Full `pnpm test` initially exposed stale API mocks in `deployment-provisioning`, `sam-dispatch-lineage`, and `sam-dispatch-task-mode-visibility`; those tests now mock the centralized placement resolver explicitly and the focused rerun passed 3 files / 28 tests.
+- Full `pnpm test` passed after the test-harness fix: 21/21 Turbo tasks, including API 630 files / 8549 tests and web 296 files / 3545 tests.
+- Full `pnpm build` passed 9/9 Turbo tasks from cache.
+- `git diff --check` passed.
+- Specialist review findings addressed: Cloudflare exact teardown/provider-catalog cache; security CC project-attachment fail-closed fallback; env/docs missing runtime knobs; constitution hardcoded max-list/freshness-skew values; test vertical-slice/filter coverage; UI screenshot evidence and filter UX.
+- Staging deployment/verification was not performed because this task explicitly forbids staging deploys.
 
 ## Acceptance criteria
 

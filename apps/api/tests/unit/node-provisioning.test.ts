@@ -343,6 +343,15 @@ describe('handleNodeAgentReady', () => {
     expect(section).toContain('rc.getAgentReadyTimeoutMs()');
   });
 
+  it('uses configurable agent ready freshness skew', () => {
+    const section = doSource.slice(
+      doSource.indexOf('export async function handleNodeAgentReady('),
+      doSource.indexOf('export async function handleWorkspaceCreation(')
+    );
+    expect(section).toContain('rc.getAgentReadyFreshnessSkewMs()');
+    expect(section).not.toContain('30_000');
+  });
+
   it('checks health via D1 heartbeat query (not direct VM fetch)', () => {
     const section = doSource.slice(
       doSource.indexOf('export async function handleNodeAgentReady('),
@@ -514,16 +523,18 @@ describe('provider-aware node provisioning', () => {
       nodesSource.indexOf('async function deleteNodeResources')
     );
     expect(section).toContain('node.cloudProvider as CredentialProvider');
+    expect(section).toContain('exactProviderCredentialBindingFromPlacementSnapshot(node)');
     expect(section).toMatch(
-      /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId\s*\)/
+      /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId,\s*exactCredential\s*\)/
     );
   });
 
   it('deleteNodeResources uses node cloudProvider for credential lookup', () => {
     const section = nodesSource.slice(nodesSource.indexOf('async function deleteNodeResources'));
     expect(section).toContain('node.cloudProvider as CredentialProvider');
+    expect(section).toContain('exactProviderCredentialBindingFromPlacementSnapshot(node)');
     expect(section).toMatch(
-      /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId\s*\)/
+      /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId,\s*exactCredential\s*\)/
     );
   });
 

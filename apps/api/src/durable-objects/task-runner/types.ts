@@ -181,6 +181,7 @@ export interface TaskRunnerContext {
   /** Get configurable timeout/interval values */
   getAgentPollIntervalMs: () => number;
   getAgentReadyTimeoutMs: () => number;
+  getAgentReadyFreshnessSkewMs: () => number;
   getWorkspaceDispatchTimeoutMs: () => number;
   getWorkspaceDispatchBaseDelayMs: () => number;
   getWorkspaceDispatchMaxDelayMs: () => number;

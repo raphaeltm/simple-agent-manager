@@ -9,7 +9,7 @@ import {
   type CredentialProvider,
   type CredentialSource,
 } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -20,7 +20,7 @@ import { decrypt } from './encryption';
 import { getPlatformCloudCredential } from './platform-credentials';
 import {
   buildProviderConfig,
-  type HetznerCapacityRetryEnv,
+  type HetznerRuntimeEnv,
   parseGcpCredential,
 } from './provider-credential-codecs';
 import {
@@ -32,6 +32,7 @@ import {
 export type {
   DigitalOceanRuntimeEnv,
   HetznerCapacityRetryEnv,
+  HetznerRuntimeEnv,
   InfomaniakRuntimeEnv,
   UpCloudRuntimeEnv,
   VultrRuntimeEnv,
@@ -44,6 +45,7 @@ export {
   serializeGcpCredential,
   toGcpCredentialMetadata,
 } from './provider-credential-codecs';
+export { exactProviderCredentialBindingFromPlacementSnapshot } from './provider-credential-exact';
 
 export type { ExactProviderCredentialBinding, ProviderResolutionResult };
 
@@ -63,7 +65,9 @@ export async function getUserCloudProviderConfig(
 ): Promise<{ config: ProviderConfig; provider: CredentialProvider } | null> {
   const conditions = [
     eq(schema.credentials.userId, userId),
+    isNull(schema.credentials.projectId),
     eq(schema.credentials.credentialType, 'cloud-provider'),
+    eq(schema.credentials.isActive, true),
   ];
   if (targetProvider) {
     conditions.push(eq(schema.credentials.provider, targetProvider));
@@ -101,14 +105,16 @@ export async function getUserCloudProviderConfig(
  *
  * Resolution order (composable-credentials PRIMARY, old path FALLBACK):
  *   1. CC resolver: project-attachment → user-attachment → platform default
- *   2. If cc_* tables are empty, lazy-backfill from legacy tables, retry
- *   3. If CC still returns null, fall back to legacy single-table lookup
+ *   2. If a project-scoped CC attachment exists but cannot resolve, halt
+ *      rather than falling through to user/platform credentials
+ *   3. If cc_* tables are empty, lazy-backfill from legacy tables, retry
+ *   4. If CC still has no data, fall back to legacy single-table lookup
  */
 export async function createProviderForUser(
   db: ReturnType<typeof drizzle>,
   userId: string,
   encryptionKey: string,
-  env: Env & Partial<HetznerCapacityRetryEnv>,
+  env: Env & Partial<HetznerRuntimeEnv>,
   targetProvider?: CredentialProvider,
   projectId?: string | null,
   exactCredential?: ExactProviderCredentialBinding | null
@@ -155,7 +161,7 @@ async function createProviderFromDecryptedToken(
   credentialSource: CredentialSource,
   userId: string,
   projectId: string | null,
-  env: Env & Partial<HetznerCapacityRetryEnv>
+  env: Env & Partial<HetznerRuntimeEnv>
 ): Promise<ProviderResolutionResult> {
   if (providerName === 'gcp') {
     const gcpCred = parseGcpCredential(decryptedToken);
@@ -188,7 +194,7 @@ async function resolveProviderViaCC(
   db: ReturnType<typeof drizzle>,
   userId: string,
   encryptionKey: string,
-  env: Env & Partial<HetznerCapacityRetryEnv>,
+  env: Env & Partial<HetznerRuntimeEnv>,
   targetProvider: CredentialProvider,
   projectId?: string | null
 ): Promise<
@@ -197,7 +203,20 @@ async function resolveProviderViaCC(
   | undefined
 > {
   const consumer = { kind: 'compute' as const, provider: targetProvider };
+  const hasProjectAttachment = await hasProjectComputeCredentialAttachment(
+    db,
+    userId,
+    targetProvider,
+    projectId
+  );
   let resolved = await resolveForConsumer(db, userId, encryptionKey, consumer, projectId);
+
+  // Rule 28: once a project-scoped compute attachment exists, a null CC
+  // resolution represents an explicit halt or a broken scoped binding, not an
+  // invitation to fall through to personal/platform legacy credentials.
+  if (!resolved && hasProjectAttachment) {
+    return null;
+  }
 
   // A platform-only first resolution (isPlatform) must be treated like a miss:
   // an enabled platform default resolves non-null at Tier 3 on the first pass,
@@ -242,6 +261,30 @@ async function resolveProviderViaCC(
   return { provider: createProvider(config), providerName, credentialSource };
 }
 
+async function hasProjectComputeCredentialAttachment(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  targetProvider: CredentialProvider,
+  projectId?: string | null
+): Promise<boolean> {
+  if (!projectId) return false;
+
+  const rows = await db
+    .select({ id: schema.ccAttachments.id })
+    .from(schema.ccAttachments)
+    .where(
+      and(
+        eq(schema.ccAttachments.userId, userId),
+        eq(schema.ccAttachments.projectId, projectId),
+        eq(schema.ccAttachments.consumerKind, 'compute'),
+        eq(schema.ccAttachments.consumerTarget, targetProvider)
+      )
+    )
+    .limit(1);
+
+  return rows.length > 0;
+}
+
 /**
  * Legacy single-table provider resolution (fallback when CC has no data).
  */
@@ -249,7 +292,7 @@ async function createProviderForUserLegacy(
   db: ReturnType<typeof drizzle>,
   userId: string,
   encryptionKey: string,
-  env: Env & Partial<HetznerCapacityRetryEnv>,
+  env: Env & Partial<HetznerRuntimeEnv>,
   targetProvider?: CredentialProvider,
   projectId?: string | null
 ): Promise<{
@@ -257,10 +300,55 @@ async function createProviderForUserLegacy(
   providerName: CredentialProvider;
   credentialSource: CredentialSource;
 } | null> {
-  // 1. Try user's own credential first
+  // 1. Try a project-scoped credential only when the caller has already
+  // authorized this project context.
+  if (projectId) {
+    const projectConditions = [
+      eq(schema.credentials.projectId, projectId),
+      eq(schema.credentials.credentialType, 'cloud-provider'),
+    ];
+    if (targetProvider) {
+      projectConditions.push(eq(schema.credentials.provider, targetProvider));
+    }
+
+    const projectCreds = await db
+      .select()
+      .from(schema.credentials)
+      .where(and(...projectConditions))
+      .limit(targetProvider ? 1 : 2);
+
+    if (projectCreds.length > 1) return null;
+    const projectCred = projectCreds[0];
+    if (projectCred) {
+      if (!projectCred.isActive) return null;
+      const providerName = projectCred.provider as CredentialProvider;
+      const decryptedToken = await decrypt(
+        projectCred.encryptedToken,
+        projectCred.iv,
+        encryptionKey
+      );
+
+      if (providerName === 'gcp') {
+        const gcpCred = parseGcpCredential(decryptedToken);
+        const { getGcpAccessToken } = await import('./gcp-sts');
+        const tokenProvider = (context?: ProviderRequestContext) =>
+          getGcpAccessToken(`project:${projectId}:${userId}`, projectId, gcpCred, env, context);
+
+        const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
+        return { provider, providerName, credentialSource: 'project' };
+      }
+
+      const config = buildProviderConfig(providerName, decryptedToken, env);
+      return { provider: createProvider(config), providerName, credentialSource: 'project' };
+    }
+  }
+
+  // 2. Try user's own personal credential.
   const conditions = [
     eq(schema.credentials.userId, userId),
+    isNull(schema.credentials.projectId),
     eq(schema.credentials.credentialType, 'cloud-provider'),
+    eq(schema.credentials.isActive, true),
   ];
   if (targetProvider) {
     conditions.push(eq(schema.credentials.provider, targetProvider));
@@ -292,7 +380,7 @@ async function createProviderForUserLegacy(
     return { provider: createProvider(config), providerName, credentialSource: 'user' };
   }
 
-  // 2. Fall back to platform credential
+  // 3. Fall back to platform credential
   const platformCred = await getPlatformCloudCredential(db, encryptionKey, targetProvider);
   if (!platformCred) {
     return null;
@@ -346,7 +434,9 @@ export async function resolveCredentialSource(
   // 1. Check user's own credential for the target provider
   const userConditions = [
     eq(schema.credentials.userId, userId),
+    isNull(schema.credentials.projectId),
     eq(schema.credentials.credentialType, 'cloud-provider'),
+    eq(schema.credentials.isActive, true),
   ];
   if (targetProvider) {
     userConditions.push(eq(schema.credentials.provider, targetProvider));
@@ -429,7 +519,35 @@ async function resolveProjectComputeCredentialSource(
     .where(and(...conditions))
     .limit(targetProvider ? 1 : 2);
 
-  if (rows.length === 0) return undefined;
+  if (rows.length === 0) {
+    const legacyProjectConditions = [
+      eq(schema.credentials.projectId, projectId),
+      eq(schema.credentials.credentialType, 'cloud-provider'),
+    ];
+    if (targetProvider) {
+      legacyProjectConditions.push(eq(schema.credentials.provider, targetProvider));
+    }
+
+    const legacyRows = await db
+      .select({
+        provider: schema.credentials.provider,
+        isActive: schema.credentials.isActive,
+      })
+      .from(schema.credentials)
+      .where(and(...legacyProjectConditions))
+      .limit(targetProvider ? 1 : 2);
+
+    if (legacyRows.length === 0) return undefined;
+    if (legacyRows.length > 1) return null;
+
+    const legacyRow = legacyRows[0];
+    if (!legacyRow?.isActive) return null;
+
+    return {
+      credentialSource: 'project',
+      providerName: legacyRow.provider as CredentialProvider,
+    };
+  }
   if (rows.length > 1) return null;
 
   const row = rows[0];

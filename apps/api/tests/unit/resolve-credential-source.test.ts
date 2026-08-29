@@ -20,17 +20,18 @@ import { resolveCredentialSource } from '../../src/services/provider-credentials
 function makeCredentialSourceDbMock(
   projectRows: unknown[],
   userRows: unknown[],
-  platformRows: unknown[] = []
+  platformRows: unknown[] = [],
+  legacyProjectRows: unknown[] = []
 ) {
-  const resultSets = [projectRows, userRows, platformRows];
-  let selectCount = 0;
+  const nonJoinResultSets = [legacyProjectRows, userRows, platformRows];
+  let nonJoinSelectCount = 0;
 
-  const makeBuilder = () => ({
-    from: () => makeBuilder(),
-    innerJoin: () => makeBuilder(),
-    leftJoin: () => makeBuilder(),
-    where: () => makeBuilder(),
-    limit: async () => resultSets[selectCount++] ?? [],
+  const makeBuilder = (usesJoin = false): Record<string, unknown> => ({
+    from: () => makeBuilder(usesJoin),
+    innerJoin: () => makeBuilder(true),
+    leftJoin: () => makeBuilder(true),
+    where: () => makeBuilder(usesJoin),
+    limit: async () => (usesJoin ? projectRows : (nonJoinResultSets[nonJoinSelectCount++] ?? [])),
   });
 
   return {
@@ -58,6 +59,14 @@ describe('resolveCredentialSource', () => {
     // When targetProvider is provided, the function MUST filter by provider
     // to avoid the bypass where a Hetzner credential exempts Scaleway provisioning
     expect(providerCredsSource).toContain('eq(schema.credentials.provider, targetProvider)');
+  });
+
+  it('filters legacy personal credentials to active user-owned rows', () => {
+    const resolveFunc = providerCredsSource.substring(
+      providerCredsSource.indexOf('export async function resolveCredentialSource')
+    );
+    expect(resolveFunc).toContain('isNull(schema.credentials.projectId)');
+    expect(resolveFunc).toContain('eq(schema.credentials.isActive, true)');
   });
 
   it('checks platform credentials with isEnabled filter', () => {
@@ -163,6 +172,32 @@ describe('resolveCredentialSource project compute precedence', () => {
     await expect(
       resolveCredentialSource(db as never, 'member-a', 'hetzner', 'project-1')
     ).resolves.toEqual({ credentialSource: 'user', providerName: 'hetzner' });
+  });
+
+  it('uses an active legacy project-scoped cloud credential before personal credentials', async () => {
+    const db = makeCredentialSourceDbMock(
+      [],
+      [{ id: 'personal-cred', provider: 'hetzner' }],
+      [],
+      [{ id: 'legacy-project-cred', provider: 'hetzner', isActive: true }]
+    );
+
+    await expect(
+      resolveCredentialSource(db as never, 'member-a', 'hetzner', 'project-1')
+    ).resolves.toEqual({ credentialSource: 'project', providerName: 'hetzner' });
+  });
+
+  it('halts on an inactive legacy project-scoped credential instead of falling through', async () => {
+    const db = makeCredentialSourceDbMock(
+      [],
+      [{ id: 'personal-cred', provider: 'hetzner' }],
+      [{ id: 'platform-cred', provider: 'hetzner' }],
+      [{ id: 'legacy-project-cred', provider: 'hetzner', isActive: false }]
+    );
+
+    await expect(
+      resolveCredentialSource(db as never, 'member-a', 'hetzner', 'project-1')
+    ).resolves.toBeNull();
   });
 
   it('returns null when no project, personal, or platform credential exists', async () => {

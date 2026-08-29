@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => ({
   getTaskTitleConfig: vi.fn(),
   truncateTitle: vi.fn(),
   enrichMessageWithMentions: vi.fn(),
+  resolveTaskStartPlacementCredentialAttributionFromPlacement: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1');
@@ -75,6 +76,15 @@ vi.mock('../../../src/services/project-data', () => ({
 vi.mock('../../../src/services/provider-credentials', () => ({
   resolveCredentialSource: mocks.resolveCredentialSource,
 }));
+vi.mock('../../../src/services/placement-resolver', async (importActual) => {
+  const actual =
+    await importActual<typeof import('../../../src/services/placement-resolver')>();
+  return {
+    ...actual,
+    resolveTaskStartPlacementCredentialAttributionFromPlacement:
+      mocks.resolveTaskStartPlacementCredentialAttributionFromPlacement,
+  };
+});
 vi.mock('../../../src/services/task-title', () => ({
   generateTaskTitle: mocks.generateTaskTitle,
   getTaskTitleConfig: mocks.getTaskTitleConfig,
@@ -183,6 +193,20 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     mocks.resolveCredentialSource.mockResolvedValue({
       credentialSource: 'user',
       providerName: 'hetzner',
+    });
+    mocks.resolveTaskStartPlacementCredentialAttributionFromPlacement.mockResolvedValue({
+      placement: expect.anything(),
+      credential: {
+        credentialSource: 'user',
+        providerName: 'hetzner',
+      },
+      capacityPoolSelection: null,
+      quotaCredentialSource: 'user',
+      capacityPlacementSnapshot: null,
+      effectiveProvider: 'hetzner',
+      credentialAttributionUserId: 'user-1',
+      credentialAttributionProjectId: null,
+      credentialAttributionSource: 'user',
     });
     mocks.getTaskTitleConfig.mockReturnValue({});
     mocks.generateTaskTitle.mockResolvedValue('Task title');

@@ -75,13 +75,17 @@ function parseOptionalInt(value: string | undefined): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
-/** Env vars that tune Hetzner capacity retry behavior. */
-export interface HetznerCapacityRetryEnv {
+/** Env vars that tune Hetzner provider behavior. */
+export interface HetznerRuntimeEnv {
   HETZNER_CAPACITY_RETRY_INITIAL_DELAY_MS?: string;
   HETZNER_CAPACITY_RETRY_MAX_DELAY_MS?: string;
   HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS?: string;
   HETZNER_CAPACITY_RETRY_BUDGET_MS?: string;
+  HETZNER_MAX_LIST_PAGES?: string;
 }
+
+/** @deprecated Use HetznerRuntimeEnv. */
+export type HetznerCapacityRetryEnv = HetznerRuntimeEnv;
 
 /** Env vars that tune Vultr provider behavior (all optional; DEFAULT_VULTR_* apply otherwise). */
 export interface InfomaniakRuntimeEnv {
@@ -136,7 +140,7 @@ export interface DigitalOceanRuntimeEnv {
 export function buildProviderConfig(
   provider: CredentialProvider,
   decryptedToken: string,
-  providerEnv?: HetznerCapacityRetryEnv &
+  providerEnv?: HetznerRuntimeEnv &
     VultrRuntimeEnv &
     InfomaniakRuntimeEnv &
     DigitalOceanRuntimeEnv &
@@ -155,6 +159,7 @@ export function buildProviderConfig(
           providerEnv?.HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS
         ),
         capacityRetryBudgetMs: parseOptionalInt(providerEnv?.HETZNER_CAPACITY_RETRY_BUDGET_MS),
+        maxListPages: parseOptionalInt(providerEnv?.HETZNER_MAX_LIST_PAGES),
       };
     case 'vultr':
       return {

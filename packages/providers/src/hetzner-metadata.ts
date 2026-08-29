@@ -91,6 +91,7 @@ export const HETZNER_VOLUME_CAPABILITIES: VolumeCapabilities = {
 export interface HetznerProviderRuntimeOptions {
   capacityRetryMaxAttempts?: number;
   capacityRetryBudgetMs?: number;
+  maxListPages?: number;
   logger?: ProviderLogger;
 }
 

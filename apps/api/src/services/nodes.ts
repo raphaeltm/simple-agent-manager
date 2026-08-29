@@ -31,7 +31,10 @@ import {
   resolveInstallationId,
 } from './node-provider-labels';
 import { persistError } from './observability';
-import { createProviderForUser, type ExactProviderCredentialBinding } from './provider-credentials';
+import {
+  createProviderForUser,
+  exactProviderCredentialBindingFromPlacementSnapshot,
+} from './provider-credentials';
 import { destroyVmAgentContainer } from './vm-agent-container';
 import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
 
@@ -208,14 +211,7 @@ export async function provisionNode(
     node.credentialAttributionSource === 'project'
       ? (node.credentialAttributionProjectId ?? taskContext?.projectId ?? null)
       : null;
-  const exactCredential =
-    node.capacityPoolId && node.placementCredentialSource && node.placementCredentialReference
-      ? ({
-          credentialSource: node.placementCredentialSource as CredentialSource,
-          credentialReference: node.placementCredentialReference,
-          credentialVersion: node.placementCredentialVersion,
-        } satisfies ExactProviderCredentialBinding)
-      : null;
+  const exactCredential = exactProviderCredentialBindingFromPlacementSnapshot(node);
 
   try {
     const providerResult = await createProviderForUser(
@@ -560,13 +556,15 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
       node.credentialAttributionSource === 'project'
         ? (node.credentialAttributionProjectId ?? null)
         : null;
+    const exactCredential = exactProviderCredentialBindingFromPlacementSnapshot(node);
     const providerResult = await createProviderForUser(
       db,
       attributionUserId,
       getCredentialEncryptionKey(env),
       env,
       targetProvider,
-      attributionProjectId
+      attributionProjectId,
+      exactCredential
     );
     if (providerResult) {
       try {
@@ -574,6 +572,15 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
       } catch (err) {
         log.error('node_stop.delete_vm_failed', { nodeId, ...serializeError(err) });
       }
+    } else if (exactCredential) {
+      log.error('node_stop.exact_credential_missing_vm_orphaned', {
+        nodeId,
+        userId,
+        providerInstanceId: node.providerInstanceId,
+        cloudProvider: node.cloudProvider,
+        credentialSource: exactCredential.credentialSource,
+        credentialReference: exactCredential.credentialReference,
+      });
     }
   }
 
@@ -670,13 +677,15 @@ export async function deleteNodeResources(
       node.credentialAttributionSource === 'project'
         ? (node.credentialAttributionProjectId ?? null)
         : null;
+    const exactCredential = exactProviderCredentialBindingFromPlacementSnapshot(node);
     const providerResult2 = await createProviderForUser(
       db,
       attributionUserId,
       getCredentialEncryptionKey(env),
       env,
       targetProvider,
-      attributionProjectId
+      attributionProjectId,
+      exactCredential
     );
     if (providerResult2) {
       try {

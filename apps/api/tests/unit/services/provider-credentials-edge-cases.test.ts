@@ -8,6 +8,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import { decrypt } from '../../../src/services/encryption';
 import {
   buildProviderConfig,
@@ -19,6 +20,22 @@ import {
 
 vi.mock('../../../src/services/encryption', () => ({
   decrypt: vi.fn(),
+}));
+
+const composableMocks = vi.hoisted(() => ({
+  resolveForConsumer: vi.fn(),
+  lazyBackfillIfNeeded: vi.fn(),
+  getPlatformCloudCredential: vi.fn(),
+}));
+
+vi.mock('../../../src/services/composable-credentials/resolve', () => ({
+  resolveForConsumer: composableMocks.resolveForConsumer,
+}));
+vi.mock('../../../src/services/composable-credentials/lazy-backfill', () => ({
+  lazyBackfillIfNeeded: composableMocks.lazyBackfillIfNeeded,
+}));
+vi.mock('../../../src/services/platform-credentials', () => ({
+  getPlatformCloudCredential: composableMocks.getPlatformCloudCredential,
 }));
 
 const mockDecrypt = decrypt as ReturnType<typeof vi.fn>;
@@ -343,6 +360,75 @@ describe('createProviderForUser exact credential binding', () => {
       credentialSource: 'project',
     });
     expect(mockDecrypt).toHaveBeenCalledWith('ciphertext', 'iv', 'enc-key');
+  });
+});
+
+describe('createProviderForUser composable credential project halt', () => {
+  it('does not fall through to legacy user or platform credentials after a project CC halt', async () => {
+    mockDecrypt.mockClear();
+    composableMocks.resolveForConsumer.mockResolvedValueOnce(null);
+    composableMocks.lazyBackfillIfNeeded.mockResolvedValueOnce(false);
+    composableMocks.getPlatformCloudCredential.mockResolvedValueOnce({
+      decryptedToken: 'platform-token',
+      provider: 'hetzner',
+    });
+    mockDecrypt.mockResolvedValueOnce('legacy-user-token');
+
+    const selectedTables: unknown[] = [];
+    const legacyUserCredential = {
+      id: 'legacy-user-cloud-1',
+      userId: 'user-1',
+      projectId: null,
+      provider: 'hetzner',
+      credentialType: 'cloud-provider',
+      isActive: true,
+      encryptedToken: 'ciphertext',
+      iv: 'iv',
+    };
+    const db = {
+      select: vi.fn(() => {
+        let table: unknown;
+        const builder = {
+          from: (value: unknown) => {
+            table = value;
+            selectedTables.push(value);
+            return builder;
+          },
+          where: () => builder,
+          limit: () =>
+            Promise.resolve(
+              table === schema.ccAttachments
+                ? [{ id: 'inactive-project-compute-attachment' }]
+                : table === schema.credentials
+                  ? [legacyUserCredential]
+                  : []
+            ),
+        };
+        return builder;
+      }),
+    } as any;
+
+    const result = await createProviderForUser(
+      db,
+      'user-1',
+      'enc-key',
+      {} as any,
+      'hetzner',
+      'project-1'
+    );
+
+    expect(result).toBeNull();
+    expect(composableMocks.resolveForConsumer).toHaveBeenCalledWith(
+      db,
+      'user-1',
+      'enc-key',
+      { kind: 'compute', provider: 'hetzner' },
+      'project-1'
+    );
+    expect(composableMocks.lazyBackfillIfNeeded).not.toHaveBeenCalled();
+    expect(composableMocks.getPlatformCloudCredential).not.toHaveBeenCalled();
+    expect(selectedTables).toEqual([schema.ccAttachments]);
+    expect(mockDecrypt).not.toHaveBeenCalledWith('ciphertext', 'iv', 'enc-key');
   });
 });
 

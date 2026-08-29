@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   persistMessage: vi.fn(),
   resolveCredentialSource: vi.fn(),
+  resolveTaskStartPlacementCredentialAttribution: vi.fn(),
   resolveAgentProfile: vi.fn(),
   generateTaskTitle: vi.fn(),
   requireRepositoryOwnerAccess: vi.fn(),
@@ -23,6 +24,11 @@ vi.mock('../../../src/services/agent-profiles', () => ({
 
 vi.mock('../../../src/services/provider-credentials', () => ({
   resolveCredentialSource: mocks.resolveCredentialSource,
+}));
+
+vi.mock('../../../src/services/placement-resolver', () => ({
+  resolveTaskStartPlacementCredentialAttribution:
+    mocks.resolveTaskStartPlacementCredentialAttribution,
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
@@ -81,6 +87,45 @@ function selectRows(rows: unknown[]) {
   };
 }
 
+function buildPlacementResolution(input: {
+  userId: string;
+  projectId: string;
+  explicit?: {
+    vmSize?: string | null;
+    workspaceProfile?: string | null;
+    taskMode?: string | null;
+    agentType?: string | null;
+  };
+}) {
+  return {
+    placement: {
+      vmSize: input.explicit?.vmSize ?? 'small',
+      vmSizeSource: input.explicit?.vmSize ? 'task' : 'default',
+      vmLocation: 'fsn1',
+      explicitVmLocation: false,
+      provider: 'hetzner',
+      workspaceProfile: input.explicit?.workspaceProfile ?? 'full',
+      devcontainerConfigName: null,
+      taskMode: input.explicit?.taskMode ?? 'task',
+      agentType: input.explicit?.agentType ?? null,
+      resolvedReservation: {
+        cpuMillis: 1000,
+        memoryMb: 2048,
+        diskMb: 20480,
+        source: 'legacy-vm-size',
+      },
+    },
+    credential: { credentialSource: 'user', providerName: 'hetzner' },
+    capacityPoolSelection: null,
+    quotaCredentialSource: 'user',
+    capacityPlacementSnapshot: null,
+    effectiveProvider: 'hetzner',
+    credentialAttributionUserId: input.userId,
+    credentialAttributionProjectId: null,
+    credentialAttributionSource: 'user',
+  };
+}
+
 function buildCtx() {
   const statement = {
     bind: vi.fn().mockReturnThis(),
@@ -117,6 +162,10 @@ describe('SAM dispatch_task taskMode visibility', () => {
       credentialSource: 'user',
       providerName: 'hetzner',
     });
+    mocks.resolveTaskStartPlacementCredentialAttribution.mockImplementation(
+      (_db: unknown, input: Parameters<typeof buildPlacementResolution>[0]) =>
+        Promise.resolve(buildPlacementResolution(input)),
+    );
     mocks.generateTaskTitle.mockResolvedValue('Generated task title');
     mocks.requireRepositoryOwnerAccess.mockResolvedValue(undefined);
     mocks.createSession.mockResolvedValue('session-1');
