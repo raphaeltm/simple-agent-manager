@@ -19,7 +19,7 @@ Compute pools must be infrastructure-scoped resources backed by concrete provide
 
 ## Research findings
 
-- PR #1943 is open/draft, base `main`, head `sam/compute-pools-integration`, and the latest pushed integration-pass head is `0c8d56f53`.
+- PR #1943 is open/draft, base `main`, head `sam/compute-pools-integration`, and the latest pushed integration-pass head is `6270514b6`.
 - The local branch matches `origin/sam/compute-pools-integration`; a sibling worktree is checked out at `/workspaces/sam-compute-pools-integration`.
 - The PR diff is too large for `gh pr diff`; local `git diff origin/main...HEAD` must be used for inspection.
 - The PR touches backend migrations/schema, capacity-pool/default-pool services, provider catalog metadata, scheduler/provisioning placement, project/user/admin routes, web infrastructure settings, tests, preflight evidence tooling, and task records.
@@ -51,7 +51,7 @@ Compute pools must be infrastructure-scoped resources backed by concrete provide
 - [x] Run repo-level typecheck/lint/build/test as far as practical; document any remaining CI-only or time-bounded validation.
 - [x] Inspect local and PR-linked Playwright screenshot evidence and note whether artifacts are missing or outdated after fixes.
 - [x] Run required specialist reviews for touched areas and address blocking findings.
-- [ ] Update PR #1943 body/comment with integration findings, validation results, reviewer evidence, and explicit “no staging deploy performed in this pass.”
+- [x] Update PR #1943 body/comment with integration findings, validation results, reviewer evidence, and explicit “no staging deploy performed in this pass.”
 - [x] Push commits to `sam/compute-pools-integration`.
 
 ## Validation results
@@ -74,6 +74,7 @@ Compute pools must be infrastructure-scoped resources backed by concrete provide
 - Full `pnpm build` passed 9/9 Turbo tasks from cache.
 - `git diff --check` passed.
 - Specialist review findings addressed: Cloudflare exact teardown/provider-catalog cache; security CC project-attachment fail-closed fallback; env/docs missing runtime knobs; constitution hardcoded max-list/freshness-skew values; test vertical-slice/filter coverage; UI screenshot evidence and filter UX.
+- PR #1943 body was updated with integration findings, exact validation results, specialist review evidence, and an explicit note that no staging validation was performed in this pass.
 - Staging deployment/verification was not performed because this task explicitly forbids staging deploys.
 
 ## Acceptance criteria
