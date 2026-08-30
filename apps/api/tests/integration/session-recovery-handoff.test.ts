@@ -6,6 +6,7 @@ import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { getTaskRuntimeLiveness } from '../../src/scheduled/stuck-tasks';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
+import { isSessionRecoverySourceTaskGuardValid } from '../../src/services/session-recovery-authority';
 import { claimSessionSnapshotRecovery } from '../../src/services/session-snapshot-recovery-lifecycle';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
@@ -276,6 +277,119 @@ describe('session recovery handoff', () => {
         conclusive: false,
         reason: 'workspace_deleted_superseded_by_live_wake',
       });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('keeps ownership coherent through three guarded sleep/wake cycles', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedRecoveryFixture(sqlite);
+      const database = createSqliteD1(sqlite);
+
+      const firstWake = await expectWakingRecovery(database);
+      markRecoveryTaskRunning(sqlite, firstWake.taskId);
+      makeSnapshotClaimable(sqlite, '2026-08-15T00:02:00.000Z');
+
+      const secondWake = await expectWakingRecovery(database, {
+        taskId: firstWake.taskId,
+        projectId: 'project-1',
+        chatSessionId: 'chat-1',
+      });
+      markRecoveryTaskRunning(sqlite, secondWake.taskId);
+      makeSnapshotClaimable(sqlite, '2026-08-15T00:03:00.000Z');
+
+      const thirdWake = await expectWakingRecovery(database, {
+        taskId: secondWake.taskId,
+        projectId: 'project-1',
+        chatSessionId: 'chat-1',
+      });
+
+      expectTaskOwnership(sqlite, firstWake.taskId, {
+        status: 'in_progress',
+        chat_session_id: null,
+        superseded_by_task_id: secondWake.taskId,
+      });
+      expectTaskOwnership(sqlite, secondWake.taskId, {
+        status: 'in_progress',
+        chat_session_id: null,
+        superseded_by_task_id: thirdWake.taskId,
+      });
+      expect(
+        sqlite.prepare(`SELECT status, chat_session_id FROM tasks WHERE id = ?`).get(thirdWake.taskId)
+      ).toMatchObject({ status: 'queued', chat_session_id: 'chat-1' });
+
+      markWorkspaceDeleted(sqlite);
+      const secondVerdict = await getTaskRuntimeLiveness({ DATABASE: database } as Env, {
+        id: secondWake.taskId,
+        project_id: 'project-1',
+        workspace_id: 'workspace-1',
+      });
+      expect(secondVerdict.reason).toBe('workspace_deleted_superseded_by_live_wake');
+      expect(taskOwnership(sqlite, secondWake.taskId)).not.toMatchObject({ status: 'failed' });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('treats guarded and unguarded wake handoffs as the same durable ownership marker', async () => {
+    const guardedSqlite = new Database(':memory:');
+    const unguardedSqlite = new Database(':memory:');
+    try {
+      seedRecoveryFixture(guardedSqlite);
+      const guardedDb = createSqliteD1(guardedSqlite);
+      const guardedWake = await expectWakingRecovery(guardedDb, guard());
+
+      seedRecoveryFixture(unguardedSqlite);
+      const unguardedDb = createSqliteD1(unguardedSqlite);
+      const unguardedWake = await ensureSessionRecovery(
+        { DATABASE: unguardedDb } as Env,
+        'project-1',
+        'chat-1'
+      );
+      expect(unguardedWake).toMatchObject({ status: 'waking' });
+      if (unguardedWake.status !== 'waking') throw new Error('unguarded wake was not claimable');
+
+      expectTaskOwnership(guardedSqlite, 'parent-1', {
+        chat_session_id: null,
+        superseded_by_task_id: guardedWake.taskId,
+      });
+      expectTaskOwnership(unguardedSqlite, 'parent-1', {
+        chat_session_id: null,
+        superseded_by_task_id: unguardedWake.taskId,
+      });
+    } finally {
+      guardedSqlite.close();
+      unguardedSqlite.close();
+    }
+  });
+
+  it('keeps a cancelled superseded source wakeable when its exact successor is live', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedRecoveryFixture(sqlite);
+      const database = createSqliteD1(sqlite);
+
+      const firstWake = await expectWakingRecovery(database);
+      markRecoveryTaskRunning(sqlite, firstWake.taskId);
+      sqlite.prepare(`UPDATE tasks SET status = 'cancelled' WHERE id = 'parent-1'`).run();
+
+      await expect(isSessionRecoverySourceTaskGuardValid(database, guard())).resolves.toBe(true);
+
+      makeSnapshotClaimable(sqlite, '2026-08-15T00:02:00.000Z');
+      const drizzled = drizzle(database, { schema });
+      await expect(
+        claimSessionSnapshotRecovery(drizzled, {} as Env, {
+          chatSessionId: 'chat-1',
+          userId: 'user-1',
+          taskId: '01M064TGCLAIMCANCEL000000',
+          sourceTaskGuard: guard(),
+        })
+      ).resolves.toMatchObject({ status: 'claimed' });
+
+      sqlite.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`).run(firstWake.taskId);
+      await expect(isSessionRecoverySourceTaskGuardValid(database, guard())).resolves.toBe(false);
     } finally {
       sqlite.close();
     }

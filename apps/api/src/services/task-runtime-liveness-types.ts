@@ -84,10 +84,11 @@ export type ResumabilityProbeOutcome = 'ok' | 'error' | 'not_run';
 export type SupersessionProbeOutcome = 'ok' | 'error' | 'not_run';
 
 /**
- * How this task's recovery family relates to it.
- *  - `none`     — no newer wake successor exists; this task was never superseded.
- *  - `live`     — a newer, non-terminal successor owns the conversation right now.
- *  - `terminal` — this task WAS superseded, and the whole family has since ended.
+ * How this task's recovery ownership marker relates to it.
+ *  - `none`     — no exact wake successor marker exists; this task was never superseded.
+ *  - `live`     — a successor exists but has not accepted runtime ownership yet.
+ *  - `terminal` — this task WAS superseded and is safe to retire benignly because
+ *                 the exact successor is in_progress or later.
  *
  * `terminal` is deliberately distinct from `none`. The task is dead either way,
  * but it ended because its conversation moved on, not because its runtime died,

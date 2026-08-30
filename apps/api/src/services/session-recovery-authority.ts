@@ -1,6 +1,7 @@
 import { log } from '../lib/logger';
 
 const TERMINAL_TASK_STATUSES_SQL = "'completed', 'failed', 'cancelled'";
+const LIVE_TASK_STATUSES_SQL = "'queued', 'delegated', 'in_progress', 'awaiting_followup'";
 
 export interface SessionRecoverySourceTaskGuard {
   taskId: string;
@@ -32,7 +33,22 @@ export async function isSessionRecoverySourceTaskGuardValid(
          FROM tasks source
         WHERE source.id = ?
           AND source.project_id = ?
-          AND source.status NOT IN (${TERMINAL_TASK_STATUSES_SQL})
+          AND (
+            source.status NOT IN (${TERMINAL_TASK_STATUSES_SQL})
+            OR (
+              source.status = 'cancelled'
+              AND source.superseded_by_task_id IS NOT NULL
+              AND EXISTS (
+                SELECT 1
+                  FROM tasks marked_successor
+                 WHERE marked_successor.id = source.superseded_by_task_id
+                   AND marked_successor.project_id = source.project_id
+                   AND marked_successor.chat_session_id = ?
+                   AND marked_successor.triggered_by = 'session-recovery'
+                   AND marked_successor.status IN (${LIVE_TASK_STATUSES_SQL})
+              )
+            )
+          )
           AND (
             source.chat_session_id = ?
             OR EXISTS (
@@ -47,7 +63,13 @@ export async function isSessionRecoverySourceTaskGuardValid(
           )
         LIMIT 1`
     )
-    .bind(guard.taskId, guard.projectId, guard.chatSessionId, guard.chatSessionId)
+    .bind(
+      guard.taskId,
+      guard.projectId,
+      guard.chatSessionId,
+      guard.chatSessionId,
+      guard.chatSessionId
+    )
     .first<{ id: string }>();
   return Boolean(row);
 }

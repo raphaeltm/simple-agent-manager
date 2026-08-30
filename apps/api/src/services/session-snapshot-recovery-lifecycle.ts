@@ -30,11 +30,32 @@ import {
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
 const TERMINAL_TASK_STATUSES = ['completed', 'failed', 'cancelled'];
-
 function sourceTaskGuardCondition(db: Db, guard: SessionRecoverySourceTaskGuard | undefined) {
   if (!guard) return undefined;
   const sourceTask = alias(schema.tasks, 'recovery_source_task');
   const recoveryOwner = alias(schema.tasks, 'recovery_session_owner');
+  const markedSuccessor = alias(schema.tasks, 'recovery_marked_successor');
+  const sourceIsWakeable = or(
+    notInArray(sourceTask.status, TERMINAL_TASK_STATUSES),
+    and(
+      eq(sourceTask.status, 'cancelled'),
+      isNotNull(sourceTask.supersededByTaskId),
+      exists(
+        db
+          .select({ id: markedSuccessor.id })
+          .from(markedSuccessor)
+          .where(
+            and(
+              eq(markedSuccessor.id, sourceTask.supersededByTaskId),
+              eq(markedSuccessor.projectId, guard.projectId),
+              eq(markedSuccessor.chatSessionId, guard.chatSessionId),
+              eq(markedSuccessor.triggeredBy, 'session-recovery'),
+              notInArray(markedSuccessor.status, TERMINAL_TASK_STATUSES)
+            )
+          )
+      )
+    )
+  );
   return exists(
     db
       .select({ id: sourceTask.id })
@@ -43,7 +64,7 @@ function sourceTaskGuardCondition(db: Db, guard: SessionRecoverySourceTaskGuard 
         and(
           eq(sourceTask.id, guard.taskId),
           eq(sourceTask.projectId, guard.projectId),
-          notInArray(sourceTask.status, TERMINAL_TASK_STATUSES),
+          sourceIsWakeable,
           or(
             eq(sourceTask.chatSessionId, guard.chatSessionId),
             exists(
@@ -72,6 +93,28 @@ async function sourceTaskGuardIsValid(
 ): Promise<boolean> {
   if (!guard) return true;
   const recoveryOwner = alias(schema.tasks, 'recovery_session_owner');
+  const markedSuccessor = alias(schema.tasks, 'recovery_marked_successor');
+  const sourceIsWakeable = or(
+    notInArray(schema.tasks.status, TERMINAL_TASK_STATUSES),
+    and(
+      eq(schema.tasks.status, 'cancelled'),
+      isNotNull(schema.tasks.supersededByTaskId),
+      exists(
+        db
+          .select({ id: markedSuccessor.id })
+          .from(markedSuccessor)
+          .where(
+            and(
+              eq(markedSuccessor.id, schema.tasks.supersededByTaskId),
+              eq(markedSuccessor.projectId, guard.projectId),
+              eq(markedSuccessor.chatSessionId, guard.chatSessionId),
+              eq(markedSuccessor.triggeredBy, 'session-recovery'),
+              notInArray(markedSuccessor.status, TERMINAL_TASK_STATUSES)
+            )
+          )
+      )
+    )
+  );
   const row = await db
     .select({ id: schema.tasks.id })
     .from(schema.tasks)
@@ -79,7 +122,7 @@ async function sourceTaskGuardIsValid(
       and(
         eq(schema.tasks.id, guard.taskId),
         eq(schema.tasks.projectId, guard.projectId),
-        notInArray(schema.tasks.status, TERMINAL_TASK_STATUSES),
+        sourceIsWakeable,
         or(
           eq(schema.tasks.chatSessionId, guard.chatSessionId),
           exists(

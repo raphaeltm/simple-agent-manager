@@ -74,14 +74,15 @@ function seedTask(
     createdAt?: string;
     startedAt?: string | null;
     chatSessionId?: string | null;
+    supersededByTaskId?: string | null;
   } = {}
 ): void {
   sqlite
     .prepare(
       `INSERT INTO tasks (id, project_id, user_id, workspace_id, title, status, priority,
-                        triggered_by, recovery_source_task_id, chat_session_id, execution_step,
+                        triggered_by, recovery_source_task_id, chat_session_id, superseded_by_task_id, execution_step,
                         started_at, created_by, created_at, updated_at)
-     VALUES (?, ?, 'user-1', ?, 'task', ?, 0, ?, ?, ?, 'running', ?, 'user-1', ?, ?)`
+     VALUES (?, ?, 'user-1', ?, 'task', ?, 0, ?, ?, ?, ?, 'running', ?, 'user-1', ?, ?)`
     )
     .run(
       id,
@@ -91,6 +92,7 @@ function seedTask(
       o.triggeredBy ?? 'user',
       o.recoverySourceTaskId ?? null,
       o.chatSessionId === undefined ? null : o.chatSessionId,
+      o.supersededByTaskId ?? null,
       o.startedAt === undefined ? iso(-6 * 60 * 60 * 1000) : o.startedAt,
       o.createdAt ?? iso(-6 * 60 * 60 * 1000),
       iso(-6 * 60 * 60 * 1000)
@@ -105,9 +107,12 @@ function seedSuccessor(
     recoverySourceTaskId?: string;
     createdAt?: string;
     chatSessionId?: string | null;
+    predecessorId?: string;
+    markPredecessor?: boolean;
   } = {}
 ): void {
-  seedTask(o.id ?? SUCCESSOR_ID, {
+  const successorId = o.id ?? SUCCESSOR_ID;
+  seedTask(successorId, {
     status,
     triggeredBy: 'session-recovery',
     recoverySourceTaskId: o.recoverySourceTaskId ?? PREDECESSOR_ID,
@@ -115,6 +120,11 @@ function seedSuccessor(
     startedAt: iso(-60_000),
     chatSessionId: o.chatSessionId === undefined ? CHAT_SESSION_ID : o.chatSessionId,
   });
+  if (o.markPredecessor !== false) {
+    sqlite
+      .prepare(`UPDATE tasks SET superseded_by_task_id = ? WHERE id = ?`)
+      .run(successorId, o.predecessorId ?? PREDECESSOR_ID);
+  }
 }
 
 function env(
@@ -290,9 +300,9 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
   });
 
   /** A live successor still preserves the predecessor entirely — no write at all. */
-  it('leaves a predecessor untouched while its successor is still live', async () => {
+  it('leaves a predecessor untouched while its successor has not taken over yet', async () => {
     seedTask(PREDECESSOR_ID, { startedAt: iso(-6 * 60 * 60 * 1000) });
-    seedSuccessor('in_progress');
+    seedSuccessor('queued');
 
     await recoverStuckTasks(env());
 
@@ -308,9 +318,9 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
    * running container. A superseded predecessor holds no compute (its workspace
    * is already deleted), so the cost ceiling has nothing to bound.
    */
-  it('preserves a superseded predecessor past the ceiling while its successor is live', async () => {
+  it('preserves a superseded predecessor past the ceiling while its successor has not taken over yet', async () => {
     seedTask(PREDECESSOR_ID, { startedAt: iso(-30 * 60 * 60 * 1000) });
-    seedSuccessor('in_progress');
+    seedSuccessor('queued');
 
     await recoverStuckTasks(env());
 
@@ -319,10 +329,37 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
     expect(row.error_message).toBeNull();
   });
 
+  it('withholds the absolute-ceiling terminal verdict when supersession lookup fails', async () => {
+    seedTask(PREDECESSOR_ID, { startedAt: iso(-30 * 60 * 60 * 1000) });
+    seedSuccessor('completed');
+    const baseEnv = env();
+    const throwingDatabase = {
+      ...baseEnv.DATABASE,
+      prepare: (query: string) => {
+        if (query.includes('supersession_chain')) {
+          return {
+            bind: () => ({
+              first: () => Promise.reject(new Error('D1 supersession unavailable')),
+            }),
+          } as unknown as D1PreparedStatement;
+        }
+        return baseEnv.DATABASE.prepare(query);
+      },
+    } as D1Database;
+
+    const result = await recoverStuckTasks({ ...baseEnv, DATABASE: throwingDatabase });
+
+    expect(result.failedInProgress).toBe(0);
+    expect(statusOf(PREDECESSOR_ID)).toMatchObject({
+      status: 'in_progress',
+      error_message: null,
+    });
+  });
+
   /** Bounded escape: the moment that successor ends, the ceiling cancels it. */
   it('cancels the same predecessor once its successor finally ends', async () => {
     seedTask(PREDECESSOR_ID, { startedAt: iso(-30 * 60 * 60 * 1000) });
-    seedSuccessor('in_progress');
+    seedSuccessor('queued');
 
     await recoverStuckTasks(env());
     expect(statusOf(PREDECESSOR_ID).status).toBe('in_progress');
@@ -426,7 +463,7 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
     expect(statusOf(PREDECESSOR_ID).error_message).toContain('workspace_deleted');
   });
 
-  it('matches live successors through the root family when the predecessor is a middle link', async () => {
+  it('retires visible marker-chain predecessors and preserves a raced-in exact successor', async () => {
     const rootId = '01M064TG9QK8ZQ3XW0M6P7ROOT';
     const middleId = PREDECESSOR_ID;
     const siblingSuccessorId = '01M0SDBZXG5AEGZJ0JH2SIBLG';
@@ -434,6 +471,7 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
       startedAt: iso(-3 * 60 * 60 * 1000),
       createdAt: iso(-3 * 60 * 60 * 1000),
       chatSessionId: null,
+      supersededByTaskId: middleId,
     });
     seedTask(middleId, {
       startedAt: iso(-10 * 60 * 1000),
@@ -454,17 +492,19 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
             recoverySourceTaskId: rootId,
             createdAt: iso(-30_000),
             chatSessionId: CHAT_SESSION_ID,
+            predecessorId: middleId,
           });
         },
       })
     );
 
     expect(insertedSuccessor).toBe(true);
+    expect(statusOf(rootId).status).toBe('cancelled');
     expect(statusOf(middleId).status).toBe('in_progress');
     expect(statusOf(siblingSuccessorId).status).toBe('in_progress');
   });
 
-  it('preserves a recovery middle link when a live successor points directly at it', async () => {
+  it('cancels a recovery middle link benignly when an accepted successor points directly at it', async () => {
     const rootId = '01M064TG9QK8ZQ3XW0M6P7ROOT';
     seedTask(rootId, {
       status: 'failed',
@@ -487,10 +527,11 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
 
     const result = await recoverStuckTasks(env());
 
-    expect(result.failedInProgress).toBe(0);
+    expect(result.failedInProgress).toBe(1);
     expect(statusOf(PREDECESSOR_ID)).toMatchObject({
-      status: 'in_progress',
-      error_message: null,
+      status: 'cancelled',
+      error_message:
+        'Superseded by a later session wake; the conversation continued in a replacement task and has since ended.',
     });
     expect(statusOf(SUCCESSOR_ID).status).toBe('in_progress');
   });
