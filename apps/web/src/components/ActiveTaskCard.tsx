@@ -29,9 +29,46 @@ function getStepLabel(task: DashboardTask): string | null {
 }
 
 function getTaskGlowClass(task: DashboardTask): string {
-  if (task.status === 'failed') return 'shadow-[0_0_0_1px_rgba(239,68,68,0.28),0_0_24px_rgba(239,68,68,0.18)]';
-  if (task.status === 'in_progress' || task.isActive) return 'animate-[task-running-glow_2.4s_ease-in-out_infinite]';
+  if (task.status === 'failed')
+    return 'shadow-[0_0_0_1px_rgba(239,68,68,0.28),0_0_24px_rgba(239,68,68,0.18)]';
+  if (task.agentActivityState === 'working' && (task.status === 'in_progress' || task.isActive)) {
+    return 'animate-[task-running-glow_2.4s_ease-in-out_infinite]';
+  }
   return '';
+}
+
+function getActivityIndicator(task: DashboardTask): {
+  label: string;
+  dotClassName: string;
+  textClassName: string;
+} {
+  switch (task.agentActivityState) {
+    case 'sleeping':
+      return {
+        label: 'Sleeping',
+        dotClassName: 'bg-info-fg',
+        textClassName: 'text-info-fg',
+      };
+    case 'working':
+      return {
+        label: task.isActive ? 'Active' : 'Working',
+        dotClassName: 'bg-success-fg',
+        textClassName: 'text-fg-muted',
+      };
+    case 'superseded':
+      return {
+        label: 'Superseded',
+        dotClassName: 'bg-fg-muted',
+        textClassName: 'text-fg-muted',
+      };
+    case 'awake-idle':
+    default:
+      return {
+        label: 'Idle',
+        dotClassName: 'bg-fg-muted',
+        textClassName: 'text-fg-muted',
+      };
+  }
 }
 
 export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
@@ -43,6 +80,7 @@ export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
 
   const stepLabel = getStepLabel(task);
   const glowClass = getTaskGlowClass(task);
+  const activity = getActivityIndicator(task);
 
   return (
     <div
@@ -58,18 +96,19 @@ export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
         }
       }}
     >
-      <Card variant="glass" className={`py-3 px-[clamp(var(--sam-space-3),3vw,var(--sam-space-4))] hover:border-border-default transition-colors ${glowClass}`}>
+      <Card
+        variant="glass"
+        className={`py-3 px-[clamp(var(--sam-space-3),3vw,var(--sam-space-4))] hover:border-border-default transition-colors ${glowClass}`}
+      >
         {/* Top row: status + activity indicator */}
         <div className="flex items-center justify-between gap-2 mb-2">
           <StatusBadge status={task.status} />
           <div className="flex items-center gap-1.5">
             <span
               aria-hidden="true"
-              className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${task.isActive ? 'bg-success-fg' : 'bg-fg-muted'}`}
+              className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${activity.dotClassName}`}
             />
-            <span className="sam-type-caption text-fg-muted">
-              {task.isActive ? 'Active' : 'Idle'}
-            </span>
+            <span className={`sam-type-caption ${activity.textClassName}`}>{activity.label}</span>
           </div>
         </div>
 

@@ -90,6 +90,18 @@ const LEGACY_ALLOWED_DUPLICATE_FILES = new Map<string, Map<string, Set<string>>>
           '0121_project_data_storage_growth_history.sql',
         ]),
       ],
+      // PR #1970's task supersession marker was applied to staging on 2026-08-30
+      // as d1_migrations id 156 after #1969 had applied
+      // 0130_repair_running_agent_sessions_deleted_workspaces.sql as id 155.
+      // Wrangler tracks exact filenames, so renumbering this branch migration would
+      // replay ALTER TABLE tasks ADD COLUMN superseded_by_task_id against staging.
+      [
+        '0130',
+        new Set([
+          '0130_repair_running_agent_sessions_deleted_workspaces.sql',
+          '0130_task_supersession_marker.sql',
+        ]),
+      ],
     ]),
   ],
 ]);

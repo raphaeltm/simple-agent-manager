@@ -856,6 +856,8 @@ export const tasks = sqliteTable(
     chatSessionId: text('chat_session_id'),
     /** Soft link from a sleeping-session recovery task to the live task whose conversation it resumes. */
     recoverySourceTaskId: text('recovery_source_task_id'),
+    /** Soft link from a superseded predecessor to the recovery task that took over its conversation. */
+    supersededByTaskId: text('superseded_by_task_id'),
     /** Null for top-level tasks; set for agent-dispatched sub-tasks (dispatch depth > 0). No FK — parent may be in another project's scope. */
     parentTaskId: text('parent_task_id'),
     /** Null until a workspace is assigned during task execution. Set by TaskRunner DO. */
@@ -966,6 +968,9 @@ export const tasks = sqliteTable(
     recoverySourceTaskIdx: index('idx_tasks_recovery_source_task_id')
       .on(table.recoverySourceTaskId)
       .where(sql`recovery_source_task_id IS NOT NULL`),
+    supersededByTaskIdx: index('idx_tasks_superseded_by_task_id')
+      .on(table.supersededByTaskId)
+      .where(sql`superseded_by_task_id IS NOT NULL`),
     claimedWarmNodeUnique: uniqueIndex('idx_tasks_claimed_warm_node_unique')
       .on(table.claimedWarmNodeId)
       .where(
