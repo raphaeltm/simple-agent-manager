@@ -160,13 +160,30 @@ export function SessionToolRail({
         {compact ? <ChevronLeft size={13} /> : <ChevronRight size={13} />}
       </button>
 
-      <div className="min-h-0 flex-1 overflow-y-auto py-1">
+      {/*
+        A fully-provisioned active session offers ten tools. On a short mobile viewport —
+        especially with the wake-progress and reconnect banners stacked above — that does
+        not fit, and a silently scrolling rail would hide Complete and Details below a
+        fold the user has no reason to suspect. The list is a real scroller (never
+        `overflow: hidden`), and the mask fades whatever content reaches the bottom edge,
+        which reads as "there is more" exactly when there is. When everything fits, the
+        faded band is empty and the mask has no visible effect.
+      */}
+      <div
+        className="min-h-0 flex-1 overflow-y-auto py-1"
+        style={{
+          maskImage: 'linear-gradient(to bottom, black calc(100% - 16px), transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, black calc(100% - 16px), transparent 100%)',
+        }}
+      >
         {actions.map((action, index) => {
           const Icon = action.icon;
           const color =
             action.tone === 'success' ? 'var(--sam-color-success)' : 'var(--sam-color-fg-muted)';
+          // Shorter rows on mobile so the full tool set clears the fold more often.
+          const iconRowHeight = isMobile ? 'h-9' : 'h-10';
           const buttonClass = `relative flex w-full items-center border-none bg-transparent transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent-primary ${
-            compact ? 'h-10 justify-center px-0' : 'h-9 gap-2.5 px-2.5 text-left'
+            compact ? `${iconRowHeight} justify-center px-0` : 'h-9 gap-2.5 px-2.5 text-left'
           } ${action.disabled ? 'cursor-default opacity-60' : 'cursor-pointer'}`;
 
           return (

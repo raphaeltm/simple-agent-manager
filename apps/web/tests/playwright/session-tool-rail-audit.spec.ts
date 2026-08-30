@@ -427,6 +427,22 @@ test.describe('Session tool rail — layout', () => {
     await capture(page, 'tool-rail-empty-conversation');
   });
 
+  test('every tool stays reachable when the rail overflows', async ({ page }) => {
+    await openChat(page, { state: 'active' });
+
+    // Ten tools on a short viewport can exceed the rail's height. The list must be a
+    // real scroller, not clipped — otherwise Complete and Details become unreachable.
+    const list = page.getByTestId('session-tool-rail').locator('> div').last();
+    const overflowY = await list.evaluate((el) => getComputedStyle(el).overflowY);
+    expect(['auto', 'scroll']).toContain(overflowY);
+
+    for (const id of ['files', 'complete', 'details']) {
+      const tool = page.getByTestId(`session-tool-${id}`);
+      await tool.scrollIntoViewIfNeeded();
+      await expect(tool).toBeInViewport();
+    }
+  });
+
   test('does not collide with the scroll-to-bottom button', async ({ page }) => {
     await openChat(page, { state: 'active' });
     const scrollBtn = page.getByRole('button', { name: 'Scroll to bottom' });
