@@ -295,6 +295,10 @@ func (c *Config) Validate() error {
 		{"JWKS_FETCH_TIMEOUT", c.JWKSFetchTimeout},
 		{EnvDefaultPSIPollIntervalSeconds, c.PSIPollInterval},
 		{EnvDefaultContainerStatsIntervalSeconds, c.ContainerStatsInterval},
+		{EnvDefaultEvictionDebounceSeconds, c.EvictionDebounceWindow},
+		{EnvDefaultEvictionSnapshotTimeoutSeconds, c.EvictionSnapshotTimeout},
+		{EnvDefaultEvictionDockerStopTimeoutSeconds, c.EvictionDockerStopTimeout},
+		{EnvDefaultEvictionResolveTimeoutSeconds, c.EvictionResolveTimeout},
 	}
 	for _, timeout := range requiredTimeouts {
 		if timeout.value <= 0 {

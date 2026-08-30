@@ -566,3 +566,7 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `DEFAULT_PSI_MEMORY_SOME_CRITICAL_THRESHOLD` — Critical threshold for memory `some` PSI `avg10`/`avg60` (default: 50.0)
 - `DEFAULT_PSI_MEMORY_FULL_WARNING_THRESHOLD` — Warning threshold for memory `full` PSI `avg10`/`avg60` (default: 10.0)
 - `DEFAULT_PSI_MEMORY_FULL_CRITICAL_THRESHOLD` — Critical threshold for memory `full` PSI `avg10`/`avg60` (default: 25.0)
+- `DEFAULT_EVICTION_DEBOUNCE_SECONDS` — Duplicate container eviction debounce window, in seconds (default: 30)
+- `DEFAULT_EVICTION_SNAPSHOT_TIMEOUT_SECONDS` — Deadline for pre-stop eviction snapshot capture, in seconds (default: 120)
+- `DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS` — Grace period passed to `docker stop --time` during eviction, in seconds (default: 10)
+- `DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS` — Deadline for resolving a pressured Docker container to a workspace before eviction, in seconds (default: 5)

@@ -226,6 +226,10 @@ func Load() (*Config, error) {
 		PSIMemorySomeCriticalThreshold: getEnvFloat(EnvDefaultPSIMemorySomeCriticalThreshold, DefaultPSIMemorySomeCriticalThreshold),
 		PSIMemoryFullWarningThreshold:  getEnvFloat(EnvDefaultPSIMemoryFullWarningThreshold, DefaultPSIMemoryFullWarningThreshold),
 		PSIMemoryFullCriticalThreshold: getEnvFloat(EnvDefaultPSIMemoryFullCriticalThreshold, DefaultPSIMemoryFullCriticalThreshold),
+		EvictionDebounceWindow:         time.Duration(getEnvInt(EnvDefaultEvictionDebounceSeconds, DefaultEvictionDebounceSeconds)) * time.Second,
+		EvictionSnapshotTimeout:        time.Duration(getEnvInt(EnvDefaultEvictionSnapshotTimeoutSeconds, DefaultEvictionSnapshotTimeoutSeconds)) * time.Second,
+		EvictionDockerStopTimeout:      time.Duration(getEnvInt(EnvDefaultEvictionDockerStopTimeoutSeconds, DefaultEvictionDockerStopTimeoutSeconds)) * time.Second,
+		EvictionResolveTimeout:         time.Duration(getEnvInt(EnvDefaultEvictionResolveTimeoutSeconds, DefaultEvictionResolveTimeoutSeconds)) * time.Second,
 
 		// Git integration settings - configurable per constitution principle XI
 		GitCredentialTimeout:     getEnvDuration("GIT_CREDENTIAL_TIMEOUT", DefaultGitCredentialTimeout),

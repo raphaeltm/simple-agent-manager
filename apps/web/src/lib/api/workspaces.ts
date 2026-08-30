@@ -178,6 +178,7 @@ function parseWorkspacePortsState(value: unknown): WorkspacePortsState {
     case 'not_ready':
     case 'sleeping':
     case 'stopped':
+    case 'evicted':
     case 'deleted':
     case 'gone':
     case 'error':

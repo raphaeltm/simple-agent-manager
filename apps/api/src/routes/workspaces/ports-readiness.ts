@@ -20,7 +20,8 @@ export function isWorkspacePortsListRequest(
 }
 
 export function workspacePortsStateForStatus(status: WorkspaceStatus): WorkspacePortsState {
-  if (status === 'sleeping' || status === 'stopped' || status === 'deleted') return status;
+  if (status === 'sleeping' || status === 'stopped' || status === 'evicted' || status === 'deleted')
+    return status;
   if (status === 'error') return 'error';
   return 'not_ready';
 }

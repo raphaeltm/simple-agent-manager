@@ -1,4 +1,8 @@
-import type { DetectedPort, WorkspacePortsState, WorkspaceStatus } from '@simple-agent-manager/shared';
+import type {
+  DetectedPort,
+  WorkspacePortsState,
+  WorkspaceStatus,
+} from '@simple-agent-manager/shared';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -16,6 +20,7 @@ import { useQueryScope } from './useQueryScope';
 const TERMINAL_PORT_STATES = new Set<WorkspacePortsState>([
   'sleeping',
   'stopped',
+  'evicted',
   'deleted',
   'gone',
   'error',
@@ -30,7 +35,9 @@ export function useWorkspacePorts(
 ) {
   const queryScope = useQueryScope();
   const workspaceOperational = isWorkspaceOperational(workspaceStatus);
-  const enabled = Boolean(workspaceUrl && workspaceId && token && workspaceOperational && queryScope);
+  const enabled = Boolean(
+    workspaceUrl && workspaceId && token && workspaceOperational && queryScope
+  );
   const lastLoggedErrorAtRef = useRef(0);
   const lastDataAtRef = useRef(0);
   const [lastReadyPorts, setLastReadyPorts] = useState<DetectedPort[]>([]);

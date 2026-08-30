@@ -94,6 +94,7 @@ type sessionSnapshotHandlerInput struct {
 	runtimeName   string
 	runtime       *WorkspaceRuntime
 	callbackToken string
+	acpSessionID  string
 	agentType     string
 	background    bool
 }
@@ -130,17 +131,24 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 	// control plane provides on the restore request so chat replies and
 	// snapshot callbacks can authenticate after a wake.
 	if wsToken := strings.TrimSpace(body.WorkspaceCallbackToken); wsToken != "" {
-		s.upsertWorkspaceRuntime(workspaceID, "", "", "", wsToken)
+		s.upsertWorkspaceRuntime(workspaceID, "", "", "", wsToken, workspaceRuntimeOpts{ChatSessionID: body.ChatSessionID})
 	}
 	runtime, ok := s.getWorkspaceRuntime(workspaceID)
 	if !ok {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return nil, false
 	}
+	s.recordWorkspaceChatSessionID(workspaceID, body.ChatSessionID)
 	callbackToken := s.callbackTokenForWorkspace(workspaceID)
 	if callbackToken == "" {
 		writeError(w, http.StatusConflict, "workspace callback token unavailable")
 		return nil, false
+	}
+	acpSessionID := ""
+	if s.agentSessions != nil {
+		if session, exists := s.agentSessions.Get(workspaceID, sessionID); exists {
+			acpSessionID = strings.TrimSpace(session.AcpSessionID)
+		}
 	}
 	return &sessionSnapshotHandlerInput{
 		workspaceID:   workspaceID,
@@ -149,9 +157,30 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 		runtimeName:   body.Runtime,
 		runtime:       runtime,
 		callbackToken: callbackToken,
+		acpSessionID:  acpSessionID,
 		agentType:     strings.TrimSpace(body.AgentType),
 		background:    body.Background,
 	}, true
+}
+
+func (s *Server) recordWorkspaceChatSessionID(workspaceID, chatSessionID string) {
+	chatSessionID = strings.TrimSpace(chatSessionID)
+	if workspaceID == "" || chatSessionID == "" {
+		return
+	}
+
+	var updated *WorkspaceRuntime
+	s.workspaceMu.Lock()
+	if rt, ok := s.workspaces[workspaceID]; ok && rt != nil && strings.TrimSpace(rt.ChatSessionID) != chatSessionID {
+		rt.ChatSessionID = chatSessionID
+		rt.UpdatedAt = nowUTC()
+		copy := *rt
+		updated = &copy
+	}
+	s.workspaceMu.Unlock()
+	if updated != nil && updated.Repository != "" {
+		s.persistWorkspaceMetadata(updated)
+	}
 }
 
 func (s *Server) handleHibernateAgentSession(w http.ResponseWriter, r *http.Request) {
@@ -221,7 +250,29 @@ func (s *Server) prepareFreshSessionAfterDegradedRestore(workspaceID, sessionID 
 	})
 }
 
-func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *WorkspaceRuntime, sessionID, chatSessionID, runtimeName, agentType, callbackToken string) (map[string]interface{}, error) {
+func (s *Server) populateSnapshotHarnessIdentity(manifest *snapshotManifest, workspaceID, sessionID, capturedAcpSessionID, capturedAgentType string) {
+	if manifest == nil {
+		return
+	}
+	if s.agentSessions != nil {
+		if session, exists := s.agentSessions.Get(workspaceID, sessionID); exists {
+			if acpSessionID := strings.TrimSpace(session.AcpSessionID); acpSessionID != "" {
+				manifest.AcpSessionID = acpSessionID
+			}
+			if agentType := strings.TrimSpace(session.AgentType); agentType != "" {
+				manifest.AgentType = agentType
+			}
+		}
+	}
+	if strings.TrimSpace(manifest.AcpSessionID) == "" {
+		manifest.AcpSessionID = strings.TrimSpace(capturedAcpSessionID)
+	}
+	if strings.TrimSpace(manifest.AgentType) == "" {
+		manifest.AgentType = strings.TrimSpace(capturedAgentType)
+	}
+}
+
+func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *WorkspaceRuntime, sessionID, chatSessionID, runtimeName, acpSessionID, agentType, callbackToken string) (map[string]interface{}, error) {
 	prepare, err := s.prepareSnapshot(ctx, runtime.ID, sessionID, chatSessionID, runtimeName, callbackToken)
 	if err != nil {
 		return nil, err
@@ -242,15 +293,7 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *Workspac
 		Artifacts:      map[string]snapshotArtifact{},
 		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
 	}
-	if s.agentSessions != nil {
-		if session, exists := s.agentSessions.Get(runtime.ID, sessionID); exists {
-			manifest.AcpSessionID = strings.TrimSpace(session.AcpSessionID)
-			manifest.AgentType = strings.TrimSpace(session.AgentType)
-		}
-	}
-	if manifest.AcpSessionID != "" && manifest.AgentType == "" {
-		manifest.AgentType = strings.TrimSpace(agentType)
-	}
+	s.populateSnapshotHarnessIdentity(&manifest, runtime.ID, sessionID, acpSessionID, agentType)
 	agentContextSkipped := false
 	if manifest.AcpSessionID == "" || manifest.AgentType == "" {
 		manifest.AcpSessionID = ""
@@ -264,7 +307,7 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *Workspac
 	workDir := standaloneWorkspaceWorkDir(runtime, s.config.WorkspaceDir, s.config.ContainerWorkDir)
 	var snapshotTarget *containerSnapshotTarget
 	if !s.config.IsStandaloneMode() {
-		snapshotTarget, err = s.resolveContainerSnapshotTarget(runtime)
+		snapshotTarget, err = s.resolveContainerSnapshotTarget(ctx, runtime)
 		if err != nil {
 			return nil, newSnapshotResolveError(prepare.Generation, err)
 		}
@@ -394,7 +437,7 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 		}
 	}
 	if !s.config.IsStandaloneMode() {
-		target, targetErr := s.resolveContainerSnapshotTarget(runtime)
+		target, targetErr := s.resolveContainerSnapshotTarget(ctx, runtime)
 		if targetErr != nil {
 			return nil, targetErr
 		}
@@ -493,11 +536,23 @@ func (s *Server) primeRestoredMessageReporter(runtime *WorkspaceRuntime, chatSes
 			"workspaceId", runtime.ID, "hasProjectID", projectID != "", "hasChatSessionID", chatSessionID != "")
 		return
 	}
+	var updated *WorkspaceRuntime
 	s.workspaceMu.Lock()
-	if rt, ok := s.workspaces[runtime.ID]; ok && strings.TrimSpace(rt.ProjectID) == "" {
-		rt.ProjectID = projectID
+	if rt, ok := s.workspaces[runtime.ID]; ok {
+		if strings.TrimSpace(rt.ProjectID) == "" {
+			rt.ProjectID = projectID
+		}
+		if strings.TrimSpace(rt.ChatSessionID) == "" {
+			rt.ChatSessionID = chatSessionID
+		}
+		rt.UpdatedAt = nowUTC()
+		copy := *rt
+		updated = &copy
 	}
 	s.workspaceMu.Unlock()
+	if updated != nil && updated.Repository != "" {
+		s.persistWorkspaceMetadata(updated)
+	}
 	if reporter := s.getOrCreateReporter(runtime.ID, projectID, chatSessionID); reporter != nil {
 		reporter.SetSessionID(chatSessionID)
 	}

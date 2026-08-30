@@ -87,6 +87,7 @@ type Server struct {
 	eventStore            *eventstore.Store
 	resourceMonitor       *resourcemon.Monitor
 	resourceGuard         *resourcemon.ResourceGuard
+	resourceEviction      *resourcemon.EvictionController
 	agentSessions         *agentsessions.Manager
 	acpConfig             acp.GatewayConfig
 	sessionHostMu         sync.Mutex
@@ -122,7 +123,7 @@ type Server struct {
 	applyWatchdogMu       sync.Mutex
 	applyWatchdogs        map[string]chan struct{}
 	sessionSnapshotMu     sync.Mutex
-	sessionSnapshotLocks  map[string]*sync.Mutex
+	sessionSnapshotLocks  map[string]sessionSnapshotLock
 	sessionSnapshotRunner func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error)
 
 	// Deployment mode — one Engine per placed deployment environment.
@@ -170,6 +171,7 @@ type WorkspaceRuntime struct {
 	ContainerUser          string
 	CallbackToken          string
 	ProjectID              string
+	ChatSessionID          string
 	TaskID                 string
 	GitUserName            string
 	GitUserEmail           string
@@ -574,6 +576,14 @@ func New(cfg *config.Config) (*Server, error) {
 		deployEngines:       make(map[string]*deploy.Engine),
 		deployRetiring:      make(map[string]bool),
 	}
+	if resourceGuard != nil {
+		evictionController, evictionErr := s.newResourceEvictionController()
+		if evictionErr != nil {
+			slog.Error("Failed to configure resource eviction controller", "error", evictionErr)
+		} else {
+			s.resourceEviction = evictionController
+		}
+	}
 
 	// GitTokenFetcher is intentionally left nil at the server level.
 	// Each SessionHost receives a per-session closure in getOrCreateSessionHost()
@@ -610,6 +620,7 @@ func New(cfg *config.Config) (*Server, error) {
 			ContainerUser:       strings.TrimSpace(cfg.ContainerUser),
 			CallbackToken:       strings.TrimSpace(cfg.CallbackToken),
 			ProjectID:           strings.TrimSpace(cfg.ProjectID),
+			ChatSessionID:       strings.TrimSpace(cfg.ChatSessionID),
 			TaskID:              strings.TrimSpace(cfg.TaskID),
 			Lightweight:         cfg.IsStandaloneMode(),
 			PTY:                 ptyManager,
@@ -1008,6 +1019,12 @@ func (s *Server) startResourceGuard() {
 		slog.Warn("Resource guard failed to start", "error", err)
 		return
 	}
+	if s.resourceEviction != nil {
+		if err := s.resourceEviction.Start(context.Background()); err != nil {
+			slog.Warn("Resource eviction controller failed to start", "error", err)
+		}
+		return
+	}
 	go func() {
 		for {
 			select {
@@ -1113,6 +1130,10 @@ func (s *Server) Stop(ctx context.Context) error {
 
 		// Flush and stop all per-workspace message reporters
 		s.shutdownAllReporters()
+
+		if s.resourceEviction != nil {
+			s.resourceEviction.Close()
+		}
 
 		if s.resourceGuard != nil {
 			if err := s.resourceGuard.Close(); err != nil {
