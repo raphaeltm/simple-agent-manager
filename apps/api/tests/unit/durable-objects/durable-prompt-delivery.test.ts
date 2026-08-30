@@ -95,6 +95,70 @@ describe('ProjectData durable prompt delivery', () => {
     );
   }
 
+  function acceptParentWake(deliveryId: string) {
+    acceptPromptDelivery(
+      sql,
+      {},
+      {
+        deliveryId,
+        targetSessionId: 'chat-1',
+        displayContent: 'trusted wake',
+        sourceTaskId: 'parent-task-1',
+        senderType: 'system',
+        sourceKind: 'parent_wakeup',
+        metadata: { waitId: 'wait-1', childTaskIds: ['child-task-1'] },
+      },
+      Date.now()
+    );
+    return claimDuePromptDeliveries(sql, config, Date.now())[0];
+  }
+
+  function taskRow(
+    id: string,
+    status: string,
+    overrides: Partial<{
+      chat_session_id: string | null;
+      superseded_by_task_id: string | null;
+      parent_task_id: string | null;
+      recovery_source_task_id: string | null;
+      triggered_by: string;
+    }> = {}
+  ) {
+    return {
+      id,
+      status,
+      chat_session_id: id === 'child-task-1' ? 'child-chat-1' : 'chat-1',
+      superseded_by_task_id: null,
+      parent_task_id: id === 'child-task-1' ? 'parent-task-1' : null,
+      recovery_source_task_id: null,
+      triggered_by: 'mcp',
+      ...overrides,
+    };
+  }
+
+  function envWithTaskRows(results: ReturnType<typeof taskRow>[]) {
+    return {
+      DATABASE: {
+        prepare: vi.fn(() => ({
+          bind: vi.fn(() => ({
+            all: vi.fn().mockResolvedValue({ results }),
+          })),
+        })),
+      },
+    } as never;
+  }
+
+  function acceptedSubmit() {
+    return vi.fn<VmPromptDeliveryAdapter['submit']>().mockResolvedValue({
+      kind: 'accepted',
+      acpSessionId: 'acp-1',
+      promptEpoch: Date.now(),
+      runtimeIdentity: 'runtime-1',
+      capabilities,
+      receipt: null,
+    });
+  }
+
   const hooks = {
     projectId: 'project-1',
     recalculateAlarm: vi.fn(async () => {}),
@@ -267,21 +331,7 @@ describe('ProjectData durable prompt delivery', () => {
   });
 
   it('accepts the recovery task as session owner while preserving the live source parent', async () => {
-    acceptPromptDelivery(
-      sql,
-      {},
-      {
-        deliveryId: 'parent-wake-recovery-owner',
-        targetSessionId: 'chat-1',
-        displayContent: 'trusted wake',
-        sourceTaskId: 'parent-task-1',
-        senderType: 'system',
-        sourceKind: 'parent_wakeup',
-        metadata: { waitId: 'wait-1', childTaskIds: ['child-task-1'] },
-      },
-      Date.now()
-    );
-    const [claim] = claimDuePromptDeliveries(sql, config, Date.now());
+    const claim = acceptParentWake('parent-wake-recovery-owner');
     const submit = vi.fn<VmPromptDeliveryAdapter['submit']>().mockResolvedValue({
       kind: 'retry',
       reason: 'not_ready',
@@ -289,117 +339,38 @@ describe('ProjectData durable prompt delivery', () => {
       runtimeIdentity: null,
       capabilities: null,
     });
-    const env = {
-      DATABASE: {
-        prepare: vi.fn(() => ({
-          bind: vi.fn(() => ({
-            all: vi.fn().mockResolvedValue({
-              results: [
-                {
-                  id: 'parent-task-1',
-                  status: 'awaiting_followup',
-                  chat_session_id: null,
-                  superseded_by_task_id: null,
-                  parent_task_id: null,
-                  recovery_source_task_id: null,
-                  triggered_by: 'mcp',
-                },
-                {
-                  id: 'child-task-1',
-                  status: 'completed',
-                  chat_session_id: 'child-chat-1',
-                  parent_task_id: 'parent-task-1',
-                  recovery_source_task_id: null,
-                  triggered_by: 'mcp',
-                },
-                {
-                  id: 'recovery-task-1',
-                  status: 'queued',
-                  chat_session_id: 'chat-1',
-                  superseded_by_task_id: null,
-                  parent_task_id: null,
-                  recovery_source_task_id: 'parent-task-1',
-                  triggered_by: 'session-recovery',
-                },
-              ],
-            }),
-          })),
-        })),
-      },
-    } as never;
+    const env = envWithTaskRows([
+      taskRow('parent-task-1', 'awaiting_followup', { chat_session_id: null }),
+      taskRow('child-task-1', 'completed'),
+      taskRow('recovery-task-1', 'queued', {
+        recovery_source_task_id: 'parent-task-1',
+        triggered_by: 'session-recovery',
+      }),
+    ]);
 
     await expect(
-      runPromptDeliveryClaim(sql, env, config, claim!, { submit, reconcile: vi.fn() }, hooks)
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
     ).resolves.toMatchObject({ kind: 'retry', reason: 'not_ready' });
     expect(submit).toHaveBeenCalledTimes(1);
   });
 
   it('accepts parent wake delivery when a cancelled source is superseded by a live owner', async () => {
-    acceptPromptDelivery(
-      sql,
-      {},
-      {
-        deliveryId: 'parent-wake-cancelled-superseded',
-        targetSessionId: 'chat-1',
-        displayContent: 'trusted wake',
-        sourceTaskId: 'parent-task-1',
-        senderType: 'system',
-        sourceKind: 'parent_wakeup',
-        metadata: { waitId: 'wait-1', childTaskIds: ['child-task-1'] },
-      },
-      Date.now()
-    );
-    const [claim] = claimDuePromptDeliveries(sql, config, Date.now());
-    const env = {
-      DATABASE: {
-        prepare: vi.fn(() => ({
-          bind: vi.fn(() => ({
-            all: vi.fn().mockResolvedValue({
-              results: [
-                {
-                  id: 'parent-task-1',
-                  status: 'cancelled',
-                  chat_session_id: null,
-                  superseded_by_task_id: 'recovery-task-1',
-                  parent_task_id: null,
-                  recovery_source_task_id: null,
-                  triggered_by: 'mcp',
-                },
-                {
-                  id: 'child-task-1',
-                  status: 'completed',
-                  chat_session_id: 'child-chat-1',
-                  superseded_by_task_id: null,
-                  parent_task_id: 'parent-task-1',
-                  recovery_source_task_id: null,
-                  triggered_by: 'mcp',
-                },
-                {
-                  id: 'recovery-task-1',
-                  status: 'in_progress',
-                  chat_session_id: 'chat-1',
-                  superseded_by_task_id: null,
-                  parent_task_id: null,
-                  recovery_source_task_id: 'parent-task-1',
-                  triggered_by: 'session-recovery',
-                },
-              ],
-            }),
-          })),
-        })),
-      },
-    } as never;
-    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>().mockResolvedValue({
-      kind: 'accepted',
-      acpSessionId: 'acp-1',
-      promptEpoch: Date.now(),
-      runtimeIdentity: 'runtime-1',
-      capabilities,
-      receipt: null,
-    });
+    const claim = acceptParentWake('parent-wake-cancelled-superseded');
+    const env = envWithTaskRows([
+      taskRow('parent-task-1', 'cancelled', {
+        chat_session_id: null,
+        superseded_by_task_id: 'recovery-task-1',
+      }),
+      taskRow('child-task-1', 'completed'),
+      taskRow('recovery-task-1', 'in_progress', {
+        recovery_source_task_id: 'parent-task-1',
+        triggered_by: 'session-recovery',
+      }),
+    ]);
+    const submit = acceptedSubmit();
 
     await expect(
-      runPromptDeliveryClaim(sql, env, config, claim!, { submit, reconcile: vi.fn() }, hooks)
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
     ).resolves.toMatchObject({ kind: 'accepted' });
     expect(submit).toHaveBeenCalledTimes(1);
   });
@@ -494,56 +465,15 @@ describe('ProjectData durable prompt delivery', () => {
   });
 
   it('allows a queued parent wake when a child was reparented inside the same project', async () => {
-    acceptPromptDelivery(
-      sql,
-      {},
-      {
-        deliveryId: 'parent-wake-reparented',
-        targetSessionId: 'chat-1',
-        displayContent: 'trusted wake',
-        sourceTaskId: 'parent-task-1',
-        senderType: 'system',
-        sourceKind: 'parent_wakeup',
-        metadata: { waitId: 'wait-1', childTaskIds: ['child-task-1'] },
-      },
-      Date.now()
-    );
-    const [claim] = claimDuePromptDeliveries(sql, config, Date.now());
-    const env = {
-      DATABASE: {
-        prepare: vi.fn(() => ({
-          bind: vi.fn(() => ({
-            all: vi.fn().mockResolvedValue({
-              results: [
-                {
-                  id: 'parent-task-1',
-                  status: 'in_progress',
-                  chat_session_id: 'chat-1',
-                  parent_task_id: null,
-                },
-                {
-                  id: 'child-task-1',
-                  status: 'completed',
-                  chat_session_id: 'child-chat-1',
-                  parent_task_id: 'other-parent',
-                },
-              ],
-            }),
-          })),
-        })),
-      },
-    } as never;
-    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>().mockResolvedValue({
-      kind: 'accepted',
-      acpSessionId: 'acp-1',
-      promptEpoch: Date.now(),
-      runtimeIdentity: 'runtime-1',
-      capabilities,
-      receipt: null,
-    });
+    const claim = acceptParentWake('parent-wake-reparented');
+    const env = envWithTaskRows([
+      taskRow('parent-task-1', 'in_progress'),
+      taskRow('child-task-1', 'completed', { parent_task_id: 'other-parent' }),
+    ]);
+    const submit = acceptedSubmit();
 
     await expect(
-      runPromptDeliveryClaim(sql, env, config, claim!, { submit, reconcile: vi.fn() }, hooks)
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
     ).resolves.toMatchObject({ kind: 'accepted' });
     expect(submit).toHaveBeenCalledTimes(1);
   });
