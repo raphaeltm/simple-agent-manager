@@ -277,51 +277,16 @@ describe('ProjectData durable prompt delivery', () => {
   });
 
   it('fails a parent wake claim before adapter recovery when the parent is terminal', async () => {
-    acceptPromptDelivery(
-      sql,
-      {},
-      {
-        deliveryId: 'parent-wake-1',
-        targetSessionId: 'chat-1',
-        displayContent: 'trusted wake',
-        deliveryContent: 'trusted wake',
-        sourceTaskId: 'parent-task-1',
-        senderType: 'system',
-        sourceKind: 'parent_wakeup',
-        metadata: { waitId: 'wait-1', childTaskIds: ['child-task-1'] },
-      },
-      Date.now()
-    );
-    const [claim] = claimDuePromptDeliveries(sql, config, Date.now());
+    const claim = acceptParentWake('parent-wake-1');
     const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
     const adapter: VmPromptDeliveryAdapter = { submit, reconcile: vi.fn() };
-    const env = {
-      DATABASE: {
-        prepare: vi.fn(() => ({
-          bind: vi.fn(() => ({
-            all: vi.fn().mockResolvedValue({
-              results: [
-                {
-                  id: 'parent-task-1',
-                  status: 'completed',
-                  chat_session_id: 'chat-1',
-                  parent_task_id: null,
-                },
-                {
-                  id: 'child-task-1',
-                  status: 'completed',
-                  chat_session_id: 'child-chat-1',
-                  parent_task_id: 'parent-task-1',
-                },
-              ],
-            }),
-          })),
-        })),
-      },
-    } as never;
+    const env = envWithTaskRows([
+      taskRow('parent-task-1', 'completed'),
+      taskRow('child-task-1', 'completed'),
+    ]);
 
     await expect(
-      runPromptDeliveryClaim(sql, env, config, claim!, adapter, hooks)
+      runPromptDeliveryClaim(sql, env, config, claim, adapter, hooks)
     ).resolves.toMatchObject({ kind: 'failed', reason: 'terminal_target' });
     expect(submit).not.toHaveBeenCalled();
     expect(mailbox.getMessage(sql, 'parent-wake-1')).toMatchObject({
@@ -376,21 +341,7 @@ describe('ProjectData durable prompt delivery', () => {
   });
 
   it('retries a parent wake when target validation storage is temporarily unavailable', async () => {
-    acceptPromptDelivery(
-      sql,
-      {},
-      {
-        deliveryId: 'parent-wake-read-retry',
-        targetSessionId: 'chat-1',
-        displayContent: 'trusted wake',
-        sourceTaskId: 'parent-task-1',
-        senderType: 'system',
-        sourceKind: 'parent_wakeup',
-        metadata: { waitId: 'wait-1', childTaskIds: ['child-task-1'] },
-      },
-      Date.now()
-    );
-    const [claim] = claimDuePromptDeliveries(sql, config, Date.now());
+    const claim = acceptParentWake('parent-wake-read-retry');
     const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
     const env = {
       DATABASE: {
@@ -401,7 +352,7 @@ describe('ProjectData durable prompt delivery', () => {
     } as never;
 
     await expect(
-      runPromptDeliveryClaim(sql, env, config, claim!, { submit, reconcile: vi.fn() }, hooks)
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
     ).resolves.toMatchObject({ kind: 'retry', reason: 'not_ready' });
     expect(submit).not.toHaveBeenCalled();
     expect(mailbox.getMessage(sql, 'parent-wake-read-retry')).toMatchObject({
@@ -411,21 +362,7 @@ describe('ProjectData durable prompt delivery', () => {
   });
 
   it('revalidates parent state inside the adapter boundary before side effects', async () => {
-    acceptPromptDelivery(
-      sql,
-      {},
-      {
-        deliveryId: 'parent-wake-race',
-        targetSessionId: 'chat-1',
-        displayContent: 'trusted wake',
-        sourceTaskId: 'parent-task-1',
-        senderType: 'system',
-        sourceKind: 'parent_wakeup',
-        metadata: { waitId: 'wait-1', childTaskIds: ['child-task-1'] },
-      },
-      Date.now()
-    );
-    const [claim] = claimDuePromptDeliveries(sql, config, Date.now());
+    const claim = acceptParentWake('parent-wake-race');
     let validationCount = 0;
     const all = vi.fn(async () => {
       validationCount++;
@@ -458,7 +395,7 @@ describe('ProjectData durable prompt delivery', () => {
     });
 
     await expect(
-      runPromptDeliveryClaim(sql, env, config, claim!, { submit, reconcile: vi.fn() }, hooks)
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
     ).resolves.toMatchObject({ kind: 'failed', reason: 'terminal_target' });
     expect(validationCount).toBe(2);
     expect(sideEffect).not.toHaveBeenCalled();
@@ -479,43 +416,12 @@ describe('ProjectData durable prompt delivery', () => {
   });
 
   it('fails a queued parent wake when a child is no longer in the project', async () => {
-    acceptPromptDelivery(
-      sql,
-      {},
-      {
-        deliveryId: 'parent-wake-missing-child',
-        targetSessionId: 'chat-1',
-        displayContent: 'trusted wake',
-        sourceTaskId: 'parent-task-1',
-        senderType: 'system',
-        sourceKind: 'parent_wakeup',
-        metadata: { waitId: 'wait-1', childTaskIds: ['child-task-1'] },
-      },
-      Date.now()
-    );
-    const [claim] = claimDuePromptDeliveries(sql, config, Date.now());
-    const env = {
-      DATABASE: {
-        prepare: vi.fn(() => ({
-          bind: vi.fn(() => ({
-            all: vi.fn().mockResolvedValue({
-              results: [
-                {
-                  id: 'parent-task-1',
-                  status: 'in_progress',
-                  chat_session_id: 'chat-1',
-                  parent_task_id: null,
-                },
-              ],
-            }),
-          })),
-        })),
-      },
-    } as never;
+    const claim = acceptParentWake('parent-wake-missing-child');
+    const env = envWithTaskRows([taskRow('parent-task-1', 'in_progress')]);
     const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
 
     await expect(
-      runPromptDeliveryClaim(sql, env, config, claim!, { submit, reconcile: vi.fn() }, hooks)
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
     ).resolves.toMatchObject({ kind: 'failed', reason: 'terminal_target' });
     expect(submit).not.toHaveBeenCalled();
   });
