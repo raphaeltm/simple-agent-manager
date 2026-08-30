@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
 const migrationSql = readFileSync(
-  join(process.cwd(), 'src/db/migrations/0130_task_supersession_marker.sql'),
+  join(process.cwd(), 'src/db/migrations/0131_task_supersession_marker.sql'),
   'utf8'
 );
 
@@ -66,7 +66,7 @@ function supersessionMap(sqlite: Database.Database): Record<string, string | nul
   return Object.fromEntries(rows.map((row) => [row.id, row.superseded_by_task_id]));
 }
 
-describe('0130_task_supersession_marker migration', () => {
+describe('0131_task_supersession_marker migration', () => {
   it('adds the supersession marker column and index', () => {
     const sqlite = createMigrationDb();
     try {
