@@ -58,6 +58,15 @@ The VM agent currently persists periodic host resource snapshots and can assembl
 - `go vet ./...` from `packages/vm-agent` — passed.
 - `git diff --check` — passed.
 - `pnpm check:fast` — passed; existing unrelated lint warnings remained warnings only.
+- Staging deploy run `33306230453` — passed: Cloudflare deploy, VM-agent binary upload, health check, and built-in Playwright smoke tests passed.
+- Real staging VM verification — passed:
+  - Temporary Artifacts project: `01M193Z44W14CM49NWR72GWQPP`.
+  - Temporary workspace: `01M193Z9R320T8EMYBAWS7YKHN`.
+  - Temporary node: `01M193Z99VVW2J8R6M5BV7XR6K`.
+  - Node heartbeat observed healthy/fresh at `2026-08-30T10:42:05.217Z` with ~30s lag at verification time.
+  - Workspace reached `running` at `2026-08-30T10:42:34.377Z`.
+  - Terminal WebSocket echo marker `sam-resource-monitor-smoke-20260830103808` succeeded at `2026-08-30T10:42:37.600Z`.
+  - Temporary workspace, node, and project were deleted by `2026-08-30T10:42:49.251Z`.
 
 ## Review notes
 
