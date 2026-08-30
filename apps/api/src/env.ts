@@ -610,6 +610,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   TERMINAL_SESSION_RECONCILE_PROJECT_BATCH_SIZE?: string;
   /** Max active ProjectData sessions reconciled per project per cron sweep. */
   TERMINAL_SESSION_RECONCILE_BATCH_SIZE?: string;
+  /** Max active D1 session_summaries reconciled globally per cron sweep. */
+  TERMINAL_SESSION_SUMMARY_RECONCILE_BATCH_SIZE?: string;
   /** Retry delay for live/snapshot-protected or temporarily ineligible candidates. */
   TERMINAL_SESSION_RECONCILE_DEFER_MS?: string;
   // ACP Session Lifecycle (spec 027)

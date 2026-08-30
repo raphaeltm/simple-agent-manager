@@ -2802,6 +2802,10 @@ export const sessionSummaries = sqliteTable(
     attentionJson: text('attention_json'),
     /** When the DO last wrote this row — the freshness signal, not session activity. */
     syncedAt: integer('synced_at'),
+    /** Next time the terminal-ledger repair sweep may reconsider this D1 index row. */
+    terminalReconcileDeferredUntil: integer('terminal_reconcile_deferred_until'),
+    /** Machine-readable reason this row was deferred by the terminal-ledger repair sweep. */
+    terminalReconcileDeferReason: text('terminal_reconcile_defer_reason'),
   },
   (table) => ({
     userRecentIdx: index('idx_session_summaries_user_recent').on(
@@ -2814,6 +2818,12 @@ export const sessionSummaries = sqliteTable(
       table.projectId,
       table.createdByUserId,
       table.updatedAt
+    ),
+    terminalReconcileIdx: index('idx_session_summaries_terminal_reconcile').on(
+      table.status,
+      table.terminalReconcileDeferredUntil,
+      table.updatedAt,
+      table.id
     ),
   })
 );
