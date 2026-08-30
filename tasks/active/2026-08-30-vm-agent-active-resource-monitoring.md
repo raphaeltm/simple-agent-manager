@@ -38,7 +38,7 @@ The VM agent currently persists periodic host resource snapshots and can assembl
 - [x] Add parser, degradation, default-constant, and concurrent getter race tests.
 - [x] Run focused Go tests, race tests, and applicable repository quality gates.
 - [x] Review with required specialist skills.
-- [ ] Create a PR targeting `sam/layered-resource-management`.
+- [x] Create a PR targeting `sam/layered-resource-management`.
 
 ## Acceptance criteria
 
@@ -59,6 +59,7 @@ The VM agent currently persists periodic host resource snapshots and can assembl
 - `git diff --check` — passed.
 - `pnpm check:fast` — passed; existing unrelated lint warnings remained warnings only.
 - Staging deploy run `33306230453` — passed: Cloudflare deploy, VM-agent binary upload, health check, and built-in Playwright smoke tests passed.
+- PR: https://github.com/raphaeltm/simple-agent-manager/pull/1971 targeting `sam/layered-resource-management`.
 - Real staging VM verification — passed:
   - Temporary Artifacts project: `01M193Z44W14CM49NWR72GWQPP`.
   - Temporary workspace: `01M193Z9R320T8EMYBAWS7YKHN`.
