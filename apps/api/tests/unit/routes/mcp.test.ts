@@ -18,6 +18,10 @@ const instantSessionMocks = vi.hoisted(() => ({
   launchInstantSession: vi.fn(),
 }));
 
+const agentActivityMocks = vi.hoisted(() => ({
+  listAgentActivityTasks: vi.fn(),
+}));
+
 vi.mock('../../../src/services/agent-profiles', () => ({
   createProfile: vi.fn(),
   deleteProfile: vi.fn(),
@@ -37,6 +41,10 @@ vi.mock('../../../src/services/instant-session', () => ({
 
 vi.mock('../../../src/services/provider-credentials', () => ({
   resolveCredentialSource: providerCredentialMocks.resolveCredentialSource,
+}));
+
+vi.mock('../../../src/services/agent-activity', () => ({
+  listAgentActivityTasks: agentActivityMocks.listAgentActivityTasks,
 }));
 
 vi.mock('../../../src/routes/mcp/deployment-tools', async () => {
@@ -360,6 +368,7 @@ describe('MCP Routes', () => {
       credentialSource: 'user',
       providerName: 'hetzner',
     });
+    agentActivityMocks.listAgentActivityTasks.mockResolvedValue([]);
     const { mcpRoutes } = await import('../../../src/routes/mcp');
     app = new Hono();
     app.route('/mcp', mcpRoutes);
@@ -893,6 +902,7 @@ describe('MCP Routes', () => {
             'task-123',
             'proj-456',
             'user-789',
+            null,
             null,
             null,
             null,
@@ -5838,21 +5848,23 @@ describe('MCP Routes', () => {
     // ─── list_project_agents happy path ───────────────────────────────
 
     it('list_project_agents: returns active tasks excluding self', async () => {
-      // Two active tasks — one is the calling agent (task-123), one is a peer
-      mockD1Results(mockD1._stmt, [
-        {
-          id: 'task-123',
-          title: 'My own task',
-          status: 'in_progress',
-          output_branch: 'sam/my-branch',
-          workspace_id: 'ws-abc',
-        },
+      agentActivityMocks.listAgentActivityTasks.mockResolvedValueOnce([
         {
           id: 'task-peer',
           title: 'Peer agent task',
           status: 'queued',
-          output_branch: 'sam/peer-branch',
-          workspace_id: 'ws-peer',
+          executionStep: 'node_selection',
+          projectId: 'proj-456',
+          projectName: 'Project',
+          userId: 'user-789',
+          workspaceId: 'ws-peer',
+          chatSessionId: null,
+          supersededByTaskId: null,
+          outputBranch: 'sam/peer-branch',
+          priority: 0,
+          createdAt: '2026-08-30T00:00:00.000Z',
+          startedAt: null,
+          agentActivityState: 'working',
         },
       ]);
 
@@ -5875,20 +5887,20 @@ describe('MCP Routes', () => {
       const peer = data.agents.find((a: { taskId: string }) => a.taskId === 'task-peer');
       expect(peer).toBeDefined();
       expect(peer.title).toBe('Peer agent task');
+      expect(peer.state).toBe('working');
       expect(data.totalAgents).toBe(1);
+      expect(agentActivityMocks.listAgentActivityTasks).toHaveBeenCalledWith(
+        mockEnv,
+        expect.objectContaining({
+          activeOnly: true,
+          excludeTaskId: 'task-123',
+          projectId: 'proj-456',
+        })
+      );
     });
 
     it('list_project_agents: returns empty list when no other active agents', async () => {
-      // Only the calling agent itself is active — should be excluded
-      mockD1Results(mockD1._stmt, [
-        {
-          id: 'task-123',
-          title: 'My own task',
-          status: 'in_progress',
-          output_branch: null,
-          workspace_id: 'ws-abc',
-        },
-      ]);
+      agentActivityMocks.listAgentActivityTasks.mockResolvedValueOnce([]);
 
       const res = await mcpRequest(
         app,
@@ -5904,6 +5916,45 @@ describe('MCP Routes', () => {
       const data = JSON.parse(body.result.content[0].text);
       expect(data.agents).toHaveLength(0);
       expect(data.totalAgents).toBe(0);
+    });
+
+    it('list_project_agents: marks sleeping peers without counting superseded rows', async () => {
+      agentActivityMocks.listAgentActivityTasks.mockResolvedValueOnce([
+        {
+          id: 'task-sleeping',
+          title: 'Sleeping peer',
+          status: 'in_progress',
+          executionStep: 'awaiting_followup',
+          projectId: 'proj-456',
+          projectName: 'Project',
+          userId: 'user-789',
+          workspaceId: 'ws-sleep',
+          chatSessionId: 'chat-sleep',
+          supersededByTaskId: null,
+          outputBranch: null,
+          priority: 0,
+          createdAt: '2026-08-30T00:00:00.000Z',
+          startedAt: '2026-08-30T00:01:00.000Z',
+          agentActivityState: 'sleeping',
+        },
+      ]);
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'list_project_agents',
+          arguments: {},
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data).toMatchObject({
+        totalAgents: 1,
+        agents: [expect.objectContaining({ taskId: 'task-sleeping', state: 'sleeping' })],
+      });
     });
 
     // ─── get_peer_agent_output not found ──────────────────────────────

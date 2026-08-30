@@ -1,6 +1,6 @@
 import type { DashboardTask } from '@simple-agent-manager/shared';
-import { fireEvent,render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ActiveTaskCard } from '../../../src/components/ActiveTaskCard';
 
@@ -24,6 +24,7 @@ function makeTask(overrides: Partial<DashboardTask> = {}): DashboardTask {
     lastMessageAt: Date.now() - 5 * 60 * 1000, // 5 min ago
     messageCount: 12,
     isActive: true,
+    agentActivityState: 'working',
     ...overrides,
   };
 }
@@ -45,8 +46,23 @@ describe('ActiveTaskCard', () => {
   });
 
   it('shows idle indicator when task is inactive', () => {
-    render(<ActiveTaskCard task={makeTask({ isActive: false })} />);
+    render(
+      <ActiveTaskCard task={makeTask({ agentActivityState: 'awake-idle', isActive: false })} />
+    );
     expect(screen.getByText('Idle')).toBeInTheDocument();
+  });
+
+  it('shows sleeping indicator when the shared activity state is sleeping', () => {
+    render(
+      <ActiveTaskCard
+        task={makeTask({
+          agentActivityState: 'sleeping',
+          isActive: false,
+          lastMessageAt: null,
+        })}
+      />
+    );
+    expect(screen.getByText('Sleeping')).toBeInTheDocument();
   });
 
   it('shows "No messages" when lastMessageAt is null', () => {
@@ -60,7 +76,11 @@ describe('ActiveTaskCard', () => {
   });
 
   it('shows submission time', () => {
-    render(<ActiveTaskCard task={makeTask({ createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() })} />);
+    render(
+      <ActiveTaskCard
+        task={makeTask({ createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() })}
+      />
+    );
     expect(screen.getByText('Submitted 2h ago')).toBeInTheDocument();
   });
 
@@ -165,7 +185,9 @@ describe('ActiveTaskCard', () => {
   });
 
   it('shows days for timestamps older than 24 hours', () => {
-    render(<ActiveTaskCard task={makeTask({ lastMessageAt: Date.now() - 2 * 24 * 60 * 60 * 1000 })} />);
+    render(
+      <ActiveTaskCard task={makeTask({ lastMessageAt: Date.now() - 2 * 24 * 60 * 60 * 1000 })} />
+    );
     expect(screen.getByText('Last msg 2d ago')).toBeInTheDocument();
   });
 

@@ -98,9 +98,14 @@ describe('session recovery handoff', () => {
       seedRecoveryFixture(sqlite);
       const database = createSqliteD1(sqlite);
 
-      await expect(
-        ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1', guard())
-      ).resolves.toMatchObject({ status: 'waking' });
+      const wake = await ensureSessionRecovery(
+        { DATABASE: database } as Env,
+        'project-1',
+        'chat-1',
+        guard()
+      );
+      expect(wake).toMatchObject({ status: 'waking' });
+      if (wake.status !== 'waking') throw new Error('wake was not claimable');
 
       expect(
         sqlite
@@ -115,8 +120,10 @@ describe('session recovery handoff', () => {
         triggered_by: 'session-recovery',
       });
       expect(
-        sqlite.prepare(`SELECT chat_session_id FROM tasks WHERE id = 'parent-1'`).get()
-      ).toEqual({ chat_session_id: null });
+        sqlite
+          .prepare(`SELECT chat_session_id, superseded_by_task_id FROM tasks WHERE id = 'parent-1'`)
+          .get()
+      ).toEqual({ chat_session_id: null, superseded_by_task_id: wake.taskId });
       expect(startTaskRunnerDOMock).toHaveBeenCalledTimes(1);
     } finally {
       sqlite.close();
@@ -216,8 +223,10 @@ describe('session recovery handoff', () => {
         triggered_by: 'session-recovery',
       });
       expect(
-        sqlite.prepare(`SELECT chat_session_id FROM tasks WHERE id = ?`).get(middleTaskId)
-      ).toEqual({ chat_session_id: null });
+        sqlite
+          .prepare(`SELECT chat_session_id, superseded_by_task_id FROM tasks WHERE id = ?`)
+          .get(middleTaskId)
+      ).toEqual({ chat_session_id: null, superseded_by_task_id: secondWake.taskId });
 
       sqlite.prepare(`UPDATE workspaces SET status = 'deleted' WHERE id = 'workspace-1'`).run();
 
@@ -232,6 +241,71 @@ describe('session recovery handoff', () => {
         conclusive: false,
         reason: 'workspace_deleted_superseded_by_live_wake',
       });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('marks the exact root-family owner during a guarded owner-path handoff', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedRecoveryFixture(sqlite);
+      const database = createSqliteD1(sqlite);
+
+      const firstWake = await ensureSessionRecovery(
+        { DATABASE: database } as Env,
+        'project-1',
+        'chat-1',
+        guard()
+      );
+      expect(firstWake).toMatchObject({ status: 'waking' });
+      if (firstWake.status !== 'waking') throw new Error('first wake was not claimable');
+
+      sqlite
+        .prepare(
+          `UPDATE tasks
+              SET status = 'in_progress', execution_step = 'running',
+                  workspace_id = 'workspace-1', started_at = ?, updated_at = ?
+            WHERE id = ?`
+        )
+        .run('2026-08-15T00:01:00.000Z', '2026-08-15T00:01:00.000Z', firstWake.taskId);
+      sqlite
+        .prepare(
+          `UPDATE session_snapshots
+              SET recovery_status = NULL, recovery_task_id = NULL, sleep_status = 'sleeping',
+                  sleeping_at = ?, recovery_attempts = 0
+            WHERE chat_session_id = 'chat-1'`
+        )
+        .run('2026-08-15T00:02:00.000Z');
+
+      const secondWake = await ensureSessionRecovery(
+        { DATABASE: database } as Env,
+        'project-1',
+        'chat-1',
+        guard()
+      );
+      expect(secondWake).toMatchObject({ status: 'waking' });
+      if (secondWake.status !== 'waking') throw new Error('second wake was not claimable');
+
+      expect(
+        sqlite
+          .prepare(
+            `SELECT chat_session_id, superseded_by_task_id
+               FROM tasks WHERE id = 'parent-1'`
+          )
+          .get()
+      ).toEqual({ chat_session_id: null, superseded_by_task_id: firstWake.taskId });
+      expect(
+        sqlite
+          .prepare(
+            `SELECT chat_session_id, superseded_by_task_id
+               FROM tasks WHERE id = ?`
+          )
+          .get(firstWake.taskId)
+      ).toEqual({ chat_session_id: null, superseded_by_task_id: secondWake.taskId });
+      expect(
+        sqlite.prepare(`SELECT chat_session_id FROM tasks WHERE id = ?`).get(secondWake.taskId)
+      ).toEqual({ chat_session_id: 'chat-1' });
     } finally {
       sqlite.close();
     }
@@ -337,8 +411,17 @@ describe('session recovery handoff', () => {
 
       expect(crossedBarrier).toBe(true);
       expect(
-        sqlite.prepare(`SELECT status, chat_session_id FROM tasks WHERE id = 'parent-1'`).get()
-      ).toEqual({ status: 'completed', chat_session_id: 'chat-1' });
+        sqlite
+          .prepare(
+            `SELECT status, chat_session_id, superseded_by_task_id
+               FROM tasks WHERE id = 'parent-1'`
+          )
+          .get()
+      ).toEqual({
+        status: 'completed',
+        chat_session_id: 'chat-1',
+        superseded_by_task_id: null,
+      });
       expect(
         sqlite.prepare(`SELECT chat_session_id FROM workspaces WHERE id = 'workspace-1'`).get()
       ).toEqual({ chat_session_id: 'chat-1' });
@@ -377,8 +460,17 @@ describe('session recovery handoff', () => {
 
       expect(batchCount).toBe(2);
       expect(
-        sqlite.prepare(`SELECT status, chat_session_id FROM tasks WHERE id = 'parent-1'`).get()
-      ).toEqual({ status: 'completed', chat_session_id: 'chat-1' });
+        sqlite
+          .prepare(
+            `SELECT status, chat_session_id, superseded_by_task_id
+               FROM tasks WHERE id = 'parent-1'`
+          )
+          .get()
+      ).toEqual({
+        status: 'completed',
+        chat_session_id: 'chat-1',
+        superseded_by_task_id: null,
+      });
       expect(
         sqlite
           .prepare(
@@ -415,8 +507,17 @@ describe('session recovery handoff', () => {
       });
 
       expect(
-        sqlite.prepare(`SELECT status, chat_session_id FROM tasks WHERE id = 'parent-1'`).get()
-      ).toEqual({ status: 'awaiting_followup', chat_session_id: 'chat-1' });
+        sqlite
+          .prepare(
+            `SELECT status, chat_session_id, superseded_by_task_id
+               FROM tasks WHERE id = 'parent-1'`
+          )
+          .get()
+      ).toEqual({
+        status: 'awaiting_followup',
+        chat_session_id: 'chat-1',
+        superseded_by_task_id: null,
+      });
       expect(
         sqlite
           .prepare(
@@ -455,8 +556,17 @@ describe('session recovery handoff', () => {
 
       expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
       expect(
-        sqlite.prepare(`SELECT status, chat_session_id FROM tasks WHERE id = 'parent-1'`).get()
-      ).toEqual({ status: 'completed', chat_session_id: 'chat-1' });
+        sqlite
+          .prepare(
+            `SELECT status, chat_session_id, superseded_by_task_id
+               FROM tasks WHERE id = 'parent-1'`
+          )
+          .get()
+      ).toEqual({
+        status: 'completed',
+        chat_session_id: 'chat-1',
+        superseded_by_task_id: null,
+      });
     } finally {
       sqlite.close();
     }
@@ -481,8 +591,17 @@ describe('session recovery handoff', () => {
       });
 
       expect(
-        sqlite.prepare(`SELECT status, chat_session_id FROM tasks WHERE id = 'parent-1'`).get()
-      ).toEqual({ status: 'completed', chat_session_id: 'chat-1' });
+        sqlite
+          .prepare(
+            `SELECT status, chat_session_id, superseded_by_task_id
+               FROM tasks WHERE id = 'parent-1'`
+          )
+          .get()
+      ).toEqual({
+        status: 'completed',
+        chat_session_id: 'chat-1',
+        superseded_by_task_id: null,
+      });
       expect(
         sqlite
           .prepare(

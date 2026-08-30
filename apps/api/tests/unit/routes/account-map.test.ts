@@ -31,10 +31,15 @@ vi.mock('../../../src/services/project-data', () => ({
   listSessions: vi.fn(),
 }));
 
+vi.mock('../../../src/services/agent-activity', () => ({
+  listAgentActivityTasks: vi.fn(),
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
+import * as agentActivityService from '../../../src/services/agent-activity';
 import * as projectDataService from '../../../src/services/project-data';
 
 function buildApp() {
@@ -55,14 +60,10 @@ function buildApp() {
  * The account-map route makes 4 parallel queries via Promise.all, each calling
  * .select().from().where().limit().
  */
-function buildMockDB(
-  projects: any[],
-  nodes: any[],
-  workspaces: any[],
-  tasks: any[]
-) {
+function buildMockDB(projects: any[], nodes: any[], workspaces: any[], tasks: any[]) {
   let callIdx = 0;
-  const results = [projects, nodes, workspaces, tasks];
+  const results = [projects, nodes, workspaces];
+  (agentActivityService.listAgentActivityTasks as any).mockResolvedValue(tasks);
 
   const mockDB = {
     select: vi.fn().mockReturnThis(),
@@ -98,6 +99,7 @@ const mockEnv = {
 describe('GET /account-map', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    (agentActivityService.listAgentActivityTasks as any).mockResolvedValue([]);
   });
 
   it('returns empty response when user has no entities', async () => {
@@ -119,22 +121,65 @@ describe('GET /account-map', () => {
 
   it('returns entities with relationships for a project with workspaces and sessions', async () => {
     const projects = [
-      { id: 'proj-1', name: 'My Project', repository: 'user/repo', status: 'active', lastActivityAt: null, activeSessionCount: 1 },
+      {
+        id: 'proj-1',
+        name: 'My Project',
+        repository: 'user/repo',
+        status: 'active',
+        lastActivityAt: null,
+        activeSessionCount: 1,
+      },
     ];
     const nodes = [
-      { id: 'node-1', name: 'node-1', status: 'active', vmSize: 'cax11', vmLocation: 'nbg1', cloudProvider: 'hetzner', ipAddress: '1.2.3.4', healthStatus: 'healthy', lastHeartbeatAt: null, lastMetrics: null },
+      {
+        id: 'node-1',
+        name: 'node-1',
+        status: 'active',
+        vmSize: 'cax11',
+        vmLocation: 'nbg1',
+        cloudProvider: 'hetzner',
+        ipAddress: '1.2.3.4',
+        healthStatus: 'healthy',
+        lastHeartbeatAt: null,
+        lastMetrics: null,
+      },
     ];
     const workspaces = [
-      { id: 'ws-1', nodeId: 'node-1', projectId: 'proj-1', displayName: 'dev-ws', branch: 'main', status: 'running', vmSize: 'cax11', chatSessionId: null },
+      {
+        id: 'ws-1',
+        nodeId: 'node-1',
+        projectId: 'proj-1',
+        displayName: 'dev-ws',
+        branch: 'main',
+        status: 'running',
+        vmSize: 'cax11',
+        chatSessionId: null,
+      },
     ];
     const tasks = [
-      { id: 'task-1', projectId: 'proj-1', workspaceId: 'ws-1', title: 'Fix bug', status: 'in_progress', executionStep: 'agent_session', priority: 2 },
+      {
+        id: 'task-1',
+        projectId: 'proj-1',
+        workspaceId: 'ws-1',
+        title: 'Fix bug',
+        status: 'in_progress',
+        executionStep: 'agent_session',
+        priority: 2,
+        agentActivityState: 'working',
+      },
     ];
 
     buildMockDB(projects, nodes, workspaces, tasks);
     (projectDataService.listSessions as any).mockResolvedValue({
       sessions: [
-        { id: 'sess-1', topic: 'Chat about bug', status: 'running', messageCount: 5, workspaceId: 'ws-1', taskId: 'task-1' },
+        {
+          id: 'sess-1',
+          topic: 'Chat about bug',
+          status: 'running',
+          messageCount: 5,
+          workspaceId: 'ws-1',
+          taskId: 'task-1',
+        },
       ],
       total: 1,
     });
@@ -149,6 +194,7 @@ describe('GET /account-map', () => {
     expect(body.nodes).toHaveLength(1);
     expect(body.workspaces).toHaveLength(1);
     expect(body.tasks).toHaveLength(1);
+    expect(body.tasks[0]).toMatchObject({ id: 'task-1', agentActivityState: 'working' });
     expect(body.sessions).toHaveLength(1);
 
     // Verify relationships are built
@@ -169,7 +215,11 @@ describe('GET /account-map', () => {
     expect(res.status).toBe(200);
 
     // Cache key should include :active suffix
-    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:user-123:active', 'json');
+    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:v2:user-123:active', 'json');
+    expect(agentActivityService.listAgentActivityTasks).toHaveBeenCalledWith(
+      mockEnv,
+      expect.objectContaining({ activeOnly: true, userId: 'user-123' })
+    );
   });
 
   it('uses :all cache key when activeOnly=false', async () => {
@@ -181,20 +231,108 @@ describe('GET /account-map', () => {
     expect(res.status).toBe(200);
 
     // Cache key should include :all suffix
-    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:user-123:all', 'json');
+    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:v2:user-123:all', 'json');
+    expect(agentActivityService.listAgentActivityTasks).toHaveBeenCalledWith(
+      mockEnv,
+      expect.objectContaining({ activeOnly: false, userId: 'user-123' })
+    );
+  });
+
+  it('preserves sleeping task state and marks its relationships inactive', async () => {
+    const projects = [
+      {
+        id: 'proj-1',
+        name: 'Project',
+        repository: null,
+        status: 'active',
+        lastActivityAt: null,
+        activeSessionCount: 0,
+      },
+    ];
+    const workspaces = [
+      {
+        id: 'ws-sleep',
+        nodeId: null,
+        projectId: 'proj-1',
+        displayName: 'sleeping',
+        branch: 'main',
+        status: 'sleeping',
+        vmSize: 'cax11',
+        chatSessionId: null,
+      },
+    ];
+    const tasks = [
+      {
+        id: 'task-sleep',
+        projectId: 'proj-1',
+        workspaceId: 'ws-sleep',
+        title: 'Sleeping task',
+        status: 'in_progress',
+        executionStep: 'awaiting_followup',
+        priority: 1,
+        agentActivityState: 'sleeping',
+      },
+    ];
+
+    buildMockDB(projects, [], workspaces, tasks);
+    (projectDataService.listSessions as any).mockResolvedValue({ sessions: [], total: 0 });
+
+    const app = buildApp();
+    const res = await app.request('/account-map', {}, mockEnv);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.tasks[0]).toMatchObject({
+      id: 'task-sleep',
+      agentActivityState: 'sleeping',
+    });
+    expect(body.relationships).toContainEqual(
+      expect.objectContaining({ source: 'proj-1', target: 'task-sleep', active: false })
+    );
+    expect(body.relationships).toContainEqual(
+      expect.objectContaining({ source: 'task-sleep', target: 'ws-sleep', active: false })
+    );
   });
 
   it('filters sessions to active-only by default', async () => {
     const projects = [
-      { id: 'proj-1', name: 'Project', repository: null, status: 'active', lastActivityAt: null, activeSessionCount: 1 },
+      {
+        id: 'proj-1',
+        name: 'Project',
+        repository: null,
+        status: 'active',
+        lastActivityAt: null,
+        activeSessionCount: 1,
+      },
     ];
 
     buildMockDB(projects, [], [], []);
     (projectDataService.listSessions as any).mockResolvedValue({
       sessions: [
-        { id: 'sess-active', topic: 'Active chat', status: 'active', messageCount: 5, workspaceId: null, taskId: null },
-        { id: 'sess-stopped', topic: 'Old chat', status: 'stopped', messageCount: 20, workspaceId: null, taskId: null },
-        { id: 'sess-error', topic: 'Error chat', status: 'error', messageCount: 0, workspaceId: null, taskId: null },
+        {
+          id: 'sess-active',
+          topic: 'Active chat',
+          status: 'active',
+          messageCount: 5,
+          workspaceId: null,
+          taskId: null,
+        },
+        {
+          id: 'sess-stopped',
+          topic: 'Old chat',
+          status: 'stopped',
+          messageCount: 20,
+          workspaceId: null,
+          taskId: null,
+        },
+        {
+          id: 'sess-error',
+          topic: 'Error chat',
+          status: 'error',
+          messageCount: 0,
+          workspaceId: null,
+          taskId: null,
+        },
       ],
       total: 3,
     });
@@ -211,14 +349,35 @@ describe('GET /account-map', () => {
 
   it('returns all sessions when activeOnly=false', async () => {
     const projects = [
-      { id: 'proj-1', name: 'Project', repository: null, status: 'active', lastActivityAt: null, activeSessionCount: 1 },
+      {
+        id: 'proj-1',
+        name: 'Project',
+        repository: null,
+        status: 'active',
+        lastActivityAt: null,
+        activeSessionCount: 1,
+      },
     ];
 
     buildMockDB(projects, [], [], []);
     (projectDataService.listSessions as any).mockResolvedValue({
       sessions: [
-        { id: 'sess-active', topic: 'Active chat', status: 'active', messageCount: 5, workspaceId: null, taskId: null },
-        { id: 'sess-stopped', topic: 'Old chat', status: 'stopped', messageCount: 20, workspaceId: null, taskId: null },
+        {
+          id: 'sess-active',
+          topic: 'Active chat',
+          status: 'active',
+          messageCount: 5,
+          workspaceId: null,
+          taskId: null,
+        },
+        {
+          id: 'sess-stopped',
+          topic: 'Old chat',
+          status: 'stopped',
+          messageCount: 20,
+          workspaceId: null,
+          taskId: null,
+        },
       ],
       total: 2,
     });
@@ -233,7 +392,14 @@ describe('GET /account-map', () => {
 
   it('tolerates DO failures without failing the request', async () => {
     const projects = [
-      { id: 'proj-1', name: 'Failing Project', repository: null, status: 'active', lastActivityAt: null, activeSessionCount: 0 },
+      {
+        id: 'proj-1',
+        name: 'Failing Project',
+        repository: null,
+        status: 'active',
+        lastActivityAt: null,
+        activeSessionCount: 0,
+      },
     ];
 
     buildMockDB(projects, [], [], []);

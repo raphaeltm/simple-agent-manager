@@ -11,8 +11,10 @@
  * - Sorting: tasks with recent messages first, then tasks without messages by createdAt
  * - Response shape matches DashboardActiveTasksResponse
  */
-import { DEFAULT_DASHBOARD_INACTIVE_THRESHOLD_MS } from '@simple-agent-manager/shared';
-import { drizzle } from 'drizzle-orm/d1';
+import {
+  DEFAULT_DASHBOARD_ACTIVE_TASK_LIMIT,
+  DEFAULT_DASHBOARD_INACTIVE_THRESHOLD_MS,
+} from '@simple-agent-manager/shared';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -24,7 +26,6 @@ import { dashboardRoutes } from '../../../src/routes/dashboard';
 // ---------------------------------------------------------------------------
 
 vi.mock('drizzle-orm/d1');
-
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: any, next: any) => next()),
   requireApproved: () => vi.fn((_c: any, next: any) => next()),
@@ -35,23 +36,31 @@ vi.mock('../../../src/services/project-data', () => ({
   getSessionsByTaskIds: vi.fn(),
 }));
 
+vi.mock('../../../src/services/agent-activity', () => ({
+  listAgentActivityTasks: vi.fn(),
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
+import * as agentActivityService from '../../../src/services/agent-activity';
 import * as projectDataService from '../../../src/services/project-data';
 
 /** Build a task row as returned by the D1 query join. */
-function makeTaskRow(overrides: Partial<{
-  id: string;
-  title: string;
-  status: string;
-  executionStep: string | null;
-  projectId: string;
-  projectName: string;
-  createdAt: string;
-  startedAt: string | null;
-}> = {}) {
+function makeTaskRow(
+  overrides: Partial<{
+    id: string;
+    title: string;
+    status: string;
+    executionStep: string | null;
+    projectId: string;
+    projectName: string;
+    createdAt: string;
+    startedAt: string | null;
+    agentActivityState: 'working' | 'awake-idle' | 'sleeping' | 'superseded';
+  }> = {}
+) {
   return {
     id: overrides.id ?? 'task-1',
     title: overrides.title ?? 'Fix login bug',
@@ -61,20 +70,24 @@ function makeTaskRow(overrides: Partial<{
     projectName: overrides.projectName ?? 'my-project',
     createdAt: overrides.createdAt ?? new Date(Date.now() - 10 * 60 * 1000).toISOString(),
     startedAt: overrides.startedAt ?? null,
+    agentActivityState: overrides.agentActivityState ?? 'working',
   };
 }
 
 /** Build a DO session summary as returned by getSessionsByTaskIds. */
-function makeSessionInfo(overrides: Partial<{
-  id: string;
-  taskId: string;
-  lastMessageAt: number | null;
-  messageCount: number;
-}> = {}) {
+function makeSessionInfo(
+  overrides: Partial<{
+    id: string;
+    taskId: string;
+    lastMessageAt: number | null;
+    messageCount: number;
+  }> = {}
+) {
   return {
     id: overrides.id ?? 'session-1',
     taskId: overrides.taskId ?? 'task-1',
-    lastMessageAt: overrides.lastMessageAt !== undefined ? overrides.lastMessageAt : Date.now() - 60 * 1000,
+    lastMessageAt:
+      overrides.lastMessageAt !== undefined ? overrides.lastMessageAt : Date.now() - 60 * 1000,
     messageCount: overrides.messageCount ?? 5,
   };
 }
@@ -93,15 +106,8 @@ function buildApp() {
 }
 
 function buildMockDB(rows: ReturnType<typeof makeTaskRow>[]) {
-  const mockDB = {
-    select: vi.fn().mockReturnThis(),
-    from: vi.fn().mockReturnThis(),
-    innerJoin: vi.fn().mockReturnThis(),
-    where: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockResolvedValue(rows),
-  };
-  (drizzle as any).mockReturnValue(mockDB);
-  return mockDB;
+  (agentActivityService.listAgentActivityTasks as any).mockResolvedValue(rows);
+  return agentActivityService.listAgentActivityTasks;
 }
 
 const mockEnv = {
@@ -119,6 +125,7 @@ const mockEnv = {
 describe('GET /dashboard/active-tasks', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    (agentActivityService.listAgentActivityTasks as any).mockResolvedValue([]);
   });
 
   // -------------------------------------------------------------------------
@@ -133,8 +140,16 @@ describe('GET /dashboard/active-tasks', () => {
     const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
 
     expect(res.status).toBe(200);
-    const body = await res.json() as { tasks: unknown[] };
+    const body = (await res.json()) as { tasks: unknown[] };
     expect(body.tasks).toEqual([]);
+    expect(agentActivityService.listAgentActivityTasks).toHaveBeenCalledWith(
+      mockEnv,
+      expect.objectContaining({
+        activeOnly: true,
+        limit: DEFAULT_DASHBOARD_ACTIVE_TASK_LIMIT,
+        userId: 'user-123',
+      })
+    );
     // Should NOT call DO at all when there are no tasks
     expect(projectDataService.getSessionsByTaskIds).not.toHaveBeenCalled();
   });
@@ -149,14 +164,19 @@ describe('GET /dashboard/active-tasks', () => {
 
     buildMockDB([makeTaskRow({ id: 'task-1', projectId: 'proj-1' })]);
     (projectDataService.getSessionsByTaskIds as any).mockResolvedValue([
-      makeSessionInfo({ id: 'session-1', taskId: 'task-1', lastMessageAt: lastMsg, messageCount: 7 }),
+      makeSessionInfo({
+        id: 'session-1',
+        taskId: 'task-1',
+        lastMessageAt: lastMsg,
+        messageCount: 7,
+      }),
     ]);
 
     const app = buildApp();
     const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
 
     expect(res.status).toBe(200);
-    const body = await res.json() as { tasks: any[] };
+    const body = (await res.json()) as { tasks: any[] };
     expect(body.tasks).toHaveLength(1);
 
     const task = body.tasks[0];
@@ -165,6 +185,22 @@ describe('GET /dashboard/active-tasks', () => {
     expect(task.lastMessageAt).toBe(lastMsg);
     expect(task.messageCount).toBe(7);
     expect(task.isActive).toBe(true);
+    expect(task.agentActivityState).toBe('working');
+  });
+
+  it('preserves sleeping state from the shared agent-activity derivation', async () => {
+    buildMockDB([makeTaskRow({ id: 'task-sleeping', agentActivityState: 'sleeping' })]);
+    (projectDataService.getSessionsByTaskIds as any).mockResolvedValue([]);
+
+    const app = buildApp();
+    const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
+    const body = (await res.json()) as { tasks: any[] };
+
+    expect(body.tasks[0]).toMatchObject({
+      id: 'task-sleeping',
+      agentActivityState: 'sleeping',
+      isActive: false,
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -180,7 +216,7 @@ describe('GET /dashboard/active-tasks', () => {
 
     const app = buildApp();
     const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
-    const body = await res.json() as { tasks: any[] };
+    const body = (await res.json()) as { tasks: any[] };
 
     expect(body.tasks[0].isActive).toBe(true);
   });
@@ -195,7 +231,7 @@ describe('GET /dashboard/active-tasks', () => {
 
     const app = buildApp();
     const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
-    const body = await res.json() as { tasks: any[] };
+    const body = (await res.json()) as { tasks: any[] };
 
     expect(body.tasks[0].isActive).toBe(false);
   });
@@ -207,7 +243,7 @@ describe('GET /dashboard/active-tasks', () => {
 
     const app = buildApp();
     const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
-    const body = await res.json() as { tasks: any[] };
+    const body = (await res.json()) as { tasks: any[] };
 
     expect(body.tasks[0].isActive).toBe(false);
     expect(body.tasks[0].lastMessageAt).toBeNull();
@@ -228,9 +264,28 @@ describe('GET /dashboard/active-tasks', () => {
 
     const app = buildApp();
     const res = await app.request('/dashboard/active-tasks', {}, customEnv);
-    const body = await res.json() as { tasks: any[] };
+    const body = (await res.json()) as { tasks: any[] };
 
     expect(body.tasks[0].isActive).toBe(false);
+  });
+
+  it('uses DASHBOARD_ACTIVE_TASK_LIMIT env var when set', async () => {
+    const customEnv = { ...mockEnv, DASHBOARD_ACTIVE_TASK_LIMIT: '7' } as unknown as Env;
+    buildMockDB([]);
+    (projectDataService.getSessionsByTaskIds as any).mockResolvedValue([]);
+
+    const app = buildApp();
+    const res = await app.request('/dashboard/active-tasks', {}, customEnv);
+
+    expect(res.status).toBe(200);
+    expect(agentActivityService.listAgentActivityTasks).toHaveBeenCalledWith(
+      customEnv,
+      expect.objectContaining({
+        activeOnly: true,
+        limit: 7,
+        userId: 'user-123',
+      })
+    );
   });
 
   it('falls back to DEFAULT_DASHBOARD_INACTIVE_THRESHOLD_MS when env var is absent', async () => {
@@ -243,7 +298,7 @@ describe('GET /dashboard/active-tasks', () => {
 
     const app = buildApp();
     const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
-    const body = await res.json() as { tasks: any[] };
+    const body = (await res.json()) as { tasks: any[] };
 
     // 10 min < DEFAULT_DASHBOARD_INACTIVE_THRESHOLD_MS (15 min) → active
     expect(body.tasks[0].isActive).toBe(true);
@@ -264,7 +319,7 @@ describe('GET /dashboard/active-tasks', () => {
 
     // Request must succeed — DO failure is tolerated
     expect(res.status).toBe(200);
-    const body = await res.json() as { tasks: any[] };
+    const body = (await res.json()) as { tasks: any[] };
     expect(body.tasks).toHaveLength(1);
     expect(body.tasks[0].sessionId).toBeNull();
     expect(body.tasks[0].isActive).toBe(false);
@@ -281,14 +336,16 @@ describe('GET /dashboard/active-tasks', () => {
     (projectDataService.getSessionsByTaskIds as any)
       .mockImplementationOnce(() => Promise.reject(new Error('proj-1 DO error')))
       .mockImplementationOnce(() =>
-        Promise.resolve([makeSessionInfo({ id: 'session-2', taskId: 'task-2', lastMessageAt: Date.now() - 1000 })])
+        Promise.resolve([
+          makeSessionInfo({ id: 'session-2', taskId: 'task-2', lastMessageAt: Date.now() - 1000 }),
+        ])
       );
 
     const app = buildApp();
     const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
 
     expect(res.status).toBe(200);
-    const body = await res.json() as { tasks: any[] };
+    const body = (await res.json()) as { tasks: any[] };
     expect(body.tasks).toHaveLength(2);
 
     const task1 = body.tasks.find((t: any) => t.id === 'task-1');
@@ -317,7 +374,11 @@ describe('GET /dashboard/active-tasks', () => {
     expect(projectDataService.getSessionsByTaskIds).toHaveBeenCalledTimes(2);
 
     // The proj-A call should include both task IDs
-    const calls = (projectDataService.getSessionsByTaskIds as any).mock.calls as [unknown, string, string[]][];
+    const calls = (projectDataService.getSessionsByTaskIds as any).mock.calls as [
+      unknown,
+      string,
+      string[],
+    ][];
     const projACall = calls.find(([, projId]) => projId === 'proj-A');
     expect(projACall).toBeDefined();
     expect(projACall![2]).toEqual(expect.arrayContaining(['task-1', 'task-2']));
@@ -331,10 +392,18 @@ describe('GET /dashboard/active-tasks', () => {
   it('sorts tasks with messages before tasks without messages', async () => {
     const now = Date.now();
     buildMockDB([
-      makeTaskRow({ id: 'task-no-msg', title: 'No messages task', projectId: 'proj-1',
-        createdAt: new Date(now - 5 * 60 * 1000).toISOString() }),
-      makeTaskRow({ id: 'task-with-msg', title: 'Has messages task', projectId: 'proj-1',
-        createdAt: new Date(now - 20 * 60 * 1000).toISOString() }),
+      makeTaskRow({
+        id: 'task-no-msg',
+        title: 'No messages task',
+        projectId: 'proj-1',
+        createdAt: new Date(now - 5 * 60 * 1000).toISOString(),
+      }),
+      makeTaskRow({
+        id: 'task-with-msg',
+        title: 'Has messages task',
+        projectId: 'proj-1',
+        createdAt: new Date(now - 20 * 60 * 1000).toISOString(),
+      }),
     ]);
     (projectDataService.getSessionsByTaskIds as any).mockResolvedValue([
       makeSessionInfo({ taskId: 'task-with-msg', lastMessageAt: now - 3 * 60 * 1000 }),
@@ -342,7 +411,7 @@ describe('GET /dashboard/active-tasks', () => {
 
     const app = buildApp();
     const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
-    const body = await res.json() as { tasks: any[] };
+    const body = (await res.json()) as { tasks: any[] };
 
     expect(body.tasks[0].id).toBe('task-with-msg');
     expect(body.tasks[1].id).toBe('task-no-msg');
@@ -356,12 +425,16 @@ describe('GET /dashboard/active-tasks', () => {
     ]);
     (projectDataService.getSessionsByTaskIds as any).mockResolvedValue([
       makeSessionInfo({ taskId: 'task-older', lastMessageAt: now - 10 * 60 * 1000 }),
-      makeSessionInfo({ id: 'session-newer', taskId: 'task-newer', lastMessageAt: now - 1 * 60 * 1000 }),
+      makeSessionInfo({
+        id: 'session-newer',
+        taskId: 'task-newer',
+        lastMessageAt: now - 1 * 60 * 1000,
+      }),
     ]);
 
     const app = buildApp();
     const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
-    const body = await res.json() as { tasks: any[] };
+    const body = (await res.json()) as { tasks: any[] };
 
     expect(body.tasks[0].id).toBe('task-newer');
     expect(body.tasks[1].id).toBe('task-older');
@@ -370,15 +443,21 @@ describe('GET /dashboard/active-tasks', () => {
   it('sorts tasks without messages by createdAt descending', async () => {
     const now = Date.now();
     buildMockDB([
-      makeTaskRow({ id: 'task-older-created', createdAt: new Date(now - 30 * 60 * 1000).toISOString() }),
-      makeTaskRow({ id: 'task-newer-created', createdAt: new Date(now - 5 * 60 * 1000).toISOString() }),
+      makeTaskRow({
+        id: 'task-older-created',
+        createdAt: new Date(now - 30 * 60 * 1000).toISOString(),
+      }),
+      makeTaskRow({
+        id: 'task-newer-created',
+        createdAt: new Date(now - 5 * 60 * 1000).toISOString(),
+      }),
     ]);
     // Neither task has a session
     (projectDataService.getSessionsByTaskIds as any).mockResolvedValue([]);
 
     const app = buildApp();
     const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
-    const body = await res.json() as { tasks: any[] };
+    const body = (await res.json()) as { tasks: any[] };
 
     expect(body.tasks[0].id).toBe('task-newer-created');
     expect(body.tasks[1].id).toBe('task-older-created');
@@ -403,12 +482,17 @@ describe('GET /dashboard/active-tasks', () => {
       }),
     ]);
     (projectDataService.getSessionsByTaskIds as any).mockResolvedValue([
-      makeSessionInfo({ id: 'ses-shape', taskId: 'task-shape', lastMessageAt: now - 2 * 60 * 1000, messageCount: 3 }),
+      makeSessionInfo({
+        id: 'ses-shape',
+        taskId: 'task-shape',
+        lastMessageAt: now - 2 * 60 * 1000,
+        messageCount: 3,
+      }),
     ]);
 
     const app = buildApp();
     const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
-    const body = await res.json() as { tasks: any[] };
+    const body = (await res.json()) as { tasks: any[] };
     const task = body.tasks[0];
 
     // All DashboardTask fields must be present
@@ -424,6 +508,7 @@ describe('GET /dashboard/active-tasks', () => {
     expect(task).toHaveProperty('lastMessageAt');
     expect(task).toHaveProperty('messageCount', 3);
     expect(task).toHaveProperty('isActive');
+    expect(task).toHaveProperty('agentActivityState', 'working');
   });
 
   it('includes executionStep as null when not set on the task row', async () => {
@@ -432,7 +517,7 @@ describe('GET /dashboard/active-tasks', () => {
 
     const app = buildApp();
     const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
-    const body = await res.json() as { tasks: any[] };
+    const body = (await res.json()) as { tasks: any[] };
 
     expect(body.tasks[0].executionStep).toBeNull();
   });
@@ -443,7 +528,7 @@ describe('GET /dashboard/active-tasks', () => {
 
     const app = buildApp();
     const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
-    const body = await res.json() as { tasks: any[] };
+    const body = (await res.json()) as { tasks: any[] };
 
     expect(body.tasks[0].startedAt).toBeNull();
   });

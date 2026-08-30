@@ -235,21 +235,25 @@ const MOCK_DASHBOARD_TASKS = [
     status: 'in_progress',
     executionStep: 'running',
     isActive: true,
+    agentActivityState: 'working',
     sessionId: 's1',
     createdAt: '2026-03-20T10:00:00Z',
     lastMessageAt: Date.now() - 30000,
+    messageCount: 4,
   },
   {
     id: 'dt2',
     projectId: 'proj-test-1',
     projectName: 'Test Project',
-    title: 'Waiting for agent to start processing the request',
-    status: 'queued',
-    executionStep: 'provisioning_node',
+    title: 'Sleeping conversation checkpoint',
+    status: 'in_progress',
+    executionStep: 'awaiting_followup',
     isActive: false,
+    agentActivityState: 'sleeping',
     sessionId: null,
     createdAt: '2026-03-20T09:00:00Z',
     lastMessageAt: null,
+    messageCount: 0,
   },
   {
     id: 'dt3',
@@ -260,9 +264,11 @@ const MOCK_DASHBOARD_TASKS = [
     status: 'in_progress',
     executionStep: 'running',
     isActive: true,
+    agentActivityState: 'working',
     sessionId: 's3',
     createdAt: '2026-03-20T08:00:00Z',
     lastMessageAt: Date.now() - 120000,
+    messageCount: 9,
   },
 ];
 
@@ -570,6 +576,8 @@ test.describe('Dashboard ActiveTaskCards - Mobile Audit', () => {
     await page.goto('/dashboard');
     await page.waitForSelector('text=Active Tasks');
     await page.waitForSelector('text=Running deployment pipeline');
+    await expect(page.getByText('Sleeping', { exact: true })).toBeVisible();
+    await assertNoOverflow(page);
     await takeScreenshot(page, 'dashboard-active-tasks');
   });
 
@@ -580,16 +588,20 @@ test.describe('Dashboard ActiveTaskCards - Mobile Audit', () => {
       projectName: i % 2 === 0 ? 'Test Project' : 'Another Project With Long Name',
       title: `Task ${i + 1}: ${['Running tests', 'Deploying', 'Building', 'Processing', 'Analyzing'][i % 5]}`,
       status: i % 2 === 0 ? 'in_progress' : 'queued',
-      executionStep: i % 3 === 0 ? 'provisioning_node' : 'running',
+      executionStep: i % 3 === 0 ? 'awaiting_followup' : 'running',
       isActive: i % 2 === 0,
+      agentActivityState: i % 3 === 0 ? 'sleeping' : i % 2 === 0 ? 'working' : 'awake-idle',
       sessionId: i % 2 === 0 ? `s-${i}` : null,
       createdAt: new Date(Date.now() - i * 3600000).toISOString(),
       lastMessageAt: i % 2 === 0 ? Date.now() - i * 60000 : null,
+      messageCount: i % 2 === 0 ? i + 1 : 0,
     }));
     await setupApiMocks(page, { dashboardTasks: manyDashboardTasks, projects: MOCK_PROJECTS });
     await page.goto('/dashboard');
     await page.waitForSelector('text=Active Tasks');
     await page.waitForTimeout(500);
+    await expect(page.getByText('Sleeping', { exact: true })).toHaveCount(3);
+    await assertNoOverflow(page);
     await takeScreenshot(page, 'dashboard-many-active-tasks');
   });
 
@@ -604,9 +616,11 @@ test.describe('Dashboard ActiveTaskCards - Mobile Audit', () => {
         status: 'in_progress',
         executionStep: 'running',
         isActive: true,
+        agentActivityState: 'working',
         sessionId: 's1',
         createdAt: '2026-03-20T10:00:00Z',
         lastMessageAt: Date.now() - 5000,
+        messageCount: 13,
       },
     ];
     await setupApiMocks(page, { dashboardTasks: longNameTasks, projects: MOCK_PROJECTS });

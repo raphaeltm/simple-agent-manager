@@ -129,7 +129,9 @@ export async function restoreSessionRecoveryHandoff(
     database
       .prepare(
         `UPDATE tasks
-            SET chat_session_id = ?, updated_at = ?
+            SET chat_session_id = ?,
+                superseded_by_task_id = NULL,
+                updated_at = ?
           WHERE id = (SELECT recovery_source_task_id FROM tasks WHERE id = ?)
             AND chat_session_id IS NULL
             AND ${claimStillOwned}
@@ -204,7 +206,9 @@ export async function failAndRestoreSessionRecoveryHandoff(
     database
       .prepare(
         `UPDATE tasks
-            SET chat_session_id = ?, updated_at = ?
+            SET chat_session_id = ?,
+                superseded_by_task_id = NULL,
+                updated_at = ?
           WHERE id = (SELECT recovery_source_task_id FROM tasks WHERE id = ?)
             AND chat_session_id IS NULL
             AND EXISTS (

@@ -265,7 +265,9 @@ async function createRecoveryTask(
       database
         .prepare(
           `UPDATE tasks
-              SET chat_session_id = NULL, updated_at = ?
+              SET chat_session_id = NULL,
+                  superseded_by_task_id = ?,
+                  updated_at = ?
             WHERE chat_session_id = ?
               AND (id = ? OR recovery_source_task_id = ?)
               AND EXISTS (
@@ -275,7 +277,7 @@ async function createRecoveryTask(
                    AND recovery.chat_session_id IS NULL
               )`
         )
-        .bind(now, chatSessionId, sourceTaskId, sourceTaskId, taskId, sourceTaskId),
+        .bind(taskId, now, chatSessionId, sourceTaskId, sourceTaskId, taskId, sourceTaskId),
       database
         .prepare(
           `UPDATE workspaces
@@ -376,7 +378,9 @@ async function abandonRecoveryHandoff(
     database
       .prepare(
         `UPDATE tasks
-            SET chat_session_id = ?, updated_at = ?
+            SET chat_session_id = ?,
+                superseded_by_task_id = NULL,
+                updated_at = ?
           WHERE id = ?
             AND project_id = ?
             AND chat_session_id IS NULL

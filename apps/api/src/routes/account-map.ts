@@ -16,7 +16,8 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
+import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
+import { listAgentActivityTasks } from '../services/agent-activity';
 import * as projectDataService from '../services/project-data';
 
 /**
@@ -28,7 +29,6 @@ import * as projectDataService from '../services/project-data';
  */
 const ACTIVE_NODE_STATUSES = ['pending', 'creating', 'running', 'stopping'];
 const ACTIVE_WORKSPACE_STATUSES = ['pending', 'creating', 'running', 'recovery', 'stopping'];
-const ACTIVE_TASK_STATUSES = ['queued', 'delegated', 'in_progress'];
 const ACTIVE_SESSION_STATUSES = ['active', 'running'];
 
 /** Default max entities per type from D1. Configurable via ACCOUNT_MAP_MAX_ENTITIES. */
@@ -39,6 +39,7 @@ const DEFAULT_MAX_SESSIONS_PER_PROJECT = 20;
 
 /** KV cache TTL in seconds. Configurable via ACCOUNT_MAP_CACHE_TTL_SECONDS. */
 const DEFAULT_CACHE_TTL_SECONDS = 30;
+const ACCOUNT_MAP_CACHE_VERSION = 'v2';
 
 interface SessionSummary {
   id: string;
@@ -69,19 +70,20 @@ accountMapRoutes.get('/', async (c) => {
   const activeOnly = activeOnlyParam !== 'false';
 
   const parsedMax = parseInt(c.env.ACCOUNT_MAP_MAX_ENTITIES ?? '', 10);
-  const maxEntities = Number.isFinite(parsedMax) && parsedMax > 0
-    ? parsedMax
-    : DEFAULT_MAX_ENTITIES;
+  const maxEntities =
+    Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : DEFAULT_MAX_ENTITIES;
 
   const parsedSessionCap = parseInt(c.env.ACCOUNT_MAP_MAX_SESSIONS_PER_PROJECT ?? '', 10);
-  const maxSessionsPerProject = Number.isFinite(parsedSessionCap) && parsedSessionCap > 0
-    ? parsedSessionCap
-    : DEFAULT_MAX_SESSIONS_PER_PROJECT;
+  const maxSessionsPerProject =
+    Number.isFinite(parsedSessionCap) && parsedSessionCap > 0
+      ? parsedSessionCap
+      : DEFAULT_MAX_SESSIONS_PER_PROJECT;
 
-  const cacheTtl = parseInt(c.env.ACCOUNT_MAP_CACHE_TTL_SECONDS ?? '', 10) || DEFAULT_CACHE_TTL_SECONDS;
+  const cacheTtl =
+    parseInt(c.env.ACCOUNT_MAP_CACHE_TTL_SECONDS ?? '', 10) || DEFAULT_CACHE_TTL_SECONDS;
 
   // --- KV cache check (separate keys for active vs all) ---
-  const cacheKey = `account-map:${userId}:${activeOnly ? 'active' : 'all'}`;
+  const cacheKey = `account-map:${ACCOUNT_MAP_CACHE_VERSION}:${userId}:${activeOnly ? 'active' : 'all'}`;
   const cached = await c.env.KV.get(cacheKey, 'json');
   if (cached) {
     return c.json(cached);
@@ -142,29 +144,19 @@ accountMapRoutes.get('/', async (c) => {
       .from(schema.workspaces)
       .where(
         activeOnly
-          ? and(eq(schema.workspaces.userId, userId), inArray(schema.workspaces.status, ACTIVE_WORKSPACE_STATUSES))
+          ? and(
+              eq(schema.workspaces.userId, userId),
+              inArray(schema.workspaces.status, ACTIVE_WORKSPACE_STATUSES)
+            )
           : eq(schema.workspaces.userId, userId)
       )
       .limit(maxEntities),
 
-    // Tasks: filter to active statuses when activeOnly
-    db
-      .select({
-        id: schema.tasks.id,
-        projectId: schema.tasks.projectId,
-        workspaceId: schema.tasks.workspaceId,
-        title: schema.tasks.title,
-        status: schema.tasks.status,
-        executionStep: schema.tasks.executionStep,
-        priority: schema.tasks.priority,
-      })
-      .from(schema.tasks)
-      .where(
-        activeOnly
-          ? and(eq(schema.tasks.userId, userId), inArray(schema.tasks.status, ACTIVE_TASK_STATUSES))
-          : eq(schema.tasks.userId, userId)
-      )
-      .limit(maxEntities),
+    listAgentActivityTasks(c.env, {
+      userId,
+      activeOnly,
+      limit: maxEntities,
+    }),
   ]);
 
   // --- Fan out to ProjectData DOs for sessions ---
@@ -179,15 +171,17 @@ accountMapRoutes.get('/', async (c) => {
         0
       );
 
-      return sessionsResult.sessions.map((s): SessionSummary => ({
-        id: s.id as string,
-        projectId: project.id,
-        topic: (s.topic as string) ?? null,
-        status: (s.status as string) ?? 'unknown',
-        messageCount: (s.messageCount as number) ?? 0,
-        workspaceId: (s.workspaceId as string) ?? null,
-        taskId: (s.taskId as string) ?? null,
-      }));
+      return sessionsResult.sessions.map(
+        (s): SessionSummary => ({
+          id: s.id as string,
+          projectId: project.id,
+          topic: (s.topic as string) ?? null,
+          status: (s.status as string) ?? 'unknown',
+          messageCount: (s.messageCount as number) ?? 0,
+          workspaceId: (s.workspaceId as string) ?? null,
+          taskId: (s.taskId as string) ?? null,
+        })
+      );
     })
   );
 
@@ -261,7 +255,7 @@ accountMapRoutes.get('/', async (c) => {
         source: task.projectId,
         target: task.id,
         type: 'has_task',
-        active: task.status === 'in_progress' || task.status === 'queued',
+        active: task.agentActivityState === 'working',
       });
     }
   }
@@ -273,7 +267,7 @@ accountMapRoutes.get('/', async (c) => {
         source: task.id,
         target: task.workspaceId,
         type: 'task_workspace',
-        active: task.status === 'in_progress',
+        active: task.agentActivityState === 'working',
       });
     }
   }
@@ -291,13 +285,15 @@ accountMapRoutes.get('/', async (c) => {
       status: t.status,
       executionStep: t.executionStep,
       priority: t.priority,
+      agentActivityState: t.agentActivityState,
     })),
     relationships,
   };
 
   // --- Cache in KV (fire-and-forget) ---
-  void c.env.KV.put(cacheKey, JSON.stringify(payload), { expirationTtl: cacheTtl })
-    .catch((err: unknown) => log.warn('account_map.kv_cache_write_failed', { error: String(err) }));
+  void c.env.KV.put(cacheKey, JSON.stringify(payload), { expirationTtl: cacheTtl }).catch(
+    (err: unknown) => log.warn('account_map.kv_cache_write_failed', { error: String(err) })
+  );
 
   return c.json(payload);
 });

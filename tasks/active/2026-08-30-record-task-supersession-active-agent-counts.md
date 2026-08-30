@@ -53,6 +53,9 @@ Columns touched in this task:
 - New `tasks.superseded_by_task_id`
   - New D1 migration backfill writes existing superseded predecessors once.
   - `session-recovery.ts:createRecoveryTask()` writes the marker in the same transactional batch as the existing predecessor `chat_session_id` handoff.
+  - `session-recovery.ts:abandonRecoveryHandoff()` clears the marker only when it restores the original chat owner after a revoked handoff.
+  - `session-recovery-authority.ts:restoreSessionRecoveryHandoff()` clears the marker only when it restores the original chat owner after a failed replacement still owns the snapshot claim.
+  - `session-recovery-authority.ts:failAndRestoreSessionRecoveryHandoff()` clears the marker only when it restores the original chat owner after a definite runner-start failure.
   - No other writer should write this column in this task.
 - Existing `tasks.chat_session_id`
   - This task edits only the existing `createRecoveryTask()` predecessor-null statement to add `superseded_by_task_id`.
@@ -80,46 +83,46 @@ Columns touched in this task:
 
 ## Implementation checklist
 
-- [ ] Add additive D1 migration `0130_task_supersession_marker.sql`:
-  - [ ] `ALTER TABLE tasks ADD COLUMN superseded_by_task_id TEXT`
-  - [ ] partial index on non-null `superseded_by_task_id`
-  - [ ] backfill non-terminal, chat-unbound predecessors with the earliest later same-family `session-recovery` owner.
-  - [ ] no `DROP`, no `DELETE`, no unbounded destructive update.
-- [ ] Update Drizzle schema for `tasks.supersededByTaskId` and its index.
-- [ ] Update `createRecoveryTask()` so the exact predecessor row that loses `chat_session_id` also receives `superseded_by_task_id = <successor task id>` in the same D1 batch and under the same predicate.
-- [ ] Do not change task status semantics, terminal writers, `sourceTaskGuardCondition`, `sourceTaskGuardIsWakeable`, `isSessionRecoverySourceTaskGuardValid`, or the `createRecoveryTask()` CAS status clause.
-- [ ] Add/extend real-writer tests:
-  - [ ] real `ensureSessionRecovery()` batch marks the predecessor with the successor id,
-  - [ ] owner-path control proves valid handoff still works,
-  - [ ] terminal/invalid source control proves marker is not written when handoff is refused,
-  - [ ] cross-project control uses a real SQL engine.
-- [ ] Add migration/backfill tests against a real SQLite engine:
-  - [ ] 29-link production-shaped chain,
-  - [ ] shared-source siblings,
-  - [ ] root-collapse variants,
-  - [ ] directionality control,
-  - [ ] cross-project control,
-  - [ ] terminal and chat-bound rows not backfilled.
-- [ ] Add shared API service for task agent-activity derivation:
-  - [ ] states: `working`, `awake-idle`, `sleeping`, `superseded`,
-  - [ ] sleeping requires restorable `session_snapshots.sleep_status = 'sleeping'`,
-  - [ ] superseded is `tasks.superseded_by_task_id IS NOT NULL`,
-  - [ ] active/listing filters exclude superseded rows through this service.
-- [ ] Consume the shared service from:
-  - [ ] MCP `list_project_agents` in `workspace-tools-direct.ts`,
-  - [ ] `GET /api/dashboard/active-tasks`,
-  - [ ] `GET /api/account-map`.
-- [ ] Add response state:
-  - [ ] MCP agent objects carry `state`,
-  - [ ] dashboard tasks carry `agentActivityState`,
-  - [ ] account-map tasks carry `agentActivityState`.
-- [ ] Update minimal web UI:
-  - [ ] `ActiveTaskCard` renders Sleeping distinctly from Active/Idle,
-  - [ ] sleeping cards do not get the active running glow.
-- [ ] Add/extend route, service, and UI tests proving superseded rows are not returned/counted and sleeping rows are marked.
-- [ ] Run migration safety: `pnpm quality:migration-safety`.
-- [ ] Run local Playwright screenshots for dashboard active-task cards at 375x667 and 1280x800 with stress data.
-- [ ] Verify discriminating tests by temporarily deleting the exclusion predicate and confirming the new tests fail, then restore it.
+- [x] Add additive D1 migration `0130_task_supersession_marker.sql`:
+  - [x] `ALTER TABLE tasks ADD COLUMN superseded_by_task_id TEXT`
+  - [x] partial index on non-null `superseded_by_task_id`
+  - [x] backfill non-terminal, chat-unbound predecessors with the earliest later same-family `session-recovery` owner.
+  - [x] no `DROP`, no `DELETE`, no unbounded destructive update.
+- [x] Update Drizzle schema for `tasks.supersededByTaskId` and its index.
+- [x] Update `createRecoveryTask()` so the exact predecessor row that loses `chat_session_id` also receives `superseded_by_task_id = <successor task id>` in the same D1 batch and under the same predicate.
+- [x] Do not change task status semantics, terminal writers, `sourceTaskGuardCondition`, `sourceTaskGuardIsWakeable`, `isSessionRecoverySourceTaskGuardValid`, or the `createRecoveryTask()` CAS status clause.
+- [x] Add/extend real-writer tests:
+  - [x] real `ensureSessionRecovery()` batch marks the predecessor with the successor id,
+  - [x] owner-path control proves valid handoff still works,
+  - [x] terminal/invalid source control proves marker is not written when handoff is refused,
+  - [x] cross-project control uses a real SQL engine.
+- [x] Add migration/backfill tests against a real SQLite engine:
+  - [x] 29-link production-shaped chain,
+  - [x] shared-source siblings,
+  - [x] root-collapse variants,
+  - [x] directionality control,
+  - [x] cross-project control,
+  - [x] terminal and chat-bound rows not backfilled.
+- [x] Add shared API service for task agent-activity derivation:
+  - [x] states: `working`, `awake-idle`, `sleeping`, `superseded`,
+  - [x] sleeping requires restorable `session_snapshots.sleep_status = 'sleeping'`,
+  - [x] superseded is `tasks.superseded_by_task_id IS NOT NULL`,
+  - [x] active/listing filters exclude superseded rows through this service.
+- [x] Consume the shared service from:
+  - [x] MCP `list_project_agents` in `workspace-tools-direct.ts`,
+  - [x] `GET /api/dashboard/active-tasks`,
+  - [x] `GET /api/account-map`.
+- [x] Add response state:
+  - [x] MCP agent objects carry `state`,
+  - [x] dashboard tasks carry `agentActivityState`,
+  - [x] account-map tasks carry `agentActivityState`.
+- [x] Update minimal web UI:
+  - [x] `ActiveTaskCard` renders Sleeping distinctly from Active/Idle,
+  - [x] sleeping cards do not get the active running glow.
+- [x] Add/extend route, service, and UI tests proving superseded rows are not returned/counted and sleeping rows are marked.
+- [x] Run migration safety: `pnpm quality:migration-safety`.
+- [x] Run local Playwright screenshots for dashboard active-task cards at 375x667 and 1280x800 with stress data.
+- [x] Verify discriminating tests by temporarily deleting the exclusion predicate and confirming the new tests fail, then restore it.
 - [ ] Coordinate staging per rule 13 before triggering `deploy-staging.yml`.
 - [ ] After staging deploy, report before/after staging D1 counts:
   - [ ] raw `tasks.status='in_progress'`,
