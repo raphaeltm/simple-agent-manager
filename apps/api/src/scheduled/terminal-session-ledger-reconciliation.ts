@@ -3,6 +3,10 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { reconcileTerminalTaskSessions } from '../services/project-data';
+import {
+  runSessionSummaryLedgerReconciliation,
+  type SessionSummaryLedgerReconciliationStats,
+} from './session-summary-ledger-reconciliation';
 
 export const DEFAULT_TERMINAL_SESSION_RECONCILE_PROJECT_BATCH_SIZE = 25;
 export const MAX_TERMINAL_SESSION_RECONCILE_PROJECT_BATCH_SIZE = 200;
@@ -14,6 +18,10 @@ const CANDIDATE_PROJECTS_CTE = `
       MIN(COALESCE(ss.updated_at, ss.synced_at, 0)) AS oldest_active_at
     FROM session_summaries ss
     WHERE ss.status = 'active'
+      AND (
+        ss.terminal_reconcile_deferred_until IS NULL
+        OR ss.terminal_reconcile_deferred_until <= ?
+      )
       AND (
         EXISTS (
           SELECT 1
@@ -64,6 +72,13 @@ export interface TerminalSessionLedgerReconciliationStats {
   skipped: number;
   errors: number;
   remainingCandidateProjects: number;
+  summarySelected: number;
+  summaryStopped: number;
+  summaryFailed: number;
+  summaryDeferred: number;
+  summarySkipped: number;
+  summaryErrors: number;
+  remainingCandidateSummaries: number;
 }
 
 function projectBatchSize(env: Env): number {
@@ -88,6 +103,13 @@ function emptyStats(): TerminalSessionLedgerReconciliationStats {
     skipped: 0,
     errors: 0,
     remainingCandidateProjects: 0,
+    summarySelected: 0,
+    summaryStopped: 0,
+    summaryFailed: 0,
+    summaryDeferred: 0,
+    summarySkipped: 0,
+    summaryErrors: 0,
+    remainingCandidateSummaries: 0,
   };
 }
 
@@ -115,12 +137,27 @@ function parseCount(row: { count?: unknown } | null): number {
   return 0;
 }
 
-async function candidateProjectCount(env: Env): Promise<number> {
+async function candidateProjectCount(env: Env, nowMs: number): Promise<number> {
   const row = await env.DATABASE.prepare(
     `${CANDIDATE_PROJECTS_CTE}
      SELECT COUNT(*) AS count FROM candidate_projects`
-  ).first<{ count: number }>();
+  )
+    .bind(nowMs)
+    .first<{ count: number }>();
   return parseCount(row);
+}
+
+function addSummaryStats(
+  aggregate: TerminalSessionLedgerReconciliationStats,
+  summaryStats: SessionSummaryLedgerReconciliationStats
+): void {
+  aggregate.summarySelected += summaryStats.selected;
+  aggregate.summaryStopped += summaryStats.stopped;
+  aggregate.summaryFailed += summaryStats.failed;
+  aggregate.summaryDeferred += summaryStats.deferred;
+  aggregate.summarySkipped += summaryStats.skipped;
+  aggregate.summaryErrors += summaryStats.errors;
+  aggregate.remainingCandidateSummaries = summaryStats.remainingCandidates;
 }
 
 export async function runTerminalSessionLedgerReconciliation(
@@ -136,11 +173,12 @@ export async function runTerminalSessionLedgerReconciliation(
       ORDER BY oldest_active_at ASC, project_id ASC
       LIMIT ?`
   )
-    .bind(limit)
+    .bind(now.getTime(), limit)
     .all<{ project_id: string }>();
 
   const projects = rows.results ?? [];
   stats.projectsScanned = projects.length;
+  const summaryEligibleProjectIds: string[] = [];
 
   for (const row of projects) {
     const projectId = row.project_id;
@@ -150,10 +188,11 @@ export async function runTerminalSessionLedgerReconciliation(
     }
 
     try {
-      addProjectStats(
-        stats,
-        await reconcileTerminalTaskSessions(env, projectId, { nowIso: now.toISOString() })
-      );
+      const projectStats = await reconcileTerminalTaskSessions(env, projectId, {
+        nowIso: now.toISOString(),
+      });
+      addProjectStats(stats, projectStats);
+      if (projectStats.errors === 0) summaryEligibleProjectIds.push(projectId);
     } catch (err) {
       stats.projectErrors += 1;
       stats.errors += 1;
@@ -164,7 +203,13 @@ export async function runTerminalSessionLedgerReconciliation(
     }
   }
 
-  stats.remainingCandidateProjects = await candidateProjectCount(env);
+  addSummaryStats(
+    stats,
+    await runSessionSummaryLedgerReconciliation(env, now, {
+      projectIds: summaryEligibleProjectIds,
+    })
+  );
+  stats.remainingCandidateProjects = await candidateProjectCount(env, now.getTime());
   log.info('terminal_session_ledger_reconciliation.completed', { ...stats });
   return stats;
 }

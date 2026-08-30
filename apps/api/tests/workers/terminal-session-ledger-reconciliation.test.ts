@@ -1,5 +1,5 @@
 import { env, runInDurableObject } from 'cloudflare:test';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Env as WorkerEnv } from '../../src/env';
 import { runTerminalSessionLedgerReconciliation } from '../../src/scheduled/terminal-session-ledger-reconciliation';
@@ -27,21 +27,25 @@ async function withReconcileEnv<T>(fn: () => Promise<T>): Promise<T> {
   const mutableEnv = testEnv as WorkerEnv & {
     TERMINAL_SESSION_RECONCILE_PROJECT_BATCH_SIZE?: string;
     TERMINAL_SESSION_RECONCILE_BATCH_SIZE?: string;
+    TERMINAL_SESSION_SUMMARY_RECONCILE_BATCH_SIZE?: string;
     TERMINAL_SESSION_RECONCILE_DEFER_MS?: string;
   };
   const previous = {
     projectBatch: mutableEnv.TERMINAL_SESSION_RECONCILE_PROJECT_BATCH_SIZE,
     sessionBatch: mutableEnv.TERMINAL_SESSION_RECONCILE_BATCH_SIZE,
+    summaryBatch: mutableEnv.TERMINAL_SESSION_SUMMARY_RECONCILE_BATCH_SIZE,
     deferMs: mutableEnv.TERMINAL_SESSION_RECONCILE_DEFER_MS,
   };
   mutableEnv.TERMINAL_SESSION_RECONCILE_PROJECT_BATCH_SIZE = '5';
   mutableEnv.TERMINAL_SESSION_RECONCILE_BATCH_SIZE = '10';
+  mutableEnv.TERMINAL_SESSION_SUMMARY_RECONCILE_BATCH_SIZE = '10';
   mutableEnv.TERMINAL_SESSION_RECONCILE_DEFER_MS = String(60 * 60 * 1000);
   try {
     return await fn();
   } finally {
     mutableEnv.TERMINAL_SESSION_RECONCILE_PROJECT_BATCH_SIZE = previous.projectBatch;
     mutableEnv.TERMINAL_SESSION_RECONCILE_BATCH_SIZE = previous.sessionBatch;
+    mutableEnv.TERMINAL_SESSION_SUMMARY_RECONCILE_BATCH_SIZE = previous.summaryBatch;
     mutableEnv.TERMINAL_SESSION_RECONCILE_DEFER_MS = previous.deferMs;
   }
 }
@@ -50,6 +54,18 @@ async function seedBase(projectId: string): Promise<void> {
   await seedUser(OWNER);
   await seedInstallation(INSTALLATION, OWNER);
   await seedProject(projectId, OWNER, INSTALLATION);
+}
+
+async function cleanupProject(projectId: string): Promise<void> {
+  await env.DATABASE.batch([
+    env.DATABASE.prepare('DELETE FROM session_snapshots WHERE project_id = ?').bind(projectId),
+    env.DATABASE.prepare('DELETE FROM session_summaries WHERE project_id = ?').bind(projectId),
+    env.DATABASE.prepare('DELETE FROM session_index_coverage WHERE project_id = ?').bind(projectId),
+    env.DATABASE.prepare('DELETE FROM tasks WHERE project_id = ?').bind(projectId),
+    env.DATABASE.prepare('DELETE FROM workspaces WHERE project_id = ?').bind(projectId),
+    env.DATABASE.prepare('DELETE FROM project_members WHERE project_id = ?').bind(projectId),
+    env.DATABASE.prepare('DELETE FROM projects WHERE id = ?').bind(projectId),
+  ]);
 }
 
 async function createTaskBackedSession(
@@ -145,6 +161,21 @@ async function readSummaryStatus(projectId: string, sessionId: string): Promise<
   return row?.status ?? null;
 }
 
+async function readSummaryDeferReason(
+  projectId: string,
+  sessionId: string
+): Promise<string | null> {
+  const row = await env.DATABASE.prepare(
+    `SELECT terminal_reconcile_defer_reason
+       FROM session_summaries
+      WHERE project_id = ?
+        AND id = ?`
+  )
+    .bind(projectId, sessionId)
+    .first<{ terminal_reconcile_defer_reason: string | null }>();
+  return row?.terminal_reconcile_defer_reason ?? null;
+}
+
 async function readDeferReason(projectId: string, sessionId: string): Promise<string | null> {
   const stub = getStub(projectId);
   await stub.ensureProjectId(projectId);
@@ -224,6 +255,10 @@ describe('terminal session ledger reconciliation', () => {
     await seedBase(projectId);
   });
 
+  afterEach(async () => {
+    await cleanupProject(projectId);
+  });
+
   it('repairs terminal sessions while preserving live-head and snapshot-protected controls', async () => {
     const now = new Date('2026-08-30T01:00:00.000Z');
     const completed = await createTaskBackedSession(projectId, 'completed', 'completed');
@@ -300,19 +335,40 @@ describe('terminal session ledger reconciliation', () => {
       deferred: 2,
       skipped: 0,
       errors: 0,
+      summarySelected: 5,
+      summaryStopped: 2,
+      summaryFailed: 1,
+      summaryDeferred: 2,
+      summarySkipped: 0,
+      summaryErrors: 0,
     });
+    expect(await readSummaryStatus(projectId, completed.sessionId)).toBe('stopped');
+    expect(await readSummaryStatus(projectId, failed.sessionId)).toBe('failed');
+    expect(await readSummaryStatus(projectId, expiredSnapshot.sessionId)).toBe('stopped');
+    expect(await readSummaryStatus(projectId, liveHead.sessionId)).toBe('active');
+    expect(await readSummaryStatus(projectId, protectedSnapshot.sessionId)).toBe('active');
+    expect(await readSummaryDeferReason(projectId, liveHead.sessionId)).toBe('live_task_head');
+    expect(await readSummaryDeferReason(projectId, protectedSnapshot.sessionId)).toBe(
+      'restorable_sleeping_snapshot'
+    );
 
     const second = await withReconcileEnv(() =>
       runTerminalSessionLedgerReconciliation(testEnv, now)
     );
     expect(second).toMatchObject({
-      projectsScanned: 1,
+      projectsScanned: 0,
       selected: 0,
       stopped: 0,
       failed: 0,
       deferred: 0,
       skipped: 0,
       errors: 0,
+      summarySelected: 0,
+      summaryStopped: 0,
+      summaryFailed: 0,
+      summaryDeferred: 0,
+      summarySkipped: 0,
+      summaryErrors: 0,
     });
 
     await stub.runSummarySyncForTest();
@@ -323,6 +379,60 @@ describe('terminal session ledger reconciliation', () => {
     expect(await readSummaryStatus(projectId, expiredSnapshot.sessionId)).toBe('stopped');
     expect(await readSummaryStatus(projectId, liveHead.sessionId)).toBe('active');
     expect(await readSummaryStatus(projectId, protectedSnapshot.sessionId)).toBe('active');
+  });
+
+  it('repairs stale active session_summaries when over-cap DO sync skips row updates', async () => {
+    const now = new Date('2026-08-30T03:00:00.000Z');
+    const terminal = await createTaskBackedSession(projectId, 'overcap-terminal', 'completed');
+    const active = await createTaskBackedSession(projectId, 'overcap-active', 'in_progress');
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await stub.runSummarySyncForTest();
+
+    expect(await readProjectActiveCount(projectId)).toBe(2);
+    expect(await readActiveSummaryCount(projectId)).toBe(2);
+
+    const doRepair = await withReconcileEnv(() =>
+      projectData.reconcileTerminalTaskSessions(testEnv, projectId, { nowIso: now.toISOString() })
+    );
+    expect(doRepair).toMatchObject({ selected: 2, stopped: 1, deferred: 1, errors: 0 });
+    expect(await readSessionStatus(projectId, terminal.sessionId)).toBe('stopped');
+    expect(await readSessionStatus(projectId, active.sessionId)).toBe('active');
+
+    await stub.runSummarySyncWithEnvForTest({ SESSION_INDEX_MAX_ROWS: '1' });
+    expect(await readProjectActiveCount(projectId)).toBe(1);
+    expect(await readActiveSummaryCount(projectId)).toBe(2);
+    expect(await readSummaryStatus(projectId, terminal.sessionId)).toBe('active');
+
+    const first = await withReconcileEnv(() =>
+      runTerminalSessionLedgerReconciliation(testEnv, now)
+    );
+    expect(first).toMatchObject({
+      summarySelected: 1,
+      summaryStopped: 1,
+      summaryFailed: 0,
+      summaryDeferred: 0,
+      summarySkipped: 0,
+      summaryErrors: 0,
+    });
+    expect(await readProjectActiveCount(projectId)).toBe(1);
+    expect(await readActiveSummaryCount(projectId)).toBe(1);
+    expect(await readSummaryStatus(projectId, terminal.sessionId)).toBe('stopped');
+    expect(await readSummaryStatus(projectId, active.sessionId)).toBe('active');
+
+    const second = await withReconcileEnv(() =>
+      runTerminalSessionLedgerReconciliation(testEnv, now)
+    );
+    expect(second).toMatchObject({
+      projectsScanned: 0,
+      selected: 0,
+      summarySelected: 0,
+      summaryStopped: 0,
+      summaryFailed: 0,
+      summaryDeferred: 0,
+      summarySkipped: 0,
+      summaryErrors: 0,
+    });
   });
 
   it('lets existing summary sync converge D1 counts after a DO ledger repair', async () => {
