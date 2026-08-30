@@ -83,7 +83,7 @@ Columns touched in this task:
 
 ## Implementation checklist
 
-- [x] Add additive D1 migration `0131_task_supersession_marker.sql`:
+- [x] Add additive D1 migration `0130_task_supersession_marker.sql`:
   - [x] `ALTER TABLE tasks ADD COLUMN superseded_by_task_id TEXT`
   - [x] partial index on non-null `superseded_by_task_id`
   - [x] backfill non-terminal, chat-unbound predecessors with the earliest later same-family `session-recovery` owner.

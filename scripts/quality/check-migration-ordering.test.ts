@@ -69,6 +69,19 @@ describe('D1 migration ordering check', () => {
     );
   });
 
+  it('grandfathers the staging-applied task supersession marker prefix', () => {
+    const migrationsDir = join(ROOT, 'apps/api/src/db/migrations');
+    const appliedFiles = [
+      '0130_repair_running_agent_sessions_deleted_workspaces.sql',
+      '0130_task_supersession_marker.sql',
+    ];
+
+    expect(isAllowedDuplicateSet(migrationsDir, '0130', appliedFiles)).toBe(true);
+    expect(isAllowedDuplicateSet(migrationsDir, '0130', [...appliedFiles, '0130_future.sql'])).toBe(
+      false
+    );
+  });
+
   it('fails on migration filenames without a sortable numeric prefix', () => {
     const dir = makeDir();
     writeFileSync(join(dir, '0001_initial.sql'), 'CREATE TABLE first (id TEXT PRIMARY KEY);');
