@@ -323,6 +323,14 @@ type Config struct {
 	MetricsDBPath     string        // SQLite database path for resource metrics snapshots
 	MetricsInterval   time.Duration // Resource metrics collection interval (default: 1m)
 
+	// Active resource monitoring settings - configurable per constitution principle XI
+	PSIPollInterval                time.Duration // PSI memory pressure polling interval (env: DEFAULT_PSI_POLL_INTERVAL_SECONDS, default: 10s)
+	ContainerStatsInterval         time.Duration // Docker stats polling interval (env: DEFAULT_CONTAINER_STATS_INTERVAL_SECONDS, default: 30s)
+	PSIMemorySomeWarningThreshold  float64       // some memory PSI warning threshold (env: DEFAULT_PSI_MEMORY_SOME_WARNING_THRESHOLD, default: 25.0)
+	PSIMemorySomeCriticalThreshold float64       // some memory PSI critical threshold (env: DEFAULT_PSI_MEMORY_SOME_CRITICAL_THRESHOLD, default: 50.0)
+	PSIMemoryFullWarningThreshold  float64       // full memory PSI warning threshold (env: DEFAULT_PSI_MEMORY_FULL_WARNING_THRESHOLD, default: 10.0)
+	PSIMemoryFullCriticalThreshold float64       // full memory PSI critical threshold (env: DEFAULT_PSI_MEMORY_FULL_CRITICAL_THRESHOLD, default: 25.0)
+
 	// Git integration settings - configurable per constitution principle XI
 	GitCredentialTimeout     time.Duration // Timeout for credential-helper callbacks (env: GIT_CREDENTIAL_TIMEOUT, default: 5s)
 	GitExecTimeout           time.Duration // Timeout for git commands via docker exec (default: 30s)
