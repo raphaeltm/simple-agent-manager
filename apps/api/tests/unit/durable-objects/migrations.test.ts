@@ -457,7 +457,8 @@ describe('DO Migrations', () => {
       // project event subscriptions: 15 from migration 038
       // project event delivery decisions: 0 from migration 039 (additive column only)
       // project event pull ack: 1 replay index from migration 040
-      expect(indexes).toHaveLength(85);
+      // terminal session reconcile marker: 1 from migration 041
+      expect(indexes).toHaveLength(86);
     });
   });
 });

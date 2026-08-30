@@ -79,6 +79,10 @@ import {
   ProjectEventValidationError,
 } from '../durable-objects/project-data/project-events-contracts';
 import type {
+  TerminalSessionReconciliationInput,
+  TerminalSessionReconciliationStats,
+} from '../durable-objects/project-data/terminal-session-reconciliation';
+import type {
   ArchivedToolPayloadListResult,
   ArchivedToolPayloadQuery,
   MessageToolContentResult,
@@ -552,6 +556,16 @@ export async function failSession(
     });
   }
   return failed;
+}
+
+export async function reconcileTerminalTaskSessions(
+  env: Env,
+  projectId: string,
+  input: TerminalSessionReconciliationInput = {}
+): Promise<TerminalSessionReconciliationStats> {
+  return callProjectDataWithRetry(env, projectId, 'reconcileTerminalTaskSessions', (stub) =>
+    stub.reconcileTerminalTaskSessions(input)
+  );
 }
 
 export async function updateSessionTopic(

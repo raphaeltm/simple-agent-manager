@@ -339,6 +339,9 @@ by the read-only cron-liveness check.
 - `TASK_RECONCILIATION_ACTIVE_WORK_HARD_STALL_MS` — Hard ceiling for deferring an expired check-in because prompt/tool work is still active (default: 7200000)
 - `TASK_RECONCILIATION_MIN_ALARM_DELAY_MS` — Minimum delay before the next reconciliation alarm can fire (default: 10000)
 - `SESSION_TASK_REPAIR_BATCH_SIZE` — Maximum legacy taskless chat sessions repaired per 5-minute sweep (default: 25; capped at 200)
+- `TERMINAL_SESSION_RECONCILE_PROJECT_BATCH_SIZE` — Maximum projects inspected for stale active ProjectData session ledgers per 5-minute sweep (default: 25; capped at 200)
+- `TERMINAL_SESSION_RECONCILE_BATCH_SIZE` — Maximum active ProjectData `chat_sessions` candidates reconciled per project per 5-minute sweep (default: 25; capped at 200)
+- `TERMINAL_SESSION_RECONCILE_DEFER_MS` — Retry delay for live-head, snapshot-protected, or temporarily ineligible terminal-session ledger candidates (default: 3600000; capped at 86400000)
 - `TASK_RUN_ABSOLUTE_CEILING_MS` — Absolute runaway-cost ceiling that fails even a demonstrably live task (default: 86400000 / 24h)
 - `SESSION_ACTIVITY_STALE_THRESHOLD_MS` — Evidence-based fallback threshold before stale working activity can be healed to idle (default: 300000)
 - `NODE_HEARTBEAT_STALE_SECONDS` — Staleness threshold for node health

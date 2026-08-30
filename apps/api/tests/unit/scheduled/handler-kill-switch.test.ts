@@ -58,6 +58,7 @@ describe('scheduled operational sweep kill switch', () => {
     expect(sweepNames).toContain('node_cleanup');
     expect(sweepNames).toContain('deployment_release_retention');
     expect(sweepNames).toContain('session_snapshot_purge');
+    expect(sweepNames).toContain('terminal_session_ledger_reconciliation');
     expect(sweepNames.indexOf('deployment_release_retention')).toBeLessThan(
       sweepNames.indexOf('compose_artifact_cleanup')
     );

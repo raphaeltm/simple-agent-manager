@@ -22,6 +22,10 @@ export type Env = {
   DO_SUMMARY_SYNC_DEBOUNCE_MS?: string;
   /** Cap on sessions mirrored into the D1 session index per project, per sync. */
   SESSION_INDEX_MAX_ROWS?: string;
+  /** Active chat-session candidates reconciled per ProjectData sweep RPC. */
+  TERMINAL_SESSION_RECONCILE_BATCH_SIZE?: string;
+  /** Retry delay for live/snapshot-protected or temporarily ineligible candidates. */
+  TERMINAL_SESSION_RECONCILE_DEFER_MS?: string;
   MAX_SESSIONS_PER_PROJECT?: string;
   MAX_MESSAGES_PER_SESSION?: string;
   COMMENT_BODY_MAX_LENGTH?: string;
