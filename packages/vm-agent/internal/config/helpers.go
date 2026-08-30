@@ -293,11 +293,32 @@ func (c *Config) Validate() error {
 		{"ACP_ACTIVITY_REPORT_TIMEOUT", c.ACPActivityReportTimeout},
 		{"ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE", c.ACPHarnessActivityReportDebounce},
 		{"JWKS_FETCH_TIMEOUT", c.JWKSFetchTimeout},
+		{EnvDefaultPSIPollIntervalSeconds, c.PSIPollInterval},
+		{EnvDefaultContainerStatsIntervalSeconds, c.ContainerStatsInterval},
 	}
 	for _, timeout := range requiredTimeouts {
 		if timeout.value <= 0 {
 			errs = append(errs, fmt.Errorf("%s must be > 0, got %s", timeout.key, timeout.value))
 		}
+	}
+
+	if c.PSIMemorySomeWarningThreshold <= 0 {
+		errs = append(errs, fmt.Errorf("%s must be > 0, got %f", EnvDefaultPSIMemorySomeWarningThreshold, c.PSIMemorySomeWarningThreshold))
+	}
+	if c.PSIMemorySomeCriticalThreshold <= 0 {
+		errs = append(errs, fmt.Errorf("%s must be > 0, got %f", EnvDefaultPSIMemorySomeCriticalThreshold, c.PSIMemorySomeCriticalThreshold))
+	}
+	if c.PSIMemoryFullWarningThreshold <= 0 {
+		errs = append(errs, fmt.Errorf("%s must be > 0, got %f", EnvDefaultPSIMemoryFullWarningThreshold, c.PSIMemoryFullWarningThreshold))
+	}
+	if c.PSIMemoryFullCriticalThreshold <= 0 {
+		errs = append(errs, fmt.Errorf("%s must be > 0, got %f", EnvDefaultPSIMemoryFullCriticalThreshold, c.PSIMemoryFullCriticalThreshold))
+	}
+	if c.PSIMemorySomeWarningThreshold > c.PSIMemorySomeCriticalThreshold {
+		errs = append(errs, fmt.Errorf("%s must be <= %s", EnvDefaultPSIMemorySomeWarningThreshold, EnvDefaultPSIMemorySomeCriticalThreshold))
+	}
+	if c.PSIMemoryFullWarningThreshold > c.PSIMemoryFullCriticalThreshold {
+		errs = append(errs, fmt.Errorf("%s must be <= %s", EnvDefaultPSIMemoryFullWarningThreshold, EnvDefaultPSIMemoryFullCriticalThreshold))
 	}
 
 	// Workspace-specific validations (skip in deployment mode)

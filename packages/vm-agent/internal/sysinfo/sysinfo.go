@@ -95,15 +95,18 @@ type DockerInfo struct {
 
 // ContainerInfo holds per-container state and resource usage.
 type ContainerInfo struct {
-	ID         string  `json:"id"`
-	Name       string  `json:"name"`
-	Image      string  `json:"image"`
-	Status     string  `json:"status"`
-	State      string  `json:"state"`
-	CPUPercent float64 `json:"cpuPercent"`
-	MemUsage   string  `json:"memUsage"`
-	MemPercent float64 `json:"memPercent"`
-	CreatedAt  string  `json:"createdAt"`
+	ID            string  `json:"id"`
+	Name          string  `json:"name"`
+	Image         string  `json:"image"`
+	Status        string  `json:"status"`
+	State         string  `json:"state"`
+	CPUPercent    float64 `json:"cpuPercent"`
+	MemUsage      string  `json:"memUsage"`
+	MemUsageBytes uint64  `json:"memUsageBytes"`
+	MemLimitBytes uint64  `json:"memLimitBytes"`
+	MemPercent    float64 `json:"memPercent"`
+	PIDs          uint64  `json:"pids"`
+	CreatedAt     string  `json:"createdAt"`
 }
 
 // SoftwareInfo holds version strings for installed software.
@@ -477,12 +480,38 @@ type dockerPSEntry struct {
 	CreatedAt string `json:"CreatedAt"`
 }
 
-// dockerStatsEntry represents per-container resource usage from docker stats.
-type dockerStatsEntry struct {
-	ID         string `json:"id"`
-	CPUPercent string `json:"cpuPercent"`
-	MemUsage   string `json:"memUsage"`
-	MemPercent string `json:"memPercent"`
+// DockerStatsEntry represents per-container resource usage from docker stats.
+type DockerStatsEntry struct {
+	ID             string
+	Container      string
+	Name           string
+	CPUPercentText string
+	CPUPercent     float64
+	MemUsage       string
+	MemUsageBytes  uint64
+	MemLimitBytes  uint64
+	MemPercentText string
+	MemPercent     float64
+	PIDs           uint64
+}
+
+type dockerStatsEntry = DockerStatsEntry
+
+type dockerStatsJSON struct {
+	ID             string `json:"ID"`
+	Container      string `json:"Container"`
+	Name           string `json:"Name"`
+	CPUPerc        string `json:"CPUPerc"`
+	MemUsage       string `json:"MemUsage"`
+	MemPerc        string `json:"MemPerc"`
+	PIDs           string `json:"PIDs"`
+	LowerID        string `json:"id"`
+	LowerContainer string `json:"container"`
+	LowerName      string `json:"name"`
+	CPUPercent     string `json:"cpuPercent"`
+	LowerMemUsage  string `json:"memUsage"`
+	MemPercent     string `json:"memPercent"`
+	LowerPIDs      string `json:"pids"`
 }
 
 // collectDocker queries Docker CLI for version and container info.
@@ -527,27 +556,23 @@ func (c *Collector) collectDocker() DockerInfo {
 		}
 	}
 
-	statsMap := make(map[string]dockerStatsEntry)
+	statsMap := make(map[string]DockerStatsEntry)
 	if len(runningIDs) > 0 {
-		ctx3, cancel3 := context.WithTimeout(context.Background(), c.config.DockerStatsTimeout)
-		defer cancel3()
-		args := append([]string{"stats", "--no-stream", "--format",
-			`{"id":"{{.ID}}","cpuPercent":"{{.CPUPerc}}","memUsage":"{{.MemUsage}}","memPercent":"{{.MemPerc}}"}`},
-			runningIDs...)
-		out, err = exec.CommandContext(ctx3, "docker", args...).Output()
+		statsMap, err = CollectDockerStats(context.Background(), c.config.DockerStatsTimeout, runningIDs...)
 		if err != nil {
 			slog.Warn("Docker stats query failed (containers still listed)", "error", err)
-		} else {
-			statsMap = parseDockerStats(string(out))
 		}
 	}
 
 	// Merge ps + stats into ContainerInfo
 	for i := range containers {
 		if stats, ok := statsMap[containers[i].ID]; ok {
-			containers[i].CPUPercent = parsePercentString(stats.CPUPercent)
+			containers[i].CPUPercent = stats.CPUPercent
 			containers[i].MemUsage = stats.MemUsage
-			containers[i].MemPercent = parsePercentString(stats.MemPercent)
+			containers[i].MemUsageBytes = stats.MemUsageBytes
+			containers[i].MemLimitBytes = stats.MemLimitBytes
+			containers[i].MemPercent = stats.MemPercent
+			containers[i].PIDs = stats.PIDs
 		}
 	}
 
@@ -583,24 +608,155 @@ func parseDockerPS(output string) []ContainerInfo {
 	return containers
 }
 
-// parseDockerStats parses docker stats --no-stream JSON output into a map keyed by container ID.
-func parseDockerStats(output string) map[string]dockerStatsEntry {
-	result := make(map[string]dockerStatsEntry)
+// CollectDockerStats runs docker stats once and parses its JSON output into a map keyed by container ID.
+func CollectDockerStats(ctx context.Context, timeout time.Duration, containerIDs ...string) (map[string]DockerStatsEntry, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if timeout <= 0 {
+		timeout = envDuration("SYSINFO_DOCKER_STATS_TIMEOUT", 10*time.Second)
+	}
+	statsCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	args := append([]string{"stats", "--no-stream", "--format", "{{json .}}"}, containerIDs...)
+	out, err := exec.CommandContext(statsCtx, "docker", args...).Output()
+	if err != nil {
+		return nil, err
+	}
+	return ParseDockerStats(string(out)), nil
+}
+
+// ParseDockerStats parses docker stats --no-stream JSON output into a map keyed by container ID.
+func ParseDockerStats(output string) map[string]DockerStatsEntry {
+	result := make(map[string]DockerStatsEntry)
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		var entry dockerStatsEntry
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+		var raw dockerStatsJSON
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
 			continue
 		}
+		entry := raw.toDockerStatsEntry()
 		if entry.ID != "" {
 			result[entry.ID] = entry
 		}
 	}
 	return result
+}
+
+func parseDockerStats(output string) map[string]dockerStatsEntry {
+	return ParseDockerStats(output)
+}
+
+func (d dockerStatsJSON) toDockerStatsEntry() DockerStatsEntry {
+	id := firstNonEmpty(d.ID, d.LowerID, d.Container, d.LowerContainer)
+	container := firstNonEmpty(d.Container, d.LowerContainer, id)
+	name := firstNonEmpty(d.Name, d.LowerName)
+	cpuText := firstNonEmpty(d.CPUPerc, d.CPUPercent)
+	memUsage := firstNonEmpty(d.MemUsage, d.LowerMemUsage)
+	memPercentText := firstNonEmpty(d.MemPerc, d.MemPercent)
+	pidsText := firstNonEmpty(d.PIDs, d.LowerPIDs)
+	memUsageBytes, memLimitBytes := ParseDockerMemoryUsage(memUsage)
+	pids, _ := strconv.ParseUint(strings.TrimSpace(pidsText), 10, 64)
+
+	return DockerStatsEntry{
+		ID:             id,
+		Container:      container,
+		Name:           strings.TrimPrefix(name, "/"),
+		CPUPercentText: cpuText,
+		CPUPercent:     ParsePercentString(cpuText),
+		MemUsage:       memUsage,
+		MemUsageBytes:  memUsageBytes,
+		MemLimitBytes:  memLimitBytes,
+		MemPercentText: memPercentText,
+		MemPercent:     ParsePercentString(memPercentText),
+		PIDs:           pids,
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+// ParseDockerMemoryUsage parses Docker MemUsage values like "128MiB / 2GiB".
+func ParseDockerMemoryUsage(value string) (usageBytes uint64, limitBytes uint64) {
+	parts := strings.SplitN(value, "/", 2)
+	if len(parts) == 0 {
+		return 0, 0
+	}
+	usageBytes = parseDockerByteQuantity(parts[0])
+	if len(parts) == 2 {
+		limitBytes = parseDockerByteQuantity(parts[1])
+	}
+	return usageBytes, limitBytes
+}
+
+func parseDockerByteQuantity(value string) uint64 {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+
+	splitAt := 0
+	for splitAt < len(value) {
+		ch := value[splitAt]
+		if (ch >= '0' && ch <= '9') || ch == '.' {
+			splitAt++
+			continue
+		}
+		break
+	}
+	if splitAt == 0 {
+		return 0
+	}
+
+	number, err := strconv.ParseFloat(strings.TrimSpace(value[:splitAt]), 64)
+	if err != nil || number < 0 {
+		return 0
+	}
+	unit := strings.TrimSpace(value[splitAt:])
+	multiplier := dockerByteMultiplier(unit)
+	if multiplier <= 0 {
+		return 0
+	}
+	return uint64(number * multiplier)
+}
+
+func dockerByteMultiplier(unit string) float64 {
+	switch strings.ToLower(strings.TrimSpace(unit)) {
+	case "", "b":
+		return 1
+	case "kb":
+		return 1000
+	case "kib":
+		return 1024
+	case "mb":
+		return 1000 * 1000
+	case "mib":
+		return 1024 * 1024
+	case "gb":
+		return 1000 * 1000 * 1000
+	case "gib":
+		return 1024 * 1024 * 1024
+	case "tb":
+		return 1000 * 1000 * 1000 * 1000
+	case "tib":
+		return 1024 * 1024 * 1024 * 1024
+	case "pb":
+		return 1000 * 1000 * 1000 * 1000 * 1000
+	case "pib":
+		return 1024 * 1024 * 1024 * 1024 * 1024
+	}
+	return 0
 }
 
 // collectSoftware queries installed software versions.
@@ -644,11 +800,15 @@ func (c *Collector) collectAgent() AgentInfo {
 	}
 }
 
-// parsePercentString strips a trailing "%" and parses to float64.
-func parsePercentString(s string) float64 {
+// ParsePercentString strips a trailing "%" and parses to float64.
+func ParsePercentString(s string) float64 {
 	s = strings.TrimSuffix(strings.TrimSpace(s), "%")
 	v, _ := strconv.ParseFloat(s, 64)
 	return v
+}
+
+func parsePercentString(s string) float64 {
+	return ParsePercentString(s)
 }
 
 // formatUptime formats seconds into a human-readable string like "2d 5h 32m".

@@ -556,3 +556,12 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `SYSINFO_DOCKER_TIMEOUT` — Timeout for Docker CLI commands during system info collection (default: 10s)
 - `SYSINFO_VERSION_TIMEOUT` — Timeout for version-check commands (default: 5s)
 - `SYSINFO_CACHE_TTL` — Cache duration for system info results (default: 5s)
+
+### Active Resource Monitoring
+
+- `DEFAULT_PSI_POLL_INTERVAL_SECONDS` — PSI memory pressure polling interval, in seconds (default: 10)
+- `DEFAULT_CONTAINER_STATS_INTERVAL_SECONDS` — Per-container `docker stats` polling interval, in seconds (default: 30)
+- `DEFAULT_PSI_MEMORY_SOME_WARNING_THRESHOLD` — Warning threshold for memory `some` PSI `avg10`/`avg60` (default: 25.0)
+- `DEFAULT_PSI_MEMORY_SOME_CRITICAL_THRESHOLD` — Critical threshold for memory `some` PSI `avg10`/`avg60` (default: 50.0)
+- `DEFAULT_PSI_MEMORY_FULL_WARNING_THRESHOLD` — Warning threshold for memory `full` PSI `avg10`/`avg60` (default: 10.0)
+- `DEFAULT_PSI_MEMORY_FULL_CRITICAL_THRESHOLD` — Critical threshold for memory `full` PSI `avg10`/`avg60` (default: 25.0)
