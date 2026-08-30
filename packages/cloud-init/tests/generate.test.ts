@@ -16,6 +16,8 @@ import YAML from 'yaml';
 
 import type { CloudInitVariables } from '../src/generate';
 import {
+  DEFAULT_SAM_INFRA_SLICE_MEMORY_MIN_MB,
+  DEFAULT_VM_AGENT_MEMORY_RESERVE_MB,
   generateCloudInit,
   indentForYamlBlock,
   VALID_CLOUD_PROVIDERS,
@@ -64,6 +66,101 @@ function runCaddySetupRuncmd(role: 'workspace' | 'deployment') {
     });
     const calls = existsSync(commandLog) ? readFileSync(commandLog, 'utf8').trim().split('\n') : [];
     return { calls, command, result };
+  } finally {
+    rmSync(scratchDir, { force: true, recursive: true });
+  }
+}
+
+interface CloudInitWriteFile {
+  path: string;
+  permissions?: string;
+  owner?: string;
+  content: string;
+}
+
+interface ParsedCloudInit {
+  runcmd: unknown[];
+  write_files: CloudInitWriteFile[];
+}
+
+function parseGeneratedCloudInit(overrides?: Partial<CloudInitVariables>): ParsedCloudInit {
+  return YAML.parse(generateCloudInit(baseVariables(overrides), { validateSize: false }));
+}
+
+function findWriteFile(parsed: ParsedCloudInit, path: string): CloudInitWriteFile {
+  const file = parsed.write_files.find((entry) => entry.path === path);
+  if (!file) {
+    throw new Error(`Rendered cloud-init is missing write_files entry ${path}`);
+  }
+  return file;
+}
+
+function runDockerMemoryConfigurator(options: {
+  totalMemoryMb: number;
+  reserveMb?: number;
+}): {
+  dropInContent: string;
+  result: ReturnType<typeof spawnSync>;
+  scriptContent: string;
+  runcmdEntry: string;
+} {
+  const parsed = parseGeneratedCloudInit(
+    options.reserveMb === undefined
+      ? undefined
+      : { vmAgentMemoryReserveMb: String(options.reserveMb) }
+  );
+  const scriptContent = findWriteFile(
+    parsed,
+    '/usr/local/sbin/sam-configure-docker-memory.sh'
+  ).content;
+  const runcmdEntry = parsed.runcmd.find(
+    (entry) =>
+      typeof entry === 'string' && entry.includes('/usr/local/sbin/sam-configure-docker-memory.sh')
+  );
+  if (typeof runcmdEntry !== 'string') {
+    throw new Error('Rendered cloud-init is missing the resource-isolation runcmd entry');
+  }
+
+  const scratchDir = mkdtempSync(join(tmpdir(), 'sam-cloud-init-docker-memory-'));
+  const binDir = join(scratchDir, 'bin');
+  const dropInDir = join(scratchDir, 'docker.service.d');
+  const meminfoPath = join(scratchDir, 'meminfo');
+  const scriptPath = join(scratchDir, 'sam-configure-docker-memory.sh');
+  mkdirSync(binDir);
+
+  writeFileSync(
+    join(binDir, 'logger'),
+    '#!/bin/sh\nprintf "%s\\n" "$*" >> "$SAM_BOOT_LOG"\n',
+    { mode: 0o755 }
+  );
+  writeFileSync(
+    meminfoPath,
+    [
+      `MemTotal:       ${options.totalMemoryMb * 1024} kB`,
+      'MemFree:        123456 kB',
+      'MemAvailable:   234567 kB',
+      'Buffers:         34567 kB',
+      'Cached:         456789 kB',
+      'SwapTotal:     2097152 kB',
+      'SwapFree:      2097152 kB',
+    ].join('\n') + '\n'
+  );
+  writeFileSync(scriptPath, scriptContent, { mode: 0o755 });
+
+  try {
+    const result = spawnSync('/bin/sh', [scriptPath], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ''}`,
+        SAM_BOOT_LOG: join(scratchDir, 'sam-boot.log'),
+        SAM_MEMINFO_PATH: meminfoPath,
+        SAM_DOCKER_SERVICE_DROPIN_DIR: dropInDir,
+      },
+    });
+    const dropInPath = join(dropInDir, 'resource-limits.conf');
+    const dropInContent = existsSync(dropInPath) ? readFileSync(dropInPath, 'utf8') : '';
+    return { dropInContent, result, scriptContent, runcmdEntry };
   } finally {
     rmSync(scratchDir, { force: true, recursive: true });
   }
@@ -211,6 +308,115 @@ describe('generateCloudInit', () => {
       );
       expect(config).toContain('"dns": ["10.0.0.1", "10.0.0.2"]');
       expect(config).not.toContain('1.1.1.1');
+    });
+  });
+
+  describe('vm-agent resource isolation', () => {
+    it('adds OOM score protection and the infrastructure slice to vm-agent.service', () => {
+      const parsed = parseGeneratedCloudInit();
+      const unitFile = findWriteFile(parsed, '/etc/systemd/system/vm-agent.service');
+      const serviceSection = unitFile.content.split('[Service]')[1]?.split('[Install]')[0];
+
+      expect(serviceSection).toBeDefined();
+      expect(serviceSection).toContain('User=root');
+      expect(serviceSection).toContain('Slice=sam-infra.slice');
+      expect(serviceSection).toContain('OOMScoreAdjust=-900');
+      expect(serviceSection).toContain('ExecStart=/usr/local/bin/vm-agent');
+    });
+
+    it('writes sam-infra.slice with the vm-agent memory reservation', () => {
+      const parsed = parseGeneratedCloudInit();
+      const sliceFile = findWriteFile(parsed, '/etc/systemd/system/sam-infra.slice');
+
+      expect(sliceFile.permissions).toBe('0644');
+      expect(sliceFile.content).toContain('[Unit]');
+      expect(sliceFile.content).toContain('Description=SAM infrastructure services');
+      expect(sliceFile.content).toContain('[Slice]');
+      expect(sliceFile.content).toContain('MemoryAccounting=yes');
+      expect(sliceFile.content).toContain(
+        `MemoryMin=${DEFAULT_SAM_INFRA_SLICE_MEMORY_MIN_MB}M`
+      );
+    });
+
+    it('configures Docker memory limits before vm-agent starts', () => {
+      const parsed = parseGeneratedCloudInit();
+      const runcmd = parsed.runcmd as string[];
+      const resourceIsolationIdx = runcmd.findIndex(
+        (entry) =>
+          typeof entry === 'string' && entry.includes('PHASE START: resource-isolation')
+      );
+      const dockerConfiguratorIdx = runcmd.findIndex(
+        (entry) =>
+          typeof entry === 'string' &&
+          entry.includes('/usr/local/sbin/sam-configure-docker-memory.sh')
+      );
+      const dockerRestartIdx = runcmd.findIndex(
+        (entry) =>
+          typeof entry === 'string' &&
+          entry.includes('systemctl daemon-reload') &&
+          entry.includes('systemctl restart docker')
+      );
+      const agentStartIdx = runcmd.findIndex(
+        (entry) => typeof entry === 'string' && entry.includes('systemctl start vm-agent')
+      );
+
+      expect(resourceIsolationIdx).toBeGreaterThan(-1);
+      expect(dockerConfiguratorIdx).toBeGreaterThan(resourceIsolationIdx);
+      expect(dockerRestartIdx).toBeGreaterThan(dockerConfiguratorIdx);
+      expect(agentStartIdx).toBeGreaterThan(dockerConfiguratorIdx);
+      expect(agentStartIdx).toBeGreaterThan(dockerRestartIdx);
+
+      const dockerRestartEntry = runcmd[dockerRestartIdx];
+      expect(dockerRestartEntry).toContain('set -eu');
+      expect(dockerRestartEntry).toContain('systemctl daemon-reload');
+      expect(dockerRestartEntry).toContain("grep -q '^docker.service'");
+      expect(dockerRestartEntry).not.toContain('pipefail');
+      expect(dockerRestartEntry).not.toContain('<<<');
+      expect(dockerRestartEntry).not.toContain('[[');
+    });
+
+    it.each([
+      ['small', 4096, 3328],
+      ['medium', 8192, 7424],
+      ['large', 16384, 15616],
+    ] as const)(
+      'derives Docker MemoryMax from %s VM memory minus the default reserve',
+      (_vmSize, totalMemoryMb, expectedDockerMemoryMaxMb) => {
+        const { dropInContent, result, scriptContent, runcmdEntry } =
+          runDockerMemoryConfigurator({ totalMemoryMb });
+
+        expect(result.error).toBeUndefined();
+        expect(result.status, result.stderr).toBe(0);
+        expect(runcmdEntry).toBe('/usr/local/sbin/sam-configure-docker-memory.sh');
+        expect(scriptContent).toContain('#!/bin/sh');
+        expect(scriptContent).toContain(
+          `VM_AGENT_MEMORY_RESERVE_MB="${DEFAULT_VM_AGENT_MEMORY_RESERVE_MB}"`
+        );
+        expect(scriptContent).toContain('/etc/systemd/system/docker.service.d');
+        expect(scriptContent).toContain('resource-limits.conf');
+        expect(scriptContent).not.toContain('pipefail');
+        expect(scriptContent).not.toContain('<<<');
+        expect(dropInContent).toBe(
+          [
+            '[Service]',
+            'MemoryAccounting=yes',
+            `MemoryMax=${expectedDockerMemoryMaxMb}M`,
+            '',
+          ].join('\n')
+        );
+      }
+    );
+
+    it('uses the configured reserve when deriving Docker MemoryMax', () => {
+      const { dropInContent, result, scriptContent } = runDockerMemoryConfigurator({
+        totalMemoryMb: 4096,
+        reserveMb: 1024,
+      });
+
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr).toBe(0);
+      expect(scriptContent).toContain('VM_AGENT_MEMORY_RESERVE_MB="1024"');
+      expect(dropInContent).toContain('MemoryMax=3072M');
     });
   });
 
@@ -2211,6 +2417,20 @@ describe('swap file configuration', () => {
     );
     expect(sysctlFile).toBeDefined();
     expect(sysctlFile.content.trim()).toBe('vm.swappiness=60');
+  });
+
+  it('accepts a positive vm-agent memory reserve override', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ vmAgentMemoryReserveMb: '1024' }))
+    ).not.toThrow();
+  });
+
+  it('rejects invalid vm-agent memory reserve overrides', () => {
+    for (const invalidReserve of ['0', '-1', '768M', '768; reboot', '99999']) {
+      expect(() =>
+        validateCloudInitVariables(baseVariables({ vmAgentMemoryReserveMb: invalidReserve }))
+      ).toThrow('vmAgentMemoryReserveMb');
+    }
   });
 });
 

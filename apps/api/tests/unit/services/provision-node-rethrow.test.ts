@@ -139,6 +139,7 @@ const ENV = {
   SESSION_SNAPSHOT_OPERATION_TIMEOUT: '12m30s',
   SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL: '3s',
   SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT: '750ms',
+  VM_AGENT_MEMORY_RESERVE_MB: '1024',
 } as unknown as Parameters<typeof provisionNode>[1];
 
 beforeEach(() => {
@@ -225,6 +226,7 @@ describe('provisionNode backend DNS records', () => {
         sessionSnapshotOperationTimeout: '12m30s',
         sessionSnapshotProgressReportInterval: '3s',
         sessionSnapshotProgressReportTimeout: '750ms',
+        vmAgentMemoryReserveMb: '1024',
       })
     );
   });
