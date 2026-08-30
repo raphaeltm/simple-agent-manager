@@ -130,7 +130,7 @@ Columns touched in this task:
   - [x] endpoint counts returned after the fix.
 - [ ] Verify real `/mcp` `list_project_agents` on staging excludes superseded rows and marks sleeping.
   - Blocked for live staging fixture seeding: the available Cloudflare token can read D1 but cannot write D1 or KV, and the public API has no safe task-scoped MCP token producer that avoids starting a real agent/workspace session. Local MCP route tests cover the real handler and shared service contract.
-- [ ] Append a short "what shipped" note to idea `01M0SG7ZEE1XARK4QDG7V6HDPN`.
+- [x] Append a short "what shipped" note to idea `01M0SG7ZEE1XARK4QDG7V6HDPN`.
 
 ## Staging verification evidence
 
