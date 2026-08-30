@@ -30,6 +30,7 @@ import { runSessionTaskReconciliation } from './session-task-reconciliation';
 import { runSetupSessionSweep } from './setup-session-sweep';
 import { recoverStuckTasks } from './stuck-tasks';
 import { createSweepIsolator } from './sweep-isolation';
+import { runTerminalSessionLedgerReconciliation } from './terminal-session-ledger-reconciliation';
 import { runTrialExpireSweep } from './trial-expire';
 import { runTrialRolloverAudit } from './trial-rollover';
 import { runTrialWaitlistCleanup } from './trial-waitlist-cleanup';
@@ -149,6 +150,9 @@ export async function scheduled(
   const sessionTaskRepair = await sweeps.isolate('session_task_reconciliation', () =>
     runSessionTaskReconciliation(env)
   );
+  const terminalSessionLedger = await sweeps.isolate('terminal_session_ledger_reconciliation', () =>
+    runTerminalSessionLedgerReconciliation(env)
+  );
   const sessionSleep = await sweeps.isolate('session_sleep', () =>
     runSessionSleepSweep(env, new Date(), ctx)
   );
@@ -249,6 +253,16 @@ export async function scheduled(
     sessionTaskRepairReused: sessionTaskRepair?.reused,
     sessionTaskRepairErrors: sessionTaskRepair?.errors,
     sessionTaskRepairResidual: sessionTaskRepair?.residual,
+    terminalSessionLedgerProjectsScanned: terminalSessionLedger?.projectsScanned,
+    terminalSessionLedgerProjectsReconciled: terminalSessionLedger?.projectsReconciled,
+    terminalSessionLedgerProjectErrors: terminalSessionLedger?.projectErrors,
+    terminalSessionLedgerSelected: terminalSessionLedger?.selected,
+    terminalSessionLedgerStopped: terminalSessionLedger?.stopped,
+    terminalSessionLedgerFailed: terminalSessionLedger?.failed,
+    terminalSessionLedgerDeferred: terminalSessionLedger?.deferred,
+    terminalSessionLedgerSkipped: terminalSessionLedger?.skipped,
+    terminalSessionLedgerErrors: terminalSessionLedger?.errors,
+    terminalSessionLedgerRemainingProjects: terminalSessionLedger?.remainingCandidateProjects,
     sessionSleepSelected: sessionSleep?.selected,
     sessionSleepReconciled: sessionSleep?.reconciled,
     sessionSleepClaimed: sessionSleep?.claimed,

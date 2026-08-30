@@ -61,6 +61,7 @@ import { readTaskAcpLivenessSignals } from './task-runtime-liveness';
 import { resolveTaskWaitConfig } from './task-wait-config';
 import { processTaskWaits } from './task-wait-supervisor';
 import * as taskWaits from './task-waits';
+import * as terminalSessionReconciliation from './terminal-session-reconciliation';
 import * as toolPayloadArchive from './tool-payload-archive';
 import type { Env, SummaryData } from './types';
 
@@ -290,6 +291,23 @@ export class ProjectData extends DurableObject<Env> {
       return true;
     }
     return false;
+  }
+
+  async reconcileTerminalTaskSessions(
+    input: terminalSessionReconciliation.TerminalSessionReconciliationInput = {}
+  ): Promise<terminalSessionReconciliation.TerminalSessionReconciliationStats> {
+    const projectId = this.getProjectId();
+    if (!projectId) return terminalSessionReconciliation.emptyTerminalSessionReconciliationStats();
+    return terminalSessionReconciliation.reconcileTerminalTaskSessions(
+      this.sql,
+      this.env,
+      projectId,
+      {
+        stopSession: (sessionId) => this.stopSession(sessionId),
+        failSession: (sessionId, errorMessage) => this.failSession(sessionId, errorMessage),
+      },
+      input
+    );
   }
 
   async persistMessage(

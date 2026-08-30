@@ -153,23 +153,33 @@ export async function seedTask(
   opts?: {
     title?: string;
     status?: string;
+    chatSessionId?: string | null;
+    recoverySourceTaskId?: string | null;
     workspaceId?: string;
     autoProvisionedNodeId?: string;
     executionStep?: string;
     taskMode?: string;
     startedAt?: string;
+    completedAt?: string | null;
+    errorMessage?: string | null;
+    triggeredBy?: string;
     updatedAt?: string;
   }
 ): Promise<void> {
   const updatedAt = opts?.updatedAt ?? new Date().toISOString();
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO tasks (id, project_id, user_id, title, status, workspace_id, auto_provisioned_node_id, execution_step, task_mode, started_at, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)`
+    `INSERT OR IGNORE INTO tasks
+       (id, project_id, user_id, chat_session_id, recovery_source_task_id, title, status,
+        workspace_id, auto_provisioned_node_id, execution_step, task_mode, started_at,
+        completed_at, error_message, triggered_by, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)`
   )
     .bind(
       taskId,
       projectId,
       userId,
+      opts?.chatSessionId ?? null,
+      opts?.recoverySourceTaskId ?? null,
       opts?.title ?? `Test task ${taskId}`,
       opts?.status ?? 'delegated',
       opts?.workspaceId ?? null,
@@ -177,6 +187,9 @@ export async function seedTask(
       opts?.executionStep ?? null,
       opts?.taskMode ?? 'task',
       opts?.startedAt ?? null,
+      opts?.completedAt ?? null,
+      opts?.errorMessage ?? null,
+      opts?.triggeredBy ?? 'user',
       userId,
       updatedAt
     )

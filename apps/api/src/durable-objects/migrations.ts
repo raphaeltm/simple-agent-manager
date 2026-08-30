@@ -1630,6 +1630,17 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '041-terminal-session-reconcile-marker',
+    run: (sql) => {
+      sql.exec('ALTER TABLE chat_sessions ADD COLUMN terminal_reconcile_deferred_until INTEGER');
+      sql.exec('ALTER TABLE chat_sessions ADD COLUMN terminal_reconcile_defer_reason TEXT');
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_chat_sessions_terminal_reconcile
+        ON chat_sessions(status, terminal_reconcile_deferred_until, updated_at, id)
+      `);
+    },
+  },
 ];
 
 /**
