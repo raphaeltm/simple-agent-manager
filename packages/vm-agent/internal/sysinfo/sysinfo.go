@@ -28,6 +28,8 @@ var (
 	GoVersionBuild = "unknown"
 )
 
+const dockerCommandSafePath = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 // SystemInfo is the full system information response.
 type SystemInfo struct {
 	CPU      CPUInfo      `json:"cpu"`
@@ -620,7 +622,9 @@ func CollectDockerStats(ctx context.Context, timeout time.Duration, containerIDs
 	defer cancel()
 
 	args := append([]string{"stats", "--no-stream", "--format", "{{json .}}"}, containerIDs...)
-	out, err := exec.CommandContext(statsCtx, "docker", args...).Output()
+	cmd := exec.CommandContext(statsCtx, "docker", args...) // NOSONAR: Docker CLI is required here; Env below pins PATH to fixed system directories.
+	cmd.Env = append(os.Environ(), dockerCommandSafePath)
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
 	}

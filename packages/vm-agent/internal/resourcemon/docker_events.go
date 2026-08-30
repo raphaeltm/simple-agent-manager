@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 const (
 	DockerWorkspaceIDLabel = "sam.workspace.id"
 	DockerOOMExitCode      = "137"
+	dockerCommandSafePath  = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 )
 
 // ContainerOOMEvent is emitted when Docker reports a container OOM or die-137 event.
@@ -77,13 +79,15 @@ func NewDockerEventSubscriber(cfg DockerEventSubscriberConfig) *DockerEventSubsc
 }
 
 func defaultDockerEventCommand(ctx context.Context) *exec.Cmd {
-	return exec.CommandContext(ctx,
+	cmd := exec.CommandContext(ctx, // NOSONAR: Docker CLI is required here; Env below pins PATH to fixed system directories.
 		"docker",
 		"events",
 		"--filter", "event=oom",
 		"--filter", "event=die",
 		"--format", "{{json .}}",
 	)
+	cmd.Env = append(os.Environ(), dockerCommandSafePath)
+	return cmd
 }
 
 // Start launches the long-running docker events subprocess.

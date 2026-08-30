@@ -11,88 +11,91 @@ import (
 
 func TestParseDockerOOMEvent(t *testing.T) {
 	tests := []struct {
-		name            string
-		input           string
-		wantOK          bool
-		wantAction      string
-		wantExitCode    string
-		wantWorkspaceID string
-		wantContainerID string
-		wantName        string
+		name    string
+		input   string
+		want    parsedDockerOOMEvent
+		wantErr bool
 	}{
 		{
-			name:            "oom event",
-			input:           `{"status":"oom","id":"abc123","Type":"container","Action":"oom","Actor":{"ID":"abc123","Attributes":{"name":"workspace-app","sam.workspace.id":"ws-1"}},"time":1780000000}`,
-			wantOK:          true,
-			wantAction:      "oom",
-			wantWorkspaceID: "ws-1",
-			wantContainerID: "abc123",
-			wantName:        "workspace-app",
+			name:  "oom event",
+			input: `{"status":"oom","id":"abc123","Type":"container","Action":"oom","Actor":{"ID":"abc123","Attributes":{"name":"workspace-app","sam.workspace.id":"ws-1"}},"time":1780000000}`,
+			want: parsedDockerOOMEvent{
+				ok:            true,
+				action:        "oom",
+				workspaceID:   "ws-1",
+				containerID:   "abc123",
+				containerName: "workspace-app",
+			},
 		},
 		{
-			name:            "die 137 event",
-			input:           `{"status":"die","id":"def456","Type":"container","Action":"die","Actor":{"ID":"def456","Attributes":{"name":"worker","sam.workspace.id":"ws-2","exitCode":"137"}},"timeNano":1780000000123456789}`,
-			wantOK:          true,
-			wantAction:      "die",
-			wantExitCode:    "137",
-			wantWorkspaceID: "ws-2",
-			wantContainerID: "def456",
-			wantName:        "worker",
+			name:  "die 137 event",
+			input: `{"status":"die","id":"def456","Type":"container","Action":"die","Actor":{"ID":"def456","Attributes":{"name":"worker","sam.workspace.id":"ws-2","exitCode":"137"}},"timeNano":1780000000123456789}`,
+			want: parsedDockerOOMEvent{
+				ok:            true,
+				action:        "die",
+				exitCode:      "137",
+				workspaceID:   "ws-2",
+				containerID:   "def456",
+				containerName: "worker",
+			},
 		},
 		{
-			name:   "die non oom ignored",
-			input:  `{"status":"die","id":"ghi789","Type":"container","Action":"die","Actor":{"ID":"ghi789","Attributes":{"name":"worker","sam.workspace.id":"ws-3","exitCode":"0"}}}`,
-			wantOK: false,
+			name:  "die non oom ignored",
+			input: `{"status":"die","id":"ghi789","Type":"container","Action":"die","Actor":{"ID":"ghi789","Attributes":{"name":"worker","sam.workspace.id":"ws-3","exitCode":"0"}}}`,
 		},
 		{
-			name:   "non container event ignored",
-			input:  `{"status":"oom","id":"abc123","Type":"volume","Action":"oom","Actor":{"ID":"abc123","Attributes":{"name":"worker"}}}`,
-			wantOK: false,
+			name:  "non container event ignored",
+			input: `{"status":"oom","id":"abc123","Type":"volume","Action":"oom","Actor":{"ID":"abc123","Attributes":{"name":"worker"}}}`,
 		},
 		{
-			name:   "invalid json",
-			input:  `not json`,
-			wantOK: false,
+			name:    "invalid json",
+			input:   `not json`,
+			wantErr: true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			event, ok, err := ParseDockerOOMEvent(test.input)
-			if test.input == "not json" {
-				if err == nil {
-					t.Fatal("expected parse error")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("ParseDockerOOMEvent() error = %v", err)
-			}
-			if ok != test.wantOK {
-				t.Fatalf("ParseDockerOOMEvent() ok = %v, want %v", ok, test.wantOK)
-			}
-			if !ok {
-				return
-			}
-			if event.Action != test.wantAction {
-				t.Fatalf("Action = %q, want %q", event.Action, test.wantAction)
-			}
-			if event.ExitCode != test.wantExitCode {
-				t.Fatalf("ExitCode = %q, want %q", event.ExitCode, test.wantExitCode)
-			}
-			if event.WorkspaceID != test.wantWorkspaceID {
-				t.Fatalf("WorkspaceID = %q, want %q", event.WorkspaceID, test.wantWorkspaceID)
-			}
-			if event.ContainerID != test.wantContainerID {
-				t.Fatalf("ContainerID = %q, want %q", event.ContainerID, test.wantContainerID)
-			}
-			if event.ContainerName != test.wantName {
-				t.Fatalf("ContainerName = %q, want %q", event.ContainerName, test.wantName)
-			}
-			if event.OccurredAt.IsZero() {
-				t.Fatal("OccurredAt should be set")
-			}
+			assertParsedDockerOOMEvent(t, event, ok, err, test.want, test.wantErr)
 		})
+	}
+}
+
+type parsedDockerOOMEvent struct {
+	ok            bool
+	action        string
+	exitCode      string
+	workspaceID   string
+	containerID   string
+	containerName string
+}
+
+func assertParsedDockerOOMEvent(t *testing.T, event ContainerOOMEvent, ok bool, err error, want parsedDockerOOMEvent, wantErr bool) {
+	t.Helper()
+	if (err != nil) != wantErr {
+		t.Fatalf("ParseDockerOOMEvent() error = %v, wantErr %v", err, wantErr)
+	}
+	if wantErr {
+		return
+	}
+	if err != nil {
+		t.Fatalf("ParseDockerOOMEvent() error = %v", err)
+	}
+
+	got := parsedDockerOOMEvent{
+		ok:            ok,
+		action:        event.Action,
+		exitCode:      event.ExitCode,
+		workspaceID:   event.WorkspaceID,
+		containerID:   event.ContainerID,
+		containerName: event.ContainerName,
+	}
+	if got != want {
+		t.Fatalf("ParseDockerOOMEvent() = %#v, want %#v", got, want)
+	}
+	if ok && event.OccurredAt.IsZero() {
+		t.Fatal("OccurredAt should be set")
 	}
 }
 
