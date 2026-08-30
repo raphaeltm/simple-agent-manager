@@ -69,7 +69,15 @@ export function useActivityVerifyTimer({
     };
 
     armVerifyTimer();
-  }, [delayMs, logMessage, onStateSnapshot, onVerifiedIdle, projectId, sessionId, stopVerifyDecayTimer]);
+  }, [
+    delayMs,
+    logMessage,
+    onStateSnapshot,
+    onVerifiedIdle,
+    projectId,
+    sessionId,
+    stopVerifyDecayTimer,
+  ]);
 
   useEffect(() => stopVerifyDecayTimer, [stopVerifyDecayTimer]);
 

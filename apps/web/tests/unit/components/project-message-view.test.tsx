@@ -1207,21 +1207,22 @@ describe('ProjectMessageView — collapsible session header', () => {
       expect(screen.getByText('Session sess-3')).toBeTruthy();
     });
 
-    // Expand
-    const expandButton = screen.getByRole('button', { name: /show session details/i });
-    fireEvent.click(expandButton);
+    // The details control is a toggle in the tool rail. Its accessible NAME is stable
+    // and the open/closed state rides on `aria-expanded`, so both directions use the
+    // same button rather than a name that flips between "Show" and "Hide".
+    const detailsToggle = screen.getByRole('button', { name: /show session details/i });
 
+    fireEvent.click(detailsToggle);
     await waitFor(() => {
       expect(screen.getByText('sam/collapse-test')).toBeTruthy();
     });
 
-    // Collapse
-    const collapseButton = screen.getByRole('button', { name: /hide session details/i });
-    fireEvent.click(collapseButton);
-
+    fireEvent.click(detailsToggle);
     await waitFor(() => {
       expect(screen.queryByText('sam/collapse-test')).toBeNull();
     });
+    // Liveness beside the absence assertion: the session is still rendered.
+    expect(screen.getByText('Session sess-3')).toBeTruthy();
   });
 
   it('sets aria-expanded attribute correctly on toggle', async () => {
@@ -1251,14 +1252,13 @@ describe('ProjectMessageView — collapsible session header', () => {
       expect(screen.getByText('Session sess-aria')).toBeTruthy();
     });
 
-    const expandButton = screen.getByRole('button', { name: /show session details/i });
-    expect(expandButton.getAttribute('aria-expanded')).toBe('false');
+    const detailsToggle = screen.getByRole('button', { name: /show session details/i });
+    expect(detailsToggle.getAttribute('aria-expanded')).toBe('false');
 
-    fireEvent.click(expandButton);
+    fireEvent.click(detailsToggle);
 
     await waitFor(() => {
-      const collapseButton = screen.getByRole('button', { name: /hide session details/i });
-      expect(collapseButton.getAttribute('aria-expanded')).toBe('true');
+      expect(detailsToggle.getAttribute('aria-expanded')).toBe('true');
     });
   });
 
@@ -2423,16 +2423,12 @@ describe('ProjectMessageView — inline idle indicator', () => {
       />
     );
 
+    // Complete is in the tool rail now — reachable without opening any disclosure.
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Show session details' })).toBeTruthy();
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Show session details' }));
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Complete' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Mark this task complete' })).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Complete' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mark this task complete' }));
     expect(screen.getByRole('dialog', { name: 'Mark task as complete?' })).toBeTruthy();
     expect(mocks.updateProjectTaskStatus).not.toHaveBeenCalled();
 
@@ -2660,9 +2656,8 @@ describe('ProjectMessageView — timeline jump-to-message', () => {
       expect(screen.getByTestId('virtuoso-scroller').textContent).toContain('JUMPME');
     });
 
-    // Expand the session header, then open the Timeline drawer.
-    fireEvent.click(screen.getByRole('button', { name: 'Show session details' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Timeline' }));
+    // Timeline is in the tool rail now — no disclosure to open first.
+    fireEvent.click(screen.getByRole('button', { name: 'Jump through session history' }));
 
     const drawer = await screen.findByRole('dialog', { name: 'Session timeline' });
 

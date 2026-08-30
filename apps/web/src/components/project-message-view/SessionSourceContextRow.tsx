@@ -32,14 +32,25 @@ export function SessionSourceContextRow({
             </span>
           </Link>
         ) : (
-          <span className="min-w-0 max-w-full truncate text-fg-primary" title={sourceContext.parentTitle}>
+          <span
+            className="min-w-0 max-w-full truncate text-fg-primary"
+            title={sourceContext.parentTitle}
+          >
             {sourceContext.parentTitle}
           </span>
         )}
         <span className="text-[10px] text-fg-muted">{sourceContext.lineageText}</span>
-        <CopyableId label="Parent task" value={sourceContext.parentTaskId} icon={<Tag size={9} />} />
+        <CopyableId
+          label="Parent task"
+          value={sourceContext.parentTaskId}
+          icon={<Tag size={9} />}
+        />
         {sourceContext.parentSessionId && (
-          <CopyableId label="Parent session" value={sourceContext.parentSessionId} icon={<Hash size={9} />} />
+          <CopyableId
+            label="Parent session"
+            value={sourceContext.parentSessionId}
+            icon={<Hash size={9} />}
+          />
         )}
         {onShowHierarchy && (
           <button

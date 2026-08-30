@@ -47,10 +47,10 @@ export function FloatingHeader({
   const taskStatus = lc.taskEmbed?.status;
   const hasRecoverableTaskError = Boolean(
     lc.taskEmbed?.errorMessage &&
-      lc.taskEmbed?.taskMode === 'conversation' &&
-      taskStatus !== 'failed' &&
-      taskStatus !== 'cancelled' &&
-      taskStatus !== 'completed'
+    lc.taskEmbed?.taskMode === 'conversation' &&
+    taskStatus !== 'failed' &&
+    taskStatus !== 'cancelled' &&
+    taskStatus !== 'completed'
   );
   const failureClassification = lc.taskEmbed?.errorMessage
     ? classifyFailure(lc.taskEmbed.errorMessage, lc.taskEmbed.executionStep ?? undefined)

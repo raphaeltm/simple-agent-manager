@@ -83,6 +83,12 @@ export interface SessionToolAction {
   /** Set for Workspace, which navigates rather than invoking a handler. */
   href?: string;
   disabled?: boolean;
+  /**
+   * Present on actions that toggle a disclosure, rendered as `aria-expanded`. The
+   * accessible NAME stays stable while this changes — screen readers announce the
+   * state from the attribute, so varying both is redundant.
+   */
+  expanded?: boolean;
 }
 
 export interface BuildSessionToolActionsInput {
@@ -101,11 +107,11 @@ export interface BuildSessionToolActionsInput {
   hasForkHandler: boolean;
   /** True while a mark-complete request is in flight. */
   completing?: boolean;
+  /** Drives `aria-expanded` on the Details action. */
+  detailsExpanded?: boolean;
 }
 
-export function buildSessionToolActions(
-  input: BuildSessionToolActionsInput
-): SessionToolAction[] {
+export function buildSessionToolActions(input: BuildSessionToolActionsInput): SessionToolAction[] {
   const {
     session,
     sessionState,
@@ -119,6 +125,7 @@ export function buildSessionToolActions(
     hasRetryHandler,
     hasForkHandler,
     completing = false,
+    detailsExpanded = false,
   } = input;
 
   const actions: SessionToolAction[] = [];
@@ -234,6 +241,7 @@ export function buildSessionToolActions(
     hint: 'Show session details, IDs and infrastructure',
     icon: Info,
     group: 'meta',
+    expanded: detailsExpanded,
   });
 
   return actions;

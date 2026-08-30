@@ -198,6 +198,7 @@ export function SessionToolRail({
                   onClick={() => onSelect(action.id)}
                   disabled={action.disabled}
                   aria-label={action.hint}
+                  aria-expanded={action.expanded}
                   title={action.hint}
                   data-testid={`session-tool-${action.id}`}
                   className={buttonClass}

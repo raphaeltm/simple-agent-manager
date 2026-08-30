@@ -157,6 +157,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
       hasRetryHandler: !!onRetry,
       hasForkHandler: !!onFork,
       completing,
+      detailsExpanded,
     });
   }, [
     session,
@@ -171,6 +172,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     onRetry,
     onFork,
     completing,
+    detailsExpanded,
   ]);
 
   const selectTool = useCallback(
