@@ -1,3 +1,4 @@
+import type { CredentialProvider } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -38,6 +39,20 @@ vi.mock('../../../src/middleware/auth', () => ({
     session: { id: 'session-1', token: null, expiresAt: new Date() },
   }),
 }));
+
+vi.mock('../../../src/services/provider-catalogs', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../../src/services/provider-catalogs')>();
+
+  return {
+    ...actual,
+    buildProviderCatalogForCredential: vi.fn(
+      async (input: { seed: { provider: CredentialProvider } }) => ({
+        offerings: actual.getStaticProviderCatalogOfferings(input.seed.provider),
+      })
+    ),
+  };
+});
 
 const { capacityPoolRoutes } = await import('../../../src/routes/projects/capacity-pools');
 
