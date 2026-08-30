@@ -12,10 +12,13 @@
  *   - tool-definitions-comment-tools.ts       (message comment threads)
  *   - tool-definitions-trigger-tools.ts       (trigger management — cron automation)
  *   - tool-definitions-incident-tools.ts      (private feedback incident backlog)
+ *   - tool-definitions-event-subscription-tools.ts (ProjectData event subscriptions)
+ *   - tool-definitions-project-event-tools.ts (ProjectData event retrieval + ack)
  */
 
 export { COMMENT_TOOLS } from './tool-definitions-comment-tools';
 export { DEPLOYMENT_TOOLS } from './tool-definitions-deployment-tools';
+export { PROJECT_EVENT_SUBSCRIPTION_TOOLS } from './tool-definitions-event-subscription-tools';
 export { INCIDENT_TOOLS } from './tool-definitions-incident-tools';
 export { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
 export { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
@@ -26,6 +29,7 @@ export { ORCHESTRATOR_LIFECYCLE_TOOLS } from './tool-definitions-orchestrator-to
 export { POLICY_TOOLS } from './tool-definitions-policy-tools';
 export { PROFILE_TOOLS } from './tool-definitions-profile-tools';
 export { PROJECT_AWARENESS_TOOLS } from './tool-definitions-project-awareness';
+export { PROJECT_EVENT_TOOLS } from './tool-definitions-project-event-tools';
 export { SESSION_IDEA_TOOLS } from './tool-definitions-session-idea-tools';
 export { SKILL_TOOLS } from './tool-definitions-skill-tools';
 export { TASK_LIFECYCLE_TOOLS } from './tool-definitions-task-tools';
@@ -34,6 +38,7 @@ export { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';
 
 import { COMMENT_TOOLS } from './tool-definitions-comment-tools';
 import { DEPLOYMENT_TOOLS } from './tool-definitions-deployment-tools';
+import { PROJECT_EVENT_SUBSCRIPTION_TOOLS } from './tool-definitions-event-subscription-tools';
 import { INCIDENT_TOOLS } from './tool-definitions-incident-tools';
 import { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
 import { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
@@ -44,6 +49,7 @@ import { ORCHESTRATOR_LIFECYCLE_TOOLS } from './tool-definitions-orchestrator-to
 import { POLICY_TOOLS } from './tool-definitions-policy-tools';
 import { PROFILE_TOOLS } from './tool-definitions-profile-tools';
 import { PROJECT_AWARENESS_TOOLS } from './tool-definitions-project-awareness';
+import { PROJECT_EVENT_TOOLS } from './tool-definitions-project-event-tools';
 import { SESSION_IDEA_TOOLS } from './tool-definitions-session-idea-tools';
 import { SKILL_TOOLS } from './tool-definitions-skill-tools';
 import { TASK_LIFECYCLE_TOOLS } from './tool-definitions-task-tools';
@@ -60,6 +66,8 @@ export const MCP_TOOLS = [
   ...ORCHESTRATION_TOOLS,
   ...COMMENT_TOOLS,
   ...LIBRARY_FILE_COMMENT_TOOLS,
+  ...PROJECT_EVENT_SUBSCRIPTION_TOOLS,
+  ...PROJECT_EVENT_TOOLS,
   ...TRIGGER_TOOLS,
   ...INCIDENT_TOOLS,
   ...PROFILE_TOOLS,

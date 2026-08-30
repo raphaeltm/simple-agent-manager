@@ -261,6 +261,8 @@ When a sleeping VM conversation needs a replacement runtime, one D1 transaction 
 
 ProjectData also owns the single durable prompt-delivery queue used by browser followups and agent handoffs. Acceptance persists the visible transcript message and its stable delivery identity before runtime I/O. Alarm-driven attempts use bounded exponential backoff, a finite lifetime, compare-and-set attempt tokens, and stable VM receipts. A lost response is reconciled before retry; if receipt evidence is unavailable or belongs to another runtime, the delivery becomes explicitly ambiguous and is not replayed.
 
+ProjectData stores the durable foundation for project event subscriptions in the same per-project SQLite database. Normalized events are admitted by project, source, delivery key, and payload fingerprint; duplicate replays are idempotent, while the same source/key with a different fingerprint becomes a visible conflict. V1 subscription filters compile only allowlisted exact/set match keys for source, event type, subject type, subject ID, and severity. Delivery batches resolve the subscription's requested delivery through an explicit adapter-capability and authorization decision, then store requested delivery, resolved delivery, and the adapter decision separately for audit. Migration `040-project-event-pull-ack` adds the pull-model acknowledgement state (`ack_required`, `delivered_at`, `acked_at`, and `acked_by_*`) plus a replay index over subscription matches. Agents use MCP to list missed/queued summaries, fetch full event details on demand, and ack processed deliveries. The resolver can record pending durable-queue, runtime-adapter, or spawn decisions, but this foundation still does not inject prompts, steer runtimes, interrupt sessions, or spawn tasks. Future delivery surfaces must reuse the existing prompt-delivery queue and receipt/ambiguity handling rather than creating a second prompt-delivery engine. Do not introduce parallel `event_bus_*` tables; project eventing storage is the canonical `project_event_*` schema.
+
 Checkpoint episodes are stored idempotently by ACP session and prompt epoch, including state transitions, attempt/error metadata, and a progress envelope for inspection. Automatic long-turn selection and checkpoint preemption remain disabled. Task agents can explicitly park on a bounded `wait_for_subtasks` subscription: ProjectData reconciles selected same-project task terminal state and enqueues one immutable caller wake through the existing durable prompt-delivery queue. See [Configuration](/docs/reference/configuration/) for the durable-execution settings and rollout flags.
 
 Conversation and message text stays in ProjectData for long-term searchability. Large
@@ -284,6 +286,13 @@ or time range without receiving raw R2 keys.
 - `acp_session_events` — ACP session state transition history
 - `task_wait_subscriptions` — idempotent bounded parent waits, immutable wake payloads, and retry state
 - `task_wait_children` — normalized same-project task observations for each durable wait
+- `project_events` — bounded normalized project events keyed by source delivery identity and payload fingerprint
+- `project_event_subscriptions` — explicit owner/lifecycle/filter/delivery-preference records for project-scoped event subscriptions
+- `project_event_subscription_match_keys` — deterministic compiled v1 exact/set match keys used for bounded candidate selection
+- `project_event_matches` — durable event-to-subscription matches after lifecycle and filter rechecks
+- `project_event_delivery_batches` — durable delivery-batch records with requested delivery, resolved delivery, adapter-decision audit data, and pull acknowledgement state
+- `project_event_delivery_attempts` — durable delivery-attempt results including `recorded_not_injected` and `ambiguous`
+- `project_event_storage_accounting` — bounded event-subscription storage accounting by category
 
 **Key features:**
 
@@ -397,13 +406,13 @@ CI runs lint, typecheck, tests, and build on pull requests and on canonical-repo
 
 ## Key Design Decisions
 
-| Decision                             | Rationale                                                                                                                                                                               |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Single Worker as API + reverse proxy | Simplifies infrastructure — one Worker handles everything                                                                                                                               |
-| Hybrid D1 + Durable Objects          | D1 for cross-project reads, DOs for high-throughput project-scoped writes                                                                                                               |
+| Decision                             | Rationale                                                                                                                                                                                                                                  |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Single Worker as API + reverse proxy | Simplifies infrastructure — one Worker handles everything                                                                                                                                                                                  |
+| Hybrid D1 + Durable Objects          | D1 for cross-project reads, DOs for high-throughput project-scoped writes                                                                                                                                                                  |
 | BYOC + platform-credential fallback  | Users/self-hosters may bring their own cloud tokens; projects may attach compute credentials; SAM's hosted platform also has an enabled platform credential so provisioning works with zero config (resolution: project → user → platform) |
-| Callback-driven provisioning         | VMs POST `/ready` when bootstrapped — no polling                                                                                                                                        |
-| Dynamic DNS per workspace            | Instant subdomain resolution; cleaned up on stop                                                                                                                                        |
-| Alarm-driven execution orchestration | Idempotent steps with exponential backoff; no long-running processes                                                                                                                    |
-| No credentials in cloud-init         | Bootstrap tokens for secure credential injection                                                                                                                                        |
-| Multi-provider abstraction           | Unified VM size/lifecycle API across Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP                                                                               |
+| Callback-driven provisioning         | VMs POST `/ready` when bootstrapped — no polling                                                                                                                                                                                           |
+| Dynamic DNS per workspace            | Instant subdomain resolution; cleaned up on stop                                                                                                                                                                                           |
+| Alarm-driven execution orchestration | Idempotent steps with exponential backoff; no long-running processes                                                                                                                                                                       |
+| No credentials in cloud-init         | Bootstrap tokens for secure credential injection                                                                                                                                                                                           |
+| Multi-provider abstraction           | Unified VM size/lifecycle API across Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP                                                                                                                                  |

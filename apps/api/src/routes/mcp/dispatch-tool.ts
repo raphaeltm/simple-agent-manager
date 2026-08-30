@@ -533,7 +533,11 @@ export async function handleDispatchTask(
       await requireRepositoryOwnerAccess(env, db, project, tokenData.userId, 'mcp-dispatch');
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await markQueuedTaskFailed(db, taskId, `Repository access check failed: ${errorMsg}`);
+      await markQueuedTaskFailed(db, taskId, `Repository access check failed: ${errorMsg}`, {
+        env,
+        projectId: tokenData.projectId,
+        source: 'mcp.dispatch_task.instant_access_check',
+      });
       log.error('mcp.dispatch_task.instant_access_check_failed', {
         taskId,
         projectId: tokenData.projectId,
@@ -595,7 +599,11 @@ export async function handleDispatchTask(
     } catch (err) {
       // Session creation failed — mark task as failed
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await markQueuedTaskFailed(db, taskId, `Session creation failed: ${errorMsg}`);
+      await markQueuedTaskFailed(db, taskId, `Session creation failed: ${errorMsg}`, {
+        env,
+        projectId: tokenData.projectId,
+        source: 'mcp.dispatch_task.session_creation',
+      });
       log.error('mcp.dispatch_task.session_failed', {
         taskId,
         projectId: tokenData.projectId,
@@ -676,7 +684,12 @@ export async function handleDispatchTask(
     } catch (err) {
       // TaskRunner DO startup failed — mark task as failed
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await markQueuedTaskFailed(db, taskId, `Task runner startup failed: ${errorMsg}`);
+      await markQueuedTaskFailed(db, taskId, `Task runner startup failed: ${errorMsg}`, {
+        env,
+        projectId: tokenData.projectId,
+        source: 'mcp.dispatch_task.task_runner_startup',
+        sessionId,
+      });
       log.error('mcp.dispatch_task.do_startup_failed', {
         taskId,
         projectId: tokenData.projectId,

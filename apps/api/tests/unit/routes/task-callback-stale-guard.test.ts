@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => {
     setTaskStatus: vi.fn(),
     computeBlockedForTask: vi.fn(),
     cleanupTerminalTaskResourcesOrThrow: vi.fn(),
+    recordTaskLifecycleEventBestEffort: vi.fn(async () => undefined),
     log: { debug: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() },
     waitUntilPromises: [] as Promise<unknown>[],
   };
@@ -91,6 +92,12 @@ vi.mock('../../../src/services/jwt', () => ({
 
 vi.mock('../../../src/services/project-data', () => ({
   recordActivityEvent: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../../../src/services/project-lifecycle-events', () => ({
+  isLifecycleTaskStatus: (status: string) =>
+    ['in_progress', 'completed', 'failed', 'cancelled'].includes(status),
+  recordTaskLifecycleEventBestEffort: mocks.recordTaskLifecycleEventBestEffort,
 }));
 
 vi.mock('../../../src/services/task-terminal-cleanup', () => ({
@@ -147,12 +154,24 @@ async function createTestApp(): Promise<Hono> {
 }
 
 async function postFailed(app: Hono, token = OLD_TOKEN): Promise<Response> {
+  return postStatusCallback(
+    app,
+    { toStatus: 'failed', reason: 'agent error', errorMessage: 'fatal' },
+    token
+  );
+}
+
+async function postStatusCallback(
+  app: Hono,
+  body: Record<string, unknown>,
+  token = OLD_TOKEN
+): Promise<Response> {
   return app.request(
     '/api/projects/proj-stale/tasks/task-stale/status/callback',
     {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ toStatus: 'failed', reason: 'agent error', errorMessage: 'fatal' }),
+      body: JSON.stringify(body),
     },
     { DATABASE: {}, PROJECT_DATA: { idFromName: (id: string) => id, get: vi.fn() } },
     { waitUntil: (p: Promise<unknown>) => mocks.waitUntilPromises.push(p) }
@@ -184,6 +203,7 @@ describe('task callback stale Instant guard', () => {
     expect(res.status).toBe(200);
     expect(mocks.setTaskStatus).not.toHaveBeenCalled();
     expect(mocks.cleanupTerminalTaskResourcesOrThrow).not.toHaveBeenCalled();
+    expect(mocks.recordTaskLifecycleEventBestEffort).not.toHaveBeenCalled();
     expect(mocks.task.status).toBe('in_progress'); // unchanged
     const body = (await res.json()) as { status: string };
     expect(body.status).toBe('in_progress');
@@ -220,6 +240,20 @@ describe('task callback stale Instant guard', () => {
       expect.objectContaining({ errorMessage: 'fatal' })
     );
     expect(mocks.cleanupTerminalTaskResourcesOrThrow).toHaveBeenCalled();
+    expect(mocks.recordTaskLifecycleEventBestEffort).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        projectId: 'proj-stale',
+        taskId: 'task-stale',
+        status: 'failed',
+        fromStatus: 'in_progress',
+        workspaceId: 'ws-stale',
+        actorType: 'workspace_callback',
+        actorId: 'ws-stale',
+        reason: 'agent error',
+        source: 'tasks.callback_status',
+      })
+    );
     expect(mocks.log.warn).not.toHaveBeenCalledWith(
       'task.rejected_stale_callback',
       expect.anything()
@@ -256,5 +290,22 @@ describe('task callback stale Instant guard', () => {
     expect(res.status).toBe(200);
     expect(mocks.setTaskStatus).toHaveBeenCalled();
     expect(mocks.cleanupTerminalTaskResourcesOrThrow).toHaveBeenCalled();
+  });
+
+  it('does not emit a lifecycle event for a replayed same-status in_progress callback', async () => {
+    const app = await createTestApp();
+
+    const res = await postStatusCallback(app, { toStatus: 'in_progress', reason: 'replayed' });
+
+    expect(res.status).toBe(200);
+    expect(mocks.setTaskStatus).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ id: 'task-stale', status: 'in_progress' }),
+      'in_progress',
+      'workspace_callback',
+      'ws-stale',
+      expect.objectContaining({ reason: 'replayed' })
+    );
+    expect(mocks.recordTaskLifecycleEventBestEffort).not.toHaveBeenCalled();
   });
 });

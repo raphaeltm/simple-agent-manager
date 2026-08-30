@@ -8,6 +8,7 @@ import type { Env } from '../../env';
 import { parseWithSchema, readRequestJsonRecord } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
 import { appendDeploymentPublishJobEvent } from '../../services/deployment-publish-jobs';
+import { recordDeploymentPublishJobLifecycleEventBestEffort } from '../../services/project-lifecycle-events';
 import { verifyWorkspacePublishCallback } from './_callback-auth';
 
 const deploymentPublishJobCallbackRoute = new Hono<{ Bindings: Env }>();
@@ -114,6 +115,26 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
     errorCode: optionalString(event.errorCode),
     retryable: event.retryable === true,
   });
+
+  if (status && status !== job.status) {
+    c.executionCtx.waitUntil(
+      recordDeploymentPublishJobLifecycleEventBestEffort(c.env, {
+        projectId,
+        publishJobId,
+        environmentId: job.environmentId,
+        status,
+        fromStatus: job.status,
+        currentStep,
+        nodeId: job.nodeId,
+        workspaceId,
+        releaseId: optionalString(event.releaseId),
+        releaseVersion: optionalNumber(event.releaseVersion),
+        terminal: event.terminal === true,
+        source: 'deployment_publish_job_callback.status',
+        occurredAt: Date.now(),
+      })
+    );
+  }
 
   return c.json({ ok: true });
 });

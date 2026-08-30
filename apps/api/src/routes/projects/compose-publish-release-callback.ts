@@ -30,6 +30,7 @@ import {
   markDeploymentReleaseVolumeAttachFailed,
 } from '../../services/deployment-volumes';
 import { teardownDeploymentEnvironmentOnNode } from '../../services/node-agent';
+import { recordDeploymentReleaseLifecycleEventBestEffort } from '../../services/project-lifecycle-events';
 import { verifyWorkspacePublishCallback } from './_callback-auth';
 
 /**
@@ -367,6 +368,20 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     serviceCount: services.length,
     reference: submission.reference ?? null,
   });
+
+  c.executionCtx?.waitUntil(
+    recordDeploymentReleaseLifecycleEventBestEffort(c.env, {
+      projectId,
+      releaseId,
+      environmentId,
+      status: 'created',
+      version: nextVersion,
+      workspaceId,
+      taskId: taskId ?? null,
+      source: 'compose_publish_release_callback.create',
+      occurredAt: releaseCreatedAt,
+    })
+  );
 
   // Provision a deployment node for this environment if one is not already
   // linked, so the captured release rolls out. Failures here must NOT fail the

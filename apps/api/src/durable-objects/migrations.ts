@@ -19,6 +19,318 @@ export interface Migration {
   run: (sql: SqlStorage) => void;
 }
 
+type MigrationTableSchema = {
+  name: string;
+  columns: Readonly<Record<string, string>>;
+  constraints?: readonly string[];
+};
+
+type MigrationIndexSchema = {
+  name: string;
+  table: string;
+  columns: string;
+  where?: string;
+};
+
+const MIGRATION_IDENTIFIER_PATTERN = /^[a-z][a-z0-9_]*$/;
+const MIGRATION_INDEX_COLUMN_LIST_PATTERN =
+  /^[a-z][a-z0-9_]*(?:\s+(?:ASC|DESC))?(?:,\s*[a-z][a-z0-9_]*(?:\s+(?:ASC|DESC))?)*$/;
+
+function createTable(sql: SqlStorage, schema: MigrationTableSchema): void {
+  assertMigrationIdentifier(schema.name, 'table name');
+  for (const column of Object.keys(schema.columns)) {
+    assertMigrationIdentifier(column, `${schema.name} column`);
+  }
+  const definitions = [
+    ...Object.entries(schema.columns).map(([name, definition]) => `${name} ${definition}`),
+    ...(schema.constraints ?? []),
+  ];
+  const statement = `
+    CREATE TABLE IF NOT EXISTS ${schema.name} (
+      ${definitions.join(',\n      ')}
+    )
+  `;
+  sql.exec(statement);
+}
+
+function createIndex(sql: SqlStorage, schema: MigrationIndexSchema): void {
+  assertMigrationIdentifier(schema.name, 'index name');
+  assertMigrationIdentifier(schema.table, `${schema.name} table`);
+  assertMigrationIndexColumnList(schema.columns, `${schema.name} columns`);
+  const where = schema.where ? ` WHERE ${schema.where}` : '';
+  const statement = `CREATE INDEX IF NOT EXISTS ${schema.name} ON ${schema.table}(${schema.columns})${where}`;
+  sql.exec(statement);
+}
+
+function assertMigrationIdentifier(value: string, label: string): void {
+  if (!MIGRATION_IDENTIFIER_PATTERN.test(value)) {
+    throw new Error(`Invalid migration ${label}: ${value}`);
+  }
+}
+
+function assertMigrationIndexColumnList(value: string, label: string): void {
+  if (!MIGRATION_INDEX_COLUMN_LIST_PATTERN.test(value)) {
+    throw new Error(`Invalid migration ${label}: ${value}`);
+  }
+}
+
+const PROJECT_EVENT_TABLE_SCHEMAS: readonly MigrationTableSchema[] = [
+  {
+    name: 'project_events',
+    columns: {
+      id: 'TEXT PRIMARY KEY',
+      project_id: 'TEXT NOT NULL',
+      contract_version: 'INTEGER NOT NULL DEFAULT 1',
+      source: 'TEXT NOT NULL',
+      event_type: 'TEXT NOT NULL',
+      subject_type: 'TEXT NOT NULL',
+      subject_id: 'TEXT NOT NULL',
+      severity:
+        "TEXT NOT NULL CHECK (severity IN ('debug', 'info', 'notice', 'warning', 'error', 'critical'))",
+      delivery_key: 'TEXT NOT NULL',
+      payload_fingerprint: 'TEXT NOT NULL',
+      metadata_json: 'TEXT NOT NULL',
+      metadata_bytes: 'INTEGER NOT NULL',
+      display_json: 'TEXT NOT NULL',
+      display_bytes: 'INTEGER NOT NULL',
+      raw_payload_ref_json: 'TEXT',
+      raw_payload_ref_bytes: 'INTEGER NOT NULL DEFAULT 0',
+      occurred_at: 'INTEGER NOT NULL',
+      received_at: 'INTEGER NOT NULL',
+      updated_at: 'INTEGER NOT NULL',
+      state: "TEXT NOT NULL CHECK (state IN ('recorded', 'conflicted'))",
+      duplicate_count: 'INTEGER NOT NULL DEFAULT 0',
+      conflict_count: 'INTEGER NOT NULL DEFAULT 0',
+      conflict_fingerprint: 'TEXT',
+      conflict_detected_at: 'INTEGER',
+    },
+    constraints: ['UNIQUE(project_id, source, delivery_key)'],
+  },
+  {
+    name: 'project_event_subscriptions',
+    columns: {
+      id: 'TEXT PRIMARY KEY',
+      project_id: 'TEXT NOT NULL',
+      contract_version: 'INTEGER NOT NULL DEFAULT 1',
+      owner_type:
+        "TEXT NOT NULL CHECK (owner_type IN ('human', 'agent', 'system', 'policy', 'standing_watch'))",
+      owner_id: 'TEXT NOT NULL',
+      owner_name: 'TEXT',
+      idempotency_key: 'TEXT NOT NULL',
+      idempotency_fingerprint: 'TEXT NOT NULL',
+      filter_version: 'INTEGER NOT NULL DEFAULT 1',
+      filter_json: 'TEXT NOT NULL',
+      filter_fingerprint: 'TEXT NOT NULL',
+      match_key_count: 'INTEGER NOT NULL',
+      requested_delivery:
+        "TEXT NOT NULL CHECK (requested_delivery IN ('record_only', 'existing_session_prompt', 'runtime_steer', 'runtime_interrupt', 'spawn_task'))",
+      resolved_delivery:
+        "TEXT NOT NULL CHECK (resolved_delivery IN ('record_only', 'recorded_not_injected', 'queued_for_prompt_delivery', 'runtime_steer', 'runtime_interrupt', 'spawn_task', 'unsupported', 'unauthorized'))",
+      target_session_id: 'TEXT',
+      target_task_id: 'TEXT',
+      target_runtime_id: 'TEXT',
+      target_agent_id: 'TEXT',
+      lifecycle_state:
+        "TEXT NOT NULL CHECK (lifecycle_state IN ('active', 'cancelled', 'expired'))",
+      reason: 'TEXT',
+      created_at: 'INTEGER NOT NULL',
+      updated_at: 'INTEGER NOT NULL',
+      expires_at: 'INTEGER',
+      cancelled_at: 'INTEGER',
+      cancelled_by_type:
+        "TEXT CHECK (cancelled_by_type IS NULL OR cancelled_by_type IN ('human', 'agent', 'system', 'policy', 'standing_watch'))",
+      cancelled_by_id: 'TEXT',
+      cancelled_by_name: 'TEXT',
+      cancel_reason: 'TEXT',
+      last_matched_at: 'INTEGER',
+    },
+    constraints: ['UNIQUE(project_id, owner_type, owner_id, idempotency_key)'],
+  },
+  {
+    name: 'project_event_subscription_match_keys',
+    columns: {
+      project_id: 'TEXT NOT NULL',
+      subscription_id: 'TEXT NOT NULL REFERENCES project_event_subscriptions(id) ON DELETE CASCADE',
+      field_name:
+        "TEXT NOT NULL CHECK (field_name IN ('source', 'eventType', 'subjectType', 'subjectId', 'severity'))",
+      field_value: 'TEXT NOT NULL',
+      match_key: 'TEXT NOT NULL',
+      created_at: 'INTEGER NOT NULL',
+    },
+    constraints: ['PRIMARY KEY (subscription_id, match_key)'],
+  },
+  {
+    name: 'project_event_matches',
+    columns: {
+      id: 'TEXT PRIMARY KEY',
+      project_id: 'TEXT NOT NULL',
+      event_id: 'TEXT NOT NULL REFERENCES project_events(id) ON DELETE CASCADE',
+      subscription_id: 'TEXT NOT NULL REFERENCES project_event_subscriptions(id) ON DELETE CASCADE',
+      state:
+        "TEXT NOT NULL CHECK (state IN ('matched', 'batch_created', 'recorded_not_injected', 'expired', 'cancelled'))",
+      matched_at: 'INTEGER NOT NULL',
+      lifecycle_checked_at: 'INTEGER NOT NULL',
+      batch_id: 'TEXT',
+      reason: 'TEXT',
+    },
+    constraints: ['UNIQUE(project_id, event_id, subscription_id)'],
+  },
+  {
+    name: 'project_event_delivery_batches',
+    columns: {
+      id: 'TEXT PRIMARY KEY',
+      project_id: 'TEXT NOT NULL',
+      subscription_id: 'TEXT NOT NULL REFERENCES project_event_subscriptions(id) ON DELETE CASCADE',
+      idempotency_key: 'TEXT NOT NULL',
+      idempotency_fingerprint: 'TEXT NOT NULL',
+      state:
+        "TEXT NOT NULL CHECK (state IN ('pending', 'recorded_not_injected', 'delivered', 'acked', 'failed', 'ambiguous', 'expired', 'cancelled'))",
+      requested_delivery:
+        "TEXT NOT NULL CHECK (requested_delivery IN ('record_only', 'existing_session_prompt', 'runtime_steer', 'runtime_interrupt', 'spawn_task'))",
+      resolved_delivery:
+        "TEXT NOT NULL CHECK (resolved_delivery IN ('record_only', 'recorded_not_injected', 'queued_for_prompt_delivery', 'runtime_steer', 'runtime_interrupt', 'spawn_task', 'unsupported', 'unauthorized'))",
+      adapter_decision_json: 'TEXT',
+      target_session_id: 'TEXT',
+      target_task_id: 'TEXT',
+      target_runtime_id: 'TEXT',
+      target_agent_id: 'TEXT',
+      match_ids_json: 'TEXT NOT NULL',
+      event_count: 'INTEGER NOT NULL',
+      created_at: 'INTEGER NOT NULL',
+      updated_at: 'INTEGER NOT NULL',
+      terminal_at: 'INTEGER',
+      terminal_reason: 'TEXT',
+    },
+    constraints: ['UNIQUE(project_id, subscription_id, idempotency_key)'],
+  },
+  {
+    name: 'project_event_delivery_attempts',
+    columns: {
+      id: 'TEXT PRIMARY KEY',
+      project_id: 'TEXT NOT NULL',
+      batch_id: 'TEXT NOT NULL REFERENCES project_event_delivery_batches(id) ON DELETE CASCADE',
+      idempotency_key: 'TEXT NOT NULL',
+      idempotency_fingerprint: 'TEXT NOT NULL',
+      attempt_number: 'INTEGER NOT NULL',
+      state:
+        "TEXT NOT NULL CHECK (state IN ('recorded_not_injected', 'accepted', 'retry', 'failed', 'ambiguous'))",
+      adapter: 'TEXT',
+      protocol_version: 'TEXT',
+      runtime_id: 'TEXT',
+      receipt_id: 'TEXT',
+      error_code: 'TEXT',
+      error_message: 'TEXT',
+      started_at: 'INTEGER NOT NULL',
+      completed_at: 'INTEGER',
+      created_at: 'INTEGER NOT NULL',
+    },
+    constraints: [
+      'UNIQUE(project_id, batch_id, idempotency_key)',
+      'UNIQUE(project_id, batch_id, attempt_number)',
+    ],
+  },
+  {
+    name: 'project_event_storage_accounting',
+    columns: {
+      project_id: 'TEXT NOT NULL',
+      category: 'TEXT NOT NULL',
+      record_count: 'INTEGER NOT NULL',
+      estimated_bytes: 'INTEGER NOT NULL',
+      oldest_created_at: 'INTEGER',
+      newest_created_at: 'INTEGER',
+      measured_at: 'INTEGER NOT NULL',
+    },
+    constraints: ['PRIMARY KEY (project_id, category)'],
+  },
+];
+
+const PROJECT_EVENT_INDEX_SCHEMAS: readonly MigrationIndexSchema[] = [
+  {
+    name: 'idx_project_events_project_received',
+    table: 'project_events',
+    columns: 'project_id, received_at DESC, id',
+  },
+  {
+    name: 'idx_project_events_project_source_type',
+    table: 'project_events',
+    columns: 'project_id, source, event_type, received_at DESC, id',
+  },
+  {
+    name: 'idx_project_events_project_subject',
+    table: 'project_events',
+    columns: 'project_id, subject_type, subject_id, received_at DESC, id',
+  },
+  {
+    name: 'idx_project_events_project_severity',
+    table: 'project_events',
+    columns: 'project_id, severity, received_at DESC, id',
+  },
+  {
+    name: 'idx_project_event_subscriptions_project_state',
+    table: 'project_event_subscriptions',
+    columns: 'project_id, lifecycle_state, updated_at DESC, id',
+  },
+  {
+    name: 'idx_project_event_subscriptions_project_expiry',
+    table: 'project_event_subscriptions',
+    columns: 'project_id, lifecycle_state, expires_at, id',
+  },
+  {
+    name: 'idx_project_event_subscriptions_project_owner',
+    table: 'project_event_subscriptions',
+    columns: 'project_id, owner_type, owner_id, updated_at DESC, id',
+  },
+  {
+    name: 'idx_project_event_subscription_match_keys_lookup',
+    table: 'project_event_subscription_match_keys',
+    columns: 'project_id, match_key, subscription_id',
+  },
+  {
+    name: 'idx_project_event_matches_project_event',
+    table: 'project_event_matches',
+    columns: 'project_id, event_id, matched_at DESC, id',
+  },
+  {
+    name: 'idx_project_event_matches_project_subscription',
+    table: 'project_event_matches',
+    columns: 'project_id, subscription_id, matched_at DESC, id',
+  },
+  {
+    name: 'idx_project_event_delivery_batches_project_state',
+    table: 'project_event_delivery_batches',
+    columns: 'project_id, state, updated_at DESC, id',
+  },
+  {
+    name: 'idx_project_event_delivery_batches_project_subscription',
+    table: 'project_event_delivery_batches',
+    columns: 'project_id, subscription_id, updated_at DESC, id',
+  },
+  {
+    name: 'idx_project_event_delivery_attempts_project_batch',
+    table: 'project_event_delivery_attempts',
+    columns: 'project_id, batch_id, attempt_number, id',
+  },
+  {
+    name: 'idx_project_event_delivery_attempts_project_state',
+    table: 'project_event_delivery_attempts',
+    columns: 'project_id, state, created_at DESC, id',
+  },
+  {
+    name: 'idx_project_event_storage_accounting_project_measured',
+    table: 'project_event_storage_accounting',
+    columns: 'project_id, measured_at DESC, category',
+  },
+];
+
+function runProjectEventSubscriptionMigration(sql: SqlStorage): void {
+  for (const schema of PROJECT_EVENT_TABLE_SCHEMAS) {
+    createTable(sql, schema);
+  }
+  for (const schema of PROJECT_EVENT_INDEX_SCHEMAS) {
+    createIndex(sql, schema);
+  }
+}
+
 /**
  * Ordered list of migrations. New migrations MUST be appended to the end.
  * Never remove or reorder existing migrations.
@@ -1274,6 +1586,47 @@ export const MIGRATIONS: Migration[] = [
       sql.exec(`
         CREATE INDEX IF NOT EXISTS idx_tool_payload_cleanup_attempts_retry
         ON tool_payload_cleanup_attempts(status, next_attempt_at, message_created_at, message_sequence, message_id)
+      `);
+    },
+  },
+  {
+    name: '038-project-event-subscriptions',
+    run: (sql) => {
+      runProjectEventSubscriptionMigration(sql);
+    },
+  },
+  {
+    name: '039-project-event-delivery-decisions',
+    run: (sql) => {
+      try {
+        sql.exec(
+          `ALTER TABLE project_event_delivery_batches ADD COLUMN adapter_decision_json TEXT`
+        );
+      } catch {
+        // Column already exists when migration 038 created the current draft schema.
+      }
+    },
+  },
+  {
+    name: '040-project-event-pull-ack',
+    run: (sql) => {
+      for (const statement of [
+        `ALTER TABLE project_event_delivery_batches ADD COLUMN ack_required INTEGER NOT NULL DEFAULT 0`,
+        `ALTER TABLE project_event_delivery_batches ADD COLUMN delivered_at INTEGER`,
+        `ALTER TABLE project_event_delivery_batches ADD COLUMN acked_at INTEGER`,
+        `ALTER TABLE project_event_delivery_batches ADD COLUMN acked_by_type TEXT`,
+        `ALTER TABLE project_event_delivery_batches ADD COLUMN acked_by_id TEXT`,
+        `ALTER TABLE project_event_delivery_batches ADD COLUMN acked_by_name TEXT`,
+      ]) {
+        try {
+          sql.exec(statement);
+        } catch {
+          // Additive compatibility: local/dev databases may already have a draft column.
+        }
+      }
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_project_subscription_replay
+        ON project_event_matches(project_id, subscription_id, matched_at ASC, id ASC)
       `);
     },
   },

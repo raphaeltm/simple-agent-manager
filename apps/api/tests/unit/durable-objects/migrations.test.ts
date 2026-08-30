@@ -189,6 +189,53 @@ describe('DO Migrations', () => {
             )
             .get()
         ).toEqual({ name: 'task_wait_subscriptions' });
+        for (const table of [
+          'project_events',
+          'project_event_subscriptions',
+          'project_event_subscription_match_keys',
+          'project_event_matches',
+          'project_event_delivery_batches',
+          'project_event_delivery_attempts',
+          'project_event_storage_accounting',
+        ]) {
+          expect(
+            db
+              .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+              .get(table)
+          ).toEqual({ name: table });
+        }
+        for (const index of [
+          'idx_project_events_project_received',
+          'idx_project_event_subscriptions_project_state',
+          'idx_project_event_subscription_match_keys_lookup',
+          'idx_project_event_matches_project_event',
+          'idx_project_event_matches_project_subscription_replay',
+          'idx_project_event_delivery_batches_project_state',
+          'idx_project_event_delivery_attempts_project_batch',
+          'idx_project_event_storage_accounting_project_measured',
+        ]) {
+          expect(
+            db
+              .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?")
+              .get(index)
+          ).toEqual({ name: index });
+        }
+        const deliveryBatchColumns = db
+          .prepare('PRAGMA table_info(project_event_delivery_batches)')
+          .all() as Array<{ name: string }>;
+        expect(deliveryBatchColumns.map((column) => column.name)).toContain(
+          'adapter_decision_json'
+        );
+        expect(deliveryBatchColumns.map((column) => column.name)).toEqual(
+          expect.arrayContaining([
+            'ack_required',
+            'delivered_at',
+            'acked_at',
+            'acked_by_type',
+            'acked_by_id',
+            'acked_by_name',
+          ])
+        );
       } finally {
         db.close();
       }
@@ -407,7 +454,10 @@ describe('DO Migrations', () => {
       // tool payload archives: 3 from migration 036 (session+created,
       // created_at, archived_at)
       // tool payload cleanup attempts: 1 from migration 037 (retry sweep)
-      expect(indexes).toHaveLength(69);
+      // project event subscriptions: 15 from migration 038
+      // project event delivery decisions: 0 from migration 039 (additive column only)
+      // project event pull ack: 1 replay index from migration 040
+      expect(indexes).toHaveLength(85);
     });
   });
 });

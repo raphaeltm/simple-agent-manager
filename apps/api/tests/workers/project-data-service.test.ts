@@ -14,7 +14,7 @@
  *
  * See: .claude/rules/35-vertical-slice-testing.md
  */
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_MAX_MESSAGES_PER_SESSION } from '../../src/durable-objects/project-data/messages';
@@ -36,6 +36,48 @@ import {
 // Cast the test env to the service's Env type.
 // The miniflare env provides the same bindings (PROJECT_DATA, etc.)
 const testEnv = env as unknown as Env;
+
+async function lifecycleEvents(projectId: string): Promise<
+  Array<{
+    event_type: string;
+    subject_type: string;
+    subject_id: string;
+    severity: string;
+    delivery_key: string;
+    payload_fingerprint: string;
+    metadata_json: string;
+    display_json: string;
+    raw_payload_ref_json: string | null;
+    duplicate_count: number;
+  }>
+> {
+  const id = env.PROJECT_DATA.idFromName(projectId);
+  const stub = env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectDataTestDouble>;
+  await stub.ensureProjectId(projectId);
+  return runInDurableObject(stub, async (_instance, state) =>
+    state.storage.sql
+      .exec(
+        `SELECT event_type, subject_type, subject_id, severity, delivery_key,
+                payload_fingerprint, metadata_json, display_json, raw_payload_ref_json,
+                duplicate_count
+           FROM project_events
+          WHERE source = 'sam.lifecycle'
+          ORDER BY received_at, id`
+      )
+      .toArray() as Array<{
+      event_type: string;
+      subject_type: string;
+      subject_id: string;
+      severity: string;
+      delivery_key: string;
+      payload_fingerprint: string;
+      metadata_json: string;
+      display_json: string;
+      raw_payload_ref_json: string | null;
+      duplicate_count: number;
+    }>
+  );
+}
 
 async function capturePersistMessageBatchError(
   projectId: string,
@@ -133,6 +175,52 @@ describe('project-data service: session lifecycle', () => {
       isTerminated: false,
     });
     expect(await svc.wakeSession(testEnv, pid, sessionId, 'ws-other', 'task-other')).toBe(false);
+  });
+
+  it('records bounded normalized session lifecycle events through ProjectData admission', async () => {
+    const pid = 'svc-session-lifecycle-events';
+    const sessionId = await svc.createSession(
+      testEnv,
+      pid,
+      'ws-start',
+      'Lifecycle topic',
+      'task-start'
+    );
+
+    expect(await svc.sleepSession(testEnv, pid, sessionId)).toBe(true);
+    expect(await svc.wakeSession(testEnv, pid, sessionId, 'ws-wake', 'task-wake')).toBe(true);
+    expect(await svc.wakeSession(testEnv, pid, sessionId, 'ws-wake', 'task-relink')).toBe(true);
+    expect(await svc.stopSession(testEnv, pid, sessionId)).toBe(true);
+    expect(await svc.stopSession(testEnv, pid, sessionId)).toBe(false);
+
+    const events = await lifecycleEvents(pid);
+    expect(events.map((event) => event.event_type)).toEqual([
+      'session.started',
+      'session.sleeping',
+      'session.woke',
+      'session.archived',
+    ]);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          subject_type: 'session',
+          subject_id: sessionId,
+          raw_payload_ref_json: null,
+          duplicate_count: 0,
+        }),
+      ])
+    );
+    const archived = events.find((event) => event.event_type === 'session.archived');
+    expect(archived?.payload_fingerprint).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(JSON.parse(archived?.metadata_json ?? '{}')).toMatchObject({
+      sessionId,
+      status: 'stopped',
+      transitionSource: 'project_data.stop_session',
+    });
+    expect(JSON.parse(archived?.display_json ?? '{}')).toMatchObject({
+      untrusted: true,
+      labels: ['session', 'archived'],
+    });
   });
 
   async function seedSnapshotRecoveryWakeFixture(

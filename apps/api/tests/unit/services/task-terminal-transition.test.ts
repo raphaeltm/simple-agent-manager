@@ -8,7 +8,12 @@ import { transitionTaskToTerminal } from '../../../src/services/task-terminal-tr
 import { cancelVmTaskAdmission } from '../../../src/services/vm-admission-control';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
+const recordTaskLifecycleEventBestEffort = vi.hoisted(() => vi.fn(async () => undefined));
+
 vi.mock('../../../src/services/project-data', () => ({ reconcileTaskWaits: vi.fn() }));
+vi.mock('../../../src/services/project-lifecycle-events', () => ({
+  recordTaskLifecycleEventBestEffort,
+}));
 vi.mock('../../../src/services/vm-admission-control', () => ({
   cancelVmTaskAdmission: vi.fn().mockResolvedValue(undefined),
 }));
@@ -185,6 +190,19 @@ describe('transitionTaskToTerminal', () => {
     expect(cancelVmTaskAdmission).toHaveBeenCalledWith(env, 'task-1', 'task_failed');
     expect(reconcileTaskWaits).toHaveBeenCalledTimes(1);
     expect(reconcileTaskWaits).toHaveBeenCalledWith(env, PROJECT_ID, 'task-1');
+    expect(recordTaskLifecycleEventBestEffort).toHaveBeenCalledTimes(1);
+    expect(recordTaskLifecycleEventBestEffort).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        projectId: PROJECT_ID,
+        taskId: 'task-1',
+        status: 'failed',
+        parentTaskId: 'parent-task-1',
+        reason: 'Agent became unresponsive after SAM check-in',
+        source: 'test.attention_expiry',
+        occurredAt: NOW.toISOString(),
+      })
+    );
   });
 
   it('rejects stale terminal evidence after workspace node ownership changes', async () => {
@@ -214,6 +232,7 @@ describe('transitionTaskToTerminal', () => {
     ).toBe('running');
     expect(cancelVmTaskAdmission).not.toHaveBeenCalled();
     expect(reconcileTaskWaits).not.toHaveBeenCalled();
+    expect(recordTaskLifecycleEventBestEffort).not.toHaveBeenCalled();
   });
 
   it('terminalizes queued rows for scheduled timeout recovery', async () => {

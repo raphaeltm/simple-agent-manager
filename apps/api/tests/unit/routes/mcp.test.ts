@@ -623,7 +623,15 @@ describe('MCP Routes', () => {
       // Library file comment tools
       expect(toolNames).toContain('list_library_file_comment_threads');
       expect(toolNames).toContain('create_library_file_comment_thread');
-      expect(body.result.tools).toHaveLength(114);
+      // ProjectData event subscription tools
+      expect(toolNames).toContain('create_project_event_subscription');
+      expect(toolNames).toContain('list_project_event_subscriptions');
+      expect(toolNames).toContain('get_project_event_subscription');
+      expect(toolNames).toContain('cancel_project_event_subscription');
+      expect(toolNames).toContain('list_subscription_events');
+      expect(toolNames).toContain('get_event');
+      expect(toolNames).toContain('ack_event_delivery');
+      expect(body.result.tools).toHaveLength(121);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {

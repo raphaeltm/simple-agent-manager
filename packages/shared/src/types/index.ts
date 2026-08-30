@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: Shared public type barrel intentionally keeps named re-exports centralized for stable package imports. See .claude/rules/18-file-size-limits.md
 // Types barrel — named re-exports only (no `export *`)
 
 // User & Credentials
@@ -316,6 +317,16 @@ export {
   MESSAGE_COMMENT_AUTHOR_KINDS,
   MESSAGE_COMMENT_THREAD_STATUSES,
 } from './comments';
+
+// ProjectData event subscription core
+// prettier-ignore
+export type { AckProjectEventDeliveryInput, AdmitProjectEventInput, CancelProjectEventSubscriptionInput, CreateProjectEventDeliveryBatchInput, CreateProjectEventSubscriptionInput, ExpireProjectEventSubscriptionsInput, GetProjectEventInput, GetProjectEventRecentStatusInput, GetProjectEventSubscriptionInput, ListProjectEventDeliveryAttemptsInput, ListProjectEventDeliveryBatchesInput, ListProjectEventSubscriptionEventsInput, ListProjectEventSubscriptionsInput, ProjectEventAdmissionOutcome, ProjectEventAdmissionResult, ProjectEventAgentVisibility, ProjectEventDeliveryAckResult, ProjectEventDeliveryAdapterAction, ProjectEventDeliveryAdapterCapability, ProjectEventDeliveryAdapterDecision, ProjectEventDeliveryAdapterKind, ProjectEventDeliveryAdapterVersionGate, ProjectEventDeliveryAttemptListResult, ProjectEventDeliveryAttemptMutationResult, ProjectEventDeliveryAttemptRecord, ProjectEventDeliveryAttemptState, ProjectEventDeliveryAuthorization, ProjectEventDeliveryBatchListResult, ProjectEventDeliveryBatchMutationResult, ProjectEventDeliveryBatchRecord, ProjectEventDeliveryBatchState, ProjectEventDeliveryCapabilityMode, ProjectEventDeliveryModelSummary, ProjectEventDeliveryPreference, ProjectEventDeliveryResolution, ProjectEventDeliveryResolutionReason, ProjectEventDeliverySummaryEvent, ProjectEventDeliveryTargetState, ProjectEventDisplayData, ProjectEventExpireSubscriptionsResult, ProjectEventFilterField, ProjectEventFilterV1, ProjectEventJsonPrimitive, ProjectEventJsonValue, ProjectEventLimits, ProjectEventMatchRecord, ProjectEventMatchState, ProjectEventMetadata, ProjectEventPullDeliveryInfo, ProjectEventPullDeliveryRecord, ProjectEventRawPayloadRef, ProjectEventRecentStatus, ProjectEventRecord, ProjectEventRecordState, ProjectEventRequestedDeliveryMode, ProjectEventResolvedDeliveryMode, ProjectEventRetentionResult, ProjectEventSeverity, ProjectEventStorageAccountingRecord, ProjectEventSubject, ProjectEventSubscriptionEvent, ProjectEventSubscriptionEventListResult, ProjectEventSubscriptionEventSummary, ProjectEventSubscriptionListResult, ProjectEventSubscriptionMutationResult, ProjectEventSubscriptionOwner, ProjectEventSubscriptionOwnerType, ProjectEventSubscriptionRecord, ProjectEventSubscriptionState, RecordProjectEventDeliveryAttemptInput, RunProjectEventRetentionInput } from './project-events';
+// prettier-ignore
+export type { ProjectEventSubscriptionAgentCaller, ProjectEventSubscriptionCaller, ProjectEventSubscriptionCallerKind, ProjectEventSubscriptionCancelRequest, ProjectEventSubscriptionCancelResponse, ProjectEventSubscriptionCreateRequest, ProjectEventSubscriptionCreateResponse, ProjectEventSubscriptionExpireRequest, ProjectEventSubscriptionExpireResponse, ProjectEventSubscriptionGetRequest, ProjectEventSubscriptionGetResponse, ProjectEventSubscriptionListRequest, ProjectEventSubscriptionListResponse, ProjectEventSubscriptionOwnerScope, ProjectEventSubscriptionPlatformCaller, ProjectEventSubscriptionPlatformPermissions } from './project-event-subscriptions';
+// prettier-ignore
+export { PROJECT_EVENT_SUBSCRIPTION_CALLER_KINDS, PROJECT_EVENT_SUBSCRIPTION_OWNER_SCOPES } from './project-event-subscriptions';
+// prettier-ignore
+export { PROJECT_EVENT_CONTRACT_VERSION, PROJECT_EVENT_DELIVERY_ADAPTER_ACTIONS, PROJECT_EVENT_DELIVERY_ADAPTER_KINDS, PROJECT_EVENT_DELIVERY_ATTEMPT_STATES, PROJECT_EVENT_DELIVERY_BATCH_STATES, PROJECT_EVENT_DELIVERY_CAPABILITY_MODES, PROJECT_EVENT_DELIVERY_RESOLUTION_REASONS, PROJECT_EVENT_DELIVERY_TARGET_STATES, PROJECT_EVENT_FILTER_FIELDS, PROJECT_EVENT_FILTER_VERSION, PROJECT_EVENT_REQUESTED_DELIVERY_MODES, PROJECT_EVENT_RESOLVED_DELIVERY_MODES, PROJECT_EVENT_SEVERITIES, PROJECT_EVENT_SUBSCRIPTION_OWNER_TYPES, PROJECT_EVENT_SUBSCRIPTION_STATES } from './project-events';
 export {
   ATTACHMENT_DEFAULTS,
   COMPLETION_EVIDENCE_VERIFICATION_KINDS,
@@ -413,6 +424,16 @@ export type {
   AdminLogEntry,
   AdminNodesResponse,
   AdminNodeSummary,
+  AdminProjectEventInspectorAdapterDecision,
+  AdminProjectEventInspectorAttempt,
+  AdminProjectEventInspectorBatch,
+  AdminProjectEventInspectorEvent,
+  AdminProjectEventInspectorMatch,
+  AdminProjectEventInspectorProject,
+  AdminProjectEventInspectorResponse,
+  AdminProjectEventInspectorSubscription,
+  AdminProjectEventInspectorTarget,
+  AdminProjectEventInspectorTotals,
   ErrorListResponse,
   ErrorTrendBucket,
   ErrorTrendResponse,

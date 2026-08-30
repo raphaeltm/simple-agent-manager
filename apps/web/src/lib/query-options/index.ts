@@ -30,6 +30,10 @@
  */
 
 export {
+  adminProjectEventInspectorQueryOptions,
+  adminProjectEventQueryKeys,
+} from './admin-project-events';
+export {
   agentCatalogQueryOptions,
   agentCredentialsQueryOptions,
   agentProfilesQueryOptions,

@@ -39,6 +39,7 @@ import { buildVolumeMountDescriptors } from '../services/deployment-volumes';
 import { cleanupAppRouteDNSRecords, upsertAppRouteDNSRecord } from '../services/dns';
 import { verifyCallbackToken } from '../services/jwt';
 import { nodeStatusTerminatesCallbacks } from '../services/node-callback-auth';
+import { recordDeploymentReleaseLifecycleEventBestEffort } from '../services/project-lifecycle-events';
 import { mintProjectRegistryCredential } from '../services/registry-credentials';
 import { getEncryptionKey, loadResolvedSecrets } from './deployment-releases';
 
@@ -236,6 +237,24 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     .run();
   if ((applyingClaim.meta?.changes ?? 0) === 0) {
     throw errors.conflict('Deployment release is no longer pending apply');
+  }
+  if (release.status !== 'applying') {
+    const lifecycleEvent = recordDeploymentReleaseLifecycleEventBestEffort(c.env, {
+      projectId: deployEnv.projectId,
+      releaseId: release.id,
+      environmentId,
+      status: 'applying',
+      fromStatus: release.status,
+      version: release.version,
+      nodeId,
+      source: 'deploy_release_callback.apply_claim',
+      occurredAt: applyingAt,
+    });
+    try {
+      c.executionCtx.waitUntil(lifecycleEvent);
+    } catch {
+      void lifecycleEvent;
+    }
   }
 
   // Two release shapes share this apply path, discriminated by `release.source`:

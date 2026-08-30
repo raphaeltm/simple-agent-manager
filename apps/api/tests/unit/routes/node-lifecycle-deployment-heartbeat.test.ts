@@ -7,11 +7,24 @@ type Condition = { op: 'eq'; col: string; val: unknown } | { op: 'and'; conds: C
 
 const updates: Array<{ table: unknown; values: Record<string, unknown>; where: unknown }> = [];
 const latestByEnvironment = new Map<string, { version: number; status: string }>();
+const releaseTransitions = vi.hoisted(
+  () =>
+    [] as Array<{
+      releaseId: string;
+      environmentId: string;
+      version: number;
+      fromStatus: string;
+      toStatus: 'applying' | 'applied' | 'failed';
+      occurredAt: string;
+    }>
+);
 let deploymentPlacements: Array<{
   envId: string;
+  projectId?: string;
   status?: string;
   requiresVolumes?: boolean;
   observedAppliedSeq?: number | null;
+  observedStatus?: string | null;
   desiredRoutingRevision?: number;
   observedRoutingRevision?: number;
 }> = [];
@@ -52,10 +65,12 @@ vi.mock('../../../src/db/schema', () => ({
   },
   deploymentEnvironments: {
     id: 'deployment_environments.id',
+    projectId: 'deployment_environments.projectId',
     nodeId: 'deployment_environments.nodeId',
     status: 'deployment_environments.status',
     requiresVolumes: 'deployment_environments.requiresVolumes',
     observedAppliedSeq: 'deployment_environments.observedAppliedSeq',
+    observedStatus: 'deployment_environments.observedStatus',
     desiredRoutingRevision: 'deployment_environments.desiredRoutingRevision',
     observedRoutingRevision: 'deployment_environments.observedRoutingRevision',
     observedDeployment: 'deployment_environments.observedDeployment',
@@ -101,9 +116,22 @@ vi.mock('../../../src/services/deployment-control', async () => {
   );
   return {
     ...actual,
-    reconcileDeploymentReleaseStatuses: vi.fn().mockResolvedValue(undefined),
+    reconcileDeploymentReleaseStatuses: vi.fn(async () => releaseTransitions),
   };
 });
+
+const {
+  recordDeploymentEnvironmentLifecycleEventBestEffort,
+  recordDeploymentReleaseLifecycleEventBestEffort,
+} = vi.hoisted(() => ({
+  recordDeploymentEnvironmentLifecycleEventBestEffort: vi.fn(async () => undefined),
+  recordDeploymentReleaseLifecycleEventBestEffort: vi.fn(async () => undefined),
+}));
+
+vi.mock('../../../src/services/project-lifecycle-events', () => ({
+  recordDeploymentEnvironmentLifecycleEventBestEffort,
+  recordDeploymentReleaseLifecycleEventBestEffort,
+}));
 
 vi.mock('../../../src/lib/logger', () => ({
   createModuleLogger: () => ({ debug: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() }),
@@ -148,11 +176,11 @@ function createMockDb() {
               ]),
             };
           }
-          if (table && typeof table === 'object' && 'projectId' in table) {
-            return Promise.resolve([]);
-          }
           if (table && typeof table === 'object' && 'observedDeployment' in table) {
             return Promise.resolve(deploymentPlacements);
+          }
+          if (table && typeof table === 'object' && 'projectId' in table) {
+            return Promise.resolve([]);
           }
           if (table && typeof table === 'object' && 'version' in table) {
             const envId = String(findEq(condition, 'deployment_releases.environmentId') ?? '');
@@ -216,21 +244,26 @@ async function postHeartbeat(
       body: JSON.stringify(payload),
     },
     env,
-    { waitUntil: vi.fn(), passThroughOnException: vi.fn() }
+    { waitUntil: waitUntilMock, passThroughOnException: vi.fn() }
   );
 }
+
+let waitUntilMock = vi.fn();
 
 describe('node lifecycle deployment heartbeat contract', () => {
   beforeEach(() => {
     updates.length = 0;
+    releaseTransitions.length = 0;
     volumeReadinessByEnvironment.clear();
     deploymentPlacements = [
-      { envId: 'env-a', status: 'active', requiresVolumes: false },
-      { envId: 'env-b', status: 'active', requiresVolumes: false },
+      { envId: 'env-a', projectId: 'project-1', status: 'active', requiresVolumes: false },
+      { envId: 'env-b', projectId: 'project-1', status: 'active', requiresVolumes: false },
     ];
     latestByEnvironment.clear();
     latestByEnvironment.set('env-a', { version: 5, status: 'created' });
     latestByEnvironment.set('env-b', { version: 8, status: 'applied' });
+    waitUntilMock = vi.fn();
+    vi.clearAllMocks();
   });
 
   it('withholds pending releases for volume environments until all volumes are attached', async () => {
@@ -369,7 +402,9 @@ describe('node lifecycle deployment heartbeat contract', () => {
   });
 
   it('promotes starting environments to active after an applied heartbeat', async () => {
-    deploymentPlacements = [{ envId: 'env-a', status: 'starting', requiresVolumes: false }];
+    deploymentPlacements = [
+      { envId: 'env-a', projectId: 'project-1', status: 'starting', requiresVolumes: false },
+    ];
     latestByEnvironment.set('env-a', { version: 4, status: 'applied' });
 
     const res = await postHeartbeat({
@@ -380,6 +415,63 @@ describe('node lifecycle deployment heartbeat contract', () => {
 
     expect(res.status).toBe(200);
     expect(updates.some((update) => update.values.status === 'active')).toBe(true);
+  });
+
+  it('schedules lifecycle events for observed environment and release transitions', async () => {
+    deploymentPlacements = [
+      {
+        envId: 'env-a',
+        projectId: 'project-1',
+        status: 'starting',
+        requiresVolumes: false,
+        observedAppliedSeq: 3,
+        observedStatus: 'applying',
+      },
+    ];
+    releaseTransitions.push({
+      releaseId: 'rel-4',
+      environmentId: 'env-a',
+      version: 4,
+      fromStatus: 'applying',
+      toStatus: 'applied',
+      occurredAt: '2026-08-28T12:00:00.000Z',
+    });
+
+    const res = await postHeartbeat({
+      deployment: {
+        environments: [{ environmentId: 'env-a', appliedSeq: 4, status: 'applied' }],
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(recordDeploymentEnvironmentLifecycleEventBestEffort).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        projectId: 'project-1',
+        environmentId: 'env-a',
+        lifecycle: 'active',
+        status: 'active',
+        fromStatus: 'starting',
+        observedStatus: 'applied',
+        observedAppliedSeq: 4,
+        nodeId: 'node-deploy-1',
+        source: 'node.heartbeat_deployment_observation',
+      })
+    );
+    expect(recordDeploymentReleaseLifecycleEventBestEffort).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        projectId: 'project-1',
+        releaseId: 'rel-4',
+        environmentId: 'env-a',
+        status: 'applied',
+        fromStatus: 'applying',
+        version: 4,
+        nodeId: 'node-deploy-1',
+        source: 'node.heartbeat_release_reconciliation',
+      })
+    );
+    expect(waitUntilMock).toHaveBeenCalled();
   });
 
   it('does not reissue a failed newer release after the node reports rollback', async () => {

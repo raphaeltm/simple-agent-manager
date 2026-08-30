@@ -171,32 +171,41 @@ SAM now backs chat sessions with task records across more runtime paths. In prac
 
 Running agents have access to project-aware MCP tools:
 
-| Tool                   | Description                                                                                                               |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `dispatch_task`        | Spawn follow-up work using the selected profile runtime, or an explicit `runtime` override                                |
-| `create_idea`          | Create a new idea                                                                                                         |
-| `update_idea`          | Update an idea's title, content, priority, or status                                                                      |
-| `list_ideas`           | View project ideas                                                                                                        |
-| `get_idea`             | Read idea details                                                                                                         |
-| `search_ideas`         | Search ideas by keyword                                                                                                   |
-| `link_idea`            | Link an idea to a chat session                                                                                            |
-| `unlink_idea`          | Remove an idea-session link                                                                                               |
-| `find_related_ideas`   | Find ideas related to a session                                                                                           |
-| `list_linked_ideas`    | List ideas linked to a session                                                                                            |
-| `list_sessions`        | View chat sessions                                                                                                        |
-| `get_session_messages` | Read conversation history (consecutive streaming tokens are concatenated into logical messages)                           |
-| `search_messages`      | Search messages by keyword — uses FTS5 full-text search for completed sessions; keyword matching for active sessions      |
-| `list_triggers`        | List this project's automation triggers, optionally filtered by status or source type                                     |
-| `list_incident_queue`  | List grouped private feedback incidents; available only inside the configured feedback project                            |
-| `get_incident`         | Read one bounded, redacted private incident and its untrusted evidence                                                    |
-| `claim_incident`       | Atomically claim a private incident for the current task                                                                  |
-| `resolve_incident`     | Terminally resolve or reject a claimed private incident; resolved outcomes require a PR/task/Idea ship-or-track reference |
-| `update_task_status`   | Report progress                                                                                                           |
-| `get_task_details`     | Inspect task state, persisted output fields, PR/error details, session id, and bounded recent assistant diagnostics       |
-| `complete_task`        | Mark current work as done, optionally with structured completion evidence                                                 |
-| `request_human_input`  | Record a user decision request and notify the user; the tool call itself is non-blocking                                  |
+| Tool                                | Description                                                                                                                                        |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dispatch_task`                     | Spawn follow-up work using the selected profile runtime, or an explicit `runtime` override                                                         |
+| `create_idea`                       | Create a new idea                                                                                                                                  |
+| `update_idea`                       | Update an idea's title, content, priority, or status                                                                                               |
+| `list_ideas`                        | View project ideas                                                                                                                                 |
+| `get_idea`                          | Read idea details                                                                                                                                  |
+| `search_ideas`                      | Search ideas by keyword                                                                                                                            |
+| `link_idea`                         | Link an idea to a chat session                                                                                                                     |
+| `unlink_idea`                       | Remove an idea-session link                                                                                                                        |
+| `find_related_ideas`                | Find ideas related to a session                                                                                                                    |
+| `list_linked_ideas`                 | List ideas linked to a session                                                                                                                     |
+| `list_sessions`                     | View chat sessions                                                                                                                                 |
+| `get_session_messages`              | Read conversation history (consecutive streaming tokens are concatenated into logical messages)                                                    |
+| `search_messages`                   | Search messages by keyword — uses FTS5 full-text search for completed sessions; keyword matching for active sessions                               |
+| `list_triggers`                     | List this project's automation triggers, optionally filtered by status or source type                                                              |
+| `create_project_event_subscription` | Subscribe the current task agent to durable project events using bounded v1 exact/set filters for source, event type, subject, and severity        |
+| `list_project_event_subscriptions`  | Recover active event subscription IDs owned by the current task agent                                                                              |
+| `get_project_event_subscription`    | Inspect one owned event subscription, including filter and recorded delivery preference                                                            |
+| `cancel_project_event_subscription` | Idempotently cancel one owned event subscription                                                                                                   |
+| `list_subscription_events`          | Replay missed or queued events for one visible subscription; returns payload-free summaries, delivery IDs, and an opaque subscription-bound cursor |
+| `get_event`                         | Fetch full stored details for one event that is visible through an active subscription                                                             |
+| `ack_event_delivery`                | Idempotently acknowledge a processed pull delivery by delivery ID                                                                                  |
+| `list_incident_queue`               | List grouped private feedback incidents; available only inside the configured feedback project                                                     |
+| `get_incident`                      | Read one bounded, redacted private incident and its untrusted evidence                                                                             |
+| `claim_incident`                    | Atomically claim a private incident for the current task                                                                                           |
+| `resolve_incident`                  | Terminally resolve or reject a claimed private incident; resolved outcomes require a PR/task/Idea ship-or-track reference                          |
+| `update_task_status`                | Report progress                                                                                                                                    |
+| `get_task_details`                  | Inspect task state, persisted output fields, PR/error details, session id, and bounded recent assistant diagnostics                                |
+| `complete_task`                     | Mark current work as done, optionally with structured completion evidence                                                                          |
+| `request_human_input`               | Record a user decision request and notify the user; the tool call itself is non-blocking                                                           |
 
 `get_task_details` keeps `outputSummary` and `completionEvidence` as the canonical persisted completion fields. When a task has a linked chat session, it can also include a bounded `recentAssistantMessages` array with up to five recent assistant messages, each capped to 2,000 characters, so orchestrators can recover useful final output when the persisted summary is sparse. The SAM session (Anthropic tool) variant returns a single `finalAssistantMessage` (the latest assistant message, content capped to 2,000 characters) instead of the full array. If session diagnostics are unavailable, task details still return and the diagnostic fields are empty/null.
+
+For durable project eventing, use this loop: create the narrowest useful subscription, list subscription events until `hasMore` is false, fetch full event details only with `get_event` when needed, then ack each processed `deliveryId`. List responses deliberately omit payloads and raw payload references. The cursor is opaque and bound to the subscription that produced it. Project and caller identity always come from the MCP token, and eventing v1 is pull/replay/ack only; it does not inject prompts, steer runtimes, interrupt sessions, or spawn tasks.
 
 Claude Code and Codex get these tools on both the VM and [Instant](/docs/guides/instant-sessions/) runtimes. If a Codex session is handed an MCP server without a usable token, it fails to start with an explicit error rather than launching a tool-less agent.
 

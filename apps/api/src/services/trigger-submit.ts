@@ -235,7 +235,11 @@ export async function submitTriggeredTask(
     );
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await markQueuedTaskFailed(db, taskId, `Session creation failed: ${errorMsg}`);
+    await markQueuedTaskFailed(db, taskId, `Session creation failed: ${errorMsg}`, {
+      env,
+      projectId: input.projectId,
+      source: 'trigger_submit.session_creation',
+    });
     throw err;
   }
 
@@ -327,7 +331,12 @@ export async function submitTriggeredTask(
   } catch (err) {
     if (err instanceof TriggerTaskSubmissionPendingError) throw err;
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await markQueuedTaskFailed(db, taskId, `Task runner startup failed: ${errorMsg}`);
+    await markQueuedTaskFailed(db, taskId, `Task runner startup failed: ${errorMsg}`, {
+      env,
+      projectId: input.projectId,
+      source: 'trigger_submit.task_runner_startup',
+      sessionId,
+    });
     // Stop orphaned session (best-effort)
     await projectDataService.stopSession(env, input.projectId, sessionId).catch(() => {});
     throw err;

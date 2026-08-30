@@ -8,20 +8,48 @@
  * See: specs/018-project-first-architecture/research.md (Decision 3)
  */
 import type {
+  AckProjectEventDeliveryInput,
+  AdmitProjectEventInput,
   AgentMailboxMessage,
+  CancelProjectEventSubscriptionInput,
   CheckpointEpisode,
   CheckpointEpisodeTransitionInput,
   CommentAuthor,
   CommentReply,
   CommentStatus,
   CreateCheckpointEpisodeInput,
+  CreateProjectEventDeliveryBatchInput,
+  CreateProjectEventSubscriptionInput,
   DeliveryState,
+  ExpireProjectEventSubscriptionsInput,
+  GetProjectEventInput,
+  GetProjectEventRecentStatusInput,
+  GetProjectEventSubscriptionInput,
   LibraryFileCommentMutationResponse,
+  ListProjectEventDeliveryAttemptsInput,
+  ListProjectEventDeliveryBatchesInput,
+  ListProjectEventSubscriptionEventsInput,
+  ListProjectEventSubscriptionsInput,
   MessageClass,
   MessageCommentListResponse,
   MessageCommentMutationResponse,
   MessageCommentReplyMutationResponse,
   MessageCommentThread,
+  ProjectEventAdmissionResult,
+  ProjectEventDeliveryAckResult,
+  ProjectEventDeliveryAttemptListResult,
+  ProjectEventDeliveryAttemptMutationResult,
+  ProjectEventDeliveryBatchListResult,
+  ProjectEventDeliveryBatchMutationResult,
+  ProjectEventExpireSubscriptionsResult,
+  ProjectEventRecentStatus,
+  ProjectEventRetentionResult,
+  ProjectEventSubscriptionEvent,
+  ProjectEventSubscriptionEventListResult,
+  ProjectEventSubscriptionListResult,
+  ProjectEventSubscriptionMutationResult,
+  RecordProjectEventDeliveryAttemptInput,
+  RunProjectEventRetentionInput,
   SessionActivityTerminalReason,
 } from '@simple-agent-manager/shared';
 import { resolveHandoffLimits, resolveMissionStateLimits } from '@simple-agent-manager/shared';
@@ -41,6 +69,15 @@ import type {
   UpdateFileCommentStatusInput,
 } from '../durable-objects/project-data/comment-contracts';
 import { CommentNotFoundError } from '../durable-objects/project-data/comment-contracts';
+import {
+  ProjectEventAckPolicyError,
+  ProjectEventAckStateError,
+  ProjectEventCursorError,
+  ProjectEventIdempotencyConflictError,
+  ProjectEventLimitExceededError,
+  ProjectEventNotFoundError,
+  ProjectEventValidationError,
+} from '../durable-objects/project-data/project-events-contracts';
 import type {
   ArchivedToolPayloadListResult,
   ArchivedToolPayloadQuery,
@@ -52,6 +89,15 @@ export {
   CommentNotFoundError,
   CommentValidationError,
 } from '../durable-objects/project-data/comment-contracts';
+export {
+  ProjectEventAckPolicyError,
+  ProjectEventAckStateError,
+  ProjectEventCursorError,
+  ProjectEventIdempotencyConflictError,
+  ProjectEventLimitExceededError,
+  ProjectEventNotFoundError,
+  ProjectEventValidationError,
+} from '../durable-objects/project-data/project-events-contracts';
 import type {
   AcceptedPromptDelivery,
   AcceptPromptDeliveryInput,
@@ -67,6 +113,10 @@ import {
 } from './durable-object-retry';
 import { ensureOncePerIsolate, forgetEnsuredProjectData } from './project-data-ensure-memo';
 import { toProjectDataStorageFullError } from './project-data-storage-errors';
+import {
+  buildSessionLifecycleEventInput,
+  type SessionLifecycleEventInput,
+} from './project-lifecycle-event-inputs';
 import { hasAuthorizedRestorableSnapshotWakeClaim } from './session-snapshots';
 import type { TaskAcpLivenessSignals } from './task-runtime-liveness';
 
@@ -107,10 +157,12 @@ function normalizeProjectDataRpcError(projectId: string, operation: string, err:
   }
   const commentError = normalizeProjectDataCommentRpcError(err);
   if (commentError) return commentError;
+  const eventError = normalizeProjectDataEventRpcError(err);
+  if (eventError) return eventError;
   return err;
 }
 
-function normalizeProjectDataCommentRpcError(err: unknown): unknown | null {
+function normalizeProjectDataCommentRpcError(err: unknown): Error | null {
   if (!(err instanceof Error)) return null;
 
   // Cloudflare DO RPC serializes custom Error subclasses across isolates as a
@@ -123,6 +175,50 @@ function normalizeProjectDataCommentRpcError(err: unknown): unknown | null {
       return new CommentNotFoundError('Message');
     case 'CommentNotFoundError: Comment thread not found':
       return new CommentNotFoundError('Comment thread');
+    default:
+      return null;
+  }
+}
+
+function normalizeProjectDataEventRpcError(err: unknown): Error | null {
+  if (!(err instanceof Error)) return null;
+
+  const validationPrefix = 'ProjectEventValidationError: ';
+  if (err.message.startsWith(validationPrefix)) {
+    return new ProjectEventValidationError(err.message.slice(validationPrefix.length));
+  }
+  const limitPrefix = 'ProjectEventLimitExceededError: ';
+  if (err.message.startsWith(limitPrefix)) {
+    return new ProjectEventLimitExceededError(err.message.slice(limitPrefix.length));
+  }
+  const conflictPrefix = 'ProjectEventIdempotencyConflictError: ';
+  if (err.message.startsWith(conflictPrefix)) {
+    return new ProjectEventIdempotencyConflictError(err.message.slice(conflictPrefix.length));
+  }
+  const cursorPrefix = 'ProjectEventCursorError: ';
+  if (err.message.startsWith(cursorPrefix)) {
+    return new ProjectEventCursorError(err.message.slice(cursorPrefix.length));
+  }
+  const ackPolicyPrefix = 'ProjectEventAckPolicyError: ';
+  if (err.message.startsWith(ackPolicyPrefix)) {
+    return new ProjectEventAckPolicyError(err.message.slice(ackPolicyPrefix.length));
+  }
+  const ackStatePrefix = 'ProjectEventAckStateError: ';
+  if (err.message.startsWith(ackStatePrefix)) {
+    return new ProjectEventAckStateError(err.message.slice(ackStatePrefix.length));
+  }
+
+  switch (err.message) {
+    case 'ProjectEventNotFoundError: Project event not found':
+      return new ProjectEventNotFoundError('Project event');
+    case 'ProjectEventNotFoundError: Event subscription not found':
+      return new ProjectEventNotFoundError('Event subscription');
+    case 'ProjectEventNotFoundError: Event match not found':
+      return new ProjectEventNotFoundError('Event match');
+    case 'ProjectEventNotFoundError: Delivery batch not found':
+      return new ProjectEventNotFoundError('Delivery batch');
+    case 'ProjectEventNotFoundError: Delivery attempt not found':
+      return new ProjectEventNotFoundError('Delivery attempt');
     default:
       return null;
   }
@@ -199,9 +295,110 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+type ProjectDataEventInput<T extends { projectId: string }> = Omit<T, 'projectId'>;
+
+function withProjectId<T extends { projectId: string }>(
+  projectId: string,
+  input: ProjectDataEventInput<T>
+): T {
+  return { ...input, projectId } as T;
+}
+
+type ProjectDataEventRpc = {
+  admitProjectEvent(input: AdmitProjectEventInput): Promise<ProjectEventAdmissionResult>;
+  createProjectEventSubscription(
+    input: CreateProjectEventSubscriptionInput
+  ): Promise<ProjectEventSubscriptionMutationResult>;
+  listProjectEventSubscriptions(
+    input: ListProjectEventSubscriptionsInput
+  ): Promise<ProjectEventSubscriptionListResult>;
+  getProjectEventSubscription(
+    input: GetProjectEventSubscriptionInput
+  ): Promise<ProjectEventSubscriptionMutationResult['subscription'] | null>;
+  cancelProjectEventSubscription(
+    input: CancelProjectEventSubscriptionInput
+  ): Promise<ProjectEventSubscriptionMutationResult>;
+  expireProjectEventSubscriptions(
+    input: ExpireProjectEventSubscriptionsInput
+  ): Promise<ProjectEventExpireSubscriptionsResult>;
+  createProjectEventDeliveryBatch(
+    input: CreateProjectEventDeliveryBatchInput
+  ): Promise<ProjectEventDeliveryBatchMutationResult>;
+  listProjectEventSubscriptionEvents(
+    input: ListProjectEventSubscriptionEventsInput
+  ): Promise<ProjectEventSubscriptionEventListResult | null>;
+  getProjectEvent(input: GetProjectEventInput): Promise<ProjectEventSubscriptionEvent | null>;
+  ackProjectEventDelivery(
+    input: AckProjectEventDeliveryInput
+  ): Promise<ProjectEventDeliveryAckResult | null>;
+  listProjectEventDeliveryBatches(
+    input: ListProjectEventDeliveryBatchesInput
+  ): Promise<ProjectEventDeliveryBatchListResult>;
+  recordProjectEventDeliveryAttempt(
+    input: RecordProjectEventDeliveryAttemptInput
+  ): Promise<ProjectEventDeliveryAttemptMutationResult>;
+  listProjectEventDeliveryAttempts(
+    input: ListProjectEventDeliveryAttemptsInput
+  ): Promise<ProjectEventDeliveryAttemptListResult>;
+  getProjectEventRecentStatus(
+    input: GetProjectEventRecentStatusInput
+  ): Promise<ProjectEventRecentStatus>;
+  runProjectEventRetention(
+    input: RunProjectEventRetentionInput
+  ): Promise<ProjectEventRetentionResult>;
+};
+
+function projectEventRpc(stub: DurableObjectStub<ProjectData>): ProjectDataEventRpc {
+  return stub as unknown as ProjectDataEventRpc;
+}
+
+type ProjectDataEventOperation = keyof ProjectDataEventRpc;
+type ProjectDataEventOperationInput<T extends ProjectDataEventOperation> = Parameters<
+  ProjectDataEventRpc[T]
+>[0];
+type ProjectDataEventOperationResult<T extends ProjectDataEventOperation> = Awaited<
+  ReturnType<ProjectDataEventRpc[T]>
+>;
+
+function callProjectDataEvent<T extends ProjectDataEventOperation>(
+  env: Env,
+  projectId: string,
+  operation: T,
+  input: ProjectDataEventInput<ProjectDataEventOperationInput<T>>
+): Promise<ProjectDataEventOperationResult<T>> {
+  return callProjectDataNoRetry(env, projectId, operation, (stub) => {
+    const method = projectEventRpc(stub)[operation] as (
+      input: ProjectDataEventOperationInput<T>
+    ) => Promise<ProjectDataEventOperationResult<T>>;
+    return method(withProjectId(projectId, input));
+  });
+}
+
 // =========================================================================
 // Chat Sessions
 // =========================================================================
+
+async function recordSessionLifecycleEventBestEffort(
+  env: Env,
+  input: SessionLifecycleEventInput
+): Promise<void> {
+  try {
+    const event = await buildSessionLifecycleEventInput(input);
+    const { projectId, ...withoutProjectId } = event;
+    await admitProjectEvent(env, projectId, withoutProjectId);
+  } catch (err) {
+    log.warn('project_data.session_lifecycle_event_failed', {
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      lifecycle: input.lifecycle,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+function sessionStatus(session: Record<string, unknown> | null): string | null {
+  return typeof session?.status === 'string' ? session.status : null;
+}
 
 export async function createSession(
   env: Env,
@@ -211,9 +408,20 @@ export async function createSession(
   taskId: string | null = null,
   createdByUserId: string | null = null
 ): Promise<string> {
-  return callProjectDataNoRetry(env, projectId, 'createSession', (stub) =>
+  const sessionId = await callProjectDataNoRetry(env, projectId, 'createSession', (stub) =>
     stub.createSession(workspaceId, topic, taskId, createdByUserId)
   );
+  await recordSessionLifecycleEventBestEffort(env, {
+    projectId,
+    sessionId,
+    lifecycle: 'started',
+    status: 'active',
+    taskId,
+    workspaceId,
+    source: 'project_data.create_session',
+    occurredAt: Date.now(),
+  });
+  return sessionId;
 }
 
 export async function linkSessionToWorkspace(
@@ -227,9 +435,24 @@ export async function linkSessionToWorkspace(
   );
 }
 
-export async function stopSession(env: Env, projectId: string, sessionId: string): Promise<void> {
+export async function stopSession(
+  env: Env,
+  projectId: string,
+  sessionId: string
+): Promise<boolean> {
   const stub = await getStub(env, projectId);
-  return stub.stopSession(sessionId);
+  const stopped = await stub.stopSession(sessionId);
+  if (stopped) {
+    await recordSessionLifecycleEventBestEffort(env, {
+      projectId,
+      sessionId,
+      lifecycle: 'archived',
+      status: 'stopped',
+      source: 'project_data.stop_session',
+      occurredAt: Date.now(),
+    });
+  }
+  return stopped;
 }
 
 export async function sleepSession(
@@ -238,7 +461,18 @@ export async function sleepSession(
   sessionId: string
 ): Promise<boolean> {
   const stub = await getStub(env, projectId);
-  return stub.sleepSession(sessionId);
+  const sleeping = await stub.sleepSession(sessionId);
+  if (sleeping) {
+    await recordSessionLifecycleEventBestEffort(env, {
+      projectId,
+      sessionId,
+      lifecycle: 'sleeping',
+      status: 'sleeping',
+      source: 'project_data.sleep_session',
+      occurredAt: Date.now(),
+    });
+  }
+  return sleeping;
 }
 
 export async function wakeSession(
@@ -249,7 +483,21 @@ export async function wakeSession(
   taskId: string
 ): Promise<boolean> {
   const stub = await getStub(env, projectId);
-  return stub.wakeSession(sessionId, workspaceId, taskId);
+  const previousStatus = sessionStatus(await stub.getSession(sessionId));
+  const woke = await stub.wakeSession(sessionId, workspaceId, taskId);
+  if (woke && previousStatus !== 'active') {
+    await recordSessionLifecycleEventBestEffort(env, {
+      projectId,
+      sessionId,
+      lifecycle: 'woke',
+      status: 'active',
+      taskId,
+      workspaceId,
+      source: 'project_data.wake_session',
+      occurredAt: Date.now(),
+    });
+  }
+  return woke;
 }
 
 export async function wakeSessionForSnapshotRecovery(
@@ -267,7 +515,21 @@ export async function wakeSessionForSnapshotRecovery(
   });
   if (!allowStopped) return false;
   const stub = await getStub(env, projectId);
-  return stub.wakeSession(sessionId, workspaceId, taskId, { allowStopped });
+  const previousStatus = sessionStatus(await stub.getSession(sessionId));
+  const woke = await stub.wakeSession(sessionId, workspaceId, taskId, { allowStopped });
+  if (woke && previousStatus !== 'active') {
+    await recordSessionLifecycleEventBestEffort(env, {
+      projectId,
+      sessionId,
+      lifecycle: 'woke',
+      status: 'active',
+      taskId,
+      workspaceId,
+      source: 'project_data.snapshot_recovery_wake_session',
+      occurredAt: Date.now(),
+    });
+  }
+  return woke;
 }
 
 export async function failSession(
@@ -275,9 +537,21 @@ export async function failSession(
   projectId: string,
   sessionId: string,
   errorMessage: string | null = null
-): Promise<void> {
+): Promise<boolean> {
   const stub = await getStub(env, projectId);
-  return stub.failSession(sessionId, errorMessage);
+  const failed = await stub.failSession(sessionId, errorMessage);
+  if (failed) {
+    await recordSessionLifecycleEventBestEffort(env, {
+      projectId,
+      sessionId,
+      lifecycle: 'failed',
+      status: 'failed',
+      reason: errorMessage,
+      source: 'project_data.fail_session',
+      occurredAt: Date.now(),
+    });
+  }
+  return failed;
 }
 
 export async function updateSessionTopic(
@@ -547,6 +821,130 @@ export async function listProjectCommentInbox(
   return callProjectDataWithRetry(env, projectId, 'listProjectCommentInbox', (stub) =>
     stub.listProjectCommentInbox(input)
   );
+}
+
+// =========================================================================
+// ProjectData Event Subscription Core
+// =========================================================================
+
+export async function admitProjectEvent(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<AdmitProjectEventInput>
+): Promise<ProjectEventAdmissionResult> {
+  return callProjectDataEvent(env, projectId, 'admitProjectEvent', input);
+}
+
+export async function createProjectEventSubscription(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<CreateProjectEventSubscriptionInput>
+): Promise<ProjectEventSubscriptionMutationResult> {
+  return callProjectDataEvent(env, projectId, 'createProjectEventSubscription', input);
+}
+
+export async function listProjectEventSubscriptions(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ListProjectEventSubscriptionsInput> = {}
+): Promise<ProjectEventSubscriptionListResult> {
+  return callProjectDataEvent(env, projectId, 'listProjectEventSubscriptions', input);
+}
+
+export async function getProjectEventSubscription(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<GetProjectEventSubscriptionInput>
+): Promise<ProjectEventSubscriptionMutationResult['subscription'] | null> {
+  return callProjectDataEvent(env, projectId, 'getProjectEventSubscription', input);
+}
+
+export async function cancelProjectEventSubscription(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<CancelProjectEventSubscriptionInput>
+): Promise<ProjectEventSubscriptionMutationResult> {
+  return callProjectDataEvent(env, projectId, 'cancelProjectEventSubscription', input);
+}
+
+export async function expireProjectEventSubscriptions(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ExpireProjectEventSubscriptionsInput> = {}
+): Promise<ProjectEventExpireSubscriptionsResult> {
+  return callProjectDataEvent(env, projectId, 'expireProjectEventSubscriptions', input);
+}
+
+export async function createProjectEventDeliveryBatch(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<CreateProjectEventDeliveryBatchInput>
+): Promise<ProjectEventDeliveryBatchMutationResult> {
+  return callProjectDataEvent(env, projectId, 'createProjectEventDeliveryBatch', input);
+}
+
+export async function listProjectEventSubscriptionEvents(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ListProjectEventSubscriptionEventsInput>
+): Promise<ProjectEventSubscriptionEventListResult | null> {
+  return callProjectDataEvent(env, projectId, 'listProjectEventSubscriptionEvents', input);
+}
+
+export async function getProjectEvent(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<GetProjectEventInput>
+): Promise<ProjectEventSubscriptionEvent | null> {
+  return callProjectDataEvent(env, projectId, 'getProjectEvent', input);
+}
+
+export async function ackProjectEventDelivery(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<AckProjectEventDeliveryInput>
+): Promise<ProjectEventDeliveryAckResult | null> {
+  return callProjectDataEvent(env, projectId, 'ackProjectEventDelivery', input);
+}
+
+export async function listProjectEventDeliveryBatches(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ListProjectEventDeliveryBatchesInput> = {}
+): Promise<ProjectEventDeliveryBatchListResult> {
+  return callProjectDataEvent(env, projectId, 'listProjectEventDeliveryBatches', input);
+}
+
+export async function recordProjectEventDeliveryAttempt(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<RecordProjectEventDeliveryAttemptInput>
+): Promise<ProjectEventDeliveryAttemptMutationResult> {
+  return callProjectDataEvent(env, projectId, 'recordProjectEventDeliveryAttempt', input);
+}
+
+export async function listProjectEventDeliveryAttempts(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ListProjectEventDeliveryAttemptsInput> = {}
+): Promise<ProjectEventDeliveryAttemptListResult> {
+  return callProjectDataEvent(env, projectId, 'listProjectEventDeliveryAttempts', input);
+}
+
+export async function getProjectEventRecentStatus(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<GetProjectEventRecentStatusInput> = {}
+): Promise<ProjectEventRecentStatus> {
+  return callProjectDataEvent(env, projectId, 'getProjectEventRecentStatus', input);
+}
+
+export async function runProjectEventRetention(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<RunProjectEventRetentionInput> = {}
+): Promise<ProjectEventRetentionResult> {
+  return callProjectDataEvent(env, projectId, 'runProjectEventRetention', input);
 }
 
 // --- Library file comments ---------------------------------------------------

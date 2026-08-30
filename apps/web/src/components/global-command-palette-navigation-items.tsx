@@ -146,6 +146,12 @@ export function buildNavigationItems(isSuperadmin: boolean): NavItem[] {
         icon: <LayoutDashboard size={14} />,
       },
       {
+        id: 'nav-admin-project-events',
+        label: 'Admin: Eventing',
+        path: '/admin/project-events',
+        icon: <Radio size={14} />,
+      },
+      {
         id: 'nav-admin-logs',
         label: 'Admin: Logs',
         path: '/admin/logs',

@@ -7,7 +7,18 @@ import { and, eq } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
+import { recordTaskLifecycleEventBestEffort } from './project-lifecycle-events';
+
+export interface MarkQueuedTaskFailedEventContext {
+  env: Env;
+  projectId: string;
+  source: string;
+  workspaceId?: string | null;
+  sessionId?: string | null;
+  nodeId?: string | null;
+}
 
 /**
  * Marks a still-queued task as failed and records the queued→failed status
@@ -23,7 +34,8 @@ import { ulid } from '../lib/ulid';
 export async function markQueuedTaskFailed(
   db: DrizzleD1Database<typeof schema>,
   taskId: string,
-  reason: string
+  reason: string,
+  eventContext?: MarkQueuedTaskFailedEventContext
 ): Promise<boolean> {
   const failedAt = new Date().toISOString();
   const result = await db
@@ -43,5 +55,21 @@ export async function markQueuedTaskFailed(
     reason,
     createdAt: failedAt,
   });
+  if (eventContext) {
+    await recordTaskLifecycleEventBestEffort(eventContext.env, {
+      projectId: eventContext.projectId,
+      taskId,
+      status: 'failed',
+      fromStatus: 'queued',
+      workspaceId: eventContext.workspaceId,
+      sessionId: eventContext.sessionId,
+      nodeId: eventContext.nodeId,
+      actorType: 'system',
+      actorId: null,
+      reason,
+      source: eventContext.source,
+      occurredAt: failedAt,
+    });
+  }
   return true;
 }
