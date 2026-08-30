@@ -192,6 +192,75 @@ actionable URL, verification code, token, or confirmation:
 4. Staging validation must prove the actionable value came through the real
    integration, then exercise the native control that exposes it.
 
+## A Layout Relationship Must Be Asserted As Measured Coordinates
+
+When a change claims that two elements relate spatially — "the panel stops where the
+rail starts", "the button sits left of the gutter", "the footer clears the composer" —
+that claim must be asserted by **comparing measured coordinates**, not by a screenshot,
+not by `toBeVisible()`, and not by reading back a value the component itself set.
+
+```ts
+// WEAK — passes for an element parked 400px below the fold
+await expect(rail).toBeVisible();
+
+// WEAK — reads back the width the component was told to render; says nothing
+// about whether that width reserved anything for its siblings
+expect(spacer.getBoundingClientRect().width).toBe(46);
+
+// STRONG — the actual relationship, in page coordinates
+const railBox = await rail.boundingBox();
+const headerBox = await header.boundingBox();
+expect(headerBox!.x + headerBox!.width).toBeLessThanOrEqual(railBox!.x + 1);
+```
+
+### Why this rule exists
+
+The session tool rail (PR "Surface session controls in a chat tool rail") reserved its
+width with a sibling `<div style={{ width }}>`. The messages container is
+`flex-col lg:flex-row` — **below `lg` it is a column**, where a sibling's width reserves
+nothing on the cross axis. The chat column, and the absolutely-positioned header inside
+it, stretched to the full viewport while the rail overlaid the right edge. Any header
+content reaching that zone was pointer-blocked.
+
+It survived a green suite, 36 passing Playwright assertions, and a screenshot review —
+because the mock chip row happened to wrap before reaching the rail. Line-wrap luck, not
+correctness. It surfaced the moment two coordinates were compared: header right edge
+375px, rail left edge 330px.
+
+**Responsive containers change layout *semantics*, not just sizes.** A guarantee that
+holds in `flex-row` can evaporate in `flex-col` with nothing in the code to signal it.
+Assert the relationship at every viewport in the project matrix.
+
+## A Conditional Test Needs An Else Branch
+
+A test whose assertions live inside `if (await x.isVisible())` reports green when the
+condition is false — whether the feature works, is broken, or never rendered at all. The
+guard must either be an assertion, or the `else` must fail or explicitly `test.skip()`
+with a reason.
+
+```ts
+// BANNED — zero assertions execute when the button never appears
+if (await scrollBtn.isVisible().catch(() => false)) {
+  expect(...);
+}
+
+// CORRECT — make the precondition true, then assert unconditionally
+await seedEnoughContentToScroll(page);
+await scrollAwayFromBottom(page);
+await expect(scrollBtn).toBeVisible();
+expect(...);
+```
+
+The same PR shipped exactly this: a scroll-button collision check guarded on
+`isVisible()`, where the four-message fixture mounted `alignToBottom` at the last item so
+the button never rendered on any of the four viewport projects. The guard was permanently
+false and the test executed **zero assertions** while reporting green. This is the
+rule-62 family and the `.claude/rules/02` "absence of failures and absence of tests are
+indistinguishable" failure mode, in test-body form.
+
+Before merging a conditional assertion, ask: *under what fixture does this branch
+actually run?* If you cannot name it, instrument the condition and measure it.
+
 ## Responsive / On-Demand Surfaces Must Be Proved Visible
 
 When a user action opens a responsive surface (rail, drawer, popover, composer,
