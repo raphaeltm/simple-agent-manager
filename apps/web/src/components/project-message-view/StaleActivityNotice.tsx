@@ -14,10 +14,7 @@ export const StaleActivityNotice: FC<StaleActivityNoticeProps> = ({ onDismiss })
   <div
     role="status"
     className="shrink-0 flex items-center gap-2 px-4 py-1.5 border-t border-border-default text-[11px]"
-    style={{
-      backgroundColor: 'var(--sam-color-warning-tint)',
-      color: 'var(--sam-color-warning-fg)',
-    }}
+    style={{ backgroundColor: 'var(--sam-color-warning-tint)', color: 'var(--sam-color-warning-fg)' }}
   >
     <span className="flex-1 min-w-0">Agent went quiet — no confirmed activity</span>
     <button

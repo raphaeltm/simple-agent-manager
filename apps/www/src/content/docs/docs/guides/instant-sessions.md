@@ -176,7 +176,7 @@ Start a new chat. [Fork](/docs/guides/chat-features/#conversation-forking) from 
 
 ### None of these fit
 
-If a session is stuck in a state this page doesn't describe, or recovery repeatedly fails on work you need, [report it](/docs/guides/reporting-issues/) from the session header — the report can attach the session, task, and node identifiers a maintainer needs.
+If a session is stuck in a state this page doesn't describe, or recovery repeatedly fails on work you need, [report it](/docs/guides/reporting-issues/) from the session tool rail — the report can attach the session, task, and node identifiers a maintainer needs.
 
 ## Starting a chat is durable
 

@@ -1,8 +1,4 @@
-import type {
-  ChatMessageResponse,
-  ChatSessionDetailResponse,
-  SessionStateSnapshot,
-} from '../../lib/api';
+import type { ChatMessageResponse, ChatSessionDetailResponse, SessionStateSnapshot } from '../../lib/api';
 import { mergeMessages } from '../../lib/merge-messages';
 
 export type FilePanelState = {
