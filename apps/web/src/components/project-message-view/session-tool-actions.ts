@@ -80,6 +80,11 @@ export interface SessionToolAction {
   tone?: 'default' | 'success';
   /** Unresolved comment count — a dot in icon mode, a number in label mode. */
   badge?: number;
+  /**
+   * Amber-tints the badge, matching the header chip's "N needs you" treatment. Without
+   * it the two surfaces disagreed about urgency for the same session.
+   */
+  badgeNeedsAttention?: boolean;
   /** Set for Workspace, which navigates rather than invoking a handler. */
   href?: string;
   disabled?: boolean;
@@ -98,6 +103,8 @@ export interface BuildSessionToolActionsInput {
   /** From `getReportIssueConfig()` — null while the config is still loading. */
   reportEnabled: boolean | null;
   unresolvedCommentCount: number;
+  /** Subset of the above whose last activity came from someone else. */
+  needsAttentionCommentCount?: number;
   /** Handler availability mirrors the old per-button `{onOpenX && ...}` guards. */
   hasFilesHandler: boolean;
   hasGitHandler: boolean;
@@ -118,6 +125,7 @@ export function buildSessionToolActions(input: BuildSessionToolActionsInput): Se
     taskEmbed,
     reportEnabled,
     unresolvedCommentCount,
+    needsAttentionCommentCount = 0,
     hasFilesHandler,
     hasGitHandler,
     hasTimelineHandler,
@@ -175,17 +183,28 @@ export function buildSessionToolActions(input: BuildSessionToolActionsInput): Se
       id: 'comments',
       label: 'Comments',
       hint:
-        unresolvedCommentCount > 0
-          ? `Open comment threads — ${unresolvedCommentCount} unresolved`
-          : 'Open comment threads on this session',
+        needsAttentionCommentCount > 0
+          ? `Open comment threads — ${needsAttentionCommentCount} needs you`
+          : unresolvedCommentCount > 0
+            ? `Open comment threads — ${unresolvedCommentCount} unresolved`
+            : 'Open comment threads on this session',
       icon: MessageSquareQuote,
       group: 'workspace',
       badge: unresolvedCommentCount > 0 ? unresolvedCommentCount : undefined,
+      badgeNeedsAttention: needsAttentionCommentCount > 0,
     });
   }
 
   // Retry / Fork act on the task, so they only exist when there is one.
-  if (session.task?.id ?? session.taskId) {
+  //
+  // `taskEmbed` is the signal Complete already gates on, and the one the WebSocket delta
+  // path keeps current. The pre-refactor header read `session.task?.id ?? session.taskId`
+  // here and `taskEmbed` for Complete — two signals answering the same question, which
+  // could disagree. Consolidating the conditions is the point of this function, so both
+  // now read `taskEmbed`, falling back to the session fields only when the embed has not
+  // arrived yet (the detail response populates it, list responses do not).
+  const hasTask = !!(taskEmbed?.id ?? session.task?.id ?? session.taskId);
+  if (hasTask) {
     if (hasRetryHandler) {
       actions.push({
         id: 'retry',

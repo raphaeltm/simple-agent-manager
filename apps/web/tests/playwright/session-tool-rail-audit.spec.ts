@@ -14,8 +14,10 @@ import { expect, type Page, type Route, test } from '@playwright/test';
 import {
   assertNoClippedOverflow,
   assertNoOverflow,
+  expectTheme,
   makeMockUser,
   screenshot,
+  seedTheme,
 } from './audit-helpers';
 
 const PROJECT_ID = 'proj-rail-1';
@@ -66,7 +68,11 @@ function makeChatSession(options: SessionOptions = {}) {
   return {
     id: SESSION_ID,
     projectId: PROJECT_ID,
-    status: state === 'sleeping' ? 'active' : 'active',
+    // `deriveSessionState` reads status + isIdle + agentCompletedAt. A non-active status
+    // is what actually produces the `sleeping` state; an earlier version of this file had
+    // `state === 'sleeping' ? 'active' : 'active'` — identical branches — so the sleeping
+    // scenario silently exercised `idle` instead.
+    status: state === 'sleeping' ? 'sleeping' : 'active',
     topic: long ? LONG_TOPIC : 'Identify source and purpose of running tasks',
     workspaceId,
     agentSessionId: 'as-rail-1',
@@ -94,6 +100,21 @@ function makeChatSession(options: SessionOptions = {}) {
 
 const LONG_TOKEN =
   'sam/layered-resource-management-with-an-extremely-long-branch-name-that-will-not-wrap-0123456789';
+
+/** Enough messages to overflow any test viewport, so the scroll-to-bottom button appears. */
+function makeManyMessages(count = 60) {
+  return {
+    messages: Array.from({ length: count }, (_, i) => ({
+      id: `bulk-${i}`,
+      sessionId: SESSION_ID,
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      content: `Message ${i}: ${'context that makes this bubble tall enough to scroll. '.repeat(3)}`,
+      toolMetadata: null,
+      createdAt: NOW - (count - i) * 10_000,
+    })),
+    hasMore: false,
+  };
+}
 
 function makeMessages(long = false) {
   return {
@@ -144,10 +165,18 @@ interface MockOptions extends SessionOptions {
   reportEnabled?: boolean;
   messagesLong?: boolean;
   empty?: boolean;
+  /** Seeds a long conversation so the scroll-to-bottom button can actually appear. */
+  manyMessages?: boolean;
 }
 
 async function setupMocks(page: Page, options: MockOptions = {}) {
-  const { mode, reportEnabled = true, messagesLong = false, empty = false } = options;
+  const {
+    mode,
+    reportEnabled = true,
+    messagesLong = false,
+    empty = false,
+    manyMessages = false,
+  } = options;
 
   await page.addInitScript(
     ({ userId, storageKey, seededMode }) => {
@@ -158,7 +187,11 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
   );
 
   const session = makeChatSession(options);
-  const messages = empty ? { messages: [], hasMore: false } : makeMessages(messagesLong);
+  const messages = empty
+    ? { messages: [], hasMore: false }
+    : manyMessages
+      ? makeManyMessages()
+      : makeMessages(messagesLong);
   const state = { activity: 'idle', activityAt: NOW, statusError: null, currentPlan: null };
 
   await page.route('**/api/**', async (route: Route) => {
@@ -309,13 +342,44 @@ test.describe('Session tool rail — discoverability', () => {
     for (const [id, name] of [
       ['files', 'Browse workspace files'],
       ['git', 'Review uncommitted changes'],
+      ['workspace', 'Open the full workspace view'],
       ['timeline', 'Jump through session history'],
+      ['comments', 'Open comment threads on this session'],
       ['retry', 'Retry — re-run this task'],
+      ['fork', 'Fork — start a new task from this session'],
+      ['report', 'Report an issue with this session'],
       ['complete', 'Mark this task complete'],
       ['details', 'Show session details, IDs and infrastructure'],
     ] as const) {
       await expect(page.getByTestId(`session-tool-${id}`)).toHaveAttribute('aria-label', name);
     }
+  });
+
+  test('Report, Complete and Details stay pinned above the fold', async ({ page }) => {
+    // These three are the reason the rail exists (Details replaces the old chevron) and
+    // the way a task ends (Complete). On a short viewport with all ten tools they were
+    // the first to fall below an easily-missed internal scroll, so they are pinned in a
+    // non-scrolling footer. Assert they are genuinely on screen, not merely in the DOM.
+    await openChat(page, { state: 'active' });
+
+    const viewportHeight = page.viewportSize()?.height ?? 0;
+    for (const id of ['report', 'complete', 'details']) {
+      const tool = page.getByTestId(`session-tool-${id}`);
+      await expect(tool).toBeInViewport();
+      const box = await tool.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.y).toBeGreaterThanOrEqual(0);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(viewportHeight);
+    }
+
+    // And they live outside the scroller, so scrolling it cannot move them.
+    await expect(page.getByTestId('session-tool-rail-pinned')).toBeVisible();
+    const before = await page.getByTestId('session-tool-details').boundingBox();
+    await page
+      .getByTestId('session-tool-rail-scroller')
+      .evaluate((el) => (el.scrollTop = el.scrollHeight));
+    const after = await page.getByTestId('session-tool-details').boundingBox();
+    expect(after!.y).toBeCloseTo(before!.y, 0);
   });
 
   test('a sleeping session hides the workspace-bound tools but keeps the rest', async ({
@@ -384,17 +448,31 @@ test.describe('Session tool rail — layout', () => {
     // makes this discriminating.
     await openChat(page, { state: 'active', mode: 'labels' });
 
-    const gutter = await page.evaluate(() => {
+    // The rail's own wrapper IS the reserved slot; the panel inside it can be wider.
+    const measured = await page.evaluate(() => {
       const rail = document.querySelector('[data-testid="session-tool-rail"]');
-      const spacer = rail?.previousElementSibling as HTMLElement | null;
-      return spacer ? spacer.getBoundingClientRect().width : -1;
+      const slot = rail?.parentElement;
+      if (!rail || !slot) return null;
+      return {
+        slot: slot.getBoundingClientRect().width,
+        panel: rail.getBoundingClientRect().width,
+      };
     });
+
+    // Guard the measurement itself: an earlier version read a since-removed spacer and
+    // silently returned -1, which passed the mobile branch for the wrong reason.
+    expect(measured).not.toBeNull();
+    expect(measured!.panel).toBeGreaterThan(150); // labels panel is full width everywhere
 
     const width = page.viewportSize()?.width ?? 0;
     if (width <= 767) {
-      expect(gutter).toBeLessThan(80); // icon-width gutter — the rail overlays
+      // Slot narrower than the panel ⇒ the panel floats over the conversation.
+      expect(measured!.slot).toBeLessThan(80);
+      expect(measured!.slot).toBeLessThan(measured!.panel);
     } else {
-      expect(gutter).toBeGreaterThan(150); // full labels width — the rail pushes
+      // Slot equals the panel ⇒ the conversation is pushed, nothing is covered.
+      expect(measured!.slot).toBeGreaterThan(150);
+      expect(measured!.slot).toBeCloseTo(measured!.panel, 0);
     }
   });
 
@@ -413,12 +491,35 @@ test.describe('Session tool rail — layout', () => {
     expect(box!.y).toBeLessThan(viewportHeight * 0.5);
     expect(box!.height).toBeGreaterThan(100);
 
+    // The header (and its details panel) must stop where the rail starts. The header is
+    // absolutely positioned inside the chat column, so if the gutter spacer ever stops
+    // narrowing that column the panel would silently slide under the rail.
+    // The header (and its details panel) must stop where the rail starts. The header is
+    // absolutely positioned inside the chat column; if that column ever stops being
+    // narrowed by the rail's slot, the panel silently slides under the rail. Screenshots
+    // do not reveal this — only measuring the two edges does.
+    const railLeft = box!.x;
+    const headerBox = await page.getByTestId('session-header').boundingBox();
+    expect(headerBox).not.toBeNull();
+    expect(headerBox!.x + headerBox!.width).toBeLessThanOrEqual(railLeft + 1);
+
     await capture(page, 'tool-rail-details-open');
   });
 
   test('long titles and unbroken tokens do not overflow', async ({ page }) => {
     await openChat(page, { state: 'active', long: true, messagesLong: true });
     await capture(page, 'tool-rail-long-content');
+  });
+
+  test('renders correctly in light theme', async ({ page }) => {
+    // The rail's chrome colours must come from the theme-aware `--sam-chrome-accent-*`
+    // family, not frozen dark-mode literals. Without this pass a light-theme user would
+    // get the dark green border against a light surface and nothing would catch it.
+    await seedTheme(page, 'light');
+    await openChat(page, { state: 'active' });
+    await expectTheme(page, 'light');
+    await expect(page.getByTestId('session-tool-rail')).toBeVisible();
+    await capture(page, 'tool-rail-light-theme');
   });
 
   test('renders over an empty conversation', async ({ page }) => {
@@ -428,15 +529,35 @@ test.describe('Session tool rail — layout', () => {
   });
 
   test('every tool stays reachable when the rail overflows', async ({ page }) => {
+    // Ten tools plus the wake/reconnect banners overflow a short viewport. Seeding a long
+    // conversation is not what causes it — the banners and viewport height are — so the
+    // test asserts the overflow actually happened before trusting the reachability
+    // checks below. Without that guard this test is vacuous on any viewport tall enough
+    // to fit the rail, which is most of them.
     await openChat(page, { state: 'active' });
 
-    // Ten tools on a short viewport can exceed the rail's height. The list must be a
-    // real scroller, not clipped — otherwise Complete and Details become unreachable.
-    const list = page.getByTestId('session-tool-rail').locator('> div').last();
-    const overflowY = await list.evaluate((el) => getComputedStyle(el).overflowY);
-    expect(['auto', 'scroll']).toContain(overflowY);
+    const list = page.getByTestId('session-tool-rail-scroller');
+    const metrics = await list.evaluate((el) => ({
+      overflowY: getComputedStyle(el).overflowY,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    }));
 
-    for (const id of ['files', 'complete', 'details']) {
+    // The list must be a real scroller, never clipped — that part holds at every size.
+    expect(['auto', 'scroll']).toContain(metrics.overflowY);
+
+    if (metrics.scrollHeight <= metrics.clientHeight) {
+      // Everything fits: nothing to scroll to, so assert the strong property instead —
+      // every tool is already on screen.
+      for (const id of ['files', 'git', 'timeline']) {
+        await expect(page.getByTestId(`session-tool-${id}`)).toBeInViewport();
+      }
+      return;
+    }
+
+    // Report/Complete/Details are pinned outside this scroller — covered separately by
+    // 'Report, Complete and Details stay pinned above the fold'.
+    for (const id of ['files', 'git', 'timeline']) {
       const tool = page.getByTestId(`session-tool-${id}`);
       await tool.scrollIntoViewIfNeeded();
       await expect(tool).toBeInViewport();
@@ -444,17 +565,27 @@ test.describe('Session tool rail — layout', () => {
   });
 
   test('does not collide with the scroll-to-bottom button', async ({ page }) => {
-    await openChat(page, { state: 'active' });
+    // The conversation must be long enough to scroll AND scrolled away from the bottom,
+    // or `showScrollButton` never flips and the button never renders. An earlier version
+    // of this test guarded on `isVisible()` with a short conversation, so the guard was
+    // always false and the test executed ZERO assertions on every viewport.
+    await openChat(page, { state: 'active', manyMessages: true });
+    await page.getByTestId('session-tool-rail').waitFor();
+    await page.evaluate(() => {
+      const scroller = document.querySelector('[data-sam-conversation-scroller="true"]');
+      if (scroller) scroller.scrollTop = 0;
+    });
+
     const scrollBtn = page.getByRole('button', { name: 'Scroll to bottom' });
-    if (await scrollBtn.isVisible().catch(() => false)) {
-      const scrollBox = await scrollBtn.boundingBox();
-      const railBox = await page.getByTestId('session-tool-rail').boundingBox();
-      expect(scrollBox).not.toBeNull();
-      expect(railBox).not.toBeNull();
-      // The scroll button lives inside the narrowed chat column, so its right edge must
-      // stay left of the rail.
-      expect(scrollBox!.x + scrollBox!.width).toBeLessThanOrEqual(railBox!.x + 1);
-    }
+    await expect(scrollBtn).toBeVisible({ timeout: 10_000 });
+
+    const scrollBox = await scrollBtn.boundingBox();
+    const railBox = await page.getByTestId('session-tool-rail').boundingBox();
+    expect(scrollBox).not.toBeNull();
+    expect(railBox).not.toBeNull();
+    // The scroll button lives inside the chat column, which the rail's slot narrows, so
+    // its right edge must stay left of the rail.
+    expect(scrollBox!.x + scrollBox!.width).toBeLessThanOrEqual(railBox!.x + 1);
   });
 });
 

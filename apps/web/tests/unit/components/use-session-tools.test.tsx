@@ -236,13 +236,61 @@ describe('useSessionTools', () => {
     expect(result.current.actions).toEqual([]);
   });
 
-  it('keeps the action array referentially stable across unrelated re-renders', () => {
-    // An unstable array would hand `SessionToolRail` a new prop identity on every poll
-    // tick and remount the strip mid-interaction (rule 64).
-    const input = inputFor();
-    const { result, rerender } = renderHook(() => useSessionTools(input));
+  it('keeps the action array stable while unrelated state churns', () => {
+    // Rebuilding this array on every render defeats its purpose: `ProjectChat` re-renders
+    // on the session-sync poll and the provisioning poll, so an unstable array means
+    // `buildSessionToolActions` re-runs on every tick (rule 64).
+    //
+    // Re-rendering with the SAME input object would be tautological — it proves the hook
+    // is stable given stable inputs, not that it survives a real render loop. So this
+    // rebuilds the input each render (as a parent component does) and changes a value
+    // the actions do not depend on.
+    let tick = 0;
+    // Stable REFERENCES, as production supplies them: `session`/`taskEmbed` come from
+    // `useSessionLifecycle` state and the handlers are `useCallback`-wrapped in
+    // `ProjectChat`. What is fresh each render is the input OBJECT itself.
+    const stableSession = makeSession();
+    const stableTaskEmbed = stableSession.task ?? null;
+    const stableHandlers = {
+      onSessionMutated: vi.fn(),
+      onOpenFiles: vi.fn(),
+      onOpenGit: vi.fn(),
+      onOpenTimeline: vi.fn(),
+      onOpenComments: vi.fn(),
+      onRetry: vi.fn(),
+      onFork: vi.fn(),
+    };
+    const { result, rerender } = renderHook(() => {
+      tick += 1;
+      return useSessionTools({
+        projectId: 'proj-1',
+        session: stableSession,
+        sessionState: 'active',
+        taskEmbed: stableTaskEmbed,
+        unresolvedCommentCount: 0,
+        ...stableHandlers,
+      });
+    });
+
     const first = result.current.actions;
     rerender();
+    rerender();
+    expect(tick).toBeGreaterThan(1);
     expect(result.current.actions).toBe(first);
+  });
+
+  it('rebuilds the action array when something it depends on changes', () => {
+    // The control for the stability test above: if `actions` were frozen rather than
+    // memoized, that test would pass for the wrong reason.
+    const { result, rerender } = renderHook(
+      ({ count }: { count: number }) =>
+        useSessionTools(inputFor({ unresolvedCommentCount: count })),
+      { initialProps: { count: 0 } }
+    );
+
+    const first = result.current.actions;
+    rerender({ count: 3 });
+    expect(result.current.actions).not.toBe(first);
+    expect(result.current.actions.find((a) => a.id === 'comments')?.badge).toBe(3);
   });
 });

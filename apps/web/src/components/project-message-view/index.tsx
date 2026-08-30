@@ -42,7 +42,7 @@ import {
 import { ProjectMessageViewDrawers } from './ProjectMessageViewDrawers';
 import { currentPlanToPlanItem, ElapsedTime } from './session-view-utils';
 import { SessionHeaderCompletionDialog } from './SessionHeaderCompletionDialog';
-import { SessionToolRail, sessionToolRailGutter } from './SessionToolRail';
+import { SessionToolRail } from './SessionToolRail';
 import { StaleActivityNotice } from './StaleActivityNotice';
 import { nearestItemId } from './timeline-jump';
 import type { TimelineJumpTarget } from './timeline-types';
@@ -349,6 +349,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     sessionState: lc.sessionState,
     taskEmbed: lc.taskEmbed,
     unresolvedCommentCount,
+    needsAttentionCommentCount: commentCounts.needs_you,
     onSessionMutated,
     onOpenFiles: lc.handleOpenFileBrowser,
     onOpenGit: lc.handleOpenGitChanges,
@@ -357,7 +358,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     onRetry,
     onFork,
   });
-  const toolRailGutter = sessionToolRailGutter(sessionTools.mode, isMobile);
   const sessionToolRail = lc.session ? (
     <SessionToolRail
       actions={sessionTools.actions}
@@ -571,108 +571,104 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       {/* Messages area — virtualized, DO-only */}
       {conversationItems.length === 0 ? (
-        <div className="relative flex flex-1 min-h-0 min-w-0 flex-col lg:flex-row">
-          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-            <FloatingHeader
-              projectId={projectId}
-              lc={lc}
-              onSessionMutated={onSessionMutated}
-              onOpenComments={openComments}
-              unresolvedCommentCount={unresolvedCommentCount}
-              needsAttentionCommentCount={commentCounts.needs_you}
-              sourceContext={sourceContext}
-              onShowHierarchy={onShowHierarchy}
-              containerRef={floatingHeaderRef}
-              expanded={sessionTools.detailsExpanded}
-              onExpandedChange={sessionTools.setDetailsExpanded}
-              completeError={sessionTools.completeError}
-              onDismissCompleteError={sessionTools.dismissCompleteError}
-            />
-            <div
-              className="flex flex-1 items-center justify-center"
-              style={{ paddingTop: floatingHeaderHeight }}
-            >
-              <span className="text-fg-muted text-sm">
-                {lc.sessionState === 'active'
-                  ? 'Waiting for messages...'
-                  : 'No messages in this session.'}
-              </span>
+        <div className="relative flex flex-1 min-h-0 min-w-0 flex-row">
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+              <FloatingHeader
+                projectId={projectId}
+                lc={lc}
+                onSessionMutated={onSessionMutated}
+                onOpenComments={openComments}
+                unresolvedCommentCount={unresolvedCommentCount}
+                needsAttentionCommentCount={commentCounts.needs_you}
+                sourceContext={sourceContext}
+                onShowHierarchy={onShowHierarchy}
+                containerRef={floatingHeaderRef}
+                expanded={sessionTools.detailsExpanded}
+                onExpandedChange={sessionTools.setDetailsExpanded}
+                completeError={sessionTools.completeError}
+                onDismissCompleteError={sessionTools.dismissCompleteError}
+              />
+              <div
+                className="flex flex-1 items-center justify-center"
+                style={{ paddingTop: floatingHeaderHeight }}
+              >
+                <span className="text-fg-muted text-sm">
+                  {lc.sessionState === 'active'
+                    ? 'Waiting for messages...'
+                    : 'No messages in this session.'}
+                </span>
+              </div>
             </div>
+            {desktopCommentRail}
           </div>
-          {desktopCommentRail}
-          {/* Reserves the rail's width. The rail itself is absolutely positioned against
-              this container, so it spans the full height and is immune to the floating
-              header growing when the details panel opens. */}
-          <div aria-hidden="true" className="shrink-0" style={{ width: toolRailGutter }} />
           {sessionToolRail}
         </div>
       ) : (
-        <div className="flex-1 min-h-0 min-w-0 relative flex flex-col lg:flex-row">
-          <div
-            ref={chatLogRef}
-            className="relative flex min-h-0 min-w-0 flex-1 flex-col"
-            role="log"
-            aria-live="polite"
-            aria-label="Conversation"
-          >
-            <FloatingHeader
-              projectId={projectId}
-              lc={lc}
-              onSessionMutated={onSessionMutated}
-              onOpenComments={openComments}
-              unresolvedCommentCount={unresolvedCommentCount}
-              needsAttentionCommentCount={commentCounts.needs_you}
-              sourceContext={sourceContext}
-              onShowHierarchy={onShowHierarchy}
-              containerRef={floatingHeaderRef}
-              expanded={sessionTools.detailsExpanded}
-              onExpandedChange={sessionTools.setDetailsExpanded}
-              completeError={sessionTools.completeError}
-              onDismissCompleteError={sessionTools.dismissCompleteError}
-            />
-            <div className="flex-1 min-h-0">
-              <Virtuoso
-                ref={virtuosoRef}
-                style={{ height: '100%' }}
-                data={conversationItems}
-                firstItemIndex={lc.firstItemIndex}
-                initialTopMostItemIndex={conversationItems.length - 1}
-                followOutput={(isAtBottom: boolean) => (isAtBottom ? 'smooth' : false)}
-                alignToBottom
-                atBottomThreshold={50}
-                atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
-                overscan={200}
-                itemContent={renderConversationItem}
-                context={chatListContext}
-                components={CHAT_LIST_COMPONENTS}
+        <div className="flex-1 min-h-0 min-w-0 relative flex flex-row">
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+            <div
+              ref={chatLogRef}
+              className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+              role="log"
+              aria-live="polite"
+              aria-label="Conversation"
+            >
+              <FloatingHeader
+                projectId={projectId}
+                lc={lc}
+                onSessionMutated={onSessionMutated}
+                onOpenComments={openComments}
+                unresolvedCommentCount={unresolvedCommentCount}
+                needsAttentionCommentCount={commentCounts.needs_you}
+                sourceContext={sourceContext}
+                onShowHierarchy={onShowHierarchy}
+                containerRef={floatingHeaderRef}
+                expanded={sessionTools.detailsExpanded}
+                onExpandedChange={sessionTools.setDetailsExpanded}
+                completeError={sessionTools.completeError}
+                onDismissCompleteError={sessionTools.dismissCompleteError}
               />
+              <div className="flex-1 min-h-0">
+                <Virtuoso
+                  ref={virtuosoRef}
+                  style={{ height: '100%' }}
+                  data={conversationItems}
+                  firstItemIndex={lc.firstItemIndex}
+                  initialTopMostItemIndex={conversationItems.length - 1}
+                  followOutput={(isAtBottom: boolean) => (isAtBottom ? 'smooth' : false)}
+                  alignToBottom
+                  atBottomThreshold={50}
+                  atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
+                  overscan={200}
+                  itemContent={renderConversationItem}
+                  context={chatListContext}
+                  components={CHAT_LIST_COMPONENTS}
+                />
+              </div>
+
+              {/* Scroll to bottom button */}
+              {lc.showScrollButton && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    virtuosoRef.current?.scrollToIndex({
+                      index: 'LAST',
+                      behavior: 'smooth',
+                    });
+                  }}
+                  className="sam-scroll-button absolute right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-[var(--sam-form-border)] bg-[var(--sam-form-bg)] shadow-md cursor-pointer hover:bg-page"
+                  data-agent-active={lc.agentActivity !== 'idle'}
+                  aria-label="Scroll to bottom"
+                >
+                  <ChevronDown size={16} className="text-fg-muted" />
+                </button>
+              )}
+
+              {commentUi.selectionControls}
             </div>
-
-            {/* Scroll to bottom button */}
-            {lc.showScrollButton && (
-              <button
-                type="button"
-                onClick={() => {
-                  virtuosoRef.current?.scrollToIndex({
-                    index: 'LAST',
-                    behavior: 'smooth',
-                  });
-                }}
-                className="sam-scroll-button absolute right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-[var(--sam-form-border)] bg-[var(--sam-form-bg)] shadow-md cursor-pointer hover:bg-page"
-                data-agent-active={lc.agentActivity !== 'idle'}
-                aria-label="Scroll to bottom"
-              >
-                <ChevronDown size={16} className="text-fg-muted" />
-              </button>
-            )}
-
-            {commentUi.selectionControls}
+            {desktopCommentRail}
           </div>
-          {desktopCommentRail}
-          {/* Reserves the rail's width. The rail itself is absolutely positioned against
-              this container, so it spans the full height and is immune to the floating
-              header growing when the details panel opens. */}
-          <div aria-hidden="true" className="shrink-0" style={{ width: toolRailGutter }} />
           {sessionToolRail}
         </div>
       )}

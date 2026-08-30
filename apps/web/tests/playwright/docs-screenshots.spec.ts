@@ -12,7 +12,7 @@
  * Covered surfaces:
  *   1. Guided subscription sign-in modal (Claude Code) — /settings/agents
  *   2. Cloud provider connect picker (all seven providers) — /settings/connections
- *   3. Report an Issue dialog with consent expanded — project chat session header
+ *   3. Report an Issue dialog with consent expanded — project chat session tool rail
  */
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';

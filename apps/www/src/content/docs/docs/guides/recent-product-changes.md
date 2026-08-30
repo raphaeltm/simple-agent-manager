@@ -11,8 +11,8 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 | Change                                | What users notice                                                                                                                                              | Where to use it                   |
 | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| **Comments have somewhere to look**   | A **Comments** page in the project nav collects every thread from chat and the library in one place, grouped by whether it is waiting on you. Chat sessions gain a matching count chip and a comments drawer. | Project → **Comments**; chat session header |
-| **Report an issue in-app**            | A **Report** button in the expanded chat session header, and a **Report this issue** link on the crash screen. You choose whether to attach technical context. | Chat session header; crash screen |
+| **Comments have somewhere to look**   | A **Comments** page in the project nav collects every thread from chat and the library in one place, grouped by whether it is waiting on you. Chat sessions gain a matching count chip and a comments drawer. | Project → **Comments**; chat session tool rail |
+| **Report an issue in-app**            | A **Report** button in the session tool rail, and a **Report this issue** link on the crash screen. You choose whether to attach technical context. | Session tool rail; crash screen |
 | **Sessions survive runtime teardown** | Sleeping Instant and VM sessions wake from a seven-day snapshot instead of losing harness context or uncommitted work.                                         | Project chat                      |
 | **Starting a chat is durable**        | Closing the tab while a chat is starting no longer strands it — the launch finishes server-side.                                                               | Project chat                      |
 | **Work lands on its own branch**      | Task workspaces start checked out on the task's `sam/…` output branch, and SAM refuses to auto-push to your default branch.                                    | Any task or chat-started work     |
@@ -30,7 +30,7 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 ## Report an issue without leaving SAM
 
-When an agent misbehaves or a page crashes, you can file a report from where you are. Expand the chat session header (the chevron on the right) and click **Report**, or use **Report this issue** on the crash screen.
+When an agent misbehaves or a page crashes, you can file a report from where you are. Click **Report** in the session tool rail on the right edge of the chat, or use **Report this issue** on the crash screen.
 
 SAM never attaches technical context silently. A consent checkbox lists the exact identifiers it would send — chat session, task, node, error, diagnosis — so you can see them before submitting. Leave it unchecked and only your words are sent. Server-side, references you don't have access to are dropped, and credential-shaped strings and email addresses are redacted from your text.
 

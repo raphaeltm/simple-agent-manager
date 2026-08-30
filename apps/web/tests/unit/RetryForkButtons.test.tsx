@@ -221,3 +221,131 @@ describe('Retry/Fork in the session tool rail', () => {
     expect(onSelect).toHaveBeenCalledWith('fork');
   });
 });
+
+/**
+ * The rest of `buildSessionToolActions`' visibility matrix, and the in-flight Complete
+ * state — which is what prevents a double submission while the mutation is running.
+ */
+describe('Session tool rail — remaining action states', () => {
+  const onSelect = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function build(overrides: Partial<BuildSessionToolActionsInput> = {}) {
+    // The shared fixture's task is `failed`, which correctly suppresses Complete. These
+    // cases need an eligible task, so default to one.
+    const session = (overrides.session ??
+      makeSession({
+        task: { id: 'task-1', status: 'in_progress', outputBranch: 'sam/fix-login-bug' },
+      })) as ChatSessionResponse;
+    return buildSessionToolActions({
+      session,
+      sessionState: 'active',
+      taskEmbed: session.task ?? null,
+      reportEnabled: false,
+      unresolvedCommentCount: 0,
+      hasFilesHandler: true,
+      hasGitHandler: true,
+      hasTimelineHandler: true,
+      hasCommentsHandler: true,
+      hasRetryHandler: true,
+      hasForkHandler: true,
+      ...overrides,
+    });
+  }
+
+  function renderActions(actions: ReturnType<typeof build>, mode: 'icons' | 'labels' = 'labels') {
+    return render(
+      <MemoryRouter>
+        <SessionToolRail
+          actions={actions}
+          mode={mode}
+          onModeChange={vi.fn()}
+          onSelect={onSelect}
+          isMobile={false}
+        />
+      </MemoryRouter>
+    );
+  }
+
+  it('labels Complete as in-flight and disables it while completing', async () => {
+    const user = userEvent.setup();
+    renderActions(build({ completing: true }));
+
+    const complete = screen.getByLabelText('Mark this task complete');
+    expect(screen.getByText('Completing...')).toBeTruthy();
+    expect(complete).toHaveProperty('disabled', true);
+
+    // The guard that matters: a second click must not dispatch another mutation.
+    await user.click(complete).catch(() => undefined);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('labels Complete normally and dispatches when not completing', async () => {
+    // Control for the case above — without it, "did not dispatch" would also pass for a
+    // rail that never dispatches at all.
+    const user = userEvent.setup();
+    renderActions(build({ completing: false }));
+
+    const complete = screen.getByLabelText('Mark this task complete');
+    expect(complete).toHaveProperty('disabled', false);
+    await user.click(complete);
+    expect(onSelect).toHaveBeenCalledWith('complete');
+  });
+
+  it('omits the workspace-bound tools when the session has no workspace', () => {
+    renderActions(build({ session: makeSession({ workspaceId: null }) }));
+
+    expect(screen.queryByLabelText('Browse workspace files')).toBeNull();
+    expect(screen.queryByLabelText('Review uncommitted changes')).toBeNull();
+    expect(screen.queryByLabelText('Open the full workspace view')).toBeNull();
+    // Liveness: session-independent tools are still there.
+    expect(screen.getByLabelText('Jump through session history')).toBeTruthy();
+  });
+
+  it('omits the workspace-bound tools for a terminated session that still has a workspace', () => {
+    renderActions(build({ sessionState: 'terminated' }));
+
+    expect(screen.queryByLabelText('Browse workspace files')).toBeNull();
+    expect(screen.queryByLabelText('Open the full workspace view')).toBeNull();
+    expect(screen.getByLabelText('Jump through session history')).toBeTruthy();
+  });
+
+  it('renders the unresolved-comment count as a badge in label mode', () => {
+    renderActions(build({ unresolvedCommentCount: 4 }));
+    const comments = screen.getByLabelText('Open comment threads — 4 unresolved');
+    expect(comments.textContent).toContain('4');
+  });
+
+  it('renders no comment badge when nothing is unresolved', () => {
+    renderActions(build({ unresolvedCommentCount: 0 }));
+    const comments = screen.getByLabelText('Open comment threads on this session');
+    expect(comments.textContent).not.toContain('0');
+  });
+
+  it('exposes the details toggle state via aria-expanded', () => {
+    const { rerender } = renderActions(build({ detailsExpanded: false }));
+    expect(screen.getByLabelText('Show session details, IDs and infrastructure')).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    );
+
+    rerender(
+      <MemoryRouter>
+        <SessionToolRail
+          actions={build({ detailsExpanded: true })}
+          mode="labels"
+          onModeChange={vi.fn()}
+          onSelect={onSelect}
+          isMobile={false}
+        />
+      </MemoryRouter>
+    );
+    expect(screen.getByLabelText('Show session details, IDs and infrastructure')).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+  });
+});

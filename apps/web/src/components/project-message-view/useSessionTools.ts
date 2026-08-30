@@ -38,6 +38,7 @@ export interface UseSessionToolsInput {
   sessionState: SessionState;
   taskEmbed: ChatSessionResponse['task'] | null;
   unresolvedCommentCount: number;
+  needsAttentionCommentCount: number;
   onSessionMutated?: () => void;
   onOpenFiles?: () => void;
   onOpenGit?: () => void;
@@ -72,6 +73,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     sessionState,
     taskEmbed,
     unresolvedCommentCount,
+    needsAttentionCommentCount,
     onSessionMutated,
     onOpenFiles,
     onOpenGit,
@@ -150,6 +152,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
       taskEmbed,
       reportEnabled,
       unresolvedCommentCount,
+      needsAttentionCommentCount,
       hasFilesHandler: !!onOpenFiles,
       hasGitHandler: !!onOpenGit,
       hasTimelineHandler: !!onOpenTimeline,
@@ -165,6 +168,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     taskEmbed,
     reportEnabled,
     unresolvedCommentCount,
+    needsAttentionCommentCount,
     onOpenFiles,
     onOpenGit,
     onOpenTimeline,
@@ -208,6 +212,12 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
         case 'workspace':
           // Rendered as an anchor by the rail — navigation is the browser's job.
           break;
+        default: {
+          // Adding a `SessionToolId` without a case here would otherwise ship a control
+          // that silently does nothing when clicked. This makes it a compile error.
+          const exhaustive: never = id;
+          void exhaustive;
+        }
       }
     },
     [onOpenFiles, onOpenGit, onOpenTimeline, onOpenComments, onRetry, onFork]

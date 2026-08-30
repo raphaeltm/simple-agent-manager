@@ -185,6 +185,7 @@ export function SessionHeader({
 
   return (
     <div
+      data-testid="session-header"
       className={`relative glass-chrome border-t-0 shrink-0${hasContentBelow ? '' : " rounded-b-2xl after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"}`}
       style={{
         boxShadow: hasContentBelow

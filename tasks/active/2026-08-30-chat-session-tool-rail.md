@@ -92,42 +92,42 @@ Removing the disclosure action row, the title-row Retry/Fork, and the chevron to
 
 ## Implementation checklist
 
-- [ ] Add `session-tool-actions.ts` — `buildToolActions()` deriving the tool list from the same
+- [x] Add `session-tool-actions.ts` — `buildToolActions()` deriving the tool list from the same
       conditions the header uses today (workspace+active gate, `canMarkComplete`, `reportEnabled`,
       task presence), plus `ToolStripMode`, `nextMode`, `isGroupStart`.
-- [ ] Add `SessionToolRail.tsx` — icons / icons+labels / hidden tri-state, one cycling control,
+- [x] Add `SessionToolRail.tsx` — icons / icons+labels / hidden tri-state, one cycling control,
       group dividers, comment badge, full-sentence `aria-label` on every button in icon mode.
-- [ ] Make `SessionHeader` disclosure state **controlled** (`expanded` + `onExpandedChange`), so
+- [x] Make `SessionHeader` disclosure state **controlled** (`expanded` + `onExpandedChange`), so
       the rail's Details action and the "+N more ports" chip drive the same panel.
-- [ ] Delete the action row from the disclosure (`SessionHeader.tsx:653-715`).
-- [ ] Delete the title-row Retry/Fork buttons and the chevron (`SessionHeader.tsx:274-311`).
-- [ ] Thread the new props through `FloatingHeader`.
-- [ ] Render the rail + gutter spacer in **both** `ProjectMessageView` branches; own `expanded`
+- [x] Delete the action row from the disclosure (`SessionHeader.tsx:653-715`).
+- [x] Delete the title-row Retry/Fork buttons and the chevron (`SessionHeader.tsx:274-311`).
+- [x] Thread the new props through `FloatingHeader`.
+- [x] Render the rail + gutter spacer in **both** `ProjectMessageView` branches; own `expanded`
       and `toolStripMode` state there; memoize the action array.
-- [ ] Persist the chosen mode across sessions (localStorage), defaulting to `icons`.
-- [ ] Delete `pages/chat-toolbar-prototype/`, its route, its `DEV_ONLY_ROUTE_PATHS` entry, and
+- [x] Persist the chosen mode across sessions (localStorage), defaulting to `icons`.
+- [x] Delete `pages/chat-toolbar-prototype/`, its route, its `DEV_ONLY_ROUTE_PATHS` entry, and
       `tests/playwright/chat-toolbar-prototype-audit.spec.ts`.
-- [ ] Update the 3 unit test files and 7 Playwright specs to drive the rail.
-- [ ] New unit tests: `buildToolActions` per session state; rail renders/cycles/activates.
-- [ ] New Playwright audit against the **real** chat at 375×667 and 1280×800, with the
+- [x] Update the 3 unit test files and 7 Playwright specs to drive the rail.
+- [x] New unit tests: `buildToolActions` per session state; rail renders/cycles/activates.
+- [x] New Playwright audit against the **real** chat at 375×667 and 1280×800, with the
       mobile-overlay vs desktop-push gutter assertion proven discriminating.
 
 ## Acceptance criteria
 
-- [ ] All nine controls are reachable without opening any disclosure, in a session where they
+- [x] All nine controls are reachable without opening any disclosure, in a session where they
       apply. Verified by a test that asserts each is visible on first paint.
-- [ ] The rail cycles icons → icons+labels → hidden → icons through its own control, and the
+- [x] The rail cycles icons → icons+labels → hidden → icons through its own control, and the
       hidden state still exposes a labelled pull-tab.
-- [ ] In icon-only mode every button has a full-sentence accessible name.
-- [ ] Labels mode overlays on mobile and pushes on desktop — asserted on the measured gutter,
+- [x] In icon-only mode every button has a full-sentence accessible name.
+- [x] Labels mode overlays on mobile and pushes on desktop — asserted on the measured gutter,
       and proven to fail if the responsive branch is removed.
-- [ ] Opening session details does not evict the rail (assert on-screen coordinates).
-- [ ] Tools shown match session state: a sleeping session shows no Files/Git/Workspace; an
+- [x] Opening session details does not evict the rail (assert on-screen coordinates).
+- [x] Tools shown match session state: a sleeping session shows no Files/Git/Workspace; an
       active one does.
-- [ ] No horizontal overflow and no clipped overflow at 375px or 1280px.
-- [ ] The scroll-to-bottom button and comment selection controls do not collide with the rail.
-- [ ] No `/prototype/*` route or prototype page directory remains.
-- [ ] Full suite green: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
+- [x] No horizontal overflow and no clipped overflow at 375px or 1280px.
+- [x] The scroll-to-bottom button and comment selection controls do not collide with the rail.
+- [x] No `/prototype/*` route or prototype page directory remains.
+- [x] Full suite green: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
 - [ ] Staging: rail visible and every control works end-to-end on `app.sammy.party`, mobile and
       desktop, zero errors.
 
@@ -136,3 +136,38 @@ Removing the disclosure action row, the title-row Retry/Fork, and the chevron to
 - Prototype branch `sam/few-buttons-drop-down-fvckk5`, commit `d71d7e27c`
 - Library `/design/chat-toolbar/` — writeup + 8 screenshot sheets
 - Knowledge entity `ChatToolStrip` — the two layout traps, measured
+
+## Review findings addressed (Phase 5)
+
+Six local reviewers ran. Everything below was found by review and fixed in-branch.
+
+| Reviewer | Severity | Finding | Resolution |
+| --- | --- | --- | --- |
+| ui-ux, task-completion | CRITICAL | Below `lg` the messages container is `flex-col`, so the sibling gutter spacer reserved **no** horizontal space — the expanded details panel slid under the rail. Screenshots did not show it. | Rail is now a flex CHILD owning its own slot; the panel is absolute inside it. Caught by measuring the header's right edge against the rail's left edge; that assertion is now in the audit. |
+| ui-ux | HIGH | Details and Complete were ordered last and fell below an easily-missed internal scroll on a short viewport — the two controls the rail exists to surface. Mobile usability scored 3/5. | `meta` group (Report/Complete/Details) pinned as a non-scrolling footer, mirroring the pinned mode-cycle header. New test asserts on-screen coordinates and that scrolling the list cannot move them. |
+| architecture | HIGH | `onRetry`/`onFork` were inline arrows in `ProjectChat`, so the memoized action array never actually held — it rebuilt on every session-sync and provisioning poll tick. | Wrapped in `useCallback` with destructured deps. |
+| architecture | HIGH | The referential-stability test passed an already-stable input object and re-rendered with the same reference — tautological. | Rewritten to rebuild the input object each render with stable field references, plus a control asserting the array DOES rebuild when a dependency changes. |
+| test-engineer | HIGH | `does not collide with the scroll-to-bottom button` was guarded on `isVisible()`, which was false on all four viewports — the test executed **zero** assertions. | Seeds 60 messages and scrolls away from the bottom so the button really renders; the guard is now an `expect(...).toBeVisible()`. |
+| test-engineer | HIGH | The in-flight `Completing…` / `disabled` state lost all coverage in the move. | Added tests for the disabled state, that a second click does not dispatch, and a control proving the enabled path does. |
+| test-engineer | MEDIUM | `status: state === 'sleeping' ? 'active' : 'active'` — identical branches, so the sleeping scenario silently exercised `idle`. | Fixed; the sleeping state is now genuinely constructed. |
+| test-engineer | MEDIUM | The overflow-reachability test only actually overflowed on one of four viewports; vacuous elsewhere. | Measures `scrollHeight` vs `clientHeight` and asserts the strong "already on screen" property when it fits. |
+| test-engineer, task-completion | MEDIUM | Untested `buildSessionToolActions` branches: comment badge, no-workspace-while-active, terminated-with-workspace; accessible names only covered 6 of 10 controls. | All added; the accessible-name test now covers all ten. |
+| constitution | MEDIUM | The rail's green `rgba(34,197,94,…)` literals are dark-mode-frozen and would render the wrong green in light theme; the audit never exercised light mode. | Swapped to the theme-aware `--sam-chrome-accent-*` family and added a light-theme audit pass. |
+| ui-ux | MEDIUM | The rail's comment badge showed a neutral dot while the header chip showed amber "N needs you" for the same session. | `needsAttentionCommentCount` threaded through; badge tone and hint now match the chip. |
+| architecture | LOW | `selectTool`'s switch had no exhaustiveness check — a new tool id could ship a control that silently does nothing. | `never`-typed default case. |
+| architecture | MEDIUM | Retry/Fork gated on `session.task?.id ?? session.taskId` while Complete gated on `taskEmbed` — two signals for one question. | Both now read `taskEmbed` with a session-field fallback. |
+| doc-sync | HIGH | Four public-doc locations, `.claude/rules/26`, and `CLAUDE.md` still described the chevron/action row. | All updated. |
+
+### Deferred with rationale
+
+- **Git vs Fork icon similarity** (ui-ux MEDIUM): both are node-and-line glyphs. Tooltips and
+  full accessible names disambiguate, and they sit in different groups. Worth a design pass if
+  it comes up in use; not worth churning the icon set pre-feedback.
+- **No opaque scrim fallback behind the rail's `backdrop-filter`** (ui-ux LOW): the header needed
+  one because Chromium does not sample composited scroll-container content. The rail's background
+  sits at 88% opacity, so a silently no-op blur still leaves icons legible. Flagged for the
+  staging pass in a real browser.
+- **`SessionCommentChip` coexists with the rail's Comments action**: kept deliberately. Both call
+  the same handler (no state to desync), the chip is the only comment signal that survives
+  `hidden` mode, and it is the at-a-glance surface while scrolling. Urgency is now consistent
+  between them.
