@@ -185,18 +185,17 @@ export async function transitionTaskToTerminal(
            )
          )
        )
-       AND NOT EXISTS (
-         SELECT 1 FROM tasks succ
-          WHERE succ.project_id = tasks.project_id
-            AND succ.id <> tasks.id
-            AND succ.triggered_by = 'session-recovery'
-            AND succ.created_at > tasks.created_at
-            AND succ.status NOT IN ('completed', 'failed', 'cancelled')
-            AND (
-              succ.id = COALESCE(tasks.recovery_source_task_id, tasks.id)
-              OR succ.recovery_source_task_id = COALESCE(tasks.recovery_source_task_id, tasks.id)
-              OR succ.recovery_source_task_id = tasks.id
-            )
+       AND (
+         ? = 'cancelled'
+         OR NOT EXISTS (
+           SELECT 1 FROM tasks succ
+            WHERE succ.project_id = tasks.project_id
+              AND succ.id <> tasks.id
+              AND succ.triggered_by = 'session-recovery'
+              AND succ.created_at > tasks.created_at
+              AND succ.status NOT IN ('completed', 'failed', 'cancelled')
+              AND succ.id = tasks.superseded_by_task_id
+         )
        )`
   ).bind(
     options.status,
@@ -213,7 +212,8 @@ export async function transitionTaskToTerminal(
     options.expectedChatSessionId ?? null,
     options.expectedChatSessionId ?? null,
     options.expectedNodeId ?? null,
-    options.expectedNodeId ?? null
+    options.expectedNodeId ?? null,
+    options.status
   );
   const insertEvent = env.DATABASE.prepare(
     `INSERT INTO task_status_events
@@ -249,7 +249,7 @@ export async function transitionTaskToTerminal(
         options.projectId,
         options.taskId
       );
-      return supersession === 'live' ? 'superseded' : 'not_terminalizable';
+      return supersession === 'none' ? 'not_terminalizable' : 'superseded';
     } catch (err) {
       log.warn('task_terminal_transition.supersession_diagnosis_failed', {
         taskId: options.taskId,

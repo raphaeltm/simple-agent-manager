@@ -54,6 +54,7 @@ const TERMINAL_CONTAINER_STATUSES = new Set(['stopping', 'stopped', 'expired', '
 const TERMINAL_NODE_STATUSES = new Set(['stopped', 'deleted', 'destroyed', 'destroying', 'error']);
 /** `session_snapshots.sleep_status` value meaning "asleep right now". */
 const RESUMABLE_SLEEP_STATUS = 'sleeping';
+const MAX_TASK_SUPERSESSION_CHAIN_DEPTH = 32;
 
 export function getTaskLivenessNodeHealthProbeTimeoutMs(
   env: Pick<TaskLivenessNodeHealthProbeEnv, 'TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS'>
@@ -602,20 +603,10 @@ function parseTimestamp(value: string | null): number | null {
 }
 
 /**
- * True when a newer, non-terminal `session-recovery` task in this task's recovery
- * family owns the conversation now — i.e. this task was superseded by a
- * *successful* wake rather than losing its runtime.
- *
- * The family is keyed on both the ROOT and the direct successor edge.
- * `session-recovery.ts:createRecoveryTask` resolves its source as
- * `guard ?? sourceTask.recoverySourceTaskId ?? sourceTask.id`: unguarded wakes
- * can collapse to the root, while guarded wakes point at the exact source task
- * the wake guard protects. A root-only check misses direct children of recovery
- * middle links; a direct-child-only check misses root-collapsed siblings.
- *
- * `triggered_by = 'session-recovery'` is what makes this supersession rather than
- * an unrelated sibling task, and `created_at >` keeps the relation directional so
- * a predecessor can never be treated as superseding its own successor.
+ * Follow the exact persisted ownership handoff marker to decide whether this
+ * task has been superseded. This deliberately does not infer from family
+ * topology: guarded parent wakes can create depth-2+ chains, and the marker on
+ * each predecessor is the only durable "who replaced me" edge.
  *
  * Project-scoped per `.claude/rules/11`.
  */
@@ -624,48 +615,39 @@ export async function loadTaskSupersession(
   projectId: string,
   taskId: string
 ): Promise<TaskSupersession> {
-  // Two existence checks rather than one aggregate, deliberately: `live` is the
-  // HOT case — a preserved predecessor is re-probed on every sweep tick for as
-  // long as its successor runs — and `LIMIT 1` lets it stop at the first match
-  // instead of scanning the project's whole post-candidate history. The planner
-  // resolves this against `idx_tasks_project_created_at`, so cost is bounded by
-  // tasks created after the candidate, and a superseding wake is almost always
-  // among the newest. The `terminal`/`none` answers cost a second read but are
-  // reached once per task, after which it leaves the candidate set entirely
-  // (`.claude/rules/47`).
-  const familyClause = `
-         FROM tasks self
-         JOIN tasks owner
-           ON owner.project_id = self.project_id
-          -- Redundant with the strict created_at inequality below in every
-          -- realistic case, but kept as defence in depth against a
-          -- same-millisecond created_at collision between two family members.
-          AND owner.id <> self.id
-          AND (
-                owner.id = COALESCE(self.recovery_source_task_id, self.id)
-             OR owner.recovery_source_task_id = COALESCE(self.recovery_source_task_id, self.id)
-             OR owner.recovery_source_task_id = self.id
-              )
-        WHERE self.id = ?
-          AND self.project_id = ?
-          AND owner.triggered_by = 'session-recovery'
-          AND owner.created_at > self.created_at`;
-
-  const live = await db
+  // Bounded recursive walk (`.claude/rules/47`): this function is only called
+  // for tasks already about to receive a terminal verdict, and the recursion is
+  // capped so a corrupt cycle cannot make the sweep unbounded.
+  const row = await db
     .prepare(
-      `SELECT 1 AS found ${familyClause}
-          AND owner.status NOT IN ('completed', 'failed', 'cancelled')
-        LIMIT 1`
+      `WITH RECURSIVE supersession_chain(id, status, superseded_by_task_id, depth) AS (
+          SELECT id, status, superseded_by_task_id, 0
+            FROM tasks
+           WHERE id = ? AND project_id = ?
+          UNION ALL
+          SELECT successor.id, successor.status, successor.superseded_by_task_id, chain.depth + 1
+            FROM supersession_chain chain
+            JOIN tasks successor
+              ON successor.id = chain.superseded_by_task_id
+             AND successor.project_id = ?
+           WHERE chain.superseded_by_task_id IS NOT NULL
+             AND chain.depth < ?
+        )
+        SELECT id, status, depth
+          FROM supersession_chain
+         WHERE depth > 0
+         ORDER BY depth DESC
+         LIMIT 1`
     )
-    .bind(taskId, projectId)
-    .first<{ found: number }>();
-  if (live) return 'live';
+    .bind(taskId, projectId, projectId, MAX_TASK_SUPERSESSION_CHAIN_DEPTH)
+    .first<{ id: string; status: string; depth: number }>();
+  if (!row) return 'none';
 
-  const any = await db
-    .prepare(`SELECT 1 AS found ${familyClause} LIMIT 1`)
-    .bind(taskId, projectId)
-    .first<{ found: number }>();
-  return any ? 'terminal' : 'none';
+  // Before the exact successor has accepted runtime ownership, preserve the
+  // predecessor. Once the exact successor is `in_progress` or later, the
+  // predecessor can leave the sweep candidate set via a benign cancellation; the
+  // guard predicates are marker-aware and still authorize the live chain.
+  return row.status === 'queued' || row.status === 'delegated' ? 'live' : 'terminal';
 }
 
 /**

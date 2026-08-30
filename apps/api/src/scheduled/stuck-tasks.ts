@@ -1128,7 +1128,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
               // predecessor holds no compute at all, so it must not be recorded as a
               // runaway failure. One cheap indexed lookup, reached only by 24h+ tasks,
               // buys the correct label without reintroducing the expensive probe.
-              let ceilingSupersession: TaskSupersession = 'none';
+              let ceilingSupersession: TaskSupersession | 'unknown' = 'none';
               try {
                 ceilingSupersession = await loadTaskSupersession(
                   env.DATABASE,
@@ -1139,9 +1139,19 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
                 log.warn('stuck_task.ceiling_supersession_query_failed', {
                   taskId: task.id,
                   projectId: task.project_id,
-                  action: 'labelled_as_runaway',
+                  action: 'withheld_terminal_verdict',
                   error: err instanceof Error ? err.message : String(err),
                 });
+                ceilingSupersession = 'unknown';
+              }
+              if (ceilingSupersession === 'unknown') {
+                log.info('stuck_task.ceiling_preserved_supersession_unknown', {
+                  taskId: task.id,
+                  projectId: task.project_id,
+                  executionMs,
+                  action: 'preserved',
+                });
+                break;
               }
               if (ceilingSupersession === 'live') {
                 // Preserve, do NOT terminalize. A superseded predecessor holds no

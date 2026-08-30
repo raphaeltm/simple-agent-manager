@@ -60,6 +60,28 @@ async function sourceTaskGuardIsWakeable(
 ): Promise<boolean> {
   if (!guard) return true;
   const recoveryOwner = alias(schema.tasks, 'recovery_owner');
+  const markedSuccessor = alias(schema.tasks, 'recovery_marked_successor');
+  const terminalStatuses = ['completed', 'failed', 'cancelled'];
+  const sourceIsWakeable = or(
+    notInArray(schema.tasks.status, terminalStatuses),
+    and(
+      eq(schema.tasks.status, 'cancelled'),
+      exists(
+        db
+          .select({ id: markedSuccessor.id })
+          .from(markedSuccessor)
+          .where(
+            and(
+              eq(markedSuccessor.id, schema.tasks.supersededByTaskId),
+              eq(markedSuccessor.projectId, guard.projectId),
+              eq(markedSuccessor.chatSessionId, guard.chatSessionId),
+              eq(markedSuccessor.triggeredBy, 'session-recovery'),
+              notInArray(markedSuccessor.status, terminalStatuses)
+            )
+          )
+      )
+    )
+  );
   const task = await db
     .select({ id: schema.tasks.id })
     .from(schema.tasks)
@@ -67,7 +89,7 @@ async function sourceTaskGuardIsWakeable(
       and(
         eq(schema.tasks.id, guard.taskId),
         eq(schema.tasks.projectId, guard.projectId),
-        notInArray(schema.tasks.status, ['completed', 'failed', 'cancelled']),
+        sourceIsWakeable,
         or(
           eq(schema.tasks.chatSessionId, guard.chatSessionId),
           exists(
@@ -229,7 +251,22 @@ async function createRecoveryTask(
              FROM tasks source
             WHERE source.id = ?
               AND source.project_id = ?
-              AND (? = 0 OR source.status NOT IN ('completed', 'failed', 'cancelled'))
+              AND (
+                ? = 0
+                OR source.status NOT IN ('completed', 'failed', 'cancelled')
+                OR (
+                  source.status = 'cancelled'
+                  AND source.superseded_by_task_id IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1 FROM tasks marked_successor
+                     WHERE marked_successor.id = source.superseded_by_task_id
+                       AND marked_successor.project_id = source.project_id
+                       AND marked_successor.chat_session_id = ?
+                       AND marked_successor.triggered_by = 'session-recovery'
+                       AND marked_successor.status NOT IN ('completed', 'failed', 'cancelled')
+                  )
+                )
+              )
               AND (
                 source.chat_session_id = ?
                 OR EXISTS (
@@ -258,6 +295,7 @@ async function createRecoveryTask(
           sourceTaskId,
           context.project.id,
           requiresLiveSource,
+          chatSessionId,
           chatSessionId,
           chatSessionId,
           taskId
@@ -302,7 +340,22 @@ async function createRecoveryTask(
                 SELECT 1 FROM tasks source
                  WHERE source.id = ?
                    AND source.project_id = ?
-                   AND (? = 0 OR source.status NOT IN ('completed', 'failed', 'cancelled'))
+                   AND (
+                     ? = 0
+                     OR source.status NOT IN ('completed', 'failed', 'cancelled')
+                     OR (
+                       source.status = 'cancelled'
+                       AND source.superseded_by_task_id IS NOT NULL
+                       AND EXISTS (
+                         SELECT 1 FROM tasks marked_successor
+                          WHERE marked_successor.id = source.superseded_by_task_id
+                            AND marked_successor.project_id = source.project_id
+                            AND marked_successor.chat_session_id = ?
+                            AND marked_successor.triggered_by = 'session-recovery'
+                            AND marked_successor.status NOT IN ('completed', 'failed', 'cancelled')
+                       )
+                     )
+                   )
               )`
         )
         .bind(
@@ -312,7 +365,8 @@ async function createRecoveryTask(
           sourceTaskId,
           sourceTaskId,
           context.project.id,
-          requiresLiveSource
+          requiresLiveSource,
+          chatSessionId
         ),
       database
         .prepare(

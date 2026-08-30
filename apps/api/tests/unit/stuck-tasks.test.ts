@@ -1616,6 +1616,19 @@ describe('recoverStuckTasks', () => {
                 workspace_id: 'ws-1',
                 auto_provisioned_node_id: 'node-1',
                 chat_session_id: null,
+                superseded_by_task_id: 'recovery-successor-1',
+              },
+            ],
+          },
+        ],
+        [
+          'supersession_chain',
+          {
+            results: [
+              {
+                id: 'recovery-successor-1',
+                status: 'queued',
+                depth: 1,
               },
             ],
           },
