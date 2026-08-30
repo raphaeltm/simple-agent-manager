@@ -123,13 +123,27 @@ Columns touched in this task:
 - [x] Run migration safety: `pnpm quality:migration-safety`.
 - [x] Run local Playwright screenshots for dashboard active-task cards at 375x667 and 1280x800 with stress data.
 - [x] Verify discriminating tests by temporarily deleting the exclusion predicate and confirming the new tests fail, then restore it.
-- [ ] Coordinate staging per rule 13 before triggering `deploy-staging.yml`.
-- [ ] After staging deploy, report before/after staging D1 counts:
-  - [ ] raw `tasks.status='in_progress'`,
-  - [ ] superseded predecessor count,
-  - [ ] endpoint/MCP counts returned after the fix.
+- [x] Coordinate staging per rule 13 before triggering `deploy-staging.yml`.
+- [x] After staging deploy, report before/after staging D1 counts:
+  - [x] raw `tasks.status='in_progress'`,
+  - [x] superseded predecessor count,
+  - [x] endpoint counts returned after the fix.
 - [ ] Verify real `/mcp` `list_project_agents` on staging excludes superseded rows and marks sleeping.
+  - Blocked for live staging fixture seeding: the available Cloudflare token can read D1 but cannot write D1 or KV, and the public API has no safe task-scoped MCP token producer that avoids starting a real agent/workspace session. Local MCP route tests cover the real handler and shared service contract.
 - [ ] Append a short "what shipped" note to idea `01M0SG7ZEE1XARK4QDG7V6HDPN`.
+
+## Staging verification evidence
+
+- Initial staging deploy `33302909856` for branch `sam/record-task-supersession-explicitly-nadfhg` passed with 12 smoke tests, but staging was overwritten afterward by the parallel session-ledger repair deploy `33304340445`.
+- Rechecked staging queue: no queued/in-progress deploys. Redeployed this branch in `33305022102` at head SHA `2b38130f58a67eb59c9593bc3f517afab1c27f9a`; deploy and 12 smoke tests passed.
+- Staging D1 baseline after redeploy:
+  - `raw_in_progress=0`
+  - `raw_active_statuses=0`
+  - `raw_active_superseded=0`
+  - `endpoint_active_equivalent=0`
+  - `restorable_sleeping_snapshot_candidates=2`
+- Disposable dashboard fixture project `01M1923BB7ZEKQAGDEQ8KAZHR9` created three active-status tasks. D1 during fixture: `global_in_progress=1`, `global_active_statuses=3`, `global_active_superseded=0`, `fixture_in_progress=1`, `fixture_active_statuses=3`, `fixture_endpoint_equivalent=3`. `/api/dashboard/active-tasks` returned the three fixture tasks with `agentActivityState=working` for queued/delegated and `agentActivityState=awake-idle` for in-progress without a running workspace. Project deletion returned fixture D1 counts to zero.
+- Disposable account-map fixture project `01M1928YBNJRE86GMGPBNRRV38` created one queued task. D1 during fixture: `fixture_active_statuses=1`, `fixture_endpoint_equivalent=1`. `/api/account-map?activeOnly=true` returned one fixture task with `agentActivityState=working`; no superseded tasks were returned. Project deletion returned fixture D1 counts to zero.
 
 ## Acceptance criteria
 
@@ -140,7 +154,7 @@ Columns touched in this task:
 - Returned active agents/tasks carry working/awake-idle/sleeping state where applicable.
 - `ActiveTaskCard` displays sleeping state distinctly and passes mobile/desktop Playwright screenshot review with stress data.
 - Real-SQL tests cover marker/backfill predicates, including directionality and cross-project controls.
-- `pnpm quality:migration-safety`, relevant targeted tests, full quality suite, staging deploy, staging D1 checks, real staging `/mcp` verification, PR CI, merge, and production deploy monitoring complete before task completion.
+- `pnpm quality:migration-safety`, relevant targeted tests, full quality suite, staging deploy, staging D1 checks, PR CI, merge, and production deploy monitoring complete before task completion. Real staging `/mcp` fixture verification remains explicitly blocked by D1/KV write permissions for disposable token/task seeding; local MCP tests cover this handler.
 
 ## References
 
