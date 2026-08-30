@@ -82,6 +82,38 @@ ordinary containers.
   - Passed with `VM_AGENT_MEMORY_RESERVE_MB` forwarded into `generateCloudInit()`.
 - `pnpm lint && pnpm typecheck && pnpm test && pnpm build`
   - Passed on the final patch set.
+- GitHub Actions staging deploy:
+  - `https://github.com/raphaeltm/simple-agent-manager/actions/runs/33306385103`
+  - Completed successfully: config validation, Cloudflare deploy, and smoke
+    tests passed.
+- Live staging verification on a freshly provisioned small Hetzner node:
+  - Node `01M1952BPG939BP4E9M7HBDT11` reached `running/healthy` with a fresh
+    heartbeat and metrics.
+  - Boot logs showed `PHASE START: resource-isolation` before
+    `PHASE START: vm-agent-start`.
+  - Boot logs showed Docker limit derivation from actual VM memory:
+    `MemoryMax=3053M (total=3821M reserve=768M)`.
+  - Systemd status showed `vm-agent.service` running in
+    `/sam.slice/sam-infra.slice/vm-agent.service`.
+  - Systemd status showed Docker using drop-in
+    `/etc/systemd/system/docker.service.d/resource-limits.conf` with a
+    memory max around 2.9GiB.
+  - Boot logs confirmed existing swap behavior was unchanged:
+    `Configuring 2048MB swap file` and `Swap configured: 2048MB,
+    swappiness=60`.
+- Live workspace smoke on the same node:
+  - Workspace `01M195ER8MV3E44JBGHABSRBVR` reached `running`.
+  - Browser verification loaded the node page and observed live log streaming
+    with zero unexpected console errors.
+- Staging smoke/observability checks:
+  - Live Playwright smoke: 11 passed, 1 flaky test passed on retry; the flaky Amp
+    smoke was rerun separately and passed.
+  - `pnpm quality:observability-noise` passed; D1 observability was skipped
+    because `OBSERVABILITY_DB_ID` is not configured in this environment, and
+    Workers telemetry was unavailable with 403.
+- Cleanup:
+  - Deleted temporary workspace `01M195ER8MV3E44JBGHABSRBVR` and node
+    `01M1952BPG939BP4E9M7HBDT11`; subsequent GET requests returned 404 for both.
 
 ## Review evidence
 
@@ -98,3 +130,5 @@ ordinary containers.
   optional cloud VM resource-isolation variable.
 - `cloudflare-specialist`: PASS — the Wrangler change is a non-sensitive
   `[vars]` default with no Cloudflare binding, secret, D1, KV, or R2 changes.
+- `task-completion-validator`: PASS — task checklist, acceptance criteria, diff,
+  tests, and branch base were cross-checked before PR creation.
