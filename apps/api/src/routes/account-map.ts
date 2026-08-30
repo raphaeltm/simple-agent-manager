@@ -69,18 +69,18 @@ accountMapRoutes.get('/', async (c) => {
   const activeOnlyParam = c.req.query('activeOnly');
   const activeOnly = activeOnlyParam !== 'false';
 
-  const parsedMax = parseInt(c.env.ACCOUNT_MAP_MAX_ENTITIES ?? '', 10);
+  const parsedMax = Number.parseInt(c.env.ACCOUNT_MAP_MAX_ENTITIES ?? '', 10);
   const maxEntities =
     Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : DEFAULT_MAX_ENTITIES;
 
-  const parsedSessionCap = parseInt(c.env.ACCOUNT_MAP_MAX_SESSIONS_PER_PROJECT ?? '', 10);
+  const parsedSessionCap = Number.parseInt(c.env.ACCOUNT_MAP_MAX_SESSIONS_PER_PROJECT ?? '', 10);
   const maxSessionsPerProject =
     Number.isFinite(parsedSessionCap) && parsedSessionCap > 0
       ? parsedSessionCap
       : DEFAULT_MAX_SESSIONS_PER_PROJECT;
 
   const cacheTtl =
-    parseInt(c.env.ACCOUNT_MAP_CACHE_TTL_SECONDS ?? '', 10) || DEFAULT_CACHE_TTL_SECONDS;
+    Number.parseInt(c.env.ACCOUNT_MAP_CACHE_TTL_SECONDS ?? '', 10) || DEFAULT_CACHE_TTL_SECONDS;
 
   // --- KV cache check (separate keys for active vs all) ---
   const cacheKey = `account-map:${ACCOUNT_MAP_CACHE_VERSION}:${userId}:${activeOnly ? 'active' : 'all'}`;

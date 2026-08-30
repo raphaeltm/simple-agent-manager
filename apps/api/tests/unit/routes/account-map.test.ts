@@ -92,6 +92,58 @@ const mockEnv = {
   },
 } as unknown as Env;
 
+function projectFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'proj-1',
+    name: 'Project',
+    repository: null,
+    status: 'active',
+    lastActivityAt: null,
+    activeSessionCount: 0,
+    ...overrides,
+  };
+}
+
+function workspaceFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'ws-1',
+    nodeId: 'node-1',
+    projectId: 'proj-1',
+    displayName: 'dev-ws',
+    branch: 'main',
+    status: 'running',
+    vmSize: 'cax11',
+    chatSessionId: null,
+    ...overrides,
+  };
+}
+
+function agentTaskFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'task-1',
+    projectId: 'proj-1',
+    workspaceId: 'ws-1',
+    title: 'Fix bug',
+    status: 'in_progress',
+    executionStep: 'agent_session',
+    priority: 1,
+    agentActivityState: 'working',
+    ...overrides,
+  };
+}
+
+function sessionFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'sess-active',
+    topic: 'Active chat',
+    status: 'active',
+    messageCount: 5,
+    workspaceId: null,
+    taskId: null,
+    ...overrides,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -121,14 +173,7 @@ describe('GET /account-map', () => {
 
   it('returns entities with relationships for a project with workspaces and sessions', async () => {
     const projects = [
-      {
-        id: 'proj-1',
-        name: 'My Project',
-        repository: 'user/repo',
-        status: 'active',
-        lastActivityAt: null,
-        activeSessionCount: 1,
-      },
+      projectFixture({ name: 'My Project', repository: 'user/repo', activeSessionCount: 1 }),
     ];
     const nodes = [
       {
@@ -144,41 +189,20 @@ describe('GET /account-map', () => {
         lastMetrics: null,
       },
     ];
-    const workspaces = [
-      {
-        id: 'ws-1',
-        nodeId: 'node-1',
-        projectId: 'proj-1',
-        displayName: 'dev-ws',
-        branch: 'main',
-        status: 'running',
-        vmSize: 'cax11',
-        chatSessionId: null,
-      },
-    ];
-    const tasks = [
-      {
-        id: 'task-1',
-        projectId: 'proj-1',
-        workspaceId: 'ws-1',
-        title: 'Fix bug',
-        status: 'in_progress',
-        executionStep: 'agent_session',
-        priority: 2,
-        agentActivityState: 'working',
-      },
-    ];
+    const workspaces = [workspaceFixture()];
+    const tasks = [agentTaskFixture({ priority: 2 })];
 
     buildMockDB(projects, nodes, workspaces, tasks);
     (projectDataService.listSessions as any).mockResolvedValue({
       sessions: [
         {
-          id: 'sess-1',
-          topic: 'Chat about bug',
-          status: 'running',
-          messageCount: 5,
-          workspaceId: 'ws-1',
-          taskId: 'task-1',
+          ...sessionFixture({
+            id: 'sess-1',
+            topic: 'Chat about bug',
+            status: 'running',
+            workspaceId: 'ws-1',
+            taskId: 'task-1',
+          }),
         },
       ],
       total: 1,
@@ -239,39 +263,23 @@ describe('GET /account-map', () => {
   });
 
   it('preserves sleeping task state and marks its relationships inactive', async () => {
-    const projects = [
-      {
-        id: 'proj-1',
-        name: 'Project',
-        repository: null,
-        status: 'active',
-        lastActivityAt: null,
-        activeSessionCount: 0,
-      },
-    ];
+    const projects = [projectFixture()];
     const workspaces = [
-      {
+      workspaceFixture({
         id: 'ws-sleep',
         nodeId: null,
-        projectId: 'proj-1',
         displayName: 'sleeping',
-        branch: 'main',
         status: 'sleeping',
-        vmSize: 'cax11',
-        chatSessionId: null,
-      },
+      }),
     ];
     const tasks = [
-      {
+      agentTaskFixture({
         id: 'task-sleep',
-        projectId: 'proj-1',
         workspaceId: 'ws-sleep',
         title: 'Sleeping task',
-        status: 'in_progress',
         executionStep: 'awaiting_followup',
-        priority: 1,
         agentActivityState: 'sleeping',
-      },
+      }),
     ];
 
     buildMockDB(projects, [], workspaces, tasks);
@@ -295,44 +303,24 @@ describe('GET /account-map', () => {
   });
 
   it('filters sessions to active-only by default', async () => {
-    const projects = [
-      {
-        id: 'proj-1',
-        name: 'Project',
-        repository: null,
-        status: 'active',
-        lastActivityAt: null,
-        activeSessionCount: 1,
-      },
-    ];
+    const projects = [projectFixture({ activeSessionCount: 1 })];
 
     buildMockDB(projects, [], [], []);
     (projectDataService.listSessions as any).mockResolvedValue({
       sessions: [
-        {
-          id: 'sess-active',
-          topic: 'Active chat',
-          status: 'active',
-          messageCount: 5,
-          workspaceId: null,
-          taskId: null,
-        },
-        {
+        sessionFixture(),
+        sessionFixture({
           id: 'sess-stopped',
           topic: 'Old chat',
           status: 'stopped',
           messageCount: 20,
-          workspaceId: null,
-          taskId: null,
-        },
-        {
+        }),
+        sessionFixture({
           id: 'sess-error',
           topic: 'Error chat',
           status: 'error',
           messageCount: 0,
-          workspaceId: null,
-          taskId: null,
-        },
+        }),
       ],
       total: 3,
     });
@@ -348,36 +336,18 @@ describe('GET /account-map', () => {
   });
 
   it('returns all sessions when activeOnly=false', async () => {
-    const projects = [
-      {
-        id: 'proj-1',
-        name: 'Project',
-        repository: null,
-        status: 'active',
-        lastActivityAt: null,
-        activeSessionCount: 1,
-      },
-    ];
+    const projects = [projectFixture({ activeSessionCount: 1 })];
 
     buildMockDB(projects, [], [], []);
     (projectDataService.listSessions as any).mockResolvedValue({
       sessions: [
-        {
-          id: 'sess-active',
-          topic: 'Active chat',
-          status: 'active',
-          messageCount: 5,
-          workspaceId: null,
-          taskId: null,
-        },
-        {
+        sessionFixture(),
+        sessionFixture({
           id: 'sess-stopped',
           topic: 'Old chat',
           status: 'stopped',
           messageCount: 20,
-          workspaceId: null,
-          taskId: null,
-        },
+        }),
       ],
       total: 2,
     });
@@ -391,16 +361,7 @@ describe('GET /account-map', () => {
   });
 
   it('tolerates DO failures without failing the request', async () => {
-    const projects = [
-      {
-        id: 'proj-1',
-        name: 'Failing Project',
-        repository: null,
-        status: 'active',
-        lastActivityAt: null,
-        activeSessionCount: 0,
-      },
-    ];
+    const projects = [projectFixture({ name: 'Failing Project' })];
 
     buildMockDB(projects, [], [], []);
     (projectDataService.listSessions as any).mockRejectedValue(new Error('DO unreachable'));

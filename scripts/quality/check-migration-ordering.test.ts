@@ -24,6 +24,15 @@ function runCheck(...dirs: string[]): string {
   });
 }
 
+function expectOnlyTheseDuplicateFiles(prefix: string, appliedFiles: string[]): void {
+  const migrationsDir = join(ROOT, 'apps/api/src/db/migrations');
+
+  expect(isAllowedDuplicateSet(migrationsDir, prefix, appliedFiles)).toBe(true);
+  expect(
+    isAllowedDuplicateSet(migrationsDir, prefix, [...appliedFiles, `${prefix}_future.sql`])
+  ).toBe(false);
+}
+
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
@@ -44,42 +53,24 @@ describe('D1 migration ordering check', () => {
   });
 
   it('grandfathers only the exact applied duplicate filename sets', () => {
-    const migrationsDir = join(ROOT, 'apps/api/src/db/migrations');
-    const appliedFiles = [
+    expectOnlyTheseDuplicateFiles('0105', [
       '0105_bootstrap_token_consumes.sql',
       '0105_debug_diagnosis_canonical_status.sql',
-    ];
-
-    expect(isAllowedDuplicateSet(migrationsDir, '0105', appliedFiles)).toBe(true);
-    expect(isAllowedDuplicateSet(migrationsDir, '0105', [...appliedFiles, '0105_future.sql'])).toBe(
-      false
-    );
+    ]);
   });
 
   it('grandfathers the staging-applied ProjectData storage migration prefix', () => {
-    const migrationsDir = join(ROOT, 'apps/api/src/db/migrations');
-    const appliedFiles = [
+    expectOnlyTheseDuplicateFiles('0121', [
       '0121_diagnostic_dedup_and_budget_retry.sql',
       '0121_project_data_storage_growth_history.sql',
-    ];
-
-    expect(isAllowedDuplicateSet(migrationsDir, '0121', appliedFiles)).toBe(true);
-    expect(isAllowedDuplicateSet(migrationsDir, '0121', [...appliedFiles, '0121_future.sql'])).toBe(
-      false
-    );
+    ]);
   });
 
   it('grandfathers the staging-applied task supersession marker prefix', () => {
-    const migrationsDir = join(ROOT, 'apps/api/src/db/migrations');
-    const appliedFiles = [
+    expectOnlyTheseDuplicateFiles('0130', [
       '0130_repair_running_agent_sessions_deleted_workspaces.sql',
       '0130_task_supersession_marker.sql',
-    ];
-
-    expect(isAllowedDuplicateSet(migrationsDir, '0130', appliedFiles)).toBe(true);
-    expect(isAllowedDuplicateSet(migrationsDir, '0130', [...appliedFiles, '0130_future.sql'])).toBe(
-      false
-    );
+    ]);
   });
 
   it('fails on migration filenames without a sortable numeric prefix', () => {

@@ -122,36 +122,26 @@ describe('0130_task_supersession_marker migration', () => {
     const sqlite = createMigrationDb();
     try {
       seedTask(sqlite, { id: 'root-collapse', createdAtMinute: 0 });
-      seedTask(sqlite, {
-        id: 'root-collapse-wake-1',
-        recoverySourceTaskId: 'root-collapse',
-        triggeredBy: 'session-recovery',
-        createdAtMinute: 1,
-      });
-      seedTask(sqlite, {
-        id: 'root-collapse-wake-2',
-        recoverySourceTaskId: 'root-collapse',
-        triggeredBy: 'session-recovery',
-        createdAtMinute: 2,
-      });
-      seedTask(sqlite, {
-        id: 'root-collapse-wake-3',
-        recoverySourceTaskId: 'root-collapse',
-        triggeredBy: 'session-recovery',
-        chatSessionId: 'chat-root-collapse',
-        createdAtMinute: 3,
-      });
+      [
+        { id: 'root-collapse-wake-1', recoverySourceTaskId: 'root-collapse', createdAtMinute: 1 },
+        { id: 'root-collapse-wake-2', recoverySourceTaskId: 'root-collapse', createdAtMinute: 2 },
+        {
+          id: 'root-collapse-wake-3',
+          recoverySourceTaskId: 'root-collapse',
+          chatSessionId: 'chat-root-collapse',
+          createdAtMinute: 3,
+        },
+        {
+          id: 'direction-older-owner',
+          recoverySourceTaskId: 'direction-root',
+          chatSessionId: 'chat-direction',
+          createdAtMinute: 9,
+        },
+      ].forEach((fixture) => seedTask(sqlite, { ...fixture, triggeredBy: 'session-recovery' }));
       seedTask(sqlite, {
         id: 'direction-later-predecessor',
         recoverySourceTaskId: 'direction-root',
         createdAtMinute: 10,
-      });
-      seedTask(sqlite, {
-        id: 'direction-older-owner',
-        recoverySourceTaskId: 'direction-root',
-        triggeredBy: 'session-recovery',
-        chatSessionId: 'chat-direction',
-        createdAtMinute: 9,
       });
 
       sqlite.exec(migrationSql);
@@ -170,39 +160,33 @@ describe('0130_task_supersession_marker migration', () => {
   it('does not backfill terminal rows, current chat owners, or cross-project owners', () => {
     const sqlite = createMigrationDb();
     try {
-      seedTask(sqlite, { id: 'terminal-predecessor', status: 'completed', createdAtMinute: 1 });
-      seedTask(sqlite, {
-        id: 'terminal-successor',
-        recoverySourceTaskId: 'terminal-predecessor',
-        triggeredBy: 'session-recovery',
-        chatSessionId: 'chat-terminal',
-        createdAtMinute: 2,
-      });
-      seedTask(sqlite, {
-        id: 'chat-bound-predecessor',
-        chatSessionId: 'chat-bound',
-        createdAtMinute: 3,
-      });
-      seedTask(sqlite, {
-        id: 'chat-bound-successor',
-        recoverySourceTaskId: 'chat-bound-predecessor',
-        triggeredBy: 'session-recovery',
-        chatSessionId: 'chat-bound-successor',
-        createdAtMinute: 4,
-      });
-      seedTask(sqlite, {
-        id: 'cross-project-predecessor',
-        projectId: 'project-1',
-        createdAtMinute: 5,
-      });
-      seedTask(sqlite, {
-        id: 'cross-project-successor',
-        projectId: 'project-2',
-        recoverySourceTaskId: 'cross-project-predecessor',
-        triggeredBy: 'session-recovery',
-        chatSessionId: 'chat-cross-project',
-        createdAtMinute: 6,
-      });
+      [
+        { id: 'terminal-predecessor', status: 'completed', createdAtMinute: 1 },
+        {
+          id: 'terminal-successor',
+          recoverySourceTaskId: 'terminal-predecessor',
+          triggeredBy: 'session-recovery',
+          chatSessionId: 'chat-terminal',
+          createdAtMinute: 2,
+        },
+        { id: 'chat-bound-predecessor', chatSessionId: 'chat-bound', createdAtMinute: 3 },
+        {
+          id: 'chat-bound-successor',
+          recoverySourceTaskId: 'chat-bound-predecessor',
+          triggeredBy: 'session-recovery',
+          chatSessionId: 'chat-bound-successor',
+          createdAtMinute: 4,
+        },
+        { id: 'cross-project-predecessor', projectId: 'project-1', createdAtMinute: 5 },
+        {
+          id: 'cross-project-successor',
+          projectId: 'project-2',
+          recoverySourceTaskId: 'cross-project-predecessor',
+          triggeredBy: 'session-recovery',
+          chatSessionId: 'chat-cross-project',
+          createdAtMinute: 6,
+        },
+      ].forEach((fixture) => seedTask(sqlite, fixture));
 
       sqlite.exec(migrationSql);
       const markers = supersessionMap(sqlite);
