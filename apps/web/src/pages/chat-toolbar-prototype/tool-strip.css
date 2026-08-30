@@ -1,0 +1,16 @@
+/**
+ * Prototype-local styles. Colocated (like `sam-prototype/sam-markdown.css`) so the
+ * exploration never touches the shared stylesheet.
+ */
+
+/* The dock is a genuine horizontal scroller — `overflow-x: auto`, never `hidden`, so
+   nothing is silently clipped. The bar itself is hidden because the strip is short and
+   an always-on GTK/Windows scrollbar eats a third of the 40px row. Scrolling still
+   works by wheel, trackpad, touch, and keyboard. */
+.sam-dock-scroll {
+  scrollbar-width: none;
+}
+
+.sam-dock-scroll::-webkit-scrollbar {
+  display: none;
+}

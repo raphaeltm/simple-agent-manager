@@ -143,6 +143,10 @@ const ProjectTriggerDetail = lazyNamed(
   'ProjectTriggerDetail'
 );
 const ProjectTriggers = lazyNamed(() => import('./pages/ProjectTriggers'), 'ProjectTriggers');
+const ChatToolbarPrototype = lazyNamed(
+  () => import('./pages/chat-toolbar-prototype'),
+  'ChatToolbarPrototype'
+);
 const SamPrototype = lazyNamed(() => import('./pages/SamPrototype'), 'SamPrototype');
 const Settings = lazyNamed(() => import('./pages/Settings'), 'Settings');
 const SettingsAgents = lazyNamed(() => import('./pages/SettingsAgents'), 'SettingsAgents');
@@ -227,6 +231,7 @@ function SuperadminRoute({ children }: { children: ReactNode }) {
 
 export const DEV_ONLY_ROUTE_PATHS = [
   '/sam',
+  '/prototype/chat-toolbar',
   '/__test/trial-chat-gate',
   '/__test/error-boundary',
   '/ui-standards',
@@ -267,6 +272,11 @@ export default function App() {
                       <>
                         {/* SAM prototype — local/test only, no auth */}
                         <Route path="/sam" element={page(<SamPrototype />)} />
+                        {/* Chat tool-strip explorations — real SessionHeader + mock data */}
+                        <Route
+                          path="/prototype/chat-toolbar"
+                          element={page(<ChatToolbarPrototype />)}
+                        />
                         {/* Harness for Playwright audits — mounts trial components with mock data */}
                         <Route
                           path="/__test/trial-chat-gate"
