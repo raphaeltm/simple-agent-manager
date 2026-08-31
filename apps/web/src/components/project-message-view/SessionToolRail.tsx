@@ -22,6 +22,7 @@
  * at icon width while the panel renders wider and extends left over the conversation.
  */
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import type { CSSProperties } from 'react';
 
 import {
   isToolGroupStart,
@@ -40,6 +41,35 @@ const RAIL_WIDTH_PX: Record<ToolStripMode, number> = {
 
 /** Width of the pull-tab shown in `hidden` mode. */
 const RAIL_TAB_WIDTH_PX = 26;
+
+/**
+ * Where the pull-tab sits when the rail is collapsed.
+ *
+ * Only meaningful in `hidden` mode: once the bar is out it is full-height, so its tab is
+ * necessarily its top segment. The variants exist because the shipped `top` placement put
+ * the tab inside the floating header's vertical band ON EVERY SESSION — the header is
+ * `absolute top-0 left-0 right-0` in the same container and 150-210px tall, while the tab
+ * anchored at 12px. Not an edge case; a guaranteed collision.
+ *
+ * `below-header` was considered and NOT built: it couples the tab to a header height that
+ * grows when chips wrap or Details expands, and needs a `min(headerHeight, 45%)` clamp to
+ * stop the tab being pushed off-screen entirely. Anchoring away from the header deletes
+ * that failure mode instead of managing it.
+ */
+export type RailTabAnchor = 'top' | 'center' | 'lower';
+
+export const RAIL_TAB_ANCHORS: readonly RailTabAnchor[] = ['top', 'center', 'lower'];
+
+export const DEFAULT_RAIL_TAB_ANCHOR: RailTabAnchor = 'center';
+
+/** Absolute-position styles per anchor. */
+const RAIL_TAB_ANCHOR_STYLE: Record<RailTabAnchor, CSSProperties> = {
+  // Shipped placement, kept only so the comparison screenshots have a baseline.
+  top: { top: 12 },
+  center: { top: '50%', transform: 'translateY(-50%)' },
+  // Biased below centre: further from the header at its tallest, closer to the thumb.
+  lower: { top: '62%', transform: 'translateY(-50%)' },
+};
 
 /**
  * Horizontal space the conversation must give up.
@@ -182,12 +212,15 @@ export function SessionToolRail({
   actions,
   mode,
   onModeChange,
+  tabAnchor = DEFAULT_RAIL_TAB_ANCHOR,
   onSelect,
   isMobile,
 }: Readonly<{
   actions: SessionToolAction[];
   mode: ToolStripMode;
   onModeChange: (mode: ToolStripMode) => void;
+  /** Collapsed-tab placement. See `RailTabAnchor`. */
+  tabAnchor?: RailTabAnchor;
   onSelect: (id: SessionToolId) => void;
   isMobile: boolean;
 }>) {
@@ -220,15 +253,17 @@ export function SessionToolRail({
           aria-label={cycleLabel}
           title={cycleLabel}
           data-testid="session-tool-rail-tab"
-          className="absolute top-3 right-0 z-20 flex cursor-pointer flex-col items-center justify-center gap-1 rounded-l-lg border border-r-0 py-3 transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary"
+          className="absolute right-0 z-30 flex cursor-pointer flex-col items-center justify-center gap-1 rounded-l-lg border border-r-0 py-3 transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary"
           style={{
+            ...RAIL_TAB_ANCHOR_STYLE[tabAnchor],
             width: RAIL_TAB_WIDTH_PX,
             borderColor: 'var(--sam-color-border-default)',
             backgroundColor: 'color-mix(in srgb, var(--sam-color-bg-surface) 92%, transparent)',
             color: 'var(--sam-color-fg-muted)',
-            // Left-cast shadow: the rail hugs the right edge, so the design-system shadow
-            // tokens (all downward-casting) do not apply. Alpha is theme-neutral black.
-            boxShadow: '-2px 0 12px rgba(0,0,0,0.28)',
+            // Collapsed, the tab genuinely floats over the conversation, so it earns an
+            // elevation. Tokenized rather than hardcoded: the previous rgba(0,0,0,0.28)
+            // ignored the theme and rendered as the heaviest edge on a light background.
+            boxShadow: 'var(--sam-shadow-rail-tab)',
           }}
         >
           <ChevronLeft size={13} aria-hidden="true" />
@@ -255,7 +290,7 @@ export function SessionToolRail({
         data-testid="session-tool-rail"
         data-mode={mode}
         aria-label="Session tools"
-        className="absolute inset-y-0 right-0 z-20 flex flex-col overflow-hidden border-l"
+        className="absolute inset-y-0 right-0 z-20 flex flex-col overflow-hidden rounded-tl-lg border-l"
         style={{
           width: RAIL_WIDTH_PX[mode],
           borderColor: 'var(--sam-chrome-accent-divider)',
@@ -263,7 +298,14 @@ export function SessionToolRail({
             ? 'var(--sam-color-bg-surface)'
             : 'color-mix(in srgb, var(--sam-color-bg-canvas) 88%, transparent)',
           backdropFilter: 'blur(12px)',
-          boxShadow: overlaying ? '-8px 0 32px rgba(0,0,0,0.55)' : '-4px 0 24px rgba(0,0,0,0.34)',
+          /*
+           * An elevation only where one is TRUE. In icons mode — and in labels mode on
+           * desktop — the rail owns a layout slot and PUSHES the conversation; it sits
+           * beside the content, not above it, so a drop shadow was asserting a
+           * relationship that does not exist. The hairline border carries the separation.
+           * Only the mobile labels rail actually floats over the conversation.
+           */
+          boxShadow: overlaying ? 'var(--sam-shadow-rail-overlay)' : 'none',
         }}
       >
         <button
@@ -275,7 +317,18 @@ export function SessionToolRail({
           className={`flex h-8 shrink-0 cursor-pointer items-center gap-1 border-none bg-transparent text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent-primary ${
             compact ? 'justify-center px-0' : 'justify-between px-2.5'
           }`}
-          style={{ borderBottom: '1px solid var(--sam-chrome-accent-active)' }}
+          /*
+           * The bar's top segment is styled as a TAB that flows into the bar rather than
+           * sitting on it as a separate pill. The assembly's OUTER corner is rounded
+           * (`rounded-tl-lg` on the aside, which clips this button), while the seam
+           * between tab and bar is a hard square edge — one continuous piece of chrome,
+           * not two stacked shapes. A slightly lifted background separates the two
+           * without a second border.
+           */
+          style={{
+            borderBottom: '1px solid var(--sam-chrome-accent-active)',
+            backgroundColor: 'var(--sam-chrome-accent-active-subtle)',
+          }}
         >
           {!compact && (
             <span className="text-[9px] font-semibold uppercase tracking-[0.14em]">Tools</span>

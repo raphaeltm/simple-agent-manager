@@ -56,22 +56,27 @@
 
   /* Body background radial-gradient color stops */
   --sam-bg-gradient-1: rgba(16, 185, 129, 0.15);
-  --sam-bg-gradient-2: rgba(34, 197, 94, 0.10);
+  --sam-bg-gradient-2: rgba(34, 197, 94, 0.1);
   --sam-bg-gradient-3: rgba(6, 78, 59, 0.12);
 
   /* Onboarding full-screen overlay background — green vignette over the app bg */
   --sam-onboarding-overlay-bg:
-    radial-gradient(ellipse 60% 50% at 50% 45%, rgba(34, 197, 94, 0.12) 0%, rgba(34, 197, 94, 0.04) 40%, transparent 70%),
+    radial-gradient(
+      ellipse 60% 50% at 50% 45%,
+      rgba(34, 197, 94, 0.12) 0%,
+      rgba(34, 197, 94, 0.04) 40%,
+      transparent 70%
+    ),
     radial-gradient(ellipse 100% 100% at 50% 50%, rgba(10, 14, 10, 0) 30%, rgba(0, 0, 0, 0.7) 100%),
     #0a0e0a;
 
   /* Form element surfaces and borders */
   --sam-form-bg: rgba(8, 15, 12, 0.5);
   --sam-form-bg-focus: rgba(8, 15, 12, 0.6);
-  --sam-form-border: rgba(34, 197, 94, 0.10);
+  --sam-form-border: rgba(34, 197, 94, 0.1);
   --sam-form-border-hover: rgba(34, 197, 94, 0.18);
   --sam-form-border-focus: rgba(34, 197, 94, 0.35);
-  --sam-form-focus-ring: rgba(34, 197, 94, 0.10);
+  --sam-form-focus-ring: rgba(34, 197, 94, 0.1);
   --sam-form-focus-inset: rgba(34, 197, 94, 0.05);
 
   /* Glass chat message bubbles */
@@ -155,7 +160,7 @@
      Dark defaults match the pre-light slice colors; light overrides below
      darken non-green series so bars/lines remain legible on light surfaces. */
   --sam-admin-chart-tooltip-bg: rgba(8, 15, 12, 0.78);
-  --sam-admin-chart-tooltip-border: rgba(34, 197, 94, 0.10);
+  --sam-admin-chart-tooltip-border: rgba(34, 197, 94, 0.1);
   --sam-admin-chart-grid: var(--sam-color-border-default);
   --sam-admin-chart-axis: var(--sam-color-border-default);
   --sam-admin-chart-cursor: var(--sam-color-bg-surface-hover);
@@ -172,9 +177,9 @@
   --sam-admin-chart-series-11: #f43f5e;
   --sam-admin-chart-series-12: #6366f1;
   --sam-admin-chart-heat-0: var(--sam-color-bg-inset);
-  --sam-admin-chart-heat-1: rgba(34, 197, 94, 0.10);
+  --sam-admin-chart-heat-1: rgba(34, 197, 94, 0.1);
   --sam-admin-chart-heat-2: rgba(34, 197, 94, 0.25);
-  --sam-admin-chart-heat-3: rgba(34, 197, 94, 0.50);
+  --sam-admin-chart-heat-3: rgba(34, 197, 94, 0.5);
   --sam-admin-chart-heat-text-on-strong: #ffffff;
 
   /* Color Tints */
@@ -230,6 +235,17 @@
   --sam-shadow-dropdown: 0 4px 16px rgba(0, 0, 0, 0.3);
   --sam-shadow-overlay: 0 8px 32px rgba(0, 0, 0, 0.4);
   --sam-shadow-tooltip: 0 2px 8px rgba(0, 0, 0, 0.3);
+
+  /*
+   * Left-cast shadows for right-edge chrome (the session tool rail and its pull-tab).
+   * Every other shadow token casts DOWNWARD, which is wrong for an element flush to the
+   * right edge — it reads as the panel hovering above the page rather than beside it.
+   * These carry the same per-theme weighting as their downward siblings, which is the
+   * point: the rail previously hardcoded rgba(0,0,0,0.34), roughly 3x the light theme's
+   * equivalent, so it rendered as the heaviest edge on the screen in light mode.
+   */
+  --sam-shadow-rail-tab: -2px 0 12px rgba(0, 0, 0, 0.28);
+  --sam-shadow-rail-overlay: -8px 0 32px rgba(0, 0, 0, 0.5);
 
   /* Z-Index Scale */
   --sam-z-sticky: 10;
@@ -327,8 +343,17 @@
 
   /* Onboarding full-screen overlay background — soft green vignette over the light app bg */
   --sam-onboarding-overlay-bg:
-    radial-gradient(ellipse 60% 50% at 50% 45%, rgba(34, 197, 94, 0.1) 0%, rgba(34, 197, 94, 0.03) 40%, transparent 70%),
-    radial-gradient(ellipse 100% 100% at 50% 50%, rgba(238, 243, 239, 0) 30%, rgba(205, 221, 210, 0.55) 100%),
+    radial-gradient(
+      ellipse 60% 50% at 50% 45%,
+      rgba(34, 197, 94, 0.1) 0%,
+      rgba(34, 197, 94, 0.03) 40%,
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 100% 100% at 50% 50%,
+      rgba(238, 243, 239, 0) 30%,
+      rgba(205, 221, 210, 0.55) 100%
+    ),
     #eef3ef;
 
   /* Form element surfaces and borders */
@@ -417,7 +442,7 @@
   --sam-admin-chart-series-11: #be123c;
   --sam-admin-chart-series-12: #4338ca;
   --sam-admin-chart-heat-0: var(--sam-color-bg-inset);
-  --sam-admin-chart-heat-1: rgba(21, 128, 61, 0.10);
+  --sam-admin-chart-heat-1: rgba(21, 128, 61, 0.1);
   --sam-admin-chart-heat-2: rgba(21, 128, 61, 0.22);
   --sam-admin-chart-heat-3: rgba(21, 128, 61, 0.48);
   --sam-admin-chart-heat-text-on-strong: #ffffff;
@@ -473,6 +498,10 @@
   --sam-shadow-dropdown: 0 4px 16px rgba(16, 40, 28, 0.12);
   --sam-shadow-overlay: 0 8px 32px rgba(16, 40, 28, 0.16);
   --sam-shadow-tooltip: 0 2px 8px rgba(16, 40, 28, 0.12);
+
+  /* Left-cast rail shadows — see the dark-theme block for why these exist. */
+  --sam-shadow-rail-tab: -2px 0 12px rgba(16, 40, 28, 0.1);
+  --sam-shadow-rail-overlay: -8px 0 32px rgba(16, 40, 28, 0.16);
 
   color: var(--sam-color-fg-primary);
   background-color: var(--sam-color-bg-canvas);
@@ -531,8 +560,12 @@
 }
 
 @keyframes sam-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -588,8 +621,13 @@
   }
 
   @keyframes glowPulse {
-    0%, 100% { opacity: 0.72; }
-    50% { opacity: 1; }
+    0%,
+    100% {
+      opacity: 0.72;
+    }
+    50% {
+      opacity: 1;
+    }
   }
 
   .sam-glass-drawer-backdrop {
@@ -623,7 +661,9 @@
     transform: translateZ(0) scale(1.01);
     will-change: transform;
     border-color: rgba(34, 197, 94, 0.28);
-    box-shadow: 0 0 18px rgba(34, 197, 94, 0.08), var(--sam-shadow-sm);
+    box-shadow:
+      0 0 18px rgba(34, 197, 94, 0.08),
+      var(--sam-shadow-sm);
   }
 
   .sam-glass-card-motion:hover::before {
@@ -651,11 +691,12 @@
     animation: glowPulse 2s ease-in-out infinite;
     box-shadow: 0 0 6px rgba(34, 197, 94, 0.42);
   }
-
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }

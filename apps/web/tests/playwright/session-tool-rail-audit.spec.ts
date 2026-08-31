@@ -24,6 +24,8 @@ const PROJECT_ID = 'proj-rail-1';
 const SESSION_ID = 'cs-rail-1';
 const WORKSPACE_ID = 'ws-rail-1';
 const STORAGE_KEY = 'sam-session-tool-strip-mode';
+/** REVIEW KNOB — see `useSessionTools`. Remove when a placement is chosen. */
+const ANCHOR_KEY = 'sam-session-tool-tab-anchor';
 
 const MOCK_USER = makeMockUser({
   email: 'rail@example.com',
@@ -167,6 +169,8 @@ interface MockOptions extends SessionOptions {
   empty?: boolean;
   /** Seeds a long conversation so the scroll-to-bottom button can actually appear. */
   manyMessages?: boolean;
+  /** REVIEW KNOB — collapsed-tab placement under comparison. Remove with the knob. */
+  anchor?: 'top' | 'center' | 'lower';
 }
 
 async function setupMocks(page: Page, options: MockOptions = {}) {
@@ -176,14 +180,22 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     messagesLong = false,
     empty = false,
     manyMessages = false,
+    anchor,
   } = options;
 
   await page.addInitScript(
-    ({ userId, storageKey, seededMode }) => {
+    ({ userId, storageKey, seededMode, anchorKey, seededAnchor }) => {
       window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
       if (seededMode) window.localStorage.setItem(storageKey, seededMode);
+      if (seededAnchor) window.localStorage.setItem(anchorKey, seededAnchor);
     },
-    { userId: MOCK_USER.user.id, storageKey: STORAGE_KEY, seededMode: mode ?? '' }
+    {
+      userId: MOCK_USER.user.id,
+      storageKey: STORAGE_KEY,
+      seededMode: mode ?? '',
+      anchorKey: ANCHOR_KEY,
+      seededAnchor: anchor ?? '',
+    }
   );
 
   const session = makeChatSession(options);
@@ -631,3 +643,104 @@ test.describe('Session tool rail — actions', () => {
     );
   });
 });
+
+/*
+ * ── COMPARISON MATRIX — REMOVE WITH THE REVIEW KNOB ──────────────────────────────────
+ *
+ * Screenshots the collapsed-tab placements side by side, in both themes, at both
+ * viewports, so a placement can be chosen from evidence rather than argument.
+ *
+ * It also carries the assertion the original audit was missing. That audit asserted the
+ * tab was `toBeVisible()`, which it always was — an element half-buried under the
+ * floating header is still "visible" to Playwright. What it never asserted was that the
+ * tab does not OVERLAP the header, which is the actual defect: the shipped `top`
+ * placement anchors the tab 12px down while the header is `absolute top-0` and 150-210px
+ * tall, so they collide on every session.
+ */
+async function tabHeaderOverlap(page: Page): Promise<number> {
+  const tab = await page.getByTestId('session-tool-rail-tab').boundingBox();
+  const header = await page.getByTestId('session-header').boundingBox();
+  if (!tab || !header) return -1;
+  const vertical =
+    Math.min(tab.y + tab.height, header.y + header.height) - Math.max(tab.y, header.y);
+  const horizontal =
+    Math.min(tab.x + tab.width, header.x + header.width) - Math.max(tab.x, header.x);
+  // Vertical overlap alone is the interesting number: the two are both flush right, so
+  // any shared vertical band means they are stacked on the same strip of screen.
+  return vertical > 0 && horizontal > -8 ? Math.round(vertical) : 0;
+}
+
+const ANCHORS = ['top', 'center', 'lower'] as const;
+
+for (const theme of ['dark', 'light'] as const) {
+  test.describe(`Tab placement matrix — mobile / ${theme}`, () => {
+    for (const anchor of ANCHORS) {
+      test(`hidden tab anchored ${anchor}`, async ({ page }) => {
+        await seedTheme(page, theme);
+        await openChat(page, { state: 'active', mode: 'hidden', anchor });
+        const overlap = await tabHeaderOverlap(page);
+        console.log(`ANCHOR-OVERLAP mobile ${theme} ${anchor}: ${overlap}px`);
+        await capture(page, `variant-tab-${anchor}-hidden-mobile-${theme}`);
+      });
+    }
+
+    test('icons bar — tab flows into the bar', async ({ page }) => {
+      await seedTheme(page, theme);
+      await openChat(page, { state: 'active', mode: 'icons' });
+      await capture(page, `variant-bar-icons-mobile-${theme}`);
+    });
+
+    /*
+     * The header is not a fixed height — a wrapped title, chips and the Public-ports row
+     * all grow it. If the overlap scales with header height then `top` is not merely
+     * badly placed, it is placed against a moving target.
+     */
+    test(`hidden tab anchored top, TALL header`, async ({ page }) => {
+      await seedTheme(page, theme);
+      await openChat(page, { state: 'active', mode: 'hidden', anchor: 'top', long: true });
+      const overlap = await tabHeaderOverlap(page);
+      console.log(`ANCHOR-OVERLAP mobile ${theme} top+tallheader: ${overlap}px`);
+      await capture(page, `variant-tab-top-tallheader-mobile-${theme}`);
+    });
+
+    test(`hidden tab anchored center, TALL header`, async ({ page }) => {
+      await seedTheme(page, theme);
+      await openChat(page, { state: 'active', mode: 'hidden', anchor: 'center', long: true });
+      const overlap = await tabHeaderOverlap(page);
+      console.log(`ANCHOR-OVERLAP mobile ${theme} center+tallheader: ${overlap}px`);
+      await capture(page, `variant-tab-center-tallheader-mobile-${theme}`);
+    });
+
+    test('labels bar — overlay elevation', async ({ page }) => {
+      await seedTheme(page, theme);
+      await openChat(page, { state: 'active', mode: 'labels' });
+      await capture(page, `variant-bar-labels-mobile-${theme}`);
+    });
+  });
+
+  test.describe(`Tab placement matrix — desktop / ${theme}`, () => {
+    test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
+
+    for (const anchor of ANCHORS) {
+      test(`hidden tab anchored ${anchor}`, async ({ page }) => {
+        await seedTheme(page, theme);
+        await openChat(page, { state: 'active', mode: 'hidden', anchor });
+        const overlap = await tabHeaderOverlap(page);
+        console.log(`ANCHOR-OVERLAP desktop ${theme} ${anchor}: ${overlap}px`);
+        await capture(page, `variant-tab-${anchor}-hidden-desktop-${theme}`);
+      });
+    }
+
+    test('icons bar — tab flows into the bar', async ({ page }) => {
+      await seedTheme(page, theme);
+      await openChat(page, { state: 'active', mode: 'icons' });
+      await capture(page, `variant-bar-icons-desktop-${theme}`);
+    });
+
+    test('labels bar — pushes, so no elevation', async ({ page }) => {
+      await seedTheme(page, theme);
+      await openChat(page, { state: 'active', mode: 'labels' });
+      await capture(page, `variant-bar-labels-desktop-${theme}`);
+    });
+  });
+}
