@@ -202,7 +202,7 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     const url = route.request().url();
     const { pathname } = new URL(url);
 
-    if (pathname.includes('/ws') || url.includes('websocket')) {
+    if (pathname.endsWith('/ws') || url.includes('websocket')) {
       await route.abort();
       return;
     }
@@ -328,6 +328,27 @@ async function capture(page: Page, name: string) {
   await screenshot(page, name);
   await assertNoOverflow(page);
   await assertNoClippedOverflow(page);
+}
+
+type MatrixViewport = 'mobile' | 'desktop';
+
+async function assertDetailsInfrastructure(page: Page, viewport: MatrixViewport) {
+  await openChat(page, { state: 'active' });
+  await page.getByTestId('session-tool-details').click();
+  await expect(page.getByText('References')).toBeVisible();
+  await expect(page.getByText('Loading infrastructure details...')).toHaveCount(0);
+
+  const header = page.getByTestId('session-header');
+  await expect(header.getByText('Workspace:')).toBeVisible();
+  await expect(header.getByText('tool-rail')).toBeVisible();
+  await expect(header.locator('a[href*="/workspaces/"]')).toHaveCount(0);
+
+  const nodeLink = header.locator('a[href="/nodes/node-rail-1"]');
+  await expect(nodeLink).toHaveText('rail-node-alpha');
+  await expect(nodeLink).toBeVisible();
+  await nodeLink.scrollIntoViewIfNeeded();
+
+  await capture(page, `details-infrastructure-${viewport}-dark`);
 }
 
 test.describe('Session tool rail — discoverability', () => {
@@ -656,6 +677,10 @@ test.describe('Session tool rail — actions', () => {
     const railLinks = page.locator('[data-testid="session-tool-rail"] a[href*="/workspaces/"]');
     await expect(railLinks).toHaveCount(0);
   });
+
+  test('Details shows the workspace as plain text and the node as the link', async ({ page }) => {
+    await assertDetailsInfrastructure(page, 'mobile');
+  });
 });
 
 /*
@@ -832,3 +857,11 @@ for (const theme of ['dark', 'light'] as const) {
     });
   });
 }
+
+test.describe('Session Details — desktop', () => {
+  test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
+
+  test('Details shows the workspace as plain text and the node as the link', async ({ page }) => {
+    await assertDetailsInfrastructure(page, 'desktop');
+  });
+});

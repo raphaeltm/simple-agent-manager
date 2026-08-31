@@ -148,6 +148,25 @@ function detail(
   };
 }
 
+function detailWithWorkspace() {
+  const response = detail([msg('a', 1000)], false, 'active');
+  return {
+    ...response,
+    session: {
+      ...response.session,
+      workspaceId: 'ws-1',
+    },
+  };
+}
+
+function workspaceResponse(nodeId: string | null = 'node-1') {
+  return {
+    id: 'ws-1',
+    nodeId,
+    status: 'running',
+  };
+}
+
 describe('useSessionLifecycle loading semantics', () => {
   let queryClient: QueryClient;
   function wrapper({ children }: { children: ReactNode }) {
@@ -435,6 +454,68 @@ describe('useSessionLifecycle loading semantics', () => {
 
     await waitFor(() => expect(result.current.sessionState).toBe('sleeping'));
     expect(result.current.agentActivity).toBe('idle');
+  });
+
+  describe('workspace and node detail fetches', () => {
+    it('keeps the node after the workspace lands, despite the re-render it causes', async () => {
+      const node = { id: 'node-1', name: 'node-alpha' };
+      let resolveNode: (value: typeof node) => void = () => {};
+      const nodeFetch = new Promise<typeof node>((resolve) => {
+        resolveNode = resolve;
+      });
+      mocks.getChatSession.mockResolvedValue(detailWithWorkspace());
+      mocks.getWorkspace.mockResolvedValue(workspaceResponse());
+      mocks.getNode.mockReturnValue(nodeFetch);
+
+      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+        wrapper,
+      });
+
+      await waitFor(() => expect(result.current.workspace?.id).toBe('ws-1'));
+      await waitFor(() => expect(mocks.getNode).toHaveBeenCalledWith('node-1'));
+
+      // This is the discriminating point. In production the workspace state commit
+      // happens while the node request is still in flight. The pre-fix single effect
+      // cleaned up that same request when `setWorkspace` re-rendered the hook, so a
+      // successful node response was discarded here.
+      expect(result.current.node).toBeNull();
+      await act(async () => {
+        resolveNode(node);
+        await nodeFetch;
+      });
+
+      await waitFor(() => expect(result.current.node?.id).toBe('node-1'));
+      expect(result.current.node?.name).toBe('node-alpha');
+    });
+
+    it('does not request a node when the workspace has no node id', async () => {
+      mocks.getChatSession.mockResolvedValue(detailWithWorkspace());
+      mocks.getWorkspace.mockResolvedValue(workspaceResponse(null));
+
+      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+        wrapper,
+      });
+
+      await waitFor(() => expect(result.current.workspace?.id).toBe('ws-1'));
+      expect(result.current.node).toBeNull();
+      expect(mocks.getNode).not.toHaveBeenCalled();
+    });
+
+    it('does not re-request either resource once both have landed', async () => {
+      mocks.getChatSession.mockResolvedValue(detailWithWorkspace());
+      mocks.getWorkspace.mockResolvedValue(workspaceResponse());
+      mocks.getNode.mockResolvedValue({ id: 'node-1', name: 'node-alpha' });
+
+      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+        wrapper,
+      });
+
+      await waitFor(() => expect(result.current.node?.id).toBe('node-1'));
+      // Both effects are identity-guarded (`workspace?.id === wsId`, `node?.id === nodeId`).
+      // Splitting them must not turn either into a refetch loop.
+      expect(mocks.getWorkspace).toHaveBeenCalledTimes(1);
+      expect(mocks.getNode).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('loadUntil', () => {
