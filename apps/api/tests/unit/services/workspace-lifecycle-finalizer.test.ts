@@ -367,6 +367,53 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
     expect(mocks.stopSession).not.toHaveBeenCalled();
     expect(mocks.failSession).not.toHaveBeenCalled();
   });
+
+  it('can repair active-looking rows on a terminal node without touching sleeping workspaces', async () => {
+    seedNode(NODE_ID, { status: 'deleted' });
+    seedWorkspace({ status: 'running' });
+    seedAgentSession({ status: 'running' });
+    sqlite
+      .prepare(
+        `INSERT INTO compute_usage
+          (id, user_id, workspace_id, node_id, server_type, vcpu_count, credential_source,
+           started_at, created_at)
+         VALUES ('usage-finalizer', ?, ?, ?, 'medium', 4, 'platform', ?, ?)`
+      )
+      .run(USER_ID, WORKSPACE_ID, NODE_ID, iso(-60 * 60 * 1000), iso(-60 * 60 * 1000));
+
+    const result = await finalizeWorkspaceLifecycleClosure(env, {
+      workspaceIds: [WORKSPACE_ID],
+      agentSessionStatus: 'stopped',
+      workspaceStatus: 'stopped',
+      nowIso: NOW_ISO,
+      reason: 'test_terminal_node_repair',
+    });
+
+    expect(result.workspacesTerminalized).toBe(1);
+    expect(result.agentSessionsClosed).toBe(1);
+    expect(result.computeUsageClosed).toBe(1);
+    expect(sqlite.prepare(`SELECT status FROM workspaces WHERE id = ?`).pluck().get(WORKSPACE_ID)).toBe(
+      'stopped'
+    );
+    expect(
+      sqlite.prepare(`SELECT status FROM agent_sessions WHERE id = ?`).pluck().get(AGENT_SESSION_ID)
+    ).toBe('stopped');
+    expect(
+      sqlite.prepare(`SELECT ended_at FROM compute_usage WHERE id = 'usage-finalizer'`).pluck().get()
+    ).toBe(NOW_ISO);
+
+    const sleepingWorkspaceId = 'workspace-sleeping-terminal-node';
+    seedWorkspace({ id: sleepingWorkspaceId, status: 'sleeping', chatSessionId: 'chat-sleeping' });
+    await finalizeWorkspaceLifecycleClosure(env, {
+      workspaceIds: [sleepingWorkspaceId],
+      workspaceStatus: 'stopped',
+      nowIso: NOW_ISO,
+      reason: 'test_terminal_node_repair',
+    });
+    expect(sqlite.prepare(`SELECT status FROM workspaces WHERE id = ?`).pluck().get(sleepingWorkspaceId)).toBe(
+      'sleeping'
+    );
+  });
 });
 
 describe('real teardown writers preserve sleeping sessions through the finalizer', () => {

@@ -123,7 +123,8 @@ describe('compute usage metering pipeline', () => {
     });
 
     it('calculateVcpuHoursForPeriod delegates to node-based aggregation', () => {
-      expect(serviceFile).toContain('calculateNodeVcpuHours(rows, periodStart, periodEnd');
+      expect(serviceFile).toContain('calculateNodeVcpuHours(');
+      expect(serviceFile).toContain('providerInstanceVcpuCount ?? row.vcpuCount');
     });
 
     it('calculateNodeVcpuHours groups rows by node before weighting duration', () => {

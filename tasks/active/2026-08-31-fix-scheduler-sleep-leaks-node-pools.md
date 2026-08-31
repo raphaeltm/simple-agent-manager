@@ -184,18 +184,18 @@ The implementation PR must include a writer inventory with disposition for every
 - [x] Update affected UI surfaces to display provider-native instance identity
       and resources as authoritative; keep `small`/`medium`/`large` labeled as
       compatibility/request hints.
-- [ ] Determine deployment-node capacity-pool scope from current architecture.
+- [x] Determine deployment-node capacity-pool scope from current architecture.
       If deployment nodes intentionally remain outside pools, document and
       label that scope. If not, route them through the same resolver.
-- [ ] Add unit/integration tests for exact production sweep ordering:
+- [x] Add unit/integration tests for exact production sweep ordering:
       terminal cleanup queues sleep, terminal ledger sweep runs, summary ledger
       sweep runs, sleep sweep completes, and node can warm/destroy without a
       stuck `stopping` snapshot.
-- [ ] Add tests for all three predicate guard sites, ceiling/escape behavior,
+- [x] Add tests for all three predicate guard sites, ceiling/escape behavior,
       recovery invalid-vs-transient pool errors, metering overlap with
       provider vCPU metadata, deleted-node orphan usage closure, and writer
       inventory coverage.
-- [ ] Update docs and PR evidence for lifecycle semantics, provider-native node
+- [x] Update docs and PR evidence for lifecycle semantics, provider-native node
       identity, metering behavior, and deployment-node pool scope.
 - [ ] Run local quality suite, local specialist reviews, UI screenshots if UI
       files change, staging on a final pinned candidate with zero staging VMs at
