@@ -14,7 +14,6 @@ import {
   buildSessionToolActions,
   DEFAULT_TOOL_STRIP_MODE,
   isToolStripMode,
-  nextToolStripMode,
   type SessionToolAction,
   type SessionToolId,
   TOOL_STRIP_MODE_STORAGE_KEY,
@@ -61,7 +60,6 @@ export interface UseSessionToolsInput {
 
 export interface UseSessionToolsResult {
   mode: ToolStripMode;
-  cycleMode: () => void;
   setMode: (mode: ToolStripMode) => void;
   actions: SessionToolAction[];
   selectTool: (id: SessionToolId) => void;
@@ -127,10 +125,6 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
       // Non-fatal: the mode just will not survive a reload.
     }
   }, []);
-
-  const cycleMode = useCallback(() => {
-    selectMode(nextToolStripMode(mode));
-  }, [mode, selectMode]);
 
   const confirmComplete = useCallback(async () => {
     if (!taskEmbed?.id || completing) return;
@@ -238,7 +232,6 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
 
   return {
     mode,
-    cycleMode,
     setMode: selectMode,
     actions,
     selectTool,

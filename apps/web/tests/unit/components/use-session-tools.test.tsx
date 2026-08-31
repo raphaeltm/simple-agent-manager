@@ -78,15 +78,17 @@ describe('useSessionTools', () => {
       expect(result.current.mode).toBe('icons');
     });
 
-    it('cycles icons → labels → hidden → icons', () => {
+    it('applies every mode the rail can ask for', () => {
+      // The rail owns the cycle order (it computes `nextToolStripMode` itself and calls
+      // `onModeChange`), so what the hook must guarantee is that it faithfully applies
+      // whichever mode it is handed. The cycle ORDER is pinned on `nextToolStripMode`
+      // directly, and the button that walks it is covered by the Playwright audit.
       const { result } = renderHook(() => useSessionTools(inputFor()));
 
-      act(() => result.current.cycleMode());
-      expect(result.current.mode).toBe('labels');
-      act(() => result.current.cycleMode());
-      expect(result.current.mode).toBe('hidden');
-      act(() => result.current.cycleMode());
-      expect(result.current.mode).toBe('icons');
+      for (const mode of ['labels', 'hidden', 'icons'] as const) {
+        act(() => result.current.setMode(mode));
+        expect(result.current.mode).toBe(mode);
+      }
     });
 
     it('persists the chosen mode and restores it on remount', () => {
