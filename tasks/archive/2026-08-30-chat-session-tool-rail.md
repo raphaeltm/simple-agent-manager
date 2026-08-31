@@ -202,3 +202,64 @@ Three harness defects were fixed to get there, none of them product bugs:
 The spec skips itself when `SAM_PLAYWRIGHT_PRIMARY_USER` is absent so it can never run in
 the CI sweep against shared staging — verified by running it with the variable unset:
 8 skipped, 0 executed. `SAM_PLAYWRIGHT` appears nowhere in `.github/`.
+
+## CI findings addressed (Phase 7)
+
+SonarCloud's quality gate passed but reported 17 new issues. Triaged rather than waved
+through, per `.claude/rules/13`. Full writeup in PR #1976 comment `#issuecomment-5472360005`.
+
+| Source | Finding | Resolution |
+|---|---|---|
+| Sonar CRITICAL | Cognitive complexity 25 > 15 in `buildSessionToolActions` | Split into `buildWorkspaceGroup` / `buildSessionGroup` / `buildMetaGroup` |
+| Sonar CRITICAL | `void` operator in the exhaustiveness default | `assertNeverToolId(id: never)` — same compile-time guarantee |
+| Sonar MAJOR | Nested ternary in the Comments hint | Extracted to `buildCommentsHint` |
+| Sonar MAJOR | Fixed wait `waitForTimeout(1500)` in the staging spec | Replaced with `data-mode` → `References` visible → `networkidle` |
+| Sonar MAJOR ×2 | Fixed waits in the two `shot()` helpers | Kept — rule 17 mandates ≥500ms settle before capture; a CSS transition has no completion event. Both now carry a comment saying so. |
+| Sonar MAJOR ×5 | `test.skip` "remove or explain" | Kept — these are runtime guards in the staging-only spec, not disabled tests. Removing them would let a spec that mutates shared staging run in CI without a token. |
+| Sonar MINOR ×3 | Sub-component props not read-only | `Readonly<{…}>` |
+| Sonar MINOR | `[mode, setModeState]` naming | See post-mortem below — the cosmetic finding was hiding a real bug |
+| Sonar ×2 | `MessageBanners`, `PublicPortsToggleRow` | Not my code; six files carried prettier-only churn and are reverted (33 → 27 files) |
+
+### Post-mortem: two defects the cleanup surfaced
+
+**1. A `localStorage` write inside a `setState` updater.** Sonar flagged the useState pair
+for not matching the `set<State>` naming convention — purely cosmetic. Renaming it made me
+read the surrounding code, where `cycleMode` was doing:
+
+```ts
+setModeState((current) => {
+  const next = nextToolStripMode(current);
+  window.localStorage.setItem(TOOL_STRIP_MODE_STORAGE_KEY, next); // side effect during render
+  return next;
+});
+```
+
+React double-invokes updaters under StrictMode, so this was a side effect running during
+render. *Class of bug*: a side effect placed in a pure-function slot because the value it
+needed was conveniently in scope there. Now split into set-then-persist in `selectMode`.
+
+**2. Dead code masking a coverage gap.** `cycleMode` was exported from the hook but never
+called in production — `SessionToolRail` computes `nextToolStripMode(mode)` itself and calls
+`onModeChange`. Its only caller was its own unit test. Removing it (CLAUDE.md "no dead code")
+revealed that `nextToolStripMode` — the single place the icons → labels → hidden → icons
+order is encoded — had **no direct test**; the wrap was asserted only through the dead API.
+Had it stopped wrapping, the cycle button would dead-end on `hidden` with the peek tab as the
+only way back. *Class of bug*: a test that reaches its subject through an API nothing else
+uses, so deleting that API silently deletes the coverage. Added
+`session-tool-actions.test.ts`, proven discriminating (clamping the modulo fails exactly the
+two wrap tests, the other six stay green).
+
+*Process fix*: no new rule. `.claude/rules/62` ("a test must reach the feature the way
+production does") and `.claude/rules/24`/`59` (one implementation per operation) already
+cover both. The gap was in application, not in the rules — which is why the fix here is the
+test and the deletion rather than another rule file.
+
+### Not fixed, filed instead
+
+SonarCloud reports **0.0% Coverage on New Code**, but it holds *no* coverage data for the
+project at all — `/api/measures/component?…&metricKeys=coverage` returns `measures: []`.
+`sonar-project.properties` declares only `sonar.go.coverage.reportPaths`, and the repo runs
+SonarCloud **Automatic Analysis**, which cannot ingest coverage reports. Any "Coverage on New
+Code" gate condition is therefore permanently satisfied-by-absence across the whole TypeScript
+codebase. Pre-existing and repo-wide; filed as idea `01M1AMNQVF6608Q5R342W6SK6J` rather than
+fixed here, to avoid turning a UI change into a CI-infrastructure change.
