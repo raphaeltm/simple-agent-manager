@@ -14,7 +14,12 @@ import {
 import type { Env } from '../env';
 import { createModuleLogger, serializeError } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS } from '../services/session-snapshot-artifacts';
+import {
+  findRestorableOrInFlightSleepSnapshot,
+  restorableOrInFlightSleepSnapshotPredicateSql,
+  sleepLifecyclePredicateBindings,
+  type SleepLifecyclePredicateResult,
+} from '../services/session-snapshot-sleep-predicate';
 
 const log = createModuleLogger('session_summary_ledger_reconciliation');
 
@@ -40,9 +45,7 @@ interface D1TaskRow {
   completed_at: string | null;
 }
 
-interface RestorableSnapshotRow {
-  expires_at: string;
-}
+type RestorableSnapshotRow = SleepLifecyclePredicateResult;
 
 export interface SessionSummaryLedgerReconciliationStats {
   selected: number;
@@ -94,15 +97,6 @@ function terminalSessionReconcileDeferMs(
   );
 }
 
-function snapshotRecoveryMaxAttempts(
-  env: Pick<Env, 'SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS'>
-): number {
-  return parsePositiveInt(
-    env.SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
-    DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS
-  );
-}
-
 function parseString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
@@ -137,7 +131,7 @@ function deferUntil(nowMs: number, env: Env, snapshot?: RestorableSnapshotRow | 
   const configuredUntil = nowMs + terminalSessionReconcileDeferMs(env);
   if (!snapshot) return configuredUntil;
 
-  const expiresAtMs = Date.parse(snapshot.expires_at);
+  const expiresAtMs = snapshot.expires_at ? Date.parse(snapshot.expires_at) : NaN;
   if (!Number.isFinite(expiresAtMs) || expiresAtMs <= nowMs) return configuredUntil;
 
   return Math.max(nowMs + 1, Math.min(configuredUntil, expiresAtMs));
@@ -231,25 +225,11 @@ async function findRestorableSleepingSnapshot(
   candidate: SummaryCandidate,
   now: Date
 ): Promise<RestorableSnapshotRow | null> {
-  const row = await env.DATABASE.prepare(
-    `SELECT expires_at
-      FROM session_snapshots
-      WHERE chat_session_id = ?
-        AND project_id = ?
-        AND sleeping_at IS NOT NULL
-        AND sleep_status = 'sleeping'
-        AND expires_at > ?
-        AND recovery_attempts < ?
-        AND (
-          (status = 'available' AND degradation = 'none')
-          OR (status = 'degraded' AND degradation IS NOT NULL AND degradation != 'none')
-        )
-      ORDER BY expires_at ASC
-      LIMIT 1`
-  )
-    .bind(candidate.id, candidate.projectId, now.toISOString(), snapshotRecoveryMaxAttempts(env))
-    .first<RestorableSnapshotRow>();
-  return row ?? null;
+  return findRestorableOrInFlightSleepSnapshot(env.DATABASE, env, {
+    projectId: candidate.projectId,
+    chatSessionId: candidate.id,
+    now,
+  });
 }
 
 function terminalTimestampMs(task: D1TaskRow, nowMs: number): number {
@@ -266,6 +246,8 @@ async function terminalizeSummary(
   const nowMs = now.getTime();
   const terminalMs = terminalTimestampMs(ownerTask, nowMs);
   const status = ownerTask.status === 'failed' ? 'failed' : 'stopped';
+  const sleepPredicate = restorableOrInFlightSleepSnapshotPredicateSql('snapshot');
+  const sleepPredicateBindings = sleepLifecyclePredicateBindings(env, now);
   const result = await env.DATABASE.prepare(
     `UPDATE session_summaries
         SET status = ?,
@@ -290,18 +272,7 @@ async function terminalizeSummary(
             FROM session_snapshots snapshot
            WHERE snapshot.chat_session_id = session_summaries.id
              AND snapshot.project_id = session_summaries.project_id
-             AND snapshot.sleeping_at IS NOT NULL
-             AND snapshot.sleep_status = 'sleeping'
-             AND snapshot.expires_at > ?
-             AND snapshot.recovery_attempts < ?
-             AND (
-               (snapshot.status = 'available' AND snapshot.degradation = 'none')
-               OR (
-                 snapshot.status = 'degraded'
-                 AND snapshot.degradation IS NOT NULL
-                 AND snapshot.degradation != 'none'
-               )
-             )
+             AND ${sleepPredicate}
         )`
   )
     .bind(
@@ -312,8 +283,7 @@ async function terminalizeSummary(
       nowMs,
       candidate.id,
       candidate.projectId,
-      now.toISOString(),
-      snapshotRecoveryMaxAttempts(env)
+      ...sleepPredicateBindings
     )
     .run();
   return (result.meta?.changes ?? 0) > 0;
@@ -367,7 +337,7 @@ async function reconcileCandidate(
     return (await deferCandidate(
       env,
       candidate,
-      'restorable_sleeping_snapshot',
+      `sleep_lifecycle_${snapshot.sleep_status ?? 'unknown'}`,
       deferUntil(now.getTime(), env, snapshot)
     ))
       ? 'deferred'

@@ -150,15 +150,15 @@ The implementation PR must include a writer inventory with disposition for every
 
 ## Implementation Checklist
 
-- [ ] Create a shared SQL-capable restorable-or-in-flight sleep lifecycle
+- [x] Create a shared SQL-capable restorable-or-in-flight sleep lifecycle
       predicate/helper that can be scoped by project/session and by
       project/session/workspace where needed.
-- [ ] Include retry-eligible `failed` snapshot sleep states in the in-flight
+- [x] Include retry-eligible `failed` snapshot sleep states in the in-flight
       defer set where they can still roll forward safely.
-- [ ] Replace the three `sleeping`-only destroyer guards with the shared
+- [x] Replace the three `sleeping`-only destroyer guards with the shared
       predicate: terminal session reconciliation, session-summary reconciliation
       read/CAS, and workspace lifecycle finalization.
-- [ ] Add an env-backed `DEFAULT_*` absolute in-flight sleep ceiling with
+- [x] Add an env-backed `DEFAULT_*` absolute in-flight sleep ceiling with
       per-cycle anchoring that resets on successful progress.
 - [ ] Add a bounded escape path for wedged `preparing`/`stopping`/retryable
       `failed` sleep rows that routes restorable wedges into the repair path

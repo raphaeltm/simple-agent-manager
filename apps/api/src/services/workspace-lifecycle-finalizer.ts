@@ -1,7 +1,7 @@
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import * as projectDataService from './project-data';
-import { hasRestorableSleepingSessionSnapshot } from './session-snapshots';
+import { findRestorableOrInFlightSleepSnapshot } from './session-snapshot-sleep-predicate';
 
 export type WorkspaceLifecycleClosureStatus = 'completed' | 'stopped' | 'failed' | 'error';
 
@@ -182,11 +182,12 @@ async function finalizeProjectDataSession(
 
   if (input.agentSessionStatus !== 'failed' && input.agentSessionStatus !== 'error') {
     try {
-      // Mirrors claimSessionSnapshotRecovery(): a sleeping, unexpired snapshot is the
-      // authoritative wake record. Per rule 66, explicit archive/delete paths remove that
-      // snapshot first, so preserving it here does not weaken genuine destructive intent.
+      // Mirrors the shared destroyer guard: restorable sleeping snapshots and
+      // bounded in-flight sleep lifecycles are authoritative recoverability
+      // records. Per rule 66, explicit archive/delete paths remove the snapshot
+      // first, so preserving it here does not weaken destructive intent.
       if (
-        await hasRestorableSleepingSessionSnapshot(env.DATABASE, env, {
+        await findRestorableOrInFlightSleepSnapshot(env.DATABASE, env, {
           projectId: row.project_id,
           workspaceId: row.id,
           chatSessionId: row.chat_session_id,
