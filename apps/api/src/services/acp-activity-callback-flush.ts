@@ -71,8 +71,8 @@ export async function assertAcpActivityCallbackResourcesActive(
     projectId: string;
     sessionId: string;
     nodeId: string;
-    workspaceId: string | null | undefined;
-    chatSessionId?: string | null | undefined;
+    workspaceId: string | null;
+    chatSessionId?: string | null;
   }
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
@@ -142,6 +142,42 @@ export async function assertAcpActivityCallbackResourcesActive(
     });
     throw errors.gone('Workspace session binding changed; activity callback resource is gone');
   }
+}
+
+export async function cancelSleepForActiveActivity(input: {
+  env: Env;
+  projectId: string;
+  sessionId: string;
+  chatSessionId: string;
+  body: AcpActivityCallbackReport;
+}): Promise<void> {
+  if (
+    input.body.activity !== 'prompting' &&
+    !reportedHarnessWorkKeepsRuntimeActive(input.body)
+  ) {
+    return;
+  }
+  await cancelScheduledSessionSleep(
+    drizzle(input.env.DATABASE, { schema }),
+    input.chatSessionId
+  ).catch((err) => {
+    log.warn('acp_activity.cancel_scheduled_sleep_failed', {
+      sessionId: input.sessionId,
+      projectId: input.projectId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
+
+function bindingMatchesSnapshot(
+  binding: AcpActivityBinding,
+  snapshot: AcpActivityPendingSnapshot
+): boolean {
+  return (
+    binding.nodeId === snapshot.binding.nodeId &&
+    binding.workspaceId === snapshot.binding.workspaceId &&
+    binding.chatSessionId === snapshot.binding.chatSessionId
+  );
 }
 
 export async function loadD1ActivityBindingForTransientFallback(
@@ -268,11 +304,7 @@ export async function flushCoalescedAcpActivity(
     if (!binding) {
       return { action: 'rejected', reason: 'session_unassigned' };
     }
-    if (
-      binding.nodeId !== snapshot.binding.nodeId ||
-      binding.workspaceId !== snapshot.binding.workspaceId ||
-      binding.chatSessionId !== snapshot.binding.chatSessionId
-    ) {
+    if (!bindingMatchesSnapshot(binding, snapshot)) {
       return { action: 'rejected', reason: 'binding_changed' };
     }
     if (!isPendingAcpActivitySnapshotCurrent(snapshot)) {
@@ -288,21 +320,13 @@ export async function flushCoalescedAcpActivity(
     if (!isPendingAcpActivitySnapshotCurrent(snapshot)) {
       return { action: 'rejected', reason: 'pending_superseded' };
     }
-    if (
-      snapshot.report.activity === 'prompting' ||
-      reportedHarnessWorkKeepsRuntimeActive(snapshot.report)
-    ) {
-      await cancelScheduledSessionSleep(
-        drizzle(env.DATABASE, { schema }),
-        binding.chatSessionId
-      ).catch((err) => {
-        log.warn('acp_activity.cancel_scheduled_sleep_failed', {
-          sessionId: snapshot.sessionId,
-          projectId: snapshot.projectId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-    }
+    await cancelSleepForActiveActivity({
+      env,
+      projectId: snapshot.projectId,
+      sessionId: snapshot.sessionId,
+      chatSessionId: binding.chatSessionId,
+      body: snapshot.report,
+    });
     if (!isPendingAcpActivitySnapshotCurrent(snapshot)) {
       return { action: 'rejected', reason: 'pending_superseded' };
     }

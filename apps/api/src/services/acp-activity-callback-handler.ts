@@ -16,6 +16,7 @@ import {
 import {
   type AcpActivityBinding,
   type AcpActivityCallbackReport,
+  type AcpActivityFlushResult,
   type AcpActivityPendingSnapshot,
   admitOrCoalesceAcpActivityCallback,
   buildAcpActivityBinding,
@@ -31,10 +32,10 @@ import {
 import {
   activityReportExtra,
   assertAcpActivityCallbackResourcesActive,
+  cancelSleepForActiveActivity,
   flushCoalescedAcpActivity,
   loadD1ActivityBindingForTransientFallback,
   persistIntermediateActivity,
-  reportedHarnessWorkKeepsRuntimeActive,
 } from './acp-activity-callback-flush';
 import { normalizeAgentActivityErrorMessage } from './acp-activity-error-message';
 import { isTransientDurableObjectError } from './durable-object-retry';
@@ -45,7 +46,6 @@ import {
   callbackTokenMatchesWorkspace,
 } from './node-callback-auth';
 import * as projectDataService from './project-data';
-import { cancelScheduledSessionSleep } from './session-snapshots';
 import { recordAcpActivityCallbackMetric } from './telemetry';
 import { markVmAgentContainerActiveWorkEndedBestEffort } from './vm-agent-container';
 
@@ -108,6 +108,204 @@ function resolveWaitUntil(c: {
   };
 }
 
+type ActivityCallbackProcessingContext = {
+  c: Context<{ Bindings: Env }>;
+  payload: CallbackTokenPayload;
+  projectId: string;
+  sessionId: string;
+  body: AcpActivityCallbackReport;
+  observedAt: number;
+  config: ReturnType<typeof getAcpActivityAdmissionConfig>;
+  waitUntil: WaitUntilFn;
+  flush: (snapshot: AcpActivityPendingSnapshot) => Promise<AcpActivityFlushResult>;
+};
+
+async function handleCachedIntermediateActivity(
+  input: ActivityCallbackProcessingContext
+): Promise<Response | null> {
+  const cachedBinding = getCachedAcpActivityBinding(
+    input.config,
+    input.projectId,
+    input.sessionId
+  );
+  if (!cachedBinding) return null;
+
+  assertCallbackTokenBoundToBinding(input.payload, cachedBinding, {
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    nodeId: input.body.nodeId,
+  });
+  await assertAcpActivityCallbackResourcesActive(input.c.env, {
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    nodeId: input.body.nodeId,
+    workspaceId: cachedBinding.workspaceId,
+    chatSessionId: cachedBinding.chatSessionId,
+  });
+  await cancelSleepForActiveActivity({
+    env: input.c.env,
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    chatSessionId: cachedBinding.chatSessionId,
+    body: input.body,
+  });
+
+  const admission = admitOrCoalesceAcpActivityCallback({
+    env: input.c.env,
+    config: input.config,
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    binding: cachedBinding,
+    report: input.body,
+    observedAt: input.observedAt,
+    waitUntil: input.waitUntil,
+    flush: input.flush,
+  });
+  if (admission.action === 'coalesce') return input.c.body(null, 204);
+
+  await persistIntermediateActivity({
+    env: input.c.env,
+    config: input.config,
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    binding: cachedBinding,
+    body: input.body,
+    observedAt: input.observedAt,
+    admissionReason: admission.reason,
+    waitUntil: input.waitUntil,
+    flush: input.flush,
+  });
+  return input.c.body(null, 204);
+}
+
+async function handleTransientLookupFallback(input: {
+  context: ActivityCallbackProcessingContext;
+  lookupError: unknown;
+  isIntermediate: boolean;
+}): Promise<Response | null> {
+  const { context } = input;
+  if (
+    !input.isIntermediate ||
+    !context.config.enabled ||
+    !isTransientDurableObjectError(input.lookupError)
+  ) {
+    return null;
+  }
+
+  try {
+    const fallbackBinding = await loadD1ActivityBindingForTransientFallback(context.c.env, {
+      projectId: context.projectId,
+      sessionId: context.sessionId,
+    });
+    if (!fallbackBinding) return null;
+
+    assertCallbackTokenBoundToBinding(context.payload, fallbackBinding, {
+      projectId: context.projectId,
+      sessionId: context.sessionId,
+      nodeId: context.body.nodeId,
+    });
+    await assertAcpActivityCallbackResourcesActive(context.c.env, {
+      projectId: context.projectId,
+      sessionId: context.sessionId,
+      nodeId: context.body.nodeId,
+      workspaceId: fallbackBinding.workspaceId,
+      chatSessionId: fallbackBinding.chatSessionId,
+    });
+    await cancelSleepForActiveActivity({
+      env: context.c.env,
+      projectId: context.projectId,
+      sessionId: context.sessionId,
+      chatSessionId: fallbackBinding.chatSessionId,
+      body: context.body,
+    });
+    cacheAcpActivityBinding(context.config, context.projectId, fallbackBinding);
+    coalesceAcpActivityAfterProjectDataTransient({
+      env: context.c.env,
+      config: context.config,
+      projectId: context.projectId,
+      sessionId: context.sessionId,
+      binding: fallbackBinding,
+      report: context.body,
+      observedAt: context.observedAt,
+      waitUntil: context.waitUntil,
+      flush: context.flush,
+    });
+    return context.c.body(null, 204);
+  } catch (fallbackErr) {
+    if (fallbackErr instanceof AppError) throw fallbackErr;
+    log.warn('acp_activity.transient_fallback_failed', {
+      projectId: context.projectId,
+      sessionId: context.sessionId,
+      error: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr),
+    });
+    return null;
+  }
+}
+
+async function rejectSupersededInstantError(input: {
+  c: Context<{ Bindings: Env }>;
+  token: string;
+  projectId: string;
+  sessionId: string;
+  body: AcpActivityCallbackReport;
+  binding: AcpActivityBinding;
+}): Promise<Response | null> {
+  if (input.body.activity !== 'error') return null;
+
+  const guardDb = drizzle(input.c.env.DATABASE, { schema });
+  const guardRow = await guardDb
+    .select({
+      updatedAt: schema.agentSessions.updatedAt,
+      runtime: schema.nodes.runtime,
+    })
+    .from(schema.agentSessions)
+    .leftJoin(schema.workspaces, eq(schema.workspaces.id, schema.agentSessions.workspaceId))
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
+    .where(eq(schema.agentSessions.id, input.sessionId))
+    .get();
+  const tokenIssuedAtMs = callbackTokenIssuedAtMs(input.token);
+  const marginMs = getInstantStaleCallbackMarginMs(input.c.env);
+  if (
+    !isSupersededInstantCallback({
+      runtime: guardRow?.runtime,
+      rowUpdatedAt: guardRow?.updatedAt,
+      tokenIssuedAtMs,
+      marginMs,
+    })
+  ) {
+    return null;
+  }
+
+  log.warn('acp_activity.rejected_stale_callback', {
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    nodeId: input.body.nodeId,
+    runtime: guardRow?.runtime ?? null,
+    rowUpdatedAt: guardRow?.updatedAt ?? null,
+    tokenIssuedAtMs,
+    marginMs,
+    reportedActivity: input.body.activity,
+    action: 'rejected_stale_callback',
+  });
+  // 2xx: the vm-agent activity client retries only on 5xx, so 204 stops
+  // retries without error-log noise. The superseded generation moves on.
+  recordAcpActivityCallbackMetric(
+    {
+      metric: 'acp_activity_callback',
+      outcome: 'rejected',
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      nodeId: input.body.nodeId,
+      workspaceId: input.binding.workspaceId,
+      activity: input.body.activity,
+      reason: 'stale_generation',
+      source: 'callback',
+    },
+    input.c.env
+  );
+  return input.c.body(null, 204);
+}
+
 export async function handleAcpActivityCallback(
   c: Context<{ Bindings: Env }>,
   input: {
@@ -135,123 +333,33 @@ export async function handleAcpActivityCallback(
   const flush = (snapshot: AcpActivityPendingSnapshot) =>
     flushCoalescedAcpActivity(c.env, snapshot);
   const isIntermediate = isIntermediateAcpActivityReport(body);
+  const processingContext: ActivityCallbackProcessingContext = {
+    c,
+    payload,
+    projectId,
+    sessionId,
+    body,
+    observedAt,
+    config,
+    waitUntil,
+    flush,
+  };
 
   if (isIntermediate && config.enabled) {
-    const cachedBinding = getCachedAcpActivityBinding(config, projectId, sessionId);
-    if (cachedBinding) {
-      assertCallbackTokenBoundToBinding(payload, cachedBinding, {
-        projectId,
-        sessionId,
-        nodeId: body.nodeId,
-      });
-      await assertAcpActivityCallbackResourcesActive(c.env, {
-        projectId,
-        sessionId,
-        nodeId: body.nodeId,
-        workspaceId: cachedBinding.workspaceId,
-        chatSessionId: cachedBinding.chatSessionId,
-      });
-      if (body.activity === 'prompting' || reportedHarnessWorkKeepsRuntimeActive(body)) {
-        await cancelScheduledSessionSleep(
-          drizzle(c.env.DATABASE, { schema }),
-          cachedBinding.chatSessionId
-        ).catch((err) => {
-          log.warn('acp_activity.cancel_scheduled_sleep_failed', {
-            sessionId,
-            projectId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
-      }
-
-      const admission = admitOrCoalesceAcpActivityCallback({
-        env: c.env,
-        config,
-        projectId,
-        sessionId,
-        binding: cachedBinding,
-        report: body,
-        observedAt,
-        waitUntil,
-        flush,
-      });
-      if (admission.action === 'coalesce') {
-        return c.body(null, 204);
-      }
-      await persistIntermediateActivity({
-        env: c.env,
-        config,
-        projectId,
-        sessionId,
-        binding: cachedBinding,
-        body,
-        observedAt,
-        admissionReason: admission.reason,
-        waitUntil,
-        flush,
-      });
-      return c.body(null, 204);
-    }
+    const cachedResponse = await handleCachedIntermediateActivity(processingContext);
+    if (cachedResponse) return cachedResponse;
   }
 
   let existing: Awaited<ReturnType<typeof projectDataService.getAcpSession>>;
   try {
     existing = await projectDataService.getAcpSession(c.env, projectId, sessionId);
   } catch (err) {
-    if (isIntermediate && config.enabled && isTransientDurableObjectError(err)) {
-      try {
-        const fallbackBinding = await loadD1ActivityBindingForTransientFallback(c.env, {
-          projectId,
-          sessionId,
-        });
-        if (fallbackBinding) {
-          assertCallbackTokenBoundToBinding(payload, fallbackBinding, {
-            projectId,
-            sessionId,
-            nodeId: body.nodeId,
-          });
-          await assertAcpActivityCallbackResourcesActive(c.env, {
-            projectId,
-            sessionId,
-            nodeId: body.nodeId,
-            workspaceId: fallbackBinding.workspaceId,
-            chatSessionId: fallbackBinding.chatSessionId,
-          });
-          if (body.activity === 'prompting' || reportedHarnessWorkKeepsRuntimeActive(body)) {
-            await cancelScheduledSessionSleep(
-              drizzle(c.env.DATABASE, { schema }),
-              fallbackBinding.chatSessionId
-            ).catch((sleepErr) => {
-              log.warn('acp_activity.cancel_scheduled_sleep_failed', {
-                sessionId,
-                projectId,
-                error: sleepErr instanceof Error ? sleepErr.message : String(sleepErr),
-              });
-            });
-          }
-          cacheAcpActivityBinding(config, projectId, fallbackBinding);
-          coalesceAcpActivityAfterProjectDataTransient({
-            env: c.env,
-            config,
-            projectId,
-            sessionId,
-            binding: fallbackBinding,
-            report: body,
-            observedAt,
-            waitUntil,
-            flush,
-          });
-          return c.body(null, 204);
-        }
-      } catch (fallbackErr) {
-        if (fallbackErr instanceof AppError) throw fallbackErr;
-        log.warn('acp_activity.transient_fallback_failed', {
-          projectId,
-          sessionId,
-          error: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr),
-        });
-      }
-    }
+    const fallbackResponse = await handleTransientLookupFallback({
+      context: processingContext,
+      lookupError: err,
+      isIntermediate,
+    });
+    if (fallbackResponse) return fallbackResponse;
     throw err;
   }
   if (!existing) {
@@ -305,18 +413,13 @@ export async function handleAcpActivityCallback(
   // Mutate sleep state only after the callback token and reported node are
   // both bound to this exact session. A valid token for another tenant must
   // not be able to keep a victim's runtime awake by cancelling its sleep.
-  if (body.activity === 'prompting' || reportedHarnessWorkKeepsRuntimeActive(body)) {
-    await cancelScheduledSessionSleep(
-      drizzle(c.env.DATABASE, { schema }),
-      existing.chatSessionId
-    ).catch((err) => {
-      log.warn('acp_activity.cancel_scheduled_sleep_failed', {
-        sessionId,
-        projectId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
-  }
+  await cancelSleepForActiveActivity({
+    env: c.env,
+    projectId,
+    sessionId,
+    chatSessionId: existing.chatSessionId,
+    body,
+  });
 
   if (isIntermediate) {
     const admission = admitOrCoalesceAcpActivityCallback({
@@ -356,58 +459,15 @@ export async function handleAcpActivityCallback(
   // would regress the freshly recovered, healthy session to error/failed.
   // Short-circuit BEFORE the activity mirror + destructive transition + active-
   // work-ended, so nothing touches the live recovered generation.
-  if (body.activity === 'error') {
-    const guardDb = drizzle(c.env.DATABASE, { schema });
-    const guardRow = await guardDb
-      .select({
-        updatedAt: schema.agentSessions.updatedAt,
-        runtime: schema.nodes.runtime,
-      })
-      .from(schema.agentSessions)
-      .leftJoin(schema.workspaces, eq(schema.workspaces.id, schema.agentSessions.workspaceId))
-      .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-      .where(eq(schema.agentSessions.id, sessionId))
-      .get();
-    const tokenIssuedAtMs = callbackTokenIssuedAtMs(token);
-    const marginMs = getInstantStaleCallbackMarginMs(c.env);
-    if (
-      isSupersededInstantCallback({
-        runtime: guardRow?.runtime,
-        rowUpdatedAt: guardRow?.updatedAt,
-        tokenIssuedAtMs,
-        marginMs,
-      })
-    ) {
-      log.warn('acp_activity.rejected_stale_callback', {
-        projectId,
-        sessionId,
-        nodeId: body.nodeId,
-        runtime: guardRow?.runtime ?? null,
-        rowUpdatedAt: guardRow?.updatedAt ?? null,
-        tokenIssuedAtMs,
-        marginMs,
-        reportedActivity: body.activity,
-        action: 'rejected_stale_callback',
-      });
-      // 2xx: the vm-agent activity client retries only on 5xx, so 204 stops
-      // retries without error-log noise. The superseded generation moves on.
-      recordAcpActivityCallbackMetric(
-        {
-          metric: 'acp_activity_callback',
-          outcome: 'rejected',
-          projectId,
-          sessionId,
-          nodeId: body.nodeId,
-          workspaceId: binding.workspaceId,
-          activity: body.activity,
-          reason: 'stale_generation',
-          source: 'callback',
-        },
-        c.env
-      );
-      return c.body(null, 204);
-    }
-  }
+  const staleGenerationResponse = await rejectSupersededInstantError({
+    c,
+    token,
+    projectId,
+    sessionId,
+    body,
+    binding,
+  });
+  if (staleGenerationResponse) return staleGenerationResponse;
 
   const activityApplied = await projectDataService.reportAcpSessionActivity(
     c.env,
