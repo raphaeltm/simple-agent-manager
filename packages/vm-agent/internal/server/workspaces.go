@@ -1069,13 +1069,26 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Store projectID on workspace runtime for ACP heartbeat goroutine.
-	if projectID != "" {
+	// Store project/chat session IDs on workspace runtime for ACP heartbeat and
+	// VM-agent-local eviction snapshots.
+	if projectID != "" || chatSID != "" {
+		var updated *WorkspaceRuntime
 		s.workspaceMu.Lock()
 		if rt, ok := s.workspaces[workspaceID]; ok {
-			rt.ProjectID = projectID
+			if projectID != "" {
+				rt.ProjectID = projectID
+			}
+			if chatSID != "" {
+				rt.ChatSessionID = chatSID
+			}
+			rt.UpdatedAt = nowUTC()
+			copy := *rt
+			updated = &copy
 		}
 		s.workspaceMu.Unlock()
+		if updated != nil && updated.Repository != "" {
+			s.persistWorkspaceMetadata(updated)
+		}
 	}
 
 	// Ensure a per-workspace message reporter exists for this workspace.

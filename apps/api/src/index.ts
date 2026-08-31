@@ -129,6 +129,7 @@ import { composePublishReleaseCallbackRoute } from './routes/projects/compose-pu
 import { deploymentPublishJobCallbackRoute } from './routes/projects/deployment-publish-job-callback';
 import { nodeAcpHeartbeatRoute } from './routes/projects/node-acp-heartbeat';
 import { registryPushCredentialsCallbackRoute } from './routes/projects/registry-push-credentials-callback';
+import { workspaceEvictionCallbackRoute } from './routes/projects/workspace-eviction-callback';
 import { providersRoutes } from './routes/providers';
 import { reportIssueRoutes } from './routes/report-issue';
 import { resolutionStatusRoute } from './routes/resolution-status';
@@ -812,6 +813,7 @@ app.route('/api/projects', registryPushCredentialsCallbackRoute); // Must be bef
 app.route('/api/projects', composeImageArtifactsCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', composePublishReleaseCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', deploymentPublishJobCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
+app.route('/api/projects', workspaceEvictionCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/sessions', chatStartRoutes);

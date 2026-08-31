@@ -330,6 +330,10 @@ type Config struct {
 	PSIMemorySomeCriticalThreshold float64       // some memory PSI critical threshold (env: DEFAULT_PSI_MEMORY_SOME_CRITICAL_THRESHOLD, default: 50.0)
 	PSIMemoryFullWarningThreshold  float64       // full memory PSI warning threshold (env: DEFAULT_PSI_MEMORY_FULL_WARNING_THRESHOLD, default: 10.0)
 	PSIMemoryFullCriticalThreshold float64       // full memory PSI critical threshold (env: DEFAULT_PSI_MEMORY_FULL_CRITICAL_THRESHOLD, default: 25.0)
+	EvictionDebounceWindow         time.Duration // Duplicate eviction debounce window (env: DEFAULT_EVICTION_DEBOUNCE_SECONDS, default: 30s)
+	EvictionSnapshotTimeout        time.Duration // Pre-stop eviction snapshot deadline (env: DEFAULT_EVICTION_SNAPSHOT_TIMEOUT_SECONDS, default: 120s)
+	EvictionDockerStopTimeout      time.Duration // Graceful docker stop timeout for evictions (env: DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS, default: 10s)
+	EvictionResolveTimeout         time.Duration // Docker label resolution timeout for evictions (env: DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS, default: 5s)
 
 	// Git integration settings - configurable per constitution principle XI
 	GitCredentialTimeout     time.Duration // Timeout for credential-helper callbacks (env: GIT_CREDENTIAL_TIMEOUT, default: 5s)

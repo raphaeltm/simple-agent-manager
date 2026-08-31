@@ -13,6 +13,14 @@ const (
 	EnvDefaultPSIMemoryFullWarningThreshold = "DEFAULT_PSI_MEMORY_FULL_WARNING_THRESHOLD"
 	// EnvDefaultPSIMemoryFullCriticalThreshold configures critical-level full-memory PSI.
 	EnvDefaultPSIMemoryFullCriticalThreshold = "DEFAULT_PSI_MEMORY_FULL_CRITICAL_THRESHOLD"
+	// EnvDefaultEvictionDebounceSeconds configures duplicate eviction debounce in seconds.
+	EnvDefaultEvictionDebounceSeconds = "DEFAULT_EVICTION_DEBOUNCE_SECONDS"
+	// EnvDefaultEvictionSnapshotTimeoutSeconds bounds pre-stop eviction snapshots in seconds.
+	EnvDefaultEvictionSnapshotTimeoutSeconds = "DEFAULT_EVICTION_SNAPSHOT_TIMEOUT_SECONDS"
+	// EnvDefaultEvictionDockerStopTimeoutSeconds bounds graceful docker stop in seconds.
+	EnvDefaultEvictionDockerStopTimeoutSeconds = "DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS"
+	// EnvDefaultEvictionResolveTimeoutSeconds bounds Docker label resolution before eviction.
+	EnvDefaultEvictionResolveTimeoutSeconds = "DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS"
 )
 
 const (
@@ -28,4 +36,12 @@ const (
 	DefaultPSIMemoryFullWarningThreshold = 10.0
 	// DefaultPSIMemoryFullCriticalThreshold is the default critical threshold for full-memory PSI.
 	DefaultPSIMemoryFullCriticalThreshold = 25.0
+	// DefaultEvictionDebounceSeconds is the default duplicate eviction debounce window.
+	DefaultEvictionDebounceSeconds = 30
+	// DefaultEvictionSnapshotTimeoutSeconds is the default pre-stop snapshot deadline.
+	DefaultEvictionSnapshotTimeoutSeconds = 120
+	// DefaultEvictionDockerStopTimeoutSeconds is the default graceful docker stop deadline.
+	DefaultEvictionDockerStopTimeoutSeconds = 10
+	// DefaultEvictionResolveTimeoutSeconds is the default pressure target resolution deadline.
+	DefaultEvictionResolveTimeoutSeconds = 5
 )

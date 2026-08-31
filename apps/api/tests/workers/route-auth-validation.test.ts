@@ -37,6 +37,7 @@ import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { importPKCS8, SignJWT } from 'jose';
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import type { ProjectData } from '../../src/durable-objects/project-data';
 import { signCallbackToken, signNodeCallbackToken } from '../../src/services/jwt';
 
 // Unique IDs per test run to avoid cross-test contamination (shared D1, no isolatedStorage)
@@ -48,12 +49,19 @@ const DELETED_NODE_ID = `${TEST_PREFIX}-deleted-node`;
 const STOPPED_NODE_ID = `${TEST_PREFIX}-stopped-node`;
 const WORKSPACE_ID = `${TEST_PREFIX}-ws`;
 const INACTIVE_WORKSPACE_ID = `${TEST_PREFIX}-inactive-ws`;
+const EVICTION_WORKSPACE_ID = `${TEST_PREFIX}-eviction-ws`;
+const NODE_EVICTION_WORKSPACE_ID = `${TEST_PREFIX}-node-eviction-ws`;
+const EXPIRED_EVICTION_WORKSPACE_ID = `${TEST_PREFIX}-expired-eviction-ws`;
+const DELETED_WORKSPACE_ID = `${TEST_PREFIX}-deleted-ws`;
 const SESSION_ID = `${TEST_PREFIX}-sess`;
+const EVICTION_SESSION_ID = `${TEST_PREFIX}-eviction-sess`;
 const DELETED_NODE_LAST_HEARTBEAT = '2026-08-25T00:00:00.000Z';
 const STOPPED_NODE_LAST_HEARTBEAT = '2026-08-25T01:00:00.000Z';
 const CALLBACK_AUDIENCE = 'workspace-callback';
 
 let workspaceCallbackToken: string;
+let evictionWorkspaceCallbackToken: string;
+let deletedWorkspaceCallbackToken: string;
 let nodeCallbackToken: string;
 let deletedNodeCallbackToken: string;
 let stoppedNodeCallbackToken: string;
@@ -83,6 +91,38 @@ async function countPlatformErrorsForNode(nodeId: string): Promise<number> {
     .bind(nodeId)
     .first<{ count: number }>();
   return row?.count ?? 0;
+}
+
+type EvictionActivityEvent = {
+  eventType: string;
+  actorType: string;
+  actorId: string | null;
+  workspaceId: string | null;
+  sessionId: string | null;
+  payload: Record<string, unknown> | null;
+};
+
+function getProjectDataStub(projectId: string): DurableObjectStub<ProjectData> {
+  return env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(projectId)) as DurableObjectStub<ProjectData>;
+}
+
+async function listWorkspaceEvictionActivity(
+  workspaceId: string
+): Promise<EvictionActivityEvent[]> {
+  const { events } = await getProjectDataStub(PROJECT_ID).listActivityEvents('workspace.evicted');
+  return (events as EvictionActivityEvent[]).filter((event) => event.workspaceId === workspaceId);
+}
+
+async function waitForWorkspaceEvictionActivity(
+  workspaceId: string
+): Promise<EvictionActivityEvent> {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    const events = await listWorkspaceEvictionActivity(workspaceId);
+    if (events[0]) return events[0];
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`workspace eviction activity not recorded for ${workspaceId}`);
 }
 
 beforeAll(async () => {
@@ -192,8 +232,54 @@ beforeAll(async () => {
     )
     .run();
 
+  for (const workspace of [
+    {
+      id: EVICTION_WORKSPACE_ID,
+      chatSessionId: EVICTION_SESSION_ID,
+      name: 'auth-test-eviction-ws',
+      status: 'running',
+    },
+    {
+      id: NODE_EVICTION_WORKSPACE_ID,
+      chatSessionId: `${EVICTION_SESSION_ID}-node`,
+      name: 'auth-test-node-eviction-ws',
+      status: 'running',
+    },
+    {
+      id: EXPIRED_EVICTION_WORKSPACE_ID,
+      chatSessionId: `${EVICTION_SESSION_ID}-expired`,
+      name: 'auth-test-expired-eviction-ws',
+      status: 'running',
+    },
+    {
+      id: DELETED_WORKSPACE_ID,
+      chatSessionId: `${EVICTION_SESSION_ID}-deleted`,
+      name: 'auth-test-deleted-ws',
+      status: 'deleted',
+    },
+  ]) {
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO workspaces (id, user_id, node_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'cx22', 'fsn1', datetime('now'), datetime('now'))`
+    )
+      .bind(
+        workspace.id,
+        USER_ID,
+        NODE_ID,
+        PROJECT_ID,
+        workspace.chatSessionId,
+        workspace.name,
+        'test-repo',
+        'main',
+        workspace.status
+      )
+      .run();
+  }
+
   // Sign all tokens after seeding is complete (follows workspace-messages.test.ts pattern)
   workspaceCallbackToken = await signCallbackToken(WORKSPACE_ID, env as any);
+  evictionWorkspaceCallbackToken = await signCallbackToken(EVICTION_WORKSPACE_ID, env as any);
+  deletedWorkspaceCallbackToken = await signCallbackToken(DELETED_WORKSPACE_ID, env as any);
   nodeCallbackToken = await signNodeCallbackToken(NODE_ID, env as any);
   deletedNodeCallbackToken = await signNodeCallbackToken(DELETED_NODE_ID, env as any);
   stoppedNodeCallbackToken = await signNodeCallbackToken(STOPPED_NODE_ID, env as any);
@@ -427,6 +513,182 @@ describe('node callback auth', () => {
       health_status: 'unhealthy',
       last_heartbeat_at: STOPPED_NODE_LAST_HEARTBEAT,
     });
+  });
+});
+
+// =============================================================================
+// Workspace eviction callback
+// =============================================================================
+
+describe('workspace eviction callback', () => {
+  it('returns 401 without a callback JWT', async () => {
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${PROJECT_ID}/workspaces/${EVICTION_WORKSPACE_ID}/eviction`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nodeId: NODE_ID,
+          workspaceId: EVICTION_WORKSPACE_ID,
+          reason: 'memory_pressure',
+          snapshotCaptured: true,
+          containerStopped: true,
+        }),
+      }
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it('accepts a workspace callback token and marks the workspace evicted', async () => {
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${PROJECT_ID}/workspaces/${EVICTION_WORKSPACE_ID}/eviction`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${evictionWorkspaceCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          nodeId: NODE_ID,
+          workspaceId: EVICTION_WORKSPACE_ID,
+          reason: 'memory_pressure',
+          snapshotCaptured: true,
+          containerStopped: true,
+        }),
+      }
+    );
+
+    expect(response.status).toBe(204);
+    const workspace = await env.DATABASE.prepare(
+      'SELECT status, error_message FROM workspaces WHERE id = ?'
+    )
+      .bind(EVICTION_WORKSPACE_ID)
+      .first<{ status: string; error_message: string | null }>();
+    expect(workspace).toMatchObject({
+      status: 'evicted',
+      error_message: 'Workspace evicted due to memory pressure',
+    });
+
+    const activity = await waitForWorkspaceEvictionActivity(EVICTION_WORKSPACE_ID);
+    expect(activity).toMatchObject({
+      eventType: 'workspace.evicted',
+      actorType: 'vm-agent',
+      actorId: NODE_ID,
+      workspaceId: EVICTION_WORKSPACE_ID,
+      sessionId: EVICTION_SESSION_ID,
+    });
+    expect(activity.payload).toMatchObject({
+      reason: 'memory_pressure',
+      snapshotCaptured: true,
+      containerStopped: true,
+      nodeId: NODE_ID,
+    });
+
+    const replay = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${PROJECT_ID}/workspaces/${EVICTION_WORKSPACE_ID}/eviction`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${evictionWorkspaceCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          nodeId: NODE_ID,
+          workspaceId: EVICTION_WORKSPACE_ID,
+          reason: 'memory_pressure',
+          snapshotCaptured: true,
+          containerStopped: true,
+        }),
+      }
+    );
+    expect(replay.status).toBe(410);
+    await expect(listWorkspaceEvictionActivity(EVICTION_WORKSPACE_ID)).resolves.toHaveLength(1);
+  });
+
+  it('accepts a node callback token bound to the workspace node', async () => {
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${PROJECT_ID}/workspaces/${NODE_EVICTION_WORKSPACE_ID}/eviction`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${nodeCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          nodeId: NODE_ID,
+          workspaceId: NODE_EVICTION_WORKSPACE_ID,
+          reason: 'oom_kill',
+          snapshotCaptured: false,
+          containerStopped: true,
+        }),
+      }
+    );
+
+    expect(response.status).toBe(204);
+    const workspace = await env.DATABASE.prepare(
+      'SELECT status, error_message FROM workspaces WHERE id = ?'
+    )
+      .bind(NODE_EVICTION_WORKSPACE_ID)
+      .first<{ status: string; error_message: string | null }>();
+    expect(workspace).toMatchObject({
+      status: 'evicted',
+      error_message: 'Workspace evicted after container OOM',
+    });
+  });
+
+  it('returns 401, not 500, when the eviction callback token is expired', async () => {
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${PROJECT_ID}/workspaces/${EXPIRED_EVICTION_WORKSPACE_ID}/eviction`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${expiredNodeCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          nodeId: NODE_ID,
+          workspaceId: EXPIRED_EVICTION_WORKSPACE_ID,
+          reason: 'memory_pressure',
+          snapshotCaptured: false,
+          containerStopped: true,
+        }),
+      }
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.status).not.toBe(500);
+    expect(await response.json()).toMatchObject({ error: 'UNAUTHORIZED' });
+    const workspace = await env.DATABASE.prepare('SELECT status FROM workspaces WHERE id = ?')
+      .bind(EXPIRED_EVICTION_WORKSPACE_ID)
+      .first<{ status: string }>();
+    expect(workspace?.status).toBe('running');
+  });
+
+  it('returns 410 for deleted workspaces and leaves the workspace tombstoned', async () => {
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${PROJECT_ID}/workspaces/${DELETED_WORKSPACE_ID}/eviction`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${deletedWorkspaceCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          nodeId: NODE_ID,
+          workspaceId: DELETED_WORKSPACE_ID,
+          reason: 'oom_kill',
+          snapshotCaptured: false,
+          containerStopped: false,
+        }),
+      }
+    );
+
+    expect(response.status).toBe(410);
+    expect(await response.json()).toMatchObject({ error: 'GONE' });
+    const workspace = await env.DATABASE.prepare('SELECT status FROM workspaces WHERE id = ?')
+      .bind(DELETED_WORKSPACE_ID)
+      .first<{ status: string }>();
+    expect(workspace?.status).toBe('deleted');
   });
 });
 
