@@ -200,23 +200,35 @@ test.describe('Staging — session tool rail', () => {
   });
 });
 
-test.describe('Staging — regression pass', () => {
-  test('dashboard, projects and settings still load', async ({ page }) => {
-    await login(page);
+/**
+ * One test per page rather than a loop.
+ *
+ * Chaining three navigations in a single test coupled them: each page is a lazy-loaded
+ * route chunk behind a session verification, and on a throttled staging environment the
+ * third could still be spinning when the clock ran out — which reads as "settings is
+ * broken" when every page renders fine in isolation. Separate tests give each page its
+ * own fresh context and budget, so a failure names the page that actually failed.
+ */
+const REGRESSION_PAGES = [
+  ['/dashboard', /projects/i],
+  ['/projects', /projects/i],
+  ['/settings', /settings/i],
+] as const;
 
-    for (const [path, marker] of [
-      ['/dashboard', /projects/i],
-      ['/projects', /projects/i],
-      ['/settings', /settings/i],
-    ] as const) {
+test.describe('Staging — regression pass', () => {
+  for (const [path, marker] of REGRESSION_PAGES) {
+    test(`${path} still loads`, async ({ page }) => {
+      test.setTimeout(90_000);
+      await login(page);
+
       await page.goto(`${STAGING_APP}${path}`, { waitUntil: 'domcontentloaded' });
       await expect(page.getByText('Something went wrong')).toHaveCount(0);
-      // Assert on rendered text, not `textContent`: these pages are lazy-loaded route
-      // chunks, and an empty `<body>` while the chunk resolves is indistinguishable from
-      // a broken page if you read raw text content.
+
+      // Assert on rendered text, not `textContent`: an empty `<body>` while the route
+      // chunk resolves is indistinguishable from a broken page if you read raw text.
       await expect
-        .poll(() => page.locator('body').innerText(), { timeout: 30_000 })
+        .poll(() => page.locator('body').innerText(), { timeout: 45_000 })
         .toMatch(marker);
-    }
-  });
+    });
+  }
 });
