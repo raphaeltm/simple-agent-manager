@@ -379,6 +379,31 @@ describe('SessionHeader', () => {
     expect(screen.getByLabelText(DETAILS_CONTROL)).toBeInTheDocument();
   });
 
+  /*
+   * Inside the Details panel the workspace is identity, not a destination: you quote its
+   * name and status when something is wrong, but `/workspaces/:id` is a debugging page
+   * and nothing in the chat should route a user there. The NODE is the link worth having
+   * — it is the machine you would actually go and look at.
+   *
+   * Both halves are asserted together on purpose. "The workspace is not a link" passes
+   * just as well on a panel that rendered nothing, so the node link is the liveness
+   * check; and asserting the node link alone would not notice the workspace regaining an
+   * anchor.
+   */
+  it('names the workspace without linking it, and links the node', () => {
+    renderHeader({ sessionState: 'active' });
+    fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
+
+    const workspaceName = screen.getByText('Test Workspace');
+    expect(workspaceName).toBeInTheDocument();
+    expect(workspaceName.closest('a')).toBeNull();
+    expect(document.querySelector('a[href^="/workspaces/"]')).toBeNull();
+
+    const nodeLink = screen.getByText('test-node').closest('a');
+    expect(nodeLink).not.toBeNull();
+    expect(nodeLink).toHaveAttribute('href', '/nodes/node-1');
+  });
+
   it('shows the Complete control when the task is eligible', () => {
     renderHeader({ taskEmbed: makeTaskEmbed({ status: 'running' }) });
     expect(screen.getByLabelText('Mark this task complete')).toBeInTheDocument();

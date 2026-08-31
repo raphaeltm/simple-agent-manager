@@ -128,11 +128,30 @@ compile time that nothing still dispatches it.
   rail carries a `/workspaces/` href, so a rename cannot slip past it.
 - Group-assignment and accessible-name fixtures updated.
 
-### Still linked, needs a decision
+### Details panel — resolved
 
-`SessionHeaderInfrastructure.tsx:51` links the workspace name inside the **Details** panel
-(the Infrastructure block, alongside VM size and node). That panel is the diagnostic
-surface, so it is the one place a link is arguably consistent with "the page exists for
-debugging" — but it is still direct user access, which the instruction rules out. Left in
-place pending Raphaël's call; removing it is a one-line change that leaves the workspace
-name as plain text.
+Raphaël: remove that one too, and "more useful would be a link to the node it's running on".
+
+The workspace name in `SessionHeaderInfrastructure` is now plain text — name and status
+still shown, because that is what you quote when something is wrong, but no anchor. There
+are now **zero** `/workspaces/` links anywhere in the chat surface.
+
+The node link he asked for **already existed** immediately below it
+(`SessionHeaderInfrastructure.tsx`, `/nodes/${node.id}`, route registered at
+`App.tsx:340`). Nothing was added; the removal just leaves it as the only destination in
+the block, which is the intended outcome.
+
+Covered by a unit test asserting both halves together — the workspace name renders with no
+enclosing anchor and no `/workspaces/` href exists, AND the node name is an anchor to
+`/nodes/node-1`. Both in one test on purpose: "the workspace is not a link" passes equally
+well on a panel that rendered nothing, so the node link is the liveness check, and
+asserting only the node link would not notice the workspace regaining an anchor. Proven
+discriminating by restoring the anchor — exactly that test goes red.
+
+Not covered by a Playwright screenshot. The audit's details panel renders "Loading
+infrastructure details..." because the workspace never lands in component state under the
+mock; the `/api/workspaces/:id` route exists and the path matches, so it is mock-ordering
+plumbing rather than product behaviour. I added a proper `/api/nodes/node-rail-1` response
+(it previously fell through to `{}`, which is why the infrastructure block has never been
+visible in any screenshot) but removed the test rather than leave a failing or skipped one.
+Worth fixing if the details panel needs visual coverage later.

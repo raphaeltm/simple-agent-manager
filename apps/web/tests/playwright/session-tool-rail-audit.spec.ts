@@ -271,6 +271,21 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       });
       return;
     }
+    // The workspace mock carries `nodeId: 'node-rail-1'`, so the details panel fetches
+    // this. Without it the request fell through to `{}` and the Node row rendered blank,
+    // which is why the infrastructure block was never visible in any screenshot.
+    if (pathname === '/api/nodes/node-rail-1') {
+      await route.fulfill({
+        json: {
+          id: 'node-rail-1',
+          name: 'rail-node-alpha',
+          healthStatus: 'healthy',
+          cloudProvider: 'hetzner',
+          status: 'running',
+        },
+      });
+      return;
+    }
     if (pathname === '/api/nodes' || pathname === '/api/credentials') {
       await route.fulfill({ json: [] });
       return;
