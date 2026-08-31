@@ -120,6 +120,10 @@ type ActivityCallbackProcessingContext = {
   flush: (snapshot: AcpActivityPendingSnapshot) => Promise<AcpActivityFlushResult>;
 };
 
+type ExistingAcpSession = NonNullable<
+  Awaited<ReturnType<typeof projectDataService.getAcpSession>>
+>;
+
 async function handleCachedIntermediateActivity(
   input: ActivityCallbackProcessingContext
 ): Promise<Response | null> {
@@ -306,6 +310,248 @@ async function rejectSupersededInstantError(input: {
   return input.c.body(null, 204);
 }
 
+function throwMissingAcpSession(input: {
+  c: Context<{ Bindings: Env }>;
+  projectId: string;
+  sessionId: string;
+  body: AcpActivityCallbackReport;
+}): never {
+  recordAcpActivityCallbackMetric(
+    {
+      metric: 'acp_activity_callback',
+      outcome: 'rejected',
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      nodeId: input.body.nodeId,
+      activity: input.body.activity,
+      reason: 'session_missing',
+      source: 'callback',
+    },
+    input.c.env
+  );
+  throw errors.notFound('ACP session not found');
+}
+
+function requireAcpActivityBinding(input: {
+  existing: ExistingAcpSession;
+  projectId: string;
+  sessionId: string;
+  body: AcpActivityCallbackReport;
+}): AcpActivityBinding {
+  const binding = buildAcpActivityBinding(input.existing);
+  if (binding) return binding;
+
+  log.warn('acp_activity.node_mismatch', {
+    sessionId: input.sessionId,
+    projectId: input.projectId,
+    expectedNodeId: input.existing.nodeId,
+    receivedNodeId: input.body.nodeId,
+    action: 'rejected',
+  });
+  throw errors.forbidden('Node identity verification failed');
+}
+
+async function handleIntermediateAfterProjectDataLookup(input: {
+  context: ActivityCallbackProcessingContext;
+  binding: AcpActivityBinding;
+}): Promise<Response> {
+  const { context } = input;
+  const admission = admitOrCoalesceAcpActivityCallback({
+    env: context.c.env,
+    config: context.config,
+    projectId: context.projectId,
+    sessionId: context.sessionId,
+    binding: input.binding,
+    report: context.body,
+    observedAt: context.observedAt,
+    waitUntil: context.waitUntil,
+    flush: context.flush,
+  });
+  if (admission.action === 'coalesce') return context.c.body(null, 204);
+
+  await persistIntermediateActivity({
+    env: context.c.env,
+    config: context.config,
+    projectId: context.projectId,
+    sessionId: context.sessionId,
+    binding: input.binding,
+    body: context.body,
+    observedAt: context.observedAt,
+    admissionReason: admission.reason,
+    waitUntil: context.waitUntil,
+    flush: context.flush,
+  });
+  return context.c.body(null, 204);
+}
+
+async function persistCriticalActivity(input: {
+  c: Context<{ Bindings: Env }>;
+  projectId: string;
+  sessionId: string;
+  body: AcpActivityCallbackReport;
+  binding: AcpActivityBinding;
+  observedAt: number;
+}): Promise<boolean> {
+  const activityApplied = await projectDataService.reportAcpSessionActivity(
+    input.c.env,
+    input.projectId,
+    input.sessionId,
+    input.body.activity,
+    activityReportExtra(input.body, input.observedAt)
+  );
+  if (activityApplied !== false) return true;
+
+  recordAcpActivityCallbackMetric(
+    {
+      metric: 'acp_activity_callback',
+      outcome: 'rejected',
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      nodeId: input.body.nodeId,
+      workspaceId: input.binding.workspaceId,
+      activity: input.body.activity,
+      reason: 'stale_activity_observed_at',
+      source: 'callback',
+    },
+    input.c.env
+  );
+  return false;
+}
+
+async function applyErrorFailureFanout(input: {
+  c: Context<{ Bindings: Env }>;
+  projectId: string;
+  sessionId: string;
+  body: AcpActivityCallbackReport;
+  existing: ExistingAcpSession;
+}): Promise<void> {
+  if (
+    input.body.activity !== 'error' ||
+    !canTransitionAcpSessionToFailed(input.existing.status)
+  ) {
+    return;
+  }
+  const failureMessage = normalizeAgentActivityErrorMessage(input.c.env, input.body.statusError);
+  const db = drizzle(input.c.env.DATABASE, { schema });
+
+  await db
+    .update(schema.agentSessions)
+    .set({
+      status: 'error',
+      errorMessage: failureMessage,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(schema.agentSessions.id, input.sessionId))
+    .catch((err) => {
+      log.warn('acp_activity.agent_session_error_update_failed', {
+        projectId: input.projectId,
+        sessionId: input.sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
+  await projectDataService
+    .transitionAcpSession(input.c.env, input.projectId, input.sessionId, 'failed', {
+      actorType: 'vm-agent',
+      actorId: input.body.nodeId,
+      reason: 'Agent activity reported error',
+      errorMessage: failureMessage,
+      metadata: {
+        activity: input.body.activity,
+        agentType: input.body.agentType ?? input.existing.agentType ?? null,
+        restartCount: input.body.restartCount ?? null,
+      },
+    })
+    .catch((err) => {
+      log.warn('acp_activity.acp_session_fail_transition_failed', {
+        projectId: input.projectId,
+        sessionId: input.sessionId,
+        fromStatus: input.existing.status,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
+  await projectDataService
+    .failSession(input.c.env, input.projectId, input.existing.chatSessionId, failureMessage)
+    .catch((err) => {
+      log.warn('acp_activity.chat_session_fail_failed', {
+        projectId: input.projectId,
+        chatSessionId: input.existing.chatSessionId,
+        sessionId: input.sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+}
+
+async function markTerminalContainerWorkEnded(input: {
+  c: Context<{ Bindings: Env }>;
+  projectId: string;
+  sessionId: string;
+  body: AcpActivityCallbackReport;
+  existing: ExistingAcpSession;
+  harnessWorkKeepsRuntimeActive: boolean;
+}): Promise<void> {
+  const shouldEndContainerWork =
+    (input.body.activity === 'idle' && !input.harnessWorkKeepsRuntimeActive) ||
+    input.body.activity === 'error';
+  if (!shouldEndContainerWork) return;
+
+  let idleSnapshotQueued = false;
+  if (
+    input.body.activity === 'idle' &&
+    input.existing.workspaceId &&
+    input.existing.nodeId &&
+    input.existing.acpSdkSessionId
+  ) {
+    const db = drizzle(input.c.env.DATABASE, { schema });
+    const workspace = await db
+      .select({
+        id: schema.workspaces.id,
+        userId: schema.workspaces.userId,
+        chatSessionId: schema.workspaces.chatSessionId,
+        runtime: schema.nodes.runtime,
+      })
+      .from(schema.workspaces)
+      .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
+      .where(eq(schema.workspaces.id, input.existing.workspaceId))
+      .get();
+    if (workspace?.runtime && workspace.chatSessionId) {
+      await hibernateAgentSessionOnNode(
+        input.existing.nodeId,
+        input.existing.workspaceId,
+        input.existing.acpSdkSessionId,
+        input.c.env,
+        workspace.userId,
+        {
+          chatSessionId: workspace.chatSessionId,
+          runtime: workspace.runtime,
+          agentType: input.body.agentType ?? input.existing.agentType ?? undefined,
+          background: true,
+        }
+      )
+        .then(() => {
+          idleSnapshotQueued = true;
+        })
+        .catch((err) => {
+          log.warn('acp_activity.session_snapshot_failed', {
+            projectId: input.projectId,
+            sessionId: input.sessionId,
+            workspaceId: input.existing.workspaceId,
+            nodeId: input.existing.nodeId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+    }
+  }
+  if (!idleSnapshotQueued) {
+    await markVmAgentContainerActiveWorkEndedBestEffort(
+      input.c.env,
+      input.existing.nodeId,
+      `agent_activity_${input.body.activity}`
+    );
+  }
+}
+
 export async function handleAcpActivityCallback(
   c: Context<{ Bindings: Env }>,
   input: {
@@ -363,20 +609,7 @@ export async function handleAcpActivityCallback(
     throw err;
   }
   if (!existing) {
-    recordAcpActivityCallbackMetric(
-      {
-        metric: 'acp_activity_callback',
-        outcome: 'rejected',
-        projectId,
-        sessionId,
-        nodeId: body.nodeId,
-        activity: body.activity,
-        reason: 'session_missing',
-        source: 'callback',
-      },
-      c.env
-    );
-    throw errors.notFound('ACP session not found');
+    throwMissingAcpSession({ c, projectId, sessionId, body });
   }
 
   // Authoritative auth: bind the token's OWN identity (payload.workspace) to the session's
@@ -384,17 +617,7 @@ export async function handleAcpActivityCallback(
   // must be the session's node; a workspace-scoped token must be the session's workspace. Without
   // this, any holder of a valid callback token (trivial to obtain once BYO self-enrollment ships)
   // could force ANOTHER tenant's session to error/failed. See .claude/rules/28 and security-critique #1.
-  const binding = buildAcpActivityBinding(existing);
-  if (!binding) {
-    log.warn('acp_activity.node_mismatch', {
-      sessionId,
-      projectId,
-      expectedNodeId: existing.nodeId,
-      receivedNodeId: body.nodeId,
-      action: 'rejected',
-    });
-    throw errors.forbidden('Node identity verification failed');
-  }
+  const binding = requireAcpActivityBinding({ existing, projectId, sessionId, body });
   assertCallbackTokenBoundToBinding(payload, binding, {
     projectId,
     sessionId,
@@ -422,33 +645,7 @@ export async function handleAcpActivityCallback(
   });
 
   if (isIntermediate) {
-    const admission = admitOrCoalesceAcpActivityCallback({
-      env: c.env,
-      config,
-      projectId,
-      sessionId,
-      binding,
-      report: body,
-      observedAt,
-      waitUntil,
-      flush,
-    });
-    if (admission.action === 'coalesce') {
-      return c.body(null, 204);
-    }
-    await persistIntermediateActivity({
-      env: c.env,
-      config,
-      projectId,
-      sessionId,
-      binding,
-      body,
-      observedAt,
-      admissionReason: admission.reason,
-      waitUntil,
-      flush,
-    });
-    return c.body(null, 204);
+    return handleIntermediateAfterProjectDataLookup({ context: processingContext, binding });
   }
 
   // Staleness guard (S2): reject a DESTRUCTIVE `error` callback that provably
@@ -469,30 +666,16 @@ export async function handleAcpActivityCallback(
   });
   if (staleGenerationResponse) return staleGenerationResponse;
 
-  const activityApplied = await projectDataService.reportAcpSessionActivity(
-    c.env,
+  const activityApplied = await persistCriticalActivity({
+    c,
     projectId,
     sessionId,
-    body.activity,
-    activityReportExtra(body, observedAt)
-  );
-  if (activityApplied === false) {
-    recordAcpActivityCallbackMetric(
-      {
-        metric: 'acp_activity_callback',
-        outcome: 'rejected',
-        projectId,
-        sessionId,
-        nodeId: body.nodeId,
-        workspaceId: binding.workspaceId,
-        activity: body.activity,
-        reason: 'stale_activity_observed_at',
-        source: 'callback',
-      },
-      c.env
-    );
-    return c.body(null, 204);
-  }
+    body,
+    binding,
+    observedAt,
+  });
+  if (!activityApplied) return c.body(null, 204);
+
   clearPendingAcpActivity(projectId, sessionId);
   recordAcpActivityAdmissionSuccess({
     env: c.env,
@@ -509,113 +692,15 @@ export async function handleAcpActivityCallback(
     body.activity === 'idle' &&
     (persistedActivity?.runtimeWorkState === 'active' ||
       persistedActivity?.runtimeWorkState === 'settling');
-  if (body.activity === 'error' && canTransitionAcpSessionToFailed(existing.status)) {
-    const failureMessage = normalizeAgentActivityErrorMessage(c.env, body.statusError);
-    const db = drizzle(c.env.DATABASE, { schema });
 
-    await db
-      .update(schema.agentSessions)
-      .set({
-        status: 'error',
-        errorMessage: failureMessage,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(schema.agentSessions.id, sessionId))
-      .catch((err) => {
-        log.warn('acp_activity.agent_session_error_update_failed', {
-          projectId,
-          sessionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-
-    await projectDataService
-      .transitionAcpSession(c.env, projectId, sessionId, 'failed', {
-        actorType: 'vm-agent',
-        actorId: body.nodeId,
-        reason: 'Agent activity reported error',
-        errorMessage: failureMessage,
-        metadata: {
-          activity: body.activity,
-          agentType: body.agentType ?? existing.agentType ?? null,
-          restartCount: body.restartCount ?? null,
-        },
-      })
-      .catch((err) => {
-        log.warn('acp_activity.acp_session_fail_transition_failed', {
-          projectId,
-          sessionId,
-          fromStatus: existing.status,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-
-    await projectDataService
-      .failSession(c.env, projectId, existing.chatSessionId, failureMessage)
-      .catch((err) => {
-        log.warn('acp_activity.chat_session_fail_failed', {
-          projectId,
-          chatSessionId: existing.chatSessionId,
-          sessionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-  }
-  if ((body.activity === 'idle' && !harnessWorkKeepsRuntimeActive) || body.activity === 'error') {
-    let idleSnapshotQueued = false;
-    if (
-      body.activity === 'idle' &&
-      existing.workspaceId &&
-      existing.nodeId &&
-      existing.acpSdkSessionId
-    ) {
-      const db = drizzle(c.env.DATABASE, { schema });
-      const workspace = await db
-        .select({
-          id: schema.workspaces.id,
-          userId: schema.workspaces.userId,
-          chatSessionId: schema.workspaces.chatSessionId,
-          runtime: schema.nodes.runtime,
-        })
-        .from(schema.workspaces)
-        .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-        .where(eq(schema.workspaces.id, existing.workspaceId))
-        .get();
-      if (workspace?.runtime && workspace.chatSessionId) {
-        await hibernateAgentSessionOnNode(
-          existing.nodeId,
-          existing.workspaceId,
-          existing.acpSdkSessionId,
-          c.env,
-          workspace.userId,
-          {
-            chatSessionId: workspace.chatSessionId,
-            runtime: workspace.runtime,
-            agentType: body.agentType ?? existing.agentType ?? undefined,
-            background: true,
-          }
-        )
-          .then(() => {
-            idleSnapshotQueued = true;
-          })
-          .catch((err) => {
-            log.warn('acp_activity.session_snapshot_failed', {
-              projectId,
-              sessionId,
-              workspaceId: existing.workspaceId,
-              nodeId: existing.nodeId,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          });
-      }
-    }
-    if (!idleSnapshotQueued) {
-      await markVmAgentContainerActiveWorkEndedBestEffort(
-        c.env,
-        existing.nodeId,
-        `agent_activity_${body.activity}`
-      );
-    }
-  }
+  await applyErrorFailureFanout({ c, projectId, sessionId, body, existing });
+  await markTerminalContainerWorkEnded({
+    c,
+    projectId,
+    sessionId,
+    body,
+    existing,
+    harnessWorkKeepsRuntimeActive,
+  });
   return c.body(null, 204);
 }

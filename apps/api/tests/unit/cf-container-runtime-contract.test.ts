@@ -158,8 +158,10 @@ describe('cf-container runtime spike contracts', () => {
     );
     expect(activityCallback).toContain('handleAcpActivityCallback');
     expect(activityCallbackHandler).toContain(
-      "body.activity === 'idle' && !harnessWorkKeepsRuntimeActive"
+      "input.body.activity === 'idle' && !input.harnessWorkKeepsRuntimeActive"
     );
+    expect(activityCallbackHandler).toContain('persistedActivity?.runtimeWorkState');
+    expect(activityCallbackHandler).toContain('markTerminalContainerWorkEnded');
     expect(activityCallbackFlush).toContain("body.runtimeWorkState === 'active'");
     expect(activityCallbackFlush).toContain("body.runtimeWorkState === 'settling'");
     expect(acpSessionsRoute).toContain("body.status === 'completed' || body.status === 'failed'");
