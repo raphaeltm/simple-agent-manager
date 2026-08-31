@@ -142,6 +142,53 @@ Every finding above is represented in the checklist below.
 No staging deploy, production mutation, production configuration change, merge,
 or production monitoring command was run.
 
+## CI fix-owner evidence
+
+2026-08-31 follow-up on draft PR #1978 fixed the branch-caused failing gates
+without staging, production mutation/configuration changes, marking ready,
+merging, closing the draft, or expanding the incident scope.
+
+- `Validate Deploy Scripts`: fixed the real Wrangler config sync environment
+  mapping in `.github/workflows/deploy-reusable.yml` and
+  `scripts/deploy/sync-wrangler-config.ts` for the new
+  `PROJECT_DATA_TOOL_PAYLOAD_*`, `PROJECT_DATA_STORAGE_RELIEF_*`,
+  `PROJECT_DATA_GROUPED_FTS_CLEANUP_*`, and
+  `PROJECT_DATA_EVENT_LOG_CLEANUP_*` variables instead of weakening the
+  assertion.
+- `Preflight Evidence`: updated the draft PR body with the required agent
+  preflight markers and current specialist evidence while keeping staging and
+  production steps explicitly not run.
+- `Durable Object Workers`: made the grouped+FTS cleanup reclaim regression test
+  derive its trigger limit inside the same Durable Object turn as the cleanup,
+  avoiding storage-size drift while preserving raw transcript/comment safety
+  assertions.
+- `Code Quality Checks`: split private R2 chunk archive helpers into
+  `tool-payload-archive-r2.ts`, keeping
+  `tool-payload-archive.ts` below the 800-line source-file limit without
+  changing fail-closed archive semantics.
+
+Additional local validation for the follow-up:
+
+- `pnpm --filter @simple-agent-manager/api build` — pass.
+- `pnpm quality:wrangler-bindings` — pass.
+- `pnpm quality:no-tracked-stale-binaries` — pass.
+- `pnpm exec vitest run scripts/quality/deploy-reusable-workflow.test.ts --reporter dot` — pass, 23 tests.
+- `GITHUB_EVENT_NAME=pull_request GITHUB_EVENT_PATH=<(gh pr view 1978 --json body ...) pnpm quality:preflight` — pass.
+- `GITHUB_EVENT_NAME=pull_request GITHUB_EVENT_PATH=<(gh pr view 1978 --json body,labels ...) pnpm quality:specialist-review` — pass.
+- `pnpm --filter @simple-agent-manager/api typecheck` — pass.
+- `pnpm --filter @simple-agent-manager/api lint` — pass.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/project-data-tool-payload-archive.test.ts --reporter dot` — pass, 2 tests.
+- `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/project-data-tool-payload-archive.test.ts --reporter dot` — pass, 12 tests.
+- `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/project-data-storage-safety.test.ts --reporter dot` — pass, 16 tests.
+- `pnpm quality:file-sizes` — pass.
+- `pnpm quality:migration-safety && pnpm quality:migration-ordering && pnpm quality:do-migration-safety` — pass.
+- `pnpm quality:ast-checks && pnpm quality:file-sizes && pnpm quality:stale-artifacts` — pass; AST checks reported warning-only baseline issues and 0 errors.
+- `pnpm quality:source-contract-tests && pnpm quality:dependency-governance && pnpm quality:workspace-test-surfaces` — pass.
+- `pnpm lint` — pass with pre-existing unrelated warning-only output in
+  `packages/acp-client` and `apps/web`.
+- `pnpm format:check` — pass with the existing Prettier ratchet baseline.
+- `git diff --check` — pass.
+
 ## Specialist review tracker
 
 - `cloudflare-specialist`: pass. D1/DO schema change is additive; alarm work is

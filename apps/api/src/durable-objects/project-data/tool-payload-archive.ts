@@ -1,17 +1,21 @@
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { stripToolMetadataPayloadForStorage } from './tool-metadata-storage';
+import {
+  parseToolPayloadArchiveObjectText,
+  type PreparedToolPayloadArchive,
+  TOOL_PAYLOAD_CHUNKED_ARCHIVE_VERSION,
+  writeToolPayloadArchiveObject,
+} from './tool-payload-archive-r2';
 import type { ToolPayloadCleanupAttemptStatus } from './tool-payload-cleanup-attempts';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.tool_payload_archive');
 const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
 
 export const TOOL_PAYLOAD_ARCHIVE_VERSION = 1;
-export const TOOL_PAYLOAD_CHUNKED_ARCHIVE_VERSION = 2;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX = 'project-data/tool-payloads';
 const DEFAULT_TOOL_PAYLOAD_ARCHIVE_RETRIEVAL_MAX_METADATA_BYTES = 1_900_000;
-const TOOL_PAYLOAD_ARCHIVE_RETRIEVAL_OVERHEAD_BYTES = 64 * 1024;
+export { TOOL_PAYLOAD_CHUNKED_ARCHIVE_VERSION };
 
 export type ArchivedToolPayloadRow = {
   messageId: string;
@@ -83,15 +87,6 @@ export type ToolPayloadArchiveUpdateResult = {
   cleanupAttemptStatus: ToolPayloadCleanupAttemptStatus | 'archived' | null;
 };
 
-type PreparedToolPayloadArchive = {
-  key: string;
-  body: string;
-  contentBytes: number;
-  archiveVersion: number;
-  strippedToolMetadata: string;
-  strippedToolMetadataBytes: number;
-};
-
 type ArchivedToolPayloadObject = {
   version: typeof TOOL_PAYLOAD_ARCHIVE_VERSION;
   projectId: string;
@@ -103,19 +98,6 @@ type ArchivedToolPayloadObject = {
   contentBytes: number;
   toolMetadataBytes: number;
   toolMetadata: Record<string, unknown>;
-};
-
-type ArchivedToolPayloadManifest = {
-  version: typeof TOOL_PAYLOAD_CHUNKED_ARCHIVE_VERSION;
-  projectId: string;
-  sessionId: string;
-  messageId: string;
-  messageCreatedAt: number;
-  messageSequence: number;
-  archivedAt: number;
-  contentBytes: number;
-  toolMetadataBytes: number;
-  chunks: string[];
 };
 
 function utf8Bytes(value: string): number {
@@ -265,112 +247,6 @@ function prepareToolPayloadArchive(input: {
   };
 }
 
-function chunkUtf8String(value: string, chunkBytes: number): Uint8Array[] {
-  const bytes = textEncoder.encode(value);
-  const chunks: Uint8Array[] = [];
-  for (let offset = 0; offset < bytes.byteLength; offset += chunkBytes) {
-    chunks.push(bytes.slice(offset, offset + chunkBytes));
-  }
-  return chunks;
-}
-
-function buildChunkKey(key: string, index: number): string {
-  return `${key}.chunk-${index}`;
-}
-
-async function writeArchiveObjectWithTimeout(
-  r2: R2Bucket,
-  key: string,
-  body: string | Uint8Array,
-  timeoutMs: number,
-  customMetadata: Record<string, string>
-): Promise<void> {
-  const write = r2.put(key, body, {
-    httpMetadata: { contentType: 'application/json' },
-    customMetadata,
-  });
-  // If the timeout wins, keep the original payload in SQLite and let the
-  // deterministic key be overwritten by a later retry. Attach a catch so a
-  // late rejection from the underlying put is not unhandled after the timeout.
-  write.catch(() => undefined);
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([
-      write,
-      new Promise<never>((_resolve, reject) => {
-        timeoutId = setTimeout(() => {
-          reject(new Error(`R2 archive write exceeded ${timeoutMs}ms timeout`));
-        }, timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  }
-}
-
-async function writeArchiveObject(
-  r2: R2Bucket,
-  prepared: PreparedToolPayloadArchive,
-  timeoutMs: number,
-  input: {
-    projectId: string;
-    sessionId: string;
-    messageId: string;
-    messageCreatedAt: number;
-    messageSequence: number;
-    archivedAt: number;
-    contentBytes: number;
-    toolMetadataBytes: number;
-    chunkBytes: number;
-  }
-): Promise<PreparedToolPayloadArchive> {
-  const bodyBytes = utf8Bytes(prepared.body);
-  const baseMetadata = {
-    projectId: input.projectId,
-    sessionId: input.sessionId,
-    messageId: input.messageId,
-    archivedAt: String(input.archivedAt),
-    contentBytes: String(input.contentBytes),
-  };
-  if (bodyBytes <= input.chunkBytes) {
-    await writeArchiveObjectWithTimeout(r2, prepared.key, prepared.body, timeoutMs, baseMetadata);
-    return prepared;
-  }
-
-  const chunks = chunkUtf8String(prepared.body, input.chunkBytes);
-  const chunkKeys = chunks.map((_chunk, index) => buildChunkKey(prepared.key, index));
-  for (const [index, chunk] of chunks.entries()) {
-    const chunkKey = chunkKeys[index];
-    if (!chunkKey) throw new Error('archive chunk key was not generated');
-    await writeArchiveObjectWithTimeout(r2, chunkKey, chunk, timeoutMs, {
-      ...baseMetadata,
-      archiveChunkIndex: String(index),
-      archiveChunkCount: String(chunks.length),
-    });
-  }
-
-  const manifest: ArchivedToolPayloadManifest = {
-    version: TOOL_PAYLOAD_CHUNKED_ARCHIVE_VERSION,
-    projectId: input.projectId,
-    sessionId: input.sessionId,
-    messageId: input.messageId,
-    messageCreatedAt: input.messageCreatedAt,
-    messageSequence: input.messageSequence,
-    archivedAt: input.archivedAt,
-    contentBytes: input.contentBytes,
-    toolMetadataBytes: input.toolMetadataBytes,
-    chunks: chunkKeys,
-  };
-  await writeArchiveObjectWithTimeout(r2, prepared.key, JSON.stringify(manifest), timeoutMs, {
-    ...baseMetadata,
-    archiveChunkCount: String(chunks.length),
-  });
-  return {
-    ...prepared,
-    archiveVersion: TOOL_PAYLOAD_CHUNKED_ARCHIVE_VERSION,
-  };
-}
-
 function upsertArchiveRow(
   sql: SqlStorage,
   candidate: ToolPayloadArchiveCandidate,
@@ -501,7 +377,7 @@ export async function archiveToolPayloadCandidate(input: {
   }
 
   try {
-    prepared = await writeArchiveObject(r2, prepared, input.archiveWriteTimeoutMs, {
+    prepared = await writeToolPayloadArchiveObject(r2, prepared, input.archiveWriteTimeoutMs, {
       projectId: input.projectId,
       sessionId: input.candidate.sessionId,
       messageId: input.candidate.messageId,
@@ -624,7 +500,14 @@ async function readArchiveContent(
     const object = await r2.get(row.r2Key);
     if (!object) return { content: null, reason: 'archived R2 object is missing' };
     const text = await object.text();
-    const parsed = await parseArchiveObjectText(r2, env, row, text);
+    const maxMetadataBytes = parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES,
+      DEFAULT_TOOL_PAYLOAD_ARCHIVE_RETRIEVAL_MAX_METADATA_BYTES
+    );
+    const parsed = await parseToolPayloadArchiveObjectText(r2, text, {
+      toolMetadataBytes: row.toolMetadataBytes,
+      maxMetadataBytes,
+    });
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return { content: null, reason: 'archived R2 object is malformed' };
     }
@@ -648,51 +531,6 @@ async function readArchiveContent(
       reason: error instanceof Error ? error.message : String(error),
     };
   }
-}
-
-async function parseArchiveObjectText(
-  r2: R2Bucket,
-  env: Env,
-  row: ArchivedToolPayloadRow,
-  text: string
-): Promise<unknown> {
-  const parsed = JSON.parse(text) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return parsed;
-  const record = parsed as Record<string, unknown>;
-  if (record.version !== TOOL_PAYLOAD_CHUNKED_ARCHIVE_VERSION) return parsed;
-
-  const chunks = record.chunks;
-  if (!Array.isArray(chunks) || !chunks.every((chunk) => typeof chunk === 'string')) {
-    throw new Error('archived chunk manifest is malformed');
-  }
-  const maxMetadataBytes = parsePositiveInteger(
-    env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES,
-    DEFAULT_TOOL_PAYLOAD_ARCHIVE_RETRIEVAL_MAX_METADATA_BYTES
-  );
-  if (row.toolMetadataBytes > maxMetadataBytes) {
-    throw new Error('archived tool payload exceeds configured retrieval byte limit');
-  }
-
-  const maxArchiveBodyBytes = row.toolMetadataBytes + TOOL_PAYLOAD_ARCHIVE_RETRIEVAL_OVERHEAD_BYTES;
-  const bodyChunks: Uint8Array[] = [];
-  let bodyBytes = 0;
-  for (const key of chunks) {
-    const chunk = await r2.get(key as string);
-    if (!chunk) throw new Error('archived R2 chunk is missing');
-    const chunkBytes = new Uint8Array(await chunk.arrayBuffer());
-    bodyBytes += chunkBytes.byteLength;
-    if (bodyBytes > maxArchiveBodyBytes) {
-      throw new Error('archived chunk manifest exceeded configured retrieval bound');
-    }
-    bodyChunks.push(chunkBytes);
-  }
-  const body = new Uint8Array(bodyBytes);
-  let offset = 0;
-  for (const chunkBytes of bodyChunks) {
-    body.set(chunkBytes, offset);
-    offset += chunkBytes.byteLength;
-  }
-  return JSON.parse(textDecoder.decode(body)) as unknown;
 }
 
 function buildArchivedUnavailableContent(row: ArchivedToolPayloadRow, reason: string): unknown[] {

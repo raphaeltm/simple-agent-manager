@@ -917,12 +917,12 @@ describe('ProjectData storage safety firebreak', () => {
     const disabled = await stub.runGroupedFtsCleanup();
     expect(disabled?.terminationReason).toBe('disabled');
 
-    const triggerLimit = await configuredLimitForRatio(stub, 0.92);
-    const cleanupResult = await runInDurableObject(stub, async (_instance, state) => {
+    const cleanupAttempt = await runInDurableObject(stub, async (_instance, state) => {
       await state.storage.deleteAlarm();
+      const triggerLimit = Math.ceil(state.storage.sql.databaseSize / 0.92);
       const config = {
         ...resolveStorageSafetyConfig(testEnv),
-        limitBytes: Number(triggerLimit),
+        limitBytes: triggerLimit,
         groupedFtsCleanupEnabled: true,
         groupedFtsCleanupTriggerRatio: 0.9,
         groupedFtsCleanupTargetRatio: 0.85,
@@ -932,10 +932,18 @@ describe('ProjectData storage safety firebreak', () => {
         groupedFtsCleanupMinSessionAgeMs: 7 * 24 * 60 * 60 * 1000,
         groupedFtsCleanupWeakReclaimBytes: 1,
       };
-      return runProjectDataGroupedFtsCleanup(state.storage.sql, testEnv, projectId, config, {
-        allowStart: true,
-      });
+      const result = await runProjectDataGroupedFtsCleanup(
+        state.storage.sql,
+        testEnv,
+        projectId,
+        config,
+        {
+          allowStart: true,
+        }
+      );
+      return { result, triggerLimit };
     });
+    const cleanupResult = cleanupAttempt.result;
 
     expect(cleanupResult?.groupedRowsDeleted).toBeGreaterThan(0);
     expect(cleanupResult?.ftsRowsDeleted).toBeGreaterThan(0);
@@ -1011,7 +1019,7 @@ describe('ProjectData storage safety firebreak', () => {
       await state.storage.deleteAlarm();
       const config = {
         ...resolveStorageSafetyConfig(testEnv),
-        limitBytes: Number(triggerLimit),
+        limitBytes: cleanupAttempt.triggerLimit,
         groupedFtsCleanupEnabled: true,
         groupedFtsCleanupTriggerRatio: 0.9,
         groupedFtsCleanupTargetRatio: 0.85,
