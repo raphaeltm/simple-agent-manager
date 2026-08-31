@@ -90,7 +90,21 @@ const RAIL_TAB_ANCHOR_STYLE: Record<RailTabAnchor, CSSProperties> = {
  * covering the chat is the better trade. On desktop 158/1280 is 12% and pushing is fine.
  */
 export function sessionToolRailGutter(mode: ToolStripMode, isMobile: boolean): number {
-  if (mode === 'hidden') return RAIL_TAB_WIDTH_PX;
+  /*
+   * Hidden reserves NOTHING. It used to reserve `RAIL_TAB_WIDTH_PX`, which meant the one
+   * mode whose entire purpose is giving the space back still took a 26px column off the
+   * conversation for the full height of the view — for a tab occupying a fraction of it.
+   *
+   * With the tab at the top that column looked plausible, because the tab sat in the part
+   * of it the header also occupied. Anchoring the tab lower exposed it: the header ended
+   * 26px short of the viewport with empty space beside it and nothing in that space,
+   * which reads as a broken layout rather than a collapsed rail.
+   *
+   * The tab now overlays instead. Its wrapper is a zero-width flex child pinned to the
+   * right edge, so `right-0` puts the tab's right edge at the viewport edge and it
+   * extends inward over the conversation — the ordinary drawer-handle arrangement.
+   */
+  if (mode === 'hidden') return 0;
   if (mode === 'labels' && isMobile) return RAIL_WIDTH_PX.icons;
   return RAIL_WIDTH_PX[mode];
 }
@@ -299,7 +313,7 @@ export function SessionToolRail({
         data-testid="session-tool-rail"
         data-mode={mode}
         aria-label="Session tools"
-        className="absolute inset-y-0 right-0 z-20 flex flex-col overflow-hidden rounded-tl-lg border-l"
+        className="absolute inset-y-0 right-0 z-20 flex flex-col overflow-hidden border-l"
         style={{
           width: RAIL_WIDTH_PX[mode],
           /*

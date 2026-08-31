@@ -19,6 +19,8 @@ interface FloatingHeaderProps {
   /** Details-panel visibility, owned by `useSessionTools` alongside the tool rail. */
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
+  /** True when the tool rail is beside the header — squares its right corner. */
+  flushRight?: boolean;
   completeError?: string | null;
   onDismissCompleteError?: () => void;
 }
@@ -36,6 +38,7 @@ export function FloatingHeader({
   containerRef,
   expanded,
   onExpandedChange,
+  flushRight,
   completeError,
   onDismissCompleteError,
 }: FloatingHeaderProps) {
@@ -57,7 +60,7 @@ export function FloatingHeader({
     : null;
   const failureShellClassName = failureClassification?.diagnosable
     ? "glass-chrome px-3 py-2 rounded-b-2xl relative after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(239,68,68,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"
-    : 'glass-chrome px-3 py-2 rounded-b-2xl relative';
+    : `glass-chrome px-3 py-2 ${flushRight ? 'rounded-bl-2xl' : 'rounded-b-2xl'} relative`;
   const failureShellBoxShadow = failureClassification?.diagnosable
     ? '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(239, 68, 68, 0.08)'
     : '0 4px 24px rgba(0, 0, 0, 0.4)';
@@ -85,6 +88,7 @@ export function FloatingHeader({
         onShowHierarchy={onShowHierarchy}
         expanded={expanded}
         onExpandedChange={onExpandedChange}
+        flushRight={flushRight}
         completeError={completeError}
         onDismissCompleteError={onDismissCompleteError}
       />

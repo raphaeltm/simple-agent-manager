@@ -732,6 +732,61 @@ for (const theme of ['dark', 'light'] as const) {
     });
 
     /*
+     * The header must butt FLUSH against the rail.
+     *
+     * The card's bottom corners are rounded so it reads as a panel hanging from the top.
+     * Beside the rail that curve leaves a lens-shaped gap between the card's rounded
+     * corner and the rail's straight edge. Squaring the right side closes it — the two
+     * edges must be at the same x, and the radius on that corner must be 0.
+     */
+    test(`header meets the rail with no gap and no curve`, async ({ page }) => {
+      await seedTheme(page, theme);
+      await openChat(page, { state: 'active', mode: 'icons' });
+
+      const header = (await page.getByTestId('session-header').boundingBox())!;
+      const rail = (await page.getByTestId('session-tool-rail').boundingBox())!;
+      // Flush: header's right edge meets the rail's left edge.
+      expect(Math.abs(header.x + header.width - rail.x)).toBeLessThanOrEqual(1);
+
+      // And square: a rounded corner would still be "flush" by bounding box while
+      // leaving a visible curve, so measure the radius itself.
+      const radius = await page
+        .getByTestId('session-header')
+        .evaluate((el) => getComputedStyle(el).borderBottomRightRadius);
+      expect(radius).toBe('0px');
+
+      await capture(page, `variant-header-flush-mobile-${theme}`);
+    });
+
+    /*
+     * Hidden must give the width back.
+     *
+     * It previously reserved a 26px column for the full height of the view, so the one
+     * mode that exists to reclaim space still took some — and with the tab anchored away
+     * from the top, that column was visibly empty beside the header. The header's right
+     * edge is the observable: collapsed, it must reach the viewport edge.
+     */
+    test(`hidden returns the full width to the conversation`, async ({ page }) => {
+      await seedTheme(page, theme);
+      await openChat(page, { state: 'active', mode: 'icons' });
+      const narrowed = (await page.getByTestId('session-header').boundingBox())!;
+
+      await page.getByTestId('session-tool-rail-cycle').click();
+      await expect(page.getByTestId('session-tool-rail')).toHaveAttribute('data-mode', 'labels');
+      await page.getByTestId('session-tool-rail-cycle').click();
+      await expect(page.getByTestId('session-tool-rail-tab')).toBeVisible();
+
+      const collapsed = (await page.getByTestId('session-header').boundingBox())!;
+      const viewport = page.viewportSize()!.width;
+      // Reaches the edge (allowing a sub-pixel rounding margin)...
+      expect(collapsed.x + collapsed.width).toBeGreaterThanOrEqual(viewport - 1);
+      // ...and is genuinely wider than it was with the bar out, so this cannot pass by
+      // the header having been full-width all along.
+      expect(collapsed.width).toBeGreaterThan(narrowed.width);
+      await capture(page, `variant-hidden-fullwidth-mobile-${theme}`);
+    });
+
+    /*
      * THE assertion that guards the shipped behaviour.
      *
      * Every other test in this matrix seeds an anchor explicitly, so all of them would
