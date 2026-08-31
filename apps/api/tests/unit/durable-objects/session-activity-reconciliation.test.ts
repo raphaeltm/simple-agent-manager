@@ -34,10 +34,15 @@ import {
   upsertActivityState,
 } from '../../../src/durable-objects/project-data/session-state';
 import { listAgentSessionsOnNode } from '../../../src/services/node-agent';
+import { recordAcpActivityCallbackMetric } from '../../../src/services/telemetry';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 vi.mock('../../../src/services/node-agent', () => ({
   listAgentSessionsOnNode: vi.fn(),
+}));
+
+vi.mock('../../../src/services/telemetry', () => ({
+  recordAcpActivityCallbackMetric: vi.fn(),
 }));
 
 const FIVE_MINUTES = 5 * 60 * 1000;
@@ -562,6 +567,7 @@ describe('session activity reconciliation', () => {
       vi.mocked(listAgentSessionsOnNode).mockResolvedValue({
         sessions: [{ id: ACP_SESSION, hostStatus: 'idle' }],
       });
+      vi.mocked(recordAcpActivityCallbackMetric).mockClear();
     });
 
     it('probes and reconciles a workspace owned by this project', async () => {
@@ -579,6 +585,19 @@ describe('session activity reconciliation', () => {
       );
       expect(result).toEqual({ probed: 1, reconciled: 1 });
       expect(readState()?.activity).toBe('idle');
+      expect(recordAcpActivityCallbackMetric).toHaveBeenCalledWith(
+        expect.objectContaining({
+          outcome: 'healed',
+          projectId: 'proj-1',
+          sessionId: ACP_SESSION,
+          nodeId: NODE,
+          workspaceId: WORKSPACE,
+          activity: 'idle',
+          reason: 'probe_reconciled',
+          source: 'reconciliation_probe',
+        }),
+        expect.anything()
+      );
     });
 
     it('refuses to probe a workspace belonging to another project', async () => {
@@ -663,6 +682,40 @@ describe('session activity reconciliation', () => {
 
       expect(result).toEqual({ probed: 1, reconciled: 0 });
       expect(readState()?.activity_probe_attempts).toBe(1);
+    });
+
+    it('emits forced-terminal telemetry when the unreachable probe budget is exhausted', async () => {
+      sql.exec(
+        'UPDATE session_state SET activity_probe_attempts = 2, activity_probe_at = NULL WHERE session_id = ?',
+        ACP_SESSION
+      );
+      vi.mocked(listAgentSessionsOnNode).mockRejectedValue(new Error('Request timed out after 5000ms'));
+
+      const result = await probeStaleSessionActivity(
+        sql,
+        makeEnv({ user_id: 'user-1', project_id: 'proj-1' }),
+        hooks,
+        {
+          thresholdMs: FIVE_MINUTES,
+          projectId: 'proj-1',
+        }
+      );
+
+      expect(result).toEqual({ probed: 1, reconciled: 1 });
+      expect(readState()?.activity).toBe('idle');
+      expect(recordAcpActivityCallbackMetric).toHaveBeenCalledWith(
+        expect.objectContaining({
+          outcome: 'forced_terminal',
+          projectId: 'proj-1',
+          sessionId: ACP_SESSION,
+          nodeId: NODE,
+          workspaceId: WORKSPACE,
+          activity: 'idle',
+          reason: 'dead_after_probe_budget',
+          source: 'reconciliation_probe',
+        }),
+        expect.anything()
+      );
     });
   });
 

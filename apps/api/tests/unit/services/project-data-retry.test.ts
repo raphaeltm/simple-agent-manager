@@ -120,6 +120,34 @@ describe('project-data Durable Object retry', () => {
     expect(forwarded.find((m) => m.messageId === 'm-visible')?.origin).toBeNull();
   });
 
+  it('does not delay raw transcript persistence behind activity callback failures', async () => {
+    const persisted = { persisted: 1, duplicates: 0 };
+    const stub = {
+      ensureProjectId: vi.fn().mockResolvedValue(undefined),
+      persistMessageBatch: vi.fn().mockResolvedValue(persisted),
+      reportActivity: vi.fn().mockRejectedValue(doResetError),
+    };
+    const env = makeEnv(stub);
+
+    const transcriptWrite = svc.persistMessageBatch(env, 'proj-1', 'chat-1', [
+      {
+        messageId: 'm-1',
+        role: 'assistant',
+        content: 'progress',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+    const activityWrite = svc
+      .reportAcpSessionActivity(env, 'proj-1', 'agent-session-1', 'prompting')
+      .catch((err) => err);
+
+    await expect(transcriptWrite).resolves.toEqual(persisted);
+    await expect(activityWrite).resolves.toBe(doResetError);
+    expect(stub.persistMessageBatch).toHaveBeenCalledTimes(1);
+    expect(stub.reportActivity).toHaveBeenCalledTimes(1);
+  });
+
   it('surfaces the reset error after max attempts are exhausted', async () => {
     const stub = {
       ensureProjectId: vi.fn().mockResolvedValue(undefined),

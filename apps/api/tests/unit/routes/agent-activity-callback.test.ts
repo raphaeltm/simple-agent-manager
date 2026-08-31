@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppError } from '../../../src/middleware/error';
 
@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   updateSets: [] as Array<Record<string, unknown>>,
   updateReject: null as Error | null,
   workspace: null as Record<string, unknown> | null,
+  d1BindingRow: null as Record<string, unknown> | null,
   nodeStatus: 'running',
   workspaceStatus: 'running',
   statusLookupCount: 0,
@@ -61,10 +62,34 @@ vi.mock('drizzle-orm/d1', () => ({
     select: (selection?: Record<string, unknown>) => {
       const rowFor = () => {
         if (selection && 'updatedAt' in selection) return mocks.guardRow;
+        if (selection && 'workspaceProjectId' in selection) {
+          return (
+            mocks.d1BindingRow ?? {
+              agentSessionId: 'agent-session-1',
+              agentType: 'openai-codex',
+              workspaceId: 'workspace-1',
+              workspaceProjectId: 'project-1',
+              workspaceNodeId: 'node-1',
+              chatSessionId: 'chat-session-1',
+            }
+          );
+        }
         if (selection && Object.keys(selection).length === 1 && 'status' in selection) {
           mocks.statusLookupCount += 1;
           return {
             status: mocks.statusLookupCount === 1 ? mocks.nodeStatus : mocks.workspaceStatus,
+          };
+        }
+        if (
+          selection &&
+          'status' in selection &&
+          'nodeId' in selection &&
+          'projectId' in selection
+        ) {
+          return {
+            status: mocks.workspaceStatus,
+            nodeId: 'node-1',
+            projectId: 'project-1',
           };
         }
         return mocks.workspace;
@@ -156,11 +181,16 @@ async function postActivity(
 }
 
 describe('agent activity callback', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    const { resetAcpActivityAdmissionForTests } =
+      await import('../../../src/services/acp-activity-admission');
+    resetAcpActivityAdmissionForTests();
     vi.clearAllMocks();
     mocks.updateSets.length = 0;
+    delete (env as Record<string, string | undefined>).ACP_ACTIVITY_ADMISSION_ENABLED;
     mocks.updateReject = null;
     mocks.workspace = null;
+    mocks.d1BindingRow = null;
     mocks.nodeStatus = 'running';
     mocks.workspaceStatus = 'running';
     mocks.statusLookupCount = 0;
@@ -176,6 +206,10 @@ describe('agent activity callback', () => {
     mocks.projectData.transitionAcpSession.mockResolvedValue({});
     mocks.projectData.failSession.mockResolvedValue(undefined);
     mocks.container.markVmAgentContainerActiveWorkEndedBestEffort.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('snapshots an idle Instant session with the exact agent type before handback', async () => {
@@ -300,6 +334,350 @@ describe('agent activity callback', () => {
     expect(response.status).toBe(204);
     expect(mocks.nodeAgent.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
     expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
+  });
+
+  it('coalesces callback storms while preserving newest intermediate state for convergence', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-31T00:00:00.000Z'));
+    const app = await createTestApp();
+
+    const firstResponse = await postActivity(app, {
+      activity: 'prompting',
+      nodeId: 'node-1',
+      promptStartedAt: 100,
+      agentType: 'openai-codex',
+      restartCount: 0,
+    });
+
+    expect(firstResponse.status).toBe(204);
+    expect(mocks.projectData.getAcpSession).toHaveBeenCalledTimes(1);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(1);
+
+    for (let restartCount = 1; restartCount <= 20; restartCount += 1) {
+      const response = await postActivity(app, {
+        activity: 'prompting',
+        nodeId: 'node-1',
+        promptStartedAt: 100,
+        agentType: 'openai-codex',
+        restartCount,
+      });
+      expect(response.status).toBe(204);
+    }
+
+    expect(mocks.projectData.getAcpSession).toHaveBeenCalledTimes(1);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(1);
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'acp_activity.telemetry',
+      expect.objectContaining({
+        outcome: 'coalesced',
+        reason: 'redundant_intermediate',
+        coalescedCount: 20,
+      })
+    );
+
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(mocks.projectData.getAcpSession).toHaveBeenCalledTimes(2);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(2);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenLastCalledWith(
+      env,
+      'project-1',
+      'agent-session-1',
+      'prompting',
+      expect.objectContaining({
+        promptStartedAt: 100,
+        restartCount: 20,
+      })
+    );
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'acp_activity.telemetry',
+      expect.objectContaining({
+        outcome: 'admitted',
+        reason: 'coalesced_flush',
+        source: 'coalesced_flush',
+        coalescedCount: 20,
+      })
+    );
+  });
+
+  it('admits new prompt epochs immediately and does not flush an older coalesced state later', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-31T00:00:00.000Z'));
+    const app = await createTestApp();
+
+    await postActivity(app, {
+      activity: 'prompting',
+      nodeId: 'node-1',
+      promptStartedAt: 100,
+      agentType: 'openai-codex',
+    });
+    await postActivity(app, {
+      activity: 'prompting',
+      nodeId: 'node-1',
+      promptStartedAt: 100,
+      agentType: 'openai-codex',
+      restartCount: 1,
+    });
+
+    const response = await postActivity(app, {
+      activity: 'prompting',
+      nodeId: 'node-1',
+      promptStartedAt: 200,
+      agentType: 'openai-codex',
+      restartCount: 2,
+    });
+
+    expect(response.status).toBe(204);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(2);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenLastCalledWith(
+      env,
+      'project-1',
+      'agent-session-1',
+      'prompting',
+      expect.objectContaining({
+        promptStartedAt: 200,
+        restartCount: 2,
+      })
+    );
+
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves terminal error transitions over pending intermediate activity', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-31T00:00:00.000Z'));
+    const app = await createTestApp();
+
+    await postActivity(app, {
+      activity: 'prompting',
+      nodeId: 'node-1',
+      promptStartedAt: 100,
+      agentType: 'openai-codex',
+    });
+    await postActivity(app, {
+      activity: 'prompting',
+      nodeId: 'node-1',
+      promptStartedAt: 100,
+      agentType: 'openai-codex',
+      restartCount: 1,
+    });
+
+    const response = await postActivity(app, {
+      activity: 'error',
+      nodeId: 'node-1',
+      agentType: 'openai-codex',
+      statusError: 'tool host crashed',
+    });
+
+    expect(response.status).toBe(204);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(2);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenLastCalledWith(
+      env,
+      'project-1',
+      'agent-session-1',
+      'error',
+      expect.objectContaining({ statusError: 'tool host crashed' })
+    );
+    expect(mocks.projectData.transitionAcpSession).toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not let an in-flight stale coalesced flush overwrite a newer terminal transition', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-31T00:00:00.000Z'));
+    let resolveFlushRevalidation: (session: ReturnType<typeof assignedAcpSession>) => void;
+    const flushRevalidation = new Promise<ReturnType<typeof assignedAcpSession>>((resolve) => {
+      resolveFlushRevalidation = resolve;
+    });
+    mocks.projectData.getAcpSession
+      .mockResolvedValueOnce(assignedAcpSession())
+      .mockImplementationOnce(() => flushRevalidation)
+      .mockResolvedValue(assignedAcpSession());
+    const app = await createTestApp();
+
+    await postActivity(app, {
+      activity: 'prompting',
+      nodeId: 'node-1',
+      promptStartedAt: 100,
+      agentType: 'openai-codex',
+    });
+    await postActivity(app, {
+      activity: 'prompting',
+      nodeId: 'node-1',
+      promptStartedAt: 100,
+      agentType: 'openai-codex',
+      restartCount: 1,
+    });
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(mocks.projectData.getAcpSession).toHaveBeenCalledTimes(2);
+
+    const terminalResponse = await postActivity(app, {
+      activity: 'error',
+      nodeId: 'node-1',
+      agentType: 'openai-codex',
+      statusError: 'newer terminal state',
+    });
+
+    expect(terminalResponse.status).toBe(204);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(2);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenLastCalledWith(
+      env,
+      'project-1',
+      'agent-session-1',
+      'error',
+      expect.objectContaining({ statusError: 'newer terminal state' })
+    );
+
+    resolveFlushRevalidation!(assignedAcpSession());
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(2);
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'acp_activity.telemetry',
+      expect.objectContaining({
+        outcome: 'rejected',
+        reason: 'pending_superseded',
+        source: 'admission_control',
+      })
+    );
+  });
+
+  it('coalesces through transient ProjectData reset/overload and retries the flush without VM retry noise', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-31T00:00:00.000Z'));
+    mocks.projectData.getAcpSession
+      .mockRejectedValueOnce(new Error('Durable Object reset because its code was updated'))
+      .mockRejectedValueOnce(new Error('Durable Object overload'))
+      .mockResolvedValue(assignedAcpSession());
+    const app = await createTestApp();
+
+    const response = await postActivity(app, {
+      activity: 'prompting',
+      nodeId: 'node-1',
+      promptStartedAt: 100,
+      agentType: 'openai-codex',
+    });
+
+    expect(response.status).toBe(204);
+    expect(mocks.projectData.reportAcpSessionActivity).not.toHaveBeenCalled();
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'acp_activity.telemetry',
+      expect.objectContaining({
+        outcome: 'coalesced',
+        reason: 'project_data_transient',
+      })
+    );
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(mocks.projectData.reportAcpSessionActivity).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(1);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledWith(
+      env,
+      'project-1',
+      'agent-session-1',
+      'prompting',
+      expect.objectContaining({ promptStartedAt: 100 })
+    );
+  });
+
+  it('honors disabled admission by surfacing transient ProjectData errors on intermediate writes', async () => {
+    (env as Record<string, string | undefined>).ACP_ACTIVITY_ADMISSION_ENABLED = 'false';
+    mocks.projectData.reportAcpSessionActivity.mockRejectedValueOnce(
+      new Error('Durable Object overload')
+    );
+    const app = await createTestApp();
+
+    const response = await postActivity(app, {
+      activity: 'prompting',
+      nodeId: 'node-1',
+      promptStartedAt: 100,
+      agentType: 'openai-codex',
+    });
+
+    expect(response.status).toBe(500);
+    expect(mocks.projectData.getAcpSession).toHaveBeenCalledTimes(1);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(1);
+    expect(mocks.log.info).not.toHaveBeenCalledWith(
+      'acp_activity.telemetry',
+      expect.objectContaining({ outcome: 'coalesced' })
+    );
+  });
+
+  it('keeps coalesced active harness reports from falsely ending runtime work', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-31T00:00:00.000Z'));
+    const app = await createTestApp();
+
+    await postActivity(app, {
+      activity: 'idle',
+      nodeId: 'node-1',
+      agentType: 'claude-code',
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'claude_sdk',
+      runtimeWorkProgressAt: 1000,
+    });
+    const response = await postActivity(app, {
+      activity: 'idle',
+      nodeId: 'node-1',
+      agentType: 'claude-code',
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'claude_sdk',
+      runtimeWorkProgressAt: 2000,
+    });
+
+    expect(response.status).toBe(204);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(1);
+    expect(mocks.updateSets).toHaveLength(2);
+    expect(mocks.nodeAgent.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
+    expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(2);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenLastCalledWith(
+      env,
+      'project-1',
+      'agent-session-1',
+      'idle',
+      expect.objectContaining({
+        runtimeWorkState: 'active',
+        runtimeWorkProgressAt: 2000,
+      })
+    );
+    expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
+  });
+
+  it('keeps cached callbacks subject to terminal workspace 410 behavior', async () => {
+    const app = await createTestApp();
+
+    await postActivity(app, {
+      activity: 'prompting',
+      nodeId: 'node-1',
+      promptStartedAt: 100,
+    });
+    mocks.workspaceStatus = 'stopped';
+
+    const response = await postActivity(app, {
+      activity: 'prompting',
+      nodeId: 'node-1',
+      promptStartedAt: 100,
+    });
+
+    expect(response.status).toBe(410);
+    expect(mocks.projectData.getAcpSession).toHaveBeenCalledTimes(1);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(1);
   });
 
   it('turns VM-agent error activity into durable failed control-plane state', async () => {

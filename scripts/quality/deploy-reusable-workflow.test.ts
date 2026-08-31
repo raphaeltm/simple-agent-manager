@@ -394,6 +394,16 @@ describe('deploy reusable workflow', () => {
       'PLATFORM_FEEDBACK_PROJECT_ID: ${{ vars.PLATFORM_FEEDBACK_PROJECT_ID }}'
     );
     for (const name of [
+      'ACP_ACTIVITY_ADMISSION_ENABLED',
+      'ACP_ACTIVITY_COALESCE_WINDOW_MS',
+      'ACP_ACTIVITY_COALESCE_TTL_MS',
+      'ACP_ACTIVITY_COALESCE_MAX_PENDING',
+      'ACP_ACTIVITY_BINDING_CACHE_TTL_MS',
+      'ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES',
+    ]) {
+      expect(sync).toContain(name + ': ${{ vars.' + name + ' }}');
+    }
+    for (const name of [
       'REPORT_ISSUE_TITLE_MAX_LENGTH',
       'REPORT_ISSUE_DESCRIPTION_MAX_LENGTH',
       'REPORT_ISSUE_CONTENT_MAX_LENGTH',

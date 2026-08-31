@@ -49,29 +49,48 @@ The three live consumers of `session_state.activity` must keep converging:
 
 ## Implementation checklist
 
-- [ ] Add env-backed activity admission/coalescing configuration with documented
+- [x] Add env-backed activity admission/coalescing configuration with documented
       defaults and validation.
-- [ ] Add a bounded in-memory admission/coalescing buffer for redundant
+- [x] Add a bounded in-memory admission/coalescing buffer for redundant
       nonterminal activity callbacks, with finite size, TTL, and timer cleanup.
-- [ ] Avoid ProjectData reads/writes for coalesced redundant callbacks by using
+- [x] Avoid ProjectData reads/writes for coalesced redundant callbacks by using
       D1 session/workspace/node binding where safe; keep ProjectData revalidation
       for terminal/error/destructive transitions and cache misses.
-- [ ] Preserve JWT verification, token-to-node/workspace binding, reported-node
+- [x] Preserve JWT verification, token-to-node/workspace binding, reported-node
       matching, stale Instant error rejection, and designed 4xx/410 behavior.
-- [ ] Admit or force-flush state transitions that change liveness semantics:
+- [x] Admit or force-flush state transitions that change liveness semantics:
       newest working state, idle handback, runtime-work active/settling edges,
       and all terminal/error reports.
-- [ ] Ensure coalesced callbacks return 204 and do not become persisted error
+- [x] Ensure coalesced callbacks return 204 and do not become persisted error
       noise or VM retry storms.
-- [ ] Add structured telemetry for admitted, coalesced, healed, rejected, and
+- [x] Add structured telemetry for admitted, coalesced, healed, rejected, and
       forced-terminal transitions without logging sensitive payloads.
-- [ ] Add unit/worker tests for callback storms, state ordering, terminal
+- [x] Add unit/worker tests for callback storms, state ordering, terminal
       preservation, reconciliation after coalescing, simultaneous transcript
       writes, DO reset/retry behavior, and liveness/session-state regressions.
-- [ ] Run focused validation and specialist reviews: cloudflare, security,
+- [x] Run focused validation and specialist reviews: cloudflare, security,
       constitution/env/doc sync, test-engineer, task-completion-validator.
 - [ ] Open a draft PR for coordinator/Fable review. Do not deploy to staging,
       mutate production/configuration, or merge.
+
+## Validation log
+
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/agent-activity-callback.test.ts tests/unit/services/acp-activity-admission.test.ts tests/unit/services/acp-activity-error-message.test.ts tests/unit/services/project-data-retry.test.ts tests/unit/durable-objects/session-activity-reconciliation.test.ts` — passed (5 files, 80 tests).
+- `pnpm exec vitest run scripts/quality/sync-wrangler-config.test.ts scripts/quality/deploy-reusable-workflow.test.ts` — passed (2 files, 55 tests).
+- `NODE_OPTIONS=--max-old-space-size=2048 pnpm --filter @simple-agent-manager/api typecheck` — passed.
+- `pnpm --filter @simple-agent-manager/api lint` — passed.
+- `NODE_OPTIONS=--max-old-space-size=2048 pnpm typecheck` — passed (known Astro template baseline summary unchanged: 4 errors, 0 warnings, 16 hints).
+- `pnpm lint` — passed with pre-existing warning-only findings in acp-client/web.
+- `pnpm tsx scripts/quality/check-file-sizes.ts` — passed; new hot-path service remains below the 800-line source limit.
+- `git diff --check -- . ':!.codex/config.toml'` — passed.
+
+## Review notes
+
+- Cloudflare/load: Worker-isolate maps are TTL-bounded and max-entry bounded; no Durable Object state, stubs, or unbounded leases are retained.
+- Security: callback JWT verification remains first, cached/fallback bindings are still checked against token identity and D1 node/workspace liveness before side effects, and terminal/error paths keep ProjectData revalidation.
+- Constitution/env/doc sync: all new admission windows/limits are env-backed with shared defaults and documented in `.env.example`, public configuration docs, env-reference, deploy sync, and workflow forwarding.
+- Test engineering: focused tests cover callback storms, newest-state convergence, state ordering, terminal preservation, reconciliation telemetry, transient DO reset/retry, admission-disabled behavior, simultaneous transcript persistence, bounded eviction, and liveness/sleep regressions.
+- Staging/prod: intentionally not run by explicit task instruction.
 
 ## Acceptance criteria
 
