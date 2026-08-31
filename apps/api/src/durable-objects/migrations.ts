@@ -1641,6 +1641,26 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '042-chat-search-materialization-state',
+    run: (sql) => {
+      for (const statement of [
+        `ALTER TABLE chat_sessions ADD COLUMN search_index_state TEXT`,
+        `ALTER TABLE chat_sessions ADD COLUMN search_index_updated_at INTEGER`,
+        `ALTER TABLE chat_sessions ADD COLUMN search_index_degradation_reason TEXT`,
+      ]) {
+        try {
+          sql.exec(statement);
+        } catch {
+          // Additive compatibility: a partially migrated object may already have the column.
+        }
+      }
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_chat_sessions_search_index_state
+        ON chat_sessions(search_index_state, updated_at, id)
+      `);
+    },
+  },
 ];
 
 /**

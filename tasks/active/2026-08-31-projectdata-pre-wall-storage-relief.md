@@ -60,36 +60,36 @@ Every finding above is represented in the checklist below.
 
 ## Implementation checklist
 
-- [ ] Move this task file to `tasks/active/` on the implementation branch.
-- [ ] Add config-backed cleanup result telemetry with explicit termination
+- [x] Move this task file to `tasks/active/` on the implementation branch.
+- [x] Add config-backed cleanup result telemetry with explicit termination
   reasons for candidates-exhausted, byte-budget, row-budget, wall-time, and
   oversized-skip; include rows examined, original bytes, stored bytes, and
   `sql.databaseSize` before/after reclaim truth.
-- [ ] Add an admin-only, cursor-resumable, strictly bounded measurement RPC/API
+- [x] Add an admin-only, cursor-resumable, strictly bounded measurement RPC/API
   for `chat_messages_grouped`/external-content FTS stock and
   eligible-vs-oversized tool-payload stock, disabled from alarms/default
   measurement.
-- [ ] Implement production-disabled canary/scaled cleanup for old terminal
+- [x] Implement production-disabled canary/scaled cleanup for old terminal
   session grouped+FTS derived rows only; never delete raw `chat_messages`,
   comments, sessions, or anchored identities.
-- [ ] Maintain external-content FTS5 correctly when deleting grouped rows and
+- [x] Maintain external-content FTS5 correctly when deleting grouped rows and
   deliberately update materialization/search state to report partial degraded
   semantics.
-- [ ] Add configurable circuit breakers for reset/overload/read regression/weak
+- [x] Add configurable circuit breakers for reset/overload/read regression/weak
   reclaim and hard kill-switch/config bounds.
-- [ ] Make pre-wall/wall behavior explicit: FTS cleanup is write-required and
+- [x] Make pre-wall/wall behavior explicit: FTS cleanup is write-required and
   not wall-safe; at the wall only existing pure-DELETE recovery paths are
   eligible.
-- [ ] Extend legacy tool-payload archival so >1 MiB payloads can be archived via
+- [x] Extend legacy tool-payload archival so >1 MiB payloads can be archived via
   bounded/chunked private R2 while preserving archive-confirmed-before-delete
   and authenticated project-scoped retrieval; do not add a longer unbounded RPC.
-- [ ] Update env references, public docs, and API/reference notes for new admin
+- [x] Update env references, public docs, and API/reference notes for new admin
   routes/config/state semantics.
-- [ ] Add unit and Workers-runtime tests for raw transcript preservation,
+- [x] Add unit and Workers-runtime tests for raw transcript preservation,
   comments/anchored-message preservation, idempotent resume, FTS bookkeeping and
   search state, `databaseSize` reclaim assertion, oversized R2 failure leaving
   source intact, and kill-switch/config bounds.
-- [ ] Run local quality gates and required specialist reviews:
+- [x] Run local quality gates and required specialist reviews:
   cloudflare-specialist, constitution-validator, env-validator,
   doc-sync-validator, security-auditor, test-engineer, and
   task-completion-validator.
@@ -100,35 +100,73 @@ Every finding above is represented in the checklist below.
 
 ## Acceptance criteria
 
-- [ ] Cleanup telemetry can distinguish candidates-exhausted, byte-budget,
+- [x] Cleanup telemetry can distinguish candidates-exhausted, byte-budget,
   row-budget, wall-time, oversized-skip, disabled, wall-unsafe, and circuit-breaker
   stops with rows examined and byte/reclaim accounting.
-- [ ] Admin measurement is bounded, cursor-resumable, requires admin auth, and is
+- [x] Admin measurement is bounded, cursor-resumable, requires admin auth, and is
   never run by the default alarm measurement path.
-- [ ] Grouped+FTS cleanup is disabled by default for production, canary/scaled by
+- [x] Grouped+FTS cleanup is disabled by default for production, canary/scaled by
   config, deletes only derived grouped/FTS rows for old terminal sessions, and
   preserves raw transcript text, sessions, and comments.
-- [ ] External-content FTS5 is kept consistent with deleted grouped rows, and
+- [x] External-content FTS5 is kept consistent with deleted grouped rows, and
   search/materialization results expose partial/degraded semantics rather than
   pretending full FTS coverage remains.
-- [ ] FTS cleanup refuses to run when storage is at/over the configured wall-safe
+- [x] FTS cleanup refuses to run when storage is at/over the configured wall-safe
   ratio; existing pure-DELETE emergency recovery remains the only wall-safe
   recovery path.
-- [ ] Legacy >1 MiB tool payloads can be archived/retrieved with bounded chunks;
+- [x] Legacy >1 MiB tool payloads can be archived/retrieved with bounded chunks;
   failed R2 archival or missing chunks leave source `tool_metadata.content`
   intact.
-- [ ] New thresholds, limits, cadence, kill-switches, chunk sizes, prefixes, and
+- [x] New thresholds, limits, cadence, kill-switches, chunk sizes, prefixes, and
   route limits are env/config-backed with documented defaults.
-- [ ] Unit and Workers-runtime tests discriminate the safety properties listed in
+- [x] Unit and Workers-runtime tests discriminate the safety properties listed in
   the user request.
 
 ## Validation evidence
 
-To be filled during implementation.
+- `pnpm install` — pass.
+- `pnpm lint` — pass with pre-existing unrelated warnings in `packages/acp-client`
+  and `apps/web` components.
+- `pnpm typecheck` — pass; existing Astro content validation output remains
+  baseline and exits 0.
+- `pnpm --filter @simple-agent-manager/api typecheck` — pass.
+- `pnpm --filter @simple-agent-manager/api lint` — pass.
+- `pnpm --filter @simple-agent-manager/api build` — pass.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/project-data-tool-payload-archive.test.ts --reporter dot` — pass, 2 tests.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/migrations.test.ts --reporter dot` — pass, 16 tests.
+- `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/project-data-tool-payload-archive.test.ts --reporter dot` — pass, 12 tests; workerd emitted an existing stream-pump cancellation diagnostic after completion.
+- `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/project-data-storage-safety.test.ts --reporter dot` — pass, 16 tests.
+- `pnpm --filter @simple-agent-manager/api test -- --reporter dot` — broad API unit/integration sweep ran 641/642 files and 8668/8669 tests green, then failed only the migration index-count assertion introduced by this PR. The assertion was updated and the targeted migration test passed afterward.
+- `git diff --check` — pass.
+
+No staging deploy, production mutation, production configuration change, merge,
+or production monitoring command was run.
 
 ## Specialist review tracker
 
-Not started.
+- `cloudflare-specialist`: pass. D1/DO schema change is additive; alarm work is
+  bounded by configured rows/bytes/wall time; grouped+FTS cleanup is disabled by
+  default and refuses wall-unsafe writes; `databaseSize` before/after is the
+  reclaim truth.
+- `constitution-validator`: pass. New limits, ratios, batch sizes, chunk sizes,
+  cadences, and kill switches are config/env backed and documented; remaining
+  literals are named local protocol defaults/constants.
+- `env-validator` / `env-reference`: pass. `Env` interfaces, `wrangler.toml`,
+  `.env.example`, deployment config sync allowlist, and env reference docs are
+  synchronized. Grouped+FTS cleanup defaults to disabled.
+- `doc-sync-validator`: pass. Public configuration docs and API reference cover
+  the new admin routes and config/state semantics.
+- `security-auditor`: pass. New HTTP entry points are admin-mounted; private R2
+  archival uses deterministic project/session/message scoped keys and
+  authenticated ProjectData retrieval; source payload remains intact until R2
+  archive writes and SQL bookkeeping succeed.
+- `test-engineer`: pass. Unit and real Workers-runtime tests cover raw
+  transcript preservation, comments/anchors, idempotent resume, FTS bookkeeping,
+  search degradation state, `databaseSize` reclaim, R2 failure/source
+  preservation, and kill-switch/config bounds.
+- `task-completion-validator`: pass. Acceptance criteria are represented in the
+  diff and validated locally. Remaining PR-only steps are draft PR creation and
+  CodeRabbit trigger.
 
 ## PR / CI evidence
 

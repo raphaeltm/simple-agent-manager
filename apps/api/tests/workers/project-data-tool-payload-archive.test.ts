@@ -407,6 +407,50 @@ describe('ProjectData tool payload R2 archival', () => {
     expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(2);
   });
 
+  it('archives and retrieves a legacy payload above the former 1MiB row budget with R2 chunks', async () => {
+    const projectId = `${TEST_PREFIX}-chunked-oversized`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'chunked-large', createdAt: FIXED_NOW - 1_000, sequence: 1, payloadBytes: 1_150_000 },
+    ]);
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        'UPDATE chat_messages SET tool_metadata = ? WHERE id = ?',
+        makeToolMetadata('chunked-large', 1_150_000),
+        seeded.messageIds[0]
+      );
+    });
+
+    const result = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES: '1800000',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES: '200000',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES: '1800000',
+      },
+      { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+    );
+
+    expect(result?.rowsUpdated).toBe(1);
+    expect(result?.terminationReason).toBe('target_reached');
+    const archiveRows = await readArchiveRows(stub, seeded.messageIds);
+    expect(archiveRows).toHaveLength(1);
+    expect(archiveRows[0]?.archive_version).toBe(2);
+
+    const manifest = await env.PROJECT_DATA_ARCHIVE_R2.get(archiveRows[0]!.r2_key);
+    const manifestJson = JSON.parse((await manifest?.text()) ?? '{}') as { chunks?: string[] };
+    expect(manifestJson.chunks?.length).toBeGreaterThan(1);
+    const firstChunk = await env.PROJECT_DATA_ARCHIVE_R2.get(manifestJson.chunks![0]!);
+    expect(firstChunk).not.toBeNull();
+
+    const loaded = await stub.getMessageToolContent(seeded.sessionId, seeded.messageIds[0]!);
+    expect(loaded?.source).toBe('archive');
+    expect(JSON.stringify(loaded?.content)).toContain('chunked-large');
+  });
+
   it('archives only tool payloads strictly older than the retention boundary', async () => {
     const projectId = `${TEST_PREFIX}-boundary`;
     const stub = getStub(projectId);

@@ -52,6 +52,8 @@ type ToolPayloadCandidateProcessingContext = {
   archivePrefix: string;
   archiveRetryDelayMs: number;
   archiveWriteTimeoutMs: number;
+  archiveChunkBytes: number;
+  archiveMaxMetadataBytes: number;
   transactionSync?: <T>(callback: () => T) => T;
   maxRowBytes: number;
   archivedAt: number;
@@ -305,7 +307,16 @@ function emptyCandidateUpdate(): ToolPayloadCandidateUpdate {
   };
 }
 
-function failedBudgetUpdate(candidate: ToolPayloadCandidate): ToolPayloadCandidateUpdate {
+function failedBudgetUpdate(
+  candidate: ToolPayloadCandidate,
+  reason: 'row' | 'batch' | 'archive'
+): ToolPayloadCandidateUpdate {
+  const description =
+    reason === 'archive'
+      ? 'archive metadata byte budget'
+      : reason === 'batch'
+        ? 'cleanup batch byte budget'
+        : 'cleanup per-row byte budget';
   return {
     rowsUpdated: 0,
     rowsFailed: 1,
@@ -313,7 +324,7 @@ function failedBudgetUpdate(candidate: ToolPayloadCandidate): ToolPayloadCandida
     originalToolMetadataBytes: candidate.toolMetadataBytes,
     storedToolMetadataBytes: 0,
     retryableFailure: false,
-    errorMessage: `tool_metadata row ${candidate.messageId} exceeded the cleanup per-row byte budget`,
+    errorMessage: `tool_metadata row ${candidate.messageId} exceeded the ${description}`,
     cleanupAttemptStatus: 'oversized',
   };
 }
@@ -328,9 +339,10 @@ function recordToolPayloadCleanupDisposition(
     clearToolPayloadCleanupAttempt(context.sql, candidate.messageId);
     return;
   }
-  const nextAttemptAt = update.cleanupAttemptStatus === 'retryable_failure'
-    ? context.archivedAt + context.archiveRetryDelayMs
-    : null;
+  const nextAttemptAt =
+    update.cleanupAttemptStatus === 'retryable_failure'
+      ? context.archivedAt + context.archiveRetryDelayMs
+      : null;
   recordToolPayloadCleanupAttempt(
     context.sql,
     candidate,
@@ -346,10 +358,22 @@ async function processToolPayloadCandidate(
   candidate: ToolPayloadCandidate,
   maxReadBytes: number
 ): Promise<ToolPayloadCandidateUpdate> {
-  if (candidate.toolMetadataBytes > context.maxRowBytes) return failedBudgetUpdate(candidate);
-  if (candidate.toolMetadataBytes > maxReadBytes) return failedBudgetUpdate(candidate);
+  if (candidate.toolMetadataBytes > context.archiveMaxMetadataBytes) {
+    return failedBudgetUpdate(candidate, 'archive');
+  }
+  if (
+    candidate.toolMetadataBytes > context.maxRowBytes &&
+    candidate.toolMetadataBytes > context.archiveMaxMetadataBytes
+  ) {
+    return failedBudgetUpdate(candidate, 'row');
+  }
+  if (candidate.toolMetadataBytes > maxReadBytes) return failedBudgetUpdate(candidate, 'batch');
 
-  const toolMetadata = readBoundedToolMetadata(context.sql, candidate.messageId, maxReadBytes);
+  const toolMetadata = readBoundedToolMetadata(
+    context.sql,
+    candidate.messageId,
+    Math.min(maxReadBytes, context.archiveMaxMetadataBytes)
+  );
   if (toolMetadata === null) return emptyCandidateUpdate();
 
   return archiveToolPayloadCandidate({
@@ -358,6 +382,7 @@ async function processToolPayloadCandidate(
     projectId: context.projectId,
     archivePrefix: context.archivePrefix,
     archiveWriteTimeoutMs: context.archiveWriteTimeoutMs,
+    archiveChunkBytes: context.archiveChunkBytes,
     ...(context.transactionSync ? { transactionSync: context.transactionSync } : {}),
     candidate,
     toolMetadata,
@@ -395,6 +420,8 @@ export async function scanToolPayloadCandidates(
     archivePrefix: input.archivePrefix,
     archiveRetryDelayMs: input.archiveRetryDelayMs,
     archiveWriteTimeoutMs: input.archiveWriteTimeoutMs,
+    archiveChunkBytes: input.archiveChunkBytes,
+    archiveMaxMetadataBytes: input.archiveMaxMetadataBytes,
     ...(input.transactionSync ? { transactionSync: input.transactionSync } : {}),
     maxRowBytes: input.maxRowBytes,
     archivedAt: input.archivedAt,

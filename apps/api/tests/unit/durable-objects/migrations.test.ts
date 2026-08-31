@@ -458,7 +458,8 @@ describe('DO Migrations', () => {
       // project event delivery decisions: 0 from migration 039 (additive column only)
       // project event pull ack: 1 replay index from migration 040
       // terminal session reconcile marker: 1 from migration 041
-      expect(indexes).toHaveLength(86);
+      // chat search materialization state: 1 from migration 042
+      expect(indexes).toHaveLength(87);
     });
   });
 });

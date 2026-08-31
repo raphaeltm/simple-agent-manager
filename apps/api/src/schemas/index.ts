@@ -132,6 +132,7 @@ export {
   AnalyticsForwardSchema,
   CreatePlatformCredentialSchema,
   ProjectDataStorageEmergencyPurgeSchema,
+  ProjectDataStorageReliefMeasureSchema,
   UpdatePlatformCredentialSchema,
   UpdatePlatformIntegrationConfigSchema,
   UpdateSignupApprovalConfigSchema,

@@ -59,6 +59,8 @@ type ToolPayloadCleanupPlan = {
   maxRowBytes: number;
   archiveRetryDelayMs: number;
   archiveWriteTimeoutMs: number;
+  archiveChunkBytes: number;
+  archiveMaxMetadataBytes: number;
   cutoffCreatedAt: number;
   deadlineMs: number;
   pendingCursor: ToolPayloadCleanupCursor | null;
@@ -134,6 +136,8 @@ function createToolPayloadCleanupPlan(
     maxRowBytes: config.toolPayloadCleanupMaxRowBytes,
     archiveRetryDelayMs: config.toolPayloadArchiveRetryDelayMs,
     archiveWriteTimeoutMs: config.toolPayloadArchiveWriteTimeoutMs,
+    archiveChunkBytes: config.toolPayloadArchiveChunkBytes,
+    archiveMaxMetadataBytes: config.toolPayloadArchiveMaxMetadataBytes,
     cutoffCreatedAt: now - config.toolPayloadArchiveRetentionMs,
     deadlineMs: now + config.toolPayloadCleanupWallTimeMs,
     pendingCursor,
@@ -198,6 +202,8 @@ async function scanToolPayloadCleanupBatch(
     archivePrefix: config.toolPayloadArchiveR2Prefix,
     archiveRetryDelayMs: plan.archiveRetryDelayMs,
     archiveWriteTimeoutMs: plan.archiveWriteTimeoutMs,
+    archiveChunkBytes: plan.archiveChunkBytes,
+    archiveMaxMetadataBytes: plan.archiveMaxMetadataBytes,
     ...(plan.transactionSync ? { transactionSync: plan.transactionSync } : {}),
     batchBytes: plan.batchBytes,
     maxRowBytes: plan.maxRowBytes,
@@ -233,7 +239,10 @@ async function scanToolPayloadCleanupBatch(
   }
 
   const lastCursor = scanned.lastCursor;
-  if (lastCursor && hasToolPayloadCandidatesAfter(sql, lastCursor, plan.cutoffCreatedAt, plan.now)) {
+  if (
+    lastCursor &&
+    hasToolPayloadCandidatesAfter(sql, lastCursor, plan.cutoffCreatedAt, plan.now)
+  ) {
     batch.hasMoreCandidates = true;
     batch.pauseCursor = lastCursor;
     return batch;
@@ -276,6 +285,7 @@ function buildToolPayloadCleanupResult(
   plan: ToolPayloadCleanupPlan,
   batch: ToolPayloadCleanupBatch,
   afterBytes: number,
+  terminationReason: ProjectDataToolPayloadCleanupResult['terminationReason'],
   shouldContinue: boolean,
   continuationCursor: ToolPayloadCleanupCursor | null,
   exhaustedCandidates: boolean,
@@ -299,10 +309,39 @@ function buildToolPayloadCleanupResult(
     toolMetadataBytesRead: batch.toolMetadataBytesRead,
     originalToolMetadataBytes: batch.originalToolMetadataBytes,
     storedToolMetadataBytes: batch.storedToolMetadataBytes,
+    terminationReason,
+    reclaimedBytes: Math.max(plan.beforeBytes - afterBytes, 0),
     cursor: shouldContinue ? publicToolPayloadCleanupCursor(continuationCursor) : null,
     exhaustedCandidates,
     recheckAt,
   };
+}
+
+function resolveToolPayloadTerminationReason(
+  plan: ToolPayloadCleanupPlan,
+  batch: ToolPayloadCleanupBatch,
+  shouldContinue: boolean,
+  exhaustedCandidates: boolean
+): ProjectDataToolPayloadCleanupResult['terminationReason'] {
+  if (batch.retryableFailure) return 'error';
+  if (
+    batch.errorMessages.some(
+      (message) =>
+        message.includes('per-row byte budget') ||
+        message.includes('archive metadata byte budget')
+    )
+  ) {
+    return 'oversized_skip';
+  }
+  if (batch.errorMessages.length > 0) return 'error';
+  if (batch.hasMoreCandidates && batch.nextRetryAt !== null) return 'oversized_skip';
+  if (shouldContinue && batch.pauseCursor !== null && batch.rowsScanned >= plan.batchRows) {
+    return 'row_budget';
+  }
+  if (shouldContinue && batch.toolMetadataBytesRead >= plan.batchBytes) return 'byte_budget';
+  if (shouldContinue) return 'wall_time';
+  if (exhaustedCandidates) return 'candidates_exhausted';
+  return 'target_reached';
 }
 
 function summarizeToolPayloadCleanupFailures(batch: ToolPayloadCleanupBatch): string | null {
@@ -414,6 +453,8 @@ function buildFailedToolPayloadCleanupResult(
     toolMetadataBytesRead: 0,
     originalToolMetadataBytes: 0,
     storedToolMetadataBytes: 0,
+    terminationReason: 'error',
+    reclaimedBytes: 0,
     cursor: publicToolPayloadCleanupCursor(plan.pendingCursor),
     exhaustedCandidates: false,
     recheckAt,
@@ -488,6 +529,7 @@ export async function runProjectDataToolPayloadCleanup(
     plan,
     batch,
     afterBytes,
+    resolveToolPayloadTerminationReason(plan, batch, shouldContinue, exhaustedCandidates),
     shouldContinue,
     continuationCursor,
     exhaustedCandidates,
