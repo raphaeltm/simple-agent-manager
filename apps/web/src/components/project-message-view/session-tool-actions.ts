@@ -118,22 +118,28 @@ export interface BuildSessionToolActionsInput {
   detailsExpanded?: boolean;
 }
 
-export function buildSessionToolActions(input: BuildSessionToolActionsInput): SessionToolAction[] {
+/** Comment tool hint — attention outranks a plain unresolved count. */
+function buildCommentsHint(needsAttentionCount: number, unresolvedCount: number): string {
+  if (needsAttentionCount > 0) {
+    return `Open comment threads — ${needsAttentionCount} needs you`;
+  }
+  if (unresolvedCount > 0) {
+    return `Open comment threads — ${unresolvedCount} unresolved`;
+  }
+  return 'Open comment threads on this session';
+}
+
+/** Tools that act on the workspace or the conversation's history. */
+function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolAction[] {
   const {
     session,
     sessionState,
-    taskEmbed,
-    reportEnabled,
     unresolvedCommentCount,
     needsAttentionCommentCount = 0,
     hasFilesHandler,
     hasGitHandler,
     hasTimelineHandler,
     hasCommentsHandler,
-    hasRetryHandler,
-    hasForkHandler,
-    completing = false,
-    detailsExpanded = false,
   } = input;
 
   const actions: SessionToolAction[] = [];
@@ -182,18 +188,21 @@ export function buildSessionToolActions(input: BuildSessionToolActionsInput): Se
     actions.push({
       id: 'comments',
       label: 'Comments',
-      hint:
-        needsAttentionCommentCount > 0
-          ? `Open comment threads — ${needsAttentionCommentCount} needs you`
-          : unresolvedCommentCount > 0
-            ? `Open comment threads — ${unresolvedCommentCount} unresolved`
-            : 'Open comment threads on this session',
+      hint: buildCommentsHint(needsAttentionCommentCount, unresolvedCommentCount),
       icon: MessageSquareQuote,
       group: 'workspace',
       badge: unresolvedCommentCount > 0 ? unresolvedCommentCount : undefined,
       badgeNeedsAttention: needsAttentionCommentCount > 0,
     });
   }
+
+  return actions;
+}
+
+/** Tools that act on the task behind the session. */
+function buildSessionGroup(input: BuildSessionToolActionsInput): SessionToolAction[] {
+  const { session, taskEmbed, hasRetryHandler, hasForkHandler } = input;
+  const actions: SessionToolAction[] = [];
 
   // Retry / Fork act on the task, so they only exist when there is one.
   //
@@ -224,6 +233,14 @@ export function buildSessionToolActions(input: BuildSessionToolActionsInput): Se
       });
     }
   }
+
+  return actions;
+}
+
+/** Cross-cutting tools, pinned to the bottom of the rail. */
+function buildMetaGroup(input: BuildSessionToolActionsInput): SessionToolAction[] {
+  const { taskEmbed, reportEnabled, completing = false, detailsExpanded = false } = input;
+  const actions: SessionToolAction[] = [];
 
   if (reportEnabled) {
     actions.push({
@@ -264,6 +281,18 @@ export function buildSessionToolActions(input: BuildSessionToolActionsInput): Se
   });
 
   return actions;
+}
+
+/**
+ * The single source of truth for "which tools does this session expose".
+ *
+ * Replaces the nine inline JSX conditions the header used to carry (rules 24 / 59), so the
+ * rail, the tests, and any future surface all answer that question the same way. Built as
+ * three group builders rather than one long function purely for readability — the order of
+ * the groups here is the render order, and `isToolGroupStart` draws the dividers from it.
+ */
+export function buildSessionToolActions(input: BuildSessionToolActionsInput): SessionToolAction[] {
+  return [...buildWorkspaceGroup(input), ...buildSessionGroup(input), ...buildMetaGroup(input)];
 }
 
 /** True where `actions[index]` starts a new group, so a divider is drawn before it. */

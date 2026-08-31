@@ -299,6 +299,9 @@ async function openChat(page: Page, options: MockOptions = {}) {
       ? page.getByTestId('session-tool-rail-tab')
       : page.getByTestId('session-tool-details');
   await expect(anchor.first()).toBeVisible({ timeout: 15_000 });
+  // Render settle before capture, mandated by `.claude/rules/17-ui-visual-testing.md`
+  // ("wait at least 500ms after navigation before capturing"). This is a deliberate
+  // fixed wait: CSS transitions have no completion event to await on.
   await page.waitForTimeout(600);
 }
 

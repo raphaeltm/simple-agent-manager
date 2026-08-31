@@ -68,6 +68,8 @@ async function openMostRecentSession(page: Page): Promise<boolean> {
 
 async function shot(page: Page, name: string) {
   const w = page.viewportSize()?.width ?? 0;
+  // Render settle before capture — see `.claude/rules/17-ui-visual-testing.md`. Longer
+  // than the local audit because staging paints over a real network.
   await page.waitForTimeout(800);
   await page.screenshot({
     path: `../../.codex/tmp/staging-screenshots/${name}-${w}.png`,
@@ -172,8 +174,17 @@ test.describe('Staging — session tool rail', () => {
 
     await expect(page.getByTestId('session-tool-details')).toBeVisible({ timeout: 30_000 });
     await page.getByTestId('session-tool-rail-cycle').click();
+    await expect(page.getByTestId('session-tool-rail')).toHaveAttribute('data-mode', 'labels');
     await page.getByTestId('session-tool-details').click();
-    await page.waitForTimeout(1500);
+    await expect(page.getByText('References')).toBeVisible({ timeout: 15_000 });
+
+    // Console errors and failed responses arrive asynchronously, so the assertions below
+    // need the in-flight work to actually finish. Waiting for network idle is the
+    // deterministic form of that; a fixed sleep would either flake or waste time.
+    await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {
+      // Staging polls on an interval, so idle is not always reachable. The explicit
+      // waits above already gate on the UI being settled.
+    });
 
     /*
      * A session old enough for its workspace to have been reaped 404s on the workspace

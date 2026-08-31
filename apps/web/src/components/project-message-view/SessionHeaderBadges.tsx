@@ -8,8 +8,7 @@ function getWorkspaceProfileLabel(workspace: WorkspaceResponse): string {
   return workspace.workspaceProfile === 'lightweight' ? 'Lightweight' : 'Full';
 }
 
-const RECOVERY_CONTAINER_HELP =
-  'The devcontainer build failed, so SAM started a fallback recovery container to keep this chat usable. Open the workspace and check Boot Logs for the devcontainer error output.';
+const RECOVERY_CONTAINER_HELP = 'The devcontainer build failed, so SAM started a fallback recovery container to keep this chat usable. Open the workspace and check Boot Logs for the devcontainer error output.';
 
 export function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: WorkspaceResponse }>) {
   const [open, setOpen] = useState(false);
@@ -18,8 +17,7 @@ export function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: Works
   const tooltipId = useId();
   const isRecovery = workspace.status === 'recovery';
   const label = getWorkspaceProfileLabel(workspace);
-  const badgeClassName =
-    'inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0';
+  const badgeClassName = 'inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0';
 
   useLayoutEffect(() => {
     if (!open || !triggerRef.current) return;
@@ -28,10 +26,7 @@ export function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: Works
       if (!trigger) return;
       const rect = trigger.getBoundingClientRect();
       const tooltipWidth = Math.min(280, window.innerWidth - 32);
-      const left = Math.max(
-        16,
-        Math.min(rect.right - tooltipWidth, window.innerWidth - tooltipWidth - 16)
-      );
+      const left = Math.max(16, Math.min(rect.right - tooltipWidth, window.innerWidth - tooltipWidth - 16));
       setTooltipStyle({
         position: 'fixed',
         left,
@@ -55,14 +50,8 @@ export function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: Works
         className={badgeClassName}
         aria-label={`Workspace profile: ${label}`}
         style={{
-          backgroundColor:
-            workspace.workspaceProfile === 'lightweight'
-              ? 'var(--sam-color-info-tint)'
-              : 'var(--sam-color-success-tint)',
-          color:
-            workspace.workspaceProfile === 'lightweight'
-              ? 'var(--sam-color-info)'
-              : 'var(--sam-color-success)',
+          backgroundColor: workspace.workspaceProfile === 'lightweight' ? 'var(--sam-color-info-tint)' : 'var(--sam-color-success-tint)',
+          color: workspace.workspaceProfile === 'lightweight' ? 'var(--sam-color-info)' : 'var(--sam-color-success)',
         }}
       >
         {label}
@@ -92,23 +81,21 @@ export function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: Works
         <AlertTriangle size={10} aria-hidden="true" />
         {label}
       </button>
-      {open &&
-        typeof document !== 'undefined' &&
-        createPortal(
-          <span
-            id={tooltipId}
-            role="tooltip"
-            className="rounded-sm glass-surface bg-[var(--sam-tooltip-bg)] px-3 py-2 text-left text-fg-primary shadow-tooltip whitespace-normal pointer-events-none"
-            style={{
-              fontSize: 'var(--sam-type-caption-size)',
-              lineHeight: 'var(--sam-type-caption-line-height)',
-              ...tooltipStyle,
-            }}
-          >
-            {RECOVERY_CONTAINER_HELP}
-          </span>,
-          document.body
-        )}
+      {open && typeof document !== 'undefined' && createPortal(
+        <span
+          id={tooltipId}
+          role="tooltip"
+          className="rounded-sm glass-surface bg-[var(--sam-tooltip-bg)] px-3 py-2 text-left text-fg-primary shadow-tooltip whitespace-normal pointer-events-none"
+          style={{
+            fontSize: 'var(--sam-type-caption-size)',
+            lineHeight: 'var(--sam-type-caption-line-height)',
+            ...tooltipStyle,
+          }}
+        >
+          {RECOVERY_CONTAINER_HELP}
+        </span>,
+        document.body,
+      )}
     </span>
   );
 }

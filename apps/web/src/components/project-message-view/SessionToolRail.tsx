@@ -67,11 +67,11 @@ function ToolBadge({
   count,
   compact,
   needsAttention,
-}: {
+}: Readonly<{
   count: number;
   compact: boolean;
   needsAttention: boolean;
-}) {
+}>) {
   const accent = needsAttention ? 'var(--sam-color-warning)' : 'var(--sam-color-fg-muted)';
 
   if (compact) {
@@ -118,12 +118,12 @@ function RailAction({
   compact,
   isMobile,
   onSelect,
-}: {
+}: Readonly<{
   action: SessionToolAction;
   compact: boolean;
   isMobile: boolean;
   onSelect: (id: SessionToolId) => void;
-}) {
+}>) {
   const Icon = action.icon;
   const color =
     action.tone === 'success' ? 'var(--sam-color-success)' : 'var(--sam-color-fg-muted)';
@@ -184,13 +184,13 @@ export function SessionToolRail({
   onModeChange,
   onSelect,
   isMobile,
-}: {
+}: Readonly<{
   actions: SessionToolAction[];
   mode: ToolStripMode;
   onModeChange: (mode: ToolStripMode) => void;
   onSelect: (id: SessionToolId) => void;
   isMobile: boolean;
-}) {
+}>) {
   const next = nextToolStripMode(mode);
   const cycleLabel = `Session tools: ${TOOL_STRIP_MODE_LABEL[mode]}. Activate for ${TOOL_STRIP_MODE_LABEL[
     next

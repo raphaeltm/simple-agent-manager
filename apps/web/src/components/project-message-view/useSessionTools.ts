@@ -32,6 +32,17 @@ function readStoredMode(): ToolStripMode {
   }
 }
 
+/**
+ * Compile-time proof that every `SessionToolId` has a dispatch case.
+ *
+ * The parameter is typed `never`, so adding an id without a matching `case` fails
+ * typecheck at the call site rather than shipping a control that does nothing when
+ * clicked. At runtime it is unreachable, and throws if that assumption is ever wrong.
+ */
+function assertNeverToolId(id: never): never {
+  throw new Error(`Unhandled session tool: ${String(id)}`);
+}
+
 export interface UseSessionToolsInput {
   projectId: string;
   session: ChatSessionResponse | null;
@@ -83,7 +94,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     onFork,
   } = input;
 
-  const [mode, setModeState] = useState<ToolStripMode>(readStoredMode);
+  const [mode, setMode] = useState<ToolStripMode>(readStoredMode);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [confirmCompleteOpen, setConfirmCompleteOpen] = useState(false);
@@ -101,8 +112,15 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
       .catch(() => setReportEnabled(false));
   }, []);
 
-  const setMode = useCallback((next: ToolStripMode) => {
-    setModeState(next);
+  /**
+   * Sets the mode and remembers it.
+   *
+   * The write deliberately sits here rather than inside a `setMode` updater callback:
+   * React invokes updaters twice under StrictMode, and a `localStorage` write is a side
+   * effect that has no business running during render.
+   */
+  const selectMode = useCallback((next: ToolStripMode) => {
+    setMode(next);
     try {
       window.localStorage.setItem(TOOL_STRIP_MODE_STORAGE_KEY, next);
     } catch {
@@ -111,16 +129,8 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
   }, []);
 
   const cycleMode = useCallback(() => {
-    setModeState((current) => {
-      const next = nextToolStripMode(current);
-      try {
-        window.localStorage.setItem(TOOL_STRIP_MODE_STORAGE_KEY, next);
-      } catch {
-        // Non-fatal.
-      }
-      return next;
-    });
-  }, []);
+    selectMode(nextToolStripMode(mode));
+  }, [mode, selectMode]);
 
   const confirmComplete = useCallback(async () => {
     if (!taskEmbed?.id || completing) return;
@@ -212,12 +222,11 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
         case 'workspace':
           // Rendered as an anchor by the rail — navigation is the browser's job.
           break;
-        default: {
+        default:
           // Adding a `SessionToolId` without a case here would otherwise ship a control
-          // that silently does nothing when clicked. This makes it a compile error.
-          const exhaustive: never = id;
-          void exhaustive;
-        }
+          // that silently does nothing when clicked. Assigning to `never` makes it a
+          // compile error instead.
+          assertNeverToolId(id);
       }
     },
     [onOpenFiles, onOpenGit, onOpenTimeline, onOpenComments, onRetry, onFork]
@@ -230,7 +239,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
   return {
     mode,
     cycleMode,
-    setMode,
+    setMode: selectMode,
     actions,
     selectTool,
     detailsExpanded,
