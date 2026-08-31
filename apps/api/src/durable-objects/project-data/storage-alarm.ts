@@ -17,10 +17,10 @@ import type {
   StorageSafetyConfig,
 } from './storage-safety';
 import {
+  deleteStorageSafetyMeta as deleteMeta,
   META_LAST_ERROR,
   META_LAST_MEASURED_AT,
   META_LAST_STATUS,
-  readStorageSafetyMeta as readMeta,
   truncateStorageSafetyMetaValue as truncate,
   writeStorageSafetyMeta as writeMeta,
 } from './storage-safety-meta';
@@ -112,6 +112,21 @@ function cleanupCandidatesExhausted(
   return toolCleanupExhausted && groupedFtsCleanupExhausted && eventLogCleanupExhausted;
 }
 
+function cleanupHadFailure(
+  cleanup: ProjectDataToolPayloadCleanupResult | null,
+  groupedFtsCleanup: ProjectDataGroupedFtsCleanupResult | null,
+  eventLogCleanup: ProjectDataEventLogCleanupResult | null
+): boolean {
+  return (
+    (cleanup !== null && (cleanup.rowsFailed > 0 || cleanup.terminationReason === 'error')) ||
+    (groupedFtsCleanup !== null &&
+      ['circuit_breaker', 'error', 'weak_reclaim'].includes(
+        groupedFtsCleanup.terminationReason
+      )) ||
+    (eventLogCleanup !== null && eventLogCleanup.terminationReason === 'error')
+  );
+}
+
 function resolveCleanupHealth(
   sql: SqlStorage,
   config: StorageSafetyConfig,
@@ -176,16 +191,10 @@ async function persistCleanupHealthTelemetryAndAlerts(
         }
       : computedTelemetry;
   const targetBytes = Math.floor(config.limitBytes * config.toolPayloadCleanupTargetRatio);
-  const previousError = readMeta(sql, META_LAST_ERROR);
   const lastError =
     cleanupHealth === 'target_unreachable'
       ? truncate(
-          [
-            `ProjectData storage cleanup target unreachable: databaseSize=${telemetry.databaseSizeBytes}, targetBytes=${targetBytes}, reclaimableBytes=${telemetry.reclaimableBytes ?? 0}`,
-            previousError ? `previousError=${previousError}` : null,
-          ]
-            .filter((part): part is string => part !== null)
-            .join('; '),
+          `ProjectData storage cleanup target unreachable: databaseSize=${telemetry.databaseSizeBytes}, targetBytes=${targetBytes}, reclaimableBytes=${telemetry.reclaimableBytes ?? 0}`,
           1000
         )
       : null;
@@ -193,6 +202,9 @@ async function persistCleanupHealthTelemetryAndAlerts(
   writeMeta(sql, META_LAST_MEASURED_AT, String(measuredAt));
   writeMeta(sql, META_LAST_STATUS, telemetry.status);
   if (lastError) writeMeta(sql, META_LAST_ERROR, truncate(lastError, 500));
+  else if (!cleanupHadFailure(cleanup, groupedFtsCleanup, eventLogCleanup)) {
+    deleteMeta(sql, META_LAST_ERROR);
+  }
 
   try {
     await upsertProjectDataStorageTelemetry(
@@ -302,6 +314,7 @@ export async function runProjectDataStorageSafetyAlarmCore(
           rowsScanned: cleanup.rowsScanned,
           rowsUpdated: cleanup.rowsUpdated,
           rowsFailed: cleanup.rowsFailed,
+          rearchivableOversizedAttemptsReset: cleanup.rearchivableOversizedAttemptsReset,
           batchRows: cleanup.batchRows,
           batchBytes: cleanup.batchBytes,
           toolMetadataBytesScanned: cleanup.toolMetadataBytesScanned,

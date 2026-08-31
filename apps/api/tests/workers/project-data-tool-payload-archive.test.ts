@@ -449,6 +449,113 @@ describe('ProjectData tool payload R2 archival', () => {
     const loaded = await stub.getMessageToolContent(seeded.sessionId, seeded.messageIds[0]!);
     expect(loaded?.source).toBe('archive');
     expect(JSON.stringify(loaded?.content)).toContain('chunked-large');
+
+    await env.PROJECT_DATA_ARCHIVE_R2.delete(manifestJson.chunks![0]!);
+    const unavailable = await stub.getMessageToolContent(seeded.sessionId, seeded.messageIds[0]!);
+    expect(unavailable?.source).toBe('archived_unavailable');
+    expect(unavailable?.archived.reason).toContain('archived R2 chunk is missing');
+  });
+
+  it('reconsiders stale oversized cleanup attempts that now fit the archive cap', async () => {
+    const projectId = `${TEST_PREFIX}-stale-oversized-retry`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'stale-oversized', createdAt: FIXED_NOW - 1_000, sequence: 1 },
+    ]);
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        'UPDATE chat_messages SET tool_metadata = ? WHERE id = ?',
+        makeToolMetadata('stale-oversized', 1_100_000),
+        seeded.messageIds[0]
+      );
+    });
+
+    const first = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS: '1',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES: '1400000',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES: '1000000',
+      },
+      { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+    );
+    expect(first?.rowsFailed).toBe(1);
+    expect(first?.terminationReason).toBe('oversized_skip');
+    expect(await readCleanupAttempts(stub, seeded.messageIds)).toEqual([
+      expect.objectContaining({ message_id: seeded.messageIds[0], status: 'oversized' }),
+    ]);
+
+    const second = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS: '1',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES: '1600000',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES: '200000',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES: '1900000',
+      },
+      { now: FIXED_NOW + 2, nowMs: () => FIXED_NOW + 2 }
+    );
+
+    expect(second?.rearchivableOversizedAttemptsReset).toBe(1);
+    expect(second?.rowsUpdated).toBe(1);
+    expect(await readCleanupAttempts(stub, seeded.messageIds)).toHaveLength(0);
+    const archiveRows = await readArchiveRows(stub, seeded.messageIds);
+    expect(archiveRows).toHaveLength(1);
+    const metadata = await readMessageMetadata(stub, seeded.messageIds);
+    expect(metadata.get(seeded.messageIds[0]!)?.content).toBeUndefined();
+  });
+
+  it('leaves source metadata intact when a chunked R2 archive write fails', async () => {
+    const projectId = `${TEST_PREFIX}-chunk-write-failure`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'chunk-failure', createdAt: FIXED_NOW - 1_000, sequence: 1 },
+    ]);
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        'UPDATE chat_messages SET tool_metadata = ? WHERE id = ?',
+        makeToolMetadata('chunk-failure', 1_150_000),
+        seeded.messageIds[0]
+      );
+    });
+
+    const failingBucket = {
+      put: async (key: string) => {
+        if (key.endsWith('.chunk-1')) throw new Error('simulated chunk write failure');
+        return null;
+      },
+    } as unknown as R2Bucket;
+    const result = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        PROJECT_DATA_ARCHIVE_R2: failingBucket,
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES: '1800000',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES: '200000',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES: '1800000',
+      },
+      { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+    );
+
+    expect(result?.rowsUpdated).toBe(0);
+    expect(result?.rowsFailed).toBe(1);
+    expect(result?.terminationReason).toBe('error');
+    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
+    const metadata = await readMessageMetadata(stub, seeded.messageIds);
+    expect(Array.isArray(metadata.get(seeded.messageIds[0]!)?.content)).toBe(true);
+    expect(await readCleanupAttempts(stub, seeded.messageIds)).toEqual([
+      expect.objectContaining({
+        message_id: seeded.messageIds[0],
+        status: 'retryable_failure',
+      }),
+    ]);
   });
 
   it('archives only tool payloads strictly older than the retention boundary', async () => {

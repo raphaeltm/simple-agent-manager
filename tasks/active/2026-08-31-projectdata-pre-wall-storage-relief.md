@@ -166,6 +166,22 @@ merging, closing the draft, or expanding the incident scope.
   `tool-payload-archive-r2.ts`, keeping
   `tool-payload-archive.ts` below the 800-line source-file limit without
   changing fail-closed archive semantics.
+- Fable review task `01M1BZEMDVRPTTRA6MSQ2P6WGD`: addressed the confirmed
+  blocking/high findings without staging or production mutation:
+  byte-oversized grouped/FTS sessions now skip-and-advance instead of wedging
+  the cursor; overload breaker matching is bounded by the configured grouped
+  cleanup recheck window and healthy cleanup-health passes clear stale last
+  errors; target-unreachable error meta no longer chains previous overload text;
+  old `oversized` tool-payload cleanup attempts now reset in bounded cursor
+  order when the current archive cap can handle the row; measurement reports
+  those rows through distinct rearchivable-oversized counters; and the unintended
+  `.codex/config.toml` runtime-state line was removed from the PR diff.
+- Additional focused regressions cover byte-oversized grouped/FTS skip and
+  continuation, stale overload metadata not permanently blocking grouped/FTS
+  cleanup, grouped/FTS cleanup through the alarm entry point, storage-relief
+  measurement cursor resume, stale `oversized` attempt retry under the larger
+  archive cap, chunked R2 write failure leaving source metadata intact, and
+  missing chunk retrieval degrading explicitly to `archived_unavailable`.
 
 Additional local validation for the follow-up:
 
@@ -180,6 +196,7 @@ Additional local validation for the follow-up:
 - `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/project-data-tool-payload-archive.test.ts --reporter dot` — pass, 2 tests.
 - `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/project-data-tool-payload-archive.test.ts --reporter dot` — pass, 12 tests.
 - `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/project-data-storage-safety.test.ts --reporter dot` — pass, 16 tests.
+- `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/project-data-storage-safety.test.ts tests/workers/project-data-tool-payload-archive.test.ts --reporter dot` — pass, 33 tests after Fable fixes.
 - `pnpm quality:file-sizes` — pass.
 - `pnpm quality:migration-safety && pnpm quality:migration-ordering && pnpm quality:do-migration-safety` — pass.
 - `pnpm quality:ast-checks && pnpm quality:file-sizes && pnpm quality:stale-artifacts` — pass; AST checks reported warning-only baseline issues and 0 errors.

@@ -1,6 +1,7 @@
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import type { ProjectDataStorageStatus, StorageSafetyConfig } from './storage-safety';
 import {
+  META_LAST_MEASURED_AT,
   readStorageSafetyMeta,
   readStorageSafetyMetaNumber,
   truncateStorageSafetyMetaValue,
@@ -241,9 +242,19 @@ function deleteGroupedFtsForSession(
   return { groupedRowsDeleted, ftsRowsDeleted, contentBytes };
 }
 
-function hasRecentOverloadSignal(sql: SqlStorage): string | null {
+function hasRecentOverloadSignal(
+  sql: SqlStorage,
+  now: number,
+  config: StorageSafetyConfig
+): string | null {
   const lastError = readStorageSafetyMeta(sql, META_LAST_ERROR);
-  if (lastError && OVERLOAD_ERROR_PATTERN.test(lastError)) return lastError;
+  if (!lastError || !OVERLOAD_ERROR_PATTERN.test(lastError)) return null;
+  const lastMeasuredAt = readStorageSafetyMetaNumber(sql, META_LAST_MEASURED_AT);
+  if (lastMeasuredAt === null) return null;
+  const lastErrorAgeMs = now - lastMeasuredAt;
+  if (lastErrorAgeMs >= 0 && lastErrorAgeMs <= config.groupedFtsCleanupRecheckMs) {
+    return lastError;
+  }
   return null;
 }
 
@@ -279,7 +290,7 @@ export async function runProjectDataGroupedFtsCleanup(
   if (pendingRecheckAt !== null && pendingRecheckAt > now) return null;
   if (!cursorSessionId && beforeBytes < triggerBytes && !options.allowStart) return null;
 
-  const overloadSignal = hasRecentOverloadSignal(sql);
+  const overloadSignal = hasRecentOverloadSignal(sql, now, config);
   if (overloadSignal) {
     const reason = `recent overload/reset signal: ${overloadSignal}`;
     writeGroupedFtsCleanupState(
@@ -346,6 +357,12 @@ export async function runProjectDataGroupedFtsCleanup(
       break;
     }
     if (originalContentBytes + candidate.contentBytes > config.groupedFtsCleanupBatchBytes) {
+      if (candidate.contentBytes > config.groupedFtsCleanupBatchBytes) {
+        terminationReason = 'oversized_skip';
+        lastProcessedSessionId = candidate.sessionId;
+        shouldContinue = true;
+        continue;
+      }
       terminationReason = 'byte_budget';
       shouldContinue = true;
       break;

@@ -22,6 +22,7 @@ export interface ProjectDataToolPayloadCleanupResult {
   rowsScanned: number;
   rowsUpdated: number;
   rowsFailed: number;
+  rearchivableOversizedAttemptsReset: number;
   toolMetadataBytesScanned: number;
   toolMetadataBytesRead: number;
   originalToolMetadataBytes: number;

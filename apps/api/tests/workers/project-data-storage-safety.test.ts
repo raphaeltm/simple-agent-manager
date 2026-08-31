@@ -914,6 +914,43 @@ describe('ProjectData storage safety firebreak', () => {
     expect(firstMeasure.toolPayloads.legacyOversizedRows).toBe(1);
     expect(firstMeasure.toolPayloads.oversizedRows).toBe(0);
 
+    const resumedMeasure = await projectDataService.measureProjectDataStorageRelief(
+      testEnv,
+      projectId,
+      {
+        limit: 10,
+        cursor: { grouped: firstMeasure.grouped.nextCursor! },
+      }
+    );
+    expect(resumedMeasure.grouped.rowsExamined).toBeGreaterThan(0);
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO tool_payload_cleanup_attempts (
+           message_id,
+           status,
+           failure_count,
+           next_attempt_at,
+           last_attempt_at,
+           last_error,
+           message_created_at,
+           message_sequence
+         )
+         SELECT id, 'oversized', 1, NULL, ?, 'legacy oversized', created_at, COALESCE(sequence, 0)
+         FROM chat_messages
+         WHERE id = ?`,
+        Date.now(),
+        seeded.legacyToolMessageId
+      );
+    });
+    const rearchivableMeasure = await projectDataService.measureProjectDataStorageRelief(
+      testEnv,
+      projectId,
+      { limit: 10 }
+    );
+    expect(rearchivableMeasure.toolPayloads.rearchivableOversizedRows).toBe(1);
+    expect(rearchivableMeasure.toolPayloads.rearchivableOversizedBytes).toBeGreaterThan(0);
+
     const disabled = await stub.runGroupedFtsCleanup();
     expect(disabled?.terminationReason).toBe('disabled');
 
@@ -930,7 +967,7 @@ describe('ProjectData storage safety firebreak', () => {
         groupedFtsCleanupBatchRows: 20,
         groupedFtsCleanupBatchBytes: 1_000_000,
         groupedFtsCleanupMinSessionAgeMs: 7 * 24 * 60 * 60 * 1000,
-        groupedFtsCleanupWeakReclaimBytes: 1,
+        groupedFtsCleanupWeakReclaimBytes: 0,
       };
       const result = await runProjectDataGroupedFtsCleanup(
         state.storage.sql,
@@ -1030,6 +1067,211 @@ describe('ProjectData storage safety firebreak', () => {
     });
     expect(resumeResult?.groupedRowsDeleted).toBe(0);
     expect(resumeResult?.terminationReason).toMatch(/target_reached|candidates_exhausted/);
+  });
+
+  it('skips a byte-oversized grouped FTS session and continues past it', async () => {
+    const projectId = `storage-grouped-fts-byte-skip-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+
+    const seeded = await runInDurableObject(stub, async (instance, state) => {
+      const oversizedSessionId = await instance.createSession(null, 'Byte oversized grouped FTS');
+      await instance.persistMessage(
+        oversizedSessionId,
+        'assistant',
+        `byte-oversized ${'b'.repeat(256 * 1024)}`,
+        null,
+        null
+      );
+      await instance.stopSession(oversizedSessionId);
+
+      const cleanupSessionId = await instance.createSession(null, 'Byte budget cleanup follower');
+      await instance.persistMessage(
+        cleanupSessionId,
+        'assistant',
+        `byte-cleanable ${'c'.repeat(32 * 1024)}`,
+        null,
+        null
+      );
+      await instance.stopSession(cleanupSessionId);
+
+      const oldUpdatedAt = Date.now() - 8 * 24 * 60 * 60 * 1000;
+      state.storage.sql.exec(
+        `UPDATE chat_sessions
+         SET updated_at = ?
+         WHERE id IN (?, ?)`,
+        oldUpdatedAt,
+        oversizedSessionId,
+        cleanupSessionId
+      );
+      return { oversizedSessionId, cleanupSessionId };
+    });
+
+    const result = await runInDurableObject(stub, async (_instance, state) => {
+      await state.storage.deleteAlarm();
+      const config = {
+        ...resolveStorageSafetyConfig(testEnv),
+        limitBytes: Math.ceil(state.storage.sql.databaseSize / 0.92),
+        groupedFtsCleanupEnabled: true,
+        groupedFtsCleanupTriggerRatio: 0.9,
+        groupedFtsCleanupTargetRatio: 0.85,
+        groupedFtsCleanupBatchSessions: 3,
+        groupedFtsCleanupBatchRows: 50,
+        groupedFtsCleanupBatchBytes: 128 * 1024,
+        groupedFtsCleanupMinSessionAgeMs: 7 * 24 * 60 * 60 * 1000,
+        groupedFtsCleanupWeakReclaimBytes: 0,
+      };
+      return runProjectDataGroupedFtsCleanup(state.storage.sql, testEnv, projectId, config, {
+        allowStart: true,
+      });
+    });
+
+    expect(result?.terminationReason).toBe('oversized_skip');
+    expect(result?.groupedRowsDeleted).toBeGreaterThan(0);
+
+    const remaining = await runInDurableObject(stub, async (_instance, state) => {
+      const rows = state.storage.sql
+        .exec(
+          `SELECT session_id, COUNT(*) AS count
+           FROM chat_messages_grouped
+           WHERE session_id IN (?, ?)
+           GROUP BY session_id
+           ORDER BY session_id ASC`,
+          seeded.oversizedSessionId,
+          seeded.cleanupSessionId
+        )
+        .toArray() as Array<{ session_id: string; count: number }>;
+      return new Map(rows.map((row) => [row.session_id, row.count]));
+    });
+    expect(remaining.get(seeded.oversizedSessionId) ?? 0).toBeGreaterThan(0);
+    expect(remaining.get(seeded.cleanupSessionId) ?? 0).toBe(0);
+  });
+
+  it('ignores stale overload metadata when evaluating grouped FTS cleanup', async () => {
+    const projectId = `storage-grouped-fts-stale-overload-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const now = Date.now();
+
+    const sessionId = await runInDurableObject(stub, async (instance, state) => {
+      const id = await instance.createSession(null, 'Grouped FTS stale overload guard');
+      await instance.persistMessage(id, 'assistant', `stale-overload ${'s'.repeat(64 * 1024)}`, null, null);
+      await instance.stopSession(id);
+      state.storage.sql.exec(
+        `UPDATE chat_sessions SET updated_at = ? WHERE id = ?`,
+        now - 8 * 24 * 60 * 60 * 1000,
+        id
+      );
+      state.storage.sql.exec(
+        `INSERT INTO do_meta (key, value)
+         VALUES ('storageSafetyLastMeasuredAt', ?), ('storageSafetyLastError', ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        String(now - 60_001),
+        'storage operation exceeded timeout'
+      );
+      return id;
+    });
+
+    const result = await runInDurableObject(stub, async (_instance, state) => {
+      await state.storage.deleteAlarm();
+      const config = {
+        ...resolveStorageSafetyConfig(testEnv),
+        limitBytes: Math.ceil(state.storage.sql.databaseSize / 0.92),
+        groupedFtsCleanupEnabled: true,
+        groupedFtsCleanupTriggerRatio: 0.9,
+        groupedFtsCleanupTargetRatio: 0.85,
+        groupedFtsCleanupBatchSessions: 1,
+        groupedFtsCleanupBatchRows: 20,
+        groupedFtsCleanupBatchBytes: 1_000_000,
+        groupedFtsCleanupMinSessionAgeMs: 7 * 24 * 60 * 60 * 1000,
+        groupedFtsCleanupRecheckMs: 60_000,
+        groupedFtsCleanupWeakReclaimBytes: 1,
+      };
+      return runProjectDataGroupedFtsCleanup(state.storage.sql, testEnv, projectId, config, {
+        allowStart: true,
+        now,
+      });
+    });
+
+    expect(result?.terminationReason).not.toBe('circuit_breaker');
+    expect(result?.groupedRowsDeleted).toBeGreaterThan(0);
+    const groupedCount = await runInDurableObject(stub, async (_instance, state) => {
+      const row = state.storage.sql
+        .exec('SELECT COUNT(*) AS count FROM chat_messages_grouped WHERE session_id = ?', sessionId)
+        .toArray()[0] as { count: number };
+      return row.count;
+    });
+    expect(groupedCount).toBe(0);
+  });
+
+  it('runs grouped FTS cleanup through the storage safety alarm path when enabled', async () => {
+    const projectId = `storage-grouped-fts-alarm-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+
+    const seeded = await runInDurableObject(stub, async (instance, state) => {
+      const sessionId = await instance.createSession(null, 'Grouped FTS alarm target');
+      const messageId = await instance.persistMessage(
+        sessionId,
+        'assistant',
+        `alarm-grouped-cleanup ${'a'.repeat(96 * 1024)}`,
+        null,
+        null
+      );
+      await instance.stopSession(sessionId);
+      state.storage.sql.exec(
+        `UPDATE chat_sessions SET updated_at = ? WHERE id = ?`,
+        Date.now() - 8 * 24 * 60 * 60 * 1000,
+        sessionId
+      );
+      return { sessionId, messageId };
+    });
+    const currentSize = await runInDurableObject(
+      stub,
+      async (_instance, state) => state.storage.sql.databaseSize
+    );
+
+    await withProjectDataStorageEnv(
+      {
+        PROJECT_DATA_STORAGE_LIMIT_BYTES: String(Math.ceil(currentSize / 0.9)),
+        PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS: '1',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'false',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED: 'true',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO: '0.85',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO: '0.8',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS: '1',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_ROWS: '50',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_BYTES: '1000000',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_MIN_SESSION_AGE_DAYS: '7',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES: '1',
+      },
+      async () => {
+        await runInDurableObject(stub, async (instance) => instance.alarm());
+      }
+    );
+
+    const after = await runInDurableObject(stub, async (_instance, state) => {
+      const groupedRows = state.storage.sql
+        .exec(
+          'SELECT COUNT(*) AS count FROM chat_messages_grouped WHERE session_id = ?',
+          seeded.sessionId
+        )
+        .toArray()[0] as { count: number };
+      const rawRows = state.storage.sql
+        .exec('SELECT COUNT(*) AS count FROM chat_messages WHERE id = ?', seeded.messageId)
+        .toArray()[0] as { count: number };
+      const session = state.storage.sql
+        .exec('SELECT search_index_state FROM chat_sessions WHERE id = ?', seeded.sessionId)
+        .toArray()[0] as { search_index_state: string | null };
+      return { groupedRows: groupedRows.count, rawRows: rawRows.count, session };
+    });
+
+    expect(after.groupedRows).toBe(0);
+    expect(after.rawRows).toBe(1);
+    expect(after.session.search_index_state).toBe('grouped_fts_pruned');
   });
 
   it('refuses grouped FTS cleanup when the wall-safety circuit breaker is tripped', async () => {

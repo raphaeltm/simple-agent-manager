@@ -249,6 +249,129 @@ export function hasToolPayloadCandidatesAfter(
   return false;
 }
 
+export function clearRearchivableOversizedToolPayloadCleanupAttempts(
+  sql: SqlStorage,
+  cursor: ToolPayloadCleanupCursor | null,
+  cutoffCreatedAt: number,
+  archiveMaxMetadataBytes: number,
+  limit: number
+): number {
+  if (!Number.isSafeInteger(limit) || limit <= 0) return 0;
+  const cursorSessionId = cursor?.sessionId ?? null;
+  const cursorCreatedAt = cursor?.createdAt ?? null;
+  const cursorSequence = cursor?.sequence ?? null;
+  const cursorMessageId = cursor?.messageId ?? null;
+  sql.exec(
+    `DELETE FROM tool_payload_cleanup_attempts
+     WHERE message_id IN (
+       SELECT attempt.message_id
+       FROM tool_payload_cleanup_attempts attempt
+       JOIN chat_messages m ON m.id = attempt.message_id
+       WHERE attempt.status = 'oversized'
+         AND m.role = 'tool'
+         AND m.tool_metadata IS NOT NULL
+         AND instr(m.tool_metadata, ?) > 0
+         AND m.created_at < ?
+         AND length(CAST(m.tool_metadata AS BLOB)) <= ?
+         AND (
+           ? IS NULL
+           OR m.session_id > ?
+           OR (
+             m.session_id = ?
+             AND (
+               m.created_at > ?
+               OR (m.created_at = ? AND COALESCE(m.sequence, 0) > ?)
+               OR (m.created_at = ? AND COALESCE(m.sequence, 0) = ? AND m.id > ?)
+             )
+           )
+         )
+         AND NOT EXISTS (
+           SELECT 1
+           FROM tool_payload_archives archived
+           WHERE archived.message_id = m.id
+         )
+       ORDER BY m.session_id ASC, m.created_at ASC, COALESCE(m.sequence, 0) ASC, m.id ASC
+       LIMIT ?
+     )`,
+    TOOL_PAYLOAD_CONTENT_KEY_NEEDLE,
+    cutoffCreatedAt,
+    archiveMaxMetadataBytes,
+    cursorSessionId,
+    cursorSessionId ?? '',
+    cursorSessionId ?? '',
+    cursorCreatedAt ?? 0,
+    cursorCreatedAt ?? 0,
+    cursorSequence ?? 0,
+    cursorCreatedAt ?? 0,
+    cursorSequence ?? 0,
+    cursorMessageId ?? '',
+    limit
+  );
+  const row = sql.exec('SELECT changes()').raw().next().value;
+  return row ? (rawNumber(row[0]) ?? 0) : 0;
+}
+
+export function hasRearchivableOversizedToolPayloadCleanupAttemptsAfter(
+  sql: SqlStorage,
+  cursor: ToolPayloadCleanupCursor | null,
+  cutoffCreatedAt: number,
+  archiveMaxMetadataBytes: number
+): boolean {
+  const cursorSessionId = cursor?.sessionId ?? null;
+  const cursorCreatedAt = cursor?.createdAt ?? null;
+  const cursorSequence = cursor?.sequence ?? null;
+  const cursorMessageId = cursor?.messageId ?? null;
+  const rows = sql
+    .exec(
+      `SELECT attempt.message_id
+       FROM tool_payload_cleanup_attempts attempt
+       JOIN chat_messages m ON m.id = attempt.message_id
+       WHERE attempt.status = 'oversized'
+         AND m.role = 'tool'
+         AND m.tool_metadata IS NOT NULL
+         AND instr(m.tool_metadata, ?) > 0
+         AND m.created_at < ?
+         AND length(CAST(m.tool_metadata AS BLOB)) <= ?
+         AND (
+           ? IS NULL
+           OR m.session_id > ?
+           OR (
+             m.session_id = ?
+             AND (
+               m.created_at > ?
+               OR (m.created_at = ? AND COALESCE(m.sequence, 0) > ?)
+               OR (m.created_at = ? AND COALESCE(m.sequence, 0) = ? AND m.id > ?)
+             )
+           )
+         )
+         AND NOT EXISTS (
+           SELECT 1
+           FROM tool_payload_archives archived
+           WHERE archived.message_id = m.id
+         )
+       ORDER BY m.session_id ASC, m.created_at ASC, COALESCE(m.sequence, 0) ASC, m.id ASC
+       LIMIT ?`,
+      TOOL_PAYLOAD_CONTENT_KEY_NEEDLE,
+      cutoffCreatedAt,
+      archiveMaxMetadataBytes,
+      cursorSessionId,
+      cursorSessionId ?? '',
+      cursorSessionId ?? '',
+      cursorCreatedAt ?? 0,
+      cursorCreatedAt ?? 0,
+      cursorSequence ?? 0,
+      cursorCreatedAt ?? 0,
+      cursorSequence ?? 0,
+      cursorMessageId ?? '',
+      1
+    )
+    .raw();
+  for (const row of rows) {
+    if (typeof row[0] === 'string') return true;
+  }
+  return false;
+}
+
 function parseToolPayloadCandidateRows(rows: IterableIterator<unknown[]>): ToolPayloadCandidate[] {
   const candidates: ToolPayloadCandidate[] = [];
   for (const row of rows) {

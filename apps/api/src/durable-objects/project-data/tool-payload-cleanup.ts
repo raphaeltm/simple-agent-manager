@@ -9,6 +9,8 @@ import {
 } from './storage-safety-meta';
 import { readNextToolPayloadCleanupRetryAt } from './tool-payload-cleanup-attempts';
 import {
+  clearRearchivableOversizedToolPayloadCleanupAttempts,
+  hasRearchivableOversizedToolPayloadCleanupAttemptsAfter,
   hasToolPayloadCandidatesAfter,
   scanToolPayloadCandidates,
   selectToolPayloadCandidates,
@@ -72,6 +74,7 @@ type ToolPayloadCleanupBatch = {
   rowsScanned: number;
   rowsUpdated: number;
   rowsFailed: number;
+  rearchivableOversizedAttemptsReset: number;
   toolMetadataBytesScanned: number;
   toolMetadataBytesRead: number;
   originalToolMetadataBytes: number;
@@ -152,6 +155,7 @@ function createEmptyToolPayloadCleanupBatch(): ToolPayloadCleanupBatch {
     rowsScanned: 0,
     rowsUpdated: 0,
     rowsFailed: 0,
+    rearchivableOversizedAttemptsReset: 0,
     toolMetadataBytesScanned: 0,
     toolMetadataBytesRead: 0,
     originalToolMetadataBytes: 0,
@@ -176,6 +180,14 @@ async function scanToolPayloadCleanupBatch(
   plan: ToolPayloadCleanupPlan
 ): Promise<ToolPayloadCleanupBatch> {
   const batch = createEmptyToolPayloadCleanupBatch();
+  batch.rearchivableOversizedAttemptsReset =
+    clearRearchivableOversizedToolPayloadCleanupAttempts(
+      sql,
+      plan.pendingCursor,
+      plan.cutoffCreatedAt,
+      plan.archiveMaxMetadataBytes,
+      plan.batchRows
+    );
   const candidates = selectToolPayloadCandidates(
     sql,
     plan.pendingCursor,
@@ -239,9 +251,20 @@ async function scanToolPayloadCleanupBatch(
   }
 
   const lastCursor = scanned.lastCursor;
+  if (lastCursor && hasToolPayloadCandidatesAfter(sql, lastCursor, plan.cutoffCreatedAt, plan.now)) {
+    batch.hasMoreCandidates = true;
+    batch.pauseCursor = lastCursor;
+    return batch;
+  }
+
   if (
     lastCursor &&
-    hasToolPayloadCandidatesAfter(sql, lastCursor, plan.cutoffCreatedAt, plan.now)
+    hasRearchivableOversizedToolPayloadCleanupAttemptsAfter(
+      sql,
+      lastCursor,
+      plan.cutoffCreatedAt,
+      plan.archiveMaxMetadataBytes
+    )
   ) {
     batch.hasMoreCandidates = true;
     batch.pauseCursor = lastCursor;
@@ -305,6 +328,7 @@ function buildToolPayloadCleanupResult(
     rowsScanned: batch.rowsScanned,
     rowsUpdated: batch.rowsUpdated,
     rowsFailed: batch.rowsFailed,
+    rearchivableOversizedAttemptsReset: batch.rearchivableOversizedAttemptsReset,
     toolMetadataBytesScanned: batch.toolMetadataBytesScanned,
     toolMetadataBytesRead: batch.toolMetadataBytesRead,
     originalToolMetadataBytes: batch.originalToolMetadataBytes,
@@ -426,6 +450,7 @@ function shouldReturnToolPayloadCleanupResult(
     batch.rowsScanned > 0 ||
     batch.rowsUpdated > 0 ||
     batch.rowsFailed > 0 ||
+    batch.rearchivableOversizedAttemptsReset > 0 ||
     exhaustedCandidates ||
     shouldContinue
   );
@@ -449,6 +474,7 @@ function buildFailedToolPayloadCleanupResult(
     rowsScanned: 0,
     rowsUpdated: 0,
     rowsFailed: 1,
+    rearchivableOversizedAttemptsReset: 0,
     toolMetadataBytesScanned: 0,
     toolMetadataBytesRead: 0,
     originalToolMetadataBytes: 0,

@@ -42,6 +42,8 @@ export type ProjectDataStorageReliefMeasureResult = {
     eligibleBytes: number;
     legacyOversizedRows: number;
     legacyOversizedBytes: number;
+    rearchivableOversizedRows: number;
+    rearchivableOversizedBytes: number;
     oversizedRows: number;
     oversizedBytes: number;
     archivedRows: number;
@@ -179,7 +181,8 @@ function measureToolPayloadSlice(
          COALESCE(m.sequence, 0) AS sequence,
          length(CAST(m.tool_metadata AS BLOB)) AS tool_metadata_bytes,
          CASE WHEN archived.message_id IS NULL THEN 0 ELSE 1 END AS archived,
-         CASE WHEN attempt.message_id IS NULL THEN 0 ELSE 1 END AS skipped
+         CASE WHEN attempt.message_id IS NULL THEN 0 ELSE 1 END AS skipped,
+         attempt.status AS attempt_status
        FROM chat_messages m
        LEFT JOIN tool_payload_archives archived ON archived.message_id = m.id
        LEFT JOIN tool_payload_cleanup_attempts attempt ON attempt.message_id = m.id
@@ -221,6 +224,8 @@ function measureToolPayloadSlice(
   let eligibleBytes = 0;
   let legacyOversizedRows = 0;
   let legacyOversizedBytes = 0;
+  let rearchivableOversizedRows = 0;
+  let rearchivableOversizedBytes = 0;
   let oversizedRows = 0;
   let oversizedBytes = 0;
   let archivedRows = 0;
@@ -236,6 +241,7 @@ function measureToolPayloadSlice(
     const bytes = rawNumber(row[4]) ?? 0;
     const archived = rawNumber(row[5]) === 1;
     const skipped = rawNumber(row[6]) === 1;
+    const attemptStatus = typeof row[7] === 'string' ? row[7] : null;
     if (
       typeof messageId !== 'string' ||
       typeof sessionId !== 'string' ||
@@ -250,7 +256,14 @@ function measureToolPayloadSlice(
     }
     rowsExamined++;
     if (archived) archivedRows++;
-    else if (skipped) skippedRows++;
+    else if (skipped) {
+      if (attemptStatus === 'oversized' && bytes <= config.toolPayloadArchiveMaxMetadataBytes) {
+        rearchivableOversizedRows++;
+        rearchivableOversizedBytes += bytes;
+      } else {
+        skippedRows++;
+      }
+    }
     else if (bytes > config.toolPayloadArchiveMaxMetadataBytes) {
       oversizedRows++;
       oversizedBytes += bytes;
@@ -271,6 +284,8 @@ function measureToolPayloadSlice(
     eligibleBytes,
     legacyOversizedRows,
     legacyOversizedBytes,
+    rearchivableOversizedRows,
+    rearchivableOversizedBytes,
     oversizedRows,
     oversizedBytes,
     archivedRows,

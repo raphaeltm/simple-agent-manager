@@ -114,7 +114,7 @@ Project event pull loop: create a subscription with the narrowest useful filter,
 - `GET /api/admin/project-data/storage` — List latest per-project ProjectData storage telemetry from D1 (`projectId`, `status`, `limit` filters), including growth forecast, cleanup health, reclaimable bytes, category breakdown JSON, and last alert reason
 - `GET /api/admin/project-data/storage/history` — List append-only ProjectData storage telemetry history from D1 (`projectId`, `status`, `cleanupHealth`, `limit` filters) for growth and cleanup-health trends
 - `POST /api/admin/project-data/storage/:projectId/measure` — Force one ProjectData `databaseSize` measurement and D1 telemetry upsert
-- `POST /api/admin/project-data/storage/:projectId/relief-measure` — Run one strictly bounded, cursor-resumable ProjectData storage-relief measurement slice for grouped/FTS derived rows and legacy tool payload stock; never performs the old full hot-object scan
+- `POST /api/admin/project-data/storage/:projectId/relief-measure` — Run one strictly bounded, cursor-resumable ProjectData storage-relief measurement slice for grouped/FTS derived rows, legacy tool payload stock, and stale `oversized` attempts now below the archive cap; never performs the old full hot-object scan
 - `POST /api/admin/project-data/storage/:projectId/grouped-fts-cleanup` — Run one explicitly enabled, production-disabled canary slice that removes old terminal-session grouped message rows and external-content FTS entries while preserving raw `chat_messages`
 - `POST /api/admin/project-data/storage/:projectId/emergency-purge` — Run a bounded ProjectData emergency purge of oldest `activity_events` and `acp_session_events` rows only
 
