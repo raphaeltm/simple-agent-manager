@@ -18,6 +18,15 @@ there is no staging deployment, production/configuration mutation, or merge.
 ## Research findings
 
 - The failed predecessor `01M1BQW8RFBQ85FGM5FW7AE7QB` never started an agent turn and has no code.
+- Salvage audit for failed implementation task `01M1BSRST91TVJE9MCCQ022WAD` found three local-only
+  commits in its durable transcript: `a68075003` (initial bridge), `3ed56e504` (recovery hardening),
+  and `14e27ee25` (fence/index tests). The agent reported 11/11 focused Workers tests passing before
+  later edits, then died after a SAM check-in. GitHub has none of those commit objects, the remote
+  salvage branch still points at this task-only commit (`fc00176ad`), the replacement workspace's
+  Git object database has no recent unreachable commits, and read-only production D1 shows the old
+  workspace `01M1BSRY52X8WGG38HK78BVZ3S` is deleted with no `session_snapshots` row. The unpushed
+  implementation bytes are therefore unavailable, but its design/file/test trace remains usable
+  evidence. Continue on this branch and preserve that design rather than reviving PR #1873 wholesale.
 - Current branch HEAD exactly matched fresh `origin/main` at `78d29db006cc6f9b6ac8cff71485c2d3d070b06a`.
 - Draft PR #1873 used root-alarm migration, PRAGMA page estimation, root-owned shard metadata, whole
   session bundles, and project-wide shard fanout. Those are compatibility/negative evidence only;
