@@ -573,12 +573,11 @@ async function openChat(page: Page) {
   await waitForUiSettled(page);
 }
 
-/** Expand the session-details disclosure so the action row is reachable. */
+/** Comments now lives in the always-visible session tool rail. */
 async function expandHeader(page: Page) {
-  const details = page.getByLabel('Show session details').first();
+  const details = page.getByTestId('session-tool-details').first();
   if (await details.isVisible().catch(() => false)) {
-    await details.click();
-    await expect(page.getByRole('button', { name: /^Comments/ }).first()).toBeVisible();
+    await expect(page.getByTestId('session-tool-comments').first()).toBeVisible();
   }
 }
 

@@ -3,7 +3,11 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { SessionHeader } from '../../src/components/project-message-view/SessionHeader';
+import {
+  buildSessionToolActions,
+  type BuildSessionToolActionsInput,
+} from '../../src/components/project-message-view/session-tool-actions';
+import { SessionToolRail } from '../../src/components/project-message-view/SessionToolRail';
 import type { ChatSessionResponse } from '../../src/lib/api';
 import { DerivedSessionBanner } from '../../src/pages/project-chat/DerivedSessionBanner';
 
@@ -98,82 +102,250 @@ describe('DerivedSessionBanner', () => {
   });
 });
 
-describe('SessionHeader retry/fork buttons', () => {
-  const onRetry = vi.fn();
-  const onFork = vi.fn();
-  const projectId = 'proj-1';
+/**
+ * Retry and Fork used to be unlabeled 14px icons in the session-header title row. They
+ * are now named controls in `SessionToolRail`, so the same behavioural contract —
+ * present for sessions with a task, absent without, wired to their handlers — is
+ * asserted against the rail.
+ */
+describe('Retry/Fork in the session tool rail', () => {
+  const onSelect = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  function renderHeader(
+  function actionsFor(
     session: ChatSessionResponse,
-    sessionState: 'active' | 'idle' | 'terminated' = 'terminated',
-    extraProps: Record<string, unknown> = {},
+    sessionState: BuildSessionToolActionsInput['sessionState'] = 'terminated',
+    overrides: Partial<BuildSessionToolActionsInput> = {}
+  ) {
+    return buildSessionToolActions({
+      session,
+      sessionState,
+      taskEmbed: session.task ?? null,
+      reportEnabled: false,
+      unresolvedCommentCount: 0,
+      hasFilesHandler: true,
+      hasGitHandler: true,
+      hasTimelineHandler: true,
+      hasCommentsHandler: true,
+      hasRetryHandler: true,
+      hasForkHandler: true,
+      ...overrides,
+    });
+  }
+
+  function renderRail(
+    session: ChatSessionResponse,
+    sessionState: BuildSessionToolActionsInput['sessionState'] = 'terminated'
   ) {
     return render(
       <MemoryRouter>
-        <SessionHeader
-          projectId={projectId}
-          session={session}
-          sessionState={sessionState}
-          loading={false}
-          idleCountdownMs={null}
-          taskEmbed={session.task ?? null}
-          workspace={null}
-          node={null}
-          detectedPorts={[]}
-          onRetry={onRetry}
-          onFork={onFork}
-          {...extraProps}
+        <SessionToolRail
+          actions={actionsFor(session, sessionState)}
+          mode="labels"
+          onModeChange={vi.fn()}
+          onSelect={onSelect}
+          isMobile={false}
         />
       </MemoryRouter>
     );
   }
 
-  it('shows retry and fork buttons for terminated sessions with tasks', () => {
-    renderHeader(makeSession(), 'terminated');
+  it('shows retry and fork for terminated sessions with tasks', () => {
+    renderRail(makeSession(), 'terminated');
 
-    expect(screen.getByLabelText('Retry task')).toBeTruthy();
-    expect(screen.getByLabelText('Fork session')).toBeTruthy();
+    expect(screen.getByLabelText('Retry — re-run this task')).toBeTruthy();
+    expect(screen.getByLabelText('Fork — start a new task from this session')).toBeTruthy();
   });
 
-  it('shows retry and fork buttons for active sessions with tasks', () => {
-    renderHeader(makeSession({ status: 'active' }), 'active');
+  it('shows retry and fork for active sessions with tasks', () => {
+    renderRail(makeSession({ status: 'active' }), 'active');
 
-    expect(screen.getByLabelText('Retry task')).toBeTruthy();
-    expect(screen.getByLabelText('Fork session')).toBeTruthy();
+    expect(screen.getByLabelText('Retry — re-run this task')).toBeTruthy();
+    expect(screen.getByLabelText('Fork — start a new task from this session')).toBeTruthy();
   });
 
-  it('shows retry and fork buttons for idle sessions with tasks', () => {
-    renderHeader(makeSession({ status: 'active', isIdle: true }), 'idle');
+  it('shows retry and fork for idle sessions with tasks', () => {
+    renderRail(makeSession({ status: 'active', isIdle: true }), 'idle');
 
-    expect(screen.getByLabelText('Retry task')).toBeTruthy();
-    expect(screen.getByLabelText('Fork session')).toBeTruthy();
+    expect(screen.getByLabelText('Retry — re-run this task')).toBeTruthy();
+    expect(screen.getByLabelText('Fork — start a new task from this session')).toBeTruthy();
   });
 
-  it('does not show buttons when session has no task', () => {
-    const noTaskSession = makeSession({ task: undefined, taskId: null });
-    renderHeader(noTaskSession, 'terminated');
+  it('omits retry and fork when the session has no task', () => {
+    renderRail(makeSession({ task: undefined, taskId: null }), 'terminated');
 
-    expect(screen.queryByLabelText('Retry task')).toBeNull();
-    expect(screen.queryByLabelText('Fork session')).toBeNull();
+    expect(screen.queryByLabelText('Retry — re-run this task')).toBeNull();
+    expect(screen.queryByLabelText('Fork — start a new task from this session')).toBeNull();
+    // Liveness: the rail rendered, so the absence above is a real omission rather than
+    // a component that failed to mount (rule 62).
+    expect(screen.getByLabelText('Show session details, IDs and infrastructure')).toBeTruthy();
   });
 
-  it('calls onRetry when retry button is clicked', async () => {
+  it('omits retry and fork when no handler is supplied', () => {
+    render(
+      <MemoryRouter>
+        <SessionToolRail
+          actions={actionsFor(makeSession(), 'terminated', {
+            hasRetryHandler: false,
+            hasForkHandler: false,
+          })}
+          mode="labels"
+          onModeChange={vi.fn()}
+          onSelect={onSelect}
+          isMobile={false}
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.queryByLabelText('Retry — re-run this task')).toBeNull();
+    expect(screen.queryByLabelText('Fork — start a new task from this session')).toBeNull();
+    expect(screen.getByLabelText('Show session details, IDs and infrastructure')).toBeTruthy();
+  });
+
+  it('dispatches retry when the retry control is clicked', async () => {
     const user = userEvent.setup();
-    renderHeader(makeSession(), 'terminated');
+    renderRail(makeSession(), 'terminated');
 
-    await user.click(screen.getByLabelText('Retry task'));
-    expect(onRetry).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByLabelText('Retry — re-run this task'));
+    expect(onSelect).toHaveBeenCalledWith('retry');
   });
 
-  it('calls onFork when fork button is clicked', async () => {
+  it('dispatches fork when the fork control is clicked', async () => {
     const user = userEvent.setup();
-    renderHeader(makeSession(), 'terminated');
+    renderRail(makeSession(), 'terminated');
 
-    await user.click(screen.getByLabelText('Fork session'));
-    expect(onFork).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByLabelText('Fork — start a new task from this session'));
+    expect(onSelect).toHaveBeenCalledWith('fork');
+  });
+});
+
+/**
+ * The rest of `buildSessionToolActions`' visibility matrix, and the in-flight Complete
+ * state — which is what prevents a double submission while the mutation is running.
+ */
+describe('Session tool rail — remaining action states', () => {
+  const onSelect = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function build(overrides: Partial<BuildSessionToolActionsInput> = {}) {
+    // The shared fixture's task is `failed`, which correctly suppresses Complete. These
+    // cases need an eligible task, so default to one.
+    const session = (overrides.session ??
+      makeSession({
+        task: { id: 'task-1', status: 'in_progress', outputBranch: 'sam/fix-login-bug' },
+      })) as ChatSessionResponse;
+    return buildSessionToolActions({
+      session,
+      sessionState: 'active',
+      taskEmbed: session.task ?? null,
+      reportEnabled: false,
+      unresolvedCommentCount: 0,
+      hasFilesHandler: true,
+      hasGitHandler: true,
+      hasTimelineHandler: true,
+      hasCommentsHandler: true,
+      hasRetryHandler: true,
+      hasForkHandler: true,
+      ...overrides,
+    });
+  }
+
+  function renderActions(actions: ReturnType<typeof build>, mode: 'icons' | 'labels' = 'labels') {
+    return render(
+      <MemoryRouter>
+        <SessionToolRail
+          actions={actions}
+          mode={mode}
+          onModeChange={vi.fn()}
+          onSelect={onSelect}
+          isMobile={false}
+        />
+      </MemoryRouter>
+    );
+  }
+
+  it('labels Complete as in-flight and disables it while completing', async () => {
+    const user = userEvent.setup();
+    renderActions(build({ completing: true }));
+
+    const complete = screen.getByLabelText('Mark this task complete');
+    expect(screen.getByText('Completing...')).toBeTruthy();
+    expect(complete).toHaveProperty('disabled', true);
+
+    // The guard that matters: a second click must not dispatch another mutation.
+    await user.click(complete).catch(() => undefined);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('labels Complete normally and dispatches when not completing', async () => {
+    // Control for the case above — without it, "did not dispatch" would also pass for a
+    // rail that never dispatches at all.
+    const user = userEvent.setup();
+    renderActions(build({ completing: false }));
+
+    const complete = screen.getByLabelText('Mark this task complete');
+    expect(complete).toHaveProperty('disabled', false);
+    await user.click(complete);
+    expect(onSelect).toHaveBeenCalledWith('complete');
+  });
+
+  it('omits the workspace-bound tools when the session has no workspace', () => {
+    renderActions(build({ session: makeSession({ workspaceId: null }) }));
+
+    expect(screen.queryByLabelText('Browse workspace files')).toBeNull();
+    expect(screen.queryByLabelText('Review uncommitted changes')).toBeNull();
+    expect(screen.queryByLabelText('Open the full workspace view')).toBeNull();
+    // Liveness: session-independent tools are still there.
+    expect(screen.getByLabelText('Jump through session history')).toBeTruthy();
+  });
+
+  it('omits the workspace-bound tools for a terminated session that still has a workspace', () => {
+    renderActions(build({ sessionState: 'terminated' }));
+
+    expect(screen.queryByLabelText('Browse workspace files')).toBeNull();
+    expect(screen.queryByLabelText('Open the full workspace view')).toBeNull();
+    expect(screen.getByLabelText('Jump through session history')).toBeTruthy();
+  });
+
+  it('renders the unresolved-comment count as a badge in label mode', () => {
+    renderActions(build({ unresolvedCommentCount: 4 }));
+    const comments = screen.getByLabelText('Open comment threads — 4 unresolved');
+    expect(comments.textContent).toContain('4');
+  });
+
+  it('renders no comment badge when nothing is unresolved', () => {
+    renderActions(build({ unresolvedCommentCount: 0 }));
+    const comments = screen.getByLabelText('Open comment threads on this session');
+    expect(comments.textContent).not.toContain('0');
+  });
+
+  it('exposes the details toggle state via aria-expanded', () => {
+    const { rerender } = renderActions(build({ detailsExpanded: false }));
+    expect(screen.getByLabelText('Show session details, IDs and infrastructure')).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    );
+
+    rerender(
+      <MemoryRouter>
+        <SessionToolRail
+          actions={build({ detailsExpanded: true })}
+          mode="labels"
+          onModeChange={vi.fn()}
+          onSelect={onSelect}
+          isMobile={false}
+        />
+      </MemoryRouter>
+    );
+    expect(screen.getByLabelText('Show session details, IDs and infrastructure')).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
   });
 });

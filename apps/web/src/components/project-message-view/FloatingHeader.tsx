@@ -10,15 +10,17 @@ interface FloatingHeaderProps {
   projectId: string;
   lc: ReturnType<typeof useSessionLifecycle>;
   onSessionMutated?: () => void;
-  onRetry?: () => void;
-  onFork?: () => void;
-  onOpenTimeline?: () => void;
   onOpenComments?: () => void;
   unresolvedCommentCount?: number;
   needsAttentionCommentCount?: number;
   sourceContext?: SessionSourceContext;
   onShowHierarchy?: (taskId: string) => void;
   containerRef?: (el: HTMLDivElement | null) => void;
+  /** Details-panel visibility, owned by `useSessionTools` alongside the tool rail. */
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  completeError?: string | null;
+  onDismissCompleteError?: () => void;
 }
 
 /** Floating session header with optional error banner and summary. */
@@ -26,15 +28,16 @@ export function FloatingHeader({
   projectId,
   lc,
   onSessionMutated,
-  onRetry,
-  onFork,
-  onOpenTimeline,
   onOpenComments,
   unresolvedCommentCount,
   needsAttentionCommentCount,
   sourceContext,
   onShowHierarchy,
   containerRef,
+  expanded,
+  onExpandedChange,
+  completeError,
+  onDismissCompleteError,
 }: FloatingHeaderProps) {
   if (!lc.session) return null;
 
@@ -44,10 +47,10 @@ export function FloatingHeader({
   const taskStatus = lc.taskEmbed?.status;
   const hasRecoverableTaskError = Boolean(
     lc.taskEmbed?.errorMessage &&
-      lc.taskEmbed?.taskMode === 'conversation' &&
-      taskStatus !== 'failed' &&
-      taskStatus !== 'cancelled' &&
-      taskStatus !== 'completed'
+    lc.taskEmbed?.taskMode === 'conversation' &&
+    taskStatus !== 'failed' &&
+    taskStatus !== 'cancelled' &&
+    taskStatus !== 'completed'
   );
   const failureClassification = lc.taskEmbed?.errorMessage
     ? classifyFailure(lc.taskEmbed.errorMessage, lc.taskEmbed.executionStep ?? undefined)
@@ -72,19 +75,18 @@ export function FloatingHeader({
         node={lc.node}
         detectedPorts={lc.detectedPorts}
         onSessionMutated={onSessionMutated}
-        onOpenFiles={lc.handleOpenFileBrowser}
-        onOpenGit={lc.handleOpenGitChanges}
-        onOpenTimeline={onOpenTimeline}
         onOpenComments={onOpenComments}
         unresolvedCommentCount={unresolvedCommentCount}
         needsAttentionCommentCount={needsAttentionCommentCount}
-        onRetry={onRetry}
-        onFork={onFork}
         lineageText={sourceContext?.lineageText}
         initialPromptFallback={initialPromptFallback}
         sourceContext={sourceContext}
         hasContentBelow={!!lc.taskEmbed?.errorMessage}
         onShowHierarchy={onShowHierarchy}
+        expanded={expanded}
+        onExpandedChange={onExpandedChange}
+        completeError={completeError}
+        onDismissCompleteError={onDismissCompleteError}
       />
       {lc.taskEmbed?.errorMessage && (
         <div

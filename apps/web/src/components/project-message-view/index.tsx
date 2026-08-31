@@ -19,10 +19,12 @@ import { ChevronDown } from 'lucide-react';
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
+import { useIsMobile } from '../../hooks/useIsMobile';
 import { getMessageToolContent } from '../../lib/api/sessions';
 import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
 import { useAuth } from '../AuthProvider';
 import { ChatFilePanel } from '../chat/ChatFilePanel';
+import { ReportIssueDialog } from '../ReportIssueDialog';
 import { type CommentInboxItem, countBuckets, toInboxItem } from './comments/comment-inbox';
 import { CommentableConversationItem } from './comments/CommentableConversationItem';
 import { DesktopCommentRail } from './comments/MessageCommentPanels';
@@ -39,12 +41,15 @@ import {
 } from './MessageListScaffold';
 import { ProjectMessageViewDrawers } from './ProjectMessageViewDrawers';
 import { currentPlanToPlanItem, ElapsedTime } from './session-view-utils';
+import { SessionHeaderCompletionDialog } from './SessionHeaderCompletionDialog';
+import { SessionToolRail } from './SessionToolRail';
 import { StaleActivityNotice } from './StaleActivityNotice';
 import { nearestItemId } from './timeline-jump';
 import type { TimelineJumpTarget } from './timeline-types';
 import { chatMessagesToConversationItems } from './types';
 import { useSessionLifecycle } from './useSessionLifecycle';
 import { useSessionTimeline } from './useSessionTimeline';
+import { useSessionTools } from './useSessionTools';
 import { WakeProgressBanner } from './WakeProgressBanner';
 
 // Re-export utilities used by external consumers
@@ -121,6 +126,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [showComments, setShowComments] = useState(false);
   const openComments = useCallback(() => setShowComments(true), []);
   const closeComments = useCallback(() => setShowComments(false), []);
+  // Stable identity matters: this feeds `useSessionTools`' memoized action array, and an
+  // inline arrow would rebuild it on every render (rule 64).
+  const openTimeline = useCallback(() => setShowTimeline(true), []);
 
   const messageComments = useMessageComments(projectId, sessionId, Boolean(projectId && sessionId));
   const { user } = useAuth();
@@ -334,6 +342,32 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const showDockedCommentRail = showComments && commentUi.usesDesktopRail;
   const showMobileCommentsDrawer = showComments && !commentUi.usesDesktopRail;
 
+  const isMobile = useIsMobile();
+  const sessionTools = useSessionTools({
+    projectId,
+    session: lc.session,
+    sessionState: lc.sessionState,
+    taskEmbed: lc.taskEmbed,
+    unresolvedCommentCount,
+    needsAttentionCommentCount: commentCounts.needs_you,
+    onSessionMutated,
+    onOpenFiles: lc.handleOpenFileBrowser,
+    onOpenGit: lc.handleOpenGitChanges,
+    onOpenTimeline: openTimeline,
+    onOpenComments: openComments,
+    onRetry,
+    onFork,
+  });
+  const sessionToolRail = lc.session ? (
+    <SessionToolRail
+      actions={sessionTools.actions}
+      mode={sessionTools.mode}
+      onModeChange={sessionTools.setMode}
+      onSelect={sessionTools.selectTool}
+      isMobile={isMobile}
+    />
+  ) : null;
+
   /**
    * Row renderer for the virtualized conversation.
    *
@@ -537,97 +571,105 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       {/* Messages area — virtualized, DO-only */}
       {conversationItems.length === 0 ? (
-        <div className="relative flex flex-1 min-h-0 min-w-0 flex-col lg:flex-row">
-          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-            <FloatingHeader
-              projectId={projectId}
-              lc={lc}
-              onSessionMutated={onSessionMutated}
-              onRetry={onRetry}
-              onFork={onFork}
-              onOpenTimeline={() => setShowTimeline(true)}
-              onOpenComments={openComments}
-              unresolvedCommentCount={unresolvedCommentCount}
-              needsAttentionCommentCount={commentCounts.needs_you}
-              sourceContext={sourceContext}
-              onShowHierarchy={onShowHierarchy}
-              containerRef={floatingHeaderRef}
-            />
-            <div
-              className="flex flex-1 items-center justify-center"
-              style={{ paddingTop: floatingHeaderHeight }}
-            >
-              <span className="text-fg-muted text-sm">
-                {lc.sessionState === 'active'
-                  ? 'Waiting for messages...'
-                  : 'No messages in this session.'}
-              </span>
+        <div className="relative flex flex-1 min-h-0 min-w-0 flex-row">
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+              <FloatingHeader
+                projectId={projectId}
+                lc={lc}
+                onSessionMutated={onSessionMutated}
+                onOpenComments={openComments}
+                unresolvedCommentCount={unresolvedCommentCount}
+                needsAttentionCommentCount={commentCounts.needs_you}
+                sourceContext={sourceContext}
+                onShowHierarchy={onShowHierarchy}
+                containerRef={floatingHeaderRef}
+                expanded={sessionTools.detailsExpanded}
+                onExpandedChange={sessionTools.setDetailsExpanded}
+                completeError={sessionTools.completeError}
+                onDismissCompleteError={sessionTools.dismissCompleteError}
+              />
+              <div
+                className="flex flex-1 items-center justify-center"
+                style={{ paddingTop: floatingHeaderHeight }}
+              >
+                <span className="text-fg-muted text-sm">
+                  {lc.sessionState === 'active'
+                    ? 'Waiting for messages...'
+                    : 'No messages in this session.'}
+                </span>
+              </div>
             </div>
+            {desktopCommentRail}
           </div>
-          {desktopCommentRail}
+          {sessionToolRail}
         </div>
       ) : (
-        <div className="flex-1 min-h-0 min-w-0 relative flex flex-col lg:flex-row">
-          <div
-            ref={chatLogRef}
-            className="relative flex min-h-0 min-w-0 flex-1 flex-col"
-            role="log"
-            aria-live="polite"
-            aria-label="Conversation"
-          >
-            <FloatingHeader
-              projectId={projectId}
-              lc={lc}
-              onSessionMutated={onSessionMutated}
-              onRetry={onRetry}
-              onFork={onFork}
-              onOpenTimeline={() => setShowTimeline(true)}
-              onOpenComments={openComments}
-              unresolvedCommentCount={unresolvedCommentCount}
-              needsAttentionCommentCount={commentCounts.needs_you}
-              sourceContext={sourceContext}
-              onShowHierarchy={onShowHierarchy}
-              containerRef={floatingHeaderRef}
-            />
-            <div className="flex-1 min-h-0">
-              <Virtuoso
-                ref={virtuosoRef}
-                style={{ height: '100%' }}
-                data={conversationItems}
-                firstItemIndex={lc.firstItemIndex}
-                initialTopMostItemIndex={conversationItems.length - 1}
-                followOutput={(isAtBottom: boolean) => (isAtBottom ? 'smooth' : false)}
-                alignToBottom
-                atBottomThreshold={50}
-                atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
-                overscan={200}
-                itemContent={renderConversationItem}
-                context={chatListContext}
-                components={CHAT_LIST_COMPONENTS}
+        <div className="flex-1 min-h-0 min-w-0 relative flex flex-row">
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+            <div
+              ref={chatLogRef}
+              className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+              role="log"
+              aria-live="polite"
+              aria-label="Conversation"
+            >
+              <FloatingHeader
+                projectId={projectId}
+                lc={lc}
+                onSessionMutated={onSessionMutated}
+                onOpenComments={openComments}
+                unresolvedCommentCount={unresolvedCommentCount}
+                needsAttentionCommentCount={commentCounts.needs_you}
+                sourceContext={sourceContext}
+                onShowHierarchy={onShowHierarchy}
+                containerRef={floatingHeaderRef}
+                expanded={sessionTools.detailsExpanded}
+                onExpandedChange={sessionTools.setDetailsExpanded}
+                completeError={sessionTools.completeError}
+                onDismissCompleteError={sessionTools.dismissCompleteError}
               />
+              <div className="flex-1 min-h-0">
+                <Virtuoso
+                  ref={virtuosoRef}
+                  style={{ height: '100%' }}
+                  data={conversationItems}
+                  firstItemIndex={lc.firstItemIndex}
+                  initialTopMostItemIndex={conversationItems.length - 1}
+                  followOutput={(isAtBottom: boolean) => (isAtBottom ? 'smooth' : false)}
+                  alignToBottom
+                  atBottomThreshold={50}
+                  atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
+                  overscan={200}
+                  itemContent={renderConversationItem}
+                  context={chatListContext}
+                  components={CHAT_LIST_COMPONENTS}
+                />
+              </div>
+
+              {/* Scroll to bottom button */}
+              {lc.showScrollButton && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    virtuosoRef.current?.scrollToIndex({
+                      index: 'LAST',
+                      behavior: 'smooth',
+                    });
+                  }}
+                  className="sam-scroll-button absolute right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-[var(--sam-form-border)] bg-[var(--sam-form-bg)] shadow-md cursor-pointer hover:bg-page"
+                  data-agent-active={lc.agentActivity !== 'idle'}
+                  aria-label="Scroll to bottom"
+                >
+                  <ChevronDown size={16} className="text-fg-muted" />
+                </button>
+              )}
+
+              {commentUi.selectionControls}
             </div>
-
-            {/* Scroll to bottom button */}
-            {lc.showScrollButton && (
-              <button
-                type="button"
-                onClick={() => {
-                  virtuosoRef.current?.scrollToIndex({
-                    index: 'LAST',
-                    behavior: 'smooth',
-                  });
-                }}
-                className="sam-scroll-button absolute right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-[var(--sam-form-border)] bg-[var(--sam-form-bg)] shadow-md cursor-pointer hover:bg-page"
-                data-agent-active={lc.agentActivity !== 'idle'}
-                aria-label="Scroll to bottom"
-              >
-                <ChevronDown size={16} className="text-fg-muted" />
-              </button>
-            )}
-
-            {commentUi.selectionControls}
+            {desktopCommentRail}
           </div>
-          {desktopCommentRail}
+          {sessionToolRail}
         </div>
       )}
 
@@ -735,6 +777,23 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         onResolve={messageComments.resolve}
         onReopen={messageComments.reopen}
         onSendToAgent={(threadId) => messageComments.sendToAgent({ commentId: threadId })}
+      />
+
+      {/* Dialogs for the rail's Report and Complete actions. They live here rather than
+          in `SessionHeader` because the actions that open them do. */}
+      <ReportIssueDialog
+        isOpen={sessionTools.reportOpen}
+        onClose={sessionTools.closeReport}
+        refs={{
+          sessionId,
+          taskId: lc.session?.taskId || undefined,
+          nodeId: lc.workspace?.nodeId || undefined,
+        }}
+      />
+      <SessionHeaderCompletionDialog
+        isOpen={sessionTools.confirmCompleteOpen}
+        onClose={sessionTools.closeConfirmComplete}
+        onConfirm={sessionTools.confirmComplete}
       />
     </div>
   );

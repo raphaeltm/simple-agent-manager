@@ -13,7 +13,7 @@ When building or modifying any feature that has a user-facing component, the **p
 | **Where to render a new tool/panel** | Project chat session header or panel first, workspace sidebar second | Workspace sidebar only, with "we'll add chat later" |
 | **Which mode to wire up first** | Session-mode (projectId + sessionId) | Workspace-mode (workspaceId only) |
 | **Where to test the UX** | Project chat flow on mobile and desktop | Workspace page only |
-| **Where to put action buttons** | Chat session header action row | Workspace sidebar collapsible section |
+| **Where to put action buttons** | Chat session tool rail | Workspace sidebar collapsible section |
 | **API route priority** | `/projects/:id/sessions/:sessionId/*` routes | `/workspaces/:id/*` routes only |
 
 ### Why This Rule Exists

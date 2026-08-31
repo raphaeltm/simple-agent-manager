@@ -12,7 +12,7 @@
  * Covered surfaces:
  *   1. Guided subscription sign-in modal (Claude Code) — /settings/agents
  *   2. Cloud provider connect picker (all seven providers) — /settings/connections
- *   3. Report an Issue dialog with consent expanded — project chat session header
+ *   3. Report an Issue dialog with consent expanded — project chat session tool rail
  */
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -327,11 +327,10 @@ test('docs: report an issue dialog with consent expanded', async ({ page }) => {
 
   await page.goto(`/projects/proj-1/chat/${REPORT_SESSION.id}`);
 
-  // The Report action lives in the expanded session-header action row.
-  const expand = page.locator('button[aria-label="Show session details"]').first();
-  await expand.waitFor({ state: 'visible', timeout: 20000 });
-  await expand.click();
-  await page.getByRole('button', { name: 'Report' }).click();
+  // The Report action lives in the always-visible session tool rail.
+  const report = page.getByTestId('session-tool-report').first();
+  await report.waitFor({ state: 'visible', timeout: 20000 });
+  await report.click();
 
   const dialog = page.getByRole('dialog', { name: 'Report an issue' });
   await expect(dialog).toBeVisible();

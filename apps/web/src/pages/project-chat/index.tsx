@@ -150,6 +150,33 @@ export function ProjectChat() {
     ];
   }, [state.project?.name, state.project?.repository]);
 
+  /**
+   * Stable identities for the session-tool handlers.
+   *
+   * These feed `useSessionTools`' memoized action array. As inline arrows they were
+   * rebuilt on every `ProjectChat` render — and this page re-renders on the session-sync
+   * poll plus the faster provisioning poll — so the memo they gate never actually held
+   * and `buildSessionToolActions` re-ran on every tick (rule 64).
+   */
+  // Destructured so the dependency arrays name the exact values used. Depending on the
+  // whole `state` object would invalidate these on every render and defeat the point.
+  // `loadSessions`/`sessionId` are already destructured above.
+  const { sessions: chatSessions, handleRetry, handleFork } = state;
+
+  const handleRetryActiveSession = useCallback(() => {
+    const session = chatSessions.find((sess) => sess.id === sessionId);
+    if (session?.taskId) handleRetry(session);
+  }, [chatSessions, sessionId, handleRetry]);
+
+  const handleForkActiveSession = useCallback(() => {
+    const session = chatSessions.find((sess) => sess.id === sessionId);
+    if (session) handleFork(session);
+  }, [chatSessions, sessionId, handleFork]);
+
+  const handleSessionMutated = useCallback(() => {
+    void loadSessions();
+  }, [loadSessions]);
+
   // Compute source context for the selected retry/fork session (for header display).
   const selectedSourceContext = useMemo(() => {
     if (!state.sessionId) return undefined;
@@ -512,17 +539,9 @@ export function ProjectChat() {
                   !isTerminal(state.provisioning.status)
                 )
               }
-              onSessionMutated={() => {
-                void state.loadSessions();
-              }}
-              onRetry={() => {
-                const s = state.sessions.find((sess) => sess.id === state.sessionId);
-                if (s?.taskId) state.handleRetry(s);
-              }}
-              onFork={() => {
-                const s = state.sessions.find((sess) => sess.id === state.sessionId);
-                if (s) state.handleFork(s);
-              }}
+              onSessionMutated={handleSessionMutated}
+              onRetry={handleRetryActiveSession}
+              onFork={handleForkActiveSession}
               sourceContext={selectedSourceContext}
               onSleepConversation={state.handleSleepConversation}
               sleepingConversation={state.sleepingConversation}

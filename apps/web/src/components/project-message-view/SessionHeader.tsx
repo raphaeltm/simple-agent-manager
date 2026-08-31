@@ -4,24 +4,15 @@ import type {
   TaskDetailResponse,
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
-import { Button, Spinner } from '@simple-agent-manager/ui';
+import { Spinner } from '@simple-agent-manager/ui';
 import {
   Bot,
   CheckCircle2,
-  ChevronDown,
-  ChevronUp,
   Clock,
   Cpu,
-  ExternalLink,
-  Flag,
-  FolderOpen,
-  GitCompare,
-  GitFork,
   Globe,
   Hash,
   MessageSquare,
-  MessageSquareQuote,
-  RotateCcw,
   Tag,
   Timer,
   User2,
@@ -30,22 +21,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
 import type { ChatSessionResponse } from '../../lib/api';
-import {
-  getPortAccessUrl,
-  getProjectTask,
-  getReportIssueConfig,
-  listChatMessages,
-  updateProjectTaskStatus,
-} from '../../lib/api';
+import { getPortAccessUrl, getProjectTask, listChatMessages } from '../../lib/api';
 import { stripMarkdown } from '../../lib/text-utils';
 import { sanitizeUrl } from '../../lib/url-utils';
 import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
-import { ReportIssueDialog } from '../ReportIssueDialog';
 import { CopyableId } from './CopyableId';
 import { PublicPortsToggleRow } from './PublicPortsToggleRow';
 import { SessionCommentChip } from './SessionCommentChip';
 import { WorkspaceProfileBadge } from './SessionHeaderBadges';
-import { SessionHeaderCompletionDialog } from './SessionHeaderCompletionDialog';
 import {
   formatAgentType,
   formatDuration,
@@ -60,7 +43,16 @@ import type { SessionState } from './types';
 import { formatCountdown } from './types';
 import { usePublicPortsToggle } from './usePublicPortsToggle';
 
-/** Collapsible session header — shows title + state dot, with expandable details. */
+/**
+ * Session header — title, status chips, and an expandable details panel.
+ *
+ * The session's ACTIONS no longer live here. Files/Git/Workspace/Timeline/Comments/
+ * Report/Complete used to sit inside the details disclosure and Retry/Fork were
+ * unlabeled icons in the title row, which put nine controls behind one 14px chevron.
+ * They now live in `SessionToolRail`, and the disclosure is controlled by the rail's
+ * "Details" action (see `useSessionTools`). This component is presentational: it owns
+ * no action state and triggers no mutations.
+ */
 export function SessionHeader({
   projectId,
   session,
@@ -72,19 +64,18 @@ export function SessionHeader({
   node,
   detectedPorts,
   onSessionMutated,
-  onOpenFiles,
-  onOpenGit,
-  onOpenTimeline,
   onOpenComments,
   unresolvedCommentCount = 0,
   needsAttentionCommentCount = 0,
-  onRetry,
-  onFork,
   lineageText,
   initialPromptFallback = null,
   sourceContext,
   hasContentBelow = false,
   onShowHierarchy,
+  expanded,
+  onExpandedChange,
+  completeError = null,
+  onDismissCompleteError,
 }: {
   projectId: string;
   session: ChatSessionResponse;
@@ -96,16 +87,11 @@ export function SessionHeader({
   node: NodeResponse | null;
   detectedPorts: DetectedPort[];
   onSessionMutated?: () => void;
-  onOpenFiles?: () => void;
-  onOpenGit?: () => void;
-  onOpenTimeline?: () => void;
   onOpenComments?: () => void;
   /** Threads in this session that are not resolved. Drives the header chip. */
   unresolvedCommentCount?: number;
   /** Subset of the above whose last activity came from someone other than you. */
   needsAttentionCommentCount?: number;
-  onRetry?: () => void;
-  onFork?: () => void;
   /** Lineage subtitle for retries/forks (e.g., "↩ attempt 3"). */
   lineageText?: string;
   /** First user prompt when the currently loaded page is known to contain it. */
@@ -116,27 +102,21 @@ export function SessionHeader({
   hasContentBelow?: boolean;
   /** Open hierarchy modal for the given task. */
   onShowHierarchy?: (taskId: string) => void;
+  /**
+   * Details-panel visibility. Controlled by the owner so the tool rail's "Details"
+   * action and the "+N more ports" chip drive the same panel.
+   */
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  /** Surfaced by the owner's mark-complete flow, which lives with the rail. */
+  completeError?: string | null;
+  onDismissCompleteError?: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const [completing, setCompleting] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [completeError, setCompleteError] = useState<string | null>(null);
   const [initialPrompt, setInitialPrompt] = useState<string | null>(initialPromptFallback);
   const [initialPromptLoading, setInitialPromptLoading] = useState(false);
   const [initialPromptError, setInitialPromptError] = useState<string | null>(null);
   const initialPromptFetchedRef = useRef<string | null>(null);
   const publicPorts = usePublicPortsToggle(workspace, onSessionMutated);
-  const [reportOpen, setReportOpen] = useState(false);
-  const [reportEnabled, setReportEnabled] = useState<boolean | null>(null);
-  const reportConfigFetchedRef = useRef(false);
-
-  useEffect(() => {
-    if (reportConfigFetchedRef.current) return;
-    reportConfigFetchedRef.current = true;
-    getReportIssueConfig()
-      .then((config) => setReportEnabled(config.enabled))
-      .catch(() => setReportEnabled(false));
-  }, []);
 
   // Trigger info — fetched on demand when expanding a task-linked session
   const [triggerDetail, setTriggerDetail] = useState<TaskDetailResponse | null>(null);
@@ -185,38 +165,6 @@ export function SessionHeader({
       });
   }, [expanded, initialPrompt, projectId, session.id]);
 
-  // Always show details — we always have at least reference IDs to display
-  const hasDetails = true;
-
-  const canMarkComplete = !!(
-    taskEmbed?.id &&
-    taskEmbed.status !== 'completed' &&
-    taskEmbed.status !== 'cancelled' &&
-    taskEmbed.status !== 'failed'
-  );
-
-  const handleMarkComplete = useCallback(async () => {
-    if (!taskEmbed?.id || completing) return;
-    setCompleteError(null);
-    setCompleting(true);
-    setConfirmOpen(false);
-    try {
-      // Task completion snapshots and sleeps resumable sessions server-side.
-      // Destructive workspace deletion belongs only to the explicit archive/delete flow.
-      await updateProjectTaskStatus(projectId, taskEmbed.id, { toStatus: 'completed' });
-
-      // Refresh session list via callback instead of full page reload.
-      // Reset completing before the callback so the button is not stuck in
-      // "Completing..." if the parent's refresh is slower than expected.
-      setCompleting(false);
-      onSessionMutated?.();
-    } catch (err) {
-      console.error('Failed to mark task complete:', err);
-      setCompleteError(err instanceof Error ? err.message : 'Failed to complete task');
-      setCompleting(false);
-    }
-  }, [projectId, taskEmbed?.id, completing, onSessionMutated]);
-
   const getWorkspacePortHref = useCallback(
     (port: DetectedPort) => {
       if (!workspace) return sanitizeUrl(port.url);
@@ -237,6 +185,7 @@ export function SessionHeader({
 
   return (
     <div
+      data-testid="session-header"
       className={`relative glass-chrome border-t-0 shrink-0${hasContentBelow ? '' : " rounded-b-2xl after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"}`}
       style={{
         boxShadow: hasContentBelow
@@ -256,59 +205,21 @@ export function SessionHeader({
         }}
       />
       <div className="px-4 py-2 min-h-[54px] space-y-1.5">
-        <div className="flex items-start gap-2">
-          <span
-            className="text-sm font-semibold text-fg-primary flex-1 min-w-0 leading-snug"
-            title={sessionTitle}
-            style={{
-              display: '-webkit-box',
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: 'vertical',
-              overflow: 'hidden',
-              overflowWrap: 'anywhere',
-            }}
-          >
-            {sessionTitle}
-          </span>
-
-          {(session.task?.id ?? session.taskId) && (
-            <span className="inline-flex items-center gap-0.5 shrink-0">
-              {onRetry && (
-                <button
-                  type="button"
-                  onClick={onRetry}
-                  aria-label="Retry task"
-                  title="Retry — re-run this task"
-                  className="shrink-0 p-1.5 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary hover:bg-surface-hover transition-colors"
-                >
-                  <RotateCcw size={14} />
-                </button>
-              )}
-              {onFork && (
-                <button
-                  type="button"
-                  onClick={onFork}
-                  aria-label="Fork session"
-                  title="Fork — start a new task from this session"
-                  className="shrink-0 p-1.5 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary hover:bg-surface-hover transition-colors"
-                >
-                  <GitFork size={14} />
-                </button>
-              )}
-            </span>
-          )}
-
-          {hasDetails && (
-            <button
-              type="button"
-              onClick={() => setExpanded((v) => !v)}
-              aria-expanded={expanded}
-              aria-label={expanded ? 'Hide session details' : 'Show session details'}
-              className="shrink-0 p-1.5 -mt-0.5 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary hover:bg-surface-hover transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary"
-            >
-              {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </button>
-          )}
+        {/* Retry / Fork / the details chevron used to sit to the right of this title as
+            unlabeled 14px icons. They are now named, grouped controls in
+            `SessionToolRail`, so the title gets the full width. */}
+        <div
+          className="text-sm font-semibold text-fg-primary min-w-0 leading-snug"
+          title={sessionTitle}
+          style={{
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+            overflowWrap: 'anywhere',
+          }}
+        >
+          {sessionTitle}
         </div>
 
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
@@ -369,7 +280,7 @@ export function SessionHeader({
           {extraPortCount > 0 && (
             <button
               type="button"
-              onClick={() => setExpanded(true)}
+              onClick={() => onExpandedChange(true)}
               className="text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 bg-transparent border cursor-pointer whitespace-nowrap hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary"
               style={{
                 color: 'var(--sam-color-fg-muted)',
@@ -411,6 +322,27 @@ export function SessionHeader({
         </div>
       </div>
 
+      {/* Mark-complete failures. Rendered OUTSIDE the disclosure: the action that
+          produces this error now lives in the tool rail, so the user has no reason to
+          have the details panel open when it fails. */}
+      {completeError && (
+        <div className="flex items-center gap-2 border-t border-[rgba(239,68,68,0.16)] px-4 py-1.5">
+          <span className="text-xs" style={{ color: 'var(--sam-color-danger)' }}>
+            {completeError}
+          </span>
+          {onDismissCompleteError && (
+            <button
+              type="button"
+              onClick={onDismissCompleteError}
+              className="text-xs bg-transparent border-none cursor-pointer underline"
+              style={{ color: 'var(--sam-color-fg-muted)' }}
+            >
+              Dismiss
+            </button>
+          )}
+        </div>
+      )}
+
       {workspace && detectedPorts.length > 0 && (
         <PublicPortsToggleRow
           enabled={publicPorts.enabled}
@@ -420,7 +352,7 @@ export function SessionHeader({
         />
       )}
 
-      {expanded && hasDetails && (
+      {expanded && (
         <div className="border-t border-[rgba(34,197,94,0.08)] px-4 py-2 space-y-2">
           <div className="space-y-1.5">
             <div className="flex items-center gap-1 text-[10px] font-medium text-fg-muted uppercase tracking-wide">
@@ -650,96 +582,9 @@ export function SessionHeader({
             />
           )}
 
-          {/* Action buttons — wraps on narrow viewports */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            {session.workspaceId && sessionState === 'active' && (
-              <>
-                {onOpenFiles && (
-                  <Button variant="ghost" size="sm" onClick={onOpenFiles}>
-                    <FolderOpen size={14} className="mr-1" />
-                    Files
-                  </Button>
-                )}
-                {onOpenGit && (
-                  <Button variant="ghost" size="sm" onClick={onOpenGit}>
-                    <GitCompare size={14} className="mr-1" />
-                    Git
-                  </Button>
-                )}
-                <a
-                  href={`/workspaces/${session.workspaceId}`}
-                  aria-label="Open workspace"
-                  className="no-underline"
-                >
-                  <Button variant="ghost" size="sm">
-                    <ExternalLink size={14} className="mr-1" />
-                    Workspace
-                  </Button>
-                </a>
-              </>
-            )}
-
-            {onOpenTimeline && (
-              <Button variant="ghost" size="sm" onClick={onOpenTimeline}>
-                <Clock size={14} className="mr-1" />
-                Timeline
-              </Button>
-            )}
-
-            {onOpenComments && (
-              <Button variant="ghost" size="sm" onClick={onOpenComments}>
-                <MessageSquareQuote size={14} className="mr-1" />
-                Comments
-              </Button>
-            )}
-
-            {reportEnabled && (
-              <Button variant="ghost" size="sm" onClick={() => setReportOpen(true)}>
-                <Flag size={14} className="mr-1" />
-                Report
-              </Button>
-            )}
-
-            {canMarkComplete && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setConfirmOpen(true)}
-                disabled={completing}
-                style={{ color: completing ? undefined : 'var(--sam-color-success)' }}
-              >
-                <CheckCircle2 size={14} className="mr-1" />
-                {completing ? 'Completing...' : 'Complete'}
-              </Button>
-            )}
-          </div>
-
-          <ReportIssueDialog
-            isOpen={reportOpen}
-            onClose={() => setReportOpen(false)}
-            refs={{
-              sessionId: session.id,
-              taskId: session.taskId || undefined,
-              nodeId: workspace?.nodeId || undefined,
-            }}
-          />
-
-          {/* Inline error for mark-complete failures */}
-          {completeError && (
-            <div className="flex items-center gap-2 px-1 py-1">
-              <span className="text-xs" style={{ color: 'var(--sam-color-danger)' }}>
-                {completeError}
-              </span>
-              <button
-                type="button"
-                onClick={() => setCompleteError(null)}
-                className="text-xs bg-transparent border-none cursor-pointer underline"
-                style={{ color: 'var(--sam-color-fg-muted)' }}
-              >
-                Dismiss
-              </button>
-            </div>
-          )}
+          {/* The action row that used to live here — Files, Git, Workspace, Timeline,
+              Comments, Report, Complete — moved to `SessionToolRail`. This panel is
+              now purely reference material: title, initial prompt, IDs, infrastructure. */}
 
           <SessionHeaderInfrastructure
             session={session}
@@ -751,12 +596,6 @@ export function SessionHeader({
           />
         </div>
       )}
-
-      <SessionHeaderCompletionDialog
-        isOpen={confirmOpen}
-        onClose={() => setConfirmOpen(false)}
-        onConfirm={handleMarkComplete}
-      />
     </div>
   );
 }

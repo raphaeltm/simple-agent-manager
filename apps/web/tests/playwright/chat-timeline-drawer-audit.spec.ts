@@ -247,13 +247,9 @@ async function setupMocks(page: Page) {
 }
 
 async function openTimeline(page: Page) {
-  const timelineBtn = page.getByRole('button', { name: /^Timeline$/ });
-  if (!(await timelineBtn.first().isVisible().catch(() => false))) {
-    const detailsBtn = page.getByLabel('Show session details').first();
-    if (await detailsBtn.isVisible().catch(() => false)) {
-      await detailsBtn.click();
-    }
-  }
+  // Timeline lives in the always-visible session tool rail now — there is no
+  // disclosure to open first.
+  const timelineBtn = page.getByTestId('session-tool-timeline').first();
   await timelineBtn.waitFor({ state: 'visible', timeout: 10_000 });
   await timelineBtn.click();
   await page.getByText('Status update').first().waitFor({ state: 'visible', timeout: 5_000 });
