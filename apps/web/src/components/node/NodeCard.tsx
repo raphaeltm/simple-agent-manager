@@ -70,6 +70,8 @@ export const NodeCard: FC<NodeCardProps> = ({
   const overflowItems = getNodeActions(node, { onStop, onDelete });
   const sizeLabels = VM_SIZE_LABELS[node.vmSize];
   const sizeInfo = lookupSizeInfo(catalogs, node.cloudProvider, node.vmSize);
+  const providerInstanceRamGb =
+    node.providerInstanceMemoryMb == null ? null : Math.round(node.providerInstanceMemoryMb / 1024);
   const locationConfig = VM_LOCATIONS[node.vmLocation];
   const metrics = node.lastMetrics;
   const hasMetrics =
@@ -161,7 +163,28 @@ export const NodeCard: FC<NodeCardProps> = ({
               : 'Unknown'}
           </span>
           <span aria-hidden="true">&middot;</span>
-          {sizeInfo ? (
+          {node.providerInstanceType ? (
+            <>
+              <span className="font-medium text-fg-primary">{node.providerInstanceType}</span>
+              <span aria-hidden="true">&middot;</span>
+              <span>
+                {node.providerInstanceVcpuCount ?? sizeInfo?.vcpu ?? '?'} vCPU
+                {providerInstanceRamGb ? `, ${providerInstanceRamGb} GB RAM` : ''}
+              </span>
+              {node.providerInstanceDiskGb != null && (
+                <>
+                  <span aria-hidden="true">&middot;</span>
+                  <span>{node.providerInstanceDiskGb} GB storage</span>
+                </>
+              )}
+              {node.providerInstancePriceDisplay && (
+                <>
+                  <span aria-hidden="true">&middot;</span>
+                  <span>{node.providerInstancePriceDisplay}</span>
+                </>
+              )}
+            </>
+          ) : sizeInfo ? (
             <>
               <span className="font-medium text-fg-primary">{sizeInfo.type}</span>
               <span aria-hidden="true">&middot;</span>
@@ -175,7 +198,7 @@ export const NodeCard: FC<NodeCardProps> = ({
             </>
           ) : (
             <span aria-label={`Size: ${sizeLabels ? sizeLabels.label : node.vmSize}`}>
-              {formatVmSizeInline(node.vmSize, null)}
+              {formatVmSizeInline(node.vmSize, null)} compatibility hint
             </span>
           )}
           <span aria-hidden="true">&middot;</span>

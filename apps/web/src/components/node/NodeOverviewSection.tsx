@@ -36,7 +36,11 @@ function formatRelativeTime(iso: string | null): string {
 export const NodeOverviewSection: FC<NodeOverviewSectionProps> = ({ node, systemInfo, catalogs = [] }) => {
   const catalogSizeInfo = lookupSizeInfo(catalogs, node.cloudProvider, node.vmSize);
   const locationConfig = VM_LOCATIONS[node.vmLocation];
-  const sizeLabel = formatVmSizeInline(node.vmSize, catalogSizeInfo);
+  const providerInstanceRamGb =
+    node.providerInstanceMemoryMb == null ? null : Math.round(node.providerInstanceMemoryMb / 1024);
+  const sizeLabel = node.providerInstanceType
+    ? `${node.providerInstanceType} (${node.providerInstanceVcpuCount ?? catalogSizeInfo?.vcpu ?? '?'} vCPU${providerInstanceRamGb ? `, ${providerInstanceRamGb} GB RAM` : ''})`
+    : `${formatVmSizeInline(node.vmSize, catalogSizeInfo)} compatibility hint`;
   const locationLabel = locationConfig
     ? `${locationConfig.name}, ${locationConfig.country}`
     : node.vmLocation;
@@ -61,7 +65,7 @@ export const NodeOverviewSection: FC<NodeOverviewSectionProps> = ({ node, system
           <div className="text-fg-primary font-medium" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>{node.cloudProvider ? (PROVIDER_LABELS[node.cloudProvider] ?? node.cloudProvider) : 'Unknown'}</div>
         </div>
         <div>
-          <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>Size</div>
+          <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>Provider instance</div>
           <div className="text-fg-primary font-medium" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>{sizeLabel}</div>
         </div>
         <div>

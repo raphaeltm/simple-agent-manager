@@ -23,6 +23,14 @@ export interface StartComputeTrackingInput {
   nodeId: string;
   vmSize: string;
   cloudProvider?: string | null;
+  providerInstanceType?: string | null;
+  providerInstanceVcpuCount?: number | null;
+  providerInstanceMemoryMb?: number | null;
+  providerInstanceDiskGb?: number | null;
+  providerInstancePriceDisplay?: string | null;
+  providerInstancePriceCurrency?: string | null;
+  providerInstancePriceMonthlyCents?: number | null;
+  providerInstancePriceHourlyMicros?: number | null;
   credentialSource?: CredentialSource;
 }
 
@@ -32,7 +40,7 @@ export async function startComputeTracking(
   input: StartComputeTrackingInput
 ): Promise<string> {
   const id = ulid();
-  const vcpuCount = getVcpuCount(input.vmSize, input.cloudProvider);
+  const vcpuCount = input.providerInstanceVcpuCount ?? getVcpuCount(input.vmSize, input.cloudProvider);
   const now = new Date().toISOString();
 
   await db.insert(schema.computeUsage).values({
@@ -42,6 +50,14 @@ export async function startComputeTracking(
     nodeId: input.nodeId,
     serverType: input.vmSize,
     vcpuCount,
+    providerInstanceType: input.providerInstanceType ?? null,
+    providerInstanceVcpuCount: input.providerInstanceVcpuCount ?? null,
+    providerInstanceMemoryMb: input.providerInstanceMemoryMb ?? null,
+    providerInstanceDiskGb: input.providerInstanceDiskGb ?? null,
+    providerInstancePriceDisplay: input.providerInstancePriceDisplay ?? null,
+    providerInstancePriceCurrency: input.providerInstancePriceCurrency ?? null,
+    providerInstancePriceMonthlyCents: input.providerInstancePriceMonthlyCents ?? null,
+    providerInstancePriceHourlyMicros: input.providerInstancePriceHourlyMicros ?? null,
     credentialSource: input.credentialSource ?? 'user',
     startedAt: now,
     createdAt: now,
@@ -192,11 +208,20 @@ export async function calculateVcpuHoursForPeriod(
       startedAt: schema.computeUsage.startedAt,
       endedAt: schema.computeUsage.endedAt,
       vcpuCount: schema.computeUsage.vcpuCount,
+      providerInstanceVcpuCount: schema.computeUsage.providerInstanceVcpuCount,
     })
     .from(schema.computeUsage)
     .where(and(...conditions));
 
-  return calculateNodeVcpuHours(rows, periodStart, periodEnd, new Date(nowIso));
+  return calculateNodeVcpuHours(
+    rows.map((row) => ({
+      ...row,
+      vcpuCount: row.providerInstanceVcpuCount ?? row.vcpuCount,
+    })),
+    periodStart,
+    periodEnd,
+    new Date(nowIso)
+  );
 }
 
 // =============================================================================
@@ -224,6 +249,14 @@ export async function getUserUsageSummary(
       workspaceId: schema.computeUsage.workspaceId,
       serverType: schema.computeUsage.serverType,
       vcpuCount: schema.computeUsage.vcpuCount,
+      providerInstanceType: schema.computeUsage.providerInstanceType,
+      providerInstanceVcpuCount: schema.computeUsage.providerInstanceVcpuCount,
+      providerInstanceMemoryMb: schema.computeUsage.providerInstanceMemoryMb,
+      providerInstanceDiskGb: schema.computeUsage.providerInstanceDiskGb,
+      providerInstancePriceDisplay: schema.computeUsage.providerInstancePriceDisplay,
+      providerInstancePriceCurrency: schema.computeUsage.providerInstancePriceCurrency,
+      providerInstancePriceMonthlyCents: schema.computeUsage.providerInstancePriceMonthlyCents,
+      providerInstancePriceHourlyMicros: schema.computeUsage.providerInstancePriceHourlyMicros,
       startedAt: schema.computeUsage.startedAt,
       credentialSource: schema.computeUsage.credentialSource,
     })
@@ -233,7 +266,15 @@ export async function getUserUsageSummary(
   const activeSessions: ActiveComputeSession[] = activeRows.map((r) => ({
     workspaceId: r.workspaceId,
     serverType: r.serverType,
-    vcpuCount: r.vcpuCount,
+    vcpuCount: r.providerInstanceVcpuCount ?? r.vcpuCount,
+    providerInstanceType: r.providerInstanceType,
+    providerInstanceVcpuCount: r.providerInstanceVcpuCount,
+    providerInstanceMemoryMb: r.providerInstanceMemoryMb,
+    providerInstanceDiskGb: r.providerInstanceDiskGb,
+    providerInstancePriceDisplay: r.providerInstancePriceDisplay,
+    providerInstancePriceCurrency: r.providerInstancePriceCurrency,
+    providerInstancePriceMonthlyCents: r.providerInstancePriceMonthlyCents,
+    providerInstancePriceHourlyMicros: r.providerInstancePriceHourlyMicros,
     startedAt: r.startedAt,
     credentialSource: r.credentialSource as CredentialSource,
   }));
@@ -378,7 +419,15 @@ export async function getUserDetailedUsage(
     workspaceId: r.workspaceId,
     nodeId: r.nodeId,
     serverType: r.serverType,
-    vcpuCount: r.vcpuCount,
+    vcpuCount: r.providerInstanceVcpuCount ?? r.vcpuCount,
+    providerInstanceType: r.providerInstanceType,
+    providerInstanceVcpuCount: r.providerInstanceVcpuCount,
+    providerInstanceMemoryMb: r.providerInstanceMemoryMb,
+    providerInstanceDiskGb: r.providerInstanceDiskGb,
+    providerInstancePriceDisplay: r.providerInstancePriceDisplay,
+    providerInstancePriceCurrency: r.providerInstancePriceCurrency,
+    providerInstancePriceMonthlyCents: r.providerInstancePriceMonthlyCents,
+    providerInstancePriceHourlyMicros: r.providerInstancePriceHourlyMicros,
     credentialSource: r.credentialSource as CredentialSource,
     startedAt: r.startedAt,
     endedAt: r.endedAt,

@@ -452,6 +452,14 @@ crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateWorks
       .select({
         cloudProvider: schema.nodes.cloudProvider,
         credentialSource: schema.nodes.credentialSource,
+        providerInstanceType: schema.nodes.providerInstanceType,
+        providerInstanceVcpuCount: schema.nodes.providerInstanceVcpuCount,
+        providerInstanceMemoryMb: schema.nodes.providerInstanceMemoryMb,
+        providerInstanceDiskGb: schema.nodes.providerInstanceDiskGb,
+        providerInstancePriceDisplay: schema.nodes.providerInstancePriceDisplay,
+        providerInstancePriceCurrency: schema.nodes.providerInstancePriceCurrency,
+        providerInstancePriceMonthlyCents: schema.nodes.providerInstancePriceMonthlyCents,
+        providerInstancePriceHourlyMicros: schema.nodes.providerInstancePriceHourlyMicros,
       })
       .from(schema.nodes)
       .where(eq(schema.nodes.id, targetNodeId))
@@ -462,7 +470,17 @@ crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateWorks
       nodeId: targetNodeId,
       vmSize,
       cloudProvider: nodeRow?.cloudProvider,
-      credentialSource: (nodeRow?.credentialSource as import('@simple-agent-manager/shared').CredentialSource) ?? 'user',
+      providerInstanceType: nodeRow?.providerInstanceType,
+      providerInstanceVcpuCount: nodeRow?.providerInstanceVcpuCount,
+      providerInstanceMemoryMb: nodeRow?.providerInstanceMemoryMb,
+      providerInstanceDiskGb: nodeRow?.providerInstanceDiskGb,
+      providerInstancePriceDisplay: nodeRow?.providerInstancePriceDisplay,
+      providerInstancePriceCurrency: nodeRow?.providerInstancePriceCurrency,
+      providerInstancePriceMonthlyCents: nodeRow?.providerInstancePriceMonthlyCents,
+      providerInstancePriceHourlyMicros: nodeRow?.providerInstancePriceHourlyMicros,
+      credentialSource:
+        (nodeRow?.credentialSource as import('@simple-agent-manager/shared').CredentialSource) ??
+        'user',
     });
   } catch (err) {
     log.error('workspace.compute_tracking_start_failed', {

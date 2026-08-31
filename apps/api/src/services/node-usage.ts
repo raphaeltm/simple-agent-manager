@@ -62,6 +62,11 @@ function calculateNodeHoursInPeriod(
 export interface NodeUsageCalculationRow {
   vmSize: string;
   cloudProvider: string | null;
+  providerInstanceType?: string | null;
+  providerInstanceVcpuCount?: number | null;
+  providerInstanceMemoryMb?: number | null;
+  providerInstanceDiskGb?: number | null;
+  providerInstancePriceDisplay?: string | null;
   credentialSource: string | null;
   /** Ownership class; user-owned (BYO) nodes accrue $0 regardless of credentialSource. */
   nodeClass: string | null;
@@ -108,6 +113,7 @@ function addNodeToTotals(
     NodeUsageRow,
     | 'vmSize'
     | 'cloudProvider'
+    | 'providerInstanceVcpuCount'
     | 'credentialSource'
     | 'nodeClass'
     | 'status'
@@ -134,7 +140,7 @@ function addNodeToTotals(
   }
   const endedAt = getNodeEndedAt(node.status, node.updatedAt);
   const hours = calculateNodeHoursInPeriod(node.createdAt, endedAt, periodStart, periodEnd, now);
-  const vcpus = getVcpuCount(node.vmSize, node.cloudProvider);
+  const vcpus = node.providerInstanceVcpuCount ?? getVcpuCount(node.vmSize, node.cloudProvider);
   const vcpuHours = hours * vcpus;
   const isPlatform = node.credentialSource === 'platform';
 
@@ -214,6 +220,11 @@ async function getUserOverlappingNodeRows(
       vmSize: schema.nodes.vmSize,
       vmLocation: schema.nodes.vmLocation,
       cloudProvider: schema.nodes.cloudProvider,
+      providerInstanceType: schema.nodes.providerInstanceType,
+      providerInstanceVcpuCount: schema.nodes.providerInstanceVcpuCount,
+      providerInstanceMemoryMb: schema.nodes.providerInstanceMemoryMb,
+      providerInstanceDiskGb: schema.nodes.providerInstanceDiskGb,
+      providerInstancePriceDisplay: schema.nodes.providerInstancePriceDisplay,
       credentialSource: schema.nodes.credentialSource,
       nodeClass: schema.nodes.nodeClass,
       status: schema.nodes.status,
@@ -242,6 +253,11 @@ async function getAllOverlappingNodeRows(
       vmSize: schema.nodes.vmSize,
       vmLocation: schema.nodes.vmLocation,
       cloudProvider: schema.nodes.cloudProvider,
+      providerInstanceType: schema.nodes.providerInstanceType,
+      providerInstanceVcpuCount: schema.nodes.providerInstanceVcpuCount,
+      providerInstanceMemoryMb: schema.nodes.providerInstanceMemoryMb,
+      providerInstanceDiskGb: schema.nodes.providerInstanceDiskGb,
+      providerInstancePriceDisplay: schema.nodes.providerInstancePriceDisplay,
       credentialSource: schema.nodes.credentialSource,
       nodeClass: schema.nodes.nodeClass,
       status: schema.nodes.status,
@@ -264,7 +280,12 @@ function toActiveComputeSession(node: NodeUsageRow): ActiveComputeSession | null
     workspaceId: node.id,
     serverType: node.vmSize,
     vmSize: node.vmSize,
-    vcpuCount: getVcpuCount(node.vmSize, node.cloudProvider),
+    vcpuCount: node.providerInstanceVcpuCount ?? getVcpuCount(node.vmSize, node.cloudProvider),
+    providerInstanceType: node.providerInstanceType,
+    providerInstanceVcpuCount: node.providerInstanceVcpuCount,
+    providerInstanceMemoryMb: node.providerInstanceMemoryMb,
+    providerInstanceDiskGb: node.providerInstanceDiskGb,
+    providerInstancePriceDisplay: node.providerInstancePriceDisplay,
     startedAt: node.createdAt,
     createdAt: node.createdAt,
     credentialSource,
@@ -280,7 +301,12 @@ function toNodeUsageRecord(
     nodeId: node.id,
     name: node.name,
     vmSize: node.vmSize,
-    vcpuCount: getVcpuCount(node.vmSize, node.cloudProvider),
+    vcpuCount: node.providerInstanceVcpuCount ?? getVcpuCount(node.vmSize, node.cloudProvider),
+    providerInstanceType: node.providerInstanceType,
+    providerInstanceVcpuCount: node.providerInstanceVcpuCount,
+    providerInstanceMemoryMb: node.providerInstanceMemoryMb,
+    providerInstanceDiskGb: node.providerInstanceDiskGb,
+    providerInstancePriceDisplay: node.providerInstancePriceDisplay,
     vmLocation: node.vmLocation,
     cloudProvider: node.cloudProvider,
     credentialSource: (node.credentialSource ?? 'user') as CredentialSource,

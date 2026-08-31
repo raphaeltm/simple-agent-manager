@@ -175,13 +175,13 @@ The implementation PR must include a writer inventory with disposition for every
 - [x] Fail wake visibly for positively invalid pool configuration and defer
       transient resolver/provider failures without consuming
       `recovery_attempts`.
-- [ ] Add provider-native instance metadata columns to `compute_usage` through
+- [x] Add provider-native instance metadata columns to `compute_usage` through
       an additive migration and snapshot those values when tracking starts.
-- [ ] Use provider instance vCPU count for compute and node usage accounting,
+- [x] Use provider instance vCPU count for compute and node usage accounting,
       with `getVcpuCount` only as legacy fallback.
-- [ ] Extend shared/API node and workspace response types with authoritative
+- [x] Extend shared/API node and workspace response types with authoritative
       provider offering identity/resources.
-- [ ] Update affected UI surfaces to display provider-native instance identity
+- [x] Update affected UI surfaces to display provider-native instance identity
       and resources as authoritative; keep `small`/`medium`/`large` labeled as
       compatibility/request hints.
 - [ ] Determine deployment-node capacity-pool scope from current architecture.
