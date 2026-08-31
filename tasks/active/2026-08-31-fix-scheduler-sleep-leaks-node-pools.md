@@ -167,12 +167,12 @@ The implementation PR must include a writer inventory with disposition for every
       sessions/snapshots without waking or replaying work.
 - [ ] Add deterministic, bounded cleanup for stale workspace, agent-session,
       and open `compute_usage` rows when the owning node is terminal/deleted.
-- [ ] Route session recovery placement through the centralized resolver before
+- [x] Route session recovery placement through the centralized resolver before
       consuming recovery attempts.
-- [ ] Feed resolved placement metadata into both recovery-task snapshot columns
+- [x] Feed resolved placement metadata into both recovery-task snapshot columns
       and `TaskRunner` `capacityPoolSelection`.
-- [ ] Preserve supersession/source-task CAS semantics during recovery handoff.
-- [ ] Fail wake visibly for positively invalid pool configuration and defer
+- [x] Preserve supersession/source-task CAS semantics during recovery handoff.
+- [x] Fail wake visibly for positively invalid pool configuration and defer
       transient resolver/provider failures without consuming
       `recovery_attempts`.
 - [ ] Add provider-native instance metadata columns to `compute_usage` through

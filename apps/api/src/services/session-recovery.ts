@@ -1,6 +1,4 @@
 import {
-  CREDENTIAL_PROVIDERS,
-  type CredentialProvider,
   type CredentialSource,
   DEFAULT_VM_LOCATION,
   DEFAULT_VM_SIZE,
@@ -8,6 +6,7 @@ import {
   VALID_WORKSPACE_PROFILES,
   type VMSize,
   type WorkspaceProfile,
+  type AgentProfileRuntime,
 } from '@simple-agent-manager/shared';
 import { and, desc, eq, exists, notInArray, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -23,7 +22,11 @@ import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
   capacityPlacementSnapshotSqlValues,
 } from './capacity-placement-snapshot';
-import { toCapacityPlacementSnapshot } from './capacity-pools';
+import {
+  resolveTaskStartPlacement,
+  resolveTaskStartPlacementCredentialAttributionFromPlacement,
+  type TaskStartPlacementWithCredential,
+} from './placement-resolver';
 import { failAndRestoreSessionRecoveryHandoff } from './session-recovery-authority';
 import {
   claimSessionSnapshotRecovery,
@@ -46,6 +49,8 @@ type RecoveryContext = {
   user: schema.User;
   sourceTask: schema.Task | null;
 };
+
+type RecoveryPlacementResolution = TaskStartPlacementWithCredential;
 
 class SourceTaskNotWakeableError extends Error {
   constructor() {
@@ -126,14 +131,12 @@ function asWorkspaceProfile(value: string | null | undefined): WorkspaceProfile 
     : DEFAULT_WORKSPACE_PROFILE;
 }
 
-function asCredentialProvider(value: string | null | undefined): CredentialProvider | null {
-  return (CREDENTIAL_PROVIDERS as readonly string[]).includes(value ?? '')
-    ? (value as CredentialProvider)
-    : null;
-}
-
 function asCredentialSource(value: string | null | undefined): CredentialSource {
   return value === 'project' || value === 'platform' || value === 'self-hosted' ? value : 'user';
+}
+
+function asAgentProfileRuntime(value: string | null | undefined): AgentProfileRuntime | null {
+  return value === 'vm' || value === 'cf-container' ? value : null;
 }
 
 function snapshotAgentType(snapshot: schema.SessionSnapshot): string | null {
@@ -192,6 +195,7 @@ async function createRecoveryTask(
   context: RecoveryContext,
   chatSessionId: string,
   taskId: string,
+  placementResolution: RecoveryPlacementResolution,
   sourceTaskGuard?: SessionRecoverySourceTaskGuard
 ): Promise<schema.Task> {
   const sourceTaskId =
@@ -216,7 +220,7 @@ async function createRecoveryTask(
   }
 
   const now = new Date().toISOString();
-  const capacityPlacementSnapshot = toCapacityPlacementSnapshot(context.workspace);
+  const capacityPlacementSnapshot = placementResolution.capacityPlacementSnapshot;
   try {
     // D1 batches are transactional. The INSERT ... SELECT is the parent-state
     // compare-and-set: if the source is terminal or no longer owns this
@@ -243,9 +247,9 @@ async function createRecoveryTask(
                   COALESCE(source.requested_vm_size_source, 'session-recovery'),
                   source.resource_requirements_json, source.resource_requirements_source,
                   source.resolved_reservation_json,
-                  COALESCE(source.credential_attribution_user_id, ?),
-                  source.credential_attribution_project_id,
-                  COALESCE(source.credential_attribution_source, 'user'),
+                  ?,
+                  ?,
+                  ?,
                   ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
                   'session-recovery', ?, ?, ?
              FROM tasks source
@@ -284,11 +288,11 @@ async function createRecoveryTask(
           context.snapshot.userId,
           SESSION_RECOVERY_INITIAL_PROMPT,
           context.workspace.agentProfileHint,
-          context.workspace.vmSize,
-          context.snapshot.userId,
-          ...capacityPlacementSnapshotSqlValues(
-            capacityPlacementSnapshot.capacityPoolId ? capacityPlacementSnapshot : null
-          ),
+          placementResolution.placement.vmSize,
+          placementResolution.credentialAttributionUserId,
+          placementResolution.credentialAttributionProjectId,
+          placementResolution.credentialAttributionSource,
+          ...capacityPlacementSnapshotSqlValues(capacityPlacementSnapshot),
           context.snapshot.userId,
           now,
           now,
@@ -479,6 +483,7 @@ async function startRecoveryTask(
   context: RecoveryContext,
   task: schema.Task,
   chatSessionId: string,
+  placementResolution: RecoveryPlacementResolution,
   sourceTaskGuard?: SessionRecoverySourceTaskGuard
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
@@ -534,10 +539,11 @@ async function startRecoveryTask(
       null,
     workspaceProfile: asWorkspaceProfile(context.workspace.workspaceProfile),
     devcontainerConfigName: context.workspace.devcontainerConfigName,
-    cloudProvider: asCredentialProvider(profile?.provider ?? context.project.defaultProvider),
-    credentialAttributionUserId: task.credentialAttributionUserId ?? context.snapshot.userId,
-    credentialAttributionProjectId: task.credentialAttributionProjectId,
-    credentialAttributionSource: asCredentialSource(task.credentialAttributionSource),
+    cloudProvider: placementResolution.placement.provider ?? placementResolution.effectiveProvider,
+    explicitVmLocation: placementResolution.placement.explicitVmLocation === true,
+    credentialAttributionUserId: placementResolution.credentialAttributionUserId,
+    credentialAttributionProjectId: placementResolution.credentialAttributionProjectId,
+    credentialAttributionSource: placementResolution.credentialAttributionSource,
     taskMode: 'conversation',
     model: profile?.model ?? null,
     effort:
@@ -557,8 +563,76 @@ async function startRecoveryTask(
       nodeMemoryThresholdPercent: context.project.nodeMemoryThresholdPercent,
       warmNodeTimeoutMs: context.project.warmNodeTimeoutMs,
     },
+    resolvedReservation: placementResolution.placement.resolvedReservation,
+    capacityPoolSelection: placementResolution.capacityPoolSelection,
+    vmSizeSource: placementResolution.placement.vmSizeSource,
     resumeSnapshotChatSessionId: chatSessionId,
     recoverySourceTaskId: sourceTaskGuard?.taskId ?? null,
+  });
+}
+
+async function resolveRecoveryPlacement(
+  db: Db,
+  env: Env,
+  context: RecoveryContext,
+  taskId: string
+): Promise<RecoveryPlacementResolution | { error: string; errorKind: 'placement' | 'credentials' }> {
+  const profile = context.workspace.agentProfileHint
+    ? await db
+        .select()
+        .from(schema.agentProfiles)
+        .where(eq(schema.agentProfiles.id, context.workspace.agentProfileHint))
+        .get()
+    : null;
+  const sourceTask = context.sourceTask;
+  const placement = resolveTaskStartPlacement({
+    entryPoint: 'session-recovery',
+    taskId,
+    projectId: context.project.id,
+    userId: context.snapshot.userId,
+    project: context.project,
+    profile: profile
+      ? {
+          profileId: profile.id,
+          agentType: profile.agentType,
+          vmSizeOverride: profile.vmSizeOverride,
+          provider: profile.provider,
+          vmLocation: profile.vmLocation,
+          workspaceProfile: profile.workspaceProfile,
+          runtime: asAgentProfileRuntime(profile.runtime),
+          devcontainerConfigName: profile.devcontainerConfigName,
+          taskMode: profile.taskMode,
+        }
+      : null,
+    explicit: {
+      vmSize: asVmSize(context.workspace.vmSize),
+      vmSizeSource: 'task',
+      provider: null,
+      vmLocation: context.workspace.vmLocation,
+      workspaceProfile: asWorkspaceProfile(context.workspace.workspaceProfile),
+      devcontainerConfigName: context.workspace.devcontainerConfigName,
+      taskMode: 'conversation',
+      agentType: snapshotAgentType(context.snapshot),
+      runtime: 'vm',
+    },
+    inheritedCredentialAttribution: {
+      userId: sourceTask?.credentialAttributionUserId ?? context.snapshot.userId,
+      projectId: sourceTask?.credentialAttributionProjectId ?? null,
+      source: asCredentialSource(sourceTask?.credentialAttributionSource),
+    },
+    credentialProjectPolicy: 'current-project-unless-inherited',
+    taskModeDefault: 'workspace-profile',
+    resourceRequirements: {
+      task: sourceTask?.resourceRequirementsJson
+        ? JSON.parse(sourceTask.resourceRequirementsJson)
+        : undefined,
+    },
+  });
+
+  return resolveTaskStartPlacementCredentialAttributionFromPlacement(db, placement, {
+    credentialsRequiredMessage:
+      'Cloud provider credentials required. Connect an account in Settings or enable a platform credential.',
+    env,
   });
 }
 
@@ -580,10 +654,27 @@ export async function ensureSessionRecovery(
     return { status: 'unavailable', reason: 'container_runtime_wakes_in_place' };
   }
 
+  const recoveryTaskId = ulid();
+  let placementResolution: RecoveryPlacementResolution;
+  try {
+    const resolved = await resolveRecoveryPlacement(db, env, context, recoveryTaskId);
+    if ('error' in resolved) {
+      return { status: 'unavailable', reason: `session_recovery_placement_${resolved.errorKind}` };
+    }
+    placementResolution = resolved;
+  } catch (error) {
+    log.warn('session_recovery.placement_resolution_deferred', {
+      projectId,
+      chatSessionId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { status: 'unavailable', reason: 'session_recovery_placement_transient' };
+  }
+
   const claim = await claimSessionSnapshotRecovery(db, env, {
     chatSessionId,
     userId: context.snapshot.userId,
-    taskId: ulid(),
+    taskId: recoveryTaskId,
     sourceTaskGuard,
   });
   if (claim.status === 'unavailable') return claim;
@@ -597,9 +688,17 @@ export async function ensureSessionRecovery(
       context,
       chatSessionId,
       claim.taskId,
+      placementResolution,
       sourceTaskGuard
     );
-    await startRecoveryTask(env, context, recoveryTask, chatSessionId, sourceTaskGuard);
+    await startRecoveryTask(
+      env,
+      context,
+      recoveryTask,
+      chatSessionId,
+      placementResolution,
+      sourceTaskGuard
+    );
     log.info('session_recovery.waking', {
       projectId,
       chatSessionId,
