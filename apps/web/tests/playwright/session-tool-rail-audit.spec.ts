@@ -658,9 +658,13 @@ test.describe('Session tool rail — actions', () => {
  * tall, so they collide on every session.
  */
 async function tabHeaderOverlap(page: Page): Promise<number> {
+  // Liveness before measurement: a vanished tab has no bounding box, and returning a
+  // sentinel would let `expect(overlap).toBe(0)` pass for a rail that never rendered.
+  await expect(page.getByTestId('session-tool-rail-tab')).toBeVisible();
+  await expect(page.getByTestId('session-header')).toBeVisible();
   const tab = await page.getByTestId('session-tool-rail-tab').boundingBox();
   const header = await page.getByTestId('session-header').boundingBox();
-  if (!tab || !header) return -1;
+  if (!tab || !header) throw new Error('tab or header has no bounding box');
   const vertical =
     Math.min(tab.y + tab.height, header.y + header.height) - Math.max(tab.y, header.y);
   const horizontal =
@@ -679,7 +683,11 @@ for (const theme of ['dark', 'light'] as const) {
         await seedTheme(page, theme);
         await openChat(page, { state: 'active', mode: 'hidden', anchor });
         const overlap = await tabHeaderOverlap(page);
-        console.log(`ANCHOR-OVERLAP mobile ${theme} ${anchor}: ${overlap}px`);
+        // `top` is the shipped baseline and MUST still collide — that is what makes this
+        // helper discriminating. If it ever reads 0 the measurement is broken, and every
+        // other assertion in this matrix is worthless.
+        if (anchor === 'top') expect(overlap).toBeGreaterThan(0);
+        else expect(overlap).toBe(0);
         await capture(page, `variant-tab-${anchor}-hidden-mobile-${theme}`);
       });
     }
@@ -699,7 +707,8 @@ for (const theme of ['dark', 'light'] as const) {
       await seedTheme(page, theme);
       await openChat(page, { state: 'active', mode: 'hidden', anchor: 'top', long: true });
       const overlap = await tabHeaderOverlap(page);
-      console.log(`ANCHOR-OVERLAP mobile ${theme} top+tallheader: ${overlap}px`);
+      // Deeper than the short-header case: the collision scales with header height.
+      expect(overlap).toBeGreaterThan(0);
       await capture(page, `variant-tab-top-tallheader-mobile-${theme}`);
     });
 
@@ -707,8 +716,61 @@ for (const theme of ['dark', 'light'] as const) {
       await seedTheme(page, theme);
       await openChat(page, { state: 'active', mode: 'hidden', anchor: 'center', long: true });
       const overlap = await tabHeaderOverlap(page);
-      console.log(`ANCHOR-OVERLAP mobile ${theme} center+tallheader: ${overlap}px`);
+      expect(overlap).toBe(0);
       await capture(page, `variant-tab-center-tallheader-mobile-${theme}`);
+    });
+
+    /*
+     * The anchor that actually SHIPS, against its own worst case. Without this the
+     * default was the one variant never screenshotted with a tall header.
+     */
+    test(`hidden tab anchored lower, TALL header`, async ({ page }) => {
+      await seedTheme(page, theme);
+      await openChat(page, { state: 'active', mode: 'hidden', anchor: 'lower', long: true });
+      expect(await tabHeaderOverlap(page)).toBe(0);
+      await capture(page, `variant-tab-lower-tallheader-mobile-${theme}`);
+    });
+
+    /*
+     * THE assertion that guards the shipped behaviour.
+     *
+     * Every other test in this matrix seeds an anchor explicitly, so all of them would
+     * still pass if `DEFAULT_RAIL_TAB_ANCHOR` were reverted to the colliding `top`. This
+     * one seeds nothing and exercises whatever the default actually is — including
+     * against a tall header, which is where the shipped placement failed.
+     */
+    test(`the DEFAULT placement clears the header`, async ({ page }) => {
+      await seedTheme(page, theme);
+      await openChat(page, { state: 'active', mode: 'hidden', long: true });
+      expect(await tabHeaderOverlap(page)).toBe(0);
+      await capture(page, `variant-tab-default-tallheader-mobile-${theme}`);
+    });
+
+    /*
+     * The scroll-to-bottom button is the one control that shares the tab's corner, and it
+     * only exists once the conversation is scrolled up. Every other fixture sits at the
+     * bottom, so without this the two were never on screen together.
+     */
+    test(`tab does not collide with the scroll-to-bottom button`, async ({ page }) => {
+      await seedTheme(page, theme);
+      await openChat(page, { state: 'active', mode: 'hidden', manyMessages: true });
+      await page.getByTestId('session-tool-rail-tab').waitFor({ state: 'visible' });
+      // Reset the scroller directly — `mouse.wheel` targets whatever is under the cursor,
+      // which in `hidden` mode may be the tab rather than the conversation.
+      await page.evaluate(() => {
+        const scroller = document.querySelector('[data-sam-conversation-scroller="true"]');
+        if (scroller) scroller.scrollTop = 0;
+      });
+      const scrollBtn = page.getByRole('button', { name: 'Scroll to bottom' });
+      await expect(scrollBtn).toBeVisible({ timeout: 10_000 });
+
+      const tab = (await page.getByTestId('session-tool-rail-tab').boundingBox())!;
+      const btn = (await scrollBtn.boundingBox())!;
+      const horizontalGap = tab.x - (btn.x + btn.width);
+      const verticalGap = Math.min(tab.y + tab.height, btn.y + btn.height) - Math.max(tab.y, btn.y);
+      // They may share a vertical band; what must never happen is overlap in BOTH axes.
+      expect(horizontalGap > 0 || verticalGap <= 0).toBe(true);
+      await capture(page, `variant-tab-scrollbutton-mobile-${theme}`);
     });
 
     test('labels bar — overlay elevation', async ({ page }) => {
@@ -726,7 +788,8 @@ for (const theme of ['dark', 'light'] as const) {
         await seedTheme(page, theme);
         await openChat(page, { state: 'active', mode: 'hidden', anchor });
         const overlap = await tabHeaderOverlap(page);
-        console.log(`ANCHOR-OVERLAP desktop ${theme} ${anchor}: ${overlap}px`);
+        if (anchor === 'top') expect(overlap).toBeGreaterThan(0);
+        else expect(overlap).toBe(0);
         await capture(page, `variant-tab-${anchor}-hidden-desktop-${theme}`);
       });
     }

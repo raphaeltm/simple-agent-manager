@@ -60,7 +60,16 @@ export type RailTabAnchor = 'top' | 'center' | 'lower';
 
 export const RAIL_TAB_ANCHORS: readonly RailTabAnchor[] = ['top', 'center', 'lower'];
 
-export const DEFAULT_RAIL_TAB_ANCHOR: RailTabAnchor = 'center';
+/*
+ * `lower`, not `center`. Both measure 0px overlap against the current tall-header
+ * fixture, but that fixture's header is only 79px — a two-line title plus one chip row.
+ * `SessionHeader` also renders an idle countdown, detected ports, node info and a
+ * completion error, and one extra wrapped chip row (~36-40px) or a third title line
+ * (~24px) is enough to put `center` (36px of headroom) back into collision. `lower`
+ * keeps ~73px. It also sits 37px closer to the thumb and lands over the empty right
+ * margin rather than beside the message column.
+ */
+export const DEFAULT_RAIL_TAB_ANCHOR: RailTabAnchor = 'lower';
 
 /** Absolute-position styles per anchor. */
 const RAIL_TAB_ANCHOR_STYLE: Record<RailTabAnchor, CSSProperties> = {
@@ -293,10 +302,22 @@ export function SessionToolRail({
         className="absolute inset-y-0 right-0 z-20 flex flex-col overflow-hidden rounded-tl-lg border-l"
         style={{
           width: RAIL_WIDTH_PX[mode],
-          borderColor: 'var(--sam-chrome-accent-divider)',
+          /*
+           * `--sam-color-border-default`, not `--sam-chrome-accent-divider`. The divider
+           * token is what `RailDivider` uses for the rail's own internal group splits, so
+           * using it here made the chrome/content boundary exactly as strong as a
+           * subdivision inside it. With the icons-mode shadow gone the border is the only
+           * thing separating rail from conversation, and measured against the light
+           * canvas the old pairing came to 1.20:1 — under the 3:1 WCAG 1.4.11 asks of a
+           * component boundary.
+           */
+          borderColor: 'var(--sam-color-border-default)',
+          // Surface, not canvas: `color-mix(bg-canvas 88%, transparent)` composites to
+          // approximately the canvas, leaving the rail with a 1.045:1 value delta in light
+          // mode — invisible without the shadow that used to carry it.
           backgroundColor: overlaying
             ? 'var(--sam-color-bg-surface)'
-            : 'color-mix(in srgb, var(--sam-color-bg-canvas) 88%, transparent)',
+            : 'color-mix(in srgb, var(--sam-color-bg-surface) 92%, transparent)',
           backdropFilter: 'blur(12px)',
           /*
            * An elevation only where one is TRUE. In icons mode — and in labels mode on
@@ -315,20 +336,21 @@ export function SessionToolRail({
           title={cycleLabel}
           data-testid="session-tool-rail-cycle"
           className={`flex h-8 shrink-0 cursor-pointer items-center gap-1 border-none bg-transparent text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent-primary ${
-            compact ? 'justify-center px-0' : 'justify-between px-2.5'
+            compact
+              ? 'justify-center px-0'
+              : // Tinted ONLY in labels mode, where the segment carries the word "TOOLS"
+                // and reads unambiguously as a section header. In compact mode the label
+                // is suppressed, so a tinted 46x32 box at the head of a vertical list of
+                // icon buttons reads as "selected" instead — the universal meaning of a
+                // tinted first list item. There the hard seam and rounded outer corner
+                // mark the segment on their own.
+                //
+                // A class, not an inline style: inline `backgroundColor` outranks every
+                // class selector, which silently killed `hover:bg-surface-hover` on this
+                // button. The `hover:` variant beats a plain utility on specificity.
+                'justify-between bg-[var(--sam-chrome-accent-active-subtle)] px-2.5'
           }`}
-          /*
-           * The bar's top segment is styled as a TAB that flows into the bar rather than
-           * sitting on it as a separate pill. The assembly's OUTER corner is rounded
-           * (`rounded-tl-lg` on the aside, which clips this button), while the seam
-           * between tab and bar is a hard square edge — one continuous piece of chrome,
-           * not two stacked shapes. A slightly lifted background separates the two
-           * without a second border.
-           */
-          style={{
-            borderBottom: '1px solid var(--sam-chrome-accent-active)',
-            backgroundColor: 'var(--sam-chrome-accent-active-subtle)',
-          }}
+          style={{ borderBottom: '1px solid var(--sam-chrome-accent-active)' }}
         >
           {!compact && (
             <span className="text-[9px] font-semibold uppercase tracking-[0.14em]">Tools</span>
