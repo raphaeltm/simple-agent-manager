@@ -1071,6 +1071,7 @@ Project event MCP tools use the ProjectData event limits above: `PROJECT_EVENT_L
 | `VITE_WORKSPACE_PORTS_FAILURE_BUDGET`       | `6`                | Consecutive unavailable port-list responses before circuit cooldown      |
 | `VITE_WORKSPACE_PORTS_BACKOFF_JITTER_RATIO` | `0.2`              | +/- jitter ratio applied to forwarded-port readiness backoff delays      |
 | `VITE_WORKSPACE_PORTS_CIRCUIT_RESET_MS`     | `300000`           | Open-circuit cooldown before probing forwarded-port readiness again      |
+| `VITE_SESSION_INFRA_RETRY_DELAYS_MS`        | `2000,5000,10000`  | Comma-separated retry delays for chat Details workspace/node fetches     |
 | `VITE_PROJECT_PREFETCH_DELAY_MS`            | `120`              | Mouse dwell before project-detail prefetch; focus/touch are immediate    |
 | `VITE_BACKGROUND_FETCH_DELAY_MS`            | `150`              | Delay before background query activity is shown and announced            |
 | `VITE_CHUNK_LOAD_RETRY_DELAY_MS`            | `350`              | Wait before retrying a failed lazy route-chunk import                    |

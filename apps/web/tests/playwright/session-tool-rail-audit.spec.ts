@@ -713,27 +713,60 @@ async function tabHeaderOverlap(page: Page): Promise<number> {
   return vertical > 0 && horizontal > -8 ? Math.round(vertical) : 0;
 }
 
+type MatrixTheme = 'dark' | 'light';
+type RailMatrixMode = NonNullable<MockOptions['mode']>;
+
+async function openMatrixCase(
+  page: Page,
+  theme: MatrixTheme,
+  mode: RailMatrixMode,
+  options: Pick<MockOptions, 'long' | 'manyMessages'> = {}
+) {
+  await seedTheme(page, theme);
+  await openChat(page, { state: 'active', mode, ...options });
+}
+
+async function railBoxShadow(page: Page): Promise<string> {
+  const rail = page.getByTestId('session-tool-rail');
+  await expect(rail).toBeVisible();
+  return rail.evaluate((el) => getComputedStyle(el).boxShadow);
+}
+
+async function expectRailElevation(page: Page, expected: 'raised' | 'flat') {
+  const shadow = await railBoxShadow(page);
+  if (expected === 'raised') {
+    expect(shadow).not.toBe('none');
+    expect(shadow).not.toBe('');
+    return;
+  }
+  expect(shadow).toBe('none');
+}
+
+function registerSharedMatrixCases(theme: MatrixTheme, viewport: MatrixViewport) {
+  const suffix = `${viewport}-${theme}`;
+
+  test('hidden tab clears the header', async ({ page }) => {
+    await openMatrixCase(page, theme, 'hidden');
+    // The `top` anchor was the discriminating control that proved `tabHeaderOverlap`
+    // can detect a collision (it returned >0 for `top`). Now that `lower` is the only
+    // placement, the helper's validity rests on that prior verification.
+    expect(await tabHeaderOverlap(page)).toBe(0);
+    await capture(page, `variant-tab-hidden-${suffix}`);
+  });
+
+  test('icons bar — tab flows into the bar, and does not float', async ({ page }) => {
+    await openMatrixCase(page, theme, 'icons');
+    await expectRailElevation(page, 'flat');
+    await capture(page, `variant-bar-icons-${suffix}`);
+  });
+}
+
 for (const theme of ['dark', 'light'] as const) {
   test.describe(`Tab placement matrix — mobile / ${theme}`, () => {
-    test(`hidden tab clears the header`, async ({ page }) => {
-      await seedTheme(page, theme);
-      await openChat(page, { state: 'active', mode: 'hidden' });
-      // The `top` anchor was the discriminating control that proved `tabHeaderOverlap`
-      // can detect a collision (it returned >0 for `top`). Now that `lower` is the only
-      // placement, the helper's validity rests on that prior verification.
-      expect(await tabHeaderOverlap(page)).toBe(0);
-      await capture(page, `variant-tab-hidden-mobile-${theme}`);
-    });
-
-    test('icons bar — tab flows into the bar', async ({ page }) => {
-      await seedTheme(page, theme);
-      await openChat(page, { state: 'active', mode: 'icons' });
-      await capture(page, `variant-bar-icons-mobile-${theme}`);
-    });
+    registerSharedMatrixCases(theme, 'mobile');
 
     test(`hidden tab clears a TALL header`, async ({ page }) => {
-      await seedTheme(page, theme);
-      await openChat(page, { state: 'active', mode: 'hidden', long: true });
+      await openMatrixCase(page, theme, 'hidden', { long: true });
       expect(await tabHeaderOverlap(page)).toBe(0);
       await capture(page, `variant-tab-tallheader-mobile-${theme}`);
     });
@@ -747,8 +780,7 @@ for (const theme of ['dark', 'light'] as const) {
      * edges must be at the same x, and the radius on that corner must be 0.
      */
     test(`header meets the rail with no gap and no curve`, async ({ page }) => {
-      await seedTheme(page, theme);
-      await openChat(page, { state: 'active', mode: 'icons' });
+      await openMatrixCase(page, theme, 'icons');
 
       const header = (await page.getByTestId('session-header').boundingBox())!;
       const rail = (await page.getByTestId('session-tool-rail').boundingBox())!;
@@ -774,8 +806,7 @@ for (const theme of ['dark', 'light'] as const) {
      * edge is the observable: collapsed, it must reach the viewport edge.
      */
     test(`hidden returns the full width to the conversation`, async ({ page }) => {
-      await seedTheme(page, theme);
-      await openChat(page, { state: 'active', mode: 'icons' });
+      await openMatrixCase(page, theme, 'icons');
       const narrowed = (await page.getByTestId('session-header').boundingBox())!;
 
       await page.getByTestId('session-tool-rail-cycle').click();
@@ -793,21 +824,13 @@ for (const theme of ['dark', 'light'] as const) {
       await capture(page, `variant-hidden-fullwidth-mobile-${theme}`);
     });
 
-    test(`the shipped placement clears a tall header`, async ({ page }) => {
-      await seedTheme(page, theme);
-      await openChat(page, { state: 'active', mode: 'hidden', long: true });
-      expect(await tabHeaderOverlap(page)).toBe(0);
-      await capture(page, `variant-tab-shipped-tallheader-mobile-${theme}`);
-    });
-
     /*
      * The scroll-to-bottom button is the one control that shares the tab's corner, and it
      * only exists once the conversation is scrolled up. Every other fixture sits at the
      * bottom, so without this the two were never on screen together.
      */
     test(`tab does not collide with the scroll-to-bottom button`, async ({ page }) => {
-      await seedTheme(page, theme);
-      await openChat(page, { state: 'active', mode: 'hidden', manyMessages: true });
+      await openMatrixCase(page, theme, 'hidden', { manyMessages: true });
       await page.getByTestId('session-tool-rail-tab').waitFor({ state: 'visible' });
       // Reset the scroller directly — `mouse.wheel` targets whatever is under the cursor,
       // which in `hidden` mode may be the tab rather than the conversation.
@@ -827,9 +850,9 @@ for (const theme of ['dark', 'light'] as const) {
       await capture(page, `variant-tab-scrollbutton-mobile-${theme}`);
     });
 
-    test('labels bar — overlay elevation', async ({ page }) => {
-      await seedTheme(page, theme);
-      await openChat(page, { state: 'active', mode: 'labels' });
+    test('labels bar — elevated only where it actually overlays', async ({ page }) => {
+      await openMatrixCase(page, theme, 'labels');
+      await expectRailElevation(page, 'raised');
       await capture(page, `variant-bar-labels-mobile-${theme}`);
     });
   });
@@ -837,22 +860,11 @@ for (const theme of ['dark', 'light'] as const) {
   test.describe(`Tab placement matrix — desktop / ${theme}`, () => {
     test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
-    test(`hidden tab clears the header`, async ({ page }) => {
-      await seedTheme(page, theme);
-      await openChat(page, { state: 'active', mode: 'hidden' });
-      expect(await tabHeaderOverlap(page)).toBe(0);
-      await capture(page, `variant-tab-hidden-desktop-${theme}`);
-    });
+    registerSharedMatrixCases(theme, 'desktop');
 
-    test('icons bar — tab flows into the bar', async ({ page }) => {
-      await seedTheme(page, theme);
-      await openChat(page, { state: 'active', mode: 'icons' });
-      await capture(page, `variant-bar-icons-desktop-${theme}`);
-    });
-
-    test('labels bar — pushes, so no elevation', async ({ page }) => {
-      await seedTheme(page, theme);
-      await openChat(page, { state: 'active', mode: 'labels' });
+    test('labels bar — elevated only where it actually overlays', async ({ page }) => {
+      await openMatrixCase(page, theme, 'labels');
+      await expectRailElevation(page, 'flat');
       await capture(page, `variant-bar-labels-desktop-${theme}`);
     });
   });

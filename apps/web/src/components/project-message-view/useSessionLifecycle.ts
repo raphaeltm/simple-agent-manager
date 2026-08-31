@@ -1,4 +1,3 @@
-import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
 import {
   DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES,
   DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
@@ -23,10 +22,8 @@ import type {
 import {
   cancelAgentPrompt,
   getChatSession,
-  getNode,
   getTerminalToken,
   getTranscribeApiUrl,
-  getWorkspace,
   resetIdleTimer,
   sendFollowUpPrompt,
 } from '../../lib/api';
@@ -51,10 +48,9 @@ import { useActivityVerifyTimer } from './useActivityVerifyTimer';
 import { useCompletionDockWorking } from './useCompletionDockWorking';
 import { useConnectionRecovery } from './useConnectionRecovery';
 import { useSessionFileUpload } from './useSessionFileUpload';
+import { useSessionInfrastructure } from './useSessionInfrastructure';
 import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
 import { useWakeProgress } from './useWakeProgress';
-
-const INFRA_FETCH_RETRY_DELAYS_MS = [2_000, 5_000, 10_000];
 
 export function useSessionLifecycle(
   projectId: string,
@@ -138,8 +134,7 @@ export function useSessionLifecycle(
     onOptimisticMessage: appendOptimisticMessage,
   });
 
-  const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
-  const [node, setNode] = useState<NodeResponse | null>(null);
+  const { workspace, node } = useSessionInfrastructure(session?.workspaceId);
   const [followUp, setFollowUp] = useState('');
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
@@ -392,73 +387,6 @@ export function useSessionLifecycle(
     hydratePlan,
     hydrateWakeProgress,
   ]);
-
-  // Fetch workspace details.
-  useEffect(() => {
-    const wsId = session?.workspaceId;
-    if (!wsId) return;
-    if (workspace?.id === wsId) return;
-
-    let cancelled = false;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-
-    async function attemptFetch(attempt = 0) {
-      if (!wsId) return;
-      try {
-        const ws = await getWorkspace(wsId);
-        if (cancelled) return;
-        setWorkspace(ws);
-      } catch {
-        if (cancelled) return;
-        if (attempt < INFRA_FETCH_RETRY_DELAYS_MS.length) {
-          retryTimer = setTimeout(
-            () => attemptFetch(attempt + 1),
-            INFRA_FETCH_RETRY_DELAYS_MS[attempt]
-          );
-        }
-      }
-    }
-
-    attemptFetch();
-    return () => {
-      cancelled = true;
-      if (retryTimer) clearTimeout(retryTimer);
-    };
-  }, [session?.workspaceId, workspace?.id]);
-
-  // Fetch node details after the workspace has landed. This must stay in a
-  // separate effect: `setWorkspace` re-renders this hook, and the workspace
-  // effect's cleanup must not be able to cancel a successful node fetch.
-  useEffect(() => {
-    const nodeId = workspace?.nodeId;
-    if (!nodeId) return;
-    if (node?.id === nodeId) return;
-
-    let cancelled = false;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-
-    async function attemptFetch(attempt = 0) {
-      if (!nodeId) return;
-      try {
-        const nd = await getNode(nodeId);
-        if (!cancelled) setNode(nd);
-      } catch {
-        if (cancelled) return;
-        if (attempt < INFRA_FETCH_RETRY_DELAYS_MS.length) {
-          retryTimer = setTimeout(
-            () => attemptFetch(attempt + 1),
-            INFRA_FETCH_RETRY_DELAYS_MS[attempt]
-          );
-        }
-      }
-    }
-
-    attemptFetch();
-    return () => {
-      cancelled = true;
-      if (retryTimer) clearTimeout(retryTimer);
-    };
-  }, [workspace?.nodeId, node?.id]);
 
   // Token refresh for port scanning
   const isWorkspaceRunning = isWorkspaceOperational(workspace?.status);
