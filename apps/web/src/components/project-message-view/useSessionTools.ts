@@ -19,32 +19,7 @@ import {
   TOOL_STRIP_MODE_STORAGE_KEY,
   type ToolStripMode,
 } from './session-tool-actions';
-import { DEFAULT_RAIL_TAB_ANCHOR, RAIL_TAB_ANCHORS, type RailTabAnchor } from './SessionToolRail';
 import type { SessionState } from './types';
-
-/**
- * REVIEW KNOB — REMOVE BEFORE MERGE.
- *
- * Lets the Playwright comparison matrix drive the collapsed-tab placement on the REAL
- * chat surface. It has to be storage rather than a prop because the collision being
- * compared is with the floating header, so the variants must be screenshotted in the real
- * page rather than a standalone harness — and a test cannot set a React prop that deep.
- *
- * Once a placement is chosen this reader and `RailTabAnchor` collapse to the single
- * constant. Tracked in the PR description; do not merge with this present.
- */
-const TAB_ANCHOR_REVIEW_KEY = 'sam-session-tool-tab-anchor';
-
-function readReviewAnchor(): RailTabAnchor {
-  try {
-    const raw = window.localStorage.getItem(TAB_ANCHOR_REVIEW_KEY);
-    return RAIL_TAB_ANCHORS.includes(raw as RailTabAnchor)
-      ? (raw as RailTabAnchor)
-      : DEFAULT_RAIL_TAB_ANCHOR;
-  } catch {
-    return DEFAULT_RAIL_TAB_ANCHOR;
-  }
-}
 
 /** Read the persisted mode. Storage can throw in private-mode Safari, so it fails soft. */
 function readStoredMode(): ToolStripMode {
@@ -85,8 +60,6 @@ export interface UseSessionToolsInput {
 
 export interface UseSessionToolsResult {
   mode: ToolStripMode;
-  /** REVIEW KNOB — remove with `readReviewAnchor`. */
-  tabAnchor: RailTabAnchor;
   setMode: (mode: ToolStripMode) => void;
   actions: SessionToolAction[];
   selectTool: (id: SessionToolId) => void;
@@ -120,7 +93,6 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
   } = input;
 
   const [mode, setMode] = useState<ToolStripMode>(readStoredMode);
-  const [tabAnchor] = useState<RailTabAnchor>(readReviewAnchor);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [confirmCompleteOpen, setConfirmCompleteOpen] = useState(false);
@@ -257,7 +229,6 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
 
   return {
     mode,
-    tabAnchor,
     setMode: persistMode,
     actions,
     selectTool,

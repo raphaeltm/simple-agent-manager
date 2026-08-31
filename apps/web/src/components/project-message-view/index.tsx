@@ -362,7 +362,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     <SessionToolRail
       actions={sessionTools.actions}
       mode={sessionTools.mode}
-      tabAnchor={sessionTools.tabAnchor}
       onModeChange={sessionTools.setMode}
       onSelect={sessionTools.selectTool}
       isMobile={isMobile}

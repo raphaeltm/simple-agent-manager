@@ -43,42 +43,10 @@ const RAIL_WIDTH_PX: Record<ToolStripMode, number> = {
 const RAIL_TAB_WIDTH_PX = 26;
 
 /**
- * Where the pull-tab sits when the rail is collapsed.
- *
- * Only meaningful in `hidden` mode: once the bar is out it is full-height, so its tab is
- * necessarily its top segment. The variants exist because the shipped `top` placement put
- * the tab inside the floating header's vertical band ON EVERY SESSION — the header is
- * `absolute top-0 left-0 right-0` in the same container and 150-210px tall, while the tab
- * anchored at 12px. Not an edge case; a guaranteed collision.
- *
- * `below-header` was considered and NOT built: it couples the tab to a header height that
- * grows when chips wrap or Details expands, and needs a `min(headerHeight, 45%)` clamp to
- * stop the tab being pushed off-screen entirely. Anchoring away from the header deletes
- * that failure mode instead of managing it.
+ * Collapsed pull-tab placement: biased below centre so it sits further from the floating
+ * header at its tallest (~73px headroom vs ~36px at centre) and closer to the thumb.
  */
-export type RailTabAnchor = 'top' | 'center' | 'lower';
-
-export const RAIL_TAB_ANCHORS: readonly RailTabAnchor[] = ['top', 'center', 'lower'];
-
-/*
- * `lower`, not `center`. Both measure 0px overlap against the current tall-header
- * fixture, but that fixture's header is only 79px — a two-line title plus one chip row.
- * `SessionHeader` also renders an idle countdown, detected ports, node info and a
- * completion error, and one extra wrapped chip row (~36-40px) or a third title line
- * (~24px) is enough to put `center` (36px of headroom) back into collision. `lower`
- * keeps ~73px. It also sits 37px closer to the thumb and lands over the empty right
- * margin rather than beside the message column.
- */
-export const DEFAULT_RAIL_TAB_ANCHOR: RailTabAnchor = 'lower';
-
-/** Absolute-position styles per anchor. */
-const RAIL_TAB_ANCHOR_STYLE: Record<RailTabAnchor, CSSProperties> = {
-  // Shipped placement, kept only so the comparison screenshots have a baseline.
-  top: { top: 12 },
-  center: { top: '50%', transform: 'translateY(-50%)' },
-  // Biased below centre: further from the header at its tallest, closer to the thumb.
-  lower: { top: '62%', transform: 'translateY(-50%)' },
-};
+const RAIL_TAB_STYLE: CSSProperties = { top: '62%', transform: 'translateY(-50%)' };
 
 /**
  * Horizontal space the conversation must give up.
@@ -219,15 +187,12 @@ export function SessionToolRail({
   actions,
   mode,
   onModeChange,
-  tabAnchor = DEFAULT_RAIL_TAB_ANCHOR,
   onSelect,
   isMobile,
 }: Readonly<{
   actions: SessionToolAction[];
   mode: ToolStripMode;
   onModeChange: (mode: ToolStripMode) => void;
-  /** Collapsed-tab placement. See `RailTabAnchor`. */
-  tabAnchor?: RailTabAnchor;
   onSelect: (id: SessionToolId) => void;
   isMobile: boolean;
 }>) {
@@ -262,7 +227,7 @@ export function SessionToolRail({
           data-testid="session-tool-rail-tab"
           className="absolute right-0 z-30 flex cursor-pointer flex-col items-center justify-center gap-1 rounded-l-lg border border-r-0 py-3 transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary"
           style={{
-            ...RAIL_TAB_ANCHOR_STYLE[tabAnchor],
+            ...RAIL_TAB_STYLE,
             width: RAIL_TAB_WIDTH_PX,
             borderColor: 'var(--sam-color-border-default)',
             backgroundColor: 'color-mix(in srgb, var(--sam-color-bg-surface) 92%, transparent)',

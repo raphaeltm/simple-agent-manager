@@ -24,8 +24,6 @@ const PROJECT_ID = 'proj-rail-1';
 const SESSION_ID = 'cs-rail-1';
 const WORKSPACE_ID = 'ws-rail-1';
 const STORAGE_KEY = 'sam-session-tool-strip-mode';
-/** REVIEW KNOB — see `useSessionTools`. Remove when a placement is chosen. */
-const ANCHOR_KEY = 'sam-session-tool-tab-anchor';
 
 const MOCK_USER = makeMockUser({
   email: 'rail@example.com',
@@ -169,8 +167,6 @@ interface MockOptions extends SessionOptions {
   empty?: boolean;
   /** Seeds a long conversation so the scroll-to-bottom button can actually appear. */
   manyMessages?: boolean;
-  /** REVIEW KNOB — collapsed-tab placement under comparison. Remove with the knob. */
-  anchor?: 'top' | 'center' | 'lower';
 }
 
 async function setupMocks(page: Page, options: MockOptions = {}) {
@@ -180,21 +176,17 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     messagesLong = false,
     empty = false,
     manyMessages = false,
-    anchor,
   } = options;
 
   await page.addInitScript(
-    ({ userId, storageKey, seededMode, anchorKey, seededAnchor }) => {
+    ({ userId, storageKey, seededMode }) => {
       window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
       if (seededMode) window.localStorage.setItem(storageKey, seededMode);
-      if (seededAnchor) window.localStorage.setItem(anchorKey, seededAnchor);
     },
     {
       userId: MOCK_USER.user.id,
       storageKey: STORAGE_KEY,
       seededMode: mode ?? '',
-      anchorKey: ANCHOR_KEY,
-      seededAnchor: anchor ?? '',
     }
   );
 
@@ -696,23 +688,17 @@ async function tabHeaderOverlap(page: Page): Promise<number> {
   return vertical > 0 && horizontal > -8 ? Math.round(vertical) : 0;
 }
 
-const ANCHORS = ['top', 'center', 'lower'] as const;
-
 for (const theme of ['dark', 'light'] as const) {
   test.describe(`Tab placement matrix — mobile / ${theme}`, () => {
-    for (const anchor of ANCHORS) {
-      test(`hidden tab anchored ${anchor}`, async ({ page }) => {
-        await seedTheme(page, theme);
-        await openChat(page, { state: 'active', mode: 'hidden', anchor });
-        const overlap = await tabHeaderOverlap(page);
-        // `top` is the shipped baseline and MUST still collide — that is what makes this
-        // helper discriminating. If it ever reads 0 the measurement is broken, and every
-        // other assertion in this matrix is worthless.
-        if (anchor === 'top') expect(overlap).toBeGreaterThan(0);
-        else expect(overlap).toBe(0);
-        await capture(page, `variant-tab-${anchor}-hidden-mobile-${theme}`);
-      });
-    }
+    test(`hidden tab clears the header`, async ({ page }) => {
+      await seedTheme(page, theme);
+      await openChat(page, { state: 'active', mode: 'hidden' });
+      // The `top` anchor was the discriminating control that proved `tabHeaderOverlap`
+      // can detect a collision (it returned >0 for `top`). Now that `lower` is the only
+      // placement, the helper's validity rests on that prior verification.
+      expect(await tabHeaderOverlap(page)).toBe(0);
+      await capture(page, `variant-tab-hidden-mobile-${theme}`);
+    });
 
     test('icons bar — tab flows into the bar', async ({ page }) => {
       await seedTheme(page, theme);
@@ -720,37 +706,11 @@ for (const theme of ['dark', 'light'] as const) {
       await capture(page, `variant-bar-icons-mobile-${theme}`);
     });
 
-    /*
-     * The header is not a fixed height — a wrapped title, chips and the Public-ports row
-     * all grow it. If the overlap scales with header height then `top` is not merely
-     * badly placed, it is placed against a moving target.
-     */
-    test(`hidden tab anchored top, TALL header`, async ({ page }) => {
+    test(`hidden tab clears a TALL header`, async ({ page }) => {
       await seedTheme(page, theme);
-      await openChat(page, { state: 'active', mode: 'hidden', anchor: 'top', long: true });
-      const overlap = await tabHeaderOverlap(page);
-      // Deeper than the short-header case: the collision scales with header height.
-      expect(overlap).toBeGreaterThan(0);
-      await capture(page, `variant-tab-top-tallheader-mobile-${theme}`);
-    });
-
-    test(`hidden tab anchored center, TALL header`, async ({ page }) => {
-      await seedTheme(page, theme);
-      await openChat(page, { state: 'active', mode: 'hidden', anchor: 'center', long: true });
-      const overlap = await tabHeaderOverlap(page);
-      expect(overlap).toBe(0);
-      await capture(page, `variant-tab-center-tallheader-mobile-${theme}`);
-    });
-
-    /*
-     * The anchor that actually SHIPS, against its own worst case. Without this the
-     * default was the one variant never screenshotted with a tall header.
-     */
-    test(`hidden tab anchored lower, TALL header`, async ({ page }) => {
-      await seedTheme(page, theme);
-      await openChat(page, { state: 'active', mode: 'hidden', anchor: 'lower', long: true });
+      await openChat(page, { state: 'active', mode: 'hidden', long: true });
       expect(await tabHeaderOverlap(page)).toBe(0);
-      await capture(page, `variant-tab-lower-tallheader-mobile-${theme}`);
+      await capture(page, `variant-tab-tallheader-mobile-${theme}`);
     });
 
     /*
@@ -808,19 +768,11 @@ for (const theme of ['dark', 'light'] as const) {
       await capture(page, `variant-hidden-fullwidth-mobile-${theme}`);
     });
 
-    /*
-     * THE assertion that guards the shipped behaviour.
-     *
-     * Every other test in this matrix seeds an anchor explicitly, so all of them would
-     * still pass if `DEFAULT_RAIL_TAB_ANCHOR` were reverted to the colliding `top`. This
-     * one seeds nothing and exercises whatever the default actually is — including
-     * against a tall header, which is where the shipped placement failed.
-     */
-    test(`the DEFAULT placement clears the header`, async ({ page }) => {
+    test(`the shipped placement clears a tall header`, async ({ page }) => {
       await seedTheme(page, theme);
       await openChat(page, { state: 'active', mode: 'hidden', long: true });
       expect(await tabHeaderOverlap(page)).toBe(0);
-      await capture(page, `variant-tab-default-tallheader-mobile-${theme}`);
+      await capture(page, `variant-tab-shipped-tallheader-mobile-${theme}`);
     });
 
     /*
@@ -860,16 +812,12 @@ for (const theme of ['dark', 'light'] as const) {
   test.describe(`Tab placement matrix — desktop / ${theme}`, () => {
     test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
-    for (const anchor of ANCHORS) {
-      test(`hidden tab anchored ${anchor}`, async ({ page }) => {
-        await seedTheme(page, theme);
-        await openChat(page, { state: 'active', mode: 'hidden', anchor });
-        const overlap = await tabHeaderOverlap(page);
-        if (anchor === 'top') expect(overlap).toBeGreaterThan(0);
-        else expect(overlap).toBe(0);
-        await capture(page, `variant-tab-${anchor}-hidden-desktop-${theme}`);
-      });
-    }
+    test(`hidden tab clears the header`, async ({ page }) => {
+      await seedTheme(page, theme);
+      await openChat(page, { state: 'active', mode: 'hidden' });
+      expect(await tabHeaderOverlap(page)).toBe(0);
+      await capture(page, `variant-tab-hidden-desktop-${theme}`);
+    });
 
     test('icons bar — tab flows into the bar', async ({ page }) => {
       await seedTheme(page, theme);
