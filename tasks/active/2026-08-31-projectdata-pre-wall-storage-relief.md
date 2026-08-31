@@ -93,7 +93,7 @@ Every finding above is represented in the checklist below.
   cloudflare-specialist, constitution-validator, env-validator,
   doc-sync-validator, security-auditor, test-engineer, and
   task-completion-validator.
-- [ ] Open a draft PR on `sam/implement-projectdata-pre-wall-3avraq`, trigger
+- [x] Open a draft PR on `sam/implement-projectdata-pre-wall-3avraq`, trigger
   label-based CodeRabbit review only after local readiness, and stop without
   staging, production mutation/config changes, merge, or production deploy
   monitoring.
@@ -170,7 +170,12 @@ or production monitoring command was run.
 
 ## PR / CI evidence
 
-To be filled after draft PR creation.
+- Draft PR: <https://github.com/raphaeltm/simple-agent-manager/pull/1978>
+- CodeRabbit review trigger: `coderabbit-review` label applied after local
+  validation and draft PR creation.
+- Branch pushed: `sam/implement-projectdata-pre-wall-3avraq`.
+- Stop condition honored: draft PR opened; no staging/prod deploy, production
+  mutation, production config change, or merge.
 
 ## References
 
