@@ -117,7 +117,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
    * React invokes updaters twice under StrictMode, and a `localStorage` write is a side
    * effect that has no business running during render.
    */
-  const selectMode = useCallback((next: ToolStripMode) => {
+  const persistMode = useCallback((next: ToolStripMode) => {
     setMode(next);
     try {
       window.localStorage.setItem(TOOL_STRIP_MODE_STORAGE_KEY, next);
@@ -232,7 +232,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
 
   return {
     mode,
-    setMode: selectMode,
+    setMode: persistMode,
     actions,
     selectTool,
     detailsExpanded,

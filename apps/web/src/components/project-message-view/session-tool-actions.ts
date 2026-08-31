@@ -118,6 +118,22 @@ export interface BuildSessionToolActionsInput {
   detailsExpanded?: boolean;
 }
 
+/**
+ * What a group builder returns: an action minus its `group`, which is stamped on by
+ * `withGroup` at the one place the grouping is decided.
+ *
+ * Hardcoding `group` on each action literal meant a copy-pasted block could claim a group
+ * that contradicted the helper it lived in — and since `SessionToolRail` partitions on that
+ * field rather than on position, a stray `group: 'meta'` would silently relocate an action
+ * into the pinned footer. Omitting it here makes that unrepresentable.
+ */
+type SessionToolSpec = Omit<SessionToolAction, 'group'>;
+
+/** Stamps one group onto every spec a builder produced. */
+function withGroup(group: SessionToolGroup, specs: SessionToolSpec[]): SessionToolAction[] {
+  return specs.map((spec) => ({ ...spec, group }));
+}
+
 /** Comment tool hint — attention outranks a plain unresolved count. */
 function buildCommentsHint(needsAttentionCount: number, unresolvedCount: number): string {
   if (needsAttentionCount > 0) {
@@ -130,7 +146,7 @@ function buildCommentsHint(needsAttentionCount: number, unresolvedCount: number)
 }
 
 /** Tools that act on the workspace or the conversation's history. */
-function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolAction[] {
+function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolSpec[] {
   const {
     session,
     sessionState,
@@ -142,7 +158,7 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolAc
     hasCommentsHandler,
   } = input;
 
-  const actions: SessionToolAction[] = [];
+  const actions: SessionToolSpec[] = [];
 
   // Files / Git / Workspace need a live workspace to act on.
   if (session.workspaceId && sessionState === 'active') {
@@ -152,7 +168,6 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolAc
         label: 'Files',
         hint: 'Browse workspace files',
         icon: FolderOpen,
-        group: 'workspace',
       });
     }
     if (hasGitHandler) {
@@ -161,7 +176,6 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolAc
         label: 'Git',
         hint: 'Review uncommitted changes',
         icon: GitCompare,
-        group: 'workspace',
       });
     }
     actions.push({
@@ -169,7 +183,6 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolAc
       label: 'Workspace',
       hint: 'Open the full workspace view',
       icon: ExternalLink,
-      group: 'workspace',
       href: `/workspaces/${session.workspaceId}`,
     });
   }
@@ -180,7 +193,6 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolAc
       label: 'Timeline',
       hint: 'Jump through session history',
       icon: Clock,
-      group: 'workspace',
     });
   }
 
@@ -190,7 +202,6 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolAc
       label: 'Comments',
       hint: buildCommentsHint(needsAttentionCommentCount, unresolvedCommentCount),
       icon: MessageSquareQuote,
-      group: 'workspace',
       badge: unresolvedCommentCount > 0 ? unresolvedCommentCount : undefined,
       badgeNeedsAttention: needsAttentionCommentCount > 0,
     });
@@ -200,9 +211,9 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolAc
 }
 
 /** Tools that act on the task behind the session. */
-function buildSessionGroup(input: BuildSessionToolActionsInput): SessionToolAction[] {
+function buildSessionGroup(input: BuildSessionToolActionsInput): SessionToolSpec[] {
   const { session, taskEmbed, hasRetryHandler, hasForkHandler } = input;
-  const actions: SessionToolAction[] = [];
+  const actions: SessionToolSpec[] = [];
 
   // Retry / Fork act on the task, so they only exist when there is one.
   //
@@ -220,7 +231,6 @@ function buildSessionGroup(input: BuildSessionToolActionsInput): SessionToolActi
         label: 'Retry',
         hint: 'Retry — re-run this task',
         icon: RotateCcw,
-        group: 'session',
       });
     }
     if (hasForkHandler) {
@@ -229,7 +239,6 @@ function buildSessionGroup(input: BuildSessionToolActionsInput): SessionToolActi
         label: 'Fork',
         hint: 'Fork — start a new task from this session',
         icon: GitFork,
-        group: 'session',
       });
     }
   }
@@ -238,9 +247,9 @@ function buildSessionGroup(input: BuildSessionToolActionsInput): SessionToolActi
 }
 
 /** Cross-cutting tools, pinned to the bottom of the rail. */
-function buildMetaGroup(input: BuildSessionToolActionsInput): SessionToolAction[] {
+function buildMetaGroup(input: BuildSessionToolActionsInput): SessionToolSpec[] {
   const { taskEmbed, reportEnabled, completing = false, detailsExpanded = false } = input;
-  const actions: SessionToolAction[] = [];
+  const actions: SessionToolSpec[] = [];
 
   if (reportEnabled) {
     actions.push({
@@ -248,7 +257,6 @@ function buildMetaGroup(input: BuildSessionToolActionsInput): SessionToolAction[
       label: 'Report',
       hint: 'Report an issue with this session',
       icon: Flag,
-      group: 'meta',
     });
   }
 
@@ -264,7 +272,6 @@ function buildMetaGroup(input: BuildSessionToolActionsInput): SessionToolAction[
       label: completing ? 'Completing...' : 'Complete',
       hint: 'Mark this task complete',
       icon: CheckCircle2,
-      group: 'meta',
       tone: 'success',
       disabled: completing,
     });
@@ -276,7 +283,6 @@ function buildMetaGroup(input: BuildSessionToolActionsInput): SessionToolAction[
     label: 'Details',
     hint: 'Show session details, IDs and infrastructure',
     icon: Info,
-    group: 'meta',
     expanded: detailsExpanded,
   });
 
@@ -287,12 +293,20 @@ function buildMetaGroup(input: BuildSessionToolActionsInput): SessionToolAction[
  * The single source of truth for "which tools does this session expose".
  *
  * Replaces the nine inline JSX conditions the header used to carry (rules 24 / 59), so the
- * rail, the tests, and any future surface all answer that question the same way. Built as
- * three group builders rather than one long function purely for readability — the order of
- * the groups here is the render order, and `isToolGroupStart` draws the dividers from it.
+ * rail, the tests, and any future surface all answer that question the same way.
+ *
+ * On ordering: `SessionToolRail` pins the `meta` group to a non-scrolling footer by
+ * FILTERING on `action.group`, not by position — so moving the `meta` spread here would
+ * render identically. The concat order is load-bearing only for the workspace → session
+ * sequence, and `isToolGroupStart` draws its divider over the already-meta-filtered list,
+ * so workspace → session is the only boundary it can ever see in production.
  */
 export function buildSessionToolActions(input: BuildSessionToolActionsInput): SessionToolAction[] {
-  return [...buildWorkspaceGroup(input), ...buildSessionGroup(input), ...buildMetaGroup(input)];
+  return [
+    ...withGroup('workspace', buildWorkspaceGroup(input)),
+    ...withGroup('session', buildSessionGroup(input)),
+    ...withGroup('meta', buildMetaGroup(input)),
+  ];
 }
 
 /** True where `actions[index]` starts a new group, so a divider is drawn before it. */

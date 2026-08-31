@@ -8,6 +8,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  type BuildSessionToolActionsInput,
+  buildSessionToolActions,
   DEFAULT_TOOL_STRIP_MODE,
   isToolGroupStart,
   isToolStripMode,
@@ -87,11 +89,64 @@ describe('isToolGroupStart', () => {
   it('is false within a group and true at a boundary', () => {
     expect(isToolGroupStart(actions, 1)).toBe(false); // git follows files
     expect(isToolGroupStart(actions, 2)).toBe(true); // session follows workspace
-    expect(isToolGroupStart(actions, 3)).toBe(true); // meta follows session
+    // Generic-function coverage only: the rail filters `meta` out before calling this, so
+    // a meta boundary cannot occur in production. Asserted so the helper stays correct if
+    // a future surface renders the ungrouped list.
+    expect(isToolGroupStart(actions, 3)).toBe(true);
   });
 
   it('is false for an out-of-range index', () => {
     expect(isToolGroupStart(actions, actions.length)).toBe(false);
     expect(isToolGroupStart([], 0)).toBe(false);
+  });
+});
+
+describe('buildSessionToolActions — group assignment', () => {
+  /** Every gate open, so all ten tools are present. */
+  const fullInput = (): BuildSessionToolActionsInput => ({
+    session: { id: 's1', workspaceId: 'ws1', taskId: 't1' } as never,
+    sessionState: 'active',
+    taskEmbed: { id: 't1', status: 'in_progress' } as never,
+    reportEnabled: true,
+    unresolvedCommentCount: 2,
+    needsAttentionCommentCount: 1,
+    hasFilesHandler: true,
+    hasGitHandler: true,
+    hasTimelineHandler: true,
+    hasCommentsHandler: true,
+    hasRetryHandler: true,
+    hasForkHandler: true,
+  });
+
+  /*
+   * `SessionToolRail` partitions on `action.group` rather than on position, so a tool
+   * carrying the wrong group is silently relocated — a `meta` typo moves it into the
+   * pinned footer no matter where it sits in the concat. `withGroup` makes that
+   * unrepresentable, and this pins the mapping so a future refactor cannot reintroduce
+   * per-action group literals without failing here.
+   */
+  it('assigns each tool to the group its builder owns', () => {
+    const byId = new Map(buildSessionToolActions(fullInput()).map((a) => [a.id, a.group]));
+
+    for (const id of ['files', 'git', 'workspace', 'timeline', 'comments'] as const) {
+      expect(byId.get(id)).toBe('workspace');
+    }
+    for (const id of ['retry', 'fork'] as const) {
+      expect(byId.get(id)).toBe('session');
+    }
+    for (const id of ['report', 'complete', 'details'] as const) {
+      expect(byId.get(id)).toBe('meta');
+    }
+  });
+
+  it('emits groups in workspace → session → meta order, never interleaved', () => {
+    // The workspace → session boundary is the only divider `isToolGroupStart` can draw in
+    // production (the rail filters `meta` out before calling it), so a group appearing
+    // twice would either duplicate that divider or suppress it.
+    const groups = buildSessionToolActions(fullInput()).map((a) => a.group);
+    const firstSeen = [...new Set(groups)];
+    expect(firstSeen).toEqual(['workspace', 'session', 'meta']);
+    // No group reappears after another has started.
+    expect(groups).toEqual([...groups].sort((a, b) => firstSeen.indexOf(a) - firstSeen.indexOf(b)));
   });
 });
