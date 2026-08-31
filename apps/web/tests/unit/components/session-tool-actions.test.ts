@@ -8,8 +8,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  type BuildSessionToolActionsInput,
   buildSessionToolActions,
+  type BuildSessionToolActionsInput,
   DEFAULT_TOOL_STRIP_MODE,
   isToolGroupStart,
   isToolStripMode,
