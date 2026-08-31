@@ -928,7 +928,10 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
         projectId: TEST_PROJECT_ID,
         chatSessionId,
       })
-    ).resolves.toMatchObject({ status: 'waking' });
+    ).resolves.toMatchObject({
+      status: 'unavailable',
+      reason: 'session_recovery_placement_credentials',
+    });
   });
 
   it('tryClaim on destroying node returns false', async () => {
