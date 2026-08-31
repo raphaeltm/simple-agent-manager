@@ -205,7 +205,9 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
             columnNames: [], rowsRead: 1, rowsWritten: 0,
           };
         }
-        // session_state upsert
+        if (query.includes('INSERT INTO session_state')) {
+          return { toArray: () => [], columnNames: [], rowsRead: 0, rowsWritten: 1 };
+        }
         return { toArray: () => [], columnNames: [], rowsRead: 0, rowsWritten: 0 };
       });
 
@@ -231,6 +233,9 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
       mockCtx.storage.sql.exec = vi.fn((query: string) => {
         if (query.includes('SELECT chat_session_id FROM acp_sessions')) {
           return { toArray: () => [], columnNames: [], rowsRead: 0, rowsWritten: 0 };
+        }
+        if (query.includes('INSERT INTO session_state')) {
+          return { toArray: () => [], columnNames: [], rowsRead: 0, rowsWritten: 1 };
         }
         return { toArray: () => [], columnNames: [], rowsRead: 0, rowsWritten: 0 };
       });

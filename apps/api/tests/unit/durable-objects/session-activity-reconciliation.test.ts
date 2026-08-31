@@ -103,7 +103,10 @@ describe('session activity reconciliation', () => {
   function readState(): Record<string, unknown> | undefined {
     return sql
       .exec(
-        'SELECT activity, activity_source, activity_reason, prompt_started_at, activity_probe_attempts FROM session_state WHERE session_id = ?',
+        `SELECT activity, activity_at, activity_source, activity_reason, prompt_started_at,
+                activity_probe_attempts, status_error, restart_count,
+                runtime_work_state, runtime_work_count, runtime_work_progress_at
+         FROM session_state WHERE session_id = ?`,
         ACP_SESSION
       )
       .toArray()[0];
@@ -352,6 +355,187 @@ describe('session activity reconciliation', () => {
         .toArray()[0];
       expect(row?.activity).toBe('idle');
       expect(row?.activity_at).toBe(now - 60 * 1000);
+    });
+  });
+
+  describe('activity report observed-time CAS', () => {
+    function queueBlockedDelivery(nextAttemptAt: number): void {
+      sql.exec(
+        `INSERT INTO session_inbox
+           (id, target_session_id, message_type, content, priority, created_at,
+            delivery_state, next_attempt_at, last_error, source_kind)
+         VALUES ('msg-cas', ?, 'prompt', 'Carry on...', 'normal', ?, 'retry_wait', ?, ?, 'agent_mailbox')`,
+        CHAT_SESSION,
+        now - 60 * 60 * 1000,
+        nextAttemptAt,
+        'Target VM is currently processing a prompt'
+      );
+    }
+
+    it('rejects an older cross-isolate intermediate after a newer idle terminal write', () => {
+      seedLiveSession();
+      queueBlockedDelivery(now + 30 * 60 * 1000);
+
+      expect(
+        upsertActivityState(sql, ACP_SESSION, {
+          activity: 'prompting',
+          observedAt: now,
+          now,
+          runtimeWorkState: 'active',
+          runtimeWorkCount: 1,
+          runtimeWorkSource: 'claude_sdk',
+          runtimeWorkProgressAt: now,
+        })
+      ).toBe(true);
+      expect(
+        upsertActivityState(sql, ACP_SESSION, {
+          activity: 'idle',
+          observedAt: now + 1000,
+          now: now + 1000,
+          runtimeWorkState: 'inactive',
+          runtimeWorkCount: 0,
+          runtimeWorkSource: 'claude_sdk',
+          runtimeWorkProgressAt: now + 1000,
+        })
+      ).toBe(true);
+
+      // Simulates isolate A flushing a coalesced intermediate after isolate B
+      // already delivered the terminal idle state. Without the DO CAS this
+      // resurrected a working state for every consumer until reconciliation.
+      expect(
+        upsertActivityState(sql, ACP_SESSION, {
+          activity: 'prompting',
+          observedAt: now + 500,
+          now: now + 5000,
+          promptStartedAt: now,
+          runtimeWorkState: 'active',
+          runtimeWorkCount: 1,
+          runtimeWorkSource: 'claude_sdk',
+          runtimeWorkProgressAt: now + 500,
+        })
+      ).toBe(false);
+
+      const state = readState();
+      expect(state).toMatchObject({
+        activity: 'idle',
+        activity_at: now + 1000,
+        runtime_work_state: 'inactive',
+        runtime_work_count: 0,
+      });
+      // Stop-button and durable-message gating read this state snapshot; it must
+      // remain non-working after the stale flush. Sleep/idleness should also not
+      // get re-queued as a stale working probe candidate.
+      expect(computeSessionActivityProbeAlarmTime(sql, {} as never, now + 5000)).toBeNull();
+      expect(candidates()).toEqual([]);
+      expect(nudgePromptDeliveriesForTarget(sql, CHAT_SESSION, now + 5000)).toBe(1);
+    });
+
+    it('allows equal-timestamp idempotent retries while keeping terminal states above working states', () => {
+      seedLiveSession();
+
+      expect(
+        upsertActivityState(sql, ACP_SESSION, {
+          activity: 'prompting',
+          observedAt: now,
+          now,
+          restartCount: 1,
+        })
+      ).toBe(true);
+      expect(
+        upsertActivityState(sql, ACP_SESSION, {
+          activity: 'prompting',
+          observedAt: now,
+          now: now + 10,
+          restartCount: 2,
+        })
+      ).toBe(true);
+      expect(readState()).toMatchObject({
+        activity: 'prompting',
+        activity_at: now,
+        restart_count: 2,
+      });
+
+      expect(upsertActivityState(sql, ACP_SESSION, { activity: 'idle', observedAt: now, now })).toBe(
+        true
+      );
+      expect(readState()).toMatchObject({ activity: 'idle', activity_at: now });
+
+      expect(
+        upsertActivityState(sql, ACP_SESSION, {
+          activity: 'prompting',
+          observedAt: now,
+          now: now + 20,
+          restartCount: 3,
+        })
+      ).toBe(false);
+      expect(readState()).toMatchObject({
+        activity: 'idle',
+        activity_at: now,
+        restart_count: 0,
+      });
+    });
+
+    it('lets same-millisecond error win and preserve status context over stale working retries', () => {
+      seedLiveSession();
+
+      expect(upsertActivityState(sql, ACP_SESSION, { activity: 'prompting', observedAt: now, now }))
+        .toBe(true);
+      expect(
+        upsertActivityState(sql, ACP_SESSION, {
+          activity: 'error',
+          observedAt: now,
+          now,
+          statusError: 'tool host crashed',
+        })
+      ).toBe(true);
+      expect(readState()).toMatchObject({
+        activity: 'error',
+        activity_at: now,
+        status_error: 'tool host crashed',
+      });
+
+      expect(
+        upsertActivityState(sql, ACP_SESSION, {
+          activity: 'prompting',
+          observedAt: now,
+          now: now + 1,
+          statusError: 'intermediate detail',
+        })
+      ).toBe(false);
+      expect(readState()).toMatchObject({
+        activity: 'error',
+        activity_at: now,
+        status_error: 'tool host crashed',
+      });
+    });
+
+    it('rejects strictly older retry writes without clearing terminal probe accounting', () => {
+      seedLiveSession();
+      upsertActivityState(sql, ACP_SESSION, { activity: 'prompting', observedAt: now, now });
+      upsertActivityState(sql, ACP_SESSION, {
+        activity: 'error',
+        observedAt: now + 1000,
+        now: now + 1000,
+        statusError: 'current terminal state',
+      });
+      sql.exec(
+        'UPDATE session_state SET activity_probe_attempts = 2 WHERE session_id = ?',
+        ACP_SESSION
+      );
+
+      expect(
+        upsertActivityState(sql, ACP_SESSION, {
+          activity: 'prompting',
+          observedAt: now + 999,
+          now: now + 2000,
+        })
+      ).toBe(false);
+      expect(readState()).toMatchObject({
+        activity: 'error',
+        activity_at: now + 1000,
+        status_error: 'current terminal state',
+        activity_probe_attempts: 2,
+      });
     });
   });
 

@@ -45,6 +45,12 @@ export function parseActivityStaleThreshold(value: string | undefined): number {
 
 export interface ActivityUpdate {
   activity: string;
+  /**
+   * When the reporter observed this activity state. Defaults to `now` for direct
+   * writes. Delayed/coalesced flushes must pass their original observation time
+   * so older cross-isolate reports cannot overwrite newer terminal state.
+   */
+  observedAt?: number | null;
   promptStartedAt?: number | null;
   agentType?: string | null;
   restartCount?: number | null;
@@ -64,15 +70,23 @@ function isWorkingActivity(activity: string): boolean {
   return (WORKING_ACTIVITIES as readonly string[]).includes(activity);
 }
 
+function normalizeActivityObservedAt(value: number | null | undefined, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    return fallback;
+  }
+  return Math.trunc(value);
+}
+
 export function upsertActivityState(
   sql: SqlStorage,
   sessionId: string,
   update: ActivityUpdate
-): void {
+): boolean {
   const now = update.now ?? Date.now();
+  const activityAt = normalizeActivityObservedAt(update.observedAt, now);
   const promptStartedAt =
     update.activity === 'prompting' || update.activity === 'recovering'
-      ? (update.promptStartedAt ?? now)
+      ? (update.promptStartedAt ?? activityAt)
       : null;
   const source: SessionActivitySource = update.source ?? 'vm_report';
   // A fresh authoritative report is its own evidence — a session that just
@@ -82,7 +96,7 @@ export function upsertActivityState(
     : (update.reason ?? (update.activity === 'idle' ? 'completed' : null));
   const hasRuntimeWorkUpdate = update.runtimeWorkState !== undefined;
 
-  sql.exec(
+  const cursor = sql.exec(
     `INSERT INTO session_state (
        session_id, activity, activity_at, prompt_started_at, prompt_epoch,
        agent_type, restart_count, status_error,
@@ -91,10 +105,10 @@ export function upsertActivityState(
        runtime_work_updated_at, runtime_work_progress_at
      )
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
-     ON CONFLICT(session_id) DO UPDATE SET
-       activity_source = excluded.activity_source,
-       activity_reason = excluded.activity_reason,
-       activity_probe_attempts = 0,
+	     ON CONFLICT(session_id) DO UPDATE SET
+	       activity_source = excluded.activity_source,
+	       activity_reason = excluded.activity_reason,
+	       activity_probe_attempts = 0,
        activity_probe_at = NULL,
        activity = excluded.activity,
        activity_at = excluded.activity_at,
@@ -129,10 +143,30 @@ export function upsertActivityState(
 		       THEN excluded.runtime_work_updated_at ELSE session_state.runtime_work_updated_at END,
 		   runtime_work_progress_at = CASE
 		     WHEN ? = 1 AND (session_state.runtime_work_progress_at IS NULL OR excluded.runtime_work_progress_at >= session_state.runtime_work_progress_at)
-		       THEN excluded.runtime_work_progress_at ELSE session_state.runtime_work_progress_at END`,
+		       THEN excluded.runtime_work_progress_at ELSE session_state.runtime_work_progress_at END
+	     WHERE session_state.activity_at IS NULL
+	        OR session_state.activity_at < excluded.activity_at
+	        OR (
+	          session_state.activity_at = excluded.activity_at
+	          AND CASE excluded.activity
+	                WHEN 'error' THEN 3
+	                WHEN 'idle' THEN 2
+	                WHEN 'stopped' THEN 2
+	                WHEN 'prompting' THEN 1
+	                WHEN 'recovering' THEN 1
+	                ELSE 0
+	              END >= CASE session_state.activity
+	                WHEN 'error' THEN 3
+	                WHEN 'idle' THEN 2
+	                WHEN 'stopped' THEN 2
+	                WHEN 'prompting' THEN 1
+	                WHEN 'recovering' THEN 1
+	                ELSE 0
+	              END
+	        )`,
     sessionId,
     update.activity,
-    now,
+    activityAt,
     promptStartedAt,
     promptStartedAt,
     update.agentType ?? null,
@@ -143,10 +177,11 @@ export function upsertActivityState(
     hasRuntimeWorkUpdate ? update.runtimeWorkState : null,
     hasRuntimeWorkUpdate ? (update.runtimeWorkCount ?? 0) : null,
     hasRuntimeWorkUpdate ? (update.runtimeWorkSource ?? null) : null,
-    hasRuntimeWorkUpdate ? now : null,
+    hasRuntimeWorkUpdate ? activityAt : null,
     hasRuntimeWorkUpdate ? (update.runtimeWorkProgressAt ?? null) : null,
     ...Array(5).fill(hasRuntimeWorkUpdate ? 1 : 0)
   );
+  return cursor.rowsWritten > 0;
 }
 
 export interface TurnEndInput {

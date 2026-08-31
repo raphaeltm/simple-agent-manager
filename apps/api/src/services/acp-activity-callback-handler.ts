@@ -16,7 +16,6 @@ import {
 import {
   type AcpActivityBinding,
   type AcpActivityCallbackReport,
-  type AcpActivityFlushResult,
   type AcpActivityPendingSnapshot,
   admitOrCoalesceAcpActivityCallback,
   buildAcpActivityBinding,
@@ -26,10 +25,17 @@ import {
   getAcpActivityAdmissionConfig,
   getCachedAcpActivityBinding,
   isIntermediateAcpActivityReport,
-  isPendingAcpActivitySnapshotCurrent,
   recordAcpActivityAdmissionSuccess,
   type WaitUntilFn,
 } from './acp-activity-admission';
+import {
+  activityReportExtra,
+  assertAcpActivityCallbackResourcesActive,
+  flushCoalescedAcpActivity,
+  loadD1ActivityBindingForTransientFallback,
+  persistIntermediateActivity,
+  reportedHarnessWorkKeepsRuntimeActive,
+} from './acp-activity-callback-flush';
 import { normalizeAgentActivityErrorMessage } from './acp-activity-error-message';
 import { isTransientDurableObjectError } from './durable-object-retry';
 import { type CallbackTokenPayload, verifyCallbackToken } from './jwt';
@@ -37,51 +43,15 @@ import { hibernateAgentSessionOnNode } from './node-agent';
 import {
   callbackTokenMatchesNode,
   callbackTokenMatchesWorkspace,
-  nodeStatusTerminatesCallbacks,
 } from './node-callback-auth';
 import * as projectDataService from './project-data';
 import { cancelScheduledSessionSleep } from './session-snapshots';
 import { recordAcpActivityCallbackMetric } from './telemetry';
 import { markVmAgentContainerActiveWorkEndedBestEffort } from './vm-agent-container';
 
-const ACP_ACTIVITY_WORKSPACE_CALLBACK_ACTIVE_STATUSES: ReadonlySet<string> = new Set([
-  'creating',
-  'running',
-  'recovery',
-]);
-
 function canTransitionAcpSessionToFailed(status: string): boolean {
   const validTargets = (ACP_SESSION_VALID_TRANSITIONS as Record<string, readonly string[]>)[status];
   return validTargets?.includes('failed') ?? false;
-}
-
-function activityReportExtra(body: AcpActivityCallbackReport): {
-  promptStartedAt?: number | null;
-  agentType?: string | null;
-  restartCount?: number | null;
-  statusError?: string | null;
-  runtimeWorkState?: 'inactive' | 'active' | 'settling';
-  runtimeWorkCount?: number;
-  runtimeWorkSource?: string;
-  runtimeWorkProgressAt?: number | null;
-} {
-  return {
-    promptStartedAt: body.promptStartedAt,
-    agentType: body.agentType,
-    restartCount: body.restartCount,
-    statusError: body.statusError,
-    runtimeWorkState: body.runtimeWorkState,
-    runtimeWorkCount: body.runtimeWorkCount,
-    runtimeWorkSource: body.runtimeWorkSource,
-    runtimeWorkProgressAt: body.runtimeWorkProgressAt,
-  };
-}
-
-function reportedHarnessWorkKeepsRuntimeActive(body: AcpActivityCallbackReport): boolean {
-  return (
-    body.activity === 'idle' &&
-    (body.runtimeWorkState === 'active' || body.runtimeWorkState === 'settling')
-  );
 }
 
 function assertCallbackTokenBoundToBinding(
@@ -138,233 +108,6 @@ function resolveWaitUntil(c: {
   };
 }
 
-async function assertAcpActivityCallbackResourcesActive(
-  env: Env,
-  input: {
-    projectId: string;
-    sessionId: string;
-    nodeId: string;
-    workspaceId: string | null | undefined;
-  }
-): Promise<void> {
-  const db = drizzle(env.DATABASE, { schema });
-  const node = await db
-    .select({ status: schema.nodes.status })
-    .from(schema.nodes)
-    .where(eq(schema.nodes.id, input.nodeId))
-    .get();
-  if (!node || nodeStatusTerminatesCallbacks(node.status)) {
-    const observedStatus = node?.status ?? 'missing';
-    log.info('acp_activity.terminal_node', {
-      projectId: input.projectId,
-      sessionId: input.sessionId,
-      nodeId: input.nodeId,
-      status: observedStatus,
-      action: 'terminal_gone',
-    });
-    throw errors.gone(`Node is ${observedStatus}; activity callback resource is gone`);
-  }
-
-  if (!input.workspaceId) return;
-  const workspace = await db
-    .select({
-      status: schema.workspaces.status,
-      nodeId: schema.workspaces.nodeId,
-      projectId: schema.workspaces.projectId,
-    })
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, input.workspaceId))
-    .get();
-  if (!workspace || !ACP_ACTIVITY_WORKSPACE_CALLBACK_ACTIVE_STATUSES.has(workspace.status)) {
-    const observedStatus = workspace?.status ?? 'missing';
-    log.info('acp_activity.terminal_workspace', {
-      projectId: input.projectId,
-      sessionId: input.sessionId,
-      workspaceId: input.workspaceId,
-      status: observedStatus,
-      action: 'terminal_gone',
-    });
-    throw errors.gone(`Workspace is ${observedStatus}; activity callback resource is gone`);
-  }
-  if (workspace.nodeId !== input.nodeId || workspace.projectId !== input.projectId) {
-    log.warn('acp_activity.workspace_binding_mismatch', {
-      projectId: input.projectId,
-      sessionId: input.sessionId,
-      workspaceId: input.workspaceId,
-      expectedNodeId: input.nodeId,
-      actualNodeId: workspace.nodeId,
-      actualProjectId: workspace.projectId,
-      action: 'rejected',
-    });
-    throw errors.gone('Workspace binding changed; activity callback resource is gone');
-  }
-}
-
-async function loadD1ActivityBindingForTransientFallback(
-  env: Env,
-  input: {
-    projectId: string;
-    sessionId: string;
-  }
-): Promise<AcpActivityBinding | null> {
-  const db = drizzle(env.DATABASE, { schema });
-  const row = await db
-    .select({
-      agentSessionId: schema.agentSessions.id,
-      agentType: schema.agentSessions.agentType,
-      workspaceId: schema.agentSessions.workspaceId,
-      workspaceProjectId: schema.workspaces.projectId,
-      workspaceNodeId: schema.workspaces.nodeId,
-      chatSessionId: schema.workspaces.chatSessionId,
-    })
-    .from(schema.agentSessions)
-    .leftJoin(schema.workspaces, eq(schema.workspaces.id, schema.agentSessions.workspaceId))
-    .where(eq(schema.agentSessions.id, input.sessionId))
-    .get();
-
-  if (!row) return null;
-  if (
-    row.agentSessionId !== input.sessionId ||
-    row.workspaceProjectId !== input.projectId ||
-    typeof row.workspaceNodeId !== 'string' ||
-    typeof row.chatSessionId !== 'string'
-  ) {
-    return null;
-  }
-
-  return {
-    sessionId: input.sessionId,
-    chatSessionId: row.chatSessionId,
-    workspaceId: typeof row.workspaceId === 'string' ? row.workspaceId : null,
-    nodeId: row.workspaceNodeId,
-    acpSdkSessionId: null,
-    status: 'running',
-    agentType: typeof row.agentType === 'string' ? row.agentType : null,
-  };
-}
-
-async function persistIntermediateActivity(input: {
-  env: Env;
-  config: ReturnType<typeof getAcpActivityAdmissionConfig>;
-  projectId: string;
-  sessionId: string;
-  binding: AcpActivityBinding;
-  body: AcpActivityCallbackReport;
-  admissionReason: string;
-  waitUntil: WaitUntilFn;
-  flush: (snapshot: AcpActivityPendingSnapshot) => Promise<AcpActivityFlushResult>;
-}): Promise<'persisted' | 'coalesced'> {
-  try {
-    await projectDataService.reportAcpSessionActivity(
-      input.env,
-      input.projectId,
-      input.sessionId,
-      input.body.activity,
-      activityReportExtra(input.body)
-    );
-    recordAcpActivityAdmissionSuccess({
-      env: input.env,
-      projectId: input.projectId,
-      sessionId: input.sessionId,
-      binding: input.binding,
-      report: input.body,
-      reason: input.admissionReason,
-    });
-    return 'persisted';
-  } catch (err) {
-    if (!isTransientDurableObjectError(err)) throw err;
-    if (!input.config.enabled) throw err;
-    coalesceAcpActivityAfterProjectDataTransient({
-      env: input.env,
-      config: input.config,
-      projectId: input.projectId,
-      sessionId: input.sessionId,
-      binding: input.binding,
-      report: input.body,
-      waitUntil: input.waitUntil,
-      flush: input.flush,
-    });
-    return 'coalesced';
-  }
-}
-
-async function flushCoalescedAcpActivity(
-  env: Env,
-  snapshot: AcpActivityPendingSnapshot
-): Promise<AcpActivityFlushResult> {
-  try {
-    const existing = await projectDataService.getAcpSession(
-      env,
-      snapshot.projectId,
-      snapshot.sessionId
-    );
-    if (!existing) {
-      return { action: 'rejected', reason: 'session_missing' };
-    }
-    const binding = buildAcpActivityBinding(existing);
-    if (!binding) {
-      return { action: 'rejected', reason: 'session_unassigned' };
-    }
-    if (
-      binding.nodeId !== snapshot.binding.nodeId ||
-      binding.workspaceId !== snapshot.binding.workspaceId ||
-      binding.chatSessionId !== snapshot.binding.chatSessionId
-    ) {
-      return { action: 'rejected', reason: 'binding_changed' };
-    }
-    if (!isPendingAcpActivitySnapshotCurrent(snapshot)) {
-      return { action: 'rejected', reason: 'pending_superseded' };
-    }
-    await assertAcpActivityCallbackResourcesActive(env, {
-      projectId: snapshot.projectId,
-      sessionId: snapshot.sessionId,
-      nodeId: binding.nodeId,
-      workspaceId: binding.workspaceId,
-    });
-    if (!isPendingAcpActivitySnapshotCurrent(snapshot)) {
-      return { action: 'rejected', reason: 'pending_superseded' };
-    }
-    if (
-      snapshot.report.activity === 'prompting' ||
-      reportedHarnessWorkKeepsRuntimeActive(snapshot.report)
-    ) {
-      await cancelScheduledSessionSleep(
-        drizzle(env.DATABASE, { schema }),
-        binding.chatSessionId
-      ).catch((err) => {
-        log.warn('acp_activity.cancel_scheduled_sleep_failed', {
-          sessionId: snapshot.sessionId,
-          projectId: snapshot.projectId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-    }
-    if (!isPendingAcpActivitySnapshotCurrent(snapshot)) {
-      return { action: 'rejected', reason: 'pending_superseded' };
-    }
-    await projectDataService.reportAcpSessionActivity(
-      env,
-      snapshot.projectId,
-      snapshot.sessionId,
-      snapshot.report.activity,
-      activityReportExtra(snapshot.report)
-    );
-    return { action: 'flushed' };
-  } catch (err) {
-    if (isTransientDurableObjectError(err)) {
-      return { action: 'retry', reason: 'project_data_transient' };
-    }
-    log.warn('acp_activity.coalesced_flush_rejected', {
-      projectId: snapshot.projectId,
-      sessionId: snapshot.sessionId,
-      nodeId: snapshot.binding.nodeId,
-      workspaceId: snapshot.binding.workspaceId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return { action: 'rejected', reason: 'flush_failed' };
-  }
-}
-
 export async function handleAcpActivityCallback(
   c: Context<{ Bindings: Env }>,
   input: {
@@ -373,6 +116,7 @@ export async function handleAcpActivityCallback(
     body: AcpActivityCallbackReport;
   }
 ): Promise<Response> {
+  const observedAt = Date.now();
   // Verify callback JWT (not BetterAuth session cookie)
   const token = extractBearerToken(c.req.header('Authorization'));
   const payload = await verifyCallbackToken(token, c.env);
@@ -405,6 +149,7 @@ export async function handleAcpActivityCallback(
         sessionId,
         nodeId: body.nodeId,
         workspaceId: cachedBinding.workspaceId,
+        chatSessionId: cachedBinding.chatSessionId,
       });
       if (body.activity === 'prompting' || reportedHarnessWorkKeepsRuntimeActive(body)) {
         await cancelScheduledSessionSleep(
@@ -426,6 +171,7 @@ export async function handleAcpActivityCallback(
         sessionId,
         binding: cachedBinding,
         report: body,
+        observedAt,
         waitUntil,
         flush,
       });
@@ -439,6 +185,7 @@ export async function handleAcpActivityCallback(
         sessionId,
         binding: cachedBinding,
         body,
+        observedAt,
         admissionReason: admission.reason,
         waitUntil,
         flush,
@@ -468,6 +215,7 @@ export async function handleAcpActivityCallback(
             sessionId,
             nodeId: body.nodeId,
             workspaceId: fallbackBinding.workspaceId,
+            chatSessionId: fallbackBinding.chatSessionId,
           });
           if (body.activity === 'prompting' || reportedHarnessWorkKeepsRuntimeActive(body)) {
             await cancelScheduledSessionSleep(
@@ -489,6 +237,7 @@ export async function handleAcpActivityCallback(
             sessionId,
             binding: fallbackBinding,
             report: body,
+            observedAt,
             waitUntil,
             flush,
           });
@@ -549,6 +298,7 @@ export async function handleAcpActivityCallback(
     sessionId,
     nodeId: body.nodeId,
     workspaceId: existing.workspaceId,
+    chatSessionId: existing.chatSessionId,
   });
   cacheAcpActivityBinding(config, projectId, binding);
 
@@ -576,6 +326,7 @@ export async function handleAcpActivityCallback(
       sessionId,
       binding,
       report: body,
+      observedAt,
       waitUntil,
       flush,
     });
@@ -589,14 +340,13 @@ export async function handleAcpActivityCallback(
       sessionId,
       binding,
       body,
+      observedAt,
       admissionReason: admission.reason,
       waitUntil,
       flush,
     });
     return c.body(null, 204);
   }
-
-  clearPendingAcpActivity(projectId, sessionId);
 
   // Staleness guard (S2): reject a DESTRUCTIVE `error` callback that provably
   // originates from a superseded Instant (cf-container) generation. A mid-turn
@@ -659,13 +409,31 @@ export async function handleAcpActivityCallback(
     }
   }
 
-  await projectDataService.reportAcpSessionActivity(
+  const activityApplied = await projectDataService.reportAcpSessionActivity(
     c.env,
     projectId,
     sessionId,
     body.activity,
-    activityReportExtra(body)
+    activityReportExtra(body, observedAt)
   );
+  if (activityApplied === false) {
+    recordAcpActivityCallbackMetric(
+      {
+        metric: 'acp_activity_callback',
+        outcome: 'rejected',
+        projectId,
+        sessionId,
+        nodeId: body.nodeId,
+        workspaceId: binding.workspaceId,
+        activity: body.activity,
+        reason: 'stale_activity_observed_at',
+        source: 'callback',
+      },
+      c.env
+    );
+    return c.body(null, 204);
+  }
+  clearPendingAcpActivity(projectId, sessionId);
   recordAcpActivityAdmissionSuccess({
     env: c.env,
     projectId,

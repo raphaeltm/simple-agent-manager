@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   d1BindingRow: null as Record<string, unknown> | null,
   nodeStatus: 'running',
   workspaceStatus: 'running',
+  workspaceChatSessionId: 'chat-session-1' as string | null,
   statusLookupCount: 0,
   // Row returned to the S2 staleness guard's combined agent_sessions⋈nodes read
   // ({ updatedAt, runtime }). Default is non-Instant so existing error tests
@@ -90,6 +91,7 @@ vi.mock('drizzle-orm/d1', () => ({
             status: mocks.workspaceStatus,
             nodeId: 'node-1',
             projectId: 'project-1',
+            chatSessionId: mocks.workspaceChatSessionId,
           };
         }
         return mocks.workspace;
@@ -193,6 +195,7 @@ describe('agent activity callback', () => {
     mocks.d1BindingRow = null;
     mocks.nodeStatus = 'running';
     mocks.workspaceStatus = 'running';
+    mocks.workspaceChatSessionId = 'chat-session-1';
     mocks.statusLookupCount = 0;
     mocks.guardRow = { updatedAt: null, runtime: 'vm' };
     mocks.jwt.verifyCallbackToken.mockResolvedValue({
@@ -338,7 +341,8 @@ describe('agent activity callback', () => {
 
   it('coalesces callback storms while preserving newest intermediate state for convergence', async () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-08-31T00:00:00.000Z'));
+    const baseMs = Date.parse('2026-08-31T00:00:00.000Z');
+    vi.setSystemTime(baseMs);
     const app = await createTestApp();
 
     const firstResponse = await postActivity(app, {
@@ -352,8 +356,16 @@ describe('agent activity callback', () => {
     expect(firstResponse.status).toBe(204);
     expect(mocks.projectData.getAcpSession).toHaveBeenCalledTimes(1);
     expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(1);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenLastCalledWith(
+      env,
+      'project-1',
+      'agent-session-1',
+      'prompting',
+      expect.objectContaining({ observedAt: baseMs })
+    );
 
     for (let restartCount = 1; restartCount <= 20; restartCount += 1) {
+      vi.setSystemTime(baseMs + restartCount);
       const response = await postActivity(app, {
         activity: 'prompting',
         nodeId: 'node-1',
@@ -385,6 +397,7 @@ describe('agent activity callback', () => {
       'agent-session-1',
       'prompting',
       expect.objectContaining({
+        observedAt: baseMs + 20,
         promptStartedAt: 100,
         restartCount: 20,
       })
@@ -680,6 +693,76 @@ describe('agent activity callback', () => {
     expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects cached callbacks when the workspace chat-session binding changed', async () => {
+    const app = await createTestApp();
+
+    await postActivity(app, {
+      activity: 'prompting',
+      nodeId: 'node-1',
+      promptStartedAt: 100,
+    });
+    mocks.workspaceChatSessionId = 'chat-session-recovered';
+
+    const response = await postActivity(app, {
+      activity: 'prompting',
+      nodeId: 'node-1',
+      promptStartedAt: 100,
+    });
+
+    expect(response.status).toBe(410);
+    expect(mocks.projectData.getAcpSession).toHaveBeenCalledTimes(1);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(1);
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'acp_activity.workspace_session_binding_changed',
+      expect.objectContaining({
+        expectedChatSessionId: 'chat-session-1',
+        actualChatSessionId: 'chat-session-recovered',
+        action: 'terminal_gone',
+      })
+    );
+  });
+
+  it('classifies expected 410 teardown during a coalesced flush as resource_gone', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-31T00:00:00.000Z'));
+    const app = await createTestApp();
+
+    await postActivity(app, {
+      activity: 'prompting',
+      nodeId: 'node-1',
+      promptStartedAt: 100,
+      agentType: 'openai-codex',
+    });
+    await postActivity(app, {
+      activity: 'prompting',
+      nodeId: 'node-1',
+      promptStartedAt: 100,
+      agentType: 'openai-codex',
+      restartCount: 1,
+    });
+    mocks.workspaceStatus = 'stopped';
+
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(1);
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'acp_activity.coalesced_flush_resource_gone',
+      expect.objectContaining({ action: 'resource_gone' })
+    );
+    expect(mocks.log.warn).not.toHaveBeenCalledWith(
+      'acp_activity.coalesced_flush_rejected',
+      expect.anything()
+    );
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'acp_activity.telemetry',
+      expect.objectContaining({
+        outcome: 'rejected',
+        reason: 'resource_gone',
+        source: 'admission_control',
+      })
+    );
+  });
+
   it('turns VM-agent error activity into durable failed control-plane state', async () => {
     const app = await createTestApp();
 
@@ -911,6 +994,49 @@ describe('agent activity callback', () => {
           action: 'rejected_stale_callback',
         })
       );
+    });
+
+    it('does not clear current pending intermediate activity when rejecting a stale error', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-08-31T00:00:00.000Z'));
+      const { getAcpActivityAdmissionSnapshotForTests } = await import(
+        '../../../src/services/acp-activity-admission'
+      );
+      mocks.guardRow = {
+        runtime: 'cf-container',
+        updatedAt: new Date(TOKEN_IAT_MS + 180_000).toISOString(),
+      };
+      const app = await createTestApp();
+
+      await postActivity(app, {
+        activity: 'prompting',
+        nodeId: 'node-1',
+        promptStartedAt: 100,
+      });
+      await postActivity(app, {
+        activity: 'prompting',
+        nodeId: 'node-1',
+        promptStartedAt: 100,
+        restartCount: 1,
+      });
+      expect(getAcpActivityAdmissionSnapshotForTests().pending).toBe(1);
+
+      const response = await postActivity(
+        app,
+        {
+          activity: 'error',
+          nodeId: 'node-1',
+          agentType: 'openai-codex',
+          statusError: 'superseded container exited',
+        },
+        OLD_TOKEN
+      );
+
+      expect(response.status).toBe(204);
+      expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(1);
+      expect(getAcpActivityAdmissionSnapshotForTests().pending).toBe(1);
+      expect(mocks.projectData.transitionAcpSession).not.toHaveBeenCalled();
+      expect(mocks.projectData.failSession).not.toHaveBeenCalled();
     });
 
     it('(b) still fails the session for a genuine crash of the CURRENT container (no recovery)', async () => {

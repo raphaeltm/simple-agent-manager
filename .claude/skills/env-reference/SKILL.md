@@ -108,6 +108,8 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `ACP_ACTIVITY_COALESCE_MAX_PENDING` — Maximum pending coalesced activity reports retained by one Worker isolate (default: `512`)
 - `ACP_ACTIVITY_BINDING_CACHE_TTL_MS` — Short-lived authorized ACP session binding cache used to avoid ProjectData reads during callback storms (default: `30000`)
 - `ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES` — Maximum cached ACP activity bindings retained by one Worker isolate (default: `2048`)
+
+Activity coalescing and binding caches are per Worker isolate. Delayed flushes carry their original observed event time, and ProjectData rejects stale writes so a delayed intermediate report cannot overwrite a newer idle/error state from another isolate.
 - `SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS` — Reclaim timeout for an interrupted replacement-runtime wake claim (default: `600000`)
 - `SESSION_LIFECYCLE_ERROR_MAX_LENGTH` — Maximum stored session lifecycle and agent activity failure diagnostic length (default: `2048`)
 - `SESSION_SNAPSHOT_PURGE_ENABLED` — Kill switch for expired snapshot cleanup in D1 and R2 (default: enabled)

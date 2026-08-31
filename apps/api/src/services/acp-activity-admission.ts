@@ -90,6 +90,7 @@ export interface AcpActivityPendingSnapshot {
   sessionId: string;
   binding: AcpActivityBinding;
   report: AcpActivityCallbackReport;
+  observedAt: number;
   firstCoalescedAt: number;
   updatedAt: number;
   expiresAt: number;
@@ -233,6 +234,7 @@ export function admitOrCoalesceAcpActivityCallback(input: {
   sessionId: string;
   binding: AcpActivityBinding;
   report: AcpActivityCallbackReport;
+  observedAt?: number;
   waitUntil: WaitUntilFn;
   flush: AcpActivityFlushHandler;
   now?: number;
@@ -292,6 +294,7 @@ export function coalesceAcpActivityAfterProjectDataTransient(input: {
   sessionId: string;
   binding: AcpActivityBinding;
   report: AcpActivityCallbackReport;
+  observedAt?: number;
   waitUntil: WaitUntilFn;
   flush: AcpActivityFlushHandler;
   now?: number;
@@ -417,6 +420,7 @@ function coalescePendingActivity(input: {
   sessionId: string;
   binding: AcpActivityBinding;
   report: AcpActivityCallbackReport;
+  observedAt?: number;
   waitUntil: WaitUntilFn;
   flush: AcpActivityFlushHandler;
   key: string;
@@ -434,6 +438,7 @@ function coalescePendingActivity(input: {
     sessionId: input.sessionId,
     binding: input.binding,
     report: withoutSensitiveActivityFields(input.report),
+    observedAt: input.observedAt ?? input.now,
     firstCoalescedAt: existing?.firstCoalescedAt ?? input.now,
     updatedAt: input.now,
     expiresAt: existing?.expiresAt ?? input.now + input.config.coalesceTtlMs,
@@ -518,6 +523,7 @@ async function flushPendingActivity(
     sessionId: pending.sessionId,
     binding: pending.binding,
     report: pending.report,
+    observedAt: pending.observedAt,
     firstCoalescedAt: pending.firstCoalescedAt,
     updatedAt: pending.updatedAt,
     expiresAt: pending.expiresAt,
@@ -685,6 +691,7 @@ function withoutSensitiveActivityFields(
     promptStartedAt: report.promptStartedAt,
     agentType: report.agentType,
     restartCount: report.restartCount,
+    statusError: report.statusError,
     runtimeWorkState: report.runtimeWorkState,
     runtimeWorkCount: report.runtimeWorkCount,
     runtimeWorkSource: report.runtimeWorkSource,

@@ -1626,6 +1626,7 @@ export async function reportAcpSessionActivity(
   sessionId: string,
   activity: string,
   extra?: {
+    observedAt?: number | null;
     promptStartedAt?: number | null;
     agentType?: string | null;
     restartCount?: number | null;
@@ -1635,9 +1636,9 @@ export async function reportAcpSessionActivity(
     runtimeWorkSource?: string;
     runtimeWorkProgressAt?: number | null;
   }
-): Promise<void> {
+): Promise<boolean> {
   const stub = await getStub(env, projectId);
-  await stub.reportActivity(sessionId, activity, extra);
+  return stub.reportActivity(sessionId, activity, extra);
 }
 
 /**
