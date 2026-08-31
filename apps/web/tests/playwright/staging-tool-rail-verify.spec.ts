@@ -14,6 +14,10 @@ import { type BrowserContext, expect, type Page, test } from '@playwright/test';
 const STAGING_API = 'https://api.sammy.party';
 const STAGING_APP = 'https://app.sammy.party';
 
+/** Per-attempt budget for the login request, well under the per-test timeout. */
+const LOGIN_TIMEOUT_MS = 20_000;
+const LOGIN_ATTEMPTS = 3;
+
 /**
  * This file talks to real staging, so it must never run in the normal CI sweep — CI has
  * no smoke token and would either fail or, worse, mutate the shared environment. The
@@ -23,6 +27,20 @@ test.skip(
   !process.env.SAM_PLAYWRIGHT_PRIMARY_USER,
   'Staging-only: requires SAM_PLAYWRIGHT_PRIMARY_USER'
 );
+
+/*
+ * Every test here does a token-login, a cross-Atlantic navigation, and then waits on a
+ * lazily-loaded route chunk — against a real, throttled environment. The project default
+ * of 30s is smaller than the sum of those waits plus a single 30s locator timeout, so a
+ * test could exhaust its whole budget waiting for the page and report the FEATURE as
+ * missing when the app was still on "Verifying your session".
+ *
+ * That is exactly what happened: `Timeline opens the real timeline drawer` failed with
+ * "element(s) not found" while the DOM snapshot showed only the auth spinner, and a
+ * sibling test asserting the same rail passed in 17s purely because it was quicker. The
+ * budget, not the feature, was the variable.
+ */
+test.describe.configure({ timeout: 120_000 });
 
 /**
  * Cookies from the one token-login this file performs.
@@ -42,13 +60,60 @@ async function login(page: Page) {
   }
 
   const token = process.env.SAM_PLAYWRIGHT_PRIMARY_USER;
-  const res = await page.request.post(`${STAGING_API}/api/auth/token-login`, {
-    data: { token },
-    headers: { 'Content-Type': 'application/json' },
-  });
-  expect(res.status(), `token-login failed: ${await res.text()}`).toBe(200);
 
-  cachedCookies = (await page.context().storageState()).cookies;
+  /*
+   * Bounded retry with an explicit per-attempt timeout.
+   *
+   * The FIRST request a worker makes can hang on connection setup. Observed directly: the
+   * run's first `token-login` sat for the full 120s test budget and failed, while the very
+   * next test's login — same token, same endpoint — succeeded in seconds, and `curl`
+   * against the endpoint returned 200 in 1.6s throughout. Without a per-request timeout
+   * the hang consumes the whole test and reports as "login failed", which points the next
+   * reader at credentials or rate limiting rather than at a cold socket.
+   *
+   * `token-login` IS also hourly-rate-limited per principal, which is why this file logs in
+   * once per worker and replays cookies. Retrying a genuine 429 would be pointless, so a
+   * non-2xx response fails immediately; only a hang or transport error is retried.
+   */
+  let lastError = '';
+  for (let attempt = 1; attempt <= LOGIN_ATTEMPTS; attempt += 1) {
+    try {
+      const res = await page.request.post(`${STAGING_API}/api/auth/token-login`, {
+        data: { token },
+        headers: { 'Content-Type': 'application/json' },
+        timeout: LOGIN_TIMEOUT_MS,
+      });
+      expect(res.status(), `token-login rejected: ${await res.text()}`).toBe(200);
+      cachedCookies = (await page.context().storageState()).cookies;
+      return;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      // An assertion failure means the server answered and rejected us — not retryable.
+      if (lastError.includes('token-login rejected')) throw err;
+    }
+  }
+  throw new Error(`token-login did not complete in ${LOGIN_ATTEMPTS} attempts: ${lastError}`);
+}
+
+/**
+ * Dismisses the first-run "Account setup" wizard if it is up.
+ *
+ * The staging smoke user has no cloud credential of its own, so the onboarding modal can
+ * appear over the chat. It is NOT a verification blocker — SAM resolves
+ * project -> user -> platform, and staging has an enabled platform credential, so
+ * workspaces provision fine without one (see CLAUDE.md, Architecture Principle 1).
+ *
+ * It IS a test hazard, and precisely the one `.claude/rules/62` records: a modal covering
+ * the surface under test makes every assertion below it report the FEATURE as missing.
+ * Here it swallowed a click on the rail and the timeline drawer never opened, which reads
+ * identically to "Timeline is broken".
+ */
+async function dismissOnboardingIfPresent(page: Page) {
+  const wizard = page.getByRole('dialog', { name: 'Account setup' });
+  // Short probe: absent is the common case and must not cost the test its budget.
+  if (!(await wizard.isVisible({ timeout: 3_000 }).catch(() => false))) return;
+  await page.getByRole('button', { name: 'Exit setup' }).click();
+  await expect(wizard).toBeHidden({ timeout: 10_000 });
 }
 
 /** Opens the most recent chat session that has messages, or skips if none exist. */
@@ -63,6 +128,7 @@ async function openMostRecentSession(page: Page): Promise<boolean> {
 
   await page.goto(`${STAGING_APP}/projects/${session.projectId}/chat/${session.id}`);
   await expect(page.getByText('Something went wrong')).toHaveCount(0);
+  await dismissOnboardingIfPresent(page);
   return true;
 }
 
@@ -229,11 +295,11 @@ const REGRESSION_PAGES = [
 test.describe('Staging — regression pass', () => {
   for (const [path, marker] of REGRESSION_PAGES) {
     test(`${path} still loads`, async ({ page }) => {
-      test.setTimeout(90_000);
       await login(page);
 
       await page.goto(`${STAGING_APP}${path}`, { waitUntil: 'domcontentloaded' });
       await expect(page.getByText('Something went wrong')).toHaveCount(0);
+      await dismissOnboardingIfPresent(page);
 
       // Assert on rendered text, not `textContent`: an empty `<body>` while the route
       // chunk resolves is indistinguishable from a broken page if you read raw text.
