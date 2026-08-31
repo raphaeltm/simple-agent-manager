@@ -13,6 +13,10 @@ import {
   type ProjectDataEventLogCleanupResult,
   readProjectDataEventLogCleanupRecheckAt,
 } from './event-log-cleanup';
+import {
+  type ProjectDataGroupedFtsCleanupResult,
+  readProjectDataGroupedFtsCleanupRecheckAt,
+} from './grouped-fts-cleanup';
 import { runProjectDataStorageSafetyAlarmCore } from './storage-alarm';
 import {
   type ProjectDataStorageCategoryBreakdown,
@@ -78,6 +82,21 @@ export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS = 5;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS = 5 * 1000;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS = 5 * 60 * 1000;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES = 512 * 1024;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES = 1_900_000;
+export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_MEASURE_BATCH_ROWS = 500;
+export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS = 5_000;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED = false;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO = 0.9;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO = 0.85;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS = 2;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_ROWS = 1_000;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_BYTES = 4 * 1024 * 1024;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_MIN_SESSION_AGE_DAYS = 7;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_RECHECK_MS = 5 * 60 * 1000;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS = 5 * 1000;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO = 0.98;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES = 1;
 export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS = 500;
 export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS = 7;
 export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS = 60 * 1000;
@@ -125,6 +144,7 @@ export interface ProjectDataStorageEmergencyPurgeResult {
 export interface ProjectDataStorageAlarmResult {
   measurement: ProjectDataStorageTelemetry | null;
   cleanup: ProjectDataToolPayloadCleanupResult | null;
+  groupedFtsCleanup: ProjectDataGroupedFtsCleanupResult | null;
   eventLogCleanup: ProjectDataEventLogCleanupResult | null;
   cleanupHealth: ProjectDataStorageCleanupHealth | null;
   durationMs: number;
@@ -158,6 +178,21 @@ export interface StorageSafetyConfig {
   toolPayloadArchiveR2Prefix: string;
   toolPayloadArchiveWriteTimeoutMs: number;
   toolPayloadArchiveRetryDelayMs: number;
+  toolPayloadArchiveChunkBytes: number;
+  toolPayloadArchiveMaxMetadataBytes: number;
+  storageReliefMeasureBatchRows: number;
+  storageReliefMeasureMaxBatchRows: number;
+  groupedFtsCleanupEnabled: boolean;
+  groupedFtsCleanupTriggerRatio: number;
+  groupedFtsCleanupTargetRatio: number;
+  groupedFtsCleanupBatchSessions: number;
+  groupedFtsCleanupBatchRows: number;
+  groupedFtsCleanupBatchBytes: number;
+  groupedFtsCleanupMinSessionAgeMs: number;
+  groupedFtsCleanupRecheckMs: number;
+  groupedFtsCleanupWallTimeMs: number;
+  groupedFtsCleanupWallUnsafeRatio: number;
+  groupedFtsCleanupWeakReclaimBytes: number;
   eventLogCleanupEnabled: boolean;
   eventLogCleanupBatchRows: number;
   eventLogCleanupMinSessionAgeMs: number;
@@ -245,6 +280,28 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
     env.PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS,
     DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS
   );
+  const groupedFtsCleanupTriggerRatio = parseBoundedRatio(
+    env.PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO,
+    DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO
+  );
+  const groupedFtsCleanupTargetRatio = parseBoundedRatio(
+    env.PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO,
+    DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO
+  );
+  const groupedFtsCleanupRatiosAreOrdered =
+    groupedFtsCleanupTargetRatio < groupedFtsCleanupTriggerRatio;
+  const groupedFtsCleanupMinSessionAgeDays = parseNonNegativeInteger(
+    env.PROJECT_DATA_GROUPED_FTS_CLEANUP_MIN_SESSION_AGE_DAYS,
+    DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_MIN_SESSION_AGE_DAYS
+  );
+  const storageReliefMeasureMaxBatchRows = parsePositiveInteger(
+    env.PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS,
+    DEFAULT_PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS
+  );
+  const storageReliefMeasureBatchRows = parsePositiveInteger(
+    env.PROJECT_DATA_STORAGE_RELIEF_MEASURE_BATCH_ROWS,
+    DEFAULT_PROJECT_DATA_STORAGE_RELIEF_MEASURE_BATCH_ROWS
+  );
 
   return {
     enabled: envFlagEnabled(env.PROJECT_DATA_STORAGE_TELEMETRY_ENABLED),
@@ -330,6 +387,56 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
       env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS,
       DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS
     ),
+    toolPayloadArchiveChunkBytes: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES
+    ),
+    toolPayloadArchiveMaxMetadataBytes: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES
+    ),
+    storageReliefMeasureBatchRows: Math.min(
+      storageReliefMeasureBatchRows,
+      storageReliefMeasureMaxBatchRows
+    ),
+    storageReliefMeasureMaxBatchRows,
+    groupedFtsCleanupEnabled:
+      (env.PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED ?? '').trim().toLowerCase() === 'true',
+    groupedFtsCleanupTriggerRatio: groupedFtsCleanupRatiosAreOrdered
+      ? groupedFtsCleanupTriggerRatio
+      : DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO,
+    groupedFtsCleanupTargetRatio: groupedFtsCleanupRatiosAreOrdered
+      ? groupedFtsCleanupTargetRatio
+      : DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO,
+    groupedFtsCleanupBatchSessions: parsePositiveInteger(
+      env.PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS,
+      DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS
+    ),
+    groupedFtsCleanupBatchRows: parsePositiveInteger(
+      env.PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_ROWS,
+      DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_ROWS
+    ),
+    groupedFtsCleanupBatchBytes: parsePositiveInteger(
+      env.PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_BYTES,
+      DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_BYTES
+    ),
+    groupedFtsCleanupMinSessionAgeMs: groupedFtsCleanupMinSessionAgeDays * 24 * 60 * 60 * 1000,
+    groupedFtsCleanupRecheckMs: parsePositiveInteger(
+      env.PROJECT_DATA_GROUPED_FTS_CLEANUP_RECHECK_MS,
+      DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_RECHECK_MS
+    ),
+    groupedFtsCleanupWallTimeMs: parsePositiveInteger(
+      env.PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS,
+      DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS
+    ),
+    groupedFtsCleanupWallUnsafeRatio: parseBoundedRatio(
+      env.PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO,
+      DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO
+    ),
+    groupedFtsCleanupWeakReclaimBytes: parsePositiveInteger(
+      env.PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES,
+      DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES
+    ),
     eventLogCleanupEnabled: envFlagEnabled(env.PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED),
     eventLogCleanupBatchRows: parsePositiveInteger(
       env.PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS,
@@ -406,14 +513,20 @@ export function computeStorageSafetyAlarmTime(
     archiveRunAt =
       archiveLastRunAt === null ? now : archiveLastRunAt + config.toolPayloadArchiveIntervalMs;
   }
+  const groupedFtsCleanupRecheckAt = config.groupedFtsCleanupEnabled
+    ? readProjectDataGroupedFtsCleanupRecheckAt(sql)
+    : null;
   const eventLogCleanupRecheckAt = config.eventLogCleanupEnabled
     ? readProjectDataEventLogCleanupRecheckAt(sql)
     : null;
   return Math.min(
     measureAt,
-    ...[cleanupRecheckAt, archiveRunAt, eventLogCleanupRecheckAt].filter(
-      (value): value is number => value !== null
-    )
+    ...[
+      cleanupRecheckAt,
+      archiveRunAt,
+      groupedFtsCleanupRecheckAt,
+      eventLogCleanupRecheckAt,
+    ].filter((value): value is number => value !== null)
   );
 }
 

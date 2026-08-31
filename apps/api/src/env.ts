@@ -559,7 +559,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES?: string;
-  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES?: string; // Max single legacy tool_metadata row bytes read by archival cleanup (default: 1048576)
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES?: string; // Legacy inline-size threshold for cleanup accounting; archival may read larger rows up to archive max (default: 1048576)
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM?: string;
@@ -569,6 +569,21 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX?: string; // Private R2 prefix for archived ProjectData tool payloads
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS?: string; // Per-R2-write timeout for archival cleanup (default: 5000)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS?: string; // Retry deferral after archive/write failures (default: 300000)
+  PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES?: string; // R2 chunk size for legacy oversized tool payload archives (default: 524288)
+  PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES?: string; // Absolute bounded metadata read cap for legacy oversized archives (default: 1900000)
+  PROJECT_DATA_STORAGE_RELIEF_MEASURE_BATCH_ROWS?: string; // Default row budget for admin-only ProjectData relief measurement slices
+  PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS?: string; // Max accepted row budget for admin-only relief measurement slices
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED?: string; // Disabled-by-default cleanup of old terminal-session grouped/FTS derived rows
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO?: string;
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO?: string;
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS?: string;
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_ROWS?: string;
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_BYTES?: string;
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_MIN_SESSION_AGE_DAYS?: string;
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_RECHECK_MS?: string;
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS?: string;
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO?: string;
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES?: string;
   PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED?: string;
   PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS?: string;
   PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS?: string;

@@ -1,6 +1,7 @@
 import { isJsonRecord } from '@simple-agent-manager/shared';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
+import type { ProjectDataCleanupTerminationReason } from './grouped-fts-cleanup';
 import type {
   ProjectDataStorageStatus,
   ProjectDataStorageTelemetry,
@@ -38,6 +39,10 @@ export interface ProjectDataEventLogCleanupResult {
     activityEvents: number;
     acpSessionEvents: number;
   };
+  rowsExamined: number;
+  originalBytes: number;
+  reclaimedBytes: number;
+  terminationReason: ProjectDataCleanupTerminationReason;
   exhaustedCandidates: boolean;
   recheckAt: number | null;
 }
@@ -367,9 +372,12 @@ function buildEventLogCleanupResult(
   afterBytes: number,
   rowsDeleted: ProjectDataEventLogCleanupResult['rowsDeleted'],
   candidateBytesDeleted: ProjectDataEventLogCleanupResult['candidateBytesDeleted'],
+  terminationReason: ProjectDataCleanupTerminationReason,
   exhaustedCandidates: boolean,
   recheckAt: number | null
 ): ProjectDataEventLogCleanupResult {
+  const rowsExamined = rowsDeleted.activityEvents + rowsDeleted.acpSessionEvents;
+  const originalBytes = candidateBytesDeleted.activityEvents + candidateBytesDeleted.acpSessionEvents;
   return {
     projectId: plan.projectId,
     beforeBytes: plan.beforeBytes,
@@ -381,6 +389,10 @@ function buildEventLogCleanupResult(
     cutoffUpdatedAt: plan.cutoffUpdatedAt,
     rowsDeleted,
     candidateBytesDeleted,
+    rowsExamined,
+    originalBytes,
+    reclaimedBytes: Math.max(plan.beforeBytes - afterBytes, 0),
+    terminationReason,
     exhaustedCandidates,
     recheckAt,
   };
@@ -432,6 +444,7 @@ async function handleEventLogCleanupFailure(
     plan.beforeBytes,
     { activityEvents: 0, acpSessionEvents: 0 },
     { activityEvents: 0, acpSessionEvents: 0 },
+    'error',
     false,
     recheckAt
   );
@@ -471,11 +484,19 @@ export async function runProjectDataEventLogCleanup(
 
   const totalRowsDeleted = rowsDeleted.activityEvents + rowsDeleted.acpSessionEvents;
   const exhaustedCandidates = afterBytes > plan.targetBytes && recheckAt === null;
+  const terminationReason = exhaustedCandidates
+    ? 'candidates_exhausted'
+    : recheckAt !== null
+      ? 'row_budget'
+      : afterBytes <= plan.targetBytes
+        ? 'target_reached'
+        : 'candidates_exhausted';
   const result = buildEventLogCleanupResult(
     plan,
     afterBytes,
     rowsDeleted,
     candidateBytesDeleted,
+    terminationReason,
     exhaustedCandidates,
     recheckAt
   );

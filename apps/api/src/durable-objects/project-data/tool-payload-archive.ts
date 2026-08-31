@@ -1,5 +1,11 @@
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { stripToolMetadataPayloadForStorage } from './tool-metadata-storage';
+import {
+  parseToolPayloadArchiveObjectText,
+  type PreparedToolPayloadArchive,
+  TOOL_PAYLOAD_CHUNKED_ARCHIVE_VERSION,
+  writeToolPayloadArchiveObject,
+} from './tool-payload-archive-r2';
 import type { ToolPayloadCleanupAttemptStatus } from './tool-payload-cleanup-attempts';
 import type { Env } from './types';
 
@@ -8,6 +14,8 @@ const textEncoder = new TextEncoder();
 
 export const TOOL_PAYLOAD_ARCHIVE_VERSION = 1;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX = 'project-data/tool-payloads';
+const DEFAULT_TOOL_PAYLOAD_ARCHIVE_RETRIEVAL_MAX_METADATA_BYTES = 1_900_000;
+export { TOOL_PAYLOAD_CHUNKED_ARCHIVE_VERSION };
 
 export type ArchivedToolPayloadRow = {
   messageId: string;
@@ -79,14 +87,6 @@ export type ToolPayloadArchiveUpdateResult = {
   cleanupAttemptStatus: ToolPayloadCleanupAttemptStatus | 'archived' | null;
 };
 
-type PreparedToolPayloadArchive = {
-  key: string;
-  body: string;
-  contentBytes: number;
-  strippedToolMetadata: string;
-  strippedToolMetadataBytes: number;
-};
-
 type ArchivedToolPayloadObject = {
   version: typeof TOOL_PAYLOAD_ARCHIVE_VERSION;
   projectId: string;
@@ -112,6 +112,12 @@ function rawNumber(value: unknown): number | null {
     return Number.isSafeInteger(parsed) ? parsed : null;
   }
   return null;
+}
+
+function parsePositiveInteger(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function stripBoundarySlashes(value: string): string {
@@ -235,51 +241,10 @@ function prepareToolPayloadArchive(input: {
     }),
     body: JSON.stringify(bodyObject),
     contentBytes: payload.contentBytes,
+    archiveVersion: TOOL_PAYLOAD_ARCHIVE_VERSION,
     strippedToolMetadata,
     strippedToolMetadataBytes: utf8Bytes(strippedToolMetadata),
   };
-}
-
-async function writeArchiveObject(
-  r2: R2Bucket,
-  key: string,
-  body: string,
-  timeoutMs: number,
-  input: {
-    projectId: string;
-    sessionId: string;
-    messageId: string;
-    archivedAt: number;
-    contentBytes: number;
-  }
-): Promise<void> {
-  const write = r2.put(key, body, {
-    httpMetadata: { contentType: 'application/json' },
-    customMetadata: {
-      projectId: input.projectId,
-      sessionId: input.sessionId,
-      messageId: input.messageId,
-      archivedAt: String(input.archivedAt),
-      contentBytes: String(input.contentBytes),
-    },
-  });
-  // If the timeout wins, keep the original payload in SQLite and let the
-  // deterministic key be overwritten by a later retry. Attach a catch so a
-  // late rejection from the underlying put is not unhandled after the timeout.
-  write.catch(() => undefined);
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([
-      write,
-      new Promise<never>((_resolve, reject) => {
-        timeoutId = setTimeout(() => {
-          reject(new Error(`R2 archive write exceeded ${timeoutMs}ms timeout`));
-        }, timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  }
 }
 
 function upsertArchiveRow(
@@ -318,7 +283,7 @@ function upsertArchiveRow(
     archivedAt,
     candidate.createdAt,
     candidate.sequence,
-    TOOL_PAYLOAD_ARCHIVE_VERSION
+    prepared.archiveVersion
   );
 }
 
@@ -368,11 +333,7 @@ function writeArchiveBookkeeping(input: {
   const transactionSync = input.transactionSync ?? (<T>(callback: () => T): T => callback());
   transactionSync(() => {
     upsertArchiveRow(input.sql, input.candidate, input.archivedAt, input.prepared);
-    updateToolMetadata(
-      input.sql,
-      input.candidate.messageId,
-      input.prepared.strippedToolMetadata
-    );
+    updateToolMetadata(input.sql, input.candidate.messageId, input.prepared.strippedToolMetadata);
   });
 }
 
@@ -382,6 +343,7 @@ export async function archiveToolPayloadCandidate(input: {
   projectId: string;
   archivePrefix: string;
   archiveWriteTimeoutMs: number;
+  archiveChunkBytes: number;
   transactionSync?: <T>(callback: () => T) => T;
   candidate: ToolPayloadArchiveCandidate;
   toolMetadata: string;
@@ -415,12 +377,16 @@ export async function archiveToolPayloadCandidate(input: {
   }
 
   try {
-    await writeArchiveObject(r2, prepared.key, prepared.body, input.archiveWriteTimeoutMs, {
+    prepared = await writeToolPayloadArchiveObject(r2, prepared, input.archiveWriteTimeoutMs, {
       projectId: input.projectId,
       sessionId: input.candidate.sessionId,
       messageId: input.candidate.messageId,
+      messageCreatedAt: input.candidate.createdAt,
+      messageSequence: input.candidate.sequence,
       archivedAt: input.archivedAt,
       contentBytes: prepared.contentBytes,
+      toolMetadataBytes: input.candidate.toolMetadataBytes,
+      chunkBytes: input.archiveChunkBytes,
     });
     writeArchiveBookkeeping({
       sql: input.sql,
@@ -534,7 +500,14 @@ async function readArchiveContent(
     const object = await r2.get(row.r2Key);
     if (!object) return { content: null, reason: 'archived R2 object is missing' };
     const text = await object.text();
-    const parsed = JSON.parse(text) as unknown;
+    const maxMetadataBytes = parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES,
+      DEFAULT_TOOL_PAYLOAD_ARCHIVE_RETRIEVAL_MAX_METADATA_BYTES
+    );
+    const parsed = await parseToolPayloadArchiveObjectText(r2, text, {
+      toolMetadataBytes: row.toolMetadataBytes,
+      maxMetadataBytes,
+    });
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return { content: null, reason: 'archived R2 object is malformed' };
     }

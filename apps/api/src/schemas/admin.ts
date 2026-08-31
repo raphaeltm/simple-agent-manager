@@ -19,6 +19,29 @@ export const ProjectDataStorageEmergencyPurgeSchema = v.object({
   maxBatches: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100))),
 });
 
+export const ProjectDataStorageReliefMeasureSchema = v.object({
+  limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  cursor: v.optional(
+    v.object({
+      grouped: v.optional(
+        v.object({
+          sessionId: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
+          createdAt: v.pipe(v.number(), v.integer(), v.minValue(0)),
+          id: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
+        })
+      ),
+      toolPayload: v.optional(
+        v.object({
+          sessionId: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
+          createdAt: v.pipe(v.number(), v.integer(), v.minValue(0)),
+          sequence: v.pipe(v.number(), v.integer(), v.minValue(0)),
+          messageId: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
+        })
+      ),
+    })
+  ),
+});
+
 export const AnalyticsForwardSchema = v.object({
   startDate: v.optional(v.string()),
   endDate: v.optional(v.string()),

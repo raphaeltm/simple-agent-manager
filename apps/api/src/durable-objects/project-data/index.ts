@@ -34,6 +34,7 @@ import type * as commentContracts from './comment-contracts';
 import * as comments from './comments';
 import { stopTimedOutConversationWorkspaces } from './conversation-timeout';
 import * as durability from './durability-foundation';
+import * as groupedFtsCleanup from './grouped-fts-cleanup';
 import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
 import * as knowledge from './knowledge';
@@ -56,6 +57,7 @@ import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
 import * as sessionWakeProgress from './session-wake-progress';
 import * as sessions from './sessions';
+import * as storageReliefMeasurement from './storage-relief-measurement';
 import * as storageSafety from './storage-safety';
 import { readTaskAcpLivenessSignals } from './task-runtime-liveness';
 import { resolveTaskWaitConfig } from './task-wait-config';
@@ -1221,6 +1223,33 @@ export class ProjectData extends DurableObject<Env> {
       this.env,
       this.getProjectId(),
       input
+    );
+    await this.recalculateAlarm();
+    return result;
+  }
+
+  measureStorageRelief(
+    input: storageReliefMeasurement.ProjectDataStorageReliefMeasureInput = {}
+  ): storageReliefMeasurement.ProjectDataStorageReliefMeasureResult {
+    return storageReliefMeasurement.measureProjectDataStorageReliefSlice(
+      this.sql,
+      storageSafety.resolveStorageSafetyConfig(this.env),
+      input
+    );
+  }
+
+  async runGroupedFtsCleanup(): Promise<groupedFtsCleanup.ProjectDataGroupedFtsCleanupResult | null> {
+    const config = storageSafety.resolveStorageSafetyConfig(this.env);
+    const result = await groupedFtsCleanup.runProjectDataGroupedFtsCleanup(
+      this.sql,
+      this.env,
+      this.getProjectId(),
+      config,
+      {
+        allowStart: true,
+        classifyStatus: (databaseSizeBytes) =>
+          storageSafety.classifyStorageUsage(databaseSizeBytes, config),
+      }
     );
     await this.recalculateAlarm();
     return result;

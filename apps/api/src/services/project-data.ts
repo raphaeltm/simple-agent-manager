@@ -69,6 +69,7 @@ import type {
   UpdateFileCommentStatusInput,
 } from '../durable-objects/project-data/comment-contracts';
 import { CommentNotFoundError } from '../durable-objects/project-data/comment-contracts';
+import type { ProjectDataGroupedFtsCleanupResult } from '../durable-objects/project-data/grouped-fts-cleanup';
 import {
   ProjectEventAckPolicyError,
   ProjectEventAckStateError,
@@ -78,6 +79,10 @@ import {
   ProjectEventNotFoundError,
   ProjectEventValidationError,
 } from '../durable-objects/project-data/project-events-contracts';
+import type {
+  ProjectDataStorageReliefMeasureInput,
+  ProjectDataStorageReliefMeasureResult,
+} from '../durable-objects/project-data/storage-relief-measurement';
 import type {
   TerminalSessionReconciliationInput,
   TerminalSessionReconciliationStats,
@@ -1417,6 +1422,25 @@ export async function runProjectDataStorageEmergencyPurge(
 ) {
   return callProjectDataNoRetry(env, projectId, 'runProjectDataStorageEmergencyPurge', (stub) =>
     stub.runStorageEmergencyPurge(input)
+  );
+}
+
+export async function measureProjectDataStorageRelief(
+  env: Env,
+  projectId: string,
+  input: ProjectDataStorageReliefMeasureInput = {}
+): Promise<ProjectDataStorageReliefMeasureResult> {
+  return callProjectDataNoRetry(env, projectId, 'measureProjectDataStorageRelief', (stub) =>
+    stub.measureStorageRelief(input)
+  );
+}
+
+export async function runProjectDataGroupedFtsCleanup(
+  env: Env,
+  projectId: string
+): Promise<ProjectDataGroupedFtsCleanupResult | null> {
+  return callProjectDataNoRetry(env, projectId, 'runProjectDataGroupedFtsCleanup', (stub) =>
+    stub.runGroupedFtsCleanup()
   );
 }
 

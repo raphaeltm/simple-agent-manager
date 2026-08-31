@@ -2,19 +2,19 @@ import { Hono } from 'hono';
 
 import type { Env } from '../../env';
 import { errors } from '../../middleware/error';
-import { parseOptionalBody, ProjectDataStorageEmergencyPurgeSchema } from '../../schemas';
+import {
+  parseOptionalBody,
+  ProjectDataStorageEmergencyPurgeSchema,
+  ProjectDataStorageReliefMeasureSchema,
+} from '../../schemas';
 import {
   measureProjectDataStorage,
+  measureProjectDataStorageRelief,
+  runProjectDataGroupedFtsCleanup,
   runProjectDataStorageEmergencyPurge,
 } from '../../services/project-data';
 
-const PROJECT_DATA_STORAGE_STATUSES = new Set([
-  'ok',
-  'notice',
-  'warning',
-  'critical',
-  'degraded',
-]);
+const PROJECT_DATA_STORAGE_STATUSES = new Set(['ok', 'notice', 'warning', 'critical', 'degraded']);
 const PROJECT_DATA_STORAGE_CLEANUP_HEALTH_STATES = new Set([
   'not_needed',
   'running',
@@ -49,10 +49,7 @@ function getStorageTelemetryListConfig(env: Env): { defaultLimit: number; maxLim
   };
 }
 
-function parseStorageTelemetryLimit(
-  rawLimit: string | undefined,
-  env: Env
-): number {
+function parseStorageTelemetryLimit(rawLimit: string | undefined, env: Env): number {
   const { defaultLimit, maxLimit } = getStorageTelemetryListConfig(env);
   const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : defaultLimit;
   if (!Number.isSafeInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > maxLimit) {
@@ -200,6 +197,33 @@ adminProjectDataStorageRoutes.post('/:projectId/measure', async (c) => {
   if (!projectId) throw errors.badRequest('projectId is required');
   const telemetry = await measureProjectDataStorage(c.env, projectId);
   return c.json({ telemetry });
+});
+
+/**
+ * POST /api/admin/project-data/storage/:projectId/relief-measure
+ *
+ * Explicit admin-only, cursor-resumable, bounded measurement of storage relief
+ * candidates. This is intentionally not part of alarm measurement.
+ */
+adminProjectDataStorageRoutes.post('/:projectId/relief-measure', async (c) => {
+  const { projectId } = c.req.param();
+  if (!projectId) throw errors.badRequest('projectId is required');
+  const body = await parseOptionalBody(c.req.raw, ProjectDataStorageReliefMeasureSchema, {});
+  const result = await measureProjectDataStorageRelief(c.env, projectId, body);
+  return c.json({ result });
+});
+
+/**
+ * POST /api/admin/project-data/storage/:projectId/grouped-fts-cleanup
+ *
+ * Explicit canary/scaled cleanup of old terminal-session grouped+FTS derived
+ * rows. Production default is disabled by PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED=false.
+ */
+adminProjectDataStorageRoutes.post('/:projectId/grouped-fts-cleanup', async (c) => {
+  const { projectId } = c.req.param();
+  if (!projectId) throw errors.badRequest('projectId is required');
+  const result = await runProjectDataGroupedFtsCleanup(c.env, projectId);
+  return c.json({ result });
 });
 
 /**

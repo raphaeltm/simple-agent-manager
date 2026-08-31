@@ -52,6 +52,8 @@ type ToolPayloadCandidateProcessingContext = {
   archivePrefix: string;
   archiveRetryDelayMs: number;
   archiveWriteTimeoutMs: number;
+  archiveChunkBytes: number;
+  archiveMaxMetadataBytes: number;
   transactionSync?: <T>(callback: () => T) => T;
   maxRowBytes: number;
   archivedAt: number;
@@ -247,6 +249,129 @@ export function hasToolPayloadCandidatesAfter(
   return false;
 }
 
+export function clearRearchivableOversizedToolPayloadCleanupAttempts(
+  sql: SqlStorage,
+  cursor: ToolPayloadCleanupCursor | null,
+  cutoffCreatedAt: number,
+  archiveMaxMetadataBytes: number,
+  limit: number
+): number {
+  if (!Number.isSafeInteger(limit) || limit <= 0) return 0;
+  const cursorSessionId = cursor?.sessionId ?? null;
+  const cursorCreatedAt = cursor?.createdAt ?? null;
+  const cursorSequence = cursor?.sequence ?? null;
+  const cursorMessageId = cursor?.messageId ?? null;
+  sql.exec(
+    `DELETE FROM tool_payload_cleanup_attempts
+     WHERE message_id IN (
+       SELECT attempt.message_id
+       FROM tool_payload_cleanup_attempts attempt
+       JOIN chat_messages m ON m.id = attempt.message_id
+       WHERE attempt.status = 'oversized'
+         AND m.role = 'tool'
+         AND m.tool_metadata IS NOT NULL
+         AND instr(m.tool_metadata, ?) > 0
+         AND m.created_at < ?
+         AND length(CAST(m.tool_metadata AS BLOB)) <= ?
+         AND (
+           ? IS NULL
+           OR m.session_id > ?
+           OR (
+             m.session_id = ?
+             AND (
+               m.created_at > ?
+               OR (m.created_at = ? AND COALESCE(m.sequence, 0) > ?)
+               OR (m.created_at = ? AND COALESCE(m.sequence, 0) = ? AND m.id > ?)
+             )
+           )
+         )
+         AND NOT EXISTS (
+           SELECT 1
+           FROM tool_payload_archives archived
+           WHERE archived.message_id = m.id
+         )
+       ORDER BY m.session_id ASC, m.created_at ASC, COALESCE(m.sequence, 0) ASC, m.id ASC
+       LIMIT ?
+     )`,
+    TOOL_PAYLOAD_CONTENT_KEY_NEEDLE,
+    cutoffCreatedAt,
+    archiveMaxMetadataBytes,
+    cursorSessionId,
+    cursorSessionId ?? '',
+    cursorSessionId ?? '',
+    cursorCreatedAt ?? 0,
+    cursorCreatedAt ?? 0,
+    cursorSequence ?? 0,
+    cursorCreatedAt ?? 0,
+    cursorSequence ?? 0,
+    cursorMessageId ?? '',
+    limit
+  );
+  const row = sql.exec('SELECT changes()').raw().next().value;
+  return row ? (rawNumber(row[0]) ?? 0) : 0;
+}
+
+export function hasRearchivableOversizedToolPayloadCleanupAttemptsAfter(
+  sql: SqlStorage,
+  cursor: ToolPayloadCleanupCursor | null,
+  cutoffCreatedAt: number,
+  archiveMaxMetadataBytes: number
+): boolean {
+  const cursorSessionId = cursor?.sessionId ?? null;
+  const cursorCreatedAt = cursor?.createdAt ?? null;
+  const cursorSequence = cursor?.sequence ?? null;
+  const cursorMessageId = cursor?.messageId ?? null;
+  const rows = sql
+    .exec(
+      `SELECT attempt.message_id
+       FROM tool_payload_cleanup_attempts attempt
+       JOIN chat_messages m ON m.id = attempt.message_id
+       WHERE attempt.status = 'oversized'
+         AND m.role = 'tool'
+         AND m.tool_metadata IS NOT NULL
+         AND instr(m.tool_metadata, ?) > 0
+         AND m.created_at < ?
+         AND length(CAST(m.tool_metadata AS BLOB)) <= ?
+         AND (
+           ? IS NULL
+           OR m.session_id > ?
+           OR (
+             m.session_id = ?
+             AND (
+               m.created_at > ?
+               OR (m.created_at = ? AND COALESCE(m.sequence, 0) > ?)
+               OR (m.created_at = ? AND COALESCE(m.sequence, 0) = ? AND m.id > ?)
+             )
+           )
+         )
+         AND NOT EXISTS (
+           SELECT 1
+           FROM tool_payload_archives archived
+           WHERE archived.message_id = m.id
+         )
+       ORDER BY m.session_id ASC, m.created_at ASC, COALESCE(m.sequence, 0) ASC, m.id ASC
+       LIMIT ?`,
+      TOOL_PAYLOAD_CONTENT_KEY_NEEDLE,
+      cutoffCreatedAt,
+      archiveMaxMetadataBytes,
+      cursorSessionId,
+      cursorSessionId ?? '',
+      cursorSessionId ?? '',
+      cursorCreatedAt ?? 0,
+      cursorCreatedAt ?? 0,
+      cursorSequence ?? 0,
+      cursorCreatedAt ?? 0,
+      cursorSequence ?? 0,
+      cursorMessageId ?? '',
+      1
+    )
+    .raw();
+  for (const row of rows) {
+    if (typeof row[0] === 'string') return true;
+  }
+  return false;
+}
+
 function parseToolPayloadCandidateRows(rows: IterableIterator<unknown[]>): ToolPayloadCandidate[] {
   const candidates: ToolPayloadCandidate[] = [];
   for (const row of rows) {
@@ -305,7 +430,16 @@ function emptyCandidateUpdate(): ToolPayloadCandidateUpdate {
   };
 }
 
-function failedBudgetUpdate(candidate: ToolPayloadCandidate): ToolPayloadCandidateUpdate {
+function failedBudgetUpdate(
+  candidate: ToolPayloadCandidate,
+  reason: 'row' | 'batch' | 'archive'
+): ToolPayloadCandidateUpdate {
+  const description =
+    reason === 'archive'
+      ? 'archive metadata byte budget'
+      : reason === 'batch'
+        ? 'cleanup batch byte budget'
+        : 'cleanup per-row byte budget';
   return {
     rowsUpdated: 0,
     rowsFailed: 1,
@@ -313,7 +447,7 @@ function failedBudgetUpdate(candidate: ToolPayloadCandidate): ToolPayloadCandida
     originalToolMetadataBytes: candidate.toolMetadataBytes,
     storedToolMetadataBytes: 0,
     retryableFailure: false,
-    errorMessage: `tool_metadata row ${candidate.messageId} exceeded the cleanup per-row byte budget`,
+    errorMessage: `tool_metadata row ${candidate.messageId} exceeded the ${description}`,
     cleanupAttemptStatus: 'oversized',
   };
 }
@@ -328,9 +462,10 @@ function recordToolPayloadCleanupDisposition(
     clearToolPayloadCleanupAttempt(context.sql, candidate.messageId);
     return;
   }
-  const nextAttemptAt = update.cleanupAttemptStatus === 'retryable_failure'
-    ? context.archivedAt + context.archiveRetryDelayMs
-    : null;
+  const nextAttemptAt =
+    update.cleanupAttemptStatus === 'retryable_failure'
+      ? context.archivedAt + context.archiveRetryDelayMs
+      : null;
   recordToolPayloadCleanupAttempt(
     context.sql,
     candidate,
@@ -346,10 +481,22 @@ async function processToolPayloadCandidate(
   candidate: ToolPayloadCandidate,
   maxReadBytes: number
 ): Promise<ToolPayloadCandidateUpdate> {
-  if (candidate.toolMetadataBytes > context.maxRowBytes) return failedBudgetUpdate(candidate);
-  if (candidate.toolMetadataBytes > maxReadBytes) return failedBudgetUpdate(candidate);
+  if (candidate.toolMetadataBytes > context.archiveMaxMetadataBytes) {
+    return failedBudgetUpdate(candidate, 'archive');
+  }
+  if (
+    candidate.toolMetadataBytes > context.maxRowBytes &&
+    candidate.toolMetadataBytes > context.archiveMaxMetadataBytes
+  ) {
+    return failedBudgetUpdate(candidate, 'row');
+  }
+  if (candidate.toolMetadataBytes > maxReadBytes) return failedBudgetUpdate(candidate, 'batch');
 
-  const toolMetadata = readBoundedToolMetadata(context.sql, candidate.messageId, maxReadBytes);
+  const toolMetadata = readBoundedToolMetadata(
+    context.sql,
+    candidate.messageId,
+    Math.min(maxReadBytes, context.archiveMaxMetadataBytes)
+  );
   if (toolMetadata === null) return emptyCandidateUpdate();
 
   return archiveToolPayloadCandidate({
@@ -358,6 +505,7 @@ async function processToolPayloadCandidate(
     projectId: context.projectId,
     archivePrefix: context.archivePrefix,
     archiveWriteTimeoutMs: context.archiveWriteTimeoutMs,
+    archiveChunkBytes: context.archiveChunkBytes,
     ...(context.transactionSync ? { transactionSync: context.transactionSync } : {}),
     candidate,
     toolMetadata,
@@ -395,6 +543,8 @@ export async function scanToolPayloadCandidates(
     archivePrefix: input.archivePrefix,
     archiveRetryDelayMs: input.archiveRetryDelayMs,
     archiveWriteTimeoutMs: input.archiveWriteTimeoutMs,
+    archiveChunkBytes: input.archiveChunkBytes,
+    archiveMaxMetadataBytes: input.archiveMaxMetadataBytes,
     ...(input.transactionSync ? { transactionSync: input.transactionSync } : {}),
     maxRowBytes: input.maxRowBytes,
     archivedAt: input.archivedAt,

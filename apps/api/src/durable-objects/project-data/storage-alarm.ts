@@ -4,6 +4,11 @@ import {
   readProjectDataEventLogCleanupRecheckAt,
   runProjectDataEventLogCleanup,
 } from './event-log-cleanup';
+import {
+  type ProjectDataGroupedFtsCleanupResult,
+  readProjectDataGroupedFtsCleanupRecheckAt,
+  runProjectDataGroupedFtsCleanup,
+} from './grouped-fts-cleanup';
 import type { ProjectDataStorageCleanupHealth } from './storage-category-telemetry';
 import type {
   ProjectDataStorageAlarmResult,
@@ -12,10 +17,10 @@ import type {
   StorageSafetyConfig,
 } from './storage-safety';
 import {
+  deleteStorageSafetyMeta as deleteMeta,
   META_LAST_ERROR,
   META_LAST_MEASURED_AT,
   META_LAST_STATUS,
-  readStorageSafetyMeta as readMeta,
   truncateStorageSafetyMetaValue as truncate,
   writeStorageSafetyMeta as writeMeta,
 } from './storage-safety-meta';
@@ -62,51 +67,84 @@ function hasPendingCleanup(
   sql: SqlStorage,
   config: StorageSafetyConfig,
   cleanup: ProjectDataToolPayloadCleanupResult | null,
+  groupedFtsCleanup: ProjectDataGroupedFtsCleanupResult | null,
   eventLogCleanup: ProjectDataEventLogCleanupResult | null,
   now: number
 ): boolean {
   const toolRecheckAt = cleanup?.recheckAt ?? readProjectDataToolPayloadCleanupRecheckAt(sql);
+  const groupedFtsRecheckAt =
+    groupedFtsCleanup?.recheckAt ?? readProjectDataGroupedFtsCleanupRecheckAt(sql);
   const eventLogRecheckAt =
     eventLogCleanup?.recheckAt ?? readProjectDataEventLogCleanupRecheckAt(sql);
   const hasToolCleanupPending =
     config.toolPayloadCleanupEnabled && toolRecheckAt !== null && toolRecheckAt > now;
+  const hasGroupedFtsCleanupPending =
+    config.groupedFtsCleanupEnabled && groupedFtsRecheckAt !== null && groupedFtsRecheckAt > now;
   const hasEventLogCleanupPending =
     config.eventLogCleanupEnabled && eventLogRecheckAt !== null && eventLogRecheckAt > now;
-  return hasToolCleanupPending || hasEventLogCleanupPending;
+  return hasToolCleanupPending || hasGroupedFtsCleanupPending || hasEventLogCleanupPending;
 }
 
 function cleanupAttempted(
   cleanup: ProjectDataToolPayloadCleanupResult | null,
+  groupedFtsCleanup: ProjectDataGroupedFtsCleanupResult | null,
   eventLogCleanup: ProjectDataEventLogCleanupResult | null
 ): boolean {
-  return cleanup !== null || eventLogCleanup !== null;
+  return cleanup !== null || groupedFtsCleanup !== null || eventLogCleanup !== null;
 }
 
 function cleanupCandidatesExhausted(
   config: StorageSafetyConfig,
   cleanup: ProjectDataToolPayloadCleanupResult | null,
+  groupedFtsCleanup: ProjectDataGroupedFtsCleanupResult | null,
   eventLogCleanup: ProjectDataEventLogCleanupResult | null
 ): boolean {
   const toolCleanupExhausted =
     !config.toolPayloadCleanupEnabled || cleanup === null || cleanup.exhaustedCandidates;
+  const groupedFtsCleanupExhausted =
+    !config.groupedFtsCleanupEnabled ||
+    groupedFtsCleanup === null ||
+    groupedFtsCleanup.terminationReason === 'candidates_exhausted';
   const eventLogCleanupExhausted =
-    !config.eventLogCleanupEnabled || eventLogCleanup === null || eventLogCleanup.exhaustedCandidates;
-  return toolCleanupExhausted && eventLogCleanupExhausted;
+    !config.eventLogCleanupEnabled ||
+    eventLogCleanup === null ||
+    eventLogCleanup.exhaustedCandidates;
+  return toolCleanupExhausted && groupedFtsCleanupExhausted && eventLogCleanupExhausted;
+}
+
+function cleanupHadFailure(
+  cleanup: ProjectDataToolPayloadCleanupResult | null,
+  groupedFtsCleanup: ProjectDataGroupedFtsCleanupResult | null,
+  eventLogCleanup: ProjectDataEventLogCleanupResult | null
+): boolean {
+  return (
+    (cleanup !== null && (cleanup.rowsFailed > 0 || cleanup.terminationReason === 'error')) ||
+    (groupedFtsCleanup !== null &&
+      ['circuit_breaker', 'error', 'weak_reclaim'].includes(
+        groupedFtsCleanup.terminationReason
+      )) ||
+    (eventLogCleanup !== null && eventLogCleanup.terminationReason === 'error')
+  );
 }
 
 function resolveCleanupHealth(
   sql: SqlStorage,
   config: StorageSafetyConfig,
   cleanup: ProjectDataToolPayloadCleanupResult | null,
+  groupedFtsCleanup: ProjectDataGroupedFtsCleanupResult | null,
   eventLogCleanup: ProjectDataEventLogCleanupResult | null,
   now: number
 ): ProjectDataStorageCleanupHealth | null {
-  if (!cleanupAttempted(cleanup, eventLogCleanup)) return null;
+  if (!cleanupAttempted(cleanup, groupedFtsCleanup, eventLogCleanup)) return null;
   const targetBytes = Math.floor(config.limitBytes * config.toolPayloadCleanupTargetRatio);
   const afterBytes = sql.databaseSize;
   if (afterBytes <= targetBytes) return 'target_reached';
-  if (hasPendingCleanup(sql, config, cleanup, eventLogCleanup, now)) return 'running';
-  if (cleanupCandidatesExhausted(config, cleanup, eventLogCleanup)) return 'target_unreachable';
+  if (hasPendingCleanup(sql, config, cleanup, groupedFtsCleanup, eventLogCleanup, now)) {
+    return 'running';
+  }
+  if (cleanupCandidatesExhausted(config, cleanup, groupedFtsCleanup, eventLogCleanup)) {
+    return 'target_unreachable';
+  }
   return 'running';
 }
 
@@ -118,11 +156,19 @@ async function persistCleanupHealthTelemetryAndAlerts(
   callbacks: ProjectDataStorageAlarmCallbacks,
   measurement: ProjectDataStorageTelemetry | null,
   cleanup: ProjectDataToolPayloadCleanupResult | null,
+  groupedFtsCleanup: ProjectDataGroupedFtsCleanupResult | null,
   eventLogCleanup: ProjectDataEventLogCleanupResult | null
 ): Promise<ProjectDataStorageCleanupHealth | null> {
   if (!projectId) return null;
   const measuredAt = Date.now();
-  const cleanupHealth = resolveCleanupHealth(sql, config, cleanup, eventLogCleanup, measuredAt);
+  const cleanupHealth = resolveCleanupHealth(
+    sql,
+    config,
+    cleanup,
+    groupedFtsCleanup,
+    eventLogCleanup,
+    measuredAt
+  );
   if (!cleanupHealth) return null;
 
   const computedTelemetry = await callbacks.buildTelemetry(
@@ -145,16 +191,10 @@ async function persistCleanupHealthTelemetryAndAlerts(
         }
       : computedTelemetry;
   const targetBytes = Math.floor(config.limitBytes * config.toolPayloadCleanupTargetRatio);
-  const previousError = readMeta(sql, META_LAST_ERROR);
   const lastError =
     cleanupHealth === 'target_unreachable'
       ? truncate(
-          [
-            `ProjectData storage cleanup target unreachable: databaseSize=${telemetry.databaseSizeBytes}, targetBytes=${targetBytes}, reclaimableBytes=${telemetry.reclaimableBytes ?? 0}`,
-            previousError ? `previousError=${previousError}` : null,
-          ]
-            .filter((part): part is string => part !== null)
-            .join('; '),
+          `ProjectData storage cleanup target unreachable: databaseSize=${telemetry.databaseSizeBytes}, targetBytes=${targetBytes}, reclaimableBytes=${telemetry.reclaimableBytes ?? 0}`,
           1000
         )
       : null;
@@ -162,6 +202,9 @@ async function persistCleanupHealthTelemetryAndAlerts(
   writeMeta(sql, META_LAST_MEASURED_AT, String(measuredAt));
   writeMeta(sql, META_LAST_STATUS, telemetry.status);
   if (lastError) writeMeta(sql, META_LAST_ERROR, truncate(lastError, 500));
+  else if (!cleanupHadFailure(cleanup, groupedFtsCleanup, eventLogCleanup)) {
+    deleteMeta(sql, META_LAST_ERROR);
+  }
 
   try {
     await upsertProjectDataStorageTelemetry(
@@ -230,8 +273,15 @@ export async function runProjectDataStorageSafetyAlarmCore(
       await upsertProjectDataStorageTelemetry(env, enriched, fields);
     },
   });
+  const groupedFtsCleanup = config.groupedFtsCleanupEnabled
+    ? await runProjectDataGroupedFtsCleanup(sql, env, projectId, config, {
+        allowStart: measurement !== null || cleanup !== null,
+        now,
+        classifyStatus: (databaseSizeBytes) => callbacks.classifyStatus(databaseSizeBytes, config),
+      })
+    : null;
   const eventLogCleanup = await runProjectDataEventLogCleanup(sql, env, projectId, config, {
-    allowStart: measurement !== null || cleanup !== null,
+    allowStart: measurement !== null || cleanup !== null || groupedFtsCleanup !== null,
     now,
     classifyStatus: (databaseSizeBytes) => callbacks.classifyStatus(databaseSizeBytes, config),
     recordTelemetry: async (telemetry, fields) => {
@@ -249,6 +299,7 @@ export async function runProjectDataStorageSafetyAlarmCore(
     callbacks,
     measurement,
     cleanup,
+    groupedFtsCleanup,
     eventLogCleanup
   );
   const durationMs = Date.now() - startedAt;
@@ -263,6 +314,7 @@ export async function runProjectDataStorageSafetyAlarmCore(
           rowsScanned: cleanup.rowsScanned,
           rowsUpdated: cleanup.rowsUpdated,
           rowsFailed: cleanup.rowsFailed,
+          rearchivableOversizedAttemptsReset: cleanup.rearchivableOversizedAttemptsReset,
           batchRows: cleanup.batchRows,
           batchBytes: cleanup.batchBytes,
           toolMetadataBytesScanned: cleanup.toolMetadataBytesScanned,
@@ -275,11 +327,28 @@ export async function runProjectDataStorageSafetyAlarmCore(
     eventLogCleanup: eventLogCleanup
       ? {
           rowsDeleted: eventLogCleanup.rowsDeleted,
+          rowsExamined: eventLogCleanup.rowsExamined,
           candidateBytesDeleted: eventLogCleanup.candidateBytesDeleted,
+          originalBytes: eventLogCleanup.originalBytes,
+          reclaimedBytes: eventLogCleanup.reclaimedBytes,
+          terminationReason: eventLogCleanup.terminationReason,
           batchRows: eventLogCleanup.batchRows,
           exhaustedCandidates: eventLogCleanup.exhaustedCandidates,
         }
       : null,
+    groupedFtsCleanup: groupedFtsCleanup
+      ? {
+          terminationReason: groupedFtsCleanup.terminationReason,
+          rowsExamined: groupedFtsCleanup.rowsExamined,
+          sessionsExamined: groupedFtsCleanup.sessionsExamined,
+          sessionsCleaned: groupedFtsCleanup.sessionsCleaned,
+          groupedRowsDeleted: groupedFtsCleanup.groupedRowsDeleted,
+          ftsRowsDeleted: groupedFtsCleanup.ftsRowsDeleted,
+          originalContentBytes: groupedFtsCleanup.originalContentBytes,
+          reclaimedBytes: groupedFtsCleanup.reclaimedBytes,
+          searchSemantics: groupedFtsCleanup.searchSemantics,
+        }
+      : null,
   });
-  return { measurement, cleanup, eventLogCleanup, cleanupHealth, durationMs };
+  return { measurement, cleanup, groupedFtsCleanup, eventLogCleanup, cleanupHealth, durationMs };
 }

@@ -1,3 +1,4 @@
+import type { ProjectDataCleanupTerminationReason } from './grouped-fts-cleanup';
 import type { ProjectDataStorageStatus, ProjectDataStorageTelemetry } from './storage-safety';
 
 export interface ProjectDataToolPayloadCleanupCursor {
@@ -21,10 +22,13 @@ export interface ProjectDataToolPayloadCleanupResult {
   rowsScanned: number;
   rowsUpdated: number;
   rowsFailed: number;
+  rearchivableOversizedAttemptsReset: number;
   toolMetadataBytesScanned: number;
   toolMetadataBytesRead: number;
   originalToolMetadataBytes: number;
   storedToolMetadataBytes: number;
+  terminationReason: ProjectDataCleanupTerminationReason;
+  reclaimedBytes: number;
   cursor: ProjectDataToolPayloadCleanupCursor | null;
   exhaustedCandidates: boolean;
   recheckAt: number | null;

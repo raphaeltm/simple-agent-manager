@@ -33,4 +33,5 @@ The reference covers:
 - Credentials
 - GitHub Integration
 - Superadmin project eventing inspector (`/api/admin/project-events/:projectId/inspector`)
+- Superadmin ProjectData storage telemetry and relief endpoints (`/api/admin/project-data/storage*`)
 - Error Format
