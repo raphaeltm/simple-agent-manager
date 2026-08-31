@@ -10,7 +10,6 @@ import type { LucideIcon } from 'lucide-react';
 import {
   CheckCircle2,
   Clock,
-  ExternalLink,
   Flag,
   FolderOpen,
   GitCompare,
@@ -58,7 +57,6 @@ export type SessionToolGroup = 'workspace' | 'session' | 'meta';
 export type SessionToolId =
   | 'files'
   | 'git'
-  | 'workspace'
   | 'timeline'
   | 'comments'
   | 'retry'
@@ -85,8 +83,6 @@ export interface SessionToolAction {
    * it the two surfaces disagreed about urgency for the same session.
    */
   badgeNeedsAttention?: boolean;
-  /** Set for Workspace, which navigates rather than invoking a handler. */
-  href?: string;
   disabled?: boolean;
   /**
    * Present on actions that toggle a disclosure, rendered as `aria-expanded`. The
@@ -178,13 +174,6 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolSp
         icon: GitCompare,
       });
     }
-    actions.push({
-      id: 'workspace',
-      label: 'Workspace',
-      hint: 'Open the full workspace view',
-      icon: ExternalLink,
-      href: `/workspaces/${session.workspaceId}`,
-    });
   }
 
   if (hasTimelineHandler) {

@@ -190,22 +190,6 @@ function RailAction({
     <span className="min-w-0 truncate text-xs font-medium">{action.label}</span>
   );
 
-  if (action.href) {
-    return (
-      <a
-        href={action.href}
-        aria-label={action.hint}
-        title={action.hint}
-        data-testid={`session-tool-${action.id}`}
-        className={`${className} no-underline`}
-        style={{ color }}
-      >
-        <Icon size={17} className="shrink-0" aria-hidden="true" />
-        {label}
-      </a>
-    );
-  }
-
   return (
     <button
       type="button"

@@ -100,3 +100,39 @@ right.
 - [ ] Placement chosen by Raphaël
 - [ ] Review knob removed
 - [ ] Staging verification (deferred — not merging yet)
+
+## Workspace link removed (Raphaël, 2026-08-31)
+
+> "Workspaces are kind of an implementation detail at this point. I don't think users
+> should actually have any direct access to them. The page still exists for debugging
+> purposes, but we shouldn't link to it."
+
+Removed the `workspace` tool from the rail. Because it was the only action that navigated
+rather than invoking a handler, three things became dead code and went with it (CLAUDE.md,
+no dead code):
+
+- `SessionToolAction.href`
+- the `<a>` branch in `RailAction` — every remaining tool is a `<button>`
+- the `ExternalLink` import and the no-op `case 'workspace'` in `selectTool`
+
+`SessionToolId` loses `'workspace'`, so the exhaustiveness check on `selectTool` proves at
+compile time that nothing still dispatches it.
+
+### Tests
+
+- `session-header.test.tsx` asserted the control was PRESENT. Inverted, with a liveness
+  assertion beside it — "no workspace control" is also satisfied by a header that rendered
+  nothing.
+- The audit's "Workspace is a real link" test became "the rail offers no route into the
+  workspace view". It asserts the old testid is gone AND that no anchor anywhere in the
+  rail carries a `/workspaces/` href, so a rename cannot slip past it.
+- Group-assignment and accessible-name fixtures updated.
+
+### Still linked, needs a decision
+
+`SessionHeaderInfrastructure.tsx:51` links the workspace name inside the **Details** panel
+(the Infrastructure block, alongside VM size and node). That panel is the diagnostic
+surface, so it is the one place a link is arguably consistent with "the page exists for
+debugging" — but it is still direct user access, which the instruction rules out. Left in
+place pending Raphaël's call; removing it is a one-line change that leaves the workspace
+name as plain text.

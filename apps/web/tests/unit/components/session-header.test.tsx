@@ -365,9 +365,18 @@ describe('SessionHeader', () => {
   // Workspace / Complete now live in the tool rail, always visible — no disclosure to
   // open first. The mark-complete FLOW (dialog, mutation, error) moved with them to
   // `useSessionTools`; see `tests/unit/components/use-session-tools.test.tsx`.
-  it('shows the Workspace control for active sessions with a workspace', () => {
+  /*
+   * Workspaces are an implementation detail. The `/workspaces/:id` page survives for
+   * debugging, but nothing in the chat should route a user to it — so an active session
+   * with a live workspace must still offer no such control.
+   *
+   * The liveness assertion beside it matters: "the workspace control is absent" is also
+   * satisfied by a header that rendered nothing at all.
+   */
+  it('offers no workspace control, even for an active session with a workspace', () => {
     renderHeader({ sessionState: 'active' });
-    expect(screen.getByLabelText('Open the full workspace view')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Open the full workspace view')).not.toBeInTheDocument();
+    expect(screen.getByLabelText(DETAILS_CONTROL)).toBeInTheDocument();
   });
 
   it('shows the Complete control when the task is eligible', () => {

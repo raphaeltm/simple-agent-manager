@@ -241,9 +241,6 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
         case 'details':
           setDetailsExpanded((v) => !v);
           break;
-        case 'workspace':
-          // Rendered as an anchor by the rail — navigation is the browser's job.
-          break;
         default:
           // Adding a `SessionToolId` without a case here would otherwise ship a control
           // that silently does nothing when clicked. Assigning to `never` makes it a

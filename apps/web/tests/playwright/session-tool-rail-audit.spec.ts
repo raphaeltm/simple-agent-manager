@@ -327,11 +327,10 @@ test.describe('Session tool rail — discoverability', () => {
   test('every control is reachable without opening any disclosure', async ({ page }) => {
     await openChat(page, { state: 'active' });
 
-    // This is the whole point of the change: all nine controls on first paint.
+    // This is the whole point of the change: every control on first paint.
     for (const id of [
       'files',
       'git',
-      'workspace',
       'timeline',
       'comments',
       'retry',
@@ -357,7 +356,6 @@ test.describe('Session tool rail — discoverability', () => {
     for (const [id, name] of [
       ['files', 'Browse workspace files'],
       ['git', 'Review uncommitted changes'],
-      ['workspace', 'Open the full workspace view'],
       ['timeline', 'Jump through session history'],
       ['comments', 'Open comment threads on this session'],
       ['retry', 'Retry — re-run this task'],
@@ -404,7 +402,6 @@ test.describe('Session tool rail — discoverability', () => {
 
     await expect(page.getByTestId('session-tool-files')).toHaveCount(0);
     await expect(page.getByTestId('session-tool-git')).toHaveCount(0);
-    await expect(page.getByTestId('session-tool-workspace')).toHaveCount(0);
     // Liveness beside those absences.
     await expect(page.getByTestId('session-tool-timeline')).toBeVisible();
     await expect(page.getByTestId('session-tool-comments')).toBeVisible();
@@ -635,12 +632,22 @@ test.describe('Session tool rail — actions', () => {
     await expect(page.getByRole('dialog', { name: 'Session timeline' })).toBeVisible();
   });
 
-  test('Workspace is a real link to the workspace view', async ({ page }) => {
+  /*
+   * The rail must not offer a route into the workspace view. Workspaces are an
+   * implementation detail — the page survives for debugging, but nothing in the chat
+   * should navigate a user to it.
+   *
+   * Asserting the absence of the old testid alone would pass if the tool were merely
+   * renamed, so this also asserts that NO control in the rail carries a workspace href,
+   * with a liveness check that the rail rendered its other tools at all.
+   */
+  test('the rail offers no route into the workspace view', async ({ page }) => {
     await openChat(page, { state: 'active' });
-    await expect(page.getByTestId('session-tool-workspace')).toHaveAttribute(
-      'href',
-      `/workspaces/${WORKSPACE_ID}`
-    );
+    await expect(page.getByTestId('session-tool-details')).toBeVisible();
+
+    await expect(page.getByTestId('session-tool-workspace')).toHaveCount(0);
+    const railLinks = page.locator('[data-testid="session-tool-rail"] a[href*="/workspaces/"]');
+    await expect(railLinks).toHaveCount(0);
   });
 });
 
