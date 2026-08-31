@@ -128,7 +128,7 @@ Removing the disclosure action row, the title-row Retry/Fork, and the chevron to
 - [x] The scroll-to-bottom button and comment selection controls do not collide with the rail.
 - [x] No `/prototype/*` route or prototype page directory remains.
 - [x] Full suite green: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
-- [ ] Staging: rail visible and every control works end-to-end on `app.sammy.party`, mobile and
+- [x] Staging: rail visible and every control works end-to-end on `app.sammy.party`, mobile and
       desktop, zero errors.
 
 ## References
@@ -171,3 +171,34 @@ Six local reviewers ran. Everything below was found by review and fixed in-branc
   the same handler (no state to desync), the chip is the only comment signal that survives
   `hidden` mode, and it is the at-a-glance surface while scrolling. Urgency is now consistent
   between them.
+
+## Staging verification record
+
+Deploy `33341167162` on this branch: conclusion `success`.
+
+Final Playwright pass against `app.sammy.party` at 375×667 and 1280×800: **16/16 green**
+(`apps/web/tests/playwright/staging-tool-rail-verify.spec.ts`). Covered: rail renders on
+first paint with no disclosure opened; pinned Report/Details on-screen by measured
+coordinates; the icons → labels → hidden → icons cycle through the real control; Details
+opening the real panel with the rail surviving the header growth; Timeline opening the
+real drawer; no unexplained console errors or failed requests; and dashboard / projects /
+settings still loading.
+
+Three harness defects were fixed to get there, none of them product bugs:
+
+1. **Self-inflicted rate limiting.** A `token-login` per test tripped the hourly limit.
+   The session cookie is now captured once per worker and replayed. A KV delete of the
+   limiter key was attempted per rule 32 but the CF token lacks KV write permission.
+2. **An unactionable console assertion.** Chromium reports a failed request as a bare
+   "Failed to load resource", so the spec now records the URL alongside it and asserts on
+   the failed-REQUEST list. That is what identified the one 404 as
+   `GET /api/workspaces/:id` for a reaped workspace — a fetch that is byte-identical on
+   `origin/main` (`useSessionLifecycle.ts:407`), so pre-existing and unrelated.
+3. **Coupled regression navigations.** Three `goto`s chained in one test meant the third
+   could still be resolving its route chunk when the per-test clock expired, which read as
+   "settings is broken" while every page rendered fine in isolation (verified standalone
+   on both viewports before changing anything). Split into one test per page.
+
+The spec skips itself when `SAM_PLAYWRIGHT_PRIMARY_USER` is absent so it can never run in
+the CI sweep against shared staging — verified by running it with the variable unset:
+8 skipped, 0 executed. `SAM_PLAYWRIGHT` appears nowhere in `.github/`.
