@@ -129,24 +129,68 @@ Relevant rules and post-mortems:
   `tasks/archive/2026-08-30-repair-sams-stale-session-hh4efq.md`: stale agent
   and session ledger repair context.
 
-## Writer Inventory To Complete In PR
+## Writer Inventory And Disposition
 
-The implementation PR must include a writer inventory with disposition for every
-`stopSession`/`failSession` call and predicate copy found by grep. Known paths:
+`ProjectData` mutators:
 
-- ProjectData DO public/internal session mutators in
-  `durable-objects/project-data/index.ts` and `sessions.ts`.
-- Terminal-session reconciliation.
-- Session-summary ledger reconciliation.
-- Workspace lifecycle finalizer and its real teardown callers.
-- `task-runtime-liveness.ts` `RESUMABLE_SLEEP_STATUS` classifier and consumers
-  in stuck tasks, idle cleanup, and dead-target reconciliation.
-- TaskRunner failure cleanup.
-- Instant/session startup failure cleanup.
-- MCP dispatch/orchestration/task run/submit cleanup.
-- Trigger submit and activity callback failure paths.
-- D1 retention expiry, explicit archive/delete, and user-initiated destructive
-  paths, with an explanation for paths that should remain destructive.
+- `apps/api/src/durable-objects/project-data/sessions.ts` owns the low-level
+  `stopSession`, `failSession`, and `sleepSession` writes. These remain narrow
+  primitives; caller-side lifecycle gates decide whether a session is
+  destroyable, failed, or should stay/wind up sleeping.
+- `apps/api/src/durable-objects/project-data/index.ts` exposes the public RPC
+  surface. No duplicated sleep predicate belongs here.
+
+Sleep-aware destroyers:
+
+- `apps/api/src/durable-objects/project-data/terminal-session-reconciliation.ts`
+  now uses the shared SQL-capable restorable-or-in-flight predicate before
+  `stopSession`/`failSession`.
+- `apps/api/src/scheduled/session-summary-ledger-reconciliation.ts` now uses the
+  same shared predicate in both its read path and its compare-and-swap SQL
+  update path.
+- `apps/api/src/services/workspace-lifecycle-finalizer.ts` now uses the same
+  shared predicate before ProjectData stop/fail. It still closes explicitly
+  non-protected lifecycle rows and destructive delete/archive paths remain
+  destructive after their snapshot state is deleted.
+
+Sleep lifecycle writers:
+
+- `apps/api/src/scheduled/session-sleep.ts` remains the normal scheduled sleep
+  executor. It reclaims stale `preparing` claims and rolls stale `stopping`
+  claims forward through the existing point-of-no-return path without consuming
+  another pre-teardown retry attempt.
+- `apps/api/src/scheduled/session-sleep-lifecycle-repair.ts` is the bounded
+  escape for already-stranded post-capture rows. It repairs only stale
+  `preparing`/`stopping` rows that already have restorable, unexpired snapshot
+  data, marks ProjectData/workspace/agent-session state as sleeping, closes
+  compute usage, and never wakes or replays work.
+- `apps/api/src/scheduled/terminal-node-lifecycle-repair.ts` skips rows
+  protected by the shared predicate so terminal-node cleanup does not break an
+  in-flight sleep lifecycle before the repair/sleep sweep can converge it.
+
+Intentional non-sleep destroyers:
+
+- `apps/api/src/services/task-terminal-cleanup.ts`,
+  `apps/api/src/services/task-runner.ts`,
+  `apps/api/src/services/instant-session.ts`,
+  `apps/api/src/routes/tasks/run.ts`,
+  `apps/api/src/routes/tasks/submit.ts`,
+  `apps/api/src/services/trigger-submit.ts`, and
+  `apps/api/src/routes/mcp/orchestration-tools.ts` perform startup failure,
+  explicit archive/delete, or no-restorable-snapshot cleanup. These paths either
+  create the sleep intent instead of stopping the chat, route through the shared
+  finalizer, or intentionally destroy after snapshot state has been removed.
+- `apps/api/src/scheduled/d1-retention.ts` expires/purges old snapshot artifacts
+  after TTL and is deliberately destructive.
+- `apps/api/src/services/agent-activity-callback.ts` cancels/updates sleep
+  lifecycle intent on resumed activity; it is not a ProjectData destroyer.
+- `apps/api/src/services/task-runtime-liveness.ts` keeps
+  `RESUMABLE_SLEEP_STATUS='sleeping'` intentionally. That classifier answers the
+  different question "can this task be considered resumable right now?" for
+  stuck-task/dead-target verdicts, and must match the resumer's final
+  `sleeping_at IS NOT NULL AND sleep_status='sleeping'` wake gate. It should
+  not include in-flight states because those are preserved/repaired by the
+  scheduler/finalizer gates, not treated as fully wakeable slept sessions.
 
 ## Implementation Checklist
 
@@ -160,10 +204,10 @@ The implementation PR must include a writer inventory with disposition for every
       read/CAS, and workspace lifecycle finalization.
 - [x] Add an env-backed `DEFAULT_*` absolute in-flight sleep ceiling with
       per-cycle anchoring that resets on successful progress.
-- [ ] Add a bounded escape path for wedged `preparing`/`stopping`/retryable
+- [x] Add a bounded escape path for wedged `preparing`/`stopping`/retryable
       `failed` sleep rows that routes restorable wedges into the repair path
       rather than archiving recoverable sessions.
-- [ ] Add deterministic, idempotent repair for already-stranded terminal
+- [x] Add deterministic, idempotent repair for already-stranded terminal
       sessions/snapshots without waking or replaying work.
 - [x] Add deterministic, bounded cleanup for stale workspace, agent-session,
       and open `compute_usage` rows when the owning node is terminal/deleted.

@@ -26,6 +26,7 @@ import {
 } from './platform-feedback-hourly';
 import { runProviderOrphanReconciliation } from './provider-orphan-reconciliation';
 import { runSessionSleepSweep } from './session-sleep';
+import { runSessionSleepLifecycleRepair } from './session-sleep-lifecycle-repair';
 import { runSessionTaskReconciliation } from './session-task-reconciliation';
 import { runSetupSessionSweep } from './setup-session-sweep';
 import { recoverStuckTasks } from './stuck-tasks';
@@ -134,6 +135,9 @@ export async function scheduled(
   const migrated = await sweeps.isolate('orphaned_workspace_migration', () =>
     migrateOrphanedWorkspaces(db)
   );
+  const sessionSleepLifecycleRepair = await sweeps.isolate('session_sleep_lifecycle_repair', () =>
+    runSessionSleepLifecycleRepair(env, new Date())
+  );
   const nodeCleanup = await sweeps.isolate('node_cleanup', () => runNodeCleanupSweep(env));
   const terminalNodeLifecycleRepair = await sweeps.isolate('terminal_node_lifecycle_repair', () =>
     runTerminalNodeLifecycleRepair(env)
@@ -203,6 +207,11 @@ export async function scheduled(
     diagnosticIncidentMetadataRepaired: incidentRecovery?.incidentMetadataRepaired,
     provisioningTimedOut: timedOut,
     workspacesMigrated: migrated,
+    sleepLifecycleRepairSelected: sessionSleepLifecycleRepair?.selected,
+    sleepLifecycleRepairRepaired: sessionSleepLifecycleRepair?.repaired,
+    sleepLifecycleRepairSkipped: sessionSleepLifecycleRepair?.skipped,
+    sleepLifecycleRepairProjectDataErrors: sessionSleepLifecycleRepair?.projectDataErrors,
+    sleepLifecycleRepairErrors: sessionSleepLifecycleRepair?.errors,
     staleNodesDestroyed: nodeCleanup?.staleDestroyed,
     lifetimeNodesDestroyed: nodeCleanup?.lifetimeDestroyed,
     lifetimeNodesSkipped: nodeCleanup?.lifetimeSkipped,
@@ -267,6 +276,8 @@ export async function scheduled(
     terminalSessionLedgerSkipped: terminalSessionLedger?.skipped,
     terminalSessionLedgerErrors: terminalSessionLedger?.errors,
     terminalNodeLifecycleRepairSelected: terminalNodeLifecycleRepair?.selected,
+    terminalNodeLifecycleRepairSkippedProtectedSleep:
+      terminalNodeLifecycleRepair?.skippedProtectedSleep,
     terminalNodeLifecycleRepairWorkspacesTerminalized:
       terminalNodeLifecycleRepair?.workspacesTerminalized,
     terminalNodeLifecycleRepairAgentSessionsClosed: terminalNodeLifecycleRepair?.agentSessionsClosed,

@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { destroyNodeForCleanup } from '../../../src/scheduled/node-cleanup/shared';
+import { runTerminalNodeLifecycleRepair } from '../../../src/scheduled/terminal-node-lifecycle-repair';
 import { cleanupTerminalTaskResources } from '../../../src/services/task-terminal-cleanup';
 import { cleanupWorkspaceForDeletion } from '../../../src/services/workspace-cleanup';
 import { finalizeWorkspaceLifecycleClosure } from '../../../src/services/workspace-lifecycle-finalizer';
@@ -180,6 +181,7 @@ function seedRestorableSnapshot(
     sleepStatus?: string | null;
     sleepingAt?: string | null;
     recoveryAttempts?: number;
+    updatedAt?: string;
   } = {}
 ): void {
   const chatSessionId = overrides.chatSessionId ?? CHAT_SESSION_ID;
@@ -207,7 +209,7 @@ function seedRestorableSnapshot(
       overrides.sleepStatus === undefined ? 'sleeping' : overrides.sleepStatus,
       overrides.recoveryAttempts ?? 0,
       iso(-60 * 60 * 1000),
-      iso(-5 * 60 * 1000)
+      overrides.updatedAt ?? iso(-5 * 60 * 1000)
     );
 }
 
@@ -413,6 +415,28 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
     expect(sqlite.prepare(`SELECT status FROM workspaces WHERE id = ?`).pluck().get(sleepingWorkspaceId)).toBe(
       'sleeping'
     );
+  });
+
+  it('skips terminal-node repair when a recent in-flight sleep row protects the workspace', async () => {
+    seedNode(undefined, { status: 'stopped' });
+    seedWorkspace({ status: 'running' });
+    seedAgentSession({ status: 'running' });
+    seedRestorableSnapshot({
+      sleepStatus: 'stopping',
+      sleepingAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await runTerminalNodeLifecycleRepair(env);
+
+    expect(result).toMatchObject({
+      selected: 1,
+      skippedProtectedSleep: 1,
+      workspacesTerminalized: 0,
+      agentSessionsClosed: 0,
+    });
+    expect(await loadWorkspace()).toMatchObject({ status: 'running' });
+    expect(mocks.stopSession).not.toHaveBeenCalled();
   });
 });
 
