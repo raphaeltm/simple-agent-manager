@@ -5,8 +5,8 @@
  */
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { parsePositiveInt } from './node-cleanup/shared';
 import { finalizeWorkspaceLifecycleClosure } from '../services/workspace-lifecycle-finalizer';
+import { parsePositiveInt } from './node-cleanup/shared';
 
 interface TerminalNodeWorkspaceRow {
   workspace_id: string;

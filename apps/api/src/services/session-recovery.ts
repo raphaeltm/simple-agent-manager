@@ -1,4 +1,5 @@
 import {
+  type AgentProfileRuntime,
   type CredentialSource,
   DEFAULT_VM_LOCATION,
   DEFAULT_VM_SIZE,
@@ -6,7 +7,6 @@ import {
   VALID_WORKSPACE_PROFILES,
   type VMSize,
   type WorkspaceProfile,
-  type AgentProfileRuntime,
 } from '@simple-agent-manager/shared';
 import { and, desc, eq, exists, notInArray, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
