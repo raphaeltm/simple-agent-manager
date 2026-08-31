@@ -74,6 +74,7 @@ export function SessionHeader({
   onShowHierarchy,
   expanded,
   onExpandedChange,
+  flushRight = false,
   completeError = null,
   onDismissCompleteError,
 }: {
@@ -108,6 +109,15 @@ export function SessionHeader({
    */
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
+  /**
+   * True when the tool rail sits directly to the right of this card.
+   *
+   * The card's bottom corners are rounded so it reads as a panel hanging from the top of
+   * the conversation. Against the rail that curve is wrong: it leaves a lens-shaped gap
+   * between the card's rounded corner and the rail's straight edge. Squaring the right
+   * side lets the two butt flush and read as one continuous piece of chrome.
+   */
+  flushRight?: boolean;
   /** Surfaced by the owner's mark-complete flow, which lives with the rail. */
   completeError?: string | null;
   onDismissCompleteError?: () => void;
@@ -186,7 +196,7 @@ export function SessionHeader({
   return (
     <div
       data-testid="session-header"
-      className={`relative glass-chrome border-t-0 shrink-0${hasContentBelow ? '' : " rounded-b-2xl after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"}`}
+      className={`relative glass-chrome border-t-0 shrink-0${hasContentBelow ? '' : `${flushRight ? ' rounded-bl-2xl' : ' rounded-b-2xl'}` + " after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"}`}
       style={{
         boxShadow: hasContentBelow
           ? '0 4px 24px rgba(0, 0, 0, 0.4)'

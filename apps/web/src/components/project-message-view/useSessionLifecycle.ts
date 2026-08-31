@@ -1,4 +1,3 @@
-import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
 import {
   DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES,
   DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
@@ -23,10 +22,8 @@ import type {
 import {
   cancelAgentPrompt,
   getChatSession,
-  getNode,
   getTerminalToken,
   getTranscribeApiUrl,
-  getWorkspace,
   resetIdleTimer,
   sendFollowUpPrompt,
 } from '../../lib/api';
@@ -51,6 +48,7 @@ import { useActivityVerifyTimer } from './useActivityVerifyTimer';
 import { useCompletionDockWorking } from './useCompletionDockWorking';
 import { useConnectionRecovery } from './useConnectionRecovery';
 import { useSessionFileUpload } from './useSessionFileUpload';
+import { useSessionInfrastructure } from './useSessionInfrastructure';
 import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
 import { useWakeProgress } from './useWakeProgress';
 
@@ -136,8 +134,7 @@ export function useSessionLifecycle(
     onOptimisticMessage: appendOptimisticMessage,
   });
 
-  const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
-  const [node, setNode] = useState<NodeResponse | null>(null);
+  const { workspace, node } = useSessionInfrastructure(session?.workspaceId);
   const [followUp, setFollowUp] = useState('');
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
@@ -390,41 +387,6 @@ export function useSessionLifecycle(
     hydratePlan,
     hydrateWakeProgress,
   ]);
-
-  // Fetch workspace and node details
-  useEffect(() => {
-    const wsId = session?.workspaceId;
-    if (!wsId) return;
-    if (workspace?.id === wsId) return;
-
-    let cancelled = false;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    const RETRY_DELAYS_MS = [2_000, 5_000, 10_000];
-
-    async function attemptFetch(attempt = 0) {
-      if (!wsId) return;
-      try {
-        const ws = await getWorkspace(wsId);
-        if (cancelled) return;
-        setWorkspace(ws);
-        if (ws.nodeId) {
-          const nd = await getNode(ws.nodeId);
-          if (!cancelled) setNode(nd);
-        }
-      } catch {
-        if (cancelled) return;
-        if (attempt < RETRY_DELAYS_MS.length) {
-          retryTimer = setTimeout(() => attemptFetch(attempt + 1), RETRY_DELAYS_MS[attempt]);
-        }
-      }
-    }
-
-    attemptFetch();
-    return () => {
-      cancelled = true;
-      if (retryTimer) clearTimeout(retryTimer);
-    };
-  }, [session?.workspaceId, workspace?.id]);
 
   // Token refresh for port scanning
   const isWorkspaceRunning = isWorkspaceOperational(workspace?.status);

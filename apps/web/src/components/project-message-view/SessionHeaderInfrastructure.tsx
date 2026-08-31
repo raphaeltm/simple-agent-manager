@@ -46,14 +46,15 @@ export function SessionHeaderInfrastructure({
         <div className="flex flex-col gap-1.5 pt-1 border-t border-border-default">
           {workspace && (
             <>
+              {/*
+                Plain text, deliberately. Workspaces are an implementation detail —
+                `/workspaces/:id` survives for debugging but nothing in the chat routes a
+                user there. The name and status still earn their place here because they
+                are what you quote when something is wrong; the Node row below is the
+                link worth having, since that is the machine you would actually go look at.
+              */}
               <ContextItem icon={<Box size={12} />} label="Workspace">
-                <a
-                  href={`/workspaces/${workspace.id}`}
-                  className="no-underline hover:underline"
-                  style={{ color: 'var(--sam-color-accent-primary)' }}
-                >
-                  {workspace.displayName || workspace.name}
-                </a>
+                {workspace.displayName || workspace.name}
                 <span className="text-fg-muted ml-1">({workspace.status})</span>
               </ContextItem>
               <ContextItem icon={<Cpu size={12} />} label="VM Size">

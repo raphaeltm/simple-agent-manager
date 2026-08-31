@@ -586,6 +586,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
                 containerRef={floatingHeaderRef}
                 expanded={sessionTools.detailsExpanded}
                 onExpandedChange={sessionTools.setDetailsExpanded}
+                flushRight={sessionTools.mode !== 'hidden'}
                 completeError={sessionTools.completeError}
                 onDismissCompleteError={sessionTools.dismissCompleteError}
               />
@@ -626,6 +627,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
                 containerRef={floatingHeaderRef}
                 expanded={sessionTools.detailsExpanded}
                 onExpandedChange={sessionTools.setDetailsExpanded}
+                flushRight={sessionTools.mode !== 'hidden'}
                 completeError={sessionTools.completeError}
                 onDismissCompleteError={sessionTools.dismissCompleteError}
               />

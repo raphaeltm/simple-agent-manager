@@ -18,7 +18,7 @@ The **Report** action lives in the session tool rail, down the right edge of the
 1. In the chat, find the tool rail on the right.
 2. Click **Report** (the flag icon).
 
-The rail also has **Files**, **Git**, and **Workspace** while the session is live; those disappear once it stops or fails. **Report** and **Timeline** stay put — so you can still report a session that already ended, which is usually when you want to.
+The rail also has **Files** and **Git** while the session is live; those disappear once it stops or fails. **Report** and **Timeline** stay put — so you can still report a session that already ended, which is usually when you want to.
 
 The chevron at the top of the rail cycles it between icons, icons with labels, and hidden. If it is hidden, click the **Tools** tab on the right edge to bring it back.
 
