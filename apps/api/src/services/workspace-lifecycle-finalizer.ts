@@ -24,6 +24,8 @@ export interface FinalizeWorkspaceLifecycleClosureInput {
   userId?: string | null;
   /** Terminal agent-session status to write for non-terminal rows. */
   agentSessionStatus?: WorkspaceLifecycleClosureStatus;
+  /** Optional workspace status to write for non-terminal, non-sleeping rows. */
+  workspaceStatus?: Exclude<WorkspaceLifecycleClosureStatus, 'completed'>;
   /** Optional error detail used only for failed/error closures. */
   errorMessage?: string | null;
   /** Stable timestamp for callers that already claimed a teardown instant. */
@@ -46,6 +48,7 @@ export interface FinalizeWorkspaceLifecycleClosureResult {
   projectSessionErrors: number;
   workspaceActivityCleaned: number;
   workspaceActivityErrors: number;
+  workspacesTerminalized: number;
 }
 
 const D1_BINDING_CHUNK_SIZE = 50;
@@ -171,6 +174,35 @@ async function closeComputeUsage(
   return closed;
 }
 
+async function updateWorkspaceStatuses(
+  env: Env,
+  workspaceIds: readonly string[],
+  input: FinalizeWorkspaceLifecycleClosureInput,
+  nowIso: string
+): Promise<number> {
+  const status = input.workspaceStatus;
+  if (!status) return 0;
+  let updated = 0;
+
+  for (let i = 0; i < workspaceIds.length; i += D1_BINDING_CHUNK_SIZE) {
+    const chunk = workspaceIds.slice(i, i + D1_BINDING_CHUNK_SIZE);
+    const userScope = input.userId ? ' AND user_id = ?' : '';
+    const result = await env.DATABASE.prepare(
+      `UPDATE workspaces
+       SET status = ?,
+           updated_at = ?
+       WHERE id IN (${placeholders(chunk.length)})
+         ${userScope}
+         AND status NOT IN ('sleeping', 'stopped', 'deleted', 'error')`
+    )
+      .bind(status, nowIso, ...chunk, ...(input.userId ? [input.userId] : []))
+      .run();
+    updated += mutationChanges(result);
+  }
+
+  return updated;
+}
+
 async function finalizeProjectDataSession(
   env: Env,
   row: WorkspaceLifecycleRow,
@@ -291,12 +323,14 @@ export async function finalizeWorkspaceLifecycleClosure(
     projectSessionErrors: 0,
     workspaceActivityCleaned: 0,
     workspaceActivityErrors: 0,
+    workspacesTerminalized: 0,
   };
 
   if (workspaceIds.length === 0) return result;
 
   result.agentSessionsClosed = await closeAgentSessions(env, workspaceIds, input, nowIso);
   result.computeUsageClosed = await closeComputeUsage(env, workspaceIds, input, nowIso);
+  result.workspacesTerminalized = await updateWorkspaceStatuses(env, workspaceIds, input, nowIso);
 
   for (const row of rows) {
     const sessionResult = await finalizeProjectDataSession(env, row, input, nowIso);

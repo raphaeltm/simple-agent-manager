@@ -31,6 +31,7 @@ import { runSetupSessionSweep } from './setup-session-sweep';
 import { recoverStuckTasks } from './stuck-tasks';
 import { createSweepIsolator } from './sweep-isolation';
 import { runTerminalSessionLedgerReconciliation } from './terminal-session-ledger-reconciliation';
+import { runTerminalNodeLifecycleRepair } from './terminal-node-lifecycle-repair';
 import { runTrialExpireSweep } from './trial-expire';
 import { runTrialRolloverAudit } from './trial-rollover';
 import { runTrialWaitlistCleanup } from './trial-waitlist-cleanup';
@@ -134,6 +135,9 @@ export async function scheduled(
     migrateOrphanedWorkspaces(db)
   );
   const nodeCleanup = await sweeps.isolate('node_cleanup', () => runNodeCleanupSweep(env));
+  const terminalNodeLifecycleRepair = await sweeps.isolate('terminal_node_lifecycle_repair', () =>
+    runTerminalNodeLifecycleRepair(env)
+  );
   const providerOrphans = await sweeps.isolate('provider_orphan_reconciliation', () =>
     runProviderOrphanReconciliation(env)
   );
@@ -262,6 +266,14 @@ export async function scheduled(
     terminalSessionLedgerDeferred: terminalSessionLedger?.deferred,
     terminalSessionLedgerSkipped: terminalSessionLedger?.skipped,
     terminalSessionLedgerErrors: terminalSessionLedger?.errors,
+    terminalNodeLifecycleRepairSelected: terminalNodeLifecycleRepair?.selected,
+    terminalNodeLifecycleRepairWorkspacesTerminalized:
+      terminalNodeLifecycleRepair?.workspacesTerminalized,
+    terminalNodeLifecycleRepairAgentSessionsClosed: terminalNodeLifecycleRepair?.agentSessionsClosed,
+    terminalNodeLifecycleRepairComputeUsageClosed: terminalNodeLifecycleRepair?.computeUsageClosed,
+    terminalNodeLifecycleRepairProjectSessionsClosed:
+      terminalNodeLifecycleRepair?.projectSessionsClosed,
+    terminalNodeLifecycleRepairErrors: terminalNodeLifecycleRepair?.errors,
     terminalSessionLedgerRemainingProjects: terminalSessionLedger?.remainingCandidateProjects,
     terminalSessionSummarySelected: terminalSessionLedger?.summarySelected,
     terminalSessionSummaryStopped: terminalSessionLedger?.summaryStopped,

@@ -165,7 +165,7 @@ The implementation PR must include a writer inventory with disposition for every
       rather than archiving recoverable sessions.
 - [ ] Add deterministic, idempotent repair for already-stranded terminal
       sessions/snapshots without waking or replaying work.
-- [ ] Add deterministic, bounded cleanup for stale workspace, agent-session,
+- [x] Add deterministic, bounded cleanup for stale workspace, agent-session,
       and open `compute_usage` rows when the owning node is terminal/deleted.
 - [x] Route session recovery placement through the centralized resolver before
       consuming recovery attempts.
