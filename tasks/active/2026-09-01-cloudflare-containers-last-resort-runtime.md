@@ -24,7 +24,7 @@ SAM should keep Cloudflare Containers enabled, but ordinary dispatched agent wor
 - [x] Update docs/configuration references that describe zero-config runtime selection.
 - [x] Add/update focused tests for platform credential, no-credential, explicit container, and tool-schema guidance behavior.
 - [x] Run targeted API tests plus lint/typecheck/build gates appropriate for the changed files.
-- [ ] Run local specialist review: task-completion-validator, cloudflare-specialist, constitution-validator, doc-sync-validator, and test-engineer.
+- [x] Run local specialist review: task-completion-validator, cloudflare-specialist, constitution-validator, doc-sync-validator, and test-engineer.
 - [ ] Deploy to staging if the final code change requires runtime validation; otherwise document why local tests are sufficient.
 
 ## Acceptance Criteria
@@ -57,3 +57,8 @@ SAM should keep Cloudflare Containers enabled, but ordinary dispatched agent wor
 - `pnpm --filter @simple-agent-manager/api build` — passed.
 - `pnpm --filter @simple-agent-manager/www build` — passed, 186 pages built.
 - `pnpm --filter @simple-agent-manager/www build` — passed again after the final self-hosting/Instant credential wording cleanup, 186 pages built.
+- `task-completion-validator` — passed after the strengthened MCP guidance assertion.
+- `cloudflare-specialist` — passed after aligning docs/tool text to avoid claiming silent VM-failure fallback.
+- `constitution-validator` — passed; no new hardcoded URLs, timeouts, limits, or deployment-specific identifiers.
+- `doc-sync-validator` — passed in main-thread review; docs/tool text match code semantics for VM-first credentials, explicit/profile Instant, no-credential fallback, and no silent runtime switch after VM failure.
+- `test-engineer` — passed; targeted route/service coverage exercises platform VM default, no-credential container fallback, explicit container routing, and VM-only field rejection.
