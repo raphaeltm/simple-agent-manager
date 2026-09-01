@@ -46,7 +46,10 @@ describe('project-data Durable Object retry', () => {
     };
     const stub = {
       ensureProjectId: vi.fn().mockResolvedValue(undefined),
-      getMessages: vi.fn().mockRejectedValueOnce(doResetError).mockResolvedValue(messages),
+      archiveSourceGetMessages: vi
+        .fn()
+        .mockRejectedValueOnce(doResetError)
+        .mockResolvedValue(messages),
     };
 
     const result = await svc.getMessages(
@@ -62,9 +65,14 @@ describe('project-data Durable Object retry', () => {
 
     expect(result).toEqual(messages);
     expect(stub.ensureProjectId).toHaveBeenCalledTimes(2);
-    expect(stub.getMessages).toHaveBeenCalledTimes(2);
-    expect(stub.getMessages).toHaveBeenLastCalledWith(
-      'chat-1',
+    expect(stub.archiveSourceGetMessages).toHaveBeenCalledTimes(2);
+    expect(stub.archiveSourceGetMessages).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        kind: 'root',
+        ownerName: 'proj-1',
+        projectId: 'proj-1',
+        sessionId: 'chat-1',
+      }),
       100,
       null,
       null,

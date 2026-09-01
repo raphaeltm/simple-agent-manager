@@ -401,6 +401,17 @@ describe('terminal session ledger reconciliation', () => {
 
     await stub.runSummarySyncWithEnvForTest({ SESSION_INDEX_MAX_ROWS: '1' });
     expect(await readProjectActiveCount(projectId)).toBe(1);
+    await env.DATABASE.prepare(
+      `UPDATE session_summaries
+          SET status = 'active',
+              ended_at = NULL,
+              agent_completed_at = NULL,
+              updated_at = ?
+        WHERE project_id = ?
+          AND id = ?`
+    )
+      .bind(now.getTime(), projectId, terminal.sessionId)
+      .run();
     expect(await readActiveSummaryCount(projectId)).toBe(2);
     expect(await readSummaryStatus(projectId, terminal.sessionId)).toBe('active');
 

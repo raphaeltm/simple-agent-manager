@@ -216,6 +216,10 @@ function forgetEnsuredProject(env: Env, projectId: string): void {
   forgetEnsuredProjectData(env.PROJECT_DATA.idFromName(projectId).toString());
 }
 
+function forgetEnsuredOwner(env: Env, ownerName: string): void {
+  forgetEnsuredProjectData(env.PROJECT_DATA.idFromName(ownerName).toString());
+}
+
 function normalizeProjectDataRpcError(projectId: string, operation: string, err: unknown): unknown {
   if (isDurableObjectStorageFullError(err)) {
     return toProjectDataStorageFullError(projectId, operation, err);
@@ -327,6 +331,56 @@ async function callProjectDataWithRetry<T>(
       // drop its belief that projectId is persisted and let the next attempt
       // re-ensure. Idempotent, and defence in depth only — see the memo module.
       forgetEnsuredProject(env, projectId);
+
+      if (isDurableObjectStorageFullError(err)) {
+        throw toProjectDataStorageFullError(projectId, operation, err);
+      }
+
+      if (attempt >= retryConfig.maxAttempts || !isTransientDurableObjectError(err)) {
+        throw err;
+      }
+
+      const delayMs = computeDurableObjectRetryDelayMs(
+        attempt,
+        retryConfig.baseDelayMs,
+        retryConfig.maxDelayMs
+      );
+      log.warn('project_data.do_rpc_retry', {
+        projectId,
+        operation,
+        attempt,
+        maxAttempts: retryConfig.maxAttempts,
+        delayMs,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await sleep(delayMs);
+    }
+  }
+
+  throw normalizeProjectDataRpcError(
+    projectId,
+    operation,
+    lastError ?? new Error('ProjectData DO retry exhausted without an error')
+  );
+}
+
+async function callProjectDataOwnerWithRetry<T>(
+  env: Env,
+  projectId: string,
+  ownerName: string,
+  operation: string,
+  call: (stub: DurableObjectStub<ProjectData>) => Promise<T>
+): Promise<T> {
+  const retryConfig = getDurableObjectRetryConfig(env);
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= retryConfig.maxAttempts; attempt++) {
+    try {
+      const stub = await getStubForOwner(env, projectId, ownerName);
+      return await call(stub);
+    } catch (err) {
+      lastError = err;
+      forgetEnsuredOwner(env, ownerName);
 
       if (isDurableObjectStorageFullError(err)) {
         throw toProjectDataStorageFullError(projectId, operation, err);
@@ -786,11 +840,12 @@ export async function getMessages(
   order: 'asc' | 'desc' = 'desc'
 ): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
   const owner = await resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId);
-  const stub = await getStubForOwner(env, projectId, owner.ownerName);
-  if (owner.kind === 'root') {
-    return stub.archiveSourceGetMessages(owner, limit, before, after, roles, compact, order);
-  }
-  return stub.archiveTargetGetMessages(owner, limit, before, after, roles, compact, order);
+  return callProjectDataOwnerWithRetry(env, projectId, owner.ownerName, 'getMessages', (stub) => {
+    if (owner.kind === 'root') {
+      return stub.archiveSourceGetMessages(owner, limit, before, after, roles, compact, order);
+    }
+    return stub.archiveTargetGetMessages(owner, limit, before, after, roles, compact, order);
+  });
 }
 
 export async function getMessageToolContent(
