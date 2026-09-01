@@ -124,7 +124,7 @@ An agent running inside a workspace has access to MCP tools that provide project
 | `complete_task`       | Mark the current work as done, optionally with structured completion evidence |
 | `request_human_input` | Ask the user for a decision                                                   |
 
-`dispatch_task` accepts an optional `runtime` value of `vm` or `cf-container`. Dispatch defaults to the VM/node path when a project, user, or platform cloud credential can satisfy the work. Container dispatch starts an [Instant](/docs/guides/instant-sessions/) task without VM sizing or cloud credentials, but it should be reserved for human/profile-requested Instant work or as the fallback when VM placement is unavailable. Explicit VM-only options such as `vmSize`, `provider`, `vmLocation`, `workspaceProfile`, and `devcontainerConfigName` cannot be combined with a container runtime; choose `runtime: "vm"` or remove those options.
+`dispatch_task` accepts an optional `runtime` value of `vm` or `cf-container`. Dispatch defaults to the VM/node path when a project, user, or platform cloud credential can satisfy the work. Container dispatch starts an [Instant](/docs/guides/instant-sessions/) task without VM sizing or cloud credentials, but it should be reserved for human/profile-requested Instant work or as the fallback when no VM credential source exists. If VM placement or provisioning fails despite credentials, agents should report that failure instead of silently switching runtimes. Explicit VM-only options such as `vmSize`, `provider`, `vmLocation`, `workspaceProfile`, and `devcontainerConfigName` cannot be combined with a container runtime; choose `runtime: "vm"` or remove those options.
 
 ### Dispatch Limits
 

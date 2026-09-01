@@ -27,7 +27,7 @@ Two paths are never Instant unless explicitly told to be:
 - **Submitted tasks always use a VM.** Attaching a file or executing a saved idea also forces task submission, even with an Instant profile selected — those paths need a VM workspace.
 - **`dispatch_task` uses Instant only when explicitly asked or when no VM credential is available**, via the call's `runtime` argument, the profile it dispatches with, or the no-credential fallback path.
 
-The practical trade: an Instant session needs **no cloud provider credential**, which makes it the fallback when no VM credential is available — yours, the project's, or the platform's. If a platform cloud credential exists, normal task work should use that VM path first; use Instant deliberately for container-suitable work or as the last resort when VM placement is unavailable.
+The practical trade: an Instant session needs **no cloud provider credential**, which makes it the fallback when no VM credential is available — yours, the project's, or the platform's. If a platform cloud credential exists, normal task work should use that VM path first; use Instant deliberately for container-suitable work or as the last resort when no VM credential source exists.
 
 ## What you give up, and what you gain
 

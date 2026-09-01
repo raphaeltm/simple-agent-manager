@@ -88,7 +88,7 @@ export const TASK_LIFECYCLE_TOOLS = [
   {
     name: 'dispatch_task',
     description:
-      'Dispatch a new task to another agent in the current project. Use this to spawn parallel work, delegate sub-tasks, or follow up on findings. Runtime defaults to the VM/node path. Use cf-container only when the human/profile explicitly asks for an Instant session container or when VM placement is unavailable/exhausted; containers are the last-resort runtime because they are more expensive. Rate-limited: max dispatch depth, per-task limit, and per-project active limit apply.',
+      'Dispatch a new task to another agent in the current project. Use this to spawn parallel work, delegate sub-tasks, or follow up on findings. Runtime defaults to the VM/node path. Use cf-container only when the human/profile explicitly asks for an Instant session container or when no project, user, or platform VM credential is available; containers are the last-resort runtime because they are more expensive. If VM placement/provisioning fails despite credentials, report that failure instead of silently switching. Rate-limited: max dispatch depth, per-task limit, and per-project active limit apply.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -107,7 +107,7 @@ export const TASK_LIFECYCLE_TOOLS = [
           type: 'string',
           enum: ['vm', 'cf-container'],
           description:
-            'Execution runtime override. Defaults to VM. Pass "cf-container" only for a human-requested/profile-requested Instant container or after VM placement/provisioning/capacity is unavailable; it skips VM sizing and uses the more expensive Cloudflare Container runtime.',
+            'Execution runtime override. Defaults to VM. Pass "cf-container" only for a human-requested/profile-requested Instant container or when no project, user, or platform VM credential is available; it skips VM sizing and uses the more expensive Cloudflare Container runtime.',
         },
         priority: {
           type: 'number',

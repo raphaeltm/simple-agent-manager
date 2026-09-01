@@ -33,7 +33,7 @@ SAM should keep Cloudflare Containers enabled, but ordinary dispatched agent wor
 - Automatic/default runtime resolution uses VM when project, user, or platform cloud credentials exist.
 - Container runtime is still reachable when explicitly requested and enabled.
 - A no-cloud-credential runtime decision can still choose container as last resort.
-- MCP `dispatch_task` tool text tells agents to use `cf-container` only when explicitly requested by the human/profile or when VM placement is unavailable/exhausted.
+- MCP `dispatch_task` tool text tells agents to use `cf-container` only when explicitly requested by the human/profile or when no project, user, or platform VM credential is available. It also tells agents to report VM placement/provisioning failures instead of silently switching runtimes.
 - Regression tests would fail if platform credentials again fell through to `zero-config` container selection.
 
 ## Post-Mortem
@@ -51,9 +51,9 @@ SAM should keep Cloudflare Containers enabled, but ordinary dispatched agent wor
 - `pnpm --filter @simple-agent-manager/providers build` — passed.
 - `pnpm --filter @simple-agent-manager/cloud-init build` — passed.
 - `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/workspace-runtime.test.ts tests/unit/services/placement-resolver.test.ts tests/unit/routes/mcp.test.ts` — passed, 3 files / 264 tests.
-- `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/mcp.test.ts` — passed, 1 file / 241 tests after strengthening MCP guidance assertions.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/mcp.test.ts` — passed, 1 file / 241 tests after strengthening and final-aligning MCP guidance assertions.
 - `pnpm --filter @simple-agent-manager/api typecheck` — passed.
 - `pnpm --filter @simple-agent-manager/api lint` — passed.
 - `pnpm --filter @simple-agent-manager/api build` — passed.
 - `pnpm --filter @simple-agent-manager/www build` — passed, 186 pages built.
-- `pnpm --filter @simple-agent-manager/www build` — passed again after the self-hosting/Instant credential wording cleanup, 186 pages built.
+- `pnpm --filter @simple-agent-manager/www build` — passed again after the final self-hosting/Instant credential wording cleanup, 186 pages built.

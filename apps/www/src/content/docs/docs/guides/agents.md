@@ -97,7 +97,7 @@ A few things worth knowing:
 
 - **No terminal, no file paste.** The old flow asked you to run `claude setup-token` or paste `~/.codex/auth.json`. Those still work as a manual fallback (in the same panel), but the guided flow removes them from the happy path.
 - **User-scoped.** Guided sign-in saves the credential for your account, so it applies across your projects. To set a subscription credential for a single [shared project](/docs/guides/collaboration/), use the manual paste fallback in that project's connections.
-- **Availability.** Guided sign-in is available on the hosted platform and on self-hosted deployments running on Cloudflare Containers (SAM's default runtime). If the button isn't shown, use the manual API key or token fields in the same panel.
+- **Availability.** Guided sign-in is available on the hosted platform and on self-hosted deployments with Cloudflare Containers enabled for Instant sessions. If the button isn't shown, use the manual API key or token fields in the same panel.
 
 ## AI Provider Modes
 
