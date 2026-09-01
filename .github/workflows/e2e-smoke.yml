@@ -12,7 +12,6 @@ on:
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
-      - '.github/workflows/e2e-smoke.yml'
 
 permissions:
   contents: read

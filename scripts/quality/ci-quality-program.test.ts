@@ -153,5 +153,6 @@ describe('deterministic quality-program CI wiring', () => {
     expect(e2eSmoke).toContain("- 'scripts/e2e/**'");
     expect(e2eSmoke).not.toContain("- 'apps/www/**'");
     expect(e2eSmoke).not.toContain("- '.github/workflows/ci.yml'");
+    expect(e2eSmoke).not.toContain("- '.github/workflows/e2e-smoke.yml'");
   });
 });
