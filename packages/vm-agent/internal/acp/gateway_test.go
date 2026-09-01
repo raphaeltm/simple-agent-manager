@@ -32,7 +32,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "oauth-token",
 			wantCommand:    "claude-agent-acp",
 			wantEnvVar:     "CLAUDE_CODE_OAUTH_TOKEN",
-			wantInstallCmd: "npm install -g @agentclientprotocol/claude-agent-acp@0.58.1",
+			wantInstallCmd: claudeCodeInstallCommand,
 		},
 		{
 			name:           "Claude Code with API key",
@@ -40,7 +40,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "api-key",
 			wantCommand:    "claude-agent-acp",
 			wantEnvVar:     "ANTHROPIC_API_KEY",
-			wantInstallCmd: "npm install -g @agentclientprotocol/claude-agent-acp@0.58.1",
+			wantInstallCmd: claudeCodeInstallCommand,
 		},
 		{
 			name:           "Claude Code with empty credential kind defaults to API key",
@@ -48,7 +48,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "",
 			wantCommand:    "claude-agent-acp",
 			wantEnvVar:     "ANTHROPIC_API_KEY",
-			wantInstallCmd: "npm install -g @agentclientprotocol/claude-agent-acp@0.58.1",
+			wantInstallCmd: claudeCodeInstallCommand,
 		},
 		{
 			name:              "OpenAI Codex with OAuth uses auth-file injection",
@@ -263,11 +263,50 @@ func TestGetAgentCommandInfoClaudeCode(t *testing.T) {
 	if info.envVarName != "ANTHROPIC_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q", info.envVarName, "ANTHROPIC_API_KEY")
 	}
-	if info.installCmd != "npm install -g @agentclientprotocol/claude-agent-acp@0.58.1" {
+	if info.installCmd != claudeCodeInstallCommand {
 		t.Fatalf("installCmd=%q, unexpected", info.installCmd)
+	}
+	if info.validationCmd != claudeCodeVersionCheckCommand() {
+		t.Fatalf("validationCmd=%q, unexpected", info.validationCmd)
 	}
 	if info.args != nil {
 		t.Fatalf("args=%v, want nil", info.args)
+	}
+}
+
+func TestGetAgentCommandInfoClaudeCodeRequiresFable51CapableCli(t *testing.T) {
+	t.Parallel()
+
+	info := getAgentCommandInfo("claude-code", "api-key")
+	if !strings.Contains(info.installCmd, "@anthropic-ai/claude-code@2.1.258") {
+		t.Fatalf("installCmd=%q, want pinned Claude Code CLI", info.installCmd)
+	}
+	if !strings.Contains(info.validationCmd, `const min="`+claudeCodeMinVersion+`".split(".").map(Number)`) {
+		t.Fatalf("validationCmd=%q, want Claude Code %s floor", info.validationCmd, claudeCodeMinVersion)
+	}
+
+	checkScript := agentInstalledCheckScript(info)
+	for _, want := range []string{
+		"command -v claude-agent-acp",
+		"command -v claude",
+		`const min="` + claudeCodeMinVersion + `".split(".").map(Number)`,
+	} {
+		if !strings.Contains(checkScript, want) {
+			t.Fatalf("agentInstalledCheckScript missing %q in %q", want, checkScript)
+		}
+	}
+}
+
+func TestClaudeCodeVersionCheckCommandDerivesFloorFromConstant(t *testing.T) {
+	t.Parallel()
+
+	command := claudeCodeVersionCheckCommand()
+	want := `const min="` + claudeCodeMinVersion + `".split(".").map(Number)`
+	if !strings.Contains(command, want) {
+		t.Fatalf("claudeCodeVersionCheckCommand()=%q, want derived minimum %q", command, want)
+	}
+	if strings.Contains(command, "const min=[2,1,251]") {
+		t.Fatalf("claudeCodeVersionCheckCommand() contains duplicated numeric minimum: %q", command)
 	}
 }
 
@@ -333,7 +372,7 @@ func TestAgentInstallScriptCleansBrokenGitHubCLIRepoBeforeNpmBootstrap(t *testin
 		`node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"`,
 		"npm install -g n",
 		"n 22",
-		"npm install -g @agentclientprotocol/claude-agent-acp@0.58.1",
+		info.installCmd,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("agentInstallScript missing %q in %q", want, script)

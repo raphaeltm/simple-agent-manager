@@ -30,6 +30,21 @@ function getPinnedAgentPackage(agentType: string): string {
   return `${entry.package}@${entry.version}`;
 }
 
+function getPinnedAgentNpmCompanion(agentType: string): string {
+  const manifest = agentInstallManifest as Array<{
+    agentType: string;
+    npmCompanion?: {
+      package: string;
+      version: string;
+    };
+  }>;
+  const entry = manifest.find((candidate) => candidate.agentType === agentType);
+  if (!entry?.npmCompanion) {
+    throw new Error(`Missing agent install manifest npm companion for ${agentType}`);
+  }
+  return `${entry.npmCompanion.package}@${entry.npmCompanion.version}`;
+}
+
 describe('cf-container runtime spike contracts', () => {
   it('adds a non-null node runtime discriminator without changing workspace node_id', () => {
     const migration = read('db/migrations/0088_node_runtime.sql');
@@ -220,7 +235,9 @@ describe('cf-container runtime spike contracts', () => {
 
   it('uses a raw vm-agent container image for PR workflows', () => {
     const dockerfile = readPackage('Dockerfile.vm-agent-container');
+    const sandboxDockerfile = readPackage('Dockerfile.sandbox');
     const bootstrap = readPackage('container-entrypoints/vm-agent-bootstrap.sh');
+    const claudeCodeCliPackage = getPinnedAgentNpmCompanion('claude-code');
     const codexACPWrapperPackage = getPinnedAgentPackage('openai-codex');
 
     expect(dockerfile).toContain('ENTRYPOINT ["/usr/local/bin/vm-agent-bootstrap"]');
@@ -232,6 +249,8 @@ describe('cf-container runtime spike contracts', () => {
     );
     expect(dockerfile).toContain('githubcli-archive-keyring.gpg');
     expect(dockerfile).toContain('apt-get install -y --no-install-recommends gh');
+    expect(dockerfile).toContain(claudeCodeCliPackage);
+    expect(sandboxDockerfile).toContain(claudeCodeCliPackage);
     expect(dockerfile).toContain(codexACPWrapperPackage);
     const vmGateway = readFileSync(
       join(apiPackageRoot, '../../packages/vm-agent/internal/acp/gateway.go'),

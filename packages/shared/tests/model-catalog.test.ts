@@ -153,6 +153,7 @@ describe('model-catalog', () => {
     it('returns flat list of models for claude-code', () => {
       const models = getModelsForAgent('claude-code');
       expect(models.length).toBeGreaterThanOrEqual(14);
+      expect(models.some((m) => m.id === 'claude-fable-5-1')).toBe(true);
       expect(models.some((m) => m.id === 'claude-fable-5')).toBe(true);
       expect(models.some((m) => m.id === 'claude-opus-5')).toBe(true);
       expect(models.some((m) => m.id === 'claude-sonnet-5')).toBe(true);
@@ -168,6 +169,7 @@ describe('model-catalog', () => {
       const namesById = new Map(models.map((model) => [model.id, model.name]));
 
       const expectedOneMillionContextModels = [
+        'claude-fable-5-1',
         'claude-fable-5',
         'claude-opus-5',
         'claude-sonnet-5',
@@ -183,6 +185,7 @@ describe('model-catalog', () => {
       // Native 1M models (Claude 5 family) are base IDs — no [1m] selector variants.
       expect(models.some((model) => model.id === 'claude-sonnet-5[1m]')).toBe(false);
       expect(models.some((model) => model.id === 'claude-opus-5[1m]')).toBe(false);
+      expect(models.some((model) => model.id === 'claude-fable-5-1[1m]')).toBe(false);
 
       for (const modelId of expectedOneMillionContextModels) {
         expect(
@@ -245,6 +248,7 @@ describe('model-catalog', () => {
 
   describe('isKnownModel', () => {
     it('returns true for a known claude model', () => {
+      expect(isKnownModel('claude-code', 'claude-fable-5-1')).toBe(true);
       expect(isKnownModel('claude-code', 'claude-opus-5')).toBe(true);
       expect(isKnownModel('claude-code', 'claude-opus-4-7')).toBe(true);
     });
