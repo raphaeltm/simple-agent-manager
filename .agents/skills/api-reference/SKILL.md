@@ -34,4 +34,5 @@ The reference covers:
 - GitHub Integration
 - Superadmin project eventing inspector (`/api/admin/project-events/:projectId/inspector`)
 - Superadmin ProjectData storage telemetry and relief endpoints (`/api/admin/project-data/storage*`)
+- Superadmin ProjectData archive-sharding rollout controls (`/api/admin/project-data/storage/*/archive-sharding*`)
 - Error Format

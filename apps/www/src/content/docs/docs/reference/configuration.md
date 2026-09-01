@@ -902,9 +902,25 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 | `PROJECT_DATA_ARCHIVE_CHUNK_BYTES`                         | `16777216`                   | Maximum bytes exported in one archive chunk; clamped below Cloudflare's 32MiB RPC ceiling                                                                                              |
 | `PROJECT_DATA_ARCHIVE_LEASE_MS`                            | `300000`                     | D1 CAS journal lease duration for archive-sharding work                                                                                                                                |
 | `PROJECT_DATA_ARCHIVE_WALL_TIME_MS`                        | `5000`                       | Soft wall-clock budget for one archive-sharding cron pass                                                                                                                              |
+| `PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_DEFAULT`          | `25`                         | Default row limit for superadmin archive-sharding rollout inspection and failed/poisoned/frozen migration list endpoints                                                               |
+| `PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_MAX`              | `100`                        | Maximum accepted row limit for superadmin archive-sharding rollout inspection endpoints                                                                                                 |
+| `PROJECT_DATA_ARCHIVE_MANUAL_CANARY_MAX_SESSIONS`          | `5`                          | Maximum sessions a superadmin scoped manual archive-sharding canary request may select; default requests select one session and dry-run by default                                      |
+| `PROJECT_DATA_ARCHIVE_MANUAL_CANARY_MAX_WALL_TIME_MS`      | `15000`                      | Maximum wall-clock budget accepted by the superadmin scoped manual archive-sharding canary endpoint                                                                                     |
 | `PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS`               | `3`                          | Failed archive-sharding attempts before the migration is poisoned and the project circuit breaker opens                                                                                |
 | `PROJECT_DATA_ARCHIVE_R2_PREFIX`                           | `project-data/session-archives` | Private R2 prefix for terminal-session archive recovery chunks and manifests                                                                                                        |
 | `PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS`                   | `4`                          | Maximum archive-shard owners queried for one project-wide message search before results report explicit partial metadata                                                               |
+
+Archive-sharding rollout is deliberately two-stage. The scheduled coordinator in
+`apps/api/src/scheduled/project-data-archive-sharding.ts` still does no work unless
+`PROJECT_DATA_ARCHIVE_SHARDING_ENABLED=true`. Before enabling that global cron selector, operators
+use the superadmin routes in `apps/api/src/routes/admin/project-data-storage.ts` to inspect one
+project's D1 journal/location/breaker state, run a scoped dry-run canary for a specific project and
+optional session, then run at most a tiny manual canary if the dry-run is clean. Failed, poisoned,
+or frozen rows are inspected through the frozen-intent route and recovered through the existing
+copy-back/rehome helpers with an explicit operator reason before any broader rollout.
+
+| Variable                                                     | Default                      | Description                                                                                                                                                                          |
+| ------------------------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED`                 | `false`                      | Production-disabled switch for cleanup of old terminal-session grouped message rows and their external-content FTS entries                                                             |
 | `PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO`           | `0.9`                        | ProjectData usage ratio that starts grouped/FTS derived-data cleanup when explicitly enabled                                                                                           |
 | `PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO`            | `0.85`                       | ProjectData usage ratio below which grouped/FTS cleanup stops                                                                                                                          |

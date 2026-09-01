@@ -34,6 +34,8 @@ import {
 const log = createModuleLogger('scheduled.project_data_archive_sharding');
 const PROJECT_DATA_ARCHIVE_DEFAULT_POISON_AFTER_ATTEMPTS = 3;
 const PROJECT_DATA_ARCHIVE_MAX_POISON_AFTER_ATTEMPTS = 100;
+const PROJECT_DATA_ARCHIVE_DEFAULT_MANUAL_CANARY_MAX_SESSIONS = 5;
+const PROJECT_DATA_ARCHIVE_DEFAULT_MANUAL_CANARY_MAX_WALL_TIME_MS = 15_000;
 
 const ACTIVE_RECLAIMABLE_STATES = [
   'candidate',
@@ -85,6 +87,18 @@ type ArchiveCoordinatorConfig = {
   r2Prefix: string;
 };
 
+type ArchiveCoordinatorScope = {
+  projectId: string;
+  sessionId?: string;
+};
+
+type ArchiveCoordinatorBudgetOverrides = {
+  limit?: number;
+  wallTimeMs?: number;
+  chunkRows?: number;
+  chunkBytes?: number;
+};
+
 type CandidateRow = {
   project_id: string;
   session_id: string;
@@ -124,6 +138,23 @@ export type ProjectDataArchiveShardingStats = {
   poisoned: number;
   chunksCopied: number;
   rowsCopied: number;
+};
+
+export type ProjectDataArchiveManualCanaryCandidate = {
+  projectId: string;
+  sessionId: string;
+  migrationId: string | null;
+  state: ProjectDataArchiveJournalState | 'eligible_session';
+  source: 'existing_migration' | 'eligible_session';
+};
+
+export type ProjectDataArchiveManualCanaryResult = {
+  dryRun: boolean;
+  scope: ArchiveCoordinatorScope;
+  reason: string | null;
+  globalCronEnabled: boolean;
+  selected: ProjectDataArchiveManualCanaryCandidate[];
+  stats: ProjectDataArchiveShardingStats;
 };
 
 export type ProjectDataArchiveFrozenIntentInspection = {
@@ -174,6 +205,7 @@ export type ProjectDataArchiveCopyBackResult = {
   migrationId: string;
   projectId: string;
   sessionId: string;
+  reason: string;
   chunksCopied: number;
   rowsCopied: number;
   restoredToRoot: boolean;
@@ -276,6 +308,34 @@ function emptyStats(config: ArchiveCoordinatorConfig, skipped: boolean, skipReas
     chunksCopied: 0,
     rowsCopied: 0,
   } satisfies ProjectDataArchiveShardingStats;
+}
+
+function scopedConfig(
+  env: Env,
+  config: ArchiveCoordinatorConfig,
+  overrides: ArchiveCoordinatorBudgetOverrides = {}
+): ArchiveCoordinatorConfig {
+  const maxSessions = envInt(
+    env.PROJECT_DATA_ARCHIVE_MANUAL_CANARY_MAX_SESSIONS,
+    PROJECT_DATA_ARCHIVE_DEFAULT_MANUAL_CANARY_MAX_SESSIONS,
+    1,
+    50
+  );
+  const maxWallTimeMs = envInt(
+    env.PROJECT_DATA_ARCHIVE_MANUAL_CANARY_MAX_WALL_TIME_MS,
+    PROJECT_DATA_ARCHIVE_DEFAULT_MANUAL_CANARY_MAX_WALL_TIME_MS,
+    1,
+    60_000
+  );
+  const limit = Math.max(1, Math.min(overrides.limit ?? 1, maxSessions));
+  return {
+    ...config,
+    sweepProjects: 1,
+    sweepSessions: limit,
+    wallTimeMs: Math.max(1, Math.min(overrides.wallTimeMs ?? config.wallTimeMs, maxWallTimeMs)),
+    chunkRows: Math.max(1, Math.min(overrides.chunkRows ?? config.chunkRows, config.chunkRows)),
+    chunkBytes: Math.max(1, Math.min(overrides.chunkBytes ?? config.chunkBytes, config.chunkBytes)),
+  };
 }
 
 function ownerStub(env: Env, ownerName: string): DurableObjectStub<ProjectData> {
@@ -463,6 +523,41 @@ async function selectReclaimableMigrations(
   return rows.results ?? [];
 }
 
+async function selectScopedReclaimableMigrations(
+  env: Env,
+  scope: ArchiveCoordinatorScope,
+  limit: number,
+  now: number
+): Promise<MigrationRow[]> {
+  if (limit <= 0) return [];
+  const sessionPredicate = scope.sessionId ? 'AND m.session_id = ?' : '';
+  const rows = await env.DATABASE.prepare(
+    `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
+            m.target_owner_name, m.target_generation, m.source_intent_token,
+            m.terminal_version_sha256, m.target_aggregate_sha256, m.r2_manifest_key,
+            m.lease_owner, m.lease_epoch, m.lease_expires_at, m.attempt_count
+     FROM project_data_archive_migrations m
+     LEFT JOIN project_data_archive_circuit_breakers breaker
+       ON breaker.project_id = m.project_id
+     WHERE m.project_id = ?
+       ${sessionPredicate}
+       AND m.state IN (${placeholders(ACTIVE_RECLAIMABLE_STATES.length)})
+       AND (m.lease_expires_at IS NULL OR m.lease_expires_at <= ?)
+       AND COALESCE(breaker.state, 'closed') = 'closed'
+     ORDER BY m.updated_at ASC, m.migration_id ASC
+     LIMIT ?`
+  )
+    .bind(
+      scope.projectId,
+      ...(scope.sessionId ? [scope.sessionId] : []),
+      ...ACTIVE_RECLAIMABLE_STATES,
+      now,
+      limit
+    )
+    .all<MigrationRow>();
+  return rows.results ?? [];
+}
+
 async function selectCandidates(
   env: Env,
   config: ArchiveCoordinatorConfig,
@@ -495,6 +590,46 @@ async function selectCandidates(
      LIMIT ?`
   )
     .bind(cutoff, nowIso, Math.min(limit, config.sweepProjects * config.sweepSessions))
+    .all<CandidateRow>();
+  return rows.results ?? [];
+}
+
+async function selectScopedCandidates(
+  env: Env,
+  config: ArchiveCoordinatorConfig,
+  now: Date,
+  scope: ArchiveCoordinatorScope,
+  limit: number
+): Promise<CandidateRow[]> {
+  if (limit <= 0) return [];
+  const cutoff = now.getTime() - config.sessionGraceMs;
+  const nowIso = now.toISOString();
+  const sessionPredicate = scope.sessionId ? 'AND ss.id = ?' : '';
+  const rows = await env.DATABASE.prepare(
+    `SELECT ss.project_id, ss.id AS session_id
+     FROM session_summaries ss
+     LEFT JOIN project_data_session_locations loc
+       ON loc.project_id = ss.project_id AND loc.session_id = ss.id
+     LEFT JOIN project_data_archive_circuit_breakers breaker
+       ON breaker.project_id = ss.project_id
+     WHERE ss.project_id = ?
+       ${sessionPredicate}
+       AND ss.status IN ('stopped', 'failed')
+       AND ss.ended_at IS NOT NULL
+       AND ss.ended_at <= ?
+       AND (loc.session_id IS NULL OR loc.location_state = 'root')
+       AND COALESCE(breaker.state, 'closed') = 'closed'
+       AND NOT EXISTS (
+         SELECT 1
+         FROM session_snapshots snap
+         WHERE snap.chat_session_id = ss.id
+           AND snap.status IN ('available', 'degraded')
+           AND snap.expires_at > ?
+       )
+     ORDER BY ss.updated_at ASC, ss.id ASC
+     LIMIT ?`
+  )
+    .bind(scope.projectId, ...(scope.sessionId ? [scope.sessionId] : []), cutoff, nowIso, limit)
     .all<CandidateRow>();
   return rows.results ?? [];
 }
@@ -620,6 +755,61 @@ async function selectMigrationWork(
     if (migration) created.push(migration);
   }
   return [...reclaimable, ...created].slice(0, config.sweepSessions);
+}
+
+async function selectScopedMigrationWork(
+  env: Env,
+  config: ArchiveCoordinatorConfig,
+  nowDate: Date,
+  now: number,
+  scope: ArchiveCoordinatorScope,
+  dryRun: boolean
+): Promise<{
+  migrations: MigrationRow[];
+  selected: ProjectDataArchiveManualCanaryCandidate[];
+}> {
+  const reclaimable = await selectScopedReclaimableMigrations(env, scope, config.sweepSessions, now);
+  const selected: ProjectDataArchiveManualCanaryCandidate[] = reclaimable.map((migration) => ({
+    projectId: migration.project_id,
+    sessionId: migration.session_id,
+    migrationId: migration.migration_id,
+    state: migration.state,
+    source: 'existing_migration',
+  }));
+  const remaining = config.sweepSessions - reclaimable.length;
+  if (remaining <= 0) return { migrations: reclaimable, selected };
+
+  const candidates = await selectScopedCandidates(env, config, nowDate, scope, remaining);
+  selected.push(
+    ...candidates.map((candidate) => ({
+      projectId: candidate.project_id,
+      sessionId: candidate.session_id,
+      migrationId: null,
+      state: 'eligible_session' as const,
+      source: 'eligible_session' as const,
+    }))
+  );
+  if (dryRun) return { migrations: reclaimable, selected };
+
+  const created: MigrationRow[] = [];
+  for (const candidate of candidates) {
+    const migration = await createCandidateJournal(env, candidate, now);
+    if (migration) {
+      created.push(migration);
+      const entry = selected.find(
+        (item) =>
+          item.source === 'eligible_session' &&
+          item.projectId === candidate.project_id &&
+          item.sessionId === candidate.session_id &&
+          item.migrationId === null
+      );
+      if (entry) {
+        entry.migrationId = migration.migration_id;
+        entry.state = migration.state;
+      }
+    }
+  }
+  return { migrations: [...reclaimable, ...created].slice(0, config.sweepSessions), selected };
 }
 
 async function claimMigrationLease(
@@ -980,8 +1170,12 @@ async function publishSourceDeletedGap(
 async function recoverCrashGaps(
   env: Env,
   config: ArchiveCoordinatorConfig,
-  now: number
+  now: number,
+  scope?: ArchiveCoordinatorScope
 ): Promise<CrashGapRecoveryResult> {
+  const scopePredicate = scope
+    ? `AND m.project_id = ? ${scope.sessionId ? 'AND m.session_id = ?' : ''}`
+    : '';
   const rows = await env.DATABASE.prepare(
     `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
             m.target_owner_name, m.target_generation, m.source_intent_token,
@@ -991,6 +1185,7 @@ async function recoverCrashGaps(
      LEFT JOIN project_data_session_locations loc
        ON loc.project_id = m.project_id AND loc.session_id = m.session_id
      WHERE m.state IN (${placeholders(RECOVERY_GAP_STATES.length)})
+       ${scopePredicate}
        AND m.target_aggregate_sha256 IS NOT NULL
        AND m.target_aggregate_sha256 != ''
        AND loc.session_id IS NOT NULL
@@ -1014,7 +1209,12 @@ async function recoverCrashGaps(
               m.migration_id ASC
      LIMIT ?`
   )
-    .bind(...RECOVERY_GAP_STATES, config.sweepSessions)
+    .bind(
+      ...RECOVERY_GAP_STATES,
+      ...(scope ? [scope.projectId] : []),
+      ...(scope?.sessionId ? [scope.sessionId] : []),
+      config.sweepSessions
+    )
     .all<MigrationRow>();
   let recovered = 0;
   let failed = 0;
@@ -1535,7 +1735,7 @@ export async function inspectFrozenProjectDataArchiveIntents(
     limit?: number;
   } = {}
 ): Promise<ProjectDataArchiveFrozenIntentInspection[]> {
-  const limit = Math.max(1, Math.min(input.limit ?? 25, 100));
+  const limit = Math.max(1, Math.min(input.limit ?? 25, 500));
   const projectPredicate = input.projectId ? 'AND m.project_id = ?' : '';
   const rows = await env.DATABASE.prepare(
     `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
@@ -1614,10 +1814,18 @@ export async function copyBackProjectDataArchiveMigration(
   input: {
     migrationId: string;
     projectId: string;
+    reason: string;
     now?: number;
   }
 ): Promise<ProjectDataArchiveCopyBackResult> {
   const now = input.now ?? Date.now();
+  const reason = input.reason.trim();
+  if (!reason) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'copy_back_reason_required',
+      `ProjectData archive migration ${input.migrationId} copy-back requires an explicit reason`
+    );
+  }
   const config = resolveConfig(env);
   const migration = await readMigrationOrThrow(env, input.migrationId);
   if (migration.project_id !== input.projectId) {
@@ -1726,19 +1934,20 @@ export async function copyBackProjectDataArchiveMigration(
     `UPDATE project_data_archive_migrations
      SET state = 'frozen',
          error_code = 'copy_back_restored',
-         error_message = 'Archive copy-back restored source rows and routed session back to root',
+         error_message = ?,
          lease_owner = NULL,
          lease_expires_at = NULL,
          frozen_at = COALESCE(frozen_at, ?),
          updated_at = ?
      WHERE migration_id = ?`
   )
-    .bind(now, now, migration.migration_id)
+    .bind(`Archive copy-back restored source rows and routed session back to root: ${reason}`, now, now, migration.migration_id)
     .run();
   return {
     migrationId: migration.migration_id,
     projectId: migration.project_id,
     sessionId: migration.session_id,
+    reason,
     chunksCopied,
     rowsCopied,
     restoredToRoot: (locationResult.meta.changes ?? 0) > 0,
@@ -1750,6 +1959,7 @@ export async function rehomeProjectDataArchiveMigration(
   input: {
     migrationId: string;
     projectId: string;
+    reason: string;
     now?: number;
   }
 ): Promise<ProjectDataArchiveCopyBackResult> {
@@ -1809,4 +2019,103 @@ export async function runProjectDataArchiveSharding(
     }
   }
   return stats;
+}
+
+export async function runScopedProjectDataArchiveCanary(
+  env: Env,
+  input: {
+    projectId: string;
+    sessionId?: string;
+    dryRun?: boolean;
+    limit?: number;
+    wallTimeMs?: number;
+    chunkRows?: number;
+    chunkBytes?: number;
+    reason?: string;
+    nowDate?: Date;
+  }
+): Promise<ProjectDataArchiveManualCanaryResult> {
+  const dryRun = input.dryRun ?? true;
+  const reason = input.reason?.trim() || null;
+  if (!dryRun && !reason) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'manual_canary_reason_required',
+      'Manual archive-sharding canary execution requires an explicit reason'
+    );
+  }
+  const baseConfig = resolveConfig(env);
+  const config = scopedConfig(env, baseConfig, input);
+  const scope: ArchiveCoordinatorScope = {
+    projectId: input.projectId,
+    ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+  };
+  const nowDate = input.nowDate ?? new Date();
+  const now = nowDate.getTime();
+  const archiveR2 = env.PROJECT_DATA_ARCHIVE_R2;
+  if (!dryRun && !archiveR2) {
+    const stats = emptyStats(config, true, 'missing_r2_binding');
+    return {
+      dryRun,
+      scope,
+      reason,
+      globalCronEnabled: baseConfig.enabled,
+      selected: [],
+      stats,
+    };
+  }
+  const work = await selectScopedMigrationWork(env, config, nowDate, now, scope, dryRun);
+  const stats = emptyStats(config, false, null);
+  stats.selected = work.selected.length;
+
+  if (dryRun) {
+    return {
+      dryRun,
+      scope,
+      reason,
+      globalCronEnabled: baseConfig.enabled,
+      selected: work.selected,
+      stats,
+    };
+  }
+
+  const startedAt = Date.now();
+  const crashGapRecovery = await recoverCrashGaps(env, config, now, scope);
+  stats.recoveredCrashGaps = crashGapRecovery.recovered;
+  stats.failed += crashGapRecovery.failed;
+  for (const migration of work.migrations) {
+    if (Date.now() - startedAt >= config.wallTimeMs) break;
+    try {
+      const result = await migrateCandidate(env, config, archiveR2, migration, now);
+      if (result.migrated) stats.migrated++;
+      if (result.recoveredCrashGap) stats.recoveredCrashGaps++;
+      stats.chunksCopied += result.chunksCopied;
+      stats.rowsCopied += result.rowsCopied;
+    } catch (error) {
+      const failureState = await markFailed(env, config, migration, now, error).catch(
+        (markError) => {
+          log.error('project_data_archive_manual_canary_mark_failed_failed', {
+            migrationId: migration.migration_id,
+            ...serializeError(markError),
+          });
+          return 'unchanged' as const;
+        }
+      );
+      recordMigrationFailure(stats, failureState);
+      log.warn('project_data_archive_manual_canary_candidate_failed', {
+        migrationId: migration.migration_id,
+        projectId: migration.project_id,
+        sessionId: migration.session_id,
+        ...serializeError(error),
+      });
+    }
+  }
+
+  return {
+    dryRun,
+    scope,
+    reason,
+    globalCronEnabled: baseConfig.enabled,
+    selected: work.selected,
+    stats,
+  };
 }
