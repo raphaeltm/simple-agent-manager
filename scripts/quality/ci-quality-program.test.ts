@@ -7,6 +7,7 @@ const e2eSmoke = readFileSync(
   new URL('../../.github/workflows/e2e-smoke.yml', import.meta.url),
   'utf8'
 );
+const codSpeed = readFileSync(new URL('../../.github/workflows/codspeed.yml', import.meta.url), 'utf8');
 const parsedRootManifest: unknown = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
 );
@@ -154,5 +155,13 @@ describe('deterministic quality-program CI wiring', () => {
     expect(e2eSmoke).not.toContain("- 'apps/www/**'");
     expect(e2eSmoke).not.toContain("- '.github/workflows/ci.yml'");
     expect(e2eSmoke).not.toContain("- '.github/workflows/e2e-smoke.yml'");
+  });
+
+  it('keeps CodSpeed off marketing-site and CI-routing-only pull requests', () => {
+    expect(codSpeed).toContain('pull_request:');
+    expect(codSpeed).toContain('paths:');
+    expect(codSpeed).toContain("- 'packages/shared/**'");
+    expect(codSpeed).not.toContain("- 'apps/www/**'");
+    expect(codSpeed).not.toContain("- '.github/workflows/ci.yml'");
   });
 });
