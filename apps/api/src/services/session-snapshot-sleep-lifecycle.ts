@@ -152,6 +152,7 @@ export async function claimSessionSnapshotSleep(
     .set({
       sleepClaimId: input.claimId,
       sleepClaimedAt: nowIso,
+      sleepStoppingSince: sql`COALESCE(${schema.sessionSnapshots.sleepStoppingSince}, ${schema.sessionSnapshots.sleepClaimedAt}, ${schema.sessionSnapshots.updatedAt}, ${schema.sessionSnapshots.createdAt}, ${nowIso})`,
       sleepAfter: null,
       updatedAt: nowIso,
     })
@@ -206,13 +207,15 @@ export async function beginSessionSnapshotStopping(
   claimId: string,
   now = new Date()
 ): Promise<boolean> {
+  const nowIso = now.toISOString();
   const result = await db
     .update(schema.sessionSnapshots)
     .set({
       sleepStatus: 'stopping',
       sleepAfter: null,
-      sleepClaimedAt: now.toISOString(),
-      updatedAt: now.toISOString(),
+      sleepClaimedAt: nowIso,
+      sleepStoppingSince: sql`COALESCE(${schema.sessionSnapshots.sleepStoppingSince}, ${nowIso})`,
+      updatedAt: nowIso,
     })
     .where(
       and(
@@ -282,6 +285,7 @@ export async function failSessionSnapshotSleepBeforeTeardown(
       sleepError: sessionLifecycleError(env, error),
       sleepClaimId: null,
       sleepClaimedAt: null,
+      sleepStoppingSince: null,
       updatedAt: now.toISOString(),
     })
     .where(
@@ -478,6 +482,7 @@ export async function scheduleSessionSnapshotSleep(
       sleepError: null,
       sleepClaimId: null,
       sleepClaimedAt: null,
+      sleepStoppingSince: null,
       updatedAt: now.toISOString(),
     })
     .where(
@@ -502,6 +507,7 @@ export async function cancelScheduledSessionSleep(db: Db, chatSessionId: string)
       sleepError: null,
       sleepClaimId: null,
       sleepClaimedAt: null,
+      sleepStoppingSince: null,
       updatedAt: new Date().toISOString(),
     })
     .where(

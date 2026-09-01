@@ -120,6 +120,7 @@ async function reconcileUnscheduledSessionSleeps(
             sleepError: sessionLifecycleError(env, error),
             sleepClaimId: null,
             sleepClaimedAt: null,
+            sleepStoppingSince: null,
             updatedAt: now.toISOString(),
           })
           .where(
