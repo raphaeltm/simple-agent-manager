@@ -24,6 +24,23 @@ export interface SessionSleepLifecycleRepairStats {
   errors: number;
 }
 
+async function projectDataSessionAlreadyClosedForSleep(
+  env: Env,
+  projectId: string,
+  chatSessionId: string
+): Promise<boolean> {
+  const session = await projectDataService.getSession(env, projectId, chatSessionId).catch((error) => {
+    log.warn('session_sleep_lifecycle_repair.project_data_status_failed', {
+      projectId,
+      chatSessionId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  });
+  const status = typeof session?.status === 'string' ? session.status : null;
+  return status === 'sleeping' || status === 'stopped';
+}
+
 function repairBatchSize(env: Env): number {
   return Math.min(
     MAX_SESSION_SLEEP_IN_FLIGHT_REPAIR_BATCH_SIZE,
@@ -146,13 +163,25 @@ export async function runSessionSleepLifecycleRepair(
           return false;
         });
       if (!projectDataSlept) {
-        stats.projectDataErrors++;
-        log.warn('session_sleep_lifecycle_repair.project_data_sleep_not_applied', {
+        const alreadyClosed = await projectDataSessionAlreadyClosedForSleep(
+          env,
+          row.projectId,
+          row.chatSessionId
+        );
+        if (!alreadyClosed) {
+          stats.projectDataErrors++;
+          log.warn('session_sleep_lifecycle_repair.project_data_sleep_not_applied', {
+            snapshotId: row.snapshotId,
+            workspaceId: row.workspaceId,
+            chatSessionId: row.chatSessionId,
+          });
+          continue;
+        }
+        log.info('session_sleep_lifecycle_repair.project_data_already_closed', {
           snapshotId: row.snapshotId,
           workspaceId: row.workspaceId,
           chatSessionId: row.chatSessionId,
         });
-        continue;
       }
       const marked = await markSessionSnapshotSleeping(db, env, row.chatSessionId, now);
       if (!marked) {
