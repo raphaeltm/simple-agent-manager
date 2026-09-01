@@ -83,6 +83,7 @@ describe('deterministic quality-program CI wiring', () => {
     expect(changes).toContain('ci-workflow:');
     expect(changes).toContain('marketing-site:');
     expect(changes).toContain("- 'apps/www/**'");
+    expect(changes).toContain("- '!scripts/quality/ci*.test.ts'");
 
     const workflow = jobBlock(ci, 'ci-workflow');
     expect(workflow).toContain('needs: [changes]');
