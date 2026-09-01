@@ -123,11 +123,6 @@ export async function runSessionSleepLifecycleRepair(
         stats.skipped++;
         continue;
       }
-      const marked = await markSessionSnapshotSleeping(db, env, row.chatSessionId, now);
-      if (!marked) {
-        stats.skipped++;
-        continue;
-      }
       const projectDataSlept = await projectDataService
         .sleepSession(env, row.projectId, row.chatSessionId)
         .catch((error) => {
@@ -146,6 +141,12 @@ export async function runSessionSleepLifecycleRepair(
           workspaceId: row.workspaceId,
           chatSessionId: row.chatSessionId,
         });
+        continue;
+      }
+      const marked = await markSessionSnapshotSleeping(db, env, row.chatSessionId, now);
+      if (!marked) {
+        stats.skipped++;
+        continue;
       }
       const nowIso = now.toISOString();
       await db.batch([

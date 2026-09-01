@@ -303,7 +303,10 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
     ['snapshot has no sleeping timestamp', { sleepingAt: null }],
     ['snapshot exhausted recovery attempts', { recoveryAttempts: 3 }],
     ['snapshot status is not restorable', { status: 'failed', degradation: 'none' }],
-    ['available snapshot has non-none degradation', { status: 'available', degradation: 'partial' }],
+    [
+      'available snapshot has non-none degradation',
+      { status: 'available', degradation: 'partial' },
+    ],
     ['snapshot belongs to a different project', { projectId: 'project-other' }],
     ['snapshot belongs to a different workspace', { workspaceId: 'workspace-other' }],
   ])('still stops when the %s', async (_name, snapshotOverrides) => {
@@ -394,14 +397,17 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
     expect(result.workspacesTerminalized).toBe(1);
     expect(result.agentSessionsClosed).toBe(1);
     expect(result.computeUsageClosed).toBe(1);
-    expect(sqlite.prepare(`SELECT status FROM workspaces WHERE id = ?`).pluck().get(WORKSPACE_ID)).toBe(
-      'stopped'
-    );
+    expect(
+      sqlite.prepare(`SELECT status FROM workspaces WHERE id = ?`).pluck().get(WORKSPACE_ID)
+    ).toBe('stopped');
     expect(
       sqlite.prepare(`SELECT status FROM agent_sessions WHERE id = ?`).pluck().get(AGENT_SESSION_ID)
     ).toBe('stopped');
     expect(
-      sqlite.prepare(`SELECT ended_at FROM compute_usage WHERE id = 'usage-finalizer'`).pluck().get()
+      sqlite
+        .prepare(`SELECT ended_at FROM compute_usage WHERE id = 'usage-finalizer'`)
+        .pluck()
+        .get()
     ).toBe(NOW_ISO);
 
     const sleepingWorkspaceId = 'workspace-sleeping-terminal-node';
@@ -412,9 +418,9 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
       nowIso: NOW_ISO,
       reason: 'test_terminal_node_repair',
     });
-    expect(sqlite.prepare(`SELECT status FROM workspaces WHERE id = ?`).pluck().get(sleepingWorkspaceId)).toBe(
-      'sleeping'
-    );
+    expect(
+      sqlite.prepare(`SELECT status FROM workspaces WHERE id = ?`).pluck().get(sleepingWorkspaceId)
+    ).toBe('sleeping');
   });
 
   it('skips terminal-node repair when a recent in-flight sleep row protects the workspace', async () => {
@@ -437,6 +443,46 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
     });
     expect(await loadWorkspace()).toMatchObject({ status: 'running' });
     expect(mocks.stopSession).not.toHaveBeenCalled();
+  });
+
+  it('repairs an unprotected active workspace on a terminal node through the scheduled repair', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    seedNode(undefined, { status: 'deleted', updatedAt: iso(-60 * 60 * 1000) });
+    seedWorkspace({ status: 'running', updatedAt: iso(-45 * 60 * 1000) });
+    seedAgentSession({ status: 'running' });
+    sqlite
+      .prepare(
+        `INSERT INTO compute_usage
+          (id, user_id, workspace_id, node_id, server_type, vcpu_count, credential_source,
+           started_at, created_at)
+         VALUES ('usage-terminal-repair', ?, ?, ?, 'medium', 4, 'platform', ?, ?)`
+      )
+      .run(USER_ID, WORKSPACE_ID, NODE_ID, iso(-60 * 60 * 1000), iso(-60 * 60 * 1000));
+
+    const result = await runTerminalNodeLifecycleRepair(env);
+
+    expect(result).toMatchObject({
+      selected: 1,
+      skippedProtectedSleep: 0,
+      workspacesTerminalized: 1,
+      agentSessionsClosed: 1,
+      computeUsageClosed: 1,
+      projectSessionsClosed: 1,
+      errors: 0,
+    });
+    expect(await loadWorkspace()).toMatchObject({ status: 'stopped' });
+    expect(
+      sqlite.prepare(`SELECT status FROM agent_sessions WHERE id = ?`).pluck().get(AGENT_SESSION_ID)
+    ).toBe('stopped');
+    expect(
+      sqlite
+        .prepare(`SELECT ended_at FROM compute_usage WHERE id = 'usage-terminal-repair'`)
+        .pluck()
+        .get()
+    ).toBe(NOW_ISO);
+    expect(mocks.stopSession).toHaveBeenCalledWith(env, PROJECT_ID, CHAT_SESSION_ID);
+    vi.useRealTimers();
   });
 });
 

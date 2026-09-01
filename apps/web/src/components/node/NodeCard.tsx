@@ -15,6 +15,7 @@ import { Plus, Rocket, Server } from 'lucide-react';
 import type { FC } from 'react';
 import { useNavigate } from 'react-router';
 
+import { formatOfferingNumber } from '../../lib/compute-pool-offerings';
 import { formatVmSizeInline, lookupSizeInfo } from '../vm/format-vm-size';
 import { MiniMetricBadge } from './MiniMetricBadge';
 import { NodeWorkspaceMiniCard } from './NodeWorkspaceMiniCard';
@@ -70,8 +71,10 @@ export const NodeCard: FC<NodeCardProps> = ({
   const overflowItems = getNodeActions(node, { onStop, onDelete });
   const sizeLabels = VM_SIZE_LABELS[node.vmSize];
   const sizeInfo = lookupSizeInfo(catalogs, node.cloudProvider, node.vmSize);
-  const providerInstanceRamGb =
-    node.providerInstanceMemoryMb == null ? null : Math.round(node.providerInstanceMemoryMb / 1024);
+  const providerInstanceRamLabel =
+    node.providerInstanceMemoryMb == null
+      ? null
+      : formatOfferingNumber(node.providerInstanceMemoryMb / 1024, 'GB RAM');
   const locationConfig = VM_LOCATIONS[node.vmLocation];
   const metrics = node.lastMetrics;
   const hasMetrics =
@@ -169,7 +172,7 @@ export const NodeCard: FC<NodeCardProps> = ({
               <span aria-hidden="true">&middot;</span>
               <span>
                 {node.providerInstanceVcpuCount ?? sizeInfo?.vcpu ?? '?'} vCPU
-                {providerInstanceRamGb ? `, ${providerInstanceRamGb} GB RAM` : ''}
+                {providerInstanceRamLabel ? `, ${providerInstanceRamLabel}` : ''}
               </span>
               {node.providerInstanceDiskGb != null && (
                 <>
