@@ -96,8 +96,6 @@ jobs:
               - 'apps/web/**'
               - 'infra/**'
               - 'packages/**'
-              - 'scripts/**'
-              - '!scripts/quality/ci*.test.ts'
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
