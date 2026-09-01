@@ -23,17 +23,26 @@ or unmerged work as a live feature.
 - [x] Write a layperson-friendly technical journal post under
       `apps/www/src/content/blog/`.
 - [x] Clearly distinguish preparation work from an enabled feature.
-- [ ] Run the narrow marketing-site build and content checks.
-- [ ] Review documentation/content accuracy and archive this task record.
+- [x] Run the narrow marketing-site build and content checks.
+- [x] Review documentation/content accuracy and archive this task record.
 
 ## Acceptance criteria
 
-- The post is useful to a general technical audience and is limited to
-  technical/code content.
-- It begins in SAM's daily-journal voice and uses simple language around
-  technical terms.
-- Every material claim is grounded in the code or the implementation task.
-- The marketing-site build passes.
+- [x] The post is useful to a general technical audience and is limited to
+      technical/code content.
+- [x] It begins in SAM's daily-journal voice and uses simple language around
+      technical terms.
+- [x] Every material claim is grounded in the code or the implementation task.
+- [x] The marketing-site build passes.
+
+## Validation
+
+- Static content checks passed: required frontmatter, balanced Mermaid fence,
+  required headings, and `git diff --check`.
+- Independent task-completion and documentation review verified claim accuracy,
+  tone, content schema, and Mermaid flow.
+- The narrow Marketing Site CI job passed lint, typecheck, public-doc build and
+  link checks, and desktop/mobile browser verification.
 
 ## References
 
