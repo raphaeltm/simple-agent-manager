@@ -43,6 +43,7 @@ jobs:
       devcontainer-volume-mount: ${{ steps.filter.outputs.devcontainer-volume-mount }}
       infra: ${{ steps.filter.outputs.infra }}
       deploy-scripts: ${{ steps.filter.outputs.deploy-scripts }}
+      ci-workflow: ${{ steps.filter.outputs.ci-workflow }}
       marketing-site: ${{ steps.filter.outputs.marketing-site }}
       repo-quality: ${{ steps.filter.outputs.repo-quality }}
       web-ui: ${{ steps.filter.outputs.web-ui }}
@@ -61,27 +62,21 @@ jobs:
               - 'scripts/quality/*worker*.ts'
               - 'scripts/quality/*migration*.ts'
               - 'scripts/quality/runtime-boundary*.ts'
-              - '.github/workflows/ci.yml'
             vm-agent:
               - 'packages/vm-agent/**'
-              - '.github/workflows/ci.yml'
             cli:
               - 'packages/cli/**'
               - 'sonar-project.properties'
               - '.claude/rules/36-cli-quality.md'
-              - '.github/workflows/ci.yml'
             devcontainer:
               - '.devcontainer/**'
-              - '.github/workflows/ci.yml'
             devcontainer-volume-mount:
               - '.devcontainer/**'
               - 'scripts/ci/**'
               - 'packages/vm-agent/**'
               - 'packages/cloud-init/**'
-              - '.github/workflows/ci.yml'
             infra:
               - 'infra/**'
-              - '.github/workflows/ci.yml'
             deploy-scripts:
               - 'scripts/deploy/**'
               - 'scripts/quality/deploy*.test.ts'
@@ -90,7 +85,9 @@ jobs:
               - '.github/workflows/deploy*.yml'
               - '.github/workflows/provision*.yml'
               - '.github/workflows/teardown*.yml'
+            ci-workflow:
               - '.github/workflows/ci.yml'
+              - 'scripts/quality/ci*.test.ts'
             marketing-site:
               - 'apps/www/**'
               - '.github/workflows/deploy-www.yml'
@@ -107,18 +104,15 @@ jobs:
               - 'vitest*.ts'
               - 'eslint.config.*'
               - 'prettier.config.*'
-              - '.github/workflows/ci.yml'
             web-ui:
               - 'apps/web/**'
               - 'packages/ui/**'
               - 'packages/terminal/**'
               - 'packages/acp-client/**'
-              - '.github/workflows/ci.yml'
             go-modules:
               - '**/go.mod'
               - '**/go.sum'
               - 'scripts/quality/check-go-vulnerability-diff.ts'
-              - '.github/workflows/ci.yml'
 
   preflight-evidence:
     name: Preflight Evidence
@@ -177,6 +171,28 @@ jobs:
 
       - name: Validate specialist review evidence
         run: pnpm quality:specialist-review
+
+  ci-workflow:
+    name: CI Workflow
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.ci-workflow == 'true'
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate CI workflow wiring
+        run: pnpm exec vitest run --config scripts/quality/vitest.config.ts ci-quality-program.test.ts ci-worker-suite.test.ts ci-workspace-surfaces.test.ts
 
   ui-compliance:
     name: UI Compliance

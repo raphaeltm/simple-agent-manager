@@ -77,10 +77,19 @@ describe('deterministic quality-program CI wiring', () => {
 
   it('keeps marketing-site changes on a narrow CI path', () => {
     const changes = jobBlock(ci, 'changes');
+    expect(changes).toContain('ci-workflow: ${{ steps.filter.outputs.ci-workflow }}');
     expect(changes).toContain('marketing-site: ${{ steps.filter.outputs.marketing-site }}');
     expect(changes).toContain('repo-quality: ${{ steps.filter.outputs.repo-quality }}');
+    expect(changes).toContain('ci-workflow:');
     expect(changes).toContain('marketing-site:');
     expect(changes).toContain("- 'apps/www/**'");
+
+    const workflow = jobBlock(ci, 'ci-workflow');
+    expect(workflow).toContain('needs: [changes]');
+    expect(workflow).toContain("needs.changes.outputs.ci-workflow == 'true'");
+    expect(workflow).toContain(
+      'pnpm exec vitest run --config scripts/quality/vitest.config.ts ci-quality-program.test.ts ci-worker-suite.test.ts ci-workspace-surfaces.test.ts'
+    );
 
     const marketing = jobBlock(ci, 'marketing-site');
     expect(marketing).toContain('needs: [changes]');
@@ -110,5 +119,24 @@ describe('deterministic quality-program CI wiring', () => {
     expect(jobBlock(ci, 'durable-object-workers')).toContain("needs.changes.outputs.api == 'true'");
     expect(jobBlock(ci, 'pulumi-infra')).toContain("needs.changes.outputs.infra == 'true'");
     expect(jobBlock(ci, 'deploy-scripts')).toContain("needs.changes.outputs.deploy-scripts == 'true'");
+
+    const expensiveFilterSnippet = changes.slice(changes.indexOf('filters: |'));
+    for (const filterName of [
+      'api',
+      'vm-agent',
+      'devcontainer',
+      'devcontainer-volume-mount',
+      'infra',
+      'repo-quality',
+      'web-ui',
+      'go-modules',
+    ]) {
+      const nextFilter = expensiveFilterSnippet.match(
+        new RegExp(String.raw`\n            ${filterName}:\n([\s\S]*?)(?=\n            [a-zA-Z0-9_-]+:\n|\n\n|\n  [a-zA-Z0-9_-]+:)`)
+      );
+      expect(nextFilter?.[1] ?? '', `${filterName} must not fan out on ci.yml`).not.toContain(
+        ".github/workflows/ci.yml"
+      );
+    }
   });
 });
