@@ -1661,6 +1661,126 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '043-project-data-terminal-archive-bridge',
+    run: (sql) => {
+      for (const statement of [
+        `ALTER TABLE chat_sessions ADD COLUMN archive_last_message_at INTEGER`,
+        `ALTER TABLE chat_sessions ADD COLUMN archive_owner_name TEXT`,
+        `ALTER TABLE chat_sessions ADD COLUMN archive_generation INTEGER`,
+        `ALTER TABLE chat_sessions ADD COLUMN archive_migration_id TEXT`,
+        `ALTER TABLE chat_sessions ADD COLUMN archive_state TEXT`,
+      ]) {
+        try {
+          sql.exec(statement);
+        } catch {
+          // Additive compatibility: a partially migrated object may already have the column.
+        }
+      }
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_data_archive_source_intents (
+          session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          project_id TEXT NOT NULL,
+          migration_id TEXT NOT NULL,
+          source_owner_name TEXT NOT NULL,
+          target_owner_name TEXT NOT NULL,
+          target_generation INTEGER NOT NULL CHECK (target_generation > 0),
+          source_intent_token TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN (
+            'intent_prepared',
+            'target_prepared',
+            'copying',
+            'target_sealed',
+            'recovery_manifest_persisted',
+            'source_deleted',
+            'rehome_exported'
+          )),
+          terminal_version_sha256 TEXT NOT NULL,
+          target_aggregate_sha256 TEXT,
+          recovery_manifest_key TEXT,
+          last_message_at INTEGER,
+          message_count INTEGER NOT NULL DEFAULT 0,
+          prepared_at INTEGER NOT NULL,
+          target_sealed_at INTEGER,
+          recovery_manifest_persisted_at INTEGER,
+          source_deleted_at INTEGER,
+          source_database_size_before INTEGER,
+          source_database_size_after INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+      sql.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_project_data_archive_source_migration
+        ON project_data_archive_source_intents(project_id, migration_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_data_archive_source_state
+        ON project_data_archive_source_intents(state, updated_at)
+      `);
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_data_archive_target_sessions (
+          session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          project_id TEXT NOT NULL,
+          migration_id TEXT NOT NULL,
+          owner_name TEXT NOT NULL,
+          generation INTEGER NOT NULL CHECK (generation > 0),
+          source_owner_name TEXT NOT NULL,
+          source_intent_token TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN (
+            'prepared',
+            'copying',
+            'sealed',
+            'published',
+            'rehome_exported'
+          )),
+          terminal_version_sha256 TEXT NOT NULL,
+          aggregate_sha256 TEXT,
+          expected_message_count INTEGER NOT NULL DEFAULT 0,
+          received_message_count INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          sealed_at INTEGER
+        )
+      `);
+      sql.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_project_data_archive_target_owner
+        ON project_data_archive_target_sessions(project_id, owner_name, generation, session_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_data_archive_target_state
+        ON project_data_archive_target_sessions(state, updated_at)
+      `);
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_data_archive_target_chunks (
+          chunk_id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          project_id TEXT NOT NULL,
+          migration_id TEXT NOT NULL,
+          owner_name TEXT NOT NULL,
+          generation INTEGER NOT NULL CHECK (generation > 0),
+          table_name TEXT NOT NULL CHECK (table_name IN (
+            'chat_messages',
+            'chat_messages_grouped',
+            'tool_payload_archives'
+          )),
+          ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+          row_count INTEGER NOT NULL CHECK (row_count >= 0),
+          byte_count INTEGER NOT NULL CHECK (byte_count >= 0),
+          sha256 TEXT NOT NULL,
+          committed_at INTEGER NOT NULL,
+          UNIQUE(session_id, table_name, ordinal)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_data_archive_target_chunks_session
+        ON project_data_archive_target_chunks(session_id, table_name, ordinal)
+      `);
+    },
+  },
 ];
 
 /**

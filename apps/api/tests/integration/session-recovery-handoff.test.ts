@@ -34,6 +34,7 @@ function seedRecoveryFixture(sqlite: Database.Database): void {
     schema.capacityPools,
     schema.capacitySources,
     schema.capacityPoolCandidates,
+    schema.projectDataSessionLocations,
   ]);
   sqlite.exec(`
     INSERT INTO users (id, name, email, github_id)

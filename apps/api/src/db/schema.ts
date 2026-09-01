@@ -2872,9 +2872,157 @@ export const sessionIndexCoverage = sqliteTable('session_index_coverage', {
   syncedAt: integer('synced_at').notNull(),
   sessionCount: integer('session_count').notNull().default(0),
   complete: integer('complete').notNull().default(0),
+  backfillCursorUpdatedAt: integer('backfill_cursor_updated_at'),
+  backfillCursorId: text('backfill_cursor_id'),
+  backfillStartedAt: integer('backfill_started_at'),
+  backfillCompletedAt: integer('backfill_completed_at'),
 });
 
 export type SessionIndexCoverageRow = typeof sessionIndexCoverage.$inferSelect;
+
+export const projectDataArchiveCircuitBreakers = sqliteTable(
+  'project_data_archive_circuit_breakers',
+  {
+    projectId: text('project_id')
+      .primaryKey()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    state: text('state', { enum: ['closed', 'open', 'frozen'] })
+      .notNull()
+      .default('closed'),
+    reason: text('reason'),
+    openedAt: integer('opened_at'),
+    updatedAt: integer('updated_at').notNull(),
+  }
+);
+
+export type ProjectDataArchiveCircuitBreakerRow =
+  typeof projectDataArchiveCircuitBreakers.$inferSelect;
+
+export const projectDataArchiveMigrations = sqliteTable(
+  'project_data_archive_migrations',
+  {
+    migrationId: text('migration_id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id').notNull(),
+    state: text('state', {
+      enum: [
+        'candidate',
+        'leased',
+        'intent_prepared',
+        'target_prepared',
+        'copying',
+        'target_sealed',
+        'recovery_manifest_persisted',
+        'source_deleted',
+        'published',
+        'failed',
+        'poisoned',
+        'frozen',
+      ],
+    }).notNull(),
+    sourceOwnerName: text('source_owner_name').notNull(),
+    targetOwnerName: text('target_owner_name').notNull(),
+    sourceGeneration: integer('source_generation').notNull().default(0),
+    targetGeneration: integer('target_generation').notNull(),
+    sourceIntentToken: text('source_intent_token'),
+    terminalVersionSha256: text('terminal_version_sha256'),
+    targetAggregateSha256: text('target_aggregate_sha256'),
+    r2ManifestKey: text('r2_manifest_key'),
+    leaseOwner: text('lease_owner'),
+    leaseEpoch: integer('lease_epoch').notNull().default(0),
+    leaseExpiresAt: integer('lease_expires_at'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    candidateAt: integer('candidate_at'),
+    intentPreparedAt: integer('intent_prepared_at'),
+    targetPreparedAt: integer('target_prepared_at'),
+    copyingStartedAt: integer('copying_started_at'),
+    targetSealedAt: integer('target_sealed_at'),
+    recoveryManifestPersistedAt: integer('recovery_manifest_persisted_at'),
+    sourceDeletedAt: integer('source_deleted_at'),
+    publishedAt: integer('published_at'),
+    poisonedAt: integer('poisoned_at'),
+    frozenAt: integer('frozen_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    stateLeaseIdx: index('idx_project_data_archive_migrations_state_lease').on(
+      table.state,
+      table.leaseExpiresAt,
+      table.updatedAt
+    ),
+    projectStateIdx: index('idx_project_data_archive_migrations_project_state').on(
+      table.projectId,
+      table.state,
+      table.updatedAt
+    ),
+    sessionIdx: index('idx_project_data_archive_migrations_session').on(
+      table.projectId,
+      table.sessionId,
+      table.state
+    ),
+  })
+);
+
+export type ProjectDataArchiveMigrationRow = typeof projectDataArchiveMigrations.$inferSelect;
+
+export const projectDataSessionLocations = sqliteTable(
+  'project_data_session_locations',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id').notNull(),
+    locationState: text('location_state', {
+      enum: ['root', 'migrating', 'archive_shard', 'frozen'],
+    }).notNull(),
+    ownerKind: text('owner_kind', { enum: ['root', 'archive_shard'] }).notNull(),
+    ownerName: text('owner_name').notNull(),
+    generation: integer('generation').notNull(),
+    migrationId: text('migration_id').references(() => projectDataArchiveMigrations.migrationId, {
+      onDelete: 'set null',
+    }),
+    sourceOwnerName: text('source_owner_name'),
+    targetOwnerName: text('target_owner_name'),
+    targetAggregateSha256: text('target_aggregate_sha256'),
+    routingSchemaVersion: integer('routing_schema_version').notNull().default(1),
+    publishedAt: integer('published_at'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.sessionId] }),
+    ownerIdx: index('idx_project_data_session_locations_owner').on(
+      table.ownerKind,
+      table.ownerName,
+      table.generation
+    ),
+    stateIdx: index('idx_project_data_session_locations_state').on(
+      table.locationState,
+      table.updatedAt
+    ),
+  })
+);
+
+export type ProjectDataSessionLocationRow = typeof projectDataSessionLocations.$inferSelect;
+
+export const projectDataSessionIndexCursors = sqliteTable('project_data_session_index_cursors', {
+  projectId: text('project_id')
+    .primaryKey()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  cursorUpdatedAt: integer('cursor_updated_at'),
+  cursorId: text('cursor_id'),
+  fullSyncStartedAt: integer('full_sync_started_at'),
+  lastProgressAt: integer('last_progress_at'),
+  observedSessionCount: integer('observed_session_count').notNull().default(0),
+  complete: integer('complete').notNull().default(0),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export type ProjectDataSessionIndexCursorRow = typeof projectDataSessionIndexCursors.$inferSelect;
 
 export const projectDataStorageTelemetry = sqliteTable(
   'project_data_storage_telemetry',

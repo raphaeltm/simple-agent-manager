@@ -66,33 +66,36 @@ export async function syncSessionSummariesToD1(
   const sessionCount = typeof countRow?.cnt === 'number' ? countRow.cnt : 0;
 
   const coverage = await env.DATABASE.prepare(
-    'SELECT synced_at, complete FROM session_index_coverage WHERE project_id = ?'
+    `SELECT synced_at, complete, backfill_cursor_updated_at, backfill_cursor_id,
+            backfill_started_at
+     FROM session_index_coverage
+     WHERE project_id = ?`
   )
     .bind(projectId)
-    .first<{ synced_at: number; complete: number }>();
-
-  // Circuit breaker. Session counts only ever grow (sessions are terminalized,
-  // never deleted), so once a project passes the cap `complete` can never return
-  // to 1 and the read path will fall back to the DO forever. Mirroring rows into
-  // an index nothing will read is pure cost — record the coverage and stop.
-  if (sessionCount > maxRows) {
-    await writeCoverage(env, projectId, syncedAt, sessionCount, false);
-    log.info('session_summaries_sync_skipped_over_cap', { projectId, sessionCount, maxRows });
-    return;
-  }
+    .first<{
+      synced_at: number;
+      complete: number;
+      backfill_cursor_updated_at: number | null;
+      backfill_cursor_id: string | null;
+      backfill_started_at: number | null;
+    }>();
 
   // Delta by default. A full mirror is only needed the first time, or after a
-  // period where coverage was not complete. Re-mirroring every session on every
-  // debounce fire would make one message write cost as many row-writes as the
-  // project has sessions.
+  // period where coverage was not complete. The non-delta path is no longer a
+  // permanent over-cap circuit breaker: it advances a resumable keyset cursor by
+  // at most SESSION_INDEX_MAX_ROWS rows per sync until D1 can prove coverage.
   const isDelta = coverage?.complete === 1;
+  const backfillStartedAt = coverage?.backfill_started_at ?? syncedAt;
 
   const rows = isDelta
     ? sql
         .exec(
           `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
                   started_at, ended_at, created_at, updated_at, agent_completed_at,
-                  (SELECT MAX(created_at) FROM chat_messages WHERE session_id = chat_sessions.id) as last_message_at
+                  COALESCE(
+                    archive_last_message_at,
+                    (SELECT MAX(created_at) FROM chat_messages WHERE session_id = chat_sessions.id)
+                  ) as last_message_at
            FROM chat_sessions
            WHERE updated_at >= ?
            ORDER BY updated_at DESC
@@ -101,17 +104,7 @@ export async function syncSessionSummariesToD1(
           maxRows
         )
         .toArray()
-    : sql
-        .exec(
-          `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
-                  started_at, ended_at, created_at, updated_at, agent_completed_at,
-                  (SELECT MAX(created_at) FROM chat_messages WHERE session_id = chat_sessions.id) as last_message_at
-           FROM chat_sessions
-           ORDER BY updated_at DESC
-           LIMIT ?`,
-          maxRows
-        )
-        .toArray();
+    : readBackfillPage(sql, coverage, maxRows);
 
   const statements = rows.map((row) => {
     // Resolved-marker semantics must match getAttentionSummary() exactly — it
@@ -186,31 +179,132 @@ export async function syncSessionSummariesToD1(
   // throws part-way leaves the previous (older but self-consistent) coverage in
   // place. The read path then keeps using the older row until it ages out, or
   // falls back to the DO — it never reads a half-written index as complete.
-  await writeCoverage(env, projectId, syncedAt, sessionCount, true);
+  const lastBackfillRow = isDelta ? null : rows[rows.length - 1];
+  const backfillComplete = isDelta || rows.length < maxRows;
+  const coverageSyncedAt = isDelta ? syncedAt : backfillComplete ? backfillStartedAt : syncedAt;
+  await writeCoverage(env, projectId, {
+    syncedAt: coverageSyncedAt,
+    sessionCount,
+    complete: backfillComplete,
+    backfillCursorUpdatedAt:
+      !isDelta && !backfillComplete ? (lastBackfillRow?.updated_at as number | null) : null,
+    backfillCursorId: !isDelta && !backfillComplete ? (lastBackfillRow?.id as string | null) : null,
+    backfillStartedAt: !isDelta && !backfillComplete ? backfillStartedAt : null,
+    backfillCompletedAt: !isDelta && backfillComplete ? syncedAt : null,
+  });
 
   log.info('session_summaries_synced', {
     projectId,
     count: rows.length,
     sessionCount,
-    mode: isDelta ? 'delta' : 'full',
+    mode: isDelta ? 'delta' : backfillComplete ? 'backfill_complete' : 'backfill_partial',
   });
+}
+
+function readBackfillPage(
+  sql: SqlStorage,
+  coverage:
+    | {
+        backfill_cursor_updated_at: number | null;
+        backfill_cursor_id: string | null;
+      }
+    | null
+    | undefined,
+  maxRows: number
+): Record<string, unknown>[] {
+  const select = `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
+                         started_at, ended_at, created_at, updated_at, agent_completed_at,
+                         COALESCE(
+                           archive_last_message_at,
+                           (SELECT MAX(created_at) FROM chat_messages WHERE session_id = chat_sessions.id)
+                         ) as last_message_at
+                  FROM chat_sessions`;
+  if (coverage?.backfill_cursor_updated_at !== null && coverage?.backfill_cursor_id) {
+    const query = `${select}
+         WHERE updated_at < ?
+            OR (updated_at = ? AND id < ?)
+         ORDER BY updated_at DESC, id DESC
+         LIMIT ?`;
+    return sql
+      .exec(
+        query,
+        coverage.backfill_cursor_updated_at,
+        coverage.backfill_cursor_updated_at,
+        coverage.backfill_cursor_id,
+        maxRows
+      )
+      .toArray();
+  }
+  const query = `${select}
+       ORDER BY updated_at DESC, id DESC
+       LIMIT ?`;
+  return sql.exec(query, maxRows).toArray();
 }
 
 async function writeCoverage(
   env: Env,
   projectId: string,
-  syncedAt: number,
-  sessionCount: number,
-  complete: boolean
+  input: {
+    syncedAt: number;
+    sessionCount: number;
+    complete: boolean;
+    backfillCursorUpdatedAt: number | null;
+    backfillCursorId: string | null;
+    backfillStartedAt: number | null;
+    backfillCompletedAt: number | null;
+  }
 ): Promise<void> {
   await env.DATABASE.prepare(
-    `INSERT INTO session_index_coverage (project_id, synced_at, session_count, complete)
-     VALUES (?, ?, ?, ?)
+    `INSERT INTO session_index_coverage (
+       project_id, synced_at, session_count, complete,
+       backfill_cursor_updated_at, backfill_cursor_id,
+       backfill_started_at, backfill_completed_at
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(project_id) DO UPDATE SET
        synced_at = excluded.synced_at,
        session_count = excluded.session_count,
-       complete = excluded.complete`
+       complete = excluded.complete,
+       backfill_cursor_updated_at = excluded.backfill_cursor_updated_at,
+       backfill_cursor_id = excluded.backfill_cursor_id,
+       backfill_started_at = excluded.backfill_started_at,
+       backfill_completed_at = excluded.backfill_completed_at`
   )
-    .bind(projectId, syncedAt, sessionCount, complete ? 1 : 0)
+    .bind(
+      projectId,
+      input.syncedAt,
+      input.sessionCount,
+      input.complete ? 1 : 0,
+      input.backfillCursorUpdatedAt,
+      input.backfillCursorId,
+      input.backfillStartedAt,
+      input.backfillCompletedAt
+    )
+    .run();
+  await env.DATABASE.prepare(
+    `INSERT INTO project_data_session_index_cursors (
+       project_id, cursor_updated_at, cursor_id, full_sync_started_at,
+       last_progress_at, observed_session_count, complete, updated_at
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(project_id) DO UPDATE SET
+       cursor_updated_at = excluded.cursor_updated_at,
+       cursor_id = excluded.cursor_id,
+       full_sync_started_at = excluded.full_sync_started_at,
+       last_progress_at = excluded.last_progress_at,
+       observed_session_count = excluded.observed_session_count,
+       complete = excluded.complete,
+       updated_at = excluded.updated_at`
+  )
+    .bind(
+      projectId,
+      input.backfillCursorUpdatedAt,
+      input.backfillCursorId,
+      input.backfillStartedAt,
+      input.syncedAt,
+      input.sessionCount,
+      input.complete ? 1 : 0,
+      input.syncedAt
+    )
     .run();
 }

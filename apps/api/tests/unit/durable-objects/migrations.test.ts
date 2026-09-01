@@ -197,6 +197,9 @@ describe('DO Migrations', () => {
           'project_event_delivery_batches',
           'project_event_delivery_attempts',
           'project_event_storage_accounting',
+          'project_data_archive_source_intents',
+          'project_data_archive_target_sessions',
+          'project_data_archive_target_chunks',
         ]) {
           expect(
             db
@@ -234,6 +237,18 @@ describe('DO Migrations', () => {
             'acked_by_type',
             'acked_by_id',
             'acked_by_name',
+          ])
+        );
+        const chatSessionColumns = db.prepare('PRAGMA table_info(chat_sessions)').all() as Array<{
+          name: string;
+        }>;
+        expect(chatSessionColumns.map((column) => column.name)).toEqual(
+          expect.arrayContaining([
+            'archive_last_message_at',
+            'archive_owner_name',
+            'archive_generation',
+            'archive_migration_id',
+            'archive_state',
           ])
         );
       } finally {
@@ -459,7 +474,8 @@ describe('DO Migrations', () => {
       // project event pull ack: 1 replay index from migration 040
       // terminal session reconcile marker: 1 from migration 041
       // chat search materialization state: 1 from migration 042
-      expect(indexes).toHaveLength(87);
+      // terminal archive sharding bridge: 3 from migration 043
+      expect(indexes).toHaveLength(90);
     });
   });
 });

@@ -251,13 +251,57 @@ const mockDoStub = {
   listSessions: vi.fn().mockResolvedValue({ sessions: [], total: 0 }),
   getSession: vi.fn().mockResolvedValue(null),
   getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
+  archiveSourceGetMessages: vi.fn(
+    (
+      owner: { sessionId: string },
+      limit?: number,
+      before?: number | null,
+      after?: number | null,
+      roles?: string[],
+      compact?: boolean,
+      order?: 'asc' | 'desc'
+    ) => mockDoStub.getMessages(owner.sessionId, limit, before, after, roles, compact, order)
+  ),
+  archiveTargetGetMessages: vi.fn(
+    (
+      owner: { sessionId: string },
+      limit?: number,
+      before?: number | null,
+      after?: number | null,
+      roles?: string[],
+      compact?: boolean,
+      order?: 'asc' | 'desc'
+    ) => mockDoStub.getMessages(owner.sessionId, limit, before, after, roles, compact, order)
+  ),
   getArchivedToolPayloads: vi.fn().mockResolvedValue({
     projectId: 'proj-456',
     payloads: [],
     count: 0,
     hasMore: false,
   }),
+  archiveSourceGetArchivedToolPayloads: vi.fn((input: { query: unknown }) =>
+    mockDoStub.getArchivedToolPayloads(input.query)
+  ),
+  archiveTargetGetArchivedToolPayloads: vi.fn((input: { query: unknown }) =>
+    mockDoStub.getArchivedToolPayloads(input.query)
+  ),
+  archiveSourceGetMessageToolContent: vi.fn().mockResolvedValue(null),
+  archiveTargetGetMessageToolContent: vi.fn().mockResolvedValue(null),
+  archiveSourceGetMessageCount: vi.fn().mockReturnValue(0),
+  archiveTargetGetMessageCount: vi.fn().mockReturnValue(0),
   searchMessages: vi.fn().mockReturnValue([]),
+  archiveSourceSearchMessages: vi.fn(
+    (owner: { sessionId: string }, query: string, roles: string[] | null, limit: number) =>
+      mockDoStub.searchMessages(query, owner.sessionId, roles, limit)
+  ),
+  archiveTargetSearchMessages: vi.fn(
+    (owner: { sessionId: string }, query: string, roles: string[] | null, limit: number) =>
+      mockDoStub.searchMessages(query, owner.sessionId, roles, limit)
+  ),
+  archiveTargetSearchProjectMessages: vi.fn(
+    (_owner: unknown, query: string, roles: string[] | null, limit: number) =>
+      mockDoStub.searchMessages(query, null, roles, limit)
+  ),
   linkSessionIdea: vi.fn(),
   unlinkSessionIdea: vi.fn(),
   getIdeasForSession: vi.fn().mockReturnValue([]),
