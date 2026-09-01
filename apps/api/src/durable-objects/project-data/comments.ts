@@ -3,6 +3,7 @@ import { COMMENT_STATUSES } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import { createModuleLogger } from '../../lib/logger';
+import { assertCommentAnchorAvailable } from './archive-sharding';
 import {
   COMMENT_IDEMPOTENCY_CONFLICT,
   COMMENT_LIMIT_EXCEEDED,
@@ -126,7 +127,12 @@ function ensureMessageAnchor(sql: SqlStorage, sessionId: string, messageId: stri
       sessionId
     )
     .toArray()[0];
-  if (!row) throw new CommentNotFoundError('Message');
+  if (!row) {
+    // A migrated transcript is intentionally unavailable in the root DO. Make
+    // that condition explicit instead of presenting it as a missing message.
+    assertCommentAnchorAvailable(sql, sessionId);
+    throw new CommentNotFoundError('Message');
+  }
 }
 
 function nextThreadSequence(sql: SqlStorage, sessionId: string): number {

@@ -518,7 +518,7 @@ export function searchMessages(
 ): SearchResult[] {
   const results: SearchResult[] = [];
 
-  results.push(...searchMessagesFts(sql, query, sessionId, roles, limit));
+  results.push(...searchMessagesFts(sql, query, sessionId, roles, limit, null, false));
 
   if (results.length < limit) {
     const fallbackResults = searchMessagesLike(
@@ -527,13 +527,48 @@ export function searchMessages(
       sessionId,
       roles,
       limit - results.length,
-      true
+      true,
+      null,
+      false
     );
     results.push(...fallbackResults);
   }
 
   results.sort((a, b) => b.createdAt - a.createdAt);
   return results.slice(0, limit);
+}
+
+/** Owner-wide archive search applies authority before LIMIT, never by overscan. */
+export function searchAuthoritativeArchiveMessages(
+  sql: SqlStorage,
+  query: string,
+  ownerName: string,
+  roles: string[] | null = null,
+  limit: number = 10
+): SearchResult[] {
+  const results = searchMessagesFts(sql, query, null, roles, limit, ownerName, false);
+  if (results.length < limit) {
+    results.push(
+      ...searchMessagesLike(sql, query, null, roles, limit - results.length, true, ownerName, false)
+    );
+  }
+  return results.sort((a, b) => b.createdAt - a.createdAt).slice(0, limit);
+}
+
+/** Root-wide search excludes every session with a local archive source intent. */
+export function searchAuthoritativeRootMessages(
+  sql: SqlStorage,
+  query: string,
+  roles: string[] | null = null,
+  limit: number = 10
+): SearchResult[] {
+  const results = searchMessagesFts(sql, query, null, roles, limit, null, true);
+  if (results.length < limit) {
+    results.push(
+      ...searchMessagesLike(sql, query, null, roles, limit - results.length, true, null, true)
+    );
+  }
+  return results.sort((a, b) => b.createdAt - a.createdAt).slice(0, limit);
 }
 
 function mapSearchResultToSearchResult(parsed: SearchResultParsed, query: string): SearchResult {
@@ -553,7 +588,9 @@ function searchMessagesFts(
   query: string,
   sessionId: string | null,
   roles: string[] | null,
-  limit: number
+  limit: number,
+  authoritativeOwnerName: string | null,
+  excludeArchiveSourceIntents: boolean
 ): SearchResult[] {
   const ftsQuery = buildFtsQuery(query);
   if (!ftsQuery) return [];
@@ -570,6 +607,21 @@ function searchMessagesFts(
     const placeholders = roles.map(() => '?').join(', ');
     conditions.push(`m.role IN (${placeholders})`);
     params.push(...roles);
+  }
+
+  if (authoritativeOwnerName) {
+    conditions.push(
+      `EXISTS (SELECT 1 FROM project_data_archive_targets target
+        WHERE target.session_id = m.session_id
+          AND target.owner_name = ? AND target.state = 'authoritative')`
+    );
+    params.push(authoritativeOwnerName);
+  }
+  if (excludeArchiveSourceIntents) {
+    conditions.push(
+      `NOT EXISTS (SELECT 1 FROM project_data_archive_source_intents source
+        WHERE source.session_id = m.session_id)`
+    );
   }
 
   const whereClause = conditions.join(' AND ');
@@ -600,7 +652,9 @@ function searchMessagesLike(
   sessionId: string | null,
   roles: string[] | null,
   limit: number,
-  onlyNonMaterialized: boolean = false
+  onlyNonMaterialized: boolean = false,
+  authoritativeOwnerName: string | null = null,
+  excludeArchiveSourceIntents: boolean = false
 ): SearchResult[] {
   const escapedQuery = query.replace(/[%_\\]/g, '\\$&');
   const conditions: string[] = [
@@ -622,6 +676,21 @@ function searchMessagesLike(
 
   if (onlyNonMaterialized) {
     conditions.push('s.materialized_at IS NULL');
+  }
+
+  if (authoritativeOwnerName) {
+    conditions.push(
+      `EXISTS (SELECT 1 FROM project_data_archive_targets target
+        WHERE target.session_id = m.session_id
+          AND target.owner_name = ? AND target.state = 'authoritative')`
+    );
+    params.push(authoritativeOwnerName);
+  }
+  if (excludeArchiveSourceIntents) {
+    conditions.push(
+      `NOT EXISTS (SELECT 1 FROM project_data_archive_source_intents source
+        WHERE source.session_id = m.session_id)`
+    );
   }
 
   const whereClause = conditions.join(' AND ');

@@ -126,34 +126,34 @@ migrated table or resumer predicate must update the implementation and this tabl
 
 ## Implementation checklist
 
-- [ ] Add additive D1 journal/location/circuit-breaker/index-cursor schema and matching Drizzle types,
+- [x] Add additive D1 journal/location/circuit-breaker/index-cursor schema and matching Drizzle types,
       using the next free migration number at final push.
-- [ ] Add additive ProjectData local intent/target-chunk/seal schema using the next DO migration
+- [x] Add additive ProjectData local intent/target-chunk/seal schema using the next DO migration
       ordinal at final push.
-- [ ] Define generation-safe root/archive-shard/direct-session owner abstractions and deterministic
+- [x] Define generation-safe root/archive-shard/direct-session owner abstractions and deterministic
       owner names; validate project/session/owner/generation on every archive RPC.
-- [ ] Add source RPCs for eligibility/intent, bounded canonical chunks, final fence/version/dependency
+- [x] Add source RPCs for eligibility/intent, bounded canonical chunks, final fence/version/dependency
       verification, atomic payload deletion, frozen intent inspection, and databaseSize diagnostics.
-- [ ] Add target RPCs for prepare, idempotent chunk commit, committed-row hash verification, FTS
+- [x] Add target RPCs for prepare, idempotent chunk commit, committed-row hash verification, FTS
       reconstruction, aggregate seal, re-home/export, and generation mismatch failure.
-- [ ] Implement canonical serialization and SHA-256 for every migrated column, per chunk and aggregate;
+- [x] Implement canonical serialization and SHA-256 for every migrated column, per chunk and aggregate;
       row counts and byte estimates remain diagnostics only.
-- [ ] Persist deterministic immutable R2 recovery chunks/manifest before source delete.
-- [ ] Implement an external scheduled Worker coordinator with D1 CAS journal/leases, bounded candidates,
+- [x] Persist deterministic immutable R2 recovery chunks/manifest before source delete.
+- [x] Implement an external scheduled Worker coordinator with D1 CAS journal/leases, bounded candidates,
       retries, poison-candidate escape, circuit breaker, freeze/forward-fix recovery, root capacity-gated
       copy-back, and clean-owner re-home fallback. Default disabled.
-- [ ] Wire exact transcript/count/tool-archive reads through D1 locations; fence writes/wake paths in D1
+- [x] Wire exact transcript/count/tool-archive reads through D1 locations; fence writes/wake paths in D1
       and in source-local state; fail closed on transitional/missing-generation mismatches.
-- [ ] Add recovery-fence checks to initial/reclaimed snapshot claim, source authorization, every
+- [x] Add recovery-fence checks to initial/reclaimed snapshot claim, source authorization, every
       TaskRunner resumer step/transition, and final ProjectData wake, with a machine-checked inventory.
-- [ ] Replace the permanent D1 session-index cap with bounded resumable keyset completion and preserve
+- [x] Replace the permanent D1 session-index cap with bounded resumable keyset completion and preserve
       explicit eventual/partial list semantics without owner fanout.
-- [ ] Make search return explicit partial-plane metadata and bound archive-owner fanout by config.
-- [ ] Add a deploy-time compatibility guard that blocks a build without the required routing version
+- [x] Make search return explicit partial-plane metadata and bound archive-owner fanout by config.
+- [x] Add a deploy-time compatibility guard that blocks a build without the required routing version
       once authoritative non-root pointers exist.
-- [ ] Document every new flag/budget/default and the migration-disabled operational/rollback/DR model
+- [x] Document every new flag/budget/default and the migration-disabled operational/rollback/DR model
       in env reference, `.env.example`, architecture/configuration docs, and relevant project docs.
-- [ ] Create/link a SAM Idea for active-session one-session `SessionData` direct ownership if it cannot
+- [x] Create/link a SAM Idea for active-session one-session `SessionData` direct ownership if it cannot
       safely fit this PR.
 - [ ] Run full validation and the Cloudflare, security, test, constitution, env/doc, task-completion,
       and iterative label-triggered CodeRabbit review gates. Address every correctness finding.
@@ -181,8 +181,8 @@ migrated table or resumer predicate must update the implementation and this tabl
 - Exact transcript reads use one authoritative owner. Exact writes fail closed once migration begins.
   List/search explicitly disclose eventual/partial semantics and never fan out to thousands of owners.
 - Re-home/repack works. Rollback freezes and forward-fixes; root copy-back requires the configured
-  databaseSize capacity gate, otherwise data moves to a clean archive owner. Immutable R2 recovery
-  evidence exists before source deletion.
+  databaseSize capacity gate, otherwise data moves only to the caller's explicit clean archive owner.
+  Immutable R2 recovery evidence exists before source deletion.
 - The D1 session index can converge beyond the old cap through bounded pages and reports complete only
   after all pages commit.
 - Workers-runtime tests cover source `sql.databaseSize` reclaim after finalization.

@@ -954,6 +954,75 @@ describe('ProjectData storage safety firebreak', () => {
     const disabled = await stub.runGroupedFtsCleanup();
     expect(disabled?.terminationReason).toBe('disabled');
 
+    const fencedCleanup = await runInDurableObject(stub, async (_instance, state) => {
+      const now = Date.now();
+      state.storage.sql.exec(
+        `INSERT INTO project_data_archive_source_intents
+         (session_id, project_id, migration_id, target_owner_name, target_generation,
+          lease_token, lease_epoch, lease_expires_at, terminal_version, state,
+          source_database_size_before, created_at, updated_at)
+         VALUES (?, ?, 'cleanup-source-fence', ?, 1, 'lease', 1, ?, 'terminal',
+                 'migrating', ?, ?, ?)`,
+        seeded.sessionId,
+        projectId,
+        `project-data-archive:${projectId}:0`,
+        now + 60_000,
+        state.storage.sql.databaseSize,
+        now,
+        now
+      );
+      state.storage.sql.exec(
+        `INSERT INTO project_data_archive_targets
+         (session_id, project_id, migration_id, owner_name, generation, state,
+          terminal_version, lease_token, lease_epoch, lease_expires_at, created_at, updated_at)
+         VALUES (?, ?, 'cleanup-target-fence', ?, 1, 'copying', 'terminal',
+                 'lease', 1, ?, ?, ?)`,
+        seeded.sessionId,
+        projectId,
+        `project-data-archive:${projectId}:0`,
+        now + 60_000,
+        now,
+        now
+      );
+      const config = {
+        ...resolveStorageSafetyConfig(testEnv),
+        limitBytes: Math.ceil(state.storage.sql.databaseSize / 0.92),
+        groupedFtsCleanupEnabled: true,
+        groupedFtsCleanupTriggerRatio: 0.9,
+        groupedFtsCleanupTargetRatio: 0.85,
+        groupedFtsCleanupBatchSessions: 1,
+        groupedFtsCleanupBatchRows: 20,
+        groupedFtsCleanupBatchBytes: 1_000_000,
+        groupedFtsCleanupMinSessionAgeMs: 7 * 24 * 60 * 60 * 1000,
+        groupedFtsCleanupWeakReclaimBytes: 0,
+      };
+      const bothFenced = await runProjectDataGroupedFtsCleanup(
+        state.storage.sql,
+        testEnv,
+        projectId,
+        config,
+        { allowStart: true }
+      );
+      state.storage.sql.exec(
+        `DELETE FROM project_data_archive_source_intents WHERE session_id = ?`,
+        seeded.sessionId
+      );
+      const targetFenced = await runProjectDataGroupedFtsCleanup(
+        state.storage.sql,
+        testEnv,
+        projectId,
+        config,
+        { allowStart: true }
+      );
+      state.storage.sql.exec(
+        `DELETE FROM project_data_archive_targets WHERE session_id = ?`,
+        seeded.sessionId
+      );
+      return { bothFenced, targetFenced };
+    });
+    expect(fencedCleanup.bothFenced?.groupedRowsDeleted).toBe(0);
+    expect(fencedCleanup.targetFenced?.groupedRowsDeleted).toBe(0);
+
     const cleanupAttempt = await runInDurableObject(stub, async (_instance, state) => {
       await state.storage.deleteAlarm();
       const triggerLimit = Math.ceil(state.storage.sql.databaseSize / 0.92);
@@ -1157,7 +1226,13 @@ describe('ProjectData storage safety firebreak', () => {
 
     const sessionId = await runInDurableObject(stub, async (instance, state) => {
       const id = await instance.createSession(null, 'Grouped FTS stale overload guard');
-      await instance.persistMessage(id, 'assistant', `stale-overload ${'s'.repeat(64 * 1024)}`, null, null);
+      await instance.persistMessage(
+        id,
+        'assistant',
+        `stale-overload ${'s'.repeat(64 * 1024)}`,
+        null,
+        null
+      );
       await instance.stopSession(id);
       state.storage.sql.exec(
         `UPDATE chat_sessions SET updated_at = ? WHERE id = ?`,

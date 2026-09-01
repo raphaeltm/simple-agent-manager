@@ -6,7 +6,10 @@ import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { getTaskRuntimeLiveness } from '../../src/scheduled/stuck-tasks';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
-import { isSessionRecoverySourceTaskGuardValid } from '../../src/services/session-recovery-authority';
+import {
+  isSessionRecoverySourceTaskGuardValid,
+  isSessionRecoveryTaskAuthorized,
+} from '../../src/services/session-recovery-authority';
 import { claimSessionSnapshotRecovery } from '../../src/services/session-snapshot-recovery-lifecycle';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
@@ -30,6 +33,7 @@ function seedRecoveryFixture(sqlite: Database.Database): void {
     schema.sessionSnapshots,
     schema.agentProfiles,
     schema.nodes,
+    schema.projectDataSessionLocations,
   ]);
   sqlite.exec(`
     INSERT INTO users (id, name, email, github_id)
@@ -161,6 +165,55 @@ describe('session recovery handoff', () => {
     vi.clearAllMocks();
     ensureTaskRunnerStartedMock.mockResolvedValue(false);
     startTaskRunnerDOMock.mockResolvedValue(undefined);
+  });
+
+  it('revokes and restores TaskRunner authority with the exact ProjectData owner fence', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedRecoveryFixture(sqlite);
+      const database = createSqliteD1(sqlite);
+      const wake = await expectWakingRecovery(database);
+      const input = {
+        recoveryTaskId: wake.taskId,
+        sourceTaskId: 'parent-1',
+        projectId: 'project-1',
+        chatSessionId: 'chat-1',
+      };
+
+      await expect(isSessionRecoveryTaskAuthorized(database, input)).resolves.toBe(true);
+      sqlite
+        .prepare(
+          `INSERT INTO project_data_session_locations
+           (project_id, session_id, state, owner_kind, owner_name, generation,
+            migration_id, routing_version, updated_at)
+           VALUES ('project-1', 'chat-1', 'migrating', 'root', 'project-1', 0,
+                   'migration-1', 1, 1)`
+        )
+        .run();
+      await expect(isSessionRecoveryTaskAuthorized(database, input)).resolves.toBe(false);
+
+      sqlite
+        .prepare(
+          `UPDATE project_data_session_locations
+              SET state = 'root', migration_id = NULL
+            WHERE project_id = 'project-1' AND session_id = 'chat-1'`
+        )
+        .run();
+      await expect(isSessionRecoveryTaskAuthorized(database, input)).resolves.toBe(true);
+
+      sqlite.prepare(`UPDATE tasks SET status = 'completed' WHERE id = 'parent-1'`).run();
+      await expect(isSessionRecoveryTaskAuthorized(database, input)).resolves.toBe(false);
+      markRecoveryTaskRunning(sqlite, wake.taskId);
+      sqlite
+        .prepare(
+          `UPDATE session_snapshots SET recovery_status = 'restored'
+           WHERE chat_session_id = 'chat-1'`
+        )
+        .run();
+      await expect(isSessionRecoveryTaskAuthorized(database, input)).resolves.toBe(true);
+    } finally {
+      sqlite.close();
+    }
   });
 
   it('atomically transfers the session binding to a recovery task linked to its source', async () => {
@@ -317,7 +370,9 @@ describe('session recovery handoff', () => {
         superseded_by_task_id: thirdWake.taskId,
       });
       expect(
-        sqlite.prepare(`SELECT status, chat_session_id FROM tasks WHERE id = ?`).get(thirdWake.taskId)
+        sqlite
+          .prepare(`SELECT status, chat_session_id FROM tasks WHERE id = ?`)
+          .get(thirdWake.taskId)
       ).toMatchObject({ status: 'queued', chat_session_id: 'chat-1' });
 
       markWorkspaceDeleted(sqlite);

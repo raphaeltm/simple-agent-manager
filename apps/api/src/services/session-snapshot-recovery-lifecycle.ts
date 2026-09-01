@@ -8,6 +8,7 @@ import {
   isNull,
   lt,
   lte,
+  not,
   notInArray,
   or,
   sql,
@@ -18,6 +19,7 @@ import { alias } from 'drizzle-orm/sqlite-core';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { PROJECT_DATA_ARCHIVE_ROUTING_VERSION } from './project-data-archive-types';
 import type { SessionRecoverySourceTaskGuard } from './session-recovery-authority';
 import {
   DEFAULT_SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS,
@@ -160,6 +162,31 @@ function restorableSnapshotCondition() {
   );
 }
 
+/** Atomic D1 wake fence: absent is legacy root; only an exact root row is writable. */
+function projectDataArchiveWakeCondition(db: Db) {
+  return not(
+    exists(
+      db
+        .select({ sessionId: schema.projectDataSessionLocations.sessionId })
+        .from(schema.projectDataSessionLocations)
+        .where(
+          and(
+            eq(schema.projectDataSessionLocations.projectId, schema.sessionSnapshots.projectId),
+            eq(schema.projectDataSessionLocations.sessionId, schema.sessionSnapshots.chatSessionId),
+            sql`NOT (
+              ${schema.projectDataSessionLocations.state} = 'root'
+              AND ${schema.projectDataSessionLocations.ownerKind} = 'root'
+              AND ${schema.projectDataSessionLocations.ownerName} = ${schema.sessionSnapshots.projectId}
+              AND ${schema.projectDataSessionLocations.generation} = 0
+              AND ${schema.projectDataSessionLocations.migrationId} IS NULL
+              AND ${schema.projectDataSessionLocations.routingVersion} = ${PROJECT_DATA_ARCHIVE_ROUTING_VERSION}
+            )`
+          )
+        )
+    )
+  );
+}
+
 function sessionRecoveryClaimLeaseMs(env: Env): number {
   return parsePositiveInt(
     env.SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS,
@@ -206,7 +233,8 @@ export async function claimSessionSnapshotRecovery(
           isNull(schema.sessionSnapshots.recoveryStatus),
           eq(schema.sessionSnapshots.recoveryStatus, 'failed')
         ),
-        sourceTaskGuardCondition(db, input.sourceTaskGuard)
+        sourceTaskGuardCondition(db, input.sourceTaskGuard),
+        projectDataArchiveWakeCondition(db)
       )
     );
   if ((result.meta.changes ?? 0) > 0) {
@@ -222,6 +250,7 @@ export async function claimSessionSnapshotRecovery(
       recoveryTaskId: schema.sessionSnapshots.recoveryTaskId,
       recoveryAttempts: schema.sessionSnapshots.recoveryAttempts,
       recoveryClaimedAt: schema.sessionSnapshots.recoveryClaimedAt,
+      projectId: schema.sessionSnapshots.projectId,
     })
     .from(schema.sessionSnapshots)
     .where(
@@ -237,7 +266,19 @@ export async function claimSessionSnapshotRecovery(
     }
     const staleBefore = new Date(now.getTime() - sessionRecoveryClaimLeaseMs(env)).toISOString();
     const claimIsStale = !snapshot.recoveryClaimedAt || snapshot.recoveryClaimedAt <= staleBefore;
-    if (!claimIsStale) return { status: 'waking', taskId: snapshot.recoveryTaskId };
+    if (!claimIsStale) {
+      if (
+        !snapshot.projectId ||
+        !(await isProjectDataSessionWakeAllowed(
+          env.DATABASE,
+          snapshot.projectId,
+          input.chatSessionId
+        ))
+      ) {
+        return { status: 'unavailable', reason: 'session_archive_fenced' };
+      }
+      return { status: 'waking', taskId: snapshot.recoveryTaskId };
+    }
 
     const recoveryTask = await db
       .select({ status: schema.tasks.status })
@@ -248,17 +289,21 @@ export async function claimSessionSnapshotRecovery(
       recoveryTask &&
       ['queued', 'delegated', 'in_progress', 'awaiting_followup'].includes(recoveryTask.status)
     ) {
-      await db
+      const refreshedClaim = await db
         .update(schema.sessionSnapshots)
         .set({ recoveryClaimedAt: nowIso, updatedAt: nowIso })
         .where(
           and(
             eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId),
             eq(schema.sessionSnapshots.recoveryStatus, 'waking'),
-            eq(schema.sessionSnapshots.recoveryTaskId, snapshot.recoveryTaskId)
+            eq(schema.sessionSnapshots.recoveryTaskId, snapshot.recoveryTaskId),
+            projectDataArchiveWakeCondition(db)
           )
         );
-      return { status: 'waking', taskId: snapshot.recoveryTaskId };
+      if ((refreshedClaim.meta.changes ?? 0) > 0) {
+        return { status: 'waking', taskId: snapshot.recoveryTaskId };
+      }
+      return { status: 'unavailable', reason: 'session_archive_fenced' };
     }
     if (snapshot.recoveryAttempts < maxAttempts) {
       const reclaimed = await db
@@ -280,7 +325,8 @@ export async function claimSessionSnapshotRecovery(
               lte(schema.sessionSnapshots.recoveryClaimedAt, staleBefore)
             ),
             lt(schema.sessionSnapshots.recoveryAttempts, maxAttempts),
-            sourceTaskGuardCondition(db, input.sourceTaskGuard)
+            sourceTaskGuardCondition(db, input.sourceTaskGuard),
+            projectDataArchiveWakeCondition(db)
           )
         );
       if ((reclaimed.meta.changes ?? 0) > 0) {
@@ -291,9 +337,29 @@ export async function claimSessionSnapshotRecovery(
         .from(schema.sessionSnapshots)
         .where(eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId))
         .get();
-      if (winner?.taskId) return { status: 'waking', taskId: winner.taskId };
+      if (winner?.taskId) {
+        const project = await db
+          .select({ projectId: schema.sessionSnapshots.projectId })
+          .from(schema.sessionSnapshots)
+          .where(eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId))
+          .get();
+        if (
+          !project?.projectId ||
+          !(await isProjectDataSessionWakeAllowed(
+            env.DATABASE,
+            project.projectId,
+            input.chatSessionId
+          ))
+        ) {
+          return { status: 'unavailable', reason: 'session_archive_fenced' };
+        }
+        return { status: 'waking', taskId: winner.taskId };
+      }
     }
   }
+  const archiveWakeAllowed = snapshot?.projectId
+    ? await isProjectDataSessionWakeAllowed(env.DATABASE, snapshot.projectId, input.chatSessionId)
+    : !snapshot;
   const reason = !snapshot
     ? 'snapshot_missing'
     : Date.parse(snapshot.expiresAt) <= now.getTime()
@@ -302,9 +368,11 @@ export async function claimSessionSnapshotRecovery(
         ? 'snapshot_not_complete'
         : snapshot.recoveryAttempts >= maxAttempts
           ? 'recovery_attempts_exhausted'
-          : !(await sourceTaskGuardIsValid(db, input.sourceTaskGuard))
-            ? 'source_task_not_wakeable'
-            : 'snapshot_not_wakeable';
+          : !archiveWakeAllowed
+            ? 'session_archive_fenced'
+            : !(await sourceTaskGuardIsValid(db, input.sourceTaskGuard))
+              ? 'source_task_not_wakeable'
+              : 'snapshot_not_wakeable';
   return { status: 'unavailable', reason };
 }
 
@@ -345,6 +413,34 @@ export async function hasRestorableSleepingSessionSnapshot(
   return Boolean(row);
 }
 
+export async function isProjectDataSessionWakeAllowed(
+  database: D1Database,
+  projectId: string,
+  chatSessionId: string
+): Promise<boolean> {
+  try {
+    const row = await database
+      .prepare(
+        `SELECT state, owner_kind, owner_name, generation, migration_id, routing_version
+           FROM project_data_session_locations
+          WHERE project_id = ? AND session_id = ?`
+      )
+      .bind(projectId, chatSessionId)
+      .first<Record<string, unknown>>();
+    if (!row) return true;
+    return (
+      row.state === 'root' &&
+      row.owner_kind === 'root' &&
+      row.owner_name === projectId &&
+      row.generation === 0 &&
+      row.migration_id === null &&
+      row.routing_version === PROJECT_DATA_ARCHIVE_ROUTING_VERSION
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function hasAuthorizedRestorableSnapshotWakeClaim(
   database: D1Database,
   input: {
@@ -356,6 +452,9 @@ export async function hasAuthorizedRestorableSnapshotWakeClaim(
   }
 ): Promise<boolean> {
   const now = input.now ?? new Date();
+  if (!(await isProjectDataSessionWakeAllowed(database, input.projectId, input.chatSessionId))) {
+    return false;
+  }
   const row = await database
     .prepare(
       `SELECT 1 AS found
@@ -510,7 +609,11 @@ export async function markSessionSnapshotAwakeInPlace(
       updatedAt: now,
     })
     .where(
-      and(eq(schema.sessionSnapshots.chatSessionId, chatSessionId), restorableSnapshotCondition())
+      and(
+        eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
+        restorableSnapshotCondition(),
+        projectDataArchiveWakeCondition(db)
+      )
     );
 }
 

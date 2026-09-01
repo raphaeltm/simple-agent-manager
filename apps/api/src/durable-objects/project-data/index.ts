@@ -23,10 +23,13 @@ import { DurableObject } from 'cloudflare:workers';
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
+import { assertProjectDataSessionWriteAllowed } from '../../services/project-data-archive-routing';
+import { resolveArchiveShardingConfig } from '../../services/project-data-archive-types';
 import { runMigrations } from '../migrations';
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
 import { computeProjectDataAlarmTime } from './alarm-schedule';
+import * as archiveSharding from './archive-sharding';
 import * as attention from './attention';
 import * as attentionExpiry from './attention-expiry';
 import * as commands from './commands';
@@ -95,6 +98,96 @@ export class ProjectData extends DurableObject<Env> {
     return this.cachedProjectId;
   }
 
+  private assertArchiveOwnerName(expectedOwnerName: string): void {
+    if (this.ctx.id.name !== expectedOwnerName) {
+      throw new Error('ProjectData archive RPC reached an unexpected Durable Object owner');
+    }
+  }
+
+  private assertArchiveChunkRpcLimits(
+    maxRows: number,
+    maxBytes: number,
+    allowZeroRows = false
+  ): void {
+    const config = resolveArchiveShardingConfig(this.env);
+    if (
+      !Number.isSafeInteger(maxRows) ||
+      (allowZeroRows ? maxRows < 0 : maxRows <= 0) ||
+      maxRows > config.chunkMaxRows ||
+      !Number.isSafeInteger(maxBytes) ||
+      maxBytes <= 0 ||
+      maxBytes > config.chunkMaxBytes
+    ) {
+      throw new Error('ProjectData archive chunk RPC exceeds configured protocol limits');
+    }
+  }
+
+  private assertArchiveManifestRpcLimit(maxEntries: number): void {
+    const config = resolveArchiveShardingConfig(this.env);
+    if (
+      !Number.isSafeInteger(maxEntries) ||
+      maxEntries <= 0 ||
+      maxEntries > config.maxChunksPerSweep
+    ) {
+      throw new Error('ProjectData archive manifest RPC exceeds configured protocol limits');
+    }
+  }
+
+  private assertArchiveTargetIdentity(
+    fence: Pick<archiveSharding.ArchiveRpcFence, 'projectId' | 'ownerName' | 'generation'>,
+    allowInitialize = false
+  ): void {
+    this.assertArchiveOwnerName(fence.ownerName);
+    const rootTarget = fence.ownerName === fence.projectId && fence.generation === 0;
+    const prefix = `project-data-archive:${fence.projectId}:`;
+    const shardText = fence.ownerName.startsWith(prefix)
+      ? fence.ownerName.slice(prefix.length)
+      : '';
+    const archiveTarget =
+      fence.generation > 0 &&
+      /^(0|[1-9]\d*)$/.test(shardText) &&
+      Number.isSafeInteger(Number(shardText));
+    if (!rootTarget && !archiveTarget) {
+      throw new Error('ProjectData archive target project/owner/generation identity is invalid');
+    }
+    const existingProjectId = this.getProjectId();
+    if (existingProjectId && existingProjectId !== fence.projectId) {
+      throw new Error('ProjectData archive target project identity mismatch');
+    }
+    if (!existingProjectId) {
+      if (!allowInitialize) {
+        throw new Error('ProjectData archive target project identity is missing');
+      }
+      this.ensureProjectId(fence.projectId);
+    }
+  }
+
+  private assertArchiveOwnerPlane(expected: {
+    projectId: string;
+    ownerName: string;
+    routingVersion: number;
+  }): void {
+    this.assertArchiveOwnerName(expected.ownerName);
+    const prefix = `project-data-archive:${expected.projectId}:`;
+    const shardText = expected.ownerName.startsWith(prefix)
+      ? expected.ownerName.slice(prefix.length)
+      : '';
+    if (
+      expected.routingVersion !== 1 ||
+      !/^(0|[1-9]\d*)$/.test(shardText) ||
+      !Number.isSafeInteger(Number(shardText)) ||
+      this.getProjectId() !== expected.projectId
+    ) {
+      throw new Error('ProjectData archive owner-wide read authority is invalid');
+    }
+  }
+
+  private assertRootOwnerPlane(projectId: string): void {
+    if (this.ctx.id.name !== projectId || this.getProjectId() !== projectId) {
+      throw new Error('ProjectData root owner-wide read authority is invalid');
+    }
+  }
+
   /**
    * Persist this DO's projectId so it can identify itself with no inbound RPC.
    *
@@ -128,6 +221,7 @@ export class ProjectData extends DurableObject<Env> {
     if (this.cachedProjectId === projectId) return;
     const existing = this.getProjectId();
     if (existing) {
+      if (existing !== projectId) throw new Error('ProjectData project identity mismatch');
       this.cachedProjectId = existing;
       return;
     }
@@ -238,6 +332,7 @@ export class ProjectData extends DurableObject<Env> {
     taskId: string,
     options?: sessions.WakeSessionOptions
   ): Promise<boolean> {
+    archiveSharding.assertRootSessionWriteAllowed(this.sql, sessionId);
     const updated = sessions.wakeSession(this.sql, sessionId, workspaceId, taskId, options);
     if (updated) {
       this.scheduleSummarySync();
@@ -319,7 +414,7 @@ export class ProjectData extends DurableObject<Env> {
     toolMetadata: string | null,
     messageId?: string
   ): Promise<string> {
-    return messagePersistence.persistMessageWithSideEffects(
+    return messagePersistence.persistRootMessageWithSideEffects(
       this.sql,
       this.env,
       this.messagePersistenceHooks(),
@@ -343,7 +438,7 @@ export class ProjectData extends DurableObject<Env> {
       origin?: string | null;
     }>
   ): Promise<messagePersistence.MessageBatchPersistenceResult> {
-    return messagePersistence.persistMessageBatchWithSideEffects(
+    return messagePersistence.persistRootMessageBatchWithSideEffects(
       this.sql,
       this.env,
       this.messagePersistenceHooks(),
@@ -353,6 +448,10 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   async acceptPromptDelivery(input: AcceptPromptDeliveryInput): Promise<AcceptedPromptDelivery> {
+    const projectId = this.getProjectId();
+    if (!projectId) throw new Error('ProjectData prompt delivery project identity is missing');
+    await assertProjectDataSessionWriteAllowed(this.env.DATABASE, projectId, input.targetSessionId);
+    archiveSharding.assertRootSessionWriteAllowed(this.sql, input.targetSessionId);
     return durability.acceptPromptDelivery(this.sql, this.env, this.durabilityHooks(), input);
   }
 
@@ -396,8 +495,17 @@ export class ProjectData extends DurableObject<Env> {
       {
         getProjectId: () => this.getProjectId(),
         transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
-        acceptPromptDelivery: (input) =>
-          durability.acceptPromptDelivery(this.sql, this.env, this.durabilityHooks(), input),
+        acceptPromptDelivery: async (input) => {
+          const projectId = this.getProjectId();
+          if (!projectId) throw new Error('ProjectData task-wait project identity is missing');
+          await assertProjectDataSessionWriteAllowed(
+            this.env.DATABASE,
+            projectId,
+            input.targetSessionId
+          );
+          archiveSharding.assertRootSessionWriteAllowed(this.sql, input.targetSessionId);
+          return durability.acceptPromptDelivery(this.sql, this.env, this.durabilityHooks(), input);
+        },
         recalculateAlarm: () => this.recalculateAlarm(),
       },
       { childTaskId }
@@ -432,7 +540,7 @@ export class ProjectData extends DurableObject<Env> {
     };
   }
 
-  private messagePersistenceHooks(): messagePersistence.MessagePersistenceHooks {
+  protected messagePersistenceHooks(): messagePersistence.MessagePersistenceHooks {
     return {
       recalculateAlarm: () => this.recalculateAlarm(),
       scheduleSummarySync: () => this.scheduleSummarySync(),
@@ -487,6 +595,7 @@ export class ProjectData extends DurableObject<Env> {
     compact: boolean = false,
     order: 'asc' | 'desc' = 'desc'
   ) {
+    archiveSharding.assertRootSessionReadAllowed(this.sql, sessionId);
     const compactOptions = compact ? messages.resolveCompactMessageOptions(this.env) : undefined;
     return messages.getMessages(
       this.sql,
@@ -505,6 +614,7 @@ export class ProjectData extends DurableObject<Env> {
     sessionId: string,
     messageId: string
   ): Promise<toolPayloadArchive.MessageToolContentResult | null> {
+    archiveSharding.assertRootSessionReadAllowed(this.sql, sessionId);
     const inlineContent = messages.getMessageToolContent(this.sql, sessionId, messageId);
     if (inlineContent === null) return null;
     if (inlineContent.length > 0) {
@@ -523,6 +633,7 @@ export class ProjectData extends DurableObject<Env> {
   async getArchivedToolPayloads(
     input: toolPayloadArchive.ArchivedToolPayloadQuery
   ): Promise<toolPayloadArchive.ArchivedToolPayloadListResult> {
+    if (input.sessionId) archiveSharding.assertRootSessionReadAllowed(this.sql, input.sessionId);
     const projectId = this.getProjectId();
     if (!projectId) {
       return { projectId: '', payloads: [], count: 0, hasMore: false };
@@ -531,7 +642,467 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   getMessageCount(sessionId: string, roles?: string[]): number {
+    archiveSharding.assertRootSessionReadAllowed(this.sql, sessionId);
     return messages.getMessageCount(this.sql, sessionId, roles);
+  }
+
+  async archiveInspectSourceEligibility(
+    projectId: string,
+    sessionId: string,
+    now: number,
+    terminalGraceMs: number
+  ): Promise<archiveSharding.SourceArchiveEligibility> {
+    if (this.getProjectId() !== projectId || this.ctx.id.name !== projectId) {
+      throw new Error('ProjectData archive source project/owner mismatch');
+    }
+    return archiveSharding.inspectSourceArchiveEligibility(
+      this.sql,
+      this.env.DATABASE,
+      projectId,
+      sessionId,
+      now,
+      terminalGraceMs
+    );
+  }
+
+  archiveGetSourceSessionAnchor(projectId: string, sessionId: string): Record<string, unknown> {
+    if (this.getProjectId() !== projectId || this.ctx.id.name !== projectId) {
+      throw new Error('ProjectData archive source project/owner mismatch');
+    }
+    return {
+      ...archiveSharding.getArchiveSessionAnchor(this.sql, sessionId),
+      project_id: projectId,
+    };
+  }
+
+  archiveEstablishSourceIntent(fence: archiveSharding.ArchiveRpcFence): void {
+    if (this.getProjectId() !== fence.projectId || this.ctx.id.name !== fence.projectId) {
+      throw new Error('ProjectData archive source project/owner mismatch');
+    }
+    archiveSharding.establishSourceIntent(
+      this.sql,
+      (callback) => this.ctx.storage.transactionSync(callback),
+      fence,
+      this.sql.databaseSize
+    );
+  }
+
+  archiveReadSourceChunk(
+    fence: archiveSharding.ArchiveRpcFence,
+    table: archiveSharding.ArchiveChunk['table'],
+    chunkIndex: number,
+    afterKey: string | null,
+    maxRows: number,
+    maxBytes: number
+  ): Promise<archiveSharding.ArchiveChunk> {
+    if (this.getProjectId() !== fence.projectId || this.ctx.id.name !== fence.projectId) {
+      throw new Error('ProjectData archive source project/owner mismatch');
+    }
+    this.assertArchiveChunkRpcLimits(maxRows, maxBytes);
+    return archiveSharding.readSourceArchiveChunk(
+      this.sql,
+      fence,
+      table,
+      chunkIndex,
+      afterKey,
+      maxRows,
+      maxBytes
+    );
+  }
+
+  archiveGetRehomeSourceSessionAnchor(
+    fence: archiveSharding.ArchiveRehomeSourceFence
+  ): Record<string, unknown> {
+    if (this.getProjectId() !== fence.projectId || this.ctx.id.name !== fence.sourceOwnerName) {
+      throw new Error('ProjectData archive rehome source project/owner mismatch');
+    }
+    return {
+      ...archiveSharding.getArchiveSessionAnchor(this.sql, fence.sessionId),
+      project_id: fence.projectId,
+    };
+  }
+
+  archiveEstablishRehomeSourceIntent(fence: archiveSharding.ArchiveRehomeSourceFence): void {
+    if (this.getProjectId() !== fence.projectId || this.ctx.id.name !== fence.sourceOwnerName) {
+      throw new Error('ProjectData archive rehome source project/owner mismatch');
+    }
+    archiveSharding.establishArchiveRehomeSourceIntent(
+      this.sql,
+      (callback) => this.ctx.storage.transactionSync(callback),
+      fence
+    );
+  }
+
+  archiveReadRehomeSourceChunk(
+    fence: archiveSharding.ArchiveRehomeSourceFence,
+    table: archiveSharding.ArchiveChunk['table'],
+    chunkIndex: number,
+    afterKey: string | null,
+    maxRows: number,
+    maxBytes: number
+  ): Promise<archiveSharding.ArchiveChunk> {
+    if (this.getProjectId() !== fence.projectId || this.ctx.id.name !== fence.sourceOwnerName) {
+      throw new Error('ProjectData archive rehome source project/owner mismatch');
+    }
+    this.assertArchiveChunkRpcLimits(maxRows, maxBytes);
+    return archiveSharding.readArchiveRehomeSourceChunk(
+      this.sql,
+      fence,
+      table,
+      chunkIndex,
+      afterKey,
+      maxRows,
+      maxBytes
+    );
+  }
+
+  archivePrepareTarget(
+    fence: archiveSharding.ArchiveRpcFence,
+    sessionAnchor: Record<string, unknown>
+  ): void {
+    this.assertArchiveTargetIdentity(fence, true);
+    archiveSharding.prepareArchiveTarget(
+      this.sql,
+      (callback) => this.ctx.storage.transactionSync(callback),
+      fence,
+      sessionAnchor
+    );
+  }
+
+  archiveCommitTargetChunk(
+    fence: archiveSharding.ArchiveRpcFence,
+    chunk: archiveSharding.ArchiveChunk,
+    r2Key: string
+  ): Promise<void> {
+    this.assertArchiveTargetIdentity(fence);
+    this.assertArchiveChunkRpcLimits(chunk.rowCount, chunk.canonicalBytes, true);
+    return archiveSharding.commitArchiveTargetChunk(
+      this.sql,
+      (callback) => this.ctx.storage.transactionSync(callback),
+      fence,
+      chunk,
+      r2Key
+    );
+  }
+
+  archiveResetTargetFromRecovery(fence: archiveSharding.ArchiveRpcFence): void {
+    this.assertArchiveTargetIdentity(fence);
+    archiveSharding.resetArchiveTargetFromRecovery(
+      this.sql,
+      (callback) => this.ctx.storage.transactionSync(callback),
+      fence
+    );
+  }
+
+  archiveBeginTargetSealing(fence: archiveSharding.ArchiveRpcFence): void {
+    this.assertArchiveTargetIdentity(fence);
+    archiveSharding.beginArchiveTargetSealing(
+      this.sql,
+      (callback) => this.ctx.storage.transactionSync(callback),
+      fence
+    );
+  }
+
+  archiveVerifyNextTargetChunk(
+    fence: archiveSharding.ArchiveRpcFence
+  ): Promise<{ done: boolean; verified: boolean }> {
+    this.assertArchiveTargetIdentity(fence);
+    return archiveSharding.verifyNextArchiveTargetChunk(
+      this.sql,
+      (callback) => this.ctx.storage.transactionSync(callback),
+      fence
+    );
+  }
+
+  archiveSealTarget(
+    fence: archiveSharding.ArchiveRpcFence,
+    aggregateHash: string,
+    manifestR2Key: string
+  ): Promise<void> {
+    this.assertArchiveTargetIdentity(fence);
+    return archiveSharding.sealArchiveTarget(
+      this.sql,
+      (callback) => this.ctx.storage.transactionSync(callback),
+      fence,
+      aggregateHash,
+      manifestR2Key
+    );
+  }
+
+  archiveGetNextTargetManifestPage(fence: archiveSharding.ArchiveRpcFence, maxEntries: number) {
+    this.assertArchiveTargetIdentity(fence);
+    this.assertArchiveManifestRpcLimit(maxEntries);
+    return archiveSharding.getNextArchiveTargetManifestPage(this.sql, fence, maxEntries);
+  }
+
+  archiveCommitTargetManifestPage(
+    fence: archiveSharding.ArchiveRpcFence,
+    page: Omit<archiveSharding.ArchiveManifestPage, 'done'>,
+    pageR2Key: string,
+    aggregateHash: string
+  ): Promise<void> {
+    this.assertArchiveTargetIdentity(fence);
+    this.assertArchiveManifestRpcLimit(page.entries.length);
+    return archiveSharding.commitArchiveTargetManifestPage(
+      this.sql,
+      (callback) => this.ctx.storage.transactionSync(callback),
+      fence,
+      page,
+      pageR2Key,
+      aggregateHash
+    );
+  }
+
+  archiveFinalizeSource(
+    fence: archiveSharding.ArchiveRpcFence,
+    aggregateHash: string,
+    manifestR2Key: string
+  ): Promise<archiveSharding.SourceDeletedProof> {
+    if (this.getProjectId() !== fence.projectId || this.ctx.id.name !== fence.projectId) {
+      throw new Error('ProjectData archive source project/owner mismatch');
+    }
+    return archiveSharding.finalizeArchiveSource(
+      this.sql,
+      (callback) => this.ctx.storage.transactionSync(callback),
+      this.env.DATABASE,
+      fence,
+      aggregateHash,
+      manifestR2Key
+    );
+  }
+
+  archiveInspectSourceProof(projectId: string, sessionId: string) {
+    if (this.getProjectId() !== projectId || this.ctx.id.name !== projectId) {
+      throw new Error('ProjectData archive source project/owner mismatch');
+    }
+    return archiveSharding.inspectSourceDeletedProof(this.sql, sessionId);
+  }
+
+  archiveFinalizeRehomeSource(
+    fence: archiveSharding.ArchiveRehomeSourceFence,
+    aggregateHash: string,
+    manifestR2Key: string
+  ): Promise<archiveSharding.SourceDeletedProof> {
+    if (this.getProjectId() !== fence.projectId || this.ctx.id.name !== fence.sourceOwnerName) {
+      throw new Error('ProjectData archive rehome source project/owner mismatch');
+    }
+    return archiveSharding.finalizeArchiveRehomeSource(
+      this.sql,
+      (callback) => this.ctx.storage.transactionSync(callback),
+      this.env.DATABASE,
+      fence,
+      aggregateHash,
+      manifestR2Key
+    );
+  }
+
+  archiveInspectRehomeSourceProof(
+    projectId: string,
+    sessionId: string,
+    sourceGeneration: number,
+    expectedOwnerName: string
+  ) {
+    if (this.getProjectId() !== projectId || this.ctx.id.name !== expectedOwnerName) {
+      throw new Error('ProjectData archive rehome source project/owner mismatch');
+    }
+    return archiveSharding.inspectArchiveRehomeSourceProof(this.sql, sessionId, sourceGeneration);
+  }
+
+  archiveMarkTargetAuthoritative(
+    fence: archiveSharding.ArchiveRpcFence,
+    aggregateHash: string
+  ): void {
+    this.assertArchiveTargetIdentity(fence);
+    archiveSharding.markArchiveTargetAuthoritative(
+      this.sql,
+      (callback) => this.ctx.storage.transactionSync(callback),
+      fence,
+      aggregateHash
+    );
+  }
+
+  async archiveCompleteRootCopyback(
+    fence: archiveSharding.ArchiveRpcFence,
+    aggregateHash: string,
+    routingVersion: number
+  ): Promise<void> {
+    this.assertArchiveTargetIdentity(fence);
+    await archiveSharding.completeArchiveRootCopyback(
+      this.sql,
+      (callback) => this.ctx.storage.transactionSync(callback),
+      this.env.DATABASE,
+      fence,
+      aggregateHash,
+      routingVersion
+    );
+  }
+
+  archiveInspectTarget(fence: archiveSharding.ArchiveRpcFence) {
+    this.assertArchiveTargetIdentity(fence);
+    return archiveSharding.inspectArchiveTarget(this.sql, fence);
+  }
+
+  archiveInspectTargetForReconciliation(fence: archiveSharding.ArchiveRpcFence) {
+    try {
+      return { ok: true as const, target: this.archiveInspectTarget(fence), error: null };
+    } catch (error) {
+      return {
+        ok: false as const,
+        target: null,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  archiveGetDatabaseSize(expectedOwnerName: string): number {
+    this.assertArchiveOwnerName(expectedOwnerName);
+    return archiveSharding.getDatabaseSize(this.sql);
+  }
+
+  archiveGetTargetCanonicalBytes(
+    expected: Parameters<typeof archiveSharding.getArchiveTargetCanonicalBytes>[1]
+  ): number {
+    this.assertArchiveOwnerName(expected.ownerName);
+    return archiveSharding.getArchiveTargetCanonicalBytes(this.sql, expected);
+  }
+
+  archiveGetMessages(
+    expected: Parameters<typeof archiveSharding.assertArchiveExactReadAllowed>[1],
+    limit: number = 1000,
+    before: number | null = null,
+    after: number | null = null,
+    roles?: string[],
+    compact: boolean = false,
+    order: 'asc' | 'desc' = 'desc'
+  ) {
+    this.assertArchiveOwnerName(expected.ownerName);
+    archiveSharding.assertArchiveExactReadAllowed(this.sql, expected);
+    return messages.getMessages(
+      this.sql,
+      expected.sessionId,
+      limit,
+      before,
+      after,
+      roles,
+      compact,
+      order,
+      compact ? messages.resolveCompactMessageOptions(this.env) : undefined
+    );
+  }
+
+  async archiveGetMessageToolContent(
+    expected: Parameters<typeof archiveSharding.assertArchiveExactReadAllowed>[1],
+    messageId: string
+  ): Promise<toolPayloadArchive.MessageToolContentResult | null> {
+    this.assertArchiveOwnerName(expected.ownerName);
+    archiveSharding.assertArchiveExactReadAllowed(this.sql, expected);
+    const inlineContent = messages.getMessageToolContent(this.sql, expected.sessionId, messageId);
+    if (inlineContent === null) return null;
+    if (inlineContent.length > 0) return { content: inlineContent, source: 'inline' };
+    return (
+      (await toolPayloadArchive.readArchivedMessageToolContent(
+        this.sql,
+        this.env,
+        expected.sessionId,
+        messageId
+      )) ?? { content: inlineContent, source: 'inline' }
+    );
+  }
+
+  archiveGetArchivedToolPayloads(
+    expected: Parameters<typeof archiveSharding.assertArchiveExactReadAllowed>[1],
+    input: toolPayloadArchive.ArchivedToolPayloadQuery
+  ): Promise<toolPayloadArchive.ArchivedToolPayloadListResult> {
+    this.assertArchiveOwnerName(expected.ownerName);
+    archiveSharding.assertArchiveExactReadAllowed(this.sql, expected);
+    if (input.sessionId !== expected.sessionId) {
+      throw new Error('ProjectData archive tool query session mismatch');
+    }
+    return toolPayloadArchive.listArchivedToolPayloads(
+      this.sql,
+      this.env,
+      expected.projectId,
+      input
+    );
+  }
+
+  archiveListOwnerToolPayloads(
+    expected: { projectId: string; ownerName: string; routingVersion: number },
+    input: toolPayloadArchive.ArchivedToolPayloadQuery
+  ): Promise<toolPayloadArchive.ArchivedToolPayloadListResult> {
+    this.assertArchiveOwnerPlane(expected);
+    if (input.sessionId) {
+      throw new Error('ProjectData archive owner-wide tool query must not specify a session');
+    }
+    return toolPayloadArchive.listArchiveOwnerToolPayloads(
+      this.sql,
+      this.env,
+      expected.projectId,
+      expected.ownerName,
+      input
+    );
+  }
+
+  rootListAuthoritativeToolPayloads(
+    projectId: string,
+    input: toolPayloadArchive.ArchivedToolPayloadQuery
+  ): Promise<toolPayloadArchive.ArchivedToolPayloadListResult> {
+    this.assertRootOwnerPlane(projectId);
+    if (input.sessionId) {
+      throw new Error('ProjectData root owner-wide tool query must not specify a session');
+    }
+    return toolPayloadArchive.listRootAuthoritativeToolPayloads(
+      this.sql,
+      this.env,
+      projectId,
+      input
+    );
+  }
+
+  archiveGetMessageCount(
+    expected: Parameters<typeof archiveSharding.assertArchiveExactReadAllowed>[1],
+    roles?: string[]
+  ): number {
+    this.assertArchiveOwnerName(expected.ownerName);
+    archiveSharding.assertArchiveExactReadAllowed(this.sql, expected);
+    return messages.getMessageCount(this.sql, expected.sessionId, roles);
+  }
+
+  archiveSearchMessages(
+    expected: { projectId: string; ownerName: string; routingVersion: number },
+    query: string,
+    roles: string[] | null = null,
+    limit: number = 10
+  ) {
+    this.assertArchiveOwnerPlane(expected);
+    return messages.searchAuthoritativeArchiveMessages(
+      this.sql,
+      query,
+      expected.ownerName,
+      roles,
+      limit
+    );
+  }
+
+  rootSearchAuthoritativeMessages(
+    projectId: string,
+    query: string,
+    roles: string[] | null = null,
+    limit: number = 10
+  ) {
+    this.assertRootOwnerPlane(projectId);
+    return messages.searchAuthoritativeRootMessages(this.sql, query, roles, limit);
+  }
+
+  archiveSearchSessionMessages(
+    expected: Parameters<typeof archiveSharding.assertArchiveExactReadAllowed>[1],
+    query: string,
+    roles: string[] | null = null,
+    limit: number = 10
+  ) {
+    this.assertArchiveOwnerName(expected.ownerName);
+    archiveSharding.assertArchiveExactReadAllowed(this.sql, expected);
+    return messages.searchMessages(this.sql, query, expected.sessionId, roles, limit);
   }
 
   searchMessages(
@@ -540,6 +1111,7 @@ export class ProjectData extends DurableObject<Env> {
     roles: string[] | null = null,
     limit: number = 10
   ) {
+    if (sessionId) archiveSharding.assertRootSessionReadAllowed(this.sql, sessionId);
     return messages.searchMessages(this.sql, query, sessionId, roles, limit);
   }
 
@@ -552,6 +1124,7 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   createCommentThread(input: comments.CreateCommentThreadInput) {
+    archiveSharding.assertRootSessionWriteAllowed(this.sql, input.sessionId);
     const result = this.ctx.storage.transactionSync(() =>
       comments.createCommentThread(this.sql, this.env, input)
     );
@@ -781,6 +1354,7 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   materializeSession(sessionId: string): void {
+    archiveSharding.assertRootSessionWriteAllowed(this.sql, sessionId);
     materialization.materializeSession(this.sql, sessionId);
   }
   materializeAllStopped(limit: number = 50) {
@@ -1128,7 +1702,16 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   getLatestPersistedPlan(sessionId: string) {
+    archiveSharding.assertRootSessionReadAllowed(this.sql, sessionId);
     return sessionState.getLatestPersistedPlan(this.sql, sessionId);
+  }
+
+  archiveGetLatestPersistedPlan(
+    expected: Parameters<typeof archiveSharding.assertArchiveExactReadAllowed>[1]
+  ) {
+    this.assertArchiveOwnerName(expected.ownerName);
+    archiveSharding.assertArchiveExactReadAllowed(this.sql, expected);
+    return sessionState.getLatestPersistedPlan(this.sql, expected.sessionId);
   }
 
   createCheckpointEpisode(input: CreateCheckpointEpisodeInput) {
@@ -2075,14 +2658,15 @@ export class ProjectData extends DurableObject<Env> {
 
     // Sync session summaries to D1 for cross-project queries
     try {
-      await this.syncSessionSummariesToD1(projectId);
+      const complete = await this.syncSessionSummariesToD1(projectId);
+      if (!complete) this.scheduleSummarySync();
     } catch (err) {
       log.error('d1_session_summary_sync_failed', { projectId, ...serializeError(err) });
     }
   }
 
   /** Batch-sync session metadata from DO SQLite to D1 session_summaries table. */
-  private async syncSessionSummariesToD1(projectId: string): Promise<void> {
-    await sessionSummarySync.syncSessionSummariesToD1(this.sql, this.env, projectId);
+  private async syncSessionSummariesToD1(projectId: string): Promise<boolean> {
+    return sessionSummarySync.syncSessionSummariesToD1(this.sql, this.env, projectId);
   }
 }

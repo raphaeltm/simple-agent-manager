@@ -117,6 +117,8 @@ Project event pull loop: create a subscription with the narrowest useful filter,
 - `POST /api/admin/project-data/storage/:projectId/relief-measure` — Run one strictly bounded, cursor-resumable ProjectData storage-relief measurement slice for grouped/FTS derived rows, legacy tool payload stock, and stale `oversized` attempts now below the archive cap; never performs the old full hot-object scan
 - `POST /api/admin/project-data/storage/:projectId/grouped-fts-cleanup` — Run one explicitly enabled, production-disabled canary slice that removes old terminal-session grouped message rows and external-content FTS entries while preserving raw `chat_messages`
 - `POST /api/admin/project-data/storage/:projectId/emergency-purge` — Run a bounded ProjectData emergency purge of oldest `activity_events` and `acp_session_events` rows only
+- `POST /api/admin/project-data/archive/migrations/:migrationId/forward-fix` — Explicitly retry a frozen terminal-archive journal or restore its target from the immutable recovery manifest (`{ mode: "retry" | "restore_target" }`). The sharding coordinator must be explicitly enabled; otherwise the request fails closed.
+- `POST /api/admin/project-data/archive/projects/:projectId/sessions/:sessionId/rehome` — Repack an authoritative archived session to one explicit configured owner (`{ targetOwnerName: string, fallbackTargetOwnerName?: string }`). Passing the project ID requests capacity-gated root copyback; if the root gate rejects it, exactly one explicit configured non-root fallback is required and the request fails closed rather than scanning owners. The sharding coordinator must be explicitly enabled.
 
 ## Agent Sessions
 

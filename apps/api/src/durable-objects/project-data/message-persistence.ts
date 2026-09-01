@@ -1,5 +1,6 @@
 import { createModuleLogger } from '../../lib/logger';
 import * as activity from './activity';
+import { assertRootSessionWriteAllowed } from './archive-sharding';
 import * as attention from './attention';
 import * as idleCleanup from './idle-cleanup';
 import * as messages from './messages';
@@ -31,6 +32,49 @@ export type MessageBatchPersistenceResult = {
   maxMessages: number;
   remainingCapacity: number;
 };
+
+/**
+ * Single production seam for the root-local writer fence. Keep this
+ * synchronous so RPC error-capture tests can exercise the exact guard without
+ * scheduling side effects from a deliberately rejected write.
+ */
+export function assertRootMessageWriteAllowed(sql: SqlStorage, sessionId: string): void {
+  assertRootSessionWriteAllowed(sql, sessionId);
+}
+
+export async function persistRootMessageWithSideEffects(
+  sql: SqlStorage,
+  env: Env,
+  hooks: MessagePersistenceHooks,
+  sessionId: string,
+  role: string,
+  content: string,
+  toolMetadata: string | null,
+  messageId?: string
+): Promise<string> {
+  assertRootMessageWriteAllowed(sql, sessionId);
+  return persistMessageWithSideEffects(
+    sql,
+    env,
+    hooks,
+    sessionId,
+    role,
+    content,
+    toolMetadata,
+    messageId
+  );
+}
+
+export async function persistRootMessageBatchWithSideEffects(
+  sql: SqlStorage,
+  env: Env,
+  hooks: MessagePersistenceHooks,
+  sessionId: string,
+  batchMessages: BatchMessageInput[]
+): Promise<MessageBatchPersistenceResult> {
+  assertRootMessageWriteAllowed(sql, sessionId);
+  return persistMessageBatchWithSideEffects(sql, env, hooks, sessionId, batchMessages);
+}
 
 export async function persistMessageWithSideEffects(
   sql: SqlStorage,

@@ -186,7 +186,7 @@ export async function handleSearchMessages(
   const requestedLimit = typeof params.limit === 'number' ? params.limit : 10;
   const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.messageSearchMax);
 
-  const results = await projectDataService.searchMessages(
+  const search = await projectDataService.searchMessages(
     env,
     tokenData.projectId,
     query,
@@ -201,7 +201,7 @@ export async function handleSearchMessages(
         type: 'text',
         text: JSON.stringify(
           {
-            results: results.map((r) => ({
+            results: search.results.map((r) => ({
               messageId: r.id,
               sessionId: r.sessionId,
               sessionTopic: r.sessionTopic,
@@ -210,8 +210,11 @@ export async function handleSearchMessages(
               snippet: r.snippet,
               createdAt: r.createdAt,
             })),
-            count: results.length,
+            count: search.results.length,
             query,
+            partial: search.partial,
+            ownersQueried: search.ownersQueried,
+            partialReason: search.reason,
           },
           null,
           2
@@ -246,9 +249,10 @@ type ArchivedToolPayloadRequest = {
   requestedLimit: number | null;
 };
 
-function parseArchivedToolPayloadRequest(
-  params: Record<string, unknown>
-): { request: ArchivedToolPayloadRequest | null; error: string | null } {
+function parseArchivedToolPayloadRequest(params: Record<string, unknown>): {
+  request: ArchivedToolPayloadRequest | null;
+  error: string | null;
+} {
   const messageId = typeof params.messageId === 'string' ? params.messageId.trim() : '';
   const sessionId = typeof params.sessionId === 'string' ? params.sessionId.trim() : '';
   const startTime = parseOptionalTimestamp(params.startTime, 'startTime');
@@ -291,7 +295,11 @@ export async function handleGetArchivedToolPayloads(
 ): Promise<JsonRpcResponse> {
   const parsed = parseArchivedToolPayloadRequest(params);
   if (parsed.error || parsed.request === null) {
-    return jsonRpcError(requestId, INVALID_PARAMS, parsed.error ?? 'Invalid archive retrieval request');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      parsed.error ?? 'Invalid archive retrieval request'
+    );
   }
 
   if (parsed.request.sessionId) {

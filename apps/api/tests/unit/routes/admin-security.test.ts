@@ -14,11 +14,21 @@ import type { Env } from '../../../src/env';
 // --- Auth mock ---
 const SUPERADMIN_USER_ID = 'user-superadmin-123';
 const mockGetUserId = vi.fn().mockReturnValue(SUPERADMIN_USER_ID);
+const archiveRouteMocks = vi.hoisted(() => ({
+  allowSuperadmin: true,
+  forwardFix: vi.fn(),
+  rehome: vi.fn(),
+}));
 
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: any, next: any) => next()),
   requireApproved: () => vi.fn((_c: any, next: any) => next()),
-  requireSuperadmin: () => vi.fn((_c: any, next: any) => next()),
+  requireSuperadmin: () =>
+    vi.fn((c: any, next: any) =>
+      archiveRouteMocks.allowSuperadmin
+        ? next()
+        : c.json({ error: 'FORBIDDEN', message: 'Superadmin access required' }, 403)
+    ),
   getUserId: (...args: unknown[]) => mockGetUserId(...args),
   getAuth: () => ({
     user: {
@@ -93,7 +103,11 @@ vi.mock('../../../src/services/observability', () => ({
   getErrorTrends: vi.fn(),
   queryCloudflareLogs: vi.fn(),
   getLogQueryRateLimit: () => 30,
-  CfApiError: class extends Error { constructor(m: string) { super(m); } },
+  CfApiError: class extends Error {
+    constructor(m: string) {
+      super(m);
+    }
+  },
 }));
 
 // --- Limits mock ---
@@ -109,17 +123,32 @@ vi.mock('../../../src/scheduled/stuck-tasks', () => ({
     mockGetTaskReconciliationDiagnostics(...args),
 }));
 
+vi.mock('../../../src/scheduled/project-data-archive-sharding', () => ({
+  requestProjectDataArchiveForwardFix: (...args: unknown[]) =>
+    archiveRouteMocks.forwardFix(...args),
+  requestProjectDataArchiveRehome: (...args: unknown[]) => archiveRouteMocks.rehome(...args),
+}));
+
 // --- Schemas mock ---
 vi.mock('../../../src/schemas', () => ({
   AdminUserActionSchema: {},
   AdminUserRoleSchema: {},
   AdminLogQuerySchema: {},
   ProjectDataStorageEmergencyPurgeSchema: {},
+  ProjectDataArchiveForwardFixSchema: {},
+  ProjectDataArchiveRehomeSchema: {},
   RunDebugDiagnosisSchema: {},
   SaveDebugDiagnosisIdeaSchema: {},
   UpdateSignupApprovalConfigSchema: {},
-  jsonValidator: () => vi.fn((_c: any, next: any) => next()),
-  parseOptionalBody: vi.fn(async () => ({})),
+  jsonValidator: () =>
+    vi.fn(async (c: any, next: any) => {
+      c.req.addValidatedData('json', await c.req.json());
+      return next();
+    }),
+  parseOptionalBody: vi.fn(async (request: Request, _schema: unknown, fallback: object) => {
+    const text = await request.text();
+    return text ? JSON.parse(text) : fallback;
+  }),
 }));
 
 // Import routes after mocks
@@ -145,6 +174,11 @@ describe('Admin security hardening (route-level)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetUserId.mockReturnValue(SUPERADMIN_USER_ID);
+    archiveRouteMocks.allowSuperadmin = true;
+    archiveRouteMocks.rehome.mockResolvedValue({
+      migrationId: 'migration-1',
+      targetOwnerName: 'project-data-archive:project-1:1',
+    });
 
     app = new Hono<{ Bindings: Env }>();
     app.onError((err, c) => {
@@ -175,7 +209,7 @@ describe('Admin security hardening (route-level)', () => {
         env
       );
 
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(res.status).toBe(400);
       expect(body.error).toBe('BAD_REQUEST');
       expect(body.message).toBe('Cannot modify your own account');
@@ -201,7 +235,7 @@ describe('Admin security hardening (route-level)', () => {
       );
 
       // Should NOT be 400 "Cannot modify your own account"
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.message).not.toBe('Cannot modify your own account');
       // It may be 500 (DB mock incomplete) or 404 (user not found) — that's fine,
       // the security property we're testing is that the self-mod guard passes.
@@ -218,7 +252,7 @@ describe('Admin security hardening (route-level)', () => {
 
       const res = await app.request('/api/admin/health/details', {}, env);
 
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(res.status).toBe(200);
       expect(body.status).toBe('healthy');
       expect(body.version).toBe('1.0.0-test');
@@ -240,7 +274,7 @@ describe('Admin security hardening (route-level)', () => {
 
       const res = await app.request('/api/admin/health/details', {}, env);
 
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(res.status).toBe(200);
       expect(body.status).toBe('degraded');
       expect(body.missingBindings).toContain('ADMIN_LOGS');
@@ -261,7 +295,7 @@ describe('Admin security hardening (route-level)', () => {
 
       const res = await app.request('/api/admin/project-data/storage', {}, env);
 
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(res.status).toBe(200);
       expect(body.telemetry).toEqual([]);
       expect(prepare).toHaveBeenCalledWith(
@@ -297,6 +331,83 @@ describe('Admin security hardening (route-level)', () => {
     });
   });
 
+  describe('ProjectData terminal archive operator routes', () => {
+    it('invokes forward-fix and rehome through the superadmin router', async () => {
+      const env = createEnv();
+      const forwardFix = await app.request(
+        '/api/admin/project-data/archive/migrations/migration-1/forward-fix',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'retry' }),
+        },
+        env
+      );
+      expect(forwardFix.status).toBe(200);
+      expect(archiveRouteMocks.forwardFix).toHaveBeenCalledWith(env, 'migration-1', 'retry');
+
+      const rehome = await app.request(
+        '/api/admin/project-data/archive/projects/project-1/sessions/session-1/rehome',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            targetOwnerName: 'project-1',
+            fallbackTargetOwnerName: 'project-data-archive:project-1:1',
+          }),
+        },
+        env
+      );
+      expect(rehome.status).toBe(200);
+      expect(archiveRouteMocks.rehome).toHaveBeenCalledWith(
+        env,
+        'project-1',
+        'session-1',
+        'project-1',
+        'project-data-archive:project-1:1'
+      );
+    });
+
+    it('rejects non-superadmins before invoking either operator mutation', async () => {
+      archiveRouteMocks.allowSuperadmin = false;
+      const env = createEnv();
+      const response = await app.request(
+        '/api/admin/project-data/archive/migrations/migration-1/forward-fix',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'retry' }),
+        },
+        env
+      );
+      expect(response.status).toBe(403);
+      expect(archiveRouteMocks.forwardFix).not.toHaveBeenCalled();
+      expect(archiveRouteMocks.rehome).not.toHaveBeenCalled();
+    });
+
+    it('rejects form-compatible and malformed rehome bodies before mutation', async () => {
+      const env = createEnv();
+      const formResponse = await app.request(
+        '/api/admin/project-data/archive/projects/project-1/sessions/session-1/rehome',
+        { method: 'POST', body: 'targetOwnerName=project-data-archive%3Aproject-1%3A1' },
+        env
+      );
+      expect(formResponse.status).toBe(400);
+
+      const malformedResponse = await app.request(
+        '/api/admin/project-data/archive/projects/project-1/sessions/session-1/rehome',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{not-json',
+        },
+        env
+      );
+      expect(malformedResponse.status).toBe(400);
+      expect(archiveRouteMocks.rehome).not.toHaveBeenCalled();
+    });
+  });
+
   describe('GET /api/admin/tasks/:taskId/reconciliation-diagnostics', () => {
     it('returns the read-only reconciliation evidence for the requested task', async () => {
       const env = createEnv();
@@ -309,11 +420,7 @@ describe('Admin security hardening (route-level)', () => {
       };
       mockGetTaskReconciliationDiagnostics.mockResolvedValueOnce(diagnostics);
 
-      const res = await app.request(
-        '/api/admin/tasks/task-1/reconciliation-diagnostics',
-        {},
-        env,
-      );
+      const res = await app.request('/api/admin/tasks/task-1/reconciliation-diagnostics', {}, env);
 
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ diagnostics });
@@ -326,7 +433,7 @@ describe('Admin security hardening (route-level)', () => {
       const res = await app.request(
         '/api/admin/tasks/missing/reconciliation-diagnostics',
         {},
-        createEnv(),
+        createEnv()
       );
 
       expect(res.status).toBe(404);

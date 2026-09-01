@@ -56,6 +56,13 @@ import { resolveHandoffLimits, resolveMissionStateLimits } from '@simple-agent-m
 
 import type { ProjectData } from '../durable-objects/project-data';
 import type {
+  ArchiveChunk,
+  ArchiveRehomeSourceFence,
+  ArchiveRpcFence,
+  SourceArchiveEligibility,
+  SourceDeletedProof,
+} from '../durable-objects/project-data/archive-sharding';
+import type {
   CreateCommentReplyInput,
   CreateCommentThreadInput,
   CreateFileCommentReplyInput,
@@ -120,6 +127,16 @@ import {
   isDurableObjectStorageFullError,
   isTransientDurableObjectError,
 } from './durable-object-retry';
+import {
+  assertProjectDataSessionWriteAllowed,
+  resolveProjectDataOwnerLocation,
+} from './project-data-archive-routing';
+import type { ProjectDataOwnerLocation } from './project-data-archive-types';
+import {
+  PROJECT_DATA_ARCHIVE_ROUTING_VERSION,
+  ProjectDataArchiveRoutingError,
+  resolveArchiveShardingConfig,
+} from './project-data-archive-types';
 import { ensureOncePerIsolate, forgetEnsuredProjectData } from './project-data-ensure-memo';
 import { toProjectDataStorageFullError } from './project-data-storage-errors';
 import {
@@ -150,6 +167,32 @@ async function getStub(env: Env, projectId: string): Promise<DurableObjectStub<P
     await stub.ensureProjectId(projectId);
   });
   return stub;
+}
+
+async function getNamedProjectDataStub(
+  env: Env,
+  projectId: string,
+  ownerName: string
+): Promise<DurableObjectStub<ProjectData>> {
+  const id = env.PROJECT_DATA.idFromName(ownerName);
+  const stub = env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectData>;
+  await ensureOncePerIsolate(env, id.toString(), async () => {
+    await stub.ensureProjectId(projectId);
+  });
+  return stub;
+}
+
+function archiveExpectedLocation(location: ProjectDataOwnerLocation) {
+  if (location.state !== 'archive_shard' || !location.migrationId) {
+    throw new Error('ProjectData archive exact location is not authoritative');
+  }
+  return {
+    projectId: location.projectId,
+    sessionId: location.sessionId,
+    migrationId: location.migrationId,
+    ownerName: location.owner.name,
+    generation: location.owner.generation,
+  };
 }
 
 /**
@@ -439,6 +482,7 @@ export async function linkSessionToWorkspace(
   sessionId: string,
   workspaceId: string
 ): Promise<void> {
+  await assertProjectDataSessionWriteAllowed(env.DATABASE, projectId, sessionId);
   return callProjectDataWithRetry(env, projectId, 'linkSessionToWorkspace', (stub) =>
     stub.linkSessionToWorkspace(sessionId, workspaceId)
   );
@@ -449,6 +493,7 @@ export async function stopSession(
   projectId: string,
   sessionId: string
 ): Promise<boolean> {
+  await assertProjectDataSessionWriteAllowed(env.DATABASE, projectId, sessionId);
   const stub = await getStub(env, projectId);
   const stopped = await stub.stopSession(sessionId);
   if (stopped) {
@@ -469,6 +514,7 @@ export async function sleepSession(
   projectId: string,
   sessionId: string
 ): Promise<boolean> {
+  await assertProjectDataSessionWriteAllowed(env.DATABASE, projectId, sessionId);
   const stub = await getStub(env, projectId);
   const sleeping = await stub.sleepSession(sessionId);
   if (sleeping) {
@@ -491,6 +537,7 @@ export async function wakeSession(
   workspaceId: string,
   taskId: string
 ): Promise<boolean> {
+  await assertProjectDataSessionWriteAllowed(env.DATABASE, projectId, sessionId);
   const stub = await getStub(env, projectId);
   const previousStatus = sessionStatus(await stub.getSession(sessionId));
   const woke = await stub.wakeSession(sessionId, workspaceId, taskId);
@@ -523,6 +570,7 @@ export async function wakeSessionForSnapshotRecovery(
     taskId,
   });
   if (!allowStopped) return false;
+  await assertProjectDataSessionWriteAllowed(env.DATABASE, projectId, sessionId);
   const stub = await getStub(env, projectId);
   const previousStatus = sessionStatus(await stub.getSession(sessionId));
   const woke = await stub.wakeSession(sessionId, workspaceId, taskId, { allowStopped });
@@ -547,6 +595,7 @@ export async function failSession(
   sessionId: string,
   errorMessage: string | null = null
 ): Promise<boolean> {
+  await assertProjectDataSessionWriteAllowed(env.DATABASE, projectId, sessionId);
   const stub = await getStub(env, projectId);
   const failed = await stub.failSession(sessionId, errorMessage);
   if (failed) {
@@ -579,6 +628,7 @@ export async function updateSessionTopic(
   sessionId: string,
   topic: string
 ): Promise<boolean> {
+  await assertProjectDataSessionWriteAllowed(env.DATABASE, projectId, sessionId);
   const stub = await getStub(env, projectId);
   return stub.updateSessionTopic(sessionId, topic);
 }
@@ -592,6 +642,7 @@ export async function persistMessage(
   toolMetadata: Record<string, unknown> | null,
   messageId?: string
 ): Promise<string> {
+  await assertProjectDataSessionWriteAllowed(env.DATABASE, projectId, sessionId);
   return callProjectDataNoRetry(env, projectId, 'persistMessage', (stub) =>
     stub.persistMessage(
       sessionId,
@@ -623,6 +674,7 @@ export async function persistMessageBatch(
   maxMessages?: number;
   remainingCapacity?: number;
 }> {
+  await assertProjectDataSessionWriteAllowed(env.DATABASE, projectId, sessionId);
   return callProjectDataNoRetry(env, projectId, 'persistMessageBatch', (stub) =>
     stub.persistMessageBatch(
       sessionId,
@@ -684,6 +736,7 @@ export async function linkSessionToTask(
   sessionId: string,
   taskId: string
 ): Promise<boolean> {
+  await assertProjectDataSessionWriteAllowed(env.DATABASE, projectId, sessionId);
   return callProjectDataWithRetry(env, projectId, 'linkSessionToTask', (stub) =>
     stub.linkSessionToTask(sessionId, taskId)
   );
@@ -694,6 +747,9 @@ export async function getSession(
   projectId: string,
   sessionId: string
 ): Promise<Record<string, unknown> | null> {
+  // Root owns the lifecycle anchor even after transcript placement. Resolve D1
+  // first so a transitional or malformed location can never be ignored.
+  await resolveProjectDataOwnerLocation(env.DATABASE, projectId, sessionId);
   return callProjectDataWithRetry(env, projectId, 'getSession', (stub) =>
     stub.getSession(sessionId)
   );
@@ -710,8 +766,21 @@ export async function getMessages(
   compact: boolean = false,
   order: 'asc' | 'desc' = 'desc'
 ): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
-  return callProjectDataWithRetry(env, projectId, 'getMessages', (stub) =>
-    stub.getMessages(sessionId, limit, before, after, roles, compact, order)
+  const location = await resolveProjectDataOwnerLocation(env.DATABASE, projectId, sessionId);
+  if (location.state === 'root') {
+    return callProjectDataWithRetry(env, projectId, 'getMessages', (stub) =>
+      stub.getMessages(sessionId, limit, before, after, roles, compact, order)
+    );
+  }
+  const stub = await getNamedProjectDataStub(env, projectId, location.owner.name);
+  return stub.archiveGetMessages(
+    archiveExpectedLocation(location),
+    limit,
+    before,
+    after,
+    roles,
+    compact,
+    order
   );
 }
 
@@ -721,8 +790,196 @@ export async function getMessageToolContent(
   sessionId: string,
   messageId: string
 ): Promise<MessageToolContentResult | null> {
-  const stub = await getStub(env, projectId);
-  return stub.getMessageToolContent(sessionId, messageId);
+  const location = await resolveProjectDataOwnerLocation(env.DATABASE, projectId, sessionId);
+  const stub = await getNamedProjectDataStub(env, projectId, location.owner.name);
+  return location.state === 'root'
+    ? stub.getMessageToolContent(sessionId, messageId)
+    : stub.archiveGetMessageToolContent(archiveExpectedLocation(location), messageId);
+}
+
+type ArchiveOwnerPlane = { projectId: string; ownerName: string; routingVersion: number };
+
+async function resolveArchiveOwnerPlanes(
+  env: Env,
+  projectId: string,
+  maxOwners: number,
+  routingVersion: number
+): Promise<{ owners: ArchiveOwnerPlane[]; partial: boolean }> {
+  const invalid = await env.DATABASE.prepare(
+    `SELECT 1 AS invalid
+       FROM project_data_session_locations location
+      WHERE location.project_id = ? AND (
+        location.routing_version != ? OR
+        location.state = 'direct_session' OR
+        location.state = 'migrating' OR
+        (location.state = 'root' AND (
+          location.owner_kind != 'root' OR location.owner_name != location.project_id OR
+          location.generation != 0 OR location.migration_id IS NOT NULL OR EXISTS (
+            SELECT 1 FROM project_data_archive_migrations migration
+             WHERE migration.project_id = location.project_id
+               AND migration.session_id = location.session_id
+               AND migration.state = 'archived'
+               AND migration.target_generation = 0
+               AND (migration.target_authoritative_at IS NULL OR migration.target_cleanup_at IS NULL)
+          )
+        )) OR
+        (location.state = 'archive_shard' AND (
+          location.owner_kind != 'archive_shard' OR location.generation <= 0 OR
+          substr(location.owner_name, 1,
+            length('project-data-archive:' || location.project_id || ':'))
+            != 'project-data-archive:' || location.project_id || ':' OR
+          CAST(CAST(substr(location.owner_name,
+            length('project-data-archive:' || location.project_id || ':') + 1) AS INTEGER) AS TEXT)
+            != substr(location.owner_name,
+              length('project-data-archive:' || location.project_id || ':') + 1) OR
+          location.migration_id IS NULL OR NOT EXISTS (
+            SELECT 1 FROM project_data_archive_migrations migration
+             WHERE migration.migration_id = location.migration_id
+               AND migration.project_id = location.project_id
+               AND migration.session_id = location.session_id
+               AND migration.state = 'archived'
+               AND migration.target_owner_name = location.owner_name
+               AND migration.target_generation = location.generation
+               AND migration.target_authoritative_at IS NOT NULL
+          )
+        )) OR
+        (location.state = 'migrating' AND (
+          location.migration_id IS NULL OR
+          (location.generation = 0 AND (
+            location.owner_kind != 'root' OR location.owner_name != location.project_id
+          )) OR
+          (location.generation > 0 AND (
+            location.owner_kind != 'archive_shard' OR
+            substr(location.owner_name, 1,
+              length('project-data-archive:' || location.project_id || ':'))
+              != 'project-data-archive:' || location.project_id || ':' OR
+            CAST(CAST(substr(location.owner_name,
+              length('project-data-archive:' || location.project_id || ':') + 1) AS INTEGER) AS TEXT)
+              != substr(location.owner_name,
+                length('project-data-archive:' || location.project_id || ':') + 1)
+          )) OR NOT EXISTS (
+            SELECT 1 FROM project_data_archive_migrations migration
+             WHERE migration.migration_id = location.migration_id
+               AND migration.project_id = location.project_id
+               AND migration.session_id = location.session_id
+               AND migration.source_owner_name = location.owner_name
+               AND migration.source_generation = location.generation
+               AND migration.state IN ('planned', 'copying', 'sealed', 'source_deleted', 'failed', 'frozen')
+          )
+        ))
+      ) LIMIT 1`
+  )
+    .bind(projectId, routingVersion)
+    .first();
+  if (invalid) {
+    throw new ProjectDataArchiveRoutingError(
+      'ProjectData project-wide read rejected ambiguous routing state'
+    );
+  }
+  const ownerRows = await env.DATABASE.prepare(
+    `SELECT DISTINCT location.owner_name
+       FROM project_data_session_locations location
+       JOIN project_data_archive_migrations migration
+         ON migration.migration_id = location.migration_id
+        AND migration.project_id = location.project_id
+        AND migration.session_id = location.session_id
+        AND migration.state = 'archived'
+        AND migration.target_owner_name = location.owner_name
+        AND migration.target_generation = location.generation
+        AND migration.target_authoritative_at IS NOT NULL
+      WHERE location.project_id = ? AND location.state = 'archive_shard'
+        AND location.owner_kind = 'archive_shard' AND location.routing_version = ?
+      ORDER BY location.owner_name LIMIT ?`
+  )
+    .bind(projectId, routingVersion, maxOwners + 1)
+    .all<{ owner_name: string }>();
+  const prefix = `project-data-archive:${projectId}:`;
+  const names = ownerRows.results.map((row) => row.owner_name);
+  for (const ownerName of names) {
+    const shardText = ownerName.startsWith(prefix) ? ownerName.slice(prefix.length) : '';
+    if (!/^(0|[1-9]\d*)$/.test(shardText) || !Number.isSafeInteger(Number(shardText))) {
+      throw new ProjectDataArchiveRoutingError(
+        'ProjectData project-wide read rejected an invalid archive owner identity'
+      );
+    }
+  }
+  return {
+    owners: names.slice(0, maxOwners).map((ownerName) => ({
+      projectId,
+      ownerName,
+      routingVersion,
+    })),
+    partial: names.length > maxOwners,
+  };
+}
+
+async function assertProjectWidePlaneAuthority(
+  env: Env,
+  projectId: string,
+  expectations: Iterable<{ ownerName: string; sessionId: string }>
+): Promise<void> {
+  const unique = new Map<string, { ownerName: string; sessionId: string }>();
+  for (const expectation of expectations) {
+    unique.set(`${expectation.ownerName}\u0000${expectation.sessionId}`, expectation);
+  }
+  if (unique.size === 0) return;
+  const rows = await env.DATABASE.prepare(
+    `WITH expected AS (
+       SELECT json_extract(value, '$.ownerName') AS expected_owner_name,
+              json_extract(value, '$.sessionId') AS session_id
+         FROM json_each(?)
+     )
+     SELECT expected.expected_owner_name, expected.session_id,
+            location.state, location.owner_kind, location.owner_name,
+            location.generation, location.migration_id, location.routing_version,
+            migration.state AS migration_state,
+            migration.target_owner_name, migration.target_generation,
+            migration.target_authoritative_at
+       FROM expected
+       LEFT JOIN project_data_session_locations location
+         ON location.project_id = ? AND location.session_id = expected.session_id
+       LEFT JOIN project_data_archive_migrations migration
+         ON migration.migration_id = location.migration_id
+        AND migration.project_id = location.project_id
+        AND migration.session_id = location.session_id`
+  )
+    .bind(JSON.stringify([...unique.values()]), projectId)
+    .all<Record<string, unknown>>();
+  if (rows.results.length !== unique.size) {
+    throw new ProjectDataArchiveRoutingError(
+      'ProjectData project-wide read authority batch was incomplete'
+    );
+  }
+  for (const row of rows.results) {
+    const expectedOwner = row.expected_owner_name;
+    const legacyRoot = expectedOwner === projectId && row.state === null && row.owner_name === null;
+    const exactRoot =
+      expectedOwner === projectId &&
+      row.state === 'root' &&
+      row.owner_kind === 'root' &&
+      row.owner_name === projectId &&
+      row.generation === 0 &&
+      row.migration_id === null &&
+      row.routing_version === PROJECT_DATA_ARCHIVE_ROUTING_VERSION;
+    const exactArchive =
+      expectedOwner !== projectId &&
+      row.state === 'archive_shard' &&
+      row.owner_kind === 'archive_shard' &&
+      row.owner_name === expectedOwner &&
+      typeof row.generation === 'number' &&
+      row.generation > 0 &&
+      typeof row.migration_id === 'string' &&
+      row.routing_version === PROJECT_DATA_ARCHIVE_ROUTING_VERSION &&
+      row.migration_state === 'archived' &&
+      row.target_owner_name === expectedOwner &&
+      row.target_generation === row.generation &&
+      typeof row.target_authoritative_at === 'number';
+    if (!legacyRoot && !exactRoot && !exactArchive) {
+      throw new ProjectDataArchiveRoutingError(
+        'ProjectData project-wide read result lost exact location authority'
+      );
+    }
+  }
 }
 
 export async function getArchivedToolPayloads(
@@ -730,8 +987,66 @@ export async function getArchivedToolPayloads(
   projectId: string,
   input: ArchivedToolPayloadQuery
 ): Promise<ArchivedToolPayloadListResult> {
-  const stub = await getStub(env, projectId);
-  return stub.getArchivedToolPayloads(input);
+  if (!input.sessionId) {
+    const config = resolveArchiveShardingConfig(env);
+    const { owners, partial } = await resolveArchiveOwnerPlanes(
+      env,
+      projectId,
+      config.searchMaxOwners,
+      config.routingVersion
+    );
+    const root = await getStub(env, projectId);
+    const planes = await Promise.all([
+      (async () => {
+        const result = (await root.rootListAuthoritativeToolPayloads(
+          projectId,
+          input
+        )) as unknown as ArchivedToolPayloadListResult;
+        return { ownerName: projectId, result };
+      })(),
+      ...owners.map(async (owner) => {
+        const stub = await getNamedProjectDataStub(env, projectId, owner.ownerName);
+        const result = (await stub.archiveListOwnerToolPayloads(
+          owner,
+          input
+        )) as unknown as ArchivedToolPayloadListResult;
+        return { ownerName: owner.ownerName, result };
+      }),
+    ]);
+    await assertProjectWidePlaneAuthority(
+      env,
+      projectId,
+      planes.flatMap((plane) =>
+        plane.result.payloads.map((payload) => ({
+          ownerName: plane.ownerName,
+          sessionId: payload.sessionId,
+        }))
+      )
+    );
+    const payloads = planes
+      .flatMap((plane) => plane.result.payloads)
+      .sort(
+        (a, b) =>
+          a.messageCreatedAt - b.messageCreatedAt ||
+          a.messageSequence - b.messageSequence ||
+          a.messageId.localeCompare(b.messageId)
+      )
+      .slice(0, input.limit);
+    return {
+      projectId,
+      payloads,
+      count: payloads.length,
+      hasMore: partial || planes.some((plane) => plane.result.hasMore),
+      partial,
+      ownersQueried: owners.length + 1,
+      partialReason: partial ? 'archive_owner_limit_reached' : null,
+    };
+  }
+  const location = await resolveProjectDataOwnerLocation(env.DATABASE, projectId, input.sessionId);
+  const stub = await getNamedProjectDataStub(env, projectId, location.owner.name);
+  return location.state === 'root'
+    ? stub.getArchivedToolPayloads(input)
+    : stub.archiveGetArchivedToolPayloads(archiveExpectedLocation(location), input);
 }
 
 /** Get total message count for a session, optionally filtered by roles. */
@@ -741,8 +1056,11 @@ export async function getMessageCount(
   sessionId: string,
   roles?: string[]
 ): Promise<number> {
-  const stub = await getStub(env, projectId);
-  return stub.getMessageCount(sessionId, roles);
+  const location = await resolveProjectDataOwnerLocation(env.DATABASE, projectId, sessionId);
+  const stub = await getNamedProjectDataStub(env, projectId, location.owner.name);
+  return location.state === 'root'
+    ? stub.getMessageCount(sessionId, roles)
+    : stub.archiveGetMessageCount(archiveExpectedLocation(location), roles);
 }
 
 /** Search messages across sessions by keyword. */
@@ -753,8 +1071,8 @@ export async function searchMessages(
   sessionId: string | null = null,
   roles: string[] | null = null,
   limit: number = 10
-): Promise<
-  Array<{
+): Promise<{
+  results: Array<{
     id: string;
     sessionId: string;
     role: string;
@@ -762,10 +1080,307 @@ export async function searchMessages(
     createdAt: number;
     sessionTopic: string | null;
     sessionTaskId: string | null;
-  }>
-> {
+  }>;
+  partial: boolean;
+  ownersQueried: number;
+  reason: string | null;
+}> {
+  if (sessionId) {
+    const location = await resolveProjectDataOwnerLocation(env.DATABASE, projectId, sessionId);
+    const stub = await getNamedProjectDataStub(env, projectId, location.owner.name);
+    const results =
+      location.state === 'root'
+        ? await stub.searchMessages(query, sessionId, roles, limit)
+        : await stub.archiveSearchSessionMessages(
+            archiveExpectedLocation(location),
+            query,
+            roles,
+            limit
+          );
+    return { results, partial: false, ownersQueried: 1, reason: null };
+  }
+  const config = resolveArchiveShardingConfig(env);
+  const { owners, partial } = await resolveArchiveOwnerPlanes(
+    env,
+    projectId,
+    config.searchMaxOwners,
+    config.routingVersion
+  );
+  const root = await getStub(env, projectId);
+  const planes = await Promise.all([
+    root.rootSearchAuthoritativeMessages(projectId, query, roles, limit).then((results) => ({
+      ownerName: projectId,
+      results,
+    })),
+    ...owners.map(async (owner) => {
+      const stub = await getNamedProjectDataStub(env, projectId, owner.ownerName);
+      return {
+        ownerName: owner.ownerName,
+        results: await stub.archiveSearchMessages(owner, query, roles, limit),
+      };
+    }),
+  ]);
+  await assertProjectWidePlaneAuthority(
+    env,
+    projectId,
+    planes.flatMap((plane) =>
+      plane.results.map((result) => ({
+        ownerName: plane.ownerName,
+        sessionId: result.sessionId,
+      }))
+    )
+  );
+  const results = planes
+    .flatMap((plane) => plane.results)
+    .sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id))
+    .slice(0, limit);
+  return {
+    results,
+    partial,
+    ownersQueried: owners.length + 1,
+    reason: partial ? 'archive_owner_limit_reached' : null,
+  };
+}
+
+// =========================================================================
+// Terminal archive coordinator RPC bridge (external Worker sweep only)
+// =========================================================================
+
+export async function inspectArchiveSourceEligibility(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  now: number,
+  terminalGraceMs: number
+): Promise<SourceArchiveEligibility> {
   const stub = await getStub(env, projectId);
-  return stub.searchMessages(query, sessionId, roles, limit);
+  return stub.archiveInspectSourceEligibility(projectId, sessionId, now, terminalGraceMs);
+}
+
+export async function getArchiveSourceSessionAnchor(
+  env: Env,
+  projectId: string,
+  sessionId: string
+): Promise<Record<string, unknown>> {
+  const stub = await getStub(env, projectId);
+  return stub.archiveGetSourceSessionAnchor(projectId, sessionId);
+}
+
+export async function establishArchiveSourceIntent(
+  env: Env,
+  fence: ArchiveRpcFence
+): Promise<void> {
+  const stub = await getStub(env, fence.projectId);
+  await stub.archiveEstablishSourceIntent(fence);
+}
+
+export async function readArchiveSourceChunk(
+  env: Env,
+  fence: ArchiveRpcFence,
+  table: ArchiveChunk['table'],
+  chunkIndex: number,
+  afterKey: string | null,
+  maxRows: number,
+  maxBytes: number
+): Promise<ArchiveChunk> {
+  const stub = await getStub(env, fence.projectId);
+  return stub.archiveReadSourceChunk(fence, table, chunkIndex, afterKey, maxRows, maxBytes);
+}
+
+export async function getArchiveRehomeSourceSessionAnchor(
+  env: Env,
+  fence: ArchiveRehomeSourceFence
+): Promise<Record<string, unknown>> {
+  const stub = await getNamedProjectDataStub(env, fence.projectId, fence.sourceOwnerName);
+  return stub.archiveGetRehomeSourceSessionAnchor(fence);
+}
+
+export async function establishArchiveRehomeSourceIntent(
+  env: Env,
+  fence: ArchiveRehomeSourceFence
+): Promise<void> {
+  const stub = await getNamedProjectDataStub(env, fence.projectId, fence.sourceOwnerName);
+  await stub.archiveEstablishRehomeSourceIntent(fence);
+}
+
+export async function readArchiveRehomeSourceChunk(
+  env: Env,
+  fence: ArchiveRehomeSourceFence,
+  table: ArchiveChunk['table'],
+  chunkIndex: number,
+  afterKey: string | null,
+  maxRows: number,
+  maxBytes: number
+): Promise<ArchiveChunk> {
+  const stub = await getNamedProjectDataStub(env, fence.projectId, fence.sourceOwnerName);
+  return stub.archiveReadRehomeSourceChunk(fence, table, chunkIndex, afterKey, maxRows, maxBytes);
+}
+
+export async function prepareArchiveTarget(
+  env: Env,
+  fence: ArchiveRpcFence,
+  sessionAnchor: Record<string, unknown>
+): Promise<void> {
+  const stub = await getNamedProjectDataStub(env, fence.projectId, fence.ownerName);
+  await stub.archivePrepareTarget(fence, sessionAnchor);
+}
+
+export async function commitArchiveTargetChunk(
+  env: Env,
+  fence: ArchiveRpcFence,
+  chunk: ArchiveChunk,
+  r2Key: string
+): Promise<void> {
+  const stub = await getNamedProjectDataStub(env, fence.projectId, fence.ownerName);
+  await stub.archiveCommitTargetChunk(fence, chunk, r2Key);
+}
+
+export async function resetArchiveTargetFromRecovery(
+  env: Env,
+  fence: ArchiveRpcFence
+): Promise<void> {
+  const stub = await getNamedProjectDataStub(env, fence.projectId, fence.ownerName);
+  await stub.archiveResetTargetFromRecovery(fence);
+}
+
+export async function beginArchiveTargetSealing(env: Env, fence: ArchiveRpcFence): Promise<void> {
+  const stub = await getNamedProjectDataStub(env, fence.projectId, fence.ownerName);
+  await stub.archiveBeginTargetSealing(fence);
+}
+
+export async function verifyNextArchiveTargetChunk(
+  env: Env,
+  fence: ArchiveRpcFence
+): Promise<{ done: boolean; verified: boolean }> {
+  const stub = await getNamedProjectDataStub(env, fence.projectId, fence.ownerName);
+  return stub.archiveVerifyNextTargetChunk(fence);
+}
+
+export async function sealArchiveTarget(
+  env: Env,
+  fence: ArchiveRpcFence,
+  aggregateHash: string,
+  manifestR2Key: string
+): Promise<void> {
+  const stub = await getNamedProjectDataStub(env, fence.projectId, fence.ownerName);
+  await stub.archiveSealTarget(fence, aggregateHash, manifestR2Key);
+}
+
+export async function inspectArchiveTarget(env: Env, fence: ArchiveRpcFence) {
+  const stub = await getNamedProjectDataStub(env, fence.projectId, fence.ownerName);
+  return stub.archiveInspectTarget(fence);
+}
+
+export async function inspectArchiveTargetForReconciliation(env: Env, fence: ArchiveRpcFence) {
+  const stub = await getNamedProjectDataStub(env, fence.projectId, fence.ownerName);
+  return stub.archiveInspectTargetForReconciliation(fence);
+}
+
+export async function getNextArchiveTargetManifestPage(
+  env: Env,
+  fence: ArchiveRpcFence,
+  maxEntries: number
+) {
+  const stub = await getNamedProjectDataStub(env, fence.projectId, fence.ownerName);
+  return stub.archiveGetNextTargetManifestPage(fence, maxEntries);
+}
+
+export async function commitArchiveTargetManifestPage(
+  env: Env,
+  fence: ArchiveRpcFence,
+  page: Omit<
+    import('../durable-objects/project-data/archive-sharding').ArchiveManifestPage,
+    'done'
+  >,
+  pageR2Key: string,
+  aggregateHash: string
+): Promise<void> {
+  const stub = await getNamedProjectDataStub(env, fence.projectId, fence.ownerName);
+  await stub.archiveCommitTargetManifestPage(fence, page, pageR2Key, aggregateHash);
+}
+
+export async function finalizeArchiveSource(
+  env: Env,
+  fence: ArchiveRpcFence,
+  aggregateHash: string,
+  manifestR2Key: string
+): Promise<SourceDeletedProof> {
+  const stub = await getStub(env, fence.projectId);
+  return stub.archiveFinalizeSource(fence, aggregateHash, manifestR2Key);
+}
+
+export async function inspectArchiveSourceProof(
+  env: Env,
+  projectId: string,
+  sessionId: string
+): Promise<SourceDeletedProof> {
+  const stub = await getStub(env, projectId);
+  return stub.archiveInspectSourceProof(projectId, sessionId);
+}
+
+export async function finalizeArchiveRehomeSource(
+  env: Env,
+  fence: ArchiveRehomeSourceFence,
+  aggregateHash: string,
+  manifestR2Key: string
+): Promise<SourceDeletedProof> {
+  const stub = await getNamedProjectDataStub(env, fence.projectId, fence.sourceOwnerName);
+  return stub.archiveFinalizeRehomeSource(fence, aggregateHash, manifestR2Key);
+}
+
+export async function inspectArchiveRehomeSourceProof(
+  env: Env,
+  fence: ArchiveRehomeSourceFence
+): Promise<SourceDeletedProof> {
+  const stub = await getNamedProjectDataStub(env, fence.projectId, fence.sourceOwnerName);
+  return stub.archiveInspectRehomeSourceProof(
+    fence.projectId,
+    fence.sessionId,
+    fence.sourceGeneration,
+    fence.sourceOwnerName
+  );
+}
+
+export async function markArchiveTargetAuthoritative(
+  env: Env,
+  fence: ArchiveRpcFence,
+  aggregateHash: string
+): Promise<void> {
+  const stub = await getNamedProjectDataStub(env, fence.projectId, fence.ownerName);
+  await stub.archiveMarkTargetAuthoritative(fence, aggregateHash);
+}
+
+export async function completeArchiveRootCopyback(
+  env: Env,
+  fence: ArchiveRpcFence,
+  aggregateHash: string,
+  routingVersion: number
+): Promise<void> {
+  const stub = await getNamedProjectDataStub(env, fence.projectId, fence.ownerName);
+  await stub.archiveCompleteRootCopyback(fence, aggregateHash, routingVersion);
+}
+
+export async function getArchiveOwnerDatabaseSize(
+  env: Env,
+  projectId: string,
+  ownerName: string
+): Promise<number> {
+  const stub = await getNamedProjectDataStub(env, projectId, ownerName);
+  return stub.archiveGetDatabaseSize(ownerName);
+}
+
+export async function getArchiveTargetCanonicalBytes(
+  env: Env,
+  expected: {
+    projectId: string;
+    sessionId: string;
+    migrationId: string;
+    ownerName: string;
+    generation: number;
+  }
+): Promise<number> {
+  const stub = await getNamedProjectDataStub(env, expected.projectId, expected.ownerName);
+  return stub.archiveGetTargetCanonicalBytes(expected);
 }
 
 // =========================================================================
@@ -779,6 +1394,7 @@ export async function listCommentThreads(
   projectId: string,
   input: ListCommentThreadsInput
 ): Promise<MessageCommentListResponse> {
+  await resolveProjectDataOwnerLocation(env.DATABASE, projectId, input.sessionId);
   return callProjectDataWithRetry(env, projectId, 'listCommentThreads', (stub) =>
     stub.listCommentThreads(input)
   );
@@ -790,6 +1406,7 @@ export async function getCommentThread(
   sessionId: string,
   threadId: string
 ): Promise<MessageCommentThread | null> {
+  await resolveProjectDataOwnerLocation(env.DATABASE, projectId, sessionId);
   return callProjectDataWithRetry(env, projectId, 'getCommentThread', (stub) =>
     stub.getCommentThread({ sessionId, threadId })
   );
@@ -800,6 +1417,7 @@ export async function createCommentThread(
   projectId: string,
   input: CreateCommentThreadInput
 ): Promise<MessageCommentMutationResponse> {
+  await assertProjectDataSessionWriteAllowed(env.DATABASE, projectId, input.sessionId);
   return callProjectDataNoRetry(env, projectId, 'createCommentThread', (stub) =>
     stub.createCommentThread(input)
   );
@@ -810,6 +1428,7 @@ export async function createCommentReply(
   projectId: string,
   input: CreateCommentReplyInput
 ): Promise<MessageCommentReplyMutationResponse> {
+  await assertProjectDataSessionWriteAllowed(env.DATABASE, projectId, input.sessionId);
   return callProjectDataNoRetry(env, projectId, 'createCommentReply', (stub) =>
     stub.createCommentReply(input)
   );
@@ -820,6 +1439,7 @@ export async function updateCommentThreadStatus(
   projectId: string,
   input: UpdateCommentStatusInput & { status: CommentStatus }
 ): Promise<MessageCommentMutationResponse> {
+  await assertProjectDataSessionWriteAllowed(env.DATABASE, projectId, input.sessionId);
   return callProjectDataNoRetry(env, projectId, 'updateCommentThreadStatus', (stub) =>
     stub.updateCommentThreadStatus(input)
   );
@@ -1034,6 +1654,7 @@ export async function markAgentCompleted(
   projectId: string,
   sessionId: string
 ): Promise<void> {
+  await assertProjectDataSessionWriteAllowed(env.DATABASE, projectId, sessionId);
   const stub = await getStub(env, projectId);
   return stub.markAgentCompleted(sessionId);
 }
@@ -1100,6 +1721,7 @@ export async function scheduleIdleCleanup(
   workspaceId: string,
   taskId: string | null
 ): Promise<{ cleanupAt: number }> {
+  await assertProjectDataSessionWriteAllowed(env.DATABASE, projectId, sessionId);
   const stub = await getStub(env, projectId);
   return stub.scheduleIdleCleanup(sessionId, workspaceId, taskId);
 }
@@ -1109,6 +1731,7 @@ export async function cancelIdleCleanup(
   projectId: string,
   sessionId: string
 ): Promise<void> {
+  await assertProjectDataSessionWriteAllowed(env.DATABASE, projectId, sessionId);
   const stub = await getStub(env, projectId);
   return stub.cancelIdleCleanup(sessionId);
 }
@@ -1118,6 +1741,7 @@ export async function resetIdleCleanup(
   projectId: string,
   sessionId: string
 ): Promise<{ cleanupAt: number }> {
+  await assertProjectDataSessionWriteAllowed(env.DATABASE, projectId, sessionId);
   const stub = await getStub(env, projectId);
   return stub.resetIdleCleanup(sessionId);
 }
@@ -1346,8 +1970,11 @@ export async function reconcileTaskWaits(env: Env, projectId: string, childTaskI
 
 /** Get the latest durable plan message snapshot for a chat session. */
 export async function getLatestPersistedPlan(env: Env, projectId: string, sessionId: string) {
-  const stub = await getStub(env, projectId);
-  return stub.getLatestPersistedPlan(sessionId);
+  const location = await resolveProjectDataOwnerLocation(env.DATABASE, projectId, sessionId);
+  const stub = await getNamedProjectDataStub(env, projectId, location.owner.name);
+  return location.state === 'root'
+    ? stub.getLatestPersistedPlan(sessionId)
+    : stub.archiveGetLatestPersistedPlan(archiveExpectedLocation(location));
 }
 
 /**
@@ -1689,6 +2316,7 @@ export async function acceptPromptDelivery(
   projectId: string,
   input: AcceptPromptDeliveryInput
 ): Promise<AcceptedPromptDelivery> {
+  await assertProjectDataSessionWriteAllowed(env.DATABASE, projectId, input.targetSessionId);
   const stub = await getStub(env, projectId);
   return stub.acceptPromptDelivery(input);
 }

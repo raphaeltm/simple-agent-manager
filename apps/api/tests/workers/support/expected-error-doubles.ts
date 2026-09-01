@@ -1,6 +1,7 @@
 import { NodeLifecycle } from '../../../src/durable-objects/node-lifecycle';
 import { ProjectData } from '../../../src/durable-objects/project-data';
 import * as mailbox from '../../../src/durable-objects/project-data/mailbox';
+import * as messagePersistence from '../../../src/durable-objects/project-data/message-persistence';
 import * as messages from '../../../src/durable-objects/project-data/messages';
 
 export interface CapturedExpectedError {
@@ -24,12 +25,72 @@ function capture(error: unknown): CapturedExpectedError {
 
 type ProjectDataExpectedErrorOperation =
   | {
+      operation: 'ensureProjectId';
+      args: Parameters<ProjectData['ensureProjectId']>;
+    }
+  | {
+      operation: 'archivePrepareTarget';
+      args: Parameters<ProjectData['archivePrepareTarget']>;
+    }
+  | {
+      operation: 'archiveFinalizeSource';
+      args: Parameters<ProjectData['archiveFinalizeSource']>;
+    }
+  | {
+      operation: 'archiveReadSourceChunk';
+      args: Parameters<ProjectData['archiveReadSourceChunk']>;
+    }
+  | {
+      operation: 'archiveGetNextTargetManifestPage';
+      args: Parameters<ProjectData['archiveGetNextTargetManifestPage']>;
+    }
+  | {
+      operation: 'archiveCommitTargetChunk';
+      args: Parameters<ProjectData['archiveCommitTargetChunk']>;
+    }
+  | {
+      operation: 'acceptPromptDelivery';
+      args: Parameters<ProjectData['acceptPromptDelivery']>;
+    }
+  | {
       operation: 'persistMessageBatch';
       args: Parameters<ProjectData['persistMessageBatch']>;
     }
   | {
       operation: 'persistMessage';
       args: Parameters<ProjectData['persistMessage']>;
+    }
+  | {
+      operation: 'getMessages';
+      args: Parameters<ProjectData['getMessages']>;
+    }
+  | {
+      operation: 'getMessageCount';
+      args: Parameters<ProjectData['getMessageCount']>;
+    }
+  | {
+      operation: 'getMessageToolContent';
+      args: Parameters<ProjectData['getMessageToolContent']>;
+    }
+  | {
+      operation: 'getArchivedToolPayloads';
+      args: Parameters<ProjectData['getArchivedToolPayloads']>;
+    }
+  | {
+      operation: 'archiveGetMessages';
+      args: Parameters<ProjectData['archiveGetMessages']>;
+    }
+  | {
+      operation: 'searchMessages';
+      args: Parameters<ProjectData['searchMessages']>;
+    }
+  | {
+      operation: 'getLatestPersistedPlan';
+      args: Parameters<ProjectData['getLatestPersistedPlan']>;
+    }
+  | {
+      operation: 'createCommentThread';
+      args: Parameters<ProjectData['createCommentThread']>;
     }
   | {
       operation: 'enqueueMailboxMessage';
@@ -126,10 +187,42 @@ export class ProjectDataTestDouble extends ProjectData {
     const input = (await request.json()) as ProjectDataExpectedErrorOperation;
 
     try {
-      if (input.operation === 'persistMessageBatch') {
+      if (input.operation === 'ensureProjectId') {
+        this.ensureProjectId(...input.args);
+      } else if (input.operation === 'archivePrepareTarget') {
+        this.archivePrepareTarget(...input.args);
+      } else if (input.operation === 'archiveFinalizeSource') {
+        await this.archiveFinalizeSource(...input.args);
+      } else if (input.operation === 'archiveReadSourceChunk') {
+        await this.archiveReadSourceChunk(...input.args);
+      } else if (input.operation === 'archiveGetNextTargetManifestPage') {
+        this.archiveGetNextTargetManifestPage(...input.args);
+      } else if (input.operation === 'archiveCommitTargetChunk') {
+        await this.archiveCommitTargetChunk(...input.args);
+      } else if (input.operation === 'acceptPromptDelivery') {
+        await this.acceptPromptDelivery(...input.args);
+      } else if (input.operation === 'persistMessageBatch') {
+        messagePersistence.assertRootMessageWriteAllowed(this.ctx.storage.sql, input.args[0]);
         messages.persistMessageBatch(this.ctx.storage.sql, this.env, ...input.args);
       } else if (input.operation === 'persistMessage') {
+        messagePersistence.assertRootMessageWriteAllowed(this.ctx.storage.sql, input.args[0]);
         messages.persistMessage(this.ctx.storage.sql, this.env, ...input.args);
+      } else if (input.operation === 'getMessages') {
+        await this.getMessages(...input.args);
+      } else if (input.operation === 'getMessageCount') {
+        this.getMessageCount(...input.args);
+      } else if (input.operation === 'getMessageToolContent') {
+        await this.getMessageToolContent(...input.args);
+      } else if (input.operation === 'getArchivedToolPayloads') {
+        await this.getArchivedToolPayloads(...input.args);
+      } else if (input.operation === 'archiveGetMessages') {
+        this.archiveGetMessages(...input.args);
+      } else if (input.operation === 'searchMessages') {
+        this.searchMessages(...input.args);
+      } else if (input.operation === 'getLatestPersistedPlan') {
+        this.getLatestPersistedPlan(...input.args);
+      } else if (input.operation === 'createCommentThread') {
+        this.createCommentThread(...input.args);
       } else if (input.operation === 'admitProjectEvent') {
         this.admitProjectEvent(...input.args);
       } else if (input.operation === 'createProjectEventSubscription') {

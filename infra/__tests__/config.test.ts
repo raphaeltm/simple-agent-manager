@@ -138,6 +138,7 @@ describe('infra config parsing', () => {
     'cli',
     'compose-image-artifacts',
     'library',
+    'project-data',
     'session-snapshots',
     'temp-uploads',
     'tts',

@@ -54,28 +54,30 @@ async function lifecycleEvents(projectId: string): Promise<
   const id = env.PROJECT_DATA.idFromName(projectId);
   const stub = env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectDataTestDouble>;
   await stub.ensureProjectId(projectId);
-  return runInDurableObject(stub, async (_instance, state) =>
-    state.storage.sql
-      .exec(
-        `SELECT event_type, subject_type, subject_id, severity, delivery_key,
+  return runInDurableObject(
+    stub,
+    async (_instance, state) =>
+      state.storage.sql
+        .exec(
+          `SELECT event_type, subject_type, subject_id, severity, delivery_key,
                 payload_fingerprint, metadata_json, display_json, raw_payload_ref_json,
                 duplicate_count
            FROM project_events
           WHERE source = 'sam.lifecycle'
           ORDER BY received_at, id`
-      )
-      .toArray() as Array<{
-      event_type: string;
-      subject_type: string;
-      subject_id: string;
-      severity: string;
-      delivery_key: string;
-      payload_fingerprint: string;
-      metadata_json: string;
-      display_json: string;
-      raw_payload_ref_json: string | null;
-      duplicate_count: number;
-    }>
+        )
+        .toArray() as Array<{
+        event_type: string;
+        subject_type: string;
+        subject_id: string;
+        severity: string;
+        delivery_key: string;
+        payload_fingerprint: string;
+        metadata_json: string;
+        display_json: string;
+        raw_payload_ref_json: string | null;
+        duplicate_count: number;
+      }>
   );
 }
 
@@ -255,12 +257,7 @@ describe('project-data service: session lifecycle', () => {
       status: 'running',
     });
 
-    const sessionId = await svc.createSession(
-      testEnv,
-      pid,
-      workspaceId,
-      `Snapshot wake ${suffix}`
-    );
+    const sessionId = await svc.createSession(testEnv, pid, workspaceId, `Snapshot wake ${suffix}`);
     expect(await svc.sleepSession(testEnv, pid, sessionId)).toBe(true);
     if (opts.stopProjectDataSession) {
       await svc.stopSession(testEnv, pid, sessionId);
@@ -795,9 +792,10 @@ describe('project-data service: message persistence', () => {
     );
     await svc.persistMessage(testEnv, pid, sessionId, 'user', 'Deploy to production', null);
 
-    const results = await svc.searchMessages(testEnv, pid, 'authentication');
-    expect(results.length).toBeGreaterThanOrEqual(2);
-    for (const r of results) {
+    const search = await svc.searchMessages(testEnv, pid, 'authentication');
+    expect(search.results.length).toBeGreaterThanOrEqual(2);
+    expect(search).toMatchObject({ partial: false, ownersQueried: 1, reason: null });
+    for (const r of search.results) {
       expect(r.snippet.toLowerCase()).toContain('authentication');
     }
   });
