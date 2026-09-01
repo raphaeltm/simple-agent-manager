@@ -83,14 +83,21 @@ export async function runSessionSleepLifecycleRepair(
     .where(
       and(
         isNull(schema.sessionSnapshots.sleepingAt),
-        inArray(schema.sessionSnapshots.sleepStatus, ['preparing', 'stopping']),
-        lte(
-          sql`CASE
-                WHEN ${schema.sessionSnapshots.sleepStatus} = 'stopping'
-                  THEN COALESCE(${schema.sessionSnapshots.sleepStoppingSince}, ${schema.sessionSnapshots.sleepClaimedAt}, ${schema.sessionSnapshots.updatedAt}, ${schema.sessionSnapshots.createdAt})
-                ELSE COALESCE(${schema.sessionSnapshots.sleepClaimedAt}, ${schema.sessionSnapshots.updatedAt}, ${schema.sessionSnapshots.createdAt})
-              END`,
-          cutoff
+        or(
+          and(
+            eq(schema.sessionSnapshots.sleepStatus, 'preparing'),
+            lte(
+              sql`COALESCE(${schema.sessionSnapshots.sleepClaimedAt}, ${schema.sessionSnapshots.updatedAt}, ${schema.sessionSnapshots.createdAt})`,
+              cutoff
+            )
+          ),
+          and(
+            eq(schema.sessionSnapshots.sleepStatus, 'stopping'),
+            lte(
+              sql`COALESCE(${schema.sessionSnapshots.sleepStoppingSince}, ${schema.sessionSnapshots.sleepClaimedAt}, ${schema.sessionSnapshots.updatedAt}, ${schema.sessionSnapshots.createdAt})`,
+              cutoff
+            )
+          )
         ),
         gt(schema.sessionSnapshots.expiresAt, now.toISOString()),
         or(
