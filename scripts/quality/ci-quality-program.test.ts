@@ -69,7 +69,46 @@ describe('deterministic quality-program CI wiring', () => {
   it('enforces dependency evidence and blocks apps/api/src semantic findings', () => {
     const quality = jobBlock(ci, 'code-quality');
     expect(quality).toContain('fetch-depth: 0');
+    expect(quality).toContain('needs: [changes]');
+    expect(quality).toContain("needs.changes.outputs.repo-quality == 'true'");
     expect(quality).toContain('pnpm quality:direct-dependency-evidence');
     expect(quality).toContain('pnpm quality:runtime-boundary-semantics');
+  });
+
+  it('keeps marketing-site changes on a narrow CI path', () => {
+    const changes = jobBlock(ci, 'changes');
+    expect(changes).toContain('marketing-site: ${{ steps.filter.outputs.marketing-site }}');
+    expect(changes).toContain('repo-quality: ${{ steps.filter.outputs.repo-quality }}');
+    expect(changes).toContain('marketing-site:');
+    expect(changes).toContain("- 'apps/www/**'");
+
+    const marketing = jobBlock(ci, 'marketing-site');
+    expect(marketing).toContain('needs: [changes]');
+    expect(marketing).toContain("needs.changes.outputs.marketing-site == 'true'");
+    expect(marketing).toContain('pnpm --filter @simple-agent-manager/www lint');
+    expect(marketing).toContain('pnpm --filter @simple-agent-manager/www typecheck');
+    expect(marketing).toContain(
+      'pnpm --filter @simple-agent-manager/www build && pnpm --filter @simple-agent-manager/www check:links'
+    );
+    expect(marketing).toContain('pnpm --filter @simple-agent-manager/www test:browser');
+
+    for (const jobName of [
+      'lint',
+      'typecheck',
+      'test',
+      'build',
+      'workspace-quality-surfaces',
+      'code-quality',
+    ]) {
+      const job = jobBlock(ci, jobName);
+      expect(job, `${jobName} should be repo-quality gated`).toContain('needs: [changes]');
+      expect(job, `${jobName} should not run for marketing-only changes`).toContain(
+        "needs.changes.outputs.repo-quality == 'true'"
+      );
+    }
+
+    expect(jobBlock(ci, 'durable-object-workers')).toContain("needs.changes.outputs.api == 'true'");
+    expect(jobBlock(ci, 'pulumi-infra')).toContain("needs.changes.outputs.infra == 'true'");
+    expect(jobBlock(ci, 'deploy-scripts')).toContain("needs.changes.outputs.deploy-scripts == 'true'");
   });
 });

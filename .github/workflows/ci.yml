@@ -36,10 +36,15 @@ jobs:
     timeout-minutes: 5
     runs-on: ubuntu-latest
     outputs:
+      api: ${{ steps.filter.outputs.api }}
       vm-agent: ${{ steps.filter.outputs.vm-agent }}
       cli: ${{ steps.filter.outputs.cli }}
       devcontainer: ${{ steps.filter.outputs.devcontainer }}
       devcontainer-volume-mount: ${{ steps.filter.outputs.devcontainer-volume-mount }}
+      infra: ${{ steps.filter.outputs.infra }}
+      deploy-scripts: ${{ steps.filter.outputs.deploy-scripts }}
+      marketing-site: ${{ steps.filter.outputs.marketing-site }}
+      repo-quality: ${{ steps.filter.outputs.repo-quality }}
       web-ui: ${{ steps.filter.outputs.web-ui }}
       go-modules: ${{ steps.filter.outputs.go-modules }}
     steps:
@@ -48,6 +53,15 @@ jobs:
         id: filter
         with:
           filters: |
+            api:
+              - 'apps/api/**'
+              - 'packages/shared/**'
+              - 'packages/task-runner/**'
+              - 'packages/config/**'
+              - 'scripts/quality/*worker*.ts'
+              - 'scripts/quality/*migration*.ts'
+              - 'scripts/quality/runtime-boundary*.ts'
+              - '.github/workflows/ci.yml'
             vm-agent:
               - 'packages/vm-agent/**'
               - '.github/workflows/ci.yml'
@@ -64,6 +78,35 @@ jobs:
               - 'scripts/ci/**'
               - 'packages/vm-agent/**'
               - 'packages/cloud-init/**'
+              - '.github/workflows/ci.yml'
+            infra:
+              - 'infra/**'
+              - '.github/workflows/ci.yml'
+            deploy-scripts:
+              - 'scripts/deploy/**'
+              - 'scripts/quality/deploy*.test.ts'
+              - 'scripts/quality/sync-wrangler-config.test.ts'
+              - 'scripts/quality/do-migration-compatibility.test.ts'
+              - '.github/workflows/deploy*.yml'
+              - '.github/workflows/provision*.yml'
+              - '.github/workflows/teardown*.yml'
+              - '.github/workflows/ci.yml'
+            marketing-site:
+              - 'apps/www/**'
+              - '.github/workflows/deploy-www.yml'
+            repo-quality:
+              - 'apps/api/**'
+              - 'apps/web/**'
+              - 'infra/**'
+              - 'packages/**'
+              - 'scripts/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'tsconfig*.json'
+              - 'vitest*.ts'
+              - 'eslint.config.*'
+              - 'prettier.config.*'
               - '.github/workflows/ci.yml'
             web-ui:
               - 'apps/web/**'
@@ -158,7 +201,8 @@ jobs:
 
   lint:
     name: Lint
-    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -241,7 +285,8 @@ jobs:
 
   typecheck:
     name: Type Check
-    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -265,7 +310,8 @@ jobs:
 
   test:
     name: Test
-    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -289,7 +335,8 @@ jobs:
 
   build:
     name: Build
-    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -310,7 +357,8 @@ jobs:
 
   workspace-quality-surfaces:
     name: Workspace Quality Surfaces
-    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
@@ -355,6 +403,50 @@ jobs:
           name: workspace-browser-evidence
           path: .codex/tmp/playwright-screenshots/
           if-no-files-found: error
+          retention-days: 7
+
+  marketing-site:
+    name: Marketing Site
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.marketing-site == 'true'
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint marketing site
+        run: pnpm --filter @simple-agent-manager/www lint
+
+      - name: Type check marketing site
+        run: pnpm --filter @simple-agent-manager/www typecheck
+
+      - name: Build public docs and check internal links
+        run: pnpm --filter @simple-agent-manager/www build && pnpm --filter @simple-agent-manager/www check:links
+
+      - name: Install Chromium
+        working-directory: apps/www
+        run: ./node_modules/.bin/playwright install --with-deps chromium
+
+      - name: Test public site in desktop and mobile browsers
+        run: pnpm --filter @simple-agent-manager/www test:browser
+
+      - name: Upload marketing browser evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: marketing-browser-evidence
+          path: .codex/tmp/playwright-screenshots/
+          if-no-files-found: ignore
           retention-days: 7
 
   playwright-visual:
@@ -418,7 +510,8 @@ jobs:
 
   deploy-scripts:
     name: Validate Deploy Scripts
-    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.deploy-scripts == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -457,7 +550,8 @@ jobs:
 
   code-quality:
     name: Code Quality Checks
-    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -556,7 +650,8 @@ jobs:
 
   durable-object-workers:
     name: Durable Object Workers
-    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.api == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -583,7 +678,8 @@ jobs:
 
   pulumi-infra:
     name: Pulumi Infrastructure Tests
-    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.infra == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
