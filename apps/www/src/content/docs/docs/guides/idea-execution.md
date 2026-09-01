@@ -114,7 +114,7 @@ An agent running inside a workspace has access to MCP tools that provide project
 
 | Tool                  | Purpose                                                                       |
 | --------------------- | ----------------------------------------------------------------------------- |
-| `dispatch_task`       | Spawn work using the selected profile runtime or an explicit runtime override |
+| `dispatch_task`       | Spawn work on VM by default; use containers only for profile/requested Instant work or no-credential fallback |
 | `create_idea`         | Create a new idea                                                             |
 | `update_idea`         | Update an idea's title, content, priority, or status                          |
 | `list_ideas`          | View existing ideas                                                           |

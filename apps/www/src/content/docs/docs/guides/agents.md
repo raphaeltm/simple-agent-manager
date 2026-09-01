@@ -173,7 +173,7 @@ Running agents have access to project-aware MCP tools:
 
 | Tool                                | Description                                                                                                                                        |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dispatch_task`                     | Spawn follow-up work using the selected profile runtime, or an explicit `runtime` override                                                         |
+| `dispatch_task`                     | Spawn follow-up work on VM by default; use `cf-container` only for profile/requested Instant work or no-credential fallback                        |
 | `create_idea`                       | Create a new idea                                                                                                                                  |
 | `update_idea`                       | Update an idea's title, content, priority, or status                                                                                               |
 | `list_ideas`                        | View project ideas                                                                                                                                 |
