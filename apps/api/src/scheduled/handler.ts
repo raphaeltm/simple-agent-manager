@@ -24,6 +24,7 @@ import {
   isHourlyPlatformMaintenanceCron,
   scheduleHourlyPlatformMaintenance,
 } from './platform-feedback-hourly';
+import { runProjectDataArchiveSharding } from './project-data-archive-sharding';
 import { runProviderOrphanReconciliation } from './provider-orphan-reconciliation';
 import { runSessionSleepSweep } from './session-sleep';
 import { runSessionTaskReconciliation } from './session-task-reconciliation';
@@ -153,6 +154,9 @@ export async function scheduled(
   const terminalSessionLedger = await sweeps.isolate('terminal_session_ledger_reconciliation', () =>
     runTerminalSessionLedgerReconciliation(env)
   );
+  const projectDataArchiveSharding = await sweeps.isolate('project_data_archive_sharding', () =>
+    runProjectDataArchiveSharding(env)
+  );
   const sessionSleep = await sweeps.isolate('session_sleep', () =>
     runSessionSleepSweep(env, new Date(), ctx)
   );
@@ -270,6 +274,15 @@ export async function scheduled(
     terminalSessionSummarySkipped: terminalSessionLedger?.summarySkipped,
     terminalSessionSummaryErrors: terminalSessionLedger?.summaryErrors,
     terminalSessionSummaryRemaining: terminalSessionLedger?.remainingCandidateSummaries,
+    projectDataArchiveShardingEnabled: projectDataArchiveSharding?.enabled,
+    projectDataArchiveShardingSkipped: projectDataArchiveSharding?.skipped,
+    projectDataArchiveShardingSkipReason: projectDataArchiveSharding?.skipReason,
+    projectDataArchiveShardingSelected: projectDataArchiveSharding?.selected,
+    projectDataArchiveShardingMigrated: projectDataArchiveSharding?.migrated,
+    projectDataArchiveShardingRecoveredCrashGaps: projectDataArchiveSharding?.recoveredCrashGaps,
+    projectDataArchiveShardingFailed: projectDataArchiveSharding?.failed,
+    projectDataArchiveShardingChunksCopied: projectDataArchiveSharding?.chunksCopied,
+    projectDataArchiveShardingRowsCopied: projectDataArchiveSharding?.rowsCopied,
     sessionSleepSelected: sessionSleep?.selected,
     sessionSleepReconciled: sessionSleep?.reconciled,
     sessionSleepClaimed: sessionSleep?.claimed,

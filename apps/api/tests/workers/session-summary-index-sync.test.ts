@@ -10,7 +10,7 @@
  *     on the two paths agreeing, so a divergence has to be a test failure rather
  *     than a subtly wrong sidebar in production.
  */
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { Env as WorkerEnv } from '../../src/env';
@@ -64,7 +64,7 @@ describe('D1 session index sync', () => {
     expect(coverage?.synced_at).toBeGreaterThan(0);
   });
 
-  it('marks coverage incomplete when the project exceeds the row cap', async () => {
+  it('marks coverage incomplete while bounded backfill still has remaining rows', async () => {
     await seed(projectId);
     const stub = getStub(projectId);
     await stub.ensureProjectId(projectId);
@@ -72,16 +72,19 @@ describe('D1 session index sync', () => {
     await stub.createSession('workspace-2', 'Two');
     await stub.createSession('workspace-3', 'Three');
 
-    // Cap below the session count — the mirror cannot be complete.
+    // Cap below the session count — the first bounded page cannot prove complete coverage.
     const cappedEnv = { ...env, SESSION_INDEX_MAX_ROWS: '2' };
-    const cappedStub = env.PROJECT_DATA.get(
-      env.PROJECT_DATA.idFromName(projectId)
-    ) as DurableObjectStub<ProjectDataTestDouble>;
-    await cappedStub.runSummarySyncWithEnvForTest({ SESSION_INDEX_MAX_ROWS: '2' });
+    await stub.runSummarySyncWithEnvForTest({ SESSION_INDEX_MAX_ROWS: '2' });
 
     const coverage = await readCoverage(projectId);
     expect(coverage?.session_count).toBe(3);
     expect(coverage?.complete).toBe(0);
+    const rows = await env.DATABASE.prepare(
+      'SELECT COUNT(*) AS cnt FROM session_summaries WHERE project_id = ?'
+    )
+      .bind(projectId)
+      .first<{ cnt: number }>();
+    expect(rows?.cnt).toBe(2);
 
     // And the read path must refuse to serve from an incomplete index.
     const out = await listSessionsFromIndex(cappedEnv as unknown as WorkerEnv, {
@@ -94,11 +97,7 @@ describe('D1 session index sync', () => {
     expect(out).toEqual({ missReason: 'incomplete_coverage' });
   });
 
-  it('stops mirroring rows once the project is provably over the cap', async () => {
-    // Circuit breaker. Session counts only grow, so an over-cap project can never
-    // reach complete=1 and the read path will fall back forever — mirroring rows
-    // into an index nothing reads is pure write cost. Without the breaker, every
-    // mutation on a large project re-wrote up to SESSION_INDEX_MAX_ROWS rows.
+  it('resumes bounded keyset backfill until coverage is complete', async () => {
     await seed(projectId);
     const stub = getStub(projectId);
     await stub.ensureProjectId(projectId);
@@ -107,6 +106,7 @@ describe('D1 session index sync', () => {
     await stub.createSession('workspace-3', 'Three');
 
     await stub.runSummarySyncWithEnvForTest({ SESSION_INDEX_MAX_ROWS: '2' });
+    await stub.runSummarySyncWithEnvForTest({ SESSION_INDEX_MAX_ROWS: '2' });
 
     const rows = await env.DATABASE.prepare(
       'SELECT COUNT(*) AS cnt FROM session_summaries WHERE project_id = ?'
@@ -114,11 +114,56 @@ describe('D1 session index sync', () => {
       .bind(projectId)
       .first<{ cnt: number }>();
 
-    // Coverage still recorded (so the gate knows to fall back), but no rows written.
-    expect(rows?.cnt).toBe(0);
+    expect(rows?.cnt).toBe(3);
     const coverage = await readCoverage(projectId);
-    expect(coverage?.complete).toBe(0);
+    expect(coverage?.complete).toBe(1);
     expect(coverage?.session_count).toBe(3);
+
+    const out = await listSessionsFromIndex(
+      { ...env, SESSION_INDEX_MAX_ROWS: '2' } as unknown as WorkerEnv,
+      {
+        projectId,
+        status: null,
+        limit: 20,
+        offset: 0,
+        createdByUserId: null,
+      }
+    );
+    if (!('result' in out)) throw new Error(`expected completed index, got ${out.missReason}`);
+    expect(out.result.total).toBe(3);
+  });
+
+  it('uses archive_last_message_at when raw messages have moved out of the root object', async () => {
+    await seed(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const sessionId = await stub.createSession('workspace-1', 'Archived anchor');
+    await stub.persistMessage(sessionId, 'user', 'message before archive', null);
+
+    const anchoredAt = 1_781_900_000_000;
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `UPDATE chat_sessions
+         SET status = 'stopped',
+             ended_at = ?,
+             archive_last_message_at = ?,
+             archive_state = 'source_deleted'
+         WHERE id = ?`,
+        anchoredAt + 1,
+        anchoredAt,
+        sessionId
+      );
+      state.storage.sql.exec('DELETE FROM chat_messages WHERE session_id = ?', sessionId);
+    });
+
+    await stub.runSummarySyncForTest();
+
+    const row = await env.DATABASE.prepare(
+      'SELECT last_message_at FROM session_summaries WHERE id = ?'
+    )
+      .bind(sessionId)
+      .first<{ last_message_at: number | null }>();
+    expect(row?.last_message_at).toBe(anchoredAt);
   });
 
   it('mirrors only rows changed since the last sync instead of the whole project', async () => {

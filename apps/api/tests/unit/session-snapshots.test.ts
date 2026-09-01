@@ -238,7 +238,7 @@ describe('session snapshot progress persistence', () => {
   it('does not let a late prepare reopen a finalized sleeping snapshot', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.projectDataSessionLocations]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -529,7 +529,9 @@ describe('session snapshot progress persistence', () => {
 
       expect(
         sqlite
-          .prepare(`SELECT capture_error, updated_at FROM session_snapshots WHERE id = 'snapshot-1'`)
+          .prepare(
+            `SELECT capture_error, updated_at FROM session_snapshots WHERE id = 'snapshot-1'`
+          )
           .get()
       ).toEqual({
         capture_error: 'real capture failure wit',
@@ -545,7 +547,7 @@ describe('session snapshot recovery lifecycle', () => {
   it('allows a degraded sleeping snapshot to be claimed for wake', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.projectDataSessionLocations]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -593,7 +595,11 @@ describe('session snapshot recovery lifecycle', () => {
   it('does not claim recovery when the guarded source task is terminal', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.tasks]);
+      createSchemaTables(sqlite, [
+        schema.sessionSnapshots,
+        schema.tasks,
+        schema.projectDataSessionLocations,
+      ]);
       sqlite
         .prepare(
           `INSERT INTO tasks
@@ -650,7 +656,11 @@ describe('session snapshot recovery lifecycle', () => {
   it('keeps a guarded source wakeable after its recovery task takes the session binding', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.tasks]);
+      createSchemaTables(sqlite, [
+        schema.sessionSnapshots,
+        schema.tasks,
+        schema.projectDataSessionLocations,
+      ]);
       sqlite.exec(`
         INSERT INTO tasks
           (id, project_id, user_id, chat_session_id, recovery_source_task_id, title,
@@ -700,7 +710,7 @@ describe('session snapshot recovery lifecycle', () => {
   it('clears the sleeping claim when snapshot recovery completes', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.projectDataSessionLocations]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -822,7 +832,7 @@ describe('session snapshot recovery lifecycle', () => {
   it('can fail a restored claim left behind by a crash before TaskRunner marker cleanup', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.projectDataSessionLocations]);
       sqlite.exec(`
         INSERT INTO session_snapshots
           (id, workspace_id, project_id, user_id, chat_session_id, runtime, status,
@@ -865,7 +875,7 @@ describe('session snapshot recovery lifecycle', () => {
   it('resets recovery_attempts on successful wake so the 4th cycle still succeeds', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.projectDataSessionLocations]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -896,9 +906,7 @@ describe('session snapshot recovery lifecycle', () => {
         });
 
         const afterClaim = sqlite
-          .prepare(
-            `SELECT recovery_attempts FROM session_snapshots WHERE id = 'snapshot-cycle'`
-          )
+          .prepare(`SELECT recovery_attempts FROM session_snapshots WHERE id = 'snapshot-cycle'`)
           .get() as { recovery_attempts: number };
         expect(afterClaim.recovery_attempts, `cycle ${cycle} attempts after claim`).toBe(1);
 
@@ -948,7 +956,7 @@ describe('session snapshot recovery lifecycle', () => {
   it('resets recovery_attempts on in-place wake (markSessionSnapshotAwakeInPlace)', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.projectDataSessionLocations]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -989,10 +997,78 @@ describe('session snapshot recovery lifecycle', () => {
     }
   });
 
+  it('fences snapshot recovery claims and in-place wake while ProjectData archive migration owns the session', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.projectDataSessionLocations]);
+      sqlite
+        .prepare(
+          `INSERT INTO session_snapshots
+             (id, workspace_id, node_id, project_id, user_id, chat_session_id,
+              agent_session_id, runtime, status, degradation, manifest_r2_key,
+              manifest_json, snapshot_generation, expires_at, sleep_status,
+              sleeping_at, recovery_attempts, updated_at)
+           VALUES ('snapshot-archive-fenced', 'workspace-1', 'node-1', 'project-1', 'user-1',
+              'chat-archive-fenced', 'agent-1', 'cf-container', 'available', 'none',
+              'snapshots/chat-archive-fenced/manifest.json', '{"status":"available"}',
+              'generation-final', '2026-09-01T00:00:00.000Z', 'sleeping',
+              '2026-08-15T00:00:00.000Z', 0, '2026-08-15T00:00:00.000Z')`
+        )
+        .run();
+      sqlite
+        .prepare(
+          `INSERT INTO project_data_session_locations
+             (project_id, session_id, location_state, owner_kind, owner_name,
+              generation, migration_id, routing_schema_version, updated_at)
+           VALUES ('project-1', 'chat-archive-fenced', 'migrating', 'archive_shard',
+                   'project-1:archive:g1:s0', 1, 'migration-1', 1, 1)`
+        )
+        .run();
+      const testEnv = env({ DATABASE: createSqliteD1(sqlite) });
+      const db = drizzle(testEnv.DATABASE, { schema });
+
+      await expect(
+        claimSessionSnapshotRecovery(db, testEnv, {
+          chatSessionId: 'chat-archive-fenced',
+          userId: 'user-1',
+          taskId: 'wake-task',
+          now: new Date('2026-08-15T01:00:00.000Z'),
+        })
+      ).resolves.toEqual({ status: 'unavailable', reason: 'archive_migration_fenced' });
+
+      await markSessionSnapshotAwakeInPlace(
+        testEnv,
+        'chat-archive-fenced',
+        'wake-task',
+        'workspace-new'
+      );
+
+      const row = sqlite
+        .prepare(
+          `SELECT recovery_status, sleep_status, sleeping_at, recovery_workspace_id
+             FROM session_snapshots WHERE id = 'snapshot-archive-fenced'`
+        )
+        .get() as {
+        recovery_status: string | null;
+        sleep_status: string | null;
+        sleeping_at: string | null;
+        recovery_workspace_id: string | null;
+      };
+      expect(row).toEqual({
+        recovery_status: null,
+        sleep_status: 'sleeping',
+        sleeping_at: '2026-08-15T00:00:00.000Z',
+        recovery_workspace_id: null,
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('3 consecutive failed wakes exhaust the budget — 4th claim is rejected', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.projectDataSessionLocations]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -1032,9 +1108,7 @@ describe('session snapshot recovery lifecycle', () => {
       }
 
       const afterFailures = sqlite
-        .prepare(
-          `SELECT recovery_attempts FROM session_snapshots WHERE id = 'snapshot-exhaust'`
-        )
+        .prepare(`SELECT recovery_attempts FROM session_snapshots WHERE id = 'snapshot-exhaust'`)
         .get() as { recovery_attempts: number };
       expect(afterFailures.recovery_attempts).toBe(3);
 

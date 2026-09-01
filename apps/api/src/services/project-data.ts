@@ -68,7 +68,10 @@ import type {
   UpdateCommentStatusInput,
   UpdateFileCommentStatusInput,
 } from '../durable-objects/project-data/comment-contracts';
-import { CommentNotFoundError } from '../durable-objects/project-data/comment-contracts';
+import {
+  CommentNotFoundError,
+  CommentValidationError,
+} from '../durable-objects/project-data/comment-contracts';
 import type { ProjectDataGroupedFtsCleanupResult } from '../durable-objects/project-data/grouped-fts-cleanup';
 import {
   ProjectEventAckPolicyError,
@@ -115,11 +118,17 @@ import type { RegisterTaskWaitInput } from '../durable-objects/project-data/task
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import {
+  PROJECT_DATA_ARCHIVE_DEFAULT_SEARCH_MAX_OWNERS,
+  PROJECT_DATA_ARCHIVE_MAX_SEARCH_OWNERS,
+  type ProjectDataArchiveOwnerRef,
+} from '../project-data-archive/contract';
+import {
   computeDurableObjectRetryDelayMs,
   getDurableObjectRetryConfig,
   isDurableObjectStorageFullError,
   isTransientDurableObjectError,
 } from './durable-object-retry';
+import { assertExactWriteAllowed, resolveExactReadOwner } from './project-data-archive-routing';
 import { ensureOncePerIsolate, forgetEnsuredProjectData } from './project-data-ensure-memo';
 import { toProjectDataStorageFullError } from './project-data-storage-errors';
 import {
@@ -143,13 +152,21 @@ import type { TaskAcpLivenessSignals } from './task-runtime-liveness';
  * second roundtrip per logical operation. See `project-data-ensure-memo.ts` for
  * the full justification and the list of consumers that depend on the stored id.
  */
-async function getStub(env: Env, projectId: string): Promise<DurableObjectStub<ProjectData>> {
-  const id = env.PROJECT_DATA.idFromName(projectId);
+async function getStubForOwner(
+  env: Env,
+  projectId: string,
+  ownerName: string
+): Promise<DurableObjectStub<ProjectData>> {
+  const id = env.PROJECT_DATA.idFromName(ownerName);
   const stub = env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectData>;
   await ensureOncePerIsolate(env, id.toString(), async () => {
     await stub.ensureProjectId(projectId);
   });
   return stub;
+}
+
+async function getStub(env: Env, projectId: string): Promise<DurableObjectStub<ProjectData>> {
+  return getStubForOwner(env, projectId, projectId);
 }
 
 /**
@@ -177,6 +194,10 @@ function normalizeProjectDataCommentRpcError(err: unknown): Error | null {
   // Cloudflare DO RPC serializes custom Error subclasses across isolates as a
   // generic Error whose message includes the original class name. Keep this
   // deliberately exact so non-domain failures continue to surface as 500s.
+  const validationPrefix = 'CommentValidationError: ';
+  if (err.message.startsWith(validationPrefix)) {
+    return new CommentValidationError(err.message.slice(validationPrefix.length));
+  }
   switch (err.message) {
     case 'CommentNotFoundError: Chat session not found':
       return new CommentNotFoundError('Chat session');
@@ -439,6 +460,7 @@ export async function linkSessionToWorkspace(
   sessionId: string,
   workspaceId: string
 ): Promise<void> {
+  await assertExactWriteAllowed(env, projectId, sessionId, 'linkSessionToWorkspace');
   return callProjectDataWithRetry(env, projectId, 'linkSessionToWorkspace', (stub) =>
     stub.linkSessionToWorkspace(sessionId, workspaceId)
   );
@@ -449,6 +471,7 @@ export async function stopSession(
   projectId: string,
   sessionId: string
 ): Promise<boolean> {
+  await assertExactWriteAllowed(env, projectId, sessionId, 'stopSession');
   const stub = await getStub(env, projectId);
   const stopped = await stub.stopSession(sessionId);
   if (stopped) {
@@ -469,6 +492,7 @@ export async function sleepSession(
   projectId: string,
   sessionId: string
 ): Promise<boolean> {
+  await assertExactWriteAllowed(env, projectId, sessionId, 'sleepSession');
   const stub = await getStub(env, projectId);
   const sleeping = await stub.sleepSession(sessionId);
   if (sleeping) {
@@ -491,6 +515,7 @@ export async function wakeSession(
   workspaceId: string,
   taskId: string
 ): Promise<boolean> {
+  await assertExactWriteAllowed(env, projectId, sessionId, 'wakeSession');
   const stub = await getStub(env, projectId);
   const previousStatus = sessionStatus(await stub.getSession(sessionId));
   const woke = await stub.wakeSession(sessionId, workspaceId, taskId);
@@ -516,6 +541,7 @@ export async function wakeSessionForSnapshotRecovery(
   workspaceId: string,
   taskId: string
 ): Promise<boolean> {
+  await assertExactWriteAllowed(env, projectId, sessionId, 'wakeSessionForSnapshotRecovery');
   const allowStopped = await hasAuthorizedRestorableSnapshotWakeClaim(env.DATABASE, {
     projectId,
     chatSessionId: sessionId,
@@ -547,6 +573,7 @@ export async function failSession(
   sessionId: string,
   errorMessage: string | null = null
 ): Promise<boolean> {
+  await assertExactWriteAllowed(env, projectId, sessionId, 'failSession');
   const stub = await getStub(env, projectId);
   const failed = await stub.failSession(sessionId, errorMessage);
   if (failed) {
@@ -579,6 +606,7 @@ export async function updateSessionTopic(
   sessionId: string,
   topic: string
 ): Promise<boolean> {
+  await assertExactWriteAllowed(env, projectId, sessionId, 'updateSessionTopic');
   const stub = await getStub(env, projectId);
   return stub.updateSessionTopic(sessionId, topic);
 }
@@ -592,6 +620,7 @@ export async function persistMessage(
   toolMetadata: Record<string, unknown> | null,
   messageId?: string
 ): Promise<string> {
+  await assertExactWriteAllowed(env, projectId, sessionId, 'persistMessage');
   return callProjectDataNoRetry(env, projectId, 'persistMessage', (stub) =>
     stub.persistMessage(
       sessionId,
@@ -623,6 +652,7 @@ export async function persistMessageBatch(
   maxMessages?: number;
   remainingCapacity?: number;
 }> {
+  await assertExactWriteAllowed(env, projectId, sessionId, 'persistMessageBatch');
   return callProjectDataNoRetry(env, projectId, 'persistMessageBatch', (stub) =>
     stub.persistMessageBatch(
       sessionId,
@@ -684,6 +714,7 @@ export async function linkSessionToTask(
   sessionId: string,
   taskId: string
 ): Promise<boolean> {
+  await assertExactWriteAllowed(env, projectId, sessionId, 'linkSessionToTask');
   return callProjectDataWithRetry(env, projectId, 'linkSessionToTask', (stub) =>
     stub.linkSessionToTask(sessionId, taskId)
   );
@@ -710,9 +741,12 @@ export async function getMessages(
   compact: boolean = false,
   order: 'asc' | 'desc' = 'desc'
 ): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
-  return callProjectDataWithRetry(env, projectId, 'getMessages', (stub) =>
-    stub.getMessages(sessionId, limit, before, after, roles, compact, order)
-  );
+  const owner = await resolveExactReadOwner(env, projectId, sessionId);
+  const stub = await getStubForOwner(env, projectId, owner.ownerName);
+  if (owner.kind === 'root') {
+    return stub.archiveSourceGetMessages(owner, limit, before, after, roles, compact, order);
+  }
+  return stub.archiveTargetGetMessages(owner, limit, before, after, roles, compact, order);
 }
 
 export async function getMessageToolContent(
@@ -721,8 +755,12 @@ export async function getMessageToolContent(
   sessionId: string,
   messageId: string
 ): Promise<MessageToolContentResult | null> {
-  const stub = await getStub(env, projectId);
-  return stub.getMessageToolContent(sessionId, messageId);
+  const owner = await resolveExactReadOwner(env, projectId, sessionId);
+  const stub = await getStubForOwner(env, projectId, owner.ownerName);
+  if (owner.kind === 'archive_shard') {
+    return stub.archiveTargetGetMessageToolContent({ ...owner, messageId });
+  }
+  return stub.archiveSourceGetMessageToolContent({ ...owner, messageId });
 }
 
 export async function getArchivedToolPayloads(
@@ -730,6 +768,15 @@ export async function getArchivedToolPayloads(
   projectId: string,
   input: ArchivedToolPayloadQuery
 ): Promise<ArchivedToolPayloadListResult> {
+  const sessionId = input.sessionId ?? null;
+  if (sessionId) {
+    const owner = await resolveExactReadOwner(env, projectId, sessionId);
+    const stub = await getStubForOwner(env, projectId, owner.ownerName);
+    if (owner.kind === 'archive_shard') {
+      return stub.archiveTargetGetArchivedToolPayloads({ owner, query: input });
+    }
+    return stub.archiveSourceGetArchivedToolPayloads({ owner, query: input });
+  }
   const stub = await getStub(env, projectId);
   return stub.getArchivedToolPayloads(input);
 }
@@ -741,11 +788,199 @@ export async function getMessageCount(
   sessionId: string,
   roles?: string[]
 ): Promise<number> {
-  const stub = await getStub(env, projectId);
-  return stub.getMessageCount(sessionId, roles);
+  const owner = await resolveExactReadOwner(env, projectId, sessionId);
+  const stub = await getStubForOwner(env, projectId, owner.ownerName);
+  if (owner.kind === 'root') return stub.archiveSourceGetMessageCount(owner, roles);
+  return stub.archiveTargetGetMessageCount(owner, roles);
 }
 
 /** Search messages across sessions by keyword. */
+export type ProjectDataMessageSearchResult = {
+  id: string;
+  sessionId: string;
+  role: string;
+  snippet: string;
+  createdAt: number;
+  sessionTopic: string | null;
+  sessionTaskId: string | null;
+};
+
+export type ProjectDataArchiveSearchMetadata = {
+  partial: boolean;
+  reason:
+    | null
+    | 'session_scoped_exact_read'
+    | 'archive_owner_inventory_unavailable'
+    | 'archive_owner_limit_exceeded'
+    | 'archive_owner_query_failed';
+  rootQueried: boolean;
+  archiveOwnersAvailable: number;
+  archiveOwnersQueried: number;
+  archiveOwnersFailed: number;
+  archiveOwnersOmitted: number;
+  archiveOwnerLimit: number;
+};
+
+export type ProjectDataSearchMessagesWithArchiveMetadataResult = {
+  results: ProjectDataMessageSearchResult[];
+  archiveSearch: ProjectDataArchiveSearchMetadata;
+};
+
+type ProjectDataArchiveSearchOwnerRow = {
+  owner_name: string;
+  generation: number;
+};
+
+function resolveProjectWideArchiveSearchMaxOwners(env: Env): number {
+  const parsed = Number.parseInt(env.PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS ?? '', 10);
+  if (
+    Number.isSafeInteger(parsed) &&
+    parsed >= 0 &&
+    parsed <= PROJECT_DATA_ARCHIVE_MAX_SEARCH_OWNERS
+  ) {
+    return parsed;
+  }
+  return PROJECT_DATA_ARCHIVE_DEFAULT_SEARCH_MAX_OWNERS;
+}
+
+async function readProjectWideArchiveSearchOwners(
+  env: Env,
+  projectId: string,
+  limit: number
+): Promise<{ owners: ProjectDataArchiveSearchOwnerRow[]; total: number }> {
+  const totalRow = await env.DATABASE.prepare(
+    `SELECT COUNT(*) AS count
+     FROM (
+       SELECT owner_name, generation
+       FROM project_data_session_locations
+       WHERE project_id = ?
+         AND location_state = 'archive_shard'
+         AND owner_kind = 'archive_shard'
+       GROUP BY owner_name, generation
+     )`
+  )
+    .bind(projectId)
+    .first<{ count: number }>();
+  const total = typeof totalRow?.count === 'number' ? totalRow.count : 0;
+  if (limit === 0) return { owners: [], total };
+  const rows = await env.DATABASE.prepare(
+    `SELECT owner_name, generation
+     FROM project_data_session_locations
+     WHERE project_id = ?
+       AND location_state = 'archive_shard'
+       AND owner_kind = 'archive_shard'
+     GROUP BY owner_name, generation
+     ORDER BY generation DESC, owner_name ASC
+     LIMIT ?`
+  )
+    .bind(projectId, limit)
+    .all<ProjectDataArchiveSearchOwnerRow>();
+  return { owners: rows.results ?? [], total };
+}
+
+function sortAndLimitSearchResults(
+  results: ProjectDataMessageSearchResult[],
+  limit: number
+): ProjectDataMessageSearchResult[] {
+  return [...results].sort((a, b) => b.createdAt - a.createdAt).slice(0, limit);
+}
+
+export async function searchMessagesWithArchiveMetadata(
+  env: Env,
+  projectId: string,
+  query: string,
+  sessionId: string | null = null,
+  roles: string[] | null = null,
+  limit: number = 10
+): Promise<ProjectDataSearchMessagesWithArchiveMetadataResult> {
+  if (sessionId) {
+    const owner = await resolveExactReadOwner(env, projectId, sessionId);
+    const ownerStub = await getStubForOwner(env, projectId, owner.ownerName);
+    let results: ProjectDataMessageSearchResult[];
+    if (owner.kind === 'root') {
+      results = await ownerStub.archiveSourceSearchMessages(owner, query, roles, limit);
+    } else {
+      results = await ownerStub.archiveTargetSearchMessages(owner, query, roles, limit);
+    }
+    return {
+      results,
+      archiveSearch: {
+        partial: false,
+        reason: 'session_scoped_exact_read',
+        rootQueried: owner.kind === 'root',
+        archiveOwnersAvailable: owner.kind === 'archive_shard' ? 1 : 0,
+        archiveOwnersQueried: owner.kind === 'archive_shard' ? 1 : 0,
+        archiveOwnersFailed: 0,
+        archiveOwnersOmitted: 0,
+        archiveOwnerLimit: 1,
+      },
+    };
+  }
+  const stub = await getStub(env, projectId);
+  const rootResults = (await stub.searchMessages(
+    query,
+    sessionId,
+    roles,
+    limit
+  )) as ProjectDataMessageSearchResult[];
+  const archiveOwnerLimit = resolveProjectWideArchiveSearchMaxOwners(env);
+  let archiveOwners: ProjectDataArchiveSearchOwnerRow[] = [];
+  let archiveOwnersAvailable = 0;
+  let reason: ProjectDataArchiveSearchMetadata['reason'] = null;
+  try {
+    const inventory = await readProjectWideArchiveSearchOwners(env, projectId, archiveOwnerLimit);
+    archiveOwners = inventory.owners;
+    archiveOwnersAvailable = inventory.total;
+    if (inventory.total > inventory.owners.length) reason = 'archive_owner_limit_exceeded';
+  } catch (error) {
+    log.warn('project_data.archive_search_inventory_failed', {
+      projectId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    reason = 'archive_owner_inventory_unavailable';
+  }
+
+  const archiveResults: ProjectDataMessageSearchResult[] = [];
+  let archiveOwnersFailed = 0;
+  for (const archiveOwner of archiveOwners) {
+    const owner: ProjectDataArchiveOwnerRef = {
+      kind: 'archive_shard',
+      projectId,
+      ownerName: archiveOwner.owner_name,
+      generation: archiveOwner.generation,
+    };
+    try {
+      const ownerStub = await getStubForOwner(env, projectId, owner.ownerName);
+      archiveResults.push(
+        ...(await ownerStub.archiveTargetSearchProjectMessages(owner, query, roles, limit))
+      );
+    } catch (error) {
+      archiveOwnersFailed++;
+      reason = 'archive_owner_query_failed';
+      log.warn('project_data.archive_search_owner_failed', {
+        projectId,
+        ownerName: owner.ownerName,
+        generation: owner.generation,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return {
+    results: sortAndLimitSearchResults([...rootResults, ...archiveResults], limit),
+    archiveSearch: {
+      partial: reason !== null,
+      reason,
+      rootQueried: true,
+      archiveOwnersAvailable,
+      archiveOwnersQueried: archiveOwners.length - archiveOwnersFailed,
+      archiveOwnersFailed,
+      archiveOwnersOmitted: Math.max(0, archiveOwnersAvailable - archiveOwners.length),
+      archiveOwnerLimit,
+    },
+  };
+}
+
 export async function searchMessages(
   env: Env,
   projectId: string,
@@ -753,19 +988,9 @@ export async function searchMessages(
   sessionId: string | null = null,
   roles: string[] | null = null,
   limit: number = 10
-): Promise<
-  Array<{
-    id: string;
-    sessionId: string;
-    role: string;
-    snippet: string;
-    createdAt: number;
-    sessionTopic: string | null;
-    sessionTaskId: string | null;
-  }>
-> {
-  const stub = await getStub(env, projectId);
-  return stub.searchMessages(query, sessionId, roles, limit);
+): Promise<ProjectDataMessageSearchResult[]> {
+  return (await searchMessagesWithArchiveMetadata(env, projectId, query, sessionId, roles, limit))
+    .results;
 }
 
 // =========================================================================
@@ -800,6 +1025,7 @@ export async function createCommentThread(
   projectId: string,
   input: CreateCommentThreadInput
 ): Promise<MessageCommentMutationResponse> {
+  await assertExactWriteAllowed(env, projectId, input.sessionId, 'createCommentThread');
   return callProjectDataNoRetry(env, projectId, 'createCommentThread', (stub) =>
     stub.createCommentThread(input)
   );
@@ -810,6 +1036,7 @@ export async function createCommentReply(
   projectId: string,
   input: CreateCommentReplyInput
 ): Promise<MessageCommentReplyMutationResponse> {
+  await assertExactWriteAllowed(env, projectId, input.sessionId, 'createCommentReply');
   return callProjectDataNoRetry(env, projectId, 'createCommentReply', (stub) =>
     stub.createCommentReply(input)
   );

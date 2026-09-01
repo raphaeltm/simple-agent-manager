@@ -27,6 +27,7 @@ import { runMigrations } from '../migrations';
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
 import { computeProjectDataAlarmTime } from './alarm-schedule';
+import * as archiveSharding from './archive-sharding';
 import * as attention from './attention';
 import * as attentionExpiry from './attention-expiry';
 import * as commands from './commands';
@@ -499,6 +500,202 @@ export class ProjectData extends DurableObject<Env> {
       order,
       compactOptions
     );
+  }
+
+  async archiveSourcePrepareIntent(
+    input: archiveSharding.ArchiveSourcePrepareInput
+  ): Promise<archiveSharding.ArchiveSourcePrepareResult> {
+    return archiveSharding.prepareArchiveSourceIntent(this.sql, input);
+  }
+
+  async archiveSourceExportChunk(
+    input: archiveSharding.ArchiveSourceExportChunkInput
+  ): Promise<import('../../project-data-archive/contract').ProjectDataArchiveChunk> {
+    return archiveSharding.exportArchiveChunk(this.sql, input);
+  }
+
+  archiveSourceMarkTargetSealed(input: {
+    sessionId: string;
+    migrationId: string;
+    sourceIntentToken: string;
+    targetAggregateSha256: string;
+    now: number;
+  }): boolean {
+    return this.ctx.storage.transactionSync(() =>
+      archiveSharding.markSourceTargetSealed(this.sql, input)
+    );
+  }
+
+  archiveSourceMarkRecoveryManifestPersisted(input: {
+    sessionId: string;
+    migrationId: string;
+    sourceIntentToken: string;
+    targetAggregateSha256: string;
+    r2ManifestKey: string;
+    now: number;
+  }): boolean {
+    return this.ctx.storage.transactionSync(() =>
+      archiveSharding.markSourceRecoveryManifestPersisted(this.sql, input)
+    );
+  }
+
+  async archiveSourceFinalizeDelete(
+    input: archiveSharding.ArchiveSourceFinalizeDeleteInput
+  ): Promise<archiveSharding.ArchiveSourceFinalizeDeleteResult> {
+    return archiveSharding.finalizeSourceDelete(this.sql, input);
+  }
+
+  archiveSourceGetMessages(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
+    limit: number = 1000,
+    before: number | null = null,
+    after: number | null = null,
+    roles?: string[],
+    compact: boolean = false,
+    order: 'asc' | 'desc' = 'desc'
+  ) {
+    return archiveSharding.archiveSourceReadMessages(
+      this.sql,
+      this.env,
+      input,
+      limit,
+      before,
+      after,
+      roles,
+      compact,
+      order
+    );
+  }
+
+  archiveSourceGetMessageCount(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
+    roles?: string[]
+  ): number {
+    return archiveSharding.archiveSourceReadMessageCount(this.sql, input, roles);
+  }
+
+  async archiveSourceGetMessageToolContent(input: {
+    projectId: string;
+    sessionId: string;
+    ownerName: string;
+    generation: number;
+    migrationId: string | null;
+    messageId: string;
+  }): Promise<toolPayloadArchive.MessageToolContentResult | null> {
+    return archiveSharding.archiveSourceReadMessageToolContent(this.sql, this.env, input);
+  }
+
+  async archiveSourceGetArchivedToolPayloads(input: {
+    owner: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput;
+    query: toolPayloadArchive.ArchivedToolPayloadQuery;
+  }): Promise<toolPayloadArchive.ArchivedToolPayloadListResult> {
+    return archiveSharding.archiveSourceReadArchivedToolPayloads(
+      this.sql,
+      this.env,
+      input.owner.projectId,
+      input.query,
+      input.owner
+    );
+  }
+
+  archiveSourceSearchMessages(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
+    query: string,
+    roles: string[] | null = null,
+    limit: number = 10
+  ) {
+    return archiveSharding.archiveSourceSearchMessages(this.sql, input, query, roles, limit);
+  }
+
+  archiveTargetPrepare(
+    input: archiveSharding.ArchiveTargetPrepareInput
+  ): archiveSharding.ArchiveTargetPrepareResult {
+    return this.ctx.storage.transactionSync(() =>
+      archiveSharding.prepareArchiveTarget(this.sql, input)
+    );
+  }
+
+  async archiveTargetCommitChunk(
+    input: archiveSharding.ArchiveTargetCommitChunkInput
+  ): Promise<archiveSharding.ArchiveTargetCommitChunkResult> {
+    return archiveSharding.commitArchiveTargetChunk(this.sql, input);
+  }
+
+  async archiveTargetSeal(
+    input: archiveSharding.ArchiveTargetSealInput
+  ): Promise<archiveSharding.ArchiveTargetSealResult> {
+    return archiveSharding.sealArchiveTarget(this.sql, input);
+  }
+
+  archiveTargetGetMessages(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
+    limit: number = 1000,
+    before: number | null = null,
+    after: number | null = null,
+    roles?: string[],
+    compact: boolean = false,
+    order: 'asc' | 'desc' = 'desc'
+  ) {
+    return archiveSharding.archiveTargetReadMessages(
+      this.sql,
+      this.env,
+      input,
+      limit,
+      before,
+      after,
+      roles,
+      compact,
+      order
+    );
+  }
+
+  async archiveTargetGetMessageToolContent(input: {
+    projectId: string;
+    sessionId: string;
+    ownerName: string;
+    generation: number;
+    migrationId: string | null;
+    messageId: string;
+  }): Promise<toolPayloadArchive.MessageToolContentResult | null> {
+    return archiveSharding.archiveTargetReadMessageToolContent(this.sql, this.env, input);
+  }
+
+  archiveTargetGetMessageCount(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
+    roles?: string[]
+  ): number {
+    return archiveSharding.archiveTargetReadMessageCount(this.sql, input, roles);
+  }
+
+  async archiveTargetGetArchivedToolPayloads(input: {
+    owner: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput;
+    query: toolPayloadArchive.ArchivedToolPayloadQuery;
+  }): Promise<toolPayloadArchive.ArchivedToolPayloadListResult> {
+    return archiveSharding.archiveTargetReadArchivedToolPayloads(
+      this.sql,
+      this.env,
+      input.owner.projectId,
+      input.query,
+      input.owner
+    );
+  }
+
+  archiveTargetSearchMessages(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
+    query: string,
+    roles: string[] | null = null,
+    limit: number = 10
+  ) {
+    return archiveSharding.archiveTargetSearchMessages(this.sql, input, query, roles, limit);
+  }
+
+  archiveTargetSearchProjectMessages(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveOwnerRef,
+    query: string,
+    roles: string[] | null = null,
+    limit: number = 10
+  ) {
+    return archiveSharding.archiveTargetSearchProjectMessages(this.sql, input, query, roles, limit);
   }
 
   async getMessageToolContent(

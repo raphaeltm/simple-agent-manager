@@ -8,6 +8,7 @@ import {
   isNull,
   lt,
   lte,
+  not,
   notInArray,
   or,
   sql,
@@ -160,6 +161,37 @@ function restorableSnapshotCondition() {
   );
 }
 
+function archiveMigrationFenceCondition(db: Db, chatSessionId: string) {
+  return not(
+    exists(
+      db
+        .select({ sessionId: schema.projectDataSessionLocations.sessionId })
+        .from(schema.projectDataSessionLocations)
+        .where(
+          and(
+            eq(schema.projectDataSessionLocations.sessionId, chatSessionId),
+            not(eq(schema.projectDataSessionLocations.locationState, 'root'))
+          )
+        )
+    )
+  );
+}
+
+async function archiveMigrationFenceIsClear(db: Db, chatSessionId: string): Promise<boolean> {
+  const row = await db
+    .select({ sessionId: schema.projectDataSessionLocations.sessionId })
+    .from(schema.projectDataSessionLocations)
+    .where(
+      and(
+        eq(schema.projectDataSessionLocations.sessionId, chatSessionId),
+        not(eq(schema.projectDataSessionLocations.locationState, 'root'))
+      )
+    )
+    .limit(1)
+    .get();
+  return !row;
+}
+
 function sessionRecoveryClaimLeaseMs(env: Env): number {
   return parsePositiveInt(
     env.SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS,
@@ -206,6 +238,7 @@ export async function claimSessionSnapshotRecovery(
           isNull(schema.sessionSnapshots.recoveryStatus),
           eq(schema.sessionSnapshots.recoveryStatus, 'failed')
         ),
+        archiveMigrationFenceCondition(db, input.chatSessionId),
         sourceTaskGuardCondition(db, input.sourceTaskGuard)
       )
     );
@@ -280,6 +313,7 @@ export async function claimSessionSnapshotRecovery(
               lte(schema.sessionSnapshots.recoveryClaimedAt, staleBefore)
             ),
             lt(schema.sessionSnapshots.recoveryAttempts, maxAttempts),
+            archiveMigrationFenceCondition(db, input.chatSessionId),
             sourceTaskGuardCondition(db, input.sourceTaskGuard)
           )
         );
@@ -302,9 +336,11 @@ export async function claimSessionSnapshotRecovery(
         ? 'snapshot_not_complete'
         : snapshot.recoveryAttempts >= maxAttempts
           ? 'recovery_attempts_exhausted'
-          : !(await sourceTaskGuardIsValid(db, input.sourceTaskGuard))
-            ? 'source_task_not_wakeable'
-            : 'snapshot_not_wakeable';
+          : !(await archiveMigrationFenceIsClear(db, input.chatSessionId))
+            ? 'archive_migration_fenced'
+            : !(await sourceTaskGuardIsValid(db, input.sourceTaskGuard))
+              ? 'source_task_not_wakeable'
+              : 'snapshot_not_wakeable';
   return { status: 'unavailable', reason };
 }
 
@@ -510,7 +546,11 @@ export async function markSessionSnapshotAwakeInPlace(
       updatedAt: now,
     })
     .where(
-      and(eq(schema.sessionSnapshots.chatSessionId, chatSessionId), restorableSnapshotCondition())
+      and(
+        eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
+        restorableSnapshotCondition(),
+        archiveMigrationFenceCondition(db, chatSessionId)
+      )
     );
 }
 

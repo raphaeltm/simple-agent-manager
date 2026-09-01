@@ -20,7 +20,7 @@ const VALID_ROLES = ['user', 'assistant', 'system', 'tool', 'thinking', 'plan'];
 export const searchTaskMessagesDef: AnthropicToolDef = {
   name: 'search_task_messages',
   description:
-    'Search through chat messages in a project\'s task sessions. ' +
+    "Search through chat messages in a project's task sessions. " +
     'Use this to find specific discussions, decisions, or outputs from past or current tasks. ' +
     'Supports filtering by task ID, session ID, and message roles.',
   input_schema: {
@@ -36,7 +36,7 @@ export const searchTaskMessagesDef: AnthropicToolDef = {
       },
       taskId: {
         type: 'string',
-        description: 'Optional: filter results to messages from a specific task\'s session.',
+        description: "Optional: filter results to messages from a specific task's session.",
       },
       sessionId: {
         type: 'string',
@@ -65,7 +65,7 @@ export async function searchTaskMessages(
     roles?: string[];
     limit?: number;
   },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   if (!input.projectId?.trim()) {
     return { error: 'projectId is required.' };
@@ -95,7 +95,7 @@ export async function searchTaskMessages(
       null, // any status
       1,
       0,
-      input.taskId.trim(),
+      input.taskId.trim()
     );
     const firstSession = sessions.sessions[0];
     if (firstSession) {
@@ -113,17 +113,17 @@ export async function searchTaskMessages(
   const defaultLimit = Number(env.SAM_TASK_MESSAGE_SEARCH_LIMIT) || DEFAULT_LIMIT;
   const limit = Math.min(Math.max(1, Math.round(input.limit || defaultLimit)), maxLimit);
 
-  const results = await projectDataService.searchMessages(
+  const search = await projectDataService.searchMessagesWithArchiveMetadata(
     env,
     project.id,
     input.query.trim(),
     sessionId,
     roles,
-    limit,
+    limit
   );
 
   return {
-    results: results.map((r) => ({
+    results: search.results.map((r) => ({
       messageId: r.id,
       sessionId: r.sessionId,
       sessionTopic: r.sessionTopic,
@@ -132,8 +132,9 @@ export async function searchTaskMessages(
       snippet: r.snippet,
       createdAt: r.createdAt,
     })),
-    count: results.length,
+    count: search.results.length,
     query: input.query.trim(),
     projectId: project.id,
+    archiveSearch: search.archiveSearch,
   };
 }
