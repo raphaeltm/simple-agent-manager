@@ -29,6 +29,7 @@
 import type { Env as WorkerEnv } from '../../env';
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { listAgentSessionsOnNode } from '../../services/node-agent';
+import { recordAcpActivityCallbackMetric } from '../../services/telemetry';
 import { recordActivityEventInternal } from './activity';
 import {
   minReconciliationAlarmDelayMs,
@@ -36,11 +37,7 @@ import {
   sessionActivityProbeMaxCandidates,
   sessionActivityProbeTimeoutMs,
 } from './reconciliation-thresholds';
-import {
-  parseActivityStaleThreshold,
-  recordTurnEnd,
-  WORKING_ACTIVITIES,
-} from './session-state';
+import { parseActivityStaleThreshold, recordTurnEnd, WORKING_ACTIVITIES } from './session-state';
 import type { Env as DOEnv } from './types';
 
 const log = createModuleLogger('session_activity_reconciliation');
@@ -472,6 +469,20 @@ export async function probeStaleSessionActivity(
 
     if (!changed) continue;
     reconciled += 1;
+    recordAcpActivityCallbackMetric(
+      {
+        metric: 'acp_activity_callback',
+        outcome: outcome.kind === 'unreachable' ? 'forced_terminal' : 'healed',
+        projectId: options.projectId,
+        sessionId: candidate.acpSessionId,
+        nodeId: candidate.nodeId,
+        workspaceId: candidate.workspaceId,
+        activity: 'idle',
+        reason: outcome.kind === 'unreachable' ? 'dead_after_probe_budget' : 'probe_reconciled',
+        source: 'reconciliation_probe',
+      },
+      workerEnv
+    );
     recordActivityEventInternal(
       sql,
       'session.activity_reconciled',

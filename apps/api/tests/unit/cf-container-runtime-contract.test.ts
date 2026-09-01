@@ -128,6 +128,8 @@ describe('cf-container runtime spike contracts', () => {
     const containerService = read('services/vm-agent-container.ts');
     const nodeAgent = read('services/node-agent.ts');
     const activityCallback = read('routes/projects/agent-activity-callback.ts');
+    const activityCallbackHandler = read('services/acp-activity-callback-handler.ts');
+    const activityCallbackFlush = read('services/acp-activity-callback-flush.ts');
     const acpSessionsRoute = read('routes/projects/acp-sessions.ts');
 
     expect(containerDo).toContain("export const DEFAULT_CF_CONTAINER_SLEEP_AFTER = '1h'");
@@ -154,9 +156,14 @@ describe('cf-container runtime spike contracts', () => {
     expect(nodeAgent).toContain(
       "markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'stop_agent_session')"
     );
-    expect(activityCallback).toContain("body.activity === 'idle' && !harnessWorkKeepsRuntimeActive");
-    expect(activityCallback).toContain("body.runtimeWorkState === 'active'");
-    expect(activityCallback).toContain("body.runtimeWorkState === 'settling'");
+    expect(activityCallback).toContain('handleAcpActivityCallback');
+    expect(activityCallbackHandler).toContain(
+      "input.body.activity === 'idle' && !input.harnessWorkKeepsRuntimeActive"
+    );
+    expect(activityCallbackHandler).toContain('persistedActivity?.runtimeWorkState');
+    expect(activityCallbackHandler).toContain('markTerminalContainerWorkEnded');
+    expect(activityCallbackFlush).toContain("body.runtimeWorkState === 'active'");
+    expect(activityCallbackFlush).toContain("body.runtimeWorkState === 'settling'");
     expect(acpSessionsRoute).toContain("body.status === 'completed' || body.status === 'failed'");
   });
 

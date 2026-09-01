@@ -1361,6 +1361,7 @@ export class ProjectData extends DurableObject<Env> {
     sessionId: string,
     activity: string,
     extra?: {
+      observedAt?: number | null;
       promptStartedAt?: number | null;
       agentType?: string | null;
       restartCount?: number | null;
@@ -1370,7 +1371,7 @@ export class ProjectData extends DurableObject<Env> {
       runtimeWorkSource?: string;
       runtimeWorkProgressAt?: number | null;
     }
-  ): Promise<void> {
+  ): Promise<boolean> {
     return durability.reportActivity(this.sql, this.durabilityHooks(), sessionId, activity, extra);
   }
 

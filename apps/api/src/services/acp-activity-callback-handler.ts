@@ -1,0 +1,706 @@
+import { ACP_SESSION_VALID_TRANSITIONS } from '@simple-agent-manager/shared';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+import type { Context } from 'hono';
+
+import * as schema from '../db/schema';
+import type { Env } from '../env';
+import { extractBearerToken } from '../lib/auth-helpers';
+import { log } from '../lib/logger';
+import { AppError, errors } from '../middleware/error';
+import {
+  callbackTokenIssuedAtMs,
+  getInstantStaleCallbackMarginMs,
+  isSupersededInstantCallback,
+} from '../routes/_stale-callback-guard';
+import {
+  type AcpActivityBinding,
+  type AcpActivityCallbackReport,
+  type AcpActivityFlushResult,
+  type AcpActivityPendingSnapshot,
+  admitOrCoalesceAcpActivityCallback,
+  buildAcpActivityBinding,
+  cacheAcpActivityBinding,
+  clearPendingAcpActivity,
+  coalesceAcpActivityAfterProjectDataTransient,
+  getAcpActivityAdmissionConfig,
+  getCachedAcpActivityBinding,
+  isIntermediateAcpActivityReport,
+  recordAcpActivityAdmissionSuccess,
+  type WaitUntilFn,
+} from './acp-activity-admission';
+import {
+  activityReportExtra,
+  assertAcpActivityCallbackResourcesActive,
+  cancelSleepForActiveActivity,
+  flushCoalescedAcpActivity,
+  loadD1ActivityBindingForTransientFallback,
+  persistIntermediateActivity,
+} from './acp-activity-callback-flush';
+import { normalizeAgentActivityErrorMessage } from './acp-activity-error-message';
+import { isTransientDurableObjectError } from './durable-object-retry';
+import { type CallbackTokenPayload, verifyCallbackToken } from './jwt';
+import { hibernateAgentSessionOnNode } from './node-agent';
+import {
+  callbackTokenMatchesNode,
+  callbackTokenMatchesWorkspace,
+} from './node-callback-auth';
+import * as projectDataService from './project-data';
+import { recordAcpActivityCallbackMetric } from './telemetry';
+import { markVmAgentContainerActiveWorkEndedBestEffort } from './vm-agent-container';
+
+function canTransitionAcpSessionToFailed(status: string): boolean {
+  const validTargets = (ACP_SESSION_VALID_TRANSITIONS as Record<string, readonly string[]>)[status];
+  return validTargets?.includes('failed') ?? false;
+}
+
+function assertCallbackTokenBoundToBinding(
+  payload: CallbackTokenPayload,
+  binding: AcpActivityBinding,
+  input: { projectId: string; sessionId: string; nodeId: string }
+): void {
+  const tokenBoundToSession =
+    callbackTokenMatchesNode(payload, binding.nodeId) ||
+    callbackTokenMatchesWorkspace(payload, binding.workspaceId);
+  if (!tokenBoundToSession) {
+    log.warn('acp_activity.callback_token_not_bound_to_session', {
+      sessionId: input.sessionId,
+      projectId: input.projectId,
+      scope: payload.scope,
+      tokenIdentity: payload.workspace,
+      sessionNodeId: binding.nodeId,
+      sessionWorkspaceId: binding.workspaceId,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Callback token not authorized for this session');
+  }
+
+  if (binding.nodeId !== input.nodeId) {
+    log.warn('acp_activity.node_mismatch', {
+      sessionId: input.sessionId,
+      projectId: input.projectId,
+      expectedNodeId: binding.nodeId,
+      receivedNodeId: input.nodeId,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Node identity verification failed');
+  }
+}
+
+function resolveWaitUntil(c: {
+  executionCtx: { waitUntil(promise: Promise<unknown>): void };
+}): WaitUntilFn {
+  try {
+    const executionCtx = c.executionCtx;
+    if (typeof executionCtx?.waitUntil === 'function') {
+      return (promise) => executionCtx.waitUntil(promise);
+    }
+  } catch {
+    // Unit-test Hono contexts may not expose executionCtx. Fall back to
+    // attaching the guarded promise so expected coalescing still drains.
+  }
+  return (promise) => {
+    void promise.catch((err) => {
+      log.warn('acp_activity.wait_until_unavailable_flush_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  };
+}
+
+type ActivityCallbackProcessingContext = {
+  c: Context<{ Bindings: Env }>;
+  payload: CallbackTokenPayload;
+  projectId: string;
+  sessionId: string;
+  body: AcpActivityCallbackReport;
+  observedAt: number;
+  config: ReturnType<typeof getAcpActivityAdmissionConfig>;
+  waitUntil: WaitUntilFn;
+  flush: (snapshot: AcpActivityPendingSnapshot) => Promise<AcpActivityFlushResult>;
+};
+
+type ExistingAcpSession = NonNullable<
+  Awaited<ReturnType<typeof projectDataService.getAcpSession>>
+>;
+
+async function handleCachedIntermediateActivity(
+  input: ActivityCallbackProcessingContext
+): Promise<Response | null> {
+  const cachedBinding = getCachedAcpActivityBinding(
+    input.config,
+    input.projectId,
+    input.sessionId
+  );
+  if (!cachedBinding) return null;
+
+  assertCallbackTokenBoundToBinding(input.payload, cachedBinding, {
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    nodeId: input.body.nodeId,
+  });
+  await assertAcpActivityCallbackResourcesActive(input.c.env, {
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    nodeId: input.body.nodeId,
+    workspaceId: cachedBinding.workspaceId,
+    chatSessionId: cachedBinding.chatSessionId,
+  });
+  await cancelSleepForActiveActivity({
+    env: input.c.env,
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    chatSessionId: cachedBinding.chatSessionId,
+    body: input.body,
+  });
+
+  const admission = admitOrCoalesceAcpActivityCallback({
+    env: input.c.env,
+    config: input.config,
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    binding: cachedBinding,
+    report: input.body,
+    observedAt: input.observedAt,
+    waitUntil: input.waitUntil,
+    flush: input.flush,
+  });
+  if (admission.action === 'coalesce') return input.c.body(null, 204);
+
+  await persistIntermediateActivity({
+    env: input.c.env,
+    config: input.config,
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    binding: cachedBinding,
+    body: input.body,
+    observedAt: input.observedAt,
+    admissionReason: admission.reason,
+    waitUntil: input.waitUntil,
+    flush: input.flush,
+  });
+  return input.c.body(null, 204);
+}
+
+async function handleTransientLookupFallback(input: {
+  context: ActivityCallbackProcessingContext;
+  lookupError: unknown;
+  isIntermediate: boolean;
+}): Promise<Response | null> {
+  const { context } = input;
+  if (
+    !input.isIntermediate ||
+    !context.config.enabled ||
+    !isTransientDurableObjectError(input.lookupError)
+  ) {
+    return null;
+  }
+
+  try {
+    const fallbackBinding = await loadD1ActivityBindingForTransientFallback(context.c.env, {
+      projectId: context.projectId,
+      sessionId: context.sessionId,
+    });
+    if (!fallbackBinding) return null;
+
+    assertCallbackTokenBoundToBinding(context.payload, fallbackBinding, {
+      projectId: context.projectId,
+      sessionId: context.sessionId,
+      nodeId: context.body.nodeId,
+    });
+    await assertAcpActivityCallbackResourcesActive(context.c.env, {
+      projectId: context.projectId,
+      sessionId: context.sessionId,
+      nodeId: context.body.nodeId,
+      workspaceId: fallbackBinding.workspaceId,
+      chatSessionId: fallbackBinding.chatSessionId,
+    });
+    await cancelSleepForActiveActivity({
+      env: context.c.env,
+      projectId: context.projectId,
+      sessionId: context.sessionId,
+      chatSessionId: fallbackBinding.chatSessionId,
+      body: context.body,
+    });
+    cacheAcpActivityBinding(context.config, context.projectId, fallbackBinding);
+    coalesceAcpActivityAfterProjectDataTransient({
+      env: context.c.env,
+      config: context.config,
+      projectId: context.projectId,
+      sessionId: context.sessionId,
+      binding: fallbackBinding,
+      report: context.body,
+      observedAt: context.observedAt,
+      waitUntil: context.waitUntil,
+      flush: context.flush,
+    });
+    return context.c.body(null, 204);
+  } catch (fallbackErr) {
+    if (fallbackErr instanceof AppError) throw fallbackErr;
+    log.warn('acp_activity.transient_fallback_failed', {
+      projectId: context.projectId,
+      sessionId: context.sessionId,
+      error: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr),
+    });
+    return null;
+  }
+}
+
+async function rejectSupersededInstantError(input: {
+  c: Context<{ Bindings: Env }>;
+  token: string;
+  projectId: string;
+  sessionId: string;
+  body: AcpActivityCallbackReport;
+  binding: AcpActivityBinding;
+}): Promise<Response | null> {
+  if (input.body.activity !== 'error') return null;
+
+  const guardDb = drizzle(input.c.env.DATABASE, { schema });
+  const guardRow = await guardDb
+    .select({
+      updatedAt: schema.agentSessions.updatedAt,
+      runtime: schema.nodes.runtime,
+    })
+    .from(schema.agentSessions)
+    .leftJoin(schema.workspaces, eq(schema.workspaces.id, schema.agentSessions.workspaceId))
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
+    .where(eq(schema.agentSessions.id, input.sessionId))
+    .get();
+  const tokenIssuedAtMs = callbackTokenIssuedAtMs(input.token);
+  const marginMs = getInstantStaleCallbackMarginMs(input.c.env);
+  if (
+    !isSupersededInstantCallback({
+      runtime: guardRow?.runtime,
+      rowUpdatedAt: guardRow?.updatedAt,
+      tokenIssuedAtMs,
+      marginMs,
+    })
+  ) {
+    return null;
+  }
+
+  log.warn('acp_activity.rejected_stale_callback', {
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    nodeId: input.body.nodeId,
+    runtime: guardRow?.runtime ?? null,
+    rowUpdatedAt: guardRow?.updatedAt ?? null,
+    tokenIssuedAtMs,
+    marginMs,
+    reportedActivity: input.body.activity,
+    action: 'rejected_stale_callback',
+  });
+  // 2xx: the vm-agent activity client retries only on 5xx, so 204 stops
+  // retries without error-log noise. The superseded generation moves on.
+  recordAcpActivityCallbackMetric(
+    {
+      metric: 'acp_activity_callback',
+      outcome: 'rejected',
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      nodeId: input.body.nodeId,
+      workspaceId: input.binding.workspaceId,
+      activity: input.body.activity,
+      reason: 'stale_generation',
+      source: 'callback',
+    },
+    input.c.env
+  );
+  return input.c.body(null, 204);
+}
+
+function throwMissingAcpSession(input: {
+  c: Context<{ Bindings: Env }>;
+  projectId: string;
+  sessionId: string;
+  body: AcpActivityCallbackReport;
+}): never {
+  recordAcpActivityCallbackMetric(
+    {
+      metric: 'acp_activity_callback',
+      outcome: 'rejected',
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      nodeId: input.body.nodeId,
+      activity: input.body.activity,
+      reason: 'session_missing',
+      source: 'callback',
+    },
+    input.c.env
+  );
+  throw errors.notFound('ACP session not found');
+}
+
+function requireAcpActivityBinding(input: {
+  existing: ExistingAcpSession;
+  projectId: string;
+  sessionId: string;
+  body: AcpActivityCallbackReport;
+}): AcpActivityBinding {
+  const binding = buildAcpActivityBinding(input.existing);
+  if (binding) return binding;
+
+  log.warn('acp_activity.node_mismatch', {
+    sessionId: input.sessionId,
+    projectId: input.projectId,
+    expectedNodeId: input.existing.nodeId,
+    receivedNodeId: input.body.nodeId,
+    action: 'rejected',
+  });
+  throw errors.forbidden('Node identity verification failed');
+}
+
+async function handleIntermediateAfterProjectDataLookup(input: {
+  context: ActivityCallbackProcessingContext;
+  binding: AcpActivityBinding;
+}): Promise<Response> {
+  const { context } = input;
+  const admission = admitOrCoalesceAcpActivityCallback({
+    env: context.c.env,
+    config: context.config,
+    projectId: context.projectId,
+    sessionId: context.sessionId,
+    binding: input.binding,
+    report: context.body,
+    observedAt: context.observedAt,
+    waitUntil: context.waitUntil,
+    flush: context.flush,
+  });
+  if (admission.action === 'coalesce') return context.c.body(null, 204);
+
+  await persistIntermediateActivity({
+    env: context.c.env,
+    config: context.config,
+    projectId: context.projectId,
+    sessionId: context.sessionId,
+    binding: input.binding,
+    body: context.body,
+    observedAt: context.observedAt,
+    admissionReason: admission.reason,
+    waitUntil: context.waitUntil,
+    flush: context.flush,
+  });
+  return context.c.body(null, 204);
+}
+
+async function persistCriticalActivity(input: {
+  c: Context<{ Bindings: Env }>;
+  projectId: string;
+  sessionId: string;
+  body: AcpActivityCallbackReport;
+  binding: AcpActivityBinding;
+  observedAt: number;
+}): Promise<boolean> {
+  const activityApplied = await projectDataService.reportAcpSessionActivity(
+    input.c.env,
+    input.projectId,
+    input.sessionId,
+    input.body.activity,
+    activityReportExtra(input.body, input.observedAt)
+  );
+  if (activityApplied !== false) return true;
+
+  recordAcpActivityCallbackMetric(
+    {
+      metric: 'acp_activity_callback',
+      outcome: 'rejected',
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      nodeId: input.body.nodeId,
+      workspaceId: input.binding.workspaceId,
+      activity: input.body.activity,
+      reason: 'stale_activity_observed_at',
+      source: 'callback',
+    },
+    input.c.env
+  );
+  return false;
+}
+
+async function applyErrorFailureFanout(input: {
+  c: Context<{ Bindings: Env }>;
+  projectId: string;
+  sessionId: string;
+  body: AcpActivityCallbackReport;
+  existing: ExistingAcpSession;
+}): Promise<void> {
+  if (
+    input.body.activity !== 'error' ||
+    !canTransitionAcpSessionToFailed(input.existing.status)
+  ) {
+    return;
+  }
+  const failureMessage = normalizeAgentActivityErrorMessage(input.c.env, input.body.statusError);
+  const db = drizzle(input.c.env.DATABASE, { schema });
+
+  await db
+    .update(schema.agentSessions)
+    .set({
+      status: 'error',
+      errorMessage: failureMessage,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(schema.agentSessions.id, input.sessionId))
+    .catch((err) => {
+      log.warn('acp_activity.agent_session_error_update_failed', {
+        projectId: input.projectId,
+        sessionId: input.sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
+  await projectDataService
+    .transitionAcpSession(input.c.env, input.projectId, input.sessionId, 'failed', {
+      actorType: 'vm-agent',
+      actorId: input.body.nodeId,
+      reason: 'Agent activity reported error',
+      errorMessage: failureMessage,
+      metadata: {
+        activity: input.body.activity,
+        agentType: input.body.agentType ?? input.existing.agentType ?? null,
+        restartCount: input.body.restartCount ?? null,
+      },
+    })
+    .catch((err) => {
+      log.warn('acp_activity.acp_session_fail_transition_failed', {
+        projectId: input.projectId,
+        sessionId: input.sessionId,
+        fromStatus: input.existing.status,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
+  await projectDataService
+    .failSession(input.c.env, input.projectId, input.existing.chatSessionId, failureMessage)
+    .catch((err) => {
+      log.warn('acp_activity.chat_session_fail_failed', {
+        projectId: input.projectId,
+        chatSessionId: input.existing.chatSessionId,
+        sessionId: input.sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+}
+
+async function markTerminalContainerWorkEnded(input: {
+  c: Context<{ Bindings: Env }>;
+  projectId: string;
+  sessionId: string;
+  body: AcpActivityCallbackReport;
+  existing: ExistingAcpSession;
+  harnessWorkKeepsRuntimeActive: boolean;
+}): Promise<void> {
+  const shouldEndContainerWork =
+    (input.body.activity === 'idle' && !input.harnessWorkKeepsRuntimeActive) ||
+    input.body.activity === 'error';
+  if (!shouldEndContainerWork) return;
+
+  let idleSnapshotQueued = false;
+  if (
+    input.body.activity === 'idle' &&
+    input.existing.workspaceId &&
+    input.existing.nodeId &&
+    input.existing.acpSdkSessionId
+  ) {
+    const db = drizzle(input.c.env.DATABASE, { schema });
+    const workspace = await db
+      .select({
+        id: schema.workspaces.id,
+        userId: schema.workspaces.userId,
+        chatSessionId: schema.workspaces.chatSessionId,
+        runtime: schema.nodes.runtime,
+      })
+      .from(schema.workspaces)
+      .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
+      .where(eq(schema.workspaces.id, input.existing.workspaceId))
+      .get();
+    if (workspace?.runtime && workspace.chatSessionId) {
+      await hibernateAgentSessionOnNode(
+        input.existing.nodeId,
+        input.existing.workspaceId,
+        input.existing.acpSdkSessionId,
+        input.c.env,
+        workspace.userId,
+        {
+          chatSessionId: workspace.chatSessionId,
+          runtime: workspace.runtime,
+          agentType: input.body.agentType ?? input.existing.agentType ?? undefined,
+          background: true,
+        }
+      )
+        .then(() => {
+          idleSnapshotQueued = true;
+        })
+        .catch((err) => {
+          log.warn('acp_activity.session_snapshot_failed', {
+            projectId: input.projectId,
+            sessionId: input.sessionId,
+            workspaceId: input.existing.workspaceId,
+            nodeId: input.existing.nodeId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+    }
+  }
+  if (!idleSnapshotQueued) {
+    await markVmAgentContainerActiveWorkEndedBestEffort(
+      input.c.env,
+      input.existing.nodeId,
+      `agent_activity_${input.body.activity}`
+    );
+  }
+}
+
+export async function handleAcpActivityCallback(
+  c: Context<{ Bindings: Env }>,
+  input: {
+    projectId: string;
+    sessionId: string;
+    body: AcpActivityCallbackReport;
+  }
+): Promise<Response> {
+  const observedAt = Date.now();
+  // Verify callback JWT (not BetterAuth session cookie)
+  const token = extractBearerToken(c.req.header('Authorization'));
+  const payload = await verifyCallbackToken(token, c.env);
+
+  if (payload.scope !== 'workspace' && payload.scope !== 'node') {
+    log.warn('acp_activity.invalid_token_scope', {
+      scope: payload.scope,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Invalid token scope for activity report');
+  }
+
+  const { projectId, sessionId, body } = input;
+  const config = getAcpActivityAdmissionConfig(c.env);
+  const waitUntil = resolveWaitUntil(c);
+  const flush = (snapshot: AcpActivityPendingSnapshot) =>
+    flushCoalescedAcpActivity(c.env, snapshot);
+  const isIntermediate = isIntermediateAcpActivityReport(body);
+  const processingContext: ActivityCallbackProcessingContext = {
+    c,
+    payload,
+    projectId,
+    sessionId,
+    body,
+    observedAt,
+    config,
+    waitUntil,
+    flush,
+  };
+
+  if (isIntermediate && config.enabled) {
+    const cachedResponse = await handleCachedIntermediateActivity(processingContext);
+    if (cachedResponse) return cachedResponse;
+  }
+
+  let existing: Awaited<ReturnType<typeof projectDataService.getAcpSession>>;
+  try {
+    existing = await projectDataService.getAcpSession(c.env, projectId, sessionId);
+  } catch (err) {
+    const fallbackResponse = await handleTransientLookupFallback({
+      context: processingContext,
+      lookupError: err,
+      isIntermediate,
+    });
+    if (fallbackResponse) return fallbackResponse;
+    throw err;
+  }
+  if (!existing) {
+    throwMissingAcpSession({ c, projectId, sessionId, body });
+  }
+
+  // Authoritative auth: bind the token's OWN identity (payload.workspace) to the session's
+  // node/workspace — never authorize on the client-supplied body.nodeId. A node-scoped token
+  // must be the session's node; a workspace-scoped token must be the session's workspace. Without
+  // this, any holder of a valid callback token (trivial to obtain once BYO self-enrollment ships)
+  // could force ANOTHER tenant's session to error/failed. See .claude/rules/28 and security-critique #1.
+  const binding = requireAcpActivityBinding({ existing, projectId, sessionId, body });
+  assertCallbackTokenBoundToBinding(payload, binding, {
+    projectId,
+    sessionId,
+    nodeId: body.nodeId,
+  });
+
+  await assertAcpActivityCallbackResourcesActive(c.env, {
+    projectId,
+    sessionId,
+    nodeId: body.nodeId,
+    workspaceId: existing.workspaceId,
+    chatSessionId: existing.chatSessionId,
+  });
+  cacheAcpActivityBinding(config, projectId, binding);
+
+  // Mutate sleep state only after the callback token and reported node are
+  // both bound to this exact session. A valid token for another tenant must
+  // not be able to keep a victim's runtime awake by cancelling its sleep.
+  await cancelSleepForActiveActivity({
+    env: c.env,
+    projectId,
+    sessionId,
+    chatSessionId: existing.chatSessionId,
+    body,
+  });
+
+  if (isIntermediate) {
+    return handleIntermediateAfterProjectDataLookup({ context: processingContext, binding });
+  }
+
+  // Staleness guard (S2): reject a DESTRUCTIVE `error` callback that provably
+  // originates from a superseded Instant (cf-container) generation. A mid-turn
+  // rollout can make a dead container fire `reportActivity("error")` (retried
+  // with backoff) with a still-valid callback token AFTER the DO has recovered
+  // a NEW container generation to running under the same nodeId. Processing it
+  // would regress the freshly recovered, healthy session to error/failed.
+  // Short-circuit BEFORE the activity mirror + destructive transition + active-
+  // work-ended, so nothing touches the live recovered generation.
+  const staleGenerationResponse = await rejectSupersededInstantError({
+    c,
+    token,
+    projectId,
+    sessionId,
+    body,
+    binding,
+  });
+  if (staleGenerationResponse) return staleGenerationResponse;
+
+  const activityApplied = await persistCriticalActivity({
+    c,
+    projectId,
+    sessionId,
+    body,
+    binding,
+    observedAt,
+  });
+  if (!activityApplied) return c.body(null, 204);
+
+  clearPendingAcpActivity(projectId, sessionId);
+  recordAcpActivityAdmissionSuccess({
+    env: c.env,
+    projectId,
+    sessionId,
+    binding,
+    report: body,
+    reason: 'critical_transition',
+  });
+  const persistedActivity = body.runtimeWorkState
+    ? await projectDataService.getSessionState(c.env, projectId, sessionId)
+    : null;
+  const harnessWorkKeepsRuntimeActive =
+    body.activity === 'idle' &&
+    (persistedActivity?.runtimeWorkState === 'active' ||
+      persistedActivity?.runtimeWorkState === 'settling');
+
+  await applyErrorFailureFanout({ c, projectId, sessionId, body, existing });
+  await markTerminalContainerWorkEnded({
+    c,
+    projectId,
+    sessionId,
+    body,
+    existing,
+    harnessWorkKeepsRuntimeActive,
+  });
+  return c.body(null, 204);
+}

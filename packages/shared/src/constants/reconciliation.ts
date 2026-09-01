@@ -67,3 +67,34 @@ export const DEFAULT_SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS = 3;
 
 /** Maximum stale-activity candidates probed in a single alarm pass. */
 export const DEFAULT_SESSION_ACTIVITY_PROBE_MAX_CANDIDATES = 10;
+
+// --- ACP activity callback admission/coalescing (ProjectData load protection) ---
+
+/** Enables Worker-side admission control for high-frequency ACP activity callbacks. */
+export const DEFAULT_ACP_ACTIVITY_ADMISSION_ENABLED = true;
+
+/**
+ * Minimum interval between redundant intermediate ACP activity writes to
+ * ProjectData. New prompt epochs, activity transitions, and terminal/error
+ * reports bypass this window.
+ */
+export const DEFAULT_ACP_ACTIVITY_COALESCE_WINDOW_MS = 2 * 1000; // 2 seconds
+
+/**
+ * Maximum lifetime for a coalesced intermediate activity report before it is
+ * abandoned to the probe-backed reconciliation path.
+ */
+export const DEFAULT_ACP_ACTIVITY_COALESCE_TTL_MS = 60 * 1000; // 1 minute
+
+/** Maximum in-memory pending coalesced activity reports per Worker isolate. */
+export const DEFAULT_ACP_ACTIVITY_COALESCE_MAX_PENDING = 512;
+
+/**
+ * Short-lived per-isolate cache of already-authorized ProjectData ACP session
+ * bindings. This avoids re-reading ProjectData for every redundant callback in
+ * a storm while D1 resource checks still gate liveness/sleep side effects.
+ */
+export const DEFAULT_ACP_ACTIVITY_BINDING_CACHE_TTL_MS = 30 * 1000; // 30 seconds
+
+/** Maximum cached ACP activity bindings per Worker isolate. */
+export const DEFAULT_ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES = 2048;

@@ -6,7 +6,8 @@ export type TelemetryMetricName =
   | 'node_agent_response'
   | 'ws_proxy_route'
   | 'sc_002_workspace_creation_flow'
-  | 'sc_006_node_efficiency';
+  | 'sc_006_node_efficiency'
+  | 'acp_activity_callback';
 
 export interface NodeRoutingMetric {
   metric: TelemetryMetricName;
@@ -89,7 +90,11 @@ function updateAggregate(metric: NodeRoutingMetric): MetricAggregate {
     aggregate.statusCodeCounts[key] = (aggregate.statusCodeCounts[key] || 0) + 1;
   }
 
-  if (typeof metric.durationMs === 'number' && Number.isFinite(metric.durationMs) && metric.durationMs >= 0) {
+  if (
+    typeof metric.durationMs === 'number' &&
+    Number.isFinite(metric.durationMs) &&
+    metric.durationMs >= 0
+  ) {
     aggregate.duration.sampleCount += 1;
     aggregate.duration.totalMs += metric.durationMs;
     aggregate.duration.maxMs = Math.max(aggregate.duration.maxMs, metric.durationMs);
@@ -148,9 +153,35 @@ export interface DurableExecutionMetric {
   reason?: string | null;
 }
 
-export function recordDurableExecutionMetric(
-  metric: DurableExecutionMetric,
-  _env: Env,
-): void {
+export function recordDurableExecutionMetric(metric: DurableExecutionMetric, _env: Env): void {
   log.info('durable_execution.telemetry', { ...metric });
+}
+
+export type AcpActivityCallbackOutcome =
+  | 'admitted'
+  | 'coalesced'
+  | 'healed'
+  | 'rejected'
+  | 'forced_terminal';
+
+export interface AcpActivityCallbackMetric {
+  metric: 'acp_activity_callback';
+  outcome: AcpActivityCallbackOutcome;
+  projectId: string | null;
+  sessionId: string | null;
+  nodeId?: string | null;
+  workspaceId?: string | null;
+  activity?: string | null;
+  reason?: string | null;
+  source?: 'callback' | 'coalesced_flush' | 'reconciliation_probe' | 'admission_control';
+  coalescedCount?: number;
+  pendingCount?: number;
+  durationMs?: number;
+}
+
+export function recordAcpActivityCallbackMetric(
+  metric: AcpActivityCallbackMetric,
+  _env: Env
+): void {
+  log.info('acp_activity.telemetry', { ...metric });
 }
