@@ -8,11 +8,13 @@ import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
   cleanupTaskRun: vi.fn(async () => {}),
+  getSession: vi.fn(async () => ({ status: 'active' })),
   markIdle: vi.fn(async () => {}),
   sleepSession: vi.fn(async () => true),
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
+  getSession: (...args: unknown[]) => mocks.getSession(...args),
   sleepSession: (...args: unknown[]) => mocks.sleepSession(...args),
 }));
 
@@ -196,6 +198,7 @@ describe('session sleep lifecycle repair', () => {
 
   it('keeps a stale post-capture row retryable when ProjectData sleep fails', async () => {
     mocks.sleepSession.mockResolvedValueOnce(false);
+    mocks.getSession.mockResolvedValueOnce({ status: 'active' });
     sqlite
       .prepare(
         `INSERT INTO session_snapshots
@@ -240,5 +243,119 @@ describe('session sleep lifecycle repair', () => {
     expect(
       sqlite.prepare(`SELECT ended_at FROM compute_usage WHERE id = 'usage-1'`).pluck().get()
     ).toBeNull();
+  });
+
+  it('repairs a stale stopping row when ProjectData was already stopped by terminal reconciliation', async () => {
+    mocks.sleepSession.mockResolvedValueOnce(false);
+    mocks.getSession.mockResolvedValueOnce({ status: 'stopped' });
+    sqlite
+      .prepare(
+        `INSERT INTO session_snapshots
+           (id, project_id, workspace_id, node_id, user_id, chat_session_id, runtime, status,
+            degradation, manifest_r2_key, home_r2_key, expires_at, sleep_status,
+            sleep_claim_id, sleep_claimed_at, sleep_stopping_since, sleep_attempts, created_at, updated_at)
+         VALUES ('snapshot-1', 'project-1', 'workspace-1', 'node-1', 'user-1', 'chat-1', 'vm',
+            'available', 'none', 'snapshots/chat-1/manifest.json', 'snapshots/chat-1/home.tar.zst',
+            '2026-08-20T00:00:00.000Z', 'stopping', 'dead-owner',
+            '2026-08-12T00:55:00.000Z', '2026-08-12T00:00:00.000Z', 2, ?, ?)`
+      )
+      .run('2026-08-12T00:00:00.000Z', '2026-08-12T00:55:00.000Z');
+
+    const result = await runSessionSleepLifecycleRepair(env, new Date('2026-08-12T01:00:00.000Z'));
+
+    expect(result).toMatchObject({
+      selected: 1,
+      repaired: 1,
+      skipped: 0,
+      projectDataErrors: 0,
+      errors: 0,
+    });
+    expect(mocks.sleepSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1');
+    expect(mocks.getSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1');
+    expect(sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).get()).toEqual({
+      status: 'sleeping',
+    });
+    expect(
+      sqlite
+        .prepare(
+          `SELECT sleep_status, sleeping_at, sleep_claim_id, sleep_claimed_at
+             FROM session_snapshots WHERE id = 'snapshot-1'`
+        )
+        .get()
+    ).toEqual({
+      sleep_status: 'sleeping',
+      sleeping_at: '2026-08-12T01:00:00.000Z',
+      sleep_claim_id: null,
+      sleep_claimed_at: null,
+    });
+    expect(
+      sqlite.prepare(`SELECT ended_at FROM compute_usage WHERE id = 'usage-1'`).pluck().get()
+    ).toEqual(expect.any(String));
+  });
+
+  it('repairs a stale stopping row idempotently when ProjectData is already sleeping', async () => {
+    mocks.sleepSession.mockResolvedValueOnce(false);
+    mocks.getSession.mockResolvedValueOnce({ status: 'sleeping' });
+    sqlite
+      .prepare(
+        `INSERT INTO session_snapshots
+           (id, project_id, workspace_id, node_id, user_id, chat_session_id, runtime, status,
+            degradation, manifest_r2_key, home_r2_key, expires_at, sleep_status,
+            sleep_claim_id, sleep_claimed_at, sleep_stopping_since, sleep_attempts, created_at, updated_at)
+         VALUES ('snapshot-1', 'project-1', 'workspace-1', 'node-1', 'user-1', 'chat-1', 'vm',
+            'available', 'none', 'snapshots/chat-1/manifest.json', 'snapshots/chat-1/home.tar.zst',
+            '2026-08-20T00:00:00.000Z', 'stopping', 'dead-owner',
+            '2026-08-12T00:55:00.000Z', '2026-08-12T00:00:00.000Z', 2, ?, ?)`
+      )
+      .run('2026-08-12T00:00:00.000Z', '2026-08-12T00:55:00.000Z');
+
+    const result = await runSessionSleepLifecycleRepair(env, new Date('2026-08-12T01:00:00.000Z'));
+
+    expect(result).toMatchObject({
+      selected: 1,
+      repaired: 1,
+      skipped: 0,
+      projectDataErrors: 0,
+      errors: 0,
+    });
+    expect(sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).get()).toEqual({
+      status: 'sleeping',
+    });
+    expect(
+      sqlite.prepare(`SELECT status FROM agent_sessions WHERE id = 'agent-1'`).pluck().get()
+    ).toBe('sleeping');
+  });
+
+  it('does not repair a stale stopping row when ProjectData status is missing after sleep fails', async () => {
+    mocks.sleepSession.mockResolvedValueOnce(false);
+    mocks.getSession.mockResolvedValueOnce(null);
+    sqlite
+      .prepare(
+        `INSERT INTO session_snapshots
+           (id, project_id, workspace_id, node_id, user_id, chat_session_id, runtime, status,
+            degradation, manifest_r2_key, home_r2_key, expires_at, sleep_status,
+            sleep_claim_id, sleep_claimed_at, sleep_stopping_since, sleep_attempts, created_at, updated_at)
+         VALUES ('snapshot-1', 'project-1', 'workspace-1', 'node-1', 'user-1', 'chat-1', 'vm',
+            'available', 'none', 'snapshots/chat-1/manifest.json', 'snapshots/chat-1/home.tar.zst',
+            '2026-08-20T00:00:00.000Z', 'stopping', 'dead-owner',
+            '2026-08-12T00:55:00.000Z', '2026-08-12T00:00:00.000Z', 2, ?, ?)`
+      )
+      .run('2026-08-12T00:00:00.000Z', '2026-08-12T00:55:00.000Z');
+
+    const result = await runSessionSleepLifecycleRepair(env, new Date('2026-08-12T01:00:00.000Z'));
+
+    expect(result).toMatchObject({
+      selected: 1,
+      repaired: 0,
+      skipped: 0,
+      projectDataErrors: 1,
+      errors: 0,
+    });
+    expect(sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).get()).toEqual({
+      status: 'running',
+    });
+    expect(
+      sqlite.prepare(`SELECT sleep_status FROM session_snapshots WHERE id = 'snapshot-1'`).pluck().get()
+    ).toBe('stopping');
   });
 });
