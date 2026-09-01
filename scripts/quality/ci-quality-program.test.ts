@@ -163,5 +163,6 @@ describe('deterministic quality-program CI wiring', () => {
     expect(codSpeed).toContain("- 'packages/shared/**'");
     expect(codSpeed).not.toContain("- 'apps/www/**'");
     expect(codSpeed).not.toContain("- '.github/workflows/ci.yml'");
+    expect(codSpeed).not.toContain("- '.github/workflows/codspeed.yml'");
   });
 });

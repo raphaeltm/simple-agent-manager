@@ -8,14 +8,12 @@ on:
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
-      - '.github/workflows/codspeed.yml'
   pull_request:
     paths:
       - 'packages/shared/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
-      - '.github/workflows/codspeed.yml'
   # Allow CodSpeed to trigger backtest performance analysis to generate baseline data.
   workflow_dispatch:
 
