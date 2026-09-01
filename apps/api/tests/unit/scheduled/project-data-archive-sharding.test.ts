@@ -1,10 +1,31 @@
 import Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import { runProjectDataArchiveSharding } from '../../../src/scheduled/project-data-archive-sharding';
+import type {
+  ProjectDataArchiveChunk,
+  ProjectDataArchiveJournalState,
+  ProjectDataArchiveTableName,
+} from '../../../src/project-data-archive/contract';
+import {
+  copyBackProjectDataArchiveMigration,
+  freezeProjectDataArchiveMigration,
+  inspectFrozenProjectDataArchiveIntents,
+  poisonProjectDataArchiveMigration,
+  runProjectDataArchiveSharding,
+} from '../../../src/scheduled/project-data-archive-sharding';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+
+const NOW = Date.now() + 60_000;
+const PROJECT_ID = 'project-archive';
+const SESSION_ID = 'session-archived';
+const MIGRATION_ID = 'migration-resume';
+const SOURCE_OWNER = PROJECT_ID;
+const TARGET_OWNER = `${PROJECT_ID}:archive:g1:s7`;
+const TERMINAL_SHA = 'a'.repeat(64);
+const TARGET_SHA = 'b'.repeat(64);
+const MANIFEST_KEY = 'project-data/session-archives/project-archive/session-archived/manifest.json';
 
 function makeEnv(sqlite: Database.Database, overrides: Partial<Env> = {}): Env {
   return {
@@ -21,6 +42,286 @@ function createCoordinatorTables(sqlite: Database.Database): void {
     schema.projectDataArchiveMigrations,
     schema.projectDataSessionLocations,
   ]);
+}
+
+function createMemoryR2(): R2Bucket {
+  const objects = new Map<string, string>();
+  return {
+    get: vi.fn(async (key: string) => {
+      const text = objects.get(key);
+      return text === undefined ? null : ({ text: async () => text } as R2ObjectBody);
+    }),
+    put: vi.fn(async (key: string, value: string) => {
+      objects.set(key, value);
+      return null;
+    }),
+  } as unknown as R2Bucket;
+}
+
+type SourceState =
+  | null
+  | 'intent_prepared'
+  | 'target_sealed'
+  | 'recovery_manifest_persisted'
+  | 'source_deleted';
+
+type FakeSourceOptions = {
+  state?: SourceState;
+  token?: string;
+  beforeTargetSealCas?: () => void;
+};
+
+function makeChunk(tableName: ProjectDataArchiveTableName, ordinal: number): ProjectDataArchiveChunk {
+  return {
+    migrationId: MIGRATION_ID,
+    projectId: PROJECT_ID,
+    sessionId: SESSION_ID,
+    sourceOwnerName: SOURCE_OWNER,
+    targetOwnerName: TARGET_OWNER,
+    targetGeneration: 1,
+    tableName,
+    ordinal,
+    rows: [],
+    rowIds: [],
+    cursor: null,
+    hasMore: false,
+    rowCount: 0,
+    byteCount: 2,
+    sha256: `${tableName}:${ordinal}:sha`,
+  };
+}
+
+function createFakeSource(options: FakeSourceOptions = {}) {
+  let state = options.state ?? null;
+  let token = options.token ?? 'old-token';
+  let targetAggregateSha256: string | null =
+    state === 'target_sealed' || state === 'recovery_manifest_persisted' || state === 'source_deleted'
+      ? TARGET_SHA
+      : null;
+  let r2ManifestKey: string | null =
+    state === 'recovery_manifest_persisted' || state === 'source_deleted' ? MANIFEST_KEY : null;
+  const prepareTokens: string[] = [];
+  const source = {
+    ensureProjectId: vi.fn(async () => undefined),
+    archiveSourceInspectIntent: vi.fn(async () => {
+      if (!state) return { exists: false, databaseSizeBytes: 1000 };
+      return {
+        exists: true,
+        state,
+        sourceIntentToken: token,
+        terminalVersionSha256: TERMINAL_SHA,
+        targetAggregateSha256,
+        r2ManifestKey,
+        lastMessageAt: 1200,
+        messageCount: 2,
+        sourceDeletedAt: state === 'source_deleted' ? NOW : null,
+        databaseSizeBeforeBytes: state === 'source_deleted' ? 1000 : null,
+        databaseSizeAfterBytes: state === 'source_deleted' ? 500 : null,
+        databaseSizeBytes: state === 'source_deleted' ? 500 : 1000,
+      };
+    }),
+    archiveSourcePrepareIntent: vi.fn(async (input: { sourceIntentToken: string }) => {
+      prepareTokens.push(input.sourceIntentToken);
+      token = input.sourceIntentToken;
+      if (!state) state = 'intent_prepared';
+      return {
+        idempotent: state !== 'intent_prepared',
+        sourceIntentToken: token,
+        terminalVersionSha256: TERMINAL_SHA,
+        lastMessageAt: 1200,
+        messageCount: 2,
+        sessionRow: {
+          id: SESSION_ID,
+          topic: 'Terminal topic',
+          status: 'stopped',
+          message_count: 2,
+          started_at: 1000,
+          ended_at: 1200,
+          created_at: 1000,
+          updated_at: 1200,
+        },
+        databaseSizeBytes: 1000,
+      };
+    }),
+    archiveSourceExportChunk: vi.fn(async (input: { tableName: ProjectDataArchiveTableName; ordinal: number }) =>
+      makeChunk(input.tableName, input.ordinal)
+    ),
+    archiveSourceMarkTargetSealed: vi.fn(async () => {
+      options.beforeTargetSealCas?.();
+      state = 'target_sealed';
+      targetAggregateSha256 = TARGET_SHA;
+      return true;
+    }),
+    archiveSourceMarkRecoveryManifestPersisted: vi.fn(async () => {
+      state = 'recovery_manifest_persisted';
+      targetAggregateSha256 = TARGET_SHA;
+      r2ManifestKey = MANIFEST_KEY;
+      return true;
+    }),
+    archiveSourceFinalizeDelete: vi.fn(async () => {
+      state = 'source_deleted';
+      targetAggregateSha256 = TARGET_SHA;
+      r2ManifestKey = MANIFEST_KEY;
+      return {
+        idempotent: false,
+        lastMessageAt: 1200,
+        messagesDeleted: 2,
+        groupedRowsDeleted: 1,
+        ftsRowsDeleted: 1,
+        toolArchiveRowsDeleted: 0,
+        databaseSizeBeforeBytes: 1000,
+        databaseSizeAfterBytes: 500,
+      };
+    }),
+    archiveSourceRestoreChunk: vi.fn(async () => ({ idempotent: false, rowCount: 0, sha256: 'copy' })),
+    archiveSourceMarkCopyBackRestored: vi.fn(async () => true),
+    prepareTokens,
+    get state() {
+      return state;
+    },
+  };
+  return source;
+}
+
+function createFakeTarget() {
+  const chunks: ProjectDataArchiveChunk[] = [];
+  let state: 'prepared' | 'copying' | 'sealed' | 'rehome_exported' = 'prepared';
+  const target = {
+    ensureProjectId: vi.fn(async () => undefined),
+    archiveTargetPrepare: vi.fn(async () => ({ idempotent: state !== 'prepared', state })),
+    archiveTargetCommitChunk: vi.fn(async (chunk: ProjectDataArchiveChunk) => {
+      state = 'copying';
+      chunks.push(chunk);
+      return { idempotent: false, tableName: chunk.tableName, rowCount: chunk.rowCount, sha256: chunk.sha256 };
+    }),
+    archiveTargetSeal: vi.fn(async () => {
+      state = 'sealed';
+      return { aggregateSha256: TARGET_SHA, messageCount: 2, groupedCount: 1, toolArchiveCount: 0 };
+    }),
+    archiveTargetInspectSession: vi.fn(async () => ({
+      state,
+      terminalVersionSha256: TERMINAL_SHA,
+      aggregateSha256: TARGET_SHA,
+      messageCount: 2,
+      groupedCount: 1,
+      toolArchiveCount: 0,
+      chunks: chunks.map((chunk) => ({
+        tableName: chunk.tableName,
+        ordinal: chunk.ordinal,
+        sha256: chunk.sha256,
+        rowCount: chunk.rowCount,
+        byteCount: chunk.byteCount,
+      })),
+      sessionRow: {
+        id: SESSION_ID,
+        topic: 'Terminal topic',
+        status: 'stopped',
+        message_count: 2,
+        started_at: 1000,
+        ended_at: 1200,
+        created_at: 1000,
+        updated_at: 1200,
+      },
+      databaseSizeBytes: 750,
+    })),
+    archiveTargetExportChunk: vi.fn(async (input: { tableName: ProjectDataArchiveTableName; ordinal: number }) =>
+      makeChunk(input.tableName, input.ordinal)
+    ),
+    archiveTargetMarkRehomeExported: vi.fn(async () => {
+      state = 'rehome_exported';
+      return true;
+    }),
+  };
+  return target;
+}
+
+function createProjectDataNamespace(stubs: Record<string, unknown>): DurableObjectNamespace {
+  return {
+    idFromName: (name: string) => name,
+    get: (id: string) => {
+      const stub = stubs[id];
+      if (!stub) throw new Error(`Missing fake ProjectData stub ${id}`);
+      return stub;
+    },
+  } as unknown as DurableObjectNamespace;
+}
+
+function seedMigration(
+  sqlite: Database.Database,
+  state: ProjectDataArchiveJournalState,
+  opts: Partial<{
+    migrationId: string;
+    projectId: string;
+    sessionId: string;
+    sourceIntentToken: string | null;
+    terminalVersionSha256: string | null;
+    targetAggregateSha256: string | null;
+    r2ManifestKey: string | null;
+    leaseExpiresAt: number | null;
+    attemptCount: number;
+  }> = {}
+): string {
+  const migrationId = opts.migrationId ?? MIGRATION_ID;
+  const projectId = opts.projectId ?? PROJECT_ID;
+  const sessionId = opts.sessionId ?? SESSION_ID;
+  sqlite
+    .prepare(
+      `INSERT INTO project_data_archive_migrations
+         (migration_id, project_id, session_id, state, source_owner_name,
+          target_owner_name, target_generation, source_intent_token,
+          terminal_version_sha256, target_aggregate_sha256, r2_manifest_key,
+          lease_epoch, lease_expires_at, attempt_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 0, ?, ?, 1000, 1000)`
+    )
+    .run(
+      migrationId,
+      projectId,
+      sessionId,
+      state,
+      projectId,
+      TARGET_OWNER,
+      opts.sourceIntentToken ?? (state === 'candidate' ? null : 'old-token'),
+      opts.terminalVersionSha256 ?? (state === 'candidate' || state === 'leased' ? null : TERMINAL_SHA),
+      opts.targetAggregateSha256 ??
+        (['target_sealed', 'recovery_manifest_persisted', 'source_deleted', 'published'].includes(state)
+          ? TARGET_SHA
+          : null),
+      opts.r2ManifestKey ??
+        (['recovery_manifest_persisted', 'source_deleted', 'published'].includes(state) ? MANIFEST_KEY : null),
+      opts.leaseExpiresAt ?? (state === 'candidate' ? null : 1000),
+      opts.attemptCount ?? 0
+    );
+  sqlite
+    .prepare(
+      `INSERT INTO project_data_session_locations
+         (project_id, session_id, location_state, owner_kind, owner_name,
+          generation, migration_id, source_owner_name, target_owner_name,
+          target_aggregate_sha256, routing_schema_version, updated_at)
+       VALUES (?, ?, 'migrating', 'archive_shard', ?, 1, ?, ?, ?, ?, 1, 1000)`
+    )
+    .run(projectId, sessionId, TARGET_OWNER, migrationId, projectId, TARGET_OWNER, TARGET_SHA);
+  return migrationId;
+}
+
+function readMigrationRow(sqlite: Database.Database, migrationId = MIGRATION_ID) {
+  return sqlite
+    .prepare(
+      `SELECT state, source_intent_token, terminal_version_sha256,
+              target_aggregate_sha256, r2_manifest_key
+       FROM project_data_archive_migrations
+       WHERE migration_id = ?`
+    )
+    .get(migrationId) as Record<string, unknown>;
+}
+
+function readLocationRow(sqlite: Database.Database, sessionId = SESSION_ID) {
+  return sqlite
+    .prepare(
+      `SELECT location_state, owner_kind, owner_name, generation, published_at
+       FROM project_data_session_locations
+       WHERE project_id = ? AND session_id = ?`
+    )
+    .get(PROJECT_ID, sessionId) as Record<string, unknown>;
 }
 
 describe('scheduled ProjectData archive sharding coordinator', () => {
@@ -62,40 +363,14 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
     const sqlite = new Database(':memory:');
     try {
       createCoordinatorTables(sqlite);
-      sqlite
-        .prepare(
-          `INSERT INTO project_data_archive_migrations
-             (migration_id, project_id, session_id, state, source_owner_name,
-              target_owner_name, target_generation, source_intent_token,
-              terminal_version_sha256, target_aggregate_sha256, r2_manifest_key,
-              created_at, updated_at)
-           VALUES ('migration-crash-gap', 'project-archive', 'session-archived',
-                   'source_deleted', 'project-archive',
-                   'project-archive:archive:g1:s7', 1, 'intent-crash-gap',
-                   'terminal-version-sha', 'target-aggregate-sha',
-                   'project-data/session-archives/project-archive/session-archived/manifest.json',
-                   1000, 1000)`
-        )
-        .run();
-      sqlite
-        .prepare(
-          `INSERT INTO project_data_session_locations
-             (project_id, session_id, location_state, owner_kind, owner_name,
-              generation, migration_id, source_owner_name, target_owner_name,
-              target_aggregate_sha256, routing_schema_version, updated_at)
-           VALUES ('project-archive', 'session-archived', 'migrating', 'archive_shard',
-                   'project-archive:archive:g1:s7', 1, 'migration-crash-gap',
-                   'project-archive', 'project-archive:archive:g1:s7',
-                   'target-aggregate-sha', 1, 1000)`
-        )
-        .run();
+      seedMigration(sqlite, 'source_deleted', { migrationId: 'migration-crash-gap' });
 
       const stats = await runProjectDataArchiveSharding(
         makeEnv(sqlite, {
           PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
-          PROJECT_DATA_ARCHIVE_R2: {} as R2Bucket,
+          PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
         }),
-        new Date('2026-09-01T05:00:00.000Z')
+        new Date(NOW)
       );
 
       expect(stats).toMatchObject({
@@ -105,32 +380,195 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
         migrated: 0,
         failed: 0,
       });
-      expect(
-        sqlite
-          .prepare(
-            `SELECT location_state, owner_kind, owner_name, generation, published_at
-             FROM project_data_session_locations
-             WHERE project_id = 'project-archive' AND session_id = 'session-archived'`
-          )
-          .get()
-      ).toEqual({
+      expect(readLocationRow(sqlite)).toMatchObject({
         location_state: 'archive_shard',
         owner_kind: 'archive_shard',
-        owner_name: 'project-archive:archive:g1:s7',
+        owner_name: TARGET_OWNER,
         generation: 1,
-        published_at: Date.parse('2026-09-01T05:00:00.000Z'),
+        published_at: NOW,
       });
+      expect(readMigrationRow(sqlite, 'migration-crash-gap')).toMatchObject({
+        state: 'published',
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it.each([
+    ['candidate', null],
+    ['leased', 'intent_prepared'],
+    ['intent_prepared', 'intent_prepared'],
+    ['target_prepared', 'intent_prepared'],
+    ['copying', 'intent_prepared'],
+    ['target_sealed', 'target_sealed'],
+    ['recovery_manifest_persisted', 'recovery_manifest_persisted'],
+    ['failed', 'recovery_manifest_persisted'],
+  ] satisfies Array<[ProjectDataArchiveJournalState, SourceState]>)(
+    'resumes and publishes an expired %s migration',
+    async (journalState, sourceState) => {
+      const sqlite = new Database(':memory:');
+      try {
+        createCoordinatorTables(sqlite);
+        const source = createFakeSource({ state: sourceState, token: 'old-token' });
+        const target = createFakeTarget();
+        seedMigration(sqlite, journalState, {
+          sourceIntentToken: journalState === 'candidate' ? null : 'old-token',
+          attemptCount: journalState === 'failed' ? 1 : 0,
+        });
+
+        const stats = await runProjectDataArchiveSharding(
+          makeEnv(sqlite, {
+            PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+            PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+            PROJECT_DATA: createProjectDataNamespace({
+              [SOURCE_OWNER]: source,
+              [TARGET_OWNER]: target,
+            }),
+          }),
+          new Date(NOW)
+        );
+
+        expect(stats.failed).toBe(0);
+        expect(stats.migrated).toBe(1);
+        expect(readMigrationRow(sqlite)).toMatchObject({
+          state: 'published',
+          terminal_version_sha256: TERMINAL_SHA,
+          target_aggregate_sha256: TARGET_SHA,
+          r2_manifest_key: expect.stringContaining(
+            'project-data/session-archives/project-archive/session-archived/'
+          ),
+        });
+        expect(readLocationRow(sqlite)).toMatchObject({
+          location_state: 'archive_shard',
+          owner_kind: 'archive_shard',
+          owner_name: TARGET_OWNER,
+          published_at: NOW,
+        });
+        if (journalState === 'failed') {
+          expect(source.prepareTokens.at(-1)).not.toBe('old-token');
+        }
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it.each(['frozen', 'poisoned'] as const)(
+    'checks the copying -> target_sealed CAS and does not finalize after a %s interleave',
+    async (blockedState) => {
+      const sqlite = new Database(':memory:');
+      try {
+        createCoordinatorTables(sqlite);
+        seedMigration(sqlite, 'copying', { attemptCount: 1 });
+        const source = createFakeSource({
+          state: 'intent_prepared',
+          beforeTargetSealCas: () => {
+            sqlite
+              .prepare(
+                `UPDATE project_data_archive_migrations
+                 SET state = ?, lease_owner = NULL, lease_expires_at = NULL
+                 WHERE migration_id = ?`
+              )
+              .run(blockedState, MIGRATION_ID);
+          },
+        });
+        const target = createFakeTarget();
+
+        const stats = await runProjectDataArchiveSharding(
+          makeEnv(sqlite, {
+            PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+            PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+            PROJECT_DATA: createProjectDataNamespace({
+              [SOURCE_OWNER]: source,
+              [TARGET_OWNER]: target,
+            }),
+          }),
+          new Date(NOW)
+        );
+
+        expect(stats.migrated).toBe(0);
+        expect(source.archiveSourceFinalizeDelete).not.toHaveBeenCalled();
+        expect(readMigrationRow(sqlite)).toMatchObject({ state: blockedState });
+        expect(readLocationRow(sqlite)).toMatchObject({ location_state: 'migrating' });
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it('implements freeze, poison, frozen-intent inspection, and copy-back controls', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      const frozenMigrationId = seedMigration(sqlite, 'copying', {
+        migrationId: 'migration-freeze',
+        sessionId: 'session-freeze',
+      });
+      await freezeProjectDataArchiveMigration(makeEnv(sqlite), {
+        migrationId: frozenMigrationId,
+        projectId: PROJECT_ID,
+        reason: 'operator hold',
+        now: NOW,
+      });
+      expect(readMigrationRow(sqlite, frozenMigrationId)).toMatchObject({ state: 'frozen' });
       expect(
         sqlite
-          .prepare(
-            `SELECT state, published_at
-             FROM project_data_archive_migrations
-             WHERE migration_id = 'migration-crash-gap'`
-          )
-          .get()
-      ).toEqual({
-        state: 'published',
-        published_at: Date.parse('2026-09-01T05:00:00.000Z'),
+          .prepare(`SELECT state, reason FROM project_data_archive_circuit_breakers WHERE project_id = ?`)
+          .get(PROJECT_ID)
+      ).toEqual({ state: 'frozen', reason: 'operator hold' });
+
+      const poisonedMigrationId = seedMigration(sqlite, 'failed', {
+        migrationId: 'migration-poison',
+        sessionId: 'session-poison',
+        attemptCount: 3,
+      });
+      await poisonProjectDataArchiveMigration(makeEnv(sqlite), {
+        migrationId: poisonedMigrationId,
+        projectId: PROJECT_ID,
+        reason: 'operator poison',
+        now: NOW,
+      });
+      expect(readMigrationRow(sqlite, poisonedMigrationId)).toMatchObject({ state: 'poisoned' });
+
+      const copyBackMigrationId = seedMigration(sqlite, 'published', {
+        migrationId: 'migration-copy-back',
+        sessionId: SESSION_ID,
+      });
+      const source = createFakeSource({ state: 'source_deleted', token: 'old-token' });
+      const target = createFakeTarget();
+      const controlEnv = makeEnv(sqlite, {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA: createProjectDataNamespace({
+          [SOURCE_OWNER]: source,
+          [TARGET_OWNER]: target,
+        }),
+      });
+
+      const inspections = await inspectFrozenProjectDataArchiveIntents(controlEnv, {
+        projectId: PROJECT_ID,
+      });
+      expect(inspections.map((inspection) => inspection.migrationId)).toEqual([
+        'migration-freeze',
+        'migration-poison',
+      ]);
+
+      const copyBack = await copyBackProjectDataArchiveMigration(controlEnv, {
+        migrationId: copyBackMigrationId,
+        projectId: PROJECT_ID,
+        now: NOW,
+      });
+      expect(copyBack).toMatchObject({
+        migrationId: copyBackMigrationId,
+        restoredToRoot: true,
+      });
+      expect(source.archiveSourceRestoreChunk).toHaveBeenCalled();
+      expect(target.archiveTargetMarkRehomeExported).toHaveBeenCalled();
+      expect(readLocationRow(sqlite)).toMatchObject({
+        location_state: 'root',
+        owner_kind: 'root',
+        owner_name: SOURCE_OWNER,
+        generation: 0,
       });
     } finally {
       sqlite.close();

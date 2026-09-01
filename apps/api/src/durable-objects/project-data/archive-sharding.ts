@@ -31,6 +31,7 @@ import * as toolPayloadArchive from './tool-payload-archive';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.archive_sharding');
+const PENDING_TERMINAL_VERSION_SHA256 = 'pending';
 
 export class ProjectDataArchiveInvariantError extends Error {
   readonly code = 'PROJECT_DATA_ARCHIVE_INVARIANT';
@@ -175,6 +176,35 @@ export type ArchiveSourcePrepareResult = {
   databaseSizeBytes: number;
 };
 
+export type ArchiveSourceInspectIntentInput = {
+  projectId: string;
+  sessionId: string;
+  migrationId: string;
+  sourceOwnerName: string;
+  targetOwnerName: string;
+  targetGeneration: number;
+};
+
+export type ArchiveSourceInspectIntentResult =
+  | {
+      exists: false;
+      databaseSizeBytes: number;
+    }
+  | {
+      exists: true;
+      state: ProjectDataArchiveSourceIntentState;
+      sourceIntentToken: string;
+      terminalVersionSha256: string;
+      targetAggregateSha256: string | null;
+      r2ManifestKey: string | null;
+      lastMessageAt: number | null;
+      messageCount: number;
+      sourceDeletedAt: number | null;
+      databaseSizeBeforeBytes: number | null;
+      databaseSizeAfterBytes: number | null;
+      databaseSizeBytes: number;
+    };
+
 export type ArchiveSourceExportChunkInput = {
   projectId: string;
   sessionId: string;
@@ -264,6 +294,57 @@ export type ArchiveSourceFinalizeDeleteResult = {
   toolArchiveRowsDeleted: number;
   databaseSizeBeforeBytes: number;
   databaseSizeAfterBytes: number;
+};
+
+export type ArchiveTargetInspectInput = {
+  projectId: string;
+  sessionId: string;
+  migrationId: string | null;
+  targetOwnerName: string;
+  targetGeneration: number;
+};
+
+export type ArchiveTargetInspectResult = {
+  state: ProjectDataArchiveTargetState;
+  terminalVersionSha256: string;
+  aggregateSha256: string | null;
+  messageCount: number;
+  groupedCount: number;
+  toolArchiveCount: number;
+  chunks: Array<{
+    tableName: ProjectDataArchiveTableName;
+    ordinal: number;
+    sha256: string;
+    rowCount: number;
+    byteCount: number;
+  }>;
+  sessionRow: ProjectDataArchiveRow;
+  databaseSizeBytes: number;
+};
+
+export type ArchiveTargetExportChunkInput = {
+  projectId: string;
+  sessionId: string;
+  migrationId: string | null;
+  targetOwnerName: string;
+  targetGeneration: number;
+  tableName: ProjectDataArchiveTableName;
+  ordinal: number;
+  cursor?: string | null;
+  maxRows?: number;
+  maxBytes?: number;
+};
+
+export type ArchiveSourceRestoreChunkInput = ProjectDataArchiveChunk & {
+  sourceIntentToken: string;
+  now: number;
+};
+
+export type ArchiveSourceRestoreChunkResult = {
+  tableName: ProjectDataArchiveTableName;
+  rowCount: number;
+  sha256: string;
+  idempotent: boolean;
 };
 
 type TerminalVersion = {
@@ -433,6 +514,19 @@ function validateIntentState(value: unknown): ProjectDataArchiveSourceIntentStat
     'unknown_source_intent_state',
     'ProjectData archive source intent has an unknown state'
   );
+}
+
+function optionalNonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function optionalInteger(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isSafeInteger(parsed)) return parsed;
+  }
+  return null;
 }
 
 function validateTargetState(value: unknown): ProjectDataArchiveTargetState {
@@ -664,7 +758,7 @@ function readSourceIntent(sql: SqlStorage, sessionId: string): Record<string, un
   );
 }
 
-function assertMatchingSourceIntent(
+function assertSameSourceIntentMigration(
   intent: Record<string, unknown> | null,
   input: {
     projectId: string;
@@ -673,7 +767,6 @@ function assertMatchingSourceIntent(
     sourceOwnerName: string;
     targetOwnerName: string;
     targetGeneration: number;
-    sourceIntentToken: string;
   }
 ): ProjectDataArchiveSourceIntentState {
   if (!intent) {
@@ -687,8 +780,7 @@ function assertMatchingSourceIntent(
     intent.migration_id !== input.migrationId ||
     intent.source_owner_name !== input.sourceOwnerName ||
     intent.target_owner_name !== input.targetOwnerName ||
-    intent.target_generation !== input.targetGeneration ||
-    intent.source_intent_token !== input.sourceIntentToken
+    intent.target_generation !== input.targetGeneration
   ) {
     throw new ProjectDataArchiveInvariantError(
       'source_intent_mismatch',
@@ -698,6 +790,81 @@ function assertMatchingSourceIntent(
   return validateIntentState(intent.state);
 }
 
+function assertMatchingSourceIntent(
+  intent: Record<string, unknown> | null,
+  input: {
+    projectId: string;
+    sessionId: string;
+    migrationId: string;
+    sourceOwnerName: string;
+    targetOwnerName: string;
+    targetGeneration: number;
+    sourceIntentToken: string;
+  }
+): ProjectDataArchiveSourceIntentState {
+  const state = assertSameSourceIntentMigration(intent, input);
+  if (intent?.source_intent_token !== input.sourceIntentToken) {
+    throw new ProjectDataArchiveInvariantError(
+      'source_intent_mismatch',
+      'ProjectData archive source intent token mismatch'
+    );
+  }
+  return state;
+}
+
+function isActiveSourceIntentState(state: ProjectDataArchiveSourceIntentState): boolean {
+  return state !== 'rehome_exported';
+}
+
+function reattachSourceIntentToken(
+  sql: SqlStorage,
+  input: ArchiveSourcePrepareInput,
+  state: ProjectDataArchiveSourceIntentState
+): void {
+  if (state === 'source_deleted' || state === 'rehome_exported') return;
+  sql.exec(
+    `UPDATE project_data_archive_source_intents
+     SET source_intent_token = ?, updated_at = ?
+     WHERE session_id = ?
+       AND project_id = ?
+       AND migration_id = ?
+       AND state = ?`,
+    input.sourceIntentToken,
+    input.now,
+    input.sessionId,
+    input.projectId,
+    input.migrationId,
+    state
+  );
+}
+
+export function inspectArchiveSourceIntent(
+  sql: SqlStorage,
+  input: ArchiveSourceInspectIntentInput
+): ArchiveSourceInspectIntentResult {
+  validateRootSourceOwner(input);
+  const intent = readSourceIntent(sql, input.sessionId);
+  if (!intent) return { exists: false, databaseSizeBytes: databaseSize(sql) };
+  const state = assertSameSourceIntentMigration(intent, input);
+  return {
+    exists: true,
+    state,
+    sourceIntentToken: strictString(intent.source_intent_token, 'source_intent.source_intent_token'),
+    terminalVersionSha256: strictString(
+      intent.terminal_version_sha256,
+      'source_intent.terminal_version_sha256'
+    ),
+    targetAggregateSha256: optionalNonEmptyString(intent.target_aggregate_sha256),
+    r2ManifestKey: optionalNonEmptyString(intent.recovery_manifest_key),
+    lastMessageAt: optionalInteger(intent.last_message_at),
+    messageCount: optionalInteger(intent.message_count) ?? 0,
+    sourceDeletedAt: optionalInteger(intent.source_deleted_at),
+    databaseSizeBeforeBytes: optionalInteger(intent.source_database_size_before),
+    databaseSizeAfterBytes: optionalInteger(intent.source_database_size_after),
+    databaseSizeBytes: databaseSize(sql),
+  };
+}
+
 export async function prepareArchiveSourceIntent(
   sql: SqlStorage,
   input: ArchiveSourcePrepareInput
@@ -705,22 +872,74 @@ export async function prepareArchiveSourceIntent(
   validateRootSourceOwner(input);
   const minTerminalAgeMs = input.minTerminalAgeMs ?? PROJECT_DATA_ARCHIVE_DEFAULT_SESSION_GRACE_MS;
   assertEligibleTerminalSource(sql, input.sessionId, input.now, minTerminalAgeMs);
-  const terminalVersion = await computeTerminalVersion(sql, input.sessionId);
   const existing = readSourceIntent(sql, input.sessionId);
+  if (!existing) {
+    sql.exec(
+      `INSERT INTO project_data_archive_source_intents (
+         session_id, project_id, migration_id, source_owner_name, target_owner_name,
+         target_generation, source_intent_token, state, terminal_version_sha256,
+         last_message_at, message_count, prepared_at, created_at, updated_at
+       )
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'intent_prepared', ?, NULL, 0, ?, ?, ?)`,
+      input.sessionId,
+      input.projectId,
+      input.migrationId,
+      input.sourceOwnerName,
+      input.targetOwnerName,
+      input.targetGeneration,
+      input.sourceIntentToken,
+      PENDING_TERMINAL_VERSION_SHA256,
+      input.now,
+      input.now,
+      input.now
+    );
+  }
+  const terminalVersion = await computeTerminalVersion(sql, input.sessionId);
   if (existing) {
-    const state = assertMatchingSourceIntent(existing, input);
+    const state = assertSameSourceIntentMigration(existing, input);
     if (state === 'source_deleted') {
       throw new ProjectDataArchiveInvariantError(
         'source_already_deleted',
         'ProjectData archive source payload has already been deleted'
       );
     }
-    if (existing.terminal_version_sha256 !== terminalVersion.sha256) {
+    if (state === 'rehome_exported') {
+      throw new ProjectDataArchiveInvariantError(
+        'source_rehome_exported',
+        'ProjectData archive source intent has already been re-homed or copied back'
+      );
+    }
+    if (
+      existing.terminal_version_sha256 !== PENDING_TERMINAL_VERSION_SHA256 &&
+      existing.terminal_version_sha256 !== terminalVersion.sha256
+    ) {
       throw new ProjectDataArchiveInvariantError(
         'terminal_version_changed',
         'ProjectData archive terminal version changed after source intent'
       );
     }
+    if (existing.source_intent_token !== input.sourceIntentToken) {
+      reattachSourceIntentToken(sql, input, state);
+    }
+    sql.exec(
+      `UPDATE project_data_archive_source_intents
+       SET terminal_version_sha256 = ?,
+           last_message_at = ?,
+           message_count = ?,
+           updated_at = ?
+       WHERE session_id = ?
+         AND project_id = ?
+         AND migration_id = ?
+         AND state = ?`,
+      terminalVersion.sha256,
+      terminalVersion.lastMessageAt,
+      terminalVersion.messageCount,
+      input.now,
+      input.sessionId,
+      input.projectId,
+      input.migrationId,
+      state
+    );
     return {
       idempotent: true,
       sourceIntentToken: input.sourceIntentToken,
@@ -731,27 +950,25 @@ export async function prepareArchiveSourceIntent(
       databaseSizeBytes: databaseSize(sql),
     };
   }
-
   sql.exec(
-    `INSERT INTO project_data_archive_source_intents (
-       session_id, project_id, migration_id, source_owner_name, target_owner_name,
-       target_generation, source_intent_token, state, terminal_version_sha256,
-       last_message_at, message_count, prepared_at, created_at, updated_at
-     )
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'intent_prepared', ?, ?, ?, ?, ?, ?)`,
-    input.sessionId,
-    input.projectId,
-    input.migrationId,
-    input.sourceOwnerName,
-    input.targetOwnerName,
-    input.targetGeneration,
-    input.sourceIntentToken,
+    `UPDATE project_data_archive_source_intents
+     SET terminal_version_sha256 = ?,
+         last_message_at = ?,
+         message_count = ?,
+         updated_at = ?
+     WHERE session_id = ?
+       AND project_id = ?
+       AND migration_id = ?
+       AND source_intent_token = ?
+       AND state = 'intent_prepared'`,
     terminalVersion.sha256,
     terminalVersion.lastMessageAt,
     terminalVersion.messageCount,
     input.now,
-    input.now,
-    input.now
+    input.sessionId,
+    input.projectId,
+    input.migrationId,
+    input.sourceIntentToken
   );
 
   return {
@@ -777,64 +994,7 @@ export async function exportArchiveChunk(
       'ProjectData archive source read failed closed because the source payload is deleted'
     );
   }
-  const spec = validateTableName(input.tableName);
-  const maxBytes = normalizePositiveInteger(
-    input.maxBytes,
-    PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_BYTES,
-    PROJECT_DATA_ARCHIVE_MAX_CHUNK_BYTES
-  );
-  const maxRows = normalizePositiveInteger(
-    input.maxRows,
-    PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_ROWS,
-    PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_ROWS * 20
-  );
-  let query = `SELECT ${spec.columns.join(', ')} FROM ${input.tableName} WHERE session_id = ?`;
-  const params: Array<string | number> = [input.sessionId];
-  if (input.cursor) {
-    query += ` AND ${spec.cursorPredicate}`;
-    params.push(...spec.cursorValues(input.cursor));
-  }
-  query += ` ORDER BY ${spec.orderBy} LIMIT ?`;
-  params.push(maxRows + 1);
-  const candidates = sql.exec(query, ...params).toArray();
-  const rows: ProjectDataArchiveRow[] = [];
-  let byteCount = 0;
-  for (const candidate of candidates.slice(0, maxRows)) {
-    const row = toArchiveRow(candidate, spec.columns);
-    const candidateBytes = byteLength(canonicalizeArchiveRow(spec.columns, row));
-    if (candidateBytes > maxBytes) {
-      throw new ProjectDataArchiveInvariantError(
-        'archive_row_exceeds_chunk_budget',
-        'ProjectData archive row exceeds the configured chunk byte budget'
-      );
-    }
-    if (byteCount + candidateBytes > maxBytes) break;
-    rows.push(row);
-    byteCount += candidateBytes;
-  }
-  const hasMore = rows.length < candidates.length;
-  const lastRow = rows.length > 0 ? rows[rows.length - 1] : null;
-  const cursor = lastRow ? spec.cursorFromRow(lastRow) : (input.cursor ?? null);
-  const rowIds = rows.map((row) =>
-    strictString(row[spec.keyColumn], `${input.tableName}.${spec.keyColumn}`)
-  );
-  return {
-    migrationId: input.migrationId,
-    projectId: input.projectId,
-    sessionId: input.sessionId,
-    sourceOwnerName: input.sourceOwnerName,
-    targetOwnerName: input.targetOwnerName,
-    targetGeneration: input.targetGeneration,
-    tableName: input.tableName,
-    ordinal: input.ordinal,
-    rows,
-    rowIds,
-    cursor,
-    hasMore,
-    rowCount: rows.length,
-    byteCount,
-    sha256: await canonicalRowsSha256(spec.columns, rows),
-  };
+  return exportArchiveRowsChunk(sql, input);
 }
 
 function validateTargetOwner(
@@ -1197,6 +1357,175 @@ export async function sealArchiveTarget(
   return { aggregateSha256, messageCount, groupedCount, toolArchiveCount };
 }
 
+function readTargetChunkInventory(
+  sql: SqlStorage,
+  sessionId: string,
+  migrationId: string | null
+): ArchiveTargetInspectResult['chunks'] {
+  const params: Array<string | number> = [sessionId];
+  let migrationPredicate = '';
+  if (migrationId !== null) {
+    migrationPredicate = ' AND migration_id = ?';
+    params.push(migrationId);
+  }
+  return sql
+    .exec(
+      `SELECT table_name, ordinal, sha256, row_count, byte_count
+       FROM project_data_archive_target_chunks
+       WHERE session_id = ?${migrationPredicate}
+       ORDER BY table_name ASC, ordinal ASC`,
+      ...params
+    )
+    .toArray()
+    .map((row) => {
+      const tableName = row.table_name as ProjectDataArchiveTableName;
+      validateTableName(tableName);
+      return {
+        tableName,
+        ordinal: strictInteger(row.ordinal, 'target_chunk.ordinal'),
+        sha256: strictString(row.sha256, 'target_chunk.sha256'),
+        rowCount: strictInteger(row.row_count, 'target_chunk.row_count'),
+        byteCount: strictInteger(row.byte_count, 'target_chunk.byte_count'),
+      };
+    });
+}
+
+export function inspectArchiveTargetSession(
+  sql: SqlStorage,
+  input: ArchiveTargetInspectInput
+): ArchiveTargetInspectResult {
+  const target = readTargetSession(sql, input.sessionId);
+  const state = validateTargetOwner(target, input);
+  return {
+    state,
+    terminalVersionSha256: strictString(
+      target?.terminal_version_sha256,
+      'target.terminal_version_sha256'
+    ),
+    aggregateSha256: optionalNonEmptyString(target?.aggregate_sha256),
+    messageCount: countRows(
+      sql,
+      'SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?',
+      input.sessionId
+    ),
+    groupedCount: countRows(
+      sql,
+      'SELECT COUNT(*) AS count FROM chat_messages_grouped WHERE session_id = ?',
+      input.sessionId
+    ),
+    toolArchiveCount: countRows(
+      sql,
+      'SELECT COUNT(*) AS count FROM tool_payload_archives WHERE session_id = ?',
+      input.sessionId
+    ),
+    chunks: readTargetChunkInventory(sql, input.sessionId, input.migrationId),
+    sessionRow: readSessionAnchor(sql, input.sessionId) ?? {},
+    databaseSizeBytes: databaseSize(sql),
+  };
+}
+
+async function exportArchiveRowsChunk(
+  sql: SqlStorage,
+  input: {
+    migrationId: string;
+    projectId: string;
+    sessionId: string;
+    sourceOwnerName: string;
+    targetOwnerName: string;
+    targetGeneration: number;
+    tableName: ProjectDataArchiveTableName;
+    ordinal: number;
+    cursor?: string | null;
+    maxRows?: number;
+    maxBytes?: number;
+  }
+): Promise<ProjectDataArchiveChunk> {
+  const spec = validateTableName(input.tableName);
+  const maxBytes = normalizePositiveInteger(
+    input.maxBytes,
+    PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_BYTES,
+    PROJECT_DATA_ARCHIVE_MAX_CHUNK_BYTES
+  );
+  const maxRows = normalizePositiveInteger(
+    input.maxRows,
+    PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_ROWS,
+    PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_ROWS * 20
+  );
+  let query = `SELECT ${spec.columns.join(', ')} FROM ${input.tableName} WHERE session_id = ?`;
+  const params: Array<string | number> = [input.sessionId];
+  if (input.cursor) {
+    query += ` AND ${spec.cursorPredicate}`;
+    params.push(...spec.cursorValues(input.cursor));
+  }
+  query += ` ORDER BY ${spec.orderBy} LIMIT ?`;
+  params.push(maxRows + 1);
+  const candidates = sql.exec(query, ...params).toArray();
+  const rows: ProjectDataArchiveRow[] = [];
+  let byteCount = 0;
+  for (const candidate of candidates.slice(0, maxRows)) {
+    const row = toArchiveRow(candidate, spec.columns);
+    const candidateBytes = byteLength(canonicalizeArchiveRow(spec.columns, row));
+    if (candidateBytes > maxBytes) {
+      throw new ProjectDataArchiveInvariantError(
+        'archive_row_exceeds_chunk_budget',
+        'ProjectData archive row exceeds the configured chunk byte budget'
+      );
+    }
+    if (byteCount + candidateBytes > maxBytes) break;
+    rows.push(row);
+    byteCount += candidateBytes;
+  }
+  const hasMore = rows.length < candidates.length;
+  const lastRow = rows.length > 0 ? rows[rows.length - 1] : null;
+  const cursor = lastRow ? spec.cursorFromRow(lastRow) : (input.cursor ?? null);
+  const rowIds = rows.map((row) =>
+    strictString(row[spec.keyColumn], `${input.tableName}.${spec.keyColumn}`)
+  );
+  return {
+    migrationId: input.migrationId,
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    sourceOwnerName: input.sourceOwnerName,
+    targetOwnerName: input.targetOwnerName,
+    targetGeneration: input.targetGeneration,
+    tableName: input.tableName,
+    ordinal: input.ordinal,
+    rows,
+    rowIds,
+    cursor,
+    hasMore,
+    rowCount: rows.length,
+    byteCount,
+    sha256: await canonicalRowsSha256(spec.columns, rows),
+  };
+}
+
+export async function exportArchiveTargetChunk(
+  sql: SqlStorage,
+  input: ArchiveTargetExportChunkInput
+): Promise<ProjectDataArchiveChunk> {
+  const state = validateTargetOwner(readTargetSession(sql, input.sessionId), input);
+  if (state !== 'sealed' && state !== 'published' && state !== 'rehome_exported') {
+    throw new ProjectDataArchiveInvariantError(
+      'target_not_exportable',
+      'ProjectData archive target is not exportable for re-home or copy-back'
+    );
+  }
+  return exportArchiveRowsChunk(sql, {
+    migrationId: input.migrationId ?? `rehome:${input.sessionId}`,
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    sourceOwnerName: input.targetOwnerName,
+    targetOwnerName: input.targetOwnerName,
+    targetGeneration: input.targetGeneration,
+    tableName: input.tableName,
+    ordinal: input.ordinal,
+    cursor: input.cursor,
+    maxRows: input.maxRows,
+    maxBytes: input.maxBytes,
+  });
+}
+
 function rebuildTargetFts(sql: SqlStorage, sessionId: string): void {
   const rows = sql
     .exec(
@@ -1219,6 +1548,148 @@ function rebuildTargetFts(sql: SqlStorage, sessionId: string): void {
       });
     }
   }
+}
+
+export async function restoreSourceArchiveChunk(
+  sql: SqlStorage,
+  input: ArchiveSourceRestoreChunkInput
+): Promise<ArchiveSourceRestoreChunkResult> {
+  validateRootSourceOwner(input);
+  const state = assertMatchingSourceIntent(readSourceIntent(sql, input.sessionId), input);
+  if (state !== 'source_deleted' && state !== 'rehome_exported') {
+    throw new ProjectDataArchiveInvariantError(
+      'source_not_copy_back_restoreable',
+      'ProjectData archive source can only be restored after source deletion proof exists'
+    );
+  }
+  const spec = validateTableName(input.tableName);
+  const suppliedHash = await canonicalRowsSha256(spec.columns, input.rows);
+  if (suppliedHash !== input.sha256) {
+    throw new ProjectDataArchiveInvariantError(
+      'copy_back_chunk_hash_mismatch',
+      'ProjectData archive copy-back chunk hash did not match supplied rows'
+    );
+  }
+  let inserted = 0;
+  for (const row of input.rows) {
+    const before = countRows(
+      sql,
+      `SELECT COUNT(*) AS count FROM ${input.tableName} WHERE ${spec.keyColumn} = ?`,
+      strictString(row[spec.keyColumn], `${input.tableName}.${spec.keyColumn}`)
+    );
+    insertArchiveRow(sql, input.tableName, row);
+    const after = countRows(
+      sql,
+      `SELECT COUNT(*) AS count FROM ${input.tableName} WHERE ${spec.keyColumn} = ?`,
+      strictString(row[spec.keyColumn], `${input.tableName}.${spec.keyColumn}`)
+    );
+    if (after > before) inserted++;
+  }
+  const committedRows = readCommittedRowsForChunk(sql, input.tableName, input.rowIds);
+  const committedHash = await canonicalRowsSha256(spec.columns, committedRows);
+  if (committedHash !== input.sha256) {
+    throw new ProjectDataArchiveInvariantError(
+      'copy_back_committed_hash_mismatch',
+      'ProjectData archive copy-back committed rows do not match source chunk hash'
+    );
+  }
+  return {
+    tableName: input.tableName,
+    rowCount: input.rowCount,
+    sha256: input.sha256,
+    idempotent: inserted === 0,
+  };
+}
+
+export async function markSourceCopyBackRestored(
+  sql: SqlStorage,
+  input: {
+    projectId: string;
+    sessionId: string;
+    migrationId: string;
+    sourceOwnerName: string;
+    targetOwnerName: string;
+    targetGeneration: number;
+    sourceIntentToken: string;
+    expectedTerminalVersionSha256: string;
+    now: number;
+  }
+): Promise<boolean> {
+  validateRootSourceOwner(input);
+  const state = assertMatchingSourceIntent(readSourceIntent(sql, input.sessionId), input);
+  if (state !== 'source_deleted' && state !== 'rehome_exported') {
+    throw new ProjectDataArchiveInvariantError(
+      'source_not_copy_back_restored',
+      'ProjectData archive source copy-back cannot be marked before source deletion proof'
+    );
+  }
+  rebuildTargetFts(sql, input.sessionId);
+  const terminalVersion = await computeTerminalVersion(sql, input.sessionId);
+  if (terminalVersion.sha256 !== input.expectedTerminalVersionSha256) {
+    throw new ProjectDataArchiveInvariantError(
+      'copy_back_terminal_version_mismatch',
+      'ProjectData archive copy-back did not restore the terminal version'
+    );
+  }
+  const result = sql.exec(
+    `UPDATE project_data_archive_source_intents
+     SET state = 'rehome_exported',
+         updated_at = ?
+     WHERE session_id = ?
+       AND project_id = ?
+       AND migration_id = ?
+       AND source_intent_token = ?
+       AND state IN ('source_deleted', 'rehome_exported')`,
+    input.now,
+    input.sessionId,
+    input.projectId,
+    input.migrationId,
+    input.sourceIntentToken
+  );
+  sql.exec(
+    `UPDATE chat_sessions
+     SET archive_state = 'copy_back_restored',
+         updated_at = updated_at
+     WHERE id = ?`,
+    input.sessionId
+  );
+  return (result.rowsWritten ?? 0) > 0;
+}
+
+export function markArchiveTargetRehomeExported(
+  sql: SqlStorage,
+  input: {
+    projectId: string;
+    sessionId: string;
+    migrationId: string | null;
+    targetOwnerName: string;
+    targetGeneration: number;
+    now: number;
+  }
+): boolean {
+  const state = validateTargetOwner(readTargetSession(sql, input.sessionId), input);
+  if (state !== 'sealed' && state !== 'published' && state !== 'rehome_exported') {
+    throw new ProjectDataArchiveInvariantError(
+      'target_not_rehome_exported',
+      'ProjectData archive target cannot be marked re-home exported before seal'
+    );
+  }
+  const result = sql.exec(
+    `UPDATE project_data_archive_target_sessions
+     SET state = 'rehome_exported',
+         updated_at = ?
+     WHERE session_id = ?
+       AND project_id = ?
+       AND owner_name = ?
+       AND generation = ?
+       AND state IN ('sealed', 'published', 'rehome_exported')`,
+    input.now,
+    input.sessionId,
+    input.projectId,
+    input.targetOwnerName,
+    input.targetGeneration
+  );
+  return (result.rowsWritten ?? 0) > 0;
 }
 
 export async function finalizeSourceDelete(
@@ -1361,6 +1832,25 @@ export function markSourceRecoveryManifestPersisted(
     now: number;
   }
 ): boolean {
+  const intent = readSourceIntent(sql, input.sessionId);
+  if (
+    !intent ||
+    intent.migration_id !== input.migrationId ||
+    intent.source_intent_token !== input.sourceIntentToken
+  ) {
+    throw new ProjectDataArchiveInvariantError(
+      'source_intent_mismatch',
+      'ProjectData archive source intent token mismatch'
+    );
+  }
+  const state = validateIntentState(intent.state);
+  if (
+    (state === 'recovery_manifest_persisted' || state === 'source_deleted') &&
+    intent?.target_aggregate_sha256 === input.targetAggregateSha256 &&
+    intent?.recovery_manifest_key === input.r2ManifestKey
+  ) {
+    return true;
+  }
   const result = sql.exec(
     `UPDATE project_data_archive_source_intents
      SET state = 'recovery_manifest_persisted',
@@ -1393,6 +1883,24 @@ export function markSourceTargetSealed(
     now: number;
   }
 ): boolean {
+  const intent = readSourceIntent(sql, input.sessionId);
+  if (
+    !intent ||
+    intent.migration_id !== input.migrationId ||
+    intent.source_intent_token !== input.sourceIntentToken
+  ) {
+    throw new ProjectDataArchiveInvariantError(
+      'source_intent_mismatch',
+      'ProjectData archive source intent token mismatch'
+    );
+  }
+  const state = validateIntentState(intent.state);
+  if (
+    ['target_sealed', 'recovery_manifest_persisted', 'source_deleted'].includes(state) &&
+    intent?.target_aggregate_sha256 === input.targetAggregateSha256
+  ) {
+    return true;
+  }
   const result = sql.exec(
     `UPDATE project_data_archive_source_intents
      SET state = 'target_sealed',
@@ -1431,10 +1939,10 @@ export function archiveSourceReadMessages(
     targetGeneration: 1,
   });
   const source = readSourceIntent(sql, input.sessionId);
-  if (source && validateIntentState(source.state) === 'source_deleted') {
+  if (source && isActiveSourceIntentState(validateIntentState(source.state))) {
     throw new ProjectDataArchiveInvariantError(
-      'source_deleted',
-      'ProjectData archive source exact read failed closed because the source payload is deleted'
+      'source_migration_in_progress',
+      'ProjectData archive source exact read failed closed because the source has an archive migration intent'
     );
   }
   const compactOptions = compact ? messages.resolveCompactMessageOptions(env) : undefined;
@@ -1463,10 +1971,10 @@ export function archiveSourceReadMessageCount(
     targetGeneration: 1,
   });
   const source = readSourceIntent(sql, input.sessionId);
-  if (source && validateIntentState(source.state) === 'source_deleted') {
+  if (source && isActiveSourceIntentState(validateIntentState(source.state))) {
     throw new ProjectDataArchiveInvariantError(
-      'source_deleted',
-      'ProjectData archive source count read failed closed because the source payload is deleted'
+      'source_migration_in_progress',
+      'ProjectData archive source count read failed closed because the source has an archive migration intent'
     );
   }
   return messages.getMessageCount(sql, input.sessionId, roles);
@@ -1484,10 +1992,10 @@ function assertSourceExactReadAvailable(
     targetGeneration: 1,
   });
   const source = readSourceIntent(sql, input.sessionId);
-  if (source && validateIntentState(source.state) === 'source_deleted') {
+  if (source && isActiveSourceIntentState(validateIntentState(source.state))) {
     throw new ProjectDataArchiveInvariantError(
-      'source_deleted',
-      `ProjectData archive source ${operation} failed closed because the source payload is deleted`
+      'source_migration_in_progress',
+      `ProjectData archive source ${operation} failed closed because the source has an archive migration intent`
     );
   }
 }

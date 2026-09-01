@@ -77,6 +77,8 @@ export class ProjectData extends DurableObject<Env> {
   private summarySyncTimer: ReturnType<typeof setTimeout> | null = null;
   /** Serializes summary syncs — see `runSummarySyncLocked` (rule 45). */
   private summarySyncLock: Promise<unknown> = Promise.resolve();
+  /** Serializes archive source hash/finalize awaits against local transcript writers (rule 45). */
+  private archiveTranscriptLock: Promise<unknown> = Promise.resolve();
   private cachedProjectId: string | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -320,15 +322,17 @@ export class ProjectData extends DurableObject<Env> {
     toolMetadata: string | null,
     messageId?: string
   ): Promise<string> {
-    return messagePersistence.persistMessageWithSideEffects(
-      this.sql,
-      this.env,
-      this.messagePersistenceHooks(),
-      sessionId,
-      role,
-      content,
-      toolMetadata,
-      messageId
+    return this.withArchiveTranscriptLock(() =>
+      messagePersistence.persistMessageWithSideEffects(
+        this.sql,
+        this.env,
+        this.messagePersistenceHooks(),
+        sessionId,
+        role,
+        content,
+        toolMetadata,
+        messageId
+      )
     );
   }
 
@@ -344,17 +348,21 @@ export class ProjectData extends DurableObject<Env> {
       origin?: string | null;
     }>
   ): Promise<messagePersistence.MessageBatchPersistenceResult> {
-    return messagePersistence.persistMessageBatchWithSideEffects(
-      this.sql,
-      this.env,
-      this.messagePersistenceHooks(),
-      sessionId,
-      batchMessages
+    return this.withArchiveTranscriptLock(() =>
+      messagePersistence.persistMessageBatchWithSideEffects(
+        this.sql,
+        this.env,
+        this.messagePersistenceHooks(),
+        sessionId,
+        batchMessages
+      )
     );
   }
 
   async acceptPromptDelivery(input: AcceptPromptDeliveryInput): Promise<AcceptedPromptDelivery> {
-    return durability.acceptPromptDelivery(this.sql, this.env, this.durabilityHooks(), input);
+    return this.withArchiveTranscriptLock(() =>
+      durability.acceptPromptDelivery(this.sql, this.env, this.durabilityHooks(), input)
+    );
   }
 
   async registerTaskWait(input: taskWaits.RegisterTaskWaitInput) {
@@ -441,6 +449,15 @@ export class ProjectData extends DurableObject<Env> {
     };
   }
 
+  private async withArchiveTranscriptLock<T>(fn: () => Promise<T> | T): Promise<T> {
+    const run = this.archiveTranscriptLock.then(() => fn());
+    this.archiveTranscriptLock = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
   async linkSessionToWorkspace(sessionId: string, workspaceId: string): Promise<void> {
     sessions.linkSessionToWorkspace(this.sql, sessionId, workspaceId);
     this.recalculateAlarm().catch((err) =>
@@ -505,13 +522,21 @@ export class ProjectData extends DurableObject<Env> {
   async archiveSourcePrepareIntent(
     input: archiveSharding.ArchiveSourcePrepareInput
   ): Promise<archiveSharding.ArchiveSourcePrepareResult> {
-    return archiveSharding.prepareArchiveSourceIntent(this.sql, input);
+    return this.withArchiveTranscriptLock(() =>
+      archiveSharding.prepareArchiveSourceIntent(this.sql, input)
+    );
+  }
+
+  archiveSourceInspectIntent(
+    input: archiveSharding.ArchiveSourceInspectIntentInput
+  ): archiveSharding.ArchiveSourceInspectIntentResult {
+    return archiveSharding.inspectArchiveSourceIntent(this.sql, input);
   }
 
   async archiveSourceExportChunk(
     input: archiveSharding.ArchiveSourceExportChunkInput
   ): Promise<import('../../project-data-archive/contract').ProjectDataArchiveChunk> {
-    return archiveSharding.exportArchiveChunk(this.sql, input);
+    return this.withArchiveTranscriptLock(() => archiveSharding.exportArchiveChunk(this.sql, input));
   }
 
   archiveSourceMarkTargetSealed(input: {
@@ -542,7 +567,31 @@ export class ProjectData extends DurableObject<Env> {
   async archiveSourceFinalizeDelete(
     input: archiveSharding.ArchiveSourceFinalizeDeleteInput
   ): Promise<archiveSharding.ArchiveSourceFinalizeDeleteResult> {
-    return archiveSharding.finalizeSourceDelete(this.sql, input);
+    return this.withArchiveTranscriptLock(() => archiveSharding.finalizeSourceDelete(this.sql, input));
+  }
+
+  async archiveSourceRestoreChunk(
+    input: archiveSharding.ArchiveSourceRestoreChunkInput
+  ): Promise<archiveSharding.ArchiveSourceRestoreChunkResult> {
+    return this.withArchiveTranscriptLock(() =>
+      archiveSharding.restoreSourceArchiveChunk(this.sql, input)
+    );
+  }
+
+  async archiveSourceMarkCopyBackRestored(input: {
+    projectId: string;
+    sessionId: string;
+    migrationId: string;
+    sourceOwnerName: string;
+    targetOwnerName: string;
+    targetGeneration: number;
+    sourceIntentToken: string;
+    expectedTerminalVersionSha256: string;
+    now: number;
+  }): Promise<boolean> {
+    return this.withArchiveTranscriptLock(() =>
+      archiveSharding.markSourceCopyBackRestored(this.sql, input)
+    );
   }
 
   archiveSourceGetMessages(
@@ -625,6 +674,31 @@ export class ProjectData extends DurableObject<Env> {
     input: archiveSharding.ArchiveTargetSealInput
   ): Promise<archiveSharding.ArchiveTargetSealResult> {
     return archiveSharding.sealArchiveTarget(this.sql, input);
+  }
+
+  archiveTargetInspectSession(
+    input: archiveSharding.ArchiveTargetInspectInput
+  ): archiveSharding.ArchiveTargetInspectResult {
+    return archiveSharding.inspectArchiveTargetSession(this.sql, input);
+  }
+
+  async archiveTargetExportChunk(
+    input: archiveSharding.ArchiveTargetExportChunkInput
+  ): Promise<import('../../project-data-archive/contract').ProjectDataArchiveChunk> {
+    return archiveSharding.exportArchiveTargetChunk(this.sql, input);
+  }
+
+  archiveTargetMarkRehomeExported(input: {
+    projectId: string;
+    sessionId: string;
+    migrationId: string | null;
+    targetOwnerName: string;
+    targetGeneration: number;
+    now: number;
+  }): boolean {
+    return this.ctx.storage.transactionSync(() =>
+      archiveSharding.markArchiveTargetRehomeExported(this.sql, input)
+    );
   }
 
   archiveTargetGetMessages(

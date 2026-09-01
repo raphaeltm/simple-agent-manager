@@ -120,6 +120,8 @@ import { log } from '../lib/logger';
 import {
   PROJECT_DATA_ARCHIVE_DEFAULT_SEARCH_MAX_OWNERS,
   PROJECT_DATA_ARCHIVE_MAX_SEARCH_OWNERS,
+  PROJECT_DATA_ARCHIVE_ROUTING_SCHEMA_VERSION,
+  type ProjectDataArchiveLocation,
   type ProjectDataArchiveOwnerRef,
 } from '../project-data-archive/contract';
 import {
@@ -137,6 +139,43 @@ import {
 } from './project-lifecycle-event-inputs';
 import { hasAuthorizedRestorableSnapshotWakeClaim } from './session-snapshots';
 import type { TaskAcpLivenessSignals } from './task-runtime-liveness';
+
+function isArchiveExactRoutingEnabled(env: Env): boolean {
+  return env.PROJECT_DATA_ARCHIVE_SHARDING_ENABLED === 'true';
+}
+
+function rootExactReadOwner(projectId: string, sessionId: string): ProjectDataArchiveLocation {
+  return {
+    kind: 'root',
+    projectId,
+    sessionId,
+    ownerName: projectId,
+    generation: 0,
+    state: 'root',
+    migrationId: null,
+    targetAggregateSha256: null,
+    routingSchemaVersion: PROJECT_DATA_ARCHIVE_ROUTING_SCHEMA_VERSION,
+  };
+}
+
+async function resolveExactReadOwnerIfArchiveEnabled(
+  env: Env,
+  projectId: string,
+  sessionId: string
+): Promise<ProjectDataArchiveLocation> {
+  if (!isArchiveExactRoutingEnabled(env)) return rootExactReadOwner(projectId, sessionId);
+  return resolveExactReadOwner(env, projectId, sessionId);
+}
+
+async function assertExactWriteAllowedIfArchiveEnabled(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  operation: string
+): Promise<void> {
+  if (!isArchiveExactRoutingEnabled(env)) return;
+  await assertExactWriteAllowed(env, projectId, sessionId, operation);
+}
 
 /**
  * Get a typed DO stub for the given project and ensure the DO knows its projectId.
@@ -460,7 +499,7 @@ export async function linkSessionToWorkspace(
   sessionId: string,
   workspaceId: string
 ): Promise<void> {
-  await assertExactWriteAllowed(env, projectId, sessionId, 'linkSessionToWorkspace');
+  await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'linkSessionToWorkspace');
   return callProjectDataWithRetry(env, projectId, 'linkSessionToWorkspace', (stub) =>
     stub.linkSessionToWorkspace(sessionId, workspaceId)
   );
@@ -471,7 +510,7 @@ export async function stopSession(
   projectId: string,
   sessionId: string
 ): Promise<boolean> {
-  await assertExactWriteAllowed(env, projectId, sessionId, 'stopSession');
+  await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'stopSession');
   const stub = await getStub(env, projectId);
   const stopped = await stub.stopSession(sessionId);
   if (stopped) {
@@ -492,7 +531,7 @@ export async function sleepSession(
   projectId: string,
   sessionId: string
 ): Promise<boolean> {
-  await assertExactWriteAllowed(env, projectId, sessionId, 'sleepSession');
+  await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'sleepSession');
   const stub = await getStub(env, projectId);
   const sleeping = await stub.sleepSession(sessionId);
   if (sleeping) {
@@ -515,7 +554,7 @@ export async function wakeSession(
   workspaceId: string,
   taskId: string
 ): Promise<boolean> {
-  await assertExactWriteAllowed(env, projectId, sessionId, 'wakeSession');
+  await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'wakeSession');
   const stub = await getStub(env, projectId);
   const previousStatus = sessionStatus(await stub.getSession(sessionId));
   const woke = await stub.wakeSession(sessionId, workspaceId, taskId);
@@ -541,7 +580,12 @@ export async function wakeSessionForSnapshotRecovery(
   workspaceId: string,
   taskId: string
 ): Promise<boolean> {
-  await assertExactWriteAllowed(env, projectId, sessionId, 'wakeSessionForSnapshotRecovery');
+  await assertExactWriteAllowedIfArchiveEnabled(
+    env,
+    projectId,
+    sessionId,
+    'wakeSessionForSnapshotRecovery'
+  );
   const allowStopped = await hasAuthorizedRestorableSnapshotWakeClaim(env.DATABASE, {
     projectId,
     chatSessionId: sessionId,
@@ -573,7 +617,7 @@ export async function failSession(
   sessionId: string,
   errorMessage: string | null = null
 ): Promise<boolean> {
-  await assertExactWriteAllowed(env, projectId, sessionId, 'failSession');
+  await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'failSession');
   const stub = await getStub(env, projectId);
   const failed = await stub.failSession(sessionId, errorMessage);
   if (failed) {
@@ -606,7 +650,7 @@ export async function updateSessionTopic(
   sessionId: string,
   topic: string
 ): Promise<boolean> {
-  await assertExactWriteAllowed(env, projectId, sessionId, 'updateSessionTopic');
+  await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'updateSessionTopic');
   const stub = await getStub(env, projectId);
   return stub.updateSessionTopic(sessionId, topic);
 }
@@ -620,7 +664,7 @@ export async function persistMessage(
   toolMetadata: Record<string, unknown> | null,
   messageId?: string
 ): Promise<string> {
-  await assertExactWriteAllowed(env, projectId, sessionId, 'persistMessage');
+  await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'persistMessage');
   return callProjectDataNoRetry(env, projectId, 'persistMessage', (stub) =>
     stub.persistMessage(
       sessionId,
@@ -652,7 +696,7 @@ export async function persistMessageBatch(
   maxMessages?: number;
   remainingCapacity?: number;
 }> {
-  await assertExactWriteAllowed(env, projectId, sessionId, 'persistMessageBatch');
+  await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'persistMessageBatch');
   return callProjectDataNoRetry(env, projectId, 'persistMessageBatch', (stub) =>
     stub.persistMessageBatch(
       sessionId,
@@ -714,7 +758,7 @@ export async function linkSessionToTask(
   sessionId: string,
   taskId: string
 ): Promise<boolean> {
-  await assertExactWriteAllowed(env, projectId, sessionId, 'linkSessionToTask');
+  await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'linkSessionToTask');
   return callProjectDataWithRetry(env, projectId, 'linkSessionToTask', (stub) =>
     stub.linkSessionToTask(sessionId, taskId)
   );
@@ -741,7 +785,7 @@ export async function getMessages(
   compact: boolean = false,
   order: 'asc' | 'desc' = 'desc'
 ): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
-  const owner = await resolveExactReadOwner(env, projectId, sessionId);
+  const owner = await resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId);
   const stub = await getStubForOwner(env, projectId, owner.ownerName);
   if (owner.kind === 'root') {
     return stub.archiveSourceGetMessages(owner, limit, before, after, roles, compact, order);
@@ -755,7 +799,7 @@ export async function getMessageToolContent(
   sessionId: string,
   messageId: string
 ): Promise<MessageToolContentResult | null> {
-  const owner = await resolveExactReadOwner(env, projectId, sessionId);
+  const owner = await resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId);
   const stub = await getStubForOwner(env, projectId, owner.ownerName);
   if (owner.kind === 'archive_shard') {
     return stub.archiveTargetGetMessageToolContent({ ...owner, messageId });
@@ -770,7 +814,7 @@ export async function getArchivedToolPayloads(
 ): Promise<ArchivedToolPayloadListResult> {
   const sessionId = input.sessionId ?? null;
   if (sessionId) {
-    const owner = await resolveExactReadOwner(env, projectId, sessionId);
+    const owner = await resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId);
     const stub = await getStubForOwner(env, projectId, owner.ownerName);
     if (owner.kind === 'archive_shard') {
       return stub.archiveTargetGetArchivedToolPayloads({ owner, query: input });
@@ -788,7 +832,7 @@ export async function getMessageCount(
   sessionId: string,
   roles?: string[]
 ): Promise<number> {
-  const owner = await resolveExactReadOwner(env, projectId, sessionId);
+  const owner = await resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId);
   const stub = await getStubForOwner(env, projectId, owner.ownerName);
   if (owner.kind === 'root') return stub.archiveSourceGetMessageCount(owner, roles);
   return stub.archiveTargetGetMessageCount(owner, roles);
@@ -894,7 +938,7 @@ export async function searchMessagesWithArchiveMetadata(
   limit: number = 10
 ): Promise<ProjectDataSearchMessagesWithArchiveMetadataResult> {
   if (sessionId) {
-    const owner = await resolveExactReadOwner(env, projectId, sessionId);
+    const owner = await resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId);
     const ownerStub = await getStubForOwner(env, projectId, owner.ownerName);
     let results: ProjectDataMessageSearchResult[];
     if (owner.kind === 'root') {
@@ -1025,7 +1069,12 @@ export async function createCommentThread(
   projectId: string,
   input: CreateCommentThreadInput
 ): Promise<MessageCommentMutationResponse> {
-  await assertExactWriteAllowed(env, projectId, input.sessionId, 'createCommentThread');
+  await assertExactWriteAllowedIfArchiveEnabled(
+    env,
+    projectId,
+    input.sessionId,
+    'createCommentThread'
+  );
   return callProjectDataNoRetry(env, projectId, 'createCommentThread', (stub) =>
     stub.createCommentThread(input)
   );
@@ -1036,7 +1085,12 @@ export async function createCommentReply(
   projectId: string,
   input: CreateCommentReplyInput
 ): Promise<MessageCommentReplyMutationResponse> {
-  await assertExactWriteAllowed(env, projectId, input.sessionId, 'createCommentReply');
+  await assertExactWriteAllowedIfArchiveEnabled(
+    env,
+    projectId,
+    input.sessionId,
+    'createCommentReply'
+  );
   return callProjectDataNoRetry(env, projectId, 'createCommentReply', (stub) =>
     stub.createCommentReply(input)
   );

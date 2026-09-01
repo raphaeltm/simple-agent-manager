@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
@@ -16,10 +19,22 @@ import {
   prepareArchiveTarget,
   sealArchiveTarget,
 } from '../../../src/durable-objects/project-data/archive-sharding';
-import { PROJECT_DATA_ARCHIVE_TABLES } from '../../../src/project-data-archive/contract';
+import {
+  persistMessage,
+  PROJECT_DATA_TRANSCRIPT_WRITE_FENCED,
+} from '../../../src/durable-objects/project-data/messages';
+import {
+  PROJECT_DATA_ARCHIVE_SURFACE_INVENTORY,
+  PROJECT_DATA_ARCHIVE_TABLES,
+  type ProjectDataArchiveSurface,
+} from '../../../src/project-data-archive/contract';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const NOW = 2_000_000;
+
+function srcFile(relativePath: string): string {
+  return readFileSync(resolve(process.cwd(), 'src', relativePath), 'utf8');
+}
 
 function makeSql(): { db: Database.Database; sql: SqlStorage } {
   const db = new Database(':memory:');
@@ -115,6 +130,103 @@ async function copyAllChunks(
 }
 
 describe('ProjectData terminal archive sharding bridge', () => {
+  it('keeps the design surface inventory machine-checked against task and code evidence', () => {
+    const task = readFileSync(
+      resolve(
+        process.cwd(),
+        '../../tasks/active/2026-08-31-projectdata-terminal-archive-sharding.md'
+      ),
+      'utf8'
+    );
+    const source = [
+      srcFile('project-data-archive/contract.ts'),
+      srcFile('durable-objects/project-data/archive-sharding.ts'),
+      srcFile('durable-objects/project-data/messages.ts'),
+      srcFile('durable-objects/project-data/session-summary-sync.ts'),
+      srcFile('durable-objects/project-data/reconciliation.ts'),
+      srcFile('durable-objects/project-data/idle-cleanup.ts'),
+      srcFile('durable-objects/project-data/acp-sessions.ts'),
+      srcFile('durable-objects/project-data/task-waits.ts'),
+      srcFile('durable-objects/project-data/comments.ts'),
+      srcFile('services/project-data.ts'),
+    ].join('\n');
+    const evidence: Record<
+      ProjectDataArchiveSurface,
+      { taskNeedles: string[]; codeNeedles: string[] }
+    > = {
+      'chat_sessions-root-anchor': {
+        taskNeedles: ['`chat_sessions`'],
+        codeNeedles: ['CHAT_SESSION_ANCHOR_COLUMNS', 'archive_last_message_at'],
+      },
+      'chat_messages-exact-transcript-read-write': {
+        taskNeedles: ['`chat_messages` raw transcript'],
+        codeNeedles: ['PROJECT_DATA_TRANSCRIPT_WRITE_FENCED', 'archiveSourceReadMessages'],
+      },
+      'chat_messages_grouped-search-materialization': {
+        taskNeedles: ['`chat_messages_grouped`'],
+        codeNeedles: ['chat_messages_grouped', 'archiveTargetSearchProjectMessages'],
+      },
+      'chat_messages_grouped_fts-search-index-rebuilt-in-target': {
+        taskNeedles: ['`chat_messages_grouped_fts`'],
+        codeNeedles: ['rebuildTargetFts', 'chat_messages_grouped_fts'],
+      },
+      'tool_payload_archives-r2-ledger': {
+        taskNeedles: ['`tool_payload_archives`'],
+        codeNeedles: ['tool_payload_archives', 'archiveTargetGetArchivedToolPayloads'],
+      },
+      'tool_payload_cleanup_attempts-eligibility-fence': {
+        taskNeedles: ['`tool_payload_cleanup_attempts`'],
+        codeNeedles: ['tool_payload_cleanup_attempts', 'tool_payload_cleanup_incomplete'],
+      },
+      'session_state-current-plan-and-activity-fence': {
+        taskNeedles: ['`session_state.current_plan_json`'],
+        codeNeedles: ['session_state', 'active_session_state'],
+      },
+      'session_summaries-d1-last-message-summary-anchor': {
+        taskNeedles: ['D1 `session_summaries` / `last_message_at`'],
+        codeNeedles: ['session_summaries', 'archive_last_message_at'],
+      },
+      'workspace_activity-liveness-fence': {
+        taskNeedles: ['liveness/activity/ACP/workspace/attention/inbox/task-waits'],
+        codeNeedles: ['workspace_activity', 'last_terminal_activity_at'],
+      },
+      'acp_sessions-liveness-fence': {
+        taskNeedles: ['liveness/activity/ACP/workspace/attention/inbox/task-waits'],
+        codeNeedles: ['acp_sessions', 'active_acp_session'],
+      },
+      'idle_cleanup_schedule-liveness-fence': {
+        taskNeedles: ['liveness/activity/ACP/workspace/attention/inbox/task-waits'],
+        codeNeedles: ['idle_cleanup_schedule', 'active_idle_cleanup'],
+      },
+      'task_wait_subscriptions-wake-fence': {
+        taskNeedles: ['liveness/activity/ACP/workspace/attention/inbox/task-waits'],
+        codeNeedles: ['task_wait_subscriptions', 'active_task_wait'],
+      },
+      'comment_threads-no-cascade-deletion-fence': {
+        taskNeedles: ['message comments/replies'],
+        codeNeedles: ['comment_threads', 'message_comments_present'],
+      },
+      'comment_replies-no-cascade-deletion-fence': {
+        taskNeedles: ['message comments/replies'],
+        codeNeedles: ['comment_replies', 'message_comments_present'],
+      },
+      'message-count-dedup-sequence-source-of-truth': {
+        taskNeedles: ['message count / dedup / sequence'],
+        codeNeedles: ['message_count', 'MAX(sequence)'],
+      },
+      'project-wide-search-explicit-partial-plane': {
+        taskNeedles: ['project-wide search'],
+        codeNeedles: ['archiveSearch', 'archive_owner_limit_exceeded'],
+      },
+    };
+
+    expect(PROJECT_DATA_ARCHIVE_SURFACE_INVENTORY).toEqual(Object.keys(evidence));
+    for (const surface of PROJECT_DATA_ARCHIVE_SURFACE_INVENTORY) {
+      for (const needle of evidence[surface].taskNeedles) expect(task).toContain(needle);
+      for (const needle of evidence[surface].codeNeedles) expect(source).toContain(needle);
+    }
+  });
+
   it('copies bounded chunks idempotently, seals by recomputed hashes, then finalizes source deletion with a last-message anchor', async () => {
     const source = makeSql();
     const target = makeSql();
@@ -263,6 +375,37 @@ describe('ProjectData terminal archive sharding bridge', () => {
     } finally {
       source.db.close();
       target.db.close();
+    }
+  });
+
+  it('fences DO-local transcript writers once archive source hashing/finalize can be in flight', async () => {
+    const source = makeSql();
+    try {
+      seedTerminalSession(source.sql);
+      await prepareArchiveSourceIntent(source.sql, {
+        projectId: 'project-archive',
+        sessionId: 'session-archive',
+        migrationId: 'migration-local-writer-fence',
+        sourceOwnerName: 'project-archive',
+        targetOwnerName: 'project-archive:archive:g1:s1',
+        targetGeneration: 1,
+        sourceIntentToken: 'intent-local-writer-fence',
+        now: NOW,
+        minTerminalAgeMs: 0,
+      });
+
+      expect(() =>
+        persistMessage(
+          source.sql,
+          {} as never,
+          'session-archive',
+          'assistant',
+          'late local write',
+          null
+        )
+      ).toThrow(expect.objectContaining({ code: PROJECT_DATA_TRANSCRIPT_WRITE_FENCED }));
+    } finally {
+      source.db.close();
     }
   });
 

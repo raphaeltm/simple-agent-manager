@@ -4,6 +4,10 @@
 import { buildSafeFtsQuery } from '../../lib/fts5';
 import { log } from '../../lib/logger';
 import {
+  PROJECT_DATA_ARCHIVE_SOURCE_INTENT_STATES,
+  type ProjectDataArchiveSourceIntentState,
+} from '../../project-data-archive/contract';
+import {
   type CompactMessageOptions,
   parseChatMessageRow,
   parseChatMessageRowCompact,
@@ -26,6 +30,7 @@ export {
 
 export const DEFAULT_MAX_MESSAGES_PER_SESSION = 100000;
 export const SESSION_MESSAGE_LIMIT_EXCEEDED = 'SESSION_MESSAGE_LIMIT_EXCEEDED';
+export const PROJECT_DATA_TRANSCRIPT_WRITE_FENCED = 'PROJECT_DATA_TRANSCRIPT_WRITE_FENCED';
 
 export class SessionMessageLimitExceededError extends Error {
   readonly code = SESSION_MESSAGE_LIMIT_EXCEEDED;
@@ -38,9 +43,56 @@ export class SessionMessageLimitExceededError extends Error {
   }
 }
 
+export class ProjectDataTranscriptWriteFencedError extends Error {
+  readonly code = PROJECT_DATA_TRANSCRIPT_WRITE_FENCED;
+
+  constructor(
+    readonly sessionId: string,
+    readonly operation: string,
+    readonly archiveState: ProjectDataArchiveSourceIntentState
+  ) {
+    super(
+      `ProjectData transcript write ${operation} for session ${sessionId} is fenced by archive source intent ${archiveState}`
+    );
+    this.name = 'ProjectDataTranscriptWriteFencedError';
+  }
+}
+
 function resolveMaxMessagesPerSession(env: Env): number {
   const parsed = Number.parseInt(env.MAX_MESSAGES_PER_SESSION || '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_MESSAGES_PER_SESSION;
+}
+
+function parseArchiveSourceIntentState(value: unknown): ProjectDataArchiveSourceIntentState | null {
+  return typeof value === 'string' &&
+    PROJECT_DATA_ARCHIVE_SOURCE_INTENT_STATES.includes(value as ProjectDataArchiveSourceIntentState)
+    ? (value as ProjectDataArchiveSourceIntentState)
+    : null;
+}
+
+function assertTranscriptWriteAllowed(
+  sql: SqlStorage,
+  sessionId: string,
+  operation: string
+): void {
+  let row: Record<string, unknown> | undefined;
+  try {
+    row = sql
+      .exec(
+        `SELECT state
+         FROM project_data_archive_source_intents
+         WHERE session_id = ?
+           AND state != 'rehome_exported'
+         LIMIT 1`,
+        sessionId
+      )
+      .toArray()[0];
+  } catch (error) {
+    if (error instanceof Error && /no such table/i.test(error.message)) return;
+    throw error;
+  }
+  const state = parseArchiveSourceIntentState(row?.state);
+  if (state) throw new ProjectDataTranscriptWriteFencedError(sessionId, operation, state);
 }
 
 /**
@@ -72,6 +124,7 @@ export function persistMessage(
   inserted: boolean;
   toolMetadata: string | null;
 } {
+  assertTranscriptWriteAllowed(sql, sessionId, 'persistMessage');
   const maxMessages = resolveMaxMessagesPerSession(env);
   const countRow = sql
     .exec('SELECT message_count FROM chat_sessions WHERE id = ?', sessionId)
@@ -197,6 +250,7 @@ export function persistMessageBatch(
   maxMessages: number;
   remainingCapacity: number;
 } {
+  assertTranscriptWriteAllowed(sql, sessionId, 'persistMessageBatch');
   const session = sql
     .exec('SELECT id, message_count, topic, status FROM chat_sessions WHERE id = ?', sessionId)
     .toArray()[0];
@@ -696,6 +750,7 @@ export function persistSystemMessage(
   content: string
 ): { id: string; now: number; sequence: number } | null {
   try {
+    assertTranscriptWriteAllowed(sql, sessionId, 'persistSystemMessage');
     const id = generateId();
     const now = Date.now();
     const sequence = nextSequence(sql, sessionId);
