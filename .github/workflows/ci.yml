@@ -59,7 +59,6 @@ jobs:
               - 'packages/shared/**'
               - 'packages/task-runner/**'
               - 'packages/config/**'
-              - 'scripts/quality/*worker*.ts'
               - 'scripts/quality/*migration*.ts'
               - 'scripts/quality/runtime-boundary*.ts'
             vm-agent:
