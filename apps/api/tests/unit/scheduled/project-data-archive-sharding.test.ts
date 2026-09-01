@@ -34,6 +34,43 @@ function makeEnv(sqlite: Database.Database, overrides: Partial<Env> = {}): Env {
   } as Env;
 }
 
+function createD1WithOnePublishFailure(
+  sqlite: Database.Database,
+  failingSessionId: string
+): D1Database {
+  const database = createSqliteD1(sqlite) as D1Database & {
+    prepare(sql: string): D1PreparedStatement;
+  };
+  let failed = false;
+  return {
+    ...database,
+    prepare: (sql: string) => {
+      const statement = database.prepare(sql);
+      return {
+        ...statement,
+        bind: (...params: unknown[]) => {
+          const bound = statement.bind(...params) as D1PreparedStatement;
+          return {
+            ...bound,
+            run: async () => {
+              if (
+                !failed &&
+                sql.includes('UPDATE project_data_session_locations') &&
+                sql.includes("SET location_state = 'archive_shard'") &&
+                params.includes(failingSessionId)
+              ) {
+                failed = true;
+                throw new Error('transient D1 publish failure');
+              }
+              return bound.run();
+            },
+          };
+        },
+      };
+    },
+  } as unknown as D1Database;
+}
+
 function createCoordinatorTables(sqlite: Database.Database): void {
   createSchemaTables(sqlite, [
     schema.sessionSummaries,
@@ -71,7 +108,10 @@ type FakeSourceOptions = {
   beforeTargetSealCas?: () => void;
 };
 
-function makeChunk(tableName: ProjectDataArchiveTableName, ordinal: number): ProjectDataArchiveChunk {
+function makeChunk(
+  tableName: ProjectDataArchiveTableName,
+  ordinal: number
+): ProjectDataArchiveChunk {
   return {
     migrationId: MIGRATION_ID,
     projectId: PROJECT_ID,
@@ -95,7 +135,9 @@ function createFakeSource(options: FakeSourceOptions = {}) {
   let state = options.state ?? null;
   let token = options.token ?? 'old-token';
   let targetAggregateSha256: string | null =
-    state === 'target_sealed' || state === 'recovery_manifest_persisted' || state === 'source_deleted'
+    state === 'target_sealed' ||
+    state === 'recovery_manifest_persisted' ||
+    state === 'source_deleted'
       ? TARGET_SHA
       : null;
   let r2ManifestKey: string | null =
@@ -143,8 +185,9 @@ function createFakeSource(options: FakeSourceOptions = {}) {
         databaseSizeBytes: 1000,
       };
     }),
-    archiveSourceExportChunk: vi.fn(async (input: { tableName: ProjectDataArchiveTableName; ordinal: number }) =>
-      makeChunk(input.tableName, input.ordinal)
+    archiveSourceExportChunk: vi.fn(
+      async (input: { tableName: ProjectDataArchiveTableName; ordinal: number }) =>
+        makeChunk(input.tableName, input.ordinal)
     ),
     archiveSourceMarkTargetSealed: vi.fn(async () => {
       options.beforeTargetSealCas?.();
@@ -173,7 +216,11 @@ function createFakeSource(options: FakeSourceOptions = {}) {
         databaseSizeAfterBytes: 500,
       };
     }),
-    archiveSourceRestoreChunk: vi.fn(async () => ({ idempotent: false, rowCount: 0, sha256: 'copy' })),
+    archiveSourceRestoreChunk: vi.fn(async () => ({
+      idempotent: false,
+      rowCount: 0,
+      sha256: 'copy',
+    })),
     archiveSourceMarkCopyBackRestored: vi.fn(async () => true),
     prepareTokens,
     get state() {
@@ -192,7 +239,12 @@ function createFakeTarget() {
     archiveTargetCommitChunk: vi.fn(async (chunk: ProjectDataArchiveChunk) => {
       state = 'copying';
       chunks.push(chunk);
-      return { idempotent: false, tableName: chunk.tableName, rowCount: chunk.rowCount, sha256: chunk.sha256 };
+      return {
+        idempotent: false,
+        tableName: chunk.tableName,
+        rowCount: chunk.rowCount,
+        sha256: chunk.sha256,
+      };
     }),
     archiveTargetSeal: vi.fn(async () => {
       state = 'sealed';
@@ -224,8 +276,9 @@ function createFakeTarget() {
       },
       databaseSizeBytes: 750,
     })),
-    archiveTargetExportChunk: vi.fn(async (input: { tableName: ProjectDataArchiveTableName; ordinal: number }) =>
-      makeChunk(input.tableName, input.ordinal)
+    archiveTargetExportChunk: vi.fn(
+      async (input: { tableName: ProjectDataArchiveTableName; ordinal: number }) =>
+        makeChunk(input.tableName, input.ordinal)
     ),
     archiveTargetMarkRehomeExported: vi.fn(async () => {
       state = 'rehome_exported';
@@ -259,11 +312,17 @@ function seedMigration(
     r2ManifestKey: string | null;
     leaseExpiresAt: number | null;
     attemptCount: number;
+    updatedAt: number;
+    locationState: 'migrating' | 'archive_shard' | 'frozen';
+    locationPublishedAt: number | null;
   }> = {}
 ): string {
   const migrationId = opts.migrationId ?? MIGRATION_ID;
   const projectId = opts.projectId ?? PROJECT_ID;
   const sessionId = opts.sessionId ?? SESSION_ID;
+  const updatedAt = opts.updatedAt ?? 1000;
+  const locationState = opts.locationState ?? 'migrating';
+  const locationPublishedAt = opts.locationPublishedAt ?? null;
   sqlite
     .prepare(
       `INSERT INTO project_data_archive_migrations
@@ -271,7 +330,7 @@ function seedMigration(
           target_owner_name, target_generation, source_intent_token,
           terminal_version_sha256, target_aggregate_sha256, r2_manifest_key,
           lease_epoch, lease_expires_at, attempt_count, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 0, ?, ?, 1000, 1000)`
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 0, ?, ?, 1000, ?)`
     )
     .run(
       migrationId,
@@ -281,25 +340,44 @@ function seedMigration(
       projectId,
       TARGET_OWNER,
       opts.sourceIntentToken ?? (state === 'candidate' ? null : 'old-token'),
-      opts.terminalVersionSha256 ?? (state === 'candidate' || state === 'leased' ? null : TERMINAL_SHA),
-      opts.targetAggregateSha256 ??
-        (['target_sealed', 'recovery_manifest_persisted', 'source_deleted', 'published'].includes(state)
+      opts.terminalVersionSha256 ??
+        (state === 'candidate' || state === 'leased' ? null : TERMINAL_SHA),
+      'targetAggregateSha256' in opts
+        ? opts.targetAggregateSha256
+        : ['target_sealed', 'recovery_manifest_persisted', 'source_deleted', 'published'].includes(
+              state
+            )
           ? TARGET_SHA
-          : null),
-      opts.r2ManifestKey ??
-        (['recovery_manifest_persisted', 'source_deleted', 'published'].includes(state) ? MANIFEST_KEY : null),
+          : null,
+      'r2ManifestKey' in opts
+        ? opts.r2ManifestKey
+        : ['recovery_manifest_persisted', 'source_deleted', 'published'].includes(state)
+          ? MANIFEST_KEY
+          : null,
       opts.leaseExpiresAt ?? (state === 'candidate' ? null : 1000),
-      opts.attemptCount ?? 0
+      opts.attemptCount ?? 0,
+      updatedAt
     );
   sqlite
     .prepare(
       `INSERT INTO project_data_session_locations
          (project_id, session_id, location_state, owner_kind, owner_name,
           generation, migration_id, source_owner_name, target_owner_name,
-          target_aggregate_sha256, routing_schema_version, updated_at)
-       VALUES (?, ?, 'migrating', 'archive_shard', ?, 1, ?, ?, ?, ?, 1, 1000)`
+          target_aggregate_sha256, routing_schema_version, published_at, updated_at)
+       VALUES (?, ?, ?, 'archive_shard', ?, 1, ?, ?, ?, ?, 1, ?, ?)`
     )
-    .run(projectId, sessionId, TARGET_OWNER, migrationId, projectId, TARGET_OWNER, TARGET_SHA);
+    .run(
+      projectId,
+      sessionId,
+      locationState,
+      TARGET_OWNER,
+      migrationId,
+      projectId,
+      TARGET_OWNER,
+      TARGET_SHA,
+      locationPublishedAt,
+      updatedAt
+    );
   return migrationId;
 }
 
@@ -389,6 +467,180 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
       });
       expect(readMigrationRow(sqlite, 'migration-crash-gap')).toMatchObject({
         state: 'published',
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('does not let an older verified-published row starve a later source_deleted crash gap with the default sweep size', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'published', {
+        migrationId: 'migration-already-published',
+        sessionId: 'session-already-published',
+        updatedAt: 1000,
+        locationState: 'archive_shard',
+        locationPublishedAt: 1000,
+      });
+      seedMigration(sqlite, 'source_deleted', {
+        migrationId: 'migration-later-crash-gap',
+        sessionId: 'session-later-crash-gap',
+        updatedAt: 2000,
+      });
+
+      const stats = await runProjectDataArchiveSharding(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+        }),
+        new Date(NOW)
+      );
+
+      expect(stats).toMatchObject({
+        enabled: true,
+        skipped: false,
+        recoveredCrashGaps: 1,
+        failed: 0,
+      });
+      expect(readMigrationRow(sqlite, 'migration-already-published')).toMatchObject({
+        state: 'published',
+      });
+      expect(readLocationRow(sqlite, 'session-already-published')).toMatchObject({
+        location_state: 'archive_shard',
+        published_at: 1000,
+      });
+      expect(readMigrationRow(sqlite, 'migration-later-crash-gap')).toMatchObject({
+        state: 'published',
+      });
+      expect(readLocationRow(sqlite, 'session-later-crash-gap')).toMatchObject({
+        location_state: 'archive_shard',
+        owner_kind: 'archive_shard',
+        owner_name: TARGET_OWNER,
+        published_at: NOW,
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('isolates crash-gap publish failures so a transient D1 error cannot block a later published-location gap', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'published', {
+        migrationId: 'migration-transient-publish-failure',
+        sessionId: 'session-transient-publish-failure',
+        updatedAt: 1000,
+      });
+      seedMigration(sqlite, 'published', {
+        migrationId: 'migration-recoverable-after-bad-row',
+        sessionId: 'session-recoverable-after-bad-row',
+        updatedAt: 2000,
+      });
+
+      const stats = await runProjectDataArchiveSharding(
+        {
+          ...makeEnv(sqlite, {
+            PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+            PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '2',
+            PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+          }),
+          DATABASE: createD1WithOnePublishFailure(sqlite, 'session-transient-publish-failure'),
+        },
+        new Date(NOW)
+      );
+
+      expect(stats).toMatchObject({
+        enabled: true,
+        skipped: false,
+        recoveredCrashGaps: 1,
+        failed: 1,
+      });
+      expect(readMigrationRow(sqlite, 'migration-transient-publish-failure')).toMatchObject({
+        state: 'published',
+      });
+      expect(readLocationRow(sqlite, 'session-transient-publish-failure')).toMatchObject({
+        location_state: 'migrating',
+        published_at: null,
+      });
+      expect(readMigrationRow(sqlite, 'migration-recoverable-after-bad-row')).toMatchObject({
+        state: 'published',
+      });
+      expect(readLocationRow(sqlite, 'session-recoverable-after-bad-row')).toMatchObject({
+        location_state: 'archive_shard',
+        published_at: NOW,
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('skips non-actionable published rows before the default sweep limit so later published-location gaps recover', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'published', {
+        migrationId: 'migration-missing-location',
+        sessionId: 'session-missing-location',
+        updatedAt: 1000,
+      });
+      sqlite
+        .prepare(
+          `DELETE FROM project_data_session_locations
+           WHERE project_id = ? AND session_id = ?`
+        )
+        .run(PROJECT_ID, 'session-missing-location');
+      seedMigration(sqlite, 'published', {
+        migrationId: 'migration-missing-hash',
+        sessionId: 'session-missing-hash',
+        targetAggregateSha256: null,
+        updatedAt: 2000,
+      });
+      seedMigration(sqlite, 'published', {
+        migrationId: 'migration-empty-hash',
+        sessionId: 'session-empty-hash',
+        targetAggregateSha256: '',
+        updatedAt: 3000,
+      });
+      seedMigration(sqlite, 'published', {
+        migrationId: 'migration-later-published-gap',
+        sessionId: 'session-later-published-gap',
+        updatedAt: 4000,
+      });
+
+      const stats = await runProjectDataArchiveSharding(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+        }),
+        new Date(NOW)
+      );
+
+      expect(stats).toMatchObject({
+        enabled: true,
+        skipped: false,
+        recoveredCrashGaps: 1,
+        failed: 0,
+      });
+      expect(readMigrationRow(sqlite, 'migration-missing-location')).toMatchObject({
+        state: 'published',
+      });
+      expect(readMigrationRow(sqlite, 'migration-missing-hash')).toMatchObject({
+        state: 'published',
+        target_aggregate_sha256: null,
+      });
+      expect(readMigrationRow(sqlite, 'migration-empty-hash')).toMatchObject({
+        state: 'published',
+        target_aggregate_sha256: '',
+      });
+      expect(readMigrationRow(sqlite, 'migration-later-published-gap')).toMatchObject({
+        state: 'published',
+      });
+      expect(readLocationRow(sqlite, 'session-later-published-gap')).toMatchObject({
+        location_state: 'archive_shard',
+        published_at: NOW,
       });
     } finally {
       sqlite.close();
@@ -514,7 +766,9 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
       expect(readMigrationRow(sqlite, frozenMigrationId)).toMatchObject({ state: 'frozen' });
       expect(
         sqlite
-          .prepare(`SELECT state, reason FROM project_data_archive_circuit_breakers WHERE project_id = ?`)
+          .prepare(
+            `SELECT state, reason FROM project_data_archive_circuit_breakers WHERE project_id = ?`
+          )
           .get(PROJECT_ID)
       ).toEqual({ state: 'frozen', reason: 'operator hold' });
 

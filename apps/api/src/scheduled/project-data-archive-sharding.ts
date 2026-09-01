@@ -179,6 +179,11 @@ export type ProjectDataArchiveCopyBackResult = {
   restoredToRoot: boolean;
 };
 
+type CrashGapRecoveryResult = {
+  recovered: number;
+  failed: number;
+};
+
 export class ProjectDataArchiveCoordinatorStateError extends Error {
   readonly code = 'PROJECT_DATA_ARCHIVE_COORDINATOR_STATE';
 
@@ -308,7 +313,11 @@ function errorMessage(error: unknown): string {
 
 function requireStringField(
   migration: MigrationRow,
-  field: 'source_intent_token' | 'terminal_version_sha256' | 'target_aggregate_sha256' | 'r2_manifest_key'
+  field:
+    | 'source_intent_token'
+    | 'terminal_version_sha256'
+    | 'target_aggregate_sha256'
+    | 'r2_manifest_key'
 ): string {
   const value = migration[field];
   if (typeof value === 'string' && value.length > 0) return value;
@@ -363,11 +372,16 @@ function targetChunkKey(
 }
 
 function chunkKey(config: ArchiveCoordinatorConfig, chunk: ProjectDataArchiveChunk): string {
-  return targetChunkKey(config, {
-    project_id: chunk.projectId,
-    session_id: chunk.sessionId,
-    migration_id: chunk.migrationId,
-  }, chunk.tableName, chunk.ordinal);
+  return targetChunkKey(
+    config,
+    {
+      project_id: chunk.projectId,
+      session_id: chunk.sessionId,
+      migration_id: chunk.migrationId,
+    },
+    chunk.tableName,
+    chunk.ordinal
+  );
 }
 
 function manifestKey(config: ArchiveCoordinatorConfig, migration: MigrationRow): string {
@@ -392,7 +406,9 @@ function manifestForTarget(
     targetGeneration: migration.target_generation,
     terminalVersionSha256,
     aggregateSha256: targetAggregateSha256,
-    chunks: chunks.map((chunk) => targetChunkKey(config, migration, chunk.tableName, chunk.ordinal)),
+    chunks: chunks.map((chunk) =>
+      targetChunkKey(config, migration, chunk.tableName, chunk.ordinal)
+    ),
     chunkHashes: chunks.map((chunk) => chunk.sha256),
     createdAt: now,
   };
@@ -669,12 +685,14 @@ async function assertLeaseStillHeld(env: Env, migration: ClaimedMigrationRow): P
       lease_epoch: number;
       lease_expires_at: number | null;
     }>();
+  const leaseExpiresAt = row?.lease_expires_at;
   if (
-    !row ||
-    row.lease_owner !== migration.lease_owner ||
-    row.lease_epoch !== migration.lease_epoch ||
-    row.lease_expires_at !== migration.lease_expires_at ||
-    row.lease_expires_at <= Date.now()
+    row?.lease_owner !== migration.lease_owner ||
+    row?.lease_epoch !== migration.lease_epoch ||
+    leaseExpiresAt !== migration.lease_expires_at ||
+    leaseExpiresAt === null ||
+    leaseExpiresAt === undefined ||
+    leaseExpiresAt <= Date.now()
   ) {
     throw new ProjectDataArchiveCoordinatorStateError(
       'lease_fence_lost',
@@ -688,7 +706,10 @@ function claimed(migration: MigrationRow): ClaimedMigrationRow {
   return migration;
 }
 
-async function refreshClaimed(env: Env, migration: ClaimedMigrationRow): Promise<ClaimedMigrationRow> {
+async function refreshClaimed(
+  env: Env,
+  migration: ClaimedMigrationRow
+): Promise<ClaimedMigrationRow> {
   const refreshed = await readMigrationOrThrow(env, migration.migration_id);
   if (
     refreshed.lease_owner !== migration.lease_owner ||
@@ -710,7 +731,7 @@ async function requireJournalCas(
     from: ProjectDataArchiveJournalState;
     to: ProjectDataArchiveJournalState;
     now: number;
-    fields?: Parameters<typeof casArchiveJournalState>[1]['fields'];
+    fields?: NonNullable<Parameters<typeof casArchiveJournalState>[1]['fields']>;
   }
 ): Promise<ClaimedMigrationRow> {
   await assertLeaseStillHeld(env, migration);
@@ -960,24 +981,57 @@ async function recoverCrashGaps(
   env: Env,
   config: ArchiveCoordinatorConfig,
   now: number
-): Promise<number> {
+): Promise<CrashGapRecoveryResult> {
   const rows = await env.DATABASE.prepare(
-    `SELECT migration_id, project_id, session_id, state, source_owner_name, target_owner_name,
-            target_generation, source_intent_token, terminal_version_sha256,
-            target_aggregate_sha256, r2_manifest_key, lease_owner, lease_epoch,
-            lease_expires_at, attempt_count
-     FROM project_data_archive_migrations
-     WHERE state IN (${placeholders(RECOVERY_GAP_STATES.length)})
-     ORDER BY updated_at ASC
+    `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
+            m.target_owner_name, m.target_generation, m.source_intent_token,
+            m.terminal_version_sha256, m.target_aggregate_sha256, m.r2_manifest_key,
+            m.lease_owner, m.lease_epoch, m.lease_expires_at, m.attempt_count
+     FROM project_data_archive_migrations m
+     LEFT JOIN project_data_session_locations loc
+       ON loc.project_id = m.project_id AND loc.session_id = m.session_id
+     WHERE m.state IN (${placeholders(RECOVERY_GAP_STATES.length)})
+       AND m.target_aggregate_sha256 IS NOT NULL
+       AND m.target_aggregate_sha256 != ''
+       AND loc.session_id IS NOT NULL
+       AND loc.migration_id = m.migration_id
+       AND loc.location_state IN ('migrating', 'frozen', 'archive_shard')
+       AND (
+         m.state = 'source_deleted'
+         OR (
+           m.state = 'published'
+           AND NOT (
+             loc.location_state = 'archive_shard'
+             AND loc.owner_kind = 'archive_shard'
+             AND loc.owner_name = m.target_owner_name
+             AND loc.generation = m.target_generation
+             AND loc.target_aggregate_sha256 = m.target_aggregate_sha256
+           )
+         )
+       )
+     ORDER BY CASE m.state WHEN 'source_deleted' THEN 0 ELSE 1 END,
+              m.updated_at ASC,
+              m.migration_id ASC
      LIMIT ?`
   )
     .bind(...RECOVERY_GAP_STATES, config.sweepSessions)
     .all<MigrationRow>();
   let recovered = 0;
+  let failed = 0;
   for (const migration of rows.results ?? []) {
-    if (await publishSourceDeletedGap(env, migration, now)) recovered++;
+    try {
+      if (await publishSourceDeletedGap(env, migration, now)) recovered++;
+    } catch (error) {
+      failed++;
+      log.warn('project_data_archive_crash_gap_recovery_failed', {
+        migrationId: migration.migration_id,
+        projectId: migration.project_id,
+        sessionId: migration.session_id,
+        ...serializeError(error),
+      });
+    }
   }
-  return recovered;
+  return { recovered, failed };
 }
 
 async function inspectSourceIntent(
@@ -998,20 +1052,18 @@ async function ensureSourcePrepared(
   const prepared = await source.archiveSourcePrepareIntent(
     sourcePrepareInput(migration, sourceIntentToken, now, config.sessionGraceMs)
   );
-  let updated = migration;
-  if (migration.state === 'leased') {
-    updated = await requireJournalCas(env, migration, {
-      from: 'leased',
-      to: 'intent_prepared',
-      now,
-      fields: {
-        sourceIntentToken,
-        terminalVersionSha256: prepared.terminalVersionSha256,
-      },
-    });
-  } else {
-    updated = await persistPreparedJournalFields(env, migration, prepared, sourceIntentToken, now);
-  }
+  const updated =
+    migration.state === 'leased'
+      ? await requireJournalCas(env, migration, {
+          from: 'leased',
+          to: 'intent_prepared',
+          now,
+          fields: {
+            sourceIntentToken,
+            terminalVersionSha256: prepared.terminalVersionSha256,
+          },
+        })
+      : await persistPreparedJournalFields(env, migration, prepared, sourceIntentToken, now);
   return { migration: updated, prepared };
 }
 
@@ -1165,7 +1217,14 @@ async function persistRecoveryManifest(
   await putImmutableJson(
     r2,
     recoveryManifestKey,
-    manifestForTarget(config, migration, terminalVersionSha256, aggregateSha256, targetInfo.chunks, now)
+    manifestForTarget(
+      config,
+      migration,
+      terminalVersionSha256,
+      aggregateSha256,
+      targetInfo.chunks,
+      now
+    )
   );
   const sourceMarked = await source.archiveSourceMarkRecoveryManifestPersisted({
     sessionId: migration.session_id,
@@ -1247,7 +1306,10 @@ async function finalizeSourceAndPublish(
     );
   }
   await publishSourceDeletedGap(env, sourceDeleted, now);
-  return { migration: await readMigrationOrThrow(env, migration.migration_id), recoveredCrashGap: !casOk };
+  return {
+    migration: await readMigrationOrThrow(env, migration.migration_id),
+    recoveredCrashGap: !casOk,
+  };
 }
 
 async function migrateCandidate(
@@ -1324,7 +1386,12 @@ async function migrateCandidate(
     return { migrated: true, recoveredCrashGap: true, chunksCopied, rowsCopied };
   }
 
-  return { migrated: migration.state === 'published', recoveredCrashGap: false, chunksCopied, rowsCopied };
+  return {
+    migrated: migration.state === 'published',
+    recoveredCrashGap: false,
+    chunksCopied,
+    rowsCopied,
+  };
 }
 
 async function markFailed(
@@ -1689,6 +1756,14 @@ export async function rehomeProjectDataArchiveMigration(
   return copyBackProjectDataArchiveMigration(env, input);
 }
 
+function recordMigrationFailure(
+  stats: ProjectDataArchiveShardingStats,
+  failureState: 'failed' | 'poisoned' | 'unchanged'
+): void {
+  if (failureState === 'poisoned') stats.poisoned++;
+  else stats.failed++;
+}
+
 export async function runProjectDataArchiveSharding(
   env: Env,
   nowDate = new Date()
@@ -1701,7 +1776,9 @@ export async function runProjectDataArchiveSharding(
   const startedAt = Date.now();
   const now = nowDate.getTime();
   const stats = emptyStats(config, false, null);
-  stats.recoveredCrashGaps = await recoverCrashGaps(env, config, now);
+  const crashGapRecovery = await recoverCrashGaps(env, config, now);
+  stats.recoveredCrashGaps = crashGapRecovery.recovered;
+  stats.failed += crashGapRecovery.failed;
   const candidates = await selectMigrationWork(env, config, nowDate, now);
   stats.selected = candidates.length;
   for (const migration of candidates) {
@@ -1713,16 +1790,16 @@ export async function runProjectDataArchiveSharding(
       stats.chunksCopied += result.chunksCopied;
       stats.rowsCopied += result.rowsCopied;
     } catch (error) {
-      const failureState = await markFailed(env, config, migration, now, error).catch((markError) => {
-        log.error('project_data_archive_mark_failed_failed', {
-          migrationId: migration.migration_id,
-          ...serializeError(markError),
-        });
-        return 'unchanged' as const;
-      });
-      if (failureState === 'poisoned') stats.poisoned++;
-      else if (failureState === 'failed') stats.failed++;
-      else stats.failed++;
+      const failureState = await markFailed(env, config, migration, now, error).catch(
+        (markError) => {
+          log.error('project_data_archive_mark_failed_failed', {
+            migrationId: migration.migration_id,
+            ...serializeError(markError),
+          });
+          return 'unchanged' as const;
+        }
+      );
+      recordMigrationFailure(stats, failureState);
       log.warn('project_data_archive_candidate_failed', {
         migrationId: migration.migration_id,
         projectId: migration.project_id,

@@ -20,6 +20,7 @@ import {
   byteLength,
   canonicalizeArchiveRow,
   canonicalRowsSha256,
+  compareArchiveStrings,
   sha256Hex,
 } from '../../project-data-archive/hashing';
 import * as messages from './messages';
@@ -849,7 +850,10 @@ export function inspectArchiveSourceIntent(
   return {
     exists: true,
     state,
-    sourceIntentToken: strictString(intent.source_intent_token, 'source_intent.source_intent_token'),
+    sourceIntentToken: strictString(
+      intent.source_intent_token,
+      'source_intent.source_intent_token'
+    ),
     terminalVersionSha256: strictString(
       intent.terminal_version_sha256,
       'source_intent.terminal_version_sha256'
@@ -1303,12 +1307,12 @@ export async function sealArchiveTarget(
       input.migrationId
     )
     .toArray();
-  const committedChunkHashes = chunkRows.map((row) =>
-    strictString(row.sha256, 'target_chunk.sha256')
-  );
+  const committedChunkHashes = chunkRows
+    .map((row) => strictString(row.sha256, 'target_chunk.sha256'))
+    .sort(compareArchiveStrings);
   if (
-    JSON.stringify(committedChunkHashes.sort()) !==
-    JSON.stringify([...input.expectedChunkHashes].sort())
+    JSON.stringify(committedChunkHashes) !==
+    JSON.stringify([...input.expectedChunkHashes].sort(compareArchiveStrings))
   ) {
     throw new ProjectDataArchiveInvariantError(
       'target_chunk_inventory_mismatch',

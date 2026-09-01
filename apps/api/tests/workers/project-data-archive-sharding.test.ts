@@ -77,7 +77,12 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
     await source.ensureProjectId(projectId);
     const sessionId = await source.createSession(null, 'Workers archive bridge');
     for (let index = 0; index < 12; index++) {
-      await source.persistMessage(sessionId, index % 2 === 0 ? 'user' : 'assistant', largeMessage(index), null);
+      await source.persistMessage(
+        sessionId,
+        index % 2 === 0 ? 'user' : 'assistant',
+        largeMessage(index),
+        null
+      );
     }
     await source.stopSession(sessionId);
     await source.runSummarySyncForTest();
@@ -96,10 +101,7 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
         PROJECT_DATA_ARCHIVE_CHUNK_BYTES: String(128 * 1024),
       },
       async () => {
-        const stats = await runProjectDataArchiveSharding(
-          testEnv,
-          new Date(Date.now() + 60_000)
-        );
+        const stats = await runProjectDataArchiveSharding(testEnv, new Date(Date.now() + 60_000));
         expect(stats).toMatchObject({
           enabled: true,
           skipped: false,
@@ -131,7 +133,14 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
         expect(routed.messages).toHaveLength(12);
         expect(routed.messages[0]?.content).toContain('archive bridge payload 0');
         await expect(
-          projectDataService.persistMessage(testEnv, projectId, sessionId, 'assistant', 'late write', null)
+          projectDataService.persistMessage(
+            testEnv,
+            projectId,
+            sessionId,
+            'assistant',
+            'late write',
+            null
+          )
         ).rejects.toMatchObject({ code: 'PROJECT_DATA_ARCHIVE_ROUTING_UNSAFE' });
 
         const sourceProof = await runInDurableObject(source, async (_instance, state) => {
@@ -163,7 +172,17 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
           sourceProof.intent.source_database_size_before
         );
         expect(sourceProof.rootMessages).toBe(0);
-        expect(sourceProof.databaseSize).toBe(sourceProof.intent.source_database_size_after);
+        // `source_database_size_after` is captured before the final intent-row UPDATE. In the
+        // real workerd SQLite runtime that metadata write can allocate pages, so the live
+        // `sql.databaseSize` observed here may be larger than the recorded post-delete proof.
+        // The invariant is that both measurements remain below the pre-delete size and the
+        // recorded proof captured actual reclaim after source transcript rows were deleted.
+        expect(sourceProof.databaseSize).toBeLessThan(
+          sourceProof.intent.source_database_size_before
+        );
+        expect(sourceProof.databaseSize).toBeGreaterThanOrEqual(
+          sourceProof.intent.source_database_size_after
+        );
 
         const target = projectDataStub(location!.owner_name);
         const targetRows = await runInDurableObject(target, async (_instance, state) => {

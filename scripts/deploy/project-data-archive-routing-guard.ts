@@ -1,6 +1,7 @@
 #!/usr/bin/env tsx
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 
 import { parseWranglerJsonOutput } from './d1-migration-safety.js';
@@ -11,6 +12,8 @@ type DatabaseTarget = {
   binding: string;
   name: string;
 };
+
+const API_DIR = resolve(import.meta.dirname, '../../apps/api');
 
 function parseArgs(argv: string[]): { environment: string; databases: DatabaseTarget[] } {
   let environment = '';
@@ -61,12 +64,16 @@ function parseCount(output: unknown, db: DatabaseTarget): number {
   return count;
 }
 
+function resolveWranglerCli(): string {
+  const apiRequire = createRequire(resolve(API_DIR, 'package.json'));
+  return apiRequire.resolve('wrangler');
+}
+
 function queryNonRootPointers(environment: string, db: DatabaseTarget): number {
   const output = execFileSync(
-    'pnpm',
+    process.execPath,
     [
-      'exec',
-      'wrangler',
+      resolveWranglerCli(),
       'd1',
       'execute',
       db.name,
@@ -77,7 +84,10 @@ function queryNonRootPointers(environment: string, db: DatabaseTarget): number {
       "SELECT COUNT(*) AS count FROM project_data_session_locations WHERE location_state != 'root'",
       '--json',
     ],
-    { cwd: resolve(import.meta.dirname, '../../apps/api'), encoding: 'utf8' }
+    {
+      cwd: API_DIR,
+      encoding: 'utf8',
+    }
   );
   return parseCount(parseWranglerJsonOutput(output), db);
 }
@@ -125,7 +135,9 @@ async function main(): Promise<void> {
   );
 }
 
-main().catch((error) => {
+try {
+  await main();
+} catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
-});
+}
