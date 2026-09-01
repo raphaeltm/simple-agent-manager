@@ -56,3 +56,4 @@ SAM should keep Cloudflare Containers enabled, but ordinary dispatched agent wor
 - `pnpm --filter @simple-agent-manager/api lint` — passed.
 - `pnpm --filter @simple-agent-manager/api build` — passed.
 - `pnpm --filter @simple-agent-manager/www build` — passed, 186 pages built.
+- `pnpm --filter @simple-agent-manager/www build` — passed again after the self-hosting/Instant credential wording cleanup, 186 pages built.

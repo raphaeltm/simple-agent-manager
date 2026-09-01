@@ -212,6 +212,6 @@ Instant sessions require **Cloudflare Containers**, which requires a Workers Pai
 
 The runtime is enabled only when `CF_CONTAINER_ENABLED` is exactly `true` (or the legacy `SANDBOX_ENABLED`) — it is **off when neither is set**. The deploy workflow injects `true` for you, so a deployment made through it has Instant sessions on by default; a Worker started some other way (a local `wrangler dev`, a hand-rolled config) does not, and every session falls back to a VM.
 
-Set it to `false` in your GitHub Environment before deploying if your account cannot use Containers. With Containers off, every session provisions a cloud VM. SAM uses a project-scoped compute credential first, then a personal compute credential, then an administrator-configured platform compute credential as the installation fallback.
+Set it to `false` in your GitHub Environment before deploying if your account cannot use Containers. With Containers off, work must use cloud VM provisioning and requires one of the VM credential sources to be available. SAM uses a project-scoped compute credential first, then a personal compute credential, then an administrator-configured platform compute credential as the installation fallback.
 
 See the [Self-Hosting Guide](/docs/guides/self-hosting/).

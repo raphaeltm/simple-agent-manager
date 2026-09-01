@@ -185,10 +185,11 @@ instead of choosing a generic prefix.
 Leaving `CF_CONTAINER_ENABLED` at the `true` the deploy workflow injects lets users start
 [Instant sessions](/docs/guides/instant-sessions/) when no project, user, or platform VM
 credential can satisfy the work.
-Setting it to `false` means every session provisions a cloud VM. SAM chooses a
-project-scoped compute credential first when one is attached to the project, then
-falls back to the user's personal compute credential, then to an enabled platform
-compute credential configured by an administrator.
+Setting it to `false` means work must use cloud VM provisioning and requires one
+of the VM credential sources to be available. SAM chooses a project-scoped compute
+credential first when one is attached to the project, then falls back to the
+user's personal compute credential, then to an enabled platform compute credential
+configured by an administrator.
 
 **GitHub Environment secrets:**
 
