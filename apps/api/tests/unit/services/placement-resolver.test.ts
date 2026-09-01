@@ -251,16 +251,29 @@ describe('placement resolver parity', () => {
     });
   });
 
-  it('keeps zero-config runtime decisions on the existing VM dispatch policy', () => {
+  it('routes no-credential zero-config decisions to the instant fallback path', () => {
     expect(
       resolveEffectivePlacementRuntime({
         requestedRuntime: null,
         runtimeDecision: { runtime: 'cf-container', reason: 'zero-config' },
       })
     ).toMatchObject({
+      executionRuntime: 'cf-container',
+      isInstantRuntime: true,
+      reason: 'zero-config',
+    });
+  });
+
+  it('keeps platform-credential automatic runtime decisions on vm', () => {
+    expect(
+      resolveEffectivePlacementRuntime({
+        requestedRuntime: null,
+        runtimeDecision: { runtime: 'vm', reason: 'platform-cloud-credential' },
+      })
+    ).toMatchObject({
       executionRuntime: 'vm',
       isInstantRuntime: false,
-      reason: 'zero-config',
+      reason: 'platform-cloud-credential',
     });
   });
 

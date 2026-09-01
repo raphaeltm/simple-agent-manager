@@ -27,7 +27,7 @@ Two paths are never Instant unless explicitly told to be:
 - **Submitted tasks always use a VM.** Attaching a file or executing a saved idea also forces task submission, even with an Instant profile selected — those paths need a VM workspace.
 - **`dispatch_task` uses Instant only when asked**, via the call's `runtime` argument or the profile it dispatches with.
 
-The practical trade: an Instant session needs **no cloud provider credential**, which makes it the way to work on a fresh account or a self-hosted deployment where users haven't connected a cloud account. A task, by contrast, fails with `Cloud provider credentials required` if there's no credential available — yours, the project's, or the platform's.
+The practical trade: an Instant session needs **no cloud provider credential**, which makes it the fallback when no VM credential is available — yours, the project's, or the platform's. If a platform cloud credential exists, normal task work should use that VM path first; use Instant deliberately for container-suitable work or as the last resort when VM placement is unavailable.
 
 ## What you give up, and what you gain
 
@@ -202,7 +202,7 @@ Launching an Instant session takes several steps. SAM does the bookkeeping up fr
 
 Instant sessions clone with `--filter=blob:none` by default so start time tracks the size of your working tree rather than the size of your repository's entire history. Self-hosters can set `CF_CONTAINER_CLONE_FILTER=off` to force full clones.
 
-Concurrency is also capped per deployment by the container binding's `max_instances` in `apps/api/wrangler.toml` — worth raising before rolling Instant out to a team. In exchange, Instant sessions consume **no cloud VM quota** and need no cloud credential, which is the main reason to adopt them.
+Concurrency is also capped per deployment by the container binding's `max_instances` in `apps/api/wrangler.toml`. Instant sessions consume **no cloud VM quota** and need no cloud credential, but they use the Cloudflare Container runtime; keep the cap aligned with your intended last-resort/container-profile usage.
 
 See the [Configuration Reference](/docs/reference/configuration/) for the full list.
 

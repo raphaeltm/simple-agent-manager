@@ -23,6 +23,8 @@ export interface WorkspaceRuntimeDecision {
     | 'explicit-cf-container'
     | 'user-cloud-credential'
     | 'project-cloud-credential'
+    | 'platform-cloud-credential'
+    | 'self-hosted-node'
     | 'zero-config';
 }
 
@@ -43,6 +45,12 @@ export function decideWorkspaceRuntime(input: WorkspaceRuntimeDecisionInput): Wo
   }
   if (input.credentialSource === 'project') {
     return { runtime: 'vm', reason: 'project-cloud-credential' };
+  }
+  if (input.credentialSource === 'platform') {
+    return { runtime: 'vm', reason: 'platform-cloud-credential' };
+  }
+  if (input.credentialSource === 'self-hosted') {
+    return { runtime: 'vm', reason: 'self-hosted-node' };
   }
 
   return { runtime: 'cf-container', reason: 'zero-config' };

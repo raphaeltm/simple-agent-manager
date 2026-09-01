@@ -109,7 +109,7 @@ export function resolveEffectivePlacementRuntime(input: {
   runtimeDecision?: WorkspaceRuntimeDecision | null;
 }): PlacementRuntimeResolution {
   const decision = input.runtimeDecision ?? null;
-  const isInstantRuntime = decision?.reason === 'explicit-cf-container';
+  const isInstantRuntime = decision?.runtime === 'cf-container';
 
   return {
     requestedRuntime: input.requestedRuntime,

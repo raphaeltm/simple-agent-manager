@@ -24,7 +24,7 @@ A workspace runs in one of two places:
 | **Instant** | A container on Cloudflare's network | Starts in seconds, no cloud account needed — but no devcontainer and no Docker |
 | **VM**      | A cloud VM on your provider account | Your full environment, at the cost of a minute or two of provisioning          |
 
-Which one you get is an [agent profile](#agent-profiles) setting: a profile whose runtime is **Instant container** starts chats on Instant; everything else runs as a task on a VM. Instant needs no cloud provider credential, so it's how you work before connecting a cloud account.
+Which one you get is an [agent profile](#agent-profiles) setting: a profile whose runtime is **Instant container** starts chats on Instant; everything else runs as a task on a VM. Instant needs no cloud provider credential, so it remains available for container-suitable profiles and as a fallback when no project, user, or platform VM credential can satisfy the work.
 
 Instant and VM sessions sleep when idle and restore from a runtime-neutral snapshot on wake. A VM wake provisions a replacement workspace after the original compute is removed. See [Instant Sessions and persistent sleep](/docs/guides/instant-sessions/).
 

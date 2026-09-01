@@ -51,16 +51,25 @@ describe('decideWorkspaceRuntime', () => {
     ).toEqual({ runtime: 'vm', reason: 'project-cloud-credential' });
   });
 
-  it('uses cf-container for platform-credential zero-config users', () => {
+  it('keeps platform cloud credential work on vm by default', () => {
     expect(
       decideWorkspaceRuntime({
         containerEnabled: true,
         credentialSource: 'platform',
       })
-    ).toEqual({ runtime: 'cf-container', reason: 'zero-config' });
+    ).toEqual({ runtime: 'vm', reason: 'platform-cloud-credential' });
   });
 
-  it('uses cf-container when no cloud credential exists', () => {
+  it('keeps self-hosted node work on vm by default', () => {
+    expect(
+      decideWorkspaceRuntime({
+        containerEnabled: true,
+        credentialSource: 'self-hosted',
+      })
+    ).toEqual({ runtime: 'vm', reason: 'self-hosted-node' });
+  });
+
+  it('uses cf-container as last resort when no cloud credential exists', () => {
     expect(
       decideWorkspaceRuntime({
         containerEnabled: true,

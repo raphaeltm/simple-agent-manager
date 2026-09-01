@@ -2092,6 +2092,10 @@ describe('MCP Routes', () => {
       expect(dispatchTool.inputSchema.properties.branch.type).toBe('string');
       expect(dispatchTool.inputSchema.properties.runtime.enum).toEqual(['vm', 'cf-container']);
       expect(dispatchTool.description).toContain('Instant session');
+      expect(dispatchTool.description).toContain('last-resort runtime');
+      expect(dispatchTool.inputSchema.properties.runtime.description).toContain(
+        'more expensive Cloudflare Container runtime'
+      );
       expect(dispatchTool.description).toContain('Dispatch a new task');
       expect(dispatchTool.description).toContain('Rate-limited');
     });
@@ -2401,6 +2405,87 @@ describe('MCP Routes', () => {
       expect(instantSessionMocks.launchInstantSession).toHaveBeenCalledTimes(1);
     });
 
+    it('keeps automatic platform-credential dispatch on VM even when containers are enabled', async () => {
+      setupHappyPathMocks();
+      mockEnv.CF_CONTAINER_ENABLED = 'true';
+      mockEnv.COMPUTE_QUOTA_ENFORCEMENT_ENABLED = 'false';
+      providerCredentialMocks.resolveCredentialSource.mockResolvedValueOnce({
+        credentialSource: 'platform',
+        providerName: 'hetzner',
+      });
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Prefer platform VM over container',
+          },
+        })
+      );
+
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(JSON.parse(body.result.content[0].text)).toMatchObject({
+        runtime: 'vm',
+        runtimeReason: 'platform-cloud-credential',
+      });
+      expect(mockTaskRunnerStub.start).toHaveBeenCalledTimes(1);
+      expect(instantSessionMocks.launchInstantSession).not.toHaveBeenCalled();
+    });
+
+    it('uses cf-container as the no-credential last resort when containers are enabled', async () => {
+      setupHappyPathMocks();
+      mockEnv.CF_CONTAINER_ENABLED = 'true';
+      providerCredentialMocks.resolveCredentialSource.mockResolvedValueOnce(null);
+      instantSessionMocks.launchInstantSession.mockResolvedValue({
+        taskId: 'generated-task',
+        runtime: 'cf-container',
+      });
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Fallback when no VM credentials exist',
+          },
+        })
+      );
+
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(JSON.parse(body.result.content[0].text)).toMatchObject({
+        runtime: 'cf-container',
+        runtimeReason: 'zero-config',
+      });
+      expect(instantSessionMocks.launchInstantSession).toHaveBeenCalledTimes(1);
+      expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
+    });
+
+    it('rejects VM-only fields when no-credential fallback resolves to cf-container', async () => {
+      setupHappyPathMocks();
+      mockEnv.CF_CONTAINER_ENABLED = 'true';
+      providerCredentialMocks.resolveCredentialSource.mockResolvedValueOnce(null);
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Fallback cannot keep VM sizing',
+            vmSize: 'large',
+          },
+        })
+      );
+
+      const body = await res.json();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('VM-only fields: vmSize');
+      expect(instantSessionMocks.launchInstantSession).not.toHaveBeenCalled();
+      expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
+    });
+
     it('rejects an unrecognized runtime value', async () => {
       setupHappyPathMocks();
 
@@ -2656,7 +2741,7 @@ describe('MCP Routes', () => {
       expect(body.error.message).toContain('active agent-dispatched tasks');
     });
 
-    it('should reject when cloud credentials are missing', async () => {
+    it('should reject when cloud credentials are missing and containers are disabled', async () => {
       providerCredentialMocks.resolveCredentialSource.mockResolvedValueOnce(null);
       const noCredProject = {
         id: 'proj-456',

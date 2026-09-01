@@ -352,6 +352,13 @@ export async function handleDispatchTask(
     }
     throw err;
   }
+  const resolvedRuntimeValidationError = getRuntimeValidationError(
+    params,
+    placement.runtime.executionRuntime
+  );
+  if (resolvedRuntimeValidationError) {
+    return jsonRpcError(requestId, INVALID_PARAMS, resolvedRuntimeValidationError);
+  }
 
   const {
     vmSize: resolvedVmSize,
