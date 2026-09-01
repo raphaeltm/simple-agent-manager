@@ -545,8 +545,8 @@ function validateTargetState(value: unknown): ProjectDataArchiveTargetState {
 
 function readSessionAnchor(sql: SqlStorage, sessionId: string): ProjectDataArchiveRow | null {
   const columns = CHAT_SESSION_ANCHOR_COLUMNS.join(', ');
-  const row =
-    sql.exec(`SELECT ${columns} FROM chat_sessions WHERE id = ?`, sessionId).toArray()[0] ?? null;
+  const query = `SELECT ${columns} FROM chat_sessions WHERE id = ?`;
+  const row = sql.exec(query, sessionId).toArray()[0] ?? null;
   return row ? toArchiveRow(row, CHAT_SESSION_ANCHOR_COLUMNS) : null;
 }
 
@@ -704,11 +704,9 @@ async function tableAggregateSha256(
   sessionId: string
 ): Promise<string> {
   const spec = validateTableName(tableName);
+  const query = `SELECT ${spec.columns.join(', ')} FROM ${tableName} WHERE session_id = ? ORDER BY ${spec.orderBy}`;
   const rows = sql
-    .exec(
-      `SELECT ${spec.columns.join(', ')} FROM ${tableName} WHERE session_id = ? ORDER BY ${spec.orderBy}`,
-      sessionId
-    )
+    .exec(query, sessionId)
     .toArray()
     .map((row) => toArchiveRow(row, spec.columns));
   return canonicalRowsSha256(spec.columns, rows);
@@ -1069,9 +1067,11 @@ export function prepareArchiveTarget(
   }
 
   const row: ProjectDataArchiveRow = { ...input.sessionRow };
+  const placeholders = CHAT_SESSION_ANCHOR_COLUMNS.map(() => '?').join(', ');
+  const insertSessionQuery = `INSERT INTO chat_sessions (${CHAT_SESSION_ANCHOR_COLUMNS.join(', ')})
+     VALUES (${placeholders})`;
   sql.exec(
-    `INSERT INTO chat_sessions (${CHAT_SESSION_ANCHOR_COLUMNS.join(', ')})
-     VALUES (${CHAT_SESSION_ANCHOR_COLUMNS.map(() => '?').join(', ')})`,
+    insertSessionQuery,
     ...CHAT_SESSION_ANCHOR_COLUMNS.map((column) => row[column] ?? null)
   );
   sql.exec(
@@ -1102,11 +1102,9 @@ function insertArchiveRow(
   row: Record<string, unknown>
 ): void {
   const spec = validateTableName(tableName);
+  const existingQuery = `SELECT ${spec.columns.join(', ')} FROM ${tableName} WHERE ${spec.keyColumn} = ?`;
   const existing = sql
-    .exec(
-      `SELECT ${spec.columns.join(', ')} FROM ${tableName} WHERE ${spec.keyColumn} = ?`,
-      row[spec.keyColumn]
-    )
+    .exec(existingQuery, row[spec.keyColumn])
     .toArray()[0];
   if (existing) {
     const expected = canonicalizeArchiveRow(spec.columns, row);
@@ -1119,11 +1117,10 @@ function insertArchiveRow(
     }
     return;
   }
-  sql.exec(
-    `INSERT INTO ${tableName} (${spec.columns.join(', ')})
-     VALUES (${spec.columns.map(() => '?').join(', ')})`,
-    ...spec.columns.map((column) => row[column] ?? null)
-  );
+  const placeholders = spec.columns.map(() => '?').join(', ');
+  const insertQuery = `INSERT INTO ${tableName} (${spec.columns.join(', ')})
+     VALUES (${placeholders})`;
+  sql.exec(insertQuery, ...spec.columns.map((column) => row[column] ?? null));
 }
 
 function readCommittedRowsForChunk(
@@ -1134,13 +1131,11 @@ function readCommittedRowsForChunk(
   if (rowIds.length === 0) return [];
   const spec = validateTableName(tableName);
   const placeholders = rowIds.map(() => '?').join(', ');
-  const rows = sql
-    .exec(
-      `SELECT ${spec.columns.join(', ')} FROM ${tableName}
+  const query = `SELECT ${spec.columns.join(', ')} FROM ${tableName}
        WHERE ${spec.keyColumn} IN (${placeholders})
-       ORDER BY ${spec.orderBy}`,
-      ...rowIds
-    )
+       ORDER BY ${spec.orderBy}`;
+  const rows = sql
+    .exec(query, ...rowIds)
     .toArray()
     .map((row) => toArchiveRow(row, spec.columns));
   if (rows.length !== rowIds.length) {
@@ -1367,16 +1362,16 @@ function readTargetChunkInventory(
   migrationId: string | null
 ): ArchiveTargetInspectResult['chunks'] {
   const params: Array<string | number> = [sessionId];
-  let migrationPredicate = '';
+  let whereClause = '';
   if (migrationId !== null) {
-    migrationPredicate = ' AND migration_id = ?';
+    whereClause = ' AND migration_id = ?';
     params.push(migrationId);
   }
   return sql
     .exec(
       `SELECT table_name, ordinal, sha256, row_count, byte_count
        FROM project_data_archive_target_chunks
-       WHERE session_id = ?${migrationPredicate}
+       WHERE session_id = ?${whereClause}
        ORDER BY table_name ASC, ordinal ASC`,
       ...params
     )
@@ -2218,9 +2213,11 @@ export function archiveTargetSearchProjectMessages(
       input.generation,
     ];
     if (roles && roles.length > 0) {
-      conditions.push(`m.role IN (${roles.map(() => '?').join(', ')})`);
+      const placeholders = roles.map(() => '?').join(', ');
+      conditions.push(`m.role IN (${placeholders})`);
       params.push(...roles);
     }
+    const whereClause = conditions.join(' AND ');
     try {
       const rows = sql
         .exec(
@@ -2230,7 +2227,7 @@ export function archiveTargetSearchProjectMessages(
            JOIN chat_messages_grouped m ON m.rowid = f.rowid
            JOIN chat_sessions s ON s.id = m.session_id
            JOIN project_data_archive_target_sessions t ON t.session_id = m.session_id
-           WHERE ${conditions.join(' AND ')}
+           WHERE ${whereClause}
            ORDER BY rank
            LIMIT ?`,
           ...params,
@@ -2264,9 +2261,11 @@ export function archiveTargetSearchProjectMessages(
       input.generation,
     ];
     if (roles && roles.length > 0) {
-      conditions.push(`m.role IN (${roles.map(() => '?').join(', ')})`);
+      const placeholders = roles.map(() => '?').join(', ');
+      conditions.push(`m.role IN (${placeholders})`);
       params.push(...roles);
     }
+    const whereClause = conditions.join(' AND ');
     const seen = new Set(results.map((result) => result.id));
     const rows = sql
       .exec(
@@ -2275,7 +2274,7 @@ export function archiveTargetSearchProjectMessages(
          FROM chat_messages m
          JOIN chat_sessions s ON s.id = m.session_id
          JOIN project_data_archive_target_sessions t ON t.session_id = m.session_id
-         WHERE ${conditions.join(' AND ')}
+         WHERE ${whereClause}
          ORDER BY m.created_at DESC
          LIMIT ?`,
         ...params,

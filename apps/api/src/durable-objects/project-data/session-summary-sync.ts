@@ -220,13 +220,14 @@ function readBackfillPage(
                          ) as last_message_at
                   FROM chat_sessions`;
   if (coverage?.backfill_cursor_updated_at !== null && coverage?.backfill_cursor_id) {
-    return sql
-      .exec(
-        `${select}
+    const query = `${select}
          WHERE updated_at < ?
             OR (updated_at = ? AND id < ?)
          ORDER BY updated_at DESC, id DESC
-         LIMIT ?`,
+         LIMIT ?`;
+    return sql
+      .exec(
+        query,
         coverage.backfill_cursor_updated_at,
         coverage.backfill_cursor_updated_at,
         coverage.backfill_cursor_id,
@@ -234,14 +235,10 @@ function readBackfillPage(
       )
       .toArray();
   }
-  return sql
-    .exec(
-      `${select}
+  const query = `${select}
        ORDER BY updated_at DESC, id DESC
-       LIMIT ?`,
-      maxRows
-    )
-    .toArray();
+       LIMIT ?`;
+  return sql.exec(query, maxRows).toArray();
 }
 
 async function writeCoverage(
