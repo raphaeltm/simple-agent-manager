@@ -138,6 +138,62 @@ describe('session sleep lifecycle repair', () => {
     ).toEqual(expect.any(String));
   });
 
+  it('repairs a stopping row from its stable stopping age even when the claim was refreshed recently', async () => {
+    sqlite
+      .prepare(
+        `INSERT INTO session_snapshots
+           (id, project_id, workspace_id, node_id, user_id, chat_session_id, runtime, status,
+            degradation, manifest_r2_key, home_r2_key, expires_at, sleep_status,
+            sleep_claim_id, sleep_claimed_at, sleep_stopping_since, sleep_attempts, created_at, updated_at)
+         VALUES ('snapshot-1', 'project-1', 'workspace-1', 'node-1', 'user-1', 'chat-1', 'vm',
+            'available', 'none', 'snapshots/chat-1/manifest.json', 'snapshots/chat-1/home.tar.zst',
+            '2026-08-20T00:00:00.000Z', 'stopping', 'reclaimed-owner',
+            '2026-08-12T00:55:00.000Z', '2026-08-12T00:00:00.000Z', 2, ?, ?)`
+      )
+      .run('2026-08-12T00:00:00.000Z', '2026-08-12T00:55:00.000Z');
+
+    const result = await runSessionSleepLifecycleRepair(env, new Date('2026-08-12T01:00:00.000Z'));
+
+    expect(result).toMatchObject({ selected: 1, repaired: 1, skipped: 0, errors: 0 });
+    expect(
+      sqlite
+        .prepare(
+          `SELECT sleep_status, sleeping_at, sleep_claim_id, sleep_claimed_at, sleep_stopping_since
+             FROM session_snapshots WHERE id = 'snapshot-1'`
+        )
+        .get()
+    ).toEqual({
+      sleep_status: 'sleeping',
+      sleeping_at: '2026-08-12T01:00:00.000Z',
+      sleep_claim_id: null,
+      sleep_claimed_at: null,
+      sleep_stopping_since: '2026-08-12T00:00:00.000Z',
+    });
+  });
+
+  it('does not repair a stopping row before the stable stopping age exceeds the in-flight ceiling', async () => {
+    sqlite
+      .prepare(
+        `INSERT INTO session_snapshots
+           (id, project_id, workspace_id, node_id, user_id, chat_session_id, runtime, status,
+            degradation, manifest_r2_key, home_r2_key, expires_at, sleep_status,
+            sleep_claim_id, sleep_claimed_at, sleep_stopping_since, sleep_attempts, created_at, updated_at)
+         VALUES ('snapshot-1', 'project-1', 'workspace-1', 'node-1', 'user-1', 'chat-1', 'vm',
+            'available', 'none', 'snapshots/chat-1/manifest.json', 'snapshots/chat-1/home.tar.zst',
+            '2026-08-20T00:00:00.000Z', 'stopping', 'owner',
+            '2026-08-12T00:59:00.000Z', '2026-08-12T00:45:00.000Z', 2, ?, ?)`
+      )
+      .run('2026-08-12T00:00:00.000Z', '2026-08-12T00:59:00.000Z');
+
+    const result = await runSessionSleepLifecycleRepair(env, new Date('2026-08-12T01:00:00.000Z'));
+
+    expect(result).toMatchObject({ selected: 0, repaired: 0, skipped: 0, errors: 0 });
+    expect(mocks.sleepSession).not.toHaveBeenCalled();
+    expect(
+      sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).pluck().get()
+    ).toBe('running');
+  });
+
   it('keeps a stale post-capture row retryable when ProjectData sleep fails', async () => {
     mocks.sleepSession.mockResolvedValueOnce(false);
     sqlite

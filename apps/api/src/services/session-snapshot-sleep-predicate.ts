@@ -14,6 +14,7 @@ export interface SleepLifecyclePredicateResult {
   expires_at: string | null;
   sleep_status: string | null;
   sleep_claimed_at: string | null;
+  sleep_stopping_since: string | null;
   sleep_after: string | null;
   updated_at: string | null;
   created_at: string | null;
@@ -62,7 +63,16 @@ export function restorableOrInFlightSleepSnapshotPredicateSql(alias = 'snapshot'
     OR (
       ${s}.sleeping_at IS NULL
       AND ${s}.sleep_status IN ('scheduled', 'preparing', 'stopping', 'failed')
-      AND COALESCE(${s}.sleep_claimed_at, ${s}.sleep_after, ${s}.updated_at, ${s}.created_at) > ?
+      AND (
+        (
+          ${s}.sleep_status = 'stopping'
+          AND COALESCE(${s}.sleep_stopping_since, ${s}.sleep_claimed_at, ${s}.sleep_after, ${s}.updated_at, ${s}.created_at) > ?
+        )
+        OR (
+          ${s}.sleep_status != 'stopping'
+          AND COALESCE(${s}.sleep_claimed_at, ${s}.sleep_after, ${s}.updated_at, ${s}.created_at) > ?
+        )
+      )
       AND (
         ${s}.sleep_status IN ('scheduled', 'preparing', 'stopping')
         OR (
@@ -81,10 +91,10 @@ export function restorableOrInFlightSleepSnapshotPredicateSql(alias = 'snapshot'
 export function sleepLifecyclePredicateBindings(
   env: SleepPredicateEnv,
   now: Date
-): [string, number, string, number] {
+): [string, number, string, string, number] {
   const maxAttempts = snapshotRecoveryMaxAttempts(env);
   const inFlightCeiling = new Date(now.getTime() - sessionSleepInFlightMaxAgeMs(env)).toISOString();
-  return [now.toISOString(), maxAttempts, inFlightCeiling, maxAttempts];
+  return [now.toISOString(), maxAttempts, inFlightCeiling, inFlightCeiling, maxAttempts];
 }
 
 export async function findRestorableOrInFlightSleepSnapshot(
@@ -100,7 +110,7 @@ export async function findRestorableOrInFlightSleepSnapshot(
 
   const row = await database
     .prepare(
-      `SELECT expires_at, sleep_status, sleep_claimed_at, sleep_after, updated_at, created_at
+      `SELECT expires_at, sleep_status, sleep_claimed_at, sleep_stopping_since, sleep_after, updated_at, created_at
          FROM session_snapshots
         WHERE chat_session_id = ?
           AND project_id = ?

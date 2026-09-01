@@ -591,4 +591,34 @@ describe('session sleep sweep', () => {
         .get()
     ).toEqual({ sleep_attempts: 2 });
   });
+
+  it('self-heals legacy stopping rows with a stable stopping timestamp on reclaim', async () => {
+    addDueSnapshot('snapshot-legacy-stopping', 2);
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots
+         SET sleep_status = 'stopping', sleep_after = '2026-08-12T00:30:00.000Z',
+             sleep_claim_id = 'dead-owner', sleep_claimed_at = '2026-08-12T00:00:00.000Z',
+             sleep_stopping_since = NULL, updated_at = '2026-08-12T00:05:00.000Z'
+         WHERE id = 'snapshot-legacy-stopping'`
+      )
+      .run();
+    mocks.sleepWorkspaceSession.mockResolvedValue(undefined);
+
+    await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00.000Z'));
+
+    expect(
+      sqlite
+        .prepare(
+          `SELECT sleep_claim_id, sleep_claimed_at, sleep_stopping_since, sleep_attempts
+             FROM session_snapshots WHERE id = 'snapshot-legacy-stopping'`
+        )
+        .get()
+    ).toEqual({
+      sleep_claim_id: expect.any(String),
+      sleep_claimed_at: '2026-08-12T01:00:00.000Z',
+      sleep_stopping_since: '2026-08-12T00:00:00.000Z',
+      sleep_attempts: 2,
+    });
+  });
 });

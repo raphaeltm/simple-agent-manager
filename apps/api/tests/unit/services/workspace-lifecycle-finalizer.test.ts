@@ -181,6 +181,8 @@ function seedRestorableSnapshot(
     sleepStatus?: string | null;
     sleepingAt?: string | null;
     recoveryAttempts?: number;
+    sleepClaimedAt?: string | null;
+    sleepStoppingSince?: string | null;
     updatedAt?: string;
   } = {}
 ): void {
@@ -190,8 +192,8 @@ function seedRestorableSnapshot(
       `INSERT INTO session_snapshots
         (id, project_id, workspace_id, node_id, user_id, chat_session_id, runtime, status,
          degradation, manifest_r2_key, home_r2_key, expires_at, sleeping_at, sleep_status,
-         recovery_attempts, sleep_attempts, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'vm', ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+         sleep_claimed_at, sleep_stopping_since, recovery_attempts, sleep_attempts, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'vm', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
     )
     .run(
       overrides.id ?? `snapshot-${chatSessionId}`,
@@ -207,6 +209,8 @@ function seedRestorableSnapshot(
       overrides.expiresAt ?? iso(7 * 24 * 60 * 60 * 1000),
       overrides.sleepingAt === undefined ? iso(-5 * 60 * 1000) : overrides.sleepingAt,
       overrides.sleepStatus === undefined ? 'sleeping' : overrides.sleepStatus,
+      overrides.sleepClaimedAt ?? null,
+      overrides.sleepStoppingSince ?? null,
       overrides.recoveryAttempts ?? 0,
       iso(-60 * 60 * 1000),
       overrides.updatedAt ?? iso(-5 * 60 * 1000)
@@ -443,6 +447,33 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
     });
     expect(await loadWorkspace()).toMatchObject({ status: 'running' });
     expect(mocks.stopSession).not.toHaveBeenCalled();
+  });
+
+  it('terminal-node repair does not treat an old stopping row as protected because the claim was refreshed', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    seedNode(undefined, { status: 'deleted', updatedAt: iso(-60 * 60 * 1000) });
+    seedWorkspace({ status: 'running', updatedAt: iso(-45 * 60 * 1000) });
+    seedAgentSession({ status: 'running' });
+    seedRestorableSnapshot({
+      sleepStatus: 'stopping',
+      sleepingAt: null,
+      sleepClaimedAt: iso(-5 * 60 * 1000),
+      sleepStoppingSince: iso(-60 * 60 * 1000),
+      updatedAt: iso(-5 * 60 * 1000),
+    });
+
+    const result = await runTerminalNodeLifecycleRepair(env);
+
+    expect(result).toMatchObject({
+      selected: 1,
+      skippedProtectedSleep: 0,
+      workspacesTerminalized: 1,
+      agentSessionsClosed: 1,
+    });
+    expect(await loadWorkspace()).toMatchObject({ status: 'stopped' });
+    expect(mocks.stopSession).toHaveBeenCalledWith(env, PROJECT_ID, CHAT_SESSION_ID);
+    vi.useRealTimers();
   });
 
   it('repairs an unprotected active workspace on a terminal node through the scheduled repair', async () => {

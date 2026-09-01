@@ -1446,6 +1446,7 @@ export const sessionSnapshots = sqliteTable(
     sleepError: text('sleep_error'),
     sleepClaimId: text('sleep_claim_id'),
     sleepClaimedAt: text('sleep_claimed_at'),
+    sleepStoppingSince: text('sleep_stopping_since'),
     snapshotGeneration: text('snapshot_generation'),
     captureGeneration: text('capture_generation'),
     captureError: text('capture_error'),
@@ -1480,6 +1481,10 @@ export const sessionSnapshots = sqliteTable(
     sleepClaimIdx: index('idx_session_snapshots_sleep_claim').on(
       table.sleepStatus,
       table.sleepClaimedAt
+    ),
+    sleepStoppingSinceIdx: index('idx_session_snapshots_sleep_stopping_since').on(
+      table.sleepStatus,
+      table.sleepStoppingSince
     ),
     sleepExpiryIdx: index('idx_session_snapshots_sleep_expiry').on(
       table.sleepStatus,
