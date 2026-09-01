@@ -3,7 +3,17 @@ name: CodSpeed
 on:
   push:
     branches: [main]
+    paths:
+      - 'packages/shared/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
   pull_request:
+    paths:
+      - 'packages/shared/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
   # Allow CodSpeed to trigger backtest performance analysis to generate baseline data.
   workflow_dispatch:
 

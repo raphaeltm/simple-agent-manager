@@ -37,8 +37,9 @@ function expectRequiredWorkerSuiteWiring(workflow: string): void {
   const step = stepBlock(job, 'Run Worker and Durable Object suites');
 
   expect(job).toContain(
-    "if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'"
+    "needs.changes.outputs.api == 'true'"
   );
+  expect(job).toContain('needs: [changes]');
   expect(job).toContain('timeout-minutes: 15');
   expect(step).toContain('run: pnpm --filter @simple-agent-manager/api test:workers');
   expect(step).not.toContain('continue-on-error');
