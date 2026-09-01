@@ -42,6 +42,15 @@ export const ProjectDataStorageReliefMeasureSchema = v.object({
   ),
 });
 
+export const ProjectDataArchiveForwardFixSchema = v.object({
+  mode: v.picklist(['retry', 'restore_target']),
+});
+
+export const ProjectDataArchiveRehomeSchema = v.object({
+  targetOwnerName: v.pipe(v.string(), v.minLength(1), v.maxLength(500)),
+  fallbackTargetOwnerName: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(500))),
+});
+
 export const AnalyticsForwardSchema = v.object({
   startDate: v.optional(v.string()),
   endDate: v.optional(v.string()),

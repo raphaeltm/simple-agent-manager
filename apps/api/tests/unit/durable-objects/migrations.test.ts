@@ -236,6 +236,45 @@ describe('DO Migrations', () => {
             'acked_by_name',
           ])
         );
+        const archiveIntentColumns = db
+          .prepare('PRAGMA table_info(project_data_archive_source_intents)')
+          .all() as Array<{ name: string }>;
+        expect(archiveIntentColumns.map((column) => column.name)).toEqual(
+          expect.arrayContaining([
+            'migration_id',
+            'lease_token',
+            'lease_epoch',
+            'terminal_version',
+            'source_database_size_before',
+            'source_database_size_after',
+          ])
+        );
+        expect(
+          db
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project_data_archive_chunks'"
+            )
+            .get()
+        ).toEqual({ name: 'project_data_archive_chunks' });
+        expect(
+          (
+            db.prepare('PRAGMA table_info(project_data_archive_targets)').all() as Array<{
+              name: string;
+            }>
+          ).map((column) => column.name)
+        ).toEqual(expect.arrayContaining(['lease_token', 'lease_epoch', 'lease_expires_at']));
+        expect(
+          (
+            db.prepare('PRAGMA table_info(project_data_archive_chunks)').all() as Array<{
+              name: string;
+            }>
+          ).map((column) => column.name)
+        ).toContain('verified_at');
+        expect(
+          (db.prepare('PRAGMA table_info(chat_sessions)').all() as Array<{ name: string }>).map(
+            (column) => column.name
+          )
+        ).toContain('last_message_at');
       } finally {
         db.close();
       }
@@ -459,7 +498,9 @@ describe('DO Migrations', () => {
       // project event pull ack: 1 replay index from migration 040
       // terminal session reconcile marker: 1 from migration 041
       // chat search materialization state: 1 from migration 042
-      expect(indexes).toHaveLength(87);
+      // terminal archive sharding: 3 from migration 043 (source state, chunk session,
+      // and archive-owner rehome source state)
+      expect(indexes).toHaveLength(90);
     });
   });
 });

@@ -10,7 +10,7 @@
  *     on the two paths agreeing, so a divergence has to be a test failure rather
  *     than a subtly wrong sidebar in production.
  */
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { Env as WorkerEnv } from '../../src/env';
@@ -94,11 +94,7 @@ describe('D1 session index sync', () => {
     expect(out).toEqual({ missReason: 'incomplete_coverage' });
   });
 
-  it('stops mirroring rows once the project is provably over the cap', async () => {
-    // Circuit breaker. Session counts only grow, so an over-cap project can never
-    // reach complete=1 and the read path will fall back forever — mirroring rows
-    // into an index nothing reads is pure write cost. Without the breaker, every
-    // mutation on a large project re-wrote up to SESSION_INDEX_MAX_ROWS rows.
+  it('resumes keyset pages until an over-cap project reaches complete coverage', async () => {
     await seed(projectId);
     const stub = getStub(projectId);
     await stub.ensureProjectId(projectId);
@@ -114,11 +110,20 @@ describe('D1 session index sync', () => {
       .bind(projectId)
       .first<{ cnt: number }>();
 
-    // Coverage still recorded (so the gate knows to fall back), but no rows written.
-    expect(rows?.cnt).toBe(0);
+    // The cap is a per-sync page budget, not a permanent ceiling.
+    expect(rows?.cnt).toBe(2);
     const coverage = await readCoverage(projectId);
     expect(coverage?.complete).toBe(0);
     expect(coverage?.session_count).toBe(3);
+
+    await stub.runSummarySyncWithEnvForTest({ SESSION_INDEX_MAX_ROWS: '2' });
+    const convergedRows = await env.DATABASE.prepare(
+      'SELECT COUNT(*) AS cnt FROM session_summaries WHERE project_id = ?'
+    )
+      .bind(projectId)
+      .first<{ cnt: number }>();
+    expect(convergedRows?.cnt).toBe(3);
+    expect((await readCoverage(projectId))?.complete).toBe(1);
   });
 
   it('mirrors only rows changed since the last sync instead of the whole project', async () => {
@@ -156,6 +161,45 @@ describe('D1 session index sync', () => {
     expect(changedRow?.topic).toBe('Changed topic');
     // Still the sentinel => the untouched row was NOT rewritten.
     expect(untouchedRow?.topic).toBe('SENTINEL');
+  });
+
+  it('resumes an over-cap delta with same-timestamp keyset ties without losing rows', async () => {
+    await seed(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const sessions = [
+      await stub.createSession('workspace-1', 'One'),
+      await stub.createSession('workspace-2', 'Two'),
+      await stub.createSession('workspace-3', 'Three'),
+    ];
+    await stub.runSummarySyncForTest();
+    await env.DATABASE.prepare('UPDATE session_summaries SET topic = ? WHERE project_id = ?')
+      .bind('SENTINEL', projectId)
+      .run();
+
+    const initialCoverage = await readCoverage(projectId);
+    const tiedUpdatedAt = Math.max(Date.now(), (initialCoverage?.synced_at ?? 0) + 1);
+    await runInDurableObject(stub, async (_instance, state) => {
+      for (const sessionId of sessions) {
+        state.storage.sql.exec(
+          'UPDATE chat_sessions SET topic = ?, updated_at = ? WHERE id = ?',
+          'Delta repaired',
+          tiedUpdatedAt,
+          sessionId
+        );
+      }
+    });
+
+    await stub.runSummarySyncWithEnvForTest({ SESSION_INDEX_MAX_ROWS: '2' });
+    expect((await readCoverage(projectId))?.complete).toBe(0);
+    await stub.runSummarySyncWithEnvForTest({ SESSION_INDEX_MAX_ROWS: '2' });
+    expect((await readCoverage(projectId))?.complete).toBe(1);
+    const repaired = await env.DATABASE.prepare(
+      'SELECT COUNT(*) AS cnt FROM session_summaries WHERE project_id = ? AND topic = ?'
+    )
+      .bind(projectId, 'Delta repaired')
+      .first<{ cnt: number }>();
+    expect(repaired?.cnt).toBe(3);
   });
 
   it('serializes overlapping syncs so an older snapshot cannot overwrite a newer one', async () => {

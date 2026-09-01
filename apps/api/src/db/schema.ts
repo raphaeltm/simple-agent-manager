@@ -2858,6 +2858,150 @@ export const sessionIndexCoverage = sqliteTable('session_index_coverage', {
 
 export type SessionIndexCoverageRow = typeof sessionIndexCoverage.$inferSelect;
 
+// =============================================================================
+// ProjectData terminal archive placement (D1 cross-owner authority)
+// =============================================================================
+
+export const projectDataSessionLocations = sqliteTable(
+  'project_data_session_locations',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id').notNull(),
+    state: text('state', {
+      enum: ['root', 'migrating', 'archive_shard', 'direct_session'],
+    }).notNull(),
+    ownerKind: text('owner_kind', { enum: ['root', 'archive_shard', 'direct_session'] }).notNull(),
+    ownerName: text('owner_name').notNull(),
+    generation: integer('generation').notNull(),
+    migrationId: text('migration_id'),
+    routingVersion: integer('routing_version').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.sessionId] }),
+    migrationIdUnique: uniqueIndex('project_data_session_locations_migration_id_unique').on(
+      table.migrationId
+    ),
+    ownerIdx: index('idx_project_data_session_locations_owner').on(
+      table.projectId,
+      table.ownerKind,
+      table.ownerName,
+      table.generation,
+      table.sessionId
+    ),
+  })
+);
+
+export const projectDataArchiveMigrations = sqliteTable(
+  'project_data_archive_migrations',
+  {
+    migrationId: text('migration_id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id').notNull(),
+    state: text('state', {
+      enum: ['planned', 'copying', 'sealed', 'source_deleted', 'archived', 'frozen', 'failed'],
+    }).notNull(),
+    sourceOwnerName: text('source_owner_name').notNull(),
+    sourceGeneration: integer('source_generation').notNull(),
+    targetOwnerName: text('target_owner_name').notNull(),
+    targetGeneration: integer('target_generation').notNull(),
+    leaseToken: text('lease_token'),
+    leaseEpoch: integer('lease_epoch').notNull().default(0),
+    leaseExpiresAt: integer('lease_expires_at'),
+    terminalVersion: text('terminal_version').notNull(),
+    aggregateHash: text('aggregate_hash'),
+    manifestR2Key: text('manifest_r2_key'),
+    nextTableName: text('next_table_name'),
+    nextChunkIndex: integer('next_chunk_index').notNull().default(0),
+    nextRowKey: text('next_row_key'),
+    failureCount: integer('failure_count').notNull().default(0),
+    nextAttemptAt: integer('next_attempt_at'),
+    lastError: text('last_error'),
+    sourceDeletedAt: integer('source_deleted_at'),
+    archivedAt: integer('archived_at'),
+    targetAuthoritativeAt: integer('target_authoritative_at'),
+    targetCleanupAt: integer('target_cleanup_at'),
+    recoveryVerifyPageKey: text('recovery_verify_page_key'),
+    recoveryVerifyPageIndex: integer('recovery_verify_page_index'),
+    recoveryVerifyEntryIndex: integer('recovery_verify_entry_index').notNull().default(0),
+    recoveryVerifyExpectedHash: text('recovery_verify_expected_hash'),
+    recoveryVerifyEntriesSeen: integer('recovery_verify_entries_seen').notNull().default(0),
+    recoveryVerifiedAt: integer('recovery_verified_at'),
+    recoveryRestorePageKey: text('recovery_restore_page_key'),
+    recoveryRestorePageIndex: integer('recovery_restore_page_index'),
+    recoveryRestoreEntryIndex: integer('recovery_restore_entry_index').notNull().default(0),
+    recoveryTargetResetAt: integer('recovery_target_reset_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    sessionUnique: uniqueIndex('project_data_archive_migrations_project_session_unique').on(
+      table.projectId,
+      table.sessionId
+    ),
+    sweepIdx: index('idx_project_data_archive_migrations_sweep').on(
+      table.state,
+      table.nextAttemptAt,
+      table.leaseExpiresAt,
+      table.updatedAt,
+      table.migrationId
+    ),
+  })
+);
+
+export const projectDataArchiveCircuitBreakers = sqliteTable(
+  'project_data_archive_circuit_breakers',
+  {
+    projectId: text('project_id')
+      .primaryKey()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+    openedUntil: integer('opened_until'),
+    lastFailure: text('last_failure'),
+    updatedAt: integer('updated_at').notNull(),
+  }
+);
+
+export const projectDataArchiveCandidateDeferrals = sqliteTable(
+  'project_data_archive_candidate_deferrals',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id').notNull(),
+    reason: text('reason').notNull(),
+    poisoned: integer('poisoned').notNull().default(0),
+    nextCheckAt: integer('next_check_at'),
+    checkCount: integer('check_count').notNull().default(1),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.sessionId] }),
+    dueIdx: index('idx_project_data_archive_candidate_deferrals_due').on(
+      table.poisoned,
+      table.nextCheckAt,
+      table.updatedAt
+    ),
+  })
+);
+
+export const sessionIndexBackfillCursors = sqliteTable('session_index_backfill_cursors', {
+  projectId: text('project_id')
+    .primaryKey()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  cursorMode: text('cursor_mode', { enum: ['full', 'delta'] }).notNull(),
+  cursorUpdatedAt: integer('cursor_updated_at'),
+  cursorSessionId: text('cursor_session_id'),
+  highWatermark: integer('high_watermark'),
+  snapshotSessionCount: integer('snapshot_session_count').notNull().default(0),
+  startedAt: integer('started_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
 export const projectDataStorageTelemetry = sqliteTable(
   'project_data_storage_telemetry',
   {

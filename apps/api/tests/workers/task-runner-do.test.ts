@@ -240,6 +240,95 @@ describe('TaskRunner DO — state persistence and idempotency', () => {
     });
   });
 
+  it('requires an exact root ProjectData location at the real recovery start boundary', async () => {
+    await seedTestData();
+    const rejectedLocations = [
+      {
+        label: 'migrating',
+        state: 'migrating',
+        ownerKind: 'root',
+        ownerName: TEST_PROJECT_ID,
+        generation: 0,
+        migrationId: 'migration-start-fence',
+      },
+      {
+        label: 'archived',
+        state: 'archive_shard',
+        ownerKind: 'archive_shard',
+        ownerName: `project-data-archive:${TEST_PROJECT_ID}:0`,
+        generation: 1,
+        migrationId: 'archived-start-fence',
+      },
+      {
+        label: 'malformed-root',
+        state: 'root',
+        ownerKind: 'root',
+        ownerName: 'wrong-project-owner',
+        generation: 0,
+        migrationId: null,
+      },
+    ] as const;
+
+    for (const location of rejectedLocations) {
+      const input = await seedRecoveryAuthorization({
+        sourceTaskId: `tr-recovery-source-${location.label}`,
+        recoveryTaskId: `tr-recovery-task-${location.label}`,
+        workspaceId: `tr-recovery-workspace-${location.label}`,
+        chatSessionId: `tr-recovery-chat-${location.label}`,
+      });
+      await env.DATABASE.prepare(
+        `INSERT INTO project_data_session_locations
+         (project_id, session_id, state, owner_kind, owner_name, generation,
+          migration_id, routing_version, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)`
+      )
+        .bind(
+          TEST_PROJECT_ID,
+          input.config.resumeSnapshotChatSessionId,
+          location.state,
+          location.ownerKind,
+          location.ownerName,
+          location.generation,
+          location.migrationId,
+          Date.now()
+        )
+        .run();
+      const stub = getStub(input.taskId);
+      await runInDurableObject(stub, async (instance) => {
+        await expect(instance.start(input)).rejects.toThrow(
+          'Session recovery authority was revoked'
+        );
+      });
+      expect(await stub.getStatus()).toBeNull();
+    }
+
+    const exactRootInput = await seedRecoveryAuthorization({
+      sourceTaskId: 'tr-recovery-source-exact-root',
+      recoveryTaskId: 'tr-recovery-task-exact-root',
+      workspaceId: 'tr-recovery-workspace-exact-root',
+      chatSessionId: 'tr-recovery-chat-exact-root',
+    });
+    await env.DATABASE.prepare(
+      `INSERT INTO project_data_session_locations
+       (project_id, session_id, state, owner_kind, owner_name, generation,
+        migration_id, routing_version, updated_at)
+       VALUES (?, ?, 'root', 'root', ?, 0, NULL, 1, ?)`
+    )
+      .bind(
+        TEST_PROJECT_ID,
+        exactRootInput.config.resumeSnapshotChatSessionId,
+        TEST_PROJECT_ID,
+        Date.now()
+      )
+      .run();
+    const exactRootStub = getStub(exactRootInput.taskId);
+    await startWithoutAlarm(exactRootStub, exactRootInput);
+    expect(await exactRootStub.getStatus()).toMatchObject({
+      taskId: exactRootInput.taskId,
+      config: { recoverySourceTaskId: 'tr-recovery-source-exact-root' },
+    });
+  });
+
   it('start() persists initial state with correct shape', async () => {
     await seedTestData();
     const taskId = 'tr-test-start-001';

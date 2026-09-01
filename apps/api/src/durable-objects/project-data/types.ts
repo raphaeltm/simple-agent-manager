@@ -8,7 +8,7 @@ export type Env = {
   DATABASE: D1Database;
   NOTIFICATION?: DurableObjectNamespace;
   KV: KVNamespace;
-  /** Private R2 binding for archived ProjectData tool payload JSON. */
+  /** Private R2 binding for archived tool payload JSON and terminal recovery bundles. */
   PROJECT_DATA_ARCHIVE_R2?: R2Bucket;
   VM_AGENT_CONTAINER?: DurableObjectNamespace<VmAgentContainer>;
   NODE_HEARTBEAT_STALE_SECONDS?: string;
@@ -22,6 +22,31 @@ export type Env = {
   DO_SUMMARY_SYNC_DEBOUNCE_MS?: string;
   /** Cap on sessions mirrored into the D1 session index per project, per sync. */
   SESSION_INDEX_MAX_ROWS?: string;
+  PROJECT_DATA_ARCHIVE_SHARDING_ENABLED?: string;
+  PROJECT_DATA_ARCHIVE_MAX_CANDIDATES_PER_SWEEP?: string;
+  PROJECT_DATA_ARCHIVE_MAX_CANDIDATES_HARD_LIMIT?: string;
+  PROJECT_DATA_ARCHIVE_MAX_CHUNKS_PER_SWEEP?: string;
+  PROJECT_DATA_ARCHIVE_MAX_CHUNKS_HARD_LIMIT?: string;
+  PROJECT_DATA_ARCHIVE_CHUNK_MAX_ROWS?: string;
+  PROJECT_DATA_ARCHIVE_CHUNK_MAX_ROWS_HARD_LIMIT?: string;
+  PROJECT_DATA_ARCHIVE_CHUNK_MAX_BYTES?: string;
+  PROJECT_DATA_ARCHIVE_LEASE_MS?: string;
+  PROJECT_DATA_ARCHIVE_TERMINAL_GRACE_MS?: string;
+  PROJECT_DATA_ARCHIVE_RETRY_BASE_MS?: string;
+  PROJECT_DATA_ARCHIVE_RETRY_MAX_MS?: string;
+  PROJECT_DATA_ARCHIVE_CIRCUIT_FAILURES?: string;
+  PROJECT_DATA_ARCHIVE_CIRCUIT_OPEN_MS?: string;
+  PROJECT_DATA_ARCHIVE_SHARD_COUNT?: string;
+  PROJECT_DATA_ARCHIVE_SHARD_COUNT_HARD_LIMIT?: string;
+  PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS?: string;
+  PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS_HARD_LIMIT?: string;
+  PROJECT_DATA_ARCHIVE_SWEEP_MAX_WALL_MS?: string;
+  PROJECT_DATA_ARCHIVE_SWEEP_MAX_IO_OPS?: string;
+  PROJECT_DATA_ARCHIVE_COPY_EXPANSION_RATIO?: string;
+  PROJECT_DATA_ARCHIVE_ERROR_MAX_CHARS?: string;
+  PROJECT_DATA_ARCHIVE_R2_PREFIX?: string;
+  PROJECT_DATA_ARCHIVE_ROOT_COPY_MAX_RATIO?: string;
+  PROJECT_DATA_ARCHIVE_ROUTING_VERSION?: string;
   /** Active chat-session candidates reconciled per ProjectData sweep RPC. */
   TERMINAL_SESSION_RECONCILE_BATCH_SIZE?: string;
   /** Retry delay for live/snapshot-protected or temporarily ineligible candidates. */

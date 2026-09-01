@@ -66,6 +66,10 @@ export type ArchivedToolPayloadListResult = {
   payloads: ArchivedToolPayloadItem[];
   count: number;
   hasMore: boolean;
+  /** Cross-owner queries are a bounded partial plane; exact session queries are complete. */
+  partial?: boolean;
+  ownersQueried?: number;
+  partialReason?: string | null;
 };
 
 export type ToolPayloadArchiveCandidate = {
@@ -578,7 +582,9 @@ export async function readArchivedMessageToolContent(
 
 function selectArchivedToolPayloadRows(
   sql: SqlStorage,
-  query: ArchivedToolPayloadQuery
+  query: ArchivedToolPayloadQuery,
+  authoritativeOwnerName?: string,
+  excludeArchiveSourceIntents = false
 ): { rows: ArchivedToolPayloadRow[]; hasMore: boolean } {
   const conditions: string[] = [];
   const params: unknown[] = [];
@@ -597,6 +603,24 @@ function selectArchivedToolPayloadRows(
   if (typeof query.endTime === 'number') {
     conditions.push('message_created_at <= ?');
     params.push(query.endTime);
+  }
+  if (authoritativeOwnerName) {
+    conditions.push(
+      `EXISTS (
+        SELECT 1 FROM project_data_archive_targets target
+         WHERE target.session_id = tool_payload_archives.session_id
+           AND target.owner_name = ? AND target.state = 'authoritative'
+      )`
+    );
+    params.push(authoritativeOwnerName);
+  }
+  if (excludeArchiveSourceIntents) {
+    conditions.push(
+      `NOT EXISTS (
+        SELECT 1 FROM project_data_archive_source_intents source
+         WHERE source.session_id = tool_payload_archives.session_id
+      )`
+    );
   }
 
   const where = conditions.length > 0 ? conditions.join(' AND ') : '1 = 1';
@@ -656,6 +680,71 @@ export async function listArchivedToolPayloads(
     });
   }
 
+  return {
+    projectId,
+    payloads,
+    count: payloads.length,
+    hasMore: selected.hasMore,
+  };
+}
+
+export async function listArchiveOwnerToolPayloads(
+  sql: SqlStorage,
+  env: Env,
+  projectId: string,
+  ownerName: string,
+  query: ArchivedToolPayloadQuery
+): Promise<ArchivedToolPayloadListResult> {
+  const selected = selectArchivedToolPayloadRows(sql, query, ownerName);
+  const payloads: ArchivedToolPayloadItem[] = [];
+  for (const row of selected.rows) {
+    const archive = await readArchiveContent(env, row);
+    payloads.push({
+      messageId: row.messageId,
+      sessionId: row.sessionId,
+      messageCreatedAt: row.messageCreatedAt,
+      messageSequence: row.messageSequence,
+      archivedAt: row.archivedAt,
+      contentBytes: row.contentBytes,
+      toolMetadataBytes: row.toolMetadataBytes,
+      archiveVersion: row.archiveVersion,
+      available: Boolean(archive.content),
+      content: archive.content,
+      ...(archive.reason ? { unavailableReason: archive.reason } : {}),
+    });
+  }
+  return {
+    projectId,
+    payloads,
+    count: payloads.length,
+    hasMore: selected.hasMore,
+  };
+}
+
+export async function listRootAuthoritativeToolPayloads(
+  sql: SqlStorage,
+  env: Env,
+  projectId: string,
+  query: ArchivedToolPayloadQuery
+): Promise<ArchivedToolPayloadListResult> {
+  const selected = selectArchivedToolPayloadRows(sql, query, undefined, true);
+  const payloads: ArchivedToolPayloadItem[] = [];
+  for (const row of selected.rows) {
+    const archive = await readArchiveContent(env, row);
+    payloads.push({
+      messageId: row.messageId,
+      sessionId: row.sessionId,
+      messageCreatedAt: row.messageCreatedAt,
+      messageSequence: row.messageSequence,
+      archivedAt: row.archivedAt,
+      contentBytes: row.contentBytes,
+      toolMetadataBytes: row.toolMetadataBytes,
+      archiveVersion: row.archiveVersion,
+      available: Boolean(archive.content),
+      content: archive.content,
+      ...(archive.reason ? { unavailableReason: archive.reason } : {}),
+    });
+  }
   return {
     projectId,
     payloads,

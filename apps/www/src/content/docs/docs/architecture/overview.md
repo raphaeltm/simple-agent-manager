@@ -161,11 +161,11 @@ Summary data flows back from DOs to D1 via debounced sync (e.g., `last_activity_
 
 ### Other Bindings
 
-| Service        | Binding | Purpose                                                                                                                                          |
-| -------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **KV**         | `KV`    | Auth sessions, bootstrap tokens, boot logs, MCP tokens                                                                                           |
-| **R2**         | `R2`    | VM Agent binaries, private diagnostic artifacts, session snapshots, compose image artifacts, TTS audio cache, ProjectData archived tool payloads |
-| **Workers AI** | `AI`    | Idea title generation, transcription, TTS, context summarization                                                                                 |
+| Service        | Binding                         | Purpose                                                                                                                                                                                                                                                        |
+| -------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **KV**         | `KV`                            | Auth sessions, bootstrap tokens, boot logs, MCP tokens                                                                                                                                                                                                         |
+| **R2**         | `R2`, `PROJECT_DATA_ARCHIVE_R2` | VM Agent binaries, private diagnostic artifacts, session snapshots, compose image artifacts, TTS audio cache, and ProjectData archived tool payloads use `R2`; immutable terminal-archive recovery bundles use the dedicated `PROJECT_DATA_ARCHIVE_R2` binding |
+| **Workers AI** | `AI`                            | Idea title generation, transcription, TTS, context summarization                                                                                                                                                                                               |
 
 ### VM diagnostic incident flow
 
@@ -254,7 +254,7 @@ Knowledge observations do **not** currently carry their `observationId` in this 
 
 ### ProjectData DO
 
-Each project gets one `ProjectData` Durable Object instance, accessed via `env.PROJECT_DATA.idFromName(projectId)`.
+Each project has one authoritative root `ProjectData` Durable Object, accessed via `env.PROJECT_DATA.idFromName(projectId)`. When the disabled-by-default terminal archive coordinator is explicitly enabled, immutable terminal transcript payloads may also live in a bounded set of packed archive-shard `ProjectData` objects. D1 stores the exact owner, generation, migration, and routing version; ambiguous or transitional locations fail closed.
 Every user-visible chat session has exactly one backing D1 Task. `taskMode` controls autonomous task versus human-controlled conversation lifecycle semantics; it never controls whether the Task exists. D1 `tasks.chat_session_id` and ProjectData `chat_sessions.task_id` form a bidirectional soft link. Because the stores cannot share a transaction, creation and legacy repair are idempotent and retain compatibility readers while reconciliation is in progress.
 
 When a sleeping VM conversation needs a replacement runtime, one D1 transaction conditionally creates the recovery task, records `recovery_source_task_id`, and transfers the unique chat-session binding only while the source task is still non-terminal. Parent-wake validation accepts that linked recovery task as the temporary session owner while continuing to require the original parent and child lineage to remain valid. If the parent terminalizes before runner startup, SAM cancels the handoff and restores the original task/workspace bindings.
@@ -265,12 +265,22 @@ ProjectData stores the durable foundation for project event subscriptions in the
 
 Checkpoint episodes are stored idempotently by ACP session and prompt epoch, including state transitions, attempt/error metadata, and a progress envelope for inspection. Automatic long-turn selection and checkpoint preemption remain disabled. Task agents can explicitly park on a bounded `wait_for_subtasks` subscription: ProjectData reconciles selected same-project task terminal state and enqueues one immutable caller wake through the existing durable prompt-delivery queue. See [Configuration](/docs/reference/configuration/) for the durable-execution settings and rollout flags.
 
-Conversation and message text stays in ProjectData for long-term searchability. Large
-tool-call JSON payloads older than the configured retention window are archived first
-to private, project-scoped R2 objects and only then stripped from the embedded SQLite
-row. Existing tool-content expanders read through the ProjectData service and fall
-back to the archive; MCP agents can retrieve archived payloads by message, session,
-or time range without receiving raw R2 keys.
+Conversation and message text remains in ProjectData-class Durable Objects for
+long-term searchability. The root project owner is authoritative for active sessions
+and all lifecycle metadata. A production-disabled external Worker coordinator can
+copy eligible terminal transcripts into deterministic packed archive owners using
+sub-32 MiB idempotent chunks, per-column SHA-256 verification, a D1 lease/fence
+journal, and immutable private-R2 recovery bundles. Exact reads resolve the D1
+owner/generation and fail closed while a pointer is transitional; archive owners are
+immutable. The root `chat_sessions` anchor, last-message summary, comments, liveness,
+state, ideas, and unrelated metadata remain at the root. ProjectData alarms never
+drive archive migration.
+
+Large tool-call JSON payloads older than the configured retention window are archived
+first to private, project-scoped R2 objects and only then stripped from the embedded
+SQLite row. Existing tool-content expanders read through the ProjectData service and
+fall back to the archive; MCP agents can retrieve archived payloads by message,
+session, or time range without receiving raw R2 keys.
 
 **Embedded SQLite tables:**
 

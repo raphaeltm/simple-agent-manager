@@ -122,7 +122,17 @@ export function materializeAllStopped(
 ): { materialized: number; errors: number; remaining: number } {
   const sessions = sql
     .exec(
-      `SELECT id FROM chat_sessions WHERE status = 'stopped' AND materialized_at IS NULL LIMIT ?`,
+      `SELECT session.id FROM chat_sessions session
+       WHERE session.status = 'stopped' AND session.materialized_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM project_data_archive_source_intents intent
+            WHERE intent.session_id = session.id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM project_data_archive_targets target
+            WHERE target.session_id = session.id
+         )
+       LIMIT ?`,
       limit
     )
     .toArray();
@@ -144,7 +154,16 @@ export function materializeAllStopped(
 
   const remainingRow = sql
     .exec(
-      `SELECT COUNT(*) as count FROM chat_sessions WHERE status = 'stopped' AND materialized_at IS NULL`
+      `SELECT COUNT(*) as count FROM chat_sessions session
+       WHERE session.status = 'stopped' AND session.materialized_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM project_data_archive_source_intents intent
+            WHERE intent.session_id = session.id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM project_data_archive_targets target
+            WHERE target.session_id = session.id
+         )`
     )
     .toArray()[0];
   const remaining = remainingRow ? parseCount(remainingRow, 'materialization.remaining') : 0;

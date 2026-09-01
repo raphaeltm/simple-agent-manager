@@ -22,40 +22,34 @@ describe('ProjectData Durable Object', () => {
   describe('durability foundation', () => {
     it('atomically persists and idempotently rereads accepted prompt intent', async () => {
       const stub = getStub('project-durable-accept');
-      const sessionId = await stub.createSession('workspace-1', 'Durable prompt');
-
-      const first = await stub.acceptPromptDelivery({
-        deliveryId: 'delivery-stable-1',
-        targetSessionId: sessionId,
-        displayContent: 'visible prompt',
-        deliveryContent: 'enriched prompt',
-        senderType: 'human',
-        senderId: 'user-1',
-        messageClass: 'deliver',
-        sourceKind: 'user_followup',
-        ttlMs: 60_000,
-      });
-      const duplicate = await stub.acceptPromptDelivery({
-        deliveryId: 'delivery-stable-1',
-        targetSessionId: sessionId,
-        displayContent: 'visible prompt',
-        deliveryContent: 'enriched prompt',
-        senderType: 'human',
-        senderId: 'user-1',
-        messageClass: 'deliver',
-        sourceKind: 'user_followup',
-        ttlMs: 60_000,
+      await stub.ensureProjectId('project-durable-accept');
+      const observed = await runInDurableObject(stub, async (instance) => {
+        const sessionId = await instance.createSession('workspace-1', 'Durable prompt');
+        const delivery = {
+          deliveryId: 'delivery-stable-1',
+          targetSessionId: sessionId,
+          displayContent: 'visible prompt',
+          deliveryContent: 'enriched prompt',
+          senderType: 'human' as const,
+          senderId: 'user-1',
+          messageClass: 'deliver' as const,
+          sourceKind: 'user_followup' as const,
+          ttlMs: 60_000,
+        };
+        const first = await instance.acceptPromptDelivery(delivery);
+        const duplicate = await instance.acceptPromptDelivery(delivery);
+        const { messages } = await instance.getMessages(sessionId, 10);
+        const snapshot = await instance.getDurableExecutionSnapshot(sessionId);
+        return { first, duplicate, messages, snapshot };
       });
 
-      expect(first.transcriptInserted).toBe(true);
-      expect(duplicate.transcriptInserted).toBe(false);
-      expect(first.message.id).toBe('delivery-stable-1');
-      const { messages } = await stub.getMessages(sessionId, 10);
-      expect(messages).toHaveLength(1);
-      expect(messages[0]).toMatchObject({ role: 'user', content: 'visible prompt' });
-      const snapshot = await stub.getDurableExecutionSnapshot(sessionId);
-      expect(snapshot.deliveries).toHaveLength(1);
-      expect(snapshot.deliveries[0]).toMatchObject({
+      expect(observed.first.transcriptInserted).toBe(true);
+      expect(observed.duplicate.transcriptInserted).toBe(false);
+      expect(observed.first.message.id).toBe('delivery-stable-1');
+      expect(observed.messages).toHaveLength(1);
+      expect(observed.messages[0]).toMatchObject({ role: 'user', content: 'visible prompt' });
+      expect(observed.snapshot.deliveries).toHaveLength(1);
+      expect(observed.snapshot.deliveries[0]).toMatchObject({
         id: 'delivery-stable-1',
         deliveryState: 'queued',
         promptMessageId: 'delivery-stable-1',
@@ -94,27 +88,27 @@ describe('ProjectData Durable Object', () => {
 
     it('lets the durable receipt alarm own terminal expiry instead of the legacy sweep', async () => {
       const stub = getStub('project-durable-alarm-expiry');
-      const sessionId = await stub.createSession('workspace-1', 'Durable alarm expiry');
-      await stub.acceptPromptDelivery({
-        deliveryId: 'delivery-expired-1',
-        targetSessionId: sessionId,
-        displayContent: 'visible prompt',
-        deliveryContent: 'enriched prompt',
-        senderType: 'human',
-        senderId: 'user-1',
-        messageClass: 'deliver',
-        sourceKind: 'agent_mailbox',
-        ttlMs: 60_000,
-      });
-
-      await runInDurableObject(stub, async (instance, state) => {
+      await stub.ensureProjectId('project-durable-alarm-expiry');
+      const snapshot = await runInDurableObject(stub, async (instance, state) => {
+        const sessionId = await instance.createSession('workspace-1', 'Durable alarm expiry');
+        await instance.acceptPromptDelivery({
+          deliveryId: 'delivery-expired-1',
+          targetSessionId: sessionId,
+          displayContent: 'visible prompt',
+          deliveryContent: 'enriched prompt',
+          senderType: 'human',
+          senderId: 'user-1',
+          messageClass: 'deliver',
+          sourceKind: 'agent_mailbox',
+          ttlMs: 60_000,
+        });
         state.storage.sql.exec(
           `UPDATE session_inbox SET expires_at = 0 WHERE id = 'delivery-expired-1'`
         );
         await instance.alarmWithDurablePromptDelivery();
+        return instance.getDurableExecutionSnapshot(sessionId);
       });
 
-      const snapshot = await stub.getDurableExecutionSnapshot(sessionId);
       expect(snapshot.deliveries).toContainEqual(
         expect.objectContaining({
           id: 'delivery-expired-1',

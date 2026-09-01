@@ -156,6 +156,14 @@ function readCandidates(
          AND s.updated_at <= ?
          AND s.materialized_at IS NOT NULL
          AND COALESCE(s.search_index_state, 'complete') != 'grouped_fts_pruned'
+         AND NOT EXISTS (
+           SELECT 1 FROM project_data_archive_source_intents intent
+           WHERE intent.session_id = s.id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM project_data_archive_targets target
+           WHERE target.session_id = s.id
+         )
          AND (? IS NULL OR s.id > ?)
        GROUP BY s.id
        ORDER BY s.id ASC
@@ -189,10 +197,24 @@ function deleteGroupedFtsForSession(
   sessionId: string,
   now: number
 ): {
+  skipped: boolean;
   groupedRowsDeleted: number;
   ftsRowsDeleted: number;
   contentBytes: number;
 } {
+  const archivePlacement = sql
+    .exec(
+      `SELECT 1 AS fenced FROM project_data_archive_source_intents WHERE session_id = ?
+       UNION ALL
+       SELECT 1 AS fenced FROM project_data_archive_targets WHERE session_id = ?
+       LIMIT 1`,
+      sessionId,
+      sessionId
+    )
+    .toArray()[0];
+  if (archivePlacement) {
+    return { skipped: true, groupedRowsDeleted: 0, ftsRowsDeleted: 0, contentBytes: 0 };
+  }
   const rows = sql
     .exec(
       `SELECT rowid, content, length(CAST(content AS BLOB)) AS content_bytes
@@ -239,7 +261,7 @@ function deleteGroupedFtsForSession(
     sessionId
   );
 
-  return { groupedRowsDeleted, ftsRowsDeleted, contentBytes };
+  return { skipped: false, groupedRowsDeleted, ftsRowsDeleted, contentBytes };
 }
 
 function hasRecentOverloadSignal(
@@ -369,6 +391,11 @@ export async function runProjectDataGroupedFtsCleanup(
     }
 
     const deleted = deleteGroupedFtsForSession(sql, candidate.sessionId, now);
+    if (deleted.skipped) {
+      lastProcessedSessionId = candidate.sessionId;
+      shouldContinue = true;
+      continue;
+    }
     groupedRowsDeleted += deleted.groupedRowsDeleted;
     ftsRowsDeleted += deleted.ftsRowsDeleted;
     originalContentBytes += deleted.contentBytes;

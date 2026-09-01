@@ -24,6 +24,7 @@ import {
   isHourlyPlatformMaintenanceCron,
   scheduleHourlyPlatformMaintenance,
 } from './platform-feedback-hourly';
+import { runProjectDataArchiveShardingSweep } from './project-data-archive-sharding';
 import { runProviderOrphanReconciliation } from './provider-orphan-reconciliation';
 import { runSessionSleepSweep } from './session-sleep';
 import { runSessionTaskReconciliation } from './session-task-reconciliation';
@@ -153,6 +154,11 @@ export async function scheduled(
   const terminalSessionLedger = await sweeps.isolate('terminal_session_ledger_reconciliation', () =>
     runTerminalSessionLedgerReconciliation(env)
   );
+  // Explicit external coordinator. The sweep returns immediately unless the
+  // archive bridge's exact opt-in flag is true; ProjectData alarms never call it.
+  const projectDataArchive = await sweeps.isolate('project_data_archive_sharding', () =>
+    runProjectDataArchiveShardingSweep(env)
+  );
   const sessionSleep = await sweeps.isolate('session_sleep', () =>
     runSessionSleepSweep(env, new Date(), ctx)
   );
@@ -270,6 +276,12 @@ export async function scheduled(
     terminalSessionSummarySkipped: terminalSessionLedger?.summarySkipped,
     terminalSessionSummaryErrors: terminalSessionLedger?.summaryErrors,
     terminalSessionSummaryRemaining: terminalSessionLedger?.remainingCandidateSummaries,
+    projectDataArchiveEnabled: projectDataArchive?.enabled,
+    projectDataArchiveSelected: projectDataArchive?.selected,
+    projectDataArchiveProgressed: projectDataArchive?.progressed,
+    projectDataArchiveArchived: projectDataArchive?.archived,
+    projectDataArchiveFailed: projectDataArchive?.failed,
+    projectDataArchiveFrozen: projectDataArchive?.frozen,
     sessionSleepSelected: sessionSleep?.selected,
     sessionSleepReconciled: sessionSleep?.reconciled,
     sessionSleepClaimed: sessionSleep?.claimed,

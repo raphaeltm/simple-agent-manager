@@ -136,7 +136,10 @@ function createD1State() {
 
 function createD1Database(
   state: ReturnType<typeof createD1State>,
-  options: { onFailureStatusRead?: (task: TaskRow) => void } = {}
+  options: {
+    onFailureStatusRead?: (task: TaskRow) => void;
+    recoveryAuthorityAllowed?: boolean;
+  } = {}
 ) {
   return {
     prepare: vi.fn((sql: string) => ({
@@ -165,6 +168,9 @@ function createD1Database(
             const taskId = String(params[2]);
             const task = state.tasks.get(taskId);
             if (!task || task.status !== 'delegated') {
+              return { success: true, meta: { changes: 0 } };
+            }
+            if (params[3] !== null && options.recoveryAuthorityAllowed === false) {
               return { success: true, meta: { changes: 0 } };
             }
             task.status = 'in_progress';
@@ -281,7 +287,10 @@ function makeState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState {
 
 function createContext(
   dbState = createD1State(),
-  options: { onFailureStatusRead?: (task: TaskRow) => void } = {}
+  options: {
+    onFailureStatusRead?: (task: TaskRow) => void;
+    recoveryAuthorityAllowed?: boolean;
+  } = {}
 ) {
   const storageWrites: TaskRunnerState[] = [];
   const database = createD1Database(dbState, options);
@@ -380,6 +389,45 @@ describe('transitionToInProgress', () => {
     expect(state.currentStep).toBe('running');
     expect(state.completed).toBe(true);
     expect(storageWrites.at(-1)).toMatchObject({ currentStep: 'running', completed: true });
+  });
+
+  it('does not advance through the atomic transition after recovery location authority is revoked', async () => {
+    const dbState = createD1State();
+    const { rc, storageWrites } = createContext(dbState, {
+      recoveryAuthorityAllowed: false,
+    });
+    seedTask(dbState);
+    const base = makeState();
+    const state = makeState({
+      config: {
+        ...base.config,
+        recoverySourceTaskId: 'source-task-1',
+        resumeSnapshotChatSessionId: 'chat-session-1',
+      },
+    });
+
+    await transitionToInProgress(state, rc);
+
+    expect(dbState.tasks.get('task-1')).toMatchObject({
+      status: 'failed',
+      execution_step: null,
+    });
+    expect(recordTaskLifecycleEventBestEffortMock).not.toHaveBeenCalledWith(
+      rc.env,
+      expect.objectContaining({ status: 'in_progress' })
+    );
+    expect(restoreSessionRecoveryHandoffMock).toHaveBeenCalledWith(
+      rc.env.DATABASE,
+      'task-1',
+      'chat-session-1'
+    );
+    expect(storageWrites.at(-1)).toMatchObject({ completed: true });
+    const transitionSql = vi
+      .mocked(rc.env.DATABASE.prepare)
+      .mock.calls.map(([sql]) => sql)
+      .find((sql) => sql.includes("SET status = 'in_progress'"));
+    expect(transitionSql).toContain('project_data_session_locations');
+    expect(transitionSql).toContain("location.state = 'root'");
   });
 
   it('broadcasts the terminal wake state when a recovery task goes in_progress', async () => {

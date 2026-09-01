@@ -1,4 +1,5 @@
 import { log } from '../lib/logger';
+import { PROJECT_DATA_ARCHIVE_ROUTING_VERSION } from './project-data-archive-types';
 
 const TERMINAL_TASK_STATUSES_SQL = "'completed', 'failed', 'cancelled'";
 const LIVE_TASK_STATUSES_SQL = "'queued', 'delegated', 'in_progress', 'awaiting_followup'";
@@ -106,6 +107,19 @@ export async function isSessionRecoveryTaskAuthorized(
           AND recovery.chat_session_id = ?
           AND recovery.triggered_by = 'session-recovery'
           AND recovery.status NOT IN (${TERMINAL_TASK_STATUSES_SQL})
+          AND NOT EXISTS (
+            SELECT 1 FROM project_data_session_locations location
+             WHERE location.project_id = recovery.project_id
+               AND location.session_id = recovery.chat_session_id
+               AND NOT (
+                 location.state = 'root'
+                 AND location.owner_kind = 'root'
+                 AND location.owner_name = recovery.project_id
+                 AND location.generation = 0
+                 AND location.migration_id IS NULL
+                 AND location.routing_version = ${PROJECT_DATA_ARCHIVE_ROUTING_VERSION}
+               )
+          )
           AND (
             (recovery.status = 'in_progress' AND snapshot.recovery_status = 'restored')
             OR (

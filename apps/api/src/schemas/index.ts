@@ -131,6 +131,8 @@ export {
   AdminUserRoleSchema,
   AnalyticsForwardSchema,
   CreatePlatformCredentialSchema,
+  ProjectDataArchiveForwardFixSchema,
+  ProjectDataArchiveRehomeSchema,
   ProjectDataStorageEmergencyPurgeSchema,
   ProjectDataStorageReliefMeasureSchema,
   UpdatePlatformCredentialSchema,

@@ -1661,6 +1661,138 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '043-projectdata-terminal-archive-sharding',
+    run: (sql) => {
+      // Additive-only archive placement bridge. The root chat_sessions row stays
+      // authoritative; only transcript payload rows may be reclaimed after the
+      // target is sealed and both D1 and this local intent are revalidated.
+      const sessionColumns = sql.exec('PRAGMA table_info(chat_sessions)').toArray();
+      if (!sessionColumns.some((column) => column.name === 'last_message_at')) {
+        sql.exec('ALTER TABLE chat_sessions ADD COLUMN last_message_at INTEGER');
+      }
+      const verifiedSessionColumns = sql.exec('PRAGMA table_info(chat_sessions)').toArray();
+      if (!verifiedSessionColumns.some((column) => column.name === 'last_message_at')) {
+        throw new Error('ProjectData archive migration requires chat_sessions.last_message_at');
+      }
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_data_archive_source_intents (
+          session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id),
+          project_id TEXT NOT NULL,
+          migration_id TEXT NOT NULL,
+          target_owner_name TEXT NOT NULL,
+          target_generation INTEGER NOT NULL,
+          lease_token TEXT NOT NULL,
+          lease_epoch INTEGER NOT NULL,
+          lease_expires_at INTEGER NOT NULL,
+          terminal_version TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN ('migrating', 'source_deleted', 'frozen')),
+          aggregate_hash TEXT,
+          manifest_r2_key TEXT,
+          last_message_at INTEGER,
+          source_database_size_before INTEGER NOT NULL,
+          source_database_size_after INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(migration_id),
+          UNIQUE(session_id, migration_id, lease_epoch)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_data_archive_source_intents_state
+        ON project_data_archive_source_intents(state, lease_expires_at, session_id)
+      `);
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_data_archive_targets (
+          session_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          migration_id TEXT NOT NULL,
+          owner_name TEXT NOT NULL,
+          generation INTEGER NOT NULL,
+          state TEXT NOT NULL CHECK (state IN ('copying', 'sealing', 'sealed', 'authoritative', 'replaced', 'frozen')),
+          terminal_version TEXT NOT NULL,
+          lease_token TEXT NOT NULL,
+          lease_epoch INTEGER NOT NULL,
+          lease_expires_at INTEGER NOT NULL,
+          aggregate_hash TEXT,
+          manifest_r2_key TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(migration_id),
+          UNIQUE(project_id, session_id, owner_name, generation)
+        )
+      `);
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_data_archive_chunks (
+          migration_id TEXT NOT NULL,
+          session_id TEXT NOT NULL,
+          table_name TEXT NOT NULL CHECK (table_name IN ('chat_messages', 'chat_messages_grouped', 'tool_payload_archives')),
+          chunk_index INTEGER NOT NULL,
+          row_count INTEGER NOT NULL,
+          canonical_bytes INTEGER NOT NULL,
+          canonical_hash TEXT NOT NULL,
+          first_row_key TEXT,
+          last_row_key TEXT,
+          r2_key TEXT NOT NULL,
+          committed_at INTEGER NOT NULL,
+          verified_at INTEGER,
+          PRIMARY KEY (migration_id, table_name, chunk_index)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_data_archive_chunks_session
+        ON project_data_archive_chunks(session_id, table_name, chunk_index)
+      `);
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_data_archive_rehome_intents (
+          session_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          migration_id TEXT NOT NULL,
+          source_owner_name TEXT NOT NULL,
+          source_generation INTEGER NOT NULL,
+          target_owner_name TEXT NOT NULL,
+          target_generation INTEGER NOT NULL,
+          lease_token TEXT NOT NULL,
+          lease_epoch INTEGER NOT NULL,
+          lease_expires_at INTEGER NOT NULL,
+          terminal_version TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN ('migrating', 'source_deleted', 'frozen')),
+          aggregate_hash TEXT,
+          manifest_r2_key TEXT,
+          source_database_size_before INTEGER NOT NULL,
+          source_database_size_after INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (session_id, source_generation),
+          UNIQUE(migration_id, source_generation),
+          UNIQUE(session_id, migration_id, lease_epoch)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_data_archive_rehome_intents_state
+        ON project_data_archive_rehome_intents(state, lease_expires_at, session_id)
+      `);
+    },
+  },
+  {
+    name: '044-projectdata-archive-paged-manifests',
+    run: (sql) => {
+      // Manifest construction is itself resumable and bounded. A linked R2
+      // page chain replaces the unbounded all-receipts DO RPC.
+      sql.exec('ALTER TABLE project_data_archive_targets ADD COLUMN manifest_cursor_table TEXT');
+      sql.exec(
+        'ALTER TABLE project_data_archive_targets ADD COLUMN manifest_cursor_chunk_index INTEGER'
+      );
+      sql.exec(
+        'ALTER TABLE project_data_archive_targets ADD COLUMN manifest_page_count INTEGER NOT NULL DEFAULT 0'
+      );
+      sql.exec(
+        'ALTER TABLE project_data_archive_targets ADD COLUMN manifest_entry_count INTEGER NOT NULL DEFAULT 0'
+      );
+      sql.exec('ALTER TABLE project_data_archive_targets ADD COLUMN manifest_chain_hash TEXT');
+      sql.exec('ALTER TABLE project_data_archive_targets ADD COLUMN manifest_head_r2_key TEXT');
+    },
+  },
 ];
 
 /**

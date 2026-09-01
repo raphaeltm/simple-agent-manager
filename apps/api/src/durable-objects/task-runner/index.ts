@@ -49,6 +49,7 @@ import {
   isSessionRecoveryTaskAuthorized,
   SessionRecoveryAuthorityRevokedError,
 } from '../../services/session-recovery-authority';
+import { isProjectDataSessionWakeAllowed } from '../../services/session-snapshot-recovery-lifecycle';
 import { handleAgentSession } from './agent-session-step';
 import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
 import { handleNodeAgentReady, handleNodeProvisioning, handleNodeSelection } from './node-steps';
@@ -444,6 +445,12 @@ export class TaskRunner extends DurableObject<Env> {
   private async hasRecoveryAuthority(input: StartTaskInput | TaskRunnerState): Promise<boolean> {
     const sourceTaskId = input.config.recoverySourceTaskId ?? null;
     const chatSessionId = input.config.resumeSnapshotChatSessionId ?? null;
+    if (
+      chatSessionId &&
+      !(await isProjectDataSessionWakeAllowed(this.env.DATABASE, input.projectId, chatSessionId))
+    ) {
+      return false;
+    }
     // A human follow-up may recover a completed conversation without a live
     // parent guard. Only runners created for a guarded orchestration wake carry
     // recoverySourceTaskId and require revocable authorization.

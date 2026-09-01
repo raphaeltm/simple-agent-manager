@@ -93,7 +93,12 @@ function seedSnapshot(
 
 beforeEach(() => {
   sqlite = new Database(':memory:');
-  createSchemaTables(sqlite, [schema.sessionSnapshots, schema.tasks, schema.workspaces]);
+  createSchemaTables(sqlite, [
+    schema.sessionSnapshots,
+    schema.tasks,
+    schema.workspaces,
+    schema.projectDataSessionLocations,
+  ]);
   wakeSessionRpc = vi.fn(
     async (
       _sessionId: string,
@@ -139,6 +144,25 @@ describe('wakeSessionForSnapshotRecovery', () => {
       wakeSessionForSnapshotRecovery(env, PROJECT_ID, CHAT_SESSION_ID, WORKSPACE_ID, TASK_ID)
     ).resolves.toBe(false);
 
+    expect(wakeSessionRpc).not.toHaveBeenCalled();
+  });
+
+  it('does not allow stopped-session wake while its ProjectData owner is migrating', async () => {
+    seedWorkspace();
+    seedRecoveryTask();
+    seedSnapshot();
+    sqlite
+      .prepare(
+        `INSERT INTO project_data_session_locations
+         (project_id, session_id, state, owner_kind, owner_name, generation,
+          migration_id, routing_version, updated_at)
+         VALUES (?, ?, 'migrating', 'root', ?, 0, 'migration-1', 1, ?)`
+      )
+      .run(PROJECT_ID, CHAT_SESSION_ID, PROJECT_ID, NOW.getTime());
+
+    await expect(
+      wakeSessionForSnapshotRecovery(env, PROJECT_ID, CHAT_SESSION_ID, WORKSPACE_ID, TASK_ID)
+    ).resolves.toBe(false);
     expect(wakeSessionRpc).not.toHaveBeenCalled();
   });
 

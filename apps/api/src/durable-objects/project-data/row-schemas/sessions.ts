@@ -20,6 +20,7 @@ const ChatSessionListRowSchema = v.object({
   created_at: v.number(),
   updated_at: v.number(),
   agent_completed_at: v.nullable(v.number()),
+  last_message_at: v.optional(v.nullable(v.number())),
   // Optional: from LEFT JOIN idle_cleanup_schedule
   cleanup_at: v.optional(v.nullable(v.number())),
 });
@@ -42,7 +43,7 @@ export function parseChatSessionListRow(row: unknown): Record<string, unknown> {
     endedAt: r.ended_at,
     createdAt: r.created_at,
     agentCompletedAt,
-    lastMessageAt: r.updated_at,
+    lastMessageAt: r.last_message_at ?? r.updated_at,
     isIdle: status === 'active' && agentCompletedAt != null,
     isTerminated: status === 'stopped' || status === 'failed',
     workspaceUrl: null, // populated by addBaseDomain in index.ts

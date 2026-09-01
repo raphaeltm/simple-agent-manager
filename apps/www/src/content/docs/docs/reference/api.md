@@ -397,6 +397,30 @@ Rate-limited to 20 submissions per clock hour per user (`RATE_LIMIT_REPORT_ISSUE
 
 Superadmin only. Runs a platform-error triage sweep immediately instead of waiting for the hourly cron. The feedback project itself is configured from **Admin → Integrations** or the environment fallback; this endpoint remains the manual way to verify automated triage without waiting up to an hour.
 
+## ProjectData Terminal Archive Operations
+
+These mutation endpoints require an approved, authenticated **superadmin** and
+also require `PROJECT_DATA_ARCHIVE_SHARDING_ENABLED=true`. With the production
+default of `false`, they fail closed without changing the journal or routing.
+
+### `POST /api/admin/project-data/archive/migrations/:migrationId/forward-fix`
+
+Recover one frozen journal with `{ "mode": "retry" }`, or rebuild its target
+from the immutable recovery manifest with `{ "mode": "restore_target" }`.
+Both modes validate the exact D1 location, owner, generation, migration, and
+routing version before changing state.
+
+### `POST /api/admin/project-data/archive/projects/:projectId/sessions/:sessionId/rehome`
+
+Repack one authoritative archived session. A validated JSON body with an exact
+configured target is required: `{ "targetOwnerName": "..." }`. Passing the
+project ID requests a capacity-gated copyback to the root owner. To handle a
+rejected root gate in the same request, also pass one explicit configured
+non-root owner as `fallbackTargetOwnerName`; the coordinator never scans owners
+synchronously. A rejected root without that fallback fails closed. The response
+reports `rootCopybackAccepted: false` when it schedules the explicit fallback.
+The coordinator performs the copy asynchronously in bounded, resumable sweeps.
+
 ## Admin Runtime Controls
 
 These endpoints require an approved, authenticated **superadmin**. The switches

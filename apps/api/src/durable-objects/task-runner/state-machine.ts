@@ -6,6 +6,7 @@
  */
 import { log } from '../../lib/logger';
 import { persistError, redactSensitiveData } from '../../services/observability';
+import { PROJECT_DATA_ARCHIVE_ROUTING_VERSION } from '../../services/project-data-archive-types';
 import { recordTaskLifecycleEventBestEffort } from '../../services/project-lifecycle-events';
 import { restoreSessionRecoveryHandoff } from '../../services/session-recovery-authority';
 import {
@@ -196,6 +197,19 @@ export async function transitionToInProgress(
                AND recovery.triggered_by = 'session-recovery'
                AND source.status NOT IN ('completed', 'failed', 'cancelled')
                AND snapshot.recovery_status IN ('waking', 'restored')
+               AND NOT EXISTS (
+                 SELECT 1 FROM project_data_session_locations location
+                  WHERE location.project_id = recovery.project_id
+                    AND location.session_id = recovery.chat_session_id
+                    AND NOT (
+                      location.state = 'root'
+                      AND location.owner_kind = 'root'
+                      AND location.owner_name = recovery.project_id
+                      AND location.generation = 0
+                      AND location.migration_id IS NULL
+                      AND location.routing_version = ${PROJECT_DATA_ARCHIVE_ROUTING_VERSION}
+                    )
+               )
           )
         )`
   )

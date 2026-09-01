@@ -82,11 +82,11 @@ Workflow prompts in `.codex/prompts/` (Codex) and `.claude/commands/` (Claude Co
 
 ## Durable Object Patterns
 
-Per-project data (chat sessions, messages, activity events, and canonical `project_event_*` event-subscription records) is stored in a `ProjectData` Durable Object with embedded SQLite:
+Each project has an authoritative root `ProjectData` Durable Object with embedded SQLite for lifecycle metadata, active transcripts, activity events, and canonical `project_event_*` records. The disabled-by-default external terminal-archive coordinator may store immutable terminal transcript payloads in exact packed `project-data-archive:<projectId>:<shard>` owners; D1 owner/generation routing is authoritative and ambiguity fails closed:
 
-- **Access**: `env.PROJECT_DATA.idFromName(projectId)` → deterministic DO stub
+- **Root access**: `env.PROJECT_DATA.idFromName(projectId)` → deterministic root DO stub; archive owners are resolved only through the ProjectData service's exact D1 location seam
 - **Service layer**: `apps/api/src/services/project-data.ts` — typed wrapper for all DO RPC calls
-- **DO class**: `apps/api/src/durable-objects/project-data.ts` — extends `DurableObject`, constructor runs migrations
+- **DO class**: `apps/api/src/durable-objects/project-data/index.ts` — extends `DurableObject`, constructor runs migrations
 - **Migrations**: `apps/api/src/durable-objects/migrations.ts` — append-only, tracked in `migrations` table
 - **WebSocket**: Hibernatable WebSockets for real-time event streaming
 - **D1 sync**: `scheduleSummarySync()` debounces summary updates to D1
