@@ -7,7 +7,7 @@ SAM should keep Cloudflare Containers enabled, but ordinary dispatched agent wor
 ## Research Findings
 
 - `apps/api/src/services/workspace-runtime.ts` currently treats only user and project cloud credentials as VM-capable. Platform credentials fall through to `zero-config`, which can incorrectly classify hosted/platform-backed work as container-suitable.
-- `apps/api/src/services/placement-resolver.ts` centralizes task-start runtime normalization. It already prevents `zero-config` decisions from forcing Instant execution, preserving VM dispatch unless the runtime decision is explicitly container-backed.
+- `apps/api/src/services/placement-resolver.ts` centralizes task-start runtime normalization. Before this change it only treated explicit container decisions as Instant; no-credential `zero-config` needed to remain a real container fallback while platform-backed decisions moved to VM.
 - `apps/api/src/routes/mcp/dispatch-tool.ts` is the production path that let agents pass `runtime: "cf-container"` over a VM profile.
 - `apps/api/src/routes/mcp/tool-definitions-task-tools.ts` currently describes containers as a fast path with no cloud credential and no VM sizing. That wording encourages expensive container use instead of last-resort use.
 - `apps/api/src/durable-objects/sam-session/tools/dispatch-task.ts` does not expose a runtime override and dispatches through VM placement.
@@ -51,6 +51,7 @@ SAM should keep Cloudflare Containers enabled, but ordinary dispatched agent wor
 - `pnpm --filter @simple-agent-manager/providers build` — passed.
 - `pnpm --filter @simple-agent-manager/cloud-init build` — passed.
 - `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/workspace-runtime.test.ts tests/unit/services/placement-resolver.test.ts tests/unit/routes/mcp.test.ts` — passed, 3 files / 264 tests.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/mcp.test.ts` — passed, 1 file / 241 tests after strengthening MCP guidance assertions.
 - `pnpm --filter @simple-agent-manager/api typecheck` — passed.
 - `pnpm --filter @simple-agent-manager/api lint` — passed.
 - `pnpm --filter @simple-agent-manager/api build` — passed.
