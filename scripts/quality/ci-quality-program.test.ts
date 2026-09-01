@@ -3,6 +3,10 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const ci = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+const e2eSmoke = readFileSync(
+  new URL('../../.github/workflows/e2e-smoke.yml', import.meta.url),
+  'utf8'
+);
 const parsedRootManifest: unknown = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
 );
@@ -139,5 +143,15 @@ describe('deterministic quality-program CI wiring', () => {
         ".github/workflows/ci.yml"
       );
     }
+  });
+
+  it('keeps VM smoke off marketing-site and CI-routing-only pull requests', () => {
+    expect(e2eSmoke).toContain('paths:');
+    expect(e2eSmoke).not.toContain('paths-ignore:');
+    expect(e2eSmoke).toContain("- 'apps/api/**'");
+    expect(e2eSmoke).toContain("- 'packages/vm-agent/**'");
+    expect(e2eSmoke).toContain("- 'scripts/e2e/**'");
+    expect(e2eSmoke).not.toContain("- 'apps/www/**'");
+    expect(e2eSmoke).not.toContain("- '.github/workflows/ci.yml'");
   });
 });

@@ -3,8 +3,16 @@ name: E2E Smoke
 on:
   pull_request:
     branches: [main]
-    paths-ignore:
-      - 'apps/www/**'
+    paths:
+      - 'apps/api/**'
+      - 'packages/vm-agent/**'
+      - 'packages/shared/**'
+      - 'packages/task-runner/**'
+      - 'scripts/e2e/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/e2e-smoke.yml'
 
 permissions:
   contents: read
