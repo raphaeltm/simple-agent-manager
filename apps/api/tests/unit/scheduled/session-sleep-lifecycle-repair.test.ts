@@ -241,12 +241,21 @@ describe('session sleep lifecycle repair', () => {
     ).toBeNull();
   });
 
-  it('repairs a stale stopping row when ProjectData was already stopped by terminal reconciliation', async () => {
+  async function runStaleRepairForProjectDataStatus(projectDataStatus: string | null) {
     mocks.sleepSession.mockResolvedValueOnce(false);
-    mocks.getSession.mockResolvedValueOnce({ status: 'stopped' });
+    mocks.getSession.mockResolvedValueOnce(
+      projectDataStatus === null ? null : { status: projectDataStatus }
+    );
     insertStaleStoppingSnapshot(sqlite);
 
-    const result = await runSessionSleepLifecycleRepair(env, new Date('2026-08-12T01:00:00.000Z'));
+    return runSessionSleepLifecycleRepair(env, new Date('2026-08-12T01:00:00.000Z'));
+  }
+
+  it.each([
+    ['stopped', 'terminal reconciliation stopped it'],
+    ['sleeping', 'ProjectData already slept it'],
+  ])('repairs a stale stopping row when ProjectData is already %s (%s)', async (status) => {
+    const result = await runStaleRepairForProjectDataStatus(status);
 
     expect(result).toMatchObject({
       selected: 1,
@@ -278,56 +287,11 @@ describe('session sleep lifecycle repair', () => {
     ).toEqual(expect.any(String));
   });
 
-  it('repairs a stale stopping row idempotently when ProjectData is already sleeping', async () => {
-    mocks.sleepSession.mockResolvedValueOnce(false);
-    mocks.getSession.mockResolvedValueOnce({ status: 'sleeping' });
-    insertStaleStoppingSnapshot(sqlite);
-
-    const result = await runSessionSleepLifecycleRepair(env, new Date('2026-08-12T01:00:00.000Z'));
-
-    expect(result).toMatchObject({
-      selected: 1,
-      repaired: 1,
-      skipped: 0,
-      projectDataErrors: 0,
-      errors: 0,
-    });
-    expect(sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).get()).toEqual({
-      status: 'sleeping',
-    });
-    expect(
-      sqlite.prepare(`SELECT status FROM agent_sessions WHERE id = 'agent-1'`).pluck().get()
-    ).toBe('sleeping');
-  });
-
-  it('does not repair a stale stopping row when ProjectData status is missing after sleep fails', async () => {
-    mocks.sleepSession.mockResolvedValueOnce(false);
-    mocks.getSession.mockResolvedValueOnce(null);
-    insertStaleStoppingSnapshot(sqlite);
-
-    const result = await runSessionSleepLifecycleRepair(env, new Date('2026-08-12T01:00:00.000Z'));
-
-    expect(result).toMatchObject({
-      selected: 1,
-      repaired: 0,
-      skipped: 0,
-      projectDataErrors: 1,
-      errors: 0,
-    });
-    expect(sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).get()).toEqual({
-      status: 'running',
-    });
-    expect(
-      sqlite.prepare(`SELECT sleep_status FROM session_snapshots WHERE id = 'snapshot-1'`).pluck().get()
-    ).toBe('stopping');
-  });
-
-  it('does not repair a stale stopping row when ProjectData status is unsupported after sleep fails', async () => {
-    mocks.sleepSession.mockResolvedValueOnce(false);
-    mocks.getSession.mockResolvedValueOnce({ status: 'failed' });
-    insertStaleStoppingSnapshot(sqlite);
-
-    const result = await runSessionSleepLifecycleRepair(env, new Date('2026-08-12T01:00:00.000Z'));
+  it.each([
+    [null, 'missing'],
+    ['failed', 'unsupported'],
+  ])('does not repair a stale stopping row when ProjectData status is %s (%s)', async (status) => {
+    const result = await runStaleRepairForProjectDataStatus(status);
 
     expect(result).toMatchObject({
       selected: 1,
