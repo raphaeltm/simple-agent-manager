@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { destroyNodeForCleanup } from '../../../src/scheduled/node-cleanup/shared';
+import { runTerminalNodeLifecycleRepair } from '../../../src/scheduled/terminal-node-lifecycle-repair';
 import { cleanupTerminalTaskResources } from '../../../src/services/task-terminal-cleanup';
 import { cleanupWorkspaceForDeletion } from '../../../src/services/workspace-cleanup';
 import { finalizeWorkspaceLifecycleClosure } from '../../../src/services/workspace-lifecycle-finalizer';
@@ -180,6 +181,9 @@ function seedRestorableSnapshot(
     sleepStatus?: string | null;
     sleepingAt?: string | null;
     recoveryAttempts?: number;
+    sleepClaimedAt?: string | null;
+    sleepStoppingSince?: string | null;
+    updatedAt?: string;
   } = {}
 ): void {
   const chatSessionId = overrides.chatSessionId ?? CHAT_SESSION_ID;
@@ -188,8 +192,8 @@ function seedRestorableSnapshot(
       `INSERT INTO session_snapshots
         (id, project_id, workspace_id, node_id, user_id, chat_session_id, runtime, status,
          degradation, manifest_r2_key, home_r2_key, expires_at, sleeping_at, sleep_status,
-         recovery_attempts, sleep_attempts, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'vm', ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+         sleep_claimed_at, sleep_stopping_since, recovery_attempts, sleep_attempts, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'vm', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
     )
     .run(
       overrides.id ?? `snapshot-${chatSessionId}`,
@@ -205,9 +209,11 @@ function seedRestorableSnapshot(
       overrides.expiresAt ?? iso(7 * 24 * 60 * 60 * 1000),
       overrides.sleepingAt === undefined ? iso(-5 * 60 * 1000) : overrides.sleepingAt,
       overrides.sleepStatus === undefined ? 'sleeping' : overrides.sleepStatus,
+      overrides.sleepClaimedAt ?? null,
+      overrides.sleepStoppingSince ?? null,
       overrides.recoveryAttempts ?? 0,
       iso(-60 * 60 * 1000),
-      iso(-5 * 60 * 1000)
+      overrides.updatedAt ?? iso(-5 * 60 * 1000)
     );
 }
 
@@ -301,7 +307,10 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
     ['snapshot has no sleeping timestamp', { sleepingAt: null }],
     ['snapshot exhausted recovery attempts', { recoveryAttempts: 3 }],
     ['snapshot status is not restorable', { status: 'failed', degradation: 'none' }],
-    ['available snapshot has non-none degradation', { status: 'available', degradation: 'partial' }],
+    [
+      'available snapshot has non-none degradation',
+      { status: 'available', degradation: 'partial' },
+    ],
     ['snapshot belongs to a different project', { projectId: 'project-other' }],
     ['snapshot belongs to a different workspace', { workspaceId: 'workspace-other' }],
   ])('still stops when the %s', async (_name, snapshotOverrides) => {
@@ -366,6 +375,145 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
     expect(result.projectSessionErrors).toBe(1);
     expect(mocks.stopSession).not.toHaveBeenCalled();
     expect(mocks.failSession).not.toHaveBeenCalled();
+  });
+
+  it('can repair active-looking rows on a terminal node without touching sleeping workspaces', async () => {
+    seedNode(NODE_ID, { status: 'deleted' });
+    seedWorkspace({ status: 'running' });
+    seedAgentSession({ status: 'running' });
+    sqlite
+      .prepare(
+        `INSERT INTO compute_usage
+          (id, user_id, workspace_id, node_id, server_type, vcpu_count, credential_source,
+           started_at, created_at)
+         VALUES ('usage-finalizer', ?, ?, ?, 'medium', 4, 'platform', ?, ?)`
+      )
+      .run(USER_ID, WORKSPACE_ID, NODE_ID, iso(-60 * 60 * 1000), iso(-60 * 60 * 1000));
+
+    const result = await finalizeWorkspaceLifecycleClosure(env, {
+      workspaceIds: [WORKSPACE_ID],
+      agentSessionStatus: 'stopped',
+      workspaceStatus: 'stopped',
+      nowIso: NOW_ISO,
+      reason: 'test_terminal_node_repair',
+    });
+
+    expect(result.workspacesTerminalized).toBe(1);
+    expect(result.agentSessionsClosed).toBe(1);
+    expect(result.computeUsageClosed).toBe(1);
+    expect(
+      sqlite.prepare(`SELECT status FROM workspaces WHERE id = ?`).pluck().get(WORKSPACE_ID)
+    ).toBe('stopped');
+    expect(
+      sqlite.prepare(`SELECT status FROM agent_sessions WHERE id = ?`).pluck().get(AGENT_SESSION_ID)
+    ).toBe('stopped');
+    expect(
+      sqlite
+        .prepare(`SELECT ended_at FROM compute_usage WHERE id = 'usage-finalizer'`)
+        .pluck()
+        .get()
+    ).toBe(NOW_ISO);
+
+    const sleepingWorkspaceId = 'workspace-sleeping-terminal-node';
+    seedWorkspace({ id: sleepingWorkspaceId, status: 'sleeping', chatSessionId: 'chat-sleeping' });
+    await finalizeWorkspaceLifecycleClosure(env, {
+      workspaceIds: [sleepingWorkspaceId],
+      workspaceStatus: 'stopped',
+      nowIso: NOW_ISO,
+      reason: 'test_terminal_node_repair',
+    });
+    expect(
+      sqlite.prepare(`SELECT status FROM workspaces WHERE id = ?`).pluck().get(sleepingWorkspaceId)
+    ).toBe('sleeping');
+  });
+
+  it('skips terminal-node repair when a recent in-flight sleep row protects the workspace', async () => {
+    seedNode(undefined, { status: 'stopped' });
+    seedWorkspace({ status: 'running' });
+    seedAgentSession({ status: 'running' });
+    seedRestorableSnapshot({
+      sleepStatus: 'stopping',
+      sleepingAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await runTerminalNodeLifecycleRepair(env);
+
+    expect(result).toMatchObject({
+      selected: 1,
+      skippedProtectedSleep: 1,
+      workspacesTerminalized: 0,
+      agentSessionsClosed: 0,
+    });
+    expect(await loadWorkspace()).toMatchObject({ status: 'running' });
+    expect(mocks.stopSession).not.toHaveBeenCalled();
+  });
+
+  it('terminal-node repair does not treat an old stopping row as protected because the claim was refreshed', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    seedNode(undefined, { status: 'deleted', updatedAt: iso(-60 * 60 * 1000) });
+    seedWorkspace({ status: 'running', updatedAt: iso(-45 * 60 * 1000) });
+    seedAgentSession({ status: 'running' });
+    seedRestorableSnapshot({
+      sleepStatus: 'stopping',
+      sleepingAt: null,
+      sleepClaimedAt: iso(-5 * 60 * 1000),
+      sleepStoppingSince: iso(-60 * 60 * 1000),
+      updatedAt: iso(-5 * 60 * 1000),
+    });
+
+    const result = await runTerminalNodeLifecycleRepair(env);
+
+    expect(result).toMatchObject({
+      selected: 1,
+      skippedProtectedSleep: 0,
+      workspacesTerminalized: 1,
+      agentSessionsClosed: 1,
+    });
+    expect(await loadWorkspace()).toMatchObject({ status: 'stopped' });
+    expect(mocks.stopSession).toHaveBeenCalledWith(env, PROJECT_ID, CHAT_SESSION_ID);
+    vi.useRealTimers();
+  });
+
+  it('repairs an unprotected active workspace on a terminal node through the scheduled repair', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    seedNode(undefined, { status: 'deleted', updatedAt: iso(-60 * 60 * 1000) });
+    seedWorkspace({ status: 'running', updatedAt: iso(-45 * 60 * 1000) });
+    seedAgentSession({ status: 'running' });
+    sqlite
+      .prepare(
+        `INSERT INTO compute_usage
+          (id, user_id, workspace_id, node_id, server_type, vcpu_count, credential_source,
+           started_at, created_at)
+         VALUES ('usage-terminal-repair', ?, ?, ?, 'medium', 4, 'platform', ?, ?)`
+      )
+      .run(USER_ID, WORKSPACE_ID, NODE_ID, iso(-60 * 60 * 1000), iso(-60 * 60 * 1000));
+
+    const result = await runTerminalNodeLifecycleRepair(env);
+
+    expect(result).toMatchObject({
+      selected: 1,
+      skippedProtectedSleep: 0,
+      workspacesTerminalized: 1,
+      agentSessionsClosed: 1,
+      computeUsageClosed: 1,
+      projectSessionsClosed: 1,
+      errors: 0,
+    });
+    expect(await loadWorkspace()).toMatchObject({ status: 'stopped' });
+    expect(
+      sqlite.prepare(`SELECT status FROM agent_sessions WHERE id = ?`).pluck().get(AGENT_SESSION_ID)
+    ).toBe('stopped');
+    expect(
+      sqlite
+        .prepare(`SELECT ended_at FROM compute_usage WHERE id = 'usage-terminal-repair'`)
+        .pluck()
+        .get()
+    ).toBe(NOW_ISO);
+    expect(mocks.stopSession).toHaveBeenCalledWith(env, PROJECT_ID, CHAT_SESSION_ID);
+    vi.useRealTimers();
   });
 });
 

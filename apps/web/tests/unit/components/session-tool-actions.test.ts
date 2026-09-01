@@ -128,7 +128,7 @@ describe('buildSessionToolActions — group assignment', () => {
   it('assigns each tool to the group its builder owns', () => {
     const byId = new Map(buildSessionToolActions(fullInput()).map((a) => [a.id, a.group]));
 
-    for (const id of ['files', 'git', 'workspace', 'timeline', 'comments'] as const) {
+    for (const id of ['files', 'git', 'timeline', 'comments'] as const) {
       expect(byId.get(id)).toBe('workspace');
     }
     for (const id of ['retry', 'fork'] as const) {

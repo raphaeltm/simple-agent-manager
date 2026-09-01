@@ -1335,6 +1335,11 @@ export const workspaces = sqliteTable(
       table.status
     ),
     nodeStatusIdx: index('idx_workspaces_node_status').on(table.nodeId, table.status),
+    statusUpdatedNodeIdx: index('idx_workspaces_status_updated_node').on(
+      table.status,
+      table.updatedAt,
+      table.nodeId
+    ),
     chatSessionIdUnique: uniqueIndex('idx_workspaces_chat_session_id_unique')
       .on(table.chatSessionId)
       .where(sql`chat_session_id IS NOT NULL`),
@@ -1441,6 +1446,7 @@ export const sessionSnapshots = sqliteTable(
     sleepError: text('sleep_error'),
     sleepClaimId: text('sleep_claim_id'),
     sleepClaimedAt: text('sleep_claimed_at'),
+    sleepStoppingSince: text('sleep_stopping_since'),
     snapshotGeneration: text('snapshot_generation'),
     captureGeneration: text('capture_generation'),
     captureError: text('capture_error'),
@@ -1475,6 +1481,10 @@ export const sessionSnapshots = sqliteTable(
     sleepClaimIdx: index('idx_session_snapshots_sleep_claim').on(
       table.sleepStatus,
       table.sleepClaimedAt
+    ),
+    sleepStoppingSinceIdx: index('idx_session_snapshots_sleep_stopping_since').on(
+      table.sleepStatus,
+      table.sleepStoppingSince
     ),
     sleepExpiryIdx: index('idx_session_snapshots_sleep_expiry').on(
       table.sleepStatus,
@@ -2641,6 +2651,14 @@ export const computeUsage = sqliteTable(
     nodeId: text('node_id').notNull(),
     serverType: text('server_type').notNull(),
     vcpuCount: integer('vcpu_count').notNull(),
+    providerInstanceType: text('provider_instance_type'),
+    providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
+    providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
+    providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+    providerInstancePriceDisplay: text('provider_instance_price_display'),
+    providerInstancePriceCurrency: text('provider_instance_price_currency'),
+    providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
+    providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
     credentialSource: text('credential_source').notNull().default('user'),
     startedAt: text('started_at').notNull(),
     /** ISO-8601 timestamp. Null while workspace is still running (open-ended usage record). */

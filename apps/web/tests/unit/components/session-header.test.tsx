@@ -365,9 +365,43 @@ describe('SessionHeader', () => {
   // Workspace / Complete now live in the tool rail, always visible — no disclosure to
   // open first. The mark-complete FLOW (dialog, mutation, error) moved with them to
   // `useSessionTools`; see `tests/unit/components/use-session-tools.test.tsx`.
-  it('shows the Workspace control for active sessions with a workspace', () => {
+  /*
+   * Workspaces are an implementation detail. The `/workspaces/:id` page survives for
+   * debugging, but nothing in the chat should route a user to it — so an active session
+   * with a live workspace must still offer no such control.
+   *
+   * The liveness assertion beside it matters: "the workspace control is absent" is also
+   * satisfied by a header that rendered nothing at all.
+   */
+  it('offers no workspace control, even for an active session with a workspace', () => {
     renderHeader({ sessionState: 'active' });
-    expect(screen.getByLabelText('Open the full workspace view')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Open the full workspace view')).not.toBeInTheDocument();
+    expect(screen.getByLabelText(DETAILS_CONTROL)).toBeInTheDocument();
+  });
+
+  /*
+   * Inside the Details panel the workspace is identity, not a destination: you quote its
+   * name and status when something is wrong, but `/workspaces/:id` is a debugging page
+   * and nothing in the chat should route a user there. The NODE is the link worth having
+   * — it is the machine you would actually go and look at.
+   *
+   * Both halves are asserted together on purpose. "The workspace is not a link" passes
+   * just as well on a panel that rendered nothing, so the node link is the liveness
+   * check; and asserting the node link alone would not notice the workspace regaining an
+   * anchor.
+   */
+  it('names the workspace without linking it, and links the node', () => {
+    renderHeader({ sessionState: 'active' });
+    fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
+
+    const workspaceName = screen.getByText('Test Workspace');
+    expect(workspaceName).toBeInTheDocument();
+    expect(workspaceName.closest('a')).toBeNull();
+    expect(document.querySelector('a[href^="/workspaces/"]')).toBeNull();
+
+    const nodeLink = screen.getByText('test-node').closest('a');
+    expect(nodeLink).not.toBeNull();
+    expect(nodeLink).toHaveAttribute('href', '/nodes/node-1');
   });
 
   it('shows the Complete control when the task is eligible', () => {

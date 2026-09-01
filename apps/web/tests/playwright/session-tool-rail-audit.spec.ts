@@ -183,7 +183,11 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
       if (seededMode) window.localStorage.setItem(storageKey, seededMode);
     },
-    { userId: MOCK_USER.user.id, storageKey: STORAGE_KEY, seededMode: mode ?? '' }
+    {
+      userId: MOCK_USER.user.id,
+      storageKey: STORAGE_KEY,
+      seededMode: mode ?? '',
+    }
   );
 
   const session = makeChatSession(options);
@@ -198,7 +202,7 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     const url = route.request().url();
     const { pathname } = new URL(url);
 
-    if (pathname.includes('/ws') || url.includes('websocket')) {
+    if (pathname.endsWith('/ws') || url.includes('websocket')) {
       await route.abort();
       return;
     }
@@ -259,6 +263,21 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       });
       return;
     }
+    // The workspace mock carries `nodeId: 'node-rail-1'`, so the details panel fetches
+    // this. Without it the request fell through to `{}` and the Node row rendered blank,
+    // which is why the infrastructure block was never visible in any screenshot.
+    if (pathname === '/api/nodes/node-rail-1') {
+      await route.fulfill({
+        json: {
+          id: 'node-rail-1',
+          name: 'rail-node-alpha',
+          healthStatus: 'healthy',
+          cloudProvider: 'hetzner',
+          status: 'running',
+        },
+      });
+      return;
+    }
     if (pathname === '/api/nodes' || pathname === '/api/credentials') {
       await route.fulfill({ json: [] });
       return;
@@ -311,15 +330,35 @@ async function capture(page: Page, name: string) {
   await assertNoClippedOverflow(page);
 }
 
+type MatrixViewport = 'mobile' | 'desktop';
+
+async function assertDetailsInfrastructure(page: Page, viewport: MatrixViewport) {
+  await openChat(page, { state: 'active' });
+  await page.getByTestId('session-tool-details').click();
+  await expect(page.getByText('References')).toBeVisible();
+  await expect(page.getByText('Loading infrastructure details...')).toHaveCount(0);
+
+  const header = page.getByTestId('session-header');
+  await expect(header.getByText('Workspace:')).toBeVisible();
+  await expect(header.getByText('tool-rail')).toBeVisible();
+  await expect(header.locator('a[href*="/workspaces/"]')).toHaveCount(0);
+
+  const nodeLink = header.locator('a[href="/nodes/node-rail-1"]');
+  await expect(nodeLink).toHaveText('rail-node-alpha');
+  await expect(nodeLink).toBeVisible();
+  await nodeLink.scrollIntoViewIfNeeded();
+
+  await capture(page, `details-infrastructure-${viewport}-dark`);
+}
+
 test.describe('Session tool rail — discoverability', () => {
   test('every control is reachable without opening any disclosure', async ({ page }) => {
     await openChat(page, { state: 'active' });
 
-    // This is the whole point of the change: all nine controls on first paint.
+    // This is the whole point of the change: every control on first paint.
     for (const id of [
       'files',
       'git',
-      'workspace',
       'timeline',
       'comments',
       'retry',
@@ -345,7 +384,6 @@ test.describe('Session tool rail — discoverability', () => {
     for (const [id, name] of [
       ['files', 'Browse workspace files'],
       ['git', 'Review uncommitted changes'],
-      ['workspace', 'Open the full workspace view'],
       ['timeline', 'Jump through session history'],
       ['comments', 'Open comment threads on this session'],
       ['retry', 'Retry — re-run this task'],
@@ -392,7 +430,6 @@ test.describe('Session tool rail — discoverability', () => {
 
     await expect(page.getByTestId('session-tool-files')).toHaveCount(0);
     await expect(page.getByTestId('session-tool-git')).toHaveCount(0);
-    await expect(page.getByTestId('session-tool-workspace')).toHaveCount(0);
     // Liveness beside those absences.
     await expect(page.getByTestId('session-tool-timeline')).toBeVisible();
     await expect(page.getByTestId('session-tool-comments')).toBeVisible();
@@ -623,11 +660,220 @@ test.describe('Session tool rail — actions', () => {
     await expect(page.getByRole('dialog', { name: 'Session timeline' })).toBeVisible();
   });
 
-  test('Workspace is a real link to the workspace view', async ({ page }) => {
+  /*
+   * The rail must not offer a route into the workspace view. Workspaces are an
+   * implementation detail — the page survives for debugging, but nothing in the chat
+   * should navigate a user to it.
+   *
+   * Asserting the absence of the old testid alone would pass if the tool were merely
+   * renamed, so this also asserts that NO control in the rail carries a workspace href,
+   * with a liveness check that the rail rendered its other tools at all.
+   */
+  test('the rail offers no route into the workspace view', async ({ page }) => {
     await openChat(page, { state: 'active' });
-    await expect(page.getByTestId('session-tool-workspace')).toHaveAttribute(
-      'href',
-      `/workspaces/${WORKSPACE_ID}`
-    );
+    await expect(page.getByTestId('session-tool-details')).toBeVisible();
+
+    await expect(page.getByTestId('session-tool-workspace')).toHaveCount(0);
+    const railLinks = page.locator('[data-testid="session-tool-rail"] a[href*="/workspaces/"]');
+    await expect(railLinks).toHaveCount(0);
+  });
+
+  test('Details shows the workspace as plain text and the node as the link', async ({ page }) => {
+    await assertDetailsInfrastructure(page, 'mobile');
+  });
+});
+
+/*
+ * ── COMPARISON MATRIX — REMOVE WITH THE REVIEW KNOB ──────────────────────────────────
+ *
+ * Screenshots the collapsed-tab placements side by side, in both themes, at both
+ * viewports, so a placement can be chosen from evidence rather than argument.
+ *
+ * It also carries the assertion the original audit was missing. That audit asserted the
+ * tab was `toBeVisible()`, which it always was — an element half-buried under the
+ * floating header is still "visible" to Playwright. What it never asserted was that the
+ * tab does not OVERLAP the header, which is the actual defect: the shipped `top`
+ * placement anchors the tab 12px down while the header is `absolute top-0` and 150-210px
+ * tall, so they collide on every session.
+ */
+async function tabHeaderOverlap(page: Page): Promise<number> {
+  // Liveness before measurement: a vanished tab has no bounding box, and returning a
+  // sentinel would let `expect(overlap).toBe(0)` pass for a rail that never rendered.
+  await expect(page.getByTestId('session-tool-rail-tab')).toBeVisible();
+  await expect(page.getByTestId('session-header')).toBeVisible();
+  const tab = await page.getByTestId('session-tool-rail-tab').boundingBox();
+  const header = await page.getByTestId('session-header').boundingBox();
+  if (!tab || !header) throw new Error('tab or header has no bounding box');
+  const vertical =
+    Math.min(tab.y + tab.height, header.y + header.height) - Math.max(tab.y, header.y);
+  const horizontal =
+    Math.min(tab.x + tab.width, header.x + header.width) - Math.max(tab.x, header.x);
+  // Vertical overlap alone is the interesting number: the two are both flush right, so
+  // any shared vertical band means they are stacked on the same strip of screen.
+  return vertical > 0 && horizontal > -8 ? Math.round(vertical) : 0;
+}
+
+type MatrixTheme = 'dark' | 'light';
+type RailMatrixMode = NonNullable<MockOptions['mode']>;
+
+async function openMatrixCase(
+  page: Page,
+  theme: MatrixTheme,
+  mode: RailMatrixMode,
+  options: Pick<MockOptions, 'long' | 'manyMessages'> = {}
+) {
+  await seedTheme(page, theme);
+  await openChat(page, { state: 'active', mode, ...options });
+}
+
+async function railBoxShadow(page: Page): Promise<string> {
+  const rail = page.getByTestId('session-tool-rail');
+  await expect(rail).toBeVisible();
+  return rail.evaluate((el) => getComputedStyle(el).boxShadow);
+}
+
+async function expectRailElevation(page: Page, expected: 'raised' | 'flat') {
+  const shadow = await railBoxShadow(page);
+  if (expected === 'raised') {
+    expect(shadow).not.toBe('none');
+    expect(shadow).not.toBe('');
+    return;
+  }
+  expect(shadow).toBe('none');
+}
+
+function registerSharedMatrixCases(theme: MatrixTheme, viewport: MatrixViewport) {
+  const suffix = `${viewport}-${theme}`;
+
+  test('hidden tab clears the header', async ({ page }) => {
+    await openMatrixCase(page, theme, 'hidden');
+    // The `top` anchor was the discriminating control that proved `tabHeaderOverlap`
+    // can detect a collision (it returned >0 for `top`). Now that `lower` is the only
+    // placement, the helper's validity rests on that prior verification.
+    expect(await tabHeaderOverlap(page)).toBe(0);
+    await capture(page, `variant-tab-hidden-${suffix}`);
+  });
+
+  test('icons bar — tab flows into the bar, and does not float', async ({ page }) => {
+    await openMatrixCase(page, theme, 'icons');
+    await expectRailElevation(page, 'flat');
+    await capture(page, `variant-bar-icons-${suffix}`);
+  });
+}
+
+for (const theme of ['dark', 'light'] as const) {
+  test.describe(`Tab placement matrix — mobile / ${theme}`, () => {
+    registerSharedMatrixCases(theme, 'mobile');
+
+    test(`hidden tab clears a TALL header`, async ({ page }) => {
+      await openMatrixCase(page, theme, 'hidden', { long: true });
+      expect(await tabHeaderOverlap(page)).toBe(0);
+      await capture(page, `variant-tab-tallheader-mobile-${theme}`);
+    });
+
+    /*
+     * The header must butt FLUSH against the rail.
+     *
+     * The card's bottom corners are rounded so it reads as a panel hanging from the top.
+     * Beside the rail that curve leaves a lens-shaped gap between the card's rounded
+     * corner and the rail's straight edge. Squaring the right side closes it — the two
+     * edges must be at the same x, and the radius on that corner must be 0.
+     */
+    test(`header meets the rail with no gap and no curve`, async ({ page }) => {
+      await openMatrixCase(page, theme, 'icons');
+
+      const header = (await page.getByTestId('session-header').boundingBox())!;
+      const rail = (await page.getByTestId('session-tool-rail').boundingBox())!;
+      // Flush: header's right edge meets the rail's left edge.
+      expect(Math.abs(header.x + header.width - rail.x)).toBeLessThanOrEqual(1);
+
+      // And square: a rounded corner would still be "flush" by bounding box while
+      // leaving a visible curve, so measure the radius itself.
+      const radius = await page
+        .getByTestId('session-header')
+        .evaluate((el) => getComputedStyle(el).borderBottomRightRadius);
+      expect(radius).toBe('0px');
+
+      await capture(page, `variant-header-flush-mobile-${theme}`);
+    });
+
+    /*
+     * Hidden must give the width back.
+     *
+     * It previously reserved a 26px column for the full height of the view, so the one
+     * mode that exists to reclaim space still took some — and with the tab anchored away
+     * from the top, that column was visibly empty beside the header. The header's right
+     * edge is the observable: collapsed, it must reach the viewport edge.
+     */
+    test(`hidden returns the full width to the conversation`, async ({ page }) => {
+      await openMatrixCase(page, theme, 'icons');
+      const narrowed = (await page.getByTestId('session-header').boundingBox())!;
+
+      await page.getByTestId('session-tool-rail-cycle').click();
+      await expect(page.getByTestId('session-tool-rail')).toHaveAttribute('data-mode', 'labels');
+      await page.getByTestId('session-tool-rail-cycle').click();
+      await expect(page.getByTestId('session-tool-rail-tab')).toBeVisible();
+
+      const collapsed = (await page.getByTestId('session-header').boundingBox())!;
+      const viewport = page.viewportSize()!.width;
+      // Reaches the edge (allowing a sub-pixel rounding margin)...
+      expect(collapsed.x + collapsed.width).toBeGreaterThanOrEqual(viewport - 1);
+      // ...and is genuinely wider than it was with the bar out, so this cannot pass by
+      // the header having been full-width all along.
+      expect(collapsed.width).toBeGreaterThan(narrowed.width);
+      await capture(page, `variant-hidden-fullwidth-mobile-${theme}`);
+    });
+
+    /*
+     * The scroll-to-bottom button is the one control that shares the tab's corner, and it
+     * only exists once the conversation is scrolled up. Every other fixture sits at the
+     * bottom, so without this the two were never on screen together.
+     */
+    test(`tab does not collide with the scroll-to-bottom button`, async ({ page }) => {
+      await openMatrixCase(page, theme, 'hidden', { manyMessages: true });
+      await page.getByTestId('session-tool-rail-tab').waitFor({ state: 'visible' });
+      // Reset the scroller directly — `mouse.wheel` targets whatever is under the cursor,
+      // which in `hidden` mode may be the tab rather than the conversation.
+      await page.evaluate(() => {
+        const scroller = document.querySelector('[data-sam-conversation-scroller="true"]');
+        if (scroller) scroller.scrollTop = 0;
+      });
+      const scrollBtn = page.getByRole('button', { name: 'Scroll to bottom' });
+      await expect(scrollBtn).toBeVisible({ timeout: 10_000 });
+
+      const tab = (await page.getByTestId('session-tool-rail-tab').boundingBox())!;
+      const btn = (await scrollBtn.boundingBox())!;
+      const horizontalGap = tab.x - (btn.x + btn.width);
+      const verticalGap = Math.min(tab.y + tab.height, btn.y + btn.height) - Math.max(tab.y, btn.y);
+      // They may share a vertical band; what must never happen is overlap in BOTH axes.
+      expect(horizontalGap > 0 || verticalGap <= 0).toBe(true);
+      await capture(page, `variant-tab-scrollbutton-mobile-${theme}`);
+    });
+
+    test('labels bar — elevated only where it actually overlays', async ({ page }) => {
+      await openMatrixCase(page, theme, 'labels');
+      await expectRailElevation(page, 'raised');
+      await capture(page, `variant-bar-labels-mobile-${theme}`);
+    });
+  });
+
+  test.describe(`Tab placement matrix — desktop / ${theme}`, () => {
+    test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
+
+    registerSharedMatrixCases(theme, 'desktop');
+
+    test('labels bar — elevated only where it actually overlays', async ({ page }) => {
+      await openMatrixCase(page, theme, 'labels');
+      await expectRailElevation(page, 'flat');
+      await capture(page, `variant-bar-labels-desktop-${theme}`);
+    });
+  });
+}
+
+test.describe('Session Details — desktop', () => {
+  test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
+
+  test('Details shows the workspace as plain text and the node as the link', async ({ page }) => {
+    await assertDetailsInfrastructure(page, 'desktop');
   });
 });

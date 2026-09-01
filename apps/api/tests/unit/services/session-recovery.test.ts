@@ -79,6 +79,66 @@ vi.mock('../../../src/services/task-runner-do', () => ({
   startTaskRunnerDO: startTaskRunnerDOMock,
 }));
 
+vi.mock('../../../src/services/placement-resolver', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/services/placement-resolver')>();
+  return {
+    ...actual,
+    resolveTaskStartPlacement: vi.fn((input) => ({
+      entryPoint: input.entryPoint,
+      taskId: input.taskId,
+      projectId: input.projectId,
+      userId: input.userId,
+      provider: input.explicit.provider ?? 'hetzner',
+      vmLocation: input.explicit.vmLocation ?? 'nbg1',
+      vmSize: input.explicit.vmSize ?? 'small',
+      vmSizeSource: 'workspace',
+      workspaceProfile: input.explicit.workspaceProfile ?? 'lightweight',
+      devcontainerConfigName: input.explicit.devcontainerConfigName ?? null,
+      taskMode: input.explicit.taskMode ?? 'conversation',
+      agentType: input.explicit.agentType ?? null,
+      explicitVmLocation: true,
+      resolvedReservation: { cpuMillis: 2_000, memoryMb: 4096, diskMb: 0 },
+      credentialLookup: {
+        userId: input.userId,
+        projectId: null,
+        provider: input.explicit.provider ?? 'hetzner',
+      },
+      inheritedCredentialAttribution: {
+        userId: input.inheritedCredentialAttribution?.userId ?? input.userId,
+        projectId: input.inheritedCredentialAttribution?.projectId ?? null,
+        source: input.inheritedCredentialAttribution?.source ?? 'user',
+      },
+      runtime: {
+        requestedRuntime: null,
+        decision: null,
+        executionRuntime: 'vm',
+        isInstantRuntime: false,
+        reason: 'vm-only',
+      },
+      capacityPoolSelection: null,
+    })),
+    resolveTaskStartPlacementCredentialAttributionFromPlacement: vi.fn(async (_db, placement) => ({
+      placement,
+      credential: {
+        credentialSource: 'user',
+        providerName: placement.provider ?? 'hetzner',
+      },
+      capacityPoolSelection: null,
+      quotaCredentialSource: 'user',
+      capacityPlacementSnapshot: null,
+      effectiveProvider: placement.provider ?? 'hetzner',
+      credentialAttributionUserId: 'user-1',
+      credentialAttributionProjectId: null,
+      credentialAttributionSource: 'user',
+      credentialAttribution: {
+        userId: 'user-1',
+        projectId: null,
+        source: 'user',
+      },
+    })),
+  };
+});
+
 import {
   ensureSessionRecovery,
   SESSION_RECOVERY_INITIAL_PROMPT,

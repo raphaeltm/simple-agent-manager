@@ -163,7 +163,7 @@ function UserDetail({ userId, onBack }: { userId: string; onBack: () => void }) 
               <thead>
                 <tr className="text-left text-fg-muted border-b border-border-default">
                   <th className="py-2 pr-3 font-medium sam-type-caption">Node</th>
-                  <th className="py-2 pr-3 font-medium sam-type-caption">Size</th>
+                  <th className="py-2 pr-3 font-medium sam-type-caption">Provider instance</th>
                   <th className="py-2 pr-3 font-medium sam-type-caption">vCPUs</th>
                   <th className="py-2 pr-3 font-medium sam-type-caption">Location</th>
                   <th className="py-2 pr-3 font-medium sam-type-caption">Source</th>
@@ -183,7 +183,7 @@ function UserDetail({ userId, onBack }: { userId: string; onBack: () => void }) 
                         {n.nodeId.slice(0, 12)}&hellip;
                       </div>
                     </td>
-                    <td className="py-2 pr-3 sam-type-caption">{n.vmSize}</td>
+                    <td className="py-2 pr-3 sam-type-caption">{n.providerInstanceType ?? `${n.vmSize} compatibility hint`}</td>
                     <td className="py-2 pr-3 tabular-nums sam-type-caption">{n.vcpuCount}</td>
                     <td className="py-2 pr-3 sam-type-caption">{n.vmLocation}</td>
                     <td className="py-2 pr-3 sam-type-caption capitalize">{n.credentialSource}</td>

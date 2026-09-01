@@ -24,6 +24,7 @@ export type PlacementEntryPoint =
   | 'trigger-submit'
   | 'retry-subtask'
   | 'task-run'
+  | 'session-recovery'
   | 'orchestrator-dispatch'
   | 'orchestration-retry';
 

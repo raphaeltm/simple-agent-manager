@@ -123,7 +123,8 @@ describe('compute usage metering pipeline', () => {
     });
 
     it('calculateVcpuHoursForPeriod delegates to node-based aggregation', () => {
-      expect(serviceFile).toContain('calculateNodeVcpuHours(rows, periodStart, periodEnd');
+      expect(serviceFile).toContain('calculateNodeVcpuHours(');
+      expect(serviceFile).toContain('providerInstanceVcpuCount ?? row.vcpuCount');
     });
 
     it('calculateNodeVcpuHours groups rows by node before weighting duration', () => {
@@ -155,6 +156,24 @@ describe('compute usage metering pipeline', () => {
 
     it('workspace creation passes credentialSource to tracking', () => {
       expect(crudFile).toContain('credentialSource');
+    });
+
+    it('fresh-node provisioning starts metering after provider metadata is persisted', () => {
+      const provisioningBlockStart = crudFile.indexOf('if (mustProvisionNode) {');
+      const provisionCall = crudFile.indexOf(
+        'await provisionNode(targetNodeId, c.env)',
+        provisioningBlockStart
+      );
+      const runningCheck = crudFile.indexOf("provisionedNode.status !== 'running'", provisionCall);
+      const trackingCall = crudFile.indexOf(
+        'await startComputeTrackingForNode(innerDb, {',
+        runningCheck
+      );
+
+      expect(provisioningBlockStart).toBeGreaterThanOrEqual(0);
+      expect(provisionCall).toBeGreaterThan(provisioningBlockStart);
+      expect(runningCheck).toBeGreaterThan(provisionCall);
+      expect(trackingCall).toBeGreaterThan(runningCheck);
     });
 
     it('workspace creation wraps metering in try/catch (best-effort)', () => {

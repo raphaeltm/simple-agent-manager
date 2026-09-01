@@ -22,6 +22,7 @@
  * at icon width while the panel renders wider and extends left over the conversation.
  */
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import type { CSSProperties } from 'react';
 
 import {
   isToolGroupStart,
@@ -42,6 +43,12 @@ const RAIL_WIDTH_PX: Record<ToolStripMode, number> = {
 const RAIL_TAB_WIDTH_PX = 26;
 
 /**
+ * Collapsed pull-tab placement: biased below centre so it sits further from the floating
+ * header at its tallest (~73px headroom vs ~36px at centre) and closer to the thumb.
+ */
+const RAIL_TAB_STYLE: CSSProperties = { top: '62%', transform: 'translateY(-50%)' };
+
+/**
  * Horizontal space the conversation must give up.
  *
  * At 375px a 158px labels rail is 42% of the viewport — the prototype audit measured
@@ -51,7 +58,21 @@ const RAIL_TAB_WIDTH_PX = 26;
  * covering the chat is the better trade. On desktop 158/1280 is 12% and pushing is fine.
  */
 export function sessionToolRailGutter(mode: ToolStripMode, isMobile: boolean): number {
-  if (mode === 'hidden') return RAIL_TAB_WIDTH_PX;
+  /*
+   * Hidden reserves NOTHING. It used to reserve `RAIL_TAB_WIDTH_PX`, which meant the one
+   * mode whose entire purpose is giving the space back still took a 26px column off the
+   * conversation for the full height of the view — for a tab occupying a fraction of it.
+   *
+   * With the tab at the top that column looked plausible, because the tab sat in the part
+   * of it the header also occupied. Anchoring the tab lower exposed it: the header ended
+   * 26px short of the viewport with empty space beside it and nothing in that space,
+   * which reads as a broken layout rather than a collapsed rail.
+   *
+   * The tab now overlays instead. Its wrapper is a zero-width flex child pinned to the
+   * right edge, so `right-0` puts the tab's right edge at the viewport edge and it
+   * extends inward over the conversation — the ordinary drawer-handle arrangement.
+   */
+  if (mode === 'hidden') return 0;
   if (mode === 'labels' && isMobile) return RAIL_WIDTH_PX.icons;
   return RAIL_WIDTH_PX[mode];
 }
@@ -137,22 +158,6 @@ function RailAction({
     <span className="min-w-0 truncate text-xs font-medium">{action.label}</span>
   );
 
-  if (action.href) {
-    return (
-      <a
-        href={action.href}
-        aria-label={action.hint}
-        title={action.hint}
-        data-testid={`session-tool-${action.id}`}
-        className={`${className} no-underline`}
-        style={{ color }}
-      >
-        <Icon size={17} className="shrink-0" aria-hidden="true" />
-        {label}
-      </a>
-    );
-  }
-
   return (
     <button
       type="button"
@@ -220,15 +225,17 @@ export function SessionToolRail({
           aria-label={cycleLabel}
           title={cycleLabel}
           data-testid="session-tool-rail-tab"
-          className="absolute top-3 right-0 z-20 flex cursor-pointer flex-col items-center justify-center gap-1 rounded-l-lg border border-r-0 py-3 transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary"
+          className="absolute right-0 z-30 flex cursor-pointer flex-col items-center justify-center gap-1 rounded-l-lg border border-r-0 py-3 transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary"
           style={{
+            ...RAIL_TAB_STYLE,
             width: RAIL_TAB_WIDTH_PX,
             borderColor: 'var(--sam-color-border-default)',
             backgroundColor: 'color-mix(in srgb, var(--sam-color-bg-surface) 92%, transparent)',
             color: 'var(--sam-color-fg-muted)',
-            // Left-cast shadow: the rail hugs the right edge, so the design-system shadow
-            // tokens (all downward-casting) do not apply. Alpha is theme-neutral black.
-            boxShadow: '-2px 0 12px rgba(0,0,0,0.28)',
+            // Collapsed, the tab genuinely floats over the conversation, so it earns an
+            // elevation. Tokenized rather than hardcoded: the previous rgba(0,0,0,0.28)
+            // ignored the theme and rendered as the heaviest edge on a light background.
+            boxShadow: 'var(--sam-shadow-rail-tab)',
           }}
         >
           <ChevronLeft size={13} aria-hidden="true" />
@@ -258,12 +265,31 @@ export function SessionToolRail({
         className="absolute inset-y-0 right-0 z-20 flex flex-col overflow-hidden border-l"
         style={{
           width: RAIL_WIDTH_PX[mode],
-          borderColor: 'var(--sam-chrome-accent-divider)',
+          /*
+           * `--sam-color-border-default`, not `--sam-chrome-accent-divider`. The divider
+           * token is what `RailDivider` uses for the rail's own internal group splits, so
+           * using it here made the chrome/content boundary exactly as strong as a
+           * subdivision inside it. With the icons-mode shadow gone the border is the only
+           * thing separating rail from conversation, and measured against the light
+           * canvas the old pairing came to 1.20:1 — under the 3:1 WCAG 1.4.11 asks of a
+           * component boundary.
+           */
+          borderColor: 'var(--sam-color-border-default)',
+          // Surface, not canvas: `color-mix(bg-canvas 88%, transparent)` composites to
+          // approximately the canvas, leaving the rail with a 1.045:1 value delta in light
+          // mode — invisible without the shadow that used to carry it.
           backgroundColor: overlaying
             ? 'var(--sam-color-bg-surface)'
-            : 'color-mix(in srgb, var(--sam-color-bg-canvas) 88%, transparent)',
+            : 'color-mix(in srgb, var(--sam-color-bg-surface) 92%, transparent)',
           backdropFilter: 'blur(12px)',
-          boxShadow: overlaying ? '-8px 0 32px rgba(0,0,0,0.55)' : '-4px 0 24px rgba(0,0,0,0.34)',
+          /*
+           * An elevation only where one is TRUE. In icons mode — and in labels mode on
+           * desktop — the rail owns a layout slot and PUSHES the conversation; it sits
+           * beside the content, not above it, so a drop shadow was asserting a
+           * relationship that does not exist. The hairline border carries the separation.
+           * Only the mobile labels rail actually floats over the conversation.
+           */
+          boxShadow: overlaying ? 'var(--sam-shadow-rail-overlay)' : 'none',
         }}
       >
         <button
@@ -273,7 +299,19 @@ export function SessionToolRail({
           title={cycleLabel}
           data-testid="session-tool-rail-cycle"
           className={`flex h-8 shrink-0 cursor-pointer items-center gap-1 border-none bg-transparent text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent-primary ${
-            compact ? 'justify-center px-0' : 'justify-between px-2.5'
+            compact
+              ? 'justify-center px-0'
+              : // Tinted ONLY in labels mode, where the segment carries the word "TOOLS"
+                // and reads unambiguously as a section header. In compact mode the label
+                // is suppressed, so a tinted 46x32 box at the head of a vertical list of
+                // icon buttons reads as "selected" instead — the universal meaning of a
+                // tinted first list item. There the hard seam and rounded outer corner
+                // mark the segment on their own.
+                //
+                // A class, not an inline style: inline `backgroundColor` outranks every
+                // class selector, which silently killed `hover:bg-surface-hover` on this
+                // button. The `hover:` variant beats a plain utility on specificity.
+                'justify-between bg-[var(--sam-chrome-accent-active-subtle)] px-2.5'
           }`}
           style={{ borderBottom: '1px solid var(--sam-chrome-accent-active)' }}
         >

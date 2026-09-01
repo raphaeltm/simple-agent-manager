@@ -30,10 +30,22 @@ function seedRecoveryFixture(sqlite: Database.Database): void {
     schema.sessionSnapshots,
     schema.agentProfiles,
     schema.nodes,
+    schema.credentials,
+    schema.capacityPools,
+    schema.capacitySources,
+    schema.capacityPoolCandidates,
   ]);
   sqlite.exec(`
     INSERT INTO users (id, name, email, github_id)
     VALUES ('user-1', 'Test User', 'test@example.com', 'gh-1');
+
+    INSERT INTO credentials
+      (id, user_id, provider, credential_type, credential_kind, is_active,
+       encrypted_token, iv, created_at, updated_at)
+    VALUES
+      ('credential-1', 'user-1', 'hetzner', 'cloud-provider', 'api-key', 1,
+       'encrypted', 'iv', '2026-08-15T00:00:00.000Z',
+       '2026-08-15T00:00:00.000Z');
 
     INSERT INTO nodes
       (id, user_id, name, status, health_status, last_heartbeat_at, vm_size,

@@ -43,6 +43,14 @@ function createDb() {
       cloud_provider TEXT,
       credential_source TEXT,
       node_class TEXT NOT NULL DEFAULT 'managed',
+      provider_instance_type TEXT,
+      provider_instance_vcpu_count INTEGER,
+      provider_instance_memory_mb INTEGER,
+      provider_instance_disk_gb INTEGER,
+      provider_instance_price_display TEXT,
+      provider_instance_price_currency TEXT,
+      provider_instance_price_monthly_cents INTEGER,
+      provider_instance_price_hourly_micros INTEGER,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );

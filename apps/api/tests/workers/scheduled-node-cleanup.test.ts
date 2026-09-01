@@ -778,7 +778,10 @@ describe('runNodeCleanupSweep — vertical slice', () => {
           projectId: PROJECT_ID,
           chatSessionId,
         })
-      ).resolves.toMatchObject({ status: 'waking' });
+      ).resolves.toMatchObject({
+        status: 'unavailable',
+        reason: 'session_recovery_placement_credentials',
+      });
 
       const recoveryTask = await env.DATABASE.prepare(
         `SELECT chat_session_id, recovery_source_task_id, triggered_by
@@ -794,11 +797,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
           recovery_source_task_id: string | null;
           triggered_by: string;
         }>();
-      expect(recoveryTask).toEqual({
-        chat_session_id: chatSessionId,
-        recovery_source_task_id: taskId,
-        triggered_by: 'session-recovery',
-      });
+      expect(recoveryTask).toBeNull();
     });
 
     it.each(['running', 'creating', 'recovery'] as const)(

@@ -5,6 +5,7 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { runSessionSleepSweep } from '../../../src/scheduled/session-sleep';
 import {
+  beginSessionSnapshotStopping,
   cancelScheduledSessionSleep,
   scheduleSessionSnapshotSleep,
 } from '../../../src/services/session-snapshots';
@@ -556,11 +557,86 @@ describe('session sleep sweep', () => {
     expect(
       sqlite
         .prepare(
-          `SELECT sleep_status, sleep_claim_id, sleep_claimed_at
+          `SELECT sleep_status, sleep_claim_id, sleep_claimed_at, sleep_stopping_since
            FROM session_snapshots WHERE id = 'snapshot-prompted'`
         )
         .get()
-    ).toEqual({ sleep_status: null, sleep_claim_id: null, sleep_claimed_at: null });
+    ).toEqual({
+      sleep_status: null,
+      sleep_claim_id: null,
+      sleep_claimed_at: null,
+      sleep_stopping_since: null,
+    });
+  });
+
+  it('clears a prior stopping timestamp when scheduling a new sleep cycle', async () => {
+    addDueSnapshot('snapshot-rescheduled');
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots
+         SET sleep_status = NULL, sleep_after = NULL, sleep_stopping_since = '2026-08-11T00:00:00.000Z'
+         WHERE id = 'snapshot-rescheduled'`
+      )
+      .run();
+    const db = await import('drizzle-orm/d1').then(({ drizzle }) =>
+      drizzle(env.DATABASE, { schema })
+    );
+
+    await scheduleSessionSnapshotSleep(
+      db,
+      env,
+      'snapshot-rescheduled-chat',
+      new Date('2026-08-12T01:00:00.000Z')
+    );
+
+    expect(
+      sqlite
+        .prepare(
+          `SELECT sleep_status, sleep_after, sleep_stopping_since
+             FROM session_snapshots WHERE id = 'snapshot-rescheduled'`
+        )
+        .get()
+    ).toEqual({
+      sleep_status: 'scheduled',
+      sleep_after: '2026-08-12T01:15:00.000Z',
+      sleep_stopping_since: null,
+    });
+  });
+
+  it('preserves an existing stable stopping timestamp when entering stopping again', async () => {
+    addDueSnapshot('snapshot-stable-stopping');
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots
+         SET sleep_status = 'preparing', sleep_after = NULL,
+             sleep_claim_id = 'owner', sleep_claimed_at = '2026-08-12T00:10:00.000Z',
+             sleep_stopping_since = '2026-08-12T00:05:00.000Z'
+         WHERE id = 'snapshot-stable-stopping'`
+      )
+      .run();
+    const db = await import('drizzle-orm/d1').then(({ drizzle }) =>
+      drizzle(env.DATABASE, { schema })
+    );
+
+    await beginSessionSnapshotStopping(
+      db,
+      'snapshot-stable-stopping-chat',
+      'owner',
+      new Date('2026-08-12T01:00:00.000Z')
+    );
+
+    expect(
+      sqlite
+        .prepare(
+          `SELECT sleep_status, sleep_claimed_at, sleep_stopping_since
+             FROM session_snapshots WHERE id = 'snapshot-stable-stopping'`
+        )
+        .get()
+    ).toEqual({
+      sleep_status: 'stopping',
+      sleep_claimed_at: '2026-08-12T01:00:00.000Z',
+      sleep_stopping_since: '2026-08-12T00:05:00.000Z',
+    });
   });
 
   it('rolls a stale stopping claim forward without consuming another attempt', async () => {
@@ -590,5 +666,35 @@ describe('session sleep sweep', () => {
         .prepare(`SELECT sleep_attempts FROM session_snapshots WHERE id = 'snapshot-stopping'`)
         .get()
     ).toEqual({ sleep_attempts: 2 });
+  });
+
+  it('self-heals legacy stopping rows with a stable stopping timestamp on reclaim', async () => {
+    addDueSnapshot('snapshot-legacy-stopping', 2);
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots
+         SET sleep_status = 'stopping', sleep_after = '2026-08-12T00:30:00.000Z',
+             sleep_claim_id = 'dead-owner', sleep_claimed_at = '2026-08-12T00:00:00.000Z',
+             sleep_stopping_since = NULL, updated_at = '2026-08-12T00:05:00.000Z'
+         WHERE id = 'snapshot-legacy-stopping'`
+      )
+      .run();
+    mocks.sleepWorkspaceSession.mockResolvedValue(undefined);
+
+    await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00.000Z'));
+
+    expect(
+      sqlite
+        .prepare(
+          `SELECT sleep_claim_id, sleep_claimed_at, sleep_stopping_since, sleep_attempts
+             FROM session_snapshots WHERE id = 'snapshot-legacy-stopping'`
+        )
+        .get()
+    ).toEqual({
+      sleep_claim_id: expect.any(String),
+      sleep_claimed_at: '2026-08-12T01:00:00.000Z',
+      sleep_stopping_since: '2026-08-12T00:00:00.000Z',
+      sleep_attempts: 2,
+    });
   });
 });

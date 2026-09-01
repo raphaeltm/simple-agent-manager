@@ -325,7 +325,7 @@ describe('terminal session ledger reconciliation', () => {
     expect(await readSessionStatus(projectId, protectedSnapshot.sessionId)).toBe('active');
     expect(await readDeferReason(projectId, liveHead.sessionId)).toBe('live_task_head');
     expect(await readDeferReason(projectId, protectedSnapshot.sessionId)).toBe(
-      'restorable_sleeping_snapshot'
+      'sleep_lifecycle_sleeping'
     );
     expect(first).toMatchObject({
       projectsScanned: 1,
@@ -349,7 +349,7 @@ describe('terminal session ledger reconciliation', () => {
     expect(await readSummaryStatus(projectId, protectedSnapshot.sessionId)).toBe('active');
     expect(await readSummaryDeferReason(projectId, liveHead.sessionId)).toBe('live_task_head');
     expect(await readSummaryDeferReason(projectId, protectedSnapshot.sessionId)).toBe(
-      'restorable_sleeping_snapshot'
+      'sleep_lifecycle_sleeping'
     );
 
     const second = await withReconcileEnv(() =>

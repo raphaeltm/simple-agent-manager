@@ -27,10 +27,12 @@ import {
 import { runProjectDataArchiveSharding } from './project-data-archive-sharding';
 import { runProviderOrphanReconciliation } from './provider-orphan-reconciliation';
 import { runSessionSleepSweep } from './session-sleep';
+import { runSessionSleepLifecycleRepair } from './session-sleep-lifecycle-repair';
 import { runSessionTaskReconciliation } from './session-task-reconciliation';
 import { runSetupSessionSweep } from './setup-session-sweep';
 import { recoverStuckTasks } from './stuck-tasks';
 import { createSweepIsolator } from './sweep-isolation';
+import { runTerminalNodeLifecycleRepair } from './terminal-node-lifecycle-repair';
 import { runTerminalSessionLedgerReconciliation } from './terminal-session-ledger-reconciliation';
 import { runTrialExpireSweep } from './trial-expire';
 import { runTrialRolloverAudit } from './trial-rollover';
@@ -134,7 +136,13 @@ export async function scheduled(
   const migrated = await sweeps.isolate('orphaned_workspace_migration', () =>
     migrateOrphanedWorkspaces(db)
   );
+  const sessionSleepLifecycleRepair = await sweeps.isolate('session_sleep_lifecycle_repair', () =>
+    runSessionSleepLifecycleRepair(env, new Date())
+  );
   const nodeCleanup = await sweeps.isolate('node_cleanup', () => runNodeCleanupSweep(env));
+  const terminalNodeLifecycleRepair = await sweeps.isolate('terminal_node_lifecycle_repair', () =>
+    runTerminalNodeLifecycleRepair(env)
+  );
   const providerOrphans = await sweeps.isolate('provider_orphan_reconciliation', () =>
     runProviderOrphanReconciliation(env)
   );
@@ -203,6 +211,11 @@ export async function scheduled(
     diagnosticIncidentMetadataRepaired: incidentRecovery?.incidentMetadataRepaired,
     provisioningTimedOut: timedOut,
     workspacesMigrated: migrated,
+    sleepLifecycleRepairSelected: sessionSleepLifecycleRepair?.selected,
+    sleepLifecycleRepairRepaired: sessionSleepLifecycleRepair?.repaired,
+    sleepLifecycleRepairSkipped: sessionSleepLifecycleRepair?.skipped,
+    sleepLifecycleRepairProjectDataErrors: sessionSleepLifecycleRepair?.projectDataErrors,
+    sleepLifecycleRepairErrors: sessionSleepLifecycleRepair?.errors,
     staleNodesDestroyed: nodeCleanup?.staleDestroyed,
     lifetimeNodesDestroyed: nodeCleanup?.lifetimeDestroyed,
     lifetimeNodesSkipped: nodeCleanup?.lifetimeSkipped,
@@ -266,6 +279,16 @@ export async function scheduled(
     terminalSessionLedgerDeferred: terminalSessionLedger?.deferred,
     terminalSessionLedgerSkipped: terminalSessionLedger?.skipped,
     terminalSessionLedgerErrors: terminalSessionLedger?.errors,
+    terminalNodeLifecycleRepairSelected: terminalNodeLifecycleRepair?.selected,
+    terminalNodeLifecycleRepairSkippedProtectedSleep:
+      terminalNodeLifecycleRepair?.skippedProtectedSleep,
+    terminalNodeLifecycleRepairWorkspacesTerminalized:
+      terminalNodeLifecycleRepair?.workspacesTerminalized,
+    terminalNodeLifecycleRepairAgentSessionsClosed: terminalNodeLifecycleRepair?.agentSessionsClosed,
+    terminalNodeLifecycleRepairComputeUsageClosed: terminalNodeLifecycleRepair?.computeUsageClosed,
+    terminalNodeLifecycleRepairProjectSessionsClosed:
+      terminalNodeLifecycleRepair?.projectSessionsClosed,
+    terminalNodeLifecycleRepairErrors: terminalNodeLifecycleRepair?.errors,
     terminalSessionLedgerRemainingProjects: terminalSessionLedger?.remainingCandidateProjects,
     terminalSessionSummarySelected: terminalSessionLedger?.summarySelected,
     terminalSessionSummaryStopped: terminalSessionLedger?.summaryStopped,

@@ -13,6 +13,7 @@ interface ImportMetaEnv {
   readonly VITE_WORKSPACE_PORTS_FAILURE_BUDGET?: string;
   readonly VITE_WORKSPACE_PORTS_BACKOFF_JITTER_RATIO?: string;
   readonly VITE_WORKSPACE_PORTS_CIRCUIT_RESET_MS?: string;
+  readonly VITE_SESSION_INFRA_RETRY_DELAYS_MS?: string;
   readonly VITE_PROJECT_PREFETCH_DELAY_MS?: string;
   readonly VITE_BACKGROUND_FETCH_DELAY_MS?: string;
   readonly VITE_CHUNK_LOAD_RETRY_DELAY_MS?: string;

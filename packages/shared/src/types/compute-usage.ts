@@ -12,6 +12,14 @@ export interface ComputeUsageRecord {
   nodeId: string;
   serverType: string;
   vcpuCount: number;
+  providerInstanceType?: string | null;
+  providerInstanceVcpuCount?: number | null;
+  providerInstanceMemoryMb?: number | null;
+  providerInstanceDiskGb?: number | null;
+  providerInstancePriceDisplay?: string | null;
+  providerInstancePriceCurrency?: string | null;
+  providerInstancePriceMonthlyCents?: number | null;
+  providerInstancePriceHourlyMicros?: number | null;
   credentialSource: CredentialSource;
   startedAt: string;
   endedAt: string | null;
@@ -28,6 +36,14 @@ export interface ActiveComputeSession {
   workspaceId: string;
   serverType: string;
   vcpuCount: number;
+  providerInstanceType?: string | null;
+  providerInstanceVcpuCount?: number | null;
+  providerInstanceMemoryMb?: number | null;
+  providerInstanceDiskGb?: number | null;
+  providerInstancePriceDisplay?: string | null;
+  providerInstancePriceCurrency?: string | null;
+  providerInstancePriceMonthlyCents?: number | null;
+  providerInstancePriceHourlyMicros?: number | null;
   startedAt: string;
   credentialSource: CredentialSource;
 }
@@ -92,6 +108,11 @@ export interface NodeUsageRecord {
   name: string;
   vmSize: string;
   vcpuCount: number;
+  providerInstanceType?: string | null;
+  providerInstanceVcpuCount?: number | null;
+  providerInstanceMemoryMb?: number | null;
+  providerInstanceDiskGb?: number | null;
+  providerInstancePriceDisplay?: string | null;
   vmLocation: string;
   cloudProvider: string | null;
   credentialSource: CredentialSource;

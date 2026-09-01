@@ -144,15 +144,6 @@ describe('useSessionTools', () => {
       act(() => result.current.closeReport());
       expect(result.current.reportOpen).toBe(false);
     });
-
-    it('does not invoke a handler for the workspace link', () => {
-      const input = inputFor();
-      const { result } = renderHook(() => useSessionTools(input));
-      act(() => result.current.selectTool('workspace'));
-      // Rendered as an anchor — navigation is the browser's job, not a handler call.
-      expect(input.onOpenFiles).not.toHaveBeenCalled();
-      expect(input.onOpenGit).not.toHaveBeenCalled();
-    });
   });
 
   describe('report gating', () => {

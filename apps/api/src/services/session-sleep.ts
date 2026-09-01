@@ -33,7 +33,7 @@ import {
 import { cleanupTaskRun } from './task-runner';
 import { sleepVmAgentContainer } from './vm-agent-container';
 
-async function finishSleepingWorkspaceComputeCleanup(
+export async function finishSleepingWorkspaceComputeCleanup(
   db: ReturnType<typeof drizzle<typeof schema>>,
   env: Env,
   input: {
@@ -59,7 +59,7 @@ async function finishSleepingWorkspaceComputeCleanup(
   }
 }
 
-async function markWorkspaceNodeWarmIfEmpty(
+export async function markWorkspaceNodeWarmIfEmpty(
   db: ReturnType<typeof drizzle<typeof schema>>,
   env: Env,
   input: {

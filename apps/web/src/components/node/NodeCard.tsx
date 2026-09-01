@@ -15,6 +15,7 @@ import { Plus, Rocket, Server } from 'lucide-react';
 import type { FC } from 'react';
 import { useNavigate } from 'react-router';
 
+import { formatOfferingNumber } from '../../lib/compute-pool-offerings';
 import { formatVmSizeInline, lookupSizeInfo } from '../vm/format-vm-size';
 import { MiniMetricBadge } from './MiniMetricBadge';
 import { NodeWorkspaceMiniCard } from './NodeWorkspaceMiniCard';
@@ -70,6 +71,10 @@ export const NodeCard: FC<NodeCardProps> = ({
   const overflowItems = getNodeActions(node, { onStop, onDelete });
   const sizeLabels = VM_SIZE_LABELS[node.vmSize];
   const sizeInfo = lookupSizeInfo(catalogs, node.cloudProvider, node.vmSize);
+  const providerInstanceRamLabel =
+    node.providerInstanceMemoryMb == null
+      ? null
+      : formatOfferingNumber(node.providerInstanceMemoryMb / 1024, 'GB RAM');
   const locationConfig = VM_LOCATIONS[node.vmLocation];
   const metrics = node.lastMetrics;
   const hasMetrics =
@@ -161,7 +166,28 @@ export const NodeCard: FC<NodeCardProps> = ({
               : 'Unknown'}
           </span>
           <span aria-hidden="true">&middot;</span>
-          {sizeInfo ? (
+          {node.providerInstanceType ? (
+            <>
+              <span className="font-medium text-fg-primary">{node.providerInstanceType}</span>
+              <span aria-hidden="true">&middot;</span>
+              <span>
+                {node.providerInstanceVcpuCount ?? sizeInfo?.vcpu ?? '?'} vCPU
+                {providerInstanceRamLabel ? `, ${providerInstanceRamLabel}` : ''}
+              </span>
+              {node.providerInstanceDiskGb != null && (
+                <>
+                  <span aria-hidden="true">&middot;</span>
+                  <span>{node.providerInstanceDiskGb} GB storage</span>
+                </>
+              )}
+              {node.providerInstancePriceDisplay && (
+                <>
+                  <span aria-hidden="true">&middot;</span>
+                  <span>{node.providerInstancePriceDisplay}</span>
+                </>
+              )}
+            </>
+          ) : sizeInfo ? (
             <>
               <span className="font-medium text-fg-primary">{sizeInfo.type}</span>
               <span aria-hidden="true">&middot;</span>
@@ -175,7 +201,7 @@ export const NodeCard: FC<NodeCardProps> = ({
             </>
           ) : (
             <span aria-label={`Size: ${sizeLabels ? sizeLabels.label : node.vmSize}`}>
-              {formatVmSizeInline(node.vmSize, null)}
+              {formatVmSizeInline(node.vmSize, null)} compatibility hint
             </span>
           )}
           <span aria-hidden="true">&middot;</span>

@@ -88,6 +88,14 @@ export interface Node {
   healthStatus?: NodeHealthStatus;
   vmSize: VMSize;
   vmLocation: VMLocation;
+  providerInstanceType?: string | null;
+  providerInstanceVcpuCount?: number | null;
+  providerInstanceMemoryMb?: number | null;
+  providerInstanceDiskGb?: number | null;
+  providerInstancePriceDisplay?: string | null;
+  providerInstancePriceCurrency?: string | null;
+  providerInstancePriceMonthlyCents?: number | null;
+  providerInstancePriceHourlyMicros?: number | null;
   nodeRole: NodeRole;
   providerInstanceId: string | null;
   ipAddress: string | null;
@@ -113,6 +121,14 @@ export interface NodeResponse {
   cloudProvider?: CredentialProvider | null;
   vmSize: VMSize;
   vmLocation: VMLocation;
+  providerInstanceType?: string | null;
+  providerInstanceVcpuCount?: number | null;
+  providerInstanceMemoryMb?: number | null;
+  providerInstanceDiskGb?: number | null;
+  providerInstancePriceDisplay?: string | null;
+  providerInstancePriceCurrency?: string | null;
+  providerInstancePriceMonthlyCents?: number | null;
+  providerInstancePriceHourlyMicros?: number | null;
   nodeRole: NodeRole;
   /**
    * Ownership/lifecycle class. Optional for backward compatibility; the API always populates it.
