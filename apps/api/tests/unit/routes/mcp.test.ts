@@ -2093,6 +2093,11 @@ describe('MCP Routes', () => {
       expect(dispatchTool.inputSchema.properties.runtime.enum).toEqual(['vm', 'cf-container']);
       expect(dispatchTool.description).toContain('Instant session');
       expect(dispatchTool.description).toContain('last-resort runtime');
+      expect(dispatchTool.description).toContain('VM placement is unavailable/exhausted');
+      expect(dispatchTool.description).toContain('human/profile explicitly asks');
+      expect(dispatchTool.inputSchema.properties.runtime.description).toContain(
+        'human-requested/profile-requested Instant container'
+      );
       expect(dispatchTool.inputSchema.properties.runtime.description).toContain(
         'more expensive Cloudflare Container runtime'
       );
