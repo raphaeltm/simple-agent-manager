@@ -1,4 +1,5 @@
 import {
+  type CredentialSource,
   DEFAULT_VM_LOCATION,
   DEFAULT_VM_SIZE,
   type WorkspaceStatus,
@@ -12,10 +13,15 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { toWorkspaceResponse } from '../../lib/mappers';
 import { ulid } from '../../lib/ulid';
-import { getAuth, getUserId, requireApproved,requireAuth } from '../../middleware/auth';
+import { getAuth, getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
-import { CreateWorkspaceSchema,jsonValidator, UpdateWorkspacePortsPublicSchema, UpdateWorkspaceSchema } from '../../schemas';
+import {
+  CreateWorkspaceSchema,
+  jsonValidator,
+  UpdateWorkspacePortsPublicSchema,
+  UpdateWorkspaceSchema,
+} from '../../schemas';
 import { startComputeTracking } from '../../services/compute-usage';
 import { signPortAccessToken } from '../../services/jwt';
 import { getRuntimeLimits } from '../../services/limits';
@@ -41,6 +47,57 @@ import {
 } from './ports-readiness';
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
+
+async function startComputeTrackingForNode(
+  db: Parameters<typeof startComputeTracking>[0],
+  input: {
+    userId: string;
+    workspaceId: string;
+    nodeId: string;
+    vmSize: string;
+  }
+): Promise<void> {
+  try {
+    const [nodeRow] = await db
+      .select({
+        cloudProvider: schema.nodes.cloudProvider,
+        credentialSource: schema.nodes.credentialSource,
+        providerInstanceType: schema.nodes.providerInstanceType,
+        providerInstanceVcpuCount: schema.nodes.providerInstanceVcpuCount,
+        providerInstanceMemoryMb: schema.nodes.providerInstanceMemoryMb,
+        providerInstanceDiskGb: schema.nodes.providerInstanceDiskGb,
+        providerInstancePriceDisplay: schema.nodes.providerInstancePriceDisplay,
+        providerInstancePriceCurrency: schema.nodes.providerInstancePriceCurrency,
+        providerInstancePriceMonthlyCents: schema.nodes.providerInstancePriceMonthlyCents,
+        providerInstancePriceHourlyMicros: schema.nodes.providerInstancePriceHourlyMicros,
+      })
+      .from(schema.nodes)
+      .where(eq(schema.nodes.id, input.nodeId))
+      .limit(1);
+
+    await startComputeTracking(db, {
+      userId: input.userId,
+      workspaceId: input.workspaceId,
+      nodeId: input.nodeId,
+      vmSize: input.vmSize,
+      cloudProvider: nodeRow?.cloudProvider,
+      providerInstanceType: nodeRow?.providerInstanceType,
+      providerInstanceVcpuCount: nodeRow?.providerInstanceVcpuCount,
+      providerInstanceMemoryMb: nodeRow?.providerInstanceMemoryMb,
+      providerInstanceDiskGb: nodeRow?.providerInstanceDiskGb,
+      providerInstancePriceDisplay: nodeRow?.providerInstancePriceDisplay,
+      providerInstancePriceCurrency: nodeRow?.providerInstancePriceCurrency,
+      providerInstancePriceMonthlyCents: nodeRow?.providerInstancePriceMonthlyCents,
+      providerInstancePriceHourlyMicros: nodeRow?.providerInstancePriceHourlyMicros,
+      credentialSource: (nodeRow?.credentialSource as CredentialSource) ?? 'user',
+    });
+  } catch (err) {
+    log.error('workspace.compute_tracking_start_failed', {
+      workspaceId: input.workspaceId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
 
 // Auth applied per-route (NOT via use('/*', ...)) to prevent middleware leakage
 // to other subrouters (lifecycle, runtime) mounted at the same base path.
@@ -188,359 +245,406 @@ crudRoutes.get('/:id/ports', requireAuth(), requireApproved(), async (c) => {
   return c.json(result);
 });
 
-crudRoutes.patch('/:id/ports-public', requireAuth(), requireApproved(), jsonValidator(UpdateWorkspacePortsPublicSchema), async (c) => {
-  const userId = getUserId(c);
-  const workspaceId = c.req.param('id');
-  const body = c.req.valid('json');
-  const db = drizzle(c.env.DATABASE, { schema });
+crudRoutes.patch(
+  '/:id/ports-public',
+  requireAuth(),
+  requireApproved(),
+  jsonValidator(UpdateWorkspacePortsPublicSchema),
+  async (c) => {
+    const userId = getUserId(c);
+    const workspaceId = c.req.param('id');
+    const body = c.req.valid('json');
+    const db = drizzle(c.env.DATABASE, { schema });
 
-  await getOwnedWorkspace(db, workspaceId, userId);
+    await getOwnedWorkspace(db, workspaceId, userId);
 
-  const [updated] = await db
-    .update(schema.workspaces)
-    .set({
-      portsPublicEnabled: body.enabled,
-      updatedAt: new Date().toISOString(),
-    })
-    .where(and(eq(schema.workspaces.id, workspaceId), eq(schema.workspaces.userId, userId)))
-    .returning();
+    const [updated] = await db
+      .update(schema.workspaces)
+      .set({
+        portsPublicEnabled: body.enabled,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(and(eq(schema.workspaces.id, workspaceId), eq(schema.workspaces.userId, userId)))
+      .returning();
 
-  if (!updated) {
-    throw errors.notFound('Workspace not found');
+    if (!updated) {
+      throw errors.notFound('Workspace not found');
+    }
+
+    return c.json(toWorkspaceResponse(updated, c.env.BASE_DOMAIN));
   }
+);
 
-  return c.json(toWorkspaceResponse(updated, c.env.BASE_DOMAIN));
-});
+crudRoutes.patch(
+  '/:id',
+  requireAuth(),
+  requireApproved(),
+  jsonValidator(UpdateWorkspaceSchema),
+  async (c) => {
+    const userId = getUserId(c);
+    const workspaceId = c.req.param('id');
+    const db = drizzle(c.env.DATABASE, { schema });
+    const body = c.req.valid('json');
 
-crudRoutes.patch('/:id', requireAuth(), requireApproved(), jsonValidator(UpdateWorkspaceSchema), async (c) => {
-  const userId = getUserId(c);
-  const workspaceId = c.req.param('id');
-  const db = drizzle(c.env.DATABASE, { schema });
-  const body = c.req.valid('json');
+    if (!body.displayName?.trim()) {
+      throw errors.badRequest('displayName is required');
+    }
 
-  if (!body.displayName?.trim()) {
-    throw errors.badRequest('displayName is required');
-  }
-
-  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
-  const nodeScopeId = workspace.nodeId ?? workspace.id;
-  const uniqueName = await resolveUniqueWorkspaceDisplayName(
-    db,
-    nodeScopeId,
-    body.displayName,
-    workspace.id
-  );
-
-  await db
-    .update(schema.workspaces)
-    .set({
-      nodeId: nodeScopeId,
-      displayName: uniqueName.displayName,
-      normalizedDisplayName: uniqueName.normalizedDisplayName,
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(schema.workspaces.id, workspace.id));
-
-  const updated = await getOwnedWorkspace(db, workspace.id, userId);
-  return c.json(toWorkspaceResponse(updated, c.env.BASE_DOMAIN));
-});
-
-crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateWorkspaceSchema), async (c) => {
-  const auth = getAuth(c);
-  const userId = auth.user.id;
-  const db = drizzle(c.env.DATABASE, { schema });
-  const body = c.req.valid('json');
-  const now = new Date().toISOString();
-  const limits = getRuntimeLimits(c.env);
-  const projectId = body.projectId?.trim();
-  const workspaceName = body.name?.trim();
-
-  if (!workspaceName) {
-    throw errors.badRequest('name is required');
-  }
-
-  if (!projectId) {
-    throw errors.badRequest('projectId is required');
-  }
-
-  const linkedProject = await requireProjectCapability(db, projectId, userId, 'workspace:write');
-  const resolvedInstallationId = linkedProject.installationId;
-  const resolvedRepository = linkedProject.repository;
-  const resolvedBranch = body.branch?.trim() || linkedProject.defaultBranch;
-
-  if (!resolvedRepository || !resolvedInstallationId) {
-    throw errors.badRequest('repository and installationId are required');
-  }
-  const normalizedRepository = resolvedRepository.toLowerCase();
-
-  // Fail-fast user∩app GitHub repo-access gate. Re-verify the user still has
-  // access to the bound repository through the app installation BEFORE
-  // provisioning any node or creating any workspace. Throws 403 if access was
-  // revoked or the repository id drifted. Also covers installation ownership
-  // (via requireOwnedInstallation), so no separate ownership query is needed.
-  await requireRepositoryUserAccess(c, db, linkedProject, userId);
-
-  const vmSize = body.vmSize ?? DEFAULT_VM_SIZE;
-  const vmLocation = body.vmLocation ?? DEFAULT_VM_LOCATION;
-
-  // Validate branch name — reject shell metacharacters to prevent command injection.
-  // Git branch names allow: alphanumeric, hyphens, underscores, slashes, dots.
-  // See INJ-VULN-02 in Shannon security assessment.
-  const SAFE_BRANCH_PATTERN = /^[a-zA-Z0-9._\-/]+$/;
-  if (!SAFE_BRANCH_PATTERN.test(resolvedBranch)) {
-    throw errors.badRequest(
-      'branch contains invalid characters. Only alphanumeric, hyphens, underscores, slashes, and dots are allowed.'
+    const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+    const nodeScopeId = workspace.nodeId ?? workspace.id;
+    const uniqueName = await resolveUniqueWorkspaceDisplayName(
+      db,
+      nodeScopeId,
+      body.displayName,
+      workspace.id
     );
-  }
-  const branch = resolvedBranch;
 
-  let nodeId = body.nodeId;
-  let mustProvisionNode = false;
-  let credentialAttributionSource: import('@simple-agent-manager/shared').CredentialSource = 'user';
-  // Use COUNT instead of fetching all node IDs (P1 fix).
-  // Exclude deleted/stopped nodes — only active ones count toward the limit.
-  const [userNodeCount] = await db
-    .select({ count: count() })
-    .from(schema.nodes)
-    .where(and(
-      eq(schema.nodes.userId, userId),
-      inArray(schema.nodes.status, ['running', 'creating', 'recovery']),
-      eq(schema.nodes.nodeRole, 'workspace')
-    ));
-  const userNodeCountVal = userNodeCount?.count ?? 0;
-
-  if (nodeId) {
-    const node = await getOwnedNode(db, nodeId, userId);
-    if (node.status === 'stopped' || node.healthStatus === 'unhealthy') {
-      throw errors.badRequest('Selected node is not ready for workspace creation');
-    }
-    if (!isNodeAgentVersionCompatible(node.agentVersion, c.env.VM_AGENT_REQUIRED_VERSION)) {
-      throw errors.badRequest('Selected node is running an incompatible VM agent build');
-    }
-  } else {
-    if (userNodeCountVal >= limits.maxNodesPerUser) {
-      throw errors.badRequest(`Maximum ${limits.maxNodesPerUser} nodes allowed`);
-    }
-
-    const { resolveCredentialSource } = await import('../../services/provider-credentials');
-    const credResult = await resolveCredentialSource(db, userId, body.provider, linkedProject.id);
-    if (!credResult) {
-      throw errors.forbidden('Cloud provider credentials required. Connect your account in Settings.');
-    }
-    credentialAttributionSource = credResult.credentialSource;
-    const effectiveProvider = body.provider ?? credResult.providerName;
-
-    const createdNode = await createNodeRecord(c.env, {
-      userId,
-      credentialAttributionUserId: userId,
-      credentialAttributionProjectId: credentialAttributionSource === 'project' ? linkedProject.id : null,
-      credentialAttributionSource,
-      name: `${workspaceName} Node`,
-      vmSize,
-      vmLocation,
-      cloudProvider: effectiveProvider,
-      heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
-    });
-
-    nodeId = createdNode.id;
-    mustProvisionNode = true;
-  }
-  const targetNodeId = nodeId;
-  if (!targetNodeId) {
-    throw errors.internal('Failed to determine target node');
-  }
-
-  // Count active workspaces on this node (for telemetry — no hard count limit,
-  // resource thresholds handle capacity in the task runner path).
-  const [nodeWorkspaceCount] = await db
-    .select({ count: count() })
-    .from(schema.workspaces)
-    .where(and(
-      eq(schema.workspaces.userId, userId),
-      eq(schema.workspaces.nodeId, targetNodeId),
-      inArray(schema.workspaces.status, ['running', 'creating', 'recovery'])
-    ));
-  const nodeWorkspaceCountVal = nodeWorkspaceCount?.count ?? 0;
-
-  const uniqueName = await resolveUniqueWorkspaceDisplayName(db, targetNodeId, workspaceName);
-
-  const workspaceId = ulid();
-
-  await db.insert(schema.workspaces).values({
-    id: workspaceId,
-    nodeId: targetNodeId,
-    projectId: linkedProject.id,
-    userId,
-    installationId: resolvedInstallationId,
-    name: workspaceName,
-    displayName: uniqueName.displayName,
-    normalizedDisplayName: uniqueName.normalizedDisplayName,
-    repository: resolvedRepository,
-    branch,
-    status: 'creating',
-    vmSize,
-    vmLocation,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  const chatTaskId = ulid();
-  await db.insert(schema.tasks).values({
-    id: chatTaskId, projectId: linkedProject.id, userId, workspaceId,
-    title: workspaceName, status: 'queued', executionStep: 'workspace_creation',
-    taskMode: 'conversation', triggeredBy: 'user',
-    credentialAttributionUserId: userId, credentialAttributionSource,
-    createdBy: userId, createdAt: now, updatedAt: now,
-  });
-
-  // Create chat session in ProjectData DO (workspace always linked to project)
-  try {
-    const chatSessionId = await projectDataService.createSession(
-      c.env,
-      linkedProject.id,
-      workspaceId,
-      workspaceName,
-      chatTaskId,
-      userId
-    );
     await db
       .update(schema.workspaces)
-      .set({ chatSessionId, updatedAt: now })
-      .where(eq(schema.workspaces.id, workspaceId));
-    await db.update(schema.tasks).set({
-      chatSessionId, status: "in_progress", executionStep: "workspace_ready", updatedAt: now,
-    }).where(eq(schema.tasks.id, chatTaskId));
-  } catch (err) {
-    // Best-effort: session creation failure should not block workspace creation
-    log.error('workspace.chat_session_create_failed', { workspaceId, error: err instanceof Error ? err.message : String(err) });
-  }
-
-  const nodeCountForUser = userNodeCountVal + (mustProvisionNode ? 1 : 0);
-  const reusedExistingNode = !mustProvisionNode;
-  const workspaceCountOnNodeBefore = nodeWorkspaceCountVal;
-
-  recordNodeRoutingMetric(
-    {
-      metric: 'sc_002_workspace_creation_flow',
-      nodeId: targetNodeId,
-      workspaceId,
-      userId,
-      repository: normalizedRepository,
-      reusedExistingNode,
-      workspaceCountOnNodeBefore,
-      nodeCountForUser,
-    },
-    c.env
-  );
-
-  recordNodeRoutingMetric(
-    {
-      metric: 'sc_006_node_efficiency',
-      nodeId: targetNodeId,
-      workspaceId,
-      userId,
-      repository: normalizedRepository,
-      reusedExistingNode,
-      nodeCountForUser,
-    },
-    c.env
-  );
-
-  // Start compute usage metering (best-effort — failure should not block workspace creation)
-  try {
-    const [nodeRow] = await db
-      .select({
-        cloudProvider: schema.nodes.cloudProvider,
-        credentialSource: schema.nodes.credentialSource,
+      .set({
+        nodeId: nodeScopeId,
+        displayName: uniqueName.displayName,
+        normalizedDisplayName: uniqueName.normalizedDisplayName,
+        updatedAt: new Date().toISOString(),
       })
-      .from(schema.nodes)
-      .where(eq(schema.nodes.id, targetNodeId))
-      .limit(1);
-    await startComputeTracking(db, {
-      userId,
-      workspaceId,
-      nodeId: targetNodeId,
-      vmSize,
-      cloudProvider: nodeRow?.cloudProvider,
-      credentialSource: (nodeRow?.credentialSource as import('@simple-agent-manager/shared').CredentialSource) ?? 'user',
-    });
-  } catch (err) {
-    log.error('workspace.compute_tracking_start_failed', {
-      workspaceId,
-      error: err instanceof Error ? err.message : String(err),
-    });
+      .where(eq(schema.workspaces.id, workspace.id));
+
+    const updated = await getOwnedWorkspace(db, workspace.id, userId);
+    return c.json(toWorkspaceResponse(updated, c.env.BASE_DOMAIN));
   }
+);
 
-  c.executionCtx.waitUntil(
-    (async () => {
-      const innerDb = drizzle(c.env.DATABASE, { schema });
-      if (mustProvisionNode) {
-        await provisionNode(targetNodeId, c.env);
+crudRoutes.post(
+  '/',
+  requireAuth(),
+  requireApproved(),
+  jsonValidator(CreateWorkspaceSchema),
+  async (c) => {
+    const auth = getAuth(c);
+    const userId = auth.user.id;
+    const db = drizzle(c.env.DATABASE, { schema });
+    const body = c.req.valid('json');
+    const now = new Date().toISOString();
+    const limits = getRuntimeLimits(c.env);
+    const projectId = body.projectId?.trim();
+    const workspaceName = body.name?.trim();
 
-        const nodeRows = await innerDb
-          .select({
-            status: schema.nodes.status,
-            errorMessage: schema.nodes.errorMessage,
-          })
-          .from(schema.nodes)
-          .where(eq(schema.nodes.id, targetNodeId))
-          .limit(1);
+    if (!workspaceName) {
+      throw errors.badRequest('name is required');
+    }
 
-        const provisionedNode = nodeRows[0];
-        if (!provisionedNode || provisionedNode.status !== 'running') {
-          await innerDb
-            .update(schema.workspaces)
-            .set({
-              status: 'error',
-              errorMessage: provisionedNode?.errorMessage || 'Node provisioning failed',
-              updatedAt: new Date().toISOString(),
-            })
-            .where(eq(schema.workspaces.id, workspaceId));
-          return;
-        }
+    if (!projectId) {
+      throw errors.badRequest('projectId is required');
+    }
 
-        try {
-          await waitForNodeAgentReady(targetNodeId, c.env);
-        } catch (err) {
-          await innerDb
-            .update(schema.workspaces)
-            .set({
-              status: 'error',
-              errorMessage:
-                err instanceof Error ? err.message : 'Node agent not reachable after provisioning',
-              updatedAt: new Date().toISOString(),
-            })
-            .where(eq(schema.workspaces.id, workspaceId));
-          return;
-        }
+    const linkedProject = await requireProjectCapability(db, projectId, userId, 'workspace:write');
+    const resolvedInstallationId = linkedProject.installationId;
+    const resolvedRepository = linkedProject.repository;
+    const resolvedBranch = body.branch?.trim() || linkedProject.defaultBranch;
+
+    if (!resolvedRepository || !resolvedInstallationId) {
+      throw errors.badRequest('repository and installationId are required');
+    }
+    const normalizedRepository = resolvedRepository.toLowerCase();
+
+    // Fail-fast user∩app GitHub repo-access gate. Re-verify the user still has
+    // access to the bound repository through the app installation BEFORE
+    // provisioning any node or creating any workspace. Throws 403 if access was
+    // revoked or the repository id drifted. Also covers installation ownership
+    // (via requireOwnedInstallation), so no separate ownership query is needed.
+    await requireRepositoryUserAccess(c, db, linkedProject, userId);
+
+    const vmSize = body.vmSize ?? DEFAULT_VM_SIZE;
+    const vmLocation = body.vmLocation ?? DEFAULT_VM_LOCATION;
+
+    // Validate branch name — reject shell metacharacters to prevent command injection.
+    // Git branch names allow: alphanumeric, hyphens, underscores, slashes, dots.
+    // See INJ-VULN-02 in Shannon security assessment.
+    const SAFE_BRANCH_PATTERN = /^[a-zA-Z0-9._\-/]+$/;
+    if (!SAFE_BRANCH_PATTERN.test(resolvedBranch)) {
+      throw errors.badRequest(
+        'branch contains invalid characters. Only alphanumeric, hyphens, underscores, slashes, and dots are allowed.'
+      );
+    }
+    const branch = resolvedBranch;
+
+    let nodeId = body.nodeId;
+    let mustProvisionNode = false;
+    let credentialAttributionSource: import('@simple-agent-manager/shared').CredentialSource =
+      'user';
+    // Use COUNT instead of fetching all node IDs (P1 fix).
+    // Exclude deleted/stopped nodes — only active ones count toward the limit.
+    const [userNodeCount] = await db
+      .select({ count: count() })
+      .from(schema.nodes)
+      .where(
+        and(
+          eq(schema.nodes.userId, userId),
+          inArray(schema.nodes.status, ['running', 'creating', 'recovery']),
+          eq(schema.nodes.nodeRole, 'workspace')
+        )
+      );
+    const userNodeCountVal = userNodeCount?.count ?? 0;
+
+    if (nodeId) {
+      const node = await getOwnedNode(db, nodeId, userId);
+      if (node.status === 'stopped' || node.healthStatus === 'unhealthy') {
+        throw errors.badRequest('Selected node is not ready for workspace creation');
+      }
+      if (!isNodeAgentVersionCompatible(node.agentVersion, c.env.VM_AGENT_REQUIRED_VERSION)) {
+        throw errors.badRequest('Selected node is running an incompatible VM agent build');
+      }
+    } else {
+      if (userNodeCountVal >= limits.maxNodesPerUser) {
+        throw errors.badRequest(`Maximum ${limits.maxNodesPerUser} nodes allowed`);
       }
 
-      await scheduleWorkspaceCreateOnNode(
-        c.env,
-        workspaceId,
-        targetNodeId,
+      const { resolveCredentialSource } = await import('../../services/provider-credentials');
+      const credResult = await resolveCredentialSource(db, userId, body.provider, linkedProject.id);
+      if (!credResult) {
+        throw errors.forbidden(
+          'Cloud provider credentials required. Connect your account in Settings.'
+        );
+      }
+      credentialAttributionSource = credResult.credentialSource;
+      const effectiveProvider = body.provider ?? credResult.providerName;
+
+      const createdNode = await createNodeRecord(c.env, {
         userId,
-        resolvedRepository,
-        branch,
-        linkedProject,
-        auth.user.name,
-        auth.user.email
+        credentialAttributionUserId: userId,
+        credentialAttributionProjectId:
+          credentialAttributionSource === 'project' ? linkedProject.id : null,
+        credentialAttributionSource,
+        name: `${workspaceName} Node`,
+        vmSize,
+        vmLocation,
+        cloudProvider: effectiveProvider,
+        heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
+      });
+
+      nodeId = createdNode.id;
+      mustProvisionNode = true;
+    }
+    const targetNodeId = nodeId;
+    if (!targetNodeId) {
+      throw errors.internal('Failed to determine target node');
+    }
+
+    // Count active workspaces on this node (for telemetry — no hard count limit,
+    // resource thresholds handle capacity in the task runner path).
+    const [nodeWorkspaceCount] = await db
+      .select({ count: count() })
+      .from(schema.workspaces)
+      .where(
+        and(
+          eq(schema.workspaces.userId, userId),
+          eq(schema.workspaces.nodeId, targetNodeId),
+          inArray(schema.workspaces.status, ['running', 'creating', 'recovery'])
+        )
       );
-    })()
-  );
+    const nodeWorkspaceCountVal = nodeWorkspaceCount?.count ?? 0;
 
-  const created = await getOwnedWorkspace(db, workspaceId, userId);
+    const uniqueName = await resolveUniqueWorkspaceDisplayName(db, targetNodeId, workspaceName);
 
-  // Record activity event for workspace creation
-  c.executionCtx.waitUntil(
-    projectDataService.recordActivityEvent(
-      c.env, linkedProject.id, 'workspace.created', 'user', userId,
-      workspaceId, null, null, { name: created.name, repository: resolvedRepository }
-    ).catch((e) => { log.warn('workspace.activity_created_failed', { workspaceId, error: String(e) }); })
-  );
+    const workspaceId = ulid();
 
-  return c.json(toWorkspaceResponse(created, c.env.BASE_DOMAIN), 201);
-});
+    await db.insert(schema.workspaces).values({
+      id: workspaceId,
+      nodeId: targetNodeId,
+      projectId: linkedProject.id,
+      userId,
+      installationId: resolvedInstallationId,
+      name: workspaceName,
+      displayName: uniqueName.displayName,
+      normalizedDisplayName: uniqueName.normalizedDisplayName,
+      repository: resolvedRepository,
+      branch,
+      status: 'creating',
+      vmSize,
+      vmLocation,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const chatTaskId = ulid();
+    await db.insert(schema.tasks).values({
+      id: chatTaskId,
+      projectId: linkedProject.id,
+      userId,
+      workspaceId,
+      title: workspaceName,
+      status: 'queued',
+      executionStep: 'workspace_creation',
+      taskMode: 'conversation',
+      triggeredBy: 'user',
+      credentialAttributionUserId: userId,
+      credentialAttributionSource,
+      createdBy: userId,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    // Create chat session in ProjectData DO (workspace always linked to project)
+    try {
+      const chatSessionId = await projectDataService.createSession(
+        c.env,
+        linkedProject.id,
+        workspaceId,
+        workspaceName,
+        chatTaskId,
+        userId
+      );
+      await db
+        .update(schema.workspaces)
+        .set({ chatSessionId, updatedAt: now })
+        .where(eq(schema.workspaces.id, workspaceId));
+      await db
+        .update(schema.tasks)
+        .set({
+          chatSessionId,
+          status: 'in_progress',
+          executionStep: 'workspace_ready',
+          updatedAt: now,
+        })
+        .where(eq(schema.tasks.id, chatTaskId));
+    } catch (err) {
+      // Best-effort: session creation failure should not block workspace creation
+      log.error('workspace.chat_session_create_failed', {
+        workspaceId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    const nodeCountForUser = userNodeCountVal + (mustProvisionNode ? 1 : 0);
+    const reusedExistingNode = !mustProvisionNode;
+    const workspaceCountOnNodeBefore = nodeWorkspaceCountVal;
+
+    recordNodeRoutingMetric(
+      {
+        metric: 'sc_002_workspace_creation_flow',
+        nodeId: targetNodeId,
+        workspaceId,
+        userId,
+        repository: normalizedRepository,
+        reusedExistingNode,
+        workspaceCountOnNodeBefore,
+        nodeCountForUser,
+      },
+      c.env
+    );
+
+    recordNodeRoutingMetric(
+      {
+        metric: 'sc_006_node_efficiency',
+        nodeId: targetNodeId,
+        workspaceId,
+        userId,
+        repository: normalizedRepository,
+        reusedExistingNode,
+        nodeCountForUser,
+      },
+      c.env
+    );
+
+    if (!mustProvisionNode) {
+      // Existing nodes already carry provider metadata; meter before scheduling work onto them.
+      await startComputeTrackingForNode(db, { userId, workspaceId, nodeId: targetNodeId, vmSize });
+    }
+
+    c.executionCtx.waitUntil(
+      (async () => {
+        const innerDb = drizzle(c.env.DATABASE, { schema });
+        if (mustProvisionNode) {
+          await provisionNode(targetNodeId, c.env);
+
+          const nodeRows = await innerDb
+            .select({
+              status: schema.nodes.status,
+              errorMessage: schema.nodes.errorMessage,
+            })
+            .from(schema.nodes)
+            .where(eq(schema.nodes.id, targetNodeId))
+            .limit(1);
+
+          const provisionedNode = nodeRows[0];
+          if (!provisionedNode || provisionedNode.status !== 'running') {
+            await innerDb
+              .update(schema.workspaces)
+              .set({
+                status: 'error',
+                errorMessage: provisionedNode?.errorMessage || 'Node provisioning failed',
+                updatedAt: new Date().toISOString(),
+              })
+              .where(eq(schema.workspaces.id, workspaceId));
+            return;
+          }
+
+          try {
+            await waitForNodeAgentReady(targetNodeId, c.env);
+          } catch (err) {
+            await innerDb
+              .update(schema.workspaces)
+              .set({
+                status: 'error',
+                errorMessage:
+                  err instanceof Error
+                    ? err.message
+                    : 'Node agent not reachable after provisioning',
+                updatedAt: new Date().toISOString(),
+              })
+              .where(eq(schema.workspaces.id, workspaceId));
+            return;
+          }
+
+          // Newly provisioned nodes only have provider-native capacity and price metadata
+          // after provisioning finishes. Start metering after that point so compute_usage
+          // records providerInstance* values instead of legacy vmSize fallbacks.
+          await startComputeTrackingForNode(innerDb, {
+            userId,
+            workspaceId,
+            nodeId: targetNodeId,
+            vmSize,
+          });
+        }
+
+        await scheduleWorkspaceCreateOnNode(
+          c.env,
+          workspaceId,
+          targetNodeId,
+          userId,
+          resolvedRepository,
+          branch,
+          linkedProject,
+          auth.user.name,
+          auth.user.email
+        );
+      })()
+    );
+
+    const created = await getOwnedWorkspace(db, workspaceId, userId);
+
+    // Record activity event for workspace creation
+    c.executionCtx.waitUntil(
+      projectDataService
+        .recordActivityEvent(
+          c.env,
+          linkedProject.id,
+          'workspace.created',
+          'user',
+          userId,
+          workspaceId,
+          null,
+          null,
+          { name: created.name, repository: resolvedRepository }
+        )
+        .catch((e) => {
+          log.warn('workspace.activity_created_failed', { workspaceId, error: String(e) });
+        })
+    );
+
+    return c.json(toWorkspaceResponse(created, c.env.BASE_DOMAIN), 201);
+  }
+);
 
 crudRoutes.delete('/:id', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);

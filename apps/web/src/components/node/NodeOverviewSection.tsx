@@ -4,6 +4,7 @@ import { StatusBadge } from '@simple-agent-manager/ui';
 import { Server } from 'lucide-react';
 import type { FC } from 'react';
 
+import { formatOfferingNumber } from '../../lib/compute-pool-offerings';
 import { formatVmSizeInline, lookupSizeInfo } from '../vm/format-vm-size';
 import { Section } from './Section';
 import { SectionHeader } from './SectionHeader';
@@ -33,10 +34,20 @@ function formatRelativeTime(iso: string | null): string {
   return `${Math.floor(seconds / 86400)}d ago`;
 }
 
-export const NodeOverviewSection: FC<NodeOverviewSectionProps> = ({ node, systemInfo, catalogs = [] }) => {
+export const NodeOverviewSection: FC<NodeOverviewSectionProps> = ({
+  node,
+  systemInfo,
+  catalogs = [],
+}) => {
   const catalogSizeInfo = lookupSizeInfo(catalogs, node.cloudProvider, node.vmSize);
   const locationConfig = VM_LOCATIONS[node.vmLocation];
-  const sizeLabel = formatVmSizeInline(node.vmSize, catalogSizeInfo);
+  const providerInstanceRamLabel =
+    node.providerInstanceMemoryMb == null
+      ? null
+      : formatOfferingNumber(node.providerInstanceMemoryMb / 1024, 'GB RAM');
+  const sizeLabel = node.providerInstanceType
+    ? `${node.providerInstanceType} (${node.providerInstanceVcpuCount ?? catalogSizeInfo?.vcpu ?? '?'} vCPU${providerInstanceRamLabel ? `, ${providerInstanceRamLabel}` : ''})`
+    : `${formatVmSizeInline(node.vmSize, catalogSizeInfo)} compatibility hint`;
   const locationLabel = locationConfig
     ? `${locationConfig.name}, ${locationConfig.country}`
     : node.vmLocation;
@@ -55,28 +66,69 @@ export const NodeOverviewSection: FC<NodeOverviewSectionProps> = ({ node, system
         <StatusBadge status={node.healthStatus || 'stale'} />
       </div>
 
-      <div className="grid gap-4 border-t border-border-default pt-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
+      <div
+        className="grid gap-4 border-t border-border-default pt-4"
+        style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}
+      >
         <div>
-          <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>Provider</div>
-          <div className="text-fg-primary font-medium" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>{node.cloudProvider ? (PROVIDER_LABELS[node.cloudProvider] ?? node.cloudProvider) : 'Unknown'}</div>
+          <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
+            Provider
+          </div>
+          <div
+            className="text-fg-primary font-medium"
+            style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+          >
+            {node.cloudProvider
+              ? (PROVIDER_LABELS[node.cloudProvider] ?? node.cloudProvider)
+              : 'Unknown'}
+          </div>
         </div>
         <div>
-          <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>Size</div>
-          <div className="text-fg-primary font-medium" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>{sizeLabel}</div>
+          <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
+            Provider instance
+          </div>
+          <div
+            className="text-fg-primary font-medium"
+            style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+          >
+            {sizeLabel}
+          </div>
         </div>
         <div>
-          <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>Location</div>
-          <div className="text-fg-primary font-medium" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>{locationLabel}</div>
+          <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
+            Location
+          </div>
+          <div
+            className="text-fg-primary font-medium"
+            style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+          >
+            {locationLabel}
+          </div>
         </div>
         {node.ipAddress && (
           <div>
-            <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>IP Address</div>
-            <div className="text-fg-primary font-medium font-mono" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>{node.ipAddress}</div>
+            <div
+              className="text-fg-muted mb-1"
+              style={{ fontSize: 'var(--sam-type-caption-size)' }}
+            >
+              IP Address
+            </div>
+            <div
+              className="text-fg-primary font-medium font-mono"
+              style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+            >
+              {node.ipAddress}
+            </div>
           </div>
         )}
         <div>
-          <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>Last Heartbeat</div>
-          <div className="text-fg-primary font-medium" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
+          <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
+            Last Heartbeat
+          </div>
+          <div
+            className="text-fg-primary font-medium"
+            style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+          >
             {node.lastHeartbeatAt ? (
               <>
                 {formatRelativeTime(node.lastHeartbeatAt)}
@@ -91,13 +143,30 @@ export const NodeOverviewSection: FC<NodeOverviewSectionProps> = ({ node, system
         </div>
         {systemInfo?.uptime && (
           <div>
-            <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>Uptime</div>
-            <div className="text-fg-primary font-medium" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>{systemInfo.uptime.humanFormat}</div>
+            <div
+              className="text-fg-muted mb-1"
+              style={{ fontSize: 'var(--sam-type-caption-size)' }}
+            >
+              Uptime
+            </div>
+            <div
+              className="text-fg-primary font-medium"
+              style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+            >
+              {systemInfo.uptime.humanFormat}
+            </div>
           </div>
         )}
         <div>
-          <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>Created</div>
-          <div className="text-fg-primary font-medium" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>{formatTimestamp(node.createdAt)}</div>
+          <div className="text-fg-muted mb-1" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
+            Created
+          </div>
+          <div
+            className="text-fg-primary font-medium"
+            style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+          >
+            {formatTimestamp(node.createdAt)}
+          </div>
         </div>
       </div>
 

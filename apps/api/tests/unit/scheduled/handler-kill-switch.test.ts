@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { enabledMock, isolateMock, logInfoMock, sessionSleepMock } = vi.hoisted(() => ({
+const { enabledMock, isolateMock, logInfoMock, sessionSleepLifecycleRepairMock, sessionSleepMock } =
+  vi.hoisted(() => ({
   enabledMock: vi.fn(),
   isolateMock: vi.fn(async () => undefined),
   logInfoMock: vi.fn(),
+  sessionSleepLifecycleRepairMock: vi.fn(),
   sessionSleepMock: vi.fn(),
 }));
 
@@ -19,6 +21,9 @@ vi.mock('../../../src/scheduled/sweep-isolation', () => ({
 }));
 vi.mock('../../../src/scheduled/session-sleep', () => ({
   runSessionSleepSweep: sessionSleepMock,
+}));
+vi.mock('../../../src/scheduled/session-sleep-lifecycle-repair', () => ({
+  runSessionSleepLifecycleRepair: sessionSleepLifecycleRepairMock,
 }));
 vi.mock('drizzle-orm/d1', () => ({ drizzle: vi.fn(() => ({})) }));
 vi.mock('../../../src/lib/logger', async (importOriginal) => ({
@@ -56,12 +61,28 @@ describe('scheduled operational sweep kill switch', () => {
     expect(isolateMock).toHaveBeenCalled();
     const sweepNames = isolateMock.mock.calls.map(([name]) => name);
     expect(sweepNames).toContain('node_cleanup');
+    expect(sweepNames).toContain('session_sleep_lifecycle_repair');
     expect(sweepNames).toContain('deployment_release_retention');
     expect(sweepNames).toContain('session_snapshot_purge');
     expect(sweepNames).toContain('terminal_session_ledger_reconciliation');
+    expect(sweepNames.indexOf('session_sleep_lifecycle_repair')).toBeLessThan(
+      sweepNames.indexOf('node_cleanup')
+    );
+    expect(sweepNames.indexOf('session_sleep_lifecycle_repair')).toBeLessThan(
+      sweepNames.indexOf('terminal_session_ledger_reconciliation')
+    );
+    expect(sweepNames.indexOf('terminal_session_ledger_reconciliation')).toBeLessThan(
+      sweepNames.indexOf('session_sleep')
+    );
     expect(sweepNames.indexOf('deployment_release_retention')).toBeLessThan(
       sweepNames.indexOf('compose_artifact_cleanup')
     );
+    const sleepLifecycleRepairCallback = isolateMock.mock.calls.find(
+      ([name]) => name === 'session_sleep_lifecycle_repair'
+    )?.[1];
+    expect(sleepLifecycleRepairCallback).toEqual(expect.any(Function));
+    await sleepLifecycleRepairCallback?.();
+    expect(sessionSleepLifecycleRepairMock).toHaveBeenCalledWith(env, expect.any(Date));
     const sessionSleepCallback = isolateMock.mock.calls.find(
       ([name]) => name === 'session_sleep'
     )?.[1];

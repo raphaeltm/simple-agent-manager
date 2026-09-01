@@ -10,7 +10,10 @@
  */
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
-import { DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS } from '../../services/session-snapshot-artifacts';
+import {
+  findRestorableOrInFlightSleepSnapshot,
+  type SleepLifecyclePredicateResult,
+} from '../../services/session-snapshot-sleep-predicate';
 import type { Env } from './types';
 
 const log = createModuleLogger('terminal_session_reconciliation');
@@ -39,9 +42,7 @@ interface D1TaskRow {
   completed_at: string | null;
 }
 
-interface RestorableSnapshotRow {
-  expires_at: string;
-}
+type RestorableSnapshotRow = SleepLifecyclePredicateResult;
 
 export interface TerminalSessionReconciliationStats {
   selected: number;
@@ -98,15 +99,6 @@ function terminalSessionReconcileDeferMs(
   );
 }
 
-function snapshotRecoveryMaxAttempts(
-  env: Pick<Env, 'SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS'>
-): number {
-  return parsePositiveInt(
-    env.SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
-    DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS
-  );
-}
-
 function parseString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
@@ -141,7 +133,7 @@ function deferUntil(nowMs: number, env: Env, snapshot?: RestorableSnapshotRow | 
   const configuredUntil = nowMs + terminalSessionReconcileDeferMs(env);
   if (!snapshot) return configuredUntil;
 
-  const expiresAtMs = Date.parse(snapshot.expires_at);
+  const expiresAtMs = snapshot.expires_at ? Date.parse(snapshot.expires_at) : NaN;
   if (!Number.isFinite(expiresAtMs) || expiresAtMs <= nowMs) return configuredUntil;
 
   return Math.max(nowMs + 1, Math.min(configuredUntil, expiresAtMs));
@@ -240,25 +232,11 @@ async function findRestorableSleepingSnapshot(
   sessionId: string,
   now: Date
 ): Promise<RestorableSnapshotRow | null> {
-  const row = await env.DATABASE.prepare(
-    `SELECT expires_at
-       FROM session_snapshots
-      WHERE chat_session_id = ?
-        AND project_id = ?
-        AND sleeping_at IS NOT NULL
-        AND sleep_status = 'sleeping'
-        AND expires_at > ?
-        AND recovery_attempts < ?
-        AND (
-          (status = 'available' AND degradation = 'none')
-          OR (status = 'degraded' AND degradation IS NOT NULL AND degradation != 'none')
-        )
-      ORDER BY expires_at ASC
-      LIMIT 1`
-  )
-    .bind(sessionId, projectId, now.toISOString(), snapshotRecoveryMaxAttempts(env))
-    .first<RestorableSnapshotRow>();
-  return row ?? null;
+  return findRestorableOrInFlightSleepSnapshot(env.DATABASE, env, {
+    projectId,
+    chatSessionId: sessionId,
+    now,
+  });
 }
 
 async function reconcileCandidate(
@@ -301,18 +279,16 @@ async function reconcileCandidate(
       : 'skipped';
   }
 
-  // Mirrors the wake-authorizing snapshot artifact predicate in
-  // `claimSessionSnapshotRecovery`: restorable status/degradation, sleeping
-  // artifact, unexpired TTL, and recovery attempts remaining. This sweep keys by
-  // project + chat session rather than the DO workspace field because stale
-  // ledger rows can have a missing or superseded workspace_id; preserving a
-  // wakeable chat is safer than trusting the stale side of the ledger.
+  // Mirrors the shared destroyer guard in
+  // `findRestorableOrInFlightSleepSnapshot`: fully restorable sleeping
+  // snapshots and bounded in-flight sleep lifecycles must not be archived by
+  // terminal-task reconciliation.
   const snapshot = await findRestorableSleepingSnapshot(env, projectId, current.id, now);
   if (snapshot) {
     return deferCandidate(
       sql,
       current.id,
-      'restorable_sleeping_snapshot',
+      `sleep_lifecycle_${snapshot.sleep_status ?? 'unknown'}`,
       deferUntil(now.getTime(), env, snapshot)
     )
       ? 'deferred'

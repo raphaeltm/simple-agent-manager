@@ -681,7 +681,9 @@ export function SettingsComputeUsage() {
                     </span>
                   </div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-4 sm:pl-0">
-                    <span className="sam-type-caption text-fg-muted">{session.vmSize ?? session.serverType} ({session.vcpuCount} vCPU)</span>
+                    <span className="sam-type-caption text-fg-muted">
+                      {session.providerInstanceType ?? `${session.vmSize ?? session.serverType} compatibility hint`} ({session.providerInstanceVcpuCount ?? session.vcpuCount} vCPU)
+                    </span>
                     <span className="sam-type-caption text-fg-muted capitalize">{session.credentialSource}</span>
                     <span className="flex items-center gap-1 sam-type-caption text-fg-muted">
                       <Clock className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
