@@ -99,7 +99,7 @@ export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO = 0.98;
 export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES = 1;
 export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS = 500;
 export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS = 7;
-export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS = 60 * 1000;
+export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS = 60 * 60 * 1000;
 
 export interface ProjectDataStorageTelemetry {
   projectId: string;
@@ -437,7 +437,8 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
       env.PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES,
       DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES
     ),
-    eventLogCleanupEnabled: envFlagEnabled(env.PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED),
+    eventLogCleanupEnabled:
+      (env.PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED ?? '').trim().toLowerCase() === 'true',
     eventLogCleanupBatchRows: parsePositiveInteger(
       env.PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS,
       DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS
