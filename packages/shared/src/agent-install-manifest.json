@@ -4,7 +4,11 @@
     "method": "npm",
     "package": "@agentclientprotocol/claude-agent-acp",
     "version": "0.58.1",
-    "bin": "claude-agent-acp"
+    "bin": "claude-agent-acp",
+    "npmCompanion": {
+      "package": "@anthropic-ai/claude-code",
+      "version": "2.1.258"
+    }
   },
   {
     "agentType": "openai-codex",

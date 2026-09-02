@@ -8,8 +8,10 @@ RUN apt-get update \
 WORKDIR /workspace
 
 COPY mock-acp-agent.sh /usr/local/bin/mock-acp-agent
+COPY mock-claude.sh /usr/local/bin/claude
 
 RUN chmod +x /usr/local/bin/mock-acp-agent \
+  && chmod +x /usr/local/bin/claude \
   && ln -s /usr/local/bin/mock-acp-agent /usr/local/bin/claude-agent-acp \
   && ln -s /usr/local/bin/mock-acp-agent /usr/local/bin/codex-acp \
   && ln -s /usr/local/bin/mock-acp-agent /usr/local/bin/gemini \
