@@ -96,19 +96,13 @@ vi.mock('../../../src/services/limits', () => ({
 }));
 
 // --- Schemas mock ---
-vi.mock('../../../src/schemas', () => ({
-  AdminUserActionSchema: {},
-  AdminUserRoleSchema: {},
-  AdminLogQuerySchema: {},
-  ProjectDataArchiveCanaryControlSchema: {},
-  ProjectDataArchiveCircuitBreakerSchema: {},
-  ProjectDataArchiveFreezeProjectSchema: {},
-  ProjectDataArchiveRecoveryControlSchema: {},
-  RunDebugDiagnosisSchema: {},
-  SaveDebugDiagnosisIdeaSchema: {},
-  UpdateSignupApprovalConfigSchema: {},
-  jsonValidator: () => vi.fn((_c: any, next: any) => next()),
-}));
+vi.mock('../../../src/schemas', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/schemas')>();
+  return {
+    ...actual,
+    jsonValidator: () => vi.fn((_c: any, next: any) => next()),
+  };
+});
 
 // Import routes after mocks
 const { adminRoutes } = await import('../../../src/routes/admin');

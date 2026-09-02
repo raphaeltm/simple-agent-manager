@@ -5,6 +5,7 @@ import {
   type ProjectDataArchiveJournalState,
   type ProjectDataArchiveLocationState,
 } from '../project-data-archive/contract';
+import { isProjectDataArchiveExactRoutingEnabled } from './project-data-archive-routing';
 
 const DEFAULT_ARCHIVE_ROLLOUT_LIST_LIMIT = 25;
 const DEFAULT_ARCHIVE_ROLLOUT_LIST_LIMIT_MAX = 100;
@@ -139,6 +140,7 @@ export type ProjectDataArchiveRolloutState = {
   };
   config: {
     globalCronEnabled: boolean;
+    exactRoutingEnabled: boolean;
     manualCanaryMaxSessions: number;
     manualCanaryMaxWallTimeMs: number;
   };
@@ -146,7 +148,9 @@ export type ProjectDataArchiveRolloutState = {
   locationStateCounts: ProjectDataArchiveRolloutStateCount[];
   circuitBreakers: ProjectDataArchiveRolloutBreaker[];
   recentMigrations: ProjectDataArchiveRolloutMigration[];
+  recentMigrationsHasMore: boolean;
   locations: ProjectDataArchiveRolloutLocation[];
+  locationsHasMore: boolean;
 };
 
 export type ProjectDataArchiveProjectControlResult = {
@@ -362,10 +366,9 @@ export async function getProjectDataArchiveRolloutState(
        FROM project_data_archive_migrations m
        ${migrationFilter.sql}
        GROUP BY m.project_id, m.state
-       ORDER BY m.project_id ASC, m.state ASC
-       LIMIT ?`
+       ORDER BY m.project_id ASC, m.state ASC`
     )
-      .bind(...migrationFilter.params, limit)
+      .bind(...migrationFilter.params)
       .all<RawCountRow>(),
     env.DATABASE.prepare(
       `SELECT loc.project_id, loc.location_state AS state, COUNT(*) AS count,
@@ -374,10 +377,9 @@ export async function getProjectDataArchiveRolloutState(
        FROM project_data_session_locations loc
        ${locationFilter.sql}
        GROUP BY loc.project_id, loc.location_state
-       ORDER BY loc.project_id ASC, loc.location_state ASC
-       LIMIT ?`
+       ORDER BY loc.project_id ASC, loc.location_state ASC`
     )
-      .bind(...locationFilter.params, limit)
+      .bind(...locationFilter.params)
       .all<RawCountRow>(),
     env.DATABASE.prepare(
       `SELECT breaker.project_id, breaker.state, breaker.reason, breaker.opened_at, breaker.updated_at
@@ -403,7 +405,7 @@ export async function getProjectDataArchiveRolloutState(
        ORDER BY m.updated_at DESC, m.migration_id ASC
        LIMIT ?`
     )
-      .bind(...migrationFilter.params, limit)
+      .bind(...migrationFilter.params, limit + 1)
       .all<RawMigrationRow>(),
     env.DATABASE.prepare(
       `SELECT loc.project_id, loc.session_id, loc.location_state, loc.owner_kind,
@@ -415,10 +417,12 @@ export async function getProjectDataArchiveRolloutState(
        ORDER BY loc.updated_at DESC, loc.session_id ASC
        LIMIT ?`
     )
-      .bind(...locationFilter.params, limit)
+      .bind(...locationFilter.params, limit + 1)
       .all<RawLocationRow>(),
   ]);
   const manualCanaryConfig = getProjectDataArchiveManualCanaryConfig(env);
+  const migrationRows = migrations.results ?? [];
+  const locationRows = locations.results ?? [];
 
   return {
     filters: {
@@ -428,14 +432,17 @@ export async function getProjectDataArchiveRolloutState(
     },
     config: {
       globalCronEnabled: env.PROJECT_DATA_ARCHIVE_SHARDING_ENABLED === 'true',
+      exactRoutingEnabled: isProjectDataArchiveExactRoutingEnabled(env),
       manualCanaryMaxSessions: manualCanaryConfig.maxSessions,
       manualCanaryMaxWallTimeMs: manualCanaryConfig.maxWallTimeMs,
     },
     migrationStateCounts: (migrationCounts.results ?? []).map(mapCountRow),
     locationStateCounts: (locationCounts.results ?? []).map(mapCountRow),
     circuitBreakers: (breakers.results ?? []).map(mapBreakerRow),
-    recentMigrations: (migrations.results ?? []).map(mapMigrationRow),
-    locations: (locations.results ?? []).map(mapLocationRow),
+    recentMigrations: migrationRows.slice(0, limit).map(mapMigrationRow),
+    recentMigrationsHasMore: migrationRows.length > limit,
+    locations: locationRows.slice(0, limit).map(mapLocationRow),
+    locationsHasMore: locationRows.length > limit,
   };
 }
 
@@ -483,7 +490,10 @@ export async function setProjectDataArchiveCircuitBreaker(
      ON CONFLICT(project_id) DO UPDATE SET
        state = excluded.state,
        reason = excluded.reason,
-       opened_at = excluded.opened_at,
+       opened_at = CASE
+         WHEN excluded.state = 'closed' THEN NULL
+         ELSE COALESCE(project_data_archive_circuit_breakers.opened_at, excluded.opened_at)
+       END,
        updated_at = excluded.updated_at`
   )
     .bind(input.projectId, input.state, input.reason, input.state === 'closed' ? null : now, now)
@@ -498,7 +508,7 @@ export async function setProjectDataArchiveCircuitBreaker(
     updatedAt: now,
     note:
       input.state === 'closed'
-        ? 'Circuit breaker closed for future archive work; existing frozen migrations and frozen locations remain frozen until copy-back/rehome or a follow-up operator action resolves them.'
+        ? 'Circuit breaker closed for future archive work; existing frozen migrations and frozen locations remain frozen until copy-back or a follow-up operator action resolves them.'
         : null,
   };
 }

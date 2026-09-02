@@ -551,6 +551,7 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
 
       const result = await runScopedProjectDataArchiveCanary(
         makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
           PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
           PROJECT_DATA: createProjectDataNamespace({
             [SOURCE_OWNER]: source,
@@ -569,8 +570,8 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
 
       expect(result).toMatchObject({
         dryRun: false,
-        globalCronEnabled: false,
-        stats: { enabled: false, skipped: false, selected: 1, migrated: 1 },
+        globalCronEnabled: true,
+        stats: { enabled: true, skipped: false, selected: 1, migrated: 1 },
         selected: [
           {
             projectId: PROJECT_ID,
@@ -592,25 +593,81 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
     }
   });
 
+  it('refuses a non-dry scoped canary when exact archive routing is disabled', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'candidate', {
+        migrationId: 'migration-target',
+        sessionId: SESSION_ID,
+      });
+      const source = createFakeSource();
+      const target = createFakeTarget();
+
+      const result = await runScopedProjectDataArchiveCanary(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+          PROJECT_DATA: createProjectDataNamespace({
+            [SOURCE_OWNER]: source,
+            [TARGET_OWNER]: target,
+          }),
+        }),
+        {
+          projectId: PROJECT_ID,
+          sessionId: SESSION_ID,
+          dryRun: false,
+          reason: 'operator scoped canary',
+          limit: 1,
+          nowDate: new Date(NOW),
+        }
+      );
+
+      expect(result).toMatchObject({
+        dryRun: false,
+        globalCronEnabled: false,
+        selected: [],
+        stats: {
+          skipped: true,
+          skipReason: 'exact_routing_disabled',
+          selected: 0,
+          migrated: 0,
+          recoveredCrashGaps: 0,
+        },
+      });
+      expect(readMigrationRow(sqlite, 'migration-target')).toMatchObject({ state: 'candidate' });
+      expect(readLocationRow(sqlite)).toMatchObject({ location_state: 'migrating' });
+      expect(source.archiveSourcePrepareIntent).not.toHaveBeenCalled();
+      expect(source.archiveSourceFinalizeDelete).not.toHaveBeenCalled();
+      expect(target.archiveTargetPrepare).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('fails closed without R2 before a non-dry scoped canary can create D1 journal rows', async () => {
     const sqlite = new Database(':memory:');
     try {
       createCoordinatorTables(sqlite);
       seedSessionSummary(sqlite, { sessionId: 'session-target', updatedAt: 1000 });
 
-      const result = await runScopedProjectDataArchiveCanary(makeEnv(sqlite), {
-        projectId: PROJECT_ID,
-        sessionId: 'session-target',
-        dryRun: false,
-        reason: 'operator scoped canary',
-        limit: 1,
-        nowDate: new Date(NOW),
-      });
+      const result = await runScopedProjectDataArchiveCanary(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        }),
+        {
+          projectId: PROJECT_ID,
+          sessionId: 'session-target',
+          dryRun: false,
+          reason: 'operator scoped canary',
+          limit: 1,
+          nowDate: new Date(NOW),
+        }
+      );
 
       expect(result).toMatchObject({
         dryRun: false,
         reason: 'operator scoped canary',
-        globalCronEnabled: false,
+        globalCronEnabled: true,
         selected: [],
         stats: {
           skipped: true,
@@ -646,6 +703,7 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
 
       const result = await runScopedProjectDataArchiveCanary(
         makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
           PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
         }),
         {
@@ -661,7 +719,7 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
       expect(result).toMatchObject({
         dryRun: false,
         reason: 'operator scoped crash-gap recovery',
-        globalCronEnabled: false,
+        globalCronEnabled: true,
         stats: { recoveredCrashGaps: 1, selected: 0, migrated: 0 },
       });
       expect(readMigrationRow(sqlite, 'migration-target-gap')).toMatchObject({

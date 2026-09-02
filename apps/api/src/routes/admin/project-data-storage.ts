@@ -5,7 +5,7 @@ import { errors } from '../../middleware/error';
 import {
   copyBackProjectDataArchiveMigration,
   inspectFrozenProjectDataArchiveIntents,
-  rehomeProjectDataArchiveMigration,
+  PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_MAX_LIMIT,
   runScopedProjectDataArchiveCanary,
 } from '../../scheduled/project-data-archive-sharding';
 import {
@@ -82,6 +82,16 @@ function parseArchiveRolloutLimit(rawLimit: string | undefined, env: Env): numbe
   const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : defaultLimit;
   if (!Number.isSafeInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > maxLimit) {
     throw errors.badRequest(`limit must be between 1 and ${maxLimit}`);
+  }
+  return parsedLimit;
+}
+
+function parseArchiveFrozenIntentLimit(rawLimit: string | undefined, env: Env): number {
+  const { defaultLimit, maxLimit } = getProjectDataArchiveRolloutListConfig(env);
+  const endpointMaxLimit = Math.min(maxLimit, PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_MAX_LIMIT);
+  const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : Math.min(defaultLimit, endpointMaxLimit);
+  if (!Number.isSafeInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > endpointMaxLimit) {
+    throw errors.badRequest(`limit must be between 1 and ${endpointMaxLimit}`);
   }
   return parsedLimit;
 }
@@ -255,8 +265,8 @@ adminProjectDataStorageRoutes.get('/archive-sharding/problem-migrations', async 
 /**
  * POST /api/admin/project-data/storage/:projectId/archive-sharding/canary
  *
- * Scoped manual archive-sharding dry-run/canary path. Defaults to dry-run and
- * does not depend on the global cron enable flag.
+ * Scoped manual archive-sharding dry-run/canary path. Defaults to dry-run.
+ * Non-dry canaries fail closed unless exact archive routing is active.
  */
 adminProjectDataStorageRoutes.post('/:projectId/archive-sharding/canary', async (c) => {
   const projectId = assertProjectId(c.req.param('projectId'));
@@ -289,6 +299,11 @@ adminProjectDataStorageRoutes.post('/:projectId/archive-sharding/canary', async 
     chunkRows: body.chunkRows,
     chunkBytes: body.chunkBytes,
   });
+  if (body.dryRun === false && result.stats.skipReason === 'exact_routing_disabled') {
+    throw errors.badRequest(
+      'non-dry archive-sharding canary requires exact archive routing to be enabled'
+    );
+  }
   return c.json({ result });
 });
 
@@ -336,7 +351,7 @@ adminProjectDataStorageRoutes.post(
  * POST /api/admin/project-data/storage/:projectId/archive-sharding/unfreeze
  *
  * Alias for closing the project circuit breaker. Frozen migration rows remain
- * frozen until copy-back/rehome or a later explicit thaw operation exists.
+ * frozen until copy-back or a later explicit thaw operation exists.
  */
 adminProjectDataStorageRoutes.post(
   '/:projectId/archive-sharding/unfreeze',
@@ -360,7 +375,7 @@ adminProjectDataStorageRoutes.post(
  */
 adminProjectDataStorageRoutes.get('/:projectId/archive-sharding/frozen-intents', async (c) => {
   const projectId = assertProjectId(c.req.param('projectId'));
-  const limit = parseArchiveRolloutLimit(c.req.query('limit'), c.env);
+  const limit = parseArchiveFrozenIntentLimit(c.req.query('limit'), c.env);
   const inspections = await inspectFrozenProjectDataArchiveIntents(c.env, { projectId, limit });
   return c.json({ inspections, limit });
 });
@@ -377,26 +392,6 @@ adminProjectDataStorageRoutes.post(
     if (!migrationId) throw errors.badRequest('migrationId is required');
     const body = c.req.valid('json');
     const result = await copyBackProjectDataArchiveMigration(c.env, {
-      projectId,
-      migrationId,
-      reason: body.reason.trim(),
-    });
-    return c.json({ result });
-  }
-);
-
-/**
- * POST /api/admin/project-data/storage/:projectId/archive-sharding/migrations/:migrationId/rehome
- */
-adminProjectDataStorageRoutes.post(
-  '/:projectId/archive-sharding/migrations/:migrationId/rehome',
-  jsonValidator(ProjectDataArchiveRecoveryControlSchema),
-  async (c) => {
-    const projectId = assertProjectId(c.req.param('projectId'));
-    const migrationId = c.req.param('migrationId')?.trim();
-    if (!migrationId) throw errors.badRequest('migrationId is required');
-    const body = c.req.valid('json');
-    const result = await rehomeProjectDataArchiveMigration(c.env, {
       projectId,
       migrationId,
       reason: body.reason.trim(),

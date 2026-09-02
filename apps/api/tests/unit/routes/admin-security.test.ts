@@ -110,21 +110,14 @@ vi.mock('../../../src/scheduled/stuck-tasks', () => ({
 }));
 
 // --- Schemas mock ---
-vi.mock('../../../src/schemas', () => ({
-  AdminUserActionSchema: {},
-  AdminUserRoleSchema: {},
-  AdminLogQuerySchema: {},
-  ProjectDataArchiveCanaryControlSchema: {},
-  ProjectDataArchiveCircuitBreakerSchema: {},
-  ProjectDataArchiveFreezeProjectSchema: {},
-  ProjectDataArchiveRecoveryControlSchema: {},
-  ProjectDataStorageEmergencyPurgeSchema: {},
-  RunDebugDiagnosisSchema: {},
-  SaveDebugDiagnosisIdeaSchema: {},
-  UpdateSignupApprovalConfigSchema: {},
-  jsonValidator: () => vi.fn((_c: any, next: any) => next()),
-  parseOptionalBody: vi.fn(async () => ({})),
-}));
+vi.mock('../../../src/schemas', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/schemas')>();
+  return {
+    ...actual,
+    jsonValidator: () => vi.fn((_c: any, next: any) => next()),
+    parseOptionalBody: vi.fn(async () => ({})),
+  };
+});
 
 // Import routes after mocks
 const { adminRoutes } = await import('../../../src/routes/admin');

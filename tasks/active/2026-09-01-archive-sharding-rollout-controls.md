@@ -14,12 +14,13 @@ production configuration, or run a production canary.
 
 - `apps/api/src/scheduled/project-data-archive-sharding.ts` already contains the core coordinator plus
   `freezeProjectDataArchiveMigration`, `poisonProjectDataArchiveMigration`,
-  `inspectFrozenProjectDataArchiveIntents`, `copyBackProjectDataArchiveMigration`, and
-  `rehomeProjectDataArchiveMigration`. These should be exposed behind superadmin admin routes rather
-  than reimplemented.
+  `inspectFrozenProjectDataArchiveIntents`, and `copyBackProjectDataArchiveMigration`. These should
+  be exposed behind superadmin admin routes rather than reimplemented. Rehome remains internal until
+  it has distinct recovery semantics.
 - `runProjectDataArchiveSharding()` exits early unless `PROJECT_DATA_ARCHIVE_SHARDING_ENABLED=true`;
-  the manual canary path needs a scoped entry point that does not depend on global cron selection, but
-  dry-run must remain D1-only and must never call source deletion RPCs.
+  the manual canary path needs a scoped dry-run entry point that does not depend on global cron
+  selection, but non-dry canary execution must fail closed unless exact archive routing is active.
+  Dry-run must remain D1-only and must never call source deletion RPCs.
 - D1 rollout state lives in `project_data_archive_migrations`,
   `project_data_session_locations`, and `project_data_archive_circuit_breakers` from migration
   `0135_project_data_archive_sharding_bridge.sql`; no schema change is needed for this slice.
@@ -41,13 +42,15 @@ production configuration, or run a production canary.
 
 - [x] Add bounded D1 rollout-state and failed/poisoned/frozen listing helpers.
 - [x] Add scoped manual archive-sharding canary helper with dry-run default, project/session filters,
-      tiny budgets, and no global-cron flag dependency.
+      tiny budgets, no global-cron dependency for dry-runs, and fail-closed routing gate for non-dry
+      runs.
 - [x] Add project circuit-breaker/freeze controls with explicit reason and audit-friendly result.
 - [x] Expose superadmin admin routes for state, problem migrations, dry-run/canary, freeze/unfreeze,
-      frozen-intent inspection, copy-back, and rehome.
+      frozen-intent inspection, and copy-back.
 - [x] Add Valibot schemas for every new request body.
 - [x] Add route/service tests for auth, bounded limits, scoped selection, dry-run no-op behavior,
-      disabled-by-default behavior, and no source deletion from dry-run.
+      disabled-by-default behavior, exact-routing-disabled non-dry refusal, and no source deletion
+      from dry-run.
 - [x] Update API/env docs for the operator sequence and rollout model.
 - [x] Run focused API tests plus lint/typecheck/build as appropriate.
 - [x] Run specialist reviews: cloudflare-specialist, security-auditor, env-validator,
@@ -61,16 +64,18 @@ production configuration, or run a production canary.
 - Superadmins can inspect D1 archive-sharding journal/session-location/circuit-breaker state by
   project and optionally session with bounded limits.
 - Superadmins can list failed, poisoned, and frozen migrations with bounded limits.
-- Frozen-intent inspection, copy-back, and rehome are reachable only through superadmin admin routes
-  and retain existing safety preconditions.
+- Frozen-intent inspection and copy-back are reachable only through superadmin admin routes, and
+  copy-back retains existing safety preconditions. Rehome is deliberately not exposed in this slice.
 - Manual canary dry-run defaults to no-op and cannot create D1 candidate rows, call ProjectData owner
   RPCs, write R2, or delete source rows.
-- Manual non-dry-run canary work is scoped to exactly one project and optionally one session, with
-  one-session selection by default and existing migration finalization safety unchanged.
+- Manual non-dry-run canary work fails closed unless exact archive routing is active. When enabled,
+  it is scoped to exactly one project and optionally one session, with one-session selection by
+  default and existing migration finalization safety unchanged.
 - Project freeze/unfreeze/circuit-breaker responses include the project id, requested state, reason,
   affected rows, and timestamp.
-- Docs describe the safe operator sequence: inspect, dry-run a scoped target, optionally run a scoped
-  canary, inspect failures, freeze/copy-back/rehome if needed, and only later consider global cron.
+- Docs describe the safe operator sequence: inspect, dry-run a scoped target, enable exact routing
+  only under coordinator control before any non-dry canary, inspect failures, freeze/copy-back if
+  needed, and only later consider broader global cron rollout.
 
 ## References
 

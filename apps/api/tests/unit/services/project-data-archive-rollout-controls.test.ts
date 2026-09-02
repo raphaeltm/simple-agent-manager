@@ -196,6 +196,57 @@ describe('ProjectData archive rollout controls service', () => {
     }
   });
 
+  it('keeps state aggregates complete when recent row lists are limited', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createTables(sqlite);
+      seedMigration(sqlite, {
+        migrationId: 'migration-source-deleted',
+        sessionId: 'session-source-deleted',
+        state: 'source_deleted',
+        locationState: 'archive_shard',
+        updatedAt: 1000,
+      });
+      seedMigration(sqlite, {
+        migrationId: 'migration-poisoned',
+        sessionId: 'session-poisoned',
+        state: 'poisoned',
+        locationState: 'frozen',
+        updatedAt: 2000,
+      });
+      seedMigration(sqlite, {
+        migrationId: 'migration-failed',
+        sessionId: 'session-failed',
+        state: 'failed',
+        updatedAt: 3000,
+      });
+
+      const state = await getProjectDataArchiveRolloutState(makeEnv(sqlite), {
+        projectId: 'project-archive',
+        limit: 1,
+      });
+
+      expect(state.recentMigrations.map((migration) => migration.migrationId)).toEqual([
+        'migration-failed',
+      ]);
+      expect(state.recentMigrationsHasMore).toBe(true);
+      expect(state.locations).toHaveLength(1);
+      expect(state.locationsHasMore).toBe(true);
+      expect(state.migrationStateCounts.map((count) => count.state).sort()).toEqual([
+        'failed',
+        'poisoned',
+        'source_deleted',
+      ]);
+      expect(state.locationStateCounts.map((count) => count.state).sort()).toEqual([
+        'archive_shard',
+        'frozen',
+        'migrating',
+      ]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('freezes project archive work and closes the circuit without thawing frozen rows', async () => {
     const sqlite = new Database(':memory:');
     try {
@@ -265,6 +316,43 @@ describe('ProjectData archive rollout controls service', () => {
           )
           .get()
       ).toEqual({ state: 'frozen' });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('preserves circuit breaker openedAt when refreshing an active breaker', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createTables(sqlite);
+
+      await setProjectDataArchiveCircuitBreaker(makeEnv(sqlite), {
+        projectId: 'project-archive',
+        state: 'open',
+        reason: 'initial incident',
+        now: 5000,
+      });
+      await setProjectDataArchiveCircuitBreaker(makeEnv(sqlite), {
+        projectId: 'project-archive',
+        state: 'frozen',
+        reason: 'operator freeze',
+        now: 6000,
+      });
+
+      expect(
+        sqlite
+          .prepare(
+            `SELECT state, reason, opened_at, updated_at
+             FROM project_data_archive_circuit_breakers
+             WHERE project_id = ?`
+          )
+          .get('project-archive')
+      ).toEqual({
+        state: 'frozen',
+        reason: 'operator freeze',
+        opened_at: 5000,
+        updated_at: 6000,
+      });
     } finally {
       sqlite.close();
     }

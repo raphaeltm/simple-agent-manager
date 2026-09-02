@@ -315,6 +315,46 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
     }
   });
 
+  it('refuses non-dry canary through the admin route while exact routing is disabled', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createTables(sqlite);
+      seedSessionSummary(sqlite, 'project-archive', 'session-target');
+
+      const response = await createApp().request(
+        '/api/admin/project-data/storage/project-archive/archive-sharding/canary',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-test-role': 'superadmin' },
+          body: JSON.stringify({
+            dryRun: false,
+            sessionId: 'session-target',
+            reason: 'operator scoped canary',
+          }),
+        },
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_R2: { put: vi.fn() } as unknown as R2Bucket,
+          PROJECT_DATA: createArchiveProjectDataNamespace(),
+        })
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: 'BAD_REQUEST',
+        message: 'non-dry archive-sharding canary requires exact archive routing to be enabled',
+      });
+      expect(
+        (
+          sqlite
+            .prepare('SELECT COUNT(*) AS count FROM project_data_archive_migrations')
+            .get() as { count: number }
+        ).count
+      ).toBe(0);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('wires frozen-intent inspection through the superadmin route', async () => {
     const sqlite = new Database(':memory:');
     try {
@@ -344,6 +384,28 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
           },
         ],
         limit: 25,
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('caps frozen-intent inspection below the D1-only rollout list maximum', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createTables(sqlite);
+      const response = await createApp().request(
+        '/api/admin/project-data/storage/project-archive/archive-sharding/frozen-intents?limit=101',
+        { headers: { 'x-test-role': 'superadmin' } },
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_MAX: '500',
+        })
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: 'BAD_REQUEST',
+        message: 'limit must be between 1 and 100',
       });
     } finally {
       sqlite.close();
@@ -407,15 +469,9 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
     }
   });
 
-  it('wires rehome through the same reasoned recovery route contract', async () => {
+  it('does not expose a misleading rehome recovery endpoint in this rollout slice', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createTables(sqlite);
-      seedArchiveMigration(sqlite, {
-        migrationId: 'migration-copy-back',
-        state: 'published',
-      });
-
       const response = await createApp().request(
         '/api/admin/project-data/storage/project-archive/archive-sharding/migrations/migration-copy-back/rehome',
         {
@@ -423,19 +479,10 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
           headers: { 'Content-Type': 'application/json', 'x-test-role': 'superadmin' },
           body: JSON.stringify({ reason: 'operator rehome' }),
         },
-        makeEnv(sqlite, {
-          PROJECT_DATA: createArchiveProjectDataNamespace(),
-        })
+        makeEnv(sqlite)
       );
 
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({
-        result: {
-          migrationId: 'migration-copy-back',
-          reason: 'operator rehome',
-          restoredToRoot: true,
-        },
-      });
+      expect(response.status).toBe(404);
     } finally {
       sqlite.close();
     }

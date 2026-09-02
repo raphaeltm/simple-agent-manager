@@ -130,7 +130,11 @@ import {
   isDurableObjectStorageFullError,
   isTransientDurableObjectError,
 } from './durable-object-retry';
-import { assertExactWriteAllowed, resolveExactReadOwner } from './project-data-archive-routing';
+import {
+  assertExactWriteAllowed,
+  isProjectDataArchiveExactRoutingEnabled,
+  resolveExactReadOwner,
+} from './project-data-archive-routing';
 import { ensureOncePerIsolate, forgetEnsuredProjectData } from './project-data-ensure-memo';
 import { toProjectDataStorageFullError } from './project-data-storage-errors';
 import {
@@ -139,10 +143,6 @@ import {
 } from './project-lifecycle-event-inputs';
 import { hasAuthorizedRestorableSnapshotWakeClaim } from './session-snapshots';
 import type { TaskAcpLivenessSignals } from './task-runtime-liveness';
-
-function isArchiveExactRoutingEnabled(env: Env): boolean {
-  return env.PROJECT_DATA_ARCHIVE_SHARDING_ENABLED === 'true';
-}
 
 function rootExactReadOwner(projectId: string, sessionId: string): ProjectDataArchiveLocation {
   return {
@@ -163,7 +163,7 @@ async function resolveExactReadOwnerIfArchiveEnabled(
   projectId: string,
   sessionId: string
 ): Promise<ProjectDataArchiveLocation> {
-  if (!isArchiveExactRoutingEnabled(env)) return rootExactReadOwner(projectId, sessionId);
+  if (!isProjectDataArchiveExactRoutingEnabled(env)) return rootExactReadOwner(projectId, sessionId);
   return resolveExactReadOwner(env, projectId, sessionId);
 }
 
@@ -173,7 +173,7 @@ async function assertExactWriteAllowedIfArchiveEnabled(
   sessionId: string,
   operation: string
 ): Promise<void> {
-  if (!isArchiveExactRoutingEnabled(env)) return;
+  if (!isProjectDataArchiveExactRoutingEnabled(env)) return;
   await assertExactWriteAllowed(env, projectId, sessionId, operation);
 }
 

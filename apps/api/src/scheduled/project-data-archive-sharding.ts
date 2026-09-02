@@ -28,6 +28,7 @@ import {
   archiveShardProjectDataOwner,
   assertArchiveJournalTransition,
   casArchiveJournalState,
+  isProjectDataArchiveExactRoutingEnabled,
   rootProjectDataOwner,
 } from '../services/project-data-archive-routing';
 
@@ -36,6 +37,7 @@ const PROJECT_DATA_ARCHIVE_DEFAULT_POISON_AFTER_ATTEMPTS = 3;
 const PROJECT_DATA_ARCHIVE_MAX_POISON_AFTER_ATTEMPTS = 100;
 const PROJECT_DATA_ARCHIVE_DEFAULT_MANUAL_CANARY_MAX_SESSIONS = 5;
 const PROJECT_DATA_ARCHIVE_DEFAULT_MANUAL_CANARY_MAX_WALL_TIME_MS = 15_000;
+export const PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_MAX_LIMIT = 100;
 
 const ACTIVE_RECLAIMABLE_STATES = [
   'candidate',
@@ -153,6 +155,7 @@ export type ProjectDataArchiveManualCanaryResult = {
   scope: ArchiveCoordinatorScope;
   reason: string | null;
   globalCronEnabled: boolean;
+  exactRoutingEnabled: boolean;
   selected: ProjectDataArchiveManualCanaryCandidate[];
   stats: ProjectDataArchiveShardingStats;
 };
@@ -1735,7 +1738,10 @@ export async function inspectFrozenProjectDataArchiveIntents(
     limit?: number;
   } = {}
 ): Promise<ProjectDataArchiveFrozenIntentInspection[]> {
-  const limit = Math.max(1, Math.min(input.limit ?? 25, 500));
+  const limit = Math.max(
+    1,
+    Math.min(input.limit ?? 25, PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_MAX_LIMIT)
+  );
   const projectPredicate = input.projectId ? 'AND m.project_id = ?' : '';
   const rows = await env.DATABASE.prepare(
     `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
@@ -1954,18 +1960,6 @@ export async function copyBackProjectDataArchiveMigration(
   };
 }
 
-export async function rehomeProjectDataArchiveMigration(
-  env: Env,
-  input: {
-    migrationId: string;
-    projectId: string;
-    reason: string;
-    now?: number;
-  }
-): Promise<ProjectDataArchiveCopyBackResult> {
-  return copyBackProjectDataArchiveMigration(env, input);
-}
-
 function recordMigrationFailure(
   stats: ProjectDataArchiveShardingStats,
   failureState: 'failed' | 'poisoned' | 'unchanged'
@@ -2045,12 +2039,25 @@ export async function runScopedProjectDataArchiveCanary(
   }
   const baseConfig = resolveConfig(env);
   const config = scopedConfig(env, baseConfig, input);
+  const exactRoutingEnabled = isProjectDataArchiveExactRoutingEnabled(env);
   const scope: ArchiveCoordinatorScope = {
     projectId: input.projectId,
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
   };
   const nowDate = input.nowDate ?? new Date();
   const now = nowDate.getTime();
+  if (!dryRun && !exactRoutingEnabled) {
+    const stats = emptyStats(config, true, 'exact_routing_disabled');
+    return {
+      dryRun,
+      scope,
+      reason,
+      globalCronEnabled: baseConfig.enabled,
+      exactRoutingEnabled,
+      selected: [],
+      stats,
+    };
+  }
   const archiveR2 = env.PROJECT_DATA_ARCHIVE_R2;
   if (!dryRun && !archiveR2) {
     const stats = emptyStats(config, true, 'missing_r2_binding');
@@ -2059,6 +2066,7 @@ export async function runScopedProjectDataArchiveCanary(
       scope,
       reason,
       globalCronEnabled: baseConfig.enabled,
+      exactRoutingEnabled,
       selected: [],
       stats,
     };
@@ -2073,6 +2081,7 @@ export async function runScopedProjectDataArchiveCanary(
       scope,
       reason,
       globalCronEnabled: baseConfig.enabled,
+      exactRoutingEnabled,
       selected: work.selected,
       stats,
     };
@@ -2115,6 +2124,7 @@ export async function runScopedProjectDataArchiveCanary(
     scope,
     reason,
     globalCronEnabled: baseConfig.enabled,
+    exactRoutingEnabled,
     selected: work.selected,
     stats,
   };
