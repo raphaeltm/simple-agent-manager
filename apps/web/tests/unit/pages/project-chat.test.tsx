@@ -788,17 +788,17 @@ describe('ProjectChat new chat button', () => {
 
     const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
     expect((textarea as HTMLTextAreaElement).value).toContain('SAM MCP tools');
-    expect((textarea as HTMLTextAreaElement).value).toContain(
-      'Previous session: "Fix the login bug"'
-    );
-    expect((textarea as HTMLTextAreaElement).value).toContain(`Parent project ID: ${PROJECT_ID}`);
-    expect((textarea as HTMLTextAreaElement).value).toContain(
-      `Parent session ID: ${SESSION_WITH_TASK.id}`
-    );
-    expect((textarea as HTMLTextAreaElement).value).toContain('Parent task ID: task-1');
 
     await waitFor(() => {
       expect(mocks.prepareForkSession).toHaveBeenCalledWith(PROJECT_ID, SESSION_WITH_TASK.id);
+      expect((textarea as HTMLTextAreaElement).value).toContain(
+        'Previous session: "Fix the login bug"'
+      );
+      expect((textarea as HTMLTextAreaElement).value).toContain(`Parent project ID: ${PROJECT_ID}`);
+      expect((textarea as HTMLTextAreaElement).value).toContain(
+        `Parent session ID: ${SESSION_WITH_TASK.id}`
+      );
+      expect((textarea as HTMLTextAreaElement).value).toContain('Parent task ID: task-1');
       expect(screen.queryByText('Loading context...')).not.toBeInTheDocument();
     });
 
