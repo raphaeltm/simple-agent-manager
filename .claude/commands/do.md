@@ -1,5 +1,5 @@
 ---
-description: End-to-end task execution — research, plan, implement, review, and merge via PR
+description: End-to-end task execution — research, plan, implement, review, CodeRabbit, and merge via PR
 argument-hint: <task description>
 ---
 
@@ -25,7 +25,7 @@ TodoWrite([
   { content: "Phase 4: Pre-PR validation (lint, typecheck, test, build)", status: "pending", activeForm: "Running full quality suite" },
   { content: "Phase 5: Review (local specialist subagents)", status: "pending", activeForm: "Running local reviewer subagents" },
   { content: "Phase 6: Staging verification (deploy + Playwright)", status: "pending", activeForm: "Verifying on staging" },
-  { content: "Phase 7: Create PR, wait for CI, merge", status: "pending", activeForm: "Creating and merging PR" },
+  { content: "Phase 7: Create PR, wait for CI and CodeRabbit, merge", status: "pending", activeForm: "Creating PR and completing review gates" },
 ])
 ```
 
@@ -245,7 +245,7 @@ You made a mistake. Close the PR, complete staging verification, then re-open. D
 
 ---
 
-## Phase 7: Pull Request & Post-Merge Deploy Monitoring
+## Phase 7: Pull Request, CodeRabbit Review & Post-Merge Deploy Monitoring
 
 1. **Create the PR** using `gh pr create`:
    - Title: short, under 70 characters
@@ -258,18 +258,32 @@ You made a mistake. Close the PR, complete staging verification, then re-open. D
 
 3. **If CI fails:** inspect logs, fix issues, commit, push, repeat.
 
-4. **Once CI is fully green**, merge the PR:
+4. **Once CI is fully green and every non-CodeRabbit gate is satisfied**, request CodeRabbit review by applying the opt-in label:
+   ```
+   gh pr edit <pr-number> --add-label coderabbit-review
+   ```
+
+5. **Complete the iterative CodeRabbit review loop before merge.** The PR is NOT good to go until the agent and CodeRabbit are in agreement:
+   - Read every CodeRabbit review comment, thread, and summary.
+   - Implement valid feedback, push fixes, and re-run the affected validation/CI checks.
+   - For feedback you believe is not applicable, explicitly review it, document the reason, and close/resolve the thread when GitHub supports that state.
+   - Keep the `coderabbit-review` label on the PR so CodeRabbit performs incremental reviews for subsequent commits.
+   - Repeat this loop until the latest CodeRabbit review after the final pushed fixes has no unresolved feedback and you independently agree the PR is ready.
+
+   **If CodeRabbit is unavailable, does not respond, or its feedback state cannot be inspected, the PR is not self-mergeable. Add `needs-human-review`, document the blocker, and do NOT merge.**
+
+6. **Once CI is fully green and the CodeRabbit loop is complete**, merge the PR:
    ```
    gh pr merge <pr-number> --squash --delete-branch
    ```
 
-5. **Clean up the worktree:**
+7. **Clean up the worktree:**
    ```
    cd /workspaces/simple-agent-manager
    git worktree remove ../sam-<short-name>
    ```
 
-6. **Pull main** to stay current:
+8. **Pull main** to stay current:
    ```
    git pull origin main
    ```
