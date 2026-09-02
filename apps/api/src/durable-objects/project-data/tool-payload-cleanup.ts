@@ -10,8 +10,6 @@ import {
 import { readNextToolPayloadCleanupRetryAt } from './tool-payload-cleanup-attempts';
 import {
   clearRearchivableOversizedToolPayloadCleanupAttempts,
-  hasRearchivableOversizedToolPayloadCleanupAttemptsAfter,
-  hasToolPayloadCandidatesAfter,
   scanToolPayloadCandidates,
   selectToolPayloadCandidates,
   type ToolPayloadCandidate,
@@ -180,15 +178,15 @@ async function scanToolPayloadCleanupBatch(
   plan: ToolPayloadCleanupPlan
 ): Promise<ToolPayloadCleanupBatch> {
   const batch = createEmptyToolPayloadCleanupBatch();
-  batch.rearchivableOversizedAttemptsReset =
-    clearRearchivableOversizedToolPayloadCleanupAttempts(
-      sql,
-      plan.pendingCursor,
-      plan.cutoffCreatedAt,
-      plan.archiveMaxMetadataBytes,
-      plan.batchRows
-    );
-  const candidates = selectToolPayloadCandidates(
+  const rearchivableResult = clearRearchivableOversizedToolPayloadCleanupAttempts(
+    sql,
+    plan.pendingCursor,
+    plan.cutoffCreatedAt,
+    plan.archiveMaxMetadataBytes,
+    plan.batchRows
+  );
+  batch.rearchivableOversizedAttemptsReset = rearchivableResult.rowsChanged;
+  const selection = selectToolPayloadCandidates(
     sql,
     plan.pendingCursor,
     plan.cutoffCreatedAt,
@@ -197,6 +195,7 @@ async function scanToolPayloadCleanupBatch(
     plan.batchBytes,
     true
   );
+  const candidates = selection.candidates;
 
   if (candidates.length === 0) {
     const nextRetryAt = readNextToolPayloadCleanupRetryAt(sql, plan.now);
@@ -250,22 +249,11 @@ async function scanToolPayloadCleanupBatch(
     return batch;
   }
 
+  // Infer hasMore from the selection/rearchivable results instead of running
+  // separate full-scan existence queries (the deleted hasToolPayloadCandidatesAfter
+  // and hasRearchivableOversizedToolPayloadCleanupAttemptsAfter functions).
   const lastCursor = scanned.lastCursor;
-  if (lastCursor && hasToolPayloadCandidatesAfter(sql, lastCursor, plan.cutoffCreatedAt, plan.now)) {
-    batch.hasMoreCandidates = true;
-    batch.pauseCursor = lastCursor;
-    return batch;
-  }
-
-  if (
-    lastCursor &&
-    hasRearchivableOversizedToolPayloadCleanupAttemptsAfter(
-      sql,
-      lastCursor,
-      plan.cutoffCreatedAt,
-      plan.archiveMaxMetadataBytes
-    )
-  ) {
+  if (lastCursor && (selection.hasMore || rearchivableResult.hasMore)) {
     batch.hasMoreCandidates = true;
     batch.pauseCursor = lastCursor;
     return batch;
