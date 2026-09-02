@@ -132,7 +132,7 @@ async function runArchiveCleanup(
   overrides: RuntimeEnvOverride,
   options: { now?: number; nowMs?: () => number } = {}
 ) {
-  return withRuntimeEnv(overrides, async () =>
+  return withRuntimeEnv({ PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'true', ...overrides }, async () =>
     runInDurableObject(stub, async (_instance, state) => {
       const config = resolveStorageSafetyConfig(testEnv);
       return runProjectDataToolPayloadCleanup(state.storage.sql, testEnv, projectId, config, {
@@ -263,7 +263,7 @@ describe('ProjectData tool payload R2 archival', () => {
 
     expect(result?.rowsUpdated).toBe(0);
     expect(result?.rowsFailed).toBe(1);
-    expect(result?.recheckAt).toBe(FIXED_NOW + 60_000);
+    expect(result?.recheckAt).toBe(FIXED_NOW + 60 * 60 * 1000);
     const metadata = await readMessageMetadata(stub, seeded.messageIds);
     expect(Array.isArray(metadata.get(seeded.messageIds[0]!)?.content)).toBe(true);
     expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
@@ -716,7 +716,7 @@ describe('ProjectData tool payload R2 archival', () => {
       { now: FIXED_NOW }
     );
     expect(rowBudgetResult?.rowsScanned).toBe(1);
-    expect(rowBudgetResult?.recheckAt).toBe(FIXED_NOW + 60_000);
+    expect(rowBudgetResult?.recheckAt).toBe(FIXED_NOW + 60 * 60 * 1000);
     const rowMetadata = await readMessageMetadata(rowBudgetStub, rowBudgetSeeded.messageIds);
     expect(rowMetadata.get(rowBudgetSeeded.messageIds[0]!)?.content).toBeUndefined();
     expect(Array.isArray(rowMetadata.get(rowBudgetSeeded.messageIds[1]!)?.content)).toBe(true);
@@ -739,7 +739,7 @@ describe('ProjectData tool payload R2 archival', () => {
       { now: FIXED_NOW }
     );
     expect(byteBudgetResult?.rowsScanned).toBe(1);
-    expect(byteBudgetResult?.recheckAt).toBe(FIXED_NOW + 60_000);
+    expect(byteBudgetResult?.recheckAt).toBe(FIXED_NOW + 60 * 60 * 1000);
     const byteMetadata = await readMessageMetadata(byteBudgetStub, byteBudgetSeeded.messageIds);
     expect(byteMetadata.get(byteBudgetSeeded.messageIds[0]!)?.content).toBeUndefined();
     expect(Array.isArray(byteMetadata.get(byteBudgetSeeded.messageIds[1]!)?.content)).toBe(true);
@@ -767,7 +767,7 @@ describe('ProjectData tool payload R2 archival', () => {
       }
     );
     expect(wallBudgetResult?.rowsScanned).toBe(1);
-    expect(wallBudgetResult?.recheckAt).toBe(FIXED_NOW + 60_000);
+    expect(wallBudgetResult?.recheckAt).toBe(FIXED_NOW + 60 * 60 * 1000);
     const wallMetadata = await readMessageMetadata(wallBudgetStub, wallBudgetSeeded.messageIds);
     expect(wallMetadata.get(wallBudgetSeeded.messageIds[0]!)?.content).toBeUndefined();
     expect(Array.isArray(wallMetadata.get(wallBudgetSeeded.messageIds[1]!)?.content)).toBe(true);
