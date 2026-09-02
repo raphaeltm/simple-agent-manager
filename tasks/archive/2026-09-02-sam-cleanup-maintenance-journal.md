@@ -15,10 +15,10 @@ that disabled work were already enabled.
 - The prior 2026-09-01 journal explained the intentionally disabled
   archive-sharding bridge. It is preparation work, not the subject of this
   entry.
-- PR #2002 (`ce1ec87c`) changed ProjectData event-log cleanup from a new
-  default-on background job with a 60-second recheck to opt-in cleanup with an
-  hourly recheck. This prevents one storage-maintenance job from making the
-  shared Durable Object alarm run all of its jobs every minute.
+- PR #2002 (`ce1ec87c`) changed the ProjectData event-log cleanup code defaults
+  from default-on with a 60-second recheck to opt-in with an hourly recheck.
+  Explicit deployment configuration can override those defaults, so this is a
+  safer baseline rather than a claim that every existing alarm changed itself.
 - PR #2004 (`3c998826`) disabled the production tool-payload cleanup switch
   while its candidate query is redesigned. The query repeatedly scanned the
   hot ProjectData SQLite database rather than using an efficient seek.
@@ -36,7 +36,7 @@ that disabled work were already enabled.
 - [x] Draft a public, layperson-friendly SAM journal post.
 - [x] Use a Mermaid diagram to clarify the maintenance flow.
 - [x] Run narrow marketing-site validation and content checks.
-- [ ] Complete documentation and task-completion review, then archive this
+- [x] Complete documentation and task-completion review, then archive this
       record.
 
 ## Acceptance criteria
@@ -64,6 +64,11 @@ that disabled work were already enabled.
   internal documentation links.
 - Static content checks passed: required frontmatter, title/excerpt limits,
   balanced code fences, one Mermaid diagram, no body H1, and `git diff --check`.
+- Task-completion review passed for the committed content; the expected PR and
+  merge criterion remains pending until Phase 7.
+- Documentation review found and corrected the task-record distinction between
+  code defaults and explicit deployment configuration; no public-post issue
+  remains.
 
 ## References
 
