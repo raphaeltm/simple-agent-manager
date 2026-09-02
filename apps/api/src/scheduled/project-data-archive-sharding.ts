@@ -17,6 +17,7 @@ import {
   PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_PROJECTS,
   PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_SESSIONS,
   PROJECT_DATA_ARCHIVE_DEFAULT_WALL_TIME_MS,
+  PROJECT_DATA_ARCHIVE_JOURNAL_STATES,
   PROJECT_DATA_ARCHIVE_MAX_CHUNK_BYTES,
   PROJECT_DATA_ARCHIVE_ROUTING_SCHEMA_VERSION,
   PROJECT_DATA_ARCHIVE_TABLES,
@@ -24,16 +25,22 @@ import {
   type ProjectDataArchiveJournalState,
   type ProjectDataArchiveTableName,
 } from '../project-data-archive/contract';
+import { getProjectDataArchiveRolloutWarningConfig } from '../services/project-data-archive-rollout-controls';
 import {
   archiveShardProjectDataOwner,
   assertArchiveJournalTransition,
   casArchiveJournalState,
+  isProjectDataArchiveExactRoutingEnabled,
   rootProjectDataOwner,
 } from '../services/project-data-archive-routing';
 
 const log = createModuleLogger('scheduled.project_data_archive_sharding');
 const PROJECT_DATA_ARCHIVE_DEFAULT_POISON_AFTER_ATTEMPTS = 3;
 const PROJECT_DATA_ARCHIVE_MAX_POISON_AFTER_ATTEMPTS = 100;
+const PROJECT_DATA_ARCHIVE_DEFAULT_MANUAL_CANARY_MAX_SESSIONS = 5;
+const PROJECT_DATA_ARCHIVE_DEFAULT_MANUAL_CANARY_MAX_WALL_TIME_MS = 15_000;
+const PROJECT_DATA_ARCHIVE_DEFAULT_FROZEN_INTENT_INSPECTION_LIMIT = 5;
+const PROJECT_DATA_ARCHIVE_DEFAULT_FROZEN_INTENT_INSPECTION_MAX_LIMIT = 10;
 
 const ACTIVE_RECLAIMABLE_STATES = [
   'candidate',
@@ -85,6 +92,18 @@ type ArchiveCoordinatorConfig = {
   r2Prefix: string;
 };
 
+type ArchiveCoordinatorScope = {
+  projectId: string;
+  sessionId?: string;
+};
+
+type ArchiveCoordinatorBudgetOverrides = {
+  limit?: number;
+  wallTimeMs?: number;
+  chunkRows?: number;
+  chunkBytes?: number;
+};
+
 type CandidateRow = {
   project_id: string;
   session_id: string;
@@ -124,6 +143,24 @@ export type ProjectDataArchiveShardingStats = {
   poisoned: number;
   chunksCopied: number;
   rowsCopied: number;
+};
+
+export type ProjectDataArchiveManualCanaryCandidate = {
+  projectId: string;
+  sessionId: string;
+  migrationId: string | null;
+  state: ProjectDataArchiveJournalState | 'eligible_session';
+  source: 'existing_migration' | 'eligible_session';
+};
+
+export type ProjectDataArchiveManualCanaryResult = {
+  dryRun: boolean;
+  scope: ArchiveCoordinatorScope;
+  reason: string | null;
+  globalCronEnabled: boolean;
+  exactRoutingEnabled: boolean;
+  selected: ProjectDataArchiveManualCanaryCandidate[];
+  stats: ProjectDataArchiveShardingStats;
 };
 
 export type ProjectDataArchiveFrozenIntentInspection = {
@@ -170,10 +207,56 @@ export type ProjectDataArchiveFrozenIntentInspection = {
       };
 };
 
+export type ProjectDataArchiveFrozenIntentWarning = {
+  surface: 'frozen_intents';
+  skippedRows: number;
+  examples: Array<{
+    rowIndex: number;
+    reason: string;
+  }>;
+};
+
+export type ProjectDataArchiveFrozenIntentInspectionResult = {
+  inspections: ProjectDataArchiveFrozenIntentInspection[];
+  warnings: ProjectDataArchiveFrozenIntentWarning[];
+};
+
+export function getProjectDataArchiveFrozenIntentInspectionConfig(env: Env): {
+  defaultLimit: number;
+  maxLimit: number;
+} {
+  const maxLimit = envInt(
+    env.PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_LIMIT_MAX,
+    PROJECT_DATA_ARCHIVE_DEFAULT_FROZEN_INTENT_INSPECTION_MAX_LIMIT,
+    1,
+    PROJECT_DATA_ARCHIVE_DEFAULT_FROZEN_INTENT_INSPECTION_MAX_LIMIT
+  );
+  const defaultLimit = envInt(
+    env.PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_LIMIT_DEFAULT,
+    PROJECT_DATA_ARCHIVE_DEFAULT_FROZEN_INTENT_INSPECTION_LIMIT,
+    1,
+    maxLimit
+  );
+  return {
+    defaultLimit: Math.min(defaultLimit, maxLimit),
+    maxLimit,
+  };
+}
+
+function resolveProjectDataArchiveFrozenIntentInspectionLimit(
+  env: Env,
+  limit: number | undefined
+): number {
+  const { defaultLimit, maxLimit } = getProjectDataArchiveFrozenIntentInspectionConfig(env);
+  if (limit === undefined || !Number.isSafeInteger(limit)) return defaultLimit;
+  return Math.max(1, Math.min(limit, maxLimit));
+}
+
 export type ProjectDataArchiveCopyBackResult = {
   migrationId: string;
   projectId: string;
   sessionId: string;
+  reason: string;
   chunksCopied: number;
   rowsCopied: number;
   restoredToRoot: boolean;
@@ -204,7 +287,7 @@ function envInt(value: string | undefined, fallback: number, min: number, max: n
 
 function resolveConfig(env: Env): ArchiveCoordinatorConfig {
   return {
-    enabled: env.PROJECT_DATA_ARCHIVE_SHARDING_ENABLED === 'true',
+    enabled: env.PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED === 'true',
     shardCount: envInt(
       env.PROJECT_DATA_ARCHIVE_SHARD_COUNT,
       PROJECT_DATA_ARCHIVE_DEFAULT_SHARD_COUNT,
@@ -278,6 +361,34 @@ function emptyStats(config: ArchiveCoordinatorConfig, skipped: boolean, skipReas
   } satisfies ProjectDataArchiveShardingStats;
 }
 
+function scopedConfig(
+  env: Env,
+  config: ArchiveCoordinatorConfig,
+  overrides: ArchiveCoordinatorBudgetOverrides = {}
+): ArchiveCoordinatorConfig {
+  const maxSessions = envInt(
+    env.PROJECT_DATA_ARCHIVE_MANUAL_CANARY_MAX_SESSIONS,
+    PROJECT_DATA_ARCHIVE_DEFAULT_MANUAL_CANARY_MAX_SESSIONS,
+    1,
+    50
+  );
+  const maxWallTimeMs = envInt(
+    env.PROJECT_DATA_ARCHIVE_MANUAL_CANARY_MAX_WALL_TIME_MS,
+    PROJECT_DATA_ARCHIVE_DEFAULT_MANUAL_CANARY_MAX_WALL_TIME_MS,
+    1,
+    60_000
+  );
+  const limit = Math.max(1, Math.min(overrides.limit ?? 1, maxSessions));
+  return {
+    ...config,
+    sweepProjects: 1,
+    sweepSessions: limit,
+    wallTimeMs: Math.max(1, Math.min(overrides.wallTimeMs ?? config.wallTimeMs, maxWallTimeMs)),
+    chunkRows: Math.max(1, Math.min(overrides.chunkRows ?? config.chunkRows, config.chunkRows)),
+    chunkBytes: Math.max(1, Math.min(overrides.chunkBytes ?? config.chunkBytes, config.chunkBytes)),
+  };
+}
+
 function ownerStub(env: Env, ownerName: string): DurableObjectStub<ProjectData> {
   const stub = env.PROJECT_DATA.get(
     env.PROJECT_DATA.idFromName(ownerName)
@@ -309,6 +420,58 @@ function errorCode(error: unknown): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, 1000) : String(error).slice(0, 1000);
+}
+
+function inspectionWarningMessage(error: unknown, maxReasonLength: number): string {
+  return error instanceof Error
+    ? error.message.slice(0, maxReasonLength)
+    : String(error).slice(0, maxReasonLength);
+}
+
+function requiredRowString(value: unknown, field: string): string {
+  if (typeof value === 'string' && value.length > 0) return value;
+  throw new ProjectDataArchiveCoordinatorStateError(
+    'invalid_inspection_row',
+    `Invalid ProjectData archive frozen-intent row: ${field}`
+  );
+}
+
+function requiredRowNumber(value: unknown, field: string): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  throw new ProjectDataArchiveCoordinatorStateError(
+    'invalid_inspection_row',
+    `Invalid ProjectData archive frozen-intent row: ${field}`
+  );
+}
+
+function requiredJournalState(value: unknown): ProjectDataArchiveJournalState {
+  if (
+    typeof value === 'string' &&
+    PROJECT_DATA_ARCHIVE_JOURNAL_STATES.includes(value as ProjectDataArchiveJournalState)
+  ) {
+    return value as ProjectDataArchiveJournalState;
+  }
+  throw new ProjectDataArchiveCoordinatorStateError(
+    'invalid_inspection_row',
+    'Invalid ProjectData archive frozen-intent row: state'
+  );
+}
+
+function validatedFrozenIntentMigrationRow(
+  row: MigrationRow & { location_state: string | null; breaker_state: string | null }
+): MigrationRow & { location_state: string | null; breaker_state: string | null } {
+  return {
+    ...row,
+    migration_id: requiredRowString(row.migration_id, 'migration_id'),
+    project_id: requiredRowString(row.project_id, 'project_id'),
+    session_id: requiredRowString(row.session_id, 'session_id'),
+    state: requiredJournalState(row.state),
+    source_owner_name: requiredRowString(row.source_owner_name, 'source_owner_name'),
+    target_owner_name: requiredRowString(row.target_owner_name, 'target_owner_name'),
+    target_generation: requiredRowNumber(row.target_generation, 'target_generation'),
+    lease_epoch: requiredRowNumber(row.lease_epoch, 'lease_epoch'),
+    attempt_count: requiredRowNumber(row.attempt_count, 'attempt_count'),
+  };
 }
 
 function requireStringField(
@@ -463,6 +626,41 @@ async function selectReclaimableMigrations(
   return rows.results ?? [];
 }
 
+async function selectScopedReclaimableMigrations(
+  env: Env,
+  scope: ArchiveCoordinatorScope,
+  limit: number,
+  now: number
+): Promise<MigrationRow[]> {
+  if (limit <= 0) return [];
+  const sessionPredicate = scope.sessionId ? 'AND m.session_id = ?' : '';
+  const rows = await env.DATABASE.prepare(
+    `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
+            m.target_owner_name, m.target_generation, m.source_intent_token,
+            m.terminal_version_sha256, m.target_aggregate_sha256, m.r2_manifest_key,
+            m.lease_owner, m.lease_epoch, m.lease_expires_at, m.attempt_count
+     FROM project_data_archive_migrations m
+     LEFT JOIN project_data_archive_circuit_breakers breaker
+       ON breaker.project_id = m.project_id
+     WHERE m.project_id = ?
+       ${sessionPredicate}
+       AND m.state IN (${placeholders(ACTIVE_RECLAIMABLE_STATES.length)})
+       AND (m.lease_expires_at IS NULL OR m.lease_expires_at <= ?)
+       AND COALESCE(breaker.state, 'closed') = 'closed'
+     ORDER BY m.updated_at ASC, m.migration_id ASC
+     LIMIT ?`
+  )
+    .bind(
+      scope.projectId,
+      ...(scope.sessionId ? [scope.sessionId] : []),
+      ...ACTIVE_RECLAIMABLE_STATES,
+      now,
+      limit
+    )
+    .all<MigrationRow>();
+  return rows.results ?? [];
+}
+
 async function selectCandidates(
   env: Env,
   config: ArchiveCoordinatorConfig,
@@ -495,6 +693,46 @@ async function selectCandidates(
      LIMIT ?`
   )
     .bind(cutoff, nowIso, Math.min(limit, config.sweepProjects * config.sweepSessions))
+    .all<CandidateRow>();
+  return rows.results ?? [];
+}
+
+async function selectScopedCandidates(
+  env: Env,
+  config: ArchiveCoordinatorConfig,
+  now: Date,
+  scope: ArchiveCoordinatorScope,
+  limit: number
+): Promise<CandidateRow[]> {
+  if (limit <= 0) return [];
+  const cutoff = now.getTime() - config.sessionGraceMs;
+  const nowIso = now.toISOString();
+  const sessionPredicate = scope.sessionId ? 'AND ss.id = ?' : '';
+  const rows = await env.DATABASE.prepare(
+    `SELECT ss.project_id, ss.id AS session_id
+     FROM session_summaries ss
+     LEFT JOIN project_data_session_locations loc
+       ON loc.project_id = ss.project_id AND loc.session_id = ss.id
+     LEFT JOIN project_data_archive_circuit_breakers breaker
+       ON breaker.project_id = ss.project_id
+     WHERE ss.project_id = ?
+       ${sessionPredicate}
+       AND ss.status IN ('stopped', 'failed')
+       AND ss.ended_at IS NOT NULL
+       AND ss.ended_at <= ?
+       AND (loc.session_id IS NULL OR loc.location_state = 'root')
+       AND COALESCE(breaker.state, 'closed') = 'closed'
+       AND NOT EXISTS (
+         SELECT 1
+         FROM session_snapshots snap
+         WHERE snap.chat_session_id = ss.id
+           AND snap.status IN ('available', 'degraded')
+           AND snap.expires_at > ?
+       )
+     ORDER BY ss.updated_at ASC, ss.id ASC
+     LIMIT ?`
+  )
+    .bind(scope.projectId, ...(scope.sessionId ? [scope.sessionId] : []), cutoff, nowIso, limit)
     .all<CandidateRow>();
   return rows.results ?? [];
 }
@@ -620,6 +858,61 @@ async function selectMigrationWork(
     if (migration) created.push(migration);
   }
   return [...reclaimable, ...created].slice(0, config.sweepSessions);
+}
+
+async function selectScopedMigrationWork(
+  env: Env,
+  config: ArchiveCoordinatorConfig,
+  nowDate: Date,
+  now: number,
+  scope: ArchiveCoordinatorScope,
+  dryRun: boolean
+): Promise<{
+  migrations: MigrationRow[];
+  selected: ProjectDataArchiveManualCanaryCandidate[];
+}> {
+  const reclaimable = await selectScopedReclaimableMigrations(env, scope, config.sweepSessions, now);
+  const selected: ProjectDataArchiveManualCanaryCandidate[] = reclaimable.map((migration) => ({
+    projectId: migration.project_id,
+    sessionId: migration.session_id,
+    migrationId: migration.migration_id,
+    state: migration.state,
+    source: 'existing_migration',
+  }));
+  const remaining = config.sweepSessions - reclaimable.length;
+  if (remaining <= 0) return { migrations: reclaimable, selected };
+
+  const candidates = await selectScopedCandidates(env, config, nowDate, scope, remaining);
+  selected.push(
+    ...candidates.map((candidate) => ({
+      projectId: candidate.project_id,
+      sessionId: candidate.session_id,
+      migrationId: null,
+      state: 'eligible_session' as const,
+      source: 'eligible_session' as const,
+    }))
+  );
+  if (dryRun) return { migrations: reclaimable, selected };
+
+  const created: MigrationRow[] = [];
+  for (const candidate of candidates) {
+    const migration = await createCandidateJournal(env, candidate, now);
+    if (migration) {
+      created.push(migration);
+      const entry = selected.find(
+        (item) =>
+          item.source === 'eligible_session' &&
+          item.projectId === candidate.project_id &&
+          item.sessionId === candidate.session_id &&
+          item.migrationId === null
+      );
+      if (entry) {
+        entry.migrationId = migration.migration_id;
+        entry.state = migration.state;
+      }
+    }
+  }
+  return { migrations: [...reclaimable, ...created].slice(0, config.sweepSessions), selected };
 }
 
 async function claimMigrationLease(
@@ -980,8 +1273,12 @@ async function publishSourceDeletedGap(
 async function recoverCrashGaps(
   env: Env,
   config: ArchiveCoordinatorConfig,
-  now: number
+  now: number,
+  scope?: ArchiveCoordinatorScope
 ): Promise<CrashGapRecoveryResult> {
+  const scopePredicate = scope
+    ? `AND m.project_id = ? ${scope.sessionId ? 'AND m.session_id = ?' : ''}`
+    : '';
   const rows = await env.DATABASE.prepare(
     `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
             m.target_owner_name, m.target_generation, m.source_intent_token,
@@ -991,6 +1288,7 @@ async function recoverCrashGaps(
      LEFT JOIN project_data_session_locations loc
        ON loc.project_id = m.project_id AND loc.session_id = m.session_id
      WHERE m.state IN (${placeholders(RECOVERY_GAP_STATES.length)})
+       ${scopePredicate}
        AND m.target_aggregate_sha256 IS NOT NULL
        AND m.target_aggregate_sha256 != ''
        AND loc.session_id IS NOT NULL
@@ -1014,7 +1312,12 @@ async function recoverCrashGaps(
               m.migration_id ASC
      LIMIT ?`
   )
-    .bind(...RECOVERY_GAP_STATES, config.sweepSessions)
+    .bind(
+      ...RECOVERY_GAP_STATES,
+      ...(scope ? [scope.projectId] : []),
+      ...(scope?.sessionId ? [scope.sessionId] : []),
+      config.sweepSessions
+    )
     .all<MigrationRow>();
   let recovered = 0;
   let failed = 0;
@@ -1534,8 +1837,8 @@ export async function inspectFrozenProjectDataArchiveIntents(
     projectId?: string;
     limit?: number;
   } = {}
-): Promise<ProjectDataArchiveFrozenIntentInspection[]> {
-  const limit = Math.max(1, Math.min(input.limit ?? 25, 100));
+): Promise<ProjectDataArchiveFrozenIntentInspectionResult> {
+  const limit = resolveProjectDataArchiveFrozenIntentInspectionLimit(env, input.limit);
   const projectPredicate = input.projectId ? 'AND m.project_id = ?' : '';
   const rows = await env.DATABASE.prepare(
     `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
@@ -1557,7 +1860,23 @@ export async function inspectFrozenProjectDataArchiveIntents(
     .all<MigrationRow & { location_state: string | null; breaker_state: string | null }>();
 
   const inspections: ProjectDataArchiveFrozenIntentInspection[] = [];
-  for (const row of rows.results ?? []) {
+  const warningConfig = getProjectDataArchiveRolloutWarningConfig(env);
+  const warningExamples: ProjectDataArchiveFrozenIntentWarning['examples'] = [];
+  let skippedRows = 0;
+  for (const [rowIndex, rawRow] of (rows.results ?? []).entries()) {
+    let row: MigrationRow & { location_state: string | null; breaker_state: string | null };
+    try {
+      row = validatedFrozenIntentMigrationRow(rawRow);
+    } catch (error) {
+      skippedRows++;
+      if (warningExamples.length < warningConfig.maxExamples) {
+        warningExamples.push({
+          rowIndex,
+          reason: inspectionWarningMessage(error, warningConfig.maxReasonLength),
+        });
+      }
+      continue;
+    }
     const source = ownerStub(env, row.source_owner_name);
     const target = ownerStub(env, row.target_owner_name);
     let sourceIntent: ProjectDataArchiveFrozenIntentInspection['sourceIntent'];
@@ -1606,7 +1925,19 @@ export async function inspectFrozenProjectDataArchiveIntents(
       target: targetInfo,
     });
   }
-  return inspections;
+  return {
+    inspections,
+    warnings:
+      skippedRows > 0
+        ? [
+            {
+              surface: 'frozen_intents',
+              skippedRows,
+              examples: warningExamples,
+            },
+          ]
+        : [],
+  };
 }
 
 export async function copyBackProjectDataArchiveMigration(
@@ -1614,10 +1945,24 @@ export async function copyBackProjectDataArchiveMigration(
   input: {
     migrationId: string;
     projectId: string;
+    reason: string;
     now?: number;
   }
 ): Promise<ProjectDataArchiveCopyBackResult> {
   const now = input.now ?? Date.now();
+  const reason = input.reason.trim();
+  if (!reason) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'copy_back_reason_required',
+      `ProjectData archive migration ${input.migrationId} copy-back requires an explicit reason`
+    );
+  }
+  if (!isProjectDataArchiveExactRoutingEnabled(env)) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'exact_routing_disabled',
+      'ProjectData archive copy-back requires exact archive routing to be enabled'
+    );
+  }
   const config = resolveConfig(env);
   const migration = await readMigrationOrThrow(env, input.migrationId);
   if (migration.project_id !== input.projectId) {
@@ -1726,34 +2071,31 @@ export async function copyBackProjectDataArchiveMigration(
     `UPDATE project_data_archive_migrations
      SET state = 'frozen',
          error_code = 'copy_back_restored',
-         error_message = 'Archive copy-back restored source rows and routed session back to root',
+         error_message = ?,
          lease_owner = NULL,
          lease_expires_at = NULL,
          frozen_at = COALESCE(frozen_at, ?),
          updated_at = ?
-     WHERE migration_id = ?`
+     WHERE migration_id = ?
+       AND project_id = ?`
   )
-    .bind(now, now, migration.migration_id)
+    .bind(
+      `Archive copy-back restored source rows and routed session back to root: ${reason}`,
+      now,
+      now,
+      migration.migration_id,
+      migration.project_id
+    )
     .run();
   return {
     migrationId: migration.migration_id,
     projectId: migration.project_id,
     sessionId: migration.session_id,
+    reason,
     chunksCopied,
     rowsCopied,
     restoredToRoot: (locationResult.meta.changes ?? 0) > 0,
   };
-}
-
-export async function rehomeProjectDataArchiveMigration(
-  env: Env,
-  input: {
-    migrationId: string;
-    projectId: string;
-    now?: number;
-  }
-): Promise<ProjectDataArchiveCopyBackResult> {
-  return copyBackProjectDataArchiveMigration(env, input);
 }
 
 function recordMigrationFailure(
@@ -1770,6 +2112,9 @@ export async function runProjectDataArchiveSharding(
 ): Promise<ProjectDataArchiveShardingStats> {
   const config = resolveConfig(env);
   if (!config.enabled) return emptyStats(config, true, 'disabled');
+  if (!isProjectDataArchiveExactRoutingEnabled(env)) {
+    return emptyStats(config, true, 'exact_routing_disabled');
+  }
   const archiveR2 = env.PROJECT_DATA_ARCHIVE_R2;
   if (!archiveR2) return emptyStats(config, true, 'missing_r2_binding');
 
@@ -1809,4 +2154,119 @@ export async function runProjectDataArchiveSharding(
     }
   }
   return stats;
+}
+
+export async function runScopedProjectDataArchiveCanary(
+  env: Env,
+  input: {
+    projectId: string;
+    sessionId?: string;
+    dryRun?: boolean;
+    limit?: number;
+    wallTimeMs?: number;
+    chunkRows?: number;
+    chunkBytes?: number;
+    reason?: string;
+    nowDate?: Date;
+  }
+): Promise<ProjectDataArchiveManualCanaryResult> {
+  const dryRun = input.dryRun ?? true;
+  const reason = input.reason?.trim() || null;
+  if (!dryRun && !reason) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'manual_canary_reason_required',
+      'Manual archive-sharding canary execution requires an explicit reason'
+    );
+  }
+  const baseConfig = resolveConfig(env);
+  const config = scopedConfig(env, baseConfig, input);
+  const exactRoutingEnabled = isProjectDataArchiveExactRoutingEnabled(env);
+  const scope: ArchiveCoordinatorScope = {
+    projectId: input.projectId,
+    ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+  };
+  const nowDate = input.nowDate ?? new Date();
+  const now = nowDate.getTime();
+  if (!dryRun && !exactRoutingEnabled) {
+    const stats = emptyStats(config, true, 'exact_routing_disabled');
+    return {
+      dryRun,
+      scope,
+      reason,
+      globalCronEnabled: baseConfig.enabled,
+      exactRoutingEnabled,
+      selected: [],
+      stats,
+    };
+  }
+  const archiveR2 = env.PROJECT_DATA_ARCHIVE_R2;
+  if (!dryRun && !archiveR2) {
+    const stats = emptyStats(config, true, 'missing_r2_binding');
+    return {
+      dryRun,
+      scope,
+      reason,
+      globalCronEnabled: baseConfig.enabled,
+      exactRoutingEnabled,
+      selected: [],
+      stats,
+    };
+  }
+  const work = await selectScopedMigrationWork(env, config, nowDate, now, scope, dryRun);
+  const stats = emptyStats(config, false, null);
+  stats.selected = work.selected.length;
+
+  if (dryRun) {
+    return {
+      dryRun,
+      scope,
+      reason,
+      globalCronEnabled: baseConfig.enabled,
+      exactRoutingEnabled,
+      selected: work.selected,
+      stats,
+    };
+  }
+
+  const startedAt = Date.now();
+  const crashGapRecovery = await recoverCrashGaps(env, config, now, scope);
+  stats.recoveredCrashGaps = crashGapRecovery.recovered;
+  stats.failed += crashGapRecovery.failed;
+  for (const migration of work.migrations) {
+    if (Date.now() - startedAt >= config.wallTimeMs) break;
+    try {
+      const result = await migrateCandidate(env, config, archiveR2, migration, now);
+      if (result.migrated) stats.migrated++;
+      if (result.recoveredCrashGap) stats.recoveredCrashGaps++;
+      stats.chunksCopied += result.chunksCopied;
+      stats.rowsCopied += result.rowsCopied;
+    } catch (error) {
+      const failureState = await markFailed(env, config, migration, now, error).catch(
+        (markError) => {
+          log.error('project_data_archive_manual_canary_mark_failed_failed', {
+            migrationId: migration.migration_id,
+            ...serializeError(markError),
+          });
+          return 'unchanged' as const;
+        }
+      );
+      recordMigrationFailure(stats, failureState);
+      log.warn('project_data_archive_manual_canary_candidate_failed', {
+        migrationId: migration.migration_id,
+        projectId: migration.project_id,
+        sessionId: migration.session_id,
+        ...serializeError(error),
+      });
+    }
+  }
+
+  return {
+    dryRun,
+    scope,
+    reason,
+    globalCronEnabled: baseConfig.enabled,
+    exactRoutingEnabled,
+    selected: work.selected,
+    stats,
+  };
 }

@@ -95,6 +95,7 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
     await withArchiveEnv(
       {
         PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
         PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
         PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '4',
         PROJECT_DATA_ARCHIVE_CHUNK_ROWS: '3',

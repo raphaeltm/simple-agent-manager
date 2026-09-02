@@ -14,6 +14,7 @@ import {
   inspectFrozenProjectDataArchiveIntents,
   poisonProjectDataArchiveMigration,
   runProjectDataArchiveSharding,
+  runScopedProjectDataArchiveCanary,
 } from '../../../src/scheduled/project-data-archive-sharding';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -392,14 +393,50 @@ function readMigrationRow(sqlite: Database.Database, migrationId = MIGRATION_ID)
     .get(migrationId) as Record<string, unknown>;
 }
 
-function readLocationRow(sqlite: Database.Database, sessionId = SESSION_ID) {
+function readLocationRow(sqlite: Database.Database, sessionId = SESSION_ID, projectId = PROJECT_ID) {
   return sqlite
     .prepare(
       `SELECT location_state, owner_kind, owner_name, generation, published_at
        FROM project_data_session_locations
        WHERE project_id = ? AND session_id = ?`
     )
-    .get(PROJECT_ID, sessionId) as Record<string, unknown>;
+    .get(projectId, sessionId) as Record<string, unknown>;
+}
+
+function seedSessionSummary(
+  sqlite: Database.Database,
+  input: {
+    projectId?: string;
+    sessionId?: string;
+    status?: 'stopped' | 'failed' | 'active';
+    endedAt?: number | null;
+    updatedAt?: number;
+  } = {}
+): void {
+  const projectId = input.projectId ?? PROJECT_ID;
+  const sessionId = input.sessionId ?? SESSION_ID;
+  const updatedAt = input.updatedAt ?? 1000;
+  sqlite
+    .prepare(
+      `INSERT INTO session_summaries
+         (id, project_id, user_id, status, topic, message_count, started_at, ended_at, updated_at)
+       VALUES (?, ?, 'owner', ?, 'Terminal session', 2, 500, ?, ?)`
+    )
+    .run(sessionId, projectId, input.status ?? 'stopped', input.endedAt ?? 1000, updatedAt);
+}
+
+function countMigrations(sqlite: Database.Database): number {
+  const row = sqlite
+    .prepare('SELECT COUNT(*) AS count FROM project_data_archive_migrations')
+    .get() as { count: number };
+  return row.count;
+}
+
+function countLocations(sqlite: Database.Database): number {
+  const row = sqlite
+    .prepare('SELECT COUNT(*) AS count FROM project_data_session_locations')
+    .get() as { count: number };
+  return row.count;
 }
 
 describe('scheduled ProjectData archive sharding coordinator', () => {
@@ -424,6 +461,7 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
         runProjectDataArchiveSharding(
           makeEnv(sqlite, {
             PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+            PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
           })
         )
       ).resolves.toMatchObject({
@@ -431,6 +469,336 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
         skipped: true,
         skipReason: 'missing_r2_binding',
         migrated: 0,
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('does not run the global cron when exact routing is enabled alone', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSessionSummary(sqlite, { sessionId: 'session-target', updatedAt: 1000 });
+
+      await expect(
+        runProjectDataArchiveSharding(
+          makeEnv(sqlite, {
+            PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+            PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+          }),
+          new Date(NOW)
+        )
+      ).resolves.toMatchObject({
+        enabled: false,
+        skipped: true,
+        skipReason: 'disabled',
+        selected: 0,
+        migrated: 0,
+      });
+      expect(countMigrations(sqlite)).toBe(0);
+      expect(countLocations(sqlite)).toBe(0);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('fails the global cron closed when the global gate is enabled without exact routing', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSessionSummary(sqlite, { sessionId: 'session-target', updatedAt: 1000 });
+
+      await expect(
+        runProjectDataArchiveSharding(
+          makeEnv(sqlite, {
+            PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+            PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+          }),
+          new Date(NOW)
+        )
+      ).resolves.toMatchObject({
+        enabled: true,
+        skipped: true,
+        skipReason: 'exact_routing_disabled',
+        selected: 0,
+        migrated: 0,
+      });
+      expect(countMigrations(sqlite)).toBe(0);
+      expect(countLocations(sqlite)).toBe(0);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('dry-runs one explicitly scoped session without global cron enabled or source-side effects', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSessionSummary(sqlite, { sessionId: 'session-target', updatedAt: 1000 });
+      seedSessionSummary(sqlite, { sessionId: 'session-other', updatedAt: 900 });
+      seedSessionSummary(sqlite, {
+        projectId: 'project-other',
+        sessionId: 'session-target-other-project',
+        updatedAt: 800,
+      });
+      const projectDataGet = vi.fn();
+      const r2Put = vi.fn();
+
+      const result = await runScopedProjectDataArchiveCanary(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_MANUAL_CANARY_MAX_SESSIONS: '5',
+          PROJECT_DATA: {
+            idFromName: (name: string) => name,
+            get: projectDataGet,
+          } as unknown as DurableObjectNamespace,
+          PROJECT_DATA_ARCHIVE_R2: { put: r2Put } as unknown as R2Bucket,
+        }),
+        {
+          projectId: PROJECT_ID,
+          sessionId: 'session-target',
+          dryRun: true,
+          limit: 5,
+          nowDate: new Date(NOW),
+        }
+      );
+
+      expect(result).toMatchObject({
+        dryRun: true,
+        globalCronEnabled: false,
+        scope: { projectId: PROJECT_ID, sessionId: 'session-target' },
+        stats: { enabled: false, skipped: false, selected: 1, migrated: 0 },
+        selected: [
+          {
+            projectId: PROJECT_ID,
+            sessionId: 'session-target',
+            migrationId: null,
+            state: 'eligible_session',
+            source: 'eligible_session',
+          },
+        ],
+      });
+      expect(countMigrations(sqlite)).toBe(0);
+      expect(projectDataGet).not.toHaveBeenCalled();
+      expect(r2Put).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('runs a non-dry scoped canary only for the requested project/session', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'candidate', {
+        migrationId: 'migration-target',
+        sessionId: SESSION_ID,
+      });
+      seedMigration(sqlite, 'candidate', {
+        migrationId: 'migration-other-session',
+        sessionId: 'session-other',
+      });
+      seedMigration(sqlite, 'candidate', {
+        migrationId: 'migration-other-project',
+        projectId: 'project-other',
+        sessionId: SESSION_ID,
+      });
+      const source = createFakeSource();
+      const target = createFakeTarget();
+
+      const result = await runScopedProjectDataArchiveCanary(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+          PROJECT_DATA: createProjectDataNamespace({
+            [SOURCE_OWNER]: source,
+            [TARGET_OWNER]: target,
+          }),
+        }),
+        {
+          projectId: PROJECT_ID,
+          sessionId: SESSION_ID,
+          dryRun: false,
+          reason: 'operator scoped canary',
+          limit: 5,
+          nowDate: new Date(NOW),
+        }
+      );
+
+      expect(result).toMatchObject({
+        dryRun: false,
+        globalCronEnabled: false,
+        stats: { enabled: false, skipped: false, selected: 1, migrated: 1 },
+        selected: [
+          {
+            projectId: PROJECT_ID,
+            sessionId: SESSION_ID,
+            migrationId: 'migration-target',
+            source: 'existing_migration',
+          },
+        ],
+      });
+      expect(readMigrationRow(sqlite, 'migration-target')).toMatchObject({ state: 'published' });
+      expect(readMigrationRow(sqlite, 'migration-other-session')).toMatchObject({
+        state: 'candidate',
+      });
+      expect(readMigrationRow(sqlite, 'migration-other-project')).toMatchObject({
+        state: 'candidate',
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('refuses a non-dry scoped canary when exact archive routing is disabled', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'candidate', {
+        migrationId: 'migration-target',
+        sessionId: SESSION_ID,
+      });
+      const source = createFakeSource();
+      const target = createFakeTarget();
+
+      const result = await runScopedProjectDataArchiveCanary(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+          PROJECT_DATA: createProjectDataNamespace({
+            [SOURCE_OWNER]: source,
+            [TARGET_OWNER]: target,
+          }),
+        }),
+        {
+          projectId: PROJECT_ID,
+          sessionId: SESSION_ID,
+          dryRun: false,
+          reason: 'operator scoped canary',
+          limit: 1,
+          nowDate: new Date(NOW),
+        }
+      );
+
+      expect(result).toMatchObject({
+        dryRun: false,
+        globalCronEnabled: false,
+        selected: [],
+        stats: {
+          skipped: true,
+          skipReason: 'exact_routing_disabled',
+          selected: 0,
+          migrated: 0,
+          recoveredCrashGaps: 0,
+        },
+      });
+      expect(readMigrationRow(sqlite, 'migration-target')).toMatchObject({ state: 'candidate' });
+      expect(readLocationRow(sqlite)).toMatchObject({ location_state: 'migrating' });
+      expect(source.archiveSourcePrepareIntent).not.toHaveBeenCalled();
+      expect(source.archiveSourceFinalizeDelete).not.toHaveBeenCalled();
+      expect(target.archiveTargetPrepare).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('fails closed without R2 before a non-dry scoped canary can create D1 journal rows', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSessionSummary(sqlite, { sessionId: 'session-target', updatedAt: 1000 });
+
+      const result = await runScopedProjectDataArchiveCanary(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        }),
+        {
+          projectId: PROJECT_ID,
+          sessionId: 'session-target',
+          dryRun: false,
+          reason: 'operator scoped canary',
+          limit: 1,
+          nowDate: new Date(NOW),
+        }
+      );
+
+      expect(result).toMatchObject({
+        dryRun: false,
+        reason: 'operator scoped canary',
+        globalCronEnabled: false,
+        selected: [],
+        stats: {
+          skipped: true,
+          skipReason: 'missing_r2_binding',
+          selected: 0,
+          migrated: 0,
+        },
+      });
+      expect(countMigrations(sqlite)).toBe(0);
+      expect(countLocations(sqlite)).toBe(0);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('scopes manual canary crash-gap recovery to the requested project/session', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'source_deleted', {
+        migrationId: 'migration-target-gap',
+        sessionId: SESSION_ID,
+      });
+      seedMigration(sqlite, 'source_deleted', {
+        migrationId: 'migration-other-session-gap',
+        sessionId: 'session-other',
+      });
+      seedMigration(sqlite, 'source_deleted', {
+        migrationId: 'migration-other-project-gap',
+        projectId: 'project-other',
+        sessionId: SESSION_ID,
+      });
+
+      const result = await runScopedProjectDataArchiveCanary(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+        }),
+        {
+          projectId: PROJECT_ID,
+          sessionId: SESSION_ID,
+          dryRun: false,
+          reason: 'operator scoped crash-gap recovery',
+          limit: 5,
+          nowDate: new Date(NOW),
+        }
+      );
+
+      expect(result).toMatchObject({
+        dryRun: false,
+        reason: 'operator scoped crash-gap recovery',
+        globalCronEnabled: false,
+        stats: { recoveredCrashGaps: 1, selected: 0, migrated: 0 },
+      });
+      expect(readMigrationRow(sqlite, 'migration-target-gap')).toMatchObject({
+        state: 'published',
+      });
+      expect(readLocationRow(sqlite, SESSION_ID)).toMatchObject({
+        location_state: 'archive_shard',
+        published_at: NOW,
+      });
+      expect(readMigrationRow(sqlite, 'migration-other-session-gap')).toMatchObject({
+        state: 'source_deleted',
+      });
+      expect(readLocationRow(sqlite, 'session-other')).toMatchObject({
+        location_state: 'migrating',
+        published_at: null,
+      });
+      expect(readMigrationRow(sqlite, 'migration-other-project-gap')).toMatchObject({
+        state: 'source_deleted',
+      });
+      expect(readLocationRow(sqlite, SESSION_ID, 'project-other')).toMatchObject({
+        location_state: 'migrating',
+        published_at: null,
       });
     } finally {
       sqlite.close();
@@ -446,6 +814,7 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
       const stats = await runProjectDataArchiveSharding(
         makeEnv(sqlite, {
           PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
           PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
         }),
         new Date(NOW)
@@ -493,6 +862,7 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
       const stats = await runProjectDataArchiveSharding(
         makeEnv(sqlite, {
           PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
           PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
         }),
         new Date(NOW)
@@ -544,6 +914,7 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
         {
           ...makeEnv(sqlite, {
             PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+            PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
             PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '2',
             PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
           }),
@@ -613,6 +984,7 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
       const stats = await runProjectDataArchiveSharding(
         makeEnv(sqlite, {
           PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
           PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
         }),
         new Date(NOW)
@@ -672,6 +1044,7 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
         const stats = await runProjectDataArchiveSharding(
           makeEnv(sqlite, {
             PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+            PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
             PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
             PROJECT_DATA: createProjectDataNamespace({
               [SOURCE_OWNER]: source,
@@ -730,6 +1103,7 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
         const stats = await runProjectDataArchiveSharding(
           makeEnv(sqlite, {
             PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+            PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
             PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
             PROJECT_DATA: createProjectDataNamespace({
               [SOURCE_OWNER]: source,
@@ -799,9 +1173,11 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
         }),
       });
 
-      const inspections = await inspectFrozenProjectDataArchiveIntents(controlEnv, {
+      const inspectionResult = await inspectFrozenProjectDataArchiveIntents(controlEnv, {
         projectId: PROJECT_ID,
       });
+      expect(inspectionResult.warnings).toEqual([]);
+      const { inspections } = inspectionResult;
       expect(inspections.map((inspection) => inspection.migrationId)).toEqual([
         'migration-freeze',
         'migration-poison',
@@ -810,10 +1186,12 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
       const copyBack = await copyBackProjectDataArchiveMigration(controlEnv, {
         migrationId: copyBackMigrationId,
         projectId: PROJECT_ID,
+        reason: 'operator copy-back',
         now: NOW,
       });
       expect(copyBack).toMatchObject({
         migrationId: copyBackMigrationId,
+        reason: 'operator copy-back',
         restoredToRoot: true,
       });
       expect(source.archiveSourceRestoreChunk).toHaveBeenCalled();
@@ -823,6 +1201,134 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
         owner_kind: 'root',
         owner_name: SOURCE_OWNER,
         generation: 0,
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('bounds frozen-intent detail inspection fan-out against ProjectData DOs', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      for (let index = 0; index < 12; index++) {
+        seedMigration(sqlite, 'failed', {
+          migrationId: `migration-frozen-${index}`,
+          sessionId: `session-frozen-${index}`,
+          updatedAt: 1000 + index,
+        });
+      }
+      const source = createFakeSource({ state: 'source_deleted' });
+      const target = createFakeTarget();
+
+      const inspectionResult = await inspectFrozenProjectDataArchiveIntents(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_LIMIT_MAX: '500',
+          PROJECT_DATA: createProjectDataNamespace({
+            [SOURCE_OWNER]: source,
+            [TARGET_OWNER]: target,
+          }),
+        }),
+        {
+          projectId: PROJECT_ID,
+          limit: 500,
+        }
+      );
+
+      expect(inspectionResult.warnings).toEqual([]);
+      const { inspections } = inspectionResult;
+      expect(inspections).toHaveLength(10);
+      expect(source.archiveSourceInspectIntent).toHaveBeenCalledTimes(10);
+      expect(target.archiveTargetInspectSession).toHaveBeenCalledTimes(10);
+      expect(inspections.map((inspection) => inspection.migrationId)).toEqual(
+        Array.from({ length: 10 }, (_unused, index) => `migration-frozen-${index}`)
+      );
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('isolates malformed frozen-intent rows without aborting inspection', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'failed', {
+        migrationId: 'migration-good',
+        sessionId: 'session-good',
+        updatedAt: 1000,
+      });
+      sqlite
+        .prepare(
+          `INSERT INTO project_data_archive_migrations
+             (migration_id, project_id, session_id, state, source_owner_name,
+              target_owner_name, target_generation, lease_epoch, attempt_count,
+              error_code, error_message, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 1, 0, 1, 'test_error', 'test message', 900, 1100)`
+        )
+        .run(
+          'migration-bad',
+          PROJECT_ID,
+          'session-bad',
+          'failed',
+          '',
+          TARGET_OWNER
+        );
+      const source = createFakeSource({ state: 'source_deleted' });
+      const target = createFakeTarget();
+
+      const result = await inspectFrozenProjectDataArchiveIntents(
+        makeEnv(sqlite, {
+          PROJECT_DATA: createProjectDataNamespace({
+            [SOURCE_OWNER]: source,
+            [TARGET_OWNER]: target,
+          }),
+        }),
+        { projectId: PROJECT_ID, limit: 10 }
+      );
+
+      expect(result.inspections.map((inspection) => inspection.migrationId)).toEqual([
+        'migration-good',
+      ]);
+      expect(result.warnings).toEqual([
+        {
+          surface: 'frozen_intents',
+          skippedRows: 1,
+          examples: [
+            {
+              rowIndex: 1,
+              reason: 'Invalid ProjectData archive frozen-intent row: source_owner_name',
+            },
+          ],
+        },
+      ]);
+      expect(source.archiveSourceInspectIntent).toHaveBeenCalledTimes(1);
+      expect(target.archiveTargetInspectSession).toHaveBeenCalledTimes(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('rejects copy-back when the migration belongs to a different project', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      const migrationId = seedMigration(sqlite, 'published', {
+        migrationId: 'migration-copy-back-other-project',
+        projectId: 'project-other',
+      });
+
+      await expect(
+        copyBackProjectDataArchiveMigration(
+          makeEnv(sqlite, { PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true' }),
+          {
+          migrationId,
+          projectId: PROJECT_ID,
+          reason: 'operator copy-back',
+          now: NOW,
+          }
+        )
+      ).rejects.toMatchObject({
+        reason: 'migration_project_mismatch',
       });
     } finally {
       sqlite.close();

@@ -3,7 +3,19 @@ import { Hono } from 'hono';
 import type { Env } from '../../env';
 import { errors } from '../../middleware/error';
 import {
+  copyBackProjectDataArchiveMigration,
+  getProjectDataArchiveFrozenIntentInspectionConfig,
+  inspectFrozenProjectDataArchiveIntents,
+  ProjectDataArchiveCoordinatorStateError,
+  runScopedProjectDataArchiveCanary,
+} from '../../scheduled/project-data-archive-sharding';
+import {
+  jsonValidator,
   parseOptionalBody,
+  ProjectDataArchiveCanaryControlSchema,
+  ProjectDataArchiveCircuitBreakerSchema,
+  ProjectDataArchiveFreezeProjectSchema,
+  ProjectDataArchiveRecoveryControlSchema,
   ProjectDataStorageEmergencyPurgeSchema,
   ProjectDataStorageReliefMeasureSchema,
 } from '../../schemas';
@@ -13,6 +25,14 @@ import {
   runProjectDataGroupedFtsCleanup,
   runProjectDataStorageEmergencyPurge,
 } from '../../services/project-data';
+import {
+  freezeProjectDataArchiveProject,
+  getProjectDataArchiveManualCanaryConfig,
+  getProjectDataArchiveRolloutListConfig,
+  getProjectDataArchiveRolloutState,
+  listProjectDataArchiveProblemMigrations,
+  setProjectDataArchiveCircuitBreaker,
+} from '../../services/project-data-archive-rollout-controls';
 
 const PROJECT_DATA_STORAGE_STATUSES = new Set(['ok', 'notice', 'warning', 'critical', 'degraded']);
 const PROJECT_DATA_STORAGE_CLEANUP_HEALTH_STATES = new Set([
@@ -56,6 +76,29 @@ function parseStorageTelemetryLimit(rawLimit: string | undefined, env: Env): num
     throw errors.badRequest(`limit must be between 1 and ${maxLimit}`);
   }
   return parsedLimit;
+}
+
+function parseArchiveRolloutLimit(rawLimit: string | undefined, env: Env): number {
+  const { defaultLimit, maxLimit } = getProjectDataArchiveRolloutListConfig(env);
+  const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : defaultLimit;
+  if (!Number.isSafeInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > maxLimit) {
+    throw errors.badRequest(`limit must be between 1 and ${maxLimit}`);
+  }
+  return parsedLimit;
+}
+
+function parseArchiveFrozenIntentLimit(rawLimit: string | undefined, env: Env): number {
+  const { defaultLimit, maxLimit } = getProjectDataArchiveFrozenIntentInspectionConfig(env);
+  const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : defaultLimit;
+  if (!Number.isSafeInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > maxLimit) {
+    throw errors.badRequest(`limit must be between 1 and ${maxLimit}`);
+  }
+  return parsedLimit;
+}
+
+function assertProjectId(projectId: string | undefined): string {
+  if (!projectId?.trim()) throw errors.badRequest('projectId is required');
+  return projectId.trim();
 }
 
 /**
@@ -190,11 +233,189 @@ adminProjectDataStorageRoutes.get('/history', async (c) => {
 });
 
 /**
+ * GET /api/admin/project-data/storage/:projectId/archive-sharding/state
+ *
+ * D1-only rollout state summary for archive-sharding journal/location/breaker rows.
+ */
+adminProjectDataStorageRoutes.get('/:projectId/archive-sharding/state', async (c) => {
+  const projectId = assertProjectId(c.req.param('projectId'));
+  const sessionId = c.req.query('sessionId')?.trim() || undefined;
+  const limit = parseArchiveRolloutLimit(c.req.query('limit'), c.env);
+  const state = await getProjectDataArchiveRolloutState(c.env, { projectId, sessionId, limit });
+  return c.json({ state });
+});
+
+/**
+ * GET /api/admin/project-data/storage/archive-sharding/problem-migrations
+ *
+ * Bounded list of failed/poisoned/frozen archive migrations.
+ */
+adminProjectDataStorageRoutes.get('/archive-sharding/problem-migrations', async (c) => {
+  const projectId = c.req.query('projectId')?.trim() || undefined;
+  const sessionId = c.req.query('sessionId')?.trim() || undefined;
+  const limit = parseArchiveRolloutLimit(c.req.query('limit'), c.env);
+  const result = await listProjectDataArchiveProblemMigrations(c.env, {
+    projectId,
+    sessionId,
+    limit,
+  });
+  return c.json({ migrations: result.migrations, warnings: result.warnings, limit });
+});
+
+/**
+ * POST /api/admin/project-data/storage/:projectId/archive-sharding/canary
+ *
+ * Scoped manual archive-sharding dry-run/canary path. Defaults to dry-run.
+ * Non-dry canaries fail closed unless exact archive routing is active.
+ */
+adminProjectDataStorageRoutes.post('/:projectId/archive-sharding/canary', async (c) => {
+  const projectId = assertProjectId(c.req.param('projectId'));
+  const body = await parseOptionalBody(c.req.raw, ProjectDataArchiveCanaryControlSchema, {});
+  if (body.dryRun === false && !body.reason?.trim()) {
+    throw errors.badRequest('reason is required when dryRun is false');
+  }
+  const canaryConfig = getProjectDataArchiveManualCanaryConfig(c.env);
+  if (
+    body.limit !== undefined &&
+    (!Number.isSafeInteger(body.limit) || body.limit < 1 || body.limit > canaryConfig.maxSessions)
+  ) {
+    throw errors.badRequest(`limit must be between 1 and ${canaryConfig.maxSessions}`);
+  }
+  if (
+    body.wallTimeMs !== undefined &&
+    (!Number.isSafeInteger(body.wallTimeMs) ||
+      body.wallTimeMs < 1 ||
+      body.wallTimeMs > canaryConfig.maxWallTimeMs)
+  ) {
+    throw errors.badRequest(`wallTimeMs must be between 1 and ${canaryConfig.maxWallTimeMs}`);
+  }
+  const result = await runScopedProjectDataArchiveCanary(c.env, {
+    projectId,
+    sessionId: body.sessionId?.trim() || undefined,
+    dryRun: body.dryRun ?? true,
+    reason: body.reason,
+    limit: body.limit,
+    wallTimeMs: body.wallTimeMs,
+    chunkRows: body.chunkRows,
+    chunkBytes: body.chunkBytes,
+  });
+  if (body.dryRun === false && result.stats.skipReason === 'exact_routing_disabled') {
+    throw errors.badRequest(
+      'non-dry archive-sharding canary requires exact archive routing to be enabled'
+    );
+  }
+  return c.json({ result });
+});
+
+/**
+ * POST /api/admin/project-data/storage/:projectId/archive-sharding/freeze
+ *
+ * Freeze a project's archive-sharding candidates and open the project breaker.
+ */
+adminProjectDataStorageRoutes.post(
+  '/:projectId/archive-sharding/freeze',
+  jsonValidator(ProjectDataArchiveFreezeProjectSchema),
+  async (c) => {
+    const projectId = assertProjectId(c.req.param('projectId'));
+    const body = c.req.valid('json');
+    const result = await freezeProjectDataArchiveProject(c.env, {
+      projectId,
+      reason: body.reason.trim(),
+    });
+    return c.json({ result });
+  }
+);
+
+/**
+ * POST /api/admin/project-data/storage/:projectId/archive-sharding/circuit-breaker
+ *
+ * Set the project archive-sharding breaker. Closing it allows future work but
+ * deliberately does not thaw already frozen migration rows.
+ */
+adminProjectDataStorageRoutes.post(
+  '/:projectId/archive-sharding/circuit-breaker',
+  jsonValidator(ProjectDataArchiveCircuitBreakerSchema),
+  async (c) => {
+    const projectId = assertProjectId(c.req.param('projectId'));
+    const body = c.req.valid('json');
+    const result = await setProjectDataArchiveCircuitBreaker(c.env, {
+      projectId,
+      state: body.state,
+      reason: body.reason.trim(),
+    });
+    return c.json({ result });
+  }
+);
+
+/**
+ * POST /api/admin/project-data/storage/:projectId/archive-sharding/unfreeze
+ *
+ * Alias for closing the project circuit breaker. Frozen migration rows remain
+ * frozen until copy-back or a later explicit thaw operation exists.
+ */
+adminProjectDataStorageRoutes.post(
+  '/:projectId/archive-sharding/unfreeze',
+  jsonValidator(ProjectDataArchiveFreezeProjectSchema),
+  async (c) => {
+    const projectId = assertProjectId(c.req.param('projectId'));
+    const body = c.req.valid('json');
+    const result = await setProjectDataArchiveCircuitBreaker(c.env, {
+      projectId,
+      state: 'closed',
+      reason: body.reason.trim(),
+    });
+    return c.json({ result });
+  }
+);
+
+/**
+ * GET /api/admin/project-data/storage/:projectId/archive-sharding/frozen-intents
+ *
+ * Bounded frozen/failed/poisoned inspection using existing DO-local helpers.
+ */
+adminProjectDataStorageRoutes.get('/:projectId/archive-sharding/frozen-intents', async (c) => {
+  const projectId = assertProjectId(c.req.param('projectId'));
+  const limit = parseArchiveFrozenIntentLimit(c.req.query('limit'), c.env);
+  const result = await inspectFrozenProjectDataArchiveIntents(c.env, { projectId, limit });
+  return c.json({ inspections: result.inspections, warnings: result.warnings, limit });
+});
+
+/**
+ * POST /api/admin/project-data/storage/:projectId/archive-sharding/migrations/:migrationId/copy-back
+ */
+adminProjectDataStorageRoutes.post(
+  '/:projectId/archive-sharding/migrations/:migrationId/copy-back',
+  jsonValidator(ProjectDataArchiveRecoveryControlSchema),
+  async (c) => {
+    const projectId = assertProjectId(c.req.param('projectId'));
+    const migrationId = c.req.param('migrationId')?.trim();
+    if (!migrationId) throw errors.badRequest('migrationId is required');
+    const body = c.req.valid('json');
+    let result;
+    try {
+      result = await copyBackProjectDataArchiveMigration(c.env, {
+        projectId,
+        migrationId,
+        reason: body.reason.trim(),
+      });
+    } catch (error) {
+      if (
+        error instanceof ProjectDataArchiveCoordinatorStateError &&
+        error.reason === 'exact_routing_disabled'
+      ) {
+        throw errors.badRequest('copy-back requires exact archive routing to be enabled');
+      }
+      throw error;
+    }
+    return c.json({ result });
+  }
+);
+
+/**
  * POST /api/admin/project-data/storage/:projectId/measure - Force a measurement.
  */
 adminProjectDataStorageRoutes.post('/:projectId/measure', async (c) => {
-  const { projectId } = c.req.param();
-  if (!projectId) throw errors.badRequest('projectId is required');
+  const projectId = assertProjectId(c.req.param('projectId'));
   const telemetry = await measureProjectDataStorage(c.env, projectId);
   return c.json({ telemetry });
 });
@@ -206,8 +427,7 @@ adminProjectDataStorageRoutes.post('/:projectId/measure', async (c) => {
  * candidates. This is intentionally not part of alarm measurement.
  */
 adminProjectDataStorageRoutes.post('/:projectId/relief-measure', async (c) => {
-  const { projectId } = c.req.param();
-  if (!projectId) throw errors.badRequest('projectId is required');
+  const projectId = assertProjectId(c.req.param('projectId'));
   const body = await parseOptionalBody(c.req.raw, ProjectDataStorageReliefMeasureSchema, {});
   const result = await measureProjectDataStorageRelief(c.env, projectId, body);
   return c.json({ result });
@@ -220,8 +440,7 @@ adminProjectDataStorageRoutes.post('/:projectId/relief-measure', async (c) => {
  * rows. Production default is disabled by PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED=false.
  */
 adminProjectDataStorageRoutes.post('/:projectId/grouped-fts-cleanup', async (c) => {
-  const { projectId } = c.req.param();
-  if (!projectId) throw errors.badRequest('projectId is required');
+  const projectId = assertProjectId(c.req.param('projectId'));
   const result = await runProjectDataGroupedFtsCleanup(c.env, projectId);
   return c.json({ result });
 });
@@ -233,8 +452,7 @@ adminProjectDataStorageRoutes.post('/:projectId/grouped-fts-cleanup', async (c) 
  * oldest ProjectData event-log rows (activity_events and acp_session_events).
  */
 adminProjectDataStorageRoutes.post('/:projectId/emergency-purge', async (c) => {
-  const { projectId } = c.req.param();
-  if (!projectId) throw errors.badRequest('projectId is required');
+  const projectId = assertProjectId(c.req.param('projectId'));
   const body = await parseOptionalBody(c.req.raw, ProjectDataStorageEmergencyPurgeSchema, {});
   const result = await runProjectDataStorageEmergencyPurge(c.env, projectId, body);
   return c.json({ result });

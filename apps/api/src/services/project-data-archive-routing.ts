@@ -284,6 +284,10 @@ export async function assertExactWriteAllowed(
   );
 }
 
+export function isProjectDataArchiveExactRoutingEnabled(env: Env): boolean {
+  return env.PROJECT_DATA_ARCHIVE_SHARDING_ENABLED === 'true';
+}
+
 export const PROJECT_DATA_ARCHIVE_STATE_TRANSITIONS: Record<
   ProjectDataArchiveJournalState,
   readonly ProjectDataArchiveJournalState[]
