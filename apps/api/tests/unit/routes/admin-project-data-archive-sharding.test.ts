@@ -434,6 +434,23 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
       );
       expect(missingReason.status).toBe(400);
 
+      const routingDisabled = await createApp().request(
+        '/api/admin/project-data/storage/project-archive/archive-sharding/migrations/migration-copy-back/copy-back',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-test-role': 'superadmin' },
+          body: JSON.stringify({ reason: 'operator recovery' }),
+        },
+        makeEnv(sqlite, {
+          PROJECT_DATA: createArchiveProjectDataNamespace(),
+        })
+      );
+      expect(routingDisabled.status).toBe(400);
+      expect(await routingDisabled.json()).toMatchObject({
+        error: 'BAD_REQUEST',
+        message: 'copy-back requires exact archive routing to be enabled',
+      });
+
       const response = await createApp().request(
         '/api/admin/project-data/storage/project-archive/archive-sharding/migrations/migration-copy-back/copy-back',
         {
@@ -443,6 +460,7 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
         },
         makeEnv(sqlite, {
           PROJECT_DATA: createArchiveProjectDataNamespace(),
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
         })
       );
 

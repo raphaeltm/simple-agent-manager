@@ -146,6 +146,7 @@ describe('ProjectData archive rollout controls service', () => {
         'migration-b',
       ]);
       expect(state.locations.map((location) => location.sessionId)).toEqual(['session-b']);
+      expect(state.warnings).toEqual([]);
     } finally {
       sqlite.close();
     }
@@ -182,16 +183,156 @@ describe('ProjectData archive rollout controls service', () => {
         updatedAt: 4000,
       });
 
-      const migrations = await listProjectDataArchiveProblemMigrations(makeEnv(sqlite), {
+      const result = await listProjectDataArchiveProblemMigrations(makeEnv(sqlite), {
         projectId: 'project-archive',
         limit: 2,
       });
 
-      expect(migrations.map((migration) => migration.migrationId)).toEqual([
+      expect(result.migrations.map((migration) => migration.migrationId)).toEqual([
         'migration-failed',
         'migration-poisoned',
       ]);
+      expect(result.warnings).toEqual([]);
     } finally {
+      sqlite.close();
+    }
+  });
+
+  it('isolates malformed rollout rows while preserving usable state and problem lists', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createTables(sqlite);
+      seedMigration(sqlite, {
+        migrationId: 'migration-good',
+        sessionId: 'session-good',
+        state: 'failed',
+        updatedAt: 1000,
+      });
+      seedMigration(sqlite, {
+        migrationId: 'migration-bad',
+        sessionId: 'session-bad',
+        state: 'failed',
+        updatedAt: 2000,
+      });
+      sqlite
+        .prepare(
+          `UPDATE project_data_archive_migrations
+           SET source_owner_name = ''
+           WHERE migration_id = 'migration-bad'`
+        )
+        .run();
+      sqlite
+        .prepare(
+          `UPDATE project_data_session_locations
+           SET owner_name = ''
+           WHERE migration_id = 'migration-bad'`
+        )
+        .run();
+      sqlite.pragma('ignore_check_constraints = ON');
+      sqlite
+        .prepare(
+          `INSERT INTO project_data_archive_migrations
+             (migration_id, project_id, session_id, state, source_owner_name,
+              target_owner_name, target_generation, lease_epoch, attempt_count,
+              error_code, error_message, created_at, updated_at)
+           VALUES ('migration-bad-state', 'project-archive', 'session-bad-state',
+                   'stale_unknown', 'project-archive', 'project-archive:archive:g1:s1',
+                   1, 0, 1, 'test_error', 'test message', 900, 2100)`
+        )
+        .run();
+      seedMigration(sqlite, {
+        migrationId: 'migration-bad-location-state',
+        sessionId: 'session-bad-location-state',
+        state: 'failed',
+        updatedAt: 2200,
+      });
+      sqlite
+        .prepare(
+          `UPDATE project_data_session_locations
+           SET location_state = 'stale_unknown'
+           WHERE migration_id = 'migration-bad-location-state'`
+        )
+        .run();
+      sqlite
+        .prepare(
+          `INSERT INTO project_data_archive_circuit_breakers
+             (project_id, state, reason, opened_at, updated_at)
+           VALUES ('project-archive', 'stale_unknown', 'drifted row', 2500, 2500)`
+        )
+        .run();
+      sqlite.pragma('ignore_check_constraints = OFF');
+
+      const state = await getProjectDataArchiveRolloutState(makeEnv(sqlite), {
+        projectId: 'project-archive',
+        limit: 10,
+      });
+      expect(state.recentMigrations.map((migration) => migration.migrationId)).toEqual([
+        'migration-bad-location-state',
+        'migration-good',
+      ]);
+      expect(state.locations.map((location) => location.sessionId)).toEqual(['session-good']);
+      expect(state.circuitBreakers).toEqual([]);
+      expect(state.warnings).toEqual(
+        expect.arrayContaining([
+          {
+            surface: 'migration_state_counts',
+            skippedRows: 1,
+            examples: [
+              { rowIndex: expect.any(Number), reason: 'Invalid ProjectData archive migration count state' },
+            ],
+          },
+          {
+            surface: 'location_state_counts',
+            skippedRows: 1,
+            examples: [
+              { rowIndex: expect.any(Number), reason: 'Invalid ProjectData archive location count state' },
+            ],
+          },
+          {
+            surface: 'circuit_breakers',
+            skippedRows: 1,
+            examples: [
+              { rowIndex: 0, reason: 'Invalid ProjectData archive circuit-breaker state' },
+            ],
+          },
+          {
+            surface: 'recent_migrations',
+            skippedRows: 2,
+            examples: [
+              { rowIndex: 1, reason: 'Invalid ProjectData archive migration state' },
+              { rowIndex: 2, reason: 'Invalid ProjectData archive rollout row: source_owner_name' },
+            ],
+          },
+          {
+            surface: 'locations',
+            skippedRows: 2,
+            examples: [
+              { rowIndex: 0, reason: 'Invalid ProjectData archive location state' },
+              { rowIndex: 1, reason: 'Invalid ProjectData archive rollout row: owner_name' },
+            ],
+          },
+        ])
+      );
+
+      const problems = await listProjectDataArchiveProblemMigrations(makeEnv(sqlite), {
+        projectId: 'project-archive',
+        limit: 10,
+      });
+      expect(problems.migrations.map((migration) => migration.migrationId)).toEqual([
+        'migration-good',
+        'migration-bad-location-state',
+      ]);
+      expect(problems.warnings).toEqual([
+        {
+          surface: 'problem_migrations',
+          skippedRows: 1,
+          examples: [
+            { rowIndex: 1, reason: 'Invalid ProjectData archive rollout row: source_owner_name' },
+          ],
+        },
+      ]);
+    } finally {
+      sqlite.pragma('ignore_check_constraints = OFF');
       sqlite.close();
     }
   });

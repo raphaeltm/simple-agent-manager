@@ -17,9 +17,14 @@ production configuration, or run a production canary.
   `inspectFrozenProjectDataArchiveIntents`, and `copyBackProjectDataArchiveMigration`. These should
   be exposed behind superadmin admin routes rather than reimplemented. Rehome remains internal until
   it has distinct recovery semantics.
-- `runProjectDataArchiveSharding()` exits early unless `PROJECT_DATA_ARCHIVE_SHARDING_ENABLED=true`;
-  the manual canary path needs a scoped dry-run entry point that does not depend on global cron
-  selection, but non-dry canary execution must fail closed unless exact archive routing is active.
+- `runProjectDataArchiveSharding()` originally exited early unless `PROJECT_DATA_ARCHIVE_SHARDING_ENABLED=true`,
+  which coupled exact archive read routing to the unscoped scheduled sweep. The final blocker fix adds
+  `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED=false` as the separate fail-closed global sweep gate, so
+  operators can enable exact routing for a scoped canary without starting global cron selection. The
+  manual canary path needs a scoped dry-run entry point that does not depend on global cron selection,
+  and non-dry canary execution must fail closed unless exact archive routing is active.
+- Rollout read/list mappers must isolate malformed D1 rows. A drifted journal, location, or breaker row
+  should not 500 the whole operator endpoint; read surfaces should skip it and return bounded warnings.
   Dry-run must remain D1-only and must never call source deletion RPCs.
 - D1 rollout state lives in `project_data_archive_migrations`,
   `project_data_session_locations`, and `project_data_archive_circuit_breakers` from migration
@@ -52,18 +57,27 @@ production configuration, or run a production canary.
       disabled-by-default behavior, exact-routing-disabled non-dry refusal, and no source deletion
       from dry-run.
 - [x] Update API/env docs for the operator sequence and rollout model.
+- [x] Add separate `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED` gate so exact routing can be enabled
+      without starting the unscoped scheduled sweep.
+- [x] Add row-fault isolation and bounded warnings for rollout read/list surfaces.
+- [x] Make rollout malformed-row warning example and reason bounds configurable.
+- [x] Wire archive rollout env overrides through deployment sync/workflow propagation.
 - [x] Run focused API tests plus lint/typecheck/build as appropriate.
 - [x] Run specialist reviews: cloudflare-specialist, security-auditor, env-validator,
       doc-sync-validator, constitution-validator, test-engineer, and task-completion-validator.
-- [ ] Open a PR and stop; do not merge or run production canary.
+- [x] Rerun final blocker-fix specialist reviews for the new global-sweep gate and row-fault isolation changes.
+- [x] Update existing PR and stop; do not merge, deploy, mutate staging/production config, or run any canary.
 
 ## Acceptance criteria
 
 - Global archive sharding remains disabled by default and the scheduled coordinator still skips when
-  `PROJECT_DATA_ARCHIVE_SHARDING_ENABLED` is not `true`.
+  `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED` is not `true`; enabling
+  `PROJECT_DATA_ARCHIVE_SHARDING_ENABLED=true` alone only enables exact archive read routing.
 - Superadmins can inspect D1 archive-sharding journal/session-location/circuit-breaker state by
   project and optionally session with bounded limits.
 - Superadmins can list failed, poisoned, and frozen migrations with bounded limits.
+- Malformed rows in D1 rollout read/list surfaces are skipped with bounded warnings instead of causing
+  the entire admin endpoint to fail.
 - Frozen-intent inspection and copy-back are reachable only through superadmin admin routes, and
   copy-back retains existing safety preconditions. Rehome is deliberately not exposed in this slice.
 - Manual canary dry-run defaults to no-op and cannot create D1 candidate rows, call ProjectData owner

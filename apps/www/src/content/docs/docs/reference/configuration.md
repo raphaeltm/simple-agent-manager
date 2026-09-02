@@ -893,7 +893,8 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 | `PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES`     | `1900000`                    | Absolute bounded read cap for legacy oversized tool payload metadata; larger rows fail closed and remain in ProjectData                                                                |
 | `PROJECT_DATA_STORAGE_RELIEF_MEASURE_BATCH_ROWS`           | `500`                        | Default row budget for superadmin ProjectData relief measurement slices                                                                                                                |
 | `PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS`       | `5000`                       | Maximum accepted row budget for superadmin relief measurement slices                                                                                                                   |
-| `PROJECT_DATA_ARCHIVE_SHARDING_ENABLED`                    | `false`                      | Production-disabled switch for terminal-session archive sharding exact routing and scheduled coordinator selection; keep false until the canary coordinator explicitly enables routing   |
+| `PROJECT_DATA_ARCHIVE_SHARDING_ENABLED`                    | `false`                      | Production-disabled switch for exact archive read routing; scoped non-dry canaries require this, but enabling it alone does not run the unscoped scheduled sweep                         |
+| `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED`                | `false`                      | Separate production-disabled switch for the unscoped scheduled archive-sharding sweep; scheduled global migration requires this and exact archive routing to be enabled                   |
 | `PROJECT_DATA_ARCHIVE_SHARD_COUNT`                         | `128`                        | Deterministic archive-shard fanout used when assigning terminal sessions to ProjectData archive Durable Objects                                                                        |
 | `PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS`                      | `1`                          | Maximum projects selected by one archive-sharding cron pass                                                                                                                            |
 | `PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS`                      | `1`                          | Maximum sessions migrated by one archive-sharding cron pass                                                                                                                            |
@@ -908,20 +909,24 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 | `PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_LIMIT_MAX`  | `10`                         | Maximum accepted frozen-intent detail inspection limit; configured values above 10 are clamped to the reviewed hot-DO fan-out ceiling and request limits above the configured max are rejected |
 | `PROJECT_DATA_ARCHIVE_MANUAL_CANARY_MAX_SESSIONS`          | `5`                          | Maximum sessions a superadmin scoped manual archive-sharding canary request may select; default requests select one session and dry-run by default                                      |
 | `PROJECT_DATA_ARCHIVE_MANUAL_CANARY_MAX_WALL_TIME_MS`      | `15000`                      | Maximum wall-clock budget accepted by the superadmin scoped manual archive-sharding canary endpoint                                                                                     |
+| `PROJECT_DATA_ARCHIVE_ROLLOUT_WARNING_EXAMPLES_MAX`        | `5`                          | Maximum malformed-row warning examples returned by archive rollout read/list endpoints                                                                                                  |
+| `PROJECT_DATA_ARCHIVE_ROLLOUT_WARNING_REASON_MAX_LENGTH`   | `300`                        | Maximum characters per malformed-row warning reason returned by archive rollout read/list endpoints                                                                                     |
 | `PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS`               | `3`                          | Failed archive-sharding attempts before the migration is poisoned and the project circuit breaker opens                                                                                |
 | `PROJECT_DATA_ARCHIVE_R2_PREFIX`                           | `project-data/session-archives` | Private R2 prefix for terminal-session archive recovery chunks and manifests                                                                                                        |
 | `PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS`                   | `4`                          | Maximum archive-shard owners queried for one project-wide message search before results report explicit partial metadata                                                               |
 
-Archive-sharding rollout is deliberately two-stage. The scheduled coordinator in
+Archive-sharding rollout is deliberately staged. The scheduled coordinator in
 `apps/api/src/scheduled/project-data-archive-sharding.ts` still does no work unless
-`PROJECT_DATA_ARCHIVE_SHARDING_ENABLED=true`. Before changing that routing/cron switch, operators
+`PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED=true` and exact archive routing is active through
+`PROJECT_DATA_ARCHIVE_SHARDING_ENABLED=true`. Before changing the global sweep switch, operators
 use the superadmin routes in `apps/api/src/routes/admin/project-data-storage.ts` to inspect one
 project's D1 journal/location/breaker state and run a scoped dry-run canary for a specific project
-and optional session. Dry-runs work while the switch is false and never call source deletion RPCs.
+and optional session. Dry-runs work while both rollout switches are false and never call source deletion RPCs.
 Non-dry scoped canaries fail closed unless exact archive routing is active, because publishing or
 deleting source rows while exact reads still resolve to root can render conversations empty. Failed,
 poisoned, or frozen rows are inspected through the frozen-intent route and recovered through the
-copy-back helper with an explicit operator reason before any broader rollout.
+copy-back helper with exact archive routing enabled and an explicit operator reason before any broader
+rollout.
 
 | Variable                                                     | Default                      | Description                                                                                                                                                                          |
 | ------------------------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

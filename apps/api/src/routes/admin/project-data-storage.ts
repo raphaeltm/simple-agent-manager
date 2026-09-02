@@ -6,6 +6,7 @@ import {
   copyBackProjectDataArchiveMigration,
   getProjectDataArchiveFrozenIntentInspectionConfig,
   inspectFrozenProjectDataArchiveIntents,
+  ProjectDataArchiveCoordinatorStateError,
   runScopedProjectDataArchiveCanary,
 } from '../../scheduled/project-data-archive-sharding';
 import {
@@ -253,12 +254,12 @@ adminProjectDataStorageRoutes.get('/archive-sharding/problem-migrations', async 
   const projectId = c.req.query('projectId')?.trim() || undefined;
   const sessionId = c.req.query('sessionId')?.trim() || undefined;
   const limit = parseArchiveRolloutLimit(c.req.query('limit'), c.env);
-  const migrations = await listProjectDataArchiveProblemMigrations(c.env, {
+  const result = await listProjectDataArchiveProblemMigrations(c.env, {
     projectId,
     sessionId,
     limit,
   });
-  return c.json({ migrations, limit });
+  return c.json({ migrations: result.migrations, warnings: result.warnings, limit });
 });
 
 /**
@@ -375,8 +376,8 @@ adminProjectDataStorageRoutes.post(
 adminProjectDataStorageRoutes.get('/:projectId/archive-sharding/frozen-intents', async (c) => {
   const projectId = assertProjectId(c.req.param('projectId'));
   const limit = parseArchiveFrozenIntentLimit(c.req.query('limit'), c.env);
-  const inspections = await inspectFrozenProjectDataArchiveIntents(c.env, { projectId, limit });
-  return c.json({ inspections, limit });
+  const result = await inspectFrozenProjectDataArchiveIntents(c.env, { projectId, limit });
+  return c.json({ inspections: result.inspections, warnings: result.warnings, limit });
 });
 
 /**
@@ -390,11 +391,22 @@ adminProjectDataStorageRoutes.post(
     const migrationId = c.req.param('migrationId')?.trim();
     if (!migrationId) throw errors.badRequest('migrationId is required');
     const body = c.req.valid('json');
-    const result = await copyBackProjectDataArchiveMigration(c.env, {
-      projectId,
-      migrationId,
-      reason: body.reason.trim(),
-    });
+    let result;
+    try {
+      result = await copyBackProjectDataArchiveMigration(c.env, {
+        projectId,
+        migrationId,
+        reason: body.reason.trim(),
+      });
+    } catch (error) {
+      if (
+        error instanceof ProjectDataArchiveCoordinatorStateError &&
+        error.reason === 'exact_routing_disabled'
+      ) {
+        throw errors.badRequest('copy-back requires exact archive routing to be enabled');
+      }
+      throw error;
+    }
     return c.json({ result });
   }
 );

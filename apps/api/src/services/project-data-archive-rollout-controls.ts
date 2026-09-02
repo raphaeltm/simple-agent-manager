@@ -11,6 +11,8 @@ const DEFAULT_ARCHIVE_ROLLOUT_LIST_LIMIT = 25;
 const DEFAULT_ARCHIVE_ROLLOUT_LIST_LIMIT_MAX = 100;
 const DEFAULT_ARCHIVE_MANUAL_CANARY_MAX_SESSIONS = 5;
 const DEFAULT_ARCHIVE_MANUAL_CANARY_MAX_WALL_TIME_MS = 15_000;
+export const DEFAULT_ARCHIVE_ROLLOUT_WARNING_EXAMPLES_MAX = 5;
+export const DEFAULT_ARCHIVE_ROLLOUT_WARNING_REASON_MAX_LENGTH = 300;
 
 type ArchiveCircuitBreakerState = 'closed' | 'open' | 'frozen';
 
@@ -132,6 +134,21 @@ export type ProjectDataArchiveRolloutMigration = {
   breakerReason: string | null;
 };
 
+export type ProjectDataArchiveRolloutRowWarning = {
+  surface:
+    | 'migration_state_counts'
+    | 'location_state_counts'
+    | 'circuit_breakers'
+    | 'recent_migrations'
+    | 'locations'
+    | 'problem_migrations';
+  skippedRows: number;
+  examples: Array<{
+    rowIndex: number;
+    reason: string;
+  }>;
+};
+
 export type ProjectDataArchiveRolloutState = {
   filters: {
     projectId: string | null;
@@ -151,6 +168,12 @@ export type ProjectDataArchiveRolloutState = {
   recentMigrationsHasMore: boolean;
   locations: ProjectDataArchiveRolloutLocation[];
   locationsHasMore: boolean;
+  warnings: ProjectDataArchiveRolloutRowWarning[];
+};
+
+export type ProjectDataArchiveProblemMigrationsResult = {
+  migrations: ProjectDataArchiveRolloutMigration[];
+  warnings: ProjectDataArchiveRolloutRowWarning[];
 };
 
 export type ProjectDataArchiveProjectControlResult = {
@@ -211,6 +234,26 @@ export function getProjectDataArchiveManualCanaryConfig(env: Env): {
   };
 }
 
+export function getProjectDataArchiveRolloutWarningConfig(env: Env): {
+  maxExamples: number;
+  maxReasonLength: number;
+} {
+  return {
+    maxExamples: envInt(
+      env.PROJECT_DATA_ARCHIVE_ROLLOUT_WARNING_EXAMPLES_MAX,
+      DEFAULT_ARCHIVE_ROLLOUT_WARNING_EXAMPLES_MAX,
+      1,
+      50
+    ),
+    maxReasonLength: envInt(
+      env.PROJECT_DATA_ARCHIVE_ROLLOUT_WARNING_REASON_MAX_LENGTH,
+      DEFAULT_ARCHIVE_ROLLOUT_WARNING_REASON_MAX_LENGTH,
+      1,
+      2000
+    ),
+  };
+}
+
 function optionalString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
@@ -251,10 +294,26 @@ function isBreakerState(value: unknown): value is ArchiveCircuitBreakerState {
   return value === 'closed' || value === 'open' || value === 'frozen';
 }
 
-function mapCountRow(row: RawCountRow): ProjectDataArchiveRolloutStateCount {
+function mapMigrationCountRow(row: RawCountRow): ProjectDataArchiveRolloutStateCount {
+  if (!isJournalState(row.state)) {
+    throw new Error('Invalid ProjectData archive migration count state');
+  }
   return {
     projectId: requiredString(row.project_id, 'project_id'),
-    state: requiredString(row.state, 'state'),
+    state: row.state,
+    count: requiredNumber(row.count, 'count'),
+    oldestUpdatedAt: optionalNumber(row.oldest_updated_at),
+    newestUpdatedAt: optionalNumber(row.newest_updated_at),
+  };
+}
+
+function mapLocationCountRow(row: RawCountRow): ProjectDataArchiveRolloutStateCount {
+  if (!isLocationState(row.state)) {
+    throw new Error('Invalid ProjectData archive location count state');
+  }
+  return {
+    projectId: requiredString(row.project_id, 'project_id'),
+    state: row.state,
     count: requiredNumber(row.count, 'count'),
     oldestUpdatedAt: optionalNumber(row.oldest_updated_at),
     newestUpdatedAt: optionalNumber(row.newest_updated_at),
@@ -299,12 +358,8 @@ function mapMigrationRow(row: RawMigrationRow): ProjectDataArchiveRolloutMigrati
   if (!isJournalState(row.state)) {
     throw new Error('Invalid ProjectData archive migration state');
   }
-  if (row.location_state !== null && !isLocationState(row.location_state)) {
-    throw new Error('Invalid ProjectData archive migration location state');
-  }
-  if (row.breaker_state !== null && !isBreakerState(row.breaker_state)) {
-    throw new Error('Invalid ProjectData archive migration circuit-breaker state');
-  }
+  const locationState = isLocationState(row.location_state) ? row.location_state : null;
+  const breakerState = isBreakerState(row.breaker_state) ? row.breaker_state : null;
   return {
     migrationId: requiredString(row.migration_id, 'migration_id'),
     projectId: requiredString(row.project_id, 'project_id'),
@@ -324,9 +379,49 @@ function mapMigrationRow(row: RawMigrationRow): ProjectDataArchiveRolloutMigrati
     poisonedAt: optionalNumber(row.poisoned_at),
     publishedAt: optionalNumber(row.published_at),
     updatedAt: requiredNumber(row.updated_at, 'updated_at'),
-    locationState: row.location_state,
-    breakerState: row.breaker_state,
+    locationState,
+    breakerState,
     breakerReason: optionalString(row.breaker_reason),
+  };
+}
+
+function rowWarningReason(error: unknown, maxReasonLength: number): string {
+  return error instanceof Error
+    ? error.message.slice(0, maxReasonLength)
+    : String(error).slice(0, maxReasonLength);
+}
+
+function mapRowsWithIsolation<RawRow, MappedRow>(
+  surface: ProjectDataArchiveRolloutRowWarning['surface'],
+  rows: RawRow[],
+  mapper: (row: RawRow) => MappedRow,
+  config: { maxExamples: number; maxReasonLength: number }
+): { rows: MappedRow[]; warnings: ProjectDataArchiveRolloutRowWarning[] } {
+  const mapped: MappedRow[] = [];
+  const examples: ProjectDataArchiveRolloutRowWarning['examples'] = [];
+  let skippedRows = 0;
+  rows.forEach((row, rowIndex) => {
+    try {
+      mapped.push(mapper(row));
+    } catch (error) {
+      skippedRows++;
+      if (examples.length < config.maxExamples) {
+        examples.push({ rowIndex, reason: rowWarningReason(error, config.maxReasonLength) });
+      }
+    }
+  });
+  return {
+    rows: mapped,
+    warnings:
+      skippedRows > 0
+        ? [
+            {
+              surface,
+              skippedRows,
+              examples,
+            },
+          ]
+        : [],
   };
 }
 
@@ -358,7 +453,13 @@ export async function getProjectDataArchiveRolloutState(
   const breakerFilter = filters.projectId ? 'WHERE breaker.project_id = ?' : '';
   const breakerParams = filters.projectId ? [filters.projectId] : [];
 
-  const [migrationCounts, locationCounts, breakers, migrations, locations] = await Promise.all([
+  const [
+    migrationCounts,
+    locationCounts,
+    breakers,
+    migrationListResult,
+    locationListResult,
+  ] = await Promise.all([
     env.DATABASE.prepare(
       `SELECT m.project_id, m.state, COUNT(*) AS count,
               MIN(m.updated_at) AS oldest_updated_at,
@@ -421,8 +522,39 @@ export async function getProjectDataArchiveRolloutState(
       .all<RawLocationRow>(),
   ]);
   const manualCanaryConfig = getProjectDataArchiveManualCanaryConfig(env);
-  const migrationRows = migrations.results ?? [];
-  const locationRows = locations.results ?? [];
+  const warningConfig = getProjectDataArchiveRolloutWarningConfig(env);
+  const migrationRows = migrationListResult.results ?? [];
+  const locationRows = locationListResult.results ?? [];
+  const migrationStateCounts = mapRowsWithIsolation(
+    'migration_state_counts',
+    migrationCounts.results ?? [],
+    mapMigrationCountRow,
+    warningConfig
+  );
+  const locationStateCounts = mapRowsWithIsolation(
+    'location_state_counts',
+    locationCounts.results ?? [],
+    mapLocationCountRow,
+    warningConfig
+  );
+  const circuitBreakers = mapRowsWithIsolation(
+    'circuit_breakers',
+    breakers.results ?? [],
+    mapBreakerRow,
+    warningConfig
+  );
+  const recentMigrations = mapRowsWithIsolation(
+    'recent_migrations',
+    migrationRows,
+    mapMigrationRow,
+    warningConfig
+  );
+  const mappedLocations = mapRowsWithIsolation(
+    'locations',
+    locationRows,
+    mapLocationRow,
+    warningConfig
+  );
 
   return {
     filters: {
@@ -431,25 +563,32 @@ export async function getProjectDataArchiveRolloutState(
       limit,
     },
     config: {
-      globalCronEnabled: env.PROJECT_DATA_ARCHIVE_SHARDING_ENABLED === 'true',
+      globalCronEnabled: env.PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED === 'true',
       exactRoutingEnabled: isProjectDataArchiveExactRoutingEnabled(env),
       manualCanaryMaxSessions: manualCanaryConfig.maxSessions,
       manualCanaryMaxWallTimeMs: manualCanaryConfig.maxWallTimeMs,
     },
-    migrationStateCounts: (migrationCounts.results ?? []).map(mapCountRow),
-    locationStateCounts: (locationCounts.results ?? []).map(mapCountRow),
-    circuitBreakers: (breakers.results ?? []).map(mapBreakerRow),
-    recentMigrations: migrationRows.slice(0, limit).map(mapMigrationRow),
-    recentMigrationsHasMore: migrationRows.length > limit,
-    locations: locationRows.slice(0, limit).map(mapLocationRow),
-    locationsHasMore: locationRows.length > limit,
+    migrationStateCounts: migrationStateCounts.rows,
+    locationStateCounts: locationStateCounts.rows,
+    circuitBreakers: circuitBreakers.rows,
+    recentMigrations: recentMigrations.rows.slice(0, limit),
+    recentMigrationsHasMore: recentMigrations.rows.length > limit || migrationRows.length > limit,
+    locations: mappedLocations.rows.slice(0, limit),
+    locationsHasMore: mappedLocations.rows.length > limit || locationRows.length > limit,
+    warnings: [
+      ...migrationStateCounts.warnings,
+      ...locationStateCounts.warnings,
+      ...circuitBreakers.warnings,
+      ...recentMigrations.warnings,
+      ...mappedLocations.warnings,
+    ],
   };
 }
 
 export async function listProjectDataArchiveProblemMigrations(
   env: Env,
   filters: ArchiveRolloutFilters = {}
-): Promise<ProjectDataArchiveRolloutMigration[]> {
+): Promise<ProjectDataArchiveProblemMigrationsResult> {
   const limitConfig = getProjectDataArchiveRolloutListConfig(env);
   const limit = Math.max(1, Math.min(filters.limit ?? limitConfig.defaultLimit, limitConfig.maxLimit));
   const scoped = filterSql(filters, 'm');
@@ -471,7 +610,16 @@ export async function listProjectDataArchiveProblemMigrations(
   )
     .bind(...scoped.params, limit)
     .all<RawMigrationRow>();
-  return (rows.results ?? []).map(mapMigrationRow);
+  const mapped = mapRowsWithIsolation(
+    'problem_migrations',
+    rows.results ?? [],
+    mapMigrationRow,
+    getProjectDataArchiveRolloutWarningConfig(env)
+  );
+  return {
+    migrations: mapped.rows,
+    warnings: mapped.warnings,
+  };
 }
 
 export async function setProjectDataArchiveCircuitBreaker(

@@ -17,6 +17,7 @@ import {
   PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_PROJECTS,
   PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_SESSIONS,
   PROJECT_DATA_ARCHIVE_DEFAULT_WALL_TIME_MS,
+  PROJECT_DATA_ARCHIVE_JOURNAL_STATES,
   PROJECT_DATA_ARCHIVE_MAX_CHUNK_BYTES,
   PROJECT_DATA_ARCHIVE_ROUTING_SCHEMA_VERSION,
   PROJECT_DATA_ARCHIVE_TABLES,
@@ -24,6 +25,7 @@ import {
   type ProjectDataArchiveJournalState,
   type ProjectDataArchiveTableName,
 } from '../project-data-archive/contract';
+import { getProjectDataArchiveRolloutWarningConfig } from '../services/project-data-archive-rollout-controls';
 import {
   archiveShardProjectDataOwner,
   assertArchiveJournalTransition,
@@ -205,6 +207,20 @@ export type ProjectDataArchiveFrozenIntentInspection = {
       };
 };
 
+export type ProjectDataArchiveFrozenIntentWarning = {
+  surface: 'frozen_intents';
+  skippedRows: number;
+  examples: Array<{
+    rowIndex: number;
+    reason: string;
+  }>;
+};
+
+export type ProjectDataArchiveFrozenIntentInspectionResult = {
+  inspections: ProjectDataArchiveFrozenIntentInspection[];
+  warnings: ProjectDataArchiveFrozenIntentWarning[];
+};
+
 export function getProjectDataArchiveFrozenIntentInspectionConfig(env: Env): {
   defaultLimit: number;
   maxLimit: number;
@@ -271,7 +287,7 @@ function envInt(value: string | undefined, fallback: number, min: number, max: n
 
 function resolveConfig(env: Env): ArchiveCoordinatorConfig {
   return {
-    enabled: env.PROJECT_DATA_ARCHIVE_SHARDING_ENABLED === 'true',
+    enabled: env.PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED === 'true',
     shardCount: envInt(
       env.PROJECT_DATA_ARCHIVE_SHARD_COUNT,
       PROJECT_DATA_ARCHIVE_DEFAULT_SHARD_COUNT,
@@ -404,6 +420,58 @@ function errorCode(error: unknown): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, 1000) : String(error).slice(0, 1000);
+}
+
+function inspectionWarningMessage(error: unknown, maxReasonLength: number): string {
+  return error instanceof Error
+    ? error.message.slice(0, maxReasonLength)
+    : String(error).slice(0, maxReasonLength);
+}
+
+function requiredRowString(value: unknown, field: string): string {
+  if (typeof value === 'string' && value.length > 0) return value;
+  throw new ProjectDataArchiveCoordinatorStateError(
+    'invalid_inspection_row',
+    `Invalid ProjectData archive frozen-intent row: ${field}`
+  );
+}
+
+function requiredRowNumber(value: unknown, field: string): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  throw new ProjectDataArchiveCoordinatorStateError(
+    'invalid_inspection_row',
+    `Invalid ProjectData archive frozen-intent row: ${field}`
+  );
+}
+
+function requiredJournalState(value: unknown): ProjectDataArchiveJournalState {
+  if (
+    typeof value === 'string' &&
+    PROJECT_DATA_ARCHIVE_JOURNAL_STATES.includes(value as ProjectDataArchiveJournalState)
+  ) {
+    return value as ProjectDataArchiveJournalState;
+  }
+  throw new ProjectDataArchiveCoordinatorStateError(
+    'invalid_inspection_row',
+    'Invalid ProjectData archive frozen-intent row: state'
+  );
+}
+
+function validatedFrozenIntentMigrationRow(
+  row: MigrationRow & { location_state: string | null; breaker_state: string | null }
+): MigrationRow & { location_state: string | null; breaker_state: string | null } {
+  return {
+    ...row,
+    migration_id: requiredRowString(row.migration_id, 'migration_id'),
+    project_id: requiredRowString(row.project_id, 'project_id'),
+    session_id: requiredRowString(row.session_id, 'session_id'),
+    state: requiredJournalState(row.state),
+    source_owner_name: requiredRowString(row.source_owner_name, 'source_owner_name'),
+    target_owner_name: requiredRowString(row.target_owner_name, 'target_owner_name'),
+    target_generation: requiredRowNumber(row.target_generation, 'target_generation'),
+    lease_epoch: requiredRowNumber(row.lease_epoch, 'lease_epoch'),
+    attempt_count: requiredRowNumber(row.attempt_count, 'attempt_count'),
+  };
 }
 
 function requireStringField(
@@ -1769,7 +1837,7 @@ export async function inspectFrozenProjectDataArchiveIntents(
     projectId?: string;
     limit?: number;
   } = {}
-): Promise<ProjectDataArchiveFrozenIntentInspection[]> {
+): Promise<ProjectDataArchiveFrozenIntentInspectionResult> {
   const limit = resolveProjectDataArchiveFrozenIntentInspectionLimit(env, input.limit);
   const projectPredicate = input.projectId ? 'AND m.project_id = ?' : '';
   const rows = await env.DATABASE.prepare(
@@ -1792,7 +1860,23 @@ export async function inspectFrozenProjectDataArchiveIntents(
     .all<MigrationRow & { location_state: string | null; breaker_state: string | null }>();
 
   const inspections: ProjectDataArchiveFrozenIntentInspection[] = [];
-  for (const row of rows.results ?? []) {
+  const warningConfig = getProjectDataArchiveRolloutWarningConfig(env);
+  const warningExamples: ProjectDataArchiveFrozenIntentWarning['examples'] = [];
+  let skippedRows = 0;
+  for (const [rowIndex, rawRow] of (rows.results ?? []).entries()) {
+    let row: MigrationRow & { location_state: string | null; breaker_state: string | null };
+    try {
+      row = validatedFrozenIntentMigrationRow(rawRow);
+    } catch (error) {
+      skippedRows++;
+      if (warningExamples.length < warningConfig.maxExamples) {
+        warningExamples.push({
+          rowIndex,
+          reason: inspectionWarningMessage(error, warningConfig.maxReasonLength),
+        });
+      }
+      continue;
+    }
     const source = ownerStub(env, row.source_owner_name);
     const target = ownerStub(env, row.target_owner_name);
     let sourceIntent: ProjectDataArchiveFrozenIntentInspection['sourceIntent'];
@@ -1841,7 +1925,19 @@ export async function inspectFrozenProjectDataArchiveIntents(
       target: targetInfo,
     });
   }
-  return inspections;
+  return {
+    inspections,
+    warnings:
+      skippedRows > 0
+        ? [
+            {
+              surface: 'frozen_intents',
+              skippedRows,
+              examples: warningExamples,
+            },
+          ]
+        : [],
+  };
 }
 
 export async function copyBackProjectDataArchiveMigration(
@@ -1859,6 +1955,12 @@ export async function copyBackProjectDataArchiveMigration(
     throw new ProjectDataArchiveCoordinatorStateError(
       'copy_back_reason_required',
       `ProjectData archive migration ${input.migrationId} copy-back requires an explicit reason`
+    );
+  }
+  if (!isProjectDataArchiveExactRoutingEnabled(env)) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'exact_routing_disabled',
+      'ProjectData archive copy-back requires exact archive routing to be enabled'
     );
   }
   const config = resolveConfig(env);
@@ -2010,6 +2112,9 @@ export async function runProjectDataArchiveSharding(
 ): Promise<ProjectDataArchiveShardingStats> {
   const config = resolveConfig(env);
   if (!config.enabled) return emptyStats(config, true, 'disabled');
+  if (!isProjectDataArchiveExactRoutingEnabled(env)) {
+    return emptyStats(config, true, 'exact_routing_disabled');
+  }
   const archiveR2 = env.PROJECT_DATA_ARCHIVE_R2;
   if (!archiveR2) return emptyStats(config, true, 'missing_r2_binding');
 
