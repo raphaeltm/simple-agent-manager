@@ -740,6 +740,13 @@ describe('ProjectData storage safety firebreak', () => {
         makeLegacyToolMetadata('oversized-legacy', 2_000_000),
         oversized
       );
+      const pastTime = Date.now() - 60_000;
+      state.storage.sql.exec(
+        'UPDATE chat_messages SET created_at = ? WHERE id IN (?, ?)',
+        pastTime,
+        oversized,
+        next
+      );
       return { oversized, next };
     });
 
