@@ -785,20 +785,22 @@ describe('ProjectData storage safety firebreak', () => {
         expect(firstMetadata[0]?.toolPayloadArchive).toBeUndefined();
         expect(Array.isArray(firstMetadata[1]?.content)).toBe(true);
 
-        const firstError = await runInDurableObject(stub, async (_instance, state) => {
+        const oversizedAttempt = await runInDurableObject(stub, async (_instance, state) => {
           const row = state.storage.sql
             .exec(
-              `SELECT value
-               FROM do_meta
-               WHERE key = 'storageSafetyLastError'
-               LIMIT 1`
+              `SELECT status, last_error
+               FROM tool_payload_cleanup_attempts
+               WHERE message_id = ?
+               LIMIT 1`,
+              messageIds.oversized
             )
-            .toArray()[0] as { value?: string } | undefined;
-          return row?.value ?? null;
+            .toArray()[0] as { status?: string; last_error?: string } | undefined;
+          return row ?? null;
         });
         const firstTelemetry = await readTelemetry(projectId);
         expect(firstTelemetry?.last_purge_rows).toBeNull();
-        expect(firstError).toContain('archive metadata byte budget');
+        expect(oversizedAttempt?.status).toBe('oversized');
+        expect(oversizedAttempt?.last_error).toContain('archive metadata byte budget');
 
         await runInDurableObject(stub, async (_instance, state) => {
           state.storage.sql.exec(
@@ -1164,7 +1166,13 @@ describe('ProjectData storage safety firebreak', () => {
 
     const sessionId = await runInDurableObject(stub, async (instance, state) => {
       const id = await instance.createSession(null, 'Grouped FTS stale overload guard');
-      await instance.persistMessage(id, 'assistant', `stale-overload ${'s'.repeat(64 * 1024)}`, null, null);
+      await instance.persistMessage(
+        id,
+        'assistant',
+        `stale-overload ${'s'.repeat(64 * 1024)}`,
+        null,
+        null
+      );
       await instance.stopSession(id);
       state.storage.sql.exec(
         `UPDATE chat_sessions SET updated_at = ? WHERE id = ?`,

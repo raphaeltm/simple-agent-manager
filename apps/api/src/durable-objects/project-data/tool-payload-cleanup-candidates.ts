@@ -24,6 +24,17 @@ export type ToolPayloadCandidateSelection = {
   hasMore: boolean;
 };
 
+type ToolPayloadCandidateSelectionRow = {
+  id: string;
+  sessionId: string;
+  createdAt: number;
+  sequence: number;
+  toolMetadataBytes: number;
+  rowNumber: number;
+  cumulativeToolMetadataBytes: number;
+  totalLimitedRows: number;
+};
+
 export type ToolPayloadCandidateScanResult = {
   rowsScanned: number;
   rowsUpdated: number;
@@ -82,6 +93,18 @@ function rawNumber(value: unknown): number | null {
   return null;
 }
 
+function messageCursorFilter(
+  cursor: ToolPayloadCleanupCursor | null,
+  columnPrefix = ''
+): { clause: string; params: Array<number | string> } {
+  if (!cursor) return { clause: '', params: [] };
+  const prefix = columnPrefix ? `${columnPrefix}.` : '';
+  return {
+    clause: `AND (${prefix}session_id, ${prefix}created_at, ${prefix}sequence, ${prefix}id) > (?, ?, ?, ?)`,
+    params: [cursor.sessionId, cursor.createdAt, cursor.sequence, cursor.messageId],
+  };
+}
+
 export function selectToolPayloadCandidates(
   sql: SqlStorage,
   cursor: ToolPayloadCleanupCursor | null,
@@ -91,10 +114,9 @@ export function selectToolPayloadCandidates(
   maxMetadataBytes: number,
   allowOversizedFirst: boolean
 ): ToolPayloadCandidateSelection {
-  const cursorSessionId = cursor?.sessionId ?? null;
-  const cursorCreatedAt = cursor?.createdAt ?? null;
-  const cursorSequence = cursor?.sequence ?? null;
-  const cursorMessageId = cursor?.messageId ?? null;
+  const cursorFilter = messageCursorFilter(cursor);
+  const whereClause = cursorFilter.clause;
+  const limitedRowLimit = limit + 1;
   const rows = sql
     .exec(
       `WITH limited AS (
@@ -102,17 +124,15 @@ export function selectToolPayloadCandidates(
            id,
            session_id,
            created_at,
-           COALESCE(sequence, 0) AS sequence,
+           sequence,
            length(CAST(tool_metadata AS BLOB)) AS tool_metadata_bytes
          FROM chat_messages
          WHERE role = 'tool'
            AND tool_metadata IS NOT NULL
            AND instr(tool_metadata, ?) > 0
            AND created_at < ?
-           AND (
-             ? IS NULL
-             OR (session_id, created_at, COALESCE(sequence, 0), id) > (?, ?, ?, ?)
-           )
+           AND sequence IS NOT NULL
+           ${whereClause}
            AND NOT EXISTS (
              SELECT 1
              FROM tool_payload_archives archived
@@ -147,29 +167,38 @@ export function selectToolPayloadCandidates(
            SUM(tool_metadata_bytes) OVER (
              ORDER BY session_id ASC, created_at ASC, sequence ASC, id ASC
              ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-           ) AS cumulative_tool_metadata_bytes
+           ) AS cumulative_tool_metadata_bytes,
+           COUNT(*) OVER () AS total_limited_rows
          FROM limited
        )
-       SELECT id, session_id, created_at, sequence, tool_metadata_bytes
+       SELECT
+         id,
+         session_id,
+         created_at,
+         sequence,
+         tool_metadata_bytes,
+         row_number,
+         cumulative_tool_metadata_bytes,
+         total_limited_rows
        FROM bounded
-       WHERE cumulative_tool_metadata_bytes <= ?
-          OR (? = 1 AND row_number = 1)
        ORDER BY session_id ASC, created_at ASC, sequence ASC, id ASC`,
       TOOL_PAYLOAD_CONTENT_KEY_NEEDLE,
       cutoffCreatedAt,
-      cursorSessionId,
-      cursorSessionId ?? '',
-      cursorCreatedAt ?? 0,
-      cursorSequence ?? 0,
-      cursorMessageId ?? '',
+      ...cursorFilter.params,
       retryReadyAt,
-      limit,
-      maxMetadataBytes,
-      allowOversizedFirst ? 1 : 0
+      limitedRowLimit
     )
     .raw();
-  const candidates = parseToolPayloadCandidateRows(rows);
-  return { candidates, hasMore: candidates.length >= limit };
+  const selection = parseToolPayloadCandidateRows(
+    rows,
+    limit,
+    maxMetadataBytes,
+    allowOversizedFirst
+  );
+  return {
+    candidates: selection.candidates,
+    hasMore: selection.totalLimitedRows > selection.candidates.length,
+  };
 }
 
 export type RearchivableOversizedCleanupResult = {
@@ -185,10 +214,8 @@ export function clearRearchivableOversizedToolPayloadCleanupAttempts(
   limit: number
 ): RearchivableOversizedCleanupResult {
   if (!Number.isSafeInteger(limit) || limit <= 0) return { rowsChanged: 0, hasMore: false };
-  const cursorSessionId = cursor?.sessionId ?? null;
-  const cursorCreatedAt = cursor?.createdAt ?? null;
-  const cursorSequence = cursor?.sequence ?? null;
-  const cursorMessageId = cursor?.messageId ?? null;
+  const cursorFilter = messageCursorFilter(cursor, 'm');
+  const whereClause = cursorFilter.clause;
   sql.exec(
     `DELETE FROM tool_payload_cleanup_attempts
      WHERE message_id IN (
@@ -200,27 +227,21 @@ export function clearRearchivableOversizedToolPayloadCleanupAttempts(
          AND m.tool_metadata IS NOT NULL
          AND instr(m.tool_metadata, ?) > 0
          AND m.created_at < ?
+         AND m.sequence IS NOT NULL
          AND length(CAST(m.tool_metadata AS BLOB)) <= ?
-         AND (
-           ? IS NULL
-           OR (m.session_id, m.created_at, COALESCE(m.sequence, 0), m.id) > (?, ?, ?, ?)
-         )
+         ${whereClause}
          AND NOT EXISTS (
            SELECT 1
            FROM tool_payload_archives archived
            WHERE archived.message_id = m.id
          )
-       ORDER BY m.session_id ASC, m.created_at ASC, COALESCE(m.sequence, 0) ASC, m.id ASC
+       ORDER BY m.session_id ASC, m.created_at ASC, m.sequence ASC, m.id ASC
        LIMIT ?
      )`,
     TOOL_PAYLOAD_CONTENT_KEY_NEEDLE,
     cutoffCreatedAt,
     archiveMaxMetadataBytes,
-    cursorSessionId,
-    cursorSessionId ?? '',
-    cursorCreatedAt ?? 0,
-    cursorSequence ?? 0,
-    cursorMessageId ?? '',
+    ...cursorFilter.params,
     limit
   );
   const row = sql.exec('SELECT changes()').raw().next().value;
@@ -228,26 +249,71 @@ export function clearRearchivableOversizedToolPayloadCleanupAttempts(
   return { rowsChanged, hasMore: rowsChanged >= limit };
 }
 
-function parseToolPayloadCandidateRows(rows: IterableIterator<unknown[]>): ToolPayloadCandidate[] {
+function parseToolPayloadCandidateRows(
+  rows: IterableIterator<unknown[]>,
+  limit: number,
+  maxMetadataBytes: number,
+  allowOversizedFirst: boolean
+): { candidates: ToolPayloadCandidate[]; totalLimitedRows: number } {
   const candidates: ToolPayloadCandidate[] = [];
+  let totalLimitedRows = 0;
   for (const row of rows) {
-    const id = row[0];
-    const sessionId = row[1];
-    const createdAt = rawNumber(row[2]);
-    const sequence = rawNumber(row[3]);
-    const toolMetadataBytes = rawNumber(row[4]);
-    if (
-      typeof id === 'string' &&
-      typeof sessionId === 'string' &&
-      createdAt !== null &&
-      sequence !== null &&
-      toolMetadataBytes !== null &&
-      toolMetadataBytes > 0
-    ) {
-      candidates.push({ sessionId, createdAt, sequence, messageId: id, toolMetadataBytes });
+    const parsed = parseToolPayloadCandidateSelectionRow(row);
+    if (!parsed) continue;
+    totalLimitedRows = Math.max(totalLimitedRows, parsed.totalLimitedRows);
+    const withinRowLimit = parsed.rowNumber <= limit;
+    const withinByteLimit = parsed.cumulativeToolMetadataBytes <= maxMetadataBytes;
+    const oversizedFirstAllowed = allowOversizedFirst && parsed.rowNumber === 1;
+    if (withinRowLimit && (withinByteLimit || oversizedFirstAllowed)) {
+      candidates.push({
+        sessionId: parsed.sessionId,
+        createdAt: parsed.createdAt,
+        sequence: parsed.sequence,
+        messageId: parsed.id,
+        toolMetadataBytes: parsed.toolMetadataBytes,
+      });
     }
   }
-  return candidates;
+  return { candidates, totalLimitedRows };
+}
+
+function parseToolPayloadCandidateSelectionRow(
+  row: unknown[]
+): ToolPayloadCandidateSelectionRow | null {
+  const id = row[0];
+  const sessionId = row[1];
+  const createdAt = rawNumber(row[2]);
+  const sequence = rawNumber(row[3]);
+  const toolMetadataBytes = rawNumber(row[4]);
+  const rowNumber = rawNumber(row[5]);
+  const cumulativeToolMetadataBytes = rawNumber(row[6]);
+  const totalLimitedRows = rawNumber(row[7]);
+  if (
+    typeof id !== 'string' ||
+    typeof sessionId !== 'string' ||
+    createdAt === null ||
+    sequence === null ||
+    toolMetadataBytes === null ||
+    toolMetadataBytes <= 0 ||
+    rowNumber === null ||
+    rowNumber <= 0 ||
+    cumulativeToolMetadataBytes === null ||
+    cumulativeToolMetadataBytes <= 0 ||
+    totalLimitedRows === null ||
+    totalLimitedRows <= 0
+  ) {
+    return null;
+  }
+  return {
+    id,
+    sessionId,
+    createdAt,
+    sequence,
+    toolMetadataBytes,
+    rowNumber,
+    cumulativeToolMetadataBytes,
+    totalLimitedRows,
+  };
 }
 
 function readBoundedToolMetadata(
