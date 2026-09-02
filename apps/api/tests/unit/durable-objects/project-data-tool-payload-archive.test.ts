@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES,
@@ -8,6 +9,7 @@ import {
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES,
+  DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS,
   resolveStorageSafetyConfig,
 } from '../../../src/durable-objects/project-data/storage-safety';
@@ -60,9 +62,18 @@ describe('ProjectData tool payload archive helpers', () => {
     expect(defaults.toolPayloadArchiveR2Prefix).toBe(
       DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX
     );
+    expect(defaults.toolPayloadCleanupRecheckMs).toBe(
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS
+    );
+    expect(defaults.eventLogCleanupRecheckMs).toBe(
+      DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS
+    );
+    expect(defaults.toolPayloadCleanupRecheckMs).toBe(24 * 60 * 60 * 1000);
+    expect(defaults.eventLogCleanupRecheckMs).toBe(24 * 60 * 60 * 1000);
 
     const overrides = resolveStorageSafetyConfig({
       PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS: '1234',
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS: '3456',
       PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES: '2345',
       PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '3',
       PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS: '4567',
@@ -84,8 +95,10 @@ describe('ProjectData tool payload archive helpers', () => {
       PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS: '6000',
       PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO: '0.97',
       PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES: '8',
+      PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS: '7000',
     } as Env);
     expect(overrides.toolPayloadCleanupWallTimeMs).toBe(1234);
+    expect(overrides.toolPayloadCleanupRecheckMs).toBe(3456);
     expect(overrides.toolPayloadCleanupMaxRowBytes).toBe(2345);
     expect(overrides.toolPayloadArchiveRetentionMs).toBe(3 * 24 * 60 * 60 * 1000);
     expect(overrides.toolPayloadArchiveIntervalMs).toBe(4567);
@@ -107,5 +120,6 @@ describe('ProjectData tool payload archive helpers', () => {
     expect(overrides.groupedFtsCleanupWallTimeMs).toBe(6000);
     expect(overrides.groupedFtsCleanupWallUnsafeRatio).toBe(0.97);
     expect(overrides.groupedFtsCleanupWeakReclaimBytes).toBe(8);
+    expect(overrides.eventLogCleanupRecheckMs).toBe(7000);
   });
 });

@@ -110,6 +110,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES` — Maximum cached ACP activity bindings retained by one Worker isolate (default: `2048`)
 
 Activity coalescing and binding caches are per Worker isolate. Delayed flushes carry their original observed event time, and ProjectData rejects stale writes so a delayed intermediate report cannot overwrite a newer idle/error state from another isolate.
+
 - `SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS` — Reclaim timeout for an interrupted replacement-runtime wake claim (default: `600000`)
 - `SESSION_LIFECYCLE_ERROR_MAX_LENGTH` — Maximum stored session lifecycle and agent activity failure diagnostic length (default: `2048`)
 - `SESSION_SNAPSHOT_PURGE_ENABLED` — Kill switch for expired snapshot cleanup in D1 and R2 (default: enabled)
@@ -189,7 +190,7 @@ Activity coalescing and binding caches are per Worker isolate. Delayed flushes c
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES` — Maximum legacy `tool_metadata` bytes read into JS by one automatic archival cleanup alarm batch (default: `2097152`)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES` — Legacy inline-size threshold for cleanup accounting; archival may read larger rows up to `PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES` (default: `1048576`)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS` — Legacy terminal-session age guard retained for storage telemetry compatibility; tool payload archival uses `PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS` (default: `7`)
-- `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS` — Delay before the next automatic cleanup alarm batch when more candidates remain (default: `60000`)
+- `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS` — Delay before the next automatic cleanup alarm batch when more candidates remain (default: `86400000`, daily)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM` — Deprecated legacy terminal-session cleanup knob retained for env compatibility; archival cleanup scans tool-message rows directly and is bounded by rows, bytes, and wall time instead (default: `25`)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS` — Soft wall-clock budget for one ProjectData tool payload archival cleanup alarm pass (default: `20000`)
 - `PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS` — Message age before expandable tool payload JSON may be archived to private R2 and stripped from the ProjectData DO (default: `5`)
@@ -215,7 +216,7 @@ Activity coalescing and binding caches are per Worker isolate. Delayed flushes c
 - `PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED` — Enables automatic deletion of old low-value terminal-session `activity_events` and terminal ACP event history when storage remains above the cleanup target (default: enabled)
 - `PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS` — Maximum terminal `activity_events` rows and terminal `acp_session_events` rows deleted per automatic cleanup alarm batch (default: `500`)
 - `PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS` — Minimum terminal-session age before automatic event-log cleanup may delete its activity/ACP event history (default: `7`)
-- `PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS` — Delay before the next terminal event-log cleanup alarm batch when more candidates remain (default: `60000`)
+- `PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS` — Delay before the next terminal event-log cleanup alarm batch when more candidates remain (default: `86400000`, daily)
 - `PROJECT_DATA_ARCHIVE_SHARDING_ENABLED` — Production-disabled switch for exact archive read routing (default: disabled)
 - `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED` — Separate production-disabled switch for the unscoped scheduled archive-sharding sweep; enabling exact routing alone does not run global migration (default: disabled)
 - `PROJECT_DATA_ARCHIVE_SHARD_COUNT` — Deterministic archive-shard fanout used when assigning terminal sessions to ProjectData archive Durable Objects (default: `128`)
