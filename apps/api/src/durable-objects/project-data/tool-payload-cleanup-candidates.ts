@@ -19,6 +19,11 @@ export type ToolPayloadCandidate = ToolPayloadCleanupCursor & {
   toolMetadataBytes: number;
 };
 
+export type ToolPayloadCandidateSelection = {
+  candidates: ToolPayloadCandidate[];
+  hasMore: boolean;
+};
+
 export type ToolPayloadCandidateScanResult = {
   rowsScanned: number;
   rowsUpdated: number;
@@ -85,7 +90,7 @@ export function selectToolPayloadCandidates(
   limit: number,
   maxMetadataBytes: number,
   allowOversizedFirst: boolean
-): ToolPayloadCandidate[] {
+): ToolPayloadCandidateSelection {
   const cursorSessionId = cursor?.sessionId ?? null;
   const cursorCreatedAt = cursor?.createdAt ?? null;
   const cursorSequence = cursor?.sequence ?? null;
@@ -106,15 +111,7 @@ export function selectToolPayloadCandidates(
            AND created_at < ?
            AND (
              ? IS NULL
-             OR session_id > ?
-             OR (
-               session_id = ?
-               AND (
-                 created_at > ?
-                 OR (created_at = ? AND COALESCE(sequence, 0) > ?)
-                 OR (created_at = ? AND COALESCE(sequence, 0) = ? AND id > ?)
-               )
-             )
+             OR (session_id, created_at, COALESCE(sequence, 0), id) > (?, ?, ?, ?)
            )
            AND NOT EXISTS (
              SELECT 1
@@ -162,10 +159,6 @@ export function selectToolPayloadCandidates(
       cutoffCreatedAt,
       cursorSessionId,
       cursorSessionId ?? '',
-      cursorSessionId ?? '',
-      cursorCreatedAt ?? 0,
-      cursorCreatedAt ?? 0,
-      cursorSequence ?? 0,
       cursorCreatedAt ?? 0,
       cursorSequence ?? 0,
       cursorMessageId ?? '',
@@ -175,79 +168,14 @@ export function selectToolPayloadCandidates(
       allowOversizedFirst ? 1 : 0
     )
     .raw();
-  return parseToolPayloadCandidateRows(rows);
+  const candidates = parseToolPayloadCandidateRows(rows);
+  return { candidates, hasMore: candidates.length >= limit };
 }
 
-export function hasToolPayloadCandidatesAfter(
-  sql: SqlStorage,
-  cursor: ToolPayloadCleanupCursor | null,
-  cutoffCreatedAt: number,
-  retryReadyAt: number
-): boolean {
-  const cursorSessionId = cursor?.sessionId ?? null;
-  const cursorCreatedAt = cursor?.createdAt ?? null;
-  const cursorSequence = cursor?.sequence ?? null;
-  const cursorMessageId = cursor?.messageId ?? null;
-  const rows = sql
-    .exec(
-      `SELECT id
-       FROM chat_messages
-       WHERE role = 'tool'
-         AND tool_metadata IS NOT NULL
-         AND instr(tool_metadata, ?) > 0
-         AND created_at < ?
-         AND (
-           ? IS NULL
-           OR session_id > ?
-           OR (
-             session_id = ?
-             AND (
-               created_at > ?
-               OR (created_at = ? AND COALESCE(sequence, 0) > ?)
-               OR (created_at = ? AND COALESCE(sequence, 0) = ? AND id > ?)
-             )
-           )
-         )
-         AND NOT EXISTS (
-           SELECT 1
-           FROM tool_payload_archives archived
-           WHERE archived.message_id = chat_messages.id
-         )
-         AND NOT EXISTS (
-           SELECT 1
-           FROM tool_payload_cleanup_attempts attempt
-           WHERE attempt.message_id = chat_messages.id
-             AND (
-               attempt.status IN ('no_reclaimable_payload', 'invalid_metadata', 'oversized')
-               OR (
-                 attempt.status = 'retryable_failure'
-                 AND attempt.next_attempt_at IS NOT NULL
-                 AND attempt.next_attempt_at > ?
-               )
-             )
-         )
-       ORDER BY session_id ASC, created_at ASC, sequence ASC, id ASC
-       LIMIT ?`,
-      TOOL_PAYLOAD_CONTENT_KEY_NEEDLE,
-      cutoffCreatedAt,
-      cursorSessionId,
-      cursorSessionId ?? '',
-      cursorSessionId ?? '',
-      cursorCreatedAt ?? 0,
-      cursorCreatedAt ?? 0,
-      cursorSequence ?? 0,
-      cursorCreatedAt ?? 0,
-      cursorSequence ?? 0,
-      cursorMessageId ?? '',
-      retryReadyAt,
-      1
-    )
-    .raw();
-  for (const row of rows) {
-    if (typeof row[0] === 'string') return true;
-  }
-  return false;
-}
+export type RearchivableOversizedCleanupResult = {
+  rowsChanged: number;
+  hasMore: boolean;
+};
 
 export function clearRearchivableOversizedToolPayloadCleanupAttempts(
   sql: SqlStorage,
@@ -255,8 +183,8 @@ export function clearRearchivableOversizedToolPayloadCleanupAttempts(
   cutoffCreatedAt: number,
   archiveMaxMetadataBytes: number,
   limit: number
-): number {
-  if (!Number.isSafeInteger(limit) || limit <= 0) return 0;
+): RearchivableOversizedCleanupResult {
+  if (!Number.isSafeInteger(limit) || limit <= 0) return { rowsChanged: 0, hasMore: false };
   const cursorSessionId = cursor?.sessionId ?? null;
   const cursorCreatedAt = cursor?.createdAt ?? null;
   const cursorSequence = cursor?.sequence ?? null;
@@ -275,15 +203,7 @@ export function clearRearchivableOversizedToolPayloadCleanupAttempts(
          AND length(CAST(m.tool_metadata AS BLOB)) <= ?
          AND (
            ? IS NULL
-           OR m.session_id > ?
-           OR (
-             m.session_id = ?
-             AND (
-               m.created_at > ?
-               OR (m.created_at = ? AND COALESCE(m.sequence, 0) > ?)
-               OR (m.created_at = ? AND COALESCE(m.sequence, 0) = ? AND m.id > ?)
-             )
-           )
+           OR (m.session_id, m.created_at, COALESCE(m.sequence, 0), m.id) > (?, ?, ?, ?)
          )
          AND NOT EXISTS (
            SELECT 1
@@ -298,78 +218,14 @@ export function clearRearchivableOversizedToolPayloadCleanupAttempts(
     archiveMaxMetadataBytes,
     cursorSessionId,
     cursorSessionId ?? '',
-    cursorSessionId ?? '',
-    cursorCreatedAt ?? 0,
-    cursorCreatedAt ?? 0,
-    cursorSequence ?? 0,
     cursorCreatedAt ?? 0,
     cursorSequence ?? 0,
     cursorMessageId ?? '',
     limit
   );
   const row = sql.exec('SELECT changes()').raw().next().value;
-  return row ? (rawNumber(row[0]) ?? 0) : 0;
-}
-
-export function hasRearchivableOversizedToolPayloadCleanupAttemptsAfter(
-  sql: SqlStorage,
-  cursor: ToolPayloadCleanupCursor | null,
-  cutoffCreatedAt: number,
-  archiveMaxMetadataBytes: number
-): boolean {
-  const cursorSessionId = cursor?.sessionId ?? null;
-  const cursorCreatedAt = cursor?.createdAt ?? null;
-  const cursorSequence = cursor?.sequence ?? null;
-  const cursorMessageId = cursor?.messageId ?? null;
-  const rows = sql
-    .exec(
-      `SELECT attempt.message_id
-       FROM tool_payload_cleanup_attempts attempt
-       JOIN chat_messages m ON m.id = attempt.message_id
-       WHERE attempt.status = 'oversized'
-         AND m.role = 'tool'
-         AND m.tool_metadata IS NOT NULL
-         AND instr(m.tool_metadata, ?) > 0
-         AND m.created_at < ?
-         AND length(CAST(m.tool_metadata AS BLOB)) <= ?
-         AND (
-           ? IS NULL
-           OR m.session_id > ?
-           OR (
-             m.session_id = ?
-             AND (
-               m.created_at > ?
-               OR (m.created_at = ? AND COALESCE(m.sequence, 0) > ?)
-               OR (m.created_at = ? AND COALESCE(m.sequence, 0) = ? AND m.id > ?)
-             )
-           )
-         )
-         AND NOT EXISTS (
-           SELECT 1
-           FROM tool_payload_archives archived
-           WHERE archived.message_id = m.id
-         )
-       ORDER BY m.session_id ASC, m.created_at ASC, COALESCE(m.sequence, 0) ASC, m.id ASC
-       LIMIT ?`,
-      TOOL_PAYLOAD_CONTENT_KEY_NEEDLE,
-      cutoffCreatedAt,
-      archiveMaxMetadataBytes,
-      cursorSessionId,
-      cursorSessionId ?? '',
-      cursorSessionId ?? '',
-      cursorCreatedAt ?? 0,
-      cursorCreatedAt ?? 0,
-      cursorSequence ?? 0,
-      cursorCreatedAt ?? 0,
-      cursorSequence ?? 0,
-      cursorMessageId ?? '',
-      1
-    )
-    .raw();
-  for (const row of rows) {
-    if (typeof row[0] === 'string') return true;
-  }
-  return false;
+  const rowsChanged = row ? (rawNumber(row[0]) ?? 0) : 0;
+  return { rowsChanged, hasMore: rowsChanged >= limit };
 }
 
 function parseToolPayloadCandidateRows(rows: IterableIterator<unknown[]>): ToolPayloadCandidate[] {
