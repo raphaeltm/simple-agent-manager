@@ -1141,4 +1141,67 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
       sqlite.close();
     }
   });
+
+  it('bounds frozen-intent detail inspection fan-out against ProjectData DOs', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      for (let index = 0; index < 12; index++) {
+        seedMigration(sqlite, 'failed', {
+          migrationId: `migration-frozen-${index}`,
+          sessionId: `session-frozen-${index}`,
+          updatedAt: 1000 + index,
+        });
+      }
+      const source = createFakeSource({ state: 'source_deleted' });
+      const target = createFakeTarget();
+
+      const inspections = await inspectFrozenProjectDataArchiveIntents(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_LIMIT_MAX: '500',
+          PROJECT_DATA: createProjectDataNamespace({
+            [SOURCE_OWNER]: source,
+            [TARGET_OWNER]: target,
+          }),
+        }),
+        {
+          projectId: PROJECT_ID,
+          limit: 500,
+        }
+      );
+
+      expect(inspections).toHaveLength(10);
+      expect(source.archiveSourceInspectIntent).toHaveBeenCalledTimes(10);
+      expect(target.archiveTargetInspectSession).toHaveBeenCalledTimes(10);
+      expect(inspections.map((inspection) => inspection.migrationId)).toEqual(
+        Array.from({ length: 10 }, (_unused, index) => `migration-frozen-${index}`)
+      );
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('rejects copy-back when the migration belongs to a different project', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      const migrationId = seedMigration(sqlite, 'published', {
+        migrationId: 'migration-copy-back-other-project',
+        projectId: 'project-other',
+      });
+
+      await expect(
+        copyBackProjectDataArchiveMigration(makeEnv(sqlite), {
+          migrationId,
+          projectId: PROJECT_ID,
+          reason: 'operator copy-back',
+          now: NOW,
+        })
+      ).rejects.toMatchObject({
+        reason: 'migration_project_mismatch',
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
 });

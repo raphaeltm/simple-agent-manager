@@ -383,7 +383,7 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
             target: { exists: true, aggregateSha256: TARGET_SHA },
           },
         ],
-        limit: 25,
+        limit: 5,
       });
     } finally {
       sqlite.close();
@@ -395,17 +395,17 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
     try {
       createTables(sqlite);
       const response = await createApp().request(
-        '/api/admin/project-data/storage/project-archive/archive-sharding/frozen-intents?limit=101',
+        '/api/admin/project-data/storage/project-archive/archive-sharding/frozen-intents?limit=11',
         { headers: { 'x-test-role': 'superadmin' } },
         makeEnv(sqlite, {
-          PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_MAX: '500',
+          PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_LIMIT_MAX: '500',
         })
       );
 
       expect(response.status).toBe(400);
       expect(await response.json()).toMatchObject({
         error: 'BAD_REQUEST',
-        message: 'limit must be between 1 and 100',
+        message: 'limit must be between 1 and 10',
       });
     } finally {
       sqlite.close();

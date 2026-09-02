@@ -37,7 +37,8 @@ const PROJECT_DATA_ARCHIVE_DEFAULT_POISON_AFTER_ATTEMPTS = 3;
 const PROJECT_DATA_ARCHIVE_MAX_POISON_AFTER_ATTEMPTS = 100;
 const PROJECT_DATA_ARCHIVE_DEFAULT_MANUAL_CANARY_MAX_SESSIONS = 5;
 const PROJECT_DATA_ARCHIVE_DEFAULT_MANUAL_CANARY_MAX_WALL_TIME_MS = 15_000;
-export const PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_MAX_LIMIT = 100;
+const PROJECT_DATA_ARCHIVE_DEFAULT_FROZEN_INTENT_INSPECTION_LIMIT = 5;
+const PROJECT_DATA_ARCHIVE_DEFAULT_FROZEN_INTENT_INSPECTION_MAX_LIMIT = 10;
 
 const ACTIVE_RECLAIMABLE_STATES = [
   'candidate',
@@ -203,6 +204,37 @@ export type ProjectDataArchiveFrozenIntentInspection = {
         error: string;
       };
 };
+
+export function getProjectDataArchiveFrozenIntentInspectionConfig(env: Env): {
+  defaultLimit: number;
+  maxLimit: number;
+} {
+  const maxLimit = envInt(
+    env.PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_LIMIT_MAX,
+    PROJECT_DATA_ARCHIVE_DEFAULT_FROZEN_INTENT_INSPECTION_MAX_LIMIT,
+    1,
+    PROJECT_DATA_ARCHIVE_DEFAULT_FROZEN_INTENT_INSPECTION_MAX_LIMIT
+  );
+  const defaultLimit = envInt(
+    env.PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_LIMIT_DEFAULT,
+    PROJECT_DATA_ARCHIVE_DEFAULT_FROZEN_INTENT_INSPECTION_LIMIT,
+    1,
+    maxLimit
+  );
+  return {
+    defaultLimit: Math.min(defaultLimit, maxLimit),
+    maxLimit,
+  };
+}
+
+function resolveProjectDataArchiveFrozenIntentInspectionLimit(
+  env: Env,
+  limit: number | undefined
+): number {
+  const { defaultLimit, maxLimit } = getProjectDataArchiveFrozenIntentInspectionConfig(env);
+  if (limit === undefined || !Number.isSafeInteger(limit)) return defaultLimit;
+  return Math.max(1, Math.min(limit, maxLimit));
+}
 
 export type ProjectDataArchiveCopyBackResult = {
   migrationId: string;
@@ -1738,10 +1770,7 @@ export async function inspectFrozenProjectDataArchiveIntents(
     limit?: number;
   } = {}
 ): Promise<ProjectDataArchiveFrozenIntentInspection[]> {
-  const limit = Math.max(
-    1,
-    Math.min(input.limit ?? 25, PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_MAX_LIMIT)
-  );
+  const limit = resolveProjectDataArchiveFrozenIntentInspectionLimit(env, input.limit);
   const projectPredicate = input.projectId ? 'AND m.project_id = ?' : '';
   const rows = await env.DATABASE.prepare(
     `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
@@ -1945,9 +1974,16 @@ export async function copyBackProjectDataArchiveMigration(
          lease_expires_at = NULL,
          frozen_at = COALESCE(frozen_at, ?),
          updated_at = ?
-     WHERE migration_id = ?`
+     WHERE migration_id = ?
+       AND project_id = ?`
   )
-    .bind(`Archive copy-back restored source rows and routed session back to root: ${reason}`, now, now, migration.migration_id)
+    .bind(
+      `Archive copy-back restored source rows and routed session back to root: ${reason}`,
+      now,
+      now,
+      migration.migration_id,
+      migration.project_id
+    )
     .run();
   return {
     migrationId: migration.migration_id,

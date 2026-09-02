@@ -4,8 +4,8 @@ import type { Env } from '../../env';
 import { errors } from '../../middleware/error';
 import {
   copyBackProjectDataArchiveMigration,
+  getProjectDataArchiveFrozenIntentInspectionConfig,
   inspectFrozenProjectDataArchiveIntents,
-  PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_MAX_LIMIT,
   runScopedProjectDataArchiveCanary,
 } from '../../scheduled/project-data-archive-sharding';
 import {
@@ -87,11 +87,10 @@ function parseArchiveRolloutLimit(rawLimit: string | undefined, env: Env): numbe
 }
 
 function parseArchiveFrozenIntentLimit(rawLimit: string | undefined, env: Env): number {
-  const { defaultLimit, maxLimit } = getProjectDataArchiveRolloutListConfig(env);
-  const endpointMaxLimit = Math.min(maxLimit, PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_MAX_LIMIT);
-  const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : Math.min(defaultLimit, endpointMaxLimit);
-  if (!Number.isSafeInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > endpointMaxLimit) {
-    throw errors.badRequest(`limit must be between 1 and ${endpointMaxLimit}`);
+  const { defaultLimit, maxLimit } = getProjectDataArchiveFrozenIntentInspectionConfig(env);
+  const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : defaultLimit;
+  if (!Number.isSafeInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > maxLimit) {
+    throw errors.badRequest(`limit must be between 1 and ${maxLimit}`);
   }
   return parsedLimit;
 }
