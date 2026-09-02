@@ -69,6 +69,8 @@ that disabled work were already enabled.
 - Documentation review found and corrected the task-record distinction between
   code defaults and explicit deployment configuration; no public-post issue
   remains.
+- PR preflight evidence records this as a public static-content and
+  documentation-sync change, with local source evidence and review results.
 
 ## References
 
