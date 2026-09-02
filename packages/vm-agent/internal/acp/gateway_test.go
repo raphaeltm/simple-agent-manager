@@ -281,7 +281,8 @@ func TestGetAgentCommandInfoClaudeCodeRequiresFable51CapableCli(t *testing.T) {
 	if !strings.Contains(info.installCmd, "@anthropic-ai/claude-code@2.1.258") {
 		t.Fatalf("installCmd=%q, want pinned Claude Code CLI", info.installCmd)
 	}
-	if !strings.Contains(info.validationCmd, `const min="`+claudeCodeMinVersion+`".split(".").map(Number)`) {
+	minParts := strings.Split(claudeCodeMinVersion, ".")
+	if !strings.Contains(info.validationCmd, `[ "$3" -ge `+minParts[2]+` ]`) {
 		t.Fatalf("validationCmd=%q, want Claude Code %s floor", info.validationCmd, claudeCodeMinVersion)
 	}
 
@@ -289,7 +290,8 @@ func TestGetAgentCommandInfoClaudeCodeRequiresFable51CapableCli(t *testing.T) {
 	for _, want := range []string{
 		"command -v claude-agent-acp",
 		"command -v claude",
-		`const min="` + claudeCodeMinVersion + `".split(".").map(Number)`,
+		`claude --version`,
+		`[ "$3" -ge ` + minParts[2] + ` ]`,
 	} {
 		if !strings.Contains(checkScript, want) {
 			t.Fatalf("agentInstalledCheckScript missing %q in %q", want, checkScript)
@@ -301,12 +303,21 @@ func TestClaudeCodeVersionCheckCommandDerivesFloorFromConstant(t *testing.T) {
 	t.Parallel()
 
 	command := claudeCodeVersionCheckCommand()
-	want := `const min="` + claudeCodeMinVersion + `".split(".").map(Number)`
-	if !strings.Contains(command, want) {
-		t.Fatalf("claudeCodeVersionCheckCommand()=%q, want derived minimum %q", command, want)
+	minParts := strings.Split(claudeCodeMinVersion, ".")
+	for _, want := range []string{
+		`[ "$1" -gt ` + minParts[0] + ` ]`,
+		`[ "$2" -gt ` + minParts[1] + ` ]`,
+		`[ "$3" -ge ` + minParts[2] + ` ]`,
+	} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("claudeCodeVersionCheckCommand()=%q, want derived minimum comparison %q", command, want)
+		}
 	}
 	if strings.Contains(command, "const min=[2,1,251]") {
 		t.Fatalf("claudeCodeVersionCheckCommand() contains duplicated numeric minimum: %q", command)
+	}
+	if strings.Contains(command, "node -e") {
+		t.Fatalf("claudeCodeVersionCheckCommand() should not require Node.js before install bootstrap: %q", command)
 	}
 }
 

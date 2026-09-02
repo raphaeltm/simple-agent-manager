@@ -906,9 +906,17 @@ func agentInstallScript(info agentCommandInfo) string {
 }
 
 func claudeCodeVersionCheckCommand() string {
+	minParts := strings.Split(claudeCodeMinVersion, ".")
+	if len(minParts) != 3 {
+		panic("claudeCodeMinVersion must use major.minor.patch")
+	}
 	return fmt.Sprintf(
-		`command -v claude >/dev/null 2>&1 && node -e 'const cp=require("node:child_process"); const out=cp.execFileSync("claude",["--version"],{encoding:"utf8"}); const match=out.match(/(\d+)\.(\d+)\.(\d+)/); if(!match) process.exit(1); const actual=match.slice(1).map(Number); const min="%s".split(".").map(Number); const ok=actual[0]>min[0]||(actual[0]===min[0]&&(actual[1]>min[1]||(actual[1]===min[1]&&actual[2]>=min[2]))); process.exit(ok?0:1);'`,
-		claudeCodeMinVersion,
+		`command -v claude >/dev/null 2>&1 && version="$(claude --version 2>/dev/null | sed -n 's/.*\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2 \3/p' | head -n 1)" && set -- $version && [ "$#" -eq 3 ] && { [ "$1" -gt %s ] || { [ "$1" -eq %s ] && { [ "$2" -gt %s ] || { [ "$2" -eq %s ] && [ "$3" -ge %s ]; }; }; }; }`,
+		minParts[0],
+		minParts[0],
+		minParts[1],
+		minParts[1],
+		minParts[2],
 	)
 }
 
