@@ -20,8 +20,9 @@ general-user feature or repeating yesterday's explanation of the unsafe query.
   completed follow-up: PR #2005 made the cursor index-friendly, and PR #2008
   added safe, superadmin-only per-project manual cleanup controls.
 - `tool-payload-cleanup-candidates.ts` now uses a row-value cursor over
-  `(session_id, created_at, sequence, id)`, so SQLite can continue after a
-  known position rather than repeatedly deriving a complex `OR` predicate.
+  `(session_id, created_at, sequence, id)`, allowing SQLite to seek on the
+  indexed `(session_id, created_at, sequence)` prefix instead of repeatedly
+  deriving a complex `OR` predicate.
 - `tool-payload-manual-cleanup.ts` reuses the regular archival cleanup path,
   but requires a reason and idempotency key, persists the starting marker and
   cooldown before work starts, enforces configured row/byte/time limits, and

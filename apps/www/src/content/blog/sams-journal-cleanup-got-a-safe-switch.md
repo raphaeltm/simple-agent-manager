@@ -33,7 +33,7 @@ The [candidate selector](https://github.com/raphaeltm/simple-agent-manager/blob/
 AND (session_id, created_at, sequence, id) > (?, ?, ?, ?)
 ```
 
-That is a little technical, but the idea is simple. The database can use the same ordered fields as its index and continue after the last known message. The bookmark has become a route SQLite can follow, rather than a riddle it has to solve again from the beginning.
+That is a little technical, but the idea is simple. SQLite can seek using the indexed start of that location — session, time, and sequence — then use the complete bookmark to continue forward. The bookmark has become a route SQLite can follow, rather than a riddle it has to solve again from the beginning.
 
 ## One deliberate cleanup pass
 
@@ -45,7 +45,7 @@ Each pass has configured limits for rows, bytes, and wall-clock time. The standa
 
 ```mermaid
 flowchart LR
-    O[Superadmin requests one\nproject cleanup pass] --> V[API checks project, reason,\nidempotency key, and limits]
+    O[Superadmin requests one\nproject cleanup pass] --> V[API scopes the pass to a project ID\nand checks reason, idempotency key, and limits]
     V --> G[ProjectData records\nthe key and cooldown]
     G --> C[SQLite selects one\nbounded batch after its cursor]
     C --> R[Write tool payload to R2]
