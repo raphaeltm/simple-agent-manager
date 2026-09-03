@@ -5,10 +5,12 @@
 The production `ProjectData` Durable Object for project
 `01KHRJGANBBWGDY1NZ0KVF0D4J` is at imminent `SQLITE_FULL` risk. The latest
 available measurement at task start was `9,884,188,672 / 10,000,000,000`
-bytes (`98.84188672%`) at `2026-09-03T21:13:42Z`, growing at approximately
-`152,972,767` bytes/day with `0.757` days to the storage limit. The configured
-emergency target is 90%, so at least `884,188,672` bytes of measured database
-relief is required before allowing for ongoing writes and measurement lag.
+bytes (`98.84188672%`) at `2026-09-03T21:13:42Z`. The next direct measurement
+at `2026-09-03T22:13:43Z` reached `9,896,890,368` bytes (`98.96890368%`),
+growing at approximately `154,691,984` bytes/day with `0.667` days to the
+storage limit. The configured emergency target is 90%, so at least
+`896,890,368` bytes of measured database relief is now required before
+allowing for ongoing writes and measurement lag.
 
 This task owns the emergency through implementation, review, staging, merge,
 production deployment, an exact human-approved production mutation, and
@@ -29,11 +31,11 @@ uncertain states must fail closed.
 
 ## Production baseline
 
-- Latest D1 telemetry re-read at `2026-09-03T21:35Z` still pointed to the
-  `2026-09-03T21:13:42Z` direct `sql.databaseSize` measurement:
-  `9,884,188,672` bytes, ratio `0.9884188672`, growth
-  `152,972,767.46` bytes/day, estimated `0.7570715` days remaining, status
-  `degraded`, cleanup health `running`.
+- Latest D1 telemetry re-read points to the `2026-09-03T22:13:43Z` direct
+  `sql.databaseSize` measurement: `9,896,890,368` bytes, ratio
+  `0.9896890368`, growth `154,691,983.54` bytes/day, estimated `0.666548`
+  days remaining, status `degraded`, cleanup health `running`. This is
+  12,701,696 bytes above the prior hourly sample.
 - Last purge was `auto_terminal_event_log_cleanup`; it removed 7 rows and did
   not converge toward the emergency target.
 - Production has zero archive-migration, archive-location, and project archive
@@ -112,24 +114,24 @@ uncertain states must fail closed.
   active ProjectData storage, retention, cleanup, and sharding task records.
 - [ ] Choose and document the minimum safe composition after measuring
   authoritative eligible tool-payload and terminal-session relief stock.
-- [ ] Add bounded, resumable, read-only preflight evidence that can produce
+- [x] Add bounded, resumable, read-only preflight evidence that can produce
   exact project/session/table/row/byte targets without an unbounded object scan.
-- [ ] Require explicit post-write R2 read-back and SHA-256/byte verification
+- [x] Require explicit post-write R2 read-back and SHA-256/byte verification
   before any selected path strips tool metadata or deletes source session rows.
 - [ ] If terminal sharding is required, make each pass resumable and enforce
   overall row, byte, R2-operation, and wall-time budgets inside a session; the
   next pass must resume after verified committed progress rather than restart.
-- [ ] Keep all limits, timeouts, target thresholds, and operator scoping
+- [x] Keep all limits, timeouts, target thresholds, and operator scoping
   environment-configurable, disabled or narrowly scoped by default, and covered
   by a project-level kill switch/circuit breaker.
-- [ ] Preserve `chat_messages.content` byte-for-byte and prove archived message
+- [x] Preserve `chat_messages.content` byte-for-byte and prove archived message
   and tool-payload reads work after source cleanup.
 - [ ] Add discriminating unit and Workers-runtime tests for success, R2
   corruption/missing-readback, timeout/pause/resume, idempotency, candidate
   exhaustion, source-change races, and target/circuit-breaker stop conditions.
-- [ ] Update Env surfaces, deployment configuration, API/operator docs, and
+- [x] Update Env surfaces, deployment configuration, API/operator docs, and
   task records for every new control or contract.
-- [ ] Run focused tests, API tests, typecheck, lint, formatting, migration safety,
+- [x] Run focused tests, API tests, typecheck, lint, formatting, migration safety,
   config sync, and the relevant full suites.
 - [ ] Complete all required specialist reviews and address every critical/high
   finding before PR creation/merge.
@@ -187,4 +189,3 @@ uncertain states must fail closed.
 - `.claude/rules/31-migration-safety.md`
 - `.claude/rules/47-control-loop-io-budget.md`
 - `.claude/rules/60-request-io-and-bundle-budgets.md`
-

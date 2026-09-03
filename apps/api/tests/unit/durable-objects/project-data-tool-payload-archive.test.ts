@@ -70,11 +70,15 @@ describe('ProjectData tool payload archive helpers', () => {
     );
     expect(defaults.toolPayloadCleanupRecheckMs).toBe(24 * 60 * 60 * 1000);
     expect(defaults.eventLogCleanupRecheckMs).toBe(24 * 60 * 60 * 1000);
+    expect(defaults.toolPayloadCleanupProjectIds).toBeNull();
+    expect(defaults.toolPayloadCleanupCutoffCreatedAt).toBeNull();
 
     const overrides = resolveStorageSafetyConfig({
       PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS: '1234',
       PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS: '3456',
       PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES: '2345',
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS: 'project-b, project-a,project-b',
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT: '1788048000000',
       PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '3',
       PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS: '4567',
       PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX: '/custom/tool-payloads/',
@@ -100,6 +104,8 @@ describe('ProjectData tool payload archive helpers', () => {
     expect(overrides.toolPayloadCleanupWallTimeMs).toBe(1234);
     expect(overrides.toolPayloadCleanupRecheckMs).toBe(3456);
     expect(overrides.toolPayloadCleanupMaxRowBytes).toBe(2345);
+    expect(overrides.toolPayloadCleanupProjectIds).toEqual(['project-a', 'project-b']);
+    expect(overrides.toolPayloadCleanupCutoffCreatedAt).toBe(1788048000000);
     expect(overrides.toolPayloadArchiveRetentionMs).toBe(3 * 24 * 60 * 60 * 1000);
     expect(overrides.toolPayloadArchiveIntervalMs).toBe(4567);
     expect(overrides.toolPayloadArchiveWriteTimeoutMs).toBe(5678);

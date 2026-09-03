@@ -92,7 +92,21 @@ function createToolPayloadCleanupPlan(
   options: ProjectDataToolPayloadCleanupOptions
 ): ToolPayloadCleanupPlan | null {
   if (!config.enabled || !config.toolPayloadCleanupEnabled || !projectId) return null;
+  if (
+    !options.forceStart &&
+    config.toolPayloadCleanupProjectIds !== null &&
+    !config.toolPayloadCleanupProjectIds.includes(projectId)
+  ) {
+    return null;
+  }
   const now = options.now ?? Date.now();
+  if (
+    config.toolPayloadCleanupCutoffCreatedAt === -1 ||
+    (config.toolPayloadCleanupCutoffCreatedAt !== null &&
+      config.toolPayloadCleanupCutoffCreatedAt > now)
+  ) {
+    return null;
+  }
 
   const beforeBytes = sql.databaseSize;
   const triggerBytes = Math.floor(config.limitBytes * config.toolPayloadCleanupTriggerRatio);
@@ -141,7 +155,8 @@ function createToolPayloadCleanupPlan(
     archiveWriteTimeoutMs: config.toolPayloadArchiveWriteTimeoutMs,
     archiveChunkBytes: config.toolPayloadArchiveChunkBytes,
     archiveMaxMetadataBytes: config.toolPayloadArchiveMaxMetadataBytes,
-    cutoffCreatedAt: now - config.toolPayloadArchiveRetentionMs,
+    cutoffCreatedAt:
+      config.toolPayloadCleanupCutoffCreatedAt ?? now - config.toolPayloadArchiveRetentionMs,
     deadlineMs: now + config.toolPayloadCleanupWallTimeMs,
     pendingCursor,
     ...(options.nowMs ? { nowMs: options.nowMs } : {}),
@@ -311,6 +326,7 @@ function buildToolPayloadCleanupResult(
     limitBytes: plan.limitBytes,
     triggerBytes: plan.triggerBytes,
     targetBytes: plan.targetBytes,
+    cutoffCreatedAt: plan.cutoffCreatedAt,
     batchRows: plan.batchRows,
     batchBytes: plan.batchBytes,
     maxRowBytes: plan.maxRowBytes,
@@ -457,6 +473,7 @@ function buildFailedToolPayloadCleanupResult(
     limitBytes: plan.limitBytes,
     triggerBytes: plan.triggerBytes,
     targetBytes: plan.targetBytes,
+    cutoffCreatedAt: plan.cutoffCreatedAt,
     batchRows: plan.batchRows,
     batchBytes: plan.batchBytes,
     maxRowBytes: plan.maxRowBytes,

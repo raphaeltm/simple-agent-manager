@@ -565,6 +565,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_DEFAULT?: string;
   PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_MAX?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED?: string;
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS?: string; // Optional comma-separated project allowlist for automatic cleanup; empty means all projects
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT?: string; // Optional fixed exclusive message creation cutoff; malformed/future values fail closed
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS?: string;
@@ -601,6 +603,17 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_ARCHIVE_SHARDING_ENABLED?: string; // Exact archive read routing switch (default: disabled)
   PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED?: string; // Separate kill switch for unscoped scheduled archive-sharding sweep (default: disabled)
   PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS?: string; // Persisted cadence between unscoped archive-sharding sweeps (default: 86400000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ENABLED?: string; // Enable one exact project-scoped, read-only resumable relief preflight (default: false)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PLAN_ID?: string; // Required immutable operator plan identifier when preflight is enabled
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PROJECT_ID?: string; // Required exact ProjectData project target when preflight is enabled
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_CUTOFF_CREATED_AT?: string; // Required fixed exclusive tool-message cutoff in epoch milliseconds
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_BATCH_ROWS?: string; // Per-slice row limit (default: 5000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INTERVAL_MS?: string; // Persisted cadence between slices (default: 300000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BATCHES?: string; // Overall slice ceiling (default: 100)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_ROWS?: string; // Overall examined-row ceiling (default: 500000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES?: string; // Overall eligible-metadata reporting ceiling (default: 2000000000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MS?: string; // D1 claim lease duration (default: 60000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS?: string; // Per-DO-RPC timeout (default: 20000)
   PROJECT_DATA_ARCHIVE_SHARD_COUNT?: string;
   PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS?: string;
   PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS?: string;

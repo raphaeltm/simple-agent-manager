@@ -19,6 +19,8 @@ export type ProjectDataStorageReliefMeasureCursor = {
 export type ProjectDataStorageReliefMeasureInput = {
   cursor?: ProjectDataStorageReliefMeasureCursor | null;
   limit?: number | null;
+  surface?: 'all' | 'tool_payloads';
+  cutoffCreatedAt?: number | null;
 };
 
 export type ProjectDataStorageReliefMeasureResult = {
@@ -48,9 +50,25 @@ export type ProjectDataStorageReliefMeasureResult = {
     oversizedBytes: number;
     archivedRows: number;
     skippedRows: number;
+    sessions: ProjectDataStorageReliefToolPayloadSessionMeasure[];
     nextCursor: ProjectDataStorageReliefMeasureCursor['toolPayload'] | null;
     hasMore: boolean;
   };
+};
+
+export type ProjectDataStorageReliefToolPayloadSessionMeasure = {
+  sessionId: string;
+  rowsExamined: number;
+  eligibleRows: number;
+  eligibleBytes: number;
+  legacyOversizedRows: number;
+  legacyOversizedBytes: number;
+  rearchivableOversizedRows: number;
+  rearchivableOversizedBytes: number;
+  oversizedRows: number;
+  oversizedBytes: number;
+  archivedRows: number;
+  skippedRows: number;
 };
 
 function rawNumber(value: unknown): number | null {
@@ -169,9 +187,16 @@ function measureToolPayloadSlice(
   config: StorageSafetyConfig,
   measuredAt: number,
   cursor: ProjectDataStorageReliefMeasureCursor['toolPayload'] | null | undefined,
-  limit: number
+  limit: number,
+  cutoffCreatedAt?: number | null
 ): ProjectDataStorageReliefMeasureResult['toolPayloads'] {
-  const cutoff = measuredAt - config.toolPayloadArchiveRetentionMs;
+  const cutoff =
+    typeof cutoffCreatedAt === 'number' &&
+    Number.isSafeInteger(cutoffCreatedAt) &&
+    cutoffCreatedAt >= 0 &&
+    cutoffCreatedAt <= measuredAt
+      ? cutoffCreatedAt
+      : measuredAt - config.toolPayloadArchiveRetentionMs;
   const rows = sql
     .exec(
       `SELECT
@@ -232,6 +257,7 @@ function measureToolPayloadSlice(
   let skippedRows = 0;
   let nextCursor: ProjectDataStorageReliefMeasureCursor['toolPayload'] | null = null;
   let hasMore = false;
+  const sessions = new Map<string, ProjectDataStorageReliefToolPayloadSessionMeasure>();
 
   for (const row of rows) {
     const messageId = row[0];
@@ -255,25 +281,54 @@ function measureToolPayloadSlice(
       break;
     }
     rowsExamined++;
-    if (archived) archivedRows++;
-    else if (skipped) {
+    let session = sessions.get(sessionId);
+    if (!session) {
+      session = {
+        sessionId,
+        rowsExamined: 0,
+        eligibleRows: 0,
+        eligibleBytes: 0,
+        legacyOversizedRows: 0,
+        legacyOversizedBytes: 0,
+        rearchivableOversizedRows: 0,
+        rearchivableOversizedBytes: 0,
+        oversizedRows: 0,
+        oversizedBytes: 0,
+        archivedRows: 0,
+        skippedRows: 0,
+      };
+      sessions.set(sessionId, session);
+    }
+    session.rowsExamined++;
+    if (archived) {
+      archivedRows++;
+      session.archivedRows++;
+    } else if (skipped) {
       if (attemptStatus === 'oversized' && bytes <= config.toolPayloadArchiveMaxMetadataBytes) {
         rearchivableOversizedRows++;
         rearchivableOversizedBytes += bytes;
+        session.rearchivableOversizedRows++;
+        session.rearchivableOversizedBytes += bytes;
       } else {
         skippedRows++;
+        session.skippedRows++;
       }
-    }
-    else if (bytes > config.toolPayloadArchiveMaxMetadataBytes) {
+    } else if (bytes > config.toolPayloadArchiveMaxMetadataBytes) {
       oversizedRows++;
       oversizedBytes += bytes;
+      session.oversizedRows++;
+      session.oversizedBytes += bytes;
     } else {
       if (bytes > config.toolPayloadCleanupMaxRowBytes) {
         legacyOversizedRows++;
         legacyOversizedBytes += bytes;
+        session.legacyOversizedRows++;
+        session.legacyOversizedBytes += bytes;
       }
       eligibleRows++;
       eligibleBytes += bytes;
+      session.eligibleRows++;
+      session.eligibleBytes += bytes;
     }
     nextCursor = { sessionId, createdAt, sequence, messageId };
   }
@@ -290,6 +345,7 @@ function measureToolPayloadSlice(
     oversizedBytes,
     archivedRows,
     skippedRows,
+    sessions: [...sessions.values()],
     nextCursor: hasMore ? nextCursor : null,
     hasMore,
   };
@@ -302,17 +358,31 @@ export function measureProjectDataStorageReliefSlice(
 ): ProjectDataStorageReliefMeasureResult {
   const measuredAt = Date.now();
   const limit = clampLimit(config, input.limit);
+  const toolPayloadOnly = input.surface === 'tool_payloads';
   return {
     measuredAt,
     databaseSizeBytes: sql.databaseSize,
     limit,
-    grouped: measureGroupedSlice(sql, config, measuredAt, input.cursor?.grouped, limit),
+    grouped: toolPayloadOnly
+      ? {
+          rowsExamined: 0,
+          rows: 0,
+          contentBytes: 0,
+          eligibleRows: 0,
+          eligibleContentBytes: 0,
+          ftsRowsPresent: 0,
+          ftsRowsMissing: 0,
+          nextCursor: null,
+          hasMore: false,
+        }
+      : measureGroupedSlice(sql, config, measuredAt, input.cursor?.grouped, limit),
     toolPayloads: measureToolPayloadSlice(
       sql,
       config,
       measuredAt,
       input.cursor?.toolPayload,
-      limit
+      limit,
+      input.cutoffCreatedAt
     ),
   };
 }

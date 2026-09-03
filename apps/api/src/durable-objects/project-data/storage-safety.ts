@@ -171,6 +171,8 @@ export interface StorageSafetyConfig {
   emergencyMaxBatches: number;
   growthLookbackMs: number;
   toolPayloadCleanupEnabled: boolean;
+  toolPayloadCleanupProjectIds: string[] | null;
+  toolPayloadCleanupCutoffCreatedAt: number | null;
   toolPayloadCleanupTriggerRatio: number;
   toolPayloadCleanupTargetRatio: number;
   toolPayloadCleanupBatchRows: number;
@@ -214,6 +216,25 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
   if (!value) return fallback;
   const parsed = Number.parseInt(value, 10);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseOptionalIdList(value: string | undefined): string[] | null {
+  const ids = [
+    ...new Set(
+      (value ?? '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    ),
+  ].sort();
+  return ids.length > 0 ? ids : null;
+}
+
+function parseOptionalTimestamp(value: string | undefined): number | null {
+  const normalized = value?.trim() ?? '';
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : -1;
 }
 
 function parseNonNegativeInteger(value: string | undefined, fallback: number): number {
@@ -350,6 +371,12 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
     ),
     growthLookbackMs: growthLookbackDays * 24 * 60 * 60 * 1000,
     toolPayloadCleanupEnabled: envFlagEnabled(env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED),
+    toolPayloadCleanupProjectIds: parseOptionalIdList(
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS
+    ),
+    toolPayloadCleanupCutoffCreatedAt: parseOptionalTimestamp(
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT
+    ),
     toolPayloadCleanupTriggerRatio: cleanupRatiosAreOrdered
       ? cleanupTriggerRatio
       : DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO,

@@ -4,6 +4,7 @@ import {
   parseToolPayloadArchiveObjectText,
   type PreparedToolPayloadArchive,
   TOOL_PAYLOAD_CHUNKED_ARCHIVE_VERSION,
+  TOOL_PAYLOAD_VERIFIED_ARCHIVE_VERSION,
   writeToolPayloadArchiveObject,
 } from './tool-payload-archive-r2';
 import type { ToolPayloadCleanupAttemptStatus } from './tool-payload-cleanup-attempts';
@@ -15,7 +16,7 @@ const textEncoder = new TextEncoder();
 export const TOOL_PAYLOAD_ARCHIVE_VERSION = 1;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX = 'project-data/tool-payloads';
 const DEFAULT_TOOL_PAYLOAD_ARCHIVE_RETRIEVAL_MAX_METADATA_BYTES = 1_900_000;
-export { TOOL_PAYLOAD_CHUNKED_ARCHIVE_VERSION };
+export { TOOL_PAYLOAD_CHUNKED_ARCHIVE_VERSION, TOOL_PAYLOAD_VERIFIED_ARCHIVE_VERSION };
 
 export type ArchivedToolPayloadRow = {
   messageId: string;
@@ -387,6 +388,20 @@ export async function archiveToolPayloadCandidate(input: {
       contentBytes: prepared.contentBytes,
       toolMetadataBytes: input.candidate.toolMetadataBytes,
       chunkBytes: input.archiveChunkBytes,
+    });
+    if (!prepared.verification) {
+      throw new Error('R2 archive verification proof is missing after write');
+    }
+    log.info('archive_verified_before_strip', {
+      projectId: input.projectId,
+      sessionId: input.candidate.sessionId,
+      messageId: input.candidate.messageId,
+      r2Key: prepared.key,
+      archiveVersion: prepared.archiveVersion,
+      archiveBodyBytes: prepared.verification.archiveBodyBytes,
+      archiveBodySha256: prepared.verification.archiveBodySha256,
+      rootObjectSha256: prepared.verification.rootObjectSha256,
+      verifiedObjectCount: prepared.verification.objectCount,
     });
     writeArchiveBookkeeping({
       sql: input.sql,

@@ -134,6 +134,20 @@ function resolveBudgets(
 function buildFingerprint(input: {
   reason: string;
   budgets: ProjectDataManualToolPayloadCleanupBudgets;
+  cutoffCreatedAt: number | null;
+}): string {
+  return JSON.stringify({
+    reason: input.reason,
+    cutoffCreatedAt: input.cutoffCreatedAt,
+    batchRows: input.budgets.batchRows,
+    batchBytes: input.budgets.batchBytes,
+    wallTimeMs: input.budgets.wallTimeMs,
+  });
+}
+
+function buildLegacyFingerprint(input: {
+  reason: string;
+  budgets: ProjectDataManualToolPayloadCleanupBudgets;
 }): string {
   return JSON.stringify({
     reason: input.reason,
@@ -335,7 +349,15 @@ export async function runProjectDataManualToolPayloadCleanup(
     'idempotencyKey',
     MAX_MANUAL_CLEANUP_IDEMPOTENCY_KEY_LENGTH
   );
-  const fingerprint = buildFingerprint({ reason, budgets });
+  const fingerprint = buildFingerprint({
+    reason,
+    budgets,
+    cutoffCreatedAt: config.toolPayloadCleanupCutoffCreatedAt,
+  });
+  const compatibleLegacyFingerprint =
+    config.toolPayloadCleanupCutoffCreatedAt === null
+      ? buildLegacyFingerprint({ reason, budgets })
+      : null;
   const beforeBytes = sql.databaseSize;
   const resolvedProjectId = projectId?.trim() || '';
   if (!resolvedProjectId) {
@@ -354,7 +376,10 @@ export async function runProjectDataManualToolPayloadCleanup(
   const existingKey = readMeta(sql, META_MANUAL_CLEANUP_IDEMPOTENCY_KEY);
   const existingFingerprint = readMeta(sql, META_MANUAL_CLEANUP_FINGERPRINT);
   if (existingKey === idempotencyKey) {
-    if (existingFingerprint !== fingerprint) {
+    if (
+      existingFingerprint !== fingerprint &&
+      existingFingerprint !== compatibleLegacyFingerprint
+    ) {
       throw new ProjectDataManualToolPayloadCleanupStateError(
         'idempotency_conflict',
         'idempotencyKey was already used with different manual cleanup input'

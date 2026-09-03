@@ -15,6 +15,7 @@ export interface ProjectDataToolPayloadCleanupResult {
   limitBytes: number;
   triggerBytes: number;
   targetBytes: number;
+  cutoffCreatedAt: number;
   batchRows: number;
   batchBytes: number;
   maxRowBytes: number;

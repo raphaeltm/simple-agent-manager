@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { enabledMock, isolateMock, logInfoMock, sessionSleepLifecycleRepairMock, sessionSleepMock } =
   vi.hoisted(() => ({
-  enabledMock: vi.fn(),
-  isolateMock: vi.fn(async () => undefined),
-  logInfoMock: vi.fn(),
-  sessionSleepLifecycleRepairMock: vi.fn(),
-  sessionSleepMock: vi.fn(),
-}));
+    enabledMock: vi.fn(),
+    isolateMock: vi.fn(async () => undefined),
+    logInfoMock: vi.fn(),
+    sessionSleepLifecycleRepairMock: vi.fn(),
+    sessionSleepMock: vi.fn(),
+  }));
 
 vi.mock('../../../src/services/operational-kill-switch', () => ({
   isOperationalLoopEnabled: enabledMock,
@@ -65,6 +65,7 @@ describe('scheduled operational sweep kill switch', () => {
     expect(sweepNames).toContain('deployment_release_retention');
     expect(sweepNames).toContain('session_snapshot_purge');
     expect(sweepNames).toContain('terminal_session_ledger_reconciliation');
+    expect(sweepNames).toContain('project_data_storage_relief_preflight');
     expect(sweepNames.indexOf('session_sleep_lifecycle_repair')).toBeLessThan(
       sweepNames.indexOf('node_cleanup')
     );
@@ -72,6 +73,12 @@ describe('scheduled operational sweep kill switch', () => {
       sweepNames.indexOf('terminal_session_ledger_reconciliation')
     );
     expect(sweepNames.indexOf('terminal_session_ledger_reconciliation')).toBeLessThan(
+      sweepNames.indexOf('project_data_storage_relief_preflight')
+    );
+    expect(sweepNames.indexOf('project_data_storage_relief_preflight')).toBeLessThan(
+      sweepNames.indexOf('project_data_archive_sharding')
+    );
+    expect(sweepNames.indexOf('project_data_archive_sharding')).toBeLessThan(
       sweepNames.indexOf('session_sleep')
     );
     expect(sweepNames.indexOf('deployment_release_retention')).toBeLessThan(
