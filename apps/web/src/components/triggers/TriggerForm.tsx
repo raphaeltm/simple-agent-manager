@@ -399,7 +399,10 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
         aria-label={isEdit ? 'Edit trigger' : 'Create trigger'}
       >
         {/* Header */}
-        <div className="glass-chrome p-4 flex shrink-0 items-center justify-between z-10">
+        <div
+          className="glass-chrome p-4 flex shrink-0 items-center justify-between z-10"
+          data-testid="trigger-form-header"
+        >
           <h2 className="sam-type-section-heading m-0">
             {isEdit ? 'Edit Trigger' : 'New Trigger'}
           </h2>
@@ -413,7 +416,10 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
         </div>
 
         {/* Form content */}
-        <div className="min-h-0 flex-1 overflow-y-auto scroll-pb-28 p-4 space-y-6">
+        <div
+          className="min-h-0 flex-1 overflow-y-auto scroll-pb-28 p-4 space-y-6"
+          data-testid="trigger-form-scroll-body"
+        >
           {editTrigger?.credentialAttribution?.multiplayerActive &&
             editTrigger.credentialAttribution.hasPersonalWarning && (
               <TriggerCredentialWarning trigger={editTrigger} />
@@ -515,7 +521,10 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
         </div>
 
         {/* Footer actions */}
-        <div className="bg-surface border-t border-border-default p-4 flex shrink-0 items-center justify-end gap-3">
+        <div
+          className="bg-surface border-t border-border-default p-4 flex shrink-0 items-center justify-end gap-3"
+          data-testid="trigger-form-footer"
+        >
           <button
             onClick={onClose}
             className={`px-4 py-2 text-sm font-medium text-fg-muted hover:text-fg-primary bg-transparent border border-border-default rounded-md cursor-pointer ${FOCUS_RING}`}

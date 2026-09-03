@@ -85,17 +85,17 @@ Separately, the observability lesson is that an active trigger with deliveries r
 - [x] Run full quality suite.
 - [x] Run specialist reviews: task-completion-validator, cloudflare-specialist, ui-ux-specialist, constitution-validator, test-engineer, doc-sync-validator.
 - [x] Check for other active staging agents/runs, deploy to staging, and verify changed behavior.
-- [ ] Create PR with production evidence, caller enumeration, post-mortem, no-migration rationale, visual evidence, staging evidence, and specialist review table.
+- [x] Create PR with production evidence, caller enumeration, post-mortem, no-migration rationale, visual evidence, staging evidence, and specialist review table.
 - [ ] Complete CI and CodeRabbit label-triggered review loop.
 - [ ] Merge, monitor production deploy, and report PR number plus merge/deploy status.
 
 ## Acceptance Criteria
 
 - [ ] Existing production GitHub `issues` trigger `01KXNX64WKGQGS955PAA7E1RFB` will no longer reject opened issues solely because its stored filters include `commandPrefix: "/sam"`.
-- [ ] `issue_comment` triggers still reject comments whose trimmed body does not start with the configured prefix, with reason `comment does not start with '/sam'`.
-- [ ] Non-comment GitHub trigger creation/update payloads produced by the UI no longer persist `commandPrefix`.
-- [ ] Trigger list/source labels no longer display a command prefix for non-comment GitHub events.
-- [ ] Required unit tests pass and are proven discriminating against the original backend bug.
+- [x] `issue_comment` triggers still reject comments whose trimmed body does not start with the configured prefix, with reason `comment does not start with '/sam'`.
+- [x] Non-comment GitHub trigger creation/update payloads produced by the UI no longer persist `commandPrefix`.
+- [x] Trigger list/source labels and trigger detail configuration no longer display a command prefix as active for non-comment GitHub events.
+- [x] Required unit tests pass and are proven discriminating against the original backend bug.
 - [ ] Desktop and mobile Playwright screenshots for changed trigger surfaces are posted to the PR and reviewed for overflow/clipping/readability.
 - [x] Staging deployment succeeds and validates the fix without overwriting another active staging run.
 - [ ] PR is merged after CI and CodeRabbit review, and production deploy is monitored to completion.
@@ -106,12 +106,16 @@ Separately, the observability lesson is that an active trigger with deliveries r
 - Post-fix API focus: `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/github-trigger-filter.test.ts` passed, 1 file / 48 tests. The same file previously had 44 tests, so the four added backend cases were collected and run.
 - Post-fix web focus: `pnpm --filter @simple-agent-manager/web test -- tests/unit/components/trigger-form-support.test.ts tests/unit/components/trigger-presentation.test.ts` passed, 2 files / 30 tests.
 - Local Playwright visual audit initially failed because Chromium dependencies were missing (`libnspr4.so`, then `libnss3.so`). Installed Chromium dependencies with `sudo npx playwright install-deps chromium`, then reran successfully.
-- Focused Playwright visual audit: `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/triggers-ui-audit.spec.ts --project='iPhone SE (375x667)' --project='Desktop (1280x800)' --grep 'GitHub source labels|GitHub event trigger form|new GitHub event trigger form|GitHub issues form'` passed, 6 executed / 6 project-scope skips. The audit captured screenshots for trigger list row rendering and GitHub trigger form fields at 375x667 and 1280x800.
+- Focused Playwright visual audit: `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/triggers-ui-audit.spec.ts --project='iPhone SE (375x667)' --project='Desktop (1280x800)' --grep='GitHub source labels|GitHub event trigger form|new GitHub event trigger form|GitHub issues form|GitHub issues detail'` passed, 8 executed / 8 project-scope skips. The audit captured and asserted trigger list, trigger detail, and GitHub trigger form behavior at 375x667 and 1280x800.
 - Full quality suite: `pnpm lint && pnpm typecheck && pnpm test && pnpm build` passed. Aggregate test/build evidence from the run:
   - `@simple-agent-manager/web`: 301 test files passed / 3,598 tests passed.
   - `@simple-agent-manager/api`: 653 test files passed / 8,780 tests passed.
   - Turbo reported 21 successful tasks for `pnpm test` and 9 successful tasks for `pnpm build`.
 - Review follow-up API focus after adding explicit event-type-vs-comment-presence coverage: `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/github-trigger-filter.test.ts` passed, 1 file / 48 tests.
+- Takeover handler-slice discrimination: with only the `event.event === 'issue_comment'` guard temporarily reverted, `pnpm --filter @simple-agent-manager/api test -- --run tests/unit/services/github-trigger-handler.test.ts -t 'admits issues events with a stale stored commandPrefix'` failed as expected with `matchedTriggers: 0` and `comment does not start with '/sam'`. Restoring the guard made the production-shaped handler/admission case pass.
+- Takeover focused backend validation: `pnpm --filter @simple-agent-manager/api test -- --run tests/unit/services/github-trigger-filter.test.ts tests/unit/services/github-trigger-handler.test.ts` passed, 2 files / 56 tests.
+- Takeover focused web validation: `pnpm --filter @simple-agent-manager/web test -- --run tests/unit/components/TriggerConfiguration.test.tsx tests/unit/components/trigger-form-support.test.ts tests/unit/components/trigger-presentation.test.ts` passed, 3 files / 32 tests.
+- Takeover type validation: `pnpm --filter @simple-agent-manager/api typecheck` and `pnpm --filter @simple-agent-manager/web typecheck` both passed.
 - Screenshot files reviewed:
   - `triggers-list-github-source-labels-mobile-375x667.png`
   - `triggers-list-github-source-labels-desktop-1280x800.png`
@@ -119,13 +123,15 @@ Separately, the observability lesson is that an active trigger with deliveries r
   - `trigger-form-github-desktop-1280x800.png`
   - `trigger-form-github-issues-mobile-375x667.png`
   - `trigger-form-github-issues-desktop-1280x800.png`
+  - `trigger-detail-github-issues-mobile-375x667.png`
+  - `trigger-detail-github-issues-desktop-1280x800.png`
 - UI issue found/fixed during screenshot review: the drawer’s scrollable panel allowed scrolled content to bleed under the header and the focused lower input to crowd the footer boundary. Fixed `TriggerForm` to use a flex column shell with header/footer outside the scroll container and `scroll-pb-28` on the form body. Final screenshots reviewed for overflow, clipping, readability, and responsive behavior; no remaining issues found.
-- Specialist review gate completed:
-  - task-completion-validator: WARN/ADDRESSED. Core implementation complete; screenshot artifact warning resolved by confirming all six local PNGs exist. Phase 6/7 items remain intentionally pending.
+- Specialist review gate takeover findings:
+  - task-completion-validator: CHANGES REQUIRED. It correctly found that local PNG paths were not durable PR attachments and the handler/admission test still used empty filters. The production-shaped handler case is now added and discriminating; durable PR attachment remains a gate before removing `needs-human-review`.
   - cloudflare-specialist: PASS. No schema, binding, secret, Durable Object, KV, R2, or `wrangler.toml` impact.
-  - ui-ux-specialist: PASS. Screenshots reviewed at mobile and desktop with no remaining overflow/clipping/readability issues.
+  - ui-ux-specialist: CHANGES REQUIRED. It correctly found missing durable screenshot attachments and missing measured drawer geometry assertions. Header/body/footer/focused-control coordinates are now asserted at mobile and desktop, and all eight screenshots were visually reviewed; durable PR attachment remains a gate.
   - constitution-validator: PASS. No Principle XI hardcoded URL/timeout/limit/deployment-identifier violations.
-  - test-engineer: PASS. Focused API/web/Playwright coverage is adequate; added one stricter backend event-type-guard test from the non-blocking recommendation.
+  - test-engineer: CHANGES REQUIRED. It correctly found the missing production-shaped handler slice and stale detail-view presentation. Both now have behavioral regression coverage.
   - doc-sync-validator: WARN/ADDRESSED. Task-file wording updated to describe the defective behavior as pre-fix; no public documentation drift.
 - Staging coordination:
   - `mcp__sam_mcp.list_project_agents` showed five other active/sleeping project agents, but none had an active staging deployment.
