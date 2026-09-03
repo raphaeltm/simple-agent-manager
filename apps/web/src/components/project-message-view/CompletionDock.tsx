@@ -462,7 +462,11 @@ export function CompletionDock({
       </Dialog>
 
       {actionError && (
-        <div className="px-3 pb-2 text-xs text-danger" role="alert">
+        // `break-words` is load-bearing: server error text is not length-bounded,
+        // and one long unbreakable token would otherwise shear off the right edge
+        // inside the chat's `overflow-x-hidden` ancestor, where a document-level
+        // overflow check cannot see it (.claude/rules/56).
+        <div className="px-3 pb-2 text-xs text-danger break-words" role="alert">
           {actionError}
         </div>
       )}

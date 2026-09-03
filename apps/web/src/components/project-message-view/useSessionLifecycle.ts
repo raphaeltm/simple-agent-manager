@@ -20,7 +20,6 @@ import type {
   SessionStateSnapshot,
 } from '../../lib/api';
 import {
-  cancelAgentPrompt,
   getChatSession,
   getTerminalToken,
   getTranscribeApiUrl,
@@ -45,6 +44,7 @@ import {
   VIRTUAL_START,
 } from './types';
 import { useActivityVerifyTimer } from './useActivityVerifyTimer';
+import { useCancelAgentPrompt } from './useCancelAgentPrompt';
 import { useCompletionDockWorking } from './useCompletionDockWorking';
 import { useConnectionRecovery } from './useConnectionRecovery';
 import { useSessionFileUpload } from './useSessionFileUpload';
@@ -533,7 +533,7 @@ export function useSessionLifecycle(
     setStaleNotice(false);
     // A new turn supersedes any failed interrupt of the previous one — leaving
     // the old error visible would attach it to work it has nothing to do with.
-    setCancelError(null);
+    clearCancelError();
     try {
       if (sessionState === 'idle') {
         resetIdleTimer(projectId, sessionId)
@@ -613,37 +613,18 @@ export function useSessionLifecycle(
   };
 
   // Upload files
-  // Cancel the current in-flight prompt via REST API.
-  //
-  // `cancelling` is state, not just a ref: the in-flight guard has to be
-  // RENDERABLE. Previously the guard was a bare ref, so every press during the
-  // request (up to the node-agent request timeout) was dropped with no feedback
-  // at all — the button looked idle, nothing happened, and users pressed it
-  // again. The ref is kept alongside it purely to make the guard synchronous, so
-  // two clicks in the same tick cannot both get past it before React re-renders.
-  const cancellingRef = useRef(false);
-  const [cancelling, setCancelling] = useState(false);
-  const [cancelError, setCancelError] = useState<string | null>(null);
-  const clearCancelError = useCallback(() => setCancelError(null), []);
-  const handleCancelPrompt = useCallback(() => {
-    if (!completionDockWorking || cancellingRef.current) return;
-    cancellingRef.current = true;
-    setCancelling(true);
-    setCancelError(null);
-    cancelAgentPrompt(projectId, sessionId)
-      .then(() => {
-        setAgentActivity('idle');
-      })
-      .catch((err: unknown) => {
-        // Surface the failure instead of swallowing it. Leaving the activity
-        // state untouched keeps the control available so the user can retry.
-        setCancelError(err instanceof Error ? err.message : 'Failed to interrupt the agent');
-      })
-      .finally(() => {
-        cancellingRef.current = false;
-        setCancelling(false);
-      });
-  }, [completionDockWorking, projectId, sessionId]);
+  const onCancelled = useCallback(() => setAgentActivity('idle'), []);
+  const {
+    cancelling,
+    cancelError,
+    cancelPrompt: handleCancelPrompt,
+    clearCancelError,
+  } = useCancelAgentPrompt({
+    projectId,
+    sessionId,
+    enabled: completionDockWorking,
+    onCancelled,
+  });
 
   // Load more (pagination)
   const loadMore = async () => {
@@ -766,7 +747,6 @@ export function useSessionLifecycle(
     handleCancelPrompt,
     cancelling,
     cancelError,
-    clearCancelError,
     handleSendFollowUp,
     handleUploadFiles,
     loadMore,

@@ -22,8 +22,9 @@ import { FollowUpInput } from '../../components/project-message-view/FollowUpInp
 import type { AgentActivityState } from '../../components/project-message-view/types';
 import { chatMessagesToConversationItems, deriveSessionState, isWorkingActivity, VIRTUAL_START } from '../../components/project-message-view/types';
 import { useActivityVerifyTimer } from '../../components/project-message-view/useActivityVerifyTimer';
+import { useCancelAgentPrompt } from '../../components/project-message-view/useCancelAgentPrompt';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
-import { cancelAgentPrompt, getChatSession, getTranscribeApiUrl, resetIdleTimer, sendFollowUpPrompt, uploadSessionFiles } from '../../lib/api';
+import { getChatSession, getTranscribeApiUrl, resetIdleTimer, sendFollowUpPrompt, uploadSessionFiles } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionDetailResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api/sessions';
 import { mergeMessages } from '../../lib/merge-messages';
 
@@ -161,6 +162,22 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     return chatMessagesToConversationItems(messages);
   }, [messages]);
 
+  // ── Cancel the current in-flight prompt ──
+  // Shares one implementation with the project-chat dock so the two surfaces
+  // cannot drift apart again (.claude/rules/24).
+  const onCancelled = useCallback(() => setAgentActivity('idle'), []);
+  const {
+    cancelling,
+    cancelError,
+    cancelPrompt: handleCancelPrompt,
+    clearCancelError,
+  } = useCancelAgentPrompt({
+    projectId,
+    sessionId,
+    enabled: agentActivity !== 'idle',
+    onCancelled,
+  });
+
   // ── Send follow-up message via REST API ──
   const handleSendFollowUp = useCallback(async () => {
     const trimmed = followUp.trim();
@@ -168,6 +185,9 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
 
     setSendingFollowUp(true);
     setAgentActivity('prompting');
+    // A new turn supersedes any failed interrupt of the previous one; leaving the
+    // old banner up would attach it to work it has nothing to do with.
+    clearCancelError();
     try {
       if (sessionState === 'idle') {
         resetIdleTimer(projectId, sessionId)
@@ -215,7 +235,7 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     } finally {
       setSendingFollowUp(false);
     }
-  }, [followUp, sendingFollowUp, sessionState, projectId, sessionId, wsRef]);
+  }, [followUp, sendingFollowUp, sessionState, projectId, sessionId, wsRef, clearCancelError]);
 
   // ── Upload files ──
   const handleUploadFiles = useCallback(async (files: FileList | File[]) => {
@@ -267,32 +287,6 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     }
   }, [hasMore, loadingMore, messages, projectId, sessionId]);
 
-  // ── Cancel the current in-flight prompt via REST API ──
-  // `cancelling` is state, not just a ref, so the in-flight guard is renderable:
-  // a ref-only guard silently drops every press for the whole request and the
-  // control looks idle while doing nothing.
-  const cancellingRef = useRef(false);
-  const [cancelling, setCancelling] = useState(false);
-  const handleCancelPrompt = useCallback(() => {
-    if (agentActivity === 'idle' || cancellingRef.current) return;
-    cancellingRef.current = true;
-    setCancelling(true);
-    setError(null);
-    cancelAgentPrompt(projectId, sessionId)
-      .then(() => {
-        setAgentActivity('idle');
-      })
-      .catch((err: unknown) => {
-        // Surface the failure through the existing error banner rather than
-        // swallowing it; the control stays available so the user can retry.
-        setError(err instanceof Error ? err.message : 'Failed to interrupt the agent');
-      })
-      .finally(() => {
-        cancellingRef.current = false;
-        setCancelling(false);
-      });
-  }, [agentActivity, projectId, sessionId]);
-
   // ── Derive placeholder from agent activity ──
   const placeholder = agentActivity === 'prompting' || agentActivity === 'responding'
     ? 'Agent is working...'
@@ -329,9 +323,12 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
       )}
 
       {/* Error banner */}
-      {error && session && (
-        <div className="px-4 py-2 bg-danger-tint border-b border-border-default text-danger text-xs">
-          {error}
+      {(error || cancelError) && session && (
+        <div
+          role="alert"
+          className="px-4 py-2 bg-danger-tint border-b border-border-default text-danger text-xs break-words"
+        >
+          {error ?? cancelError}
         </div>
       )}
 

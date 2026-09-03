@@ -66,7 +66,6 @@ export interface UseSessionLifecycleResult {
   cancelling: boolean;
   /** Message from a failed interrupt attempt, surfaced beside the control. */
   cancelError: string | null;
-  clearCancelError: () => void;
   handleSendFollowUp: () => Promise<void>;
   handleUploadFiles: (files: FileList | File[]) => Promise<void>;
   loadMore: () => Promise<void>;

@@ -114,15 +114,45 @@ genuine terminal endings, so clearing the working mirror is correct for all of t
 | 7 | `routes/mcp/dispatch-tool.ts:698` (orphaned session) | yes |
 | 8 | `routes/mcp/orchestration-tools.ts:150` (retry) | yes |
 | 9 | `scheduled/d1-retention.ts:454` | yes |
-| — | `terminal-session-reconciliation.ts:306` + `idle-cleanup.ts:366,571` use `stopSessionInternal` (raw SQL, not the RPC) | out of scope, unchanged |
+| 10 | `terminal-session-reconciliation.ts:306` (hooks wired to the RPCs at `index.ts`) | yes — see correction |
+| 11 | `reconciliation-dead-target.ts:80` — calls `sessions.failSession(sql, …)` directly | yes — see correction |
+| — | `idle-cleanup.ts:366,571` use `stopSessionInternal` (raw SQL, not the RPC) | out of scope, unchanged |
+
+**CORRECTION (found in review — this inventory was wrong twice).** The table is the
+audit record rule 44 exists to produce, and getting it wrong is exactly how a real
+writer went unnoticed:
+
+1. `terminal-session-reconciliation.ts:306` does NOT use `stopSessionInternal`. Its
+   `hooks.stopSession`/`hooks.failSession` are wired to the full `this.stopSession`/
+   `this.failSession` RPCs, so the DO's own alarm sweep — up to
+   `MAX_TERMINAL_SESSION_RECONCILE_BATCH_SIZE` (200) candidates per tick — does
+   inherit the fan-out. Behaviourally right, but the cost was unaccounted for:
+   `recalculateAlarm` re-reads all nine alarm sources, so paying it per candidate was
+   an N x full recompute inside one alarm tick. Hence `deferAlarm` and one batched
+   recompute per sweep.
+2. `reconciliation-dead-target.ts:80` calls raw `sessions.failSession(sql, …)` and
+   bypasses the RPC entirely, clearing no activity mirror at all — reproducing the very
+   wedge this task fixes on the dead-target path, delayed by the probe's staleness bound
+   plus its whole attempt budget. Now calls `terminalizeChatSessionActivity` directly.
+
+Also worth recording: `'stopped'` is not unconditionally terminal at the `chat_sessions`
+level — `wakeSession(…, { allowStopped: true })` can revive a stopped row from a
+restorable snapshot (rule 66). Terminalizing the mirror does not block that; a fresh
+prompt simply re-`upsertActivityState`s.
 
 `failSession` has the equivalent 7 external callers, all terminal.
 
-**Fan-out must NOT reuse `publishTurnEnd` verbatim.** `publishTurnEnd` calls
-`hooks.armIdleCleanup` → `idleCleanup.resetIdleCleanup`, which **re-arms** the idle timer. Handing a
-fresh idle timer to a session that was just terminated is wrong and creates an immortal candidate
-(`.claude/rules/47` §3). A terminal ending needs `cancelIdleCleanup` (`idle-cleanup.ts:197`, a plain
-`DELETE`) instead. The task brief agrees — it says "idle cleanup **disarm**".
+**Fan-out REUSES `publishTurnEnd`, parameterized by a disposition.** `publishTurnEnd` calls
+`hooks.armIdleCleanup` → `idleCleanup.resetIdleCleanup`, which **re-arms** the idle timer — wrong for
+a session that has ended, since it pushes teardown out on a session that will never report again.
+
+The brief asked for "idle cleanup **disarm**", and the first cut did exactly that. **Review showed
+disarming is also wrong, and worse:** the `idle_cleanup_schedule` row's expiry is what actually calls
+`stopWorkspaceInD1`, and `scheduled/stuck-tasks.ts:1440` deliberately transitions with
+`stopWorkspace: false` before failing the session — so deleting the row removes that workspace's only
+teardown path. Correct behaviour: touch the schedule only for a TURN ending; a SESSION ending leaves
+the existing deadline exactly where it is. The row is not an immortal candidate because
+`processExpiredCleanups` terminalizes it when it fires.
 
 ### F4. `/stop` never signals the VM agent
 
@@ -199,20 +229,20 @@ No new env knobs are needed; no hardcoded values are introduced (Constitution XI
 
 ## Implementation Checklist
 
-- [ ] `session-state.ts`: `recordTurnEnd` CAS compares `COALESCE(prompt_started_at, activity_at) <= observedAt`, with a comment naming `refreshWorkingActivityForChatSession` as the writer that made `activity_at` unusable here
-- [ ] `session-state.ts`: `markSessionStopped` also clears `status_error` and resets probe accounting, and records provenance, so a stopped row cannot be re-probed as a working candidate
-- [ ] `project-data/index.ts`: add `publishSessionTerminalEnd()` fan-out (broadcast + nudge deliveries + **cancel** idle cleanup + recalculate alarm)
-- [ ] `project-data/index.ts`: `stopSession` RPC calls `markSessionStopped` for the chat session and each linked ACP session, then fans out
-- [ ] `project-data/index.ts`: `failSession` RPC does the same via `markSessionError`
-- [ ] `chat-stop.ts`: best-effort `cancelAgentSessionOnNode` + `stopAgentSessionOnNode` before teardown; never throws
-- [ ] `useSessionLifecycle.ts`: reactive `cancelling` state replacing the ref-only guard; `cancelError` state; populate both; expose in `UseSessionLifecycleResult`
-- [ ] `useSessionLifecycle.types.ts`: add `cancelling` / `cancelError` / `clearCancelError`
-- [ ] `CompletionDock.tsx`: `cancelling` prop → `centerDisabled` + `'Cancelling…'` title + `aria-busy`; `cancelError` → `actionError` for interrupt
-- [ ] `project-message-view/index.tsx`: wire `cancelling`/`cancelError` through to the dock
-- [ ] `WorkspaceChatView.tsx`: stop swallowing cancel errors (surface via the existing error affordance)
-- [ ] Tests: all listed below, each proven discriminating
-- [ ] Playwright visual audit — mobile 375x667 + desktop 1280x800, cancelling state, error state, overflow assertions
-- [ ] Docs sync: check `apps/www/src/content/docs/docs/` for statements about interrupt/archive behaviour
+- [x] `session-state.ts`: `recordTurnEnd` CAS compares `COALESCE(prompt_started_at, activity_at) <= observedAt`, with a comment naming `refreshWorkingActivityForChatSession` as the writer that made `activity_at` unusable here
+- [x] `session-state.ts`: `markSessionStopped` also clears `status_error` and resets probe accounting, and records provenance, so a stopped row cannot be re-probed as a working candidate
+- [x] `project-data/index.ts`: add `publishSessionTerminalEnd()` fan-out (broadcast + nudge deliveries + **cancel** idle cleanup + recalculate alarm)
+- [x] `project-data/index.ts`: `stopSession` RPC calls `markSessionStopped` for the chat session and each linked ACP session, then fans out
+- [x] `project-data/index.ts`: `failSession` RPC does the same via `markSessionError`
+- [x] `chat-stop.ts`: best-effort `cancelAgentSessionOnNode` + `stopAgentSessionOnNode` before teardown; never throws
+- [x] `useSessionLifecycle.ts`: reactive `cancelling` state replacing the ref-only guard; `cancelError` state; populate both; expose in `UseSessionLifecycleResult`
+- [x] `useSessionLifecycle.types.ts`: add `cancelling` / `cancelError` / `clearCancelError`
+- [x] `CompletionDock.tsx`: `cancelling` prop → `centerDisabled` + `'Cancelling…'` title + `aria-busy`; `cancelError` → `actionError` for interrupt
+- [x] `project-message-view/index.tsx`: wire `cancelling`/`cancelError` through to the dock
+- [x] `WorkspaceChatView.tsx`: stop swallowing cancel errors (surface via the existing error affordance)
+- [x] Tests: all listed below, each proven discriminating
+- [x] Playwright visual audit — mobile 375x667 + desktop 1280x800, cancelling state, error state, overflow assertions
+- [x] Docs sync: check `apps/www/src/content/docs/docs/` for statements about interrupt/archive behaviour
 
 ## Required Tests
 
@@ -220,53 +250,75 @@ Per `.claude/rules/62` each test must reach the feature the way production does,
 must be proven discriminating (delete it, confirm exactly the intended test goes red, restore).
 
 **Root cause (F2)** — `session-state-mirror.test.ts`, real SQL:
-- [ ] **The incident, reproduced through the real writer**: enter `prompting`, capture `observedAt`,
+- [x] **The incident, reproduced through the real writer**: enter `prompting`, capture `observedAt`,
       then call the real `refreshWorkingActivityForChatSession` (not a hand-written `UPDATE`) to
       advance `activity_at` past `observedAt`, then `recordTurnEnd(observedAt)`. Assert it returns
       `true` and the row is `idle`. **Must fail against pre-fix code.**
-- [ ] **Rule-49 control (discriminating)**: a *new* prompt whose `prompt_started_at > observedAt` is
+- [x] **Rule-49 control (discriminating)**: a *new* prompt whose `prompt_started_at > observedAt` is
       still NOT stomped. Must stay green after the fix — this is what proves the fix did not simply
       delete the guard.
-- [ ] **COALESCE fallback**: a working row with `prompt_started_at IS NULL` behaves as before.
+- [x] **COALESCE fallback**: a working row with `prompt_started_at IS NULL` behaves as before.
 
 **Terminal fan-out (F3)** — DO tests:
-- [ ] `stopSession` on a session whose mirror is `prompting` clears it and nudges queued deliveries.
-- [ ] `stopSession` **cancels** rather than re-arms idle cleanup (assert the schedule row is gone).
-- [ ] ACP-keyed rows linked to the chat session are cleared too, not just the chat-session-keyed row.
-- [ ] `failSession` equivalent via `markSessionError`.
-- [ ] Control: a session already `idle` is unaffected and no spurious broadcast/nudge storm occurs.
+- [x] `stopSession` on a session whose mirror is `prompting` clears it and nudges queued deliveries.
+- [x] `stopSession` **cancels** rather than re-arms idle cleanup (assert the schedule row is gone).
+- [x] ACP-keyed rows linked to the chat session are cleared too, not just the chat-session-keyed row.
+- [x] `failSession` equivalent via `markSessionError`.
+- [x] Control: a session already `idle` is unaffected and no spurious broadcast/nudge storm occurs.
 
 **`/stop` VM signal (F4)** — `chat-session-stop-cleanup.test.ts`:
-- [ ] Ordering: the VM cancel/stop is attempted **before** `cleanupTerminalTaskResources`.
-- [ ] Best-effort: a throwing/404 resolver still returns 200 and still tears down (the
+- [x] Ordering: the VM cancel/stop is attempted **before** `cleanupTerminalTaskResources`.
+- [x] Best-effort: a throwing/404 resolver still returns 200 and still tears down (the
       already-sleeping archive case, where there is no live workspace, must not regress).
-- [ ] `destructiveSessionEnd: true` is still passed (guards F5 against accidental change).
+- [x] `destructiveSessionEnd: true` is still passed (guards F5 against accidental change).
 
 **UI (F6)**:
-- [ ] `CompletionDock`: `cancelling` disables Interrupt and shows the cancelling affordance.
-- [ ] `CompletionDock`: `cancelError` renders in the `role="alert"` slot for interrupt.
-- [ ] `CompletionDock` control: `cancelling` does **not** disable Sleep/Archive (mirrors the existing
+- [x] `CompletionDock`: `cancelling` disables Interrupt and shows the cancelling affordance.
+- [x] `CompletionDock`: `cancelError` renders in the `role="alert"` slot for interrupt.
+- [x] `CompletionDock` control: `cancelling` does **not** disable Sleep/Archive (mirrors the existing
       `:217` test in the other direction).
-- [ ] `project-message-view`: clicking Interrupt when the API rejects surfaces the error and
+- [x] `project-message-view`: clicking Interrupt when the API rejects surfaces the error and
       re-enables the button (the missing failure-path test). Use a deferred promise so the test can
       assert the disabled mid-state before releasing the rejection (`.claude/rules/62` ordering).
-- [ ] Absence assertions paired with a positive render assertion (`.claude/rules/62` §5).
+- [x] Absence assertions paired with a positive render assertion (`.claude/rules/62` §5).
 
 ## Acceptance Criteria
 
-- [ ] A cancel issued while the agent is actively emitting messages terminalizes the session state on
+- [x] A cancel issued while the agent is actively emitting messages terminalizes the session state on
       the **first** press (root cause fixed, proven by a test that fails pre-fix)
-- [ ] A prompt that starts after the cancel's `observedAt` is still never stomped (rule 49 intact)
-- [ ] After an interrupt, a queued follow-up prompt is released rather than parking in `retry_wait`
-- [ ] Interrupt shows a visible cancelling state and cannot be clicked twice into the void
-- [ ] A failed cancel surfaces a visible error and the button becomes usable again
-- [ ] `stopSession`/`failSession` leave no session in a working mirror state, and do not re-arm idle
+- [x] A prompt that starts after the cancel's `observedAt` is still never stomped (rule 49 intact)
+- [x] After an interrupt, a queued follow-up prompt is released rather than parking in `retry_wait`
+- [x] Interrupt shows a visible cancelling state and cannot be clicked twice into the void
+- [x] A failed cancel surfaces a visible error and the button becomes usable again
+- [x] `stopSession`/`failSession` leave no session in a working mirror state, and do not re-arm idle
       cleanup on a terminal session
-- [ ] Archiving a live session signals the VM agent before teardown; archiving a sleeping session
+- [x] Archiving a live session signals the VM agent before teardown; archiving a sleeping session
       (no live workspace) still succeeds unchanged
-- [ ] `destructiveSessionEnd: true` is retained for `/stop` with the rationale recorded
-- [ ] No hardcoded values; no new env knobs required
-- [ ] Mobile + desktop Playwright screenshots reviewed, no overflow or clipping
+- [x] `destructiveSessionEnd: true` is retained for `/stop` with the rationale recorded
+- [x] No hardcoded values; no new env knobs required
+- [x] Mobile + desktop Playwright screenshots reviewed, no overflow or clipping
+
+## What local review changed (recorded honestly)
+
+Eight local reviewers ran against this branch. They found two CI blockers, a
+correctness bug in the fix itself, and two audit errors in this very document:
+
+- **A correctness bug I introduced.** The first cut had the terminal path CANCEL
+  the idle-cleanup schedule. That row's expiry is what calls `stopWorkspaceInD1`,
+  and `scheduled/stuck-tasks.ts` deliberately keeps the workspace running past the
+  session's end, so cancelling removed that workspace's only teardown path. See
+  the corrected design note above.
+- **Two CI blockers.** Making `guard` required broke two pre-existing tests that
+  `pnpm typecheck` cannot see (`apps/api/tsconfig.json` excludes `tests/`); and
+  the new SQL interpolation tripped `scripts/quality/ast-checks.ts`.
+- **A false "green".** `pnpm --filter api test` exited 0 while the JSON reporter
+  reported `success: false, failed: 3`. The wrapper's exit code was not the
+  suite's result — the rule-02 trap, hit in the course of fixing a bug whose own
+  post-mortem is about tests that cannot see what they claim to.
+- **Two audit errors in this file's own rule-44 inventory** (corrected above),
+  one of which hid a real unenumerated writer (`reconciliation-dead-target.ts`).
+- **Duplicated work that should have been shared**: the same UI fix was
+  hand-written twice and had already drifted. Extracted to `useCancelAgentPrompt`.
 
 ## Post-Mortem (for the PR)
 
