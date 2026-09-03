@@ -22,15 +22,15 @@ Everything upstream of the bad filter is healthy: signature verification, delive
 
 ## Research Findings
 
-- `apps/api/src/services/github-trigger-filter.ts` exports the pure `evaluateFilters()` predicate. The comment says command prefix is for `issue_comment` events, but the code applies it to every GitHub webhook event.
+- `apps/api/src/services/github-trigger-filter.ts` exports the pure `evaluateFilters()` predicate. Pre-fix, the comment said command prefix is for `issue_comment` events, but the code applied it to every GitHub webhook event.
 - The only production caller is `apps/api/src/services/github-trigger-handler.ts`, after GitHub signature/dedup/project lookup and after the trigger config `eventType` has already been matched against the webhook event.
 - Caller enumeration for `.claude/rules/67`: `rg "evaluateFilters\\("` finds:
   - `apps/api/src/services/github-trigger-handler.ts:226` — runtime caller. Narrowing `commandPrefix` to `issue_comment` changes behavior only for stored non-comment GitHub triggers with stray `commandPrefix`, turning an incorrect rejection into normal evaluation of the remaining filters. `issue_comment` behavior remains unchanged.
   - `apps/api/tests/unit/services/github-trigger-filter.test.ts` — tests only.
 - `apps/web/src/components/triggers/TriggerForm.tsx` initializes new GitHub trigger command prefix state to `/sam` and edit state to `existing ?? '/sam'`.
 - `apps/web/src/components/triggers/GitHubTriggerFields.tsx` only renders the command-prefix input for `issue_comment`, so non-comment triggers cannot see or clear the stale field.
-- `apps/web/src/components/triggers/trigger-form-support.ts` builds GitHub filters and currently persists a trimmed `commandPrefix` regardless of event type.
-- `apps/web/src/components/triggers/trigger-presentation.tsx` renders any stored `commandPrefix` in source labels, producing misleading labels such as `GitHub issues: /sam`.
+- Pre-fix, `apps/web/src/components/triggers/trigger-form-support.ts` built GitHub filters and persisted a trimmed `commandPrefix` regardless of event type.
+- Pre-fix, `apps/web/src/components/triggers/trigger-presentation.tsx` rendered any stored `commandPrefix` in source labels, producing misleading labels such as `GitHub issues: /sam`.
 - Existing trigger UI post-mortem `tasks/archive/2026-06-05-harden-trigger-ui-accessibility.md` established the retained lesson that trigger UI changes need behavioral tests plus mobile/desktop Playwright screenshot evidence; shallow DOM or visual-only checks previously missed trigger UI defects.
 - `git blame` introducing commits:
   - `c444b3e056ad6576a66387bc4f6ab7c1674ea455` (`feat: add GitHub event triggers`, 2026-05-31T10:41:17Z) introduced the ungated backend `commandPrefix` filter and `/sam` UI command-prefix defaults.
@@ -67,11 +67,11 @@ A filter predicate whose scope comment does not match its code, silently rejecti
 
 Add a `.claude/rules/` rule requiring event- or source-scoped filters to encode their scope in executable guard logic and tests for both in-scope enforcement and out-of-scope inertness. The rule should also require PRs touching shared filter predicates to enumerate callers and explain per-caller behavior changes.
 
-Separately, the observability lesson is that an active trigger with deliveries recorded as `filtered` for weeks, `trigger_count = 0`, and a stable rejection reason should be surfaced in the triggers UI. Capture that as a SAM Idea, not a GitHub Issue, and do not expand this PR’s implementation scope.
+Separately, the observability lesson is that an active trigger with deliveries recorded as `filtered` for weeks, `trigger_count = 0`, and a stable rejection reason should be surfaced in the triggers UI. Captured as SAM Idea `01M1M8ENP75RD87GF5BC7DZJ11`, not a GitHub Issue, and this PR’s implementation scope remains focused on the filter/UI hygiene fix.
 
 ## Implementation Checklist
 
-- [x] Add backend regression tests proving `issues`/`opened`, `pull_request`/`opened`, and `push` events with stray stored `commandPrefix: "/sam"` still match when all applicable filters pass.
+- [x] Add backend regression tests proving `issues`/`opened`, `pull_request`/`opened`, and `push` events with stray stored `commandPrefix: "/sam"` still match when all applicable filters pass, plus a synthetic accidental-comment case proving the guard is event-type based rather than comment-presence based.
 - [x] Add an `issue_comment` control test proving `commandPrefix` is still enforced and preserves the `comment does not start with '/sam'` reason string.
 - [x] Verify the `issues` regression test fails against pre-fix code and record the command/result.
 - [x] Update `evaluateFilters()` to apply `commandPrefix` only when `event.event === 'issue_comment'`.
@@ -82,8 +82,8 @@ Separately, the observability lesson is that an active trigger with deliveries r
 - [x] Add the `.claude/rules/` process fix for event-scoped filter predicates.
 - [x] Run targeted API/web unit tests and prove no test collection regressions.
 - [x] Run local Playwright screenshots for trigger list row rendering and trigger form GitHub fields at 1280x800 and 375x667 using stress data; review overflow/clipping/readability.
-- [ ] Run full quality suite.
-- [ ] Run specialist reviews: task-completion-validator, cloudflare-specialist, ui-ux-specialist, constitution-validator, test-engineer, doc-sync-validator.
+- [x] Run full quality suite.
+- [x] Run specialist reviews: task-completion-validator, cloudflare-specialist, ui-ux-specialist, constitution-validator, test-engineer, doc-sync-validator.
 - [ ] Check for other active staging agents/runs, deploy to staging, and verify changed behavior.
 - [ ] Create PR with production evidence, caller enumeration, post-mortem, no-migration rationale, visual evidence, staging evidence, and specialist review table.
 - [ ] Complete CI and CodeRabbit label-triggered review loop.
@@ -103,10 +103,15 @@ Separately, the observability lesson is that an active trigger with deliveries r
 ## Validation Log
 
 - Pre-fix discrimination: after adding the backend regression tests and before changing `evaluateFilters()`, `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/github-trigger-filter.test.ts` failed with 3 expected failures. Each non-comment event (`issues`, `pull_request`, `push`) returned `{ matched: false, reason: "comment does not start with '/sam'" }` instead of `{ matched: true }`.
-- Post-fix API focus: `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/github-trigger-filter.test.ts` passed, 1 file / 47 tests. The same file previously had 44 tests, so the three added backend cases were collected and run.
+- Post-fix API focus: `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/github-trigger-filter.test.ts` passed, 1 file / 48 tests. The same file previously had 44 tests, so the four added backend cases were collected and run.
 - Post-fix web focus: `pnpm --filter @simple-agent-manager/web test -- tests/unit/components/trigger-form-support.test.ts tests/unit/components/trigger-presentation.test.ts` passed, 2 files / 30 tests.
 - Local Playwright visual audit initially failed because Chromium dependencies were missing (`libnspr4.so`, then `libnss3.so`). Installed Chromium dependencies with `sudo npx playwright install-deps chromium`, then reran successfully.
 - Focused Playwright visual audit: `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/triggers-ui-audit.spec.ts --project='iPhone SE (375x667)' --project='Desktop (1280x800)' --grep 'GitHub source labels|GitHub event trigger form|new GitHub event trigger form|GitHub issues form'` passed, 6 executed / 6 project-scope skips. The audit captured screenshots for trigger list row rendering and GitHub trigger form fields at 375x667 and 1280x800.
+- Full quality suite: `pnpm lint && pnpm typecheck && pnpm test && pnpm build` passed. Aggregate test/build evidence from the run:
+  - `@simple-agent-manager/web`: 301 test files passed / 3,598 tests passed.
+  - `@simple-agent-manager/api`: 653 test files passed / 8,780 tests passed.
+  - Turbo reported 21 successful tasks for `pnpm test` and 9 successful tasks for `pnpm build`.
+- Review follow-up API focus after adding explicit event-type-vs-comment-presence coverage: `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/github-trigger-filter.test.ts` passed, 1 file / 48 tests.
 - Screenshot files reviewed:
   - `triggers-list-github-source-labels-mobile-375x667.png`
   - `triggers-list-github-source-labels-desktop-1280x800.png`
@@ -115,6 +120,13 @@ Separately, the observability lesson is that an active trigger with deliveries r
   - `trigger-form-github-issues-mobile-375x667.png`
   - `trigger-form-github-issues-desktop-1280x800.png`
 - UI issue found/fixed during screenshot review: the drawer’s scrollable panel allowed scrolled content to bleed under the header and the focused lower input to crowd the footer boundary. Fixed `TriggerForm` to use a flex column shell with header/footer outside the scroll container and `scroll-pb-28` on the form body. Final screenshots reviewed for overflow, clipping, readability, and responsive behavior; no remaining issues found.
+- Specialist review gate completed:
+  - task-completion-validator: WARN/ADDRESSED. Core implementation complete; screenshot artifact warning resolved by confirming all six local PNGs exist. Phase 6/7 items remain intentionally pending.
+  - cloudflare-specialist: PASS. No schema, binding, secret, Durable Object, KV, R2, or `wrangler.toml` impact.
+  - ui-ux-specialist: PASS. Screenshots reviewed at mobile and desktop with no remaining overflow/clipping/readability issues.
+  - constitution-validator: PASS. No Principle XI hardcoded URL/timeout/limit/deployment-identifier violations.
+  - test-engineer: PASS. Focused API/web/Playwright coverage is adequate; added one stricter backend event-type-guard test from the non-blocking recommendation.
+  - doc-sync-validator: WARN/ADDRESSED. Task-file wording updated to describe the defective behavior as pre-fix; no public documentation drift.
 
 ## UI/UX Validation Report
 

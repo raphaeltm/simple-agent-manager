@@ -172,6 +172,18 @@ describe('evaluateFilters', () => {
       expect(result).toEqual({ matched: true });
     });
 
+    it('gates commandPrefix by event type, not by accidental comment presence', () => {
+      const filters: GitHubTriggerFilters = { commandPrefix: '/sam' };
+      const event = makeEvent({
+        event: 'issues',
+        comment: { body: 'Please fix this' },
+      });
+
+      const result = evaluateFilters(event, filters);
+
+      expect(result).toEqual({ matched: true });
+    });
+
     it('matches when comment starts with prefix', () => {
       const filters: GitHubTriggerFilters = { commandPrefix: '/sam' };
       const event = makeEvent({
