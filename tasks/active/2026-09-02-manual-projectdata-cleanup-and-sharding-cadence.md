@@ -138,7 +138,7 @@ Every finding above is represented in the checklist below.
 - [x] Run requested specialist reviews:
   cloudflare-specialist, security-auditor, env-validator, doc-sync-validator,
   constitution-validator, test-engineer, and task-completion-validator.
-- [ ] Push the branch, open a draft PR, record CI/review evidence, and stop
+- [x] Push the branch, open a draft PR, record CI/review evidence, and stop
   without CodeRabbit, staging, production mutation, merge, or deploy.
 
 ## Acceptance criteria
@@ -173,7 +173,7 @@ Every finding above is represented in the checklist below.
   upgrades.
 - [x] Env types, wrangler/default/example config, deployment sync, public docs,
   API reference, and env reference skills are synchronized.
-- [ ] Local validation and required specialist reviews have no unresolved
+- [x] Local validation and required specialist reviews have no unresolved
   critical/high findings. The PR is draft and unmerged.
 
 ## Validation and review log
@@ -213,6 +213,10 @@ Requested specialist reviews completed:
 - `task-completion-validator`: PASS. Checklist items, acceptance criteria, and
   research findings are covered by the diff and tests; no UI propagation or
   multi-resource selector work applies.
+
+Draft PR:
+
+- <https://github.com/raphaeltm/simple-agent-manager/pull/2008>
 
 ## References
 
