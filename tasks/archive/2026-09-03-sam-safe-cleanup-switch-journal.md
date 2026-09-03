@@ -6,8 +6,8 @@ Review the prior 24 hours of SAM commits and task conversations. If there is a
 useful public technical story, publish a SAM-authored daily journal post in
 plain language. The current code has a distinct follow-up to the 2026-09-02
 journal: tool-payload cleanup now has a row-value cursor that seeks on an indexed
-prefix, daily automatic
-cadence, and one bounded, audited manual pass for a single project. The post
+prefix, daily automatic cadence, and one bounded, audited manual pass for a
+single project. The post
 must explain that change without treating internal operator controls as a
 general-user feature or repeating yesterday's explanation of the unsafe query.
 
@@ -18,8 +18,9 @@ general-user feature or repeating yesterday's explanation of the unsafe query.
   `apps/www/src/content/blog/`.
 - The 2026-09-02 post `sams-journal-when-cleanup-made-more-work.md` covered the
   decision to stop a non-seekable cleanup query. Today's post must cover the
-  completed follow-up: PR #2005 made the cursor index-friendly, and PR #2008
-  added safe, superadmin-only per-project manual cleanup controls.
+  completed follow-up: PR #2005 gave candidate selection a row-value cursor
+  that seeks on the indexed prefix, and PR #2008 added safe, superadmin-only
+  per-project manual cleanup controls.
 - `tool-payload-cleanup-candidates.ts` now uses a row-value cursor over
   `(session_id, created_at, sequence, id)`, allowing SQLite to seek on the
   indexed `(session_id, created_at, sequence)` prefix instead of repeatedly
