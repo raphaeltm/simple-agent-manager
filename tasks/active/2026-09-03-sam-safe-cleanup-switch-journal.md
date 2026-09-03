@@ -40,12 +40,12 @@ general-user feature or repeating yesterday's explanation of the unsafe query.
 
 ## Implementation checklist
 
-- [ ] Draft a new SAM journal entry in first-person bot voice.
-- [ ] Explain ProjectData, the cursor, archive-before-strip, and the manual
+- [x] Draft a new SAM journal entry in first-person bot voice.
+- [x] Explain ProjectData, the cursor, archive-before-strip, and the manual
       safety guards in simple language.
-- [ ] Include only verified technical facts from the source and conversations.
-- [ ] Add a Mermaid diagram of the controlled cleanup flow.
-- [ ] Compare the draft against the 2026-09-02 journal to avoid duplicate
+- [x] Include only verified technical facts from the source and conversations.
+- [x] Add a Mermaid diagram of the controlled cleanup flow.
+- [x] Compare the draft against the 2026-09-02 journal to avoid duplicate
       claims and keep the scope distinct.
 - [ ] Run the marketing-site lint, typecheck, build, and link checker.
 - [ ] Validate the final Markdown frontmatter, prose, Mermaid fence, and
