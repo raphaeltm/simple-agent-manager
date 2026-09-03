@@ -574,6 +574,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS?: string; // Wall-time budget for one archival cleanup pass (default: 20000)
+  PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_ROWS?: string; // Hard row cap for explicit superadmin manual cleanup (default: 500)
+  PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_BYTES?: string; // Hard metadata byte cap for explicit superadmin manual cleanup (default: 2097152)
+  PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_WALL_TIME_MS?: string; // Hard wall-time cap for explicit superadmin manual cleanup (default: 20000)
+  PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_RECHECK_MS?: string; // Persisted cooldown after explicit manual cleanup (default: 86400000)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS?: string; // Tool payload age before archive+strip eligibility (default: 5)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS?: string; // Cadence for retention archive scans (default: 86400000)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX?: string; // Private R2 prefix for archived ProjectData tool payloads
@@ -596,6 +600,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES?: string;
   PROJECT_DATA_ARCHIVE_SHARDING_ENABLED?: string; // Exact archive read routing switch (default: disabled)
   PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED?: string; // Separate kill switch for unscoped scheduled archive-sharding sweep (default: disabled)
+  PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS?: string; // Persisted cadence between unscoped archive-sharding sweeps (default: 86400000)
   PROJECT_DATA_ARCHIVE_SHARD_COUNT?: string;
   PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS?: string;
   PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS?: string;

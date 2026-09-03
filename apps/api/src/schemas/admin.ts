@@ -42,6 +42,14 @@ export const ProjectDataStorageReliefMeasureSchema = v.object({
   ),
 });
 
+export const ProjectDataManualToolPayloadCleanupSchema = v.object({
+  reason: v.pipe(v.string(), v.minLength(1), v.maxLength(500)),
+  idempotencyKey: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
+  batchRows: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  batchBytes: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  wallTimeMs: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+});
+
 export const ProjectDataArchiveCanaryControlSchema = v.object({
   sessionId: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(200))),
   dryRun: v.optional(v.boolean()),

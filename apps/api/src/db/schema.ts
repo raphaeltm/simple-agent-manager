@@ -2898,6 +2898,37 @@ export const projectDataArchiveCircuitBreakers = sqliteTable(
 export type ProjectDataArchiveCircuitBreakerRow =
   typeof projectDataArchiveCircuitBreakers.$inferSelect;
 
+export const projectDataArchiveGlobalSweepCadence = sqliteTable(
+  'project_data_archive_global_sweep_cadence',
+  {
+    sweepName: text('sweep_name', {
+      enum: ['archive_sharding_global_sweep'],
+    }).primaryKey(),
+    lastStartedAt: integer('last_started_at'),
+    lastCompletedAt: integer('last_completed_at'),
+    nextEligibleAt: integer('next_eligible_at').notNull().default(0),
+    lastStatus: text('last_status', {
+      enum: ['never', 'running', 'succeeded', 'failed', 'partial'],
+    })
+      .notNull()
+      .default('never'),
+    lastSkipReason: text('last_skip_reason'),
+    lastError: text('last_error'),
+    leaseOwner: text('lease_owner'),
+    leaseExpiresAt: integer('lease_expires_at'),
+    runCount: integer('run_count').notNull().default(0),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    nextEligibleIdx: index('idx_project_data_archive_global_sweep_cadence_next_eligible').on(
+      table.nextEligibleAt
+    ),
+  })
+);
+
+export type ProjectDataArchiveGlobalSweepCadenceRow =
+  typeof projectDataArchiveGlobalSweepCadence.$inferSelect;
+
 export const projectDataArchiveMigrations = sqliteTable(
   'project_data_archive_migrations',
   {

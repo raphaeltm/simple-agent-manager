@@ -43,7 +43,7 @@ export type {
   ProjectDataToolPayloadCleanupResult,
 } from './tool-payload-cleanup-types';
 
-type ToolPayloadCleanupReason = 'retention_due' | 'storage_pressure' | 'continuation';
+type ToolPayloadCleanupReason = 'retention_due' | 'storage_pressure' | 'continuation' | 'manual';
 
 type ToolPayloadCleanupPlan = {
   projectId: string;
@@ -106,19 +106,21 @@ function createToolPayloadCleanupPlan(
   const underStoragePressure =
     beforeBytes >= triggerBytes || (hasPendingCleanup && beforeBytes > targetBytes);
 
-  if (pendingRecheckAt !== null && pendingRecheckAt > now) {
+  if (pendingRecheckAt !== null && pendingRecheckAt > now && !options.forceStart) {
     return null;
   }
-  if (!hasPendingCleanup && !retentionDue && !options.allowStart) {
+  if (!hasPendingCleanup && !retentionDue && !options.allowStart && !options.forceStart) {
     return null;
   }
-  if (!hasPendingCleanup && !retentionDue && !underStoragePressure) {
+  if (!hasPendingCleanup && !retentionDue && !underStoragePressure && !options.forceStart) {
     clearToolPayloadCleanupState(sql);
     return null;
   }
 
   let reason: ToolPayloadCleanupReason = 'retention_due';
-  if (hasPendingCleanup) {
+  if (options.forceStart && !hasPendingCleanup && !retentionDue && !underStoragePressure) {
+    reason = 'manual';
+  } else if (hasPendingCleanup) {
     reason = 'continuation';
   } else if (underStoragePressure) {
     reason = 'storage_pressure';
@@ -339,8 +341,7 @@ function resolveToolPayloadTerminationReason(
   if (
     batch.errorMessages.some(
       (message) =>
-        message.includes('per-row byte budget') ||
-        message.includes('archive metadata byte budget')
+        message.includes('per-row byte budget') || message.includes('archive metadata byte budget')
     )
   ) {
     return 'oversized_skip';
@@ -412,9 +413,10 @@ async function recordToolPayloadCleanupTelemetry(
   };
 
   try {
+    const purgeReason = options.purgeReason ?? 'auto_tool_payload_archive_cleanup';
     await options.recordTelemetry(telemetry, {
       lastPurgeAt: rowsUpdated > 0 ? measuredAt : null,
-      lastPurgeReason: rowsUpdated > 0 ? 'auto_tool_payload_archive_cleanup' : null,
+      lastPurgeReason: rowsUpdated > 0 ? purgeReason : null,
       lastPurgeRows: rowsUpdated > 0 ? rowsUpdated : null,
       lastPurgeDatabaseSizeBytes: rowsUpdated > 0 ? afterBytes : null,
       lastError,

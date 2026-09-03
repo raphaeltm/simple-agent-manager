@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
@@ -92,6 +92,8 @@ function seedSnapshot(
 }
 
 beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(NOW);
   sqlite = new Database(':memory:');
   createSchemaTables(sqlite, [schema.sessionSnapshots, schema.tasks, schema.workspaces]);
   wakeSessionRpc = vi.fn(
@@ -114,6 +116,10 @@ beforeEach(() => {
       get: () => stub,
     },
   } as unknown as Env;
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('wakeSessionForSnapshotRecovery', () => {

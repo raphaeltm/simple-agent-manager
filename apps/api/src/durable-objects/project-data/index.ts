@@ -66,6 +66,11 @@ import { processTaskWaits } from './task-wait-supervisor';
 import * as taskWaits from './task-waits';
 import * as terminalSessionReconciliation from './terminal-session-reconciliation';
 import * as toolPayloadArchive from './tool-payload-archive';
+import type {
+  ProjectDataManualToolPayloadCleanupInput,
+  ProjectDataManualToolPayloadCleanupResult,
+} from './tool-payload-cleanup-types';
+import * as toolPayloadManualCleanup from './tool-payload-manual-cleanup';
 import type { Env, SummaryData } from './types';
 
 const log = createModuleLogger('project_data');
@@ -536,7 +541,9 @@ export class ProjectData extends DurableObject<Env> {
   async archiveSourceExportChunk(
     input: archiveSharding.ArchiveSourceExportChunkInput
   ): Promise<import('../../project-data-archive/contract').ProjectDataArchiveChunk> {
-    return this.withArchiveTranscriptLock(() => archiveSharding.exportArchiveChunk(this.sql, input));
+    return this.withArchiveTranscriptLock(() =>
+      archiveSharding.exportArchiveChunk(this.sql, input)
+    );
   }
 
   archiveSourceMarkTargetSealed(input: {
@@ -567,7 +574,9 @@ export class ProjectData extends DurableObject<Env> {
   async archiveSourceFinalizeDelete(
     input: archiveSharding.ArchiveSourceFinalizeDeleteInput
   ): Promise<archiveSharding.ArchiveSourceFinalizeDeleteResult> {
-    return this.withArchiveTranscriptLock(() => archiveSharding.finalizeSourceDelete(this.sql, input));
+    return this.withArchiveTranscriptLock(() =>
+      archiveSharding.finalizeSourceDelete(this.sql, input)
+    );
   }
 
   async archiveSourceRestoreChunk(
@@ -1521,6 +1530,22 @@ export class ProjectData extends DurableObject<Env> {
         allowStart: true,
         classifyStatus: (databaseSizeBytes) =>
           storageSafety.classifyStorageUsage(databaseSizeBytes, config),
+      }
+    );
+    await this.recalculateAlarm();
+    return result;
+  }
+
+  async runManualToolPayloadCleanup(
+    input: ProjectDataManualToolPayloadCleanupInput
+  ): Promise<ProjectDataManualToolPayloadCleanupResult> {
+    const result = await toolPayloadManualCleanup.runProjectDataManualToolPayloadCleanup(
+      this.sql,
+      this.env,
+      this.getProjectId(),
+      input,
+      {
+        transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
       }
     );
     await this.recalculateAlarm();

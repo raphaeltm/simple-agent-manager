@@ -77,6 +77,7 @@ function createCoordinatorTables(sqlite: Database.Database): void {
     schema.sessionSummaries,
     schema.sessionSnapshots,
     schema.projectDataArchiveCircuitBreakers,
+    schema.projectDataArchiveGlobalSweepCadence,
     schema.projectDataArchiveMigrations,
     schema.projectDataSessionLocations,
   ]);
@@ -393,7 +394,11 @@ function readMigrationRow(sqlite: Database.Database, migrationId = MIGRATION_ID)
     .get(migrationId) as Record<string, unknown>;
 }
 
-function readLocationRow(sqlite: Database.Database, sessionId = SESSION_ID, projectId = PROJECT_ID) {
+function readLocationRow(
+  sqlite: Database.Database,
+  sessionId = SESSION_ID,
+  projectId = PROJECT_ID
+) {
   return sqlite
     .prepare(
       `SELECT location_state, owner_kind, owner_name, generation, published_at
@@ -437,6 +442,28 @@ function countLocations(sqlite: Database.Database): number {
     .prepare('SELECT COUNT(*) AS count FROM project_data_session_locations')
     .get() as { count: number };
   return row.count;
+}
+
+function readCadenceRow(sqlite: Database.Database) {
+  return sqlite
+    .prepare(
+      `SELECT sweep_name, last_started_at, last_completed_at, next_eligible_at,
+              last_status, lease_owner, lease_expires_at, run_count
+       FROM project_data_archive_global_sweep_cadence
+       WHERE sweep_name = 'archive_sharding_global_sweep'`
+    )
+    .get() as
+    | {
+        sweep_name: string;
+        last_started_at: number | null;
+        last_completed_at: number | null;
+        next_eligible_at: number;
+        last_status: string;
+        lease_owner: string | null;
+        lease_expires_at: number | null;
+        run_count: number;
+      }
+    | undefined;
 }
 
 describe('scheduled ProjectData archive sharding coordinator', () => {
@@ -836,6 +863,173 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
       });
       expect(readMigrationRow(sqlite, 'migration-crash-gap')).toMatchObject({
         state: 'published',
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('gates five-minute scheduled archive-sharding invocations behind the persisted daily cadence', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'source_deleted', { migrationId: 'migration-daily-gate-gap' });
+      const env = makeEnv(sqlite, {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+      });
+
+      const first = await runProjectDataArchiveSharding(env, new Date(NOW));
+      expect(first).toMatchObject({
+        skipped: false,
+        recoveredCrashGaps: 1,
+        cadence: {
+          claimed: true,
+          intervalMs: 86_400_000,
+          nextEligibleAt: NOW + 86_400_000,
+          lastStatus: 'succeeded',
+          runCount: 1,
+        },
+      });
+      expect(readCadenceRow(sqlite)).toMatchObject({
+        last_started_at: NOW,
+        next_eligible_at: NOW + 86_400_000,
+        last_status: 'succeeded',
+        lease_owner: null,
+        lease_expires_at: null,
+        run_count: 1,
+      });
+
+      const second = await runProjectDataArchiveSharding(env, new Date(NOW + 5 * 60 * 1000));
+      expect(second).toMatchObject({
+        skipped: true,
+        skipReason: 'cadence_not_due',
+        selected: 0,
+        migrated: 0,
+        recoveredCrashGaps: 0,
+        cadence: {
+          claimed: false,
+          nextEligibleAt: NOW + 86_400_000,
+          remainingMs: 86_100_000,
+          lastStatus: 'succeeded',
+          runCount: 1,
+        },
+      });
+      expect(readCadenceRow(sqlite)?.run_count).toBe(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('lets scoped manual dry-run canaries bypass the global cadence gate', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'source_deleted', { migrationId: 'migration-cadence-primer' });
+      const projectDataGet = vi.fn();
+      const env = makeEnv(sqlite, {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA: {
+          idFromName: (name: string) => name,
+          get: projectDataGet,
+        } as unknown as DurableObjectNamespace,
+        PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+      });
+
+      await runProjectDataArchiveSharding(env, new Date(NOW));
+      const skipped = await runProjectDataArchiveSharding(env, new Date(NOW + 5 * 60 * 1000));
+      expect(skipped.skipReason).toBe('cadence_not_due');
+      seedSessionSummary(sqlite, { sessionId: 'session-manual-bypass', updatedAt: 2000 });
+
+      const manualDryRun = await runScopedProjectDataArchiveCanary(env, {
+        projectId: PROJECT_ID,
+        sessionId: 'session-manual-bypass',
+        dryRun: true,
+        limit: 1,
+        nowDate: new Date(NOW + 5 * 60 * 1000),
+      });
+
+      expect(manualDryRun).toMatchObject({
+        dryRun: true,
+        globalCronEnabled: true,
+        stats: {
+          skipped: false,
+          selected: 1,
+          migrated: 0,
+        },
+        selected: [
+          {
+            projectId: PROJECT_ID,
+            sessionId: 'session-manual-bypass',
+            source: 'eligible_session',
+          },
+        ],
+      });
+      expect(projectDataGet).not.toHaveBeenCalled();
+      expect(readCadenceRow(sqlite)?.run_count).toBe(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('advances cadence on partial scheduled runs but retries recoverable work after the interval', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'candidate', { migrationId: 'migration-partial-cadence' });
+      const env = makeEnv(sqlite, {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+      });
+
+      const first = await runProjectDataArchiveSharding(env, new Date(NOW));
+      expect(first).toMatchObject({
+        skipped: false,
+        selected: 1,
+        failed: 1,
+        cadence: {
+          lastStatus: 'partial',
+          nextEligibleAt: NOW + 86_400_000,
+          runCount: 1,
+        },
+      });
+      expect(readMigrationRow(sqlite, 'migration-partial-cadence')).toMatchObject({
+        state: 'failed',
+      });
+
+      const immediateRetry = await runProjectDataArchiveSharding(
+        env,
+        new Date(NOW + 5 * 60 * 1000)
+      );
+      expect(immediateRetry).toMatchObject({
+        skipped: true,
+        skipReason: 'cadence_not_due',
+        selected: 0,
+        failed: 0,
+        cadence: {
+          lastStatus: 'partial',
+          runCount: 1,
+        },
+      });
+
+      const nextDailyRun = await runProjectDataArchiveSharding(env, new Date(NOW + 86_400_000 + 1));
+      expect(nextDailyRun).toMatchObject({
+        skipped: false,
+        selected: 1,
+        failed: 1,
+        cadence: {
+          lastStatus: 'partial',
+          nextEligibleAt: NOW + 2 * 86_400_000 + 1,
+          runCount: 2,
+        },
+      });
+      expect(readCadenceRow(sqlite)).toMatchObject({
+        last_started_at: NOW + 86_400_000 + 1,
+        run_count: 2,
+        last_status: 'partial',
       });
     } finally {
       sqlite.close();
@@ -1265,14 +1459,7 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
               error_code, error_message, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, 1, 0, 1, 'test_error', 'test message', 900, 1100)`
         )
-        .run(
-          'migration-bad',
-          PROJECT_ID,
-          'session-bad',
-          'failed',
-          '',
-          TARGET_OWNER
-        );
+        .run('migration-bad', PROJECT_ID, 'session-bad', 'failed', '', TARGET_OWNER);
       const source = createFakeSource({ state: 'source_deleted' });
       const target = createFakeTarget();
 
@@ -1321,10 +1508,10 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
         copyBackProjectDataArchiveMigration(
           makeEnv(sqlite, { PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true' }),
           {
-          migrationId,
-          projectId: PROJECT_ID,
-          reason: 'operator copy-back',
-          now: NOW,
+            migrationId,
+            projectId: PROJECT_ID,
+            reason: 'operator copy-back',
+            now: NOW,
           }
         )
       ).rejects.toMatchObject({
