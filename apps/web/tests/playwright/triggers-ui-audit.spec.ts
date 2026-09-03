@@ -1,4 +1,4 @@
-import { expect, type Page, type Route, test, type TestInfo } from '@playwright/test';
+import { expect, type Locator, type Page, type Route, test, type TestInfo } from '@playwright/test';
 
 import {
   assertNoClippedOverflow,
@@ -800,11 +800,40 @@ async function verifyGitHubSourceLabels(page: Page, screenshotName: string) {
   await page.goto('/projects/proj-test-1/triggers');
   await page.waitForSelector('text=Issue Reviewer');
   await expect(page.getByText('GitHub issues: /sam')).toHaveCount(0);
-  await expect(page.getByText('GitHub issues', { exact: true })).toBeVisible();
-  await expect(page.getByText('GitHub issue comment: /sam', { exact: true })).toBeVisible();
+  const issuesSource = page.getByText('GitHub issues', { exact: true });
+  const commentSource = page.getByText('GitHub issue comment: /sam', { exact: true });
+  await expect(issuesSource).toBeVisible();
+  await expect(commentSource).toBeVisible();
+  await assertTriggerCardLayout(page, GITHUB_SOURCE_TRIGGERS[0].name, issuesSource);
+  await assertTriggerCardLayout(page, GITHUB_SOURCE_TRIGGERS[1].name, commentSource);
   await screenshot(page, screenshotName);
   await assertNoOverflow(page);
   await assertNoClippedOverflow(page);
+}
+
+async function requireBox(locator: Locator) {
+  const box = await locator.boundingBox();
+  expect(box).not.toBeNull();
+  return box!;
+}
+
+async function assertTriggerCardLayout(page: Page, triggerName: string, source: Locator) {
+  const title = page.getByRole('heading', { name: triggerName });
+  const card = title.locator('xpath=ancestor::div[contains(@class,"glass-surface")][1]');
+  const actions = page.getByRole('button', { name: `Actions for "${triggerName}"` });
+  const [titleBox, sourceBox, cardBox, actionsBox] = await Promise.all([
+    requireBox(title),
+    requireBox(source),
+    requireBox(card),
+    requireBox(actions),
+  ]);
+
+  expect(titleBox.y + titleBox.height).toBeLessThanOrEqual(sourceBox.y + 1);
+  expect(sourceBox.x).toBeGreaterThanOrEqual(cardBox.x - 1);
+  expect(sourceBox.x + sourceBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
+  expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
+  expect(cardBox.x).toBeGreaterThanOrEqual(-1);
+  expect(cardBox.x + cardBox.width).toBeLessThanOrEqual((page.viewportSize()?.width ?? 0) + 1);
 }
 
 async function assertTriggerFormChrome(page: Page, scrollToEnd = false) {
@@ -865,9 +894,22 @@ async function verifyGitHubIssuesDetail(page: Page, screenshotName: string) {
 
   const label = page.getByText('Command Prefix', { exact: true });
   const row = label.locator('..');
-  await expect(row.getByText('None', { exact: true })).toBeVisible();
+  const value = row.getByText('None', { exact: true });
+  await expect(value).toBeVisible();
   await expect(row.getByText('/sam', { exact: true })).toHaveCount(0);
   await row.scrollIntoViewIfNeeded();
+  const [rowBox, labelBox, valueBox] = await Promise.all([
+    requireBox(row),
+    requireBox(label),
+    requireBox(value),
+  ]);
+  expect(labelBox.x).toBeGreaterThanOrEqual(rowBox.x - 1);
+  expect(labelBox.x + labelBox.width).toBeLessThanOrEqual(valueBox.x + 1);
+  expect(valueBox.x + valueBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 1);
+  expect(labelBox.y).toBeGreaterThanOrEqual(rowBox.y - 1);
+  expect(valueBox.y + valueBox.height).toBeLessThanOrEqual(rowBox.y + rowBox.height + 1);
+  expect(rowBox.x).toBeGreaterThanOrEqual(-1);
+  expect(rowBox.x + rowBox.width).toBeLessThanOrEqual((page.viewportSize()?.width ?? 0) + 1);
   await screenshot(page, screenshotName, false);
   await assertNoOverflow(page);
   await assertNoClippedOverflow(page);
