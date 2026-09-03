@@ -106,14 +106,27 @@ test.describe('Staging — interrupt then follow-up', () => {
     await dismissOnboardingIfPresent(page);
     await expect(page.getByText('Something went wrong')).toHaveCount(0);
 
+    // The landing surface and the in-session surface use DIFFERENT placeholders
+    // (`project-chat/index.tsx` vs `project-message-view/index.tsx`), so they are
+    // matched separately rather than by one loose regex that silently misses one.
+    const startComposer = page.getByPlaceholder(/describe what you want/i).first();
+    const sessionComposer = page
+      .getByPlaceholder(/send a message|agent is working|resume the agent|wake the agent/i)
+      .first();
+
     // A prompt long enough that the agent is demonstrably still mid-turn when we
     // interrupt — the whole point is to catch it working, not idle.
-    const composer = page.getByPlaceholder(/message|ask|send/i).first();
-    await expect(composer).toBeVisible({ timeout: 60_000 });
-    await composer.fill(
-      'Count slowly from 1 to 400, one number per line, with a short sentence about each number.'
-    );
-    await composer.press('Control+Enter');
+    const LONG_PROMPT =
+      'Count slowly from 1 to 400, one number per line, with a short sentence about each number.';
+
+    await expect(startComposer.or(sessionComposer)).toBeVisible({ timeout: 60_000 });
+    if (await startComposer.isVisible().catch(() => false)) {
+      await startComposer.fill(LONG_PROMPT);
+      await startComposer.press('Control+Enter');
+    } else {
+      await sessionComposer.fill(LONG_PROMPT);
+      await sessionComposer.press('Control+Enter');
+    }
 
     // --- Symptom A: interrupt ONCE against a genuinely working agent ---
     const interrupt = page.getByRole('button', INTERRUPT);
@@ -141,9 +154,10 @@ test.describe('Staging — interrupt then follow-up', () => {
     await shot(page, 'staging-interrupt-stopped');
 
     // --- Symptom B: the follow-up after the interrupt must be answered ---
-    const marker = `ack-${Date.now()}`;
-    await composer.fill(`Reply with exactly this token and nothing else: ${marker}`);
-    await composer.press('Control+Enter');
+    // By now we are inside the session, so the in-session composer is the one.
+    await expect(sessionComposer).toBeVisible({ timeout: 60_000 });
+    await sessionComposer.fill('Reply with exactly one word: acknowledged');
+    await sessionComposer.press('Control+Enter');
 
     // The agent producing anything at all is the proof: pre-fix the delivery
     // parked in retry_wait behind a turn that had already ended, and the session
