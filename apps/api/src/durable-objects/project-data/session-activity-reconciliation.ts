@@ -421,12 +421,24 @@ export async function publishTurnEnd(
   // Only a TURN ending re-arms. A session ending leaves the existing schedule
   // untouched — see TurnEndDisposition for why neither re-arming nor cancelling
   // is safe there.
-  if (disposition.kind === 'idle') hooks.armIdleCleanup(chatSessionId);
-  hooks.nudgeDeliveries(chatSessionId);
-  // Batch callers recompute once for the whole sweep instead of once per
-  // candidate — `recalculateAlarm` re-reads all nine alarm sources, so paying it
-  // per candidate is an N x full recompute inside a single alarm tick.
-  if (!options.deferAlarm) await hooks.recalculateAlarm();
+  let alarmMayHaveMoved = false;
+  if (disposition.kind === 'idle') {
+    hooks.armIdleCleanup(chatSessionId);
+    alarmMayHaveMoved = true;
+  }
+  // Releasing a queued delivery makes it due sooner, which is the only reason a
+  // terminal ending needs the alarm touched at all.
+  alarmMayHaveMoved = hooks.nudgeDeliveries(chatSessionId) > 0 || alarmMayHaveMoved;
+
+  // Recompute only when something actually moved. `stopSession`/`failSession`
+  // never scheduled an alarm before this fan-out existed, and scheduling one
+  // unconditionally makes every terminal transition wake the object to re-read
+  // all nine alarm sources and run storage maintenance that nothing asked for.
+  //
+  // Batch callers defer entirely and recompute once for the whole sweep, since
+  // paying a full nine-source recompute per candidate is an N x amplification
+  // inside a single alarm tick (.claude/rules/47).
+  if (!options.deferAlarm && alarmMayHaveMoved) await hooks.recalculateAlarm();
 }
 
 /** Resolve the workspace owner needed to authenticate the probe request. */
