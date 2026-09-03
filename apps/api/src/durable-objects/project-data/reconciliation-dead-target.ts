@@ -2,8 +2,8 @@ import type { Env as WorkerEnv } from '../../env';
 import { createModuleLogger } from '../../lib/logger';
 import { transitionTaskToTerminal } from '../../services/task-terminal-transition';
 import { recordActivityEventInternal } from './activity';
-import * as sessions from './sessions';
 import { terminalizeChatSessionActivity } from './session-state';
+import * as sessions from './sessions';
 import type { Env as DOEnv } from './types';
 
 const log = createModuleLogger('reconciliation');

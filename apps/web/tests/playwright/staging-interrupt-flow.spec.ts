@@ -78,6 +78,36 @@ async function dismissOnboardingIfPresent(page: Page) {
   await expect(wizard).toBeHidden({ timeout: 10_000 });
 }
 
+
+/** The newest session in this project — the one the run just created. */
+async function resolveSessionId(page: Page, projectId: string): Promise<string> {
+  const res = await page.request.get(
+    `${STAGING_API}/api/projects/${projectId}/sessions?limit=1`
+  );
+  expect(res.status(), 'could not list sessions').toBe(200);
+  const body = (await res.json()) as { sessions?: Array<{ id: string }> };
+  const id = body.sessions?.[0]?.id;
+  expect(id, 'no session was created for the prompt').toBeTruthy();
+  return id!;
+}
+
+/**
+ * How many non-user messages the agent has produced. Read from the API so the
+ * probe cannot silently measure nothing, which a guessed DOM selector can.
+ */
+async function countAgentMessages(
+  page: Page,
+  projectId: string,
+  sessionId: string
+): Promise<number> {
+  const res = await page.request.get(
+    `${STAGING_API}/api/projects/${projectId}/sessions/${sessionId}`
+  );
+  if (res.status() !== 200) return 0;
+  const body = (await res.json()) as { messages?: Array<{ role: string }> };
+  return (body.messages ?? []).filter((m) => m.role !== 'user').length;
+}
+
 const INTERRUPT = { name: 'Interrupt agent' } as const;
 const INTERRUPTING = { name: 'Interrupting agent' } as const;
 
@@ -138,13 +168,16 @@ test.describe('Staging — interrupt then follow-up', () => {
       timeout: AGENT_START_TIMEOUT_MS,
     });
 
-    // Real assistant output is the only proof the agent is mid-turn. The prompt
-    // asks for 400 numbered lines, so output keeps arriving while we interrupt.
-    const assistantOutput = page.locator('[data-testid="acp-conversation-item"], article, li').filter({
-      hasText: /\b(1|2|3)\b/,
-    });
+    // Real agent output is the only proof the agent is mid-turn. Counted through
+    // the API rather than by guessing at DOM structure: a hand-written selector
+    // that matches nothing reports "no output" identically to a broken agent,
+    // which is exactly how the first version of this spec passed while proving
+    // nothing (.claude/rules/62).
+    const sessionId = await resolveSessionId(page, project!.id);
+    const agentMessages = () => countAgentMessages(page, project!.id, sessionId);
+
     await expect
-      .poll(async () => assistantOutput.count(), {
+      .poll(agentMessages, {
         timeout: AGENT_START_TIMEOUT_MS,
         message: 'agent never produced output, so it was never genuinely mid-turn',
       })
@@ -176,15 +209,15 @@ test.describe('Staging — interrupt then follow-up', () => {
 
     // --- Symptom B: the follow-up after the interrupt must be answered ---
     await expect(sessionComposer).toBeVisible({ timeout: 60_000 });
-    const outputBefore = await assistantOutput.count();
+    const outputBefore = await agentMessages();
     await sessionComposer.fill('Reply with exactly one word: acknowledged');
     await sessionComposer.press('Control+Enter');
 
     // Pre-fix this delivery parked in retry_wait behind a turn that had already
-    // ended, and only sleep/wake recovered it. New agent output is the proof it
-    // was delivered rather than parked.
+    // ended, and only sleep/wake recovered it. A NEW agent message is the proof
+    // it was delivered rather than parked.
     await expect
-      .poll(async () => assistantOutput.count(), {
+      .poll(agentMessages, {
         timeout: AGENT_START_TIMEOUT_MS,
         message: 'the follow-up sent after an interrupt was never answered',
       })
