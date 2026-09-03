@@ -89,6 +89,9 @@ general-user feature or repeating yesterday's explanation of the unsafe query.
 - `doc-sync-validator`: initial review found an overstatement about full
   four-column index coverage and diagram wording that implied project-record
   lookup. Both were corrected in `81799ebca`; focused recheck PASS.
+- PR #2009 records this command and review evidence. Its automated gates,
+  merge, and production-deployment monitoring remain the final pending
+  acceptance criterion.
 
 ## References
 
