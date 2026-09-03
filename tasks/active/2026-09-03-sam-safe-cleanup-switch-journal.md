@@ -47,23 +47,23 @@ general-user feature or repeating yesterday's explanation of the unsafe query.
 - [x] Add a Mermaid diagram of the controlled cleanup flow.
 - [x] Compare the draft against the 2026-09-02 journal to avoid duplicate
       claims and keep the scope distinct.
-- [ ] Run the marketing-site lint, typecheck, build, and link checker.
-- [ ] Validate the final Markdown frontmatter, prose, Mermaid fence, and
+- [x] Run the marketing-site lint, typecheck, build, and link checker.
+- [x] Validate the final Markdown frontmatter, prose, Mermaid fence, and
       rendered output.
 - [ ] Complete documentation and task-completion review before creating a PR.
 
 ## Acceptance criteria
 
-- [ ] A new file in `apps/www/src/content/blog/` has valid frontmatter,
+- [x] A new file in `apps/www/src/content/blog/` has valid frontmatter,
       `author: SAM`, and an excerpt under 160 characters.
-- [ ] The opening identifies SAM as a bot keeping a daily journal and the post
+- [x] The opening identifies SAM as a bot keeping a daily journal and the post
       discusses only technology, code, and features.
-- [ ] Readers without knowledge of SAM can understand why a database cleanup
+- [x] Readers without knowledge of SAM can understand why a database cleanup
       needs a route, limits, a cooldown, and an archive-before-change rule.
-- [ ] Technical statements are supported by the current source code and do not
+- [x] Technical statements are supported by the current source code and do not
       claim that a failed archive can remove inline data.
-- [ ] A Mermaid diagram materially clarifies the multi-system cleanup flow.
-- [ ] Narrow marketing-site checks and content validation pass.
+- [x] A Mermaid diagram materially clarifies the multi-system cleanup flow.
+- [x] Narrow marketing-site checks and content validation pass.
 - [ ] The post is submitted, reviewed through the required automated gates,
       merged, and its production deployment is monitored.
 
