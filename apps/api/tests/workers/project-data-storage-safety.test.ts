@@ -1455,7 +1455,9 @@ describe('ProjectData storage safety firebreak', () => {
         expect(validMetadata.content).toBeUndefined();
         expect(validMetadata.contentSize).toBeGreaterThan(0);
         expect(metaByKey.has('storageSafetyToolCleanupRecheckAt')).toBe(false);
-        expect(metaByKey.get('storageSafetyLastError')).toMatch(/failed closed 1 candidate/);
+        expect(metaByKey.get('storageSafetyLastError')).toMatch(
+          /failed closed 1 candidate|cleanup target unreachable/
+        );
         expect(stateAfter.alarm).toBeTypeOf('number');
         expect(stateAfter.alarm as number).toBeGreaterThan(Date.now());
 

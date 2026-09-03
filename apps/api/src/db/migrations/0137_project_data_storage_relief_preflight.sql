@@ -11,6 +11,7 @@ CREATE TABLE project_data_storage_relief_preflights (
     'failed'
   )),
   cutoff_created_at INTEGER NOT NULL CHECK (cutoff_created_at >= 0),
+  config_json TEXT NOT NULL,
   cursor_json TEXT,
   batches_started INTEGER NOT NULL DEFAULT 0 CHECK (batches_started >= 0),
   rows_examined INTEGER NOT NULL DEFAULT 0 CHECK (rows_examined >= 0),

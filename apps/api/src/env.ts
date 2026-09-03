@@ -565,6 +565,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_DEFAULT?: string;
   PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_MAX?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED?: string;
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID?: string; // Required immutable operator plan id when a fixed cutoff is configured
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS?: string; // Optional comma-separated project allowlist for automatic cleanup; empty means all projects
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT?: string; // Optional fixed exclusive message creation cutoff; malformed/future values fail closed
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO?: string;
@@ -584,6 +585,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS?: string; // Cadence for retention archive scans (default: 86400000)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX?: string; // Private R2 prefix for archived ProjectData tool payloads
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS?: string; // Per-R2-write timeout for archival cleanup (default: 5000)
+  PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_OPERATIONS?: string; // Max R2 put/get/body operations per cleanup pass (default: 1500)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS?: string; // Retry deferral after archive/write failures (default: 300000)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES?: string; // R2 chunk size for legacy oversized tool payload archives (default: 524288)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES?: string; // Absolute bounded metadata read cap for legacy oversized archives (default: 1900000)

@@ -1,6 +1,7 @@
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
+import { toolPayloadStorageReliefCursorFilter } from '../../src/durable-objects/project-data/storage-relief-measurement';
 import {
   classifyStorageUsage,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS,
@@ -11,6 +12,7 @@ import { runProjectDataToolPayloadCleanup } from '../../src/durable-objects/proj
 import { runProjectDataManualToolPayloadCleanup } from '../../src/durable-objects/project-data/tool-payload-manual-cleanup';
 import type { Env as WorkerEnv } from '../../src/env';
 import { storeMcpToken } from '../../src/services/mcp-token';
+import { measureProjectDataStorageRelief } from '../../src/services/project-data';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
@@ -31,6 +33,11 @@ type ArchiveRow = {
   message_created_at: number;
   message_sequence: number;
   archive_version: number;
+  archive_body_bytes: number | null;
+  archive_body_sha256: string | null;
+  root_object_bytes: number | null;
+  root_object_sha256: string | null;
+  verified_object_count: number | null;
 };
 
 type JsonRpcToolResponse = {
@@ -230,7 +237,12 @@ async function readArchiveRows(
            archived_at,
            message_created_at,
            message_sequence,
-           archive_version
+           archive_version,
+           archive_body_bytes,
+           archive_body_sha256,
+           root_object_bytes,
+           root_object_sha256,
+           verified_object_count
          FROM tool_payload_archives
          WHERE message_id IN (${placeholders})
          ORDER BY message_created_at ASC, message_sequence ASC, message_id ASC`,
@@ -334,9 +346,10 @@ describe('ProjectData tool payload R2 archival', () => {
       Math.max(first.telemetry.beforeBytes - first.telemetry.afterBytes, 0)
     );
 
-    const afterFirst = await readMessageMetadata(stub, seeded.messageIds);
-    expect(afterFirst.get(seeded.messageIds[0]!)?.content).toBeUndefined();
-    expect(Array.isArray(afterFirst.get(seeded.messageIds[1]!)?.content)).toBe(true);
+    const afterFirst = await readMessageContentAndMetadata(stub, seeded.messageIds);
+    expect(afterFirst.get(seeded.messageIds[0]!)?.content).toBe('visible manual-1');
+    expect(afterFirst.get(seeded.messageIds[0]!)?.toolMetadata.content).toBeUndefined();
+    expect(Array.isArray(afterFirst.get(seeded.messageIds[1]!)?.toolMetadata.content)).toBe(true);
 
     const replay = await runManualCleanup(
       stub,
@@ -357,6 +370,10 @@ describe('ProjectData tool payload R2 archival', () => {
     );
     expect(replay.idempotent).toBe(true);
     expect(replay.telemetry.rowsUpdated).toBe(1);
+    expect(
+      (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(seeded.messageIds[0]!)
+        ?.content
+    ).toBe('visible manual-1');
     expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(1);
 
     const differentKeyDuringCooldown = await runManualCleanup(
@@ -409,8 +426,10 @@ describe('ProjectData tool payload R2 archival', () => {
       attempted: true,
       telemetry: { rowsScanned: 1, rowsUpdated: 1 },
     });
-    const afterFinal = await readMessageMetadata(stub, seeded.messageIds);
-    expect(afterFinal.get(seeded.messageIds[1]!)?.content).toBeUndefined();
+    const afterFinal = await readMessageContentAndMetadata(stub, seeded.messageIds);
+    expect(afterFinal.get(seeded.messageIds[0]!)?.content).toBe('visible manual-1');
+    expect(afterFinal.get(seeded.messageIds[1]!)?.content).toBe('visible manual-2');
+    expect(afterFinal.get(seeded.messageIds[1]!)?.toolMetadata.content).toBeUndefined();
     expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(2);
   });
 
@@ -684,6 +703,133 @@ describe('ProjectData tool payload R2 archival', () => {
     ).toBeUndefined();
   });
 
+  it('preflight reports net reclaimable bytes for exactly the payloads cleanup can strip', async () => {
+    const projectId = `${TEST_PREFIX}-net-relief-measurement`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'valid', createdAt: FIXED_NOW - 4_000, sequence: 1 },
+      { id: 'empty', createdAt: FIXED_NOW - 3_000, sequence: 2 },
+      { id: 'scalar', createdAt: FIXED_NOW - 2_000, sequence: 3 },
+      { id: 'malformed', createdAt: FIXED_NOW - 1_000, sequence: 4 },
+    ]);
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        'UPDATE chat_messages SET tool_metadata = ? WHERE id = ?',
+        JSON.stringify({ content: [] }),
+        seeded.messageIds[1]
+      );
+      state.storage.sql.exec(
+        'UPDATE chat_messages SET tool_metadata = ? WHERE id = ?',
+        JSON.stringify({ content: 'not-an-array' }),
+        seeded.messageIds[2]
+      );
+      state.storage.sql.exec(
+        'UPDATE chat_messages SET tool_metadata = ? WHERE id = ?',
+        '{"content": [malformed}',
+        seeded.messageIds[3]
+      );
+    });
+
+    const measurement = await measureProjectDataStorageRelief(testEnv, projectId, {
+      surface: 'tool_payloads',
+      cutoffCreatedAt: FIXED_NOW,
+      limit: 10,
+    });
+    expect(measurement.toolPayloads).toMatchObject({
+      rowsExamined: 4,
+      eligibleRows: 1,
+      skippedRows: 3,
+    });
+    const validBytesBefore = await runInDurableObject(stub, async (_instance, state) => {
+      const row = state.storage.sql
+        .exec(
+          'SELECT length(CAST(tool_metadata AS BLOB)) AS bytes FROM chat_messages WHERE id = ?',
+          seeded.messageIds[0]
+        )
+        .toArray()[0] as { bytes: number };
+      return row.bytes;
+    });
+
+    const cleanup = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS: '10',
+      },
+      { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+    );
+    expect(cleanup?.rowsUpdated).toBe(1);
+    const validBytesAfter = await runInDurableObject(stub, async (_instance, state) => {
+      const row = state.storage.sql
+        .exec(
+          'SELECT length(CAST(tool_metadata AS BLOB)) AS bytes FROM chat_messages WHERE id = ?',
+          seeded.messageIds[0]
+        )
+        .toArray()[0] as { bytes: number };
+      return row.bytes;
+    });
+    expect(measurement.toolPayloads.eligibleBytes).toBe(validBytesBefore - validBytesAfter);
+    const contents = await runInDurableObject(stub, async (_instance, state) => {
+      const placeholders = seeded.messageIds.map(() => '?').join(', ');
+      return new Map(
+        (
+          state.storage.sql
+            .exec(
+              `SELECT id, content FROM chat_messages WHERE id IN (${placeholders})`,
+              ...seeded.messageIds
+            )
+            .toArray() as Array<{ id: string; content: string }>
+        ).map((row) => [row.id, row.content])
+      );
+    });
+    for (const [index, messageId] of seeded.messageIds.entries()) {
+      expect(contents.get(messageId)).toBe(
+        `visible ${['valid', 'empty', 'scalar', 'malformed'][index]}`
+      );
+    }
+  });
+
+  it('uses an index search rather than a prefix scan for resumed preflight slices', async () => {
+    const projectId = `${TEST_PREFIX}-preflight-query-plan`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const cursor = {
+      sessionId: 'session-a',
+      createdAt: FIXED_NOW - 1_000,
+      sequence: 1,
+      messageId: 'message-a',
+    };
+    const filter = toolPayloadStorageReliefCursorFilter(cursor);
+    const details = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.sql
+        .exec(
+          `EXPLAIN QUERY PLAN
+           SELECT m.id
+           FROM chat_messages m
+           WHERE m.role = 'tool'
+             AND m.tool_metadata IS NOT NULL
+             AND m.created_at < ?
+             AND m.sequence IS NOT NULL
+             ${filter.clause}
+           ORDER BY m.session_id ASC, m.created_at ASC, m.sequence ASC, m.id ASC
+           LIMIT ?`,
+          FIXED_NOW,
+          ...filter.params,
+          10
+        )
+        .toArray()
+        .map((row) => String((row as { detail?: string }).detail ?? ''))
+    );
+    expect(
+      details.some((detail) =>
+        detail.includes('SEARCH m USING INDEX idx_chat_messages_session_seq')
+      )
+    ).toBe(true);
+    expect(details.some((detail) => detail.includes('SCAN m'))).toBe(false);
+  });
+
   it('limits automatic cleanup to the configured fixed creation cutoff', async () => {
     const projectId = `${TEST_PREFIX}-fixed-cutoff`;
     const stub = getStub(projectId);
@@ -698,6 +844,7 @@ describe('ProjectData tool payload R2 archival', () => {
       projectId,
       {
         PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID: 'fixed-cutoff-test-plan',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS: projectId,
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT: String(FIXED_NOW - 1_500),
       },
@@ -709,6 +856,95 @@ describe('ProjectData tool payload R2 archival', () => {
     expect(metadata.get(seeded.messageIds[0]!)?.content).toBeUndefined();
     expect(Array.isArray(metadata.get(seeded.messageIds[1]!)?.content)).toBe(true);
     expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(1);
+  });
+
+  it('fails closed when a fixed cutoff has no exact project allowlist and plan id', async () => {
+    const projectId = `${TEST_PREFIX}-fixed-cutoff-unscoped`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'fixed-cutoff-unscoped', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+    ]);
+
+    const result = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT: String(FIXED_NOW - 1_000),
+      },
+      { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+    );
+
+    expect(result).toBeNull();
+    const before = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
+      seeded.messageIds[0]!
+    );
+    expect(before?.content).toBe('visible fixed-cutoff-unscoped');
+    expect(Array.isArray(before?.toolMetadata.content)).toBe(true);
+    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
+  });
+
+  it('fails closed when cleanup budgets drift across a fixed-plan continuation', async () => {
+    const projectId = `${TEST_PREFIX}-fixed-plan-drift`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'fixed-plan-first', createdAt: FIXED_NOW - 3_000, sequence: 1 },
+      { id: 'fixed-plan-second', createdAt: FIXED_NOW - 2_000, sequence: 2 },
+    ]);
+    const base = {
+      PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID: 'fixed-plan-drift-test',
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS: projectId,
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT: String(FIXED_NOW - 1_000),
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS: '1',
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS: '1',
+    };
+
+    const first = await runArchiveCleanup(stub, projectId, base, {
+      now: FIXED_NOW,
+      nowMs: () => FIXED_NOW,
+    });
+    expect(first).toMatchObject({ rowsUpdated: 1, cursor: expect.any(Object) });
+
+    const drifted = await runArchiveCleanup(
+      stub,
+      projectId,
+      { ...base, PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES: '3000000' },
+      { now: FIXED_NOW + 2, nowMs: () => FIXED_NOW + 2 }
+    );
+    expect(drifted).toBeNull();
+    const state = await readMessageContentAndMetadata(stub, seeded.messageIds);
+    expect(state.get(seeded.messageIds[0]!)?.content).toBe('visible fixed-plan-first');
+    expect(state.get(seeded.messageIds[0]!)?.toolMetadata.content).toBeUndefined();
+    expect(Array.isArray(state.get(seeded.messageIds[1]!)?.toolMetadata.content)).toBe(true);
+  });
+
+  it('fails closed rather than defaulting a malformed fixed-plan budget', async () => {
+    const projectId = `${TEST_PREFIX}-fixed-plan-malformed-budget`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'fixed-plan-malformed-budget', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+    ]);
+    const result = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID: 'fixed-plan-malformed-budget',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS: projectId,
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT: String(FIXED_NOW - 1_000),
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_OPERATIONS: '3garbage',
+      },
+      { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+    );
+    expect(result).toBeNull();
+    expect(
+      Array.isArray(
+        (await readMessageMetadata(stub, seeded.messageIds)).get(seeded.messageIds[0]!)?.content
+      )
+    ).toBe(true);
   });
 
   it('fails closed when the configured fixed creation cutoff is invalid', async () => {
@@ -804,6 +1040,50 @@ describe('ProjectData tool payload R2 archival', () => {
     expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
   });
 
+  it('fails closed on equal-length R2 readback corruption via SHA-256 verification', async () => {
+    const projectId = `${TEST_PREFIX}-r2-readback-sha-corrupt`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'r2-readback-sha-corrupt', createdAt: FIXED_NOW - 1_000, sequence: 1 },
+    ]);
+    const objects = new Map<string, Uint8Array>();
+    const corruptReadbackR2 = {
+      put: async (key: string, value: string | Uint8Array) => {
+        objects.set(key, typeof value === 'string' ? new TextEncoder().encode(value) : value);
+        return null;
+      },
+      get: async (key: string) => {
+        const stored = objects.get(key);
+        if (!stored) return null;
+        const corrupted = stored.slice();
+        corrupted[0] = (corrupted[0] ?? 0) ^ 1;
+        return { arrayBuffer: async () => corrupted.buffer } as R2ObjectBody;
+      },
+    } as unknown as R2Bucket;
+
+    const result = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+        PROJECT_DATA_ARCHIVE_R2: corruptReadbackR2,
+      },
+      { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+    );
+
+    expect(result).toMatchObject({ rowsUpdated: 0, rowsFailed: 1, terminationReason: 'error' });
+    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
+      seeded.messageIds[0]!
+    );
+    expect(source?.content).toBe('visible r2-readback-sha-corrupt');
+    expect(Array.isArray(source?.toolMetadata.content)).toBe(true);
+    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
+    expect(await readCleanupAttempts(stub, seeded.messageIds)).toEqual([
+      expect.objectContaining({ message_id: seeded.messageIds[0], status: 'retryable_failure' }),
+    ]);
+  });
+
   it('fails closed when local archive bookkeeping fails after the R2 write', async () => {
     const projectId = `${TEST_PREFIX}-local-atomicity`;
     const stub = getStub(projectId);
@@ -833,6 +1113,72 @@ describe('ProjectData tool payload R2 archival', () => {
     expect(result?.rowsFailed).toBe(1);
     const metadata = await readMessageMetadata(stub, seeded.messageIds);
     expect(Array.isArray(metadata.get(seeded.messageIds[0]!)?.content)).toBe(true);
+    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
+  });
+
+  it('does not overwrite tool metadata that changes while R2 verification is in flight', async () => {
+    const projectId = `${TEST_PREFIX}-source-cas-race`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'source-cas-race', createdAt: FIXED_NOW - 1_000, sequence: 1 },
+    ]);
+    const changedMetadata = makeToolMetadata('changed-during-r2', 256);
+    const result = await withRuntimeEnv(
+      { PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0' },
+      async () =>
+        runInDurableObject(stub, async (_instance, state) => {
+          const objects = new Map<string, Uint8Array>();
+          let changed = false;
+          const bucket = {
+            put: async (key: string, value: string | Uint8Array) => {
+              objects.set(key, typeof value === 'string' ? new TextEncoder().encode(value) : value);
+              return null;
+            },
+            get: async (key: string) => {
+              if (!changed) {
+                changed = true;
+                state.storage.sql.exec(
+                  'UPDATE chat_messages SET tool_metadata = ? WHERE id = ?',
+                  changedMetadata,
+                  seeded.messageIds[0]
+                );
+              }
+              const stored = objects.get(key);
+              return stored ? ({ arrayBuffer: async () => stored.buffer } as R2ObjectBody) : null;
+            },
+          } as unknown as R2Bucket;
+          const previous = testEnv.PROJECT_DATA_ARCHIVE_R2;
+          testEnv.PROJECT_DATA_ARCHIVE_R2 = bucket;
+          try {
+            const config = resolveStorageSafetyConfig(testEnv);
+            return await runProjectDataToolPayloadCleanup(
+              state.storage.sql,
+              testEnv,
+              projectId,
+              config,
+              {
+                allowStart: true,
+                now: FIXED_NOW,
+                nowMs: () => FIXED_NOW,
+                transactionSync: (callback) => state.storage.transactionSync(callback),
+                classifyStatus: (databaseSizeBytes) =>
+                  classifyStorageUsage(databaseSizeBytes, config),
+                recordTelemetry: async () => undefined,
+              }
+            );
+          } finally {
+            testEnv.PROJECT_DATA_ARCHIVE_R2 = previous;
+          }
+        })
+    );
+
+    expect(result).toMatchObject({ rowsUpdated: 0, rowsFailed: 1, terminationReason: 'error' });
+    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
+      seeded.messageIds[0]!
+    );
+    expect(source?.content).toBe('visible source-cas-race');
+    expect(source?.toolMetadata).toEqual(JSON.parse(changedMetadata));
     expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
   });
 
@@ -977,6 +1323,15 @@ describe('ProjectData tool payload R2 archival', () => {
     const archiveRows = await readArchiveRows(stub, seeded.messageIds);
     expect(archiveRows).toHaveLength(1);
     expect(archiveRows[0]?.archive_version).toBe(3);
+    expect(archiveRows[0]).toMatchObject({
+      archive_body_sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      root_object_sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      verified_object_count: expect.any(Number),
+    });
+    expect(
+      (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(seeded.messageIds[0]!)
+        ?.content
+    ).toBe('visible chunked-large');
 
     const manifest = await env.PROJECT_DATA_ARCHIVE_R2.get(archiveRows[0]!.r2_key);
     const manifestJson = JSON.parse((await manifest?.text()) ?? '{}') as {
@@ -1100,6 +1455,86 @@ describe('ProjectData tool payload R2 archival', () => {
     ]);
   });
 
+  it('leaves source text and metadata intact when a written chunk is missing on verification', async () => {
+    const projectId = `${TEST_PREFIX}-chunk-readback-missing`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      {
+        id: 'chunk-readback-missing',
+        createdAt: FIXED_NOW - 1_000,
+        sequence: 1,
+        payloadBytes: 8_000,
+      },
+    ]);
+    const objects = new Map<string, Uint8Array>();
+    const bucket = {
+      put: async (key: string, value: string | Uint8Array) => {
+        objects.set(key, typeof value === 'string' ? new TextEncoder().encode(value) : value);
+        return null;
+      },
+      get: async (key: string) => {
+        if (key.endsWith('.chunk-0')) return null;
+        const stored = objects.get(key);
+        return stored ? ({ arrayBuffer: async () => stored.buffer } as R2ObjectBody) : null;
+      },
+    } as unknown as R2Bucket;
+
+    const result = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        PROJECT_DATA_ARCHIVE_R2: bucket,
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES: '1000',
+      },
+      { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+    );
+    expect(result).toMatchObject({ rowsUpdated: 0, rowsFailed: 1, terminationReason: 'error' });
+    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
+      seeded.messageIds[0]!
+    );
+    expect(source?.content).toBe('visible chunk-readback-missing');
+    expect(Array.isArray(source?.toolMetadata.content)).toBe(true);
+    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
+  });
+
+  it('fails before writing when a chunked archive exceeds the R2 operation budget', async () => {
+    const projectId = `${TEST_PREFIX}-r2-operation-budget`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'r2-operation-budget', createdAt: FIXED_NOW - 1_000, sequence: 1, payloadBytes: 8_000 },
+    ]);
+    let puts = 0;
+    const bucket = {
+      put: async () => {
+        puts++;
+        return null;
+      },
+      get: async () => null,
+    } as unknown as R2Bucket;
+
+    const result = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        PROJECT_DATA_ARCHIVE_R2: bucket,
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES: '1000',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_OPERATIONS: '3',
+      },
+      { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+    );
+    expect(result).toMatchObject({ rowsUpdated: 0, rowsFailed: 1, terminationReason: 'error' });
+    expect(puts).toBe(0);
+    expect(
+      Array.isArray(
+        (await readMessageMetadata(stub, seeded.messageIds)).get(seeded.messageIds[0]!)?.content
+      )
+    ).toBe(true);
+  });
+
   it('archives only tool payloads strictly older than the retention boundary', async () => {
     const projectId = `${TEST_PREFIX}-boundary`;
     const stub = getStub(projectId);
@@ -1134,6 +1569,19 @@ describe('ProjectData tool payload R2 archival', () => {
 
     const archiveRows = await readArchiveRows(stub, seeded.messageIds);
     expect(archiveRows).toHaveLength(1);
+    expect(archiveRows[0]).toMatchObject({
+      archive_version: 3,
+      archive_body_bytes: expect.any(Number),
+      archive_body_sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      root_object_bytes: expect.any(Number),
+      root_object_sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      verified_object_count: 1,
+    });
+    expect(archiveRows[0]!.r2_key).toMatch(/\.[a-f0-9]{64}\.json$/);
+    const preserved = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
+      seeded.messageIds[0]!
+    );
+    expect(preserved?.content).toBe('visible old');
     const object = await env.PROJECT_DATA_ARCHIVE_R2.get(archiveRows[0]!.r2_key);
     expect(object).not.toBeNull();
     const archived = JSON.parse((await object?.text()) ?? '{}') as Record<string, unknown>;
@@ -1313,11 +1761,12 @@ describe('ProjectData tool payload R2 archival', () => {
       }
     );
     expect(wallBudgetResult?.rowsScanned).toBe(1);
+    expect(wallBudgetResult).toMatchObject({ rowsUpdated: 0, rowsFailed: 1, terminationReason: 'error' });
     expect(wallBudgetResult?.recheckAt).toBe(
       FIXED_NOW + DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS
     );
     const wallMetadata = await readMessageMetadata(wallBudgetStub, wallBudgetSeeded.messageIds);
-    expect(wallMetadata.get(wallBudgetSeeded.messageIds[0]!)?.content).toBeUndefined();
+    expect(Array.isArray(wallMetadata.get(wallBudgetSeeded.messageIds[0]!)?.content)).toBe(true);
     expect(Array.isArray(wallMetadata.get(wallBudgetSeeded.messageIds[1]!)?.content)).toBe(true);
   });
 
@@ -1407,6 +1856,18 @@ describe('ProjectData tool payload R2 archival', () => {
     );
 
     const archiveRows = await readArchiveRows(stub, seeded.messageIds);
+    const root = await env.PROJECT_DATA_ARCHIVE_R2.get(archiveRows[0]!.r2_key);
+    const originalRoot = new Uint8Array(await root!.arrayBuffer());
+    const corruptRoot = originalRoot.slice();
+    corruptRoot[0] = (corruptRoot[0] ?? 0) ^ 1;
+    await env.PROJECT_DATA_ARCHIVE_R2.put(archiveRows[0]!.r2_key, corruptRoot);
+    const corrupt = await stub.getMessageToolContent(seeded.sessionId, seeded.messageIds[0]!);
+    expect(corrupt?.source).toBe('archived_unavailable');
+    expect(corrupt?.archived.reason).toContain('root SHA-256 verification failed');
+    await env.PROJECT_DATA_ARCHIVE_R2.put(archiveRows[0]!.r2_key, originalRoot);
+    expect(
+      (await stub.getMessageToolContent(seeded.sessionId, seeded.messageIds[0]!))?.source
+    ).toBe('archive');
     await env.PROJECT_DATA_ARCHIVE_R2.delete(archiveRows[0]!.r2_key);
     const unavailable = await stub.getMessageToolContent(seeded.sessionId, seeded.messageIds[0]!);
     expect(unavailable?.source).toBe('archived_unavailable');

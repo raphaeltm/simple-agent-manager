@@ -1781,6 +1781,24 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '044-tool-payload-archive-verification-proof',
+    run: (sql) => {
+      for (const statement of [
+        `ALTER TABLE tool_payload_archives ADD COLUMN archive_body_bytes INTEGER`,
+        `ALTER TABLE tool_payload_archives ADD COLUMN archive_body_sha256 TEXT`,
+        `ALTER TABLE tool_payload_archives ADD COLUMN root_object_bytes INTEGER`,
+        `ALTER TABLE tool_payload_archives ADD COLUMN root_object_sha256 TEXT`,
+        `ALTER TABLE tool_payload_archives ADD COLUMN verified_object_count INTEGER`,
+      ]) {
+        try {
+          sql.exec(statement);
+        } catch {
+          // Additive compatibility: a partially migrated object may already have the column.
+        }
+      }
+    },
+  },
 ];
 
 /**

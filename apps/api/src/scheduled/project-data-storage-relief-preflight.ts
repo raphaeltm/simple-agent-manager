@@ -15,6 +15,8 @@ export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_ROWS = 500_000;
 export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES = 2_000_000_000;
 export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MS = 60_000;
 export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS = 20_000;
+const PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MARGIN_MS = 5_000;
+const PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_MANIFEST_BYTES = 1_750_000;
 
 type PreflightStatus = 'running' | 'complete' | 'truncated' | 'failed';
 type PreflightSkipReason = 'disabled' | 'invalid_config' | 'cadence' | 'leased' | 'terminal';
@@ -24,6 +26,7 @@ type PreflightConfig = {
   planId: string;
   projectId: string;
   cutoffCreatedAt: number;
+  configJson: string;
   batchRows: number;
   intervalMs: number;
   maxBatches: number;
@@ -39,6 +42,7 @@ type PreflightRow = {
   project_id: string;
   status: PreflightStatus;
   cutoff_created_at: number;
+  config_json: string;
   cursor_json: string | null;
   batches_started: number;
   rows_examined: number;
@@ -84,9 +88,18 @@ export type ProjectDataStorageReliefPreflightResult = {
   lastError: string | null;
 };
 
-function positiveInteger(raw: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(raw ?? '', 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+function positiveInteger(
+  raw: string | undefined,
+  fallback: number
+): { value: number; valid: boolean } {
+  const normalized = raw?.trim() ?? '';
+  if (!normalized) return { value: fallback, valid: true };
+  if (!/^[1-9][0-9]*$/.test(normalized)) return { value: fallback, valid: false };
+  const parsed = Number(normalized);
+  return {
+    value: Number.isSafeInteger(parsed) ? parsed : fallback,
+    valid: Number.isSafeInteger(parsed),
+  };
 }
 
 function requiredTimestamp(raw: string | undefined): number {
@@ -103,40 +116,71 @@ function configFromEnv(env: Env): PreflightConfig {
     env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_CUTOFF_CREATED_AT
   );
   const enabled = env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ENABLED === 'true';
+  const batchRows = positiveInteger(
+    env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_BATCH_ROWS,
+    DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_BATCH_ROWS
+  );
+  const intervalMs = positiveInteger(
+    env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INTERVAL_MS,
+    DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INTERVAL_MS
+  );
+  const maxBatches = positiveInteger(
+    env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BATCHES,
+    DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BATCHES
+  );
+  const maxRows = positiveInteger(
+    env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_ROWS,
+    DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_ROWS
+  );
+  const maxBytes = positiveInteger(
+    env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES,
+    DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES
+  );
+  const leaseMs = positiveInteger(
+    env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MS,
+    DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MS
+  );
+  const wallTimeMs = positiveInteger(
+    env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS,
+    DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS
+  );
+  const configJson = JSON.stringify({
+    projectId,
+    cutoffCreatedAt,
+    batchRows: batchRows.value,
+    intervalMs: intervalMs.value,
+    maxBatches: maxBatches.value,
+    maxRows: maxRows.value,
+    maxBytes: maxBytes.value,
+    leaseMs: leaseMs.value,
+    wallTimeMs: wallTimeMs.value,
+  });
   return {
     enabled,
     planId,
     projectId,
     cutoffCreatedAt,
-    batchRows: positiveInteger(
-      env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_BATCH_ROWS,
-      DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_BATCH_ROWS
+    configJson,
+    batchRows: batchRows.value,
+    intervalMs: intervalMs.value,
+    maxBatches: maxBatches.value,
+    maxRows: maxRows.value,
+    maxBytes: maxBytes.value,
+    leaseMs: leaseMs.value,
+    wallTimeMs: wallTimeMs.value,
+    valid: Boolean(
+      planId &&
+      projectId &&
+      cutoffCreatedAt >= 0 &&
+      batchRows.valid &&
+      intervalMs.valid &&
+      maxBatches.valid &&
+      maxRows.valid &&
+      maxBytes.valid &&
+      leaseMs.valid &&
+      wallTimeMs.valid &&
+      leaseMs.value >= wallTimeMs.value + PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MARGIN_MS
     ),
-    intervalMs: positiveInteger(
-      env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INTERVAL_MS,
-      DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INTERVAL_MS
-    ),
-    maxBatches: positiveInteger(
-      env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BATCHES,
-      DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BATCHES
-    ),
-    maxRows: positiveInteger(
-      env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_ROWS,
-      DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_ROWS
-    ),
-    maxBytes: positiveInteger(
-      env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES,
-      DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES
-    ),
-    leaseMs: positiveInteger(
-      env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MS,
-      DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MS
-    ),
-    wallTimeMs: positiveInteger(
-      env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS,
-      DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS
-    ),
-    valid: Boolean(planId && projectId && cutoffCreatedAt >= 0),
   };
 }
 
@@ -265,7 +309,14 @@ function mergeSessionManifest(
   const ordered = Object.fromEntries(
     Object.entries(manifest).sort(([left], [right]) => left.localeCompare(right))
   );
-  return { json: JSON.stringify(ordered), count: Object.keys(ordered).length };
+  const json = JSON.stringify(ordered);
+  if (
+    new TextEncoder().encode(json).byteLength >
+    PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_MANIFEST_BYTES
+  ) {
+    throw new Error('ProjectData relief preflight session manifest exceeded its D1 row bound');
+  }
+  return { json, count: Object.keys(ordered).length };
 }
 
 async function sha256Text(value: string): Promise<string> {
@@ -327,16 +378,21 @@ async function initializeRun(
 ): Promise<PreflightRow> {
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO project_data_storage_relief_preflights
-       (plan_id, project_id, status, cutoff_created_at, next_eligible_at, started_at, updated_at)
-     VALUES (?, ?, 'running', ?, 0, ?, ?)`
+       (plan_id, project_id, status, cutoff_created_at, config_json,
+        next_eligible_at, started_at, updated_at)
+     VALUES (?, ?, 'running', ?, ?, 0, ?, ?)`
   )
-    .bind(config.planId, config.projectId, config.cutoffCreatedAt, now, now)
+    .bind(config.planId, config.projectId, config.cutoffCreatedAt, config.configJson, now, now)
     .run();
   const row = await readRun(env, config.planId);
   if (!row) throw new Error(`ProjectData relief preflight ${config.planId} was not initialized`);
-  if (row.project_id !== config.projectId || row.cutoff_created_at !== config.cutoffCreatedAt) {
+  if (
+    row.project_id !== config.projectId ||
+    row.cutoff_created_at !== config.cutoffCreatedAt ||
+    row.config_json !== config.configJson
+  ) {
     throw new Error(
-      `ProjectData relief preflight ${config.planId} conflicts with its immutable project or cutoff`
+      `ProjectData relief preflight ${config.planId} conflicts with its immutable scope or budgets`
     );
   }
   return row;
@@ -348,7 +404,31 @@ function parseCursor(raw: string | null): ProjectDataStorageReliefMeasureCursor 
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('ProjectData relief preflight cursor is malformed');
   }
-  return parsed as ProjectDataStorageReliefMeasureCursor;
+  const toolPayload = (parsed as Record<string, unknown>).toolPayload;
+  if (!toolPayload || typeof toolPayload !== 'object' || Array.isArray(toolPayload)) {
+    throw new Error('ProjectData relief preflight cursor is malformed');
+  }
+  const cursor = toolPayload as Record<string, unknown>;
+  if (
+    typeof cursor.sessionId !== 'string' ||
+    cursor.sessionId.length === 0 ||
+    !Number.isSafeInteger(cursor.createdAt) ||
+    Number(cursor.createdAt) < 0 ||
+    !Number.isSafeInteger(cursor.sequence) ||
+    Number(cursor.sequence) < 0 ||
+    typeof cursor.messageId !== 'string' ||
+    cursor.messageId.length === 0
+  ) {
+    throw new Error('ProjectData relief preflight cursor is malformed');
+  }
+  return {
+    toolPayload: {
+      sessionId: cursor.sessionId,
+      createdAt: Number(cursor.createdAt),
+      sequence: Number(cursor.sequence),
+      messageId: cursor.messageId,
+    },
+  };
 }
 
 async function withTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
@@ -468,10 +548,10 @@ export async function runProjectDataStorageReliefPreflight(
     return { ...emptyResult(config, 'invalid_config'), lastError: String(error) };
   }
   if (row.status !== 'running') return resultFromRow(row, 'terminal');
-  if (row.next_eligible_at > now) return resultFromRow(row, 'cadence');
   if (row.lease_owner && row.lease_expires_at !== null && row.lease_expires_at > now) {
     return resultFromRow(row, 'leased');
   }
+  if (row.next_eligible_at > now) return resultFromRow(row, 'cadence');
 
   const leaseOwner = crypto.randomUUID();
   const claimed = await claimRun(env, config, row, now, leaseOwner);
@@ -533,7 +613,7 @@ export async function runProjectDataStorageReliefPreflight(
       skippedRows: claimed.skipped_rows + tool.skippedRows,
     });
     const sessionManifestSha256 = await sha256Text(sessionManifest.json);
-    await env.DATABASE.prepare(
+    const finalize = await env.DATABASE.prepare(
       `UPDATE project_data_storage_relief_preflights
        SET status = ?,
            cursor_json = ?,
@@ -583,6 +663,9 @@ export async function runProjectDataStorageReliefPreflight(
         leaseOwner
       )
       .run();
+    if ((finalize.meta.changes ?? 0) !== 1) {
+      throw new Error('ProjectData relief preflight lost its lease before result persistence');
+    }
     const updated = (await readRun(env, config.planId)) ?? claimed;
     log.info(status === 'running' ? 'slice_completed' : 'preflight_terminal', {
       planId: config.planId,

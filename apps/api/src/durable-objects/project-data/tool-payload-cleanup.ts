@@ -21,6 +21,7 @@ import {
   readProjectDataToolPayloadArchiveLastRunAt as readToolPayloadArchiveLastRunAt,
   readProjectDataToolPayloadCleanupRecheckAt as readToolPayloadCleanupRecheckAt,
   readToolPayloadCleanupCursor,
+  readToolPayloadCleanupPersistedPlan,
   writeProjectDataToolPayloadArchiveLastRunAt,
   writeToolPayloadCleanupCursor,
   writeToolPayloadCleanupRecheckAt,
@@ -47,6 +48,8 @@ type ToolPayloadCleanupReason = 'retention_due' | 'storage_pressure' | 'continua
 
 type ToolPayloadCleanupPlan = {
   projectId: string;
+  planId: string;
+  fingerprint: string;
   reason: ToolPayloadCleanupReason;
   now: number;
   nowMs?: () => number;
@@ -59,6 +62,7 @@ type ToolPayloadCleanupPlan = {
   maxRowBytes: number;
   archiveRetryDelayMs: number;
   archiveWriteTimeoutMs: number;
+  archiveMaxOperations: number;
   archiveChunkBytes: number;
   archiveMaxMetadataBytes: number;
   cutoffCreatedAt: number;
@@ -92,6 +96,17 @@ function createToolPayloadCleanupPlan(
   options: ProjectDataToolPayloadCleanupOptions
 ): ToolPayloadCleanupPlan | null {
   if (!config.enabled || !config.toolPayloadCleanupEnabled || !projectId) return null;
+  const fixedCutoffConfigured = config.toolPayloadCleanupCutoffCreatedAt !== null;
+  if (
+    fixedCutoffConfigured &&
+    (!config.toolPayloadCleanupExactConfigValid ||
+      config.toolPayloadCleanupCutoffCreatedAt === -1 ||
+      !config.toolPayloadCleanupPlanId ||
+      config.toolPayloadCleanupProjectIds?.length !== 1 ||
+      config.toolPayloadCleanupProjectIds[0] !== projectId)
+  ) {
+    return null;
+  }
   if (
     !options.forceStart &&
     config.toolPayloadCleanupProjectIds !== null &&
@@ -100,10 +115,10 @@ function createToolPayloadCleanupPlan(
     return null;
   }
   const now = options.now ?? Date.now();
+  const wallClockStart = options.nowMs ? options.nowMs() : Date.now();
   if (
-    config.toolPayloadCleanupCutoffCreatedAt === -1 ||
-    (config.toolPayloadCleanupCutoffCreatedAt !== null &&
-      config.toolPayloadCleanupCutoffCreatedAt > now)
+    config.toolPayloadCleanupCutoffCreatedAt !== null &&
+    config.toolPayloadCleanupCutoffCreatedAt > now
   ) {
     return null;
   }
@@ -111,12 +126,52 @@ function createToolPayloadCleanupPlan(
   const beforeBytes = sql.databaseSize;
   const triggerBytes = Math.floor(config.limitBytes * config.toolPayloadCleanupTriggerRatio);
   const targetBytes = Math.floor(config.limitBytes * config.toolPayloadCleanupTargetRatio);
-  const pendingCursor = readToolPayloadCleanupCursor(sql);
-  const pendingRecheckAt = readToolPayloadCleanupRecheckAt(sql);
+  let pendingCursor = readToolPayloadCleanupCursor(sql);
+  let persistedPlan = readToolPayloadCleanupPersistedPlan(sql);
+  let pendingRecheckAt = readToolPayloadCleanupRecheckAt(sql);
   const lastArchiveRunAt = readToolPayloadArchiveLastRunAt(sql);
   const retentionDue =
     lastArchiveRunAt === null || now - lastArchiveRunAt >= config.toolPayloadArchiveIntervalMs;
-  const hasPendingCleanup = pendingCursor !== null || pendingRecheckAt !== null;
+  let hasPendingCleanup = pendingCursor !== null || pendingRecheckAt !== null;
+  if (hasPendingCleanup && !persistedPlan) {
+    if (fixedCutoffConfigured) return null;
+    // Compatibility with pre-plan continuation state: source payloads are
+    // still authoritative, so discard the old unscoped cursor and restart a
+    // newly fingerprinted retention pass from the beginning.
+    clearToolPayloadCleanupState(sql);
+    pendingCursor = null;
+    pendingRecheckAt = null;
+    persistedPlan = null;
+    hasPendingCleanup = false;
+  }
+  const cutoffCreatedAt = persistedPlan
+    ? persistedPlan.cutoffCreatedAt
+    : (config.toolPayloadCleanupCutoffCreatedAt ?? now - config.toolPayloadArchiveRetentionMs);
+  const planId = config.toolPayloadCleanupPlanId ?? 'automatic-retention';
+  const fingerprint = JSON.stringify({
+    projectId,
+    planId,
+    cutoffCreatedAt,
+    targetRatio: config.toolPayloadCleanupTargetRatio,
+    batchRows: config.toolPayloadCleanupBatchRows,
+    batchBytes: config.toolPayloadCleanupBatchBytes,
+    maxRowBytes: config.toolPayloadCleanupMaxRowBytes,
+    wallTimeMs: config.toolPayloadCleanupWallTimeMs,
+    archivePrefix: config.toolPayloadArchiveR2Prefix,
+    archiveWriteTimeoutMs: config.toolPayloadArchiveWriteTimeoutMs,
+    archiveMaxOperations: config.toolPayloadArchiveMaxOperations,
+    archiveChunkBytes: config.toolPayloadArchiveChunkBytes,
+    archiveMaxMetadataBytes: config.toolPayloadArchiveMaxMetadataBytes,
+  });
+  if (
+    persistedPlan &&
+    (persistedPlan.planId !== planId ||
+      persistedPlan.fingerprint !== fingerprint ||
+      (fixedCutoffConfigured &&
+        persistedPlan.cutoffCreatedAt !== config.toolPayloadCleanupCutoffCreatedAt))
+  ) {
+    return null;
+  }
   const underStoragePressure =
     beforeBytes >= triggerBytes || (hasPendingCleanup && beforeBytes > targetBytes);
 
@@ -142,6 +197,8 @@ function createToolPayloadCleanupPlan(
 
   return {
     projectId,
+    planId,
+    fingerprint,
     reason,
     now,
     beforeBytes,
@@ -153,11 +210,11 @@ function createToolPayloadCleanupPlan(
     maxRowBytes: config.toolPayloadCleanupMaxRowBytes,
     archiveRetryDelayMs: config.toolPayloadArchiveRetryDelayMs,
     archiveWriteTimeoutMs: config.toolPayloadArchiveWriteTimeoutMs,
+    archiveMaxOperations: config.toolPayloadArchiveMaxOperations,
     archiveChunkBytes: config.toolPayloadArchiveChunkBytes,
     archiveMaxMetadataBytes: config.toolPayloadArchiveMaxMetadataBytes,
-    cutoffCreatedAt:
-      config.toolPayloadCleanupCutoffCreatedAt ?? now - config.toolPayloadArchiveRetentionMs,
-    deadlineMs: now + config.toolPayloadCleanupWallTimeMs,
+    cutoffCreatedAt,
+    deadlineMs: wallClockStart + config.toolPayloadCleanupWallTimeMs,
     pendingCursor,
     ...(options.nowMs ? { nowMs: options.nowMs } : {}),
     ...(options.transactionSync ? { transactionSync: options.transactionSync } : {}),
@@ -230,6 +287,7 @@ async function scanToolPayloadCleanupBatch(
     archivePrefix: config.toolPayloadArchiveR2Prefix,
     archiveRetryDelayMs: plan.archiveRetryDelayMs,
     archiveWriteTimeoutMs: plan.archiveWriteTimeoutMs,
+    archiveMaxOperations: plan.archiveMaxOperations,
     archiveChunkBytes: plan.archiveChunkBytes,
     archiveMaxMetadataBytes: plan.archiveMaxMetadataBytes,
     ...(plan.transactionSync ? { transactionSync: plan.transactionSync } : {}),
@@ -296,14 +354,15 @@ function resolveContinuationCursor(
 
 function persistToolPayloadCleanupState(
   sql: SqlStorage,
+  plan: ToolPayloadCleanupPlan,
   continuationCursor: ToolPayloadCleanupCursor | null,
   recheckAt: number | null
 ): void {
   if (continuationCursor && recheckAt !== null) {
-    writeToolPayloadCleanupCursor(sql, continuationCursor, recheckAt);
+    writeToolPayloadCleanupCursor(sql, continuationCursor, recheckAt, plan);
   } else if (recheckAt !== null) {
     clearToolPayloadCleanupState(sql);
-    writeToolPayloadCleanupRecheckAt(sql, recheckAt);
+    writeToolPayloadCleanupRecheckAt(sql, recheckAt, plan);
   } else {
     clearToolPayloadCleanupState(sql);
   }
@@ -503,9 +562,9 @@ async function handleToolPayloadCleanupFailure(
 ): Promise<ProjectDataToolPayloadCleanupResult> {
   const recheckAt = plan.now + config.toolPayloadCleanupRecheckMs;
   if (plan.pendingCursor) {
-    writeToolPayloadCleanupCursor(sql, plan.pendingCursor, recheckAt);
+    writeToolPayloadCleanupCursor(sql, plan.pendingCursor, recheckAt, plan);
   } else {
-    writeToolPayloadCleanupRecheckAt(sql, recheckAt);
+    writeToolPayloadCleanupRecheckAt(sql, recheckAt, plan);
   }
 
   const message = truncate(error instanceof Error ? error.message : String(error), 500);
@@ -550,7 +609,7 @@ export async function runProjectDataToolPayloadCleanup(
   const recheckAt = shouldContinue
     ? (batch.nextRetryAt ?? plan.now + config.toolPayloadCleanupRecheckMs)
     : null;
-  persistToolPayloadCleanupState(sql, continuationCursor, recheckAt);
+  persistToolPayloadCleanupState(sql, plan, continuationCursor, recheckAt);
 
   const exhaustedCandidates =
     plan.reason === 'storage_pressure' && afterBytes > plan.targetBytes && !shouldContinue;

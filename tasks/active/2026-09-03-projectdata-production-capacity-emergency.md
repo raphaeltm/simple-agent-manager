@@ -6,10 +6,10 @@ The production `ProjectData` Durable Object for project
 `01KHRJGANBBWGDY1NZ0KVF0D4J` is at imminent `SQLITE_FULL` risk. The latest
 available measurement at task start was `9,884,188,672 / 10,000,000,000`
 bytes (`98.84188672%`) at `2026-09-03T21:13:42Z`. The next direct measurement
-at `2026-09-03T22:13:43Z` reached `9,896,890,368` bytes (`98.96890368%`),
-growing at approximately `154,691,984` bytes/day with `0.667` days to the
+at `2026-09-03T23:13:44Z` reached `9,908,338,688` bytes (`99.08338688%`),
+growing at approximately `156,398,777` bytes/day with `0.586` days to the
 storage limit. The configured emergency target is 90%, so at least
-`896,890,368` bytes of measured database relief is now required before
+`908,338,688` bytes of measured database relief is now required before
 allowing for ongoing writes and measurement lag.
 
 This task owns the emergency through implementation, review, staging, merge,
@@ -31,9 +31,9 @@ uncertain states must fail closed.
 
 ## Production baseline
 
-- Latest D1 telemetry re-read points to the `2026-09-03T22:13:43Z` direct
-  `sql.databaseSize` measurement: `9,896,890,368` bytes, ratio
-  `0.9896890368`, growth `154,691,983.54` bytes/day, estimated `0.666548`
+- Latest D1 telemetry re-read points to the `2026-09-03T23:13:44Z` direct
+  `sql.databaseSize` measurement: `9,908,338,688` bytes, ratio
+  `0.9908338688`, growth `156,398,777.33` bytes/day, estimated `0.586074`
   days remaining, status `degraded`, cleanup health `running`. This is
   12,701,696 bytes above the prior hourly sample.
 - Last purge was `auto_terminal_event_log_cleanup`; it removed 7 rows and did

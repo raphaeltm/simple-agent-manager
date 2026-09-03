@@ -1,4 +1,5 @@
 import { archiveToolPayloadCandidate } from './tool-payload-archive';
+import type { ToolPayloadArchiveOperationBudget } from './tool-payload-archive-r2';
 import {
   clearToolPayloadCleanupAttempt,
   recordToolPayloadCleanupAttempt,
@@ -70,16 +71,23 @@ type ToolPayloadCandidateProcessingContext = {
   archiveWriteTimeoutMs: number;
   archiveChunkBytes: number;
   archiveMaxMetadataBytes: number;
+  archiveOperationBudget: ToolPayloadArchiveOperationBudget;
+  deadlineMs: number;
+  nowMs: () => number;
   transactionSync?: <T>(callback: () => T) => T;
   maxRowBytes: number;
   archivedAt: number;
 };
 
-type ToolPayloadCandidateScanInput = ToolPayloadCandidateProcessingContext & {
+type ToolPayloadCandidateScanInput = Omit<
+  ToolPayloadCandidateProcessingContext,
+  'archiveOperationBudget' | 'deadlineMs' | 'nowMs'
+> & {
   batchBytes: number;
   candidates: ToolPayloadCandidate[];
   initialCursor: ToolPayloadCleanupCursor | null;
   deadlineMs: number;
+  archiveMaxOperations: number;
   nowMs?: () => number;
 };
 
@@ -428,6 +436,9 @@ async function processToolPayloadCandidate(
     archivePrefix: context.archivePrefix,
     archiveWriteTimeoutMs: context.archiveWriteTimeoutMs,
     archiveChunkBytes: context.archiveChunkBytes,
+    deadlineMs: context.deadlineMs,
+    nowMs: context.nowMs,
+    operationBudget: context.archiveOperationBudget,
     ...(context.transactionSync ? { transactionSync: context.transactionSync } : {}),
     candidate,
     toolMetadata,
@@ -457,6 +468,10 @@ export async function scanToolPayloadCandidates(
 ): Promise<ToolPayloadCandidateScanResult> {
   const result = createEmptyCandidateScanResult();
   const nowMs = input.nowMs ?? Date.now;
+  const archiveOperationBudget: ToolPayloadArchiveOperationBudget = {
+    used: 0,
+    max: input.archiveMaxOperations,
+  };
   let previousCursor = input.initialCursor;
   const processingContext: ToolPayloadCandidateProcessingContext = {
     sql: input.sql,
@@ -467,6 +482,9 @@ export async function scanToolPayloadCandidates(
     archiveWriteTimeoutMs: input.archiveWriteTimeoutMs,
     archiveChunkBytes: input.archiveChunkBytes,
     archiveMaxMetadataBytes: input.archiveMaxMetadataBytes,
+    archiveOperationBudget,
+    deadlineMs: input.deadlineMs,
+    nowMs,
     ...(input.transactionSync ? { transactionSync: input.transactionSync } : {}),
     maxRowBytes: input.maxRowBytes,
     archivedAt: input.archivedAt,

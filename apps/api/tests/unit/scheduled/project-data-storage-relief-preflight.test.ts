@@ -19,6 +19,7 @@ function createTables(sqlite: Database.Database): void {
       project_id TEXT NOT NULL,
       status TEXT NOT NULL,
       cutoff_created_at INTEGER NOT NULL,
+      config_json TEXT NOT NULL,
       cursor_json TEXT,
       batches_started INTEGER NOT NULL DEFAULT 0,
       rows_examined INTEGER NOT NULL DEFAULT 0,
@@ -127,7 +128,8 @@ function makeEnv(
     PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BATCHES: '10',
     PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_ROWS: '10',
     PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES: '10000',
-    PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MS: '5000',
+    PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MS: '6000',
+    PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS: '1000',
     ...overrides,
   } as Env;
 }
@@ -296,6 +298,101 @@ describe('scheduled ProjectData storage relief preflight', () => {
       expect(result).toMatchObject({ skipped: true, skipReason: 'invalid_config' });
       expect(measure).not.toHaveBeenCalled();
       expect(readRun(sqlite)).toBeUndefined();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it.each(['0', '-1', '10garbage'])(
+    'fails closed when a numeric cap is malformed: %s',
+    async (raw) => {
+      const sqlite = new Database(':memory:');
+      try {
+        createTables(sqlite);
+        const measure = vi.fn();
+        const result = await runProjectDataStorageReliefPreflight(
+          makeEnv(sqlite, measure, { PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_ROWS: raw }),
+          new Date(NOW)
+        );
+        expect(result).toMatchObject({ skipped: true, skipReason: 'invalid_config' });
+        expect(measure).not.toHaveBeenCalled();
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it('rejects budget drift for an existing immutable plan id', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createTables(sqlite);
+      const measure = vi.fn().mockResolvedValue(
+        toolResult({
+          sessionId: 'session-a',
+          eligibleRows: 1,
+          eligibleBytes: 100,
+          cursor: { sessionId: 'session-a', createdAt: CUTOFF - 1, sequence: 1, messageId: 'm' },
+          hasMore: true,
+        })
+      );
+      await runProjectDataStorageReliefPreflight(makeEnv(sqlite, measure), new Date(NOW));
+      const drifted = await runProjectDataStorageReliefPreflight(
+        makeEnv(sqlite, measure, { PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES: '9999' }),
+        new Date(NOW + 1000)
+      );
+      expect(drifted).toMatchObject({ skipped: true, skipReason: 'invalid_config' });
+      expect(measure).toHaveBeenCalledTimes(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('leases a delayed slice so concurrent invocations cannot double count it', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createTables(sqlite);
+      let resolveMeasure!: (value: ReturnType<typeof toolResult>) => void;
+      const delayed = new Promise<ReturnType<typeof toolResult>>((resolve) => {
+        resolveMeasure = resolve;
+      });
+      const measure = vi.fn(() => delayed);
+      const env = makeEnv(sqlite, measure);
+      const firstPromise = runProjectDataStorageReliefPreflight(env, new Date(NOW));
+      await vi.waitFor(() => expect(measure).toHaveBeenCalledTimes(1));
+      const concurrent = await runProjectDataStorageReliefPreflight(env, new Date(NOW));
+      expect(concurrent).toMatchObject({ skipped: true, skipReason: 'leased' });
+      resolveMeasure(
+        toolResult({
+          sessionId: 'session-a',
+          eligibleRows: 1,
+          eligibleBytes: 100,
+          cursor: null,
+          hasMore: false,
+        })
+      );
+      await expect(firstPromise).resolves.toMatchObject({ status: 'complete', eligibleRows: 1 });
+      expect(measure).toHaveBeenCalledTimes(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('releases the lease and becomes terminal exactly at the failure batch ceiling', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createTables(sqlite);
+      const measure = vi.fn().mockRejectedValue(new Error('bounded preflight failure'));
+      const result = await runProjectDataStorageReliefPreflight(
+        makeEnv(sqlite, measure, { PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BATCHES: '1' }),
+        new Date(NOW)
+      );
+      expect(result).toMatchObject({ status: 'failed', lastError: 'bounded preflight failure' });
+      expect(readRun(sqlite)).toMatchObject({
+        status: 'failed',
+        lease_owner: null,
+        lease_expires_at: null,
+        batches_started: 1,
+      });
     } finally {
       sqlite.close();
     }

@@ -2942,6 +2942,7 @@ export const projectDataStorageReliefPreflights = sqliteTable(
       .notNull()
       .default('running'),
     cutoffCreatedAt: integer('cutoff_created_at').notNull(),
+    configJson: text('config_json').notNull(),
     cursorJson: text('cursor_json'),
     batchesStarted: integer('batches_started').notNull().default(0),
     rowsExamined: integer('rows_examined').notNull().default(0),

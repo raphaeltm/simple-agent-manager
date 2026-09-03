@@ -5,6 +5,7 @@ import {
   type PreparedToolPayloadArchive,
   TOOL_PAYLOAD_CHUNKED_ARCHIVE_VERSION,
   TOOL_PAYLOAD_VERIFIED_ARCHIVE_VERSION,
+  type ToolPayloadArchiveOperationBudget,
   writeToolPayloadArchiveObject,
 } from './tool-payload-archive-r2';
 import type { ToolPayloadCleanupAttemptStatus } from './tool-payload-cleanup-attempts';
@@ -28,6 +29,11 @@ export type ArchivedToolPayloadRow = {
   messageCreatedAt: number;
   messageSequence: number;
   archiveVersion: number;
+  archiveBodyBytes: number | null;
+  archiveBodySha256: string | null;
+  rootObjectBytes: number | null;
+  rootObjectSha256: string | null;
+  verifiedObjectCount: number | null;
 };
 
 export type MessageToolContentResult = {
@@ -175,6 +181,29 @@ function extractToolPayloadContent(toolMetadata: string): {
   };
 }
 
+export function projectToolPayloadArchiveRelief(input: {
+  env: Env;
+  toolMetadata: string;
+  archivedAt: number;
+}): { contentBytes: number; storedToolMetadataBytes: number; reclaimableBytes: number } | null {
+  let payload: ReturnType<typeof extractToolPayloadContent>;
+  try {
+    payload = extractToolPayloadContent(input.toolMetadata);
+  } catch {
+    return null;
+  }
+  if (!payload) return null;
+  const stripped = stripToolMetadataPayloadForStorage(input.toolMetadata, input.env);
+  if (stripped.failed || !stripped.stripped || typeof stripped.value !== 'string') return null;
+  const storedToolMetadataBytes = utf8Bytes(
+    addArchiveMarker(stripped.value, input.archivedAt, payload.contentBytes)
+  );
+  const originalToolMetadataBytes = utf8Bytes(input.toolMetadata);
+  const reclaimableBytes = Math.max(originalToolMetadataBytes - storedToolMetadataBytes, 0);
+  if (reclaimableBytes === 0) return null;
+  return { contentBytes: payload.contentBytes, storedToolMetadataBytes, reclaimableBytes };
+}
+
 function addArchiveMarker(
   strippedToolMetadata: string,
   archivedAt: number,
@@ -254,6 +283,8 @@ function upsertArchiveRow(
   archivedAt: number,
   prepared: PreparedToolPayloadArchive
 ): void {
+  const verification = prepared.verification;
+  if (!verification) throw new Error('verified archive proof is required for bookkeeping');
   sql.exec(
     `INSERT INTO tool_payload_archives (
        message_id,
@@ -264,9 +295,14 @@ function upsertArchiveRow(
        archived_at,
        message_created_at,
        message_sequence,
-       archive_version
+       archive_version,
+       archive_body_bytes,
+       archive_body_sha256,
+       root_object_bytes,
+       root_object_sha256,
+       verified_object_count
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(message_id) DO UPDATE SET
        session_id = excluded.session_id,
        r2_key = excluded.r2_key,
@@ -275,7 +311,12 @@ function upsertArchiveRow(
        archived_at = excluded.archived_at,
        message_created_at = excluded.message_created_at,
        message_sequence = excluded.message_sequence,
-       archive_version = excluded.archive_version`,
+       archive_version = excluded.archive_version,
+       archive_body_bytes = excluded.archive_body_bytes,
+       archive_body_sha256 = excluded.archive_body_sha256,
+       root_object_bytes = excluded.root_object_bytes,
+       root_object_sha256 = excluded.root_object_sha256,
+       verified_object_count = excluded.verified_object_count`,
     candidate.messageId,
     candidate.sessionId,
     prepared.key,
@@ -284,12 +325,40 @@ function upsertArchiveRow(
     archivedAt,
     candidate.createdAt,
     candidate.sequence,
-    prepared.archiveVersion
+    prepared.archiveVersion,
+    verification.archiveBodyBytes,
+    verification.archiveBodySha256,
+    verification.rootObjectBytes,
+    verification.rootObjectSha256,
+    verification.objectCount
   );
 }
 
-function updateToolMetadata(sql: SqlStorage, messageId: string, toolMetadata: string): void {
-  sql.exec('UPDATE chat_messages SET tool_metadata = ? WHERE id = ?', toolMetadata, messageId);
+function updateToolMetadata(
+  sql: SqlStorage,
+  candidate: ToolPayloadArchiveCandidate,
+  originalToolMetadata: string,
+  strippedToolMetadata: string
+): void {
+  const update = sql.exec(
+    `UPDATE chat_messages
+     SET tool_metadata = ?
+     WHERE id = ?
+       AND session_id = ?
+       AND created_at = ?
+       AND sequence = ?
+       AND role = 'tool'
+       AND tool_metadata = ?`,
+    strippedToolMetadata,
+    candidate.messageId,
+    candidate.sessionId,
+    candidate.createdAt,
+    candidate.sequence,
+    originalToolMetadata
+  );
+  if (update.rowsWritten !== 1) {
+    throw new Error('tool_metadata source changed after archive verification');
+  }
 }
 
 function emptyArchiveUpdate(toolMetadataBytesRead: number): ToolPayloadArchiveUpdateResult {
@@ -330,11 +399,17 @@ function writeArchiveBookkeeping(input: {
   candidate: ToolPayloadArchiveCandidate;
   archivedAt: number;
   prepared: PreparedToolPayloadArchive;
+  originalToolMetadata: string;
 }): void {
   const transactionSync = input.transactionSync ?? (<T>(callback: () => T): T => callback());
   transactionSync(() => {
+    updateToolMetadata(
+      input.sql,
+      input.candidate,
+      input.originalToolMetadata,
+      input.prepared.strippedToolMetadata
+    );
     upsertArchiveRow(input.sql, input.candidate, input.archivedAt, input.prepared);
-    updateToolMetadata(input.sql, input.candidate.messageId, input.prepared.strippedToolMetadata);
   });
 }
 
@@ -345,6 +420,9 @@ export async function archiveToolPayloadCandidate(input: {
   archivePrefix: string;
   archiveWriteTimeoutMs: number;
   archiveChunkBytes: number;
+  deadlineMs: number;
+  nowMs: () => number;
+  operationBudget: ToolPayloadArchiveOperationBudget;
   transactionSync?: <T>(callback: () => T) => T;
   candidate: ToolPayloadArchiveCandidate;
   toolMetadata: string;
@@ -388,9 +466,15 @@ export async function archiveToolPayloadCandidate(input: {
       contentBytes: prepared.contentBytes,
       toolMetadataBytes: input.candidate.toolMetadataBytes,
       chunkBytes: input.archiveChunkBytes,
+      deadlineMs: input.deadlineMs,
+      nowMs: input.nowMs,
+      operationBudget: input.operationBudget,
     });
     if (!prepared.verification) {
       throw new Error('R2 archive verification proof is missing after write');
+    }
+    if (input.nowMs() >= input.deadlineMs) {
+      throw new Error('cleanup wall-time deadline elapsed before archive bookkeeping');
     }
     log.info('archive_verified_before_strip', {
       projectId: input.projectId,
@@ -400,6 +484,7 @@ export async function archiveToolPayloadCandidate(input: {
       archiveVersion: prepared.archiveVersion,
       archiveBodyBytes: prepared.verification.archiveBodyBytes,
       archiveBodySha256: prepared.verification.archiveBodySha256,
+      rootObjectBytes: prepared.verification.rootObjectBytes,
       rootObjectSha256: prepared.verification.rootObjectSha256,
       verifiedObjectCount: prepared.verification.objectCount,
     });
@@ -409,6 +494,7 @@ export async function archiveToolPayloadCandidate(input: {
       candidate: input.candidate,
       archivedAt: input.archivedAt,
       prepared,
+      originalToolMetadata: input.toolMetadata,
     });
   } catch (error) {
     log.warn('archive_write_failed_closed', {
@@ -454,7 +540,12 @@ export function selectArchivedToolPayloadRow(
          archived_at,
          message_created_at,
          message_sequence,
-         archive_version
+         archive_version,
+         archive_body_bytes,
+         archive_body_sha256,
+         root_object_bytes,
+         root_object_sha256,
+         verified_object_count
        FROM tool_payload_archives
        WHERE message_id = ?
          AND (? IS NULL OR session_id = ?)
@@ -478,6 +569,11 @@ function parseArchivedToolPayloadRow(row: unknown[]): ArchivedToolPayloadRow {
   const messageCreatedAt = rawNumber(row[6]);
   const messageSequence = rawNumber(row[7]);
   const archiveVersion = rawNumber(row[8]);
+  const archiveBodyBytes = row[9] === null ? null : rawNumber(row[9]);
+  const archiveBodySha256 = row[10];
+  const rootObjectBytes = row[11] === null ? null : rawNumber(row[11]);
+  const rootObjectSha256 = row[12];
+  const verifiedObjectCount = row[13] === null ? null : rawNumber(row[13]);
   if (
     typeof messageId !== 'string' ||
     typeof sessionId !== 'string' ||
@@ -487,7 +583,9 @@ function parseArchivedToolPayloadRow(row: unknown[]): ArchivedToolPayloadRow {
     archivedAt === null ||
     messageCreatedAt === null ||
     messageSequence === null ||
-    archiveVersion === null
+    archiveVersion === null ||
+    (archiveBodySha256 !== null && typeof archiveBodySha256 !== 'string') ||
+    (rootObjectSha256 !== null && typeof rootObjectSha256 !== 'string')
   ) {
     throw new Error('Invalid archived tool payload row');
   }
@@ -501,12 +599,23 @@ function parseArchivedToolPayloadRow(row: unknown[]): ArchivedToolPayloadRow {
     messageCreatedAt,
     messageSequence,
     archiveVersion,
+    archiveBodyBytes,
+    archiveBodySha256,
+    rootObjectBytes,
+    rootObjectSha256,
+    verifiedObjectCount,
   };
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 async function readArchiveContent(
   env: Env,
-  row: ArchivedToolPayloadRow
+  row: ArchivedToolPayloadRow,
+  projectId: string
 ): Promise<{ content: unknown[]; reason?: never } | { content: null; reason: string }> {
   const r2 = env.PROJECT_DATA_ARCHIVE_R2;
   if (!r2) return { content: null, reason: 'PROJECT_DATA_ARCHIVE_R2 binding is not configured' };
@@ -514,7 +623,25 @@ async function readArchiveContent(
   try {
     const object = await r2.get(row.r2Key);
     if (!object) return { content: null, reason: 'archived R2 object is missing' };
-    const text = await object.text();
+    const rootBytes = new Uint8Array(await object.arrayBuffer());
+    if (row.archiveVersion >= TOOL_PAYLOAD_VERIFIED_ARCHIVE_VERSION) {
+      if (
+        row.rootObjectBytes === null ||
+        row.rootObjectSha256 === null ||
+        row.archiveBodyBytes === null ||
+        row.archiveBodySha256 === null ||
+        row.verifiedObjectCount === null
+      ) {
+        return { content: null, reason: 'verified archive proof is missing' };
+      }
+      if (rootBytes.byteLength !== row.rootObjectBytes) {
+        return { content: null, reason: 'archived R2 root byte verification failed' };
+      }
+      if ((await sha256Hex(rootBytes)) !== row.rootObjectSha256) {
+        return { content: null, reason: 'archived R2 root SHA-256 verification failed' };
+      }
+    }
+    const text = new TextDecoder().decode(rootBytes);
     const maxMetadataBytes = parsePositiveInteger(
       env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES,
       DEFAULT_TOOL_PAYLOAD_ARCHIVE_RETRIEVAL_MAX_METADATA_BYTES
@@ -522,11 +649,28 @@ async function readArchiveContent(
     const parsed = await parseToolPayloadArchiveObjectText(r2, text, {
       toolMetadataBytes: row.toolMetadataBytes,
       maxMetadataBytes,
+      expectedIdentity: {
+        projectId,
+        sessionId: row.sessionId,
+        messageId: row.messageId,
+        messageCreatedAt: row.messageCreatedAt,
+        messageSequence: row.messageSequence,
+      },
     });
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return { content: null, reason: 'archived R2 object is malformed' };
     }
-    const toolMetadata = (parsed as Record<string, unknown>).toolMetadata;
+    const archiveRecord = parsed as Record<string, unknown>;
+    if (
+      archiveRecord.projectId !== projectId ||
+      archiveRecord.sessionId !== row.sessionId ||
+      archiveRecord.messageId !== row.messageId ||
+      archiveRecord.messageCreatedAt !== row.messageCreatedAt ||
+      archiveRecord.messageSequence !== row.messageSequence
+    ) {
+      return { content: null, reason: 'archived tool payload identity does not match archive row' };
+    }
+    const toolMetadata = archiveRecord.toolMetadata;
     if (!toolMetadata || typeof toolMetadata !== 'object' || Array.isArray(toolMetadata)) {
       return { content: null, reason: 'archived tool metadata is malformed' };
     }
@@ -562,13 +706,14 @@ function buildArchivedUnavailableContent(row: ArchivedToolPayloadRow, reason: st
 export async function readArchivedMessageToolContent(
   sql: SqlStorage,
   env: Env,
+  projectId: string,
   sessionId: string,
   messageId: string
 ): Promise<MessageToolContentResult | null> {
   const row = selectArchivedToolPayloadRow(sql, messageId, sessionId);
   if (!row) return null;
 
-  const archive = await readArchiveContent(env, row);
+  const archive = await readArchiveContent(env, row, projectId);
   if (archive.content) {
     return {
       content: archive.content,
@@ -626,7 +771,12 @@ function selectArchivedToolPayloadRows(
          archived_at,
          message_created_at,
          message_sequence,
-         archive_version
+         archive_version,
+         archive_body_bytes,
+         archive_body_sha256,
+         root_object_bytes,
+         root_object_sha256,
+         verified_object_count
        FROM tool_payload_archives
        WHERE ${where}
        ORDER BY message_created_at ASC, message_sequence ASC, message_id ASC
@@ -655,7 +805,7 @@ export async function listArchivedToolPayloads(
   const selected = selectArchivedToolPayloadRows(sql, query);
   const payloads: ArchivedToolPayloadItem[] = [];
   for (const row of selected.rows) {
-    const archive = await readArchiveContent(env, row);
+    const archive = await readArchiveContent(env, row, projectId);
     payloads.push({
       messageId: row.messageId,
       sessionId: row.sessionId,

@@ -794,6 +794,7 @@ export class ProjectData extends DurableObject<Env> {
     const archived = await toolPayloadArchive.readArchivedMessageToolContent(
       this.sql,
       this.env,
+      this.getProjectId() ?? '',
       sessionId,
       messageId
     );
@@ -1514,6 +1515,7 @@ export class ProjectData extends DurableObject<Env> {
   ): storageReliefMeasurement.ProjectDataStorageReliefMeasureResult {
     return storageReliefMeasurement.measureProjectDataStorageReliefSlice(
       this.sql,
+      this.env,
       storageSafety.resolveStorageSafetyConfig(this.env),
       input
     );

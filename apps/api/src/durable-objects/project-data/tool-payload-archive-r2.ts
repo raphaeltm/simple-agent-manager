@@ -17,8 +17,14 @@ export type PreparedToolPayloadArchive = {
     archiveBodyBytes: number;
     archiveBodySha256: string;
     objectCount: number;
+    rootObjectBytes: number;
     rootObjectSha256: string;
   };
+};
+
+export type ToolPayloadArchiveOperationBudget = {
+  used: number;
+  max: number;
 };
 
 type ArchivedToolPayloadManifest = {
@@ -52,10 +58,6 @@ type ArchiveObjectProof = {
   bytes: number;
   sha256: string;
 };
-
-function utf8Bytes(value: string): number {
-  return textEncoder.encode(value).byteLength;
-}
 
 function chunkUtf8String(value: string, chunkBytes: number): Uint8Array[] {
   const bytes = textEncoder.encode(value);
@@ -97,20 +99,49 @@ async function withTimeout<T>(
   }
 }
 
+function remainingOperationTimeout(
+  timeoutMs: number,
+  deadlineMs: number,
+  nowMs: () => number
+): number {
+  const remaining = deadlineMs - nowMs();
+  if (remaining <= 0) throw new Error('R2 archive operation exceeded cleanup wall-time deadline');
+  return Math.min(timeoutMs, remaining);
+}
+
+function reserveArchiveOperations(budget: ToolPayloadArchiveOperationBudget, count: number): void {
+  if (budget.used + count > budget.max) {
+    throw new Error(
+      `R2 archive operation budget exceeded: ${budget.used + count} required, ${budget.max} allowed`
+    );
+  }
+  budget.used += count;
+}
+
+function contentAddressedArchiveKey(key: string, archiveBodySha256: string): string {
+  return key.endsWith('.json')
+    ? `${key.slice(0, -'.json'.length)}.${archiveBodySha256}.json`
+    : `${key}.${archiveBodySha256}`;
+}
+
 async function writeArchiveObjectWithTimeout(
   r2: R2Bucket,
   key: string,
   body: string | Uint8Array,
   timeoutMs: number,
+  deadlineMs: number,
+  nowMs: () => number,
   customMetadata: Record<string, string>
 ): Promise<void> {
+  const operationTimeoutMs = remainingOperationTimeout(timeoutMs, deadlineMs, nowMs);
   const write = r2.put(key, body, {
     httpMetadata: { contentType: 'application/json' },
     customMetadata,
   });
   // If the timeout wins, keep the original payload in SQLite and let the
-  // deterministic key be overwritten by a later retry. Attach a catch so a
-  // late rejection from the underlying put is not unhandled after the timeout.
+  // immutable content-addressed key finish after a retry. Every writer for
+  // this key writes byte-identical content, so a late completion cannot
+  // invalidate a newer verification proof.
   write.catch(() => undefined);
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -118,8 +149,8 @@ async function writeArchiveObjectWithTimeout(
       write,
       new Promise<never>((_resolve, reject) => {
         timeoutId = setTimeout(() => {
-          reject(new Error(`R2 archive write exceeded ${timeoutMs}ms timeout`));
-        }, timeoutMs);
+          reject(new Error(`R2 archive write exceeded ${operationTimeoutMs}ms timeout`));
+        }, operationTimeoutMs);
       }),
     ]);
   } finally {
@@ -130,18 +161,22 @@ async function writeArchiveObjectWithTimeout(
 async function readArchiveObjectBytesWithTimeout(
   r2: R2Bucket,
   key: string,
-  timeoutMs: number
+  timeoutMs: number,
+  deadlineMs: number,
+  nowMs: () => number
 ): Promise<Uint8Array> {
+  const getTimeoutMs = remainingOperationTimeout(timeoutMs, deadlineMs, nowMs);
   const object = await withTimeout(
     r2.get(key),
-    timeoutMs,
-    `R2 archive verification read exceeded ${timeoutMs}ms timeout`
+    getTimeoutMs,
+    `R2 archive verification read exceeded ${getTimeoutMs}ms timeout`
   );
   if (!object) throw new Error(`R2 archive verification read was missing for ${key}`);
+  const bodyTimeoutMs = remainingOperationTimeout(timeoutMs, deadlineMs, nowMs);
   const buffer = await withTimeout(
     object.arrayBuffer(),
-    timeoutMs,
-    `R2 archive verification body read exceeded ${timeoutMs}ms timeout`
+    bodyTimeoutMs,
+    `R2 archive verification body read exceeded ${bodyTimeoutMs}ms timeout`
   );
   return new Uint8Array(buffer);
 }
@@ -151,17 +186,19 @@ async function writeAndVerifyArchiveObject(
   key: string,
   body: string | Uint8Array,
   timeoutMs: number,
+  deadlineMs: number,
+  nowMs: () => number,
   customMetadata: Record<string, string>
 ): Promise<ArchiveObjectProof> {
   const expected = typeof body === 'string' ? textEncoder.encode(body) : body;
   const expectedSha256 = await sha256(expected);
-  await writeArchiveObjectWithTimeout(r2, key, body, timeoutMs, {
+  await writeArchiveObjectWithTimeout(r2, key, body, timeoutMs, deadlineMs, nowMs, {
     ...customMetadata,
     archiveBytes: String(expected.byteLength),
     archiveSha256: expectedSha256,
     archiveVerificationVersion: String(TOOL_PAYLOAD_VERIFIED_ARCHIVE_VERSION),
   });
-  const actual = await readArchiveObjectBytesWithTimeout(r2, key, timeoutMs);
+  const actual = await readArchiveObjectBytesWithTimeout(r2, key, timeoutMs, deadlineMs, nowMs);
   if (actual.byteLength !== expected.byteLength) {
     throw new Error(
       `R2 archive verification byte mismatch for ${key}: expected ${expected.byteLength}, got ${actual.byteLength}`
@@ -188,9 +225,15 @@ export async function writeToolPayloadArchiveObject(
     contentBytes: number;
     toolMetadataBytes: number;
     chunkBytes: number;
+    deadlineMs: number;
+    nowMs: () => number;
+    operationBudget: ToolPayloadArchiveOperationBudget;
   }
 ): Promise<PreparedToolPayloadArchive> {
-  const bodyBytes = utf8Bytes(prepared.body);
+  const archiveBody = textEncoder.encode(prepared.body);
+  const bodyBytes = archiveBody.byteLength;
+  const archiveBodySha256 = await sha256(archiveBody);
+  const immutableKey = contentAddressedArchiveKey(prepared.key, archiveBodySha256);
   const baseMetadata = {
     projectId: input.projectId,
     sessionId: input.sessionId,
@@ -199,37 +242,51 @@ export async function writeToolPayloadArchiveObject(
     contentBytes: String(input.contentBytes),
   };
   if (bodyBytes <= input.chunkBytes) {
+    reserveArchiveOperations(input.operationBudget, 3);
     const proof = await writeAndVerifyArchiveObject(
       r2,
-      prepared.key,
+      immutableKey,
       prepared.body,
       timeoutMs,
+      input.deadlineMs,
+      input.nowMs,
       baseMetadata
     );
     return {
       ...prepared,
+      key: immutableKey,
       archiveVersion: TOOL_PAYLOAD_VERIFIED_ARCHIVE_VERSION,
       verification: {
         archiveBodyBytes: proof.bytes,
         archiveBodySha256: proof.sha256,
         objectCount: 1,
+        rootObjectBytes: proof.bytes,
         rootObjectSha256: proof.sha256,
       },
     };
   }
 
   const chunks = chunkUtf8String(prepared.body, input.chunkBytes);
-  const chunkKeys = chunks.map((_chunk, index) => buildChunkKey(prepared.key, index));
+  const chunkKeys = chunks.map((_chunk, index) => buildChunkKey(immutableKey, index));
+  reserveArchiveOperations(input.operationBudget, (chunks.length + 1) * 3);
   const chunkProofs: ArchiveObjectProof[] = [];
   for (const [index, chunk] of chunks.entries()) {
     const chunkKey = chunkKeys[index];
     if (!chunkKey) throw new Error('archive chunk key was not generated');
     chunkProofs.push(
-      await writeAndVerifyArchiveObject(r2, chunkKey, chunk, timeoutMs, {
-        ...baseMetadata,
-        archiveChunkIndex: String(index),
-        archiveChunkCount: String(chunks.length),
-      })
+      await writeAndVerifyArchiveObject(
+        r2,
+        chunkKey,
+        chunk,
+        timeoutMs,
+        input.deadlineMs,
+        input.nowMs,
+        {
+          ...baseMetadata,
+          archiveChunkIndex: String(index),
+          archiveChunkCount: String(chunks.length),
+        }
+      )
     );
   }
 
@@ -243,8 +300,8 @@ export async function writeToolPayloadArchiveObject(
     archivedAt: input.archivedAt,
     contentBytes: input.contentBytes,
     toolMetadataBytes: input.toolMetadataBytes,
-    archiveBodyBytes: textEncoder.encode(prepared.body).byteLength,
-    archiveBodySha256: await sha256(textEncoder.encode(prepared.body)),
+    archiveBodyBytes: bodyBytes,
+    archiveBodySha256,
     chunks: chunkKeys.map((key, index) => {
       const proof = chunkProofs[index];
       if (!proof) throw new Error('archive chunk proof was not generated');
@@ -253,9 +310,11 @@ export async function writeToolPayloadArchiveObject(
   };
   const manifestProof = await writeAndVerifyArchiveObject(
     r2,
-    prepared.key,
+    immutableKey,
     JSON.stringify(manifest),
     timeoutMs,
+    input.deadlineMs,
+    input.nowMs,
     {
       ...baseMetadata,
       archiveChunkCount: String(chunks.length),
@@ -264,11 +323,13 @@ export async function writeToolPayloadArchiveObject(
   );
   return {
     ...prepared,
+    key: immutableKey,
     archiveVersion: TOOL_PAYLOAD_VERIFIED_ARCHIVE_VERSION,
     verification: {
       archiveBodyBytes: manifest.archiveBodyBytes,
       archiveBodySha256: manifest.archiveBodySha256,
       objectCount: chunks.length + 1,
+      rootObjectBytes: manifestProof.bytes,
       rootObjectSha256: manifestProof.sha256,
     },
   };
@@ -280,6 +341,13 @@ export async function parseToolPayloadArchiveObjectText(
   input: {
     toolMetadataBytes: number;
     maxMetadataBytes: number;
+    expectedIdentity?: {
+      projectId: string;
+      sessionId: string;
+      messageId: string;
+      messageCreatedAt: number;
+      messageSequence: number;
+    };
   }
 ): Promise<unknown> {
   const parsed = JSON.parse(text) as unknown;
@@ -297,6 +365,18 @@ export async function parseToolPayloadArchiveObjectText(
     throw new Error('archived chunk manifest is malformed');
   }
   const verified = record.version === TOOL_PAYLOAD_VERIFIED_ARCHIVE_VERSION;
+  if (verified && input.expectedIdentity) {
+    const expected = input.expectedIdentity;
+    if (
+      record.projectId !== expected.projectId ||
+      record.sessionId !== expected.sessionId ||
+      record.messageId !== expected.messageId ||
+      record.messageCreatedAt !== expected.messageCreatedAt ||
+      record.messageSequence !== expected.messageSequence
+    ) {
+      throw new Error('archived verified manifest identity does not match archive row');
+    }
+  }
   const chunkProofs = verified
     ? chunks.map((chunk) => {
         if (!chunk || typeof chunk !== 'object' || Array.isArray(chunk)) {

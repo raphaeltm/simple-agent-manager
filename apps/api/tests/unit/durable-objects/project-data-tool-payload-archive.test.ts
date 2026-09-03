@@ -5,6 +5,7 @@ import {
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES,
+  DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_OPERATIONS,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS,
@@ -17,6 +18,7 @@ import {
   buildToolPayloadArchiveKey,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX,
 } from '../../../src/durable-objects/project-data/tool-payload-archive';
+import { writeToolPayloadArchiveObject } from '../../../src/durable-objects/project-data/tool-payload-archive-r2';
 import type { Env } from '../../../src/durable-objects/project-data/types';
 
 describe('ProjectData tool payload archive helpers', () => {
@@ -50,6 +52,9 @@ describe('ProjectData tool payload archive helpers', () => {
     expect(defaults.toolPayloadArchiveWriteTimeoutMs).toBe(
       DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS
     );
+    expect(defaults.toolPayloadArchiveMaxOperations).toBe(
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_OPERATIONS
+    );
     expect(defaults.toolPayloadArchiveRetryDelayMs).toBe(
       DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS
     );
@@ -72,17 +77,20 @@ describe('ProjectData tool payload archive helpers', () => {
     expect(defaults.eventLogCleanupRecheckMs).toBe(24 * 60 * 60 * 1000);
     expect(defaults.toolPayloadCleanupProjectIds).toBeNull();
     expect(defaults.toolPayloadCleanupCutoffCreatedAt).toBeNull();
+    expect(defaults.toolPayloadCleanupExactConfigValid).toBe(true);
 
     const overrides = resolveStorageSafetyConfig({
       PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS: '1234',
       PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS: '3456',
       PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES: '2345',
       PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS: 'project-b, project-a,project-b',
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID: 'operator-plan',
       PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT: '1788048000000',
       PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '3',
       PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS: '4567',
       PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX: '/custom/tool-payloads/',
       PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS: '5678',
+      PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_OPERATIONS: '77',
       PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS: '6789',
       PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES: '7890',
       PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES: '8901',
@@ -105,10 +113,12 @@ describe('ProjectData tool payload archive helpers', () => {
     expect(overrides.toolPayloadCleanupRecheckMs).toBe(3456);
     expect(overrides.toolPayloadCleanupMaxRowBytes).toBe(2345);
     expect(overrides.toolPayloadCleanupProjectIds).toEqual(['project-a', 'project-b']);
+    expect(overrides.toolPayloadCleanupPlanId).toBe('operator-plan');
     expect(overrides.toolPayloadCleanupCutoffCreatedAt).toBe(1788048000000);
     expect(overrides.toolPayloadArchiveRetentionMs).toBe(3 * 24 * 60 * 60 * 1000);
     expect(overrides.toolPayloadArchiveIntervalMs).toBe(4567);
     expect(overrides.toolPayloadArchiveWriteTimeoutMs).toBe(5678);
+    expect(overrides.toolPayloadArchiveMaxOperations).toBe(77);
     expect(overrides.toolPayloadArchiveRetryDelayMs).toBe(6789);
     expect(overrides.toolPayloadArchiveChunkBytes).toBe(7890);
     expect(overrides.toolPayloadArchiveMaxMetadataBytes).toBe(8901);
@@ -127,5 +137,73 @@ describe('ProjectData tool payload archive helpers', () => {
     expect(overrides.groupedFtsCleanupWallUnsafeRatio).toBe(0.97);
     expect(overrides.groupedFtsCleanupWeakReclaimBytes).toBe(8);
     expect(overrides.eventLogCleanupRecheckMs).toBe(7000);
+    expect(
+      resolveStorageSafetyConfig({
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_OPERATIONS: '3garbage',
+      } as Env).toolPayloadCleanupExactConfigValid
+    ).toBe(false);
+  });
+
+  it('uses different immutable keys when an old timed-out write completes after a changed retry', async () => {
+    const objects = new Map<string, Uint8Array>();
+    let releaseOld!: () => void;
+    const bucket = {
+      put: (key: string, value: string | Uint8Array) => {
+        const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value;
+        if (value === '{"payload":"old"}') {
+          return new Promise<null>((resolve) => {
+            releaseOld = () => {
+              objects.set(key, bytes);
+              resolve(null);
+            };
+          });
+        }
+        objects.set(key, bytes);
+        return Promise.resolve(null);
+      },
+      get: async (key: string) => {
+        const bytes = objects.get(key);
+        return bytes ? ({ arrayBuffer: async () => bytes.buffer } as R2ObjectBody) : null;
+      },
+    } as unknown as R2Bucket;
+    const base = {
+      key: 'project-data/tool-payloads/project/session/message.json',
+      contentBytes: 1,
+      archiveVersion: 1,
+      strippedToolMetadata: '{}',
+      strippedToolMetadataBytes: 2,
+    };
+    const archiveInput = {
+      projectId: 'project',
+      sessionId: 'session',
+      messageId: 'message',
+      messageCreatedAt: 1,
+      messageSequence: 1,
+      archivedAt: 2,
+      contentBytes: 1,
+      toolMetadataBytes: 20,
+      chunkBytes: 1_000,
+      deadlineMs: Date.now() + 10_000,
+      nowMs: Date.now,
+    };
+
+    await expect(
+      writeToolPayloadArchiveObject(bucket, { ...base, body: '{"payload":"old"}' }, 1, {
+        ...archiveInput,
+        operationBudget: { used: 0, max: 3 },
+      })
+    ).rejects.toThrow(/archive write exceeded/);
+    const changed = await writeToolPayloadArchiveObject(
+      bucket,
+      { ...base, body: '{"payload":"new"}' },
+      100,
+      { ...archiveInput, operationBudget: { used: 0, max: 3 } }
+    );
+    releaseOld();
+    await Promise.resolve();
+
+    expect(changed.key).toMatch(/\.[a-f0-9]{64}\.json$/);
+    expect(new TextDecoder().decode(objects.get(changed.key))).toBe('{"payload":"new"}');
+    expect([...objects.keys()]).toHaveLength(2);
   });
 });

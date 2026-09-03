@@ -134,6 +134,11 @@ const ARCHIVE_TABLE_SPECS: Record<ProjectDataArchiveTableName, ChunkTableSpec> =
       'message_created_at',
       'message_sequence',
       'archive_version',
+      'archive_body_bytes',
+      'archive_body_sha256',
+      'root_object_bytes',
+      'root_object_sha256',
+      'verified_object_count',
     ],
     keyColumn: 'message_id',
     orderBy: 'message_created_at ASC, message_sequence ASC, message_id ASC',
@@ -2012,6 +2017,7 @@ export async function archiveSourceReadMessageToolContent(
     (await toolPayloadArchive.readArchivedMessageToolContent(
       sql,
       env,
+      input.projectId,
       input.sessionId,
       input.messageId
     )) ?? { content: inlineContent, source: 'inline' }
@@ -2110,6 +2116,7 @@ export async function archiveTargetReadMessageToolContent(
     (await toolPayloadArchive.readArchivedMessageToolContent(
       sql,
       env,
+      input.projectId,
       input.sessionId,
       input.messageId
     )) ?? { content: inlineContent, source: 'inline' }

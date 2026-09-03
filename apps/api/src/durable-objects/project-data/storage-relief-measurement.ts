@@ -1,4 +1,6 @@
 import type { StorageSafetyConfig } from './storage-safety';
+import { projectToolPayloadArchiveRelief } from './tool-payload-archive';
+import type { Env } from './types';
 
 const TOOL_PAYLOAD_CONTENT_NEEDLE = '"content"';
 
@@ -70,6 +72,17 @@ export type ProjectDataStorageReliefToolPayloadSessionMeasure = {
   archivedRows: number;
   skippedRows: number;
 };
+
+export function toolPayloadStorageReliefCursorFilter(
+  cursor: ProjectDataStorageReliefMeasureCursor['toolPayload'] | null | undefined
+): { clause: string; params: Array<string | number> } {
+  return cursor
+    ? {
+        clause: 'AND (m.session_id, m.created_at, m.sequence, m.id) > (?, ?, ?, ?)',
+        params: [cursor.sessionId, cursor.createdAt, cursor.sequence, cursor.messageId],
+      }
+    : { clause: '', params: [] };
+}
 
 function rawNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isSafeInteger(value)) return value;
@@ -184,6 +197,7 @@ function measureGroupedSlice(
 
 function measureToolPayloadSlice(
   sql: SqlStorage,
+  env: Env,
   config: StorageSafetyConfig,
   measuredAt: number,
   cursor: ProjectDataStorageReliefMeasureCursor['toolPayload'] | null | undefined,
@@ -197,13 +211,30 @@ function measureToolPayloadSlice(
     cutoffCreatedAt <= measuredAt
       ? cutoffCreatedAt
       : measuredAt - config.toolPayloadArchiveRetentionMs;
+  const cursorFilter = toolPayloadStorageReliefCursorFilter(cursor);
+  const readToolMetadata = (messageId: string): string | null => {
+    const row = sql
+      .exec(
+        `SELECT tool_metadata
+         FROM chat_messages
+         WHERE id = ?
+           AND tool_metadata IS NOT NULL
+           AND length(CAST(tool_metadata AS BLOB)) <= ?
+         LIMIT 1`,
+        messageId,
+        config.toolPayloadArchiveMaxMetadataBytes
+      )
+      .raw()
+      .next();
+    return !row.done && typeof row.value[0] === 'string' ? row.value[0] : null;
+  };
   const rows = sql
     .exec(
       `SELECT
          m.id,
          m.session_id,
          m.created_at,
-         COALESCE(m.sequence, 0) AS sequence,
+         m.sequence,
          length(CAST(m.tool_metadata AS BLOB)) AS tool_metadata_bytes,
          CASE WHEN archived.message_id IS NULL THEN 0 ELSE 1 END AS archived,
          CASE WHEN attempt.message_id IS NULL THEN 0 ELSE 1 END AS skipped,
@@ -215,31 +246,13 @@ function measureToolPayloadSlice(
          AND m.tool_metadata IS NOT NULL
          AND instr(m.tool_metadata, ?) > 0
          AND m.created_at < ?
-         AND (
-           ? IS NULL
-           OR m.session_id > ?
-           OR (
-             m.session_id = ?
-             AND (
-               m.created_at > ?
-               OR (m.created_at = ? AND COALESCE(m.sequence, 0) > ?)
-               OR (m.created_at = ? AND COALESCE(m.sequence, 0) = ? AND m.id > ?)
-             )
-           )
-         )
+         AND m.sequence IS NOT NULL
+         ${cursorFilter.clause}
        ORDER BY m.session_id ASC, m.created_at ASC, sequence ASC, m.id ASC
        LIMIT ?`,
       TOOL_PAYLOAD_CONTENT_NEEDLE,
       cutoff,
-      cursor?.sessionId ?? null,
-      cursor?.sessionId ?? '',
-      cursor?.sessionId ?? '',
-      cursor?.createdAt ?? 0,
-      cursor?.createdAt ?? 0,
-      cursor?.sequence ?? 0,
-      cursor?.createdAt ?? 0,
-      cursor?.sequence ?? 0,
-      cursor?.messageId ?? '',
+      ...cursorFilter.params,
       limit + 1
     )
     .raw();
@@ -319,6 +332,18 @@ function measureToolPayloadSlice(
       session.oversizedRows++;
       session.oversizedBytes += bytes;
     } else {
+      const toolMetadata = readToolMetadata(messageId);
+      const projection = projectToolPayloadArchiveRelief({
+        env,
+        toolMetadata: toolMetadata ?? '',
+        archivedAt: measuredAt,
+      });
+      if (!projection) {
+        skippedRows++;
+        session.skippedRows++;
+        nextCursor = { sessionId, createdAt, sequence, messageId };
+        continue;
+      }
       if (bytes > config.toolPayloadCleanupMaxRowBytes) {
         legacyOversizedRows++;
         legacyOversizedBytes += bytes;
@@ -326,9 +351,9 @@ function measureToolPayloadSlice(
         session.legacyOversizedBytes += bytes;
       }
       eligibleRows++;
-      eligibleBytes += bytes;
+      eligibleBytes += projection.reclaimableBytes;
       session.eligibleRows++;
-      session.eligibleBytes += bytes;
+      session.eligibleBytes += projection.reclaimableBytes;
     }
     nextCursor = { sessionId, createdAt, sequence, messageId };
   }
@@ -353,6 +378,7 @@ function measureToolPayloadSlice(
 
 export function measureProjectDataStorageReliefSlice(
   sql: SqlStorage,
+  env: Env,
   config: StorageSafetyConfig,
   input: ProjectDataStorageReliefMeasureInput = {}
 ): ProjectDataStorageReliefMeasureResult {
@@ -378,6 +404,7 @@ export function measureProjectDataStorageReliefSlice(
       : measureGroupedSlice(sql, config, measuredAt, input.cursor?.grouped, limit),
     toolPayloads: measureToolPayloadSlice(
       sql,
+      env,
       config,
       measuredAt,
       input.cursor?.toolPayload,
