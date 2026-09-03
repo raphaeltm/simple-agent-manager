@@ -87,55 +87,55 @@ Every finding above is represented in the checklist below.
 ## Implementation checklist
 
 - [x] Move this task file to `tasks/active/` on the implementation branch.
-- [ ] Add manual tool-payload cleanup config defaults and Env fields:
+- [x] Add manual tool-payload cleanup config defaults and Env fields:
   env-backed maximum batch rows, maximum batch bytes, maximum wall time, and
   manual cooldown/recheck interval with 24h defaults.
-- [ ] Add a ProjectData DO manual cleanup RPC that requires a reason and
+- [x] Add a ProjectData DO manual cleanup RPC that requires a reason and
   idempotency key, persists an idempotency/cooldown marker before cleanup work,
   reuses `runProjectDataToolPayloadCleanup()`, bypasses automatic cleanup
   enablement only for this explicit call, and returns idempotent retry/cooldown
   state without starting a second cleanup pass.
-- [ ] Expose
+- [x] Expose
   `POST /api/admin/project-data/storage/:projectId/tool-payload-cleanup` as a
   superadmin-only route using Valibot request validation and bounded budget
   checks against the configured hard maxima.
-- [ ] Ensure manual cleanup telemetry distinguishes skipped cooldown,
+- [x] Ensure manual cleanup telemetry distinguishes skipped cooldown,
   no-op/not-needed, candidates-exhausted, row budget, byte budget, wall time,
   error, and `databaseSize` reclaim evidence; use
   `manual_tool_payload_archive_cleanup` as the audit purge reason when rows are
   stripped.
-- [ ] Add an additive D1 migration and Drizzle schema for persisted
+- [x] Add an additive D1 migration and Drizzle schema for persisted
   archive-sharding global sweep cadence state.
-- [ ] Add `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` config with 24h
+- [x] Add `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` config with 24h
   default and wire it through Env types, wrangler defaults, `.env.example`,
   deployment config sync, GitHub workflow env passthrough, public configuration
   docs, and env reference skills.
-- [ ] Gate scheduled `runProjectDataArchiveSharding()` with D1 cadence state so
+- [x] Gate scheduled `runProjectDataArchiveSharding()` with D1 cadence state so
   global crash-gap recovery/candidate selection/migration can start at most once
   per interval. The cadence claim must advance before work starts so crashes or
   partial runs do not hot-loop on five-minute Worker wakeups.
-- [ ] Keep scoped manual archive-sharding canaries and copy-back/freeze/recovery
+- [x] Keep scoped manual archive-sharding canaries and copy-back/freeze/recovery
   routes independent of the global cadence gate.
-- [ ] Add unit tests for manual cleanup route authorization, request validation,
+- [x] Add unit tests for manual cleanup route authorization, request validation,
   project scoping, service delegation, idempotent retry, cooldown skip, strict
   budget maximums, telemetry audit reason, and archive failure preserving source
   metadata.
-- [ ] Add Workers-runtime tests for manual cleanup idempotency/cooldown,
+- [x] Add Workers-runtime tests for manual cleanup idempotency/cooldown,
   R2/missing verification fail-closed behavior, raw transcript preservation,
   `databaseSize` reclaim evidence, and old automatic cleanup disabled while
   manual cleanup still runs.
-- [ ] Add unit and Workers-runtime archive-sharding tests proving five-minute
+- [x] Add unit and Workers-runtime archive-sharding tests proving five-minute
   scheduled invocations are daily-gated, failed/partial scheduled starts advance
   cadence state and do not hot-loop, and scoped manual canaries bypass the global
   cadence gate.
-- [ ] Update public API/reference docs and task notes with the safe operator
+- [x] Update public API/reference docs and task notes with the safe operator
   sequence: inspect telemetry, run bounded relief measurement, run one manual
   cleanup slice with reason/idempotency key, inspect returned termination and
   cooldown state, measure storage again, then proceed to scoped archive-sharding
   dry-run/canary only under the separate rollout controls.
-- [ ] Run focused and relevant broad validation without staging or production
+- [x] Run focused and relevant broad validation without staging or production
   mutation.
-- [ ] Run requested specialist reviews:
+- [x] Run requested specialist reviews:
   cloudflare-specialist, security-auditor, env-validator, doc-sync-validator,
   constitution-validator, test-engineer, and task-completion-validator.
 - [ ] Push the branch, open a draft PR, record CI/review evidence, and stop
@@ -143,36 +143,76 @@ Every finding above is represented in the checklist below.
 
 ## Acceptance criteria
 
-- [ ] A superadmin can invoke exactly one project-scoped manual tool-payload
+- [x] A superadmin can invoke exactly one project-scoped manual tool-payload
   archival cleanup slice while `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED=false`.
-- [ ] Non-superadmins are rejected before ProjectData cleanup is invoked.
-- [ ] Manual cleanup requires a non-empty audit reason and idempotency key.
-- [ ] Retrying the same idempotency key returns the prior result/cooldown without
-  re-running cleanup; a different key inside the persisted cooldown is skipped.
-- [ ] Requested manual row, byte, and wall-time budgets default from configured
+- [x] Non-superadmins are rejected before ProjectData cleanup is invoked.
+- [x] Manual cleanup requires a non-empty audit reason and idempotency key.
+- [x] Retrying the same idempotency key returns the prior result/cooldown without
+  re-running cleanup after a completed pass; if a crash leaves only an
+  in-progress marker, the same key is held during cooldown and can retry after
+  cooldown. A different key inside the persisted cooldown is skipped.
+- [x] Requested manual row, byte, and wall-time budgets default from configured
   cleanup values and are rejected above env-backed hard maxima.
-- [ ] R2 archive failure, missing archive binding, missing verification, or SQL
+- [x] R2 archive failure, missing archive binding, missing verification, or SQL
   bookkeeping failure leaves `tool_metadata.content` and raw
   `chat_messages.content` intact.
-- [ ] Manual cleanup response includes termination reason, before/after
+- [x] Manual cleanup response includes termination reason, before/after
   `databaseSize`, reclaimed bytes, rows scanned/updated/failed, cursor/recheck,
   and cooldown state.
-- [ ] Existing bounded relief measurement remains the measurement/dry-run path;
+- [x] Existing bounded relief measurement remains the measurement/dry-run path;
   no new unbounded scanner is added.
-- [ ] Global archive-sharding scheduled work remains disabled by default; when
+- [x] Global archive-sharding scheduled work remains disabled by default; when
   enabled with exact routing, persisted cadence allows candidate selection and
   migration no more than once per configured interval despite five-minute Worker
   wakes.
-- [ ] Failed or partial scheduled archive-sharding starts persist a next
+- [x] Failed or partial scheduled archive-sharding starts persist a next
   eligible time before doing work so they do not hot-loop. Manual scoped canary
   and explicit recovery controls remain callable regardless of that global
   cadence state.
-- [ ] D1 and DO schema changes are additive and support clean installs and
+- [x] D1 and DO schema changes are additive and support clean installs and
   upgrades.
-- [ ] Env types, wrangler/default/example config, deployment sync, public docs,
+- [x] Env types, wrangler/default/example config, deployment sync, public docs,
   API reference, and env reference skills are synchronized.
 - [ ] Local validation and required specialist reviews have no unresolved
   critical/high findings. The PR is draft and unmerged.
+
+## Validation and review log
+
+Local validation completed without staging or production mutation:
+
+- `git diff --check`
+- `pnpm lint`
+- `pnpm typecheck`
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/admin-project-data-manual-cleanup.test.ts tests/unit/routes/admin-project-data-archive-sharding.test.ts tests/unit/scheduled/project-data-archive-sharding.test.ts`
+- `cd apps/api && timeout 240s pnpm exec vitest run --config vitest.workers.config.ts tests/workers/project-data-tool-payload-archive.test.ts --reporter verbose`
+- `cd apps/api && timeout 240s pnpm exec vitest run --config vitest.workers.config.ts tests/workers/project-data-archive-sharding.test.ts --reporter verbose`
+- `pnpm exec vitest run scripts/quality/sync-wrangler-config.test.ts scripts/quality/deploy-reusable-workflow.test.ts`
+- `pnpm exec vitest run scripts/quality/do-migration-compatibility.test.ts`
+
+Requested specialist reviews completed:
+
+- `cloudflare-specialist`: PASS. D1 migration is additive, `wrangler.toml`
+  changes are non-sensitive vars, global cadence state uses D1 CAS/lease
+  semantics, and Workers-runtime tests cover the Cloudflare DO/D1/R2 paths.
+- `security-auditor`: PASS. New control is behind existing admin
+  auth/approval/superadmin middleware, validates request bodies, uses
+  parameterized SQL, does not expose secrets, and preserves raw
+  `chat_messages.content`/inline `tool_metadata.content` on archive failure.
+- `env-validator`: PASS. New Worker vars are present in Env types, DO Env
+  types, defaults/examples, deploy sync, GitHub workflow passthrough, public
+  configuration docs, and env reference skill.
+- `doc-sync-validator`: PASS. Public configuration docs, safe operator
+  sequence, API reference skill, env reference skill, and this task file match
+  the implemented endpoint/config behavior.
+- `constitution-validator`: PASS. New limits/cadences are defaults with Env
+  overrides; no hardcoded internal URLs/secrets or unconfigurable operational
+  budgets were added.
+- `test-engineer`: PASS. Added route unit tests and Workers-runtime vertical
+  slice tests for API/DO cleanup, R2 fail-closed behavior, D1 cadence, manual
+  canary bypass, and crash/retry behavior.
+- `task-completion-validator`: PASS. Checklist items, acceptance criteria, and
+  research findings are covered by the diff and tests; no UI propagation or
+  multi-resource selector work applies.
 
 ## References
 

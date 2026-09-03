@@ -36,6 +36,7 @@ export interface ProjectDataToolPayloadCleanupResult {
 
 export interface ProjectDataToolPayloadCleanupOptions {
   allowStart?: boolean;
+  forceStart?: boolean;
   now?: number;
   nowMs?: () => number;
   transactionSync?: <T>(callback: () => T) => T;
@@ -50,4 +51,5 @@ export interface ProjectDataToolPayloadCleanupOptions {
       lastError?: string | null;
     }
   ) => Promise<void>;
+  purgeReason?: string;
 }

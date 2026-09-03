@@ -13,6 +13,7 @@ import {
 const testEnv = env as unknown as WorkerEnv;
 const OWNER = 'archive-bridge-owner';
 const INSTALLATION = 'archive-bridge-installation';
+const TARGET_SHA = 'b'.repeat(64);
 
 function projectDataStub(ownerName: string): DurableObjectStub<ProjectDataTestDouble> {
   return env.PROJECT_DATA.get(
@@ -69,8 +70,76 @@ async function readLocation(projectId: string, sessionId: string) {
     }>();
 }
 
+async function clearArchiveCadence(): Promise<void> {
+  await env.DATABASE.prepare(
+    `DELETE FROM project_data_archive_global_sweep_cadence
+     WHERE sweep_name = 'archive_sharding_global_sweep'`
+  ).run();
+}
+
+async function readArchiveCadence() {
+  return env.DATABASE.prepare(
+    `SELECT last_started_at, next_eligible_at, last_status, lease_owner, lease_expires_at, run_count
+     FROM project_data_archive_global_sweep_cadence
+     WHERE sweep_name = 'archive_sharding_global_sweep'`
+  ).first<{
+    last_started_at: number;
+    next_eligible_at: number;
+    last_status: string;
+    lease_owner: string | null;
+    lease_expires_at: number | null;
+    run_count: number;
+  }>();
+}
+
+async function seedSourceDeletedCrashGap(
+  projectId: string,
+  sessionId: string,
+  migrationId: string
+): Promise<void> {
+  const sourceOwnerName = projectId;
+  const targetOwnerName = `${projectId}:archive:g1:s1`;
+  await env.DATABASE.batch([
+    env.DATABASE.prepare(
+      `INSERT INTO project_data_archive_migrations (
+         migration_id, project_id, session_id, state, source_owner_name, target_owner_name,
+         source_generation, target_generation, source_intent_token, terminal_version_sha256,
+         target_aggregate_sha256, r2_manifest_key, lease_epoch, attempt_count,
+         candidate_at, created_at, updated_at
+       )
+       VALUES (?, ?, ?, 'source_deleted', ?, ?, 0, 1, 'source-token', ?, ?, 'manifest-key',
+               0, 1, 1000, 1000, 1000)`
+    ).bind(
+      migrationId,
+      projectId,
+      sessionId,
+      sourceOwnerName,
+      targetOwnerName,
+      'a'.repeat(64),
+      TARGET_SHA
+    ),
+    env.DATABASE.prepare(
+      `INSERT INTO project_data_session_locations (
+         project_id, session_id, location_state, owner_kind, owner_name, generation,
+         migration_id, source_owner_name, target_owner_name, target_aggregate_sha256,
+         routing_schema_version, updated_at
+       )
+       VALUES (?, ?, 'migrating', 'archive_shard', ?, 1, ?, ?, ?, ?, 1, 1000)`
+    ).bind(
+      projectId,
+      sessionId,
+      targetOwnerName,
+      migrationId,
+      sourceOwnerName,
+      targetOwnerName,
+      TARGET_SHA
+    ),
+  ]);
+}
+
 describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
   it('migrates a terminal transcript through real DO SQLite, publishes archive routing, and records databaseSize reclaim evidence', async () => {
+    await clearArchiveCadence();
     const projectId = `archive-bridge-${crypto.randomUUID()}`;
     await seedProjectGraph(projectId);
     const source = projectDataStub(projectId);
@@ -201,6 +270,64 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
         });
         expect(targetRows.messages).toBe(12);
         expect(targetRows.chunks).toBeGreaterThan(0);
+      }
+    );
+  });
+
+  it('daily-gates repeated global scheduled archive-sharding sweeps in the Workers runtime', async () => {
+    await clearArchiveCadence();
+    const projectId = `archive-cadence-${crypto.randomUUID()}`;
+    const sessionId = `session-${crypto.randomUUID()}`;
+    const migrationId = `migration-${crypto.randomUUID()}`;
+    const firstNow = Date.now() + 60_000;
+    await seedProjectGraph(projectId);
+    await seedSourceDeletedCrashGap(projectId, sessionId, migrationId);
+
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '4',
+      },
+      async () => {
+        const first = await runProjectDataArchiveSharding(testEnv, new Date(firstNow));
+        expect(first).toMatchObject({
+          enabled: true,
+          skipped: false,
+          recoveredCrashGaps: 1,
+          cadence: {
+            claimed: true,
+            nextEligibleAt: firstNow + 86_400_000,
+            lastStatus: 'succeeded',
+            runCount: 1,
+          },
+        });
+        expect(await readLocation(projectId, sessionId)).toMatchObject({
+          location_state: 'archive_shard',
+        });
+
+        const second = await runProjectDataArchiveSharding(testEnv, new Date(firstNow + 300_000));
+        expect(second).toMatchObject({
+          skipped: true,
+          skipReason: 'cadence_not_due',
+          selected: 0,
+          migrated: 0,
+          recoveredCrashGaps: 0,
+          cadence: {
+            claimed: false,
+            nextEligibleAt: firstNow + 86_400_000,
+            remainingMs: 86_100_000,
+            runCount: 1,
+          },
+        });
+        expect(await readArchiveCadence()).toMatchObject({
+          last_started_at: firstNow,
+          next_eligible_at: firstNow + 86_400_000,
+          last_status: 'succeeded',
+          lease_owner: null,
+          lease_expires_at: null,
+          run_count: 1,
+        });
       }
     );
   });

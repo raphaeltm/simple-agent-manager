@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
 
+import { resolveStorageSafetyConfig } from '../../durable-objects/project-data/storage-safety';
+import { ProjectDataManualToolPayloadCleanupStateError } from '../../durable-objects/project-data/tool-payload-manual-cleanup';
 import type { Env } from '../../env';
 import { errors } from '../../middleware/error';
 import {
@@ -16,6 +18,7 @@ import {
   ProjectDataArchiveCircuitBreakerSchema,
   ProjectDataArchiveFreezeProjectSchema,
   ProjectDataArchiveRecoveryControlSchema,
+  ProjectDataManualToolPayloadCleanupSchema,
   ProjectDataStorageEmergencyPurgeSchema,
   ProjectDataStorageReliefMeasureSchema,
 } from '../../schemas';
@@ -23,6 +26,7 @@ import {
   measureProjectDataStorage,
   measureProjectDataStorageRelief,
   runProjectDataGroupedFtsCleanup,
+  runProjectDataManualToolPayloadCleanup,
   runProjectDataStorageEmergencyPurge,
 } from '../../services/project-data';
 import {
@@ -99,6 +103,41 @@ function parseArchiveFrozenIntentLimit(rawLimit: string | undefined, env: Env): 
 function assertProjectId(projectId: string | undefined): string {
   if (!projectId?.trim()) throw errors.badRequest('projectId is required');
   return projectId.trim();
+}
+
+function assertManualToolPayloadCleanupBudgetBounds(
+  body: {
+    batchRows?: number;
+    batchBytes?: number;
+    wallTimeMs?: number;
+  },
+  env: Env
+): void {
+  const config = resolveStorageSafetyConfig(env);
+  if (
+    body.batchRows !== undefined &&
+    body.batchRows > config.toolPayloadManualCleanupMaxBatchRows
+  ) {
+    throw errors.badRequest(
+      `batchRows must be between 1 and ${config.toolPayloadManualCleanupMaxBatchRows}`
+    );
+  }
+  if (
+    body.batchBytes !== undefined &&
+    body.batchBytes > config.toolPayloadManualCleanupMaxBatchBytes
+  ) {
+    throw errors.badRequest(
+      `batchBytes must be between 1 and ${config.toolPayloadManualCleanupMaxBatchBytes}`
+    );
+  }
+  if (
+    body.wallTimeMs !== undefined &&
+    body.wallTimeMs > config.toolPayloadManualCleanupMaxWallTimeMs
+  ) {
+    throw errors.badRequest(
+      `wallTimeMs must be between 1 and ${config.toolPayloadManualCleanupMaxWallTimeMs}`
+    );
+  }
 }
 
 /**
@@ -432,6 +471,42 @@ adminProjectDataStorageRoutes.post('/:projectId/relief-measure', async (c) => {
   const result = await measureProjectDataStorageRelief(c.env, projectId, body);
   return c.json({ result });
 });
+
+/**
+ * POST /api/admin/project-data/storage/:projectId/tool-payload-cleanup
+ *
+ * Explicit superadmin-only, project-scoped archival cleanup pass. This control
+ * bypasses automatic cleanup enablement but still reuses the
+ * archive-confirmed-before-delete cleanup implementation.
+ */
+adminProjectDataStorageRoutes.post(
+  '/:projectId/tool-payload-cleanup',
+  jsonValidator(ProjectDataManualToolPayloadCleanupSchema),
+  async (c) => {
+    const projectId = assertProjectId(c.req.param('projectId'));
+    const body = c.req.valid('json');
+    assertManualToolPayloadCleanupBudgetBounds(body, c.env);
+
+    try {
+      const result = await runProjectDataManualToolPayloadCleanup(c.env, projectId, {
+        reason: body.reason.trim(),
+        idempotencyKey: body.idempotencyKey.trim(),
+        batchRows: body.batchRows,
+        batchBytes: body.batchBytes,
+        wallTimeMs: body.wallTimeMs,
+      });
+      return c.json({ result });
+    } catch (error) {
+      if (error instanceof ProjectDataManualToolPayloadCleanupStateError) {
+        if (error.reason === 'idempotency_conflict') {
+          throw errors.conflict(error.message);
+        }
+        throw errors.badRequest(error.message);
+      }
+      throw error;
+    }
+  }
+);
 
 /**
  * POST /api/admin/project-data/storage/:projectId/grouped-fts-cleanup

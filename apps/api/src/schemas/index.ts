@@ -135,6 +135,7 @@ export {
   ProjectDataArchiveCircuitBreakerSchema,
   ProjectDataArchiveFreezeProjectSchema,
   ProjectDataArchiveRecoveryControlSchema,
+  ProjectDataManualToolPayloadCleanupSchema,
   ProjectDataStorageEmergencyPurgeSchema,
   ProjectDataStorageReliefMeasureSchema,
   UpdatePlatformCredentialSchema,

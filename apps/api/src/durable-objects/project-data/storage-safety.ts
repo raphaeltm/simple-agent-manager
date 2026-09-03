@@ -78,6 +78,13 @@ export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS = 7;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM = 25;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS = 20 * 1000;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_ROWS =
+  DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_BYTES =
+  DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_WALL_TIME_MS =
+  DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_RECHECK_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS = 5;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS = 5 * 1000;
@@ -173,6 +180,10 @@ export interface StorageSafetyConfig {
   toolPayloadCleanupRecheckMs: number;
   toolPayloadCleanupMaxSessionsPerAlarm: number;
   toolPayloadCleanupWallTimeMs: number;
+  toolPayloadManualCleanupMaxBatchRows: number;
+  toolPayloadManualCleanupMaxBatchBytes: number;
+  toolPayloadManualCleanupMaxWallTimeMs: number;
+  toolPayloadManualCleanupRecheckMs: number;
   toolPayloadArchiveRetentionMs: number;
   toolPayloadArchiveIntervalMs: number;
   toolPayloadArchiveR2Prefix: string;
@@ -369,6 +380,22 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
     toolPayloadCleanupWallTimeMs: parsePositiveInteger(
       env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS,
       DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS
+    ),
+    toolPayloadManualCleanupMaxBatchRows: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_ROWS,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_ROWS
+    ),
+    toolPayloadManualCleanupMaxBatchBytes: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_BYTES,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_BYTES
+    ),
+    toolPayloadManualCleanupMaxWallTimeMs: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_WALL_TIME_MS,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_WALL_TIME_MS
+    ),
+    toolPayloadManualCleanupRecheckMs: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_RECHECK_MS,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_RECHECK_MS
     ),
     toolPayloadArchiveRetentionMs: archiveRetentionDays * 24 * 60 * 60 * 1000,
     toolPayloadArchiveIntervalMs: parsePositiveInteger(

@@ -41,6 +41,9 @@ const PROJECT_DATA_ARCHIVE_DEFAULT_MANUAL_CANARY_MAX_SESSIONS = 5;
 const PROJECT_DATA_ARCHIVE_DEFAULT_MANUAL_CANARY_MAX_WALL_TIME_MS = 15_000;
 const PROJECT_DATA_ARCHIVE_DEFAULT_FROZEN_INTENT_INSPECTION_LIMIT = 5;
 const PROJECT_DATA_ARCHIVE_DEFAULT_FROZEN_INTENT_INSPECTION_MAX_LIMIT = 10;
+const PROJECT_DATA_ARCHIVE_DEFAULT_GLOBAL_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const PROJECT_DATA_ARCHIVE_MAX_GLOBAL_SWEEP_INTERVAL_MS = 365 * 24 * 60 * 60 * 1000;
+const PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_CADENCE_NAME = 'archive_sharding_global_sweep';
 
 const ACTIVE_RECLAIMABLE_STATES = [
   'candidate',
@@ -80,6 +83,7 @@ const JOURNAL_PHASE_RANK: Record<ProjectDataArchiveJournalState, number> = {
 
 type ArchiveCoordinatorConfig = {
   enabled: boolean;
+  globalSweepIntervalMs: number;
   shardCount: number;
   sweepProjects: number;
   sweepSessions: number;
@@ -132,10 +136,48 @@ type ClaimedMigrationRow = MigrationRow & {
   lease_expires_at: number;
 };
 
+type ProjectDataArchiveGlobalSweepCadenceStatus =
+  | 'never'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'partial';
+
+type ProjectDataArchiveGlobalSweepCadenceRow = {
+  sweep_name: string;
+  last_started_at: number | null;
+  last_completed_at: number | null;
+  next_eligible_at: number;
+  last_status: ProjectDataArchiveGlobalSweepCadenceStatus;
+  last_skip_reason: string | null;
+  last_error: string | null;
+  lease_owner: string | null;
+  lease_expires_at: number | null;
+  run_count: number;
+  updated_at: number;
+};
+
+export type ProjectDataArchiveGlobalSweepCadenceState = {
+  claimed: boolean;
+  intervalMs: number;
+  sweepName: string;
+  lastStartedAt: number | null;
+  lastCompletedAt: number | null;
+  nextEligibleAt: number | null;
+  remainingMs: number;
+  lastStatus: ProjectDataArchiveGlobalSweepCadenceStatus;
+  lastSkipReason: string | null;
+  lastError: string | null;
+  leaseOwner: string | null;
+  leaseExpiresAt: number | null;
+  runCount: number;
+};
+
 export type ProjectDataArchiveShardingStats = {
   enabled: boolean;
   skipped: boolean;
   skipReason: string | null;
+  cadence: ProjectDataArchiveGlobalSweepCadenceState;
   selected: number;
   migrated: number;
   recoveredCrashGaps: number;
@@ -288,6 +330,12 @@ function envInt(value: string | undefined, fallback: number, min: number, max: n
 function resolveConfig(env: Env): ArchiveCoordinatorConfig {
   return {
     enabled: env.PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED === 'true',
+    globalSweepIntervalMs: envInt(
+      env.PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS,
+      PROJECT_DATA_ARCHIVE_DEFAULT_GLOBAL_SWEEP_INTERVAL_MS,
+      1,
+      PROJECT_DATA_ARCHIVE_MAX_GLOBAL_SWEEP_INTERVAL_MS
+    ),
     shardCount: envInt(
       env.PROJECT_DATA_ARCHIVE_SHARD_COUNT,
       PROJECT_DATA_ARCHIVE_DEFAULT_SHARD_COUNT,
@@ -346,11 +394,61 @@ function resolveConfig(env: Env): ArchiveCoordinatorConfig {
   };
 }
 
-function emptyStats(config: ArchiveCoordinatorConfig, skipped: boolean, skipReason: string | null) {
+function emptyCadenceState(
+  config: ArchiveCoordinatorConfig
+): ProjectDataArchiveGlobalSweepCadenceState {
+  return {
+    claimed: false,
+    intervalMs: config.globalSweepIntervalMs,
+    sweepName: PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_CADENCE_NAME,
+    lastStartedAt: null,
+    lastCompletedAt: null,
+    nextEligibleAt: null,
+    remainingMs: 0,
+    lastStatus: 'never',
+    lastSkipReason: null,
+    lastError: null,
+    leaseOwner: null,
+    leaseExpiresAt: null,
+    runCount: 0,
+  };
+}
+
+function cadenceStateFromRow(
+  config: ArchiveCoordinatorConfig,
+  row: ProjectDataArchiveGlobalSweepCadenceRow | null,
+  now: number,
+  claimed: boolean
+): ProjectDataArchiveGlobalSweepCadenceState {
+  if (!row) return emptyCadenceState(config);
+  return {
+    claimed,
+    intervalMs: config.globalSweepIntervalMs,
+    sweepName: row.sweep_name,
+    lastStartedAt: row.last_started_at,
+    lastCompletedAt: row.last_completed_at,
+    nextEligibleAt: row.next_eligible_at,
+    remainingMs: Math.max(row.next_eligible_at - now, 0),
+    lastStatus: row.last_status,
+    lastSkipReason: row.last_skip_reason,
+    lastError: row.last_error,
+    leaseOwner: row.lease_owner,
+    leaseExpiresAt: row.lease_expires_at,
+    runCount: row.run_count,
+  };
+}
+
+function emptyStats(
+  config: ArchiveCoordinatorConfig,
+  skipped: boolean,
+  skipReason: string | null,
+  cadence: ProjectDataArchiveGlobalSweepCadenceState = emptyCadenceState(config)
+) {
   return {
     enabled: config.enabled,
     skipped,
     skipReason,
+    cadence,
     selected: 0,
     migrated: 0,
     recoveredCrashGaps: 0,
@@ -359,6 +457,181 @@ function emptyStats(config: ArchiveCoordinatorConfig, skipped: boolean, skipReas
     chunksCopied: 0,
     rowsCopied: 0,
   } satisfies ProjectDataArchiveShardingStats;
+}
+
+function globalSweepCadenceLeaseMs(config: ArchiveCoordinatorConfig): number {
+  return Math.min(Math.max(config.wallTimeMs + config.leaseMs + 60_000, 60_000), 60 * 60 * 1000);
+}
+
+async function ensureGlobalSweepCadenceRow(env: Env, now: number): Promise<void> {
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO project_data_archive_global_sweep_cadence (
+       sweep_name, next_eligible_at, last_status, run_count, updated_at
+     )
+     VALUES (?, 0, 'never', 0, ?)`
+  )
+    .bind(PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_CADENCE_NAME, now)
+    .run();
+}
+
+async function readGlobalSweepCadenceRow(
+  env: Env
+): Promise<ProjectDataArchiveGlobalSweepCadenceRow | null> {
+  return env.DATABASE.prepare(
+    `SELECT sweep_name, last_started_at, last_completed_at, next_eligible_at,
+            last_status, last_skip_reason, last_error, lease_owner, lease_expires_at,
+            run_count, updated_at
+     FROM project_data_archive_global_sweep_cadence
+     WHERE sweep_name = ?`
+  )
+    .bind(PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_CADENCE_NAME)
+    .first<ProjectDataArchiveGlobalSweepCadenceRow>();
+}
+
+async function claimGlobalSweepCadence(
+  env: Env,
+  config: ArchiveCoordinatorConfig,
+  now: number
+): Promise<
+  | {
+      claimed: true;
+      cadence: ProjectDataArchiveGlobalSweepCadenceState;
+      leaseOwner: string;
+    }
+  | {
+      claimed: false;
+      skipReason: 'cadence_not_due' | 'cadence_running' | 'cadence_unavailable';
+      cadence: ProjectDataArchiveGlobalSweepCadenceState;
+    }
+> {
+  try {
+    await ensureGlobalSweepCadenceRow(env, now);
+    const existing = await readGlobalSweepCadenceRow(env);
+    if (existing && existing.next_eligible_at > now) {
+      return {
+        claimed: false,
+        skipReason: 'cadence_not_due',
+        cadence: cadenceStateFromRow(config, existing, now, false),
+      };
+    }
+    if (
+      existing?.last_status === 'running' &&
+      existing.lease_expires_at !== null &&
+      existing.lease_expires_at > now
+    ) {
+      return {
+        claimed: false,
+        skipReason: 'cadence_running',
+        cadence: cadenceStateFromRow(config, existing, now, false),
+      };
+    }
+
+    const leaseOwner = crypto.randomUUID();
+    const result = await env.DATABASE.prepare(
+      `UPDATE project_data_archive_global_sweep_cadence
+       SET last_started_at = ?,
+           last_completed_at = NULL,
+           next_eligible_at = ?,
+           last_status = 'running',
+           last_skip_reason = NULL,
+           last_error = NULL,
+           lease_owner = ?,
+           lease_expires_at = ?,
+           run_count = run_count + 1,
+           updated_at = ?
+       WHERE sweep_name = ?
+         AND next_eligible_at <= ?
+         AND (
+           last_status != 'running'
+           OR lease_expires_at IS NULL
+           OR lease_expires_at <= ?
+         )`
+    )
+      .bind(
+        now,
+        now + config.globalSweepIntervalMs,
+        leaseOwner,
+        now + globalSweepCadenceLeaseMs(config),
+        now,
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_CADENCE_NAME,
+        now,
+        now
+      )
+      .run();
+    const row = await readGlobalSweepCadenceRow(env);
+    if ((result.meta.changes ?? 0) === 0) {
+      return {
+        claimed: false,
+        skipReason:
+          row?.last_status === 'running' &&
+          row.lease_expires_at !== null &&
+          row.lease_expires_at > now
+            ? 'cadence_running'
+            : 'cadence_not_due',
+        cadence: cadenceStateFromRow(config, row, now, false),
+      };
+    }
+    return {
+      claimed: true,
+      cadence: cadenceStateFromRow(config, row, now, true),
+      leaseOwner,
+    };
+  } catch (error) {
+    log.error('project_data_archive_global_sweep_cadence_unavailable', {
+      ...serializeError(error),
+    });
+    return {
+      claimed: false,
+      skipReason: 'cadence_unavailable',
+      cadence: emptyCadenceState(config),
+    };
+  }
+}
+
+async function finishGlobalSweepCadence(
+  env: Env,
+  config: ArchiveCoordinatorConfig,
+  stats: ProjectDataArchiveShardingStats,
+  leaseOwner: string,
+  status: Exclude<ProjectDataArchiveGlobalSweepCadenceStatus, 'never' | 'running'>,
+  error: unknown = null
+): Promise<void> {
+  const completedAt = Date.now();
+  const lastError =
+    status === 'partial'
+      ? `completed with failed=${stats.failed}, poisoned=${stats.poisoned}`
+      : error
+        ? errorMessage(error)
+        : null;
+  const result = await env.DATABASE.prepare(
+    `UPDATE project_data_archive_global_sweep_cadence
+     SET last_completed_at = ?,
+         last_status = ?,
+         last_skip_reason = NULL,
+         last_error = ?,
+         lease_owner = NULL,
+         lease_expires_at = NULL,
+         updated_at = ?
+     WHERE sweep_name = ?
+       AND lease_owner = ?`
+  )
+    .bind(
+      completedAt,
+      status,
+      lastError,
+      completedAt,
+      PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_CADENCE_NAME,
+      leaseOwner
+    )
+    .run();
+  if ((result.meta.changes ?? 0) === 0) {
+    log.warn('project_data_archive_global_sweep_cadence_finish_miss', {
+      leaseOwner,
+      status,
+    });
+  }
+  const row = await readGlobalSweepCadenceRow(env).catch(() => null);
+  stats.cadence = cadenceStateFromRow(config, row, completedAt, true);
 }
 
 function scopedConfig(
@@ -871,7 +1144,12 @@ async function selectScopedMigrationWork(
   migrations: MigrationRow[];
   selected: ProjectDataArchiveManualCanaryCandidate[];
 }> {
-  const reclaimable = await selectScopedReclaimableMigrations(env, scope, config.sweepSessions, now);
+  const reclaimable = await selectScopedReclaimableMigrations(
+    env,
+    scope,
+    config.sweepSessions,
+    now
+  );
   const selected: ProjectDataArchiveManualCanaryCandidate[] = reclaimable.map((migration) => ({
     projectId: migration.project_id,
     sessionId: migration.session_id,
@@ -2120,40 +2398,58 @@ export async function runProjectDataArchiveSharding(
 
   const startedAt = Date.now();
   const now = nowDate.getTime();
-  const stats = emptyStats(config, false, null);
-  const crashGapRecovery = await recoverCrashGaps(env, config, now);
-  stats.recoveredCrashGaps = crashGapRecovery.recovered;
-  stats.failed += crashGapRecovery.failed;
-  const candidates = await selectMigrationWork(env, config, nowDate, now);
-  stats.selected = candidates.length;
-  for (const migration of candidates) {
-    if (Date.now() - startedAt >= config.wallTimeMs) break;
-    try {
-      const result = await migrateCandidate(env, config, archiveR2, migration, now);
-      if (result.migrated) stats.migrated++;
-      if (result.recoveredCrashGap) stats.recoveredCrashGaps++;
-      stats.chunksCopied += result.chunksCopied;
-      stats.rowsCopied += result.rowsCopied;
-    } catch (error) {
-      const failureState = await markFailed(env, config, migration, now, error).catch(
-        (markError) => {
-          log.error('project_data_archive_mark_failed_failed', {
-            migrationId: migration.migration_id,
-            ...serializeError(markError),
-          });
-          return 'unchanged' as const;
-        }
-      );
-      recordMigrationFailure(stats, failureState);
-      log.warn('project_data_archive_candidate_failed', {
-        migrationId: migration.migration_id,
-        projectId: migration.project_id,
-        sessionId: migration.session_id,
-        ...serializeError(error),
-      });
-    }
+  const cadenceClaim = await claimGlobalSweepCadence(env, config, now);
+  if (!cadenceClaim.claimed) {
+    return emptyStats(config, true, cadenceClaim.skipReason, cadenceClaim.cadence);
   }
-  return stats;
+
+  const stats = emptyStats(config, false, null, cadenceClaim.cadence);
+  try {
+    const crashGapRecovery = await recoverCrashGaps(env, config, now);
+    stats.recoveredCrashGaps = crashGapRecovery.recovered;
+    stats.failed += crashGapRecovery.failed;
+    const candidates = await selectMigrationWork(env, config, nowDate, now);
+    stats.selected = candidates.length;
+    for (const migration of candidates) {
+      if (Date.now() - startedAt >= config.wallTimeMs) break;
+      try {
+        const result = await migrateCandidate(env, config, archiveR2, migration, now);
+        if (result.migrated) stats.migrated++;
+        if (result.recoveredCrashGap) stats.recoveredCrashGaps++;
+        stats.chunksCopied += result.chunksCopied;
+        stats.rowsCopied += result.rowsCopied;
+      } catch (error) {
+        const failureState = await markFailed(env, config, migration, now, error).catch(
+          (markError) => {
+            log.error('project_data_archive_mark_failed_failed', {
+              migrationId: migration.migration_id,
+              ...serializeError(markError),
+            });
+            return 'unchanged' as const;
+          }
+        );
+        recordMigrationFailure(stats, failureState);
+        log.warn('project_data_archive_candidate_failed', {
+          migrationId: migration.migration_id,
+          projectId: migration.project_id,
+          sessionId: migration.session_id,
+          ...serializeError(error),
+        });
+      }
+    }
+    await finishGlobalSweepCadence(
+      env,
+      config,
+      stats,
+      cadenceClaim.leaseOwner,
+      stats.failed > 0 || stats.poisoned > 0 ? 'partial' : 'succeeded'
+    );
+    return stats;
+  } catch (error) {
+    stats.failed++;
+    await finishGlobalSweepCadence(env, config, stats, cadenceClaim.leaseOwner, 'failed', error);
+    throw error;
+  }
 }
 
 export async function runScopedProjectDataArchiveCanary(

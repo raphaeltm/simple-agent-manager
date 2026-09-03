@@ -95,6 +95,11 @@ import type {
   ArchivedToolPayloadQuery,
   MessageToolContentResult,
 } from '../durable-objects/project-data/tool-payload-archive';
+import {
+  type ProjectDataManualToolPayloadCleanupInput,
+  type ProjectDataManualToolPayloadCleanupResult,
+  ProjectDataManualToolPayloadCleanupStateError,
+} from '../durable-objects/project-data/tool-payload-manual-cleanup';
 export {
   CommentIdempotencyConflictError,
   CommentLimitExceededError,
@@ -163,7 +168,8 @@ async function resolveExactReadOwnerIfArchiveEnabled(
   projectId: string,
   sessionId: string
 ): Promise<ProjectDataArchiveLocation> {
-  if (!isProjectDataArchiveExactRoutingEnabled(env)) return rootExactReadOwner(projectId, sessionId);
+  if (!isProjectDataArchiveExactRoutingEnabled(env))
+    return rootExactReadOwner(projectId, sessionId);
   return resolveExactReadOwner(env, projectId, sessionId);
 }
 
@@ -228,7 +234,23 @@ function normalizeProjectDataRpcError(projectId: string, operation: string, err:
   if (commentError) return commentError;
   const eventError = normalizeProjectDataEventRpcError(err);
   if (eventError) return eventError;
+  const manualToolPayloadCleanupError = normalizeManualToolPayloadCleanupRpcError(err);
+  if (manualToolPayloadCleanupError) return manualToolPayloadCleanupError;
   return err;
+}
+
+function normalizeManualToolPayloadCleanupRpcError(err: unknown): Error | null {
+  if (err instanceof ProjectDataManualToolPayloadCleanupStateError) return err;
+  if (!(err instanceof Error)) return null;
+  const prefix = 'ProjectDataManualToolPayloadCleanupStateError: ';
+  if (!err.message.startsWith(prefix)) return null;
+  const message = err.message.slice(prefix.length);
+  return new ProjectDataManualToolPayloadCleanupStateError(
+    message.includes('idempotencyKey was already used')
+      ? 'idempotency_conflict'
+      : 'invalid_request',
+    message
+  );
 }
 
 function normalizeProjectDataCommentRpcError(err: unknown): Error | null {
@@ -553,7 +575,12 @@ export async function linkSessionToWorkspace(
   sessionId: string,
   workspaceId: string
 ): Promise<void> {
-  await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'linkSessionToWorkspace');
+  await assertExactWriteAllowedIfArchiveEnabled(
+    env,
+    projectId,
+    sessionId,
+    'linkSessionToWorkspace'
+  );
   return callProjectDataWithRetry(env, projectId, 'linkSessionToWorkspace', (stub) =>
     stub.linkSessionToWorkspace(sessionId, workspaceId)
   );
@@ -1778,6 +1805,16 @@ export async function runProjectDataGroupedFtsCleanup(
 ): Promise<ProjectDataGroupedFtsCleanupResult | null> {
   return callProjectDataNoRetry(env, projectId, 'runProjectDataGroupedFtsCleanup', (stub) =>
     stub.runGroupedFtsCleanup()
+  );
+}
+
+export async function runProjectDataManualToolPayloadCleanup(
+  env: Env,
+  projectId: string,
+  input: ProjectDataManualToolPayloadCleanupInput
+): Promise<ProjectDataManualToolPayloadCleanupResult> {
+  return callProjectDataNoRetry(env, projectId, 'runProjectDataManualToolPayloadCleanup', (stub) =>
+    stub.runManualToolPayloadCleanup(input)
   );
 }
 
