@@ -71,16 +71,16 @@ Separately, the observability lesson is that an active trigger with deliveries r
 
 ## Implementation Checklist
 
-- [ ] Add backend regression tests proving `issues`/`opened`, `pull_request`/`opened`, and `push` events with stray stored `commandPrefix: "/sam"` still match when all applicable filters pass.
-- [ ] Add an `issue_comment` control test proving `commandPrefix` is still enforced and preserves the `comment does not start with '/sam'` reason string.
-- [ ] Verify the `issues` regression test fails against pre-fix code and record the command/result.
-- [ ] Update `evaluateFilters()` to apply `commandPrefix` only when `event.event === 'issue_comment'`.
-- [ ] Add web tests for `buildGitHubFilters()` proving `commandPrefix` is omitted for non-comment event types and preserved for `issue_comment`.
-- [ ] Update `buildGitHubFilters()` to persist `commandPrefix` only for `issue_comment`.
-- [ ] Add presentation tests proving `formatTriggerSource()` renders the prefix for `issue_comment` and not for `issues`.
-- [ ] Update `formatTriggerSource()` to render `commandPrefix` only for `issue_comment`.
-- [ ] Add the `.claude/rules/` process fix for event-scoped filter predicates.
-- [ ] Run targeted API/web unit tests and prove no test collection regressions.
+- [x] Add backend regression tests proving `issues`/`opened`, `pull_request`/`opened`, and `push` events with stray stored `commandPrefix: "/sam"` still match when all applicable filters pass.
+- [x] Add an `issue_comment` control test proving `commandPrefix` is still enforced and preserves the `comment does not start with '/sam'` reason string.
+- [x] Verify the `issues` regression test fails against pre-fix code and record the command/result.
+- [x] Update `evaluateFilters()` to apply `commandPrefix` only when `event.event === 'issue_comment'`.
+- [x] Add web tests for `buildGitHubFilters()` proving `commandPrefix` is omitted for non-comment event types and preserved for `issue_comment`.
+- [x] Update `buildGitHubFilters()` to persist `commandPrefix` only for `issue_comment`.
+- [x] Add presentation tests proving `formatTriggerSource()` renders the prefix for `issue_comment` and not for `issues`.
+- [x] Update `formatTriggerSource()` to render `commandPrefix` only for `issue_comment`.
+- [x] Add the `.claude/rules/` process fix for event-scoped filter predicates.
+- [x] Run targeted API/web unit tests and prove no test collection regressions.
 - [ ] Run local Playwright screenshots for trigger list row rendering and trigger form GitHub fields at 1280x800 and 375x667 using stress data; review overflow/clipping/readability.
 - [ ] Run full quality suite.
 - [ ] Run specialist reviews: task-completion-validator, cloudflare-specialist, ui-ux-specialist, constitution-validator, test-engineer, doc-sync-validator.
@@ -102,4 +102,6 @@ Separately, the observability lesson is that an active trigger with deliveries r
 
 ## Validation Log
 
-Pending.
+- Pre-fix discrimination: after adding the backend regression tests and before changing `evaluateFilters()`, `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/github-trigger-filter.test.ts` failed with 3 expected failures. Each non-comment event (`issues`, `pull_request`, `push`) returned `{ matched: false, reason: "comment does not start with '/sam'" }` instead of `{ matched: true }`.
+- Post-fix API focus: `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/github-trigger-filter.test.ts` passed, 1 file / 47 tests. The same file previously had 44 tests, so the three added backend cases were collected and run.
+- Post-fix web focus: `pnpm --filter @simple-agent-manager/web test -- tests/unit/components/trigger-form-support.test.ts tests/unit/components/trigger-presentation.test.ts` passed, 2 files / 30 tests.

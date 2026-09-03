@@ -136,7 +136,9 @@ export function buildGitHubFilters(input: {
   if (actions) filters.actions = actions;
   if (labels) filters.labels = labels;
   if (ignoreActors) filters.ignoreActors = ignoreActors;
-  if (input.commandPrefix.trim()) filters.commandPrefix = input.commandPrefix.trim();
+  if (input.eventType === 'issue_comment' && input.commandPrefix.trim()) {
+    filters.commandPrefix = input.commandPrefix.trim();
+  }
   if (input.bodyContains.trim()) filters.bodyContains = input.bodyContains.trim();
   if (branches) filters.branches = branches;
   if (input.eventType === 'pull_request' && input.ignoreDrafts) filters.ignoreDrafts = true;
