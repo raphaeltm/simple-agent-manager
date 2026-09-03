@@ -913,6 +913,7 @@ describe('session activity reconciliation', () => {
           reason: 'cancelled',
           source: 'control_plane',
           observedAt: now,
+          guard: 'turn_start',
         })
       ).toBe(true);
 
@@ -935,6 +936,7 @@ describe('session activity reconciliation', () => {
           reason: 'cancelled',
           source: 'control_plane',
           observedAt,
+          guard: 'turn_start',
         })
       ).toBe(false);
       expect(readState()?.activity).toBe('prompting');
@@ -948,6 +950,7 @@ describe('session activity reconciliation', () => {
           reason: 'force_stopped',
           source: 'control_plane',
           observedAt: now,
+          guard: 'turn_start',
         })
       ).toBe(false);
     });

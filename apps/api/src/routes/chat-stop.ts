@@ -150,9 +150,18 @@ async function signalAgentStopBestEffort(
       userId: context.userId,
     });
 
-    const { cancelAgentSessionOnNode, stopAgentSessionOnNode } = await import(
-      '../services/node-agent'
-    );
+    const {
+      cancelAgentSessionOnNode,
+      stopAgentSessionOnNode,
+      getNodeAgentBackgroundRequestTimeoutMs,
+    } = await import('../services/node-agent');
+
+    // Both calls run on the BACKGROUND timeout tier, not the interactive one.
+    // Neither result is awaited for a decision — the archive proceeds either way
+    // — so inheriting the 30s interactive budget would add up to a minute of
+    // latency to a foreground archive precisely when the node is unreachable,
+    // which is the case where the signal cannot land anyway (.claude/rules/47).
+    const requestTimeoutMs = getNodeAgentBackgroundRequestTimeoutMs(env);
 
     // Cancel first so an in-flight prompt is interrupted rather than left to
     // race the stop, then stop the session host itself.
@@ -161,14 +170,16 @@ async function signalAgentStopBestEffort(
       workspace.id,
       agentSession.id,
       env,
-      context.userId
+      context.userId,
+      { requestTimeoutMs }
     );
     await stopAgentSessionOnNode(
       workspace.nodeId,
       workspace.id,
       agentSession.id,
       env,
-      context.userId
+      context.userId,
+      { requestTimeoutMs }
     );
   } catch (err) {
     log.info('chat.stop_agent_signal_skipped', {

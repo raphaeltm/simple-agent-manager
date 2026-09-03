@@ -21,6 +21,41 @@ function getStub(projectId: string): DurableObjectStub<ProjectData> {
   return env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectData>;
 }
 
+/**
+ * Park a durable message in `retry_wait` behind an in-flight turn — the exact
+ * state symptom B leaves a follow-up prompt in ("Target VM is currently
+ * processing a prompt"). Returns a reader for its `next_attempt_at` so a test
+ * can prove the message was actually RELEASED, not merely that some code ran.
+ */
+async function queueBlockedDelivery(
+  stub: DurableObjectStub<ProjectData>,
+  chatSessionId: string,
+  parkedUntil: number
+): Promise<() => Promise<number | null>> {
+  await runInDurableObject(stub, async (instance: ProjectData) => {
+    const sql = (instance as unknown as { sql: SqlStorage }).sql;
+    sql.exec(
+      `INSERT INTO session_inbox
+         (id, target_session_id, message_type, content, priority, created_at,
+          delivery_state, next_attempt_at, last_error, source_kind)
+       VALUES ('msg-blocked', ?, 'prompt', 'Carry on...', 'normal', ?, 'retry_wait', ?, ?, 'agent_mailbox')`,
+      chatSessionId,
+      Date.now() - 60 * 60 * 1000,
+      parkedUntil,
+      'Target VM is currently processing a prompt'
+    );
+  });
+
+  return async () =>
+    runInDurableObject(stub, (instance: ProjectData) => {
+      const sql = (instance as unknown as { sql: SqlStorage }).sql;
+      const row = sql
+        .exec('SELECT next_attempt_at FROM session_inbox WHERE id = ?', 'msg-blocked')
+        .toArray()[0];
+      return (row?.next_attempt_at as number | null) ?? null;
+    });
+}
+
 /** A chat session with a linked ACP session, both reporting a working turn. */
 async function seedWorkingSession(projectId: string): Promise<{
   stub: DurableObjectStub<ProjectData>;
@@ -61,18 +96,41 @@ describe('session terminal end — activity mirror fan-out', () => {
     expect(chatState?.lastStopReason).toBe('Session stopped');
   });
 
-  it('stopSession CANCELS the idle cleanup schedule rather than re-arming it', async () => {
+  /**
+   * The idle schedule's expiry is what actually calls `stopWorkspaceInD1`, and
+   * some callers deliberately end the session while keeping the workspace
+   * running (`scheduled/stuck-tasks.ts` transitions with `stopWorkspace: false`
+   * before failing the session). So a terminal transition must do NEITHER of the
+   * two obvious things: re-arming pushes teardown out on a session that will
+   * never report again, and cancelling deletes that workspace's only teardown
+   * path. It leaves the original deadline exactly where it was.
+   */
+  it('stopSession neither re-arms nor deletes the idle cleanup schedule', async () => {
     const { stub, chatSessionId } = await seedWorkingSession('term-stop-2');
     await stub.scheduleIdleCleanup(chatSessionId, 'ws-1', null);
-    expect(await stub.getCleanupAt(chatSessionId)).toBeGreaterThan(0);
+    const scheduledAt = await stub.getCleanupAt(chatSessionId);
+    expect(scheduledAt).toBeGreaterThan(0);
 
     await stub.stopSession(chatSessionId);
 
-    // A terminal session must not be handed a fresh idle timer — that is the
-    // immortal-candidate anti-pattern (.claude/rules/47 §3). This is precisely
-    // why the fan-out does not reuse `publishTurnEnd`, whose `armIdleCleanup`
-    // hook calls `resetIdleCleanup`.
-    expect(await stub.getCleanupAt(chatSessionId)).toBeNull();
+    // Unchanged: not pushed forward (which `publishTurnEnd`'s `armIdleCleanup`
+    // hook would do via `resetIdleCleanup`), and not deleted.
+    expect(await stub.getCleanupAt(chatSessionId)).toBe(scheduledAt);
+  });
+
+  it('a TURN ending still re-arms the idle timer (discriminating control)', async () => {
+    const { stub, chatSessionId, acpSessionId } = await seedWorkingSession('term-turn-rearm');
+    await stub.scheduleIdleCleanup(chatSessionId, 'ws-1', null);
+    const scheduledAt = (await stub.getCleanupAt(chatSessionId))!;
+
+    // Without this control, "the schedule was untouched" would also pass if the
+    // idle-timer handling were removed altogether.
+    await stub.recordSessionTurnEnd(acpSessionId, {
+      reason: 'cancelled',
+      observedAt: Date.now(),
+    });
+
+    expect(await stub.getCleanupAt(chatSessionId)).toBeGreaterThan(scheduledAt);
   });
 
   it('failSession terminalizes the mirror and retains the failure context', async () => {
@@ -122,6 +180,62 @@ describe('session terminal end — activity mirror fan-out', () => {
     // reports false and must not run the fan-out again.
     await expect(stub.stopSession(chatSessionId)).resolves.toBe(false);
     expect((await stub.getSessionState(chatSessionId))?.activity).toBe('stopped');
+  });
+
+  it('stopSession RELEASES a delivery parked behind the ended turn', async () => {
+    const { stub, chatSessionId } = await seedWorkingSession('term-nudge-1');
+    const parkedUntil = Date.now() + 30 * 60 * 1000;
+    const readNextAttempt = await queueBlockedDelivery(stub, chatSessionId, parkedUntil);
+    // Precondition — the message really is parked, so the assertion below cannot
+    // pass vacuously.
+    expect(await readNextAttempt()).toBe(parkedUntil);
+
+    await stub.stopSession(chatSessionId);
+
+    // The third consumer of "is this session mid-prompt". Without this the
+    // message would sit in retry_wait behind a turn that will never finish —
+    // which is symptom B.
+    const released = await readNextAttempt();
+    expect(released).not.toBeNull();
+    expect(released!).toBeLessThan(parkedUntil);
+  });
+
+  it('failSession likewise releases a parked delivery', async () => {
+    const { stub, chatSessionId } = await seedWorkingSession('term-nudge-2');
+    const parkedUntil = Date.now() + 30 * 60 * 1000;
+    const readNextAttempt = await queueBlockedDelivery(stub, chatSessionId, parkedUntil);
+
+    await stub.failSession(chatSessionId, 'Agent crashed');
+
+    const released = await readNextAttempt();
+    expect(released!).toBeLessThan(parkedUntil);
+  });
+
+  /**
+   * The capability test for the ACTUAL user-reported outcome (symptom B):
+   * interrupt mid-turn, then the follow-up you already sent gets delivered.
+   *
+   * Driven through `recordSessionTurnEnd` — the DO RPC `chat-cancel.ts` calls —
+   * with a real queued delivery, so it exercises the whole composition
+   * (CAS -> publishTurnEnd -> nudge) rather than each layer separately
+   * (.claude/rules/10, .claude/rules/35).
+   */
+  it('interrupt -> turn ends -> the queued follow-up is released', async () => {
+    const { stub, chatSessionId, acpSessionId } = await seedWorkingSession('term-cancel-e2e');
+    const parkedUntil = Date.now() + 30 * 60 * 1000;
+    const readNextAttempt = await queueBlockedDelivery(stub, chatSessionId, parkedUntil);
+    expect(await readNextAttempt()).toBe(parkedUntil);
+
+    // The user presses Interrupt. `chat-cancel.ts` captures `observedAt` BEFORE
+    // its VM round-trip, then records the turn end with it.
+    const observedAt = Date.now();
+    await expect(
+      stub.recordSessionTurnEnd(acpSessionId, { reason: 'cancelled', observedAt })
+    ).resolves.toBe(true);
+
+    expect((await stub.getSessionState(acpSessionId))?.activity).toBe('idle');
+    const released = await readNextAttempt();
+    expect(released!).toBeLessThan(parkedUntil);
   });
 
   it('a mirror write failure never turns a successful stop into a failed one', async () => {
