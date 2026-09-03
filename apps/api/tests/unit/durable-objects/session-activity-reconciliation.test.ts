@@ -710,7 +710,9 @@ describe('session activity reconciliation', () => {
           armIdleCleanup: (chatSessionId) => armed.push(chatSessionId),
           recalculateAlarm: async () => {},
         },
-        CHAT_SESSION
+        CHAT_SESSION,
+        // A TURN ending: the session lives on and still wants an idle timer.
+        { kind: 'idle' }
       );
 
       // All three consumers observe the same transition.
