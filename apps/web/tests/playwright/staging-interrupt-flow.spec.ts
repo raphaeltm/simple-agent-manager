@@ -99,6 +99,27 @@ async function resolveSessionId(page: Page, projectId: string): Promise<string> 
  * stops rising even as new messages land — which reads exactly like "the agent
  * never answered". `messageCount` is monotonic and cannot silently saturate.
  */
+/**
+ * How many ASSISTANT messages exist. Used only as the pre-interrupt gate, while
+ * the transcript is short enough that the detail payload's page cap cannot bite.
+ *
+ * Deliberately not the raw total: SAM injects its own `get_instructions` reminder
+ * as an extra message, so a total of 2 is reachable with zero agent output — the
+ * gate would pass before the agent had done anything.
+ */
+async function assistantMessageCount(
+  page: Page,
+  projectId: string,
+  sessionId: string
+): Promise<number> {
+  const res = await page.request.get(
+    `${STAGING_API}/api/projects/${projectId}/sessions/${sessionId}`
+  );
+  if (res.status() !== 200) return 0;
+  const body = (await res.json()) as { messages?: Array<{ role: string }> };
+  return (body.messages ?? []).filter((m) => m.role === 'assistant').length;
+}
+
 async function sessionMessageCount(
   page: Page,
   projectId: string,
@@ -181,11 +202,21 @@ test.describe('Staging — interrupt then follow-up', () => {
     const messageCount = () => sessionMessageCount(page, project!.id, sessionId);
 
     await expect
-      .poll(messageCount, {
+      .poll(() => assistantMessageCount(page, project!.id, sessionId), {
         timeout: AGENT_START_TIMEOUT_MS,
         message: 'agent never produced output, so it was never genuinely mid-turn',
       })
-      .toBeGreaterThan(1);
+      .toBeGreaterThan(0);
+
+    // The dock's working morph lags real activity by
+    // COMPLETION_DOCK_IDLE_STABILIZE_MS, so it can still show Interrupt for a
+    // second after the agent has gone idle — clicking then would interrupt
+    // nothing. The composer placeholder tracks `agentActivity` directly, so it is
+    // the honest signal that a turn is genuinely in flight right now.
+    await expect(
+      page.getByPlaceholder(/agent is working/i),
+      'the agent was not actually mid-turn at the moment of the interrupt'
+    ).toBeVisible({ timeout: 60_000 });
 
     const interrupt = page.getByRole('button', INTERRUPT);
     await expect(interrupt, 'agent never entered the working state').toBeVisible({
