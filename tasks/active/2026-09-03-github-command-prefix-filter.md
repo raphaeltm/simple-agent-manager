@@ -84,7 +84,7 @@ Separately, the observability lesson is that an active trigger with deliveries r
 - [x] Run local Playwright screenshots for trigger list row rendering and trigger form GitHub fields at 1280x800 and 375x667 using stress data; review overflow/clipping/readability.
 - [x] Run full quality suite.
 - [x] Run specialist reviews: task-completion-validator, cloudflare-specialist, ui-ux-specialist, constitution-validator, test-engineer, doc-sync-validator.
-- [ ] Check for other active staging agents/runs, deploy to staging, and verify changed behavior.
+- [x] Check for other active staging agents/runs, deploy to staging, and verify changed behavior.
 - [ ] Create PR with production evidence, caller enumeration, post-mortem, no-migration rationale, visual evidence, staging evidence, and specialist review table.
 - [ ] Complete CI and CodeRabbit label-triggered review loop.
 - [ ] Merge, monitor production deploy, and report PR number plus merge/deploy status.
@@ -97,7 +97,7 @@ Separately, the observability lesson is that an active trigger with deliveries r
 - [ ] Trigger list/source labels no longer display a command prefix for non-comment GitHub events.
 - [ ] Required unit tests pass and are proven discriminating against the original backend bug.
 - [ ] Desktop and mobile Playwright screenshots for changed trigger surfaces are posted to the PR and reviewed for overflow/clipping/readability.
-- [ ] Staging deployment succeeds and validates the fix without overwriting another active staging run.
+- [x] Staging deployment succeeds and validates the fix without overwriting another active staging run.
 - [ ] PR is merged after CI and CodeRabbit review, and production deploy is monitored to completion.
 
 ## Validation Log
@@ -127,6 +127,23 @@ Separately, the observability lesson is that an active trigger with deliveries r
   - constitution-validator: PASS. No Principle XI hardcoded URL/timeout/limit/deployment-identifier violations.
   - test-engineer: PASS. Focused API/web/Playwright coverage is adequate; added one stricter backend event-type-guard test from the non-blocking recommendation.
   - doc-sync-validator: WARN/ADDRESSED. Task-file wording updated to describe the defective behavior as pre-fix; no public documentation drift.
+- Staging coordination:
+  - `mcp__sam_mcp.list_project_agents` showed five other active/sleeping project agents, but none had an active staging deployment.
+  - `gh run list --workflow=deploy-staging.yml --status=in_progress --json ...` and `--status=queued` both returned `[]` before deployment.
+- Staging deployment:
+  - `gh workflow run deploy-staging.yml --ref sam/fix-bug-makes-every-m6y9zw` created run `33791134030`.
+  - `gh run watch 33791134030 --exit-status --interval 10` completed successfully. Deploy job was green in 14m19s; smoke-tests were green in 2m33s.
+  - `curl https://api.sammy.party/health` returned HTTP 200 with `{"status":"healthy",...}` during post-deploy verification.
+- Task-specific staging verification:
+  - Authenticated with `SAM_PLAYWRIGHT_PRIMARY_USER` against `https://api.sammy.party/api/auth/token-login`, then loaded the staging app at `https://app.sammy.party`.
+  - Created a temporary GitHub `issues` trigger through the authenticated staging API on project `01KJNR9R3TEN3KX1ETE33852R8` (`Test Project 1`, repository `serverspresentation2025/crewai`) with deliberately stale stored `commandPrefix: "/sam"` to simulate the production/self-hosted stale-data shape.
+  - Verified the API returned and persisted `githubConfig.eventType = "issues"` and `githubConfig.filters.commandPrefix = "/sam"` for temporary trigger `01M1M9SVPD5K8X2QDS77B3BPRX`.
+  - Verified the live staging trigger list rendered `GitHub issues` and did not render `GitHub issues: /sam` at 1280x800 and 375x667.
+  - Verified the live staging GitHub issues form hid `#github-command-prefix` at 1280x800 and 375x667.
+  - Verified project settings and projects dashboard loaded without `Something went wrong`, no horizontal overflow was detected, and no browser console/page errors were captured.
+  - Deleted temporary trigger `01M1M9SVPD5K8X2QDS77B3BPRX`.
+  - Staging webhook route note: `/api/github/webhook` requires GitHub HMAC signature verification, and staging Worker secret values are intentionally not retrievable. Staging D1 had no existing GitHub triggers or deliveries to replay. The signed-webhook admission predicate remains covered by discriminating unit tests plus the deployed UI/API stale-data verification above.
+- Observability noise check: `pnpm quality:observability-noise` passed. D1 observability checks skipped because `OBSERVABILITY_DB_ID` was not set; Workers telemetry skipped with 403 unavailable; result reported no significant log noise detected.
 
 ## UI/UX Validation Report
 
