@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 
 import { resolveStorageSafetyConfig } from '../../durable-objects/project-data/storage-safety';
-import { ProjectDataManualToolPayloadCleanupStateError } from '../../durable-objects/project-data/tool-payload-manual-cleanup';
+import { ProjectDataManualToolPayloadCleanupStateError } from '../../durable-objects/project-data/tool-payload-cleanup-types';
 import type { Env } from '../../env';
 import { errors } from '../../middleware/error';
 import {

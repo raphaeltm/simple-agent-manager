@@ -99,7 +99,7 @@ import {
   type ProjectDataManualToolPayloadCleanupInput,
   type ProjectDataManualToolPayloadCleanupResult,
   ProjectDataManualToolPayloadCleanupStateError,
-} from '../durable-objects/project-data/tool-payload-manual-cleanup';
+} from '../durable-objects/project-data/tool-payload-cleanup-types';
 export {
   CommentIdempotencyConflictError,
   CommentLimitExceededError,

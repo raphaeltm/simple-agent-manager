@@ -597,12 +597,7 @@ async function finishGlobalSweepCadence(
   error: unknown = null
 ): Promise<void> {
   const completedAt = Date.now();
-  const lastError =
-    status === 'partial'
-      ? `completed with failed=${stats.failed}, poisoned=${stats.poisoned}`
-      : error
-        ? errorMessage(error)
-        : null;
+  const lastError = globalSweepCadenceLastError(stats, status, error);
   const result = await env.DATABASE.prepare(
     `UPDATE project_data_archive_global_sweep_cadence
      SET last_completed_at = ?,
@@ -1241,6 +1236,18 @@ function assertLeasePresent(migration: MigrationRow): asserts migration is Claim
       `ProjectData archive migration ${migration.migration_id} is missing an active lease`
     );
   }
+}
+
+function globalSweepCadenceLastError(
+  stats: ProjectDataArchiveShardingStats,
+  status: Exclude<ProjectDataArchiveGlobalSweepCadenceStatus, 'never' | 'running'>,
+  error: unknown
+): string | null {
+  if (status === 'partial') {
+    return `completed with failed=${stats.failed}, poisoned=${stats.poisoned}`;
+  }
+  if (error) return errorMessage(error);
+  return null;
 }
 
 async function assertLeaseStillHeld(env: Env, migration: ClaimedMigrationRow): Promise<void> {
@@ -2384,6 +2391,56 @@ function recordMigrationFailure(
   else stats.failed++;
 }
 
+async function processArchiveMigrationBatch(input: {
+  env: Env;
+  config: ArchiveCoordinatorConfig;
+  archiveR2: R2Bucket;
+  migrations: MigrationRow[];
+  now: number;
+  startedAt: number;
+  stats: ProjectDataArchiveShardingStats;
+  markFailedErrorEvent: string;
+  candidateFailedEvent: string;
+}): Promise<void> {
+  for (const migration of input.migrations) {
+    if (Date.now() - input.startedAt >= input.config.wallTimeMs) break;
+    try {
+      const result = await migrateCandidate(
+        input.env,
+        input.config,
+        input.archiveR2,
+        migration,
+        input.now
+      );
+      if (result.migrated) input.stats.migrated++;
+      if (result.recoveredCrashGap) input.stats.recoveredCrashGaps++;
+      input.stats.chunksCopied += result.chunksCopied;
+      input.stats.rowsCopied += result.rowsCopied;
+    } catch (error) {
+      const failureState = await markFailed(
+        input.env,
+        input.config,
+        migration,
+        input.now,
+        error
+      ).catch((markError) => {
+          log.error(input.markFailedErrorEvent, {
+            migrationId: migration.migration_id,
+            ...serializeError(markError),
+          });
+          return 'unchanged' as const;
+        });
+      recordMigrationFailure(input.stats, failureState);
+      log.warn(input.candidateFailedEvent, {
+        migrationId: migration.migration_id,
+        projectId: migration.project_id,
+        sessionId: migration.session_id,
+        ...serializeError(error),
+      });
+    }
+  }
+}
+
 export async function runProjectDataArchiveSharding(
   env: Env,
   nowDate = new Date()
@@ -2410,33 +2467,17 @@ export async function runProjectDataArchiveSharding(
     stats.failed += crashGapRecovery.failed;
     const candidates = await selectMigrationWork(env, config, nowDate, now);
     stats.selected = candidates.length;
-    for (const migration of candidates) {
-      if (Date.now() - startedAt >= config.wallTimeMs) break;
-      try {
-        const result = await migrateCandidate(env, config, archiveR2, migration, now);
-        if (result.migrated) stats.migrated++;
-        if (result.recoveredCrashGap) stats.recoveredCrashGaps++;
-        stats.chunksCopied += result.chunksCopied;
-        stats.rowsCopied += result.rowsCopied;
-      } catch (error) {
-        const failureState = await markFailed(env, config, migration, now, error).catch(
-          (markError) => {
-            log.error('project_data_archive_mark_failed_failed', {
-              migrationId: migration.migration_id,
-              ...serializeError(markError),
-            });
-            return 'unchanged' as const;
-          }
-        );
-        recordMigrationFailure(stats, failureState);
-        log.warn('project_data_archive_candidate_failed', {
-          migrationId: migration.migration_id,
-          projectId: migration.project_id,
-          sessionId: migration.session_id,
-          ...serializeError(error),
-        });
-      }
-    }
+    await processArchiveMigrationBatch({
+      env,
+      config,
+      archiveR2,
+      migrations: candidates,
+      now,
+      startedAt,
+      stats,
+      markFailedErrorEvent: 'project_data_archive_mark_failed_failed',
+      candidateFailedEvent: 'project_data_archive_candidate_failed',
+    });
     await finishGlobalSweepCadence(
       env,
       config,
@@ -2528,33 +2569,17 @@ export async function runScopedProjectDataArchiveCanary(
   const crashGapRecovery = await recoverCrashGaps(env, config, now, scope);
   stats.recoveredCrashGaps = crashGapRecovery.recovered;
   stats.failed += crashGapRecovery.failed;
-  for (const migration of work.migrations) {
-    if (Date.now() - startedAt >= config.wallTimeMs) break;
-    try {
-      const result = await migrateCandidate(env, config, archiveR2, migration, now);
-      if (result.migrated) stats.migrated++;
-      if (result.recoveredCrashGap) stats.recoveredCrashGaps++;
-      stats.chunksCopied += result.chunksCopied;
-      stats.rowsCopied += result.rowsCopied;
-    } catch (error) {
-      const failureState = await markFailed(env, config, migration, now, error).catch(
-        (markError) => {
-          log.error('project_data_archive_manual_canary_mark_failed_failed', {
-            migrationId: migration.migration_id,
-            ...serializeError(markError),
-          });
-          return 'unchanged' as const;
-        }
-      );
-      recordMigrationFailure(stats, failureState);
-      log.warn('project_data_archive_manual_canary_candidate_failed', {
-        migrationId: migration.migration_id,
-        projectId: migration.project_id,
-        sessionId: migration.session_id,
-        ...serializeError(error),
-      });
-    }
-  }
+  await processArchiveMigrationBatch({
+    env,
+    config,
+    archiveR2,
+    migrations: work.migrations,
+    now,
+    startedAt,
+    stats,
+    markFailedErrorEvent: 'project_data_archive_manual_canary_mark_failed_failed',
+    candidateFailedEvent: 'project_data_archive_manual_canary_candidate_failed',
+  });
 
   return {
     dryRun,

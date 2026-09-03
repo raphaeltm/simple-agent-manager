@@ -18,9 +18,18 @@ import {
   upsertProjectDataStorageTelemetry,
 } from './storage-telemetry';
 import { runProjectDataToolPayloadCleanup } from './tool-payload-cleanup';
-import type {
-  ProjectDataToolPayloadCleanupOptions,
-  ProjectDataToolPayloadCleanupResult,
+import {
+  PROJECT_DATA_MANUAL_TOOL_PAYLOAD_CLEANUP_RESULT_VERSION as MANUAL_CLEANUP_RESULT_VERSION,
+  type ProjectDataManualToolPayloadCleanupBudgets,
+  type ProjectDataManualToolPayloadCleanupCooldown,
+  type ProjectDataManualToolPayloadCleanupInput,
+  type ProjectDataManualToolPayloadCleanupResult,
+  type ProjectDataManualToolPayloadCleanupSkipReason,
+  ProjectDataManualToolPayloadCleanupStateError,
+  type ProjectDataManualToolPayloadCleanupTelemetry,
+  type ProjectDataManualToolPayloadCleanupTerminationReason,
+  type ProjectDataToolPayloadCleanupOptions,
+  type ProjectDataToolPayloadCleanupResult,
 } from './tool-payload-cleanup-types';
 import type { Env } from './types';
 
@@ -33,91 +42,9 @@ const META_MANUAL_CLEANUP_STARTED_AT = 'storageSafetyToolPayloadManualCleanupSta
 const META_MANUAL_CLEANUP_NEXT_ALLOWED_AT = 'storageSafetyToolPayloadManualCleanupNextAllowedAt';
 const META_MANUAL_CLEANUP_RESULT_JSON = 'storageSafetyToolPayloadManualCleanupResultJson';
 
-const MANUAL_CLEANUP_RESULT_VERSION = 1;
 const MAX_MANUAL_CLEANUP_REASON_LENGTH = 500;
 const MAX_MANUAL_CLEANUP_IDEMPOTENCY_KEY_LENGTH = 200;
 const MANUAL_TOOL_PAYLOAD_CLEANUP_PURGE_REASON = 'manual_tool_payload_archive_cleanup';
-
-export type ProjectDataManualToolPayloadCleanupSkipReason =
-  | 'cooldown'
-  | 'idempotency_in_progress'
-  | 'missing_project_id'
-  | 'not_needed';
-
-export type ProjectDataManualToolPayloadCleanupTerminationReason =
-  | ProjectDataToolPayloadCleanupResult['terminationReason']
-  | ProjectDataManualToolPayloadCleanupSkipReason;
-
-export type ProjectDataManualToolPayloadCleanupInput = {
-  reason: string;
-  idempotencyKey: string;
-  batchRows?: number | null;
-  batchBytes?: number | null;
-  wallTimeMs?: number | null;
-  now?: number;
-  nowMs?: () => number;
-};
-
-export type ProjectDataManualToolPayloadCleanupBudgets = {
-  batchRows: number;
-  batchBytes: number;
-  wallTimeMs: number;
-  maxBatchRows: number;
-  maxBatchBytes: number;
-  maxWallTimeMs: number;
-  recheckMs: number;
-};
-
-export type ProjectDataManualToolPayloadCleanupCooldown = {
-  active: boolean;
-  nextAllowedAt: number;
-  remainingMs: number;
-  recheckMs: number;
-};
-
-export type ProjectDataManualToolPayloadCleanupTelemetry = {
-  beforeBytes: number;
-  afterBytes: number;
-  reclaimedBytes: number;
-  terminationReason: ProjectDataManualToolPayloadCleanupTerminationReason;
-  rowsScanned: number;
-  rowsUpdated: number;
-  rowsFailed: number;
-  sessionsScanned: number;
-  originalToolMetadataBytes: number;
-  storedToolMetadataBytes: number;
-  exhaustedCandidates: boolean;
-  cursor: ProjectDataToolPayloadCleanupResult['cursor'];
-  recheckAt: number | null;
-};
-
-export type ProjectDataManualToolPayloadCleanupResult = {
-  version: typeof MANUAL_CLEANUP_RESULT_VERSION;
-  projectId: string;
-  reason: string;
-  idempotencyKey: string;
-  idempotent: boolean;
-  attempted: boolean;
-  skipReason: ProjectDataManualToolPayloadCleanupSkipReason | null;
-  startedAt: number;
-  completedAt: number | null;
-  budgets: ProjectDataManualToolPayloadCleanupBudgets;
-  cooldown: ProjectDataManualToolPayloadCleanupCooldown;
-  telemetry: ProjectDataManualToolPayloadCleanupTelemetry;
-  cleanup: ProjectDataToolPayloadCleanupResult | null;
-};
-
-export class ProjectDataManualToolPayloadCleanupStateError extends Error {
-  readonly code = 'PROJECT_DATA_MANUAL_TOOL_PAYLOAD_CLEANUP_STATE';
-
-  constructor(
-    readonly reason: 'idempotency_conflict' | 'invalid_request',
-    message: string
-  ) {
-    super(message);
-    this.name = 'ProjectDataManualToolPayloadCleanupStateError';
-  }
-}
 
 function readStoredResult(sql: SqlStorage): ProjectDataManualToolPayloadCleanupResult | null {
   const raw = readMeta(sql, META_MANUAL_CLEANUP_RESULT_JSON);

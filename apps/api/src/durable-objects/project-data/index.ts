@@ -66,6 +66,10 @@ import { processTaskWaits } from './task-wait-supervisor';
 import * as taskWaits from './task-waits';
 import * as terminalSessionReconciliation from './terminal-session-reconciliation';
 import * as toolPayloadArchive from './tool-payload-archive';
+import type {
+  ProjectDataManualToolPayloadCleanupInput,
+  ProjectDataManualToolPayloadCleanupResult,
+} from './tool-payload-cleanup-types';
 import * as toolPayloadManualCleanup from './tool-payload-manual-cleanup';
 import type { Env, SummaryData } from './types';
 
@@ -1533,8 +1537,8 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   async runManualToolPayloadCleanup(
-    input: toolPayloadManualCleanup.ProjectDataManualToolPayloadCleanupInput
-  ): Promise<toolPayloadManualCleanup.ProjectDataManualToolPayloadCleanupResult> {
+    input: ProjectDataManualToolPayloadCleanupInput
+  ): Promise<ProjectDataManualToolPayloadCleanupResult> {
     const result = await toolPayloadManualCleanup.runProjectDataManualToolPayloadCleanup(
       this.sql,
       this.env,
