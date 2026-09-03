@@ -65,6 +65,9 @@ vi.mock('../../../src/routes/chat-workspace-resolver', () => ({
 vi.mock('../../../src/services/node-agent', () => ({
   cancelAgentSessionOnNode: (...args: unknown[]) => mocks.cancelAgentSessionOnNode(...args),
   stopAgentSessionOnNode: (...args: unknown[]) => mocks.stopAgentSessionOnNode(...args),
+  // Real value, not a stub: the assertion below checks the route picks the
+  // BACKGROUND tier rather than the interactive 30s one.
+  getNodeAgentBackgroundRequestTimeoutMs: () => 5_000,
 }));
 
 import { chatRoutes } from '../../../src/routes/chat';
@@ -275,13 +278,24 @@ describe('POST /api/projects/:projectId/sessions/:sessionId/stop cleanup', () =>
         'stopAgentSessionOnNode',
         'cleanupTerminalTaskResources',
       ]);
-      expect(mocks.cancelAgentSessionOnNode).toHaveBeenCalledWith(
+      // Both calls, not just the first: a wrong id passed only to the stop half
+      // would otherwise go unnoticed. The timeout must be the BACKGROUND tier —
+      // nothing here is awaited for a decision, so inheriting the interactive 30s
+      // budget would add up to a minute of latency to a foreground archive
+      // against an unreachable node.
+      const expectedArgs = [
         'node-live-1',
         'workspace-live-1',
         'acp-live-1',
         expect.anything(),
-        'user-stop-1'
-      );
+        'user-stop-1',
+        { requestTimeoutMs: expect.any(Number) },
+      ];
+      expect(mocks.cancelAgentSessionOnNode).toHaveBeenCalledWith(...expectedArgs);
+      expect(mocks.stopAgentSessionOnNode).toHaveBeenCalledWith(...expectedArgs);
+
+      const cancelTimeout = mocks.cancelAgentSessionOnNode.mock.calls[0]?.[5]?.requestTimeoutMs;
+      expect(cancelTimeout).toBeLessThan(30_000);
     });
 
     it('still archives when there is no live workspace to signal', async () => {
