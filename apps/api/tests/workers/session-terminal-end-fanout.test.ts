@@ -238,6 +238,48 @@ describe('session terminal end — activity mirror fan-out', () => {
     expect(released!).toBeLessThan(parkedUntil);
   });
 
+  /**
+   * `stopSession`/`failSession` never scheduled a Durable Object alarm before
+   * this fan-out existed. Scheduling one unconditionally makes every terminal
+   * transition wake the object to re-read all nine alarm sources and run storage
+   * maintenance nothing asked for — on 16 external call sites including cron
+   * sweeps. It was caught by `project-data-storage-safety.test.ts`, whose
+   * grouped-FTS cleanup candidate the unrequested alarm consumed before the test
+   * could measure it (.claude/rules/47).
+   */
+  it('does not schedule an alarm when a terminal stop releases nothing', async () => {
+    const { stub, chatSessionId } = await seedWorkingSession('term-noalarm-1');
+
+    const alarmBefore = await runInDurableObject(stub, (instance: ProjectData) =>
+      (instance as unknown as { ctx: DurableObjectState }).ctx.storage.getAlarm()
+    );
+
+    await stub.stopSession(chatSessionId);
+
+    const alarmAfter = await runInDurableObject(stub, (instance: ProjectData) =>
+      (instance as unknown as { ctx: DurableObjectState }).ctx.storage.getAlarm()
+    );
+    expect(alarmAfter).toBe(alarmBefore);
+  });
+
+  it('DOES recompute the alarm when the stop actually releases a delivery', async () => {
+    // The discriminating control for the test above: without it, "no alarm was
+    // scheduled" would also pass if the fan-out stopped recomputing entirely and
+    // a released delivery were left with nothing to run it.
+    const { stub, chatSessionId } = await seedWorkingSession('term-noalarm-2');
+    const parkedUntil = Date.now() + 30 * 60 * 1000;
+    const readNextAttempt = await queueBlockedDelivery(stub, chatSessionId, parkedUntil);
+    expect(await readNextAttempt()).toBe(parkedUntil);
+
+    await stub.stopSession(chatSessionId);
+
+    const alarmAfter = await runInDurableObject(stub, (instance: ProjectData) =>
+      (instance as unknown as { ctx: DurableObjectState }).ctx.storage.getAlarm()
+    );
+    expect(alarmAfter).not.toBeNull();
+    expect(await readNextAttempt()).toBeLessThan(parkedUntil);
+  });
+
   it('a mirror write failure never turns a successful stop into a failed one', async () => {
     const { stub, chatSessionId } = await seedWorkingSession('term-stop-4');
 
