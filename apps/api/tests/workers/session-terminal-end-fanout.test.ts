@@ -243,40 +243,60 @@ describe('session terminal end — activity mirror fan-out', () => {
    * this fan-out existed. Scheduling one unconditionally makes every terminal
    * transition wake the object to re-read all nine alarm sources and run storage
    * maintenance nothing asked for — on 16 external call sites including cron
-   * sweeps. It was caught by `project-data-storage-safety.test.ts`, whose
-   * grouped-FTS cleanup candidate the unrequested alarm consumed before the test
-   * could measure it (.claude/rules/47).
+   * sweeps. `project-data-storage-safety.test.ts` caught it: the unrequested
+   * alarm consumed the grouped-FTS cleanup candidate before that test could
+   * measure it (.claude/rules/47).
+   *
+   * Asserting on `ctx.storage.getAlarm()` does NOT discriminate — a recompute
+   * that finds nothing new writes back the same instant, so the value is
+   * identical either way. Verified: that version passed against the unconditional
+   * recompute. The observable that actually differs is whether `recalculateAlarm`
+   * is CALLED, so these tests count invocations.
    */
-  it('does not schedule an alarm when a terminal stop releases nothing', async () => {
+  async function countAlarmRecomputes(
+    stub: DurableObjectStub<ProjectData>,
+    action: (instance: ProjectData) => Promise<unknown>
+  ): Promise<number> {
+    return runInDurableObject(stub, async (instance: ProjectData) => {
+      const target = instance as unknown as { recalculateAlarm: () => Promise<void> };
+      const original = target.recalculateAlarm.bind(instance);
+      let calls = 0;
+      target.recalculateAlarm = async () => {
+        calls += 1;
+        await original();
+      };
+      try {
+        await action(instance);
+      } finally {
+        target.recalculateAlarm = original;
+      }
+      return calls;
+    });
+  }
+
+  it('does not recompute the alarm when a terminal stop releases nothing', async () => {
     const { stub, chatSessionId } = await seedWorkingSession('term-noalarm-1');
 
-    const alarmBefore = await runInDurableObject(stub, (instance: ProjectData) =>
-      (instance as unknown as { ctx: DurableObjectState }).ctx.storage.getAlarm()
+    const calls = await countAlarmRecomputes(stub, (instance) =>
+      instance.stopSession(chatSessionId)
     );
 
-    await stub.stopSession(chatSessionId);
-
-    const alarmAfter = await runInDurableObject(stub, (instance: ProjectData) =>
-      (instance as unknown as { ctx: DurableObjectState }).ctx.storage.getAlarm()
-    );
-    expect(alarmAfter).toBe(alarmBefore);
+    expect(calls).toBe(0);
   });
 
-  it('DOES recompute the alarm when the stop actually releases a delivery', async () => {
-    // The discriminating control for the test above: without it, "no alarm was
-    // scheduled" would also pass if the fan-out stopped recomputing entirely and
-    // a released delivery were left with nothing to run it.
+  it('DOES recompute when the stop actually releases a delivery (discriminating control)', async () => {
+    // Without this control, "no recompute" would also pass if the fan-out stopped
+    // recomputing entirely, leaving a released delivery with nothing to run it.
     const { stub, chatSessionId } = await seedWorkingSession('term-noalarm-2');
     const parkedUntil = Date.now() + 30 * 60 * 1000;
     const readNextAttempt = await queueBlockedDelivery(stub, chatSessionId, parkedUntil);
     expect(await readNextAttempt()).toBe(parkedUntil);
 
-    await stub.stopSession(chatSessionId);
-
-    const alarmAfter = await runInDurableObject(stub, (instance: ProjectData) =>
-      (instance as unknown as { ctx: DurableObjectState }).ctx.storage.getAlarm()
+    const calls = await countAlarmRecomputes(stub, (instance) =>
+      instance.stopSession(chatSessionId)
     );
-    expect(alarmAfter).not.toBeNull();
+
+    expect(calls).toBe(1);
     expect(await readNextAttempt()).toBeLessThan(parkedUntil);
   });
 
