@@ -1,15 +1,14 @@
 import Database from 'better-sqlite3';
-import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import { handleAppError } from '../../../src/middleware/app-error-handler';
 import {
   PROJECT_DATA_ARCHIVE_TABLES,
   type ProjectDataArchiveTableName,
 } from '../../../src/project-data-archive/contract';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import { createAdminProjectDataStorageApp } from './helpers/admin-project-data-storage-route';
 
 const PROJECT_ID = 'project-archive';
 const SESSION_ID = 'session-archive';
@@ -17,37 +16,6 @@ const SOURCE_OWNER = PROJECT_ID;
 const TARGET_OWNER = `${PROJECT_ID}:archive:g1:s1`;
 const TERMINAL_SHA = 'a'.repeat(64);
 const TARGET_SHA = 'b'.repeat(64);
-
-vi.mock('../../../src/middleware/auth', () => ({
-  requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
-  requireApproved: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
-  requireSuperadmin: () =>
-    vi.fn(
-      (
-        c: {
-          req: { header: (name: string) => string | undefined };
-          json: (body: unknown, status: 403) => Response;
-        },
-        next: () => Promise<void>
-      ) =>
-        c.req.header('x-test-role') === 'superadmin'
-          ? next()
-          : c.json({ error: 'FORBIDDEN', message: 'Superadmin access required' }, 403)
-    ),
-}));
-
-const { requireAuth, requireApproved, requireSuperadmin } =
-  await import('../../../src/middleware/auth');
-const { adminProjectDataStorageRoutes } =
-  await import('../../../src/routes/admin/project-data-storage');
-
-function createApp(): Hono<{ Bindings: Env }> {
-  const app = new Hono<{ Bindings: Env }>();
-  app.onError(handleAppError);
-  app.use('/api/admin/project-data/storage/*', requireAuth(), requireApproved(), requireSuperadmin());
-  app.route('/api/admin/project-data/storage', adminProjectDataStorageRoutes);
-  return app;
-}
 
 function makeEnv(sqlite: Database.Database, overrides: Partial<Env> = {}): Env {
   return {
@@ -194,7 +162,7 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
     const prepare = vi.fn();
     const env = { DATABASE: { prepare } } as unknown as Env;
 
-    const response = await createApp().request(
+    const response = await createAdminProjectDataStorageApp().request(
       '/api/admin/project-data/storage/project-archive/archive-sharding/state',
       { headers: { 'x-test-role': 'user' } },
       env
@@ -213,7 +181,7 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
         PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_MAX: '3',
       });
 
-      const ok = await createApp().request(
+      const ok = await createAdminProjectDataStorageApp().request(
         '/api/admin/project-data/storage/project-archive/archive-sharding/state?limit=3',
         { headers: { 'x-test-role': 'superadmin' } },
         env
@@ -221,7 +189,7 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
       expect(ok.status).toBe(200);
       expect(await ok.json()).toMatchObject({ state: { filters: { limit: 3 } } });
 
-      const tooLarge = await createApp().request(
+      const tooLarge = await createAdminProjectDataStorageApp().request(
         '/api/admin/project-data/storage/project-archive/archive-sharding/state?limit=4',
         { headers: { 'x-test-role': 'superadmin' } },
         env
@@ -252,7 +220,7 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
         PROJECT_DATA_ARCHIVE_R2: { put: r2Put } as unknown as R2Bucket,
       });
 
-      const response = await createApp().request(
+      const response = await createAdminProjectDataStorageApp().request(
         '/api/admin/project-data/storage/project-archive/archive-sharding/canary',
         {
           method: 'POST',
@@ -295,7 +263,7 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
     const sqlite = new Database(':memory:');
     try {
       createTables(sqlite);
-      const response = await createApp().request(
+      const response = await createAdminProjectDataStorageApp().request(
         '/api/admin/project-data/storage/project-archive/archive-sharding/canary',
         {
           method: 'POST',
@@ -321,7 +289,7 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
       createTables(sqlite);
       seedSessionSummary(sqlite, 'project-archive', 'session-target');
 
-      const response = await createApp().request(
+      const response = await createAdminProjectDataStorageApp().request(
         '/api/admin/project-data/storage/project-archive/archive-sharding/canary',
         {
           method: 'POST',
@@ -363,7 +331,7 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
         migrationId: 'migration-frozen-intent',
         state: 'failed',
       });
-      const response = await createApp().request(
+      const response = await createAdminProjectDataStorageApp().request(
         '/api/admin/project-data/storage/project-archive/archive-sharding/frozen-intents',
         { headers: { 'x-test-role': 'superadmin' } },
         makeEnv(sqlite, {
@@ -394,7 +362,7 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
     const sqlite = new Database(':memory:');
     try {
       createTables(sqlite);
-      const response = await createApp().request(
+      const response = await createAdminProjectDataStorageApp().request(
         '/api/admin/project-data/storage/project-archive/archive-sharding/frozen-intents?limit=11',
         { headers: { 'x-test-role': 'superadmin' } },
         makeEnv(sqlite, {
@@ -421,7 +389,7 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
         state: 'published',
       });
 
-      const missingReason = await createApp().request(
+      const missingReason = await createAdminProjectDataStorageApp().request(
         '/api/admin/project-data/storage/project-archive/archive-sharding/migrations/migration-copy-back/copy-back',
         {
           method: 'POST',
@@ -434,7 +402,7 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
       );
       expect(missingReason.status).toBe(400);
 
-      const routingDisabled = await createApp().request(
+      const routingDisabled = await createAdminProjectDataStorageApp().request(
         '/api/admin/project-data/storage/project-archive/archive-sharding/migrations/migration-copy-back/copy-back',
         {
           method: 'POST',
@@ -451,7 +419,7 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
         message: 'copy-back requires exact archive routing to be enabled',
       });
 
-      const response = await createApp().request(
+      const response = await createAdminProjectDataStorageApp().request(
         '/api/admin/project-data/storage/project-archive/archive-sharding/migrations/migration-copy-back/copy-back',
         {
           method: 'POST',
@@ -490,7 +458,7 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
   it('does not expose a misleading rehome recovery endpoint in this rollout slice', async () => {
     const sqlite = new Database(':memory:');
     try {
-      const response = await createApp().request(
+      const response = await createAdminProjectDataStorageApp().request(
         '/api/admin/project-data/storage/project-archive/archive-sharding/migrations/migration-copy-back/rehome',
         {
           method: 'POST',

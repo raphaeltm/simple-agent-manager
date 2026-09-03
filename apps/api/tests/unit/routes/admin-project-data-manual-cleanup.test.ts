@@ -1,45 +1,8 @@
-import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ProjectDataManualToolPayloadCleanupStateError } from '../../../src/durable-objects/project-data/tool-payload-cleanup-types';
 import type { Env } from '../../../src/env';
-import { handleAppError } from '../../../src/middleware/app-error-handler';
-
-vi.mock('../../../src/middleware/auth', () => ({
-  requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
-  requireApproved: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
-  requireSuperadmin: () =>
-    vi.fn(
-      (
-        c: {
-          req: { header: (name: string) => string | undefined };
-          json: (body: unknown, status: 403) => Response;
-        },
-        next: () => Promise<void>
-      ) =>
-        c.req.header('x-test-role') === 'superadmin'
-          ? next()
-          : c.json({ error: 'FORBIDDEN', message: 'Superadmin access required' }, 403)
-    ),
-}));
-
-const { requireAuth, requireApproved, requireSuperadmin } =
-  await import('../../../src/middleware/auth');
-const { adminProjectDataStorageRoutes } =
-  await import('../../../src/routes/admin/project-data-storage');
-
-function createApp(): Hono<{ Bindings: Env }> {
-  const app = new Hono<{ Bindings: Env }>();
-  app.onError(handleAppError);
-  app.use(
-    '/api/admin/project-data/storage/*',
-    requireAuth(),
-    requireApproved(),
-    requireSuperadmin()
-  );
-  app.route('/api/admin/project-data/storage', adminProjectDataStorageRoutes);
-  return app;
-}
+import { createAdminProjectDataStorageApp } from './helpers/admin-project-data-storage-route';
 
 function makeManualCleanupResult(projectId: string) {
   return {
@@ -119,7 +82,7 @@ describe('admin ProjectData manual tool-payload cleanup route', () => {
       },
     } as unknown as Env;
 
-    const response = await createApp().request(
+    const response = await createAdminProjectDataStorageApp().request(
       '/api/admin/project-data/storage/project-route/tool-payload-cleanup',
       {
         method: 'POST',
@@ -136,7 +99,7 @@ describe('admin ProjectData manual tool-payload cleanup route', () => {
   it('requires an audit reason and idempotency key', async () => {
     const env = makeEnv('project-route');
 
-    const response = await createApp().request(
+    const response = await createAdminProjectDataStorageApp().request(
       '/api/admin/project-data/storage/project-route/tool-payload-cleanup',
       {
         method: 'POST',
@@ -159,7 +122,7 @@ describe('admin ProjectData manual tool-payload cleanup route', () => {
       }
     );
 
-    const response = await createApp().request(
+    const response = await createAdminProjectDataStorageApp().request(
       '/api/admin/project-data/storage/project-route/tool-payload-cleanup',
       {
         method: 'POST',
@@ -185,7 +148,7 @@ describe('admin ProjectData manual tool-payload cleanup route', () => {
     const projectId = 'project-route';
     const env = makeEnv(projectId);
 
-    const response = await createApp().request(
+    const response = await createAdminProjectDataStorageApp().request(
       `/api/admin/project-data/storage/${projectId}/tool-payload-cleanup`,
       {
         method: 'POST',
@@ -233,7 +196,7 @@ describe('admin ProjectData manual tool-payload cleanup route', () => {
       }),
     });
 
-    const response = await createApp().request(
+    const response = await createAdminProjectDataStorageApp().request(
       '/api/admin/project-data/storage/project-route/tool-payload-cleanup',
       {
         method: 'POST',
