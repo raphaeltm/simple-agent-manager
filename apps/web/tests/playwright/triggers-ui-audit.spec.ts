@@ -783,6 +783,44 @@ async function verifyGitHubIssuesForm(page: Page, screenshotName: string) {
   await assertNoClippedOverflow(page);
 }
 
+async function openNewTriggerDialog(page: Page, triggers: ReturnType<typeof makeTrigger>[]) {
+  await setupApiMocks(page, { triggers });
+  await page.goto('/projects/proj-test-1/triggers');
+  if (triggers.length > 0) {
+    await page.waitForSelector(`text=${triggers[0].name.split(' ')[0]}`);
+    await page.click('text=New Trigger');
+  } else {
+    await page.waitForSelector('text=No triggers yet');
+    await page.click('text=Create your first trigger');
+  }
+  await page.waitForSelector('text=New Trigger');
+}
+
+async function verifyGitHubSourceLabels(page: Page, screenshotName: string) {
+  await setupApiMocks(page, { triggers: GITHUB_SOURCE_TRIGGERS });
+  await page.goto('/projects/proj-test-1/triggers');
+  await page.waitForSelector('text=Issue Reviewer');
+  await expect(page.getByText('GitHub issues: /sam')).toHaveCount(0);
+  await expect(page.getByText('GitHub issues', { exact: true })).toBeVisible();
+  await expect(page.getByText('GitHub issue comment: /sam', { exact: true })).toBeVisible();
+  await screenshot(page, screenshotName);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+}
+
+async function verifyGitHubCommentForm(
+  page: Page,
+  screenshotName: string,
+  triggers: ReturnType<typeof makeTrigger>[]
+) {
+  await openNewTriggerDialog(page, triggers);
+  await page.click('role=button[name=/GitHub event/]');
+  await page.waitForSelector('text=Command prefix');
+  await screenshot(page, screenshotName);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+}
+
 // ---------------------------------------------------------------------------
 // Tests: Triggers List — Mobile
 // ---------------------------------------------------------------------------
@@ -810,15 +848,7 @@ test.describe('Triggers List — Mobile', () => {
   });
 
   test('GitHub source labels hide inactive command prefix', async ({ page }) => {
-    await setupApiMocks(page, { triggers: GITHUB_SOURCE_TRIGGERS });
-    await page.goto('/projects/proj-test-1/triggers');
-    await page.waitForSelector('text=Issue Reviewer');
-    await expect(page.getByText('GitHub issues: /sam')).toHaveCount(0);
-    await expect(page.getByText('GitHub issues', { exact: true })).toBeVisible();
-    await expect(page.getByText('GitHub issue comment: /sam', { exact: true })).toBeVisible();
-    await screenshot(page, 'triggers-list-github-source-labels-mobile');
-    await assertNoOverflow(page);
-    await assertNoClippedOverflow(page);
+    await verifyGitHubSourceLabels(page, 'triggers-list-github-source-labels-mobile');
   });
 
   /**
@@ -936,15 +966,7 @@ test.describe('Triggers List — Desktop', () => {
   });
 
   test('GitHub source labels hide inactive command prefix', async ({ page }) => {
-    await setupApiMocks(page, { triggers: GITHUB_SOURCE_TRIGGERS });
-    await page.goto('/projects/proj-test-1/triggers');
-    await page.waitForSelector('text=Issue Reviewer');
-    await expect(page.getByText('GitHub issues: /sam')).toHaveCount(0);
-    await expect(page.getByText('GitHub issues', { exact: true })).toBeVisible();
-    await expect(page.getByText('GitHub issue comment: /sam', { exact: true })).toBeVisible();
-    await screenshot(page, 'triggers-list-github-source-labels-desktop');
-    await assertNoOverflow(page);
-    await assertNoClippedOverflow(page);
+    await verifyGitHubSourceLabels(page, 'triggers-list-github-source-labels-desktop');
   });
 
   test('empty state', async ({ page }) => {
@@ -1095,15 +1117,7 @@ test.describe('Trigger Form — Mobile', () => {
   });
 
   test('GitHub event trigger form renders', async ({ page }) => {
-    await setupApiMocks(page, { triggers: [] });
-    await page.goto('/projects/proj-test-1/triggers');
-    await page.waitForSelector('text=No triggers yet');
-    await page.click('text=Create your first trigger');
-    await page.click('role=button[name=/GitHub event/]');
-    await page.waitForSelector('text=Command prefix');
-    await screenshot(page, 'trigger-form-github-mobile');
-    await assertNoOverflow(page);
-    await assertNoClippedOverflow(page);
+    await verifyGitHubCommentForm(page, 'trigger-form-github-mobile', []);
   });
 
   test('GitHub issues form hides command prefix field', async ({ page }) => {
@@ -1153,15 +1167,7 @@ test.describe('Trigger Form — Desktop', () => {
   });
 
   test('new GitHub event trigger form', async ({ page }) => {
-    await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
-    await page.goto('/projects/proj-test-1/triggers');
-    await page.waitForSelector('text=Daily Code Review');
-    await page.click('text=New Trigger');
-    await page.click('role=button[name=/GitHub event/]');
-    await page.waitForSelector('text=GitHub event');
-    await screenshot(page, 'trigger-form-github-desktop');
-    await assertNoOverflow(page);
-    await assertNoClippedOverflow(page);
+    await verifyGitHubCommentForm(page, 'trigger-form-github-desktop', NORMAL_TRIGGERS);
   });
 
   test('GitHub issues form hides command prefix field', async ({ page }) => {
