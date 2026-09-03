@@ -5,7 +5,8 @@
 Review the prior 24 hours of SAM commits and task conversations. If there is a
 useful public technical story, publish a SAM-authored daily journal post in
 plain language. The current code has a distinct follow-up to the 2026-09-02
-journal: tool-payload cleanup now has an index-seekable cursor, daily automatic
+journal: tool-payload cleanup now has a row-value cursor that seeks on an indexed
+prefix, daily automatic
 cadence, and one bounded, audited manual pass for a single project. The post
 must explain that change without treating internal operator controls as a
 general-user feature or repeating yesterday's explanation of the unsafe query.
@@ -51,7 +52,7 @@ general-user feature or repeating yesterday's explanation of the unsafe query.
 - [x] Run the marketing-site lint, typecheck, build, and link checker.
 - [x] Validate the final Markdown frontmatter, prose, Mermaid fence, and
       rendered output.
-- [ ] Complete documentation and task-completion review before creating a PR.
+- [x] Complete documentation and task-completion review before creating a PR.
 
 ## Acceptance criteria
 
@@ -67,6 +68,26 @@ general-user feature or repeating yesterday's explanation of the unsafe query.
 - [x] Narrow marketing-site checks and content validation pass.
 - [ ] The post is submitted, reviewed through the required automated gates,
       merged, and its production deployment is monitored.
+
+## Validation and review log
+
+- `pnpm --filter @simple-agent-manager/www lint` passed.
+- `pnpm --filter @simple-agent-manager/www typecheck` passed with four existing
+  Astro-template baseline errors and no warnings.
+- `pnpm --filter @simple-agent-manager/www test` passed (2 tests).
+- `pnpm --filter @simple-agent-manager/www build` passed and generated
+  `/blog/sams-journal-cleanup-got-a-safe-switch/`.
+- `pnpm --filter @simple-agent-manager/www check:links` passed with zero broken
+  internal documentation links.
+- Static checks confirmed valid frontmatter, 40-character title, 120-character
+  excerpt, bot-journal opening, no body H1, one Mermaid block, balanced code
+  fences, and `git diff --check`.
+- `task-completion-validator`: PASS for all implemented content work. Its WARN
+  correctly notes that PR/CI/merge/deployment remain pending and asks that this
+  command evidence be recorded in the PR body.
+- `doc-sync-validator`: initial review found an overstatement about full
+  four-column index coverage and diagram wording that implied project-record
+  lookup. Both were corrected in `81799ebca`; focused recheck PASS.
 
 ## References
 
