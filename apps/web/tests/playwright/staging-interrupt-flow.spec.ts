@@ -229,16 +229,28 @@ test.describe('Staging — interrupt then follow-up', () => {
     await expect(page.getByRole('button', INTERRUPTING)).toBeVisible({ timeout: 15_000 });
     await shot(page, 'staging-interrupt-cancelling');
 
-    // The positive assertion matters here. Asserting only that "Interrupt agent"
-    // disappears is satisfied by the CANCELLING state itself (that button is
-    // relabelled "Interrupting agent"), so it would pass without the turn ever
-    // ending. The dock's center action becoming Sleep is what actually proves the
-    // session reached awake-idle — i.e. the turn-end write landed and fanned out.
+    // What must be proven is that the TURN ENDED. Two assertions together:
+    //
+    // Positive — the composer placeholder leaves "Agent is working..." for one of
+    // the idle-family variants. That placeholder is derived directly from
+    // `agentActivity`, so it is the honest read of the state this fix repairs.
+    //
+    // Absence — neither interrupt control remains. Asserting only that
+    // "Interrupt agent" disappears is satisfied by the CANCELLING state itself,
+    // since that button is merely relabelled "Interrupting agent".
+    //
+    // Deliberately NOT asserting a specific dock control: the centre action is
+    // Sleep while awake-idle but Archive once the session has slept, and after an
+    // interrupt the idle session may sleep within seconds. Requiring `Sleep
+    // session` excluded that perfectly valid outcome and failed a run in which
+    // the turn had provably ended (the session was `status=sleeping`, which a
+    // session wedged at `prompting` can never become).
     await expect(
-      page.getByRole('button', { name: 'Sleep session' }),
-      'the session never reached awake-idle after a single interrupt'
+      page.getByPlaceholder(/send a message|resume the agent|wake the agent/i),
+      'the agent never left the working state after a single interrupt'
     ).toBeVisible({ timeout: 120_000 });
     await expect(page.getByRole('button', INTERRUPTING)).toBeHidden();
+    await expect(page.getByRole('button', INTERRUPT)).toBeHidden();
     await expect(page.getByText('Failed to interrupt the agent')).toHaveCount(0);
     await shot(page, 'staging-interrupt-stopped');
 
