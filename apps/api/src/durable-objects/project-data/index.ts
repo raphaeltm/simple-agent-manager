@@ -206,6 +206,54 @@ export class ProjectData extends DurableObject<Env> {
     return updated;
   }
 
+  /**
+   * Terminalize the activity mirror for an ended session and fan the transition
+   * out to every consumer of "is this session mid-prompt".
+   *
+   * `stopSession`/`failSession` previously wrote only `chat_sessions.status`, so
+   * a session ended mid-turn left `session_state.activity` reporting `prompting`
+   * until the 5-minute probe sweep noticed. All three consumers broke together:
+   * the dock kept showing "working", queued durable messages stayed parked
+   * behind a turn that had ended, and idle scheduling was suppressed
+   * (.claude/rules/57). Both keyings are cleared — the chat-session row and every
+   * linked ACP-session row — because the VM writes the latter.
+   *
+   * This deliberately does NOT reuse `publishTurnEnd`. That helper calls
+   * `armIdleCleanup` -> `resetIdleCleanup`, which hands the session a FRESH idle
+   * timer. Re-arming a timer on a session that has just been terminated would
+   * create a candidate that can never leave the schedule (.claude/rules/47 §3),
+   * so a terminal ending cancels the schedule instead.
+   */
+  private async publishSessionTerminalEnd(
+    chatSessionId: string,
+    outcome: { kind: 'stopped'; reason: string } | { kind: 'failed'; errorMessage: string }
+  ): Promise<void> {
+    for (const stateId of sessionState.listSessionStateIdsForChatSession(this.sql, chatSessionId)) {
+      if (outcome.kind === 'stopped') {
+        sessionState.markSessionStopped(this.sql, stateId, outcome.reason);
+      } else {
+        sessionState.markSessionError(this.sql, stateId, outcome.errorMessage);
+      }
+    }
+
+    this.broadcastEvent(
+      'session.activity',
+      {
+        sessionId: chatSessionId,
+        activity: outcome.kind === 'stopped' ? 'stopped' : 'error',
+        promptStartedAt: null,
+        ...(outcome.kind === 'failed' ? { statusError: outcome.errorMessage } : {}),
+      },
+      chatSessionId
+    );
+    // Release anything queued behind the turn that just ended. These deliveries
+    // now resolve against a terminal target instead of parking in `retry_wait`
+    // behind a prompt that is never going to finish.
+    promptDelivery.nudgePromptDeliveriesForTarget(this.sql, chatSessionId);
+    idleCleanup.cancelIdleCleanup(this.sql, chatSessionId);
+    await this.recalculateAlarm();
+  }
+
   async stopSession(sessionId: string): Promise<boolean> {
     const result = sessions.stopSession(this.sql, sessionId);
     if (result) {
@@ -226,6 +274,21 @@ export class ProjectData extends DurableObject<Env> {
       }
       this.scheduleSummarySync();
       this.broadcastEvent('session.stopped', { sessionId }, sessionId);
+      // Best-effort: a session IS stopped once `chat_sessions` says so, and the
+      // probe sweep remains the backstop for the mirror. Never turn a mirror
+      // failure into a failed stop.
+      try {
+        await this.publishSessionTerminalEnd(sessionId, {
+          kind: 'stopped',
+          reason: 'Session stopped',
+        });
+      } catch (e) {
+        log.error('session_terminal_end_publish_failed', {
+          sessionId,
+          outcome: 'stopped',
+          error: String(e),
+        });
+      }
       return true;
     }
     return false;
@@ -298,6 +361,18 @@ export class ProjectData extends DurableObject<Env> {
       }
       this.scheduleSummarySync();
       this.broadcastEvent('session.failed', { sessionId }, sessionId);
+      try {
+        await this.publishSessionTerminalEnd(sessionId, {
+          kind: 'failed',
+          errorMessage: errorMessage ?? 'Session failed',
+        });
+      } catch (e) {
+        log.error('session_terminal_end_publish_failed', {
+          sessionId,
+          outcome: 'failed',
+          error: String(e),
+        });
+      }
       return true;
     }
     return false;
@@ -1401,6 +1476,12 @@ export class ProjectData extends DurableObject<Env> {
       reason: input.reason,
       source: 'control_plane',
       observedAt: input.observedAt,
+      // `observedAt` is a wall-clock instant captured before the caller's slow
+      // VM call, so the question is "did a NEW turn begin since then?" — not
+      // "did this turn make any progress since then?". Same-turn message
+      // persistence advances `activity_at` constantly, which is exactly what
+      // used to void a cancel issued while the agent was still emitting.
+      guard: 'turn_start',
     });
     if (!changed) return false;
     const chatSessionId = sessionState.resolveActivityChatSessionId(this.sql, sessionId);

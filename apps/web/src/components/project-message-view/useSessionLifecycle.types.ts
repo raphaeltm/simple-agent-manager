@@ -62,6 +62,11 @@ export interface UseSessionLifecycleResult {
   handleOpenFileBrowser: () => void;
   handleOpenGitChanges: () => void;
   handleCancelPrompt: () => void;
+  /** True while an interrupt request is in flight, so the control can show progress. */
+  cancelling: boolean;
+  /** Message from a failed interrupt attempt, surfaced beside the control. */
+  cancelError: string | null;
+  clearCancelError: () => void;
   handleSendFollowUp: () => Promise<void>;
   handleUploadFiles: (files: FileList | File[]) => Promise<void>;
   loadMore: () => Promise<void>;

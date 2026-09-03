@@ -184,6 +184,44 @@ export function upsertActivityState(
   return cursor.rowsWritten > 0;
 }
 
+/**
+ * Which clock `observedAt` is measured against. The two callers of
+ * `recordTurnEnd` ask genuinely different questions, so the predicate is an
+ * explicit argument rather than a shared default — a new caller must choose,
+ * and neither meaning can be widened into the other by accident
+ * (.claude/rules/67).
+ *
+ * - `turn_start` — "has a NEW turn begun since I observed the turn-end
+ *   evidence?" Used by control-plane observations (cancel, force-stop, dead
+ *   target) whose `observedAt` is a wall-clock instant captured BEFORE a slow
+ *   VM call (.claude/rules/49). Compares `prompt_started_at`, which is written
+ *   once when a turn begins and is explicitly PRESERVED across same-turn
+ *   re-reports by `upsertActivityState`, so it is stable for the life of a turn.
+ *
+ *   It must NOT compare `activity_at`, which is a LAST-REPORT clock:
+ *   `refreshWorkingActivityForChatSession` rewrites it to `now` on EVERY
+ *   persisted message while a session is working (`message-persistence.ts`,
+ *   both the single and batch paths). Guarding a cancel on `activity_at` meant
+ *   any message flushing inside the cancel's VM round-trip pushed it past
+ *   `observedAt` and silently voided the cancel — the turn stayed "working",
+ *   `publishTurnEnd` never ran, and the stop button, durable delivery and idle
+ *   scheduling all wedged together (.claude/rules/57).
+ *
+ * - `row_unchanged` — "has this row changed at all since I selected it?"
+ *   Optimistic concurrency for the probe sweep, whose `observedAt` is the
+ *   `activity_at` it read at candidate-selection time rather than a wall-clock
+ *   observation. Compares `activity_at` so that ANY fresh report — including a
+ *   new message arriving mid-probe — withdraws the probe's stale verdict.
+ */
+export type TurnEndGuard = 'turn_start' | 'row_unchanged';
+
+const TURN_END_GUARD_SQL: Record<TurnEndGuard, string> = {
+  // COALESCE falls back to the last-report clock so a working row that never
+  // recorded a prompt start behaves exactly as it did before this guard existed.
+  turn_start: 'COALESCE(prompt_started_at, activity_at)',
+  row_unchanged: 'activity_at',
+};
+
 export interface TurnEndInput {
   reason: SessionActivityTerminalReason;
   source: SessionActivitySource;
@@ -193,6 +231,8 @@ export interface TurnEndInput {
    * belongs to a newer prompt and is never stomped.
    */
   observedAt: number;
+  /** Which clock `observedAt` is compared against. See {@link TurnEndGuard}. */
+  guard: TurnEndGuard;
   now?: number;
 }
 
@@ -244,7 +284,7 @@ export function recordTurnEnd(
          activity_probe_at = NULL
      WHERE session_id = ?
        AND activity IN (${placeholders})
-       AND activity_at <= ?`,
+       AND ${TURN_END_GUARD_SQL[input.guard]} <= ?`,
     now,
     input.source,
     input.reason,
@@ -354,12 +394,27 @@ export function updateCurrentPlan(sql: SqlStorage, sessionId: string, planJson: 
   );
 }
 
+/**
+ * Terminalize the activity mirror for a session that has been stopped.
+ *
+ * `stopSession` used to write only `chat_sessions.status`, leaving a mid-turn
+ * row reporting `prompting` forever — so the stop button kept showing "working",
+ * queued durable messages stayed parked behind a turn that had ended, and the
+ * probe sweep kept selecting a session that no longer existed. Clearing the
+ * probe accounting here is what removes it from the candidate set
+ * (`selectStaleActivityProbeCandidates` only matches WORKING_ACTIVITIES, and
+ * `'stopped'` is not one), so the row leaves the sweep by construction rather
+ * than by budget exhaustion (.claude/rules/47).
+ */
 export function markSessionStopped(sql: SqlStorage, sessionId: string, reason: string): void {
   const now = Date.now();
   sql.exec(
     `UPDATE session_state
      SET activity = 'stopped', activity_at = ?, last_stop_reason = ?,
 		     prompt_started_at = NULL, prompt_epoch = NULL,
+			 status_error = NULL,
+			 activity_source = 'control_plane', activity_reason = 'force_stopped',
+			 activity_probe_attempts = 0, activity_probe_at = NULL,
 			 runtime_work_state = 'inactive', runtime_work_count = 0,
 			 runtime_work_updated_at = ?
      WHERE session_id = ?`,
@@ -370,11 +425,22 @@ export function markSessionStopped(sql: SqlStorage, sessionId: string, reason: s
   );
 }
 
+/**
+ * Terminalize the activity mirror for a session that ended in failure.
+ *
+ * Unlike {@link markSessionStopped} this deliberately RETAINS `status_error` —
+ * it is the user-visible failure context — and leaves `activity = 'error'`,
+ * which `WORKING_ACTIVITIES` excludes, so the row is likewise not a probe
+ * candidate.
+ */
 export function markSessionError(sql: SqlStorage, sessionId: string, errorMessage: string): void {
   const now = Date.now();
   sql.exec(
     `UPDATE session_state
 		 SET activity = 'error', activity_at = ?, status_error = ?,
+		     prompt_started_at = NULL, prompt_epoch = NULL,
+			 activity_source = 'control_plane', activity_reason = 'dead',
+			 activity_probe_attempts = 0, activity_probe_at = NULL,
 		     runtime_work_state = 'inactive', runtime_work_count = 0,
 			 runtime_work_updated_at = ?
 		 WHERE session_id = ?`,
@@ -383,6 +449,33 @@ export function markSessionError(sql: SqlStorage, sessionId: string, errorMessag
     now,
     sessionId
   );
+}
+
+/**
+ * Every `session_state` row belonging to one chat session: the chat-session-keyed
+ * row plus every linked ACP-session-keyed row.
+ *
+ * Both keyings exist in production (the VM's activity callbacks are keyed by ACP
+ * session id, the browser-facing state by chat session id), which is why
+ * `refreshWorkingActivityForChatSession` matches the same union. A terminal
+ * transition that cleared only one of them would leave the other reporting a
+ * turn that has ended.
+ */
+export function listSessionStateIdsForChatSession(
+  sql: SqlStorage,
+  chatSessionId: string
+): string[] {
+  const rows = sql
+    .exec(
+      `SELECT id FROM acp_sessions WHERE chat_session_id = ?
+       UNION SELECT ?`,
+      chatSessionId,
+      chatSessionId
+    )
+    .toArray();
+  return rows
+    .map((row) => row.id)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
 }
 
 // --- Read Operations ---

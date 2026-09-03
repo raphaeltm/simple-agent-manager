@@ -309,7 +309,11 @@ export function applyProbeOutcome(
     return recordTurnEnd(sql, candidate.acpSessionId, {
       reason: 'probe_reconciled',
       source: 'probe',
+      // `observedAt` here is the `activity_at` read at candidate selection, not
+      // a wall-clock observation, so the guard is optimistic concurrency: any
+      // fresh report since selection withdraws this probe's stale verdict.
       observedAt: candidate.activityAt,
+      guard: 'row_unchanged',
       now,
     });
   }
@@ -354,6 +358,7 @@ export function applyProbeOutcome(
     reason: 'dead',
     source: 'probe',
     observedAt: candidate.activityAt,
+    guard: 'row_unchanged',
     now,
   });
 }

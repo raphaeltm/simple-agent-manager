@@ -4,6 +4,7 @@ import type { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log, serializeError } from '../lib/logger';
 import { requireRouteParam } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
 import { getUserId } from '../middleware/auth';
@@ -16,6 +17,7 @@ import {
   type TerminalTaskCleanupStatus,
 } from '../services/task-terminal-cleanup';
 import { requireSessionCreator } from './chat-session-ownership';
+import { resolveLiveAgentSessionForChat } from './chat-workspace-resolver';
 
 type Database = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -121,6 +123,62 @@ async function stopTaskBackedSession(
   });
 }
 
+/**
+ * Tell the agent to stop before we tear its workspace down.
+ *
+ * Archiving used to be silent from the VM's point of view: the control plane
+ * cancelled the task row and deleted the workspace while the agent kept running
+ * — and kept spending tokens — until teardown reaped it.
+ *
+ * Strictly best-effort, and deliberately so. The dominant UI path archives an
+ * already-sleeping session, where there is no live workspace at all and
+ * `resolveLiveAgentSessionForChat` throws a 404 by design. Archive must succeed
+ * regardless of whether anything was there to signal, so every failure here is
+ * logged and swallowed. Unlike `/cancel` (which keeps the session alive and
+ * therefore must record a turn end), the teardown that follows is what
+ * terminalizes the session state.
+ */
+async function signalAgentStopBestEffort(
+  env: Env,
+  db: Database,
+  context: StopRouteContext
+): Promise<void> {
+  try {
+    const { workspace, agentSession } = await resolveLiveAgentSessionForChat(db, {
+      projectId: context.projectId,
+      sessionId: context.sessionId,
+      userId: context.userId,
+    });
+
+    const { cancelAgentSessionOnNode, stopAgentSessionOnNode } = await import(
+      '../services/node-agent'
+    );
+
+    // Cancel first so an in-flight prompt is interrupted rather than left to
+    // race the stop, then stop the session host itself.
+    await cancelAgentSessionOnNode(
+      workspace.nodeId,
+      workspace.id,
+      agentSession.id,
+      env,
+      context.userId
+    );
+    await stopAgentSessionOnNode(
+      workspace.nodeId,
+      workspace.id,
+      agentSession.id,
+      env,
+      context.userId
+    );
+  } catch (err) {
+    log.info('chat.stop_agent_signal_skipped', {
+      projectId: context.projectId,
+      sessionId: context.sessionId,
+      ...serializeError(err),
+    });
+  }
+}
+
 export function registerChatStopRoute(chatRoutes: Hono<{ Bindings: Env }>): void {
   /**
    * POST /api/projects/:projectId/sessions/:sessionId/stop
@@ -141,6 +199,9 @@ export function registerChatStopRoute(chatRoutes: Hono<{ Bindings: Env }>): void
       sessionId,
       fallbackUserId: userId,
     });
+    // Signal the agent BEFORE teardown — once the workspace row is gone there is
+    // nothing left to resolve a node from.
+    await signalAgentStopBestEffort(c.env, db, context);
     await stopTaskBackedSession(c.env, db, backingTask.id, context);
     await chatPersistence.stopChatSession(c.env, projectId, sessionId);
 

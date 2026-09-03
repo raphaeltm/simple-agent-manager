@@ -268,19 +268,28 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
   }, [hasMore, loadingMore, messages, projectId, sessionId]);
 
   // ── Cancel the current in-flight prompt via REST API ──
+  // `cancelling` is state, not just a ref, so the in-flight guard is renderable:
+  // a ref-only guard silently drops every press for the whole request and the
+  // control looks idle while doing nothing.
   const cancellingRef = useRef(false);
+  const [cancelling, setCancelling] = useState(false);
   const handleCancelPrompt = useCallback(() => {
     if (agentActivity === 'idle' || cancellingRef.current) return;
     cancellingRef.current = true;
+    setCancelling(true);
+    setError(null);
     cancelAgentPrompt(projectId, sessionId)
       .then(() => {
         setAgentActivity('idle');
       })
-      .catch(() => {
-        // Network/server error — keep spinner visible so user can retry
+      .catch((err: unknown) => {
+        // Surface the failure through the existing error banner rather than
+        // swallowing it; the control stays available so the user can retry.
+        setError(err instanceof Error ? err.message : 'Failed to interrupt the agent');
       })
       .finally(() => {
         cancellingRef.current = false;
+        setCancelling(false);
       });
   }, [agentActivity, projectId, sessionId]);
 
@@ -369,10 +378,12 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
           <button
             type="button"
             onClick={handleCancelPrompt}
-            aria-label="Cancel agent"
-            className="ml-auto flex-shrink-0 px-2 py-2.5 min-h-[44px] text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer text-danger hover:bg-danger-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            disabled={cancelling}
+            aria-busy={cancelling}
+            aria-label={cancelling ? 'Cancelling agent' : 'Cancel agent'}
+            className="ml-auto flex-shrink-0 px-2 py-2.5 min-h-[44px] text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer text-danger hover:bg-danger-tint disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
-            Cancel
+            {cancelling ? 'Cancelling…' : 'Cancel'}
           </button>
         </div>
       )}
