@@ -81,7 +81,7 @@ Separately, the observability lesson is that an active trigger with deliveries r
 - [x] Update `formatTriggerSource()` to render `commandPrefix` only for `issue_comment`.
 - [x] Add the `.claude/rules/` process fix for event-scoped filter predicates.
 - [x] Run targeted API/web unit tests and prove no test collection regressions.
-- [ ] Run local Playwright screenshots for trigger list row rendering and trigger form GitHub fields at 1280x800 and 375x667 using stress data; review overflow/clipping/readability.
+- [x] Run local Playwright screenshots for trigger list row rendering and trigger form GitHub fields at 1280x800 and 375x667 using stress data; review overflow/clipping/readability.
 - [ ] Run full quality suite.
 - [ ] Run specialist reviews: task-completion-validator, cloudflare-specialist, ui-ux-specialist, constitution-validator, test-engineer, doc-sync-validator.
 - [ ] Check for other active staging agents/runs, deploy to staging, and verify changed behavior.
@@ -105,3 +105,41 @@ Separately, the observability lesson is that an active trigger with deliveries r
 - Pre-fix discrimination: after adding the backend regression tests and before changing `evaluateFilters()`, `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/github-trigger-filter.test.ts` failed with 3 expected failures. Each non-comment event (`issues`, `pull_request`, `push`) returned `{ matched: false, reason: "comment does not start with '/sam'" }` instead of `{ matched: true }`.
 - Post-fix API focus: `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/github-trigger-filter.test.ts` passed, 1 file / 47 tests. The same file previously had 44 tests, so the three added backend cases were collected and run.
 - Post-fix web focus: `pnpm --filter @simple-agent-manager/web test -- tests/unit/components/trigger-form-support.test.ts tests/unit/components/trigger-presentation.test.ts` passed, 2 files / 30 tests.
+- Local Playwright visual audit initially failed because Chromium dependencies were missing (`libnspr4.so`, then `libnss3.so`). Installed Chromium dependencies with `sudo npx playwright install-deps chromium`, then reran successfully.
+- Focused Playwright visual audit: `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/triggers-ui-audit.spec.ts --project='iPhone SE (375x667)' --project='Desktop (1280x800)' --grep 'GitHub source labels|GitHub event trigger form|new GitHub event trigger form|GitHub issues form'` passed, 6 executed / 6 project-scope skips. The audit captured screenshots for trigger list row rendering and GitHub trigger form fields at 375x667 and 1280x800.
+- Screenshot files reviewed:
+  - `triggers-list-github-source-labels-mobile-375x667.png`
+  - `triggers-list-github-source-labels-desktop-1280x800.png`
+  - `trigger-form-github-mobile-375x667.png`
+  - `trigger-form-github-desktop-1280x800.png`
+  - `trigger-form-github-issues-mobile-375x667.png`
+  - `trigger-form-github-issues-desktop-1280x800.png`
+- UI issue found/fixed during screenshot review: the drawer’s scrollable panel allowed scrolled content to bleed under the header and the focused lower input to crowd the footer boundary. Fixed `TriggerForm` to use a flex column shell with header/footer outside the scroll container and `scroll-pb-28` on the form body. Final screenshots reviewed for overflow, clipping, readability, and responsive behavior; no remaining issues found.
+
+## UI/UX Validation Report
+
+### Variants Considered
+
+1. Backend-only/UI-serializer-only change: smallest code diff, but leaves the existing drawer overlap found during required visual audit.
+2. Keep sticky header/footer inside the same scrolling panel and increase opaque backgrounds: reduces overlap, but keeps the scroll/positioning relationship fragile.
+3. Use a flex column drawer with fixed header/footer and one internal scroll body: slightly broader than the originally requested hygiene change, but directly fixes the clipping/overlap exposed by screenshots.
+
+### Selected Direction
+
+- Choice: explicit event-scoped serialization/presentation plus flex column drawer chrome.
+- Why: this keeps business behavior narrowly scoped while making the required trigger-form screenshots readable and preventing form fields from scrolling underneath header/footer chrome.
+
+### Rubric Scores
+
+| Category | Score | Notes |
+| --- | ---: | --- |
+| Visual hierarchy and scanability | 5 | Source labels distinguish active `issue_comment` prefix from inert `issues` prefix; drawer fields remain grouped and readable. |
+| Interaction clarity | 5 | The GitHub event select controls whether the command prefix field exists; non-comment fields show only applicable inputs. |
+| Mobile usability | 5 | 375x667 screenshots passed overflow assertions; header/footer no longer overlap scrolled content. |
+| Accessibility | 5 | Native labels/selects/inputs remain; focus ring is visible on the active field. |
+| System consistency | 5 | Reuses existing trigger components, tokens, and Playwright audit harness. |
+
+### Issues Found/Fixes
+
+- Fixed Playwright locator ambiguity where `Actions` matched row menu buttons and the form input; the audit now targets the textbox role.
+- Fixed drawer content overlap/clipping discovered in the mobile issues-form screenshot by separating drawer chrome from the scroll container and adding scroll clearance.

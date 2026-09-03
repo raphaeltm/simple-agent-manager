@@ -82,6 +82,18 @@ interface TriggerOverrides {
   sourceType?: 'cron' | 'github' | 'webhook' | 'incident';
   promptTemplate?: string;
   agentProfileId?: string | null;
+  githubConfig?: {
+    eventType: 'issue_comment' | 'issues' | 'pull_request' | 'push';
+    filters: {
+      actions?: string[];
+      labels?: string[];
+      ignoreActors?: string[];
+      commandPrefix?: string;
+      bodyContains?: string;
+      branches?: string[];
+      ignoreDrafts?: boolean;
+    };
+  };
   webhookConfig?: {
     sourceLabel: string | null;
     filterMode: 'all' | 'any';
@@ -199,6 +211,41 @@ const LONG_TEXT_TRIGGERS = [
     description:
       'Unicode: 🚀🎉💻 and HTML: &amp; &lt; &gt; and URL: https://example.com/very/long/path/that/should/not/break/layout',
     status: 'paused',
+  }),
+];
+
+const GITHUB_SOURCE_TRIGGERS = [
+  makeTrigger({
+    id: 'gh-issues-1',
+    name: 'Issue Reviewer with a deliberately long name that should wrap cleanly while hiding an inactive stale command prefix',
+    description:
+      'Production-shaped GitHub issue trigger carrying a stored /sam prefix that must not be rendered for issues events.',
+    sourceType: 'github',
+    triggerCount: 0,
+    nextFireAt: null,
+    githubConfig: {
+      eventType: 'issues',
+      filters: {
+        actions: ['opened'],
+        ignoreActors: ['dependabot[bot]', 'simple-agent-manager[bot]'],
+        commandPrefix: '/sam',
+      },
+    },
+  }),
+  makeTrigger({
+    id: 'gh-comment-1',
+    name: 'Comment command router /sam with a long unicode suffix 日本語 🚀',
+    description: 'In-scope issue_comment trigger where the command prefix remains visible.',
+    sourceType: 'github',
+    triggerCount: 17,
+    nextFireAt: null,
+    githubConfig: {
+      eventType: 'issue_comment',
+      filters: {
+        actions: ['created'],
+        commandPrefix: '/sam',
+      },
+    },
   }),
 ];
 
@@ -711,6 +758,31 @@ async function verifyIncidentTriggerDetail(page: Page, screenshotPrefix: string)
   await assertNoClippedOverflow(page);
 }
 
+async function verifyGitHubIssuesForm(page: Page, screenshotName: string) {
+  await setupApiMocks(page, { triggers: GITHUB_SOURCE_TRIGGERS });
+  await page.goto('/projects/proj-test-1/triggers');
+  await page.waitForSelector('text=Issue Reviewer');
+  await page.click('text=New Trigger');
+  await page.click('role=button[name=/GitHub event/]');
+  await page.getByLabel('GitHub event').selectOption('issues');
+  await page
+    .getByRole('textbox', { name: 'Actions' })
+    .fill('opened, reopened, labeled, assigned, transferred, milestoned');
+  await page
+    .getByRole('textbox', { name: 'Ignore actors' })
+    .fill('dependabot[bot], simple-agent-manager[bot], github-actions[bot]');
+  await page
+    .getByRole('textbox', { name: 'Required labels' })
+    .fill('needs-agent, regression, customer-visible, very-long-label-name-that-wraps');
+  await page
+    .getByRole('textbox', { name: 'Text contains' })
+    .fill('a deliberately long keyword phrase that should wrap without clipping 日本語 🚀');
+  await expect(page.locator('#github-command-prefix')).toHaveCount(0);
+  await screenshot(page, screenshotName);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+}
+
 // ---------------------------------------------------------------------------
 // Tests: Triggers List — Mobile
 // ---------------------------------------------------------------------------
@@ -733,6 +805,18 @@ test.describe('Triggers List — Mobile', () => {
     await page.goto('/projects/proj-test-1/triggers');
     await page.waitForSelector('text=Special chars');
     await screenshot(page, 'triggers-list-long-text-mobile');
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+  });
+
+  test('GitHub source labels hide inactive command prefix', async ({ page }) => {
+    await setupApiMocks(page, { triggers: GITHUB_SOURCE_TRIGGERS });
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForSelector('text=Issue Reviewer');
+    await expect(page.getByText('GitHub issues: /sam')).toHaveCount(0);
+    await expect(page.getByText('GitHub issues', { exact: true })).toBeVisible();
+    await expect(page.getByText('GitHub issue comment: /sam', { exact: true })).toBeVisible();
+    await screenshot(page, 'triggers-list-github-source-labels-mobile');
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
   });
@@ -847,6 +931,18 @@ test.describe('Triggers List — Desktop', () => {
     await page.goto('/projects/proj-test-1/triggers');
     await page.waitForSelector('text=Special chars');
     await screenshot(page, 'triggers-list-long-text-desktop');
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+  });
+
+  test('GitHub source labels hide inactive command prefix', async ({ page }) => {
+    await setupApiMocks(page, { triggers: GITHUB_SOURCE_TRIGGERS });
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForSelector('text=Issue Reviewer');
+    await expect(page.getByText('GitHub issues: /sam')).toHaveCount(0);
+    await expect(page.getByText('GitHub issues', { exact: true })).toBeVisible();
+    await expect(page.getByText('GitHub issue comment: /sam', { exact: true })).toBeVisible();
+    await screenshot(page, 'triggers-list-github-source-labels-desktop');
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
   });
@@ -1010,6 +1106,10 @@ test.describe('Trigger Form — Mobile', () => {
     await assertNoClippedOverflow(page);
   });
 
+  test('GitHub issues form hides command prefix field', async ({ page }) => {
+    await verifyGitHubIssuesForm(page, 'trigger-form-github-issues-mobile');
+  });
+
   test('webhook form creates one-time credential', async ({ page }) => {
     await verifyWebhookCreation(page, 'trigger-webhook-credential-mobile');
   });
@@ -1062,6 +1162,10 @@ test.describe('Trigger Form — Desktop', () => {
     await screenshot(page, 'trigger-form-github-desktop');
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
+  });
+
+  test('GitHub issues form hides command prefix field', async ({ page }) => {
+    await verifyGitHubIssuesForm(page, 'trigger-form-github-issues-desktop');
   });
 
   test('webhook form creates one-time credential', async ({ page }) => {
