@@ -1916,29 +1916,15 @@ func TestSessionHost_MonitorIntentionalPromptCancelDoesNotConsumeRestartBudget(t
 }
 
 func TestSessionHost_MonitorIntentionalPromptCancelReportsIdleAfterSuccessfulRestart(t *testing.T) {
-	var mu sync.Mutex
-	activities := make([]string, 0, 2)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload activityPayload
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Errorf("decode activity payload: %v", err)
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		mu.Lock()
-		activities = append(activities, payload.Activity)
-		mu.Unlock()
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
+	recorder := newActivityRecorder(t)
 
 	host := newRecoveryTestHost(t, time.Second)
 	defer host.Stop()
 	host.config.ProjectID = "project-1"
 	host.config.NodeID = "node-1"
-	host.config.ControlPlaneURL = server.URL
+	host.config.ControlPlaneURL = recorder.server.URL
 	host.config.CallbackToken = "token"
-	host.config.HTTPClient = server.Client()
+	host.config.HTTPClient = recorder.server.Client()
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CODEX_HOME", "")
 	host.config.ContainerResolver = func() (string, error) { return "", nil }
@@ -1970,7 +1956,7 @@ func TestSessionHost_MonitorIntentionalPromptCancelReportsIdleAfterSuccessfulRes
 	)
 
 	waitFor(t, 250*time.Millisecond, func() bool {
-		return countActivity(&mu, &activities, "idle") == 1
+		return countActivity(&recorder.mu, &recorder.activities, "idle") == 1
 	})
 	if starts.Load() != 1 {
 		t.Fatalf("restart count = %d, want 1", starts.Load())
@@ -1978,8 +1964,8 @@ func TestSessionHost_MonitorIntentionalPromptCancelReportsIdleAfterSuccessfulRes
 	if host.Status() != HostReady {
 		t.Fatalf("status = %s, want %s", host.Status(), HostReady)
 	}
-	if countActivity(&mu, &activities, "recovering") != 1 {
-		t.Fatalf("activities = %v, want one recovering report before idle", snapshotActivities(&mu, &activities))
+	if countActivity(&recorder.mu, &recorder.activities, "recovering") != 1 {
+		t.Fatalf("activities = %v, want one recovering report before idle", snapshotActivities(&recorder.mu, &recorder.activities))
 	}
 }
 
