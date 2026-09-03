@@ -92,10 +92,14 @@ async function resolveSessionId(page: Page, projectId: string): Promise<string> 
 }
 
 /**
- * How many non-user messages the agent has produced. Read from the API so the
- * probe cannot silently measure nothing, which a guessed DOM selector can.
+ * The session's server-maintained message counter.
+ *
+ * Deliberately NOT `messages.length` from the session-detail payload: that array
+ * is a capped page, so on a long transcript the count plateaus at the cap and
+ * stops rising even as new messages land — which reads exactly like "the agent
+ * never answered". `messageCount` is monotonic and cannot silently saturate.
  */
-async function countAgentMessages(
+async function sessionMessageCount(
   page: Page,
   projectId: string,
   sessionId: string
@@ -103,9 +107,9 @@ async function countAgentMessages(
   const res = await page.request.get(
     `${STAGING_API}/api/projects/${projectId}/sessions/${sessionId}`
   );
-  if (res.status() !== 200) return 0;
-  const body = (await res.json()) as { messages?: Array<{ role: string }> };
-  return (body.messages ?? []).filter((m) => m.role !== 'user').length;
+  if (res.status() !== 200) return -1;
+  const body = (await res.json()) as { session?: { messageCount?: number } };
+  return body.session?.messageCount ?? -1;
 }
 
 const INTERRUPT = { name: 'Interrupt agent' } as const;
@@ -174,14 +178,14 @@ test.describe('Staging — interrupt then follow-up', () => {
     // which is exactly how the first version of this spec passed while proving
     // nothing (.claude/rules/62).
     const sessionId = await resolveSessionId(page, project!.id);
-    const agentMessages = () => countAgentMessages(page, project!.id, sessionId);
+    const messageCount = () => sessionMessageCount(page, project!.id, sessionId);
 
     await expect
-      .poll(agentMessages, {
+      .poll(messageCount, {
         timeout: AGENT_START_TIMEOUT_MS,
         message: 'agent never produced output, so it was never genuinely mid-turn',
       })
-      .toBeGreaterThan(0);
+      .toBeGreaterThan(1);
 
     const interrupt = page.getByRole('button', INTERRUPT);
     await expect(interrupt, 'agent never entered the working state').toBeVisible({
@@ -209,7 +213,7 @@ test.describe('Staging — interrupt then follow-up', () => {
 
     // --- Symptom B: the follow-up after the interrupt must be answered ---
     await expect(sessionComposer).toBeVisible({ timeout: 60_000 });
-    const outputBefore = await agentMessages();
+    const countBefore = await messageCount();
     await sessionComposer.fill('Reply with exactly one word: acknowledged');
     await sessionComposer.press('Control+Enter');
 
@@ -217,11 +221,13 @@ test.describe('Staging — interrupt then follow-up', () => {
     // ended, and only sleep/wake recovered it. A NEW agent message is the proof
     // it was delivered rather than parked.
     await expect
-      .poll(agentMessages, {
+      .poll(messageCount, {
         timeout: AGENT_START_TIMEOUT_MS,
         message: 'the follow-up sent after an interrupt was never answered',
       })
-      .toBeGreaterThan(outputBefore);
+      // +1 would only prove the user's own message persisted. The agent's reply
+      // is what proves the delivery was released rather than parked.
+      .toBeGreaterThan(countBefore + 1);
     await shot(page, 'staging-followup-accepted');
   });
 });
