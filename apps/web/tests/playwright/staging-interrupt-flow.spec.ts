@@ -128,44 +128,67 @@ test.describe('Staging — interrupt then follow-up', () => {
       await sessionComposer.press('Control+Enter');
     }
 
-    // --- Symptom A: interrupt ONCE against a genuinely working agent ---
+    // --- Wait for the agent to be GENUINELY working ---
+    // The dock shows Interrupt as soon as the prompt is sent, while the runtime
+    // is still provisioning ("Provisioning VM / Waiting for task runner"). Pressing
+    // it then proves nothing about the bug, which is specifically about a message
+    // flushing DURING the cancel's round trip. Wait for real agent output first.
+    const startupBanner = page.getByText(/Usually takes .* minutes|Waiting for task runner/i);
+    await expect(startupBanner, 'runtime never finished starting').toBeHidden({
+      timeout: AGENT_START_TIMEOUT_MS,
+    });
+
+    // Real assistant output is the only proof the agent is mid-turn. The prompt
+    // asks for 400 numbered lines, so output keeps arriving while we interrupt.
+    const assistantOutput = page.locator('[data-testid="acp-conversation-item"], article, li').filter({
+      hasText: /\b(1|2|3)\b/,
+    });
+    await expect
+      .poll(async () => assistantOutput.count(), {
+        timeout: AGENT_START_TIMEOUT_MS,
+        message: 'agent never produced output, so it was never genuinely mid-turn',
+      })
+      .toBeGreaterThan(0);
+
     const interrupt = page.getByRole('button', INTERRUPT);
     await expect(interrupt, 'agent never entered the working state').toBeVisible({
-      timeout: AGENT_START_TIMEOUT_MS,
+      timeout: 60_000,
     });
     await shot(page, 'staging-interrupt-working');
 
+    // --- Symptom A: ONE press must end the turn ---
     await interrupt.click();
-
-    // The in-flight state must be visible — the bug was that a press produced no
-    // feedback at all and users pressed again.
     await expect(page.getByRole('button', INTERRUPTING)).toBeVisible({ timeout: 15_000 });
     await shot(page, 'staging-interrupt-cancelling');
 
-    // ONE press must be enough. Pre-fix, a message flushing during the cancel's
-    // VM round-trip voided the turn-end write and the dock flipped straight back
-    // to working, which is what "needs multiple presses" was.
+    // The positive assertion matters here. Asserting only that "Interrupt agent"
+    // disappears is satisfied by the CANCELLING state itself (that button is
+    // relabelled "Interrupting agent"), so it would pass without the turn ever
+    // ending. The dock's center action becoming Sleep is what actually proves the
+    // session reached awake-idle — i.e. the turn-end write landed and fanned out.
     await expect(
-      page.getByRole('button', INTERRUPT),
-      'the dock returned to the working state after a single interrupt'
-    ).toBeHidden({ timeout: 90_000 });
-    // No error surfaced by the interrupt itself.
+      page.getByRole('button', { name: 'Sleep session' }),
+      'the session never reached awake-idle after a single interrupt'
+    ).toBeVisible({ timeout: 120_000 });
+    await expect(page.getByRole('button', INTERRUPTING)).toBeHidden();
     await expect(page.getByText('Failed to interrupt the agent')).toHaveCount(0);
     await shot(page, 'staging-interrupt-stopped');
 
     // --- Symptom B: the follow-up after the interrupt must be answered ---
-    // By now we are inside the session, so the in-session composer is the one.
     await expect(sessionComposer).toBeVisible({ timeout: 60_000 });
+    const outputBefore = await assistantOutput.count();
     await sessionComposer.fill('Reply with exactly one word: acknowledged');
     await sessionComposer.press('Control+Enter');
 
-    // The agent producing anything at all is the proof: pre-fix the delivery
-    // parked in retry_wait behind a turn that had already ended, and the session
-    // only recovered via sleep/wake.
-    await expect(
-      page.getByRole('button', INTERRUPT),
-      'the follow-up after an interrupt never reached the agent'
-    ).toBeVisible({ timeout: AGENT_START_TIMEOUT_MS });
+    // Pre-fix this delivery parked in retry_wait behind a turn that had already
+    // ended, and only sleep/wake recovered it. New agent output is the proof it
+    // was delivered rather than parked.
+    await expect
+      .poll(async () => assistantOutput.count(), {
+        timeout: AGENT_START_TIMEOUT_MS,
+        message: 'the follow-up sent after an interrupt was never answered',
+      })
+      .toBeGreaterThan(outputBefore);
     await shot(page, 'staging-followup-accepted');
   });
 });
