@@ -399,7 +399,15 @@ export function CompletionDock({
           disabled={centerDisabled}
           aria-label={centerLabel}
           aria-busy={centerDisabled}
-          className="pointer-events-auto absolute flex items-center justify-center rounded-full cursor-pointer border-0 shadow-lg disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:outline-offset-2"
+          // While cancelling, dimming alone is too quiet to read as "working on
+          // it" — the pulse is the visible progress signal the button otherwise
+          // lacks. `motion-safe:` matches the spinner ring's own guard, so
+          // reduced-motion users get the dim + label change only.
+          className={`pointer-events-auto absolute flex items-center justify-center rounded-full cursor-pointer border-0 shadow-lg disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:outline-offset-2${
+            cancelling && effectiveCenterAction === 'interrupt'
+              ? ' motion-safe:animate-pulse'
+              : ''
+          }`}
           style={{
             width: BTN,
             height: BTN,
