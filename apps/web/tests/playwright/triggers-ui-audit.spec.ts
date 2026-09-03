@@ -890,6 +890,24 @@ async function verifyGitHubCommentForm(
   await assertNoClippedOverflow(page);
 }
 
+test.describe('GitHub command-prefix event scoping', () => {
+  test('source labels hide inactive command prefix', async ({ page }) => {
+    await verifyGitHubSourceLabels(page, 'triggers-list-github-source-labels');
+  });
+
+  test('issues detail hides inactive command prefix', async ({ page }) => {
+    await verifyGitHubIssuesDetail(page, 'trigger-detail-github-issues');
+  });
+
+  test('issue comment form shows command prefix field', async ({ page }) => {
+    await verifyGitHubCommentForm(page, 'trigger-form-github-comment', GITHUB_SOURCE_TRIGGERS);
+  });
+
+  test('issues form hides command prefix field', async ({ page }) => {
+    await verifyGitHubIssuesForm(page, 'trigger-form-github-issues');
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Tests: Triggers List — Mobile
 // ---------------------------------------------------------------------------
@@ -914,10 +932,6 @@ test.describe('Triggers List — Mobile', () => {
     await screenshot(page, 'triggers-list-long-text-mobile');
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
-  });
-
-  test('GitHub source labels hide inactive command prefix', async ({ page }) => {
-    await verifyGitHubSourceLabels(page, 'triggers-list-github-source-labels-mobile');
   });
 
   /**
@@ -1034,10 +1048,6 @@ test.describe('Triggers List — Desktop', () => {
     await assertNoClippedOverflow(page);
   });
 
-  test('GitHub source labels hide inactive command prefix', async ({ page }) => {
-    await verifyGitHubSourceLabels(page, 'triggers-list-github-source-labels-desktop');
-  });
-
   test('empty state', async ({ page }) => {
     await setupApiMocks(page, { triggers: [] });
     await page.goto('/projects/proj-test-1/triggers');
@@ -1092,10 +1102,6 @@ test.describe('Trigger Detail — Mobile', () => {
     await screenshot(page, 'trigger-detail-normal-mobile');
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
-  });
-
-  test('GitHub issues detail hides inactive command prefix', async ({ page }) => {
-    await verifyGitHubIssuesDetail(page, 'trigger-detail-github-issues-mobile');
   });
 
   test('no executions', async ({ page }) => {
@@ -1158,10 +1164,6 @@ test.describe('Trigger Detail — Desktop', () => {
     await assertNoClippedOverflow(page);
   });
 
-  test('GitHub issues detail hides inactive command prefix', async ({ page }) => {
-    await verifyGitHubIssuesDetail(page, 'trigger-detail-github-issues-desktop');
-  });
-
   test('cleanup failure feedback', async ({ page }) => {
     await verifyCleanupFailure(page, 'trigger-detail-cleanup-error-desktop');
   });
@@ -1191,14 +1193,6 @@ test.describe('Trigger Form — Mobile', () => {
     await screenshot(page, 'trigger-form-new-mobile');
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
-  });
-
-  test('GitHub event trigger form renders', async ({ page }) => {
-    await verifyGitHubCommentForm(page, 'trigger-form-github-mobile', []);
-  });
-
-  test('GitHub issues form hides command prefix field', async ({ page }) => {
-    await verifyGitHubIssuesForm(page, 'trigger-form-github-issues-mobile');
   });
 
   test('webhook form creates one-time credential', async ({ page }) => {
@@ -1241,14 +1235,6 @@ test.describe('Trigger Form — Desktop', () => {
 
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
-  });
-
-  test('new GitHub event trigger form', async ({ page }) => {
-    await verifyGitHubCommentForm(page, 'trigger-form-github-desktop', NORMAL_TRIGGERS);
-  });
-
-  test('GitHub issues form hides command prefix field', async ({ page }) => {
-    await verifyGitHubIssuesForm(page, 'trigger-form-github-issues-desktop');
   });
 
   test('webhook form creates one-time credential', async ({ page }) => {
