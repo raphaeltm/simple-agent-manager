@@ -29,7 +29,6 @@ import {
   type StaleActivityCandidate,
 } from '../../../src/durable-objects/project-data/session-activity-reconciliation';
 import {
-  reconcileStaleActivity,
   recordTurnEnd,
   upsertActivityState,
 } from '../../../src/durable-objects/project-data/session-state';
@@ -50,6 +49,18 @@ const ACP_SESSION = 'acp-1';
 const CHAT_SESSION = 'chat-1';
 const WORKSPACE = 'ws-1';
 const NODE = 'node-1';
+
+function listedSession(hostStatus: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id: ACP_SESSION,
+    workspaceId: WORKSPACE,
+    status: 'running',
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+    hostStatus,
+    ...overrides,
+  };
+}
 
 describe('session activity reconciliation', () => {
   let db: Database.Database;
@@ -121,15 +132,6 @@ describe('session activity reconciliation', () => {
   }
 
   describe('(a) lost idle report after a turn end', () => {
-    it('is NOT healed by the SQL-only path while the agent heartbeats', () => {
-      seedLiveSession();
-      wedgePrompting(now - 4 * 60 * 60 * 1000);
-
-      // Discriminating: this is the pre-fix behavior. The wedge survives.
-      expect(reconcileStaleActivity(sql, FIVE_MINUTES)).toEqual([]);
-      expect(readState()?.activity).toBe('prompting');
-    });
-
     it('is selected as a probe candidate and reconciled to idle by the probe', () => {
       seedLiveSession();
       wedgePrompting(now - 4 * 60 * 60 * 1000);
@@ -143,8 +145,9 @@ describe('session activity reconciliation', () => {
       });
 
       const outcome = classifyProbeResponse(
-        { sessions: [{ id: ACP_SESSION, hostStatus: 'idle' }] },
-        ACP_SESSION
+        { sessions: [listedSession('idle')] },
+        ACP_SESSION,
+        WORKSPACE
       );
       expect(outcome).toEqual({ kind: 'not_working', hostStatus: 'idle' });
 
@@ -163,34 +166,129 @@ describe('session activity reconciliation', () => {
       seedLiveSession();
       wedgePrompting(now - 4 * 60 * 60 * 1000);
       const [candidate] = candidates();
-      applyProbeOutcome(sql, candidate!, { kind: 'not_working', hostStatus: 'idle' }, {
-        maxAttempts: 3,
-      });
+      applyProbeOutcome(
+        sql,
+        candidate!,
+        { kind: 'not_working', hostStatus: 'idle' },
+        {
+          maxAttempts: 3,
+        }
+      );
       expect(readState()?.activity).toBe('idle');
       // ...and it is no longer a probe candidate (escapes the candidate set).
       expect(candidates()).toEqual([]);
     });
 
-    it('reconciles when the node does not know the session at all', () => {
+    it('preserves work when the inventory does not contain the exact session identity', () => {
       seedLiveSession();
       wedgePrompting(now - FIVE_MINUTES - 1000);
       const [candidate] = candidates();
-      const outcome = classifyProbeResponse({ sessions: [{ id: 'other', hostStatus: 'prompting' }] }, ACP_SESSION);
-      expect(outcome).toEqual({ kind: 'not_working', hostStatus: null });
-      expect(applyProbeOutcome(sql, candidate!, outcome, { maxAttempts: 3 })).toBe(true);
-      expect(readState()?.activity).toBe('idle');
+      const outcome = classifyProbeResponse(
+        { sessions: [listedSession('prompting', { id: 'other' })] },
+        ACP_SESSION,
+        WORKSPACE
+      );
+      expect(outcome).toEqual({ kind: 'unreachable', error: 'agent_session_identity_missing' });
+      expect(applyProbeOutcome(sql, candidate!, outcome, { maxAttempts: 3 })).toBe(false);
+      expect(readState()?.activity).toBe('prompting');
+    });
+  });
+
+  describe('stale error mirrors', () => {
+    it('reconciles a stale error only after the exact SessionHost reports no work', () => {
+      seedLiveSession();
+      upsertActivityState(sql, ACP_SESSION, {
+        activity: 'error',
+        statusError: 'tool host crashed',
+        now: now - 4 * 60 * 60 * 1000,
+      });
+
+      const [candidate] = candidates();
+      expect(candidate).toMatchObject({ acpSessionId: ACP_SESSION, workspaceId: WORKSPACE });
+      expect(
+        applyProbeOutcome(
+          sql,
+          candidate!,
+          { kind: 'not_working', hostStatus: 'error' },
+          { maxAttempts: 3 }
+        )
+      ).toBe(true);
+      expect(readState()).toMatchObject({
+        activity: 'idle',
+        activity_source: 'probe',
+        activity_reason: 'probe_reconciled',
+        status_error: 'tool host crashed',
+      });
+      expect(candidates()).toEqual([]);
+    });
+
+    it('preserves and refreshes stale error context while SessionHost is still working', () => {
+      seedLiveSession();
+      upsertActivityState(sql, ACP_SESSION, {
+        activity: 'error',
+        statusError: 'callback failed after prompt start',
+        now: now - 4 * 60 * 60 * 1000,
+      });
+
+      const [candidate] = candidates();
+      expect(applyProbeOutcome(sql, candidate!, { kind: 'working' }, { maxAttempts: 3 })).toBe(
+        false
+      );
+      expect(readState()).toMatchObject({
+        activity: 'error',
+        activity_at: now,
+        status_error: 'callback failed after prompt start',
+        activity_probe_attempts: 0,
+      });
+      expect(candidates()).toEqual([]);
+    });
+
+    it('does not select a fresh error or clear one on unreachable inventory', () => {
+      seedLiveSession();
+      upsertActivityState(sql, ACP_SESSION, {
+        activity: 'error',
+        statusError: 'fresh error',
+        now,
+      });
+      expect(candidates()).toEqual([]);
+
+      vi.setSystemTime(now + FIVE_MINUTES + 1);
+      const [candidate] = candidates();
+      expect(
+        applyProbeOutcome(
+          sql,
+          candidate!,
+          { kind: 'unreachable', error: 'connection_timeout' },
+          { maxAttempts: 3 }
+        )
+      ).toBe(false);
+      expect(readState()).toMatchObject({ activity: 'error', status_error: 'fresh error' });
     });
   });
 
   describe('(c) genuinely prompting session (control case)', () => {
+    it.each([
+      ['idle', { kind: 'not_working', hostStatus: 'idle' }],
+      ['starting', { kind: 'working' }],
+      ['ready', { kind: 'not_working', hostStatus: 'ready' }],
+      ['prompting', { kind: 'working' }],
+      ['error', { kind: 'not_working', hostStatus: 'error' }],
+      ['stopped', { kind: 'not_working', hostStatus: 'stopped' }],
+    ])('classifies the real SessionHost %s status', (hostStatus, expected) => {
+      expect(
+        classifyProbeResponse({ sessions: [listedSession(hostStatus)] }, ACP_SESSION, WORKSPACE)
+      ).toEqual(expected);
+    });
+
     it('is NOT flipped when the vm-agent reports a live turn', () => {
       seedLiveSession();
       wedgePrompting(now - 4 * 60 * 60 * 1000);
       const [candidate] = candidates();
 
       const outcome = classifyProbeResponse(
-        { sessions: [{ id: ACP_SESSION, hostStatus: 'prompting' }] },
-        ACP_SESSION
+        { sessions: [listedSession('prompting')] },
+        ACP_SESSION,
+        WORKSPACE
       );
       expect(outcome).toEqual({ kind: 'working' });
       expect(applyProbeOutcome(sql, candidate!, outcome, { maxAttempts: 3 })).toBe(false);
@@ -203,21 +301,51 @@ describe('session activity reconciliation', () => {
       expect(candidates()).toEqual([]);
     });
 
-    it('treats a recovering host status as a live turn', () => {
+    it('treats a starting recovery host as a live turn', () => {
       expect(
-        classifyProbeResponse({ sessions: [{ id: ACP_SESSION, hostStatus: 'recovering' }] }, ACP_SESSION)
+        classifyProbeResponse(
+          { sessions: [listedSession('starting', { status: 'recovery' })] },
+          ACP_SESSION,
+          WORKSPACE
+        )
       ).toEqual({ kind: 'working' });
+    });
+
+    it.each([
+      ['unknown host status', listedSession('future-state')],
+      ['unknown session status', listedSession('idle', { status: 'future-state' })],
+      ['missing createdAt', listedSession('idle', { createdAt: undefined })],
+      ['missing updatedAt', listedSession('idle', { updatedAt: undefined })],
+    ])('treats %s as inconclusive inventory', (_label, session) => {
+      expect(classifyProbeResponse({ sessions: [session] }, ACP_SESSION, WORKSPACE)).toMatchObject({
+        kind: 'unreachable',
+      });
+    });
+
+    it('accepts an omitted hostStatus as a reachable session with no host', () => {
+      expect(
+        classifyProbeResponse(
+          { sessions: [listedSession('idle', { hostStatus: undefined })] },
+          ACP_SESSION,
+          WORKSPACE
+        )
+      ).toEqual({ kind: 'not_working', hostStatus: null });
     });
   });
 
   describe('bounded probe attempts (candidate escape path)', () => {
-    it('terminalizes as dead after the attempt budget is exhausted', () => {
+    it('quarantines without ending the turn after the attempt budget is exhausted', () => {
       seedLiveSession();
       wedgePrompting(now - FIVE_MINUTES - 1000);
 
       let candidate = candidates()[0]!;
       expect(
-        applyProbeOutcome(sql, candidate, { kind: 'unreachable', error: 'timeout' }, { maxAttempts: 2 })
+        applyProbeOutcome(
+          sql,
+          candidate,
+          { kind: 'unreachable', error: 'timeout' },
+          { maxAttempts: 2 }
+        )
       ).toBe(false);
       expect(readState()?.activity_probe_attempts).toBe(1);
 
@@ -228,13 +356,25 @@ describe('session activity reconciliation', () => {
 
       candidate = candidates()[0]!;
       expect(
-        applyProbeOutcome(sql, candidate, { kind: 'unreachable', error: 'timeout' }, { maxAttempts: 2 })
-      ).toBe(true);
+        applyProbeOutcome(
+          sql,
+          candidate,
+          { kind: 'unreachable', error: 'timeout' },
+          { maxAttempts: 2 }
+        )
+      ).toBe(false);
 
       const state = readState();
-      expect(state?.activity).toBe('idle');
-      expect(state?.activity_reason).toBe('dead');
-      // Zombie-candidate check: two sweeps in, the row is gone from the set.
+      expect(state?.activity).toBe('prompting');
+      expect(state?.activity_probe_attempts).toBe(2);
+      expect(
+        sql
+          .exec(
+            `SELECT COUNT(*) AS count FROM activity_events WHERE event_type = 'session.activity_probe_quarantined'`
+          )
+          .toArray()[0]?.count
+      ).toBe(1);
+      // Hot-candidate escape: two sweeps in, the row is quarantined.
       expect(candidates()).toEqual([]);
     });
 
@@ -258,10 +398,15 @@ describe('session activity reconciliation', () => {
       expect(readState()?.activity_probe_attempts).toBe(0);
 
       // The stale outcome lands after the epoch flipped.
-      applyProbeOutcome(sql, candidate, { kind: 'unreachable', error: 'timeout' }, {
-        maxAttempts: 3,
-        now: now + 3000,
-      });
+      applyProbeOutcome(
+        sql,
+        candidate,
+        { kind: 'unreachable', error: 'timeout' },
+        {
+          maxAttempts: 3,
+          now: now + 3000,
+        }
+      );
 
       // Pre-fix this was 1 — budget stolen from an epoch that was never probed.
       expect(readState()?.activity_probe_attempts).toBe(0);
@@ -455,9 +600,9 @@ describe('session activity reconciliation', () => {
         restart_count: 2,
       });
 
-      expect(upsertActivityState(sql, ACP_SESSION, { activity: 'idle', observedAt: now, now })).toBe(
-        true
-      );
+      expect(
+        upsertActivityState(sql, ACP_SESSION, { activity: 'idle', observedAt: now, now })
+      ).toBe(true);
       expect(readState()).toMatchObject({ activity: 'idle', activity_at: now });
 
       expect(
@@ -478,8 +623,9 @@ describe('session activity reconciliation', () => {
     it('lets same-millisecond error win and preserve status context over stale working retries', () => {
       seedLiveSession();
 
-      expect(upsertActivityState(sql, ACP_SESSION, { activity: 'prompting', observedAt: now, now }))
-        .toBe(true);
+      expect(
+        upsertActivityState(sql, ACP_SESSION, { activity: 'prompting', observedAt: now, now })
+      ).toBe(true);
       expect(
         upsertActivityState(sql, ACP_SESSION, {
           activity: 'error',
@@ -546,7 +692,7 @@ describe('session activity reconciliation', () => {
       ['null payload', null],
       ['non-object payload', 'unexpected'],
     ])('treats %s as unreachable rather than not-working', (_label, payload) => {
-      expect(classifyProbeResponse(payload, ACP_SESSION)).toEqual({
+      expect(classifyProbeResponse(payload, ACP_SESSION, WORKSPACE)).toEqual({
         kind: 'unreachable',
         error: 'malformed_agent_sessions_response',
       });
@@ -557,16 +703,39 @@ describe('session activity reconciliation', () => {
       wedgePrompting(now - 4 * 60 * 60 * 1000);
       const [candidate] = candidates();
 
-      const outcome = classifyProbeResponse({ unexpected: true }, ACP_SESSION);
+      const outcome = classifyProbeResponse({ unexpected: true }, ACP_SESSION, WORKSPACE);
       expect(applyProbeOutcome(sql, candidate!, outcome, { maxAttempts: 3 })).toBe(false);
       expect(readState()?.activity).toBe('prompting');
     });
 
-    it('still accepts a well-formed empty listing as proof the turn ended', () => {
-      expect(classifyProbeResponse({ sessions: [] }, ACP_SESSION)).toEqual({
-        kind: 'not_working',
-        hostStatus: null,
+    it('treats an empty listing as inconclusive identity evidence', () => {
+      expect(classifyProbeResponse({ sessions: [] }, ACP_SESSION, WORKSPACE)).toEqual({
+        kind: 'unreachable',
+        error: 'agent_session_identity_missing',
       });
+    });
+
+    it('rejects malformed entries, duplicate identity, and workspace ambiguity', () => {
+      expect(
+        classifyProbeResponse({ sessions: [{ id: ACP_SESSION }] }, ACP_SESSION, WORKSPACE)
+      ).toEqual({
+        kind: 'unreachable',
+        error: 'malformed_agent_session_entry',
+      });
+      expect(
+        classifyProbeResponse(
+          { sessions: [listedSession('idle'), listedSession('idle')] },
+          ACP_SESSION,
+          WORKSPACE
+        )
+      ).toEqual({ kind: 'unreachable', error: 'agent_session_identity_ambiguous' });
+      expect(
+        classifyProbeResponse(
+          { sessions: [listedSession('idle', { workspaceId: 'other-workspace' })] },
+          ACP_SESSION,
+          WORKSPACE
+        )
+      ).toEqual({ kind: 'unreachable', error: 'agent_session_workspace_mismatch' });
     });
   });
 
@@ -690,9 +859,14 @@ describe('session activity reconciliation', () => {
 
       const [candidate] = candidates();
       expect(
-        applyProbeOutcome(sql, candidate!, { kind: 'not_working', hostStatus: 'idle' }, {
-          maxAttempts: 3,
-        })
+        applyProbeOutcome(
+          sql,
+          candidate!,
+          { kind: 'not_working', hostStatus: 'idle' },
+          {
+            maxAttempts: 3,
+          }
+        )
       ).toBe(true);
       // Still parked until the transition is published to the consumers.
       expect(nextAttemptAt()).toBe(parkedUntil);
@@ -749,16 +923,21 @@ describe('session activity reconciliation', () => {
       wedgePrompting(now - 4 * 60 * 60 * 1000);
       vi.mocked(listAgentSessionsOnNode).mockReset();
       vi.mocked(listAgentSessionsOnNode).mockResolvedValue({
-        sessions: [{ id: ACP_SESSION, hostStatus: 'idle' }],
+        sessions: [listedSession('idle')],
       });
       vi.mocked(recordAcpActivityCallbackMetric).mockClear();
     });
 
     it('probes and reconciles a workspace owned by this project', async () => {
-      const result = await probeStaleSessionActivity(sql, makeEnv({ user_id: 'user-1', project_id: 'proj-1' }), hooks, {
-        thresholdMs: FIVE_MINUTES,
-        projectId: 'proj-1',
-      });
+      const result = await probeStaleSessionActivity(
+        sql,
+        makeEnv({ user_id: 'user-1', project_id: 'proj-1' }),
+        hooks,
+        {
+          thresholdMs: FIVE_MINUTES,
+          projectId: 'proj-1',
+        }
+      );
 
       expect(listAgentSessionsOnNode).toHaveBeenCalledWith(
         NODE,
@@ -784,11 +963,75 @@ describe('session activity reconciliation', () => {
       );
     });
 
-    it('refuses to probe a workspace belonging to another project', async () => {
-      const result = await probeStaleSessionActivity(sql, makeEnv({ user_id: 'victim', project_id: 'proj-other' }), hooks, {
-        thresholdMs: FIVE_MINUTES,
-        projectId: 'proj-1',
+    it('caps inventory calls at the configured candidate and timeout budgets', async () => {
+      for (let index = 2; index <= 3; index++) {
+        const chatSessionId = `chat-${index}`;
+        const workspaceId = `ws-${index}`;
+        const acpSessionId = `acp-${index}`;
+        sql.exec(
+          `INSERT INTO chat_sessions
+             (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)
+           VALUES (?, ?, NULL, 'Conversation', 'active', 0, ?, ?, ?)`,
+          chatSessionId,
+          workspaceId,
+          now,
+          now,
+          now
+        );
+        sql.exec(
+          `INSERT INTO acp_sessions
+             (id, chat_session_id, workspace_id, node_id, status, agent_type,
+              last_heartbeat_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'running', 'claude_code', ?, ?, ?)`,
+          acpSessionId,
+          chatSessionId,
+          workspaceId,
+          `node-${index}`,
+          now,
+          now,
+          now
+        );
+        upsertActivityState(sql, acpSessionId, {
+          activity: 'prompting',
+          now: now - 4 * 60 * 60 * 1000,
+        });
+      }
+      vi.mocked(listAgentSessionsOnNode).mockResolvedValue({
+        sessions: [
+          listedSession('prompting'),
+          listedSession('prompting', { id: 'acp-2', workspaceId: 'ws-2' }),
+          listedSession('prompting', { id: 'acp-3', workspaceId: 'ws-3' }),
+        ],
       });
+      const requestTimeoutMs = 1234;
+      const result = await probeStaleSessionActivity(
+        sql,
+        {
+          ...makeEnv({ user_id: 'user-1', project_id: 'proj-1' }),
+          SESSION_ACTIVITY_PROBE_MAX_CANDIDATES: '2',
+          SESSION_ACTIVITY_PROBE_TIMEOUT_MS: String(requestTimeoutMs),
+        },
+        hooks,
+        { thresholdMs: FIVE_MINUTES, projectId: 'proj-1' }
+      );
+
+      expect(result.probed).toBe(2);
+      expect(listAgentSessionsOnNode).toHaveBeenCalledTimes(2);
+      for (const call of vi.mocked(listAgentSessionsOnNode).mock.calls) {
+        expect(call[4]).toEqual({ requestTimeoutMs });
+      }
+    });
+
+    it('refuses to probe a workspace belonging to another project', async () => {
+      const result = await probeStaleSessionActivity(
+        sql,
+        makeEnv({ user_id: 'victim', project_id: 'proj-other' }),
+        hooks,
+        {
+          thresholdMs: FIVE_MINUTES,
+          projectId: 'proj-1',
+        }
+      );
 
       expect(listAgentSessionsOnNode).not.toHaveBeenCalled();
       expect(result.reconciled).toBe(0);
@@ -798,10 +1041,15 @@ describe('session activity reconciliation', () => {
     });
 
     it('fails closed when this DO has no project identity yet', async () => {
-      const result = await probeStaleSessionActivity(sql, makeEnv({ user_id: 'user-1', project_id: 'proj-1' }), hooks, {
-        thresholdMs: FIVE_MINUTES,
-        projectId: null,
-      });
+      const result = await probeStaleSessionActivity(
+        sql,
+        makeEnv({ user_id: 'user-1', project_id: 'proj-1' }),
+        hooks,
+        {
+          thresholdMs: FIVE_MINUTES,
+          projectId: null,
+        }
+      );
 
       expect(listAgentSessionsOnNode).not.toHaveBeenCalled();
       expect(result.reconciled).toBe(0);
@@ -809,10 +1057,15 @@ describe('session activity reconciliation', () => {
     });
 
     it('fails closed when the workspace row has no project', async () => {
-      const result = await probeStaleSessionActivity(sql, makeEnv({ user_id: 'user-1', project_id: null }), hooks, {
-        thresholdMs: FIVE_MINUTES,
-        projectId: 'proj-1',
-      });
+      const result = await probeStaleSessionActivity(
+        sql,
+        makeEnv({ user_id: 'user-1', project_id: null }),
+        hooks,
+        {
+          thresholdMs: FIVE_MINUTES,
+          projectId: 'proj-1',
+        }
+      );
 
       expect(listAgentSessionsOnNode).not.toHaveBeenCalled();
       expect(result.reconciled).toBe(0);
@@ -857,23 +1110,9 @@ describe('session activity reconciliation', () => {
     });
 
     it('treats a probe timeout as unreachable rather than proof of work', async () => {
-      vi.mocked(listAgentSessionsOnNode).mockRejectedValue(new Error('Request timed out after 5000ms'));
-
-      const result = await probeStaleSessionActivity(sql, makeEnv({ user_id: 'user-1', project_id: 'proj-1' }), hooks, {
-        thresholdMs: FIVE_MINUTES,
-        projectId: 'proj-1',
-      });
-
-      expect(result).toEqual({ probed: 1, reconciled: 0 });
-      expect(readState()?.activity_probe_attempts).toBe(1);
-    });
-
-    it('emits forced-terminal telemetry when the unreachable probe budget is exhausted', async () => {
-      sql.exec(
-        'UPDATE session_state SET activity_probe_attempts = 2, activity_probe_at = NULL WHERE session_id = ?',
-        ACP_SESSION
+      vi.mocked(listAgentSessionsOnNode).mockRejectedValue(
+        new Error('Request timed out after 5000ms')
       );
-      vi.mocked(listAgentSessionsOnNode).mockRejectedValue(new Error('Request timed out after 5000ms'));
 
       const result = await probeStaleSessionActivity(
         sql,
@@ -885,21 +1124,48 @@ describe('session activity reconciliation', () => {
         }
       );
 
-      expect(result).toEqual({ probed: 1, reconciled: 1 });
-      expect(readState()?.activity).toBe('idle');
-      expect(recordAcpActivityCallbackMetric).toHaveBeenCalledWith(
-        expect.objectContaining({
-          outcome: 'forced_terminal',
-          projectId: 'proj-1',
-          sessionId: ACP_SESSION,
-          nodeId: NODE,
-          workspaceId: WORKSPACE,
-          activity: 'idle',
-          reason: 'dead_after_probe_budget',
-          source: 'reconciliation_probe',
-        }),
-        expect.anything()
+      expect(result).toEqual({ probed: 1, reconciled: 0 });
+      expect(readState()?.activity_probe_attempts).toBe(1);
+    });
+
+    it('quarantines without telemetry or turn-end fan-out when the probe budget is exhausted', async () => {
+      const broadcastEvent = vi.fn();
+      const nudgeDeliveries = vi.fn(() => 0);
+      const armIdleCleanup = vi.fn();
+      const recalculateAlarm = vi.fn(async () => {});
+      sql.exec(
+        'UPDATE session_state SET activity_probe_attempts = 2, activity_probe_at = NULL WHERE session_id = ?',
+        ACP_SESSION
       );
+      vi.mocked(listAgentSessionsOnNode).mockRejectedValue(
+        new Error('Request timed out after 5000ms')
+      );
+
+      const result = await probeStaleSessionActivity(
+        sql,
+        makeEnv({ user_id: 'user-1', project_id: 'proj-1' }),
+        { broadcastEvent, nudgeDeliveries, armIdleCleanup, recalculateAlarm },
+        {
+          thresholdMs: FIVE_MINUTES,
+          projectId: 'proj-1',
+        }
+      );
+
+      expect(result).toEqual({ probed: 1, reconciled: 0 });
+      expect(readState()?.activity).toBe('prompting');
+      expect(readState()?.activity_probe_attempts).toBe(3);
+      expect(recordAcpActivityCallbackMetric).not.toHaveBeenCalled();
+      expect(broadcastEvent).not.toHaveBeenCalled();
+      expect(nudgeDeliveries).not.toHaveBeenCalled();
+      expect(armIdleCleanup).not.toHaveBeenCalled();
+      expect(recalculateAlarm).not.toHaveBeenCalled();
+      expect(
+        sql
+          .exec(
+            `SELECT COUNT(*) AS count FROM activity_events WHERE event_type = 'session.activity_probe_quarantined'`
+          )
+          .toArray()[0]?.count
+      ).toBe(1);
     });
   });
 
@@ -956,9 +1222,14 @@ describe('session activity reconciliation', () => {
       seedLiveSession();
       wedgePrompting(now - FIVE_MINUTES - 1000);
       const candidate = candidates()[0]!;
-      applyProbeOutcome(sql, candidate, { kind: 'unreachable', error: 'timeout' }, {
-        maxAttempts: 3,
-      });
+      applyProbeOutcome(
+        sql,
+        candidate,
+        { kind: 'unreachable', error: 'timeout' },
+        {
+          maxAttempts: 3,
+        }
+      );
       expect(readState()?.activity_probe_attempts).toBe(1);
 
       upsertActivityState(sql, ACP_SESSION, { activity: 'prompting', now });

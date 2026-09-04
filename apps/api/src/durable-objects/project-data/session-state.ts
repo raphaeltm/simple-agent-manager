@@ -5,7 +5,7 @@
  * VM agent's current session state. Enables:
  * - Correct activity state on page load (no waiting for next broadcast)
  * - Plan button restoration in project chat
- * - Staleness auto-heal for stuck "prompting" states
+ * - Probe-backed reconciliation for stale working states
  */
 import type {
   PlanEntry,
@@ -23,14 +23,14 @@ export const DEFAULT_SESSION_ACTIVITY_STALE_THRESHOLD_MS = 5 * 60 * 1000;
 /**
  * Activity values that mean "a prompt turn is believed to be in flight".
  *
- * These are the only states the reconciler may terminalize, and the only
- * states that suppress idle scheduling / delivery for their session.
+ * These are the states interpreted as positive in-flight work throughout the
+ * control plane, and the states that suppress idle scheduling / delivery for
+ * their session.
  *
- * `error` is deliberately EXCLUDED: clearing it would erase user-visible error
- * context, which is a product decision rather than a reliability fix. A wedged
- * `error` activity therefore still suppresses idle scheduling. Tracked in
- * `tasks/backlog/2026-08-16-probe-reconcile-wedged-error-activity.md`
- * (`.claude/rules/42`).
+ * `error` is deliberately EXCLUDED from positive working evidence. The
+ * SessionHost-backed reconciler probes stale error mirrors separately and may
+ * end them only when the exact runtime session authoritatively reports that no
+ * turn is in flight.
  */
 export const WORKING_ACTIVITIES = ['prompting', 'recovering'] as const;
 
@@ -216,22 +216,35 @@ export interface TurnEndInput {
  * Compare-and-set: only a row still in a working state whose activity is not
  * newer than the observation is flipped. Returns true when the row changed.
  */
-export function recordTurnEnd(
+export function recordTurnEnd(sql: SqlStorage, sessionId: string, input: TurnEndInput): boolean {
+  return recordTurnEndFromActivities(sql, sessionId, input, WORKING_ACTIVITIES, false);
+}
+
+/**
+ * Probe-only terminal transition that also admits a stale `error` mirror.
+ * Preserve its diagnostic text after returning the activity gate to `idle` so
+ * reconciliation releases downstream consumers without erasing user-visible
+ * error context.
+ */
+export function recordProbeReconciledTurnEnd(
+  sql: SqlStorage,
+  sessionId: string,
+  input: TurnEndInput
+): boolean {
+  return recordTurnEndFromActivities(sql, sessionId, input, [...WORKING_ACTIVITIES, 'error'], true);
+}
+
+function recordTurnEndFromActivities(
   sql: SqlStorage,
   sessionId: string,
   input: TurnEndInput,
+  expectedActivities: readonly string[],
+  preserveErrorContext: boolean
 ): boolean {
   const now = input.now ?? Date.now();
-  const placeholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
-  const before = sql.exec(
-    `SELECT activity FROM session_state WHERE session_id = ?`,
-    sessionId,
-  ).toArray()[0];
-  if (!before || typeof before.activity !== 'string' || !isWorkingActivity(before.activity)) {
-    return false;
-  }
+  const placeholders = expectedActivities.map(() => '?').join(', ');
 
-  sql.exec(
+  const updated = sql.exec(
     `UPDATE session_state
      SET activity = 'idle',
          activity_at = ?,
@@ -239,7 +252,7 @@ export function recordTurnEnd(
          activity_reason = ?,
          prompt_started_at = NULL,
          prompt_epoch = NULL,
-         status_error = NULL,
+         status_error = CASE WHEN ? = 1 AND activity = 'error' THEN status_error ELSE NULL END,
          activity_probe_attempts = 0,
          activity_probe_at = NULL
      WHERE session_id = ?
@@ -248,16 +261,13 @@ export function recordTurnEnd(
     now,
     input.source,
     input.reason,
+    preserveErrorContext ? 1 : 0,
     sessionId,
-    ...WORKING_ACTIVITIES,
-    input.observedAt,
+    ...expectedActivities,
+    input.observedAt
   );
 
-  const after = sql.exec(
-    `SELECT activity FROM session_state WHERE session_id = ?`,
-    sessionId,
-  ).toArray()[0];
-  const changed = after?.activity === 'idle';
+  const changed = updated.rowsWritten > 0;
   if (changed) {
     log.info('session_state.turn_end_recorded', {
       sessionId,
@@ -465,74 +475,4 @@ export function getLatestPersistedPlan(
   } catch {
     return null;
   }
-}
-
-// --- Staleness Reconciliation ---
-
-/**
- * Auto-heal stuck working states only with positive dead-session evidence:
- * activity is stale, no messages arrived after activity_at, and no linked ACP
- * session is still running/started with recent heartbeat/update evidence.
- *
- * Message persistence refreshes activity_at to the latest message timestamp
- * while a prompt is working, so equality is the refresh point itself rather
- * than new liveness evidence.
- *
- * Returns session IDs that were auto-healed (for broadcasting).
- */
-export function reconcileStaleActivity(sql: SqlStorage, thresholdMs?: number): string[] {
-  const threshold = thresholdMs ?? DEFAULT_SESSION_ACTIVITY_STALE_THRESHOLD_MS;
-  const cutoff = Date.now() - threshold;
-  const now = Date.now();
-
-  const staleRows = sql
-    .exec(
-      `SELECT session_id FROM session_state
-       WHERE activity IN ('prompting', 'recovering', 'error')
-         AND activity_at < ?
-         AND NOT EXISTS (
-           SELECT 1
-           FROM acp_sessions acp
-           JOIN chat_messages msg ON msg.session_id = acp.chat_session_id
-           WHERE acp.id = session_state.session_id
-             AND msg.created_at > session_state.activity_at
-           UNION
-           SELECT 1
-           FROM chat_messages msg
-           WHERE msg.session_id = session_state.session_id
-             AND msg.created_at > session_state.activity_at
-         )
-         AND NOT EXISTS (
-           SELECT 1
-           FROM acp_sessions acp
-           WHERE acp.id = session_state.session_id
-             AND acp.status IN ('running', 'started')
-             AND COALESCE(acp.last_heartbeat_at, acp.updated_at, acp.started_at, acp.created_at, 0) >= ?
-         )`,
-      cutoff,
-      cutoff
-    )
-    .toArray();
-
-  if (staleRows.length === 0) return [];
-
-  const healedSessionIds: string[] = [];
-  for (const row of staleRows) {
-    const sessionId = row.session_id as string;
-    sql.exec(
-      `UPDATE session_state
-       SET activity = 'idle', activity_at = ?,
-           prompt_started_at = NULL, prompt_epoch = NULL,
-           activity_source = 'control_plane',
-           activity_reason = 'stale_no_evidence',
-           activity_probe_attempts = 0, activity_probe_at = NULL
-       WHERE session_id = ?`,
-      now,
-      sessionId
-    );
-    healedSessionIds.push(sessionId);
-    log.warn('session_state.stale_activity_healed', { sessionId, staleSince: cutoff });
-  }
-
-  return healedSessionIds;
 }

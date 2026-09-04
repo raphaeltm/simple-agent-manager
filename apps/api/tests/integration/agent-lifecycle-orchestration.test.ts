@@ -6,6 +6,7 @@
  * reconciliation. D1 and VM-agent delivery stay mocked because they cross
  * service boundaries, but time and message flow are simulated end to end.
  */
+import { VM_PROMPT_DELIVERY_PROTOCOL_VERSION } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -18,7 +19,11 @@ import {
   resolveAttentionMarkers,
   resolveAttentionMarkersByKind,
 } from '../../src/durable-objects/project-data/attention';
-import { resetIdleCleanup, scheduleIdleCleanup, stopWorkspaceInD1 } from '../../src/durable-objects/project-data/idle-cleanup';
+import {
+  resetIdleCleanup,
+  scheduleIdleCleanup,
+  stopWorkspaceInD1,
+} from '../../src/durable-objects/project-data/idle-cleanup';
 import { persistMessage } from '../../src/durable-objects/project-data/messages';
 import {
   getReconciliationCandidates,
@@ -26,13 +31,33 @@ import {
 } from '../../src/durable-objects/project-data/reconciliation';
 import { failSession } from '../../src/durable-objects/project-data/sessions';
 import type { Env } from '../../src/durable-objects/project-data/types';
-import { sendPromptToAgentOnNode } from '../../src/services/node-agent';
+import { nodeAgentRequest, sendPromptToAgentOnNode } from '../../src/services/node-agent';
+import {
+  acceptedPromptResponse,
+  missingPromptReceipt,
+  versionedPromptCapabilities,
+} from '../helpers/vm-prompt-delivery-fixtures';
 
-vi.mock('../../src/services/node-agent', () => ({
-  sendPromptToAgentOnNode: vi.fn().mockResolvedValue(undefined),
+const nodeAgentMocks = vi.hoisted(() => ({
+  runtimeIdentity: 'runtime-lifecycle-1',
+  nodeAgentRequest: vi.fn(),
+  sendPromptToAgentOnNode: vi.fn(),
 }));
 
-type TaskRow = { task_mode: string; status: string; error?: string | null };
+vi.mock('../../src/services/node-agent', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/services/node-agent')>()),
+  nodeAgentRequest: nodeAgentMocks.nodeAgentRequest,
+  sendPromptToAgentOnNode: nodeAgentMocks.sendPromptToAgentOnNode,
+}));
+
+type TaskRow = {
+  task_mode: string;
+  status: string;
+  project_id: string;
+  workspace_id: string;
+  chat_session_id: string;
+  error?: string | null;
+};
 type WorkspaceRow = {
   node_id: string | null;
   user_id: string;
@@ -66,7 +91,7 @@ function createSqlStorage(db: Database.Database): SqlStorage {
 
 function createMockD1(
   tasks: Record<string, TaskRow>,
-  workspaces: Record<string, WorkspaceRow>,
+  workspaces: Record<string, WorkspaceRow>
 ): D1Database {
   return {
     prepare: vi.fn().mockImplementation((query: string) => ({
@@ -78,11 +103,17 @@ function createMockD1(
           if (query.includes('FROM workspaces')) {
             const row = workspaces[args[0] as string];
             if (!row) return null;
-            if (!row.node_id) return row;
             return {
+              id: args[0] as string,
+              workspace_status: row.status,
+              chat_session_id: 'session-1',
+              node_id: row.node_id,
+              user_id: row.user_id,
+              node_runtime: 'vm',
               node_status: 'running',
               health_status: 'healthy',
               last_heartbeat_at: new Date(Date.now()).toISOString(),
+              running_workspaces_on_node: row.node_id ? 1 : 0,
               ...row,
             };
           }
@@ -99,7 +130,10 @@ function createMockD1(
           }
           if (query.includes("UPDATE workspaces SET status = 'stopped'")) {
             const workspaceId = args[1] as string;
-            if (workspaces[workspaceId] && ['running', 'recovery'].includes(workspaces[workspaceId].status)) {
+            if (
+              workspaces[workspaceId] &&
+              ['running', 'recovery'].includes(workspaces[workspaceId].status)
+            ) {
               workspaces[workspaceId].status = 'stopped';
             }
           }
@@ -128,7 +162,15 @@ describe('agent lifecycle orchestration integration', () => {
     db = new Database(':memory:');
     sql = createSqlStorage(db);
     runMigrations(sql);
-    tasks = { 'task-1': { task_mode: 'task', status: 'in_progress' } };
+    tasks = {
+      'task-1': {
+        task_mode: 'task',
+        status: 'in_progress',
+        project_id: 'project-1',
+        workspace_id: 'ws-1',
+        chat_session_id: 'session-1',
+      },
+    };
     workspaces = { 'ws-1': { node_id: 'node-1', user_id: 'user-1', status: 'running' } };
     env = {
       DATABASE: createMockD1(tasks, workspaces),
@@ -136,7 +178,23 @@ describe('agent lifecycle orchestration integration', () => {
       TASK_RECONCILIATION_IDLE_MS: String(FIVE_MINUTES),
       TASK_RECONCILIATION_RESPONSE_DEADLINE_MS: String(ONE_MINUTE),
     } as unknown as Env;
-    vi.mocked(sendPromptToAgentOnNode).mockClear();
+    vi.mocked(nodeAgentRequest)
+      .mockReset()
+      .mockImplementation(async (_nodeId, _env, path) =>
+        path.endsWith('/agent-capabilities')
+          ? versionedPromptCapabilities(nodeAgentMocks.runtimeIdentity)
+          : missingPromptReceipt(path.split('/').at(-1) ?? '', nodeAgentMocks.runtimeIdentity)
+      );
+    vi.mocked(sendPromptToAgentOnNode)
+      .mockReset()
+      .mockImplementation(async (_nodeId, _workspaceId, acpSessionId, ...args) =>
+        acceptedPromptResponse(
+          acpSessionId,
+          args[4]?.deliveryId ?? '',
+          nodeAgentMocks.runtimeIdentity,
+          Date.now()
+        )
+      );
   });
 
   afterEach(() => {
@@ -151,19 +209,19 @@ describe('agent lifecycle orchestration integration', () => {
        VALUES ('session-1', 'ws-1', 'task-1', 'Lifecycle test', 'active', 0, ?, ?, ?)`,
       START,
       START,
-      START,
+      START
     );
     sql.exec(
       `INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, last_terminal_activity_at, created_at)
        VALUES ('ws-1', 'session-1', ?, 0, ?)`,
       START,
-      START,
+      START
     );
     sql.exec(
       `INSERT INTO acp_sessions (id, chat_session_id, workspace_id, status, agent_type, created_at, updated_at)
        VALUES ('acp-1', 'session-1', 'ws-1', 'running', 'claude_code', ?, ?)`,
       START,
-      START,
+      START
     );
     scheduleIdleCleanup(sql, env, 'session-1', 'ws-1', 'task-1');
   }
@@ -181,7 +239,7 @@ describe('agent lifecycle orchestration integration', () => {
         'reconciliation_checkin',
         result.id,
         'agent',
-        'agent_message',
+        'agent_message'
       );
     }
 
@@ -189,18 +247,23 @@ describe('agent lifecycle orchestration integration', () => {
     return result.id;
   }
 
-  async function expireMarkerLikeProjectDataAlarm(kind: 'needs_input' | 'reconciliation_checkin'): Promise<void> {
+  async function expireMarkerLikeProjectDataAlarm(
+    kind: 'needs_input' | 'reconciliation_checkin'
+  ): Promise<void> {
     const [marker] = getExpiredMarkers(sql);
     expect(marker?.kind).toBe(kind);
 
     resolveAttentionMarkerById(sql, marker.id, 'system', 'expired');
-    const errorMessage = kind === 'reconciliation_checkin'
-      ? 'Agent became unresponsive after SAM check-in'
-      : 'Human input request expired after timeout';
+    const errorMessage =
+      kind === 'reconciliation_checkin'
+        ? 'Agent became unresponsive after SAM check-in'
+        : 'Human input request expired after timeout';
 
     await env.DATABASE.prepare(
-      `UPDATE tasks SET status = 'failed', error = ?, updated_at = datetime('now') WHERE id = ? AND status IN ('in_progress', 'delegated')`,
-    ).bind(errorMessage, marker.taskId).run();
+      `UPDATE tasks SET status = 'failed', error = ?, updated_at = datetime('now') WHERE id = ? AND status IN ('in_progress', 'delegated')`
+    )
+      .bind(errorMessage, marker.taskId)
+      .run();
     expect(marker.workspaceId).toBeTypeOf('string');
     if (!marker.workspaceId) {
       throw new Error('Expected expired marker to include workspaceId');
@@ -217,6 +280,15 @@ describe('agent lifecycle orchestration integration', () => {
     const processed = await processReconciliationCandidates(sql, env, () => {});
 
     expect(processed).toBe(1);
+    expect(nodeAgentRequest).toHaveBeenCalledWith(
+      'node-1',
+      expect.anything(),
+      '/workspaces/ws-1/agent-capabilities',
+      expect.objectContaining({
+        method: 'GET',
+        requestTimeoutMs: 5000,
+      })
+    );
     expect(sendPromptToAgentOnNode).toHaveBeenCalledWith(
       'node-1',
       'ws-1',
@@ -224,20 +296,36 @@ describe('agent lifecycle orchestration integration', () => {
       expect.stringContaining('continue working from where you left off'),
       expect.anything(),
       'user-1',
-      undefined,
-      { requestTimeoutMs: 5000 },
+      expect.any(String),
+      expect.objectContaining({
+        requestTimeoutMs: 5000,
+        protocolVersion: VM_PROMPT_DELIVERY_PROTOCOL_VERSION,
+        deliveryId: expect.any(String),
+        sourceTaskGuard: {
+          taskId: 'task-1',
+          projectId: 'project-1',
+          chatSessionId: 'session-1',
+        },
+      })
     );
-    expect(db.prepare(`SELECT role, content, tool_metadata FROM chat_messages`).all()).toMatchObject([
+    const promptCall = vi.mocked(sendPromptToAgentOnNode).mock.calls[0];
+    const messages = db.prepare(`SELECT id, role, content, tool_metadata FROM chat_messages`).all();
+    expect(messages).toMatchObject([
       {
+        id: promptCall?.[6],
         role: 'user',
         content: expect.stringContaining('Do not stop after the update'),
-        tool_metadata: JSON.stringify({ source: 'sam_orchestrator', kind: 'reconciliation_checkin' }),
       },
     ]);
+    expect(JSON.parse((messages[0] as { tool_metadata: string }).tool_metadata)).toEqual({
+      source: 'sam_orchestrator',
+      kind: 'reconciliation_checkin',
+      deliveryId: promptCall?.[7]?.deliveryId,
+    });
 
-    const checkinsBeforeReply = sql.exec(
-      `SELECT kind, expires_at FROM session_attention_markers WHERE resolved_at IS NULL`,
-    ).toArray();
+    const checkinsBeforeReply = sql
+      .exec(`SELECT kind, expires_at FROM session_attention_markers WHERE resolved_at IS NULL`)
+      .toArray();
     expect(checkinsBeforeReply).toHaveLength(1);
     expect(checkinsBeforeReply[0].kind).toBe('reconciliation_checkin');
     expect(checkinsBeforeReply[0].expires_at).toBe(START + FIVE_MINUTES + 1 + ONE_MINUTE);
@@ -245,7 +333,9 @@ describe('agent lifecycle orchestration integration', () => {
     vi.advanceTimersByTime(30_000);
     persistProjectMessage('assistant', 'Still working; I am investigating the failing test.');
 
-    expect(sql.exec(`SELECT * FROM session_attention_markers WHERE resolved_at IS NULL`).toArray()).toHaveLength(0);
+    expect(
+      sql.exec(`SELECT * FROM session_attention_markers WHERE resolved_at IS NULL`).toArray()
+    ).toHaveLength(0);
     expect(tasks['task-1'].status).toBe('in_progress');
 
     vi.advanceTimersByTime(FIVE_MINUTES + 1);
@@ -272,9 +362,11 @@ describe('agent lifecycle orchestration integration', () => {
 
     persistProjectMessage('assistant', 'I found more context, but still need your decision.');
 
-    const markers = sql.exec(
-      `SELECT kind, resolved_at FROM session_attention_markers WHERE session_id = 'session-1'`,
-    ).toArray();
+    const markers = sql
+      .exec(
+        `SELECT kind, resolved_at FROM session_attention_markers WHERE session_id = 'session-1'`
+      )
+      .toArray();
     expect(markers).toMatchObject([{ kind: 'needs_input', resolved_at: null }]);
     expect(await getReconciliationCandidates(sql, env)).toHaveLength(0);
   });
@@ -295,7 +387,9 @@ describe('agent lifecycle orchestration integration', () => {
     expect(await processReconciliationCandidates(sql, env, () => {})).toBe(0);
 
     persistProjectMessage('user', 'Approved. Continue.');
-    expect(sql.exec(`SELECT * FROM session_attention_markers WHERE resolved_at IS NULL`).toArray()).toHaveLength(0);
+    expect(
+      sql.exec(`SELECT * FROM session_attention_markers WHERE resolved_at IS NULL`).toArray()
+    ).toHaveLength(0);
 
     vi.advanceTimersByTime(FIVE_MINUTES + 1);
     expect(await processReconciliationCandidates(sql, env, () => {})).toBe(1);
@@ -314,12 +408,12 @@ describe('agent lifecycle orchestration integration', () => {
       error: 'Agent became unresponsive after SAM check-in',
     });
     expect(workspaces['ws-1'].status).toBe('stopped');
-    expect(sql.exec(`SELECT status FROM chat_sessions WHERE id = 'session-1'`).toArray()).toMatchObject([
-      { status: 'failed' },
-    ]);
-    expect(sql.exec(`SELECT resolved_reason FROM session_attention_markers`).toArray()).toMatchObject([
-      { resolved_reason: 'expired' },
-    ]);
+    expect(
+      sql.exec(`SELECT status FROM chat_sessions WHERE id = 'session-1'`).toArray()
+    ).toMatchObject([{ status: 'failed' }]);
+    expect(
+      sql.exec(`SELECT resolved_reason FROM session_attention_markers`).toArray()
+    ).toMatchObject([{ resolved_reason: 'expired' }]);
   });
 
   it('expires unanswered human input after two hours and cleans up without a reconciliation check-in', async () => {
@@ -343,9 +437,9 @@ describe('agent lifecycle orchestration integration', () => {
       error: 'Human input request expired after timeout',
     });
     expect(workspaces['ws-1'].status).toBe('stopped');
-    expect(sql.exec(`SELECT status FROM chat_sessions WHERE id = 'session-1'`).toArray()).toMatchObject([
-      { status: 'failed' },
-    ]);
+    expect(
+      sql.exec(`SELECT status FROM chat_sessions WHERE id = 'session-1'`).toArray()
+    ).toMatchObject([{ status: 'failed' }]);
     expect(sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 });
