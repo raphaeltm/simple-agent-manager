@@ -53,7 +53,8 @@ For now, the production slice is deliberately audit-only. `apps/api/src/routes/t
 :::note[September 2026 update]
 This describes the May foundation as it shipped. Reusable VM placement now subtracts active
 CPU, memory, and disk reservations, enforces exclusivity, persists the same snapshot on the
-workspace, and repeats the aggregate check in the final atomic D1 reservation.
+workspace, and repeats the aggregate check in the final atomic D1 reservation through
+`reserveWorkspacePlacement()` in `apps/api/src/services/workspace-placement.ts`.
 :::
 
 ```mermaid
