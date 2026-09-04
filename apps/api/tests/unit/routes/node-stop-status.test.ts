@@ -277,6 +277,8 @@ describe('DELETE /api/nodes/:id', () => {
     mocks.deleteNodeResources.mockResolvedValue({
       nodeFound: true,
       runtimeTerminationConfirmed: true,
+      runtimeTerminationConfirmedAt: '2026-09-04T09:00:00.000Z',
+      runtimeIncarnationId: 'runtime-node-1',
       providerVmDeleted: true,
       providerVmDeleteSkippedReason: null,
       backendDnsDeleted: true,
@@ -285,8 +287,10 @@ describe('DELETE /api/nodes/:id', () => {
 
     let selectIndex = 0;
     const selectResults = [[], [{ id: 'workspace-node-1' }]];
-    const deleteWhere = vi.fn(async () => {
+    const deleteRun = vi.fn(async () => ({ meta: { changes: 1 } }));
+    const deleteWhere = vi.fn(() => {
       operations.push('d1-delete');
+      return Object.assign(Promise.resolve(), { run: deleteRun });
     });
     (drizzle as any).mockReturnValue({
       select: vi.fn(() => {
