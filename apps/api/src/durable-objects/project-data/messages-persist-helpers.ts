@@ -62,13 +62,15 @@ export function resolveDuplicateMessage(
   role: string,
   content: string
 ): PersistedMessageResult {
-  const mismatch =
+  const createdAt = existing.created_at;
+  const sequence = existing.sequence;
+  if (
     existing.session_id !== sessionId ||
     existing.role !== role ||
     existing.content !== content ||
-    typeof existing.created_at !== 'number' ||
-    typeof existing.sequence !== 'number';
-  if (mismatch) {
+    typeof createdAt !== 'number' ||
+    typeof sequence !== 'number'
+  ) {
     throw new Error(`Message id ${id} already belongs to a different transcript entry`);
   }
   const wsRow = sql
@@ -76,8 +78,8 @@ export function resolveDuplicateMessage(
     .toArray()[0];
   return {
     id,
-    now: existing.created_at as number,
-    sequence: existing.sequence as number,
+    now: createdAt,
+    sequence,
     workspaceId: wsRow
       ? parseWorkspaceId(wsRow, 'messages.persist_duplicate_workspace')
       : null,
