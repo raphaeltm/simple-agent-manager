@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   cancelWorkspaceDeletion: vi.fn(),
   recordActivityEvent: vi.fn(),
   requireRepositoryOwnerAccess: vi.fn(),
-  restartWorkspaceOnNode: vi.fn(),
+  signNodeManagementToken: vi.fn(),
   writeBootLogs: vi.fn(),
 }));
 
@@ -28,10 +28,11 @@ vi.mock('../../../src/services/boot-log', () => ({
   writeBootLogs: (...args: unknown[]) => mocks.writeBootLogs(...args),
 }));
 vi.mock('../../../src/services/compute-usage', () => ({ stopComputeTracking: vi.fn() }));
-vi.mock('../../../src/services/node-agent', () => ({
-  rebuildWorkspaceOnNode: vi.fn(),
-  restartWorkspaceOnNode: (...args: unknown[]) => mocks.restartWorkspaceOnNode(...args),
-  stopWorkspaceOnNode: vi.fn(),
+vi.mock('../../../src/services/jwt', () => ({
+  signCallbackToken: vi.fn(),
+  signNodeCallbackToken: vi.fn(),
+  signNodeManagementToken: (...args: unknown[]) => mocks.signNodeManagementToken(...args),
+  verifyCallbackToken: vi.fn(),
 }));
 vi.mock('../../../src/services/nodes', () => ({ stopNodeResources: vi.fn() }));
 vi.mock('../../../src/services/project-data', () => ({
@@ -48,7 +49,7 @@ const NODE_ID = 'node-restart-race';
 const WORKSPACE_ID = 'workspace-restart-race';
 const CHAT_SESSION_ID = 'chat-restart-race';
 
-describe('POST /api/workspaces/:id/restart deletion races — real SQL', () => {
+describe('workspace runtime recreation/deletion races — real SQL', () => {
   let sqlite: Database.Database;
   let env: Env;
   let app: Hono<{ Bindings: Env }>;
@@ -62,13 +63,13 @@ describe('POST /api/workspaces/:id/restart deletion races — real SQL', () => {
     ).status;
   }
 
-  async function requestRestart(): Promise<Response> {
+  async function requestLifecycle(action: 'restart' | 'rebuild'): Promise<Response> {
     const executionContext = {
       waitUntil: (promise: Promise<unknown>) => waitUntilPromises.push(promise),
       passThroughOnException: vi.fn(),
     } as unknown as ExecutionContext;
     return app.fetch(
-      new Request(`https://api.test/api/workspaces/${WORKSPACE_ID}/restart`, {
+      new Request(`https://api.test/api/workspaces/${WORKSPACE_ID}/${action}`, {
         method: 'POST',
       }),
       env,
@@ -115,10 +116,15 @@ describe('POST /api/workspaces/:id/restart deletion races — real SQL', () => {
     mocks.cancelWorkspaceDeletion.mockResolvedValue(true);
     mocks.recordActivityEvent.mockResolvedValue(undefined);
     mocks.requireRepositoryOwnerAccess.mockResolvedValue(undefined);
-    mocks.restartWorkspaceOnNode.mockResolvedValue(undefined);
+    mocks.signNodeManagementToken.mockResolvedValue({ token: 'signed-test-token' });
     mocks.writeBootLogs.mockResolvedValue(undefined);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 204 }))
+    );
     env = {
       DATABASE: createSqliteD1(sqlite),
+      BASE_DOMAIN: 'example.test',
       KV: {} as KVNamespace,
       NODE_LIFECYCLE: {
         idFromName: (name: string) => name,
@@ -135,7 +141,10 @@ describe('POST /api/workspaces/:id/restart deletion races — real SQL', () => {
     app.route('/api/workspaces', lifecycleRoutes);
   });
 
-  afterEach(() => sqlite.close());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    sqlite.close();
+  });
 
   it('returns conflict when deletion changes D1 after cancellation but before restart CAS', async () => {
     mocks.cancelWorkspaceDeletion.mockImplementation(async () => {
@@ -143,36 +152,83 @@ describe('POST /api/workspaces/:id/restart deletion races — real SQL', () => {
       return true;
     });
 
-    const response = await requestRestart();
+    const response = await requestLifecycle('restart');
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({
       message: 'Workspace changed while restart cancellation was being claimed',
     });
     expect(workspaceStatus()).toBe('stopping');
-    expect(mocks.restartWorkspaceOnNode).not.toHaveBeenCalled();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it('does not overwrite stopping when deletion wins at the VM request boundary', async () => {
-    mocks.restartWorkspaceOnNode.mockImplementation(
-      async (
-        _nodeId: string,
-        _workspaceId: string,
-        _env: Env,
-        _userId: string,
-        options: { beforeExternalMutation: () => Promise<void> }
-      ) => {
-        sqlite.prepare("UPDATE workspaces SET status = 'stopping' WHERE id = ?").run(WORKSPACE_ID);
-        await options.beforeExternalMutation();
-      }
+    let releaseToken: ((value: { token: string }) => void) | undefined;
+    let markTokenRequested: (() => void) | undefined;
+    const tokenRequested = new Promise<void>((resolve) => {
+      markTokenRequested = resolve;
+    });
+    mocks.signNodeManagementToken.mockImplementation(
+      () =>
+        new Promise<{ token: string }>((resolve) => {
+          releaseToken = resolve;
+          markTokenRequested?.();
+        })
     );
 
-    const response = await requestRestart();
+    const response = await requestLifecycle('restart');
+    await tokenRequested;
+    sqlite.prepare("UPDATE workspaces SET status = 'stopping' WHERE id = ?").run(WORKSPACE_ID);
+    releaseToken?.({ token: 'signed-test-token' });
     await Promise.all(waitUntilPromises);
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ status: 'creating' });
     expect(workspaceStatus()).toBe('stopping');
-    expect(mocks.restartWorkspaceOnNode).toHaveBeenCalledOnce();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('returns conflict when deletion changes D1 after cancellation but before rebuild CAS', async () => {
+    sqlite.prepare("UPDATE workspaces SET status = 'error' WHERE id = ?").run(WORKSPACE_ID);
+    mocks.cancelWorkspaceDeletion.mockImplementation(async () => {
+      sqlite.prepare("UPDATE workspaces SET status = 'stopping' WHERE id = ?").run(WORKSPACE_ID);
+      return true;
+    });
+
+    const response = await requestLifecycle('rebuild');
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      message: 'Workspace changed while rebuild cancellation was being claimed',
+    });
+    expect(workspaceStatus()).toBe('stopping');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite stopping when deletion wins at the rebuild VM request boundary', async () => {
+    sqlite.prepare("UPDATE workspaces SET status = 'error' WHERE id = ?").run(WORKSPACE_ID);
+    let releaseToken: ((value: { token: string }) => void) | undefined;
+    let markTokenRequested: (() => void) | undefined;
+    const tokenRequested = new Promise<void>((resolve) => {
+      markTokenRequested = resolve;
+    });
+    mocks.signNodeManagementToken.mockImplementation(
+      () =>
+        new Promise<{ token: string }>((resolve) => {
+          releaseToken = resolve;
+          markTokenRequested?.();
+        })
+    );
+
+    const response = await requestLifecycle('rebuild');
+    await tokenRequested;
+    sqlite.prepare("UPDATE workspaces SET status = 'stopping' WHERE id = ?").run(WORKSPACE_ID);
+    releaseToken?.({ token: 'signed-test-token' });
+    await Promise.all(waitUntilPromises);
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({ status: 'rebuilding' });
+    expect(workspaceStatus()).toBe('stopping');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });

@@ -939,11 +939,13 @@ export async function rebuildWorkspaceOnNode(
   nodeId: string,
   workspaceId: string,
   env: Env,
-  userId: string
+  userId: string,
+  options?: GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/rebuild`, {
     method: 'POST',
     userId,
     workspaceId,
+    beforeExternalMutation: options?.beforeExternalMutation,
   });
 }
