@@ -344,6 +344,42 @@ proof was completed through the AUTOMATIC alarm path instead, which reads a diff
 recheck key. That required lowering the staging trigger/target ratios to create storage
 pressure on a 987 KB object — the same technique the Workers tests use.
 
+## Production deploy and preflight status (handover point)
+
+- Merged as `831d14e2a`; main CI green with no timeout; **Deploy Production `33880365647`
+  succeeded at 2026-09-04T14:07:26Z**, zero failed steps. Worker deployment
+  `c3a155c0-cfa5-43` created 14:00:30Z. (A different `deploy.yml` run, `33881908488`, shows
+  `skipped` — that is an unrelated later trigger, not this deploy.)
+- D1 migration `0138_project_data_storage_relief_preflight.sql` applied to production,
+  immediately after `0137_project_max_triggers_override.sql`.
+- Production Worker config verified against the RUNNING worker, not inferred:
+  `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ENABLED=true`,
+  `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED=false`, manifest key empty,
+  `SLICES_PER_RUN=12`. The destructive path is double-frozen:
+  `createToolPayloadCleanupPlan` returns `null` both on the disabled flag and on the
+  absent manifest.
+- **The read-only preflight is running and has NOT yet produced a manifest.** Latest
+  observed state: `status=running`, `batches_started=12`, `rows_examined=480,000`,
+  `session_count=300`, `eligible_rows=0`, `eligible_bytes=0`, `last_error=NULL`.
+
+`eligible_rows=0` at this depth is expected rather than alarming: the scan walks `rowid`
+ascending, so it is working through the oldest messages first, and those predate the
+2026-08-18 manual purge that already stripped ~3.14 GB. Any eligible stock lies in the band
+between that purge and the 2026-08-30T03:45Z cutoff.
+
+**To finish the plan, run `.tmp/compute-plan.py`** (or the equivalent query) once the plan
+reaches `complete` or `truncated`. It derives every ceiling from the preflight's own D1 row
+— never typed — and evaluates the 5 KB go/no-go and the net reclaim.
+
+### Three possible outcomes, only one of which is "run the plan"
+
+1. Eligible stock with average payload comfortably above 5 KB -> execute the plan below.
+2. Eligible stock but average payload under ~5 KB -> **DO NOT RUN**. Archive bookkeeping at
+   ~981 B/row consumes the reclaim; under ~1 KB it makes the object bigger.
+3. Little or no eligible stock -> tool-payload cleanup is not the lever for this object at
+   all; escalate to terminal-session sharding, whose read-back-before-delete and
+   per-session wall-time gaps must be closed first.
+
 ## Exact production mutation plan (AWAITING RAPHAËL'S APPROVAL — nothing below has been executed)
 
 Nothing in this section has been run. The production switches it names are all currently
