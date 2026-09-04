@@ -107,7 +107,14 @@ are out of scope.
 - [x] Run `pnpm quality:agent-install-manifest` and the
       `cf-container-runtime-contract` test; run `go test ./internal/acp/...` in
       `packages/vm-agent` (all green; full `go test ./...` runs in Phase 4/CI).
-- [ ] Full quality suite: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
+- [x] Full quality suite: lint 13/13 (0 errors), typecheck 19/19, test green (one
+      `packages/ui` Textarea timeout under parallel load — untouched package,
+      reran solo: 104/104), build 9/9. Full `go test ./...` all 23 packages ok.
+- [x] Specialist review round: task-completion-validator PASS (2 LOW addressed),
+      go-specialist PASS, cloudflare-specialist ADDRESSED (stale Node-20 comment
+      fixed), test-engineer ADDRESSED (test literals now reference package consts;
+      sync-gate pin matching made boundary-aware and proven discriminating against
+      a `1.18.270` false-positive; sandbox coverage pointer added).
 - [x] Add a CLAUDE.md "Recent Changes" entry (doc sync).
 - [ ] Staging (rule 27): delete existing staging nodes, deploy branch, start a fresh
       agent session for each updated client that staging credentials allow, verify
