@@ -92,6 +92,93 @@ function seedTerminalSession(sql: SqlStorage, sessionId = 'session-archive'): vo
   );
 }
 
+/**
+ * Seed a terminal session whose transcript spans several bind sub-batches.
+ *
+ * NOTE: this suite runs on better-sqlite3, whose bound-parameter ceiling is far
+ * above Cloudflare's 100. It therefore CANNOT reproduce the production
+ * `too many SQL variables` failure at any fixture size — that regression lives in
+ * tests/workers/project-data-archive-sharding.test.ts against real workerd SQLite.
+ * What these cases do cover is engine-independent: the sub-batch arithmetic, the
+ * completeness total across batches, and the row-order guard.
+ */
+function seedWideTerminalSession(sql: SqlStorage, sessionId: string, messageCount: number): void {
+  sql.exec(
+    `INSERT INTO chat_sessions
+       (id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
+        started_at, ended_at, created_at, updated_at, agent_completed_at, materialized_at)
+     VALUES (?, ?, ?, ?, ?, 'stopped', ?, 1000, 1500, 1000, 1500, 1500, 1500)`,
+    sessionId,
+    'workspace-wide',
+    'task-wide',
+    'user-wide',
+    'wide terminal topic',
+    messageCount
+  );
+  for (let index = 0; index < messageCount; index++) {
+    sql.exec(
+      `INSERT INTO chat_messages
+         (id, session_id, role, content, tool_metadata, created_at, sequence, origin)
+       VALUES (?, ?, ?, ?, NULL, ?, ?, NULL)`,
+      `${sessionId}-message-${String(index).padStart(4, '0')}`,
+      sessionId,
+      index % 2 === 0 ? 'user' : 'assistant',
+      `wide payload ${index}`,
+      1100 + index,
+      index + 1
+    );
+  }
+}
+
+async function exportWideChatMessagesChunk(sql: SqlStorage, sessionId: string, maxRows: number) {
+  return exportArchiveChunk(sql, {
+    projectId: 'project-archive',
+    sessionId,
+    migrationId: 'migration-wide',
+    sourceOwnerName: 'project-archive',
+    targetOwnerName: 'project-archive:archive:g1:s1',
+    targetGeneration: 1,
+    sourceIntentToken: 'intent-wide',
+    tableName: 'chat_messages',
+    ordinal: 0,
+    cursor: null,
+    maxRows,
+    maxBytes: 1024 * 1024,
+  });
+}
+
+/** Drives the real prepare-intent -> prepare-target handshake, as the coordinator does. */
+async function prepareWideTarget(
+  source: SqlStorage,
+  target: SqlStorage,
+  sessionId: string
+): Promise<void> {
+  const prepared = await prepareArchiveSourceIntent(source, {
+    projectId: 'project-archive',
+    sessionId,
+    migrationId: 'migration-wide',
+    sourceOwnerName: 'project-archive',
+    targetOwnerName: 'project-archive:archive:g1:s1',
+    targetGeneration: 1,
+    sourceIntentToken: 'intent-wide',
+    now: NOW,
+    minTerminalAgeMs: 0,
+  });
+  prepareArchiveTarget(target, {
+    projectId: 'project-archive',
+    sessionId,
+    migrationId: 'migration-wide',
+    sourceOwnerName: 'project-archive',
+    targetOwnerName: 'project-archive:archive:g1:s1',
+    targetGeneration: 1,
+    sourceIntentToken: 'intent-wide',
+    terminalVersionSha256: prepared.terminalVersionSha256,
+    sessionRow: prepared.sessionRow,
+    expectedMessageCount: prepared.messageCount,
+    now: NOW,
+  });
+}
+
 async function copyAllChunks(
   source: SqlStorage,
   target: SqlStorage,
@@ -144,6 +231,78 @@ describe('ProjectData terminal archive sharding bridge', () => {
     ];
 
     expect(PROJECT_DATA_ARCHIVE_SURFACE_INVENTORY).toEqual(expected);
+  });
+
+  describe('chunk verification read across bind sub-batches', () => {
+    const SESSION = 'session-wide';
+    const WIDE_ROWS = 250;
+
+    it('verifies a chunk whose row count spans several sub-batches', async () => {
+      const source = makeSql();
+      const target = makeSql();
+      try {
+        seedWideTerminalSession(source.sql, SESSION, WIDE_ROWS);
+        await prepareWideTarget(source.sql, target.sql, SESSION);
+        const chunk = await exportWideChatMessagesChunk(source.sql, SESSION, 500);
+        expect(chunk.rowCount).toBe(WIDE_ROWS);
+
+        const committed = await commitArchiveTargetChunk(target.sql, { ...chunk, now: NOW });
+        // The committed hash is recomputed from the read-back rows, so a batch
+        // concatenated out of order could not produce the source chunk hash.
+        expect(committed.sha256).toBe(chunk.sha256);
+        expect(committed.rowCount).toBe(WIDE_ROWS);
+      } finally {
+        source.db.close();
+        target.db.close();
+      }
+    });
+
+    it('counts missing rows across every sub-batch, not just the first', async () => {
+      const source = makeSql();
+      const target = makeSql();
+      try {
+        seedWideTerminalSession(source.sql, SESSION, WIDE_ROWS);
+        await prepareWideTarget(source.sql, target.sql, SESSION);
+        const chunk = await exportWideChatMessagesChunk(source.sql, SESSION, 500);
+
+        // A row id that will never be committed, appended past the first
+        // sub-batch. A per-batch completeness check would miss it.
+        await expect(
+          commitArchiveTargetChunk(target.sql, {
+            ...chunk,
+            rowIds: [...chunk.rowIds, `${SESSION}-message-absent`],
+            now: NOW,
+          })
+        ).rejects.toMatchObject({ reason: 'target_chunk_missing_rows' });
+      } finally {
+        source.db.close();
+        target.db.close();
+      }
+    });
+
+    it('rejects row ids that are not in source chunk order', async () => {
+      const source = makeSql();
+      const target = makeSql();
+      try {
+        seedWideTerminalSession(source.sql, SESSION, WIDE_ROWS);
+        await prepareWideTarget(source.sql, target.sql, SESSION);
+        const chunk = await exportWideChatMessagesChunk(source.sql, SESSION, 500);
+
+        // Sub-batching makes the returned sequence depend on rowIds being globally
+        // ordered; pre-fix that ordering came entirely from SQL. Reversing the ids
+        // must fail fast and namefully rather than surfacing as a hash mismatch.
+        await expect(
+          commitArchiveTargetChunk(target.sql, {
+            ...chunk,
+            rowIds: [...chunk.rowIds].reverse(),
+            now: NOW,
+          })
+        ).rejects.toMatchObject({ reason: 'target_chunk_row_order_mismatch' });
+      } finally {
+        source.db.close();
+        target.db.close();
+      }
+    });
   });
 
   it('copies bounded chunks idempotently, seals by recomputed hashes, then finalizes source deletion with a last-message anchor', async () => {

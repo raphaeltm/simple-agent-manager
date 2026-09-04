@@ -2,7 +2,12 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { Env as WorkerEnv } from '../../src/env';
-import { runProjectDataArchiveSharding } from '../../src/scheduled/project-data-archive-sharding';
+import { D1_MAX_BOUND_PARAMETERS } from '../../src/lib/d1-limits';
+import {
+  copyBackProjectDataArchiveMigration,
+  runProjectDataArchiveSharding,
+  runScopedProjectDataArchiveCanary,
+} from '../../src/scheduled/project-data-archive-sharding';
 import * as projectDataService from '../../src/services/project-data';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 import {
@@ -51,6 +56,52 @@ async function withArchiveEnv<T>(
 
 function largeMessage(index: number): string {
   return `archive bridge payload ${index} ${'x'.repeat(24 * 1024)}`;
+}
+
+/**
+ * One chunk holding more rows than Cloudflare will bind in a single statement.
+ * 201 spans two full sub-batches plus a remainder, so an off-by-one in the
+ * batching arithmetic cannot pass by landing on an exact multiple.
+ *
+ * Production ran at PROJECT_DATA_ARCHIVE_CHUNK_ROWS=500 and every session above
+ * 100 messages died on `too many SQL variables at offset 421`.
+ */
+const OVER_BIND_LIMIT_ROWS = D1_MAX_BOUND_PARAMETERS * 2 + 1;
+
+/** Small bodies: this fixture stresses the bind count, not the byte budget. */
+function seedMessages(count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    messageId: `bind-limit-message-${String(index).padStart(4, '0')}`,
+    role: index % 2 === 0 ? 'user' : 'assistant',
+    content: `bind limit payload ${index}`,
+    toolMetadata: null,
+    timestamp: new Date(1_000_000 + index * 1_000).toISOString(),
+    sequence: index + 1,
+  }));
+}
+
+async function seedTerminalSessionWithMessages(
+  projectId: string,
+  count: number
+): Promise<{ source: DurableObjectStub<ProjectDataTestDouble>; sessionId: string }> {
+  await seedProjectGraph(projectId);
+  const source = projectDataStub(projectId);
+  await source.ensureProjectId(projectId);
+  const sessionId = await source.createSession(null, 'Bind limit transcript');
+  await source.persistMessageBatch(sessionId, seedMessages(count));
+  await source.stopSession(sessionId);
+  await source.runSummarySyncForTest();
+  return { source, sessionId };
+}
+
+async function countTargetMessages(ownerName: string, sessionId: string): Promise<number> {
+  const target = projectDataStub(ownerName);
+  return runInDurableObject(target, async (_instance, state) => {
+    const row = state.storage.sql
+      .exec('SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?', sessionId)
+      .toArray()[0] as { count: number };
+    return row.count;
+  });
 }
 
 async function readLocation(projectId: string, sessionId: string) {
@@ -331,6 +382,147 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
       }
     );
   });
+
+  // Regression: production archive-sharding canary runs failed with
+  // `too many SQL variables at offset 421: SQLITE_ERROR` for every session above
+  // 100 messages. readCommittedRowsForChunk bound one placeholder per chunk row,
+  // and Cloudflare's SQL surfaces reject the 101st bound parameter.
+  //
+  // These MUST live in the Workers pool. The DO unit suite runs on better-sqlite3,
+  // whose bind ceiling is far above 100, so it cannot reproduce this at any fixture
+  // size — which is exactly why a 12-row suite stayed green while production failed.
+  it(
+    'migrates a chunk holding more rows than the Cloudflare SQL bind-parameter ceiling',
+    async () => {
+      // Guards the fixture itself: if the platform ceiling is ever raised, this
+      // assertion fails loudly rather than silently becoming non-discriminating.
+      expect(OVER_BIND_LIMIT_ROWS).toBeGreaterThan(D1_MAX_BOUND_PARAMETERS);
+
+      await clearArchiveCadence();
+      const projectId = `archive-bind-limit-${crypto.randomUUID()}`;
+      const { sessionId } = await seedTerminalSessionWithMessages(projectId, OVER_BIND_LIMIT_ROWS);
+
+      await withArchiveEnv(
+        {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+        },
+        async () => {
+          // The exact entry point the production canary used, at the production
+          // chunk-row setting, so the whole transcript lands in ONE chunk.
+          const result = await runScopedProjectDataArchiveCanary(testEnv, {
+            projectId,
+            sessionId,
+            dryRun: false,
+            reason: 'bind-variable-limit regression',
+            limit: 5,
+            chunkRows: 500,
+            nowDate: new Date(Date.now() + 60_000),
+          });
+
+          expect(result.stats).toMatchObject({ selected: 1, migrated: 1, failed: 0 });
+
+          const location = await readLocation(projectId, sessionId);
+          expect(location).toMatchObject({
+            location_state: 'archive_shard',
+            owner_kind: 'archive_shard',
+          });
+          expect(await countTargetMessages(location!.owner_name, sessionId)).toBe(
+            OVER_BIND_LIMIT_ROWS
+          );
+
+          // Order is load-bearing: the committed rows are re-hashed against the
+          // source chunk hash, so a batch concatenated out of order would have
+          // failed the migration above. Assert the transcript reads back in order.
+          const routed = await projectDataService.getMessages(
+            testEnv,
+            projectId,
+            sessionId,
+            OVER_BIND_LIMIT_ROWS,
+            null,
+            null,
+            undefined,
+            false,
+            'asc'
+          );
+          expect(routed.messages).toHaveLength(OVER_BIND_LIMIT_ROWS);
+          expect(routed.messages[0]?.content).toBe('bind limit payload 0');
+          expect(routed.messages[OVER_BIND_LIMIT_ROWS - 1]?.content).toBe(
+            `bind limit payload ${OVER_BIND_LIMIT_ROWS - 1}`
+          );
+        }
+      );
+    },
+    120_000
+  );
+
+  // The rollback path shares readCommittedRowsForChunk via restoreSourceArchiveChunk
+  // and was broken identically. Recovery failing is strictly worse than the forward
+  // copy failing, so it gets its own real-trigger test rather than riding on the fix.
+  it(
+    'copies a chunk back above the bind-parameter ceiling during rollback recovery',
+    async () => {
+      await clearArchiveCadence();
+      const projectId = `archive-bind-limit-copyback-${crypto.randomUUID()}`;
+      const { source, sessionId } = await seedTerminalSessionWithMessages(
+        projectId,
+        OVER_BIND_LIMIT_ROWS
+      );
+
+      await withArchiveEnv(
+        {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+        },
+        async () => {
+          const migrated = await runScopedProjectDataArchiveCanary(testEnv, {
+            projectId,
+            sessionId,
+            dryRun: false,
+            reason: 'bind-variable-limit copy-back regression',
+            limit: 5,
+            chunkRows: 500,
+            nowDate: new Date(Date.now() + 60_000),
+          });
+          expect(migrated.stats).toMatchObject({ migrated: 1, failed: 0 });
+
+          const location = await readLocation(projectId, sessionId);
+          expect(location?.migration_id).toBeTruthy();
+
+          // Source transcript rows were deleted by the forward migration.
+          const sourceRowsAfterMigrate = await runInDurableObject(
+            source,
+            async (_instance, state) => {
+              const row = state.storage.sql
+                .exec(
+                  'SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?',
+                  sessionId
+                )
+                .toArray()[0] as { count: number };
+              return row.count;
+            }
+          );
+          expect(sourceRowsAfterMigrate).toBe(0);
+
+          const copyBack = await copyBackProjectDataArchiveMigration(testEnv, {
+            migrationId: location!.migration_id!,
+            projectId,
+            reason: 'bind-variable-limit copy-back regression',
+          });
+          expect(copyBack.rowsCopied).toBeGreaterThanOrEqual(OVER_BIND_LIMIT_ROWS);
+
+          const restored = await runInDurableObject(source, async (_instance, state) => {
+            const row = state.storage.sql
+              .exec('SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?', sessionId)
+              .toArray()[0] as { count: number };
+            return row.count;
+          });
+          expect(restored).toBe(OVER_BIND_LIMIT_ROWS);
+        }
+      );
+    },
+    120_000
+  );
 
   it('fails closed for DO-local transcript writes after a source archive intent is prepared', async () => {
     const projectId = `archive-local-fence-${crypto.randomUUID()}`;
