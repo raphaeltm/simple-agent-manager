@@ -85,6 +85,88 @@ async function requireWorkspaceRestartGitHubAccess(
   await requireRepositoryOwnerAccess(env, db, project, userId, flow);
 }
 
+type WorkspaceRuntimeRecreationOperation = 'restart' | 'rebuild';
+
+class WorkspaceRuntimeRecreationFenceError extends Error {
+  constructor(readonly operation: WorkspaceRuntimeRecreationOperation) {
+    super(`Workspace ${operation} lost its lifecycle claim`);
+    this.name = 'WorkspaceRuntimeRecreationFenceError';
+  }
+}
+
+async function recordWorkspaceRuntimeRecreationFailure(
+  env: Env,
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  workspace: schema.Workspace,
+  userId: string,
+  nodeId: string,
+  operation: WorkspaceRuntimeRecreationOperation,
+  error: unknown
+): Promise<void> {
+  const result = await db
+    .update(schema.workspaces)
+    .set({
+      status: 'error',
+      errorMessage: error instanceof Error ? error.message : `Failed to ${operation} workspace`,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(
+      and(
+        eq(schema.workspaces.id, workspace.id),
+        eq(schema.workspaces.userId, userId),
+        eq(schema.workspaces.nodeId, nodeId),
+        eq(schema.workspaces.status, 'creating'),
+        sql`${schema.workspaces.projectId} IS ${workspace.projectId}`,
+        sql`${schema.workspaces.chatSessionId} IS ${workspace.chatSessionId}`,
+        sql`${schema.workspaces.runtimeDeletionConfirmedAt} IS NULL`
+      )
+    )
+    .run();
+
+  if (error instanceof WorkspaceRuntimeRecreationFenceError || (result.meta.changes ?? 0) === 0) {
+    const current = await env.DATABASE.prepare(
+      `SELECT user_id AS userId,
+              project_id AS projectId,
+              chat_session_id AS chatSessionId,
+              node_id AS nodeId,
+              status,
+              runtime_deletion_confirmed_at AS runtimeDeletionConfirmedAt
+         FROM workspaces
+        WHERE id = ?
+        LIMIT 1`
+    )
+      .bind(workspace.id)
+      .first<{
+        userId: string;
+        projectId: string | null;
+        chatSessionId: string | null;
+        nodeId: string | null;
+        status: string;
+        runtimeDeletionConfirmedAt: string | null;
+      }>();
+    log.warn('workspace_runtime_recreation.identity_fenced', {
+      workspaceId: workspace.id,
+      operation,
+      expectedUserId: userId,
+      currentUserId: current?.userId ?? null,
+      expectedProjectId: workspace.projectId,
+      currentProjectId: current?.projectId ?? null,
+      expectedChatSessionId: workspace.chatSessionId,
+      currentChatSessionId: current?.chatSessionId ?? null,
+      expectedNodeId: nodeId,
+      currentNodeId: current?.nodeId ?? null,
+      expectedStatus: 'creating',
+      currentStatus: current?.status ?? 'missing',
+      currentRuntimeDeletionConfirmedAt: current?.runtimeDeletionConfirmedAt ?? null,
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+      action:
+        error instanceof WorkspaceRuntimeRecreationFenceError
+          ? 'network_request_refused'
+          : 'error_state_update_refused',
+    });
+  }
+}
+
 // --- User-authenticated lifecycle routes ---
 
 lifecycleRoutes.post('/:id/sleep', requireAuth(), requireApproved(), async (c) => {
@@ -308,28 +390,19 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
             )
               .bind(workspace.id, userId, nodeId, workspace.projectId, workspace.chatSessionId)
               .first<{ id: string }>();
-            if (!current) throw new Error('Workspace restart lost its lifecycle claim');
+            if (!current) throw new WorkspaceRuntimeRecreationFenceError('restart');
           },
         });
       } catch (err) {
-        await innerDb
-          .update(schema.workspaces)
-          .set({
-            status: 'error',
-            errorMessage: err instanceof Error ? err.message : 'Failed to restart workspace',
-            updatedAt: new Date().toISOString(),
-          })
-          .where(
-            and(
-              eq(schema.workspaces.id, workspace.id),
-              eq(schema.workspaces.userId, userId),
-              eq(schema.workspaces.nodeId, nodeId),
-              eq(schema.workspaces.status, 'creating'),
-              sql`${schema.workspaces.projectId} IS ${workspace.projectId}`,
-              sql`${schema.workspaces.chatSessionId} IS ${workspace.chatSessionId}`,
-              sql`${schema.workspaces.runtimeDeletionConfirmedAt} IS NULL`
-            )
-          );
+        await recordWorkspaceRuntimeRecreationFailure(
+          c.env,
+          innerDb,
+          workspace,
+          userId,
+          nodeId,
+          'restart',
+          err
+        );
       }
     })()
   );
@@ -433,28 +506,19 @@ lifecycleRoutes.post('/:id/rebuild', requireAuth(), requireApproved(), async (c)
             )
               .bind(workspace.id, userId, nodeId, workspace.projectId, workspace.chatSessionId)
               .first<{ id: string }>();
-            if (!current) throw new Error('Workspace rebuild lost its lifecycle claim');
+            if (!current) throw new WorkspaceRuntimeRecreationFenceError('rebuild');
           },
         });
       } catch (err) {
-        await innerDb
-          .update(schema.workspaces)
-          .set({
-            status: 'error',
-            errorMessage: err instanceof Error ? err.message : 'Failed to rebuild workspace',
-            updatedAt: new Date().toISOString(),
-          })
-          .where(
-            and(
-              eq(schema.workspaces.id, workspace.id),
-              eq(schema.workspaces.userId, userId),
-              eq(schema.workspaces.nodeId, nodeId),
-              eq(schema.workspaces.status, 'creating'),
-              sql`${schema.workspaces.projectId} IS ${workspace.projectId}`,
-              sql`${schema.workspaces.chatSessionId} IS ${workspace.chatSessionId}`,
-              sql`${schema.workspaces.runtimeDeletionConfirmedAt} IS NULL`
-            )
-          );
+        await recordWorkspaceRuntimeRecreationFailure(
+          c.env,
+          innerDb,
+          workspace,
+          userId,
+          nodeId,
+          'rebuild',
+          err
+        );
       }
     })()
   );

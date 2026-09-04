@@ -7,6 +7,7 @@ import {
   loadWorkspaceDeletionSnapshot,
   WORKSPACE_DELETION_DIAGNOSTIC_PREFIX,
   type WorkspaceDeletionIdentity,
+  workspaceDeletionIdentityLogContext,
 } from '../services/workspace-deletion';
 import {
   claimWorkspaceDeletionInD1,
@@ -186,6 +187,11 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       current.projectId !== expected.projectId ||
       current.chatSessionId !== expected.chatSessionId
     ) {
+      log.warn('node_lifecycle.workspace_deletion_claim_identity_fenced', {
+        ...workspaceDeletionIdentityLogContext(expected, current),
+        currentStatus: current?.status ?? 'missing',
+        action: 'rejected',
+      });
       return false;
     }
 
@@ -241,12 +247,42 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       await this.putEntryAndAlarm(transaction, key, claimed, warmAlarmTime, now);
       return claimed;
     });
-    if (!entry) return false;
+    if (!entry) {
+      const currentEntry = await this.storage.get<PendingWorkspaceDeletion>(key);
+      const currentEntryIdentity: WorkspaceDeletionIdentity | null = currentEntry
+        ? {
+            workspaceId: currentEntry.workspaceId,
+            nodeId: currentEntry.nodeId ?? null,
+            nodeUserId: currentEntry.nodeUserId ?? null,
+            nodeRuntime: currentEntry.nodeRuntime ?? null,
+            nodeProviderInstanceId: currentEntry.nodeProviderInstanceId ?? null,
+            nodeRuntimeIncarnationId: currentEntry.nodeRuntimeIncarnationId ?? null,
+            userId: currentEntry.userId,
+            projectId: currentEntry.projectId ?? null,
+            chatSessionId: currentEntry.chatSessionId ?? null,
+          }
+        : null;
+      log.warn('node_lifecycle.workspace_deletion_claim_fenced', {
+        ...workspaceDeletionIdentityLogContext(expected, currentEntryIdentity),
+        attemptCount: currentEntry?.attemptCount ?? 0,
+        action: 'rejected',
+      });
+      return false;
+    }
 
     try {
       const claimed = await claimWorkspaceDeletionInD1(this.env, expected, 1, claimDiagnostic);
       if (!claimed) {
         await this.compensateExactClaim(key, claimId);
+        const currentAfterClaim = await loadWorkspaceDeletionSnapshot(
+          this.env.DATABASE,
+          workspaceId
+        );
+        log.warn('node_lifecycle.workspace_deletion_d1_claim_fenced', {
+          ...workspaceDeletionIdentityLogContext(expected, currentAfterClaim),
+          currentStatus: currentAfterClaim?.status ?? 'missing',
+          action: 'rejected',
+        });
         return false;
       }
     } catch (error) {

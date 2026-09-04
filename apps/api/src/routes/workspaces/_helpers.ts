@@ -218,8 +218,18 @@ export async function assertWorkspaceCallbackIdentityCurrent(
   if (!sameWorkspaceCallbackIdentity(active, expected)) {
     log.info('workspace_callback.incarnation_changed', {
       workspaceId: expected.workspaceId,
+      expectedUserId: expected.userId,
+      currentUserId: active.userId,
+      expectedProjectId: expected.projectId,
+      currentProjectId: active.projectId,
+      expectedChatSessionId: expected.chatSessionId,
+      currentChatSessionId: active.chatSessionId,
       expectedNodeId: expected.nodeId,
       currentNodeId: active.nodeId,
+      expectedWorkspaceStatus: expected.status,
+      currentWorkspaceStatus: active.status,
+      expectedNodeStatus: expected.nodeStatus,
+      currentNodeStatus: active.nodeStatus,
       callback,
       action: 'terminal_gone',
     });

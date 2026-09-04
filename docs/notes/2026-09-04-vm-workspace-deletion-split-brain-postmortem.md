@@ -27,7 +27,8 @@ rotation could otherwise change which external account a destructive call addres
   persisted in the proof.
 - Every attempt validates workspace, node, user, project, session, and status immediately
   before the request and again before a VM-confirmed terminal write.
-- A restart can cancel a pending deletion only before the first attempt is claimed.
+- A restart or rebuild can cancel a pending deletion only before the first attempt is claimed,
+  and revalidates the exact workspace again at the VM request boundary.
 - Linked recovery/replacement authority remains fenced while deletion is unconfirmed.
 - Rejected late callbacks emit bounded payload-free evidence and never ingest request
   bodies, prompts, tool results, credentials, or repository data.

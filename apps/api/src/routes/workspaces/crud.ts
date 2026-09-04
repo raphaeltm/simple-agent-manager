@@ -660,12 +660,24 @@ crudRoutes.delete('/:id', requireAuth(), requireApproved(), async (c) => {
     userId,
   });
 
-  if (deletion.status !== 'confirmed') {
+  if (deletion.status === 'fenced') {
+    return c.json(
+      {
+        success: false,
+        deletionStatus: 'rejected',
+        workspaceStatus: 'unchanged',
+        reason: deletion.reason,
+      },
+      409
+    );
+  }
+
+  if (deletion.status === 'retry') {
     return c.json(
       {
         success: true,
         deletionStatus: 'pending',
-        workspaceStatus: deletion.status === 'retry' ? 'stopping' : 'unchanged',
+        workspaceStatus: 'stopping',
         reason: deletion.reason,
       },
       202

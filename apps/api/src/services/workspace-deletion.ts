@@ -25,6 +25,32 @@ export interface WorkspaceDeletionSnapshot extends WorkspaceDeletionIdentity {
   runtimeDeletionProof: WorkspaceDeletionProof | null;
 }
 
+export function workspaceDeletionIdentityLogContext(
+  expected: WorkspaceDeletionIdentity,
+  current: WorkspaceDeletionIdentity | null
+): Record<string, string | null> {
+  return {
+    expectedWorkspaceId: expected.workspaceId,
+    currentWorkspaceId: current?.workspaceId ?? null,
+    expectedUserId: expected.userId,
+    currentUserId: current?.userId ?? null,
+    expectedProjectId: expected.projectId,
+    currentProjectId: current?.projectId ?? null,
+    expectedChatSessionId: expected.chatSessionId,
+    currentChatSessionId: current?.chatSessionId ?? null,
+    expectedNodeId: expected.nodeId,
+    currentNodeId: current?.nodeId ?? null,
+    expectedNodeUserId: expected.nodeUserId,
+    currentNodeUserId: current?.nodeUserId ?? null,
+    expectedNodeRuntime: expected.nodeRuntime,
+    currentNodeRuntime: current?.nodeRuntime ?? null,
+    expectedNodeProviderInstanceId: expected.nodeProviderInstanceId,
+    currentNodeProviderInstanceId: current?.nodeProviderInstanceId ?? null,
+    expectedNodeRuntimeIncarnationId: expected.nodeRuntimeIncarnationId,
+    currentNodeRuntimeIncarnationId: current?.nodeRuntimeIncarnationId ?? null,
+  };
+}
+
 export type WorkspaceDeletionProof =
   | 'vm_agent_confirmed'
   | 'workspace_never_started'
@@ -126,6 +152,24 @@ function isWorkspaceDeletionProof(value: string | null): value is WorkspaceDelet
     value === 'workspace_never_started' ||
     value === 'node_runtime_terminated'
   );
+}
+
+function fencedDeletionOutcome(
+  expected: WorkspaceDeletionIdentity,
+  current: WorkspaceDeletionSnapshot | null,
+  reason: Extract<WorkspaceDeletionOutcome, { status: 'fenced' }>['reason'],
+  source: string,
+  phase: string
+): WorkspaceDeletionOutcome {
+  log.warn('workspace_deletion.identity_fenced', {
+    ...workspaceDeletionIdentityLogContext(expected, current),
+    currentStatus: current?.status ?? 'missing',
+    reason,
+    source,
+    phase,
+    action: 'rejected',
+  });
+  return { status: 'fenced', reason };
 }
 
 function deletionFailureDiagnostic(env: Env, attempt: number, error: unknown): string {
@@ -322,9 +366,8 @@ async function finalizeConfirmedDeletion(
     : sameOwnership(current, expected);
   if (!ownershipMatches) {
     log.warn('workspace_deletion.confirmed_old_incarnation', {
-      workspaceId: expected.workspaceId,
-      expectedNodeId: expected.nodeId,
-      currentNodeId: current.nodeId,
+      ...workspaceDeletionIdentityLogContext(expected, current),
+      currentStatus: current.status,
       proof,
       source,
       action: 'current_incarnation_preserved',
@@ -437,12 +480,18 @@ export async function attemptWorkspaceDeletion(
   if (!initial) {
     return proofBeforeRequest
       ? finalizeConfirmedDeletion(env, expected, proofBeforeRequest, source, beforeFinalize)
-      : { status: 'fenced', reason: 'workspace_missing' };
+      : fencedDeletionOutcome(expected, initial, 'workspace_missing', source, 'initial_recheck');
   }
   if (!sameOwnership(initial, expected)) {
     return proofBeforeRequest
       ? finalizeConfirmedDeletion(env, expected, proofBeforeRequest, source, beforeFinalize)
-      : { status: 'fenced', reason: 'workspace_assignment_changed' };
+      : fencedDeletionOutcome(
+          expected,
+          initial,
+          'workspace_assignment_changed',
+          source,
+          'initial_recheck'
+        );
   }
   if (
     initial.runtimeDeletionConfirmedAt &&
@@ -473,9 +522,15 @@ export async function attemptWorkspaceDeletion(
   if (!claimed) {
     const current = await loadWorkspaceDeletionRow(env.DATABASE, expected.workspaceId);
     if (current && sameOwnership(current, expected)) {
-      return { status: 'fenced', reason: 'workspace_active' };
+      return fencedDeletionOutcome(expected, current, 'workspace_active', source, 'd1_claim');
     }
-    return { status: 'fenced', reason: 'workspace_assignment_changed' };
+    return fencedDeletionOutcome(
+      expected,
+      current,
+      'workspace_assignment_changed',
+      source,
+      'd1_claim'
+    );
   }
 
   // Rule 49 / TOCTOU fence: re-read immediately before the external mutation.
@@ -485,7 +540,13 @@ export async function attemptWorkspaceDeletion(
     !sameOwnership(beforeRequest, expected) ||
     beforeRequest.status !== 'stopping'
   ) {
-    return { status: 'fenced', reason: 'workspace_assignment_changed' };
+    return fencedDeletionOutcome(
+      expected,
+      beforeRequest,
+      'workspace_assignment_changed',
+      source,
+      'before_vm_request'
+    );
   }
 
   try {
@@ -516,7 +577,14 @@ export async function attemptWorkspaceDeletion(
     return finalizeConfirmedDeletion(env, expected, proof, source, beforeFinalize);
   } catch (error) {
     if (error instanceof WorkspaceDeletionFenceError) {
-      return { status: 'fenced', reason: 'workspace_assignment_changed' };
+      const current = await loadWorkspaceDeletionRow(env.DATABASE, expected.workspaceId);
+      return fencedDeletionOutcome(
+        expected,
+        current,
+        'workspace_assignment_changed',
+        source,
+        'vm_request_boundary'
+      );
     }
     // The node can become authoritatively terminal while the request is in
     // flight. That is valid proof; heartbeat age and health are intentionally

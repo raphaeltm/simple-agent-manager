@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   requireRepositoryOwnerAccess: vi.fn(),
   signNodeManagementToken: vi.fn(),
   writeBootLogs: vi.fn(),
+  logWarn: vi.fn(),
 }));
 
 vi.mock('../../../src/middleware/auth', () => ({
@@ -21,6 +22,13 @@ vi.mock('../../../src/middleware/auth', () => ({
   requireApproved: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
   requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
 }));
+vi.mock('../../../src/lib/logger', async (importActual) => {
+  const actual = await importActual<typeof import('../../../src/lib/logger')>();
+  return {
+    ...actual,
+    log: { ...actual.log, warn: mocks.logWarn },
+  };
+});
 vi.mock('../../../src/routes/projects/_helpers', () => ({
   requireRepositoryOwnerAccess: (...args: unknown[]) => mocks.requireRepositoryOwnerAccess(...args),
 }));
@@ -186,6 +194,24 @@ describe('workspace runtime recreation/deletion races — real SQL', () => {
     await expect(response.json()).resolves.toEqual({ status: 'creating' });
     expect(workspaceStatus()).toBe('stopping');
     expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mocks.logWarn).toHaveBeenCalledWith(
+      'workspace_runtime_recreation.identity_fenced',
+      expect.objectContaining({
+        workspaceId: WORKSPACE_ID,
+        operation: 'restart',
+        expectedUserId: USER_ID,
+        currentUserId: USER_ID,
+        expectedProjectId: PROJECT_ID,
+        currentProjectId: PROJECT_ID,
+        expectedChatSessionId: CHAT_SESSION_ID,
+        currentChatSessionId: CHAT_SESSION_ID,
+        expectedNodeId: NODE_ID,
+        currentNodeId: NODE_ID,
+        expectedStatus: 'creating',
+        currentStatus: 'stopping',
+        action: 'network_request_refused',
+      })
+    );
   });
 
   it('returns conflict when deletion changes D1 after cancellation but before rebuild CAS', async () => {
@@ -230,5 +256,23 @@ describe('workspace runtime recreation/deletion races — real SQL', () => {
     await expect(response.json()).resolves.toEqual({ status: 'rebuilding' });
     expect(workspaceStatus()).toBe('stopping');
     expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mocks.logWarn).toHaveBeenCalledWith(
+      'workspace_runtime_recreation.identity_fenced',
+      expect.objectContaining({
+        workspaceId: WORKSPACE_ID,
+        operation: 'rebuild',
+        expectedUserId: USER_ID,
+        currentUserId: USER_ID,
+        expectedProjectId: PROJECT_ID,
+        currentProjectId: PROJECT_ID,
+        expectedChatSessionId: CHAT_SESSION_ID,
+        currentChatSessionId: CHAT_SESSION_ID,
+        expectedNodeId: NODE_ID,
+        currentNodeId: NODE_ID,
+        expectedStatus: 'creating',
+        currentStatus: 'stopping',
+        action: 'network_request_refused',
+      })
+    );
   });
 });

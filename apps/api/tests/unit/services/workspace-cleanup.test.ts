@@ -11,18 +11,23 @@ const mocks = vi.hoisted(() => ({
   confirmWorkspaceDeletion: vi.fn(),
   scheduleWorkspaceDeletion: vi.fn(),
   deleteSessionSnapshotState: vi.fn(),
+  logWarn: vi.fn(),
 }));
 
-vi.mock('../../../src/services/workspace-deletion', () => ({
-  attemptWorkspaceDeletion: (...args: unknown[]) => mocks.attemptWorkspaceDeletion(...args),
-  loadWorkspaceDeletionIdentity: (...args: unknown[]) =>
-    mocks.loadWorkspaceDeletionIdentity(...args),
-}));
+vi.mock('../../../src/services/workspace-deletion', async (importActual) => {
+  const actual = await importActual<typeof import('../../../src/services/workspace-deletion')>();
+  return {
+    ...actual,
+    attemptWorkspaceDeletion: (...args: unknown[]) => mocks.attemptWorkspaceDeletion(...args),
+    loadWorkspaceDeletionIdentity: (...args: unknown[]) =>
+      mocks.loadWorkspaceDeletionIdentity(...args),
+  };
+});
 vi.mock('../../../src/services/session-snapshots', () => ({
   deleteSessionSnapshotState: (...args: unknown[]) => mocks.deleteSessionSnapshotState(...args),
 }));
 vi.mock('../../../src/lib/logger', () => ({
-  log: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
+  log: { error: vi.fn(), info: vi.fn(), warn: mocks.logWarn },
 }));
 
 function buildDb() {
@@ -148,6 +153,69 @@ describe('cleanupWorkspaceForDeletion', () => {
     expect(outcome).toEqual({ status: 'fenced', reason: 'workspace_active' });
     expect(mocks.attemptWorkspaceDeletion).not.toHaveBeenCalled();
     expect(deletedTables).toEqual([]);
+    expect(mocks.logWarn).toHaveBeenCalledWith(
+      'workspace.deletion_claim_fenced',
+      expect.objectContaining({
+        expectedWorkspaceId: 'ws-cleanup-1',
+        currentWorkspaceId: 'ws-cleanup-1',
+        expectedUserId: 'user-cleanup-1',
+        currentUserId: 'user-cleanup-1',
+        expectedProjectId: 'project-cleanup-1',
+        currentProjectId: 'project-cleanup-1',
+        expectedChatSessionId: 'session-cleanup-1',
+        currentChatSessionId: 'session-cleanup-1',
+        expectedNodeId: 'node-cleanup-1',
+        currentNodeId: 'node-cleanup-1',
+        action: 'rejected',
+      })
+    );
+  });
+
+  it('logs full bounded identity context when the route snapshot is stale', async () => {
+    const { db, deletedTables } = buildDb();
+    mocks.loadWorkspaceDeletionIdentity.mockResolvedValueOnce({
+      workspaceId: 'ws-cleanup-1',
+      nodeId: 'node-cleanup-2',
+      nodeUserId: 'user-cleanup-2',
+      nodeRuntime: 'vm',
+      nodeProviderInstanceId: 'provider-node-cleanup-2',
+      nodeRuntimeIncarnationId: 'runtime-node-cleanup-2',
+      userId: 'user-cleanup-2',
+      projectId: 'project-cleanup-2',
+      chatSessionId: 'session-cleanup-2',
+    });
+
+    const outcome = await cleanupWorkspaceForDeletion({
+      db: db as never,
+      env: buildEnv(),
+      workspace: workspace(),
+      userId: 'user-cleanup-1',
+    });
+
+    expect(outcome).toEqual({ status: 'fenced', reason: 'workspace_assignment_changed' });
+    expect(mocks.claimWorkspaceDeletionAttempt).not.toHaveBeenCalled();
+    expect(mocks.attemptWorkspaceDeletion).not.toHaveBeenCalled();
+    expect(deletedTables).toEqual([]);
+    expect(mocks.logWarn).toHaveBeenCalledWith(
+      'workspace.deletion_identity_fenced',
+      expect.objectContaining({
+        expectedWorkspaceId: 'ws-cleanup-1',
+        currentWorkspaceId: 'ws-cleanup-1',
+        expectedUserId: 'user-cleanup-1',
+        currentUserId: 'user-cleanup-2',
+        expectedProjectId: 'project-cleanup-1',
+        currentProjectId: 'project-cleanup-2',
+        expectedChatSessionId: 'session-cleanup-1',
+        currentChatSessionId: 'session-cleanup-2',
+        expectedNodeId: 'node-cleanup-1',
+        currentNodeId: 'node-cleanup-2',
+        expectedNodeRuntime: null,
+        currentNodeRuntime: 'vm',
+        expectedNodeRuntimeIncarnationId: null,
+        currentNodeRuntimeIncarnationId: 'runtime-node-cleanup-2',
+        action: 'rejected',
+      })
+    );
   });
 
   it('does not hard-delete an incarnation that changed before confirmation finalized', async () => {

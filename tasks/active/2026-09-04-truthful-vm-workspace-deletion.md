@@ -54,7 +54,7 @@ available transcript and focused green evidence are the recovery source.
       null proof, and re-resolve the exact credential after composable resolution so
       provider creation and the stored fingerprint use the same generation.
 - [x] Centralize workspace deletion outcome classification and JIT identity validation.
-- [x] Claim durable NodeLifecycle attempts before VM network I/O; refuse restart
+- [x] Claim durable NodeLifecycle attempts before VM network I/O; refuse restart/rebuild
       cancellation after an attempt starts.
 - [x] Retain deletion-unconfirmed workspaces in `stopping`, preserve durable pending state,
       and retry with configurable bounded exponential backoff and batch limits.
@@ -67,9 +67,10 @@ available transcript and focused green evidence are the recovery source.
       terminal proof, with JIT TaskRunner rechecks before resource-creating work.
 - [x] Preserve sleeping/restorable session semantics and ordinary idempotent cleanup.
 - [x] Add exact unit and real Worker race coverage for timeout → recovery → retry,
-      ownership/incarnation changes, restart fencing, strict node proof, callback safety,
+      ownership/incarnation changes, restart/rebuild fencing, strict node proof, callback safety,
       token rejection, scheduled cleanup, replacement authority, same-row credential
-      rotation, fingerprint collisions, and forced A → B credential interleaving.
+      rotation, fingerprint collisions, forced A → B credential interleaving, and real-SQL
+      VM request-boundary races for both restart and rebuild.
 - [x] Update public configuration/security documentation and retained incident guidance.
 - [ ] Run full repository gates and required specialist reviews.
 - [ ] Deploy serially to staging; prove a real VM timeout remains quarantined and later
@@ -89,7 +90,8 @@ available transcript and focused green evidence are the recovery source.
   reincarnation produces a fenced no-op. Managed provider deletion also revalidates the
   exact encrypted credential generation and fails closed on rotation or missing legacy
   fingerprint proof.
-- Restart cancellation succeeds only before any delete attempt is claimed.
+- Restart/rebuild cancellation succeeds only before any delete attempt is claimed, and both
+  refuse runtime recreation when deletion wins at the final VM request boundary.
 - Late callbacks create no normal side effect, ingest no callback payload, and emit only a
   bounded payload-free activity/telemetry signal.
 - Linked recovery/retry remains quarantined while deletion is unconfirmed and releases
@@ -105,10 +107,10 @@ due attempt durably, and dispatches its bounded VM-agent I/O through `waitUntil`
 attempt performs bounded D1 reads/writes and at most one VM-agent delete using the separate
 background timeout. Unconfirmed attempts leave the immediate candidate set until their
 bounded exponential `deleteAt`; both the maximum delay and maximum residence are
-configurable. Exhausted entries remain quarantined in `stopping`, leave bounded payload-free
-dead-letter telemetry, and stop consuming the immediate alarm candidate set. Identity
-changes and confirmed outcomes remove the entry. Heartbeat age and D1 status labels are
-never used as terminal proof.
+configurable. Exhausted or identity-changed entries remain quarantined in `stopping`, leave
+bounded payload-free dead-letter telemetry, and stop consuming the immediate alarm candidate
+set. Only confirmed outcomes and same-identity stale schedules for an active workspace remove
+the entry. Heartbeat age and D1 status labels are never used as terminal proof.
 
 ## References
 
@@ -143,4 +145,4 @@ durable alarm entry did not record a pre-network attempt claim or full workspace
 All workspace deletion callers use one proof-bearing classifier. Destructive completion
 requires VM-confirmed success/absence or an explicit marker written only after strict
 provider/container termination. Regression tests must cause the real async interleavings,
-including timeout, runtime recovery, ownership changes, and restart races.
+including timeout, runtime recovery, ownership changes, and restart/rebuild races.

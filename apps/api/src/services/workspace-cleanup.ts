@@ -9,6 +9,7 @@ import { deleteSessionSnapshotState } from './session-snapshots';
 import {
   attemptWorkspaceDeletion,
   loadWorkspaceDeletionIdentity,
+  workspaceDeletionIdentityLogContext,
   type WorkspaceDeletionOutcome,
 } from './workspace-deletion';
 
@@ -32,6 +33,17 @@ export async function cleanupWorkspaceForDeletion(
 ): Promise<WorkspaceDeletionOutcome> {
   const { db, env, workspace, userId, logContext = {} } = options;
   const expected = await loadWorkspaceDeletionIdentity(env.DATABASE, workspace.id);
+  const requestedIdentity = {
+    workspaceId: workspace.id,
+    nodeId: workspace.nodeId,
+    nodeUserId: null,
+    nodeRuntime: null,
+    nodeProviderInstanceId: null,
+    nodeRuntimeIncarnationId: null,
+    userId,
+    projectId: workspace.projectId,
+    chatSessionId: workspace.chatSessionId,
+  };
   if (
     !expected ||
     expected.userId !== userId ||
@@ -39,6 +51,12 @@ export async function cleanupWorkspaceForDeletion(
     expected.projectId !== workspace.projectId ||
     expected.chatSessionId !== workspace.chatSessionId
   ) {
+    log.warn('workspace.deletion_identity_fenced', {
+      ...workspaceDeletionIdentityLogContext(requestedIdentity, expected),
+      reason: 'workspace_assignment_changed',
+      action: 'rejected',
+      ...logContext,
+    });
     return { status: 'fenced', reason: 'workspace_assignment_changed' };
   }
   let lifecycleStub:
@@ -56,6 +74,12 @@ export async function cleanupWorkspaceForDeletion(
       expected
     );
     if (!claimed) {
+      log.warn('workspace.deletion_claim_fenced', {
+        ...workspaceDeletionIdentityLogContext(expected, expected),
+        reason: 'workspace_active',
+        action: 'rejected',
+        ...logContext,
+      });
       return { status: 'fenced', reason: 'workspace_active' };
     }
   }

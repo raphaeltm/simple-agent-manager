@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => ({
   truncateTitle: vi.fn(),
   enrichMessageWithMentions: vi.fn(),
   resolveTaskStartPlacementCredentialAttributionFromPlacement: vi.fn(),
+  cleanupWorkspaceForDeletion: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1');
@@ -77,8 +78,7 @@ vi.mock('../../../src/services/provider-credentials', () => ({
   resolveCredentialSource: mocks.resolveCredentialSource,
 }));
 vi.mock('../../../src/services/placement-resolver', async (importActual) => {
-  const actual =
-    await importActual<typeof import('../../../src/services/placement-resolver')>();
+  const actual = await importActual<typeof import('../../../src/services/placement-resolver')>();
   return {
     ...actual,
     resolveTaskStartPlacementCredentialAttributionFromPlacement:
@@ -92,6 +92,9 @@ vi.mock('../../../src/services/task-title', () => ({
 }));
 vi.mock('../../../src/services/mention-enrichment', () => ({
   enrichMessageWithMentions: mocks.enrichMessageWithMentions,
+}));
+vi.mock('../../../src/services/workspace-cleanup', () => ({
+  cleanupWorkspaceForDeletion: mocks.cleanupWorkspaceForDeletion,
 }));
 
 const INSTALLATION_ROW = {
@@ -240,7 +243,11 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
   function post(path: string, body: unknown, ctx?: ExecutionContext): Promise<Response> {
     return buildApp().request(
       path,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
       mockEnv,
       ctx
     );
@@ -287,6 +294,69 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     await expectForbidden(res, REPO_NOT_ACCESSIBLE);
     // Fail-fast: no node was ever created.
     expect(mocks.createNodeRecord).not.toHaveBeenCalled();
+  });
+
+  it('workspace delete: returns conflict instead of claiming pending success when fenced', async () => {
+    limitResponses.push([
+      {
+        id: 'workspace-1',
+        userId: 'user-1',
+        nodeId: 'node-1',
+        projectId: 'proj-1',
+        chatSessionId: 'session-1',
+        status: 'running',
+      },
+    ]);
+    mocks.cleanupWorkspaceForDeletion.mockResolvedValueOnce({
+      status: 'fenced',
+      reason: 'workspace_assignment_changed',
+    });
+
+    const res = await buildApp().request(
+      '/api/workspaces/workspace-1',
+      { method: 'DELETE' },
+      mockEnv
+    );
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({
+      success: false,
+      deletionStatus: 'rejected',
+      workspaceStatus: 'unchanged',
+      reason: 'workspace_assignment_changed',
+    });
+  });
+
+  it('workspace delete: reports pending only for a retained retry outcome', async () => {
+    limitResponses.push([
+      {
+        id: 'workspace-1',
+        userId: 'user-1',
+        nodeId: 'node-1',
+        projectId: 'proj-1',
+        chatSessionId: 'session-1',
+        status: 'running',
+      },
+    ]);
+    mocks.cleanupWorkspaceForDeletion.mockResolvedValueOnce({
+      status: 'retry',
+      reason: 'runtime_deletion_unconfirmed',
+      diagnostic: 'bounded diagnostic',
+    });
+
+    const res = await buildApp().request(
+      '/api/workspaces/workspace-1',
+      { method: 'DELETE' },
+      mockEnv
+    );
+
+    expect(res.status).toBe(202);
+    await expect(res.json()).resolves.toEqual({
+      success: true,
+      deletionStatus: 'pending',
+      workspaceStatus: 'stopping',
+      reason: 'runtime_deletion_unconfirmed',
+    });
   });
 
   it('workspace create: gate passes and node provisioning is reached when access is intact', async () => {
@@ -366,16 +436,16 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
       null,
       'Fallback title',
       expect.any(String),
-      'user-1',
+      'user-1'
     );
     expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ taskTitle: 'Fallback title' }),
+      expect.objectContaining({ taskTitle: 'Fallback title' })
     );
     expect(mocks.generateTaskTitle).toHaveBeenCalledWith(
       expect.anything(),
       'Write a detailed implementation plan for async task titles',
-      {},
+      {}
     );
   });
 
@@ -398,15 +468,17 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     expect(titleUpdatePromise).toBeDefined();
     await titleUpdatePromise;
 
-    expect(updateSetSpy).toHaveBeenCalledWith(expect.objectContaining({
-      title: 'Generated AI title',
-      updatedAt: expect.any(String),
-    }));
+    expect(updateSetSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Generated AI title',
+        updatedAt: expect.any(String),
+      })
+    );
     expect(mocks.updateSessionTopic).toHaveBeenCalledWith(
       expect.anything(),
       'proj-1',
       'sess-1',
-      'Generated AI title',
+      'Generated AI title'
     );
   });
 
@@ -417,7 +489,18 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
   it('task run: returns 403 and does NOT start the Task Runner when access is revoked', async () => {
     // run.ts pre-gate db sequence: task lookup (.limit) -> dependencies (.where, no limit) ->
     // installation lookup (.limit). Credential resolution is mocked at the service boundary.
-    limitResponses.push([{ id: 'task-1', projectId: 'proj-1', userId: 'owner-user', status: 'ready', title: 'Task One', description: 'do the work', outputBranch: null, agentProfileHint: null }]);
+    limitResponses.push([
+      {
+        id: 'task-1',
+        projectId: 'proj-1',
+        userId: 'owner-user',
+        status: 'ready',
+        title: 'Task One',
+        description: 'do the work',
+        outputBranch: null,
+        agentProfileHint: null,
+      },
+    ]);
     whereResponses.push([]); // no task dependencies
     limitResponses.push([INSTALLATION_ROW]); // installation lookup (gate)
     mocks.getUserInstallationRepositories.mockResolvedValue([OTHER_REPO]);
@@ -430,7 +513,18 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
 
   it('task run: rejects with 403 when the repository id has drifted, before provisioning', async () => {
     mocks.requireProjectCapability.mockResolvedValue(makeProject({ githubRepoId: 42 }));
-    limitResponses.push([{ id: 'task-1', projectId: 'proj-1', userId: 'owner-user', status: 'ready', title: 'Task One', description: 'do the work', outputBranch: null, agentProfileHint: null }]);
+    limitResponses.push([
+      {
+        id: 'task-1',
+        projectId: 'proj-1',
+        userId: 'owner-user',
+        status: 'ready',
+        title: 'Task One',
+        description: 'do the work',
+        outputBranch: null,
+        agentProfileHint: null,
+      },
+    ]);
     whereResponses.push([]);
     limitResponses.push([INSTALLATION_ROW]);
     // User can still see a repo with the bound full name, but a DIFFERENT id.
@@ -438,7 +532,10 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
 
     const res = await post('/api/projects/proj-1/tasks/task-1/run', {});
 
-    await expectForbidden(res, 'GitHub repository access has changed; repository ID no longer matches');
+    await expectForbidden(
+      res,
+      'GitHub repository access has changed; repository ID no longer matches'
+    );
     expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
   });
 
@@ -447,7 +544,18 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     // the installation lookup. The optimistic-lock UPDATE goes through the raw
     // DATABASE.prepare mock (meta.changes === 1). createSession + startTaskRunnerDO
     // are mocked at their boundaries (rule 35) so the request reaches provisioning.
-    limitResponses.push([{ id: 'task-1', projectId: 'proj-1', userId: 'owner-user', status: 'ready', title: 'Task One', description: 'do the work', outputBranch: null, agentProfileHint: null }]);
+    limitResponses.push([
+      {
+        id: 'task-1',
+        projectId: 'proj-1',
+        userId: 'owner-user',
+        status: 'ready',
+        title: 'Task One',
+        description: 'do the work',
+        outputBranch: null,
+        agentProfileHint: null,
+      },
+    ]);
     whereResponses.push([]); // no task dependencies
     limitResponses.push([INSTALLATION_ROW]); // installation lookup (gate)
     limitResponses.push([{ githubId: null }]); // caller githubId fallback lookup

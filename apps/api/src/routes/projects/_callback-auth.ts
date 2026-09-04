@@ -90,8 +90,18 @@ async function assertWorkspacePublishCallbackCurrent(
   if (!sameWorkspacePublishCallbackIdentity(current, expected)) {
     log.info(`${logPrefix}.workspace_incarnation_changed`, {
       workspaceId,
+      expectedUserId: expected.userId,
+      currentUserId: current.userId,
+      expectedProjectId: expected.projectId,
+      currentProjectId: current.projectId,
+      expectedChatSessionId: expected.chatSessionId,
+      currentChatSessionId: current.chatSessionId,
       expectedNodeId: expected.nodeId,
       currentNodeId: current.nodeId,
+      expectedWorkspaceStatus: expected.status,
+      currentWorkspaceStatus: current.status,
+      expectedNodeStatus: expected.nodeStatus,
+      currentNodeStatus: current.nodeStatus,
       action: 'terminal_gone',
     });
     throw errors.gone('Workspace callback identity changed; callback resource is gone');
