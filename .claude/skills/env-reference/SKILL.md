@@ -231,6 +231,20 @@ Activity coalescing and binding caches are per Worker isolate. Delayed flushes c
 - `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MEASUREMENT_WALL_TIME_MS` — Explicit ProjectData measurement budget within one slice; plus the return margin it must not exceed the slice wall budget (default: `10000`)
 - `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_STATE_BYTES` — Combined D1 JSON byte ceiling for accumulated session and target-batch proof state in one preflight row (default: `1750000`)
 - `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ERROR_MAX_LENGTH` — Character ceiling for a persisted preflight failure diagnostic (default: `1000`)
+
+Implementation of the storage-safety, cleanup and preflight behavior documented above:
+`resolveStorageSafetyConfig()` (`apps/api/src/durable-objects/project-data/storage-safety.ts`)
+validates every value and fails closed on a malformed one;
+`runProjectDataToolPayloadCleanup()` / `scanToolPayloadCleanupBatch()`
+(`.../tool-payload-cleanup.ts`) apply the row/byte/wall-time and approved-plan budgets;
+`runProjectDataManualToolPayloadCleanup()` (`.../tool-payload-manual-cleanup.ts`) owns the
+manual slice, its fingerprint and its cooldown;
+`measureProjectDataStorageReliefSlice()` (`.../storage-relief-measurement.ts`) owns the
+read-only measurement, cursor and byte/deadline bounds; and
+`runProjectDataStorageReliefPreflight()`
+(`apps/api/src/scheduled/project-data-storage-relief-preflight.ts`) owns the lease, the
+per-slice and per-run admission budgets, and the verified R2 manifest writes.
+
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED` — Production-disabled switch for cleanup of old terminal-session grouped message rows and their external-content FTS entries (default: disabled)
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO` — ProjectData usage ratio that starts grouped/FTS derived-data cleanup when explicitly enabled (default: `0.9`)
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO` — ProjectData usage ratio below which grouped/FTS cleanup stops (default: `0.85`)
