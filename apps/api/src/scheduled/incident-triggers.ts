@@ -1,9 +1,5 @@
 /** Incident source adapter. Backlog grouping stays in D1; execution policy lives in trigger-admission. */
-import {
-  DEFAULT_MAX_TRIGGERS_PER_PROJECT,
-  DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
-  resolveProjectScalingConfig,
-} from '@simple-agent-manager/shared';
+import { DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT } from '@simple-agent-manager/shared';
 
 import type * as schema from '../db/schema';
 import type { Env } from '../env';
@@ -26,6 +22,7 @@ import {
   admitAndSubmitTriggerExecution,
   type TriggerTaskSubmitter,
 } from '../services/trigger-admission';
+import { resolveMaxTriggersPerProject } from '../services/trigger-limits';
 import { renderTemplate } from '../services/trigger-template';
 
 export interface IncidentTriggerSweepStats {
@@ -106,11 +103,7 @@ async function ensureDefaultIncidentTrigger(
   if (await hasAnyIncidentTrigger(env, project.id)) return false;
 
   // Per-project override (project.max_triggers) > platform env var > default.
-  const maxTriggers = resolveProjectScalingConfig(
-    project.max_triggers,
-    env.MAX_TRIGGERS_PER_PROJECT,
-    DEFAULT_MAX_TRIGGERS_PER_PROJECT
-  );
+  const maxTriggers = resolveMaxTriggersPerProject(project.max_triggers, env.MAX_TRIGGERS_PER_PROJECT);
   const triggerCount = await env.DATABASE.prepare(
     'SELECT COUNT(*) AS count FROM triggers WHERE project_id = ?'
   )
