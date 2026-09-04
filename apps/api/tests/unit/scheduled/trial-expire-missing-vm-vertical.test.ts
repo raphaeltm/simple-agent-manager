@@ -150,7 +150,7 @@ describe('expired-trial conclusive provider absence vertical slice', () => {
     expect(providerGetVM).toHaveBeenCalledWith('vm-missing');
     expect(providerDeleteVM).not.toHaveBeenCalled();
     expect(deleteDNSRecord).toHaveBeenCalledWith('dns-old', env);
-    expect(drizzleUpdates).toEqual([]);
+    expect(drizzleUpdates).toEqual([{ runtimeTerminationConfirmedAt: expect.any(String) }]);
     expect(calls.some(({ sql }) => sql.includes('UPDATE agent_sessions'))).toBe(true);
     expect(calls.some(({ sql }) => sql.includes('UPDATE compute_usage'))).toBe(true);
     expect(

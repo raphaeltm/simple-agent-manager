@@ -76,6 +76,7 @@ function createDb() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       cleanup_backoff_until TEXT
+      ,runtime_termination_confirmed_at TEXT
     );
     CREATE TABLE workspaces (
       id TEXT PRIMARY KEY,

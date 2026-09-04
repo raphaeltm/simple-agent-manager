@@ -143,7 +143,7 @@ vi.mock('../../src/schemas', async (importOriginal) => {
 });
 
 vi.mock('../../src/routes/workspaces/_helpers', () => ({
-  assertWorkspaceAcceptsCallback: vi.fn(),
+  assertWorkspaceAcceptsCallback: vi.fn(async (_env: unknown, workspace: unknown) => workspace),
   assertWorkspaceCallbackResourceById: vi.fn().mockResolvedValue(undefined),
   verifyWorkspaceCallbackAuth: vi.fn().mockResolvedValue(undefined),
   getWorkspaceRuntimeAssets: vi.fn(),
@@ -297,7 +297,7 @@ describe('runtime.ts always-proxy', () => {
     expect(projectDataService.persistMessageBatch).not.toHaveBeenCalled();
   });
 
-  it('rejects oversized message payloads with a bounded body read before persistence', async () => {
+  it('rejects oversized message payloads after terminal-state preflight and before persistence', async () => {
     mockDbLimit.mockImplementation(() => [
       {
         projectId: 'proj1',
@@ -329,7 +329,7 @@ describe('runtime.ts always-proxy', () => {
       error: 'BAD_REQUEST',
       message: 'Payload exceeds 64 byte limit',
     });
-    expect(mockDbLimit).not.toHaveBeenCalled();
+    expect(mockDbLimit).toHaveBeenCalledTimes(1);
     expect(projectDataService.persistMessageBatch).not.toHaveBeenCalled();
   });
 

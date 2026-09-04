@@ -247,6 +247,14 @@ beforeEach(() => {
   env = {
     DATABASE: createSqliteD1(sqlite),
     OBSERVABILITY_DATABASE: createSqliteD1(new Database(':memory:')),
+    NODE_LIFECYCLE: {
+      idFromName: vi.fn(() => 'node-lifecycle-id'),
+      get: vi.fn(() => ({
+        claimWorkspaceDeletionAttempt: vi.fn(async () => true),
+        confirmWorkspaceDeletion: vi.fn(async () => {}),
+        scheduleWorkspaceDeletion: vi.fn(async () => {}),
+      })),
+    },
     R2: { delete: vi.fn(async () => {}) },
     SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS: '3',
     TASK_RUN_CLEANUP_DELAY_MS: '0',
@@ -552,7 +560,8 @@ describe('real teardown writers preserve sleeping sessions through the finalizer
 
 describe('destructive archive/delete paths still stop sessions', () => {
   it('user workspace deletion removes snapshot state before finalization, so the session still stops', async () => {
-    seedWorkspace({ nodeId: null, status: 'sleeping' });
+    seedNode();
+    seedWorkspace({ status: 'sleeping' });
     seedRestorableSnapshot();
     const db = drizzle(env.DATABASE, { schema });
 
