@@ -1391,6 +1391,50 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     }
   });
 
+  it('continues a bounded legacy backfill before a far-future indexed deletion', async () => {
+    const nodeId = 'nl-test-delete-index-future-backfill-001';
+    const workspaceIds = [
+      'ws-delete-index-future-backfill-001',
+      'ws-delete-index-future-backfill-002',
+      'ws-delete-index-future-backfill-003',
+    ];
+    await seedTestNode(nodeId);
+    const stub = getStub(nodeId);
+    await setNodeLifecycleDeletionEnv(stub, { WORKSPACE_DELETION_ALARM_BATCH_SIZE: '2' });
+
+    try {
+      await runInDurableObject(stub, async (instance) => {
+        const farFuture = Date.now() + 10 * 60_000;
+        for (const workspaceId of workspaceIds) {
+          await instance.ctx.storage.put(`ws-delete:${workspaceId}`, {
+            nodeId,
+            workspaceId,
+            userId: TEST_USER_ID,
+            deleteAt: farFuture,
+          } satisfies PendingWorkspaceDeletion);
+        }
+        await instance.ctx.storage.setAlarm(Date.now() - 1);
+        await instance.alarm();
+
+        expect(await instance.ctx.storage.getAlarm()).toBeLessThan(farFuture);
+        expect(await instance.ctx.storage.get('ws-delete-due-index-backfill:v1')).toMatchObject({
+          cursor: `ws-delete:${workspaceIds[1]}`,
+          done: false,
+        });
+
+        await instance.alarm();
+        expect(await instance.ctx.storage.get('ws-delete-due-index-backfill:v1')).toMatchObject({
+          cursor: `ws-delete:${workspaceIds[2]}`,
+          done: true,
+        });
+      });
+    } finally {
+      await setNodeLifecycleDeletionEnv(stub, {
+        WORKSPACE_DELETION_ALARM_BATCH_SIZE: undefined,
+      });
+    }
+  });
+
   it('atomically repairs orphaned, malformed, and mismatched due indexes', async () => {
     const nodeId = 'nl-test-delete-index-repair-001';
     const wsId = 'ws-delete-index-repair-001';

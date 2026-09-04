@@ -146,10 +146,7 @@ export async function recalculateWorkspaceDeletionAlarm(input: {
       await input.storage.put(WORKSPACE_DELETION_DUE_INDEX_BACKFILL_KEY, backfill);
     }
   }
-  if (
-    (!backfill?.done || inspected === input.inspectionLimit) &&
-    earliest === input.warmAlarmTime
-  ) {
+  if (!backfill?.done || inspected === input.inspectionLimit) {
     const boundedRescanAt = Date.now() + input.boundedRescanDelayMs;
     if (earliest === null || boundedRescanAt < earliest) earliest = boundedRescanAt;
   }
