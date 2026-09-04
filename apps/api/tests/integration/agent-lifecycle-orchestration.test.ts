@@ -18,11 +18,7 @@ import {
   resolveAttentionMarkers,
   resolveAttentionMarkersByKind,
 } from '../../src/durable-objects/project-data/attention';
-import {
-  resetIdleCleanup,
-  scheduleIdleCleanup,
-  stopWorkspaceInD1,
-} from '../../src/durable-objects/project-data/idle-cleanup';
+import { resetIdleCleanup, scheduleIdleCleanup, stopWorkspaceInD1 } from '../../src/durable-objects/project-data/idle-cleanup';
 import { persistMessage } from '../../src/durable-objects/project-data/messages';
 import {
   getReconciliationCandidates,
@@ -50,10 +46,7 @@ function createSqlStorage(db: Database.Database): SqlStorage {
   return {
     exec(query: string, ...params: unknown[]) {
       const trimmed = query.trim().toUpperCase();
-      const isSelect =
-        trimmed.startsWith('SELECT') ||
-        trimmed.startsWith('WITH') ||
-        trimmed.startsWith('PRAGMA TABLE_INFO');
+      const isSelect = trimmed.startsWith('SELECT') || trimmed.startsWith('WITH') || trimmed.startsWith('PRAGMA TABLE_INFO');
 
       if (isSelect) {
         const rows = params.length > 0 ? db.prepare(query).all(...params) : db.prepare(query).all();
@@ -73,7 +66,7 @@ function createSqlStorage(db: Database.Database): SqlStorage {
 
 function createMockD1(
   tasks: Record<string, TaskRow>,
-  workspaces: Record<string, WorkspaceRow>
+  workspaces: Record<string, WorkspaceRow>,
 ): D1Database {
   return {
     prepare: vi.fn().mockImplementation((query: string) => ({
@@ -106,10 +99,7 @@ function createMockD1(
           }
           if (query.includes("UPDATE workspaces SET status = 'stopped'")) {
             const workspaceId = args[1] as string;
-            if (
-              workspaces[workspaceId] &&
-              ['running', 'recovery'].includes(workspaces[workspaceId].status)
-            ) {
+            if (workspaces[workspaceId] && ['running', 'recovery'].includes(workspaces[workspaceId].status)) {
               workspaces[workspaceId].status = 'stopped';
             }
           }
@@ -161,19 +151,19 @@ describe('agent lifecycle orchestration integration', () => {
        VALUES ('session-1', 'ws-1', 'task-1', 'Lifecycle test', 'active', 0, ?, ?, ?)`,
       START,
       START,
-      START
+      START,
     );
     sql.exec(
       `INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, last_terminal_activity_at, created_at)
        VALUES ('ws-1', 'session-1', ?, 0, ?)`,
       START,
-      START
+      START,
     );
     sql.exec(
       `INSERT INTO acp_sessions (id, chat_session_id, workspace_id, status, agent_type, created_at, updated_at)
        VALUES ('acp-1', 'session-1', 'ws-1', 'running', 'claude_code', ?, ?)`,
       START,
-      START
+      START,
     );
     scheduleIdleCleanup(sql, env, 'session-1', 'ws-1', 'task-1');
   }
@@ -191,7 +181,7 @@ describe('agent lifecycle orchestration integration', () => {
         'reconciliation_checkin',
         result.id,
         'agent',
-        'agent_message'
+        'agent_message',
       );
     }
 
@@ -199,23 +189,18 @@ describe('agent lifecycle orchestration integration', () => {
     return result.id;
   }
 
-  async function expireMarkerLikeProjectDataAlarm(
-    kind: 'needs_input' | 'reconciliation_checkin'
-  ): Promise<void> {
+  async function expireMarkerLikeProjectDataAlarm(kind: 'needs_input' | 'reconciliation_checkin'): Promise<void> {
     const [marker] = getExpiredMarkers(sql);
     expect(marker?.kind).toBe(kind);
 
     resolveAttentionMarkerById(sql, marker.id, 'system', 'expired');
-    const errorMessage =
-      kind === 'reconciliation_checkin'
-        ? 'Agent became unresponsive after SAM check-in'
-        : 'Human input request expired after timeout';
+    const errorMessage = kind === 'reconciliation_checkin'
+      ? 'Agent became unresponsive after SAM check-in'
+      : 'Human input request expired after timeout';
 
     await env.DATABASE.prepare(
-      `UPDATE tasks SET status = 'failed', error = ?, updated_at = datetime('now') WHERE id = ? AND status IN ('in_progress', 'delegated')`
-    )
-      .bind(errorMessage, marker.taskId)
-      .run();
+      `UPDATE tasks SET status = 'failed', error = ?, updated_at = datetime('now') WHERE id = ? AND status IN ('in_progress', 'delegated')`,
+    ).bind(errorMessage, marker.taskId).run();
     expect(marker.workspaceId).toBeTypeOf('string');
     if (!marker.workspaceId) {
       throw new Error('Expected expired marker to include workspaceId');
@@ -240,24 +225,19 @@ describe('agent lifecycle orchestration integration', () => {
       expect.anything(),
       'user-1',
       undefined,
-      { requestTimeoutMs: 5000 }
+      { requestTimeoutMs: 5000 },
     );
-    expect(
-      db.prepare(`SELECT role, content, tool_metadata FROM chat_messages`).all()
-    ).toMatchObject([
+    expect(db.prepare(`SELECT role, content, tool_metadata FROM chat_messages`).all()).toMatchObject([
       {
         role: 'user',
         content: expect.stringContaining('Do not stop after the update'),
-        tool_metadata: JSON.stringify({
-          source: 'sam_orchestrator',
-          kind: 'reconciliation_checkin',
-        }),
+        tool_metadata: JSON.stringify({ source: 'sam_orchestrator', kind: 'reconciliation_checkin' }),
       },
     ]);
 
-    const checkinsBeforeReply = sql
-      .exec(`SELECT kind, expires_at FROM session_attention_markers WHERE resolved_at IS NULL`)
-      .toArray();
+    const checkinsBeforeReply = sql.exec(
+      `SELECT kind, expires_at FROM session_attention_markers WHERE resolved_at IS NULL`,
+    ).toArray();
     expect(checkinsBeforeReply).toHaveLength(1);
     expect(checkinsBeforeReply[0].kind).toBe('reconciliation_checkin');
     expect(checkinsBeforeReply[0].expires_at).toBe(START + FIVE_MINUTES + 1 + ONE_MINUTE);
@@ -265,9 +245,7 @@ describe('agent lifecycle orchestration integration', () => {
     vi.advanceTimersByTime(30_000);
     persistProjectMessage('assistant', 'Still working; I am investigating the failing test.');
 
-    expect(
-      sql.exec(`SELECT * FROM session_attention_markers WHERE resolved_at IS NULL`).toArray()
-    ).toHaveLength(0);
+    expect(sql.exec(`SELECT * FROM session_attention_markers WHERE resolved_at IS NULL`).toArray()).toHaveLength(0);
     expect(tasks['task-1'].status).toBe('in_progress');
 
     vi.advanceTimersByTime(FIVE_MINUTES + 1);
@@ -294,11 +272,9 @@ describe('agent lifecycle orchestration integration', () => {
 
     persistProjectMessage('assistant', 'I found more context, but still need your decision.');
 
-    const markers = sql
-      .exec(
-        `SELECT kind, resolved_at FROM session_attention_markers WHERE session_id = 'session-1'`
-      )
-      .toArray();
+    const markers = sql.exec(
+      `SELECT kind, resolved_at FROM session_attention_markers WHERE session_id = 'session-1'`,
+    ).toArray();
     expect(markers).toMatchObject([{ kind: 'needs_input', resolved_at: null }]);
     expect(await getReconciliationCandidates(sql, env)).toHaveLength(0);
   });
@@ -319,9 +295,7 @@ describe('agent lifecycle orchestration integration', () => {
     expect(await processReconciliationCandidates(sql, env, () => {})).toBe(0);
 
     persistProjectMessage('user', 'Approved. Continue.');
-    expect(
-      sql.exec(`SELECT * FROM session_attention_markers WHERE resolved_at IS NULL`).toArray()
-    ).toHaveLength(0);
+    expect(sql.exec(`SELECT * FROM session_attention_markers WHERE resolved_at IS NULL`).toArray()).toHaveLength(0);
 
     vi.advanceTimersByTime(FIVE_MINUTES + 1);
     expect(await processReconciliationCandidates(sql, env, () => {})).toBe(1);
@@ -340,12 +314,12 @@ describe('agent lifecycle orchestration integration', () => {
       error: 'Agent became unresponsive after SAM check-in',
     });
     expect(workspaces['ws-1'].status).toBe('stopped');
-    expect(
-      sql.exec(`SELECT status FROM chat_sessions WHERE id = 'session-1'`).toArray()
-    ).toMatchObject([{ status: 'failed' }]);
-    expect(
-      sql.exec(`SELECT resolved_reason FROM session_attention_markers`).toArray()
-    ).toMatchObject([{ resolved_reason: 'expired' }]);
+    expect(sql.exec(`SELECT status FROM chat_sessions WHERE id = 'session-1'`).toArray()).toMatchObject([
+      { status: 'failed' },
+    ]);
+    expect(sql.exec(`SELECT resolved_reason FROM session_attention_markers`).toArray()).toMatchObject([
+      { resolved_reason: 'expired' },
+    ]);
   });
 
   it('expires unanswered human input after two hours and cleans up without a reconciliation check-in', async () => {
@@ -369,9 +343,9 @@ describe('agent lifecycle orchestration integration', () => {
       error: 'Human input request expired after timeout',
     });
     expect(workspaces['ws-1'].status).toBe('stopped');
-    expect(
-      sql.exec(`SELECT status FROM chat_sessions WHERE id = 'session-1'`).toArray()
-    ).toMatchObject([{ status: 'failed' }]);
+    expect(sql.exec(`SELECT status FROM chat_sessions WHERE id = 'session-1'`).toArray()).toMatchObject([
+      { status: 'failed' },
+    ]);
     expect(sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 });
