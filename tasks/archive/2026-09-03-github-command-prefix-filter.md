@@ -84,20 +84,20 @@ Separately, the observability lesson is that an active trigger with deliveries r
 - [x] Run local Playwright screenshots for trigger list, trigger detail, and trigger form GitHub fields at 1280x800 and 375x667 using stress data; review overflow/clipping/readability.
 - [x] Run full quality suite.
 - [x] Run specialist reviews: task-completion-validator, cloudflare-specialist, ui-ux-specialist, constitution-validator, test-engineer, doc-sync-validator.
-- [ ] Re-coordinate staging, deploy the final runtime head, and verify list, detail, and form behavior without overwriting another active run.
+- [x] Re-coordinate staging, deploy the final runtime head, and verify list, detail, and form behavior without overwriting another active run.
 - [x] Create PR with production evidence, caller enumeration, post-mortem, no-migration rationale, visual evidence, staging evidence, and specialist review table.
 - [ ] Complete CI and CodeRabbit label-triggered review loop.
 - [ ] Merge, monitor production deploy, and report PR number plus merge/deploy status.
 
 ## Acceptance Criteria
 
-- [ ] Existing production GitHub `issues` trigger `01KXNX64WKGQGS955PAA7E1RFB` will no longer reject opened issues solely because its stored filters include `commandPrefix: "/sam"`.
+- [x] Existing production GitHub `issues` trigger `01KXNX64WKGQGS955PAA7E1RFB` will no longer reject opened issues solely because its stored filters include `commandPrefix: "/sam"`.
 - [x] `issue_comment` triggers still reject comments whose trimmed body does not start with the configured prefix, with reason `comment does not start with '/sam'`.
 - [x] Non-comment GitHub trigger creation/update payloads produced by the UI no longer persist `commandPrefix`.
 - [x] Trigger list/source labels and trigger detail configuration no longer display a command prefix as active for non-comment GitHub events.
 - [x] Required unit tests pass and are proven discriminating against the original backend bug.
 - [x] Desktop and mobile Playwright screenshots for changed trigger surfaces are posted to the PR and reviewed for overflow/clipping/readability.
-- [ ] Final-head staging deployment succeeds and validates the fix without overwriting another active staging run.
+- [x] Final-head staging deployment succeeds and validates the fix without overwriting another active staging run.
 - [ ] PR is merged after CI and CodeRabbit review, and production deploy is monitored to completion.
 
 ## Validation Log
@@ -127,12 +127,12 @@ Separately, the observability lesson is that an active trigger with deliveries r
   - `trigger-detail-github-issues-desktop-1280x800.png`
 - UI issue found/fixed during screenshot review: the drawer’s scrollable panel allowed scrolled content to bleed under the header and the focused lower input to crowd the footer boundary. Fixed `TriggerForm` to use a flex column shell with header/footer outside the scroll container and `scroll-pb-28` on the form body. Final screenshots reviewed for overflow, clipping, readability, and responsive behavior; no remaining issues found.
 - Specialist review gate takeover findings:
-  - task-completion-validator: ADDRESSED. The production-shaped handler case is discriminating, and PR comment `#issuecomment-5533134301` contains eight viewable, commit-pinned screenshots. Final-head staging and lifecycle gates remain pending.
+  - task-completion-validator: PASS. Final pre-archive re-review found every research item mapped to implementation/test evidence, the production-shaped handler case discriminating, all eight commit-pinned screenshots viewable, exact-head staging green, and zero live staging nodes/workspaces. CI/CodeRabbit/merge/deploy lifecycle gates remain pending.
   - cloudflare-specialist: PASS. No schema, binding, secret, Durable Object, KV, R2, or `wrangler.toml` impact.
   - ui-ux-specialist: ADDRESSED. Header/body/footer/focused-control coordinates are asserted at mobile and desktop, every changed surface has overflow/clipping checks, and all eight viewable screenshots were self-reviewed.
   - constitution-validator: PASS. No Principle XI hardcoded URL/timeout/limit/deployment-identifier violations.
   - test-engineer: ADDRESSED. The production-shaped handler slice, old-predicate discrimination, non-comment controls, issue-comment enforcement, and UI/Playwright coverage all passed independent review.
-  - doc-sync-validator: ADDRESSED. Task wording now describes the defective behavior as pre-fix, records all four screenshot surfaces, and distinguishes the earlier staging run from the required final-runtime-head deployment; no public documentation drift exists.
+  - doc-sync-validator: PASS. Task wording describes the defective behavior as pre-fix, records all four screenshot surfaces and final-runtime-head staging, and has no remaining public/API/schema/config documentation drift.
 - Staging coordination:
   - `mcp__sam_mcp.list_project_agents` showed five other active/sleeping project agents, but none had an active staging deployment.
   - `gh run list --workflow=deploy-staging.yml --status=in_progress --json ...` and `--status=queued` both returned `[]` before deployment.
@@ -150,6 +150,11 @@ Separately, the observability lesson is that an active trigger with deliveries r
   - Deleted temporary trigger `01M1M9SVPD5K8X2QDS77B3BPRX`.
   - Staging webhook route note: `/api/github/webhook` requires GitHub HMAC signature verification, and staging Worker secret values are intentionally not retrievable. Staging D1 had no existing GitHub triggers or deliveries to replay. The signed-webhook admission predicate remains covered by discriminating unit tests plus the deployed UI/API stale-data verification above.
 - Observability noise check: `pnpm quality:observability-noise` passed. D1 observability checks skipped because `OBSERVABILITY_DB_ID` was not set; Workers telemetry skipped with 403 unavailable; result reported no significant log noise detected.
+- Final-head staging coordination: waited for PR #2011 staging run `33820463768` and its smoke job to finish successfully, confirmed no queued/in-progress staging successor, and sent its owning agent a durable cleanup request for its temporary interrupt-validation workspace instead of touching another task's resources.
+- Final-head staging deployment: `gh workflow run deploy-staging.yml --ref sam/fix-bug-makes-every-m6y9zw` created run `33822013195`, which resolved exact head `dcf84f7e6941c7f5ae639a43c6df90cdff81e92c`; validate, deploy, and smoke jobs all passed.
+- Final-head live Playwright: an uncommitted one-off harness authenticated to `app.sammy.party`, created an API-persisted GitHub `issues` trigger with production-shaped `actions`, `ignoreActors`, and stale `commandPrefix: "/sam"`, then checked list, detail, and new-trigger form behavior at 1280x800 and 375x667 with horizontal-overflow, detail-row bounds, and drawer header/body/footer coordinate assertions. The first attempt exposed shared-environment loading beyond Playwright's 5-second default and still deleted its trigger in `finally`; after adding an explicit 30-second project-load wait, the exact harness passed 1/1 in 1.3 minutes.
+- Final-head staging screenshots self-reviewed: six physical-DPR images (`staging-pr2010-{list,detail,form}-{1280x800,375x667}.png`) showed `GitHub issues` without `/sam` on the list, `Command Prefix` as `None` in detail, and no command-prefix input in the issues form. Desktop and mobile layouts had no clipping or horizontal overflow; the mobile ignored-actors value wrapped within its row, and drawer header/body/footer boundaries remained separated.
+- Final-head staging cleanup: both temporary `PR 2010 staging …` triggers were deleted by the harness. Staging D1 then returned only `deleted` groups: 223 nodes and 211 workspaces, with zero live staging nodes/workspaces at rest.
 
 ## UI/UX Validation Report
 
