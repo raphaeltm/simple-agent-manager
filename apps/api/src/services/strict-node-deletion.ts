@@ -249,6 +249,15 @@ async function deleteStrictNodeDnsRecord(node: NodeRow, userId: string, env: Env
   }
 }
 
+async function markRuntimeTerminationConfirmed(db: NodeDb, nodeId: string): Promise<void> {
+  await db
+    .update(schema.nodes)
+    .set({
+      runtimeTerminationConfirmedAt: new Date().toISOString(),
+    })
+    .where(eq(schema.nodes.id, nodeId));
+}
+
 /**
  * Strict node teardown for cleanup paths where hiding a failed cloud delete is
  * worse than surfacing a stale D1 row. Unlike deleteNodeResources(), this does
@@ -273,11 +282,13 @@ export async function deleteNodeResourcesStrict(
 
   if (node.runtime === 'cf-container') {
     await destroyVmAgentContainer(env, node.id);
+    await markRuntimeTerminationConfirmed(db, node.id);
     await deleteStrictNodeDnsRecord(node, userId, env);
     return { providerVm: 'no-instance' };
   }
 
   const providerVm = await deleteStrictProviderInstance(db, node, userId, env);
+  await markRuntimeTerminationConfirmed(db, node.id);
   await deleteStrictNodeDnsRecord(node, userId, env);
   return { providerVm };
 }

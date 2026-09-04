@@ -13,7 +13,7 @@
  * - Stopped workspace TTL deletion
  * - Stale warm nodes: error is caught (no Hetzner), counted in result
  */
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
@@ -493,6 +493,67 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       expect(await getAgentSessionStatus('agent-nc-stopped-ttl')).toMatchObject({
         status: 'completed',
         stopped_at: expect.any(String),
+      });
+    });
+
+    it('quarantines an unconfirmed VM deletion and arms NodeLifecycle retry', async () => {
+      await seedBaseData();
+      const nodeId = 'node-nc-ttl-timeout';
+      const wsId = 'ws-nc-stopped-timeout';
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+      await seedNode(nodeId, USER_ID);
+      await seedWorkspace(wsId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'stopped',
+        updatedAt: oldDate,
+      });
+      await seedAgentSession('agent-nc-stopped-timeout', wsId, USER_ID, {
+        status: 'running',
+      });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url =
+            typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+          if (url.includes('.vm.test.example.com')) {
+            throw new Error('simulated scheduled VM delete timeout');
+          }
+          return originalFetch(input);
+        })
+      );
+
+      const result = await runNodeCleanupSweep({
+        ...env,
+        WORKSPACE_STOPPED_TTL_MS: '1000',
+        WORKSPACE_DELETION_RETRY_BASE_MS: '60000',
+      } as unknown as Env);
+
+      expect(result.stoppedWorkspacesDeleted).toBe(0);
+      expect(result.errors).toBeGreaterThanOrEqual(1);
+      const ws = await env.DATABASE.prepare(
+        'SELECT status, error_message FROM workspaces WHERE id = ?'
+      )
+        .bind(wsId)
+        .first<{ status: string; error_message: string | null }>();
+      expect(ws).toMatchObject({
+        status: 'stopping',
+        error_message: expect.stringContaining('deletion unconfirmed'),
+      });
+      expect(await getAgentSessionStatus('agent-nc-stopped-timeout')).toMatchObject({
+        status: 'running',
+        stopped_at: null,
+      });
+
+      const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(nodeId));
+      await runInDurableObject(stub, async (instance) => {
+        expect(await instance.ctx.storage.get(`ws-delete:${wsId}`)).toMatchObject({
+          workspaceId: wsId,
+          nodeId,
+          userId: USER_ID,
+          lastError: expect.stringContaining('deletion unconfirmed'),
+        });
+        expect(await instance.ctx.storage.getAlarm()).toBeGreaterThan(Date.now());
       });
     });
 

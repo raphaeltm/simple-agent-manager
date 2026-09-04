@@ -7,6 +7,7 @@ const {
   failSessionSnapshotRecoveryMock,
   selectQueue,
   startTaskRunnerDOMock,
+  assertReplacementDeletionConfirmedMock,
 } = vi.hoisted(() => {
   const selectQueue: unknown[] = [];
   let batchInsertChanges = 1;
@@ -56,6 +57,7 @@ const {
     failSessionSnapshotRecoveryMock: vi.fn(async () => undefined),
     selectQueue,
     startTaskRunnerDOMock: vi.fn(async () => undefined),
+    assertReplacementDeletionConfirmedMock: vi.fn(async () => undefined),
   };
 });
 
@@ -77,6 +79,11 @@ vi.mock('../../../src/services/session-snapshots', () => ({
 vi.mock('../../../src/services/task-runner-do', () => ({
   ensureTaskRunnerStarted: vi.fn(async () => false),
   startTaskRunnerDO: startTaskRunnerDOMock,
+}));
+
+vi.mock('../../../src/services/replacement-deletion-fence', () => ({
+  assertReplacementDeletionConfirmed: assertReplacementDeletionConfirmedMock,
+  WorkspaceDeletionUnconfirmedError: class WorkspaceDeletionUnconfirmedError extends Error {},
 }));
 
 vi.mock('../../../src/services/placement-resolver', async (importOriginal) => {

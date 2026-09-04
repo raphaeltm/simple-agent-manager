@@ -34,6 +34,10 @@ import {
   sessionLifecycleError,
   type SessionRecoverySourceTaskGuard,
 } from './session-snapshots';
+import {
+  assertReplacementDeletionConfirmed,
+  WorkspaceDeletionUnconfirmedError,
+} from './replacement-deletion-fence';
 import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -576,7 +580,9 @@ async function resolveRecoveryPlacement(
   env: Env,
   context: RecoveryContext,
   taskId: string
-): Promise<RecoveryPlacementResolution | { error: string; errorKind: 'placement' | 'credentials' }> {
+): Promise<
+  RecoveryPlacementResolution | { error: string; errorKind: 'placement' | 'credentials' }
+> {
   const profile = context.workspace.agentProfileHint
     ? await db
         .select()
@@ -652,6 +658,26 @@ export async function ensureSessionRecovery(
   if (!context) return { status: 'unavailable', reason: 'sleeping_snapshot_missing' };
   if (context.snapshot.runtime === 'cf-container') {
     return { status: 'unavailable', reason: 'container_runtime_wakes_in_place' };
+  }
+
+  const deletionSourceTaskId =
+    sourceTaskGuard?.taskId ??
+    context.sourceTask?.recoverySourceTaskId ??
+    context.sourceTask?.id ??
+    null;
+  if (deletionSourceTaskId) {
+    try {
+      await assertReplacementDeletionConfirmed(env, {
+        sourceTaskId: deletionSourceTaskId,
+        projectId,
+        userId: context.snapshot.userId,
+      });
+    } catch (error) {
+      if (error instanceof WorkspaceDeletionUnconfirmedError) {
+        return { status: 'unavailable', reason: 'workspace_deletion_unconfirmed' };
+      }
+      throw error;
+    }
   }
 
   const recoveryTaskId = ulid();

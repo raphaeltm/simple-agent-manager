@@ -49,6 +49,7 @@ import {
   isSessionRecoveryTaskAuthorized,
   SessionRecoveryAuthorityRevokedError,
 } from '../../services/session-recovery-authority';
+import { assertReplacementDeletionConfirmed } from '../../services/replacement-deletion-fence';
 import { handleAgentSession } from './agent-session-step';
 import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
 import { handleNodeAgentReady, handleNodeProvisioning, handleNodeSelection } from './node-steps';
@@ -435,6 +436,7 @@ export class TaskRunner extends DurableObject<Env> {
     raw.workspaceDispatchAckedAt ??= null;
     raw.config.resumeSnapshotChatSessionId ??= null;
     raw.config.recoverySourceTaskId ??= null;
+    raw.config.retrySourceTaskId ??= null;
     raw.stepResults.claimedWarmNodeId ??= null;
     raw.stepResults.capacityPlacementSnapshot ??= null;
     raw.lastD1Step ??= null;
@@ -458,6 +460,15 @@ export class TaskRunner extends DurableObject<Env> {
   }
 
   private async assertRecoveryAuthority(input: StartTaskInput | TaskRunnerState): Promise<void> {
+    const deletionSourceTaskId =
+      input.config.retrySourceTaskId ?? input.config.recoverySourceTaskId ?? null;
+    if (deletionSourceTaskId) {
+      await assertReplacementDeletionConfirmed(this.env as unknown as Env, {
+        sourceTaskId: deletionSourceTaskId,
+        projectId: input.projectId,
+        userId: input.userId,
+      });
+    }
     if (!(await this.hasRecoveryAuthority(input))) {
       throw new SessionRecoveryAuthorityRevokedError();
     }

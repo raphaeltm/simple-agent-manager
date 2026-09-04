@@ -254,15 +254,15 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
   assertNodeOperational(node, 'restart workspace');
   await requireWorkspaceRestartGitHubAccess(c.env, db, workspace, userId, 'workspace-restart');
 
-  // Cancel any pending auto-deletion before restarting
-  try {
-    const doId = c.env.NODE_LIFECYCLE.idFromName(nodeId);
-    const stub = c.env.NODE_LIFECYCLE.get(doId);
-    await (
-      stub as unknown as import('../../durable-objects/node-lifecycle').NodeLifecycle
-    ).cancelWorkspaceDeletion(workspace.id);
-  } catch (e) {
-    log.warn('workspace.cancel_deletion_failed', { workspaceId: workspace.id, error: String(e) });
+  // Fail closed: once a delete attempt is claimed, restart could create a
+  // second live incarnation while the first delete is still in flight.
+  const doId = c.env.NODE_LIFECYCLE.idFromName(nodeId);
+  const stub = c.env.NODE_LIFECYCLE.get(doId);
+  const cancelled = await (
+    stub as unknown as import('../../durable-objects/node-lifecycle').NodeLifecycle
+  ).cancelWorkspaceDeletion(workspace.id);
+  if (!cancelled) {
+    throw errors.conflict('Workspace deletion has already started; restart is fenced');
   }
 
   // Clear previous error state and boot logs before starting new provisioning
@@ -387,8 +387,7 @@ lifecycleRoutes.post('/:id/ready', async (c) => {
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
-  const workspace = rows[0];
-  assertWorkspaceAcceptsCallback(workspace, workspaceId, 'ready');
+  await assertWorkspaceAcceptsCallback(c.env, rows[0], workspaceId, 'ready');
 
   const updateValues: {
     status: string;
@@ -449,9 +448,9 @@ lifecycleRoutes.post('/:id/provisioning-failed', async (c) => {
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
-  const workspace = rows[0];
-  assertWorkspaceAcceptsCallback(
-    workspace,
+  const workspace = await assertWorkspaceAcceptsCallback(
+    c.env,
+    rows[0],
     workspaceId,
     'provisioning_failed',
     WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES

@@ -5,47 +5,43 @@ import type { Env } from '../../../src/env';
 import { cleanupWorkspaceForDeletion } from '../../../src/services/workspace-cleanup';
 
 const mocks = vi.hoisted(() => ({
-  deleteWorkspaceOnNode: vi.fn(),
-  stopNodeResources: vi.fn(),
+  attemptWorkspaceDeletion: vi.fn(),
+  claimWorkspaceDeletionAttempt: vi.fn(),
+  confirmWorkspaceDeletion: vi.fn(),
+  scheduleWorkspaceDeletion: vi.fn(),
   deleteSessionSnapshotState: vi.fn(),
-  finalizeWorkspaceLifecycleClosure: vi.fn(),
 }));
 
-vi.mock('../../../src/services/node-agent', () => ({
-  deleteWorkspaceOnNode: (...args: unknown[]) => mocks.deleteWorkspaceOnNode(...args),
-}));
-vi.mock('../../../src/services/nodes', () => ({
-  stopNodeResources: (...args: unknown[]) => mocks.stopNodeResources(...args),
+vi.mock('../../../src/services/workspace-deletion', () => ({
+  attemptWorkspaceDeletion: (...args: unknown[]) => mocks.attemptWorkspaceDeletion(...args),
 }));
 vi.mock('../../../src/services/session-snapshots', () => ({
   deleteSessionSnapshotState: (...args: unknown[]) => mocks.deleteSessionSnapshotState(...args),
 }));
-vi.mock('../../../src/services/workspace-lifecycle-finalizer', () => ({
-  finalizeWorkspaceLifecycleClosure: (...args: unknown[]) =>
-    mocks.finalizeWorkspaceLifecycleClosure(...args),
-}));
 vi.mock('../../../src/lib/logger', () => ({
-  log: { error: vi.fn(), warn: vi.fn() },
+  log: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
 }));
 
-function buildDb(nodeRows: unknown[]) {
+function buildDb() {
   const deletedTables: string[] = [];
-  const select = vi.fn(() => {
-    const chain = {
-      from: vi.fn(() => chain),
-      where: vi.fn(() => chain),
-      limit: vi.fn(() => Promise.resolve(nodeRows)),
-    };
-    return chain;
-  });
   const deleteFn = vi.fn((table: { _: { name?: string }; [key: symbol]: unknown }) => {
     deletedTables.push(String(table[Symbol.for('drizzle:Name')] ?? table._.name ?? 'unknown'));
-    return {
-      where: vi.fn(() => Promise.resolve()),
-    };
+    return { where: vi.fn(async () => undefined) };
   });
+  return { db: { delete: deleteFn }, deletedTables };
+}
 
-  return { db: { select, delete: deleteFn }, deletedTables };
+function buildEnv(): Env {
+  return {
+    NODE_LIFECYCLE: {
+      idFromName: vi.fn(() => 'node-lifecycle-id'),
+      get: vi.fn(() => ({
+        claimWorkspaceDeletionAttempt: mocks.claimWorkspaceDeletionAttempt,
+        confirmWorkspaceDeletion: mocks.confirmWorkspaceDeletion,
+        scheduleWorkspaceDeletion: mocks.scheduleWorkspaceDeletion,
+      })),
+    },
+  } as unknown as Env;
 }
 
 function workspace(overrides: Partial<Workspace> = {}): Workspace {
@@ -86,108 +82,112 @@ function workspace(overrides: Partial<Workspace> = {}): Workspace {
 describe('cleanupWorkspaceForDeletion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.deleteWorkspaceOnNode.mockResolvedValue(undefined);
-    mocks.stopNodeResources.mockResolvedValue(undefined);
+    mocks.claimWorkspaceDeletionAttempt.mockResolvedValue(true);
+    mocks.scheduleWorkspaceDeletion.mockResolvedValue(undefined);
     mocks.deleteSessionSnapshotState.mockResolvedValue(true);
-    mocks.finalizeWorkspaceLifecycleClosure.mockResolvedValue({
-      workspaces: 1,
-      agentSessionsClosed: 1,
-      computeUsageClosed: 1,
-      projectSessionsClosed: 1,
-      projectSessionErrors: 0,
-      workspaceActivityCleaned: 1,
-      workspaceActivityErrors: 0,
-    });
   });
 
-  it('deletes the workspace row immediately after best-effort runtime cleanup', async () => {
-    const { db, deletedTables } = buildDb([{ status: 'running', healthStatus: 'healthy' }]);
-    const env = {} as Env;
-    const waitUntil = vi.fn();
+  it('hard-deletes local state only after confirmed runtime deletion and lifecycle finalization', async () => {
+    const { db, deletedTables } = buildDb();
+    const env = buildEnv();
+    mocks.attemptWorkspaceDeletion.mockImplementationOnce(
+      async (options: { beforeFinalize?: () => Promise<void> }) => {
+        await options.beforeFinalize?.();
+        return { status: 'confirmed', proof: 'vm_agent_confirmed', workspaceFinalized: true };
+      }
+    );
 
-    await cleanupWorkspaceForDeletion({
+    const outcome = await cleanupWorkspaceForDeletion({
       db: db as never,
       env,
       workspace: workspace(),
       userId: 'user-cleanup-1',
-      waitUntil,
     });
 
-    expect(mocks.deleteWorkspaceOnNode).toHaveBeenCalledWith(
+    expect(outcome).toMatchObject({ status: 'confirmed', proof: 'vm_agent_confirmed' });
+    expect(mocks.deleteSessionSnapshotState).toHaveBeenCalledWith(db, env, 'session-cleanup-1');
+    expect(mocks.claimWorkspaceDeletionAttempt).toHaveBeenCalledWith(
       'node-cleanup-1',
       'ws-cleanup-1',
-      env,
-      'user-cleanup-1'
+      'user-cleanup-1',
+      expect.objectContaining({ workspaceId: 'ws-cleanup-1' })
     );
-    expect(mocks.stopNodeResources).not.toHaveBeenCalled();
-    expect(mocks.deleteSessionSnapshotState).toHaveBeenCalledWith(db, env, 'session-cleanup-1');
-    expect(mocks.finalizeWorkspaceLifecycleClosure).toHaveBeenCalledWith(
-      env,
-      expect.objectContaining({
-        workspaceIds: ['ws-cleanup-1'],
-        userId: 'user-cleanup-1',
-        agentSessionStatus: 'completed',
-        reason: 'workspace_delete',
-      })
-    );
+    expect(mocks.confirmWorkspaceDeletion).toHaveBeenCalledWith('ws-cleanup-1');
     expect(deletedTables).toEqual(['workspaces']);
-    expect(waitUntil).not.toHaveBeenCalled();
+    expect(mocks.scheduleWorkspaceDeletion).not.toHaveBeenCalled();
   });
 
-  it('destroys cf-container nodes instead of only deleting the workspace inside the container', async () => {
-    const { db, deletedTables } = buildDb([
-      {
-        status: 'running',
-        healthStatus: 'healthy',
-        runtime: 'cf-container',
-      },
-    ]);
-    const env = {} as Env;
-
-    await cleanupWorkspaceForDeletion({
-      db: db as never,
-      env,
-      workspace: workspace({ vmLocation: 'cf-container' }),
-      userId: 'user-cleanup-1',
+  it('does not hard-delete an incarnation that changed before confirmation finalized', async () => {
+    const { db, deletedTables } = buildDb();
+    mocks.attemptWorkspaceDeletion.mockResolvedValueOnce({
+      status: 'confirmed',
+      proof: 'vm_agent_confirmed',
+      workspaceFinalized: false,
     });
 
-    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-cleanup-1', 'user-cleanup-1', env);
-    expect(mocks.deleteWorkspaceOnNode).not.toHaveBeenCalled();
-    expect(deletedTables).toEqual(['workspaces']);
-  });
-
-  it('still requests cf-container destruction when the node heartbeat is unhealthy', async () => {
-    const { db } = buildDb([
-      {
-        status: 'error',
-        healthStatus: 'unhealthy',
-        runtime: 'cf-container',
-      },
-    ]);
-    const env = {} as Env;
-
     await cleanupWorkspaceForDeletion({
       db: db as never,
-      env,
-      workspace: workspace({ vmLocation: 'cf-container' }),
-      userId: 'user-cleanup-1',
-    });
-
-    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-cleanup-1', 'user-cleanup-1', env);
-    expect(mocks.deleteWorkspaceOnNode).not.toHaveBeenCalled();
-  });
-
-  it('still deletes D1 workspace state when the node delete call fails', async () => {
-    const { db, deletedTables } = buildDb([{ status: 'running', healthStatus: 'healthy' }]);
-    mocks.deleteWorkspaceOnNode.mockRejectedValueOnce(new Error('node unavailable'));
-
-    await cleanupWorkspaceForDeletion({
-      db: db as never,
-      env: {} as Env,
+      env: buildEnv(),
       workspace: workspace(),
       userId: 'user-cleanup-1',
     });
 
-    expect(deletedTables).toContain('workspaces');
+    expect(deletedTables).toEqual([]);
+    expect(mocks.confirmWorkspaceDeletion).not.toHaveBeenCalled();
+  });
+
+  it('keeps a failed VM deletion retryable without deleting snapshots or D1 workspace state', async () => {
+    const { db, deletedTables } = buildDb();
+    const env = buildEnv();
+    mocks.attemptWorkspaceDeletion.mockResolvedValueOnce({
+      status: 'retry',
+      reason: 'runtime_deletion_unconfirmed',
+      diagnostic: 'VM deletion unconfirmed after attempt 1: timeout',
+    });
+
+    const outcome = await cleanupWorkspaceForDeletion({
+      db: db as never,
+      env,
+      workspace: workspace(),
+      userId: 'user-cleanup-1',
+    });
+
+    expect(outcome.status).toBe('retry');
+    expect(deletedTables).toEqual([]);
+    expect(mocks.deleteSessionSnapshotState).not.toHaveBeenCalled();
+    expect(mocks.confirmWorkspaceDeletion).not.toHaveBeenCalled();
+    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith(
+      'node-cleanup-1',
+      'ws-cleanup-1',
+      'user-cleanup-1',
+      expect.objectContaining({
+        lastError: expect.stringContaining('timeout'),
+        expected: {
+          workspaceId: 'ws-cleanup-1',
+          nodeId: 'node-cleanup-1',
+          userId: 'user-cleanup-1',
+          projectId: 'project-cleanup-1',
+          chatSessionId: 'session-cleanup-1',
+        },
+      })
+    );
+  });
+
+  it('retains an ownership-changed deletion as a fenced pending operation', async () => {
+    const { db, deletedTables } = buildDb();
+    mocks.attemptWorkspaceDeletion.mockResolvedValueOnce({
+      status: 'fenced',
+      reason: 'workspace_assignment_changed',
+    });
+
+    await cleanupWorkspaceForDeletion({
+      db: db as never,
+      env: buildEnv(),
+      workspace: workspace(),
+      userId: 'user-cleanup-1',
+    });
+
+    expect(deletedTables).toEqual([]);
+    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledOnce();
   });
 });

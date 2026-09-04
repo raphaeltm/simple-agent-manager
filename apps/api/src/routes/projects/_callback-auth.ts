@@ -9,6 +9,7 @@ import { log } from '../../lib/logger';
 import { errors } from '../../middleware/error';
 import { verifyCallbackToken } from '../../services/jwt';
 import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
+import { signalWorkspaceDeletionUnconfirmedCallback } from '../../services/workspace-deletion-callback-signal';
 
 const WORKSPACE_STATUSES_ACCEPTING_PUBLISH_CALLBACKS = new Set(['creating', 'running', 'recovery']);
 
@@ -99,6 +100,7 @@ export async function verifyWorkspacePublishCallback(
   }
 
   if (!WORKSPACE_STATUSES_ACCEPTING_PUBLISH_CALLBACKS.has(workspace.status)) {
+    await signalWorkspaceDeletionUnconfirmedCallback(c.env, payload.workspace, logPrefix);
     log.info(`${logPrefix}.terminal_workspace`, {
       workspaceId: payload.workspace,
       projectId: workspace.projectId,

@@ -56,6 +56,7 @@ import * as projectDataService from '../../services/project-data';
 import { extractScalewaySecretKey } from '../../services/provider-credentials';
 import { bridgeAgentActivity } from '../../services/trial/bridge';
 import { getWorkspaceRuntimeAssets } from '../../services/workspace-runtime-assets';
+import { signalWorkspaceDeletionUnconfirmedCallback } from '../../services/workspace-deletion-callback-signal';
 import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
 import { assertRepositoryAccess } from '../projects/_helpers';
 import {
@@ -724,8 +725,12 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
-  const workspace = workspaceRows[0];
-  assertWorkspaceAcceptsCallback(workspace, workspaceId, 'agent_key');
+  const workspace = await assertWorkspaceAcceptsCallback(
+    c.env,
+    workspaceRows[0],
+    workspaceId,
+    'agent_key'
+  );
 
   // OpenCode always uses a user-supplied credential (zen/go/custom). It never
   // routes through the SAM platform proxy, so it always requires a dedicated key.
@@ -1051,8 +1056,12 @@ runtimeRoutes.post(
       .where(eq(schema.workspaces.id, workspaceId))
       .limit(1);
 
-    const workspace = workspaceRows[0];
-    assertWorkspaceAcceptsCallback(workspace, workspaceId, 'agent_credential_sync');
+    const workspace = await assertWorkspaceAcceptsCallback(
+      c.env,
+      workspaceRows[0],
+      workspaceId,
+      'agent_credential_sync'
+    );
 
     // Find the existing credential row to update. Prefer project-scoped match
     // when the workspace is in a project; fall back to user-scoped only when
@@ -1175,8 +1184,12 @@ runtimeRoutes.post('/:id/agent-settings', jsonValidator(AgentTypeBodySchema), as
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
-  const workspace = workspaceRows[0];
-  assertWorkspaceAcceptsCallback(workspace, workspaceId, 'agent_settings');
+  const workspace = await assertWorkspaceAcceptsCallback(
+    c.env,
+    workspaceRows[0],
+    workspaceId,
+    'agent_settings'
+  );
 
   // Fetch user-level agent settings (existing behaviour).
   const settingsRows = await db
@@ -1235,8 +1248,12 @@ runtimeRoutes.get('/:id/runtime', async (c) => {
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
-  const workspace = workspaceRows[0];
-  assertWorkspaceAcceptsCallback(workspace, workspaceId, 'runtime');
+  const workspace = await assertWorkspaceAcceptsCallback(
+    c.env,
+    workspaceRows[0],
+    workspaceId,
+    'runtime'
+  );
 
   return c.json({
     workspaceId: workspace.id,
@@ -1285,8 +1302,12 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
-  const workspace = workspaceRows[0];
-  assertWorkspaceAcceptsCallback(workspace, workspaceId, 'git_token');
+  const workspace = await assertWorkspaceAcceptsCallback(
+    c.env,
+    workspaceRows[0],
+    workspaceId,
+    'git_token'
+  );
 
   // Look up the project to check repoProvider
   let repoProvider = 'github';
@@ -1568,11 +1589,25 @@ runtimeRoutes.post('/:id/messages', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
+  // Authenticate and resolve terminal state before reading an untrusted body.
+  // Late deletion callbacks are discarded without parsing or persisting payloads.
+  const workspace = await loadMessageWorkspace(c.env, workspaceId);
+  const preflightTerminalResponse = maybeTerminalMessageWorkspaceResponse(
+    c,
+    workspace,
+    workspaceId,
+    '',
+    0
+  );
+  if (preflightTerminalResponse) {
+    await signalWorkspaceDeletionUnconfirmedCallback(c.env, workspaceId, 'messages');
+    return preflightTerminalResponse;
+  }
+
   const body = await parseMessageBatchRequest(c);
   const sessionId = validateMessageBatch(c.env, body);
 
   // Resolve workspace to project and validate session linkage (Principle XIII: Fail-Fast)
-  const workspace = await loadMessageWorkspace(c.env, workspaceId);
   const terminalResponse = maybeTerminalMessageWorkspaceResponse(
     c,
     workspace,

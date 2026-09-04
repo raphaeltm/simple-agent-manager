@@ -117,6 +117,8 @@ export interface TaskRunConfig {
   resumeSnapshotChatSessionId?: string | null;
   /** Live source parent that revocably authorizes a snapshot-recovery TaskRunner. */
   recoverySourceTaskId?: string | null;
+  /** Failed/stopped predecessor whose workspace deletion must be confirmed before replacement. */
+  retrySourceTaskId?: string | null;
 }
 
 export interface TaskRunnerState {

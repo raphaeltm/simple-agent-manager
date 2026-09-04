@@ -1,103 +1,99 @@
+import { DEFAULT_WORKSPACE_DELETION_RETRY_BASE_MS } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { deleteWorkspaceOnNode } from './node-agent';
-import { stopNodeResources } from './nodes';
 import { deleteSessionSnapshotState } from './session-snapshots';
-import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
+import { attemptWorkspaceDeletion, type WorkspaceDeletionOutcome } from './workspace-deletion';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
-
-type WaitUntil = (promise: Promise<unknown>) => void;
-type WorkspaceNodeCleanupNode = {
-  status: string;
-  healthStatus: string | null;
-  runtime: string | null;
-};
 
 export interface WorkspaceDeletionCleanupOptions {
   db: Db;
   env: Env;
   workspace: schema.Workspace;
   userId: string;
-  waitUntil?: WaitUntil;
   logContext?: Record<string, unknown>;
 }
 
-function logWorkspaceNodeCleanupFailure(
-  workspace: schema.Workspace,
-  node: WorkspaceNodeCleanupNode,
-  error: unknown,
-  logContext: Record<string, unknown>
-): void {
-  log.error('workspace.delete_on_node_failed', {
-    workspaceId: workspace.id,
-    nodeId: workspace.nodeId,
-    runtime: node.runtime,
-    error: String(error),
-    ...logContext,
-  });
-}
-
-async function cleanupWorkspaceNode(options: {
-  env: Env;
-  workspace: schema.Workspace;
-  userId: string;
-  node: WorkspaceNodeCleanupNode;
-  logContext: Record<string, unknown>;
-}): Promise<void> {
-  const { env, workspace, userId, node, logContext } = options;
-  if (!workspace.nodeId) return;
-
-  try {
-    if (node.runtime === 'cf-container' && node.status !== 'deleted') {
-      await stopNodeResources(workspace.nodeId, userId, env);
-      return;
-    }
-    if (node.status === 'running' && node.healthStatus !== 'unhealthy') {
-      await deleteWorkspaceOnNode(workspace.nodeId, workspace.id, env, userId);
-    }
-  } catch (error) {
-    logWorkspaceNodeCleanupFailure(workspace, node, error, logContext);
-  }
+function workspaceDeletionRetryBaseMs(env: Env): number {
+  const parsed = Number.parseInt(env.WORKSPACE_DELETION_RETRY_BASE_MS ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_WORKSPACE_DELETION_RETRY_BASE_MS;
 }
 
 export async function cleanupWorkspaceForDeletion(
   options: WorkspaceDeletionCleanupOptions
-): Promise<void> {
+): Promise<WorkspaceDeletionOutcome> {
   const { db, env, workspace, userId, logContext = {} } = options;
-
-  if (workspace.chatSessionId) {
-    await deleteSessionSnapshotState(db, env, workspace.chatSessionId);
-  }
-
+  const expected = {
+    workspaceId: workspace.id,
+    nodeId: workspace.nodeId,
+    userId,
+    projectId: workspace.projectId,
+    chatSessionId: workspace.chatSessionId,
+  };
+  let lifecycleStub:
+    | DurableObjectStub<import('../durable-objects/node-lifecycle').NodeLifecycle>
+    | undefined;
   if (workspace.nodeId) {
-    const [node] = await db
-      .select({
-        status: schema.nodes.status,
-        healthStatus: schema.nodes.healthStatus,
-        runtime: schema.nodes.runtime,
-      })
-      .from(schema.nodes)
-      .where(and(eq(schema.nodes.id, workspace.nodeId), eq(schema.nodes.userId, userId)))
-      .limit(1);
-
-    if (node) {
-      await cleanupWorkspaceNode({ env, workspace, userId, node, logContext });
+    const doId = env.NODE_LIFECYCLE.idFromName(workspace.nodeId);
+    lifecycleStub = env.NODE_LIFECYCLE.get(doId) as DurableObjectStub<
+      import('../durable-objects/node-lifecycle').NodeLifecycle
+    >;
+    const claimed = await lifecycleStub.claimWorkspaceDeletionAttempt(
+      workspace.nodeId,
+      workspace.id,
+      userId,
+      expected
+    );
+    if (!claimed) {
+      return { status: 'fenced', reason: 'workspace_active' };
     }
   }
-
-  await finalizeWorkspaceLifecycleClosure(env, {
-    workspaceIds: [workspace.id],
-    userId,
-    agentSessionStatus: 'completed',
-    reason: String(logContext.closePath ?? 'workspace_delete'),
+  const outcome = await attemptWorkspaceDeletion({
+    env,
+    expected,
+    attempt: 1,
+    source: String(logContext.closePath ?? 'explicit'),
+    mode: 'explicit',
+    beforeFinalize: workspace.chatSessionId
+      ? async () => {
+          await deleteSessionSnapshotState(db, env, workspace.chatSessionId as string);
+        }
+      : undefined,
   });
 
-  await db
-    .delete(schema.workspaces)
-    .where(and(eq(schema.workspaces.id, workspace.id), eq(schema.workspaces.userId, userId)));
+  if (outcome.status === 'confirmed' && outcome.workspaceFinalized) {
+    await lifecycleStub?.confirmWorkspaceDeletion(workspace.id);
+    await db
+      .delete(schema.workspaces)
+      .where(
+        and(
+          eq(schema.workspaces.id, workspace.id),
+          eq(schema.workspaces.userId, userId),
+          eq(schema.workspaces.status, 'deleted')
+        )
+      );
+    return outcome;
+  }
+
+  if (outcome.status !== 'confirmed' && workspace.nodeId) {
+    await lifecycleStub?.scheduleWorkspaceDeletion(workspace.nodeId, workspace.id, userId, {
+      retryAfterMs: workspaceDeletionRetryBaseMs(env),
+      lastError: outcome.status === 'retry' ? outcome.diagnostic : outcome.reason,
+      expected,
+    });
+    log.warn('workspace.deletion_pending', {
+      workspaceId: workspace.id,
+      nodeId: workspace.nodeId,
+      userId,
+      outcome: outcome.status,
+      reason: outcome.reason,
+      ...logContext,
+    });
+  }
+
+  return outcome;
 }

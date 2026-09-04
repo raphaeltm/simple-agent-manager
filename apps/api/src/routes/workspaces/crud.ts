@@ -653,15 +653,26 @@ crudRoutes.delete('/:id', requireAuth(), requireApproved(), async (c) => {
 
   const workspace = await getOwnedWorkspace(db, workspaceId, userId);
 
-  await cleanupWorkspaceForDeletion({
+  const deletion = await cleanupWorkspaceForDeletion({
     db,
     env: c.env,
     workspace,
     userId,
-    waitUntil: (promise) => c.executionCtx.waitUntil(promise),
   });
 
-  return c.json({ success: true });
+  if (deletion.status !== 'confirmed') {
+    return c.json(
+      {
+        success: true,
+        deletionStatus: 'pending',
+        workspaceStatus: deletion.status === 'retry' ? 'stopping' : 'unchanged',
+        reason: deletion.reason,
+      },
+      202
+    );
+  }
+
+  return c.json({ success: true, deletionStatus: 'confirmed' });
 });
 
 export { crudRoutes };

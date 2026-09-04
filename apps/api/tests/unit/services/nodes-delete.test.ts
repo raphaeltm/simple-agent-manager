@@ -318,6 +318,9 @@ describe('node resource deletion services', () => {
       providerVm: 'no-instance',
     });
     expect(destroyVmAgentContainer).toHaveBeenCalledWith(ENV, 'cf-strict');
+    expect(updateCalls).toContainEqual({
+      runtimeTerminationConfirmedAt: expect.any(String),
+    });
 
     destroyVmAgentContainer.mockRejectedValueOnce(new Error('container teardown unavailable'));
     await expect(deleteNodeResourcesStrict('cf-strict', 'user-1', ENV)).rejects.toThrow(
@@ -335,6 +338,7 @@ describe('node resource deletion services', () => {
     });
     expect(providerDeleteVM).not.toHaveBeenCalled();
     expect(createProviderForUser).not.toHaveBeenCalled();
+    expect(updateCalls).toEqual([]);
   });
 
   it('keeps legacy deleteNodeResources idempotent when the node row is missing', async () => {
@@ -405,7 +409,7 @@ describe('node resource deletion services', () => {
     expect(providerGetVM).toHaveBeenCalledWith('vm-absent');
     expect(providerDeleteVM).not.toHaveBeenCalled();
     expect(deleteDNSRecord).toHaveBeenCalledWith('dns-absent', ENV);
-    expect(updateCalls).toEqual([]);
+    expect(updateCalls).toEqual([{ runtimeTerminationConfirmedAt: expect.any(String) }]);
   });
 
   it('checks every credentialed provider before selecting the only provider that contains a legacy VM', async () => {
@@ -447,6 +451,9 @@ describe('node resource deletion services', () => {
     expect(updateCalls).toContainEqual(
       expect.objectContaining({ cloudProvider: 'scaleway', credentialSource: 'user' })
     );
+    expect(updateCalls).toContainEqual({
+      runtimeTerminationConfirmedAt: expect.any(String),
+    });
   });
 
   it('fails closed when a legacy instance ID matches multiple credentialed providers', async () => {
@@ -553,6 +560,9 @@ describe('node resource deletion services', () => {
         credentialSource: 'platform',
       })
     );
+    expect(updateCalls).toContainEqual({
+      runtimeTerminationConfirmedAt: expect.any(String),
+    });
     expect(persistError).toHaveBeenCalledWith(
       undefined,
       expect.objectContaining({

@@ -11,6 +11,7 @@ import { errors } from '../../middleware/error';
 import { signCallbackToken, verifyCallbackToken } from '../../services/jwt';
 import { createWorkspaceOnNode } from '../../services/node-agent';
 import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
+import { signalWorkspaceDeletionUnconfirmedCallback } from '../../services/workspace-deletion-callback-signal';
 import {
   resolveWorkspaceGitSource,
   type WorkspaceGitSourceProject,
@@ -31,16 +32,18 @@ export function isActiveWorkspaceStatus(status: string): boolean {
   return ACTIVE_WORKSPACE_STATUSES.has(status as 'running' | 'recovery');
 }
 
-export function assertWorkspaceAcceptsCallback<
+export async function assertWorkspaceAcceptsCallback<
   T extends { status: string; nodeId: string | null; nodeStatus: string | null },
 >(
+  env: Env,
   workspace: T | null | undefined,
   workspaceId: string,
   callback: string,
   allowedStatuses: ReadonlySet<string> = WORKSPACE_CALLBACK_ACTIVE_STATUSES
-): asserts workspace is T {
+): Promise<T> {
   if (!workspace || !allowedStatuses.has(workspace.status)) {
     const observedStatus = workspace?.status ?? 'missing';
+    await signalWorkspaceDeletionUnconfirmedCallback(env, workspaceId, callback);
     log.info('workspace_callback.terminal_resource', {
       workspaceId,
       status: observedStatus,
@@ -66,6 +69,7 @@ export function assertWorkspaceAcceptsCallback<
     });
     throw errors.gone(`Workspace node is ${observedNodeStatus}; callback resource is gone`);
   }
+  return workspace;
 }
 
 export async function assertWorkspaceCallbackResourceById(
@@ -85,7 +89,7 @@ export async function assertWorkspaceCallbackResourceById(
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
     .where(eq(schema.workspaces.id, workspaceId))
     .get();
-  assertWorkspaceAcceptsCallback(workspace, workspaceId, callback, allowedStatuses);
+  await assertWorkspaceAcceptsCallback(env, workspace, workspaceId, callback, allowedStatuses);
 }
 
 /** Parse a JSON string into a plain object, returning null on failure or prototype pollution. */

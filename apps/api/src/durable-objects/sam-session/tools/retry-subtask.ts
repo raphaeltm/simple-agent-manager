@@ -21,6 +21,10 @@ import {
 import { resolveTaskStartPlacementCredentialAttribution } from '../../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
+import {
+  assertReplacementDeletionConfirmed,
+  WorkspaceDeletionUnconfirmedError,
+} from '../../../services/replacement-deletion-fence';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../../services/skills';
 import { startTaskRunnerDO } from '../../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../../services/task-title';
@@ -109,6 +113,19 @@ export async function retrySubtask(
     return {
       error: `Task is in '${original.status}' status — only failed or cancelled tasks can be retried.`,
     };
+  }
+
+  try {
+    await assertReplacementDeletionConfirmed(env, {
+      sourceTaskId: taskId,
+      projectId: original.projectId,
+      userId: ctx.userId,
+    });
+  } catch (error) {
+    if (error instanceof WorkspaceDeletionUnconfirmedError) {
+      return { error: error.message };
+    }
+    throw error;
   }
 
   // Use new description or fall back to original
@@ -350,6 +367,7 @@ export async function retrySubtask(
       resolvedReservation,
       capacityPoolSelection,
       vmSizeSource,
+      retrySourceTaskId: taskId,
     });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);

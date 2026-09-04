@@ -31,6 +31,9 @@ import {
   DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS,
   DEFAULT_NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS,
   DEFAULT_NODE_WARM_TIMEOUT_MS,
+  DEFAULT_WORKSPACE_DELETION_ALARM_BATCH_SIZE,
+  DEFAULT_WORKSPACE_DELETION_RETRY_BASE_MS,
+  DEFAULT_WORKSPACE_DELETION_RETRY_MAX_MS,
   DEFAULT_WORKSPACE_STOPPED_TTL_MS,
   isUserOwnedNodeClass,
 } from '@simple-agent-manager/shared';
@@ -38,13 +41,17 @@ import { DurableObject } from 'cloudflare:workers';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { deleteWorkspaceOnNode } from '../services/node-agent';
+import { getNodeAgentBackgroundRequestTimeoutMs } from '../services/node-agent';
 import { deferAlarmWhenDisabled } from '../services/operational-kill-switch';
 import {
   isSessionRecoveryTaskAuthorized,
   type SessionRecoverySourceTaskGuard,
 } from '../services/session-recovery-authority';
-import { finalizeWorkspaceLifecycleClosure } from '../services/workspace-lifecycle-finalizer';
+import {
+  attemptWorkspaceDeletion,
+  loadWorkspaceDeletionIdentity,
+  type WorkspaceDeletionIdentity,
+} from '../services/workspace-deletion';
 
 type NodeLifecycleEnv = {
   DATABASE: D1Database;
@@ -55,6 +62,11 @@ type NodeLifecycleEnv = {
   CONTROL_LOOP_KILL_SWITCH_CACHE_MS?: string;
   CONTROL_LOOP_DISABLED_ALARM_RETRY_MS?: string;
   WORKSPACE_STOPPED_TTL_MS?: string;
+  WORKSPACE_DELETION_RETRY_BASE_MS?: string;
+  WORKSPACE_DELETION_RETRY_MAX_MS?: string;
+  WORKSPACE_DELETION_ALARM_BATCH_SIZE?: string;
+  WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH?: string;
+  NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS?: string;
 };
 
 interface StoredState {
@@ -78,7 +90,13 @@ interface PendingWorkspaceDeletion {
   nodeId?: string;
   workspaceId: string;
   userId: string;
+  projectId?: string | null;
+  chatSessionId?: string | null;
   deleteAt: number;
+  firstScheduledAt?: number;
+  attemptCount?: number;
+  lastAttemptAt?: number | null;
+  lastError?: string | null;
 }
 
 export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
@@ -399,22 +417,129 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
   async scheduleWorkspaceDeletion(
     nodeId: string,
     workspaceId: string,
-    userId: string
+    userId: string,
+    options?: {
+      retryAfterMs?: number;
+      lastError?: string | null;
+      expected?: WorkspaceDeletionIdentity;
+    }
   ): Promise<void> {
-    const ttl = this.getWorkspaceStoppedTtlMs();
-    const deleteAt = Date.now() + ttl;
-
-    const entry: PendingWorkspaceDeletion = { nodeId, workspaceId, userId, deleteAt };
-    await this.ctx.storage.put(`ws-delete:${workspaceId}`, entry);
+    const now = Date.now();
+    const delayMs = options?.retryAfterMs ?? this.getWorkspaceStoppedTtlMs();
+    const key = `ws-delete:${workspaceId}`;
+    // Resolve external D1 identity before the storage read/write critical
+    // section. Awaiting D1 opens the DO input gate; keeping it before the
+    // storage read avoids a concurrent schedule being overwritten afterward.
+    const identity = await loadWorkspaceDeletionIdentity(this.env.DATABASE, workspaceId);
+    const existing = await this.ctx.storage.get<PendingWorkspaceDeletion>(key);
+    const scheduledIdentity: WorkspaceDeletionIdentity = options?.expected ??
+      identity ?? {
+        workspaceId,
+        nodeId,
+        userId,
+        projectId: null,
+        chatSessionId: null,
+      };
+    const existingMatches =
+      existing?.nodeId === scheduledIdentity.nodeId &&
+      existing.userId === scheduledIdentity.userId &&
+      existing.projectId === scheduledIdentity.projectId &&
+      existing.chatSessionId === scheduledIdentity.chatSessionId;
+    if (existing && !existingMatches) {
+      // Never replace evidence for an unconfirmed old incarnation with a newer
+      // assignment sharing the workspace ID. The old runtime remains the safety
+      // concern until its node is terminal or deletion is confirmed.
+      log.warn('node_lifecycle.workspace_deletion_schedule_fenced', {
+        workspaceId,
+        nodeId: existing.nodeId,
+        currentNodeId: scheduledIdentity.nodeId,
+        userId: existing.userId,
+        action: 'existing_incarnation_preserved',
+      });
+      await this.recalculateAlarm(await this.getWarmAlarmTime());
+      return;
+    }
+    const entry: PendingWorkspaceDeletion = {
+      nodeId: scheduledIdentity.nodeId ?? nodeId,
+      workspaceId,
+      userId: scheduledIdentity.userId,
+      projectId: scheduledIdentity.projectId,
+      chatSessionId: scheduledIdentity.chatSessionId,
+      deleteAt: existingMatches ? Math.min(existing.deleteAt, now + delayMs) : now + delayMs,
+      firstScheduledAt: existingMatches ? (existing.firstScheduledAt ?? now) : now,
+      attemptCount: existingMatches ? (existing.attemptCount ?? 0) : 0,
+      lastAttemptAt: existingMatches ? (existing.lastAttemptAt ?? null) : null,
+      lastError: options?.lastError ?? (existingMatches ? (existing.lastError ?? null) : null),
+    };
+    await this.ctx.storage.put(key, entry);
 
     log.info('node_lifecycle.workspace_deletion_scheduled', {
       workspaceId,
-      nodeId,
-      userId,
-      deleteAt: new Date(deleteAt).toISOString(),
-      ttlMs: ttl,
+      nodeId: entry.nodeId,
+      userId: entry.userId,
+      deleteAt: new Date(entry.deleteAt).toISOString(),
+      delayMs,
+      attemptCount: entry.attemptCount,
     });
 
+    await this.recalculateAlarm(await this.getWarmAlarmTime());
+  }
+
+  /**
+   * Claim an immediate external delete in durable storage before its network
+   * request begins. A pre-existing claimed attempt wins and prevents parallel
+   * explicit/cron deletion calls.
+   */
+  async claimWorkspaceDeletionAttempt(
+    nodeId: string,
+    workspaceId: string,
+    userId: string,
+    expected: WorkspaceDeletionIdentity
+  ): Promise<boolean> {
+    const current = await loadWorkspaceDeletionIdentity(this.env.DATABASE, workspaceId);
+    if (
+      !current ||
+      current.workspaceId !== expected.workspaceId ||
+      current.nodeId !== expected.nodeId ||
+      current.userId !== expected.userId ||
+      current.projectId !== expected.projectId ||
+      current.chatSessionId !== expected.chatSessionId
+    ) {
+      return false;
+    }
+
+    const key = `ws-delete:${workspaceId}`;
+    const existing = await this.ctx.storage.get<PendingWorkspaceDeletion>(key);
+    const existingMatches =
+      !existing ||
+      ((existing.nodeId ?? nodeId) === (expected.nodeId ?? nodeId) &&
+        existing.userId === userId &&
+        (existing.projectId ?? expected.projectId) === expected.projectId &&
+        (existing.chatSessionId ?? expected.chatSessionId) === expected.chatSessionId);
+    if (!existingMatches || (existing?.attemptCount ?? 0) > 0 || existing?.lastAttemptAt != null) {
+      return false;
+    }
+
+    const now = Date.now();
+    await this.ctx.storage.put(key, {
+      nodeId: expected.nodeId ?? nodeId,
+      workspaceId,
+      userId,
+      projectId: expected.projectId,
+      chatSessionId: expected.chatSessionId,
+      deleteAt: now + this.getWorkspaceDeletionRetryDelayMs(1),
+      firstScheduledAt: existing?.firstScheduledAt ?? now,
+      attemptCount: 1,
+      lastAttemptAt: now,
+      lastError: existing?.lastError ?? null,
+    } satisfies PendingWorkspaceDeletion);
+    await this.recalculateAlarm(await this.getWarmAlarmTime());
+    return true;
+  }
+
+  /** Clear durable evidence only after a caller has proof-bearing confirmation. */
+  async confirmWorkspaceDeletion(workspaceId: string): Promise<void> {
+    await this.ctx.storage.delete(`ws-delete:${workspaceId}`);
     await this.recalculateAlarm(await this.getWarmAlarmTime());
   }
 
@@ -422,12 +547,24 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
    * Cancel a pending workspace deletion. Called when a workspace is restarted
    * before the TTL expires.
    */
-  async cancelWorkspaceDeletion(workspaceId: string): Promise<void> {
-    await this.ctx.storage.delete(`ws-delete:${workspaceId}`);
+  async cancelWorkspaceDeletion(workspaceId: string): Promise<boolean> {
+    const key = `ws-delete:${workspaceId}`;
+    const entry = await this.ctx.storage.get<PendingWorkspaceDeletion>(key);
+    if (!entry) return true;
+    if ((entry.attemptCount ?? 0) > 0 || entry.lastAttemptAt != null) {
+      log.warn('node_lifecycle.workspace_deletion_cancel_fenced', {
+        workspaceId,
+        attemptCount: entry.attemptCount ?? 0,
+        action: 'restart_refused',
+      });
+      return false;
+    }
+    await this.ctx.storage.delete(key);
 
     log.info('node_lifecycle.workspace_deletion_cancelled', { workspaceId });
 
     await this.recalculateAlarm(await this.getWarmAlarmTime());
+    return true;
   }
 
   // =========================================================================
@@ -612,6 +749,28 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     return DEFAULT_WORKSPACE_STOPPED_TTL_MS;
   }
 
+  private getWorkspaceDeletionRetryDelayMs(attemptCount: number): number {
+    const parsedBase = Number.parseInt(this.env.WORKSPACE_DELETION_RETRY_BASE_MS ?? '', 10);
+    const baseMs =
+      Number.isFinite(parsedBase) && parsedBase > 0
+        ? parsedBase
+        : DEFAULT_WORKSPACE_DELETION_RETRY_BASE_MS;
+    const parsedMax = Number.parseInt(this.env.WORKSPACE_DELETION_RETRY_MAX_MS ?? '', 10);
+    const maxMs =
+      Number.isFinite(parsedMax) && parsedMax >= baseMs
+        ? parsedMax
+        : Math.max(baseMs, DEFAULT_WORKSPACE_DELETION_RETRY_MAX_MS);
+    const exponent = Math.min(Math.max(attemptCount - 1, 0), 30);
+    return Math.min(baseMs * 2 ** exponent, maxMs);
+  }
+
+  private getWorkspaceDeletionAlarmBatchSize(): number {
+    const parsed = Number.parseInt(this.env.WORKSPACE_DELETION_ALARM_BATCH_SIZE ?? '', 10);
+    return Number.isInteger(parsed) && parsed > 0
+      ? parsed
+      : DEFAULT_WORKSPACE_DELETION_ALARM_BATCH_SIZE;
+  }
+
   private toPublicState(state: StoredState): NodeLifecycleState {
     return {
       nodeId: state.nodeId,
@@ -655,79 +814,100 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     // the entry rather than silently stranding it.
     const state = await this.getStoredState();
 
-    for (const [key, entry] of pending) {
-      if (entry.deleteAt > now) continue;
+    const due = [...pending.entries()]
+      .filter(([, entry]) => entry.deleteAt <= now)
+      .sort((left, right) => left[1].deleteAt - right[1].deleteAt)
+      .slice(0, this.getWorkspaceDeletionAlarmBatchSize());
+
+    for (const [key, entry] of due) {
+      const currentIdentity = await loadWorkspaceDeletionIdentity(
+        this.env.DATABASE,
+        entry.workspaceId
+      );
 
       const nodeId = entry.nodeId ?? state?.nodeId;
-      if (!nodeId) {
+      if (!nodeId && !currentIdentity) {
         log.error('node_lifecycle.workspace_deletion_missing_node_id', {
           workspaceId: entry.workspaceId,
           userId: entry.userId,
         });
-        entry.deleteAt = now + DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS;
+        entry.deleteAt = now + this.getWorkspaceDeletionRetryDelayMs(entry.attemptCount ?? 0);
         await this.ctx.storage.put(key, entry);
         continue;
       }
 
-      try {
-        await this.deleteWorkspace(nodeId, entry.workspaceId, entry.userId);
-        await this.ctx.storage.delete(key);
+      const expected: WorkspaceDeletionIdentity = {
+        workspaceId: entry.workspaceId,
+        nodeId: nodeId ?? currentIdentity?.nodeId ?? null,
+        userId: entry.userId,
+        projectId:
+          entry.projectId === undefined ? (currentIdentity?.projectId ?? null) : entry.projectId,
+        chatSessionId:
+          entry.chatSessionId === undefined
+            ? (currentIdentity?.chatSessionId ?? null)
+            : entry.chatSessionId,
+      };
+      const attempt = (entry.attemptCount ?? 0) + 1;
+      // Claim the durable attempt before opening the VM network request. Once
+      // this write lands, restart cancellation must fail closed.
+      const latest = await this.ctx.storage.get<PendingWorkspaceDeletion>(key);
+      if (!latest || (latest.attemptCount ?? 0) !== (entry.attemptCount ?? 0)) continue;
+      entry.nodeId = expected.nodeId ?? undefined;
+      entry.projectId = expected.projectId;
+      entry.chatSessionId = expected.chatSessionId;
+      entry.firstScheduledAt ??= now;
+      entry.attemptCount = attempt;
+      entry.lastAttemptAt = now;
+      await this.ctx.storage.put(key, entry);
 
-        log.info('node_lifecycle.workspace_auto_deleted', {
+      try {
+        const outcome = await attemptWorkspaceDeletion({
+          env: this.env as unknown as Env,
+          expected,
+          attempt,
+          source: 'node_lifecycle',
+          mode: 'automatic',
+          requestTimeoutMs: getNodeAgentBackgroundRequestTimeoutMs(this.env),
+        });
+        if (outcome.status === 'confirmed') {
+          await this.ctx.storage.delete(key);
+          log.info('node_lifecycle.workspace_auto_deleted', {
+            workspaceId: entry.workspaceId,
+            userId: entry.userId,
+            attempt,
+            proof: outcome.proof,
+          });
+          continue;
+        }
+
+        entry.nodeId = expected.nodeId ?? undefined;
+        entry.projectId = expected.projectId;
+        entry.chatSessionId = expected.chatSessionId;
+        entry.firstScheduledAt ??= now;
+        entry.lastError = outcome.status === 'retry' ? outcome.diagnostic : outcome.reason;
+        entry.deleteAt = now + this.getWorkspaceDeletionRetryDelayMs(attempt);
+        await this.ctx.storage.put(key, entry);
+        log.warn('node_lifecycle.workspace_deletion_quarantined', {
           workspaceId: entry.workspaceId,
+          nodeId: expected.nodeId,
           userId: entry.userId,
+          attempt,
+          outcome: outcome.status,
+          reason: outcome.reason,
+          retryAt: new Date(entry.deleteAt).toISOString(),
         });
       } catch (err) {
         log.error('node_lifecycle.workspace_deletion_failed', {
           workspaceId: entry.workspaceId,
           userId: entry.userId,
+          attempt,
           error: err instanceof Error ? err.message : String(err),
         });
-        // Leave the entry for retry on next alarm. Push deleteAt forward slightly
-        // to avoid tight retry loops.
-        entry.deleteAt = now + DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS;
+        entry.lastError = 'workspace deletion attempt failed before classification';
+        entry.deleteAt = now + this.getWorkspaceDeletionRetryDelayMs(attempt);
         await this.ctx.storage.put(key, entry);
       }
     }
-  }
-
-  /**
-   * Delete a workspace: call VM agent to remove Docker container + volume,
-   * then update D1 status to 'deleted'.
-   */
-  private async deleteWorkspace(
-    nodeId: string,
-    workspaceId: string,
-    userId: string
-  ): Promise<void> {
-    // Call VM agent DELETE endpoint via shared helper (handles JWT auth, proper URL routing)
-    try {
-      await deleteWorkspaceOnNode(nodeId, workspaceId, this.env as unknown as Env, userId);
-    } catch (err) {
-      // If the node is unreachable (already destroyed), log but don't fail
-      // The D1 status update below still marks the workspace as deleted
-      log.warn('node_lifecycle.workspace_delete_vm_agent_failed', {
-        workspaceId,
-        nodeId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    // Update D1 workspace status to 'deleted'
-    const now = new Date().toISOString();
-    await this.env.DATABASE.prepare(
-      `UPDATE workspaces SET status = 'deleted', updated_at = ? WHERE id = ? AND status IN ('stopped', 'sleeping')`
-    )
-      .bind(now, workspaceId)
-      .run();
-
-    await finalizeWorkspaceLifecycleClosure(this.env as unknown as Env, {
-      workspaceIds: [workspaceId],
-      userId,
-      agentSessionStatus: 'completed',
-      nowIso: now,
-      reason: 'node_lifecycle_workspace_auto_delete',
-    });
   }
 
   /**

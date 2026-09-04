@@ -12,15 +12,22 @@
  * ON DELETE SET NULL — the workspace row survives as history when its node dies).
  * A workspace with no node has no owning machine to protect, so it stays eligible.
  */
-import { and, eq } from 'drizzle-orm';
+import { DEFAULT_WORKSPACE_DELETION_RETRY_BASE_MS } from '@simple-agent-manager/shared';
+import { eq } from 'drizzle-orm';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { deleteWorkspaceOnNode, stopWorkspaceOnNode } from '../../services/node-agent';
+import { stopWorkspaceOnNode } from '../../services/node-agent';
 import { persistError } from '../../services/observability';
 import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
+import { attemptWorkspaceDeletion } from '../../services/workspace-deletion';
 import type { CleanupConfig, CleanupDb, NodeCleanupResult } from './shared';
+
+function deletionRetryBaseMs(env: Env): number {
+  const parsed = Number.parseInt(env.WORKSPACE_DELETION_RETRY_BASE_MS ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_WORKSPACE_DELETION_RETRY_BASE_MS;
+}
 
 /**
  * Phase 4 — task-created workspaces still active after their task ended.
@@ -145,7 +152,7 @@ export async function sweepOrphanedWorkspaces(
  * Phase 6 — safety net for stopped workspaces the DO alarm never deleted.
  */
 export async function sweepStaleStoppedWorkspaces(
-  db: CleanupDb,
+  _db: CleanupDb,
   env: Env,
   now: Date,
   config: CleanupConfig,
@@ -155,7 +162,7 @@ export async function sweepStaleStoppedWorkspaces(
   const threshold = new Date(now.getTime() - config.stoppedTtlMs * 2).toISOString();
 
   const candidates = await env.DATABASE.prepare(
-    `SELECT w.id, w.node_id, w.user_id
+    `SELECT w.id, w.node_id, w.user_id, w.project_id, w.chat_session_id
      FROM workspaces w
      LEFT JOIN nodes n ON n.id = w.node_id
      WHERE w.status = 'stopped'
@@ -169,38 +176,58 @@ export async function sweepStaleStoppedWorkspaces(
       id: string;
       node_id: string | null;
       user_id: string;
+      project_id: string | null;
+      chat_session_id: string | null;
     }>();
 
   for (const ws of candidates.results) {
     try {
+      const expected = {
+        workspaceId: ws.id,
+        nodeId: ws.node_id,
+        userId: ws.user_id,
+        projectId: ws.project_id,
+        chatSessionId: ws.chat_session_id,
+      };
+      const lifecycleStub = ws.node_id
+        ? (env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(ws.node_id)) as DurableObjectStub<
+            import('../../durable-objects/node-lifecycle').NodeLifecycle
+          >)
+        : null;
+      if (
+        lifecycleStub &&
+        !(await lifecycleStub.claimWorkspaceDeletionAttempt(
+          ws.node_id as string,
+          ws.id,
+          ws.user_id,
+          expected
+        ))
+      ) {
+        result.errors++;
+        continue;
+      }
+      const outcome = await attemptWorkspaceDeletion({
+        env,
+        expected,
+        attempt: 1,
+        source: 'node_cleanup_safety_net',
+        mode: 'automatic',
+        requestTimeoutMs: config.agentTimeoutMs,
+      });
+      if (outcome.status === 'confirmed') {
+        await lifecycleStub?.confirmWorkspaceDeletion(ws.id);
+        result.stoppedWorkspacesDeleted++;
+        continue;
+      }
+
       if (ws.node_id) {
-        await deleteWorkspaceOnNode(ws.node_id, ws.id, env, ws.user_id, {
-          requestTimeoutMs: config.agentTimeoutMs,
-        }).catch((e) => {
-          log.warn('node_cleanup.stale_stopped_delete_on_node_failed', {
-            workspaceId: ws.id,
-            error: String(e),
-          });
+        await lifecycleStub?.scheduleWorkspaceDeletion(ws.node_id, ws.id, ws.user_id, {
+          retryAfterMs: deletionRetryBaseMs(env),
+          lastError: outcome.status === 'retry' ? outcome.diagnostic : outcome.reason,
+          expected,
         });
       }
-
-      // Status guard prevents a TOCTOU race if the workspace was restarted. Also
-      // the escape path: on success the row no longer matches `status='stopped'`.
-      const deleted = await db
-        .update(schema.workspaces)
-        .set({ status: 'deleted', updatedAt: new Date().toISOString() })
-        .where(and(eq(schema.workspaces.id, ws.id), eq(schema.workspaces.status, 'stopped')));
-
-      if ((deleted.meta?.changes ?? 0) > 0) {
-        await finalizeWorkspaceLifecycleClosure(env, {
-          workspaceIds: [ws.id],
-          userId: ws.user_id,
-          agentSessionStatus: 'completed',
-          reason: 'node_cleanup_stale_stopped_workspace_deleted',
-        });
-      }
-
-      result.stoppedWorkspacesDeleted++;
+      result.errors++;
     } catch (e) {
       log.error('node_cleanup.stale_stopped_workspace_delete_failed', {
         workspaceId: ws.id,

@@ -19,6 +19,7 @@ import {
 } from './acp-activity-admission';
 import { isTransientDurableObjectError } from './durable-object-retry';
 import { nodeStatusTerminatesCallbacks } from './node-callback-auth';
+import { signalWorkspaceDeletionUnconfirmedCallback } from './workspace-deletion-callback-signal';
 import * as projectDataService from './project-data';
 import { cancelScheduledSessionSleep } from './session-snapshots';
 import { recordAcpActivityCallbackMetric } from './telemetry';
@@ -56,9 +57,7 @@ export function activityReportExtra(
   };
 }
 
-export function reportedHarnessWorkKeepsRuntimeActive(
-  body: AcpActivityCallbackReport
-): boolean {
+export function reportedHarnessWorkKeepsRuntimeActive(body: AcpActivityCallbackReport): boolean {
   return (
     body.activity === 'idle' &&
     (body.runtimeWorkState === 'active' || body.runtimeWorkState === 'settling')
@@ -106,6 +105,7 @@ export async function assertAcpActivityCallbackResourcesActive(
     .get();
   if (!workspace || !ACP_ACTIVITY_WORKSPACE_CALLBACK_ACTIVE_STATUSES.has(workspace.status)) {
     const observedStatus = workspace?.status ?? 'missing';
+    await signalWorkspaceDeletionUnconfirmedCallback(env, input.workspaceId, 'acp_activity');
     log.info('acp_activity.terminal_workspace', {
       projectId: input.projectId,
       sessionId: input.sessionId,
@@ -151,10 +151,7 @@ export async function cancelSleepForActiveActivity(input: {
   chatSessionId: string;
   body: AcpActivityCallbackReport;
 }): Promise<void> {
-  if (
-    input.body.activity !== 'prompting' &&
-    !reportedHarnessWorkKeepsRuntimeActive(input.body)
-  ) {
+  if (input.body.activity !== 'prompting' && !reportedHarnessWorkKeepsRuntimeActive(input.body)) {
     return;
   }
   await cancelScheduledSessionSleep(
