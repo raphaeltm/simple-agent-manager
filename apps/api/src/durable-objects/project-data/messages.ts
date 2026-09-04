@@ -8,11 +8,17 @@ import {
   type ProjectDataArchiveSourceIntentState,
 } from '../../project-data-archive/contract';
 import {
+  insertNewMessage,
+  nextSequence,
+  resolveDuplicateMessage,
+  resolveMaxMessagesPerSession,
+  SessionMessageLimitExceededError,
+} from './messages-persist-helpers';
+import {
   type CompactMessageOptions,
   parseChatMessageRow,
   parseChatMessageRowCompact,
   parseCount,
-  parseMaxSeq,
   parseMessageCount,
   parseSearchResultRow,
   parseWorkspaceId,
@@ -23,25 +29,19 @@ import type { Env } from './types';
 import { generateId } from './types';
 
 export {
+  DEFAULT_MAX_MESSAGES_PER_SESSION,
+  nextSequence,
+  resolveMaxMessagesPerSession,
+  SESSION_MESSAGE_LIMIT_EXCEEDED,
+  SessionMessageLimitExceededError,
+} from './messages-persist-helpers';
+export {
   boundToolMetadataForStorage,
   DEFAULT_PROJECT_DATA_TOOL_METADATA_MAX_BYTES,
   resolveCompactMessageOptions,
 } from './tool-metadata-storage';
 
-export const DEFAULT_MAX_MESSAGES_PER_SESSION = 100000;
-export const SESSION_MESSAGE_LIMIT_EXCEEDED = 'SESSION_MESSAGE_LIMIT_EXCEEDED';
 export const PROJECT_DATA_TRANSCRIPT_WRITE_FENCED = 'PROJECT_DATA_TRANSCRIPT_WRITE_FENCED';
-
-export class SessionMessageLimitExceededError extends Error {
-  readonly code = SESSION_MESSAGE_LIMIT_EXCEEDED;
-  readonly maxMessages: number;
-
-  constructor(maxMessages: number) {
-    super(`Session message limit of ${maxMessages} messages exceeded`);
-    this.name = 'SessionMessageLimitExceededError';
-    this.maxMessages = maxMessages;
-  }
-}
 
 export class ProjectDataTranscriptWriteFencedError extends Error {
   readonly code = PROJECT_DATA_TRANSCRIPT_WRITE_FENCED;
@@ -56,11 +56,6 @@ export class ProjectDataTranscriptWriteFencedError extends Error {
     );
     this.name = 'ProjectDataTranscriptWriteFencedError';
   }
-}
-
-function resolveMaxMessagesPerSession(env: Env): number {
-  const parsed = Number.parseInt(env.MAX_MESSAGES_PER_SESSION || '', 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_MESSAGES_PER_SESSION;
 }
 
 function parseArchiveSourceIntentState(value: unknown): ProjectDataArchiveSourceIntentState | null {
@@ -89,149 +84,6 @@ function assertTranscriptWriteAllowed(sql: SqlStorage, sessionId: string, operat
   }
   const state = parseArchiveSourceIntentState(row?.state);
   if (state) throw new ProjectDataTranscriptWriteFencedError(sessionId, operation, state);
-}
-
-/**
- * Returns the next monotonic sequence number for a session's messages.
- */
-export function nextSequence(sql: SqlStorage, sessionId: string): number {
-  const row = sql
-    .exec(
-      'SELECT COALESCE(MAX(sequence), 0) AS max_seq FROM chat_messages WHERE session_id = ?',
-      sessionId
-    )
-    .toArray()[0];
-  return (row ? parseMaxSeq(row, 'messages.next_sequence') : 0) + 1;
-}
-
-function resolveDuplicateMessage(
-  sql: SqlStorage,
-  existing: Record<string, unknown>,
-  id: string,
-  sessionId: string,
-  role: string,
-  content: string
-): {
-  id: string;
-  now: number;
-  sequence: number;
-  workspaceId: string | null;
-  inserted: boolean;
-  toolMetadata: string | null;
-} {
-  if (
-    existing.session_id !== sessionId ||
-    existing.role !== role ||
-    existing.content !== content ||
-    typeof existing.created_at !== 'number' ||
-    typeof existing.sequence !== 'number'
-  ) {
-    throw new Error(`Message id ${id} already belongs to a different transcript entry`);
-  }
-  const wsRow = sql
-    .exec('SELECT workspace_id FROM chat_sessions WHERE id = ?', sessionId)
-    .toArray()[0];
-  const workspaceId = wsRow
-    ? parseWorkspaceId(wsRow, 'messages.persist_duplicate_workspace')
-    : null;
-  return {
-    id,
-    now: existing.created_at,
-    sequence: existing.sequence,
-    workspaceId,
-    inserted: false,
-    toolMetadata: typeof existing.tool_metadata === 'string' ? existing.tool_metadata : null,
-  };
-}
-
-function insertNewMessage(
-  sql: SqlStorage,
-  env: Env,
-  sessionId: string,
-  role: string,
-  content: string,
-  toolMetadata: string | null,
-  id: string
-): {
-  id: string;
-  now: number;
-  sequence: number;
-  workspaceId: string | null;
-  inserted: boolean;
-  toolMetadata: string | null;
-} {
-  const countRow = sql
-    .exec('SELECT message_count FROM chat_sessions WHERE id = ?', sessionId)
-    .toArray()[0];
-  if (!countRow) {
-    throw new Error(`Session ${sessionId} not found`);
-  }
-
-  const maxMessages = resolveMaxMessagesPerSession(env);
-  if (parseMessageCount(countRow, 'messages.persist_count') >= maxMessages) {
-    throw new SessionMessageLimitExceededError(maxMessages);
-  }
-
-  const now = Date.now();
-  const sequence = nextSequence(sql, sessionId);
-  const boundedToolMetadata = boundToolMetadataForStorage(toolMetadata, env);
-  if (boundedToolMetadata.truncated) {
-    log.warn('messages.tool_metadata_truncated_for_storage', {
-      sessionId,
-      messageId: id,
-      originalBytes: boundedToolMetadata.originalBytes,
-      storedBytes: boundedToolMetadata.storedBytes,
-    });
-  }
-
-  sql.exec(
-    `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    id,
-    sessionId,
-    role,
-    content,
-    boundedToolMetadata.value,
-    now,
-    sequence
-  );
-
-  sql.exec(
-    `UPDATE chat_sessions SET message_count = message_count + 1, updated_at = ? WHERE id = ?`,
-    now,
-    sessionId
-  );
-
-  // Auto-capture topic from first user message
-  if (role === 'user') {
-    const session = sql
-      .exec('SELECT topic FROM chat_sessions WHERE id = ?', sessionId)
-      .toArray()[0];
-    if (session && !session.topic) {
-      const truncatedTopic = content.length > 100 ? content.substring(0, 97) + '...' : content;
-      sql.exec(
-        'UPDATE chat_sessions SET topic = ?, updated_at = ? WHERE id = ?',
-        truncatedTopic,
-        now,
-        sessionId
-      );
-    }
-  }
-
-  // Get workspace ID for activity tracking
-  const wsRow = sql
-    .exec('SELECT workspace_id FROM chat_sessions WHERE id = ?', sessionId)
-    .toArray()[0];
-  const workspaceId = wsRow ? parseWorkspaceId(wsRow, 'messages.persist_workspace') : null;
-
-  return {
-    id,
-    now,
-    sequence,
-    workspaceId,
-    inserted: true,
-    toolMetadata: boundedToolMetadata.value,
-  };
 }
 
 export function persistMessage(
