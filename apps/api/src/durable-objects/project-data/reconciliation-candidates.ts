@@ -123,6 +123,207 @@ function selectLocalCandidatePage(
     .toArray() as unknown as LocalCandidateRow[];
 }
 
+interface CandidateBuildInput {
+  sql: SqlStorage;
+  env: Env;
+  row: LocalCandidateRow;
+  now: number;
+  softPromptMs: number;
+  hardPromptMs: number;
+}
+
+interface CandidateBuildResult {
+  candidate: ReconciliationCandidate | null;
+}
+
+async function resolveCandidateProjectId(
+  env: Env,
+  sessionId: string,
+  workspaceId: string,
+  taskId: string,
+  sql: SqlStorage
+): Promise<string | null> {
+  const taskRow = await env.DATABASE.prepare(
+    `SELECT task_mode, status, project_id, workspace_id, chat_session_id
+     FROM tasks WHERE id = ? LIMIT 1`
+  )
+    .bind(taskId)
+    .first<{
+      task_mode: string | null;
+      status: string;
+      project_id: string | null;
+      workspace_id: string | null;
+      chat_session_id: string | null;
+    }>();
+  if (!taskRow) {
+    recordReconciliationCandidateInconclusive(sql, env, {
+      sessionId,
+      workspaceId,
+      taskId,
+      reason: 'task_missing',
+    });
+    return null;
+  }
+  if (
+    !taskRow.project_id ||
+    taskRow.workspace_id !== workspaceId ||
+    taskRow.chat_session_id !== sessionId
+  ) {
+    recordReconciliationCandidateInconclusive(sql, env, {
+      sessionId,
+      workspaceId,
+      taskId,
+      reason: 'task_identity_mismatch',
+    });
+    return null;
+  }
+  if (
+    taskRow.task_mode !== 'task' ||
+    (TASK_TERMINAL_STATUSES as readonly string[]).includes(taskRow.status)
+  ) {
+    excludeReconciliationCandidateForTask(sql, sessionId, taskId);
+    return null;
+  }
+  if (!['in_progress', 'delegated', 'awaiting_followup'].includes(taskRow.status)) {
+    recordReconciliationCandidateInconclusive(sql, env, {
+      sessionId,
+      workspaceId,
+      taskId,
+      reason: 'task_not_active',
+    });
+    return null;
+  }
+  return taskRow.project_id;
+}
+
+function resolveAcpSessionId(
+  sql: SqlStorage,
+  env: Env,
+  workspaceId: string,
+  sessionId: string,
+  taskId: string
+): string | null {
+  const acpRow = sql
+    .exec(
+      `SELECT id FROM acp_sessions
+       WHERE workspace_id = ? AND chat_session_id = ? AND status IN ('assigned', 'running')
+       ORDER BY created_at DESC LIMIT 1`,
+      workspaceId,
+      sessionId
+    )
+    .toArray()[0];
+  if (typeof acpRow?.id !== 'string') {
+    log.warn('reconciliation.no_active_acp_session', { sessionId, workspaceId });
+    recordReconciliationCandidateInconclusive(sql, env, {
+      sessionId,
+      workspaceId,
+      taskId,
+      reason: 'active_acp_session_missing',
+    });
+    return null;
+  }
+  return acpRow.id;
+}
+
+function resolvePromptAction(
+  sql: SqlStorage,
+  sessionId: string,
+  acpSessionId: string,
+  lastActivityAt: number,
+  now: number,
+  softPromptMs: number,
+  hardPromptMs: number
+): {
+  action: ReconciliationCandidate['action'];
+  promptStartedAt: number;
+  promptAgeMs: number;
+} | null {
+  const stateRow = parseRowOrNull(
+    sql
+      .exec(
+        `SELECT activity, activity_at, prompt_started_at FROM session_state WHERE session_id = ?`,
+        acpSessionId
+      )
+      .toArray()[0],
+    SessionStateRowSchema,
+    'reconciliation.session_state'
+  );
+  if (stateRow?.activity !== 'prompting') {
+    return { action: 'checkin', promptStartedAt: 0, promptAgeMs: 0 };
+  }
+  const promptStartedAt = stateRow.prompt_started_at || stateRow.activity_at || lastActivityAt;
+  const promptAgeMs = Math.max(0, now - promptStartedAt);
+  if (promptAgeMs < softPromptMs) {
+    deferReconciliationCandidateUntil(sql, sessionId, promptStartedAt + softPromptMs);
+    return null;
+  }
+  const action = promptAgeMs >= hardPromptMs ? 'cancel_prompt' : 'observe_prompt';
+  return { action, promptStartedAt, promptAgeMs };
+}
+
+async function buildCandidate(input: CandidateBuildInput): Promise<CandidateBuildResult> {
+  const { sql, env, row, now, softPromptMs, hardPromptMs } = input;
+  if (
+    typeof row.session_id !== 'string' ||
+    typeof row.workspace_id !== 'string' ||
+    typeof row.task_id !== 'string' ||
+    typeof row.last_activity_at !== 'number'
+  ) {
+    if (typeof row.session_id === 'string') {
+      clearReconciliationCandidateGate(sql, row.session_id);
+    }
+    return { candidate: null };
+  }
+  const sessionId = row.session_id;
+  const workspaceId = row.workspace_id;
+  const taskId = row.task_id;
+  const lastActivityAt = row.last_activity_at;
+
+  let projectId: string | null = null;
+  try {
+    projectId = await resolveCandidateProjectId(env, sessionId, workspaceId, taskId, sql);
+  } catch (err) {
+    log.warn('reconciliation.d1_task_query_failed', { taskId, ...serializeError(err) });
+    recordReconciliationCandidateInconclusive(sql, env, {
+      sessionId,
+      workspaceId,
+      taskId,
+      reason: 'd1_task_query_failed',
+    });
+    return { candidate: null };
+  }
+  if (!projectId) return { candidate: null };
+
+  const acpSessionId = resolveAcpSessionId(sql, env, workspaceId, sessionId, taskId);
+  if (!acpSessionId) return { candidate: null };
+
+  const promptResult = resolvePromptAction(
+    sql,
+    sessionId,
+    acpSessionId,
+    lastActivityAt,
+    now,
+    softPromptMs,
+    hardPromptMs
+  );
+  if (!promptResult) return { candidate: null };
+
+  return {
+    candidate: {
+      sessionId,
+      workspaceId,
+      taskId,
+      projectId,
+      acpSessionId,
+      lastActivityAt,
+      idleDurationMs: now - lastActivityAt,
+      action: promptResult.action,
+      promptStartedAt: promptResult.action === 'checkin' ? null : promptResult.promptStartedAt,
+      promptAgeMs: promptResult.action === 'checkin' ? null : promptResult.promptAgeMs,
+    },
+  };
+}
+
 /**
  * Find and durably claim a bounded page of task-mode sessions eligible for
  * reconciliation. D1 is consulted only after the DO-local cursor and leases
@@ -168,147 +369,20 @@ export async function getReconciliationCandidates(
         maxAttempts,
       })
   );
+
   const candidates: ReconciliationCandidate[] = [];
-
   for (const row of claimedRows) {
-    if (
-      typeof row.session_id !== 'string' ||
-      typeof row.workspace_id !== 'string' ||
-      typeof row.task_id !== 'string' ||
-      typeof row.last_activity_at !== 'number'
-    ) {
-      if (typeof row.session_id === 'string') {
-        clearReconciliationCandidateGate(sql, row.session_id);
-      }
-      continue;
-    }
-    const sessionId = row.session_id;
-    const workspaceId = row.workspace_id;
-    const taskId = row.task_id;
-    const lastActivityAt = row.last_activity_at;
-    let projectId: string | null = null;
-
-    try {
-      const taskRow = await env.DATABASE.prepare(
-        `SELECT task_mode, status, project_id, workspace_id, chat_session_id
-         FROM tasks WHERE id = ? LIMIT 1`
-      )
-        .bind(taskId)
-        .first<{
-          task_mode: string | null;
-          status: string;
-          project_id: string | null;
-          workspace_id: string | null;
-          chat_session_id: string | null;
-        }>();
-      if (!taskRow) {
-        recordReconciliationCandidateInconclusive(sql, env, {
-          sessionId,
-          workspaceId,
-          taskId,
-          reason: 'task_missing',
-        });
-        continue;
-      }
-      if (
-        !taskRow.project_id ||
-        taskRow.workspace_id !== workspaceId ||
-        taskRow.chat_session_id !== sessionId
-      ) {
-        recordReconciliationCandidateInconclusive(sql, env, {
-          sessionId,
-          workspaceId,
-          taskId,
-          reason: 'task_identity_mismatch',
-        });
-        continue;
-      }
-      projectId = taskRow.project_id;
-      if (
-        taskRow.task_mode !== 'task' ||
-        (TASK_TERMINAL_STATUSES as readonly string[]).includes(taskRow.status)
-      ) {
-        excludeReconciliationCandidateForTask(sql, sessionId, taskId);
-        continue;
-      }
-      if (!['in_progress', 'delegated', 'awaiting_followup'].includes(taskRow.status)) {
-        recordReconciliationCandidateInconclusive(sql, env, {
-          sessionId,
-          workspaceId,
-          taskId,
-          reason: 'task_not_active',
-        });
-        continue;
-      }
-    } catch (err) {
-      log.warn('reconciliation.d1_task_query_failed', { taskId, ...serializeError(err) });
-      recordReconciliationCandidateInconclusive(sql, env, {
-        sessionId,
-        workspaceId,
-        taskId,
-        reason: 'd1_task_query_failed',
-      });
-      continue;
-    }
-    if (!projectId) continue;
-
-    const acpRow = sql
-      .exec(
-        `SELECT id FROM acp_sessions
-         WHERE workspace_id = ? AND chat_session_id = ? AND status IN ('assigned', 'running')
-         ORDER BY created_at DESC LIMIT 1`,
-        workspaceId,
-        sessionId
-      )
-      .toArray()[0];
-    if (typeof acpRow?.id !== 'string') {
-      log.warn('reconciliation.no_active_acp_session', { sessionId, workspaceId });
-      recordReconciliationCandidateInconclusive(sql, env, {
-        sessionId,
-        workspaceId,
-        taskId,
-        reason: 'active_acp_session_missing',
-      });
-      continue;
-    }
-
-    const acpSessionId = acpRow.id;
-    const stateRow = parseRowOrNull(
-      sql
-        .exec(
-          `SELECT activity, activity_at, prompt_started_at FROM session_state WHERE session_id = ?`,
-          acpSessionId
-        )
-        .toArray()[0],
-      SessionStateRowSchema,
-      'reconciliation.session_state'
-    );
-    let action: ReconciliationCandidate['action'] = 'checkin';
-    let promptStartedAt: number | null = null;
-    let promptAgeMs: number | null = null;
-
-    if (stateRow?.activity === 'prompting') {
-      promptStartedAt = stateRow.prompt_started_at || stateRow.activity_at || lastActivityAt;
-      promptAgeMs = Math.max(0, now - promptStartedAt);
-      if (promptAgeMs < softPromptMs) {
-        deferReconciliationCandidateUntil(sql, sessionId, promptStartedAt + softPromptMs);
-        continue;
-      }
-      action = promptAgeMs >= hardPromptMs ? 'cancel_prompt' : 'observe_prompt';
-    }
-
-    candidates.push({
-      sessionId,
-      workspaceId,
-      taskId,
-      projectId,
-      acpSessionId,
-      lastActivityAt,
-      idleDurationMs: now - lastActivityAt,
-      action,
-      promptStartedAt,
-      promptAgeMs,
+    const { candidate } = await buildCandidate({
+      sql,
+      env,
+      row,
+      now,
+      softPromptMs,
+      hardPromptMs,
     });
+    if (candidate) {
+      candidates.push(candidate);
+    }
   }
   return candidates;
 }

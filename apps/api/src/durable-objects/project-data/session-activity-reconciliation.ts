@@ -240,6 +240,37 @@ export function computeSessionActivityProbeAlarmTime(
   return Math.max(earliestDue, now + minDelayMs);
 }
 
+function validateAgentSessionEntry(entry: unknown): { kind: 'unreachable'; error: string } | null {
+  if (!entry || typeof entry !== 'object') {
+    return { kind: 'unreachable', error: 'malformed_agent_session_entry' };
+  }
+  const record = entry as Record<string, unknown>;
+  if (
+    typeof record.id !== 'string' ||
+    typeof record.workspaceId !== 'string' ||
+    typeof record.status !== 'string' ||
+    !AGENT_SESSION_STATUSES.has(record.status) ||
+    typeof record.createdAt !== 'string' ||
+    typeof record.updatedAt !== 'string' ||
+    (record.hostStatus !== undefined &&
+      record.hostStatus !== null &&
+      typeof record.hostStatus !== 'string')
+  ) {
+    return { kind: 'unreachable', error: 'malformed_agent_session_entry' };
+  }
+  return null;
+}
+
+function classifyHostStatus(hostStatus: string | null): ProbeOutcome {
+  if (hostStatus !== null && HOST_WORKING_STATUSES.has(hostStatus)) {
+    return { kind: 'working' };
+  }
+  if (hostStatus === null || HOST_NON_WORKING_STATUSES.has(hostStatus)) {
+    return { kind: 'not_working', hostStatus };
+  }
+  return { kind: 'unreachable', error: 'unknown_agent_session_host_status' };
+}
+
 /**
  * Classify a vm-agent agent-session listing for one ACP session.
  *
@@ -262,23 +293,9 @@ export function classifyProbeResponse(
   }
   const matches: Record<string, unknown>[] = [];
   for (const entry of rawSessions) {
-    if (!entry || typeof entry !== 'object') {
-      return { kind: 'unreachable', error: 'malformed_agent_session_entry' };
-    }
+    const validationError = validateAgentSessionEntry(entry);
+    if (validationError) return validationError;
     const record = entry as Record<string, unknown>;
-    if (
-      typeof record.id !== 'string' ||
-      typeof record.workspaceId !== 'string' ||
-      typeof record.status !== 'string' ||
-      !AGENT_SESSION_STATUSES.has(record.status) ||
-      typeof record.createdAt !== 'string' ||
-      typeof record.updatedAt !== 'string' ||
-      (record.hostStatus !== undefined &&
-        record.hostStatus !== null &&
-        typeof record.hostStatus !== 'string')
-    ) {
-      return { kind: 'unreachable', error: 'malformed_agent_session_entry' };
-    }
     if (record.id === acpSessionId) matches.push(record);
   }
 
@@ -298,13 +315,7 @@ export function classifyProbeResponse(
   }
 
   const hostStatus = typeof match.hostStatus === 'string' ? match.hostStatus : null;
-  if (hostStatus !== null && HOST_WORKING_STATUSES.has(hostStatus)) {
-    return { kind: 'working' };
-  }
-  if (hostStatus === null || HOST_NON_WORKING_STATUSES.has(hostStatus)) {
-    return { kind: 'not_working', hostStatus };
-  }
-  return { kind: 'unreachable', error: 'unknown_agent_session_host_status' };
+  return classifyHostStatus(hostStatus);
 }
 
 /**

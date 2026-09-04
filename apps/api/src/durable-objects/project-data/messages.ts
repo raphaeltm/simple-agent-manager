@@ -104,14 +104,13 @@ export function nextSequence(sql: SqlStorage, sessionId: string): number {
   return (row ? parseMaxSeq(row, 'messages.next_sequence') : 0) + 1;
 }
 
-export function persistMessage(
+function resolveDuplicateMessage(
   sql: SqlStorage,
-  env: Env,
+  existing: Record<string, unknown>,
+  id: string,
   sessionId: string,
   role: string,
-  content: string,
-  toolMetadata: string | null,
-  messageId?: string
+  content: string
 ): {
   id: string;
   now: number;
@@ -120,49 +119,55 @@ export function persistMessage(
   inserted: boolean;
   toolMetadata: string | null;
 } {
-  assertTranscriptWriteAllowed(sql, sessionId, 'persistMessage');
-  const maxMessages = resolveMaxMessagesPerSession(env);
+  if (
+    existing.session_id !== sessionId ||
+    existing.role !== role ||
+    existing.content !== content ||
+    typeof existing.created_at !== 'number' ||
+    typeof existing.sequence !== 'number'
+  ) {
+    throw new Error(`Message id ${id} already belongs to a different transcript entry`);
+  }
+  const wsRow = sql
+    .exec('SELECT workspace_id FROM chat_sessions WHERE id = ?', sessionId)
+    .toArray()[0];
+  const workspaceId = wsRow
+    ? parseWorkspaceId(wsRow, 'messages.persist_duplicate_workspace')
+    : null;
+  return {
+    id,
+    now: existing.created_at,
+    sequence: existing.sequence,
+    workspaceId,
+    inserted: false,
+    toolMetadata: typeof existing.tool_metadata === 'string' ? existing.tool_metadata : null,
+  };
+}
+
+function insertNewMessage(
+  sql: SqlStorage,
+  env: Env,
+  sessionId: string,
+  role: string,
+  content: string,
+  toolMetadata: string | null,
+  id: string
+): {
+  id: string;
+  now: number;
+  sequence: number;
+  workspaceId: string | null;
+  inserted: boolean;
+  toolMetadata: string | null;
+} {
   const countRow = sql
     .exec('SELECT message_count FROM chat_sessions WHERE id = ?', sessionId)
     .toArray()[0];
-
   if (!countRow) {
     throw new Error(`Session ${sessionId} not found`);
   }
-  const id = messageId ?? generateId();
-  const existing = sql
-    .exec(
-      `SELECT id, session_id, role, content, tool_metadata, created_at, sequence
-       FROM chat_messages WHERE id = ? LIMIT 1`,
-      id
-    )
-    .toArray()[0];
-  if (existing) {
-    if (
-      existing.session_id !== sessionId ||
-      existing.role !== role ||
-      existing.content !== content ||
-      typeof existing.created_at !== 'number' ||
-      typeof existing.sequence !== 'number'
-    ) {
-      throw new Error(`Message id ${id} already belongs to a different transcript entry`);
-    }
-    const wsRow = sql
-      .exec('SELECT workspace_id FROM chat_sessions WHERE id = ?', sessionId)
-      .toArray()[0];
-    const workspaceId = wsRow
-      ? parseWorkspaceId(wsRow, 'messages.persist_duplicate_workspace')
-      : null;
-    return {
-      id,
-      now: existing.created_at,
-      sequence: existing.sequence,
-      workspaceId,
-      inserted: false,
-      toolMetadata: typeof existing.tool_metadata === 'string' ? existing.tool_metadata : null,
-    };
-  }
 
+  const maxMessages = resolveMaxMessagesPerSession(env);
   if (parseMessageCount(countRow, 'messages.persist_count') >= maxMessages) {
     throw new SessionMessageLimitExceededError(maxMessages);
   }
@@ -227,6 +232,37 @@ export function persistMessage(
     inserted: true,
     toolMetadata: boundedToolMetadata.value,
   };
+}
+
+export function persistMessage(
+  sql: SqlStorage,
+  env: Env,
+  sessionId: string,
+  role: string,
+  content: string,
+  toolMetadata: string | null,
+  messageId?: string
+): {
+  id: string;
+  now: number;
+  sequence: number;
+  workspaceId: string | null;
+  inserted: boolean;
+  toolMetadata: string | null;
+} {
+  assertTranscriptWriteAllowed(sql, sessionId, 'persistMessage');
+  const id = messageId ?? generateId();
+  const existing = sql
+    .exec(
+      `SELECT id, session_id, role, content, tool_metadata, created_at, sequence
+       FROM chat_messages WHERE id = ? LIMIT 1`,
+      id
+    )
+    .toArray()[0];
+  if (existing) {
+    return resolveDuplicateMessage(sql, existing, id, sessionId, role, content);
+  }
+  return insertNewMessage(sql, env, sessionId, role, content, toolMetadata, id);
 }
 
 export function persistMessageBatch(
