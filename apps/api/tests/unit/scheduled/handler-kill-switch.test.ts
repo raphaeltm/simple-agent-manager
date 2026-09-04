@@ -73,13 +73,18 @@ describe('scheduled operational sweep kill switch', () => {
       sweepNames.indexOf('terminal_session_ledger_reconciliation')
     );
     expect(sweepNames.indexOf('terminal_session_ledger_reconciliation')).toBeLessThan(
-      sweepNames.indexOf('project_data_storage_relief_preflight')
-    );
-    expect(sweepNames.indexOf('project_data_storage_relief_preflight')).toBeLessThan(
       sweepNames.indexOf('project_data_archive_sharding')
     );
     expect(sweepNames.indexOf('project_data_archive_sharding')).toBeLessThan(
       sweepNames.indexOf('session_sleep')
+    );
+    // The relief preflight runs LAST. Its run budget is operator-tuned into the minutes
+    // while an emergency plan converges, so anywhere earlier it would push every later
+    // lifecycle sweep — session_sleep above all — back by that budget on every tick
+    // (`.claude/rules/47`). Pinned as an ordering invariant, not an incidental position.
+    expect(sweepNames.indexOf('project_data_storage_relief_preflight')).toBe(sweepNames.length - 1);
+    expect(sweepNames.indexOf('session_sleep')).toBeLessThan(
+      sweepNames.indexOf('project_data_storage_relief_preflight')
     );
     expect(sweepNames.indexOf('deployment_release_retention')).toBeLessThan(
       sweepNames.indexOf('compose_artifact_cleanup')
