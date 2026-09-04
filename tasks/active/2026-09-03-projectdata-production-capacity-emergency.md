@@ -127,10 +127,12 @@ uncertain states must fail closed.
 - [x] Make manifest sizes and all preflight state, measurement, margin, and
       diagnostic bounds configurable and part of immutable plan configuration.
 - [x] Require explicit post-write R2 read-back and SHA-256/byte verification
-      before any selected path strips tool metadata or deletes source session rows.
+      before the selected tool-payload path strips inline metadata.
 - [ ] If terminal sharding is required, make each pass resumable and enforce
       overall row, byte, R2-operation, and wall-time budgets inside a session; the
-      next pass must resume after verified committed progress rather than restart.
+      next pass must resume after verified committed progress rather than restart,
+      and every R2 chunk/root manifest must be read back and verified before source
+      session rows are deleted.
 - [x] Keep all limits, timeouts, target thresholds, and operator scoping
       environment-configurable, disabled or narrowly scoped by default, and covered
       by a project-level kill switch/circuit breaker.

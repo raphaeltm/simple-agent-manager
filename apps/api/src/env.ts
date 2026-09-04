@@ -598,7 +598,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES?: string; // R2 chunk size for legacy oversized tool payload archives (default: 524288)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES?: string; // Absolute bounded metadata read cap for legacy oversized archives (default: 1900000)
   PROJECT_DATA_STORAGE_RELIEF_MEASURE_BATCH_ROWS?: string; // Default row budget for admin-only ProjectData relief measurement slices
-  PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS?: string; // Max accepted row budget for admin-only relief measurement slices
+  PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS?: string; // Max physical row window for admin/preflight measurement and ordinary cleanup selection
   PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED?: string; // Disabled-by-default cleanup of old terminal-session grouped/FTS derived rows
   PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO?: string;
   PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO?: string;
@@ -619,17 +619,17 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_CUTOFF_CREATED_AT?: string; // Required fixed exclusive tool-message cutoff in epoch milliseconds
   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_BATCH_ROWS?: string; // Per-slice row limit (default: 5000)
   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INTERVAL_MS?: string; // Persisted cadence between slices (default: 300000)
-  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BATCHES?: string; // Overall slice ceiling (default: 100)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BATCHES?: string; // Overall claimed-attempt ceiling (default: 100)
   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_ROWS?: string; // Overall examined-row ceiling (default: 500000)
   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES?: string; // Overall eligible-metadata reporting ceiling (default: 2000000000)
   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MS?: string; // D1 claim lease duration (default: 60000)
-  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS?: string; // Per-DO-RPC timeout (default: 20000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS?: string; // Absolute measurement plus manifest-I/O slice deadline (default: 20000)
   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_SLICES_PER_RUN?: string; // Maximum sequential slices per scheduled invocation (default: 1)
-  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS?: string; // Aggregate scheduled-invocation wall-time budget (default: 25000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS?: string; // Admission budget for starting sequential slices (default: 25000)
   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MARGIN_MS?: string; // Required lease headroom above a slice wall budget (default: 5000)
   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RETURN_MARGIN_MS?: string; // Required return headroom inside slice/run wall budgets (default: 500)
   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MEASUREMENT_WALL_TIME_MS?: string; // Per-slice ProjectData measurement budget (default: 10000)
-  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_STATE_BYTES?: string; // D1 JSON state ceiling for session and batch-proof manifests (default: 1750000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_STATE_BYTES?: string; // Combined D1 JSON ceiling for session and batch-proof state (default: 1750000)
   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ERROR_MAX_LENGTH?: string; // Persisted preflight diagnostic character ceiling (default: 1000)
   PROJECT_DATA_ARCHIVE_SHARD_COUNT?: string;
   PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS?: string;

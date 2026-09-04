@@ -831,8 +831,11 @@ async function runProjectDataStorageReliefPreflightSlice(
       });
     }
     const targetBatchesJson = JSON.stringify(targetBatchProofs);
-    if (new TextEncoder().encode(targetBatchesJson).byteLength > config.maxStateBytes) {
-      throw new Error('ProjectData relief preflight target batch proofs exceeded D1 row bound');
+    const proofStateBytes =
+      new TextEncoder().encode(sessionManifest.json).byteLength +
+      new TextEncoder().encode(targetBatchesJson).byteLength;
+    if (proofStateBytes > config.maxStateBytes) {
+      throw new Error('ProjectData relief preflight combined proof state exceeded D1 row bound');
     }
     let targetManifest:
       | { key: string; bytes: number; sha256: string; value: ToolPayloadCleanupManifestRoot }

@@ -550,6 +550,42 @@ describe('scheduled ProjectData storage relief preflight', () => {
     }
   );
 
+  it('fails closed when session and target-proof JSON exceed their combined D1 row budget', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createTables(sqlite);
+      const measure = vi.fn().mockResolvedValue(
+        toolResult({
+          sessionId: 'session-a',
+          eligibleRows: 1,
+          eligibleBytes: 100,
+          cursor: null,
+          hasMore: false,
+        })
+      );
+      const env = makeEnv(sqlite, measure, {
+        PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BATCHES: '1',
+        PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_STATE_BYTES: '500',
+      });
+
+      const result = await runProjectDataStorageReliefPreflight(env, new Date(NOW));
+
+      expect(result).toMatchObject({
+        status: 'failed',
+        lastError: 'ProjectData relief preflight combined proof state exceeded D1 row bound',
+      });
+      expect(readRun(sqlite)).toMatchObject({
+        eligible_rows: 0,
+        sessions_json: '{}',
+        target_batches_json: '[]',
+        target_manifest_key: null,
+      });
+      expect(env.PROJECT_DATA_ARCHIVE_R2.put).toHaveBeenCalledTimes(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('fails closed before ProjectData when exact plan scope is missing', async () => {
     const sqlite = new Database(':memory:');
     try {
