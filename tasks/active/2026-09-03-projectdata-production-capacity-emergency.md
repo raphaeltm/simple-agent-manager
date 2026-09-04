@@ -8,8 +8,9 @@ available measurement at task start was `9,884,188,672 / 10,000,000,000`
 bytes (`98.84188672%`) at `2026-09-03T21:13:42Z`. Subsequent direct measurements
 reached `9,908,338,688` bytes at `23:13:44Z`, `9,926,107,136` bytes at
 `00:13:45Z`, and `9,950,601,216` bytes (`99.50601216%`) at
-`2026-09-04T01:13:48.572Z`. The configured emergency target is 90%, so at least
-`950,601,216` bytes of measured database relief is now required before allowing
+`2026-09-04T01:13:48.572Z`. The latest sample reached `9,967,820,800` bytes
+(`99.678208%`) at `2026-09-04T02:13:50.204Z`. The configured emergency target
+is 90%, so at least `967,820,800` bytes of measured database relief is now required before allowing
 for ongoing writes and measurement lag.
 
 This task owns the emergency through implementation, review, staging, merge,
@@ -31,12 +32,12 @@ uncertain states must fail closed.
 
 ## Production baseline
 
-- Latest D1 telemetry re-read points to the `2026-09-04T01:13:48.572Z` direct
-  `sql.databaseSize` measurement: `9,950,601,216` bytes, ratio
-  `0.9950601216`, growth `161,113,667.77` bytes/day, estimated `0.306608`
-  days (about 7.36 hours) remaining, status `degraded`, cleanup health
-  `running`. This is 24,494,080 bytes above the prior hourly sample and leaves
-  only 49,398,784 bytes before the configured limit.
+- Latest D1 telemetry re-read points to the `2026-09-04T02:13:50.204Z` direct
+  `sql.databaseSize` measurement: `9,967,820,800` bytes, ratio `0.99678208`,
+  growth `162,026,818.44` bytes/day, estimated `0.198604` days (about 4.77
+  hours) remaining, status `degraded`, cleanup health `running`. This is
+  17,219,584 bytes above the prior hourly sample and leaves only 32,179,200
+  bytes before the configured limit.
 - Last purge was `auto_terminal_event_log_cleanup`; it removed 7 rows and did
   not converge toward the emergency target.
 - Production has zero archive-migration, archive-location, and project archive

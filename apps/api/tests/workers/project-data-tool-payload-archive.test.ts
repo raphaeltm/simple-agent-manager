@@ -1149,6 +1149,94 @@ describe('ProjectData tool payload R2 archival', () => {
     expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(1);
   });
 
+  it('serializes manual cleanup behind storage-safety cleanup across an external R2 await', async () => {
+    const projectId = `${TEST_PREFIX}-manual-automatic-cleanup-mutex`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'manual-automatic-cleanup-mutex', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+    ]);
+    const approval = await approvedCleanupEnv(
+      projectId,
+      'manual-automatic-cleanup-mutex-plan',
+      FIXED_NOW - 1_000
+    );
+    const realR2 = env.PROJECT_DATA_ARCHIVE_R2;
+    let payloadPuts = 0;
+    let markFirstPayloadPutStarted!: () => void;
+    let releaseFirstPayloadPut!: () => void;
+    const firstPayloadPutStarted = new Promise<void>((resolve) => {
+      markFirstPayloadPutStarted = resolve;
+    });
+    const firstPayloadPutRelease = new Promise<void>((resolve) => {
+      releaseFirstPayloadPut = resolve;
+    });
+    const delayedR2 = {
+      put: async (key: string, value: string | ArrayBuffer | ArrayBufferView) => {
+        if (!key.includes('/approved-plans/')) {
+          payloadPuts += 1;
+          if (payloadPuts === 1) {
+            markFirstPayloadPutStarted();
+            await firstPayloadPutRelease;
+          }
+        }
+        return realR2.put(key, value);
+      },
+      get: (key: string) => realR2.get(key),
+    } as unknown as R2Bucket;
+
+    await withRuntimeEnv(
+      {
+        ...approval,
+        PROJECT_DATA_ARCHIVE_R2: delayedR2,
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'true',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED: 'false',
+        PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: 'false',
+      },
+      async () =>
+        runInDurableObject(stub, async (instance) => {
+          const automatic = instance.runStorageSafetyAlarmForTest();
+          await firstPayloadPutStarted;
+          let manualSettled = false;
+          const manual = instance
+            .runManualToolPayloadCleanup({
+              reason: 'mutex overlap proof',
+              idempotencyKey: 'manual-automatic-cleanup-mutex',
+              batchRows: 1,
+              batchBytes: 1_000_000,
+              wallTimeMs: 20_000,
+              now: FIXED_NOW,
+              nowMs: () => FIXED_NOW,
+            })
+            .then((result) => {
+              manualSettled = true;
+              return result;
+            });
+
+          try {
+            await new Promise((resolve) => setTimeout(resolve, 25));
+            expect(payloadPuts).toBe(1);
+            expect(manualSettled).toBe(false);
+          } finally {
+            releaseFirstPayloadPut();
+          }
+          const [, manualResult] = await Promise.all([automatic, manual]);
+          expect(manualResult.telemetry.rowsUpdated).toBe(0);
+          expect(manualResult.skipReason).toBe('not_needed');
+        })
+    );
+
+    expect(payloadPuts).toBe(1);
+    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
+      seeded.messageIds[0]!
+    );
+    expect(source?.content).toBe('visible manual-automatic-cleanup-mutex');
+    expect(source?.toolMetadata.content).toBeUndefined();
+    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(1);
+  });
+
   it('fails closed when a fixed cutoff has no exact project allowlist and plan id', async () => {
     const projectId = `${TEST_PREFIX}-fixed-cutoff-unscoped`;
     const stub = getStub(projectId);
@@ -1470,6 +1558,12 @@ describe('ProjectData tool payload R2 archival', () => {
       PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO: '0.00001',
       PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS: '1',
       PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS: '1',
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS: String(
+        Number(approval.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS) + 1
+      ),
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES: String(
+        Number(approval.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES) + 1
+      ),
     };
     const readProgress = async (): Promise<Record<string, number>> =>
       runInDurableObject(stub, async (_instance, state) => {
@@ -1513,12 +1607,38 @@ describe('ProjectData tool payload R2 archival', () => {
       storageSafetyToolCleanupTotalR2Operations: 3000,
       storageSafetyToolCleanupTotalWallTimeMs: 40000,
     });
+    let replayReads = 0;
+    let replayWrites = 0;
+    const realR2 = env.PROJECT_DATA_ARCHIVE_R2;
+    const replayTrackingR2 = {
+      put: async (key: string, value: string | ArrayBuffer | ArrayBufferView) => {
+        replayWrites += 1;
+        return realR2.put(key, value);
+      },
+      get: async (key: string) => {
+        replayReads += 1;
+        return realR2.get(key);
+      },
+    } as unknown as R2Bucket;
+    const sourcesBeforeReplay = await readMessageContentAndMetadata(stub, seeded.messageIds);
+    const archivesBeforeReplay = await readArchiveRows(stub, seeded.messageIds);
     expect(
-      await runArchiveCleanup(stub, projectId, exactEnv, {
-        now: FIXED_NOW + 4,
-        nowMs: () => FIXED_NOW + 4,
-      })
+      await runArchiveCleanup(
+        stub,
+        projectId,
+        { ...exactEnv, PROJECT_DATA_ARCHIVE_R2: replayTrackingR2 },
+        {
+          now: FIXED_NOW + 4,
+          nowMs: () => FIXED_NOW + 4,
+        }
+      )
     ).toBeNull();
+    expect(replayReads).toBe(0);
+    expect(replayWrites).toBe(0);
+    expect(await readMessageContentAndMetadata(stub, seeded.messageIds)).toEqual(
+      sourcesBeforeReplay
+    );
+    expect(await readArchiveRows(stub, seeded.messageIds)).toEqual(archivesBeforeReplay);
     const terminalState = await runInDurableObject(stub, async (_instance, state) => {
       const rows = state.storage.sql
         .exec(

@@ -493,6 +493,63 @@ describe('scheduled ProjectData storage relief preflight', () => {
     }
   });
 
+  it.each([
+    {
+      name: 'batch manifest',
+      overrides: { PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES: '1' },
+      error: 'tool payload cleanup manifest exceeded 1 bytes',
+      expectedPuts: 0,
+    },
+    {
+      name: 'root manifest',
+      overrides: { PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES: '1' },
+      error: 'tool payload cleanup manifest exceeded 1 bytes',
+      expectedPuts: 1,
+    },
+    {
+      name: 'D1 proof state',
+      overrides: { PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_STATE_BYTES: '1' },
+      error: 'ProjectData relief preflight session manifest exceeded its D1 row bound',
+      expectedPuts: 0,
+    },
+  ])(
+    'fails closed at a configured lower $name bound',
+    async ({ overrides, error, expectedPuts }) => {
+      const sqlite = new Database(':memory:');
+      try {
+        createTables(sqlite);
+        const measure = vi.fn().mockResolvedValue(
+          toolResult({
+            sessionId: 'session-a',
+            eligibleRows: 1,
+            eligibleBytes: 100,
+            cursor: null,
+            hasMore: false,
+          })
+        );
+        const env = makeEnv(sqlite, measure, {
+          PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BATCHES: '1',
+          ...overrides,
+        });
+
+        const result = await runProjectDataStorageReliefPreflight(env, new Date(NOW));
+
+        expect(result).toMatchObject({ status: 'failed', lastError: error });
+        expect(readRun(sqlite)).toMatchObject({
+          status: 'failed',
+          eligible_rows: 0,
+          eligible_bytes: 0,
+          target_batches_json: '[]',
+          target_manifest_key: null,
+          target_manifest_sha256: null,
+        });
+        expect(env.PROJECT_DATA_ARCHIVE_R2.put).toHaveBeenCalledTimes(expectedPuts);
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
   it('fails closed before ProjectData when exact plan scope is missing', async () => {
     const sqlite = new Database(':memory:');
     try {
