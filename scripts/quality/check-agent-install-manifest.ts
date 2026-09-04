@@ -28,7 +28,7 @@ const catalog = readFileSync(join(root, 'packages/shared/src/agents.ts'), 'utf8'
 // A pin must be followed by a non-version character so e.g. pkg@1.18.27 cannot
 // be satisfied by a stale pkg@1.18.270 (substring false-positive).
 const containsPin = (source: string, pin: string): boolean =>
-  new RegExp(`${pin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![0-9A-Za-z.+-])`).test(source);
+  new RegExp(`${pin.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)}(?![0-9A-Za-z.+-])`).test(source);
 const safePackage = /^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/;
 const safeVersion = /^[0-9][0-9A-Za-z.+-]*$/;
 const ids = new Set<string>();
