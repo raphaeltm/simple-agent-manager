@@ -81,6 +81,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `INSTANT_STALE_CALLBACK_MARGIN_MS` — Freshness margin for rejecting destructive callbacks from superseded Instant containers (default: `60000`)
 - `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` — Synchronous workspace creation and clone budget (default: `120000`)
 - `CF_CONTAINER_CLONE_FILTER` — Git partial-clone filter (default: `blob:none`; `off` disables partial clone)
+- `VM_AGENT_MEMORY_RESERVE_MB` — Megabytes reserved for the OS and `vm-agent` on cloud VM nodes before Docker's systemd `MemoryMax` is derived from actual node memory (default: `768`)
 - `SESSION_SNAPSHOT_TTL_DAYS` — Retention from actual sleep; the scheduled Worker terminalizes the chat and deletes R2 state (default: `7`)
 - `SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES` — Maximum combined bytes accepted for snapshot artifacts (default: `268435456`)
 - `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES` — Per-file threshold before snapshot content is visibly skipped (default: `268435456`)
@@ -612,3 +613,16 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `SYSINFO_DOCKER_TIMEOUT` — Timeout for Docker CLI commands during system info collection (default: 10s)
 - `SYSINFO_VERSION_TIMEOUT` — Timeout for version-check commands (default: 5s)
 - `SYSINFO_CACHE_TTL` — Cache duration for system info results (default: 5s)
+
+### Active Resource Monitoring
+
+- `DEFAULT_PSI_POLL_INTERVAL_SECONDS` — PSI memory pressure polling interval, in seconds (default: 10)
+- `DEFAULT_CONTAINER_STATS_INTERVAL_SECONDS` — Per-container `docker stats` polling interval, in seconds (default: 30)
+- `DEFAULT_PSI_MEMORY_SOME_WARNING_THRESHOLD` — Warning threshold for memory `some` PSI `avg10`/`avg60` (default: 25.0)
+- `DEFAULT_PSI_MEMORY_SOME_CRITICAL_THRESHOLD` — Critical threshold for memory `some` PSI `avg10`/`avg60` (default: 50.0)
+- `DEFAULT_PSI_MEMORY_FULL_WARNING_THRESHOLD` — Warning threshold for memory `full` PSI `avg10`/`avg60` (default: 10.0)
+- `DEFAULT_PSI_MEMORY_FULL_CRITICAL_THRESHOLD` — Critical threshold for memory `full` PSI `avg10`/`avg60` (default: 25.0)
+- `DEFAULT_EVICTION_DEBOUNCE_SECONDS` — Duplicate container eviction debounce window, in seconds (default: 30)
+- `DEFAULT_EVICTION_SNAPSHOT_TIMEOUT_SECONDS` — Deadline for pre-stop eviction snapshot capture, in seconds (default: 120)
+- `DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS` — Grace period passed to `docker stop --time` during eviction, in seconds (default: 10)
+- `DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS` — Deadline for resolving a pressured Docker container to a workspace before eviction, in seconds (default: 5)

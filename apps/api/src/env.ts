@@ -481,6 +481,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // Swap file configuration
   SWAP_SIZE_MB?: string; // Swap file size in MB (default: 2048, set to "0" to disable)
   SWAP_SWAPPINESS?: string; // vm.swappiness value 0-100 (default: 60)
+  VM_AGENT_MEMORY_RESERVE_MB?: string; // Memory in MB reserved for OS + vm-agent before Docker MemoryMax (default: 768)
   // Hetzner base image override (e.g., "ubuntu-24.04" to roll back from the
   // default "docker-ce" marketplace image). Only applies to Hetzner nodes.
   HETZNER_BASE_IMAGE?: string;

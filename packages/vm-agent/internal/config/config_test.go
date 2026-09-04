@@ -141,6 +141,119 @@ func TestLoadCallbackTokenEnvFallback(t *testing.T) {
 	}
 }
 
+func TestLoadResourceMonitoringDefaultsAndOverrides(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+		t.Setenv("WORKSPACE_ID", "ws-123")
+
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load returned error: %v", err)
+		}
+
+		if cfg.PSIPollInterval != time.Duration(DefaultPSIPollIntervalSeconds)*time.Second {
+			t.Fatalf("PSIPollInterval=%s, want %ds", cfg.PSIPollInterval, DefaultPSIPollIntervalSeconds)
+		}
+		if cfg.ContainerStatsInterval != time.Duration(DefaultContainerStatsIntervalSeconds)*time.Second {
+			t.Fatalf("ContainerStatsInterval=%s, want %ds", cfg.ContainerStatsInterval, DefaultContainerStatsIntervalSeconds)
+		}
+		if cfg.PSIMemorySomeWarningThreshold != DefaultPSIMemorySomeWarningThreshold ||
+			cfg.PSIMemorySomeCriticalThreshold != DefaultPSIMemorySomeCriticalThreshold ||
+			cfg.PSIMemoryFullWarningThreshold != DefaultPSIMemoryFullWarningThreshold ||
+			cfg.PSIMemoryFullCriticalThreshold != DefaultPSIMemoryFullCriticalThreshold {
+			t.Fatalf("unexpected PSI threshold defaults: %#v", cfg)
+		}
+		if cfg.EvictionDebounceWindow != time.Duration(DefaultEvictionDebounceSeconds)*time.Second {
+			t.Fatalf("EvictionDebounceWindow=%s, want %ds", cfg.EvictionDebounceWindow, DefaultEvictionDebounceSeconds)
+		}
+		if cfg.EvictionSnapshotTimeout != time.Duration(DefaultEvictionSnapshotTimeoutSeconds)*time.Second {
+			t.Fatalf("EvictionSnapshotTimeout=%s, want %ds", cfg.EvictionSnapshotTimeout, DefaultEvictionSnapshotTimeoutSeconds)
+		}
+		if cfg.EvictionDockerStopTimeout != time.Duration(DefaultEvictionDockerStopTimeoutSeconds)*time.Second {
+			t.Fatalf("EvictionDockerStopTimeout=%s, want %ds", cfg.EvictionDockerStopTimeout, DefaultEvictionDockerStopTimeoutSeconds)
+		}
+		if cfg.EvictionResolveTimeout != time.Duration(DefaultEvictionResolveTimeoutSeconds)*time.Second {
+			t.Fatalf("EvictionResolveTimeout=%s, want %ds", cfg.EvictionResolveTimeout, DefaultEvictionResolveTimeoutSeconds)
+		}
+	})
+
+	t.Run("overrides", func(t *testing.T) {
+		t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+		t.Setenv("WORKSPACE_ID", "ws-123")
+		t.Setenv(EnvDefaultPSIPollIntervalSeconds, "3")
+		t.Setenv(EnvDefaultContainerStatsIntervalSeconds, "7")
+		t.Setenv(EnvDefaultPSIMemorySomeWarningThreshold, "11.5")
+		t.Setenv(EnvDefaultPSIMemorySomeCriticalThreshold, "22.5")
+		t.Setenv(EnvDefaultPSIMemoryFullWarningThreshold, "4.5")
+		t.Setenv(EnvDefaultPSIMemoryFullCriticalThreshold, "9.5")
+		t.Setenv(EnvDefaultEvictionDebounceSeconds, "13")
+		t.Setenv(EnvDefaultEvictionSnapshotTimeoutSeconds, "47")
+		t.Setenv(EnvDefaultEvictionDockerStopTimeoutSeconds, "8")
+		t.Setenv(EnvDefaultEvictionResolveTimeoutSeconds, "6")
+
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load returned error: %v", err)
+		}
+
+		if cfg.PSIPollInterval != 3*time.Second {
+			t.Fatalf("PSIPollInterval=%s, want 3s", cfg.PSIPollInterval)
+		}
+		if cfg.ContainerStatsInterval != 7*time.Second {
+			t.Fatalf("ContainerStatsInterval=%s, want 7s", cfg.ContainerStatsInterval)
+		}
+		if cfg.PSIMemorySomeWarningThreshold != 11.5 ||
+			cfg.PSIMemorySomeCriticalThreshold != 22.5 ||
+			cfg.PSIMemoryFullWarningThreshold != 4.5 ||
+			cfg.PSIMemoryFullCriticalThreshold != 9.5 {
+			t.Fatalf("unexpected PSI threshold overrides: %#v", cfg)
+		}
+		if cfg.EvictionDebounceWindow != 13*time.Second {
+			t.Fatalf("EvictionDebounceWindow=%s, want 13s", cfg.EvictionDebounceWindow)
+		}
+		if cfg.EvictionSnapshotTimeout != 47*time.Second {
+			t.Fatalf("EvictionSnapshotTimeout=%s, want 47s", cfg.EvictionSnapshotTimeout)
+		}
+		if cfg.EvictionDockerStopTimeout != 8*time.Second {
+			t.Fatalf("EvictionDockerStopTimeout=%s, want 8s", cfg.EvictionDockerStopTimeout)
+		}
+		if cfg.EvictionResolveTimeout != 6*time.Second {
+			t.Fatalf("EvictionResolveTimeout=%s, want 6s", cfg.EvictionResolveTimeout)
+		}
+	})
+}
+
+func TestResourceMonitoringDefaultsUseNamedConstants(t *testing.T) {
+	source, err := os.ReadFile("config_load.go")
+	if err != nil {
+		t.Fatalf("read config_load.go: %v", err)
+	}
+	loadSource := string(source)
+	pairs := []struct {
+		envConst     string
+		defaultConst string
+	}{
+		{"EnvDefaultPSIPollIntervalSeconds", "DefaultPSIPollIntervalSeconds"},
+		{"EnvDefaultContainerStatsIntervalSeconds", "DefaultContainerStatsIntervalSeconds"},
+		{"EnvDefaultPSIMemorySomeWarningThreshold", "DefaultPSIMemorySomeWarningThreshold"},
+		{"EnvDefaultPSIMemorySomeCriticalThreshold", "DefaultPSIMemorySomeCriticalThreshold"},
+		{"EnvDefaultPSIMemoryFullWarningThreshold", "DefaultPSIMemoryFullWarningThreshold"},
+		{"EnvDefaultPSIMemoryFullCriticalThreshold", "DefaultPSIMemoryFullCriticalThreshold"},
+		{"EnvDefaultEvictionDebounceSeconds", "DefaultEvictionDebounceSeconds"},
+		{"EnvDefaultEvictionSnapshotTimeoutSeconds", "DefaultEvictionSnapshotTimeoutSeconds"},
+		{"EnvDefaultEvictionDockerStopTimeoutSeconds", "DefaultEvictionDockerStopTimeoutSeconds"},
+		{"EnvDefaultEvictionResolveTimeoutSeconds", "DefaultEvictionResolveTimeoutSeconds"},
+	}
+	for _, pair := range pairs {
+		if !strings.Contains(loadSource, pair.envConst) {
+			t.Fatalf("config_load.go must use %s", pair.envConst)
+		}
+		if !strings.Contains(loadSource, pair.defaultConst) {
+			t.Fatalf("config_load.go must use %s", pair.defaultConst)
+		}
+	}
+}
+
 func TestLoadDurableErrorReportGuardrails(t *testing.T) {
 	persistenceDir := t.TempDir()
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
@@ -919,6 +1032,104 @@ func validConfig() *Config {
 		DevcontainerCachePushTimeout:          DefaultDevcontainerCachePushTimeout,
 		DeployPreflightCommandTimeout:         DefaultDeployPreflightCommandTimeout,
 		LogStreamPingWriteTimeout:             DefaultLogStreamPingWriteTimeout,
+		PSIPollInterval:                       time.Duration(DefaultPSIPollIntervalSeconds) * time.Second,
+		ContainerStatsInterval:                time.Duration(DefaultContainerStatsIntervalSeconds) * time.Second,
+		PSIMemorySomeWarningThreshold:         DefaultPSIMemorySomeWarningThreshold,
+		PSIMemorySomeCriticalThreshold:        DefaultPSIMemorySomeCriticalThreshold,
+		PSIMemoryFullWarningThreshold:         DefaultPSIMemoryFullWarningThreshold,
+		PSIMemoryFullCriticalThreshold:        DefaultPSIMemoryFullCriticalThreshold,
+		EvictionDebounceWindow:                time.Duration(DefaultEvictionDebounceSeconds) * time.Second,
+		EvictionSnapshotTimeout:               time.Duration(DefaultEvictionSnapshotTimeoutSeconds) * time.Second,
+		EvictionDockerStopTimeout:             time.Duration(DefaultEvictionDockerStopTimeoutSeconds) * time.Second,
+		EvictionResolveTimeout:                time.Duration(DefaultEvictionResolveTimeoutSeconds) * time.Second,
+	}
+}
+
+func TestValidateResourceMonitoringConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		wantErr string
+		mutate  func(*Config)
+	}{
+		{
+			name:    "psi interval",
+			wantErr: EnvDefaultPSIPollIntervalSeconds,
+			mutate:  func(cfg *Config) { cfg.PSIPollInterval = 0 },
+		},
+		{
+			name:    "container stats interval",
+			wantErr: EnvDefaultContainerStatsIntervalSeconds,
+			mutate:  func(cfg *Config) { cfg.ContainerStatsInterval = 0 },
+		},
+		{
+			name:    "eviction debounce",
+			wantErr: EnvDefaultEvictionDebounceSeconds,
+			mutate:  func(cfg *Config) { cfg.EvictionDebounceWindow = 0 },
+		},
+		{
+			name:    "eviction snapshot timeout",
+			wantErr: EnvDefaultEvictionSnapshotTimeoutSeconds,
+			mutate:  func(cfg *Config) { cfg.EvictionSnapshotTimeout = 0 },
+		},
+		{
+			name:    "eviction docker stop timeout",
+			wantErr: EnvDefaultEvictionDockerStopTimeoutSeconds,
+			mutate:  func(cfg *Config) { cfg.EvictionDockerStopTimeout = 0 },
+		},
+		{
+			name:    "eviction resolve timeout",
+			wantErr: EnvDefaultEvictionResolveTimeoutSeconds,
+			mutate:  func(cfg *Config) { cfg.EvictionResolveTimeout = 0 },
+		},
+		{
+			name:    "some warning threshold",
+			wantErr: EnvDefaultPSIMemorySomeWarningThreshold,
+			mutate:  func(cfg *Config) { cfg.PSIMemorySomeWarningThreshold = 0 },
+		},
+		{
+			name:    "some critical threshold",
+			wantErr: EnvDefaultPSIMemorySomeCriticalThreshold,
+			mutate:  func(cfg *Config) { cfg.PSIMemorySomeCriticalThreshold = 0 },
+		},
+		{
+			name:    "full warning threshold",
+			wantErr: EnvDefaultPSIMemoryFullWarningThreshold,
+			mutate:  func(cfg *Config) { cfg.PSIMemoryFullWarningThreshold = 0 },
+		},
+		{
+			name:    "full critical threshold",
+			wantErr: EnvDefaultPSIMemoryFullCriticalThreshold,
+			mutate:  func(cfg *Config) { cfg.PSIMemoryFullCriticalThreshold = 0 },
+		},
+		{
+			name:    "some warning above critical",
+			wantErr: EnvDefaultPSIMemorySomeCriticalThreshold,
+			mutate: func(cfg *Config) {
+				cfg.PSIMemorySomeWarningThreshold = 60
+				cfg.PSIMemorySomeCriticalThreshold = 50
+			},
+		},
+		{
+			name:    "full warning above critical",
+			wantErr: EnvDefaultPSIMemoryFullCriticalThreshold,
+			mutate: func(cfg *Config) {
+				cfg.PSIMemoryFullWarningThreshold = 30
+				cfg.PSIMemoryFullCriticalThreshold = 25
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := validConfig()
+			test.mutate(cfg)
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatalf("Validate() should reject %s", test.name)
+			}
+			if !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("Validate() error=%v, want %s", err, test.wantErr)
+			}
+		})
 	}
 }
 

@@ -484,7 +484,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         error: `Target workspace is ${row.workspace_status} (${recovery.reason})`,
       };
     }
-    if (['stopping', 'stopped', 'deleted', 'error'].includes(row.workspace_status)) {
+    if (['stopping', 'stopped', 'evicted', 'deleted', 'error'].includes(row.workspace_status)) {
       return {
         kind: 'failed',
         reason: 'terminal_target',

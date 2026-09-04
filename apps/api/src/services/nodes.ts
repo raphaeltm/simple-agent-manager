@@ -272,6 +272,7 @@ export async function provisionNode(
       devcontainerCacheEnabled: env.DEVCONTAINER_CACHE_ENABLED,
       swapSizeMb: env.SWAP_SIZE_MB,
       swapSwappiness: env.SWAP_SWAPPINESS,
+      vmAgentMemoryReserveMb: env.VM_AGENT_MEMORY_RESERVE_MB,
       role: isDeploymentNode ? 'deployment' : undefined,
       environmentId: deploymentContext?.environmentId,
       deploySigningPubKey: isDeploymentNode ? env.DEPLOY_SIGNING_PUBLIC_KEY : undefined,

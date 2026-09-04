@@ -33,6 +33,10 @@ describe('isWorkspaceOperational', () => {
     expect(isWorkspaceOperational('stopped')).toBe(false);
   });
 
+  it('returns false for "evicted" status', () => {
+    expect(isWorkspaceOperational('evicted')).toBe(false);
+  });
+
   it('returns false for "error" status', () => {
     expect(isWorkspaceOperational('error')).toBe(false);
   });

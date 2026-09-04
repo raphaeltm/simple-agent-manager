@@ -156,6 +156,12 @@ The variables below tune the **Instant** (Cloudflare Container) runtime — how 
 | `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` | `120000`         | Budget for the synchronous instant-session create-workspace request, which includes the repository clone inside the container.                                                             |
 | `CF_CONTAINER_CLONE_FILTER`                | `blob:none`      | Git partial-clone filter forwarded to instant containers as `STANDALONE_CLONE_FILTER`. Set `off` to force full clones.                                                                     |
 
+### Cloud VM resource isolation
+
+| Variable                     | Default | Description                                                                                                                                                              |
+| ---------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `VM_AGENT_MEMORY_RESERVE_MB` | `768`   | Megabytes reserved for the OS and `vm-agent` when provisioning cloud VM nodes. Docker's systemd `MemoryMax` is derived from the node's actual memory minus this reserve. |
+
 ### Persistent session snapshots and sleep
 
 Sleeping and reclaimed Instant and VM sessions are restored from a snapshot of the agent's home directory and the repository work in progress. A complete snapshot is required before SAM tears down VM compute. None of these limits are surfaced in the UI, so operators should set expectations deliberately — see [What gets restored](/docs/guides/instant-sessions/#what-gets-restored).
@@ -781,47 +787,51 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 
 ## App Deployment Routing
 
-| Variable                                      | Default                                | Description                                                           |
-| --------------------------------------------- | -------------------------------------- | --------------------------------------------------------------------- |
-| `DEPLOY_PAYLOAD_EXPIRY_SECONDS`               | `3600`                                 | Signed deployment apply payload lifetime                              |
-| `DEPLOYMENT_ROUTE_PORT_BASE`                  | `35000`                                | First node-local loopback port reserved for app routes                |
-| `DEPLOYMENT_ROUTE_PORT_SPAN`                  | `100`                                  | Number of loopback ports reserved per deployment environment          |
-| `AGENT_DEPLOYMENT_RESERVED_ENVIRONMENT_NAMES` | `prod,production`                      | Comma-separated environment names agents cannot create through MCP    |
-| `MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE`        | `5`                                    | Maximum deployment environments to place on one deployment node       |
-| `DEPLOYMENT_DEFAULT_VM_SIZE`                  | `small`                                | Default VM size for deployment nodes                                  |
-| `DEPLOYMENT_MODEL_RUNNER_VM_SIZE`             | `medium`                               | VM size for deployment nodes that need Docker Model Runner            |
-| `DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB`          | `256`                                  | Default per-service memory limit for compose-publish releases         |
-| `DEPLOYMENT_LOG_MAX_SIZE`                     | `10m`                                  | Default json-file log max-size for compose-publish releases           |
-| `DEPLOYMENT_LOG_MAX_FILE`                     | `3`                                    | Default json-file log max-file for compose-publish releases           |
-| `MCP_DEPLOYMENT_COMPOSE_PREVIEW_MAX_BYTES`    | `128000`                               | Max Compose YAML size accepted by deployment route preview MCP tool   |
-| `BUILD_PUBLISH_TOOL_TIMEOUT_MS`               | `1260000`                              | Worker-to-VM proxy timeout for `build_and_publish`                    |
-| `DEPLOY_ACME_EMAIL`                           | _(unset)_                              | Optional ACME contact email emitted into deployment-node Caddy config |
-| `DEPLOY_ACME_CA`                              | _(unset)_                              | Optional ACME CA directory override, useful for Let's Encrypt staging |
-| `DOH_RESOLVER_URL`                            | `https://cloudflare-dns.com/dns-query` | DNS-over-HTTPS resolver used to verify deployment custom domains      |
-| `DOH_TIMEOUT_MS`                              | `10000`                                | Timeout for deployment custom-domain DNS verification lookups         |
-| `DEPLOY_COMPOSE_CMD`                          | `docker compose`                       | Docker Compose command used by the deployment engine                  |
-| `DEPLOY_HEALTH_TIMEOUT`                       | `5m`                                   | Deployment health-check timeout used by the VM agent                  |
-| `DEPLOY_RUNTIME_TIMEOUT`                      | `15m`                                  | VM-agent max time for deployment-node host dependency setup           |
-| `GRACEFUL_SHUTDOWN_TIMEOUT`                   | `30s`                                  | VM-agent max time for graceful HTTP server shutdown after SIGTERM     |
-| `SYSTEM_PROVISIONING_TIMEOUT`                 | `15m`                                  | VM-agent max time for workspace host provisioning before bootstrap    |
-| `CF_IP_FETCH_TIMEOUT`                         | `10s`                                  | VM-agent timeout for Cloudflare IP range fetches during provisioning  |
-| `BOOT_LOG_HTTP_TIMEOUT`                       | `10s`                                  | VM-agent timeout for boot-log callbacks to the control plane          |
-| `MCP_SHORT_COMMAND_TIMEOUT`                   | `10s`                                  | VM-agent timeout for short MCP workspace command probes               |
-| `MCP_DIFF_COMMAND_TIMEOUT`                    | `30s`                                  | VM-agent timeout for MCP diff-summary git commands                    |
-| `MCP_BUILD_PREPARE_TIMEOUT`                   | `30s`                                  | VM-agent timeout for MCP build/publish preparation probes             |
-| `JWKS_FETCH_TIMEOUT`                          | `10s`                                  | VM-agent startup JWKS fetch timeout                                   |
-| `ACP_CREDENTIAL_SYNC_TIMEOUT`                 | `10s`                                  | VM-agent ACP auth-file sync-back timeout during shutdown              |
-| `ACP_ACTIVITY_REPORT_TIMEOUT`                 | `10s`                                  | VM-agent timeout for each ACP activity callback attempt               |
-| `DEVCONTAINER_CACHE_PUSH_TIMEOUT`             | `10m`                                  | VM-agent best-effort devcontainer cache image push timeout            |
-| `DEPLOY_PREFLIGHT_COMMAND_TIMEOUT`            | `15s`                                  | VM-agent deployment preflight diagnostic command timeout              |
-| `LOG_STREAM_PING_WRITE_TIMEOUT`               | `10s`                                  | VM-agent log-stream WebSocket ping write deadline                     |
-| `DEPLOY_TEARDOWN_TIMEOUT`                     | `2m`                                   | VM-agent max time for deployment environment teardown (stop/start)    |
-| `DEPLOY_APPLY_IDLE_TIMEOUT`                   | `15m`                                  | VM-agent idle watchdog for deployment apply (no-progress only)        |
-| `DEPLOY_BUILD_PUBLISH_TIMEOUT`                | `20m`                                  | VM-agent max time for host build + push + release publish             |
-| `DEPLOY_ARTIFACT_DIAL_TIMEOUT`                | `30s`                                  | VM-agent TCP dial timeout for artifact downloads                      |
-| `DEPLOY_ARTIFACT_TLS_HANDSHAKE_TIMEOUT`       | `15s`                                  | VM-agent TLS handshake timeout for artifact downloads                 |
-| `DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT`     | `60s`                                  | VM-agent first-response-header timeout for artifact downloads         |
-| `DEPLOY_ARTIFACT_IDLE_TIMEOUT`                | `2m`                                   | VM-agent idle watchdog for artifact body-read progress                |
+| Variable                                       | Default                                | Description                                                               |
+| ---------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------- |
+| `DEPLOY_PAYLOAD_EXPIRY_SECONDS`                | `3600`                                 | Signed deployment apply payload lifetime                                  |
+| `DEPLOYMENT_ROUTE_PORT_BASE`                   | `35000`                                | First node-local loopback port reserved for app routes                    |
+| `DEPLOYMENT_ROUTE_PORT_SPAN`                   | `100`                                  | Number of loopback ports reserved per deployment environment              |
+| `AGENT_DEPLOYMENT_RESERVED_ENVIRONMENT_NAMES`  | `prod,production`                      | Comma-separated environment names agents cannot create through MCP        |
+| `MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE`         | `5`                                    | Maximum deployment environments to place on one deployment node           |
+| `DEPLOYMENT_DEFAULT_VM_SIZE`                   | `small`                                | Default VM size for deployment nodes                                      |
+| `DEPLOYMENT_MODEL_RUNNER_VM_SIZE`              | `medium`                               | VM size for deployment nodes that need Docker Model Runner                |
+| `DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB`           | `256`                                  | Default per-service memory limit for compose-publish releases             |
+| `DEPLOYMENT_LOG_MAX_SIZE`                      | `10m`                                  | Default json-file log max-size for compose-publish releases               |
+| `DEPLOYMENT_LOG_MAX_FILE`                      | `3`                                    | Default json-file log max-file for compose-publish releases               |
+| `MCP_DEPLOYMENT_COMPOSE_PREVIEW_MAX_BYTES`     | `128000`                               | Max Compose YAML size accepted by deployment route preview MCP tool       |
+| `BUILD_PUBLISH_TOOL_TIMEOUT_MS`                | `1260000`                              | Worker-to-VM proxy timeout for `build_and_publish`                        |
+| `DEPLOY_ACME_EMAIL`                            | _(unset)_                              | Optional ACME contact email emitted into deployment-node Caddy config     |
+| `DEPLOY_ACME_CA`                               | _(unset)_                              | Optional ACME CA directory override, useful for Let's Encrypt staging     |
+| `DOH_RESOLVER_URL`                             | `https://cloudflare-dns.com/dns-query` | DNS-over-HTTPS resolver used to verify deployment custom domains          |
+| `DOH_TIMEOUT_MS`                               | `10000`                                | Timeout for deployment custom-domain DNS verification lookups             |
+| `DEPLOY_COMPOSE_CMD`                           | `docker compose`                       | Docker Compose command used by the deployment engine                      |
+| `DEPLOY_HEALTH_TIMEOUT`                        | `5m`                                   | Deployment health-check timeout used by the VM agent                      |
+| `DEPLOY_RUNTIME_TIMEOUT`                       | `15m`                                  | VM-agent max time for deployment-node host dependency setup               |
+| `GRACEFUL_SHUTDOWN_TIMEOUT`                    | `30s`                                  | VM-agent max time for graceful HTTP server shutdown after SIGTERM         |
+| `SYSTEM_PROVISIONING_TIMEOUT`                  | `15m`                                  | VM-agent max time for workspace host provisioning before bootstrap        |
+| `CF_IP_FETCH_TIMEOUT`                          | `10s`                                  | VM-agent timeout for Cloudflare IP range fetches during provisioning      |
+| `BOOT_LOG_HTTP_TIMEOUT`                        | `10s`                                  | VM-agent timeout for boot-log callbacks to the control plane              |
+| `MCP_SHORT_COMMAND_TIMEOUT`                    | `10s`                                  | VM-agent timeout for short MCP workspace command probes                   |
+| `MCP_DIFF_COMMAND_TIMEOUT`                     | `30s`                                  | VM-agent timeout for MCP diff-summary git commands                        |
+| `MCP_BUILD_PREPARE_TIMEOUT`                    | `30s`                                  | VM-agent timeout for MCP build/publish preparation probes                 |
+| `JWKS_FETCH_TIMEOUT`                           | `10s`                                  | VM-agent startup JWKS fetch timeout                                       |
+| `ACP_CREDENTIAL_SYNC_TIMEOUT`                  | `10s`                                  | VM-agent ACP auth-file sync-back timeout during shutdown                  |
+| `ACP_ACTIVITY_REPORT_TIMEOUT`                  | `10s`                                  | VM-agent timeout for each ACP activity callback attempt                   |
+| `DEFAULT_EVICTION_DEBOUNCE_SECONDS`            | `30`                                   | Duplicate ResourceGuard-triggered container eviction debounce window      |
+| `DEFAULT_EVICTION_SNAPSHOT_TIMEOUT_SECONDS`    | `120`                                  | VM-agent pre-stop ResourceGuard eviction snapshot deadline                |
+| `DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS` | `10`                                   | Grace period passed to `docker stop --time` during ResourceGuard eviction |
+| `DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS`     | `5`                                    | Docker label resolution deadline before ResourceGuard eviction            |
+| `DEVCONTAINER_CACHE_PUSH_TIMEOUT`              | `10m`                                  | VM-agent best-effort devcontainer cache image push timeout                |
+| `DEPLOY_PREFLIGHT_COMMAND_TIMEOUT`             | `15s`                                  | VM-agent deployment preflight diagnostic command timeout                  |
+| `LOG_STREAM_PING_WRITE_TIMEOUT`                | `10s`                                  | VM-agent log-stream WebSocket ping write deadline                         |
+| `DEPLOY_TEARDOWN_TIMEOUT`                      | `2m`                                   | VM-agent max time for deployment environment teardown (stop/start)        |
+| `DEPLOY_APPLY_IDLE_TIMEOUT`                    | `15m`                                  | VM-agent idle watchdog for deployment apply (no-progress only)            |
+| `DEPLOY_BUILD_PUBLISH_TIMEOUT`                 | `20m`                                  | VM-agent max time for host build + push + release publish                 |
+| `DEPLOY_ARTIFACT_DIAL_TIMEOUT`                 | `30s`                                  | VM-agent TCP dial timeout for artifact downloads                          |
+| `DEPLOY_ARTIFACT_TLS_HANDSHAKE_TIMEOUT`        | `15s`                                  | VM-agent TLS handshake timeout for artifact downloads                     |
+| `DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT`      | `60s`                                  | VM-agent first-response-header timeout for artifact downloads             |
+| `DEPLOY_ARTIFACT_IDLE_TIMEOUT`                 | `2m`                                   | VM-agent idle watchdog for artifact body-read progress                    |
 
 ## Platform Limits
 

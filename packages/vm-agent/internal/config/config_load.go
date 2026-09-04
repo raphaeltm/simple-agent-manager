@@ -219,6 +219,18 @@ func Load() (*Config, error) {
 		MetricsDBPath:     getEnv("METRICS_DB_PATH", "/var/lib/vm-agent/metrics.db"),
 		MetricsInterval:   getEnvDuration("METRICS_INTERVAL", time.Minute),
 
+		// Active resource monitoring settings - configurable per constitution principle XI
+		PSIPollInterval:                time.Duration(getEnvInt(EnvDefaultPSIPollIntervalSeconds, DefaultPSIPollIntervalSeconds)) * time.Second,
+		ContainerStatsInterval:         time.Duration(getEnvInt(EnvDefaultContainerStatsIntervalSeconds, DefaultContainerStatsIntervalSeconds)) * time.Second,
+		PSIMemorySomeWarningThreshold:  getEnvFloat(EnvDefaultPSIMemorySomeWarningThreshold, DefaultPSIMemorySomeWarningThreshold),
+		PSIMemorySomeCriticalThreshold: getEnvFloat(EnvDefaultPSIMemorySomeCriticalThreshold, DefaultPSIMemorySomeCriticalThreshold),
+		PSIMemoryFullWarningThreshold:  getEnvFloat(EnvDefaultPSIMemoryFullWarningThreshold, DefaultPSIMemoryFullWarningThreshold),
+		PSIMemoryFullCriticalThreshold: getEnvFloat(EnvDefaultPSIMemoryFullCriticalThreshold, DefaultPSIMemoryFullCriticalThreshold),
+		EvictionDebounceWindow:         time.Duration(getEnvInt(EnvDefaultEvictionDebounceSeconds, DefaultEvictionDebounceSeconds)) * time.Second,
+		EvictionSnapshotTimeout:        time.Duration(getEnvInt(EnvDefaultEvictionSnapshotTimeoutSeconds, DefaultEvictionSnapshotTimeoutSeconds)) * time.Second,
+		EvictionDockerStopTimeout:      time.Duration(getEnvInt(EnvDefaultEvictionDockerStopTimeoutSeconds, DefaultEvictionDockerStopTimeoutSeconds)) * time.Second,
+		EvictionResolveTimeout:         time.Duration(getEnvInt(EnvDefaultEvictionResolveTimeoutSeconds, DefaultEvictionResolveTimeoutSeconds)) * time.Second,
+
 		// Git integration settings - configurable per constitution principle XI
 		GitCredentialTimeout:     getEnvDuration("GIT_CREDENTIAL_TIMEOUT", DefaultGitCredentialTimeout),
 		GitExecTimeout:           getEnvDuration("GIT_EXEC_TIMEOUT", 30*time.Second),

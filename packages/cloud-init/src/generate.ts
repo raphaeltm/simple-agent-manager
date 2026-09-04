@@ -39,6 +39,12 @@ const GO_DURATION_RE = /^(?:[0-9]+(?:ns|us|ms|s|m|h))+$/;
 /** Absolute Linux path without whitespace or shell metacharacters. */
 const SAFE_ABSOLUTE_PATH_RE = /^\/[a-zA-Z0-9._/-]+$/;
 
+/** Default memory reserved for the OS and vm-agent before capping Docker containers. */
+export const DEFAULT_VM_AGENT_MEMORY_RESERVE_MB = 768;
+
+/** Memory guaranteed to SAM infrastructure services through sam-infra.slice. */
+export const DEFAULT_SAM_INFRA_SLICE_MEMORY_MIN_MB = 384;
+
 function isSafeAbsolutePath(value: string): boolean {
   if (!SAFE_ABSOLUTE_PATH_RE.test(value) || value.includes('//')) {
     return false;
@@ -184,6 +190,19 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
     if (!NUMERIC_RE.test(variables.swapSwappiness) || val < 0 || val > 100) {
       errors.push(
         `swapSwappiness: must be numeric 0-100 (got ${JSON.stringify(variables.swapSwappiness)})`
+      );
+    }
+  }
+  if (variables.vmAgentMemoryReserveMb !== undefined && variables.vmAgentMemoryReserveMb !== '') {
+    const reserve = Number(variables.vmAgentMemoryReserveMb);
+    if (
+      !NUMERIC_RE.test(variables.vmAgentMemoryReserveMb) ||
+      !Number.isSafeInteger(reserve) ||
+      reserve < 1 ||
+      reserve > 65536
+    ) {
+      errors.push(
+        `vmAgentMemoryReserveMb: must be numeric 1-65536 (got ${JSON.stringify(variables.vmAgentMemoryReserveMb)})`
       );
     }
   }
@@ -359,6 +378,8 @@ export interface CloudInitVariables {
   swapSizeMb?: string;
   /** Swap swappiness value 0-100 (default: 60). Only relevant when swap is enabled. */
   swapSwappiness?: string;
+  /** Memory in MB reserved for the OS + vm-agent before Docker MemoryMax is calculated. */
+  vmAgentMemoryReserveMb?: string;
   /** VM agent role: 'workspace' (default) or 'deployment'. */
   role?: string;
   /** Deployment environment ID (required when role='deployment'). */
@@ -450,6 +471,9 @@ export function generateCloudInit(
     '{{ devcontainer_cache_enabled }}': variables.devcontainerCacheEnabled ?? 'false',
     '{{ swap_size_mb }}': variables.swapSizeMb ?? '2048',
     '{{ swap_swappiness }}': variables.swapSwappiness ?? '60',
+    '{{ vm_agent_memory_reserve_mb }}':
+      variables.vmAgentMemoryReserveMb || String(DEFAULT_VM_AGENT_MEMORY_RESERVE_MB),
+    '{{ sam_infra_slice_memory_min_mb }}': String(DEFAULT_SAM_INFRA_SLICE_MEMORY_MIN_MB),
     '{{ role }}': variables.role ?? '',
     '{{ environment_id }}': variables.environmentId ?? '',
     '{{ deploy_signing_pub_key }}': variables.deploySigningPubKey ?? '',
