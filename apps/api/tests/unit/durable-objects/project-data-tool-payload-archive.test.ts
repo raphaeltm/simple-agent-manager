@@ -18,7 +18,10 @@ import {
   buildToolPayloadArchiveKey,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX,
 } from '../../../src/durable-objects/project-data/tool-payload-archive';
-import { writeToolPayloadArchiveObject } from '../../../src/durable-objects/project-data/tool-payload-archive-r2';
+import {
+  parseToolPayloadArchiveObjectText,
+  writeToolPayloadArchiveObject,
+} from '../../../src/durable-objects/project-data/tool-payload-archive-r2';
 import type { Env } from '../../../src/durable-objects/project-data/types';
 
 describe('ProjectData tool payload archive helpers', () => {
@@ -205,5 +208,107 @@ describe('ProjectData tool payload archive helpers', () => {
     expect(changed.key).toMatch(/\.[a-f0-9]{64}\.json$/);
     expect(new TextDecoder().decode(objects.get(changed.key))).toBe('{"payload":"new"}');
     expect([...objects.keys()]).toHaveLength(2);
+  });
+
+  it('fails closed for equal or reversed exact-plan cleanup ratios', () => {
+    for (const [trigger, target] of [
+      ['0.9', '0.9'],
+      ['0.8', '0.9'],
+    ]) {
+      const config = resolveStorageSafetyConfig({
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO: trigger,
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO: target,
+      } as Env);
+      expect(config.toolPayloadCleanupExactConfigValid).toBe(false);
+    }
+  });
+
+  it('keeps a changed chunk-layout retry readable after the timed-out old chunk completes', async () => {
+    const objects = new Map<string, Uint8Array>();
+    let releaseOld!: () => void;
+    let delayFirstPut = true;
+    const bucket = {
+      put: (key: string, value: string | Uint8Array) => {
+        const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value;
+        if (delayFirstPut) {
+          delayFirstPut = false;
+          return new Promise<null>((resolve) => {
+            releaseOld = () => {
+              objects.set(key, bytes.slice());
+              resolve(null);
+            };
+          });
+        }
+        objects.set(key, bytes.slice());
+        return Promise.resolve(null);
+      },
+      get: async (key: string) => {
+        const bytes = objects.get(key);
+        return bytes ? ({ arrayBuffer: async () => bytes.slice().buffer } as R2ObjectBody) : null;
+      },
+    } as unknown as R2Bucket;
+    const base = {
+      key: 'project-data/tool-payloads/project/session/chunked-message.json',
+      body: JSON.stringify({
+        version: 1,
+        projectId: 'project',
+        sessionId: 'session',
+        messageId: 'chunked-message',
+        messageCreatedAt: 1,
+        messageSequence: 1,
+        archivedAt: 2,
+        contentBytes: 1,
+        toolMetadataBytes: 50,
+        toolMetadata: { content: [{ type: 'text', text: 'layout-change' }] },
+      }),
+      contentBytes: 1,
+      archiveVersion: 1,
+      strippedToolMetadata: '{}',
+      strippedToolMetadataBytes: 2,
+    };
+    const archiveInput = {
+      projectId: 'project',
+      sessionId: 'session',
+      messageId: 'chunked-message',
+      messageCreatedAt: 1,
+      messageSequence: 1,
+      archivedAt: 2,
+      contentBytes: 1,
+      toolMetadataBytes: 50,
+      deadlineMs: Date.now() + 10_000,
+      nowMs: Date.now,
+    };
+    await expect(
+      writeToolPayloadArchiveObject(bucket, base, 1, {
+        ...archiveInput,
+        chunkBytes: 13,
+        operationBudget: { used: 0, max: 100 },
+      })
+    ).rejects.toThrow(/archive write exceeded/);
+    const changed = await writeToolPayloadArchiveObject(bucket, base, 100, {
+      ...archiveInput,
+      chunkBytes: 17,
+      operationBudget: { used: 0, max: 100 },
+    });
+    const rootBefore = objects.get(changed.key)?.slice();
+    releaseOld();
+    await Promise.resolve();
+    expect(objects.get(changed.key)).toEqual(rootBefore);
+    const parsed = await parseToolPayloadArchiveObjectText(
+      bucket,
+      new TextDecoder().decode(rootBefore),
+      {
+        toolMetadataBytes: 50,
+        maxMetadataBytes: 1_000,
+        expectedIdentity: {
+          projectId: 'project',
+          sessionId: 'session',
+          messageId: 'chunked-message',
+          messageCreatedAt: 1,
+          messageSequence: 1,
+        },
+      }
+    );
+    expect(parsed).toMatchObject({ toolMetadata: { content: expect.any(Array) } });
   });
 });

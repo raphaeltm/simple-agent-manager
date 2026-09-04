@@ -36,6 +36,10 @@ function createTables(sqlite: Database.Database): void {
       session_count INTEGER NOT NULL DEFAULT 0,
       sessions_json TEXT NOT NULL DEFAULT '{}',
       sessions_sha256 TEXT,
+      target_batches_json TEXT NOT NULL DEFAULT '[]',
+      target_manifest_key TEXT,
+      target_manifest_bytes INTEGER,
+      target_manifest_sha256 TEXT,
       database_size_bytes INTEGER,
       next_eligible_at INTEGER NOT NULL DEFAULT 0,
       lease_owner TEXT,
@@ -52,7 +56,14 @@ function toolResult(input: {
   sessionId: string;
   eligibleRows: number;
   eligibleBytes: number;
-  cursor: { sessionId: string; createdAt: number; sequence: number; messageId: string } | null;
+  firstRowId?: number;
+  cursor: {
+    rowId: number;
+    sessionId: string;
+    createdAt: number;
+    sequence: number;
+    messageId: string;
+  } | null;
   hasMore: boolean;
 }) {
   return {
@@ -82,6 +93,20 @@ function toolResult(input: {
       oversizedBytes: 0,
       archivedRows: 0,
       skippedRows: 0,
+      targets: Array.from({ length: input.eligibleRows }, (_value, index) => ({
+        rowId:
+          (input.firstRowId ??
+            (input.cursor?.rowId ?? input.eligibleRows) - input.eligibleRows + 1) + index,
+        sessionId: input.sessionId,
+        messageId: `target-${input.sessionId}-${index}`,
+        messageCreatedAt: CUTOFF - 100 + index,
+        messageSequence: index + 1,
+        toolMetadataBytes: Math.ceil(input.eligibleBytes / input.eligibleRows) + 100,
+        toolMetadataSha256: 'a'.repeat(64),
+        projectedReclaimableBytes: Math.ceil(input.eligibleBytes / input.eligibleRows),
+      })),
+      byteLimitReached: false,
+      deadlineReached: false,
       sessions: [
         {
           sessionId: input.sessionId,
@@ -109,6 +134,23 @@ function makeEnv(
   measureStorageRelief: ReturnType<typeof vi.fn>,
   overrides: Partial<Env> = {}
 ): Env {
+  const objects = new Map<string, Uint8Array>();
+  const r2 = {
+    put: vi.fn(async (key: string, value: string | ArrayBuffer | ArrayBufferView) => {
+      const bytes =
+        typeof value === 'string'
+          ? new TextEncoder().encode(value)
+          : value instanceof ArrayBuffer
+            ? new Uint8Array(value)
+            : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+      objects.set(key, bytes.slice());
+      return {};
+    }),
+    get: vi.fn(async (key: string) => {
+      const bytes = objects.get(key);
+      return bytes ? ({ arrayBuffer: async () => bytes.slice().buffer } as R2ObjectBody) : null;
+    }),
+  } as unknown as R2Bucket;
   const stub = {
     ensureProjectId: vi.fn(async () => undefined),
     measureStorageRelief,
@@ -119,6 +161,7 @@ function makeEnv(
       idFromName: (name: string) => ({ toString: () => name }),
       get: () => stub,
     } as unknown as DurableObjectNamespace,
+    PROJECT_DATA_ARCHIVE_R2: r2,
     PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ENABLED: 'true',
     PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PLAN_ID: PLAN_ID,
     PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PROJECT_ID: PROJECT_ID,
@@ -164,6 +207,7 @@ describe('scheduled ProjectData storage relief preflight', () => {
     try {
       createTables(sqlite);
       const cursor = {
+        rowId: 2,
         sessionId: 'session-a',
         createdAt: CUTOFF - 10,
         sequence: 2,
@@ -185,6 +229,7 @@ describe('scheduled ProjectData storage relief preflight', () => {
             sessionId: 'session-b',
             eligibleRows: 1,
             eligibleBytes: 400,
+            firstRowId: 3,
             cursor: null,
             hasMore: false,
           })
@@ -193,25 +238,42 @@ describe('scheduled ProjectData storage relief preflight', () => {
 
       const first = await runProjectDataStorageReliefPreflight(env, new Date(NOW));
       expect(first).toMatchObject({ status: 'running', eligibleRows: 2, eligibleBytes: 1200 });
-      expect(measure).toHaveBeenNthCalledWith(1, {
-        cursor: null,
-        limit: 2,
-        surface: 'tool_payloads',
-        cutoffCreatedAt: CUTOFF,
-      });
+      expect(measure).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          cursor: null,
+          limit: 2,
+          surface: 'tool_payloads',
+          cutoffCreatedAt: CUTOFF,
+          maxEligibleBytes: 10000,
+          deadlineMs: expect.any(Number),
+        })
+      );
 
       const cadenceSkip = await runProjectDataStorageReliefPreflight(env, new Date(NOW + 500));
       expect(cadenceSkip).toMatchObject({ skipped: true, skipReason: 'cadence' });
       expect(measure).toHaveBeenCalledTimes(1);
 
       const second = await runProjectDataStorageReliefPreflight(env, new Date(NOW + 1000));
-      expect(second).toMatchObject({ status: 'complete', eligibleRows: 3, eligibleBytes: 1600 });
-      expect(measure).toHaveBeenNthCalledWith(2, {
-        cursor: { toolPayload: cursor },
-        limit: 2,
-        surface: 'tool_payloads',
-        cutoffCreatedAt: CUTOFF,
+      expect(second).toMatchObject({
+        status: 'complete',
+        eligibleRows: 3,
+        eligibleBytes: 1600,
+        targetManifestKey: expect.stringMatching(/\/root\.[a-f0-9]{64}\.json$/),
+        targetManifestBytes: expect.any(Number),
+        targetManifestSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
       });
+      expect(measure).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          cursor: { toolPayload: cursor },
+          limit: 2,
+          surface: 'tool_payloads',
+          cutoffCreatedAt: CUTOFF,
+          maxEligibleBytes: 8800,
+          deadlineMs: expect.any(Number),
+        })
+      );
       expect(readRun(sqlite)).toMatchObject({
         status: 'complete',
         cutoff_created_at: CUTOFF,
@@ -221,6 +283,9 @@ describe('scheduled ProjectData storage relief preflight', () => {
         eligible_bytes: 1600,
         session_count: 2,
         sessions_sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        target_manifest_key: second.targetManifestKey,
+        target_manifest_bytes: second.targetManifestBytes,
+        target_manifest_sha256: second.targetManifestSha256,
         cursor_json: null,
         completed_at: NOW + 1000,
       });
@@ -228,6 +293,37 @@ describe('scheduled ProjectData storage relief preflight', () => {
         'session-a': expect.objectContaining({ eligibleRows: 2, eligibleBytes: 1200 }),
         'session-b': expect.objectContaining({ eligibleRows: 1, eligibleBytes: 400 }),
       });
+      const rootObject = await env.PROJECT_DATA_ARCHIVE_R2.get(second.targetManifestKey!);
+      expect(rootObject).not.toBeNull();
+      const root = JSON.parse(new TextDecoder().decode(await rootObject!.arrayBuffer())) as {
+        planId: string;
+        projectId: string;
+        cutoffCreatedAt: number;
+        eligibleRows: number;
+        eligibleBytes: number;
+        batches: Array<{
+          key: string;
+          sha256: string;
+          firstRowId: number;
+          lastRowId: number;
+        }>;
+      };
+      expect(root).toMatchObject({
+        planId: PLAN_ID,
+        projectId: PROJECT_ID,
+        cutoffCreatedAt: CUTOFF,
+        eligibleRows: 3,
+        eligibleBytes: 1600,
+      });
+      expect(root.batches).toHaveLength(2);
+      expect(root.batches).toEqual([
+        expect.objectContaining({ firstRowId: 1, lastRowId: 2 }),
+        expect.objectContaining({ firstRowId: 3, lastRowId: 3 }),
+      ]);
+      for (const proof of root.batches) {
+        expect(proof.sha256).toMatch(/^[a-f0-9]{64}$/);
+        expect(await env.PROJECT_DATA_ARCHIVE_R2.get(proof.key)).not.toBeNull();
+      }
 
       const terminalSkip = await runProjectDataStorageReliefPreflight(env, new Date(NOW + 5000));
       expect(terminalSkip).toMatchObject({ skipped: true, skipReason: 'terminal' });
@@ -236,7 +332,6 @@ describe('scheduled ProjectData storage relief preflight', () => {
       sqlite.close();
     }
   });
-
   it('fails closed before ProjectData when exact plan scope is missing', async () => {
     const sqlite = new Database(':memory:');
     try {
@@ -331,7 +426,13 @@ describe('scheduled ProjectData storage relief preflight', () => {
           sessionId: 'session-a',
           eligibleRows: 1,
           eligibleBytes: 100,
-          cursor: { sessionId: 'session-a', createdAt: CUTOFF - 1, sequence: 1, messageId: 'm' },
+          cursor: {
+            rowId: 1,
+            sessionId: 'session-a',
+            createdAt: CUTOFF - 1,
+            sequence: 1,
+            messageId: 'm',
+          },
           hasMore: true,
         })
       );
@@ -408,6 +509,7 @@ describe('scheduled ProjectData storage relief preflight', () => {
           eligibleRows: 2,
           eligibleBytes: 1200,
           cursor: {
+            rowId: 2,
             sessionId: 'session-a',
             createdAt: CUTOFF - 10,
             sequence: 2,
@@ -423,6 +525,49 @@ describe('scheduled ProjectData storage relief preflight', () => {
 
       expect(result).toMatchObject({ status: 'truncated', eligibleRows: 2, eligibleBytes: 1200 });
       expect(readRun(sqlite)).toMatchObject({ status: 'truncated', completed_at: NOW });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('never persists evidence beyond the configured eligible-byte ceiling', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createTables(sqlite);
+      const firstSlice = toolResult({
+        sessionId: 'session-a',
+        eligibleRows: 1,
+        eligibleBytes: 60,
+        cursor: {
+          rowId: 1,
+          sessionId: 'session-a',
+          createdAt: CUTOFF - 2,
+          sequence: 1,
+          messageId: 'message-1',
+        },
+        hasMore: true,
+      });
+      const byteBoundary = toolResult({
+        sessionId: 'session-a',
+        eligibleRows: 0,
+        eligibleBytes: 0,
+        cursor: null,
+        hasMore: true,
+      });
+      byteBoundary.toolPayloads.rowsExamined = 1;
+      byteBoundary.toolPayloads.sessions[0]!.rowsExamined = 1;
+      byteBoundary.toolPayloads.byteLimitReached = true;
+      const measure = vi.fn().mockResolvedValueOnce(firstSlice).mockResolvedValueOnce(byteBoundary);
+      const env = makeEnv(sqlite, measure, {
+        PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES: '100',
+      });
+
+      await runProjectDataStorageReliefPreflight(env, new Date(NOW));
+      const result = await runProjectDataStorageReliefPreflight(env, new Date(NOW + 1000));
+
+      expect(result).toMatchObject({ status: 'truncated', eligibleRows: 1, eligibleBytes: 60 });
+      expect(Number(readRun(sqlite)?.eligible_bytes)).toBeLessThanOrEqual(100);
+      expect(measure).toHaveBeenLastCalledWith(expect.objectContaining({ maxEligibleBytes: 40 }));
     } finally {
       sqlite.close();
     }

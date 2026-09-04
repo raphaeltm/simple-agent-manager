@@ -7,6 +7,7 @@ import {
   truncateStorageSafetyMetaValue as truncate,
   writeStorageSafetyMeta as writeMeta,
 } from './storage-safety-meta';
+import type { ToolPayloadArchiveOperationBudget } from './tool-payload-archive-r2';
 import { readNextToolPayloadCleanupRetryAt } from './tool-payload-cleanup-attempts';
 import {
   clearRearchivableOversizedToolPayloadCleanupAttempts,
@@ -16,13 +17,20 @@ import {
   type ToolPayloadCleanupCursor,
 } from './tool-payload-cleanup-candidates';
 import {
+  readToolPayloadCleanupManifestBatch,
+  readToolPayloadCleanupManifestRoot,
+} from './tool-payload-cleanup-manifest';
+import {
   clearToolPayloadCleanupState,
   publicToolPayloadCleanupCursor,
   readProjectDataToolPayloadArchiveLastRunAt as readToolPayloadArchiveLastRunAt,
   readProjectDataToolPayloadCleanupRecheckAt as readToolPayloadCleanupRecheckAt,
+  readToolPayloadCleanupCumulativeProgress,
   readToolPayloadCleanupCursor,
   readToolPayloadCleanupPersistedPlan,
+  type ToolPayloadCleanupCumulativeProgress,
   writeProjectDataToolPayloadArchiveLastRunAt,
+  writeToolPayloadCleanupCumulativeProgress,
   writeToolPayloadCleanupCursor,
   writeToolPayloadCleanupRecheckAt,
 } from './tool-payload-cleanup-state';
@@ -67,6 +75,14 @@ type ToolPayloadCleanupPlan = {
   archiveMaxMetadataBytes: number;
   cutoffCreatedAt: number;
   deadlineMs: number;
+  wallClockStart: number;
+  manifestKey: string | null;
+  manifestSha256: string | null;
+  maxTotalRows: number | null;
+  maxTotalBytes: number | null;
+  maxTotalR2Operations: number | null;
+  maxTotalWallTimeMs: number | null;
+  cumulative: ToolPayloadCleanupCumulativeProgress;
   pendingCursor: ToolPayloadCleanupCursor | null;
   transactionSync?: <T>(callback: () => T) => T;
 };
@@ -75,6 +91,9 @@ type ToolPayloadCleanupBatch = {
   sessionsScanned: number;
   rowsScanned: number;
   rowsUpdated: number;
+  approvedRowsCompleted: number;
+  approvedBytesCompleted: number;
+  archiveOperations: number;
   rowsFailed: number;
   rearchivableOversizedAttemptsReset: number;
   toolMetadataBytesScanned: number;
@@ -102,6 +121,13 @@ function createToolPayloadCleanupPlan(
     (!config.toolPayloadCleanupExactConfigValid ||
       config.toolPayloadCleanupCutoffCreatedAt === -1 ||
       !config.toolPayloadCleanupPlanId ||
+      !config.toolPayloadCleanupManifestKey ||
+      !config.toolPayloadCleanupManifestSha256 ||
+      !/^[a-f0-9]{64}$/.test(config.toolPayloadCleanupManifestSha256) ||
+      config.toolPayloadCleanupMaxTotalRows === null ||
+      config.toolPayloadCleanupMaxTotalBytes === null ||
+      config.toolPayloadCleanupMaxTotalR2Operations === null ||
+      config.toolPayloadCleanupMaxTotalWallTimeMs === null ||
       config.toolPayloadCleanupProjectIds?.length !== 1 ||
       config.toolPayloadCleanupProjectIds[0] !== projectId)
   ) {
@@ -148,6 +174,7 @@ function createToolPayloadCleanupPlan(
     ? persistedPlan.cutoffCreatedAt
     : (config.toolPayloadCleanupCutoffCreatedAt ?? now - config.toolPayloadArchiveRetentionMs);
   const planId = config.toolPayloadCleanupPlanId ?? 'automatic-retention';
+  const cumulative = readToolPayloadCleanupCumulativeProgress(sql);
   const fingerprint = JSON.stringify({
     projectId,
     planId,
@@ -162,6 +189,12 @@ function createToolPayloadCleanupPlan(
     archiveMaxOperations: config.toolPayloadArchiveMaxOperations,
     archiveChunkBytes: config.toolPayloadArchiveChunkBytes,
     archiveMaxMetadataBytes: config.toolPayloadArchiveMaxMetadataBytes,
+    manifestKey: config.toolPayloadCleanupManifestKey,
+    manifestSha256: config.toolPayloadCleanupManifestSha256,
+    maxTotalRows: config.toolPayloadCleanupMaxTotalRows,
+    maxTotalBytes: config.toolPayloadCleanupMaxTotalBytes,
+    maxTotalR2Operations: config.toolPayloadCleanupMaxTotalR2Operations,
+    maxTotalWallTimeMs: config.toolPayloadCleanupMaxTotalWallTimeMs,
   });
   if (
     persistedPlan &&
@@ -172,10 +205,22 @@ function createToolPayloadCleanupPlan(
   ) {
     return null;
   }
+  if (
+    fixedCutoffConfigured &&
+    (cumulative.rows >= (config.toolPayloadCleanupMaxTotalRows ?? 0) ||
+      cumulative.bytes >= (config.toolPayloadCleanupMaxTotalBytes ?? 0) ||
+      cumulative.r2Operations >= (config.toolPayloadCleanupMaxTotalR2Operations ?? 0) ||
+      cumulative.wallTimeMs >= (config.toolPayloadCleanupMaxTotalWallTimeMs ?? 0))
+  ) {
+    return null;
+  }
   const underStoragePressure =
     beforeBytes >= triggerBytes || (hasPendingCleanup && beforeBytes > targetBytes);
 
   if (pendingRecheckAt !== null && pendingRecheckAt > now && !options.forceStart) {
+    return null;
+  }
+  if (fixedCutoffConfigured && hasPendingCleanup && beforeBytes <= targetBytes) {
     return null;
   }
   if (!hasPendingCleanup && !retentionDue && !options.allowStart && !options.forceStart) {
@@ -195,6 +240,10 @@ function createToolPayloadCleanupPlan(
     reason = 'storage_pressure';
   }
 
+  const remainingTotalWallTimeMs = config.toolPayloadCleanupMaxTotalWallTimeMs
+    ? config.toolPayloadCleanupMaxTotalWallTimeMs - cumulative.wallTimeMs
+    : config.toolPayloadCleanupWallTimeMs;
+  const passWallTimeMs = Math.min(config.toolPayloadCleanupWallTimeMs, remainingTotalWallTimeMs);
   return {
     projectId,
     planId,
@@ -214,7 +263,15 @@ function createToolPayloadCleanupPlan(
     archiveChunkBytes: config.toolPayloadArchiveChunkBytes,
     archiveMaxMetadataBytes: config.toolPayloadArchiveMaxMetadataBytes,
     cutoffCreatedAt,
-    deadlineMs: wallClockStart + config.toolPayloadCleanupWallTimeMs,
+    deadlineMs: wallClockStart + passWallTimeMs,
+    wallClockStart,
+    manifestKey: config.toolPayloadCleanupManifestKey,
+    manifestSha256: config.toolPayloadCleanupManifestSha256,
+    maxTotalRows: config.toolPayloadCleanupMaxTotalRows,
+    maxTotalBytes: config.toolPayloadCleanupMaxTotalBytes,
+    maxTotalR2Operations: config.toolPayloadCleanupMaxTotalR2Operations,
+    maxTotalWallTimeMs: config.toolPayloadCleanupMaxTotalWallTimeMs,
+    cumulative,
     pendingCursor,
     ...(options.nowMs ? { nowMs: options.nowMs } : {}),
     ...(options.transactionSync ? { transactionSync: options.transactionSync } : {}),
@@ -226,6 +283,9 @@ function createEmptyToolPayloadCleanupBatch(): ToolPayloadCleanupBatch {
     sessionsScanned: 0,
     rowsScanned: 0,
     rowsUpdated: 0,
+    approvedRowsCompleted: 0,
+    approvedBytesCompleted: 0,
+    archiveOperations: 0,
     rowsFailed: 0,
     rearchivableOversizedAttemptsReset: 0,
     toolMetadataBytesScanned: 0,
@@ -245,12 +305,177 @@ function countSessions(candidates: ToolPayloadCandidate[]): number {
   return new Set(candidates.map((candidate) => candidate.sessionId)).size;
 }
 
+async function scanApprovedToolPayloadCleanupBatch(
+  sql: SqlStorage,
+  env: Env,
+  config: StorageSafetyConfig,
+  plan: ToolPayloadCleanupPlan
+): Promise<ToolPayloadCleanupBatch> {
+  const batch = createEmptyToolPayloadCleanupBatch();
+  const r2 = env.PROJECT_DATA_ARCHIVE_R2;
+  if (
+    !r2 ||
+    !plan.manifestKey ||
+    !plan.manifestSha256 ||
+    plan.maxTotalRows === null ||
+    plan.maxTotalBytes === null ||
+    plan.maxTotalR2Operations === null
+  ) {
+    throw new Error('approved tool payload cleanup manifest configuration is incomplete');
+  }
+  const operationBudget: ToolPayloadArchiveOperationBudget = {
+    used: 0,
+    max: Math.min(
+      plan.archiveMaxOperations,
+      plan.maxTotalR2Operations - plan.cumulative.r2Operations
+    ),
+  };
+  try {
+    const root = await readToolPayloadCleanupManifestRoot({
+      r2,
+      key: plan.manifestKey,
+      sha256: plan.manifestSha256,
+      timeoutMs: plan.archiveWriteTimeoutMs,
+      deadlineMs: plan.deadlineMs,
+      operationBudget,
+      ...(plan.nowMs ? { nowMs: plan.nowMs } : {}),
+    });
+    if (
+      root.planId !== plan.planId ||
+      root.projectId !== plan.projectId ||
+      root.cutoffCreatedAt !== plan.cutoffCreatedAt ||
+      root.eligibleRows > plan.maxTotalRows ||
+      root.eligibleBytes > plan.maxTotalBytes
+    ) {
+      throw new Error('approved tool payload cleanup manifest does not match configured scope');
+    }
+
+    const remainingRows = plan.maxTotalRows - plan.cumulative.rows;
+    const remainingBytes = plan.maxTotalBytes - plan.cumulative.bytes;
+    const candidates: ToolPayloadCandidate[] = [];
+    let candidateMetadataBytes = 0;
+    let candidateProjectedBytes = 0;
+    let previousManifestRowId = 0;
+    let manifestHasMore = false;
+    outer: for (const proof of root.batches) {
+      if (plan.pendingCursor && proof.lastRowId <= plan.pendingCursor.rowId) {
+        previousManifestRowId = proof.lastRowId;
+        continue;
+      }
+      if (operationBudget.used + 2 > operationBudget.max) {
+        manifestHasMore = true;
+        break;
+      }
+      const manifestBatch = await readToolPayloadCleanupManifestBatch({
+        r2,
+        proof,
+        root,
+        timeoutMs: plan.archiveWriteTimeoutMs,
+        deadlineMs: plan.deadlineMs,
+        operationBudget,
+        ...(plan.nowMs ? { nowMs: plan.nowMs } : {}),
+      });
+      for (const target of manifestBatch.targets) {
+        if (target.rowId <= previousManifestRowId) {
+          throw new Error('approved tool payload cleanup targets are not globally ordered');
+        }
+        previousManifestRowId = target.rowId;
+        if (plan.pendingCursor && target.rowId <= plan.pendingCursor.rowId) continue;
+        const nextMetadataBytes = candidateMetadataBytes + target.toolMetadataBytes;
+        const nextProjectedBytes = candidateProjectedBytes + target.projectedReclaimableBytes;
+        if (
+          candidates.length >= Math.min(plan.batchRows, remainingRows) ||
+          (nextMetadataBytes > plan.batchBytes && candidates.length > 0) ||
+          nextProjectedBytes > remainingBytes
+        ) {
+          manifestHasMore = true;
+          break outer;
+        }
+        candidates.push({
+          rowId: target.rowId,
+          sessionId: target.sessionId,
+          createdAt: target.messageCreatedAt,
+          sequence: target.messageSequence,
+          messageId: target.messageId,
+          toolMetadataBytes: target.toolMetadataBytes,
+          approvedToolMetadataSha256: target.toolMetadataSha256,
+          projectedReclaimableBytes: target.projectedReclaimableBytes,
+        });
+        candidateMetadataBytes = nextMetadataBytes;
+        candidateProjectedBytes = nextProjectedBytes;
+      }
+    }
+
+    if (candidates.length === 0) {
+      batch.archiveOperations = operationBudget.used;
+      if (manifestHasMore) {
+        throw new Error('approved cleanup budget cannot admit the next manifest target');
+      }
+      return batch;
+    }
+    const scanned = await scanToolPayloadCandidates({
+      sql,
+      env,
+      projectId: plan.projectId,
+      archivePrefix: config.toolPayloadArchiveR2Prefix,
+      archiveRetryDelayMs: plan.archiveRetryDelayMs,
+      archiveWriteTimeoutMs: plan.archiveWriteTimeoutMs,
+      archiveMaxOperations: operationBudget.max,
+      archiveChunkBytes: plan.archiveChunkBytes,
+      archiveMaxMetadataBytes: plan.archiveMaxMetadataBytes,
+      operationBudget,
+      requireApprovedTargets: true,
+      ...(plan.transactionSync ? { transactionSync: plan.transactionSync } : {}),
+      batchBytes: plan.batchBytes,
+      maxRowBytes: plan.maxRowBytes,
+      candidates,
+      initialCursor: plan.pendingCursor,
+      archivedAt: plan.now,
+      deadlineMs: plan.deadlineMs,
+      ...(plan.nowMs ? { nowMs: plan.nowMs } : {}),
+    });
+    batch.sessionsScanned = countSessions(candidates.slice(0, scanned.rowsScanned));
+    batch.rowsScanned = scanned.rowsScanned;
+    batch.rowsUpdated = scanned.rowsUpdated;
+    batch.approvedRowsCompleted = scanned.approvedRowsCompleted;
+    batch.approvedBytesCompleted = scanned.approvedBytesCompleted;
+    batch.archiveOperations = scanned.archiveOperations;
+    batch.rowsFailed = scanned.rowsFailed;
+    batch.toolMetadataBytesScanned = scanned.toolMetadataBytesScanned;
+    batch.toolMetadataBytesRead = scanned.toolMetadataBytesRead;
+    batch.originalToolMetadataBytes = scanned.originalToolMetadataBytes;
+    batch.storedToolMetadataBytes = scanned.storedToolMetadataBytes;
+    batch.errorMessages.push(...scanned.errorMessages);
+    batch.lastCursor = scanned.lastCursor;
+    batch.retryableFailure = scanned.retryableFailure;
+    if (scanned.retryableFailure || scanned.pausedForWallTime) {
+      batch.hasMoreCandidates = true;
+      batch.pauseCursor = scanned.retryCursor ?? scanned.lastCursor;
+    } else if (manifestHasMore) {
+      batch.hasMoreCandidates = true;
+      batch.pauseCursor = scanned.lastCursor;
+    }
+    return batch;
+  } catch (error) {
+    const nowMs = plan.nowMs ?? Date.now;
+    writeToolPayloadCleanupCumulativeProgress(sql, {
+      ...plan.cumulative,
+      r2Operations: plan.cumulative.r2Operations + operationBudget.used,
+      wallTimeMs: plan.cumulative.wallTimeMs + Math.max(nowMs() - plan.wallClockStart, 0),
+    });
+    throw error;
+  }
+}
+
 async function scanToolPayloadCleanupBatch(
   sql: SqlStorage,
   env: Env,
   config: StorageSafetyConfig,
   plan: ToolPayloadCleanupPlan
 ): Promise<ToolPayloadCleanupBatch> {
+  if (plan.manifestKey) {
+    return scanApprovedToolPayloadCleanupBatch(sql, env, config, plan);
+  }
   const batch = createEmptyToolPayloadCleanupBatch();
   const rearchivableResult = clearRearchivableOversizedToolPayloadCleanupAttempts(
     sql,
@@ -267,11 +492,17 @@ async function scanToolPayloadCleanupBatch(
     plan.now,
     plan.batchRows,
     plan.batchBytes,
-    true
+    true,
+    config.storageReliefMeasureMaxBatchRows
   );
   const candidates = selection.candidates;
 
   if (candidates.length === 0) {
+    if (selection.hasMore && selection.nextCursor) {
+      batch.hasMoreCandidates = true;
+      batch.pauseCursor = selection.nextCursor;
+      return batch;
+    }
     const nextRetryAt = readNextToolPayloadCleanupRetryAt(sql, plan.now);
     if (nextRetryAt !== null) {
       batch.hasMoreCandidates = true;
@@ -303,6 +534,7 @@ async function scanToolPayloadCleanupBatch(
   batch.sessionsScanned = countSessions(candidates.slice(0, scanned.rowsScanned));
   batch.rowsScanned = scanned.rowsScanned;
   batch.rowsUpdated = scanned.rowsUpdated;
+  batch.archiveOperations = scanned.archiveOperations;
   batch.rowsFailed = scanned.rowsFailed;
   batch.toolMetadataBytesScanned = scanned.toolMetadataBytesScanned;
   batch.toolMetadataBytesRead = scanned.toolMetadataBytesRead;
@@ -330,7 +562,7 @@ async function scanToolPayloadCleanupBatch(
   const lastCursor = scanned.lastCursor;
   if (lastCursor && (selection.hasMore || rearchivableResult.hasMore)) {
     batch.hasMoreCandidates = true;
-    batch.pauseCursor = lastCursor;
+    batch.pauseCursor = selection.nextCursor ?? lastCursor;
     return batch;
   }
 
@@ -363,6 +595,9 @@ function persistToolPayloadCleanupState(
   } else if (recheckAt !== null) {
     clearToolPayloadCleanupState(sql);
     writeToolPayloadCleanupRecheckAt(sql, recheckAt, plan);
+  } else if (plan.manifestKey) {
+    clearToolPayloadCleanupState(sql);
+    writeToolPayloadCleanupRecheckAt(sql, Number.MAX_SAFE_INTEGER, plan);
   } else {
     clearToolPayloadCleanupState(sql);
   }
@@ -610,6 +845,15 @@ export async function runProjectDataToolPayloadCleanup(
     ? (batch.nextRetryAt ?? plan.now + config.toolPayloadCleanupRecheckMs)
     : null;
   persistToolPayloadCleanupState(sql, plan, continuationCursor, recheckAt);
+  if (plan.manifestKey) {
+    const nowMs = plan.nowMs ?? Date.now;
+    writeToolPayloadCleanupCumulativeProgress(sql, {
+      rows: plan.cumulative.rows + batch.approvedRowsCompleted,
+      bytes: plan.cumulative.bytes + batch.approvedBytesCompleted,
+      r2Operations: plan.cumulative.r2Operations + batch.archiveOperations,
+      wallTimeMs: plan.cumulative.wallTimeMs + Math.max(nowMs() - plan.wallClockStart, 0),
+    });
+  }
 
   const exhaustedCandidates =
     plan.reason === 'storage_pressure' && afterBytes > plan.targetBytes && !shouldContinue;

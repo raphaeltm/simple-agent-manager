@@ -2,6 +2,7 @@ import type { ProjectDataCleanupTerminationReason } from './grouped-fts-cleanup'
 import type { ProjectDataStorageStatus, ProjectDataStorageTelemetry } from './storage-safety';
 
 export interface ProjectDataToolPayloadCleanupCursor {
+  rowId: number;
   sessionId: string;
   createdAt: number;
   sequence: number;

@@ -1,4 +1,8 @@
-import { archiveToolPayloadCandidate } from './tool-payload-archive';
+import {
+  archiveToolPayloadCandidate,
+  readArchivedMessageToolContent,
+  selectArchivedToolPayloadRow,
+} from './tool-payload-archive';
 import type { ToolPayloadArchiveOperationBudget } from './tool-payload-archive-r2';
 import {
   clearToolPayloadCleanupAttempt,
@@ -10,6 +14,7 @@ import type { Env } from './types';
 const TOOL_PAYLOAD_CONTENT_KEY_NEEDLE = '"content"';
 
 export type ToolPayloadCleanupCursor = {
+  rowId: number;
   sessionId: string;
   createdAt: number;
   sequence: number;
@@ -18,27 +23,21 @@ export type ToolPayloadCleanupCursor = {
 
 export type ToolPayloadCandidate = ToolPayloadCleanupCursor & {
   toolMetadataBytes: number;
+  approvedToolMetadataSha256?: string;
+  projectedReclaimableBytes?: number;
 };
 
 export type ToolPayloadCandidateSelection = {
   candidates: ToolPayloadCandidate[];
   hasMore: boolean;
-};
-
-type ToolPayloadCandidateSelectionRow = {
-  id: string;
-  sessionId: string;
-  createdAt: number;
-  sequence: number;
-  toolMetadataBytes: number;
-  rowNumber: number;
-  cumulativeToolMetadataBytes: number;
-  totalLimitedRows: number;
+  nextCursor: ToolPayloadCleanupCursor | null;
 };
 
 export type ToolPayloadCandidateScanResult = {
   rowsScanned: number;
   rowsUpdated: number;
+  approvedRowsCompleted: number;
+  approvedBytesCompleted: number;
   rowsFailed: number;
   toolMetadataBytesScanned: number;
   toolMetadataBytesRead: number;
@@ -49,6 +48,7 @@ export type ToolPayloadCandidateScanResult = {
   pausedForWallTime: boolean;
   retryableFailure: boolean;
   errorMessages: string[];
+  archiveOperations: number;
 };
 
 type ToolPayloadCandidateUpdate = {
@@ -89,6 +89,8 @@ type ToolPayloadCandidateScanInput = Omit<
   deadlineMs: number;
   archiveMaxOperations: number;
   nowMs?: () => number;
+  operationBudget?: ToolPayloadArchiveOperationBudget;
+  requireApprovedTargets?: boolean;
 };
 
 function rawNumber(value: unknown): number | null {
@@ -108,8 +110,8 @@ function messageCursorFilter(
   if (!cursor) return { clause: '', params: [] };
   const prefix = columnPrefix ? `${columnPrefix}.` : '';
   return {
-    clause: `AND (${prefix}session_id, ${prefix}created_at, ${prefix}sequence, ${prefix}id) > (?, ?, ?, ?)`,
-    params: [cursor.sessionId, cursor.createdAt, cursor.sequence, cursor.messageId],
+    clause: `AND ${prefix}rowid > ?`,
+    params: [cursor.rowId],
   };
 }
 
@@ -120,93 +122,119 @@ export function selectToolPayloadCandidates(
   retryReadyAt: number,
   limit: number,
   maxMetadataBytes: number,
-  allowOversizedFirst: boolean
+  allowOversizedFirst: boolean,
+  physicalLimit = limit
 ): ToolPayloadCandidateSelection {
-  const cursorFilter = messageCursorFilter(cursor);
-  const whereClause = cursorFilter.clause;
-  const limitedRowLimit = limit + 1;
+  const cursorClause = cursor ? 'WHERE rowid > ?' : '';
+  const cursorParams = cursor ? [cursor.rowId] : [];
   const rows = sql
     .exec(
-      `WITH limited AS (
+      `WITH raw_window AS MATERIALIZED (
          SELECT
+           rowid AS physical_rowid,
            id,
            session_id,
            created_at,
            sequence,
-           length(CAST(tool_metadata AS BLOB)) AS tool_metadata_bytes
+           role,
+           length(CAST(tool_metadata AS BLOB)) AS tool_metadata_bytes,
+           CASE WHEN tool_metadata IS NOT NULL AND instr(tool_metadata, ?) > 0 THEN 1 ELSE 0 END AS has_content
          FROM chat_messages
-         WHERE role = 'tool'
-           AND tool_metadata IS NOT NULL
-           AND instr(tool_metadata, ?) > 0
-           AND created_at < ?
-           AND sequence IS NOT NULL
-           ${whereClause}
-           AND NOT EXISTS (
-             SELECT 1
-             FROM tool_payload_archives archived
-             WHERE archived.message_id = chat_messages.id
-           )
-           AND NOT EXISTS (
-             SELECT 1
-             FROM tool_payload_cleanup_attempts attempt
-             WHERE attempt.message_id = chat_messages.id
-               AND (
-                 attempt.status IN ('no_reclaimable_payload', 'invalid_metadata', 'oversized')
-                 OR (
-                   attempt.status = 'retryable_failure'
-                   AND attempt.next_attempt_at IS NOT NULL
-                   AND attempt.next_attempt_at > ?
-                 )
-               )
-           )
-         ORDER BY session_id ASC, created_at ASC, sequence ASC, id ASC
+         ${cursorClause}
+         ORDER BY rowid ASC
          LIMIT ?
-       ),
-       bounded AS (
-         SELECT
-           id,
-           session_id,
-           created_at,
-           sequence,
-           tool_metadata_bytes,
-           ROW_NUMBER() OVER (
-             ORDER BY session_id ASC, created_at ASC, sequence ASC, id ASC
-           ) AS row_number,
-           SUM(tool_metadata_bytes) OVER (
-             ORDER BY session_id ASC, created_at ASC, sequence ASC, id ASC
-             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-           ) AS cumulative_tool_metadata_bytes,
-           COUNT(*) OVER () AS total_limited_rows
-         FROM limited
        )
        SELECT
-         id,
-         session_id,
-         created_at,
-         sequence,
-         tool_metadata_bytes,
-         row_number,
-         cumulative_tool_metadata_bytes,
-         total_limited_rows
-       FROM bounded
-       ORDER BY session_id ASC, created_at ASC, sequence ASC, id ASC`,
+         raw.physical_rowid,
+         raw.id,
+         raw.session_id,
+         raw.created_at,
+         raw.sequence,
+         raw.role,
+         raw.tool_metadata_bytes,
+         raw.has_content,
+         CASE WHEN archived.message_id IS NULL THEN 0 ELSE 1 END AS archived,
+         attempt.status,
+         attempt.next_attempt_at
+       FROM raw_window raw
+       LEFT JOIN tool_payload_archives archived ON archived.message_id = raw.id
+       LEFT JOIN tool_payload_cleanup_attempts attempt ON attempt.message_id = raw.id
+       ORDER BY raw.physical_rowid ASC`,
       TOOL_PAYLOAD_CONTENT_KEY_NEEDLE,
-      cutoffCreatedAt,
-      ...cursorFilter.params,
-      retryReadyAt,
-      limitedRowLimit
+      ...cursorParams,
+      physicalLimit + 1
     )
     .raw();
-  const selection = parseToolPayloadCandidateRows(
-    rows,
-    limit,
-    maxMetadataBytes,
-    allowOversizedFirst
-  );
-  return {
-    candidates: selection.candidates,
-    hasMore: selection.totalLimitedRows > selection.candidates.length,
-  };
+  const candidates: ToolPayloadCandidate[] = [];
+  let nextCursor: ToolPayloadCleanupCursor | null = cursor;
+  let cumulativeBytes = 0;
+  let physicalRows = 0;
+  let hasMore = false;
+  for (const row of rows) {
+    if (physicalRows >= physicalLimit) {
+      hasMore = true;
+      break;
+    }
+    const rowId = rawNumber(row[0]);
+    const messageId = row[1];
+    const sessionId = row[2];
+    const createdAt = rawNumber(row[3]);
+    const sequence = rawNumber(row[4]);
+    const role = row[5];
+    const toolMetadataBytes = rawNumber(row[6]) ?? 0;
+    const hasContent = rawNumber(row[7]) === 1;
+    const archived = rawNumber(row[8]) === 1;
+    const attemptStatus = typeof row[9] === 'string' ? row[9] : null;
+    const nextAttemptAt = rawNumber(row[10]);
+    if (
+      rowId === null ||
+      typeof messageId !== 'string' ||
+      typeof sessionId !== 'string' ||
+      createdAt === null
+    ) {
+      continue;
+    }
+    physicalRows++;
+    const currentCursor: ToolPayloadCleanupCursor = {
+      rowId,
+      sessionId,
+      createdAt,
+      sequence: sequence ?? -1,
+      messageId,
+    };
+    const eligible =
+      role === 'tool' &&
+      sequence !== null &&
+      toolMetadataBytes > 0 &&
+      hasContent &&
+      createdAt < cutoffCreatedAt &&
+      !archived &&
+      attemptStatus !== 'no_reclaimable_payload' &&
+      attemptStatus !== 'invalid_metadata' &&
+      attemptStatus !== 'oversized' &&
+      !(
+        attemptStatus === 'retryable_failure' &&
+        nextAttemptAt !== null &&
+        nextAttemptAt > retryReadyAt
+      );
+    if (!eligible) {
+      nextCursor = currentCursor;
+      continue;
+    }
+    if (candidates.length >= limit) {
+      hasMore = true;
+      break;
+    }
+    const nextBytes = cumulativeBytes + toolMetadataBytes;
+    if (nextBytes > maxMetadataBytes && !(allowOversizedFirst && candidates.length === 0)) {
+      hasMore = true;
+      break;
+    }
+    candidates.push({ ...currentCursor, toolMetadataBytes });
+    cumulativeBytes = nextBytes;
+    nextCursor = currentCursor;
+  }
+  return { candidates, hasMore, nextCursor };
 }
 
 export type RearchivableOversizedCleanupResult = {
@@ -257,76 +285,9 @@ export function clearRearchivableOversizedToolPayloadCleanupAttempts(
   return { rowsChanged, hasMore: rowsChanged >= limit };
 }
 
-function parseToolPayloadCandidateRows(
-  rows: IterableIterator<unknown[]>,
-  limit: number,
-  maxMetadataBytes: number,
-  allowOversizedFirst: boolean
-): { candidates: ToolPayloadCandidate[]; totalLimitedRows: number } {
-  const candidates: ToolPayloadCandidate[] = [];
-  let totalLimitedRows = 0;
-  for (const row of rows) {
-    const parsed = parseToolPayloadCandidateSelectionRow(row);
-    if (!parsed) continue;
-    totalLimitedRows = Math.max(totalLimitedRows, parsed.totalLimitedRows);
-    const withinRowLimit = parsed.rowNumber <= limit;
-    const withinByteLimit = parsed.cumulativeToolMetadataBytes <= maxMetadataBytes;
-    const oversizedFirstAllowed = allowOversizedFirst && parsed.rowNumber === 1;
-    if (withinRowLimit && (withinByteLimit || oversizedFirstAllowed)) {
-      candidates.push({
-        sessionId: parsed.sessionId,
-        createdAt: parsed.createdAt,
-        sequence: parsed.sequence,
-        messageId: parsed.id,
-        toolMetadataBytes: parsed.toolMetadataBytes,
-      });
-    }
-  }
-  return { candidates, totalLimitedRows };
-}
-
-function parseToolPayloadCandidateSelectionRow(
-  row: unknown[]
-): ToolPayloadCandidateSelectionRow | null {
-  const id = row[0];
-  const sessionId = row[1];
-  const createdAt = rawNumber(row[2]);
-  const sequence = rawNumber(row[3]);
-  const toolMetadataBytes = rawNumber(row[4]);
-  const rowNumber = rawNumber(row[5]);
-  const cumulativeToolMetadataBytes = rawNumber(row[6]);
-  const totalLimitedRows = rawNumber(row[7]);
-  if (
-    typeof id !== 'string' ||
-    typeof sessionId !== 'string' ||
-    createdAt === null ||
-    sequence === null ||
-    toolMetadataBytes === null ||
-    toolMetadataBytes <= 0 ||
-    rowNumber === null ||
-    rowNumber <= 0 ||
-    cumulativeToolMetadataBytes === null ||
-    cumulativeToolMetadataBytes <= 0 ||
-    totalLimitedRows === null ||
-    totalLimitedRows <= 0
-  ) {
-    return null;
-  }
-  return {
-    id,
-    sessionId,
-    createdAt,
-    sequence,
-    toolMetadataBytes,
-    rowNumber,
-    cumulativeToolMetadataBytes,
-    totalLimitedRows,
-  };
-}
-
 function readBoundedToolMetadata(
   sql: SqlStorage,
-  messageId: string,
+  candidate: ToolPayloadCandidate,
   maxMetadataBytes: number
 ): string | null {
   const rows = sql
@@ -334,10 +295,17 @@ function readBoundedToolMetadata(
       `SELECT tool_metadata
        FROM chat_messages
        WHERE id = ?
+         AND session_id = ?
+         AND created_at = ?
+         AND sequence = ?
+         AND role = 'tool'
          AND tool_metadata IS NOT NULL
          AND length(CAST(tool_metadata AS BLOB)) <= ?
        LIMIT 1`,
-      messageId,
+      candidate.messageId,
+      candidate.sessionId,
+      candidate.createdAt,
+      candidate.sequence,
       maxMetadataBytes
     )
     .raw();
@@ -424,10 +392,57 @@ async function processToolPayloadCandidate(
 
   const toolMetadata = readBoundedToolMetadata(
     context.sql,
-    candidate.messageId,
+    candidate,
     Math.min(maxReadBytes, context.archiveMaxMetadataBytes)
   );
-  if (toolMetadata === null) return emptyCandidateUpdate();
+  if (toolMetadata === null) {
+    if (!candidate.approvedToolMetadataSha256) return emptyCandidateUpdate();
+    const archived = selectArchivedToolPayloadRow(
+      context.sql,
+      candidate.messageId,
+      candidate.sessionId
+    );
+    if (
+      archived?.sourceToolMetadataSha256 === candidate.approvedToolMetadataSha256 &&
+      archived.messageCreatedAt === candidate.createdAt &&
+      archived.messageSequence === candidate.sequence &&
+      archived.toolMetadataBytes === candidate.toolMetadataBytes
+    ) {
+      const verified = await readArchivedMessageToolContent(
+        context.sql,
+        context.env,
+        context.projectId,
+        candidate.sessionId,
+        candidate.messageId
+      );
+      if (verified?.source === 'archive') {
+        return { ...emptyCandidateUpdate(), cleanupAttemptStatus: 'archived' };
+      }
+    }
+    return {
+      ...emptyCandidateUpdate(),
+      rowsFailed: 1,
+      retryableFailure: true,
+      errorMessage:
+        'approved tool payload source is missing and no matching verified archive exists',
+      cleanupAttemptStatus: 'retryable_failure',
+    };
+  }
+  if (candidate.approvedToolMetadataSha256) {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(toolMetadata));
+    const actual = Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, '0')
+    ).join('');
+    if (actual !== candidate.approvedToolMetadataSha256) {
+      return {
+        ...emptyCandidateUpdate(),
+        rowsFailed: 1,
+        retryableFailure: true,
+        errorMessage: 'approved tool payload source SHA-256 changed after preflight',
+        cleanupAttemptStatus: 'retryable_failure',
+      };
+    }
+  }
 
   return archiveToolPayloadCandidate({
     sql: context.sql,
@@ -450,6 +465,8 @@ function createEmptyCandidateScanResult(): ToolPayloadCandidateScanResult {
   return {
     rowsScanned: 0,
     rowsUpdated: 0,
+    approvedRowsCompleted: 0,
+    approvedBytesCompleted: 0,
     rowsFailed: 0,
     toolMetadataBytesScanned: 0,
     toolMetadataBytesRead: 0,
@@ -460,6 +477,7 @@ function createEmptyCandidateScanResult(): ToolPayloadCandidateScanResult {
     pausedForWallTime: false,
     retryableFailure: false,
     errorMessages: [],
+    archiveOperations: 0,
   };
 }
 
@@ -468,7 +486,7 @@ export async function scanToolPayloadCandidates(
 ): Promise<ToolPayloadCandidateScanResult> {
   const result = createEmptyCandidateScanResult();
   const nowMs = input.nowMs ?? Date.now;
-  const archiveOperationBudget: ToolPayloadArchiveOperationBudget = {
+  const archiveOperationBudget: ToolPayloadArchiveOperationBudget = input.operationBudget ?? {
     used: 0,
     max: input.archiveMaxOperations,
   };
@@ -516,12 +534,14 @@ export async function scanToolPayloadCandidates(
     result.storedToolMetadataBytes += updated.storedToolMetadataBytes;
     if (updated.errorMessage) result.errorMessages.push(updated.errorMessage);
 
-    if (updated.retryableFailure) {
+    if (updated.retryableFailure || (input.requireApprovedTargets && updated.rowsFailed > 0)) {
       result.retryableFailure = true;
       result.retryCursor = previousCursor;
       break;
     }
 
+    result.approvedRowsCompleted++;
+    result.approvedBytesCompleted += candidate.projectedReclaimableBytes ?? 0;
     previousCursor = candidate;
 
     if (nowMs() >= input.deadlineMs) {
@@ -530,6 +550,8 @@ export async function scanToolPayloadCandidates(
       break;
     }
   }
+
+  result.archiveOperations = archiveOperationBudget.used;
 
   return result;
 }

@@ -34,6 +34,7 @@ export type ArchivedToolPayloadRow = {
   rootObjectBytes: number | null;
   rootObjectSha256: string | null;
   verifiedObjectCount: number | null;
+  sourceToolMetadataSha256: string | null;
 };
 
 export type MessageToolContentResult = {
@@ -281,7 +282,8 @@ function upsertArchiveRow(
   sql: SqlStorage,
   candidate: ToolPayloadArchiveCandidate,
   archivedAt: number,
-  prepared: PreparedToolPayloadArchive
+  prepared: PreparedToolPayloadArchive,
+  sourceToolMetadataSha256: string
 ): void {
   const verification = prepared.verification;
   if (!verification) throw new Error('verified archive proof is required for bookkeeping');
@@ -300,9 +302,10 @@ function upsertArchiveRow(
        archive_body_sha256,
        root_object_bytes,
        root_object_sha256,
-       verified_object_count
+       verified_object_count,
+       source_tool_metadata_sha256
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(message_id) DO UPDATE SET
        session_id = excluded.session_id,
        r2_key = excluded.r2_key,
@@ -316,7 +319,8 @@ function upsertArchiveRow(
        archive_body_sha256 = excluded.archive_body_sha256,
        root_object_bytes = excluded.root_object_bytes,
        root_object_sha256 = excluded.root_object_sha256,
-       verified_object_count = excluded.verified_object_count`,
+       verified_object_count = excluded.verified_object_count,
+       source_tool_metadata_sha256 = excluded.source_tool_metadata_sha256`,
     candidate.messageId,
     candidate.sessionId,
     prepared.key,
@@ -330,7 +334,8 @@ function upsertArchiveRow(
     verification.archiveBodySha256,
     verification.rootObjectBytes,
     verification.rootObjectSha256,
-    verification.objectCount
+    verification.objectCount,
+    sourceToolMetadataSha256
   );
 }
 
@@ -400,6 +405,7 @@ function writeArchiveBookkeeping(input: {
   archivedAt: number;
   prepared: PreparedToolPayloadArchive;
   originalToolMetadata: string;
+  sourceToolMetadataSha256: string;
 }): void {
   const transactionSync = input.transactionSync ?? (<T>(callback: () => T): T => callback());
   transactionSync(() => {
@@ -409,7 +415,13 @@ function writeArchiveBookkeeping(input: {
       input.originalToolMetadata,
       input.prepared.strippedToolMetadata
     );
-    upsertArchiveRow(input.sql, input.candidate, input.archivedAt, input.prepared);
+    upsertArchiveRow(
+      input.sql,
+      input.candidate,
+      input.archivedAt,
+      input.prepared,
+      input.sourceToolMetadataSha256
+    );
   });
 }
 
@@ -429,6 +441,7 @@ export async function archiveToolPayloadCandidate(input: {
   archivedAt: number;
 }): Promise<ToolPayloadArchiveUpdateResult> {
   const toolMetadataBytesRead = utf8Bytes(input.toolMetadata);
+  const sourceToolMetadataSha256 = await sha256Hex(textEncoder.encode(input.toolMetadata));
   let prepared: PreparedToolPayloadArchive | null;
   try {
     prepared = prepareToolPayloadArchive(input);
@@ -495,6 +508,7 @@ export async function archiveToolPayloadCandidate(input: {
       archivedAt: input.archivedAt,
       prepared,
       originalToolMetadata: input.toolMetadata,
+      sourceToolMetadataSha256,
     });
   } catch (error) {
     log.warn('archive_write_failed_closed', {
@@ -545,7 +559,8 @@ export function selectArchivedToolPayloadRow(
          archive_body_sha256,
          root_object_bytes,
          root_object_sha256,
-         verified_object_count
+         verified_object_count,
+         source_tool_metadata_sha256
        FROM tool_payload_archives
        WHERE message_id = ?
          AND (? IS NULL OR session_id = ?)
@@ -574,6 +589,7 @@ function parseArchivedToolPayloadRow(row: unknown[]): ArchivedToolPayloadRow {
   const rootObjectBytes = row[11] === null ? null : rawNumber(row[11]);
   const rootObjectSha256 = row[12];
   const verifiedObjectCount = row[13] === null ? null : rawNumber(row[13]);
+  const sourceToolMetadataSha256 = row[14];
   if (
     typeof messageId !== 'string' ||
     typeof sessionId !== 'string' ||
@@ -585,7 +601,8 @@ function parseArchivedToolPayloadRow(row: unknown[]): ArchivedToolPayloadRow {
     messageSequence === null ||
     archiveVersion === null ||
     (archiveBodySha256 !== null && typeof archiveBodySha256 !== 'string') ||
-    (rootObjectSha256 !== null && typeof rootObjectSha256 !== 'string')
+    (rootObjectSha256 !== null && typeof rootObjectSha256 !== 'string') ||
+    (sourceToolMetadataSha256 !== null && typeof sourceToolMetadataSha256 !== 'string')
   ) {
     throw new Error('Invalid archived tool payload row');
   }
@@ -604,6 +621,7 @@ function parseArchivedToolPayloadRow(row: unknown[]): ArchivedToolPayloadRow {
     rootObjectBytes,
     rootObjectSha256,
     verifiedObjectCount,
+    sourceToolMetadataSha256,
   };
 }
 
@@ -776,7 +794,8 @@ function selectArchivedToolPayloadRows(
          archive_body_sha256,
          root_object_bytes,
          root_object_sha256,
-         verified_object_count
+         verified_object_count,
+         source_tool_metadata_sha256
        FROM tool_payload_archives
        WHERE ${where}
        ORDER BY message_created_at ASC, message_sequence ASC, message_id ASC

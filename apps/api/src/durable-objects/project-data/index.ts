@@ -1510,10 +1510,10 @@ export class ProjectData extends DurableObject<Env> {
     return result;
   }
 
-  measureStorageRelief(
+  async measureStorageRelief(
     input: storageReliefMeasurement.ProjectDataStorageReliefMeasureInput = {}
-  ): storageReliefMeasurement.ProjectDataStorageReliefMeasureResult {
-    return storageReliefMeasurement.measureProjectDataStorageReliefSlice(
+  ): Promise<storageReliefMeasurement.ProjectDataStorageReliefMeasureResult> {
+    return await storageReliefMeasurement.measureProjectDataStorageReliefSlice(
       this.sql,
       this.env,
       storageSafety.resolveStorageSafetyConfig(this.env),

@@ -1784,17 +1784,32 @@ export const MIGRATIONS: Migration[] = [
   {
     name: '044-tool-payload-archive-verification-proof',
     run: (sql) => {
-      for (const statement of [
-        `ALTER TABLE tool_payload_archives ADD COLUMN archive_body_bytes INTEGER`,
-        `ALTER TABLE tool_payload_archives ADD COLUMN archive_body_sha256 TEXT`,
-        `ALTER TABLE tool_payload_archives ADD COLUMN root_object_bytes INTEGER`,
-        `ALTER TABLE tool_payload_archives ADD COLUMN root_object_sha256 TEXT`,
-        `ALTER TABLE tool_payload_archives ADD COLUMN verified_object_count INTEGER`,
-      ]) {
+      const columns = [
+        ['archive_body_bytes', 'INTEGER'],
+        ['archive_body_sha256', 'TEXT'],
+        ['root_object_bytes', 'INTEGER'],
+        ['root_object_sha256', 'TEXT'],
+        ['verified_object_count', 'INTEGER'],
+        ['source_tool_metadata_sha256', 'TEXT'],
+      ] as const;
+      for (const [column, type] of columns) {
         try {
-          sql.exec(statement);
-        } catch {
-          // Additive compatibility: a partially migrated object may already have the column.
+          sql.exec(`ALTER TABLE tool_payload_archives ADD COLUMN ${column} ${type}`);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!new RegExp(`duplicate column name:\\s*${column}`, 'i').test(message)) throw error;
+        }
+      }
+      const actualColumns = new Set(
+        sql
+          .exec('PRAGMA table_info(tool_payload_archives)')
+          .toArray()
+          .map((row) => row.name)
+          .filter((value): value is string => typeof value === 'string')
+      );
+      for (const [column] of columns) {
+        if (!actualColumns.has(column)) {
+          throw new Error(`tool_payload_archives verification column ${column} is missing`);
         }
       }
     },

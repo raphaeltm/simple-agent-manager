@@ -566,6 +566,12 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_MAX?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID?: string; // Required immutable operator plan id when a fixed cutoff is configured
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY?: string; // Required verified R2 target-manifest root for a fixed cleanup plan
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256?: string; // Required SHA-256 of the approved target-manifest root
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS?: string; // Hard cumulative approved source-row ceiling
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES?: string; // Hard cumulative approved projected-reclaim ceiling
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS?: string; // Hard cumulative approved R2 operation ceiling
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_WALL_TIME_MS?: string; // Hard cumulative approved cleanup wall-time ceiling
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS?: string; // Optional comma-separated project allowlist for automatic cleanup; empty means all projects
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT?: string; // Optional fixed exclusive message creation cutoff; malformed/future values fail closed
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO?: string;

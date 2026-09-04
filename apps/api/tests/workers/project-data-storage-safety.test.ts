@@ -920,9 +920,24 @@ describe('ProjectData storage safety firebreak', () => {
     expect(firstMeasure.grouped.hasMore).toBe(true);
     expect(firstMeasure.grouped.nextCursor).not.toBeNull();
     expect(firstMeasure.toolPayloads.rowsExamined).toBe(1);
-    expect(firstMeasure.toolPayloads.eligibleRows).toBe(1);
-    expect(firstMeasure.toolPayloads.legacyOversizedRows).toBe(1);
+    expect(firstMeasure.toolPayloads.eligibleRows).toBe(0);
+    expect(firstMeasure.toolPayloads.legacyOversizedRows).toBe(0);
     expect(firstMeasure.toolPayloads.oversizedRows).toBe(0);
+    expect(firstMeasure.toolPayloads.hasMore).toBe(true);
+    expect(firstMeasure.toolPayloads.nextCursor).not.toBeNull();
+
+    const resumedPayloadMeasure = await projectDataService.measureProjectDataStorageRelief(
+      testEnv,
+      projectId,
+      {
+        limit: 10,
+        surface: 'tool_payloads',
+        cursor: { toolPayload: firstMeasure.toolPayloads.nextCursor! },
+      }
+    );
+    expect(resumedPayloadMeasure.toolPayloads.rowsExamined).toBeGreaterThan(0);
+    expect(resumedPayloadMeasure.toolPayloads.eligibleRows).toBe(1);
+    expect(resumedPayloadMeasure.toolPayloads.legacyOversizedRows).toBe(1);
 
     const fixedCutoffExcluded = await projectDataService.measureProjectDataStorageRelief(
       testEnv,
@@ -935,7 +950,8 @@ describe('ProjectData storage safety firebreak', () => {
     );
     expect(fixedCutoffExcluded.grouped.rowsExamined).toBe(0);
     expect(fixedCutoffExcluded.grouped.hasMore).toBe(false);
-    expect(fixedCutoffExcluded.toolPayloads.rowsExamined).toBe(0);
+    expect(fixedCutoffExcluded.toolPayloads.rowsExamined).toBeGreaterThan(0);
+    expect(fixedCutoffExcluded.toolPayloads.eligibleRows).toBe(0);
 
     const fixedCutoffIncluded = await projectDataService.measureProjectDataStorageRelief(
       testEnv,
@@ -947,7 +963,7 @@ describe('ProjectData storage safety firebreak', () => {
       }
     );
     expect(fixedCutoffIncluded.grouped.rowsExamined).toBe(0);
-    expect(fixedCutoffIncluded.toolPayloads.rowsExamined).toBe(1);
+    expect(fixedCutoffIncluded.toolPayloads.rowsExamined).toBeGreaterThan(0);
     expect(fixedCutoffIncluded.toolPayloads.eligibleRows).toBe(1);
 
     const resumedMeasure = await projectDataService.measureProjectDataStorageRelief(

@@ -174,6 +174,12 @@ export interface StorageSafetyConfig {
   toolPayloadCleanupEnabled: boolean;
   toolPayloadCleanupExactConfigValid: boolean;
   toolPayloadCleanupPlanId: string | null;
+  toolPayloadCleanupManifestKey: string | null;
+  toolPayloadCleanupManifestSha256: string | null;
+  toolPayloadCleanupMaxTotalRows: number | null;
+  toolPayloadCleanupMaxTotalBytes: number | null;
+  toolPayloadCleanupMaxTotalR2Operations: number | null;
+  toolPayloadCleanupMaxTotalWallTimeMs: number | null;
   toolPayloadCleanupProjectIds: string[] | null;
   toolPayloadCleanupCutoffCreatedAt: number | null;
   toolPayloadCleanupTriggerRatio: number;
@@ -227,6 +233,13 @@ function optionalPositiveIntegerIsValid(value: string | undefined): boolean {
   if (!normalized) return true;
   if (!/^[1-9][0-9]*$/.test(normalized)) return false;
   return Number.isSafeInteger(Number(normalized));
+}
+
+function parseOptionalPositiveInteger(value: string | undefined): number | null {
+  const normalized = value?.trim() ?? '';
+  if (!normalized || !/^[1-9][0-9]*$/.test(normalized)) return null;
+  const parsed = Number(normalized);
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
 function optionalRatioIsValid(value: string | undefined): boolean {
@@ -392,6 +405,7 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
     toolPayloadCleanupExactConfigValid:
       optionalRatioIsValid(env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO) &&
       optionalRatioIsValid(env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO) &&
+      cleanupRatiosAreOrdered &&
       [
         env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS,
         env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES,
@@ -403,8 +417,28 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
         env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS,
         env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES,
         env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES,
+        env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS,
+        env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES,
+        env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS,
+        env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_WALL_TIME_MS,
       ].every(optionalPositiveIntegerIsValid),
     toolPayloadCleanupPlanId: env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID?.trim() || null,
+    toolPayloadCleanupManifestKey:
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY?.trim() || null,
+    toolPayloadCleanupManifestSha256:
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256?.trim() || null,
+    toolPayloadCleanupMaxTotalRows: parseOptionalPositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS
+    ),
+    toolPayloadCleanupMaxTotalBytes: parseOptionalPositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES
+    ),
+    toolPayloadCleanupMaxTotalR2Operations: parseOptionalPositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS
+    ),
+    toolPayloadCleanupMaxTotalWallTimeMs: parseOptionalPositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_WALL_TIME_MS
+    ),
     toolPayloadCleanupProjectIds: parseOptionalIdList(
       env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS
     ),

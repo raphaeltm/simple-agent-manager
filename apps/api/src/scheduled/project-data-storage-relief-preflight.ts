@@ -2,6 +2,13 @@ import type {
   ProjectDataStorageReliefMeasureCursor,
   ProjectDataStorageReliefToolPayloadSessionMeasure,
 } from '../durable-objects/project-data/storage-relief-measurement';
+import { DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX } from '../durable-objects/project-data/tool-payload-cleanup';
+import {
+  type ToolPayloadCleanupManifestBatchProof,
+  type ToolPayloadCleanupManifestRoot,
+  writeToolPayloadCleanupManifestBatch,
+  writeToolPayloadCleanupManifestRoot,
+} from '../durable-objects/project-data/tool-payload-cleanup-manifest';
 import type { Env } from '../env';
 import { createModuleLogger, serializeError } from '../lib/logger';
 import { measureProjectDataStorageRelief } from '../services/project-data';
@@ -16,6 +23,7 @@ export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES = 2_000_000
 export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MS = 60_000;
 export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS = 20_000;
 const PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MARGIN_MS = 5_000;
+const PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INNER_RETURN_MARGIN_MS = 500;
 const PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_MANIFEST_BYTES = 1_750_000;
 
 type PreflightStatus = 'running' | 'complete' | 'truncated' | 'failed';
@@ -34,6 +42,8 @@ type PreflightConfig = {
   maxBytes: number;
   leaseMs: number;
   wallTimeMs: number;
+  archivePrefix: string;
+  archiveWriteTimeoutMs: number;
   valid: boolean;
 };
 
@@ -59,6 +69,10 @@ type PreflightRow = {
   session_count: number;
   sessions_json: string;
   sessions_sha256: string | null;
+  target_batches_json: string;
+  target_manifest_key: string | null;
+  target_manifest_bytes: number | null;
+  target_manifest_sha256: string | null;
   database_size_bytes: number | null;
   next_eligible_at: number;
   lease_owner: string | null;
@@ -83,6 +97,9 @@ export type ProjectDataStorageReliefPreflightResult = {
   eligibleBytes: number;
   sessionCount: number;
   sessionManifestSha256: string | null;
+  targetManifestKey: string | null;
+  targetManifestBytes: number | null;
+  targetManifestSha256: string | null;
   databaseSizeBytes: number | null;
   completedAt: number | null;
   lastError: string | null;
@@ -144,6 +161,13 @@ function configFromEnv(env: Env): PreflightConfig {
     env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS,
     DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS
   );
+  const archiveWriteTimeoutMs = positiveInteger(
+    env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS,
+    5_000
+  );
+  const archivePrefix =
+    env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX?.trim() ||
+    DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX;
   const configJson = JSON.stringify({
     projectId,
     cutoffCreatedAt,
@@ -154,6 +178,8 @@ function configFromEnv(env: Env): PreflightConfig {
     maxBytes: maxBytes.value,
     leaseMs: leaseMs.value,
     wallTimeMs: wallTimeMs.value,
+    archivePrefix,
+    archiveWriteTimeoutMs: archiveWriteTimeoutMs.value,
   });
   return {
     enabled,
@@ -168,6 +194,8 @@ function configFromEnv(env: Env): PreflightConfig {
     maxBytes: maxBytes.value,
     leaseMs: leaseMs.value,
     wallTimeMs: wallTimeMs.value,
+    archivePrefix,
+    archiveWriteTimeoutMs: archiveWriteTimeoutMs.value,
     valid: Boolean(
       planId &&
       projectId &&
@@ -179,6 +207,7 @@ function configFromEnv(env: Env): PreflightConfig {
       maxBytes.valid &&
       leaseMs.valid &&
       wallTimeMs.valid &&
+      archiveWriteTimeoutMs.valid &&
       leaseMs.value >= wallTimeMs.value + PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MARGIN_MS
     ),
   };
@@ -202,6 +231,9 @@ function emptyResult(
     eligibleBytes: 0,
     sessionCount: 0,
     sessionManifestSha256: null,
+    targetManifestKey: null,
+    targetManifestBytes: null,
+    targetManifestSha256: null,
     databaseSizeBytes: null,
     completedAt: null,
     lastError: null,
@@ -226,6 +258,9 @@ function resultFromRow(
     eligibleBytes: row.eligible_bytes,
     sessionCount: row.session_count,
     sessionManifestSha256: row.sessions_sha256,
+    targetManifestKey: row.target_manifest_key,
+    targetManifestBytes: row.target_manifest_bytes,
+    targetManifestSha256: row.target_manifest_sha256,
     databaseSizeBytes: row.database_size_bytes,
     completedAt: row.completed_at,
     lastError: row.last_error,
@@ -324,6 +359,48 @@ async function sha256Text(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+function parseTargetBatchProofs(raw: string): ToolPayloadCleanupManifestBatchProof[] {
+  const parsed = JSON.parse(raw) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error('ProjectData relief preflight target batch manifest is malformed');
+  }
+  return parsed.map((value, index) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('ProjectData relief preflight target batch manifest is malformed');
+    }
+    const proof = value as Record<string, unknown>;
+    if (
+      proof.ordinal !== index ||
+      typeof proof.key !== 'string' ||
+      !proof.key ||
+      !Number.isSafeInteger(proof.bytes) ||
+      Number(proof.bytes) <= 0 ||
+      typeof proof.sha256 !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(proof.sha256) ||
+      !Number.isSafeInteger(proof.targetCount) ||
+      Number(proof.targetCount) <= 0 ||
+      !Number.isSafeInteger(proof.projectedReclaimableBytes) ||
+      Number(proof.projectedReclaimableBytes) <= 0 ||
+      !Number.isSafeInteger(proof.firstRowId) ||
+      Number(proof.firstRowId) <= 0 ||
+      !Number.isSafeInteger(proof.lastRowId) ||
+      Number(proof.lastRowId) < Number(proof.firstRowId)
+    ) {
+      throw new Error('ProjectData relief preflight target batch proof is malformed');
+    }
+    return {
+      ordinal: index,
+      key: proof.key,
+      bytes: Number(proof.bytes),
+      sha256: proof.sha256,
+      targetCount: Number(proof.targetCount),
+      projectedReclaimableBytes: Number(proof.projectedReclaimableBytes),
+      firstRowId: Number(proof.firstRowId),
+      lastRowId: Number(proof.lastRowId),
+    };
+  });
+}
+
 function verifySessionManifestTotals(
   manifestJson: string,
   expected: Omit<ProjectDataStorageReliefToolPayloadSessionMeasure, 'sessionId'>
@@ -410,12 +487,14 @@ function parseCursor(raw: string | null): ProjectDataStorageReliefMeasureCursor 
   }
   const cursor = toolPayload as Record<string, unknown>;
   if (
+    !Number.isSafeInteger(cursor.rowId) ||
+    Number(cursor.rowId) <= 0 ||
     typeof cursor.sessionId !== 'string' ||
     cursor.sessionId.length === 0 ||
     !Number.isSafeInteger(cursor.createdAt) ||
     Number(cursor.createdAt) < 0 ||
     !Number.isSafeInteger(cursor.sequence) ||
-    Number(cursor.sequence) < 0 ||
+    Number(cursor.sequence) < -1 ||
     typeof cursor.messageId !== 'string' ||
     cursor.messageId.length === 0
   ) {
@@ -423,6 +502,7 @@ function parseCursor(raw: string | null): ProjectDataStorageReliefMeasureCursor 
   }
   return {
     toolPayload: {
+      rowId: Number(cursor.rowId),
       sessionId: cursor.sessionId,
       createdAt: Number(cursor.createdAt),
       sequence: Number(cursor.sequence),
@@ -480,10 +560,12 @@ function terminalStatus(
   config: PreflightConfig,
   claimed: PreflightRow,
   totals: { rowsExamined: number; eligibleBytes: number },
-  hasMore: boolean
+  hasMore: boolean,
+  byteLimitReached: boolean
 ): PreflightStatus {
   if (!hasMore) return 'complete';
   if (
+    byteLimitReached ||
     claimed.batches_started >= config.maxBatches ||
     totals.rowsExamined >= config.maxRows ||
     totals.eligibleBytes >= config.maxBytes
@@ -575,14 +657,19 @@ export async function runProjectDataStorageReliefPreflight(
     }
 
     const cursor = parseCursor(claimed.cursor_json);
+    const sliceDeadlineMs = Date.now() + config.wallTimeMs;
+    const measurementBudgetMs = Math.max(Math.floor(config.wallTimeMs / 2), 1);
+    const innerDeadlineMs = Date.now() + measurementBudgetMs;
     const measurement = await withTimeout(
       measureProjectDataStorageRelief(env, config.projectId, {
         cursor,
         limit: Math.min(config.batchRows, remainingRows),
         surface: 'tool_payloads',
         cutoffCreatedAt: config.cutoffCreatedAt,
+        maxEligibleBytes: Math.max(config.maxBytes - claimed.eligible_bytes, 0),
+        deadlineMs: innerDeadlineMs,
       }),
-      config.wallTimeMs
+      measurementBudgetMs + PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INNER_RETURN_MARGIN_MS
     );
     const tool = measurement.toolPayloads;
     const totals = {
@@ -590,7 +677,7 @@ export async function runProjectDataStorageReliefPreflight(
       eligibleRows: claimed.eligible_rows + tool.eligibleRows,
       eligibleBytes: claimed.eligible_bytes + tool.eligibleBytes,
     };
-    const status = terminalStatus(config, claimed, totals, tool.hasMore);
+    const status = terminalStatus(config, claimed, totals, tool.hasMore, tool.byteLimitReached);
     const completedAt = status === 'running' ? null : now;
     const cursorJson =
       status === 'running' && tool.nextCursor
@@ -613,6 +700,70 @@ export async function runProjectDataStorageReliefPreflight(
       skippedRows: claimed.skipped_rows + tool.skippedRows,
     });
     const sessionManifestSha256 = await sha256Text(sessionManifest.json);
+    const targetBatchProofs = parseTargetBatchProofs(claimed.target_batches_json);
+    if (tool.targets.length !== tool.eligibleRows) {
+      throw new Error('ProjectData relief preflight eligible target count is inconsistent');
+    }
+    if (tool.targets.length > 0) {
+      const firstTarget = tool.targets[0];
+      const lastTarget = tool.targets.at(-1);
+      if (!firstTarget || !lastTarget) {
+        throw new Error('ProjectData relief preflight target bounds are missing');
+      }
+      const ordinal = targetBatchProofs.length;
+      const written = await writeToolPayloadCleanupManifestBatch({
+        r2: env.PROJECT_DATA_ARCHIVE_R2,
+        archivePrefix: config.archivePrefix,
+        manifest: {
+          version: 1,
+          planId: config.planId,
+          projectId: config.projectId,
+          cutoffCreatedAt: config.cutoffCreatedAt,
+          ordinal,
+          targets: tool.targets,
+        },
+        timeoutMs: config.archiveWriteTimeoutMs,
+        deadlineMs: sliceDeadlineMs,
+      });
+      targetBatchProofs.push({
+        ordinal,
+        key: written.key,
+        bytes: written.bytes,
+        sha256: written.sha256,
+        targetCount: tool.targets.length,
+        projectedReclaimableBytes: tool.eligibleBytes,
+        firstRowId: firstTarget.rowId,
+        lastRowId: lastTarget.rowId,
+      });
+    }
+    const targetBatchesJson = JSON.stringify(targetBatchProofs);
+    if (
+      new TextEncoder().encode(targetBatchesJson).byteLength >
+      PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_MANIFEST_BYTES
+    ) {
+      throw new Error('ProjectData relief preflight target batch proofs exceeded D1 row bound');
+    }
+    let targetManifest:
+      | { key: string; bytes: number; sha256: string; value: ToolPayloadCleanupManifestRoot }
+      | undefined;
+    if (status !== 'running') {
+      targetManifest = await writeToolPayloadCleanupManifestRoot({
+        r2: env.PROJECT_DATA_ARCHIVE_R2,
+        archivePrefix: config.archivePrefix,
+        manifest: {
+          version: 1,
+          planId: config.planId,
+          projectId: config.projectId,
+          cutoffCreatedAt: config.cutoffCreatedAt,
+          createdAt: now,
+          eligibleRows: totals.eligibleRows,
+          eligibleBytes: totals.eligibleBytes,
+          batches: targetBatchProofs,
+        },
+        timeoutMs: config.archiveWriteTimeoutMs,
+        deadlineMs: sliceDeadlineMs,
+      });
+    }
     const finalize = await env.DATABASE.prepare(
       `UPDATE project_data_storage_relief_preflights
        SET status = ?,
@@ -631,6 +782,10 @@ export async function runProjectDataStorageReliefPreflight(
            session_count = ?,
            sessions_json = ?,
            sessions_sha256 = ?,
+           target_batches_json = ?,
+           target_manifest_key = ?,
+           target_manifest_bytes = ?,
+           target_manifest_sha256 = ?,
            database_size_bytes = ?,
            completed_at = ?,
            lease_owner = NULL,
@@ -656,6 +811,10 @@ export async function runProjectDataStorageReliefPreflight(
         sessionManifest.count,
         sessionManifest.json,
         sessionManifestSha256,
+        targetBatchesJson,
+        targetManifest?.key ?? null,
+        targetManifest?.bytes ?? null,
+        targetManifest?.sha256 ?? null,
         measurement.databaseSizeBytes,
         completedAt,
         now,
@@ -678,6 +837,8 @@ export async function runProjectDataStorageReliefPreflight(
       eligibleBytes: updated.eligible_bytes,
       sessionCount: updated.session_count,
       sessionManifestSha256: updated.sessions_sha256,
+      targetManifestKey: updated.target_manifest_key,
+      targetManifestSha256: updated.target_manifest_sha256,
       databaseSizeBytes: updated.database_size_bytes,
     });
     return resultFromRow(updated);

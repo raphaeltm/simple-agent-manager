@@ -59,17 +59,8 @@ type ArchiveObjectProof = {
   sha256: string;
 };
 
-function chunkUtf8String(value: string, chunkBytes: number): Uint8Array[] {
-  const bytes = textEncoder.encode(value);
-  const chunks: Uint8Array[] = [];
-  for (let offset = 0; offset < bytes.byteLength; offset += chunkBytes) {
-    chunks.push(bytes.slice(offset, offset + chunkBytes));
-  }
-  return chunks;
-}
-
-function buildChunkKey(key: string, index: number): string {
-  return `${key}.chunk-${index}`;
+function buildChunkKey(key: string, index: number, chunkSha256: string): string {
+  return `${key}.chunk-${index}.${chunkSha256}`;
 }
 
 function hex(bytes: Uint8Array): string {
@@ -233,7 +224,6 @@ export async function writeToolPayloadArchiveObject(
   const archiveBody = textEncoder.encode(prepared.body);
   const bodyBytes = archiveBody.byteLength;
   const archiveBodySha256 = await sha256(archiveBody);
-  const immutableKey = contentAddressedArchiveKey(prepared.key, archiveBodySha256);
   const baseMetadata = {
     projectId: input.projectId,
     sessionId: input.sessionId,
@@ -242,6 +232,7 @@ export async function writeToolPayloadArchiveObject(
     contentBytes: String(input.contentBytes),
   };
   if (bodyBytes <= input.chunkBytes) {
+    const immutableKey = contentAddressedArchiveKey(prepared.key, archiveBodySha256);
     reserveArchiveOperations(input.operationBudget, 3);
     const proof = await writeAndVerifyArchiveObject(
       r2,
@@ -266,28 +257,28 @@ export async function writeToolPayloadArchiveObject(
     };
   }
 
-  const chunks = chunkUtf8String(prepared.body, input.chunkBytes);
-  const chunkKeys = chunks.map((_chunk, index) => buildChunkKey(immutableKey, index));
-  reserveArchiveOperations(input.operationBudget, (chunks.length + 1) * 3);
-  const chunkProofs: ArchiveObjectProof[] = [];
-  for (const [index, chunk] of chunks.entries()) {
-    const chunkKey = chunkKeys[index];
-    if (!chunkKey) throw new Error('archive chunk key was not generated');
-    chunkProofs.push(
-      await writeAndVerifyArchiveObject(
-        r2,
-        chunkKey,
-        chunk,
-        timeoutMs,
-        input.deadlineMs,
-        input.nowMs,
-        {
-          ...baseMetadata,
-          archiveChunkIndex: String(index),
-          archiveChunkCount: String(chunks.length),
-        }
-      )
+  const chunkCount = Math.ceil(bodyBytes / input.chunkBytes);
+  reserveArchiveOperations(input.operationBudget, (chunkCount + 1) * 3);
+  const chunks: Array<{ key: string; bytes: number; sha256: string }> = [];
+  for (let index = 0; index < chunkCount; index++) {
+    const offset = index * input.chunkBytes;
+    const chunk = archiveBody.slice(offset, Math.min(offset + input.chunkBytes, bodyBytes));
+    const chunkSha256 = await sha256(chunk);
+    const chunkKey = buildChunkKey(prepared.key, index, chunkSha256);
+    const proof = await writeAndVerifyArchiveObject(
+      r2,
+      chunkKey,
+      chunk,
+      timeoutMs,
+      input.deadlineMs,
+      input.nowMs,
+      {
+        ...baseMetadata,
+        archiveChunkIndex: String(index),
+        archiveChunkCount: String(chunkCount),
+      }
     );
+    chunks.push({ key: chunkKey, bytes: proof.bytes, sha256: proof.sha256 });
   }
 
   const manifest: ArchivedVerifiedToolPayloadManifest = {
@@ -302,22 +293,21 @@ export async function writeToolPayloadArchiveObject(
     toolMetadataBytes: input.toolMetadataBytes,
     archiveBodyBytes: bodyBytes,
     archiveBodySha256,
-    chunks: chunkKeys.map((key, index) => {
-      const proof = chunkProofs[index];
-      if (!proof) throw new Error('archive chunk proof was not generated');
-      return { key, bytes: proof.bytes, sha256: proof.sha256 };
-    }),
+    chunks,
   };
+  const manifestBody = JSON.stringify(manifest);
+  const manifestSha256 = await sha256(textEncoder.encode(manifestBody));
+  const immutableKey = contentAddressedArchiveKey(prepared.key, manifestSha256);
   const manifestProof = await writeAndVerifyArchiveObject(
     r2,
     immutableKey,
-    JSON.stringify(manifest),
+    manifestBody,
     timeoutMs,
     input.deadlineMs,
     input.nowMs,
     {
       ...baseMetadata,
-      archiveChunkCount: String(chunks.length),
+      archiveChunkCount: String(chunkCount),
       archiveBodySha256: manifest.archiveBodySha256,
     }
   );
@@ -328,7 +318,7 @@ export async function writeToolPayloadArchiveObject(
     verification: {
       archiveBodyBytes: manifest.archiveBodyBytes,
       archiveBodySha256: manifest.archiveBodySha256,
-      objectCount: chunks.length + 1,
+      objectCount: chunkCount + 1,
       rootObjectBytes: manifestProof.bytes,
       rootObjectSha256: manifestProof.sha256,
     },

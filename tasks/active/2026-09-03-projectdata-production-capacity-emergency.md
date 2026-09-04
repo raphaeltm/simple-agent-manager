@@ -126,7 +126,7 @@ uncertain states must fail closed.
   by a project-level kill switch/circuit breaker.
 - [x] Preserve `chat_messages.content` byte-for-byte and prove archived message
   and tool-payload reads work after source cleanup.
-- [ ] Add discriminating unit and Workers-runtime tests for success, R2
+- [x] Add discriminating unit and Workers-runtime tests for success, R2
   corruption/missing-readback, timeout/pause/resume, idempotency, candidate
   exhaustion, source-change races, and target/circuit-breaker stop conditions.
 - [x] Update Env surfaces, deployment configuration, API/operator docs, and
