@@ -177,8 +177,8 @@ single replacement owner. No duplicate PR or branch was created.
 Refreshed production baseline, read directly from `sam-prod` D1 and the `sam-api-prod`
 Worker settings.
 
-**The growth rate is accelerating, and the window is shorter than the task brief assumed.**
-Hourly `database_size_bytes` for `01KHRJGANBBWGDY1NZ0KVF0D4J` on 2026-09-04:
+**The growth rate is volatile and the window is somewhat shorter than the task brief
+assumed.** Hourly `database_size_bytes` for `01KHRJGANBBWGDY1NZ0KVF0D4J` on 2026-09-04:
 
 | Hour (UTC) | Bytes          | Delta    |
 | ---------- | -------------- | -------- |
@@ -190,12 +190,16 @@ Hourly `database_size_bytes` for `01KHRJGANBBWGDY1NZ0KVF0D4J` on 2026-09-04:
 | 10:14      | 10,030,129,152 | +9.4 MB  |
 | 11:14      | 10,046,488,576 | +16.4 MB |
 | 12:14      | 10,072,158,208 | +25.7 MB |
+| 13:14      | 10,080,493,568 | +8.3 MB  |
 
-The rate went from ~3.6 MB/h to ~25.7 MB/h across seven hours. The seven-hour average is
-10.8 MB/h (258 MB/day); the trailing two-hour average is 21 MB/h (504 MB/day). The most
-likely driver is concurrent agent activity on this very project — every recovery agent's
-transcript is written into this same Durable Object, which is also why agents working this
-incident must keep their chat output lean.
+The hourly rate is volatile, NOT monotonically accelerating: it spiked to 25.7 MB/h at
+12:14Z and fell back to 8.3 MB/h in the next hour. Extrapolating from the single steepest
+hour briefly suggested "about 26 hours of headroom"; that overstates the urgency and is
+corrected here. Use the whole window: across `05:14Z -> 13:14Z` the object grew 83,619,840
+bytes, i.e. **10.45 MB/h (251 MB/day)**. The spikes track concurrent agent activity on this
+very project — every agent working this incident writes its transcript into this same
+Durable Object — which is why agents on this incident must keep their chat output lean, and
+why the rate must be re-derived rather than assumed.
 
 - `platform_errors` still has ZERO `Exceeded the maximum database size` rows in seven days
   while the object is above the configured `10^10` limit, so Cloudflare's real per-object
