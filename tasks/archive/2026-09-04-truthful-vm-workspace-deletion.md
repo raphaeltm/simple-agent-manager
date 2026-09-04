@@ -72,8 +72,8 @@ available transcript and focused green evidence are the recovery source.
       rotation, fingerprint collisions, forced A → B credential interleaving, and real-SQL
       VM request-boundary races for both restart and rebuild.
 - [x] Update public configuration/security documentation and retained incident guidance.
-- [ ] Run full repository gates and required specialist reviews.
-- [ ] Deploy serially to staging; prove a real VM timeout remains quarantined and later
+- [x] Run full repository gates and required specialist reviews.
+- [x] Deploy serially to staging; prove a real VM timeout remains quarantined and later
       converges; return staging to zero VMs.
 - [ ] Open exactly one PR, complete CI and iterative CodeRabbit review, merge, and monitor
       production deployment and deletion telemetry.
@@ -115,6 +115,41 @@ identity-changed entries remain quarantined in `stopping`, leave bounded payload
 dead-letter telemetry, and stop consuming the immediate alarm candidate set. Only confirmed
 outcomes and same-identity stale schedules for an active workspace remove the entry. Heartbeat
 age and D1 status labels are never used as terminal proof.
+
+## Validation Evidence
+
+- Exact pushed implementation SHA `23d76eedeaa006b4f7acebc75025a0ade6472d5a` passed
+  `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, `pnpm check:fast`, D1/DO
+  migration safety and ordering, focused migration coverage, and the recovered real-Worker
+  suites. Cloudflare, security, test-engineer, constitution, documentation-sync, and
+  environment-sync reviews passed; the final task-completion audit found no implementation
+  blocker.
+- Serialized staging run `33895757952` deployed the exact SHA under the normal interactive
+  timeout and passed 12/12 smoke tests. A prior serialized run (`33892683853`) was cancelled
+  only after Wrangler failed to return despite Cloudflare reporting the Worker at 100% and
+  the container rollout ready; the clean same-SHA retry superseded it before VM creation.
+- Real workspace `01M1PN4N5881W3J5MS048YAX6H` reached `running` on provider-backed node
+  `01M1PN4MNTA6DFJETZWM9X2S89`. D1 showed the node `running`/`healthy`, a fresh heartbeat,
+  exact agent SHA `23d76eedeaa006b4f7acebc75025a0ade6472d5a`, and non-null runtime-incarnation
+  and provider-credential-generation fences.
+- Serialized fault run `33897579393` applied a `1ms` interactive and background node-agent
+  timeout with a 60-second bounded retry interval at the same SHA and passed 12/12 smoke
+  tests. The one authenticated DELETE returned HTTP `202` / `pending`; D1 kept the workspace
+  `stopping`, both runtime-deletion proof fields null, a bounded 69-character timeout/request
+  diagnostic, and the provider node `running`/`healthy`. It remained quarantined across
+  multiple scheduled retry intervals.
+- All four temporary variables were removed before serialized restore run `33899157453`.
+  No second DELETE was issued. After the restored Worker bindings became live, the durable
+  retry wrote `runtime_deletion_proof='vm_agent_confirmed'` at
+  `2026-09-04T17:18:57.147Z`, changed the workspace audit row to `deleted`, cleared the
+  diagnostic, and made the authenticated workspace API return not found while the node
+  continued heartbeating healthy. The restore run passed 12/12 smoke tests.
+- Provider-backed node cleanup returned HTTP `200`. Final D1 counts were zero nonterminal
+  nodes and zero nonterminal provider nodes; the exact test-node row was gone. Direct Worker
+  settings showed all four temporary variables absent, and the final authenticated live-app
+  baseline passed with no browser console errors.
+- The task-completion validator passed before archive. The remaining PR/CI/CodeRabbit/merge
+  and production-monitoring line is completed by the sequential `/do` Phase 7 workflow.
 
 ## References
 
