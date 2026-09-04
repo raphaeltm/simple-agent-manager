@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: This bounded emergency preflight is one resumable fail-closed state machine; splitting its lease, cursor, manifest, and completion invariants during the P0 rollout would make the audited transition order harder to verify. See .claude/rules/18-file-size-limits.md
 import type {
   ProjectDataStorageReliefMeasureCursor,
   ProjectDataStorageReliefToolPayloadSessionMeasure,
