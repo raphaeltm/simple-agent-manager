@@ -406,6 +406,7 @@ const renderDiagram = async (diagram: Diagram, theme: 'light' | 'dark') => {
   surface.append(canvas);
 
   diagram.wrapper.classList.remove('mermaid-shell--error');
+  let svgElement: SVGElement | null = null;
 
   try {
     const { svg } = await mermaid.render(
@@ -414,16 +415,13 @@ const renderDiagram = async (diagram: Diagram, theme: 'light' | 'dark') => {
     );
     canvas.innerHTML = svg;
 
-    const svgElement = canvas.querySelector<SVGElement>('svg');
+    svgElement = canvas.querySelector<SVGElement>('svg');
     if (svgElement) {
       svgElement.removeAttribute('width');
       svgElement.removeAttribute('height');
       svgElement.setAttribute('preserveAspectRatio', 'xMidYMid meet');
       svgElement.setAttribute('role', 'img');
       svgElement.setAttribute('aria-label', `Diagram for ${diagram.title}`);
-      diagram.controls = attachPanZoom(surface, svgElement);
-    } else {
-      diagram.controls = { reset: () => {} };
     }
   } catch (error) {
     diagram.wrapper.classList.add('mermaid-shell--error');
@@ -442,6 +440,13 @@ const renderDiagram = async (diagram: Diagram, theme: 'light' | 'dark') => {
     diagram.wrapper.append(surface);
   }
   diagram.surface = surface;
+
+  // The layout-dependent pan/zoom calculation needs a real element box. Rendering
+  // the SVG while detached is fine, but measuring it there yields a zero-sized
+  // viewBox and an invisible diagram.
+  diagram.controls = svgElement
+    ? attachPanZoom(surface, svgElement)
+    : { reset: () => {} };
 };
 
 const diagrams: Diagram[] = [];
