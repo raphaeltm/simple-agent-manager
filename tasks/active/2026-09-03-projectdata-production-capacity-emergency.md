@@ -367,9 +367,40 @@ ascending, so it is working through the oldest messages first, and those predate
 2026-08-18 manual purge that already stripped ~3.14 GB. Any eligible stock lies in the band
 between that purge and the 2026-08-30T03:45Z cutoff.
 
-**To finish the plan, run `.tmp/compute-plan.py`** (or the equivalent query) once the plan
-reaches `complete` or `truncated`. It derives every ceiling from the preflight's own D1 row
-— never typed — and evaluates the 5 KB go/no-go and the net reclaim.
+**To finish the plan**, once the row reaches `complete` or `truncated`, read it and derive
+every value from it — never type them:
+
+```sql
+SELECT plan_id, status, batches_started, rows_examined,
+       eligible_rows, eligible_bytes, session_count,
+       target_manifest_key, target_manifest_sha256, last_error
+  FROM project_data_storage_relief_preflights
+ WHERE project_id = '01KHRJGANBBWGDY1NZ0KVF0D4J';
+```
+
+Then:
+
+| Value to configure                    | Derivation                                       |
+| ------------------------------------- | ------------------------------------------------ |
+| `..._CLEANUP_PLAN_ID`                 | `plan_id`                                        |
+| `..._CLEANUP_MANIFEST_KEY`            | `target_manifest_key`                            |
+| `..._CLEANUP_MANIFEST_SHA256`         | `target_manifest_sha256`                         |
+| `..._CLEANUP_MAX_TOTAL_ROWS`          | `eligible_rows`                                  |
+| `..._CLEANUP_MAX_TOTAL_BYTES`         | `eligible_bytes`                                 |
+| `..._CLEANUP_MAX_TOTAL_R2_OPERATIONS` | `eligible_rows * 6 + batches_started * 4 + 1000` |
+| `..._CLEANUP_MAX_TOTAL_WALL_TIME_MS`  | `ceil(eligible_rows / 500) * 20000 * 2`          |
+
+Go/no-go and expected result:
+
+- `avg = eligible_bytes / eligible_rows` — must be comfortably **above 5,000 bytes**.
+- `bookkeeping ≈ eligible_rows * 981` bytes (measured on staging).
+- `net ≈ eligible_bytes - bookkeeping` — quote THIS for approval, not `eligible_bytes`.
+- Resulting size ≈ (size read immediately before the run) − `net`; the target is
+  ≤ 9,000,000,000 bytes.
+
+Deriving the ceilings from the row rather than typing them is what makes it structurally
+impossible to authorise more than the preflight actually proved eligible. Preserve that
+property.
 
 ### Three possible outcomes, only one of which is "run the plan"
 
