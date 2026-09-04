@@ -267,7 +267,8 @@ async function markRuntimeTerminationConfirmed(db: NodeDb, nodeId: string): Prom
 export async function deleteNodeResourcesStrict(
   nodeId: string,
   userId: string,
-  env: Env
+  env: Env,
+  options: { cleanupDns?: boolean } = {}
 ): Promise<StrictNodeDeletionResult> {
   const db = drizzle(env.DATABASE, { schema });
   const node = await requireStrictNode(db, nodeId, userId);
@@ -283,12 +284,12 @@ export async function deleteNodeResourcesStrict(
   if (node.runtime === 'cf-container') {
     await destroyVmAgentContainer(env, node.id);
     await markRuntimeTerminationConfirmed(db, node.id);
-    await deleteStrictNodeDnsRecord(node, userId, env);
+    if (options.cleanupDns !== false) await deleteStrictNodeDnsRecord(node, userId, env);
     return { providerVm: 'no-instance' };
   }
 
   const providerVm = await deleteStrictProviderInstance(db, node, userId, env);
   await markRuntimeTerminationConfirmed(db, node.id);
-  await deleteStrictNodeDnsRecord(node, userId, env);
+  if (options.cleanupDns !== false) await deleteStrictNodeDnsRecord(node, userId, env);
   return { providerVm };
 }

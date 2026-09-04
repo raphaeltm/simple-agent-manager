@@ -270,6 +270,8 @@ describe('ensureSessionRecovery', () => {
         taskTitle: 'Original task title that must not become the fresh wake prompt',
         taskDescription: SESSION_RECOVERY_INITIAL_PROMPT,
         resumeSnapshotChatSessionId: 'chat-1',
+        recoverySourceTaskId: null,
+        retrySourceTaskId: 'source-task-1',
       })
     );
   });

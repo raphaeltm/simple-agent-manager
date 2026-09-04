@@ -359,18 +359,18 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
     });
 
     it('rejects a late stopping-workspace callback before parsing payloads and emits bounded telemetry', async () => {
-      const response = await SELF.fetch(
-        `https://api.test.example.com/api/workspaces/${WORKSPACE_STOPPING}/messages`,
-        {
+      const postLateCallback = () =>
+        SELF.fetch(`https://api.test.example.com/api/workspaces/${WORKSPACE_STOPPING}/messages`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${stoppingToken}`,
             'Content-Type': 'application/json',
           },
           body: '{"prompt":"do-not-ingest","token":"super-secret"',
-        }
-      );
+        });
+      const response = await postLateCallback();
       expect(response.status).toBe(204);
+      expect((await postLateCallback()).status).toBe(204);
 
       const projectData = env.PROJECT_DATA.get(
         env.PROJECT_DATA.idFromName(PROJECT_ID)
@@ -382,7 +382,9 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
       const { events } = await projectData.listActivityEvents(
         'workspace.deletion_unconfirmed_callback'
       );
-      const signal = events.find((event) => event.workspaceId === WORKSPACE_STOPPING);
+      const workspaceSignals = events.filter((event) => event.workspaceId === WORKSPACE_STOPPING);
+      expect(workspaceSignals).toHaveLength(1);
+      const signal = workspaceSignals[0];
       expect(signal).toMatchObject({
         eventType: 'workspace.deletion_unconfirmed_callback',
         actorType: 'workspace_callback',

@@ -7,7 +7,7 @@
  * 1. Stopping/deleting a workspace stops the chat session
  * 2. linkSessionToWorkspace creates workspace_activity and schedules alarm
  * 3. Orphaned workspaces are stopped by cron (not just flagged)
- * 4. Node destruction cascades workspace status to 'deleted'
+ * 4. Node destruction cascades only after runtime-termination proof
  * 5. Credential lookup failure logs a warning
  *
  * Source contract test — verifies correct wiring across modules.
@@ -38,7 +38,10 @@ describe('workspace lifecycle synchronization', () => {
   const cleanupFile = ['index.ts', 'shared.ts', 'node-phases.ts', 'workspace-phases.ts']
     .map((f) => readFileSync(resolve(process.cwd(), `src/scheduled/node-cleanup/${f}`), 'utf8'))
     .join('\n');
-  const nodesFile = readFileSync(resolve(process.cwd(), 'src/services/nodes.ts'), 'utf8');
+  const nodeDeletionFile = readFileSync(
+    resolve(process.cwd(), 'src/services/node-resource-deletion.ts'),
+    'utf8'
+  );
   const doFile = [
     readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/sessions.ts'), 'utf8'),
     readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/activity.ts'), 'utf8'),
@@ -113,20 +116,26 @@ describe('workspace lifecycle synchronization', () => {
     });
   });
 
-  describe('node destruction cascade', () => {
-    it('deleteNodeResources cascades workspace status to deleted', () => {
-      const deleteSection = nodesFile.slice(
-        nodesFile.indexOf('export async function deleteNodeResources(')
+  describe('node destruction proof boundary', () => {
+    it('deleteNodeResources quarantines unconfirmed deletion and gates the terminal cascade', () => {
+      const deleteSection = nodeDeletionFile.slice(
+        nodeDeletionFile.indexOf('export async function deleteNodeResources(')
       );
+      expect(deleteSection).toContain('if (!runtimeTerminationConfirmed)');
+      expect(deleteSection).toContain("status: 'stopping'");
+      expect(deleteSection).toContain('errorMessage: deletionDiagnostic(env)');
+      expect(deleteSection).toContain("status: 'destroying'");
       expect(deleteSection).toContain("status: 'deleted'");
-      expect(deleteSection).toContain('schema.workspaces.nodeId');
+      expect(deleteSection.indexOf("status: 'deleted'")).toBeGreaterThan(
+        deleteSection.indexOf('if (!runtimeTerminationConfirmed)')
+      );
     });
 
-    it('deleteNodeResources logs warning when credentials are missing', () => {
-      const deleteSection = nodesFile.slice(
-        nodesFile.indexOf('export async function deleteNodeResources(')
+    it('deleteNodeResources records managed-runtime proof failures', () => {
+      const deleteSection = nodeDeletionFile.slice(
+        nodeDeletionFile.indexOf('export async function deleteNodeResources(')
       );
-      expect(deleteSection).toContain('credential_missing_vm_orphaned');
+      expect(deleteSection).toContain('runtime_termination_unconfirmed');
     });
   });
 

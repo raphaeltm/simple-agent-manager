@@ -46,24 +46,24 @@ available transcript and focused green evidence are the recovery source.
 
 ## Implementation Checklist
 
-- [ ] Add an explicit strict node runtime-termination proof marker and migration coverage.
-- [ ] Centralize workspace deletion outcome classification and JIT identity validation.
-- [ ] Claim durable NodeLifecycle attempts before VM network I/O; refuse restart
+- [x] Add an explicit strict node runtime-termination proof marker and migration coverage.
+- [x] Centralize workspace deletion outcome classification and JIT identity validation.
+- [x] Claim durable NodeLifecycle attempts before VM network I/O; refuse restart
       cancellation after an attempt starts.
-- [ ] Retain deletion-unconfirmed workspaces in `stopping`, preserve durable pending state,
+- [x] Retain deletion-unconfirmed workspaces in `stopping`, preserve durable pending state,
       and retry with configurable bounded exponential backoff and batch limits.
-- [ ] Require the same workspace incarnation and `stopping` status before VM-confirmed
+- [x] Require the same workspace incarnation and `stopping` status before VM-confirmed
       terminal writes.
-- [ ] Route explicit deletion and scheduled cleanup through the central classifier.
-- [ ] Emit throttled, payload-free late-callback activity evidence while preserving normal
+- [x] Route explicit deletion and scheduled cleanup through the central classifier.
+- [x] Emit throttled, payload-free late-callback activity evidence while preserving normal
       callback rejection and token-mint denial.
-- [ ] Fence linked retry/session recovery/replacement until confirmed deletion or strict
+- [x] Fence linked retry/session recovery/replacement until confirmed deletion or strict
       terminal proof, with JIT TaskRunner rechecks before resource-creating work.
-- [ ] Preserve sleeping/restorable session semantics and ordinary idempotent cleanup.
-- [ ] Add exact unit and real Worker race coverage for timeout → recovery → retry,
+- [x] Preserve sleeping/restorable session semantics and ordinary idempotent cleanup.
+- [x] Add exact unit and real Worker race coverage for timeout → recovery → retry,
       ownership/incarnation changes, restart fencing, strict node proof, callback safety,
       token rejection, scheduled cleanup, and replacement authority.
-- [ ] Update public configuration/security documentation and retained incident guidance.
+- [x] Update public configuration/security documentation and retained incident guidance.
 - [ ] Run full repository gates and required specialist reviews.
 - [ ] Deploy serially to staging; prove a real VM timeout remains quarantined and later
       converges; return staging to zero VMs.

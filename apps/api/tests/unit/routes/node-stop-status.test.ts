@@ -87,7 +87,7 @@ function createApp() {
     if (typeof appError.statusCode === 'number') {
       return c.json(
         { error: appError.error, message: appError.message },
-        appError.statusCode as any,
+        appError.statusCode as any
       );
     }
     return c.json({ error: 'INTERNAL_ERROR', message: String(err) }, 500);
@@ -132,6 +132,7 @@ describe('POST /api/nodes/:id/stop', () => {
     mocks.stopNodeResources.mockResolvedValue(undefined);
     mocks.deleteNodeResources.mockResolvedValue({
       nodeFound: true,
+      runtimeTerminationConfirmed: true,
       providerVmDeleted: true,
       providerVmDeleteSkippedReason: null,
       backendDnsDeleted: true,
@@ -177,7 +178,7 @@ describe('POST /api/nodes/:id/stop', () => {
         statusCode: 404,
         error: 'NOT_FOUND',
         message: 'Node not found',
-      }),
+      })
     );
 
     const response = await app.request('/api/nodes/node-1/stop', { method: 'POST' }, env);
@@ -204,6 +205,7 @@ describe('DELETE /api/nodes/:id', () => {
     });
     mocks.deleteNodeResources.mockResolvedValue({
       nodeFound: true,
+      runtimeTerminationConfirmed: false,
       providerVmDeleted: false,
       providerVmDeleteSkippedReason: null,
       backendDnsDeleted: false,
@@ -231,11 +233,7 @@ describe('DELETE /api/nodes/:id', () => {
       nodeRole: 'deployment',
     });
 
-    const response = await app.request(
-      '/api/nodes/node-deploy-1',
-      { method: 'DELETE' },
-      env,
-    );
+    const response = await app.request('/api/nodes/node-deploy-1', { method: 'DELETE' }, env);
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({
@@ -245,17 +243,15 @@ describe('DELETE /api/nodes/:id', () => {
     expect(mockDeleteWhere).not.toHaveBeenCalled();
   });
 
-  it('keeps existing workspace-node deletion behavior when cleanup reports errors', async () => {
-    const response = await app.request(
-      '/api/nodes/node-1',
-      { method: 'DELETE' },
-      env,
-    );
+  it('returns conflict and preserves workspace/node records when runtime deletion is unconfirmed', async () => {
+    const response = await app.request('/api/nodes/node-1', { method: 'DELETE' }, env);
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ success: true });
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      message: 'Node runtime termination is not confirmed: provider cleanup failed',
+    });
     expect(mocks.deleteNodeResources).toHaveBeenCalledWith('node-1', 'user-123', env);
-    expect(mockDeleteWhere).toHaveBeenCalled();
+    expect(mockDeleteWhere).not.toHaveBeenCalled();
   });
 
   it('routes managed workspace deletion through the NodeLifecycle terminal boundary', async () => {
@@ -280,6 +276,7 @@ describe('DELETE /api/nodes/:id', () => {
     });
     mocks.deleteNodeResources.mockResolvedValue({
       nodeFound: true,
+      runtimeTerminationConfirmed: true,
       providerVmDeleted: true,
       providerVmDeleteSkippedReason: null,
       backendDnsDeleted: true,

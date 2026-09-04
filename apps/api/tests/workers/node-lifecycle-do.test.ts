@@ -710,6 +710,42 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     expect(status.status).toBe('warm');
   });
 
+  it('fences a stale scheduled cleanup claim after restart wins', async () => {
+    const nodeId = 'nl-test-restart-before-cleanup-claim-001';
+    const wsId = 'ws-restart-before-cleanup-claim-001';
+    await seedTestNode(nodeId);
+    await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'stopped' });
+
+    // This is the identity snapshot captured by the scheduled safety-net scan.
+    const expected = {
+      workspaceId: wsId,
+      nodeId,
+      userId: TEST_USER_ID,
+      projectId: null,
+      chatSessionId: null,
+    };
+
+    // Restart completes before the scan reaches NodeLifecycle.claimAttempt().
+    await env.DATABASE.prepare("UPDATE workspaces SET status = 'running' WHERE id = ?")
+      .bind(wsId)
+      .run();
+
+    const stub = getStub(nodeId);
+    await expect(
+      stub.claimWorkspaceDeletionAttempt(nodeId, wsId, TEST_USER_ID, expected)
+    ).resolves.toBe(false);
+
+    const workspace = await env.DATABASE.prepare('SELECT status FROM workspaces WHERE id = ?')
+      .bind(wsId)
+      .first<{ status: string }>();
+    expect(workspace?.status).toBe('running');
+    expect(
+      await runInDurableObject(stub, async (instance) =>
+        instance.ctx.storage.get(`ws-delete:${wsId}`)
+      )
+    ).toBeUndefined();
+  });
+
   it('claims and quarantines a timed-out deletion, refuses restart, then converges on retry', async () => {
     const nodeId = 'nl-test-delete-timeout-retry-001';
     const wsId = 'ws-delete-timeout-retry-001';
@@ -778,6 +814,41 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       status: 'completed',
       stopped_at: expect.any(String),
     });
+    expect(
+      await runInDurableObject(stub, async (instance) =>
+        instance.ctx.storage.get(`ws-delete:${wsId}`)
+      )
+    ).toBeUndefined();
+  });
+
+  it('treats a workspace-specific VM 404 as idempotent absence proof', async () => {
+    const nodeId = 'nl-test-delete-404-proof-001';
+    const wsId = 'ws-delete-404-proof-001';
+    const agentSessionId = 'agent-delete-404-proof-001';
+    await seedTestNode(nodeId);
+    await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'stopped' });
+    await seedAgentSession(agentSessionId, wsId, TEST_USER_ID, { status: 'running' });
+
+    const fetchMock = vi.fn(async () => new Response(null, { status: 404 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const stub = getStub(nodeId);
+    await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID);
+    await runInDurableObject(stub, async (instance) => {
+      const key = `ws-delete:${wsId}`;
+      const pending = await instance.ctx.storage.get<Record<string, unknown>>(key);
+      await instance.ctx.storage.put(key, { ...pending, deleteAt: Date.now() - 1 });
+      await instance.alarm();
+    });
+
+    const workspace = await env.DATABASE.prepare('SELECT status FROM workspaces WHERE id = ?')
+      .bind(wsId)
+      .first<{ status: string }>();
+    expect(workspace?.status).toBe('deleted');
+    expect(await getAgentSessionStatus(agentSessionId)).toMatchObject({
+      status: 'completed',
+      stopped_at: expect.any(String),
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(
       await runInDurableObject(stub, async (instance) =>
         instance.ctx.storage.get(`ws-delete:${wsId}`)
@@ -879,6 +950,80 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       )
     ).toBeDefined();
   });
+
+  it.each(['node', 'user', 'project', 'chat-session'] as const)(
+    'preserves a new %s incarnation that wins while VM deletion is in flight',
+    async (dimension) => {
+      const suffix = dimension.replace('-', '_');
+      const oldNodeId = `nl-test-inflight-${suffix}-old-001`;
+      const newNodeId = `nl-test-inflight-${suffix}-new-001`;
+      const wsId = `ws-inflight-${suffix}-001`;
+      const newUserId = `user-inflight-${suffix}-001`;
+      const newProjectId = `project-inflight-${suffix}-001`;
+      const newInstallationId = `installation-inflight-${suffix}-001`;
+      const newChatSessionId = `chat-inflight-${suffix}-001`;
+      await seedTestNode(oldNodeId);
+      if (dimension === 'node') await seedTestNode(newNodeId);
+      if (dimension === 'user') await seedUser(newUserId);
+      if (dimension === 'project') {
+        await seedInstallation(newInstallationId, TEST_USER_ID, {
+          installationIdValue: `external-${newInstallationId}`,
+          accountName: `account-${suffix}`,
+        });
+        await seedProject(newProjectId, TEST_USER_ID, newInstallationId);
+      }
+      await seedWorkspace(wsId, oldNodeId, TEST_USER_ID, { status: 'stopped' });
+
+      const fetchMock = vi.fn(async () => {
+        const mutation =
+          dimension === 'node'
+            ? ["UPDATE workspaces SET node_id = ?, status = 'running' WHERE id = ?", newNodeId]
+            : dimension === 'user'
+              ? ["UPDATE workspaces SET user_id = ?, status = 'running' WHERE id = ?", newUserId]
+              : dimension === 'project'
+                ? [
+                    "UPDATE workspaces SET project_id = ?, status = 'running' WHERE id = ?",
+                    newProjectId,
+                  ]
+                : [
+                    "UPDATE workspaces SET chat_session_id = ?, status = 'running' WHERE id = ?",
+                    newChatSessionId,
+                  ];
+        await env.DATABASE.prepare(mutation[0]).bind(mutation[1], wsId).run();
+        return new Response(null, { status: 204 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const stub = getStub(oldNodeId);
+      await stub.scheduleWorkspaceDeletion(oldNodeId, wsId, TEST_USER_ID);
+      await runInDurableObject(stub, async (instance) => {
+        const key = `ws-delete:${wsId}`;
+        const pending = await instance.ctx.storage.get<Record<string, unknown>>(key);
+        await instance.ctx.storage.put(key, { ...pending, deleteAt: Date.now() - 1 });
+        await instance.alarm();
+      });
+
+      const workspace = await env.DATABASE.prepare(
+        'SELECT status, node_id, user_id, project_id, chat_session_id FROM workspaces WHERE id = ?'
+      )
+        .bind(wsId)
+        .first<{
+          status: string;
+          node_id: string | null;
+          user_id: string;
+          project_id: string | null;
+          chat_session_id: string | null;
+        }>();
+      expect(workspace?.status).toBe('running');
+      expect(workspace?.node_id).toBe(dimension === 'node' ? newNodeId : oldNodeId);
+      expect(workspace?.user_id).toBe(dimension === 'user' ? newUserId : TEST_USER_ID);
+      expect(workspace?.project_id).toBe(dimension === 'project' ? newProjectId : null);
+      expect(workspace?.chat_session_id).toBe(
+        dimension === 'chat-session' ? newChatSessionId : null
+      );
+      expect(fetchMock).toHaveBeenCalledOnce();
+    }
+  );
 
   it('markActive preserves a pending workspace deletion alarm when clearing warm state', async () => {
     const nodeId = 'nl-test-active-preserves-ws-delete-001';

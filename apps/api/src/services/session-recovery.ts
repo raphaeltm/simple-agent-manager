@@ -571,7 +571,12 @@ async function startRecoveryTask(
     capacityPoolSelection: placementResolution.capacityPoolSelection,
     vmSizeSource: placementResolution.placement.vmSizeSource,
     resumeSnapshotChatSessionId: chatSessionId,
+    // Unguarded human wakes intentionally do not carry recoverySourceTaskId:
+    // that field grants the live-parent revocable-authority contract. Keep the
+    // predecessor deletion lineage separately so every TaskRunner boundary can
+    // still revalidate that the old runtime is gone before allocating a node.
     recoverySourceTaskId: sourceTaskGuard?.taskId ?? null,
+    retrySourceTaskId: task.recoverySourceTaskId ?? null,
   });
 }
 

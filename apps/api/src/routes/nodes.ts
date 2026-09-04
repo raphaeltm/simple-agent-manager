@@ -369,6 +369,11 @@ nodesRoutes.delete('/:id', async (c) => {
       `Deployment node could not be fully deprovisioned: ${cleanup.errors.join('; ')}`
     );
   }
+  if (!cleanup.runtimeTerminationConfirmed) {
+    throw errors.conflict(
+      `Node runtime termination is not confirmed: ${cleanup.errors.join('; ') || 'cleanup remains pending'}`
+    );
+  }
 
   // Deprovision app-route DNS records for any deployment environments hosted on
   // this node. The environment rows survive (nodeId is set null by the FK), but
