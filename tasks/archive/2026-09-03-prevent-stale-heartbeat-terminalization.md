@@ -124,9 +124,9 @@ reachability were conflated, and absence/timeout was promoted to terminal state.
       specialist reviews with zero unresolved findings.
 - [x] Verify on staging with a genuinely long-running VM prompt and a deliberately
       stopped runtime, then remove all staging VMs.
-- [ ] Open the focused production PR, pass CI, request CodeRabbit only after all
-      other gates, resolve every thread, merge, monitor deploy, and run a bounded
-      production observation with zero stale-heartbeat terminalizations.
+- [ ] Finish PR #2015: pass CI, request CodeRabbit only after all other gates,
+      resolve every thread, merge, monitor deploy, and run a bounded production
+      observation with zero stale-heartbeat terminalizations.
 
 ## Acceptance criteria
 
