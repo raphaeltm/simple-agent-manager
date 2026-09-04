@@ -108,12 +108,13 @@ attempt performs bounded D1 reads/writes and at most one VM-agent delete using t
 background timeout. A compact due-time index lets each alarm load only the configured batch
 and the next live deadline; retained dead letters never trigger a full payload scan. The
 Free-plan-safe default batch is three. A bounded resumable per-DO backfill indexes durable
-entries written by the pre-index release, so rollout cannot strand an existing alarm. Unconfirmed attempts leave the immediate candidate set
-until their bounded exponential `deleteAt`; both the maximum delay and maximum residence are
-configurable. Exhausted or identity-changed entries remain quarantined in `stopping`, leave
-bounded payload-free dead-letter telemetry, and stop consuming the immediate alarm candidate
-set. Only confirmed outcomes and same-identity stale schedules for an active workspace remove
-the entry. Heartbeat age and D1 status labels are never used as terminal proof.
+entries written by the pre-index release, so rollout cannot strand an existing alarm.
+Unconfirmed attempts leave the immediate candidate set until their bounded exponential
+`deleteAt`; both the maximum delay and maximum residence are configurable. Exhausted or
+identity-changed entries remain quarantined in `stopping`, leave bounded payload-free
+dead-letter telemetry, and stop consuming the immediate alarm candidate set. Only confirmed
+outcomes and same-identity stale schedules for an active workspace remove the entry. Heartbeat
+age and D1 status labels are never used as terminal proof.
 
 ## References
 
