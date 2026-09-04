@@ -470,7 +470,29 @@ the archive read path, which re-verifies the hash on read.
   this figure.
 - The run self-terminates at `9,000,000,000` bytes even if more candidates remain.
 
-### Observation window and stop conditions
+#### If the preflight ends `truncated` rather than `complete`
+
+`truncated` means a ceiling was reached — `MAX_BATCHES`, `MAX_ROWS` or `MAX_BYTES` — before
+the candidate set was exhausted. It is NOT an error and the manifest it published is still
+internally coherent: it describes exactly the rows that were measured, with the same batch
+proofs and hashes, and `scanApprovedToolPayloadCleanupBatch` validates it identically.
+
+A truncated plan is therefore executable. It simply reclaims less than the full eligible
+stock, so the arithmetic changes rather than the safety:
+
+- The ceilings still come from the row, so the approved authority still cannot exceed what
+  was actually measured.
+- The expected net reclaim is computed from the truncated `eligible_bytes`, not from an
+  estimate of the whole stock.
+- If that net does not bring the object under 9,000,000,000 bytes, say so explicitly when
+  presenting the plan. The options are then a second preflight plan under a new plan id for
+  the next tranche, or escalation to terminal-session sharding — not raising the ceilings by
+  hand, which would break the "authority equals evidence" property this design depends on.
+
+`MAX_BYTES` is deliberately set at 1,250,000,000, slightly above the ~1.08 GB currently
+needed, so a single tranche should suffice if the average payload clears the threshold.
+
+## Observation window and stop conditions
 
 Watch for **6 hours** after the first pass, then a final check at **24 hours**:
 
