@@ -76,8 +76,8 @@ export function resolveDuplicateMessage(
     .toArray()[0];
   return {
     id,
-    now: existing.created_at,
-    sequence: existing.sequence,
+    now: existing.created_at as number,
+    sequence: existing.sequence as number,
     workspaceId: wsRow
       ? parseWorkspaceId(wsRow, 'messages.persist_duplicate_workspace')
       : null,
