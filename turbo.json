@@ -9,7 +9,8 @@
       "dependsOn": ["build"]
     },
     "test:coverage": {
-      "dependsOn": ["build"]
+      "dependsOn": ["build"],
+      "outputs": ["coverage/**"]
     },
     "lint": {
       "inputs": [

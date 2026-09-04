@@ -94,7 +94,7 @@ describe('deterministic quality-program CI wiring', () => {
     expect(workflow).toContain('needs: [changes]');
     expect(workflow).toContain("needs.changes.outputs.ci-workflow == 'true'");
     expect(workflow).toContain(
-      'pnpm exec vitest run --config scripts/quality/vitest.config.ts ci-quality-program.test.ts ci-worker-suite.test.ts ci-workspace-surfaces.test.ts'
+      'pnpm exec vitest run --config scripts/quality/vitest.config.ts ci-quality-program.test.ts ci-worker-suite.test.ts ci-workspace-surfaces.test.ts sonar-coverage-pipeline.test.ts'
     );
 
     const marketing = jobBlock(ci, 'marketing-site');

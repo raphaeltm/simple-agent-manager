@@ -87,12 +87,17 @@ jobs:
             ci-workflow:
               - '.github/workflows/ci.yml'
               - 'scripts/quality/ci*.test.ts'
+              - 'scripts/quality/sonar-coverage-pipeline.test.ts'
             marketing-site:
               - 'apps/www/**'
               - '.github/workflows/deploy-www.yml'
             repo-quality:
               - 'apps/api/**'
               - 'apps/web/**'
+              - 'apps/www/package.json'
+              - 'apps/www/vitest.config.ts'
+              - 'apps/www/src/**/*.{ts,tsx,js,jsx,astro}'
+              - 'apps/www/tests/**/*.test.{ts,tsx}'
               - 'infra/**'
               - 'packages/**'
               - 'package.json'
@@ -102,6 +107,9 @@ jobs:
               - 'vitest*.ts'
               - 'eslint.config.*'
               - 'prettier.config.*'
+              - 'sonar-project.properties'
+              - 'scripts/quality/check-sonar-coverage.ts'
+              - 'scripts/quality/sonar-coverage-pipeline.test.ts'
             web-ui:
               - 'apps/web/**'
               - 'packages/ui/**'
@@ -190,7 +198,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Validate CI workflow wiring
-        run: pnpm exec vitest run --config scripts/quality/vitest.config.ts ci-quality-program.test.ts ci-worker-suite.test.ts ci-workspace-surfaces.test.ts
+        run: pnpm exec vitest run --config scripts/quality/vitest.config.ts ci-quality-program.test.ts ci-worker-suite.test.ts ci-workspace-surfaces.test.ts sonar-coverage-pipeline.test.ts
 
   ui-compliance:
     name: UI Compliance
@@ -346,6 +354,29 @@ jobs:
 
       - name: Run tests with coverage
         run: pnpm test:coverage
+
+      - name: Normalize and validate JavaScript coverage reports
+        run: pnpm quality:sonar-coverage:javascript
+
+      - name: Upload JavaScript coverage reports
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: js-ts-lcov
+          path: |
+            apps/api/coverage/lcov.info
+            apps/tail-worker/coverage/lcov.info
+            apps/web/coverage/lcov.info
+            apps/www/coverage/lcov.info
+            infra/coverage/lcov.info
+            packages/acp-client/coverage/lcov.info
+            packages/cloud-init/coverage/lcov.info
+            packages/eslint-plugin-sam/coverage/lcov.info
+            packages/providers/coverage/lcov.info
+            packages/shared/coverage/lcov.info
+            packages/terminal/coverage/lcov.info
+            packages/ui/coverage/lcov.info
+          if-no-files-found: error
+          retention-days: 7
 
   build:
     name: Build
@@ -773,7 +804,112 @@ jobs:
         with:
           name: cli-go-coverage
           path: packages/cli/coverage.out
+          if-no-files-found: error
           retention-days: 7
+
+  sonar-go-coverage:
+    name: Sonar Go Coverage
+    needs: [changes]
+    if: >-
+      vars.SONAR_CI_ENABLED == 'true' &&
+      needs.changes.outputs.repo-quality == 'true' &&
+      needs.changes.outputs.cli != 'true' &&
+      (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository)
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Assert Go version
+        run: go version | grep -E '^go version go1\.26\.6 '
+
+      # CLI Test owns this report when CLI inputs changed. Generate it here only
+      # when that job is skipped, so the scanner always receives Go coverage
+      # without running the CLI suite twice in one workflow.
+      - name: Generate CLI coverage for Sonar
+        working-directory: packages/cli
+        run: go test -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Validate CLI coverage report
+        working-directory: packages/cli
+        run: go tool cover -func=coverage.out
+
+      - name: Upload CLI coverage report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cli-go-coverage
+          path: packages/cli/coverage.out
+          if-no-files-found: error
+          retention-days: 7
+
+  sonar:
+    name: SonarQube Cloud
+    needs: [changes, test, cli-test, sonar-go-coverage]
+    if: >-
+      always() &&
+      vars.SONAR_CI_ENABLED == 'true' &&
+      needs.changes.result == 'success' &&
+      needs.changes.outputs.repo-quality == 'true' &&
+      needs.test.result == 'success' &&
+      (needs.cli-test.result == 'success' ||
+      needs.sonar-go-coverage.result == 'success') &&
+      (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository)
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install coverage validator dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Download JavaScript coverage reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: js-ts-lcov
+          path: .
+
+      - name: Download Go coverage report
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cli-go-coverage
+          path: packages/cli
+
+      - name: Validate scanner coverage inputs
+        run: pnpm quality:sonar-coverage
+
+      - name: Require Sonar scanner token
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -z "$SONAR_TOKEN" ]; then
+            echo "::error::SONAR_TOKEN is required after SONAR_CI_ENABLED is enabled."
+            exit 1
+          fi
+
+      - name: Analyze with SonarQube Cloud
+        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   vm-agent-integration:
     name: VM Agent Integration
