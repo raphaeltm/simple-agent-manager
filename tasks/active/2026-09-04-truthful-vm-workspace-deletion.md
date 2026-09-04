@@ -23,7 +23,9 @@ available transcript and focused green evidence are the recovery source.
    classification, so outcome semantics must be centralized.
 3. A D1 node `status='deleted'` label is not strict proof: legacy provider teardown paths
    can write it after provider deletion failure. Strict provider/container success or
-   absence needs an explicit additive proof marker.
+   absence needs an explicit additive proof marker. Provider deletion must additionally
+   pin the encrypted credential generation used to address the external VM, because a
+   credential row can rotate in place without changing its reference or timestamp.
 4. Pending deletion entries are durable but lack identity/incarnation data, attempt
    claims, and bounded retry metadata. Restart can currently cancel an attempt after the
    network call has begun.
@@ -47,6 +49,10 @@ available transcript and focused green evidence are the recovery source.
 ## Implementation Checklist
 
 - [x] Add an explicit strict node runtime-termination proof marker and migration coverage.
+- [x] Add migration `0141_node_provider_credential_fingerprint.sql`; persist a SHA-256
+      fingerprint of the encrypted provider credential generation, fail closed for legacy
+      null proof, and re-resolve the exact credential after composable resolution so
+      provider creation and the stored fingerprint use the same generation.
 - [x] Centralize workspace deletion outcome classification and JIT identity validation.
 - [x] Claim durable NodeLifecycle attempts before VM network I/O; refuse restart
       cancellation after an attempt starts.
@@ -62,7 +68,8 @@ available transcript and focused green evidence are the recovery source.
 - [x] Preserve sleeping/restorable session semantics and ordinary idempotent cleanup.
 - [x] Add exact unit and real Worker race coverage for timeout → recovery → retry,
       ownership/incarnation changes, restart fencing, strict node proof, callback safety,
-      token rejection, scheduled cleanup, and replacement authority.
+      token rejection, scheduled cleanup, replacement authority, same-row credential
+      rotation, fingerprint collisions, and forced A → B credential interleaving.
 - [x] Update public configuration/security documentation and retained incident guidance.
 - [ ] Run full repository gates and required specialist reviews.
 - [ ] Deploy serially to staging; prove a real VM timeout remains quarantined and later
@@ -79,7 +86,9 @@ available transcript and focused green evidence are the recovery source.
 - Strictly confirmed provider/container termination permits finalization without a
   reachable VM; a D1 node status label alone never does.
 - Every attempt re-reads workspace/node/user/project/session identity, and reassignment or
-  reincarnation produces a fenced no-op.
+  reincarnation produces a fenced no-op. Managed provider deletion also revalidates the
+  exact encrypted credential generation and fails closed on rotation or missing legacy
+  fingerprint proof.
 - Restart cancellation succeeds only before any delete attempt is claimed.
 - Late callbacks create no normal side effect, ingest no callback payload, and emit only a
   bounded payload-free activity/telemetry signal.

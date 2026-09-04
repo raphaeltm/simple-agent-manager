@@ -73,7 +73,13 @@ Restart a stopped or errored workspace. Provisions a new VM and recreates the co
 
 ### `DELETE /api/workspaces/:id`
 
-Permanently delete a workspace, its retained session snapshot, and all associated resources.
+Permanently request deletion of a workspace, its retained session snapshot, and associated
+resources. A confirmed deletion returns `200` with
+`{ "success": true, "deletionStatus": "confirmed" }`. If VM deletion is not yet proven,
+the endpoint returns `202` with
+`{ "success": true, "deletionStatus": "pending", "workspaceStatus": "stopping", "reason": "..." }`.
+The `202` response is not deletion proof: SAM keeps the workspace quarantined and retries from
+durable state until VM absence/success or strict provider/container termination is confirmed.
 
 ### `GET /api/workspaces/:id/boot-log`
 

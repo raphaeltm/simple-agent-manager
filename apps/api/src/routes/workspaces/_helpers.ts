@@ -11,7 +11,10 @@ import { errors } from '../../middleware/error';
 import { signCallbackToken, verifyCallbackToken } from '../../services/jwt';
 import { createWorkspaceOnNode } from '../../services/node-agent';
 import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
-import { signalWorkspaceDeletionUnconfirmedCallback } from '../../services/workspace-deletion-callback-signal';
+import {
+  signalWorkspaceDeletionUnconfirmedCallback,
+  type WorkspaceDeletionCallbackKind,
+} from '../../services/workspace-deletion-callback-signal';
 import {
   resolveWorkspaceGitSource,
   type WorkspaceGitSourceProject,
@@ -48,7 +51,7 @@ export async function assertWorkspaceAcceptsCallback<
   env: Env,
   workspace: T | null | undefined,
   workspaceId: string,
-  callback: string,
+  callback: WorkspaceDeletionCallbackKind,
   allowedStatuses: ReadonlySet<string> = WORKSPACE_CALLBACK_ACTIVE_STATUSES
 ): Promise<T> {
   if (!workspace || !allowedStatuses.has(workspace.status)) {
@@ -85,7 +88,7 @@ export async function assertWorkspaceAcceptsCallback<
 export async function assertWorkspaceCallbackResourceById(
   env: Env,
   workspaceId: string,
-  callback: string,
+  callback: WorkspaceDeletionCallbackKind,
   allowedStatuses: ReadonlySet<string> = WORKSPACE_CALLBACK_ACTIVE_STATUSES
 ): Promise<WorkspaceCallbackIdentitySnapshot> {
   const workspace = await loadWorkspaceCallbackIdentity(env, workspaceId);
@@ -141,7 +144,7 @@ interface WorkspaceCallbackTransitionValues {
 export async function transitionWorkspaceFromCallback(
   env: Env,
   expected: WorkspaceCallbackIdentitySnapshot,
-  callback: string,
+  callback: WorkspaceDeletionCallbackKind,
   values: WorkspaceCallbackTransitionValues,
   allowedStatuses: ReadonlySet<string> = WORKSPACE_CALLBACK_ACTIVE_STATUSES
 ): Promise<WorkspaceCallbackIdentitySnapshot> {
@@ -201,7 +204,7 @@ export async function transitionWorkspaceFromCallback(
 export async function assertWorkspaceCallbackIdentityCurrent(
   env: Env,
   expected: WorkspaceCallbackIdentitySnapshot,
-  callback: string,
+  callback: WorkspaceDeletionCallbackKind,
   allowedStatuses: ReadonlySet<string> = WORKSPACE_CALLBACK_ACTIVE_STATUSES
 ): Promise<WorkspaceCallbackIdentitySnapshot> {
   const current = await loadWorkspaceCallbackIdentity(env, expected.workspaceId);

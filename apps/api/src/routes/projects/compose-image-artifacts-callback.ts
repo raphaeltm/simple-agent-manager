@@ -16,6 +16,7 @@ import {
   validateComposeImageArtifactDescriptor,
 } from '../../services/compose-image-artifacts';
 import { assertAgentDeploymentAllowedForProfile } from '../../services/deployment-control';
+import type { WorkspaceDeletionCallbackKind } from '../../services/workspace-deletion-callback-signal';
 import { verifyWorkspacePublishCallback } from './_callback-auth';
 
 const composeImageArtifactsCallbackRoute = new Hono<{ Bindings: Env }>();
@@ -75,7 +76,10 @@ const artifactCompleteRequestSchema = v.object({
   artifacts: v.optional(v.array(artifactCompleteItemSchema)),
 });
 
-async function verifyArtifactPolicy(c: Context<{ Bindings: Env }>, logPrefix: string) {
+async function verifyArtifactPolicy(
+  c: Context<{ Bindings: Env }>,
+  logPrefix: WorkspaceDeletionCallbackKind
+) {
   const verified = await verifyWorkspacePublishCallback(
     c,
     logPrefix,

@@ -9,7 +9,10 @@ import { log } from '../../lib/logger';
 import { errors } from '../../middleware/error';
 import { verifyCallbackToken } from '../../services/jwt';
 import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
-import { signalWorkspaceDeletionUnconfirmedCallback } from '../../services/workspace-deletion-callback-signal';
+import {
+  signalWorkspaceDeletionUnconfirmedCallback,
+  type WorkspaceDeletionCallbackKind,
+} from '../../services/workspace-deletion-callback-signal';
 
 const WORKSPACE_STATUSES_ACCEPTING_PUBLISH_CALLBACKS = new Set(['creating', 'running', 'recovery']);
 
@@ -72,7 +75,7 @@ async function assertWorkspacePublishCallbackCurrent(
   db: ReturnType<typeof drizzle<typeof schema>>,
   workspaceId: string,
   expected: WorkspacePublishCallbackIdentity,
-  logPrefix: string
+  logPrefix: WorkspaceDeletionCallbackKind
 ): Promise<void> {
   const current = await loadWorkspacePublishCallbackIdentity(db, workspaceId);
   if (!current || !WORKSPACE_STATUSES_ACCEPTING_PUBLISH_CALLBACKS.has(current.status)) {
@@ -117,7 +120,7 @@ async function assertWorkspacePublishCallbackCurrent(
  */
 export async function verifyWorkspacePublishCallback(
   c: Context<{ Bindings: Env }>,
-  logPrefix: string,
+  logPrefix: WorkspaceDeletionCallbackKind,
   scopeErrorMessage: string
 ): Promise<VerifiedWorkspacePublishCallback> {
   // Verify callback JWT (not BetterAuth session cookie)

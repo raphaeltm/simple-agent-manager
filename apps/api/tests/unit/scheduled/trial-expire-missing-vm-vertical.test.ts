@@ -73,12 +73,14 @@ vi.mock('../../../src/services/provider-credentials', () => ({
     placementCredentialSource?: string | null;
     placementCredentialReference?: string | null;
     placementCredentialVersion?: number | null;
+    placementCredentialFingerprint?: string | null;
   }) =>
     snapshot.placementCredentialSource && snapshot.placementCredentialReference
       ? {
           credentialSource: snapshot.placementCredentialSource,
           credentialReference: snapshot.placementCredentialReference,
           credentialVersion: snapshot.placementCredentialVersion ?? null,
+          credentialFingerprint: snapshot.placementCredentialFingerprint ?? null,
         }
       : null,
 }));
@@ -123,6 +125,7 @@ describe('expired-trial exact provider deletion vertical slice', () => {
       placementCredentialSource: 'platform',
       placementCredentialReference: 'platform_credentials:platform-hetzner',
       placementCredentialVersion: null,
+      placementCredentialFingerprint: 'sha256:fixture-provider-generation',
     });
     providerGetVM.mockResolvedValue(null);
     createProviderForUser.mockImplementation(async (...args: unknown[]) => {

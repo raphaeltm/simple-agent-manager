@@ -62,8 +62,10 @@ export function workspaceDeletionRetryDelayMs(
     Number.isFinite(parsedMax) && parsedMax >= baseMs
       ? parsedMax
       : Math.max(baseMs, DEFAULT_WORKSPACE_DELETION_RETRY_MAX_MS);
-  const exponent = Math.min(Math.max(attemptCount - 1, 0), 30);
-  return Math.min(baseMs * 2 ** exponent, maxMs);
+  const exponent = Math.max(attemptCount - 1, 0);
+  const saturationExponent = Math.ceil(Math.log2(maxMs / baseMs));
+  if (exponent >= saturationExponent) return maxMs;
+  return baseMs * 2 ** exponent;
 }
 
 export function workspaceDeletionAlarmBatchSize(env: NodeLifecycleDeletionEnv): number {

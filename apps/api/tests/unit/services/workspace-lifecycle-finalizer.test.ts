@@ -56,6 +56,7 @@ vi.mock('../../../src/lib/logger', () => ({
 
 const NOW = new Date('2026-08-26T21:10:00.000Z');
 const NOW_ISO = NOW.toISOString();
+const RUNTIME_TERMINATION_CONFIRMED_AT = '2026-09-04T00:00:00.000Z';
 const PROJECT_ID = 'project-finalizer';
 const USER_ID = 'user-finalizer';
 const WORKSPACE_ID = 'workspace-finalizer';
@@ -260,6 +261,25 @@ beforeEach(() => {
     TASK_RUN_CLEANUP_DELAY_MS: '0',
   } as unknown as Env;
   vi.clearAllMocks();
+  mocks.deleteNodeResourcesStrict.mockImplementation(async (nodeId: string) => {
+    sqlite
+      .prepare('UPDATE nodes SET runtime_termination_confirmed_at = ? WHERE id = ?')
+      .run(RUNTIME_TERMINATION_CONFIRMED_AT, nodeId);
+    sqlite
+      .prepare(
+        `UPDATE workspaces
+            SET status = 'deleted', runtime_deletion_confirmed_at = ?,
+                runtime_deletion_proof = 'node_runtime_terminated'
+          WHERE node_id = ?`
+      )
+      .run(RUNTIME_TERMINATION_CONFIRMED_AT, nodeId);
+    return {
+      providerVm: 'deleted',
+      runtimeTerminationConfirmedAt: RUNTIME_TERMINATION_CONFIRMED_AT,
+      runtimeIncarnationId: null,
+      providerInstanceId: null,
+    };
+  });
 });
 
 describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', () => {

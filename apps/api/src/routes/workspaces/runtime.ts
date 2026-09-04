@@ -55,7 +55,10 @@ import { resolveProjectAgentDefault } from '../../services/project-agent-default
 import * as projectDataService from '../../services/project-data';
 import { extractScalewaySecretKey } from '../../services/provider-credentials';
 import { bridgeAgentActivity } from '../../services/trial/bridge';
-import { signalWorkspaceDeletionUnconfirmedCallback } from '../../services/workspace-deletion-callback-signal';
+import {
+  signalWorkspaceDeletionUnconfirmedCallback,
+  type WorkspaceDeletionCallbackKind,
+} from '../../services/workspace-deletion-callback-signal';
 import { getWorkspaceRuntimeAssets } from '../../services/workspace-runtime-assets';
 import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
 import { assertRepositoryAccess } from '../projects/_helpers';
@@ -126,7 +129,7 @@ type MessageBatchBody = v.InferOutput<typeof MessageBatchSchema>;
 async function callbackJsonWithJit<T extends Record<string, unknown>>(
   c: RuntimeContext,
   expected: WorkspaceCallbackIdentitySnapshot,
-  callback: string,
+  callback: WorkspaceDeletionCallbackKind,
   body: T
 ) {
   await assertWorkspaceCallbackIdentityCurrent(c.env, expected, callback);

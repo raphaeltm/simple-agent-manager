@@ -520,11 +520,12 @@ describe('provider-aware node provisioning', () => {
       nodesSource.indexOf('async function stopNodeResources'),
       nodesSource.indexOf('async function deleteNodeResources')
     );
-    expect(section).toContain(
-      'await deleteNodeResourcesStrict(nodeId, userId, env, { cleanupDns: false })'
-    );
+    expect(section).toContain('await deleteNodeResourcesStrict(nodeId, userId, env, {');
+    expect(section).toContain('cleanupDns: false');
+    expect(section).toContain('expectedRuntime:');
     expect(section).toContain("status: 'stopping'");
-    expect(section).toContain('isNotNull(schema.nodes.runtimeTerminationConfirmedAt)');
+    expect(section).toContain('schema.nodes.runtimeTerminationConfirmedAt} IS');
+    expect(section).toContain('schema.nodes.runtimeIncarnationId} IS');
     expect(section).not.toContain('providerResult.provider.deleteVM');
   });
 
@@ -551,7 +552,7 @@ describe('provider-aware node provisioning', () => {
     );
   });
 
-  it('deleteNodeResourcesStrict verifies legacy unknown-provider nodes before deleting', () => {
+  it('deleteNodeResourcesStrict fails closed without an exact provider credential binding', () => {
     const strictSection = strictNodeDeletionSource.slice(
       strictNodeDeletionSource.indexOf('async function deleteNodeResourcesStrict')
     );
@@ -564,10 +565,12 @@ describe('provider-aware node provisioning', () => {
       strictNodeDeletionSource.indexOf('async function persistStrictDnsCleanupError')
     );
     expect(strictSection).toContain('await deleteStrictProviderInstance(db, node, userId, env)');
-    expect(verificationSection).toContain('for (const providerName of CREDENTIAL_PROVIDERS)');
-    expect(verificationSection).toContain('candidate.provider.getVM(providerInstanceId)');
-    expect(verificationSection).toContain('presentCandidates.length > 1');
-    expect(verificationSection).toContain('throw new Error');
+    expect(verificationSection).toContain('requireStrictNodeProvider(db, node, userId, env)');
+    expect(strictNodeDeletionSource).toContain(
+      '!targetProvider || !exactCredential?.credentialFingerprint'
+    );
+    expect(verificationSection).not.toContain('CREDENTIAL_PROVIDERS');
+    expect(deletionSection).toContain('await requireSameNodeIncarnation');
     expect(deletionSection).toContain(
       'await providerResult.provider.deleteVM(node.providerInstanceId)'
     );
