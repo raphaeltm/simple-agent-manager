@@ -119,8 +119,11 @@ uncertain states must fail closed.
       circuit-breaker, error, CPU, and rows-read evidence from production.
 - [x] Inspect PRs #1978, #1984, #2000, #2002, #2004, #2005, and #2008 plus the
       active ProjectData storage, retention, cleanup, and sharding task records.
-- [ ] Choose and document the minimum safe composition after measuring
+- [x] Choose and document the minimum safe composition after measuring
       authoritative eligible tool-payload and terminal-session relief stock.
+      Composition is tool-payload-only, conditional on the preflight's average
+      payload clearing the 5 KB net-reclaim threshold; below that the documented
+      answer is to escalate to terminal-session sharding rather than run this plan.
 - [x] Add bounded, resumable, read-only preflight evidence that can produce
       exact project/session/table/row/byte targets without an unbounded object scan.
 - [x] Add an explicit per-cron slice cap and aggregate run admission budget so an
@@ -150,13 +153,15 @@ uncertain states must fail closed.
       task records for every new control or contract.
 - [x] Run focused tests, API tests, typecheck, lint, formatting, migration safety,
       config sync, and the relevant full suites.
-- [ ] Complete all required specialist reviews and address every critical/high
+- [x] Complete all required specialist reviews and address every critical/high
       finding before PR creation/merge.
-- [ ] Coordinate a successful staging deployment, exercise the real preflight
+- [x] Coordinate a successful staging deployment, exercise the real preflight
       and archival path end to end, prove fail-closed behavior, and return staging
       to zero VMs at rest.
-- [ ] Open the PR, converge CI and CodeRabbit, merge, deploy production, and
+- [x] Open the PR, converge CI and CodeRabbit, merge, deploy production, and
       verify the exact deployed version before asking for mutation approval.
+      Merged as `831d14e2a` with 17 green checks; D1 `0138` applied to production;
+      production Worker verified live with ONLY the read-only preflight enabled.
 - [ ] Present the exact production mutation plan and obtain Raphaël's explicit
       approval before any destructive production operation.
 - [ ] Execute only the approved bounded plan, verify every archive before source
@@ -309,10 +314,35 @@ Re-proved on the final head because this branch changed relief code. Target
 staging smoke user so message text can be read back through the normal project API. A
 SHA-256 baseline of all 17 target messages' visible text was captured before any mutation.
 
-Deploy `33873876435` also ships a deliberately HALF-APPLIED cleanup configuration — plan
-id, allowlist and cutoff set, manifest absent — as a live test of the fail-closed guard
-added for the security review finding: the cleaner must refuse to build a plan at all
-rather than fall through to ordinary retention.
+Deploy `33873876435` shipped a deliberately HALF-APPLIED cleanup configuration — plan id,
+allowlist and cutoff set, manifest deliberately absent — as a live test of the fail-closed
+guard added for the security review finding. I forced a pass through the superadmin route,
+which enters the identical `createToolPayloadCleanupPlan` choke point the alarm uses, so the
+system was genuinely asked and "nothing happened" is a positive result rather than an
+untested silence (rule 62: an absence assertion needs a liveness assertion beside it).
+
+Result: `skipReason=not_needed`, `terminationReason=not_needed`, `rowsUpdated 0`,
+`rowsFailed 0`; all 17 rows still eligible, 0 archived, `databaseSize` unchanged at 978,944,
+all 17 message texts byte-identical.
+
+What matters is what did NOT happen. Those rows are older than the 5-day retention window,
+so without the new guard the half-applied config would have skipped the strict gate —
+including the exact single-project allowlist match — and fallen through to the ordinary
+retention path, archiving and stripping them. It refused to build a plan at all instead.
+
+### 3c. What the manual route cost, and the defect that exposed
+
+Running the refuse-proof through the manual route consumed that project's 24-hour manual
+cooldown, because the reservation is written BEFORE the pass (it doubles as the overlap
+guard). A pass that refused and did nothing still charged the full slot. That is a real
+defect for exactly this incident — a one-variable config mistake would cost a day of a
+window measured in days — and it is fixed in this branch: the reservation is still taken up
+front but released when no plan was built, while a pass that ran keeps its cooldown.
+
+Because the already-written timestamp could not be cleared retroactively, the exact-manifest
+proof was completed through the AUTOMATIC alarm path instead, which reads a different
+recheck key. That required lowering the staging trigger/target ratios to create storage
+pressure on a 987 KB object — the same technique the Workers tests use.
 
 ## Exact production mutation plan (AWAITING RAPHAËL'S APPROVAL — nothing below has been executed)
 
