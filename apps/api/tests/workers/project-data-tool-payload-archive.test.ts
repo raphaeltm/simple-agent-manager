@@ -448,6 +448,60 @@ async function callMcpTool(
 }
 
 describe('ProjectData tool payload R2 archival', () => {
+  it('does not spend the manual cooldown on a pass that built no plan', async () => {
+    // Found by running the staging proof: the cooldown reservation is written BEFORE the
+    // pass (it doubles as the overlap guard), so a half-applied config that refused to
+    // build a plan still burned the operator's full 24h manual slot. During a capacity
+    // emergency that converts a one-variable config mistake into a day-long lockout.
+    const projectId = `${TEST_PREFIX}-manual-cooldown-release`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'manual-cooldown-release', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+    ]);
+    const approval = await approvedCleanupEnv(
+      projectId,
+      'manual-cooldown-release-plan',
+      FIXED_NOW - 1_000
+    );
+
+    // Half-applied: manifest deliberately absent, so no plan can be built.
+    const refused = await runManualCleanup(
+      stub,
+      projectId,
+      { ...approval, PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY: '' },
+      {
+        reason: 'half applied config',
+        idempotencyKey: 'manual-cooldown-release-a',
+        batchRows: 1,
+        batchBytes: 1_000_000,
+        wallTimeMs: 20_000,
+        now: FIXED_NOW,
+      }
+    );
+    expect(refused).toMatchObject({ skipReason: 'not_needed' });
+    // The discriminating assertion: the operator is NOT locked out.
+    expect(refused.cooldown.nextAllowedAt).toBeLessThanOrEqual(FIXED_NOW);
+    await expectSourcePayloadIntact(stub, seeded, 'manual-cooldown-release');
+
+    // A second pass with the corrected config runs immediately instead of hitting cooldown.
+    const applied = await runManualCleanup(stub, projectId, approval, {
+      reason: 'corrected config',
+      idempotencyKey: 'manual-cooldown-release-b',
+      batchRows: 5,
+      batchBytes: 1_000_000,
+      wallTimeMs: 20_000,
+      now: FIXED_NOW + 1,
+    });
+    expect(applied.telemetry.terminationReason).not.toBe('cooldown');
+    expect(applied.telemetry.rowsUpdated).toBe(1);
+    await expectSourcePayloadArchived(stub, seeded, 'manual-cooldown-release');
+
+    // Owner control: a pass that DID work keeps its cooldown.
+    expect(applied.cooldown.nextAllowedAt).toBeGreaterThan(FIXED_NOW + 1);
+  });
+
   it('feeds a manifest produced by the real preflight scheduler into the real cleanup engine', async () => {
     // The vertical slice the suite was missing: every other approved-manifest test builds
     // its manifest with `approvedCleanupEnv`, a hand-rolled parallel of what the scheduler
