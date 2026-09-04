@@ -392,6 +392,9 @@ by the read-only cron-liveness check.
 - `TASK_RECONCILIATION_MIN_ALARM_DELAY_MS` — Minimum delay before the next reconciliation alarm can fire (default: 10000)
 - `TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP` — Maximum D1/runtime assessments per ProjectData alarm pass (default: 5)
 - `TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS` — Bounded reconciliation check-in/cancel request timeout (default: 5000)
+- `TASK_RECONCILIATION_CANDIDATE_LEASE_MS` — Durable claim floor preventing overlapping alarms from repeating reconciliation; the effective lease covers configured liveness-probe, node-call, and minimum-alarm-delay budgets (default: 30000)
+- `TASK_RECONCILIATION_PROBE_MAX_ATTEMPTS` — Consecutive inconclusive task reconciliation attempts before quarantine (default: 3)
+- `TASK_RECONCILIATION_QUARANTINE_MS` — Cooldown after task reconciliation exhausts its inconclusive-attempt budget (default: 300000)
 - `SESSION_ACTIVITY_PROBE_TIMEOUT_MS` — Bounded authoritative SessionHost inventory request timeout (default: 5000)
 - `SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS` — Unreachable probes before the stale activity mirror is quarantined without terminalization (default: 3)
 - `SESSION_ACTIVITY_PROBE_MAX_CANDIDATES` — Maximum SessionHost inventory probes per ProjectData alarm pass (default: 10)
@@ -403,6 +406,8 @@ by the read-only cron-liveness check.
 - `TASK_RUN_ABSOLUTE_CEILING_MS` — Absolute runaway-cost ceiling that fails even a demonstrably live task (default: 86400000 / 24h)
 - `SESSION_ACTIVITY_STALE_THRESHOLD_MS` — Threshold before stale working activity is checked against authoritative SessionHost inventory (default: 300000)
 - `NODE_HEARTBEAT_STALE_SECONDS` — Staleness threshold for node health
+- `TASK_LIVENESS_PROBE_TIMEOUT_MS` — Per-candidate timeout for ACP and Instant lifecycle probes used by ProjectData heartbeat deferral, idle cleanup, and stuck-task reconciliation; timeout is inconclusive (default: 5000)
+- `TASK_LIVENESS_MAX_ACP_SESSIONS` — Maximum task-scoped ACP sessions inspected per liveness probe (default: 5)
 - `TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS` — Timeout for stale-VM-node health probes used by ProjectData idle cleanup and stuck-task reconciliation; a timeout is inconclusive and preserves the task/workspace (default: 5000)
 - `NODE_AGENT_READY_TIMEOUT_MS` — Max wait for freshly provisioned node-agent health
 - `NODE_AGENT_READY_POLL_INTERVAL_MS` — Polling interval for fresh-node readiness checks

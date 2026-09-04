@@ -90,7 +90,10 @@ reachability were conflated, and absence/timeout was promoted to terminal state.
 - Each selected candidate performs one shared runtime assessment. VM candidates
   perform at most one bounded node-health probe, and a deliverable check-in/cancel
   performs at most one bounded runtime mutation. Thus network fan-out is at most
-  `2 * candidate_limit` and each call uses the configured reconciliation timeout.
+  `2 * candidate_limit`. VM node-health probes use
+  `TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS`, container lifecycle probes use
+  `TASK_LIVENESS_PROBE_TIMEOUT_MS`, and check-in/cancel mutations use
+  `TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS`.
 - Stale activity probing selects at most
   `SESSION_ACTIVITY_PROBE_MAX_CANDIDATES` rows (default 10), performs one bounded
   inventory request per row, and quarantines after
@@ -162,10 +165,10 @@ the escape from quarantine.
 - Full coverage retry passed 21/21 workspace tasks: API 653 files / 8,773 tests
   and web 300 files / 3,595 tests, with repository coverage thresholds met.
 - Gitleaks v8.30.1 passed both current-tree and PR-range scans; dependency
-  governance and direct dependency evidence passed. `pnpm audit --audit-level
-  high` exhausted its built-in retries twice because the npm advisory endpoint
-  returned `ERR_SOCKET_TIMEOUT`; the failure was external and no dependency
-  manifest or lockfile changed.
+  governance and direct dependency evidence passed. The
+  `pnpm audit --audit-level high` command exhausted its built-in retries twice
+  because the npm advisory endpoint returned `ERR_SOCKET_TIMEOUT`; the failure
+  was external and no dependency manifest or lockfile changed.
 - The first specialist review wave rejected the initial reconstruction on
   candidate starvation/overlap, exact ownership fencing, SessionHost contract
   validation, configured budget coverage, and missing vertical alarm replay.
