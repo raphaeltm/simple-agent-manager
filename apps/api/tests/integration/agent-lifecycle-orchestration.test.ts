@@ -40,6 +40,8 @@ type TaskRow = {
   task_mode: string;
   status: string;
   project_id: string;
+  workspace_id: string;
+  chat_session_id: string;
   error?: string | null;
 };
 type WorkspaceRow = {
@@ -147,7 +149,13 @@ describe('agent lifecycle orchestration integration', () => {
     sql = createSqlStorage(db);
     runMigrations(sql);
     tasks = {
-      'task-1': { task_mode: 'task', status: 'in_progress', project_id: 'project-1' },
+      'task-1': {
+        task_mode: 'task',
+        status: 'in_progress',
+        project_id: 'project-1',
+        workspace_id: 'ws-1',
+        chat_session_id: 'session-1',
+      },
     };
     workspaces = { 'ws-1': { node_id: 'node-1', user_id: 'user-1', status: 'running' } };
     env = {

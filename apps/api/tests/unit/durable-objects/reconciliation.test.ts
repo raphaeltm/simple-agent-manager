@@ -1486,10 +1486,14 @@ describe('Task Reconciliation Module', () => {
       await vi.waitFor(() => {
         expect(vi.mocked(sendPromptToAgentOnNode)).toHaveBeenCalledTimes(1);
       });
-      vi.setSystemTime(now + 2);
+      const gate = db
+        .prepare(`SELECT value FROM do_meta WHERE key = 'taskReconciliationGate:session-1'`)
+        .get<{ value: string }>();
+      expect(JSON.parse(gate!.value)).toMatchObject({ nextAttemptAt: now + 4000 });
+      vi.setSystemTime(now + 3500);
       // A second alarm can run while the first waitUntil delivery is still in
-      // flight. Even though the configured lease was only 1 ms, its effective
-      // value covers the configured liveness and delivery I/O budgets.
+      // flight. Even after the max-of-probes lease would have expired, the
+      // effective value still covers every configured probe and delivery budget.
       expect(
         await processReconciliationCandidates(sql, env, vi.fn(), {
           waitUntil: (promise) => waitUntilPromises.push(promise),

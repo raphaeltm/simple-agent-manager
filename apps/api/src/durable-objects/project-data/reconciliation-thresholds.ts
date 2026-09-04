@@ -109,14 +109,15 @@ export function reconciliationCandidateLeaseMs(env: DOEnv): number {
     'TASK_RECONCILIATION_CANDIDATE_LEASE_MS',
     DEFAULT_TASK_RECONCILIATION_CANDIDATE_LEASE_MS
   );
-  const livenessProbeMs = Math.max(
+  // Cover both probe boundaries conservatively. They are mutually exclusive in
+  // today's runtime adapter, but summing them keeps the claim safe if a future
+  // classifier legitimately chains both before attempting delivery.
+  const livenessProbeMs =
     envNumber(
       env,
       'TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS',
       DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS
-    ),
-    envNumber(env, 'TASK_LIVENESS_PROBE_TIMEOUT_MS', DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS)
-  );
+    ) + envNumber(env, 'TASK_LIVENESS_PROBE_TIMEOUT_MS', DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS);
   const minimumSafeLeaseMs =
     livenessProbeMs + reconciliationNodeCallTimeoutMs(env) + minReconciliationAlarmDelayMs(env);
   return Math.max(configuredLeaseMs, minimumSafeLeaseMs);
