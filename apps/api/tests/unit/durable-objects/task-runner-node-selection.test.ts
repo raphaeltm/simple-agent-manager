@@ -11,28 +11,36 @@ import { SessionRecoveryAuthorityRevokedError } from '../../../src/services/sess
 type D1ResultMap = {
   persistedWarmClaim?: string | null;
   runs?: Array<{ sql: string; bound: unknown[] }>;
-  preferredNode?: PlacementSeedFields & {
-    status: string;
-  } | null;
+  preferredNode?:
+    | (PlacementSeedFields & {
+        status: string;
+      })
+    | null;
   warmNodes?: Array<PlacementSeedFields & { vm_location: string }>;
-  freshWarmNode?: PlacementMetadataFields & {
-    id?: string;
-    status: string;
-    warm_since: string | null;
-    vm_size?: string;
-    vm_location?: string;
-    agent_version?: string | null;
-    placement_explanation_json?: string | null;
-  } | null;
+  freshWarmNode?:
+    | (PlacementMetadataFields & {
+        id?: string;
+        status: string;
+        warm_since: string | null;
+        vm_size?: string;
+        vm_location?: string;
+        agent_version?: string | null;
+        placement_explanation_json?: string | null;
+      })
+    | null;
   existingNodes?: Array<
     PlacementSeedFields & {
-    vm_location: string;
-    health_status: string;
-    last_metrics: string | null;
+      vm_location: string;
+      health_status: string;
+      last_metrics: string | null;
     }
   >;
   workspaceCounts?: Array<{ node_id: string; c: number }>;
   warmWorkspaceCount?: number;
+  workspaceReservations?: Array<{
+    nodeId: string;
+    resolvedReservationJson: string | null;
+  }>;
   healthByNode?: Record<
     string,
     {
@@ -199,6 +207,9 @@ function createStatement(sql: string, results: D1ResultMap) {
       if (sql.includes('SELECT node_id, COUNT(*) as c FROM workspaces')) {
         return Promise.resolve({ results: results.workspaceCounts ?? [] });
       }
+      if (sql.includes('resolved_reservation_json AS resolvedReservationJson')) {
+        return Promise.resolve({ results: results.workspaceReservations ?? [] });
+      }
       return Promise.resolve({ results: [] });
     },
   };
@@ -283,6 +294,16 @@ function createState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState 
       agentProfileHint: null,
       attachments: null,
       projectScaling: null,
+      resolvedReservation: {
+        cpuMillis: 2_000,
+        memoryMb: 4_096,
+        diskMb: 40_960,
+        exclusiveNode: false,
+        maxCoTenants: 4,
+        source: 'platform',
+        sourceId: 'platform',
+        version: 1,
+      },
     },
     retryCount: 0,
     workspaceReadyReceived: false,
@@ -326,16 +347,14 @@ function capacityPoolSelection(
       machineSize
     ];
   const providerInstanceVcpuCount =
-    overrides.vcpuCount ?? ({ small: 2, medium: 2, large: 8 } satisfies Record<string, number>)[
-      machineSize
-    ];
+    overrides.vcpuCount ??
+    ({ small: 2, medium: 2, large: 8 } satisfies Record<string, number>)[machineSize];
   const providerInstanceMemoryMb =
     overrides.memoryMb ??
     ({ small: 4096, medium: 4096, large: 16384 } satisfies Record<string, number>)[machineSize];
   const providerInstanceDiskGb =
-    overrides.diskGb ?? ({ small: 40, medium: 80, large: 160 } satisfies Record<string, number>)[
-      machineSize
-    ];
+    overrides.diskGb ??
+    ({ small: 40, medium: 80, large: 160 } satisfies Record<string, number>)[machineSize];
   const placementCredentialSource = scope === 'installation' ? 'platform' : scope;
   const snapshot = {
     capacityPoolId: poolId,
@@ -442,7 +461,8 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
     };
 
     await expect(handleNodeSelection(state, rc)).rejects.toMatchObject({
-      message: 'No active compute pool offerings in the selected user pool satisfy the requested resources.',
+      message:
+        'No active compute pool offerings in the selected user pool satisfy the requested resources.',
       permanent: true,
     });
 
@@ -657,6 +677,36 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
     expect(rc.advanceToStep).not.toHaveBeenCalled();
   });
 
+  it('rejects a preferred node whose active reservations consume its capacity', async () => {
+    const state = createState({
+      config: { ...createState().config, preferredNodeId: 'node-full', vmSize: 'small' },
+    });
+    const rc = createContext({
+      preferredNode: {
+        id: 'node-full',
+        status: 'running',
+        vm_size: 'small',
+        agent_version: 'current-sha',
+        provider_instance_type: 'cx23',
+        provider_instance_vcpu_count: 2,
+        provider_instance_memory_mb: 4_096,
+        provider_instance_disk_gb: 40,
+      },
+      workspaceReservations: [
+        {
+          nodeId: 'node-full',
+          resolvedReservationJson: JSON.stringify(state.config.resolvedReservation),
+        },
+      ],
+    });
+
+    await expect(handleNodeSelection(state, rc)).rejects.toMatchObject({
+      message: 'Specified node lacks available resource capacity',
+      permanent: true,
+    });
+    expect(rc.advanceToStep).not.toHaveBeenCalled();
+  });
+
   it('does not claim undersized warm nodes and falls through to provisioning', async () => {
     const lifecycleGet = vi.fn();
     const state = createState();
@@ -739,6 +789,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           maxCoTenants: 1,
           source: 'task',
           sourceId: 'task-1',
+          version: 1,
         },
       },
     });

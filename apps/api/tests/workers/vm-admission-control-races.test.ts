@@ -12,10 +12,6 @@ import { env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { findNodeWithCapacity } from '../../src/durable-objects/task-runner/node-selection';
-import type {
-  TaskRunnerContext,
-  TaskRunnerState,
-} from '../../src/durable-objects/task-runner/types';
 import type { TaskStartCapacityPoolSelection } from '../../src/services/placement-resolver';
 import {
   assertVmProvisioningLease,
@@ -26,10 +22,7 @@ import {
   type VmTaskAdmissionIdentity,
   waitForVmAdmissionCapacity,
 } from '../../src/services/vm-admission-control';
-import {
-  reserveWorkspacePlacement,
-  type WorkspacePlacementInput,
-} from '../../src/services/workspace-placement';
+import { reserveWorkspacePlacement } from '../../src/services/workspace-placement';
 import {
   seedInstallation,
   seedNode,
@@ -38,6 +31,16 @@ import {
   seedUser,
   seedWorkspace,
 } from './helpers/seed-d1';
+import {
+  assignNodeCapacity,
+  capacitySnapshot,
+  makeReadyNode,
+  placement,
+  reservation,
+  seedCapacityRecords,
+  selectorContext,
+  taskState,
+} from './helpers/vm-workspace-placement';
 
 const USER_ID = 'user-vm-admission-races';
 const OTHER_USER_ID = 'user-vm-admission-races-other';
@@ -96,268 +99,6 @@ async function leaseRow(scopeKey = SCOPE_KEY): Promise<{
       fencing_token: number;
       inflight_node_id: string | null;
     }>();
-}
-
-function placement(
-  workspaceId: string,
-  nodeId: string,
-  overrides: Partial<
-    Pick<
-      WorkspacePlacementInput,
-      'projectId' | 'userId' | 'installationId' | 'repository' | 'vmSize' | 'vmLocation'
-    >
-  > = {}
-): WorkspacePlacementInput {
-  return {
-    id: workspaceId,
-    nodeId,
-    projectId: overrides.projectId ?? PROJECT_ID,
-    userId: overrides.userId ?? USER_ID,
-    installationId: overrides.installationId ?? INSTALLATION_ID,
-    name: `Workspace ${workspaceId}`,
-    displayName: `Workspace ${workspaceId}`,
-    normalizedDisplayName: workspaceId,
-    repository: overrides.repository ?? 'test-org/vm-admission-races',
-    branch: 'main',
-    vmSize: overrides.vmSize ?? 'medium',
-    vmLocation: overrides.vmLocation ?? 'nbg1',
-    workspaceProfile: 'full',
-    devcontainerConfigName: null,
-    agentProfileHint: null,
-    createdAt: new Date().toISOString(),
-  };
-}
-
-function taskState(
-  userId: string,
-  vmSize: 'small' | 'medium' | 'large',
-  overrides: Partial<Pick<TaskRunnerState, 'projectId'>> & {
-    installationId?: string;
-    repository?: string;
-    capacityPoolSelection?: TaskRunnerState['config']['capacityPoolSelection'];
-  } = {}
-): TaskRunnerState {
-  const now = Date.now();
-  return {
-    version: 1,
-    taskId: `task-selector-${userId}-${vmSize}`,
-    projectId: overrides.projectId ?? PROJECT_ID,
-    userId,
-    currentStep: 'node_selection',
-    stepResults: {
-      nodeId: null,
-      autoProvisioned: false,
-      claimedWarmNodeId: null,
-      workspaceId: null,
-      chatSessionId: null,
-      agentSessionId: null,
-      agentStarted: false,
-      mcpToken: null,
-      provisionedVmSize: null,
-    },
-    config: {
-      vmSize,
-      vmLocation: 'nbg1',
-      branch: 'main',
-      preferredNodeId: null,
-      userName: null,
-      userEmail: null,
-      githubId: null,
-      taskTitle: 'selector packing',
-      taskDescription: null,
-      repository: overrides.repository ?? 'test-org/vm-admission-races',
-      installationId: overrides.installationId ?? INSTALLATION_ID,
-      outputBranch: null,
-      defaultBranch: 'main',
-      projectDefaultVmSize: null,
-      chatSessionId: null,
-      agentType: 'openai-codex',
-      workspaceProfile: 'full',
-      devcontainerConfigName: null,
-      cloudProvider: 'hetzner',
-      credentialAttributionUserId: userId,
-      credentialAttributionProjectId: null,
-      credentialAttributionSource: 'user',
-      taskMode: 'task',
-      model: null,
-      effort: null,
-      permissionMode: null,
-      opencodeProvider: null,
-      opencodeBaseUrl: null,
-      systemPromptAppend: null,
-      agentProfileHint: null,
-      attachments: null,
-      projectScaling: { maxWorkspacesPerNode: 2 },
-      resourceRequirements: null,
-      resolvedReservation: null,
-      capacityPoolSelection: overrides.capacityPoolSelection ?? null,
-      vmSizeSource: null,
-      resumeSnapshotChatSessionId: null,
-      recoverySourceTaskId: null,
-    },
-    retryCount: 0,
-    workspaceReadyReceived: false,
-    workspaceReadyStatus: null,
-    workspaceErrorMessage: null,
-    createdAt: now,
-    lastStepAt: now,
-    provisioningStartedAt: null,
-    admissionScopeKey: null,
-    admissionLeaseToken: null,
-    agentReadyStartedAt: null,
-    workspaceReadyStartedAt: null,
-    workspaceDispatchStartedAt: null,
-    workspaceDispatchAttempts: 0,
-    workspaceDispatchLastAttemptAt: null,
-    workspaceDispatchLastError: null,
-    workspaceDispatchAckedAt: null,
-    lastD1Step: null,
-    completed: false,
-  };
-}
-
-function capacitySnapshot(input: {
-  poolId: string;
-  sourceId: string;
-  candidateId: string;
-  scope: 'project' | 'user' | 'installation';
-  projectId?: string | null;
-}): CapacityPlacementSnapshot {
-  return {
-    capacityPoolId: input.poolId,
-    capacityPoolScope: input.scope,
-    capacityPoolRevision: 1,
-    capacitySourceId: input.sourceId,
-    capacityPoolCandidateId: input.candidateId,
-    placementCredentialSource: input.scope === 'installation' ? 'platform' : input.scope,
-    placementCredentialReference: `test:${input.sourceId}`,
-    placementCredentialVersion: 1,
-    capacityPoolProjectId: input.scope === 'project' ? (input.projectId ?? PROJECT_ID) : null,
-    workloadRole: 'workspace',
-    placementExplanationJson: JSON.stringify({
-      poolId: input.poolId,
-      sourceId: input.sourceId,
-      candidateId: input.candidateId,
-    }),
-  };
-}
-
-async function seedCapacityRecords(
-  snapshot: CapacityPlacementSnapshot,
-  ownerUserId = USER_ID
-): Promise<void> {
-  if (!snapshot.capacityPoolId || !snapshot.capacityPoolScope || !snapshot.capacitySourceId) {
-    throw new Error('snapshot must include pool and source IDs');
-  }
-  await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO capacity_pools
-       (id, scope, owner_user_id, owner_project_id, name, is_default, revision, status, strategy,
-        exhaustion_policy, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 0, ?, 'active', 'balanced', 'queue', ?, ?)`
-  )
-    .bind(
-      snapshot.capacityPoolId,
-      snapshot.capacityPoolScope,
-      snapshot.capacityPoolScope === 'user' ? ownerUserId : null,
-      snapshot.capacityPoolScope === 'project' ? snapshot.capacityPoolProjectId : null,
-      `Pool ${snapshot.capacityPoolId}`,
-      snapshot.capacityPoolRevision ?? 1,
-      new Date().toISOString(),
-      new Date().toISOString()
-    )
-    .run();
-  await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO capacity_sources
-       (id, scope, owner_user_id, owner_project_id, source_kind, provider, credential_source,
-        credential_id, platform_credential_id, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'registered-runner', NULL, NULL, NULL, NULL, 'active', ?, ?)`
-  )
-    .bind(
-      snapshot.capacitySourceId,
-      snapshot.capacityPoolScope,
-      snapshot.capacityPoolScope === 'user' ? ownerUserId : null,
-      snapshot.capacityPoolScope === 'project' ? snapshot.capacityPoolProjectId : null,
-      new Date().toISOString(),
-      new Date().toISOString()
-    )
-    .run();
-}
-
-async function assignNodeCapacity(
-  nodeId: string,
-  snapshot: CapacityPlacementSnapshot
-): Promise<void> {
-  await seedCapacityRecords(snapshot);
-  await env.DATABASE.prepare(
-    `UPDATE nodes
-     SET capacity_pool_id = ?,
-         capacity_pool_scope = ?,
-         capacity_pool_revision = ?,
-         capacity_source_id = ?,
-         capacity_pool_candidate_id = ?,
-         placement_credential_source = ?,
-         placement_credential_reference = ?,
-         placement_credential_version = ?,
-         capacity_pool_project_id = ?,
-         workload_role = ?,
-         placement_explanation_json = ?
-     WHERE id = ?`
-  )
-    .bind(
-      snapshot.capacityPoolId,
-      snapshot.capacityPoolScope,
-      snapshot.capacityPoolRevision,
-      snapshot.capacitySourceId,
-      snapshot.capacityPoolCandidateId,
-      snapshot.placementCredentialSource,
-      snapshot.placementCredentialReference,
-      snapshot.placementCredentialVersion,
-      snapshot.capacityPoolProjectId,
-      snapshot.workloadRole,
-      snapshot.placementExplanationJson,
-      nodeId
-    )
-    .run();
-}
-
-function selectorContext(): TaskRunnerContext {
-  return {
-    env: {
-      DATABASE: env.DATABASE,
-      MAX_WORKSPACES_PER_NODE: '2',
-      TASK_RUN_NODE_CPU_THRESHOLD_PERCENT: '90',
-      TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT: '90',
-      VM_AGENT_REQUIRED_VERSION: 'current-sha',
-    },
-  } as unknown as TaskRunnerContext;
-}
-
-async function makeReadyNode(
-  nodeId: string,
-  userId: string,
-  vmSize: 'small' | 'medium' | 'large',
-  opts: { nodeClass?: 'managed' | 'user-owned' } = {}
-): Promise<void> {
-  const now = new Date().toISOString();
-  await seedNode(nodeId, userId, {
-    vmSize,
-    vmLocation: 'nbg1',
-    status: 'running',
-    nodeClass: opts.nodeClass ?? 'managed',
-  });
-  await env.DATABASE.prepare(
-    `UPDATE nodes
-     SET health_status = 'healthy',
-       last_heartbeat_at = ?,
-       agent_ready_at = ?,
-       agent_version = 'current-sha',
-       runtime = 'vm',
-       node_role = 'workspace',
-       last_metrics = ?
-     WHERE id = ?`
-  )
-    .bind(now, now, JSON.stringify({ cpuLoadAvg1: 5, memoryPercent: 10 }), nodeId)
-    .run();
 }
 
 describe('VM admission control D1 races', () => {
@@ -517,6 +258,7 @@ describe('VM admission control D1 races', () => {
     await seedWorkspace('workspace-vm-admission-large-occupant', largeNode, USER_ID, {
       projectId: PROJECT_ID,
       status: 'running',
+      resolvedReservationJson: JSON.stringify(reservation()),
     });
 
     const rc = selectorContext();
@@ -561,6 +303,7 @@ describe('VM admission control D1 races', () => {
     await seedWorkspace('workspace-vm-admission-cross-project-first', crossProjectNode, userId, {
       projectId: firstProjectId,
       status: 'running',
+      resolvedReservationJson: JSON.stringify(reservation()),
     });
 
     // Exercise the user-scope capacity-pool path across projects: the node and
@@ -593,6 +336,14 @@ describe('VM admission control D1 races', () => {
           runtime: 'vm',
           machineClass: 'shared-vm',
           machineSize: 'medium',
+          providerInstanceType: snapshot.providerInstanceType!,
+          providerInstanceVcpuCount: snapshot.providerInstanceVcpuCount!,
+          providerInstanceMemoryMb: snapshot.providerInstanceMemoryMb!,
+          providerInstanceDiskGb: snapshot.providerInstanceDiskGb ?? null,
+          providerInstancePriceDisplay: snapshot.providerInstancePriceDisplay ?? null,
+          providerInstancePriceCurrency: snapshot.providerInstancePriceCurrency ?? null,
+          providerInstancePriceMonthlyCents: snapshot.providerInstancePriceMonthlyCents ?? null,
+          providerInstancePriceHourlyMicros: snapshot.providerInstancePriceHourlyMicros ?? null,
           priority: 1,
           candidateOrder: 0,
           credentialAttributionSource: 'user',
@@ -645,59 +396,6 @@ describe('VM admission control D1 races', () => {
       firstProjectId,
       secondProjectId,
     ]);
-  });
-
-  it('persists capacity snapshots during final workspace reservation', async () => {
-    const nodeId = 'node-vm-admission-capacity-snapshot';
-    const workspaceId = 'workspace-vm-admission-capacity-snapshot';
-    const snapshot = capacitySnapshot({
-      poolId: 'pool-vm-admission-project',
-      sourceId: 'source-vm-admission-project',
-      candidateId: 'candidate-vm-admission-project',
-      scope: 'project',
-      projectId: PROJECT_ID,
-    });
-    await makeReadyNode(nodeId, USER_ID, 'large');
-    await assignNodeCapacity(nodeId, snapshot);
-
-    await expect(
-      reserveWorkspacePlacement(
-        env.DATABASE,
-        {
-          ...placement(workspaceId, nodeId, { vmSize: 'large' }),
-          capacityPlacementSnapshot: snapshot,
-        },
-        2
-      )
-    ).resolves.toBe(true);
-
-    const row = await env.DATABASE.prepare(
-      `SELECT capacity_pool_id, capacity_pool_scope, capacity_source_id,
-              capacity_pool_candidate_id, capacity_pool_project_id, workload_role,
-              placement_explanation_json
-       FROM workspaces
-       WHERE id = ?`
-    )
-      .bind(workspaceId)
-      .first<{
-        capacity_pool_id: string | null;
-        capacity_pool_scope: string | null;
-        capacity_source_id: string | null;
-        capacity_pool_candidate_id: string | null;
-        capacity_pool_project_id: string | null;
-        workload_role: string | null;
-        placement_explanation_json: string | null;
-      }>();
-
-    expect(row).toMatchObject({
-      capacity_pool_id: snapshot.capacityPoolId,
-      capacity_pool_scope: 'project',
-      capacity_source_id: snapshot.capacitySourceId,
-      capacity_pool_candidate_id: snapshot.capacityPoolCandidateId,
-      capacity_pool_project_id: PROJECT_ID,
-      workload_role: 'workspace',
-      placement_explanation_json: snapshot.placementExplanationJson,
-    });
   });
 
   it('handles source-less capacity pool snapshots without SQL truthiness binds', async () => {
@@ -761,9 +459,7 @@ describe('VM admission control D1 races', () => {
       )
     ).resolves.toBe(false);
 
-    const projectWorkspace = await env.DATABASE.prepare(
-      `SELECT id FROM workspaces WHERE id = ?`
-    )
+    const projectWorkspace = await env.DATABASE.prepare(`SELECT id FROM workspaces WHERE id = ?`)
       .bind('workspace-vm-admission-source-less-project')
       .first<{ id: string }>();
     expect(projectWorkspace).toBeNull();
@@ -856,6 +552,7 @@ describe('VM admission control D1 races', () => {
     await seedWorkspace('workspace-vm-admission-share-owner', ownerNode, ownerUserId, {
       projectId: ownerProjectId,
       status: 'running',
+      resolvedReservationJson: JSON.stringify(reservation()),
     });
 
     const rc = selectorContext();
@@ -957,45 +654,62 @@ describe('VM admission control D1 races', () => {
     }
   });
 
-  it('counts creating and recovery workspaces against final reservation capacity', async () => {
+  it('counts creating and recovery reservations but releases stopped and deleted capacity', async () => {
     const creatingNode = 'node-vm-admission-capacity-creating';
     const recoveryNode = 'node-vm-admission-capacity-recovery';
     const stoppedNode = 'node-vm-admission-capacity-stopped';
-    await makeReadyNode(creatingNode, USER_ID, 'medium');
-    await makeReadyNode(recoveryNode, USER_ID, 'medium');
-    await makeReadyNode(stoppedNode, USER_ID, 'medium');
+    const deletedNode = 'node-vm-admission-capacity-deleted';
+    await makeReadyNode(creatingNode, USER_ID, 'small');
+    await makeReadyNode(recoveryNode, USER_ID, 'small');
+    await makeReadyNode(stoppedNode, USER_ID, 'small');
+    await makeReadyNode(deletedNode, USER_ID, 'small');
     await seedWorkspace('workspace-vm-admission-capacity-creating', creatingNode, USER_ID, {
       projectId: PROJECT_ID,
       status: 'creating',
+      resolvedReservationJson: JSON.stringify(reservation()),
     });
     await seedWorkspace('workspace-vm-admission-capacity-recovery', recoveryNode, USER_ID, {
       projectId: PROJECT_ID,
       status: 'recovery',
+      resolvedReservationJson: JSON.stringify(reservation()),
     });
     await seedWorkspace('workspace-vm-admission-capacity-stopped', stoppedNode, USER_ID, {
       projectId: PROJECT_ID,
       status: 'stopped',
+      resolvedReservationJson: JSON.stringify(reservation()),
+    });
+    await seedWorkspace('workspace-vm-admission-capacity-deleted', deletedNode, USER_ID, {
+      projectId: PROJECT_ID,
+      status: 'deleted',
+      resolvedReservationJson: JSON.stringify(reservation()),
     });
 
     await expect(
       reserveWorkspacePlacement(
         env.DATABASE,
         placement('workspace-vm-admission-capacity-creating-denied', creatingNode),
-        1
+        3
       )
     ).resolves.toBe(false);
     await expect(
       reserveWorkspacePlacement(
         env.DATABASE,
         placement('workspace-vm-admission-capacity-recovery-denied', recoveryNode),
-        1
+        3
       )
     ).resolves.toBe(false);
     await expect(
       reserveWorkspacePlacement(
         env.DATABASE,
         placement('workspace-vm-admission-capacity-stopped-allowed', stoppedNode),
-        1
+        3
+      )
+    ).resolves.toBe(true);
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-admission-capacity-deleted-allowed', deletedNode),
+        3
       )
     ).resolves.toBe(true);
   });

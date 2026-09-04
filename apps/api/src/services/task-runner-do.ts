@@ -183,10 +183,10 @@ export async function startTaskRunnerDO(
       nodeMemoryThresholdPercent?: number | null;
       warmNodeTimeoutMs?: number | null;
     } | null;
-    /** Resolved resource requirements (audit-only, Phase 0). */
+    /** Raw resolved inputs retained for audit and provenance. */
     resourceRequirements?: ResourceRequirements | null;
-    /** Resolved reservation in scheduler units (audit-only, Phase 0). */
-    resolvedReservation?: ResolvedResourceReservation | null;
+    /** Immutable scheduler reservation used for node selection and final workspace placement. */
+    resolvedReservation: ResolvedResourceReservation;
     /** Effective one-pool capacity selection for VM task placement. */
     capacityPoolSelection?: TaskStartCapacityPoolSelection | null;
     /** Where the VM size came from in the precedence chain. */
@@ -249,7 +249,7 @@ export async function startTaskRunnerDO(
       attachments: input.attachments ?? null,
       projectScaling: input.projectScaling ?? null,
       resourceRequirements: input.resourceRequirements ?? null,
-      resolvedReservation: input.resolvedReservation ?? null,
+      resolvedReservation: input.resolvedReservation,
       capacityPoolSelection,
       vmSizeSource: input.vmSizeSource ?? null,
       resumeSnapshotChatSessionId: input.resumeSnapshotChatSessionId ?? null,

@@ -38,6 +38,27 @@ must not introduce another allocator, resource-requirement resolver, or SKU tabl
   through TaskRunner reusable-VM packing and must not gain a second requirement
   resolver in this focused change.
 
+### TaskRunner reservation data flow
+
+All nine task-start entry points resolve once, persist the task snapshot, and pass
+that same object to `startTaskRunnerDO()`:
+
+1. `routes/tasks/submit.ts`
+2. `routes/tasks/run.ts`
+3. `services/trigger-submit.ts`
+4. `durable-objects/sam-session/tools/dispatch-task.ts`
+5. `durable-objects/sam-session/tools/retry-subtask.ts`
+6. `durable-objects/project-orchestrator/scheduling.ts`
+7. `services/session-recovery.ts`
+8. `routes/mcp/orchestration-tools.ts`
+9. `routes/mcp/dispatch-tool.ts`
+
+`startTaskRunnerDO()` stores it in `TaskRunConfig.resolvedReservation`.
+`createAndProvisionWorkspace()` now passes that object directly to
+`reserveWorkspacePlacement()`; the workspace-recovery unit test asserts object
+identity at this seam, and the D1 race test asserts the serialized workspace value
+is byte-for-byte `JSON.stringify()` of the same snapshot. No second resolver exists.
+
 ## Required policy
 
 - Provider-native CPU and memory must be known before a node with an existing
@@ -55,17 +76,17 @@ must not introduce another allocator, resource-requirement resolver, or SKU tabl
 
 ## Implementation checklist
 
-- [ ] Add a shared reservation/capacity accounting helper with explicit parsing
+- [x] Add a shared reservation/capacity accounting helper with explicit parsing
       and conservative legacy behavior.
-- [ ] Persist the exact central `resolvedReservation` on the workspace `creating`
+- [x] Persist the exact central `resolvedReservation` on the workspace `creating`
       row without re-resolving it.
-- [ ] Subtract active workspace reservations during reusable-node selection and
+- [x] Subtract active workspace reservations during reusable-node selection and
       recheck after warm-node claims.
-- [ ] Extend the final atomic placement CAS to prove aggregate CPU, memory, disk,
+- [x] Extend the final atomic placement CAS to prove aggregate CPU, memory, disk,
       exclusivity, assignment, state, isolation, and the optional count cap.
-- [ ] Preserve project/user/capacity-pool isolation predicates from PR #1943.
-- [ ] Document the capacity policy and update `MAX_WORKSPACES_PER_NODE` wording.
-- [ ] Add a retained process rule requiring aggregate resource invariants to be
+- [x] Preserve project/user/capacity-pool isolation predicates from PR #1943.
+- [x] Document the capacity policy and update `MAX_WORKSPACES_PER_NODE` wording.
+- [x] Add a retained process rule requiring aggregate resource invariants to be
       enforced at the final atomic reservation boundary.
 - [ ] Run task-completion, Cloudflare, test-engineer, constitution, doc-sync, full
       local gates, staging, CodeRabbit, CI, production deploy, and production
@@ -105,7 +126,8 @@ must not introduce another allocator, resource-requirement resolver, or SKU tabl
   combined concurrency with aggregate resource exhaustion.
 - **Class of bug**: a concurrency-safe admission check enforced a proxy limit rather
   than the actual aggregate resource invariant.
-- **Process fix**: add a repository rule requiring every reusable-resource
+- **Process fix**: `.claude/rules/69-aggregate-capacity-at-final-reservation.md`
+  now requires every reusable-resource
   preselection invariant to be repeated in the final atomic reservation statement,
   with a discriminating last-capacity race test.
 
