@@ -2,7 +2,6 @@ import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
 import { runMigrations } from '../../../src/durable-objects/migrations';
-import { D1_MAX_BOUND_PARAMETERS } from '../../../src/lib/d1-limits';
 import {
   type ArchiveSourceExportChunkInput,
   archiveSourceReadMessages,
@@ -21,6 +20,7 @@ import {
   persistMessage,
   PROJECT_DATA_TRANSCRIPT_WRITE_FENCED,
 } from '../../../src/durable-objects/project-data/messages';
+import { D1_MAX_BOUND_PARAMETERS } from '../../../src/lib/d1-limits';
 import {
   PROJECT_DATA_ARCHIVE_SURFACE_INVENTORY,
   PROJECT_DATA_ARCHIVE_TABLES,
