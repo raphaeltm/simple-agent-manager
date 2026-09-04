@@ -475,7 +475,7 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 	if err != nil {
 		return fmt.Errorf("cannot start Codex: write SAM MCP config.toml: %w", err)
 	}
-	// codex-acp@1.1.2 ignores Codex CLI -c arguments. CODEX_CONFIG is merged into
+	// codex-acp (verified through 1.8.0) ignores Codex CLI -c arguments. CODEX_CONFIG is merged into
 	// each app-server thread, but every turn then applies the ACP agent mode's
 	// approval and sandbox policy on top. Select the wrapper's supported full-access
 	// mode as well so main turns and spawned subagents cannot fall back to bwrap

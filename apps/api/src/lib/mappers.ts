@@ -139,6 +139,7 @@ export function toProjectResponse(project: schema.Project): Project {
     maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
     nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
     nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
+    maxTriggers: project.maxTriggers ?? null,
     status: (project.status as 'active' | 'detached') || 'active',
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,

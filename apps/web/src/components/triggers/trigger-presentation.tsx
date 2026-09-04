@@ -40,7 +40,10 @@ export function sourceIcon(trigger: TriggerResponse, size = 14): ReactNode {
 export function formatTriggerSource(trigger: TriggerResponse): string {
   if (trigger.sourceType === 'github') {
     const eventLabel = trigger.githubConfig?.eventType?.replace(/_/g, ' ') ?? 'event';
-    const commandPrefix = trigger.githubConfig?.filters.commandPrefix;
+    const commandPrefix =
+      trigger.githubConfig?.eventType === 'issue_comment'
+        ? trigger.githubConfig.filters.commandPrefix
+        : undefined;
     return commandPrefix ? `GitHub ${eventLabel}: ${commandPrefix}` : `GitHub ${eventLabel}`;
   }
   if (trigger.sourceType === 'webhook') {
