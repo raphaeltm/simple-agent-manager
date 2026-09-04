@@ -324,6 +324,87 @@ async function readArchiveRows(
   });
 }
 
+/**
+ * Shared assertion for the "source is untouched" invariant: visible message text
+ * is preserved byte-for-byte, the inline tool payload is still present, and no
+ * archive row was published. Used by every fail-closed case.
+ */
+async function expectSourcePayloadIntact(
+  stub: DurableObjectStub<ProjectDataTestDouble>,
+  seeded: { messageIds: string[] },
+  label: string
+): Promise<void> {
+  const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
+    seeded.messageIds[0]!
+  );
+  expect(source?.content).toBe(`visible ${label}`);
+  expect(Array.isArray(source?.toolMetadata.content)).toBe(true);
+  expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
+}
+
+/**
+ * Shared assertion for the success invariant: visible message text is preserved
+ * byte-for-byte while the inline tool payload has been stripped and exactly one
+ * verified archive row exists.
+ */
+async function expectSourcePayloadArchived(
+  stub: DurableObjectStub<ProjectDataTestDouble>,
+  seeded: { messageIds: string[] },
+  label: string
+): Promise<void> {
+  const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
+    seeded.messageIds[0]!
+  );
+  expect(source?.content).toBe(`visible ${label}`);
+  expect(source?.toolMetadata.content).toBeUndefined();
+  expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(1);
+}
+
+/**
+ * Builds an R2 double whose FIRST tool-payload put blocks until released, so a
+ * test can hold one cleanup pass inside its external await and prove a second,
+ * overlapping pass is serialized behind the shared mutex (rule 45). Approved-plan
+ * manifest puts are excluded so plan setup is never gated.
+ */
+function makePayloadPutGate(): {
+  firstPayloadPutStarted: Promise<void>;
+  releaseFirstPayloadPut: () => void;
+  delayedR2: R2Bucket;
+  readonly payloadPuts: number;
+} {
+  const realR2 = env.PROJECT_DATA_ARCHIVE_R2;
+  let payloadPuts = 0;
+  let markFirstPayloadPutStarted!: () => void;
+  let releaseFirstPayloadPut!: () => void;
+  const firstPayloadPutStarted = new Promise<void>((resolve) => {
+    markFirstPayloadPutStarted = resolve;
+  });
+  const firstPayloadPutRelease = new Promise<void>((resolve) => {
+    releaseFirstPayloadPut = resolve;
+  });
+  const delayedR2 = {
+    put: async (key: string, value: string | ArrayBuffer | ArrayBufferView) => {
+      if (!key.includes('/approved-plans/')) {
+        payloadPuts += 1;
+        if (payloadPuts === 1) {
+          markFirstPayloadPutStarted();
+          await firstPayloadPutRelease;
+        }
+      }
+      return realR2.put(key, value);
+    },
+    get: (key: string) => realR2.get(key),
+  } as unknown as R2Bucket;
+  return {
+    firstPayloadPutStarted,
+    releaseFirstPayloadPut: () => releaseFirstPayloadPut(),
+    delayedR2,
+    get payloadPuts() {
+      return payloadPuts;
+    },
+  };
+}
+
 async function readCleanupAttempts(
   stub: DurableObjectStub<ProjectDataTestDouble>,
   messageIds: string[]
@@ -1080,29 +1161,8 @@ describe('ProjectData tool payload R2 archival', () => {
       'overlapping-cleanup-mutex-plan',
       FIXED_NOW - 1_000
     );
-    const realR2 = env.PROJECT_DATA_ARCHIVE_R2;
-    let payloadPuts = 0;
-    let markFirstPayloadPutStarted!: () => void;
-    let releaseFirstPayloadPut!: () => void;
-    const firstPayloadPutStarted = new Promise<void>((resolve) => {
-      markFirstPayloadPutStarted = resolve;
-    });
-    const firstPayloadPutRelease = new Promise<void>((resolve) => {
-      releaseFirstPayloadPut = resolve;
-    });
-    const delayedR2 = {
-      put: async (key: string, value: string | ArrayBuffer | ArrayBufferView) => {
-        if (!key.includes('/approved-plans/')) {
-          payloadPuts += 1;
-          if (payloadPuts === 1) {
-            markFirstPayloadPutStarted();
-            await firstPayloadPutRelease;
-          }
-        }
-        return realR2.put(key, value);
-      },
-      get: (key: string) => realR2.get(key),
-    } as unknown as R2Bucket;
+    const gate = makePayloadPutGate();
+    const { firstPayloadPutStarted, releaseFirstPayloadPut, delayedR2 } = gate;
 
     await withRuntimeEnv(
       {
@@ -1121,7 +1181,7 @@ describe('ProjectData tool payload R2 archival', () => {
 
           try {
             await new Promise((resolve) => setTimeout(resolve, 25));
-            expect(payloadPuts).toBe(1);
+            expect(gate.payloadPuts).toBe(1);
             expect(
               Number(
                 (
@@ -1140,13 +1200,8 @@ describe('ProjectData tool payload R2 archival', () => {
         })
     );
 
-    expect(payloadPuts).toBe(1);
-    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
-      seeded.messageIds[0]!
-    );
-    expect(source?.content).toBe('visible overlapping-cleanup-mutex');
-    expect(source?.toolMetadata.content).toBeUndefined();
-    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(1);
+    expect(gate.payloadPuts).toBe(1);
+    await expectSourcePayloadArchived(stub, seeded, 'overlapping-cleanup-mutex');
   });
 
   it('serializes manual cleanup behind storage-safety cleanup across an external R2 await', async () => {
@@ -1162,29 +1217,8 @@ describe('ProjectData tool payload R2 archival', () => {
       'manual-automatic-cleanup-mutex-plan',
       FIXED_NOW - 1_000
     );
-    const realR2 = env.PROJECT_DATA_ARCHIVE_R2;
-    let payloadPuts = 0;
-    let markFirstPayloadPutStarted!: () => void;
-    let releaseFirstPayloadPut!: () => void;
-    const firstPayloadPutStarted = new Promise<void>((resolve) => {
-      markFirstPayloadPutStarted = resolve;
-    });
-    const firstPayloadPutRelease = new Promise<void>((resolve) => {
-      releaseFirstPayloadPut = resolve;
-    });
-    const delayedR2 = {
-      put: async (key: string, value: string | ArrayBuffer | ArrayBufferView) => {
-        if (!key.includes('/approved-plans/')) {
-          payloadPuts += 1;
-          if (payloadPuts === 1) {
-            markFirstPayloadPutStarted();
-            await firstPayloadPutRelease;
-          }
-        }
-        return realR2.put(key, value);
-      },
-      get: (key: string) => realR2.get(key),
-    } as unknown as R2Bucket;
+    const gate = makePayloadPutGate();
+    const { firstPayloadPutStarted, releaseFirstPayloadPut, delayedR2 } = gate;
 
     await withRuntimeEnv(
       {
@@ -1217,7 +1251,7 @@ describe('ProjectData tool payload R2 archival', () => {
 
           try {
             await new Promise((resolve) => setTimeout(resolve, 25));
-            expect(payloadPuts).toBe(1);
+            expect(gate.payloadPuts).toBe(1);
             expect(manualSettled).toBe(false);
           } finally {
             releaseFirstPayloadPut();
@@ -1228,13 +1262,8 @@ describe('ProjectData tool payload R2 archival', () => {
         })
     );
 
-    expect(payloadPuts).toBe(1);
-    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
-      seeded.messageIds[0]!
-    );
-    expect(source?.content).toBe('visible manual-automatic-cleanup-mutex');
-    expect(source?.toolMetadata.content).toBeUndefined();
-    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(1);
+    expect(gate.payloadPuts).toBe(1);
+    await expectSourcePayloadArchived(stub, seeded, 'manual-automatic-cleanup-mutex');
   });
 
   it('fails closed when a fixed cutoff has no exact project allowlist and plan id', async () => {
@@ -1304,12 +1333,7 @@ describe('ProjectData tool payload R2 archival', () => {
       { now: FIXED_NOW, nowMs: () => FIXED_NOW }
     );
     expect(result).toMatchObject({ rowsUpdated: 1, rowsFailed: 0 });
-    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
-      seeded.messageIds[0]!
-    );
-    expect(source?.content).toBe('visible fixed-plan-v2-cursor');
-    expect(source?.toolMetadata.content).toBeUndefined();
-    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(1);
+    await expectSourcePayloadArchived(stub, seeded, 'fixed-plan-v2-cursor');
   });
 
   it('fails closed for a manifest-bound fixed plan with reversed cleanup ratios', async () => {
@@ -1370,12 +1394,7 @@ describe('ProjectData tool payload R2 archival', () => {
         }
       )
     ).toBeNull();
-    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
-      seeded.messageIds[0]!
-    );
-    expect(source?.content).toBe('visible fixed-plan-below-target');
-    expect(Array.isArray(source?.toolMetadata.content)).toBe(true);
-    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
+    await expectSourcePayloadIntact(stub, seeded, 'fixed-plan-below-target');
     const payloadObjects = await env.PROJECT_DATA_ARCHIVE_R2.list({
       prefix: `project-data/tool-payloads/${encodeURIComponent(projectId)}/${encodeURIComponent(seeded.sessionId)}/`,
     });
@@ -1407,12 +1426,7 @@ describe('ProjectData tool payload R2 archival', () => {
       { now: FIXED_NOW, nowMs: () => FIXED_NOW }
     );
     expect(result).toBeNull();
-    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
-      seeded.messageIds[0]!
-    );
-    expect(source?.content).toBe('visible fixed-plan-row-over-pass');
-    expect(Array.isArray(source?.toolMetadata.content)).toBe(true);
-    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
+    await expectSourcePayloadIntact(stub, seeded, 'fixed-plan-row-over-pass');
   });
 
   it('archives only approved manifest rows and fails closed if an approved source changes', async () => {
@@ -1531,12 +1545,7 @@ describe('ProjectData tool payload R2 archival', () => {
       { now: FIXED_NOW + 2, nowMs: () => FIXED_NOW + 2 }
     );
     expect(boundedSuccess).toMatchObject({ rowsUpdated: 0, rowsFailed: 0 });
-    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
-      seeded.messageIds[0]!
-    );
-    expect(source?.content).toBe('visible manifest-resume-r2-budget');
-    expect(source?.toolMetadata.content).toBeUndefined();
-    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(1);
+    await expectSourcePayloadArchived(stub, seeded, 'manifest-resume-r2-budget');
   });
 
   it('resumes an exact manifest across passes without rescanning or double counting', async () => {
@@ -1693,12 +1702,7 @@ describe('ProjectData tool payload R2 archival', () => {
       }
     );
     expect(result).toMatchObject({ rowsUpdated: 0, rowsFailed: 1 });
-    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
-      seeded.messageIds[0]!
-    );
-    expect(source?.content).toBe('visible manifest-root-corruption');
-    expect(Array.isArray(source?.toolMetadata.content)).toBe(true);
-    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
+    await expectSourcePayloadIntact(stub, seeded, 'manifest-root-corruption');
   });
 
   it('refuses an approved manifest whose totals exceed the cumulative operator ceilings', async () => {
@@ -1725,12 +1729,7 @@ describe('ProjectData tool payload R2 archival', () => {
       { now: FIXED_NOW, nowMs: () => FIXED_NOW }
     );
     expect(result).toMatchObject({ rowsUpdated: 0, rowsFailed: 1 });
-    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
-      seeded.messageIds[0]!
-    );
-    expect(source?.content).toBe('visible manifest-total-ceiling');
-    expect(Array.isArray(source?.toolMetadata.content)).toBe(true);
-    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
+    await expectSourcePayloadIntact(stub, seeded, 'manifest-total-ceiling');
   });
 
   it('fails closed when cleanup budgets drift across a fixed-plan continuation', async () => {
@@ -1921,12 +1920,7 @@ describe('ProjectData tool payload R2 archival', () => {
     );
 
     expect(result).toMatchObject({ rowsUpdated: 0, rowsFailed: 1, terminationReason: 'error' });
-    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
-      seeded.messageIds[0]!
-    );
-    expect(source?.content).toBe('visible r2-readback-sha-corrupt');
-    expect(Array.isArray(source?.toolMetadata.content)).toBe(true);
-    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
+    await expectSourcePayloadIntact(stub, seeded, 'r2-readback-sha-corrupt');
     expect(await readCleanupAttempts(stub, seeded.messageIds)).toEqual([
       expect.objectContaining({ message_id: seeded.messageIds[0], status: 'retryable_failure' }),
     ]);
@@ -2351,12 +2345,7 @@ describe('ProjectData tool payload R2 archival', () => {
       { now: FIXED_NOW, nowMs: () => FIXED_NOW }
     );
     expect(result).toMatchObject({ rowsUpdated: 0, rowsFailed: 1, terminationReason: 'error' });
-    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
-      seeded.messageIds[0]!
-    );
-    expect(source?.content).toBe('visible chunk-readback-missing');
-    expect(Array.isArray(source?.toolMetadata.content)).toBe(true);
-    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
+    await expectSourcePayloadIntact(stub, seeded, 'chunk-readback-missing');
   });
 
   it('leaves source text and metadata intact on equal-length chunk readback corruption', async () => {
@@ -2400,12 +2389,7 @@ describe('ProjectData tool payload R2 archival', () => {
       { now: FIXED_NOW, nowMs: () => FIXED_NOW }
     );
     expect(result).toMatchObject({ rowsUpdated: 0, rowsFailed: 1, terminationReason: 'error' });
-    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
-      seeded.messageIds[0]!
-    );
-    expect(source?.content).toBe('visible chunk-readback-corrupt');
-    expect(Array.isArray(source?.toolMetadata.content)).toBe(true);
-    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
+    await expectSourcePayloadIntact(stub, seeded, 'chunk-readback-corrupt');
   });
 
   it('fails before writing when a chunked archive exceeds the R2 operation budget', async () => {

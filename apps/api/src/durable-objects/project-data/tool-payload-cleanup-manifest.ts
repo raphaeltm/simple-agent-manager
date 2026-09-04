@@ -140,6 +140,7 @@ async function writeVerifiedJson<T>(input: {
 }
 
 async function readVerifiedJson<T>(input: {
+  parse: (value: unknown) => T;
   r2: R2Bucket;
   key: string;
   expectedSha256: string;
@@ -178,7 +179,7 @@ async function readVerifiedJson<T>(input: {
     throw new Error('tool payload cleanup manifest SHA-256 verification failed');
   }
   const parsed: unknown = JSON.parse(textDecoder.decode(bytes));
-  return parsed as T;
+  return input.parse(parsed);
 }
 
 function assertSafeInteger(value: unknown, name: string, minimum = 0): asserts value is number {
@@ -206,6 +207,58 @@ function assertTarget(value: unknown): asserts value is ProjectDataStorageRelief
     !/^[a-f0-9]{64}$/.test(target.toolMetadataSha256)
   ) {
     throw new Error('tool payload cleanup manifest target identity or hash is malformed');
+  }
+}
+
+/**
+ * Envelope + primitive-field guard for the root manifest. Kept as an assertion
+ * function so the external JSON payload is narrowed by a runtime guard rather
+ * than a blind cast (`.claude/rules/51-runtime-boundary-validation.md`).
+ */
+function assertRootManifestShape(value: unknown): asserts value is ToolPayloadCleanupManifestRoot {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('tool payload cleanup root manifest is malformed');
+  }
+  const root = value as Record<string, unknown>;
+  if (
+    root.version !== TOOL_PAYLOAD_CLEANUP_MANIFEST_VERSION ||
+    typeof root.planId !== 'string' ||
+    !root.planId ||
+    typeof root.projectId !== 'string' ||
+    !root.projectId ||
+    !Array.isArray(root.batches)
+  ) {
+    throw new Error('tool payload cleanup root manifest is malformed');
+  }
+  assertSafeInteger(root.cutoffCreatedAt, 'root cutoffCreatedAt');
+  assertSafeInteger(root.createdAt, 'root createdAt');
+  assertSafeInteger(root.eligibleRows, 'root eligibleRows');
+  assertSafeInteger(root.eligibleBytes, 'root eligibleBytes');
+}
+
+/**
+ * Envelope + identity guard for a batch manifest, cross-checked against the
+ * already verified root manifest and the proof the batch was selected from.
+ */
+function assertBatchManifestShape(
+  value: unknown,
+  root: ToolPayloadCleanupManifestRoot,
+  proof: ToolPayloadCleanupManifestBatchProof
+): asserts value is ToolPayloadCleanupManifestBatch {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('tool payload cleanup batch manifest identity is invalid');
+  }
+  const batch = value as Record<string, unknown>;
+  if (
+    batch.version !== TOOL_PAYLOAD_CLEANUP_MANIFEST_VERSION ||
+    batch.planId !== root.planId ||
+    batch.projectId !== root.projectId ||
+    batch.cutoffCreatedAt !== root.cutoffCreatedAt ||
+    batch.ordinal !== proof.ordinal ||
+    !Array.isArray(batch.targets) ||
+    batch.targets.length !== proof.targetCount
+  ) {
+    throw new Error('tool payload cleanup batch manifest identity is invalid');
   }
 }
 
@@ -253,30 +306,27 @@ export async function readToolPayloadCleanupManifestRoot(input: {
   nowMs?: () => number;
   maxBytes?: number;
 }): Promise<ToolPayloadCleanupManifestRoot> {
-  const root = await readVerifiedJson<ToolPayloadCleanupManifestRoot>({
+  return readVerifiedJson({
     r2: input.r2,
     key: input.key,
     expectedSha256: input.sha256,
     timeoutMs: input.timeoutMs,
     deadlineMs: input.deadlineMs,
     maxBytes: input.maxBytes ?? DEFAULT_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES,
+    parse: parseCleanupManifestRoot,
     ...(input.operationBudget ? { operationBudget: input.operationBudget } : {}),
     ...(input.nowMs ? { nowMs: input.nowMs } : {}),
   });
-  if (
-    root.version !== TOOL_PAYLOAD_CLEANUP_MANIFEST_VERSION ||
-    typeof root.planId !== 'string' ||
-    !root.planId ||
-    typeof root.projectId !== 'string' ||
-    !root.projectId ||
-    !Array.isArray(root.batches)
-  ) {
-    throw new Error('tool payload cleanup root manifest is malformed');
-  }
-  assertSafeInteger(root.cutoffCreatedAt, 'root cutoffCreatedAt');
-  assertSafeInteger(root.createdAt, 'root createdAt');
-  assertSafeInteger(root.eligibleRows, 'root eligibleRows');
-  assertSafeInteger(root.eligibleBytes, 'root eligibleBytes');
+}
+
+/**
+ * Structural parser for the root manifest. `readVerifiedJson` delegates narrowing
+ * here so no external payload is ever narrowed by a blind `as` cast
+ * (`.claude/rules/51-runtime-boundary-validation.md`).
+ */
+function parseCleanupManifestRoot(value: unknown): ToolPayloadCleanupManifestRoot {
+  assertRootManifestShape(value);
+  const root = value;
   let rows = 0;
   let bytes = 0;
   let previousLastRowId = 0;
@@ -318,7 +368,7 @@ export async function readToolPayloadCleanupManifestBatch(input: {
   nowMs?: () => number;
   maxBytes?: number;
 }): Promise<ToolPayloadCleanupManifestBatch> {
-  const batch = await readVerifiedJson<ToolPayloadCleanupManifestBatch>({
+  return readVerifiedJson({
     r2: input.r2,
     key: input.proof.key,
     expectedSha256: input.proof.sha256,
@@ -326,20 +376,23 @@ export async function readToolPayloadCleanupManifestBatch(input: {
     timeoutMs: input.timeoutMs,
     deadlineMs: input.deadlineMs,
     maxBytes: input.maxBytes ?? DEFAULT_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES,
+    parse: (value) => parseCleanupManifestBatch(value, input.root, input.proof),
     ...(input.operationBudget ? { operationBudget: input.operationBudget } : {}),
     ...(input.nowMs ? { nowMs: input.nowMs } : {}),
   });
-  if (
-    batch.version !== TOOL_PAYLOAD_CLEANUP_MANIFEST_VERSION ||
-    batch.planId !== input.root.planId ||
-    batch.projectId !== input.root.projectId ||
-    batch.cutoffCreatedAt !== input.root.cutoffCreatedAt ||
-    batch.ordinal !== input.proof.ordinal ||
-    !Array.isArray(batch.targets) ||
-    batch.targets.length !== input.proof.targetCount
-  ) {
-    throw new Error('tool payload cleanup batch manifest identity is invalid');
-  }
+}
+
+/**
+ * Structural parser for a batch manifest, cross-checked against the already
+ * verified root manifest and the batch proof it was selected from.
+ */
+function parseCleanupManifestBatch(
+  value: unknown,
+  root: ToolPayloadCleanupManifestRoot,
+  proof: ToolPayloadCleanupManifestBatchProof
+): ToolPayloadCleanupManifestBatch {
+  assertBatchManifestShape(value, root, proof);
+  const batch = value;
   let projectedBytes = 0;
   let previousRowId = 0;
   for (const target of batch.targets) {
@@ -350,12 +403,12 @@ export async function readToolPayloadCleanupManifestBatch(input: {
     previousRowId = target.rowId;
     projectedBytes += target.projectedReclaimableBytes;
   }
-  if (projectedBytes !== input.proof.projectedReclaimableBytes) {
+  if (projectedBytes !== proof.projectedReclaimableBytes) {
     throw new Error('tool payload cleanup batch projected bytes do not match proof');
   }
   if (
-    batch.targets[0]?.rowId !== input.proof.firstRowId ||
-    batch.targets.at(-1)?.rowId !== input.proof.lastRowId
+    batch.targets[0]?.rowId !== proof.firstRowId ||
+    batch.targets.at(-1)?.rowId !== proof.lastRowId
   ) {
     throw new Error('tool payload cleanup batch row bounds do not match proof');
   }

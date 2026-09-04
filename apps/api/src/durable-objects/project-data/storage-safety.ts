@@ -237,13 +237,13 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
 function optionalPositiveIntegerIsValid(value: string | undefined): boolean {
   const normalized = value?.trim() ?? '';
   if (!normalized) return true;
-  if (!/^[1-9][0-9]*$/.test(normalized)) return false;
+  if (!/^[1-9]\d*$/.test(normalized)) return false;
   return Number.isSafeInteger(Number(normalized));
 }
 
 function parseOptionalPositiveInteger(value: string | undefined): number | null {
   const normalized = value?.trim() ?? '';
-  if (!normalized || !/^[1-9][0-9]*$/.test(normalized)) return null;
+  if (!normalized || !/^[1-9]\d*$/.test(normalized)) return null;
   const parsed = Number(normalized);
   return Number.isSafeInteger(parsed) ? parsed : null;
 }
@@ -263,7 +263,7 @@ function parseOptionalIdList(value: string | undefined): string[] | null {
         .map((item) => item.trim())
         .filter(Boolean)
     ),
-  ].sort();
+  ].sort((a, b) => a.localeCompare(b));
   return ids.length > 0 ? ids : null;
 }
 
