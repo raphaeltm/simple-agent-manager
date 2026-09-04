@@ -20,75 +20,23 @@ import {
   getReconciliationCandidates,
   processReconciliationCandidates,
 } from '../../../src/durable-objects/project-data/reconciliation';
+import {
+  acceptedPromptResponse,
+  missingPromptReceipt,
+  versionedPromptCapabilities,
+} from '../../helpers/vm-prompt-delivery-fixtures';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 // Mock the node-agent service to prevent real HTTP calls while preserving the
 // versioned receipt contract reconciliation now depends on.
 const nodeAgentMocks = vi.hoisted(() => ({
   runtimeIdentity: 'runtime-1',
-  NodeAgentHttpError: class NodeAgentHttpError extends Error {
-    constructor(
-      public readonly statusCode: number,
-      public readonly responseBody: string
-    ) {
-      super(`Node Agent request failed: ${statusCode} ${responseBody}`);
-    }
-  },
-  nodeAgentRequest: vi.fn(async (_nodeId: unknown, _env: unknown, path: string) => {
-    if (path.endsWith('/agent-capabilities')) {
-      return {
-        protocolVersion: 1,
-        runtimeIdentity: 'runtime-1',
-        promptReceipts: {
-          supported: true,
-          lookup: true,
-          states: ['accepted', 'in_flight', 'completed', 'not_found', 'ambiguous'],
-        },
-        checkpointRollover: {
-          supported: false,
-          automatic: false,
-          states: [],
-          defaultGraceMs: 0,
-          maxGraceMs: 0,
-          operationTimeoutMs: 0,
-        },
-      };
-    }
-    const deliveryId = path.split('/').at(-1) ?? '';
-    return {
-      deliveryId,
-      state: 'not_found',
-      runtimeIdentity: 'runtime-1',
-      acceptedAt: null,
-      completedAt: null,
-    };
-  }),
-  sendPromptToAgentOnNode: vi.fn(
-    async (
-      _nodeId: unknown,
-      _workspaceId: unknown,
-      acpSessionId: string,
-      _prompt: unknown,
-      _env: unknown,
-      _userId: unknown,
-      _messageId: unknown,
-      options: { deliveryId?: string } | undefined
-    ) => ({
-      status: 'accepted',
-      sessionId: acpSessionId,
-      receipt: {
-        deliveryId: options?.deliveryId ?? '',
-        state: 'accepted',
-        runtimeIdentity: 'runtime-1',
-        acceptedAt: Date.now(),
-        completedAt: null,
-      },
-    })
-  ),
+  nodeAgentRequest: vi.fn(),
+  sendPromptToAgentOnNode: vi.fn(),
   cancelAgentSessionOnNode: vi.fn().mockResolvedValue({ success: true, status: 200 }),
 }));
-vi.mock('../../../src/services/node-agent', () => ({
-  NodeAgentHttpError: nodeAgentMocks.NodeAgentHttpError,
+vi.mock('../../../src/services/node-agent', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/node-agent')>()),
   nodeAgentRequest: nodeAgentMocks.nodeAgentRequest,
   sendPromptToAgentOnNode: nodeAgentMocks.sendPromptToAgentOnNode,
   cancelAgentSessionOnNode: nodeAgentMocks.cancelAgentSessionOnNode,
@@ -299,6 +247,24 @@ describe('Task Reconciliation Module', () => {
     sql = createSqlStorage(db);
     runMigrations(sql);
     vi.clearAllMocks();
+    nodeAgentMocks.nodeAgentRequest
+      .mockReset()
+      .mockImplementation(async (_nodeId, _env, path) =>
+        path.endsWith('/agent-capabilities')
+          ? versionedPromptCapabilities(nodeAgentMocks.runtimeIdentity)
+          : missingPromptReceipt(path.split('/').at(-1) ?? '', nodeAgentMocks.runtimeIdentity)
+      );
+    nodeAgentMocks.sendPromptToAgentOnNode
+      .mockReset()
+      .mockImplementation(async (_nodeId, _workspaceId, acpSessionId, ...args) =>
+        acceptedPromptResponse(
+          acpSessionId,
+          args[4]?.deliveryId ?? '',
+          nodeAgentMocks.runtimeIdentity,
+          Date.now()
+        )
+      );
+    nodeAgentMocks.cancelAgentSessionOnNode.mockResolvedValue({ success: true, status: 200 });
   });
 
   afterEach(() => {

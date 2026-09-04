@@ -32,73 +32,20 @@ import {
 import { failSession } from '../../src/durable-objects/project-data/sessions';
 import type { Env } from '../../src/durable-objects/project-data/types';
 import { nodeAgentRequest, sendPromptToAgentOnNode } from '../../src/services/node-agent';
+import {
+  acceptedPromptResponse,
+  missingPromptReceipt,
+  versionedPromptCapabilities,
+} from '../helpers/vm-prompt-delivery-fixtures';
 
 const nodeAgentMocks = vi.hoisted(() => ({
   runtimeIdentity: 'runtime-lifecycle-1',
-  NodeAgentHttpError: class NodeAgentHttpError extends Error {
-    constructor(
-      public readonly statusCode: number,
-      public readonly responseBody: string
-    ) {
-      super(`Node Agent request failed: ${statusCode} ${responseBody}`);
-    }
-  },
-  nodeAgentRequest: vi.fn(async (_nodeId: unknown, _env: unknown, path: string) => {
-    if (path.endsWith('/agent-capabilities')) {
-      return {
-        protocolVersion: 1,
-        runtimeIdentity: 'runtime-lifecycle-1',
-        promptReceipts: {
-          supported: true,
-          lookup: true,
-          states: ['accepted', 'in_flight', 'completed', 'not_found', 'ambiguous'],
-        },
-        checkpointRollover: {
-          supported: false,
-          automatic: false,
-          states: [],
-          defaultGraceMs: 0,
-          maxGraceMs: 0,
-          operationTimeoutMs: 0,
-        },
-      };
-    }
-
-    const deliveryId = path.split('/').at(-1) ?? '';
-    return {
-      deliveryId,
-      state: 'not_found',
-      runtimeIdentity: 'runtime-lifecycle-1',
-      acceptedAt: null,
-      completedAt: null,
-    };
-  }),
-  sendPromptToAgentOnNode: vi.fn(
-    async (
-      _nodeId: unknown,
-      _workspaceId: unknown,
-      acpSessionId: string,
-      _prompt: unknown,
-      _env: unknown,
-      _userId: unknown,
-      _messageId: unknown,
-      options: { deliveryId?: string } | undefined
-    ) => ({
-      status: 'accepted',
-      sessionId: acpSessionId,
-      receipt: {
-        deliveryId: options?.deliveryId ?? '',
-        state: 'accepted',
-        runtimeIdentity: 'runtime-lifecycle-1',
-        acceptedAt: Date.now(),
-        completedAt: null,
-      },
-    })
-  ),
+  nodeAgentRequest: vi.fn(),
+  sendPromptToAgentOnNode: vi.fn(),
 }));
 
-vi.mock('../../src/services/node-agent', () => ({
-  NodeAgentHttpError: nodeAgentMocks.NodeAgentHttpError,
+vi.mock('../../src/services/node-agent', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/services/node-agent')>()),
   nodeAgentRequest: nodeAgentMocks.nodeAgentRequest,
   sendPromptToAgentOnNode: nodeAgentMocks.sendPromptToAgentOnNode,
 }));
@@ -231,8 +178,23 @@ describe('agent lifecycle orchestration integration', () => {
       TASK_RECONCILIATION_IDLE_MS: String(FIVE_MINUTES),
       TASK_RECONCILIATION_RESPONSE_DEADLINE_MS: String(ONE_MINUTE),
     } as unknown as Env;
-    vi.mocked(nodeAgentRequest).mockClear();
-    vi.mocked(sendPromptToAgentOnNode).mockClear();
+    vi.mocked(nodeAgentRequest)
+      .mockReset()
+      .mockImplementation(async (_nodeId, _env, path) =>
+        path.endsWith('/agent-capabilities')
+          ? versionedPromptCapabilities(nodeAgentMocks.runtimeIdentity)
+          : missingPromptReceipt(path.split('/').at(-1) ?? '', nodeAgentMocks.runtimeIdentity)
+      );
+    vi.mocked(sendPromptToAgentOnNode)
+      .mockReset()
+      .mockImplementation(async (_nodeId, _workspaceId, acpSessionId, ...args) =>
+        acceptedPromptResponse(
+          acpSessionId,
+          args[4]?.deliveryId ?? '',
+          nodeAgentMocks.runtimeIdentity,
+          Date.now()
+        )
+      );
   });
 
   afterEach(() => {
