@@ -37,8 +37,29 @@ vi.mock('drizzle-orm/d1', () => ({
     update: () => ({
       set: (values: Record<string, unknown>) => ({
         where: () => {
-          drizzleUpdates.push(values);
-          return Promise.resolve();
+          let execution: Promise<{ meta: { changes: number } }> | undefined;
+          const execute = () => {
+            if (!execution) {
+              drizzleUpdates.push(values);
+              if (
+                typeof values.runtimeTerminationConfirmedAt === 'string' &&
+                nodeRows[0]
+              ) {
+                nodeRows[0] = { ...nodeRows[0], ...values };
+              }
+              execution = Promise.resolve({ meta: { changes: 1 } });
+            }
+            return execution;
+          };
+          return {
+            run: execute,
+            then: <TResult1 = { meta: { changes: number } }, TResult2 = never>(
+              onfulfilled?:
+                | ((value: { meta: { changes: number } }) => TResult1 | PromiseLike<TResult1>)
+                | null,
+              onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+            ) => execute().then(onfulfilled, onrejected),
+          };
         },
       }),
     }),
@@ -150,7 +171,16 @@ describe('expired-trial conclusive provider absence vertical slice', () => {
     expect(providerGetVM).toHaveBeenCalledWith('vm-missing');
     expect(providerDeleteVM).not.toHaveBeenCalled();
     expect(deleteDNSRecord).toHaveBeenCalledWith('dns-old', env);
-    expect(drizzleUpdates).toEqual([{ runtimeTerminationConfirmedAt: expect.any(String) }]);
+    expect(drizzleUpdates).toEqual(
+      expect.arrayContaining([
+        { runtimeTerminationConfirmedAt: expect.any(String) },
+        expect.objectContaining({
+          status: 'deleted',
+          runtimeDeletionConfirmedAt: expect.any(String),
+          runtimeDeletionProof: 'node_runtime_terminated',
+        }),
+      ])
+    );
     expect(calls.some(({ sql }) => sql.includes('UPDATE agent_sessions'))).toBe(true);
     expect(calls.some(({ sql }) => sql.includes('UPDATE compute_usage'))).toBe(true);
     expect(
