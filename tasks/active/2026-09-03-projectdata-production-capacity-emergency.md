@@ -200,11 +200,12 @@ incident must keep their chat output lean.
 - `platform_errors` still has ZERO `Exceeded the maximum database size` rows in seven days
   while the object is above the configured `10^10` limit, so Cloudflare's real per-object
   ceiling is higher — consistent with 10 GiB (`10,737,418,240` bytes).
-- Remaining true headroom at 12:14Z is therefore about **665,260,032 bytes**: roughly
-  **26 hours** at the trailing rate, **62 hours** at the seven-hour average. Call it one to
-  two and a half days, not the three to four days the task brief estimated, and shrinking.
+- Remaining true headroom at 13:14Z is about **656,924,672 bytes**, which at the eight-hour
+  average of 10.45 MB/h is roughly **63 hours — about 2.6 days**. A sustained return to the
+  12:14Z peak rate would compress that to under 26 hours, so the RATE is the thing to watch,
+  not the absolute size.
 - Reaching the configured `PROJECT_DATA_STORAGE_EMERGENCY_TARGET_RATIO` of 0.9 now needs at
-  least **1,072,158,208 bytes** of measured relief.
+  least **1,080,493,568 bytes** of measured relief.
 - Re-derive both numbers at execution time; do not reuse these.
 
 Merge safety: this PR is non-destructive on deploy. `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED`
