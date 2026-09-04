@@ -223,6 +223,7 @@ export async function scheduled(
     orphanedWorkspacesFlagged: nodeCleanup?.orphanedWorkspacesFlagged,
     orphanedNodesDestroyed: nodeCleanup?.orphanedNodesDestroyed,
     orphanedNodesSkipped: nodeCleanup?.orphanedNodesSkipped,
+    stoppedWorkspacesQueued: nodeCleanup?.stoppedWorkspacesQueued,
     stoppedWorkspacesDeleted: nodeCleanup?.stoppedWorkspacesDeleted,
     cfContainersDestroyed: nodeCleanup?.cfContainersDestroyed,
     providerOrphansScanned: providerOrphans?.scanned,
@@ -284,7 +285,8 @@ export async function scheduled(
       terminalNodeLifecycleRepair?.skippedProtectedSleep,
     terminalNodeLifecycleRepairWorkspacesTerminalized:
       terminalNodeLifecycleRepair?.workspacesTerminalized,
-    terminalNodeLifecycleRepairAgentSessionsClosed: terminalNodeLifecycleRepair?.agentSessionsClosed,
+    terminalNodeLifecycleRepairAgentSessionsClosed:
+      terminalNodeLifecycleRepair?.agentSessionsClosed,
     terminalNodeLifecycleRepairComputeUsageClosed: terminalNodeLifecycleRepair?.computeUsageClosed,
     terminalNodeLifecycleRepairProjectSessionsClosed:
       terminalNodeLifecycleRepair?.projectSessionsClosed,

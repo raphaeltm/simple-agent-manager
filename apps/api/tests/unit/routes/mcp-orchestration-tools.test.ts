@@ -369,7 +369,10 @@ describe('MCP Orchestration Tools', () => {
     /** Set up all D1 mocks needed for a successful retry */
     function setupRetryHappyPath(
       childOverrides: Partial<Record<string, unknown>> = {},
-      options: { runningAgentSession?: boolean } = {}
+      options: {
+        runningAgentSession?: boolean;
+        deletionFenceRow?: Record<string, unknown> | null;
+      } = {}
     ) {
       const childTask = makeTask(childOverrides);
       const project = makeProjectObj();
@@ -382,6 +385,15 @@ describe('MCP Orchestration Tools', () => {
         result: [toRawRow(TASK_COLUMNS, childTask)],
         once: true,
       });
+
+      if (options.deletionFenceRow !== undefined) {
+        mockD1._handlers.push({
+          match: 'LEFT JOIN workspaces',
+          method: 'first',
+          result: options.deletionFenceRow,
+          once: true,
+        });
+      }
 
       // 2. count(*) for sibling count
       mockD1._handlers.push({
@@ -475,7 +487,18 @@ describe('MCP Orchestration Tools', () => {
     });
 
     it('should retry a failed child task and dispatch replacement', async () => {
-      setupRetryHappyPath();
+      setupRetryHappyPath(
+        {},
+        {
+          deletionFenceRow: {
+            workspaceId: 'workspace-confirmed',
+            workspaceStatus: 'stopping',
+            workspaceErrorMessage: 'Workspace deletion unconfirmed: prior timeout',
+            nodeId: 'node-confirmed',
+            runtimeTerminationConfirmedAt: '2026-09-04T00:00:00.000Z',
+          },
+        }
+      );
 
       const res = await mcpRequest(
         app,
@@ -492,6 +515,52 @@ describe('MCP Orchestration Tools', () => {
       expect(content.newTaskId).toBeDefined();
       expect(content.newSessionId).toBeDefined();
       expect(content.newBranch).toBeDefined();
+    });
+
+    it('rejects an unconfirmed predecessor before creating replacement state', async () => {
+      const childTask = makeTask({
+        id: 'child-unconfirmed',
+        status: 'failed',
+        workspaceId: 'workspace-unconfirmed',
+      });
+      mockD1._handlers.push({
+        match: 'from "tasks"',
+        method: 'raw',
+        result: [toRawRow(TASK_COLUMNS, childTask)],
+        once: true,
+      });
+      mockD1._handlers.push({
+        match: 'LEFT JOIN workspaces',
+        method: 'first',
+        result: {
+          workspaceId: 'workspace-unconfirmed',
+          workspaceStatus: 'stopping',
+          workspaceErrorMessage: 'Workspace deletion unconfirmed: VM request timed out',
+          nodeId: 'node-unconfirmed',
+          runtimeTerminationConfirmedAt: null,
+        },
+        once: true,
+      });
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'retry_subtask',
+          arguments: { taskId: 'child-unconfirmed' },
+        })
+      );
+
+      const body = await res.json();
+      expect(body.error?.message).toContain(
+        'Replacement is fenced while workspace workspace-unconfirmed deletion is unconfirmed'
+      );
+      expect(mockD1.batch).not.toHaveBeenCalled();
+      expect(mockDoStub.createSession).not.toHaveBeenCalled();
+      expect(mockDoStub.persistMessage).not.toHaveBeenCalled();
+      expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
+      expect(
+        mockD1.prepare.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO tasks'))
+      ).toBe(false);
     });
 
     it('should reject newDescription exceeding max length', async () => {

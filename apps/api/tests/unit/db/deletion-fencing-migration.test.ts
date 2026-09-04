@@ -24,4 +24,36 @@ describe('0137 deletion fencing migration', () => {
       sqlite.close();
     }
   });
+
+  it('adds workspace-runtime proof fields without blessing legacy deleted labels', () => {
+    const sqlite = new Database(':memory:');
+    try {
+      sqlite.exec(`CREATE TABLE workspaces (id TEXT PRIMARY KEY, status TEXT NOT NULL)`);
+      sqlite.exec(`INSERT INTO workspaces (id, status) VALUES ('legacy-deleted', 'deleted')`);
+      sqlite.exec(
+        readFileSync(
+          join(process.cwd(), 'src/db/migrations/0139_workspace_runtime_deletion_proof.sql'),
+          'utf8'
+        )
+      );
+
+      const columns = sqlite.prepare(`PRAGMA table_info('workspaces')`).all() as Array<{
+        name: string;
+      }>;
+      const row = sqlite
+        .prepare(
+          `SELECT runtime_deletion_confirmed_at AS confirmedAt,
+                  runtime_deletion_proof AS proof
+             FROM workspaces
+            WHERE id = ?`
+        )
+        .get('legacy-deleted') as { confirmedAt: string | null; proof: string | null };
+      expect(columns.map((column) => column.name)).toEqual(
+        expect.arrayContaining(['runtime_deletion_confirmed_at', 'runtime_deletion_proof'])
+      );
+      expect(row).toEqual({ confirmedAt: null, proof: null });
+    } finally {
+      sqlite.close();
+    }
+  });
 });

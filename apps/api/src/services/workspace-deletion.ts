@@ -17,6 +17,8 @@ export interface WorkspaceDeletionIdentity {
 
 export interface WorkspaceDeletionSnapshot extends WorkspaceDeletionIdentity {
   status: string;
+  runtimeDeletionConfirmedAt: string | null;
+  runtimeDeletionProof: WorkspaceDeletionProof | null;
 }
 
 export type WorkspaceDeletionProof =
@@ -98,6 +100,14 @@ function boundedDiagnostic(env: Env, value: string): string {
   return sanitized.slice(0, diagnosticMaxLength(env));
 }
 
+function isWorkspaceDeletionProof(value: string | null): value is WorkspaceDeletionProof {
+  return (
+    value === 'vm_agent_confirmed' ||
+    value === 'workspace_never_started' ||
+    value === 'node_runtime_terminated'
+  );
+}
+
 function deletionFailureDiagnostic(env: Env, attempt: number, error: unknown): string {
   const errorName = error instanceof Error ? error.name : 'UnknownError';
   const message = error instanceof Error ? error.message : String(error);
@@ -124,7 +134,9 @@ async function loadWorkspaceDeletionRow(
               w.user_id AS userId,
               w.project_id AS projectId,
               w.chat_session_id AS chatSessionId,
-              w.status AS status
+              w.status AS status,
+              w.runtime_deletion_confirmed_at AS runtimeDeletionConfirmedAt,
+              w.runtime_deletion_proof AS runtimeDeletionProof
          FROM workspaces w
         WHERE w.id = ?
         LIMIT 1`
@@ -163,7 +175,8 @@ async function persistDeletionDiagnostic(
           AND user_id = ?
           AND project_id IS ?
           AND chat_session_id IS ?
-          AND node_id IS ?`
+          AND node_id IS ?
+          AND runtime_deletion_confirmed_at IS NULL`
   )
     .bind(
       boundedDiagnostic(env, diagnostic),
@@ -193,6 +206,7 @@ async function claimDeletionTransition(
           AND project_id IS ?
           AND chat_session_id IS ?
           AND node_id IS ?
+          AND runtime_deletion_confirmed_at IS NULL
           ${statusPredicate}`
   )
     .bind(
@@ -239,6 +253,23 @@ async function finalizeConfirmedDeletion(
     });
     return { status: 'confirmed', proof, workspaceFinalized: false };
   }
+  if (
+    current.runtimeDeletionConfirmedAt &&
+    isWorkspaceDeletionProof(current.runtimeDeletionProof)
+  ) {
+    await beforeFinalize?.();
+    await finalizeWorkspaceLifecycleClosure(env, {
+      workspaceIds: [expected.workspaceId],
+      userId: expected.userId,
+      agentSessionStatus: 'completed',
+      reason: `workspace_deletion_${source}_${current.runtimeDeletionProof}`,
+    });
+    return {
+      status: 'confirmed',
+      proof: current.runtimeDeletionProof,
+      workspaceFinalized: true,
+    };
+  }
   if (proof === 'vm_agent_confirmed' && current.status !== 'stopping') {
     log.warn('workspace_deletion.confirmed_after_state_change', {
       workspaceId: expected.workspaceId,
@@ -252,7 +283,11 @@ async function finalizeConfirmedDeletion(
 
   const result = await env.DATABASE.prepare(
     `UPDATE workspaces
-        SET status = 'deleted', error_message = NULL, updated_at = ?
+        SET status = 'deleted',
+            error_message = NULL,
+            runtime_deletion_confirmed_at = ?,
+            runtime_deletion_proof = ?,
+            updated_at = ?
       WHERE id = ?
         AND user_id = ?
         AND project_id IS ?
@@ -261,6 +296,8 @@ async function finalizeConfirmedDeletion(
         AND status = ?`
   )
     .bind(
+      new Date().toISOString(),
+      proof,
       new Date().toISOString(),
       current.workspaceId,
       current.userId,
@@ -313,6 +350,18 @@ export async function attemptWorkspaceDeletion(
     return proofBeforeRequest
       ? finalizeConfirmedDeletion(env, expected, proofBeforeRequest, source, beforeFinalize)
       : { status: 'fenced', reason: 'workspace_assignment_changed' };
+  }
+  if (
+    initial.runtimeDeletionConfirmedAt &&
+    isWorkspaceDeletionProof(initial.runtimeDeletionProof)
+  ) {
+    return finalizeConfirmedDeletion(
+      env,
+      expected,
+      initial.runtimeDeletionProof,
+      source,
+      beforeFinalize
+    );
   }
   if (!expected.nodeId && initial.status === 'pending') {
     return finalizeConfirmedDeletion(
@@ -406,6 +455,8 @@ export async function loadWorkspaceDeletionSnapshot(
     projectId: workspace.projectId,
     chatSessionId: workspace.chatSessionId,
     status: workspace.status,
+    runtimeDeletionConfirmedAt: workspace.runtimeDeletionConfirmedAt,
+    runtimeDeletionProof: workspace.runtimeDeletionProof,
   };
 }
 

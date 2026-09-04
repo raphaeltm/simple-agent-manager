@@ -418,6 +418,7 @@ describe('runNodeCleanupSweep', () => {
         // orphan nodes instead of only writing an observability row.
         orphanedNodesDestroyed: 0,
         orphanedNodesSkipped: 0,
+        stoppedWorkspacesQueued: 0,
         stoppedWorkspacesDeleted: 0,
         cfContainersDestroyed: 0,
         incompatibleDestroyed: 0,

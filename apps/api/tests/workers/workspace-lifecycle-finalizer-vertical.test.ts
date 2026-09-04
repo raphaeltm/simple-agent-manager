@@ -71,6 +71,11 @@ describe('workspace lifecycle finalizer vertical slices', () => {
   it('stopNodeResources closes running agent sessions for deleted node workspaces', async () => {
     const ids = await seedBase(`stop-node-${crypto.randomUUID()}`);
     await seedComputeUsage(`${ids.workspaceId}-usage`, ids.userId, ids.workspaceId, ids.nodeId);
+    await env.DATABASE.prepare(
+      `UPDATE nodes SET runtime_termination_confirmed_at = datetime('now') WHERE id = ?`
+    )
+      .bind(ids.nodeId)
+      .run();
 
     await stopNodeResources(ids.nodeId, ids.userId, env as unknown as Env);
 
@@ -94,6 +99,40 @@ describe('workspace lifecycle finalizer vertical slices', () => {
     });
     expect(usage?.ended_at).toEqual(expect.any(String));
     expect(await countRunningAgentSessions(ids.workspaceId)).toBe(0);
+  });
+
+  it('stopNodeResources keeps managed records and sessions quarantined without strict proof', async () => {
+    const ids = await seedBase(`failed-node-stop-${crypto.randomUUID()}`);
+    await env.DATABASE.prepare(
+      `UPDATE nodes SET cloud_provider = 'hetzner', provider_instance_id = 'unconfirmed-vm' WHERE id = ?`
+    )
+      .bind(ids.nodeId)
+      .run();
+
+    await expect(stopNodeResources(ids.nodeId, ids.userId, env as unknown as Env)).rejects.toThrow(
+      'Managed node teardown remains unconfirmed'
+    );
+
+    const workspace = await env.DATABASE.prepare(
+      `SELECT status, error_message FROM workspaces WHERE id = ?`
+    )
+      .bind(ids.workspaceId)
+      .first<{ status: string; error_message: string | null }>();
+    const node = await env.DATABASE.prepare(
+      `SELECT status, runtime_termination_confirmed_at FROM nodes WHERE id = ?`
+    )
+      .bind(ids.nodeId)
+      .first<{ status: string; runtime_termination_confirmed_at: string | null }>();
+
+    expect(workspace).toEqual({
+      status: 'stopping',
+      error_message: expect.stringMatching(/^Workspace deletion unconfirmed:/),
+    });
+    expect(node).toEqual({ status: 'destroying', runtime_termination_confirmed_at: null });
+    expect(await getAgentSession(ids.agentSessionId)).toMatchObject({
+      status: 'running',
+      stopped_at: null,
+    });
   });
 
   it('deleteNodeResources closes sessions only after a strict runtime marker exists', async () => {

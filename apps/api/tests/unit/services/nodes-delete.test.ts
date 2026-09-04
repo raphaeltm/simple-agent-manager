@@ -16,8 +16,30 @@ vi.mock('drizzle-orm/d1', () => ({
     update: () => ({
       set: (values: Record<string, unknown>) => ({
         where: () => {
-          updateCalls.push(values);
-          return Promise.resolve();
+          let execution: Promise<{ meta: { changes: number } }> | undefined;
+          const execute = () => {
+            if (!execution) {
+              updateCalls.push(values);
+              if (
+                typeof values.runtimeTerminationConfirmedAt === 'string' &&
+                nodeRows[0] &&
+                typeof nodeRows[0] === 'object'
+              ) {
+                nodeRows[0] = { ...nodeRows[0], ...values };
+              }
+              execution = Promise.resolve({ meta: { changes: 1 } });
+            }
+            return execution;
+          };
+          return {
+            run: execute,
+            then: <TResult1 = { meta: { changes: number } }, TResult2 = never>(
+              onfulfilled?:
+                | ((value: { meta: { changes: number } }) => TResult1 | PromiseLike<TResult1>)
+                | null,
+              onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+            ) => execute().then(onfulfilled, onrejected),
+          };
         },
       }),
     }),
@@ -267,6 +289,35 @@ describe('node resource deletion services', () => {
       }
     );
     expect(providerDeleteVM).toHaveBeenCalledWith('vm-pool-1');
+    expect(updateCalls).toContainEqual({ runtimeTerminationConfirmedAt: expect.any(String) });
+    expect(updateCalls).toContainEqual(
+      expect.objectContaining({ status: 'deleted', healthStatus: 'stale' })
+    );
+    expect(finalizeWorkspaceLifecycleClosure).toHaveBeenCalledTimes(1);
+  });
+
+  it('stopNodeResources quarantines managed records and sanitizes provider deletion failure', async () => {
+    nodeRows.push(managedPoolNode());
+    providerDeleteVM.mockRejectedValueOnce(new Error('raw provider account detail'));
+
+    await expect(stopNodeResources('pool-node-1', 'user-1', ENV)).rejects.toThrow(
+      'Managed node teardown remains unconfirmed'
+    );
+
+    expect(updateCalls).toContainEqual(
+      expect.objectContaining({
+        status: 'stopping',
+        errorMessage: expect.stringMatching(/^Workspace deletion unconfirmed:/),
+      })
+    );
+    expect(updateCalls).toContainEqual(
+      expect.objectContaining({ status: 'destroying', healthStatus: 'stale' })
+    );
+    expect(updateCalls).not.toContainEqual(
+      expect.objectContaining({ runtimeTerminationConfirmedAt: expect.any(String) })
+    );
+    expect(updateCalls).not.toContainEqual(expect.objectContaining({ status: 'deleted' }));
+    expect(finalizeWorkspaceLifecycleClosure).not.toHaveBeenCalled();
   });
 
   it('deleteNodeResources deletes a pool-provisioned VM with its exact placement credential', async () => {
@@ -303,8 +354,9 @@ describe('node resource deletion services', () => {
       nodeFound: true,
       runtimeTerminationConfirmed: false,
       providerVmDeleted: false,
-      errors: ['provider delete timed out'],
+      errors: ['Managed runtime termination remains unconfirmed'],
     });
+    expect(result.errors.join(' ')).not.toContain('provider delete timed out');
     expect(updateCalls).toContainEqual(
       expect.objectContaining({
         status: 'stopping',
@@ -319,6 +371,46 @@ describe('node resource deletion services', () => {
     );
     expect(updateCalls).not.toContainEqual(expect.objectContaining({ status: 'deleted' }));
     expect(finalizeWorkspaceLifecycleClosure).not.toHaveBeenCalled();
+  });
+
+  it('sanitizes managed container teardown errors returned by deleteNodeResources', async () => {
+    nodeRows.push({
+      ...managedPoolNode(),
+      id: 'cf-container-1',
+      runtime: 'cf-container',
+      providerInstanceId: null,
+      cloudProvider: 'cloudflare',
+    });
+    destroyVmAgentContainer.mockRejectedValueOnce(
+      new Error('raw container infrastructure account detail')
+    );
+
+    const result = await deleteNodeResources('cf-container-1', 'user-1', ENV);
+
+    expect(result).toMatchObject({
+      runtimeTerminationConfirmed: false,
+      errors: ['Managed runtime termination remains unconfirmed'],
+    });
+    expect(result.errors.join(' ')).not.toContain('infrastructure account detail');
+    expect(finalizeWorkspaceLifecycleClosure).not.toHaveBeenCalled();
+  });
+
+  it('sanitizes DNS cleanup errors returned by deleteNodeResources', async () => {
+    nodeRows.push(
+      managedPoolNode({
+        runtimeTerminationConfirmedAt: '2026-09-04T00:00:00.000Z',
+        backendDnsRecordId: 'dns-sensitive',
+      })
+    );
+    deleteDNSRecord.mockRejectedValueOnce(new Error('raw DNS provider account detail'));
+
+    const result = await deleteNodeResources('pool-node-1', 'user-1', ENV);
+
+    expect(result).toMatchObject({
+      runtimeTerminationConfirmed: true,
+      errors: ['Node DNS cleanup remains pending'],
+    });
+    expect(result.errors.join(' ')).not.toContain('DNS provider account detail');
   });
 
   it('uses an existing strict runtime marker without repeating provider teardown', async () => {
@@ -366,11 +458,81 @@ describe('node resource deletion services', () => {
       runtimeTerminationConfirmedAt: expect.any(String),
     });
 
+    nodeRows[0] = {
+      ...(nodeRows[0] as Record<string, unknown>),
+      runtimeTerminationConfirmedAt: null,
+    };
     destroyVmAgentContainer.mockRejectedValueOnce(new Error('container teardown unavailable'));
     await expect(deleteNodeResourcesStrict('cf-strict', 'user-1', ENV)).rejects.toThrow(
       /container teardown unavailable/
     );
   });
+
+  it('refuses no-instance proof for a managed VM that may still be provisioning', async () => {
+    nodeRows.push(managedPoolNode({ status: 'creating', providerInstanceId: null }));
+
+    await expect(deleteNodeResourcesStrict('pool-node-1', 'user-1', ENV)).rejects.toThrow(
+      /instance identity is missing/
+    );
+
+    expect(createProviderForUser).not.toHaveBeenCalled();
+    expect(providerDeleteVM).not.toHaveBeenCalled();
+    expect(updateCalls).toEqual([]);
+  });
+
+  it('does not write termination proof when provider deletion races a new VM incarnation', async () => {
+    nodeRows.push(managedPoolNode());
+    let releaseProviderDelete: (() => void) | undefined;
+    providerDeleteVM.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseProviderDelete = resolve;
+        })
+    );
+
+    const deletion = deleteNodeResourcesStrict('pool-node-1', 'user-1', ENV);
+    await vi.waitFor(() => expect(providerDeleteVM).toHaveBeenCalledWith('vm-pool-1'));
+    nodeRows[0] = {
+      ...(nodeRows[0] as Record<string, unknown>),
+      providerInstanceId: 'vm-reprovisioned',
+      runtimeTerminationConfirmedAt: null,
+    };
+    releaseProviderDelete?.();
+
+    await expect(deletion).rejects.toThrow(/lost its incarnation fence/);
+    expect(updateCalls).not.toContainEqual(
+      expect.objectContaining({ runtimeTerminationConfirmedAt: expect.any(String) })
+    );
+  });
+
+  it.each([
+    ['user', 'userId', 'different-user'],
+    ['runtime', 'runtime', 'cf-container'],
+    ['provider', 'cloudProvider', 'scaleway'],
+    ['credential attribution', 'credentialAttributionProjectId', 'different-project'],
+    ['placement credential', 'placementCredentialReference', 'credentials:rotated'],
+    ['placement version', 'placementCredentialVersion', 1787875200001],
+  ])(
+    'does not write termination proof when %s identity changes during provider I/O',
+    async (_dimension, key, replacement) => {
+      nodeRows.push(managedPoolNode());
+      providerDeleteVM.mockImplementationOnce(async () => {
+        nodeRows[0] = {
+          ...(nodeRows[0] as Record<string, unknown>),
+          [key]: replacement,
+          runtimeTerminationConfirmedAt: null,
+        };
+      });
+
+      await expect(deleteNodeResourcesStrict('pool-node-1', 'user-1', ENV)).rejects.toThrow(
+        /lost its incarnation fence/
+      );
+
+      expect(updateCalls).not.toContainEqual(
+        expect.objectContaining({ runtimeTerminationConfirmedAt: expect.any(String) })
+      );
+    }
+  );
 
   it('deleteNodeResourcesStrict is a no-op for a user-owned node (nothing to delete, no throw)', async () => {
     nodeRows.push(
@@ -454,7 +616,14 @@ describe('node resource deletion services', () => {
     expect(providerGetVM).toHaveBeenCalledWith('vm-absent');
     expect(providerDeleteVM).not.toHaveBeenCalled();
     expect(deleteDNSRecord).toHaveBeenCalledWith('dns-absent', ENV);
-    expect(updateCalls).toEqual([{ runtimeTerminationConfirmedAt: expect.any(String) }]);
+    expect(updateCalls).toContainEqual({ runtimeTerminationConfirmedAt: expect.any(String) });
+    expect(updateCalls).toContainEqual(
+      expect.objectContaining({
+        status: 'deleted',
+        runtimeDeletionConfirmedAt: expect.any(String),
+        runtimeDeletionProof: 'node_runtime_terminated',
+      })
+    );
   });
 
   it('checks every credentialed provider before selecting the only provider that contains a legacy VM', async () => {
@@ -493,9 +662,6 @@ describe('node resource deletion services', () => {
     expect(scalewayGetVM).toHaveBeenCalledWith('vm-shared-id');
     expect(providerDeleteVM).not.toHaveBeenCalled();
     expect(scalewayDeleteVM).toHaveBeenCalledWith('vm-shared-id');
-    expect(updateCalls).toContainEqual(
-      expect.objectContaining({ cloudProvider: 'scaleway', credentialSource: 'user' })
-    );
     expect(updateCalls).toContainEqual({
       runtimeTerminationConfirmedAt: expect.any(String),
     });
@@ -599,12 +765,6 @@ describe('node resource deletion services', () => {
 
     expect(providerDeleteVM).toHaveBeenCalledWith('vm-1');
     expect(deleteDNSRecord).toHaveBeenCalledWith('dns-1', ENV);
-    expect(updateCalls).toContainEqual(
-      expect.objectContaining({
-        cloudProvider: 'hetzner',
-        credentialSource: 'platform',
-      })
-    );
     expect(updateCalls).toContainEqual({
       runtimeTerminationConfirmedAt: expect.any(String),
     });

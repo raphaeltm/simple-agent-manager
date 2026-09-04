@@ -515,16 +515,28 @@ describe('provider-aware node provisioning', () => {
     expect(section).toContain('statusCode');
   });
 
-  it('stopNodeResources uses node cloudProvider for credential lookup', () => {
+  it('stopNodeResources delegates managed teardown to strict proof-bearing deletion', () => {
     const section = nodesSource.slice(
       nodesSource.indexOf('async function stopNodeResources'),
       nodesSource.indexOf('async function deleteNodeResources')
     );
-    expect(section).toContain('node.cloudProvider as CredentialProvider');
-    expect(section).toContain('exactProviderCredentialBindingFromPlacementSnapshot(node)');
-    expect(section).toMatch(
-      /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId,\s*exactCredential\s*\)/
+    expect(section).toContain(
+      'await deleteNodeResourcesStrict(nodeId, userId, env, { cleanupDns: false })'
     );
+    expect(section).toContain("status: 'stopping'");
+    expect(section).toContain('isNotNull(schema.nodes.runtimeTerminationConfirmedAt)');
+    expect(section).not.toContain('providerResult.provider.deleteVM');
+  });
+
+  it('provisionNode clears stale runtime termination proof before allocating a new incarnation', () => {
+    const section = nodesSource.slice(
+      nodesSource.indexOf('async function provisionNode'),
+      nodesSource.indexOf('async function stopNodeResources')
+    );
+    const firstClear = section.indexOf('runtimeTerminationConfirmedAt: null');
+    const providerAllocation = section.indexOf('provider.createVM');
+    expect(firstClear).toBeGreaterThan(-1);
+    expect(providerAllocation).toBeGreaterThan(firstClear);
   });
 
   it('deleteNodeResources delegates provider credential lookup to strict deletion', () => {

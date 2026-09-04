@@ -144,7 +144,29 @@ vi.mock('../../src/schemas', async (importOriginal) => {
 
 vi.mock('../../src/routes/workspaces/_helpers', () => ({
   assertWorkspaceAcceptsCallback: vi.fn(async (_env: unknown, workspace: unknown) => workspace),
-  assertWorkspaceCallbackResourceById: vi.fn().mockResolvedValue(undefined),
+  assertWorkspaceCallbackResourceById: vi.fn(async () => ({
+    workspaceId: 'test-workspace',
+    userId: 'user1',
+    projectId: 'proj1',
+    chatSessionId: 'session1',
+    status: 'running',
+    nodeId: 'node1',
+    nodeStatus: 'running',
+    ...(mockDbLimit()[0] ?? {}),
+  })),
+  assertWorkspaceCallbackIdentityCurrent: vi.fn(async (_env: unknown, workspace: unknown) =>
+    Promise.resolve(workspace)
+  ),
+  sameWorkspaceCallbackIdentity: vi.fn(
+    (current: Record<string, unknown>, expected: Record<string, unknown>) =>
+      current.workspaceId === expected.workspaceId &&
+      current.userId === expected.userId &&
+      current.projectId === expected.projectId &&
+      current.chatSessionId === expected.chatSessionId &&
+      current.status === expected.status &&
+      current.nodeId === expected.nodeId &&
+      current.nodeStatus === expected.nodeStatus
+  ),
   verifyWorkspaceCallbackAuth: vi.fn().mockResolvedValue(undefined),
   getWorkspaceRuntimeAssets: vi.fn(),
   safeParseJson: vi.fn(),
@@ -354,6 +376,38 @@ describe('runtime.ts always-proxy', () => {
       },
     ]);
     expect(response.status).toBe(204);
+    expect(projectDataService.persistMessageBatch).not.toHaveBeenCalled();
+  });
+
+  it('drops a batch when deletion starts while the request body is read', async () => {
+    let workspaceRead = 0;
+    mockDbLimit.mockImplementation(() => {
+      workspaceRead += 1;
+      return [
+        {
+          workspaceId: 'test-workspace',
+          userId: 'user1',
+          projectId: 'proj1',
+          chatSessionId: 'sess1',
+          status: workspaceRead === 1 ? 'running' : 'stopping',
+          nodeId: 'node1',
+          nodeStatus: 'running',
+        },
+      ];
+    });
+
+    const response = await postMessages([
+      {
+        messageId: 'msg-race',
+        sessionId: 'sess1',
+        role: 'assistant',
+        content: 'must not persist',
+        timestamp: '2026-06-18T14:18:22.000Z',
+      },
+    ]);
+
+    expect(response.status).toBe(204);
+    expect(mockDbLimit).toHaveBeenCalledTimes(2);
     expect(projectDataService.persistMessageBatch).not.toHaveBeenCalled();
   });
 

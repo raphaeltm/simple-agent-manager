@@ -20,7 +20,6 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { stopWorkspaceOnNode } from '../../services/node-agent';
 import { persistError } from '../../services/observability';
-import { attemptWorkspaceDeletion } from '../../services/workspace-deletion';
 import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import type { CleanupConfig, CleanupDb, NodeCleanupResult } from './shared';
 
@@ -182,6 +181,17 @@ export async function sweepStaleStoppedWorkspaces(
 
   for (const ws of candidates.results) {
     try {
+      if (!ws.node_id) {
+        await persistError(env.OBSERVABILITY_DATABASE, {
+          source: 'api',
+          level: 'error',
+          message: 'Stopped workspace cannot be queued for runtime deletion without a node',
+          workspaceId: ws.id,
+          userId: ws.user_id,
+        });
+        result.errors++;
+        continue;
+      }
       const expected = {
         workspaceId: ws.id,
         nodeId: ws.node_id,
@@ -189,45 +199,22 @@ export async function sweepStaleStoppedWorkspaces(
         projectId: ws.project_id,
         chatSessionId: ws.chat_session_id,
       };
-      const lifecycleStub = ws.node_id
-        ? (env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(ws.node_id)) as DurableObjectStub<
-            import('../../durable-objects/node-lifecycle').NodeLifecycle
-          >)
-        : null;
-      if (
-        lifecycleStub &&
-        !(await lifecycleStub.claimWorkspaceDeletionAttempt(
-          ws.node_id as string,
-          ws.id,
-          ws.user_id,
-          expected
-        ))
-      ) {
-        result.errors++;
-        continue;
-      }
-      const outcome = await attemptWorkspaceDeletion({
-        env,
+      const lifecycleStub = env.NODE_LIFECYCLE.get(
+        env.NODE_LIFECYCLE.idFromName(ws.node_id)
+      ) as DurableObjectStub<import('../../durable-objects/node-lifecycle').NodeLifecycle>;
+      // Rule 47: cron is a bounded durable-enqueue safety net. The DO alarm claims
+      // the exact incarnation and moves VM I/O behind waitUntil.
+      await lifecycleStub.scheduleWorkspaceDeletion(ws.node_id, ws.id, ws.user_id, {
+        retryAfterMs: deletionRetryBaseMs(env),
+        lastError: 'scheduled by stopped-workspace cleanup safety net',
         expected,
-        attempt: 1,
-        source: 'node_cleanup_safety_net',
-        mode: 'automatic',
-        requestTimeoutMs: config.agentTimeoutMs,
       });
-      if (outcome.status === 'confirmed') {
-        await lifecycleStub?.confirmWorkspaceDeletion(ws.id);
-        result.stoppedWorkspacesDeleted++;
-        continue;
-      }
-
-      if (ws.node_id) {
-        await lifecycleStub?.scheduleWorkspaceDeletion(ws.node_id, ws.id, ws.user_id, {
-          retryAfterMs: deletionRetryBaseMs(env),
-          lastError: outcome.status === 'retry' ? outcome.diagnostic : outcome.reason,
-          expected,
-        });
-      }
-      result.errors++;
+      result.stoppedWorkspacesQueued++;
+      log.info('node_cleanup.stale_stopped_workspace_queued', {
+        workspaceId: ws.id,
+        nodeId: ws.node_id,
+        userId: ws.user_id,
+      });
     } catch (e) {
       log.error('node_cleanup.stale_stopped_workspace_delete_failed', {
         workspaceId: ws.id,

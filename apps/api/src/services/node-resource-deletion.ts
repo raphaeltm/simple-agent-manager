@@ -23,6 +23,9 @@ export interface DeleteNodeResourcesResult {
   errors: string[];
 }
 
+const RUNTIME_TERMINATION_PENDING_ERROR = 'Managed runtime termination remains unconfirmed';
+const DNS_CLEANUP_PENDING_ERROR = 'Node DNS cleanup remains pending';
+
 function deletionDiagnostic(env: Env): string {
   const configuredMaxLength = Number.parseInt(
     env.WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH ?? '',
@@ -84,7 +87,7 @@ export async function deleteNodeResources(
             : 'strict deletion confirmed no provider instance';
       }
     } catch (err) {
-      result.errors.push(err instanceof Error ? err.message : String(err));
+      result.errors.push(RUNTIME_TERMINATION_PENDING_ERROR);
       log.error('node_delete.runtime_termination_unconfirmed', {
         nodeId,
         ...serializeError(err),
@@ -99,7 +102,7 @@ export async function deleteNodeResources(
       await deleteDNSRecord(node.backendDnsRecordId, env);
       result.backendDnsDeleted = true;
     } catch (err) {
-      result.errors.push(err instanceof Error ? err.message : String(err));
+      result.errors.push(DNS_CLEANUP_PENDING_ERROR);
       log.error('node_delete.delete_dns_failed', { nodeId, ...serializeError(err) });
     }
   }

@@ -368,9 +368,8 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
           },
           body: '{"prompt":"do-not-ingest","token":"super-secret"',
         });
-      const response = await postLateCallback();
-      expect(response.status).toBe(204);
-      expect((await postLateCallback()).status).toBe(204);
+      const responses = await Promise.all(Array.from({ length: 8 }, () => postLateCallback()));
+      expect(responses.every((response) => response.status === 204)).toBe(true);
 
       const projectData = env.PROJECT_DATA.get(
         env.PROJECT_DATA.idFromName(PROJECT_ID)

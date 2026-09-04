@@ -46,7 +46,7 @@ describe('replacement deletion fence', () => {
       get: vi.fn(() => ({
         getWorkspaceDeletionAttemptState: vi.fn(async () => ({
           pending: true,
-          attemptStarted: true,
+          attemptStarted: false,
         })),
       })),
     } as unknown as DurableObjectNamespace;
@@ -67,6 +67,17 @@ describe('replacement deletion fence', () => {
     await expect(assertReplacementDeletionConfirmed(env, input)).resolves.toBeUndefined();
   });
 
+  it('releases the fence after exact workspace runtime deletion proof', async () => {
+    const env = buildEnv({
+      workspaceId: 'workspace-old',
+      workspaceStatus: 'deleted',
+      runtimeDeletionConfirmedAt: '2026-09-04T00:00:00.000Z',
+      runtimeTerminationConfirmedAt: null,
+    });
+
+    await expect(assertReplacementDeletionConfirmed(env, input)).resolves.toBeUndefined();
+  });
+
   it('does not fence ordinary sleeping recovery before a deletion attempt', async () => {
     const env = buildEnv({
       workspaceId: 'workspace-old',
@@ -78,7 +89,7 @@ describe('replacement deletion fence', () => {
     await expect(assertReplacementDeletionConfirmed(env, input)).resolves.toBeUndefined();
   });
 
-  it('allows a predecessor whose workspace is already finalized or absent', async () => {
+  it('allows an absent predecessor workspace but rejects an unproven deleted label', async () => {
     await expect(
       assertReplacementDeletionConfirmed(buildEnv(null), input)
     ).resolves.toBeUndefined();
@@ -92,6 +103,6 @@ describe('replacement deletion fence', () => {
         }),
         input
       )
-    ).resolves.toBeUndefined();
+    ).rejects.toBeInstanceOf(WorkspaceDeletionUnconfirmedError);
   });
 });

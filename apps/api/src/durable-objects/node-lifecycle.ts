@@ -446,7 +446,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     // Workspace deletion is independent from warm-pool state. In particular,
     // long-lived conversation workspaces can sleep before markIdle() has ever
     // initialized the per-node state record.
-    await this.workspaceDeletionQueue().processExpired();
+    await this.workspaceDeletionQueue().processExpired((attempt) => this.ctx.waitUntil(attempt));
 
     const state = await this.getStoredState();
     if (!state) {

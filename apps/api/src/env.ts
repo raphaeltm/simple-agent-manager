@@ -380,7 +380,9 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   WORKSPACE_STOPPED_TTL_MS?: string;
   WORKSPACE_DELETION_RETRY_BASE_MS?: string; // Initial retry delay for unconfirmed VM deletion (default: 60000)
   WORKSPACE_DELETION_RETRY_MAX_MS?: string; // Maximum exponential retry delay (default: 3600000)
+  WORKSPACE_DELETION_MAX_RESIDENCE_MS?: string; // Hot retry lifetime before durable dead-letter quarantine (default: 86400000)
   WORKSPACE_DELETION_ALARM_BATCH_SIZE?: string; // Maximum due deletions per NodeLifecycle alarm (default: 10)
+  WORKSPACE_DELETION_CALLBACK_SIGNAL_CLEANUP_LIMIT?: string; // Maximum expired callback throttle claims pruned per signal (default: 25)
   WORKSPACE_DELETION_CALLBACK_SIGNAL_TTL_SECONDS?: string; // Per-workspace/callback activity dedupe window (default: 300)
   WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH?: string; // Sanitized workspaces.error_message bound (default: 500)
   // Task agent configuration

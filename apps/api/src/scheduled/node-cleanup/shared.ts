@@ -50,6 +50,7 @@ export interface NodeCleanupResult {
    */
   orphanedNodesDestroyed: number;
   orphanedNodesSkipped: number;
+  stoppedWorkspacesQueued: number;
   stoppedWorkspacesDeleted: number;
   cfContainersDestroyed: number;
   incompatibleDestroyed: number;
@@ -65,6 +66,7 @@ export function emptyResult(): NodeCleanupResult {
     orphanedWorkspacesFlagged: 0,
     orphanedNodesDestroyed: 0,
     orphanedNodesSkipped: 0,
+    stoppedWorkspacesQueued: 0,
     stoppedWorkspacesDeleted: 0,
     cfContainersDestroyed: 0,
     incompatibleDestroyed: 0,

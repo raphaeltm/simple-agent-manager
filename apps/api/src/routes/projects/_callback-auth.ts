@@ -21,6 +21,78 @@ export interface VerifiedWorkspacePublishCallback {
   workspaceId: string;
   userId: string;
   db: ReturnType<typeof drizzle<typeof schema>>;
+  assertCurrent(): Promise<void>;
+}
+
+interface WorkspacePublishCallbackIdentity {
+  projectId: string | null;
+  userId: string;
+  chatSessionId: string | null;
+  status: string;
+  nodeId: string | null;
+  nodeStatus: string | null;
+}
+
+async function loadWorkspacePublishCallbackIdentity(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  workspaceId: string
+): Promise<WorkspacePublishCallbackIdentity | null> {
+  const rows = await db
+    .select({
+      projectId: schema.workspaces.projectId,
+      userId: schema.workspaces.userId,
+      chatSessionId: schema.workspaces.chatSessionId,
+      status: schema.workspaces.status,
+      nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
+    })
+    .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
+    .where(eq(schema.workspaces.id, workspaceId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+function sameWorkspacePublishCallbackIdentity(
+  current: WorkspacePublishCallbackIdentity,
+  expected: WorkspacePublishCallbackIdentity
+): boolean {
+  return (
+    current.projectId === expected.projectId &&
+    current.userId === expected.userId &&
+    current.chatSessionId === expected.chatSessionId &&
+    current.status === expected.status &&
+    current.nodeId === expected.nodeId &&
+    current.nodeStatus === expected.nodeStatus
+  );
+}
+
+async function assertWorkspacePublishCallbackCurrent(
+  env: Env,
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  workspaceId: string,
+  expected: WorkspacePublishCallbackIdentity,
+  logPrefix: string
+): Promise<void> {
+  const current = await loadWorkspacePublishCallbackIdentity(db, workspaceId);
+  if (!current || !WORKSPACE_STATUSES_ACCEPTING_PUBLISH_CALLBACKS.has(current.status)) {
+    await signalWorkspaceDeletionUnconfirmedCallback(env, workspaceId, logPrefix);
+    throw errors.gone(`Workspace is ${current?.status ?? 'missing'}; callback resource is gone`);
+  }
+  if (!current.nodeId || !current.nodeStatus || nodeStatusTerminatesCallbacks(current.nodeStatus)) {
+    throw errors.gone(
+      `Workspace node is ${current.nodeStatus ?? 'missing'}; callback resource is gone`
+    );
+  }
+  if (!sameWorkspacePublishCallbackIdentity(current, expected)) {
+    log.info(`${logPrefix}.workspace_incarnation_changed`, {
+      workspaceId,
+      expectedNodeId: expected.nodeId,
+      currentNodeId: current.nodeId,
+      action: 'terminal_gone',
+    });
+    throw errors.gone('Workspace callback identity changed; callback resource is gone');
+  }
 }
 
 /**
@@ -68,20 +140,7 @@ export async function verifyWorkspacePublishCallback(
   // lookup. Resolve the owning project + user, then verify the workspace's
   // project matches the route param so a workspace token cannot act on another
   // project.
-  const workspaceRows = await db
-    .select({
-      projectId: schema.workspaces.projectId,
-      userId: schema.workspaces.userId,
-      status: schema.workspaces.status,
-      nodeId: schema.workspaces.nodeId,
-      nodeStatus: schema.nodes.status,
-    })
-    .from(schema.workspaces)
-    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-    .where(eq(schema.workspaces.id, payload.workspace))
-    .limit(1);
-
-  const workspace = workspaceRows[0];
+  const workspace = await loadWorkspacePublishCallbackIdentity(db, payload.workspace);
   if (!workspace) {
     log.info(`${logPrefix}.terminal_workspace`, {
       workspaceId: payload.workspace,
@@ -137,5 +196,12 @@ export async function verifyWorkspacePublishCallback(
     throw errors.forbidden('Project identity verification failed');
   }
 
-  return { projectId, workspaceId: payload.workspace, userId: workspace.userId, db };
+  return {
+    projectId,
+    workspaceId: payload.workspace,
+    userId: workspace.userId,
+    db,
+    assertCurrent: () =>
+      assertWorkspacePublishCallbackCurrent(c.env, db, payload.workspace, workspace, logPrefix),
+  };
 }

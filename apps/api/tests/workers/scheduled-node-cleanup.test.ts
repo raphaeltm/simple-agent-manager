@@ -445,10 +445,18 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         updatedAt: oldDate,
       });
       await seedAutoProvisionedTaskForNode(taskId, nodeId, { updatedAt: oldDate });
+      await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
+        .bind(nodeId)
+        .run();
       // No workspaces on this node
 
       const testEnv = {
         ...env,
+        CF_CONTAINER_ENABLED: 'true',
+        VM_AGENT_CONTAINER: {
+          idFromName: (id: string) => id,
+          get: () => ({ destroyForUser: vi.fn().mockResolvedValue(undefined) }),
+        },
         NODE_WORKSPACE_IDLE_TIMEOUT_MS: '1000',
       } as unknown as Env;
 
@@ -485,18 +493,32 @@ describe('runNodeCleanupSweep — vertical slice', () => {
 
       const result = await runNodeCleanupSweep(testEnv);
 
-      expect(result.stoppedWorkspacesDeleted).toBeGreaterThanOrEqual(1);
+      expect(result.stoppedWorkspacesDeleted).toBe(0);
+      expect(result.stoppedWorkspacesQueued).toBeGreaterThanOrEqual(1);
+      expect((await getWorkspaceStatus(wsId))?.status).toBe('stopped');
+      expect(await getAgentSessionStatus('agent-nc-stopped-ttl')).toMatchObject({
+        status: 'running',
+        stopped_at: null,
+      });
 
-      // Verify D1 state: workspace should now be 'deleted'
-      const ws = await getWorkspaceStatus(wsId);
-      expect(ws?.status).toBe('deleted');
+      const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(nodeId));
+      await runInDurableObject(stub, async (instance) => {
+        const key = `ws-delete:${wsId}`;
+        const pending = await instance.ctx.storage.get<Record<string, unknown>>(key);
+        expect(pending).toMatchObject({ workspaceId: wsId, attemptCount: 0 });
+        await instance.ctx.storage.put(key, { ...pending, deleteAt: Date.now() - 1 });
+        await instance.alarm();
+      });
+      await vi.waitFor(async () => {
+        expect((await getWorkspaceStatus(wsId))?.status).toBe('deleted');
+      });
       expect(await getAgentSessionStatus('agent-nc-stopped-ttl')).toMatchObject({
         status: 'completed',
         stopped_at: expect.any(String),
       });
     });
 
-    it('quarantines an unconfirmed VM deletion and arms NodeLifecycle retry', async () => {
+    it('queues stale stopped deletion without doing VM I/O in cron', async () => {
       await seedBaseData();
       const nodeId = 'node-nc-ttl-timeout';
       const wsId = 'ws-nc-stopped-timeout';
@@ -530,15 +552,17 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       } as unknown as Env);
 
       expect(result.stoppedWorkspacesDeleted).toBe(0);
-      expect(result.errors).toBeGreaterThanOrEqual(1);
+      expect(result.stoppedWorkspacesQueued).toBeGreaterThanOrEqual(1);
+      expect(result.errors).toBe(0);
+      expect(fetch).not.toHaveBeenCalled();
       const ws = await env.DATABASE.prepare(
         'SELECT status, error_message FROM workspaces WHERE id = ?'
       )
         .bind(wsId)
         .first<{ status: string; error_message: string | null }>();
       expect(ws).toMatchObject({
-        status: 'stopping',
-        error_message: expect.stringContaining('deletion unconfirmed'),
+        status: 'stopped',
+        error_message: null,
       });
       expect(await getAgentSessionStatus('agent-nc-stopped-timeout')).toMatchObject({
         status: 'running',
@@ -551,7 +575,8 @@ describe('runNodeCleanupSweep — vertical slice', () => {
           workspaceId: wsId,
           nodeId,
           userId: USER_ID,
-          lastError: expect.stringContaining('deletion unconfirmed'),
+          attemptCount: 0,
+          lastError: 'scheduled by stopped-workspace cleanup safety net',
         });
         expect(await instance.ctx.storage.getAlarm()).toBeGreaterThan(Date.now());
       });
@@ -733,9 +758,17 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         executionStep: 'running',
         updatedAt: new Date().toISOString(),
       });
+      await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
+        .bind(nodeId)
+        .run();
 
       const testEnv = {
         ...env,
+        CF_CONTAINER_ENABLED: 'true',
+        VM_AGENT_CONTAINER: {
+          idFromName: (id: string) => id,
+          get: () => ({ destroyForUser: vi.fn().mockResolvedValue(undefined) }),
+        },
         NODE_WORKSPACE_IDLE_TIMEOUT_MS: '1000',
       } as unknown as Env;
 
@@ -799,9 +832,17 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         chatSessionId,
         timestamp: oldDate,
       });
+      await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
+        .bind(nodeId)
+        .run();
 
       const testEnv = {
         ...env,
+        CF_CONTAINER_ENABLED: 'true',
+        VM_AGENT_CONTAINER: {
+          idFromName: (id: string) => id,
+          get: () => ({ destroyForUser: vi.fn().mockResolvedValue(undefined) }),
+        },
         NODE_WORKSPACE_IDLE_TIMEOUT_MS: '1000',
       } as unknown as Env;
 
@@ -1016,6 +1057,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         orphanedWorkspacesFlagged: expect.any(Number),
         orphanedNodesDestroyed: expect.any(Number),
         orphanedNodesSkipped: expect.any(Number),
+        stoppedWorkspacesQueued: expect.any(Number),
         stoppedWorkspacesDeleted: expect.any(Number),
         cfContainersDestroyed: expect.any(Number),
         incompatibleDestroyed: expect.any(Number),

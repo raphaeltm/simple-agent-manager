@@ -27,11 +27,13 @@ import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-life
 import { requireRepositoryOwnerAccess } from '../projects/_helpers';
 import {
   assertNodeOperational,
-  assertWorkspaceAcceptsCallback,
+  assertWorkspaceCallbackIdentityCurrent,
+  assertWorkspaceCallbackResourceById,
   getOwnedNode,
   getOwnedWorkspace,
   isActiveWorkspaceStatus,
   normalizeWorkspaceReadyStatus,
+  transitionWorkspaceFromCallback,
   verifyWorkspaceCallbackAuth,
   WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES,
 } from './_helpers';
@@ -375,35 +377,14 @@ lifecycleRoutes.post('/:id/ready', async (c) => {
 
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
-  const rows = await db
-    .select({
-      id: schema.workspaces.id,
-      status: schema.workspaces.status,
-      nodeId: schema.workspaces.nodeId,
-      nodeStatus: schema.nodes.status,
-    })
-    .from(schema.workspaces)
-    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
-
-  await assertWorkspaceAcceptsCallback(c.env, rows[0], workspaceId, 'ready');
-
-  const updateValues: {
-    status: string;
-    lastActivityAt: string;
-    updatedAt: string;
-    workspaceProfile?: 'full' | 'lightweight';
-  } = {
+  const workspace = await assertWorkspaceCallbackResourceById(c.env, workspaceId, 'ready');
+  const now = new Date().toISOString();
+  const transitionedWorkspace = await transitionWorkspaceFromCallback(c.env, workspace, 'ready', {
     status: nextStatus,
-    lastActivityAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-  if (body.workspaceProfile) {
-    updateValues.workspaceProfile = body.workspaceProfile;
-  }
-
-  await db.update(schema.workspaces).set(updateValues).where(eq(schema.workspaces.id, workspaceId));
+    lastActivityAt: now,
+    updatedAt: now,
+    ...(body.workspaceProfile ? { workspaceProfile: body.workspaceProfile } : {}),
+  });
 
   // Notify TaskRunner DO inline if a task is associated with this workspace.
   // TDF-5: moved from waitUntil() to inline await so the VM agent gets an error
@@ -420,6 +401,7 @@ lifecycleRoutes.post('/:id/ready', async (c) => {
     .limit(1);
 
   if (readyTask) {
+    await assertWorkspaceCallbackIdentityCurrent(c.env, transitionedWorkspace, 'ready');
     const { advanceTaskRunnerWorkspaceReady } = await import('../../services/task-runner-do');
     const readyStatus = getTaskRunnerReadyStatus(nextStatus);
     await advanceTaskRunnerWorkspaceReady(c.env, readyTask.id, readyStatus, null);
@@ -437,44 +419,37 @@ lifecycleRoutes.post('/:id/provisioning-failed', async (c) => {
   const providedMessage = typeof body.errorMessage === 'string' ? body.errorMessage.trim() : '';
   const errorMessage = providedMessage || 'Workspace provisioning failed';
 
-  const rows = await db
-    .select({
-      status: schema.workspaces.status,
-      nodeId: schema.workspaces.nodeId,
-      nodeStatus: schema.nodes.status,
-    })
-    .from(schema.workspaces)
-    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
-
-  const workspace = await assertWorkspaceAcceptsCallback(
+  const workspace = await assertWorkspaceCallbackResourceById(
     c.env,
-    rows[0],
     workspaceId,
     'provisioning_failed',
     WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES
   );
 
-  // Allow retries: if the workspace is already in 'error' state (from a previous
-  // attempt where D1 was updated but the DO notification failed), skip the D1
-  // update and retry the DO notification. Any other non-'creating' status is invalid.
+  // An error callback retry still performs an exact CAS. This keeps DO
+  // notification retryability while ensuring deletion wins any interleaving.
+  const transitionedWorkspace = await transitionWorkspaceFromCallback(
+    c.env,
+    workspace,
+    'provisioning_failed',
+    {
+      status: 'error',
+      errorMessage,
+      updatedAt: new Date().toISOString(),
+    },
+    WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES
+  );
   if (workspace.status === 'creating') {
-    await db
-      .update(schema.workspaces)
-      .set({
-        status: 'error',
-        errorMessage,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(schema.workspaces.id, workspaceId));
-
+    await assertWorkspaceCallbackIdentityCurrent(
+      c.env,
+      transitionedWorkspace,
+      'provisioning_failed',
+      WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES
+    );
     // Stop compute metering on provisioning failure (best-effort)
     await stopComputeTracking(db, workspaceId).catch((e) => {
       log.warn('workspace.compute_tracking_stop_failed', { workspaceId, error: String(e) });
     });
-  } else if (workspace.status !== 'error') {
-    return c.json({ success: false, reason: 'workspace_not_creating' });
   }
 
   // Notify TaskRunner DO of workspace error inline.
@@ -492,6 +467,12 @@ lifecycleRoutes.post('/:id/provisioning-failed', async (c) => {
     .limit(1);
 
   if (failedTask) {
+    await assertWorkspaceCallbackIdentityCurrent(
+      c.env,
+      transitionedWorkspace,
+      'provisioning_failed',
+      WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES
+    );
     const { advanceTaskRunnerWorkspaceReady } = await import('../../services/task-runner-do');
     await advanceTaskRunnerWorkspaceReady(c.env, failedTask.id, 'error', errorMessage);
   }

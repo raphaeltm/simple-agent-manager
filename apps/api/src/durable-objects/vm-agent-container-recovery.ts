@@ -131,17 +131,41 @@ export async function persistRuntimeRecovering(
   await env.DATABASE.batch([
     env.DATABASE.prepare(
       `UPDATE nodes
-       SET status = 'recovery', health_status = 'unhealthy', error_message = ?, updated_at = ?
-       WHERE id = ?`
+       SET status = 'recovery',
+           health_status = 'unhealthy',
+           error_message = ?,
+           runtime_termination_confirmed_at = NULL,
+           updated_at = ?
+       WHERE id = ?
+         AND runtime = 'cf-container'
+         AND status NOT IN ('stopping', 'destroying', 'stopped', 'deleted')`
     ).bind(RUNTIME_RECOVERING_MESSAGE, now, target.nodeId),
     env.DATABASE.prepare(
-      `UPDATE workspaces SET status = 'recovery', error_message = ?, updated_at = ? WHERE id = ?`
-    ).bind(RUNTIME_RECOVERING_MESSAGE, now, target.workspaceId),
+      `UPDATE workspaces
+       SET status = 'recovery', error_message = ?, updated_at = ?
+       WHERE id = ?
+         AND node_id = ?
+         AND EXISTS (
+           SELECT 1 FROM nodes
+           WHERE id = ? AND runtime = 'cf-container' AND status = 'recovery'
+         )`
+    ).bind(RUNTIME_RECOVERING_MESSAGE, now, target.workspaceId, target.nodeId, target.nodeId),
     env.DATABASE.prepare(
       `UPDATE agent_sessions
        SET status = 'recovery', stopped_at = NULL, error_message = ?, updated_at = ?
-       WHERE id = ?`
-    ).bind(RUNTIME_RECOVERING_MESSAGE, now, target.agentSessionId),
+       WHERE id = ?
+         AND workspace_id = ?
+         AND EXISTS (
+           SELECT 1 FROM nodes
+           WHERE id = ? AND runtime = 'cf-container' AND status = 'recovery'
+         )`
+    ).bind(
+      RUNTIME_RECOVERING_MESSAGE,
+      now,
+      target.agentSessionId,
+      target.workspaceId,
+      target.nodeId
+    ),
   ]);
 }
 
@@ -156,17 +180,35 @@ export async function persistRuntimeRecovered(
   await env.DATABASE.batch([
     env.DATABASE.prepare(
       `UPDATE nodes
-       SET status = 'running', health_status = 'healthy', error_message = NULL, updated_at = ?
-       WHERE id = ?`
+       SET status = 'running',
+           health_status = 'healthy',
+           error_message = NULL,
+           runtime_termination_confirmed_at = NULL,
+           updated_at = ?
+       WHERE id = ?
+         AND runtime = 'cf-container'
+         AND status IN ('running', 'recovery')`
     ).bind(now, target.nodeId),
     env.DATABASE.prepare(
-      `UPDATE workspaces SET status = 'running', error_message = NULL, updated_at = ? WHERE id = ?`
-    ).bind(now, target.workspaceId),
+      `UPDATE workspaces
+       SET status = 'running', error_message = NULL, updated_at = ?
+       WHERE id = ?
+         AND node_id = ?
+         AND EXISTS (
+           SELECT 1 FROM nodes
+           WHERE id = ? AND runtime = 'cf-container' AND status = 'running'
+         )`
+    ).bind(now, target.workspaceId, target.nodeId, target.nodeId),
     env.DATABASE.prepare(
       `UPDATE agent_sessions
        SET status = 'running', stopped_at = NULL, error_message = ?, updated_at = ?
-       WHERE id = ?`
-    ).bind(agentMessage, now, target.agentSessionId),
+       WHERE id = ?
+         AND workspace_id = ?
+         AND EXISTS (
+           SELECT 1 FROM nodes
+           WHERE id = ? AND runtime = 'cf-container' AND status = 'running'
+         )`
+    ).bind(agentMessage, now, target.agentSessionId, target.workspaceId, target.nodeId),
   ]);
 }
 
