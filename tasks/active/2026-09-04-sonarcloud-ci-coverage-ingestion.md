@@ -227,6 +227,10 @@ producer/consumer boundary whose missing output has been interpreted as success.
   changed supported files, and `git diff --check` passes. The repository-wide formatting
   ratchet could not fetch its lazy-clone baseline objects because the shell GitHub token
   expired; ordinary CI runs that ratchet in a fresh full checkout.
+- Recovery review added exact contracts for the retained text/JSON/HTML/LCOV reporter set,
+  Turbo's `coverage/**` cache output, the fail-closed non-secret missing-token diagnostic,
+  and the `GO_VERSION`-derived supplemental Go assertion. The focused four-file slice now
+  passes 33/33 tests.
 - GitHub rejected the first two shell feature-branch push attempts because the injected
   token became invalid. The coherent implementation is preserved at local SHA
   `5abab4ae3` and remote checkpoint SHA `23d0c4ad`; the latter was published through the

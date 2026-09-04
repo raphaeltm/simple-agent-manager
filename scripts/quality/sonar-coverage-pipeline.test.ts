@@ -121,6 +121,20 @@ afterEach(() => {
 });
 
 describe('Sonar coverage report contract', () => {
+  it('retains existing coverage reporters and restores cached coverage outputs', () => {
+    const rootManifest = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    const turbo = JSON.parse(readFileSync(join(REPO_ROOT, 'turbo.json'), 'utf8')) as {
+      tasks: Record<string, { outputs?: string[] }>;
+    };
+
+    expect(rootManifest.scripts['test:coverage']).toBe(
+      'turbo run test:coverage -- --coverage.reporter=text --coverage.reporter=json --coverage.reporter=html --coverage.reporter=lcov'
+    );
+    expect(turbo.tasks['test:coverage'].outputs).toEqual(['coverage/**']);
+  });
+
   it('discovers only Vitest coverage workspaces at deterministic sorted paths', () => {
     const root = createFixture();
 
@@ -244,6 +258,7 @@ describe('Sonar CI wiring', () => {
     const tokenSteps = workflowSteps(sonarJob).filter((step) =>
       serialized(step).includes('secrets.SONAR_TOKEN')
     );
+    const requireToken = namedStep(sonarJob, 'Require Sonar scanner token');
     const scan = namedStep(sonarJob, 'Analyze with SonarQube Cloud');
 
     expect(sonarJob.needs).toEqual(['changes', 'test', 'cli-test', 'sonar-go-coverage']);
@@ -262,6 +277,16 @@ describe('Sonar CI wiring', () => {
       'Require Sonar scanner token',
       'Analyze with SonarQube Cloud',
     ]);
+    expect(requireToken.run).toContain('if [ -z "$SONAR_TOKEN" ]; then');
+    expect(requireToken.run).toContain(
+      'echo "::error::SONAR_TOKEN is required after SONAR_CI_ENABLED is enabled."'
+    );
+    expect(requireToken.run).toContain('exit 1');
+    expect(
+      String(requireToken.run)
+        .split('\n')
+        .filter((line) => line.includes('echo'))
+    ).not.toEqual(expect.arrayContaining([expect.stringContaining('$SONAR_TOKEN')]));
     expect(scan.uses).toBe(
       'SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f'
     );
@@ -274,6 +299,7 @@ describe('Sonar CI wiring', () => {
   it('produces Go coverage only when the scanner is enabled and CLI Test was skipped', () => {
     const jobs = workflowJobs();
     const supplementalGo = serialized(jobs['sonar-go-coverage']);
+    const assertGoVersion = namedStep(jobs['sonar-go-coverage'], 'Assert Go version');
     const cliTest = serialized(jobs['cli-test']);
 
     expect(supplementalGo).toContain('SONAR_CI_ENABLED');
@@ -281,6 +307,7 @@ describe('Sonar CI wiring', () => {
     expect(supplementalGo).toContain('go test -coverprofile=coverage.out -covermode=atomic ./...');
     expect(supplementalGo).toContain('go tool cover -func=coverage.out');
     expect(supplementalGo).toContain('cli-go-coverage');
+    expect(assertGoVersion.run).toBe('test "$(go env GOVERSION)" = "go${GO_VERSION}"');
     expect(cliTest).toContain('go tool cover -func=coverage.out');
     expect(cliTest).toContain('cli-go-coverage');
   });

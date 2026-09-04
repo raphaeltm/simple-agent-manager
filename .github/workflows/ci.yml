@@ -829,7 +829,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Assert Go version
-        run: go version | grep -E '^go version go1\.26\.6 '
+        run: test "$(go env GOVERSION)" = "go${GO_VERSION}"
 
       # CLI Test owns this report when CLI inputs changed. Generate it here only
       # when that job is skipped, so the scanner always receives Go coverage

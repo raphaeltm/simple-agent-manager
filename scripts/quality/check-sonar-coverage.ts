@@ -161,20 +161,31 @@ function resolveLcovSource(root: string, reportPath: string, sourcePath: string)
   throw new Error(`LCOV source ${sourcePath} does not resolve to a repository source file.`);
 }
 
-function validateAndNormalizeLcov(
+function normalizeLcovSourceRecord(
   root: string,
   reportPath: string,
+  line: string,
+  normalize: boolean
+): string {
+  const sourcePath = line.slice(3).trim();
+  if (sourcePath === '') {
+    throw new Error(`JavaScript coverage report ${reportPath} has an empty SF record.`);
+  }
+  const repositoryPath = resolveLcovSource(root, reportPath, sourcePath);
+  if (!normalize && sourcePath !== repositoryPath) {
+    throw new Error(
+      `JavaScript coverage report ${reportPath} has a non-normalized SF path: ${sourcePath}.`
+    );
+  }
+  return `SF:${repositoryPath}`;
+}
+
+function parseLcovContents(
+  root: string,
+  reportPath: string,
+  originalContents: string,
   normalize: boolean
 ): { contents: string; lineRecords: number; sourceFiles: number } {
-  const absoluteReportPath = join(root, reportPath);
-  if (!existsSync(absoluteReportPath)) {
-    throw new Error(`Missing JavaScript coverage report: ${reportPath}`);
-  }
-  const originalContents = readFileSync(absoluteReportPath, 'utf8');
-  if (originalContents.trim() === '') {
-    throw new Error(`JavaScript coverage report ${reportPath} is empty.`);
-  }
-
   const lines = originalContents.split(/\r?\n/u);
   let sourceFiles = 0;
   let lineRecords = 0;
@@ -185,17 +196,7 @@ function validateAndNormalizeLcov(
       if (recordOpen) {
         throw new Error(`JavaScript coverage report ${reportPath} has an unterminated record.`);
       }
-      const sourcePath = line.slice(3).trim();
-      if (sourcePath === '') {
-        throw new Error(`JavaScript coverage report ${reportPath} has an empty SF record.`);
-      }
-      const repositoryPath = resolveLcovSource(root, reportPath, sourcePath);
-      if (!normalize && sourcePath !== repositoryPath) {
-        throw new Error(
-          `JavaScript coverage report ${reportPath} has a non-normalized SF path: ${sourcePath}.`
-        );
-      }
-      lines[index] = `SF:${repositoryPath}`;
+      lines[index] = normalizeLcovSourceRecord(root, reportPath, line, normalize);
       sourceFiles += 1;
       recordOpen = true;
     } else if (line.startsWith('DA:')) {
@@ -224,6 +225,22 @@ function validateAndNormalizeLcov(
   }
 
   return { contents: lines.join('\n'), lineRecords, sourceFiles };
+}
+
+function validateAndNormalizeLcov(
+  root: string,
+  reportPath: string,
+  normalize: boolean
+): { contents: string; lineRecords: number; sourceFiles: number } {
+  const absoluteReportPath = join(root, reportPath);
+  if (!existsSync(absoluteReportPath)) {
+    throw new Error(`Missing JavaScript coverage report: ${reportPath}`);
+  }
+  const originalContents = readFileSync(absoluteReportPath, 'utf8');
+  if (originalContents.trim() === '') {
+    throw new Error(`JavaScript coverage report ${reportPath} is empty.`);
+  }
+  return parseLcovContents(root, reportPath, originalContents, normalize);
 }
 
 export function prepareJavaScriptCoverageReports(
