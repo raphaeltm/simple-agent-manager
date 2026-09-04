@@ -1,8 +1,4 @@
-import type {
-  Provider,
-  ProviderConfig,
-  ProviderRequestContext,
-} from '@simple-agent-manager/providers';
+import type { ProviderConfig, ProviderRequestContext } from '@simple-agent-manager/providers';
 import { createProvider, GcpProvider } from '@simple-agent-manager/providers';
 import {
   computeAssembler,
@@ -197,11 +193,7 @@ async function resolveProviderViaCC(
   env: Env & Partial<HetznerRuntimeEnv>,
   targetProvider: CredentialProvider,
   projectId?: string | null
-): Promise<
-  | { provider: Provider; providerName: CredentialProvider; credentialSource: CredentialSource }
-  | null
-  | undefined
-> {
+): Promise<ProviderResolutionResult | null | undefined> {
   const consumer = { kind: 'compute' as const, provider: targetProvider };
   const hasProjectAttachment = await hasProjectComputeCredentialAttachment(
     db,
@@ -243,6 +235,16 @@ async function resolveProviderViaCC(
       : resolved.source === 'user-attachment'
         ? 'user'
         : 'platform';
+  const exactCredentialBinding: ExactProviderCredentialBinding | undefined = resolved.credential
+    ? {
+        credentialSource,
+        credentialReference:
+          credentialSource === 'platform'
+            ? `platform_credentials:${resolved.credential.id}`
+            : `cc_credentials:${resolved.credential.id}`,
+        credentialVersion: null,
+      }
+    : undefined;
   const ccConfig = computeAssembler.assemble(resolved);
 
   // GCP requires runtime STS token exchange — not a simple token
@@ -254,11 +256,16 @@ async function resolveProviderViaCC(
     const tokenProvider = (context?: ProviderRequestContext) =>
       getGcpAccessToken(cacheUserId, cacheProjectId, gcpCred, env, context);
     const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
-    return { provider, providerName, credentialSource };
+    return { provider, providerName, credentialSource, exactCredentialBinding };
   }
 
   const config = buildProviderConfig(providerName, ccConfig.token, env);
-  return { provider: createProvider(config), providerName, credentialSource };
+  return {
+    provider: createProvider(config),
+    providerName,
+    credentialSource,
+    exactCredentialBinding,
+  };
 }
 
 async function hasProjectComputeCredentialAttachment(
@@ -295,11 +302,7 @@ async function createProviderForUserLegacy(
   env: Env & Partial<HetznerRuntimeEnv>,
   targetProvider?: CredentialProvider,
   projectId?: string | null
-): Promise<{
-  provider: Provider;
-  providerName: CredentialProvider;
-  credentialSource: CredentialSource;
-} | null> {
+): Promise<ProviderResolutionResult | null> {
   // 1. Try a project-scoped credential only when the caller has already
   // authorized this project context.
   if (projectId) {
@@ -335,11 +338,29 @@ async function createProviderForUserLegacy(
           getGcpAccessToken(`project:${projectId}:${userId}`, projectId, gcpCred, env, context);
 
         const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
-        return { provider, providerName, credentialSource: 'project' };
+        return {
+          provider,
+          providerName,
+          credentialSource: 'project',
+          exactCredentialBinding: {
+            credentialSource: 'project',
+            credentialReference: `credentials:${projectCred.id}`,
+            credentialVersion: null,
+          },
+        };
       }
 
       const config = buildProviderConfig(providerName, decryptedToken, env);
-      return { provider: createProvider(config), providerName, credentialSource: 'project' };
+      return {
+        provider: createProvider(config),
+        providerName,
+        credentialSource: 'project',
+        exactCredentialBinding: {
+          credentialSource: 'project',
+          credentialReference: `credentials:${projectCred.id}`,
+          credentialVersion: null,
+        },
+      };
     }
   }
 
@@ -373,11 +394,29 @@ async function createProviderForUserLegacy(
         getGcpAccessToken(userId, cacheProjectId, gcpCred, env, context);
 
       const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
-      return { provider, providerName, credentialSource: 'user' };
+      return {
+        provider,
+        providerName,
+        credentialSource: 'user',
+        exactCredentialBinding: {
+          credentialSource: 'user',
+          credentialReference: `credentials:${cred.id}`,
+          credentialVersion: null,
+        },
+      };
     }
 
     const config = buildProviderConfig(providerName, decryptedToken, env);
-    return { provider: createProvider(config), providerName, credentialSource: 'user' };
+    return {
+      provider: createProvider(config),
+      providerName,
+      credentialSource: 'user',
+      exactCredentialBinding: {
+        credentialSource: 'user',
+        credentialReference: `credentials:${cred.id}`,
+        credentialVersion: null,
+      },
+    };
   }
 
   // 3. Fall back to platform credential
@@ -396,7 +435,18 @@ async function createProviderForUserLegacy(
       getGcpAccessToken(`platform:${userId}`, cacheProjectId, gcpCred, env, context);
 
     const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
-    return { provider, providerName: platformProvider, credentialSource: 'platform' };
+    return {
+      provider,
+      providerName: platformProvider,
+      credentialSource: 'platform',
+      exactCredentialBinding: platformCred.credentialId
+        ? {
+            credentialSource: 'platform',
+            credentialReference: `platform_credentials:${platformCred.credentialId}`,
+            credentialVersion: null,
+          }
+        : undefined,
+    };
   }
 
   const config = buildProviderConfig(platformProvider, decryptedToken, env);
@@ -404,6 +454,13 @@ async function createProviderForUserLegacy(
     provider: createProvider(config),
     providerName: platformProvider,
     credentialSource: 'platform',
+    exactCredentialBinding: platformCred.credentialId
+      ? {
+          credentialSource: 'platform',
+          credentialReference: `platform_credentials:${platformCred.credentialId}`,
+          credentialVersion: null,
+        }
+      : undefined,
   };
 }
 

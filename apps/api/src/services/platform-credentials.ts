@@ -12,8 +12,12 @@ import { decrypt } from './encryption';
 export async function getPlatformCloudCredential(
   db: ReturnType<typeof drizzle>,
   encryptionKey: string,
-  targetProvider?: CredentialProvider,
-): Promise<{ decryptedToken: string; provider: CredentialProvider } | null> {
+  targetProvider?: CredentialProvider
+): Promise<{
+  decryptedToken: string;
+  provider: CredentialProvider;
+  credentialId?: string;
+} | null> {
   const conditions = [
     eq(schema.platformCredentials.credentialType, 'cloud-provider'),
     eq(schema.platformCredentials.isEnabled, true),
@@ -34,7 +38,7 @@ export async function getPlatformCloudCredential(
   }
 
   const decryptedToken = await decrypt(row.encryptedToken, row.iv, encryptionKey);
-  return { decryptedToken, provider: row.provider as CredentialProvider };
+  return { decryptedToken, provider: row.provider as CredentialProvider, credentialId: row.id };
 }
 
 /**
@@ -44,7 +48,7 @@ export async function getPlatformCloudCredential(
 export async function getPlatformAgentCredential(
   db: ReturnType<typeof drizzle>,
   agentType: string,
-  encryptionKey: string,
+  encryptionKey: string
 ): Promise<{ credential: string; credentialKind: 'api-key' | 'oauth-token' } | null> {
   const rows = await db
     .select()
@@ -53,8 +57,8 @@ export async function getPlatformAgentCredential(
       and(
         eq(schema.platformCredentials.credentialType, 'agent-api-key'),
         eq(schema.platformCredentials.agentType, agentType),
-        eq(schema.platformCredentials.isEnabled, true),
-      ),
+        eq(schema.platformCredentials.isEnabled, true)
+      )
     )
     .limit(1);
 

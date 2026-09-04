@@ -23,7 +23,7 @@ import {
   DEFAULT_WORKSPACE_CLEANUP_SWEEP_LIMIT,
   DEFAULT_WORKSPACE_STOPPED_TTL_MS,
 } from '@simple-agent-manager/shared';
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
@@ -488,9 +488,12 @@ export async function destroyNodeForCleanup(
       ...options.context,
     });
 
-    await deleteNodeResourcesStrict(node.id, node.user_id, env);
+    const strictDeletion = await deleteNodeResourcesStrict(node.id, node.user_id, env);
+    if (!strictDeletion.runtimeTerminationConfirmedAt) {
+      throw new Error('Strict cleanup returned no managed-runtime termination proof');
+    }
 
-    await db
+    const terminalNode = await db
       .update(schema.nodes)
       .set({
         status: 'deleted',
@@ -499,10 +502,35 @@ export async function destroyNodeForCleanup(
         cleanupBackoffUntil: null,
         updatedAt: nowIso,
       })
-      .where(eq(schema.nodes.id, node.id));
+      .where(
+        and(
+          eq(schema.nodes.id, node.id),
+          eq(schema.nodes.userId, node.user_id),
+          sql`${schema.nodes.runtimeTerminationConfirmedAt} IS ${strictDeletion.runtimeTerminationConfirmedAt}`,
+          sql`${schema.nodes.runtimeIncarnationId} IS ${strictDeletion.runtimeIncarnationId}`
+        )
+      )
+      .run();
+    if ((terminalNode.meta.changes ?? 0) !== 1) {
+      throw new Error('Cleanup terminal write lost its exact node-incarnation proof');
+    }
+
+    const confirmedWorkspaces = await db
+      .select({ id: schema.workspaces.id })
+      .from(schema.workspaces)
+      .where(
+        and(
+          eq(schema.workspaces.nodeId, node.id),
+          eq(schema.workspaces.userId, node.user_id),
+          eq(
+            schema.workspaces.runtimeDeletionConfirmedAt,
+            strictDeletion.runtimeTerminationConfirmedAt
+          )
+        )
+      );
 
     await finalizeWorkspaceLifecycleClosure(env, {
-      nodeId: node.id,
+      workspaceIds: confirmedWorkspaces.map((workspace) => workspace.id),
       userId: node.user_id,
       agentSessionStatus: 'completed',
       nowIso,

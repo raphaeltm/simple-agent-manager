@@ -13,6 +13,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../src/env';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import {
+  attemptWorkspaceDeletion,
+  loadWorkspaceDeletionIdentity,
+} from '../../src/services/workspace-deletion';
+import {
   seedAgentSession,
   seedInstallation,
   seedNode,
@@ -733,6 +737,10 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     const expected = {
       workspaceId: wsId,
       nodeId,
+      nodeUserId: TEST_USER_ID,
+      nodeRuntime: 'vm',
+      nodeProviderInstanceId: null,
+      nodeRuntimeIncarnationId: null,
       userId: TEST_USER_ID,
       projectId: null,
       chatSessionId: null,
@@ -1551,6 +1559,164 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       expect(fetchMock).toHaveBeenCalledOnce();
     }
   );
+
+  it('preserves a status-only restart that wins while VM deletion is in flight', async () => {
+    const nodeId = 'nl-test-inflight-status-only-001';
+    const wsId = 'ws-inflight-status-only-001';
+    const agentSessionId = 'agent-inflight-status-only-001';
+    await seedTestNode(nodeId);
+    await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'stopped' });
+    await seedAgentSession(agentSessionId, wsId, TEST_USER_ID, { status: 'running' });
+
+    const fetchMock = vi.fn(async () => {
+      await env.DATABASE.prepare("UPDATE workspaces SET status = 'running' WHERE id = ?")
+        .bind(wsId)
+        .run();
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const stub = getStub(nodeId);
+    await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID);
+    await runInDurableObject(stub, async (instance) => {
+      const key = `ws-delete:${wsId}`;
+      const pending = await instance.ctx.storage.get<Record<string, unknown>>(key);
+      await instance.ctx.storage.put(key, { ...pending, deleteAt: Date.now() - 1 });
+      await instance.alarm();
+    });
+
+    await vi.waitFor(async () => {
+      const workspace = await env.DATABASE.prepare(
+        `SELECT status,
+                runtime_deletion_confirmed_at AS confirmedAt,
+                runtime_deletion_proof AS proof
+           FROM workspaces WHERE id = ?`
+      )
+        .bind(wsId)
+        .first<{ status: string; confirmedAt: string | null; proof: string | null }>();
+      expect(workspace).toEqual({ status: 'running', confirmedAt: null, proof: null });
+      expect(await getAgentSessionStatus(agentSessionId)).toMatchObject({
+        status: 'running',
+        stopped_at: null,
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    });
+  });
+
+  it('fences a node reincarnation after durable claim at the physical fetch boundary', async () => {
+    const nodeId = 'nl-test-runtime-boundary-incarnation-001';
+    const wsId = 'ws-runtime-boundary-incarnation-001';
+    await seedTestNode(nodeId);
+    await env.DATABASE.prepare(
+      `UPDATE nodes
+          SET provider_instance_id = ?, runtime_incarnation_id = ?
+        WHERE id = ?`
+    )
+      .bind('provider-old-001', 'runtime-old-001', nodeId)
+      .run();
+    await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'stopped' });
+
+    const expected = await loadWorkspaceDeletionIdentity(env.DATABASE, wsId);
+    expect(expected).not.toBeNull();
+    const stub = getStub(nodeId);
+    await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID, { expected: expected! });
+    await expect(
+      stub.claimWorkspaceDeletionAttempt(nodeId, wsId, TEST_USER_ID, expected!)
+    ).resolves.toBe(true);
+
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const outcome = await runInDurableObject(stub, async (instance) => {
+      const mutableEnv = instance.env as unknown as { DATABASE: D1Database };
+      const originalDatabase = mutableEnv.DATABASE;
+      let runtimeLookupMutations = 0;
+      const mutateAfterRuntimeLookup = async () => {
+        if (runtimeLookupMutations > 0) return;
+        runtimeLookupMutations += 1;
+        await originalDatabase
+          .prepare(
+            `UPDATE nodes
+                SET provider_instance_id = ?, runtime_incarnation_id = ?
+              WHERE id = ?`
+          )
+          .bind('provider-new-001', 'runtime-new-001', nodeId)
+          .run();
+      };
+      const wrapStatement = (
+        statement: D1PreparedStatement,
+        interceptResult: boolean
+      ): D1PreparedStatement =>
+        new Proxy(statement, {
+          get(target, property, receiver) {
+            if (property === 'bind') {
+              return (...values: unknown[]) =>
+                wrapStatement(target.bind(...values), interceptResult);
+            }
+            if (
+              interceptResult &&
+              (property === 'first' || property === 'raw' || property === 'all')
+            ) {
+              return async (...args: unknown[]) => {
+                const method = Reflect.get(target, property, receiver) as (
+                  ...methodArgs: unknown[]
+                ) => Promise<unknown>;
+                const result = await method.apply(target, args);
+                await mutateAfterRuntimeLookup();
+                return result;
+              };
+            }
+            const value = Reflect.get(target, property, receiver) as unknown;
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        });
+      mutableEnv.DATABASE = new Proxy(originalDatabase, {
+        get(target, property, receiver) {
+          if (property === 'prepare') {
+            return (query: string) => {
+              const normalized = query.toLowerCase();
+              const isRuntimeLookup =
+                normalized.includes('runtime') &&
+                normalized.includes('from "nodes"') &&
+                !normalized.includes('runtime_incarnation_id');
+              return wrapStatement(target.prepare(query), isRuntimeLookup);
+            };
+          }
+          const value = Reflect.get(target, property, receiver) as unknown;
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      try {
+        const deletionOutcome = await attemptWorkspaceDeletion({
+          env: instance.env as unknown as Env,
+          expected: expected!,
+          attempt: 1,
+          source: 'runtime_boundary_test',
+          mode: 'explicit',
+        });
+        expect(runtimeLookupMutations).toBe(1);
+        return deletionOutcome;
+      } finally {
+        mutableEnv.DATABASE = originalDatabase;
+      }
+    });
+
+    expect(outcome).toEqual({ status: 'fenced', reason: 'workspace_assignment_changed' });
+    expect(fetchMock).not.toHaveBeenCalled();
+    const workspace = await env.DATABASE.prepare(
+      `SELECT status,
+              runtime_deletion_confirmed_at AS confirmedAt,
+              runtime_deletion_proof AS proof
+         FROM workspaces WHERE id = ?`
+    )
+      .bind(wsId)
+      .first<{ status: string; confirmedAt: string | null; proof: string | null }>();
+    expect(workspace).toEqual({ status: 'stopping', confirmedAt: null, proof: null });
+    expect(
+      await runInDurableObject(stub, async (instance) =>
+        instance.ctx.storage.get(`ws-delete:${wsId}`)
+      )
+    ).toBeDefined();
+  });
 
   it('markActive preserves a pending workspace deletion alarm when clearing warm state', async () => {
     const nodeId = 'nl-test-active-preserves-ws-delete-001';

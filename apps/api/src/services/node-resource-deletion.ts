@@ -20,6 +20,8 @@ export interface DeleteNodeResourcesResult {
   providerVmDeleted: boolean;
   providerVmDeleteSkippedReason: string | null;
   backendDnsDeleted: boolean;
+  runtimeTerminationConfirmedAt: string | null;
+  runtimeIncarnationId: string | null;
   errors: string[];
 }
 
@@ -57,6 +59,8 @@ export async function deleteNodeResources(
     providerVmDeleted: false,
     providerVmDeleteSkippedReason: null,
     backendDnsDeleted: false,
+    runtimeTerminationConfirmedAt: null,
+    runtimeIncarnationId: null,
     errors: [],
   };
 
@@ -69,16 +73,24 @@ export async function deleteNodeResources(
 
   result.nodeFound = true;
   const userOwned = isUserOwnedNodeClass(node.nodeClass);
-  let runtimeTerminationConfirmed = userOwned || Boolean(node.runtimeTerminationConfirmedAt);
+  let runtimeTerminationConfirmed = userOwned;
 
   if (userOwned) {
     result.providerVmDeleteSkippedReason = 'user-owned node — no cloud VM to delete';
-  } else if (!runtimeTerminationConfirmed) {
+  } else {
     try {
       const strictResult = await deleteNodeResourcesStrict(nodeId, userId, env, {
         cleanupDns: false,
+        expectedRuntime: {
+          userId: node.userId,
+          runtime: node.runtime,
+          providerInstanceId: node.providerInstanceId,
+          runtimeIncarnationId: node.runtimeIncarnationId,
+        },
       });
       runtimeTerminationConfirmed = true;
+      result.runtimeTerminationConfirmedAt = strictResult.runtimeTerminationConfirmedAt;
+      result.runtimeIncarnationId = strictResult.runtimeIncarnationId;
       result.providerVmDeleted = strictResult.providerVm === 'deleted';
       if (!result.providerVmDeleted) {
         result.providerVmDeleteSkippedReason =
@@ -120,16 +132,40 @@ export async function deleteNodeResources(
     return result;
   }
 
-  await db
-    .update(schema.workspaces)
-    .set({ status: 'deleted', updatedAt: now })
-    .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
+  if (userOwned) {
+    await db
+      .update(schema.workspaces)
+      .set({ status: 'deleted', updatedAt: now })
+      .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
+    await finalizeWorkspaceLifecycleClosure(env, {
+      nodeId,
+      userId,
+      agentSessionStatus: 'completed',
+      nowIso: now,
+      reason: 'delete_node_resources_user_owned',
+    });
+    return result;
+  }
+
+  if (!result.runtimeTerminationConfirmedAt) {
+    throw new Error('Strict managed-node deletion returned no termination proof');
+  }
+  const confirmedWorkspaces = await db
+    .select({ id: schema.workspaces.id })
+    .from(schema.workspaces)
+    .where(
+      and(
+        eq(schema.workspaces.nodeId, nodeId),
+        eq(schema.workspaces.userId, userId),
+        eq(schema.workspaces.runtimeDeletionConfirmedAt, result.runtimeTerminationConfirmedAt)
+      )
+    );
   await finalizeWorkspaceLifecycleClosure(env, {
-    nodeId,
+    workspaceIds: confirmedWorkspaces.map((workspace) => workspace.id),
     userId,
     agentSessionStatus: 'completed',
     nowIso: now,
-    reason: 'delete_node_resources',
+    reason: 'delete_node_resources_strict_proof',
   });
   return result;
 }

@@ -685,7 +685,7 @@ deploymentEnvironmentRoutes.delete(
           );
         }
 
-        await retireDeletedDeploymentNodeRecord(db, c.env, environment.nodeId, userId);
+        await retireDeletedDeploymentNodeRecord(db, c.env, environment.nodeId, userId, cleanup);
         nodeDeleted = cleanup.nodeFound;
       }
     }

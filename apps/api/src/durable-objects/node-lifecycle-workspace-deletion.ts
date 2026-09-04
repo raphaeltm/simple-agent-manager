@@ -49,12 +49,31 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       identity ?? {
         workspaceId,
         nodeId,
+        nodeUserId: null,
+        nodeRuntime: null,
+        nodeProviderInstanceId: null,
+        nodeRuntimeIncarnationId: null,
         userId,
         projectId: null,
         chatSessionId: null,
       };
+    const existingClaimedWithoutNodeIncarnation =
+      Boolean(existing) &&
+      (existing.attemptCount ?? 0) > 0 &&
+      (existing.nodeUserId === undefined ||
+        existing.nodeRuntime === undefined ||
+        existing.nodeProviderInstanceId === undefined ||
+        existing.nodeRuntimeIncarnationId === undefined);
     const existingMatches =
+      !existingClaimedWithoutNodeIncarnation &&
       existing?.nodeId === scheduledIdentity.nodeId &&
+      (existing.nodeUserId === undefined || existing.nodeUserId === scheduledIdentity.nodeUserId) &&
+      (existing.nodeRuntime === undefined ||
+        existing.nodeRuntime === scheduledIdentity.nodeRuntime) &&
+      (existing.nodeProviderInstanceId === undefined ||
+        existing.nodeProviderInstanceId === scheduledIdentity.nodeProviderInstanceId) &&
+      (existing.nodeRuntimeIncarnationId === undefined ||
+        existing.nodeRuntimeIncarnationId === scheduledIdentity.nodeRuntimeIncarnationId) &&
       existing.userId === scheduledIdentity.userId &&
       existing.projectId === scheduledIdentity.projectId &&
       existing.chatSessionId === scheduledIdentity.chatSessionId;
@@ -76,6 +95,10 @@ export class NodeLifecycleWorkspaceDeletionQueue {
 
     const entry: PendingWorkspaceDeletion = {
       nodeId: scheduledIdentity.nodeId ?? nodeId,
+      nodeUserId: scheduledIdentity.nodeUserId,
+      nodeRuntime: scheduledIdentity.nodeRuntime,
+      nodeProviderInstanceId: scheduledIdentity.nodeProviderInstanceId,
+      nodeRuntimeIncarnationId: scheduledIdentity.nodeRuntimeIncarnationId,
       workspaceId,
       userId: scheduledIdentity.userId,
       projectId: scheduledIdentity.projectId,
@@ -112,6 +135,10 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       !current ||
       current.workspaceId !== expected.workspaceId ||
       current.nodeId !== expected.nodeId ||
+      current.nodeUserId !== expected.nodeUserId ||
+      current.nodeRuntime !== expected.nodeRuntime ||
+      current.nodeProviderInstanceId !== expected.nodeProviderInstanceId ||
+      current.nodeRuntimeIncarnationId !== expected.nodeRuntimeIncarnationId ||
       current.userId !== expected.userId ||
       current.projectId !== expected.projectId ||
       current.chatSessionId !== expected.chatSessionId
@@ -124,6 +151,16 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     const existingMatches =
       !existing ||
       ((existing.nodeId ?? nodeId) === (expected.nodeId ?? nodeId) &&
+        (existing.nodeUserId === undefined ? expected.nodeUserId : existing.nodeUserId) ===
+          expected.nodeUserId &&
+        (existing.nodeRuntime === undefined ? expected.nodeRuntime : existing.nodeRuntime) ===
+          expected.nodeRuntime &&
+        (existing.nodeProviderInstanceId === undefined
+          ? expected.nodeProviderInstanceId
+          : existing.nodeProviderInstanceId) === expected.nodeProviderInstanceId &&
+        (existing.nodeRuntimeIncarnationId === undefined
+          ? expected.nodeRuntimeIncarnationId
+          : existing.nodeRuntimeIncarnationId) === expected.nodeRuntimeIncarnationId &&
         existing.userId === userId &&
         (existing.projectId ?? expected.projectId) === expected.projectId &&
         (existing.chatSessionId ?? expected.chatSessionId) === expected.chatSessionId);
@@ -136,6 +173,10 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     const claimDiagnostic = `${WORKSPACE_DELETION_DIAGNOSTIC_PREFIX}: durable attempt 1 claimed`;
     const entry = {
       nodeId: expected.nodeId ?? nodeId,
+      nodeUserId: expected.nodeUserId,
+      nodeRuntime: expected.nodeRuntime,
+      nodeProviderInstanceId: expected.nodeProviderInstanceId,
+      nodeRuntimeIncarnationId: expected.nodeRuntimeIncarnationId,
       workspaceId,
       userId,
       projectId: expected.projectId,
@@ -223,6 +264,23 @@ export class NodeLifecycleWorkspaceDeletionQueue {
         this.env.DATABASE,
         entry.workspaceId
       );
+      const legacyStartedWithoutNodeIncarnation =
+        (entry.attemptCount ?? 0) > 0 &&
+        (entry.nodeUserId === undefined ||
+          entry.nodeRuntime === undefined ||
+          entry.nodeProviderInstanceId === undefined ||
+          entry.nodeRuntimeIncarnationId === undefined);
+      if (legacyStartedWithoutNodeIncarnation) {
+        dispatch(
+          this.deadLetterExact(
+            key,
+            entry.claimId ?? null,
+            entry,
+            'claimed attempt lacks an immutable node-incarnation snapshot'
+          )
+        );
+        continue;
+      }
       if (currentIdentity?.runtimeDeletionConfirmedAt && currentIdentity.runtimeDeletionProof) {
         dispatch(this.deleteExact(key, entry.claimId ?? null));
         continue;
@@ -254,6 +312,20 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       const expected: WorkspaceDeletionIdentity = {
         workspaceId: entry.workspaceId,
         nodeId: nodeId ?? currentIdentity?.nodeId ?? null,
+        nodeUserId:
+          entry.nodeUserId === undefined ? (currentIdentity?.nodeUserId ?? null) : entry.nodeUserId,
+        nodeRuntime:
+          entry.nodeRuntime === undefined
+            ? (currentIdentity?.nodeRuntime ?? null)
+            : entry.nodeRuntime,
+        nodeProviderInstanceId:
+          entry.nodeProviderInstanceId === undefined
+            ? (currentIdentity?.nodeProviderInstanceId ?? null)
+            : entry.nodeProviderInstanceId,
+        nodeRuntimeIncarnationId:
+          entry.nodeRuntimeIncarnationId === undefined
+            ? (currentIdentity?.nodeRuntimeIncarnationId ?? null)
+            : entry.nodeRuntimeIncarnationId,
         userId: entry.userId,
         projectId:
           entry.projectId === undefined ? (currentIdentity?.projectId ?? null) : entry.projectId,
@@ -277,6 +349,10 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       const claimedEntry: PendingWorkspaceDeletion = {
         ...entry,
         nodeId: expected.nodeId ?? undefined,
+        nodeUserId: expected.nodeUserId,
+        nodeRuntime: expected.nodeRuntime,
+        nodeProviderInstanceId: expected.nodeProviderInstanceId,
+        nodeRuntimeIncarnationId: expected.nodeRuntimeIncarnationId,
         projectId: expected.projectId,
         chatSessionId: expected.chatSessionId,
         deleteAt: now + workspaceDeletionRetryDelayMs(this.env, attempt),

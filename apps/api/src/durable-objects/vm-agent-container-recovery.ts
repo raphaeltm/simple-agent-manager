@@ -128,6 +128,7 @@ export async function persistRuntimeRecovering(
   target: RuntimeRecoveryTarget
 ): Promise<void> {
   const now = new Date().toISOString();
+  const runtimeIncarnationId = crypto.randomUUID();
   await env.DATABASE.batch([
     env.DATABASE.prepare(
       `UPDATE nodes
@@ -135,11 +136,12 @@ export async function persistRuntimeRecovering(
            health_status = 'unhealthy',
            error_message = ?,
            runtime_termination_confirmed_at = NULL,
+           runtime_incarnation_id = ?,
            updated_at = ?
        WHERE id = ?
          AND runtime = 'cf-container'
          AND status NOT IN ('stopping', 'destroying', 'stopped', 'deleted')`
-    ).bind(RUNTIME_RECOVERING_MESSAGE, now, target.nodeId),
+    ).bind(RUNTIME_RECOVERING_MESSAGE, runtimeIncarnationId, now, target.nodeId),
     env.DATABASE.prepare(
       `UPDATE workspaces
        SET status = 'recovery', error_message = ?, updated_at = ?

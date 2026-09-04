@@ -12,6 +12,8 @@ export type ProviderResolutionResult = {
   provider: Provider;
   providerName: CredentialProvider;
   credentialSource: CredentialSource;
+  /** Exact persisted account binding used to construct this provider. */
+  exactCredentialBinding?: ExactProviderCredentialBinding;
 };
 
 export interface ExactProviderCredentialBinding {
@@ -73,7 +75,6 @@ export function exactProviderCredentialBindingFromPlacementSnapshot(
   snapshot: ProviderCredentialPlacementSnapshot
 ): ExactProviderCredentialBinding | null {
   if (
-    !snapshot.capacityPoolId ||
     !isExactCredentialSource(snapshot.placementCredentialSource) ||
     !snapshot.placementCredentialReference
   ) {
@@ -117,8 +118,12 @@ export async function createProviderForExactCredential<TEnv extends Env>(
       .limit(1);
 
     if (!platformCred?.provider) return null;
-    const decryptedToken = await decrypt(platformCred.encryptedToken, platformCred.iv, encryptionKey);
-    return createProviderFromDecryptedToken(
+    const decryptedToken = await decrypt(
+      platformCred.encryptedToken,
+      platformCred.iv,
+      encryptionKey
+    );
+    const result = await createProviderFromDecryptedToken(
       platformCred.provider as CredentialProvider,
       decryptedToken,
       'platform',
@@ -126,11 +131,12 @@ export async function createProviderForExactCredential<TEnv extends Env>(
       projectId ?? null,
       env
     );
+    return { ...result, exactCredentialBinding: exactCredential };
   }
 
   if (exactCredential.credentialSource === 'user') {
     if (reference.kind === 'ccCredential') {
-      return createProviderForExactComposableCredential(
+      const result = await createProviderForExactComposableCredential(
         db,
         userId,
         encryptionKey,
@@ -141,6 +147,7 @@ export async function createProviderForExactCredential<TEnv extends Env>(
         'user',
         createProviderFromDecryptedToken
       );
+      return result ? { ...result, exactCredentialBinding: exactCredential } : null;
     }
     if (reference.kind !== 'credential') return null;
     const [cred] = await db
@@ -160,7 +167,7 @@ export async function createProviderForExactCredential<TEnv extends Env>(
 
     if (!cred) return null;
     const decryptedToken = await decrypt(cred.encryptedToken, cred.iv, encryptionKey);
-    return createProviderFromDecryptedToken(
+    const result = await createProviderFromDecryptedToken(
       cred.provider as CredentialProvider,
       decryptedToken,
       'user',
@@ -168,12 +175,13 @@ export async function createProviderForExactCredential<TEnv extends Env>(
       projectId ?? null,
       env
     );
+    return { ...result, exactCredentialBinding: exactCredential };
   }
 
   if (exactCredential.credentialSource === 'project') {
     if (reference.kind === 'ccCredential') {
       if (!projectId) return null;
-      return createProviderForExactComposableCredential(
+      const result = await createProviderForExactComposableCredential(
         db,
         userId,
         encryptionKey,
@@ -184,6 +192,7 @@ export async function createProviderForExactCredential<TEnv extends Env>(
         'project',
         createProviderFromDecryptedToken
       );
+      return result ? { ...result, exactCredentialBinding: exactCredential } : null;
     }
     if (reference.kind !== 'credential' || !projectId) return null;
     const [cred] = await db
@@ -202,7 +211,7 @@ export async function createProviderForExactCredential<TEnv extends Env>(
 
     if (!cred) return null;
     const decryptedToken = await decrypt(cred.encryptedToken, cred.iv, encryptionKey);
-    return createProviderFromDecryptedToken(
+    const result = await createProviderFromDecryptedToken(
       cred.provider as CredentialProvider,
       decryptedToken,
       'project',
@@ -210,6 +219,7 @@ export async function createProviderForExactCredential<TEnv extends Env>(
       projectId,
       env
     );
+    return { ...result, exactCredentialBinding: exactCredential };
   }
 
   return null;

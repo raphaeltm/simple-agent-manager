@@ -1,8 +1,4 @@
-import {
-  CREDENTIAL_PROVIDERS,
-  type CredentialProvider,
-  isUserOwnedNodeClass,
-} from '@simple-agent-manager/shared';
+import { type CredentialProvider, isUserOwnedNodeClass } from '@simple-agent-manager/shared';
 import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -28,6 +24,7 @@ const NODE_INCARNATION_KEYS = [
   'nodeClass',
   'runtime',
   'providerInstanceId',
+  'runtimeIncarnationId',
   'cloudProvider',
   'credentialSource',
   'credentialAttributionUserId',
@@ -62,6 +59,7 @@ function exactNodeIncarnationPredicate(node: NodeRow) {
     sql`${schema.nodes.nodeClass} IS ${node.nodeClass}`,
     sql`${schema.nodes.runtime} IS ${node.runtime}`,
     sql`${schema.nodes.providerInstanceId} IS ${node.providerInstanceId}`,
+    sql`${schema.nodes.runtimeIncarnationId} IS ${node.runtimeIncarnationId}`,
     sql`${schema.nodes.cloudProvider} IS ${node.cloudProvider}`,
     sql`${schema.nodes.credentialSource} IS ${node.credentialSource}`,
     sql`${schema.nodes.credentialAttributionUserId} IS ${node.credentialAttributionUserId}`,
@@ -129,6 +127,11 @@ async function requireStrictNodeProvider(
 ): Promise<ProviderForUserResult> {
   const { targetProvider, attributionUserId, attributionProjectId, exactCredential } =
     getStrictNodeCredentialContext(node, userId);
+  if (!targetProvider || !exactCredential) {
+    throw new Error(
+      `Cannot strictly delete node ${node.id}: exact provider credential binding is missing`
+    );
+  }
   const providerResult = await createProviderForUser(
     db,
     attributionUserId,
@@ -146,91 +149,51 @@ async function requireStrictNodeProvider(
   return providerResult;
 }
 
-type StrictProviderResolution =
-  | { state: 'present'; providerResult: ProviderForUserResult }
-  | { state: 'absent'; providersChecked: CredentialProvider[] };
-
 async function resolveStrictNodeProvider(
   db: NodeDb,
   node: NodeRow,
   userId: string,
   env: Env
-): Promise<StrictProviderResolution> {
-  const providerInstanceId = node.providerInstanceId;
-  if (!providerInstanceId) {
+): Promise<ProviderForUserResult> {
+  if (!node.providerInstanceId) {
     throw new Error(`Cannot strictly resolve provider for node ${node.id}: instance ID is missing`);
   }
-  const { targetProvider, attributionUserId, attributionProjectId, exactCredential } =
-    getStrictNodeCredentialContext(node, userId);
-
-  if (targetProvider) {
-    const providerResult = await requireStrictNodeProvider(db, node, userId, env);
-    if (providerResult.providerName !== targetProvider) {
-      throw new Error(
-        `Cannot strictly delete node ${node.id}: requested provider ${targetProvider} resolved as ${providerResult.providerName}`
-      );
-    }
-    return { state: 'present', providerResult };
-  }
-
-  if (exactCredential) {
+  const targetProvider = node.cloudProvider as CredentialProvider | null;
+  const providerResult = await requireStrictNodeProvider(db, node, userId, env);
+  if (!targetProvider || providerResult.providerName !== targetProvider) {
     throw new Error(
-      `Cannot strictly delete node ${node.id}: exact credential snapshot requires a persisted cloud provider`
+      `Cannot strictly delete node ${node.id}: persisted provider binding did not resolve exactly`
     );
   }
-
-  const candidates: ProviderForUserResult[] = [];
-  for (const providerName of CREDENTIAL_PROVIDERS) {
-    const providerResult = await createProviderForUser(
-      db,
-      attributionUserId,
-      getCredentialEncryptionKey(env),
-      env,
-      providerName,
-      attributionProjectId
-    );
-    if (!providerResult) continue;
-    if (providerResult.providerName !== providerName) {
-      throw new Error(
-        `Cannot strictly delete node ${node.id}: requested provider ${providerName} resolved as ${providerResult.providerName}`
-      );
-    }
-    candidates.push(providerResult);
-  }
-
-  if (candidates.length === 0) {
-    throw new Error(
-      `Cloud provider credentials missing for strict node deletion: node=${node.id} provider=unknown instance=${node.providerInstanceId}`
-    );
-  }
-
-  const presentCandidates: ProviderForUserResult[] = [];
-  for (const candidate of candidates) {
-    await requireSameNodeIncarnation(db, node, `${candidate.providerName} provider lookup`);
-    const vm = await candidate.provider.getVM(providerInstanceId);
-    await requireSameNodeIncarnation(db, node, `${candidate.providerName} provider lookup result`);
-    if (vm === null) continue;
-    if (!vm || typeof vm !== 'object') {
-      throw new Error(
-        `Cannot strictly delete node ${node.id}: ambiguous ${candidate.providerName} lookup result`
-      );
-    }
-    presentCandidates.push(candidate);
-  }
-
-  if (presentCandidates.length > 1) {
-    throw new Error(
-      `Cannot strictly delete node ${node.id}: instance ${node.providerInstanceId} matched multiple providers`
-    );
-  }
-
-  const providerResult = presentCandidates[0];
-  return providerResult
-    ? { state: 'present', providerResult }
-    : { state: 'absent', providersChecked: candidates.map((candidate) => candidate.providerName) };
+  return providerResult;
 }
 
-export type StrictNodeDeletionResult = { providerVm: 'no-instance' | 'deleted' | 'already-absent' };
+export type StrictNodeDeletionResult = {
+  providerVm: 'no-instance' | 'deleted' | 'already-absent';
+  runtimeTerminationConfirmedAt: string | null;
+  runtimeIncarnationId: string | null;
+  providerInstanceId: string | null;
+};
+
+export interface StrictNodeRuntimeIdentity {
+  userId: string;
+  runtime: string;
+  providerInstanceId: string | null;
+  runtimeIncarnationId: string | null;
+}
+
+function matchesExpectedRuntime(
+  node: NodeRow,
+  expected: StrictNodeRuntimeIdentity | undefined
+): boolean {
+  return (
+    !expected ||
+    (node.userId === expected.userId &&
+      node.runtime === expected.runtime &&
+      node.providerInstanceId === expected.providerInstanceId &&
+      node.runtimeIncarnationId === expected.runtimeIncarnationId)
+  );
+}
 
 async function deleteStrictProviderInstance(
   db: NodeDb,
@@ -244,18 +207,7 @@ async function deleteStrictProviderInstance(
     );
   }
 
-  const providerResolution = await resolveStrictNodeProvider(db, node, userId, env);
-
-  if (providerResolution.state === 'absent') {
-    log.warn('node_delete.strict_provider_vm_already_absent', {
-      nodeId: node.id,
-      providersChecked: providerResolution.providersChecked,
-      providerInstanceId: node.providerInstanceId,
-    });
-    return 'already-absent';
-  }
-
-  const { providerResult } = providerResolution;
+  const providerResult = await resolveStrictNodeProvider(db, node, userId, env);
 
   await requireSameNodeIncarnation(db, node, 'provider delete');
   await providerResult.provider.deleteVM(node.providerInstanceId);
@@ -340,13 +292,14 @@ async function markWorkspaceRuntimeTerminationConfirmed(
              AND proof_node.status IS ${node.status}
              AND proof_node.runtime IS ${node.runtime}
              AND proof_node.provider_instance_id IS ${node.providerInstanceId}
+             AND proof_node.runtime_incarnation_id IS ${node.runtimeIncarnationId}
              AND proof_node.runtime_termination_confirmed_at IS ${confirmedAt}
         )`
       )
     );
 }
 
-async function markRuntimeTerminationConfirmed(db: NodeDb, node: NodeRow): Promise<void> {
+async function markRuntimeTerminationConfirmed(db: NodeDb, node: NodeRow): Promise<string> {
   await requireSameNodeIncarnation(db, node, 'termination proof write');
   const confirmedAt = new Date().toISOString();
   const result = await db
@@ -365,6 +318,27 @@ async function markRuntimeTerminationConfirmed(db: NodeDb, node: NodeRow): Promi
     'termination proof verification'
   );
   await markWorkspaceRuntimeTerminationConfirmed(db, node, confirmedAt);
+  return confirmedAt;
+}
+
+async function claimManagedNodeDeletion(db: NodeDb, node: NodeRow): Promise<NodeRow> {
+  if (node.runtimeTerminationConfirmedAt || node.status === 'destroying') {
+    return await requireSameNodeIncarnation(db, node, 'managed deletion claim');
+  }
+
+  const result = await db
+    .update(schema.nodes)
+    .set({ status: 'destroying', healthStatus: 'stale', updatedAt: new Date().toISOString() })
+    .where(exactNodeIncarnationPredicate(node))
+    .run();
+  if ((result.meta.changes ?? 0) !== 1) {
+    throw new Error(`Strict node deletion claim CAS failed: node=${node.id}`);
+  }
+  return await requireSameNodeIncarnation(
+    db,
+    { ...node, status: 'destroying', healthStatus: 'stale' },
+    'managed deletion claim verification'
+  );
 }
 
 /**
@@ -377,35 +351,60 @@ export async function deleteNodeResourcesStrict(
   nodeId: string,
   userId: string,
   env: Env,
-  options: { cleanupDns?: boolean } = {}
+  options: { cleanupDns?: boolean; expectedRuntime?: StrictNodeRuntimeIdentity } = {}
 ): Promise<StrictNodeDeletionResult> {
   const db = drizzle(env.DATABASE, { schema });
-  const node = await requireStrictNode(db, nodeId, userId);
+  const initialNode = await requireStrictNode(db, nodeId, userId);
+  if (!matchesExpectedRuntime(initialNode, options.expectedRuntime)) {
+    throw new Error(`Strict node deletion target was reincarnated before claim: node=${nodeId}`);
+  }
 
   // User-owned (BYO) machines have no SAM-provisioned cloud VM: strict deletion of the cloud
   // instance is a no-op ("nothing to delete"), never a hard error, and NEVER a provider.deleteVM
   // against the user's hardware — even defensively if a providerInstanceId were somehow set.
   // The tunnel CNAME teardown lands in Phase 1. See architecture-critique #2.
-  if (isUserOwnedNodeClass(node.nodeClass)) {
-    return { providerVm: 'no-instance' };
+  if (isUserOwnedNodeClass(initialNode.nodeClass)) {
+    return {
+      providerVm: 'no-instance',
+      runtimeTerminationConfirmedAt: null,
+      runtimeIncarnationId: initialNode.runtimeIncarnationId,
+      providerInstanceId: initialNode.providerInstanceId,
+    };
   }
+
+  const node = await claimManagedNodeDeletion(db, initialNode);
 
   if (node.runtimeTerminationConfirmedAt) {
     await requireSameNodeIncarnation(db, node, 'existing termination proof use');
     await markWorkspaceRuntimeTerminationConfirmed(db, node, node.runtimeTerminationConfirmedAt);
-    return { providerVm: node.providerInstanceId ? 'already-absent' : 'no-instance' };
+    return {
+      providerVm: node.providerInstanceId ? 'already-absent' : 'no-instance',
+      runtimeTerminationConfirmedAt: node.runtimeTerminationConfirmedAt,
+      runtimeIncarnationId: node.runtimeIncarnationId,
+      providerInstanceId: node.providerInstanceId,
+    };
   }
 
   if (node.runtime === 'cf-container') {
     await requireSameNodeIncarnation(db, node, 'container teardown');
     await destroyVmAgentContainer(env, node.id);
-    await markRuntimeTerminationConfirmed(db, node);
+    const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
     if (options.cleanupDns !== false) await deleteStrictNodeDnsRecord(node, userId, env);
-    return { providerVm: 'no-instance' };
+    return {
+      providerVm: 'no-instance',
+      runtimeTerminationConfirmedAt,
+      runtimeIncarnationId: node.runtimeIncarnationId,
+      providerInstanceId: node.providerInstanceId,
+    };
   }
 
   const providerVm = await deleteStrictProviderInstance(db, node, userId, env);
-  await markRuntimeTerminationConfirmed(db, node);
+  const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
   if (options.cleanupDns !== false) await deleteStrictNodeDnsRecord(node, userId, env);
-  return { providerVm };
+  return {
+    providerVm,
+    runtimeTerminationConfirmedAt,
+    runtimeIncarnationId: node.runtimeIncarnationId,
+    providerInstanceId: node.providerInstanceId,
+  };
 }

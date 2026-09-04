@@ -20,6 +20,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { stopWorkspaceOnNode } from '../../services/node-agent';
 import { persistError } from '../../services/observability';
+import { loadWorkspaceDeletionIdentity } from '../../services/workspace-deletion';
 import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import type { CleanupConfig, CleanupDb, NodeCleanupResult } from './shared';
 
@@ -192,13 +193,11 @@ export async function sweepStaleStoppedWorkspaces(
         result.errors++;
         continue;
       }
-      const expected = {
-        workspaceId: ws.id,
-        nodeId: ws.node_id,
-        userId: ws.user_id,
-        projectId: ws.project_id,
-        chatSessionId: ws.chat_session_id,
-      };
+      const expected = await loadWorkspaceDeletionIdentity(env.DATABASE, ws.id);
+      if (!expected || expected.nodeId !== ws.node_id || expected.userId !== ws.user_id) {
+        result.errors++;
+        continue;
+      }
       const lifecycleStub = env.NODE_LIFECYCLE.get(
         env.NODE_LIFECYCLE.idFromName(ws.node_id)
       ) as DurableObjectStub<import('../../durable-objects/node-lifecycle').NodeLifecycle>;

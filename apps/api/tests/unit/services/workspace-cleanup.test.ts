@@ -6,6 +6,7 @@ import { cleanupWorkspaceForDeletion } from '../../../src/services/workspace-cle
 
 const mocks = vi.hoisted(() => ({
   attemptWorkspaceDeletion: vi.fn(),
+  loadWorkspaceDeletionIdentity: vi.fn(),
   claimWorkspaceDeletionAttempt: vi.fn(),
   confirmWorkspaceDeletion: vi.fn(),
   scheduleWorkspaceDeletion: vi.fn(),
@@ -14,6 +15,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../../src/services/workspace-deletion', () => ({
   attemptWorkspaceDeletion: (...args: unknown[]) => mocks.attemptWorkspaceDeletion(...args),
+  loadWorkspaceDeletionIdentity: (...args: unknown[]) =>
+    mocks.loadWorkspaceDeletionIdentity(...args),
 }));
 vi.mock('../../../src/services/session-snapshots', () => ({
   deleteSessionSnapshotState: (...args: unknown[]) => mocks.deleteSessionSnapshotState(...args),
@@ -85,6 +88,17 @@ describe('cleanupWorkspaceForDeletion', () => {
     mocks.claimWorkspaceDeletionAttempt.mockResolvedValue(true);
     mocks.scheduleWorkspaceDeletion.mockResolvedValue(undefined);
     mocks.deleteSessionSnapshotState.mockResolvedValue(true);
+    mocks.loadWorkspaceDeletionIdentity.mockResolvedValue({
+      workspaceId: 'ws-cleanup-1',
+      nodeId: 'node-cleanup-1',
+      nodeUserId: 'user-cleanup-1',
+      nodeRuntime: 'vm',
+      nodeProviderInstanceId: 'provider-node-cleanup-1',
+      nodeRuntimeIncarnationId: 'runtime-node-cleanup-1',
+      userId: 'user-cleanup-1',
+      projectId: 'project-cleanup-1',
+      chatSessionId: 'session-cleanup-1',
+    });
   });
 
   it('hard-deletes local state only after confirmed runtime deletion and lifecycle finalization', async () => {
@@ -184,6 +198,10 @@ describe('cleanupWorkspaceForDeletion', () => {
         expected: {
           workspaceId: 'ws-cleanup-1',
           nodeId: 'node-cleanup-1',
+          nodeUserId: 'user-cleanup-1',
+          nodeRuntime: 'vm',
+          nodeProviderInstanceId: 'provider-node-cleanup-1',
+          nodeRuntimeIncarnationId: 'runtime-node-cleanup-1',
           userId: 'user-cleanup-1',
           projectId: 'project-cleanup-1',
           chatSessionId: 'session-cleanup-1',

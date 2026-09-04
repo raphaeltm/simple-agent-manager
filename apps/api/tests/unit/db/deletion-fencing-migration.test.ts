@@ -56,4 +56,25 @@ describe('0137 deletion fencing migration', () => {
       sqlite.close();
     }
   });
+
+  it('assigns an opaque runtime incarnation to the currently represented legacy runtime', () => {
+    const sqlite = new Database(':memory:');
+    try {
+      sqlite.exec(`CREATE TABLE nodes (id TEXT PRIMARY KEY, status TEXT NOT NULL)`);
+      sqlite.exec(`INSERT INTO nodes (id, status) VALUES ('legacy-running', 'running')`);
+      sqlite.exec(
+        readFileSync(
+          join(process.cwd(), 'src/db/migrations/0140_node_runtime_incarnation.sql'),
+          'utf8'
+        )
+      );
+
+      const row = sqlite
+        .prepare('SELECT runtime_incarnation_id AS incarnationId FROM nodes WHERE id = ?')
+        .get('legacy-running') as { incarnationId: string | null };
+      expect(row.incarnationId).toMatch(/^[a-f0-9]{32}$/);
+    } finally {
+      sqlite.close();
+    }
+  });
 });

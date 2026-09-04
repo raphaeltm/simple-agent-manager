@@ -3,9 +3,10 @@ import {
   DEFAULT_VM_LOCATION,
   DEFAULT_VM_SIZE,
   getLocationsForProvider,
+  isUserOwnedNodeClass,
   isValidLocationForProvider,
 } from '@simple-agent-manager/shared';
-import { and, desc, eq, inArray, ne } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -408,15 +409,43 @@ nodesRoutes.delete('/:id', async (c) => {
   }
 
   if ((node.nodeRole ?? 'workspace') === 'deployment') {
-    await retireDeletedDeploymentNodeRecord(db, c.env, nodeId, userId);
+    await retireDeletedDeploymentNodeRecord(db, c.env, nodeId, userId, cleanup);
   } else {
-    await db
-      .delete(schema.workspaces)
-      .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
-
-    await db
-      .delete(schema.nodes)
-      .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)));
+    if (isUserOwnedNodeClass(node.nodeClass)) {
+      await db
+        .delete(schema.workspaces)
+        .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
+      await db
+        .delete(schema.nodes)
+        .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)));
+    } else {
+      if (!cleanup.runtimeTerminationConfirmedAt) {
+        throw errors.conflict('Managed node deletion proof is unavailable');
+      }
+      await db
+        .delete(schema.workspaces)
+        .where(
+          and(
+            eq(schema.workspaces.nodeId, nodeId),
+            eq(schema.workspaces.userId, userId),
+            eq(schema.workspaces.runtimeDeletionConfirmedAt, cleanup.runtimeTerminationConfirmedAt)
+          )
+        );
+      const deletedNode = await db
+        .delete(schema.nodes)
+        .where(
+          and(
+            eq(schema.nodes.id, nodeId),
+            eq(schema.nodes.userId, userId),
+            sql`${schema.nodes.runtimeTerminationConfirmedAt} IS ${cleanup.runtimeTerminationConfirmedAt}`,
+            sql`${schema.nodes.runtimeIncarnationId} IS ${cleanup.runtimeIncarnationId}`
+          )
+        )
+        .run();
+      if ((deletedNode.meta.changes ?? 0) !== 1) {
+        throw errors.conflict('Managed node incarnation changed after deletion proof');
+      }
+    }
   }
 
   await finalizeNodeLifecycleDeletion(c.env, nodeId, userId);

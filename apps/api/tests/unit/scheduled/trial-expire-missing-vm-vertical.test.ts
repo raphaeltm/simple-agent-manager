@@ -42,8 +42,9 @@ vi.mock('drizzle-orm/d1', () => ({
             if (!execution) {
               drizzleUpdates.push(values);
               if (
-                typeof values.runtimeTerminationConfirmedAt === 'string' &&
-                nodeRows[0]
+                nodeRows[0] &&
+                (typeof values.runtimeTerminationConfirmedAt === 'string' ||
+                  (values.status === 'destroying' && values.healthStatus === 'stale'))
               ) {
                 nodeRows[0] = { ...nodeRows[0], ...values };
               }
@@ -68,7 +69,18 @@ vi.mock('drizzle-orm/d1', () => ({
 
 vi.mock('../../../src/services/provider-credentials', () => ({
   createProviderForUser: (...args: unknown[]) => createProviderForUser(...args),
-  exactProviderCredentialBindingFromPlacementSnapshot: () => null,
+  exactProviderCredentialBindingFromPlacementSnapshot: (snapshot: {
+    placementCredentialSource?: string | null;
+    placementCredentialReference?: string | null;
+    placementCredentialVersion?: number | null;
+  }) =>
+    snapshot.placementCredentialSource && snapshot.placementCredentialReference
+      ? {
+          credentialSource: snapshot.placementCredentialSource,
+          credentialReference: snapshot.placementCredentialReference,
+          credentialVersion: snapshot.placementCredentialVersion ?? null,
+        }
+      : null,
 }));
 vi.mock('../../../src/lib/secrets', () => ({ getCredentialEncryptionKey: () => 'test-key' }));
 vi.mock('../../../src/services/dns', () => ({
@@ -90,7 +102,7 @@ vi.mock('../../../src/lib/logger', () => ({
 
 const { runTrialExpireSweep } = await import('../../../src/scheduled/trial-expire');
 
-describe('expired-trial conclusive provider absence vertical slice', () => {
+describe('expired-trial exact provider deletion vertical slice', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     nodeRows.length = 0;
@@ -98,12 +110,19 @@ describe('expired-trial conclusive provider absence vertical slice', () => {
     nodeRows.push({
       id: 'node-old',
       userId: 'system_anonymous_trials',
+      status: 'destroying',
+      nodeClass: 'managed',
+      runtime: 'vm',
+      runtimeIncarnationId: 'runtime-old',
       providerInstanceId: 'vm-missing',
-      cloudProvider: null,
+      cloudProvider: 'hetzner',
       backendDnsRecordId: 'dns-old',
       credentialAttributionUserId: null,
       credentialAttributionProjectId: null,
       credentialAttributionSource: null,
+      placementCredentialSource: 'platform',
+      placementCredentialReference: 'platform_credentials:platform-hetzner',
+      placementCredentialVersion: null,
     });
     providerGetVM.mockResolvedValue(null);
     createProviderForUser.mockImplementation(async (...args: unknown[]) => {
@@ -168,8 +187,8 @@ describe('expired-trial conclusive provider absence vertical slice', () => {
     const result = await runTrialExpireSweep(env, 1_700_000_000_000);
 
     expect(result).toMatchObject({ workspacesDeleted: 1, nodesDeleted: 1, cleanupErrors: 0 });
-    expect(providerGetVM).toHaveBeenCalledWith('vm-missing');
-    expect(providerDeleteVM).not.toHaveBeenCalled();
+    expect(providerGetVM).not.toHaveBeenCalled();
+    expect(providerDeleteVM).toHaveBeenCalledWith('vm-missing');
     expect(deleteDNSRecord).toHaveBeenCalledWith('dns-old', env);
     expect(drizzleUpdates).toEqual(
       expect.arrayContaining([

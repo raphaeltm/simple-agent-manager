@@ -10,6 +10,10 @@ export const WORKSPACE_DELETION_DIAGNOSTIC_PREFIX = 'Workspace deletion unconfir
 export interface WorkspaceDeletionIdentity {
   workspaceId: string;
   nodeId: string | null;
+  nodeUserId: string | null;
+  nodeRuntime: string | null;
+  nodeProviderInstanceId: string | null;
+  nodeRuntimeIncarnationId: string | null;
   userId: string;
   projectId: string | null;
   chatSessionId: string | null;
@@ -54,6 +58,13 @@ interface AttemptWorkspaceDeletionOptions {
   beforeFinalize?: () => Promise<void>;
 }
 
+class WorkspaceDeletionFenceError extends Error {
+  constructor() {
+    super('Workspace deletion target changed before VM request');
+    this.name = 'WorkspaceDeletionFenceError';
+  }
+}
+
 function nullableEqual(left: string | null, right: string | null): boolean {
   return left === right;
 }
@@ -67,7 +78,11 @@ function sameOwnership(
     current.userId === expected.userId &&
     nullableEqual(current.projectId, expected.projectId) &&
     nullableEqual(current.chatSessionId, expected.chatSessionId) &&
-    nullableEqual(current.nodeId, expected.nodeId)
+    nullableEqual(current.nodeId, expected.nodeId) &&
+    nullableEqual(current.nodeUserId, expected.nodeUserId) &&
+    nullableEqual(current.nodeRuntime, expected.nodeRuntime) &&
+    nullableEqual(current.nodeProviderInstanceId, expected.nodeProviderInstanceId) &&
+    nullableEqual(current.nodeRuntimeIncarnationId, expected.nodeRuntimeIncarnationId)
   );
 }
 
@@ -80,7 +95,12 @@ function sameOwnershipExceptTerminalNode(
     current.userId === expected.userId &&
     nullableEqual(current.projectId, expected.projectId) &&
     nullableEqual(current.chatSessionId, expected.chatSessionId) &&
-    (nullableEqual(current.nodeId, expected.nodeId) || current.nodeId === null)
+    (current.nodeId === null ||
+      (nullableEqual(current.nodeId, expected.nodeId) &&
+        nullableEqual(current.nodeUserId, expected.nodeUserId) &&
+        nullableEqual(current.nodeRuntime, expected.nodeRuntime) &&
+        nullableEqual(current.nodeProviderInstanceId, expected.nodeProviderInstanceId) &&
+        nullableEqual(current.nodeRuntimeIncarnationId, expected.nodeRuntimeIncarnationId)))
   );
 }
 
@@ -131,6 +151,10 @@ async function loadWorkspaceDeletionRow(
     .prepare(
       `SELECT w.id AS workspaceId,
               w.node_id AS nodeId,
+              n.user_id AS nodeUserId,
+              n.runtime AS nodeRuntime,
+              n.provider_instance_id AS nodeProviderInstanceId,
+              n.runtime_incarnation_id AS nodeRuntimeIncarnationId,
               w.user_id AS userId,
               w.project_id AS projectId,
               w.chat_session_id AS chatSessionId,
@@ -138,6 +162,7 @@ async function loadWorkspaceDeletionRow(
               w.runtime_deletion_confirmed_at AS runtimeDeletionConfirmedAt,
               w.runtime_deletion_proof AS runtimeDeletionProof
          FROM workspaces w
+         LEFT JOIN nodes n ON n.id = w.node_id
         WHERE w.id = ?
         LIMIT 1`
     )
@@ -156,9 +181,22 @@ async function terminalNodeProof(
   // may mark a node deleted even when the provider request failed.
   const node = await database
     .prepare(
-      'SELECT runtime_termination_confirmed_at AS runtimeTerminationConfirmedAt FROM nodes WHERE id = ? LIMIT 1'
+      `SELECT runtime_termination_confirmed_at AS runtimeTerminationConfirmedAt
+         FROM nodes
+        WHERE id = ?
+          AND user_id IS ?
+          AND runtime IS ?
+          AND provider_instance_id IS ?
+          AND runtime_incarnation_id IS ?
+        LIMIT 1`
     )
-    .bind(expected.nodeId)
+    .bind(
+      expected.nodeId,
+      expected.nodeUserId,
+      expected.nodeRuntime,
+      expected.nodeProviderInstanceId,
+      expected.nodeRuntimeIncarnationId
+    )
     .first<{ runtimeTerminationConfirmedAt: string | null }>();
   return node?.runtimeTerminationConfirmedAt ? 'node_runtime_terminated' : null;
 }
@@ -176,6 +214,16 @@ async function persistDeletionDiagnostic(
           AND project_id IS ?
           AND chat_session_id IS ?
           AND node_id IS ?
+          AND (
+            ? IS NULL OR EXISTS (
+              SELECT 1 FROM nodes n
+               WHERE n.id = workspaces.node_id
+                 AND n.user_id IS ?
+                 AND n.runtime IS ?
+                 AND n.provider_instance_id IS ?
+                 AND n.runtime_incarnation_id IS ?
+            )
+          )
           AND runtime_deletion_confirmed_at IS NULL`
   )
     .bind(
@@ -185,7 +233,12 @@ async function persistDeletionDiagnostic(
       expected.userId,
       expected.projectId,
       expected.chatSessionId,
-      expected.nodeId
+      expected.nodeId,
+      expected.nodeId,
+      expected.nodeUserId,
+      expected.nodeRuntime,
+      expected.nodeProviderInstanceId,
+      expected.nodeRuntimeIncarnationId
     )
     .run();
 }
@@ -206,6 +259,16 @@ async function claimDeletionTransition(
           AND project_id IS ?
           AND chat_session_id IS ?
           AND node_id IS ?
+          AND (
+            ? IS NULL OR EXISTS (
+              SELECT 1 FROM nodes n
+               WHERE n.id = workspaces.node_id
+                 AND n.user_id IS ?
+                 AND n.runtime IS ?
+                 AND n.provider_instance_id IS ?
+                 AND n.runtime_incarnation_id IS ?
+            )
+          )
           AND runtime_deletion_confirmed_at IS NULL
           ${statusPredicate}`
   )
@@ -219,10 +282,25 @@ async function claimDeletionTransition(
       expected.userId,
       expected.projectId,
       expected.chatSessionId,
-      expected.nodeId
+      expected.nodeId,
+      expected.nodeId,
+      expected.nodeUserId,
+      expected.nodeRuntime,
+      expected.nodeProviderInstanceId,
+      expected.nodeRuntimeIncarnationId
     )
     .run();
   return (result.meta.changes ?? 0) > 0;
+}
+
+async function requireDeletionTargetAtBoundary(
+  env: Env,
+  expected: WorkspaceDeletionIdentity
+): Promise<void> {
+  const current = await loadWorkspaceDeletionRow(env.DATABASE, expected.workspaceId);
+  if (!current || current.status !== 'stopping' || !sameOwnership(current, expected)) {
+    throw new WorkspaceDeletionFenceError();
+  }
 }
 
 async function finalizeConfirmedDeletion(
@@ -293,7 +371,17 @@ async function finalizeConfirmedDeletion(
         AND project_id IS ?
         AND chat_session_id IS ?
         AND node_id IS ?
-        AND status = ?`
+        AND status = ?
+        AND (
+          ? IS NULL OR EXISTS (
+            SELECT 1 FROM nodes n
+             WHERE n.id = workspaces.node_id
+               AND n.user_id IS ?
+               AND n.runtime IS ?
+               AND n.provider_instance_id IS ?
+               AND n.runtime_incarnation_id IS ?
+          )
+        )`
   )
     .bind(
       new Date().toISOString(),
@@ -304,7 +392,12 @@ async function finalizeConfirmedDeletion(
       current.projectId,
       current.chatSessionId,
       current.nodeId,
-      current.status
+      current.status,
+      current.nodeId,
+      expected.nodeUserId,
+      expected.nodeRuntime,
+      expected.nodeProviderInstanceId,
+      expected.nodeRuntimeIncarnationId
     )
     .run();
   if ((result.meta.changes ?? 0) === 0) {
@@ -408,6 +501,9 @@ export async function attemptWorkspaceDeletion(
       try {
         await deleteWorkspaceOnNode(expected.nodeId, expected.workspaceId, env, expected.userId, {
           requestTimeoutMs,
+          beforeExternalMutation: async () => {
+            await requireDeletionTargetAtBoundary(env, expected);
+          },
         });
       } catch (error) {
         // The VM agent's workspace-specific 404 means the exact runtime is
@@ -419,6 +515,9 @@ export async function attemptWorkspaceDeletion(
     }
     return finalizeConfirmedDeletion(env, expected, proof, source, beforeFinalize);
   } catch (error) {
+    if (error instanceof WorkspaceDeletionFenceError) {
+      return { status: 'fenced', reason: 'workspace_assignment_changed' };
+    }
     // The node can become authoritatively terminal while the request is in
     // flight. That is valid proof; heartbeat age and health are intentionally
     // ignored here.
@@ -451,6 +550,10 @@ export async function loadWorkspaceDeletionSnapshot(
   return {
     workspaceId: workspace.workspaceId,
     nodeId: workspace.nodeId,
+    nodeUserId: workspace.nodeUserId,
+    nodeRuntime: workspace.nodeRuntime,
+    nodeProviderInstanceId: workspace.nodeProviderInstanceId,
+    nodeRuntimeIncarnationId: workspace.nodeRuntimeIncarnationId,
     userId: workspace.userId,
     projectId: workspace.projectId,
     chatSessionId: workspace.chatSessionId,
@@ -469,6 +572,10 @@ export async function loadWorkspaceDeletionIdentity(
   return {
     workspaceId: workspace.workspaceId,
     nodeId: workspace.nodeId,
+    nodeUserId: workspace.nodeUserId,
+    nodeRuntime: workspace.nodeRuntime,
+    nodeProviderInstanceId: workspace.nodeProviderInstanceId,
+    nodeRuntimeIncarnationId: workspace.nodeRuntimeIncarnationId,
     userId: workspace.userId,
     projectId: workspace.projectId,
     chatSessionId: workspace.chatSessionId,

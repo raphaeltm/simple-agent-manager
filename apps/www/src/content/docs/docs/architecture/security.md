@@ -104,6 +104,13 @@ normal effects. SAM records only throttled, bounded metadata (callback kind,
 workspace/node identifiers, and rejection state); request bodies, prompts,
 tool output, repository data, and credentials are never copied into this signal.
 
+Destructive runtime requests are bound to a server-written node incarnation and
+the exact provider credential reference used for provisioning. SAM rechecks the
+workspace, node owner, project/session ownership, provider instance, and runtime
+incarnation immediately before a VM-agent deletion request. Managed provider
+teardown fails closed when a legacy node has no exact provider-account binding;
+it never substitutes whichever credential happens to be active later.
+
 ## Credential Encryption
 
 User credentials are encrypted at rest using **AES-256-GCM**:

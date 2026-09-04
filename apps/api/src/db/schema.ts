@@ -1240,6 +1240,8 @@ export const nodes = sqliteTable(
     errorMessage: text('error_message'),
     /** Written only after strict provider/container teardown confirms the runtime is absent. */
     runtimeTerminationConfirmedAt: text('runtime_termination_confirmed_at'),
+    /** Server-written identity rotated whenever the runtime behind this node row is replaced. */
+    runtimeIncarnationId: text('runtime_incarnation_id'),
     /** Candidate-page escape after cleanup failure; ISO-8601 UTC timestamp. */
     cleanupBackoffUntil: text('cleanup_backoff_until'),
     createdAt: text('created_at')

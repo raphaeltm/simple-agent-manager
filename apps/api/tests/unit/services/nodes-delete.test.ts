@@ -2,14 +2,25 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const nodeRows: unknown[] = [];
 const updateCalls: Array<Record<string, unknown>> = [];
+let selectCallCount = 0;
+let beforeSelectReturn: ((call: number) => void) | null = null;
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
     select: () => {
+      const selectRows = async () => {
+        selectCallCount += 1;
+        beforeSelectReturn?.(selectCallCount);
+        return nodeRows;
+      };
       const builder = {
         from: () => builder,
         where: () => builder,
-        limit: () => Promise.resolve(nodeRows),
+        limit: selectRows,
+        then: <TResult1 = unknown[], TResult2 = never>(
+          onfulfilled?: ((value: unknown[]) => TResult1 | PromiseLike<TResult1>) | null,
+          onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+        ) => selectRows().then(onfulfilled, onrejected),
       };
       return builder;
     },
@@ -21,9 +32,10 @@ vi.mock('drizzle-orm/d1', () => ({
             if (!execution) {
               updateCalls.push(values);
               if (
-                typeof values.runtimeTerminationConfirmedAt === 'string' &&
                 nodeRows[0] &&
-                typeof nodeRows[0] === 'object'
+                typeof nodeRows[0] === 'object' &&
+                (typeof values.runtimeTerminationConfirmedAt === 'string' ||
+                  (values.status === 'destroying' && values.healthStatus === 'stale'))
               ) {
                 nodeRows[0] = { ...nodeRows[0], ...values };
               }
@@ -48,8 +60,6 @@ vi.mock('drizzle-orm/d1', () => ({
 
 const providerDeleteVM = vi.fn(async () => {});
 const providerGetVM = vi.fn(async () => ({ id: 'vm-1' }));
-const scalewayDeleteVM = vi.fn(async () => {});
-const scalewayGetVM = vi.fn(async () => null);
 const createProviderForUser = vi.fn();
 vi.mock('../../../src/services/provider-credentials', () => ({
   createProviderForUser: (...args: unknown[]) => createProviderForUser(...args),
@@ -60,7 +70,6 @@ vi.mock('../../../src/services/provider-credentials', () => ({
     placementCredentialVersion?: number | null;
   }) => {
     if (
-      !snapshot.capacityPoolId ||
       !(
         snapshot.placementCredentialSource === 'user' ||
         snapshot.placementCredentialSource === 'project' ||
@@ -135,6 +144,8 @@ describe('node resource deletion services', () => {
   beforeEach(() => {
     nodeRows.length = 0;
     updateCalls.length = 0;
+    selectCallCount = 0;
+    beforeSelectReturn = null;
     vi.clearAllMocks();
     createProviderForUser.mockImplementation(async (...args: unknown[]) => {
       if (args[4] !== 'hetzner') return null;
@@ -176,6 +187,7 @@ describe('node resource deletion services', () => {
       status: 'running',
       nodeClass: 'managed',
       runtime: 'vm',
+      runtimeIncarnationId: 'runtime-incarnation-pool-1',
       providerInstanceId: 'vm-pool-1',
       cloudProvider: 'hetzner',
       backendDnsRecordId: null,
@@ -425,6 +437,26 @@ describe('node resource deletion services', () => {
     expect(finalizeWorkspaceLifecycleClosure).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects a direct delete when the node is reprovisioned after its initial read', async () => {
+    nodeRows.push(managedPoolNode({ runtimeTerminationConfirmedAt: '2026-09-04T00:00:00.000Z' }));
+    beforeSelectReturn = (call) => {
+      if (call !== 2) return;
+      nodeRows[0] = {
+        ...(nodeRows[0] as Record<string, unknown>),
+        providerInstanceId: 'vm-reprovisioned',
+        runtimeIncarnationId: 'runtime-incarnation-reprovisioned',
+        runtimeTerminationConfirmedAt: null,
+      };
+    };
+
+    const result = await deleteNodeResources('pool-node-1', 'user-1', ENV);
+
+    expect(result.runtimeTerminationConfirmed).toBe(false);
+    expect(result.errors).toEqual(['Managed runtime termination remains unconfirmed']);
+    expect(providerDeleteVM).not.toHaveBeenCalled();
+    expect(finalizeWorkspaceLifecycleClosure).not.toHaveBeenCalled();
+  });
+
   it('deleteNodeResources does NOT destroy a container for a user-owned node', async () => {
     // BYO nodes are never cf-container; the explicit guard proves it (even if runtime leaked in).
     nodeRows.push(userOwnedNode({ runtime: 'cf-container' }));
@@ -452,6 +484,9 @@ describe('node resource deletion services', () => {
 
     await expect(deleteNodeResourcesStrict('cf-strict', 'user-1', ENV)).resolves.toEqual({
       providerVm: 'no-instance',
+      runtimeTerminationConfirmedAt: expect.any(String),
+      runtimeIncarnationId: undefined,
+      providerInstanceId: null,
     });
     expect(destroyVmAgentContainer).toHaveBeenCalledWith(ENV, 'cf-strict');
     expect(updateCalls).toContainEqual({
@@ -477,7 +512,9 @@ describe('node resource deletion services', () => {
 
     expect(createProviderForUser).not.toHaveBeenCalled();
     expect(providerDeleteVM).not.toHaveBeenCalled();
-    expect(updateCalls).toEqual([]);
+    expect(updateCalls).toEqual([
+      expect.objectContaining({ status: 'destroying', healthStatus: 'stale' }),
+    ]);
   });
 
   it('does not write termination proof when provider deletion races a new VM incarnation', async () => {
@@ -503,6 +540,20 @@ describe('node resource deletion services', () => {
     expect(updateCalls).not.toContainEqual(
       expect.objectContaining({ runtimeTerminationConfirmedAt: expect.any(String) })
     );
+  });
+
+  it('claims the managed node as destroying before provider I/O', async () => {
+    nodeRows.push(managedPoolNode());
+    providerDeleteVM.mockImplementationOnce(async () => {
+      expect(nodeRows[0]).toMatchObject({ status: 'destroying', healthStatus: 'stale' });
+    });
+
+    await expect(deleteNodeResourcesStrict('pool-node-1', 'user-1', ENV)).resolves.toMatchObject({
+      providerVm: 'deleted',
+    });
+
+    expect(updateCalls[0]).toMatchObject({ status: 'destroying', healthStatus: 'stale' });
+    expect(providerDeleteVM).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -541,6 +592,9 @@ describe('node resource deletion services', () => {
 
     await expect(deleteNodeResourcesStrict('byo-1', 'user-1', ENV)).resolves.toEqual({
       providerVm: 'no-instance',
+      runtimeTerminationConfirmedAt: null,
+      runtimeIncarnationId: undefined,
+      providerInstanceId: 'srv-should-not-touch',
     });
     expect(providerDeleteVM).not.toHaveBeenCalled();
     expect(createProviderForUser).not.toHaveBeenCalled();
@@ -554,6 +608,8 @@ describe('node resource deletion services', () => {
       providerVmDeleted: false,
       providerVmDeleteSkippedReason: null,
       backendDnsDeleted: false,
+      runtimeTerminationConfirmedAt: null,
+      runtimeIncarnationId: null,
       errors: [],
     });
   });
@@ -567,7 +623,10 @@ describe('node resource deletion services', () => {
   it('retires deployment node records as tombstones so event history can keep its FK', async () => {
     const db = drizzle({} as never) as Parameters<typeof retireDeletedDeploymentNodeRecord>[0];
 
-    await retireDeletedDeploymentNodeRecord(db, ENV, 'node-1', 'user-1');
+    await retireDeletedDeploymentNodeRecord(db, ENV, 'node-1', 'user-1', {
+      runtimeTerminationConfirmedAt: '2026-09-04T00:00:00.000Z',
+      runtimeIncarnationId: 'runtime-incarnation-1',
+    });
 
     expect(updateCalls).toEqual(
       expect.arrayContaining([
@@ -599,119 +658,53 @@ describe('node resource deletion services', () => {
     );
   });
 
-  it('finalizes strict cleanup when a credentialed legacy-provider lookup conclusively returns null', async () => {
-    nodeRows.push({
-      id: 'node-absent',
-      userId: 'user-1',
-      providerInstanceId: 'vm-absent',
-      cloudProvider: null,
-      backendDnsRecordId: 'dns-absent',
-    });
-    providerGetVM.mockResolvedValueOnce(null);
-
-    await expect(deleteNodeResourcesStrict('node-absent', 'user-1', ENV)).resolves.toEqual({
-      providerVm: 'already-absent',
-    });
-
-    expect(providerGetVM).toHaveBeenCalledWith('vm-absent');
-    expect(providerDeleteVM).not.toHaveBeenCalled();
-    expect(deleteDNSRecord).toHaveBeenCalledWith('dns-absent', ENV);
-    expect(updateCalls).toContainEqual({ runtimeTerminationConfirmedAt: expect.any(String) });
-    expect(updateCalls).toContainEqual(
-      expect.objectContaining({
-        status: 'deleted',
-        runtimeDeletionConfirmedAt: expect.any(String),
-        runtimeDeletionProof: 'node_runtime_terminated',
+  it('fails closed when a legacy node lacks an exact provider-account binding', async () => {
+    nodeRows.push(
+      managedPoolNode({
+        id: 'legacy-node',
+        status: 'destroying',
+        capacityPoolId: null,
+        placementCredentialSource: null,
+        placementCredentialReference: null,
+        placementCredentialVersion: null,
       })
     );
-  });
 
-  it('checks every credentialed provider before selecting the only provider that contains a legacy VM', async () => {
-    nodeRows.push({
-      id: 'node-present',
-      userId: 'user-1',
-      providerInstanceId: 'vm-shared-id',
-      cloudProvider: null,
-      backendDnsRecordId: 'dns-present',
-    });
-    providerGetVM.mockResolvedValueOnce(null);
-    scalewayGetVM.mockResolvedValueOnce({ id: 'vm-shared-id' });
-    createProviderForUser.mockImplementation(async (...args: unknown[]) => {
-      if (args[4] === 'hetzner') {
-        return {
-          provider: { deleteVM: providerDeleteVM, getVM: providerGetVM },
-          providerName: 'hetzner',
-          credentialSource: 'platform',
-        };
-      }
-      if (args[4] === 'scaleway') {
-        return {
-          provider: { deleteVM: scalewayDeleteVM, getVM: scalewayGetVM },
-          providerName: 'scaleway',
-          credentialSource: 'user',
-        };
-      }
-      return null;
-    });
-
-    await expect(deleteNodeResourcesStrict('node-present', 'user-1', ENV)).resolves.toEqual({
-      providerVm: 'deleted',
-    });
-
-    expect(providerGetVM).toHaveBeenCalledWith('vm-shared-id');
-    expect(scalewayGetVM).toHaveBeenCalledWith('vm-shared-id');
-    expect(providerDeleteVM).not.toHaveBeenCalled();
-    expect(scalewayDeleteVM).toHaveBeenCalledWith('vm-shared-id');
-    expect(updateCalls).toContainEqual({
-      runtimeTerminationConfirmedAt: expect.any(String),
-    });
-  });
-
-  it('fails closed when a legacy instance ID matches multiple credentialed providers', async () => {
-    nodeRows.push({
-      id: 'node-ambiguous',
-      userId: 'user-1',
-      providerInstanceId: 'vm-shared-id',
-      cloudProvider: null,
-      backendDnsRecordId: 'dns-ambiguous',
-    });
-    providerGetVM.mockResolvedValueOnce({ id: 'vm-shared-id' });
-    scalewayGetVM.mockResolvedValueOnce({ id: 'vm-shared-id' });
-    createProviderForUser.mockImplementation(async (...args: unknown[]) => {
-      if (args[4] === 'hetzner') {
-        return {
-          provider: { deleteVM: providerDeleteVM, getVM: providerGetVM },
-          providerName: 'hetzner',
-          credentialSource: 'platform',
-        };
-      }
-      if (args[4] === 'scaleway') {
-        return {
-          provider: { deleteVM: scalewayDeleteVM, getVM: scalewayGetVM },
-          providerName: 'scaleway',
-          credentialSource: 'user',
-        };
-      }
-      return null;
-    });
-
-    await expect(deleteNodeResourcesStrict('node-ambiguous', 'user-1', ENV)).rejects.toThrow(
-      /matched multiple providers/
+    await expect(deleteNodeResourcesStrict('legacy-node', 'user-1', ENV)).rejects.toThrow(
+      /exact provider credential binding is missing/
     );
 
+    expect(createProviderForUser).not.toHaveBeenCalled();
+    expect(providerGetVM).not.toHaveBeenCalled();
     expect(providerDeleteVM).not.toHaveBeenCalled();
-    expect(scalewayDeleteVM).not.toHaveBeenCalled();
     expect(deleteDNSRecord).not.toHaveBeenCalled();
     expect(updateCalls).toEqual([]);
   });
 
+  it('does not use a rotated current account even when its instance ID collides', async () => {
+    nodeRows.push(
+      managedPoolNode({
+        id: 'legacy-collision',
+        status: 'destroying',
+        capacityPoolId: null,
+        placementCredentialSource: null,
+        placementCredentialReference: null,
+        placementCredentialVersion: null,
+      })
+    );
+    providerGetVM.mockResolvedValueOnce({ id: 'vm-pool-1' });
+
+    await expect(deleteNodeResourcesStrict('legacy-collision', 'user-1', ENV)).rejects.toThrow(
+      /exact provider credential binding is missing/
+    );
+
+    expect(createProviderForUser).not.toHaveBeenCalled();
+    expect(providerGetVM).not.toHaveBeenCalled();
+    expect(providerDeleteVM).not.toHaveBeenCalled();
+  });
+
   it('fails closed when strict deletion credentials are missing', async () => {
-    nodeRows.push({
-      id: 'node-1',
-      userId: 'user-1',
-      providerInstanceId: 'vm-1',
-      cloudProvider: null,
-    });
+    nodeRows.push(managedPoolNode({ id: 'node-1', status: 'destroying' }));
     createProviderForUser.mockResolvedValueOnce(null);
 
     await expect(deleteNodeResourcesStrict('node-1', 'user-1', ENV)).rejects.toThrow(
@@ -723,47 +716,28 @@ describe('node resource deletion services', () => {
     expect(deleteDNSRecord).not.toHaveBeenCalled();
   });
 
-  it.each([
-    [
-      'lookup failure',
-      () => providerGetVM.mockRejectedValueOnce(new Error('provider unavailable')),
-      /provider unavailable/,
-    ],
-    [
-      'ambiguous lookup',
-      () => providerGetVM.mockResolvedValueOnce(undefined),
-      /ambiguous hetzner lookup result/,
-    ],
-  ])('fails closed for %s', async (_scenario, arrange, expected) => {
-    nodeRows.push({
-      id: 'node-1',
-      userId: 'user-1',
-      providerInstanceId: 'vm-1',
-      cloudProvider: null,
-    });
-    arrange();
+  it('fails closed when exact-account provider deletion fails', async () => {
+    nodeRows.push(managedPoolNode({ id: 'node-1', status: 'destroying' }));
+    providerDeleteVM.mockRejectedValueOnce(new Error('provider unavailable'));
 
-    await expect(deleteNodeResourcesStrict('node-1', 'user-1', ENV)).rejects.toThrow(expected);
+    await expect(deleteNodeResourcesStrict('node-1', 'user-1', ENV)).rejects.toThrow(
+      /provider unavailable/
+    );
 
-    expect(providerDeleteVM).not.toHaveBeenCalled();
     expect(deleteDNSRecord).not.toHaveBeenCalled();
   });
 
   it('does not fail strict compute deletion when DNS cleanup fails after VM deletion', async () => {
-    nodeRows.push({
-      id: 'node-1',
-      userId: 'user-1',
-      providerInstanceId: 'vm-1',
-      cloudProvider: 'hetzner',
-      backendDnsRecordId: 'dns-1',
-    });
+    nodeRows.push(
+      managedPoolNode({ id: 'node-1', status: 'destroying', backendDnsRecordId: 'dns-1' })
+    );
     deleteDNSRecord.mockRejectedValueOnce(new Error('Cloudflare DNS outage'));
 
-    await expect(deleteNodeResourcesStrict('node-1', 'user-1', ENV)).resolves.toEqual({
+    await expect(deleteNodeResourcesStrict('node-1', 'user-1', ENV)).resolves.toMatchObject({
       providerVm: 'deleted',
     });
 
-    expect(providerDeleteVM).toHaveBeenCalledWith('vm-1');
+    expect(providerDeleteVM).toHaveBeenCalledWith('vm-pool-1');
     expect(deleteDNSRecord).toHaveBeenCalledWith('dns-1', ENV);
     expect(updateCalls).toContainEqual({
       runtimeTerminationConfirmedAt: expect.any(String),
@@ -783,7 +757,7 @@ describe('node resource deletion services', () => {
   it('deleteNodeResourcesStrict deletes a pool-provisioned VM with its exact placement credential', async () => {
     nodeRows.push(managedPoolNode({ status: 'destroying', backendDnsRecordId: 'dns-pool-1' }));
 
-    await expect(deleteNodeResourcesStrict('pool-node-1', 'user-1', ENV)).resolves.toEqual({
+    await expect(deleteNodeResourcesStrict('pool-node-1', 'user-1', ENV)).resolves.toMatchObject({
       providerVm: 'deleted',
     });
 

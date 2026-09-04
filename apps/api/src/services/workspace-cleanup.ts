@@ -6,7 +6,11 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { deleteSessionSnapshotState } from './session-snapshots';
-import { attemptWorkspaceDeletion, type WorkspaceDeletionOutcome } from './workspace-deletion';
+import {
+  attemptWorkspaceDeletion,
+  loadWorkspaceDeletionIdentity,
+  type WorkspaceDeletionOutcome,
+} from './workspace-deletion';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -27,13 +31,16 @@ export async function cleanupWorkspaceForDeletion(
   options: WorkspaceDeletionCleanupOptions
 ): Promise<WorkspaceDeletionOutcome> {
   const { db, env, workspace, userId, logContext = {} } = options;
-  const expected = {
-    workspaceId: workspace.id,
-    nodeId: workspace.nodeId,
-    userId,
-    projectId: workspace.projectId,
-    chatSessionId: workspace.chatSessionId,
-  };
+  const expected = await loadWorkspaceDeletionIdentity(env.DATABASE, workspace.id);
+  if (
+    !expected ||
+    expected.userId !== userId ||
+    expected.nodeId !== workspace.nodeId ||
+    expected.projectId !== workspace.projectId ||
+    expected.chatSessionId !== workspace.chatSessionId
+  ) {
+    return { status: 'fenced', reason: 'workspace_assignment_changed' };
+  }
   let lifecycleStub:
     | DurableObjectStub<import('../durable-objects/node-lifecycle').NodeLifecycle>
     | undefined;

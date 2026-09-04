@@ -445,13 +445,14 @@ export async function deleteWorkspaceOnNode(
   workspaceId: string,
   env: Env,
   userId: string,
-  options?: { requestTimeoutMs?: number }
+  options?: { requestTimeoutMs?: number } & GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}`, {
     method: 'DELETE',
     userId,
     workspaceId,
     requestTimeoutMs: options?.requestTimeoutMs,
+    beforeExternalMutation: options?.beforeExternalMutation,
   });
 }
 

@@ -23,6 +23,10 @@ export type NodeLifecycleDeletionEnv = {
 
 export interface PendingWorkspaceDeletion {
   nodeId?: string;
+  nodeUserId?: string | null;
+  nodeRuntime?: string | null;
+  nodeProviderInstanceId?: string | null;
+  nodeRuntimeIncarnationId?: string | null;
   workspaceId: string;
   userId: string;
   projectId?: string | null;
@@ -90,6 +94,16 @@ export async function claimWorkspaceDeletionInD1(
         AND project_id IS ?
         AND chat_session_id IS ?
         AND node_id IS ?
+        AND (
+          ? IS NULL OR EXISTS (
+            SELECT 1 FROM nodes n
+             WHERE n.id = workspaces.node_id
+               AND n.user_id IS ?
+               AND n.runtime IS ?
+               AND n.provider_instance_id IS ?
+               AND n.runtime_incarnation_id IS ?
+          )
+        )
         AND runtime_deletion_confirmed_at IS NULL
         AND status IN ('stopped', 'sleeping', 'stopping', 'deleted')`
   )
@@ -100,7 +114,12 @@ export async function claimWorkspaceDeletionInD1(
       expected.userId,
       expected.projectId,
       expected.chatSessionId,
-      expected.nodeId
+      expected.nodeId,
+      expected.nodeId,
+      expected.nodeUserId,
+      expected.nodeRuntime,
+      expected.nodeProviderInstanceId,
+      expected.nodeRuntimeIncarnationId
     )
     .run();
   if ((result.meta.changes ?? 0) > 0) return true;
