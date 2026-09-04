@@ -167,8 +167,11 @@ the escape from quarantine.
 - Full repository typecheck (19/19), lint (13/13), build (9/9), format ratchet,
   type/runtime boundary checks, migration checks, source contracts, repository
   size, and configuration/binding checks passed.
-- Full coverage retry passed 21/21 workspace tasks: API 653 files / 8,773 tests
-  and web 300 files / 3,595 tests, with repository coverage thresholds met.
+- Final full coverage retry passed 21/21 workspace tasks: API 653 files / 8,811
+  tests and web 302 files / 3,600 tests, with repository coverage thresholds met.
+  The preceding non-coverage matrix passed every package and 8,810/8,811 API
+  assertions; its sole unrelated five-second route-test timeout immediately
+  passed 2/2 in 2.85 seconds, and the independent GitHub full-test job passed.
 - Gitleaks v8.30.1 passed both current-tree and PR-range scans; dependency
   governance and direct dependency evidence passed. The
   `pnpm audit --audit-level high` command exhausted its built-in retries twice
@@ -181,13 +184,20 @@ the escape from quarantine.
   gate, exact task/workspace/chat/ACP liveness scope, strict authoritative
   response parsing, canonical terminal-transition outcome propagation, and
   mutation-discriminating overlap/fairness/budget/Workers-runtime tests.
-- Post-remediation focused validation passes 3 files / 175 unit assertions and
-  2/2 Workers-runtime VM alarm assertions. The Worker replay preserves the live
+- Post-remediation focused validation passes 5 files / 180 unit and integration
+  assertions and 2/2 Workers-runtime VM alarm assertions. The Worker replay preserves the live
   task, prompting mirror, active chat, and absence of messages, attention
   markers, destructive reconciliation events, and false task failure.
-- All six required review gates passed at `3daab40a3`: task-completion,
-  Cloudflare, test-engineer, constitution, documentation-sync, and environment
-  validation, with no unresolved findings.
+- CodeRabbit's first review found three additional gaps: stale `error` mirrors,
+  receipt-idempotent check-ins after a lost response or local write failure, and
+  explicit `node_not_live` supersession-race coverage. The fixes include a
+  task-scoped durable delivery/transcript intent, versioned receipt negotiation,
+  authoritative stale-error probing, and a dedicated terminal-write race test.
+  The lifecycle integration fixture now exercises the real versioned contract,
+  and shared typed fixtures keep SonarCloud duplication within its quality gate.
+- All six required review gates passed after the CodeRabbit remediation:
+  task-completion, Cloudflare, test-engineer, constitution,
+  documentation-sync, and environment validation, with no unresolved findings.
 - Staging deploy `33843354982` passed all 12 smoke checks. A deliberately stopped
   VM (`01M1NJ011CWNX9BWZMVYJYVQY3`) converged once from `in_progress` to `failed`
   through the canonical `workspace_deleted` transition; a later query still
