@@ -376,10 +376,13 @@ export async function runProjectDataManualToolPayloadCleanup(
   const existingKey = readMeta(sql, META_MANUAL_CLEANUP_IDEMPOTENCY_KEY);
   const existingFingerprint = readMeta(sql, META_MANUAL_CLEANUP_FINGERPRINT);
   if (existingKey === idempotencyKey) {
-    if (
-      existingFingerprint !== fingerprint &&
-      existingFingerprint !== compatibleLegacyFingerprint
-    ) {
+    // `compatibleLegacyFingerprint` is null whenever an exact cutoff is configured.
+    // Comparing against it directly would let a MISSING stored fingerprint (also null)
+    // silently pass as compatible, so a reused key could replay or start cleanup with
+    // different inputs. Require a real legacy fingerprint before accepting it.
+    const matchesLegacyFingerprint =
+      compatibleLegacyFingerprint !== null && existingFingerprint === compatibleLegacyFingerprint;
+    if (existingFingerprint !== fingerprint && !matchesLegacyFingerprint) {
       throw new ProjectDataManualToolPayloadCleanupStateError(
         'idempotency_conflict',
         'idempotencyKey was already used with different manual cleanup input'

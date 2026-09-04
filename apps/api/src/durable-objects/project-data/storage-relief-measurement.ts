@@ -231,7 +231,8 @@ function measureGroupedSlice(
     eligibleContentBytes,
     ftsRowsPresent,
     ftsRowsMissing,
-    nextCursor: hasMore ? nextCursor : null,
+    // Same resume-position guarantee as the tool-payload slice above.
+    nextCursor: hasMore ? (nextCursor ?? cursor ?? null) : null,
     hasMore,
   };
 }
@@ -447,7 +448,11 @@ async function measureToolPayloadSlice(
     byteLimitReached,
     deadlineReached,
     sessions: [...sessions.values()],
-    nextCursor: hasMore ? nextCursor : null,
+    // A slice can break before advancing (row limit or wall-time deadline reached on
+    // the very first row). Falling back to the INCOMING cursor keeps the resumed
+    // scan at the same position; returning null would restart at the lowest rowid and
+    // double-count rows into a second batch manifest.
+    nextCursor: hasMore ? (nextCursor ?? cursor ?? null) : null,
     hasMore,
   };
 }

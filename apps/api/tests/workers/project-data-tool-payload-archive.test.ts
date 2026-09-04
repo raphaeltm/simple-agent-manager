@@ -447,6 +447,105 @@ async function callMcpTool(
 }
 
 describe('ProjectData tool payload R2 archival', () => {
+  it('keeps the incoming resume cursor when a measurement slice exhausts its deadline before the first row', async () => {
+    // Regression: the deadline break ran before `nextCursor` was assigned, so a slice
+    // that ran out of wall time on its very first row returned hasMore:true with a
+    // null cursor. The preflight then persisted cursor_json = null and the next slice
+    // restarted at the lowest rowid, double-counting rows into a second batch manifest.
+    const projectId = `${TEST_PREFIX}-measure-deadline-cursor`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await seedToolMessages(stub, [
+      { id: 'measure-deadline-a', createdAt: FIXED_NOW - 4_000, sequence: 1 },
+      { id: 'measure-deadline-b', createdAt: FIXED_NOW - 3_000, sequence: 2 },
+    ]);
+
+    const first = await stub.measureStorageRelief({
+      surface: 'tool_payloads',
+      limit: 1,
+      cutoffCreatedAt: FIXED_NOW - 1_000,
+    });
+    expect(first.toolPayloads.hasMore).toBe(true);
+    const resumeCursor = first.toolPayloads.nextCursor;
+    expect(resumeCursor).not.toBeNull();
+
+    // Already-expired deadline: the slice must break before examining any row.
+    const exhausted = await stub.measureStorageRelief({
+      surface: 'tool_payloads',
+      limit: 1,
+      cutoffCreatedAt: FIXED_NOW - 1_000,
+      deadlineMs: Date.now() - 1,
+      cursor: { toolPayload: resumeCursor ?? undefined },
+    });
+    expect(exhausted.toolPayloads.rowsExamined).toBe(0);
+    expect(exhausted.toolPayloads.deadlineReached).toBe(true);
+    expect(exhausted.toolPayloads.hasMore).toBe(true);
+    // The discriminating assertion: the cursor must not regress to null.
+    expect(exhausted.toolPayloads.nextCursor).toEqual(resumeCursor);
+  });
+
+  it('rejects a reused manual idempotency key whose stored fingerprint is missing under an exact cutoff', async () => {
+    // Regression: `existingFingerprint !== compatibleLegacyFingerprint` was satisfied
+    // by null === null when an exact cutoff made the legacy fingerprint null, so a
+    // reused key with no stored fingerprint was accepted as compatible.
+    const projectId = `${TEST_PREFIX}-manual-missing-fingerprint`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'manual-missing-fingerprint', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+    ]);
+    const idempotencyKey = 'manual-missing-fingerprint-key';
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO do_meta (key, value) VALUES ('storageSafetyToolPayloadManualCleanupIdempotencyKey', ?) " +
+          'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+        idempotencyKey
+      );
+      state.storage.sql.exec(
+        "DELETE FROM do_meta WHERE key = 'storageSafetyToolPayloadManualCleanupFingerprint'"
+      );
+    });
+
+    // Same module entry point the DO method delegates to (see runManualCleanup above);
+    // the guard under test lives in that module, before any lock or R2 work. The throw
+    // is caught INSIDE the runInDurableObject callback: letting it escape the callback
+    // is reported by the workers pool as an unhandled rejection and fails the run.
+    const rejection = await withRuntimeEnv(
+      {
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT: String(FIXED_NOW - 1_000),
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+      },
+      async () =>
+        runInDurableObject(stub, async (_instance, state) => {
+          try {
+            await runProjectDataManualToolPayloadCleanup(
+              state.storage.sql,
+              testEnv,
+              projectId,
+              {
+                reason: 'missing fingerprint replay',
+                idempotencyKey,
+                batchRows: 1,
+                batchBytes: 1_000_000,
+                wallTimeMs: 20_000,
+                now: FIXED_NOW,
+              },
+              { transactionSync: (callback) => state.storage.transactionSync(callback) }
+            );
+            return null;
+          } catch (error) {
+            return error instanceof Error ? error.message : String(error);
+          }
+        })
+    );
+    expect(rejection).toMatch(/idempotencyKey was already used/);
+
+    // Owner control: the source row is untouched by the rejected replay.
+    await expectSourcePayloadIntact(stub, seeded, 'manual-missing-fingerprint');
+  });
+
   it('runs one manual project-scoped cleanup pass with auto cleanup disabled, idempotency, and cooldown', async () => {
     const projectId = `${TEST_PREFIX}-manual-control`;
     const stub = getStub(projectId);
