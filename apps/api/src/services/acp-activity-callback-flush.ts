@@ -19,10 +19,10 @@ import {
 } from './acp-activity-admission';
 import { isTransientDurableObjectError } from './durable-object-retry';
 import { nodeStatusTerminatesCallbacks } from './node-callback-auth';
-import { signalWorkspaceDeletionUnconfirmedCallback } from './workspace-deletion-callback-signal';
 import * as projectDataService from './project-data';
 import { cancelScheduledSessionSleep } from './session-snapshots';
 import { recordAcpActivityCallbackMetric } from './telemetry';
+import { signalWorkspaceDeletionUnconfirmedCallback } from './workspace-deletion-callback-signal';
 
 const ACP_ACTIVITY_WORKSPACE_CALLBACK_ACTIVE_STATUSES: ReadonlySet<string> = new Set([
   'creating',

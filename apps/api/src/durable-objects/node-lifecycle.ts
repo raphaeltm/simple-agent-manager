@@ -50,6 +50,7 @@ import {
 import {
   attemptWorkspaceDeletion,
   loadWorkspaceDeletionIdentity,
+  WORKSPACE_DELETION_DIAGNOSTIC_PREFIX,
   type WorkspaceDeletionIdentity,
 } from '../services/workspace-deletion';
 
@@ -533,8 +534,37 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
       lastAttemptAt: now,
       lastError: existing?.lastError ?? null,
     } satisfies PendingWorkspaceDeletion);
+    const claimed = await this.env.DATABASE.prepare(
+      `UPDATE workspaces
+          SET status = 'stopping', error_message = ?, updated_at = ?
+        WHERE id = ?
+          AND node_id IS ?
+          AND user_id = ?
+          AND project_id IS ?
+          AND chat_session_id IS ?`
+    )
+      .bind(
+        `${WORKSPACE_DELETION_DIAGNOSTIC_PREFIX}: durable attempt 1 claimed`,
+        new Date().toISOString(),
+        expected.workspaceId,
+        expected.nodeId,
+        expected.userId,
+        expected.projectId,
+        expected.chatSessionId
+      )
+      .run();
     await this.recalculateAlarm(await this.getWarmAlarmTime());
-    return true;
+    return (claimed.meta.changes ?? 0) > 0;
+  }
+
+  async getWorkspaceDeletionAttemptState(
+    workspaceId: string
+  ): Promise<{ pending: boolean; attemptStarted: boolean }> {
+    const entry = await this.ctx.storage.get<PendingWorkspaceDeletion>(`ws-delete:${workspaceId}`);
+    return {
+      pending: Boolean(entry),
+      attemptStarted: Boolean((entry?.attemptCount ?? 0) > 0 || entry?.lastAttemptAt != null),
+    };
   }
 
   /** Clear durable evidence only after a caller has proof-bearing confirmation. */
@@ -859,6 +889,33 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
       entry.attemptCount = attempt;
       entry.lastAttemptAt = now;
       await this.ctx.storage.put(key, entry);
+
+      const d1Claim = await this.env.DATABASE.prepare(
+        `UPDATE workspaces
+            SET status = 'stopping', error_message = ?, updated_at = ?
+          WHERE id = ?
+            AND node_id IS ?
+            AND user_id = ?
+            AND project_id IS ?
+            AND chat_session_id IS ?
+            AND status IN ('stopped', 'sleeping', 'stopping', 'deleted')`
+      )
+        .bind(
+          `${WORKSPACE_DELETION_DIAGNOSTIC_PREFIX}: durable attempt ${attempt} claimed`,
+          new Date().toISOString(),
+          expected.workspaceId,
+          expected.nodeId,
+          expected.userId,
+          expected.projectId,
+          expected.chatSessionId
+        )
+        .run();
+      if ((d1Claim.meta.changes ?? 0) === 0) {
+        entry.lastError = 'workspace identity or status changed before VM deletion';
+        entry.deleteAt = now + this.getWorkspaceDeletionRetryDelayMs(attempt);
+        await this.ctx.storage.put(key, entry);
+        continue;
+      }
 
       try {
         const outcome = await attemptWorkspaceDeletion({

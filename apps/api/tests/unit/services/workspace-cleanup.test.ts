@@ -112,9 +112,28 @@ describe('cleanupWorkspaceForDeletion', () => {
       'user-cleanup-1',
       expect.objectContaining({ workspaceId: 'ws-cleanup-1' })
     );
+    expect(mocks.claimWorkspaceDeletionAttempt.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.attemptWorkspaceDeletion.mock.invocationCallOrder[0] as number
+    );
     expect(mocks.confirmWorkspaceDeletion).toHaveBeenCalledWith('ws-cleanup-1');
     expect(deletedTables).toEqual(['workspaces']);
     expect(mocks.scheduleWorkspaceDeletion).not.toHaveBeenCalled();
+  });
+
+  it('does not open a VM request when the durable attempt claim is already owned', async () => {
+    const { db, deletedTables } = buildDb();
+    mocks.claimWorkspaceDeletionAttempt.mockResolvedValueOnce(false);
+
+    const outcome = await cleanupWorkspaceForDeletion({
+      db: db as never,
+      env: buildEnv(),
+      workspace: workspace(),
+      userId: 'user-cleanup-1',
+    });
+
+    expect(outcome).toEqual({ status: 'fenced', reason: 'workspace_active' });
+    expect(mocks.attemptWorkspaceDeletion).not.toHaveBeenCalled();
+    expect(deletedTables).toEqual([]);
   });
 
   it('does not hard-delete an incarnation that changed before confirmation finalized', async () => {

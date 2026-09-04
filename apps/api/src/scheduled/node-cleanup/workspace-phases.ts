@@ -20,8 +20,8 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { stopWorkspaceOnNode } from '../../services/node-agent';
 import { persistError } from '../../services/observability';
-import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import { attemptWorkspaceDeletion } from '../../services/workspace-deletion';
+import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import type { CleanupConfig, CleanupDb, NodeCleanupResult } from './shared';
 
 function deletionRetryBaseMs(env: Env): number {

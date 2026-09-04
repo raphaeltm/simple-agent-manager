@@ -98,6 +98,12 @@ SAM uses **BetterAuth** with configured OAuth login providers for user authentic
 | Bootstrap token | 5 minutes | One-time VM credential injection | API Worker              |
 | Callback token  | Minutes   | VM Agent → API callbacks         | API Worker              |
 
+Deletion-in-progress callbacks fail closed. A VM delete timeout is treated as
+uncertainty, so the workspace remains `stopping` and callback routes reject its
+normal effects. SAM records only throttled, bounded metadata (callback kind,
+workspace/node identifiers, and rejection state); request bodies, prompts,
+tool output, repository data, and credentials are never copied into this signal.
+
 ## Credential Encryption
 
 User credentials are encrypted at rest using **AES-256-GCM**:

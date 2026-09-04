@@ -115,7 +115,9 @@ describe('workspace lifecycle finalizer vertical slices', () => {
 
   it('cleanupWorkspaceForDeletion leaves no running agent session after hard workspace deletion', async () => {
     const ids = await seedBase(`hard-delete-ws-${crypto.randomUUID()}`);
-    await env.DATABASE.prepare(`UPDATE workspaces SET node_id = NULL WHERE id = ?`)
+    await env.DATABASE.prepare(
+      `UPDATE workspaces SET node_id = NULL, status = 'pending' WHERE id = ?`
+    )
       .bind(ids.workspaceId)
       .run();
     const db = drizzle(env.DATABASE, { schema });

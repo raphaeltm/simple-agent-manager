@@ -26,7 +26,7 @@ user-invocable: false
 - `POST /api/workspaces/:id/sleep` — Strictly checkpoint and sleep a persistent session; verified VM snapshots are resumable on a replacement workspace
 - `POST /api/workspaces/:id/stop` — Permanently stop a running workspace and delete retained session snapshot state
 - `POST /api/workspaces/:id/restart` — Restart a workspace
-- `DELETE /api/workspaces/:id` — Permanently delete a workspace and retained session snapshot state
+- `DELETE /api/workspaces/:id` — Request permanent workspace deletion. Returns confirmed success only after VM absence/success proof; returns `202` with `deletionStatus: "pending"` when VM deletion is unconfirmed and durable retry is armed. Retained snapshot/session state is removed only after confirmation.
 
 ## Project Management
 

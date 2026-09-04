@@ -27,6 +27,10 @@ import {
   resolveTaskStartPlacementCredentialAttributionFromPlacement,
   type TaskStartPlacementWithCredential,
 } from './placement-resolver';
+import {
+  assertReplacementDeletionConfirmed,
+  WorkspaceDeletionUnconfirmedError,
+} from './replacement-deletion-fence';
 import { failAndRestoreSessionRecoveryHandoff } from './session-recovery-authority';
 import {
   claimSessionSnapshotRecovery,
@@ -34,10 +38,6 @@ import {
   sessionLifecycleError,
   type SessionRecoverySourceTaskGuard,
 } from './session-snapshots';
-import {
-  assertReplacementDeletionConfirmed,
-  WorkspaceDeletionUnconfirmedError,
-} from './replacement-deletion-fence';
 import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;

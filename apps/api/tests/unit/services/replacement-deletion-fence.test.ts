@@ -33,6 +33,29 @@ describe('replacement deletion fence', () => {
     );
   });
 
+  it('observes the durable pre-network claim even before another D1 reader sees stopping', async () => {
+    const env = buildEnv({
+      workspaceId: 'workspace-old',
+      workspaceStatus: 'stopped',
+      workspaceErrorMessage: null,
+      nodeId: 'node-old',
+      runtimeTerminationConfirmedAt: null,
+    });
+    env.NODE_LIFECYCLE = {
+      idFromName: vi.fn(() => 'node-lifecycle-id'),
+      get: vi.fn(() => ({
+        getWorkspaceDeletionAttemptState: vi.fn(async () => ({
+          pending: true,
+          attemptStarted: true,
+        })),
+      })),
+    } as unknown as DurableObjectNamespace;
+
+    await expect(assertReplacementDeletionConfirmed(env, input)).rejects.toBeInstanceOf(
+      WorkspaceDeletionUnconfirmedError
+    );
+  });
+
   it('releases the fence after strict provider/container termination proof', async () => {
     const env = buildEnv({
       workspaceId: 'workspace-old',

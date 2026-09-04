@@ -21,6 +21,7 @@ export async function assertReplacementDeletionConfirmed(
     `SELECT w.id AS workspaceId,
             w.status AS workspaceStatus,
             w.error_message AS workspaceErrorMessage,
+            w.node_id AS nodeId,
             n.runtime_termination_confirmed_at AS runtimeTerminationConfirmedAt
        FROM tasks t
        LEFT JOIN workspaces w ON w.id = t.workspace_id
@@ -35,8 +36,18 @@ export async function assertReplacementDeletionConfirmed(
       workspaceId: string | null;
       workspaceStatus: string | null;
       workspaceErrorMessage: string | null;
+      nodeId: string | null;
       runtimeTerminationConfirmedAt: string | null;
     }>();
+
+  if (row?.workspaceId && row.runtimeTerminationConfirmedAt) return;
+  if (row?.workspaceId && row.nodeId && env.NODE_LIFECYCLE) {
+    const stub = env.NODE_LIFECYCLE.get(
+      env.NODE_LIFECYCLE.idFromName(row.nodeId)
+    ) as DurableObjectStub<import('../durable-objects/node-lifecycle').NodeLifecycle>;
+    const attempt = await stub.getWorkspaceDeletionAttemptState(row.workspaceId);
+    if (attempt.attemptStarted) throw new WorkspaceDeletionUnconfirmedError(row.workspaceId);
+  }
 
   if (
     !row?.workspaceId ||
