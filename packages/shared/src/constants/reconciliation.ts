@@ -39,11 +39,17 @@ export const DEFAULT_TASK_RECONCILIATION_MIN_ALARM_DELAY_MS = 10 * 1000; // 10 s
 /** Maximum number of reconciliation candidates to process in one alarm pass. */
 export const DEFAULT_TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP = 5;
 
-/** Maximum age for a node heartbeat before reconciliation treats the node as dead. */
-export const DEFAULT_TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS = 5 * 60 * 1000; // 5 minutes
-
 /** Short timeout for reconciliation-originated cancel requests that remain on the alarm path. */
 export const DEFAULT_TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS = 5 * 1000; // 5 seconds
+
+/** Durable claim window preventing overlapping alarms from repeating remote reconciliation I/O. */
+export const DEFAULT_TASK_RECONCILIATION_CANDIDATE_LEASE_MS = 30 * 1000; // 30 seconds
+
+/** Consecutive inconclusive task reconciliation attempts before quarantine. */
+export const DEFAULT_TASK_RECONCILIATION_PROBE_MAX_ATTEMPTS = 3;
+
+/** Cooldown after the inconclusive-attempt budget is exhausted. */
+export const DEFAULT_TASK_RECONCILIATION_QUARANTINE_MS = 5 * 60 * 1000; // 5 minutes
 
 // --- Session activity reconciliation (probe-backed staleness bound) ---
 
@@ -60,8 +66,8 @@ export const DEFAULT_SESSION_ACTIVITY_PROBE_TIMEOUT_MS = 5 * 1000; // 5 seconds
 
 /**
  * Consecutive unreachable probes after which a stale working-state session is
- * terminalized as dead. Guarantees every candidate leaves the candidate set
- * (.claude/rules/47 #3) instead of being re-probed forever.
+ * quarantined outside the hot candidate set. Silence cannot prove a turn ended;
+ * a later authoritative activity report resets this counter.
  */
 export const DEFAULT_SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS = 3;
 

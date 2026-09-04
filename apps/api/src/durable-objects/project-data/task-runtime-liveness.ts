@@ -158,7 +158,13 @@ export function readTaskAcpLivenessSignals(
 export async function getLocalTaskRuntimeLiveness(
   sql: SqlStorage,
   env: Env,
-  task: { taskId: string; projectId: string; workspaceId: string | null }
+  task: {
+    taskId: string;
+    projectId: string;
+    workspaceId: string | null;
+    chatSessionId?: string | null;
+    acpSessionId?: string | null;
+  }
 ): Promise<TaskRuntimeLiveness> {
   const staleMs =
     positiveInt(env.NODE_HEARTBEAT_STALE_SECONDS, DEFAULT_NODE_HEARTBEAT_STALE_SECONDS) * 1000;
@@ -193,7 +199,9 @@ export async function getLocalTaskRuntimeLiveness(
   let sessionResumability: TaskRuntimeLivenessSignals['sessionResumability'] = null;
   /** True when resumability alone already yields an inconclusive verdict. */
   let resumabilityResolvedInconclusive = false;
-  if (needsSessionResumabilityProbe(workspace, workspaceProbeOutcome)) {
+  const workspaceChatMatches =
+    !task.chatSessionId || !workspace || workspace.chatSessionId === task.chatSessionId;
+  if (workspaceChatMatches && needsSessionResumabilityProbe(workspace, workspaceProbeOutcome)) {
     try {
       sessionResumability = await loadSessionResumabilitySnapshot(
         env.DATABASE,
@@ -227,6 +235,7 @@ export async function getLocalTaskRuntimeLiveness(
   let supersessionProbeOutcome: TaskRuntimeLivenessSignals['supersessionProbeOutcome'] = 'not_run';
   let supersession: TaskRuntimeLivenessSignals['supersession'] = 'none';
   if (
+    workspaceChatMatches &&
     !resumabilityResolvedInconclusive &&
     needsTaskSupersessionProbe(workspace, workspaceProbeOutcome)
   ) {
@@ -247,6 +256,8 @@ export async function getLocalTaskRuntimeLiveness(
   let livenessSignals: TaskRuntimeLivenessSignals = {
     projectId: task.projectId,
     taskWorkspaceId: task.workspaceId,
+    expectedChatSessionId: task.chatSessionId,
+    expectedAcpSessionId: task.acpSessionId,
     workspace,
     workspaceProbeOutcome,
     supersessionProbeOutcome,
@@ -264,6 +275,7 @@ export async function getLocalTaskRuntimeLiveness(
     resumabilityMaxRecoveryAttempts: maxRecoveryAttempts,
   };
   let initialClassification = classifyTaskRuntimeLiveness(livenessSignals);
+  if (!workspaceChatMatches) return initialClassification;
   if (needsNodeHealthProbe(livenessSignals) && livenessSignals.workspace?.nodeId) {
     const nodeId = livenessSignals.workspace.nodeId;
     const probe = await probeNodeHealthForTaskLiveness(env, nodeId);
@@ -275,7 +287,7 @@ export async function getLocalTaskRuntimeLiveness(
         outcome: probe.outcome,
         status: probe.status,
         timeoutMs: probe.timeoutMs,
-        action: probe.outcome === 'failed' ? 'terminal_candidate' : 'preserved',
+        action: 'preserved',
         error: probe.error,
       });
     }

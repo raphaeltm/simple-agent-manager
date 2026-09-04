@@ -7,6 +7,7 @@ export interface TaskRuntimeLiveness {
   workspaceStatus: string | null;
   nodeId: string | null;
   activeAcpSessionId: string | null;
+  deliveryTarget?: { nodeId: string; userId: string };
 }
 
 export type RuntimeProbeOutcome = 'ok' | 'timeout' | 'error' | 'unknown' | 'not_run';
@@ -17,6 +18,7 @@ export interface RuntimeWorkspaceSnapshot {
   status: string;
   chatSessionId: string | null;
   nodeId: string | null;
+  userId: string | null;
   nodeRuntime: string | null;
   nodeStatus: string | null;
   nodeHealthStatus: string | null;
@@ -100,6 +102,10 @@ export interface TaskRuntimeLivenessSignals {
   /** The task's project — re-checked against the snapshot row in memory. */
   projectId: string;
   taskWorkspaceId: string | null;
+  /** Optional canonical chat owner used by reconciliation's cross-store fence. */
+  expectedChatSessionId?: string | null;
+  /** Optional current ACP owner; historical siblings cannot terminalize it. */
+  expectedAcpSessionId?: string | null;
   workspace: RuntimeWorkspaceSnapshot | null;
   workspaceProbeOutcome: 'ok' | 'error' | 'unknown';
   nowMs: number;

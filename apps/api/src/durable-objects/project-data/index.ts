@@ -1676,28 +1676,13 @@ export class ProjectData extends DurableObject<Env> {
       }
     );
 
-    // Session state staleness: auto-heal stuck "prompting" states
+    // Session state staleness is reconciled only against the authoritative
+    // SessionHost inventory. Local SQL mirrors and VM heartbeats cannot prove a
+    // turn ended.
     const staleThresholdMs = sessionState.parseActivityStaleThreshold(
       this.env.SESSION_ACTIVITY_STALE_THRESHOLD_MS
     );
-    try {
-      const healedSessionIds = sessionState.reconcileStaleActivity(this.sql, staleThresholdMs);
-      for (const healedId of healedSessionIds) {
-        const healedChatId = sessionState.resolveActivityChatSessionId(this.sql, healedId);
-        await sessionActivityReconciliation.publishTurnEnd(
-          this.sessionActivityHooks(),
-          healedChatId
-        );
-      }
-    } catch (err) {
-      log.error('alarm.stale_activity_reconciliation_failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    // Probe-backed reconciliation for stale working states the SQL-only heal
-    // cannot resolve (an awake, heartbeating agent that simply is not
-    // prompting). Network I/O stays OFF the alarm's critical path — rule 47.
+    // Network I/O stays OFF the alarm's critical path — rule 47.
     this.ctx.waitUntil(
       sessionActivityReconciliation
         .probeStaleSessionActivity(this.sql, this.env, this.sessionActivityHooks(), {
