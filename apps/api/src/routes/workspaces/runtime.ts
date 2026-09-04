@@ -1074,7 +1074,10 @@ runtimeRoutes.post(
         if (projectCredential.isActive) {
           existing = projectCredential;
         } else {
-          return c.json({ success: false, reason: 'credential_not_found' });
+          return callbackJsonWithJit(c, workspace, 'agent_credential_sync', {
+            success: false,
+            reason: 'credential_not_found',
+          });
         }
       }
     }
