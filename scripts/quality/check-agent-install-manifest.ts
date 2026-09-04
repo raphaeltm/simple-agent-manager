@@ -22,6 +22,13 @@ const specs = parsedManifest as Spec[];
 const goSource = readFileSync(join(root, 'packages/vm-agent/internal/acp/gateway.go'), 'utf8');
 const dockerfile = readFileSync(join(root, 'apps/api/Dockerfile.vm-agent-container'), 'utf8');
 const catalog = readFileSync(join(root, 'packages/shared/src/agents.ts'), 'utf8');
+// apps/api/Dockerfile.sandbox pins a smaller CLI subset (claude-code + codex, no
+// ACP wrappers); its manifest alignment is enforced separately by
+// apps/api/tests/unit/cf-container-runtime-contract.test.ts.
+// A pin must be followed by a non-version character so e.g. pkg@1.18.27 cannot
+// be satisfied by a stale pkg@1.18.270 (substring false-positive).
+const containsPin = (source: string, pin: string): boolean =>
+  new RegExp(`${pin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![0-9A-Za-z.+-])`).test(source);
 const safePackage = /^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/;
 const safeVersion = /^[0-9][0-9A-Za-z.+-]*$/;
 const ids = new Set<string>();
@@ -35,13 +42,13 @@ for (const spec of specs) {
     throw new Error(`Invalid install manifest entry: ${spec.agentType}`);
   ids.add(spec.agentType);
   const pin = `${spec.package}${spec.method === 'npm' ? '@' : '=='}${spec.version}`;
-  if (!goSource.includes(pin)) throw new Error(`Go installer is missing ${pin}`);
-  if (!dockerfile.includes(pin)) throw new Error(`cf-container image is missing ${pin}`);
+  if (!containsPin(goSource, pin)) throw new Error(`Go installer is missing ${pin}`);
+  if (!containsPin(dockerfile, pin)) throw new Error(`cf-container image is missing ${pin}`);
   if (!catalog.includes(`id: '${spec.agentType}'`))
     throw new Error(`Agent catalog is missing ${spec.agentType}`);
   if (spec.npmCompanion) {
     const companion = `${spec.npmCompanion.package}@${spec.npmCompanion.version}`;
-    if (!goSource.includes(companion) || !dockerfile.includes(companion))
+    if (!containsPin(goSource, companion) || !containsPin(dockerfile, companion))
       throw new Error(`Runtime outputs are missing ${companion}`);
   }
 }

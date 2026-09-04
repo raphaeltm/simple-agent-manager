@@ -114,6 +114,10 @@ are out of scope.
       install + ACP handshake + agent response; clean up staging nodes/workspaces
       afterward (Hetzner capacity: staging runs zero VMs at rest).
 - [ ] PR through CI, CodeRabbit label loop, merge, monitor production deploy.
+- [ ] Post-ship: update the SAM project knowledge entry "SAM event delivery
+      compatibility" (codex-acp pinned at 1.1.2 lacks `_session/steering`) to
+      reflect the 1.8.0 pin — steering may now be advertised; SAM remains
+      capability-gated and does not consume it yet.
 
 ## Acceptance Criteria
 

@@ -56,7 +56,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind:    "oauth-token",
 			wantCommand:       "codex-acp",
 			wantEnvVar:        "",
-			wantInstallCmd:    "npm install -g @agentclientprotocol/codex-acp@1.8.0 @openai/codex@0.153.2",
+			wantInstallCmd:    codexACPInstallCommand,
 			wantInjectionMode: "auth-file",
 			wantAuthFilePath:  ".codex/auth.json",
 		},
@@ -66,7 +66,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "api-key",
 			wantCommand:    "codex-acp",
 			wantEnvVar:     "OPENAI_API_KEY",
-			wantInstallCmd: "npm install -g @agentclientprotocol/codex-acp@1.8.0 @openai/codex@0.153.2",
+			wantInstallCmd: codexACPInstallCommand,
 		},
 		{
 			name:           "Google Gemini always uses API key",
@@ -331,7 +331,7 @@ func TestGetAgentCommandInfoOpenAICodex(t *testing.T) {
 	if info.envVarName != "OPENAI_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q", info.envVarName, "OPENAI_API_KEY")
 	}
-	if info.installCmd != "npm install -g @agentclientprotocol/codex-acp@1.8.0 @openai/codex@0.153.2" {
+	if info.installCmd != codexACPInstallCommand {
 		t.Fatalf("installCmd=%q, unexpected", info.installCmd)
 	}
 	if info.injectionMode != "" {
@@ -358,7 +358,7 @@ func TestGetAgentCommandInfoOpenAICodexOAuth(t *testing.T) {
 	if info.envVarName != "" {
 		t.Fatalf("envVarName=%q, want empty for auth-file injection", info.envVarName)
 	}
-	if info.installCmd != "npm install -g @agentclientprotocol/codex-acp@1.8.0 @openai/codex@0.153.2" {
+	if info.installCmd != codexACPInstallCommand {
 		t.Fatalf("installCmd=%q, unexpected", info.installCmd)
 	}
 	if info.args != nil {
@@ -371,7 +371,7 @@ func TestAgentInstallScriptCleansBrokenGitHubCLIRepoBeforeNpmBootstrap(t *testin
 
 	info := agentCommandInfo{
 		command:    "claude-agent-acp",
-		installCmd: "npm install -g @agentclientprotocol/claude-agent-acp@0.73.0",
+		installCmd: "npm install -g " + claudeACPInstallPackage,
 		isNpmBased: true,
 	}
 
