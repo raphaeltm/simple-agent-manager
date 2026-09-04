@@ -180,9 +180,7 @@ describe('node provisioning success path', () => {
       doSource.indexOf('export async function handleNodeAgentReady(')
     );
     expect(section).toContain('auto_provisioned_node_id');
-    expect(section.replace(/\s+/g, ' ')).toContain(
-      'UPDATE tasks SET auto_provisioned_node_id = ?'
-    );
+    expect(section.replace(/\s+/g, ' ')).toContain('UPDATE tasks SET auto_provisioned_node_id = ?');
   });
 
   it('persists state to DO storage after creating node', () => {
@@ -529,8 +527,11 @@ describe('provider-aware node provisioning', () => {
     );
   });
 
-  it('deleteNodeResources uses node cloudProvider for credential lookup', () => {
-    const section = nodesSource.slice(nodesSource.indexOf('async function deleteNodeResources'));
+  it('deleteNodeResources delegates provider credential lookup to strict deletion', () => {
+    const section = strictNodeDeletionSource.slice(
+      strictNodeDeletionSource.indexOf('function getStrictNodeCredentialContext'),
+      strictNodeDeletionSource.indexOf('async function resolveStrictNodeProvider')
+    );
     expect(section).toContain('node.cloudProvider as CredentialProvider');
     expect(section).toContain('exactProviderCredentialBindingFromPlacementSnapshot(node)');
     expect(section).toMatch(
