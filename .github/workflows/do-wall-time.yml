@@ -13,6 +13,34 @@ on:
         options:
           - staging
           - production
+      operation:
+        description: Operation to run
+        required: true
+        default: wall-time
+        type: choice
+        options:
+          - wall-time
+          - stale-heartbeat-probe
+      probe_database_id:
+        description: Staging D1 database UUID for the bounded probe
+        required: false
+        type: string
+      probe_node_id:
+        description: Exact staging node ULID for the bounded probe
+        required: false
+        type: string
+      probe_stale_timestamp:
+        description: ISO timestamp to persist during the bounded probe
+        required: false
+        type: string
+      probe_iterations:
+        description: Number of bounded stale writes
+        required: false
+        type: string
+      probe_interval_seconds:
+        description: Seconds between bounded stale writes
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -28,17 +56,77 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Inject bounded staging stale-heartbeat evidence
+        if: ${{ inputs.operation == 'stale-heartbeat-probe' }}
+        env:
+          CF_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+          PROBE_DATABASE_ID: ${{ inputs.probe_database_id }}
+          PROBE_NODE_ID: ${{ inputs.probe_node_id }}
+          PROBE_STALE_TIMESTAMP: ${{ inputs.probe_stale_timestamp }}
+          PROBE_ITERATIONS: ${{ inputs.probe_iterations }}
+          PROBE_INTERVAL_SECONDS: ${{ inputs.probe_interval_seconds }}
+        run: |
+          set -euo pipefail
+          if [ "$TARGET_ENVIRONMENT" != staging ]; then
+            echo "Stale-heartbeat probes are staging-only" >&2
+            exit 2
+          fi
+          [[ "$PROBE_DATABASE_ID" =~ ^[0-9a-f-]{36}$ ]]
+          [[ "$PROBE_NODE_ID" =~ ^[0-9A-HJKMNP-TV-Z]{26}$ ]]
+          [[ "$PROBE_STALE_TIMESTAMP" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$ ]]
+          [[ "$PROBE_ITERATIONS" =~ ^[0-9]+$ ]]
+          [[ "$PROBE_INTERVAL_SECONDS" =~ ^[0-9]+$ ]]
+          if [ "$PROBE_ITERATIONS" -lt 1 ] || [ "$PROBE_ITERATIONS" -gt 120 ]; then
+            echo "Probe iterations must be in [1,120]" >&2
+            exit 2
+          fi
+          if [ "$PROBE_INTERVAL_SECONDS" -lt 1 ] || [ "$PROBE_INTERVAL_SECONDS" -gt 10 ]; then
+            echo "Probe interval must be in [1,10] seconds" >&2
+            exit 2
+          fi
+          endpoint="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/d1/database/$PROBE_DATABASE_ID/query"
+          query() {
+            curl -fsS -X POST \
+              -H "Authorization: Bearer $CF_TOKEN" \
+              -H 'Content-Type: application/json' \
+              "$endpoint" --data "$1"
+          }
+          inventory_payload=$(jq -cn --arg node "$PROBE_NODE_ID" '{sql:"SELECT id,status,runtime FROM nodes WHERE id = ?",params:[$node]}')
+          inventory=$(query "$inventory_payload")
+          if [ "$(jq -r '.result[0].results | length' <<<"$inventory")" != 1 ] || \
+             [ "$(jq -r '.result[0].results[0].status' <<<"$inventory")" != running ] || \
+             [ "$(jq -r '.result[0].results[0].runtime' <<<"$inventory")" != vm ]; then
+            echo "Exact running VM probe target was not found" >&2
+            exit 2
+          fi
+          update_payload=$(jq -cn --arg node "$PROBE_NODE_ID" --arg stale "$PROBE_STALE_TIMESTAMP" '{sql:"UPDATE nodes SET health_status = ?, last_heartbeat_at = ? WHERE id = ? AND status = ? AND runtime = ?",params:["unhealthy",$stale,$node,"running","vm"]}')
+          for ((i = 1; i <= PROBE_ITERATIONS; i++)); do
+            result=$(query "$update_payload")
+            if [ "$(jq -r '.result[0].meta.changes // 0' <<<"$result")" != 1 ]; then
+              echo "Exact-node stale write failed at iteration $i" >&2
+              exit 2
+            fi
+            sleep "$PROBE_INTERVAL_SECONDS"
+          done
+          echo "Completed $PROBE_ITERATIONS exact-node stale-heartbeat writes"
+
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        if: ${{ inputs.operation != 'stale-heartbeat-probe' }}
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: ${{ inputs.operation != 'stale-heartbeat-probe' }}
         with:
           node-version: '22'
           cache: 'pnpm'
 
       - name: Install dependencies
+        if: ${{ inputs.operation != 'stale-heartbeat-probe' }}
         run: pnpm install --frozen-lockfile
 
       - name: Check Durable Object wall-time regression
+        if: ${{ inputs.operation != 'stale-heartbeat-probe' }}
         env:
           CF_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
