@@ -598,7 +598,8 @@ aggregate operator-visible counters.
 | `TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS` | `48`               | Hard maximum execution residence backstop; live linked tasks still control concurrency and incident dispatch use |
 | `TRIGGER_EXECUTION_LOG_RETENTION_DAYS`       | `90`               | Completed/failed/skipped execution log retention                                                                 |
 | `TRIGGER_EXECUTION_CLEANUP_ENABLED`          | enabled            | Set to `false` to disable the cleanup sweep                                                                      |
-| `TRIGGER_STALE_RECOVERY_BATCH_SIZE`          | `100`              | Maximum stale execution candidates processed per sweep                                                           |
+| `TRIGGER_STALE_RECOVERY_BATCH_SIZE`          | `100`              | Maximum stale execution candidates processed per sweep                           |
+| `MAX_TRIGGERS_PER_PROJECT`                   | `20`               | Maximum triggers per project. Per-project overrides are configurable in Project → Settings → Scaling & Scheduling → Task Limits. |
 
 ## Generic Webhook Triggers
 
