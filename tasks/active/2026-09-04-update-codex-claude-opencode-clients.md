@@ -86,16 +86,24 @@ are out of scope.
 
 ## Implementation Checklist
 
-- [ ] Bump all five pins in `packages/shared/src/agent-install-manifest.json`.
-- [ ] Bump `claudeACPInstallPackage`, `claudeCodeInstallPackage`,
+- [x] Bump all five pins in `packages/shared/src/agent-install-manifest.json`.
+- [x] Bump `claudeACPInstallPackage`, `claudeCodeInstallPackage`,
       `codexACPInstallCommand`, and the opencode `installCmd` in
       `packages/vm-agent/internal/acp/gateway.go`.
-- [ ] Update the `codex-acp 1.1.2` behavior comments in `gateway.go` and
+- [x] Update the `codex-acp 1.1.2` behavior comments in `gateway.go` and
       `session_host_startup.go` to cite the new version (behavior re-verified).
-- [ ] Bump the `npm install -g` line in `apps/api/Dockerfile.vm-agent-container`.
-- [ ] Update expected install commands in
+- [x] Bump the `npm install -g` line in `apps/api/Dockerfile.vm-agent-container`.
+- [x] Update expected install commands in
       `packages/vm-agent/internal/acp/gateway_test.go`.
-- [ ] Update `scripts/e2e/workspace-mock/mock-claude.sh` version echo to 2.1.260.
+- [x] Update `scripts/e2e/workspace-mock/mock-claude.sh` version echo to 2.1.260.
+- [x] Discovered during implementation: `apps/api/Dockerfile.sandbox` (guided
+      credential-setup / admin sandbox image) had drifted pins —
+      `@anthropic-ai/claude-code@2.1.258` and `@openai/codex@0.142.5` — plus an
+      unpinned install of the deprecated `@zed-industries/claude-agent-acp` that no
+      sandbox surface execs (scripts spawn `claude` / `codex` directly). Bumped both
+      CLIs to the manifest companions and removed the dead adapter install; added
+      contract-test assertions pinning sandbox codex alignment and banning the Zed
+      adapter's return (`cf-container-runtime-contract.test.ts`).
 - [ ] Run `pnpm quality:agent-install-manifest` and the
       `cf-container-runtime-contract` test; run `go test ./...` in `packages/vm-agent`.
 - [ ] Full quality suite: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
