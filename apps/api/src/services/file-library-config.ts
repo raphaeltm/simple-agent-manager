@@ -67,10 +67,13 @@ export function getListMaxPageSize(env: Env): number {
   return parsePositiveInt(env.LIBRARY_LIST_MAX_PAGE_SIZE, LIBRARY_DEFAULTS.LIST_MAX_PAGE_SIZE);
 }
 
+// Cloudflare's workerd SQLite build rejects statements that bind more than
+// 100 variables, in both D1 and Durable Object storage. Keep this cap fixed
+// while per-surface defaults remain configurable downward for self-hosters
+// and tests.
+export const d1BindVariableLimit = 100;
+
 export function getTagQueryBatchSize(env: Env): number {
-  // Cloudflare D1 fails at 101 bound variables. Keep this cap fixed while the
-  // default remains configurable downward for self-hosters and tests.
-  const d1BindVariableLimit = 100;
   return Math.min(
     parsePositiveInt(env.LIBRARY_TAG_QUERY_BATCH_SIZE, LIBRARY_DEFAULTS.TAG_QUERY_BATCH_SIZE),
     d1BindVariableLimit

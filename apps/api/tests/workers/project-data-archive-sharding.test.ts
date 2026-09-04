@@ -274,6 +274,93 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
     );
   });
 
+  it('migrates a >100-message session whose chunk verification exceeds the workerd SQLite bind-variable ceiling', async () => {
+    await clearArchiveCadence();
+    const projectId = `archive-bind-limit-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const source = projectDataStub(projectId);
+    await source.ensureProjectId(projectId);
+    const sessionId = await source.createSession(null, 'Workers archive bind limit');
+    // 130 messages with an identical created_at forces the chunk's
+    // spec.orderBy to resolve every row by sequence — the ordering contract
+    // the sub-batched verification read must preserve across batches.
+    const messageCount = 130;
+    const batchTimestamp = new Date('2026-09-04T00:00:00Z').toISOString();
+    await source.persistMessageBatch(
+      sessionId,
+      Array.from({ length: messageCount }, (_, index) => ({
+        messageId: `${sessionId}-bind-limit-${index}`,
+        role: index % 2 === 0 ? 'user' : 'assistant',
+        content: `bind limit payload ${index}`,
+        toolMetadata: null,
+        timestamp: batchTimestamp,
+      }))
+    );
+    await source.stopSession(sessionId);
+    await source.runSummarySyncForTest();
+
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '4',
+        // No PROJECT_DATA_ARCHIVE_CHUNK_ROWS override: the default (500) packs
+        // all 130 chat_messages rows into ONE chunk, so the post-insert
+        // verification read binds 130 variables — the exact production
+        // configuration that failed with "too many SQL variables".
+      },
+      async () => {
+        const stats = await runProjectDataArchiveSharding(testEnv, new Date(Date.now() + 60_000));
+        expect(stats).toMatchObject({
+          enabled: true,
+          skipped: false,
+          migrated: 1,
+          failed: 0,
+        });
+
+        const location = await readLocation(projectId, sessionId);
+        expect(location).toMatchObject({ location_state: 'archive_shard' });
+
+        const target = projectDataStub(location!.owner_name);
+        const targetProof = await runInDurableObject(target, async (_instance, state) => {
+          const sql = state.storage.sql;
+          const messages = sql
+            .exec('SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?', sessionId)
+            .toArray()[0] as { count: number };
+          const chatMessageChunks = sql
+            .exec(
+              `SELECT row_count FROM project_data_archive_target_chunks
+               WHERE session_id = ? AND table_name = 'chat_messages'`,
+              sessionId
+            )
+            .toArray() as Array<{ row_count: number }>;
+          return { messages: messages.count, chatMessageChunks };
+        });
+        expect(targetProof.messages).toBe(messageCount);
+        expect(targetProof.chatMessageChunks).toHaveLength(1);
+        expect(targetProof.chatMessageChunks[0]?.row_count).toBe(messageCount);
+
+        const routed = await projectDataService.getMessages(
+          testEnv,
+          projectId,
+          sessionId,
+          messageCount + 10,
+          null,
+          null,
+          undefined,
+          false,
+          'asc'
+        );
+        expect(routed.messages).toHaveLength(messageCount);
+        expect(routed.messages[0]?.content).toContain('bind limit payload 0');
+        expect(routed.messages[messageCount - 1]?.content).toContain(
+          `bind limit payload ${messageCount - 1}`
+        );
+      }
+    );
+  });
+
   it('daily-gates repeated global scheduled archive-sharding sweeps in the Workers runtime', async () => {
     await clearArchiveCadence();
     const projectId = `archive-cadence-${crypto.randomUUID()}`;

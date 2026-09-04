@@ -23,6 +23,7 @@ import {
   compareArchiveStrings,
   sha256Hex,
 } from '../../project-data-archive/hashing';
+import { d1BindVariableLimit } from '../../services/file-library-config';
 import * as messages from './messages';
 import type {
   ArchivedToolPayloadListResult,
@@ -1131,14 +1132,28 @@ function readCommittedRowsForChunk(
 ): ProjectDataArchiveRow[] {
   if (rowIds.length === 0) return [];
   const spec = validateTableName(tableName);
-  const placeholders = rowIds.map(() => '?').join(', ');
-  const query = `SELECT ${spec.columns.join(', ')} FROM ${tableName}
+  const rows: ProjectDataArchiveRow[] = [];
+  // Cloudflare's workerd SQLite rejects statements binding more than
+  // d1BindVariableLimit variables, so the IN-list verification read is
+  // sub-batched instead of shrinking chunkRows (smaller chunks would multiply
+  // DO RPC + R2 round trips inside one invocation). rowIds arrives in
+  // spec.orderBy order and every sub-batch re-applies the same ORDER BY, so
+  // concatenating sequential slices preserves the global order the caller
+  // hashes against the source chunk hash. The completeness check below totals
+  // across all sub-batches.
+  for (let start = 0; start < rowIds.length; start += d1BindVariableLimit) {
+    const batchRowIds = rowIds.slice(start, start + d1BindVariableLimit);
+    const placeholders = batchRowIds.map(() => '?').join(', ');
+    const query = `SELECT ${spec.columns.join(', ')} FROM ${tableName}
        WHERE ${spec.keyColumn} IN (${placeholders})
        ORDER BY ${spec.orderBy}`;
-  const rows = sql
-    .exec(query, ...rowIds)
-    .toArray()
-    .map((row) => toArchiveRow(row, spec.columns));
+    rows.push(
+      ...sql
+        .exec(query, ...batchRowIds)
+        .toArray()
+        .map((row) => toArchiveRow(row, spec.columns))
+    );
+  }
   if (rows.length !== rowIds.length) {
     throw new ProjectDataArchiveInvariantError(
       'target_chunk_missing_rows',

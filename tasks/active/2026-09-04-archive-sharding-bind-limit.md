@@ -22,12 +22,12 @@ Production impact: 5 failed sessions in project `01KHRJGANBBWGDY1NZ0KVF0D4J` (1 
 
 ## Implementation Checklist
 
-- [ ] Export `d1BindVariableLimit` from `apps/api/src/services/file-library-config.ts` (single shared constant; extend its comment to note it applies to workerd SQLite in both D1 and DO storage).
-- [ ] Sub-batch the `WHERE <key> IN (...)` query inside `readCommittedRowsForChunk` in groups of `d1BindVariableLimit`, preserving `spec.orderBy` order via sequential slice concatenation.
-- [ ] Make the completeness check (`rows.length !== rowIds.length`) a total across all sub-batches.
-- [ ] Confirm both callers (`commitArchiveTargetChunk`, `restoreSourceArchiveChunk`) flow through the fixed helper (no caller changes needed — the fix is in the shared helper).
-- [ ] Add a Workers-runtime test in `apps/api/tests/workers/project-data-archive-sharding.test.ts` that migrates a >=101-message session with default chunk rows (single chunk >100 rows) through real DO SQLite and verifies the migration succeeds, routing returns all messages, and the target recorded a single >100-row `chat_messages` chunk.
-- [ ] Run the full quality suite (`pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`).
+- [x] Export `d1BindVariableLimit` from `apps/api/src/services/file-library-config.ts` (single shared constant; extend its comment to note it applies to workerd SQLite in both D1 and DO storage).
+- [x] Sub-batch the `WHERE <key> IN (...)` query inside `readCommittedRowsForChunk` in groups of `d1BindVariableLimit`, preserving `spec.orderBy` order via sequential slice concatenation.
+- [x] Make the completeness check (`rows.length !== rowIds.length`) a total across all sub-batches.
+- [x] Confirm both callers (`commitArchiveTargetChunk`, `restoreSourceArchiveChunk`) flow through the fixed helper (no caller changes needed — the fix is in the shared helper).
+- [x] Add a Workers-runtime test in `apps/api/tests/workers/project-data-archive-sharding.test.ts` that migrates a >=101-message session with default chunk rows (single chunk >100 rows) through real DO SQLite and verifies the migration succeeds, routing returns all messages, and the target recorded a single >100-row `chat_messages` chunk.
+- [x] Run the full quality suite (`pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`).
 
 ## Acceptance Criteria
 

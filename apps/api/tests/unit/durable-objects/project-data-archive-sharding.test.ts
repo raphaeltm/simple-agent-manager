@@ -92,6 +92,39 @@ function seedTerminalSession(sql: SqlStorage, sessionId = 'session-archive'): vo
   );
 }
 
+function seedBindLimitSession(sql: SqlStorage, sessionId = 'session-bind-limit'): void {
+  const messageCount = 130;
+  sql.exec(
+    `INSERT INTO chat_sessions
+       (id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
+        started_at, ended_at, created_at, updated_at, agent_completed_at, materialized_at)
+     VALUES (?, ?, ?, ?, ?, 'stopped', ?, 1000, 1500, 1000, 1500, 1500, 1500)`,
+    sessionId,
+    'workspace-bind-limit',
+    'task-bind-limit',
+    'user-bind-limit',
+    'bind limit topic',
+    messageCount
+  );
+  for (let index = 0; index < messageCount; index++) {
+    sql.exec(
+      `INSERT INTO chat_messages
+         (id, session_id, role, content, tool_metadata, created_at, sequence, origin)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+      `${sessionId}-bind-${index}`,
+      sessionId,
+      index % 2 === 0 ? 'user' : 'assistant',
+      `bind limit payload ${index}`,
+      null,
+      // Identical created_at on every row forces spec.orderBy to resolve the
+      // chunk order by sequence alone — the tie-heavy shape the sub-batched
+      // verification read must keep in global order.
+      2000,
+      index + 1
+    );
+  }
+}
+
 async function copyAllChunks(
   source: SqlStorage,
   target: SqlStorage,
@@ -291,6 +324,83 @@ describe('ProjectData terminal archive sharding bridge', () => {
           'asc'
         )
       ).toThrow(/failed closed/);
+    } finally {
+      source.db.close();
+      target.db.close();
+    }
+  });
+
+  it('commits a single chunk larger than the bind-variable limit with sub-batched verification preserving chunk order', async () => {
+    const source = makeSql();
+    const target = makeSql();
+    try {
+      seedBindLimitSession(source.sql);
+      const prepared = await prepareArchiveSourceIntent(source.sql, {
+        projectId: 'project-archive',
+        sessionId: 'session-bind-limit',
+        migrationId: 'migration-bind-limit',
+        sourceOwnerName: 'project-archive',
+        targetOwnerName: 'project-archive:archive:g1:s1',
+        targetGeneration: 1,
+        sourceIntentToken: 'intent-bind-limit',
+        now: NOW,
+        minTerminalAgeMs: 0,
+      });
+      expect(prepared.messageCount).toBe(130);
+
+      prepareArchiveTarget(target.sql, {
+        projectId: 'project-archive',
+        sessionId: 'session-bind-limit',
+        migrationId: 'migration-bind-limit',
+        sourceOwnerName: 'project-archive',
+        targetOwnerName: 'project-archive:archive:g1:s1',
+        targetGeneration: 1,
+        sourceIntentToken: 'intent-bind-limit',
+        terminalVersionSha256: prepared.terminalVersionSha256,
+        sessionRow: prepared.sessionRow,
+        expectedMessageCount: prepared.messageCount,
+        now: NOW,
+      });
+
+      // maxRows 500 packs all 130 rows into ONE chunk, so the committed-row
+      // verification read spans two sub-batches (100 + 30). The workerd
+      // 100-variable ceiling is exercised end-to-end by the Workers-runtime
+      // test; this unit test pins the ordering and completeness contract the
+      // sub-batch concatenation must preserve.
+      const chunk = await exportArchiveChunk(source.sql, {
+        projectId: 'project-archive',
+        sessionId: 'session-bind-limit',
+        migrationId: 'migration-bind-limit',
+        sourceOwnerName: 'project-archive',
+        targetOwnerName: 'project-archive:archive:g1:s1',
+        targetGeneration: 1,
+        sourceIntentToken: 'intent-bind-limit',
+        tableName: 'chat_messages',
+        ordinal: 0,
+        cursor: null,
+        maxRows: 500,
+        maxBytes: 1024 * 1024,
+      });
+      expect(chunk.rowCount).toBe(130);
+      expect(chunk.hasMore).toBe(false);
+
+      const committed = await commitArchiveTargetChunk(target.sql, { ...chunk, now: NOW });
+      expect(committed.sha256).toBe(chunk.sha256);
+      const replay = await commitArchiveTargetChunk(target.sql, { ...chunk, now: NOW });
+      expect(replay.idempotent).toBe(true);
+
+      // The recomputed-hash equality above already fails on any reordering;
+      // assert it directly too: committed rows follow the chunk's rowIds
+      // (spec.orderBy order) even though verification read them in batches.
+      const committedIds = (
+        target.db
+          .prepare(
+            `SELECT id FROM chat_messages WHERE session_id = ?
+             ORDER BY created_at ASC, sequence ASC, id ASC`
+          )
+          .all('session-bind-limit') as Array<{ id: string }>
+      ).map((row) => row.id);
+      expect(committedIds).toEqual(chunk.rowIds);
     } finally {
       source.db.close();
       target.db.close();
