@@ -3,22 +3,22 @@
     "agentType": "claude-code",
     "method": "npm",
     "package": "@agentclientprotocol/claude-agent-acp",
-    "version": "0.58.1",
+    "version": "0.73.0",
     "bin": "claude-agent-acp",
     "npmCompanion": {
       "package": "@anthropic-ai/claude-code",
-      "version": "2.1.258"
+      "version": "2.1.260"
     }
   },
   {
     "agentType": "openai-codex",
     "method": "npm",
     "package": "@agentclientprotocol/codex-acp",
-    "version": "1.1.2",
+    "version": "1.8.0",
     "bin": "codex-acp",
     "npmCompanion": {
       "package": "@openai/codex",
-      "version": "0.144.6"
+      "version": "0.153.2"
     }
   },
   {
@@ -40,7 +40,7 @@
     "agentType": "opencode",
     "method": "npm",
     "package": "opencode-ai",
-    "version": "1.17.18",
+    "version": "1.18.27",
     "bin": "opencode"
   },
   {
