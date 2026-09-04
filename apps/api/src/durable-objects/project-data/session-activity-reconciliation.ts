@@ -72,6 +72,38 @@ export interface SessionActivityReconciliationHooks {
 }
 
 /**
+ * What happened to the session, as distinct from what happened to the turn.
+ *
+ * Required rather than defaulted so a new caller must state which it means. The
+ * distinction is load-bearing for the idle timer:
+ *
+ * - A TURN ending on a session that lives on RE-ARMS the timer — that session
+ *   was wrongly denied one while its mirror was wedged, which is the whole
+ *   point of the reconciliation.
+ * - A SESSION ending LEAVES THE EXISTING SCHEDULE ALONE. Neither alternative is
+ *   safe: re-arming pushes the deadline out on a session that will never report
+ *   again, while cancelling deletes the row whose expiry is what actually calls
+ *   `stopWorkspaceInD1`. Some callers deliberately keep the workspace running
+ *   past the session's end (`scheduled/stuck-tasks.ts` transitions with
+ *   `stopWorkspace: false` before failing the session), so cancelling would
+ *   remove that workspace's only teardown path. Leaving the original deadline
+ *   intact preserves teardown, and the row is not an immortal candidate because
+ *   `processExpiredCleanups` terminalizes it when it fires.
+ */
+export type TurnEndDisposition =
+  /** The turn ended; the session remains alive and may receive another prompt. */
+  | { kind: 'idle' }
+  /** The session itself was stopped. */
+  | { kind: 'stopped' }
+  /** The session itself ended in failure. */
+  | { kind: 'failed'; statusError: string };
+
+function dispositionActivity(disposition: TurnEndDisposition): string {
+  if (disposition.kind === 'idle') return 'idle';
+  return disposition.kind === 'stopped' ? 'stopped' : 'error';
+}
+
+/**
  * Select working-state rows that are stale and have no RECENT progress, then
  * claim them so a concurrent pass cannot probe the same row twice. SQL only —
  * no I/O.
@@ -309,7 +341,11 @@ export function applyProbeOutcome(
     return recordTurnEnd(sql, candidate.acpSessionId, {
       reason: 'probe_reconciled',
       source: 'probe',
+      // `observedAt` here is the `activity_at` read at candidate selection, not
+      // a wall-clock observation, so the guard is optimistic concurrency: any
+      // fresh report since selection withdraws this probe's stale verdict.
       observedAt: candidate.activityAt,
+      guard: 'row_unchanged',
       now,
     });
   }
@@ -354,6 +390,7 @@ export function applyProbeOutcome(
     reason: 'dead',
     source: 'probe',
     observedAt: candidate.activityAt,
+    guard: 'row_unchanged',
     now,
   });
 }
@@ -367,16 +404,41 @@ export function applyProbeOutcome(
  */
 export async function publishTurnEnd(
   hooks: SessionActivityReconciliationHooks,
-  chatSessionId: string
+  chatSessionId: string,
+  disposition: TurnEndDisposition,
+  options: { deferAlarm?: boolean } = {}
 ): Promise<void> {
   hooks.broadcastEvent(
     'session.activity',
-    { sessionId: chatSessionId, activity: 'idle', promptStartedAt: null },
+    {
+      sessionId: chatSessionId,
+      activity: dispositionActivity(disposition),
+      promptStartedAt: null,
+      ...(disposition.kind === 'failed' ? { statusError: disposition.statusError } : {}),
+    },
     chatSessionId
   );
-  hooks.armIdleCleanup(chatSessionId);
-  hooks.nudgeDeliveries(chatSessionId);
-  await hooks.recalculateAlarm();
+  // Only a TURN ending re-arms. A session ending leaves the existing schedule
+  // untouched — see TurnEndDisposition for why neither re-arming nor cancelling
+  // is safe there.
+  let alarmMayHaveMoved = false;
+  if (disposition.kind === 'idle') {
+    hooks.armIdleCleanup(chatSessionId);
+    alarmMayHaveMoved = true;
+  }
+  // Releasing a queued delivery makes it due sooner, which is the only reason a
+  // terminal ending needs the alarm touched at all.
+  alarmMayHaveMoved = hooks.nudgeDeliveries(chatSessionId) > 0 || alarmMayHaveMoved;
+
+  // Recompute only when something actually moved. `stopSession`/`failSession`
+  // never scheduled an alarm before this fan-out existed, and scheduling one
+  // unconditionally makes every terminal transition wake the object to re-read
+  // all nine alarm sources and run storage maintenance that nothing asked for.
+  //
+  // Batch callers defer entirely and recompute once for the whole sweep, since
+  // paying a full nine-source recompute per candidate is an N x amplification
+  // inside a single alarm tick (.claude/rules/47).
+  if (!options.deferAlarm && alarmMayHaveMoved) await hooks.recalculateAlarm();
 }
 
 /** Resolve the workspace owner needed to authenticate the probe request. */
@@ -498,8 +560,13 @@ export async function probeStaleSessionActivity(
         staleForMs: Math.max(0, Date.now() - candidate.activityAt),
       })
     );
-    await publishTurnEnd(hooks, candidate.chatSessionId);
+    // The TURN ended; the session itself is untouched and still wants an idle
+    // timer. Alarm recomputation is deferred to one call after the sweep rather
+    // than one per reconciled candidate (.claude/rules/47).
+    await publishTurnEnd(hooks, candidate.chatSessionId, { kind: 'idle' }, { deferAlarm: true });
   }
+
+  if (reconciled > 0) await hooks.recalculateAlarm();
 
   log.info('session_activity.probe_sweep_completed', {
     probed: candidates.length,

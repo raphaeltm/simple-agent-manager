@@ -692,8 +692,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
             onOpenPlan={() => setShowPlanModal(true)}
             sleeping={sleepingConversation}
             archiving={closingConversation}
+            cancelling={lc.cancelling}
             sleepError={sleepError}
             archiveError={closeError}
+            cancelError={lc.cancelError}
             elapsed={
               lc.promptStartedAt ? <ElapsedTime startedAt={lc.promptStartedAt} /> : undefined
             }

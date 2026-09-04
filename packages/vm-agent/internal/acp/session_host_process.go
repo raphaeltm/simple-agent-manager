@@ -228,9 +228,14 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 		return
 	}
 	if !crashRecovery.inProgress {
-		// Normal (non-recovery) restart succeeded.
+		// Normal (non-crash-recovery) restart succeeded. This includes the
+		// intentional process restart used to preserve a session after prompt
+		// cancellation. The detach path published `recovering`; close that
+		// transition explicitly after LoadSession succeeds so the control-plane
+		// activity mirror and composer become usable for the next prompt.
 		h.mu.Unlock()
 		h.broadcastAgentStatus(StatusReady, agentType, "")
+		h.reportActivity("idle")
 		return
 	}
 

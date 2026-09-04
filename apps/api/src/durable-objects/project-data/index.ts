@@ -75,6 +75,15 @@ import type { Env, SummaryData } from './types';
 
 const log = createModuleLogger('project_data');
 
+/**
+ * Human-readable fallbacks written into the free-text `session_state`
+ * diagnostic columns (`last_stop_reason`, `status_error`) when a terminal
+ * transition carries no caller-supplied reason. Display copy, not a vocabulary
+ * anything branches on.
+ */
+const SESSION_STOPPED_REASON = 'Session stopped';
+const SESSION_FAILED_REASON = 'Session failed';
+
 export type { Env } from './types';
 
 export class ProjectData extends DurableObject<Env> {
@@ -206,7 +215,56 @@ export class ProjectData extends DurableObject<Env> {
     return updated;
   }
 
-  async stopSession(sessionId: string): Promise<boolean> {
+  /**
+   * Terminalize the activity mirror for an ended session and fan the transition
+   * out to every consumer of "is this session mid-prompt".
+   *
+   * `stopSession`/`failSession` previously wrote only `chat_sessions.status`, so
+   * a session ended mid-turn left `session_state.activity` reporting `prompting`
+   * until the 5-minute probe sweep noticed. All three consumers broke together:
+   * the dock kept showing "working", queued durable messages stayed parked
+   * behind a turn that had ended, and idle scheduling was suppressed
+   * (.claude/rules/57). Both keyings are cleared — the chat-session row and every
+   * linked ACP-session row — because the VM writes the latter. That multi-row
+   * clear is the ONLY part unique to a session ending; a turn ending touches one
+   * row. Everything downstream is delegated to the shared `publishTurnEnd`
+   * fan-out so a consumer added there is inherited here automatically, which is
+   * the promise `sessionActivityHooks()` makes.
+   *
+   * The disposition also tells the shared fan-out to leave the idle-cleanup
+   * schedule alone rather than re-arm it — see `TurnEndDisposition`.
+   */
+  private async publishSessionTerminalEnd(
+    chatSessionId: string,
+    disposition: sessionActivityReconciliation.TurnEndDisposition,
+    options: { deferAlarm?: boolean } = {}
+  ): Promise<void> {
+    if (disposition.kind !== 'idle') {
+      sessionState.terminalizeChatSessionActivity(
+        this.sql,
+        chatSessionId,
+        disposition.kind === 'stopped'
+          ? { activity: 'stopped', reason: SESSION_STOPPED_REASON }
+          : { activity: 'error', statusError: disposition.statusError }
+      );
+    }
+
+    await sessionActivityReconciliation.publishTurnEnd(
+      this.sessionActivityHooks(),
+      chatSessionId,
+      disposition,
+      options
+    );
+  }
+
+  /**
+   * @param options.deferAlarm Skip the alarm recomputation, for BATCH callers
+   * that terminalize many sessions in one turn. `recalculateAlarm` re-reads all
+   * nine alarm sources, so paying it per candidate is an N x full recompute
+   * inside a single alarm tick (.claude/rules/47). A deferring caller MUST
+   * recompute once when its batch completes.
+   */
+  async stopSession(sessionId: string, options: { deferAlarm?: boolean } = {}): Promise<boolean> {
     const result = sessions.stopSession(this.sql, sessionId);
     if (result) {
       activity.recordActivityEventInternal(
@@ -226,6 +284,18 @@ export class ProjectData extends DurableObject<Env> {
       }
       this.scheduleSummarySync();
       this.broadcastEvent('session.stopped', { sessionId }, sessionId);
+      // Best-effort: a session IS stopped once `chat_sessions` says so, and the
+      // probe sweep remains the backstop for the mirror. Never turn a mirror
+      // failure into a failed stop.
+      try {
+        await this.publishSessionTerminalEnd(sessionId, { kind: 'stopped' }, options);
+      } catch (e) {
+        log.error('session_terminal_end_publish_failed', {
+          sessionId,
+          outcome: 'stopped',
+          ...serializeError(e),
+        });
+      }
       return true;
     }
     return false;
@@ -278,7 +348,12 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
-  async failSession(sessionId: string, errorMessage: string | null = null): Promise<boolean> {
+  /** @param options.deferAlarm See {@link ProjectData.stopSession}. */
+  async failSession(
+    sessionId: string,
+    errorMessage: string | null = null,
+    options: { deferAlarm?: boolean } = {}
+  ): Promise<boolean> {
     const result = sessions.failSession(this.sql, sessionId);
     if (result) {
       activity.recordActivityEventInternal(
@@ -298,6 +373,19 @@ export class ProjectData extends DurableObject<Env> {
       }
       this.scheduleSummarySync();
       this.broadcastEvent('session.failed', { sessionId }, sessionId);
+      try {
+        await this.publishSessionTerminalEnd(
+          sessionId,
+          { kind: 'failed', statusError: errorMessage ?? SESSION_FAILED_REASON },
+          options
+        );
+      } catch (e) {
+        log.error('session_terminal_end_publish_failed', {
+          sessionId,
+          outcome: 'failed',
+          ...serializeError(e),
+        });
+      }
       return true;
     }
     return false;
@@ -308,16 +396,25 @@ export class ProjectData extends DurableObject<Env> {
   ): Promise<terminalSessionReconciliation.TerminalSessionReconciliationStats> {
     const projectId = this.getProjectId();
     if (!projectId) return terminalSessionReconciliation.emptyTerminalSessionReconciliationStats();
-    return terminalSessionReconciliation.reconcileTerminalTaskSessions(
+    // This sweep terminalizes up to MAX_TERMINAL_SESSION_RECONCILE_BATCH_SIZE
+    // sessions inside ONE alarm tick, so it defers the alarm recomputation and
+    // pays it once below rather than once per candidate — otherwise every
+    // candidate re-reads all nine alarm sources (.claude/rules/47).
+    const stats = await terminalSessionReconciliation.reconcileTerminalTaskSessions(
       this.sql,
       this.env,
       projectId,
       {
-        stopSession: (sessionId) => this.stopSession(sessionId),
-        failSession: (sessionId, errorMessage) => this.failSession(sessionId, errorMessage),
+        stopSession: (sessionId) => this.stopSession(sessionId, { deferAlarm: true }),
+        failSession: (sessionId, errorMessage) =>
+          this.failSession(sessionId, errorMessage, { deferAlarm: true }),
       },
       input
     );
+    if (stats.stopped > 0 || stats.failed > 0) {
+      await this.recalculateAlarm();
+    }
+    return stats;
   }
 
   async persistMessage(
@@ -1401,10 +1498,22 @@ export class ProjectData extends DurableObject<Env> {
       reason: input.reason,
       source: 'control_plane',
       observedAt: input.observedAt,
+      // `observedAt` is a wall-clock instant captured before the caller's slow
+      // VM call, so the question is "did a NEW turn begin since then?" — not
+      // "did this turn make any progress since then?". Same-turn message
+      // persistence advances `activity_at` constantly, which is exactly what
+      // used to void a cancel issued while the agent was still emitting.
+      guard: 'turn_start',
     });
     if (!changed) return false;
     const chatSessionId = sessionState.resolveActivityChatSessionId(this.sql, sessionId);
-    await sessionActivityReconciliation.publishTurnEnd(this.sessionActivityHooks(), chatSessionId);
+    // The TURN ended; the session lives on and may receive another prompt, so it
+    // still wants an idle timer.
+    await sessionActivityReconciliation.publishTurnEnd(
+      this.sessionActivityHooks(),
+      chatSessionId,
+      { kind: 'idle' }
+    );
     return true;
   }
 
@@ -1662,7 +1771,8 @@ export class ProjectData extends DurableObject<Env> {
         const healedChatId = sessionState.resolveActivityChatSessionId(this.sql, healedId);
         await sessionActivityReconciliation.publishTurnEnd(
           this.sessionActivityHooks(),
-          healedChatId
+          healedChatId,
+          { kind: 'idle' }
         );
       }
     } catch (err) {

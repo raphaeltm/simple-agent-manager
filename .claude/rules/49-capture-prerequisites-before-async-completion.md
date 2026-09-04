@@ -69,6 +69,49 @@ lifecycle-transition callbacks.
 - A negative assertion that no recovery/episode state is left armed on the
   terminal path (so a watchdog cannot fire a second completion).
 
+## The Compare-And-Set Sibling: A Guard Column With Other Writers
+
+The capture pattern above usually lands as a compare-and-set — "only act if the
+state has not moved since I observed it". That CAS is only as correct as the
+column it compares. **Enumerate every writer of the guard column before you
+choose it** (`.claude/rules/44`), and reject any column an unrelated path also
+writes.
+
+`recordTurnEnd` guarded a cancel on `session_state.activity_at`, intending "has a
+NEW turn begun since I observed the turn-end evidence?". But `activity_at` is a
+LAST-REPORT clock: `refreshWorkingActivityForChatSession` rewrites it to `now` on
+every persisted message while a turn is working. So a message flushing inside the
+cancel's VM round-trip pushed it past `observedAt`, the CAS silently no-opped,
+and the turn-end fan-out never ran — wedging the stop button, durable-message
+delivery and idle scheduling together (`.claude/rules/57`). The user-visible
+symptoms were "Interrupt needs several presses" and "follow-ups stop working
+after an interrupt".
+
+The guard column must answer the question the caller is actually asking:
+
+| The question | The column | NOT |
+|---|---|---|
+| Has a new EPISODE begun? | the episode's own start (`prompt_started_at`, an epoch, a generation counter) | a last-activity/last-report timestamp |
+| Has this ROW changed since I read it? | the exact value read at selection time | anything an unrelated path also advances |
+
+Two callers asking different questions must say so explicitly. Do not let one of
+them inherit the other's predicate by default — that is `.claude/rules/67` at the
+predicate level.
+
+**Required test.** The regression test must DRIVE THE REAL WRITER of the guard
+column, not seed the column. Seeding it is what let this ship with green CAS
+tests: every existing test set `activity_at` directly, so none could observe that
+message persistence moves it. Call the production writer, assert the precondition
+it created, then assert the CAS still fires.
+
+**Required inventory.** When a shared helper gains a REQUIRED field, its callers
+include test files. `apps/api/tsconfig.json` excludes `tests/`, so TypeScript
+will not tell you: a required-field addition type-checks clean and fails at
+runtime. Grep for every call site, tests included, and reconcile the full suite
+total against a baseline rather than trusting a wrapper's exit code
+(`.claude/rules/02` — a pnpm/turbo exit code is not the suite's result; read the
+JSON reporter's own `success` field).
+
 ## Quick Compliance Check
 
 Before merging a change to a long async operation with a deferred handler:
@@ -77,6 +120,10 @@ Before merging a change to a long async operation with a deferred handler:
 - [ ] Captured-state fallback is scoped to the active episode only
 - [ ] Unrecoverable path is explicit + sanitized-diagnostic, never a silent stall
 - [ ] Regression test clears live state after capture and is proven discriminating
+- [ ] Every writer of any CAS guard column is enumerated; no unrelated path writes it
+- [ ] The guard column answers the caller's actual question (episode start vs row-unchanged)
+- [ ] The regression test drives the real writer of that column rather than seeding it
+- [ ] A newly-required field on a shared helper was grepped for in `tests/` too
 
 ## References
 
@@ -85,3 +132,7 @@ Before merging a change to a long async operation with a deferred handler:
 - `.claude/rules/45-durable-object-concurrency-mutex.md` — the DO `await`-interleaving analogue
 - `.claude/rules/46-vm-agent-diagnostic-getter-sync.md` — the goroutine field-sync analogue
 - `.claude/rules/11-fail-fast-patterns.md` — identity validation + explicit failure at boundaries
+- `.claude/rules/44-dual-write-migration-enumerate-writers.md` — enumerate every writer
+- `.claude/rules/57-write-only-cross-boundary-state.md` — the three consumers that wedge together
+- `.claude/rules/67-shared-predicates-that-trigger-actions.md` — two callers, two questions
+- Task: `tasks/active/2026-09-03-session-stop-cancel-flow-fixes.md` (the CAS-clock incident)

@@ -22,8 +22,9 @@ import { FollowUpInput } from '../../components/project-message-view/FollowUpInp
 import type { AgentActivityState } from '../../components/project-message-view/types';
 import { chatMessagesToConversationItems, deriveSessionState, isWorkingActivity, VIRTUAL_START } from '../../components/project-message-view/types';
 import { useActivityVerifyTimer } from '../../components/project-message-view/useActivityVerifyTimer';
+import { useCancelAgentPrompt } from '../../components/project-message-view/useCancelAgentPrompt';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
-import { cancelAgentPrompt, getChatSession, getTranscribeApiUrl, resetIdleTimer, sendFollowUpPrompt, uploadSessionFiles } from '../../lib/api';
+import { getChatSession, getTranscribeApiUrl, resetIdleTimer, sendFollowUpPrompt, uploadSessionFiles } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionDetailResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api/sessions';
 import { mergeMessages } from '../../lib/merge-messages';
 
@@ -161,6 +162,22 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     return chatMessagesToConversationItems(messages);
   }, [messages]);
 
+  // ── Cancel the current in-flight prompt ──
+  // Shares one implementation with the project-chat dock so the two surfaces
+  // cannot drift apart again (.claude/rules/24).
+  const onCancelled = useCallback(() => setAgentActivity('idle'), []);
+  const {
+    cancelling,
+    cancelError,
+    cancelPrompt: handleCancelPrompt,
+    clearCancelError,
+  } = useCancelAgentPrompt({
+    projectId,
+    sessionId,
+    enabled: agentActivity !== 'idle',
+    onCancelled,
+  });
+
   // ── Send follow-up message via REST API ──
   const handleSendFollowUp = useCallback(async () => {
     const trimmed = followUp.trim();
@@ -168,6 +185,9 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
 
     setSendingFollowUp(true);
     setAgentActivity('prompting');
+    // A new turn supersedes any failed interrupt of the previous one; leaving the
+    // old banner up would attach it to work it has nothing to do with.
+    clearCancelError();
     try {
       if (sessionState === 'idle') {
         resetIdleTimer(projectId, sessionId)
@@ -215,7 +235,7 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     } finally {
       setSendingFollowUp(false);
     }
-  }, [followUp, sendingFollowUp, sessionState, projectId, sessionId, wsRef]);
+  }, [followUp, sendingFollowUp, sessionState, projectId, sessionId, wsRef, clearCancelError]);
 
   // ── Upload files ──
   const handleUploadFiles = useCallback(async (files: FileList | File[]) => {
@@ -267,23 +287,6 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     }
   }, [hasMore, loadingMore, messages, projectId, sessionId]);
 
-  // ── Cancel the current in-flight prompt via REST API ──
-  const cancellingRef = useRef(false);
-  const handleCancelPrompt = useCallback(() => {
-    if (agentActivity === 'idle' || cancellingRef.current) return;
-    cancellingRef.current = true;
-    cancelAgentPrompt(projectId, sessionId)
-      .then(() => {
-        setAgentActivity('idle');
-      })
-      .catch(() => {
-        // Network/server error — keep spinner visible so user can retry
-      })
-      .finally(() => {
-        cancellingRef.current = false;
-      });
-  }, [agentActivity, projectId, sessionId]);
-
   // ── Derive placeholder from agent activity ──
   const placeholder = agentActivity === 'prompting' || agentActivity === 'responding'
     ? 'Agent is working...'
@@ -320,9 +323,12 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
       )}
 
       {/* Error banner */}
-      {error && session && (
-        <div className="px-4 py-2 bg-danger-tint border-b border-border-default text-danger text-xs">
-          {error}
+      {(error || cancelError) && session && (
+        <div
+          role="alert"
+          className="px-4 py-2 bg-danger-tint border-b border-border-default text-danger text-xs break-words"
+        >
+          {error ?? cancelError}
         </div>
       )}
 
@@ -369,10 +375,12 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
           <button
             type="button"
             onClick={handleCancelPrompt}
-            aria-label="Cancel agent"
-            className="ml-auto flex-shrink-0 px-2 py-2.5 min-h-[44px] text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer text-danger hover:bg-danger-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            disabled={cancelling}
+            aria-busy={cancelling}
+            aria-label={cancelling ? 'Cancelling agent' : 'Cancel agent'}
+            className="ml-auto flex-shrink-0 px-2 py-2.5 min-h-[44px] text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer text-danger hover:bg-danger-tint disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
-            Cancel
+            {cancelling ? 'Cancelling…' : 'Cancel'}
           </button>
         </div>
       )}

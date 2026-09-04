@@ -184,6 +184,44 @@ export function upsertActivityState(
   return cursor.rowsWritten > 0;
 }
 
+/**
+ * Which clock `observedAt` is measured against. The two callers of
+ * `recordTurnEnd` ask genuinely different questions, so the predicate is an
+ * explicit argument rather than a shared default — a new caller must choose,
+ * and neither meaning can be widened into the other by accident
+ * (.claude/rules/67).
+ *
+ * - `turn_start` — "has a NEW turn begun since I observed the turn-end
+ *   evidence?" Used by control-plane observations (cancel, force-stop, dead
+ *   target) whose `observedAt` is a wall-clock instant captured BEFORE a slow
+ *   VM call (.claude/rules/49). Compares `prompt_started_at`, which is written
+ *   once when a turn begins and is explicitly PRESERVED across same-turn
+ *   re-reports by `upsertActivityState`, so it is stable for the life of a turn.
+ *
+ *   It must NOT compare `activity_at`, which is a LAST-REPORT clock:
+ *   `refreshWorkingActivityForChatSession` rewrites it to `now` on EVERY
+ *   persisted message while a session is working (`message-persistence.ts`,
+ *   both the single and batch paths). Guarding a cancel on `activity_at` meant
+ *   any message flushing inside the cancel's VM round-trip pushed it past
+ *   `observedAt` and silently voided the cancel — the turn stayed "working",
+ *   `publishTurnEnd` never ran, and the stop button, durable delivery and idle
+ *   scheduling all wedged together (.claude/rules/57).
+ *
+ * - `row_unchanged` — "has this row changed at all since I selected it?"
+ *   Optimistic concurrency for the probe sweep, whose `observedAt` is the
+ *   `activity_at` it read at candidate-selection time rather than a wall-clock
+ *   observation. Compares `activity_at` so that ANY fresh report — including a
+ *   new message arriving mid-probe — withdraws the probe's stale verdict.
+ */
+export type TurnEndGuard = 'turn_start' | 'row_unchanged';
+
+const TURN_END_GUARD_SQL: Record<TurnEndGuard, string> = {
+  // COALESCE falls back to the last-report clock so a working row that never
+  // recorded a prompt start behaves exactly as it did before this guard existed.
+  turn_start: 'COALESCE(prompt_started_at, activity_at)',
+  row_unchanged: 'activity_at',
+};
+
 export interface TurnEndInput {
   reason: SessionActivityTerminalReason;
   source: SessionActivitySource;
@@ -193,6 +231,8 @@ export interface TurnEndInput {
    * belongs to a newer prompt and is never stomped.
    */
   observedAt: number;
+  /** Which clock `observedAt` is compared against. See {@link TurnEndGuard}. */
+  guard: TurnEndGuard;
   now?: number;
 }
 
@@ -222,7 +262,28 @@ export function recordTurnEnd(
   input: TurnEndInput,
 ): boolean {
   const now = input.now ?? Date.now();
+  // The guard selects a SQL FRAGMENT, so its closedness must be enforced at
+  // runtime and not left to the TypeScript union alone (.claude/rules/51). Both
+  // current callers pass a literal, but a future caller deserializing this from
+  // an RPC/JSON boundary would otherwise reopen a SQL-construction hole with no
+  // compile error to catch it.
+  const guardSql = Object.prototype.hasOwnProperty.call(TURN_END_GUARD_SQL, input.guard)
+    ? TURN_END_GUARD_SQL[input.guard]
+    : undefined;
+  if (!guardSql) {
+    throw new Error(`recordTurnEnd: unknown turn-end guard`);
+  }
   const placeholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
+  // Assembled outside the `sql.exec` template and named `whereClause`
+  // deliberately: `scripts/quality/ast-checks.ts` allowlists exactly that
+  // identifier for a dynamic WHERE built from parameterized conditions, which is
+  // what this is — both interpolated parts are compile-time constants (a `?`
+  // expansion over a const array, and a lookup into a frozen fragment map that
+  // the runtime check above has already proven closed). No caller value reaches
+  // the SQL text; every caller value is bound.
+  const whereClause = `session_id = ?
+       AND activity IN (${placeholders})
+       AND ${guardSql} <= ?`;
   const before = sql.exec(
     `SELECT activity FROM session_state WHERE session_id = ?`,
     sessionId,
@@ -242,9 +303,7 @@ export function recordTurnEnd(
          status_error = NULL,
          activity_probe_attempts = 0,
          activity_probe_at = NULL
-     WHERE session_id = ?
-       AND activity IN (${placeholders})
-       AND activity_at <= ?`,
+     WHERE ${whereClause}`,
     now,
     input.source,
     input.reason,
@@ -313,19 +372,41 @@ export function getPromptEpoch(sql: SqlStorage, sessionId: string): number | nul
   return typeof row?.prompt_epoch === 'number' ? row.prompt_epoch : null;
 }
 
+/**
+ * Every `session_state` key belonging to one chat session: the chat-session id
+ * itself plus every linked ACP-session id.
+ *
+ * Both keyings exist in production — the VM's activity callbacks are keyed by
+ * ACP session id, the browser-facing state by chat session id — so any operation
+ * over "this conversation's activity mirror" must span both. Defined once here
+ * and shared by every reader/writer so the keying scheme cannot drift between
+ * them. NOTE: `archive-sharding.ts` encodes the same invariant as a LEFT JOIN +
+ * OR; keep the two in step if the keying ever changes.
+ *
+ * Takes two bind parameters, both the chat session id.
+ */
+const CHAT_SESSION_STATE_IDS_SQL = `SELECT id FROM acp_sessions WHERE chat_session_id = ?
+   UNION SELECT ?`;
+
+/**
+ * `WHERE` restricting `session_state` to one chat session's rows. Named
+ * `whereClause` at every use site because `scripts/quality/ast-checks.ts`
+ * allowlists that identifier for a dynamic WHERE assembled from constants —
+ * which this is: the only interpolated value is the module constant above, and
+ * both of its parameters are bound.
+ */
+const CHAT_SESSION_STATE_WHERE = `session_id IN (${CHAT_SESSION_STATE_IDS_SQL})`;
+
 export function refreshWorkingActivityForChatSession(
   sql: SqlStorage,
   chatSessionId: string,
   now = Date.now()
 ): void {
+  const whereClause = `activity IN ('prompting', 'recovering') AND ${CHAT_SESSION_STATE_WHERE}`;
   sql.exec(
     `UPDATE session_state
      SET activity_at = ?
-     WHERE activity IN ('prompting', 'recovering')
-       AND session_id IN (
-         SELECT id FROM acp_sessions WHERE chat_session_id = ?
-         UNION SELECT ?
-       )`,
+     WHERE ${whereClause}`,
     now,
     chatSessionId,
     chatSessionId
@@ -354,35 +435,92 @@ export function updateCurrentPlan(sql: SqlStorage, sessionId: string, planJson: 
   );
 }
 
-export function markSessionStopped(sql: SqlStorage, sessionId: string, reason: string): void {
-  const now = Date.now();
-  sql.exec(
+/**
+ * Terminalize the activity mirror for a chat session that has ENDED.
+ *
+ * `stopSession`/`failSession` used to write only `chat_sessions.status`, leaving
+ * a mid-turn row reporting `prompting` forever — so the stop button kept showing
+ * "working", queued durable messages stayed parked behind a turn that had ended,
+ * and the probe sweep kept selecting a session that no longer exists
+ * (.claude/rules/57).
+ *
+ * ONE statement rather than a row-per-id loop, because a long-lived conversation
+ * accumulates an ACP session per resume and this runs inside sweeps that
+ * terminalize many sessions per alarm tick (.claude/rules/47).
+ *
+ * Scope is deliberately asymmetric:
+ * - the chat-session-keyed row ALWAYS updates — that is the row the UI reads, so
+ *   it must carry the terminal state and (for a failure) the error context;
+ * - an ACP-session-keyed row updates only while it is still in a WORKING state.
+ *   Those are the wedged rows this fix exists to clear. Rewriting historical ACP
+ *   rows from turns that ended normally would destroy their per-turn provenance
+ *   for no benefit.
+ *
+ * Clearing the probe accounting is what removes the row from the sweep's
+ * candidate set by construction: `selectStaleActivityProbeCandidates` matches
+ * only `WORKING_ACTIVITIES`, and neither `stopped` nor `error` is one.
+ *
+ * Returns the number of rows written.
+ */
+export function terminalizeChatSessionActivity(
+  sql: SqlStorage,
+  chatSessionId: string,
+  outcome:
+    | { activity: 'stopped'; reason: string }
+    | { activity: 'error'; statusError: string },
+  now = Date.now()
+): number {
+  const placeholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
+  // See CHAT_SESSION_STATE_WHERE for why this identifier is named `whereClause`.
+  const whereClause = `${CHAT_SESSION_STATE_WHERE}
+       AND (session_id = ? OR activity IN (${placeholders}))`;
+  const stopped = outcome.activity === 'stopped';
+  const cursor = sql.exec(
     `UPDATE session_state
-     SET activity = 'stopped', activity_at = ?, last_stop_reason = ?,
-		     prompt_started_at = NULL, prompt_epoch = NULL,
-			 runtime_work_state = 'inactive', runtime_work_count = 0,
-			 runtime_work_updated_at = ?
-     WHERE session_id = ?`,
+     SET activity = ?,
+         activity_at = ?,
+         last_stop_reason = ?,
+         status_error = ?,
+         activity_source = 'control_plane',
+         activity_reason = ?,
+         prompt_started_at = NULL,
+         prompt_epoch = NULL,
+         activity_probe_attempts = 0,
+         activity_probe_at = NULL,
+         runtime_work_state = 'inactive',
+         runtime_work_count = 0,
+         runtime_work_updated_at = ?
+     WHERE ${whereClause}`,
+    outcome.activity,
     now,
-    reason,
+    stopped ? outcome.reason : null,
+    // A failure keeps its user-visible context; a stop clears any stale error.
+    stopped ? null : outcome.statusError,
+    stopped ? 'force_stopped' : 'dead',
     now,
-    sessionId
+    chatSessionId,
+    chatSessionId,
+    chatSessionId,
+    ...WORKING_ACTIVITIES
   );
+  return cursor.rowsWritten;
 }
 
-export function markSessionError(sql: SqlStorage, sessionId: string, errorMessage: string): void {
-  const now = Date.now();
-  sql.exec(
-    `UPDATE session_state
-		 SET activity = 'error', activity_at = ?, status_error = ?,
-		     runtime_work_state = 'inactive', runtime_work_count = 0,
-			 runtime_work_updated_at = ?
-		 WHERE session_id = ?`,
-    now,
-    errorMessage,
-    now,
-    sessionId
-  );
+/**
+ * Materialize {@link CHAT_SESSION_STATE_IDS_SQL} for callers that need the ids
+ * in TypeScript rather than as a subquery. A terminal transition that cleared
+ * only one keying would leave the other still reporting a turn that has ended.
+ */
+export function listSessionStateIdsForChatSession(
+  sql: SqlStorage,
+  chatSessionId: string
+): string[] {
+  const rows = sql
+    .exec(CHAT_SESSION_STATE_IDS_SQL, chatSessionId, chatSessionId)
+    .toArray();
+  return rows
+    .map((row) => row.id)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
 }
 
 // --- Read Operations ---

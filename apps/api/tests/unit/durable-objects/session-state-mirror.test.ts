@@ -431,40 +431,357 @@ describe('Session State Mirror — vertical slice', () => {
   });
 
   describe('Session lifecycle transitions', () => {
+    /** A chat session with one linked ACP session, so both keyings exist. */
+    function seedLinkedSession(chatId: string, acpId: string) {
+      const now = Date.now();
+      sql.exec(
+        `INSERT INTO chat_sessions (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
+         VALUES (?, 'ws-1', 'Topic', 'active', 0, ?, ?, ?)`,
+        chatId,
+        now,
+        now,
+        now
+      );
+      sql.exec(
+        `INSERT INTO acp_sessions (id, chat_session_id, workspace_id, status, agent_type, created_at, updated_at)
+         VALUES (?, ?, 'ws-1', 'running', 'claude_code', ?, ?)`,
+        acpId,
+        chatId,
+        now,
+        now
+      );
+    }
+
     it('full lifecycle: prompting → idle → stopped', () => {
-      sessionState.upsertActivityState(sql, 'sess-1', {
+      seedLinkedSession('chat-lifecycle', 'acp-lifecycle');
+      sessionState.upsertActivityState(sql, 'chat-lifecycle', {
         activity: 'prompting',
         promptStartedAt: Date.now(),
         agentType: 'claude-code',
       });
-      expect(sessionState.getSessionState(sql, 'sess-1')!.activity).toBe('prompting');
+      expect(sessionState.getSessionState(sql, 'chat-lifecycle')!.activity).toBe('prompting');
 
-      sessionState.upsertActivityState(sql, 'sess-1', { activity: 'idle' });
-      let state = sessionState.getSessionState(sql, 'sess-1');
+      sessionState.upsertActivityState(sql, 'chat-lifecycle', { activity: 'idle' });
+      let state = sessionState.getSessionState(sql, 'chat-lifecycle');
       expect(state!.activity).toBe('idle');
       expect(state!.agentType).toBe('claude-code');
 
-      sessionState.markSessionStopped(sql, 'sess-1', 'user_requested');
-      state = sessionState.getSessionState(sql, 'sess-1');
+      sessionState.terminalizeChatSessionActivity(sql, 'chat-lifecycle', {
+        activity: 'stopped',
+        reason: 'user_requested',
+      });
+      state = sessionState.getSessionState(sql, 'chat-lifecycle');
       expect(state!.activity).toBe('stopped');
       expect(state!.lastStopReason).toBe('user_requested');
       expect(state!.promptStartedAt).toBeNull();
       expect(state!.runtimeWorkState).toBe('inactive');
       expect(state!.runtimeWorkCount).toBe(0);
-      expect(sessionState.getPromptEpoch(sql, 'sess-1')).toBeNull();
+      expect(sessionState.getPromptEpoch(sql, 'chat-lifecycle')).toBeNull();
     });
 
-    it('markSessionError writes error state', () => {
-      sessionState.upsertActivityState(sql, 'sess-1', {
+    it('clears probe accounting and any stale error when stopping', () => {
+      seedLinkedSession('chat-stop-probe', 'acp-stop-probe');
+      sessionState.upsertActivityState(sql, 'chat-stop-probe', {
+        activity: 'prompting',
+        promptStartedAt: Date.now(),
+        statusError: 'transient blip',
+      });
+
+      sessionState.terminalizeChatSessionActivity(sql, 'chat-stop-probe', {
+        activity: 'stopped',
+        reason: 'user_requested',
+      });
+
+      const state = sessionState.getSessionState(sql, 'chat-stop-probe');
+      expect(state!.activity).toBe('stopped');
+      expect(state!.statusError).toBeNull();
+      expect(state!.activitySource).toBe('control_plane');
+      expect(state!.activityReason).toBe('force_stopped');
+      const row = sql
+        .exec(
+          'SELECT activity_probe_attempts, activity_probe_at FROM session_state WHERE session_id = ?',
+          'chat-stop-probe'
+        )
+        .toArray()[0];
+      expect(row?.activity_probe_attempts).toBe(0);
+      expect(row?.activity_probe_at).toBeNull();
+    });
+
+    it('retains user-visible failure context but clears the prompt epoch', () => {
+      seedLinkedSession('chat-fail', 'acp-fail');
+      sessionState.upsertActivityState(sql, 'chat-fail', {
         activity: 'prompting',
         promptStartedAt: Date.now(),
       });
 
-      sessionState.markSessionError(sql, 'sess-1', 'Agent crashed');
+      sessionState.terminalizeChatSessionActivity(sql, 'chat-fail', {
+        activity: 'error',
+        statusError: 'Agent crashed',
+      });
 
-      const state = sessionState.getSessionState(sql, 'sess-1');
+      const state = sessionState.getSessionState(sql, 'chat-fail');
       expect(state!.activity).toBe('error');
       expect(state!.statusError).toBe('Agent crashed');
+      expect(state!.promptStartedAt).toBeNull();
+      expect(sessionState.getPromptEpoch(sql, 'chat-fail')).toBeNull();
+      expect(state!.runtimeWorkState).toBe('inactive');
+    });
+
+    it('clears a WEDGED linked ACP row but leaves a completed one intact', () => {
+      seedLinkedSession('chat-scope', 'acp-wedged');
+      const now = Date.now();
+      sql.exec(
+        `INSERT INTO acp_sessions (id, chat_session_id, workspace_id, status, agent_type, created_at, updated_at)
+         VALUES ('acp-history', 'chat-scope', 'ws-1', 'running', 'claude_code', ?, ?)`,
+        now,
+        now
+      );
+      sessionState.upsertActivityState(sql, 'chat-scope', { activity: 'prompting' });
+      sessionState.upsertActivityState(sql, 'acp-wedged', { activity: 'prompting' });
+      // A turn that ended normally long ago — its provenance must survive.
+      sessionState.upsertActivityState(sql, 'acp-history', { activity: 'idle' });
+
+      sessionState.terminalizeChatSessionActivity(sql, 'chat-scope', {
+        activity: 'stopped',
+        reason: 'user_requested',
+      });
+
+      expect(sessionState.getSessionState(sql, 'chat-scope')!.activity).toBe('stopped');
+      expect(sessionState.getSessionState(sql, 'acp-wedged')!.activity).toBe('stopped');
+      // Rewriting historical per-turn provenance would destroy diagnostics for
+      // turns that had nothing to do with this stop.
+      const history = sessionState.getSessionState(sql, 'acp-history')!;
+      expect(history.activity).toBe('idle');
+      expect(history.activityReason).toBe('completed');
+    });
+
+    it('never reaches another chat session\'s rows', () => {
+      seedLinkedSession('chat-a', 'acp-a');
+      seedLinkedSession('chat-b', 'acp-b');
+      sessionState.upsertActivityState(sql, 'acp-a', { activity: 'prompting' });
+      sessionState.upsertActivityState(sql, 'acp-b', { activity: 'prompting' });
+
+      sessionState.terminalizeChatSessionActivity(sql, 'chat-a', {
+        activity: 'stopped',
+        reason: 'user_requested',
+      });
+
+      expect(sessionState.getSessionState(sql, 'acp-a')!.activity).toBe('stopped');
+      // Liveness beside the absence assertion (.claude/rules/62 §5).
+      expect(sessionState.getSessionState(sql, 'acp-b')!.activity).toBe('prompting');
+    });
+  });
+
+  /**
+   * Regression suite for the cancel-voided-by-same-turn-progress defect.
+   *
+   * `recordTurnEnd`'s compare-and-set used to guard on `activity_at`, which is a
+   * LAST-REPORT clock that `refreshWorkingActivityForChatSession` rewrites on
+   * every persisted message. A message flushing inside a cancel's VM round-trip
+   * therefore voided the cancel, `publishTurnEnd` never ran, and the stop button,
+   * durable delivery and idle scheduling all wedged together.
+   *
+   * These tests drive the REAL writer (`persistMessageWithSideEffects` /
+   * `refreshWorkingActivityForChatSession`) rather than seeding `activity_at`
+   * directly, because seeding the column is exactly what let the original defect
+   * ship with green CAS tests (.claude/rules/62).
+   */
+  describe('recordTurnEnd — guard clock', () => {
+    const CHAT_SESSION_ID = 'chat-cancel';
+    const ACP_SESSION_ID = 'acp-cancel';
+
+    function seedWorkingTurn(promptStartedAt: number) {
+      sql.exec(
+        `INSERT INTO chat_sessions (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
+         VALUES (?, 'ws-cancel', 'Topic', 'active', 0, ?, ?, ?)`,
+        CHAT_SESSION_ID,
+        promptStartedAt,
+        promptStartedAt,
+        promptStartedAt
+      );
+      sql.exec(
+        `INSERT INTO acp_sessions (id, chat_session_id, workspace_id, status, agent_type, created_at, updated_at)
+         VALUES (?, ?, 'ws-cancel', 'running', 'claude_code', ?, ?)`,
+        ACP_SESSION_ID,
+        CHAT_SESSION_ID,
+        promptStartedAt,
+        promptStartedAt
+      );
+      sessionState.upsertActivityState(sql, ACP_SESSION_ID, {
+        activity: 'prompting',
+        promptStartedAt,
+        now: promptStartedAt,
+      });
+    }
+
+    it('terminalizes a turn whose activity_at advanced while the cancel was in flight', async () => {
+      const promptStartedAt = 1_000;
+      seedWorkingTurn(promptStartedAt);
+
+      // The user presses Interrupt. `observedAt` is captured BEFORE the slow VM
+      // call, exactly as `chat-cancel.ts` does.
+      const observedAt = 5_000;
+
+      // While the cancel is in flight the agent flushes a message. This is the
+      // real writer, reached the way production reaches it.
+      await persistMessageWithSideEffects(
+        sql,
+        { DATABASE: {} as D1Database },
+        {
+          recalculateAlarm: async () => {},
+          scheduleSummarySync: () => {},
+          broadcastEvent: () => {},
+        },
+        CHAT_SESSION_ID,
+        'assistant',
+        'still streaming when the cancel was issued',
+        null
+      );
+
+      // Precondition: the message really did push the last-report clock past the
+      // observation instant. Without this the test could pass vacuously.
+      const midFlight = sessionState.getSessionState(sql, ACP_SESSION_ID)!;
+      expect(midFlight.activityAt).toBeGreaterThan(observedAt);
+      expect(midFlight.promptStartedAt).toBe(promptStartedAt);
+
+      const changed = sessionState.recordTurnEnd(sql, ACP_SESSION_ID, {
+        reason: 'cancelled',
+        source: 'control_plane',
+        observedAt,
+        guard: 'turn_start',
+      });
+
+      expect(changed).toBe(true);
+      const after = sessionState.getSessionState(sql, ACP_SESSION_ID)!;
+      expect(after.activity).toBe('idle');
+      expect(after.activityReason).toBe('cancelled');
+      expect(after.promptStartedAt).toBeNull();
+    });
+
+    it('still refuses to stomp a turn that began after the observation (rule 49 control)', () => {
+      // The cancel was observed at 5_000, but by the time it landed a NEW turn
+      // had already started at 6_000. That turn must survive.
+      const observedAt = 5_000;
+      seedWorkingTurn(6_000);
+
+      const changed = sessionState.recordTurnEnd(sql, ACP_SESSION_ID, {
+        reason: 'cancelled',
+        source: 'control_plane',
+        observedAt,
+        guard: 'turn_start',
+      });
+
+      expect(changed).toBe(false);
+      expect(sessionState.getSessionState(sql, ACP_SESSION_ID)!.activity).toBe('prompting');
+    });
+
+    it('falls back to the last-report clock when no prompt start was recorded', () => {
+      sessionState.upsertActivityState(sql, 'sess-no-start', {
+        activity: 'recovering',
+        now: 1_000,
+      });
+      // `recovering` records a prompt start by default, so clear it to reproduce
+      // a legacy row that only ever had an activity timestamp.
+      sql.exec(
+        'UPDATE session_state SET prompt_started_at = NULL WHERE session_id = ?',
+        'sess-no-start'
+      );
+
+      expect(
+        sessionState.recordTurnEnd(sql, 'sess-no-start', {
+          reason: 'cancelled',
+          source: 'control_plane',
+          observedAt: 500,
+          guard: 'turn_start',
+        })
+      ).toBe(false);
+
+      expect(
+        sessionState.recordTurnEnd(sql, 'sess-no-start', {
+          reason: 'cancelled',
+          source: 'control_plane',
+          observedAt: 2_000,
+          guard: 'turn_start',
+        })
+      ).toBe(true);
+    });
+
+    it('row_unchanged guard withdraws a probe verdict when any fresh report landed', async () => {
+      const promptStartedAt = 1_000;
+      seedWorkingTurn(promptStartedAt);
+      const selectedActivityAt = sessionState.getSessionState(sql, ACP_SESSION_ID)!.activityAt;
+
+      // A message lands after the probe selected this candidate.
+      await persistMessageWithSideEffects(
+        sql,
+        { DATABASE: {} as D1Database },
+        {
+          recalculateAlarm: async () => {},
+          scheduleSummarySync: () => {},
+          broadcastEvent: () => {},
+        },
+        CHAT_SESSION_ID,
+        'assistant',
+        'fresh progress after selection',
+        null
+      );
+
+      // The probe's stale verdict must not win — this is the behaviour the
+      // `turn_start` guard deliberately does NOT share (.claude/rules/67).
+      const changed = sessionState.recordTurnEnd(sql, ACP_SESSION_ID, {
+        reason: 'probe_reconciled',
+        source: 'probe',
+        observedAt: selectedActivityAt,
+        guard: 'row_unchanged',
+      });
+
+      expect(changed).toBe(false);
+      expect(sessionState.getSessionState(sql, ACP_SESSION_ID)!.activity).toBe('prompting');
+    });
+  });
+
+  describe('listSessionStateIdsForChatSession', () => {
+    it('returns the chat session and every linked ACP session', () => {
+      const now = Date.now();
+      sql.exec(
+        `INSERT INTO chat_sessions (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
+         VALUES ('chat-multi', 'ws-multi', 'Topic', 'active', 0, ?, ?, ?)`,
+        now,
+        now,
+        now
+      );
+      for (const acpId of ['acp-multi-1', 'acp-multi-2']) {
+        sql.exec(
+          `INSERT INTO acp_sessions (id, chat_session_id, workspace_id, status, agent_type, created_at, updated_at)
+           VALUES (?, 'chat-multi', 'ws-multi', 'running', 'claude_code', ?, ?)`,
+          acpId,
+          now,
+          now
+        );
+      }
+      // A different chat session's ACP row must never be included.
+      sql.exec(
+        `INSERT INTO chat_sessions (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
+         VALUES ('chat-other', 'ws-other', 'Topic', 'active', 0, ?, ?, ?)`,
+        now,
+        now,
+        now
+      );
+      sql.exec(
+        `INSERT INTO acp_sessions (id, chat_session_id, workspace_id, status, agent_type, created_at, updated_at)
+         VALUES ('acp-other', 'chat-other', 'ws-other', 'running', 'claude_code', ?, ?)`,
+        now,
+        now
+      );
+
+      const ids = sessionState.listSessionStateIdsForChatSession(sql, 'chat-multi').sort();
+      expect(ids).toEqual(['acp-multi-1', 'acp-multi-2', 'chat-multi']);
+    });
+
+    it('returns just the chat session when no ACP session is linked', () => {
+      expect(sessionState.listSessionStateIdsForChatSession(sql, 'chat-none')).toEqual([
+        'chat-none',
+      ]);
     });
   });
 });

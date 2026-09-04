@@ -710,7 +710,9 @@ describe('session activity reconciliation', () => {
           armIdleCleanup: (chatSessionId) => armed.push(chatSessionId),
           recalculateAlarm: async () => {},
         },
-        CHAT_SESSION
+        CHAT_SESSION,
+        // A TURN ending: the session lives on and still wants an idle timer.
+        { kind: 'idle' }
       );
 
       // All three consumers observe the same transition.
@@ -913,6 +915,7 @@ describe('session activity reconciliation', () => {
           reason: 'cancelled',
           source: 'control_plane',
           observedAt: now,
+          guard: 'turn_start',
         })
       ).toBe(true);
 
@@ -935,6 +938,7 @@ describe('session activity reconciliation', () => {
           reason: 'cancelled',
           source: 'control_plane',
           observedAt,
+          guard: 'turn_start',
         })
       ).toBe(false);
       expect(readState()?.activity).toBe('prompting');
@@ -948,6 +952,7 @@ describe('session activity reconciliation', () => {
           reason: 'force_stopped',
           source: 'control_plane',
           observedAt: now,
+          guard: 'turn_start',
         })
       ).toBe(false);
     });

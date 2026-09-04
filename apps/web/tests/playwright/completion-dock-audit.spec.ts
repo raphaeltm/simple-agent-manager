@@ -1,6 +1,10 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-import { seedTheme } from './audit-helpers';
+// The shared helper also walks the DOM for horizontally-clipped containers.
+// Overflow inside an `overflow-x-hidden` ancestor never reaches
+// `documentElement.scrollWidth`, so a document-level check alone is structurally
+// unable to see it (.claude/rules/56).
+import { assertNoOverflow, seedTheme } from './audit-helpers';
 
 // ---------------------------------------------------------------------------
 // CompletionDock visual audit against the REAL project chat UI.
@@ -200,11 +204,26 @@ const IDLE_STATE = {
   lastStopReason: null,
 };
 
-async function setupApiMocks(page: Page, opts: { mode: CompletionDockMode }) {
-  const state: { mode: CompletionDockMode; sleepRequests: string[] } = {
+async function setupApiMocks(
+  page: Page,
+  opts: {
+    mode: CompletionDockMode;
+    /**
+     * How `POST /sessions/:id/cancel` behaves.
+     * - `ok` (default): resolves immediately.
+     * - `hang`: never resolves, so the in-flight "Interrupting…" morph can be
+     *   captured at the load-bearing midpoint rather than raced past.
+     * - `fail`: rejects, so the inline error affordance can be captured.
+     */
+    cancelBehavior?: 'ok' | 'hang' | 'fail';
+  }
+) {
+  const state: { mode: CompletionDockMode; sleepRequests: string[]; cancelRequests: string[] } = {
     mode: opts.mode,
     sleepRequests: [],
+    cancelRequests: [],
   };
+  const cancelBehavior = opts.cancelBehavior ?? 'ok';
 
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
@@ -248,6 +267,21 @@ async function setupApiMocks(page: Page, opts: { mode: CompletionDockMode }) {
         return respond(200, { sessions: [session], total: 1, hasMore: false });
       }
 
+      if (subPath.match(/^\/sessions\/[^/]+\/cancel$/)) {
+        state.cancelRequests.push(path);
+        if (cancelBehavior === 'hang') {
+          // Never fulfil — the request stays in flight for the whole test.
+          return new Promise<void>(() => {});
+        }
+        if (cancelBehavior === 'fail') {
+          return respond(500, {
+            error: 'INTERNAL_ERROR',
+            message: 'Failed to cancel prompt on agent',
+          });
+        }
+        return respond(200, { status: 'cancelled', message: 'Prompt cancel signal sent' });
+      }
+
       const sessionDetailMatch = subPath.match(/^\/sessions\/([^/]+)$/);
       if (sessionDetailMatch) {
         return respond(200, {
@@ -286,13 +320,6 @@ async function screenshot(page: Page, name: string) {
     path: `../../.codex/tmp/playwright-screenshots/${name}${suffix}.png`,
     fullPage: true,
   });
-}
-
-async function assertNoOverflow(page: Page) {
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth
-  );
-  expect(overflow).toBe(false);
 }
 
 async function gotoChat(page: Page) {
@@ -358,6 +385,35 @@ for (const theme of ['dark', 'light'] as const) {
       await screenshot(page, `completion-dock-working-${theme}-desktop`);
       await assertNoOverflow(page);
     });
+
+    test('cancelling: Interrupt shows a disabled in-flight state', async ({ page }) => {
+      await seedTheme(page, theme);
+      await setupApiMocks(page, { mode: 'working', cancelBehavior: 'hang' });
+      await gotoChat(page);
+      await page.getByRole('button', { name: 'Interrupt agent' }).click();
+      const busy = page.getByRole('button', { name: 'Interrupting agent' });
+      await expect(busy).toBeVisible();
+      await expect(busy).toBeDisabled();
+      await screenshot(page, `completion-dock-cancelling-${theme}-desktop`);
+      await assertNoOverflow(page);
+    });
+
+    test('cancel failure: inline error is visible and the control is retryable', async ({
+      page,
+    }) => {
+      await seedTheme(page, theme);
+      await setupApiMocks(page, { mode: 'working', cancelBehavior: 'fail' });
+      await gotoChat(page);
+      await page.getByRole('button', { name: 'Interrupt agent' }).click();
+      // Scope to the dock's own alert: the chat also renders a "Reconnecting…"
+      // banner with role="alert" in this mocked environment.
+      await expect(
+        page.getByRole('alert').filter({ hasText: 'Failed to cancel prompt on agent' })
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Interrupt agent' })).toBeEnabled();
+      await screenshot(page, `completion-dock-cancel-error-${theme}-desktop`);
+      await assertNoOverflow(page);
+    });
   });
 
   test.describe(`CompletionDock — ${theme} — Mobile`, () => {
@@ -389,6 +445,37 @@ for (const theme of ['dark', 'light'] as const) {
       await gotoChat(page);
       await expect(page.getByRole('button', { name: 'Interrupt agent' })).toBeVisible();
       await screenshot(page, `completion-dock-working-${theme}-mobile`);
+      await assertNoOverflow(page);
+    });
+
+    test('cancelling: Interrupt shows a disabled in-flight state', async ({ page }) => {
+      await seedTheme(page, theme);
+      await setupApiMocks(page, { mode: 'working', cancelBehavior: 'hang' });
+      await gotoChat(page);
+      await page.getByRole('button', { name: 'Interrupt agent' }).click();
+      const busy = page.getByRole('button', { name: 'Interrupting agent' });
+      await expect(busy).toBeVisible();
+      await expect(busy).toBeDisabled();
+      await screenshot(page, `completion-dock-cancelling-${theme}-mobile`);
+      await assertNoOverflow(page);
+    });
+
+    test('cancel failure: inline error is visible and the control is retryable', async ({
+      page,
+    }) => {
+      await seedTheme(page, theme);
+      await setupApiMocks(page, { mode: 'working', cancelBehavior: 'fail' });
+      await gotoChat(page);
+      await page.getByRole('button', { name: 'Interrupt agent' }).click();
+      // Scope to the dock's own alert: the chat also renders a "Reconnecting…"
+      // banner with role="alert" in this mocked environment.
+      await expect(
+        page.getByRole('alert').filter({ hasText: 'Failed to cancel prompt on agent' })
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Interrupt agent' })).toBeEnabled();
+      // A long error string is the realistic stress case for a 375px viewport:
+      // the dock's error slot must wrap rather than push the page sideways.
+      await screenshot(page, `completion-dock-cancel-error-${theme}-mobile`);
       await assertNoOverflow(page);
     });
   });
