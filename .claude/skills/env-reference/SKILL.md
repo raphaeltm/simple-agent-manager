@@ -502,6 +502,7 @@ by the read-only cron-liveness check.
 - `WEBHOOK_DELIVERY_DEFAULT_PAGE_SIZE` — Default delivery-history page size (default: `25`)
 - `WEBHOOK_DELIVERY_MAX_PAGE_SIZE` — Maximum delivery-history page size (default: `100`)
 - `WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS` — Recovery lease for processing deliveries without a submitted task (default: `300`)
+- `MAX_TRIGGERS_PER_PROJECT` — Platform default trigger cap per project (default: `20`). Editable per project in the Settings → Scaling & Scheduling → Task Limits field; a `NULL` `projects.max_triggers` falls back to this env default.
 
 ### Trial Onboarding (`/try` flow)
 

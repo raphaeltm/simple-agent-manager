@@ -1,5 +1,10 @@
 import { DEFAULT_NODE_WARM_TIMEOUT_MS } from './node-pooling';
 import { DEFAULT_MAX_WORKSPACES_PER_NODE } from './task-execution';
+import {
+  DEFAULT_MAX_TRIGGERS_PER_PROJECT,
+  MAX_MAX_TRIGGERS_PER_PROJECT,
+  MIN_MAX_TRIGGERS_PER_PROJECT,
+} from './triggers';
 
 // =============================================================================
 // Per-Project Scaling Parameters (Defaults, Mins, Maxes)
@@ -64,6 +69,7 @@ export const SCALING_PARAMS: ScalingParamMeta[] = [
   { key: 'maxWorkspacesPerNode', label: 'Max Workspaces Per Node', envVar: 'MAX_WORKSPACES_PER_NODE', defaultValue: DEFAULT_MAX_WORKSPACES_PER_NODE, min: MIN_MAX_WORKSPACES_PER_NODE, max: MAX_MAX_WORKSPACES_PER_NODE, unit: 'count' },
   { key: 'nodeCpuThresholdPercent', label: 'Node CPU Threshold', envVar: 'TASK_RUN_NODE_CPU_THRESHOLD_PERCENT', defaultValue: DEFAULT_NODE_CPU_THRESHOLD_PERCENT, min: MIN_NODE_CPU_THRESHOLD_PERCENT, max: MAX_NODE_CPU_THRESHOLD_PERCENT, unit: 'percent' },
   { key: 'nodeMemoryThresholdPercent', label: 'Node Memory Threshold', envVar: 'TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT', defaultValue: DEFAULT_NODE_MEMORY_THRESHOLD_PERCENT, min: MIN_NODE_MEMORY_THRESHOLD_PERCENT, max: MAX_NODE_MEMORY_THRESHOLD_PERCENT, unit: 'percent' },
+  { key: 'maxTriggers', label: 'Max Triggers', envVar: 'MAX_TRIGGERS_PER_PROJECT', defaultValue: DEFAULT_MAX_TRIGGERS_PER_PROJECT, min: MIN_MAX_TRIGGERS_PER_PROJECT, max: MAX_MAX_TRIGGERS_PER_PROJECT, unit: 'count' },
 ];
 
 /** Scaling parameter keys as a type. */

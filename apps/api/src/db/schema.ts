@@ -413,6 +413,8 @@ export const projects = sqliteTable(
     maxWorkspacesPerNode: integer('max_workspaces_per_node'),
     nodeCpuThresholdPercent: integer('node_cpu_threshold_percent'),
     nodeMemoryThresholdPercent: integer('node_memory_threshold_percent'),
+    /** Per-project max triggers override. null = use platform default (MAX_TRIGGERS_PER_PROJECT). */
+    maxTriggers: integer('max_triggers'),
     status: text('status').notNull().default('active'),
     lastActivityAt: text('last_activity_at'),
     activeSessionCount: integer('active_session_count').notNull().default(0),
