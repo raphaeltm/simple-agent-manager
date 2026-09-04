@@ -24,6 +24,7 @@ import {
   clearToolPayloadCleanupContinuationState,
   clearToolPayloadCleanupState,
   hasCompleteLegacyV2ToolPayloadCleanupCursor,
+  isToolPayloadCleanupPlanTerminal,
   publicToolPayloadCleanupCursor,
   readProjectDataToolPayloadArchiveLastRunAt as readToolPayloadArchiveLastRunAt,
   readProjectDataToolPayloadCleanupRecheckAt as readToolPayloadCleanupRecheckAt,
@@ -34,6 +35,7 @@ import {
   writeProjectDataToolPayloadArchiveLastRunAt,
   writeToolPayloadCleanupCumulativeProgress,
   writeToolPayloadCleanupCursor,
+  writeToolPayloadCleanupPlanTerminal,
   writeToolPayloadCleanupRecheckAt,
 } from './tool-payload-cleanup-state';
 import type {
@@ -80,6 +82,8 @@ type ToolPayloadCleanupPlan = {
   wallClockStart: number;
   manifestKey: string | null;
   manifestSha256: string | null;
+  batchManifestMaxBytes: number;
+  rootManifestMaxBytes: number;
   maxTotalRows: number | null;
   maxTotalBytes: number | null;
   maxTotalR2Operations: number | null;
@@ -197,6 +201,8 @@ function createToolPayloadCleanupPlan(
     archiveMaxMetadataBytes: config.toolPayloadArchiveMaxMetadataBytes,
     manifestKey: config.toolPayloadCleanupManifestKey,
     manifestSha256: config.toolPayloadCleanupManifestSha256,
+    batchManifestMaxBytes: config.toolPayloadCleanupBatchManifestMaxBytes,
+    rootManifestMaxBytes: config.toolPayloadCleanupRootManifestMaxBytes,
     maxTotalRows: config.toolPayloadCleanupMaxTotalRows,
     maxTotalBytes: config.toolPayloadCleanupMaxTotalBytes,
     maxTotalR2Operations: config.toolPayloadCleanupMaxTotalR2Operations,
@@ -209,6 +215,9 @@ function createToolPayloadCleanupPlan(
       (fixedCutoffConfigured &&
         persistedPlan.cutoffCreatedAt !== config.toolPayloadCleanupCutoffCreatedAt))
   ) {
+    return null;
+  }
+  if (fixedCutoffConfigured && persistedPlan && isToolPayloadCleanupPlanTerminal(sql)) {
     return null;
   }
   if (
@@ -280,6 +289,8 @@ function createToolPayloadCleanupPlan(
     wallClockStart,
     manifestKey: config.toolPayloadCleanupManifestKey,
     manifestSha256: config.toolPayloadCleanupManifestSha256,
+    batchManifestMaxBytes: config.toolPayloadCleanupBatchManifestMaxBytes,
+    rootManifestMaxBytes: config.toolPayloadCleanupRootManifestMaxBytes,
     maxTotalRows: config.toolPayloadCleanupMaxTotalRows,
     maxTotalBytes: config.toolPayloadCleanupMaxTotalBytes,
     maxTotalR2Operations: config.toolPayloadCleanupMaxTotalR2Operations,
@@ -349,6 +360,7 @@ async function scanApprovedToolPayloadCleanupBatch(
     timeoutMs: plan.archiveWriteTimeoutMs,
     deadlineMs: plan.deadlineMs,
     operationBudget,
+    maxBytes: plan.rootManifestMaxBytes,
     ...(plan.nowMs ? { nowMs: plan.nowMs } : {}),
   });
   if (
@@ -384,6 +396,7 @@ async function scanApprovedToolPayloadCleanupBatch(
       timeoutMs: plan.archiveWriteTimeoutMs,
       deadlineMs: plan.deadlineMs,
       operationBudget,
+      maxBytes: plan.batchManifestMaxBytes,
       ...(plan.nowMs ? { nowMs: plan.nowMs } : {}),
     });
     for (const target of manifestBatch.targets) {
@@ -599,8 +612,7 @@ function persistToolPayloadCleanupState(
     else clearToolPayloadCleanupState(sql);
     writeToolPayloadCleanupRecheckAt(sql, recheckAt, plan);
   } else if (plan.manifestKey) {
-    clearToolPayloadCleanupContinuationState(sql);
-    writeToolPayloadCleanupRecheckAt(sql, Number.MAX_SAFE_INTEGER, plan);
+    writeToolPayloadCleanupPlanTerminal(sql, plan);
   } else {
     clearToolPayloadCleanupState(sql);
   }

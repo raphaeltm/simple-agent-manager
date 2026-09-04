@@ -44,6 +44,10 @@ import {
   readProjectDataToolPayloadArchiveLastRunAt,
   readProjectDataToolPayloadCleanupRecheckAt,
 } from './tool-payload-cleanup';
+import {
+  DEFAULT_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES,
+  DEFAULT_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES,
+} from './tool-payload-cleanup-manifest';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.storage_safety');
@@ -176,6 +180,8 @@ export interface StorageSafetyConfig {
   toolPayloadCleanupPlanId: string | null;
   toolPayloadCleanupManifestKey: string | null;
   toolPayloadCleanupManifestSha256: string | null;
+  toolPayloadCleanupBatchManifestMaxBytes: number;
+  toolPayloadCleanupRootManifestMaxBytes: number;
   toolPayloadCleanupMaxTotalRows: number | null;
   toolPayloadCleanupMaxTotalBytes: number | null;
   toolPayloadCleanupMaxTotalR2Operations: number | null;
@@ -430,12 +436,22 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
         env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES,
         env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS,
         env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_WALL_TIME_MS,
+        env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES,
+        env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES,
       ].every(optionalPositiveIntegerIsValid),
     toolPayloadCleanupPlanId: env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID?.trim() || null,
     toolPayloadCleanupManifestKey:
       env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY?.trim() || null,
     toolPayloadCleanupManifestSha256:
       env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256?.trim() || null,
+    toolPayloadCleanupBatchManifestMaxBytes: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES,
+      DEFAULT_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES
+    ),
+    toolPayloadCleanupRootManifestMaxBytes: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES,
+      DEFAULT_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES
+    ),
     toolPayloadCleanupMaxTotalRows: parseOptionalPositiveInteger(
       env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS
     ),

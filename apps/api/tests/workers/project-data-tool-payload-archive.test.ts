@@ -1067,6 +1067,88 @@ describe('ProjectData tool payload R2 archival', () => {
     expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(1);
   });
 
+  it('serializes overlapping storage-safety cleanup passes across external R2 awaits', async () => {
+    const projectId = `${TEST_PREFIX}-overlapping-cleanup-mutex`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'overlapping-cleanup-mutex', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+    ]);
+    const approval = await approvedCleanupEnv(
+      projectId,
+      'overlapping-cleanup-mutex-plan',
+      FIXED_NOW - 1_000
+    );
+    const realR2 = env.PROJECT_DATA_ARCHIVE_R2;
+    let payloadPuts = 0;
+    let markFirstPayloadPutStarted!: () => void;
+    let releaseFirstPayloadPut!: () => void;
+    const firstPayloadPutStarted = new Promise<void>((resolve) => {
+      markFirstPayloadPutStarted = resolve;
+    });
+    const firstPayloadPutRelease = new Promise<void>((resolve) => {
+      releaseFirstPayloadPut = resolve;
+    });
+    const delayedR2 = {
+      put: async (key: string, value: string | ArrayBuffer | ArrayBufferView) => {
+        if (!key.includes('/approved-plans/')) {
+          payloadPuts += 1;
+          if (payloadPuts === 1) {
+            markFirstPayloadPutStarted();
+            await firstPayloadPutRelease;
+          }
+        }
+        return realR2.put(key, value);
+      },
+      get: (key: string) => realR2.get(key),
+    } as unknown as R2Bucket;
+
+    await withRuntimeEnv(
+      {
+        ...approval,
+        PROJECT_DATA_ARCHIVE_R2: delayedR2,
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'true',
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED: 'false',
+        PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: 'false',
+      },
+      async () =>
+        runInDurableObject(stub, async (instance, state) => {
+          const first = instance.runStorageSafetyAlarmForTest();
+          await firstPayloadPutStarted;
+          const second = instance.runStorageSafetyAlarmForTest();
+
+          try {
+            await new Promise((resolve) => setTimeout(resolve, 25));
+            expect(payloadPuts).toBe(1);
+            expect(
+              Number(
+                (
+                  state.storage.sql
+                    .exec(
+                      "SELECT value FROM do_meta WHERE key = 'storageSafetyToolCleanupTotalR2Operations'"
+                    )
+                    .one() as { value: string }
+                ).value
+              )
+            ).toBe(1500);
+          } finally {
+            releaseFirstPayloadPut();
+          }
+          await Promise.all([first, second]);
+        })
+    );
+
+    expect(payloadPuts).toBe(1);
+    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
+      seeded.messageIds[0]!
+    );
+    expect(source?.content).toBe('visible overlapping-cleanup-mutex');
+    expect(source?.toolMetadata.content).toBeUndefined();
+    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(1);
+  });
+
   it('fails closed when a fixed cutoff has no exact project allowlist and plan id', async () => {
     const projectId = `${TEST_PREFIX}-fixed-cutoff-unscoped`;
     const stub = getStub(projectId);
@@ -1437,6 +1519,19 @@ describe('ProjectData tool payload R2 archival', () => {
         nowMs: () => FIXED_NOW + 4,
       })
     ).toBeNull();
+    const terminalState = await runInDurableObject(stub, async (_instance, state) => {
+      const rows = state.storage.sql
+        .exec(
+          `SELECT key, value FROM do_meta
+           WHERE key IN (
+             'storageSafetyToolCleanupPlanTerminal',
+             'storageSafetyToolCleanupRecheckAt'
+           )`
+        )
+        .toArray() as Array<{ key: string; value: string }>;
+      return Object.fromEntries(rows.map((row) => [row.key, row.value]));
+    });
+    expect(terminalState).toEqual({ storageSafetyToolCleanupPlanTerminal: 'true' });
     const sources = await readMessageContentAndMetadata(stub, seeded.messageIds);
     expect(sources.get(seeded.messageIds[0]!)?.content).toBe('visible manifest-exact-first');
     expect(sources.get(seeded.messageIds[1]!)?.content).toBe('visible manifest-exact-second');

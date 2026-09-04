@@ -568,6 +568,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID?: string; // Required immutable operator plan id when a fixed cutoff is configured
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY?: string; // Required verified R2 target-manifest root for a fixed cleanup plan
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256?: string; // Required SHA-256 of the approved target-manifest root
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES?: string; // Verified approved-plan batch-manifest size ceiling (default: 2000000)
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES?: string; // Verified approved-plan root-manifest size ceiling (default: 1000000)
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS?: string; // Hard cumulative approved source-row ceiling
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES?: string; // Hard cumulative approved projected-reclaim ceiling
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS?: string; // Hard cumulative approved R2 operation ceiling
@@ -624,6 +626,11 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS?: string; // Per-DO-RPC timeout (default: 20000)
   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_SLICES_PER_RUN?: string; // Maximum sequential slices per scheduled invocation (default: 1)
   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS?: string; // Aggregate scheduled-invocation wall-time budget (default: 25000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MARGIN_MS?: string; // Required lease headroom above a slice wall budget (default: 5000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RETURN_MARGIN_MS?: string; // Required return headroom inside slice/run wall budgets (default: 500)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MEASUREMENT_WALL_TIME_MS?: string; // Per-slice ProjectData measurement budget (default: 10000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_STATE_BYTES?: string; // D1 JSON state ceiling for session and batch-proof manifests (default: 1750000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ERROR_MAX_LENGTH?: string; // Persisted preflight diagnostic character ceiling (default: 1000)
   PROJECT_DATA_ARCHIVE_SHARD_COUNT?: string;
   PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS?: string;
   PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS?: string;

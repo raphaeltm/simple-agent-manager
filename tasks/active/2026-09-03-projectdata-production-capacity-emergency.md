@@ -120,6 +120,11 @@ uncertain states must fail closed.
 - [x] Add an explicit per-cron slice cap and aggregate run wall-time ceiling so an
       emergency preflight can accelerate without changing the separately leased,
       one-slice default or bypassing the overall row/byte/batch bounds.
+- [x] Serialize automatic and manual cleanup through one non-wedging ProjectData
+      mutex so R2 awaits cannot interleave stale cumulative reservations or cursor
+      writes; prove an overlapping pass cannot duplicate the external archive work.
+- [x] Make manifest sizes and all preflight state, measurement, margin, and
+      diagnostic bounds configurable and part of immutable plan configuration.
 - [x] Require explicit post-write R2 read-back and SHA-256/byte verification
       before any selected path strips tool metadata or deletes source session rows.
 - [ ] If terminal sharding is required, make each pass resumable and enforce

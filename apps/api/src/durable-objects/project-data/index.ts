@@ -84,6 +84,8 @@ export class ProjectData extends DurableObject<Env> {
   private summarySyncLock: Promise<unknown> = Promise.resolve();
   /** Serializes archive source hash/finalize awaits against local transcript writers (rule 45). */
   private archiveTranscriptLock: Promise<unknown> = Promise.resolve();
+  /** Serializes cleanup state reads, external R2 work, and final progress writes (rule 45). */
+  private toolPayloadCleanupLock: Promise<unknown> = Promise.resolve();
   private cachedProjectId: string | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -1541,17 +1543,36 @@ export class ProjectData extends DurableObject<Env> {
   async runManualToolPayloadCleanup(
     input: ProjectDataManualToolPayloadCleanupInput
   ): Promise<ProjectDataManualToolPayloadCleanupResult> {
-    const result = await toolPayloadManualCleanup.runProjectDataManualToolPayloadCleanup(
-      this.sql,
-      this.env,
-      this.getProjectId(),
-      input,
-      {
-        transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
-      }
+    const result = await this.withToolPayloadCleanupLock(() =>
+      toolPayloadManualCleanup.runProjectDataManualToolPayloadCleanup(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        input,
+        {
+          transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
+        }
+      )
     );
     await this.recalculateAlarm();
     return result;
+  }
+
+  private withToolPayloadCleanupLock<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.toolPayloadCleanupLock.then(operation);
+    this.toolPayloadCleanupLock = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  protected runStorageSafetyAlarmLocked(): Promise<storageSafety.ProjectDataStorageAlarmResult> {
+    return this.withToolPayloadCleanupLock(() =>
+      storageSafety.runProjectDataStorageSafetyAlarm(this.sql, this.env, this.getProjectId(), {
+        transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
+      })
+    );
   }
 
   // --- DO Alarm Handler ---
@@ -1572,14 +1593,7 @@ export class ProjectData extends DurableObject<Env> {
     // lifecycle maintenance sections so a large project can still reclaim bytes
     // even when idle/reconciliation work has accumulated.
     try {
-      await storageSafety.runProjectDataStorageSafetyAlarm(
-        this.sql,
-        this.env,
-        this.getProjectId(),
-        {
-          transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
-        }
-      );
+      await this.runStorageSafetyAlarmLocked();
     } catch (err) {
       log.error('alarm.storage_safety_failed', {
         error: err instanceof Error ? err.message : String(err),

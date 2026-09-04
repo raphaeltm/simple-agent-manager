@@ -5,8 +5,8 @@ const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
 export const TOOL_PAYLOAD_CLEANUP_MANIFEST_VERSION = 1 as const;
-const MAX_BATCH_MANIFEST_BYTES = 2_000_000;
-const MAX_ROOT_MANIFEST_BYTES = 1_000_000;
+export const DEFAULT_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES = 2_000_000;
+export const DEFAULT_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES = 1_000_000;
 
 export type ToolPayloadCleanupManifestBatch = {
   version: typeof TOOL_PAYLOAD_CLEANUP_MANIFEST_VERSION;
@@ -215,13 +215,14 @@ export async function writeToolPayloadCleanupManifestBatch(input: {
   manifest: ToolPayloadCleanupManifestBatch;
   timeoutMs: number;
   deadlineMs: number;
+  maxBytes?: number;
 }): Promise<VerifiedManifestObject<ToolPayloadCleanupManifestBatch>> {
   const base = `${normalizePrefix(input.archivePrefix)}/approved-plans/${encodeSegment(input.manifest.projectId)}/${encodeSegment(input.manifest.planId)}/batch-${input.manifest.ordinal}`;
   return writeVerifiedJson({
     ...input,
     key: base,
     value: input.manifest,
-    maxBytes: MAX_BATCH_MANIFEST_BYTES,
+    maxBytes: input.maxBytes ?? DEFAULT_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES,
   });
 }
 
@@ -231,13 +232,14 @@ export async function writeToolPayloadCleanupManifestRoot(input: {
   manifest: ToolPayloadCleanupManifestRoot;
   timeoutMs: number;
   deadlineMs: number;
+  maxBytes?: number;
 }): Promise<VerifiedManifestObject<ToolPayloadCleanupManifestRoot>> {
   const base = `${normalizePrefix(input.archivePrefix)}/approved-plans/${encodeSegment(input.manifest.projectId)}/${encodeSegment(input.manifest.planId)}/root`;
   return writeVerifiedJson({
     ...input,
     key: base,
     value: input.manifest,
-    maxBytes: MAX_ROOT_MANIFEST_BYTES,
+    maxBytes: input.maxBytes ?? DEFAULT_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES,
   });
 }
 
@@ -249,6 +251,7 @@ export async function readToolPayloadCleanupManifestRoot(input: {
   deadlineMs: number;
   operationBudget?: ToolPayloadArchiveOperationBudget;
   nowMs?: () => number;
+  maxBytes?: number;
 }): Promise<ToolPayloadCleanupManifestRoot> {
   const root = await readVerifiedJson<ToolPayloadCleanupManifestRoot>({
     r2: input.r2,
@@ -256,7 +259,7 @@ export async function readToolPayloadCleanupManifestRoot(input: {
     expectedSha256: input.sha256,
     timeoutMs: input.timeoutMs,
     deadlineMs: input.deadlineMs,
-    maxBytes: MAX_ROOT_MANIFEST_BYTES,
+    maxBytes: input.maxBytes ?? DEFAULT_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES,
     ...(input.operationBudget ? { operationBudget: input.operationBudget } : {}),
     ...(input.nowMs ? { nowMs: input.nowMs } : {}),
   });
@@ -313,6 +316,7 @@ export async function readToolPayloadCleanupManifestBatch(input: {
   deadlineMs: number;
   operationBudget?: ToolPayloadArchiveOperationBudget;
   nowMs?: () => number;
+  maxBytes?: number;
 }): Promise<ToolPayloadCleanupManifestBatch> {
   const batch = await readVerifiedJson<ToolPayloadCleanupManifestBatch>({
     r2: input.r2,
@@ -321,7 +325,7 @@ export async function readToolPayloadCleanupManifestBatch(input: {
     expectedBytes: input.proof.bytes,
     timeoutMs: input.timeoutMs,
     deadlineMs: input.deadlineMs,
-    maxBytes: MAX_BATCH_MANIFEST_BYTES,
+    maxBytes: input.maxBytes ?? DEFAULT_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES,
     ...(input.operationBudget ? { operationBudget: input.operationBudget } : {}),
     ...(input.nowMs ? { nowMs: input.nowMs } : {}),
   });

@@ -18,6 +18,7 @@ const META_TOOL_PAYLOAD_ARCHIVE_LAST_RUN_AT = 'storageSafetyToolPayloadArchiveLa
 const META_TOOL_CLEANUP_PLAN_ID = 'storageSafetyToolCleanupPlanId';
 const META_TOOL_CLEANUP_PLAN_FINGERPRINT = 'storageSafetyToolCleanupPlanFingerprint';
 const META_TOOL_CLEANUP_PLAN_CUTOFF = 'storageSafetyToolCleanupPlanCutoff';
+const META_TOOL_CLEANUP_PLAN_TERMINAL = 'storageSafetyToolCleanupPlanTerminal';
 const META_TOOL_CLEANUP_TOTAL_ROWS = 'storageSafetyToolCleanupTotalRows';
 const META_TOOL_CLEANUP_TOTAL_BYTES = 'storageSafetyToolCleanupTotalBytes';
 const META_TOOL_CLEANUP_TOTAL_R2_OPERATIONS = 'storageSafetyToolCleanupTotalR2Operations';
@@ -114,6 +115,10 @@ export function readToolPayloadCleanupPersistedPlan(
   return { planId, fingerprint, cutoffCreatedAt };
 }
 
+export function isToolPayloadCleanupPlanTerminal(sql: SqlStorage): boolean {
+  return readMeta(sql, META_TOOL_CLEANUP_PLAN_TERMINAL) === 'true';
+}
+
 function writeToolPayloadCleanupPersistedPlan(
   sql: SqlStorage,
   plan: ToolPayloadCleanupPersistedPlan
@@ -148,6 +153,15 @@ export function writeToolPayloadCleanupRecheckAt(
   writeToolPayloadCleanupPersistedPlan(sql, plan);
 }
 
+export function writeToolPayloadCleanupPlanTerminal(
+  sql: SqlStorage,
+  plan: ToolPayloadCleanupPersistedPlan
+): void {
+  clearToolPayloadCleanupContinuationState(sql);
+  writeToolPayloadCleanupPersistedPlan(sql, plan);
+  writeMeta(sql, META_TOOL_CLEANUP_PLAN_TERMINAL, 'true');
+}
+
 export function clearToolPayloadCleanupContinuationState(sql: SqlStorage): void {
   deleteMeta(sql, META_TOOL_CLEANUP_CURSOR_SESSION_ID);
   deleteMeta(sql, META_TOOL_CLEANUP_CURSOR_ROW_ID);
@@ -159,6 +173,7 @@ export function clearToolPayloadCleanupContinuationState(sql: SqlStorage): void 
   deleteMeta(sql, META_TOOL_CLEANUP_PLAN_ID);
   deleteMeta(sql, META_TOOL_CLEANUP_PLAN_FINGERPRINT);
   deleteMeta(sql, META_TOOL_CLEANUP_PLAN_CUTOFF);
+  deleteMeta(sql, META_TOOL_CLEANUP_PLAN_TERMINAL);
 }
 
 export function clearToolPayloadCleanupState(sql: SqlStorage): void {

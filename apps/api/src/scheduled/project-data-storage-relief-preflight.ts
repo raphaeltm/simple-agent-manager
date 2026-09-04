@@ -4,6 +4,8 @@ import type {
 } from '../durable-objects/project-data/storage-relief-measurement';
 import { DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX } from '../durable-objects/project-data/tool-payload-cleanup';
 import {
+  DEFAULT_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES,
+  DEFAULT_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES,
   type ToolPayloadCleanupManifestBatchProof,
   type ToolPayloadCleanupManifestRoot,
   writeToolPayloadCleanupManifestBatch,
@@ -24,9 +26,11 @@ export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MS = 60_000;
 export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS = 20_000;
 export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_SLICES_PER_RUN = 1;
 export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS = 25_000;
-const PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MARGIN_MS = 5_000;
-const PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INNER_RETURN_MARGIN_MS = 500;
-const PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_MANIFEST_BYTES = 1_750_000;
+export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MARGIN_MS = 5_000;
+export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RETURN_MARGIN_MS = 500;
+export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MEASUREMENT_WALL_TIME_MS = 10_000;
+export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_STATE_BYTES = 1_750_000;
+export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ERROR_MAX_LENGTH = 1_000;
 
 type PreflightStatus = 'running' | 'complete' | 'truncated' | 'failed';
 type PreflightSkipReason = 'disabled' | 'invalid_config' | 'cadence' | 'leased' | 'terminal';
@@ -46,6 +50,13 @@ type PreflightConfig = {
   wallTimeMs: number;
   slicesPerRun: number;
   runWallTimeMs: number;
+  leaseMarginMs: number;
+  returnMarginMs: number;
+  measurementWallTimeMs: number;
+  maxStateBytes: number;
+  errorMaxLength: number;
+  batchManifestMaxBytes: number;
+  rootManifestMaxBytes: number;
   archivePrefix: string;
   archiveWriteTimeoutMs: number;
   valid: boolean;
@@ -173,6 +184,34 @@ function configFromEnv(env: Env): PreflightConfig {
     env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS,
     DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS
   );
+  const leaseMarginMs = positiveInteger(
+    env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MARGIN_MS,
+    DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MARGIN_MS
+  );
+  const returnMarginMs = positiveInteger(
+    env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RETURN_MARGIN_MS,
+    DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RETURN_MARGIN_MS
+  );
+  const measurementWallTimeMs = positiveInteger(
+    env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MEASUREMENT_WALL_TIME_MS,
+    DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MEASUREMENT_WALL_TIME_MS
+  );
+  const maxStateBytes = positiveInteger(
+    env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_STATE_BYTES,
+    DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_STATE_BYTES
+  );
+  const errorMaxLength = positiveInteger(
+    env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ERROR_MAX_LENGTH,
+    DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ERROR_MAX_LENGTH
+  );
+  const batchManifestMaxBytes = positiveInteger(
+    env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES,
+    DEFAULT_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES
+  );
+  const rootManifestMaxBytes = positiveInteger(
+    env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES,
+    DEFAULT_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES
+  );
   const archiveWriteTimeoutMs = positiveInteger(
     env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS,
     5_000
@@ -192,6 +231,13 @@ function configFromEnv(env: Env): PreflightConfig {
     wallTimeMs: wallTimeMs.value,
     slicesPerRun: slicesPerRun.value,
     runWallTimeMs: runWallTimeMs.value,
+    leaseMarginMs: leaseMarginMs.value,
+    returnMarginMs: returnMarginMs.value,
+    measurementWallTimeMs: measurementWallTimeMs.value,
+    maxStateBytes: maxStateBytes.value,
+    errorMaxLength: errorMaxLength.value,
+    batchManifestMaxBytes: batchManifestMaxBytes.value,
+    rootManifestMaxBytes: rootManifestMaxBytes.value,
     archivePrefix,
     archiveWriteTimeoutMs: archiveWriteTimeoutMs.value,
   });
@@ -210,6 +256,13 @@ function configFromEnv(env: Env): PreflightConfig {
     wallTimeMs: wallTimeMs.value,
     slicesPerRun: slicesPerRun.value,
     runWallTimeMs: runWallTimeMs.value,
+    leaseMarginMs: leaseMarginMs.value,
+    returnMarginMs: returnMarginMs.value,
+    measurementWallTimeMs: measurementWallTimeMs.value,
+    maxStateBytes: maxStateBytes.value,
+    errorMaxLength: errorMaxLength.value,
+    batchManifestMaxBytes: batchManifestMaxBytes.value,
+    rootManifestMaxBytes: rootManifestMaxBytes.value,
     archivePrefix,
     archiveWriteTimeoutMs: archiveWriteTimeoutMs.value,
     valid: Boolean(
@@ -225,10 +278,17 @@ function configFromEnv(env: Env): PreflightConfig {
       wallTimeMs.valid &&
       slicesPerRun.valid &&
       runWallTimeMs.valid &&
+      leaseMarginMs.valid &&
+      returnMarginMs.valid &&
+      measurementWallTimeMs.valid &&
+      maxStateBytes.valid &&
+      errorMaxLength.valid &&
+      batchManifestMaxBytes.valid &&
+      rootManifestMaxBytes.valid &&
       archiveWriteTimeoutMs.valid &&
-      leaseMs.value >= wallTimeMs.value + PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MARGIN_MS &&
-      runWallTimeMs.value >=
-        wallTimeMs.value + PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INNER_RETURN_MARGIN_MS
+      leaseMs.value >= wallTimeMs.value + leaseMarginMs.value &&
+      runWallTimeMs.value >= wallTimeMs.value + returnMarginMs.value &&
+      measurementWallTimeMs.value + returnMarginMs.value <= wallTimeMs.value
     ),
   };
 }
@@ -328,7 +388,8 @@ function parseSessionManifest(raw: string): SessionManifest {
 
 function mergeSessionManifest(
   raw: string,
-  slices: ProjectDataStorageReliefToolPayloadSessionMeasure[]
+  slices: ProjectDataStorageReliefToolPayloadSessionMeasure[],
+  maxBytes: number
 ): { json: string; count: number } {
   const manifest = parseSessionManifest(raw);
   for (const slice of slices) {
@@ -365,10 +426,7 @@ function mergeSessionManifest(
     Object.entries(manifest).sort(([left], [right]) => left.localeCompare(right))
   );
   const json = JSON.stringify(ordered);
-  if (
-    new TextEncoder().encode(json).byteLength >
-    PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_MANIFEST_BYTES
-  ) {
+  if (new TextEncoder().encode(json).byteLength > maxBytes) {
     throw new Error('ProjectData relief preflight session manifest exceeded its D1 row bound');
   }
   return { json, count: Object.keys(ordered).length };
@@ -613,7 +671,10 @@ async function recordFailure(
   now: number,
   error: unknown
 ): Promise<PreflightRow> {
-  const message = (error instanceof Error ? error.message : String(error)).slice(0, 1_000);
+  const message = (error instanceof Error ? error.message : String(error)).slice(
+    0,
+    config.errorMaxLength
+  );
   const status: PreflightStatus =
     claimed.batches_started >= config.maxBatches ? 'failed' : 'running';
   await env.DATABASE.prepare(
@@ -686,7 +747,7 @@ async function runProjectDataStorageReliefPreflightSlice(
 
     const cursor = parseCursor(claimed.cursor_json);
     const sliceDeadlineMs = nowMs() + config.wallTimeMs;
-    const measurementBudgetMs = Math.max(Math.floor(config.wallTimeMs / 2), 1);
+    const measurementBudgetMs = config.measurementWallTimeMs;
     const innerDeadlineMs = nowMs() + measurementBudgetMs;
     const measurement = await withTimeout(
       measureProjectDataStorageRelief(env, config.projectId, {
@@ -697,7 +758,7 @@ async function runProjectDataStorageReliefPreflightSlice(
         maxEligibleBytes: Math.max(config.maxBytes - claimed.eligible_bytes, 0),
         deadlineMs: innerDeadlineMs,
       }),
-      measurementBudgetMs + PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INNER_RETURN_MARGIN_MS
+      measurementBudgetMs + config.returnMarginMs
     );
     const tool = measurement.toolPayloads;
     const totals = {
@@ -711,7 +772,11 @@ async function runProjectDataStorageReliefPreflightSlice(
       status === 'running' && tool.nextCursor
         ? JSON.stringify({ toolPayload: tool.nextCursor })
         : null;
-    const sessionManifest = mergeSessionManifest(claimed.sessions_json, tool.sessions);
+    const sessionManifest = mergeSessionManifest(
+      claimed.sessions_json,
+      tool.sessions,
+      config.maxStateBytes
+    );
     verifySessionManifestTotals(sessionManifest.json, {
       rowsExamined: totals.rowsExamined,
       eligibleRows: totals.eligibleRows,
@@ -752,6 +817,7 @@ async function runProjectDataStorageReliefPreflightSlice(
         },
         timeoutMs: config.archiveWriteTimeoutMs,
         deadlineMs: sliceDeadlineMs,
+        maxBytes: config.batchManifestMaxBytes,
       });
       targetBatchProofs.push({
         ordinal,
@@ -765,10 +831,7 @@ async function runProjectDataStorageReliefPreflightSlice(
       });
     }
     const targetBatchesJson = JSON.stringify(targetBatchProofs);
-    if (
-      new TextEncoder().encode(targetBatchesJson).byteLength >
-      PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_MANIFEST_BYTES
-    ) {
+    if (new TextEncoder().encode(targetBatchesJson).byteLength > config.maxStateBytes) {
       throw new Error('ProjectData relief preflight target batch proofs exceeded D1 row bound');
     }
     let targetManifest:
@@ -790,6 +853,7 @@ async function runProjectDataStorageReliefPreflightSlice(
         },
         timeoutMs: config.archiveWriteTimeoutMs,
         deadlineMs: sliceDeadlineMs,
+        maxBytes: config.rootManifestMaxBytes,
       });
     }
     const finalize = await env.DATABASE.prepare(
@@ -893,10 +957,7 @@ export async function runProjectDataStorageReliefPreflight(
   let result = await runProjectDataStorageReliefPreflightSlice(env, config, date, false, nowMs);
   for (let slice = 1; slice < config.slicesPerRun; slice += 1) {
     if (result.skipped || result.status !== 'running' || result.lastError) break;
-    if (
-      nowMs() + config.wallTimeMs + PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INNER_RETURN_MARGIN_MS >
-      runDeadlineMs
-    ) {
+    if (nowMs() + config.wallTimeMs + config.returnMarginMs > runDeadlineMs) {
       break;
     }
     const elapsedMs = Math.max(nowMs() - runStartedAtMs, 0);
