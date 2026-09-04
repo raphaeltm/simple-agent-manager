@@ -2931,6 +2931,63 @@ export const projectDataArchiveGlobalSweepCadence = sqliteTable(
 export type ProjectDataArchiveGlobalSweepCadenceRow =
   typeof projectDataArchiveGlobalSweepCadence.$inferSelect;
 
+export const projectDataStorageReliefPreflights = sqliteTable(
+  'project_data_storage_relief_preflights',
+  {
+    planId: text('plan_id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    status: text('status', { enum: ['running', 'complete', 'truncated', 'failed'] })
+      .notNull()
+      .default('running'),
+    cutoffCreatedAt: integer('cutoff_created_at').notNull(),
+    configJson: text('config_json').notNull(),
+    cursorJson: text('cursor_json'),
+    batchesStarted: integer('batches_started').notNull().default(0),
+    rowsExamined: integer('rows_examined').notNull().default(0),
+    eligibleRows: integer('eligible_rows').notNull().default(0),
+    eligibleBytes: integer('eligible_bytes').notNull().default(0),
+    legacyOversizedRows: integer('legacy_oversized_rows').notNull().default(0),
+    legacyOversizedBytes: integer('legacy_oversized_bytes').notNull().default(0),
+    rearchivableOversizedRows: integer('rearchivable_oversized_rows').notNull().default(0),
+    rearchivableOversizedBytes: integer('rearchivable_oversized_bytes').notNull().default(0),
+    oversizedRows: integer('oversized_rows').notNull().default(0),
+    oversizedBytes: integer('oversized_bytes').notNull().default(0),
+    archivedRows: integer('archived_rows').notNull().default(0),
+    skippedRows: integer('skipped_rows').notNull().default(0),
+    sessionCount: integer('session_count').notNull().default(0),
+    sessionsJson: text('sessions_json').notNull().default('{}'),
+    sessionsSha256: text('sessions_sha256'),
+    targetBatchesJson: text('target_batches_json').notNull().default('[]'),
+    targetManifestKey: text('target_manifest_key'),
+    targetManifestBytes: integer('target_manifest_bytes'),
+    targetManifestSha256: text('target_manifest_sha256'),
+    databaseSizeBytes: integer('database_size_bytes'),
+    nextEligibleAt: integer('next_eligible_at').notNull().default(0),
+    leaseOwner: text('lease_owner'),
+    leaseExpiresAt: integer('lease_expires_at'),
+    startedAt: integer('started_at').notNull(),
+    completedAt: integer('completed_at'),
+    lastError: text('last_error'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    projectStatusIdx: index('idx_project_data_storage_relief_preflights_project_status').on(
+      table.projectId,
+      table.status,
+      table.updatedAt
+    ),
+    nextEligibleIdx: index('idx_project_data_storage_relief_preflights_next_eligible').on(
+      table.status,
+      table.nextEligibleAt
+    ),
+  })
+);
+
+export type ProjectDataStorageReliefPreflightRow =
+  typeof projectDataStorageReliefPreflights.$inferSelect;
+
 export const projectDataArchiveMigrations = sqliteTable(
   'project_data_archive_migrations',
   {

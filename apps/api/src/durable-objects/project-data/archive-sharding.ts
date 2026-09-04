@@ -134,6 +134,12 @@ const ARCHIVE_TABLE_SPECS: Record<ProjectDataArchiveTableName, ChunkTableSpec> =
       'message_created_at',
       'message_sequence',
       'archive_version',
+      'archive_body_bytes',
+      'archive_body_sha256',
+      'root_object_bytes',
+      'root_object_sha256',
+      'verified_object_count',
+      'source_tool_metadata_sha256',
     ],
     keyColumn: 'message_id',
     orderBy: 'message_created_at ASC, message_sequence ASC, message_id ASC',
@@ -1070,10 +1076,7 @@ export function prepareArchiveTarget(
   const placeholders = CHAT_SESSION_ANCHOR_COLUMNS.map(() => '?').join(', ');
   const insertSessionQuery = `INSERT INTO chat_sessions (${CHAT_SESSION_ANCHOR_COLUMNS.join(', ')})
      VALUES (${placeholders})`;
-  sql.exec(
-    insertSessionQuery,
-    ...CHAT_SESSION_ANCHOR_COLUMNS.map((column) => row[column] ?? null)
-  );
+  sql.exec(insertSessionQuery, ...CHAT_SESSION_ANCHOR_COLUMNS.map((column) => row[column] ?? null));
   sql.exec(
     `INSERT INTO project_data_archive_target_sessions (
        session_id, project_id, migration_id, owner_name, generation, source_owner_name,
@@ -1103,9 +1106,7 @@ function insertArchiveRow(
 ): void {
   const spec = validateTableName(tableName);
   const existingQuery = `SELECT ${spec.columns.join(', ')} FROM ${tableName} WHERE ${spec.keyColumn} = ?`;
-  const existing = sql
-    .exec(existingQuery, row[spec.keyColumn])
-    .toArray()[0];
+  const existing = sql.exec(existingQuery, row[spec.keyColumn]).toArray()[0];
   if (existing) {
     const expected = canonicalizeArchiveRow(spec.columns, row);
     const actual = canonicalizeArchiveRow(spec.columns, existing);
@@ -2012,6 +2013,7 @@ export async function archiveSourceReadMessageToolContent(
     (await toolPayloadArchive.readArchivedMessageToolContent(
       sql,
       env,
+      input.projectId,
       input.sessionId,
       input.messageId
     )) ?? { content: inlineContent, source: 'inline' }
@@ -2110,6 +2112,7 @@ export async function archiveTargetReadMessageToolContent(
     (await toolPayloadArchive.readArchivedMessageToolContent(
       sql,
       env,
+      input.projectId,
       input.sessionId,
       input.messageId
     )) ?? { content: inlineContent, source: 'inline' }

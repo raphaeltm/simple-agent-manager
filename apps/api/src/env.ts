@@ -565,28 +565,40 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_DEFAULT?: string;
   PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_MAX?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED?: string;
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID?: string; // Required immutable operator plan id when a fixed cutoff is configured
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY?: string; // Required verified R2 target-manifest root for a fixed cleanup plan
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256?: string; // Required SHA-256 of the approved target-manifest root
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES?: string; // Verified approved-plan batch-manifest size ceiling (default: 2000000)
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES?: string; // Verified approved-plan root-manifest size ceiling (default: 1000000)
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS?: string; // Hard cumulative approved source-row ceiling
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES?: string; // Hard cumulative approved projected-reclaim ceiling
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS?: string; // Hard cumulative approved R2 operation ceiling
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_WALL_TIME_MS?: string; // Hard cumulative approved cleanup wall-time ceiling
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS?: string; // Optional comma-separated project allowlist for automatic cleanup; empty means all projects
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT?: string; // Optional fixed exclusive message creation cutoff in epoch milliseconds; malformed/future values fail closed
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO?: string;
-  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS?: string;
-  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES?: string;
-  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES?: string; // Legacy inline-size threshold for cleanup accounting; archival may read larger rows up to archive max (default: 1048576)
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS?: string; // Eligible candidate cap; ordinary physical scan uses the relief-measure max-row window
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES?: string; // Read budget; ordinary cleanup may admit one oversized first row to advance its cursor
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES?: string; // Hard per-row read ceiling; raise deliberately for larger legacy rows without exceeding archive max (default: 1048576)
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS?: string; // Wall-time budget for one archival cleanup pass (default: 20000)
   PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_ROWS?: string; // Hard row cap for explicit superadmin manual cleanup (default: 500)
-  PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_BYTES?: string; // Hard metadata byte cap for explicit superadmin manual cleanup (default: 2097152)
+  PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_BYTES?: string; // Max manual read budget; ordinary-path first-row exception applies unless an exact plan binds the row ceiling (default: 2097152)
   PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_WALL_TIME_MS?: string; // Hard wall-time cap for explicit superadmin manual cleanup (default: 20000)
   PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_RECHECK_MS?: string; // Persisted cooldown after explicit manual cleanup (default: 86400000)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS?: string; // Tool payload age before archive+strip eligibility (default: 5)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS?: string; // Cadence for retention archive scans (default: 86400000)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX?: string; // Private R2 prefix for archived ProjectData tool payloads
-  PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS?: string; // Per-R2-write timeout for archival cleanup (default: 5000)
+  PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS?: string; // Per-R2 write/read-back operation timeout for archival cleanup (default: 5000)
+  PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_OPERATIONS?: string; // Max R2 put/get/body operations per cleanup pass (default: 1500)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS?: string; // Retry deferral after archive/write failures (default: 300000)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES?: string; // R2 chunk size for legacy oversized tool payload archives (default: 524288)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES?: string; // Absolute bounded metadata read cap for legacy oversized archives (default: 1900000)
   PROJECT_DATA_STORAGE_RELIEF_MEASURE_BATCH_ROWS?: string; // Default row budget for admin-only ProjectData relief measurement slices
-  PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS?: string; // Max accepted row budget for admin-only relief measurement slices
+  PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS?: string; // Max physical row window for admin/preflight measurement and ordinary cleanup selection
   PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED?: string; // Disabled-by-default cleanup of old terminal-session grouped/FTS derived rows
   PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO?: string;
   PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO?: string;
@@ -601,6 +613,24 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_ARCHIVE_SHARDING_ENABLED?: string; // Exact archive read routing switch (default: disabled)
   PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED?: string; // Separate kill switch for unscoped scheduled archive-sharding sweep (default: disabled)
   PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS?: string; // Persisted cadence between unscoped archive-sharding sweeps (default: 86400000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ENABLED?: string; // Enable one exact project-scoped, read-only resumable relief preflight (default: false)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PLAN_ID?: string; // Required immutable operator plan identifier when preflight is enabled
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PROJECT_ID?: string; // Required exact ProjectData project target when preflight is enabled
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_CUTOFF_CREATED_AT?: string; // Required fixed exclusive tool-message cutoff in epoch milliseconds
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_BATCH_ROWS?: string; // Per-slice physical row-window limit (default: 5000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INTERVAL_MS?: string; // Persisted cadence between slices (default: 300000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BATCHES?: string; // Overall claimed-attempt ceiling (default: 100)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_ROWS?: string; // Overall physical rows-examined ceiling (default: 500000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES?: string; // Overall projected net reclaimable-byte evidence ceiling (default: 2000000000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MS?: string; // D1 claim lease duration (default: 60000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS?: string; // Absolute measurement plus manifest-I/O slice deadline (default: 20000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_SLICES_PER_RUN?: string; // Maximum sequential slices per scheduled invocation (default: 1)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS?: string; // Admission budget for starting sequential slices (default: 25000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MARGIN_MS?: string; // Required lease headroom above a slice wall budget (default: 5000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RETURN_MARGIN_MS?: string; // Required return headroom inside slice/run wall budgets (default: 500)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MEASUREMENT_WALL_TIME_MS?: string; // Per-slice ProjectData measurement budget (default: 10000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_STATE_BYTES?: string; // Combined D1 JSON ceiling for session and batch-proof state (default: 1750000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ERROR_MAX_LENGTH?: string; // Persisted preflight diagnostic character ceiling (default: 1000)
   PROJECT_DATA_ARCHIVE_SHARD_COUNT?: string;
   PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS?: string;
   PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS?: string;

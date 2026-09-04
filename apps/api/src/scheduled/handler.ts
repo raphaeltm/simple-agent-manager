@@ -25,6 +25,7 @@ import {
   scheduleHourlyPlatformMaintenance,
 } from './platform-feedback-hourly';
 import { runProjectDataArchiveSharding } from './project-data-archive-sharding';
+import { runProjectDataStorageReliefPreflight } from './project-data-storage-relief-preflight';
 import { runProviderOrphanReconciliation } from './provider-orphan-reconciliation';
 import { runSessionSleepSweep } from './session-sleep';
 import { runSessionSleepLifecycleRepair } from './session-sleep-lifecycle-repair';
@@ -187,6 +188,17 @@ export async function scheduled(
   );
   const trialExpire = await sweeps.isolate('trial_expire', () => runTrialExpireSweep(env));
 
+  // Runs LAST on purpose. The relief preflight is read-only, but it is the only
+  // sweep whose run budget is operator-tuned into the minutes
+  // (PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS / _SLICES_PER_RUN) while an
+  // emergency plan is converging. Anywhere earlier in the chain it would push every
+  // later lifecycle sweep — session_sleep above all — back by its whole run budget on
+  // every tick (`.claude/rules/47`).
+  const projectDataStorageReliefPreflight = await sweeps.isolate(
+    'project_data_storage_relief_preflight',
+    () => runProjectDataStorageReliefPreflight(env)
+  );
+
   const failedSweeps = sweeps.failedSweeps();
   const failureNotifications = await notifyFailedSweeps(env, failedSweeps).catch((err) => {
     log.error('cron.failed_sweep_notifications_failed', {
@@ -284,7 +296,8 @@ export async function scheduled(
       terminalNodeLifecycleRepair?.skippedProtectedSleep,
     terminalNodeLifecycleRepairWorkspacesTerminalized:
       terminalNodeLifecycleRepair?.workspacesTerminalized,
-    terminalNodeLifecycleRepairAgentSessionsClosed: terminalNodeLifecycleRepair?.agentSessionsClosed,
+    terminalNodeLifecycleRepairAgentSessionsClosed:
+      terminalNodeLifecycleRepair?.agentSessionsClosed,
     terminalNodeLifecycleRepairComputeUsageClosed: terminalNodeLifecycleRepair?.computeUsageClosed,
     terminalNodeLifecycleRepairProjectSessionsClosed:
       terminalNodeLifecycleRepair?.projectSessionsClosed,
@@ -297,6 +310,18 @@ export async function scheduled(
     terminalSessionSummarySkipped: terminalSessionLedger?.summarySkipped,
     terminalSessionSummaryErrors: terminalSessionLedger?.summaryErrors,
     terminalSessionSummaryRemaining: terminalSessionLedger?.remainingCandidateSummaries,
+    projectDataStorageReliefPreflightEnabled: projectDataStorageReliefPreflight?.enabled,
+    projectDataStorageReliefPreflightSkipped: projectDataStorageReliefPreflight?.skipped,
+    projectDataStorageReliefPreflightSkipReason: projectDataStorageReliefPreflight?.skipReason,
+    projectDataStorageReliefPreflightPlanId: projectDataStorageReliefPreflight?.planId,
+    projectDataStorageReliefPreflightStatus: projectDataStorageReliefPreflight?.status,
+    projectDataStorageReliefPreflightRowsExamined: projectDataStorageReliefPreflight?.rowsExamined,
+    projectDataStorageReliefPreflightEligibleRows: projectDataStorageReliefPreflight?.eligibleRows,
+    projectDataStorageReliefPreflightEligibleBytes:
+      projectDataStorageReliefPreflight?.eligibleBytes,
+    projectDataStorageReliefPreflightSessionCount: projectDataStorageReliefPreflight?.sessionCount,
+    projectDataStorageReliefPreflightSessionManifestSha256:
+      projectDataStorageReliefPreflight?.sessionManifestSha256,
     projectDataArchiveShardingEnabled: projectDataArchiveSharding?.enabled,
     projectDataArchiveShardingSkipped: projectDataArchiveSharding?.skipped,
     projectDataArchiveShardingSkipReason: projectDataArchiveSharding?.skipReason,
