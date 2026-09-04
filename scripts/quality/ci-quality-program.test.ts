@@ -7,7 +7,10 @@ const e2eSmoke = readFileSync(
   new URL('../../.github/workflows/e2e-smoke.yml', import.meta.url),
   'utf8'
 );
-const codSpeed = readFileSync(new URL('../../.github/workflows/codspeed.yml', import.meta.url), 'utf8');
+const codSpeed = readFileSync(
+  new URL('../../.github/workflows/codspeed.yml', import.meta.url),
+  'utf8'
+);
 const parsedRootManifest: unknown = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
 );
@@ -124,7 +127,9 @@ describe('deterministic quality-program CI wiring', () => {
 
     expect(jobBlock(ci, 'durable-object-workers')).toContain("needs.changes.outputs.api == 'true'");
     expect(jobBlock(ci, 'pulumi-infra')).toContain("needs.changes.outputs.infra == 'true'");
-    expect(jobBlock(ci, 'deploy-scripts')).toContain("needs.changes.outputs.deploy-scripts == 'true'");
+    expect(jobBlock(ci, 'deploy-scripts')).toContain(
+      "needs.changes.outputs.deploy-scripts == 'true'"
+    );
 
     const expensiveFilterSnippet = changes.slice(changes.indexOf('filters: |'));
     for (const filterName of [
@@ -138,10 +143,12 @@ describe('deterministic quality-program CI wiring', () => {
       'go-modules',
     ]) {
       const nextFilter = expensiveFilterSnippet.match(
-        new RegExp(String.raw`\n            ${filterName}:\n([\s\S]*?)(?=\n            [a-zA-Z0-9_-]+:\n|\n\n|\n  [a-zA-Z0-9_-]+:)`)
+        new RegExp(
+          String.raw`\n            ${filterName}:\n([\s\S]*?)(?=\n            [a-zA-Z0-9_-]+:\n|\n\n|\n  [a-zA-Z0-9_-]+:)`
+        )
       );
       expect(nextFilter?.[1] ?? '', `${filterName} must not fan out on ci.yml`).not.toContain(
-        ".github/workflows/ci.yml"
+        '.github/workflows/ci.yml'
       );
     }
   });

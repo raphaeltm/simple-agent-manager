@@ -173,8 +173,9 @@ producer/consumer boundary whose missing output has been interpreted as success.
       queries used to prove nonzero coverage.
 - [ ] Keep the PR draft and unmerged until a real same-repository PR scanner run succeeds
       and Sonar's API reports nonzero `lines_to_cover` plus coverage for the PR.
-- [ ] After ordinary CI and the first real Sonar scan are green, request iterative
-      CodeRabbit review with the `coderabbit-review` label and resolve all findings.
+- [ ] After ordinary CI is green, request iterative CodeRabbit review with the
+      `coderabbit-review` label and resolve all findings. The first real Sonar scan remains
+      a separate merge blocker until the external cutover is complete.
 - [ ] Do not deploy to staging or production. This is CI-only configuration, staging is
       reserved, and the user explicitly prohibited deployment without later confirmation.
 
@@ -199,6 +200,38 @@ producer/consumer boundary whose missing output has been interpreted as success.
   domain reviews, ordinary PR CI, and CodeRabbit are recorded. Staging is explicitly
   not applicable for this CI-only change.
 - The draft PR remains unmerged until a real PR scan reports nonzero Sonar measures.
+
+## Validation Evidence
+
+- TDD red: the initial coverage-pipeline suite failed all 18 cases before the validator
+  and workflow wiring existed.
+- Focused green: `sonar-coverage-pipeline.test.ts` passes 20/20 cases, including exact
+  artifact layouts, current-run downloads, immutable action pins, fork gating, secret
+  scope, change filters, and the no-duplicate-suite contract. The final four-file CI
+  quality slice passes 32/32 tests.
+- The first unbounded root coverage run and a bounded Turbo `--concurrency=2` retry
+  exposed timeout flakes while API and web competed on the fallback container's single
+  CPU and 4 GiB RAM. No repository concurrency, timeout, or threshold was changed.
+- Isolated marketing coverage passes 2/2 tests and reports seven tracked TypeScript
+  source files. The ignored generated tracker is no longer present in LCOV.
+- Isolated web coverage passes 302/302 files and 3,600/3,600 tests with 22,697 line
+  records and 65.61% line coverage. Isolated API coverage passes 656/656 files and
+  8,841/8,841 tests with 48,175 line records and 71.08% line coverage.
+- Aggregate `pnpm quality:sonar-coverage:javascript` validation passes for all 12 LCOV
+  reports: 1,582 repository source files and 78,754 line records. Go profile generation
+  remains delegated to the ordinary GitHub CLI job because this fallback container has no
+  Go toolchain; fixture tests cover valid and invalid Go report contracts locally.
+- The full repository quality-script suite passes 41/41 files and 562/562 tests. Full
+  lint passes 13/13 Turbo tasks with the same six pre-existing warnings; full typecheck
+  passes 19/19 tasks; and the production build passes 9/9 tasks. Prettier passes for all
+  changed supported files, and `git diff --check` passes. The repository-wide formatting
+  ratchet could not fetch its lazy-clone baseline objects because the shell GitHub token
+  expired; ordinary CI runs that ratchet in a fresh full checkout.
+- GitHub rejected the first two shell feature-branch push attempts because the injected
+  token became invalid. The coherent implementation is preserved at local SHA
+  `5abab4ae3` and remote checkpoint SHA `23d0c4ad`; the latter was published through the
+  authorized GitHub installation connector. PR creation, ordinary CI, CodeRabbit, the
+  external cutover, and real Sonar measures remain pending.
 
 ## Post-Mortem
 
