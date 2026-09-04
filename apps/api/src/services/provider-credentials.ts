@@ -229,6 +229,11 @@ async function resolveProviderViaCC(
 
   if (!resolved) return undefined;
 
+  // Validate the resolved credential's semantic compute contract before the exact-generation
+  // snapshot path re-reads its ciphertext. In particular, preserve computeAssembler's specific
+  // provider-mismatch classification instead of letting token-shape validation replace it with a
+  // generic stored-format error during exact credential reconstruction.
+  const ccConfig = computeAssembler.assemble(resolved);
   const providerName = targetProvider;
   const credentialSource: CredentialSource =
     resolved.source === 'project-attachment'
@@ -280,8 +285,6 @@ async function resolveProviderViaCC(
       createProviderFromDecryptedToken
     );
   }
-  const ccConfig = computeAssembler.assemble(resolved);
-
   // GCP requires runtime STS token exchange — not a simple token
   if (providerName === 'gcp') {
     const gcpCred = parseGcpCredential(ccConfig.token);

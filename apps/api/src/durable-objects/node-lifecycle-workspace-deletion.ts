@@ -691,7 +691,7 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     const futureAlarm = currentAlarm !== null && currentAlarm > now ? currentAlarm : null;
     const nextAlarm = [futureAlarm, warmAlarmTime, entry.deleteAt]
       .filter((value): value is number => value !== null)
-      .reduce((earliest, value) => Math.min(earliest, value));
+      .reduce((earliest, value) => Math.min(earliest, value), Number.POSITIVE_INFINITY);
     if (current) await transaction.delete(workspaceDeletionDueIndexKey(current));
     await transaction.put(key, entry);
     if (!entry.deadLetteredAt) {
