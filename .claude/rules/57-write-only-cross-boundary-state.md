@@ -6,12 +6,16 @@ Any control-plane value that answers a question about **another process's curren
 internal state** — "is this agent mid-prompt", "is this container still building",
 "does this node still hold the lock" — where:
 
-1. the remote side is the only writer (it _reports_; we _store_), and
+1. the remote side is, or historically was, the only writer (it _reports_; we
+   _store_), and
 2. more than one consumer branches on the stored value.
 
-The canonical example is `session_state.activity` in the ProjectData DO: written
-exclusively by the vm-agent's `reportActivity` callbacks, read by the stop-button
-UI, by durable-message delivery gating, and by idle/sleep scheduling.
+The canonical example is `session_state.activity` in the ProjectData DO. The
+vm-agent's `reportActivity` callbacks are the authority for remote work
+inventory, while the control plane also records transitions it positively
+observes, including accepted prompt epochs and identity-fenced turn ends. The
+value is read by the stop-button UI, durable-message delivery gating, and
+idle/sleep scheduling.
 
 ## Why This Rule Exists
 
