@@ -61,31 +61,31 @@ reachability were conflated, and absence/timeout was promoted to terminal state.
 
 ## Design invariants
 
-- [ ] Record `observe_prompt` synchronously from DO-local state before any
+- [x] Record `observe_prompt` synchronously from DO-local state before any
       workspace/node lookup or network call.
-- [ ] Remove/bypass the SQL-only prompting/recovering stale-activity rewrite;
+- [x] Remove/bypass the SQL-only prompting/recovering stale-activity rewrite;
       SessionHost agent-session inventory is the sole stale-activity authority.
-- [ ] Accept only a well-formed, identity-unambiguous SessionHost result as
+- [x] Accept only a well-formed, identity-unambiguous SessionHost result as
       `working` or `not_working`; timeout, error, malformed data, missing identity,
       and duplicate identity are inconclusive.
-- [ ] Exhausted unreachable activity probes enter a non-hot quarantined state by
+- [x] Exhausted unreachable activity probes enter a non-hot quarantined state by
       saturating their bounded probe counter while preserving the working mirror;
       they never publish turn-end. A later authoritative VM report resets probe
       accounting and converges normally.
-- [ ] Reconciliation reuses the shared task-runtime-liveness classifier/adapter.
+- [x] Reconciliation reuses the shared task-runtime-liveness classifier/adapter.
       D1 node health and heartbeat staleness are suspect only; a bounded health
       probe timeout/error/failure remains inconclusive.
-- [ ] Explicit terminal workspace/node/session evidence still converges through
+- [x] Explicit terminal workspace/node/session evidence still converges through
       the canonical fenced terminal transition.
-- [ ] Persist a reconciliation check-in message, expiring attention marker, and
+- [x] Persist a reconciliation check-in message, expiring attention marker, and
       failure-capable deadline only after the runtime has accepted delivery.
-- [ ] Bound every reconciliation sweep before cross-boundary I/O and keep network
+- [x] Bound every reconciliation sweep before cross-boundary I/O and keep network
       work outside the alarm's synchronous critical path.
 
 ## Control-loop budget
 
 - Task reconciliation selects at most
-  `PROJECT_DATA_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP` rows in SQL before any D1
+  `TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP` rows in SQL before any D1
   or network work (default 5).
 - Each selected candidate performs one shared runtime assessment. VM candidates
   perform at most one bounded node-health probe, and a deliverable check-in/cancel
@@ -100,20 +100,23 @@ reachability were conflated, and absence/timeout was promoted to terminal state.
 
 ## Implementation checklist
 
-- [ ] Refactor task reconciliation ordering and delivery classification.
-- [ ] Remove the SQL-only stale-activity writer from ProjectData alarms.
-- [ ] Harden SessionHost response identity validation and quarantine exhausted
+- [x] Refactor task reconciliation ordering and delivery classification.
+- [x] Remove the SQL-only stale-activity writer from ProjectData alarms.
+- [x] Harden SessionHost response identity validation and quarantine exhausted
       unreachable probes without publishing terminal activity.
-- [ ] Make failed/timed-out node health probes inconclusive in the shared
+- [x] Make failed/timed-out node health probes inconclusive in the shared
       task-runtime-liveness classifier.
-- [ ] Fence check-in side effects on proven runtime acceptance.
-- [ ] Add exact-timestamp regression fixtures for both production incidents.
-- [ ] Add timeout/error/malformed/identity-ambiguity, authoritative recovery,
+- [x] Fence check-in side effects on proven runtime acceptance.
+- [x] Add exact-timestamp regression fixtures for both production incidents.
+- [x] Add timeout/error/malformed/identity-ambiguity, authoritative recovery,
       explicit terminal convergence, delivery acceptance, and budget tests.
-- [ ] Update internal process rules, shared configuration comments, and public
+- [x] Update internal process rules, shared configuration comments, and public
       configuration documentation.
-- [ ] Pass typecheck, lint, focused unit/Worker tests, full test suites, coverage,
-      format, dependency audit, quality gates, and repository size constraints.
+- [x] Pass typecheck, lint, focused unit/Worker tests, full test suites, coverage,
+      format, diff-scoped dependency governance, quality gates, and repository
+      size constraints. The npm advisory endpoint timed out on both bounded
+      attempts; no dependency files changed and the repository's dependency
+      governance gate passed.
 - [ ] Pass task-completion, Cloudflare, test, constitution, and documentation-sync
       specialist reviews with zero unresolved findings.
 - [ ] Verify on staging with a genuinely long-running VM prompt and a deliberately
@@ -146,6 +149,23 @@ unreachable probes quarantine an ambiguous working state instead of treating
 silence as death. The rule must require positive, identity-fenced terminal evidence
 for destructive convergence and must explicitly preserve authoritative refresh as
 the escape from quarantine.
+
+## Validation evidence
+
+- Focused reconciliation/runtime matrix: 10 files and 248 assertions passed;
+  the Workers alarm regression passed directly in the Workers runtime.
+- Exact incident replay: 53 mutation-discriminating assertions passed with the
+  production timestamps preserved in fixtures.
+- Full repository typecheck (19/19), lint (13/13), build (9/9), format ratchet,
+  type/runtime boundary checks, migration checks, source contracts, repository
+  size, and configuration/binding checks passed.
+- Full coverage retry passed 21/21 workspace tasks: API 653 files / 8,773 tests
+  and web 300 files / 3,595 tests, with repository coverage thresholds met.
+- Gitleaks v8.30.1 passed both current-tree and PR-range scans; dependency
+  governance and direct dependency evidence passed. `pnpm audit --audit-level
+  high` exhausted its built-in retries twice because the npm advisory endpoint
+  returned `ERR_SOCKET_TIMEOUT`; the failure was external and no dependency
+  manifest or lockfile changed.
 
 ## Scope boundaries
 

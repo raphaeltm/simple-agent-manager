@@ -762,14 +762,16 @@ describe('Task Reconciliation Module', () => {
       ).toEqual([]);
     });
 
-    it('replays 01M1M75WA3V528VYZCWQGGM3NT: a 22:02–22:44 live prompt survives stale mirrors', async () => {
+    it('replays 01M1M75WA3V528VYZCWQGGM3NT: the live prompt survives the exact stale-mirror sequence', async () => {
       const taskId = '01M1M75WA3V528VYZCWQGGM3NT';
       const sessionId = 'incident-long-prompt-session';
       const workspaceId = 'incident-long-prompt-workspace';
       const acpSessionId = 'incident-long-prompt-acp';
-      const promptStartedAt = Date.parse('2026-09-03T22:02:00.000Z');
-      const staleMirrorObservedAt = Date.parse('2026-09-03T22:15:48.000Z');
-      const promptStillLiveAt = Date.parse('2026-09-03T22:44:00.000Z');
+      const promptStartedAt = Date.parse('2026-09-03T22:02:15.000Z');
+      const staleMirrorObservedAt = Date.parse('2026-09-03T22:15:48.823Z');
+      const nodeHeartbeatSuspectAt = Date.parse('2026-09-03T22:15:48.965Z');
+      const promptFailureObservedAt = Date.parse('2026-09-03T22:44:48.341Z');
+      const promptStillLiveAt = promptFailureObservedAt - 1;
 
       vi.setSystemTime(staleMirrorObservedAt);
       setupTaskSession({
@@ -803,6 +805,8 @@ describe('Task Reconciliation Module', () => {
         TASK_RECONCILIATION_PROMPT_HARD_STALL_MS: String(TWO_HOURS),
       } as ProjectDataEnv;
 
+      expect(await processReconciliationCandidates(sql, env, vi.fn())).toBe(0);
+      vi.setSystemTime(nodeHeartbeatSuspectAt);
       expect(await processReconciliationCandidates(sql, env, vi.fn())).toBe(0);
       vi.setSystemTime(promptStillLiveAt);
       expect(await processReconciliationCandidates(sql, env, vi.fn())).toBe(1);

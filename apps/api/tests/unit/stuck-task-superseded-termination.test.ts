@@ -416,7 +416,7 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
     skippedSupersessionGuard.mockRestore();
   });
 
-  it('keeps the supersession fence on a stale-heartbeat node_not_live terminal write', async () => {
+  it('does not start a terminal write when the stale-heartbeat health probe fails', async () => {
     seedTask(PREDECESSOR_ID, {
       startedAt: iso(-10 * 60 * 1000),
       createdAt: iso(-60 * 60 * 1000),
@@ -441,13 +441,15 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
       { method: 'GET' },
       5_000
     );
-    expect(insertedSuccessor).toBe(true);
+    expect(insertedSuccessor).toBe(false);
     expect(result.failedInProgress).toBe(0);
     expect(statusOf(PREDECESSOR_ID)).toMatchObject({
       status: 'in_progress',
       error_message: null,
     });
-    expect(statusOf(SUCCESSOR_ID).status).toBe('queued');
+    expect(
+      sqlite.prepare(`SELECT COUNT(*) AS count FROM tasks WHERE id = ?`).get(SUCCESSOR_ID)
+    ).toEqual({ count: 0 });
   });
 
   it('still kills the same dead predecessor when no successor appears at write time', async () => {
