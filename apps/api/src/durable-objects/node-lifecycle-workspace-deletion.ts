@@ -58,15 +58,16 @@ export class NodeLifecycleWorkspaceDeletionQueue {
         chatSessionId: null,
       };
     const existingClaimedWithoutNodeIncarnation =
-      Boolean(existing) &&
+      existing !== undefined &&
       (existing.attemptCount ?? 0) > 0 &&
       (existing.nodeUserId === undefined ||
         existing.nodeRuntime === undefined ||
         existing.nodeProviderInstanceId === undefined ||
         existing.nodeRuntimeIncarnationId === undefined);
     const existingMatches =
+      existing !== undefined &&
       !existingClaimedWithoutNodeIncarnation &&
-      existing?.nodeId === scheduledIdentity.nodeId &&
+      existing.nodeId === scheduledIdentity.nodeId &&
       (existing.nodeUserId === undefined || existing.nodeUserId === scheduledIdentity.nodeUserId) &&
       (existing.nodeRuntime === undefined ||
         existing.nodeRuntime === scheduledIdentity.nodeRuntime) &&

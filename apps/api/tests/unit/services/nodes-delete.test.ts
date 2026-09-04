@@ -68,6 +68,7 @@ vi.mock('../../../src/services/provider-credentials', () => ({
     placementCredentialSource?: string | null;
     placementCredentialReference?: string | null;
     placementCredentialVersion?: number | null;
+    placementCredentialFingerprint?: string | null;
   }) => {
     if (
       !(
@@ -83,6 +84,7 @@ vi.mock('../../../src/services/provider-credentials', () => ({
       credentialSource: snapshot.placementCredentialSource,
       credentialReference: snapshot.placementCredentialReference,
       credentialVersion: snapshot.placementCredentialVersion ?? null,
+      credentialFingerprint: snapshot.placementCredentialFingerprint ?? null,
     };
   },
 }));
@@ -198,6 +200,7 @@ describe('node resource deletion services', () => {
       placementCredentialSource: 'project',
       placementCredentialReference: 'credentials:project-cloud-1',
       placementCredentialVersion: 1787875200000,
+      placementCredentialFingerprint: 'sha256:account-a',
       ...overrides,
     };
   }
@@ -298,6 +301,7 @@ describe('node resource deletion services', () => {
         credentialSource: 'project',
         credentialReference: 'credentials:project-cloud-1',
         credentialVersion: 1787875200000,
+        credentialFingerprint: 'sha256:account-a',
       }
     );
     expect(providerDeleteVM).toHaveBeenCalledWith('vm-pool-1');
@@ -350,6 +354,7 @@ describe('node resource deletion services', () => {
         credentialSource: 'project',
         credentialReference: 'credentials:project-cloud-1',
         credentialVersion: 1787875200000,
+        credentialFingerprint: 'sha256:account-a',
       }
     );
     expect(providerDeleteVM).toHaveBeenCalledWith('vm-pool-1');
@@ -667,6 +672,7 @@ describe('node resource deletion services', () => {
         placementCredentialSource: null,
         placementCredentialReference: null,
         placementCredentialVersion: null,
+        placementCredentialFingerprint: null,
       })
     );
 
@@ -690,6 +696,7 @@ describe('node resource deletion services', () => {
         placementCredentialSource: null,
         placementCredentialReference: null,
         placementCredentialVersion: null,
+        placementCredentialFingerprint: null,
       })
     );
     providerGetVM.mockResolvedValueOnce({ id: 'vm-pool-1' });
@@ -701,6 +708,29 @@ describe('node resource deletion services', () => {
     expect(createProviderForUser).not.toHaveBeenCalled();
     expect(providerGetVM).not.toHaveBeenCalled();
     expect(providerDeleteVM).not.toHaveBeenCalled();
+  });
+
+  it('does not delete or write proof after the bound credential row rotates to a colliding account', async () => {
+    nodeRows.push(managedPoolNode({ id: 'rotated-row-collision', status: 'destroying' }));
+    createProviderForUser.mockImplementationOnce(async (...args: unknown[]) => {
+      expect(args[6]).toMatchObject({
+        credentialReference: 'credentials:project-cloud-1',
+        credentialFingerprint: 'sha256:account-a',
+      });
+      // The exact resolver returns null because the mutable row now contains account B.
+      return null;
+    });
+    providerGetVM.mockResolvedValueOnce({ id: 'vm-pool-1' });
+
+    await expect(deleteNodeResourcesStrict('rotated-row-collision', 'user-1', ENV)).rejects.toThrow(
+      /credentials missing/
+    );
+
+    expect(providerGetVM).not.toHaveBeenCalled();
+    expect(providerDeleteVM).not.toHaveBeenCalled();
+    expect(updateCalls).not.toContainEqual({
+      runtimeTerminationConfirmedAt: expect.any(String),
+    });
   });
 
   it('fails closed when strict deletion credentials are missing', async () => {
@@ -772,6 +802,7 @@ describe('node resource deletion services', () => {
         credentialSource: 'project',
         credentialReference: 'credentials:project-cloud-1',
         credentialVersion: 1787875200000,
+        credentialFingerprint: 'sha256:account-a',
       }
     );
     expect(providerDeleteVM).toHaveBeenCalledWith('vm-pool-1');

@@ -104,8 +104,11 @@ normal effects. SAM records only throttled, bounded metadata (callback kind,
 workspace/node identifiers, and rejection state); request bodies, prompts,
 tool output, repository data, and credentials are never copied into this signal.
 
-Destructive runtime requests are bound to a server-written node incarnation and
-the exact provider credential reference used for provisioning. SAM rechecks the
+Destructive runtime requests are bound to a server-written node incarnation, the
+exact provider credential reference used for provisioning, and a SHA-256
+fingerprint of that encrypted credential generation. The fingerprint prevents a
+later in-place credential rotation from redirecting teardown to a different
+provider account whose VM identifier happens to collide. SAM rechecks the
 workspace, node owner, project/session ownership, provider instance, and runtime
 incarnation immediately before a VM-agent deletion request. Managed provider
 teardown fails closed when a legacy node has no exact provider-account binding;

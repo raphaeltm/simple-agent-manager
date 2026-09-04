@@ -12,7 +12,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import { decrypt } from '../../../src/services/encryption';
-import { createProviderForExactCredential } from '../../../src/services/provider-credential-exact';
+import {
+  createProviderForExactCredential,
+  fingerprintEncryptedProviderCredential,
+} from '../../../src/services/provider-credential-exact';
 import {
   buildProviderConfig,
   createProviderForUser,
@@ -345,6 +348,7 @@ describe('createProviderForUser exact credential binding', () => {
       },
     ]) as any;
 
+    const credentialFingerprint = await fingerprintEncryptedProviderCredential('ciphertext', 'iv');
     const result = await createProviderForUser(
       db,
       'project-member',
@@ -356,6 +360,7 @@ describe('createProviderForUser exact credential binding', () => {
         credentialSource: 'project',
         credentialReference: 'credentials:project-cloud-1',
         credentialVersion: 1700000000000,
+        credentialFingerprint,
       }
     );
 
@@ -387,6 +392,10 @@ describe('createProviderForUser exact credential binding', () => {
       }),
     } as any;
 
+    const credentialFingerprint = await fingerprintEncryptedProviderCredential(
+      'cc-ciphertext',
+      'cc-iv'
+    );
     const result = await createProviderForUser(
       db,
       'project-member',
@@ -398,6 +407,7 @@ describe('createProviderForUser exact credential binding', () => {
         credentialSource: 'project',
         credentialReference: 'cc_credentials:cc-project-cloud-1',
         credentialVersion: 1700000000000,
+        credentialFingerprint,
       }
     );
 
@@ -406,6 +416,49 @@ describe('createProviderForUser exact credential binding', () => {
       credentialSource: 'project',
     });
     expect(mockDecrypt).toHaveBeenCalledWith('cc-ciphertext', 'cc-iv', 'enc-key');
+  });
+
+  it('refuses a rotated credential row even when the replacement account has a colliding VM ID', async () => {
+    mockDecrypt.mockClear();
+    const accountAFingerprint = await fingerprintEncryptedProviderCredential(
+      'account-a-ciphertext',
+      'account-a-iv'
+    );
+    const db = makeDbMock([
+      {
+        id: 'project-cloud-1',
+        userId: 'project-owner',
+        projectId: 'project-1',
+        provider: 'hetzner',
+        credentialType: 'cloud-provider',
+        isActive: true,
+        encryptedToken: 'account-b-ciphertext',
+        iv: 'account-b-iv',
+      },
+    ]) as any;
+    const providerFactory = vi.fn(() => {
+      throw new Error('account B provider must not be constructed');
+    });
+
+    const result = await createProviderForExactCredential(
+      db,
+      'project-member',
+      'enc-key',
+      {} as any,
+      'hetzner',
+      'project-1',
+      {
+        credentialSource: 'project',
+        credentialReference: 'credentials:project-cloud-1',
+        credentialVersion: 1700000000000,
+        credentialFingerprint: accountAFingerprint,
+      },
+      providerFactory
+    );
+
+    expect(result).toBeNull();
+    expect(providerFactory).not.toHaveBeenCalled();
+    expect(mockDecrypt).not.toHaveBeenCalled();
   });
 
   it('refuses an exact project composable credential with mismatched owner lineage', async () => {

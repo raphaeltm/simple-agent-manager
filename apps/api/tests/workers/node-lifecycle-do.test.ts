@@ -1133,13 +1133,13 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     const stub = getStub(nodeId);
     await setNodeLifecycleDeletionEnv(stub, { WORKSPACE_DELETION_MAX_RESIDENCE_MS: '100' });
     try {
+      await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID);
       await runInDurableObject(stub, async (instance) => {
-        await instance.ctx.storage.put(`ws-delete:${wsId}`, {
-          nodeId,
-          workspaceId: wsId,
-          userId: TEST_USER_ID,
-          projectId: null,
-          chatSessionId: null,
+        const key = `ws-delete:${wsId}`;
+        const pending = await instance.ctx.storage.get<Record<string, unknown>>(key);
+        if (!pending) throw new Error('expected scheduled workspace deletion');
+        await instance.ctx.storage.put(key, {
+          ...pending,
           deleteAt: Date.now() - 1,
           firstScheduledAt: Date.now() - 1_000,
           attemptCount: 3,

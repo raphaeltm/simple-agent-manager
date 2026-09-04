@@ -271,6 +271,9 @@ export async function provisionNode(
         placementCredentialVersion:
           providerResult.exactCredentialBinding?.credentialVersion ??
           node.placementCredentialVersion,
+        placementCredentialFingerprint:
+          providerResult.exactCredentialBinding?.credentialFingerprint ??
+          node.placementCredentialFingerprint,
         runtimeIncarnationId,
         runtimeTerminationConfirmedAt: null,
         updatedAt: new Date().toISOString(),

@@ -1242,6 +1242,12 @@ export const nodes = sqliteTable(
     runtimeTerminationConfirmedAt: text('runtime_termination_confirmed_at'),
     /** Server-written identity rotated whenever the runtime behind this node row is replaced. */
     runtimeIncarnationId: text('runtime_incarnation_id'),
+    /**
+     * SHA-256 fingerprint of the encrypted provider credential used for this runtime. The
+     * fingerprint is pinned before provider I/O so strict deletion cannot follow a mutable
+     * credential row into a different provider account.
+     */
+    placementCredentialFingerprint: text('placement_credential_fingerprint'),
     /** Candidate-page escape after cleanup failure; ISO-8601 UTC timestamp. */
     cleanupBackoffUntil: text('cleanup_backoff_until'),
     createdAt: text('created_at')

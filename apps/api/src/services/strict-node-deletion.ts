@@ -38,6 +38,7 @@ const NODE_INCARNATION_KEYS = [
   'placementCredentialSource',
   'placementCredentialReference',
   'placementCredentialVersion',
+  'placementCredentialFingerprint',
   'capacityPoolProjectId',
   'workloadRole',
   'providerInstanceType',
@@ -73,6 +74,7 @@ function exactNodeIncarnationPredicate(node: NodeRow) {
     sql`${schema.nodes.placementCredentialSource} IS ${node.placementCredentialSource}`,
     sql`${schema.nodes.placementCredentialReference} IS ${node.placementCredentialReference}`,
     sql`${schema.nodes.placementCredentialVersion} IS ${node.placementCredentialVersion}`,
+    sql`${schema.nodes.placementCredentialFingerprint} IS ${node.placementCredentialFingerprint}`,
     sql`${schema.nodes.capacityPoolProjectId} IS ${node.capacityPoolProjectId}`,
     sql`${schema.nodes.workloadRole} IS ${node.workloadRole}`,
     sql`${schema.nodes.providerInstanceType} IS ${node.providerInstanceType}`,
@@ -127,7 +129,7 @@ async function requireStrictNodeProvider(
 ): Promise<ProviderForUserResult> {
   const { targetProvider, attributionUserId, attributionProjectId, exactCredential } =
     getStrictNodeCredentialContext(node, userId);
-  if (!targetProvider || !exactCredential) {
+  if (!targetProvider || !exactCredential?.credentialFingerprint) {
     throw new Error(
       `Cannot strictly delete node ${node.id}: exact provider credential binding is missing`
     );

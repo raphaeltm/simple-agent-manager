@@ -22,6 +22,7 @@ import {
 import {
   createProviderForExactCredential,
   type ExactProviderCredentialBinding,
+  fingerprintEncryptedProviderCredential,
   type ProviderResolutionResult,
 } from './provider-credential-exact';
 
@@ -235,16 +236,36 @@ async function resolveProviderViaCC(
       : resolved.source === 'user-attachment'
         ? 'user'
         : 'platform';
-  const exactCredentialBinding: ExactProviderCredentialBinding | undefined = resolved.credential
-    ? {
-        credentialSource,
-        credentialReference:
-          credentialSource === 'platform'
-            ? `platform_credentials:${resolved.credential.id}`
-            : `cc_credentials:${resolved.credential.id}`,
-        credentialVersion: null,
-      }
-    : undefined;
+  let exactCredentialBinding: ExactProviderCredentialBinding | undefined;
+  if (resolved.credential) {
+    const credentialTable =
+      credentialSource === 'platform' ? schema.platformCredentials : schema.ccCredentials;
+    const [credentialRow] = await db
+      .select({
+        encryptedToken: credentialTable.encryptedToken,
+        iv: credentialTable.iv,
+        createdAt: credentialTable.createdAt,
+        updatedAt: credentialTable.updatedAt,
+      })
+      .from(credentialTable)
+      .where(eq(credentialTable.id, resolved.credential.id))
+      .limit(1);
+    if (!credentialRow) return null;
+    const timestamp = credentialRow.updatedAt ?? credentialRow.createdAt;
+    const parsedVersion = timestamp ? Date.parse(timestamp) : Number.NaN;
+    exactCredentialBinding = {
+      credentialSource,
+      credentialReference:
+        credentialSource === 'platform'
+          ? `platform_credentials:${resolved.credential.id}`
+          : `cc_credentials:${resolved.credential.id}`,
+      credentialVersion: Number.isFinite(parsedVersion) ? parsedVersion : null,
+      credentialFingerprint: await fingerprintEncryptedProviderCredential(
+        credentialRow.encryptedToken,
+        credentialRow.iv
+      ),
+    };
+  }
   const ccConfig = computeAssembler.assemble(resolved);
 
   // GCP requires runtime STS token exchange — not a simple token
@@ -345,7 +366,11 @@ async function createProviderForUserLegacy(
           exactCredentialBinding: {
             credentialSource: 'project',
             credentialReference: `credentials:${projectCred.id}`,
-            credentialVersion: null,
+            credentialVersion: Date.parse(projectCred.updatedAt ?? projectCred.createdAt),
+            credentialFingerprint: await fingerprintEncryptedProviderCredential(
+              projectCred.encryptedToken,
+              projectCred.iv
+            ),
           },
         };
       }
@@ -358,7 +383,11 @@ async function createProviderForUserLegacy(
         exactCredentialBinding: {
           credentialSource: 'project',
           credentialReference: `credentials:${projectCred.id}`,
-          credentialVersion: null,
+          credentialVersion: Date.parse(projectCred.updatedAt ?? projectCred.createdAt),
+          credentialFingerprint: await fingerprintEncryptedProviderCredential(
+            projectCred.encryptedToken,
+            projectCred.iv
+          ),
         },
       };
     }
@@ -401,7 +430,11 @@ async function createProviderForUserLegacy(
         exactCredentialBinding: {
           credentialSource: 'user',
           credentialReference: `credentials:${cred.id}`,
-          credentialVersion: null,
+          credentialVersion: Date.parse(cred.updatedAt ?? cred.createdAt),
+          credentialFingerprint: await fingerprintEncryptedProviderCredential(
+            cred.encryptedToken,
+            cred.iv
+          ),
         },
       };
     }
@@ -414,7 +447,11 @@ async function createProviderForUserLegacy(
       exactCredentialBinding: {
         credentialSource: 'user',
         credentialReference: `credentials:${cred.id}`,
-        credentialVersion: null,
+        credentialVersion: Date.parse(cred.updatedAt ?? cred.createdAt),
+        credentialFingerprint: await fingerprintEncryptedProviderCredential(
+          cred.encryptedToken,
+          cred.iv
+        ),
       },
     };
   }
@@ -443,7 +480,8 @@ async function createProviderForUserLegacy(
         ? {
             credentialSource: 'platform',
             credentialReference: `platform_credentials:${platformCred.credentialId}`,
-            credentialVersion: null,
+            credentialVersion: platformCred.credentialVersion,
+            credentialFingerprint: platformCred.credentialFingerprint,
           }
         : undefined,
     };
@@ -458,7 +496,8 @@ async function createProviderForUserLegacy(
       ? {
           credentialSource: 'platform',
           credentialReference: `platform_credentials:${platformCred.credentialId}`,
-          credentialVersion: null,
+          credentialVersion: platformCred.credentialVersion,
+          credentialFingerprint: platformCred.credentialFingerprint,
         }
       : undefined,
   };
