@@ -197,6 +197,51 @@ Environment variable is set (so `sync-wrangler-config.ts` falls back to the chec
 global sweep stay disabled, DO migration `044` is additive `ALTER TABLE ADD COLUMN`
 only, and D1 migration `0137` creates a new table.
 
+## Staging evidence on the final head
+
+Staging was free (the other staging owner, task `01M1MZVMF6M8E2FN65986AX5CY`, is cancelled
+and its last deploy run was cancelled at 11:17Z). Staging held zero live nodes throughout;
+two sleeping workspaces were deliberately left alone because they hold restorable snapshots
+belonging to another agent's work (rule 58).
+
+### 1. The preflight is read-only — the property the production step depends on
+
+Deploy `33872266972` (green) ran the scheduled preflight end to end on real Cloudflare
+infrastructure: real D1 lease/claim, real Durable Object measurement RPC (now behind the
+shared cleanup mutex), real R2 manifest write with post-write read-back verification.
+
+| Field                    | Value                                                                                |
+| ------------------------ | ------------------------------------------------------------------------------------ |
+| Plan                     | `staging-verify-2014-ddbe0aace`                                                      |
+| Project                  | `01KPMZ6Q7NB0PX9J74N4D2MM93`                                                         |
+| Status                   | `complete`, `last_error` NULL                                                        |
+| Rows examined / eligible | 59 / 10                                                                              |
+| Eligible bytes           | 31,313                                                                               |
+| Root manifest            | 574 bytes, sha256 `a7142c121176f632e70f11c24d59d12e4988e8274dadea4e0f0ca5bb8af57a22` |
+
+The discriminating check is the re-measurement **after** the plan completed:
+`databaseSize 1,040,384`, `eligibleRows 10`, `eligibleBytes 31,313`, `archivedRows 0` —
+byte-identical to the pre-preflight measurement. The preflight consumed nothing and
+mutated nothing.
+
+### 2. Cursor paging against the real API
+
+Paging the real `relief-measure` endpoint through four cursor pages over 18,954 physical
+rows advanced correctly and never returned a null cursor while `hasMore` was true. That is
+precisely the defect CodeRabbit found and this branch fixes.
+
+### 3. Exact-manifest cleanup (in progress)
+
+Re-proved on the final head because this branch changed relief code. Target
+`01KY2QCEC2FEFDJ1536GGMS3JS` — 17 eligible rows / 8,488 bytes in one session, owned by the
+staging smoke user so message text can be read back through the normal project API. A
+SHA-256 baseline of all 17 target messages' visible text was captured before any mutation.
+
+Deploy `33873876435` also ships a deliberately HALF-APPLIED cleanup configuration — plan
+id, allowlist and cutoff set, manifest absent — as a live test of the fail-closed guard
+added for the security review finding: the cleaner must refuse to build a plan at all
+rather than fall through to ordinary retention.
+
 ## Exact production mutation plan (AWAITING RAPHAËL'S APPROVAL — nothing below has been executed)
 
 Nothing in this section has been run. The production switches it names are all currently
