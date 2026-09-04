@@ -157,7 +157,7 @@ producer/consumer boundary whose missing output has been interpreted as success.
       both artifacts to the configured paths, revalidates them, and runs pinned
       `SonarSource/sonarqube-scan-action` with least privilege.
 - [x] Gate CI scanning on repository variable `SONAR_CI_ENABLED=true`, explicitly skip
-      fork pull requests, scope `SONAR_TOKEN` only to validation/scanner steps, and fail with
+      fork pull requests, scope `SONAR_TOKEN` only to the fail-closed token check and scanner steps, and fail with
       a non-secret diagnostic when the gate is enabled without the secret.
 - [x] Add structurally parsed workflow tests covering producer/consumer paths, action
       pins, current-run artifacts, change-filter behavior, fork safety, secret scope, and the
