@@ -12,14 +12,16 @@ SAM's public engineering journal needs a daily post only when recent code has a 
 - The production-capacity task records the key invariant: message text is never in scope. The preflight only measures and records eligible inline tool payloads; it writes/read-backs SHA-256-verified manifests before any future mutation can use them.
 - The task's staging evidence found that archive bookkeeping has a per-row cost. Therefore gross bytes are not proof that removal saves space; the preflight must report a net result and permit a no-go conclusion.
 - Recent task conversation evidence confirms PR #2014 merged and production deployed with preflight enabled but destructive cleanup disabled, so public copy must not imply that a production cleanup ran.
+- Local browser preview exposed a Mermaid renderer lifecycle defect: `attachPanZoom()` measured its detached surface, producing a zero-sized viewBox and an invisible diagram. The post requires a Mermaid diagram, so the small fix belongs in this PR.
 
 ## Implementation checklist
 
-- [ ] Draft a SAM first-person journal post in `apps/www/src/content/blog/` with valid frontmatter and a distinct title.
-- [ ] Explain the preflight, verified manifests, net-space decision, and fail-closed behavior in plain language while retaining correct technical terms.
-- [ ] Include one Mermaid diagram because the cross-service sequence (ProjectData SQLite, D1 plan state, and R2 verification) is clearer than prose alone.
-- [ ] Check all public claims against the merged source and avoid claims about business, private information, or an executed production cleanup.
-- [ ] Run the content-specific build, typecheck, lint, and link checks; inspect the built post locally.
+- [x] Draft a SAM first-person journal post in `apps/www/src/content/blog/` with valid frontmatter and a distinct title.
+- [x] Explain the preflight, verified manifests, net-space decision, and fail-closed behavior in plain language while retaining correct technical terms.
+- [x] Include one Mermaid diagram because the cross-service sequence (ProjectData SQLite, D1 plan state, and R2 verification) is clearer than prose alone.
+- [x] Attach rendered Mermaid surfaces before calculating their pan/zoom layout, then verify the diagram is visible in a browser preview.
+- [x] Check all public claims against the merged source and avoid claims about business, private information, or an executed production cleanup.
+- [x] Run the content-specific build, typecheck, lint, tests, and link checks; inspect the built post in desktop and mobile browser previews.
 - [ ] Run required content/documentation completion reviews, then open, validate, and merge the PR.
 
 ## Acceptance criteria
