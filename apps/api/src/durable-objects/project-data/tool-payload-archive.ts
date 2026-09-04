@@ -2,8 +2,6 @@ import { createModuleLogger, serializeError } from '../../lib/logger';
 import { stripToolMetadataPayloadForStorage } from './tool-metadata-storage';
 import {
   type PreparedToolPayloadArchive,
-  TOOL_PAYLOAD_CHUNKED_ARCHIVE_VERSION,
-  TOOL_PAYLOAD_VERIFIED_ARCHIVE_VERSION,
   type ToolPayloadArchiveOperationBudget,
   writeToolPayloadArchiveObject,
 } from './tool-payload-archive-r2';
@@ -15,7 +13,10 @@ const textEncoder = new TextEncoder();
 
 export const TOOL_PAYLOAD_ARCHIVE_VERSION = 1;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX = 'project-data/tool-payloads';
-export { TOOL_PAYLOAD_CHUNKED_ARCHIVE_VERSION, TOOL_PAYLOAD_VERIFIED_ARCHIVE_VERSION };
+export {
+  TOOL_PAYLOAD_CHUNKED_ARCHIVE_VERSION,
+  TOOL_PAYLOAD_VERIFIED_ARCHIVE_VERSION,
+} from './tool-payload-archive-r2';
 export {
   listArchivedToolPayloads,
   readArchivedMessageToolContent,

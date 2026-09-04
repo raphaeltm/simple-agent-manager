@@ -1,4 +1,5 @@
 import type { ProjectDataStorageReliefToolPayloadTarget } from './storage-relief-measurement';
+import { sha256Hex, withTimeout } from './tool-payload-archive-primitives';
 import type { ToolPayloadArchiveOperationBudget } from './tool-payload-archive-r2';
 
 const textEncoder = new TextEncoder();
@@ -47,7 +48,7 @@ export type VerifiedManifestObject<T> = {
 };
 
 function normalizePrefix(value: string): string {
-  const normalized = value.trim().replace(/^\/+|\/+$/g, '');
+  const normalized = value.trim().replace(/^\/+/, '').replace(/\/+$/, '');
   return normalized || 'project-data/tool-payloads';
 }
 
@@ -55,34 +56,12 @@ function encodeSegment(value: string): string {
   return encodeURIComponent(value);
 }
 
-async function sha256(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
+const sha256 = sha256Hex;
 
 function remainingTimeout(timeoutMs: number, deadlineMs: number, nowMs: () => number): number {
   const remaining = deadlineMs - nowMs();
   if (remaining <= 0) throw new Error('tool payload cleanup manifest deadline exceeded');
   return Math.min(timeoutMs, remaining);
-}
-
-async function withTimeout<T>(
-  operation: Promise<T>,
-  timeoutMs: number,
-  message: string
-): Promise<T> {
-  operation.catch(() => undefined);
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      operation,
-      new Promise<never>((_resolve, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  }
 }
 
 function reserveOperations(

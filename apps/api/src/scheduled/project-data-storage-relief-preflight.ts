@@ -127,7 +127,7 @@ function positiveInteger(
 ): { value: number; valid: boolean } {
   const normalized = raw?.trim() ?? '';
   if (!normalized) return { value: fallback, valid: true };
-  if (!/^[1-9][0-9]*$/.test(normalized)) return { value: fallback, valid: false };
+  if (!/^[1-9]\d*$/.test(normalized)) return { value: fallback, valid: false };
   const parsed = Number(normalized);
   return {
     value: Number.isSafeInteger(parsed) ? parsed : fallback,
@@ -220,7 +220,9 @@ function configFromEnv(env: Env): PreflightConfig {
   const archivePrefix =
     env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX?.trim() ||
     DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX;
-  const configJson = JSON.stringify({
+  // One settings object feeds BOTH the sealed immutable plan config and the
+  // in-memory config, so a later slice can never diverge from what was sealed.
+  const settings = {
     projectId,
     cutoffCreatedAt,
     batchRows: batchRows.value,
@@ -241,31 +243,12 @@ function configFromEnv(env: Env): PreflightConfig {
     rootManifestMaxBytes: rootManifestMaxBytes.value,
     archivePrefix,
     archiveWriteTimeoutMs: archiveWriteTimeoutMs.value,
-  });
+  };
   return {
     enabled,
     planId,
-    projectId,
-    cutoffCreatedAt,
-    configJson,
-    batchRows: batchRows.value,
-    intervalMs: intervalMs.value,
-    maxBatches: maxBatches.value,
-    maxRows: maxRows.value,
-    maxBytes: maxBytes.value,
-    leaseMs: leaseMs.value,
-    wallTimeMs: wallTimeMs.value,
-    slicesPerRun: slicesPerRun.value,
-    runWallTimeMs: runWallTimeMs.value,
-    leaseMarginMs: leaseMarginMs.value,
-    returnMarginMs: returnMarginMs.value,
-    measurementWallTimeMs: measurementWallTimeMs.value,
-    maxStateBytes: maxStateBytes.value,
-    errorMaxLength: errorMaxLength.value,
-    batchManifestMaxBytes: batchManifestMaxBytes.value,
-    rootManifestMaxBytes: rootManifestMaxBytes.value,
-    archivePrefix,
-    archiveWriteTimeoutMs: archiveWriteTimeoutMs.value,
+    configJson: JSON.stringify(settings),
+    ...settings,
     valid: Boolean(
       planId &&
       projectId &&
@@ -441,11 +424,11 @@ async function sha256Text(value: string): Promise<string> {
 function parseTargetBatchProofs(raw: string): ToolPayloadCleanupManifestBatchProof[] {
   const parsed = JSON.parse(raw) as unknown;
   if (!Array.isArray(parsed)) {
-    throw new Error('ProjectData relief preflight target batch manifest is malformed');
+    throw new TypeError('ProjectData relief preflight target batch manifest is malformed');
   }
   return parsed.map((value, index) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      throw new Error('ProjectData relief preflight target batch manifest is malformed');
+      throw new TypeError('ProjectData relief preflight target batch manifest is malformed');
     }
     const proof = value as Record<string, unknown>;
     if (

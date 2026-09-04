@@ -1815,7 +1815,8 @@ export const MIGRATIONS: Migration[] = [
           sql.exec(statement);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          if (!new RegExp(`duplicate column name:\\s*${column}`, 'i').test(message)) throw error;
+          if (!new RegExp(String.raw`duplicate column name:\s*${column}`, 'i').test(message))
+            throw error;
         }
       }
       // SQLite resolves every selected identifier before executing the query, so

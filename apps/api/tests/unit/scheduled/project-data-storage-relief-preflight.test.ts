@@ -586,65 +586,34 @@ describe('scheduled ProjectData storage relief preflight', () => {
     }
   });
 
-  it('fails closed before ProjectData when exact plan scope is missing', async () => {
+  it.each([
+    [
+      'exact plan scope is missing',
+      { PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PROJECT_ID: '' } satisfies Partial<Env>,
+    ],
+    [
+      'the fixed cutoff is in the future',
+      {
+        PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_CUTOFF_CREATED_AT: String(NOW + 1),
+      } satisfies Partial<Env>,
+    ],
+    [
+      'the fixed cutoff has trailing garbage',
+      {
+        PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_CUTOFF_CREATED_AT: '123garbage',
+      } satisfies Partial<Env>,
+    ],
+  ])('fails closed before ProjectData when %s', async (_case, overrides) => {
     const sqlite = new Database(':memory:');
     try {
       createTables(sqlite);
       const measure = vi.fn();
       const result = await runProjectDataStorageReliefPreflight(
-        makeEnv(sqlite, measure, { PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PROJECT_ID: '' }),
+        makeEnv(sqlite, measure, overrides),
         new Date(NOW)
       );
 
-      expect(result).toMatchObject({
-        enabled: true,
-        skipped: true,
-        skipReason: 'invalid_config',
-      });
-      expect(measure).not.toHaveBeenCalled();
-      expect(readRun(sqlite)).toBeUndefined();
-    } finally {
-      sqlite.close();
-    }
-  });
-
-  it('fails closed before ProjectData when the fixed cutoff is in the future', async () => {
-    const sqlite = new Database(':memory:');
-    try {
-      createTables(sqlite);
-      const measure = vi.fn();
-      const result = await runProjectDataStorageReliefPreflight(
-        makeEnv(sqlite, measure, {
-          PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_CUTOFF_CREATED_AT: String(NOW + 1),
-        }),
-        new Date(NOW)
-      );
-
-      expect(result).toMatchObject({
-        enabled: true,
-        skipped: true,
-        skipReason: 'invalid_config',
-      });
-      expect(measure).not.toHaveBeenCalled();
-      expect(readRun(sqlite)).toBeUndefined();
-    } finally {
-      sqlite.close();
-    }
-  });
-
-  it('fails closed before ProjectData when the fixed cutoff has trailing garbage', async () => {
-    const sqlite = new Database(':memory:');
-    try {
-      createTables(sqlite);
-      const measure = vi.fn();
-      const result = await runProjectDataStorageReliefPreflight(
-        makeEnv(sqlite, measure, {
-          PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_CUTOFF_CREATED_AT: '123garbage',
-        }),
-        new Date(NOW)
-      );
-
-      expect(result).toMatchObject({ skipped: true, skipReason: 'invalid_config' });
+      expect(result).toMatchObject({ enabled: true, skipped: true, skipReason: 'invalid_config' });
       expect(measure).not.toHaveBeenCalled();
       expect(readRun(sqlite)).toBeUndefined();
     } finally {

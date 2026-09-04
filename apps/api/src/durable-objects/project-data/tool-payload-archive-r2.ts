@@ -1,3 +1,5 @@
+import { sha256Hex, withTimeout } from './tool-payload-archive-primitives';
+
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -63,32 +65,7 @@ function buildChunkKey(key: string, index: number, chunkSha256: string): string 
   return `${key}.chunk-${index}.${chunkSha256}`;
 }
 
-function hex(bytes: Uint8Array): string {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
-async function sha256(bytes: Uint8Array): Promise<string> {
-  return hex(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)));
-}
-
-async function withTimeout<T>(
-  operation: Promise<T>,
-  timeoutMs: number,
-  message: string
-): Promise<T> {
-  operation.catch(() => undefined);
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      operation,
-      new Promise<never>((_resolve, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  }
-}
+const sha256 = sha256Hex;
 
 function remainingOperationTimeout(
   timeoutMs: number,
@@ -367,7 +344,7 @@ export async function parseToolPayloadArchiveObjectText(
 
   const chunks = record.chunks;
   if (!Array.isArray(chunks)) {
-    throw new Error('archived chunk manifest is malformed');
+    throw new TypeError('archived chunk manifest is malformed');
   }
   const verified = record.version === TOOL_PAYLOAD_VERIFIED_ARCHIVE_VERSION;
   if (verified && input.expectedIdentity) {

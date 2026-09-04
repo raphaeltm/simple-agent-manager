@@ -459,11 +459,32 @@ async function scanApprovedToolPayloadCleanupBatch(
     deadlineMs: plan.deadlineMs,
     ...(plan.nowMs ? { nowMs: plan.nowMs } : {}),
   });
+  applyScanResultsToBatch(batch, scanned, candidates);
+  batch.approvedRowsCompleted = scanned.approvedRowsCompleted;
+  batch.approvedBytesCompleted = scanned.approvedBytesCompleted;
+  if (scanned.retryableFailure || scanned.pausedForWallTime) {
+    batch.hasMoreCandidates = true;
+    batch.pauseCursor = scanned.retryCursor ?? scanned.lastCursor;
+  } else if (manifestHasMore) {
+    batch.hasMoreCandidates = true;
+    batch.pauseCursor = scanned.lastCursor;
+  }
+  return batch;
+}
+
+/**
+ * Copies one archive scan result onto the cleanup batch accumulator. Shared by the
+ * approved-manifest and the ordinary retention path so their accounting can never
+ * drift (`.claude/rules/24`).
+ */
+function applyScanResultsToBatch(
+  batch: ToolPayloadCleanupBatch,
+  scanned: Awaited<ReturnType<typeof scanToolPayloadCandidates>>,
+  candidates: ToolPayloadCandidate[]
+): void {
   batch.sessionsScanned = countSessions(candidates.slice(0, scanned.rowsScanned));
   batch.rowsScanned = scanned.rowsScanned;
   batch.rowsUpdated = scanned.rowsUpdated;
-  batch.approvedRowsCompleted = scanned.approvedRowsCompleted;
-  batch.approvedBytesCompleted = scanned.approvedBytesCompleted;
   batch.archiveOperations = scanned.archiveOperations;
   batch.rowsFailed = scanned.rowsFailed;
   batch.toolMetadataBytesScanned = scanned.toolMetadataBytesScanned;
@@ -473,14 +494,6 @@ async function scanApprovedToolPayloadCleanupBatch(
   batch.errorMessages.push(...scanned.errorMessages);
   batch.lastCursor = scanned.lastCursor;
   batch.retryableFailure = scanned.retryableFailure;
-  if (scanned.retryableFailure || scanned.pausedForWallTime) {
-    batch.hasMoreCandidates = true;
-    batch.pauseCursor = scanned.retryCursor ?? scanned.lastCursor;
-  } else if (manifestHasMore) {
-    batch.hasMoreCandidates = true;
-    batch.pauseCursor = scanned.lastCursor;
-  }
-  return batch;
 }
 
 async function scanToolPayloadCleanupBatch(
@@ -547,18 +560,7 @@ async function scanToolPayloadCleanupBatch(
     ...(plan.nowMs ? { nowMs: plan.nowMs } : {}),
   });
 
-  batch.sessionsScanned = countSessions(candidates.slice(0, scanned.rowsScanned));
-  batch.rowsScanned = scanned.rowsScanned;
-  batch.rowsUpdated = scanned.rowsUpdated;
-  batch.archiveOperations = scanned.archiveOperations;
-  batch.rowsFailed = scanned.rowsFailed;
-  batch.toolMetadataBytesScanned = scanned.toolMetadataBytesScanned;
-  batch.toolMetadataBytesRead = scanned.toolMetadataBytesRead;
-  batch.originalToolMetadataBytes = scanned.originalToolMetadataBytes;
-  batch.storedToolMetadataBytes = scanned.storedToolMetadataBytes;
-  batch.errorMessages.push(...scanned.errorMessages);
-  batch.lastCursor = scanned.lastCursor;
-  batch.retryableFailure = scanned.retryableFailure;
+  applyScanResultsToBatch(batch, scanned, candidates);
 
   if (scanned.retryableFailure) {
     batch.hasMoreCandidates = true;

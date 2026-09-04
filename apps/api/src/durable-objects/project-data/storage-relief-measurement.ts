@@ -363,19 +363,19 @@ async function measureToolPayloadSlice(
       }
       continue;
     }
-    if (attemptStatus === 'no_reclaimable_payload' || attemptStatus === 'invalid_metadata') {
-      skippedRows++;
-      session.skippedRows++;
-    } else if (bytes > config.toolPayloadArchiveMaxMetadataBytes) {
+    // Ineligible rows are classified before the oversized check, and a row deferred
+    // by retry backoff is only skipped when it is NOT oversized — this preserves the
+    // original if/else-if precedence without repeating the skip block.
+    const ineligible =
+      attemptStatus === 'no_reclaimable_payload' || attemptStatus === 'invalid_metadata';
+    const deferredByBackoff =
+      attemptStatus === 'retryable_failure' && nextAttemptAt !== null && nextAttemptAt > measuredAt;
+    if (!ineligible && bytes > config.toolPayloadArchiveMaxMetadataBytes) {
       oversizedRows++;
       oversizedBytes += bytes;
       session.oversizedRows++;
       session.oversizedBytes += bytes;
-    } else if (
-      attemptStatus === 'retryable_failure' &&
-      nextAttemptAt !== null &&
-      nextAttemptAt > measuredAt
-    ) {
+    } else if (ineligible || deferredByBackoff) {
       skippedRows++;
       session.skippedRows++;
     } else {

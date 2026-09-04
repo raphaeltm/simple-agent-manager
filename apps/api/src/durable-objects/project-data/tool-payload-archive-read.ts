@@ -6,6 +6,7 @@ import type {
   ArchivedToolPayloadRow,
   MessageToolContentResult,
 } from './tool-payload-archive';
+import { sha256Hex } from './tool-payload-archive-primitives';
 import {
   parseToolPayloadArchiveObjectText,
   readToolPayloadArchiveObjectBytesWithTimeout,
@@ -119,11 +120,6 @@ function parseArchivedToolPayloadRow(row: unknown[]): ArchivedToolPayloadRow {
     verifiedObjectCount,
     sourceToolMetadataSha256,
   };
-}
-
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 async function readArchiveContent(
