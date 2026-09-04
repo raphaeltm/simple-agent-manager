@@ -14,6 +14,7 @@ import {
   writeToolPayloadCleanupManifestRoot,
 } from '../../src/durable-objects/project-data/tool-payload-cleanup-manifest';
 import { runProjectDataManualToolPayloadCleanup } from '../../src/durable-objects/project-data/tool-payload-manual-cleanup';
+import { runProjectDataStorageReliefPreflight } from '../../src/scheduled/project-data-storage-relief-preflight';
 import type { Env as WorkerEnv } from '../../src/env';
 import { storeMcpToken } from '../../src/services/mcp-token';
 import { measureProjectDataStorageRelief } from '../../src/services/project-data';
@@ -447,6 +448,107 @@ async function callMcpTool(
 }
 
 describe('ProjectData tool payload R2 archival', () => {
+  it('feeds a manifest produced by the real preflight scheduler into the real cleanup engine', async () => {
+    // The vertical slice the suite was missing: every other approved-manifest test builds
+    // its manifest with `approvedCleanupEnv`, a hand-rolled parallel of what the scheduler
+    // does. That cannot catch a divergence between what the preflight WRITES (ordinals,
+    // first/last row bounds, batch proof accumulation) and what the cleanup engine READS.
+    // Here the scheduler itself produces the manifest, against a real DO and real D1/R2.
+    const projectId = `${TEST_PREFIX}-preflight-to-cleanup`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'preflight-slice-a', createdAt: FIXED_NOW - 4_000, sequence: 1 },
+      { id: 'preflight-slice-b', createdAt: FIXED_NOW - 3_000, sequence: 2 },
+      { id: 'preflight-slice-c', createdAt: FIXED_NOW - 2_000, sequence: 3 },
+    ]);
+    const planId = 'preflight-to-cleanup-plan';
+    const cutoffCreatedAt = FIXED_NOW - 1_000;
+
+    // Two slices, so the resume cursor round-trips through D1 `cursor_json` for real
+    // rather than being handed back by a mock.
+    const preflightEnv = {
+      PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ENABLED: 'true',
+      PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PLAN_ID: planId,
+      PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PROJECT_ID: projectId,
+      PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_CUTOFF_CREATED_AT: String(cutoffCreatedAt),
+      PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_BATCH_ROWS: '2',
+      PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INTERVAL_MS: '1',
+      PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_SLICES_PER_RUN: '5',
+      PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS: '120000',
+      PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS: '5000',
+    } satisfies RuntimeEnvOverride;
+
+    let preflight = await withRuntimeEnv(preflightEnv, async () =>
+      runProjectDataStorageReliefPreflight(testEnv)
+    );
+    for (let attempt = 0; attempt < 6 && preflight.status === 'running'; attempt += 1) {
+      preflight = await withRuntimeEnv(preflightEnv, async () =>
+        runProjectDataStorageReliefPreflight(testEnv)
+      );
+    }
+
+    expect(preflight).toMatchObject({ skipped: false, status: 'complete', planId });
+    expect(preflight.eligibleRows).toBe(3);
+    expect(preflight.eligibleBytes).toBeGreaterThan(0);
+    expect(preflight.sessionManifestSha256).toBeTruthy();
+
+    const run = await env.DATABASE.prepare(
+      `SELECT target_manifest_key, target_manifest_sha256, eligible_rows, eligible_bytes,
+              batches_started, rows_examined
+         FROM project_data_storage_relief_preflights
+        WHERE plan_id = ?`
+    )
+      .bind(planId)
+      .first<{
+        target_manifest_key: string;
+        target_manifest_sha256: string;
+        eligible_rows: number;
+        eligible_bytes: number;
+        batches_started: number;
+        rows_examined: number;
+      }>();
+    expect(run?.target_manifest_key).toBeTruthy();
+    expect(run?.target_manifest_sha256).toMatch(/^[a-f0-9]{64}$/);
+    // More than one slice ran, so the persisted cursor was genuinely resumed.
+    expect(run!.batches_started).toBeGreaterThan(1);
+    expect(run!.rows_examined).toBeGreaterThanOrEqual(3);
+
+    // Now hand the scheduler's OWN manifest to the cleanup engine, unmodified.
+    const result = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID: planId,
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS: projectId,
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT: String(cutoffCreatedAt),
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY: run!.target_manifest_key,
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256: run!.target_manifest_sha256,
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS: String(run!.eligible_rows),
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES: String(run!.eligible_bytes),
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS: '100000',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_WALL_TIME_MS: '100000',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO: '0.00002',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO: '0.00001',
+      },
+      { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+    );
+
+    expect(result).toMatchObject({ rowsUpdated: 3, rowsFailed: 0 });
+    const sources = await readMessageContentAndMetadata(stub, seeded.messageIds);
+    for (const label of ['preflight-slice-a', 'preflight-slice-b', 'preflight-slice-c']) {
+      const messageId =
+        seeded.messageIds[
+          ['preflight-slice-a', 'preflight-slice-b', 'preflight-slice-c'].indexOf(label)
+        ]!;
+      const source = sources.get(messageId);
+      expect(source?.content).toBe(`visible ${label}`);
+      expect(source?.toolMetadata.content).toBeUndefined();
+    }
+    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(3);
+  });
+
   it('refuses an approved manifest that belongs to a different project', async () => {
     // The single guard that stops a reused/misconfigured manifest key from stripping the
     // WRONG project's rows is the root.projectId equality check in
