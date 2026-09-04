@@ -9,6 +9,15 @@ count-only `MAX_WORKSPACES_PER_NODE=3` guard admitted all three; the node later
 reported 98.8% memory and a 40.26 one-minute CPU load before heartbeat starvation
 and two false failures.
 
+The same failure recurred before release on production node
+`01M1PCG91VV30DSSJM9W3K9DBK`: a large deletion-recovery workspace and an
+unrelated medium archive-sharding workspace were both admitted with
+`resolved_reservation_json=NULL`. The node reached CPU load 59.04, memory 98.3%,
+and disk 88.7%, stopped heartbeating at 20:18:21Z, and reconciliation falsely
+failed both active tasks at 20:23:50Z/20:24:07Z with `node_stale_heartbeat`. It
+resumed heartbeats at 20:25:17Z while still at 99.4% memory, confirming that the
+aggregate admission gap—not permanent node loss—remained the release blocker.
+
 This task completes the aggregate-accounting slice of ideas
 `01KWVZKB5K7V02GZT3X3G0CWMZ` and `01KRAHJ0R7Y9N0EVS27JKYT8PF`. It builds on
 merged PR #1876 (`92b485644`, concurrency-safe admission/slot reservation) and
@@ -103,8 +112,16 @@ is byte-for-byte `JSON.stringify()` of the same snapshot. No second resolver exi
   isolation.
 - `pnpm build`: 9/9 build tasks passed.
 - `pnpm --dir apps/api test:workers`: 65 files and 828 tests passed.
-- Focused API reservation, placement, node-selection, and recovery suites passed;
-  the split capacity/admission worker suites passed 19/19.
+- Focused API reservation, placement, node-selection, and recovery suites passed
+  26/26 after reconciliation with current main; the split capacity/admission
+  Worker suites passed 19/19, and the Worker-to-TaskRunner proxy passed 15/15
+  with an exact `resolvedReservation` forwarding assertion.
+- Mutation discrimination was verified after reconciliation: replacing all
+  three aggregate CAS resource comparisons with always-true non-negative checks
+  made the cx23 overpacking test admit another workspace and made the concurrent
+  final-capacity race produce two winners; mutating the serialized `sourceId`
+  made the exact-snapshot persistence assertion fail. Restoring the production
+  code returned both Worker suites to green.
 - Format ratchet, file-size, source-contract, migration, Durable Object migration,
   Wrangler binding, AST, runtime-boundary, and type-boundary checks passed.
 
