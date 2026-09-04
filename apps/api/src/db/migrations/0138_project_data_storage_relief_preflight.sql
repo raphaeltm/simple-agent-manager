@@ -1,7 +1,13 @@
 -- Persist exact, bounded, read-only ProjectData relief preflight progress.
+--
+-- IF NOT EXISTS is deliberate. This migration was originally numbered 0137 and has
+-- already been applied under that name to the staging database; PR #2017 then took 0137
+-- on main, so it was renumbered to 0138. Wrangler tracks applied migrations by FILE NAME,
+-- so the renumbered file is re-applied to any environment that already ran the 0137 name.
+-- Making it idempotent is what keeps that re-application a no-op instead of a failure.
 -- A plan ID is immutable for one project and one fixed eligibility cutoff.
 
-CREATE TABLE project_data_storage_relief_preflights (
+CREATE TABLE IF NOT EXISTS project_data_storage_relief_preflights (
   plan_id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   status TEXT NOT NULL DEFAULT 'running' CHECK (status IN (
@@ -42,8 +48,8 @@ CREATE TABLE project_data_storage_relief_preflights (
   updated_at INTEGER NOT NULL
 );
 
-CREATE INDEX idx_project_data_storage_relief_preflights_project_status
+CREATE INDEX IF NOT EXISTS idx_project_data_storage_relief_preflights_project_status
   ON project_data_storage_relief_preflights(project_id, status, updated_at);
 
-CREATE INDEX idx_project_data_storage_relief_preflights_next_eligible
+CREATE INDEX IF NOT EXISTS idx_project_data_storage_relief_preflights_next_eligible
   ON project_data_storage_relief_preflights(status, next_eligible_at);
