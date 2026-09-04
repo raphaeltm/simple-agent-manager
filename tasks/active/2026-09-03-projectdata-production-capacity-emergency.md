@@ -252,7 +252,57 @@ Paging the real `relief-measure` endpoint through four cursor pages over 18,954 
 rows advanced correctly and never returned a null cursor while `hasMore` was true. That is
 precisely the defect CodeRabbit found and this branch fixes.
 
-### 3. Exact-manifest cleanup (in progress)
+### 3. Exact-manifest cleanup — PASSED, and it produced a go/no-go precondition
+
+Target `01KY2QCEC2FEFDJ1536GGMS3JS`, 17 eligible rows / 8,488 bytes in one session, owned by
+the staging smoke user so message text is readable through the normal project API. A
+SHA-256 baseline of all 17 target messages was captured before any mutation.
+
+| Check                | Before   | After                    |
+| -------------------- | -------- | ------------------------ |
+| `eligibleRows`       | 17       | **0**                    |
+| `archivedRows`       | 0        | **17**                   |
+| `eligibleBytes`      | 8,488    | 0                        |
+| Visible message text | baseline | **17/17 byte-identical** |
+
+Every archive row is written only after the R2 object has been read back and byte/SHA-256
+verified, so 17 archive rows is 17 verified archives.
+
+Two things this run proved that the tests could not, plus one it exposed:
+
+- The renumbered `0138` migration applied cleanly to a database that had already applied
+  the same file under its old `0137` name ("Run Database Migrations With Safety Gates:
+  success"). That is the idempotency fix working, not asserted.
+- The **fail-closed** half-applied config refused before this, with all 17 rows left
+  eligible and untouched — see below.
+
+#### The precondition this exposed: archive bookkeeping is not free
+
+`databaseSize` went **up**, from 978,944 to 987,136 (+8,192), while 8,488 bytes of inline
+payload were removed. Reclaiming inline bytes also writes a `tool_payload_archives` row per
+payload (R2 key, two hashes, four sizes, verified-object count). On this run that cost
+`8,488 + 8,192 = 16,680` bytes across 17 rows, about **981 bytes of bookkeeping per archived
+row** — coarse at this scale, since 4 KiB SQLite page granularity dominates a 1 MB object,
+but real and directionally right.
+
+The consequence for production is a hard precondition, because net relief is
+`gross inline reclaim − (rows × ~1 KB)`:
+
+| Avg payload | Rows for 1.08 GB gross | Bookkeeping | **Net**                                  |
+| ----------- | ---------------------- | ----------- | ---------------------------------------- |
+| 500 B       | 2,160,987              | 2,120 MB    | **−1,039 MB (worse than doing nothing)** |
+| 1 KB        | 1,080,494              | 1,060 MB    | +21 MB                                   |
+| 5 KB        | 216,099                | 212 MB      | +869 MB                                  |
+| 20 KB       | 54,025                 | 53 MB       | +1,028 MB                                |
+| 50 KB       | 21,610                 | 21 MB       | +1,059 MB                                |
+
+**Go/no-go: the preflight's `eligible_bytes / eligible_rows` must be comfortably above
+5 KB before the plan is worth executing.** Below roughly 1 KB the operation makes the
+object BIGGER. This is why the plan's expected-reclaim figure must be stated as net, and
+why the first pass must be checked against the measured `databaseSize` delta before the
+remaining passes are allowed to continue.
+
+### 3b. Fail-closed proof (also passed)
 
 Re-proved on the final head because this branch changed relief code. Target
 `01KY2QCEC2FEFDJ1536GGMS3JS` — 17 eligible rows / 8,488 bytes in one session, owned by the
@@ -371,10 +421,18 @@ the archive read path, which re-verifies the hash on read.
 
 ### Expected result
 
-- Reclaim: `<preflight:eligible_bytes>` projected. Realised reclaim is measured as the
+- **Precondition, checked before anything is flipped**: the preflight's
+  `eligible_bytes / eligible_rows` must be comfortably above 5 KB. Archiving writes a
+  `tool_payload_archives` row per payload, measured on staging at roughly **981 bytes per
+  archived row**, so net relief is `gross − (rows × ~1 KB)`. Below about 1 KB average
+  payload the operation makes the object BIGGER — on staging, 8,488 gross bytes over 17
+  small rows moved `databaseSize` from 978,944 **up** to 987,136. If the production average
+  is under 5 KB, do not run this plan; escalate to terminal-session sharding instead.
+- Reclaim: `<preflight:eligible_bytes>` GROSS, minus about `<preflight:eligible_rows> × 1 KB`
+  of archive bookkeeping. Quote the NET figure for approval. Realised reclaim is the
   `sql.databaseSize` delta; DO SQLite does return freed pages (verified in the workerd
-  runtime by `databaseSize drops after deleting rows…`), so projected and realised should
-  track closely, but the realised number is the one that counts.
+  runtime by `databaseSize drops after deleting rows…`), but the bookkeeping offset is real
+  and must not be omitted.
 - Resulting usage: from the size measured immediately before the run (`10,072,158,208` at
   12:14Z, still climbing) minus `<preflight:eligible_bytes>`, i.e. a ratio of about
   `<computed>` against the configured `10^10` limit. Because the object is growing at
@@ -395,6 +453,11 @@ Watch for **6 hours** after the first pass, then a final check at **24 hours**:
 - `tool_payload_archives` row count must increase by exactly the number of stripped rows.
 - A sampled read of an archived payload through the MCP retrieval tool must return the
   original content.
+
+**Check the first pass before allowing the rest.** After the first pass completes, compare
+the measured `databaseSize` delta against that pass's reported `rowsUpdated`. If the object
+did not shrink by at least half the pass's gross projected reclaim, stop — the bookkeeping
+overhead is dominating and the remaining passes will not converge.
 
 **Abort immediately** (revert `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` to `false`, or
 pull the KV alarm brake if faster) if any of: a single `Exceeded the maximum database size`
