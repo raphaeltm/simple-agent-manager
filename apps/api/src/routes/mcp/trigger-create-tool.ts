@@ -4,6 +4,7 @@ import {
   DEFAULT_MAX_TRIGGERS_PER_PROJECT,
   DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
   DEFAULT_TRIGGER_NAME_MAX_LENGTH,
+  resolveProjectScalingConfig,
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
@@ -125,7 +126,14 @@ export async function handleCreateTrigger(
     );
   }
 
-  const maxTriggers = parsePositiveInt(
+  const project = await env.DATABASE.prepare(
+    'SELECT max_triggers AS maxTriggers FROM projects WHERE id = ?'
+  )
+    .bind(tokenData.projectId)
+    .first<{ maxTriggers: number | null }>();
+  // Per-project override (project.maxTriggers) > platform env var > default.
+  const maxTriggers = resolveProjectScalingConfig(
+    project?.maxTriggers ?? null,
     env.MAX_TRIGGERS_PER_PROJECT,
     DEFAULT_MAX_TRIGGERS_PER_PROJECT
   );

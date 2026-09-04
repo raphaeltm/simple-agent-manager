@@ -855,6 +855,7 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
     'maxWorkspacesPerNode',
     'nodeCpuThresholdPercent',
     'nodeMemoryThresholdPercent',
+    'maxTriggers',
   ];
   if (allFieldKeys.every((k) => body[k] === undefined)) {
     throw errors.badRequest('At least one field is required');
@@ -1120,6 +1121,8 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
         body.nodeMemoryThresholdPercent === undefined
           ? existing.nodeMemoryThresholdPercent
           : (body.nodeMemoryThresholdPercent ?? null),
+      maxTriggers:
+        body.maxTriggers === undefined ? existing.maxTriggers : (body.maxTriggers ?? null),
       updatedAt: new Date().toISOString(),
     })
     .where(eq(schema.projects.id, projectId));

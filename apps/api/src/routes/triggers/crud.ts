@@ -12,6 +12,7 @@ import {
   DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
   DEFAULT_TRIGGER_NAME_MAX_LENGTH,
+  resolveProjectScalingConfig,
 } from '@simple-agent-manager/shared';
 import { and, count, desc, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -211,11 +212,14 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
       .get(),
   ]);
   if (sameName) throw errors.conflict(`Trigger "${name}" already exists in this project`);
-  if (
-    (total?.count ?? 0) >=
-    parsePositiveInt(c.env.MAX_TRIGGERS_PER_PROJECT, DEFAULT_MAX_TRIGGERS_PER_PROJECT)
-  ) {
-    throw errors.badRequest('Maximum triggers per project reached');
+  // Per-project override (project.maxTriggers) > platform env var > default.
+  const maxTriggers = resolveProjectScalingConfig(
+    project.maxTriggers,
+    c.env.MAX_TRIGGERS_PER_PROJECT,
+    DEFAULT_MAX_TRIGGERS_PER_PROJECT
+  );
+  if ((total?.count ?? 0) >= maxTriggers) {
+    throw errors.badRequest(`Maximum triggers per project (${maxTriggers}) reached`);
   }
   const maxConcurrent = body.maxConcurrent ?? DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT;
   const maxConcurrentLimit = parsePositiveInt(

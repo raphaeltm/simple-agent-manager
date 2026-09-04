@@ -2,6 +2,7 @@
 import {
   DEFAULT_MAX_TRIGGERS_PER_PROJECT,
   DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
+  resolveProjectScalingConfig,
 } from '@simple-agent-manager/shared';
 
 import type * as schema from '../db/schema';
@@ -52,11 +53,8 @@ interface ProjectRow {
   id: string;
   name: string;
   user_id: string;
-}
-
-function positive(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(value ?? '', 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+  /** Per-project max triggers override. null = use platform default. */
+  max_triggers: number | null;
 }
 
 async function loadIncidentTriggers(
@@ -107,7 +105,12 @@ async function ensureDefaultIncidentTrigger(
   if (!(await hasDispatchablePendingIncidents(env, config, nowMs))) return false;
   if (await hasAnyIncidentTrigger(env, project.id)) return false;
 
-  const maxTriggers = positive(env.MAX_TRIGGERS_PER_PROJECT, DEFAULT_MAX_TRIGGERS_PER_PROJECT);
+  // Per-project override (project.max_triggers) > platform env var > default.
+  const maxTriggers = resolveProjectScalingConfig(
+    project.max_triggers,
+    env.MAX_TRIGGERS_PER_PROJECT,
+    DEFAULT_MAX_TRIGGERS_PER_PROJECT
+  );
   const triggerCount = await env.DATABASE.prepare(
     'SELECT COUNT(*) AS count FROM triggers WHERE project_id = ?'
   )
@@ -253,7 +256,9 @@ export async function runIncidentTriggerSweep(
   };
   if (!projectId) return base;
 
-  const project = await env.DATABASE.prepare('SELECT id, name, user_id FROM projects WHERE id = ?')
+  const project = await env.DATABASE.prepare(
+    'SELECT id, name, user_id, max_triggers AS max_triggers FROM projects WHERE id = ?'
+  )
     .bind(projectId)
     .first<ProjectRow>();
   if (!project)

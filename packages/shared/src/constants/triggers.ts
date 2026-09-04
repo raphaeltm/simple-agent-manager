@@ -4,7 +4,11 @@
 // =============================================================================
 
 /** Maximum triggers per project. Override via MAX_TRIGGERS_PER_PROJECT env var. */
-export const DEFAULT_MAX_TRIGGERS_PER_PROJECT = 10;
+export const DEFAULT_MAX_TRIGGERS_PER_PROJECT = 20;
+/** Minimum allowed per-project max triggers override. */
+export const MIN_MAX_TRIGGERS_PER_PROJECT = 1;
+/** Maximum allowed per-project max triggers override. */
+export const MAX_MAX_TRIGGERS_PER_PROJECT = 100;
 
 /** Minimum interval between cron fires in minutes. Override via CRON_MIN_INTERVAL_MINUTES env var. */
 export const DEFAULT_CRON_MIN_INTERVAL_MINUTES = 15;
