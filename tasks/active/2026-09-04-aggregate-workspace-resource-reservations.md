@@ -88,24 +88,40 @@ is byte-for-byte `JSON.stringify()` of the same snapshot. No second resolver exi
 - [x] Document the capacity policy and update `MAX_WORKSPACES_PER_NODE` wording.
 - [x] Add a retained process rule requiring aggregate resource invariants to be
       enforced at the final atomic reservation boundary.
+- [x] Run lint, typecheck, build, formatting, repository policy checks, the full
+      unit suite, and the complete Workers/D1 suite.
 - [ ] Run task-completion, Cloudflare, test-engineer, constitution, doc-sync, full
-      local gates, staging, CodeRabbit, CI, production deploy, and production
-      verification.
+      staging, CodeRabbit, CI, production deploy, and production verification
+      gates.
+
+## Local validation evidence
+
+- `pnpm lint`: passed (existing warning-only findings).
+- `pnpm typecheck`: passed.
+- `pnpm test`: implementation packages passed; the parallel monorepo run produced
+  one infra `beforeAll` setup timeout, then `pnpm --dir infra test` passed 68/68 in
+  isolation.
+- `pnpm build`: 9/9 build tasks passed.
+- `pnpm --dir apps/api test:workers`: 65 files and 828 tests passed.
+- Focused API reservation, placement, node-selection, and recovery suites passed;
+  the split capacity/admission worker suites passed 19/19.
+- Format ratchet, file-size, source-contract, migration, Durable Object migration,
+  Wrangler binding, AST, runtime-boundary, and type-boundary checks passed.
 
 ## Acceptance criteria
 
-- [ ] A `cx23` fixture admits one `2000` mCPU / `4096` MB reservation and rejects
+- [x] A `cx23` fixture admits one `2000` mCPU / `4096` MB reservation and rejects
       or reselects the second and third even when the count cap is three.
-- [ ] A larger node admits exactly the aggregate combinations that fit.
-- [ ] Two concurrent final reservations for the last CPU/memory capacity produce
+- [x] A larger node admits exactly the aggregate combinations that fit.
+- [x] Two concurrent final reservations for the last CPU/memory capacity produce
       exactly one winner.
-- [ ] Exclusive-node rules hold in selection and the final CAS in both directions.
-- [ ] Null/malformed legacy reservations fail closed for co-tenancy while an empty
+- [x] Exclusive-node rules hold in selection and the final CAS in both directions.
+- [x] Null/malformed legacy reservations fail closed for co-tenancy while an empty
       compatible node still has an explicit single-workspace path.
-- [ ] Creating and recovery reservations count; stopped and deleted reservations do
+- [x] Creating and recovery reservations count; stopped and deleted reservations do
       not.
-- [ ] Capacity placement and resolved reservation snapshots persist unchanged.
-- [ ] Existing same-user cross-project and project-pool isolation tests remain green.
+- [x] Capacity placement and resolved reservation snapshots persist unchanged.
+- [x] Existing same-user cross-project and project-pool isolation tests remain green.
 - [ ] Staging provisions a real small/`cx23`-equivalent node, submits two whole-node
       tasks concurrently, proves the second is not placed on that node, and returns
       all staging VMs to zero.

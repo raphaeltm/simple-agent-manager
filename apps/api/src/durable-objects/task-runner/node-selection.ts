@@ -216,7 +216,6 @@ export async function tryClaimWarmNode(
       if (await hasReusableNodeReservationCapacity(state, rc, persistedClaim)) {
         return selection;
       }
-      await releaseClaimedWarmNode(state, rc, persistedClaim.id);
     }
     // The persisted warm claim can no longer be used: either the referenced
     // node is no longer a reusable selection, or claiming it failed. Release
