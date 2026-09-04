@@ -120,9 +120,9 @@ reachability were conflated, and absence/timeout was promoted to terminal state.
       size constraints. The npm advisory endpoint timed out on both bounded
       attempts; no dependency files changed and the repository's dependency
       governance gate passed.
-- [ ] Pass task-completion, Cloudflare, test, constitution, and documentation-sync
+- [x] Pass task-completion, Cloudflare, test, constitution, and documentation-sync
       specialist reviews with zero unresolved findings.
-- [ ] Verify on staging with a genuinely long-running VM prompt and a deliberately
+- [x] Verify on staging with a genuinely long-running VM prompt and a deliberately
       stopped runtime, then remove all staging VMs.
 - [ ] Open the focused production PR, pass CI, request CodeRabbit only after all
       other gates, resolve every thread, merge, monitor deploy, and run a bounded
@@ -180,6 +180,22 @@ the escape from quarantine.
   2/2 Workers-runtime VM alarm assertions. The Worker replay preserves the live
   task, prompting mirror, active chat, and absence of messages, attention
   markers, destructive reconciliation events, and false task failure.
+- All six required review gates passed at `3daab40a3`: task-completion,
+  Cloudflare, test-engineer, constitution, documentation-sync, and environment
+  validation, with no unresolved findings.
+- Staging deploy `33843354982` passed all 12 smoke checks. A deliberately stopped
+  VM (`01M1NJ011CWNX9BWZMVYJYVQY3`) converged once from `in_progress` to `failed`
+  through the canonical `workspace_deleted` transition; a later query still
+  found exactly one terminal status event.
+- On the shortened, staging-only reconciliation window from deploy
+  `33846308910`, task `01M1NN9D5B7XRT5E1C2BS5NDQH` ran
+  `openssl speed -seconds 240 sha256` in one foreground VM tool call. Authorized
+  workflow run `33849780505` held only that exact node's D1 mirror at an
+  `unhealthy` 05:00 heartbeat for 60 writes over two minutes. During the stale
+  window the authoritative session remained `prompting` with one active tool,
+  while the task, workspace, and node remained live and no reconciliation
+  check-in, attention marker, cleanup, or failure appeared. The test VM was then
+  stopped and staging returned to zero active VM nodes.
 
 ## Scope boundaries
 
