@@ -37,8 +37,17 @@ import type { Env as DOEnv } from './types';
 
 const log = createModuleLogger('session_activity_reconciliation');
 
-/** Host statuses that prove a prompt turn really is in flight right now. */
-const HOST_WORKING_STATUSES = new Set(['prompting', 'recovering']);
+/** SessionHost states in which the VM can still be initializing or running work. */
+const HOST_WORKING_STATUSES = new Set(['starting', 'prompting']);
+const HOST_NON_WORKING_STATUSES = new Set(['idle', 'ready', 'error', 'stopped']);
+const AGENT_SESSION_STATUSES = new Set([
+  'running',
+  'recovery',
+  'sleeping',
+  'suspended',
+  'stopped',
+  'error',
+]);
 
 export interface StaleActivityCandidate {
   acpSessionId: string;
@@ -73,7 +82,7 @@ export interface SessionActivityReconciliationHooks {
  *
  * Two bounds keep the candidate set finite:
  * - `activity_probe_attempts < maxAttempts` — a target that never answers is
- *   terminalized as dead by `applyProbeOutcome` on its final attempt.
+ *   quarantined as ambiguous by `applyProbeOutcome` on its final attempt.
  * - `activity_probe_at` acts as a lease: a row claimed by an in-flight pass is
  *   skipped until the lease expires, so overlapping alarms do not double-probe.
  *
@@ -256,7 +265,12 @@ export function classifyProbeResponse(
       typeof record.id !== 'string' ||
       typeof record.workspaceId !== 'string' ||
       typeof record.status !== 'string' ||
-      (record.hostStatus !== undefined && typeof record.hostStatus !== 'string')
+      !AGENT_SESSION_STATUSES.has(record.status) ||
+      typeof record.createdAt !== 'string' ||
+      typeof record.updatedAt !== 'string' ||
+      (record.hostStatus !== undefined &&
+        record.hostStatus !== null &&
+        typeof record.hostStatus !== 'string')
     ) {
       return { kind: 'unreachable', error: 'malformed_agent_session_entry' };
     }
@@ -279,9 +293,13 @@ export function classifyProbeResponse(
   }
 
   const hostStatus = typeof match.hostStatus === 'string' ? match.hostStatus : null;
-  return hostStatus !== null && HOST_WORKING_STATUSES.has(hostStatus)
-    ? { kind: 'working' }
-    : { kind: 'not_working', hostStatus };
+  if (hostStatus !== null && HOST_WORKING_STATUSES.has(hostStatus)) {
+    return { kind: 'working' };
+  }
+  if (hostStatus === null || HOST_NON_WORKING_STATUSES.has(hostStatus)) {
+    return { kind: 'not_working', hostStatus };
+  }
+  return { kind: 'unreachable', error: 'unknown_agent_session_host_status' };
 }
 
 /**

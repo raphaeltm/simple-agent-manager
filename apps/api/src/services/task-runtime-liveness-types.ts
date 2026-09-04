@@ -102,6 +102,10 @@ export interface TaskRuntimeLivenessSignals {
   /** The task's project — re-checked against the snapshot row in memory. */
   projectId: string;
   taskWorkspaceId: string | null;
+  /** Optional canonical chat owner used by reconciliation's cross-store fence. */
+  expectedChatSessionId?: string | null;
+  /** Optional current ACP owner; historical siblings cannot terminalize it. */
+  expectedAcpSessionId?: string | null;
   workspace: RuntimeWorkspaceSnapshot | null;
   workspaceProbeOutcome: 'ok' | 'error' | 'unknown';
   nowMs: number;

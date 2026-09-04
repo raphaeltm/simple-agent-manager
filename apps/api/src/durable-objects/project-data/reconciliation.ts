@@ -12,25 +12,33 @@
  * - Sessions with active `needs_input` attention markers
  * - Sessions that already have an unresolved `reconciliation_checkin` marker
  */
-import * as v from 'valibot';
-
 import type { Env as WorkerEnv } from '../../env';
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { cancelAgentSessionOnNode, sendPromptToAgentOnNode } from '../../services/node-agent';
 import { classifyTaskRuntimeDelivery } from '../../services/task-runtime-liveness';
-import { parseRowOrNull } from '../row-validation';
 import { recordActivityEventInternal } from './activity';
 import { createAttentionMarker } from './attention';
 import { persistMessage } from './messages';
+import {
+  CANDIDATE_GATE_META_PREFIX,
+  clearReconciliationCandidateGate,
+  deferReconciliationCandidateUntil,
+  parseReconciliationCandidateNotBefore,
+  recordReconciliationCandidateInconclusive,
+} from './reconciliation-candidate-state';
+import {
+  getReconciliationCandidates,
+  type ReconciliationCandidate,
+} from './reconciliation-candidates';
 import {
   type ReconciliationProcessingHooks,
   terminallyFailDeadTarget,
 } from './reconciliation-dead-target';
 import {
-  maxCandidatesPerSweep,
   minReconciliationAlarmDelayMs,
   promptHardStallMs,
   promptSoftStallMs,
+  reconciliationCandidateLeaseMs,
   reconciliationDeadlineMs,
   reconciliationIdleMs,
   reconciliationNodeCallTimeoutMs,
@@ -55,190 +63,12 @@ const CHECKIN_METADATA = JSON.stringify({
   kind: 'reconciliation_checkin',
 });
 
-export interface ReconciliationCandidate {
-  sessionId: string;
-  workspaceId: string;
-  taskId: string;
-  projectId: string;
-  acpSessionId: string;
-  lastActivityAt: number;
-  idleDurationMs: number;
-  action: 'checkin' | 'observe_prompt' | 'cancel_prompt';
-  promptStartedAt: number | null;
-  promptAgeMs: number | null;
-}
-
-/** `SELECT activity, activity_at, prompt_started_at FROM session_state ...` shape. */
-const SessionStateRowSchema = v.object({
-  activity: v.nullable(v.string()),
-  activity_at: v.nullable(v.number()),
-  prompt_started_at: v.nullable(v.number()),
-});
+export type { ReconciliationCandidate } from './reconciliation-candidates';
+export { getReconciliationCandidates } from './reconciliation-candidates';
 
 interface WorkspaceDeliveryTarget {
   nodeId: string;
   userId: string;
-}
-
-/**
- * Find task-mode sessions that are idle and eligible for a SAM check-in.
- *
- * A session is a candidate if:
- * 1. It is an active chat session linked to a task and workspace
- * 2. The session has been idle for at least TASK_RECONCILIATION_IDLE_MS
- * 3. There is no active `needs_input` attention marker
- * 4. There is no unresolved `reconciliation_checkin` attention marker
- * 5. The task is still active in D1 and task_mode = 'task'
- */
-export async function getReconciliationCandidates(
-  sql: SqlStorage,
-  env: DOEnv
-): Promise<ReconciliationCandidate[]> {
-  const now = Date.now();
-  const idleThresholdMs = reconciliationIdleMs(env);
-  const idleThreshold = now - idleThresholdMs;
-  const softPromptMs = promptSoftStallMs(env);
-  const hardPromptMs = promptHardStallMs(env);
-  const candidateLimit = maxCandidatesPerSweep(env);
-
-  // Find active task-linked sessions. idle_cleanup_schedule is optional: early
-  // production task sessions predated reliable schedule creation, and
-  // reconciliation must still protect them.
-  // Join with workspace_activity to get last activity timestamp.
-  // Exclude sessions that already have active needs_input or reconciliation_checkin markers.
-  const rows = sql
-    .exec(
-      `SELECT
-       cs.id AS session_id,
-       COALESCE(ics.workspace_id, cs.workspace_id) AS workspace_id,
-       COALESCE(ics.task_id, cs.task_id) AS task_id,
-       COALESCE(
-         CASE
-           WHEN wa.last_message_at IS NULL THEN wa.last_terminal_activity_at
-           WHEN wa.last_terminal_activity_at IS NULL THEN wa.last_message_at
-           WHEN wa.last_terminal_activity_at > wa.last_message_at THEN wa.last_terminal_activity_at
-           ELSE wa.last_message_at
-         END,
-         wa.created_at,
-         cs.updated_at,
-         cs.created_at,
-         ics.created_at
-       ) AS last_activity_at
-     FROM chat_sessions cs
-     LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id
-     LEFT JOIN workspace_activity wa ON wa.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id)
-     WHERE cs.status = 'active'
-       AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL
-       AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL
-       AND NOT EXISTS (
-         SELECT 1 FROM session_attention_markers sam
-         WHERE sam.session_id = cs.id
-           AND sam.resolved_at IS NULL
-           AND sam.kind IN ('needs_input', 'reconciliation_checkin')
-       )
-     ORDER BY last_activity_at ASC
-     LIMIT ?`,
-      candidateLimit
-    )
-    .toArray();
-
-  const candidates: ReconciliationCandidate[] = [];
-
-  for (const row of rows) {
-    const sessionId = row.session_id as string;
-    const workspaceId = row.workspace_id as string;
-    const taskId = row.task_id as string;
-    const lastActivityAt = (row.last_activity_at as number) || 0;
-    let projectId: string | null = null;
-
-    // Check if the session has been idle long enough
-    if (lastActivityAt > idleThreshold) continue;
-
-    // Verify task is still active and task_mode = 'task' via D1
-    try {
-      const taskRow = await env.DATABASE.prepare(
-        `SELECT task_mode, status, project_id FROM tasks WHERE id = ? LIMIT 1`
-      )
-        .bind(taskId)
-        .first<{ task_mode: string | null; status: string; project_id: string | null }>();
-
-      if (!taskRow) continue;
-      if (taskRow.task_mode !== 'task') continue;
-      if (!['in_progress', 'delegated', 'awaiting_followup'].includes(taskRow.status)) continue;
-      if (!taskRow.project_id) continue;
-      projectId = taskRow.project_id;
-    } catch (err) {
-      log.warn('reconciliation.d1_task_query_failed', { taskId, ...serializeError(err) });
-      continue;
-    }
-    if (!projectId) continue;
-
-    // Find active ACP session for this workspace (DO SQLite)
-    const acpRows = sql
-      .exec(
-        `SELECT id FROM acp_sessions
-       WHERE workspace_id = ? AND status IN ('running', 'started')
-       ORDER BY created_at DESC LIMIT 1`,
-        workspaceId
-      )
-      .toArray();
-
-    const acpRow = acpRows[0];
-    if (!acpRow?.id) {
-      log.warn('reconciliation.no_active_acp_session', { sessionId, workspaceId });
-      continue;
-    }
-
-    const acpSessionId = acpRow.id as string;
-    const stateRow = parseRowOrNull(
-      sql
-        .exec(
-          `SELECT activity, activity_at, prompt_started_at FROM session_state WHERE session_id = ?`,
-          acpSessionId
-        )
-        .toArray()[0],
-      SessionStateRowSchema,
-      'reconciliation.session_state'
-    );
-
-    let action: ReconciliationCandidate['action'] = 'checkin';
-    let promptStartedAt: number | null = null;
-    let promptAgeMs: number | null = null;
-
-    if (stateRow?.activity === 'prompting') {
-      promptStartedAt = stateRow.prompt_started_at || stateRow.activity_at || lastActivityAt;
-      promptAgeMs = Math.max(0, now - promptStartedAt);
-
-      if (promptAgeMs < softPromptMs) {
-        log.info('reconciliation.prompt_in_flight_deferred', {
-          sessionId,
-          taskId,
-          workspaceId,
-          acpSessionId,
-          promptAgeMs,
-          softPromptMs,
-        });
-        continue;
-      }
-
-      action = promptAgeMs >= hardPromptMs ? 'cancel_prompt' : 'observe_prompt';
-    }
-
-    candidates.push({
-      sessionId,
-      workspaceId,
-      taskId,
-      projectId,
-      acpSessionId,
-      lastActivityAt,
-      idleDurationMs: now - lastActivityAt,
-      action,
-      promptStartedAt,
-      promptAgeMs,
-    });
-  }
-
-  return candidates;
 }
 
 /**
@@ -270,15 +100,20 @@ export async function processReconciliationCandidates(
   const remoteWork = Promise.allSettled(
     candidates.map(async (candidate) => {
       try {
-        const projectId = hooks.projectId ?? candidate.projectId;
-        if (hooks.projectId && hooks.projectId !== candidate.projectId) {
+        const hasHookProjectId = Object.prototype.hasOwnProperty.call(hooks, 'projectId');
+        const projectId = hasHookProjectId ? hooks.projectId : candidate.projectId;
+        if (!projectId || projectId !== candidate.projectId) {
           log.error('reconciliation.project_identity_mismatch', {
             sessionId: candidate.sessionId,
             taskId: candidate.taskId,
             workspaceId: candidate.workspaceId,
             taskProjectId: candidate.projectId,
-            durableObjectProjectId: hooks.projectId,
+            durableObjectProjectId: projectId ?? null,
             action: 'preserved',
+          });
+          recordReconciliationCandidateInconclusive(sql, env, {
+            ...candidate,
+            reason: 'project_identity_mismatch',
           });
           return 0;
         }
@@ -287,28 +122,51 @@ export async function processReconciliationCandidates(
           taskId: candidate.taskId,
           projectId,
           workspaceId: candidate.workspaceId,
+          chatSessionId: candidate.sessionId,
+          acpSessionId: candidate.acpSessionId,
         });
         const delivery = classifyTaskRuntimeDelivery(liveness);
         if (delivery.kind === 'terminal') {
-          await terminallyFailDeadTarget(
+          const transitioned = await terminallyFailDeadTarget(
             sql,
             env,
             candidate,
             { reason: delivery.reason, nodeId: delivery.nodeId, projectId },
             hooks
           );
-          return 1;
+          if (transitioned) {
+            clearReconciliationCandidateGate(sql, candidate.sessionId);
+            return 1;
+          }
+          recordReconciliationCandidateInconclusive(sql, env, {
+            ...candidate,
+            reason: 'terminal_ownership_transition_skipped',
+          });
+          return 0;
         }
 
         if (candidate.action === 'observe_prompt') {
-          if (delivery.kind === 'inconclusive') {
+          if (!liveness.live || !liveness.conclusive) {
             log.warn('reconciliation.prompt_observation_liveness_inconclusive', {
               sessionId: candidate.sessionId,
               taskId: candidate.taskId,
               workspaceId: candidate.workspaceId,
-              reason: delivery.reason,
+              reason: liveness.reason,
               action: 'preserved',
             });
+            recordReconciliationCandidateInconclusive(sql, env, {
+              ...candidate,
+              reason: delivery.kind === 'inconclusive' ? delivery.reason : liveness.reason,
+            });
+          } else {
+            deferReconciliationCandidateUntil(
+              sql,
+              candidate.sessionId,
+              Math.max(
+                Date.now() + reconciliationCandidateLeaseMs(env),
+                (candidate.promptStartedAt ?? Date.now()) + promptHardStallMs(env)
+              )
+            );
           }
           return 0;
         }
@@ -321,11 +179,33 @@ export async function processReconciliationCandidates(
             reason: delivery.reason,
             action: 'preserved',
           });
+          recordReconciliationCandidateInconclusive(sql, env, {
+            ...candidate,
+            reason: delivery.reason,
+          });
           return 0;
         }
 
         if (candidate.action === 'cancel_prompt') {
-          await cancelStalledPrompt(sql, env, candidate, delivery.target, broadcastEvent);
+          const accepted = await cancelStalledPrompt(
+            sql,
+            env,
+            candidate,
+            delivery.target,
+            broadcastEvent
+          );
+          if (!accepted) {
+            recordReconciliationCandidateInconclusive(sql, env, {
+              ...candidate,
+              reason: 'prompt_cancel_not_accepted',
+            });
+            return 0;
+          }
+          deferReconciliationCandidateUntil(
+            sql,
+            candidate.sessionId,
+            Date.now() + reconciliationCandidateLeaseMs(env)
+          );
           return 1;
         }
 
@@ -404,6 +284,7 @@ export async function processReconciliationCandidates(
           idleDurationMs: candidate.idleDurationMs,
         });
 
+        clearReconciliationCandidateGate(sql, candidate.sessionId);
         return 1;
       } catch (err) {
         log.warn('reconciliation.candidate_processing_inconclusive', {
@@ -412,6 +293,10 @@ export async function processReconciliationCandidates(
           workspaceId: candidate.workspaceId,
           action: 'preserved',
           ...serializeError(err),
+        });
+        recordReconciliationCandidateInconclusive(sql, env, {
+          ...candidate,
+          reason: err instanceof Error ? err.message : String(err),
         });
         return 0;
       }
@@ -483,7 +368,7 @@ async function cancelStalledPrompt(
   candidate: ReconciliationCandidate,
   target: WorkspaceDeliveryTarget,
   broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void
-): Promise<void> {
+): Promise<boolean> {
   const workerEnv = env as unknown as WorkerEnv;
 
   const result = await cancelAgentSessionOnNode(
@@ -546,6 +431,7 @@ async function cancelStalledPrompt(
     success: result.success,
     status: result.status,
   });
+  return result.success || result.status === 409;
 }
 
 /**
@@ -591,6 +477,7 @@ export function computeReconciliationAlarmTime(sql: SqlStorage, env: DOEnv): num
   const rows = sql
     .exec(
       `SELECT
+       cs.id AS session_id,
        COALESCE(
          CASE
            WHEN wa.last_message_at IS NULL THEN wa.last_terminal_activity_at
@@ -605,13 +492,16 @@ export function computeReconciliationAlarmTime(sql: SqlStorage, env: DOEnv): num
        ) AS last_activity,
        ss.activity AS session_activity,
        ss.activity_at AS session_activity_at,
-       ss.prompt_started_at AS prompt_started_at
+       ss.prompt_started_at AS prompt_started_at,
+       gate.value AS reconciliation_gate
      FROM chat_sessions cs
      LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id
      LEFT JOIN workspace_activity wa ON wa.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id)
      JOIN acp_sessions acp ON acp.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id)
-       AND acp.status IN ('running', 'started')
+       AND acp.chat_session_id = cs.id
+       AND acp.status IN ('assigned', 'running')
      LEFT JOIN session_state ss ON ss.session_id = acp.id
+     LEFT JOIN do_meta gate ON gate.key = ? || cs.id
      WHERE cs.status = 'active'
        AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL
        AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL
@@ -620,7 +510,8 @@ export function computeReconciliationAlarmTime(sql: SqlStorage, env: DOEnv): num
          WHERE sam.session_id = cs.id
            AND sam.resolved_at IS NULL
            AND sam.kind IN ('needs_input', 'reconciliation_checkin')
-       )`
+       )`,
+      CANDIDATE_GATE_META_PREFIX
     )
     .toArray();
 
@@ -645,6 +536,8 @@ export function computeReconciliationAlarmTime(sql: SqlStorage, env: DOEnv): num
       const promptThreshold = promptAgeMs < softPromptMs ? softPromptMs : hardPromptMs;
       candidateTime = Math.max(candidateTime, promptStartedAt + promptThreshold);
     }
+    const notBefore = parseReconciliationCandidateNotBefore(row.reconciliation_gate);
+    if (notBefore !== null) candidateTime = Math.max(candidateTime, notBefore);
 
     nextCheck = nextCheck === null ? candidateTime : Math.min(nextCheck, candidateTime);
   }

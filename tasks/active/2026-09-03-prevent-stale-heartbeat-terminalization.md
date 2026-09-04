@@ -166,6 +166,17 @@ the escape from quarantine.
   high` exhausted its built-in retries twice because the npm advisory endpoint
   returned `ERR_SOCKET_TIMEOUT`; the failure was external and no dependency
   manifest or lockfile changed.
+- The first specialist review wave rejected the initial reconstruction on
+  candidate starvation/overlap, exact ownership fencing, SessionHost contract
+  validation, configured budget coverage, and missing vertical alarm replay.
+  The remediation adds a durable keyset cursor plus per-session claim/quarantine
+  gate, exact task/workspace/chat/ACP liveness scope, strict authoritative
+  response parsing, canonical terminal-transition outcome propagation, and
+  mutation-discriminating overlap/fairness/budget/Workers-runtime tests.
+- Post-remediation focused validation passes 3 files / 175 unit assertions and
+  2/2 Workers-runtime VM alarm assertions. The Worker replay preserves the live
+  task, prompting mirror, active chat, and absence of messages, attention
+  markers, destructive reconciliation events, and false task failure.
 
 ## Scope boundaries
 

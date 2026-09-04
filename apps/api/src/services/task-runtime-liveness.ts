@@ -362,6 +362,15 @@ export function classifyTaskRuntimeLiveness(
     );
   }
 
+  if (signals.expectedChatSessionId && workspace.chatSessionId !== signals.expectedChatSessionId) {
+    return result(workspace, {
+      live: false,
+      conclusive: false,
+      reason: 'workspace_chat_session_mismatch',
+      activeAcpSessionId: null,
+    });
+  }
+
   if (INCONCLUSIVE_WORKSPACE_STATUSES.has(workspace.status)) {
     return result(workspace, {
       live: false,
@@ -537,7 +546,11 @@ export function classifyTaskRuntimeLiveness(
     });
   }
 
-  if (signals.sessionWork?.active) {
+  if (
+    signals.sessionWork?.active &&
+    (!signals.expectedAcpSessionId ||
+      signals.sessionWork.activeAcpSessionId === signals.expectedAcpSessionId)
+  ) {
     return result(workspace, {
       live: true,
       conclusive: true,
@@ -547,6 +560,7 @@ export function classifyTaskRuntimeLiveness(
   }
 
   const active = signals.acpSessions.find((session) => {
+    if (signals.expectedAcpSessionId && session.id !== signals.expectedAcpSessionId) return false;
     if (!ACTIVE_ACP_STATUSES.has(session.status) || session.workspaceId !== workspace.id) {
       return false;
     }
@@ -564,7 +578,9 @@ export function classifyTaskRuntimeLiveness(
   }
 
   const taskWorkspaceSessions = signals.acpSessions.filter(
-    (session) => session.workspaceId === workspace.id
+    (session) =>
+      session.workspaceId === workspace.id &&
+      (!signals.expectedAcpSessionId || session.id === signals.expectedAcpSessionId)
   );
   const terminal = taskWorkspaceSessions.find((session) =>
     TERMINAL_ACP_STATUSES.has(session.status)

@@ -294,6 +294,80 @@ describe('classifyTaskRuntimeLiveness', () => {
     });
   });
 
+  it('does not let a historical terminal ACP session kill the expected running owner', () => {
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          expectedAcpSessionId: 'acp-current',
+          acpSessions: [
+            {
+              id: 'acp-historical',
+              status: 'completed',
+              workspaceId: 'workspace-1',
+              lastHeartbeatAt: NOW,
+              updatedAt: NOW,
+              startedAt: NOW - 4_000,
+              createdAt: NOW - 5_000,
+            },
+            {
+              id: 'acp-current',
+              status: 'running',
+              workspaceId: 'workspace-1',
+              lastHeartbeatAt: NOW - STALE_MS - 1,
+              updatedAt: NOW - STALE_MS - 1,
+              startedAt: NOW - 2_000,
+              createdAt: NOW - 3_000,
+            },
+          ],
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'task_acp_session_stale',
+    });
+  });
+
+  it('accepts terminal ACP evidence only for the expected current owner', () => {
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          expectedAcpSessionId: 'acp-current',
+          acpSessions: [
+            {
+              id: 'acp-current',
+              status: 'completed',
+              workspaceId: 'workspace-1',
+              lastHeartbeatAt: NOW,
+              updatedAt: NOW,
+              startedAt: NOW - 1_000,
+              createdAt: NOW - 2_000,
+            },
+          ],
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: true,
+      reason: 'task_acp_session_terminal',
+      activeAcpSessionId: 'acp-current',
+    });
+  });
+
+  it('treats a rebound workspace chat as inconclusive', () => {
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          expectedChatSessionId: 'chat-expected',
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'workspace_chat_session_mismatch',
+    });
+  });
+
   it('treats a missing ProjectData ACP session as suspect for a healthy VM runtime', () => {
     expect(
       classifyTaskRuntimeLiveness(

@@ -42,6 +42,15 @@ export const DEFAULT_TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP = 5;
 /** Short timeout for reconciliation-originated cancel requests that remain on the alarm path. */
 export const DEFAULT_TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS = 5 * 1000; // 5 seconds
 
+/** Durable claim window preventing overlapping alarms from repeating remote reconciliation I/O. */
+export const DEFAULT_TASK_RECONCILIATION_CANDIDATE_LEASE_MS = 30 * 1000; // 30 seconds
+
+/** Consecutive inconclusive task reconciliation attempts before quarantine. */
+export const DEFAULT_TASK_RECONCILIATION_PROBE_MAX_ATTEMPTS = 3;
+
+/** Cooldown after the inconclusive-attempt budget is exhausted. */
+export const DEFAULT_TASK_RECONCILIATION_QUARANTINE_MS = 5 * 60 * 1000; // 5 minutes
+
 // --- Session activity reconciliation (probe-backed staleness bound) ---
 
 /**

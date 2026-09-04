@@ -55,6 +55,8 @@ function listedSession(hostStatus: string, overrides: Record<string, unknown> = 
     id: ACP_SESSION,
     workspaceId: WORKSPACE,
     status: 'running',
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
     hostStatus,
     ...overrides,
   };
@@ -214,10 +216,35 @@ describe('session activity reconciliation', () => {
       expect(candidates()).toEqual([]);
     });
 
-    it('treats a recovering host status as a live turn', () => {
+    it('treats a starting recovery host as a live turn', () => {
       expect(
-        classifyProbeResponse({ sessions: [listedSession('recovering')] }, ACP_SESSION, WORKSPACE)
+        classifyProbeResponse(
+          { sessions: [listedSession('starting', { status: 'recovery' })] },
+          ACP_SESSION,
+          WORKSPACE
+        )
       ).toEqual({ kind: 'working' });
+    });
+
+    it.each([
+      ['unknown host status', listedSession('future-state')],
+      ['unknown session status', listedSession('idle', { status: 'future-state' })],
+      ['missing createdAt', listedSession('idle', { createdAt: undefined })],
+      ['missing updatedAt', listedSession('idle', { updatedAt: undefined })],
+    ])('treats %s as inconclusive inventory', (_label, session) => {
+      expect(classifyProbeResponse({ sessions: [session] }, ACP_SESSION, WORKSPACE)).toMatchObject({
+        kind: 'unreachable',
+      });
+    });
+
+    it('accepts an omitted hostStatus as a reachable session with no host', () => {
+      expect(
+        classifyProbeResponse(
+          { sessions: [listedSession('idle', { hostStatus: undefined })] },
+          ACP_SESSION,
+          WORKSPACE
+        )
+      ).toEqual({ kind: 'not_working', hostStatus: null });
     });
   });
 
@@ -849,6 +876,65 @@ describe('session activity reconciliation', () => {
         }),
         expect.anything()
       );
+    });
+
+    it('caps inventory calls at the configured candidate and timeout budgets', async () => {
+      for (let index = 2; index <= 3; index++) {
+        const chatSessionId = `chat-${index}`;
+        const workspaceId = `ws-${index}`;
+        const acpSessionId = `acp-${index}`;
+        sql.exec(
+          `INSERT INTO chat_sessions
+             (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)
+           VALUES (?, ?, NULL, 'Conversation', 'active', 0, ?, ?, ?)`,
+          chatSessionId,
+          workspaceId,
+          now,
+          now,
+          now
+        );
+        sql.exec(
+          `INSERT INTO acp_sessions
+             (id, chat_session_id, workspace_id, node_id, status, agent_type,
+              last_heartbeat_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'running', 'claude_code', ?, ?, ?)`,
+          acpSessionId,
+          chatSessionId,
+          workspaceId,
+          `node-${index}`,
+          now,
+          now,
+          now
+        );
+        upsertActivityState(sql, acpSessionId, {
+          activity: 'prompting',
+          now: now - 4 * 60 * 60 * 1000,
+        });
+      }
+      vi.mocked(listAgentSessionsOnNode).mockResolvedValue({
+        sessions: [
+          listedSession('prompting'),
+          listedSession('prompting', { id: 'acp-2', workspaceId: 'ws-2' }),
+          listedSession('prompting', { id: 'acp-3', workspaceId: 'ws-3' }),
+        ],
+      });
+      const requestTimeoutMs = 1234;
+      const result = await probeStaleSessionActivity(
+        sql,
+        {
+          ...makeEnv({ user_id: 'user-1', project_id: 'proj-1' }),
+          SESSION_ACTIVITY_PROBE_MAX_CANDIDATES: '2',
+          SESSION_ACTIVITY_PROBE_TIMEOUT_MS: String(requestTimeoutMs),
+        },
+        hooks,
+        { thresholdMs: FIVE_MINUTES, projectId: 'proj-1' }
+      );
+
+      expect(result.probed).toBe(2);
+      expect(listAgentSessionsOnNode).toHaveBeenCalledTimes(2);
+      for (const call of vi.mocked(listAgentSessionsOnNode).mock.calls) {
+        expect(call[4]).toEqual({ requestTimeoutMs });
+      }
     });
 
     it('refuses to probe a workspace belonging to another project', async () => {
