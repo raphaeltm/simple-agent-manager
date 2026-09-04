@@ -447,6 +447,152 @@ async function callMcpTool(
 }
 
 describe('ProjectData tool payload R2 archival', () => {
+  it('refuses an approved manifest that belongs to a different project', async () => {
+    // The single guard that stops a reused/misconfigured manifest key from stripping the
+    // WRONG project's rows is the root.projectId equality check in
+    // scanApprovedToolPayloadCleanupBatch. Build project A's manifest, then point project
+    // B's DO at it — B must fail closed with B's payload untouched.
+    const victimProjectId = `${TEST_PREFIX}-manifest-scope-victim`;
+    const approvedProjectId = `${TEST_PREFIX}-manifest-scope-approved`;
+    await seedProjectGraph(victimProjectId);
+    await seedProjectGraph(approvedProjectId);
+
+    const approvedStub = getStub(approvedProjectId);
+    await approvedStub.ensureProjectId(approvedProjectId);
+    await seedToolMessages(approvedStub, [
+      { id: 'manifest-scope-approved', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+    ]);
+    const approval = await approvedCleanupEnv(
+      approvedProjectId,
+      'manifest-scope-plan',
+      FIXED_NOW - 1_000
+    );
+
+    const victimStub = getStub(victimProjectId);
+    await victimStub.ensureProjectId(victimProjectId);
+    const victimSeeded = await seedToolMessages(victimStub, [
+      { id: 'manifest-scope-victim', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+    ]);
+
+    const result = await runArchiveCleanup(
+      victimStub,
+      victimProjectId,
+      {
+        ...approval,
+        // The allowlist must name the DO being run, or createToolPayloadCleanupPlan
+        // refuses before the manifest is ever read and the scope guard is not exercised.
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS: victimProjectId,
+      },
+      { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+    );
+    expect(result).toMatchObject({ rowsUpdated: 0, rowsFailed: 1 });
+    await expectSourcePayloadIntact(victimStub, victimSeeded, 'manifest-scope-victim');
+  });
+
+  it.each([
+    ['plan id', { PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID: 'a-different-plan-id' }],
+    [
+      'creation cutoff',
+      { PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT: String(FIXED_NOW - 900) },
+    ],
+  ])(
+    'refuses an approved manifest whose %s disagrees with the configured plan',
+    async (label, override) => {
+      const projectId = `${TEST_PREFIX}-manifest-mismatch-${label.replace(/\s+/g, '-')}`;
+      await seedProjectGraph(projectId);
+      const stub = getStub(projectId);
+      await stub.ensureProjectId(projectId);
+      const seeded = await seedToolMessages(stub, [
+        { id: 'manifest-mismatch', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+      ]);
+      const approval = await approvedCleanupEnv(
+        projectId,
+        'manifest-mismatch-plan',
+        FIXED_NOW - 1_000
+      );
+
+      const result = await runArchiveCleanup(
+        stub,
+        projectId,
+        { ...approval, ...override },
+        { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+      );
+      expect(result).toMatchObject({ rowsUpdated: 0, rowsFailed: 1 });
+      await expectSourcePayloadIntact(stub, seeded, 'manifest-mismatch');
+    }
+  );
+
+  it('refuses an approved manifest whose row count exceeds the cumulative row ceiling', async () => {
+    const projectId = `${TEST_PREFIX}-manifest-row-ceiling`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'manifest-row-ceiling', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+    ]);
+    const approval = await approvedCleanupEnv(
+      projectId,
+      'manifest-row-ceiling-plan',
+      FIXED_NOW - 1_000
+    );
+
+    const result = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        ...approval,
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS: String(
+          Number(approval.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS) - 1
+        ),
+      },
+      { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+    );
+    // The cumulative row ceiling is refused at pass reservation, before the manifest is
+    // read, so no plan is created at all — a strictly earlier fail-closed point than the
+    // byte ceiling, which is refused by the manifest scope check.
+    expect(result).toBeNull();
+    await expectSourcePayloadIntact(stub, seeded, 'manifest-row-ceiling');
+  });
+
+  it.each([
+    ['the fixed cutoff is absent', { PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT: '' }],
+    [
+      'the manifest hash is not 64 hex characters',
+      { PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256: 'not-a-sha256' },
+    ],
+  ])('never enters the approved-manifest branch when %s', async (label, override) => {
+    // Half-applied operator config must not fall back to the ordinary retention path
+    // while a manifest key is still configured — the plan must not be created at all.
+    const projectId = `${TEST_PREFIX}-manifest-halfconfig-${label.slice(0, 12).replace(/\s+/g, '-')}`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'manifest-halfconfig', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+    ]);
+    const approval = await approvedCleanupEnv(
+      projectId,
+      'manifest-halfconfig-plan',
+      FIXED_NOW - 1_000
+    );
+
+    const result = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        ...approval,
+        PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
+        ...override,
+      },
+      { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+    );
+    // No plan is created at all (null) — and crucially the source payload is NOT
+    // stripped by an accidental fall-through to the ordinary retention path, which
+    // `PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0'` would otherwise make eligible.
+    expect(result).toBeNull();
+    await expectSourcePayloadIntact(stub, seeded, 'manifest-halfconfig');
+  });
+
   it('keeps the incoming resume cursor when a measurement slice exhausts its deadline before the first row', async () => {
     // Regression: the deadline break ran before `nextCursor` was assigned, so a slice
     // that ran out of wall time on its very first row returned hasMore:true with a

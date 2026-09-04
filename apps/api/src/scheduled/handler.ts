@@ -163,10 +163,6 @@ export async function scheduled(
   const terminalSessionLedger = await sweeps.isolate('terminal_session_ledger_reconciliation', () =>
     runTerminalSessionLedgerReconciliation(env)
   );
-  const projectDataStorageReliefPreflight = await sweeps.isolate(
-    'project_data_storage_relief_preflight',
-    () => runProjectDataStorageReliefPreflight(env)
-  );
   const projectDataArchiveSharding = await sweeps.isolate('project_data_archive_sharding', () =>
     runProjectDataArchiveSharding(env)
   );
@@ -191,6 +187,17 @@ export async function scheduled(
     runComputeUsageCleanup(env)
   );
   const trialExpire = await sweeps.isolate('trial_expire', () => runTrialExpireSweep(env));
+
+  // Runs LAST on purpose. The relief preflight is read-only, but it is the only
+  // sweep whose run budget is operator-tuned into the minutes
+  // (PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS / _SLICES_PER_RUN) while an
+  // emergency plan is converging. Anywhere earlier in the chain it would push every
+  // later lifecycle sweep — session_sleep above all — back by its whole run budget on
+  // every tick (`.claude/rules/47`).
+  const projectDataStorageReliefPreflight = await sweeps.isolate(
+    'project_data_storage_relief_preflight',
+    () => runProjectDataStorageReliefPreflight(env)
+  );
 
   const failedSweeps = sweeps.failedSweeps();
   const failureNotifications = await notifyFailedSweeps(env, failedSweeps).catch((err) => {

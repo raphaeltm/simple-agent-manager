@@ -43,8 +43,13 @@ uncertain states must fail closed.
 - Production has zero archive-migration, archive-location, and project archive
   circuit-breaker rows for the hot project.
 - Production Worker flags have exact archive routing and the global archive
-  sweep disabled. Automatic tool-payload cleanup is enabled, but automatic and
-  manual budgets are only 500 rows / 2 MiB / 20 seconds on a daily cadence.
+  sweep disabled. CORRECTED 2026-09-04 11:30Z by direct read of the `sam-api-prod`
+  Worker settings: `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` is `false`, not
+  enabled — every automatic reclaimer (tool-payload, grouped-FTS, event-log,
+  archive sharding, global sweep) is off. Only the superadmin manual slice
+  (`POST /api/admin/project-data/storage/:projectId/tool-payload-cleanup`, which
+  deliberately bypasses the automatic enablement flag) can reclaim anything today,
+  and it is capped at 500 rows / 2 MiB / 20 s with a 24 h persisted cooldown.
 - The D1 candidate plane contains 3,357 eligible terminal root sessions and
   6,555,879 indexed messages; the largest eligible session has 100,000 messages.
   Candidate discovery does not expose authoritative per-table source bytes.
@@ -159,6 +164,38 @@ uncertain states must fail closed.
 - [ ] Observe storage/growth, archive integrity, errors/overload/CPU, and rows
       read for the approved window; report exact before/after evidence and remaining
       risk rather than stopping at code deployment.
+
+## Recovery ownership and refreshed baseline (2026-09-04)
+
+SAM task `01M1MJYM0R1BYZ5MDMDVVTCHVS` (session `b2f1a155`) was falsely terminalized at
+05:17Z by `node_stale_heartbeat` while healthy. That is an infrastructure false kill,
+not an implementation failure: its staging cleanup had already succeeded with all ten
+payload archives hash-checked and message text preserved, and it had already restored
+staging to the six pre-incident controls. Task `01M1P0HMQHAXJ0H4Y7J491ESEF` is its
+single replacement owner. No duplicate PR or branch was created.
+
+Refreshed production baseline, read directly from `sam-prod` D1 and the `sam-api-prod`
+Worker settings:
+
+- `project_data_storage_telemetry` at `2026-09-04T11:14:02Z`: `10,046,488,576` bytes,
+  ratio `1.0046488576`, status `degraded`, 7-day growth `161,577,335` bytes/day.
+- Hourly history `06:13Z → 11:14Z` grew `42,045,440` bytes in five hours
+  (~202 MB/day), so the recent rate is above the 7-day average.
+- `platform_errors` still has ZERO `Exceeded the maximum database size` rows in seven
+  days while the object is above the configured `10^10` limit, so Cloudflare's real
+  per-object ceiling is higher — consistent with 10 GiB (`10,737,418,240` bytes).
+  Remaining true headroom is therefore about `690,929,664` bytes, which is 3.4 days at
+  the recent rate and 4.3 days at the 7-day average.
+- The configured `PROJECT_DATA_STORAGE_EMERGENCY_TARGET_RATIO` is `0.9`, so converging
+  to the configured target needs at least `1,046,488,576` bytes of measured relief
+  before allowing for ongoing writes and measurement lag.
+
+Merge safety: this PR is non-destructive on deploy. `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED`
+stays `false` in production, no `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_*` GitHub
+Environment variable is set (so `sync-wrangler-config.ts` falls back to the checked-in
+`PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ENABLED = "false"`), archive sharding and the
+global sweep stay disabled, DO migration `044` is additive `ALTER TABLE ADD COLUMN`
+only, and D1 migration `0137` creates a new table.
 
 ## Acceptance criteria
 

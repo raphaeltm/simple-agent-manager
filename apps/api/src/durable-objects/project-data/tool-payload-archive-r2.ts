@@ -1,4 +1,8 @@
-import { sha256Hex, withTimeout } from './tool-payload-archive-primitives';
+import {
+  assertR2ObjectSizeWithinBound,
+  sha256Hex,
+  withTimeout,
+} from './tool-payload-archive-primitives';
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -134,7 +138,8 @@ export async function readToolPayloadArchiveObjectBytesWithTimeout(
   key: string,
   timeoutMs: number,
   deadlineMs: number,
-  nowMs: () => number
+  nowMs: () => number,
+  maxBytes?: number
 ): Promise<Uint8Array> {
   const getTimeoutMs = remainingOperationTimeout(timeoutMs, deadlineMs, nowMs);
   const object = await withTimeout(
@@ -143,6 +148,11 @@ export async function readToolPayloadArchiveObjectBytesWithTimeout(
     `R2 archive verification read exceeded ${getTimeoutMs}ms timeout`
   );
   if (!object) throw new Error(`R2 archive verification read was missing for ${key}`);
+  assertR2ObjectSizeWithinBound(
+    object,
+    maxBytes,
+    `R2 archive verification read exceeded the ${maxBytes ?? 0} byte ceiling for ${key}`
+  );
   const bodyTimeoutMs = remainingOperationTimeout(timeoutMs, deadlineMs, nowMs);
   const buffer = await withTimeout(
     object.arrayBuffer(),

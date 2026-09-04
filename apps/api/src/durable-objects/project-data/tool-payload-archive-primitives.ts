@@ -43,3 +43,24 @@ export async function withTimeout<T>(
     if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
 }
+
+/**
+ * Rejects an oversized R2 object BEFORE its body is buffered into the isolate.
+ *
+ * `R2Object.size` is available from `get()` without reading the body, so the ceiling can
+ * be enforced for free. The post-read byte comparison stays as the authoritative check —
+ * this is defence in depth against pulling a wrong-sized operator-supplied manifest or a
+ * corrupt archive object into memory on the storage-relief hot path. Doubles that do not
+ * model `size` simply fall through to the post-read check.
+ */
+export function assertR2ObjectSizeWithinBound(
+  object: { size?: unknown },
+  maxBytes: number | undefined,
+  message: string
+): void {
+  if (maxBytes === undefined) return;
+  const size = object.size;
+  if (typeof size === 'number' && Number.isFinite(size) && size > maxBytes) {
+    throw new Error(message);
+  }
+}

@@ -1515,11 +1515,19 @@ export class ProjectData extends DurableObject<Env> {
   async measureStorageRelief(
     input: storageReliefMeasurement.ProjectDataStorageReliefMeasureInput = {}
   ): Promise<storageReliefMeasurement.ProjectDataStorageReliefMeasureResult> {
-    return await storageReliefMeasurement.measureProjectDataStorageReliefSlice(
-      this.sql,
-      this.env,
-      storageSafety.resolveStorageSafetyConfig(this.env),
-      input
+    // Read-only, but it shares the cleanup mutex on purpose. The measurement reads a
+    // candidate window and then re-reads each row's tool_metadata across an await to hash
+    // it; a concurrent cleanup pass stripping that row in between would make the preflight
+    // hash and size an already-stripped payload, so the eligible-byte total a human
+    // approves against would be wrong. Execution still re-verifies the live hash, so this
+    // protects evidence accuracy rather than data safety.
+    return await this.withToolPayloadCleanupLock(() =>
+      storageReliefMeasurement.measureProjectDataStorageReliefSlice(
+        this.sql,
+        this.env,
+        storageSafety.resolveStorageSafetyConfig(this.env),
+        input
+      )
     );
   }
 

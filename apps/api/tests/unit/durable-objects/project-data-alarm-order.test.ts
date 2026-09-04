@@ -39,8 +39,12 @@ describe('ProjectData alarm ordering', () => {
   it('routes the alarm storage-safety pass through the shared cleanup mutex', () => {
     const wrapper = sliceMember('protected runStorageSafetyAlarmLocked()', '\n  // --- DO Alarm');
 
-    // The alarm and the manual cleanup slice must not interleave their R2 awaits
-    // against the same cumulative reservation/cursor state (rule 45).
+    // Wiring only. The DISCRIMINATING proof that the lock actually serializes overlapping
+    // R2 awaits is behavioural and lives in
+    // tests/workers/project-data-tool-payload-archive.test.ts — "serializes overlapping
+    // storage-safety cleanup passes across external R2 awaits" and "serializes manual
+    // cleanup behind storage-safety cleanup across an external R2 await" (rule 45). This
+    // assertion only pins that the alarm keeps entering through that wrapper.
     expect(wrapper).toContain('this.withToolPayloadCleanupLock(');
     expect(wrapper).toContain('storageSafety.runProjectDataStorageSafetyAlarm');
   });

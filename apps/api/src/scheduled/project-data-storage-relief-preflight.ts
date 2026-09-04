@@ -3,6 +3,7 @@ import type {
   ProjectDataStorageReliefMeasureCursor,
   ProjectDataStorageReliefToolPayloadSessionMeasure,
 } from '../durable-objects/project-data/storage-relief-measurement';
+import { DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS } from '../durable-objects/project-data/storage-safety';
 import { DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX } from '../durable-objects/project-data/tool-payload-cleanup';
 import {
   DEFAULT_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES,
@@ -215,7 +216,7 @@ function configFromEnv(env: Env): PreflightConfig {
   );
   const archiveWriteTimeoutMs = positiveInteger(
     env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS,
-    5_000
+    DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS
   );
   const archivePrefix =
     env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX?.trim() ||

@@ -1,5 +1,9 @@
 import type { ProjectDataStorageReliefToolPayloadTarget } from './storage-relief-measurement';
-import { sha256Hex, withTimeout } from './tool-payload-archive-primitives';
+import {
+  assertR2ObjectSizeWithinBound,
+  sha256Hex,
+  withTimeout,
+} from './tool-payload-archive-primitives';
 import type { ToolPayloadArchiveOperationBudget } from './tool-payload-archive-r2';
 
 const textEncoder = new TextEncoder();
@@ -141,6 +145,11 @@ async function readVerifiedJson<T>(input: {
     'tool payload cleanup manifest read timed out'
   );
   if (!object) throw new Error(`tool payload cleanup manifest ${input.key} is missing`);
+  assertR2ObjectSizeWithinBound(
+    object,
+    input.expectedBytes ?? input.maxBytes,
+    'tool payload cleanup manifest byte verification failed'
+  );
   const bytes = new Uint8Array(
     await withTimeout(
       object.arrayBuffer(),

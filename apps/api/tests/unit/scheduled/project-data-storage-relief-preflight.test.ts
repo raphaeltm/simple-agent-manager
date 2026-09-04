@@ -701,6 +701,75 @@ describe('scheduled ProjectData storage relief preflight', () => {
     }
   });
 
+  it.each([
+    ['reclaims a stale lease left by a crashed slice', NOW - 1, false],
+    ['refuses a lease that has not yet expired', NOW + 30_000, true],
+  ])('%s', async (_label, leaseExpiresAt, expectRefused) => {
+    // A slice whose isolate was killed leaves lease_owner/lease_expires_at populated. The
+    // claim predicate must reclaim it once the TTL has passed, or an emergency plan would
+    // wedge until a human intervened (an immortal candidate, rule 47). The unexpired case
+    // is the discriminating control: reclamation must be driven by the TTL, not by the
+    // guard being absent.
+    const sqlite = new Database(':memory:');
+    try {
+      createTables(sqlite);
+      // Let the real writer create the row so config_json matches the sealed plan config;
+      // a hand-rolled row fails the immutable-config check and never reaches the lease.
+      const seedMeasure = vi.fn().mockResolvedValue(
+        toolResult({
+          sessionId: 'session-a',
+          eligibleRows: 1,
+          eligibleBytes: 100,
+          cursor: {
+            rowId: 1,
+            sessionId: 'session-a',
+            createdAt: CUTOFF - 10,
+            sequence: 1,
+            messageId: 'message-1',
+          },
+          hasMore: true,
+        })
+      );
+      await runProjectDataStorageReliefPreflight(makeEnv(sqlite, seedMeasure), new Date(NOW));
+      expect(readRun(sqlite)).toMatchObject({ status: 'running' });
+
+      // Simulate the crash: the lease is still held by an isolate that will never return.
+      sqlite
+        .prepare(
+          `UPDATE project_data_storage_relief_preflights
+             SET lease_owner = 'crashed-owner', lease_expires_at = ?, next_eligible_at = 0
+           WHERE plan_id = ?`
+        )
+        .run(leaseExpiresAt, PLAN_ID);
+
+      const measure = vi.fn().mockResolvedValue(
+        toolResult({
+          sessionId: 'session-a',
+          eligibleRows: 1,
+          eligibleBytes: 100,
+          cursor: null,
+          hasMore: false,
+        })
+      );
+      const result = await runProjectDataStorageReliefPreflight(
+        makeEnv(sqlite, measure),
+        new Date(NOW + 1)
+      );
+
+      if (expectRefused) {
+        expect(result).toMatchObject({ skipped: true, skipReason: 'leased' });
+        expect(measure).not.toHaveBeenCalled();
+        expect(readRun(sqlite)).toMatchObject({ lease_owner: 'crashed-owner' });
+      } else {
+        expect(result).toMatchObject({ skipped: false, status: 'complete' });
+        expect(measure).toHaveBeenCalledTimes(1);
+        expect(readRun(sqlite)).toMatchObject({ lease_owner: null, lease_expires_at: null });
+      }
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('releases the lease and becomes terminal exactly at the failure batch ceiling', async () => {
     const sqlite = new Database(':memory:');
     try {

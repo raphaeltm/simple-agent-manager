@@ -125,6 +125,18 @@ function createToolPayloadCleanupPlan(
 ): ToolPayloadCleanupPlan | null {
   if (!config.enabled || !config.toolPayloadCleanupEnabled || !projectId) return null;
   const fixedCutoffConfigured = config.toolPayloadCleanupCutoffCreatedAt !== null;
+  // An approved-manifest plan is ONLY ever entered through the fixed-cutoff gate
+  // below. Without this guard, half-applied operator config — manifest key/hash and
+  // ceilings set, but `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT` dropped —
+  // would skip the strict block entirely (including the exact single-project
+  // allowlist match) and still take the manifest branch for EVERY project, with only
+  // an incidental cutoff-timestamp mismatch standing between it and a strip.
+  if (
+    (config.toolPayloadCleanupManifestKey || config.toolPayloadCleanupManifestSha256) &&
+    !fixedCutoffConfigured
+  ) {
+    return null;
+  }
   if (
     fixedCutoffConfigured &&
     (!config.toolPayloadCleanupExactConfigValid ||
