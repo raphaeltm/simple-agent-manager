@@ -118,7 +118,7 @@ uncertain states must fail closed.
       authoritative eligible tool-payload and terminal-session relief stock.
 - [x] Add bounded, resumable, read-only preflight evidence that can produce
       exact project/session/table/row/byte targets without an unbounded object scan.
-- [x] Add an explicit per-cron slice cap and aggregate run wall-time ceiling so an
+- [x] Add an explicit per-cron slice cap and aggregate run admission budget so an
       emergency preflight can accelerate without changing the separately leased,
       one-slice default or bypassing the overall row/byte/batch bounds.
 - [x] Serialize automatic and manual cleanup through one non-wedging ProjectData
