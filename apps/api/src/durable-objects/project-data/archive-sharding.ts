@@ -1142,6 +1142,18 @@ function readCommittedRowsForChunk(
   // single-statement result exactly. That ordering is load-bearing: callers re-hash these rows
   // with canonicalRowsSha256 against the source chunk hash. The order assertion below fails
   // closed if that precondition ever breaks, rather than surfacing as an opaque hash mismatch.
+  //
+  // Distinctness is asserted rather than assumed. `IN (...)` collapses repeats, so the single
+  // statement read a duplicated id once and the length check below rejected the chunk. Split
+  // across batches, an id repeated either side of a boundary is read once per batch, restoring
+  // the count and hiding it. Every key column is a TEXT PRIMARY KEY so the exporter cannot emit
+  // one -- which is exactly why sub-batching must not be allowed to quietly relax the check.
+  if (new Set(rowIds).size !== rowIds.length) {
+    throw new ProjectDataArchiveInvariantError(
+      'target_chunk_duplicate_row_ids',
+      'ProjectData archive target chunk row ids contain duplicates'
+    );
+  }
   const rows: ProjectDataArchiveRow[] = [];
   for (let offset = 0; offset < rowIds.length; offset += D1_MAX_BOUND_PARAMETERS) {
     const batch = rowIds.slice(offset, offset + D1_MAX_BOUND_PARAMETERS);

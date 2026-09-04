@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
 import { runMigrations } from '../../../src/durable-objects/migrations';
+import { D1_MAX_BOUND_PARAMETERS } from '../../../src/lib/d1-limits';
 import {
   type ArchiveSourceExportChunkInput,
   archiveSourceReadMessages,
@@ -130,7 +131,38 @@ function seedWideTerminalSession(sql: SqlStorage, sessionId: string, messageCoun
   }
 }
 
-async function exportWideChatMessagesChunk(sql: SqlStorage, sessionId: string, maxRows: number) {
+/**
+ * Seed the tool-payload ledger for an already-seeded wide session.
+ *
+ * Exists because `readCommittedRowsForChunk` short-circuits on an empty rowIds list, so a
+ * fixture with no tool payloads never invokes the sub-batching loop for this table at all —
+ * it was the one archive table with zero above-ceiling coverage.
+ */
+function seedWideToolPayloadArchives(sql: SqlStorage, sessionId: string, count: number): void {
+  for (let index = 0; index < count; index++) {
+    sql.exec(
+      `INSERT INTO tool_payload_archives
+         (message_id, session_id, r2_key, content_bytes, tool_metadata_bytes,
+          archived_at, message_created_at, message_sequence, archive_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      `${sessionId}-message-${String(index).padStart(4, '0')}`,
+      sessionId,
+      `r2/tool/${sessionId}/${index}`,
+      10 + index,
+      20 + index,
+      1300 + index,
+      1100 + index,
+      index + 1
+    );
+  }
+}
+
+async function exportWideChunk(
+  sql: SqlStorage,
+  sessionId: string,
+  maxRows: number,
+  tableName: 'chat_messages' | 'tool_payload_archives' = 'chat_messages'
+) {
   return exportArchiveChunk(sql, {
     projectId: 'project-archive',
     sessionId,
@@ -139,7 +171,7 @@ async function exportWideChatMessagesChunk(sql: SqlStorage, sessionId: string, m
     targetOwnerName: 'project-archive:archive:g1:s1',
     targetGeneration: 1,
     sourceIntentToken: 'intent-wide',
-    tableName: 'chat_messages',
+    tableName,
     ordinal: 0,
     cursor: null,
     maxRows,
@@ -243,7 +275,7 @@ describe('ProjectData terminal archive sharding bridge', () => {
       try {
         seedWideTerminalSession(source.sql, SESSION, WIDE_ROWS);
         await prepareWideTarget(source.sql, target.sql, SESSION);
-        const chunk = await exportWideChatMessagesChunk(source.sql, SESSION, 500);
+        const chunk = await exportWideChunk(source.sql, SESSION, 500);
         expect(chunk.rowCount).toBe(WIDE_ROWS);
 
         const committed = await commitArchiveTargetChunk(target.sql, { ...chunk, now: NOW });
@@ -257,13 +289,46 @@ describe('ProjectData terminal archive sharding bridge', () => {
       }
     });
 
+    // The 201-row Workers test proves workerd accepts a full 100-bind batch (it sends two).
+    // What it cannot cheaply do is sweep the arithmetic either side of the boundary, so that
+    // is pinned here: an off-by-one in the slice bounds shows up as a wrong row set, which is
+    // engine-independent and therefore legitimate to assert against better-sqlite3.
+    it.each([
+      D1_MAX_BOUND_PARAMETERS - 1,
+      D1_MAX_BOUND_PARAMETERS,
+      D1_MAX_BOUND_PARAMETERS + 1,
+      D1_MAX_BOUND_PARAMETERS * 2 + 1,
+    ])(
+      'reads back exactly the right rows at the exact sub-batch boundary (%i rows)',
+      async (rowCount) => {
+        const source = makeSql();
+        const target = makeSql();
+        const sessionId = `${SESSION}-${rowCount}`;
+        try {
+          seedWideTerminalSession(source.sql, sessionId, rowCount);
+          await prepareWideTarget(source.sql, target.sql, sessionId);
+          const chunk = await exportWideChunk(source.sql, sessionId, 500);
+          expect(chunk.rowCount).toBe(rowCount);
+
+          const committed = await commitArchiveTargetChunk(target.sql, { ...chunk, now: NOW });
+          // Hash equality over the read-back rows is the strong assertion: it can only hold if
+          // every row was returned exactly once, in the source chunk's order.
+          expect(committed.sha256).toBe(chunk.sha256);
+          expect(committed.rowCount).toBe(rowCount);
+        } finally {
+          source.db.close();
+          target.db.close();
+        }
+      }
+    );
+
     it('counts missing rows across every sub-batch, not just the first', async () => {
       const source = makeSql();
       const target = makeSql();
       try {
         seedWideTerminalSession(source.sql, SESSION, WIDE_ROWS);
         await prepareWideTarget(source.sql, target.sql, SESSION);
-        const chunk = await exportWideChatMessagesChunk(source.sql, SESSION, 500);
+        const chunk = await exportWideChunk(source.sql, SESSION, 500);
 
         // A row id that will never be committed, appended past the first
         // sub-batch. A per-batch completeness check would miss it.
@@ -280,13 +345,61 @@ describe('ProjectData terminal archive sharding bridge', () => {
       }
     });
 
+    it('sub-batches the tool-payload ledger above the ceiling too, not just chat_messages', async () => {
+      const source = makeSql();
+      const target = makeSql();
+      try {
+        seedWideTerminalSession(source.sql, SESSION, WIDE_ROWS);
+        seedWideToolPayloadArchives(source.sql, SESSION, WIDE_ROWS);
+        await prepareWideTarget(source.sql, target.sql, SESSION);
+
+        const chunk = await exportWideChunk(source.sql, SESSION, 500, 'tool_payload_archives');
+        expect(chunk.rowCount).toBe(WIDE_ROWS);
+        expect(chunk.rowCount).toBeGreaterThan(D1_MAX_BOUND_PARAMETERS);
+
+        const committed = await commitArchiveTargetChunk(target.sql, { ...chunk, now: NOW });
+        expect(committed.sha256).toBe(chunk.sha256);
+        expect(committed.rowCount).toBe(WIDE_ROWS);
+      } finally {
+        source.db.close();
+        target.db.close();
+      }
+    });
+
+    it('rejects duplicate row ids instead of letting a batch boundary restore the count', async () => {
+      const source = makeSql();
+      const target = makeSql();
+      try {
+        seedWideTerminalSession(source.sql, SESSION, WIDE_ROWS);
+        await prepareWideTarget(source.sql, target.sql, SESSION);
+        const chunk = await exportWideChunk(source.sql, SESSION, 500);
+
+        // `IN (...)` de-duplicates. One statement read a repeat once and the
+        // count check caught it; batched, the repeat is read once per batch it
+        // lands in, which would restore the count and hide it.
+        const duplicated = [...chunk.rowIds];
+        duplicated.splice(D1_MAX_BOUND_PARAMETERS, 0, duplicated[D1_MAX_BOUND_PARAMETERS - 1]!);
+
+        await expect(
+          commitArchiveTargetChunk(target.sql, {
+            ...chunk,
+            rowIds: duplicated,
+            now: NOW,
+          })
+        ).rejects.toMatchObject({ reason: 'target_chunk_duplicate_row_ids' });
+      } finally {
+        source.db.close();
+        target.db.close();
+      }
+    });
+
     it('rejects row ids that are not in source chunk order', async () => {
       const source = makeSql();
       const target = makeSql();
       try {
         seedWideTerminalSession(source.sql, SESSION, WIDE_ROWS);
         await prepareWideTarget(source.sql, target.sql, SESSION);
-        const chunk = await exportWideChatMessagesChunk(source.sql, SESSION, 500);
+        const chunk = await exportWideChunk(source.sql, SESSION, 500);
 
         // Sub-batching makes the returned sequence depend on rowIds being globally
         // ordered; pre-fix that ordering came entirely from SQL. Reversing the ids
