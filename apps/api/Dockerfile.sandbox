@@ -10,15 +10,17 @@ COPY scripts/claude-setup-token.mjs /usr/local/bin/sam-claude-setup-token.mjs
 # Add extra tools needed for SAM agent workloads here. The normal VM runtime
 # can install GitHub CLI during devcontainer bootstrap; standalone cf-container
 # sessions skip that bootstrap path, so the image must include gh for PR flows.
-# Pre-bake the Claude Code ACP adapter (and CLI) into the image. In standalone
-# (cf-container) mode the vm-agent runs the ACP adapter directly. Installing it
-# at BUILD time — rather than via runtime `npm install -g` inside the running
-# container — avoids a CF Sandbox / gVisor overlay filesystem visibility gap
-# where a freshly runtime-installed binary is not execve-able by the vm-agent
-# process for several seconds after npm reports success. Image-layer files are
-# fully materialized at container boot, so ensureAgentInstalled hits the
-# already-installed fast path and startLocalProcess execs immediately.
-# Aligns with the spike constraint of a single prebuilt image.
+# Pre-bake the Claude Code and Codex CLIs the guided credential-setup flows
+# spawn (`claude setup-token` via sam-claude-setup-token.mjs, `codex app-server`
+# via sam-codex-device-auth.mjs). Installing them at BUILD time — rather than
+# via runtime `npm install -g` inside the running container — avoids a CF
+# Sandbox / gVisor overlay filesystem visibility gap where a freshly
+# runtime-installed binary is not execve-able for several seconds after npm
+# reports success. Image-layer files are fully materialized at container boot.
+# Keep the CLI pins aligned with agent-install-manifest.json npm companions
+# (enforced for claude-code by cf-container-runtime-contract.test.ts). No ACP
+# adapter is needed here: nothing in the sandbox surfaces execs one (a
+# deprecated unpinned Zed ACP adapter install was removed 2026-09-04).
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates jq wget; \
@@ -28,7 +30,12 @@ RUN set -eux; \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends gh; \
-    npm install -g @zed-industries/claude-agent-acp @anthropic-ai/claude-code@2.1.258 @openai/codex@0.142.5; \
+    npm install -g --ignore-scripts @anthropic-ai/claude-code@2.1.260 @openai/codex@0.153.2; \
+    # --ignore-scripts blocks implicit third-party lifecycle scripts (supply-chain
+    # guard). claude-code's postinstall only links the platform-native binary from
+    # its pinned optionalDependencies over the bin placeholder, so run that one
+    # vetted script explicitly; codex ships no lifecycle scripts.
+    node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"; \
     npm cache clean --force; \
     chmod 755 /usr/local/bin/sam-codex-device-auth.mjs /usr/local/bin/sam-claude-setup-token.mjs; \
     mkdir -p /workspaces; \
