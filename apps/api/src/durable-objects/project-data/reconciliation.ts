@@ -87,6 +87,7 @@ interface CandidateProcessingContext {
 }
 
 function resolveCandidateProject(
+  sql: SqlStorage,
   candidate: ReconciliationCandidate,
   hooks: ReconciliationProcessingHooks,
   env: DOEnv
@@ -102,7 +103,7 @@ function resolveCandidateProject(
       durableObjectProjectId: projectId ?? null,
       action: 'preserved',
     });
-    recordReconciliationCandidateInconclusive(env, {
+    recordReconciliationCandidateInconclusive(sql, env, {
       ...candidate,
       reason: 'project_identity_mismatch',
     });
@@ -136,7 +137,7 @@ async function processSingleCandidate(
 ): Promise<number> {
   const { broadcastEvent, hooks } = ctx;
 
-  const projectId = resolveCandidateProject(candidate, hooks, env);
+  const projectId = resolveCandidateProject(sql, candidate, hooks, env);
   if (!projectId) return 0;
 
   const liveness = await getLocalTaskRuntimeLiveness(sql, env, {
@@ -167,7 +168,7 @@ function handleTerminalDelivery(
   sql: SqlStorage,
   env: DOEnv,
   candidate: ReconciliationCandidate,
-  delivery: { kind: string; reason: string; nodeId: string },
+  delivery: { kind: string; reason: string; nodeId: string | null },
   projectId: string,
   hooks: ReconciliationProcessingHooks
 ): Promise<number> {
@@ -211,7 +212,7 @@ function handleObservePrompt(
   } else {
     recordReconciliationCandidateInconclusive(sql, env, {
       ...candidate,
-      reason: delivery.kind === 'inconclusive' ? delivery.reason : liveness.reason,
+      reason: delivery.kind === 'inconclusive' ? (delivery.reason ?? liveness.reason) : liveness.reason,
     });
   }
   return 0;
