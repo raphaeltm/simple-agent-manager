@@ -197,6 +197,46 @@ Environment variable is set (so `sync-wrangler-config.ts` falls back to the chec
 global sweep stay disabled, DO migration `044` is additive `ALTER TABLE ADD COLUMN`
 only, and D1 migration `0137` creates a new table.
 
+## Post-mortem (defects found in review, fixed before any production use)
+
+**What broke.** Two latent defects in the relief path, both caught by review before the
+code ran against production data.
+
+1. `measureToolPayloadSlice` assigned its resume cursor _after_ the row-limit and
+   wall-time break checks. A slice that exhausted its budget before advancing returned
+   `hasMore: true` with `nextCursor: null`; the preflight then persisted
+   `cursor_json = null` and the next slice restarted at the lowest rowid. Consequences:
+   `rows_examined` / `eligible_rows` / `eligible_bytes` accumulate the same physical rows
+   twice — inflating the exact reclaim evidence a human is asked to approve — and duplicate
+   `rowId` targets appear across batch manifests, which the per-batch ordering check cannot
+   detect because it only orders within one batch.
+2. `runProjectDataManualToolPayloadCleanup` compared a stored idempotency fingerprint
+   against `compatibleLegacyFingerprint`, which is `null` precisely when an exact cutoff is
+   configured. A missing stored fingerprint is also `null`, so `null !== null` was false and
+   a reused key was accepted as compatible — it could replay an unrelated result or start
+   cleanup with different inputs after the cooldown expired.
+
+Review additionally found that the destructive path's fail-closed guards were largely
+untested in the configuration that arms them: four of the five disjuncts of the
+approved-manifest scope check (`planId`, `projectId`, `cutoffCreatedAt`, `eligibleRows`)
+had no test, and the structural manifest parsers had no test file at all. Separately, the
+approved-manifest branch could be entered without the fixed-cutoff gate — and therefore
+without the exact single-project allowlist match — if `CUTOFF_CREATED_AT` alone was dropped
+from an otherwise complete plan config.
+
+**Class of bug.** A fail-closed guard whose falsifying case is unreachable in the
+configuration the tests use. The guard exists, reads correctly, and never executes; line
+coverage counts it because the enclosing branch runs while the disjunct inside it never
+evaluates true. This is the configuration-level sibling of rule 53's
+liveness-used-as-idleness trap.
+
+**Why it wasn't caught.** The suite exercised the ordinary retention configuration
+thoroughly and the exact-plan configuration only on its happy path. Nothing forced a test
+per disjunct, and the one manifest-corruption test flipped bytes — which the SHA-256 gate
+catches before any structural assertion runs, so the parsers were never reached.
+
+**Process fix (this PR).** `.claude/rules/69-emergency-config-paths-need-their-own-coverage.md`.
+
 ## Acceptance criteria
 
 - [ ] Production `sql.databaseSize` for `01KHRJGANBBWGDY1NZ0KVF0D4J` is at or
