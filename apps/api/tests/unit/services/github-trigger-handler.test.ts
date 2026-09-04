@@ -184,7 +184,7 @@ describe('handleGitHubEventForTriggers', () => {
     expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
   });
 
-  it('renders matching GitHub events as plain text before admission', async () => {
+  it('admits issues events with a stale stored commandPrefix and renders them as plain text', async () => {
     const { env, mockStmt } = createMockEnv();
     const now = '2026-07-14T00:00:00.000Z';
     const issueBody = 'Quotes "stay" & <script>window.githubExecuted=true</script> **bold**';
@@ -220,7 +220,20 @@ describe('handleGitHubEventForTriggers', () => {
           now,
         ],
       ])
-      .mockResolvedValueOnce([['config-1', 'trigger-1', 'issues', '{}', now, now]]);
+      .mockResolvedValueOnce([
+        [
+          'config-1',
+          'trigger-1',
+          'issues',
+          JSON.stringify({
+            actions: ['opened'],
+            ignoreActors: ['dependabot[bot]', 'simple-agent-manager[bot]'],
+            commandPrefix: '/sam',
+          }),
+          now,
+          now,
+        ],
+      ]);
 
     let renderedPrompt = '';
     vi.mocked(admitAndSubmitTriggerExecution).mockImplementationOnce(async (_env, input) => {
