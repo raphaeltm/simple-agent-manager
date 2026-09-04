@@ -6,6 +6,7 @@
  * reconciliation. D1 and VM-agent delivery stay mocked because they cross
  * service boundaries, but time and message flow are simulated end to end.
  */
+import { VM_PROMPT_DELIVERY_PROTOCOL_VERSION } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -30,10 +31,76 @@ import {
 } from '../../src/durable-objects/project-data/reconciliation';
 import { failSession } from '../../src/durable-objects/project-data/sessions';
 import type { Env } from '../../src/durable-objects/project-data/types';
-import { sendPromptToAgentOnNode } from '../../src/services/node-agent';
+import { nodeAgentRequest, sendPromptToAgentOnNode } from '../../src/services/node-agent';
+
+const nodeAgentMocks = vi.hoisted(() => ({
+  runtimeIdentity: 'runtime-lifecycle-1',
+  NodeAgentHttpError: class NodeAgentHttpError extends Error {
+    constructor(
+      public readonly statusCode: number,
+      public readonly responseBody: string
+    ) {
+      super(`Node Agent request failed: ${statusCode} ${responseBody}`);
+    }
+  },
+  nodeAgentRequest: vi.fn(async (_nodeId: unknown, _env: unknown, path: string) => {
+    if (path.endsWith('/agent-capabilities')) {
+      return {
+        protocolVersion: 1,
+        runtimeIdentity: 'runtime-lifecycle-1',
+        promptReceipts: {
+          supported: true,
+          lookup: true,
+          states: ['accepted', 'in_flight', 'completed', 'not_found', 'ambiguous'],
+        },
+        checkpointRollover: {
+          supported: false,
+          automatic: false,
+          states: [],
+          defaultGraceMs: 0,
+          maxGraceMs: 0,
+          operationTimeoutMs: 0,
+        },
+      };
+    }
+
+    const deliveryId = path.split('/').at(-1) ?? '';
+    return {
+      deliveryId,
+      state: 'not_found',
+      runtimeIdentity: 'runtime-lifecycle-1',
+      acceptedAt: null,
+      completedAt: null,
+    };
+  }),
+  sendPromptToAgentOnNode: vi.fn(
+    async (
+      _nodeId: unknown,
+      _workspaceId: unknown,
+      acpSessionId: string,
+      _prompt: unknown,
+      _env: unknown,
+      _userId: unknown,
+      _messageId: unknown,
+      options: { deliveryId?: string } | undefined
+    ) => ({
+      status: 'accepted',
+      sessionId: acpSessionId,
+      receipt: {
+        deliveryId: options?.deliveryId ?? '',
+        state: 'accepted',
+        runtimeIdentity: 'runtime-lifecycle-1',
+        acceptedAt: Date.now(),
+        completedAt: null,
+      },
+    })
+  ),
+}));
 
 vi.mock('../../src/services/node-agent', () => ({
-  sendPromptToAgentOnNode: vi.fn().mockResolvedValue(undefined),
+  NodeAgentHttpError: nodeAgentMocks.NodeAgentHttpError,
+  nodeAgentRequest: nodeAgentMocks.nodeAgentRequest,
+  sendPromptToAgentOnNode: nodeAgentMocks.sendPromptToAgentOnNode,
 }));
 
 type TaskRow = {
@@ -164,6 +231,7 @@ describe('agent lifecycle orchestration integration', () => {
       TASK_RECONCILIATION_IDLE_MS: String(FIVE_MINUTES),
       TASK_RECONCILIATION_RESPONSE_DEADLINE_MS: String(ONE_MINUTE),
     } as unknown as Env;
+    vi.mocked(nodeAgentRequest).mockClear();
     vi.mocked(sendPromptToAgentOnNode).mockClear();
   });
 
@@ -250,6 +318,15 @@ describe('agent lifecycle orchestration integration', () => {
     const processed = await processReconciliationCandidates(sql, env, () => {});
 
     expect(processed).toBe(1);
+    expect(nodeAgentRequest).toHaveBeenCalledWith(
+      'node-1',
+      expect.anything(),
+      '/workspaces/ws-1/agent-capabilities',
+      expect.objectContaining({
+        method: 'GET',
+        requestTimeoutMs: 5000,
+      })
+    );
     expect(sendPromptToAgentOnNode).toHaveBeenCalledWith(
       'node-1',
       'ws-1',
@@ -257,21 +334,32 @@ describe('agent lifecycle orchestration integration', () => {
       expect.stringContaining('continue working from where you left off'),
       expect.anything(),
       'user-1',
-      undefined,
-      { requestTimeoutMs: 5000 }
+      expect.any(String),
+      expect.objectContaining({
+        requestTimeoutMs: 5000,
+        protocolVersion: VM_PROMPT_DELIVERY_PROTOCOL_VERSION,
+        deliveryId: expect.any(String),
+        sourceTaskGuard: {
+          taskId: 'task-1',
+          projectId: 'project-1',
+          chatSessionId: 'session-1',
+        },
+      })
     );
-    expect(
-      db.prepare(`SELECT role, content, tool_metadata FROM chat_messages`).all()
-    ).toMatchObject([
+    const promptCall = vi.mocked(sendPromptToAgentOnNode).mock.calls[0];
+    const messages = db.prepare(`SELECT id, role, content, tool_metadata FROM chat_messages`).all();
+    expect(messages).toMatchObject([
       {
+        id: promptCall?.[6],
         role: 'user',
         content: expect.stringContaining('Do not stop after the update'),
-        tool_metadata: JSON.stringify({
-          source: 'sam_orchestrator',
-          kind: 'reconciliation_checkin',
-        }),
       },
     ]);
+    expect(JSON.parse((messages[0] as { tool_metadata: string }).tool_metadata)).toEqual({
+      source: 'sam_orchestrator',
+      kind: 'reconciliation_checkin',
+      deliveryId: promptCall?.[7]?.deliveryId,
+    });
 
     const checkinsBeforeReply = sql
       .exec(`SELECT kind, expires_at FROM session_attention_markers WHERE resolved_at IS NULL`)

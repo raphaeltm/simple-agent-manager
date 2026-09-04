@@ -79,6 +79,9 @@ reachability were conflated, and absence/timeout was promoted to terminal state.
       the canonical fenced terminal transition.
 - [x] Persist a reconciliation check-in message, expiring attention marker, and
       failure-capable deadline only after the runtime has accepted delivery.
+- [x] Persist stable delivery and transcript identities before crossing the VM
+      boundary so an accepted prompt can be reconciled or replayed without a
+      second execution when the response or a later local write is lost.
 - [x] Bound every reconciliation sweep before cross-boundary I/O and keep network
       work outside the alarm's synchronous critical path.
 
@@ -88,9 +91,11 @@ reachability were conflated, and absence/timeout was promoted to terminal state.
   `TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP` rows in SQL before any D1
   or network work (default 5).
 - Each selected candidate performs one shared runtime assessment. VM candidates
-  perform at most one bounded node-health probe, and a deliverable check-in/cancel
-  performs at most one bounded runtime mutation. Thus network fan-out is at most
-  `2 * candidate_limit`. VM node-health probes use
+  perform at most one bounded node-health probe. A deliverable versioned check-in
+  performs at most three bounded node calls (capability negotiation, submit, and
+  receipt lookup after an ambiguous submit); cancellation performs one bounded
+  mutation instead. Thus worst-case VM check-in fan-out is at most
+  `4 * candidate_limit`, including the liveness probe. VM node-health probes use
   `TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS`, container lifecycle probes use
   `TASK_LIVENESS_PROBE_TIMEOUT_MS`, and check-in/cancel mutations use
   `TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS`.
