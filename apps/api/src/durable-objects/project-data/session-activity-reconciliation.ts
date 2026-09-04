@@ -32,7 +32,11 @@ import {
   sessionActivityProbeMaxCandidates,
   sessionActivityProbeTimeoutMs,
 } from './reconciliation-thresholds';
-import { parseActivityStaleThreshold, recordTurnEnd, WORKING_ACTIVITIES } from './session-state';
+import {
+  parseActivityStaleThreshold,
+  recordProbeReconciledTurnEnd,
+  WORKING_ACTIVITIES,
+} from './session-state';
 import type { Env as DOEnv } from './types';
 
 const log = createModuleLogger('session_activity_reconciliation');
@@ -48,6 +52,7 @@ const AGENT_SESSION_STATUSES = new Set([
   'stopped',
   'error',
 ]);
+const PROBE_RECONCILIABLE_ACTIVITIES = [...WORKING_ACTIVITIES, 'error'] as const;
 
 export interface StaleActivityCandidate {
   acpSessionId: string;
@@ -107,7 +112,7 @@ export function selectStaleActivityProbeCandidates(
   const now = options.now ?? Date.now();
   const cutoff = now - options.thresholdMs;
   const leaseCutoff = now - (options.leaseMs ?? options.thresholdMs);
-  const placeholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
+  const placeholders = PROBE_RECONCILIABLE_ACTIVITIES.map(() => '?').join(', ');
 
   const candidates = sql
     .exec(
@@ -132,7 +137,7 @@ export function selectStaleActivityProbeCandidates(
          )
        ORDER BY ss.activity_at ASC
        LIMIT ?`,
-      ...WORKING_ACTIVITIES,
+      ...PROBE_RECONCILIABLE_ACTIVITIES,
       cutoff,
       options.maxAttempts,
       leaseCutoff,
@@ -203,7 +208,7 @@ export function computeSessionActivityProbeAlarmTime(
   // Must mirror `probeStaleSessionActivity`'s lease derivation exactly, or the
   // scheduler and the selector disagree about when a claimed row is due again.
   const leaseMs = sessionActivityProbeMaxCandidates(env) * sessionActivityProbeTimeoutMs(env);
-  const placeholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
+  const placeholders = PROBE_RECONCILIABLE_ACTIVITIES.map(() => '?').join(', ');
 
   // A row is next selectable at the LATER of (a) its staleness bound and (b) its
   // outstanding probe lease expiring. Scanning only (a) reports a claimed-but-
@@ -222,7 +227,7 @@ export function computeSessionActivityProbeAlarmTime(
          AND acp.node_id IS NOT NULL`,
       thresholdMs,
       leaseMs,
-      ...WORKING_ACTIVITIES,
+      ...PROBE_RECONCILIABLE_ACTIVITIES,
       maxAttempts
     )
     .toArray()[0];
@@ -326,7 +331,7 @@ export function applyProbeOutcome(
     // Bumping `activity_at` unconditionally would push the idle clock that
     // `session-sleep.ts` reads forward on an already-idle session, delaying
     // sleep — a regression in one of the three consumers this fixes.
-    const placeholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
+    const placeholders = PROBE_RECONCILIABLE_ACTIVITIES.map(() => '?').join(', ');
     sql.exec(
       `UPDATE session_state
        SET activity_at = ?, activity_probe_attempts = 0, activity_probe_at = ?
@@ -336,14 +341,14 @@ export function applyProbeOutcome(
       now,
       now,
       candidate.acpSessionId,
-      ...WORKING_ACTIVITIES,
+      ...PROBE_RECONCILIABLE_ACTIVITIES,
       candidate.activityAt
     );
     return false;
   }
 
   if (outcome.kind === 'not_working') {
-    return recordTurnEnd(sql, candidate.acpSessionId, {
+    return recordProbeReconciledTurnEnd(sql, candidate.acpSessionId, {
       reason: 'probe_reconciled',
       source: 'probe',
       observedAt: candidate.activityAt,
@@ -357,7 +362,7 @@ export function applyProbeOutcome(
   // turn ended and a brand-new prompt epoch began — would charge an attempt
   // against that new epoch, which resets `activity_probe_attempts` to 0 on
   // every authoritative write.
-  const placeholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
+  const placeholders = PROBE_RECONCILIABLE_ACTIVITIES.map(() => '?').join(', ');
   const updated = sql.exec(
     `UPDATE session_state
      SET activity_probe_attempts = ?, activity_probe_at = ?
@@ -367,7 +372,7 @@ export function applyProbeOutcome(
     attempts,
     now,
     candidate.acpSessionId,
-    ...WORKING_ACTIVITIES,
+    ...PROBE_RECONCILIABLE_ACTIVITIES,
     candidate.activityAt
   );
 

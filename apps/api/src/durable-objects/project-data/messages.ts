@@ -70,11 +70,7 @@ function parseArchiveSourceIntentState(value: unknown): ProjectDataArchiveSource
     : null;
 }
 
-function assertTranscriptWriteAllowed(
-  sql: SqlStorage,
-  sessionId: string,
-  operation: string
-): void {
+function assertTranscriptWriteAllowed(sql: SqlStorage, sessionId: string, operation: string): void {
   let row: Record<string, unknown> | undefined;
   try {
     row = sql
@@ -134,8 +130,23 @@ export function persistMessage(
     throw new Error(`Session ${sessionId} not found`);
   }
   const id = messageId ?? generateId();
-  const existing = sql.exec('SELECT id FROM chat_messages WHERE id = ? LIMIT 1', id).toArray()[0];
+  const existing = sql
+    .exec(
+      `SELECT id, session_id, role, content, tool_metadata, created_at, sequence
+       FROM chat_messages WHERE id = ? LIMIT 1`,
+      id
+    )
+    .toArray()[0];
   if (existing) {
+    if (
+      existing.session_id !== sessionId ||
+      existing.role !== role ||
+      existing.content !== content ||
+      typeof existing.created_at !== 'number' ||
+      typeof existing.sequence !== 'number'
+    ) {
+      throw new Error(`Message id ${id} already belongs to a different transcript entry`);
+    }
     const wsRow = sql
       .exec('SELECT workspace_id FROM chat_sessions WHERE id = ?', sessionId)
       .toArray()[0];
@@ -144,11 +155,11 @@ export function persistMessage(
       : null;
     return {
       id,
-      now: Date.now(),
-      sequence: 0,
+      now: existing.created_at,
+      sequence: existing.sequence,
       workspaceId,
       inserted: false,
-      toolMetadata,
+      toolMetadata: typeof existing.tool_metadata === 'string' ? existing.tool_metadata : null,
     };
   }
 

@@ -1,6 +1,7 @@
 import { isJsonRecord } from '@simple-agent-manager/shared';
 
 import { createModuleLogger } from '../../lib/logger';
+import { ulid } from '../../lib/ulid';
 import { recordActivityEventInternal } from './activity';
 import {
   reconciliationCandidateLeaseMs,
@@ -23,6 +24,20 @@ export interface ReconciliationGate {
   attempts: number;
   nextAttemptAt: number;
   excludedTaskId: string | null;
+  checkinIntent: ReconciliationCheckinIntent | null;
+}
+
+/**
+ * Stable identity persisted before a reconciliation prompt crosses the VM
+ * boundary. The visible transcript and failure-capable attention marker are
+ * intentionally absent here; those are committed only after receipt-backed
+ * acceptance.
+ */
+export interface ReconciliationCheckinIntent {
+  taskId: string;
+  deliveryId: string;
+  promptMessageId: string;
+  createdAt: number;
 }
 
 function readMeta(sql: SqlStorage, key: string): string | null {
@@ -68,7 +83,12 @@ function parseGate(raw: string | null): ReconciliationGate | null {
       parsed.attempts < 0 ||
       typeof parsed.nextAttemptAt !== 'number' ||
       !Number.isFinite(parsed.nextAttemptAt) ||
-      (parsed.excludedTaskId !== undefined && typeof parsed.excludedTaskId !== 'string')
+      (parsed.excludedTaskId !== undefined &&
+        parsed.excludedTaskId !== null &&
+        typeof parsed.excludedTaskId !== 'string') ||
+      (parsed.checkinIntent !== undefined &&
+        parsed.checkinIntent !== null &&
+        !parseCheckinIntent(parsed.checkinIntent))
     ) {
       return null;
     }
@@ -76,10 +96,34 @@ function parseGate(raw: string | null): ReconciliationGate | null {
       attempts: parsed.attempts,
       nextAttemptAt: parsed.nextAttemptAt,
       excludedTaskId: typeof parsed.excludedTaskId === 'string' ? parsed.excludedTaskId : null,
+      checkinIntent: parseCheckinIntent(parsed.checkinIntent),
     };
   } catch {
     return null;
   }
+}
+
+function parseCheckinIntent(value: unknown): ReconciliationCheckinIntent | null {
+  if (
+    !isJsonRecord(value) ||
+    typeof value.taskId !== 'string' ||
+    value.taskId.length === 0 ||
+    typeof value.deliveryId !== 'string' ||
+    value.deliveryId.length === 0 ||
+    typeof value.promptMessageId !== 'string' ||
+    value.promptMessageId.length === 0 ||
+    typeof value.createdAt !== 'number' ||
+    !Number.isFinite(value.createdAt) ||
+    value.createdAt < 0
+  ) {
+    return null;
+  }
+  return {
+    taskId: value.taskId,
+    deliveryId: value.deliveryId,
+    promptMessageId: value.promptMessageId,
+    createdAt: value.createdAt,
+  };
 }
 
 function gateKey(sessionId: string): string {
@@ -112,7 +156,11 @@ export function claimReconciliationCandidate(
 
   // An expired quarantine starts a fresh bounded attempt series.
   const attempts = existing && existing.attempts < options.maxAttempts ? existing.attempts : 0;
-  writeMeta(sql, key, { attempts, nextAttemptAt: options.now + options.leaseMs });
+  writeMeta(sql, key, {
+    ...(existing?.checkinIntent ? { checkinIntent: existing.checkinIntent } : {}),
+    attempts,
+    nextAttemptAt: options.now + options.leaseMs,
+  });
   return true;
 }
 
@@ -126,7 +174,11 @@ export function deferReconciliationCandidate(
   const attempts = Math.min((existing?.attempts ?? 0) + 1, options.maxAttempts);
   const quarantined = attempts >= options.maxAttempts;
   const nextAttemptAt = options.now + (quarantined ? options.quarantineMs : options.leaseMs);
-  writeMeta(sql, key, { attempts, nextAttemptAt });
+  writeMeta(sql, key, {
+    ...(existing?.checkinIntent ? { checkinIntent: existing.checkinIntent } : {}),
+    attempts,
+    nextAttemptAt,
+  });
   return { attempts, quarantined, nextAttemptAt };
 }
 
@@ -135,7 +187,38 @@ export function deferReconciliationCandidateUntil(
   sessionId: string,
   nextAttemptAt: number
 ): void {
-  writeMeta(sql, gateKey(sessionId), { attempts: 0, nextAttemptAt });
+  const key = gateKey(sessionId);
+  const existing = parseGate(readMeta(sql, key));
+  writeMeta(sql, key, {
+    ...(existing?.checkinIntent ? { checkinIntent: existing.checkinIntent } : {}),
+    attempts: 0,
+    nextAttemptAt,
+  });
+}
+
+/** Create once and then reuse the same VM receipt and transcript identities. */
+export function getOrCreateReconciliationCheckinIntent(
+  sql: SqlStorage,
+  sessionId: string,
+  taskId: string,
+  now = Date.now()
+): ReconciliationCheckinIntent {
+  const key = gateKey(sessionId);
+  const existing = parseGate(readMeta(sql, key));
+  if (existing?.checkinIntent?.taskId === taskId) return existing.checkinIntent;
+
+  const checkinIntent: ReconciliationCheckinIntent = {
+    taskId,
+    deliveryId: ulid(),
+    promptMessageId: ulid(),
+    createdAt: now,
+  };
+  writeMeta(sql, key, {
+    attempts: existing?.attempts ?? 0,
+    nextAttemptAt: existing?.nextAttemptAt ?? now,
+    checkinIntent,
+  });
+  return checkinIntent;
 }
 
 export function clearReconciliationCandidateGate(sql: SqlStorage, sessionId: string): void {
@@ -148,7 +231,11 @@ export function excludeReconciliationCandidateForTask(
   sessionId: string,
   taskId: string
 ): void {
-  writeMeta(sql, gateKey(sessionId), { attempts: 0, nextAttemptAt: 0, excludedTaskId: taskId });
+  writeMeta(sql, gateKey(sessionId), {
+    attempts: 0,
+    nextAttemptAt: 0,
+    excludedTaskId: taskId,
+  });
 }
 
 /** Parse the value selected through an alarm query's correlated do_meta join. */

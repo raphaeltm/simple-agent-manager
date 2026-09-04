@@ -31,6 +31,10 @@ import type { Env as DOEnv } from './types';
 export const DEFAULT_TASK_RECONCILIATION_ACTIVE_WORK_HARD_STALL_MS =
   DEFAULT_TASK_RECONCILIATION_PROMPT_HARD_STALL_MS;
 
+// Capability negotiation, prompt submission, and (after a lost response)
+// receipt lookup are the versioned delivery protocol's bounded remote calls.
+const RECONCILIATION_PROMPT_DELIVERY_MAX_NODE_CALLS = 3;
+
 function envNumber(env: DOEnv, key: string, fallback: number): number {
   const value = Number.parseInt(
     (env as unknown as Record<string, string | undefined>)[key] ?? '',
@@ -119,7 +123,9 @@ export function reconciliationCandidateLeaseMs(env: DOEnv): number {
       DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS
     ) + envNumber(env, 'TASK_LIVENESS_PROBE_TIMEOUT_MS', DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS);
   const minimumSafeLeaseMs =
-    livenessProbeMs + reconciliationNodeCallTimeoutMs(env) + minReconciliationAlarmDelayMs(env);
+    livenessProbeMs +
+    RECONCILIATION_PROMPT_DELIVERY_MAX_NODE_CALLS * reconciliationNodeCallTimeoutMs(env) +
+    minReconciliationAlarmDelayMs(env);
   return Math.max(configuredLeaseMs, minimumSafeLeaseMs);
 }
 

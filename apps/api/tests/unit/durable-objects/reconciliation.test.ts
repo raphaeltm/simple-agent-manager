@@ -22,10 +22,76 @@ import {
 } from '../../../src/durable-objects/project-data/reconciliation';
 import { createSqlStorage } from './sql-storage-test-utils';
 
-// Mock the node-agent service to prevent real HTTP calls
-vi.mock('../../../src/services/node-agent', () => ({
-  sendPromptToAgentOnNode: vi.fn().mockResolvedValue(undefined),
+// Mock the node-agent service to prevent real HTTP calls while preserving the
+// versioned receipt contract reconciliation now depends on.
+const nodeAgentMocks = vi.hoisted(() => ({
+  runtimeIdentity: 'runtime-1',
+  NodeAgentHttpError: class NodeAgentHttpError extends Error {
+    constructor(
+      public readonly statusCode: number,
+      public readonly responseBody: string
+    ) {
+      super(`Node Agent request failed: ${statusCode} ${responseBody}`);
+    }
+  },
+  nodeAgentRequest: vi.fn(async (_nodeId: unknown, _env: unknown, path: string) => {
+    if (path.endsWith('/agent-capabilities')) {
+      return {
+        protocolVersion: 1,
+        runtimeIdentity: 'runtime-1',
+        promptReceipts: {
+          supported: true,
+          lookup: true,
+          states: ['accepted', 'in_flight', 'completed', 'not_found', 'ambiguous'],
+        },
+        checkpointRollover: {
+          supported: false,
+          automatic: false,
+          states: [],
+          defaultGraceMs: 0,
+          maxGraceMs: 0,
+          operationTimeoutMs: 0,
+        },
+      };
+    }
+    const deliveryId = path.split('/').at(-1) ?? '';
+    return {
+      deliveryId,
+      state: 'not_found',
+      runtimeIdentity: 'runtime-1',
+      acceptedAt: null,
+      completedAt: null,
+    };
+  }),
+  sendPromptToAgentOnNode: vi.fn(
+    async (
+      _nodeId: unknown,
+      _workspaceId: unknown,
+      acpSessionId: string,
+      _prompt: unknown,
+      _env: unknown,
+      _userId: unknown,
+      _messageId: unknown,
+      options: { deliveryId?: string } | undefined
+    ) => ({
+      status: 'accepted',
+      sessionId: acpSessionId,
+      receipt: {
+        deliveryId: options?.deliveryId ?? '',
+        state: 'accepted',
+        runtimeIdentity: 'runtime-1',
+        acceptedAt: Date.now(),
+        completedAt: null,
+      },
+    })
+  ),
   cancelAgentSessionOnNode: vi.fn().mockResolvedValue({ success: true, status: 200 }),
+}));
+vi.mock('../../../src/services/node-agent', () => ({
+  NodeAgentHttpError: nodeAgentMocks.NodeAgentHttpError,
+  nodeAgentRequest: nodeAgentMocks.nodeAgentRequest,
+  sendPromptToAgentOnNode: nodeAgentMocks.sendPromptToAgentOnNode,
+  cancelAgentSessionOnNode: nodeAgentMocks.cancelAgentSessionOnNode,
 }));
 vi.mock('../../../src/services/project-data', () => ({ reconcileTaskWaits: vi.fn() }));
 vi.mock('../../../src/services/vm-admission-control', () => ({
@@ -463,7 +529,7 @@ describe('Task Reconciliation Module', () => {
       expect(await getReconciliationCandidates(sql, env)).toEqual([]);
 
       taskRows['task-1']!.status = 'in_progress';
-      vi.setSystemTime(now + 30_001);
+      vi.setSystemTime(now + 35_001);
 
       await expect(getReconciliationCandidates(sql, env)).resolves.toEqual([
         expect.objectContaining({ sessionId: 'session-1', taskId: 'task-1' }),
@@ -1068,8 +1134,12 @@ describe('Task Reconciliation Module', () => {
         expect.stringContaining('continue working from where you left off'),
         expect.anything(),
         'user-1',
-        undefined,
-        { requestTimeoutMs: 1234 }
+        expect.any(String),
+        expect.objectContaining({
+          requestTimeoutMs: 1234,
+          protocolVersion: 1,
+          deliveryId: expect.any(String),
+        })
       );
     });
 
@@ -1101,6 +1171,83 @@ describe('Task Reconciliation Module', () => {
         )
         .all('session-1');
       expect(markers).toHaveLength(0);
+    });
+
+    it('reuses receipt and transcript identities after acceptance precedes a marker write failure', async () => {
+      const { sendPromptToAgentOnNode } = await import('../../../src/services/node-agent');
+      const executedDeliveryIds = new Set<string>();
+      let promptExecutions = 0;
+      vi.mocked(sendPromptToAgentOnNode).mockImplementation(async (...args) => {
+        const acpSessionId = args[2];
+        const deliveryId = args[7]?.deliveryId ?? '';
+        const duplicate = executedDeliveryIds.has(deliveryId);
+        if (!duplicate) {
+          executedDeliveryIds.add(deliveryId);
+          promptExecutions += 1;
+        }
+        return {
+          status: duplicate ? 'duplicate' : 'accepted',
+          sessionId: acpSessionId,
+          receipt: {
+            deliveryId,
+            state: 'accepted',
+            runtimeIdentity: nodeAgentMocks.runtimeIdentity,
+            acceptedAt: now,
+            completedAt: null,
+          },
+        };
+      });
+
+      setupTaskSession();
+      db.exec(
+        `CREATE TRIGGER reject_first_reconciliation_marker
+         BEFORE INSERT ON session_attention_markers
+         WHEN NEW.kind = 'reconciliation_checkin'
+         BEGIN
+           SELECT RAISE(FAIL, 'simulated marker write failure');
+         END`
+      );
+      const env = {
+        ...envWithRows(
+          { 'task-1': { task_mode: 'task', status: 'in_progress' } },
+          { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } }
+        ),
+        TASK_RECONCILIATION_CANDIDATE_LEASE_MS: '1',
+        TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS: '1',
+        TASK_LIVENESS_PROBE_TIMEOUT_MS: '1',
+        TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS: '1',
+        TASK_RECONCILIATION_MIN_ALARM_DELAY_MS: '1',
+      } as ProjectDataEnv;
+      const broadcastEvent = vi.fn();
+
+      expect(await processReconciliationCandidates(sql, env, broadcastEvent)).toBe(0);
+      expect(
+        db.prepare(`SELECT COUNT(*) AS count FROM chat_messages`).get<{ count: number }>()!.count
+      ).toBe(1);
+      expect(
+        db
+          .prepare(`SELECT COUNT(*) AS count FROM session_attention_markers`)
+          .get<{ count: number }>()!.count
+      ).toBe(0);
+
+      db.exec('DROP TRIGGER reject_first_reconciliation_marker');
+      vi.setSystemTime(now + 7);
+      expect(await processReconciliationCandidates(sql, env, broadcastEvent)).toBe(1);
+
+      const submitCalls = vi.mocked(sendPromptToAgentOnNode).mock.calls;
+      expect(submitCalls).toHaveLength(2);
+      expect(submitCalls[1]?.[6]).toBe(submitCalls[0]?.[6]);
+      expect(submitCalls[1]?.[7]?.deliveryId).toBe(submitCalls[0]?.[7]?.deliveryId);
+      expect(promptExecutions).toBe(1);
+      expect(
+        db.prepare(`SELECT COUNT(*) AS count FROM chat_messages`).get<{ count: number }>()!.count
+      ).toBe(1);
+      expect(
+        db
+          .prepare(`SELECT COUNT(*) AS count FROM session_attention_markers`)
+          .get<{ count: number }>()!.count
+      ).toBe(1);
+      expect(broadcastEvent.mock.calls.filter(([type]) => type === 'message.new')).toHaveLength(1);
     });
 
     it('fails dead-node candidates without attempting VM delivery', async () => {
@@ -1458,9 +1605,22 @@ describe('Task Reconciliation Module', () => {
     it('clamps the candidate lease across waitUntil delivery and persists only after acceptance', async () => {
       const { sendPromptToAgentOnNode } = await import('../../../src/services/node-agent');
       let acceptDelivery!: () => void;
-      vi.mocked(sendPromptToAgentOnNode).mockImplementationOnce(() => {
-        return new Promise<void>((resolve) => {
-          acceptDelivery = resolve;
+      vi.mocked(sendPromptToAgentOnNode).mockImplementationOnce((...args) => {
+        const acpSessionId = args[2];
+        const deliveryId = args[7]?.deliveryId;
+        return new Promise((resolve) => {
+          acceptDelivery = () =>
+            resolve({
+              status: 'accepted',
+              sessionId: acpSessionId,
+              receipt: {
+                deliveryId,
+                state: 'accepted',
+                runtimeIdentity: nodeAgentMocks.runtimeIdentity,
+                acceptedAt: Date.now(),
+                completedAt: null,
+              },
+            });
         });
       });
       setupTaskSession();
@@ -1489,8 +1649,8 @@ describe('Task Reconciliation Module', () => {
       const gate = db
         .prepare(`SELECT value FROM do_meta WHERE key = 'taskReconciliationGate:session-1'`)
         .get<{ value: string }>();
-      expect(JSON.parse(gate!.value)).toMatchObject({ nextAttemptAt: now + 4000 });
-      vi.setSystemTime(now + 3500);
+      expect(JSON.parse(gate!.value)).toMatchObject({ nextAttemptAt: now + 6000 });
+      vi.setSystemTime(now + 5500);
       // A second alarm can run while the first waitUntil delivery is still in
       // flight. Even after the max-of-probes lease would have expired, the
       // effective value still covers every configured probe and delivery budget.
@@ -1781,7 +1941,7 @@ describe('Task Reconciliation Module', () => {
         activity: 'idle',
       });
 
-      vi.setSystemTime(now + 30_001);
+      vi.setSystemTime(now + 35_001);
       const secondPass = await processReconciliationCandidates(sql, env, broadcastEvent);
       expect(secondPass).toBe(1);
       expect(vi.mocked(sendPromptToAgentOnNode)).toHaveBeenCalledWith(
@@ -1791,8 +1951,12 @@ describe('Task Reconciliation Module', () => {
         expect.stringContaining('continue working from where you left off'),
         expect.anything(),
         'user-1',
-        undefined,
-        { requestTimeoutMs: 5000 }
+        expect.any(String),
+        expect.objectContaining({
+          requestTimeoutMs: 5000,
+          protocolVersion: 1,
+          deliveryId: expect.any(String),
+        })
       );
     });
   });

@@ -452,6 +452,36 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
     ).toEqual({ count: 0 });
   });
 
+  it('keeps the write-time supersession fence for an explicit node_not_live verdict', async () => {
+    seedTask(PREDECESSOR_ID, {
+      startedAt: iso(-10 * 60 * 1000),
+      createdAt: iso(-60 * 60 * 1000),
+      chatSessionId: CHAT_SESSION_ID,
+    });
+    makeWorkspaceRunning();
+    sqlite.prepare(`UPDATE nodes SET status = 'stopped' WHERE id = ?`).run(NODE_ID);
+    let insertedSuccessor = false;
+
+    const result = await recoverStuckTasks(
+      env({
+        beforeTerminalUpdate: () => {
+          if (insertedSuccessor) return;
+          insertedSuccessor = true;
+          seedSuccessor('queued', { createdAt: iso(-30_000) });
+        },
+      })
+    );
+
+    expect(insertedSuccessor).toBe(true);
+    expect(fetchWithTimeoutMock).not.toHaveBeenCalled();
+    expect(result.failedInProgress).toBe(0);
+    expect(statusOf(PREDECESSOR_ID)).toMatchObject({
+      status: 'in_progress',
+      error_message: null,
+    });
+    expect(statusOf(SUCCESSOR_ID).status).toBe('queued');
+  });
+
   it('still kills the same dead predecessor when no successor appears at write time', async () => {
     seedTask(PREDECESSOR_ID, {
       startedAt: iso(-10 * 60 * 1000),
@@ -476,7 +506,9 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
       supersededByTaskId: middleId,
     });
     seedTask(middleId, {
-      startedAt: iso(-10 * 60 * 1000),
+      // Keep this middle link below the reconciliation grace threshold; the
+      // explicit node_not_live test above owns the write-time race coverage.
+      startedAt: iso(-9 * 60 * 1000),
       createdAt: iso(-2 * 60 * 60 * 1000),
       triggeredBy: 'session-recovery',
       recoverySourceTaskId: rootId,

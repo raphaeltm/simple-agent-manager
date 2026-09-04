@@ -23,14 +23,14 @@ export const DEFAULT_SESSION_ACTIVITY_STALE_THRESHOLD_MS = 5 * 60 * 1000;
 /**
  * Activity values that mean "a prompt turn is believed to be in flight".
  *
- * These are the only states the reconciler may verify with SessionHost, and the only
- * states that suppress idle scheduling / delivery for their session.
+ * These are the states interpreted as positive in-flight work throughout the
+ * control plane, and the states that suppress idle scheduling / delivery for
+ * their session.
  *
- * `error` is deliberately EXCLUDED: clearing it would erase user-visible error
- * context, which is a product decision rather than a reliability fix. A wedged
- * `error` activity therefore still suppresses idle scheduling. Tracked in
- * `tasks/backlog/2026-08-16-probe-reconcile-wedged-error-activity.md`
- * (`.claude/rules/42`).
+ * `error` is deliberately EXCLUDED from positive working evidence. The
+ * SessionHost-backed reconciler probes stale error mirrors separately and may
+ * end them only when the exact runtime session authoritatively reports that no
+ * turn is in flight.
  */
 export const WORKING_ACTIVITIES = ['prompting', 'recovering'] as const;
 
@@ -217,16 +217,34 @@ export interface TurnEndInput {
  * newer than the observation is flipped. Returns true when the row changed.
  */
 export function recordTurnEnd(sql: SqlStorage, sessionId: string, input: TurnEndInput): boolean {
-  const now = input.now ?? Date.now();
-  const placeholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
-  const before = sql
-    .exec(`SELECT activity FROM session_state WHERE session_id = ?`, sessionId)
-    .toArray()[0];
-  if (!before || typeof before.activity !== 'string' || !isWorkingActivity(before.activity)) {
-    return false;
-  }
+  return recordTurnEndFromActivities(sql, sessionId, input, WORKING_ACTIVITIES, false);
+}
 
-  sql.exec(
+/**
+ * Probe-only terminal transition that also admits a stale `error` mirror.
+ * Preserve its diagnostic text after returning the activity gate to `idle` so
+ * reconciliation releases downstream consumers without erasing user-visible
+ * error context.
+ */
+export function recordProbeReconciledTurnEnd(
+  sql: SqlStorage,
+  sessionId: string,
+  input: TurnEndInput
+): boolean {
+  return recordTurnEndFromActivities(sql, sessionId, input, [...WORKING_ACTIVITIES, 'error'], true);
+}
+
+function recordTurnEndFromActivities(
+  sql: SqlStorage,
+  sessionId: string,
+  input: TurnEndInput,
+  expectedActivities: readonly string[],
+  preserveErrorContext: boolean
+): boolean {
+  const now = input.now ?? Date.now();
+  const placeholders = expectedActivities.map(() => '?').join(', ');
+
+  const updated = sql.exec(
     `UPDATE session_state
      SET activity = 'idle',
          activity_at = ?,
@@ -234,7 +252,7 @@ export function recordTurnEnd(sql: SqlStorage, sessionId: string, input: TurnEnd
          activity_reason = ?,
          prompt_started_at = NULL,
          prompt_epoch = NULL,
-         status_error = NULL,
+         status_error = CASE WHEN ? = 1 AND activity = 'error' THEN status_error ELSE NULL END,
          activity_probe_attempts = 0,
          activity_probe_at = NULL
      WHERE session_id = ?
@@ -243,15 +261,13 @@ export function recordTurnEnd(sql: SqlStorage, sessionId: string, input: TurnEnd
     now,
     input.source,
     input.reason,
+    preserveErrorContext ? 1 : 0,
     sessionId,
-    ...WORKING_ACTIVITIES,
+    ...expectedActivities,
     input.observedAt
   );
 
-  const after = sql
-    .exec(`SELECT activity FROM session_state WHERE session_id = ?`, sessionId)
-    .toArray()[0];
-  const changed = after?.activity === 'idle';
+  const changed = updated.rowsWritten > 0;
   if (changed) {
     log.info('session_state.turn_end_recorded', {
       sessionId,

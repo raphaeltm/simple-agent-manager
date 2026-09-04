@@ -194,6 +194,78 @@ describe('session activity reconciliation', () => {
     });
   });
 
+  describe('stale error mirrors', () => {
+    it('reconciles a stale error only after the exact SessionHost reports no work', () => {
+      seedLiveSession();
+      upsertActivityState(sql, ACP_SESSION, {
+        activity: 'error',
+        statusError: 'tool host crashed',
+        now: now - 4 * 60 * 60 * 1000,
+      });
+
+      const [candidate] = candidates();
+      expect(candidate).toMatchObject({ acpSessionId: ACP_SESSION, workspaceId: WORKSPACE });
+      expect(
+        applyProbeOutcome(
+          sql,
+          candidate!,
+          { kind: 'not_working', hostStatus: 'error' },
+          { maxAttempts: 3 }
+        )
+      ).toBe(true);
+      expect(readState()).toMatchObject({
+        activity: 'idle',
+        activity_source: 'probe',
+        activity_reason: 'probe_reconciled',
+        status_error: 'tool host crashed',
+      });
+      expect(candidates()).toEqual([]);
+    });
+
+    it('preserves and refreshes stale error context while SessionHost is still working', () => {
+      seedLiveSession();
+      upsertActivityState(sql, ACP_SESSION, {
+        activity: 'error',
+        statusError: 'callback failed after prompt start',
+        now: now - 4 * 60 * 60 * 1000,
+      });
+
+      const [candidate] = candidates();
+      expect(applyProbeOutcome(sql, candidate!, { kind: 'working' }, { maxAttempts: 3 })).toBe(
+        false
+      );
+      expect(readState()).toMatchObject({
+        activity: 'error',
+        activity_at: now,
+        status_error: 'callback failed after prompt start',
+        activity_probe_attempts: 0,
+      });
+      expect(candidates()).toEqual([]);
+    });
+
+    it('does not select a fresh error or clear one on unreachable inventory', () => {
+      seedLiveSession();
+      upsertActivityState(sql, ACP_SESSION, {
+        activity: 'error',
+        statusError: 'fresh error',
+        now,
+      });
+      expect(candidates()).toEqual([]);
+
+      vi.setSystemTime(now + FIVE_MINUTES + 1);
+      const [candidate] = candidates();
+      expect(
+        applyProbeOutcome(
+          sql,
+          candidate!,
+          { kind: 'unreachable', error: 'connection_timeout' },
+          { maxAttempts: 3 }
+        )
+      ).toBe(false);
+      expect(readState()).toMatchObject({ activity: 'error', status_error: 'fresh error' });
+    });
+  });
+
   describe('(c) genuinely prompting session (control case)', () => {
     it.each([
       ['idle', { kind: 'not_working', hostStatus: 'idle' }],

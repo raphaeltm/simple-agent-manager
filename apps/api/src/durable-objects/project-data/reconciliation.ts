@@ -14,16 +14,20 @@
  */
 import type { Env as WorkerEnv } from '../../env';
 import { createModuleLogger, serializeError } from '../../lib/logger';
-import { cancelAgentSessionOnNode, sendPromptToAgentOnNode } from '../../services/node-agent';
+import { cancelAgentSessionOnNode } from '../../services/node-agent';
 import { classifyTaskRuntimeDelivery } from '../../services/task-runtime-liveness';
+import { DefaultVmPromptDeliveryAdapter } from '../../services/vm-prompt-delivery-adapter';
 import { recordActivityEventInternal } from './activity';
 import { createAttentionMarker } from './attention';
 import { persistMessage } from './messages';
+import type { PromptDeliveryClaim } from './prompt-delivery';
 import {
   CANDIDATE_GATE_META_PREFIX,
   clearReconciliationCandidateGate,
   deferReconciliationCandidateUntil,
+  getOrCreateReconciliationCheckinIntent,
   parseReconciliationCandidateGate,
+  type ReconciliationCheckinIntent,
   recordReconciliationCandidateInconclusive,
 } from './reconciliation-candidate-state';
 import {
@@ -57,11 +61,13 @@ const CHECKIN_PROMPT =
   'If you need human help, call request_human_input(). ' +
   'If you do not respond shortly, this task will be marked as failed.';
 
-/** Source metadata attached to the persisted check-in message. */
-const CHECKIN_METADATA = JSON.stringify({
-  source: 'sam_orchestrator',
-  kind: 'reconciliation_checkin',
-});
+function checkinMetadata(deliveryId: string): Record<string, unknown> {
+  return {
+    source: 'sam_orchestrator',
+    kind: 'reconciliation_checkin',
+    deliveryId,
+  };
+}
 
 export type { ReconciliationCandidate } from './reconciliation-candidates';
 export { getReconciliationCandidates } from './reconciliation-candidates';
@@ -85,6 +91,7 @@ export async function processReconciliationCandidates(
   if (candidates.length === 0) return 0;
 
   const deadlineMs = reconciliationDeadlineMs(env);
+  const promptDeliveryAdapter = new DefaultVmPromptDeliveryAdapter(env as unknown as WorkerEnv);
   let localObservations = 0;
 
   // `observe_prompt` is a fact already present in this Durable Object. Record
@@ -209,19 +216,39 @@ export async function processReconciliationCandidates(
           return 1;
         }
 
-        // Runtime acceptance is the correctness boundary. A timeout/error here
-        // remains inconclusive and creates no failure-capable deadline.
-        await sendCheckinToAgent(env, candidate, delivery.target);
+        // Persist stable receipt/transcript identity BEFORE crossing the VM
+        // boundary. A lost response or a later local write failure can then
+        // safely replay the same intent; the VM returns the existing receipt
+        // instead of executing a duplicate prompt.
+        const intent = getOrCreateReconciliationCheckinIntent(
+          sql,
+          candidate.sessionId,
+          candidate.taskId
+        );
+        const deliveryResult = await sendCheckinToAgent(
+          env,
+          candidate,
+          delivery.target,
+          intent,
+          promptDeliveryAdapter
+        );
+        if (deliveryResult.kind !== 'accepted') {
+          throw new Error(
+            `reconciliation_checkin_${deliveryResult.kind}:${'reason' in deliveryResult ? deliveryResult.reason : 'unknown'}`
+          );
+        }
 
         // Persist/broadcast only after accepted delivery, so transcript state
         // cannot claim SAM sent a prompt the runtime never received.
+        const metadata = checkinMetadata(intent.deliveryId);
         const msgResult = persistMessage(
           sql,
           env,
           candidate.sessionId,
           'user',
           CHECKIN_PROMPT,
-          CHECKIN_METADATA
+          JSON.stringify(metadata),
+          intent.promptMessageId
         );
 
         const marker = createAttentionMarker(sql, {
@@ -246,8 +273,10 @@ export async function processReconciliationCandidates(
           JSON.stringify({
             messageId: msgResult.id,
             markerId: marker.id,
+            deliveryId: intent.deliveryId,
             idleDurationMs: candidate.idleDurationMs,
             deadlineMs,
+            acceptedAt: deliveryResult.promptEpoch,
           })
         );
 
@@ -258,7 +287,7 @@ export async function processReconciliationCandidates(
             messageId: msgResult.id,
             role: 'user',
             content: CHECKIN_PROMPT,
-            toolMetadata: JSON.parse(CHECKIN_METADATA),
+            toolMetadata: metadata,
             createdAt: msgResult.now,
             sequence: msgResult.sequence,
           },
@@ -281,6 +310,7 @@ export async function processReconciliationCandidates(
           workspaceId: candidate.workspaceId,
           markerId: marker.id,
           messageId: msgResult.id,
+          deliveryId: intent.deliveryId,
           idleDurationMs: candidate.idleDurationMs,
         });
 
@@ -441,20 +471,71 @@ async function cancelStalledPrompt(
 async function sendCheckinToAgent(
   env: DOEnv,
   candidate: ReconciliationCandidate,
-  target: WorkspaceDeliveryTarget
-): Promise<void> {
-  const workerEnv = env as unknown as WorkerEnv;
+  target: WorkspaceDeliveryTarget,
+  intent: ReconciliationCheckinIntent,
+  adapter: DefaultVmPromptDeliveryAdapter
+) {
+  const claim: PromptDeliveryClaim = {
+    attemptId: intent.deliveryId,
+    mode: 'submit',
+    message: {
+      id: intent.deliveryId,
+      targetSessionId: candidate.sessionId,
+      sourceTaskId: candidate.taskId,
+      senderType: 'system',
+      senderId: null,
+      messageClass: 'deliver',
+      deliveryState: 'delivering',
+      content: CHECKIN_PROMPT,
+      metadata: checkinMetadata(intent.deliveryId),
+      ackRequired: false,
+      ackTimeoutMs: null,
+      deliveryAttempts: 1,
+      lastDeliveryAt: intent.createdAt,
+      expiresAt: null,
+      createdAt: intent.createdAt,
+      deliveredAt: null,
+      ackedAt: null,
+      sourceKind: 'agent_mailbox',
+      promptMessageId: intent.promptMessageId,
+      nextAttemptAt: intent.createdAt,
+      lastError: null,
+      terminalReason: null,
+      attemptId: intent.deliveryId,
+      attemptStartedAt: intent.createdAt,
+      runtimeIdentity: null,
+      receiptState: null,
+      receiptRuntimeIdentity: null,
+      receiptCheckedAt: null,
+      acceptedAt: null,
+      adapterProtocolVersion: null,
+      receiptSupported: null,
+    },
+  };
 
-  await sendPromptToAgentOnNode(
-    target.nodeId,
-    candidate.workspaceId,
-    candidate.acpSessionId,
-    CHECKIN_PROMPT,
-    workerEnv,
-    target.userId,
-    undefined,
-    { requestTimeoutMs: reconciliationNodeCallTimeoutMs(env) }
-  );
+  return adapter.submit({
+    projectId: candidate.projectId,
+    claim,
+    allowLegacyVm: false,
+    requestTimeoutMs: reconciliationNodeCallTimeoutMs(env),
+    resolvedTarget: {
+      projectId: candidate.projectId,
+      chatSessionId: candidate.sessionId,
+      workspaceId: candidate.workspaceId,
+      nodeId: target.nodeId,
+      agentSessionId: candidate.acpSessionId,
+      userId: target.userId,
+      // Versioned capability negotiation supplies the authoritative runtime
+      // identity. This local value is used only to fail closed for legacy VMs.
+      runtimeIdentity: `${target.nodeId}:${candidate.acpSessionId}`,
+      runtime: 'vm',
+    },
+    sourceTaskGuard: {
+      taskId: candidate.taskId,
+      projectId: candidate.projectId,
+      chatSessionId: candidate.sessionId,
+    },
+  });
 }
 
 /**
