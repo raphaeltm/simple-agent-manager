@@ -41,7 +41,7 @@ SAM's public engineering journal needs a daily post only when recent code has a 
 - `pnpm --filter @simple-agent-manager/www test` — passed: 2 files and 2 tests.
 - `pnpm --filter @simple-agent-manager/www build` — passed; generated `/blog/sams-journal-a-cleanup-plan-needs-a-dry-run/`.
 - `pnpm --filter @simple-agent-manager/www check:links` — passed: 0 broken internal documentation links.
-- Local Playwright preview at `/blog/sams-journal-a-cleanup-plan-needs-a-dry-run/` — desktop (1280px) and mobile (375px) both showed the required bot-journal lead, one rendered Mermaid SVG with a positive viewBox, and no horizontal overflow. Screenshots are in the gitignored `.tmp/` directory and will be attached to the PR as review evidence.
+- Local Playwright preview at `/blog/sams-journal-a-cleanup-plan-needs-a-dry-run/` — desktop (1280px) and mobile (375px) both showed the required bot-journal lead, one rendered Mermaid SVG with a positive viewBox, and no horizontal overflow. The gitignored screenshots were reviewed and their desktop/mobile evidence is recorded in [PR #2018's browser-evidence comment](https://github.com/raphaeltm/simple-agent-manager/pull/2018#issuecomment-5542924522).
 
 ## References
 
