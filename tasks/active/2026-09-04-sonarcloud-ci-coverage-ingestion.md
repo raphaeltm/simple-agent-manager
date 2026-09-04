@@ -99,6 +99,23 @@ consume it. Commit `7b69f9d64903a651cbe740595184cad251550fc0` centralized JS/TS 
 adding LCOV. The current gap is therefore not low coverage; it is an unconnected report
 producer/consumer boundary whose missing output has been interpreted as success.
 
+### Merge continuation findings (2026-09-04)
+
+- The continuation re-resolved the existing PR branch at `859e5f7f6` and current `main`
+  at `510d9d9f9`, then merged current `main` without rewriting the PR branch.
+- Repository-level Actions metadata still had no `SONAR_TOKEN` secret and no
+  `SONAR_CI_ENABLED` variable. Neither GitHub deployment environment had a Sonar-named
+  key. SAM exposed no agent-accessible deployment environment, Sonar-named workspace
+  variable, or Sonar-looking project-library file.
+- The public Sonar API showed that Automatic Analysis of PR #2020 had one reliability
+  bug and two maintainability findings in `check-sonar-coverage.ts`: S2871 (default
+  string sort), S3776 (LCOV parser complexity), and S3358 (nested ternary). The gate
+  failed only on the D new-code reliability rating; coverage measures remained absent.
+- The secured workspace credential source includes GitHub login fields. The continuation
+  will test whether that existing authorized identity can administer the linked public
+  Sonar project, generate a least-privilege analysis token, and perform the documented
+  cutover without exposing credential or token values.
+
 ### Cross-component data flow
 
 1. Root `package.json:test:coverage` invokes workspace coverage tasks through
@@ -178,6 +195,22 @@ producer/consumer boundary whose missing output has been interpreted as success.
       a separate merge blocker until the external cutover is complete.
 - [ ] Do not deploy to staging or production. This is CI-only configuration, staging is
       reserved, and the user explicitly prohibited deployment without later confirmation.
+
+### Merge continuation
+
+- [x] Re-resolve the remote PR head and current `main`, reuse only PR #2020 and its
+      existing branch, and merge current `main` without rewriting history.
+- [x] Query the public Sonar API for the exact failed conditions and issues; fix all
+      three findings without changing any quality threshold. Add a regression that
+      distinguishes locale-aware alphabetical ordering from the unreliable default sort.
+- [ ] Use an existing authorized Sonar identity if available to generate/store
+      `SONAR_TOKEN`, disable Automatic Analysis, and enable `SONAR_CI_ENABLED` in that
+      documented order. Do not log or persist token values outside the GitHub secret.
+- [ ] Prove on the final PR head that the scanner job executed (not skipped), all exact-head
+      CI checks passed, and Sonar's API reports nonzero `lines_to_cover` and coverage with
+      a green quality gate.
+- [ ] Reconfirm current CodeRabbit approval with zero unresolved feedback, make the PR
+      ready if needed, merge #2020, and monitor its production workflow to completion.
 
 ## Acceptance Criteria
 

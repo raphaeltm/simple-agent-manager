@@ -119,7 +119,7 @@ export function findJavaScriptCoverageReportPaths(root: string): string[] {
   if (reportPaths.size === 0) {
     throw new Error('No Vitest coverage workspaces were discovered.');
   }
-  return [...reportPaths].sort();
+  return [...reportPaths].sort((left, right) => left.localeCompare(right, 'en'));
 }
 
 function readSonarProperties(root: string): Map<string, string> {
@@ -189,6 +189,24 @@ function normalizeLcovSourceRecord(
   return `SF:${repositoryPath}`;
 }
 
+function assertLcovRecordCanStart(reportPath: string, recordOpen: boolean): void {
+  if (recordOpen) {
+    throw new Error(`JavaScript coverage report ${reportPath} has an unterminated record.`);
+  }
+}
+
+function assertValidLcovDataRecord(reportPath: string, line: string, recordOpen: boolean): void {
+  if (!recordOpen || !/^DA:\d+,\d+(?:,[^,\s]+)?$/u.test(line)) {
+    throw new Error(`JavaScript coverage report ${reportPath} has a malformed DA record: ${line}.`);
+  }
+}
+
+function assertLcovRecordCanEnd(reportPath: string, recordOpen: boolean): void {
+  if (!recordOpen) {
+    throw new Error(`JavaScript coverage report ${reportPath} has an orphaned record end.`);
+  }
+}
+
 function parseLcovContents(
   root: string,
   reportPath: string,
@@ -202,23 +220,19 @@ function parseLcovContents(
 
   for (const [index, line] of lines.entries()) {
     if (line.startsWith('SF:')) {
-      if (recordOpen) {
-        throw new Error(`JavaScript coverage report ${reportPath} has an unterminated record.`);
-      }
+      assertLcovRecordCanStart(reportPath, recordOpen);
       lines[index] = normalizeLcovSourceRecord(root, reportPath, line, normalize);
       sourceFiles += 1;
       recordOpen = true;
-    } else if (line.startsWith('DA:')) {
-      if (!recordOpen || !/^DA:\d+,\d+(?:,[^,\s]+)?$/u.test(line)) {
-        throw new Error(
-          `JavaScript coverage report ${reportPath} has a malformed DA record: ${line}.`
-        );
-      }
+      continue;
+    }
+    if (line.startsWith('DA:')) {
+      assertValidLcovDataRecord(reportPath, line, recordOpen);
       lineRecords += 1;
-    } else if (line === 'end_of_record') {
-      if (!recordOpen) {
-        throw new Error(`JavaScript coverage report ${reportPath} has an orphaned record end.`);
-      }
+      continue;
+    }
+    if (line === 'end_of_record') {
+      assertLcovRecordCanEnd(reportPath, recordOpen);
       recordOpen = false;
     }
   }
@@ -278,14 +292,21 @@ function goModuleName(root: string): string {
   return moduleMatch[1];
 }
 
-function resolveGoSource(root: string, sourcePath: string, moduleName: string): void {
+function goCoverageSourceCandidates(
+  root: string,
+  sourcePath: string,
+  moduleName: string
+): string[] {
   const cliRoot = join(root, 'packages/cli');
-  const candidates = sourcePath.startsWith(`${moduleName}/`)
-    ? [join(cliRoot, sourcePath.slice(moduleName.length + 1))]
-    : isAbsolute(sourcePath)
-      ? [sourcePath]
-      : [join(root, sourcePath), join(cliRoot, sourcePath)];
-  for (const candidate of candidates) {
+  if (sourcePath.startsWith(`${moduleName}/`)) {
+    return [join(cliRoot, sourcePath.slice(moduleName.length + 1))];
+  }
+  if (isAbsolute(sourcePath)) return [sourcePath];
+  return [join(root, sourcePath), join(cliRoot, sourcePath)];
+}
+
+function resolveGoSource(root: string, sourcePath: string, moduleName: string): void {
+  for (const candidate of goCoverageSourceCandidates(root, sourcePath, moduleName)) {
     try {
       assertRepositoryFile(root, candidate, `Go coverage source ${sourcePath}`);
       return;

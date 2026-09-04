@@ -160,7 +160,22 @@ describe('Sonar coverage report contract', () => {
   it('discovers only Vitest coverage workspaces at deterministic sorted paths', () => {
     const root = createFixture();
 
-    expect(findJavaScriptCoverageReportPaths(root)).toEqual(['apps/covered/coverage/lcov.info']);
+    for (const workspace of ['apps/zeta', 'apps/éclair']) {
+      write(
+        root,
+        `${workspace}/package.json`,
+        JSON.stringify({
+          name: `@fixture/${workspace}`,
+          scripts: { 'test:coverage': 'vitest run --coverage' },
+        })
+      );
+    }
+
+    expect(findJavaScriptCoverageReportPaths(root)).toEqual([
+      'apps/covered/coverage/lcov.info',
+      'apps/éclair/coverage/lcov.info',
+      'apps/zeta/coverage/lcov.info',
+    ]);
   });
 
   it('discovers every checked-in Vitest coverage workspace', () => {
