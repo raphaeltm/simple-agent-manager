@@ -125,8 +125,6 @@ export function selectToolPayloadCandidates(
   allowOversizedFirst: boolean,
   physicalLimit = limit
 ): ToolPayloadCandidateSelection {
-  const cursorClause = cursor ? 'WHERE rowid > ?' : '';
-  const cursorParams = cursor ? [cursor.rowId] : [];
   const rows = sql
     .exec(
       `WITH raw_window AS MATERIALIZED (
@@ -140,7 +138,7 @@ export function selectToolPayloadCandidates(
            length(CAST(tool_metadata AS BLOB)) AS tool_metadata_bytes,
            CASE WHEN tool_metadata IS NOT NULL AND instr(tool_metadata, ?) > 0 THEN 1 ELSE 0 END AS has_content
          FROM chat_messages
-         ${cursorClause}
+         WHERE rowid > ?
          ORDER BY rowid ASC
          LIMIT ?
        )
@@ -161,7 +159,7 @@ export function selectToolPayloadCandidates(
        LEFT JOIN tool_payload_cleanup_attempts attempt ON attempt.message_id = raw.id
        ORDER BY raw.physical_rowid ASC`,
       TOOL_PAYLOAD_CONTENT_KEY_NEEDLE,
-      ...cursorParams,
+      cursor?.rowId ?? 0,
       physicalLimit + 1
     )
     .raw();

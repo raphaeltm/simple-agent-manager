@@ -1785,33 +1785,53 @@ export const MIGRATIONS: Migration[] = [
     name: '044-tool-payload-archive-verification-proof',
     run: (sql) => {
       const columns = [
-        ['archive_body_bytes', 'INTEGER'],
-        ['archive_body_sha256', 'TEXT'],
-        ['root_object_bytes', 'INTEGER'],
-        ['root_object_sha256', 'TEXT'],
-        ['verified_object_count', 'INTEGER'],
-        ['source_tool_metadata_sha256', 'TEXT'],
+        [
+          'archive_body_bytes',
+          'ALTER TABLE tool_payload_archives ADD COLUMN archive_body_bytes INTEGER',
+        ],
+        [
+          'archive_body_sha256',
+          'ALTER TABLE tool_payload_archives ADD COLUMN archive_body_sha256 TEXT',
+        ],
+        [
+          'root_object_bytes',
+          'ALTER TABLE tool_payload_archives ADD COLUMN root_object_bytes INTEGER',
+        ],
+        [
+          'root_object_sha256',
+          'ALTER TABLE tool_payload_archives ADD COLUMN root_object_sha256 TEXT',
+        ],
+        [
+          'verified_object_count',
+          'ALTER TABLE tool_payload_archives ADD COLUMN verified_object_count INTEGER',
+        ],
+        [
+          'source_tool_metadata_sha256',
+          'ALTER TABLE tool_payload_archives ADD COLUMN source_tool_metadata_sha256 TEXT',
+        ],
       ] as const;
-      for (const [column, type] of columns) {
+      for (const [column, statement] of columns) {
         try {
-          sql.exec(`ALTER TABLE tool_payload_archives ADD COLUMN ${column} ${type}`);
+          sql.exec(statement);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           if (!new RegExp(`duplicate column name:\\s*${column}`, 'i').test(message)) throw error;
         }
       }
-      const actualColumns = new Set(
-        sql
-          .exec('PRAGMA table_info(tool_payload_archives)')
-          .toArray()
-          .map((row) => row.name)
-          .filter((value): value is string => typeof value === 'string')
-      );
-      for (const [column] of columns) {
-        if (!actualColumns.has(column)) {
-          throw new Error(`tool_payload_archives verification column ${column} is missing`);
-        }
-      }
+      // SQLite resolves every selected identifier before executing the query, so
+      // this static zero-row projection fails the migration if any proof column
+      // is absent without interpolating identifiers into SQL.
+      sql.exec(`
+        SELECT
+          archive_body_bytes,
+          archive_body_sha256,
+          root_object_bytes,
+          root_object_sha256,
+          verified_object_count,
+          source_tool_metadata_sha256
+        FROM tool_payload_archives
+        LIMIT 0
+      `);
     },
   },
 ];
