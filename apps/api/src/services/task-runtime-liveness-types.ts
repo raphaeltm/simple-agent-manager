@@ -7,6 +7,7 @@ export interface TaskRuntimeLiveness {
   workspaceStatus: string | null;
   nodeId: string | null;
   activeAcpSessionId: string | null;
+  deliveryTarget?: { nodeId: string; userId: string };
 }
 
 export type RuntimeProbeOutcome = 'ok' | 'timeout' | 'error' | 'unknown' | 'not_run';
@@ -17,6 +18,7 @@ export interface RuntimeWorkspaceSnapshot {
   status: string;
   chatSessionId: string | null;
   nodeId: string | null;
+  userId: string | null;
   nodeRuntime: string | null;
   nodeStatus: string | null;
   nodeHealthStatus: string | null;

@@ -16,7 +16,6 @@ import {
   DEFAULT_TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP,
   DEFAULT_TASK_RECONCILIATION_MIN_ALARM_DELAY_MS,
   DEFAULT_TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS,
-  DEFAULT_TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS,
   DEFAULT_TASK_RECONCILIATION_PROMPT_HARD_STALL_MS,
   DEFAULT_TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS,
   DEFAULT_TASK_RECONCILIATION_RESPONSE_DEADLINE_MS,
@@ -91,14 +90,6 @@ export function maxCandidatesPerSweep(env: DOEnv): number {
   );
 }
 
-export function nodeHeartbeatStaleMs(env: DOEnv): number {
-  return envNumber(
-    env,
-    'TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS',
-    DEFAULT_TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS
-  );
-}
-
 export function reconciliationNodeCallTimeoutMs(env: DOEnv): number {
   return envNumber(
     env,
@@ -119,7 +110,7 @@ export function sessionActivityProbeTimeoutMs(env: DOEnv): number {
   );
 }
 
-/** Consecutive unreachable probes after which the target is treated as dead. */
+/** Consecutive unreachable probes before the stale mirror is quarantined. */
 export function sessionActivityProbeMaxAttempts(env: DOEnv): number {
   return envNumber(
     env,

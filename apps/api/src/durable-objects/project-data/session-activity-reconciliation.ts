@@ -8,12 +8,6 @@
  * break together — the stop-button UI, durable-message delivery gating, and
  * idle/sleep scheduling.
  *
- * The pre-existing SQL-only heal (`session-state.reconcileStaleActivity`)
- * cannot help an awake session: it refuses to heal while the ACP session is
- * heartbeating, and a vm-agent heartbeats whether or not a prompt is in
- * flight. That is a liveness signal standing in for an idleness signal —
- * exactly the failure mode `.claude/rules/53` exists to prevent.
- *
  * So: a working state older than the staleness bound with no progress
  * evidence is UNPROVEN, not trusted. We ask the only authority that actually
  * knows — the vm-agent's live SessionHost status, already exposed by
@@ -23,8 +17,9 @@
  * Control-loop budget (`.claude/rules/47`): candidate selection is cheap SQL
  * on the alarm path; the network probe runs outside it via `waitUntil`, under
  * a short background timeout, bounded per pass, and every candidate leaves the
- * candidate set — reconciled, refreshed, or terminalized as dead after a
- * bounded number of unreachable probes.
+ * candidate set — reconciled, refreshed, or quarantined after a bounded
+ * number of unreachable probes. Quarantine preserves "work may be in flight"
+ * and authoritative VM reports reset it.
  */
 import type { Env as WorkerEnv } from '../../env';
 import { createModuleLogger, serializeError } from '../../lib/logger';
@@ -239,7 +234,11 @@ export function computeSessionActivityProbeAlarmTime(
  * bounded-retry path instead of terminalizing a possibly live turn on the
  * strength of a response we could not parse.
  */
-export function classifyProbeResponse(payload: unknown, acpSessionId: string): ProbeOutcome {
+export function classifyProbeResponse(
+  payload: unknown,
+  acpSessionId: string,
+  workspaceId: string
+): ProbeOutcome {
   const rawSessions =
     payload && typeof payload === 'object'
       ? (payload as { sessions?: unknown }).sessions
@@ -247,22 +246,42 @@ export function classifyProbeResponse(payload: unknown, acpSessionId: string): P
   if (!Array.isArray(rawSessions)) {
     return { kind: 'unreachable', error: 'malformed_agent_sessions_response' };
   }
-  const sessions = rawSessions as unknown[];
-
-  for (const entry of sessions) {
-    if (!entry || typeof entry !== 'object') continue;
-    const record = entry as Record<string, unknown>;
-    if (record.id !== acpSessionId) continue;
-    const hostStatus = typeof record.hostStatus === 'string' ? record.hostStatus : null;
-    if (hostStatus !== null && HOST_WORKING_STATUSES.has(hostStatus)) {
-      return { kind: 'working' };
+  const matches: Record<string, unknown>[] = [];
+  for (const entry of rawSessions) {
+    if (!entry || typeof entry !== 'object') {
+      return { kind: 'unreachable', error: 'malformed_agent_session_entry' };
     }
-    return { kind: 'not_working', hostStatus };
+    const record = entry as Record<string, unknown>;
+    if (
+      typeof record.id !== 'string' ||
+      typeof record.workspaceId !== 'string' ||
+      typeof record.status !== 'string' ||
+      (record.hostStatus !== undefined && typeof record.hostStatus !== 'string')
+    ) {
+      return { kind: 'unreachable', error: 'malformed_agent_session_entry' };
+    }
+    if (record.id === acpSessionId) matches.push(record);
   }
 
-  // The node does not know this session at all — it certainly is not
-  // mid-prompt on our behalf.
-  return { kind: 'not_working', hostStatus: null };
+  if (matches.length === 0) {
+    return { kind: 'unreachable', error: 'agent_session_identity_missing' };
+  }
+  if (matches.length > 1) {
+    return { kind: 'unreachable', error: 'agent_session_identity_ambiguous' };
+  }
+
+  const match = matches[0];
+  if (!match) {
+    return { kind: 'unreachable', error: 'agent_session_identity_missing' };
+  }
+  if (match.workspaceId !== workspaceId) {
+    return { kind: 'unreachable', error: 'agent_session_workspace_mismatch' };
+  }
+
+  const hostStatus = typeof match.hostStatus === 'string' ? match.hostStatus : null;
+  return hostStatus !== null && HOST_WORKING_STATUSES.has(hostStatus)
+    ? { kind: 'working' }
+    : { kind: 'not_working', hostStatus };
 }
 
 /**
@@ -314,48 +333,55 @@ export function applyProbeOutcome(
     });
   }
 
-  const attempts = candidate.probeAttempts + 1;
-  if (attempts < options.maxAttempts) {
-    // Same compare-and-set discipline as the two branches above. Without it a
-    // stale `unreachable` outcome — one whose probe was still in flight while the
-    // turn ended and a brand-new prompt epoch began — would charge an attempt
-    // against that new epoch, which resets `activity_probe_attempts` to 0 on
-    // every authoritative write. `recordTurnEnd`'s own CAS still stops the new
-    // epoch being terminalized, so the blast radius is only a silently reduced
-    // retry budget; the fix keeps the module's CAS discipline uniform.
-    // Named `placeholders` deliberately: `scripts/quality/ast-checks.ts`
-    // allowlists that exact identifier for `.map(() => '?').join(', ')` IN-clause
-    // expansion, which is what this is (over a compile-time const array).
-    const placeholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
-    sql.exec(
-      `UPDATE session_state
-       SET activity_probe_attempts = ?, activity_probe_at = ?
-       WHERE session_id = ?
-         AND activity IN (${placeholders})
-         AND activity_at <= ?`,
-      attempts,
-      now,
-      candidate.acpSessionId,
-      ...WORKING_ACTIVITIES,
-      candidate.activityAt
-    );
-    return false;
-  }
-
-  // Escape path: the target has not answered within its whole probe budget.
-  // An unreachable agent is not prompting on our behalf, and leaving the row
-  // in the candidate set forever is the zombie-candidate anti-pattern.
-  log.warn('session_activity.probe_target_dead', {
-    acpSessionId: candidate.acpSessionId,
-    nodeId: candidate.nodeId,
+  const attempts = Math.min(candidate.probeAttempts + 1, options.maxAttempts);
+  // Same compare-and-set discipline as the two branches above. Without it a
+  // stale `unreachable` outcome — one whose probe was still in flight while the
+  // turn ended and a brand-new prompt epoch began — would charge an attempt
+  // against that new epoch, which resets `activity_probe_attempts` to 0 on
+  // every authoritative write.
+  const placeholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
+  const updated = sql.exec(
+    `UPDATE session_state
+     SET activity_probe_attempts = ?, activity_probe_at = ?
+     WHERE session_id = ?
+       AND activity IN (${placeholders})
+       AND activity_at <= ?`,
     attempts,
-  });
-  return recordTurnEnd(sql, candidate.acpSessionId, {
-    reason: 'dead',
-    source: 'probe',
-    observedAt: candidate.activityAt,
     now,
-  });
+    candidate.acpSessionId,
+    ...WORKING_ACTIVITIES,
+    candidate.activityAt
+  );
+
+  if (attempts >= options.maxAttempts && updated.rowsWritten > 0) {
+    // Non-hot escape path: silence remains ambiguous, so preserve the working
+    // mirror and saturate the counter. Candidate selection/alarm scheduling
+    // exclude it until a later authoritative VM report resets probe accounting.
+    recordActivityEventInternal(
+      sql,
+      'session.activity_probe_quarantined',
+      'system',
+      null,
+      candidate.workspaceId,
+      candidate.chatSessionId,
+      null,
+      JSON.stringify({
+        acpSessionId: candidate.acpSessionId,
+        nodeId: candidate.nodeId,
+        attempts,
+        error: outcome.error,
+      })
+    );
+    log.warn('session_activity.probe_quarantined', {
+      acpSessionId: candidate.acpSessionId,
+      workspaceId: candidate.workspaceId,
+      nodeId: candidate.nodeId,
+      attempts,
+      error: outcome.error,
+      action: 'preserved',
+    });
+  }
+  return false;
 }
 
 /**
@@ -450,7 +476,7 @@ export async function probeStaleSessionActivity(
           userId,
           { requestTimeoutMs }
         );
-        outcome = classifyProbeResponse(payload, candidate.acpSessionId);
+        outcome = classifyProbeResponse(payload, candidate.acpSessionId, candidate.workspaceId);
       }
     } catch (err) {
       outcome = { kind: 'unreachable', error: err instanceof Error ? err.message : String(err) };
@@ -472,13 +498,13 @@ export async function probeStaleSessionActivity(
     recordAcpActivityCallbackMetric(
       {
         metric: 'acp_activity_callback',
-        outcome: outcome.kind === 'unreachable' ? 'forced_terminal' : 'healed',
+        outcome: 'healed',
         projectId: options.projectId,
         sessionId: candidate.acpSessionId,
         nodeId: candidate.nodeId,
         workspaceId: candidate.workspaceId,
         activity: 'idle',
-        reason: outcome.kind === 'unreachable' ? 'dead_after_probe_budget' : 'probe_reconciled',
+        reason: 'probe_reconciled',
         source: 'reconciliation_probe',
       },
       workerEnv

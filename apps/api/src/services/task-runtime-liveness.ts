@@ -42,6 +42,44 @@ export type {
  */
 export const SUPERSEDED_TERMINAL_REASON_SUFFIX = '_superseded_by_completed_wake';
 
+const PROBEABLE_DELIVERY_REASONS = new Set([
+  'task_acp_session_missing',
+  'task_acp_session_stale',
+  'task_acp_session_suspect',
+]);
+
+export type TaskRuntimeDeliveryDisposition =
+  | { kind: 'deliverable'; target: { nodeId: string; userId: string } }
+  | { kind: 'terminal'; reason: string; nodeId: string | null }
+  | { kind: 'inconclusive'; reason: string };
+
+/**
+ * Convert the shared task-runtime verdict into a reconciliation delivery gate.
+ *
+ * Task-scoped ACP absence/staleness is allowed to make one bounded delivery
+ * attempt: acceptance is positive reachability evidence, while timeout/error is
+ * still inconclusive. Every other uncertain verdict stays deferred. Keeping
+ * this adapter beside the classifier prevents reconciliation from growing a
+ * second D1-heartbeat death policy.
+ */
+export function classifyTaskRuntimeDelivery(
+  liveness: TaskRuntimeLiveness
+): TaskRuntimeDeliveryDisposition {
+  if (liveness.conclusive && !liveness.live) {
+    return { kind: 'terminal', reason: liveness.reason, nodeId: liveness.nodeId };
+  }
+
+  const target = liveness.deliveryTarget;
+  if (
+    target &&
+    (liveness.live || (!liveness.conclusive && PROBEABLE_DELIVERY_REASONS.has(liveness.reason)))
+  ) {
+    return { kind: 'deliverable', target };
+  }
+
+  return { kind: 'inconclusive', reason: liveness.reason };
+}
+
 /** True when a conclusive verdict was reached because the wake moved on. */
 export function isSupersededTerminalReason(reason: string): boolean {
   return reason.endsWith(SUPERSEDED_TERMINAL_REASON_SUFFIX);
@@ -79,8 +117,8 @@ function isVmNodeHeartbeatStale(
 
 /**
  * A stale D1 heartbeat/health field is a weak self-signal, not proof of VM
- * death. Both liveness adapters must make the same bounded authority probe
- * before converting that stale signal into a terminal `node_not_live` verdict
+ * death. Both liveness adapters make the same bounded authority probe, but a
+ * failed request still cannot manufacture terminal ownership evidence
  * (`.claude/rules/61`).
  */
 export function needsNodeHealthProbe(signals: TaskRuntimeLivenessSignals): boolean {
@@ -132,7 +170,7 @@ export async function probeNodeHealthForTaskLiveness(
     };
   } catch (err) {
     return {
-      outcome: isNodeHealthProbeTimeout(err) ? 'timeout' : 'failed',
+      outcome: isNodeHealthProbeTimeout(err) ? 'timeout' : 'error',
       timeoutMs,
       url,
       status: null,
@@ -289,6 +327,9 @@ function result(
     ...values,
     workspaceStatus: workspace?.status ?? null,
     nodeId: workspace?.nodeId ?? null,
+    ...(workspace?.nodeId && workspace.userId
+      ? { deliveryTarget: { nodeId: workspace.nodeId, userId: workspace.userId } }
+      : {}),
   };
 }
 
@@ -442,8 +483,8 @@ export function classifyTaskRuntimeLiveness(
     if (signals.nodeHealthProbeOutcome === 'failed') {
       return result(workspace, {
         live: false,
-        conclusive: true,
-        reason: 'node_not_live',
+        conclusive: false,
+        reason: 'node_health_probe_failed',
         activeAcpSessionId: null,
       });
     }
@@ -525,7 +566,9 @@ export function classifyTaskRuntimeLiveness(
   const taskWorkspaceSessions = signals.acpSessions.filter(
     (session) => session.workspaceId === workspace.id
   );
-  const terminal = taskWorkspaceSessions.find((session) => TERMINAL_ACP_STATUSES.has(session.status));
+  const terminal = taskWorkspaceSessions.find((session) =>
+    TERMINAL_ACP_STATUSES.has(session.status)
+  );
   if (terminal) {
     return result(workspace, {
       live: false,
@@ -559,7 +602,7 @@ export async function loadRuntimeWorkspaceSnapshot(
 ): Promise<RuntimeWorkspaceSnapshot | null> {
   const row = await db
     .prepare(
-      `SELECT w.id, w.status AS workspace_status, w.chat_session_id, w.node_id,
+      `SELECT w.id, w.status AS workspace_status, w.chat_session_id, w.node_id, w.user_id,
             n.status AS node_status, n.health_status, n.last_heartbeat_at,
             n.runtime AS node_runtime,
             (SELECT COUNT(*) FROM workspaces nw WHERE nw.node_id = w.node_id AND nw.status = 'running') AS running_workspaces_on_node
@@ -574,6 +617,7 @@ export async function loadRuntimeWorkspaceSnapshot(
       workspace_status: string;
       chat_session_id: string | null;
       node_id: string | null;
+      user_id: string | null;
       node_status: string | null;
       health_status: string | null;
       last_heartbeat_at: string | null;
@@ -588,6 +632,7 @@ export async function loadRuntimeWorkspaceSnapshot(
     status: row.workspace_status,
     chatSessionId: row.chat_session_id,
     nodeId: row.node_id,
+    userId: row.user_id,
     nodeRuntime: row.node_runtime,
     nodeStatus: row.node_status,
     nodeHealthStatus: row.health_status,

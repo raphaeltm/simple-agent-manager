@@ -56,6 +56,8 @@ interface MockWorkspaceRow {
   user_id: string;
   project_id?: string | null;
   status?: string;
+  chat_session_id?: string | null;
+  node_runtime?: string | null;
   node_status?: string | null;
   health_status?: string | null;
   last_heartbeat_at?: string | null;
@@ -70,6 +72,8 @@ function createMockD1(
   function workspaceIdForTask(taskId: string): string | null {
     if (taskRows[taskId]?.workspace_id !== undefined) return taskRows[taskId].workspace_id ?? null;
     if (taskId === 'task-1') return 'ws-1';
+    const numberedTask = /^task-(.+)$/.exec(taskId);
+    if (numberedTask?.[1]) return `ws-${numberedTask[1]}`;
     return taskId.replace(/-task$/, '-ws');
   }
   function chatSessionIdForTask(taskId: string): string | null {
@@ -77,7 +81,15 @@ function createMockD1(
       return taskRows[taskId].chat_session_id ?? null;
     }
     if (taskId === 'task-1') return 'session-1';
+    const numberedTask = /^task-(.+)$/.exec(taskId);
+    if (numberedTask?.[1]) return `session-${numberedTask[1]}`;
     return taskId.replace(/-task$/, '-session');
+  }
+  function chatSessionIdForWorkspace(workspaceId: string): string | null {
+    const taskId = Object.keys(taskRows).find(
+      (candidateTaskId) => workspaceIdForTask(candidateTaskId) === workspaceId
+    );
+    return taskId ? chatSessionIdForTask(taskId) : null;
   }
   function richTaskRow(taskId: string): MockTaskRow | null {
     const row = taskRows[taskId];
@@ -157,6 +169,9 @@ function createMockD1(
     prepare: vi.fn().mockImplementation((query: string) => ({
       bind: vi.fn().mockImplementation((...args: unknown[]) => ({
         first: vi.fn().mockImplementation(async () => {
+          if (query.includes('WITH RECURSIVE supersession_chain')) {
+            return null;
+          }
           if (query.includes('FROM tasks')) {
             return richTaskRow(args[0] as string);
           }
@@ -164,12 +179,19 @@ function createMockD1(
             const row = workspaceRows[args[0] as string];
             if (!row) return null;
             const fullRow = { project_id: 'project-1', ...row };
-            if (!fullRow.node_id) return fullRow;
             return {
+              id: args[0] as string,
+              workspace_status: fullRow.status ?? 'running',
+              chat_session_id:
+                fullRow.chat_session_id ?? chatSessionIdForWorkspace(args[0] as string),
+              node_id: fullRow.node_id,
+              user_id: fullRow.user_id,
+              node_runtime: fullRow.node_runtime ?? 'vm',
               project_id: 'project-1',
               node_status: 'running',
               health_status: 'healthy',
               last_heartbeat_at: new Date(Date.now()).toISOString(),
+              running_workspaces_on_node: fullRow.node_id ? 1 : 0,
               ...fullRow,
             };
           }
@@ -267,8 +289,8 @@ describe('Task Reconciliation Module', () => {
   }
 
   function envWithRows(
-    taskRows: Record<string, { task_mode: string; status: string }> = {},
-    workspaceRows: Record<string, { node_id: string | null; user_id: string }> = {}
+    taskRows: Record<string, MockTaskRow> = {},
+    workspaceRows: Record<string, MockWorkspaceRow> = {}
   ): ProjectDataEnv {
     return { DATABASE: createMockD1(taskRows, workspaceRows) } as unknown as ProjectDataEnv;
   }
@@ -672,6 +694,136 @@ describe('Task Reconciliation Module', () => {
       expect(processed).toBe(0);
     });
 
+    it('replays 01M1MJN41VG0Y964CTQ6S06Q4D: observe_prompt wins before suspect node resolution', async () => {
+      const taskId = '01M1MJN41VG0Y964CTQ6S06Q4D';
+      const sessionId = 'incident-observe-session';
+      const workspaceId = 'incident-observe-workspace';
+      const acpSessionId = 'incident-observe-acp';
+      const promptStartedAt = Date.parse('2026-09-03T21:40:00.000Z');
+      const nodeHeartbeatAt = Date.parse('2026-09-03T22:10:29.295Z');
+      const observationAt = Date.parse('2026-09-03T22:13:05.000Z');
+      const reconciliationAt = Date.parse('2026-09-03T22:15:29.000Z');
+
+      vi.setSystemTime(observationAt);
+      setupTaskSession({
+        taskId,
+        sessionId,
+        workspaceId,
+        acpSessionId,
+        lastActivityAt: promptStartedAt,
+      });
+      setSessionActivity({ acpSessionId, activityAt: promptStartedAt, promptStartedAt });
+      setAcpHeartbeat(acpSessionId, nodeHeartbeatAt);
+
+      const taskRows = {
+        [taskId]: {
+          task_mode: 'task',
+          status: 'in_progress',
+          project_id: 'project-1',
+          workspace_id: workspaceId,
+          chat_session_id: sessionId,
+        },
+      } satisfies Record<string, MockTaskRow>;
+      const env = {
+        ...envWithRows(taskRows, {
+          [workspaceId]: {
+            node_id: 'incident-node',
+            user_id: 'user-1',
+            project_id: 'project-1',
+            health_status: 'unhealthy',
+            last_heartbeat_at: new Date(nodeHeartbeatAt).toISOString(),
+          },
+        }),
+        TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS: String(THIRTY_MINUTES),
+        TASK_RECONCILIATION_PROMPT_HARD_STALL_MS: String(TWO_HOURS),
+      } as ProjectDataEnv;
+
+      expect(await processReconciliationCandidates(sql, env, vi.fn())).toBe(1);
+      vi.setSystemTime(reconciliationAt);
+      expect(await processReconciliationCandidates(sql, env, vi.fn())).toBe(0);
+
+      expect(
+        db
+          .prepare(
+            `SELECT created_at FROM activity_events
+             WHERE event_type = 'reconciliation.prompt_in_flight_observed' AND task_id = ?`
+          )
+          .all(taskId)
+      ).toEqual([expect.objectContaining({ created_at: observationAt })]);
+      expect(db.prepare('SELECT status FROM chat_sessions WHERE id = ?').get(sessionId)).toEqual({
+        status: 'active',
+      });
+      expect(taskRows[taskId].status).toBe('in_progress');
+      expect(db.prepare('SELECT * FROM chat_messages WHERE session_id = ?').all(sessionId)).toEqual(
+        []
+      );
+      expect(
+        db.prepare('SELECT * FROM session_attention_markers WHERE session_id = ?').all(sessionId)
+      ).toEqual([]);
+    });
+
+    it('replays 01M1M75WA3V528VYZCWQGGM3NT: a 22:02–22:44 live prompt survives stale mirrors', async () => {
+      const taskId = '01M1M75WA3V528VYZCWQGGM3NT';
+      const sessionId = 'incident-long-prompt-session';
+      const workspaceId = 'incident-long-prompt-workspace';
+      const acpSessionId = 'incident-long-prompt-acp';
+      const promptStartedAt = Date.parse('2026-09-03T22:02:00.000Z');
+      const staleMirrorObservedAt = Date.parse('2026-09-03T22:15:48.000Z');
+      const promptStillLiveAt = Date.parse('2026-09-03T22:44:00.000Z');
+
+      vi.setSystemTime(staleMirrorObservedAt);
+      setupTaskSession({
+        taskId,
+        sessionId,
+        workspaceId,
+        acpSessionId,
+        lastActivityAt: promptStartedAt,
+      });
+      setSessionActivity({ acpSessionId, activityAt: promptStartedAt, promptStartedAt });
+      const taskRows = {
+        [taskId]: {
+          task_mode: 'task',
+          status: 'in_progress',
+          project_id: 'project-1',
+          workspace_id: workspaceId,
+          chat_session_id: sessionId,
+        },
+      } satisfies Record<string, MockTaskRow>;
+      const env = {
+        ...envWithRows(taskRows, {
+          [workspaceId]: {
+            node_id: 'incident-node',
+            user_id: 'user-1',
+            project_id: 'project-1',
+            health_status: 'unhealthy',
+            last_heartbeat_at: new Date(promptStartedAt).toISOString(),
+          },
+        }),
+        TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS: String(THIRTY_MINUTES),
+        TASK_RECONCILIATION_PROMPT_HARD_STALL_MS: String(TWO_HOURS),
+      } as ProjectDataEnv;
+
+      expect(await processReconciliationCandidates(sql, env, vi.fn())).toBe(0);
+      vi.setSystemTime(promptStillLiveAt);
+      expect(await processReconciliationCandidates(sql, env, vi.fn())).toBe(1);
+
+      expect(
+        db.prepare('SELECT activity FROM session_state WHERE session_id = ?').get(acpSessionId)
+      ).toEqual({
+        activity: 'prompting',
+      });
+      expect(db.prepare('SELECT status FROM chat_sessions WHERE id = ?').get(sessionId)).toEqual({
+        status: 'active',
+      });
+      expect(taskRows[taskId].status).toBe('in_progress');
+      expect(db.prepare('SELECT * FROM chat_messages WHERE session_id = ?').all(sessionId)).toEqual(
+        []
+      );
+      expect(
+        db.prepare('SELECT * FROM session_attention_markers WHERE session_id = ?').all(sessionId)
+      ).toEqual([]);
+    });
+
     it('calls sendPromptToAgentOnNode with correct parameters', async () => {
       const { sendPromptToAgentOnNode } = await import('../../../src/services/node-agent');
       setupTaskSession();
@@ -698,7 +850,7 @@ describe('Task Reconciliation Module', () => {
       );
     });
 
-    it('still creates marker and message when agent send fails', async () => {
+    it('does not create a marker or message when agent delivery fails', async () => {
       const { sendPromptToAgentOnNode } = await import('../../../src/services/node-agent');
       vi.mocked(sendPromptToAgentOnNode).mockRejectedValueOnce(new Error('network error'));
 
@@ -713,20 +865,19 @@ describe('Task Reconciliation Module', () => {
       const broadcastEvent = vi.fn();
 
       const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
-      expect(processed).toBe(1);
+      expect(processed).toBe(0);
 
-      // Message and marker should still exist despite send failure
       const messages = db
         .prepare('SELECT * FROM chat_messages WHERE session_id = ?')
         .all('session-1');
-      expect(messages).toHaveLength(1);
+      expect(messages).toHaveLength(0);
 
       const markers = db
         .prepare(
           `SELECT * FROM session_attention_markers WHERE session_id = ? AND kind = 'reconciliation_checkin'`
         )
         .all('session-1');
-      expect(markers).toHaveLength(1);
+      expect(markers).toHaveLength(0);
     });
 
     it('fails dead-node candidates without attempting VM delivery', async () => {
@@ -791,7 +942,7 @@ describe('Task Reconciliation Module', () => {
       setupTaskSession();
       const env = envWithRows(
         { 'task-1': { task_mode: 'task', status: 'in_progress' } },
-        { 'ws-1': { node_id: null, user_id: 'user-1' } }
+        { 'ws-1': { node_id: 'node-1', user_id: 'user-1', status: 'stopped' } }
       );
       const scheduleSummarySync = vi.fn();
 
@@ -815,7 +966,7 @@ describe('Task Reconciliation Module', () => {
       setupTaskSession();
       const env = envWithRows(
         { 'task-1': { task_mode: 'task', status: 'in_progress' } },
-        { 'ws-1': { node_id: null, user_id: 'user-1' } }
+        { 'ws-1': { node_id: 'node-1', user_id: 'user-1', status: 'stopped' } }
       );
 
       await expect(
@@ -826,7 +977,7 @@ describe('Task Reconciliation Module', () => {
       ).toMatchObject({ status: 'failed' });
     });
 
-    it('gives no-node workspaces a terminal disposition so they are not selected again', async () => {
+    it('preserves a running workspace whose delivery identity is incomplete', async () => {
       const { sendPromptToAgentOnNode } = await import('../../../src/services/node-agent');
       setupTaskSession();
       const env = envWithRows(
@@ -837,14 +988,12 @@ describe('Task Reconciliation Module', () => {
       const firstPass = await processReconciliationCandidates(sql, env, vi.fn());
       const secondPass = await processReconciliationCandidates(sql, env, vi.fn());
 
-      expect(firstPass).toBe(1);
+      expect(firstPass).toBe(0);
       expect(secondPass).toBe(0);
       expect(vi.mocked(sendPromptToAgentOnNode)).not.toHaveBeenCalled();
       expect(
         db.prepare(`SELECT status FROM chat_sessions WHERE id = 'session-1'`).get()
-      ).toMatchObject({
-        status: 'failed',
-      });
+      ).toMatchObject({ status: 'active' });
     });
 
     it('terminally handles dead-node observe and cancel candidates without touching unrelated newer sessions', async () => {
@@ -915,9 +1064,7 @@ describe('Task Reconciliation Module', () => {
       expect(vi.mocked(cancelAgentSessionOnNode)).not.toHaveBeenCalled();
       expect(
         db.prepare(`SELECT status FROM chat_sessions WHERE id = 'observe-session'`).get()
-      ).toMatchObject({
-        status: 'failed',
-      });
+      ).toMatchObject({ status: 'active' });
       expect(
         db.prepare(`SELECT status FROM chat_sessions WHERE id = 'cancel-session'`).get()
       ).toMatchObject({
@@ -930,17 +1077,13 @@ describe('Task Reconciliation Module', () => {
       });
     });
 
-    it('persists the check-in marker before fire-and-forget delivery and does not await send failure', async () => {
+    it('runs delivery in waitUntil and never persists a marker before acceptance', async () => {
       const { sendPromptToAgentOnNode } = await import('../../../src/services/node-agent');
-      let markerExistedAtSend = false;
-      vi.mocked(sendPromptToAgentOnNode).mockImplementationOnce(async () => {
-        markerExistedAtSend =
-          db
-            .prepare(
-              `SELECT COUNT(*) AS count FROM session_attention_markers WHERE kind = 'reconciliation_checkin'`
-            )
-            .get<{ count: number }>()!.count === 1;
-        throw new Error('network error');
+      let acceptDelivery!: () => void;
+      vi.mocked(sendPromptToAgentOnNode).mockImplementationOnce(() => {
+        return new Promise<void>((resolve) => {
+          acceptDelivery = resolve;
+        });
       });
       setupTaskSession();
       const env = envWithRows(
@@ -953,10 +1096,30 @@ describe('Task Reconciliation Module', () => {
         waitUntil: (promise) => waitUntilPromises.push(promise),
       });
 
-      expect(processed).toBe(1);
-      expect(markerExistedAtSend).toBe(true);
+      expect(processed).toBe(0);
       expect(waitUntilPromises).toHaveLength(1);
-      await expect(waitUntilPromises[0]).resolves.toBeUndefined();
+      await vi.waitFor(() => {
+        expect(vi.mocked(sendPromptToAgentOnNode)).toHaveBeenCalledTimes(1);
+      });
+      expect(
+        db
+          .prepare(
+            `SELECT COUNT(*) AS count FROM session_attention_markers WHERE kind = 'reconciliation_checkin'`
+          )
+          .get<{ count: number }>()!.count
+      ).toBe(0);
+
+      acceptDelivery();
+      await expect(waitUntilPromises[0]).resolves.toEqual([
+        expect.objectContaining({ status: 'fulfilled', value: 1 }),
+      ]);
+      expect(
+        db
+          .prepare(
+            `SELECT COUNT(*) AS count FROM session_attention_markers WHERE kind = 'reconciliation_checkin'`
+          )
+          .get<{ count: number }>()!.count
+      ).toBe(1);
     });
 
     it('processes multiple concurrent candidates independently', async () => {

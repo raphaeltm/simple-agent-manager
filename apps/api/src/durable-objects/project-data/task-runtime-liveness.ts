@@ -275,7 +275,7 @@ export async function getLocalTaskRuntimeLiveness(
         outcome: probe.outcome,
         status: probe.status,
         timeoutMs: probe.timeoutMs,
-        action: probe.outcome === 'failed' ? 'terminal_candidate' : 'preserved',
+        action: 'preserved',
         error: probe.error,
       });
     }
