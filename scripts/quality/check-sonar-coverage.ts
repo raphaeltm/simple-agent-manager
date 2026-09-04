@@ -1,4 +1,11 @@
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,16 +35,18 @@ function toRepositoryPath(path: string): string {
 }
 
 function assertRepositoryFile(root: string, candidate: string, description: string): string {
-  const rootPath = resolve(root);
-  const absolutePath = resolve(candidate);
+  const candidatePath = resolve(candidate);
+  if (!existsSync(candidatePath) || !statSync(candidatePath).isFile()) {
+    throw new Error(`${description} does not resolve to a repository source file.`);
+  }
+  const rootPath = realpathSync(resolve(root));
+  const absolutePath = realpathSync(candidatePath);
   const relativePath = relative(rootPath, absolutePath);
   if (
     relativePath === '' ||
     relativePath === '..' ||
     relativePath.startsWith(`..${sep}`) ||
-    isAbsolute(relativePath) ||
-    !existsSync(absolutePath) ||
-    !statSync(absolutePath).isFile()
+    isAbsolute(relativePath)
   ) {
     throw new Error(`${description} does not resolve to a repository source file.`);
   }

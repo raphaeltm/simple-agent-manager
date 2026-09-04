@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
@@ -32,16 +32,29 @@ const temporaryRoots: string[] = [];
 interface FixtureOptions {
   goCoverage?: string;
   javascriptCoverage?: string | null;
+  sonarGoPath?: string;
   sonarJavaScriptPaths?: string[];
 }
 
 type WorkflowJob = Record<string, unknown>;
 type WorkflowStep = Record<string, unknown>;
 
+interface WorkflowDefinition {
+  jobs?: Record<string, WorkflowJob>;
+  on?: Record<string, unknown>;
+}
+
 function write(root: string, path: string, contents: string): void {
   const absolutePath = join(root, path);
   mkdirSync(dirname(absolutePath), { recursive: true });
   writeFileSync(absolutePath, contents);
+}
+
+function createOutsideSource(filename: string, contents: string): string {
+  const outsideRoot = mkdtempSync(join(tmpdir(), 'sam-sonar-outside-'));
+  temporaryRoots.push(outsideRoot);
+  write(outsideRoot, filename, contents);
+  return join(outsideRoot, filename);
 }
 
 function createFixture(options: FixtureOptions = {}): string {
@@ -71,7 +84,7 @@ function createFixture(options: FixtureOptions = {}): string {
     'sonar-project.properties',
     [
       `sonar.javascript.lcov.reportPaths=${javascriptPaths.join(',')}`,
-      'sonar.go.coverage.reportPaths=packages/cli/coverage.out',
+      `sonar.go.coverage.reportPaths=${options.sonarGoPath ?? 'packages/cli/coverage.out'}`,
       '',
     ].join('\n')
   );
@@ -90,12 +103,21 @@ function createFixture(options: FixtureOptions = {}): string {
   return root;
 }
 
+function workflowDefinition(): WorkflowDefinition {
+  return parse(
+    readFileSync(join(REPO_ROOT, '.github/workflows/ci.yml'), 'utf8')
+  ) as WorkflowDefinition;
+}
+
 function workflowJobs(): Record<string, WorkflowJob> {
-  const workflow = parse(readFileSync(join(REPO_ROOT, '.github/workflows/ci.yml'), 'utf8')) as {
-    jobs?: Record<string, WorkflowJob>;
-  };
+  const workflow = workflowDefinition();
   if (!workflow.jobs) throw new Error('CI workflow is missing jobs.');
   return workflow.jobs;
+}
+
+function normalizedJobCondition(job: WorkflowJob): string {
+  if (typeof job.if !== 'string') throw new Error('CI job is missing an if condition.');
+  return job.if.replace(/\s+/gu, ' ').trim();
 }
 
 function workflowSteps(job: WorkflowJob): WorkflowStep[] {
@@ -186,6 +208,13 @@ describe('Sonar coverage report contract', () => {
     ['', 'is empty'],
     ['TN:\nSF:src/index.ts\nend_of_record\n', 'has no DA line records'],
     ['TN:\nSF:src/index.ts\nDA:not-a-line\nend_of_record\n', 'malformed DA record'],
+    ['TN:\nSF:\nDA:1,1\nend_of_record\n', 'has an empty SF record'],
+    [
+      'TN:\nSF:src/index.ts\nSF:src/index.ts\nDA:1,1\nend_of_record\n',
+      'has an unterminated record',
+    ],
+    ['TN:\nend_of_record\n', 'has an orphaned record end'],
+    ['TN:\n', 'has no SF source records'],
   ])('rejects unusable JavaScript coverage: %s', (coverage, expectedMessage) => {
     const root = createFixture({ javascriptCoverage: coverage });
 
@@ -195,9 +224,25 @@ describe('Sonar coverage report contract', () => {
   });
 
   it('rejects LCOV sources that do not point to repository files', () => {
+    const outsideSource = createOutsideSource('outside.ts', 'export const outside = true;\n');
     const root = createFixture({
-      javascriptCoverage: 'TN:\nSF:../../outside.ts\nDA:1,1\nLF:1\nLH:1\nend_of_record\n',
+      javascriptCoverage: `TN:\nSF:${outsideSource}\nDA:1,1\nLF:1\nLH:1\nend_of_record\n`,
     });
+
+    expect(() => prepareJavaScriptCoverageReports(root, { normalize: true })).toThrow(
+      'does not resolve to a repository source file'
+    );
+  });
+
+  it('rejects LCOV sources whose in-repository symlink resolves outside the repository', () => {
+    const outsideSource = createOutsideSource(
+      'symlink-target.ts',
+      'export const outside = true;\n'
+    );
+    const root = createFixture({
+      javascriptCoverage: 'TN:\nSF:src/symlink.ts\nDA:1,1\nLF:1\nLH:1\nend_of_record\n',
+    });
+    symlinkSync(outsideSource, join(root, 'apps/covered/src/symlink.ts'));
 
     expect(() => prepareJavaScriptCoverageReports(root, { normalize: true })).toThrow(
       'does not resolve to a repository source file'
@@ -214,6 +259,14 @@ describe('Sonar coverage report contract', () => {
     ).toThrow('sonar.javascript.lcov.reportPaths must exactly equal');
   });
 
+  it('rejects Sonar properties that drift from the canonical Go report path', () => {
+    const root = createFixture({ sonarGoPath: 'coverage/go.out' });
+
+    expect(() =>
+      assertSonarCoverageConfiguration(root, findJavaScriptCoverageReportPaths(root))
+    ).toThrow('sonar.go.coverage.reportPaths must exactly equal packages/cli/coverage.out');
+  });
+
   it('accepts a non-empty Go coverage report whose sources resolve through go.mod', () => {
     const root = createFixture({
       goCoverage: 'mode: atomic\nexample.test/sam-cli/main.go:3.13,3.15 1 1\n',
@@ -225,12 +278,25 @@ describe('Sonar coverage report contract', () => {
   it.each([
     [undefined, 'Missing Go coverage report: packages/cli/coverage.out'],
     ['', 'Go coverage report is empty'],
+    ['mode: invalid\nexample.test/sam-cli/main.go:3.13,3.15 1 1\n', 'invalid mode header'],
+    ['mode: atomic\n', 'has no coverage records'],
     ['mode: atomic\nnot-a-coverage-record\n', 'malformed Go coverage record'],
     ['mode: atomic\nexample.test/sam-cli/missing.go:1.1,1.2 1 0\n', 'does not resolve'],
   ])('rejects an unusable Go coverage report', (goCoverage, expectedMessage) => {
     const root = createFixture({ goCoverage });
 
     expect(() => validateGoCoverageReport(root)).toThrow(expectedMessage);
+  });
+
+  it('rejects existing Go coverage sources outside the repository', () => {
+    const outsideSource = createOutsideSource('outside.go', 'package outside\n');
+    const root = createFixture({
+      goCoverage: `mode: atomic\n${outsideSource}:1.1,1.2 1 1\n`,
+    });
+
+    expect(() => validateGoCoverageReport(root)).toThrow(
+      'does not resolve to a repository source file'
+    );
   });
 });
 
@@ -250,6 +316,8 @@ describe('Sonar CI wiring', () => {
   });
 
   it('feeds current-run JS and Go artifacts to a secret-safe scanner without rerunning tests', () => {
+    const workflow = workflowDefinition();
+    if (!workflow.on) throw new Error('CI workflow is missing event triggers.');
     const jobs = workflowJobs();
     const sonarJob = jobs.sonar;
     const scanner = serialized(sonarJob);
@@ -264,8 +332,11 @@ describe('Sonar CI wiring', () => {
     expect(sonarJob.needs).toEqual(['changes', 'test', 'cli-test', 'sonar-go-coverage']);
     expect(sonarJob.permissions).toEqual({ contents: 'read' });
     expect(sonarJob.env).toBeUndefined();
-    expect(scanner).toContain('SONAR_CI_ENABLED');
-    expect(scanner).toContain('github.event.pull_request.head.repo.full_name');
+    expect(workflow.on).toHaveProperty('pull_request');
+    expect(workflow.on).not.toHaveProperty('pull_request_target');
+    expect(normalizedJobCondition(sonarJob)).toBe(
+      "always() && vars.SONAR_CI_ENABLED == 'true' && needs.changes.result == 'success' && needs.changes.outputs.repo-quality == 'true' && needs.test.result == 'success' && (needs.cli-test.result == 'success' || needs.sonar-go-coverage.result == 'success') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)"
+    );
     expect(scanner).toContain('fetch-depth');
     expect(scanner).toContain('pnpm quality:sonar-coverage');
     expect(javascriptDownload.uses).toBe(
@@ -277,23 +348,25 @@ describe('Sonar CI wiring', () => {
       'Require Sonar scanner token',
       'Analyze with SonarQube Cloud',
     ]);
-    expect(requireToken.run).toContain('if [ -z "$SONAR_TOKEN" ]; then');
-    expect(requireToken.run).toContain(
-      'echo "::error::SONAR_TOKEN is required after SONAR_CI_ENABLED is enabled."'
+    expect(String(requireToken.run).trim()).toBe(
+      [
+        'if [ -z "$SONAR_TOKEN" ]; then',
+        '  echo "::error::SONAR_TOKEN is required after SONAR_CI_ENABLED is enabled."',
+        '  exit 1',
+        'fi',
+      ].join('\n')
     );
-    expect(requireToken.run).toContain('exit 1');
-    expect(
-      String(requireToken.run)
-        .split('\n')
-        .filter((line) => line.includes('echo'))
-    ).not.toEqual(expect.arrayContaining([expect.stringContaining('$SONAR_TOKEN')]));
     expect(scan.uses).toBe(
       'SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f'
     );
     expect(scan.env).toEqual({ SONAR_TOKEN: '${{ secrets.SONAR_TOKEN }}' });
     expect(scan.with).toBeUndefined();
-    expect(scanner).not.toContain('pnpm test:coverage');
-    expect(scanner).not.toContain('pull_request_target');
+    const coverageRunSteps = Object.entries(jobs).flatMap(([jobName, job]) =>
+      workflowSteps(job)
+        .filter((step) => typeof step.run === 'string' && step.run.includes('pnpm test:coverage'))
+        .map((step) => ({ jobName, stepName: step.name }))
+    );
+    expect(coverageRunSteps).toEqual([{ jobName: 'test', stepName: 'Run tests with coverage' }]);
   });
 
   it('produces Go coverage only when the scanner is enabled and CLI Test was skipped', () => {
@@ -303,7 +376,9 @@ describe('Sonar CI wiring', () => {
     const cliTest = serialized(jobs['cli-test']);
 
     expect(supplementalGo).toContain('SONAR_CI_ENABLED');
-    expect(supplementalGo).toContain("needs.changes.outputs.cli != 'true'");
+    expect(normalizedJobCondition(jobs['sonar-go-coverage'])).toBe(
+      "vars.SONAR_CI_ENABLED == 'true' && needs.changes.outputs.repo-quality == 'true' && needs.changes.outputs.cli != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)"
+    );
     expect(supplementalGo).toContain('go test -coverprofile=coverage.out -covermode=atomic ./...');
     expect(supplementalGo).toContain('go tool cover -func=coverage.out');
     expect(supplementalGo).toContain('cli-go-coverage');

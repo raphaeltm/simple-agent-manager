@@ -113,7 +113,7 @@ producer/consumer boundary whose missing output has been interpreted as success.
 5. `.github/workflows/ci.yml:sonar` checks out the same SHA with full history, downloads
    the current workflow run's artifacts at their configured repository paths, validates
    them again, and invokes the pinned official scanner with `SONAR_TOKEN` scoped only to
-   that action step.
+   the fail-closed token check and scanner steps.
 6. SonarQube Cloud associates the analysis with the PR/main SHA and exposes measures via
    `/api/measures/component` after the one-time external cutover.
 
@@ -231,6 +231,10 @@ producer/consumer boundary whose missing output has been interpreted as success.
   Turbo's `coverage/**` cache output, the fail-closed non-secret missing-token diagnostic,
   and the `GO_VERSION`-derived supplemental Go assertion. The focused four-file slice now
   passes 33/33 tests.
+- Final test review hardened the root trigger and exact fork/gate predicates, asserted the
+  single repository-wide full coverage invocation, covered every fail-closed parser branch,
+  and proved existing outside files and symlink escapes are rejected. The same focused slice
+  passes 42/42 tests.
 - GitHub rejected the first two shell feature-branch push attempts because the injected
   token became invalid. The coherent implementation is preserved at local SHA
   `5abab4ae3` and remote checkpoint SHA `23d0c4ad`; the latter was published through the

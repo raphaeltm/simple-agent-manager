@@ -111,8 +111,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           TARGET_COMMIT_SHA: ${{ github.event.workflow_run.head_sha }}
 
-  # Gate only on the GitHub Actions CI workflow result. SonarCloud is a
-  # separate GitHub App check and must not suppress production deploys.
+  # Gate on the complete GitHub Actions CI workflow result. After the
+  # SONAR_CI_ENABLED cutover, a failed in-workflow scan suppresses deployment.
   deploy:
     needs: [validate-manual-dispatch, validate-automatic-dispatch]
     if: >-
