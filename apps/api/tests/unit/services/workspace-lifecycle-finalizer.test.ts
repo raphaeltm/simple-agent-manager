@@ -20,6 +20,9 @@ const mocks = vi.hoisted(() => ({
   log: { debug: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() },
   markIdle: vi.fn(async () => {}),
   persistError: vi.fn(async () => {}),
+  claimWorkspaceDeletionAttempt: vi.fn(async () => 'claimed' as const),
+  confirmWorkspaceDeletion: vi.fn(async () => {}),
+  scheduleWorkspaceDeletion: vi.fn(async () => {}),
   stopSession: vi.fn(async () => {}),
   stopWorkspaceOnNode: vi.fn(async () => {}),
 }));
@@ -251,9 +254,9 @@ beforeEach(() => {
     NODE_LIFECYCLE: {
       idFromName: vi.fn(() => 'node-lifecycle-id'),
       get: vi.fn(() => ({
-        claimWorkspaceDeletionAttempt: vi.fn(async () => 'claimed' as const),
-        confirmWorkspaceDeletion: vi.fn(async () => {}),
-        scheduleWorkspaceDeletion: vi.fn(async () => {}),
+        claimWorkspaceDeletionAttempt: mocks.claimWorkspaceDeletionAttempt,
+        confirmWorkspaceDeletion: mocks.confirmWorkspaceDeletion,
+        scheduleWorkspaceDeletion: mocks.scheduleWorkspaceDeletion,
       })),
     },
     R2: { delete: vi.fn(async () => {}) },
@@ -548,6 +551,33 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
     ).toBe(NOW_ISO);
     expect(mocks.stopSession).toHaveBeenCalledWith(env, PROJECT_ID, CHAT_SESSION_ID);
     vi.useRealTimers();
+  });
+
+  it('quarantines a terminal-label workspace when VM deletion times out', async () => {
+    seedNode(undefined, { status: 'deleted', updatedAt: iso(-60 * 60 * 1000) });
+    seedWorkspace({ status: 'running', updatedAt: iso(-45 * 60 * 1000) });
+    seedAgentSession({ status: 'running' });
+    mocks.deleteWorkspaceOnNode.mockRejectedValueOnce(new Error('VM delete request timed out'));
+
+    const result = await runTerminalNodeLifecycleRepair(env);
+
+    expect(result).toMatchObject({
+      selected: 1,
+      workspacesTerminalized: 0,
+      agentSessionsClosed: 0,
+      errors: 1,
+    });
+    expect(await loadWorkspace()).toMatchObject({
+      status: 'stopping',
+      runtimeDeletionConfirmedAt: null,
+      runtimeDeletionProof: null,
+    });
+    expect(
+      sqlite.prepare(`SELECT status FROM agent_sessions WHERE id = ?`).pluck().get(AGENT_SESSION_ID)
+    ).toBe('running');
+    expect(mocks.stopSession).not.toHaveBeenCalled();
+    expect(mocks.confirmWorkspaceDeletion).not.toHaveBeenCalled();
+    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledOnce();
   });
 });
 

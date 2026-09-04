@@ -378,4 +378,73 @@ describe('cleanupWorkspaceForDeletion', () => {
     expect(deletedTables).toEqual([]);
     expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledOnce();
   });
+
+  it('allows never-started proof only for an originally and currently pending no-node workspace', async () => {
+    const { db } = buildDb();
+    mocks.loadWorkspaceDeletionSnapshot.mockResolvedValueOnce({
+      workspaceId: 'ws-cleanup-1',
+      nodeId: null,
+      nodeUserId: null,
+      nodeRuntime: null,
+      nodeProviderInstanceId: null,
+      nodeRuntimeIncarnationId: null,
+      userId: 'user-cleanup-1',
+      projectId: 'project-cleanup-1',
+      chatSessionId: 'session-cleanup-1',
+      status: 'pending',
+      runtimeDeletionConfirmedAt: null,
+      runtimeDeletionProof: null,
+    });
+    mocks.attemptWorkspaceDeletion.mockResolvedValueOnce({
+      status: 'confirmed',
+      proof: 'workspace_never_started',
+      workspaceFinalized: true,
+    });
+
+    await cleanupWorkspaceForDeletion({
+      db: db as never,
+      env: buildEnv(),
+      workspace: workspace({ nodeId: null, status: 'pending' }),
+      userId: 'user-cleanup-1',
+    });
+
+    expect(mocks.attemptWorkspaceDeletion).toHaveBeenCalledWith(
+      expect.objectContaining({ allowWorkspaceNeverStartedProof: true })
+    );
+  });
+
+  it('withholds never-started proof from a non-pending no-node workspace', async () => {
+    const { db } = buildDb();
+    mocks.loadWorkspaceDeletionSnapshot.mockResolvedValueOnce({
+      workspaceId: 'ws-cleanup-1',
+      nodeId: null,
+      nodeUserId: null,
+      nodeRuntime: null,
+      nodeProviderInstanceId: null,
+      nodeRuntimeIncarnationId: null,
+      userId: 'user-cleanup-1',
+      projectId: 'project-cleanup-1',
+      chatSessionId: 'session-cleanup-1',
+      status: 'running',
+      runtimeDeletionConfirmedAt: null,
+      runtimeDeletionProof: null,
+    });
+    mocks.attemptWorkspaceDeletion.mockResolvedValueOnce({
+      status: 'retry',
+      reason: 'runtime_deletion_unconfirmed',
+      diagnostic: 'node assignment unavailable',
+    });
+
+    await cleanupWorkspaceForDeletion({
+      db: db as never,
+      env: buildEnv(),
+      workspace: workspace({ nodeId: null, status: 'running' }),
+      userId: 'user-cleanup-1',
+    });
+
+    expect(mocks.attemptWorkspaceDeletion).toHaveBeenCalledWith(
+      expect.objectContaining({ allowWorkspaceNeverStartedProof: false })
+    );
+    expect(mocks.confirmWorkspaceDeletion).not.toHaveBeenCalled();
+  });
 });
