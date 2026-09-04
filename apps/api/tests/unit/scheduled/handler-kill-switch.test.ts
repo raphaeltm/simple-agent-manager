@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { enabledMock, isolateMock, logInfoMock, sessionSleepLifecycleRepairMock, sessionSleepMock } =
   vi.hoisted(() => ({
-  enabledMock: vi.fn(),
-  isolateMock: vi.fn(async () => undefined),
-  logInfoMock: vi.fn(),
-  sessionSleepLifecycleRepairMock: vi.fn(),
-  sessionSleepMock: vi.fn(),
-}));
+    enabledMock: vi.fn(),
+    isolateMock: vi.fn(async () => undefined),
+    logInfoMock: vi.fn(),
+    sessionSleepLifecycleRepairMock: vi.fn(),
+    sessionSleepMock: vi.fn(),
+  }));
 
 vi.mock('../../../src/services/operational-kill-switch', () => ({
   isOperationalLoopEnabled: enabledMock,
@@ -65,6 +65,7 @@ describe('scheduled operational sweep kill switch', () => {
     expect(sweepNames).toContain('deployment_release_retention');
     expect(sweepNames).toContain('session_snapshot_purge');
     expect(sweepNames).toContain('terminal_session_ledger_reconciliation');
+    expect(sweepNames).toContain('project_data_storage_relief_preflight');
     expect(sweepNames.indexOf('session_sleep_lifecycle_repair')).toBeLessThan(
       sweepNames.indexOf('node_cleanup')
     );
@@ -72,7 +73,18 @@ describe('scheduled operational sweep kill switch', () => {
       sweepNames.indexOf('terminal_session_ledger_reconciliation')
     );
     expect(sweepNames.indexOf('terminal_session_ledger_reconciliation')).toBeLessThan(
+      sweepNames.indexOf('project_data_archive_sharding')
+    );
+    expect(sweepNames.indexOf('project_data_archive_sharding')).toBeLessThan(
       sweepNames.indexOf('session_sleep')
+    );
+    // The relief preflight runs LAST. Its run budget is operator-tuned into the minutes
+    // while an emergency plan converges, so anywhere earlier it would push every later
+    // lifecycle sweep — session_sleep above all — back by that budget on every tick
+    // (`.claude/rules/47`). Pinned as an ordering invariant, not an incidental position.
+    expect(sweepNames.indexOf('project_data_storage_relief_preflight')).toBe(sweepNames.length - 1);
+    expect(sweepNames.indexOf('session_sleep')).toBeLessThan(
+      sweepNames.indexOf('project_data_storage_relief_preflight')
     );
     expect(sweepNames.indexOf('deployment_release_retention')).toBeLessThan(
       sweepNames.indexOf('compose_artifact_cleanup')
