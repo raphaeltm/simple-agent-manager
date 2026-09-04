@@ -99,13 +99,15 @@ The repository already encodes this: `apps/api/src/lib/d1-limits.ts` exports
 
 ## Follow-ups (not in this PR)
 
-- `apps/api/src/services/file-library-config.ts:70-78` still holds a function-local
-  `d1BindVariableLimit = 100` that duplicates `D1_MAX_BOUND_PARAMETERS`. Collapsing it is a
-  different subsystem with its own tests — file as an Idea.
-- Repo-wide audit of the remaining caller-sized `IN (…)` builders in
-  `apps/api/src/durable-objects/project-data/` (comments, project-events, prompt-delivery,
-  sessions, library-file-comments). Each is fed from an upstream page-limited or enum-bounded list
-  today, but none of them states or enforces that bound. File as an Idea.
+- **Idea `01M1QBD7XFWMPA4PCZHJZS3CKG`** — `apps/api/src/services/file-library-config.ts:70-78` still
+  holds a function-local `d1BindVariableLimit = 100` duplicating `D1_MAX_BOUND_PARAMETERS`.
+  Different subsystem with its own tests, and there it is a *cap* on an env-configurable value
+  rather than a batch size, so collapsing it needs care. Deferred deliberately.
+- **Idea `01M1QBCXT0QND28MT3JFYMF1GE`** — repo-wide audit of the remaining caller-sized `IN (…)`
+  builders (comments, project-events, prompt-delivery, sessions, library-file-comments,
+  acp-sessions, task-wait-supervisor). Each is fed from an upstream page-limited or enum-bounded
+  list today, but none of them states or enforces that bound. Includes a proposal for a
+  `scripts/quality/` scanner, since reviewer diligence has already failed once on this class.
 
 ## References
 
