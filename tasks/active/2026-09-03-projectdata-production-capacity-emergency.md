@@ -197,6 +197,156 @@ Environment variable is set (so `sync-wrangler-config.ts` falls back to the chec
 global sweep stay disabled, DO migration `044` is additive `ALTER TABLE ADD COLUMN`
 only, and D1 migration `0137` creates a new table.
 
+## Exact production mutation plan (AWAITING RAPHAËL'S APPROVAL — nothing below has been executed)
+
+Nothing in this section has been run. The production switches it names are all currently
+frozen. Numbers marked `<preflight:…>` are filled in from the read-only preflight's own
+verified evidence before the plan is presented; they are not estimates.
+
+### Target
+
+| Field          | Value                                                                                                                                                                                         |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Project        | `01KHRJGANBBWGDY1NZ0KVF0D4J` (the SAM dogfooding project)                                                                                                                                     |
+| Durable Object | `PROJECT_DATA.idFromName('01KHRJGANBBWGDY1NZ0KVF0D4J')` — one object, no other project is touched                                                                                             |
+| Rows           | ONLY `chat_messages` rows with `role='tool'` whose `created_at < 1788061500000` (`2026-08-30T03:45:00Z`) AND that appear in the verified batch manifests, addressed by exact physical `rowid` |
+| Column         | ONLY `tool_metadata` — the JSON `content` array inside it is replaced by a stripped marker                                                                                                    |
+| Never touched  | `chat_messages.content` (message text), any row not named in a manifest, any other project, any session row                                                                                   |
+
+### What actually executes
+
+The superadmin manual route caps at one pass per 24 h, so it cannot deliver ~1 GB. The
+plan therefore arms the **automatic** cleaner, but bound to the approved manifest — which
+is a strictly narrower authority than the ordinary retention cleaner, because
+`createToolPayloadCleanupPlan` refuses unless _all_ of the following hold together:
+
+1. `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT` is set and not in the future
+2. `…_PLAN_ID`, `…_MANIFEST_KEY`, `…_MANIFEST_SHA256` (64 hex) are all present
+3. all four `…_MAX_TOTAL_*` ceilings are present
+4. `…_PROJECT_IDS` contains **exactly one** id and it equals this DO's own project id
+5. a `transactionSync` is available
+
+and `scanApprovedToolPayloadCleanupBatch` then independently re-checks the manifest's own
+embedded `planId`, `projectId`, `cutoffCreatedAt`, `eligibleRows` and `eligibleBytes`
+against the configured plan on **every** pass. Any disagreement throws before a byte is
+written.
+
+### Exact configuration to flip (production GitHub Environment, then Deploy Production)
+
+| Variable                                                    | From            | To                                   | Why                                                                  |
+| ----------------------------------------------------------- | --------------- | ------------------------------------ | -------------------------------------------------------------------- |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED`                 | `false`         | `true`                               | arms the cleaner                                                     |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID`                 | unset           | `<preflight:plan_id>`                | binds to the approved plan                                           |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY`            | unset           | `<preflight:target_manifest_key>`    | the verified R2 root manifest                                        |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256`         | unset           | `<preflight:target_manifest_sha256>` | its SHA-256                                                          |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS`             | unset           | `01KHRJGANBBWGDY1NZ0KVF0D4J`         | single-project allowlist (required, exactly one)                     |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT`       | `1788061500000` | unchanged                            | already correct                                                      |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS`          | unset           | `<preflight:eligible_rows>`          | hard cumulative row ceiling                                          |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES`         | unset           | `<preflight:eligible_bytes>`         | hard cumulative reclaim ceiling                                      |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS` | unset           | `<computed>`                         | hard cumulative R2 ceiling                                           |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_WALL_TIME_MS`  | unset           | `<computed>`                         | hard cumulative wall-time ceiling                                    |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO`           | `0.8`           | `0.95`                               | start condition (object is at ~1.005)                                |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO`            | `0.75`          | `0.90`                               | **stop condition** — see below                                       |
+| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS`              | `86400000`      | `60000`                              | pass cadence for the emergency only; reverted afterwards             |
+| `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ENABLED`             | `true`          | `false`                              | the preflight has served its purpose; stop re-reading the hot object |
+
+`TARGET_RATIO = 0.90` is not advisory. `createToolPayloadCleanupPlan` contains
+`if (fixedCutoffConfigured && beforeBytes <= targetBytes) return null;` — once the object
+reaches 9,000,000,000 bytes the approved plan refuses to build and cleanup stops on its
+own, without anyone watching. That is the primary stop condition and it is the same number
+as the acceptance criterion.
+
+`RECHECK_MS = 60000` is a deliberate, time-boxed exception to the at-most-daily storage
+cleanup preference. It is justified only by the emergency and is bounded by the four
+cumulative ceilings; it MUST be restored to `86400000` when the operation ends.
+
+### Hard limits
+
+- **Per pass**: `BATCH_ROWS` eligible rows, `BATCH_BYTES` of `tool_metadata` read into JS,
+  `WALL_TIME_MS` wall clock, `ARCHIVE_MAX_OPERATIONS` R2 operations. Every one is charged
+  transactionally _before_ external work and never refunded.
+- **Cumulatively across all passes**: the four `MAX_TOTAL_*` ceilings, persisted in DO
+  storage. When any is reached the plan refuses to build. There is no path that exceeds
+  them.
+- **By construction**: only rows named in the verified manifests are eligible.
+
+### Archive and verification
+
+Every row, before its inline payload is replaced:
+
+1. the payload is written to a content-addressed R2 key under
+   `project-data/tool-payloads/…{sha256}.json` (chunked for legacy oversized rows);
+2. the object is **read back** from R2 and its byte length and SHA-256 compared to what
+   was written — a mismatch aborts the row;
+3. the archive row (`tool_payload_archives`) records `archive_body_bytes`,
+   `archive_body_sha256`, `root_object_bytes`, `root_object_sha256`,
+   `verified_object_count` and `source_tool_metadata_sha256`;
+4. only then does `UPDATE chat_messages SET tool_metadata = ?` run, and its `WHERE` carries
+   the ORIGINAL `tool_metadata` as a compare-and-set — if the row changed since it was
+   read, the write loses and the row is deferred, not stripped.
+
+Archived payloads remain readable through the `get_archived_tool_payloads` MCP tool and
+the archive read path, which re-verifies the hash on read.
+
+### Failure and rollback behaviour
+
+- Any R2 write, read-back, hash or byte mismatch → the row is left **fully intact** and
+  deferred by `ARCHIVE_RETRY_DELAY_MS`. No partial state.
+- Any manifest, config, budget or identity uncertainty → the plan refuses to build; nothing
+  runs. Fail-closed is the default at every boundary.
+- Rollback of the _config_ is a variable revert plus a deploy.
+- Rollback of _data_: each stripped payload is recoverable from its verified R2 object.
+  Note honestly: there is no automated bulk re-inline path — recovery is per-row through
+  the archive read path. This is why read-back verification before stripping is
+  non-negotiable, and why message text is never in scope.
+- Emergency brake if the object misbehaves during the run: the KV master switches
+  (`.claude/rules/55`) stop cron and DO alarms within one cache window without a deploy.
+
+### Expected result
+
+- Reclaim: `<preflight:eligible_bytes>` projected. Realised reclaim is measured as the
+  `sql.databaseSize` delta; DO SQLite does return freed pages (verified in the workerd
+  runtime by `databaseSize drops after deleting rows…`), so projected and realised should
+  track closely, but the realised number is the one that counts.
+- Resulting usage: from `10,046,488,576` to roughly `<10,046,488,576 − preflight:eligible_bytes>`
+  bytes, i.e. a ratio of about `<computed>` against the configured `10^10` limit.
+- The run self-terminates at `9,000,000,000` bytes even if more candidates remain.
+
+### Observation window and stop conditions
+
+Watch for **6 hours** after the first pass, then a final check at **24 hours**:
+
+- `project_data_storage_telemetry` for `01KHRJGANBBWGDY1NZ0KVF0D4J` every hour: size must
+  fall monotonically and stop at or above 9e9.
+- `platform_errors` for `Exceeded the maximum database size`, Durable Object overload,
+  storage-operation-timeout resets, and any `alarm.storage_safety_failed`.
+- Cloudflare DO analytics: rows read/written and CPU for the hot object must not exceed the
+  pre-operation baseline (~18.7M rows read/hour average) by more than 2x.
+- `tool_payload_archives` row count must increase by exactly the number of stripped rows.
+- A sampled read of an archived payload through the MCP retrieval tool must return the
+  original content.
+
+**Abort immediately** (revert `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` to `false`, or
+pull the KV alarm brake if faster) if any of: a single `Exceeded the maximum database size`
+error appears; DO overload or CPU-reset errors appear; rows-read for the object more than
+doubles against baseline; `rowsFailed` is non-zero on two consecutive passes; the measured
+size does not fall after three consecutive passes; or any archive read-back failure is
+logged.
+
+### Contingency if the object hits the wall before approval
+
+If `Exceeded the maximum database size` starts appearing before Raphaël approves, the
+fastest safe relief that is already merged and needs no further approval is the
+**superadmin manual cleanup route**
+(`POST /api/admin/project-data/storage/01KHRJGANBBWGDY1NZ0KVF0D4J/tool-payload-cleanup`),
+which bypasses the automatic enablement flag, is bounded at 500 rows / 2 MiB / 20 s, and
+uses the identical archive-then-verify-then-strip path. It reclaims only ~2 MiB per 24 h
+under current settings, so it is a stopgap that keeps writes alive rather than a fix, and
+it still requires a human with superadmin credentials to call it. The genuinely fast
+contingency remains this plan; the contingency for the _contingency_ is the 2026-08-18
+precedent — a manual operator purge — which has no archive guarantee and would lose tool
+payloads permanently.
+
 ## Post-mortem (defects found in review, fixed before any production use)
 
 **What broke.** Two latent defects in the relief path, both caught by review before the
