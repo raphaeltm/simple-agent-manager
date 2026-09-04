@@ -204,4 +204,6 @@ writer, late callback, and replacement trigger.
 - `apps/api/src/services/workspace-cleanup.ts`
 - `apps/api/src/services/session-recovery.ts`
 - `apps/api/src/routes/projects/_callback-auth.ts`
+- Task-bootstrap PR #2012 (required because the repository's status-check rule rejects direct task
+  commits to `main`)
 - PR #2011 (read-only overlap check)
