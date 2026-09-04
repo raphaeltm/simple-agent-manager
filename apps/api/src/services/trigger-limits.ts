@@ -1,8 +1,8 @@
-import type { D1Database } from '@cloudflare/workers-types';
 import {
   DEFAULT_MAX_TRIGGERS_PER_PROJECT,
   resolveProjectScalingConfig,
 } from '@simple-agent-manager/shared';
+import type { D1Database } from '@cloudflare/workers-types';
 
 /**
  * Read a project's configured max-triggers override (`projects.max_triggers`).
