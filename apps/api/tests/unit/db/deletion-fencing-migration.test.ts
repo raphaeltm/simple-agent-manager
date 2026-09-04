@@ -11,7 +11,7 @@ describe('0137 deletion fencing migration', () => {
       sqlite.exec(`CREATE TABLE nodes (id TEXT PRIMARY KEY, status TEXT NOT NULL)`);
       sqlite.exec(`INSERT INTO nodes (id, status) VALUES ('legacy-deleted', 'deleted')`);
       sqlite.exec(
-        readFileSync(join(process.cwd(), 'src/db/migrations/0137_deletion_fencing.sql'), 'utf8')
+        readFileSync(join(process.cwd(), 'src/db/migrations/0138_deletion_fencing.sql'), 'utf8')
       );
 
       const columns = sqlite.prepare(`PRAGMA table_info('nodes')`).all() as Array<{ name: string }>;
@@ -32,7 +32,7 @@ describe('0137 deletion fencing migration', () => {
       sqlite.exec(`INSERT INTO workspaces (id, status) VALUES ('legacy-deleted', 'deleted')`);
       sqlite.exec(
         readFileSync(
-          join(process.cwd(), 'src/db/migrations/0139_workspace_runtime_deletion_proof.sql'),
+          join(process.cwd(), 'src/db/migrations/0140_workspace_runtime_deletion_proof.sql'),
           'utf8'
         )
       );
@@ -64,7 +64,7 @@ describe('0137 deletion fencing migration', () => {
       sqlite.exec(`INSERT INTO nodes (id, status) VALUES ('legacy-running', 'running')`);
       sqlite.exec(
         readFileSync(
-          join(process.cwd(), 'src/db/migrations/0140_node_runtime_incarnation.sql'),
+          join(process.cwd(), 'src/db/migrations/0141_node_runtime_incarnation.sql'),
           'utf8'
         )
       );
@@ -87,7 +87,7 @@ describe('0137 deletion fencing migration', () => {
         readFileSync(
           join(
             process.cwd(),
-            'src/db/migrations/0141_node_provider_credential_fingerprint.sql'
+            'src/db/migrations/0142_node_provider_credential_fingerprint.sql'
           ),
           'utf8'
         )

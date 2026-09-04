@@ -49,7 +49,7 @@ available transcript and focused green evidence are the recovery source.
 ## Implementation Checklist
 
 - [x] Add an explicit strict node runtime-termination proof marker and migration coverage.
-- [x] Add migration `0141_node_provider_credential_fingerprint.sql`; persist a SHA-256
+- [x] Add migration `0142_node_provider_credential_fingerprint.sql`; persist a SHA-256
       fingerprint of the encrypted provider credential generation, fail closed for legacy
       null proof, and re-resolve the exact credential after composable resolution so
       provider creation and the stored fingerprint use the same generation.

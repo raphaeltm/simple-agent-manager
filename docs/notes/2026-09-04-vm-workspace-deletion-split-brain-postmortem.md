@@ -20,7 +20,7 @@ rotation could otherwise change which external account a destructive call addres
 - Timeout, transport error, and unknown outcomes mean `stopping` plus durable retry.
 - Terminal finalization requires VM-confirmed success/absence or an explicit marker
   written after strict provider/container termination.
-- Migration `0141_node_provider_credential_fingerprint.sql` adds an encrypted credential
+- Migration `0142_node_provider_credential_fingerprint.sql` adds an encrypted credential
   generation fingerprint to managed nodes. Strict deletion re-resolves that exact
   generation immediately before provider construction and fails closed for legacy null
   proof, same-row rotation, or a mismatched fingerprint; plaintext credentials are never
