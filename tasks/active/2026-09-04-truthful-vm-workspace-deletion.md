@@ -91,12 +91,15 @@ available transcript and focused green evidence are the recovery source.
 
 ## Control-Loop I/O Budget
 
-The NodeLifecycle alarm processes at most the configurable deletion batch size. Each due
-entry performs bounded D1 reads/writes and at most one VM-agent delete using the separate
+The NodeLifecycle alarm processes at most the configurable deletion batch size, claims each
+due attempt durably, and dispatches its bounded VM-agent I/O through `waitUntil`. Each
+attempt performs bounded D1 reads/writes and at most one VM-agent delete using the separate
 background timeout. Unconfirmed attempts leave the immediate candidate set until their
-bounded exponential `deleteAt`; the maximum delay is configurable. Identity changes and
-confirmed outcomes remove the entry. Heartbeat age and D1 status labels are never used as
-terminal proof.
+bounded exponential `deleteAt`; both the maximum delay and maximum residence are
+configurable. Exhausted entries remain quarantined in `stopping`, leave bounded payload-free
+dead-letter telemetry, and stop consuming the immediate alarm candidate set. Identity
+changes and confirmed outcomes remove the entry. Heartbeat age and D1 status labels are
+never used as terminal proof.
 
 ## References
 
