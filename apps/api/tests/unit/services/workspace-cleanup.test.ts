@@ -7,7 +7,7 @@ import { workspaceDeletionIdentityLogContext } from '../../../src/services/works
 
 const mocks = vi.hoisted(() => ({
   attemptWorkspaceDeletion: vi.fn(),
-  loadWorkspaceDeletionIdentity: vi.fn(),
+  loadWorkspaceDeletionSnapshot: vi.fn(),
   claimWorkspaceDeletionAttempt: vi.fn(),
   confirmWorkspaceDeletion: vi.fn(),
   scheduleWorkspaceDeletion: vi.fn(),
@@ -20,8 +20,8 @@ vi.mock('../../../src/services/workspace-deletion', async (importActual) => {
   return {
     ...actual,
     attemptWorkspaceDeletion: (...args: unknown[]) => mocks.attemptWorkspaceDeletion(...args),
-    loadWorkspaceDeletionIdentity: (...args: unknown[]) =>
-      mocks.loadWorkspaceDeletionIdentity(...args),
+    loadWorkspaceDeletionSnapshot: (...args: unknown[]) =>
+      mocks.loadWorkspaceDeletionSnapshot(...args),
   };
 });
 vi.mock('../../../src/services/session-snapshots', () => ({
@@ -94,7 +94,7 @@ describe('cleanupWorkspaceForDeletion', () => {
     mocks.claimWorkspaceDeletionAttempt.mockResolvedValue('claimed');
     mocks.scheduleWorkspaceDeletion.mockResolvedValue(undefined);
     mocks.deleteSessionSnapshotState.mockResolvedValue(true);
-    mocks.loadWorkspaceDeletionIdentity.mockResolvedValue({
+    mocks.loadWorkspaceDeletionSnapshot.mockResolvedValue({
       workspaceId: 'ws-cleanup-1',
       nodeId: 'node-cleanup-1',
       nodeUserId: 'user-cleanup-1',
@@ -104,6 +104,9 @@ describe('cleanupWorkspaceForDeletion', () => {
       userId: 'user-cleanup-1',
       projectId: 'project-cleanup-1',
       chatSessionId: 'session-cleanup-1',
+      status: 'stopped',
+      runtimeDeletionConfirmedAt: null,
+      runtimeDeletionProof: null,
     });
   });
 
@@ -178,7 +181,8 @@ describe('cleanupWorkspaceForDeletion', () => {
       'node-cleanup-1',
       'ws-cleanup-1',
       'user-cleanup-1',
-      expect.objectContaining({ workspaceId: 'ws-cleanup-1' })
+      expect.objectContaining({ workspaceId: 'ws-cleanup-1' }),
+      'explicit'
     );
     expect(mocks.claimWorkspaceDeletionAttempt.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.attemptWorkspaceDeletion.mock.invocationCallOrder[0] as number
@@ -246,7 +250,7 @@ describe('cleanupWorkspaceForDeletion', () => {
 
   it('logs full bounded identity context when the route snapshot is stale', async () => {
     const { db, deletedTables } = buildDb();
-    mocks.loadWorkspaceDeletionIdentity.mockResolvedValueOnce({
+    mocks.loadWorkspaceDeletionSnapshot.mockResolvedValueOnce({
       workspaceId: 'ws-cleanup-1',
       nodeId: 'node-cleanup-2',
       nodeUserId: 'user-cleanup-2',
@@ -256,6 +260,9 @@ describe('cleanupWorkspaceForDeletion', () => {
       userId: 'user-cleanup-2',
       projectId: 'project-cleanup-2',
       chatSessionId: 'session-cleanup-2',
+      status: 'running',
+      runtimeDeletionConfirmedAt: null,
+      runtimeDeletionProof: null,
     });
 
     const outcome = await cleanupWorkspaceForDeletion({
@@ -339,7 +346,7 @@ describe('cleanupWorkspaceForDeletion', () => {
       'user-cleanup-1',
       expect.objectContaining({
         lastError: expect.stringContaining('timeout'),
-        expected: {
+        expected: expect.objectContaining({
           workspaceId: 'ws-cleanup-1',
           nodeId: 'node-cleanup-1',
           nodeUserId: 'user-cleanup-1',
@@ -349,7 +356,7 @@ describe('cleanupWorkspaceForDeletion', () => {
           userId: 'user-cleanup-1',
           projectId: 'project-cleanup-1',
           chatSessionId: 'session-cleanup-1',
-        },
+        }),
       })
     );
   });

@@ -72,12 +72,18 @@ vi.mock('../../../src/services/task-runner-do', () => ({
 vi.mock('../../../src/services/workspace-cleanup', () => ({
   cleanupWorkspaceForDeletion: (...args: unknown[]) => mocks.cleanupWorkspaceForDeletion(...args),
 }));
+vi.mock('../../../src/services/workspace-deletion-callback-signal', () => ({
+  signalWorkspaceDeletionUnconfirmedCallback: vi.fn(async () => undefined),
+}));
 vi.mock('../../../src/routes/projects/_helpers', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/routes/projects/_helpers')>()),
   requireRepositoryUserAccess: mocks.requireRepositoryUserAccess,
 }));
 
-import { setTaskStatus } from '../../../src/routes/tasks/_helpers';
+import {
+  setTaskStatus,
+  updateTaskExecutionStepFromCallback,
+} from '../../../src/routes/tasks/_helpers';
 import { crudRoutes } from '../../../src/routes/tasks/crud';
 import { runRoutes } from '../../../src/routes/tasks/run';
 
@@ -203,10 +209,14 @@ describe('shared-project task lifecycle — positive paths for a non-creator mem
     expect(updatedTask?.resolvedReservationJson).toContain('"source":"platform"');
     // Repo access is re-verified for the CALLER, not the task creator.
     expect(mocks.requireRepositoryUserAccess).toHaveBeenCalledWith(
-      expect.anything(), expect.anything(), expect.anything(), MEMBER
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      MEMBER
     );
     expect(mocks.startTaskRunnerDO).not.toHaveBeenCalledWith(
-      expect.anything(), expect.objectContaining({ userId: CREATOR })
+      expect.anything(),
+      expect.objectContaining({ userId: CREATOR })
     );
   });
 
@@ -296,7 +306,9 @@ describe('shared-project task lifecycle — positive paths for a non-creator mem
     await seedTask({ status: 'in_progress', taskMode: 'conversation' });
 
     const response = await makeApp(crudRoutes).fetch(
-      new Request(`https://api.test/api/projects/${PROJECT}/tasks/task-1/close`, { method: 'POST' }),
+      new Request(`https://api.test/api/projects/${PROJECT}/tasks/task-1/close`, {
+        method: 'POST',
+      }),
       env,
       mockCtx
     );
@@ -327,7 +339,9 @@ describe('POST /:taskId/close — workspace teardown stays caller-scoped (real S
 
   async function close() {
     return makeApp(crudRoutes).fetch(
-      new Request(`https://api.test/api/projects/${PROJECT}/tasks/task-1/close`, { method: 'POST' }),
+      new Request(`https://api.test/api/projects/${PROJECT}/tasks/task-1/close`, {
+        method: 'POST',
+      }),
       env,
       mockCtx
     );
@@ -352,7 +366,10 @@ describe('POST /:taskId/close — workspace teardown stays caller-scoped (real S
 
     expect(response.status).toBe(200);
     expect(mocks.cleanupWorkspaceForDeletion).toHaveBeenCalledWith(
-      expect.objectContaining({ workspace: expect.objectContaining({ id: 'ws-conv' }), userId: MEMBER })
+      expect.objectContaining({
+        workspace: expect.objectContaining({ id: 'ws-conv' }),
+        userId: MEMBER,
+      })
     );
   });
 });
@@ -384,5 +401,100 @@ describe('task write predicates are project-scoped (rule 11 defence in depth)', 
     await setTaskStatus(db(), task as schema.Task, 'cancelled', 'user', MEMBER);
 
     expect((await readTask())?.status).toBe('cancelled');
+  });
+});
+
+describe('task callback writes are fenced by the active workspace incarnation', () => {
+  const callbackSnapshot = {
+    workspaceId: 'ws-callback',
+    userId: CREATOR,
+    projectId: PROJECT,
+    chatSessionId: 'chat-callback',
+    status: 'running',
+    nodeId: 'node-callback',
+    nodeStatus: 'running',
+  } as const;
+
+  async function seedCallbackTask(): Promise<schema.Task> {
+    await db()
+      .insert(schema.nodes)
+      .values({
+        id: callbackSnapshot.nodeId,
+        userId: CREATOR,
+        name: 'callback node',
+        status: callbackSnapshot.nodeStatus,
+        healthStatus: 'healthy',
+        vmSize: 'small',
+        vmLocation: 'nbg1',
+      } as typeof schema.nodes.$inferInsert);
+    await db()
+      .insert(schema.workspaces)
+      .values({
+        id: callbackSnapshot.workspaceId,
+        nodeId: callbackSnapshot.nodeId,
+        userId: callbackSnapshot.userId,
+        projectId: callbackSnapshot.projectId,
+        chatSessionId: callbackSnapshot.chatSessionId,
+        name: 'callback workspace',
+        repository: 'org/repo',
+        status: callbackSnapshot.status,
+        vmSize: 'small',
+        vmLocation: 'nbg1',
+      } as typeof schema.workspaces.$inferInsert);
+    await seedTask({ workspaceId: callbackSnapshot.workspaceId });
+    return (await readTask()) as schema.Task;
+  }
+
+  async function beginWorkspaceDeletion(): Promise<void> {
+    await db()
+      .update(schema.workspaces)
+      .set({ status: 'stopping' })
+      .where(eq(schema.workspaces.id, callbackSnapshot.workspaceId));
+  }
+
+  it('rejects a status transition after deletion wins the CAS race', async () => {
+    const task = await seedCallbackTask();
+    await beginWorkspaceDeletion();
+
+    await expect(
+      setTaskStatus(db(), task, 'failed', 'workspace_callback', callbackSnapshot.workspaceId, {
+        callbackFence: { env, expected: callbackSnapshot },
+      })
+    ).rejects.toMatchObject({ statusCode: 410 });
+
+    expect((await readTask())?.status).toBe('in_progress');
+    expect(sqlite.prepare('SELECT COUNT(*) FROM task_status_events').pluck().get()).toBe(0);
+  });
+
+  it('rejects an execution-step update after deletion wins the CAS race', async () => {
+    const task = await seedCallbackTask();
+    await beginWorkspaceDeletion();
+
+    await expect(
+      updateTaskExecutionStepFromCallback(
+        db(),
+        task,
+        { executionStep: 'awaiting_followup' },
+        { env, expected: callbackSnapshot }
+      )
+    ).rejects.toMatchObject({ statusCode: 410 });
+
+    expect((await readTask())?.executionStep).toBeNull();
+  });
+
+  it('updates task status when the exact workspace and node remain active', async () => {
+    const task = await seedCallbackTask();
+
+    await setTaskStatus(
+      db(),
+      task,
+      'completed',
+      'workspace_callback',
+      callbackSnapshot.workspaceId,
+      { callbackFence: { env, expected: callbackSnapshot } }
+    );
+
+    expect((await readTask())?.status).toBe('completed');
+    expect(sqlite.prepare('SELECT COUNT(*) FROM task_status_events').pluck().get()).toBe(1);
   });
 });

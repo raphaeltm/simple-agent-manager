@@ -499,7 +499,10 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
       workspacesTerminalized: 1,
       agentSessionsClosed: 1,
     });
-    expect(await loadWorkspace()).toMatchObject({ status: 'stopped' });
+    expect(await loadWorkspace()).toMatchObject({
+      status: 'deleted',
+      runtimeDeletionProof: 'vm_agent_confirmed',
+    });
     expect(mocks.stopSession).toHaveBeenCalledWith(env, PROJECT_ID, CHAT_SESSION_ID);
     vi.useRealTimers();
   });
@@ -530,10 +533,13 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
       projectSessionsClosed: 1,
       errors: 0,
     });
-    expect(await loadWorkspace()).toMatchObject({ status: 'stopped' });
+    expect(await loadWorkspace()).toMatchObject({
+      status: 'deleted',
+      runtimeDeletionProof: 'vm_agent_confirmed',
+    });
     expect(
       sqlite.prepare(`SELECT status FROM agent_sessions WHERE id = ?`).pluck().get(AGENT_SESSION_ID)
-    ).toBe('stopped');
+    ).toBe('completed');
     expect(
       sqlite
         .prepare(`SELECT ended_at FROM compute_usage WHERE id = 'usage-terminal-repair'`)

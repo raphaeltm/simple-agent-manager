@@ -343,9 +343,10 @@ request and again before a VM-confirmed terminal write. Identity changes and exh
 residence are dead-lettered for investigation rather than silently discarded; a plain D1
 `nodes.status = 'deleted'` value is not terminal proof.
 
-Live attempts also maintain a compact lexicographically ordered due-time index. Alarm reads
+Live attempts also maintain a compact lexicographically ordered due-time index. A bounded,
+resumable per-DO backfill makes pre-index attempts discoverable during rollout. Alarm reads
 are limited to the configured batch and the next indexed deadline, so retained dead letters
-never cause an all-payload queue scan. The default batch is four, keeping the worst retry path
+never cause an all-payload queue scan. The default batch is three, keeping the worst successful path
 within the Cloudflare Free-plan D1 query budget; paid deployments can override it deliberately.
 
 ### TaskRunner DO

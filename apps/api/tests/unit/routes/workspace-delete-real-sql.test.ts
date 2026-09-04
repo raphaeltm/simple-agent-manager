@@ -144,6 +144,26 @@ describe('DELETE /api/workspaces/:id deletion outcomes — real SQL', () => {
     expect(mocks.scheduleWorkspaceDeletion).not.toHaveBeenCalled();
   });
 
+  it.each(['running', 'creating'] as const)(
+    'claims an exact %s workspace as an explicit deletion before VM I/O',
+    async (status) => {
+      setWorkspaceStatus(status);
+
+      const response = await requestDelete();
+
+      expect(response.status).toBe(200);
+      expect(workspaceStatus()).toBeNull();
+      expect(mocks.claimWorkspaceDeletionAttempt).toHaveBeenCalledWith(
+        NODE_ID,
+        WORKSPACE_ID,
+        USER_ID,
+        expect.objectContaining({ workspaceId: WORKSPACE_ID, status }),
+        'explicit'
+      );
+      expect(globalThis.fetch).toHaveBeenCalledOnce();
+    }
+  );
+
   it('returns 202 for an identical deletion attempt that is already durably in flight', async () => {
     setWorkspaceStatus('stopping');
     mocks.claimWorkspaceDeletionAttempt.mockResolvedValueOnce('already_claimed_same_identity');
@@ -285,5 +305,37 @@ describe('DELETE /api/workspaces/:id deletion outcomes — real SQL', () => {
     expect(globalThis.fetch).toHaveBeenCalledOnce();
     expect(mocks.confirmWorkspaceDeletion).toHaveBeenCalledWith(WORKSPACE_ID);
     expect(mocks.scheduleWorkspaceDeletion).not.toHaveBeenCalled();
+  });
+
+  it('resumes lifecycle closure and hard deletion for an already-proven tombstone', async () => {
+    sqlite
+      .prepare(
+        `INSERT INTO agent_sessions
+          (id, workspace_id, user_id, status, agent_type, created_at, updated_at)
+         VALUES (?, ?, ?, 'running', 'codex', datetime('now'), datetime('now'))`
+      )
+      .run('agent-delete-route-proven', WORKSPACE_ID, USER_ID);
+    sqlite
+      .prepare(
+        `UPDATE workspaces
+            SET status = 'deleted',
+                runtime_deletion_confirmed_at = datetime('now'),
+                runtime_deletion_proof = 'vm_agent_confirmed'
+          WHERE id = ?`
+      )
+      .run(WORKSPACE_ID);
+
+    const response = await requestDelete();
+
+    expect(response.status).toBe(200);
+    expect(workspaceStatus()).toBeNull();
+    expect(
+      sqlite
+        .prepare('SELECT status FROM agent_sessions WHERE id = ?')
+        .get('agent-delete-route-proven')
+    ).toMatchObject({ status: 'completed' });
+    expect(mocks.claimWorkspaceDeletionAttempt).not.toHaveBeenCalled();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mocks.confirmWorkspaceDeletion).toHaveBeenCalledWith(WORKSPACE_ID);
   });
 });

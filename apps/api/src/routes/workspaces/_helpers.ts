@@ -269,7 +269,8 @@ export function normalizeWorkspaceReadyStatus(status: unknown): 'running' | 'rec
 export async function getOwnedWorkspace(
   db: ReturnType<typeof drizzle<typeof schema>>,
   workspaceId: string,
-  userId: string
+  userId: string,
+  options: { includeDeleted?: boolean } = {}
 ): Promise<schema.Workspace> {
   const rows = await db
     .select()
@@ -278,7 +279,7 @@ export async function getOwnedWorkspace(
     .limit(1);
 
   const workspace = rows[0];
-  if (!workspace || workspace.status === 'deleted') {
+  if (!workspace || (workspace.status === 'deleted' && !options.includeDeleted)) {
     throw errors.notFound('Workspace');
   }
 

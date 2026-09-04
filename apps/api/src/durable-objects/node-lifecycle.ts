@@ -46,6 +46,7 @@ import {
   type NodeLifecycleDeletionEnv,
   NodeLifecycleWorkspaceDeletionQueue,
   type WorkspaceDeletionClaimResult,
+  type WorkspaceDeletionMode,
 } from './node-lifecycle-workspace-deletion';
 
 type NodeLifecycleEnv = NodeLifecycleDeletionEnv & {
@@ -406,9 +407,16 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     nodeId: string,
     workspaceId: string,
     userId: string,
-    expected: WorkspaceDeletionIdentity
+    expected: WorkspaceDeletionIdentity,
+    mode: WorkspaceDeletionMode
   ): Promise<WorkspaceDeletionClaimResult> {
-    return await this.workspaceDeletionQueue().claimAttempt(nodeId, workspaceId, userId, expected);
+    return await this.workspaceDeletionQueue().claimAttempt(
+      nodeId,
+      workspaceId,
+      userId,
+      expected,
+      mode
+    );
   }
 
   async getWorkspaceDeletionAttemptState(

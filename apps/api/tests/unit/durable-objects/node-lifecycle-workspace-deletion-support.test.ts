@@ -21,7 +21,7 @@ describe('workspaceDeletionRetryDelayMs', () => {
 
 describe('workspaceDeletionAlarmBatchSize', () => {
   it('defaults to the Free-plan-safe D1 query budget and accepts an explicit override', () => {
-    expect(workspaceDeletionAlarmBatchSize({} as never)).toBe(4);
+    expect(workspaceDeletionAlarmBatchSize({} as never)).toBe(3);
     expect(
       workspaceDeletionAlarmBatchSize({ WORKSPACE_DELETION_ALARM_BATCH_SIZE: '2' } as never)
     ).toBe(2);

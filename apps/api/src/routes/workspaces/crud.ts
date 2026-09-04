@@ -651,7 +651,7 @@ crudRoutes.delete('/:id', requireAuth(), requireApproved(), async (c) => {
   const workspaceId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  const workspace = await getOwnedWorkspace(db, workspaceId, userId, { includeDeleted: true });
 
   const deletion = await cleanupWorkspaceForDeletion({
     db,

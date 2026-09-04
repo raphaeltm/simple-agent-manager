@@ -215,17 +215,25 @@ async function cleanupExpiredTrialResources(
       const byNode = new Map<string, TrialWorkspaceCleanupRow[]>();
       for (const workspace of workspaces.results) {
         if (!workspace.node_id) {
-          const deleted = await markWorkspaceDeletedIfTrialStillExpired(
+          const outcome = await cleanupWorkspaceForDeletion({
+            db: drizzle(env.DATABASE, { schema }),
             env,
-            row,
-            workspace,
-            anonymousUserId,
-            now,
-            nowIso
-          );
-          result.workspacesDeleted += deleted;
-          if (deleted > 0) {
+            workspace: {
+              id: workspace.id,
+              nodeId: null,
+              userId: workspace.user_id,
+              projectId: workspace.project_id,
+              chatSessionId: workspace.chat_session_id,
+              status: workspace.status,
+            } as schema.Workspace,
+            userId: workspace.user_id,
+            logContext: { closePath: 'trial_expire_no_node' },
+          });
+          if (outcome.status === 'confirmed') {
+            result.workspacesDeleted++;
             await cleanupWorkspaceReferences(env, row.trial_id, workspace, nowIso);
+          } else {
+            result.cleanupErrors++;
           }
           continue;
         }
@@ -490,7 +498,7 @@ async function markWorkspaceDeletedIfTrialStillExpired(
   anonymousUserId: string,
   now: number,
   nowIso: string,
-  requiredRuntimeProof: string | null = null
+  requiredRuntimeProof: string
 ): Promise<number> {
   const updateResult = await env.DATABASE.prepare(
     `UPDATE workspaces
@@ -499,8 +507,7 @@ async function markWorkspaceDeletedIfTrialStillExpired(
      WHERE id = ?
        AND user_id = ?
        AND project_id = ?
-       AND (? IS NOT NULL OR status != 'deleted')
-       AND (? IS NULL OR runtime_deletion_confirmed_at IS ?)
+       AND runtime_deletion_confirmed_at IS ?
        AND EXISTS (
          SELECT 1
          FROM trials t
@@ -515,8 +522,6 @@ async function markWorkspaceDeletedIfTrialStillExpired(
       workspace.id,
       anonymousUserId,
       row.project_id,
-      requiredRuntimeProof,
-      requiredRuntimeProof,
       requiredRuntimeProof,
       row.trial_id,
       now,

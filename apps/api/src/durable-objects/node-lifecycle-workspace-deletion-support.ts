@@ -7,7 +7,10 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { log } from '../lib/logger';
-import type { WorkspaceDeletionIdentity } from '../services/workspace-deletion';
+import type {
+  WorkspaceDeletionIdentity,
+  WorkspaceDeletionMode,
+} from '../services/workspace-deletion';
 
 export type NodeLifecycleDeletionEnv = {
   DATABASE: D1Database;
@@ -88,8 +91,11 @@ export async function claimWorkspaceDeletionInD1(
   env: NodeLifecycleDeletionEnv,
   expected: WorkspaceDeletionIdentity,
   attempt: number,
-  diagnostic: string
+  diagnostic: string,
+  mode: WorkspaceDeletionMode
 ): Promise<boolean> {
+  const statusPredicate =
+    mode === 'automatic' ? "AND status IN ('stopped', 'sleeping', 'stopping', 'deleted')" : '';
   const result = await env.DATABASE.prepare(
     `UPDATE workspaces
         SET status = 'stopping', error_message = ?, updated_at = ?
@@ -109,7 +115,7 @@ export async function claimWorkspaceDeletionInD1(
           )
         )
         AND runtime_deletion_confirmed_at IS NULL
-        AND status IN ('stopped', 'sleeping', 'stopping', 'deleted')`
+        ${statusPredicate}`
   )
     .bind(
       diagnostic,

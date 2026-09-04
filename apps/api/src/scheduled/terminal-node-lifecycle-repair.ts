@@ -3,10 +3,13 @@
  * is already terminal. This closes the accounting/session side effects without
  * waking or replaying work.
  */
+import { drizzle } from 'drizzle-orm/d1';
+
+import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { findRestorableOrInFlightSleepSnapshot } from '../services/session-snapshot-sleep-predicate';
-import { finalizeWorkspaceLifecycleClosure } from '../services/workspace-lifecycle-finalizer';
+import { cleanupWorkspaceForDeletion } from '../services/workspace-cleanup';
 import { parsePositiveInt } from './node-cleanup/shared';
 
 interface TerminalNodeWorkspaceRow {
@@ -14,6 +17,8 @@ interface TerminalNodeWorkspaceRow {
   node_id: string;
   project_id: string | null;
   chat_session_id: string | null;
+  user_id: string;
+  status: string;
 }
 
 export interface TerminalNodeLifecycleRepairStats {
@@ -34,7 +39,13 @@ const DEFAULT_TERMINAL_NODE_LIFECYCLE_REPAIR_BATCH_SIZE = 25;
 const DEFAULT_TERMINAL_NODE_LIFECYCLE_REPAIR_WALL_BUDGET_MS = 10_000;
 const MAX_TERMINAL_NODE_LIFECYCLE_REPAIR_BATCH_SIZE = 100;
 const MAX_TERMINAL_NODE_LIFECYCLE_REPAIR_WALL_BUDGET_MS = 30_000;
-const ACTIVE_WORKSPACE_STATUSES = ['pending', 'creating', 'running', 'recovery'] as const;
+const ACTIVE_WORKSPACE_STATUSES = [
+  'pending',
+  'creating',
+  'running',
+  'recovery',
+  'stopping',
+] as const;
 
 function repairBatchSize(env: Env): number {
   return Math.min(
@@ -68,10 +79,11 @@ export async function runTerminalNodeLifecycleRepair(
   const startedAt = Date.now();
   const limit = repairBatchSize(env);
   const rows = await env.DATABASE.prepare(
-    `SELECT w.id AS workspace_id, w.node_id AS node_id,
-            w.project_id AS project_id, w.chat_session_id AS chat_session_id
-       FROM workspaces w
-       INNER JOIN nodes n ON n.id = w.node_id
+    `SELECT w.id AS workspace_id, w.node_id AS node_id, w.user_id AS user_id,
+            w.project_id AS project_id, w.chat_session_id AS chat_session_id,
+            w.status AS status
+      FROM workspaces w
+      INNER JOIN nodes n ON n.id = w.node_id
       WHERE n.status IN ('stopped', 'deleted', 'destroyed', 'error')
         AND w.status IN (${ACTIVE_WORKSPACE_STATUSES.map(() => '?').join(', ')})
       ORDER BY w.updated_at ASC
@@ -111,19 +123,32 @@ export async function runTerminalNodeLifecycleRepair(
           continue;
         }
       }
-      const result = await finalizeWorkspaceLifecycleClosure(env, {
-        workspaceIds: [row.workspace_id],
-        agentSessionStatus: 'stopped',
-        workspaceStatus: 'stopped',
-        reason: 'terminal_node_lifecycle_repair',
+      const outcome = await cleanupWorkspaceForDeletion({
+        db: drizzle(env.DATABASE, { schema }),
+        env,
+        workspace: {
+          id: row.workspace_id,
+          nodeId: row.node_id,
+          userId: row.user_id,
+          projectId: row.project_id,
+          chatSessionId: row.chat_session_id,
+          status: row.status,
+        } as schema.Workspace,
+        userId: row.user_id,
+        deleteConfirmedRow: false,
+        logContext: { closePath: 'terminal_node_lifecycle_repair' },
       });
-      stats.workspacesTerminalized += result.workspacesTerminalized;
-      stats.agentSessionsClosed += result.agentSessionsClosed;
-      stats.computeUsageClosed += result.computeUsageClosed;
-      stats.projectSessionsClosed += result.projectSessionsClosed;
-      stats.projectSessionErrors += result.projectSessionErrors;
-      stats.workspaceActivityCleaned += result.workspaceActivityCleaned;
-      stats.workspaceActivityErrors += result.workspaceActivityErrors;
+      if (outcome.status === 'confirmed') {
+        stats.workspacesTerminalized++;
+        stats.agentSessionsClosed += outcome.lifecycle?.agentSessionsClosed ?? 0;
+        stats.computeUsageClosed += outcome.lifecycle?.computeUsageClosed ?? 0;
+        stats.projectSessionsClosed += outcome.lifecycle?.projectSessionsClosed ?? 0;
+        stats.projectSessionErrors += outcome.lifecycle?.projectSessionErrors ?? 0;
+        stats.workspaceActivityCleaned += outcome.lifecycle?.workspaceActivityCleaned ?? 0;
+        stats.workspaceActivityErrors += outcome.lifecycle?.workspaceActivityErrors ?? 0;
+      } else {
+        stats.errors++;
+      }
     } catch (error) {
       stats.errors++;
       log.warn('terminal_node_lifecycle_repair.workspace_failed', {

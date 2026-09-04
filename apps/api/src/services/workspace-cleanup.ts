@@ -8,7 +8,7 @@ import { log } from '../lib/logger';
 import { deleteSessionSnapshotState } from './session-snapshots';
 import {
   attemptWorkspaceDeletion,
-  loadWorkspaceDeletionIdentity,
+  loadWorkspaceDeletionSnapshot,
   workspaceDeletionIdentityLogContext,
   type WorkspaceDeletionOutcome,
 } from './workspace-deletion';
@@ -21,6 +21,8 @@ export interface WorkspaceDeletionCleanupOptions {
   workspace: schema.Workspace;
   userId: string;
   logContext?: Record<string, unknown>;
+  /** Preserve the proof-bearing D1 tombstone after lifecycle closure. */
+  deleteConfirmedRow?: boolean;
 }
 
 function workspaceDeletionRetryBaseMs(env: Env): number {
@@ -31,8 +33,8 @@ function workspaceDeletionRetryBaseMs(env: Env): number {
 export async function cleanupWorkspaceForDeletion(
   options: WorkspaceDeletionCleanupOptions
 ): Promise<WorkspaceDeletionOutcome> {
-  const { db, env, workspace, userId, logContext = {} } = options;
-  const expected = await loadWorkspaceDeletionIdentity(env.DATABASE, workspace.id);
+  const { db, env, workspace, userId, logContext = {}, deleteConfirmedRow = true } = options;
+  const expected = await loadWorkspaceDeletionSnapshot(env.DATABASE, workspace.id);
   const requestedIdentity = {
     workspaceId: workspace.id,
     nodeId: workspace.nodeId,
@@ -62,16 +64,22 @@ export async function cleanupWorkspaceForDeletion(
   let lifecycleStub:
     | DurableObjectStub<import('../durable-objects/node-lifecycle').NodeLifecycle>
     | undefined;
+  const deletionAlreadyProven = Boolean(
+    expected.runtimeDeletionConfirmedAt && expected.runtimeDeletionProof
+  );
   if (workspace.nodeId) {
     const doId = env.NODE_LIFECYCLE.idFromName(workspace.nodeId);
     lifecycleStub = env.NODE_LIFECYCLE.get(doId) as DurableObjectStub<
       import('../durable-objects/node-lifecycle').NodeLifecycle
     >;
+  }
+  if (workspace.nodeId && lifecycleStub && !deletionAlreadyProven) {
     const claim = await lifecycleStub.claimWorkspaceDeletionAttempt(
       workspace.nodeId,
       workspace.id,
       userId,
-      expected
+      expected,
+      'explicit'
     );
     if (claim === 'already_claimed_same_identity') {
       const diagnostic = 'Workspace deletion unconfirmed: durable attempt already in progress';
@@ -99,6 +107,7 @@ export async function cleanupWorkspaceForDeletion(
     attempt: 1,
     source: String(logContext.closePath ?? 'explicit'),
     mode: 'explicit',
+    allowWorkspaceNeverStartedProof: workspace.status === 'pending',
     beforeFinalize: workspace.chatSessionId
       ? async () => {
           await deleteSessionSnapshotState(db, env, workspace.chatSessionId as string);
@@ -108,15 +117,17 @@ export async function cleanupWorkspaceForDeletion(
 
   if (outcome.status === 'confirmed') {
     await lifecycleStub?.confirmWorkspaceDeletion(workspace.id);
-    await db
-      .delete(schema.workspaces)
-      .where(
-        and(
-          eq(schema.workspaces.id, workspace.id),
-          eq(schema.workspaces.userId, userId),
-          eq(schema.workspaces.status, 'deleted')
-        )
-      );
+    if (deleteConfirmedRow) {
+      await db
+        .delete(schema.workspaces)
+        .where(
+          and(
+            eq(schema.workspaces.id, workspace.id),
+            eq(schema.workspaces.userId, userId),
+            eq(schema.workspaces.status, 'deleted')
+          )
+        );
+    }
     return outcome;
   }
 

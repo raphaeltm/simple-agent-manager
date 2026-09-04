@@ -3,6 +3,7 @@ import { DEFAULT_WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH } from '@simple-agent-
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { deleteWorkspaceOnNode, NodeAgentHttpError } from './node-agent';
+import type { FinalizeWorkspaceLifecycleClosureResult } from './workspace-lifecycle-finalizer';
 import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
 
 export const WORKSPACE_DELETION_DIAGNOSTIC_PREFIX = 'Workspace deletion unconfirmed';
@@ -56,11 +57,14 @@ export type WorkspaceDeletionProof =
   | 'workspace_never_started'
   | 'node_runtime_terminated';
 
+export type WorkspaceDeletionMode = 'explicit' | 'automatic';
+
 export type WorkspaceDeletionOutcome =
   | {
       status: 'confirmed';
       proof: WorkspaceDeletionProof;
       workspaceFinalized: true;
+      lifecycle?: FinalizeWorkspaceLifecycleClosureResult;
     }
   | {
       status: 'retry';
@@ -83,9 +87,10 @@ interface AttemptWorkspaceDeletionOptions {
   expected: WorkspaceDeletionIdentity;
   attempt: number;
   source: string;
-  mode: 'automatic' | 'explicit';
+  mode: WorkspaceDeletionMode;
   requestTimeoutMs?: number;
   beforeFinalize?: () => Promise<void>;
+  allowWorkspaceNeverStartedProof?: boolean;
 }
 
 class WorkspaceDeletionFenceError extends Error {
@@ -410,7 +415,7 @@ async function finalizeConfirmedDeletion(
     isWorkspaceDeletionProof(current.runtimeDeletionProof)
   ) {
     await beforeFinalize?.();
-    await finalizeWorkspaceLifecycleClosure(env, {
+    const lifecycle = await finalizeWorkspaceLifecycleClosure(env, {
       workspaceIds: [expected.workspaceId],
       userId: expected.userId,
       agentSessionStatus: 'completed',
@@ -420,6 +425,7 @@ async function finalizeConfirmedDeletion(
       status: 'confirmed',
       proof: current.runtimeDeletionProof,
       workspaceFinalized: true,
+      lifecycle,
     };
   }
   if (proof === 'vm_agent_confirmed' && current.status !== 'stopping') {
@@ -512,7 +518,7 @@ async function finalizeConfirmedDeletion(
   }
 
   await beforeFinalize?.();
-  await finalizeWorkspaceLifecycleClosure(env, {
+  const lifecycle = await finalizeWorkspaceLifecycleClosure(env, {
     workspaceIds: [expected.workspaceId],
     userId: expected.userId,
     agentSessionStatus: 'completed',
@@ -526,7 +532,7 @@ async function finalizeConfirmedDeletion(
     proof,
     source,
   });
-  return { status: 'confirmed', proof, workspaceFinalized: true };
+  return { status: 'confirmed', proof, workspaceFinalized: true, lifecycle };
 }
 
 /**
@@ -537,7 +543,16 @@ async function finalizeConfirmedDeletion(
 export async function attemptWorkspaceDeletion(
   options: AttemptWorkspaceDeletionOptions
 ): Promise<WorkspaceDeletionOutcome> {
-  const { env, expected, attempt, source, mode, requestTimeoutMs, beforeFinalize } = options;
+  const {
+    env,
+    expected,
+    attempt,
+    source,
+    mode,
+    requestTimeoutMs,
+    beforeFinalize,
+    allowWorkspaceNeverStartedProof = false,
+  } = options;
   const initial = await loadWorkspaceDeletionRow(env.DATABASE, expected.workspaceId);
   const proofBeforeRequest = await terminalNodeProof(env.DATABASE, expected);
 
@@ -569,7 +584,7 @@ export async function attemptWorkspaceDeletion(
       beforeFinalize
     );
   }
-  if (!expected.nodeId && initial.status === 'pending') {
+  if (allowWorkspaceNeverStartedProof && !expected.nodeId && initial.status === 'pending') {
     return finalizeConfirmedDeletion(
       env,
       expected,

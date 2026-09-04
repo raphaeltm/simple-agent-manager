@@ -51,8 +51,21 @@ vi.mock('drizzle-orm/d1', () => ({
         mocks.updateSets.push(values);
         return {
           where: vi.fn().mockImplementation(() => {
-            if (mocks.updateReject) return Promise.reject(mocks.updateReject);
-            return Promise.resolve(undefined);
+            const pending = mocks.updateReject
+              ? Promise.reject(mocks.updateReject)
+              : Promise.resolve(undefined);
+            return Object.assign(pending, {
+              returning: vi.fn(async () => {
+                await pending;
+                if (
+                  values.status === 'error' &&
+                  !['creating', 'running', 'recovery'].includes(mocks.workspaceStatus)
+                ) {
+                  return [];
+                }
+                return [{ id: 'agent-session-1' }];
+              }),
+            });
           }),
         };
       },
@@ -816,6 +829,26 @@ describe('agent activity callback', () => {
     );
   });
 
+  it('lets deletion fence error fanout after the activity mirror but before the D1 error write', async () => {
+    mocks.projectData.reportAcpSessionActivity.mockImplementationOnce(async () => {
+      mocks.workspaceStatus = 'stopping';
+    });
+    const app = await createTestApp();
+
+    const response = await postActivity(app, {
+      activity: 'error',
+      nodeId: 'node-1',
+      agentType: 'openai-codex',
+      statusError: 'late container failure',
+    });
+
+    expect(response.status).toBe(410);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledOnce();
+    expect(mocks.projectData.transitionAcpSession).not.toHaveBeenCalled();
+    expect(mocks.projectData.failSession).not.toHaveBeenCalled();
+    expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
+  });
+
   // --- Callback-token binding (security-critique #1, rule 28) ---------------------------------
   // The token's OWN identity (payload.workspace) must be bound to the session; the client-supplied
   // body.nodeId is NOT trusted for authorization. Each rejection test is discriminating: on pre-fix
@@ -999,9 +1032,8 @@ describe('agent activity callback', () => {
     it('does not clear current pending intermediate activity when rejecting a stale error', async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-08-31T00:00:00.000Z'));
-      const { getAcpActivityAdmissionSnapshotForTests } = await import(
-        '../../../src/services/acp-activity-admission'
-      );
+      const { getAcpActivityAdmissionSnapshotForTests } =
+        await import('../../../src/services/acp-activity-admission');
       mocks.guardRow = {
         runtime: 'cf-container',
         updatedAt: new Date(TOKEN_IAT_MS + 180_000).toISOString(),
