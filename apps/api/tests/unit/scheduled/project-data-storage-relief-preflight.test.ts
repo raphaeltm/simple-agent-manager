@@ -332,6 +332,166 @@ describe('scheduled ProjectData storage relief preflight', () => {
       sqlite.close();
     }
   });
+
+  it('runs an explicitly bounded set of separately leased slices in one invocation', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createTables(sqlite);
+      const cursor = {
+        rowId: 1,
+        sessionId: 'session-a',
+        createdAt: CUTOFF - 10,
+        sequence: 1,
+        messageId: 'message-1',
+      };
+      const measure = vi
+        .fn()
+        .mockResolvedValueOnce(
+          toolResult({
+            sessionId: 'session-a',
+            eligibleRows: 1,
+            eligibleBytes: 600,
+            cursor,
+            hasMore: true,
+          })
+        )
+        .mockResolvedValueOnce(
+          toolResult({
+            sessionId: 'session-b',
+            eligibleRows: 1,
+            eligibleBytes: 400,
+            firstRowId: 2,
+            cursor: null,
+            hasMore: false,
+          })
+        );
+      const env = makeEnv(sqlite, measure, {
+        PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_SLICES_PER_RUN: '2',
+        PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS: '3000',
+      });
+
+      const wallClock = Date.now();
+      const result = await runProjectDataStorageReliefPreflight(env, new Date(NOW), {
+        nowMs: () => wallClock,
+      });
+
+      expect(result).toMatchObject({
+        skipped: false,
+        status: 'complete',
+        batchesStarted: 2,
+        rowsExamined: 2,
+        eligibleRows: 2,
+        eligibleBytes: 1000,
+      });
+      expect(measure).toHaveBeenCalledTimes(2);
+      expect(measure).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ cursor: { toolPayload: cursor } })
+      );
+      expect(readRun(sqlite)).toMatchObject({
+        status: 'complete',
+        batches_started: 2,
+        rows_examined: 2,
+        eligible_rows: 2,
+        eligible_bytes: 1000,
+        completed_at: NOW,
+        lease_owner: null,
+        lease_expires_at: null,
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('renews the later-slice lease from elapsed wall time so another invocation cannot steal it', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createTables(sqlite);
+      let wallNow = Date.now();
+      let resolveSecond!: (value: ReturnType<typeof toolResult>) => void;
+      const delayedSecond = new Promise<ReturnType<typeof toolResult>>((resolve) => {
+        resolveSecond = resolve;
+      });
+      const measure = vi
+        .fn()
+        .mockImplementationOnce(async () => {
+          wallNow += 2_000;
+          return toolResult({
+            sessionId: 'session-a',
+            eligibleRows: 1,
+            eligibleBytes: 600,
+            cursor: {
+              rowId: 1,
+              sessionId: 'session-a',
+              createdAt: CUTOFF - 10,
+              sequence: 1,
+              messageId: 'message-1',
+            },
+            hasMore: true,
+          });
+        })
+        .mockImplementationOnce(() => delayedSecond);
+      const env = makeEnv(sqlite, measure, {
+        PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_SLICES_PER_RUN: '2',
+        PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS: '4000',
+      });
+
+      const runPromise = runProjectDataStorageReliefPreflight(env, new Date(NOW), {
+        nowMs: () => wallNow,
+      });
+      await vi.waitFor(() => expect(measure).toHaveBeenCalledTimes(2));
+      expect(readRun(sqlite)).toMatchObject({
+        status: 'running',
+        batches_started: 2,
+        updated_at: NOW + 2_000,
+        lease_expires_at: NOW + 8_000,
+      });
+
+      const overlapping = await runProjectDataStorageReliefPreflight(env, new Date(NOW + 6_500));
+      expect(overlapping).toMatchObject({ skipped: true, skipReason: 'leased' });
+      expect(measure).toHaveBeenCalledTimes(2);
+
+      resolveSecond(
+        toolResult({
+          sessionId: 'session-b',
+          eligibleRows: 1,
+          eligibleBytes: 400,
+          firstRowId: 2,
+          cursor: null,
+          hasMore: false,
+        })
+      );
+      await expect(runPromise).resolves.toMatchObject({
+        status: 'complete',
+        batchesStarted: 2,
+        completedAt: NOW + 2_000,
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('fails closed when the aggregate run budget cannot contain one bounded slice', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createTables(sqlite);
+      const measure = vi.fn();
+      const result = await runProjectDataStorageReliefPreflight(
+        makeEnv(sqlite, measure, {
+          PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_SLICES_PER_RUN: '2',
+          PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS: '1000',
+        }),
+        new Date(NOW)
+      );
+
+      expect(result).toMatchObject({ skipped: true, skipReason: 'invalid_config' });
+      expect(measure).not.toHaveBeenCalled();
+      expect(readRun(sqlite)).toBeUndefined();
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('fails closed before ProjectData when exact plan scope is missing', async () => {
     const sqlite = new Database(':memory:');
     try {

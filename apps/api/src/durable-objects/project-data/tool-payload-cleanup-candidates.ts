@@ -328,6 +328,61 @@ function emptyCandidateUpdate(): ToolPayloadCandidateUpdate {
   };
 }
 
+function hasArchivedToolPayloadMarker(toolMetadata: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(toolMetadata);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+    const record = parsed as Record<string, unknown>;
+    const archive = record.toolPayloadArchive;
+    return (
+      record.toolPayloadArchived === true &&
+      !Array.isArray(record.content) &&
+      Boolean(
+        archive &&
+        typeof archive === 'object' &&
+        !Array.isArray(archive) &&
+        (archive as Record<string, unknown>).status === 'archived'
+      )
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function hasMatchingVerifiedApprovedArchive(
+  context: ToolPayloadCandidateProcessingContext,
+  candidate: ToolPayloadCandidate
+): Promise<boolean> {
+  if (!candidate.approvedToolMetadataSha256) return false;
+  const archived = selectArchivedToolPayloadRow(
+    context.sql,
+    candidate.messageId,
+    candidate.sessionId
+  );
+  if (
+    archived?.sourceToolMetadataSha256 !== candidate.approvedToolMetadataSha256 ||
+    archived.messageCreatedAt !== candidate.createdAt ||
+    archived.messageSequence !== candidate.sequence ||
+    archived.toolMetadataBytes !== candidate.toolMetadataBytes
+  ) {
+    return false;
+  }
+  const verified = await readArchivedMessageToolContent(
+    context.sql,
+    context.env,
+    context.projectId,
+    candidate.sessionId,
+    candidate.messageId,
+    {
+      operationBudget: context.archiveOperationBudget,
+      timeoutMs: context.archiveWriteTimeoutMs,
+      deadlineMs: context.deadlineMs,
+      nowMs: context.nowMs,
+    }
+  );
+  return verified?.source === 'archive';
+}
+
 function failedBudgetUpdate(
   candidate: ToolPayloadCandidate,
   reason: 'row' | 'batch' | 'archive'
@@ -382,10 +437,7 @@ async function processToolPayloadCandidate(
   if (candidate.toolMetadataBytes > context.archiveMaxMetadataBytes) {
     return failedBudgetUpdate(candidate, 'archive');
   }
-  if (
-    candidate.toolMetadataBytes > context.maxRowBytes &&
-    candidate.toolMetadataBytes > context.archiveMaxMetadataBytes
-  ) {
+  if (candidate.toolMetadataBytes > context.maxRowBytes) {
     return failedBudgetUpdate(candidate, 'row');
   }
   if (candidate.toolMetadataBytes > maxReadBytes) return failedBudgetUpdate(candidate, 'batch');
@@ -397,27 +449,8 @@ async function processToolPayloadCandidate(
   );
   if (toolMetadata === null) {
     if (!candidate.approvedToolMetadataSha256) return emptyCandidateUpdate();
-    const archived = selectArchivedToolPayloadRow(
-      context.sql,
-      candidate.messageId,
-      candidate.sessionId
-    );
-    if (
-      archived?.sourceToolMetadataSha256 === candidate.approvedToolMetadataSha256 &&
-      archived.messageCreatedAt === candidate.createdAt &&
-      archived.messageSequence === candidate.sequence &&
-      archived.toolMetadataBytes === candidate.toolMetadataBytes
-    ) {
-      const verified = await readArchivedMessageToolContent(
-        context.sql,
-        context.env,
-        context.projectId,
-        candidate.sessionId,
-        candidate.messageId
-      );
-      if (verified?.source === 'archive') {
-        return { ...emptyCandidateUpdate(), cleanupAttemptStatus: 'archived' };
-      }
+    if (await hasMatchingVerifiedApprovedArchive(context, candidate)) {
+      return { ...emptyCandidateUpdate(), cleanupAttemptStatus: 'archived' };
     }
     return {
       ...emptyCandidateUpdate(),
@@ -434,6 +467,12 @@ async function processToolPayloadCandidate(
       byte.toString(16).padStart(2, '0')
     ).join('');
     if (actual !== candidate.approvedToolMetadataSha256) {
+      if (
+        hasArchivedToolPayloadMarker(toolMetadata) &&
+        (await hasMatchingVerifiedApprovedArchive(context, candidate))
+      ) {
+        return { ...emptyCandidateUpdate(), cleanupAttemptStatus: 'archived' };
+      }
       return {
         ...emptyCandidateUpdate(),
         rowsFailed: 1,

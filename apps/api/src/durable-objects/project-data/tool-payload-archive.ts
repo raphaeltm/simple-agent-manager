@@ -3,6 +3,8 @@ import { stripToolMetadataPayloadForStorage } from './tool-metadata-storage';
 import {
   parseToolPayloadArchiveObjectText,
   type PreparedToolPayloadArchive,
+  readToolPayloadArchiveObjectBytesWithTimeout,
+  reserveToolPayloadArchiveOperations,
   TOOL_PAYLOAD_CHUNKED_ARCHIVE_VERSION,
   TOOL_PAYLOAD_VERIFIED_ARCHIVE_VERSION,
   type ToolPayloadArchiveOperationBudget,
@@ -633,15 +635,34 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 async function readArchiveContent(
   env: Env,
   row: ArchivedToolPayloadRow,
-  projectId: string
+  projectId: string,
+  verificationBudget?: {
+    operationBudget: ToolPayloadArchiveOperationBudget;
+    timeoutMs: number;
+    deadlineMs: number;
+    nowMs: () => number;
+  }
 ): Promise<{ content: unknown[]; reason?: never } | { content: null; reason: string }> {
   const r2 = env.PROJECT_DATA_ARCHIVE_R2;
   if (!r2) return { content: null, reason: 'PROJECT_DATA_ARCHIVE_R2 binding is not configured' };
 
   try {
-    const object = await r2.get(row.r2Key);
-    if (!object) return { content: null, reason: 'archived R2 object is missing' };
-    const rootBytes = new Uint8Array(await object.arrayBuffer());
+    const rootBytes = verificationBudget
+      ? await (async () => {
+          reserveToolPayloadArchiveOperations(verificationBudget.operationBudget, 2);
+          return readToolPayloadArchiveObjectBytesWithTimeout(
+            r2,
+            row.r2Key,
+            verificationBudget.timeoutMs,
+            verificationBudget.deadlineMs,
+            verificationBudget.nowMs
+          );
+        })()
+      : await (async () => {
+          const object = await r2.get(row.r2Key);
+          if (!object) throw new Error('archived R2 object is missing');
+          return new Uint8Array(await object.arrayBuffer());
+        })();
     if (row.archiveVersion >= TOOL_PAYLOAD_VERIFIED_ARCHIVE_VERSION) {
       if (
         row.rootObjectBytes === null ||
@@ -674,6 +695,7 @@ async function readArchiveContent(
         messageCreatedAt: row.messageCreatedAt,
         messageSequence: row.messageSequence,
       },
+      ...(verificationBudget ? { verificationBudget } : {}),
     });
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return { content: null, reason: 'archived R2 object is malformed' };
@@ -726,12 +748,18 @@ export async function readArchivedMessageToolContent(
   env: Env,
   projectId: string,
   sessionId: string,
-  messageId: string
+  messageId: string,
+  verificationBudget?: {
+    operationBudget: ToolPayloadArchiveOperationBudget;
+    timeoutMs: number;
+    deadlineMs: number;
+    nowMs: () => number;
+  }
 ): Promise<MessageToolContentResult | null> {
   const row = selectArchivedToolPayloadRow(sql, messageId, sessionId);
   if (!row) return null;
 
-  const archive = await readArchiveContent(env, row, projectId);
+  const archive = await readArchiveContent(env, row, projectId, verificationBudget);
   if (archive.content) {
     return {
       content: archive.content,

@@ -60,6 +60,16 @@ export function readToolPayloadCleanupCursor(sql: SqlStorage): ToolPayloadCleanu
   return { rowId, sessionId, createdAt, sequence, messageId };
 }
 
+export function hasCompleteLegacyV2ToolPayloadCleanupCursor(sql: SqlStorage): boolean {
+  if (readMeta(sql, META_TOOL_CLEANUP_CURSOR_VERSION) !== '2') return false;
+  return Boolean(
+    readMeta(sql, META_TOOL_CLEANUP_CURSOR_SESSION_ID) &&
+    readMetaNumber(sql, META_TOOL_CLEANUP_CURSOR_CREATED_AT) !== null &&
+    readMetaNumber(sql, META_TOOL_CLEANUP_CURSOR_SEQUENCE) !== null &&
+    readMeta(sql, META_TOOL_CLEANUP_CURSOR_MESSAGE_ID)
+  );
+}
+
 export type ToolPayloadCleanupPersistedPlan = {
   planId: string;
   fingerprint: string;
@@ -138,7 +148,7 @@ export function writeToolPayloadCleanupRecheckAt(
   writeToolPayloadCleanupPersistedPlan(sql, plan);
 }
 
-export function clearToolPayloadCleanupState(sql: SqlStorage): void {
+export function clearToolPayloadCleanupContinuationState(sql: SqlStorage): void {
   deleteMeta(sql, META_TOOL_CLEANUP_CURSOR_SESSION_ID);
   deleteMeta(sql, META_TOOL_CLEANUP_CURSOR_ROW_ID);
   deleteMeta(sql, META_TOOL_CLEANUP_CURSOR_CREATED_AT);
@@ -149,6 +159,10 @@ export function clearToolPayloadCleanupState(sql: SqlStorage): void {
   deleteMeta(sql, META_TOOL_CLEANUP_PLAN_ID);
   deleteMeta(sql, META_TOOL_CLEANUP_PLAN_FINGERPRINT);
   deleteMeta(sql, META_TOOL_CLEANUP_PLAN_CUTOFF);
+}
+
+export function clearToolPayloadCleanupState(sql: SqlStorage): void {
+  clearToolPayloadCleanupContinuationState(sql);
   deleteMeta(sql, META_TOOL_CLEANUP_TOTAL_ROWS);
   deleteMeta(sql, META_TOOL_CLEANUP_TOTAL_BYTES);
   deleteMeta(sql, META_TOOL_CLEANUP_TOTAL_R2_OPERATIONS);

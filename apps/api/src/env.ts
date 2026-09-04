@@ -622,6 +622,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES?: string; // Overall eligible-metadata reporting ceiling (default: 2000000000)
   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MS?: string; // D1 claim lease duration (default: 60000)
   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS?: string; // Per-DO-RPC timeout (default: 20000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_SLICES_PER_RUN?: string; // Maximum sequential slices per scheduled invocation (default: 1)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS?: string; // Aggregate scheduled-invocation wall-time budget (default: 25000)
   PROJECT_DATA_ARCHIVE_SHARD_COUNT?: string;
   PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS?: string;
   PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS?: string;

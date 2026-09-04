@@ -327,6 +327,14 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
     DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO
   );
   const cleanupRatiosAreOrdered = cleanupTargetRatio < cleanupTriggerRatio;
+  const cleanupBatchBytes = parsePositiveInteger(
+    env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES,
+    DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES
+  );
+  const cleanupMaxRowBytes = parsePositiveInteger(
+    env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES,
+    DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES
+  );
   const cleanupMinSessionAgeDays = parseNonNegativeInteger(
     env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS,
     DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS
@@ -406,6 +414,7 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
       optionalRatioIsValid(env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO) &&
       optionalRatioIsValid(env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO) &&
       cleanupRatiosAreOrdered &&
+      cleanupMaxRowBytes <= cleanupBatchBytes &&
       [
         env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS,
         env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES,
@@ -455,14 +464,8 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
       env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS,
       DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS
     ),
-    toolPayloadCleanupBatchBytes: parsePositiveInteger(
-      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES,
-      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES
-    ),
-    toolPayloadCleanupMaxRowBytes: parsePositiveInteger(
-      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES,
-      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES
-    ),
+    toolPayloadCleanupBatchBytes: cleanupBatchBytes,
+    toolPayloadCleanupMaxRowBytes: cleanupMaxRowBytes,
     toolPayloadCleanupMinSessionAgeMs: cleanupMinSessionAgeDays * 24 * 60 * 60 * 1000,
     toolPayloadCleanupRecheckMs: parsePositiveInteger(
       env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS,

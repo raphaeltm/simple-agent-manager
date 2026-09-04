@@ -21,7 +21,9 @@ import {
   readToolPayloadCleanupManifestRoot,
 } from './tool-payload-cleanup-manifest';
 import {
+  clearToolPayloadCleanupContinuationState,
   clearToolPayloadCleanupState,
+  hasCompleteLegacyV2ToolPayloadCleanupCursor,
   publicToolPayloadCleanupCursor,
   readProjectDataToolPayloadArchiveLastRunAt as readToolPayloadArchiveLastRunAt,
   readProjectDataToolPayloadCleanupRecheckAt as readToolPayloadCleanupRecheckAt,
@@ -82,6 +84,8 @@ type ToolPayloadCleanupPlan = {
   maxTotalBytes: number | null;
   maxTotalR2Operations: number | null;
   maxTotalWallTimeMs: number | null;
+  reservedR2Operations: number;
+  reservedWallTimeMs: number;
   cumulative: ToolPayloadCleanupCumulativeProgress;
   pendingCursor: ToolPayloadCleanupCursor | null;
   transactionSync?: <T>(callback: () => T) => T;
@@ -128,6 +132,7 @@ function createToolPayloadCleanupPlan(
       config.toolPayloadCleanupMaxTotalBytes === null ||
       config.toolPayloadCleanupMaxTotalR2Operations === null ||
       config.toolPayloadCleanupMaxTotalWallTimeMs === null ||
+      !options.transactionSync ||
       config.toolPayloadCleanupProjectIds?.length !== 1 ||
       config.toolPayloadCleanupProjectIds[0] !== projectId)
   ) {
@@ -160,10 +165,11 @@ function createToolPayloadCleanupPlan(
     lastArchiveRunAt === null || now - lastArchiveRunAt >= config.toolPayloadArchiveIntervalMs;
   let hasPendingCleanup = pendingCursor !== null || pendingRecheckAt !== null;
   if (hasPendingCleanup && !persistedPlan) {
-    if (fixedCutoffConfigured) return null;
-    // Compatibility with pre-plan continuation state: source payloads are
-    // still authoritative, so discard the old unscoped cursor and restart a
-    // newly fingerprinted retention pass from the beginning.
+    if (fixedCutoffConfigured && !hasCompleteLegacyV2ToolPayloadCleanupCursor(sql)) return null;
+    // Compatibility with the production v2 cursor/recheck state, which
+    // predates immutable plan fingerprints. Source payloads remain
+    // authoritative. A fixed plan has already passed exact manifest/project/
+    // cap validation above, so it can safely supersede the old broad cursor.
     clearToolPayloadCleanupState(sql);
     pendingCursor = null;
     pendingRecheckAt = null;
@@ -220,7 +226,7 @@ function createToolPayloadCleanupPlan(
   if (pendingRecheckAt !== null && pendingRecheckAt > now && !options.forceStart) {
     return null;
   }
-  if (fixedCutoffConfigured && hasPendingCleanup && beforeBytes <= targetBytes) {
+  if (fixedCutoffConfigured && beforeBytes <= targetBytes) {
     return null;
   }
   if (!hasPendingCleanup && !retentionDue && !options.allowStart && !options.forceStart) {
@@ -244,6 +250,13 @@ function createToolPayloadCleanupPlan(
     ? config.toolPayloadCleanupMaxTotalWallTimeMs - cumulative.wallTimeMs
     : config.toolPayloadCleanupWallTimeMs;
   const passWallTimeMs = Math.min(config.toolPayloadCleanupWallTimeMs, remainingTotalWallTimeMs);
+  const remainingTotalR2Operations = config.toolPayloadCleanupMaxTotalR2Operations
+    ? config.toolPayloadCleanupMaxTotalR2Operations - cumulative.r2Operations
+    : config.toolPayloadArchiveMaxOperations;
+  const passR2Operations = Math.min(
+    config.toolPayloadArchiveMaxOperations,
+    remainingTotalR2Operations
+  );
   return {
     projectId,
     planId,
@@ -271,6 +284,8 @@ function createToolPayloadCleanupPlan(
     maxTotalBytes: config.toolPayloadCleanupMaxTotalBytes,
     maxTotalR2Operations: config.toolPayloadCleanupMaxTotalR2Operations,
     maxTotalWallTimeMs: config.toolPayloadCleanupMaxTotalWallTimeMs,
+    reservedR2Operations: fixedCutoffConfigured ? passR2Operations : 0,
+    reservedWallTimeMs: fixedCutoffConfigured ? passWallTimeMs : 0,
     cumulative,
     pendingCursor,
     ...(options.nowMs ? { nowMs: options.nowMs } : {}),
@@ -325,146 +340,133 @@ async function scanApprovedToolPayloadCleanupBatch(
   }
   const operationBudget: ToolPayloadArchiveOperationBudget = {
     used: 0,
-    max: Math.min(
-      plan.archiveMaxOperations,
-      plan.maxTotalR2Operations - plan.cumulative.r2Operations
-    ),
+    max: plan.reservedR2Operations,
   };
-  try {
-    const root = await readToolPayloadCleanupManifestRoot({
+  const root = await readToolPayloadCleanupManifestRoot({
+    r2,
+    key: plan.manifestKey,
+    sha256: plan.manifestSha256,
+    timeoutMs: plan.archiveWriteTimeoutMs,
+    deadlineMs: plan.deadlineMs,
+    operationBudget,
+    ...(plan.nowMs ? { nowMs: plan.nowMs } : {}),
+  });
+  if (
+    root.planId !== plan.planId ||
+    root.projectId !== plan.projectId ||
+    root.cutoffCreatedAt !== plan.cutoffCreatedAt ||
+    root.eligibleRows > plan.maxTotalRows ||
+    root.eligibleBytes > plan.maxTotalBytes
+  ) {
+    throw new Error('approved tool payload cleanup manifest does not match configured scope');
+  }
+
+  const remainingRows = plan.maxTotalRows - plan.cumulative.rows;
+  const remainingBytes = plan.maxTotalBytes - plan.cumulative.bytes;
+  const candidates: ToolPayloadCandidate[] = [];
+  let candidateMetadataBytes = 0;
+  let candidateProjectedBytes = 0;
+  let previousManifestRowId = 0;
+  let manifestHasMore = false;
+  outer: for (const proof of root.batches) {
+    if (plan.pendingCursor && proof.lastRowId <= plan.pendingCursor.rowId) {
+      previousManifestRowId = proof.lastRowId;
+      continue;
+    }
+    if (operationBudget.used + 2 > operationBudget.max) {
+      manifestHasMore = true;
+      break;
+    }
+    const manifestBatch = await readToolPayloadCleanupManifestBatch({
       r2,
-      key: plan.manifestKey,
-      sha256: plan.manifestSha256,
+      proof,
+      root,
       timeoutMs: plan.archiveWriteTimeoutMs,
       deadlineMs: plan.deadlineMs,
       operationBudget,
       ...(plan.nowMs ? { nowMs: plan.nowMs } : {}),
     });
-    if (
-      root.planId !== plan.planId ||
-      root.projectId !== plan.projectId ||
-      root.cutoffCreatedAt !== plan.cutoffCreatedAt ||
-      root.eligibleRows > plan.maxTotalRows ||
-      root.eligibleBytes > plan.maxTotalBytes
-    ) {
-      throw new Error('approved tool payload cleanup manifest does not match configured scope');
-    }
-
-    const remainingRows = plan.maxTotalRows - plan.cumulative.rows;
-    const remainingBytes = plan.maxTotalBytes - plan.cumulative.bytes;
-    const candidates: ToolPayloadCandidate[] = [];
-    let candidateMetadataBytes = 0;
-    let candidateProjectedBytes = 0;
-    let previousManifestRowId = 0;
-    let manifestHasMore = false;
-    outer: for (const proof of root.batches) {
-      if (plan.pendingCursor && proof.lastRowId <= plan.pendingCursor.rowId) {
-        previousManifestRowId = proof.lastRowId;
-        continue;
+    for (const target of manifestBatch.targets) {
+      if (target.rowId <= previousManifestRowId) {
+        throw new Error('approved tool payload cleanup targets are not globally ordered');
       }
-      if (operationBudget.used + 2 > operationBudget.max) {
+      previousManifestRowId = target.rowId;
+      if (plan.pendingCursor && target.rowId <= plan.pendingCursor.rowId) continue;
+      const nextMetadataBytes = candidateMetadataBytes + target.toolMetadataBytes;
+      const nextProjectedBytes = candidateProjectedBytes + target.projectedReclaimableBytes;
+      if (
+        candidates.length >= Math.min(plan.batchRows, remainingRows) ||
+        (nextMetadataBytes > plan.batchBytes && candidates.length > 0) ||
+        nextProjectedBytes > remainingBytes
+      ) {
         manifestHasMore = true;
-        break;
+        break outer;
       }
-      const manifestBatch = await readToolPayloadCleanupManifestBatch({
-        r2,
-        proof,
-        root,
-        timeoutMs: plan.archiveWriteTimeoutMs,
-        deadlineMs: plan.deadlineMs,
-        operationBudget,
-        ...(plan.nowMs ? { nowMs: plan.nowMs } : {}),
+      candidates.push({
+        rowId: target.rowId,
+        sessionId: target.sessionId,
+        createdAt: target.messageCreatedAt,
+        sequence: target.messageSequence,
+        messageId: target.messageId,
+        toolMetadataBytes: target.toolMetadataBytes,
+        approvedToolMetadataSha256: target.toolMetadataSha256,
+        projectedReclaimableBytes: target.projectedReclaimableBytes,
       });
-      for (const target of manifestBatch.targets) {
-        if (target.rowId <= previousManifestRowId) {
-          throw new Error('approved tool payload cleanup targets are not globally ordered');
-        }
-        previousManifestRowId = target.rowId;
-        if (plan.pendingCursor && target.rowId <= plan.pendingCursor.rowId) continue;
-        const nextMetadataBytes = candidateMetadataBytes + target.toolMetadataBytes;
-        const nextProjectedBytes = candidateProjectedBytes + target.projectedReclaimableBytes;
-        if (
-          candidates.length >= Math.min(plan.batchRows, remainingRows) ||
-          (nextMetadataBytes > plan.batchBytes && candidates.length > 0) ||
-          nextProjectedBytes > remainingBytes
-        ) {
-          manifestHasMore = true;
-          break outer;
-        }
-        candidates.push({
-          rowId: target.rowId,
-          sessionId: target.sessionId,
-          createdAt: target.messageCreatedAt,
-          sequence: target.messageSequence,
-          messageId: target.messageId,
-          toolMetadataBytes: target.toolMetadataBytes,
-          approvedToolMetadataSha256: target.toolMetadataSha256,
-          projectedReclaimableBytes: target.projectedReclaimableBytes,
-        });
-        candidateMetadataBytes = nextMetadataBytes;
-        candidateProjectedBytes = nextProjectedBytes;
-      }
+      candidateMetadataBytes = nextMetadataBytes;
+      candidateProjectedBytes = nextProjectedBytes;
     }
+  }
 
-    if (candidates.length === 0) {
-      batch.archiveOperations = operationBudget.used;
-      if (manifestHasMore) {
-        throw new Error('approved cleanup budget cannot admit the next manifest target');
-      }
-      return batch;
-    }
-    const scanned = await scanToolPayloadCandidates({
-      sql,
-      env,
-      projectId: plan.projectId,
-      archivePrefix: config.toolPayloadArchiveR2Prefix,
-      archiveRetryDelayMs: plan.archiveRetryDelayMs,
-      archiveWriteTimeoutMs: plan.archiveWriteTimeoutMs,
-      archiveMaxOperations: operationBudget.max,
-      archiveChunkBytes: plan.archiveChunkBytes,
-      archiveMaxMetadataBytes: plan.archiveMaxMetadataBytes,
-      operationBudget,
-      requireApprovedTargets: true,
-      ...(plan.transactionSync ? { transactionSync: plan.transactionSync } : {}),
-      batchBytes: plan.batchBytes,
-      maxRowBytes: plan.maxRowBytes,
-      candidates,
-      initialCursor: plan.pendingCursor,
-      archivedAt: plan.now,
-      deadlineMs: plan.deadlineMs,
-      ...(plan.nowMs ? { nowMs: plan.nowMs } : {}),
-    });
-    batch.sessionsScanned = countSessions(candidates.slice(0, scanned.rowsScanned));
-    batch.rowsScanned = scanned.rowsScanned;
-    batch.rowsUpdated = scanned.rowsUpdated;
-    batch.approvedRowsCompleted = scanned.approvedRowsCompleted;
-    batch.approvedBytesCompleted = scanned.approvedBytesCompleted;
-    batch.archiveOperations = scanned.archiveOperations;
-    batch.rowsFailed = scanned.rowsFailed;
-    batch.toolMetadataBytesScanned = scanned.toolMetadataBytesScanned;
-    batch.toolMetadataBytesRead = scanned.toolMetadataBytesRead;
-    batch.originalToolMetadataBytes = scanned.originalToolMetadataBytes;
-    batch.storedToolMetadataBytes = scanned.storedToolMetadataBytes;
-    batch.errorMessages.push(...scanned.errorMessages);
-    batch.lastCursor = scanned.lastCursor;
-    batch.retryableFailure = scanned.retryableFailure;
-    if (scanned.retryableFailure || scanned.pausedForWallTime) {
-      batch.hasMoreCandidates = true;
-      batch.pauseCursor = scanned.retryCursor ?? scanned.lastCursor;
-    } else if (manifestHasMore) {
-      batch.hasMoreCandidates = true;
-      batch.pauseCursor = scanned.lastCursor;
+  if (candidates.length === 0) {
+    batch.archiveOperations = operationBudget.used;
+    if (manifestHasMore) {
+      throw new Error('approved cleanup budget cannot admit the next manifest target');
     }
     return batch;
-  } catch (error) {
-    const nowMs = plan.nowMs ?? Date.now;
-    writeToolPayloadCleanupCumulativeProgress(sql, {
-      ...plan.cumulative,
-      r2Operations: plan.cumulative.r2Operations + operationBudget.used,
-      wallTimeMs: plan.cumulative.wallTimeMs + Math.max(nowMs() - plan.wallClockStart, 0),
-    });
-    throw error;
   }
+  const scanned = await scanToolPayloadCandidates({
+    sql,
+    env,
+    projectId: plan.projectId,
+    archivePrefix: config.toolPayloadArchiveR2Prefix,
+    archiveRetryDelayMs: plan.archiveRetryDelayMs,
+    archiveWriteTimeoutMs: plan.archiveWriteTimeoutMs,
+    archiveMaxOperations: operationBudget.max,
+    archiveChunkBytes: plan.archiveChunkBytes,
+    archiveMaxMetadataBytes: plan.archiveMaxMetadataBytes,
+    operationBudget,
+    requireApprovedTargets: true,
+    ...(plan.transactionSync ? { transactionSync: plan.transactionSync } : {}),
+    batchBytes: plan.batchBytes,
+    maxRowBytes: plan.maxRowBytes,
+    candidates,
+    initialCursor: plan.pendingCursor,
+    archivedAt: plan.now,
+    deadlineMs: plan.deadlineMs,
+    ...(plan.nowMs ? { nowMs: plan.nowMs } : {}),
+  });
+  batch.sessionsScanned = countSessions(candidates.slice(0, scanned.rowsScanned));
+  batch.rowsScanned = scanned.rowsScanned;
+  batch.rowsUpdated = scanned.rowsUpdated;
+  batch.approvedRowsCompleted = scanned.approvedRowsCompleted;
+  batch.approvedBytesCompleted = scanned.approvedBytesCompleted;
+  batch.archiveOperations = scanned.archiveOperations;
+  batch.rowsFailed = scanned.rowsFailed;
+  batch.toolMetadataBytesScanned = scanned.toolMetadataBytesScanned;
+  batch.toolMetadataBytesRead = scanned.toolMetadataBytesRead;
+  batch.originalToolMetadataBytes = scanned.originalToolMetadataBytes;
+  batch.storedToolMetadataBytes = scanned.storedToolMetadataBytes;
+  batch.errorMessages.push(...scanned.errorMessages);
+  batch.lastCursor = scanned.lastCursor;
+  batch.retryableFailure = scanned.retryableFailure;
+  if (scanned.retryableFailure || scanned.pausedForWallTime) {
+    batch.hasMoreCandidates = true;
+    batch.pauseCursor = scanned.retryCursor ?? scanned.lastCursor;
+  } else if (manifestHasMore) {
+    batch.hasMoreCandidates = true;
+    batch.pauseCursor = scanned.lastCursor;
+  }
+  return batch;
 }
 
 async function scanToolPayloadCleanupBatch(
@@ -593,14 +595,39 @@ function persistToolPayloadCleanupState(
   if (continuationCursor && recheckAt !== null) {
     writeToolPayloadCleanupCursor(sql, continuationCursor, recheckAt, plan);
   } else if (recheckAt !== null) {
-    clearToolPayloadCleanupState(sql);
+    if (plan.manifestKey) clearToolPayloadCleanupContinuationState(sql);
+    else clearToolPayloadCleanupState(sql);
     writeToolPayloadCleanupRecheckAt(sql, recheckAt, plan);
   } else if (plan.manifestKey) {
-    clearToolPayloadCleanupState(sql);
+    clearToolPayloadCleanupContinuationState(sql);
     writeToolPayloadCleanupRecheckAt(sql, Number.MAX_SAFE_INTEGER, plan);
   } else {
     clearToolPayloadCleanupState(sql);
   }
+}
+
+function reserveApprovedToolPayloadCleanupPass(
+  sql: SqlStorage,
+  plan: ToolPayloadCleanupPlan
+): void {
+  if (!plan.manifestKey) return;
+  if (!plan.transactionSync) {
+    throw new Error('approved tool payload cleanup requires transactional state reservation');
+  }
+  const reserved: ToolPayloadCleanupCumulativeProgress = {
+    ...plan.cumulative,
+    r2Operations: plan.cumulative.r2Operations + plan.reservedR2Operations,
+    wallTimeMs: plan.cumulative.wallTimeMs + plan.reservedWallTimeMs,
+  };
+  plan.transactionSync(() => {
+    if (plan.pendingCursor) {
+      writeToolPayloadCleanupCursor(sql, plan.pendingCursor, plan.now, plan);
+    } else {
+      writeToolPayloadCleanupRecheckAt(sql, plan.now, plan);
+    }
+    writeToolPayloadCleanupCumulativeProgress(sql, reserved);
+  });
+  plan.cumulative = reserved;
 }
 
 function buildToolPayloadCleanupResult(
@@ -834,6 +861,7 @@ export async function runProjectDataToolPayloadCleanup(
 
   let batch: ToolPayloadCleanupBatch;
   try {
+    reserveApprovedToolPayloadCleanupPass(sql, plan);
     batch = await scanToolPayloadCleanupBatch(sql, env, config, plan);
   } catch (error) {
     return handleToolPayloadCleanupFailure(sql, config, options, plan, error);
@@ -844,15 +872,21 @@ export async function runProjectDataToolPayloadCleanup(
   const recheckAt = shouldContinue
     ? (batch.nextRetryAt ?? plan.now + config.toolPayloadCleanupRecheckMs)
     : null;
-  persistToolPayloadCleanupState(sql, plan, continuationCursor, recheckAt);
   if (plan.manifestKey) {
-    const nowMs = plan.nowMs ?? Date.now;
-    writeToolPayloadCleanupCumulativeProgress(sql, {
-      rows: plan.cumulative.rows + batch.approvedRowsCompleted,
-      bytes: plan.cumulative.bytes + batch.approvedBytesCompleted,
-      r2Operations: plan.cumulative.r2Operations + batch.archiveOperations,
-      wallTimeMs: plan.cumulative.wallTimeMs + Math.max(nowMs() - plan.wallClockStart, 0),
+    const transactionSync = plan.transactionSync;
+    if (!transactionSync) {
+      throw new Error('approved tool payload cleanup lost transactional state reservation');
+    }
+    transactionSync(() => {
+      persistToolPayloadCleanupState(sql, plan, continuationCursor, recheckAt);
+      writeToolPayloadCleanupCumulativeProgress(sql, {
+        ...plan.cumulative,
+        rows: plan.cumulative.rows + batch.approvedRowsCompleted,
+        bytes: plan.cumulative.bytes + batch.approvedBytesCompleted,
+      });
     });
+  } else {
+    persistToolPayloadCleanupState(sql, plan, continuationCursor, recheckAt);
   }
 
   const exhaustedCandidates =

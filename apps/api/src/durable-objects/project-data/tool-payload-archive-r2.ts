@@ -100,7 +100,10 @@ function remainingOperationTimeout(
   return Math.min(timeoutMs, remaining);
 }
 
-function reserveArchiveOperations(budget: ToolPayloadArchiveOperationBudget, count: number): void {
+export function reserveToolPayloadArchiveOperations(
+  budget: ToolPayloadArchiveOperationBudget,
+  count: number
+): void {
   if (budget.used + count > budget.max) {
     throw new Error(
       `R2 archive operation budget exceeded: ${budget.used + count} required, ${budget.max} allowed`
@@ -149,7 +152,7 @@ async function writeArchiveObjectWithTimeout(
   }
 }
 
-async function readArchiveObjectBytesWithTimeout(
+export async function readToolPayloadArchiveObjectBytesWithTimeout(
   r2: R2Bucket,
   key: string,
   timeoutMs: number,
@@ -189,7 +192,13 @@ async function writeAndVerifyArchiveObject(
     archiveSha256: expectedSha256,
     archiveVerificationVersion: String(TOOL_PAYLOAD_VERIFIED_ARCHIVE_VERSION),
   });
-  const actual = await readArchiveObjectBytesWithTimeout(r2, key, timeoutMs, deadlineMs, nowMs);
+  const actual = await readToolPayloadArchiveObjectBytesWithTimeout(
+    r2,
+    key,
+    timeoutMs,
+    deadlineMs,
+    nowMs
+  );
   if (actual.byteLength !== expected.byteLength) {
     throw new Error(
       `R2 archive verification byte mismatch for ${key}: expected ${expected.byteLength}, got ${actual.byteLength}`
@@ -233,7 +242,7 @@ export async function writeToolPayloadArchiveObject(
   };
   if (bodyBytes <= input.chunkBytes) {
     const immutableKey = contentAddressedArchiveKey(prepared.key, archiveBodySha256);
-    reserveArchiveOperations(input.operationBudget, 3);
+    reserveToolPayloadArchiveOperations(input.operationBudget, 3);
     const proof = await writeAndVerifyArchiveObject(
       r2,
       immutableKey,
@@ -258,7 +267,7 @@ export async function writeToolPayloadArchiveObject(
   }
 
   const chunkCount = Math.ceil(bodyBytes / input.chunkBytes);
-  reserveArchiveOperations(input.operationBudget, (chunkCount + 1) * 3);
+  reserveToolPayloadArchiveOperations(input.operationBudget, (chunkCount + 1) * 3);
   const chunks: Array<{ key: string; bytes: number; sha256: string }> = [];
   for (let index = 0; index < chunkCount; index++) {
     const offset = index * input.chunkBytes;
@@ -338,6 +347,12 @@ export async function parseToolPayloadArchiveObjectText(
       messageCreatedAt: number;
       messageSequence: number;
     };
+    verificationBudget?: {
+      operationBudget: ToolPayloadArchiveOperationBudget;
+      timeoutMs: number;
+      deadlineMs: number;
+      nowMs: () => number;
+    };
   }
 ): Promise<unknown> {
   const parsed = JSON.parse(text) as unknown;
@@ -401,9 +416,21 @@ export async function parseToolPayloadArchiveObjectText(
   const bodyChunks: Uint8Array[] = [];
   let bodyBytes = 0;
   for (const [index, key] of chunkKeys.entries()) {
-    const chunk = await r2.get(key);
-    if (!chunk) throw new Error('archived R2 chunk is missing');
-    const chunkBytes = new Uint8Array(await chunk.arrayBuffer());
+    let chunkBytes: Uint8Array;
+    if (input.verificationBudget) {
+      reserveToolPayloadArchiveOperations(input.verificationBudget.operationBudget, 2);
+      chunkBytes = await readToolPayloadArchiveObjectBytesWithTimeout(
+        r2,
+        key,
+        input.verificationBudget.timeoutMs,
+        input.verificationBudget.deadlineMs,
+        input.verificationBudget.nowMs
+      );
+    } else {
+      const chunk = await r2.get(key);
+      if (!chunk) throw new Error('archived R2 chunk is missing');
+      chunkBytes = new Uint8Array(await chunk.arrayBuffer());
+    }
     const proof = chunkProofs?.[index];
     if (proof) {
       if (chunkBytes.byteLength !== proof.bytes) {

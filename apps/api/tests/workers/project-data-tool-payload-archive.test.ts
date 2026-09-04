@@ -220,9 +220,11 @@ async function approvedCleanupEnv(
     PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT: String(cutoffCreatedAt),
     PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY: root.key,
     PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256: root.sha256,
+    PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO: '0.00002',
+    PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO: '0.00001',
     PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS: String(measured.toolPayloads.eligibleRows),
     PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES: String(measured.toolPayloads.eligibleBytes),
-    PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS: '1000',
+    PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS: '100000',
     PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_WALL_TIME_MS: '100000',
   };
 }
@@ -1092,6 +1094,54 @@ describe('ProjectData tool payload R2 archival', () => {
     expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
   });
 
+  it('safely supersedes the pre-plan v2 cleanup cursor with an exact approved manifest', async () => {
+    const projectId = `${TEST_PREFIX}-fixed-plan-v2-cursor`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'fixed-plan-v2-cursor', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+    ]);
+    const approval = await approvedCleanupEnv(
+      projectId,
+      'fixed-plan-v2-cursor-plan',
+      FIXED_NOW - 1_000
+    );
+    await runInDurableObject(stub, async (_instance, state) => {
+      const writeMeta = (key: string, value: string): void => {
+        state.storage.sql.exec(
+          `INSERT INTO do_meta (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+          key,
+          value
+        );
+      };
+      writeMeta('storageSafetyToolCleanupCursorVersion', '2');
+      writeMeta('storageSafetyToolCleanupCursorSessionId', seeded.sessionId);
+      writeMeta('storageSafetyToolCleanupCursorCreatedAt', String(FIXED_NOW - 2_000));
+      writeMeta('storageSafetyToolCleanupCursorSequence', '1');
+      writeMeta('storageSafetyToolCleanupCursorMessageId', seeded.messageIds[0]!);
+      writeMeta('storageSafetyToolCleanupRecheckAt', String(FIXED_NOW - 1));
+    });
+
+    const result = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        ...approval,
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO: '0.00002',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO: '0.00001',
+      },
+      { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+    );
+    expect(result).toMatchObject({ rowsUpdated: 1, rowsFailed: 0 });
+    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
+      seeded.messageIds[0]!
+    );
+    expect(source?.content).toBe('visible fixed-plan-v2-cursor');
+    expect(source?.toolMetadata.content).toBeUndefined();
+    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(1);
+  });
+
   it('fails closed for a manifest-bound fixed plan with reversed cleanup ratios', async () => {
     const projectId = `${TEST_PREFIX}-fixed-ratio-order`;
     const stub = getStub(projectId);
@@ -1122,6 +1172,79 @@ describe('ProjectData tool payload R2 archival', () => {
     expect(Array.isArray(source?.toolMetadata.content)).toBe(true);
   });
 
+  it('does not start a fresh exact plan when the object is already at or below target', async () => {
+    const projectId = `${TEST_PREFIX}-fixed-plan-below-target`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'fixed-plan-below-target', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+    ]);
+    const approval = await approvedCleanupEnv(
+      projectId,
+      'fixed-plan-below-target-plan',
+      FIXED_NOW - 1_000
+    );
+
+    expect(
+      await runArchiveCleanup(
+        stub,
+        projectId,
+        {
+          ...approval,
+          PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO: '0.9',
+          PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO: '0.82',
+        },
+        {
+          now: FIXED_NOW,
+          nowMs: () => FIXED_NOW,
+        }
+      )
+    ).toBeNull();
+    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
+      seeded.messageIds[0]!
+    );
+    expect(source?.content).toBe('visible fixed-plan-below-target');
+    expect(Array.isArray(source?.toolMetadata.content)).toBe(true);
+    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
+    const payloadObjects = await env.PROJECT_DATA_ARCHIVE_R2.list({
+      prefix: `project-data/tool-payloads/${encodeURIComponent(projectId)}/${encodeURIComponent(seeded.sessionId)}/`,
+    });
+    expect(payloadObjects.objects).toHaveLength(0);
+  });
+
+  it('rejects an exact plan whose per-row ceiling exceeds its per-pass byte ceiling', async () => {
+    const projectId = `${TEST_PREFIX}-fixed-plan-row-over-pass`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'fixed-plan-row-over-pass', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+    ]);
+    const approval = await approvedCleanupEnv(
+      projectId,
+      'fixed-plan-row-over-pass-plan',
+      FIXED_NOW - 1_000
+    );
+    const result = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        ...approval,
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO: '0.00002',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO: '0.00001',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES: '1000',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES: '1001',
+      },
+      { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+    );
+    expect(result).toBeNull();
+    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
+      seeded.messageIds[0]!
+    );
+    expect(source?.content).toBe('visible fixed-plan-row-over-pass');
+    expect(Array.isArray(source?.toolMetadata.content)).toBe(true);
+    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
+  });
+
   it('archives only approved manifest rows and fails closed if an approved source changes', async () => {
     const projectId = `${TEST_PREFIX}-manifest-binding`;
     const stub = getStub(projectId);
@@ -1137,10 +1260,19 @@ describe('ProjectData tool payload R2 archival', () => {
     const addedLater = await seedToolMessages(stub, [
       { id: 'backfilled-after-approval', createdAt: FIXED_NOW - 2_000, sequence: 1 },
     ]);
-    const result = await runArchiveCleanup(stub, projectId, approval, {
-      now: FIXED_NOW,
-      nowMs: () => FIXED_NOW,
-    });
+    const result = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        ...approval,
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO: '0.00002',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO: '0.00001',
+      },
+      {
+        now: FIXED_NOW,
+        nowMs: () => FIXED_NOW,
+      }
+    );
     expect(result?.rowsUpdated).toBe(1);
     const after = await readMessageContentAndMetadata(stub, [
       approved.messageIds[0]!,
@@ -1179,6 +1311,179 @@ describe('ProjectData tool payload R2 archival', () => {
     expect(changedSource?.content).toBe('visible changed-approved-row');
     expect(JSON.stringify(changedSource?.toolMetadata.content)).toContain('changed-after-approval');
     expect(await readArchiveRows(changedStub, changed.messageIds)).toHaveLength(0);
+  });
+
+  it('charges verified idempotent resume reads to the cumulative R2 operation ceiling', async () => {
+    const projectId = `${TEST_PREFIX}-manifest-resume-r2-budget`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'manifest-resume-r2-budget', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+    ]);
+    const approval = await approvedCleanupEnv(
+      projectId,
+      'manifest-resume-r2-budget-plan',
+      FIXED_NOW - 1_000
+    );
+    expect(
+      await runArchiveCleanup(stub, projectId, approval, {
+        now: FIXED_NOW,
+        nowMs: () => FIXED_NOW,
+      })
+    ).toMatchObject({ rowsUpdated: 1, rowsFailed: 0 });
+
+    const clearPlanState = async (): Promise<void> => {
+      await runInDurableObject(stub, async (_instance, state) => {
+        state.storage.sql.exec("DELETE FROM do_meta WHERE key LIKE 'storageSafetyTool%'");
+      });
+    };
+    await clearPlanState();
+    const boundedFailure = await runArchiveCleanup(
+      stub,
+      projectId,
+      { ...approval, PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS: '5' },
+      { now: FIXED_NOW + 1, nowMs: () => FIXED_NOW + 1 }
+    );
+    expect(boundedFailure).toMatchObject({ rowsUpdated: 0, rowsFailed: 1 });
+    const failedOperations = await runInDurableObject(stub, async (_instance, state) => {
+      const row = state.storage.sql
+        .exec("SELECT value FROM do_meta WHERE key = 'storageSafetyToolCleanupTotalR2Operations'")
+        .one() as { value: string };
+      return Number(row.value);
+    });
+    expect(failedOperations).toBe(5);
+
+    await clearPlanState();
+    const boundedSuccess = await runArchiveCleanup(
+      stub,
+      projectId,
+      { ...approval, PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS: '6' },
+      { now: FIXED_NOW + 2, nowMs: () => FIXED_NOW + 2 }
+    );
+    expect(boundedSuccess).toMatchObject({ rowsUpdated: 0, rowsFailed: 0 });
+    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
+      seeded.messageIds[0]!
+    );
+    expect(source?.content).toBe('visible manifest-resume-r2-budget');
+    expect(source?.toolMetadata.content).toBeUndefined();
+    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(1);
+  });
+
+  it('resumes an exact manifest across passes without rescanning or double counting', async () => {
+    const projectId = `${TEST_PREFIX}-manifest-exact-continuation`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'manifest-exact-first', createdAt: FIXED_NOW - 3_000, sequence: 1 },
+      { id: 'manifest-exact-second', createdAt: FIXED_NOW - 2_000, sequence: 2 },
+    ]);
+    const approval = await approvedCleanupEnv(
+      projectId,
+      'manifest-exact-continuation-plan',
+      FIXED_NOW - 1_000
+    );
+    const exactEnv = {
+      ...approval,
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO: '0.00002',
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO: '0.00001',
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS: '1',
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS: '1',
+    };
+    const readProgress = async (): Promise<Record<string, number>> =>
+      runInDurableObject(stub, async (_instance, state) => {
+        const rows = state.storage.sql
+          .exec(
+            `SELECT key, value FROM do_meta
+             WHERE key IN (
+               'storageSafetyToolCleanupTotalRows',
+               'storageSafetyToolCleanupTotalBytes',
+               'storageSafetyToolCleanupTotalR2Operations',
+               'storageSafetyToolCleanupTotalWallTimeMs'
+             )`
+          )
+          .toArray() as Array<{ key: string; value: string }>;
+        return Object.fromEntries(rows.map((row) => [row.key, Number(row.value)]));
+      });
+
+    const first = await runArchiveCleanup(stub, projectId, exactEnv, {
+      now: FIXED_NOW,
+      nowMs: () => FIXED_NOW,
+    });
+    expect(first).toMatchObject({ rowsScanned: 1, rowsUpdated: 1, rowsFailed: 0 });
+    expect(first?.cursor?.messageId).toBe(seeded.messageIds[0]);
+    expect(await readProgress()).toMatchObject({
+      storageSafetyToolCleanupTotalRows: 1,
+      storageSafetyToolCleanupTotalR2Operations: 1500,
+      storageSafetyToolCleanupTotalWallTimeMs: 20000,
+    });
+
+    const second = await runArchiveCleanup(stub, projectId, exactEnv, {
+      now: FIXED_NOW + 2,
+      nowMs: () => FIXED_NOW + 2,
+    });
+    expect(second).toMatchObject({ rowsScanned: 1, rowsUpdated: 1, rowsFailed: 0 });
+    expect(second?.cursor).toBeNull();
+    expect(await readProgress()).toEqual({
+      storageSafetyToolCleanupTotalRows: 2,
+      storageSafetyToolCleanupTotalBytes: Number(
+        approval.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES
+      ),
+      storageSafetyToolCleanupTotalR2Operations: 3000,
+      storageSafetyToolCleanupTotalWallTimeMs: 40000,
+    });
+    expect(
+      await runArchiveCleanup(stub, projectId, exactEnv, {
+        now: FIXED_NOW + 4,
+        nowMs: () => FIXED_NOW + 4,
+      })
+    ).toBeNull();
+    const sources = await readMessageContentAndMetadata(stub, seeded.messageIds);
+    expect(sources.get(seeded.messageIds[0]!)?.content).toBe('visible manifest-exact-first');
+    expect(sources.get(seeded.messageIds[1]!)?.content).toBe('visible manifest-exact-second');
+    expect(sources.get(seeded.messageIds[0]!)?.toolMetadata.content).toBeUndefined();
+    expect(sources.get(seeded.messageIds[1]!)?.toolMetadata.content).toBeUndefined();
+    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(2);
+  });
+
+  it('fails closed on equal-length approved root-manifest corruption', async () => {
+    const projectId = `${TEST_PREFIX}-manifest-root-corruption`;
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'manifest-root-corruption', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+    ]);
+    const approval = await approvedCleanupEnv(
+      projectId,
+      'manifest-root-corruption-plan',
+      FIXED_NOW - 1_000
+    );
+    const rootKey = approval.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY;
+    const rootObject = await env.PROJECT_DATA_ARCHIVE_R2.get(rootKey);
+    expect(rootObject).not.toBeNull();
+    const corrupted = new Uint8Array(await rootObject!.arrayBuffer());
+    corrupted[Math.floor(corrupted.byteLength / 2)]! ^= 1;
+    await env.PROJECT_DATA_ARCHIVE_R2.put(rootKey, corrupted);
+
+    const result = await runArchiveCleanup(
+      stub,
+      projectId,
+      {
+        ...approval,
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO: '0.00002',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO: '0.00001',
+      },
+      {
+        now: FIXED_NOW,
+        nowMs: () => FIXED_NOW,
+      }
+    );
+    expect(result).toMatchObject({ rowsUpdated: 0, rowsFailed: 1 });
+    const source = (await readMessageContentAndMetadata(stub, seeded.messageIds)).get(
+      seeded.messageIds[0]!
+    );
+    expect(source?.content).toBe('visible manifest-root-corruption');
+    expect(Array.isArray(source?.toolMetadata.content)).toBe(true);
+    expect(await readArchiveRows(stub, seeded.messageIds)).toHaveLength(0);
   });
 
   it('refuses an approved manifest whose totals exceed the cumulative operator ceilings', async () => {
@@ -1640,6 +1945,7 @@ describe('ProjectData tool payload R2 archival', () => {
       {
         PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES: '1800000',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES: '1800000',
         PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES: '200000',
         PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES: '1800000',
       },
@@ -1727,6 +2033,7 @@ describe('ProjectData tool payload R2 archival', () => {
         PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
         PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS: '1',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES: '1600000',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES: '1900000',
         PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES: '200000',
         PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES: '1900000',
       },
@@ -1772,6 +2079,7 @@ describe('ProjectData tool payload R2 archival', () => {
         PROJECT_DATA_ARCHIVE_R2: failingBucket,
         PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS: '0',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES: '1800000',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES: '1800000',
         PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES: '200000',
         PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES: '1800000',
       },

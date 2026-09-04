@@ -22,6 +22,8 @@ export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_ROWS = 500_000;
 export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES = 2_000_000_000;
 export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MS = 60_000;
 export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS = 20_000;
+export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_SLICES_PER_RUN = 1;
+export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS = 25_000;
 const PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MARGIN_MS = 5_000;
 const PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INNER_RETURN_MARGIN_MS = 500;
 const PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_MANIFEST_BYTES = 1_750_000;
@@ -42,6 +44,8 @@ type PreflightConfig = {
   maxBytes: number;
   leaseMs: number;
   wallTimeMs: number;
+  slicesPerRun: number;
+  runWallTimeMs: number;
   archivePrefix: string;
   archiveWriteTimeoutMs: number;
   valid: boolean;
@@ -161,6 +165,14 @@ function configFromEnv(env: Env): PreflightConfig {
     env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS,
     DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS
   );
+  const slicesPerRun = positiveInteger(
+    env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_SLICES_PER_RUN,
+    DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_SLICES_PER_RUN
+  );
+  const runWallTimeMs = positiveInteger(
+    env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS,
+    DEFAULT_PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS
+  );
   const archiveWriteTimeoutMs = positiveInteger(
     env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS,
     5_000
@@ -178,6 +190,8 @@ function configFromEnv(env: Env): PreflightConfig {
     maxBytes: maxBytes.value,
     leaseMs: leaseMs.value,
     wallTimeMs: wallTimeMs.value,
+    slicesPerRun: slicesPerRun.value,
+    runWallTimeMs: runWallTimeMs.value,
     archivePrefix,
     archiveWriteTimeoutMs: archiveWriteTimeoutMs.value,
   });
@@ -194,6 +208,8 @@ function configFromEnv(env: Env): PreflightConfig {
     maxBytes: maxBytes.value,
     leaseMs: leaseMs.value,
     wallTimeMs: wallTimeMs.value,
+    slicesPerRun: slicesPerRun.value,
+    runWallTimeMs: runWallTimeMs.value,
     archivePrefix,
     archiveWriteTimeoutMs: archiveWriteTimeoutMs.value,
     valid: Boolean(
@@ -207,8 +223,12 @@ function configFromEnv(env: Env): PreflightConfig {
       maxBytes.valid &&
       leaseMs.valid &&
       wallTimeMs.valid &&
+      slicesPerRun.valid &&
+      runWallTimeMs.valid &&
       archiveWriteTimeoutMs.valid &&
-      leaseMs.value >= wallTimeMs.value + PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MARGIN_MS
+      leaseMs.value >= wallTimeMs.value + PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MARGIN_MS &&
+      runWallTimeMs.value >=
+        wallTimeMs.value + PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INNER_RETURN_MARGIN_MS
     ),
   };
 }
@@ -534,7 +554,8 @@ async function claimRun(
   config: PreflightConfig,
   row: PreflightRow,
   now: number,
-  leaseOwner: string
+  leaseOwner: string,
+  bypassCadence: boolean
 ): Promise<PreflightRow | null> {
   if (row.status !== 'running') return null;
   const result = await env.DATABASE.prepare(
@@ -547,10 +568,19 @@ async function claimRun(
          updated_at = ?
      WHERE plan_id = ?
        AND status = 'running'
-       AND next_eligible_at <= ?
+       AND (? = 1 OR next_eligible_at <= ?)
        AND (lease_owner IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= ?)`
   )
-    .bind(now + config.intervalMs, leaseOwner, now + config.leaseMs, now, config.planId, now, now)
+    .bind(
+      now + config.intervalMs,
+      leaseOwner,
+      now + config.leaseMs,
+      now,
+      config.planId,
+      bypassCadence ? 1 : 0,
+      now,
+      now
+    )
     .run();
   if ((result.meta.changes ?? 0) === 0) return null;
   return readRun(env, config.planId);
@@ -607,16 +637,14 @@ async function recordFailure(
   return (await readRun(env, config.planId)) ?? claimed;
 }
 
-export async function runProjectDataStorageReliefPreflight(
+async function runProjectDataStorageReliefPreflightSlice(
   env: Env,
-  date = new Date()
+  config: PreflightConfig,
+  date: Date,
+  bypassCadence: boolean,
+  nowMs: () => number
 ): Promise<ProjectDataStorageReliefPreflightResult> {
-  const config = configFromEnv(env);
-  if (!config.enabled) return emptyResult(config, 'disabled');
   const now = date.getTime();
-  if (!config.valid || config.cutoffCreatedAt > now) {
-    return emptyResult(config, 'invalid_config');
-  }
 
   let row: PreflightRow;
   try {
@@ -633,10 +661,10 @@ export async function runProjectDataStorageReliefPreflight(
   if (row.lease_owner && row.lease_expires_at !== null && row.lease_expires_at > now) {
     return resultFromRow(row, 'leased');
   }
-  if (row.next_eligible_at > now) return resultFromRow(row, 'cadence');
+  if (!bypassCadence && row.next_eligible_at > now) return resultFromRow(row, 'cadence');
 
   const leaseOwner = crypto.randomUUID();
-  const claimed = await claimRun(env, config, row, now, leaseOwner);
+  const claimed = await claimRun(env, config, row, now, leaseOwner, bypassCadence);
   if (!claimed) {
     row = (await readRun(env, config.planId)) ?? row;
     return resultFromRow(row, row.status === 'running' ? 'leased' : 'terminal');
@@ -657,9 +685,9 @@ export async function runProjectDataStorageReliefPreflight(
     }
 
     const cursor = parseCursor(claimed.cursor_json);
-    const sliceDeadlineMs = Date.now() + config.wallTimeMs;
+    const sliceDeadlineMs = nowMs() + config.wallTimeMs;
     const measurementBudgetMs = Math.max(Math.floor(config.wallTimeMs / 2), 1);
-    const innerDeadlineMs = Date.now() + measurementBudgetMs;
+    const innerDeadlineMs = nowMs() + measurementBudgetMs;
     const measurement = await withTimeout(
       measureProjectDataStorageRelief(env, config.projectId, {
         cursor,
@@ -845,4 +873,40 @@ export async function runProjectDataStorageReliefPreflight(
   } catch (error) {
     return resultFromRow(await recordFailure(env, config, claimed, leaseOwner, now, error));
   }
+}
+
+export async function runProjectDataStorageReliefPreflight(
+  env: Env,
+  date = new Date(),
+  options: { nowMs?: () => number } = {}
+): Promise<ProjectDataStorageReliefPreflightResult> {
+  const config = configFromEnv(env);
+  if (!config.enabled) return emptyResult(config, 'disabled');
+  const now = date.getTime();
+  if (!config.valid || config.cutoffCreatedAt > now) {
+    return emptyResult(config, 'invalid_config');
+  }
+
+  const nowMs = options.nowMs ?? Date.now;
+  const runStartedAtMs = nowMs();
+  const runDeadlineMs = runStartedAtMs + config.runWallTimeMs;
+  let result = await runProjectDataStorageReliefPreflightSlice(env, config, date, false, nowMs);
+  for (let slice = 1; slice < config.slicesPerRun; slice += 1) {
+    if (result.skipped || result.status !== 'running' || result.lastError) break;
+    if (
+      nowMs() + config.wallTimeMs + PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INNER_RETURN_MARGIN_MS >
+      runDeadlineMs
+    ) {
+      break;
+    }
+    const elapsedMs = Math.max(nowMs() - runStartedAtMs, 0);
+    result = await runProjectDataStorageReliefPreflightSlice(
+      env,
+      config,
+      new Date(now + elapsedMs),
+      true,
+      nowMs
+    );
+  }
+  return result;
 }

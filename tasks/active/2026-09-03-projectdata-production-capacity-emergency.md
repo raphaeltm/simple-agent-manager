@@ -5,12 +5,12 @@
 The production `ProjectData` Durable Object for project
 `01KHRJGANBBWGDY1NZ0KVF0D4J` is at imminent `SQLITE_FULL` risk. The latest
 available measurement at task start was `9,884,188,672 / 10,000,000,000`
-bytes (`98.84188672%`) at `2026-09-03T21:13:42Z`. The next direct measurement
-at `2026-09-03T23:13:44Z` reached `9,908,338,688` bytes (`99.08338688%`),
-growing at approximately `156,398,777` bytes/day with `0.586` days to the
-storage limit. The configured emergency target is 90%, so at least
-`908,338,688` bytes of measured database relief is now required before
-allowing for ongoing writes and measurement lag.
+bytes (`98.84188672%`) at `2026-09-03T21:13:42Z`. Subsequent direct measurements
+reached `9,908,338,688` bytes at `23:13:44Z`, `9,926,107,136` bytes at
+`00:13:45Z`, and `9,950,601,216` bytes (`99.50601216%`) at
+`2026-09-04T01:13:48.572Z`. The configured emergency target is 90%, so at least
+`950,601,216` bytes of measured database relief is now required before allowing
+for ongoing writes and measurement lag.
 
 This task owns the emergency through implementation, review, staging, merge,
 production deployment, an exact human-approved production mutation, and
@@ -31,11 +31,12 @@ uncertain states must fail closed.
 
 ## Production baseline
 
-- Latest D1 telemetry re-read points to the `2026-09-03T23:13:44Z` direct
-  `sql.databaseSize` measurement: `9,908,338,688` bytes, ratio
-  `0.9908338688`, growth `156,398,777.33` bytes/day, estimated `0.586074`
-  days remaining, status `degraded`, cleanup health `running`. This is
-  12,701,696 bytes above the prior hourly sample.
+- Latest D1 telemetry re-read points to the `2026-09-04T01:13:48.572Z` direct
+  `sql.databaseSize` measurement: `9,950,601,216` bytes, ratio
+  `0.9950601216`, growth `161,113,667.77` bytes/day, estimated `0.306608`
+  days (about 7.36 hours) remaining, status `degraded`, cleanup health
+  `running`. This is 24,494,080 bytes above the prior hourly sample and leaves
+  only 49,398,784 bytes before the configured limit.
 - Last purge was `auto_terminal_event_log_cleanup`; it removed 7 rows and did
   not converge toward the emergency target.
 - Production has zero archive-migration, archive-location, and project archive
@@ -107,68 +108,71 @@ uncertain states must fail closed.
 ## Implementation checklist
 
 - [x] Inspect the failed predecessor and active duplicates; record this task as
-  the explicit successor.
+      the explicit successor.
 - [x] Refresh direct storage, growth, cleanup, candidate, archive-journal,
-  circuit-breaker, error, CPU, and rows-read evidence from production.
+      circuit-breaker, error, CPU, and rows-read evidence from production.
 - [x] Inspect PRs #1978, #1984, #2000, #2002, #2004, #2005, and #2008 plus the
-  active ProjectData storage, retention, cleanup, and sharding task records.
+      active ProjectData storage, retention, cleanup, and sharding task records.
 - [ ] Choose and document the minimum safe composition after measuring
-  authoritative eligible tool-payload and terminal-session relief stock.
+      authoritative eligible tool-payload and terminal-session relief stock.
 - [x] Add bounded, resumable, read-only preflight evidence that can produce
-  exact project/session/table/row/byte targets without an unbounded object scan.
+      exact project/session/table/row/byte targets without an unbounded object scan.
+- [x] Add an explicit per-cron slice cap and aggregate run wall-time ceiling so an
+      emergency preflight can accelerate without changing the separately leased,
+      one-slice default or bypassing the overall row/byte/batch bounds.
 - [x] Require explicit post-write R2 read-back and SHA-256/byte verification
-  before any selected path strips tool metadata or deletes source session rows.
+      before any selected path strips tool metadata or deletes source session rows.
 - [ ] If terminal sharding is required, make each pass resumable and enforce
-  overall row, byte, R2-operation, and wall-time budgets inside a session; the
-  next pass must resume after verified committed progress rather than restart.
+      overall row, byte, R2-operation, and wall-time budgets inside a session; the
+      next pass must resume after verified committed progress rather than restart.
 - [x] Keep all limits, timeouts, target thresholds, and operator scoping
-  environment-configurable, disabled or narrowly scoped by default, and covered
-  by a project-level kill switch/circuit breaker.
+      environment-configurable, disabled or narrowly scoped by default, and covered
+      by a project-level kill switch/circuit breaker.
 - [x] Preserve `chat_messages.content` byte-for-byte and prove archived message
-  and tool-payload reads work after source cleanup.
+      and tool-payload reads work after source cleanup.
 - [x] Add discriminating unit and Workers-runtime tests for success, R2
-  corruption/missing-readback, timeout/pause/resume, idempotency, candidate
-  exhaustion, source-change races, and target/circuit-breaker stop conditions.
+      corruption/missing-readback, timeout/pause/resume, idempotency, candidate
+      exhaustion, source-change races, and target/circuit-breaker stop conditions.
 - [x] Update Env surfaces, deployment configuration, API/operator docs, and
-  task records for every new control or contract.
+      task records for every new control or contract.
 - [x] Run focused tests, API tests, typecheck, lint, formatting, migration safety,
-  config sync, and the relevant full suites.
+      config sync, and the relevant full suites.
 - [ ] Complete all required specialist reviews and address every critical/high
-  finding before PR creation/merge.
+      finding before PR creation/merge.
 - [ ] Coordinate a successful staging deployment, exercise the real preflight
-  and archival path end to end, prove fail-closed behavior, and return staging
-  to zero VMs at rest.
+      and archival path end to end, prove fail-closed behavior, and return staging
+      to zero VMs at rest.
 - [ ] Open the PR, converge CI and CodeRabbit, merge, deploy production, and
-  verify the exact deployed version before asking for mutation approval.
+      verify the exact deployed version before asking for mutation approval.
 - [ ] Present the exact production mutation plan and obtain Raphaël's explicit
-  approval before any destructive production operation.
+      approval before any destructive production operation.
 - [ ] Execute only the approved bounded plan, verify every archive before source
-  deletion, stop at or below 90%, and abort on any uncertainty or stop trigger.
+      deletion, stop at or below 90%, and abort on any uncertainty or stop trigger.
 - [ ] Observe storage/growth, archive integrity, errors/overload/CPU, and rows
-  read for the approved window; report exact before/after evidence and remaining
-  risk rather than stopping at code deployment.
+      read for the approved window; report exact before/after evidence and remaining
+      risk rather than stopping at code deployment.
 
 ## Acceptance criteria
 
 - [ ] Production `sql.databaseSize` for `01KHRJGANBBWGDY1NZ0KVF0D4J` is at or
-  below 9,000,000,000 bytes after the approved operation.
+      below 9,000,000,000 bytes after the approved operation.
 - [ ] No message text is deleted; sampled and boundary session reads remain
-  byte-equivalent across any ownership transition.
+      byte-equivalent across any ownership transition.
 - [ ] Every removed inline tool payload and every deleted root session row has a
-  verified R2 recovery object or manifest and hash evidence recorded before the
-  source mutation.
+      verified R2 recovery object or manifest and hash evidence recorded before the
+      source mutation.
 - [ ] Destructive work cannot exceed the approved project/session set or the
-  configured rows, bytes, R2 operations, and wall time, and can be stopped by a
-  scoped circuit breaker/kill switch.
+      configured rows, bytes, R2 operations, and wall time, and can be stopped by a
+      scoped circuit breaker/kill switch.
 - [ ] Partial work and failures retain a readable authoritative source, persist
-  resumable progress, and never publish an unverified archive owner.
+      resumable progress, and never publish an unverified archive owner.
 - [ ] Staging validates the production-like path and has zero VMs at rest after
-  verification.
+      verification.
 - [ ] CI, specialist reviews, CodeRabbit, merge, deployment, and exact deployed
-  commit are all recorded.
+      commit are all recorded.
 - [ ] The post-operation observation window shows storage relief plus stable or
-  improved read cost and no new capacity, overload, CPU, or archive-integrity
-  incident attributable to the operation.
+      improved read cost and no new capacity, overload, CPU, or archive-integrity
+      incident attributable to the operation.
 
 ## References
 
