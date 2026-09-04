@@ -251,7 +251,7 @@ beforeEach(() => {
     NODE_LIFECYCLE: {
       idFromName: vi.fn(() => 'node-lifecycle-id'),
       get: vi.fn(() => ({
-        claimWorkspaceDeletionAttempt: vi.fn(async () => true),
+        claimWorkspaceDeletionAttempt: vi.fn(async () => 'claimed' as const),
         confirmWorkspaceDeletion: vi.fn(async () => {}),
         scheduleWorkspaceDeletion: vi.fn(async () => {}),
       })),

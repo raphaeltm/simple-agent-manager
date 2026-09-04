@@ -60,7 +60,7 @@ export type WorkspaceDeletionOutcome =
   | {
       status: 'confirmed';
       proof: WorkspaceDeletionProof;
-      workspaceFinalized: boolean;
+      workspaceFinalized: true;
     }
   | {
       status: 'retry';
@@ -70,6 +70,10 @@ export type WorkspaceDeletionOutcome =
   | {
       status: 'fenced';
       reason: 'workspace_active' | 'workspace_missing' | 'workspace_assignment_changed';
+    }
+  | {
+      status: 'superseded';
+      reason: 'workspace_assignment_changed_after_vm_confirmation';
     };
 
 type WorkspaceDeletionRow = WorkspaceDeletionSnapshot;
@@ -347,6 +351,30 @@ async function requireDeletionTargetAtBoundary(
   }
 }
 
+async function deferConfirmedDeletionFinalization(
+  env: Env,
+  expected: WorkspaceDeletionIdentity,
+  current: WorkspaceDeletionSnapshot,
+  proof: WorkspaceDeletionProof,
+  source: string,
+  phase: string
+): Promise<WorkspaceDeletionOutcome> {
+  const diagnostic = boundedDiagnostic(
+    env,
+    `${WORKSPACE_DELETION_DIAGNOSTIC_PREFIX}: ${proof} proof retained; finalization requires stopping state`
+  );
+  await persistDeletionDiagnostic(env, expected, diagnostic);
+  log.warn('workspace_deletion.confirmed_finalization_deferred', {
+    ...workspaceDeletionIdentityLogContext(expected, current),
+    currentStatus: current.status,
+    proof,
+    source,
+    phase,
+    action: 'durable_attempt_retained',
+  });
+  return { status: 'retry', reason: 'runtime_deletion_finalization_pending', diagnostic };
+}
+
 async function finalizeConfirmedDeletion(
   env: Env,
   expected: WorkspaceDeletionIdentity,
@@ -356,7 +384,7 @@ async function finalizeConfirmedDeletion(
 ): Promise<WorkspaceDeletionOutcome> {
   const current = await loadWorkspaceDeletionRow(env.DATABASE, expected.workspaceId);
   if (!current) {
-    return { status: 'confirmed', proof, workspaceFinalized: false };
+    return { status: 'confirmed', proof, workspaceFinalized: true };
   }
 
   const terminalNodeMayClearAssignment =
@@ -372,7 +400,10 @@ async function finalizeConfirmedDeletion(
       source,
       action: 'current_incarnation_preserved',
     });
-    return { status: 'confirmed', proof, workspaceFinalized: false };
+    return {
+      status: 'superseded',
+      reason: 'workspace_assignment_changed_after_vm_confirmation',
+    };
   }
   if (
     current.runtimeDeletionConfirmedAt &&
@@ -392,14 +423,14 @@ async function finalizeConfirmedDeletion(
     };
   }
   if (proof === 'vm_agent_confirmed' && current.status !== 'stopping') {
-    log.warn('workspace_deletion.confirmed_after_state_change', {
-      workspaceId: expected.workspaceId,
-      expectedNodeId: expected.nodeId,
-      currentStatus: current.status,
+    return deferConfirmedDeletionFinalization(
+      env,
+      expected,
+      current,
+      proof,
       source,
-      action: 'current_state_preserved',
-    });
-    return { status: 'confirmed', proof, workspaceFinalized: false };
+      'before_terminal_write'
+    );
   }
 
   const result = await env.DATABASE.prepare(
@@ -444,7 +475,40 @@ async function finalizeConfirmedDeletion(
     )
     .run();
   if ((result.meta.changes ?? 0) === 0) {
-    return { status: 'confirmed', proof, workspaceFinalized: false };
+    const latest = await loadWorkspaceDeletionRow(env.DATABASE, expected.workspaceId);
+    if (!latest) return { status: 'confirmed', proof, workspaceFinalized: true };
+    const latestOwnershipMatches = terminalNodeMayClearAssignment
+      ? sameOwnershipExceptTerminalNode(latest, expected)
+      : sameOwnership(latest, expected);
+    if (!latestOwnershipMatches) {
+      return fencedDeletionOutcome(
+        expected,
+        latest,
+        'workspace_assignment_changed',
+        source,
+        'terminal_write'
+      );
+    }
+    if (
+      latest.runtimeDeletionConfirmedAt &&
+      isWorkspaceDeletionProof(latest.runtimeDeletionProof)
+    ) {
+      return finalizeConfirmedDeletion(
+        env,
+        expected,
+        latest.runtimeDeletionProof,
+        source,
+        beforeFinalize
+      );
+    }
+    return deferConfirmedDeletionFinalization(
+      env,
+      expected,
+      latest,
+      proof,
+      source,
+      'terminal_write'
+    );
   }
 
   await beforeFinalize?.();

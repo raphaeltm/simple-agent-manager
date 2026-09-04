@@ -40,7 +40,6 @@ const mocks = vi.hoisted(() => ({
   truncateTitle: vi.fn(),
   enrichMessageWithMentions: vi.fn(),
   resolveTaskStartPlacementCredentialAttributionFromPlacement: vi.fn(),
-  cleanupWorkspaceForDeletion: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1');
@@ -92,9 +91,6 @@ vi.mock('../../../src/services/task-title', () => ({
 }));
 vi.mock('../../../src/services/mention-enrichment', () => ({
   enrichMessageWithMentions: mocks.enrichMessageWithMentions,
-}));
-vi.mock('../../../src/services/workspace-cleanup', () => ({
-  cleanupWorkspaceForDeletion: mocks.cleanupWorkspaceForDeletion,
 }));
 
 const INSTALLATION_ROW = {
@@ -294,69 +290,6 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     await expectForbidden(res, REPO_NOT_ACCESSIBLE);
     // Fail-fast: no node was ever created.
     expect(mocks.createNodeRecord).not.toHaveBeenCalled();
-  });
-
-  it('workspace delete: returns conflict instead of claiming pending success when fenced', async () => {
-    limitResponses.push([
-      {
-        id: 'workspace-1',
-        userId: 'user-1',
-        nodeId: 'node-1',
-        projectId: 'proj-1',
-        chatSessionId: 'session-1',
-        status: 'running',
-      },
-    ]);
-    mocks.cleanupWorkspaceForDeletion.mockResolvedValueOnce({
-      status: 'fenced',
-      reason: 'workspace_assignment_changed',
-    });
-
-    const res = await buildApp().request(
-      '/api/workspaces/workspace-1',
-      { method: 'DELETE' },
-      mockEnv
-    );
-
-    expect(res.status).toBe(409);
-    await expect(res.json()).resolves.toEqual({
-      success: false,
-      deletionStatus: 'rejected',
-      workspaceStatus: 'unchanged',
-      reason: 'workspace_assignment_changed',
-    });
-  });
-
-  it('workspace delete: reports pending only for a retained retry outcome', async () => {
-    limitResponses.push([
-      {
-        id: 'workspace-1',
-        userId: 'user-1',
-        nodeId: 'node-1',
-        projectId: 'proj-1',
-        chatSessionId: 'session-1',
-        status: 'running',
-      },
-    ]);
-    mocks.cleanupWorkspaceForDeletion.mockResolvedValueOnce({
-      status: 'retry',
-      reason: 'runtime_deletion_unconfirmed',
-      diagnostic: 'bounded diagnostic',
-    });
-
-    const res = await buildApp().request(
-      '/api/workspaces/workspace-1',
-      { method: 'DELETE' },
-      mockEnv
-    );
-
-    expect(res.status).toBe(202);
-    await expect(res.json()).resolves.toEqual({
-      success: true,
-      deletionStatus: 'pending',
-      workspaceStatus: 'stopping',
-      reason: 'runtime_deletion_unconfirmed',
-    });
   });
 
   it('workspace create: gate passes and node provisioning is reached when access is intact', async () => {

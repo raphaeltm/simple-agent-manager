@@ -455,7 +455,7 @@ async function cleanupWorkspacesOnLiveNode(
         userId: workspace.user_id,
         logContext: { closePath: 'trial_expire' },
       });
-      if (outcome.status !== 'confirmed' || !outcome.workspaceFinalized) {
+      if (outcome.status !== 'confirmed') {
         result.cleanupErrors++;
         continue;
       }

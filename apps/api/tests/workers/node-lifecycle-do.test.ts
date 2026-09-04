@@ -10,6 +10,8 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { workspaceDeletionDueIndexKey } from '../../src/durable-objects/node-lifecycle-workspace-deletion';
+import type { PendingWorkspaceDeletion } from '../../src/durable-objects/node-lifecycle-workspace-deletion-support';
 import type { Env } from '../../src/env';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import {
@@ -43,6 +45,15 @@ function getStub(nodeId: string): DurableObjectStub<NodeLifecycleTestDouble> {
 function getProjectDataStub(projectId: string): DurableObjectStub<ProjectDataTestDouble> {
   const id = env.PROJECT_DATA.idFromName(projectId);
   return env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectDataTestDouble>;
+}
+
+async function putIndexedWorkspaceDeletion(
+  storage: DurableObjectStorage,
+  entry: PendingWorkspaceDeletion
+): Promise<void> {
+  const entryKey = `ws-delete:${entry.workspaceId}`;
+  await storage.put(entryKey, entry);
+  if (!entry.deadLetteredAt) await storage.put(workspaceDeletionDueIndexKey(entry), entryKey);
 }
 
 const TEST_USER_ID = 'user-nl-test-001';
@@ -829,7 +840,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     const stub = getStub(nodeId);
     await expect(
       stub.claimWorkspaceDeletionAttempt(nodeId, wsId, TEST_USER_ID, expected)
-    ).resolves.toBe(false);
+    ).resolves.toBe('fenced');
 
     const workspace = await env.DATABASE.prepare('SELECT status FROM workspaces WHERE id = ?')
       .bind(wsId)
@@ -840,6 +851,34 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
         instance.ctx.storage.get(`ws-delete:${wsId}`)
       )
     ).toBeUndefined();
+  });
+
+  it('reports an exact duplicate deletion claim as the same retained attempt', async () => {
+    const nodeId = 'nl-test-duplicate-delete-claim-001';
+    const wsId = 'ws-duplicate-delete-claim-001';
+    await seedTestNode(nodeId);
+    await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'stopped' });
+
+    const expected = await loadWorkspaceDeletionIdentity(env.DATABASE, wsId);
+    expect(expected).not.toBeNull();
+    const stub = getStub(nodeId);
+    await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID, { expected: expected! });
+
+    await expect(
+      stub.claimWorkspaceDeletionAttempt(nodeId, wsId, TEST_USER_ID, expected!)
+    ).resolves.toBe('claimed');
+    await expect(
+      stub.claimWorkspaceDeletionAttempt(nodeId, wsId, TEST_USER_ID, expected!)
+    ).resolves.toBe('already_claimed_same_identity');
+
+    const pending = await runInDurableObject(stub, async (instance) =>
+      instance.ctx.storage.get<{ attemptCount: number; claimId: string }>(`ws-delete:${wsId}`)
+    );
+    expect(pending).toMatchObject({ attemptCount: 1, claimId: expect.any(String) });
+    const workspace = await env.DATABASE.prepare('SELECT status FROM workspaces WHERE id = ?')
+      .bind(wsId)
+      .first<{ status: string }>();
+    expect(workspace?.status).toBe('stopping');
   });
 
   it('persists a deletion claim before VM I/O and refuses restart cancellation while fetch is deferred', async () => {
@@ -1086,7 +1125,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
         claimedByTask: null,
         warmTimeoutOverrideMs: 1,
       } satisfies StoredNodeLifecycleState);
-      await instance.ctx.storage.put(`ws-delete:${wsId}`, {
+      await putIndexedWorkspaceDeletion(instance.ctx.storage, {
         nodeId,
         workspaceId: wsId,
         userId: TEST_USER_ID,
@@ -1679,7 +1718,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     }
   );
 
-  it('preserves a status-only restart that wins while VM deletion is in flight', async () => {
+  it('re-quarantines a status-only restart that races with VM deletion confirmation', async () => {
     const nodeId = 'nl-test-inflight-status-only-001';
     const wsId = 'ws-inflight-status-only-001';
     const agentSessionId = 'agent-inflight-status-only-001';
@@ -1713,12 +1752,18 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       )
         .bind(wsId)
         .first<{ status: string; confirmedAt: string | null; proof: string | null }>();
-      expect(workspace).toEqual({ status: 'running', confirmedAt: null, proof: null });
+      expect(workspace).toEqual({ status: 'stopping', confirmedAt: null, proof: null });
       expect(await getAgentSessionStatus(agentSessionId)).toMatchObject({
         status: 'running',
         stopped_at: null,
       });
       expect(fetchMock).toHaveBeenCalledOnce();
+      expect(
+        await runInDurableObject(stub, async (instance) =>
+          instance.ctx.storage.get(`ws-delete:${wsId}`)
+        )
+      ).toMatchObject({ attemptCount: 1, claimId: expect.any(String) });
+      expect(await getAlarm(stub)).not.toBeNull();
     });
   });
 
@@ -1741,7 +1786,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID, { expected: expected! });
     await expect(
       stub.claimWorkspaceDeletionAttempt(nodeId, wsId, TEST_USER_ID, expected!)
-    ).resolves.toBe(true);
+    ).resolves.toBe('claimed');
 
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1893,7 +1938,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
         warmSince: null,
         claimedByTask: null,
       } satisfies StoredNodeLifecycleState);
-      await instance.ctx.storage.put(`ws-delete:${wsId}`, {
+      await putIndexedWorkspaceDeletion(instance.ctx.storage, {
         nodeId,
         workspaceId: wsId,
         userId: TEST_USER_ID,

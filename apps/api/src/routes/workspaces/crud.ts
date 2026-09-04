@@ -660,7 +660,7 @@ crudRoutes.delete('/:id', requireAuth(), requireApproved(), async (c) => {
     userId,
   });
 
-  if (deletion.status === 'fenced') {
+  if (deletion.status === 'fenced' || deletion.status === 'superseded') {
     return c.json(
       {
         success: false,

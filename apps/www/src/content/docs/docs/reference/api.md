@@ -89,6 +89,9 @@ the endpoint returns `202` with
 `{ "success": true, "deletionStatus": "pending", "workspaceStatus": "stopping", "reason": "..." }`.
 The `202` response is not deletion proof: SAM keeps the workspace quarantined and retries from
 durable state until VM absence/success or strict provider/container termination is confirmed.
+The same `202` is returned for an idempotent repeat while that exact durable attempt is already
+in flight, or when VM proof arrived but a concurrent state write requires terminalization to
+converge on a later retry.
 If the exact deletion target is missing, active, or reassigned before a durable attempt is
 retained, the endpoint returns `409` with `deletionStatus: "rejected"`; it never labels that
 rejection as a pending deletion.

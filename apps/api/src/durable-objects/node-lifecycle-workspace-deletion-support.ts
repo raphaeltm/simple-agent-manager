@@ -43,6 +43,8 @@ export interface PendingWorkspaceDeletion {
 
 export type WorkspaceDeletionAttemptDispatcher = (attempt: Promise<void>) => void;
 
+export type WorkspaceDeletionClaimResult = 'claimed' | 'already_claimed_same_identity' | 'fenced';
+
 export function workspaceStoppedTtlMs(env: NodeLifecycleDeletionEnv): number {
   const parsed = Number.parseInt(env.WORKSPACE_STOPPED_TTL_MS ?? '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_WORKSPACE_STOPPED_TTL_MS;

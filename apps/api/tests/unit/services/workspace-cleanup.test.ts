@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Workspace } from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { cleanupWorkspaceForDeletion } from '../../../src/services/workspace-cleanup';
+import { workspaceDeletionIdentityLogContext } from '../../../src/services/workspace-deletion';
 
 const mocks = vi.hoisted(() => ({
   attemptWorkspaceDeletion: vi.fn(),
@@ -90,7 +91,7 @@ function workspace(overrides: Partial<Workspace> = {}): Workspace {
 describe('cleanupWorkspaceForDeletion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.claimWorkspaceDeletionAttempt.mockResolvedValue(true);
+    mocks.claimWorkspaceDeletionAttempt.mockResolvedValue('claimed');
     mocks.scheduleWorkspaceDeletion.mockResolvedValue(undefined);
     mocks.deleteSessionSnapshotState.mockResolvedValue(true);
     mocks.loadWorkspaceDeletionIdentity.mockResolvedValue({
@@ -103,6 +104,54 @@ describe('cleanupWorkspaceForDeletion', () => {
       userId: 'user-cleanup-1',
       projectId: 'project-cleanup-1',
       chatSessionId: 'session-cleanup-1',
+    });
+  });
+
+  it('emits the complete bounded identity field set without arbitrary payloads', () => {
+    expect(
+      workspaceDeletionIdentityLogContext(
+        {
+          workspaceId: 'workspace-expected',
+          userId: 'user-expected',
+          projectId: 'project-expected',
+          chatSessionId: 'session-expected',
+          nodeId: 'node-expected',
+          nodeUserId: 'node-user-expected',
+          nodeRuntime: 'vm',
+          nodeProviderInstanceId: 'provider-expected',
+          nodeRuntimeIncarnationId: 'runtime-expected',
+        },
+        {
+          workspaceId: 'workspace-current',
+          userId: 'user-current',
+          projectId: 'project-current',
+          chatSessionId: 'session-current',
+          nodeId: 'node-current',
+          nodeUserId: 'node-user-current',
+          nodeRuntime: 'cf-container',
+          nodeProviderInstanceId: 'provider-current',
+          nodeRuntimeIncarnationId: 'runtime-current',
+        }
+      )
+    ).toEqual({
+      expectedWorkspaceId: 'workspace-expected',
+      currentWorkspaceId: 'workspace-current',
+      expectedUserId: 'user-expected',
+      currentUserId: 'user-current',
+      expectedProjectId: 'project-expected',
+      currentProjectId: 'project-current',
+      expectedChatSessionId: 'session-expected',
+      currentChatSessionId: 'session-current',
+      expectedNodeId: 'node-expected',
+      currentNodeId: 'node-current',
+      expectedNodeUserId: 'node-user-expected',
+      currentNodeUserId: 'node-user-current',
+      expectedNodeRuntime: 'vm',
+      currentNodeRuntime: 'cf-container',
+      expectedNodeProviderInstanceId: 'provider-expected',
+      currentNodeProviderInstanceId: 'provider-current',
+      expectedNodeRuntimeIncarnationId: 'runtime-expected',
+      currentNodeRuntimeIncarnationId: 'runtime-current',
     });
   });
 
@@ -141,7 +190,7 @@ describe('cleanupWorkspaceForDeletion', () => {
 
   it('does not open a VM request when the durable attempt claim is already owned', async () => {
     const { db, deletedTables } = buildDb();
-    mocks.claimWorkspaceDeletionAttempt.mockResolvedValueOnce(false);
+    mocks.claimWorkspaceDeletionAttempt.mockResolvedValueOnce('fenced');
 
     const outcome = await cleanupWorkspaceForDeletion({
       db: db as never,
@@ -168,6 +217,30 @@ describe('cleanupWorkspaceForDeletion', () => {
         currentNodeId: 'node-cleanup-1',
         action: 'rejected',
       })
+    );
+  });
+
+  it('reports an identical already-claimed deletion as durably pending', async () => {
+    const { db, deletedTables } = buildDb();
+    mocks.claimWorkspaceDeletionAttempt.mockResolvedValueOnce('already_claimed_same_identity');
+
+    const outcome = await cleanupWorkspaceForDeletion({
+      db: db as never,
+      env: buildEnv(),
+      workspace: workspace(),
+      userId: 'user-cleanup-1',
+    });
+
+    expect(outcome).toEqual({
+      status: 'retry',
+      reason: 'runtime_deletion_unconfirmed',
+      diagnostic: 'Workspace deletion unconfirmed: durable attempt already in progress',
+    });
+    expect(mocks.attemptWorkspaceDeletion).not.toHaveBeenCalled();
+    expect(deletedTables).toEqual([]);
+    expect(mocks.logWarn).toHaveBeenCalledWith(
+      'workspace.deletion_claim_contended',
+      expect.objectContaining({ action: 'existing_attempt_retained' })
     );
   });
 
@@ -211,6 +284,10 @@ describe('cleanupWorkspaceForDeletion', () => {
         currentNodeId: 'node-cleanup-2',
         expectedNodeRuntime: null,
         currentNodeRuntime: 'vm',
+        expectedNodeUserId: null,
+        currentNodeUserId: 'user-cleanup-2',
+        expectedNodeProviderInstanceId: null,
+        currentNodeProviderInstanceId: 'provider-node-cleanup-2',
         expectedNodeRuntimeIncarnationId: null,
         currentNodeRuntimeIncarnationId: 'runtime-node-cleanup-2',
         action: 'rejected',
@@ -221,9 +298,8 @@ describe('cleanupWorkspaceForDeletion', () => {
   it('does not hard-delete an incarnation that changed before confirmation finalized', async () => {
     const { db, deletedTables } = buildDb();
     mocks.attemptWorkspaceDeletion.mockResolvedValueOnce({
-      status: 'confirmed',
-      proof: 'vm_agent_confirmed',
-      workspaceFinalized: false,
+      status: 'fenced',
+      reason: 'workspace_assignment_changed',
     });
 
     await cleanupWorkspaceForDeletion({

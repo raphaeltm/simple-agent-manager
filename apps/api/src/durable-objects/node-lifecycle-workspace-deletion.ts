@@ -15,12 +15,16 @@ import {
   type PendingWorkspaceDeletion,
   workspaceDeletionAlarmBatchSize,
   type WorkspaceDeletionAttemptDispatcher,
+  type WorkspaceDeletionClaimResult,
   workspaceDeletionMaxResidenceMs,
   workspaceDeletionRetryDelayMs,
   workspaceStoppedTtlMs,
 } from './node-lifecycle-workspace-deletion-support';
 
-export type { NodeLifecycleDeletionEnv } from './node-lifecycle-workspace-deletion-support';
+export type {
+  NodeLifecycleDeletionEnv,
+  WorkspaceDeletionClaimResult,
+} from './node-lifecycle-workspace-deletion-support';
 
 const WORKSPACE_DELETION_ELIGIBLE_STATUSES = new Set([
   'stopped',
@@ -28,6 +32,24 @@ const WORKSPACE_DELETION_ELIGIBLE_STATUSES = new Set([
   'stopping',
   'deleted',
 ]);
+const WORKSPACE_DELETION_ENTRY_PREFIX = 'ws-delete:';
+const WORKSPACE_DELETION_DUE_INDEX_PREFIX = 'ws-delete-due:';
+const WORKSPACE_DELETION_TIMESTAMP_WIDTH = String(Number.MAX_SAFE_INTEGER).length;
+
+export function workspaceDeletionDueIndexKey(entry: PendingWorkspaceDeletion): string {
+  const deleteAt = String(Math.max(0, Math.trunc(entry.deleteAt))).padStart(
+    WORKSPACE_DELETION_TIMESTAMP_WIDTH,
+    '0'
+  );
+  return `${WORKSPACE_DELETION_DUE_INDEX_PREFIX}${deleteAt}:${entry.workspaceId}`;
+}
+
+function workspaceDeletionDueIndexTimestamp(key: string): number | null {
+  const encoded = key.slice(WORKSPACE_DELETION_DUE_INDEX_PREFIX.length).split(':', 1)[0];
+  if (!encoded) return null;
+  const parsed = Number.parseInt(encoded, 10);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
 
 function isWorkspaceDeletionEligibleStatus(status: string): boolean {
   return WORKSPACE_DELETION_ELIGIBLE_STATUSES.has(status);
@@ -173,7 +195,7 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     workspaceId: string,
     userId: string,
     expected: WorkspaceDeletionIdentity
-  ): Promise<boolean> {
+  ): Promise<WorkspaceDeletionClaimResult> {
     const current = await loadWorkspaceDeletionSnapshot(this.env.DATABASE, workspaceId);
     if (
       !current ||
@@ -192,7 +214,7 @@ export class NodeLifecycleWorkspaceDeletionQueue {
         currentStatus: current?.status ?? 'missing',
         action: 'rejected',
       });
-      return false;
+      return 'fenced';
     }
 
     const key = `ws-delete:${workspaceId}`;
@@ -200,7 +222,7 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     const claimId = crypto.randomUUID();
     const claimDiagnostic = `${WORKSPACE_DELETION_DIAGNOSTIC_PREFIX}: durable attempt 1 claimed`;
     const warmAlarmTime = await this.getWarmAlarmTime();
-    const entry = await this.storage.transaction(async (transaction) => {
+    const claim = await this.storage.transaction(async (transaction) => {
       const existing = await transaction.get<PendingWorkspaceDeletion>(key);
       const existingMatches =
         !existing ||
@@ -218,12 +240,11 @@ export class NodeLifecycleWorkspaceDeletionQueue {
           existing.userId === userId &&
           (existing.projectId ?? expected.projectId) === expected.projectId &&
           (existing.chatSessionId ?? expected.chatSessionId) === expected.chatSessionId);
-      if (
-        !existingMatches ||
-        (existing?.attemptCount ?? 0) > 0 ||
-        existing?.lastAttemptAt != null
-      ) {
-        return null;
+      if (!existingMatches || existing?.deadLetteredAt) {
+        return { result: 'fenced' as const, entry: existing ?? null };
+      }
+      if ((existing?.attemptCount ?? 0) > 0 || existing?.lastAttemptAt != null) {
+        return { result: 'already_claimed_same_identity' as const, entry: existing };
       }
       const claimed = {
         nodeId: expected.nodeId ?? nodeId,
@@ -245,10 +266,10 @@ export class NodeLifecycleWorkspaceDeletionQueue {
         deadLetterReason: null,
       } satisfies PendingWorkspaceDeletion;
       await this.putEntryAndAlarm(transaction, key, claimed, warmAlarmTime, now);
-      return claimed;
+      return { result: 'claimed' as const, entry: claimed };
     });
-    if (!entry) {
-      const currentEntry = await this.storage.get<PendingWorkspaceDeletion>(key);
+    if (claim.result !== 'claimed') {
+      const currentEntry = claim.entry;
       const currentEntryIdentity: WorkspaceDeletionIdentity | null = currentEntry
         ? {
             workspaceId: currentEntry.workspaceId,
@@ -265,9 +286,12 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       log.warn('node_lifecycle.workspace_deletion_claim_fenced', {
         ...workspaceDeletionIdentityLogContext(expected, currentEntryIdentity),
         attemptCount: currentEntry?.attemptCount ?? 0,
-        action: 'rejected',
+        action:
+          claim.result === 'already_claimed_same_identity'
+            ? 'existing_attempt_retained'
+            : 'rejected',
       });
-      return false;
+      return claim.result;
     }
 
     try {
@@ -283,7 +307,7 @@ export class NodeLifecycleWorkspaceDeletionQueue {
           currentStatus: currentAfterClaim?.status ?? 'missing',
           action: 'rejected',
         });
-        return false;
+        return 'fenced';
       }
     } catch (error) {
       log.error('node_lifecycle.workspace_deletion_d1_claim_failed', {
@@ -297,7 +321,7 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     }
 
     const latest = await this.storage.get<PendingWorkspaceDeletion>(key);
-    return latest?.claimId === claimId && !latest.deadLetteredAt;
+    return latest?.claimId === claimId && !latest.deadLetteredAt ? 'claimed' : 'fenced';
   }
 
   async getAttemptState(
@@ -311,7 +335,12 @@ export class NodeLifecycleWorkspaceDeletionQueue {
   }
 
   async confirm(workspaceId: string): Promise<void> {
-    await this.storage.delete(`ws-delete:${workspaceId}`);
+    const key = `${WORKSPACE_DELETION_ENTRY_PREFIX}${workspaceId}`;
+    await this.storage.transaction(async (transaction) => {
+      const current = await transaction.get<PendingWorkspaceDeletion>(key);
+      if (current) await transaction.delete(workspaceDeletionDueIndexKey(current));
+      await transaction.delete(key);
+    });
     await this.recalculateAlarm(await this.getWarmAlarmTime());
   }
 
@@ -323,6 +352,7 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       if ((entry.attemptCount ?? 0) > 0 || entry.lastAttemptAt != null) {
         return { cancelled: false, attemptCount: entry.attemptCount ?? 0 };
       }
+      await transaction.delete(workspaceDeletionDueIndexKey(entry));
       await transaction.delete(key);
       return { cancelled: true, attemptCount: 0 };
     });
@@ -340,13 +370,30 @@ export class NodeLifecycleWorkspaceDeletionQueue {
   }
 
   async processExpired(dispatch: WorkspaceDeletionAttemptDispatcher): Promise<void> {
-    const pending = await this.getPending();
     const now = Date.now();
     const storedNodeId = await this.getStoredNodeId();
-    const due = [...pending.entries()]
-      .filter(([, entry]) => !entry.deadLetteredAt && entry.deleteAt <= now)
-      .sort((left, right) => left[1].deleteAt - right[1].deleteAt)
-      .slice(0, workspaceDeletionAlarmBatchSize(this.env));
+    const batchSize = workspaceDeletionAlarmBatchSize(this.env);
+    const indexed = await this.storage.list<string>({
+      prefix: WORKSPACE_DELETION_DUE_INDEX_PREFIX,
+      limit: batchSize,
+    });
+    const due: Array<[string, PendingWorkspaceDeletion]> = [];
+    for (const [indexKey, entryKey] of indexed) {
+      const indexedDeleteAt = workspaceDeletionDueIndexTimestamp(indexKey);
+      const entry = await this.storage.get<PendingWorkspaceDeletion>(entryKey);
+      if (!entry || entry.deadLetteredAt || indexedDeleteAt === null) {
+        await this.storage.delete(indexKey);
+        continue;
+      }
+      const expectedIndexKey = workspaceDeletionDueIndexKey(entry);
+      if (expectedIndexKey !== indexKey) {
+        await this.storage.delete(indexKey);
+        await this.storage.put(expectedIndexKey, entryKey);
+        if (entry.deleteAt > now) continue;
+      }
+      if (entry.deleteAt > now) break;
+      due.push([entryKey, entry]);
+    }
 
     for (const [key, entry] of due) {
       entry.firstScheduledAt ??= now;
@@ -535,6 +582,19 @@ export class NodeLifecycleWorkspaceDeletionQueue {
         return;
       }
 
+      if (outcome.status === 'superseded') {
+        await this.deleteExact(key, claimId);
+        log.info('node_lifecycle.workspace_deletion_superseded', {
+          workspaceId: entry.workspaceId,
+          nodeId: expected.nodeId,
+          userId: entry.userId,
+          attempt,
+          reason: outcome.reason,
+          action: 'old_incarnation_attempt_removed',
+        });
+        return;
+      }
+
       if (outcome.status === 'fenced') {
         await this.deadLetterExact(key, claimId, entry, outcome.reason);
         return;
@@ -572,17 +632,37 @@ export class NodeLifecycleWorkspaceDeletionQueue {
 
   async recalculateAlarm(warmAlarmTime: number | null): Promise<void> {
     let earliest = warmAlarmTime;
-    const pending = await this.getPending();
-    for (const [, entry] of pending) {
-      if (entry.deadLetteredAt) continue;
-      if (earliest === null || entry.deleteAt < earliest) earliest = entry.deleteAt;
+    const inspectionLimit = workspaceDeletionAlarmBatchSize(this.env);
+    let inspected = 0;
+    while (inspected < inspectionLimit) {
+      const indexed = await this.storage.list<string>({
+        prefix: WORKSPACE_DELETION_DUE_INDEX_PREFIX,
+        limit: 1,
+      });
+      const first = indexed.entries().next().value as [string, string] | undefined;
+      if (!first) break;
+      inspected += 1;
+      const [indexKey, entryKey] = first;
+      const indexedDeleteAt = workspaceDeletionDueIndexTimestamp(indexKey);
+      const entry = await this.storage.get<PendingWorkspaceDeletion>(entryKey);
+      if (indexedDeleteAt !== null && entry && !entry.deadLetteredAt) {
+        const expectedIndexKey = workspaceDeletionDueIndexKey(entry);
+        if (expectedIndexKey === indexKey) {
+          if (earliest === null || indexedDeleteAt < earliest) earliest = indexedDeleteAt;
+          break;
+        }
+        await this.storage.delete(indexKey);
+        await this.storage.put(expectedIndexKey, entryKey);
+        continue;
+      }
+      await this.storage.delete(indexKey);
+    }
+    if (inspected === inspectionLimit && earliest === warmAlarmTime) {
+      const boundedRescanAt = Date.now() + workspaceDeletionRetryDelayMs(this.env, 1);
+      if (earliest === null || boundedRescanAt < earliest) earliest = boundedRescanAt;
     }
     if (earliest !== null) await this.storage.setAlarm(earliest);
     else await this.storage.deleteAlarm();
-  }
-
-  private async getPending(): Promise<Map<string, PendingWorkspaceDeletion>> {
-    return await this.storage.list<PendingWorkspaceDeletion>({ prefix: 'ws-delete:' });
   }
 
   private async putEntryWithAlarm(key: string, entry: PendingWorkspaceDeletion): Promise<void> {
@@ -622,19 +702,27 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     warmAlarmTime: number | null,
     now: number
   ): Promise<void> {
+    const current = await transaction.get<PendingWorkspaceDeletion>(key);
     const currentAlarm = await transaction.getAlarm();
     const futureAlarm = currentAlarm !== null && currentAlarm > now ? currentAlarm : null;
     const nextAlarm = [futureAlarm, warmAlarmTime, entry.deleteAt]
       .filter((value): value is number => value !== null)
       .reduce((earliest, value) => Math.min(earliest, value));
+    if (current) await transaction.delete(workspaceDeletionDueIndexKey(current));
     await transaction.put(key, entry);
+    if (!entry.deadLetteredAt) {
+      await transaction.put(workspaceDeletionDueIndexKey(entry), key);
+    }
     await transaction.setAlarm(nextAlarm);
   }
 
   private async compensateExactClaim(key: string, claimId: string): Promise<void> {
     await this.storage.transaction(async (transaction) => {
       const current = await transaction.get<PendingWorkspaceDeletion>(key);
-      if (current?.claimId === claimId) await transaction.delete(key);
+      if (current?.claimId === claimId) {
+        await transaction.delete(workspaceDeletionDueIndexKey(current));
+        await transaction.delete(key);
+      }
     });
     await this.recalculateAlarm(await this.getWarmAlarmTime());
   }
@@ -642,7 +730,10 @@ export class NodeLifecycleWorkspaceDeletionQueue {
   private async deleteExact(key: string, claimId: string | null): Promise<void> {
     await this.storage.transaction(async (transaction) => {
       const current = await transaction.get<PendingWorkspaceDeletion>(key);
-      if (current && (current.claimId ?? null) === claimId) await transaction.delete(key);
+      if (current && (current.claimId ?? null) === claimId) {
+        await transaction.delete(workspaceDeletionDueIndexKey(current));
+        await transaction.delete(key);
+      }
     });
     await this.recalculateAlarm(await this.getWarmAlarmTime());
   }
@@ -655,7 +746,12 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     return await this.storage.transaction(async (transaction) => {
       const current = await transaction.get<PendingWorkspaceDeletion>(key);
       if (!current || current.claimId !== claimId || current.deadLetteredAt) return false;
-      await transaction.put(key, { ...current, ...update });
+      const next = { ...current, ...update };
+      await transaction.delete(workspaceDeletionDueIndexKey(current));
+      await transaction.put(key, next);
+      if (!next.deadLetteredAt) {
+        await transaction.put(workspaceDeletionDueIndexKey(next), key);
+      }
       return true;
     });
   }
@@ -670,6 +766,7 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     const retained = await this.storage.transaction(async (transaction) => {
       const current = await transaction.get<PendingWorkspaceDeletion>(key);
       if (!current || (current.claimId ?? null) !== claimId || current.deadLetteredAt) return false;
+      await transaction.delete(workspaceDeletionDueIndexKey(current));
       await transaction.put(key, {
         ...current,
         deadLetteredAt,

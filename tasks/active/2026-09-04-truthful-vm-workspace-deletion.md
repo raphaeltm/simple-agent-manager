@@ -105,8 +105,10 @@ available transcript and focused green evidence are the recovery source.
 The NodeLifecycle alarm processes at most the configurable deletion batch size, claims each
 due attempt durably, and dispatches its bounded VM-agent I/O through `waitUntil`. Each
 attempt performs bounded D1 reads/writes and at most one VM-agent delete using the separate
-background timeout. Unconfirmed attempts leave the immediate candidate set until their
-bounded exponential `deleteAt`; both the maximum delay and maximum residence are
+background timeout. A compact due-time index lets each alarm load only the configured batch
+and the next live deadline; retained dead letters never trigger a full payload scan. The
+Free-plan-safe default batch is four. Unconfirmed attempts leave the immediate candidate set
+until their bounded exponential `deleteAt`; both the maximum delay and maximum residence are
 configurable. Exhausted or identity-changed entries remain quarantined in `stopping`, leave
 bounded payload-free dead-letter telemetry, and stop consuming the immediate alarm candidate
 set. Only confirmed outcomes and same-identity stale schedules for an active workspace remove
