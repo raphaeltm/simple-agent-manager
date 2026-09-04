@@ -69,6 +69,7 @@ CREATE TABLE projects (
   task_execution_timeout_ms INTEGER, max_concurrent_tasks INTEGER, max_dispatch_depth INTEGER,
   max_sub_tasks_per_task INTEGER, warm_node_timeout_ms INTEGER, max_workspaces_per_node INTEGER,
   node_cpu_threshold_percent INTEGER, node_memory_threshold_percent INTEGER,
+  max_triggers INTEGER,
   status TEXT NOT NULL DEFAULT 'active', last_activity_at TEXT,
   active_session_count INTEGER NOT NULL DEFAULT 0, created_by TEXT NOT NULL REFERENCES users(id),
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL

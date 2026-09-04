@@ -22,9 +22,9 @@ import (
 
 const localShellPath = "/bin/sh"
 
-const claudeACPInstallPackage = "@agentclientprotocol/claude-agent-acp@0.58.1"
+const claudeACPInstallPackage = "@agentclientprotocol/claude-agent-acp@0.73.0"
 const claudeCodeMinVersion = "2.1.251"
-const claudeCodeInstallPackage = "@anthropic-ai/claude-code@2.1.258"
+const claudeCodeInstallPackage = "@anthropic-ai/claude-code@2.1.260"
 const claudeCodeInstallCommand = "npm install -g " + claudeACPInstallPackage + " " + claudeCodeInstallPackage
 
 // BootLogReporter sends structured log entries to the control plane.
@@ -942,7 +942,7 @@ type agentCommandInfo struct {
 	authFilePath  string // relative to home dir, e.g. ".codex/auth.json" (only when injectionMode == "auth-file")
 }
 
-const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@1.1.2 @openai/codex@0.144.6"
+const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@1.8.0 @openai/codex@0.153.2"
 
 // getAgentCommandInfo returns the ACP command, args, env var name, and install command for a given agent type.
 // These match the agent catalog defined in packages/shared/src/agents.ts.
@@ -968,7 +968,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 		}
 	case "openai-codex":
 		// Sandbox and approval overrides are injected through CODEX_CONFIG by
-		// writeCodexStartupConfig. codex-acp 1.1.2 does not parse Codex CLI -c
+		// writeCodexStartupConfig. codex-acp (verified through 1.8.0) does not parse Codex CLI -c
 		// arguments; its supported config channel is CODEX_CONFIG JSON, which it
 		// forwards to every app-server thread (including spawned subagents).
 		if credentialKind == "oauth-token" {
@@ -1007,7 +1007,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 			command:       "opencode",
 			args:          []string{"acp"},
 			envVarName:    "OPENCODE_API_KEY",
-			installCmd:    "npm install -g opencode-ai@1.17.18",
+			installCmd:    "npm install -g opencode-ai@1.18.27",
 			isNpmBased:    true,
 			injectionMode: "",
 			authFilePath:  "",
