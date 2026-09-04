@@ -69,9 +69,10 @@ secret material in logs, PR text, or public issues.
 ## SonarQube Cloud coverage ingestion
 
 The CI workflow retains LCOV from the existing `pnpm test:coverage` run instead of running the
-JavaScript/TypeScript suites again. `pnpm quality:sonar-coverage:javascript` normalizes every
-`SF:` entry to a repository-relative source path, rejects missing, empty, malformed, or
-mispointed reports, and uploads these current-run files as the `js-ts-lcov` artifact:
+JavaScript/TypeScript suites again. `pnpm quality:sonar-coverage:javascript` invokes `runCli` and
+`prepareJavaScriptCoverageReports` only to normalize every `SF:` entry to a repository-relative
+source path and reject missing, empty, malformed, or mispointed reports. The CI `test` job then
+separately uploads these current-run files as the `js-ts-lcov` artifact:
 
 ```text
 apps/api/coverage/lcov.info
