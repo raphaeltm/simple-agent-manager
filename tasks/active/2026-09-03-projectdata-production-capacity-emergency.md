@@ -175,20 +175,37 @@ staging to the six pre-incident controls. Task `01M1P0HMQHAXJ0H4Y7J491ESEF` is i
 single replacement owner. No duplicate PR or branch was created.
 
 Refreshed production baseline, read directly from `sam-prod` D1 and the `sam-api-prod`
-Worker settings:
+Worker settings.
 
-- `project_data_storage_telemetry` at `2026-09-04T11:14:02Z`: `10,046,488,576` bytes,
-  ratio `1.0046488576`, status `degraded`, 7-day growth `161,577,335` bytes/day.
-- Hourly history `06:13Z → 11:14Z` grew `42,045,440` bytes in five hours
-  (~202 MB/day), so the recent rate is above the 7-day average.
-- `platform_errors` still has ZERO `Exceeded the maximum database size` rows in seven
-  days while the object is above the configured `10^10` limit, so Cloudflare's real
-  per-object ceiling is higher — consistent with 10 GiB (`10,737,418,240` bytes).
-  Remaining true headroom is therefore about `690,929,664` bytes, which is 3.4 days at
-  the recent rate and 4.3 days at the 7-day average.
-- The configured `PROJECT_DATA_STORAGE_EMERGENCY_TARGET_RATIO` is `0.9`, so converging
-  to the configured target needs at least `1,046,488,576` bytes of measured relief
-  before allowing for ongoing writes and measurement lag.
+**The growth rate is accelerating, and the window is shorter than the task brief assumed.**
+Hourly `database_size_bytes` for `01KHRJGANBBWGDY1NZ0KVF0D4J` on 2026-09-04:
+
+| Hour (UTC) | Bytes          | Delta    |
+| ---------- | -------------- | -------- |
+| 05:14      | 9,996,873,728  | —        |
+| 06:14      | 10,004,443,136 | +7.6 MB  |
+| 07:14      | 10,008,006,656 | +3.6 MB  |
+| 08:14      | 10,013,339,648 | +5.3 MB  |
+| 09:14      | 10,020,720,640 | +7.4 MB  |
+| 10:14      | 10,030,129,152 | +9.4 MB  |
+| 11:14      | 10,046,488,576 | +16.4 MB |
+| 12:14      | 10,072,158,208 | +25.7 MB |
+
+The rate went from ~3.6 MB/h to ~25.7 MB/h across seven hours. The seven-hour average is
+10.8 MB/h (258 MB/day); the trailing two-hour average is 21 MB/h (504 MB/day). The most
+likely driver is concurrent agent activity on this very project — every recovery agent's
+transcript is written into this same Durable Object, which is also why agents working this
+incident must keep their chat output lean.
+
+- `platform_errors` still has ZERO `Exceeded the maximum database size` rows in seven days
+  while the object is above the configured `10^10` limit, so Cloudflare's real per-object
+  ceiling is higher — consistent with 10 GiB (`10,737,418,240` bytes).
+- Remaining true headroom at 12:14Z is therefore about **665,260,032 bytes**: roughly
+  **26 hours** at the trailing rate, **62 hours** at the seven-hour average. Call it one to
+  two and a half days, not the three to four days the task brief estimated, and shrinking.
+- Reaching the configured `PROJECT_DATA_STORAGE_EMERGENCY_TARGET_RATIO` of 0.9 now needs at
+  least **1,072,158,208 bytes** of measured relief.
+- Re-derive both numbers at execution time; do not reuse these.
 
 Merge safety: this PR is non-destructive on deploy. `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED`
 stays `false` in production, no `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_*` GitHub
@@ -353,8 +370,11 @@ the archive read path, which re-verifies the hash on read.
   `sql.databaseSize` delta; DO SQLite does return freed pages (verified in the workerd
   runtime by `databaseSize drops after deleting rows…`), so projected and realised should
   track closely, but the realised number is the one that counts.
-- Resulting usage: from `10,046,488,576` to roughly `<10,046,488,576 − preflight:eligible_bytes>`
-  bytes, i.e. a ratio of about `<computed>` against the configured `10^10` limit.
+- Resulting usage: from the size measured immediately before the run (`10,072,158,208` at
+  12:14Z, still climbing) minus `<preflight:eligible_bytes>`, i.e. a ratio of about
+  `<computed>` against the configured `10^10` limit. Because the object is growing at
+  10-26 MB/h, the run must be measured against a size read at execution time, not against
+  this figure.
 - The run self-terminates at `9,000,000,000` bytes even if more candidates remain.
 
 ### Observation window and stop conditions
