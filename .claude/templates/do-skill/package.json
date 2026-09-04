@@ -1,0 +1,28 @@
+{
+  "name": "@sam/do-skill-template",
+  "version": "1.0.0",
+  "description": "Portable /do skill template for autonomous task execution workflows",
+  "private": true,
+  "scripts": {
+    "generate": "node generate-skill.js",
+    "generate:sam": "node generate-skill.js examples/sam-config.json ../../commands/do.md",
+    "generate:agent-box": "node generate-skill.js examples/agent-box-config.json",
+    "validate:schema": "ajv validate -s do-config.schema.json -d examples/*.json"
+  },
+  "dependencies": {
+    "handlebars": "^4.7.8"
+  },
+  "devDependencies": {
+    "ajv-cli": "^5.0.0"
+  },
+  "keywords": [
+    "agent",
+    "workflow",
+    "automation",
+    "template",
+    "claude",
+    "ai-agent"
+  ],
+  "author": "SAM Team",
+  "license": "MIT"
+}

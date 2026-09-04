@@ -1,0 +1,210 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "/do Skill Configuration",
+  "description": "Configuration schema for adapting the /do skill workflow to different agent environments",
+  "type": "object",
+  "required": ["project", "workflow", "phases"],
+  "properties": {
+    "project": {
+      "type": "object",
+      "description": "Project-specific paths and structure",
+      "required": ["taskPaths", "rulesPath"],
+      "properties": {
+        "taskPaths": {
+          "type": "object",
+          "properties": {
+            "backlog": { "type": "string", "default": "tasks/backlog" },
+            "active": { "type": "string", "default": "tasks/active" },
+            "archive": { "type": "string", "default": "tasks/archive" }
+          }
+        },
+        "rulesPath": {
+          "type": "string",
+          "default": ".claude/rules",
+          "description": "Path to project-specific rules and guidelines"
+        },
+        "docsPath": {
+          "type": "string",
+          "default": "docs",
+          "description": "Path to user-facing documentation"
+        },
+        "specsPath": {
+          "type": "string",
+          "default": "specs",
+          "description": "Path to feature specifications"
+        }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "description": "Workflow tracking and state management",
+      "required": ["trackingTool", "stateFile"],
+      "properties": {
+        "trackingTool": {
+          "type": "string",
+          "enum": ["TodoWrite", "TaskCreate", "markdown", "none"],
+          "description": "Tool used for workflow phase tracking"
+        },
+        "stateFile": {
+          "type": "string",
+          "default": ".do-state.md",
+          "description": "File for persisting workflow state across context compaction"
+        },
+        "gitWorkflow": {
+          "type": "object",
+          "properties": {
+            "worktreePrefix": {
+              "type": "string",
+              "default": "../{project}",
+              "description": "Template for worktree directory naming. {project} is replaced with project name"
+            },
+            "branchPrefix": {
+              "type": "string",
+              "default": "",
+              "description": "Prefix for feature branch names"
+            },
+            "mainBranch": { "type": "string", "default": "main" },
+            "taskCommitToMain": {
+              "type": "boolean",
+              "default": true,
+              "description": "Whether task files are committed directly to main"
+            }
+          }
+        }
+      }
+    },
+    "phases": {
+      "type": "object",
+      "description": "Configuration for each workflow phase",
+      "properties": {
+        "research": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "postMortemPaths": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": [".claude/rules"],
+              "description": "Paths to search for relevant post-mortems and incident lessons"
+            }
+          }
+        },
+        "implementation": {
+          "type": "object",
+          "properties": {
+            "buildOrder": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Package build order dependencies"
+            },
+            "qualityCommands": {
+              "type": "object",
+              "properties": {
+                "typecheck": { "type": "string", "default": "pnpm typecheck" },
+                "lint": { "type": "string", "default": "pnpm lint" },
+                "test": { "type": "string", "default": "pnpm test" },
+                "build": { "type": "string", "default": "pnpm build" }
+              }
+            }
+          }
+        },
+        "review": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "reviewers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "trigger"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "skill": { "type": "string", "description": "Skill name or command to invoke" },
+                  "agent": { "type": "string", "description": "Agent type for spawning subagent" },
+                  "trigger": {
+                    "type": "object",
+                    "description": "Conditions that trigger this reviewer",
+                    "properties": {
+                      "paths": { "type": "array", "items": { "type": "string" } },
+                      "always": { "type": "boolean" }
+                    }
+                  },
+                  "checks": { "type": "string", "description": "What this reviewer validates" }
+                }
+              }
+            }
+          }
+        },
+        "staging": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "required": {
+              "type": "boolean",
+              "default": true,
+              "description": "Whether staging verification blocks PR creation"
+            },
+            "deployment": {
+              "type": "object",
+              "properties": {
+                "workflow": { "type": "string", "description": "GitHub Actions workflow name" },
+                "checkCommand": { "type": "string", "description": "Command to check for active deployments" },
+                "triggerCommand": { "type": "string", "description": "Command to trigger deployment" },
+                "watchCommand": { "type": "string", "description": "Command to watch deployment progress" }
+              }
+            },
+            "environment": {
+              "type": "object",
+              "properties": {
+                "appUrl": { "type": "string", "description": "Staging app URL" },
+                "apiUrl": { "type": "string", "description": "Staging API URL" },
+                "authMethod": {
+                  "type": "string",
+                  "enum": ["token", "oauth", "basic", "none"],
+                  "default": "token"
+                }
+              }
+            },
+            "infrastructure": {
+              "type": "object",
+              "properties": {
+                "required": { "type": "boolean", "default": false },
+                "triggers": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "File paths that require infrastructure verification"
+                }
+              }
+            }
+          }
+        },
+        "pr": {
+          "type": "object",
+          "properties": {
+            "template": { "type": "string", "description": "Path to PR template" },
+            "mergeMethod": {
+              "type": "string",
+              "enum": ["squash", "merge", "rebase"],
+              "default": "squash"
+            },
+            "monitorDeploy": {
+              "type": "boolean",
+              "default": true,
+              "description": "Whether to monitor post-merge deployment"
+            },
+            "deployWorkflow": { "type": "string", "description": "Production deploy workflow name" }
+          }
+        }
+      }
+    },
+    "conventions": {
+      "type": "object",
+      "description": "Project-specific conventions and principles",
+      "properties": {
+        "constitutionPath": { "type": "string", "description": "Path to constitution or core principles" },
+        "noHardcodedValues": { "type": "boolean", "default": true },
+        "documentationSync": { "type": "boolean", "default": true }
+      }
+    }
+  }
+}

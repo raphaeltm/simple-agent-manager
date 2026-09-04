@@ -1,0 +1,131 @@
+{
+  "$schema": "../do-config.schema.json",
+  "project": {
+    "taskPaths": {
+      "backlog": "tasks/backlog",
+      "active": "tasks/active",
+      "archive": "tasks/archive"
+    },
+    "rulesPath": ".claude/rules",
+    "docsPath": "apps/www/src/content/docs/docs",
+    "specsPath": "specs"
+  },
+  "workflow": {
+    "trackingTool": "TodoWrite",
+    "stateFile": ".do-state.md",
+    "gitWorkflow": {
+      "worktreePrefix": "../sam",
+      "branchPrefix": "",
+      "mainBranch": "main",
+      "taskCommitToMain": true
+    }
+  },
+  "phases": {
+    "research": {
+      "enabled": true,
+      "postMortemPaths": [".claude/rules", "tasks/archive"]
+    },
+    "implementation": {
+      "buildOrder": ["shared", "providers", "cloud-init", "api", "web"],
+      "qualityCommands": {
+        "typecheck": "pnpm typecheck",
+        "lint": "pnpm lint",
+        "test": "pnpm test",
+        "build": "pnpm build"
+      }
+    },
+    "review": {
+      "enabled": true,
+      "reviewers": [
+        {
+          "name": "task-completion-validator",
+          "agent": "task-completion-validator",
+          "trigger": { "always": true },
+          "checks": "Planned vs. actual work — research gaps, unwired UI, missing tests"
+        },
+        {
+          "name": "go-specialist",
+          "agent": "go-specialist",
+          "trigger": { "paths": ["packages/vm-agent/"] },
+          "checks": "Concurrency, resource leaks, Go idioms"
+        },
+        {
+          "name": "cloudflare-specialist",
+          "agent": "cloudflare-specialist",
+          "trigger": { "paths": ["apps/api/"] },
+          "checks": "D1, KV, Workers patterns"
+        },
+        {
+          "name": "ui-ux-specialist",
+          "agent": "ui-ux-specialist",
+          "trigger": { "paths": ["apps/web/", "packages/ui/"] },
+          "checks": "Accessibility, layout, interactions"
+        },
+        {
+          "name": "security-auditor",
+          "agent": "security-auditor",
+          "trigger": { "paths": ["**/auth*", "**/credential*", "**/token*"] },
+          "checks": "Credential safety, OWASP, JWT"
+        },
+        {
+          "name": "env-validator",
+          "agent": "env-validator",
+          "trigger": { "paths": ["**/.env*", "**/wrangler.toml"] },
+          "checks": "GH_ vs GITHUB_, deployment mapping"
+        },
+        {
+          "name": "doc-sync-validator",
+          "agent": "doc-sync-validator",
+          "trigger": { "paths": ["apps/www/src/content/docs/**", "*.md"] },
+          "checks": "Docs match code reality"
+        },
+        {
+          "name": "constitution-validator",
+          "agent": "constitution-validator",
+          "trigger": { "paths": ["apps/api/**", "apps/web/**"] },
+          "checks": "No hardcoded values"
+        },
+        {
+          "name": "test-engineer",
+          "agent": "test-engineer",
+          "trigger": { "paths": ["**/*.test.ts", "**/*.spec.ts"] },
+          "checks": "Coverage, realism, TDD compliance"
+        }
+      ]
+    },
+    "staging": {
+      "enabled": true,
+      "required": true,
+      "deployment": {
+        "workflow": "deploy-staging.yml",
+        "checkCommand": "gh run list --workflow=deploy-staging.yml --status=in_progress --status=queued --json databaseId,status,createdAt,headBranch",
+        "triggerCommand": "gh workflow run deploy-staging.yml --ref $BRANCH",
+        "watchCommand": "gh run watch $RUN_ID"
+      },
+      "environment": {
+        "appUrl": "https://app.sammy.party",
+        "apiUrl": "https://api.sammy.party",
+        "authMethod": "token"
+      },
+      "infrastructure": {
+        "required": true,
+        "triggers": [
+          "packages/cloud-init/",
+          "packages/vm-agent/",
+          "scripts/deploy/"
+        ]
+      }
+    },
+    "pr": {
+      "template": ".github/pull_request_template.md",
+      "mergeMethod": "squash",
+      "monitorDeploy": true,
+      "deployWorkflow": "deploy.yml"
+    }
+  },
+  "conventions": {
+    "constitutionPath": ".specify/memory/constitution.md",
+    "noHardcodedValues": true,
+    "documentationSync": true
+  }
+}

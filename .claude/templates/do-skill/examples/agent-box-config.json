@@ -1,0 +1,85 @@
+{
+  "$schema": "../do-config.schema.json",
+  "project": {
+    "taskPaths": {
+      "backlog": ".agent/tasks/backlog",
+      "active": ".agent/tasks/active",
+      "archive": ".agent/tasks/archive"
+    },
+    "rulesPath": ".agent/rules",
+    "docsPath": "docs",
+    "specsPath": ".agent/specs"
+  },
+  "workflow": {
+    "trackingTool": "markdown",
+    "stateFile": ".do-state.md",
+    "gitWorkflow": {
+      "worktreePrefix": "../work",
+      "branchPrefix": "feat/",
+      "mainBranch": "main",
+      "taskCommitToMain": false
+    }
+  },
+  "phases": {
+    "research": {
+      "enabled": true,
+      "postMortemPaths": [".agent/rules"]
+    },
+    "implementation": {
+      "buildOrder": [],
+      "qualityCommands": {
+        "typecheck": "mypy .",
+        "lint": "ruff check .",
+        "test": "pytest",
+        "build": "nix build"
+      }
+    },
+    "review": {
+      "enabled": true,
+      "reviewers": [
+        {
+          "name": "code-review",
+          "skill": "/code-review",
+          "trigger": { "always": true },
+          "checks": "Code quality, best practices, potential bugs"
+        },
+        {
+          "name": "security-check",
+          "skill": "/security-review",
+          "trigger": { "paths": ["**/*auth*", "**/*secret*", "**/*password*"] },
+          "checks": "Security vulnerabilities, credential handling"
+        }
+      ]
+    },
+    "staging": {
+      "enabled": false,
+      "required": false,
+      "deployment": {
+        "workflow": null,
+        "checkCommand": null,
+        "triggerCommand": null,
+        "watchCommand": null
+      },
+      "environment": {
+        "appUrl": null,
+        "apiUrl": null,
+        "authMethod": "none"
+      },
+      "infrastructure": {
+        "required": false,
+        "triggers": []
+      }
+    },
+    "pr": {
+      "template": ".github/pull_request_template.md",
+      "mergeMethod": "squash",
+      "monitorDeploy": false,
+      "deployWorkflow": null
+    }
+  },
+  "conventions": {
+    "constitutionPath": null,
+    "noHardcodedValues": true,
+    "documentationSync": true
+  }
+}
