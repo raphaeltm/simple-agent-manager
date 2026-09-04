@@ -19,9 +19,10 @@ export interface ReconciliationCursor {
   sessionId: string;
 }
 
-interface ReconciliationGate {
+export interface ReconciliationGate {
   attempts: number;
   nextAttemptAt: number;
+  excludedTaskId: string | null;
 }
 
 function readMeta(sql: SqlStorage, key: string): string | null {
@@ -66,11 +67,16 @@ function parseGate(raw: string | null): ReconciliationGate | null {
       !Number.isSafeInteger(parsed.attempts) ||
       parsed.attempts < 0 ||
       typeof parsed.nextAttemptAt !== 'number' ||
-      !Number.isFinite(parsed.nextAttemptAt)
+      !Number.isFinite(parsed.nextAttemptAt) ||
+      (parsed.excludedTaskId !== undefined && typeof parsed.excludedTaskId !== 'string')
     ) {
       return null;
     }
-    return { attempts: parsed.attempts, nextAttemptAt: parsed.nextAttemptAt };
+    return {
+      attempts: parsed.attempts,
+      nextAttemptAt: parsed.nextAttemptAt,
+      excludedTaskId: typeof parsed.excludedTaskId === 'string' ? parsed.excludedTaskId : null,
+    };
   } catch {
     return null;
   }
@@ -96,10 +102,12 @@ export function resetReconciliationCursor(sql: SqlStorage): void {
 export function claimReconciliationCandidate(
   sql: SqlStorage,
   sessionId: string,
+  taskId: string,
   options: { now: number; leaseMs: number; maxAttempts: number }
 ): boolean {
   const key = gateKey(sessionId);
   const existing = parseGate(readMeta(sql, key));
+  if (existing?.excludedTaskId === taskId) return false;
   if (existing && existing.nextAttemptAt > options.now) return false;
 
   // An expired quarantine starts a fresh bounded attempt series.
@@ -134,9 +142,18 @@ export function clearReconciliationCandidateGate(sql: SqlStorage, sessionId: str
   sql.exec('DELETE FROM do_meta WHERE key = ?', gateKey(sessionId));
 }
 
+/** Permanently exclude a D1-proven ineligible task while this chat keeps that task identity. */
+export function excludeReconciliationCandidateForTask(
+  sql: SqlStorage,
+  sessionId: string,
+  taskId: string
+): void {
+  writeMeta(sql, gateKey(sessionId), { attempts: 0, nextAttemptAt: 0, excludedTaskId: taskId });
+}
+
 /** Parse the value selected through an alarm query's correlated do_meta join. */
-export function parseReconciliationCandidateNotBefore(value: unknown): number | null {
-  return typeof value === 'string' ? (parseGate(value)?.nextAttemptAt ?? null) : null;
+export function parseReconciliationCandidateGate(value: unknown): ReconciliationGate | null {
+  return typeof value === 'string' ? parseGate(value) : null;
 }
 
 export function recordReconciliationCandidateInconclusive(

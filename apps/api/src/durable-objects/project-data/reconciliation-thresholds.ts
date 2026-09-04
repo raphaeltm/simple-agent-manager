@@ -12,6 +12,8 @@ import {
   DEFAULT_SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS,
   DEFAULT_SESSION_ACTIVITY_PROBE_MAX_CANDIDATES,
   DEFAULT_SESSION_ACTIVITY_PROBE_TIMEOUT_MS,
+  DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS,
+  DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS,
   DEFAULT_TASK_RECONCILIATION_CANDIDATE_LEASE_MS,
   DEFAULT_TASK_RECONCILIATION_IDLE_MS,
   DEFAULT_TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP,
@@ -102,11 +104,22 @@ export function reconciliationNodeCallTimeoutMs(env: DOEnv): number {
 }
 
 export function reconciliationCandidateLeaseMs(env: DOEnv): number {
-  return envNumber(
+  const configuredLeaseMs = envNumber(
     env,
     'TASK_RECONCILIATION_CANDIDATE_LEASE_MS',
     DEFAULT_TASK_RECONCILIATION_CANDIDATE_LEASE_MS
   );
+  const livenessProbeMs = Math.max(
+    envNumber(
+      env,
+      'TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS',
+      DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS
+    ),
+    envNumber(env, 'TASK_LIVENESS_PROBE_TIMEOUT_MS', DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS)
+  );
+  const minimumSafeLeaseMs =
+    livenessProbeMs + reconciliationNodeCallTimeoutMs(env) + minReconciliationAlarmDelayMs(env);
+  return Math.max(configuredLeaseMs, minimumSafeLeaseMs);
 }
 
 export function reconciliationProbeMaxAttempts(env: DOEnv): number {

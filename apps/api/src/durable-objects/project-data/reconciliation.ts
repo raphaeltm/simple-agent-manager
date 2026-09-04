@@ -23,7 +23,7 @@ import {
   CANDIDATE_GATE_META_PREFIX,
   clearReconciliationCandidateGate,
   deferReconciliationCandidateUntil,
-  parseReconciliationCandidateNotBefore,
+  parseReconciliationCandidateGate,
   recordReconciliationCandidateInconclusive,
 } from './reconciliation-candidate-state';
 import {
@@ -478,6 +478,7 @@ export function computeReconciliationAlarmTime(sql: SqlStorage, env: DOEnv): num
     .exec(
       `SELECT
        cs.id AS session_id,
+       COALESCE(ics.task_id, cs.task_id) AS task_id,
        COALESCE(
          CASE
            WHEN wa.last_message_at IS NULL THEN wa.last_terminal_activity_at
@@ -536,8 +537,9 @@ export function computeReconciliationAlarmTime(sql: SqlStorage, env: DOEnv): num
       const promptThreshold = promptAgeMs < softPromptMs ? softPromptMs : hardPromptMs;
       candidateTime = Math.max(candidateTime, promptStartedAt + promptThreshold);
     }
-    const notBefore = parseReconciliationCandidateNotBefore(row.reconciliation_gate);
-    if (notBefore !== null) candidateTime = Math.max(candidateTime, notBefore);
+    const gate = parseReconciliationCandidateGate(row.reconciliation_gate);
+    if (gate?.excludedTaskId === row.task_id) continue;
+    if (gate !== null) candidateTime = Math.max(candidateTime, gate.nextAttemptAt);
 
     nextCheck = nextCheck === null ? candidateTime : Math.min(nextCheck, candidateTime);
   }

@@ -1,11 +1,14 @@
+import { TASK_TERMINAL_STATUSES } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { parseRowOrNull } from '../row-validation';
 import {
+  CANDIDATE_GATE_META_PREFIX,
   claimReconciliationCandidate,
   clearReconciliationCandidateGate,
   deferReconciliationCandidateUntil,
+  excludeReconciliationCandidateForTask,
   readReconciliationCursor,
   type ReconciliationCursor,
   recordReconciliationCandidateInconclusive,
@@ -56,15 +59,8 @@ function selectLocalCandidatePage(
   candidateLimit: number,
   cursor: ReconciliationCursor | null
 ): LocalCandidateRow[] {
-  const cursorClause = cursor
-    ? `AND (
-         last_activity_at > ?
-         OR (last_activity_at = ? AND session_id > ?)
-       )`
-    : '';
-  const cursorParams = cursor
-    ? [cursor.lastActivityAt, cursor.lastActivityAt, cursor.sessionId]
-    : [];
+  const cursorActivity = cursor?.lastActivityAt ?? null;
+  const cursorSessionId = cursor?.sessionId ?? null;
   return sql
     .exec(
       `WITH local_candidates AS (
@@ -88,9 +84,17 @@ function selectLocalCandidatePage(
          LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id
          LEFT JOIN workspace_activity wa
            ON wa.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id)
+         LEFT JOIN do_meta gate ON gate.key = ? || cs.id
          WHERE cs.status = 'active'
            AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL
            AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL
+           AND CASE
+             WHEN gate.value IS NULL OR json_valid(gate.value) = 0 THEN 1
+             ELSE COALESCE(
+               json_extract(gate.value, '$.excludedTaskId') != COALESCE(ics.task_id, cs.task_id),
+               1
+             )
+           END
            AND NOT EXISTS (
              SELECT 1 FROM session_attention_markers sam
              WHERE sam.session_id = cs.id
@@ -101,11 +105,19 @@ function selectLocalCandidatePage(
        SELECT session_id, workspace_id, task_id, last_activity_at
        FROM local_candidates
        WHERE last_activity_at <= ?
-       ${cursorClause}
+         AND (
+           ? IS NULL
+           OR last_activity_at > ?
+           OR (last_activity_at = ? AND session_id > ?)
+         )
        ORDER BY last_activity_at ASC, session_id ASC
        LIMIT ?`,
+      CANDIDATE_GATE_META_PREFIX,
       idleThreshold,
-      ...cursorParams,
+      cursorActivity,
+      cursorActivity,
+      cursorActivity,
+      cursorSessionId,
       candidateLimit
     )
     .toArray() as unknown as LocalCandidateRow[];
@@ -149,7 +161,12 @@ export async function getReconciliationCandidates(
   const claimedRows = rows.filter(
     (row) =>
       typeof row.session_id === 'string' &&
-      claimReconciliationCandidate(sql, row.session_id, { now, leaseMs, maxAttempts })
+      typeof row.task_id === 'string' &&
+      claimReconciliationCandidate(sql, row.session_id, row.task_id, {
+        now,
+        leaseMs,
+        maxAttempts,
+      })
   );
   const candidates: ReconciliationCandidate[] = [];
 
@@ -184,12 +201,13 @@ export async function getReconciliationCandidates(
           workspace_id: string | null;
           chat_session_id: string | null;
         }>();
-      if (
-        !taskRow ||
-        taskRow.task_mode !== 'task' ||
-        !['in_progress', 'delegated', 'awaiting_followup'].includes(taskRow.status)
-      ) {
-        clearReconciliationCandidateGate(sql, sessionId);
+      if (!taskRow) {
+        recordReconciliationCandidateInconclusive(sql, env, {
+          sessionId,
+          workspaceId,
+          taskId,
+          reason: 'task_missing',
+        });
         continue;
       }
       if (
@@ -206,6 +224,22 @@ export async function getReconciliationCandidates(
         continue;
       }
       projectId = taskRow.project_id;
+      if (
+        taskRow.task_mode !== 'task' ||
+        (TASK_TERMINAL_STATUSES as readonly string[]).includes(taskRow.status)
+      ) {
+        excludeReconciliationCandidateForTask(sql, sessionId, taskId);
+        continue;
+      }
+      if (!['in_progress', 'delegated', 'awaiting_followup'].includes(taskRow.status)) {
+        recordReconciliationCandidateInconclusive(sql, env, {
+          sessionId,
+          workspaceId,
+          taskId,
+          reason: 'task_not_active',
+        });
+        continue;
+      }
     } catch (err) {
       log.warn('reconciliation.d1_task_query_failed', { taskId, ...serializeError(err) });
       recordReconciliationCandidateInconclusive(sql, env, {

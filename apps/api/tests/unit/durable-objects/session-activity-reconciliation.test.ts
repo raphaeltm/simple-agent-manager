@@ -195,6 +195,19 @@ describe('session activity reconciliation', () => {
   });
 
   describe('(c) genuinely prompting session (control case)', () => {
+    it.each([
+      ['idle', { kind: 'not_working', hostStatus: 'idle' }],
+      ['starting', { kind: 'working' }],
+      ['ready', { kind: 'not_working', hostStatus: 'ready' }],
+      ['prompting', { kind: 'working' }],
+      ['error', { kind: 'not_working', hostStatus: 'error' }],
+      ['stopped', { kind: 'not_working', hostStatus: 'stopped' }],
+    ])('classifies the real SessionHost %s status', (hostStatus, expected) => {
+      expect(
+        classifyProbeResponse({ sessions: [listedSession(hostStatus)] }, ACP_SESSION, WORKSPACE)
+      ).toEqual(expected);
+    });
+
     it('is NOT flipped when the vm-agent reports a live turn', () => {
       seedLiveSession();
       wedgePrompting(now - 4 * 60 * 60 * 1000);
@@ -1044,6 +1057,10 @@ describe('session activity reconciliation', () => {
     });
 
     it('quarantines without telemetry or turn-end fan-out when the probe budget is exhausted', async () => {
+      const broadcastEvent = vi.fn();
+      const nudgeDeliveries = vi.fn(() => 0);
+      const armIdleCleanup = vi.fn();
+      const recalculateAlarm = vi.fn(async () => {});
       sql.exec(
         'UPDATE session_state SET activity_probe_attempts = 2, activity_probe_at = NULL WHERE session_id = ?',
         ACP_SESSION
@@ -1055,7 +1072,7 @@ describe('session activity reconciliation', () => {
       const result = await probeStaleSessionActivity(
         sql,
         makeEnv({ user_id: 'user-1', project_id: 'proj-1' }),
-        hooks,
+        { broadcastEvent, nudgeDeliveries, armIdleCleanup, recalculateAlarm },
         {
           thresholdMs: FIVE_MINUTES,
           projectId: 'proj-1',
@@ -1066,6 +1083,10 @@ describe('session activity reconciliation', () => {
       expect(readState()?.activity).toBe('prompting');
       expect(readState()?.activity_probe_attempts).toBe(3);
       expect(recordAcpActivityCallbackMetric).not.toHaveBeenCalled();
+      expect(broadcastEvent).not.toHaveBeenCalled();
+      expect(nudgeDeliveries).not.toHaveBeenCalled();
+      expect(armIdleCleanup).not.toHaveBeenCalled();
+      expect(recalculateAlarm).not.toHaveBeenCalled();
       expect(
         sql
           .exec(
