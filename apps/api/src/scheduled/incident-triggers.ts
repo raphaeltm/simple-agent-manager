@@ -22,7 +22,7 @@ import {
   admitAndSubmitTriggerExecution,
   type TriggerTaskSubmitter,
 } from '../services/trigger-admission';
-import { resolveMaxTriggersPerProject } from '../services/trigger-limits';
+import { loadProjectMaxTriggersOverride,resolveMaxTriggersPerProject } from '../services/trigger-limits';
 import { renderTemplate } from '../services/trigger-template';
 
 export interface IncidentTriggerSweepStats {
@@ -50,8 +50,6 @@ interface ProjectRow {
   id: string;
   name: string;
   user_id: string;
-  /** Per-project max triggers override. null = use platform default. */
-  max_triggers: number | null;
 }
 
 async function loadIncidentTriggers(
@@ -102,8 +100,8 @@ async function ensureDefaultIncidentTrigger(
   if (!(await hasDispatchablePendingIncidents(env, config, nowMs))) return false;
   if (await hasAnyIncidentTrigger(env, project.id)) return false;
 
-  // Per-project override (project.max_triggers) > platform env var > default.
-  const maxTriggers = resolveMaxTriggersPerProject(project.max_triggers, env.MAX_TRIGGERS_PER_PROJECT);
+  const projectMaxTriggers = await loadProjectMaxTriggersOverride(env.DATABASE, project.id);
+  const maxTriggers = resolveMaxTriggersPerProject(projectMaxTriggers, env.MAX_TRIGGERS_PER_PROJECT);
   const triggerCount = await env.DATABASE.prepare(
     'SELECT COUNT(*) AS count FROM triggers WHERE project_id = ?'
   )
@@ -249,9 +247,7 @@ export async function runIncidentTriggerSweep(
   };
   if (!projectId) return base;
 
-  const project = await env.DATABASE.prepare(
-    'SELECT id, name, user_id, max_triggers AS max_triggers FROM projects WHERE id = ?'
-  )
+  const project = await env.DATABASE.prepare('SELECT id, name, user_id FROM projects WHERE id = ?')
     .bind(projectId)
     .first<ProjectRow>();
   if (!project)

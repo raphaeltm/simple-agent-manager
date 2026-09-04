@@ -1,7 +1,23 @@
+import type { D1Database } from '@cloudflare/workers-types';
 import {
   DEFAULT_MAX_TRIGGERS_PER_PROJECT,
   resolveProjectScalingConfig,
 } from '@simple-agent-manager/shared';
+
+/**
+ * Read a project's configured max-triggers override (`projects.max_triggers`).
+ * Returns null when the project uses the platform default.
+ */
+export async function loadProjectMaxTriggersOverride(
+  database: D1Database,
+  projectId: string
+): Promise<number | null> {
+  const row = await database
+    .prepare('SELECT max_triggers AS maxTriggers FROM projects WHERE id = ?')
+    .bind(projectId)
+    .first<{ maxTriggers: number | null }>();
+  return row?.maxTriggers ?? null;
+}
 
 /**
  * Resolve the maximum number of triggers a project may have.

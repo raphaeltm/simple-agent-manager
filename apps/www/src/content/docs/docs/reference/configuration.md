@@ -599,7 +599,7 @@ aggregate operator-visible counters.
 | `TRIGGER_EXECUTION_LOG_RETENTION_DAYS`       | `90`               | Completed/failed/skipped execution log retention                                                                 |
 | `TRIGGER_EXECUTION_CLEANUP_ENABLED`          | enabled            | Set to `false` to disable the cleanup sweep                                                                      |
 | `TRIGGER_STALE_RECOVERY_BATCH_SIZE`          | `100`              | Maximum stale execution candidates processed per sweep                           |
-| `MAX_TRIGGERS_PER_PROJECT`                   | `20`               | Maximum triggers per project. Per-project overrides are configurable in Project → Settings → Scaling & Scheduling → Task Limits. |
+| `MAX_TRIGGERS_PER_PROJECT`                   | `20`               | Platform default trigger cap per project. A project owner can raise or lower it per project via UI (Project → Settings → Scaling & Scheduling → Task Limits). |
 
 ## Generic Webhook Triggers
 

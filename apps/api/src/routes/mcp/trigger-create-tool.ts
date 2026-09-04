@@ -14,7 +14,7 @@ import {
   cronToNextFire,
   validateCronExpression,
 } from '../../services/cron-utils';
-import { resolveMaxTriggersPerProject } from '../../services/trigger-limits';
+import { loadProjectMaxTriggersOverride,resolveMaxTriggersPerProject } from '../../services/trigger-limits';
 import {
   INVALID_PARAMS,
   jsonRpcError,
@@ -125,14 +125,9 @@ export async function handleCreateTrigger(
     );
   }
 
-  const project = await env.DATABASE.prepare(
-    'SELECT max_triggers AS maxTriggers FROM projects WHERE id = ?'
-  )
-    .bind(tokenData.projectId)
-    .first<{ maxTriggers: number | null }>();
-  // Per-project override (project.maxTriggers) > platform env var > default.
+  const projectMaxTriggers = await loadProjectMaxTriggersOverride(env.DATABASE, tokenData.projectId);
   const maxTriggers = resolveMaxTriggersPerProject(
-    project?.maxTriggers ?? null,
+    projectMaxTriggers,
     env.MAX_TRIGGERS_PER_PROJECT
   );
   const countResult = await env.DATABASE.prepare(
