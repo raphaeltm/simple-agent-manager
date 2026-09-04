@@ -104,10 +104,11 @@ are out of scope.
       CLIs to the manifest companions and removed the dead adapter install; added
       contract-test assertions pinning sandbox codex alignment and banning the Zed
       adapter's return (`cf-container-runtime-contract.test.ts`).
-- [ ] Run `pnpm quality:agent-install-manifest` and the
-      `cf-container-runtime-contract` test; run `go test ./...` in `packages/vm-agent`.
+- [x] Run `pnpm quality:agent-install-manifest` and the
+      `cf-container-runtime-contract` test; run `go test ./internal/acp/...` in
+      `packages/vm-agent` (all green; full `go test ./...` runs in Phase 4/CI).
 - [ ] Full quality suite: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
-- [ ] Add a CLAUDE.md "Recent Changes" entry (doc sync).
+- [x] Add a CLAUDE.md "Recent Changes" entry (doc sync).
 - [ ] Staging (rule 27): delete existing staging nodes, deploy branch, start a fresh
       agent session for each updated client that staging credentials allow, verify
       install + ACP handshake + agent response; clean up staging nodes/workspaces
