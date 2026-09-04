@@ -265,6 +265,20 @@ async function resolveProviderViaCC(
         credentialRow.iv
       ),
     };
+
+    // The resolver snapshot and this fingerprint query are separate D1 reads. Re-enter exact
+    // resolution so provider construction and the persisted fingerprint are guaranteed to use
+    // one captured ciphertext generation if an in-place rotation lands between those reads.
+    return createProviderForExactCredential(
+      db,
+      userId,
+      encryptionKey,
+      env,
+      targetProvider,
+      projectId,
+      exactCredentialBinding,
+      createProviderFromDecryptedToken
+    );
   }
   const ccConfig = computeAssembler.assemble(resolved);
 
